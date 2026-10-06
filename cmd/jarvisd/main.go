@@ -13,9 +13,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
+	logsmod "github.com/alexberardi/jarvis-server/internal/modules/logs"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -35,6 +37,7 @@ func modules() []module.Module {
 			AdminToken: os.Getenv("JARVIS_CONFIG_ADMIN_TOKEN"),
 			Advertise:  os.Getenv("JARVIS_MDNS") != "0",
 		},
+		&logsmod.Module{},
 		&authmod.Module{
 			AdminToken: os.Getenv("JARVIS_AUTH_ADMIN_TOKEN"),
 			// Legacy HS256 secret: HS256 is minted (auth.algorithm=HS256) and verified only when set.
@@ -62,6 +65,10 @@ func modules() []module.Module {
 			c.SettingsGuard = superuser
 		case *authmod.Module:
 			c.InProcess = names
+		case *logsmod.Module:
+			c.Auth = auth
+			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
+			c.SettingsWrite = superuser
 		}
 	}
 	return mods
@@ -139,6 +146,16 @@ func serve(ctx context.Context) error {
 	}
 	defer deps.DB.Close()
 	mods := modules()
+	// jarvisd's own records go to stderr and, once migrated, into the logs module's store.
+	for _, m := range mods {
+		if l, ok := m.(*logsmod.Module); ok {
+			shipper := logging.NewShipper(l.Sink(), 4096, 200, 2*time.Second)
+			defer shipper.Close()
+			deps.Log = logging.New(os.Stderr, logging.ParseLevel(os.Getenv("JARVIS_LOG_LEVEL")), shipper)
+			deps.Queue = queue.New(deps.DB, deps.Log)
+			deps.Scheduler = scheduler.New(deps.DB, deps.Queue, deps.Log)
+		}
+	}
 	deps.Log.Info("starting jarvisd", "version", version, "home", deps.Config.Home)
 	return (&module.Runner{Deps: deps, Modules: mods}).Run(ctx)
 }
