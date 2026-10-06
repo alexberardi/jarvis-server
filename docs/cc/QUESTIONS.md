@@ -30,6 +30,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D22 | 2026-10-06 | 01 / 02 / 03 (S7, derived) | **Prompt path, derived from earlier decisions without a new question.** <br>• **Both paths ship:** text (Qwen3 14B for prod's 27B, 8B for dev) and native (Qwen3.5-9B, ChatGPT for e2e), per Appendix B. <br>• **Port the providers exactly** (byte-exact prompts, internal parameterised builder), because the user is redesigning prompt providers after the port. The `<message>` unwrap is added to the 8B/9B sanitize (D8 bug). The doubled persona is kept. <br>• **The native path gets the text path's per-household server-tool gates** (02.Q3, 03.Q5): web search off means no egress, and memory needs a speaker plus the setting (D4/D8, D21). <br>Open: text-path continue chaining (S7b). |
 | D23 | 2026-10-06 | 02 (S7b) | **Keep the text-path continue asymmetry for the port** (02.Q4 option a): text-path continue stays a single formatting call; native continue re-enters the loop. Chaining on the text path gets fixed in the post-port prompt-provider redesign. |
 | D24 | 2026-10-06 | 08 (S8) | **Routines execute on the node** (08.Q5). User's reason: multi-tenancy. A routine in another household (e.g. the user's parents turning on their lights) must run on *that* home's node, against devices on that LAN. Server-side execution (option c) is rejected. **Staleness fix: option b.** The server sends the full routine definition in the `routine` MQTT command, so app and scheduled runs never use a stale local copy. Voice triggers stay local on the node. Small node change (node-setup accepts an inline definition and still falls back to its local copy when none is sent). If node changes have to wait, option a (version hash + re-pull) is the zero-change fallback. |
+| D25 | 2026-10-06 | 08 (S8b) | **Scheduled and run-now routines don't speak: card only** (08.Q1 option a, today's behaviour). No "speak on node X" path is needed for routines. Voice-triggered routines keep speaking locally. **Scheduler gate removed** (08.Q2 option c, proposed and not objected to): drop `routines.scheduler_enabled`; a routine with an enabled `schedule` is the opt-in. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -50,7 +51,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S8b. Should scheduled routines speak on the node?** (08.Q1) Plus the scheduler default (08.Q2) and missed runs (08.Q3) after this.
+- **S8c. Missed scheduled runs after downtime** (08.Q3): fire once late, skip past a grace window, or replay all?
 
 ### P: policies (resolve many at once)
 
