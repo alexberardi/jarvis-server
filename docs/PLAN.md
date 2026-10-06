@@ -282,7 +282,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 
 1. **CC size and undocumented behaviour.** Mitigations: sub-phases, byte-exact prompts, shadow replay and the behaviour corpus.
 2. **FastAPI/Pydantic implicit semantics:** null vs missing, coercion, the 422 shape. These are captured by the contract suite and matched deliberately in `httpx`.
-3. **SQLite under concurrent load.** The design uses one writer and the queue in the same DB. Mitigation: a load test in Phase 0 with voice traffic plus background jobs on Pi-class and mini-PC hardware.
+3. **SQLite under concurrent load.** Not a concern: deployments are self-hosted with at most about 10 concurrent clients (user, 2026-10-06).
 4. **purego native loading.** C struct layouts must match the C headers exactly on every OS; this is proven first in Phase 0. The fallback is static cgo plus Windows DLLs.
 5. **Engine parity:** `llama-server` tool calls and JSON schema versus llama-cpp-python. This is low risk because prod already runs `llama-server` via the REST backend.
 6. **Single-process blast radius.** Mitigations: recover() per request and per job, engines out of process, and a watchdog restart via systemd/launchd.

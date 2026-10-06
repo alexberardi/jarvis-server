@@ -22,7 +22,8 @@ Update it at the end of every working session, and whenever a task finishes or a
 - [ ] 0.5 Golden-fixture exporters, which live beside the Python code. Output goes to `fixtures/golden/`. Include byte-exact prompts for the kept Qwen providers.
 - [ ] 0.6 Wire-contract freeze tests: `/services`, `/info`, log batch, app-ping, validate-node, LLM stream frames, PCM stream headers, the MQTT topic catalogue, and the public plugin endpoints.
 - [ ] 0.7 Schema baseline: goose SQLite migrations per module, from each service's alembic head.
-- [ ] 0.8 SQLite load test: voice traffic plus background jobs on Pi-class and mini-PC hardware.
+- [-] ~~0.8 SQLite load test~~: dropped. Self-hosted with at most about 10 concurrent clients, so the user confirmed SQLite scale is a non-issue.
+- [ ] **0.9 command-center deep dive.** Read each subsystem, then ask the user about intent. Write `docs/cc/<subsystem>.md` specs: purpose, behaviour, data, routes, invariants, keep/cut/change. This drives the CC contract tests and the Phase 5 port.
 
 ## Environment notes
 
@@ -56,6 +57,8 @@ Update it at the end of every working session, and whenever a task finishes or a
 | 2026-10-06 | Cut LoRA/adapters, unused CC routes (PLAN Appendix A), all prompt providers except Qwen 3.x + ChatGPTOpenAI (e2e), settings-server, mcp. |
 | 2026-10-06 | Native Windows support → no cgo anywhere: purego plus embedded native libraries, and the pure-Go SQLite driver. |
 | 2026-10-06 | Public repo, AGPL-3.0. |
+| 2026-10-06 | **Hard stop on Python.** Nothing lands in the Python server repos during the migration, so there is no dual maintenance. |
+| 2026-10-06 | Prod is the user's home and friends/family instance and tolerates outages. Testing on dev and prod hardware is welcome. SQLite load testing was dropped (at most about 10 clients). |
 | 2026-10-06 | purego loader proven on linux/amd64 (same EER as cgo). Windows MT (static CRT) DLLs, so no VC++ redistributable is needed. |
 
 ## Session log
