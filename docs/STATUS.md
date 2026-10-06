@@ -69,6 +69,7 @@ Update it at the end of every working session, and whenever a task finishes or a
 | 2026-10-06 | purego loader proven on linux/amd64 (same EER as cgo). Windows MT (static CRT) DLLs, so no VC++ redistributable is needed. |
 | 2026-10-06 | Engines: a health-failure restart first drains (`HealthCheck.DrainGrace`, called off if the engine recovers). GPUs: auto-detect, always configurable in admin/settings, multi-GPU (per-engine device lists, tensor split). PLAN §3.3. |
 | 2026-10-06 | **JWT signing key: one RS256 key, generated once on first run, stored in `auth_signing_keys`** (DB file is 0600 under `~/.jarvis`). No env var to set, no rotation machinery, nothing to keep in sync: jarvisd is the only minter and verifier. Legacy import copies the old `AUTH_PRIVATE_KEY` (and the HS256 `AUTH_SECRET_KEY`, verify-only) so existing sessions survive the cutover. New installs never mint HS256. User: "whatever is simplest". |
+| 2026-10-06 | Auth follow-ups settled (user): (1) access tokens stay valid until expiry (30 min) after logout/password change: fine for now. (2) Rotating a revoked app client re-activates it: kept as the one explicit "reissue + reactivate" admin action (there is no separate un-revoke route), documented rather than changed. (3) An admin removing a member from their only household is by design. |
 
 ## Session log
 
@@ -91,6 +92,6 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Phase 1 started: **config module** done and passing the legacy contract tests unchanged (first parity proof). jarvisd self-registers its listeners in the registry and advertises mDNS.
   - **logs module** written (SQLite store replacing Loki, same API, retention purge, sink for jarvisd's own logs); unit-tested, not yet wired into main (waits for the auth module, which provides `authn.Authority`).
   - **auth module** ported (63 routes) and passing all 62-route auth contract coverage against jarvisd; closes the X-Household-Id join hole (D4/D5). **logs module** wired and passing its contracts. Contract tests now branch on `JARVIS_CONTRACT_IMPL=jarvisd` for decided fixes. Shared `/settings` guards in the platform. jarvisd's own logs land in the log store.
-  - Known follow-ups in auth (parity kept, decide later): access tokens stay valid until expiry after logout/password change; rotate re-activates a revoked app; admin can remove a member's last household; D20 per-household leave hook not built yet.
+  - Auth follow-ups settled (decision log). Still to build: the D20 per-household leave hook (erase a user's data for a household they leave).
   - **Phase 1 done:** jarvisd serves config, auth, logs, notifications. 45 control-plane contract tests pass against one jarvisd process (only the registry's missing command-center row fails, expected until Phase 5). Notifications: pushes via the relay as durable queue jobs (D31); D20 purge + log de-identification.
 - **Next:** Phase 2, recipes + OCR (queue replaces RQ, files to the blob store). Contract tests first against the MBP, then the Go modules. CI should be checked after the latest pushes.
