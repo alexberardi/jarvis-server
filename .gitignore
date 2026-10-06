@@ -1,0 +1,8 @@
+/jarvisd
+/jarvisd.exe
+/dist/
+*.db
+*.db-wal
+*.db-shm
+/third_party/sherpa/libs/
+/.models/
