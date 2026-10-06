@@ -20,6 +20,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D12 | 2026-10-06 | Q-CAT | **Admin model catalog offers only models with a kept provider.** Remove `qwen25-7b`, `llama-3.1-8b`, `hermes-3-8b`. Remap `qwen3-14b` → `Qwen3_14B_Compressed`. **Add** Qwen3.5-9B (→ `Qwen3_5_9B_Compressed`) and the prod 27B model (→ `Qwen3_14B_Compressed`). jarvis-admin change, landed alongside the `llm.prompt_provider` rename (D11). |
 | D13 | 2026-10-06 | 09 (S1) | **Errands ship in v1.** The user says they are useful and will be used. The hard part is **when to use one**, i.e. knowing when a request should become an errand rather than a normal turn; record this as a product/UX follow-up for after the port. Prod has 0 plans/runs/schedules, so there is no data to import (09.Q12: import active `schedules` only). The core (plan → card → Run, sync and phone steps, Revise/Cancel, scheduled re-plan) is in. Pause-and-replan scope is S1b (09.Q4). |
 | D14 | 2026-10-06 | 09 (S1b) | **Keep pause-and-replan** (09.Q4). The user: it is what makes errands "so cool": you get the plan, can trigger a rework (Revise), then it executes, or something changes mid-run and it goes down a different path. Port the checkpoint → LLM continuation → envelope check. **Fix (D8):** an approval wait gets a deadline, so it can't park forever (§8.7). Whether in-envelope steps continue silently is S1c. |
+| D15 | 2026-10-06 | 09 (S1c) | **In-envelope replan steps keep running silently** (today's behaviour). Out-of-envelope changes (new phone calls, risky steps) still pause for an approval card, which now has a deadline (D14). Port `widens_envelope` byte-for-byte; it is the safety boundary. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -40,7 +41,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S1c. In-envelope replan steps:** run silently (today) or always show a card?
+- **S2. Phone calling:** port the CC half now with the gateway as an external sidecar, or absorb the gateway into jarvisd? (11.Q1, Q2). Prod: `phone_calls.enabled=true`, 17 call sessions 2026-08-06..08-30, 2 contacts, gateway container up.
 
 ### P: policies (resolve many at once)
 
