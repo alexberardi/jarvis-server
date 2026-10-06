@@ -29,6 +29,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D21 | 2026-10-06 | 06 / 02 / 09 / 11 (S6) | **Unknown or ambiguous speaker → per-user things refuse** (06.Q2 option b; no per-household knob). The server's own per-user tools (memory, phone calls, a user's errands) refuse with "I'm not sure who's speaking"; household-level things still work. Ambiguous is treated as unknown. No fallback to the node owner. **Commands own their restrictions:** the server passes the speaker identity (or its absence) to every command, and each command decides what to refuse. The framework doesn't impose one policy. Approvals (09.Q9, 11.Q10) were not tightened: the user answered "just B", so any household member may still approve a call or errand card. |
 | D22 | 2026-10-06 | 01 / 02 / 03 (S7, derived) | **Prompt path, derived from earlier decisions without a new question.** <br>• **Both paths ship:** text (Qwen3 14B for prod's 27B, 8B for dev) and native (Qwen3.5-9B, ChatGPT for e2e), per Appendix B. <br>• **Port the providers exactly** (byte-exact prompts, internal parameterised builder), because the user is redesigning prompt providers after the port. The `<message>` unwrap is added to the 8B/9B sanitize (D8 bug). The doubled persona is kept. <br>• **The native path gets the text path's per-household server-tool gates** (02.Q3, 03.Q5): web search off means no egress, and memory needs a speaker plus the setting (D4/D8, D21). <br>Open: text-path continue chaining (S7b). |
 | D23 | 2026-10-06 | 02 (S7b) | **Keep the text-path continue asymmetry for the port** (02.Q4 option a): text-path continue stays a single formatting call; native continue re-enters the loop. Chaining on the text path gets fixed in the post-port prompt-provider redesign. |
+| D24 | 2026-10-06 | 08 (S8) | **Routines execute on the node** (08.Q5). User's reason: multi-tenancy. A routine in another household (e.g. the user's parents turning on their lights) must run on *that* home's node, against devices on that LAN. Server-side execution (option c) is rejected. **Staleness fix: option b.** The server sends the full routine definition in the `routine` MQTT command, so app and scheduled runs never use a stale local copy. Voice triggers stay local on the node. Small node change (node-setup accepts an inline definition and still falls back to its local copy when none is sent). If node changes have to wait, option a (version hash + re-pull) is the zero-change fallback. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -49,7 +50,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S8. Routines:** where they execute, whether scheduled runs speak, the scheduler default and missed runs (08.Q1–Q3, Q5). Asking Q5 (execution location) first. Prod: 2 routines (Good morning, Good night), neither scheduled, `routines.*` settings unset (scheduler off), 0 `routine_executions` rows.
+- **S8b. Should scheduled routines speak on the node?** (08.Q1) Plus the scheduler default (08.Q2) and missed runs (08.Q3) after this.
 
 ### P: policies (resolve many at once)
 
