@@ -113,8 +113,8 @@ CREATE TABLE %[1]s (
     household_id    TEXT,
     node_id         TEXT,
     user_id         INTEGER,
-    created_at      TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 -- One row per (key, scope). COALESCE because NULLs never collide in a UNIQUE index; Postgres
 -- allowed duplicate system rows, SQLite won't.
@@ -354,7 +354,7 @@ func (s *Service) Set(ctx context.Context, key string, value any, sc Scope) erro
 		                         env_fallback, household_id, node_id, user_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (key, COALESCE(household_id, ''), COALESCE(node_id, ''), COALESCE(user_id, 0))
-		DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+		DO UPDATE SET value = excluded.value, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
 		key, ser, string(def.Type), def.Category, def.Description, def.RequiresReload, def.IsSecret,
 		nullString(def.EnvFallback), nullString(sc.HouseholdID), nullString(sc.NodeID), nullInt(sc.UserID))
 	if err != nil {
