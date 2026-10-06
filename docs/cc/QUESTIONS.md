@@ -43,6 +43,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D35 | 2026-10-06 | 06 (S13b) | **Speaker recognition stays off by default** (06.Q9 option a). User: "it's a privacy thing. Better to start off and have to turn on than the opposite." Enrolling a voice does not turn it on. Consequence to handle in UX (minor list): with it off, every speaker is unknown and per-user tools refuse (D21), so the refusal and the enrollment screen should say recognition is off rather than "I'm not sure who's speaking". |
 | D36 | 2026-10-06 | 06 (S13c) | **Voiceprints stay per (household, user)** (06.Q8 option a, today's layout: `voice_profiles/{household}/{sha256(user)[:16]}/sample_NNN`, no node id). Enroll once per household; used on every node there. **Future work:** make profiles **per node** (the user's intent: a voice sounds different per room). Recorded in PLAN §9. Verified 2026-10-06: today's code and prod have no node scoping. |
 | D37 | 2026-10-06 | 06 (S13, derived) | **Enrollment quality gate** (06.Q6 option b), treated as a bug fix under D8 because silent or noisy takes are accepted today: reject a take with under ~3 s of VAD speech, or one that scores far below the user's other takes, returning `success:false, error:"low_quality"`, which mobile already displays. No mobile change. |
+| D38 | 2026-10-06 | 06 / 01 (S13d) | **Cut the affect/emotion pass** (06.Q10 option a). No librosa features and no Go reimplementation. The `affect` field stays in the STT response and the `/voice/command` request as `null` for contract stability; CC's affect-hint code is kept as a no-op (01.Q7). `voice.emotion_enabled` / `voice.emotion_min_confidence` are dropped. Prod: off. |
+| D39 | 2026-10-06 | 12 (S14, derived) | **Packages, derived from earlier decisions without a new question.** <br>• **Slow installs (12.Q1, D8 bug fix):** a 5-minute *pickup* deadline until the node verifies, then `expires_at = verify + 15 min`, keeping the +120 s restart extension. A slow Pi Zero install is no longer reported as "expired" while it succeeds. Server-only; node unchanged. <br>• **Pantry URL (12.Q8):** a setting `pantry.base_url`, defaulting to the public Pantry URL, so a household can point at a private Pantry (D5). It must be reachable from the node, not just from jarvisd. <br>• **Forge test install:** dropped (D5), future work. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -63,7 +65,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S13d. Affect/emotion pass (06.Q10, 01.Q7):** cut (always `"affect": null`) or reimplement in Go?
+- *(none: S1–S14 done. Next: triage the B list into settled / bug-fix default / genuinely open.)*
 
 ### P: policies (resolve many at once)
 
