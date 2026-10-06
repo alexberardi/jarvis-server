@@ -15,6 +15,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 
 | D5 | 2026-10-06 | P1 follow-ups | **Security principle (user):** these are self-hosted installs. If people want to muck with their own system, allow it, rather than "janky / super hard security" that blocks valid use cases. **Fix** holes that let *unauthenticated network actors or other households* in. **Don't restrict** what authenticated members do to their own household. Specifics: <br>• `/api/v0/chat`: **drop the route.** Node `chat_text()` switches to the existing node-authed LLM passthrough `/api/v0/node/llm/chat` (the "live" model path; assumption to confirm). This needs a **node-setup change**. <br>• Provisioning-token and OAuth checks: users can belong to **multiple households**. Check membership of the *target* household among all of the caller's memberships, not just the JWT's active household. <br>• **Test install: dropped** from Go. Forge test install was dropped temporarily; revisit later (future-work note). <br>• **Package install/uninstall/revert: any household member, any URL.** No URL allowlist, because a story is in the pipeline for private, self-hosted Pantry instances. A power-user gate is possible later. <br>• Bluetooth: agreed (mobile polls get the household check, node posts get node auth). Package verify/results: agreed (node auth, node bound to path). |
 
+| D6 | 2026-10-06 | 07 / 05 | **Config push `pending`/`ack`: node auth**, with the node bound to `{node_id}` in the path. The node is already registered and already sends `X-API-Key` (`node-setup services/config_push_service.py` via `RestClient`), so real nodes see no change. User: "we don't want security holes obviously." |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -34,8 +36,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **Q1c. Config push auth.** The user thought the node doesn't exist yet. Evidence shows the node is already registered and already sends `X-API-Key`. Confirm node auth vs. leaving it open.
-- **Q1a, queued next. Automation cards:** keep the power, but bind the action server-side and to the household? (10.Q1)
+- **Q1a. Automation cards:** keep the power, but bind the action server-side and to the household? (10.Q1)
 
 ### P: policies (resolve many at once)
 
