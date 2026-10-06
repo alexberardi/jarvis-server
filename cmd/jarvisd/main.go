@@ -18,6 +18,7 @@ import (
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
 	logsmod "github.com/alexberardi/jarvis-server/internal/modules/logs"
+	notifmod "github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -38,6 +39,12 @@ func modules() []module.Module {
 			Advertise:  os.Getenv("JARVIS_MDNS") != "0",
 		},
 		&logsmod.Module{},
+		&notifmod.Module{
+			AdminKey: os.Getenv("ADMIN_API_KEY"),
+			RelayURL: os.Getenv("RELAY_URL"),
+			// Normally empty: the relay token is registered per household.
+			RelayHouseholdJWT: os.Getenv("RELAY_HOUSEHOLD_JWT"),
+		},
 		&authmod.Module{
 			AdminToken: os.Getenv("JARVIS_AUTH_ADMIN_TOKEN"),
 			// Legacy HS256 secret: HS256 is minted (auth.algorithm=HS256) and verified only when set.
@@ -65,6 +72,10 @@ func modules() []module.Module {
 			c.SettingsGuard = superuser
 		case *authmod.Module:
 			c.InProcess = names
+		case *notifmod.Module:
+			c.Auth = auth
+			c.Users = auth
+			auth.OnUserDeleted(c.PurgeUser)
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)

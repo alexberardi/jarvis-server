@@ -482,6 +482,15 @@ func (m *Module) HouseholdRole(ctx context.Context, userID int64, householdID st
 func (m *Module) VerifyUser(ctx context.Context, token string) (authn.User, error) {
 	c, err := m.verify(ctx, token)
 	if err != nil {
+		// Callers distinguish bad tokens (401) from infrastructure failures (500) with the
+		// authn sentinels, so map the module's own token errors onto them.
+		var ve verifyError
+		switch {
+		case errors.Is(err, errExpired):
+			return authn.User{}, authn.ErrExpired
+		case errors.As(err, &ve):
+			return authn.User{}, authn.ErrInvalid
+		}
 		return authn.User{}, err
 	}
 	id, err := c.UserID()

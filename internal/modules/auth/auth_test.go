@@ -1131,3 +1131,12 @@ func TestExpiredTokens(t *testing.T) {
 	e.expect(401, "Could not validate credentials", "GET", "/auth/me", nil, bearerH(su.access))
 	e.expect(401, "Invalid token: Signature has expired.", "GET", "/settings/", nil, bearerH(su.access))
 }
+
+func TestVerifyUserErrorsAreSentinels(t *testing.T) {
+	e := newEnv(t)
+	for _, tok := range []string{"not-a-jwt", "a.b.c", ""} {
+		if _, err := e.m.VerifyUser(context.Background(), tok); !errors.Is(err, authn.ErrInvalid) {
+			t.Errorf("%q: %v, want authn.ErrInvalid", tok, err)
+		}
+	}
+}
