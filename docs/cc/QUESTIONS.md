@@ -45,6 +45,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D37 | 2026-10-06 | 06 (S13, derived) | **Enrollment quality gate** (06.Q6 option b), treated as a bug fix under D8 because silent or noisy takes are accepted today: reject a take with under ~3 s of VAD speech, or one that scores far below the user's other takes, returning `success:false, error:"low_quality"`, which mobile already displays. No mobile change. |
 | D38 | 2026-10-06 | 06 / 01 (S13d) | **Cut the affect/emotion pass** (06.Q10 option a). No librosa features and no Go reimplementation. The `affect` field stays in the STT response and the `/voice/command` request as `null` for contract stability; CC's affect-hint code is kept as a no-op (01.Q7). `voice.emotion_enabled` / `voice.emotion_min_confidence` are dropped. Prod: off. |
 | D39 | 2026-10-06 | 12 (S14, derived) | **Packages, derived from earlier decisions without a new question.** <br>• **Slow installs (12.Q1, D8 bug fix):** a 5-minute *pickup* deadline until the node verifies, then `expires_at = verify + 15 min`, keeping the +120 s restart extension. A slow Pi Zero install is no longer reported as "expired" while it succeeds. Server-only; node unchanged. <br>• **Pantry URL (12.Q8):** a setting `pantry.base_url`, defaulting to the public Pantry URL, so a household can point at a private Pantry (D5). It must be reachable from the node, not just from jarvisd. <br>• **Forge test install:** dropped (D5), future work. |
+| D40 | 2026-10-06 | B (all) | **B-list defaults applied** (56 questions): see "B triage" in the Queue. These follow D8/D4/D5/D9, frozen-client parity, or are internal. Three carry a verify-first note: 01.Q6 (prod wake-verification mode), 05.Q10 (node headers before dropping bare-key auth), 13.Q3 (mobile doesn't filter on `confirmation`). |
 
 ## Verified facts (resolve questions without asking)
 
@@ -65,7 +66,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- *(none: S1–S14 done. Next: triage the B list into settled / bug-fix default / genuinely open.)*
+- **B1. Routines run as whom? (08.Q8)**
 
 ### P: policies (resolve many at once)
 
@@ -96,6 +97,94 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 12. **Mobile chat:** real token streaming? Fold the inbox into one module? (13.Q1, Q2)
 13. **Voice identity under new models:** keep raw enrollment audio, per-user or per-household voiceprints, default on, cut affect. (06.Q4, Q6–Q10, 01.Q7)
 14. **Packages:** slow-install expiry, Forge test install, and the Pantry URL. (12.Q1, Q8)
+
+### B triage (2026-10-06)
+
+66 B questions, triaged against D1–D39: **4 settled, 56 applied by default, 6 asked.** Defaults are applied unless the user objects; they are recorded as D40.
+
+**Settled by earlier decisions:**
+- 02.Q8: nag/hint strings byte-exact (D22).
+- 05.Q4: reset token persisted with the task (D10).
+- 09.Q11: errand prompts byte-exact (D22); compose runs on the background slot.
+- 09.Q12: import active `schedules` only (D13); add `errands.enabled`, default on.
+
+**Applied by default (D40):** policy D8 (fix bugs), D4/D5 (security), D9 (dead code), parity where a frozen client depends on behaviour, or purely internal.
+- **01 voice:**
+  - Q2: sliding idle TTL + sweeper + evict on end + cap.
+  - Q6: keep wake verification, in-process (verify prod mode).
+  - Q8: emit the real engine sample rate (verify on Pi).
+  - Q9: accept the empty `X-Assistant-Message` gap (path B cut).
+  - Q10: native warmup `max_tokens=1`.
+- **02 tool loop:**
+  - Q9: natural iteration-limit fallback, error code kept in traces.
+  - Q10: date extraction once per turn.
+  - Q12: moot (03.Q9).
+- **03 prompts and dates:**
+  - Q8: date extraction from the raw transcript.
+  - Q9: close the date-key vocabulary gap with one shared constant; drop the LLM fallback.
+  - Q11: keep `/generate/date-context`, never null.
+- **04 memory:**
+  - Q6: hard-delete on forget, TTL purge of expired rows.
+  - Q7: passive extraction never overwrites pinned/`ui`/permanent memories.
+  - Q8: keep the rating routes.
+  - Q9: deep research is a durable job with a 10-min deadline; push to the speaker (household if unknown).
+  - Q10: always store injected context; reject non-members.
+- **05 nodes:**
+  - Q5: stuck update dispatch → 400 at request time.
+  - Q7: broker sessions in memory.
+  - Q8: add the `include_values` columns.
+  - Q10: drop bare-key node auth (verify node headers first).
+  - Q11: prune settings requests after 24 h.
+- **07 smart home:**
+  - Q9: OAuth at-rest key is a dedicated generated key.
+  - Q10: retention sweeps.
+  - Q12: deferred with cameras (D29).
+- **08 routines:**
+  - Q6: routine timezone = node zone, fall back to household; 422 on an unknown zone.
+  - Q7: ~60 s synchronous result wait.
+  - Q10: skip overlapping runs with a note (single-flight lock).
+  - Q11: drop `routine_executions`.
+  - Q12: drop `paused`/`title`, 30-day purge of terminal schedules.
+- **09 errands:**
+  - Q3: restart mid-step fails with a card.
+  - Q6: draft TTL 24 h; approval deadline (D14); phone deadline measured from confirm; cancel or timeout auto-declines the call card.
+- **10 signals:**
+  - Q4: "never suggest" checked centrally.
+  - Q5: dedup in SQLite with TTL.
+  - Q7: voice presence never shortens TTL; honour `signals.enabled`.
+  - Q8: static signal catalog (cut a stale `appt.detected` listener).
+  - Q9: keep `cacheable`/`salience` on the wire.
+- **11 phone:**
+  - Q3: real cancel, including a live call.
+  - Q4: do-not-call also blocks by number and filters web results.
+  - Q5: faithful fuzzy match, deterministic ties, note on the card when the score is < 95.
+  - Q6: minutes cap from `in_call_at`.
+  - Q7: per-state reaper windows.
+  - Q11: corrective card on a late success.
+- **12 packages:**
+  - Q5: nodes with no household fail closed.
+  - Q7: request tables are not imported; 30-day sweeper.
+  - Q9: keep 200-empty on node-tools timeout and log it.
+  - Q10: invalidate the schema cache.
+  - Q11: reproduce the error mapping exactly.
+  - Q12: keep `github_repo_url`.
+- **13 mobile:**
+  - Q3: honour the caller's push category/priority (confirm mobile doesn't filter on `confirmation`).
+  - Q4: callback job sweeper + fail fast with a card.
+  - Q5: keep (D32).
+  - Q6: keep the allowlist (+ D19 keys).
+  - Q7: liveness check before warmup.
+  - Q8: `status` event, fail fast.
+  - Q9: static callback map.
+  - Q12: one SSE event per flush.
+
+**Asked, one at a time (most consequential first):**
+- 08.Q8: who routines run as.
+- 11.Q8: call transcript/audio retention.
+- 04.Q5: User Profile contents.
+- 08.Q9: default/Pantry routines.
+- 09.Q10: errand fail-fast.
+- 10.Q6: user appointment rule vs the built-in leave-by.
 
 ### B: behaviour (one at a time, after S)
 
