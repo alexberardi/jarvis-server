@@ -347,7 +347,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 - `GET /oauth/callback`: browser redirect target for the OAuth bounce.
 - `/internal/phone/*`: jarvis-phone-gateway only.
 - `POST /api/v0/chat`: node `chat_text()` (jokes, what's up, routines).
-- `POST /voice/command` and `POST /voice/command/continue` (non-stream): install-e2e Phase 2. The node uses the stream variants.
+- `POST /voice/command` and `POST /voice/command/continue` (non-stream): **core node contract**, not just install-e2e Phase 2. Every node follow-up turn uses blocking `/voice/command` (`follow_up_loop.py:342`), and `/continue` is the node's fallback and clarification path. Corrected 2026-10-06 by spec doc 01.
 - `GET|POST /households/{hh}/rooms`: also called by jarvis-home-assistant-integration.
 - `POST /node/inbox-item`, `/node/push-notification`, `/node/llm/chat`, `/callbacks`, `/signals`: also called directly by community packages (sports, entertainment-knowledge, news, messages) and the SDK. These are **public plugin API** and must stay stable.
 
