@@ -46,6 +46,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D38 | 2026-10-06 | 06 / 01 (S13d) | **Cut the affect/emotion pass** (06.Q10 option a). No librosa features and no Go reimplementation. The `affect` field stays in the STT response and the `/voice/command` request as `null` for contract stability; CC's affect-hint code is kept as a no-op (01.Q7). `voice.emotion_enabled` / `voice.emotion_min_confidence` are dropped. Prod: off. |
 | D39 | 2026-10-06 | 12 (S14, derived) | **Packages, derived from earlier decisions without a new question.** <br>• **Slow installs (12.Q1, D8 bug fix):** a 5-minute *pickup* deadline until the node verifies, then `expires_at = verify + 15 min`, keeping the +120 s restart extension. A slow Pi Zero install is no longer reported as "expired" while it succeeds. Server-only; node unchanged. <br>• **Pantry URL (12.Q8):** a setting `pantry.base_url`, defaulting to the public Pantry URL, so a household can point at a private Pantry (D5). It must be reachable from the node, not just from jarvisd. <br>• **Forge test install:** dropped (D5), future work. |
 | D40 | 2026-10-06 | B (all) | **B-list defaults applied** (56 questions): see "B triage" in the Queue. These follow D8/D4/D5/D9, frozen-client parity, or are internal. Three carry a verify-first note: 01.Q6 (prod wake-verification mode), 05.Q10 (node headers before dropping bare-key auth), 13.Q3 (mobile doesn't filter on `confirmation`). |
+| D41 | 2026-10-06 | 08 (B1) | **Run-now and scheduled routines run with no user** (08.Q8 option a, today's behaviour). The server passes no identity. Commands that need a person (news, calendar, email) use the existing SDK mechanism: a node secret with `value_type='user'`, which renders a household-member picker in mobile and stores the chosen member's user id (`jarvis-command-sdk/jarvis_command_sdk/secret.py:89`, `forge.py:137`). Preserve that secret type and the mobile picker contract. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -66,7 +67,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **B1. Routines run as whom? (08.Q8)**
+- **B2. Call transcript/audio retention (11.Q8)**
 
 ### P: policies (resolve many at once)
 
