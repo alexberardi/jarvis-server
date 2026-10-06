@@ -6,6 +6,25 @@ All paths are relative to `jarvis-command-center/` unless noted otherwise. "CH" 
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. §1–§9 still describe today's Python behaviour; changes are flagged inline as "Changed by D#".
+
+- **D19.** Every completed voice turn writes a transcript **when the speaker is confidently identified**. Passive extraction is **per household**: it honours `memory.enabled` plus a household-scoped `memory.extraction_enabled`, **default ON** (opt-out). With memory off, nothing is logged or extracted. Both keys go on the mobile household-settings allowlist. CLAUDE.md's "opt-in" claim is fixed.
+- **D2 / D3.** No last speaker and no stickiness: the speaker is per conversation, from turns identified in it. Memories load when a turn's speaker is identified, not at warmup for a predicted speaker.
+- **D21 / D35 / M14.** An unknown or ambiguous speaker means `remember`, `recall` and `forget` refuse ("I'm not sure who's speaking", or "speaker recognition is off" when recognition is off, which is the default). Household-level features still work.
+- **D20.** Account deletion erases all data tied to the user and keeps de-identified activity history (see §3.10 note). Leaving a household deletes that user's data for that household only.
+- **D30.** Characterization is ported **dormant** (off by default). The swap uses the current speaker's view, and no view is injected for an unknown speaker. `forget` and account deletion delete the person's characterization so it re-synthesises. The inspection routes stay cut.
+- **D43.** The User Profile is pinned first, then the budget is filled with unpinned memories by priority and recency. The budget stays `memory.pinned_max_chars` (500). The "answer DIRECTLY … do NOT call recall" wording stays byte-exact.
+- **D40 (B defaults).** Q6: hard-delete on forget, TTL purge of expired rows. Q7: passive extraction never overwrites pinned, `ui` or permanent memories. Q8: keep the rating routes. Q9: deep research is a durable job with a 10-minute deadline, pushed to the speaker (the household if unknown). Q10: inject always stores; reject non-member `user_id`s.
+- **M1.** Recall also runs substring search when vector search finds nothing above threshold, and unions the results.
+- **D11.** The embedding sweep is always on every 60 s; `memory.embedding_*` stay undefined and hard-coded.
+- **D22.** The native path gets the same memory and web-search gates as the text path.
+- **D27.** The loops in §2.3 become trigger kinds on the one scheduler, with a persisted `last_run_at`.
+- **D31.** Inbox and push are an in-process `notify` call.
+- **D34.** Voiceprints are in-process; account deletion deletes them in the same purge.
+- **D8.** The other bugs in §8 are fixed by default.
+
 ## 1. Purpose
 
 Jarvis remembers facts about the people it talks to and about the household.
@@ -105,6 +124,7 @@ There is one table, `user_memories`, and the scope is encoded by `user_id`:
 | Household | `NULL` | inject (source `agent`, or whatever the agent sends); mobile `scope=household` (POWER_USER or above) | agent context (vector), the ambient bundle (latest per category), mobile (POWER_USER or above) |
 
 - There is **no speaker or voice-profile scope** separate from `user_id`. The speaker id *is* the auth user id, resolved by whisper and speaker stickiness (chapter 06).
+  > **Changed by D3:** no stickiness in Go; the speaker comes only from turns identified in the current conversation.
 - Every query also filters `household_id`, so the same user in two households has disjoint memories.
 
 ### 3.2 Save and upsert (`memory_service.py:88-158`)
@@ -134,6 +154,9 @@ There is one table, `user_memories`, and the scope is encoded by `user_id`:
   - then `updated_at` descending.
 - Each memory becomes a line `- {content}`, and lines are added greedily until the next line would exceed `max_chars`. There is no top-k and no similarity filter.
 - **Loading.** The text is loaded at warmup for the predicted speaker (CH:399-431). It is reloaded per turn **only when** the turn's speaker id differs from the warmup speaker (CH:3497-3500, 3564-3624). When memory is disabled, the reload writes an empty string, so one speaker's memories never carry into another speaker's turn (3589-3593).
+
+> **Changed by D43:** pinned first, then unpinned by priority and recency, until the budget is full; no pinned-else-all cliff. **Changed by D2/D3:** there is no predicted warmup speaker; the profile loads when a turn identifies the speaker.
+
 - **Wrapping.** `build_speaker_block` wraps it as "You are speaking with X. User Profile — … answer DIRECTLY … do NOT call recall …" (`core_rules.py:310-330`). With no name and no memories it returns `UNKNOWN_SPEAKER_BLOCK`. The block is a trailing system message, so the cached prefix is untouched.
 
 **B. The `recall` tool** (`recall_tool.py:49-152`).
@@ -144,6 +167,7 @@ There is one table, `user_memories`, and the scope is encoded by `user_id`:
 - **Search.**
   1. It embeds the query, then runs `search_memories`: cosine ≥ threshold, `ORDER BY` similarity, `LIMIT` k, scoped to the speaker's own rows only (`memory_service.py:239-302`).
   2. It falls back to substring search (words longer than 2 characters, `ILIKE` any word, score = matched words / total words; `memory_service.py:304-360`) **only when the embedding call fails or returns empty**. A vector search that returns zero hits above the threshold returns "no_results" and does not fall back (`recall_tool.py:109`).
+     > **Changed by M1:** Go also runs the substring search when the vector search finds nothing above the threshold, and unions the results.
 - **Output.** `{content, category, similarity}` triples.
 
 **C. Agent context** (per turn, appended to the user message).
@@ -168,6 +192,8 @@ There is one table, `user_memories`, and the scope is encoded by `user_id`:
 ### 3.4 Passive extraction (two-phase, `memory_extraction_service.py`)
 
 **Phase 1: `run_extraction_batch`** (90-131), every tick:
+
+> **Changed by D19:** the gate is per household (`memory.enabled` and household-scoped `memory.extraction_enabled`, default on). **Changed by D40 (Q7):** a passive write never overwrites a pinned, `ui` or permanent memory.
 
 1. `reset_stale_jobs(30)` clears `extraction_job_id` on unprocessed transcripts **whose `created_at`** is more than 30 minutes old (`transcript_service.py:115-135`).
 2. `get_users_with_unprocessed()` returns the distinct `(user_id, household_id)` pairs with `is_processed=false AND extraction_job_id IS NULL`.
@@ -220,6 +246,8 @@ There is one table, `user_memories`, and the scope is encoded by `user_id`:
    - `memory.enabled` false returns **409**;
    - `model.advanced_context` false returns **200 with all counts 0, and nothing is stored** (308-317);
    - a settings exception means proceed.
+
+   > **Changed by D40 (Q10):** Go always stores; `advanced_context` gates only the per-turn injection. An item `user_id` that isn't a household member is rejected.
 3. **Dedup layer 1:** last write wins per `(key, user_id)` within the batch.
 4. **Dedup layer 2:** each item is upserted by key via `save_memory`, with `expires_at = now + ttl_hours`. `ttl_hours` is in (0, 720] and defaults to 24.
 5. **Dedup layer 3:**
@@ -234,6 +262,8 @@ There is one table, `user_memories`, and the scope is encoded by `user_id`:
 - Mobile and admin DELETE also soft-delete (`mobile_memories.py:304-319`).
 - `cleanup_expired` soft-deletes rows past `expires_at` (582-605).
 - **Nothing ever hard-deletes a memory except the `/me/data` purge.**
+
+> **Changed by D40 (Q6) / D30:** `forget` and mobile delete hard-delete, and also delete the person's characterization (D30). Expired rows are purged on a TTL.
 
 ### 3.9 Mobile permission matrix (`mobile_memories.py:1-127`)
 
@@ -274,6 +304,12 @@ It commits, returns the per-table counts, and on error rolls back and re-raises,
 
 **What it does *not* delete** is listed in section 8, item 3.
 
+> **Changed by D20:** in Go one in-process transaction across modules:
+> - **Hard-delete** (user-owned): memories in all households, transcripts, characterizations, traces, voiceprints and enrollment audio, personal settings, sessions, pending drafts and schedules the user owns (errand plans, schedules, call drafts), signals and suppressions, queued jobs naming the user (cancelled, with a tombstone so late results are dropped), in-memory caches, and user-owned data in other modules (recipes, notifications inbox, …).
+> - **Keep, de-identified** (`user_id` → NULL): activity history such as phone call sessions and outcomes, completed errand runs, attention deliveries and logs.
+> - **Keep**: household-owned data (phonebook contacts, devices, routines, household settings).
+> - **Leaving a household** deletes that user's data for that household only.
+
 ### 3.11 Deep research (end to end)
 
 1. **The tool** (`deep_research_tool.py:76-139`):
@@ -293,6 +329,8 @@ It commits, returns the per-table counts, and on error rolls back and re-raises,
    - otherwise it strips `<think>` for the 200-character preview;
    - it POSTs to the notifications `/api/v0/inbox` with `category=deep_research`, `user_id=speaker` (which may be None) and the **raw** summary as `body` (`<think>` is not stripped from the body);
    - then it POSTs `/api/v0/notify` to the **whole household**: `target_type=household`, "Research Complete", `data.inbox_item_id`.
+
+   > **Changed by D40 (Q9) / D31:** Go runs the whole pipeline as one durable job with a 10-minute deadline, pushes to the speaker (the household if unknown) through the in-process `notify` service, sends a failure push on timeout, and strips `<think>` from the stored body.
 5. **Latency budget.** Nothing is enforced end to end. Search plus scrape takes seconds. The LLM job may wait in the queue for up to its 600s TTL, and the elapsed time is only recorded in the inbox metadata.
 
 ### 3.12 Quick search (`quick_search_tool.py`)
@@ -396,7 +434,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
 
 ## 7. Invariants and non-obvious behaviour (preserve)
 
-1. **Never carry the previous speaker's memories.** When the turn speaker changes, `user_memories` is overwritten, and with `""` when memory is off (CH:3586-3593).
+1. **Never carry the previous speaker's memories.** When the turn speaker changes, `user_memories` is overwritten, and with `""` when memory is off (CH:3586-3593). Under D3 this extends across conversations: nothing about a speaker survives the conversation. Under D30 the characterization follows the same rule.
 2. **The speaker, profile, ambient and agent blocks are all *after* the cached prefix.** `messages[0]` stays byte-stable. The only per-turn edit to `messages[0]` is the characterization swap, which always *replaces* the dict and never mutates it (CH:197-210).
 3. **With characterization injection off, the prompt is byte-identical to the path without it** (CH:3316-3330). The same holds for the empty ambient and agent blocks.
 4. **The User Profile wording "answer DIRECTLY … do NOT call recall" is load-bearing** for latency (`core_rules.py:316-322`).
@@ -526,6 +564,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (b) keep the parity bug;
      - (c) log, but only when the household opts in.
    - **Recommendation:** (a), together with the per-household gate from Q2. Log only turns with a confident speaker id, not ones resolved through the stickiness fallback.
+   - **Decided (D19):** (a). Every completed voice turn (stream, continue/stream, continue, blocking) is logged when the speaker is confidently identified (stickiness no longer exists, D2/D3), gated per household as in Q2.
 
 2. **[behaviour] Should passive extraction be per-household opt-in, or stay globally on by default?**
    - *Why it matters.* The default is on and global (section 8.2). A household that turned `memory.enabled` off is still mined. That is a privacy surprise and contradicts CLAUDE.md.
@@ -534,6 +573,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (b) the same, with default off;
      - (c) keep as is.
    - **Recommendation:** (a), and add both keys to the mobile household-settings allowlist so a household admin can turn them off.
+   - **Decided (D19):** (a). Default ON (opt-out), per household; with memory off nothing is logged or extracted; both keys on the mobile allowlist.
 
 3. **[behaviour] What exactly must `/me/data` erase?**
    - *Why it matters.* Characterizations, signals, phone sessions, errands, workflows, schedules, callback jobs, feedback, suppressions and most voice traces survive today. In-flight jobs can also re-create memories after the purge (section 8.3).
@@ -543,6 +583,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (c) keep today's list.
    - **Recommendation:** (b). Add a `user_id` column to traces in Go, and cancel queued jobs whose dedup key names the user.
    - *Also decide:* should memories in a **solo household that auth auto-deletes** (including `user_id IS NULL` rows) be purged too? Today they are orphaned.
+   - **Decided (D20):** a mix of (a) and (b). Hard-delete all user-owned data (memories in every household, transcripts, characterizations, traces, voiceprints, personal settings, sessions, pending drafts and schedules they own, signals, suppressions, queued jobs with a tombstone, caches, user-owned data in other modules). De-identify activity history (call sessions, completed errand runs, attention deliveries, logs). Keep household-owned data. One in-process transaction. **Open:** the solo-household sub-question. D20 keeps household-owned data, but doesn't say what happens to it when auth deletes the household itself.
 
 4. **[scope] Is characterization still wanted?**
    - *Why it matters.* Synthesis and injection are off by default, the inspection routes have no caller (Appendix A), and the speaker-change swap shows the wrong person's view (section 8.4). It is also a derived profile that "forget" never reaches: a fact you tell Jarvis to forget lives on in the `body`.
@@ -551,6 +592,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (b) port it dormant (off), fix the swap, and make `forget` and purge trigger a re-synthesis or deletion;
      - (c) port it and turn it on.
    - **Recommendation:** (a) unless you're actively evaluating it, because it is the most complex consumer of the background slot and has no user-facing surface.
+   - **Decided (D30):** (b). Ported dormant (off by default): table, job, prompt and tail kept. The swap uses the current speaker's view, with none for an unknown speaker. `forget` and account deletion delete the characterization. The inspection routes stay cut.
 
 5. **[behaviour] What should the prompt "User Profile" contain?**
    - *Why it matters.* Pinning is effectively unused, so today it is "all facts by category, then recency, cut at 500 characters". Pinning one item hides everything else (section 8.5). As passive memories accumulate, the 500-character cut decides which facts Jarvis "knows" without calling `recall`.
@@ -559,6 +601,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (b) always pinned first, then fill the rest of the budget with unpinned memories by priority and recency;
      - (c) pinned plus the top-k memories by similarity to the utterance, per turn.
    - **Recommendation:** (b). It is deterministic and cache-friendly and removes the cliff. Option (c) costs an embedding on the hot path.
+   - **Decided (D43):** (b). The budget stays `memory.pinned_max_chars` (500); raising it for the 27B was suggested but not decided.
 
 6. **[behaviour] Should forget and delete stay soft-deletes?**
    - *Why it matters.* "Forget that" and mobile delete only set `is_active=false`. Expired agent rows also accumulate forever. A user who says "forget" probably expects the text to be gone.
@@ -567,6 +610,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (b) soft-delete, then purge after 30 days;
      - (c) keep soft-delete forever.
    - **Recommendation:** (a) for user-initiated deletes, and (b) for TTL expiry, which also bounds the brute-force scan.
+   - **Decided (D40 default):** hard-delete on forget and delete; TTL purge of expired rows.
 
 7. **[behaviour] How should a key collision on upsert behave?**
    - *Why it matters.* A passive or voice upsert currently unpins a user-pinned row, overwrites `source="ui"` and can add an expiry to a permanent fact. LLM keys like `brother_name` also collapse distinct facts (section 8.6).
@@ -575,6 +619,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (b) scope passive keys (`passive:` prefix) so they never hit voice or UI keys;
      - (c) keep as is.
    - **Recommendation:** (a), plus never letting passive overwrite `source=ui`.
+   - **Decided (D40 default):** (a). Passive extraction never overwrites pinned, `ui` or permanent memories.
 
 8. **[scope] Do transcript ratings still matter now that LoRA is cut?**
    - *Why it matters.* The rating UI is live in mobile, but its only consumer was the training extractor, and rated rows are deleted after 7 days anyway.
@@ -583,6 +628,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (b) keep them, and exempt rated rows from the TTL for an offline eval corpus;
      - (c) drop the routes, which needs a mobile change.
    - **Recommendation:** (a) for contract parity. Decide (b) separately if you want a feedback corpus.
+   - **Decided (D40 default):** (a). Keep the rating routes as they are.
 
 9. **[behaviour] Deep research delivery and limits.**
    - *Why it matters.* The completion push goes to every household device with the query text. Research has no overall deadline, and it is lost on restart before the enqueue.
@@ -590,6 +636,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
      - (a) push to the speaker (or the household if the speaker is unknown), make the whole pipeline one durable job type with a 10-minute deadline, and send a failure push on timeout;
      - (b) keep household-wide delivery.
    - **Recommendation:** (a). Also strip `<think>` from the stored body.
+   - **Decided (D40 default):** (a). A durable job with a 10-minute deadline, pushed to the speaker (the household if unknown); `<think>` is stripped (D8).
 
 10. **[behaviour] Should `/memories/inject` store anything when `model.advanced_context` is off?**
     - *Why it matters.* By default inject is a 200 no-op, which starves the ambient snapshot (section 8.13).
@@ -598,10 +645,13 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
       - (b) keep the coupling.
     - **Recommendation:** (a). Embedding cost is trivial in-binary.
     - *Also:* should inject reject `user_id`s that aren't household members? Recommendation: yes.
+    - **Decided (D40 default):** (a). Always store; reject non-member `user_id`s.
 
 11. **[minor] Should recall fall back to substring search when the vector search finds nothing above the threshold?** Today it falls back only when the embedder errors. **Recommendation:** yes; match the comment and union the results. It is cheap and helps name lookups ("Leo") that MiniLM scores low.
+    - **Decided (M1/D47):** yes. Also run substring search when vector search finds nothing above the threshold, and union the results.
 
 12. **[minor] What should happen to memories when a user leaves a household?** Their rows keyed to that household stay. **Recommendation:** hard-delete that user's rows for that household on leave. That needs an auth→CC hook, which is in-process in Go.
+    - **Decided (D20):** leaving a household deletes that user's data for that household only, through an in-process hook.
 
 ## 11. Go port notes
 
@@ -646,13 +696,24 @@ The tools live in `internal/cc/tools/{remember,recall,forget,quicksearch,deepres
 - A per-turn agent-context embedding must run with a short timeout (for example 150 ms) and drop the block on timeout.
 - Nothing blocks a shared loop, because Go handlers are goroutines, so section 8.10 disappears by construction. `quick_search` still needs an overall deadline of about 12s.
 
-**Speaker change.** Reload both memories **and** the characterization in one `ResolveSpeaker(ctx, userID)` (fixes section 8.4 even if Q4 keeps the feature).
+**Speaker change.** Reload both memories **and** the characterization in one `ResolveSpeaker(ctx, userID)` (fixes section 8.4; D30). The speaker is conversation state only (D3): there is no warmup speaker and no stickiness. With no identified speaker, load nothing personal, inject no `<person_view>`, and have `remember`/`recall`/`forget` refuse (D21; M14 wording when recognition is off).
+
+**Profile block (D43).** Pinned first, then unpinned by category priority and `updated_at` desc, greedily up to `memory.pinned_max_chars`. Deterministic per user, so the cached prefix stays stable.
+
+**Transcripts and extraction (D19).** Every completed voice turn with a confidently identified speaker writes a transcript when the household's `memory.enabled` is on. Extraction runs per household under `memory.enabled` and household-scoped `memory.extraction_enabled` (default on). Passive writes never overwrite pinned, `ui` or permanent rows (D40).
+
+**Deletes (D40, Q6).** Forget and mobile delete are hard deletes and also delete the person's characterization (D30). Expired rows are purged on a TTL, which also bounds the brute-force scan.
+
+**Recall (M1).** Union the vector hits with substring hits when the vector search finds nothing above threshold.
+
+**Inject (D40, Q10).** Always store; `model.advanced_context` gates only per-turn injection. Reject item `user_id`s that aren't household members.
 
 **Purge.**
-- Run it as a single SQLite transaction over the table list decided in Q3.
-- Then cancel or tombstone queued jobs for that user.
+- Run it as a single in-process SQLite transaction across modules over the D20 lists: hard-delete user-owned rows (including characterizations, signals, suppressions, owned errand plans, schedules and call drafts, user-owned data in other modules); set `user_id` to NULL on activity history (call sessions, completed errand runs, attention deliveries).
+- Then cancel queued jobs naming the user, and write a tombstone so late results for the deleted user are dropped.
 - Then evict the conversation-cache entries whose speaker is that user.
-- Then delete the voiceprints. Speaker ID is in-binary now, so this becomes part of the same purge, not a best-effort HTTP call.
+- Then delete the voiceprints. Speaker ID is in-binary now, so this becomes part of the same purge, not a best-effort HTTP call (D34: there is no raw enrollment audio to delete).
+- Leaving a household runs the same purge scoped to that household (D20).
 - Map an error to 500 so that auth (in-process, or external during the strangler phase) aborts.
 
 **Web.**
@@ -663,4 +724,5 @@ The tools live in `internal/cc/tools/{remember,recall,forget,quicksearch,deepres
 
 **Simplifications:**
 - The callback routes, tokens, `network.public_url`, `LLM_PROXY_INTERNAL_TOKEN` and the sync-synthesis path all go away.
-- The notifications inbox and push become in-process calls to the notifications module.
+- The notifications inbox and push become in-process calls to the `notify` service (D31).
+- The periodic loops are trigger kinds on the one scheduler with a persisted `last_run_at` (D27). The embedding sweep is always on, every 60 s (D11).

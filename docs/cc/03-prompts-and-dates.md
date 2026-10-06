@@ -14,6 +14,20 @@ All paths are relative to `jarvis-command-center/app/` unless prefixed. Every be
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. §1–§9 still describe today's Python behaviour; changes are flagged inline as "Changed by D#".
+
+- **D22.** Both prompt paths ship: text (`Qwen3_14B_Compressed` for prod's 27B, `Qwen3_8B_Compressed` for dev) and native (`Qwen3_5_9B_Compressed`, `ChatGPTOpenAI` for e2e). Providers are ported **byte-exact** with an internal parameterised builder, because the provider design is reworked after the port. The `<message>` unwrap is added to the 8B/9B sanitize (a D8 bug fix). The doubled persona is kept. The native path gets the text path's per-household server-tool gates.
+- **D23.** The text-path continue asymmetry is kept (owned by 02).
+- **D11 / D12.** `llm.interface` is renamed **`llm.prompt_provider`**, set at install time by the jarvis-admin wizard and installer; import maps the old key. **An unknown provider name is a hard error**: no default, no remap of dropped names. The admin catalog drops `qwen25-7b`, `llama-3.1-8b`, `hermes-3-8b`, remaps `qwen3-14b` → `Qwen3_14B_Compressed`, and adds Qwen3.5-9B (→ `Qwen3_5_9B_Compressed`) and the prod 27B (→ `Qwen3_14B_Compressed`). Defined-but-unread keys (`prompt.include_*`) are dropped.
+- **D9 (cuts, with F1).** Cut: the fastText router and the per-turn `Router hint:` message, llm-proxy's fastText date-key fallback and its `[DATE_HINT]` message, and every uncalled prompt/date module: `date_replacer`, `date_detector`, `build_tool_system_message`, `command_converters`, `prompt_variant_builder`, the malformed-JSON extractor and `json_schema.py`, the prune helpers, and the legacy `IModelInterface`/`ModelFactory`/`JarvisToolModel`.
+- **D4.** `/prompt-providers/install` is stubbed in Go: no clone, no exec. The mechanism is reworked after the migration.
+- **D8.** Known bugs are fixed: the date bugs §8.1–8.6 (Q1) and the accumulating speaker blocks §8.13 (Q6).
+- **D40 (B defaults).** Q8: date extraction from the raw transcript. Q9: one shared date-key constant closes the vocabulary gap, and the LLM fallback is dropped. Q11: keep `/generate/date-context`, never null.
+- **D3 / D21 / D30.** Speaker identity is per conversation; an unknown speaker gets `UNKNOWN_SPEAKER_BLOCK`, and no `<person_view>` is injected for an unknown speaker. With D35 (recognition off by default) that is the default case.
+- **D38.** The affect hint stays in the user-message assembly as a no-op (`affect` is always `null`).
+
 ## 1. Purpose
 
 A **prompt provider** turns three things into one system-prompt string:
@@ -73,6 +87,8 @@ There are no MQTT topics and no background loops in this subsystem.
    - Import errors are swallowed at debug level (`:105-107`).
 3. If no provider is found, `ModelService` falls back to the legacy `ModelFactory` model. The handler then uses `model._build_system_prompt`, or finally the literal `"You are a helpful voice assistant."` (`conversation_handler.py:3293-3302`).
 4. `requires_reload=True` on `llm.interface` is moot: per-request construction means a change applies to the **next conversation warmup** without a restart.
+
+> **Changed by D11:** Go reads `llm.prompt_provider` from a static registry. There is no discovery, no custom root, no `JarvisToolModel` fallback and no generic-prompt fallback: an unknown name is a hard error.
 
 ### 3.2 The kept providers and their inheritance chain
 
@@ -261,7 +277,7 @@ Order after `messages[0]` and the trimmed history (`conversation_handler.py:858-
    - the latest household weather, calendar and reminder memories;
    - live Signals.
 3. `RECENTLY SHOWN …` block (`core_rules.py:487-524`, at most 8 items).
-4. `Router hint: likely tool is '{x}'. …`, when the fastText router fires (`:893-898`).
+4. `Router hint: likely tool is '{x}'. …`, when the fastText router fires (`:893-898`). **Cut by D9:** Go never emits it.
 5. The `user` message:
 
    ```
@@ -302,6 +318,8 @@ Order after `messages[0]` and the trimmed history (`conversation_handler.py:858-
    - llm-proxy takes the **last `user` message's text** (`jarvis-llm-proxy-api/services/model_service.py:366-380`). That text includes the appended hints, the agent context and `/no_think`.
    - It runs the regex matcher (`services/date_key_matcher.py`).
    - If that returns nothing, it falls back to a fastText model and may **append a `[DATE_HINT]` system message to the prompt** (`model_service.py:392-409`, `services/date_keys.py:646-672`).
+
+   > **Changed by D9 / D40 (Q7, Q8):** in Go, extraction is regex only (no fastText fallback, no `[DATE_HINT]`), runs once per turn, and reads the raw transcript, not the hint-laden user message.
    - It returns `date_keys` in the response (`:416-417`).
 4. **CC normalisation.** `normalize_date_key`: strip, lowercase, whitespace→`_`, `:`→`_` (`date_resolution.py:13-29`, `tool_execution_engine.py:796-801`).
 5. **ISO guard** (`tool_execution_engine.py:320-386,1260-1279`). On `finish_reason=="tool_calls"`, any ISO strings in `resolved_datetimes` are reverse-mapped to keys:
@@ -312,6 +330,7 @@ Order after `messages[0]` and the trimmed history (`conversation_handler.py:858-
    - **MCP path.** `jarvis_mcp_client.resolve_date_keys` is tried first (`:72-76,446-458`). The package is not in any requirements file or repo, so `_HAS_MCP_CLIENT` is always False. **The MCP path is dead code today, so nothing needs replacing.**
    - **Local resolution.** `resolve_date_keys(date_keys, generate_date_context_object(tz))` returns `(resolved, unresolved)`.
    - **Unresolved keys** go to a **separate LLM call**, `ResolveRelativeDateTool.resolve_with_llm_fallback`. It uses the `live` model at temperature 0 with a "pick ONE key" prompt (`tools/resolve_relative_date_tool.py:241-343`). Invalid answers fall back to `"today"`.
+     > **Changed by D40 (Q9):** the LLM fallback is dropped. The vocabulary is one shared Go constant, the gap (`after_dinner` etc.) is closed, and an unknown key becomes `today`.
    - **Parameter empty:** inject all `resolved` (array parameter) or `resolved[0]` (scalar). With no keys at all, inject `today`'s UTC start of day (`:566-586`).
    - **Parameter set:** each non-ISO string is resolved **individually** through the flat map. A list value contributes only its **first element**, so `"this_weekend"` becomes Saturday only. Then the LLM fallback runs (`:490-528,588-606`). An array that resolves to empty is replaced by `resolved_dates`.
 
@@ -440,6 +459,8 @@ The date logic keeps no state: it is recomputed on every call from the current t
 
 **Date bugs.** All were reproduced on 2026-10-06 (a Tuesday) with `America/New_York`.
 
+> **Changed by D8 (Q1):** Go fixes §8.1–8.6; the G2/G3 fixtures for these cases are regenerated from the corrected spec and marked as intended differences.
+
 1. **`next_<weekday>` / `last_<weekday>` are off by one day.**
    - Cause: `weekday_names` starts at Monday but is offset from a **Sunday** week start (`general_context.py:175-187`).
    - Effect: `next_monday` = 2026-10-11 (a Sunday) and `next_tuesday` = 2026-10-12 (a Monday).
@@ -553,6 +574,8 @@ The date logic keeps no state: it is recomputed on every call from the current t
 
 **My recommendation: (b).** Write the corrected spec now: local-time modifiers, a single combined instant (no stray midnight), correct `next_<day>`, DST-correct zones, minute offsets. Mark G2 and G3 as "intentional divergence". The Python fixtures are still useful for the cases that are already correct.
 
+**Decided (D8, P2):** (b). Fix in Go from day one; regenerate G2/G3 from the corrected spec and log them as intended differences.
+
 **Q2 `[scope]` What should `/prompt-providers/install` and its poll route do in Go?**
 Mobile still shows "Install to Command Center" for Pantry packages that have a `prompt_provider` component.
 
@@ -562,6 +585,8 @@ Mobile still shows "Install to Command Center" for Pantry packages that have a `
 - (c) Also hide such packages in Pantry or mobile.
 
 **My recommendation: (b) plus (c).** Zero mobile change, a clear message, and no `exec`. Separately, confirm that you're aware the current route is remote code execution for any household JWT (§8.20). Do you want it disabled in Python prod now, despite the freeze?
+
+**Decided (D4):** (b), a stub with no clone or exec; the mechanism is reworked after the migration (no Python ABC). **Open:** (c) hiding such packages in Pantry or mobile was not decided, nor was disabling the route in Python prod.
 
 **Q3 `[behaviour]` How should a provider name the Go binary does not ship be handled?**
 `llm.interface` defaults to the dropped `Qwen25MediumUntrained`. Imported legacy settings may name Gemma, Llama and others.
@@ -573,6 +598,8 @@ Mobile still shows "Install to Command Center" for Pantry packages that have a `
 
 **My recommendation:** make `Qwen3_8B_Compressed` the default, use (b) for names in the drop list, and use (a) for unknown names (`doctor` reports it). `JarvisToolModel` and legacy models disappear entirely.
 
+**Decided (D11, D12):** (a) for every name the binary doesn't ship, including the dropped ones: no default and no remap. The key is renamed `llm.prompt_provider` and is set at install time; the admin catalog is fixed so it only offers kept providers. `JarvisToolModel` and legacy models disappear.
+
 **Q4 `[behaviour]` Should the 14B / 8B / 9B differences be kept, or should the providers be unified?**
 The intentional-looking differences are 5 vs 4 rules and param descriptions on or off. The likely-accidental ones are the `<message>` unwrap only on 14B, and `force_tool_calls` on native 9B.
 
@@ -583,6 +610,8 @@ The intentional-looking differences are 5 vs 4 rules and param descriptions on o
 
 **My recommendation: (a)** for prompt bytes, with an internal parameterised builder (rules count, descriptions flag, native flag), and **(b)** for sanitize, because a `<message>` wrapper spoken by TTS on 8B is a plain bug.
 
+**Decided (D22):** as recommended: port exactly with an internal parameterised builder, plus the `<message>` unwrap in the 8B/9B sanitize. `force_tool_calls` on native 9B is kept as-is. Unifying providers is deferred to the post-port redesign.
+
 **Q5 `[behaviour]` Should the native path keep receiving all server tools, ungated?**
 On 9B and ChatGPT, `quick_search`, `deep_research`, `remember` and `recall` are offered (with guidance) even when `web_search.enabled=false`, no speaker is known, or memory is off (§8.15).
 
@@ -591,6 +620,8 @@ On 9B and ChatGPT, `quick_search`, `deep_research`, `remember` and `recall` are 
 - (b) Apply the same whitelist and gates to both paths.
 
 **My recommendation: (b).** The CLAUDE.md says "toggle off means no egress" is the intent.
+
+**Decided (D22):** (b). The same whitelist and gates on both paths; memory tools need a speaker plus the setting (D21).
 
 **Q6 `[behaviour]` Fix the accumulating speaker blocks?**
 Unknown-speaker and memories-only turns add one more system message per turn (§8.13).
@@ -601,6 +632,8 @@ Unknown-speaker and memories-only turns add one more system message per turn (§
 
 **My recommendation: (b).** It only grows the prompt, and shadow replay should ignore the count.
 
+**Decided (D8, P2):** (b). Tag transient blocks structurally.
+
 **Q7 `[scope]` Keep llm-proxy's fastText date-key fallback and its `[DATE_HINT]` message?**
 This is a second fastText model on top of the regex matcher, which already covers the 4,987-example corpus. It mutates the prompt server-side.
 
@@ -610,6 +643,8 @@ This is a second fastText model on top of the regex matcher, which already cover
 
 **My recommendation: (b),** unless you know of real utterances the regex misses. It removes a model download and a hidden prompt mutation.
 
+**Decided (D9, P3/F1):** (b). Drop the fastText date fallback and `[DATE_HINT]`; regex only.
+
 **Q8 `[behaviour]` Should date extraction see only the raw utterance?**
 Today it scans the user message *after* hints and agent context are appended (§8.9).
 
@@ -618,6 +653,8 @@ Today it scans the user message *after* hints and agent context are appended (§
 - (b) Extract from the raw transcript, which `jarvisd` can pass in-process.
 
 **My recommendation: (b).**
+
+**Decided (D40 default):** (b). Extract from the raw transcript.
 
 **Q9 `[behaviour]` What should happen to the LLM fallback for unresolved date keys?**
 It costs a whole extra `live`-slot LLM call on the hot path. It fires for 3 vocabulary keys CC can't resolve, and its key list is malformed (§8.7–8.8).
@@ -629,12 +666,16 @@ It costs a whole extra `live`-slot LLM call on the hot path. It fires for 3 voca
 
 **My recommendation: (b).**
 
+**Decided (D40 default):** (b). One shared vocabulary constant for prompt, matcher and resolver; the gap is closed; the LLM fallback is dropped; unknown keys become `today`.
+
 **Q10 `[behaviour]` Is the doubled persona (top `<personality>` plus end "YOUR VOICE" reminder) still wanted for the 14B/27B prod model?**
 It was added for small-model recency.
 
 *Options:* keep for all; or keep only for the 8B/9B tier.
 
 **My recommendation:** keep as-is for parity. Revisit after the port.
+
+**Decided (D22):** keep the doubled persona for all providers.
 
 **Q11 `[minor]` Should `/generate/date-context` stay?**
 The node calls it on every conversation start, but the SDK ignores the result.
@@ -643,6 +684,8 @@ The node calls it on every conversation start, but the SDK ignores the result.
 
 **My recommendation:** keep it, but generate it from the *corrected* date module, keeping the strict `DateContext` shape with `user_timezone` as a non-null string and `is_dst` as a bool. The node rejects `null` there today when no timezone is sent, so always fill both.
 
+**Decided (D40 default):** keep it, generated from the corrected date module, never null.
+
 **Q12 `[minor]` Can the vestigial prompt settings be dropped from the definitions?**
 `prompt.include_antipatterns`, `prompt.include_param_descriptions` and `model.small_model_mode` (as prompt text) have no effect on kept providers.
 
@@ -650,16 +693,21 @@ The node calls it on every conversation start, but the SDK ignores the result.
 
 **My recommendation:** drop them from the definitions, and have `import-legacy` ignore them.
 
+**Decided (D11, P4):** drop the defined-but-unread keys (`prompt.include_antipatterns`, `prompt.include_param_descriptions`); import ignores them. `model.small_model_mode` is still read by the tool engine (02 §5), so it stays as a setting, just not as prompt text.
+
 ---
 
 ## 11. Go port notes
 
 **Package shape.** Use `internal/modules/cc/prompts`:
 
-- An `interface Provider { Name(); BuildSystemPrompt(ctx PromptContext, tools []Tool, flags []CommandFlag) string; NativeTools() bool; UseClassifier() bool; ForceToolCalls() bool; ResponseFormat() *RespFmt; UserSuffix(includeThinking bool) string; ParseResponse(string) (string, bool); Sanitize(string) string; BuildTools([]Tool) []json.RawMessage }`.
+- An `interface Provider { Name(); BuildSystemPrompt(ctx PromptContext, tools []Tool, flags []CommandFlag) string; NativeTools() bool; ForceToolCalls() bool; ResponseFormat() *RespFmt; UserSuffix(includeThinking bool) string; ParseResponse(string) (string, bool); Sanitize(string) string; BuildTools([]Tool) []json.RawMessage }`.
 - Pass `include_thinking` as an argument instead of a mutable field.
 - Use a typed `PromptContext` struct in place of the `node_context` dict; there are about 14 keys (§4).
-- Keep a static registry map. There is no discovery and no custom root. Resolve the provider once per warmup.
+- `UseClassifier()` is gone with the fastText router (D9).
+- Keep a static registry map of the four kept providers. There is no discovery and no custom root. Resolve `llm.prompt_provider` once per warmup; an unknown name is a hard error (D11).
+- One internal parameterised Qwen builder (rules count, param-descriptions flag, native flag) that reproduces each provider's bytes exactly (D22). Sanitize adds the `<message>` unwrap for 8B/9B (D22).
+- Mark transient per-turn blocks structurally (an internal field), not by content prefix, so unknown-speaker blocks no longer accumulate (D8, Q6). Never emit the `Router hint:` block (D9).
 
 **Text constants.** Copy every rule and instruction string into one `rules.go`, verbatim, with `{terminology}` substitution. Generate them from Python with an exporter so typos are impossible. Assert with G1.
 
@@ -674,15 +722,19 @@ Fuzz-test it against Python's `json.dumps` on the G1 tool corpus. Tools arrive f
 
 **`rstrip`.** `strings.TrimRightFunc(s, unicode.IsSpace)` matches Python for this content.
 
-**Dates.** Implement `datectx` on `time.LoadLocation`, with `time.Date(y,m,d,0,0,0,0,loc)` for local midnight. That gives DST-correct results for free, but only if Q1 says fix.
+**Dates.** Implement `datectx` on `time.LoadLocation`, with `time.Date(y,m,d,0,0,0,0,loc)` for local midnight. That gives DST-correct results for free; Q1 is decided as fix (D8), so implement the corrected spec: local-time modifiers, one combined instant, correct `next_<day>`, minute offsets.
 
 - Embed tzdata (`time/tzdata`) so Windows works.
 - Inject the clock (`func() time.Time`) for fixtures.
 - The vocabulary becomes one Go slice shared by the DT_KEYS prompt, the regex matcher (Phase 3 `llm` module) and the resolver. That removes the HTTP `date-keys` fetch, the drift (§8.7) and the MCP branch.
-- `include_date_context` / `date_keys` become an in-process call `dates.Extract(rawUtterance)` made by the tool loop, rather than a response field from llm-proxy.
+- `include_date_context` / `date_keys` become an in-process call `dates.Extract(rawUtterance)` made by the tool loop once per turn on the raw transcript, rather than a response field from llm-proxy (D40). Regex only: no fastText fallback, no `[DATE_HINT]` (D9).
+- No LLM fallback for unresolved keys; an unknown key becomes `today` (D40, Q9).
+- `/generate/date-context` always fills `user_timezone` and `is_dst` (D40, Q11).
 
 **Persona.** `persona_presets` is a static table and the presets route serves it unchanged. Enforce the 2000-character cap on write.
 
-**Install routes.** Per Q2: stub handlers, no table, no git or exec.
+**Install routes.** Per Q2 / D4: stub handlers, no table, no git or exec.
+
+**Do not port** (D9): `date_replacer`, `date_detector`, `build_tool_system_message`, `command_converters`, `tool_formatters`, `prompt_variant_builder`, the training-prompt methods and the legacy model stack.
 
 **Risk: byte-exactness across the entire assembled conversation** (`messages[0]` plus trailing blocks plus user suffix). Prefix-cache behaviour depends on it, and so does the prod 27B model's tuned behaviour. G1 must be the gate for Phase 5b. Run shadow replay (L4) with the LLM fake keyed on a hash of the full message list, so any drift shows up as a cache miss in the fake.

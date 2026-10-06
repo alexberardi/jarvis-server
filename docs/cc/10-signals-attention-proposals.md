@@ -2,7 +2,23 @@
 
 Source: `/home/alex/jarvis/jarvis-command-center/app` (paths below are relative to it unless prefixed). About 3.9k LOC across 20 files, plus about 3.2k LOC of tests. This is an **R&D area that is still changing**. It has three PRDs: `prds/signal-bus-situation-matcher.md` ("Draft for build", 2026-08-08), `prds/attention-broker.md` ("Scoped, not yet built", which is stale because phase 1 *is* built), and the precision harness in `evals/signal_precision/`. Several of its planes are off by default, and one module (`autorun_gate.py`) has no caller at all.
 
-## 0. The concepts in plain language, and how they connect
+## 0. Decisions applied (2026-10-06)
+
+- **D7:** automation cards store the chosen action **server-side**; the card carries only an opaque id. Confirm runs exactly the stored action after checking the node belongs to the caller's household. `automatic` keeps full power with **no allowlist** (Q1).
+- **D4:** `trusted:true` is removed; node commands are authentic via per-node broker credentials and ACLs. The proposable dispatcher also gets the household ownership check on `_action.node_id`.
+- **D17:** the **proactive situation matcher is cut**: the matcher, its prompt, the `situation_match` job, anti-nag state, `match_situation`/`match_proposals`, `proposals.proactive_enabled`, `/situation-matcher/callback` and the `evals/signal_precision` harness. **Kept:** the signal store, render into voice context, leave-by, user-authored automations and the card dispatcher. `proposals.enabled` stays (it gates leave-by and the dispatcher). Prod never enabled the matcher.
+- **D18:** the attention broker's working part is ported: gates (safety bypass, dedupe, budget, quiet hours), journal, daily journal card, TTL cleanup (at startup, not after a 24 h sleep) and the interposition on the three `/node/*` endpoints, byte-identical to legacy when `attention.enabled` is off. **Dropped:** `attention_source_tiers`, `attention_consents`, `attention_feedback` and the consent/tier gates. **Fix (D8):** quiet hours use the household timezone; `attention.timezone` goes away. Prod: on, 149 events in 30 days.
+- **D9:** the attention tier/consent/feedback tables are cut as never written. `autorun_gate.py` is **kept** as dormant errand code (doc 09), but automations do not route through it (D7).
+- **D46:** a user `appt.upcoming` automation and the built-in leave-by **both fire** (Q6). The prod "leave by" alerts come from the node-side `calendar_alerts` agent, not CC (leave-by is off in prod: `proposals.enabled` unset). Keep `/signals` ingest and the node alert path working for that package.
+- **D27:** the signal TTL sweep, attention cleanup and journal card are trigger kinds on the one scheduler engine, with `last_run_at` persisted (no double-posted journal card after a restart).
+- **D31:** cards and the broker's deliveries go through the in-process `notify` service.
+- **D20:** account deletion hard-deletes the user's signals and suppressions; attention deliveries are kept, de-identified.
+- **D2/D3:** voice presence is written only from a speaker identified in the current conversation; there is no sticky fallback.
+- **D40 defaults:** Q4 "never suggest" is checked centrally; Q5 dedup state lives in SQLite with TTLs; Q7 voice presence never shortens TTL and honours `signals.enabled`; Q8 static catalog; Q9 `cacheable`/`salience` kept on the wire.
+- **M6 (D47):** `/signals` keeps app auth; the rate-limit bucket keys on (household, principal), not `source_agent`.
+- **D8:** the bugs in §8 (claim-before-success, salted `hash()` idempotency, insert race, global `journal_ttl_days`) are fixed.
+
+## 0b. The concepts in plain language, and how they connect
 
 | Term | Meaning | Where |
 |---|---|---|
@@ -162,6 +178,8 @@ The guards run in this order, and each one returns its status:
 6. Suppression lookup: `"leaveby"` in source_keys for command `reminder` → `suppressed`
 7. **In-memory claim** on `hh:event_id` → `duplicate` (`:77-83`). The claim happens *before* the work, so a later failure leaves it claimed.
 
+   > **Changed by D40 (Q5):** the claim moves to SQLite with a TTL and latches only on terminal outcomes.
+
 Then:
 
 - Probes the node for `get_drive_time`, 4 s (`:99-110`). Missing → `no_drive_time`.
@@ -198,7 +216,11 @@ Then:
    `notification`: an inbox card titled "Confirm automation", category `proposal`, whose `_action={node_id, command_name, arguments, idempotency_key}` is **embedded in the card data** (`:192-249`).
 7. On confirm, `_execute_confirmed_action` (`:332-355`) dispatches **whatever `_action` the tap carries**. It does not check that the node belongs to the household, that the command is opted in, or that the call is idempotent. See §8.
 
+> **Changed by D7/D4:** the action is stored server-side and the card carries an opaque id; confirm runs exactly the stored action after a household ownership check. No `trusted` flag. `automatic` keeps running any tool the LLM picks (no allowlist).
+
 ### 3.6 Proactive situation matcher (`situation_matcher_service.py`)
+
+> **Cut by D17.** Described here as today's behaviour only; none of §3.6 is ported.
 
 - **Edge**: `signal_situation_edge` cancels any pending task for the household and schedules `_debounced_run` 5 s later. The latest edge wins (`:309-344`).
 - `run_match_batch` (`:121-149`):
@@ -253,6 +275,8 @@ The gates run in order:
 | 3. Budget | `source_daily_cap` (4) of non-journal deliveries per source → journal. Push and inbox budgets (8 and 30 per local day) each demote one rung. |
 | 4. Quiet hours | `HH:MM-HH:MM` in household tz, may cross midnight. Demotes push → inbox. |
 
+> **Changed by D18:** gates 1 (consent) and 2 (tier) are dropped with their tables. Quiet hours use the household timezone; `attention.timezone` is removed.
+
 Callers deliver when `rung != journal` and then stamp `mark_outcome`. In `node_commands`:
 
 - Broker errors or broker off → **legacy delivery, byte-identical** (`_attention_gate` returns None; fail-open, `:245-286`).
@@ -293,12 +317,12 @@ All timestamps are naive UTC.
 | `signals.automations` | `"{}"` (`:60`) | Automation rules. |
 | `ambient_context.enabled` | `false` (`:312`) | Gates the render of signals and memories into the voice prompt, and the voice presence write. |
 | `proposals.enabled` | `false` (`:340`) | Gates leave-by, dispatcher execute, and (with the next key) the matcher. Fail-closed. |
-| `proposals.proactive_enabled` | `false` (`:353`) | The proactive matcher. |
+| `proposals.proactive_enabled` | `false` (`:353`) | The proactive matcher. **Dropped (D17).** |
 | `attention.enabled` | `false` (`:699`) | Broker interposition and the journal card. |
 | `attention.daily_push_budget` / `daily_inbox_budget` / `source_daily_cap` | 8 / 30 / 4 | Budgets. |
 | `attention.dedupe_window_hours` | 24 | — |
 | `attention.quiet_hours` | `"22:00-07:00"` | — |
-| `attention.timezone` | `"UTC"` | Separate from any household tz used elsewhere. |
+| `attention.timezone` | `"UTC"` | Separate from any household tz used elsewhere. **Dropped (D18):** use the household timezone. |
 | `attention.safety_categories` | `"medication,reminder,security,safety"` | — |
 | `attention.journal_ttl_days` | 30 | Read **without** a household (global). |
 | `attention.journal_card_enabled` / `journal_card_cron` | `true` / `"0 21 * * *"` | — |
@@ -376,6 +400,8 @@ Hard-coded constants a port must carry:
    - So any authenticated household member can run any tool on any node, including another household's, with arbitrary arguments.
    - The automatic path likewise skips `proposals.enabled`, the proposable opt-in, and the (dead) autorun allowlist.
    - The proposable dispatcher is bounded by opt-in but also does not check that `_action.node_id` belongs to the household.
+
+   > **Fixed by D7/D4:** server-side stored action, household ownership check, no `trusted` flag.
 2. **"Never suggest this" is a no-op on most cards.**
    - Directed cards (`source=source_key`) and proactive cards (`source=first source_key`) show the button.
    - Neither path ever reads `proposal_suppressions`. Only leave-by (`bridge:64-74`) and node detector agents do.
@@ -442,6 +468,7 @@ All are in `tests/`:
      - (b) Keep both delivery modes, but store the chosen action **server-side** with the card carrying only an opaque id; check the node belongs to the household; route `automatic` through the autorun allowlist, and fall back to a card when it fails.
      - (c) Drop `automatic`, so everything is a card.
    - **My recommendation:** (b). Ask whether the allowlist should be user-extensible per rule.
+   - **Decided (D7):** server-side stored action with an opaque id on the card, and a household ownership check on confirm. Unlike (b), `automatic` keeps full power with **no allowlist** and does not use `autorun_gate`.
 2. **[scope] What is the product intent for the proactive situation matcher, and should it be ported now?**
    - It is off by default, its harness gate fails on Qwen3.5-9B (PRD §15: recall 0.86 with 9% nag, or 0.57 with 0% nag), and its live `match_situation` path has no prod caller.
    - It brings a byte-exact prompt, a queue job type, anti-nag state and the eval harness.
@@ -451,6 +478,7 @@ All are in `tests/`:
      - (b) Port the Signal store, render, reactions and dispatcher now; defer the matcher to post-port R&D in Go and keep `evals/` as an offline Python tool.
      - (c) Cut it.
    - **My recommendation:** (b). The matcher is the most experimental piece and its correctness is model-dependent, not port-dependent.
+   - **Decided (D17):** (c) cut the matcher and its harness. Store, render, reactions, automations and dispatcher are kept. Prod: matcher never enabled; `proposals.enabled` unset (D46); `attention.enabled` on (D18).
 3. **[scope] Should the attention broker be ported?**
    - It is phase 1 of 3. The tier, consent and feedback tables have no writer, the two direct routes are unused, and it is off by default.
    - However, it is interposed on three *public plugin* endpoints, and its Keppra-dose safety rule shows it was used in anger at least once.
@@ -459,6 +487,7 @@ All are in `tests/`:
      - (b) Port the gates, journal and card, and drop the tier, consent and feedback tables until phase 2/3 is actually built.
      - (c) Cut it, keeping only the legacy delivery path.
    - **My recommendation:** (b) if you still want notification governance, otherwise (c). Either way the legacy (flag-off) path must stay byte-identical.
+   - **Decided (D18):** (b): gates, journal, journal card and interposition; tier/consent/feedback tables dropped; quiet hours in household tz; flag-off path byte-identical.
 4. **[behaviour] Should "Never suggest this" be enforced centrally?**
    - Today it only works for leave-by cards and the email detector agent. On directed and proactive cards the button records a row that nothing reads (§8.2).
    - *Options:*
@@ -466,12 +495,14 @@ All are in `tests/`:
      - (b) Check suppressions inside `emit_proposal_card`, keyed on (household, user or any, command, source), so every proposer honors them.
      - (c) Hide the button on cards whose proposer does not honor it.
    - **My recommendation:** (b).
+   - **Decided (D40 default):** (b): suppressions are checked centrally in the card emitter. With the matcher cut (D17), the remaining proposers are directed `/signals`, leave-by and SDK `propose_action`, so suppressions are kept.
 5. **[behaviour] Should dedup and anti-nag state survive restarts?**
    - Leave-by claims, automation signatures and matcher cooldowns and caps are all in-process and partly unbounded. Leave-by claims *before* success, so one transient failure suppresses that appointment until restart (§8.3).
    - *Options:*
      - (a) Keep them in memory.
      - (b) Persist them in a small SQLite table with TTLs, and claim only on terminal outcomes (proposed, suppressed, departure passed).
    - **My recommendation:** (b). It is cheap with SQLite and fixes the retry bug.
+   - **Decided (D40 default):** (b): dedup in SQLite with TTL; claim only on terminal outcomes.
 6. **[behaviour] When a user writes an automation for "An appointment is coming up", should the built-in leave-by reaction still fire?**
    - Today both fire, which can produce two cards (§8.4).
    - *Options:*
@@ -479,6 +510,7 @@ All are in `tests/`:
      - (b) A user rule for `appt.upcoming` replaces leave-by.
      - (c) Show leave-by in the automations UI as a built-in default rule the user can switch off.
    - **My recommendation:** (c), or (b) if the UI is frozen.
+   - **Decided (D46):** (a): both fire (the user prefers it).
 7. **[behaviour] How should voice presence interact with phone presence?**
    - Voice overwrites the user's single presence row, cutting the TTL from 4 h to 15 min. It is gated by `ambient_context.enabled`, not `signals.enabled`, and it never fires automations.
    - *Options:*
@@ -486,19 +518,23 @@ All are in `tests/`:
      - (b) Voice refreshes but never shortens an existing `home` row's TTL, and honors `signals.enabled`.
      - (c) Give voice a separate `source_key` (`presence:voice:{uid}`).
    - **My recommendation:** (b). Keep no fan-out from voice, so automations don't fire every time you speak.
+   - **Decided (D40 default):** (b): voice never shortens TTL and honours `signals.enabled`; no fan-out from voice.
 8. **[scope] Should signal kinds be declared by producers or kept as a static catalog?**
    - The catalog is hard-coded to presence plus `appt.upcoming`. `game.final` is emitted but not authorable, and `appt.detected` is listened for but never emitted.
    - *Options:*
      - (a) Keep the static catalog in Go.
      - (b) Let the SDK declare `emitted_signal_types` on agents and build the catalog from installed packages, which is an SDK change after the port.
    - **My recommendation:** (a) for the port, with (b) noted for later. Please confirm whether `appt.detected` is planned (from the email agent?) or stale.
+   - **Decided (D40 default):** (a) static catalog; the stale `appt.detected` listener is cut.
 9. **[minor] Should `cacheable` and `salience` keep their meaning?**
    - Both are accepted and `cacheable` is validated (422), but nothing reads either.
    - **My recommendation:** keep both on the wire and keep the 422 rule for compatibility, with no other behaviour. Or drop the 422, since no producer sends `cacheable: true` (calendar and sports send false).
+   - **Decided (D40 default):** keep `cacheable`/`salience` on the wire (and the 422 rule), with no other behaviour.
 10. **[minor] How should `/signals` handle auth and rate limits?**
     - Any app-to-app credential can write to any household, and the rate limit keys on the client-chosen `source_agent`.
     - Inside `jarvisd` the remaining app callers are external only (node-setup uses node keys).
     - **My recommendation:** keep app auth for compatibility, but key the bucket on (household, auth principal), with `source_agent` used only for logging.
+    - **Decided (M6/D47, D4):** keep app auth; key the bucket on (household, principal), `source_agent` for logging only.
 
 ## 11. Go port notes
 
@@ -508,8 +544,10 @@ All are in `tests/`:
 - **`Bus`**: `Ingest(ctx, Signal) (id, error)` followed by `Dispatch(evt)`. `Dispatch` sends to a buffered channel drained by a goroutine pool. Reactions are an `map[kind][]Reaction` registered at module init. This replaces `call_soon_threadsafe` and both captured `_main_loop`s.
 - **Reactions**: `LeaveBy` and `Automation`, each a plain Go func with the status-string return kept for logs and tests.
 - **`Proposals`**: the card emitter, the dispatcher (registered on the server-callback registry from doc 13) and suppressions.
-- **`Matcher`**: only if Q2 says so. It becomes an embedded-queue job type `situation_match` with a per-household dedup key (`situation:{hh}`). That gives you the debounce (a delayed job that replaces any pending one) and the background concurrency cap of 1 for free. The `/situation-matcher/callback` route disappears, and the job completion calls `finalize` directly.
-- **`Attention`**: only if Q3 says so. It is a pure `Route(ctx, Event) Decision` plus its tables, called by the `/node/*` handlers through an interface, so with the flag off they take the legacy branch unchanged.
+- **No `Matcher`** (D17): no `situation_match` job, no `/situation-matcher/callback`, no anti-nag state, no harness. `Dispatch` fans out to reactions only.
+- **`Attention`** (D18): a pure `Route(ctx, Event) Decision` (dedupe, safety bypass, budget, quiet hours in the household tz) plus `attention_events`/`attention_deliveries`, called by the `/node/*` handlers through an interface, so with the flag off they take the legacy branch unchanged. No tier/consent/feedback tables.
+- **Automation confirm** (D7): persist the chosen action server-side (keyed by an opaque id the card carries), check node ∈ caller's household on confirm, dispatch without `trusted`. `automatic` has no allowlist.
+- **Suppressions** (D40 Q4): checked centrally in the card emitter.
 
 **Automation LLM call.** Make it an embedded-queue job too (type `signal_automation`, background slot, dedup key = the occurrence signature), not an inline goroutine. This bounds load on slow hardware and makes the signature dedup durable for free (Q5). Pass `reasoning_budget: 0` / `enable_thinking:false` through the in-process LLM interface.
 
@@ -522,14 +560,13 @@ All are in `tests/`:
 - the `/signals` JSON (including FastAPI's 422 shape)
 - the card element JSON (stringified params)
 - `_stable_idempotency_key`: reproduce `json.dumps(sort_keys=True, default=str)` exactly, including `", "` and `": "` separators and `ensure_ascii=True` escaping, or existing idempotency keys and suppressions stop matching
-- the situation prompt, if kept
 
 `_action_idem` uses salted `hash()`, so it does not need to match. Replace it with sha256.
 
 **SQLite:**
 
 - Enable `PRAGMA foreign_keys=ON` for the attention cascade.
-- Run all three sweeps (signals every 30 min, attention daily, and the journal-card cron tick) as scheduled jobs on the embedded queue, with the first attention cleanup run at startup.
+- Run all three sweeps (signals every 30 min, attention daily, and the journal-card cron) as trigger kinds on the one scheduler engine (D27) with persisted `last_run_at`, and the first attention cleanup run at startup (D18).
 - Timestamps stay naive UTC in TEXT to match `import-legacy`.
 
 **Risks:**
@@ -543,4 +580,5 @@ All are in `tests/`:
 - No `JARVIS_ADAPTER_CALLBACK_TOKEN` and no `LLM_PROXY_INTERNAL_TOKEN` hop.
 - No `asyncio.run`-in-threadpool hack.
 - No `/internal/app-ping` round trip for in-process callers.
-- Rate-limit and anti-nag state can live in one `sync.Map` or a SQLite table, as Q5 decides.
+- Rate-limit state keyed on (household, principal) (M6); leave-by and automation dedup in a SQLite table with TTLs (D40 Q5). There is no anti-nag state (D17).
+- **Account deletion (D20):** delete the user's signals and suppressions in the shared transaction; de-identify their attention events/deliveries.

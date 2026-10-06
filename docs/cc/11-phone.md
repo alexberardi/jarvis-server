@@ -9,6 +9,22 @@ Gateway (external, Python, frozen): `jarvis-phone-gateway`, port 7713. I read a 
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+- **D16:** **jarvis-phone-gateway is absorbed into jarvisd** (Q1 option c). Phone becomes its own set of REST endpoints (Twilio voice webhook, Media Streams WebSocket, and the call/session/escalation routes), gated behind `phone_calls.enabled` (default off). Live calls use the in-process STT, LLM and TTS. **No Redis and no dial-queue shim** (Q2 is moot); dial hand-off is an in-process call or queue job. Twilio still needs the webhook/WS routes publicly reachable (a tunnel), configured only by households that turn phone on. Oddities caused by the two-process split are fixed (D8). Ported in Phase 5c; until cutover prod keeps the Python gateway. Prod: enabled, 17 calls 2026-08-06..08-30.
+- **D4:** `/internal/phone/*` stays open to any registered app for now; a future external-API connector concept will take this route over. (With D16 the absorbed gateway no longer calls it; see Q9.)
+- **D42:** call transcripts and audio are ported as-is (Q8 option a): no retention job, `audio_retention_days` stays inert, no notice-off mode. Revisit with a call-history screen. Prod: 4 of 17 calls have a transcript, none have audio.
+- **D20:** account deletion keeps `phone_call_sessions` as activity history with `user_id` (and `confirmed_by`) → NULL; it hard-deletes the user's pending call drafts and their `phone_calls.call_context`. The phonebook is household-owned and stays.
+- **D21:** unknown or ambiguous speaker → `make_phone_call` refuses (today's behaviour). Approvals are not tightened: any household member may confirm (Q10).
+- **M14 (D47) / D35:** when speaker recognition is off, the no-speaker refusal says "speaker recognition is off" rather than "I'm not sure who's speaking".
+- **D45:** errand fail-fast stays: a `done` call with `goal_achieved` None counts as failure.
+- **D31:** cards go through the in-process `notify` service.
+- **D27:** the reaper is a periodic trigger on the one scheduler engine.
+- **D40 defaults:** Q3 real cancel, including a live call; Q4 DNC also blocks by number and filters web results; Q5 faithful WRatio, deterministic ties, a note on the card when the score is under 95; Q6 minutes cap from a new `in_call_at`; Q7 per-state reaper windows; Q11 corrective card on a late success.
+- **M12 (D47):** drop `attempt_cap`, `overlay_json`, the `constraints` column and `source='web'`; keep `category` on call-context fields.
+
+---
+
 ## 1. Purpose
 
 **In user terms:** you say "Call Tony's Pizzeria and order a large pie for pickup at 6", or an errand step asks for it. Jarvis then:
@@ -58,6 +74,8 @@ When the call ends you get an **outcome card**: a summary, `goal_achieved`, and 
 
 Router mounts are at `main.py:846-856`. The `/internal/phone/*` routes have no `/api/v0` prefix.
 
+> **Changed by D16:** in Go the gateway is in-process, so nothing internal calls `/internal/phone/*`. Per D4 they stay open to any registered app for now, pending the external-API connector. Go adds the gateway's own public routes: the Twilio voice webhook and the Media Streams WebSocket.
+
 ### Server-plane callbacks
 
 All of these arrive as card taps on `POST /callbacks` with no `target_node_id`. Doc 13 owns that route. The only requirement is household **member** (`api/callbacks.py:231-260`). They are registered at `phone_call_service.py:1033-1039` and called from `main.py:486-488`.
@@ -80,9 +98,13 @@ All three use app-to-app headers from env:
 
 `worker_url` is whatever the gateway sent in `claim_dial`. In practice that is the gateway's **public tunnel URL**, `cfg.public_url` (gateway `dial_worker.py:191-193`). So CC reaches those two internal endpoints through the public Cloudflare hostname.
 
+> **Changed by D16:** these become in-process calls (line-type lookup, a channel send for the answer, context cancellation for cancel). No `worker_url`.
+
 ### Redis
 
 `LPUSH phone:dial {"session_id","household_id"}` (`:1047-1065`). It needs `REDIS_URL`; if that is missing it raises, and the session is marked `failed`.
+
+> **Changed by D16:** no Redis. Dial hand-off is an in-process call or queue job; the `confirmed→dialing` CAS stays the authorisation.
 
 ### Tool
 
@@ -131,6 +153,8 @@ This step is synchronous and returns immediately. It takes the household and `sp
 3. No household.
 4. **Gate off.** Returns `phone_calls_disabled` with "A household admin can enable them in Household Settings" (`:103-114`).
 5. **No identified speaker.** Returns `no_identified_speaker` with "Try again from the Jarvis app" (`:116-127`). This is deliberate: the confirm card has to land on a specific user's phone.
+
+   > **Kept by D21;** unknown and ambiguous are both "no speaker". **Changed by M14:** when speaker recognition is off, the message says so.
 
 If nothing refuses, it fires `create_call_plan` with `loop.create_task` (`:132-140`) and returns `status: accepted` plus the spoken ack (`:149-155`).
 
@@ -185,6 +209,8 @@ The rule is "never vanish": every failure posts an inbox card.
 10. Returns a "📞 Calling {name}…" inbox context (`:929-941`).
 
 **Cancel** (`:946-976`) moves `draft → declined` **only**. In any other state it still returns "🚫 Call cancelled — Won't call X" and does nothing else. See §8.
+
+> **Changed by D40 (Q3):** cancel is real: a confirmed call is declined before the claim, and a live call is hung up and marked `failed` ("cancelled by user"). A gate toggle-off cancels active calls.
 
 ### 3.5 Gateway events (`api/phone_sessions.py:206-348`)
 
@@ -365,9 +391,13 @@ terminal: done, failed, declined, expired
 
 - Sessions are **never deleted**.
 - `phone_calls.audio_retention_days` (default 30, "audio AND transcript") is declared and exposed in mobile settings, but **nothing reads it** in CC or the gateway.
+
+> **Kept by D42:** no retention job for now. **D20:** on account deletion, sessions are de-identified, not deleted.
 - Audio is stored in MinIO bucket `PHONE_CALLS_BUCKET` by the gateway (`services/recording.py`).
 
 **In-memory state in CC:** none. The gateway holds all live-call state in its own `call_runtimes` and its token registry.
+
+> **Changed by D16:** in jarvisd that live-call state lives in-process in the phone module.
 
 ---
 
@@ -642,6 +672,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (d) (b) now, (c) in a later phase.
 
    **My recommendation: (d).** Phase 5 ports the CC half behind a `Dialer` interface, so (c) later is a drop-in. Absorbing it also fixes oddities 1–4, 7 and 19 for free, because the call loop and the session row would live in one process.
+   **Decided (D16):** (c): absorb the gateway into jarvisd in Phase 5c, gated behind `phone_calls.enabled` (default off), using in-process STT, LLM and TTS. Until cutover prod keeps the Python gateway.
 
 2. **[change] If the gateway stays external for now (D8), how does jarvisd hand off dial jobs?**
 
@@ -653,6 +684,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (c) The gateway polls a new `GET /internal/phone/dial-jobs`. This needs a gateway change.
 
    **My recommendation: (a).** The CAS stays the authorisation, so the transport carries no trust, and it respects the freeze. Treat it as throwaway until (1c).
+   **Decided (D16):** moot. No Redis and no shim; dial hand-off is an in-process call or queue job.
 
 3. **[behaviour] What should "cancel" mean once a call is past draft?**
 
@@ -667,6 +699,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (c) As (b), but add a distinct `cancelled` terminal state.
 
    **My recommendation: (b).** It reuses the existing states. Errand fail-fast already treats any non-done state as failure.
+   **Decided (D40 default):** (b): real cancel, including a live call; `confirmed→declined` added; a gate toggle-off cancels active calls.
 
 4. **[behaviour] Should do-not-call also block by *number*?**
 
@@ -678,6 +711,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (c) As (b), and also suppress web results matching a DNC number at plan time.
 
    **My recommendation: (c).** It is cheap, and a DNC flag the user set should be absolute.
+   **Decided (D40 default):** (c): block by number at confirm and filter DNC numbers out of web results.
 
 5. **[behaviour] Fuzzy matching: port rapidfuzz `WRatio@80` faithfully, or change it?**
 
@@ -689,6 +723,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (c) Replace it with a simpler token-overlap scorer and new goldens.
 
    **My recommendation: (b).** The confirm card is the real guard, so make the substitution visible rather than re-tuning the threshold.
+   **Decided (D40 default):** (b): faithful WRatio@80, deterministic ties, and a card note when the score is under 95.
 
 6. **[behaviour] The monthly-minutes cap never counts anything, because the gateway never reports `duration_seconds` (oddity 2).**
 
@@ -698,6 +733,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (c) Drop the cap.
 
    **My recommendation: (a)**, using a new `in_call_at` set by the `in_call` transition. That makes Twilio spend actually bounded.
+   **Decided (D40 default):** (a): count minutes from a new `in_call_at`. With D16 the call duration is also known locally.
 
 7. **[behaviour] Reaper windows.**
 
@@ -708,6 +744,8 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (b) Per-state windows: `dialing` 150 s (60 s for the stream to start, plus synthesis and calls.create margin); `in_call`/`wrapup` 60 s; `confirmed` 5 min → `failed` with "the call never started — is the phone gateway running?"
 
    **My recommendation: (b).**
+
+   **Decided (D40 default):** (b): per-state reaper windows. (With D16 the `confirmed` failure text should no longer mention a separate gateway.)
 
 8. **[scope] Retention, transcripts and notice-off.**
 
@@ -720,6 +758,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (d) Stop storing transcripts at all, since nothing reads them.
 
    **My recommendation: (b), with (c) if you still want notice-off.** Do you want a call-history screen? If not, (d) is simpler and safer.
+   **Decided (D42):** (a) port as-is for now: no retention job, `audio_retention_days` stays inert, no notice-off. Revisit with a call-history screen. Account deletion de-identifies sessions (D20).
 
 9. **[change] Lock down the `/internal/phone/*` routes.**
 
@@ -731,6 +770,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (c) (b), and also return 409 on GET unless the state is `confirmed|dialing|in_call|wrapup`.
 
    **My recommendation: (c).** If the gateway is absorbed (Q1c), the routes disappear altogether.
+   **Decided (D4):** (a) for now: open to any registered app, later moved onto an external-API connector for 3rd-party apps. With D16 the absorbed gateway no longer calls them.
 
 10. **[behaviour] Who may confirm a call plan?**
 
@@ -741,6 +781,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
     - (b) Only the initiator (`ctx.user_id == session.user_id`), or a household admin.
 
     **My recommendation: (b).** The call speaks "on behalf of {initiator}" and loads *their* PII.
+    **Decided (D21):** (a): any household member may confirm (the user answered "just B" on 06.Q2; approvals were not tightened).
 
 11. **[minor] Late outcome after the reaper failed the session (oddity 8).**
 
@@ -750,10 +791,12 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
     - (c) As (b), but if `goal_achieved` is true, post a corrective "Actually, the call finished: …" card.
 
     **My recommendation: (c).** The first card told the user it failed, and that was wrong.
+    **Decided (D40 default):** (c): store the late outcome, no second failure card or re-resume, and post a corrective card if `goal_achieved` is true.
 
 12. **[minor] Remove the dead knobs:** `phone_calls.attempt_cap` (no reader), `overlay_json`, the `constraints` column and `source='web'`. Also: should the per-call **category** selection on the confirm card ever ship? It was deferred on 2026-07-23, and all categories load today.
 
     **My recommendation:** drop the first four from the Go schema. Keep `category` on call-context fields, since it costs nothing.
+    **Decided (M12/D47):** drop `attempt_cap`, `overlay_json`, the `constraints` column and `source='web'`; keep `category`.
 
 ---
 
@@ -784,10 +827,11 @@ type Dialer interface {
 }
 ```
 
-Implementations:
-- `redisDialer` (Q2a): LPUSH, plus HTTP to `worker_url` for Cancel and Answer, plus HTTP to the gateway for LineType.
-- `noopDialer`: phone disabled.
-- Later, `inprocDialer` (Q1c).
+Implementations (D16):
+- `inprocDialer`: the absorbed gateway. Enqueue is an in-process queue job, Cancel is context cancellation, Answer is a channel send, LineType calls Twilio Lookup directly.
+- `noopDialer`: phone disabled (`phone_calls.enabled` off).
+
+No `redisDialer`: there is no Redis and no shim (D16; Q2 moot). Until cutover prod keeps the Python CC and gateway together, so Go never needs to feed the Python gateway.
 
 The confirm handler keeps the same order: commit `confirmed`, then `Enqueue`. If `Enqueue` returns an error, mark the session `failed` and post an honest card.
 
@@ -811,7 +855,11 @@ Check `RowsAffected()==1`. jarvisd has a single writer connection, so this is se
 
 **Errand resume.** Replace FastAPI `BackgroundTasks` with a direct `workflow.DeliverSignal(runID, step, "phone_call", snapshot)`, posted to the queue after the session commits. Keep the 20 s sweep as the safety net, and have the reaper's and confirm's terminal transitions also deliver the signal. That removes the 20 s lag for declined, expired and reaped calls.
 
-**Reaper.** A ticker goroutine every 30 s, or a recurring queue job, using the per-state windows from Q7. Use one transaction per session, so a slow `/cancel` POST to the worker never holds the writer: commit first, then call the Dialer.
+**Reaper.** A periodic trigger on the one scheduler engine (D27), every 30 s, using the per-state windows from Q7 (D40). Use one transaction per session, so a slow `/cancel` POST to the worker never holds the writer: commit first, then call the Dialer.
+
+**Account deletion (D20).** De-identify the user's sessions (`user_id`, `confirmed_by` → NULL), delete their pending drafts and their `phone_calls.call_context`; leave contacts alone.
+
+**Schema (M12).** No `attempt_cap`, `overlay_json`, `constraints` column or `source='web'`. Add `in_call_at` (D40 Q6).
 
 **Times.** Store UTC everywhere. Caps should use the household timezone if you agree (oddity 17); otherwise keep UTC for parity. The card's `expires_at` format is `%Y-%m-%dT%H:%M:%SZ`.
 
@@ -827,12 +875,14 @@ An empty input scores 0. Write it from the rapidfuzz source, not from memory, an
 
 **Risks.**
 - The wording of the brief and context prompts was tuned live. Port the strings byte-for-byte: `_draft_details` system prompt, `build_context_block`, the `_search_miss_note` texts, the refusal messages.
-- The `/internal/phone/*` JSON shapes are a frozen contract with the Python gateway. Contract-test them against the gateway's `session_client.py` expectations: 200 / 409 semantics on claim, `allow_conflict` only there.
+- The `/internal/phone/*` JSON shapes were a contract with the Python gateway. With D16 nothing internal calls them; D4 keeps them open to registered apps until the external-API connector exists, so keep their shapes and 200 / 409 claim semantics if they are ported.
+- The absorbed gateway's own behaviour (the disclosure text, spoken-output guard, escalation's 25 s window, wrap-up assessment prompt, turn payload shape) must be ported from the gateway source, which this doc only snapshots.
+- **Public ingress (D16):** the Twilio voice webhook and Media Streams WS must be publicly reachable (a tunnel) and validate Twilio signatures. Only households that enable phone configure this.
 - Quick-search scraping (doc 04) must keep the SSRF guard.
 
-**Simplifications if the gateway is absorbed (Q1c):**
+**Simplifications from absorbing the gateway (D16, decided):**
 - No Redis.
-- No `/internal/phone/*` routes, no app-auth and no `worker_url`.
+- No internal `/internal/phone/*` hop, no app-auth between CC and gateway, and no `worker_url`. (The routes themselves stay open to registered apps per D4.)
 - Escalation answers become a channel send to the live call goroutine.
 - Cancel becomes context cancellation.
 - Heartbeats become in-process liveness.

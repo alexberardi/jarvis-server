@@ -6,6 +6,17 @@ Out of scope here: `/prompt-providers/*` (doc 03, being cut); the generic node `
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+- **D39:** (Q1) slow installs get a 5-minute **pickup** deadline until the node verifies, then `expires_at = verify + 15 min`, keeping the +120 s restart extension; server-only, node unchanged. (Q8) a setting `pantry.base_url`, defaulting to the public Pantry URL, so a household can point at a private Pantry; it must be reachable from the node.
+- **D5:** **Forge test install is dropped** from Go (future work): the four `test-install` routes, the `test_install_requests` table and the `test-install` MQTT topic are not ported. Install, uninstall and revert are allowed for **any household member, from any URL** (no allowlist; private Pantry instances are coming). Household checks look at the caller's memberships, not just the JWT's active household.
+- **D4:** package verify/results are node callbacks: node auth, with the authenticated node bound to `{node_id}` in the path. `node-tool-reports` gets node auth and the request id must belong to that node. `trusted:true` is removed; per-node broker credentials and ACLs make broker-level spoofing (including the §8 op-confusion replay) impossible.
+- **D8:** known bugs fixed: sticky terminal status (Q6), idempotent verify, unguarded node responses.
+- **D27:** the 30-day request-row sweeper is a trigger kind on the one scheduler engine.
+- **D40 defaults:** Q5 nodes with no household fail closed; Q7 request tables not imported, 30-day sweeper; Q9 keep 200-empty on node-tools timeout and log it; Q10 invalidate the schema cache in-process; Q11 reproduce the substring error mapping exactly; Q12 keep sending `github_repo_url`/`git_tag`.
+
+---
+
 ## 1. Purpose
 
 Three related mobile features. In each one, **CC is a broker and record-keeper, never the executor**. The node does the work, and CC keeps the request state or relays the round-trip.
@@ -13,7 +24,7 @@ Three related mobile features. In each one, **CC is a broker and record-keeper, 
 | Feature | User story | Who calls CC |
 |---|---|---|
 | **Package install / uninstall / revert** | From the Store screen in the mobile app, install a Pantry package (command, agent, device protocol, bundle) on one or more nodes. Also remove it, or roll it back to the previous version. | Mobile (JWT) creates and polls; the node (X-API-Key) verifies and posts results. |
-| **Test install (Forge)** | A developer in Pantry's AI Forge gets a 6-character share code. They type it into mobile, and the draft is installed on a node as a temporary test command (20-minute node-side TTL). | Same split; CC also calls Pantry once to validate the code. |
+| **Test install (Forge)** | A developer in Pantry's AI Forge gets a 6-character share code. They type it into mobile, and the draft is installed on a node as a temporary test command (20-minute node-side TTL). **Dropped by D5** (future work). | Same split; CC also calls Pantry once to validate the code. |
 | **Command-data browser** | Browse, create, edit and delete the records a command stored on a node via `JarvisStorage` (reminders, shopping/todo lists, medications, …) without SSH. | Mobile (JWT); CC does a synchronous MQTT round-trip to the node. |
 | **Node tools view** | Mobile asks which tools and commands a node exposes, which packages are installed (with versions, `previous_version` and health), so the Store can show Install/Update/Revert. | Mobile (JWT); the node posts back via an HTTP callback. |
 
@@ -50,6 +61,8 @@ There is no `/package-uninstall/{id}/verify` or `/package-revert/{id}/verify`. A
 
 ### 2.2 Test install (`api/test_install.py`)
 
+> **Dropped by D5.** Today's routes are listed for reference only; Go does not port them.
+
 | Method + path | Auth | Line |
 |---|---|---|
 | `POST /api/v0/nodes/{node_id}/test-install` → 201, body `{share_code}` | provisioning + household | 73 |
@@ -79,7 +92,7 @@ The caller is mobile `api/commandDataApi.ts`, from the screens in `screens/Comma
 | Method + path | Auth | Caller | Line |
 |---|---|---|---|
 | `GET /api/v0/mobile/nodes/{node_id}/tools` | JWT + household member (only if the node has a household) | mobile `chatApi.ts:317` (`fetchNodeTools`, 15 s client timeout) | 28 |
-| `POST /api/v0/mobile/node-tool-reports/{request_id}` | **none** | node `mqtt_tts_listener.py:536` | 105 |
+| `POST /api/v0/mobile/node-tool-reports/{request_id}` | **none** (**D4:** node auth, request id bound to that node) | node `mqtt_tts_listener.py:536` | 105 |
 
 ### 2.5 MQTT topics (CC → node; the node subscribes to `jarvis/nodes/{node_id}/#`)
 
@@ -159,6 +172,8 @@ Git refs: Pantry pins installs to the validated **commit SHA** (it passes it as 
 ```
 
 - `expires_at = created_at + 5 min` (`:127`, `:348`, `:529`). There is no setting for this.
+
+  > **Changed by D39:** 5 min is a pickup deadline; on verify, `expires_at = verify + 15 min`. The +120 s restart extension stays. **Changed by D8 (Q6):** terminal status is sticky.
 - A `restarting` post extends `expires_at` by **120 s from the old expiry**, not from now (`:85-87`). It is accepted any number of times; the auto-rollback path relies on that (`handler :391-399`).
 - Expiry is **lazy**:
   - verify and results: if `expires_at < now`, the row is set to `expired`, committed, and the call returns 410, *regardless of the current status*. A late result for a `restarting` row also expires (`:173-176`, `:206-209`).
@@ -169,6 +184,8 @@ Git refs: Pantry pins installs to the validated **commit SHA** (it passes it as 
 - Test-install requests use the same machine **without** `restarting` (`test_install.py:208-216`, `:247`).
 
 ### 3.3 Test install
+
+> **Dropped by D5** (future work). Kept here as a record of today's behaviour.
 
 1. Mobile POSTs `{share_code}`. CC checks the node and household (`:85-89`), then normalises the code with `strip().upper()`. Length ≠ 6 → 400 `"Invalid share code"` (`:91-93`).
 2. CC `GET {pantry}/v1/forge/drafts/{code}` with a 10 s timeout (`:96-99`). Errors map as follows:
@@ -252,7 +269,7 @@ Every route:
 ### 3.6 Node tools
 
 1. `GET /mobile/nodes/{id}/tools`: 404 if the node is unknown. A household role check applies only if the node has a household (`node_tools.py:43-47`).
-2. CC publishes `report_tools` on the generic `commands` topic, with `trusted:true` and `reply_request_id`.
+2. CC publishes `report_tools` on the generic `commands` topic, with `trusted:true` and `reply_request_id`. **Changed by D4:** no `trusted` flag; the broker ACL makes the command authentic.
 3. CC polls for `/tmp/jarvis-node-tools/{request_id}.json` every 100 ms for up to 10 s (`:64-102`).
 4. The node refreshes discovery and builds `client_tools` (OpenAI schemas), `available_commands` and `installed_packages:[{name, version, previous_version?, health:"ok"|"failed"}]`. It POSTs them to `/mobile/node-tool-reports/{request_id}`, which writes the file (`:105-116`; node `mqtt_tts_listener.py:454-552`).
 5. On timeout, the response is **200 with three empty lists**, so mobile cannot distinguish "offline" from "nothing installed" (`:57-61`).
@@ -385,7 +402,7 @@ Environment variables:
 - **The test-install poll lacks `require_household_access`** (`test_install.py:230-242`). Any authenticated user who knows the node id and request id can read `package_name` and the error.
 - **Lazy-expiry write races:** concurrent poll and results calls can each commit a different status.
 - **There is no row retention.** Request tables grow forever.
-- **Who may install:** any household **member** can install arbitrary GitHub code on a shared node. CC does not validate `github_repo_url` (any host) or check it against Pantry (`:30-33`). See Q2.
+- **Who may install:** any household **member** can install arbitrary GitHub code on a shared node. CC does not validate `github_repo_url` (any host) or check it against Pantry (`:30-33`). See Q2. **Kept by D5:** this is intended for a self-hosted install.
 - **Stale caches:** the schema cache is not invalidated after install/uninstall/revert, which changes a node's commands and FieldSpecs. Mobile can see a stale form for up to 10 minutes. The docstring admits this (`:66-69`).
 - **Unguarded node responses:** `get_schema` and `list_records` index `response["mode"]` and `["fields"]` directly, and `get_record` indexes `response["record"]`. A node answering `ok:true` without them gives a 500 (`:393-395`, `:489`).
 - **`update` responses are not user_ref-enriched; `create` is enriched only if the schema happens to be cached.**
@@ -427,40 +444,52 @@ Node-side: `test_package_install_handler.py`, `test_command_data_handler.py`, `t
    - *Why it matters:* the user sees "node may be offline", while the node actually installs and restarts. Mobile's revert/uninstall loops also give up at 120 s.
    - *Options:* (a) keep 5 minutes absolute; (b) a 5-minute *pickup* deadline (until verify), then on verify reset `expires_at = now + 15 min`, keeping the +120 s restart extension; (c) never expire once verified.
    - **Recommendation: (b).** It is server-only, so the frozen node is unaffected, and the observable states are unchanged.
+   - **Decided (D39):** (b): 5-minute pickup deadline, then `verify + 15 min`, keeping the +120 s restart extension.
 2. **[behaviour] Who may install code on a node?** Today any household *member* can make a node run arbitrary code from any URL. CC neither validates the host nor checks the package against Pantry.
    - *Options:* (a) keep member; (b) require household admin/owner for install, uninstall, revert and test install, and keep member for command-data and the tools view; (c) (b) plus restrict `github_repo_url` to `https://github.com/`.
    - **Recommendation: (b) + (c),** if mobile users who install are already household admins in practice. Is that true for your household setup?
+   - **Decided (D5):** (a): any household member, any URL. No allowlist, because private self-hosted Pantry instances are planned. A power-user gate is possible later.
 3. **[behaviour] The op-confusion gap in verify.** A broker-level attacker can replay a live install `request_id` on `/package-uninstall` and remove the package (§8).
    - *Options:* (a) accept it, and rely on broker ACLs (the embedded broker can make only `jarvisd` publish to `jarvis/nodes/+/…` except response topics); (b) also add an additive `action: "install"|"uninstall"|"revert"` field to the verify response, and an `action` column, so a post-freeze node can check it; (c) both.
    - **Recommendation: (c).** The ACL fixes it now; the field future-proofs it.
+   - **Decided (D4), partly:** (a): per-node broker credentials and ACLs mean only `jarvisd` publishes to `jarvis/nodes/+/…`. **Open:** whether to also add the additive `action` field and column (b).
 4. **[behaviour] Bind node credentials to the path in Go?**
    - (a) Verify and results reject when the authenticated node ≠ `{node_id}` (403).
    - (b) `node-tool-reports` requires node auth and must match the node the report was requested from.
 
    Nodes always send their own id and key, so neither breaks a live client. **Recommendation: do both.**
+   **Decided (D4, D5):** both. Verify and results require node auth bound to `{node_id}`; `node-tool-reports` requires node auth and must match the requested node.
 5. **[behaviour] What should happen to nodes with no household?**
    - Today, command-data and the node tools view allow *any* JWT user on such a node, package routes deny every JWT user (403), and `list_nodes` hides it.
    - *Options:* (a) keep this mix; (b) fail closed everywhere (JWT → 403, admin key only).
    - **Recommendation: (b).** `admin.py` now always sets `household_id`, so this should only affect legacy rows.
+   - **Decided (D40 default):** (b): fail closed everywhere.
 6. **[behaviour] Should a terminal status be sticky?** Today a late or duplicate results post can turn `completed` into `failed`, or back into `restarting`.
    - *Options:* (a) keep last-write-wins; (b) terminal is sticky: ignore later posts with 200 `{"status":"ok"}`, so the node doesn't retry or log errors; (c) sticky with 409.
    - **Recommendation: (b).** Also make verify idempotent rather than single-use, so a duplicate QoS-1 nudge doesn't produce a spurious failure. Is the double-install risk from duplicate nudges something you've seen?
+   - **Decided (D8, P2):** (b): terminal is sticky, later posts get 200 `{"status":"ok"}`; verify is idempotent.
 7. **[scope] Legacy import and retention for the request tables.**
    - *Options:* (a) import them; (b) don't import (rows are minutes-lived and mobile only polls fresh ids), and add a sweeper that deletes rows older than N days.
    - **Recommendation: (b), with N = 30.**
+   - **Decided (D40 default):** (b): don't import; 30-day sweeper.
 8. **[scope] Where does `jarvisd` get the Pantry URL, and is Forge test install still wanted?** Today it comes from config-service `jarvis-pantry` or `JARVIS_PANTRY_URL`.
    - *Options:* (a) a setting `pantry.base_url` defaulting to the public Fly URL; (b) env-only; (c) cut test install.
    - The verify response hands the node `{pantry}/v1/forge/drafts/{code}`, so the URL must be reachable *from the node*, not just from `jarvisd`.
    - **Recommendation: (a), and keep test install.**
+   - **Decided (D39, D5):** (a) `pantry.base_url`, defaulting to the public Pantry URL, reachable from the node. Test install is **dropped** (D5), future work.
 9. **[behaviour] Node tools timeout semantics.** A node that doesn't answer within 10 s yields 200 with empty lists, so the Store shows "not installed" for everything.
    - *Options:* (a) keep (frozen); (b) 504 on timeout (mobile shows an error, which is a client-visible change).
    - **Recommendation: (a)** for Phase 5, plus a log line. Revisit with a mobile change.
+   - **Decided (D40 default):** (a): keep 200-empty and log it.
 10. **[minor] Invalidate the command-data schema cache in-process when a package install, uninstall or revert completes for that node** (and when the node reconnects to the embedded broker)?
     - **Recommendation: yes.** It is free in a single process, and it doesn't change the wire contract.
+    - **Decided (D40 default):** yes, invalidate in-process.
 11. **[minor] Error mapping.** Should the Go port reproduce the substring mapping byte-for-byte (including "missing" → 404 on create), or map by an error `code`?
     - The node is frozen and sends no code. **Recommendation:** reproduce exactly, and add `error.code` support later as an additive node change.
+    - **Decided (D40 default):** reproduce the substring mapping exactly.
 12. **[minor] Keep sending `github_repo_url`/`git_tag` in the install MQTT payload,** even though nodes ignore them?
     - Older node builds may have read them. **Recommendation:** keep them for wire parity, and drop them once all nodes are verify-based.
+    - **Decided (D40 default):** keep `github_repo_url`/`git_tag` in the payload.
 
 ---
 
@@ -468,7 +497,7 @@ Node-side: `test_package_install_handler.py`, `test_command_data_handler.py`, `t
 
 **Shape.** One `packages` package in the CC module. It contains:
 
-- a `Requests` store over SQLite: two tables, plus an `action` column (Q3) and a `verified_at` column (Q1)
+- a `Requests` store over SQLite: one table, `package_install_requests` (no `test_install_requests`, D5), plus a `verified_at` column (Q1, D39) and, if Q3(b) is taken, an `action` column
 - a pure `transition(row, event, now) (row, httpStatus)` function that implements §3.2. This is the unit-test surface.
 - thin handlers
 
@@ -476,13 +505,13 @@ The `commanddata` package holds the 8 handlers plus a generic `mqttRPC(ctx, node
 
 **Embedded broker.** `request_response` becomes an in-process waiter: a `map[correlationID]chan []byte`, filled by a broker publish hook on `jarvis/nodes/+/command-data/+/response/+`. No subscribe/unsubscribe churn is needed, and the subscribe-before-publish race disappears by construction: register the channel, then publish.
 
-The same hook mechanism lets `node-tool-reports` complete a channel instead of writing to `/tmp`. The HTTP route must stay, because the frozen node POSTs to it.
+The same hook mechanism lets `node-tool-reports` complete a channel instead of writing to `/tmp`. The HTTP route must stay, because the frozen node POSTs to it; it now requires node auth bound to the requested node (D4).
 
-**ACLs (coordinate with doc 05).** With an embedded broker, `jarvisd` decides who may publish to `jarvis/nodes/{id}/package-*`, `…/test-install` and `…/command-data/{op}`. Only `jarvisd` itself should be allowed. A node credential should be allowed to publish only to `jarvis/nodes/{own id}/…/response/#`. This is what makes `requesting_user_id` trustworthy, since the node believes whatever it receives.
+**ACLs (coordinate with doc 05; D4).** With an embedded broker and per-node credentials, `jarvisd` decides who may publish to `jarvis/nodes/{id}/package-*` and `…/command-data/{op}`. Only `jarvisd` itself should be allowed. A node credential should be allowed to publish only to `jarvis/nodes/{own id}/…/response/#`. This is what makes `requesting_user_id` trustworthy, since the node believes whatever it receives.
 
-**Auth in-process.** `verify_provisioning_auth` (admin key or JWT) and the household role check become local calls. There are no more `/auth/me` or `/internal/users/batch` round-trips: user display names come straight from the auth module's tables, and the 300 s cache can go.
+**Auth in-process.** `verify_provisioning_auth` (admin key or JWT) and the household role check become local calls. Any household member may install, uninstall and revert from any URL (D5); the household check covers all of the caller's memberships. Nodes with no household fail closed (D40). Verify/results bind the node credential to `{node_id}` (D4). There are no more `/auth/me` or `/internal/users/batch` round-trips: user display names come straight from the auth module's tables, and the 300 s cache can go.
 
-**Expiry.** Compute the effective status on read: `pending|restarting && now > expires_at ⇒ expired`. Persist it only on the same events Python persists on, or always; it isn't observable either way. Use UTC timestamps. Serialise `created_at` without a zone suffix, to match the naive FastAPI output (put this in a contract-test fixture).
+**Expiry.** 5-minute pickup deadline, then `verify + 15 min`, plus +120 s per `restarting` (D39). Terminal status is sticky (D8). A 30-day sweeper trigger deletes old rows (D40, D27). Compute the effective status on read: `pending|restarting && now > expires_at ⇒ expired`. Persist it only on the same events Python persists on, or always; it isn't observable either way. Use UTC timestamps. Serialise `created_at` without a zone suffix, to match the naive FastAPI output (put this in a contract-test fixture).
 
 **JSON fidelity.**
 
@@ -491,12 +520,13 @@ The same hook mechanism lets `node-tool-reports` complete a channel instead of w
 - Keep the `{name}_display` injection placement (invariant 10).
 - 422 bodies: the revert "name required" error has a string `detail`, and missing-field errors must match FastAPI's validation shape (shared contract-test helper, doc 00).
 
-**Pantry.** One outbound `GET` with a 10 s timeout. The base URL comes from the setting chosen in Q8. Map errors exactly as §3.3 (404 → 404, other → 502, transport → 502).
+**Pantry.** With test install dropped (D5), this subsystem makes no outbound Pantry call. The `pantry.base_url` setting (D39) still exists, defaulting to the public Pantry URL, and must be reachable from the node.
 
 **Risks.**
 
 - The frozen node's behaviour is half the contract: restart-and-deferred-flush, the double restart on auto-rollback, and the verify-route sharing. Black-box test against a real node (install-e2e Phase 3) before cutover.
-- Q1 and Q6 change edge-case behaviour, so the tests should pin them down explicitly.
+- Q1 (D39) and Q6 (D8) change edge-case behaviour, so the tests should pin them down explicitly.
+- Mobile's `TestInstallScreen` will hit removed routes (D5); that screen needs hiding or a clear error.
 
 **Simplifications.**
 

@@ -6,6 +6,26 @@ Cross-references: doc 08 (the `schedules` table and the schedule sweep, which re
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+- **D13:** errands ship in v1: plan → card → Run, sync and phone steps, Revise/Cancel and scheduled re-plan. Prod has 0 plans/runs/schedules. "When should a request become an errand" is a post-port product/UX follow-up.
+- **D14:** pause-and-replan is kept (checkpoint → LLM continuation → envelope check). **Fix (D8):** an approval wait gets a deadline, so it can't park forever (§8.7).
+- **D15:** in-envelope replan steps keep running silently. Out-of-envelope changes still pause for a delta card (with the D14 deadline). `widens_envelope` is ported byte-for-byte.
+- **D45:** strict fail-fast is kept (any failed step ends the errand; `goal_achieved` None = failure; a resolver-skipped step = success).
+- **D27:** one scheduler engine. Errand schedules and workflow wake-ups are trigger kinds on the embedded durable queue; errands build on the queue with a `StepHandler` interface (Q2 option c on b). **D26:** a missed schedule fires once, late.
+- **D9:** errand autonomy is **kept, not cut**: `autorun_gate`, `errands.autonomous_enabled` and the `$leave_by`/`$from_step` resolver are ported, uncalled, with no new callers yet. Other dead surface (`POST /errands`, the edit-goal callback, unreachable `wait_for`) falls under the P3 cut policy.
+- **D16:** the phone gateway is absorbed into jarvisd, so a call's terminal transition resumes the errand by an in-process call, not via `/internal/phone/*`.
+- **D4:** node steps lose `trusted:true`; commands are authentic via per-node broker credentials and ACLs.
+- **D18:** `attention.timezone` goes away; execution uses the household timezone (§3.4, §7.14).
+- **D21:** with an unknown or ambiguous speaker, per-user tools (named: "a user's errands") refuse; household-level things still work; each command decides. Approvals are **not** tightened: any household member may tap Run (Q9).
+- **D20:** account deletion hard-deletes the user's drafts (`errand_plans`) and `schedules`; **completed** runs (`workflows`) are kept with `user_id` → NULL.
+- **D22 / D40 (Q11):** planner, refine, replan and compose prompts are byte-exact; compose moves to the background slot.
+- **D31:** plan, delta and completion cards go through the in-process `notify` service (inbox row in the same transaction, push on the queue).
+- **D40 defaults:** Q3 restart mid-step fails with a card; Q6 draft TTL 24 h, approval deadline, phone deadline from confirm, cancel or timeout auto-declines the call card; Q12 add `errands.enabled` (default on), import active `schedules` only.
+- **D8:** the bugs in §8 (cancel/restart, park-forever, event-loop blocking, phone deadline clock) are fixed and logged as intended differences.
+
+---
+
 ## 1. Purpose
 
 **What the user sees.** You say *"Run an errand: check the weather and remind me to buy milk tomorrow"* or *"Call the pharmacy about my refill, then call the doctor's office"*. The node replies "On it, I'll send a plan to your phone". A minute later a **plan card** reaches your phone, listing numbered steps with **Run**, **Revise** (a free-text "tell me what to change" box) and **Cancel**. Tap Run and CC carries out the steps in the background. Nothing is ever spoken back on the node. When it finishes, one **completion card** arrives ("✅ Errand done: …", "⚠️ … finished with issues", and so on).
@@ -48,7 +68,7 @@ The workflow engine was pulled out of the errand runner as a "general durable en
 |---|---|---|---|
 | `POST /api/v0/errands` | Node `X-API-Key` (`api/errands.py:41-46`) | **None. Cut.** | Plans a goal into a draft and card, and returns `{errand_plan_id, state, summary, steps}` (`api/errands.py:87-92`). Supports a `node_id` override inside the household (`:63-78`). Confirmed: nothing in node-setup, mobile, web or the packages posts here. The mounting comment at `main.py:826-827` is stale: it still says "transient routine". |
 | `POST /api/v0/callbacks` | User JWT | Mobile | The **real** errand control surface. Each `(command="errand", callback=…)` pair (`services/errand_service.py:69-78`) is dispatched by `api/callbacks.py:232-280` → `_run_server_callback_job` (`:289-356`) as a FastAPI background task. Doc 13 owns this route. |
-| `/internal/phone/*` session transitions | App-to-app (phone-gateway) | phone-gateway | `api/phone_sessions.py:34-51` schedules `resume_errand_after_call` on a terminal call (`:279` fail paths, `:345` done). Doc 11. |
+| `/internal/phone/*` session transitions | App-to-app (phone-gateway) | phone-gateway | `api/phone_sessions.py:34-51` schedules `resume_errand_after_call` on a terminal call (`:279` fail paths, `:345` done). Doc 11. **Changed by D16:** in Go the gateway is in-process, so this becomes a direct call from the phone module. |
 | `GET/DELETE /mobile/schedules…` | JWT | Mobile Schedules screen | Doc 08 (`api/mobile_schedules.py`). |
 
 ### Server tools (voice)
@@ -203,6 +223,8 @@ plan card ── Revise ─▶ refine (LLM) → rev+1, card updated IN PLACE
 **`run_workflow` → `_drive_run` → `execute_errand`** (`services/workflow_engine.py:808-846, 765-805`; `services/errand_executor.py:193-335`):
 
 - **Timezone.** It reads `attention.timezone` for the household, falling back to UTC (`errand_executor.py:224-230`). The date context is built lazily, only if a node step has `resolved_datetimes` (`:232-244`; `workflow_engine.py:178-209`).
+
+  > **Changed by D18:** `attention.timezone` is removed; Go uses the household timezone.
 - **Synthetic conversation.** It seeds a `conversation_cache` entry `errand-<uuid>` with `node_context{household_id,node_id,speaker_user_id,timezone}` so server tools resolve their context as they would on a real turn. It is removed in `finally` (`errand_executor.py:246-259, 318-319`).
 - **The loop, from `start_index` (`:280-317`):**
   1. Skip a step with an empty command, appending no result.
@@ -289,6 +311,8 @@ The safety-net sweep:
    - **In envelope, or nothing to add:** `_auto_continue_replan` splices and resumes with no tap (`:315-330`).
    - **Any failure:** auto-continue, so the run never parks forever (`:435-440`).
 
+> **Kept by D14/D15:** this whole flow is ported, including silent in-envelope auto-continue. **Changed by D14:** the approval wait gets a deadline; on expiry the run fails with a card.
+
 ### 3.7 Revise and cancel
 
 - **Refine** (`:1173-1231`):
@@ -310,6 +334,8 @@ The safety-net sweep:
   - A lost draft means the voice user was promised a card that never comes.
   - A lost replan task leaves the run `waiting/approval` **forever**. Nothing sweeps approval waits (acknowledged at `:318-319`).
 - **Drafts never expire.** `expires_at` is never set, and nothing writes `expired` to `errand_plans`.
+
+> **Changed by D40 (Q3, Q6) and D27:** `running` at boot still fails with a card. Drafting and replan resolve become durable queue jobs, so they survive a restart. Drafts expire after 24 h; approval waits get a deadline (D14).
 
 ---
 
@@ -340,8 +366,10 @@ The safety-net sweep:
 | `phone_calls` gate (`phone_calls_enabled`, doc 11) | off (fails closed) | `make_phone_call` appears in the errand menu only if this is on (`errand_planner.py:134-140`) |
 | `web_search.enabled` | `False` | Adds `deep_research` and `quick_search` to the menu |
 | `memory.enabled` / `memory.recall_enabled` | `True` / `True` | Add `remember`, `forget` and `recall`, and only with an identified speaker |
-| `attention.timezone` | `"UTC"` | Household zone for date-key resolution in node steps (`errand_executor.py:228`) |
-| `errands.autonomous_enabled` | `False` | **Defined but read by nothing** (`services/settings_definitions.py:365-380`); see §8 |
+| `attention.timezone` | `"UTC"` | Household zone for date-key resolution in node steps (`errand_executor.py:228`). **Removed by D18:** use the household timezone |
+| `errands.autonomous_enabled` | `False` | **Defined but read by nothing** (`services/settings_definitions.py:365-380`); see §8. **Kept by D9** (ported, uncalled) |
+
+> **Added by D40 (Q12):** `errands.enabled`, default on.
 
 No setting enables or disables errands, and the following are all constants: the 20 s cadence, the 60-min phone deadline, the 30 s node timeout, the 10 s menu fetch, and the planner's 6000 `max_tokens`.
 
@@ -400,7 +428,7 @@ None of these use the prompt providers; they are raw user-message prompts.
 11. **Errands are headless.** They never speak on the node. The voice tool's spoken ack is the only audio.
 12. **Detached runs need a synthetic conversation context** so that server tools find household and speaker. In Go, pass the context explicitly instead (§11).
 13. **`replan` splices at `at_step+1`, not at the end**, and the continuation is persisted before the decision so every path splices the same steps.
-14. **Timezones:** `schedule_errand` resolves times in the **node's** zone from the conversation (`schedule_errand_tool.py:238-242`). Execution uses the **household** `attention.timezone`, and these can differ.
+14. **Timezones:** `schedule_errand` resolves times in the **node's** zone from the conversation (`schedule_errand_tool.py:238-242`). Execution uses the **household** `attention.timezone`, and these can differ. **Changed by D18:** execution uses the household timezone (`attention.timezone` is removed); the node zone at scheduling time stays.
 
 ---
 
@@ -416,6 +444,8 @@ None of these use the prompt providers; they are raw user-message prompts.
    - `is_autorun_eligible` is called only by tests.
    - The setting is read by nothing, yet it is still exposed in settings definitions.
    - `resolve_step_args` still runs on every step (`errand_executor.py:294-301`), but no producer emits `$` directives. The planner prompt never mentions them.
+
+   > **Kept by D9:** the user says this "should actually not be orphaned". Port all three, uncalled for now.
 2. **`wait_for` is unreachable.** It is not in `CONTROL_COMMANDS` (`errand_planner.py:218`) and not in any menu, so the planner can't emit it, and `_plan_from_data` would drop it anyway. The timer handler, the `wake_at` column and the timer sweep exist only to "prove the engine is general" (`errand_service.py:856-858`).
 3. **The `replan_errand_plan` callback** (edit the goal and re-plan) is registered, but no card renders its button.
 4. **`POST /errands` is unused**, and its docstring and `main.py:826-827` describe the removed "transient routine" path. Likewise the planner module docstring still says "executor (execute_routine_on_node)" (`errand_planner.py:3-8`), and `ErrandPlan.routine_slug` is vestigial.
@@ -470,6 +500,8 @@ None of these use the prompt providers; they are raw user-message prompts.
 
 ***My recommendation:* (b).** Phone errands are the headline capability and the core is well specified by tests. Pause-and-replan is the most complex and least proven part (see Q4). A quick check of prod `errand_plans` and `workflows` counts would settle this. Can you tell me whether you actually use errands day to day?
 
+**Decided (D13, D14):** errands ship in v1 with the (b) core, and pause-and-replan is also kept (D14), so effectively (a) minus the dead-code cuts.
+
 **2. `[change]` Keep the generic "workflow engine" abstraction, or build errands directly on the embedded job queue?**
 
 *Why it matters:* The engine's seams (handler registry, store factory, consumer registry, progress emitter) exist for a second consumer that never came. In Go the durable queue already provides leases, retries, delays (timers) and dedup.
@@ -482,6 +514,8 @@ None of these use the prompt providers; they are raw user-message prompts.
 
 ***My recommendation:* (c) on top of (b).**
 
+**Decided (D27):** (c) on top of (b): errands build on the embedded queue with a `StepHandler` interface; schedules and wake-ups are trigger kinds of the one scheduler engine.
+
 **3. `[behaviour]` What should happen to an errand that was mid-step when the process restarted?**
 
 *Why it matters:* Today every `running` run is failed at boot with an "interrupted" card. With a durable queue, Go could resume from the cursor. But a node or server step may already have executed (a device toggled, a memory saved), so re-running it is not idempotent.
@@ -493,6 +527,8 @@ None of these use the prompt providers; they are raw user-message prompts.
 - **(c)** Mark the in-flight step "unknown" and stop, with a card offering "Run the rest?".
 
 ***My recommendation:* (a) for v1.** It's honest and simple, and restarts are rare. (c) is a nice follow-up.
+
+**Decided (D40 default):** (a): a run that was mid-step at restart fails with a card.
 
 **4. `[scope]` Keep mid-run pause-and-replan (`request_replan` → LLM continuation → `widens_envelope` → delta card or silent auto-continue)?**
 
@@ -510,6 +546,8 @@ None of these use the prompt providers; they are raw user-message prompts.
 
 ***My recommendation:* (b).** Silent continuation of unseen steps contradicts "nothing runs without a tap". Do you want in-envelope auto-continue?
 
+**Decided (D14, D15):** (a) port as-is, *including* silent in-envelope auto-continue (D15), plus a deadline on approval waits (D14, D8 fix). Out-of-envelope changes still need a tap.
+
 **5. `[scope]` Cut the orphaned autonomy code: `autorun_gate.py`, `errands.autonomous_enabled` and the `$leave_by`/`$from_step` step-value resolver?**
 
 *Why it matters:* These were superseded by the deterministic leave-by card (`ea66619`) and have no producer or caller. But they encode a trust boundary you may want back: a signal autorunning a low-blast plan.
@@ -521,6 +559,8 @@ None of these use the prompt providers; they are raw user-message prompts.
 - **(c)** Cut the code but record the design in the doc 10 backlog.
 
 ***My recommendation:* (c).** Is signal-triggered autorun still on your roadmap?
+
+**Decided (D9):** (b): `autorun_gate`, `errands.autonomous_enabled` and the `$leave_by`/`$from_step` resolver are ported as dormant code, with no new callers yet.
 
 **6. `[behaviour]` Timeouts and expiry.**
 
@@ -538,6 +578,8 @@ None of these use the prompt providers; they are raw user-message prompts.
 
 ***My recommendation:* (i) 24 h; (ii) 24 h; (iii) yes, measured from confirm, still 60 min.** When an errand is cancelled or times out, should its unconfirmed call card also be auto-declined (as Cancel already does)?
 
+**Decided (D40 default):** (i) draft TTL 24 h; (ii) approval-wait deadline (D14; 24 h recommended); (iii) phone deadline measured from confirm, 60 min; cancel or timeout auto-declines the unconfirmed call card.
+
 **7. `[behaviour]` Recurring scheduled errands re-plan and re-ask on every fire. Is that really the experience you want for e.g. "every hour" or "every weekday at 8"?**
 
 *Why it matters:* Each fire costs a background-slot LLM call (up to 6000 tokens) and sends a push that needs a tap. Unapproved drafts pile up forever (Q6). This overlaps doc 08.
@@ -549,6 +591,8 @@ None of these use the prompt providers; they are raw user-message prompts.
 - **(c)** Add a per-schedule "run without asking" option, limited to an allowlist (this is Q5's gate).
 
 ***My recommendation:* (a) for v1, plus the draft TTL**, so stale cards expire. Revisit (c) together with Q5.
+
+**Decided (D13, D40):** (a): scheduled re-plan is part of the v1 core (D13), with the 24 h draft TTL (D40, Q6). Missed fires run once, late (D26).
 
 **8. `[scope]` Confirm the cuts.**
 
@@ -562,6 +606,8 @@ The cuts are:
 *Why it matters:* Each item is surface area to port and test with zero users. `wait_for` is nearly free on a queue with delayed jobs, but it also needs planner support to be reachable.
 
 ***My recommendation:* cut all of them.** Keep "timer" only as a queue capability, not as an errand step.
+
+**Decided (D9 / P3 policy):** cut `POST /errands` (Appendix A), the `replan_errand_plan` callback and the unreachable `wait_for` step and timer sweep (P3: no caller or unreachable). The vestigial columns go except `expires_at`, which the draft TTL (D40, Q6) reuses. D9's keep list (autonomy code) does not include any of these.
 
 **9. `[behaviour]` Who may see and approve an errand when the speaker wasn't identified?**
 
@@ -578,6 +624,8 @@ The cuts are:
 - **(c)** Always target the household, but restrict Run to the household owner or admins.
 
 ***My recommendation:* (a), plus (b) for any plan containing `is_risky` steps.**
+
+**Decided (D21):** (a): approvals are not tightened, so any household member may tap Run. With an unknown or ambiguous speaker, per-user tools refuse and each command decides its own restriction; memory tools stay out of the menu without a speaker.
 
 **10. `[behaviour]` Keep the strict fail-fast semantics exactly?**
 
@@ -597,6 +645,8 @@ The current rules:
 
 ***My recommendation:* (a) for parity;** (b) is a small, safe improvement if you want it.
 
+**Decided (D45):** (a): keep strict fail-fast exactly.
+
 **11. `[minor]` Prompt handling.**
 
 *The question:* Should the planner, refine, replan and compose prompts be ported **byte-exact**, as the kept providers are, and should compose move to the background slot?
@@ -604,6 +654,8 @@ The current rules:
 *Why it matters:* These prompts were tuned against Qwen3.5-9B live failures ("joke was told", empty replan).
 
 ***My recommendation:* byte-exact prompts, and compose on background** with the per-type concurrency cap. It isn't latency-critical, and today it competes with voice.
+
+**Decided (D22, D40):** byte-exact prompts; compose runs on the background slot.
 
 **12. `[minor]` Feature flag and legacy import.**
 
@@ -613,6 +665,8 @@ The current rules:
 - **Import:** `import-legacy` lists routines but not `schedules`, `errand_plans` or `workflows`.
 
 ***My recommendation:* add `errands.enabled` (default on, to match today). Import active `schedules` only. Don't import drafts or runs.**
+
+**Decided (D13, D40):** add `errands.enabled` (default on); import active `schedules` only (prod has none today).
 
 ---
 
@@ -627,7 +681,8 @@ cc/errands/
   service.go     // CreatePlan, card builders (plan/delta/completion/couldn't-plan), callback handlers
   runner.go      // Drive(ctx, wfID) — the execute_errand loop; fail-fast; aggregate+compose
   handlers.go    // type StepHandler interface { Match(cmd) bool; Run(...) (Outcome, *Suspend, error);
-                 //   Interpret(signal) Outcome } — phone, (replan), server, node
+                 //   Interpret(signal) Outcome } — phone, replan, server, node
+  autorun.go     // autorun gate + $leave_by/$from_step resolver — ported dormant, uncalled (D9)
   envelope.go    // WidensEnvelope — pure, port the truth-table test verbatim
   store.go       // sqlc: cc_errand_plans, cc_workflows (claim = UPDATE … WHERE state='waiting')
 ```
@@ -645,7 +700,13 @@ cc/errands/
 - **No synthetic conversation-cache entry.** In-process server tools should take an explicit `ToolContext{HouseholdID, NodeID, SpeakerUserID, TZ}`. Doc 02 should make that the server-tool signature anyway.
 - **Node steps** use the embedded MQTT request/response (doc 05) instead of temp-file polling. Keep the 30 s step timeout and the `{success:false,error:"the node didn't respond in time"}` shape. That error text reaches the completion card and the compose prompt.
 - **Phone resume** is a direct function call from the phone module's terminal transition: `errands.OnCallTerminal(session)`. Keep the snapshot of `outcome_json` so that `goal_achieved` and `summary/facts` are available.
-- **Restart.** On boot, fail `running` workflows as today (Q3), unless the queue lease model makes "in-flight step unknown" precise.
+- **Restart.** On boot, fail `running` workflows as today, with a card (D40, Q3).
+- **Deadlines (D14, D40 Q6).** Draft TTL 24 h (sets `expires_at`/`expired` and updates the card in place); approval waits get a deadline and fail with a card; the phone deadline runs from confirm. Cancel or timeout auto-declines an unconfirmed call card. These are delayed queue jobs / trigger kinds (D27), not a poll.
+- **Gate.** `errands.enabled` (default on) gates the three errand tools (D40, Q12).
+- **Phone (D16).** The phone module is in-process; there is no `/internal/phone/*` hop between the call and the errand resume.
+- **Node steps (D4).** No `trusted:true`; per-node broker credentials and ACLs make commands authentic.
+- **Account deletion (D20).** Delete the user's drafts and schedules; de-identify completed `workflows` (`user_id` → NULL).
+- **Speaker (D21).** Pass the speaker identity (or its absence) in `ToolContext`; per-user tools decide whether to refuse.
 
 ### Risks
 
@@ -655,15 +716,15 @@ cc/errands/
   - no `editor_schema`
 - **Timestamps.** `wake_at` and `next_fire_at` are naive UTC. Store them as UTC in SQLite and compare in UTC.
 - **`steps` JSON passes `args` through untyped**, as `map[string]any`. Node commands receive whatever the LLM produced, after `resolved_datetimes` resolution. Don't impose a schema the Python never enforced.
-- **The two timezone sources** (node zone at scheduling, household `attention.timezone` at execution) must be preserved, or deliberately unified.
+- **The two timezone sources:** node zone at scheduling stays; execution uses the household timezone, since `attention.timezone` is removed (D18).
 
-### Simplifications if the recommendations are taken
+### Simplifications (as decided)
 
 Cut:
 
-- the autorun gate, step-value resolver and `wait_for`/timer sweep (Q5, Q8)
+- `wait_for` and the timer sweep (Q8, P3)
 - `POST /errands` and the `replan_errand_plan` callback
-- the vestigial columns
-- the store, consumer and emitter indirection (Q2)
+- the vestigial columns, except `expires_at` (reused for the draft TTL)
+- the store, consumer and emitter indirection (Q2, D27)
 
-Together that removes about a third of the Python surface without changing any live behaviour.
+**Not cut (D9):** the autorun gate, `errands.autonomous_enabled` and the step-value resolver are ported dormant.

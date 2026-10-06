@@ -5,6 +5,22 @@ Files: `api/mobile_chat.py`, `services/inbox_notification_service.py`, `api/node
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+- **D32:** mobile chat **keeps the fake word-by-word replay exactly**, including the 20 ms pause per word (Q1 option a). Real token streaming is deferred to the post-port prompt-provider redesign, because the text path's parse step needs the complete output.
+- **D31:** inbox and push become an in-process `notify` service (Q2 option b): producers write the inbox row in the same SQLite transaction as their own state; push goes on the durable queue with retries. Notifications' HTTP routes for mobile and other callers stay unchanged.
+- **D19:** `memory.enabled` and the new household-scoped `memory.extraction_enabled` (default ON) join the household-settings allowlist (14 keys). With memory off, no chat transcript is logged or extracted.
+- **D4:** `trusted:true` is removed from `tool_call` / `action` (per-node broker credentials and ACLs instead). `/device-control-results` gets node auth, and the request id must belong to that node.
+- **D7:** the signal-automation confirm card carries an opaque id, not the action (doc 10); `/callbacks` server-plane behaviour is otherwise unchanged.
+- **D20:** account deletion deletes the user's inbox items, personal settings, sessions and queued jobs naming them; household settings stay.
+- **D11 / D12:** `llm.interface` is renamed `llm.prompt_provider`, and an unknown provider name is a hard error, so the `Qwen25MediumUntrained` default (§8) cannot carry over.
+- **M3 (D47):** the four settings scopes and cascade order stay; env fallback is dropped except for secrets/URLs that become jarvisd config.
+- **D18:** the attention broker interposition on the three `/node/*` routes is ported; flag-off stays byte-identical.
+- **D40 defaults:** Q3 honour the caller's push category and priority (verify first that mobile doesn't filter on `confirmation`); Q4 callback-job sweeper and fail fast with a card; Q5 keep the vanishing intermediate message (D32); Q6 keep the allowlist (+ D19 keys); Q7 liveness check before the warmup MQTT fetch; Q8 `status` event and fail fast on an offline node; Q9 static server-callback map; Q12 one SSE event per flush.
+- **M10, M11 (D47):** `/nodes/{id}/actions` passes `input_required` through; demoted `send-link` adds `metadata:{url, type:"open_url"}`.
+
+---
+
 ## 1. Purpose
 
 Four related surfaces that turn CC into something a phone (and the browser) can talk to, and that let node commands reach a phone:
@@ -96,8 +112,12 @@ Generator flow (`_chat_stream`, `:276-507`):
    - **`complete` / `server_tool_complete`:**
      - Strip a leading `[Tool data: …]\n\n` prefix (`:340-344`).
      - Emit **fake streaming**: one `delta` per space-separated word, with a 20 ms sleep between words when there are more than 3 words (`:345-351`).
+
+       > **Kept by D32:** port this exactly; real streaming is post-port work.
      - Emit `done` with `stop_reason:"complete"` (always "complete", even for server_tool_complete), plus `actions` / `action_context` / `action_preview` if collected, plus `reasoning` if requested (`:353-367`).
      - End the trace, and fire-and-forget the transcript log for memory extraction (`:373-380`, `_log_mobile_transcript` `:60-87`, doc 04). This is the **only branch that logs a transcript.**
+
+       > **Changed by D19:** transcript logging and extraction honour `memory.enabled` and the household `memory.extraction_enabled`.
    - **`validation_required`:** emit `done` with `stop_reason:"validation_required"`, `validation` (the `validation_request` dict) and `full_text` (= assistant_message or `validation.question`) (`:383-396`). There is no delta, and the next user message continues the same conversation.
    - **`tool_calls`:**
      1. Emit the LLM's intermediate `assistant_message`, if any, as one `delta` with a trailing space (`:404-406`).
@@ -153,7 +173,7 @@ Mobile calls it on screen open and node change, and again after a fresh tool fet
 **Headless tool execution**: `dispatch_node_command` (`services/node_command_service.py:145-196`):
 
 1. Publish `tool_call` with `details = {command_name, arguments, tool_call_id, reply_request_id: rid, trusted: True, user_id?, voice_command?, request_id: rid}`. `voice_command` is the typed message, which the node puts into `RequestInformation` (the spotify playlist detection uses it).
-2. Register `rid` in the in-memory `_pending_commands` with a 5-minute TTL (`:53-59`). `trusted` makes the node skip `/commands/{id}/verify`.
+2. Register `rid` in the in-memory `_pending_commands` with a 5-minute TTL (`:53-59`). `trusted` makes the node skip `/commands/{id}/verify`. **Changed by D4:** no `trusted` flag; per-node broker ACLs make the command authentic, and `/device-control-results` requires node auth bound to the request.
 3. Poll for `<tmp>/jarvis-device-control/{rid}.json` every 100 ms, for up to 10 s (`:118-142`).
 4. The node (`mqtt_tts_listener.py:830-927`):
    - looks the command up, refreshing discovery once on a miss;
@@ -174,7 +194,7 @@ Mobile calls it on screen open and node change, and again after a fresh tool fet
 - **Synchronously** poll the same result dir for 10 s, sleeping the threadpool thread (`time.sleep(0.1)`).
 - Returns `{status:"completed"|"timeout", request_id, success, error}`.
 
-The node runs `cmd.handle_action(action_name, context)` and posts `{success, error, input_required?}` (`mqtt_tts_listener.py:192-298`). The response model drops `input_required` (`ActionResponse` `:69-73`).
+The node runs `cmd.handle_action(action_name, context)` and posts `{success, error, input_required?}` (`mqtt_tts_listener.py:192-298`). The response model drops `input_required` (`ActionResponse` `:69-73`). **Changed by M10:** Go passes it through as an optional field.
 
 Context differs by entry point:
 
@@ -184,6 +204,8 @@ Context differs by entry point:
 ### 3.4 Inbox: item schema and producers
 
 The inbox lives in **jarvis-notifications**. CC never stores inbox rows; it calls notifications over app-to-app HTTP (`_get_notifications_url` → discovery or `JARVIS_NOTIFICATIONS_URL`, default `http://localhost:7712`, `inbox_notification_service.py:169-183`).
+
+> **Changed by D31:** in jarvisd this is the in-process `notify` service; the inbox row shape and push `data` stay the same.
 
 **Inbox item (notifications `app/models.py:56-69`, `app/api/inbox.py:19-50`):**
 
@@ -259,7 +281,7 @@ The SDK backend maps this to tags (`ok` / `no_cc_url` / `http_error` / …).
 
 - **Withheld:** `{sent:false, withheld_by}`.
 - **Demoted to inbox:** `post_inbox_item_sync` with `category=request.category`, `metadata={node_id}` and no push.
-- **Legacy or approved push:** `push_confirmation_to_inbox(command_name="reminder", actions=[])`. This creates an inbox item with **category `confirmation`** (not the request's category) and pushes with `priority:"high"`. **`request.priority` is ignored.**
+- **Legacy or approved push:** `push_confirmation_to_inbox(command_name="reminder", actions=[])`. This creates an inbox item with **category `confirmation`** (not the request's category) and pushes with `priority:"high"`. **`request.priority` is ignored.** **Changed by D40 (Q3):** honour `request.category` and `request.priority`, after verifying mobile doesn't filter on `confirmation`.
 - Response `{sent, inbox_item_id, withheld_by}`.
 
 **`POST /node/send-link`** (`:485-582`). Request: `{user_id: int (required), url, title?, body?}`.
@@ -267,7 +289,7 @@ The SDK backend maps this to tags (`ok` / `no_cc_url` / `http_error` / …).
 - A non-http(s) URL gives `{sent:false}`.
 - Defaults: title "Link from Jarvis", body "Tap to open".
 - Gate with `dedupe_key=url`.
-- Demoted: an inbox item with `category "link"`, body `"{body}\n\n[{title}]({url})"` and **no `metadata.url`**.
+- Demoted: an inbox item with `category "link"`, body `"{body}\n\n[{title}]({url})"` and **no `metadata.url`**. **Changed by M11:** add `metadata:{url, type:"open_url"}`.
 - Otherwise `send_link_push_sync`.
 - Response `{sent, withheld_by}`.
 
@@ -334,10 +356,12 @@ mobile (stack/popover) ─GET /callbacks/{id}/status (poll)──▶ {id,status,
 | `household.location` | string | "" (`:842`) | yes (`:513`) |
 | `persona.household_prompt` | string | `DEFAULT_PERSONA` (`:223`) | yes (`:532`) |
 
+> **Changed by D19:** add `memory.enabled` (bool) and `memory.extraction_enabled` (bool, household-scoped, default true) so a household admin can turn learning off.
+
 **GET** (`:99-124`):
 
 - Any member may read.
-- Each key goes through `settings.get(key, household_id)`. That uses the settings-client cascade: household row, then system row, then env fallback, then definition default, with a 60 s per-process cache (`jarvis-settings-client/.../service.py:8-10,127-155`; framework in doc 00).
+- Each key goes through `settings.get(key, household_id)`. That uses the settings-client cascade: household row, then system row, then env fallback, then definition default, with a 60 s per-process cache (`jarvis-settings-client/.../service.py:8-10,127-155`; framework in doc 00). **Changed by M3:** the cascade order stays, but env fallback is dropped except for secrets/URLs.
 - Values are coerced; an uncoercible value becomes `null` rather than failing the whole screen.
 - Response `{household_id, settings: {key: value}}`. **All 12 keys are returned**, although mobile's TS type declares only 3.
 
@@ -360,7 +384,7 @@ mobile (stack/popover) ─GET /callbacks/{id}/status (poll)──▶ {id,status,
 
 | Store | What | Lifecycle |
 |---|---|---|
-| `callback_jobs` (`models.py:747-803`) | `id` uuid PK = MQTT request_id; `node_id` FK→nodes ON DELETE CASCADE, **nullable** (server plane, migration `b2c3cbsrv001`); `household_id` (idx); `user_id`; `command_name`, `callback_name` (≤128); `data_json`; `idempotency_key` (idx, migration `pa01`); `navigation_type` (default `new_notification`); `status` pending/completed/failed/expired; `error_message`; `result_context_data_json`; `created_at`, `expires_at` (+5 m), `completed_at` | `expired` is set **only lazily on read** (`callbacks.py:381-385,541-543`). There is no deletion, so rows accumulate forever. |
+| `callback_jobs` (`models.py:747-803`; **D40 Q4:** sweeper added) | `id` uuid PK = MQTT request_id; `node_id` FK→nodes ON DELETE CASCADE, **nullable** (server plane, migration `b2c3cbsrv001`); `household_id` (idx); `user_id`; `command_name`, `callback_name` (≤128); `data_json`; `idempotency_key` (idx, migration `pa01`); `navigation_type` (default `new_notification`); `status` pending/completed/failed/expired; `error_message`; `result_context_data_json`; `created_at`, `expires_at` (+5 m), `completed_at` | `expired` is set **only lazily on read** (`callbacks.py:381-385,541-543`). There is no deletion, so rows accumulate forever. |
 | `NodeCommandService._pending_commands` | in-memory `{request_id: {node_id, command, created_at, expires_at(+5m)}}` | Pruned on each publish. Every `tool_call`, `action` and `callback` adds an entry even though `trusted` / callback flows never consume it. |
 | `<tmp>/jarvis-device-control/{rid}.json` | the node's result for `tool_call` / `action` | Written by the unauthenticated `/device-control-results`, deleted on read or timeout. It exists only because uvicorn may run several worker processes. |
 | `conversation_cache` (in-memory) | messages and tools per `conversation_id` | 10-minute TTL (doc 02). Chat warmness is defined by `get_tools()`. |
@@ -484,6 +508,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (b) stream real tokens as `delta`, same schema;
      - (c) (b), plus send `delta` for the first LLM call's text too.
    - **My recommendation: (b).** The schema is unchanged and clients can't tell, except that it gets faster.
+   - **Decided (D32):** (a): keep fake word-streaming exactly, 20 ms per word. Real token streaming is deferred to the post-port prompt-provider redesign (the text path needs the full output to parse tool calls).
 
 2. **[scope] Collapse inbox + push into CC's own module now that notifications is in the same binary?**
    - *Why it matters:* every CC producer does two HTTP calls with app-to-app auth, and failures are swallowed. In-process, an inbox write can share a SQLite transaction with the producer's own row (callback result, errand plan, attention outcome).
@@ -491,6 +516,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (a) keep an HTTP-shaped client interface;
      - (b) a Go `notify.Inbox` service called directly, with inbox insert and job/outcome update in one transaction, and push enqueued on the durable queue (retries for free; PLAN §2 notes notifications' retry worker never starts).
    - **My recommendation: (b).** Keep notifications' HTTP routes for mobile and other services unchanged.
+   - **Decided (D31):** (b): in-process `notify` service, same-transaction inbox writes, push on the durable queue; notifications' HTTP routes unchanged.
 
 3. **[behaviour] `/node/push-notification` category and priority.**
    - *Why it matters:* the legacy path stores every node push as category `confirmation` / `command_name:"reminder"` and forces `priority:high`, while the broker-demoted path uses the caller's category. That is two categories for the same request. Community packages (sports, news) send their own `category`.
@@ -498,6 +524,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (a) preserve byte-for-byte;
      - (b) honour `request.category` and `request.priority` everywhere (the inbox list colours change for reminders; mobile already falls back generically).
    - **My recommendation: (b)**, with `category` defaulting to `alert` as the model already says. Confirm that nothing on mobile filters on `confirmation` for these.
+   - **Decided (D40 default):** (b): honour the caller's category and priority. Verify first that mobile doesn't filter on `confirmation`.
 
 4. **[behaviour] Callback job retention and expiry.**
    - *Why it matters:* `callback_jobs` rows are never deleted, and `expired` is only set lazily. A failed MQTT publish leaves a job pending forever.
@@ -506,6 +533,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (b) a sweeper on the job queue that marks expired at `expires_at` and deletes after N days;
      - (c) (b), plus fail the job immediately when the node is offline or the publish fails.
    - **My recommendation: (c)**, with 7-day retention. Do you want an inbox "couldn't reach <node>" card on failure for `new_notification` taps, or silence?
+   - **Decided (D40 default):** (c): callback job sweeper, and fail fast with a card when the publish fails or the node is offline.
 
 5. **[behaviour] Should the intermediate message ("Let me check the weather…") survive in the final bubble?**
    - *Why it matters:* it is streamed as a `delta`, then wiped by `done.full_text` (`useChat.ts:381`). Users see it flash and vanish.
@@ -513,6 +541,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (a) keep as-is (a transient "working" message);
      - (b) prepend it to `full_text`.
    - **My recommendation: (a).** It is presumably intentional, but confirm.
+   - **Decided (D40 default, D32):** (a): keep as-is.
 
 6. **[scope] The nine allowlisted household keys with no mobile UI** (`phone_calls.*`, `proposals.enabled`, `web_scraping.allow_external`).
    - *Why it matters:* they are writable by any household admin via raw API, but no screen exposes them. Are they deliberately API-only, planned UI, or meant to come off the allowlist? For example, should `phone_calls.max_concurrent_calls` really be household-tunable?
@@ -521,6 +550,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (b) shrink the allowlist to what the UI writes plus `proposals.enabled` / `phone_calls.enabled`;
      - (c) keep them all and add UI later.
    - **My recommendation: (a)** for the port, which keeps the contract. Flag `phone_calls.*` caps for a later review.
+   - **Decided (D40 default, D19):** (a): keep all 12, plus `memory.enabled` and `memory.extraction_enabled` (D19).
 
 7. **[behaviour] The warmup MQTT tool fetch blocks for 10 s on an offline node.**
    - *Why it matters:* the mobile chat to an offline node hangs before falling back to the client-sent tools (`mobile_chat.py:121-140`).
@@ -529,6 +559,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (b) check node liveness (doc 05) first and skip MQTT when offline;
      - (c) a shorter timeout (2-3 s).
    - **My recommendation: (b).** Liveness is in-process in Go.
+   - **Decided (D40 default):** (b): liveness check before the warmup MQTT fetch.
 
 8. **[behaviour] What should mobile chat do when the selected node is offline mid-conversation?**
    - *Why it matters:* each node tool call silently waits 10 s, then the LLM narrates "the node didn't respond in time".
@@ -537,6 +568,7 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (b) emit a `status` "Node is offline" and fail fast;
      - (c) run node-less: drop client tools and keep server tools only.
    - **My recommendation: (b).** It uses the same events and needs no new client code.
+   - **Decided (D40 default):** (b): `status` event and fail fast.
 
 9. **[scope] Server-plane callbacks: should community packages be able to register server-side handlers?**
    - *Why it matters:* the registry is CC-internal today, keyed by `command_name` strings such as `jarvis.proposable_action`. In Go it becomes a compile-time map. If plugins later run server-side, this is the extension point.
@@ -544,17 +576,21 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
      - (a) internal only, static map;
      - (b) design for plugin registration.
    - **My recommendation: (a)** for the port.
+   - **Decided (D40 default):** (a): internal only, static map.
 
 10. **[minor] `/nodes/{id}/actions` drops `input_required`** from the node's result.
     - *Why it matters:* the node sends it (`mqtt_tts_listener.py:268-272`), but `ActionResponse` strips it. Was there a planned "needs more input" flow on mobile?
     - **My recommendation:** pass it through as an additive optional field. It is harmless to old clients.
+    - **Decided (M10/D47):** pass `input_required` through as an optional field.
 
 11. **[minor] Demoted `send-link` loses the tap-to-open URL.**
     - **My recommendation:** add `metadata:{url, type:"open_url"}` on the demoted path, the same as the push path.
+    - **Decided (M11/D47):** add `metadata:{url, type:"open_url"}` on the demoted path.
 
 12. **[minor] SSE robustness.**
     - *Why it matters:* clients drop events split across chunks.
     - **My recommendation:** keep the server writing one-event-per-flush in Go. Separately, fix the line-buffering bug in mobile `parseSSEChunk` and web `lib/api.ts` when the clients are next touched. Which client release do you expect to coincide with the cutover?
+    - **Decided (D40 default):** one SSE event per flush. (The client line-buffering fix is not decided; it happens when those clients are next touched.)
 
 ---
 
@@ -568,27 +604,30 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
   - it writes the 200 header before the first event;
   - pre-stream auth and 404 errors use the normal FastAPI-shaped JSON error.
 - Encode the event structs with `omitempty` **only** where Python omits keys. Python always emits `conversation_id`, `full_text`, `stop_reason` and `trace_summary` on `done`, while `actions` / `action_context` / `action_preview` / `reasoning` / `validation` appear only conditionally.
+- **Keep the fake word replay** (D32): one `delta` per word with a 20 ms sleep when there are more than 3 words. Don't stream real tokens yet.
 - Use `context.Context` from the request for client-abort cancellation. Python keeps running the LLM after the client disconnects; Go should cancel the node waits but **let the conversation history commit**.
 
-**Node dispatch.** Replace the tmp-file polling with an in-process `pending map[requestID]chan Result` that is fed by the `/device-control-results` handler. That handler stays as an HTTP route because nodes POST to it. With one process, the multi-worker reason for files disappears. The same applies to `/nodes/{id}/actions`: a select on the channel with a 10 s timeout, not a sleeping thread.
+**Node dispatch.** Replace the tmp-file polling with an in-process `pending map[requestID]chan Result` that is fed by the `/device-control-results` handler. That handler stays as an HTTP route because nodes POST to it, and now requires node auth with the request id bound to that node (D4). Drop `trusted:true` from `tool_call` / `action` (D4). Check node liveness before the warmup fetch, and emit a `status` event and fail fast when the node is offline (D40 Q7, Q8). `/nodes/{id}/actions` passes `input_required` through (M10). With one process, the multi-worker reason for files disappears. The same applies to `/nodes/{id}/actions`: a select on the channel with a 10 s timeout, not a sleeping thread.
 
 **Callbacks.**
 
 - `callback_jobs` becomes `cc_callback_jobs` (TEXT JSON columns kept).
 - Server-plane execution becomes a job on the embedded queue (type `cc.callback.server`, concurrency-capped), not a goroutine, so it survives restarts. That gives the anti-vanishing rule for free via the queue's terminal-failure hook.
 - `proposable_action`'s DB polling becomes waiting on a per-job notification channel that `recordCallbackResult` signals.
-- Add the sweeper (Q4).
+- Add the sweeper and fail-fast-with-a-card on publish failure (D40 Q4), as a trigger kind on the one scheduler engine (D27).
 - Keep 404-vs-410 semantics and `voice_command "cb:<name>"` / `conversation_id "callback:<id>"`.
 
-**Inbox in the same binary.** This is the main simplification.
+**Inbox in the same binary (D31, decided).** This is the main simplification.
 
 - `notify.CreateInboxItem(ctx, tx, item)` and `notify.Push(ctx, target, msg)` are called directly. This removes app-to-app auth, discovery and `JARVIS_NOTIFICATIONS_URL`.
 - Producers can write their own row and the inbox row in one transaction (callback result + fan-out; errand plan + card; attention `mark_outcome` + inbox id).
 - Push goes on the durable queue with retries, and `/node/*` responses still report `sent` from the inbox write.
 - `source_service` stays `"jarvis-command-center"` for every CC-origin row, because mobile may display it.
 - Mobile keeps reading `/api/v0/inbox*` on port 7712 unchanged.
+- `/node/push-notification` honours the caller's category and priority (D40 Q3); demoted `send-link` adds `metadata.url` (M11).
+- Account deletion (D20) deletes the user's inbox rows (`user_id` = them) in the shared transaction; household-wide rows stay.
 
-**Household settings.** A `map[string]settingType` allowlist in Go plus the shared settings module (doc 00). In-process `verify_household_role` is a direct call into the auth module. Keep the order: allowlist (404), then role (403), then coerce (400), then persona length (400). Port `PERSONA_PRESETS` and `DEFAULT_PERSONA` texts **byte-exact** (they are prompt bytes and also returned to the UI).
+**Household settings.** A `map[string]settingType` allowlist in Go plus the shared settings module (doc 00). In-process `verify_household_role` is a direct call into the auth module. Keep the order: allowlist (404), then role (403), then coerce (400), then persona length (400). The allowlist gains `memory.enabled` and `memory.extraction_enabled` (D19). Port `PERSONA_PRESETS` and `DEFAULT_PERSONA` texts **byte-exact** (they are prompt bytes and also returned to the UI).
 
 **Cuts here:**
 
@@ -600,4 +639,4 @@ Env: `JARVIS_NOTIFICATIONS_URL` (fallback only). The timezone default `"America/
 
 1. SSE flush/proxy behaviour behind Next's rewrite (jarvis-web). Verify that Go `Flush` reaches the browser through `next start`.
 2. Pydantic 422 shapes for `MobileChatRequest` (`min_length`/`max_length` on `message`) and `CallbackCreateBody` (`min_length=1` on `target_node_id`/`household_id`, so an empty string is a 422, not the server plane).
-3. The `/node/*` routes are a public plugin API. Lock their request/response JSON with contract tests before touching the Q3/Q11 behaviour changes.
+3. The `/node/*` routes are a public plugin API. Lock their request/response JSON with contract tests before applying the Q3/Q11 behaviour changes (D40, M11); regenerate those goldens as intended differences (D8).

@@ -2,6 +2,29 @@
 
 Source root: `/home/alex/jarvis/jarvis-command-center`. All `file:line` below are relative to it. The CC `CLAUDE.md` is stale; where it disagrees with code, this doc follows the code and lists the difference in §8.
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. §1–§9 still describe today's Python behaviour; changes are flagged inline as "Changed by D#".
+
+- **D4 / D5 / D6 (security).** Close holes for unauthenticated actors and other households; keep wire shapes. `/api/v0/chat` is **dropped** (D5 supersedes D4's "add node auth"): node `chat_text()` moves to `/api/v0/node/llm/chat`, a node-setup change. `/lightweight/chat` is cut. The MQTT result posts get node auth, and the request id must belong to that node. Config `pending`/`ack` get node auth bound to the path node (D6). Household checks look at **all** of the caller's memberships, not just the JWT's active household (D5). `/internal/phone/*` stays open to any registered app for now. `trusted:true` is removed; MQTT trust comes from per-node broker credentials and ACLs.
+- **D8.** Known bugs are fixed by default and logged as intended differences, unless a frozen client depends on the buggy behaviour.
+- **D9.** Cut: `/tool-router/train` and fastText, `/admin/nodes/{id}/commands`, the never-written attention tables, `ambient_grounding.py`, the legacy `IModelInterface`/`ModelFactory`/`JarvisToolModel`. Errand autonomy (`errands.autonomous_enabled`) is kept.
+- **D10.** Factory reset uses the tracked `NodeTask` flow only. The reset token is persisted in SQLite with the task; `core/pending_resets.py` (in-memory, 300 s) goes.
+- **D11 (settings hygiene).** Defined-but-unread keys are dropped. The three read-but-undefined keys are hard-coded, not defined: the embedding sweep is always on every 60 s, and trace retention is 7 days. `llm.interface` is renamed **`llm.prompt_provider`**, set at install time by the admin wizard/installer; import maps the old key. **An unknown provider name is a hard error**, not a fallback.
+- **D12.** The admin model catalog offers only models with a kept provider (jarvis-admin change, alongside the rename).
+- **D17.** The situation matcher is cut: its callback route, debounce task and `proposals.proactive_enabled`. `proposals.enabled` stays.
+- **D18.** Attention: journal card and TTL cleanup kept; quiet hours and the journal cron use the **household timezone** (`attention.timezone` goes); TTL cleanup runs at startup, not after a 24 h sleep.
+- **D19.** `memory.extraction_enabled` becomes household-scoped, **default ON** (opt-out), alongside `memory.enabled`; both go on the mobile allowlist. CC CLAUDE.md's "opt-in" claim (§8.11) is wrong and is fixed.
+- **D20.** Account deletion is one in-process transaction across modules: hard-delete user-owned data, de-identify activity history, leave household-owned data.
+- **D3 / D25 / D33 / D38.** Settings that go: `voice.stickiness_*` (and the `b8x9y0z1a2b3` seed), `routines.scheduler_enabled`, the short/long speaker thresholds, `voice.emotion_enabled` / `voice.emotion_min_confidence`.
+- **D27 / D26.** One scheduler engine: a `next_fire_at` trigger table on the embedded durable queue. The loops in §2.4 become trigger kinds with a persisted `last_run_at`; missed triggers fire once, late.
+- **D29.** Cameras are deferred: no HLS packager thread in v1.
+- **D31.** Inbox and push become an in-process `notify` service.
+- **D40 (B defaults, via 05).** Bare-key node auth is dropped once the node headers are verified (05.Q10); settings requests are pruned after 24 h (05.Q11).
+- **D47 / M4.** `adapter_settings`, `skip_warmup_inference` and `JARVIS_TEST_MODE` are dropped; old nodes still sending them are fine because the decoder ignores unknown fields.
+- **M2.** The `llm_trace.log` file is dropped; the metrics JSONL is kept only behind a debug setting with a size cap.
+- **M3.** The four settings scopes and the cascade order are kept exactly; env fallback is dropped except for secrets and URLs that become `jarvisd` config.
+
 ## 1. Purpose
 
 This doc covers everything in CC that is not one feature:
@@ -85,6 +108,8 @@ Background concurrency outside `main.py`:
 | HLS packager | a thread per camera stream (`app/api/hls_packager.py:185`) | 07 |
 | trace persistence | a daemon thread **per request** that writes `request_traces` (`app/core/utils/latency_logger.py:272-309`) | 00 |
 
+> **Changed by D27 / D11 / D17 / D18 / D19 / D25:** all of the above become trigger kinds on one scheduler with a persisted `last_run_at`. L4 and L7 have hard-coded intervals (no settings). L3's gate is per household and defaults on. L11, the situation-matcher debounce and the HLS packager (D29) are gone. L13 loses its gate: a routine with an enabled `schedule` is the opt-in. L15 uses the household timezone, and L16 runs at startup.
+
 ### 2.5 Other startup side effects (`app/main.py:130-646`, in order)
 
 1. `enforce_secret_security` (`:137`). Startup aborts only when `JARVIS_ENV=production` (`app/deps.py:68-83`).
@@ -136,6 +161,8 @@ Routes with **no auth at all**, found by an AST scan:
 - GET `/releases/latest` (`app/api/node_updates.py:101`).
 - GET `/oauth/callback`, where the state parameter is the auth (07).
 
+> **Changed by D4 / D5 / D6:** `/api/v0/chat` is dropped and `/lightweight/chat` is cut. The four result posts and config `pending`/`ack` require node auth, with the node bound to the request id or the path. `/admin/cache/*` is cut.
+
 ### 3.2 Settings framework
 
 - **Definitions.** `SETTINGS_DEFINITIONS` defines 89 keys (`app/services/settings_definitions.py:13-861`). Each `SettingDefinition` has `key, category, value_type ∈ {string,int,float,bool,json}, default, description, env_fallback, requires_reload, is_secret, options` (`jarvis-settings-client/.../types.py:10-37`).
@@ -184,6 +211,8 @@ Routes with **no auth at all**, found by an AST scan:
 | `adapter.*` (13) | **CUT** | |
 | *(used, undefined)* `memory.embedding_enabled`, `memory.embedding_interval_seconds`, `tracing.retention_days` | 04 / 05 | `get` on an unknown key returns None, so the hardcoded `or` default always wins |
 
+> **Changed by D11:** the defined-but-unread keys are dropped, the three used-but-undefined keys are hard-coded (sweep always on, 60 s; traces 7 days), and `llm.interface` becomes `llm.prompt_provider` with no default fallback (unknown name = hard error). D3, D17, D18, D25 and D38 remove further keys (see §0).
+
 ### 3.3 Service discovery (`app/core/service_config.py`)
 
 - `init(db_engine)` calls `jarvis_config_client.init(config_url, refresh_interval_seconds=300, db_engine)` (`:66-102`). The client persists its cache in a **`service_configs` table in CC's own DB**, created by the client and not by alembic (`jarvis-config-client/jarvis_config_client/client.py:104`).
@@ -203,6 +232,8 @@ Routes with **no auth at all**, found by an AST scan:
   - `JARVIS_LLM_METRICS_LOG_PATH`, JSONL of per-iteration tokens and duration, plus `answered_from_context`.
 
   None of them is rotated.
+
+  > **Changed by M2:** the trace file is dropped; the metrics JSONL survives only behind a debug setting with a size cap.
 - **`latency_logger`** is a global keyed by **`conversation_id`** (`app/core/utils/latency_logger.py:197-218`).
   - `RequestTiming` holds `checkpoint`, `measure` (a context manager), `record_span`, `to_spans` and `to_trace_summary`.
   - `end_request` (`:220-270`) does three things:
@@ -360,7 +391,7 @@ Places where **kept** code touches adapters:
 |---|---|---|---|
 | 1 | `app/main.py:459-480` | L11 loop | drop |
 | 2 | `app/main.py:1652-1836, 1881-1934` | `/adapters/train` (uses `provider.build_training_*`, `adapter_example_expansion`, `adapter.expansion_*` settings) and `/adapters/jobs/callback`, which writes `nodes.adapter_hash` | drop |
-| 3 | `app/main.py:891-975` | `node_context["adapter_hash"]=None`, the dead `if False` AdapterRegistry block, and the `JARVIS_TEST_MODE` `adapter_settings` override | drop. **But keep accepting the `adapter_settings` field** on `ConversationStartRequest` (`app/request_models/conversation_start_request.py:34`) and ignore it, if install-e2e or the eval harness still send it (Q7). |
+| 3 | `app/main.py:891-975` | `node_context["adapter_hash"]=None`, the dead `if False` AdapterRegistry block, and the `JARVIS_TEST_MODE` `adapter_settings` override | drop. **Changed by D47 (M4):** `adapter_settings` is dropped from the schema too; senders don't break because the decoder ignores unknown fields on this route. |
 | 4 | `app/admin.py:61-67,121,670-760` | `NodeResponse.adapter_hash`; `/admin/adapter/{hh}`, `/history`, `/rollback` | drop the routes. Keep `adapter_hash: null` in NodeResponse only if mobile reads it (Q7). |
 | 5 | `app/models.py:28,592-664` | `nodes.adapter_hash` and the four adapter tables | do not create them in SQLite; skip them on legacy import |
 | 6 | `app/core/conversation_handler.py:263-279,547-559,1356-1400,1719-1722`; `app/core/tool_execution_engine.py:244-250,734-751`; `app/core/models/jarvis_tool_model.py:208-226`; `app/core/model_service.py:258-281`; `app/core/llm_proxy_client.py:64-217` | `adapter_settings` threaded from `node_context.adapter_hash` into the llm-proxy chat payload | drop the parameter end to end; llm-proxy's adapter path is cut too |
@@ -433,26 +464,32 @@ Golden and contract candidates:
    - *Why it matters:* `nodes.api_key` holds every node key in plaintext, and the no-colon path skips auth and `is_active` (§8.2). In Go, auth and CC share a process and a DB, so node validation becomes a function call against auth's hashed key table.
    - *Options:* (a) port it as is; (b) drop the legacy path, and stop importing `nodes.api_key`; (c) keep it but check `is_active`.
    - **My recommendation:** (b). Every current node sends `node_id:node_key`. I can confirm that with a log grep before the cut.
+   - **Decided (D40 default, via 05.Q10):** (b). Drop the bare-key path and don't import `nodes.api_key`; verify the jarvis-dev and prod node headers first.
 2. **[behaviour] How should CC verify user JWTs during the HS256 → RS256 window?**
    - *Why it matters:* CC is a third local verifier the RS256 plan doesn't list. It verifies HS256 only with `JARVIS_AUTH_SECRET_KEY` (§8.1).
    - *Options:* (a) CC calls the Go auth module's verifier in-process: both algorithms, keys chosen by algorithm family, with the forged-HS256-with-public-key test; (b) keep a CC-local HS256 verifier.
    - **My recommendation:** (a). There is one verifier in the binary, and `JARVIS_AUTH_SECRET_KEY` disappears.
+   - **Open:** not covered by any decision or by the B triage. The recommendation (a) stands as the working assumption.
 3. **[behaviour] What should the default and fallback `llm.interface` be, and what happens when an imported DB names a dropped provider?**
    - *Why it matters:* today there are three different defaults, and none of them is kept: `Qwen25MediumUntrained`, `JarvisAdapterModel` and `JarvisToolModel` (§8.10). A legacy import may carry e.g. `Gemma3…`.
    - *Options:* (a) default `Qwen3_8B_Compressed`, and map unknown names to it with a WARNING plus an admin-visible notice; (b) fail warmup with a 500, as today.
    - **My recommendation:** (a). Use `Qwen3_14B_Compressed` instead if the hardware probe says there is enough VRAM.
+   - **Decided (D11, D12):** neither option. The key is renamed `llm.prompt_provider` and set at install time by the jarvis-admin wizard / installer (prod = `Qwen3_14B_Compressed`). An unknown or dropped provider name is a **hard error**, not a fallback; import maps the old key name. The admin catalog only offers models with a kept provider.
 4. **[scope] Where should the date-key vocabulary live, given that it is served from llm-proxy's adapter routes?**
    - *Why it matters:* cutting LoRA in llm-proxy silently removes `DT_KEYS` from the kept Qwen3 prompts (§7c #7), which changes model behaviour.
    - *Options:* (a) a static list embedded in the CC prompt module; (b) keep a non-adapter `/v1/date-keys` in the LLM module.
    - **My recommendation:** (a). It is static vocabulary, shared with `date_resolution.py`.
+   - **Decided (D40 default, via 03.Q9):** (a). One shared Go constant used by the prompt, the matcher and the resolver; the LLM fallback is dropped.
 5. **[behaviour] Should passive memory extraction be on or off by default?**
    - *Why it matters:* the code default is ON (`memory.extraction_enabled=True`, gate "on unless false"). CC `CLAUDE.md` calls it opt-in and privacy-sensitive. A fresh `jarvisd` install inherits whichever default we pick.
    - *Options:* (a) on, matching the code; (b) off and opt-in, matching the doc.
    - **My recommendation:** ask, because this is a product call. I lean towards (b) for a new install, and preserving whatever row an imported DB has.
+   - **Decided (D19):** (a), on by default (opt-out), but **per household**: honour `memory.enabled` plus a household-scoped `memory.extraction_enabled`. Both keys go on the mobile household-settings allowlist.
 6. **[behaviour] Should the unauthenticated routes stay open?** These are `/api/v0/chat`, the MQTT result POSTs, config ack, and `/releases/latest`.
    - *Why it matters:* `/api/v0/chat` is a live caller (node `chat_text()`), but it is an open LLM on the LAN. The result POSTs let anyone spoof a device-state or tool report if they guess a request_id.
    - *Options:* (a) port them open, for contract fidelity; (b) require node `X-API-Key`, since node-setup already sends it on most calls; (c) open, but rate-limited.
    - **My recommendation:** (b) for `/api/v0/chat` and the result POSTs, but only after checking that node-setup sends `X-API-Key` on those calls. Otherwise it's a node change, which is out of scope. Keep `/releases/latest` open.
+   - **Decided (D4, D5, D6):** `/api/v0/chat` is **dropped**; node `chat_text()` moves to the node-authed `/api/v0/node/llm/chat` (node-setup change). The result POSTs and config `pending`/`ack` get node auth bound to the request/path node. `/releases/latest` was not decided and stays open per the recommendation.
 7. **[scope] Which adapter-shaped fields must survive as inert compatibility fields?**
    - *Why it matters:* the hard constraint is "JSON shapes unchanged".
    - *Options:*
@@ -460,26 +497,32 @@ Golden and contract candidates:
      - (b) accept and ignore `adapter_settings` on `/conversation/start`;
      - (c) existing `adapter_proposal` inbox items in notifications: leave them, or delete them on import.
    - **My recommendation:** keep (a) and (b) as ignored or null fields. For (c), delete them on import, because their action buttons hit cut routes.
+   - **Decided (D47/M4):** (b) `adapter_settings` is dropped from the schema; senders still work because unknown fields are ignored. **Decided (D9, via 05.Q9):** (a) `adapter_hash` is dropped from `NodeResponse`, after checking mobile ignores it. **Open:** (c) what to do with existing `adapter_proposal` inbox items on import.
 8. **[behaviour] Should Go keep the 60s node-auth cache semantics?**
    - *Why it matters:* the cache is a pure cost-saver for an HTTP round trip that no longer exists in-process. Today revocation lags 60s, and an auth outage turns into 401s (§8.3).
    - *Options:* (a) no cache, and validate against SQLite every call (well under 1ms); (b) cache positives only.
    - **My recommendation:** (a).
+   - **Open (partly):** negative caching of auth outages goes away with in-process auth (D40 via 05.Q10). Whether to keep a positive cache at all was not decided; (a) stands as the working assumption.
 9. **[behaviour] Should the background loops move to the durable job queue with persisted last-run times?**
    - *Why it matters:* today the daily cleanups never run on a box that restarts daily, and the journal card can post twice after a restart.
    - *Options:* (a) a scheduler built on the jobs table, with a `last_run_at` per loop and catch-up on boot; (b) port as in-memory tickers.
    - **My recommendation:** (a). The interval and gate semantics stay identical.
+   - **Decided (D27, D26):** (a). One scheduler engine on the durable queue with a persisted `last_run_at`; a missed trigger fires once, late.
 10. **[minor] Should the three used-but-undefined keys become real settings?** They are `memory.embedding_enabled`, `memory.embedding_interval_seconds` and `tracing.retention_days`.
     - *Why it matters:* without definitions they are invisible in admin.
     - *Options:* (a) define them with today's effective defaults; (b) hardcode them.
     - **My recommendation:** (a). And delete the eight dead keys (`tool_classifier.*`, `prompt.include_*`, `transcription.cleanup_enabled`, `conversation.cache_ttl_seconds`, `admin.api_key`, `smart_home.use_home_assistant`), unless admin or mobile reads them through `/settings/*`. I'll check that.
+    - **Decided (D11):** (b). The three keys stay undefined and are hard-coded to today's behaviour (sweep always on every 60 s; trace retention 7 days). Defined-but-unread keys are dropped.
 11. **[minor] Should the `llm_{usage,trace,metrics}.log` and `latency.log` files be kept?**
     - *Why it matters:* the trace log stores full prompts, including memories, forever.
     - *Options:* (a) drop the files and rely on `request_traces` plus the log module; (b) keep the metrics JSONL only, behind a debug setting with a cap.
     - **My recommendation:** (b).
+    - **Decided (M2/D47):** (b). Drop the trace file; keep the metrics JSONL only behind a debug setting with a size cap.
 12. **[minor] Should the four settings scopes and the env fallback be kept?**
     - *Why it matters:* user-scoped and node-scoped rows appear to be rare. Env fallback is a container-era idea, and in a single binary it would mean `jarvisd` reading old env names.
     - *Options:* (a) port all of it exactly; (b) keep the four scopes and drop env fallback, except for secrets and URLs that become `jarvisd` config.
     - **My recommendation:** (b), with the cascade order preserved exactly.
+    - **Decided (M3/D47):** (b), cascade order preserved exactly.
 
 ## 11. Go port notes
 
@@ -491,22 +534,29 @@ Golden and contract candidates:
   - `MQTT` (the embedded broker client);
   - `Clock`.
 - **Auth middleware.** One function per mode, returning a typed principal. The error `detail` strings must match the table in §3.1 (clients and tests read them). Use `subtle.ConstantTimeCompare` everywhere.
+  - No bare-key node path and no negative caching of auth failures (D40 via 05.Q10).
+  - Node-auth the result posts and config `pending`/`ack`, binding the node to the request id or path node (D4, D6). Don't port `/api/v0/chat` or `/lightweight/chat` (D5).
+  - Household checks accept any of the caller's memberships, not only the JWT's active household (D5).
 - **Validation errors.** A custom binder must produce the 400 `{error,message,details}` shape. `details` uses FastAPI's `loc -> loc: msg` format, so collect the Pydantic `msg` strings in the contract suite.
-- **Loops.** One `scheduler` with a registry of `{name, interval func(settings), gate func(settings), run func(ctx)}`. Each run gets a per-run `recover()`, persists `last_run_at`, and respects the global background-concurrency cap (one LLM job at a time).
+- **Loops.** Per D27, these are trigger kinds on the one scheduler engine (a `next_fire_at` trigger table on the embedded durable queue, with claims), each `{name, interval func(settings), gate func(settings), run func(ctx)}`. Each run gets a per-run `recover()`, persists `last_run_at`, and respects the global background-concurrency cap (one LLM job at a time). Missed triggers fire once, late (D26).
+  - L3's gate is per household, default on (D19). L4 and L7 use hard-coded values (D11). L13 has no gate (D25). L15 uses the household timezone (D18). L11 and the situation-matcher debounce are not ported (D9, D17).
   - L3 and L5 enqueue jobs whose completion handlers replace the HTTP callbacks.
   - L4 calls the embedding engine.
   - L17 is gone: discovery is in-process.
   - L18 becomes the embedded broker.
-- **Settings router.** Mount `/settings/*` on the **7703 listener** with combined auth: superuser JWT or app creds. Keep the 404 dict shape, the secret masking and `from_db`. The `llm.interface` options come from the Go provider registry.
+- **Settings router.** Mount `/settings/*` on the **7703 listener** with combined auth: superuser JWT or app creds. Keep the 404 dict shape, the secret masking and `from_db`. The `llm.prompt_provider` options (renamed from `llm.interface`, D11) come from the Go provider registry.
 - **Simplifications enabled by the single binary:**
   - no callback tokens;
   - no `service_configs` table;
   - no per-request engines;
   - no `/tmp` rendezvous files (use in-process channels keyed by request_id; doc 05/07);
   - no remote-logging handler (log straight into the logs module);
-  - trace writes go onto a buffered channel instead of a thread per request.
+  - trace writes go onto a buffered channel instead of a thread per request;
+  - no `llm_trace.log`; the metrics JSONL only behind a debug setting with a size cap (M2);
+  - factory-reset tokens live in SQLite with the `NodeTask`, not in memory (D10).
 - **Risks:**
   - the JWT dual-algorithm verifier;
   - preserving 401-vs-403-vs-502-vs-503 for each auth mode;
   - settings cascade parity on an imported DB with duplicate NULL-scope rows: pick the lowest `id` to match `.first()` with no ORDER BY, and note that Postgres's order is not guaranteed.
-- **Legacy import.** Skip the adapter tables, `service_configs`, `prompt_provider_install_requests` and `nodes.api_key` (Q1). Remap `llm.interface` (Q3). Drop `adapter.*` settings rows.
+- **Legacy import.** Skip the adapter tables, the never-written attention tables, `service_configs`, `prompt_provider_install_requests` and `nodes.api_key` (Q1, D40). Rename `llm.interface` → `llm.prompt_provider`; an unknown provider name is a hard error, not a remap (D11). Drop `adapter.*` settings rows and every key §0 removes (`voice.stickiness_*`, `voice.emotion_*`, `routines.scheduler_enabled`, `attention.timezone`, `proposals.proactive_enabled`, the defined-but-unread keys).
+- **Env.** Per M3, read no legacy env-fallback names except secrets and URLs that become `jarvisd` config. `JARVIS_TEST_MODE` is gone (D47).

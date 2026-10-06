@@ -8,6 +8,20 @@ All paths are relative to `jarvis-command-center/app/` unless stated otherwise.
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. §1–§9 still describe today's Python behaviour; changes are flagged inline as "Changed by D#".
+
+- **D9 (cuts, with F1).** The fastText router is cut: the classifier, `/tool-router/train`, the router decision, the **`Router hint:` message**, the **must-call guard**, the fast stream path and tool-stream path B (the PLAN's pure-Go fastText port is dropped too). Also cut: the legacy `IModelInterface`/`ModelFactory`/`JarvisToolModel`, the malformed-JSON extractor and `json_schema.py`, the prune helpers, `/lightweight/chat`, the disabled `ControlDeviceTool`. The force-tools guard is **not** cut.
+- **D4 / D5.** `/api/v0/chat` is **dropped** (D5 supersedes D4's "add node auth"): node `chat_text()` moves to the node-authed `/api/v0/node/llm/chat`, a node-setup change. `/mobile/node-tool-reports/{id}` and `/device-control-results/{id}` need node auth, and the replying node must be the one the request was addressed to. `trusted:true` leaves the `tool_call` payload; MQTT trust comes from per-node broker credentials and ACLs.
+- **D8.** Known bugs are fixed by default and logged as intended differences: native transcript validity (Q6) and the `_refinable` aliasing (Q7).
+- **D11 / D12.** `llm.interface` becomes `llm.prompt_provider`, set at install time; an unknown provider name is a hard error. The dead `tool_classifier.*` keys are dropped. The admin catalog offers only models with a kept provider.
+- **D21 / M14.** The server passes the speaker identity (or its absence) to **every** command and server tool, and each decides what to refuse. Per-user tools (memory, phone, a user's errands) refuse an unknown or ambiguous speaker; when recognition is off the refusal says "speaker recognition is off".
+- **D22.** Both prompt paths ship. **The native path gets the text path's per-household server-tool gates** (Q3). Nag and hint strings are byte-exact (Q8).
+- **D23.** The text-path continue stays a single formatting call; native continue re-enters the loop (Q4).
+- **D40 (B defaults).** Q9: natural iteration-limit fallback, error code kept in traces. Q10: date extraction once per turn. Q12: moot, the date-key LLM fallback is dropped (03.Q9).
+- **M2.** The `llm_trace.log` file is dropped; metrics JSONL only behind a debug setting with a size cap.
+
 ## 1. Purpose
 
 When a user speaks to a node (or types in mobile chat), CC asks the LLM what to do. The model either:
@@ -44,13 +58,13 @@ Users of the loop:
 
 | Method | Path | Auth | Live caller (PLAN App. A) | Disposition |
 |---|---|---|---|---|
-| POST | `/api/v0/chat` | **none** (`chat.py:16`) | node `chat_text()`/`chat()` (`jarvis-node-setup/clients/jarvis_command_center_client.py:472,492`): jokes, what's-up, routines | Keep |
+| POST | `/api/v0/chat` | **none** (`chat.py:16`) | node `chat_text()`/`chat()` (`jarvis-node-setup/clients/jarvis_command_center_client.py:472,492`): jokes, what's-up, routines | **Dropped (D5).** The node moves to `/api/v0/node/llm/chat`. |
 | POST | `/api/v0/lightweight/chat` | none (`chat.py:28`) | none | Cut |
-| POST | `/api/v0/tool-router/train` | node `X-API-Key` (`main.py:1602`) | `jarvis-node-setup/scripts/train_tool_router.py` | See Q1/Q2 |
+| POST | `/api/v0/tool-router/train` | node `X-API-Key` (`main.py:1602`) | `jarvis-node-setup/scripts/train_tool_router.py` | **Cut (D9)** |
 | POST | `/api/v0/test/command` | app-to-app (`api/test_commands.py:167`) | jarvis-mcp only | Cut |
 | GET | `/api/v0/mobile/nodes/{node_id}/tools` | user JWT + household `member` (`api/node_tools.py:28-47`) | mobile node-tools view | Keep (also see doc 12) |
-| POST | `/api/v0/mobile/node-tool-reports/{request_id}` | **none** (`api/node_tools.py:105`) | node's reply to the `report_tools` MQTT verb | Keep |
-| POST | `/api/v0/device-control-results/{request_id}` | **none** (`api/smart_home.py:1200`) | node's reply to the `tool_call` MQTT verb (owned by doc 07; listed because headless tool calls depend on it) | Keep |
+| POST | `/api/v0/mobile/node-tool-reports/{request_id}` | **none** (`api/node_tools.py:105`) | node's reply to the `report_tools` MQTT verb | Keep, with node auth bound to the request (D4) |
+| POST | `/api/v0/device-control-results/{request_id}` | **none** (`api/smart_home.py:1200`) | node's reply to the `tool_call` MQTT verb (owned by doc 07; listed because headless tool calls depend on it) | Keep, with node auth bound to the request (D4) |
 
 `/voice/command`, `/voice/command/stream`, `/voice/command/continue[/stream]` and `/api/v0/mobile/chat` are documented in docs 01 and 13. This doc specifies the loop they call.
 
@@ -129,6 +143,8 @@ All three Qwen providers inherit `force_tool_calls = True` from `Qwen25_7B_Compr
   - `deep_research` and `quick_search`, only if `web_search.enabled`.
   - `remember` and `forget`, only with a speaker **and** memory enabled; `recall` additionally needs recall enabled.
 - **Native path:** **every** registered tool, ungated (`get_tools_for_model` returns all, `tool_registry.py:273-275`).
+
+> **Changed by D22:** in Go both paths get the text path's per-household gates: web search off means no `quick_search`/`deep_research`, and the memory tools need a speaker plus the setting.
 
 Server and client tools are concatenated without dedupe (`warmup_service.py:133-148`).
 
@@ -220,6 +236,8 @@ execute(conversation_id, messages, tools, max_iterations=10, user_utterance, age
 Every return path attaches "reasoning" (joined think blocks) when any were captured.
 ```
 
+> **Changed by D9:** the must-call guard (step i) and step 1 are not ported; the router decision no longer exists. **Changed by D40 (Q9):** step 5 speaks a natural fallback instead of "Maximum tool execution iterations reached.", keeping `error:"max_iterations_exceeded"` for traces. **Changed by D8 (Q6):** on the invalid-param retry (j.8) and the server+client drop (j.7), Go no longer leaves an assistant `tool_calls` message without matching tool replies.
+
 ### 3.3 Client vs server split
 
 `ToolExecutor.execute_tool_calls` (`core/tool_executor.py:96-171`) splits calls by name:
@@ -270,6 +288,8 @@ When no node HTTP round trip is in flight, a client call becomes `dispatch_node_
   "tool_call_id":"…","reply_request_id":"<uuid>","trusted":true,"user_id":1,"voice_command":"…",
   "request_id":"<uuid>"}}]
 ```
+
+> **Changed by D4:** `trusted:true` is removed; the per-node broker ACLs make the command authentic. The reply post needs node auth from the addressed node.
 
 The node POSTs its reply to `/api/v0/device-control-results/{request_id}`. CC writes the reply to `<tmp>/jarvis-device-control/{id}.json` and polls every 0.1 s, with a 10 s timeout. It returns `output`, or `{"success":false,"error":"the node didn't respond in time","timeout":true}`.
 
@@ -377,6 +397,8 @@ The decision is `{"tool_name","score","used": score >= JARVIS_TOOL_CLASSIFIER_MI
 4. **Must-call guard** prerequisite (§3.2 i).
 
 **Fallback:** no decision means the blocking path, no hint and no must-call guard. Nothing fails.
+
+> **Changed by D9 (F1):** the router is off in prod and is cut entirely, with all four consumers and the training route. Go behaves as today's "no decision" case.
 
 **Training:**
 
@@ -565,73 +587,92 @@ The decision is `{"tool_name","score","used": score >= JARVIS_TOOL_CLASSIFIER_MI
      - (b) Drop the classifier. Keep the stream-path *code shape* but gate it on something else, such as the native model's first-token tool call.
      - (c) Keep the interface, ship it disabled, and port the inference later.
    - **Recommendation:** check prod logs for `Router predicted`. If it is absent, choose (c). Port nothing but the `RouterDecision` interface and the hint/must-call plumbing, behind a nil classifier.
+   - **Decided (D9, F1):** the router is off in prod; **cut it entirely**, including the `RouterDecision` interface, the hint, the must-call guard and both stream paths. No pure-Go fastText.
 2. **[scope] If the router stays, what happens to `/tool-router/train`?** Training is Python-only, writes to any path, blocks the loop and never hot-reloads.
    - *Options:*
      - (a) Keep the route, but have Go shell out to an offline Python trainer.
      - (b) Cut the route and make training an offline script that drops a `.bin` into `~/.jarvis/models/`, which `jarvisd` reloads on change.
      - (c) Keep the route as-is.
    - **Recommendation:** (b). The only caller is a dev script.
+   - **Decided (D9):** cut the route; there is no router to train.
 3. **[behaviour] Which per-household gates must the native path honour?** The text path whitelists server tools: web-search on/off, memory needs a speaker and the setting. The native path offers all 12 ungated. Since the Go port will run Qwen3.5-9B natively, this becomes the default path.
    - *Options:*
      - (a) Apply the text whitelist to both paths.
      - (b) Keep the native path ungated and rely on the `execute()` re-checks.
    - **Recommendation:** (a). It is fail-closed for egress, as CLAUDE.md #13 intends.
+   - **Decided (D22):** (a). Web search off means no egress; memory tools need a speaker plus the setting (D21).
 4. **[behaviour] Should a text-path (Qwen3 14B/8B) continue be allowed to chain another client tool?** Today it is a single formatting call, so "check the calendar then text Mom" cannot complete in one exchange. Native continue re-enters the loop.
    - *Options:*
      - (a) Preserve the asymmetry exactly.
      - (b) Unify on the loop for both paths.
    - **Recommendation:** (a) for parity in Phase 5, and revisit once native Qwen3.5 is the default.
+   - **Decided (D23):** (a). Chaining on the text path is fixed in the post-port prompt-provider redesign.
 5. **[behaviour] `/api/v0/chat` is unauthenticated.** The node already sends `X-API-Key`.
    - *Options:*
      - (a) Require node auth (or app/JWT) in Go.
      - (b) Keep it open for parity.
    - **Recommendation:** (a). It is zero client change, and it closes an open LLM relay on the LAN. The same question applies to the unauthenticated MQTT reply mailboxes. I'd require the replying node's key, and that the replying node is the one the request was addressed to.
+   - **Decided (D5, D4):** neither option. `/api/v0/chat` is **dropped**; node `chat_text()` switches to the node-authed `/api/v0/node/llm/chat` (node-setup change). The reply mailboxes get node auth, with the replying node bound to the request.
 6. **[behaviour] Native transcript validity.** On invalid-param retry, and when server and client calls are mixed, the assistant `tool_calls` message is left with no `role=tool` reply. That is fine for llama-server, but a strict OpenAI backend (the e2e ChatGPT provider) rejects it.
    - *Options:*
      - (a) Preserve it.
      - (b) In Go, pop the assistant message (or synthesize `{"error":"not executed"}` tool replies) before nagging or continuing.
    - **Recommendation:** (b), with a contract test.
+   - **Decided (D8):** (b), fix it, with a contract test.
 7. **[behaviour] The `_refinable` mutation bug.** On the native path, param refinement never runs, because the marker is stripped from the cached schemas first. Do you want refinement on native (Qwen3.5-9B)?
    - *Options:*
      - (a) Preserve today's effective behaviour: no refinement on native, with the refinable params left in the schema.
      - (b) Fix it so refinement runs on both paths.
    - **Recommendation:** (a). Native models see the full enum anyway, so a second LLM call is pure latency. Make it explicit in Go rather than accidental.
+   - **Decided (D8, P2):** fix the aliasing bug (no in-place mutation of cached schemas). Applied as the recommendation: refinement runs on the text path only, by explicit rule rather than by accident. P2 says "fix" without choosing between (a) and (b); flag this if (b) was meant.
 8. **[behaviour] Should the router-hint and must-call text be byte-exact?** PLAN demands byte-exact prompts, and the nag strings ([MUST_CALL_RETRY] ×2 variants, [ISO_DATE_RETRY], [INVALID_PARAM_RETRY], [TOOL_DEDUPE], [NOT_FOR_ME_DOUBLE_CHECK], Router hint) and the formatting-call user message are prompt text too.
    - *Options:*
      - (a) Treat them all as golden strings.
      - (b) Only treat the system prompt as golden.
    - **Recommendation:** (a). They are model-tuned and cheap to freeze.
+   - **Decided (D22, settled in B triage):** (a). The Router hint and both `[MUST_CALL_RETRY]` must-call variants are cut with the router (D9); the force-tools `[MUST_CALL_RETRY]` string stays.
 9. **[behaviour] When the iteration limit is hit, users hear "Maximum tool execution iterations reached."** Is that intended?
    - *Options:*
      - (a) Keep it.
      - (b) Use a natural fallback ("Sorry, I got stuck on that.").
      - (c) Return `not_for_me`-style silence.
    - **Recommendation:** (b), keeping `error:"max_iterations_exceeded"` for traces.
+   - **Decided (D40 default):** (b).
 10. **[scope] Do the jarvis-mcp date resolution and `include_date_context` on every loop iteration stay?** mcp is dropped, so MCP date resolution goes. The proxy's date-key extraction runs per iteration over the full user text. In-process, CC could call the date extractor once per turn.
     - *Options:*
       - (a) Keep the per-call flag semantics.
       - (b) Extract once per turn in the tool-loop module and stop sending the flag.
     - **Recommendation:** (b). Keep the `date_keys` contract only on the external `/v1/chat/completions` surface.
+    - **Decided (D40 default):** (b), extract once per turn, from the raw transcript (03.Q8). The MCP path is dead and not ported.
 11. **[minor] What should `llm.interface` default to?** The default is `Qwen25MediumUntrained`, which is cut, and the providers' `force_tool_calls` and native flags hang off inheritance from cut Qwen2.5 classes.
     - **Recommendation:** default to `Qwen3_8B_Compressed`, flatten the kept providers' flags into explicit Go values, and fail loudly on unknown names.
+    - **Decided (D11, D12):** no default. The key becomes `llm.prompt_provider`, set at install time; an unknown name is a hard error. Flatten the flags into explicit Go values.
 12. **[minor] What happens to the date-key LLM fallback** (live slot, no `max_tokens`, no `/no_think`, an `available_keys` list of roughly 60–100 entries)?
     - **Recommendation:** keep it, but cap it at `max_tokens:16` with `reasoning_budget:0`. Otherwise it is a latent multi-second stall on thinking models.
+    - **Decided (D40 default):** moot. The fallback is dropped (03.Q9): the vocabulary gap is closed and unknown keys become `today`.
 
 ## 11. Go port notes
 
 - **Package shape.** `internal/cc/toolloop`:
   - `Engine.Execute(ctx, conv *Conversation, in TurnInput) (Result, error)`, where `Result` has a typed `StopReason` (complete | tool_calls | validation_required | server_tool_complete | not_for_me | error).
   - A `Registry` of `ServerTool` interfaces: `Name`, `Description`, `Params`, `Enabled(ctx, hh)`, `PromptText`, `Risky`, `Execute(ctx, Call) (map[string]any, error)`. Tools are registered explicitly at init. No reflection discovery.
+  - `Call` carries the speaker identity, or an explicit "unknown" (D21). Each tool decides what to refuse; the framework imposes no policy. Per-user tools refuse an unknown or ambiguous speaker, with the M14 wording when recognition is off.
+  - `Enabled(ctx, hh)` (plus the speaker) applies to **both** paths (D22).
   - A `Parser` (pure functions, golden-tested).
-  - A `Guards` set, where each guard is a small function over `(state, response)`, with the nag strings as constants.
+  - A `Guards` set, where each guard is a small function over `(state, response)`, with the nag strings as constants (byte-exact, D22). No must-call guard and no router decision (D9).
   - An `LLM` interface implemented in-process by the llm-proxy module, so there is no HTTP. Shapes A–E map to one `ChatRequest{Slot, Temperature, MaxTokens, Tools, ToolChoice, ResponseFormat, ReasoningBudget, WantDateKeys}`. External `/v1/chat/completions` keeps the JSON extensions.
 - **Context-aware server tools.** Python tools are sync on the event loop. In Go every tool gets a `ctx` with a deadline, and independent server calls in one response can run concurrently. Concurrency is optional; result order must stay the call order.
-- **Explicit plane routing.** Compute the turn's offered-tool set once. Dispatch a call to the server plane only if the call name is in the offered server set. Reject or flag unknown names instead of running unoffered tools (Oddity 6). This needs a decision in Q3.
-- **Headless MQTT calls.** Replace the tmp-file mailboxes with an in-memory `map[requestID]chan Reply` (with the embedded broker the reply can even arrive over MQTT). Keep `POST /device-control-results/{id}` and `/mobile/node-tool-reports/{id}` as thin adapters that feed the channel. Keep the 10 s timeout and the synthetic failure dicts.
-- **One `ModelService` per provider.** Build it per provider change (the setting has a 60 s cache), not per request. Drop `IModelInterface`, `ModelFactory`, `JarvisToolModel`, the adapter models, `MalformedJsonExtractor`, `json_schema.py`, the prune helpers and `/lightweight/chat`. Drop `/test/command` with jarvis-mcp.
+- **Explicit plane routing.** Compute the turn's offered-tool set once, with the same per-household gates on both paths (D22). Dispatch a call to the server plane only if the call name is in the offered server set. Reject or flag unknown names instead of running unoffered tools (Oddity 6).
+- **Continue.** Text path: one formatting call, as today (D23). Native: re-enter the engine.
+- **Iteration limit.** Speak a natural fallback; keep `error:"max_iterations_exceeded"` in the trace (D40).
+- **Native transcript validity.** Never leave an assistant `tool_calls` message without matching tool replies (D8, Q6).
+- **Refinement.** Text path only, by explicit rule; never mutate cached schemas (D8, Q7).
+- **Dates.** Extract date keys once per turn from the raw transcript; no `include_date_context` per call and no LLM fallback (D40, 03.Q8/Q9).
+- **Headless MQTT calls.** Replace the tmp-file mailboxes with an in-memory `map[requestID]chan Reply` (with the embedded broker the reply can even arrive over MQTT). Keep `POST /device-control-results/{id}` and `/mobile/node-tool-reports/{id}` as thin adapters that feed the channel, now node-authed with the replying node bound to the request (D4). Drop `trusted:true` from the payload (D4). Keep the 10 s timeout and the synthetic failure dicts.
+- **One `ModelService` per provider.** Build it per provider change (the setting has a 60 s cache), not per request. Drop `IModelInterface`, `ModelFactory`, `JarvisToolModel`, the adapter models, `MalformedJsonExtractor`, `json_schema.py`, the prune helpers, `/lightweight/chat`, `/api/v0/chat` (D5), the fastText classifier and `/tool-router/train` (D9). Drop `/test/command` with jarvis-mcp.
 - **Cache mutation.** `messages` is mutated in place and shared with the cache. In Go, have the engine own a working copy and commit it back once on return. This avoids the `_refinable`-style aliasing bugs, and makes the "transcript only changes on success" behaviour explicit. Today a mid-turn exception leaves a half-mutated history in the cache.
 - **Risks:**
   - Byte-exact parity of the repair pipeline. Python `json.loads` accepts `NaN` and `Infinity` and duplicate keys (last wins), and `json.dumps` uses `", "` / `": "` separators. Arguments strings that reach the node and the dedupe hash must match. Use a Python-compatible encoder for `arguments`.
   - Regex differences: `re.DOTALL`, and `(?:</think>|\Z)` vs Go's RE2 `\z`.
   - `str(value) in allowed` enum coercion (`True`→`"True"`).
-- **Logging.** Replace the unbounded `/app/temp/llm_*.log` files with rows in the platform log table under retention. Full prompts belong behind a debug setting, since they hold household data.
+- **Logging (M2).** No `llm_trace.log`. Keep the metrics JSONL only behind a debug setting with a size cap; full prompts hold household data.

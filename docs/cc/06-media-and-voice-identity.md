@@ -12,6 +12,27 @@ Voice is **greenfield** in Go (PLAN §2, D7, Appendix C). Kokoro TTS and speaker
 >
 > **Decision D3 (2026-10-06, user):** CC's per-node stickiness (§3.6) is **also dropped**. Speaker identity is per conversation only: set from turns identified in the current conversation, and cleared when the conversation ends or expires. Nothing persists per node or across conversations. Reason: sensitive-info permission gates are keyed on speaker ID, so cross-conversation memory leaks.
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. Sections below still describe today's Python behaviour; inline "Changed by" notes and §11 say what Go does instead.
+
+- **D2:** the node "last speaker" is dropped. Go accepts and **ignores** `node_context.speaker_user_id` / `speaker_confidence` on `/conversation/start`. No node change.
+- **D3:** CC's 30 s per-node stickiness is dropped (`speaker_stickiness.py`, `voice.stickiness_*`). Speaker identity is **per conversation only**: from turns identified in this conversation, gone when it ends or expires.
+- **D4:** V9 (`POST /mobile/voice-profile-results/{rid}`) requires node auth, and the rid must belong to that node. The rest of 06.Q5 (V10 poller check, M4/M5 bound to a pending request and the node's household) follows the same policy.
+- **D8:** known bugs fixed as intended differences (e.g. profile-store not-found → 404, empty TTS text → 400 JSON).
+- **D9:** phone-mic routes V2–V5 are cut.
+- **D19 (owned by 01/04):** a voice turn writes a transcript only when the speaker is confidently identified.
+- **D20:** account deletion hard-deletes voiceprints in every household and clears in-memory speaker/name caches, in the same in-process transaction as the rest of the user's data.
+- **D21:** an unknown **or ambiguous** speaker means per-user things refuse ("I'm not sure who's speaking"); household-level things still work. No fallback to the node owner, no per-household knob. The server passes the speaker identity (or its absence) to every command, and each command decides what to refuse.
+- **D33:** one `voice.similarity_threshold` plus `voice.min_speaker_margin`; verify uses the same threshold. Short/long knobs and the fixed 0.45 verify threshold go. Recalibrated for ERes2Net on jarvis-dev enrollments.
+- **D34:** voiceprints only. No raw enrollment audio kept; WAVs are discarded once embedded. Each embedding is tagged with its model id; a model change (including ECAPA → ERes2Net at cutover) requires re-enrollment. Legacy voiceprints are not imported.
+- **D35:** speaker recognition stays **off by default**; enrolling does not turn it on. **M14:** when it is off, refusals and the enrollment screen say "speaker recognition is off", not "I'm not sure who's speaking".
+- **D36:** voiceprints stay per (household, user), no node id. Per-node profiles are future work (PLAN §9).
+- **D37:** enrollment quality gate: reject a take with under ~3 s of VAD speech, or one scoring far below the user's other takes, with `success:false, error:"low_quality"`. No mobile change.
+- **D38:** the affect/emotion pass is cut. `affect` stays in the STT response and `/voice/command` as `null`. `voice.emotion_*` dropped.
+- **D40 (01.Q8, verify on Pi):** audio routes emit the real engine sample rate in the `X-Audio-*` headers.
+- **M13:** STT `language`/`task` fields are accepted and ignored; honour `language` later if the engine supports it. **M15:** in-memory speaker state on deletion is covered by D20.
+
 ## 1. Purpose
 
 - **Nodes** use CC as their only audio backend. A node never talks to whisper or tts directly. It sends STT uploads, gets TTS back as a WAV or as a raw PCM stream, and uploads voice-profile samples it records itself. CC adds app-to-app auth plus household context headers, and runs the speaker pass scoped to the node's household members.
@@ -258,6 +279,8 @@ Identity is **asserted by the node**. CC never reads whisper's `speaker` itself 
 2. On the next wake, the node's parallel warmup sends `/conversation/start` with `node_context.speaker_user_id`/`speaker_confidence` = **the last speaker ever identified on that node** (`NODE:core/wake_loop.py:725`, `clients/jarvis_command_center_client.py:612-615`).
 3. The command turn sends `/voice/command/stream` with `speaker_user_id` = **this utterance's** STT result, which may be null (`NODE:wake_transcription.py:299,317-319`, `jarvis_command_center_client.py:194-195`).
 
+> **Changed by D2/D3/D21:** Go ignores the node's claimed `speaker_user_id` on `/conversation/start` and keeps no per-node state. The conversation's speaker comes only from turns CC identified in-process during that conversation. An unknown or ambiguous turn speaker leaves per-user tools refusing, and the identity (or its absence) is passed to every command.
+
 CC handling at **`/conversation/start`** (`main.py:1018-1070`):
 
 - `validated_speaker_user_id(claimed, household_member_ids)` (`core/utils/speaker_membership.py:23-63`):
@@ -295,6 +318,8 @@ Match iff `best > threshold` **and not** ambiguous (`WA:app/utils.py:587-718`):
 
 The spike (`spikes/voice-onnx/RESULTS.md:17,31,73`) found ERes2Net's EER point at about 0.33–0.36, so **all numbers change**. The structure (adaptive vs single threshold, margin gate) is a Q7 decision.
 
+> **Changed by D33:** one `voice.similarity_threshold` plus the margin gate; verify uses the same threshold. Recognition stays off by default (D35).
+
 ### 3.6 Stickiness (CC)
 
 `core/utils/speaker_stickiness.py` keeps a per-node `{user_id, confidence, ts}`.
@@ -303,6 +328,8 @@ The spike (`spikes/voice-onnx/RESULTS.md:17,31,73`) found ERes2Net's EER point a
 - `/conversation/end` → `reset_node_history` (`main.py:1100-1120`).
 - It is consulted **only** at `/conversation/start`, never per turn.
 - It is process-local, so it is lost on restart. It is unsynchronised, which is fine under asyncio.
+
+> **Changed by D3:** not ported. `speaker_stickiness.py` and `voice.stickiness_*` are dropped.
 
 ### 3.7 Name resolution
 
@@ -323,7 +350,7 @@ The spike (`spikes/voice-onnx/RESULTS.md:17,31,73`) found ERes2Net's EER point a
 | speaker missing, or name in `{"default","user",""}` | `{"speaker_name": null, "message": "I don't recognize your voice yet. Enroll a voice profile…"}` |
 | otherwise | `{"speaker_name": name}` |
 
-It reports whatever `node_context` holds, **including the session/warmup fallback**, so it can answer with the previous speaker's name. Its `included_system_prompt_text` (`:59-68`) is prompt-bearing and must be ported byte-exact (doc 03).
+It reports whatever `node_context` holds, **including the session/warmup fallback**, so it can answer with the previous speaker's name. **Changed by D2/D3:** in Go it reports only the speaker identified in this conversation. Its `included_system_prompt_text` (`:59-68`) is prompt-bearing and must be ported byte-exact (doc 03).
 
 ### 3.9 Mobile STT/TTS
 
@@ -355,8 +382,8 @@ CC itself has **no voice-related tables**.
 
 | Key | Default | Notes |
 |---|---|---|
-| `voice.stickiness_min_confidence` | 0.55 | ECAPA-calibrated; meaningless under a new model |
-| `voice.stickiness_ttl_seconds` | 30.0 | |
+| `voice.stickiness_min_confidence` | 0.55 | ECAPA-calibrated; meaningless under a new model. **Dropped (D3)** |
+| `voice.stickiness_ttl_seconds` | 30.0 | **Dropped (D3)** |
 | `tts.url`, `whisper.url` | none | Read per household/node (`tts_client.py:66`, `whisper_client.py:58`) but **not declared** in the definitions. They disappear in Go, which is in-process. |
 | `voice.wake_verification_mode` / `_phrase` | — | Gate the M3 side effect; owned by doc 01 |
 
@@ -375,6 +402,8 @@ CC itself has **no voice-related tables**.
 - `whisper.default_beam_size` 2
 
 (`WA:app/services/settings_definitions.py:93-240`.) Env: `WHISPER_MAX_UPLOAD_BYTES` (25 MB).
+
+> **Changed by D33/D35/D38:** Go keeps `voice.recognition_enabled` (default **false**), `voice.similarity_threshold` and `voice.min_speaker_margin` (recalibrated). The short/long thresholds and cutoffs, `voice.encoder` (model is fixed per build, tagged per embedding, D34) and `voice.emotion_*` are dropped.
 
 **tts:** active provider and voice (Kokoro `bm_george`, speed 1.25 per PLAN §3).
 
@@ -412,6 +441,8 @@ CC itself has **no voice-related tables**.
 12. **The PCM stream is raw s16le with the three `X-Audio-*` headers on every audio route**; the node initialises playback from them.
 13. Account deletion purges voiceprints across **all** households, best-effort. A failure never blocks deletion (`api/me.py:23-37`).
 14. Each voiceprint is per **(household, user)**, so a user in two households enrolls twice (Q8).
+
+> **Changed by decisions:** invariants 2 and 9 do not carry over (D2/D3: the node claim is ignored and there is no stickiness). Invariant 7's "session fallback" becomes "speaker from an earlier turn of this conversation". Invariant 13 becomes part of the D20 transaction. Invariant 14 is confirmed by D36.
 
 ---
 
@@ -472,6 +503,8 @@ CC itself has **no voice-related tables**.
      - (c) Strict: no inheritance at all; unknown means unknown.
    - **Recommendation: (b).** The node's wire contract is unchanged, the stale-speaker leak disappears, and `/conversation/end` reset starts working again.
 
+   **Decided (D2/D3):** close to (c). The node's claimed speaker is ignored entirely; nothing is kept per node or across conversations. Within a conversation the speaker persists from turns identified in that conversation, and dies with it.
+
 2. **[behaviour] With 2+ enrolled members and an ambiguous or unknown match, should per-user scopes be withheld?**
    - Per-user scopes are memories, a user's email or calendar tools, and reminders. Today an unknown speaker just gets no speaker block. Any per-user data still reached through the session fallback is exposed.
    - Options:
@@ -480,11 +513,15 @@ CC itself has **no voice-related tables**.
      - (c) Make it configurable per household.
    - **Recommendation: (b) by default, with (c) as a later knob.** It pairs with Q1, and abstaining is cheaper than misattribution (the whisper margin-gate comment already argues this).
 
+   **Decided (D21):** (b), no per-household knob. Ambiguous counts as unknown; no fallback to the node owner. The server passes the speaker identity (or none) to every command, and each command decides what to refuse. With recognition off, the message says so (M14).
+
 3. **[scope] Should the phone-mic routes V2–V5 be cut?**
    - The routes are `POST /voice-profile/enroll`, `GET /samples`, `DELETE /samples/{i}` and `POST /verify`. No screen calls them, and the mobile app says phone-mic enrollment was dropped for acoustic mismatch.
    - *Why it matters:* 4 fewer routes and no explicit-index slot management. The only risk is older app builds in the wild.
    - Options: (a) cut; (b) keep as thin wrappers.
    - **Recommendation: (a) cut.** Users re-enroll anyway under greenfield voice, and the current app only uses the node-mic flow.
+
+   **Decided (D9):** (a) cut.
 
 4. **[behaviour] Should Go keep the raw enrollment audio, or only embeddings?**
    - *Why it matters:* WAVs let us switch ERes2Net ↔ TitaNet or re-calibrate without asking every user to re-enroll again. But they are biometric recordings, which raises the privacy surface.
@@ -494,11 +531,15 @@ CC itself has **no voice-related tables**.
      - (c) Keep the WAVs only until the model choice is final (Phase 4), then purge.
    - **Recommendation: (b).** It is self-hosted local data, account deletion already purges it, and it avoids a second forced re-enroll.
 
+   **Decided (D34):** (a), not the recommendation. Embeddings only, tagged with model id; WAVs discarded once embedded; a model change requires re-enrollment. Legacy ECAPA voiceprints are not imported.
+
 5. **[behaviour] Should the enrollment handoff routes (V9/V10, M4/M5) be tightened?**
    - Today V9 is unauthenticated; V10 doesn't check who polls; M4 accepts any `user_id`; M5 takes `household_id` from the query.
    - Proposal: V9 requires node `X-API-Key` (the node already sends it) and must match the node the command was published to. V10 must be the user who started it. M4/M5 require a pending `enroll_voice`/`verify_voice` request for that node and user, and use the node's household. Results expire after about 5 min, held in an in-memory map instead of `/tmp`.
    - None of this changes the node or mobile wire shapes.
    - **Recommendation: yes, do all of it.** The only thing it rejects is behaviour no legitimate client exhibits.
+
+   **Decided (D4):** yes. V9 needs node auth bound to the issuing node; V10, M4 and M5 are tightened under the same close-the-holes policy, with no wire change.
 
 6. **[behaviour] Enrollment UX under the new model: keep 3 × 8 s takes and a 5 s verify, or add a server-side quality gate?**
    - Today a silent or noisy take is accepted, and a failed wizard leaves a partial profile (Oddities 13, 10).
@@ -508,12 +549,16 @@ CC itself has **no voice-related tables**.
      - (c) (b), plus treating a profile as "enrolled" only at 3 or more good takes.
    - **Recommendation: (b).** It needs no mobile change. (c) needs a `has_profile` semantics change, so leave it unless you want it.
 
+   **Decided (D37):** (b), treated as a D8 bug fix. No mobile change.
+
 7. **[change] Threshold model for Go speaker ID.**
    - Today there are 5 knobs: short, normal and long thresholds plus two cutoffs. There is also a margin gate and a separate fixed verify threshold of 0.45, all ECAPA-calibrated.
    - Options:
      - (a) Port the structure and recalibrate every number.
      - (b) Simplify: one threshold plus the margin gate, with verify using the same threshold, recalibrated on jarvis-dev enrollments (the spike showed flatter EER across 1.5 s and 3 s for ERes2Net).
    - **Recommendation: (b).** Keep the setting key names `voice.similarity_threshold` and `voice.min_speaker_margin`, and drop the short/long ones.
+
+   **Decided (D33):** (b).
 
 8. **[behaviour] Should a voiceprint be per user, or per (user, household)?**
    - Today it is per (household, user). A user in two households enrolls twice, and V6 deletes only one copy.
@@ -522,23 +567,33 @@ CC itself has **no voice-related tables**.
      - (b) One voiceprint per user, scored inside any household they belong to. Node-mic differences argue for per-node-or-household samples, though.
    - **Recommendation: (a) keep per household.** It matches the node-mic rationale, and multi-household users are rare. But tell me if the shared-across-homes case matters to you.
 
+   **Decided (D36):** (a) keep per (household, user). Future work: per-node profiles (PLAN §9).
+
 9. **[behaviour] Should speaker recognition default to on?**
    - Whisper's `voice.recognition_enabled` defaults to **false**. A fresh install that enrolls a voice gets no matches until an admin flips the flag, and the logs flag this case as easy to misdiagnose.
    - Options: (a) keep the off flag; (b) on whenever any member of the household has a profile; (c) remove the flag.
    - **Recommendation: (b).**
+
+   **Decided (D35):** (a), not the recommendation. Off by default for privacy; enrolling does not turn it on. M14 covers the UX consequence.
 
 10. **[scope] Should the affect/emotion pass be cut?**
     - `voice.emotion_enabled` (default off) adds `affect` to M3, using librosa pitch features. librosa is cut (PLAN §7), and the node forwards `affect` to `/voice/command`.
     - Options: (a) cut, always returning `"affect": null`; (b) reimplement the features in Go (pitch variance, pause ratio, spectral centroid).
     - **Recommendation: (a).** Keep the key as `null` for contract stability, and revisit if you were actively tuning it.
 
+    **Decided (D38):** (a). `affect` stays `null`; `voice.emotion_*` dropped.
+
 11. **[minor] Should account deletion also clear in-memory speaker state?**
     - "Who am I" uses the session fallback, and the 5-min name cache keeps old usernames.
     - **Recommendation:** on account deletion or membership change, purge stickiness entries and the name cache for that user. Doing it in-process is trivial.
 
+    **Decided (D20/M15):** yes. Account deletion clears in-memory caches for the user. There are no stickiness entries to purge (D3).
+
 12. **[minor] How should the dead `language`/`task` fields be handled?**
     - Options: (a) accept and ignore them (zero contract risk); (b) honour `language` if the D7 engine supports it.
     - **Recommendation: (a) now, (b) after D7.**
+
+    **Decided (M13/D47):** (a) now; (b) later if the engine supports it.
 
 ---
 
@@ -555,31 +610,33 @@ CC itself has **no voice-related tables**.
   - `Speaker.Enroll / Verify / Delete / List`.
 - No HTTP hop, no `X-Context-*` headers, no URL settings.
 
-**Storage.** SQLite `voice_samples(household_id, user_id, idx, model_id, embedding BLOB, wav BLOB NULL, created_at)` plus an in-memory centroid cache per `(household, user, model_id)` that is invalidated on write. Raw `user_id`, not a sha prefix; the DB is local.
+**Storage.** SQLite `voice_samples(household_id, user_id, idx, model_id, embedding BLOB, created_at)` plus an in-memory centroid cache per `(household, user, model_id)` that is invalidated on write. Raw `user_id`, not a sha prefix; the DB is local. **No WAV column (D34):** enrollment audio is discarded once embedded. Embeddings with a `model_id` other than the active model are ignored, so a model change means re-enrollment. No node id (D36). Account deletion deletes the user's rows in every household inside the D20 transaction.
 
 **Identity service (`cc/voice/identity`).** It replaces `speaker_membership`, `speaker_stickiness` and the node echo:
 
-- Every in-process transcribe on a node records `{node_id, conversation_id, user_id|nil, score, t}`.
-- `/conversation/start` and per-turn handlers ask `identity.Resolve(node, conv, claimed)`, which returns `{effective, source: stt|session|sticky|none}` under the Q1/Q2 policy.
+- Every in-process transcribe records `{conversation_id, user_id|nil, score, t}` against the **conversation**, never the node (D3).
+- `/conversation/start` ignores the claimed speaker (D2). Per-turn handlers ask `identity.Resolve(conv, turnResult)`, which returns `{effective, source: stt|conversation|none}`. There is no `sticky` source. State is dropped when the conversation ends or expires.
+- Ambiguous (margin gate) resolves to unknown (D21). The resolved identity, or its absence, is passed to every command and server tool; per-user server tools (memory, phone, errands) refuse on unknown, and say "speaker recognition is off" when it is (M14).
 - The membership check comes from the auth module in-process.
 - Names come from the auth module directly, so the 5-min cache becomes optional.
 
-**Enrollment handoff.** `map[requestID]pending{nodeID, userID, kind, expires}` is created by V7/V8. M4/M5 must match a pending entry (Q5), V9 fills in the result, and V10 consumes it. A 5-min janitor runs on the existing ticker infrastructure. The `/tmp` file is gone, and the MQTT publish goes through the embedded broker (doc 05).
+**Enrollment handoff.** `map[requestID]pending{nodeID, userID, kind, expires}` is created by V7/V8. M4/M5 must match a pending entry (Q5, D4), V9 requires node auth and the issuing node (D4) and fills in the result, and V10 consumes it (poller must be the starting user). M4 applies the D37 quality gate before storing an embedding; verify (M5) uses `voice.similarity_threshold` (D33). A 5-min janitor runs on the existing ticker infrastructure. The `/tmp` file is gone, and the MQTT publish goes through the embedded broker (doc 05).
 
-**PCM streaming.** Use `http.Flusher`. Write the headers before the first synth so the node starts its player early, and flush after each sentence. Always send `24000/1/2` (or the active voice's real format). Return **400 JSON** for empty text, rather than a 200 JSON body labelled as audio: the node already treats non-2xx as "fall back", so this is safe. A `context` cancel on client disconnect must stop synthesis.
+**PCM streaming.** Use `http.Flusher`. Write the headers before the first synth so the node starts its player early, and flush after each sentence. Always send the active voice's real format (`24000/1/2` for Kokoro; D40 01.Q8, verify on the Pi). Return **400 JSON** for empty text, rather than a 200 JSON body labelled as audio: the node already treats non-2xx as "fall back", so this is safe. A `context` cancel on client disconnect must stop synthesis.
 
 **Error mapping.** Map not-found from the profile store to **404** (Python gave 500). Mobile treats any error as a failure, so this is safe. Keep 202 `{"detail":"pending"}` exactly.
 
 **Risks.**
 
 - **Threshold calibration** (Phase 4) needs real node-mic enrollments; the spike set was tiny.
-- **The node keeps sending stale `speaker_user_id`** (a frozen client). The Go policy must *tolerate and override* it, never trust it.
+- **The node keeps sending stale `speaker_user_id`** (a frozen client). Go accepts the field and ignores it (D2).
 - **TTS→STT parity in the GPU lane** depends on D7.
 - **The `audio/wav` blocking route** (M1, A2) must emit a correct RIFF header with the real sample rate, because the node's wake-response path plays it as a file.
 
 **Simplifications this enables.**
 
 - Delete the whisper and tts proxies and their clients, the context headers, URL discovery, the per-call `httpx` clients, the `/tmp` handoff and the CC↔whisper member-id plumbing.
-- Collapse the 15 whisper voice settings to about 4.
-- Cut V2–V5 (Q3) and the 2 media list/delete routes.
+- Collapse the 15 whisper voice settings to about 4 (D33): `voice.recognition_enabled` (default off, D35), `voice.similarity_threshold`, `voice.min_speaker_margin`, `whisper.default_beam_size`. `voice.stickiness_*` (D3) and `voice.emotion_*` (D38) go.
+- Cut V2–V5 (D9) and the 2 media list/delete routes.
+- No affect pass (D38): `affect` is always `null`. `language`/`task` accepted and ignored (M13).
 - Move account purge and identity state into one module.

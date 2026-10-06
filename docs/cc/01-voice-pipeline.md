@@ -11,6 +11,24 @@ All paths are relative to `jarvis-command-center/app/` unless prefixed. Node pat
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. §1–§9 still describe today's Python behaviour; changes are flagged inline as "Changed by D#".
+
+- **D2 / D3 (speaker).** The "last speaker" concept is dropped: `node_context.speaker_user_id` / `speaker_confidence` on `/conversation/start` are accepted and **ignored**. CC's 30 s per-node stickiness is dropped too. Speaker identity is **per conversation only**: it comes from turns identified in this conversation and dies with it. Nothing is keyed per node or survives across conversations.
+- **D9 (cuts, with F1).** The fastText router is cut, and with it **path A (the fast stream path)**, **path B (tool-stream)**, the `Router hint:` message, `JARVIS_STREAM_TOOL_*` and `JARVIS_TOOL_CLASSIFIER_*`. `/voice/command/stream` always runs path C. `ambient_grounding.py` is cut.
+- **D8.** Internal bugs are fixed (cache pollution §8.3, the `include_thinking` race §8.10). Wire-visible quirks the frozen node depends on (§8.6 status codes and body shapes) are kept and documented.
+- **D19.** **Every completed voice turn** (stream, continue/stream, continue, blocking) writes a transcript, **when the speaker is confidently identified**, and only when the household has memory on. Fixes §8.1.
+- **D21 / D35 / M14.** An unknown or ambiguous speaker means per-user tools refuse; household-level things still work. Speaker recognition is **off by default**, so every speaker is unknown until a household turns it on; refusals then say "speaker recognition is off".
+- **D22.** Both prompt paths ship: text (Qwen3 14B/8B) and native (Qwen3.5-9B, ChatGPT). Providers are ported byte-exact. The native path gets the text path's per-household server-tool gates.
+- **D23.** The text-path continue asymmetry is kept: text continue is one formatting call; native continue re-enters the loop.
+- **D33.** One `voice.similarity_threshold` plus `voice.min_speaker_margin` decide the turn speaker (owned by 06).
+- **D38.** The affect pass is cut. `affect` stays in the request as `null`; the affect-hint code is kept as a no-op. `voice.emotion_*` is dropped.
+- **D40 (B defaults).** Q2: sliding idle TTL, sweeper, evict on `/conversation/end`, entry cap. Q6: keep wake verification, computed in-process (verify prod's mode first). Q8: emit the real engine sample rate (verify on a Pi). Q9: accept the empty `X-Assistant-Message` gap. Q10: native warmup `max_tokens=1`.
+- **D47 / M4.** `adapter_settings` and `skip_warmup_inference` are dropped from the `/conversation/start` schema, with `JARVIS_TEST_MODE`. Old senders still work: the decoder ignores unknown fields.
+- **M5.** `/voice/acknowledge` keyword matching gets word boundaries.
+- **D5 (via 02).** `/api/v0/chat` is dropped; this doc's routes are unaffected.
+
 ## 1. Purpose
 
 This subsystem turns a transcribed utterance from a Pi node into one of:
@@ -116,6 +134,8 @@ end of cycle → POST /conversation/end
    - `validated_speaker_user_id` drops IDs that aren't household members (`1023-1028`).
    - If there's no ID, the speaker is inherited from per-node stickiness. A confident ID is recorded (`1032-1054`; doc 06).
    - The display name is resolved (`1056-1070`).
+
+   > **Changed by D2 / D3:** Go ignores the client's `speaker_user_id` / `speaker_confidence` here (it is the node's never-expiring last speaker) and has no stickiness. A conversation starts with **no speaker**; the speaker comes from turns identified in this conversation, and the per-turn speaker change re-resolves name and memories (§7.9).
 8. **Warmup.** `model_service.warmup_conversation_with_tools(...)` (`1076-1085`). It is **awaited**: the response returns only after the warmup inference, despite the "return immediately" comment at `1088`.
 9. **Response.** `{"status":"success","conversation_id":…,"home_context":…|null}`. Any exception gives a 500 with `detail="Failed to start conversation: …"` (`1094-1097`).
 
@@ -158,6 +178,8 @@ end of cycle → POST /conversation/end
 - **Speaker.** `speaker_user_id` is validated against the household (`1405-1410`).
 - **Turn context.** Each path builds its own `turn_context` dict from `turn_source`, `wake_confidence`, `follow_up_iteration`, `self_playback` and `self_playback_kind`.
 - **TTS client.** `TTSClient(household_id, node_id, conversation_id)` is built once (`1415-1419`). It uses the `tts.url` setting, then discovery, then a fallback (`core/clients/tts_client.py:62-73`).
+
+> **Changed by D9 (F1):** paths A and B depend on the fastText router, which is off in prod and is cut. Go ports only path C. A and B are described below for reference.
 
 **A. Fast path:** `stream_voice_response` (`conversation_handler.py:1131-1551`).
 
@@ -281,6 +303,8 @@ The route pushes inbox actions **after** the LLM call (`2203`). `StopReason(...)
   - Include `reasoning` and `end_of_exchange`.
   - An unknown stop reason is logged and becomes `complete` (`1202-1208`).
 - **Fire-and-forget `_log_transcript`.** This is the **only voice path that writes transcripts** (`1263-1270`, `1124-1158`). It requires a speaker and a household in the cached `node_context`.
+
+  > **Changed by D19:** in Go every completed voice turn writes one transcript (stream, continue/stream, continue and blocking), only when the speaker was confidently identified and the household's `memory.enabled` is on.
 - **Generic exception.** Returns **200** with `commands[0].errors.type="processing_error"` and `stop_reason:"complete"` (`1284-1310`).
 
 ### 3.6 Follow-up doubt and answered rounds
@@ -433,6 +457,7 @@ LLM calls per turn, all on the **live slot**:
 7. **`<exchange_complete/>` is never spoken.** It is stripped by `apply_to_result` on C and continue, and as a backstop by `clean_for_tts` (`core/tts_text.py:115`).
 8. **The filler guard** rewrites `_GENERIC_FILLER_RESPONSES` on path C only (`99-107`).
 9. **Client-asserted speaker IDs are honoured only if they belong to a household member** (`main.py:1023,1405`). Turn speaker beats warmup speaker. A changed speaker re-resolves name and memories into the **live cached `node_context`**, which also fixes transcript attribution (`3475-3502`).
+   > **Changed by D2 / D3 / D21:** the warmup speaker no longer exists (the `/conversation/start` hint is ignored), so the first identified turn sets the speaker for the conversation. An unknown or ambiguous speaker means per-user tools refuse; nothing falls back to the node owner.
 10. **Fail directions are deliberate:**
     - memory fails open
     - web search fails closed
@@ -518,55 +543,68 @@ Shadow replay (PLAN §4 layer 4) must ignore `X-Audio-*` values if Go emits the 
    - *Why it matters:* this decides what memory extraction learns from. Fixing it multiplies the transcript volume, which is privacy-relevant.
    - *Options:* (a) port as-is; (b) log every completed voice turn (stream, continue and blocking) with a consistent record.
    - **My recommendation:** (b). It looks accidental. Gate it on the existing memory-extraction setting.
+   - **Decided (D19):** (b). Every completed voice turn writes a transcript, only when the speaker is confidently identified and the household has memory on. With memory off, nothing is logged or extracted.
 2. **[behaviour] Conversation lifetime.** Today it is a 10-minute absolute TTL with no sweeper, no eviction on `/conversation/end`, and a leak (§8.2).
    - *Why it matters:* a long, active follow-up conversation dies mid-exchange. Memory also grows unbounded in a process that is now everything.
    - *Options:* (a) keep the absolute 10 minutes; (b) a sliding idle TTL (10 minutes since last touch) plus a periodic sweeper plus eviction on `/conversation/end`; (c) (b) with a hard cap on entry count.
    - **My recommendation:** (c). Is there any reason the absolute expiry was deliberate, for example bounding stale `node_context`?
+   - **Decided (D40 default):** (c). Sliding idle TTL, a sweeper, eviction on `/conversation/end`, and an entry cap.
 3. **[scope] Port path B (tool-stream)?** It is env-gated off, requires a native provider (prod and dev are both text-path), and double-executes tools on fallback.
    - *Options:* (a) cut it; (b) port it behind a flag and fix the double execution.
    - **My recommendation:** (a). Revisit if prod moves to Qwen3.5-9B native.
+   - **Decided (D9):** (a), cut. The fast path A goes too, since it depends on the cut fastText router (F1).
 4. **[behaviour] Fix or replicate the known bugs: §8.3 cache pollution, §8.4 double execution, §8.10 the provider `include_thinking` race and §8.6 status inconsistencies?**
    - *Why it matters:* shadow replay and contract tests treat Python as the oracle.
    - *Options:* (a) bug-for-bug; (b) fix the internal bugs (8.3, 8.10) while keeping the wire-visible quirks (8.6) exact.
    - **My recommendation:** (b). Keep the status codes and body shapes byte-identical, because the frozen node depends on them. Record the fixes as deliberate shadow-replay diffs.
+   - **Decided (D8):** (b). Fix the internal bugs; keep the wire quirks the frozen node depends on, and document why. §8.4 is moot (path B cut, D9).
 5. **[scope] Which prompt path is the Go target: text (Qwen3 14B/8B), native (Qwen3.5-9B, ChatGPT), or both?** Nearly every stage branches on `supports_native_tools`: the server-tool whitelist, the warmup `max_tokens`, the iteration cap, the continue shapes and `server_tool_complete`.
    - **My recommendation:** both, since prod is text and e2e is native. If you plan to move prod to native soon, the text branch could be ported later.
+   - **Decided (D22):** both ship, providers ported byte-exact; the native path gets the text path's server-tool gates.
 6. **[behaviour] Wake verification in Go.**
    - Today it is a second whisper call on a 2.2s slice, fired after STT returns, with a ≤1.2s wait on the turn.
    - With STT in-process, Go could verify inside the same transcribe call, with no race and no wait.
    - What is prod's `voice.wake_verification_mode` today, and do you still want this feature?
    - **My recommendation:** keep it. Compute the verdict synchronously in the STT module and store it on the conversation, so the 1.2s poll disappears.
+   - **Decided (D40 default):** keep it, in-process. Verify prod's `voice.wake_verification_mode` first.
 7. **[scope] Affect hint.** It depends on whisper's `affect` (`voice.emotion_enabled`), which the greenfield STT may not produce.
    - *Options:* keep the field and hint (no-op without a producer); port the affect model; drop it.
    - **My recommendation:** keep the request field and the hint code; it is tiny. Defer the producer to Phase 4's "if still wanted".
+   - **Decided (D38):** the affect pass is cut (no producer). `affect` stays in the request as `null`; the hint code is kept as a no-op.
 8. **[behaviour] Audio format headers.** Kokoro in Go emits its native rate (probably 24 kHz). CC's fallback today is 16000; the node's is 22050.
    - Can every node (aplay on a Pi Zero) take 24 kHz mono s16?
    - **My recommendation:** emit the real engine format from in-process knowledge, with no `/audio/format` round trip. Verify on jarvis-dev.
+   - **Decided (D40 default):** emit the real engine sample rate; verify on a Pi.
 9. **[behaviour] `X-Assistant-Message` is empty on paths A and B and on continue-stream.** The node then can't run its follow-up self-echo detection (`follow_up_loop.py:306`), or show text, for those turns.
    - Headers must precede the body and Python `requests` can't read trailers, so a fix would need a node change.
    - Is the gap acceptable, or should Go hold path A's headers until the first sentence and send that sentence?
    - **My recommendation:** accept the gap. Python is frozen, and a partial header would mislead the echo check.
+   - **Decided (D40 default):** accept the gap. With paths A and B cut (D9), it remains only on continue-stream.
 10. **[scope] Native warmup generates a full completion with no `max_tokens`** (§8.5). Is that intended, for example to prime the tool-call template, or an omission?
     - **My recommendation:** add `max_tokens=1` in Go. It frees the live slot sooner. Check on Qwen3.5 that the cached-prefix hit rate is unchanged.
+    - **Decided (D40 default):** `max_tokens=1`.
 11. **[minor] `/conversation/start` request fields `adapter_settings` and `skip_warmup_inference`.** Accept and ignore them, so old nodes and the eval harness don't get 422s?
     - **My recommendation:** yes, accept and ignore. Drop `JARVIS_TEST_MODE`.
+    - **Decided (M4/D47):** overridden. Drop both fields from the schema, and `JARVIS_TEST_MODE`. Old senders still work because the decoder ignores unknown fields (no `DisallowUnknownFields` on this route).
 12. **[minor] `/voice/acknowledge`.** Port the keyword pools as they are (substring matching, random choice), or fix the word boundaries ("show" → "how")?
     - **My recommendation:** add word boundaries. Nothing tests the exact pick, and the output is random anyway.
+    - **Decided (M5/D47):** add word boundaries.
 
 ## 11. Go port notes
 
 **Package shape.** `internal/modules/cc/voice`:
 - `routes.go`: the 8 handlers, strict `httpx` DTOs mirroring the Pydantic models, including null-vs-missing.
-- `handler.go`: three methods, `Process` (path C), `StreamFast` (path A) and `Continue` / `ContinueStream`, sharing **one** `assembleTurn(ctx, conv, utterance, turnCtx) []Message` function. Python duplicates the assembly three times (`858-971`, `1248-1341`, `1678-1780`). Golden-test the shared function.
+- `handler.go`: `Process` (path C) and `Continue` / `ContinueStream`, sharing **one** `assembleTurn(ctx, conv, utterance, turnCtx) []Message` function. Golden-test the shared function. There is no `StreamFast`: paths A and B, the router hint and the router decision are cut (D9). `/voice/command/stream` runs `Process` and streams the result via the `stream_text_as_audio` grouping.
 - `convcache.go`: the conversation cache.
-- `hints/`: direction, affect, turn, profile and doubt hints.
+- `hints/`: direction, affect (a no-op while `affect` is always `null`, D38), turn, profile and doubt hints.
 - `textfilter/`: `transcript_filter`, `tts_text`, `not_for_me`, `exchange_complete` and `think`.
 - `ack.go` and `wake_response.go`.
 
 **Conversation cache.**
 - Use a `map[string]*Conversation` with a per-conversation mutex. That gives serialized turns per ID and fixes the in-place-aliasing hazards.
 - Take copy-on-write snapshots of `Messages`; commit with `conv.Commit(msgs)` only on success. That alone fixes §8.3.
-- Add a sweeper goroutine and an LRU cap.
+- Use a sliding idle TTL (10 minutes since last touch), evict on `/conversation/end`, and add a sweeper goroutine and an entry cap (D40).
+- **Speaker is conversation state** (D2/D3): it starts empty, is set by identified turns, and is dropped with the conversation. No per-node map, no stickiness. Ignore `speaker_user_id` / `speaker_confidence` on `/conversation/start`.
 - Keep the cache in memory only; restart semantics are unchanged. Persisting to SQLite is not worth it.
 
 **Streaming.**
@@ -582,7 +620,8 @@ Shadow replay (PLAN §4 layer 4) must ignore `X-Audio-*` values if Go emits the 
 | Today | In `jarvisd` |
 |---|---|
 | auth name lookups | auth module interface |
-| `/v1/adapters/date-keys`, `/v1/engine` | LLM module calls |
+| `/v1/adapters/date-keys` | one shared Go date-key constant (D40 via 03.Q9) |
+| `/v1/engine` | LLM module call |
 | TTS HTTP | Kokoro in-binary |
 | whisper verification task | STT module, synchronous verdict (Q6) |
 | inbox push | notifications module call. Make it a real goroutine on continue-stream so audio isn't delayed. |
@@ -590,6 +629,12 @@ Shadow replay (PLAN §4 layer 4) must ignore `X-Audio-*` values if Go emits the 
 **LLM slot discipline.** Warmup, the turn and the continue all hit the live `llama-server` slot. With the embedded queue capping background LLM jobs at one, voice keeps priority. Make sure warmup can't starve a turn: it is cancellable when a turn for the same conversation arrives.
 
 **Provider state.** Pass `includeThinking` as a per-call argument rather than mutating a shared provider (§8.10).
+
+**Transcripts (D19).** After every completed turn on any of the four voice routes, write one transcript row when the speaker is confidently identified and the household's `memory.enabled` is on. Write it after the response is committed, off the audio path.
+
+**Request DTOs (D47).** `/conversation/start` has no `adapter_settings` / `skip_warmup_inference`; do not enable `DisallowUnknownFields` on it.
+
+**Acknowledge (M5).** Match keywords on word boundaries.
 
 **Risks.**
 - **Byte-exact prompt assembly is the top risk.** Any drift in hint strings, block ordering or whitespace silently costs prefix-cache hits. Shadow replay on the assembled `messages` is mandatory.

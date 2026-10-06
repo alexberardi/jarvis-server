@@ -11,6 +11,23 @@ Both are specified here (§3.6) because the split assigned them here, and the ow
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. Sections below still describe today's Python behaviour; inline "Changed by" notes and §11 say what Go does instead.
+
+- **D24:** routines **execute on the node** (multi-tenancy: a routine in another household runs on that home's node and LAN). Server-side execution is rejected. **Staleness fix:** CC sends the **full routine definition** in the `routine` MQTT command for run-now and scheduled runs; the node falls back to its local copy when none is sent. Voice triggers stay local on the node. Small node-setup change; zero-change fallback is a version hash + re-pull.
+- **D25:** scheduled and run-now routines **don't speak**: card only, as today. Voice-triggered routines keep speaking locally. `routines.scheduler_enabled` is **removed**; a routine with an enabled `schedule` is the opt-in.
+- **D26:** missed scheduled runs **fire once, late**, for routines and errand schedules alike. No grace window, no replay.
+- **D27:** **one scheduler engine**: a `next_fire_at` trigger table on the embedded durable queue, with claims. Routines, errand schedules, the attention journal card, workflow wake-ups and the periodic cleanup loops are trigger kinds. `last_run_at` is persisted. The routine `schedule` JSON (with `last_fired_at`) stays as the mobile-facing projection.
+- **D41:** run-now and scheduled routines run **with no user**, as today. Commands that need a person use the SDK's node secret with `value_type='user'` (household-member picker in mobile; `jarvis-command-sdk/jarvis_command_sdk/secret.py:89`, `forge.py:137`). Preserve that secret type and the picker contract.
+- **D44:** **the server owns every routine definition.** Node defaults (Good morning, Good night, …) are seeded as real CC rows per household; nodes report installed Pantry routine packages up to CC, so the Pantry `routine` type stays. Deleting or disabling a routine removes it from nodes (fixes §8.8). Node change: report Pantry routines, stop seeding defaults locally. Pantry's `/v1/routines/generate` is left alone.
+- **D4/D5:** `/api/v0/chat` is dropped; the node's routine composition (`chat_text`) moves to the node-authed `/api/v0/node/llm/chat` (node change). `trusted:true` is no longer sent in the `routine` command. `/device-control-results` requires node auth bound to the issuing node.
+- **D9:** errand autonomy is kept, so `step_value_resolver` (`$leave_by`, `$from_step`) is ported, uncalled for now. **D45:** a resolver-skipped step counts as success (§3.6 behaviour kept).
+- **D13:** errands ship; import **active** `schedules` only; add `errands.enabled`, default on.
+- **D16:** `time_window` is ported with phone into jarvisd (doc 11).
+- **D18 (owned by 10):** `attention.timezone` goes; the journal card uses the household timezone.
+- **D40 (B defaults):** routine timezone = node zone, falling back to household; 422 on an unknown zone (Q6). ~60 s synchronous result wait (Q7). Overlapping runs are skipped with a note via a single-flight lock (Q10). `routine_executions` is dropped (Q11). `schedules.paused`/`title` dropped, terminal schedules purged after 30 days (Q12).
+
 ## 1. Purpose
 
 Three different "do something later or repeatedly" concepts share the word *schedule*. A port must keep them distinct.
@@ -60,13 +77,13 @@ Users:
 | Topic | Direction | Payload |
 |---|---|---|
 | `jarvis/nodes/{node_id}/routines/sync` | CC → node | `{"event":"routines_changed","household_id":…}`. A nudge only; it carries no routine data (`app/api/routines.py:237-240`). The node reacts by GET-pulling (`node-setup/scripts/mqtt_tts_listener.py:2411`, `:1787`). |
-| `jarvis/nodes/{node_id}/commands` | CC → node | `[{"command":"routine","details":{routine_name:<slug>, reply_request_id, tool_call_id, trusted:true, voice_command:"routine: <slug>", request_id}}]` (`app/api/routines.py:537-548`, `app/services/node_command_service.py:64-68`). The node dispatches it to `handle_routine` (`node-setup/scripts/mqtt_tts_listener.py:1388`, `:926`). |
+| `jarvis/nodes/{node_id}/commands` | CC → node | `[{"command":"routine","details":{routine_name:<slug>, reply_request_id, tool_call_id, trusted:true, voice_command:"routine: <slug>", request_id}}]` (`app/api/routines.py:537-548`, `app/services/node_command_service.py:64-68`). The node dispatches it to `handle_routine` (`node-setup/scripts/mqtt_tts_listener.py:1388`, `:926`). **Changed by D24/D4:** Go adds the full routine definition to `details` and drops `trusted:true`. |
 
 ### Background loops (in `app/main.py`)
 
 | Loop | Cadence | Gate |
 |---|---|---|
-| `_periodic_routine_scheduler` (`main.py:531-553`) | Sleeps `max(10, routines.scheduler_interval_seconds)` (default 30) **before** each tick | `routines.scheduler_enabled` (**default False**, `app/services/settings_definitions.py:675-680`) |
+| `_periodic_routine_scheduler` (`main.py:531-553`) | Sleeps `max(10, routines.scheduler_interval_seconds)` (default 30) **before** each tick | `routines.scheduler_enabled` (**default False**, `app/services/settings_definitions.py:675-680`). **Gate removed by D25** |
 | `_periodic_routine_execution_cleanup` (`main.py:556-575`) | Every 86400 s; the first run is 24 h after boot | none |
 | `fire_due_schedules`, inside `_periodic_errand_resume` (`main.py:203-224`) | Every 20 s, after `resume_waiting_errands` and `resume_due_timer_workflows` | none (always on) |
 | `_periodic_attention_journal` (`main.py:578-610`) | 60 s | Owned by doc 10, but it **reuses `routine_scheduler.is_due`** with an in-memory `last_fired` dict |
@@ -105,6 +122,8 @@ Users:
   - If CC is unreachable, keeps the local data and does not prune.
 
 ### 3.2 Node-side routine store and execution (reference; not ported, but it is the contract)
+
+> **Changed by D24/D44/D41/D5:** run-now and scheduled runs carry the full definition, so the node no longer depends on its local copy for them. CC owns every definition, including seeded defaults and node-reported Pantry routines, so the "protected" prune exception goes away once the node change lands. `user_id` stays unset (D41). Composition moves from `/api/v0/chat` to `/api/v0/node/llm/chat` (D5). Nothing is spoken for run-now and scheduled runs (D25).
 
 - **Precedence:** DB > `routines/custom_routines/*/routine.json` (Pantry) > hardcoded defaults (`good_morning`, `good_night`, `morning_briefing`, `nightly_briefing`). See `node-setup/commands/routine_command.py:81-117`, `:463-524`. `_load_routines` also **seeds** defaults and custom files into the DB on every load (`:106-110`).
 - **Routine definition schema** (node-native, the union of all sources):
@@ -153,6 +172,8 @@ Users:
 
 **Run-background** (`:597-668`) is cut. It is the only producer of `trigger="background"` and of `notify_user_id`.
 
+> **Changed by D24/D40:** the publish includes the full definition (D24). The wait is ~60 s via an in-process reply channel (Q7). An overlapping run of the same routine is skipped with a note (Q10). No `routine_executions` row is written (Q11).
+
 ### 3.4 Routine scheduler (`app/services/routine_scheduler.py`)
 
 The tick runs `run_due_routines(db)` (`:99-167`):
@@ -171,6 +192,8 @@ The tick runs `run_due_routines(db)` (`:99-167`):
    - Offline or missing → post a `failed` card ("the target node was offline") to the **household**.
    - Then mark it fired anyway: "respect cadence, don't pile up" (`:146-158`).
 6. Otherwise `await execute_routine_on_node(…, "scheduled", notify_on_complete=True)`, then `_mark_fired(now)` (`:160-165`). `_mark_fired` writes the in-memory `schedule` dict snapshot plus `last_fired_at` back into `routine.schedule` (`:92-96`).
+
+> **Changed by D25/D26/D27:** no `routines.scheduler_enabled` gate. The tick loop becomes a trigger kind on the one scheduler engine with a stored `next_fire_at` and claims. Missed runs still fire once, late (D26). Timezone is the node's zone, falling back to the household's; an unknown zone is a 422 at save (D40, Q6).
 
 **Semantics a port must decide on** (current behaviour first):
 
@@ -268,11 +291,11 @@ The tick runs `run_due_routines(db)` (`:99-167`):
 
 | Key | Default | Effect |
 |---|---|---|
-| `routines.scheduler_enabled` | **False** (`settings_definitions.py:675-680`) | When off, routine schedules **never fire**. The mobile UI still lets users set them. Truthy strings are accepted (`main.py:539-541`). |
+| `routines.scheduler_enabled` | **False** (`settings_definitions.py:675-680`) | When off, routine schedules **never fire**. The mobile UI still lets users set them. Truthy strings are accepted (`main.py:539-541`). **Dropped (D25).** |
 | `routines.scheduler_interval_seconds` | 30 | Tick period, floored at 10. Above 60 it breaks the first-fire window (§3.4). |
-| `routines.execution_ttl_days` | 7 | Audit retention. |
+| `routines.execution_ttl_days` | 7 | Audit retention. **Dropped with `routine_executions` (D40, Q11).** |
 | `smart_home.primary_node_id` (household) | — | Default target for run-now and scheduled runs. Resolved at **save** time for schedules and at request time for run-now. |
-| `attention.journal_card_cron` / `attention.timezone` | `0 21 * * *` / UTC | Doc 10's consumer of `is_due`. |
+| `attention.journal_card_cron` / `attention.timezone` | `0 21 * * *` / UTC | Doc 10's consumer of `is_due`. `attention.timezone` goes; household timezone instead (D18). |
 
 Schedules have no settings, and their sweep is always on.
 
@@ -310,6 +333,8 @@ Schedules have no settings, and their sweep is always on.
 ## 7. Invariants and non-obvious behaviour
 
 1. Routine JSON goes **only** over the node's authenticated HTTP pull, never over MQTT (`app/api/routines.py:10-13`). The MQTT payload is `{"event":"routines_changed","household_id":…}`.
+
+   > **Changed by D24:** the `routine` command now carries the full definition over MQTT. That is acceptable because per-node broker ACLs (D4) make only CC able to publish there and only the target node able to read it. The `routines/sync` nudge stays a nudge.
 2. The pull is **slug-keyed** and **enabled-only**. Args are flattened, with JSON-looking strings decoded (`:124-145`). Mobile round-trips args as `[{key, value: string}]`.
 3. The slug is assigned once, de-duplicated with `_N`, and never changes on rename.
 4. Every mutation nudges every **active** household node. MQTT errors never fail the request.
@@ -380,6 +405,8 @@ Golden and contract candidates:
      - (b) speak on the target node and also post the card
      - (c) a per-routine `announce: bool` flag
    - **Recommendation: (c), defaulting to true for scheduled runs and false for run-now.** The phone already shows the run-now result inline.
+
+   **Decided (D25):** (a) card only, as today. No "speak on node X" path is needed for routines; voice-triggered routines keep speaking locally.
 2. **[scope] Is `routines.scheduler_enabled` still meant to default to off?** What is it set to in prod?
    - *Why it matters:* with the default, the mobile schedule picker is a no-op. Users get silent non-firing, unless prod has flipped the setting.
    - Options:
@@ -387,18 +414,24 @@ Golden and contract candidates:
      - (b) default on
      - (c) remove the setting; a routine with a schedule is the opt-in
    - **Recommendation: (c).** The per-routine `schedule.enabled` already exists.
+
+   **Decided (D25):** (c). `routines.scheduler_enabled` is dropped; an enabled `schedule` is the opt-in.
 3. **[behaviour] What should missed scheduled occurrences do after downtime?** Today a routine fires **once, however late**: an 8am briefing replays at 7pm after an outage. Errand schedules also fire once, late, and drop the rest.
    - Options:
      - (a) fire once, late, as today
      - (b) skip if later than a grace window (e.g. 15 min or 10% of the period), and post a "skipped while offline" card
      - (c) replay every missed occurrence
    - **Recommendation: (b) for routines,** which act autonomously, with a 15-minute default grace. Keep (a) for errand schedules, since the user approves them anyway.
+
+   **Decided (D26):** (a) for both routines and errand schedules, not the recommendation. Fire once, late; no grace window, no replay.
 4. **[scope] Should routines and errand schedules share one scheduler engine?**
    - Today there are two loops and two semantics (§8.11). A third consumer, the attention journal, borrows `is_due`. Doc 09 workflows add `wake_at` timers.
    - Options:
      - (a) port both as they are
      - (b) one Go `scheduler` module: a `next_fire_at`-based durable trigger table with claims and enqueue into the embedded job queue. Routines, errand schedules, the journal and workflow wakeups are trigger *kinds*.
    - **Recommendation: (b).** Keep the routine `schedule` JSON (including `last_fired_at`) as a projection for the mobile contract.
+
+   **Decided (D27):** (b). One engine on the durable queue; `last_run_at` persisted; the `schedule` JSON stays as the mobile projection.
 5. **[behaviour] Where should routines execute in the Go world: still on the node, or on the server?**
    - Today CC only relays to the node. The node composes through CC `/api/v0/chat` anyway, and a run silently depends on the node's possibly stale local copy (§8.10).
    - Options:
@@ -406,6 +439,8 @@ Golden and contract candidates:
      - (b) CC sends the full definition in the `routine` MQTT command (still node-executed, never stale)
      - (c) CC executes server-side, dispatching node-plane steps like the errand executor
    - **Recommendation: (b).** It needs a node change, but a tiny one. Otherwise (a) needs no node change at all.
+
+   **Decided (D24):** node execution, with (b): the full definition rides in the `routine` command; the node falls back to its local copy when none is sent. (a) is the zero-change fallback if node changes have to wait. (c) is rejected for multi-tenancy reasons.
 6. **[behaviour] Which timezone should a routine schedule use?**
    - The mobile editor stamps the **phone's** zone on every save. A user travelling, or a family member in another zone, silently shifts a household's 7am routine.
    - Options:
@@ -413,6 +448,8 @@ Golden and contract candidates:
      - (b) the target node's zone
      - (c) a household timezone setting
    - **Recommendation: (b), falling back to (c).** Schedules for errands already use the node's zone (`schedule_errand_tool.py:238`). Also decide whether an unknown zone falls back to UTC silently (today) or is rejected with a 422. I recommend 422.
+
+   **Decided (D40 default):** (b), falling back to (c) the household zone. An unknown zone is a 422.
 7. **[behaviour] What should the run-now / scheduled result timeout be?**
    - 20 s regularly loses to the LLM composition of a medium briefing, producing false "didn't finish" cards (§8.3).
    - Options:
@@ -420,6 +457,8 @@ Golden and contract candidates:
      - (b) about 90 s, with run-now returning `202 {execution_id}` while mobile polls
      - (c) a longer synchronous wait of about 60 s
    - **Recommendation: (c) for now.** Mobile expects a synchronous result. In Go the wait is an in-process MQTT reply channel, so nothing leaks after a timeout.
+
+   **Decided (D40 default):** (c), a ~60 s synchronous wait. Note: mobile's `runRoutineNow` uses the shared `apiClient` with a 10 s axios timeout (`node-mobile/src/api/apiClient.ts:56`), so mobile gives up long before either 20 s or 60 s; the longer wait mainly fixes scheduled runs' false "didn't finish" cards.
 8. **[behaviour] Should run-now and scheduled routines run as a user?**
    - CC never passes `user_id`, so calendar and email steps run with no user (§8.7).
    - Options:
@@ -427,6 +466,8 @@ Golden and contract candidates:
      - (b) run-now passes the caller's user id; scheduled runs pass the routine's creator
      - (c) add an explicit per-routine "run as" field
    - **Recommendation: (b).** It needs a `created_by_user_id` column, which the port can add.
+
+   **Decided (D41):** (a), not the recommendation. No user is passed. Commands that need a person use a node secret with `value_type='user'` (mobile member picker); preserve that SDK contract.
 9. **[behaviour] Pantry and default routines live only on nodes. Should CC own them?**
    - They are invisible to mobile, can't be run-now'd or scheduled, and a same-slug user routine permanently shadows the default even after deletion (§8.8–9). Pantry's `/v1/routines/generate` client code is unused.
    - Options:
@@ -434,18 +475,24 @@ Golden and contract candidates:
      - (b) seed the defaults as real CC rows per household, and have the node report installed custom routines up to CC
      - (c) drop the node defaults and the Pantry routine component
    - **Recommendation: (b) for the defaults,** which also fixes the shadowing. Ask separately whether the Pantry `routine` package type is still wanted. If it isn't, the dead `generateRoutines` client goes too.
+
+   **Decided (D44):** (b). Defaults are seeded as CC rows per household; nodes report installed Pantry routine packages to CC, so the Pantry `routine` type stays. Fixes the shadowing bug. Pantry's `/v1/routines/generate` is outside jarvisd and left alone.
 10. **[behaviour] Overlap: if a routine is still running (or awaiting its result) when its next occurrence, or a run-now, arrives, what should happen?**
     - Options:
       - (a) allow concurrent runs, as today
       - (b) skip and note it on the card
       - (c) queue it
     - **Recommendation: (b),** with a per-routine single-flight lock in the job queue (dedup key `routine:{id}`).
+
+    **Decided (D40 default):** (b).
 11. **[minor] Should `routine_executions` stay write-only?**
     - Nothing reads it.
     - Options:
       - (a) drop it
       - (b) keep it and expose `GET …/routines/{id}/executions` for a "last run" line in mobile
     - **Recommendation: (b),** if a "last ran at / status" line is wanted. Otherwise (a).
+
+    **Decided (D40 default):** (a) drop `routine_executions`.
 12. **[minor] Schedules housekeeping.**
     - `paused` and `title` are unused, and `done`/`cancelled` rows are never purged.
     - Options:
@@ -453,13 +500,15 @@ Golden and contract candidates:
       - (b) drop `paused`/`title` and add a TTL purge of terminal rows (e.g. 30 days)
     - **Recommendation: (b).** Also include active `schedules` in `import-legacy`; PLAN §5 lists only routines.
 
+    **Decided (D40 default, D13):** (b): drop `paused`/`title`, purge terminal schedules after 30 days. Import **active** schedules only.
+
 ---
 
 ## 11. Go port notes
 
 **Shape.** Package `cc/routines`:
 
-- `store` (sqlc on `cc_routines`, `cc_routine_executions`, `cc_schedules`)
+- `store` (sqlc on `cc_routines`, `cc_schedules`; no `cc_routine_executions`, D40 Q11)
 - `api` (the 7 kept routine routes and 2 schedule routes)
 - `sync` (the nudge publisher)
 - `runner` (`RunOnNode(ctx, routine, nodeID, trigger, notify)`)
@@ -473,14 +522,20 @@ Golden and contract candidates:
 2. Publish on `jarvis/nodes/{id}/commands`.
 3. Have the `/device-control-results/{id}` handler deliver into the channel. The route stays for nodes, but there is no filesystem.
 
-A timeout cancels the waiter, and a late reply is dropped and logged. Keep the details payload byte-compatible: `routine_name`, `reply_request_id`, `tool_call_id`, `trusted`, `voice_command`, `request_id`. Add `user_id` only if Q8 says so; the node already reads it.
+A timeout (~60 s, D40 Q7) cancels the waiter, and a late reply is dropped and logged. The result route requires node auth and checks the rid was issued to that node (D4). Keep the details payload compatible: `routine_name`, `reply_request_id`, `tool_call_id`, `voice_command`, `request_id`, **plus the full routine definition** in the node-pull shape (D24). Drop `trusted` (D4); the node will then call `/commands/{rid}/verify`, so the pending entry must be recorded before publishing (doc 05). Do **not** add `user_id` (D41).
+
+**Overlap (D40 Q10).** A per-routine single-flight lock (dedup key `routine:{id}`); an overlapping run-now or occurrence is skipped and noted on the card.
+
+**Definition ownership (D44).** Seed node defaults as `cc_routines` rows per household (on household creation and at import). Accept node reports of installed Pantry routine packages and upsert them as CC rows. Once nodes stop seeding locally, the node prune has no "protected" slugs, so delete/disable reaches every node.
 
 **Scheduler.**
 
 - Store an explicit `next_fire_at` per trigger in a `cc_triggers` table (or a column on `cc_routines`). Compute it on save and on fire.
 - Claim with a conditional UPDATE, as `schedule_service` does, and enqueue a job with dedup key `(kind, id, occurrence)` into the embedded queue. Durable delivery comes from the queue, and the claim gives exactly-once enqueue.
 - Keep writing `schedule.last_fired_at` inside the routine JSON, because mobile reads it.
-- The grace window for missed runs is per Q3.
+- Missed runs fire once, late, with no grace window (D26). `last_run_at` is persisted (D27), so a restart doesn't re-fire or skip.
+- There is no `routines.scheduler_enabled` gate (D25).
+- The same engine runs errand schedules, the attention journal card (household timezone, D18), workflow wake-ups and the periodic cleanup loops (D27). Errand schedules respect `errands.enabled` (D13).
 - Mobile resaving a schedule must **not** reset `next_fire_at` unless `type`, `cron`, `interval_seconds` or `timezone` actually changed. This fixes §8.4.
 
 **Cron and timezones.**
@@ -497,16 +552,20 @@ A timeout cancels the waiter, and a late reply is dropped and logged. Keep the d
 
 - Routines keep TEXT JSON columns, per the convention. The node pull flattens at the boundary.
 - Timestamps: today they are naive UTC everywhere. Store RFC3339 UTC text in SQLite, and keep the `isoformat()` style (`+00:00`, microseconds) for `last_fired_at`, since mobile parses it.
-- `import-legacy`: routines are covered. Add `schedules` with `state IN ('active','paused')`, and skip `routine_executions`.
+- `import-legacy`: routines are covered. Add `schedules` with `state = 'active'` only (D13; `paused` is dropped), and skip `routine_executions`.
+- Routine timezone: the target node's zone, falling back to the household's; 422 on an unknown zone (D40 Q6).
 
 **Cut.**
 
 - `POST /routines/run-background`, `_run_routine_background_task`, `trigger="background"`, and `tests/test_routine_background_dispatch.py`.
+- `routine_executions`, its daily TTL loop and `routines.execution_ttl_days` (D40 Q11). `routines.scheduler_enabled` (D25).
+- `schedules.paused` and `schedules.title`; add a 30-day purge of terminal schedules (D40 Q12).
 - The `_RESULT_DIR` file plumbing.
 - The croniter-missing branches.
 
 **Risks.**
 
 - Schedule display strings are a mobile/voice contract with quirks such as the `:00` stripping. Port them byte-exact with golden tests.
-- Behaviour changes that answers to Q1, Q3, Q6 and Q7 introduce are user-visible. Land them deliberately, not as port accidents.
+- User-visible changes from the decisions: scheduled routines fire without a global gate (D25), the zone comes from the node (Q6), the wait is ~60 s (Q7), and overlapping runs are skipped (Q10). Land them deliberately, not as port accidents.
+- Node changes required: accept an inline definition in the `routine` command (D24), compose via `/node/llm/chat` (D5), report Pantry routines and stop seeding defaults (D44). Until they land, the node uses its local copy and the D24 fallback (version hash + re-pull) applies.
 - `routines/sync` nudges come from the embedded broker. Nodes connect with CC-issued credentials (doc 05), so the nudge works only after the broker cutover. During the strangler phase, the node must still be subscribed on whichever broker CC publishes to.

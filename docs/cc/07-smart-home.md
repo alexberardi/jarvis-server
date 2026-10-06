@@ -26,6 +26,23 @@ Line references without a path are to `api/smart_home.py`. Other repos are abbre
 
 > **Correction (2026-10-06, D9):** the external device manager feature is live. `smart_home.use_external_devices` and `smart_home.device_manager` are written by `PUT smart-home/config` (`smart_home.py:74-127`) and drive the mobile external-devices UI, so they are **not** dead settings. Only the `control-external` *route* is cut.
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. Sections below still describe today's Python behaviour; inline "Changed by" notes and §11 say what Go does instead.
+
+- **D1:** Caddy is not ported. External OAuth (e.g. Nest) goes through the cloud relay bounce; local providers (HA) use CC's own `/oauth/callback` over LAN HTTP.
+- **D4 (security, wire shapes kept):** node auth on routes 13 and 16, with the rid bound to the issuing node; node-id == path on result uploads (18, 21, Bluetooth 159, 314); household check on `config/push`, OAuth session create (target node in the caller's household), `exchange`/status, and the Bluetooth polls; the OAuth `exchange_url` SSRF is fixed (URLs come from server-side config only). `trusted:true` is removed; per-node broker credentials and ACLs make commands authentic (D7).
+- **D5:** household checks consider **all** of the caller's memberships, not just the JWT's active household. Members are not otherwise restricted.
+- **D6:** config push `pending`/`ack` (routes 24, 25) require node auth, with the node bound to `{node}` in the path. Real nodes already send `X-API-Key`.
+- **D8:** known bugs fixed as intended differences; this includes adding the missing Bluetooth `release` and `auto-connect` routes (Q4).
+- **D9:** `POST /devices/control-external` (route 14) is cut. The external device manager feature (`smart_home.use_external_devices`, `smart_home.device_manager`, device listing, `ExternalDeviceDetailScreen`) is **live and kept**. The disabled `ControlDeviceTool` and `ambient_grounding.py` are cut.
+- **D20:** rooms, devices and other household-owned smart-home data survive a user's account deletion.
+- **D27:** retention sweeps run as trigger kinds on the one scheduler engine.
+- **D28:** the device model is ported **as-is**: same routes, the `devices` table, the node's external device manager dual mode, and `/devices/import`. Source of truth revisited after cutover.
+- **D29:** **cameras are deferred** until after the port. No go2rtc or ffmpeg in v1. Camera device rows import and stay listed; the stream/HLS routes return a clear "not available" error.
+- **D40 (B defaults):** OAuth at-rest key is a dedicated generated key (Q9); retention sweeps for request tables and consumed pushes (Q10); stream naming deferred with cameras (Q12).
+- **M7:** drop `smart_home.use_home_assistant`, the voice Bluetooth deep-link branch and `ControlDeviceTool`; keep `smart_home.device_manager`. **M8:** voice control on a node lacking the protocol stays status quo; forwarding is post-port. **M9:** node selection = protocol match → primary → online/most recent `last_seen`; fail fast 503 instead of a 10 s timeout.
+
 ## 1. Purpose
 
 CC is the household's **registry and switchboard** for smart-home things. It is **not** the thing that talks to devices: every LAN or cloud protocol call happens on a node, inside a `jarvis-device-*` protocol plugin (hue, kasa, lifx, nest, govee, homekit, apple, homeconnect, schlage, simplisafe, resideo, zwave). CC's jobs:
@@ -87,7 +104,7 @@ Auth key:
 | — | GET `/node/devices/{entity_id:path}` | N | **none → CUT** | 1054 |
 | 12 | POST `/households/{hh}/devices/{id}/control` | P+hh | MOB `device-controls/*` | 1098 |
 | 13 | POST `/device-control-results/{rid}` | **none** | NS `mqtt_tts_listener.py:290,991` | 1200 |
-| 14 | POST `/households/{hh}/devices/control-external` | P+hh | **MOB function defined, no screen calls it** (Q5) | 1229 |
+| 14 | POST `/households/{hh}/devices/control-external` | P+hh | **MOB function defined, no screen calls it** (Q5). **CUT (D9)** | 1229 |
 | 15 | GET `/households/{hh}/devices/{id}/state` | P+hh | MOB DeviceControlPanel | 1332 |
 | 16 | POST `/device-state-results/{rid}` | **none** | NS `device_state_handler.py:160` | 1420 |
 | 17 | POST `/nodes/{node}/device-scan/request` | P+hh(node) | MOB DeviceDiscovery | 1473 |
@@ -101,6 +118,8 @@ Auth key:
 | 25 | POST `/nodes/{node}/config/{push}/ack` | **none** | NS `config_push_service.py:449` | 2062 |
 
 ### 2.2 Routes: `cameras.py`
+
+> **Changed by D29:** cameras are deferred. In v1 the list route still lists imported camera rows; the stream start/stop and HLS proxy return a clear "not available" error; `camera-credentials` is not published or awaited.
 
 | Method and path | Auth | Caller | Line |
 |---|---|---|---|
@@ -230,6 +249,8 @@ Mobile's axios timeout is 15 s (`MOB smartHomeApi.ts:141`), shorter than CC's 20
 
 Online status is **not** considered: an offline node is a 10 s timeout.
 
+> **Changed by D4/M9:** Go publishes control and state without `trusted:true` (per-node broker ACLs make the command authentic). Node choice is one policy for control and state: protocol match → `primary_node_id` → online, most recent `last_seen`; with no online node the route fails fast with 503 instead of a 10 s timeout.
+
 **State** (route 15, 1332-1417):
 
 - Same shape on the `device-state` topic. The file is `state-{rid}.json`, with a fixed 10 s timeout.
@@ -312,6 +333,8 @@ Bluetooth specifics:
    - other rows → `status=consumed` and `consumed_at`, and are **kept forever**
    - an ack of an already-consumed row → `already_consumed`
 
+> **Changed by D4/D6:** `config/pending` and `ack` require node auth with the node bound to the path; `config/push` checks the caller's membership of the node's household (D5: any of their households). Consumed non-auth pushes are swept after 24 h (D40, Q10).
+
 ### 3.6 Provider OAuth
 
 **Session create** (240-365):
@@ -354,6 +377,8 @@ Storage: `client_secret` is encrypted into `client_secret_enc`. The session row 
 
 Refresh tokens and background refresh live entirely on the node afterwards.
 
+> **Changed by D1/D4/D5/D40:** no Caddy; external providers use the relay bounce and HA uses CC's own callback over LAN HTTP. Session create checks the target node is in one of the caller's households; `exchange` and status check ownership. `exchange_url`/`authorize_url` come from server-side config only, not the client body (SSRF fix). The at-rest key is a dedicated generated key, not derived from `SECRET_KEY` (Q9).
+
 **Encryption** (106-137): this is **AES-256-GCM** (not Fernet), stored as `b64url(nonce‖ct)`.
 
 - Key: `JARVIS_TOKEN_ENCRYPTION_KEY` (64 hex characters).
@@ -361,6 +386,8 @@ Refresh tokens and background refresh live entirely on the node afterwards.
 - If neither is set, it raises a 500 at use time.
 
 ### 3.7 Cameras
+
+> **Changed by D29:** deferred until after the port; nothing below is built in v1. Kept as the reference for the later HLS packager vs WebRTC/MSE decision.
 
 **Start stream** (`cameras.py:221-286`):
 
@@ -487,6 +514,8 @@ Environment variables:
 
 1. **Route 13's shape is a node contract.** The node POSTs `{success, error, input_required?}` to `/api/v0/device-control-results/{rid}`, where `rid` = `details.reply_request_id || request_id`. The node sends `X-API-Key` on every REST call (`NS clients/rest_client.py:53-68`), so Go *may* require node auth there without breaking nodes. The same applies to routes 16, 24 and 25.
 2. **Pass `trusted:true` on control actions.** Without it the node calls `_verify_command`, and the action is dropped unless the in-memory pending-command check passes (`NS :203`). In jarvisd the broker **must** forbid node clients from publishing to `jarvis/nodes/+/commands`. Today any MQTT client that can publish there can drive devices with `trusted:true`.
+
+   > **Changed by D4/D7:** Go drops `trusted:true`. Consequence: today's nodes will call `POST /commands/{rid}/verify` for every `action`, so CC must record the pending command before publishing and keep the verify route (doc 05) working, or every control is silently dropped.
 3. **Control timeouts return 200 with `success:false`,** not 504. Cameras return **504** on a node timeout. Keep both.
 4. **The 20 s / 10 s split by `action.startswith("pair")`** (1166).
 5. **The stream name is `cam_{entity_id}`, and the HLS URL is relative:** `/api/v0/cameras/stream/{name}/stream.m3u8`. Mobile builds the absolute URL itself (`MOB cameraApi.ts:53`) and sends a Bearer header to the player.
@@ -595,6 +624,8 @@ Golden fixtures:
      - (b) CC DB is the single registry. HA devices get imported too, and the HA package reads the registry.
      - (c) Nodes are the truth, and CC only stores room assignment and names as overlays.
    - **Recommendation: (a) for the port.** Byte-compatible routes, then decide (b) vs (c) after the cutover. Confirm that HA rows in `devices` are wanted at all.
+
+   **Decided (D28):** (a). Same routes, `devices` table, external device manager dual mode and `/devices/import` kept; revisit the source of truth after cutover.
 2. **[behaviour] Do cameras actually work on mobile today, and should Go ship the ffmpeg HLS packager?**
    - `hls_packager.py` is finished, tested and unwired. Its docstring says the go2rtc HLS that is actually served goes black or 404s on AVPlayer and ExoPlayer.
    - *Why it matters:* it changes the external-binary story (go2rtc **plus** ffmpeg plus x264) and the proxy (static files instead of go2rtc passthrough).
@@ -603,6 +634,8 @@ Golden fixtures:
      - (b) Port with the packager wired: same URL contract, served from a temp dir.
      - (c) Have Go speak WebRTC or MSE instead.
    - **Recommendation: (b)** if you confirm passthrough is broken on your phones. Keep cameras an optional module that is disabled when go2rtc or ffmpeg is absent.
+
+   **Decided (D29):** none for v1. Cameras are deferred ("I don't think it works currently"): no go2rtc or ffmpeg; rows stay listed; stream/HLS routes return "not available". Revisit (b) vs (c) after the port.
 3. **[change] May Go close the auth holes in §8 while keeping wire shapes?**
    - The holes:
      - node auth on `device-control-results`, `device-state-results`, `config/pending` and `ack`
@@ -611,21 +644,31 @@ Golden fixtures:
      - UUID validation of `rid`
    - Every node already sends `X-API-Key`. A new 401 or 403 would hit only an attacker or a misconfigured client.
    - **Recommendation: yes, all of them.** Each one is a behaviour change worth a line in the contract suite: the Python oracle passes it as "200", and Go deliberately diverges.
+
+   **Decided (D4/D5/D6):** yes, all of them, plus the `exchange_url` SSRF fix (server-side config only). Household checks match any of the caller's memberships.
 4. **[scope] Mobile's Bluetooth "Release/Forget" and "Auto-connect" buttons call `/bluetooth/release` and `/bluetooth/auto-connect`, which CC never implemented.** The node already handles both topics. Should Go add them?
    - They are thin: a 202 plus a publish of `{mac_address, forget}` / `{mac_address, enabled}`.
    - Python is frozen, so this would be the first "new" route.
    - **Recommendation: add both in Go.** They are tiny, and the UI is already shipped and broken.
+
+   **Decided (D8, P2 "Bluetooth missing routes = add"):** add both.
 5. **[scope] Cut `POST /devices/control-external`?** No mobile screen calls it; the API function is orphaned.
    - **Recommendation: cut it**, unless you plan to make `ExternalDeviceDetailScreen` controllable. Even then, it would be better to route through the node's own manager than a CC relay.
+
+   **Decided (D9):** cut the route only. The external device manager feature and its settings are live and kept.
 6. **[behaviour] Voice control runs on whichever node heard you, while mobile control is routed to a node that has the protocol plugin.** On a multi-node household where only one node has, e.g., HomeKit paired, voice fails with "No adapter for protocol". Should CC route voice `control_device` calls too?
    - Options:
      - (a) Status quo.
      - (b) When the local node lacks the protocol, the node or CC forwards to the protocol node via the mobile relay path.
      - (c) Require every node to install every device plugin.
    - **Recommendation: (a) for the port, and track (b)** as post-port work.
+
+   **Decided (M8/D47):** (a) status quo for the port; forwarding to a protocol node is post-port work.
 7. **[behaviour] The HA integration fetches `GET /households/{hh}/rooms` with a node key, which always 401s.** Should Go accept node auth (scoped to the node's own household) on `GET rooms`?
    - Accepting it makes the HA package's "upstairs" room-hierarchy feature start working for the first time, which could change voice behaviour.
    - **Recommendation: yes, accept node auth on GET rooms only,** and soak it on dev.
+
+   **Decided (D4/D5, P1 policy default):** yes. Accept node auth on `GET rooms` only, scoped to the node's own household; soak on dev. (Covered by P1's list; not asked individually.)
 8. **[behaviour] Unify the node-selection policy?**
    - Today control and state use protocol match, then primary, then arbitrary. Control-external uses protocol match plus primary. Cameras use primary, then arbitrary, and ignore protocols. None of them consider online status.
    - **Recommendation:**
@@ -635,22 +678,32 @@ Golden fixtures:
      4. Fail fast with 503 "no online node with protocol X" instead of a 10 s timeout.
 
    This changes the error shape only in the failure case.
+
+   **Decided (M9/D47):** yes, as recommended (cameras are deferred, so this covers control and state).
 9. **[change] OAuth token-at-rest key.** The key currently derives from `SECRET_KEY` / `JARVIS_AUTH_SECRET_KEY`, which the RS256 migration retires.
    - **Recommendation:** jarvisd generates a dedicated 32-byte key on first run (in `~/.jarvis/` or its secrets table). Do **not** import `auth_sessions` (they live 10 minutes and are single-use). Purge consumed and expired sessions after 1 h.
 
    Also: may Go validate `exchange_url` / `authorize_url` (https, or the session's `provider_base_url` host) to stop SSRF?
+
+   **Decided (D40 default, D4):** a dedicated generated key; `auth_sessions` not imported; consumed and expired sessions purged. SSRF is fixed by taking the exchange/authorize URLs from server-side config only (D4).
 10. **[behaviour] Retention for the request tables and consumed config pushes.**
     - The four request tables plus `config_pushes` grow forever. Non-auth consumed pushes keep HA config ciphertext indefinitely.
     - **Recommendation:**
       - an embedded-queue sweep that deletes request rows 1 h after `expires_at`
       - delete consumed non-auth pushes after 24 h
       - keep the Bluetooth `status` route's "latest completed scan" semantics by keeping the newest completed scan per node
+
+    **Decided (D40 default):** retention sweeps as recommended.
 11. **[minor] Drop the dead settings and the code paths behind them?**
     - The settings: `smart_home.use_home_assistant` and `smart_home.device_manager`. The latter must still be echoed in the config response, because mobile types include it.
     - The code paths: the voice Bluetooth deep-link branch and the disabled `ControlDeviceTool`.
     - **Recommendation:** keep `device_manager` in the JSON as a stored passthrough. Drop the rest.
+
+    **Decided (M7/D47, D9):** drop `smart_home.use_home_assistant`, the voice Bluetooth deep-link branch and `ControlDeviceTool`. Keep `smart_home.device_manager` as a **live** setting (external device manager), not a passthrough.
 12. **[minor] Stream-name collisions across households** (`cam_{entity_id}`).
     - **Recommendation:** name streams `cam_{device_id}` (a UUID) in Go. The URL is opaque to mobile (it uses the returned `stream_name`), so this is safe.
+
+    **Decided (D40 default):** deferred with cameras (D29); apply `cam_{device_id}` when cameras are built.
 
 ## 11. Go port notes
 
@@ -664,21 +717,27 @@ Golden fixtures:
 | `jobs.go` | scan, list and Bluetooth request/poll |
 | `configpush.go` | |
 | `oauth.go` | |
-| `cameras.go` | plus `hls.go` if Q2 is (b) |
+| `cameras.go` | v1: list only, stream/HLS routes return "not available" (D29) |
 | `tools.go` | `get_ha_entities` |
 
 **Request/response correlation replaces temp files.**
 
 - `platform/mqtt` provides `Await(ctx, requestID) <-chan json.RawMessage` (the PLAN §6 5a mechanism).
-- The HTTP result routes (13, 16, camera creds) stay as **node-facing contracts** and just `Fulfill(rid, body)`.
-- Timeouts come from `context.WithTimeout`: 10 s, or 20 s for pair. On timeout the code returns the same 200/false (or 504 for cameras) bodies.
+- The HTTP result routes (13, 16) stay as **node-facing contracts**: they require node auth, check the rid was issued to that node (D4), then `Fulfill(rid, body)`. No camera-creds route in v1 (D29).
+- Timeouts come from `context.WithTimeout`: 10 s, or 20 s for pair. On timeout the code returns the same 200/false body.
+- Node pick (M9): protocol match → primary → online/most recent `last_seen`; no online node → 503 fail fast.
+- Control and state publish **without** `trusted:true` (D4). Record the pending command before publishing so the node's `_verify_command` call succeeds (§7.2).
 - No blocked threads, no `/tmp` files, and no path-traversal surface.
 - A single process removes the "multi-worker" reason the files existed.
 
 **Request/poll jobs** (scan, list, Bluetooth):
 
 - Keep the SQLite tables, because mobile polls by ID and the 410 semantics need `expires_at`.
-- Add the TTL sweep as a periodic job on the embedded queue.
+- Add the TTL sweep as a trigger kind on the one scheduler engine (D27, D40): delete request rows 1 h after `expires_at`, consumed non-auth config pushes after 24 h, consumed/expired `auth_sessions`.
+- Result uploads check node-id == path; mobile polls check household (D4/D5).
+- Add Bluetooth `release` and `auto-connect` (D8): 202 plus a publish of `{mac_address, forget}` / `{mac_address, enabled}`.
+
+**Config push (D4/D6):** `pending`/`ack` require node auth bound to `{node}`; `push` checks household membership (any of the caller's households, D5).
 - Alternative: in-memory with TTL. That is acceptable too, but it loses Bluetooth `status`'s "last completed scan" fallback across restarts.
 
 **Embedded broker ACL** (cross-cutting with chapter 05):
@@ -686,9 +745,9 @@ Golden fixtures:
 - Nodes may subscribe to `jarvis/nodes/{self}/#` and `jarvis/auth/+/ready`.
 - Nodes must **not** publish to `jarvis/nodes/+/commands`, `.../device-*`, `.../camera-credentials`, `.../config/push`, `jarvis/auth/#`.
 - jarvisd publishes in-process, with no client credentials.
-- This makes `trusted:true` actually trustworthy.
+- This replaces `trusted:true`, which Go no longer sends (D4/D7). Per-node credentials, as in doc 05.
 
-**go2rtc:**
+**go2rtc** (deferred, D29; notes kept for when cameras are built):
 
 - An optional supervised child process (PLAN §3.2), with config written by jarvisd.
 - Bind the API (1984) and RTSP (8554) to **127.0.0.1** only. The proxy is the only way in.
@@ -696,7 +755,7 @@ Golden fixtures:
 - Because go2rtc keeps the `nest:` secrets in memory, never expose `/api/config`. Keep the allow-list as defence in depth.
 - On jarvisd restart, re-registration happens lazily: mobile's retry calls start again. Optionally persist active streams.
 
-**HLS packager** (if wired):
+**HLS packager** (deferred, D29):
 
 - `exec.Cmd` per stream.
 - A goroutine pre-warms against `/api/frame.jpeg`, then respawns only on exit with a 3 s backoff.
@@ -706,7 +765,11 @@ Golden fixtures:
 
 **OAuth:**
 
-- Use `crypto/aes` + `cipher.NewGCM`, with the same `b64url(nonce‖ct)` format only if `auth_sessions` were imported (Q9 says don't).
+- Use `crypto/aes` + `cipher.NewGCM` with a dedicated key generated on first run (D40, Q9). `auth_sessions` are not imported.
+- Session create, `exchange` and status check the target node / session against the caller's households (D4/D5).
+- `exchange_url` and `authorize_url` are resolved from server-side config, never taken from the client body (D4 SSRF fix).
+- No Caddy (D1): relay bounce for external providers, CC's own `/oauth/callback` over LAN HTTP for local ones (HA).
+- `GET rooms` accepts node auth scoped to the node's household (Q7).
 - `net/http` client with a 15 s timeout. Form-encode the exchange.
 - The redirect builder is a pure function: golden-test all three modes.
 - Relay `state` encoding must stay byte-compatible (unpadded `RawURLEncoding` of `{"t":…,"r":…}` with Python `json.dumps` spacing, `", "` and `": "`).
@@ -729,3 +792,5 @@ Golden fixtures:
 
 - `verify_household_role` becomes an in-process call to the auth module. Today it is a synchronous HTTP round trip on **every** smart-home request.
 - The mobile-chat DB device injection and the voice room-hierarchy injection become direct repository calls shared with chapter 01.
+
+**Cut:** route 14 `control-external` (D9), `ControlDeviceTool`, `smart_home.use_home_assistant`, the voice Bluetooth deep-link branch (M7). Keep `smart_home.device_manager` and `use_external_devices` (live).

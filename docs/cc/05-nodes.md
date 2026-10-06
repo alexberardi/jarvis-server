@@ -6,6 +6,25 @@ All paths are relative to `jarvis-command-center/app/` unless prefixed with anot
 
 ---
 
+## 0. Decisions applied (2026-10-06)
+
+Source: `QUESTIONS.md`. Sections below still describe today's Python behaviour; inline "Changed by" notes and §11 say what Go does instead.
+
+- **D4 (security):** `trusted:true` is removed from every published command. Fresh installs get **per-node broker credentials and ACLs** (a node subscribes only to its own `jarvis/nodes/{self}/#` plus `jarvis/auth/+/ready`, and publishes only its own responses; CC is the only other publisher). The result sinks (`/device-control-results`, `/device-state-results`, `/mobile/node-tool-reports`, `/mobile/voice-profile-results`) require node auth, and the rid must belong to that node. Ambient-noise trigger/poll and the settings `/result` poll get the household check. Wire shapes are unchanged.
+- **D4/D5 (provisioning):** token minting adds a household-membership check against the *target* household, across **all** of the caller's memberships (users can belong to several households), not just the JWT's active one.
+- **D5:** `/api/v0/chat` is dropped; node `chat_text()` moves to `/node/llm/chat` (§3.11), which becomes a core node route, not only a plugin one. Needs a node-setup change. Forge test install (topic 19, `test-install`) is dropped.
+- **D6 (owned by 07):** config push `pending`/`ack` get node auth bound to the path node. DELETE still hard-deletes `config_pushes` (§3.4).
+- **D7:** commands are authentic by construction via the D4 broker ACLs; the node-side verify step is no longer a security boundary.
+- **D8:** known bugs are fixed and logged as intended differences: `/k2/ack` checks the path node (§8.5), no negative caching of auth outages (§8.7), the sweeper filters by kind (§8.8), and `create_settings_request` no longer skips authz on a NULL household (§8.6).
+- **D9:** `/nodes/{id}/commands` (LoRA `train_adapter`) is cut, with the verb. `adapter_hash` goes with LoRA.
+- **D10:** factory reset uses the **tracked flow only**: `POST /admin/nodes/{id}/factory-reset` creates a `NodeTask` (single-in-flight), the node reports via `/nodes/factory-reset/{task_id}/status`, and the sweeper times it out. Mobile's delete switches to it (mobile change). The DELETE + `verify-reset` flow is dropped once mobile switches; `verify-reset` stays only while older node builds need it. The reset token is **persisted in SQLite with the task**, so an offline node or a restart can still complete the reset.
+- **D11:** `tracing.retention_days` is not declared; trace retention is hard-coded to 7 days. Defined-but-unread keys are dropped.
+- **D18 (owned by 10):** the attention broker interposes on `/node/push-notification`, `/node/inbox-item` and `/node/send-link`; with `attention.enabled` off they stay byte-identical.
+- **D24 (owned by 08):** the `routine` verb carries the full routine definition in `details`.
+- **D29 (owned by 07):** cameras are deferred, so the camera-creds result waiter is not built in v1.
+- **D40 (B defaults):** stuck update dispatch → 400 at request time (Q5); broker sessions in memory (Q7); persist `include_values`/`user_id` on settings requests (Q8); drop bare-key node auth after verifying node headers (Q10); prune settings requests/snapshots after 24 h (Q11).
+- **M10:** `/nodes/{id}/actions` passes `input_required` through as an optional field. **M11:** a demoted `send-link` keeps its URL as `metadata:{url, type:"open_url"}` (doc 13).
+
 ## 1. Purpose
 
 A **node** is a Pi Zero (or Docker/dev) voice client. This subsystem owns:
@@ -37,9 +56,9 @@ Auth: **N** = node `X-API-Key: node_id:node_key` (`deps.py:162-217`); **J** = us
 | POST | `/admin/nodes` | A | install-e2e `seed.py:83`, `scripts/seed_dev.py:226`, node-setup `authorize_node.py:118` | `admin.py:345` |
 | PATCH | `/admin/nodes/{id}` | A | `authorize_node.py:171` | `admin.py:626` |
 | DELETE | `/admin/nodes/{id}` | J (power_user; superuser if no household) | mobile `deleteNode` (`nodeApi.ts:52`), `bootstrap_multi_node.py:196` | `admin.py:393` |
-| POST | `/admin/nodes/{id}/factory-reset` | J | **none: CUT** (Appendix A) | `admin.py:469` |
+| POST | `/admin/nodes/{id}/factory-reset` | J | **none: CUT** (Appendix A). **Kept by D10:** becomes the only reset flow; mobile's delete switches to it | `admin.py:469` |
 | POST | `/nodes/factory-reset/{task_id}/status` | `X-Reset-Token` | node, but only when the MQTT message carries `task_id`, i.e. only via the cut route | `admin.py:564` |
-| POST | `/nodes/verify-reset` | – | node legacy path (`mqtt_tts_listener.py:2149`). **This is the live path**, because DELETE publishes without `task_id`. | `admin.py:765` |
+| POST | `/nodes/verify-reset` | – | node legacy path (`mqtt_tts_listener.py:2149`). **This is the live path**, because DELETE publishes without `task_id`. **D10:** kept only while older node builds need it | `admin.py:765` |
 | GET/POST/DELETE | `/admin/cache/*` | – | **CUT** | `admin.py:648-665` |
 | GET/POST | `/admin/adapter/*` | A | **CUT** (LoRA) | `admin.py:691-751` |
 | POST | `/provisioning/token` | A or J (member) | mobile `requestProvisioningToken` (`commandCenterApi.ts:152`) | `provisioning.py:154` |
@@ -54,7 +73,7 @@ Auth: **N** = node `X-API-Key: node_id:node_key` (`deps.py:162-217`); **J** = us
 | POST | `/nodes/{id}/k2/ack/{rid}` | N (**not checked against the path id**) | node `_ack_k2_provision` (`:1751`) | `node_settings.py:569` |
 | GET | `/node/mqtt-credentials` | N | node `utils/mqtt_credentials.py:58` | `api/node_mqtt.py:22` |
 | POST | `/nodes/{id}/actions` | J (member) | mobile (`commandCenterApi.ts`) | `api/node_commands.py:79` |
-| POST | `/nodes/{id}/commands` | A | jarvis-admin `routes/nodes.ts:44`, which only sends `train_adapter`. So it is **effectively LoRA-only.** | `api/node_commands.py:138` |
+| POST | `/nodes/{id}/commands` | A | jarvis-admin `routes/nodes.ts:44`, which only sends `train_adapter`. So it is **effectively LoRA-only.** **CUT (D9)** | `api/node_commands.py:138` |
 | POST | `/nodes/{id}/node-config` | J (member) | mobile `nodeApi.ts:73` | `api/node_commands.py:156` |
 | POST | `/nodes/{id}/led/preview` | J (member) | mobile `nodeApi.ts:88` | `api/node_commands.py:189` |
 | POST | `/commands/{rid}/verify` | N | node `_verify_command` (`mqtt_tts_listener.py:128`) | `api/node_commands.py:222` |
@@ -167,7 +186,11 @@ mobile (JWT)             CC                          jarvis-auth                
   3. Otherwise the **legacy** path: `nodes.api_key == header`, i.e. the bare node_key (`:211-217`).
 
   Every success calls `touch_node_last_seen` (§3.7). `is_active` is **not** checked.
+
+  > **Changed by D40 (05.Q10):** Go drops the legacy bare-key path (after confirming the jarvis-dev and prod nodes send `node_id:node_key`) and never caches "auth unavailable" (auth is in-process).
 - MQTT credential: one **shared** credential for all nodes and CC (`core/mqtt_client.py:39-50`). Nulls mean connect anonymously. When the broker rejects with CONNACK 4 or 5, the node self-heals by re-fetching, at most once per 300 s (`mqtt_tts_listener.py:1440-1470`).
+
+  > **Changed by D4:** per-node broker credentials and ACLs; the `/node/mqtt-credentials` response shape is unchanged.
 - The QR payloads in node-mobile (`qrPayloadService.ts`) are mobile↔mobile K2 export, `{v, mode, node_id, kid, k2, cc_url}`. CC never sees them.
 
 ### 3.2 Settings request / snapshot (mobile ↔ node, end-to-end encrypted)
@@ -215,6 +238,8 @@ The **cut** tracked path (`admin.py:469-561`) creates `node_tasks(kind="factory_
 
 On success CC marks `is_active=False` and deactivates in auth (`admin.py:564-623`). Terminal states are idempotent (`:604-606`).
 
+> **Changed by D10:** the tracked path is the one Go keeps, and mobile's delete moves to it. The reset token is stored in SQLite on the `node_tasks` row instead of `core/pending_resets.py`'s in-memory 300 s dict, so a node that comes back later, or a server restart, can still complete the reset. The DELETE + `verify-reset` path above survives only until mobile switches and older node builds are gone.
+
 ### 3.5 Node commands topic and the verify pattern
 
 `NodeCommandService._publish` (`node_command_service.py:49-81`):
@@ -236,6 +261,8 @@ node: POST result to verb-specific sink (§3.6)
 ```
 
 **Which verbs actually verify** is the node's choice, not CC's (`mqtt_tts_listener.py:128-143`, `183`, `203`, `1276`):
+
+> **Changed by D4/D7:** Go never sends `trusted:true`. Command authenticity comes from per-node broker ACLs (only CC may publish to `jarvis/nodes/{nid}/commands`). `train_adapter` is cut (D9). The `routine` verb carries the full definition (D24, doc 08).
 
 | Verb (`commands` topic) | Published by | Node verifies? | Result sink | CC wait |
 |---|---|---|---|---|
@@ -470,39 +497,63 @@ Env: `MQTT_USERNAME`, `MQTT_PASSWORD`, `JARVIS_MQTT_BROKER_URL`, `NODE_AUTH_CACH
    - (c) (b) plus a later node change to always verify.
 
    **My recommendation: (b)** for the port, which closes the hole server-side without touching the node, then (c) post-port.
+
+   **Decided (D4/D7):** (b). Per-node broker credentials and ACLs; `trusted:true` removed. Commands are authentic by construction, so a node-side always-verify change is not required.
 2. **[behaviour] Should the unauthenticated result sinks get authentication?** These are `/device-control-results`, `/device-state-results`, `/mobile/node-tool-reports` and `/mobile/voice-profile-results`. Nodes already send `X-API-Key` on these POSTs via RestClient. Options:
    - (a) Port them unauthenticated.
    - (b) Require node auth and match the rid to the node it was issued to.
 
    **My recommendation: (b).** Accept the node key when present and bind rid→node_id in the in-process waiter map. First confirm that RestClient always attaches the key.
+
+   **Decided (D4):** (b). Node auth required, and the rid must belong to that node.
 3. **[scope] Which factory-reset flow survives?** The live path is DELETE plus unauthenticated `verify-reset`. The tracked task path (`POST …/factory-reset` and `/nodes/factory-reset/{tid}/status`) has no caller but is fully implemented on the node. Options:
    - (a) Port only DELETE + verify-reset, and cut both task routes.
    - (b) Switch DELETE to publish a `task_id`, so the node uses the status path and the hard-delete happens after `success` or a timeout.
    - (c) Port both.
 
    **My recommendation: (a)** for the port (zero client change). Consider (b) later for the zombie problem.
+
+   **Decided (D10):** the tracked flow only (`POST …/factory-reset` + task status). Mobile's delete switches to it (mobile change). DELETE + `verify-reset` is dropped once mobile switches; `verify-reset` stays only while older node builds need it.
 4. **[behaviour] What should happen to a delete or reset queued for an offline node** after the 300 s in-memory token expires, or after a restart (§8.10)? Options:
    - (a) Same as today: the node becomes a zombie.
    - (b) Persist reset tokens in SQLite with a longer TTL, e.g. 7 days, consumed once.
 
    **My recommendation: (b).** It costs little and fixes the restart loss as well.
+
+   **Decided (D10):** (b). The reset token is persisted in SQLite with the task, so an offline node or a restart can still complete the reset.
 5. **[behaviour] Should the update dispatch stay stuck until the sweeper?** When a node silently ignores a dispatched update (busy, docker, downgrade), the task waits 15 min. Options:
    - (a) Keep it.
    - (b) Reject at request time when `install_mode != "tarball"` or the target ≤ `last_seen_version` (400 with a reason).
    - (c) (b), plus re-dispatch on a later heartbeat if the node was busy.
 
    **My recommendation: (b).** It needs no node change and gives honest errors.
+
+   **Decided (D40 default):** (b). A dispatch that can't succeed is rejected with 400 at request time.
 6. **[behaviour] Should provisioning-token minting check household membership?** It currently doesn't (§8.3), and neither does the ambient-noise trigger/poll or the settings `/result` poll (§8.4). Should the Go port enforce membership as a "fix while porting", even though that changes behaviour for any caller relying on it? **My recommendation:** yes, enforce member (power_user for settings), and pin it with a contract test.
+
+   **Decided (D4/D5):** yes. Provisioning checks membership of the *target* household among all of the caller's memberships. Ambient-noise trigger/poll and the settings `/result` poll get the household check. Members are not otherwise restricted on their own household.
 7. **[behaviour] Should the embedded broker persist sessions across `jarvisd` restarts?** Nodes depend on `clean_session=False` offline queuing, plus the HTTP backstop that exists only for settings. mochi-mqtt keeps sessions in memory unless a storage hook is added. Options:
    - (a) In-memory only; a restart drops queued messages, as a Mosquitto restart does today.
    - (b) Add a SQLite persistence hook.
 
    **My recommendation: (a)** plus generalising "pull on reconnect" later. Every nudge already has an HTTP pull behind it, except commands.
+
+   **Decided (D40 default):** (a). Broker sessions in memory.
 8. **[scope] Should `include_values` and `user_id` be persisted on the settings request?** That would let the reconnect backstop honour secret-sync (§8.11). It would also need a node change to read them from `GET …/settings/requests`. **My recommendation:** add the columns now (harmless), and expose them in the list response. The node can adopt them whenever.
+
+   **Decided (D40 default):** add the columns and expose them in the list response.
 9. **[scope] Should `/admin/nodes/{id}/commands` be cut?** Its only caller is jarvis-admin's train-adapter, which is LoRA. **My recommendation:** cut it along with the `train_adapter` verb, and also drop `adapter_hash` from `NodeResponse`/`NodeUpdate`. The extra JSON field is harmless if mobile ignores it; I would verify that first.
+
+   **Decided (D9):** cut the route and the `train_adapter` verb (LoRA). `adapter_hash` goes with LoRA; verify mobile ignores it before dropping the field.
 10. **[behaviour] Should legacy bare-key node auth and the negative caching of auth outages be kept?** In-process auth makes outages impossible, so the caching question goes away. The real decision is whether the bare-`node_key` header (no `node_id:`) is still needed by any deployed node. **My recommendation:** drop it, and check the jarvis-dev and prod nodes' headers first.
+
+   **Decided (D40 default, verify first):** drop bare-key auth after checking the jarvis-dev and prod nodes' headers; no negative caching.
 11. **[minor] Should settings requests and snapshots be pruned?** Today they grow forever. **My recommendation:** delete after 24 h in the token-cleanup loop.
+
+   **Decided (D40 default):** delete after 24 h in the token-cleanup loop.
 12. **[minor] Should `tracing.retention_days` be declared?** It is read but not defined in the settings definitions. Declare it (default 7) or hard-code it? **My recommendation:** declare it.
+
+   **Decided (D11):** hard-code it. The key is verified never set, so trace retention is a fixed 7 days and the setting check goes away.
 
 ## 11. Go port notes
 
@@ -524,11 +575,18 @@ Env: `MQTT_USERNAME`, `MQTT_PASSWORD`, `JARVIS_MQTT_BROKER_URL`, `NODE_AUTH_CACH
   - Embedded mode lets CC publish directly via `server.Publish` and receive response topics through an inline client or hook. Still keep exact topic strings and QoS 1, because nodes match by suffix.
   - It must support persistent sessions, `clean_session=False` and offline QoS-1 queuing (mochi does, in memory).
   - It must serve WebSocket for `ws://` and `wss://` broker URLs.
-  - ACLs are the place to implement Q1(b).
-- **Pending maps** (verify, reset tokens, ambient results) become typed maps with expiry. If Q4(b) is chosen, reset tokens move to SQLite.
+  - ACLs implement Q1(b) (D4): per-node credentials issued via `/node/mqtt-credentials` (shape unchanged); a node may subscribe only to `jarvis/nodes/{self}/#` and `jarvis/auth/+/ready`, and publish only its own responses. Nothing publishes `trusted:true`. Consequence for frozen nodes: the node verifies any `action` without `trusted` (`mqtt_tts_listener.py:203`), so `VerifyCommand` and `POST /commands/{rid}/verify` stay, and every `action` publish must record its pending entry first.
+  - Sessions stay in memory (D40, Q7).
+- **Pending maps** (verify, ambient results) become typed maps with expiry. **Reset tokens live in SQLite on the `node_tasks` row (D10)**, consumed per §7.4.
+- **Factory reset (D10):** port the tracked flow (`POST /admin/nodes/{id}/factory-reset`, single-in-flight 409, `/nodes/factory-reset/{task_id}/status`, sweeper timeout). Keep DELETE + `verify-reset` only as a transition path for mobile and older node builds; plan its removal.
+- **Result sinks (D4):** require node auth and check the rid's issuing node in the waiter map before delivering. `/k2/ack` checks the path node (D8). `/nodes/{id}/actions` passes `input_required` through (M10). No camera-creds waiter in v1 (D29).
+- **Household checks (D4/D5):** provisioning-token minting, ambient-noise trigger/poll and the settings `/result` poll check membership of the target household among all the caller's memberships. Settings create no longer skips authz on a NULL household (D8).
+- **Updates (D40, Q5):** reject at request time (400 with a reason) when `install_mode != "tarball"` or the target ≤ `last_seen_version`.
+- **Cut:** `/nodes/{id}/commands` and `train_adapter` (D9), `adapter_hash` (LoRA), the `test-install` topic (D5), `/api/v0/chat` (D5: `/node/llm/chat` replaces it for node `chat_text()`).
+- **Settings tables (D40, Q8/Q11):** add `include_values` and `user_id` columns to settings requests and expose them in the list; prune requests and snapshots after 24 h.
 - **Long-poll handlers.** The K2 15 s and action 10 s waits become `select` on channel / `ctx.Done()` / timer. Keep the exact status codes (504 and 502 detail strings for K2; for actions, 200 with `status:"timeout"`).
-- **Loops** go to the platform scheduler: token+settings cleanup hourly, trace TTL hourly, and the task sweeper every 120 s. The sweeper should filter `kind='update'`, or else write a kind-specific message. Get confirmation first, since this changes stored text.
-- **Auth.** Node validation is an in-process call to the auth module. The 60 s cache can stay for parity, but it should not cache "unavailable".
+- **Loops** go to the platform scheduler as trigger kinds (D27): token+settings cleanup hourly, trace TTL hourly (fixed 7 days, D11), and the task sweeper every 120 s. The sweeper writes a kind-specific message (D8), since factory-reset tasks are now live (D10).
+- **Auth.** Node validation is an in-process call to the auth module. The 60 s cache can stay for parity, but it should not cache "unavailable". Bare-key auth is dropped once node headers are verified (D40, Q10).
 - **Liveness.** Keep the 60 s debounce. Consider also touching `last_seen` on context-query round-trips, for consistency with the command-data round-trips.
 - **Risks:**
   - Topic suffix ordering on the node means a new topic ending in an existing suffix would be misrouted, so freeze the catalogue (§2.4).

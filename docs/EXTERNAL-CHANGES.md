@@ -1,0 +1,52 @@
+# Changes needed outside jarvis-server
+
+jarvisd keeps every client's wire contract, so most clients need no change. A few decisions in
+[`docs/cc/QUESTIONS.md`](cc/QUESTIONS.md) do need changes in other repos. They are listed here so
+they can be scheduled; none are blockers for porting the server unless marked **before cutover**.
+
+The Python hard stop applies to the **server** repos only. Node, mobile, admin and the installer
+keep shipping.
+
+## jarvis-node-setup (Pi node)
+
+| Change | Why | Decision | When |
+|---|---|---|---|
+| `chat_text()` calls `POST /api/v0/node/llm/chat` (node `X-API-Key`) instead of `/api/v0/chat` | `/api/v0/chat` is unauthenticated and is dropped | D5 | **Before cutover**. Confirm `/node/llm/chat` is the "live" path the user meant. |
+| Accept a full routine definition inline in the `routine` MQTT command, falling back to the local copy by slug when none is sent | App and scheduled runs never run a stale copy | D24 | Any time; the server can send both shapes |
+| Report installed Pantry routine packages to CC, and stop seeding default routines locally once CC seeds them | CC owns every routine definition; fixes permanent shadowing | D44 | After the routines port |
+| Use per-node MQTT broker credentials on fresh installs (no anonymous or shared broker login) | Per-node ACLs replace `trusted:true` | D4, D7 | **Before cutover** for new installs |
+| Keep sending `X-API-Key` on Bluetooth result posts, package verify/results and settings snapshots | These routes now require node auth | D4, D5 | Verify only; believed to be sent already |
+| Stop calling `/generate/date-context` (optional) | The SDK ignores the result | 03.Q11 (D40) | Optional, later |
+
+## jarvis-node-mobile
+
+| Change | Why | Decision | When |
+|---|---|---|---|
+| "Delete node" uses the tracked factory-reset flow (`POST /admin/nodes/{id}/factory-reset` + status polling) | Flow 1 (DELETE + untracked verify-reset) is dropped | D10 | Before flow 1 is removed |
+| Add `memory.extraction_enabled` (and confirm `memory.enabled`) to the household settings screen | Per-household opt-out of learning from voice | D19 | With the memory port |
+| Run-now: a longer timeout for `runRoutineNow` (today the shared `apiClient` gives up at 10 s, `src/api/apiClient.ts:56`), or switch to `202` + polling | Routine composition regularly exceeds 10 s | D40 (08.Q7), D48 | After the routines port |
+| Voice enrollment screen says when speaker recognition is off for the household | Recognition is off by default; enrolling doesn't turn it on | D35, M14 | With the voice port |
+| Hide or label "Install to Command Center" for Pantry `prompt_provider` packages | The install route becomes a stub that always fails cleanly | 03.Q2 | Optional |
+| (Future) a "leave-by" built-in rule in the automations list; per-node voice enrollment | Deferred product work | D46, D36 | Post-port |
+
+## jarvis-admin
+
+| Change | Why | Decision |
+|---|---|---|
+| Model catalog (`src/data/models.ts`): remove `qwen25-7b`, `llama-3.1-8b`, `hermes-3-8b`; remap `qwen3-14b` → `Qwen3_14B_Compressed`; add Qwen3.5-9B (→ `Qwen3_5_9B_Compressed`) and the 27B prod model (→ `Qwen3_14B_Compressed`) | Only providers that ship may be offered; an unknown provider is a hard error | D11, D12 |
+| LLM wizard and quick-sets write `llm.prompt_provider` instead of `llm.interface` | Setting renamed (legacy import maps the old key) | D11 |
+
+## jarvis-installer
+
+| Change | Why | Decision |
+|---|---|---|
+| `LLM_INTERFACE_SEED` → seeds `llm.prompt_provider`; the `llm-interface-select` dropdown lists only kept providers | Setting rename and catalog cleanup | D11, D12 |
+| Long term: replaced by the jarvisd install scripts | Single binary | PLAN Phase 6 |
+
+## Command packages (`jarvis-cmd-*`, `jarvis-device-*`)
+
+No changes required. Contracts to keep working:
+
+- `jarvis-cmd-calendar`'s `calendar_alerts` agent: `/signals` ingest of `appt.upcoming`, and the node-local alert path (D46).
+- Secrets with `value_type='user'` (member picker) used by commands that act for a person (D41).
+- `proposable_actions` and the generic proposal dispatcher (doc 10).
