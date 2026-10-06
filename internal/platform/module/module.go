@@ -8,8 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
+	"github.com/alexberardi/jarvis-server/internal/platform/queue"
+	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 )
 
 // Module is one former service (or one part of command-center).
@@ -31,9 +34,15 @@ type Starter interface {
 	Start(ctx context.Context) error
 }
 
-// Deps are the shared platform services handed to every module.
+// Deps are the shared platform services handed to every module. Modules register queue job
+// handlers in Register; the runner starts the queue and scheduler after every module has
+// registered. The MQTT broker and mDNS advertiser join once the auth and config modules
+// exist to back them (Phase 1).
 type Deps struct {
-	Config config.Config
-	DB     *db.DB
-	Log    *slog.Logger
+	Config    config.Config
+	DB        *db.DB
+	Log       *slog.Logger
+	Queue     *queue.Queue
+	Scheduler *scheduler.Scheduler
+	Blobs     blob.Store
 }

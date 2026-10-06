@@ -11,12 +11,16 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
+	"path/filepath"
 	"syscall"
 
+	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
+	"github.com/alexberardi/jarvis-server/internal/platform/logging"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
+	"github.com/alexberardi/jarvis-server/internal/platform/queue"
+	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 )
 
 var version = "dev"
@@ -64,16 +68,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func newLogger() *slog.Logger {
-	level := slog.LevelInfo
-	switch strings.ToLower(os.Getenv("JARVIS_LOG_LEVEL")) {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	return logging.New(os.Stderr, logging.ParseLevel(os.Getenv("JARVIS_LOG_LEVEL")), nil)
 }
 
 func openDeps(ctx context.Context) (module.Deps, error) {
@@ -85,7 +80,17 @@ func openDeps(ctx context.Context) (module.Deps, error) {
 	if err != nil {
 		return module.Deps{}, err
 	}
-	return module.Deps{Config: cfg, DB: d, Log: newLogger()}, nil
+	log := newLogger()
+	blobs, err := blob.NewFS(filepath.Join(cfg.Home, "blobs"), log)
+	if err != nil {
+		d.Close()
+		return module.Deps{}, err
+	}
+	q := queue.New(d, log)
+	return module.Deps{
+		Config: cfg, DB: d, Log: log,
+		Queue: q, Scheduler: scheduler.New(d, q, log), Blobs: blobs,
+	}, nil
 }
 
 func serve(ctx context.Context) error {

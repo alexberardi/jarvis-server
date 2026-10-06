@@ -12,6 +12,8 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
+	"github.com/alexberardi/jarvis-server/internal/platform/queue"
+	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 )
 
 // ShutdownTimeout bounds graceful shutdown of each listener.
@@ -33,8 +35,18 @@ func (r *Runner) Addr(listener string) string {
 	return r.addrs[listener]
 }
 
-// Migrate runs every module's migrations, in module order.
+// Migrate runs the platform's migrations, then every module's, in module order.
 func (r *Runner) Migrate(ctx context.Context) error {
+	if r.Deps.Queue != nil {
+		if err := db.Migrate(ctx, r.Deps.DB, queue.MigrationModule, queue.Migrations()); err != nil {
+			return err
+		}
+	}
+	if r.Deps.Scheduler != nil {
+		if err := db.Migrate(ctx, r.Deps.DB, scheduler.MigrationModule, scheduler.Migrations()); err != nil {
+			return err
+		}
+	}
 	seen := map[string]bool{}
 	for _, m := range r.Modules {
 		if seen[m.Name()] {
@@ -122,6 +134,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		})
 	}
 
+	if r.Deps.Queue != nil {
+		r.Deps.Queue.Start(ctx)
+	}
+	if r.Deps.Scheduler != nil {
+		r.Deps.Scheduler.Start(ctx)
+	}
 	for _, m := range r.Modules {
 		if s, ok := m.(Starter); ok {
 			if err := s.Start(ctx); err != nil {

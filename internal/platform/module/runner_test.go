@@ -16,6 +16,8 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
+	"github.com/alexberardi/jarvis-server/internal/platform/queue"
+	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 )
 
 type fakeModule struct {
@@ -166,5 +168,21 @@ func TestRunnerFailsOnPortConflict(t *testing.T) {
 	}}
 	if err := r.Run(context.Background()); err == nil {
 		t.Fatal("want bind error")
+	}
+}
+
+func TestRunnerMigratesPlatformTables(t *testing.T) {
+	d := deps(t)
+	d.Queue = queue.New(d.DB, d.Log)
+	d.Scheduler = scheduler.New(d.DB, d.Queue, d.Log)
+	r := &Runner{Deps: d}
+	if err := r.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"platform_jobs", "platform_triggers"} {
+		var n int
+		if err := d.DB.Read.QueryRow(`SELECT count(*) FROM ` + table).Scan(&n); err != nil {
+			t.Errorf("%s: %v", table, err)
+		}
 	}
 }
