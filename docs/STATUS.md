@@ -18,13 +18,13 @@ Update it at the end of every working session, and whenever a task finishes or a
     - Windows: no by-value float args, because purego routes through `syscall.SyscallN`. TTS uses `GenerateWithConfig`.
     - The C structs live in `capi.go`. A version bump means replacing the header, updating the fetch script, and running the layout test.
 - [~] 0.2 CI: `.github/workflows/ci.yml` has the build job (vet, 4-target cross-compile, race tests) and the native-voice matrix on 4 OS runners. Still to do: release packaging.
-- [ ] 0.3 `internal/platform` skeleton: httpx, authn, settings, db (modernc sqlite + goose + sqlc), queue, blob, mqtt, logging, mdns, engines. Also the multi-listener runner and the module interface.
+- [~] 0.3 `internal/platform` skeleton. **Done:** `config` (data dir, legacy ports + env overrides), `db` (modernc sqlite, one writer + read-only pool, WAL, FKs, per-module goose version tables, `migrate status`), `httpx` (FastAPI-shaped errors, JSON decode, recover/log middleware), `module` (Module/Starter interfaces; Runner = one server per legacy listener), `queue` (durable jobs: per-type concurrency, dedup, delays, retries, leases, tx enqueue), `jarvisd serve|migrate status|version`. **Still to do:** authn, settings, blob, mqtt (mochi), logging→logs module, mdns, engines, sqlc wiring, a scheduler on the queue (D27).
 - [ ] 0.4 `contract/` black-box suite plus fakes (LLM, relay, MQTT node). It must run green against the **Python** stack first.
 - [ ] 0.5 Golden-fixture exporters, which live beside the Python code. Output goes to `fixtures/golden/`. Include byte-exact prompts for the kept Qwen providers.
 - [ ] 0.6 Wire-contract freeze tests: `/services`, `/info`, log batch, app-ping, validate-node, LLM stream frames, PCM stream headers, the MQTT topic catalogue, and the public plugin endpoints.
 - [ ] 0.7 Schema baseline: goose SQLite migrations per module, from each service's alembic head.
 - [-] ~~0.8 SQLite load test~~: dropped. Self-hosted with at most about 10 concurrent clients, so the user confirmed SQLite scale is a non-issue.
-- [~] **0.9 command-center deep dive.** All questions answered (D4–D47); decisions not yet folded into the subsystem docs. Read each subsystem, then ask the user about intent. Write `docs/cc/<subsystem>.md` specs: purpose, behaviour, data, routes, invariants, keep/cut/change. This drives the CC contract tests and the Phase 5 port.
+- [x] **0.9 command-center deep dive.** All questions answered (D4–D49); decisions folded into every `docs/cc/NN` doc; out-of-repo changes in `docs/EXTERNAL-CHANGES.md`.  Read each subsystem, then ask the user about intent. Write `docs/cc/<subsystem>.md` specs: purpose, behaviour, data, routes, invariants, keep/cut/change. This drives the CC contract tests and the Phase 5 port.
 
 ## Environment notes
 
@@ -78,4 +78,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - All 14 `docs/cc` drafts are done (about 166 questions), reduced into a queue in `docs/cc/QUESTIONS.md`: policies P1–P4, then scope S1–S14, then behaviour, then a minor list.
   - Decisions D1 (Caddy orphaned) and D2 (drop node last-speaker); facts F1 (fastText off in prod) and F2.
   - CC spec questions: P1–P4 → D4–D11; Q-CAT → D12; S1–S14 → D13–D39; B list triaged (4 settled, 56 defaults as D40, 6 asked → D41–D46). Prod facts gathered read-only (errand/phone/attention/memory/routine counts). Notable: phone gateway absorbed into jarvisd (D16), situation matcher cut (D17), learn from voice (D19), account deletion scope (D20), unknown speaker refuses per-user tools (D21), routines run on the node and CC owns definitions (D24, D44), cameras deferred (D29), voiceprints only and recognition off by default (D34, D35).
-- **Next:** all CC questions answered (minor list → D47). Fold all decisions into the owning `docs/cc/NN-*.md` specs, collect the out-of-repo change list (node-setup, mobile, admin, installer), tick 0.9, and start 0.3 (`internal/platform` skeleton).
+  - Folded decisions into all 14 docs (D48–D49 loose ends); wrote EXTERNAL-CHANGES.md. Started 0.3: config, db, httpx, module runner, queue (all race-tested, 4-target cross-compile green).
+- **Next:** 0.3 remaining pieces (authn, settings, blob, mqtt, logging, mdns, engines, scheduler, sqlc). Open user question: D19 vs D35 (voice learning needs speaker recognition, which is off by default).
