@@ -40,6 +40,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D32 | 2026-10-06 | 13 (S12) | **Mobile chat keeps the fake word-by-word replay exactly**, including the 20 ms pause per word (13.Q1 option a). User pointed out that real streaming needs the full output to know whether it's a tool call; the text path's parse step (think strip, `<message>` unwrap, sentinels, JSON envelope) also needs the complete output. Real token streaming is deferred to the post-port prompt-provider redesign, where the output format can be designed to stream. |
 | D33 | 2026-10-06 | 06 (S13, derived) | **Speaker-ID thresholds simplified** (06.Q7 option b), decided without a question because it is a calibration detail: one `voice.similarity_threshold` plus `voice.min_speaker_margin`, verify uses the same threshold, recalibrated for ERes2Net on jarvis-dev enrollments; the short/long knobs and the fixed 0.45 verify threshold go. |
 | D34 | 2026-10-06 | 06 (S13) | **Voiceprints only; no raw enrollment audio is kept** (06.Q4 option a). Each embedding is tagged with the model id that produced it; a model change (including the ECAPA → ERes2Net switch at cutover) requires re-enrollment, which the user accepts. Enrollment WAVs are discarded once embedded. Legacy ECAPA voiceprints are not imported. |
+| D35 | 2026-10-06 | 06 (S13b) | **Speaker recognition stays off by default** (06.Q9 option a). User: "it's a privacy thing. Better to start off and have to turn on than the opposite." Enrolling a voice does not turn it on. Consequence to handle in UX (minor list): with it off, every speaker is unknown and per-user tools refuse (D21), so the refusal and the enrollment screen should say recognition is off rather than "I'm not sure who's speaking". |
 
 ## Verified facts (resolve questions without asking)
 
@@ -60,7 +61,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S13b. Speaker recognition default (06.Q9):** keep the off flag, on whenever a household member has a voiceprint, or remove the flag? Then 06.Q8, Q6, Q10.
+- **S13c. Voiceprint per user or per (user, household)? (06.Q8)** Then 06.Q6, Q10.
 
 ### P: policies (resolve many at once)
 
