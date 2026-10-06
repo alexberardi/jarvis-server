@@ -33,6 +33,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D25 | 2026-10-06 | 08 (S8b) | **Scheduled and run-now routines don't speak: card only** (08.Q1 option a, today's behaviour). No "speak on node X" path is needed for routines. Voice-triggered routines keep speaking locally. **Scheduler gate removed** (08.Q2 option c, proposed and not objected to): drop `routines.scheduler_enabled`; a routine with an enabled `schedule` is the opt-in. |
 | D26 | 2026-10-06 | 08 (S8c) | **Missed scheduled runs fire once, late** (08.Q3 option a, today's behaviour) for both routines and errand schedules. No grace window, no replay of every missed occurrence. |
 | D27 | 2026-10-06 | 08 / 00 / 09 (S9, derived) | **One scheduler engine**, decided without a question because it is internal and keeps user-visible semantics. A `next_fire_at` trigger table on the embedded durable queue, with claims; routines, errand schedules, the attention journal card, workflow wake-ups and the periodic cleanup loops are trigger kinds. `last_run_at` is persisted, so daily cleanups run even on a box that restarts often and the journal card can't double-post after a restart. Missed triggers fire once, late (D26). The routine `schedule` JSON (with `last_fired_at`) stays as the mobile-facing projection. Errands build on the queue with a `StepHandler` interface (09.Q2 option c on b). |
+| D28 | 2026-10-06 | 07 (S10) | **Smart-home device model: port as-is** (07.Q1 option a). Same routes, the `devices` table plus the node's live external device manager dual mode, and `/devices/import` (HA import) kept. Revisit the long-term source of truth (CC registry vs nodes) after cutover. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -53,7 +54,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S10. Smart home:** device source of truth (07.Q1), then cameras/HLS (07.Q2), voice-control node routing. Prod: 7 devices, all `source=direct` (2 zwave, 2 govee, 2 nest, 1 schlage), no Home Assistant rows; `smart_home.primary_node_id` set for 2 households.
+- **S10b. Cameras (07.Q2):** keep cameras; go2rtc passthrough or the ffmpeg HLS packager, and is go2rtc a supervised engine? Prod: 1 camera device (nest), go2rtc container up, but **no camera/HLS requests in CC logs over 30 days** and go2rtc logged only its startup.
 
 ### P: policies (resolve many at once)
 
