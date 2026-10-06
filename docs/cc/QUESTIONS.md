@@ -17,6 +17,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 
 | D6 | 2026-10-06 | 07 / 05 | **Config push `pending`/`ack`: node auth**, with the node bound to `{node_id}` in the path. The node is already registered and already sends `X-API-Key` (`node-setup services/config_push_service.py` via `RestClient`), so real nodes see no change. User: "we don't want security holes obviously." |
 
+| D7 | 2026-10-06 | 10 | **Automation cards: option 1.** The chosen action is stored server-side and the card carries only an opaque id. Confirm runs exactly the stored action, after an **ownership check** that the node belongs to the caller's household. `automatic` mode keeps full power, with **no allowlist**. `autorun_gate.py` stays cut (P3). Commands are authentic by construction via per-node broker ACLs (D4), with no `trusted` flag. |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -36,7 +38,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **Q1a. Automation cards:** keep the power, but bind the action server-side and to the household? (10.Q1)
+- **P2. Known bugs:** fix, not replicate?
 
 ### P: policies (resolve many at once)
 
