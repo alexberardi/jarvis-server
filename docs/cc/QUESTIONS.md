@@ -37,6 +37,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D29 | 2026-10-06 | 07 (S10b) | **Cameras are deferred until after the port** ("I don't think it works currently, we can punt"). No go2rtc or ffmpeg engine in jarvisd v1. Camera device rows import and stay listed; the camera stream/HLS routes return a clear "not available" error. Revisit with the HLS packager vs WebRTC/MSE question. Prod: 1 Nest camera, no camera requests in 30 days. 07.Q6 (voice routing to a protocol node) and 07.Q8 (node-selection policy) move to the minor list. |
 | D30 | 2026-10-06 | 04 (S11) | **Characterization ported dormant** (04.Q4 option b): off by default (`characterization.synthesis_enabled` / `injection_enabled`), table, job, prompt and tail kept. **Fixes:** the speaker-change swap uses the current speaker's view (and per D3/D21 no view is injected for an unknown speaker); `forget` and account deletion (D20) delete the person's characterization so it re-synthesises without the forgotten fact. The inspection routes stay cut (Appendix A). Prod: 0 rows, never enabled. |
 | D31 | 2026-10-06 | 13 (S12, derived) | **Inbox and push become an in-process `notify` service** (13.Q2 option b), decided without a question because it is internal: producers write the inbox row in the same SQLite transaction as their own state, and push goes onto the durable queue with retries. Notifications' HTTP routes for mobile and other callers stay unchanged. |
+| D32 | 2026-10-06 | 13 (S12) | **Mobile chat keeps the fake word-by-word replay exactly**, including the 20 ms pause per word (13.Q1 option a). User pointed out that real streaming needs the full output to know whether it's a tool call; the text path's parse step (think strip, `<message>` unwrap, sentinels, JSON envelope) also needs the complete output. Real token streaming is deferred to the post-port prompt-provider redesign, where the output format can be designed to stream. |
+| D33 | 2026-10-06 | 06 (S13, derived) | **Speaker-ID thresholds simplified** (06.Q7 option b), decided without a question because it is a calibration detail: one `voice.similarity_threshold` plus `voice.min_speaker_margin`, verify uses the same threshold, recalibrated for ERes2Net on jarvis-dev enrollments; the short/long knobs and the fixed 0.45 verify threshold go. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -57,7 +59,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S12. Mobile chat streaming (13.Q1):** keep the fake word-by-word replay, or stream real tokens in the same `delta` schema?
+- **S13. Voice identity:** keep raw enrollment audio (06.Q4), then recognition default (06.Q9), per-user vs per-household voiceprints (06.Q8), enrollment quality gate (06.Q6), affect (06.Q10, 01.Q7).
 
 ### P: policies (resolve many at once)
 
