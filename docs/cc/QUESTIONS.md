@@ -25,6 +25,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 
 | D10 | 2026-10-06 | 05 | **Factory reset: the tracked flow (flow 2) only.** `POST /admin/nodes/{id}/factory-reset` creates a persisted `NodeTask`, with a single-in-flight guard, node progress reports via `/nodes/factory-reset/{task_id}/status`, and the task-timeout sweeper. **Mobile's delete switches to it** (mobile change). Flow 1 (DELETE + `verify-reset` without a task_id) is dropped once mobile switches; keep `verify-reset` only as long as nodes on older builds need it. **Fix (D8):** today both flows keep the reset token in an in-memory dict with a 300 s TTL (`core/pending_resets.py`). Go persists it in SQLite with the task, so an offline node, or a server restart, can still complete the reset when the node comes back. |
 
+| D11 | 2026-10-06 | P4 | **Settings hygiene.** <br>(1) **Drop** defined-but-unread keys. <br>(2) The three read-but-undefined keys are **verified never set**: no alembic seed, no row in prod's `jarvis_command_center.settings`, and no env mapping. So **remove the checks and hard-code today's behaviour**: the embedding sweep is always on (unset meant enabled, `main.py:274`), every 60 s, and trace retention is 7 days. <br>(3) **`llm.interface` is set at install time:** the jarvis-admin LLM wizard writes each catalog model's `promptProvider` (`jarvis-admin/src/data/models.ts`, `server/src/routes/llm-setup.ts:122-174`), plus quick-sets and the installer's `LLM_INTERFACE_SEED`. Prod = `Qwen3_14B_Compressed`. **Rename the key** to `llm.prompt_provider` (proposed). Admin and installer change; import maps the old key. <br>(4) **An unknown provider name is a hard error**, not a fallback. **Consequence:** admin's catalog currently maps 4 of 6 models to dropped providers: `qwen3-14b`→`Qwen3LargeUntrained`, `qwen25-7b`→`Qwen25MediumUntrained`, `llama-3.1-8b`→`Llama31MediumUntrained`, `hermes-3-8b`→`HermesMediumUntrained`. See Q-CAT. |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -44,7 +46,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **P4. Settings hygiene.**
+- **Q-CAT. Admin model catalog:** remap or remove the 4 models whose providers are dropped?
 
 ### P: policies (resolve many at once)
 
@@ -56,7 +58,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
   - Covers: 01.Q4, 02.Q6, 02.Q7, 03.Q1 (date bugs), 03.Q6, 04 §8 list, 07 (Bluetooth missing routes = add), 08 timing bugs, 09 restart/cancel bugs, 10 dedup bugs, 11 oddities, 12.Q6, 13.Q10–11.
 - **P3. Dead and unreachable code: cut it.** This means code with no caller, behind a flag that is off everywhere, or unreachable with the kept providers.
   - Covers: 01.Q3 (tool-stream path B), 02 dead modules, 03 dead date/prompt modules, 05.Q3 (tracked-reset path), 05.Q9, 06.Q3 (phone-mic routes), 07.Q5, 09.Q5, 10 (autorun gate, attention tier tables), 11.Q12, the fastText router (F1: 02.Q1, Q2, 03.Q7).
-- **P4. Settings hygiene.** Drop defined keys that have no reader. Declare read-but-undefined keys with today's hard-coded defaults. Set the `llm.interface` default to a kept provider and map dropped names to the nearest kept one.
+- **Q-CAT. Admin model catalog:** remap or remove the 4 models whose providers are dropped? Drop defined keys that have no reader. Declare read-but-undefined keys with today's hard-coded defaults. Set the `llm.interface` default to a kept provider and map dropped names to the nearest kept one.
   - Covers: 00.Q3, 00.Q10, 02.Q11, 03.Q3, 03.Q12, 05.Q12, 07.Q11.
 
 ### S: scope and product (one at a time, most consequential first)
