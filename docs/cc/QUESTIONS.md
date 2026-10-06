@@ -34,6 +34,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D26 | 2026-10-06 | 08 (S8c) | **Missed scheduled runs fire once, late** (08.Q3 option a, today's behaviour) for both routines and errand schedules. No grace window, no replay of every missed occurrence. |
 | D27 | 2026-10-06 | 08 / 00 / 09 (S9, derived) | **One scheduler engine**, decided without a question because it is internal and keeps user-visible semantics. A `next_fire_at` trigger table on the embedded durable queue, with claims; routines, errand schedules, the attention journal card, workflow wake-ups and the periodic cleanup loops are trigger kinds. `last_run_at` is persisted, so daily cleanups run even on a box that restarts often and the journal card can't double-post after a restart. Missed triggers fire once, late (D26). The routine `schedule` JSON (with `last_fired_at`) stays as the mobile-facing projection. Errands build on the queue with a `StepHandler` interface (09.Q2 option c on b). |
 | D28 | 2026-10-06 | 07 (S10) | **Smart-home device model: port as-is** (07.Q1 option a). Same routes, the `devices` table plus the node's live external device manager dual mode, and `/devices/import` (HA import) kept. Revisit the long-term source of truth (CC registry vs nodes) after cutover. |
+| D29 | 2026-10-06 | 07 (S10b) | **Cameras are deferred until after the port** ("I don't think it works currently, we can punt"). No go2rtc or ffmpeg engine in jarvisd v1. Camera device rows import and stay listed; the camera stream/HLS routes return a clear "not available" error. Revisit with the HLS packager vs WebRTC/MSE question. Prod: 1 Nest camera, no camera requests in 30 days. 07.Q6 (voice routing to a protocol node) and 07.Q8 (node-selection policy) move to the minor list. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -54,7 +55,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S10b. Cameras (07.Q2):** keep cameras; go2rtc passthrough or the ffmpeg HLS packager, and is go2rtc a supervised engine? Prod: 1 camera device (nest), go2rtc container up, but **no camera/HLS requests in CC logs over 30 days** and go2rtc logged only its startup.
+- **S11. Characterization (04.Q4):** cut, port dormant, or port and enable? Prod: `person_characterizations` has 0 rows, synthesis never enabled.
 
 ### P: policies (resolve many at once)
 
