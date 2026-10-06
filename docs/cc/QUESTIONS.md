@@ -31,6 +31,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D23 | 2026-10-06 | 02 (S7b) | **Keep the text-path continue asymmetry for the port** (02.Q4 option a): text-path continue stays a single formatting call; native continue re-enters the loop. Chaining on the text path gets fixed in the post-port prompt-provider redesign. |
 | D24 | 2026-10-06 | 08 (S8) | **Routines execute on the node** (08.Q5). User's reason: multi-tenancy. A routine in another household (e.g. the user's parents turning on their lights) must run on *that* home's node, against devices on that LAN. Server-side execution (option c) is rejected. **Staleness fix: option b.** The server sends the full routine definition in the `routine` MQTT command, so app and scheduled runs never use a stale local copy. Voice triggers stay local on the node. Small node change (node-setup accepts an inline definition and still falls back to its local copy when none is sent). If node changes have to wait, option a (version hash + re-pull) is the zero-change fallback. |
 | D25 | 2026-10-06 | 08 (S8b) | **Scheduled and run-now routines don't speak: card only** (08.Q1 option a, today's behaviour). No "speak on node X" path is needed for routines. Voice-triggered routines keep speaking locally. **Scheduler gate removed** (08.Q2 option c, proposed and not objected to): drop `routines.scheduler_enabled`; a routine with an enabled `schedule` is the opt-in. |
+| D26 | 2026-10-06 | 08 (S8c) | **Missed scheduled runs fire once, late** (08.Q3 option a, today's behaviour) for both routines and errand schedules. No grace window, no replay of every missed occurrence. |
+| D27 | 2026-10-06 | 08 / 00 / 09 (S9, derived) | **One scheduler engine**, decided without a question because it is internal and keeps user-visible semantics. A `next_fire_at` trigger table on the embedded durable queue, with claims; routines, errand schedules, the attention journal card, workflow wake-ups and the periodic cleanup loops are trigger kinds. `last_run_at` is persisted, so daily cleanups run even on a box that restarts often and the journal card can't double-post after a restart. Missed triggers fire once, late (D26). The routine `schedule` JSON (with `last_fired_at`) stays as the mobile-facing projection. Errands build on the queue with a `StepHandler` interface (09.Q2 option c on b). |
 
 ## Verified facts (resolve questions without asking)
 
@@ -51,7 +53,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S8c. Missed scheduled runs after downtime** (08.Q3): fire once late, skip past a grace window, or replay all?
+- **S10. Smart home:** device source of truth (07.Q1), then cameras/HLS (07.Q2), voice-control node routing. Prod: 7 devices, all `source=direct` (2 zwave, 2 govee, 2 nest, 1 schlage), no Home Assistant rows; `smart_home.primary_node_id` set for 2 households.
 
 ### P: policies (resolve many at once)
 
