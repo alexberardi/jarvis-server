@@ -307,6 +307,10 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 - **D8 (Phase 5):** phone-gateway dial queue. Options are a Redis shim, or switching phone-gateway to HTTP.
 - **D9 (Phase 6):** whether jarvis-admin stays as a Fastify app or is absorbed into `jarvisd`.
 
+**Future work (after the migration):**
+- **External-API connector.** A first-class way for 3rd-party apps to use Jarvis, with scoped credentials. `/internal/phone/*` (jarvis-phone-gateway) moves onto it; until then it stays open to any registered app.
+- **Prompt-provider redesign.** Something simpler than a Python class implementing an ABC. Until then `/prompt-providers/install` is a no-op stub.
+
 ## Appendix A: command-center route audit (2026-10-06)
 
 **Method.**

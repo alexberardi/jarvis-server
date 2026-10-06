@@ -11,6 +11,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 
 | D3 | 2026-10-06 | 06 / 01 | **Drop CC's 30 s per-node speaker stickiness too.** User's reason: within a multi-turn conversation the speaker already persists through the conversation context. A *new* conversation must never inherit a previous speaker, because permission gates for sensitive info are keyed on speaker ID, so remembering across conversations can leak. **Rule:** speaker identity is per conversation only. It comes from turns identified *in this conversation* and dies with the conversation (end or expiry). Nothing is keyed per node, and nothing survives across conversations. This removes `speaker_stickiness.py` and settings `voice.stickiness_*`. |
 
+| D4 | 2026-10-06 | P1 (all) | **Security policy: close holes, keep wire shapes.** Per item: <br>• `/api/v0/chat` **is used** (node `chat_text()` for jokes, what's-up and routine composition) → require node auth. `/lightweight/chat` is unused and cut. <br>• Node result posts (`/device-control-results`, `/device-state-results`, `/mobile/node-tool-reports`, `/mobile/voice-profile-results`) → node auth, and the request id must belong to that node. <br>• Config push is **not** config-service. It is the encrypted mobile→node secret relay (K2): mobile encrypts creds, CC stores ciphertext, and the node fetches `config/pending` and acks. It is live, so keep it. `pending`/`ack` get node auth bound to the path node; `push` gets a household check. <br>• `/internal/phone/*` stays open to any registered app for now. **TODO: an external-API connector concept for 3rd-party apps** (future); this route moves onto it. <br>• Provisioning-token minting already requires login. The gap is the *household* check (a user of household A can mint for B), so add membership. <br>• OAuth session create: add the check that the target node is in the caller's household (today a user can point their provider tokens at another household's node). Same for exchange/status. <br>• Bluetooth and ambient-noise **polls** are mobile-side (JWT): add the household check. The node's result posts get node auth. <br>• Test-install poll is mobile polling a Forge test install's status, not a health check. Keep it and add the household check. <br>• Package verify/results are node callbacks (the node confirms CC really issued the command, then reports): node auth, node must match the path. <br>• `/prompt-providers/install`: the mechanism gets reworked after the migration (no Python ABC). In Go, stub it with no clone or exec. <br>• OAuth `exchange_url` SSRF: fix (server-side config only). <br>• **`trusted:true` removed.** Fresh installs get per-node broker credentials and ACLs. <br>Open follow-ups: automation-card binding (Q1a), package-install permissions (Q1b). |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -30,11 +32,13 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- _(none)_. Q0 was answered as D3.
+- **Q1b. Package install permissions:** who may install code on a node, and from which URLs? (12.Q2)
+- **Q1a, queued next. Automation cards:** keep the power, but bind the action server-side and to the household? (10.Q1)
 
 ### P: policies (resolve many at once)
 
-- **P1. Security holes: close them, keeping wire shapes?** Unauthenticated routes and missing household or node-binding checks get fixed in Go, and well-formed clients see no change.
+- ~~**P1**~~ → answered as D4.
+- **P1 (answered). Security holes: close them, keeping wire shapes?** Unauthenticated routes and missing household or node-binding checks get fixed in Go, and well-formed clients see no change.
   - Covers: 00.Q6, 02.Q5, 05.Q2, 05.Q6, 06.Q5, 07.Q3, 07.Q7, 10.Q1 (the trusted-exec part), 10.Q10, 11.Q9, 12.Q2–Q4, 13.Q4 (partly).
   - Also: the `/prompt-providers/install` code execution (03.Q2), the OAuth `exchange_url` SSRF (07), `/admin/cache` (already cut), and MQTT trust via per-node broker credentials and ACLs (05.Q1, 07, 12.Q3).
 - **P2. Known bugs: fix, not replicate,** unless a frozen client depends on the buggy behaviour, in which case keep it and document it.
