@@ -21,6 +21,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 
 | D8 | 2026-10-06 | P2 (all) | **Known bugs: fix by default.** Each fix is logged in the owning doc as an *intended difference*, with its golden fixture regenerated. Exception: when an unchanged client depends on the buggy behaviour (e.g. the node's reliance on today's 400/422/500 and 200-with-error-body codes), keep it and document why. |
 
+| D9 | 2026-10-06 | P3 | **Dead code.** <br>**Cut:** <br>• the fastText router, fast stream path, router hint/must-call guard and `/tool-router/train` (PLAN's pure-Go fastText is dropped too) <br>• tool-stream path B (user: tool calls need the full JSON object before executing anyway) <br>• all uncalled prompt and date modules (`date_replacer`, `date_detector`, `build_tool_system_message`, `command_converters`, `prompt_variant_builder`, the malformed-JSON extractor + `json_schema.py`, the prune helpers, and the legacy `IModelInterface`/`ModelFactory`/`JarvisToolModel`) <br>• the never-written attention tier/consent/feedback tables <br>• the phone-mic voice-profile routes V2–V5 <br>• `/devices/control-external`: it controls non-imported "external" devices. Mobile added the UI in `984f4d5` and hid it in `c51ccc6`, and no screen calls it; it is **not** used by the HA package <br>• `ambient_grounding.py` and the disabled `ControlDeviceTool` <br>• dead phone knobs <br>• `/admin/nodes/{id}/commands` (LoRA) <br>**Keep:** errand autonomy (`autorun_gate`, `errands.autonomous_enabled`, `$leave_by`/`$from_step` resolver). The user says it "should actually not be orphaned". Port it, uncalled for now, with no new callers to be built yet. <br>**Factory reset is used** (see Q-FR). |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -40,7 +42,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **P3. Dead and unreachable code:** cut?
+- **Q-FR. Factory reset:** which of the two flows does Go keep? (05.Q3, Q4)
 
 ### P: policies (resolve many at once)
 

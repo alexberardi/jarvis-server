@@ -118,7 +118,7 @@ SQLite driver: `modernc.org/sqlite` (pure Go; keeps the build cgo-free, see §3.
 | STT | whisper.cpp `whisper-server` on GPU. The alternative is sherpa-onnx ASR on CPU (D7). | Engine |
 | Speaker ID | **sherpa-onnx**: 3D-Speaker ERes2Net or NeMo TitaNet-small. Pick and calibrate thresholds on a real enrollment set. | **In-binary** |
 | TTS | **sherpa-onnx Kokoro** v1.0, `bm_george`, speed 1.25, CPU, fp32 (RTF 0.17). It streams per sentence. | **In-binary** |
-| Intent classifier (fastText) | Pure-Go inference over the supervised `.bin`, verified against Python on the full corpus. Training stays an offline Python script. | In-binary |
+| ~~Intent classifier (fastText)~~ | **Cut** (D9: off in prod, F1). | — |
 | OCR | LLM vision via `llama-server` (`--mmproj`), `tesseract` (optional), and a macOS Swift Vision helper. | Engine |
 
 `internal/engines` handles, for each engine:
