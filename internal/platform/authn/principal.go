@@ -88,11 +88,23 @@ const (
 	RoleOwner  Role = "owner"
 )
 
+// NodeValidation is the outcome of validating a node's credentials for one service, as
+// jarvis-auth's /internal/validate-node returned it. When Valid is false, Reason is the legacy
+// string callers surface verbatim ("Node not found", "Node is inactive", "Invalid node
+// credentials", "Node is not authorized to access service '<service>'").
+type NodeValidation struct {
+	Valid              bool
+	Reason             string
+	Node               Node
+	HouseholdMemberIDs []int64
+}
+
 // Authority is what modules need from the auth module. It is implemented in-process by the
 // auth module (Phase 1); modules depend on this interface, not on auth's internals.
 type Authority interface {
-	// ValidateNode checks a node key and returns the node; ok=false for unknown or bad keys.
-	ValidateNode(ctx context.Context, nodeID, key string) (Node, bool, error)
+	// ValidateNode checks a node's key and its access to serviceID (the legacy service name,
+	// e.g. "jarvis-logs", "jarvis-command-center"). err is for infrastructure failures only.
+	ValidateNode(ctx context.Context, nodeID, key, serviceID string) (NodeValidation, error)
 	// ValidateApp checks app-to-app credentials.
 	ValidateApp(ctx context.Context, appID, key string) (App, bool, error)
 	// HouseholdRole returns the user's role in a household, or ok=false if not a member.
