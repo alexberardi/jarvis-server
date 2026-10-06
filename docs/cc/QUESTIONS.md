@@ -19,6 +19,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 
 | D7 | 2026-10-06 | 10 | **Automation cards: option 1.** The chosen action is stored server-side and the card carries only an opaque id. Confirm runs exactly the stored action, after an **ownership check** that the node belongs to the caller's household. `automatic` mode keeps full power, with **no allowlist**. `autorun_gate.py` stays cut (P3). Commands are authentic by construction via per-node broker ACLs (D4), with no `trusted` flag. |
 
+| D8 | 2026-10-06 | P2 (all) | **Known bugs: fix by default.** Each fix is logged in the owning doc as an *intended difference*, with its golden fixture regenerated. Exception: when an unchanged client depends on the buggy behaviour (e.g. the node's reliance on today's 400/422/500 and 200-with-error-body codes), keep it and document why. |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -38,7 +40,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **P2. Known bugs:** fix, not replicate?
+- **P3. Dead and unreachable code:** cut?
 
 ### P: policies (resolve many at once)
 
