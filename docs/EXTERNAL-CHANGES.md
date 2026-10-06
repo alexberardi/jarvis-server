@@ -36,6 +36,8 @@ keep shipping.
 | Model catalog (`src/data/models.ts`): remove `qwen25-7b`, `llama-3.1-8b`, `hermes-3-8b`; remap `qwen3-14b` → `Qwen3_14B_Compressed`; add Qwen3.5-9B (→ `Qwen3_5_9B_Compressed`) and the 27B prod model (→ `Qwen3_14B_Compressed`) | Only providers that ship may be offered; an unknown provider is a hard error | D11, D12 |
 | LLM wizard and quick-sets write `llm.prompt_provider` instead of `llm.interface` | Setting renamed (legacy import maps the old key) | D11 |
 
+| Models page + setup step: hardware-aware recommendation, one-click install, install from a Hugging Face repo (pick a GGUF file/quant, see size and VRAM fit), download progress, delete, assign to live/background | First-class model management on jarvisd's model API; no automatic download | docs/llm LD3 |
+
 ## jarvis-installer
 
 | Change | Why | Decision |
