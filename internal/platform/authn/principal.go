@@ -83,9 +83,10 @@ func Equal(got, expected string) bool {
 type Role string
 
 const (
-	RoleMember Role = "member"
-	RoleAdmin  Role = "admin"
-	RoleOwner  Role = "owner"
+	RoleMember    Role = "member"
+	RolePowerUser Role = "power_user" // jarvis-auth's middle role
+	RoleAdmin     Role = "admin"
+	RoleOwner     Role = "owner"
 )
 
 // NodeValidation is the outcome of validating a node's credentials for one service, as

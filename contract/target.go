@@ -296,3 +296,11 @@ func randHex(n int) string {
 	}
 	return hex.EncodeToString(b)
 }
+
+// EnvImpl names the implementation under test: "python" (default) or "jarvisd". Tests for
+// behaviour jarvisd deliberately changes (a LEGACY-BUG fixed under a decision) branch on it,
+// so both sides stay tested: Python must still behave as frozen, jarvisd as decided.
+const EnvImpl = "JARVIS_CONTRACT_IMPL"
+
+// Jarvisd reports whether the target is jarvisd rather than the legacy Python stack.
+func Jarvisd() bool { return os.Getenv(EnvImpl) == "jarvisd" }

@@ -31,7 +31,7 @@ var nonCCBaselines = []struct {
 		"auth_users",
 	}},
 	{"config", config.Migrations(), []string{"config_services"}},
-	{"logs", logs.Migrations(), nil},
+	{"logs", logs.Migrations(), []string{"logs_entries"}},
 	{"notifications", notifications.Migrations(), []string{
 		"notifications_device_tokens", "notifications_inbox_items", "notifications_notification_log",
 	}},
@@ -60,7 +60,7 @@ func TestNonCCBaselinesApply(t *testing.T) {
 			t.Fatalf("%s: %v", b.module, err)
 		}
 		st, err := db.Status(ctx, d, b.module, b.migrations)
-		if err != nil || st.Current != 1 || st.Pending != 0 {
+		if err != nil || st.Current != st.Latest || st.Pending != 0 {
 			t.Fatalf("%s: status %+v, %v", b.module, st, err)
 		}
 		got := tablesWithPrefix(t, d, b.module+"_")

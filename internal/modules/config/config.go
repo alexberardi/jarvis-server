@@ -25,6 +25,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/mdns"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 //go:embed migrations/*.sql
@@ -53,6 +54,15 @@ var ServiceNames = map[string]string{
 	pconfig.ListenerOCR:           "jarvis-ocr-service",
 }
 
+// Definitions are config-service's settings. Health probes use health_check.timeout.
+var Definitions = []settings.Definition{
+	{Key: "health_check.timeout", Category: "health_check", Type: settings.Float, Default: 5.0,
+		Description: "Timeout in seconds for health check requests"},
+	// Kept for /settings parity (admin lists it); nothing reads it, as in the legacy service.
+	{Key: "health_check.enabled", Category: "health_check", Type: settings.Bool, Default: true,
+		Description: "Whether health checks are enabled"},
+}
+
 // Module is the config module.
 type Module struct {
 	// Served lists the listeners jarvisd itself serves; their registry rows are kept in
@@ -64,6 +74,11 @@ type Module struct {
 	HealthTimeout time.Duration
 	// Advertise announces _jarvis-config._tcp over mDNS so the mobile app finds this server.
 	Advertise bool
+	// SettingsGuard protects /settings (legacy: superuser JWT for reads and writes). Nil
+	// leaves /settings unmounted.
+	SettingsGuard settings.Guard
+
+	settings *settings.Service
 
 	deps   module.Deps
 	client *http.Client
@@ -79,6 +94,14 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 		m.HealthTimeout = 5 * time.Second
 	}
 	m.client = &http.Client{Timeout: m.HealthTimeout}
+	svc, err := settings.New(deps.DB, "config", Definitions, deps.Log)
+	if err != nil {
+		panic(err) // static definitions
+	}
+	m.settings = svc
+	if m.SettingsGuard != nil {
+		svc.Mount(mux, m.SettingsGuard, m.SettingsGuard)
+	}
 
 	mux.HandleFunc("GET /info", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"service": "jarvis-config-service"})
@@ -97,6 +120,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 
 // Start registers jarvisd's own listeners in the registry and starts the mDNS advertisement.
 func (m *Module) Start(ctx context.Context) error {
+	if err := m.settings.Migrate(ctx); err != nil {
+		return err
+	}
 	if err := m.syncSelf(ctx); err != nil {
 		return err
 	}
@@ -345,7 +371,11 @@ func (m *Module) probe(ctx context.Context, s service) healthStatus {
 		e := err.Error()
 		return healthStatus{Error: &e}
 	}
-	res, err := m.client.Do(req)
+	client := m.client
+	if secs := m.settings.Float(ctx, "health_check.timeout", settings.Scope{}); secs > 0 {
+		client = &http.Client{Timeout: time.Duration(secs * float64(time.Second))}
+	}
+	res, err := client.Do(req)
 	if err != nil {
 		var e string
 		switch {

@@ -9,6 +9,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pressly/goose/v3 v3.26.0
+	golang.org/x/crypto v0.40.0
 	golang.org/x/sys v0.36.0
 	modernc.org/sqlite v1.39.1
 )
@@ -25,7 +26,6 @@ require (
 	github.com/rs/xid v1.4.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.40.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.42.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect

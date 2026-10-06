@@ -73,7 +73,7 @@ SET NULL for `created_by_user_id`, `registered_by_user_id`, `granted_by`, `paren
 
 ## Setting keys
 
-From `jarvis-auth/jarvis_auth/app/services/settings_service.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-auth/jarvis_auth/app/services/settings_service.py`; implemented as `auth.Definitions()`. `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|
@@ -98,3 +98,22 @@ updated_at`). Import copies rows 1:1, with these transforms:
 - `value` is already JSON/text-encoded by the settings client; copy it verbatim.
 - Rows whose key is no longer defined (cut keys, listed above) are skipped.
 - Keys defined but never seeded are fine: the definition default applies.
+
+## Go module notes (internal/modules/auth)
+
+- **Signing keys.** `auth_signing_keys` holds PKCS#8 PEM (`private_pem`); a base64-of-PEM value
+  (the legacy `AUTH_PRIVATE_KEY` form) also loads, so an import can copy it verbatim. The newest
+  `is_active` row mints (JWT header carries its `kid`); every stored RS256 row verifies, so an
+  imported legacy key keeps old sessions valid. A key is generated on first start if no active
+  row exists. `kid` for generated keys is hex(SHA-256(public DER)[:8]).
+- **`auth.algorithm`** defaults to `RS256` in Go (legacy default `HS256`). HS256 is minted only
+  when the row says so **and** `AUTH_SECRET_KEY` is set (else RS256 with an error log); HS256 is
+  verified only when `AUTH_SECRET_KEY` is set.
+- **Hashes.** bcrypt cost 12 (passlib's default). Secrets are truncated to 72 bytes before
+  hashing and verifying, matching passlib + bcrypt 4.x, so imported long-password hashes verify.
+- **Account deletion** also deletes the user's rows in `auth_settings`, and runs other modules'
+  `OnUserDeleted` hooks inside the same transaction. The legacy HTTP purge resolves URLs from
+  `config_services` (`scheme://host:port`); it does not read `JARVIS_COMMAND_CENTER_URL` /
+  `JARVIS_NOTIFICATIONS_URL`.
+- Timestamps are written as `YYYY-MM-DDTHH:MM:SS.ffffffZ` and rendered like pydantic
+  (`…Z`, fraction omitted when zero).

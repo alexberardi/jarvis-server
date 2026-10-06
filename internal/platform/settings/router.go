@@ -149,13 +149,16 @@ func (s *Service) handlePut(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var body struct {
-		Value any `json:"value"`
-	}
+	var body map[string]any
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if err := s.Set(r.Context(), key, body.Value, sc); err != nil {
+	value, present := body["value"]
+	if !present { // pydantic: `value: Any` is required (null is allowed)
+		httpx.ValidationError(w, httpx.FieldError{Type: "missing", Loc: []any{"body", "value"}, Msg: "Field required", Input: body})
+		return
+	}
+	if err := s.Set(r.Context(), key, value, sc); err != nil {
 		s.log.Error("settings: update failed", "key", key, "err", err)
 		apiError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting: "+key, "update_failed")
 		return

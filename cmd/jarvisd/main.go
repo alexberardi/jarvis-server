@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
@@ -22,6 +23,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 var version = "dev"
@@ -33,15 +35,33 @@ func modules() []module.Module {
 			AdminToken: os.Getenv("JARVIS_CONFIG_ADMIN_TOKEN"),
 			Advertise:  os.Getenv("JARVIS_MDNS") != "0",
 		},
+		&authmod.Module{
+			AdminToken: os.Getenv("JARVIS_AUTH_ADMIN_TOKEN"),
+			// Legacy HS256 secret: HS256 is minted (auth.algorithm=HS256) and verified only when set.
+			HMACSecret: os.Getenv("AUTH_SECRET_KEY"),
+		},
 	}
-	// The registry lists exactly the listeners jarvisd serves.
-	var served []string
+	// The registry lists exactly the listeners jarvisd serves; account deletion skips the
+	// legacy HTTP purge for the same services.
+	var served, names []string
 	for _, m := range mods {
 		served = append(served, m.Listener())
+		names = append(names, configmod.ServiceNames[m.Listener()])
 	}
+	var auth *authmod.Module
 	for _, m := range mods {
-		if c, ok := m.(*configmod.Module); ok {
+		if a, ok := m.(*authmod.Module); ok {
+			auth = a
+		}
+	}
+	superuser := settings.SuperuserGuard(auth.VerifyUser)
+	for _, m := range mods {
+		switch c := m.(type) {
+		case *configmod.Module:
 			c.Served = served
+			c.SettingsGuard = superuser
+		case *authmod.Module:
+			c.InProcess = names
 		}
 	}
 	return mods

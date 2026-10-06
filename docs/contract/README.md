@@ -187,6 +187,96 @@ Seen while reading but not observable black-box: logs' node routes enrich entrie
 `context.user_id` from validate-node's `user_id`, a field validate-node never returns, so it is
 always `null` in Loki.
 
+## jarvis-auth: every route (green twice in a row against the MBP, 2026-10-06)
+
+All **62** routes jarvis-auth serves are covered (MBP checkout: git `main` plus the uncommitted
+RS256 WIP that adds `/auth/public-key`). Files: `auth_test.go`, `auth_account_test.go`,
+`auth_households_test.go`, `auth_invites_test.go`, `auth_admin_test.go`,
+`auth_internal_test.go` and `auth_superuser_test.go`, with helpers and shapes in
+`auth_fixtures.go`. `scripts/contract.sh -run TestAuth` takes about 4 minutes, mostly waiting
+out the 30/min/IP limiter on register/login/refresh.
+
+Extra fixtures in `auth_fixtures.go`, all cleaned up LIFO, so a household or node goes before
+its owner: `RegisterUser` (register with an invite code or `X-Household-Id`), `DisposableUser`
+(for a test that deletes the user itself), `NewHousehold` (cleanup deletes it as the owner),
+`AddMember`, and `NewHouseholdNode` (registered *by* a user; it is deactivated first, since an
+active node blocks `DELETE /auth/me`). After both runs, the auth DB had no `contract-*` users,
+nodes, active app clients, memberless households, or orphaned user-scoped settings.
+
+| Route | Test |
+|---|---|
+| `GET /health` | `TestHealth/auth` |
+| `POST /auth/register` | `TestAuthRegisterLoginRefresh`, `TestAuthRegisterHousehold` (`X-Household-Id`, unknown household, bad invite, bad email), `TestAuthInvites/register_with_code` |
+| `POST /auth/login` | `TestAuthRegisterLoginRefresh`, `TestAuthLoginLockout` (429 `Too many failed login attempts. Please try again later.` after 8 failures, `Retry-After: 900`), temp-password login in `TestAuthSuperuserTempPassword` |
+| `POST /auth/refresh` | `TestAuthRegisterLoginRefresh`; revocation in `TestAuthLogout`, `TestAuthChangePassword`, `TestAuthDeleteMe`, `TestAuthSuperuserTempPassword` |
+| `POST /auth/logout` | `TestAuthLogout`: 204 always, even for unknown tokens; one family vs. `all_devices` |
+| `POST /auth/change-password` | `TestAuthChangePassword`: `Incorrect password`, `New password must be different from the current password`, 422, revokes all refresh tokens; clears `must_change_password` in `TestAuthSuperuserTempPassword` |
+| `GET /auth/me` | `TestAuthMe` |
+| `DELETE /auth/me` | `TestAuthDeleteMe`: 401 `Incorrect password`, 409 `Cannot delete account with nodes registered to it`, 409 sole-admin-of-shared-household, then 204, after which token, refresh and login fail, the solo household's nodes are gone and the shared household survives |
+| `GET /auth/public-key` | `TestAuthPublicKey` |
+| `GET /auth/setup-status` | `TestAuthSetupStatus` |
+| `POST /auth/setup` | `TestAuthSetup`: 409 `Setup already completed` only (see below) |
+| `POST /auth/switch-household` | `TestAuthSwitchHousehold`: `{access_token, household_id}`, new jti, the `household_id` claim is the target; 403 `Not a member of this household` for another or nonexistent household |
+| `POST/GET /households`, `GET/PATCH/DELETE /households/{id}` | `TestAuthHouseholdsCRUD` |
+| `GET/POST /households/{id}/members`, `PATCH/DELETE …/members/{uid}`, `POST …/leave` | `TestAuthHouseholdMembers` |
+| `GET/POST /households/{id}/nodes` | `TestAuthHouseholdNodes` (also used by `TestAuthDeleteMe`) |
+| `POST/GET /households/{id}/invites`, `DELETE …/invites/{id}`, `GET /invites/{code}/validate`, `POST /households/join` | `TestAuthInvites` |
+| `POST/GET /admin/app-clients`, `POST …/{id}/rotate`, `POST …/{id}/revoke` | `TestAuthAdminAppClients`, `TestAuthAdminToken`, `TestAuthAppPing/revoked` |
+| `POST/GET /admin/nodes`, `GET/DELETE /admin/nodes/{id}`, `POST …/rotate-key`, `POST …/services`, `DELETE …/services/{sid}` | `TestAuthAdminNodes` (rotate-key: the old key gets `Invalid node credentials` at validate-node) |
+| `PUT /admin/users/{id}/superuser`, `GET /admin/users/{id}`, `GET /admin/users/by-email/{email}` | `TestAuthAdminUsers` (messages are Python f-strings: `already has is_superuser=True`) |
+| *every* `/admin/*` route | `TestAuthAdminTokenRequired`: 401 `Unauthorized` with no token, a wrong token, app credentials, or a superuser JWT |
+| `GET /internal/app-ping`, `POST /internal/validate-node` | `TestAuthAppPing`, `TestAuthValidateNode` |
+| `POST /internal/nodes/register`, `POST/DELETE /internal/nodes/{id}/services[/{sid}]`, `DELETE /internal/nodes/{id}`, `POST /internal/validate-node-household` | `TestAuthInternalNodes` (the calling app is auto-granted) |
+| `POST /internal/validate-household-access` | `TestAuthInternalHouseholdAccess` (`User has member role, requires power_user or higher`; checked against the requested household, per D5) |
+| `GET /internal/users/batch` | `TestAuthInternalUsersBatch` (`{"users":{"<id>": username}}`, 400 `Maximum 100 user IDs per request`, 422 `[query, user_ids]`) |
+| every `/internal/*` route | `TestAuthInternalAppAuth`: 401 `Missing app credentials` (a user JWT counts as missing), `Invalid app credentials` |
+| `GET /superuser/households`, `/superuser/users`, `/superuser/nodes` | `TestAuthSuperuserViews`, `TestAuthSuperuserAuth` |
+| `POST /superuser/users/{id}/temp-password` | `TestAuthSuperuserTempPassword`: server-generated or chosen, revokes sessions, login carries `must_change_password: true`; 422 bounds, 404 `User not found` |
+| `GET /settings/`, `/settings/categories`, `/settings/{key}` | `TestSettingsAppAuth/auth`, `TestSettingsSuperuserRead/auth` |
+| `PUT /settings/{key}`, `POST /settings/invalidate-cache`, `POST /settings/sync-from-env` | `TestAuthSettingsWrite`, plus `TestAuthSuperuserAuth` (writes take a superuser JWT only, so app credentials get 401 `Not authenticated`) |
+
+Auth error conventions, frozen across these tests:
+
+- **User-JWT routes:** no token or a non-Bearer header gives 401 `Not authenticated` with
+  `WWW-Authenticate: Bearer`. A bad token gives 401 `Could not validate credentials`.
+- **Superuser routes:** a non-superuser gets 403 `Superuser access required`. This is decided
+  from the DB, not the token's `is_superuser` claim, so a demoted user's old token is refused
+  and a freshly promoted user's old token is accepted.
+- **Household routes:** a non-member gets 403 `Not a member of this household`, and so does a
+  request for a household that doesn't exist. An insufficient role gets 403
+  `Requires <role> role or higher`.
+
+Not testable black-box, and why:
+
+- `POST /auth/setup` happy path: it only runs when the target has no superuser.
+- `POST /settings/sync-from-env` happy path: it rewrites system settings from the target's env.
+- Expiry paths: `Refresh token expired` (14 days), `Temporary password expired…` (the minimum
+  is 1 h), and invite expiry (the minimum is 1 day).
+- Inactive users: no route deactivates one. That also covers temp-password's 409 for a
+  deactivated user.
+- `REFRESH_TOKEN_REVOKE_FAMILY_ON_REUSE`: an env flag that is off on the target.
+- The DELETE /auth/me 502 when a downstream purge 5xxes.
+- The admin token compare is not constant-time (`!=`). That is not observable over HTTP.
+
+LEGACY-BUGs (marked `// LEGACY-BUG:` in the tests):
+
+- **Security, high: `POST /auth/register` with `X-Household-Id: <uuid>` joins that household
+  as a member with no invite**, unauthenticated. Test: `TestAuthRegisterHousehold`.
+- Security, low: logout, change-password and temp-password revoke refresh tokens only. **Access
+  tokens stay valid until they expire** (default 30 min). Tests: `TestAuthLogout`,
+  `TestAuthChangePassword`, `TestAuthSuperuserTempPassword`.
+- Security, low: **rotating a revoked app client re-activates it.** Test:
+  `TestAuthAdminAppClients/revoke`.
+- An admin can **kick a member out of their only household**, leaving them with none, though
+  `/leave` refuses that. Test: `TestAuthInvites/register_with_code`.
+- `POST /households/{id}/leave` for a non-member is **404**, where every other household route
+  answers 403 with the same detail. Test: `TestAuthHouseholdMembers/leave`.
+
+Seen while reading, not frozen: the login and refresh `household_id` claim is the user's
+*first* membership (`.first()` without `ORDER BY`), so for a multi-household user it is
+arbitrary. A token from `switch-household` keeps its `household_id` after the user leaves or is
+kicked from that household. Auth never re-checks it; consumers that trust the claim must.
+
 ## Remaining wire contracts (PLAN §6 Phase 0 item 4)
 
 - [x] **LLM stream frames.** Done against the MBP's Qwen3-8B (`llm_test.go`): framing, delta,

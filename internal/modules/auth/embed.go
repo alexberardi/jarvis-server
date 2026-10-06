@@ -1,4 +1,3 @@
-// Package auth is the jarvisd auth module. For now it holds only the schema baseline.
 package auth
 
 import (
