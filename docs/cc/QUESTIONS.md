@@ -52,6 +52,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D44 | 2026-10-06 | 08 (B4) | **The server owns every routine definition** (08.Q9 option b). Node defaults (Good morning, Good night, …) are seeded as real CC routine rows per household, so mobile can see, edit, run-now and schedule them. Nodes report installed Pantry routine packages up to CC the same way, so the Pantry `routine` package type stays. With D24 (full definition sent with each run) CC is the single source of truth. Fixes the permanent-shadowing bug (§8.8): deleting or disabling a routine removes it from nodes. Needs a node change (report Pantry routines; stop seeding defaults locally once CC seeds them). Pantry's unused `/v1/routines/generate` is outside jarvisd and is left alone. |
 | D45 | 2026-10-06 | 09 (B5) | **Errands keep strict fail-fast** (09.Q10 option a): any failed step ends the errand; a connected call with unknown `goal_achieved` counts as failure; a resolver-skipped step counts as success. |
 | D46 | 2026-10-06 | 10 (B6) | **A user `appt.upcoming` automation and the built-in leave-by both fire** (10.Q6 option a, today's behaviour; the user prefers it). <br>**Fact checked while answering:** the "leave by" alerts heard in the prod kitchen are **not** CC's leave-by reaction. CC's reaction is gated by `proposals.enabled`, which is unset (off) in prod, and the notifications inbox has no leave-by items. They come from the **node-side `calendar_alerts` agent** in the `jarvis-cmd-calendar` package (`agents/calendar_alerts/agent.py`): local proximity alerts "Upcoming: X in about N minutes" at ≤60 and ≤15 min. The same agent also emits `appt.upcoming` signals (≤120 min) for CC's drive-time leave-by. Port contract: keep the `/signals` ingest and the node alert path working for this package. |
+| D47 | 2026-10-06 | minor list | **Minor list M1–M15 accepted as recommended, except M4.** **M4 (overrides):** `adapter_settings` and `skip_warmup_inference` are dropped from the `/conversation/start` schema, along with `JARVIS_TEST_MODE`. Old nodes that still send them don't break, because the Go JSON decoder ignores unknown fields (no `DisallowUnknownFields` on this route). |
 
 ## Verified facts (resolve questions without asking)
 
@@ -72,7 +73,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- *(none: S and B rounds done 2026-10-06. Remaining: the minor list, presented once as recommendations to accept or override.)*
+- *(none: all question rounds done 2026-10-06, D4–D47.)*
 
 ### P: policies (resolve many at once)
 
@@ -104,7 +105,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 13. **Voice identity under new models:** keep raw enrollment audio, per-user or per-household voiceprints, default on, cut affect. (06.Q4, Q6–Q10, 01.Q7)
 14. **Packages:** slow-install expiry, Forge test install, and the Pantry URL. (12.Q1, Q8)
 
-### Minor list (presented 2026-10-06; accept or override)
+### Minor list (answered 2026-10-06 → D47: all accepted except M4, dropped)
 
 | # | Item | Recommendation |
 |---|---|---|
