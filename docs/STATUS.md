@@ -41,9 +41,11 @@ Update it at the end of every working session, and whenever a task finishes or a
 - **Static-link recipe** (fallback path): link sherpa-onnx v1.13.8 `linux-x64-static-lib` with
   `-Wl,--start-group -lsherpa-onnx-c-api -lsherpa-onnx-core -lkaldi-decoder-core -lsherpa-onnx-kaldifst-core -lsherpa-onnx-fstfar -lsherpa-onnx-fst -lkaldi-native-fbank-core -lkissfft-float -lpiper_phonemize -lespeak-ng -lucd -lssentencepiece_core -lonnxruntime -Wl,--end-group -lstdc++ -lm -ldl -lpthread`.
   This gives a 41 MB binary that needs only libc and libstdc++.
-- **Hosts:**
+- **Hosts** (test targets: this box 10.0.0.122 and the MBP are free to use, including resetting their dev DBs; prod read-only):
   - **dev node:** `pi@jarvis-dev.local` (10.0.0.142). Seeed 2-mic HAT, ALSA `plughw:1,0`. It drops into provision mode when config-service is down.
   - **prod:** `jarvis@10.0.0.107`, under `~/.jarvis/`. **Read-only unless the user says otherwise.**
+  - **MacBook Pro:** `alexanderberardi@10.0.0.103`, M2 Max. Full legacy stack (Docker + llm-proxy/whisper/tts native for Metal). Contract-suite target and the Metal test box. No Go toolchain installed (Homebrew present).
+  - **this box:** 10.0.0.122, partial stack in Docker (auth, config, settings-server, OCR, infra).
 - **Prod facts (2026-10-06):**
   - `llm.interface=Qwen3_14B_Compressed`.
   - LLM: Qwen3.8-27B via `llama-server` sidecars, using llm-proxy's REST backend.

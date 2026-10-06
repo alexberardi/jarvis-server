@@ -121,6 +121,8 @@ SQLite driver: `modernc.org/sqlite` (pure Go; keeps the build cgo-free, see §3.
 | ~~Intent classifier (fastText)~~ | **Cut** (D9: off in prod, F1). | — |
 | OCR | LLM vision via `llama-server` (`--mmproj`), `tesseract` (optional), and a macOS Swift Vision helper. | Engine |
 
+**macOS must run on Metal (user requirement, 2026-10-06).** On darwin/arm64 the engines are Metal builds: llama-server (`GGML_METAL`, the default in upstream macOS releases) and whisper.cpp with Metal. CPU fallback is allowed only when the user picks it. Verified on the MacBook Pro (M2 Max, `alexanderberardi@10.0.0.103`), which also runs the legacy stack natively for Metal today.
+
 **GPU selection (user decision, 2026-10-06): auto-detect, always overridable, multi-GPU.**
 
 - jarvisd **detects** GPUs at startup and on demand (port of `gpu_select.py`: NVIDIA via `nvidia-smi`, AMD via `rocm-smi`, Vulkan devices, Apple Metal) and proposes an assignment.
