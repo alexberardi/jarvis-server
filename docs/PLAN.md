@@ -309,6 +309,8 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 
 **Future work (after the migration):**
 - **External-API connector.** A first-class way for 3rd-party apps to use Jarvis, with scoped credentials. `/internal/phone/*` (jarvis-phone-gateway) moves onto it; until then it stays open to any registered app.
+- **Forge test install.** Dropped from the Go port; Forge test installs were dropped temporarily upstream. Re-add if Forge returns.
+- **Private Pantry instances.** Installs must keep accepting any repo URL, so users can run their own Pantry for private commands. Optionally a power-user gate for installs later.
 - **Prompt-provider redesign.** Something simpler than a Python class implementing an ABC. Until then `/prompt-providers/install` is a no-op stub.
 
 ## Appendix A: command-center route audit (2026-10-06)
