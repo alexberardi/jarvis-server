@@ -175,3 +175,26 @@ always `null` in Loki.
 
 The fakes from Phase 0 item 2 still to build: **fake LLM** (scripted OpenAI-compatible),
 **fake relay**, and **fake MQTT node**. They go in `contract/fakes/…` with the same build tag.
+
+## Running against jarvisd (parity)
+
+A contract test proves parity once the same test passes against jarvisd. During the strangler
+phase jarvisd serves only some listeners, so point the suite at it with a separate env file and
+skip the rest:
+
+```bash
+JARVIS_HOME=$(mktemp -d) JARVIS_PORT_CONFIG=17700 JARVIS_CONFIG_ADMIN_TOKEN=tok JARVIS_MDNS=0 jarvisd serve &
+# Registry rows for services jarvisd doesn't serve yet (here: the Python ones), e.g.
+curl -X POST -H 'X-Admin-Token: tok' -H 'Content-Type: application/json' \
+  -d '{"name":"jarvis-auth","host":"localhost","port":7701}' localhost:17700/services
+cat > /tmp/jarvisd.env <<EOT
+JARVIS_CONTRACT_HOST=127.0.0.1
+JARVIS_CONTRACT_PORT_CONFIG=17700
+JARVIS_CONTRACT_AUTH_ADMIN_TOKEN=unused
+EOT
+JARVIS_CONTRACT_ENV_FILE=/tmp/jarvisd.env scripts/contract.sh -run 'TestConfig|TestHealth/config'
+```
+
+| Module | Parity status |
+|---|---|
+| config | `TestConfigInfo`, `TestConfigServices` (all URL styles, 422), `TestConfigServiceByName`, `TestHealth/config` pass against jarvisd (2026-10-06). `/settings` and `/v1/services/*` wait for the auth module (superuser JWT). |

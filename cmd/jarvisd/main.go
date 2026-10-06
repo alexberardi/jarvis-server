@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -27,7 +28,23 @@ var version = "dev"
 
 // modules lists every module jarvisd serves. Modules are added here as they are ported.
 func modules() []module.Module {
-	return nil
+	mods := []module.Module{
+		&configmod.Module{
+			AdminToken: os.Getenv("JARVIS_CONFIG_ADMIN_TOKEN"),
+			Advertise:  os.Getenv("JARVIS_MDNS") != "0",
+		},
+	}
+	// The registry lists exactly the listeners jarvisd serves.
+	var served []string
+	for _, m := range mods {
+		served = append(served, m.Listener())
+	}
+	for _, m := range mods {
+		if c, ok := m.(*configmod.Module); ok {
+			c.Served = served
+		}
+	}
+	return mods
 }
 
 const usage = `usage: jarvisd <command>
@@ -102,9 +119,6 @@ func serve(ctx context.Context) error {
 	}
 	defer deps.DB.Close()
 	mods := modules()
-	if len(mods) == 0 {
-		deps.Log.Warn("no modules are ported yet; nothing to serve")
-	}
 	deps.Log.Info("starting jarvisd", "version", version, "home", deps.Config.Home)
 	return (&module.Runner{Deps: deps, Modules: mods}).Run(ctx)
 }

@@ -100,3 +100,16 @@ func Middleware(log *slog.Logger, listener string, next http.Handler) http.Handl
 		next.ServeHTTP(rec, r)
 	})
 }
+
+// FieldError is one entry of a FastAPI/pydantic validation error.
+type FieldError struct {
+	Type  string `json:"type"`
+	Loc   []any  `json:"loc"`
+	Msg   string `json:"msg"`
+	Input any    `json:"input"`
+}
+
+// ValidationError writes FastAPI's 422 body: {"detail": [{"type", "loc", "msg", "input"}, ...]}.
+func ValidationError(w http.ResponseWriter, errs ...FieldError) {
+	WriteJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": errs})
+}
