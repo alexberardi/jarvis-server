@@ -41,6 +41,7 @@ Tests skip with a message when the environment they need is missing. With no
 | `JARVIS_CONTRACT_MQTT_PORT` | for the MQTT test | The target's broker port (MBP: `1884`). Without it `TestCCMQTTCatalogue` skips. |
 | `JARVIS_CONTRACT_MQTT_USERNAME` / `JARVIS_CONTRACT_MQTT_PASSWORD` | if the broker has auth | The shared broker credential (CC's `MQTT_USERNAME`/`MQTT_PASSWORD`). Empty means anonymous. |
 | `JARVIS_CONTRACT_SLOW_TIMEOUT` | no | Timeout for inference calls (LLM, STT, TTS synthesis). The default is `180s`. |
+| `JARVIS_CONTRACT_CALLBACK_HOST` | for the OCR callback test | An address the target can reach this test process at (jarvisd only; `127.0.0.1` for a local jarvisd). Without it `TestOCRFlowJobs/callback` skips. |
 | `JARVIS_CONTRACT_NOTIFICATIONS_ADMIN_KEY` | for the notifications admin test | jarvis-notifications' `ADMIN_API_KEY` (MBP: `docker exec jarvis-notifications-jarvis-notifications-1 printenv ADMIN_API_KEY`). Without it `TestNotificationsAdmin` skips. |
 
 To get the admin token from the MBP without echoing it:
@@ -308,6 +309,48 @@ kicked from that household. Auth never re-checks it; consumers that trust the cl
   notifications); the tests delete the household-wide items they create. `notification_log`
   rows (7 per run) stay: they are the audit trail, with no delete API, pruned after 30 days.
 
+## jarvis-ocr-service: every route (green twice in a row against the MBP, 2026-10-06)
+
+`contract/ocr_test.go`, **9 tests** (`-run TestOCR`), covering every route: `GET /v1/providers`,
+`GET /v1/queue/status`, `POST /v1/ocr` + `GET /v1/ocr/jobs/{id}`, `POST /v1/ocr/batch`, the
+`/settings` router (reads, writes, auth), plus `/health` in `TestHealth`. `TestOCRFlowJobs`
+covers jarvisd's new `POST /v1/ocr/jobs` and is **jarvisd-only** (Python has no such route; it
+replaces the Redis queue-flow handoff with recipes, see `docs/schema/ocr.md`).
+
+- **Engines.** The MBP has none available (no tesseract binary; Apple Vision, remote OCR and
+  LLM vision off), so there the image tests take the "no engine" branch: auto batch → 500
+  `Internal server error…`, a named unavailable provider → 400 `Provider 'tesseract' is not…`.
+  The "engine" branch (a generated PNG reading `HELLO`, boxes from tesseract) was proven against
+  the same Python code (the MBP checkout, run locally in the ocr-service image with tesseract
+  and this box's jarvis-auth) — green twice — and against jarvisd with and without tesseract.
+- **Auth details frozen:** missing either header, or a user JWT → 401
+  `{"detail":{"error_code":"unauthorized","error_message":"Missing or invalid app credentials"}}`.
+  Auth runs before body validation. `/settings` uses the shared settings-client guards (reads:
+  superuser JWT or app; writes: superuser JWT only, `Missing or invalid Authorization header`).
+- **422 locs** frozen for both bodies (missing image/base64/content_type, provider and mode
+  literals, `json_invalid`, `images` min 1 / max 100). Bad base64 is a 400
+  `Invalid base64 image data at index <i>: …` (Python's lenient decoder: only bad padding fails).
+  A cut engine (`easyocr`) is 400 `Provider 'easyocr' is not enabled or available. Available providers: …`.
+- `GET /v1/queue/status` keeps its Redis-shaped body; jarvisd reports its embedded queue
+  (`redis_connected: true`, `queue_name: "jarvis.ocr.jobs"`).
+- The settings write test PUTs `ocr.max_attempts` with its current value (no behaviour change)
+  and never calls `sync-from-env` with a superuser (it would copy the target's env into its DB).
+- **Leftovers:** Python's `POST /v1/ocr` writes `ocr_job:<uuid>` (24 h TTL) and a queue message
+  the worker drops. No delete route; the TTL removes the key. jarvisd purges job records after
+  24 h. The callback subtest needs `JARVIS_CONTRACT_CALLBACK_HOST` (an address the target can
+  reach the test process at; `127.0.0.1` for a local jarvisd) and skips without it.
+
+LEGACY-BUGs (marked `// LEGACY-BUG:`; jarvisd fixes them, the tests branch on `JARVIS_CONTRACT_IMPL`):
+
+- **Bad app credentials answer 503 `auth_unavailable` the first time.** `verify_app_auth`
+  raises its 401 inside a `try` whose `except Exception` turns it into 503; only the cached
+  failure (10 s) is a 401. jarvisd: 401 every time.
+- **`POST /v1/ocr` jobs never run.** The endpoint enqueues `{job_id, request}`, the worker
+  validates the queue-flow v1 envelope and silently drops anything else, so the job stays
+  `pending` until its TTL. jarvisd runs it (the tier chain) to `completed`/`failed`.
+- Not frozen (shape-level only): the batch path's LLM validation tested a tuple's truthiness,
+  so garbled output was never rejected there; jarvisd honours the verdict.
+
 ## Remaining wire contracts (PLAN §6 Phase 0 item 4)
 
 - [x] **LLM stream frames.** Done against the MBP's Qwen3-8B (`llm_test.go`): framing, delta,
@@ -397,3 +440,4 @@ JARVIS_CONTRACT_ENV_FILE=/tmp/jarvisd.env scripts/contract.sh -run 'TestConfig|T
 |---|---|
 | config | `TestConfigInfo`, `TestConfigServices` (all URL styles, 422), `TestConfigServiceByName`, `TestHealth/config` pass against jarvisd (2026-10-06). `/settings` and `/v1/services/*` wait for the auth module (superuser JWT). |
 | notifications | All 7 `TestNotifications*` pass against the Go module (2026-10-06), served alone by a test-only harness until main.go wires it: `internal/modules/notifications/parity_test.go` (build tag `parity`) runs it through `module.Runner`, validating apps against the MBP's jarvis-auth (`/internal/app-ping`, via `ssh -L 27701:localhost:7701`) and JWTs with its HS256 `AUTH_SECRET_KEY`. Env: `JARVIS_CONTRACT_HOST=127.0.0.1 JARVIS_CONTRACT_PORT_AUTH=27701 JARVIS_CONTRACT_PORT_NOTIFICATIONS=27712`; see the file header. |
+| ocr | All 9 `TestOCR*` pass against the Go module (2026-10-06), twice with tesseract and once without (`JARVIS_PARITY_TESSERACT=-`), through `internal/modules/ocr/parity_test.go` (build tag `parity`). It validates apps against a legacy jarvis-auth's `/internal/app-ping` and user JWTs against its `/auth/me`. Env: `JARVIS_CONTRACT_HOST=127.0.0.1 JARVIS_CONTRACT_PORT_OCR=27031 JARVIS_CONTRACT_IMPL=jarvisd JARVIS_CONTRACT_CALLBACK_HOST=127.0.0.1` (plus `JARVIS_CONTRACT_PORT_AUTH` if the auth is tunnelled); see the file header. |
