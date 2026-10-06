@@ -75,4 +75,6 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Task 0.1: the purego loader works on linux; CI added for the other 3 OSes.
   - 0.1 done: the single-binary approach is proven on all 4 OSes.
   - Started 0.9, the CC deep dive. 14 agents are drafting `docs/cc/00..13-*.md`, each ending with questions for the user.
-- **Next:** collect the `docs/cc` drafts, dedupe and prioritise the questions, and run question rounds with the user (batches of about 10, scope-changing first). Fold the answers into the docs. Only after that: 0.3 onward.
+  - All 14 `docs/cc` drafts are done (about 166 questions), reduced into a queue in `docs/cc/QUESTIONS.md`: policies P1–P4, then scope S1–S14, then behaviour, then a minor list.
+  - Decisions D1 (Caddy orphaned) and D2 (drop node last-speaker); facts F1 (fastText off in prod) and F2.
+- **Next:** continue `docs/cc/QUESTIONS.md`, asking **one question at a time** (user preference). Q0 (stickiness) is pending. Record each answer in Decisions, then fold it into the owning doc.
