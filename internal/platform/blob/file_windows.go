@@ -7,22 +7,30 @@ import (
 	"os"
 	"syscall"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
-// Windows refuses to replace or delete a file that another handle has open unless every
-// handle was opened with FILE_SHARE_DELETE, which os.Open doesn't set. Readers open with it,
-// and replace/remove retry briefly to ride out a concurrent rename holding the destination.
+// Windows refuses to replace a file that another handle has open, unless the rename uses
+// POSIX semantics (Windows 10 1607+, NTFS): then the open readers keep the old contents and
+// new opens see the new file, just as on unix. Readers must also open with FILE_SHARE_DELETE,
+// which os.Open doesn't set. If POSIX rename isn't supported, fall back to MoveFileEx with
+// short retries.
 
 func openShared(path string) (*os.File, error) {
-	p, err := syscall.UTF16PtrFromString(path)
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+	}
+	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
-	h, err := syscall.CreateFile(p, syscall.GENERIC_READ,
-		syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE,
-		nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	h, err := windows.CreateFile(p, windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
-		if errors.Is(err, syscall.ERROR_FILE_NOT_FOUND) || errors.Is(err, syscall.ERROR_PATH_NOT_FOUND) {
+		if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
 			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
 		}
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
@@ -30,7 +38,48 @@ func openShared(path string) (*os.File, error) {
 	return os.NewFile(uintptr(h), path), nil
 }
 
-const errSharingViolation syscall.Errno = 32
+const (
+	fileRenameInfoEx         = 22 // FILE_INFO_BY_HANDLE_CLASS FileRenameInfoEx
+	renameFlagReplace        = 0x1
+	renameFlagPosixSemantics = 0x2
+)
+
+// posixRename renames from over to with FILE_RENAME_FLAG_POSIX_SEMANTICS.
+func posixRename(from, to string) error {
+	src, err := windows.UTF16PtrFromString(from)
+	if err != nil {
+		return err
+	}
+	dst, err := windows.UTF16FromString(to)
+	if err != nil {
+		return err
+	}
+	h, err := windows.CreateFile(src, windows.DELETE|windows.SYNCHRONIZE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+
+	// FILE_RENAME_INFO: Flags (u32, padded), RootDirectory (HANDLE), FileNameLength (u32),
+	// FileName (WCHAR[], no terminator counted).
+	name := dst[:len(dst)-1]
+	const nameOff = unsafe.Offsetof(renameInfo{}.FileName)
+	buf := make([]byte, int(nameOff)+len(name)*2+2)
+	info := (*renameInfo)(unsafe.Pointer(&buf[0]))
+	info.Flags = renameFlagReplace | renameFlagPosixSemantics
+	info.FileNameLength = uint32(len(name) * 2)
+	copy(unsafe.Slice((*uint16)(unsafe.Pointer(&buf[nameOff])), len(name)), name)
+	return windows.SetFileInformationByHandle(h, fileRenameInfoEx, &buf[0], uint32(len(buf)))
+}
+
+type renameInfo struct {
+	Flags          uint32
+	RootDirectory  windows.Handle
+	FileNameLength uint32
+	FileName       [1]uint16
+}
 
 func retry(op func() error) error {
 	var err error
@@ -38,7 +87,7 @@ func retry(op func() error) error {
 		if err = op(); err == nil {
 			return nil
 		}
-		if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) && !errors.Is(err, errSharingViolation) {
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) && !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
 			return err
 		}
 		time.Sleep(time.Duration(i+1) * time.Millisecond)
@@ -46,5 +95,15 @@ func retry(op func() error) error {
 	return err
 }
 
-func replaceFile(from, to string) error { return retry(func() error { return os.Rename(from, to) }) }
-func removeFile(path string) error      { return retry(func() error { return os.Remove(path) }) }
+func replaceFile(from, to string) error {
+	return retry(func() error {
+		err := posixRename(from, to)
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) || errors.Is(err, windows.ERROR_NOT_SUPPORTED) ||
+			errors.Is(err, syscall.EWINDOWS) {
+			return os.Rename(from, to) // no POSIX rename here (old Windows, FAT)
+		}
+		return err
+	})
+}
+
+func removeFile(path string) error { return retry(func() error { return os.Remove(path) }) }
