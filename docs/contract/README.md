@@ -37,6 +37,7 @@ Tests skip with a message when the environment they need is missing. With no
 | `JARVIS_CONTRACT_PORT_<LISTENER>` | no | Port override per listener. Dashes become underscores, e.g. `JARVIS_CONTRACT_PORT_COMMAND_CENTER=17703`. |
 | `JARVIS_CONTRACT_SCHEME` | no | `http` (default) or `https`. |
 | `JARVIS_CONTRACT_TIMEOUT` | no | Per-request timeout as a Go duration. The default is `15s`. |
+| `JARVIS_CONTRACT_SLOW_TIMEOUT` | no | Timeout for inference calls (LLM, STT, TTS synthesis). The default is `180s`. |
 
 To get the admin token from the MBP without echoing it:
 
@@ -56,6 +57,7 @@ Default ports are the legacy ones (PLAN §3.1): 7700 config, 7701 auth, 7702 log
 | `resp.go` | `Resp` with `ExpectStatus`, `ExpectShape`, `ExpectError(status, detail)` and so on. Every failure prints the request line, the status and the body. |
 | `shape.go` | Shape matchers. `Obj` is an exact key set, as in pydantic models; `Open` is a subset. Also `Optional`, `String`, `Int`, `Bool`, `Eq`, `OneOf`, `NullOr`, `ArrayOf`, `MapOf`, `UUID`, `TimestampUTC`, `TimestampNaive`, and `ValidationError(loc…)` for FastAPI 422s. |
 | `fixtures.go` | Throwaway fixtures created through the real APIs, tagged `contract-<runid>`. |
+| `media_helpers.go` | For the LLM/STT/TTS contracts: `SlowDo`/`SlowJSON` (raw bodies, slow timeout, keeps `Transfer-Encoding`), `ExpectChunked`, `ExpectMediaType`, `ExpectHeaderVal`; `MultipartBody`/`FormFile`/`FormField`; `SineWAV` and `ParseWAV`; strict SSE parsing (`ParseSSE` for a whole body, `OpenSSE`/`Next` for incremental reads). |
 
 ### Fixtures
 
@@ -99,6 +101,18 @@ then a login as that user and `DELETE /auth/me`.
 | Settings | `TestSettingsAppAuth/*` | `/settings/`, `/settings/categories` and `/settings/{key}` on auth, logs, CC, llm, whisper, tts and recipes, with app credentials. Covers the SettingResponse key set, `total`, secret masking, the nested 404 `{"detail":{"error":{type,message,code}}}`, the 401 details, and 403 `Superuser access required` for a plain user. |
 | | `TestSettingsConfigService` | config-service `/settings` is **superuser-only**: app credentials get 401 `Missing or invalid Authorization header`; a garbage token gets 401 `Invalid or expired token`. |
 | | `TestSettingsSuperuserRead`, `TestSettingsOptionsOnSingleRead` | Superuser JWT reads; the single-read `options` bug (below) |
+| LLM | `TestLLMChatCompletion` | Non-stream `POST /v1/chat/completions` key set: `id` (`chatcmpl-` + 8 hex), `object:"chat.completion"`, `created`, `model` (echoes `live`/`background`; anything else is forced to `live`), one choice `{index:0, message:{role:"assistant", content, tool_calls:null, tool_call_id:null}, finish_reason}`, `usage{prompt,completion,total}_tokens`, and the Jarvis `date_keys`: `null` unless `include_date_context:true`, then an array (`[]` when no date is mentioned). 422 for missing `messages`/`model`. |
+| | `TestLLMChatStream` | `stream:true`: 200 `text/event-stream`, chunked, `Cache-Control: no-cache`, `X-Accel-Buffering: no`, `X-Request-Id` echoed (or a generated 32-hex id). Every event is exactly `data: <json>\n\n`. Frames are `{"delta": "<tok>"}`, then a final `{"done":true, "content", "usage", "tool_calls":null, "finish_reason"}` whose `content` equals the concatenated deltas. **No `[DONE]` sentinel, not OpenAI chunks, no `date_keys`.** Cancel: `POST /v1/chat/completions/cancel/{id}` → `{"status":"cancelling","request_id"}`, the stream ends with `{"cancelled": true}` and no done frame; an unknown id is 404 `{"detail":{"error":{type:"not_found", message:"No active stream with request id '<id>'", code:"request_not_found"}}}`. |
+| | `TestLLMImageToTextModel` | An image to a text-only model (non-stream: the OpenAI error shape, see LEGACY-BUGs; stream: not refused) |
+| | `TestLLMModels`, `TestLLMEngine`, `TestLLMDateKeyVocabulary` | Unauthenticated `GET /v1/models` (`{object:"list", data:[{id, object:"model", created:0, owned_by:"jarvis", supports_images?, context_length?}]}`), `GET /v1/engine` (`{inference_engine, backend_type, allows_caching, description}`, CC reads `allows_caching`), `GET /v1/adapters/date-keys` (`static_keys` etc., CC loads the vocabulary from it). |
+| | `TestLLMEmbeddings` | `POST /v1/embeddings`: string or list input, `{object:"list", data:[{object:"embedding", embedding, index}], model, usage{prompt_tokens,total_tokens}}`, indices in input order, `[]` input → empty data and zero usage. |
+| | `TestLLMQueueEnqueue` | `POST /internal/queue/enqueue` (CC's background-job payload): `{accepted:true, job_id, deduped:false}`, then `deduped:true` for the same `job_id`+`idempotency_key`. 400 nested errors with codes `expired` (`Job already expired`), `invalid_request`, `missing_schema`; 422 without `callback`. |
+| | `TestLLMAppAuth` | 401 `Missing app credentials` / `Invalid app credentials` on chat, cancel, embeddings and enqueue (the proxy's own `auth/app_auth.py`). |
+| TTS | `TestTTSAudioFormat` | `GET /audio/format` `{sample_rate, channels:1, sample_width:2, provider}` |
+| | `TestTTSSpeakStream` | `POST /speak/stream`: 200 `audio/raw`, chunked, decimal `X-Audio-Sample-Rate`/`X-Audio-Channels`/`X-Audio-Sample-Width` that agree with `/audio/format`, `X-Audio-Provider`; no `X-Assistant-Message` (that is CC's); headerless body of whole `channels × width` frames. |
+| | `TestTTSSpeak`, `TestTTSEmptyText`, `TestTTSAppAuth` | `POST /speak`: 200 `audio/wav`, a complete RIFF WAV whose fmt chunk matches `/audio/format` and whose data is whole frames. Empty text (bug, below). The `require_app_auth` 401s on all three routes. |
+| STT | `TestWhisperTranscribe` | `POST /transcribe` multipart: `file` (required, 422 `[body, file]` without it), optional `speaker_audio`; CC's extra form fields (`conversation_id`, `language`, `task`) are accepted and ignored. Response `{text, segments:[{t0_ms,t1_ms,text}], speaker:{user_id, confidence}, affect}`; `affect` is present and `null` (D38); `speaker` is always present, `{user_id:null, confidence:0}` with `?speaker_recognition=false`. 401s. |
+| | `TestWhisperVoiceProfiles` | For a throwaway user: `GET /voice-profiles/check` `{exists, user_id, sample_count}`; `POST /voice-profiles/enroll?user_id&household_id[&sample_index]` `{status:"enrolled", user_id, household_id, sample_index, total_samples}` with auto-allocated indices, 400 `sample_index must be in [0, 999]`; `GET /voice-profiles/{uid}/samples`; `GET /voice-profiles?household_id` (hashed filenames); `POST /voice-profiles/verify` `{matched, confidence, user_id}`, 404 `No voice profile enrolled for user <id>`; `DELETE …/samples/{i}` `{status, user_id, sample_index, remaining_samples}`, 404 `Sample <i> not found for user <id>`; `DELETE /voice-profiles/{uid}` `{status, user_id, household_id}`, 404 `Voice profile not found`; `DELETE /voice-profiles/user/{uid}` `{status, user_id, households}` (idempotent). 422 on missing query params. |
 
 Not frozen on purpose:
 
@@ -106,6 +120,9 @@ Not frozen on purpose:
 - The current `auth.algorithm`. Tokens may be HS256 or RS256.
 - `needs_setup`'s value.
 - The LLM health `model_service` blob.
+- Any LLM content, transcript text, audio samples, or the TTS sample rate itself (16000 Piper on the MBP, 24000 Kokoro in prod); only that the headers, `/audio/format` and the WAV agree.
+- The queue **callback envelope** `{job_id, job_type, finished_at, status, result, error, timing, metadata}` (llm-proxy `queues/tasks.py`). Freezing it needs a listener the target can POST to; the enqueue test points the callback at a closed port on the target's loopback.
+- The stream **error frame** `{"error": "Model service error <status>"}` / `{"error": "Model service connection error: …"}`. The model service only refuses a stream for an unloaded slot, a non-streaming backend or a bad internal token, none of which a black-box test can cause. It is documented here so the Go port keeps it.
 
 ## LEGACY-BUGs frozen as-is
 
@@ -123,24 +140,34 @@ becomes an intended divergence: when the Go module lands, flip the assertion and
 4. **Logs `/health` reports `degraded` with HTTP 200** when Loki is down, so the registry probe
    shows it as healthy. Test: `healthShapes[Logs]`.
 
+LLM, STT and TTS (`llm_test.go`, `tts_test.go`):
+
+- **TTS empty text is 200 JSON `{"error":"No text provided"}`** on `/speak` and `/speak/stream`, which CC relabels as audio (docs/cc/06 §8 item 7). Test: `TestTTSEmptyText`.
+- **Stream final frame `usage` is `{}`** with the in-process GGUF backend (the REST backend sends counts). Test: `streamFinal`.
+- **Non-stream image to a text-only model is 500 `internal_server_error`** wrapping the model service's 400 in the message. llm-proxy #86 (2026-10-03) fixed this to a 400 `invalid_request_error`, but the MBP's running proxy predates it; the test accepts either. Test: `TestLLMImageToTextModel/non-stream`.
+- **The stream path never checks for images**: the same request streams a normal answer. Test: `TestLLMImageToTextModel/stream`.
+
+Also seen, not frozen: on the stream path `reasoning_budget: 0` did not stop Qwen3 thinking on the MBP (deltas start with `<think>`). The queue worker's expiry branch calls `_send_callback` without the required `job_type`/`metadata` arguments (a `TypeError` instead of an `expired` callback). Whisper's account purge removes the user directory but leaves the empty `voice_profiles/<household_id>/` directory behind, so **each run of `TestWhisperVoiceProfiles` leaves one empty directory on the target** (no API removes it).
+
 Seen while reading but not observable black-box: logs' node routes enrich entries with
 `context.user_id` from validate-node's `user_id`, a field validate-node never returns, so it is
 always `null` in Loki.
 
 ## Remaining wire contracts (PLAN §6 Phase 0 item 4)
 
-- [ ] **LLM stream frames.** llm-proxy's OpenAI-compatible `POST /v1/chat/completions` with
-  `stream:true`. Freeze the SSE framing (`data: {…}\n\n`, the chunk object keys, `delta`
-  shape, the final `finish_reason`, the `data: [DONE]` terminator) and the non-stream response
-  key set. Also the app-auth errors.
-  - Against the MBP it can use the real Qwen3-8B, with `max_tokens` small and `temperature 0`.
-    Assert framing only, never content.
+- [x] **LLM stream frames.** Done against the MBP's Qwen3-8B (`llm_test.go`): framing, delta,
+  final and cancelled frames, non-stream key set, `date_keys`, models/engine/date-key vocabulary,
+  embeddings, enqueue + dedup, app-auth errors. There is no `[DONE]` terminator.
+  - Still open: the queue callback envelope (needs a reachable listener) and the stream error
+    frame (not triggerable black-box); see "Not frozen on purpose".
   - For CC's own streaming (the voice path and `/node/llm/chat`), CC needs a **fake LLM**: an
     OpenAI-compatible scripted server in `contract/fakes/llm`. Point CC at it via
     `jarvis-llm-proxy-api` in `/services`, or via a CC setting. That requires re-registering the
     service on the target, so do it only on a dev box and restore it afterwards.
-- [ ] **Voice PCM stream headers.** jarvis-tts `POST /speak/stream`, and CC's media proxy
-  (`app/api/media.py`), which re-emits them. Covers `X-Audio-Sample-Rate`, `X-Audio-Channels`,
+- [~] **Voice PCM stream headers.** jarvis-tts side done (`tts_test.go`); STT `/transcribe` and the
+  voice-profile routes done (`whisper_test.go`). Still open: CC's media proxy
+  (`app/api/media.py`, needs the CC node fixture), which re-emits the headers.
+  Original scope: jarvis-tts `POST /speak/stream`, and CC's media proxy, which re-emits them. Covers `X-Audio-Sample-Rate`, `X-Audio-Channels`,
   `X-Audio-Sample-Width`, `X-Audio-Provider`, the content type, and chunked raw PCM whose
   length is a multiple of `channels × width`.
   - TTS needs node or app auth: a node fixture with the tts service grant. CC's proxy also needs
