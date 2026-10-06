@@ -23,6 +23,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 
 | D9 | 2026-10-06 | P3 | **Dead code.** <br>**Cut:** <br>• the fastText router, fast stream path, router hint/must-call guard and `/tool-router/train` (PLAN's pure-Go fastText is dropped too) <br>• tool-stream path B (user: tool calls need the full JSON object before executing anyway) <br>• all uncalled prompt and date modules (`date_replacer`, `date_detector`, `build_tool_system_message`, `command_converters`, `prompt_variant_builder`, the malformed-JSON extractor + `json_schema.py`, the prune helpers, and the legacy `IModelInterface`/`ModelFactory`/`JarvisToolModel`) <br>• the never-written attention tier/consent/feedback tables <br>• the phone-mic voice-profile routes V2–V5 <br>• `/devices/control-external` (route only): it belongs to the **external device manager** feature (household setting `smart_home.use_external_devices` / `smart_home.device_manager`, where a Pantry `device_manager` package such as HA takes over the built-in `jarvis_direct` manager). That feature is **live and kept**, along with its settings, device listing and `ExternalDeviceDetailScreen`. Mobile deliberately removed the *controls* in `c51ccc6` ("externally managed devices are controlled through their own system"), so this control route has no caller <br>• `ambient_grounding.py` and the disabled `ControlDeviceTool` <br>• dead phone knobs <br>• `/admin/nodes/{id}/commands` (LoRA) <br>**Keep:** errand autonomy (`autorun_gate`, `errands.autonomous_enabled`, `$leave_by`/`$from_step` resolver). The user says it "should actually not be orphaned". Port it, uncalled for now, with no new callers to be built yet. <br>**Factory reset is used** (see Q-FR). |
 
+| D10 | 2026-10-06 | 05 | **Factory reset: the tracked flow (flow 2) only.** `POST /admin/nodes/{id}/factory-reset` creates a persisted `NodeTask`, with a single-in-flight guard, node progress reports via `/nodes/factory-reset/{task_id}/status`, and the task-timeout sweeper. **Mobile's delete switches to it** (mobile change). Flow 1 (DELETE + `verify-reset` without a task_id) is dropped once mobile switches; keep `verify-reset` only as long as nodes on older builds need it. **Fix (D8):** today both flows keep the reset token in an in-memory dict with a 300 s TTL (`core/pending_resets.py`). Go persists it in SQLite with the task, so an offline node, or a server restart, can still complete the reset when the node comes back. |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -42,7 +44,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **Q-FR. Factory reset:** which of the two flows does Go keep? (05.Q3, Q4)
+- **P4. Settings hygiene.**
 
 ### P: policies (resolve many at once)
 
