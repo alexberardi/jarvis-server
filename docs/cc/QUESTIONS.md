@@ -23,6 +23,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D15 | 2026-10-06 | 09 (S1c) | **In-envelope replan steps keep running silently** (today's behaviour). Out-of-envelope changes (new phone calls, risky steps) still pause for an approval card, which now has a deadline (D14). Port `widens_envelope` byte-for-byte; it is the safety boundary. |
 | D16 | 2026-10-06 | 11 (S2) | **Absorb jarvis-phone-gateway into jarvisd** (11.Q1 option c). Phone becomes its own set of REST endpoints (Twilio voice webhook, Media Streams WebSocket, and the call/session/escalation routes) gated behind `phone_calls.enabled` (default off). Live calls use the in-process STT, LLM and TTS. **No Redis and no dial-queue shim** (11.Q2 is moot); dial hand-off is an in-process call or queue job. Twilio still needs the webhook/WS routes to be publicly reachable (a tunnel), which is configured only by households that turn phone on. The gateway's oddities that come from the two-process split get fixed (D8). Prod usage: enabled, 17 calls 2026-08-06..08-30. Ported in Phase 5c with the rest of phone; until cutover prod keeps the Python gateway. |
 | D17 | 2026-10-06 | 10 (S3) | **Cut the proactive situation matcher** (10.Q2 option c): the matcher, its byte-exact prompt, queue job type, anti-nag state, `match_situation`, the `proposals.*` settings and the `evals/signal_precision` harness. Prod never enabled it. **Kept:** the signal store, signal rendering into voice context, deterministic reactions (leave-by), user-authored automations (D7) and the card dispatcher. Whether `proposal_suppressions` / "never suggest this" survives depends on what still produces proposals (minor list). |
+| D18 | 2026-10-06 | 10 (S3b) | **Port the working part of the attention broker** (10.Q3 option b): the gates (safety bypass, dedupe, budget, quiet hours), the journal, the daily journal card, TTL cleanup (run at startup, not after a 24 h sleep), and the interposition on `/node/push-notification`, `/node/inbox-item` and `/node/send-link`. With `attention.enabled` off these stay byte-identical to legacy. **Drop** `attention_source_tiers`, `attention_consents`, `attention_feedback` (never written) and the consent/tier gates that read them. **Fix (D8):** quiet hours use the household timezone; `attention.timezone` (default UTC) goes away. Prod: on, 149 events in 30 days, mostly medication (safety bypass). |
 
 ## Verified facts (resolve questions without asking)
 
@@ -43,7 +44,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S3b. Attention broker (10.Q3):** port the gates + journal + card, drop the never-written tier/consent/feedback tables? Prod: on since 2026-09-06, 149 events in 30 days: 109 medication pushes (safety bypass), 28 interactive-list pushes, 10 interactive-list withheld by dedupe, 2 smart-reply pushes. Never withheld by budget or quiet hours.
+- **S4. Memory:** log voice turns as transcripts so passive extraction learns from voice, and make extraction a per-household setting (default?). (01.Q1, 04.Q1, 04.Q2, 00.Q5). Prod: 13 transcripts (2026-09-29..10-06, all processed), 49 memories (43 passive, 6 explicit voice), `memory.*` otherwise unset (extraction on via code default).
 
 ### P: policies (resolve many at once)
 
