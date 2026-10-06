@@ -104,6 +104,26 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 13. **Voice identity under new models:** keep raw enrollment audio, per-user or per-household voiceprints, default on, cut affect. (06.Q4, Q6–Q10, 01.Q7)
 14. **Packages:** slow-install expiry, Forge test install, and the Pantry URL. (12.Q1, Q8)
 
+### Minor list (presented 2026-10-06; accept or override)
+
+| # | Item | Recommendation |
+|---|---|---|
+| M1 | 04.Q11 recall fallback | Also run substring search when vector search finds nothing above threshold; union results (helps names like "Leo") |
+| M2 | 00.Q11 `llm_*.log` / `latency.log` files (full prompts incl. memories, forever) | Drop the trace file; keep metrics JSONL only behind a debug setting with a size cap |
+| M3 | 00.Q12 settings scopes + env fallback | Keep the four scopes and the cascade order exactly; drop env fallback except secrets/URLs that become jarvisd config |
+| M4 | 01.Q11 `/conversation/start` `adapter_settings`, `skip_warmup_inference` | Accept and ignore; drop `JARVIS_TEST_MODE` |
+| M5 | 01.Q12 `/voice/acknowledge` keyword matching | Add word boundaries ("show" no longer matches "how") |
+| M6 | 10.Q10 `/signals` rate limit | Keep app auth; key the bucket on (household, principal), not client-chosen `source_agent` |
+| M7 | 07.Q11 dead smart-home settings | Drop `smart_home.use_home_assistant`, the voice Bluetooth deep-link branch and the disabled `ControlDeviceTool`; keep `smart_home.device_manager` (live: external device manager) |
+| M8 | 07.Q6 voice control when the hearing node lacks the protocol | Status quo for the port; forwarding to a protocol node is post-port work |
+| M9 | 07.Q8 node selection for device control | Protocol match → primary → online/most recent `last_seen`; fail fast 503 instead of a 10 s timeout |
+| M10 | 13.Q10 `/nodes/{id}/actions` drops `input_required` | Pass it through as an optional field |
+| M11 | 13.Q11 demoted `send-link` loses its URL | Add `metadata:{url, type:"open_url"}` like the push path |
+| M12 | 11.Q12 dead phone knobs | Drop `attempt_cap`, `overlay_json`, the `constraints` column, `source='web'`; keep `category` on call-context fields |
+| M13 | 06.Q12 STT `language`/`task` fields | Accept and ignore now; honour `language` later if the engine supports it |
+| M14 | D35 follow-up | When recognition is off, refusals and the enrollment screen say "speaker recognition is off", not "I'm not sure who's speaking" |
+| M15 | 06.Q11 in-memory speaker state on deletion | Covered by D20 (caches cleared) |
+
 ### B triage (2026-10-06)
 
 66 B questions, triaged against D1–D39: **4 settled, 56 applied by default, 6 asked.** Defaults are applied unless the user objects; they are recorded as D40.

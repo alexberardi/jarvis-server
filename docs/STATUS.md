@@ -24,7 +24,7 @@ Update it at the end of every working session, and whenever a task finishes or a
 - [ ] 0.6 Wire-contract freeze tests: `/services`, `/info`, log batch, app-ping, validate-node, LLM stream frames, PCM stream headers, the MQTT topic catalogue, and the public plugin endpoints.
 - [ ] 0.7 Schema baseline: goose SQLite migrations per module, from each service's alembic head.
 - [-] ~~0.8 SQLite load test~~: dropped. Self-hosted with at most about 10 concurrent clients, so the user confirmed SQLite scale is a non-issue.
-- [ ] **0.9 command-center deep dive.** Read each subsystem, then ask the user about intent. Write `docs/cc/<subsystem>.md` specs: purpose, behaviour, data, routes, invariants, keep/cut/change. This drives the CC contract tests and the Phase 5 port.
+- [~] **0.9 command-center deep dive.** Questions answered through D46; minor list pending; decisions not yet folded into the subsystem docs. Read each subsystem, then ask the user about intent. Write `docs/cc/<subsystem>.md` specs: purpose, behaviour, data, routes, invariants, keep/cut/change. This drives the CC contract tests and the Phase 5 port.
 
 ## Environment notes
 
@@ -77,4 +77,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Started 0.9, the CC deep dive. 14 agents are drafting `docs/cc/00..13-*.md`, each ending with questions for the user.
   - All 14 `docs/cc` drafts are done (about 166 questions), reduced into a queue in `docs/cc/QUESTIONS.md`: policies P1–P4, then scope S1–S14, then behaviour, then a minor list.
   - Decisions D1 (Caddy orphaned) and D2 (drop node last-speaker); facts F1 (fastText off in prod) and F2.
-- **Next:** continue `docs/cc/QUESTIONS.md`, asking **one question at a time** (user preference). Q0 (stickiness) is pending. Record each answer in Decisions, then fold it into the owning doc.
+  - CC spec questions: P1–P4 → D4–D11; Q-CAT → D12; S1–S14 → D13–D39; B list triaged (4 settled, 56 defaults as D40, 6 asked → D41–D46). Prod facts gathered read-only (errand/phone/attention/memory/routine counts). Notable: phone gateway absorbed into jarvisd (D16), situation matcher cut (D17), learn from voice (D19), account deletion scope (D20), unknown speaker refuses per-user tools (D21), routines run on the node and CC owns definitions (D24, D44), cameras deferred (D29), voiceprints only and recognition off by default (D34, D35).
+- **Next:** user answers the **minor list** (M1–M15 in `docs/cc/QUESTIONS.md`). Then fold all decisions into the owning `docs/cc/NN-*.md` specs, collect the out-of-repo change list (node-setup, mobile, admin, installer), tick 0.9, and start 0.3 (`internal/platform` skeleton).
