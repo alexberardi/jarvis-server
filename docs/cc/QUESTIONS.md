@@ -35,6 +35,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D27 | 2026-10-06 | 08 / 00 / 09 (S9, derived) | **One scheduler engine**, decided without a question because it is internal and keeps user-visible semantics. A `next_fire_at` trigger table on the embedded durable queue, with claims; routines, errand schedules, the attention journal card, workflow wake-ups and the periodic cleanup loops are trigger kinds. `last_run_at` is persisted, so daily cleanups run even on a box that restarts often and the journal card can't double-post after a restart. Missed triggers fire once, late (D26). The routine `schedule` JSON (with `last_fired_at`) stays as the mobile-facing projection. Errands build on the queue with a `StepHandler` interface (09.Q2 option c on b). |
 | D28 | 2026-10-06 | 07 (S10) | **Smart-home device model: port as-is** (07.Q1 option a). Same routes, the `devices` table plus the node's live external device manager dual mode, and `/devices/import` (HA import) kept. Revisit the long-term source of truth (CC registry vs nodes) after cutover. |
 | D29 | 2026-10-06 | 07 (S10b) | **Cameras are deferred until after the port** ("I don't think it works currently, we can punt"). No go2rtc or ffmpeg engine in jarvisd v1. Camera device rows import and stay listed; the camera stream/HLS routes return a clear "not available" error. Revisit with the HLS packager vs WebRTC/MSE question. Prod: 1 Nest camera, no camera requests in 30 days. 07.Q6 (voice routing to a protocol node) and 07.Q8 (node-selection policy) move to the minor list. |
+| D30 | 2026-10-06 | 04 (S11) | **Characterization ported dormant** (04.Q4 option b): off by default (`characterization.synthesis_enabled` / `injection_enabled`), table, job, prompt and tail kept. **Fixes:** the speaker-change swap uses the current speaker's view (and per D3/D21 no view is injected for an unknown speaker); `forget` and account deletion (D20) delete the person's characterization so it re-synthesises without the forgotten fact. The inspection routes stay cut (Appendix A). Prod: 0 rows, never enabled. |
+| D31 | 2026-10-06 | 13 (S12, derived) | **Inbox and push become an in-process `notify` service** (13.Q2 option b), decided without a question because it is internal: producers write the inbox row in the same SQLite transaction as their own state, and push goes onto the durable queue with retries. Notifications' HTTP routes for mobile and other callers stay unchanged. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -55,7 +57,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S11. Characterization (04.Q4):** cut, port dormant, or port and enable? Prod: `person_characterizations` has 0 rows, synthesis never enabled.
+- **S12. Mobile chat streaming (13.Q1):** keep the fake word-by-word replay, or stream real tokens in the same `delta` schema?
 
 ### P: policies (resolve many at once)
 
