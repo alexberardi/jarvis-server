@@ -56,7 +56,7 @@ The route audit (Appendix A) found **about 180 live command-center routes**. Tho
 | auth | **Port**, including the unmerged `feat/rs256-minting` work (RS256 minting plus `/auth/public-key`). It keeps verifying HS256 during the window. |
 | logs | **Port.** Logs live in the DB with retention, plus the SSE tail. A Loki push sink is optional. |
 | notifications | **Port.** Fix the retry worker that is never started. |
-| recipes-server + worker | **Port**, together with OCR. |
+| recipes-server + worker | **Not ported (user decision 2026-10-06).** Recipes is an optional add-on server: it stays the separate jarvis-recipes-server and talks to jarvisd over HTTP (auth, config registry, OCR). |
 | ocr-service + worker | **Port the orchestration.** Engines: LLM vision, `tesseract` as an optional engine, and the macOS Vision helper. Fix the broken `POST /v1/ocr` job path. |
 | llm-proxy (API, model service, worker) | **Port the orchestration**, which is about 60% of the code. Inference runs in `llama-server` subprocesses, as prod already does. The REST backend is ported (OpenAI, Anthropic, Ollama, LM Studio). |
 | whisper-api | **Rebuild, greenfield.** STT on whisper.cpp as an engine (see D7). Speaker ID is in-binary via sherpa-onnx. |
@@ -169,7 +169,7 @@ internal/platform/      httpx (router, errors, SSE, chunked), authn (JWT HS256+R
                         settings (definitions, cascade, cache, /settings router), db (sqlite, sqlc, goose),
                         queue, blob, mqtt (broker + req/resp), logging (slog → logs module), mdns, engines
 internal/voice/         sherpa-onnx wrappers: kokoro, speaker
-internal/modules/       config auth logs notifications recipes ocr llm stt tts
+internal/modules/       config auth logs notifications ocr llm stt tts
                         cc/{voice,toolloop,prompts,memory,smarthome,nodes,routines,errands,signals,phone,mobile,...}
 third_party/sherpa/     pinned static libs per platform (fetched by script, not committed)
 contract/               black-box pytest suite + fakes (§4)
@@ -199,7 +199,7 @@ Go code follows TDD per RULES.md, plus `go test -race`. Coverage target: 80%.
 
 **Legacy data import (wanted, not required):** `jarvisd import-legacy --from postgres://…` reads each legacy DB at alembic head and writes the module's SQLite tables.
 
-- **Covered:** users, households, nodes and keys, app clients, settings, routines, memories (re-embedded), recipes, inbox, rooms and devices.
+- **Covered:** users, households, nodes and keys, app clients, settings, routines, memories (re-embedded), inbox, rooms and devices.
 - **Blob files** are copied from S3/SeaweedFS.
 - **Voice profiles are not imported.** Voice is greenfield, so users re-enroll.
 - It has a dry-run mode, and is tested against a prod snapshot in dev.
@@ -231,9 +231,9 @@ Go code follows TDD per RULES.md, plus `go test -race`. Coverage target: 80%.
 
 config, auth (with RS256), logs, notifications.
 
-### Phase 2: recipes and OCR together
+### Phase 2: OCR (recipes stays an external add-on)
 
-Both move to the embedded queue, which removes the RQ pickle coupling. Files move to the blob store.
+OCR moves to the embedded queue and the blob store, keeping its HTTP API, because the external recipes server is its consumer. If recipes hands work to OCR through a shared Redis/RQ queue rather than HTTP, that coupling needs a bridge or a small recipes change (decided when the OCR port finds out).
 
 ### Phase 3: LLM
 
@@ -320,6 +320,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 - **D9 (Phase 6):** whether jarvis-admin stays as a Fastify app or is absorbed into `jarvisd`.
 
 **Future work (after the migration):**
+- **Recipes in Go.** A separate effort, outside this rewrite: port jarvis-recipes-server as its own Go service (or an optional jarvisd module) once jarvisd is done. Until then it runs as the existing Python add-on.
 - **Per-node voiceprints.** Scope speaker profiles per (node, user) instead of per (household, user), because a voice sounds different per room (docs/cc D36).
 - **External-API connector.** A first-class way for 3rd-party apps to use Jarvis, with scoped credentials.
 - **Forge test install.** Dropped from the Go port; Forge test installs were dropped temporarily upstream. Re-add if Forge returns.

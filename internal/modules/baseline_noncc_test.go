@@ -13,7 +13,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/logs"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	"github.com/alexberardi/jarvis-server/internal/modules/ocr"
-	"github.com/alexberardi/jarvis-server/internal/modules/recipes"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 	"github.com/alexberardi/jarvis-server/internal/modules/tts"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -34,12 +33,6 @@ var nonCCBaselines = []struct {
 	{"logs", logs.Migrations(), []string{"logs_entries"}},
 	{"notifications", notifications.Migrations(), []string{
 		"notifications_device_tokens", "notifications_inbox_items", "notifications_notification_log",
-	}},
-	{"recipes", recipes.Migrations(), []string{
-		"recipes_grocery_sku_map", "recipes_ingredients", "recipes_mailbox_messages", "recipes_meal_plan_items",
-		"recipes_meal_plans", "recipes_recipe_ingestions", "recipes_recipe_parse_jobs", "recipes_recipe_tags",
-		"recipes_recipes", "recipes_stage_recipes", "recipes_staples", "recipes_steps", "recipes_stock_ingredients",
-		"recipes_stock_units_of_measure", "recipes_tags", "recipes_users",
 	}},
 	{"ocr", ocr.Migrations(), nil},
 	{"llm", llm.Migrations(), nil},
