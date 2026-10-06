@@ -48,6 +48,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D40 | 2026-10-06 | B (all) | **B-list defaults applied** (56 questions): see "B triage" in the Queue. These follow D8/D4/D5/D9, frozen-client parity, or are internal. Three carry a verify-first note: 01.Q6 (prod wake-verification mode), 05.Q10 (node headers before dropping bare-key auth), 13.Q3 (mobile doesn't filter on `confirmation`). |
 | D41 | 2026-10-06 | 08 (B1) | **Run-now and scheduled routines run with no user** (08.Q8 option a, today's behaviour). The server passes no identity. Commands that need a person (news, calendar, email) use the existing SDK mechanism: a node secret with `value_type='user'`, which renders a household-member picker in mobile and stores the chosen member's user id (`jarvis-command-sdk/jarvis_command_sdk/secret.py:89`, `forge.py:137`). Preserve that secret type and the mobile picker contract. |
 | D42 | 2026-10-06 | 11 (B2) | **Call transcripts and audio: port as-is for now** (11.Q8 option a). Stored as today, no retention job; `audio_retention_days` keeps today's (inert) behaviour; no notice-off mode. Revisit with a call-history screen. Account deletion follows D20 (sessions kept as de-identified activity history). Prod: 4 of 17 calls have a transcript, none have audio. |
+| D43 | 2026-10-06 | 04 (B3) | **User Profile block: pinned first, then fill the budget with unpinned memories by priority and recency** (04.Q5 option b). Deterministic per user, so the cached prefix is stable, and pinning one memory no longer hides the rest. Budget stays `memory.pinned_max_chars` (500) for parity; it is a setting, and raising it (~1,500 for the 27B) was suggested but not decided. The "answer DIRECTLY … do NOT call recall" wording stays byte-exact. Prod: no pinned memories; one user already at 596 chars. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -68,7 +69,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **B3. User Profile block contents (04.Q5)**
+- **B4. Node default routines and Pantry routines (08.Q9)**
 
 ### P: policies (resolve many at once)
 
