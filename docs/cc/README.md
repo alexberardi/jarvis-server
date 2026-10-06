@@ -36,3 +36,11 @@ Source: `/home/alex/jarvis/jarvis-command-center` (about 62k LOC, `app/`).
 9. **Tests.** Which test files cover this, and the candidates for golden fixtures or black-box contract tests.
 10. **Questions for the user.** Numbered. Each question has: the question; *why it matters*; the options; **my recommendation**. Tag each `[scope]` (keep/cut/change), `[behaviour]` (what should happen) or `[minor]`. Put the most consequential first, with at most about 12.
 11. **Go port notes.** Shape in Go, risks, and simplifications enabled by the single-binary design: embedded queue, embedded MQTT, SQLite, in-process calls instead of HTTP callbacks.
+
+## Confirmed orphaned (not ported)
+
+- **Caddy** (`Caddyfile`, the `caddy` service in CC's `docker-compose.dev.yaml` and `docker-compose.prod.yaml`, and the `localhost:9443` "temporary Spotify OAuth callback" note). It was a TLS reverse proxy in front of CC, there to give OAuth providers an HTTPS redirect target. Confirmed unused on 2026-10-06:
+  - **External providers no longer need it.** Nest, for example, uses the **cloud relay bounce**: CC sets `redirect_uri = <relay>/oauth/bounce` (`app/api/oauth.py:297-302`), and the relay 302s to `jarvis://auth-complete`. The mobile app then POSTs the code to `/oauth/sessions/{id}/exchange`. Prod has `JARVIS_RELAY_URL=https://relay.jarvisautomation.io`. jarvis-device-nest's protocol says the relay URL must be an authorized redirect URI in GCP.
+  - **Local providers** like Home Assistant use CC's own `/api/v0/oauth/callback` over LAN HTTP (`oauth.py:303-310`), with no TLS needed.
+  - **Nothing references it.** No installer, jarvis-admin generator, `./jarvis` CLI or install-e2e mentions Caddy, and prod runs no Caddy container.
+  - **Implication for Go:** the only gap Caddy covered is an external provider with **no relay configured**. Google won't accept a plain-HTTP non-localhost redirect. That case stays unsupported, as it is today in practice; doc 07 owns the question.
