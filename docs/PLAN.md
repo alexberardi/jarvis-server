@@ -308,6 +308,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 - **D9 (Phase 6):** whether jarvis-admin stays as a Fastify app or is absorbed into `jarvisd`.
 
 **Future work (after the migration):**
+- **Per-node voiceprints.** Scope speaker profiles per (node, user) instead of per (household, user), because a voice sounds different per room (docs/cc D36).
 - **External-API connector.** A first-class way for 3rd-party apps to use Jarvis, with scoped credentials.
 - **Forge test install.** Dropped from the Go port; Forge test installs were dropped temporarily upstream. Re-add if Forge returns.
 - **Private Pantry instances.** Installs must keep accepting any repo URL, so users can run their own Pantry for private commands. Optionally a power-user gate for installs later.

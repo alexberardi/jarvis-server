@@ -41,6 +41,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D33 | 2026-10-06 | 06 (S13, derived) | **Speaker-ID thresholds simplified** (06.Q7 option b), decided without a question because it is a calibration detail: one `voice.similarity_threshold` plus `voice.min_speaker_margin`, verify uses the same threshold, recalibrated for ERes2Net on jarvis-dev enrollments; the short/long knobs and the fixed 0.45 verify threshold go. |
 | D34 | 2026-10-06 | 06 (S13) | **Voiceprints only; no raw enrollment audio is kept** (06.Q4 option a). Each embedding is tagged with the model id that produced it; a model change (including the ECAPA → ERes2Net switch at cutover) requires re-enrollment, which the user accepts. Enrollment WAVs are discarded once embedded. Legacy ECAPA voiceprints are not imported. |
 | D35 | 2026-10-06 | 06 (S13b) | **Speaker recognition stays off by default** (06.Q9 option a). User: "it's a privacy thing. Better to start off and have to turn on than the opposite." Enrolling a voice does not turn it on. Consequence to handle in UX (minor list): with it off, every speaker is unknown and per-user tools refuse (D21), so the refusal and the enrollment screen should say recognition is off rather than "I'm not sure who's speaking". |
+| D36 | 2026-10-06 | 06 (S13c) | **Voiceprints stay per (household, user)** (06.Q8 option a, today's layout: `voice_profiles/{household}/{sha256(user)[:16]}/sample_NNN`, no node id). Enroll once per household; used on every node there. **Future work:** make profiles **per node** (the user's intent: a voice sounds different per room). Recorded in PLAN §9. Verified 2026-10-06: today's code and prod have no node scoping. |
+| D37 | 2026-10-06 | 06 (S13, derived) | **Enrollment quality gate** (06.Q6 option b), treated as a bug fix under D8 because silent or noisy takes are accepted today: reject a take with under ~3 s of VAD speech, or one that scores far below the user's other takes, returning `success:false, error:"low_quality"`, which mobile already displays. No mobile change. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -61,7 +63,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S13c. Voiceprint per user or per (user, household)? (06.Q8)** Then 06.Q6, Q10.
+- **S13d. Affect/emotion pass (06.Q10, 01.Q7):** cut (always `"affect": null`) or reimplement in Go?
 
 ### P: policies (resolve many at once)
 
