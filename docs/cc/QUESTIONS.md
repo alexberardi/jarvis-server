@@ -49,6 +49,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D41 | 2026-10-06 | 08 (B1) | **Run-now and scheduled routines run with no user** (08.Q8 option a, today's behaviour). The server passes no identity. Commands that need a person (news, calendar, email) use the existing SDK mechanism: a node secret with `value_type='user'`, which renders a household-member picker in mobile and stores the chosen member's user id (`jarvis-command-sdk/jarvis_command_sdk/secret.py:89`, `forge.py:137`). Preserve that secret type and the mobile picker contract. |
 | D42 | 2026-10-06 | 11 (B2) | **Call transcripts and audio: port as-is for now** (11.Q8 option a). Stored as today, no retention job; `audio_retention_days` keeps today's (inert) behaviour; no notice-off mode. Revisit with a call-history screen. Account deletion follows D20 (sessions kept as de-identified activity history). Prod: 4 of 17 calls have a transcript, none have audio. |
 | D43 | 2026-10-06 | 04 (B3) | **User Profile block: pinned first, then fill the budget with unpinned memories by priority and recency** (04.Q5 option b). Deterministic per user, so the cached prefix is stable, and pinning one memory no longer hides the rest. Budget stays `memory.pinned_max_chars` (500) for parity; it is a setting, and raising it (~1,500 for the 27B) was suggested but not decided. The "answer DIRECTLY … do NOT call recall" wording stays byte-exact. Prod: no pinned memories; one user already at 596 chars. |
+| D44 | 2026-10-06 | 08 (B4) | **The server owns every routine definition** (08.Q9 option b). Node defaults (Good morning, Good night, …) are seeded as real CC routine rows per household, so mobile can see, edit, run-now and schedule them. Nodes report installed Pantry routine packages up to CC the same way, so the Pantry `routine` package type stays. With D24 (full definition sent with each run) CC is the single source of truth. Fixes the permanent-shadowing bug (§8.8): deleting or disabling a routine removes it from nodes. Needs a node change (report Pantry routines; stop seeding defaults locally once CC seeds them). Pantry's unused `/v1/routines/generate` is outside jarvisd and is left alone. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -69,7 +70,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **B4. Node default routines and Pantry routines (08.Q9)**
+- **B5. Errand fail-fast (09.Q10)**
 
 ### P: policies (resolve many at once)
 
