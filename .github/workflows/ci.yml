@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  GO_VERSION: "1.25"
+
+jobs:
+  # Unit tests + vet + CGO_ENABLED=0 cross-compile for every release target.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs (all targets)
+        run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64 darwin-arm64 windows-amd64
+      - name: Vet + cross-compile
+        run: |
+          for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+            GOOS=${p%/*} GOARCH=${p#*/} CGO_ENABLED=0 go vet ./...
+            GOOS=${p%/*} GOARCH=${p#*/} CGO_ENABLED=0 go build -o /dev/null ./...
+          done
+      # -race needs cgo; this is test-only, release builds stay CGO_ENABLED=0.
+      - name: Unit tests (race)
+        run: CGO_ENABLED=1 go test -race ./...
+
+  # Load the embedded native libraries via purego and run real models on each OS.
+  native-voice:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: linux-amd64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+          - { os: macos-14,         target: darwin-arm64 }
+          - { os: windows-latest,   target: windows-amd64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: .models
+          key: voice-models-${{ hashFiles('scripts/fetch-test-models.sh') }}
+      - name: Fetch test models
+        run: scripts/fetch-test-models.sh
+      - name: Voice tests (CGO_ENABLED=0)
+        env:
+          CGO_ENABLED: "0"
+          JARVIS_SHERPA_MODELS: ${{ github.workspace }}/.models
+        run: go test ./internal/voice/... -v -run 'Layout|Extract|Smoke|Kokoro'

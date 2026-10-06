@@ -9,11 +9,14 @@ Update it at the end of every working session, and whenever a task finishes or a
 ### Phase 0 checklist
 
 - [x] Repo created: public, AGPL-3.0, `github.com/alexberardi/jarvis-server`
-- [ ] **0.1 purego sherpa loader.** Embed the sherpa-onnx and onnxruntime shared libraries, extract them to `~/.jarvis/lib/<hash>/`, and load them with purego.
-  - Reproduce the spike's results on linux: ERes2Net EER 1.25% and a Kokoro render.
-  - Then darwin/arm64 and windows/amd64 in CI.
-  - Fallback: static cgo (proven) plus Windows DLLs.
-- [ ] 0.2 CI: `CGO_ENABLED=0` cross-compile matrix for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64, plus `go test -race` on linux.
+- [~] **0.1 purego sherpa loader** (`internal/voice/sherpa`). The shared libraries are embedded, extracted to `<base>/sherpa-<hash>/`, and loaded with purego. `CGO_ENABLED=0` everywhere.
+  - [x] linux/amd64: `TestStructLayout` matches all 12 mirrored structs against the C header via gcc. EER is **1.25%** (identical to the cgo spike), Kokoro renders, and the smoke test passes (same-voice 0.70 vs cross-voice −0.08).
+  - [x] All 4 targets cross-compile with `CGO_ENABLED=0`.
+  - [ ] **Runtime on linux/arm64, darwin/arm64 and windows/amd64.** This is the CI `native-voice` job; check its result.
+  - Notes:
+    - Windows: no by-value float args, because purego routes through `syscall.SyscallN`. TTS uses `GenerateWithConfig`.
+    - The C structs live in `capi.go`. A version bump means replacing the header, updating the fetch script, and running the layout test.
+- [~] 0.2 CI: `.github/workflows/ci.yml` has the build job (vet, 4-target cross-compile, race tests) and the native-voice matrix on 4 OS runners. Still to do: release packaging.
 - [ ] 0.3 `internal/platform` skeleton: httpx, authn, settings, db (modernc sqlite + goose + sqlc), queue, blob, mqtt, logging, mdns, engines. Also the multi-listener runner and the module interface.
 - [ ] 0.4 `contract/` black-box suite plus fakes (LLM, relay, MQTT node). It must run green against the **Python** stack first.
 - [ ] 0.5 Golden-fixture exporters, which live beside the Python code. Output goes to `fixtures/golden/`. Include byte-exact prompts for the kept Qwen providers.
@@ -53,6 +56,7 @@ Update it at the end of every working session, and whenever a task finishes or a
 | 2026-10-06 | Cut LoRA/adapters, unused CC routes (PLAN Appendix A), all prompt providers except Qwen 3.x + ChatGPTOpenAI (e2e), settings-server, mcp. |
 | 2026-10-06 | Native Windows support → no cgo anywhere: purego plus embedded native libraries, and the pure-Go SQLite driver. |
 | 2026-10-06 | Public repo, AGPL-3.0. |
+| 2026-10-06 | purego loader proven on linux/amd64 (same EER as cgo). Windows MT (static CRT) DLLs, so no VC++ redistributable is needed. |
 
 ## Session log
 
@@ -64,4 +68,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Voice spike passed: LibriSpeech eval, plus a listening test and mic test on jarvis-dev.
   - Static-link proof.
   - Repo scaffolded.
-- **Next:** task 0.1.
+  - Task 0.1: the purego loader works on linux; CI added for the other 3 OSes.
+- **Next:** check the CI `native-voice` results for arm64, macOS and Windows, and fix as needed. Then 0.3, the platform skeleton.

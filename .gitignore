@@ -4,5 +4,5 @@
 *.db
 *.db-wal
 *.db-shm
-/third_party/sherpa/libs/
+/internal/voice/sherpa/libs/
 /.models/
