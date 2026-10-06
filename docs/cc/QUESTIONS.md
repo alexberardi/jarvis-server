@@ -51,6 +51,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D43 | 2026-10-06 | 04 (B3) | **User Profile block: pinned first, then fill the budget with unpinned memories by priority and recency** (04.Q5 option b). Deterministic per user, so the cached prefix is stable, and pinning one memory no longer hides the rest. Budget stays `memory.pinned_max_chars` (500) for parity; it is a setting, and raising it (~1,500 for the 27B) was suggested but not decided. The "answer DIRECTLY … do NOT call recall" wording stays byte-exact. Prod: no pinned memories; one user already at 596 chars. |
 | D44 | 2026-10-06 | 08 (B4) | **The server owns every routine definition** (08.Q9 option b). Node defaults (Good morning, Good night, …) are seeded as real CC routine rows per household, so mobile can see, edit, run-now and schedule them. Nodes report installed Pantry routine packages up to CC the same way, so the Pantry `routine` package type stays. With D24 (full definition sent with each run) CC is the single source of truth. Fixes the permanent-shadowing bug (§8.8): deleting or disabling a routine removes it from nodes. Needs a node change (report Pantry routines; stop seeding defaults locally once CC seeds them). Pantry's unused `/v1/routines/generate` is outside jarvisd and is left alone. |
 | D45 | 2026-10-06 | 09 (B5) | **Errands keep strict fail-fast** (09.Q10 option a): any failed step ends the errand; a connected call with unknown `goal_achieved` counts as failure; a resolver-skipped step counts as success. |
+| D46 | 2026-10-06 | 10 (B6) | **A user `appt.upcoming` automation and the built-in leave-by both fire** (10.Q6 option a, today's behaviour; the user prefers it). <br>**Fact checked while answering:** the "leave by" alerts heard in the prod kitchen are **not** CC's leave-by reaction. CC's reaction is gated by `proposals.enabled`, which is unset (off) in prod, and the notifications inbox has no leave-by items. They come from the **node-side `calendar_alerts` agent** in the `jarvis-cmd-calendar` package (`agents/calendar_alerts/agent.py`): local proximity alerts "Upcoming: X in about N minutes" at ≤60 and ≤15 min. The same agent also emits `appt.upcoming` signals (≤120 min) for CC's drive-time leave-by. Port contract: keep the `/signals` ingest and the node alert path working for this package. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -71,7 +72,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **B6. User `appt.upcoming` automation vs built-in leave-by (10.Q6)**
+- *(none: S and B rounds done 2026-10-06. Remaining: the minor list, presented once as recommendations to accept or override.)*
 
 ### P: policies (resolve many at once)
 
