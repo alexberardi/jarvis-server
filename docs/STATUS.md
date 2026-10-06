@@ -9,10 +9,11 @@ Update it at the end of every working session, and whenever a task finishes or a
 ### Phase 0 checklist
 
 - [x] Repo created: public, AGPL-3.0, `github.com/alexberardi/jarvis-server`
-- [~] **0.1 purego sherpa loader** (`internal/voice/sherpa`). The shared libraries are embedded, extracted to `<base>/sherpa-<hash>/`, and loaded with purego. `CGO_ENABLED=0` everywhere.
+- [x] **0.1 purego sherpa loader** (`internal/voice/sherpa`). The shared libraries are embedded, extracted to `<base>/sherpa-<hash>/`, and loaded with purego. `CGO_ENABLED=0` everywhere.
   - [x] linux/amd64: `TestStructLayout` matches all 12 mirrored structs against the C header via gcc. EER is **1.25%** (identical to the cgo spike), Kokoro renders, and the smoke test passes (same-voice 0.70 vs cross-voice −0.08).
   - [x] All 4 targets cross-compile with `CGO_ENABLED=0`.
-  - [ ] **Runtime on linux/arm64, darwin/arm64 and windows/amd64.** This is the CI `native-voice` job; check its result.
+  - [x] **Runtime verified in CI on all 4** (linux amd64/arm64, macos-14, windows-latest). Kokoro and speaker ID work everywhere; the smoke test gives same-voice ≈0.67–0.69 vs cross-voice ≈−0.08 on every OS.
+  - Fixes needed: the fetch script avoids bash associative arrays (macOS has bash 3.2), and the tests extract to a persistent dir because Windows locks loaded DLLs.
   - Notes:
     - Windows: no by-value float args, because purego routes through `syscall.SyscallN`. TTS uses `GenerateWithConfig`.
     - The C structs live in `capi.go`. A version bump means replacing the header, updating the fetch script, and running the layout test.
@@ -72,4 +73,6 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Static-link proof.
   - Repo scaffolded.
   - Task 0.1: the purego loader works on linux; CI added for the other 3 OSes.
-- **Next:** check the CI `native-voice` results for arm64, macOS and Windows, and fix as needed. Then 0.3, the platform skeleton.
+  - 0.1 done: the single-binary approach is proven on all 4 OSes.
+  - Started 0.9, the CC deep dive. 14 agents are drafting `docs/cc/00..13-*.md`, each ending with questions for the user.
+- **Next:** collect the `docs/cc` drafts, dedupe and prioritise the questions, and run question rounds with the user (batches of about 10, scope-changing first). Fold the answers into the docs. Only after that: 0.3 onward.
