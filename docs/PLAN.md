@@ -37,7 +37,7 @@ What "single binary" means concretely:
 | Mobile apps, `jarvis-web` | Clients. |
 | `jarvis-pantry` | A separate cloud service on Fly. |
 | `jarvis-host-agent` | Runs on users' desktops. |
-| `jarvis-phone-gateway` | External. It calls `/internal/phone/*`. |
+| `jarvis-phone-gateway` | **Absorbed** into jarvisd as `cc/phone` (docs/cc D16). |
 
 **Hard constraint:** every live client contract keeps working unchanged:
 
@@ -89,7 +89,7 @@ Multi-listen gives zero client changes. `/services` returns the same host for ev
 Inside the process:
 
 - Modules talk through **Go interfaces**, not HTTP.
-- App-to-app keys remain only for external callers: node-setup, phone-gateway, and a remote GPU satellite.
+- App-to-app keys remain only for external callers: node-setup and a remote GPU satellite (phone-gateway until it is absorbed, D16).
 - An **mDNS advertiser** for `_jarvis-config._tcp` is added. Mobile already browses for it, but nothing advertises it today.
 
 ### 3.2 Storage and infrastructure, all embedded
@@ -104,7 +104,7 @@ Inside the process:
 | SeaweedFS | A blob interface: **local filesystem** (`~/.jarvis/blobs`), with S3 optional. |
 | Mosquitto | **Embedded broker** (mochi-mqtt) on 1884 and WebSocket 9883, with the same topics. It authenticates against the credentials CC issues via `/node/mqtt-credentials`. |
 | Loki + Grafana | A log table with retention, plus the SSE tail. |
-| phone-gateway's Redis dial queue | Optional `REDIS_URL` LPUSH compatibility shim, or move phone-gateway to HTTP. Decide in Phase 5. |
+| phone-gateway's Redis dial queue | Gone: the gateway is absorbed into jarvisd, so dial hand-off is in-process (docs/cc D16). |
 | go2rtc, ffmpeg | Optional external binaries (cameras/HLS), supervised when enabled. |
 
 SQLite driver: `modernc.org/sqlite` (pure Go; keeps the build cgo-free, see §3.4).
@@ -308,7 +308,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 - **D9 (Phase 6):** whether jarvis-admin stays as a Fastify app or is absorbed into `jarvisd`.
 
 **Future work (after the migration):**
-- **External-API connector.** A first-class way for 3rd-party apps to use Jarvis, with scoped credentials. `/internal/phone/*` (jarvis-phone-gateway) moves onto it; until then it stays open to any registered app.
+- **External-API connector.** A first-class way for 3rd-party apps to use Jarvis, with scoped credentials.
 - **Forge test install.** Dropped from the Go port; Forge test installs were dropped temporarily upstream. Re-add if Forge returns.
 - **Private Pantry instances.** Installs must keep accepting any repo URL, so users can run their own Pantry for private commands. Optionally a power-user gate for installs later.
 - **Prompt-provider redesign.** Something simpler than a Python class implementing an ABC. Until then `/prompt-providers/install` is a no-op stub.
@@ -351,7 +351,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 ### Live but with a single, narrow caller (keep, but worth knowing)
 - `POST /tool-router/train`: only `scripts/train_tool_router.py` calls it (fastText training).
 - `GET /oauth/callback`: browser redirect target for the OAuth bounce.
-- `/internal/phone/*`: jarvis-phone-gateway only.
+- `/internal/phone/*`: jarvis-phone-gateway only. Becomes in-process once the gateway is absorbed (docs/cc D16).
 - `POST /api/v0/chat`: node `chat_text()` (jokes, what's up, routines).
 - `POST /voice/command` and `POST /voice/command/continue` (non-stream): **core node contract**, not just install-e2e Phase 2. Every node follow-up turn uses blocking `/voice/command` (`follow_up_loop.py:342`), and `/continue` is the node's fallback and clarification path. Corrected 2026-10-06 by spec doc 01.
 - `GET|POST /households/{hh}/rooms`: also called by jarvis-home-assistant-integration.
