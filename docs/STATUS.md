@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 2 (OCR; recipes stays external) — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
+## Current phase: 3 (LLM) — Phases 1–2 done — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
 
 ### Phase 0 checklist
 
@@ -96,4 +96,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - **auth module** ported (63 routes) and passing all 62-route auth contract coverage against jarvisd; closes the X-Household-Id join hole (D4/D5). **logs module** wired and passing its contracts. Contract tests now branch on `JARVIS_CONTRACT_IMPL=jarvisd` for decided fixes. Shared `/settings` guards in the platform. jarvisd's own logs land in the log store.
   - Auth follow-ups settled (decision log). Still to build: the D20 per-household leave hook (erase a user's data for a household they leave).
   - **Phase 1 done:** jarvisd serves config, auth, logs, notifications. 45 control-plane contract tests pass against one jarvisd process (only the registry's missing command-center row fails, expected until Phase 5). Notifications: pushes via the relay as durable queue jobs (D31); D20 purge + log de-identification.
-- **Next:** Phase 2 = OCR only (agent in progress). Recipes is an optional add-on and stays the external Python jarvis-recipes-server (user decision); its schema baseline was removed from jarvisd (`docs/schema/recipes.md` kept for reference).
+  - **Phase 2 done:** OCR module in jarvisd (legacy routes + async job API with callbacks per the recipes handoff decision); 9 OCR contract tests green vs Python and vs the jarvisd binary. jarvisd now serves config, auth, logs, notifications, ocr. Recipes-side change listed in EXTERNAL-CHANGES.md. Note: the MBP's Docker Desktop leaked ~6k CLOSE_WAIT sockets (contract runs likely contributed); user restarted it. If it recurs, make the harness reuse connections.
+- **Next:** Phase 3 LLM — spec agent writing docs/llm/ (+ QUESTIONS.md); then questions to the user one at a time; then the port (llama-server engines, Metal, slots, stream frames, queue).
