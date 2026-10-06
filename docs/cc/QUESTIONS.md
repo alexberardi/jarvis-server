@@ -21,6 +21,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D13 | 2026-10-06 | 09 (S1) | **Errands ship in v1.** The user says they are useful and will be used. The hard part is **when to use one**, i.e. knowing when a request should become an errand rather than a normal turn; record this as a product/UX follow-up for after the port. Prod has 0 plans/runs/schedules, so there is no data to import (09.Q12: import active `schedules` only). The core (plan → card → Run, sync and phone steps, Revise/Cancel, scheduled re-plan) is in. Pause-and-replan scope is S1b (09.Q4). |
 | D14 | 2026-10-06 | 09 (S1b) | **Keep pause-and-replan** (09.Q4). The user: it is what makes errands "so cool": you get the plan, can trigger a rework (Revise), then it executes, or something changes mid-run and it goes down a different path. Port the checkpoint → LLM continuation → envelope check. **Fix (D8):** an approval wait gets a deadline, so it can't park forever (§8.7). Whether in-envelope steps continue silently is S1c. |
 | D15 | 2026-10-06 | 09 (S1c) | **In-envelope replan steps keep running silently** (today's behaviour). Out-of-envelope changes (new phone calls, risky steps) still pause for an approval card, which now has a deadline (D14). Port `widens_envelope` byte-for-byte; it is the safety boundary. |
+| D16 | 2026-10-06 | 11 (S2) | **Absorb jarvis-phone-gateway into jarvisd** (11.Q1 option c). Phone becomes its own set of REST endpoints (Twilio voice webhook, Media Streams WebSocket, and the call/session/escalation routes) gated behind `phone_calls.enabled` (default off). Live calls use the in-process STT, LLM and TTS. **No Redis and no dial-queue shim** (11.Q2 is moot); dial hand-off is an in-process call or queue job. Twilio still needs the webhook/WS routes to be publicly reachable (a tunnel), which is configured only by households that turn phone on. The gateway's oddities that come from the two-process split get fixed (D8). Prod usage: enabled, 17 calls 2026-08-06..08-30. Ported in Phase 5c with the rest of phone; until cutover prod keeps the Python gateway. |
 
 ## Verified facts (resolve questions without asking)
 
@@ -41,7 +42,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S2. Phone calling:** port the CC half now with the gateway as an external sidecar, or absorb the gateway into jarvisd? (11.Q1, Q2). Prod: `phone_calls.enabled=true`, 17 call sessions 2026-08-06..08-30, 2 contacts, gateway container up.
+- **S3. Signals/proposals:** port the proactive situation matcher now or defer; attention broker scope. (10.Q2, Q3; Q1 settled by D7). Prod: `attention.enabled=true` (149 events/deliveries; consent/feedback/tier tables empty), `ambient_context.enabled=true`, two `automatic` presence automations (lock/unlock front door), `proposals.*` unset (off), 0 signals rows, 0 suppressions.
 
 ### P: policies (resolve many at once)
 

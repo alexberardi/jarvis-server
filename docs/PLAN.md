@@ -304,7 +304,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 
 - **D5 (Phase 1):** confirm Go auth ships RS256 minting from day one. Recommended: yes.
 - **D7 (Phase 4):** STT engine. Options are whisper.cpp on GPU (today's quality, needs an engine download), or sherpa-onnx ASR on CPU in-binary (e.g. Parakeet or Whisper ONNX; simpler, needs a latency and accuracy check).
-- **D8 (Phase 5):** phone-gateway dial queue. Options are a Redis shim, or switching phone-gateway to HTTP.
+- ~~**D8 (Phase 5):** phone-gateway dial queue~~ → resolved: gateway absorbed into jarvisd (docs/cc D16).
 - **D9 (Phase 6):** whether jarvis-admin stays as a Fastify app or is absorbed into `jarvisd`.
 
 **Future work (after the migration):**
