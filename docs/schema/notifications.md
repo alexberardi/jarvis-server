@@ -42,3 +42,20 @@ Cross-module FKs are deliberately not introduced: modules migrate and import ind
 ## Setting keys
 
 None. jarvis-notifications had no `settings_definitions` and no settings table.
+
+## Go module notes (2026-10-06)
+
+The module (`internal/modules/notifications`) uses the baseline unchanged; no 00002 was needed.
+
+- Timestamps are written by the module as `YYYY-MM-DDTHH:MM:SS.ffffffZ` (microseconds, the legacy
+  precision), not by the column defaults, and rendered back as Python's naive `isoformat()`.
+  Cleanup and stats compare with `julianday()`, so imported rows with another fraction width
+  still compare correctly. The inbox orders by `created_at DESC, rowid DESC`.
+- `notification_log.delivery_status` gains a live `pending` state: `/notify` writes the row as
+  `pending` and enqueues the `notifications.push` job in the same transaction (D31); the job
+  rewrites `delivery_status` / `success_count` / `failure_count` after each attempt.
+- Account deletion (D20): `PurgeUser` deletes the user's `device_tokens` and personal
+  `inbox_items` inside auth's deletion transaction. `notification_log` is kept as the activity
+  record (its `target_id` still holds the user id for `target_type = 'user'`; it is pruned after
+  30 days). `PurgeHousehold` deletes a deleted household's tokens and inbox items (D49).
+- `push_token` keeps its UNIQUE index: registration is an `ON CONFLICT (push_token)` upsert.

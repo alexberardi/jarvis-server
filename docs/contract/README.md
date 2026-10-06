@@ -41,6 +41,7 @@ Tests skip with a message when the environment they need is missing. With no
 | `JARVIS_CONTRACT_MQTT_PORT` | for the MQTT test | The target's broker port (MBP: `1884`). Without it `TestCCMQTTCatalogue` skips. |
 | `JARVIS_CONTRACT_MQTT_USERNAME` / `JARVIS_CONTRACT_MQTT_PASSWORD` | if the broker has auth | The shared broker credential (CC's `MQTT_USERNAME`/`MQTT_PASSWORD`). Empty means anonymous. |
 | `JARVIS_CONTRACT_SLOW_TIMEOUT` | no | Timeout for inference calls (LLM, STT, TTS synthesis). The default is `180s`. |
+| `JARVIS_CONTRACT_NOTIFICATIONS_ADMIN_KEY` | for the notifications admin test | jarvis-notifications' `ADMIN_API_KEY` (MBP: `docker exec jarvis-notifications-jarvis-notifications-1 printenv ADMIN_API_KEY`). Without it `TestNotificationsAdmin` skips. |
 
 To get the admin token from the MBP without echoing it:
 
@@ -277,6 +278,36 @@ Seen while reading, not frozen: the login and refresh `household_id` claim is th
 arbitrary. A token from `switch-household` keeps its `household_id` after the user leaves or is
 kicked from that household. Auth never re-checks it; consumers that trust the claim must.
 
+## jarvis-notifications: every route (green twice in a row against the MBP, 2026-10-06)
+
+`contract/notifications_test.go`, **7 tests** (`-run TestNotifications`), covering all 18 routes:
+`/info`, `/health`; mobile (user JWT) inbox list (filters, paging, 422s), unread count, get
+(auto-marks read), `PATCH …/read`, delete, bulk read/delete, `POST`/`DELETE /tokens`,
+`/tokens/me`, `DELETE /me/data`; services (app-to-app) `POST /inbox`, `PATCH /inbox/{id}`,
+`/notify`, `/notify/batch`; admin (`X-Api-Key`) `/admin/stats`, `/admin/cleanup`.
+
+- **Visibility** needs no second member: items are written with app credentials into the user's
+  household for another user's id (invisible: 404 `Item not found`), household-wide
+  (`user_id` null: visible), and into another household (404).
+- **Auth details frozen:** no/non-Bearer credentials → 401 `Not authenticated` with
+  `WWW-Authenticate: Bearer`; bad JWT → 401 `Invalid or expired token`; app → 401
+  `Missing app credentials` / `Invalid app credentials`; admin header missing → 422
+  (`["header","X-Api-Key"]`), wrong → 401 `Invalid admin key`. Auth runs before body validation.
+- **Push is never delivered.** Tokens are obviously fake (`ExponentPushToken[contract-…]`).
+  The legacy service forwards to a relay (`RELAY_URL`, which fronts Expo); on the MBP it points
+  at `host.docker.internal:7735`, where nothing listens, so a send to a device is
+  `delivery_status: "failed"`, `failure_count: 1` (`relay_unreachable`). jarvisd queues the push
+  durably (D31) and answers `"pending"`; the test accepts either. A repeat within 60 s is
+  deduped (`skipped`, `token_count: 0`).
+- Quirks frozen: an empty `metadata` dict is stored as `null` on create (but `{}` on PATCH);
+  `PATCH /inbox/{id}` is household-scoped only (it may edit another member's item); `DELETE
+  /tokens` deactivates any token for any authenticated user, and an inactive token is still
+  "found"; the batch path does not validate `priority`; a bad `target_type` mid-batch is 400
+  after the earlier items were sent.
+- **Leftovers:** tokens and personal items go with the fixture users (account deletion purges
+  notifications); the tests delete the household-wide items they create. `notification_log`
+  rows (7 per run) stay: they are the audit trail, with no delete API, pruned after 30 days.
+
 ## Remaining wire contracts (PLAN §6 Phase 0 item 4)
 
 - [x] **LLM stream frames.** Done against the MBP's Qwen3-8B (`llm_test.go`): framing, delta,
@@ -365,3 +396,4 @@ JARVIS_CONTRACT_ENV_FILE=/tmp/jarvisd.env scripts/contract.sh -run 'TestConfig|T
 | Module | Parity status |
 |---|---|
 | config | `TestConfigInfo`, `TestConfigServices` (all URL styles, 422), `TestConfigServiceByName`, `TestHealth/config` pass against jarvisd (2026-10-06). `/settings` and `/v1/services/*` wait for the auth module (superuser JWT). |
+| notifications | All 7 `TestNotifications*` pass against the Go module (2026-10-06), served alone by a test-only harness until main.go wires it: `internal/modules/notifications/parity_test.go` (build tag `parity`) runs it through `module.Runner`, validating apps against the MBP's jarvis-auth (`/internal/app-ping`, via `ssh -L 27701:localhost:7701`) and JWTs with its HS256 `AUTH_SECRET_KEY`. Env: `JARVIS_CONTRACT_HOST=127.0.0.1 JARVIS_CONTRACT_PORT_AUTH=27701 JARVIS_CONTRACT_PORT_NOTIFICATIONS=27712`; see the file header. |
