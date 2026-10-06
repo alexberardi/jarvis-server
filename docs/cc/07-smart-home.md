@@ -24,6 +24,8 @@ Line references without a path are to `api/smart_home.py`. Other repos are abbre
 
 ---
 
+> **Correction (2026-10-06, D9):** the external device manager feature is live. `smart_home.use_external_devices` and `smart_home.device_manager` are written by `PUT smart-home/config` (`smart_home.py:74-127`) and drive the mobile external-devices UI, so they are **not** dead settings. Only the `control-external` *route* is cut.
+
 ## 1. Purpose
 
 CC is the household's **registry and switchboard** for smart-home things. It is **not** the thing that talks to devices: every LAN or cloud protocol call happens on a node, inside a `jarvis-device-*` protocol plugin (hue, kasa, lifx, nest, govee, homekit, apple, homeconnect, schlage, simplisafe, resideo, zwave). CC's jobs:
