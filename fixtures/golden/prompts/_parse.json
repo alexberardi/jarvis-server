@@ -1,0 +1,314 @@
+[
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "Sure thing, the kitchen lights are on.",
+  "parse_response": "{\"message\": \"Sure thing, the kitchen lights are on.\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "Sure thing, the kitchen lights are on."
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "<think>The user wants weather.</think>\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}], \"error\": null}",
+  "sanitize_text": "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>"
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "<think>unclosed reasoning that never ends",
+  "parse_response": null,
+  "sanitize_text": ""
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "<message>It's 72 and cloudy.</message>",
+  "parse_response": "{\"message\": \"It's 72 and cloudy.\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "It's 72 and cloudy."
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "<think>x</think><message>Done.</message>",
+  "parse_response": "{\"message\": \"Done.\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "Done."
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}], \"error\": null}",
+  "sanitize_text": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>"
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}",
+  "parse_response": null,
+  "sanitize_text": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}"
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {}}], \"error\": null}",
+  "sanitize_text": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}"
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}], \"error\": null}",
+  "sanitize_text": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}"
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "<not_for_me/>",
+  "parse_response": "{\"message\": \"<not_for_me/>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "<not_for_me/>"
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "Okay! <exchange_complete/>",
+  "parse_response": "{\"message\": \"Okay! <exchange_complete/>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "Okay! <exchange_complete/>"
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "",
+  "parse_response": null,
+  "sanitize_text": ""
+ },
+ {
+  "provider": "Qwen3_14B_Compressed",
+  "raw": "   padded reply   ",
+  "parse_response": "{\"message\": \"padded reply\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "padded reply"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "Sure thing, the kitchen lights are on.",
+  "parse_response": "{\"message\": \"Sure thing, the kitchen lights are on.\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "Sure thing, the kitchen lights are on."
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "<think>The user wants weather.</think>\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}], \"error\": null}",
+  "sanitize_text": "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "<think>unclosed reasoning that never ends",
+  "parse_response": null,
+  "sanitize_text": ""
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "<message>It's 72 and cloudy.</message>",
+  "parse_response": "{\"message\": \"<message>It's 72 and cloudy.</message>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "<message>It's 72 and cloudy.</message>"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "<think>x</think><message>Done.</message>",
+  "parse_response": "{\"message\": \"<message>Done.</message>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "<message>Done.</message>"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}], \"error\": null}",
+  "sanitize_text": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}",
+  "parse_response": null,
+  "sanitize_text": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {}}], \"error\": null}",
+  "sanitize_text": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}], \"error\": null}",
+  "sanitize_text": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "<not_for_me/>",
+  "parse_response": "{\"message\": \"<not_for_me/>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "<not_for_me/>"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "Okay! <exchange_complete/>",
+  "parse_response": "{\"message\": \"Okay! <exchange_complete/>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "Okay! <exchange_complete/>"
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "",
+  "parse_response": null,
+  "sanitize_text": ""
+ },
+ {
+  "provider": "Qwen3_8B_Compressed",
+  "raw": "   padded reply   ",
+  "parse_response": "{\"message\": \"padded reply\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "padded reply"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "Sure thing, the kitchen lights are on.",
+  "parse_response": "{\"message\": \"Sure thing, the kitchen lights are on.\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "Sure thing, the kitchen lights are on."
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "<think>The user wants weather.</think>\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}], \"error\": null}",
+  "sanitize_text": "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "<think>unclosed reasoning that never ends",
+  "parse_response": null,
+  "sanitize_text": ""
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "<message>It's 72 and cloudy.</message>",
+  "parse_response": "{\"message\": \"<message>It's 72 and cloudy.</message>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "<message>It's 72 and cloudy.</message>"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "<think>x</think><message>Done.</message>",
+  "parse_response": "{\"message\": \"<message>Done.</message>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "<message>Done.</message>"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}], \"error\": null}",
+  "sanitize_text": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}",
+  "parse_response": null,
+  "sanitize_text": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {}}], \"error\": null}",
+  "sanitize_text": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}",
+  "parse_response": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}], \"error\": null}",
+  "sanitize_text": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "<not_for_me/>",
+  "parse_response": "{\"message\": \"<not_for_me/>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "<not_for_me/>"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "Okay! <exchange_complete/>",
+  "parse_response": "{\"message\": \"Okay! <exchange_complete/>\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "Okay! <exchange_complete/>"
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "",
+  "parse_response": null,
+  "sanitize_text": ""
+ },
+ {
+  "provider": "Qwen3_5_9B_Compressed",
+  "raw": "   padded reply   ",
+  "parse_response": "{\"message\": \"padded reply\", \"tool_calls\": [], \"error\": null}",
+  "sanitize_text": "padded reply"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "Sure thing, the kitchen lights are on.",
+  "parse_response": null,
+  "sanitize_text": "Sure thing, the kitchen lights are on."
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "<think>The user wants weather.</think>\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>",
+  "parse_response": null,
+  "sanitize_text": "<think>The user wants weather.</think>\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "<think>unclosed reasoning that never ends",
+  "parse_response": null,
+  "sanitize_text": "<think>unclosed reasoning that never ends"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "<message>It's 72 and cloudy.</message>",
+  "parse_response": null,
+  "sanitize_text": "<message>It's 72 and cloudy.</message>"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "<think>x</think><message>Done.</message>",
+  "parse_response": null,
+  "sanitize_text": "<think>x</think><message>Done.</message>"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>",
+  "parse_response": null,
+  "sanitize_text": "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}",
+  "parse_response": null,
+  "sanitize_text": "{\"message\": \"\", \"tool_calls\": [], \"error\": null}"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}",
+  "parse_response": null,
+  "sanitize_text": "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}",
+  "parse_response": null,
+  "sanitize_text": "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "<not_for_me/>",
+  "parse_response": null,
+  "sanitize_text": "<not_for_me/>"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "Okay! <exchange_complete/>",
+  "parse_response": null,
+  "sanitize_text": "Okay! <exchange_complete/>"
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "",
+  "parse_response": null,
+  "sanitize_text": ""
+ },
+ {
+  "provider": "ChatGPTOpenAI",
+  "raw": "   padded reply   ",
+  "parse_response": null,
+  "sanitize_text": "   padded reply   "
+ }
+]

@@ -1,0 +1,15 @@
+[
+ "Sure thing, the kitchen lights are on.",
+ "<think>The user wants weather.</think>\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"today\"]}}\n</tool_call>",
+ "<think>unclosed reasoning that never ends",
+ "<message>It's 72 and cloudy.</message>",
+ "<think>x</think><message>Done.</message>",
+ "<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n<tool_call>\n{bad json}\n</tool_call>",
+ "{\"message\": \"\", \"tool_calls\": [], \"error\": null}",
+ "{\"message\": \"<tool_call>{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {}}</tool_call>\", \"tool_calls\": []}",
+ "{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}",
+ "<not_for_me/>",
+ "Okay! <exchange_complete/>",
+ "",
+ "   padded reply   "
+]

@@ -1,0 +1,354 @@
+[
+ {
+  "file": "Qwen3_14B_Compressed__base.json",
+  "sha256": "57cb4fcd44b69202f91e444ae9c545cfe09c423b8d50f304c895742e1f8593cd"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__tools_none.json",
+  "sha256": "c9bc549d854a4acf77097230e6b4adf444f4c24adb3b12e83d4d39522708f70e"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__tools_client.json",
+  "sha256": "f80485f6eec46ca335dda4b553f1043c35366a4641d7a06a6a49abae776a0aa2"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__tools_server.json",
+  "sha256": "4c1e9afcbd59da9dab1fedcdd9242c9914c55745514a04cf08f3ee15a89f677e"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__tools_all.json",
+  "sha256": "57cb4fcd44b69202f91e444ae9c545cfe09c423b8d50f304c895742e1f8593cd"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__tools_node_dev.json",
+  "sha256": "30dbdab72e92a2e8188e281a812cbd0b987ae116687fae4b9620bf6c1668dcc2"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__no_flags.json",
+  "sha256": "41727a469102ecd96823ce8b6bafb56832eb4c14d8cc4f8b59ec45de7be7f4bc"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__real_node.json",
+  "sha256": "6a0674a0b674d05a717c52e5889ebc4da62bf2b65801ad5033c54b5849bff57a"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__bare.json",
+  "sha256": "3bc7c9191cf2caa314e008351c6a68384d2bb51bf34f49b67d9d1fa2e7f02361"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__persona_default.json",
+  "sha256": "57cb4fcd44b69202f91e444ae9c545cfe09c423b8d50f304c895742e1f8593cd"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__persona_custom.json",
+  "sha256": "9d2f667a7e66776e16517ef6ffa3fe1f7eca06409ac60293c0310030715b94c4"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__persona_empty.json",
+  "sha256": "3fda5ae64948dc0a4f968f95b54a9475959b8c349f1d07da8891e291183560ea"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__no_date_keys.json",
+  "sha256": "d2f9c702e954900a006f3dbd9607c05edd79aea5a33b50ac3a7e9f568fbefd4a"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__agents_small.json",
+  "sha256": "84644b53b5de2f49896049e25b55ba9664645d7afe7cee54a879b72c21d866af"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__agents_big.json",
+  "sha256": "99172622cc8eebbbd4db70b8fa19eaa0975bbd929686d5723749e0d029d94265"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__agents_sensor_only.json",
+  "sha256": "57cb4fcd44b69202f91e444ae9c545cfe09c423b8d50f304c895742e1f8593cd"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__agents_big_hierarchy.json",
+  "sha256": "659d04ab91b1a141d4c4776da3975b5740db863714b32185a3d2a6fc42ae5e68"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__agents_big_no_room.json",
+  "sha256": "e2c305b4ddebed57bbf7c7ed9fa2229bd917914fb749b9dd614fa63067ac744a"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__characterization_on.json",
+  "sha256": "8bf460010f758fe7ef4a450a5b14cfe54f977ec3845a96b423a5e997d4582240"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__characterization_on_empty.json",
+  "sha256": "57cb4fcd44b69202f91e444ae9c545cfe09c423b8d50f304c895742e1f8593cd"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__thinking_on.json",
+  "sha256": "57cb4fcd44b69202f91e444ae9c545cfe09c423b8d50f304c895742e1f8593cd"
+ },
+ {
+  "file": "Qwen3_14B_Compressed__verbose_office.json",
+  "sha256": "e91b58bcfed6c6223d2a218e55041da8f288a4b7a5b406fe2edbc26a322aa4bc"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__base.json",
+  "sha256": "9ebfecbccddeeae2d790116e5e9c0cd8e8f04c559d38cef960a1d93395002faa"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__tools_none.json",
+  "sha256": "a6dfcebc8ae22aa44c8433f9e885bf441abedaaf75f93bd5abd61a3289e520cf"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__tools_client.json",
+  "sha256": "e6351c069cb3d6b0744ae49421536d969b0c548992aa900b7a62f21194f9a5fc"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__tools_server.json",
+  "sha256": "e4c7f75c9ba655719b13e075b4a5e57e1c85bd81b465253b931bf6464e2e72ce"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__tools_all.json",
+  "sha256": "9ebfecbccddeeae2d790116e5e9c0cd8e8f04c559d38cef960a1d93395002faa"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__tools_node_dev.json",
+  "sha256": "1ade937c2756fd85fd6fdbdc7ec158c77436b63583683d1fc70fa8f8c621b766"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__no_flags.json",
+  "sha256": "1e45888689327ec4b471f7e2e1801166bb84be14a39c3f2b95edf1f9248e1dab"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__real_node.json",
+  "sha256": "534ea1ebe2591f854defe03878afeaf3c8ee2c8e90d0b87fa607f73e42400e13"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__bare.json",
+  "sha256": "3564dc7662853b12814fcd1e6c124420b6df4213dd4a69879a550e692cff525e"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__persona_default.json",
+  "sha256": "9ebfecbccddeeae2d790116e5e9c0cd8e8f04c559d38cef960a1d93395002faa"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__persona_custom.json",
+  "sha256": "6699fd83566bb60717c1c5622d63d738aac9320c15340db12ac1e80f056177fe"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__persona_empty.json",
+  "sha256": "dd0c83e22d393f679bac8363ec3a463e3e1ca43ce9239ff2b90fe2481ae372e9"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__no_date_keys.json",
+  "sha256": "60e7fb20e75da312e733dda1081bf32248ba5554720c38ad12522bb924e04a41"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__agents_small.json",
+  "sha256": "34b1a531869c02be29b9b66e8cc443b6b037c97cdd0ac29da610f4bfadf6a203"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__agents_big.json",
+  "sha256": "421527849a5e58c87f10b8c6c643e35e690aaa809a450f949cb2ebb28309cafa"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__agents_sensor_only.json",
+  "sha256": "9ebfecbccddeeae2d790116e5e9c0cd8e8f04c559d38cef960a1d93395002faa"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__agents_big_hierarchy.json",
+  "sha256": "533d4fb90a32385e63620eb87502008e5aa8ec112c9cfabcf894bd86a33c8f2d"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__agents_big_no_room.json",
+  "sha256": "5f1001fa1a93d5afa268699e9e39fcd4aae13b80f9043d6cb8d26bdee19cb996"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__characterization_on.json",
+  "sha256": "d279c6c49e6ea355ef4bf280b31a9902d551e1306239076ec4fd061276b36e76"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__characterization_on_empty.json",
+  "sha256": "9ebfecbccddeeae2d790116e5e9c0cd8e8f04c559d38cef960a1d93395002faa"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__thinking_on.json",
+  "sha256": "9ebfecbccddeeae2d790116e5e9c0cd8e8f04c559d38cef960a1d93395002faa"
+ },
+ {
+  "file": "Qwen3_8B_Compressed__verbose_office.json",
+  "sha256": "8255e88c1ee4dedef6664efb6ed91c254b961250e7d1b96691cb334c2ff13f32"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__base.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__tools_none.json",
+  "sha256": "2e71637178f078edbcee23d172f0825b52e10f2d93bb03d681732b7dda3191d5"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__tools_client.json",
+  "sha256": "2e71637178f078edbcee23d172f0825b52e10f2d93bb03d681732b7dda3191d5"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__tools_server.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__tools_all.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__tools_node_dev.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__no_flags.json",
+  "sha256": "9a94eeb84d765779e12e63ed7c54415b70fc5f05aed09edbc0fa1bdefbc591eb"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__real_node.json",
+  "sha256": "95c4b3f2abac682507e9d538e701bcbf11429b49d4b3fd49e6ea9f96542ecce9"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__bare.json",
+  "sha256": "d146afc01a0fd6adc7c7c38ce783f72ddaa0e43fcfa894c85c8694b06e85b051"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__persona_default.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__persona_custom.json",
+  "sha256": "275c22955d91a64327b0b4671e19c9e1d09b5ba94103a992e33076b812d4711a"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__persona_empty.json",
+  "sha256": "dc2657601416bc72098a198d526276678ac70d0f33920d66ac7b7d30ad7f5d35"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__no_date_keys.json",
+  "sha256": "82ae0b3634d4ee54942b06c2187827dfb88b75fab2c1e92c2f347b13cd591675"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__agents_small.json",
+  "sha256": "e36276c5caf16ec02c35a20f05e5cbe2ffb3eae06ecd1a94925b8ed858afd952"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__agents_big.json",
+  "sha256": "fc509a06f151d86c275f526978adc67ec885f510b3ab9ed6a69d90cee5f779fb"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__agents_sensor_only.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__agents_big_hierarchy.json",
+  "sha256": "d2959bf55ccafa566b9cdb0af8c60da3cf66ad16b20ab67aa04da8166b54e743"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__agents_big_no_room.json",
+  "sha256": "86ad70d4bb0982d5baa25b9e64450e00fc9b28294e2c99db53cc09550dcfa504"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__characterization_on.json",
+  "sha256": "de5780bb64f53e300894f7d3cb151344a4e8327e70a7cbbb2922a6a289289095"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__characterization_on_empty.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__thinking_on.json",
+  "sha256": "6a1cacd5338607d1bc5d9bbb44055d0970e072d73350f4018f62581d150f39ce"
+ },
+ {
+  "file": "Qwen3_5_9B_Compressed__verbose_office.json",
+  "sha256": "754873c0566d25fd8f8c9d1dc6f65b29ed9fdc1cc1c1456fe315729f9c8b42a5"
+ },
+ {
+  "file": "ChatGPTOpenAI__base.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__tools_none.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__tools_client.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__tools_server.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__tools_all.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__tools_node_dev.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__no_flags.json",
+  "sha256": "0de016886c2b1a6ef8ebc749623f3de5ffd2da9435eebb02925de5f956fc5183"
+ },
+ {
+  "file": "ChatGPTOpenAI__real_node.json",
+  "sha256": "745cf55dd192d39a54298234a294c53796a6063f44dc614000da8cca53a90c9d"
+ },
+ {
+  "file": "ChatGPTOpenAI__bare.json",
+  "sha256": "8d57af4e9c7091dd848ac383a003722db98eb371335677971976b2fb3e9b555d"
+ },
+ {
+  "file": "ChatGPTOpenAI__persona_default.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__persona_custom.json",
+  "sha256": "fe6e186d466c472b011d1e91fb60abdc514258ac0e5464bb442d689e23af1faa"
+ },
+ {
+  "file": "ChatGPTOpenAI__persona_empty.json",
+  "sha256": "34c9cfcecb90cc60d85ae8c94691724a03d7d39efb3c0fe94b22c7e1a6fbd00c"
+ },
+ {
+  "file": "ChatGPTOpenAI__no_date_keys.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__agents_small.json",
+  "sha256": "ac9e5514e82ea2b57b3966e9f6e57aeeaaee69fef9070d7404631973d31d2233"
+ },
+ {
+  "file": "ChatGPTOpenAI__agents_big.json",
+  "sha256": "49f7c92829607df18253f4014db78e7e81487735a6635b56fa8e70000594ff87"
+ },
+ {
+  "file": "ChatGPTOpenAI__agents_sensor_only.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__agents_big_hierarchy.json",
+  "sha256": "88639898ad07b8f3307f005dcebff40c94817e2ba932b2f717e819a1a3709ba3"
+ },
+ {
+  "file": "ChatGPTOpenAI__agents_big_no_room.json",
+  "sha256": "87e6046dea9878e1b699fc88a14261f7c65dc7c1e1626ae990b67b3af4c0ee6f"
+ },
+ {
+  "file": "ChatGPTOpenAI__characterization_on.json",
+  "sha256": "43b34e86cb4832c492fe8d05e2ca3443fd41da09499d87e13446dc819fa995c9"
+ },
+ {
+  "file": "ChatGPTOpenAI__characterization_on_empty.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__thinking_on.json",
+  "sha256": "0dbf44148d76b753b47c3fbef55c550b052e4eebab8f227c0f4f55057fcf1dad"
+ },
+ {
+  "file": "ChatGPTOpenAI__verbose_office.json",
+  "sha256": "c2a2fff4bf2fffc19a36f6787d8bf51ec59419325892ded655a57d317e3ff53e"
+ }
+]
