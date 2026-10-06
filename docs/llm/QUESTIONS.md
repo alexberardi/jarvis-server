@@ -11,9 +11,9 @@ These are asked **one at a time**, most consequential first. Record each answer 
 
 ## Decisions
 
-| # | Date | Decision |
-|---|---|---|
-| – | – | *(none yet)* |
+| # | Date | Question | Decision |
+|---|---|---|---|
+| LD1 | 2026-10-06 | LQ1 | **Slots are labels; memory sharing follows the model path.** `live` and `background` are labels, each configured with a model; background work ALWAYS uses the background label's model (it is never silently routed to the live model). Engine instances are keyed by (model path, load settings, device placement): two labels with the same key share one loaded llama-server instance (its parallel slots), the jarvisd equivalent of the legacy in-process llama.cpp backend sharing one `Llama` object when both labels use the same path. On limited hardware the user configures both labels with the same model. Different path or placement → separate engines. Fixes the legacy bug where background mirrored live whenever both named the same model even with different server URLs. No cgo, so llama.cpp in-process becomes a supervised llama-server for both legacy backends. |
 
 ## Queue
 
