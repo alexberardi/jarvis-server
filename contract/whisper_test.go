@@ -104,6 +104,9 @@ func TestWhisperVoiceProfiles(t *testing.T) {
 		if r := purge(); r.Status != http.StatusOK {
 			t.Errorf("cleanup voice profiles for user %d: %d %s", uid, r.Status, r.Body)
 		}
+		// LEGACY-BUG: whisper's purge leaves an empty voice_profiles/<household>/ directory.
+		// Opt-in host cleanup for the Python stack only; jarvisd keeps voiceprints in the DB.
+		removeEmptyProfileDir(t, u.HouseholdID)
 	})
 
 	enroll := func(extra string) *RawResp {

@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -399,4 +401,29 @@ func atoiHeader(r *Resp, name string) (int, bool) {
 	v := r.HeaderVal(name)
 	n, err := strconv.Atoi(v)
 	return n, err == nil && strconv.Itoa(n) == v
+}
+
+// EnvSSHCleanup, when set to an ssh destination (e.g. user@10.0.0.103) and a whisper repo path
+// separated by a colon ("user@host:~/jarvis/jarvis-whisper-api"), lets the suite remove the
+// empty voice_profiles/<household>/ directory the legacy purge leaves behind.
+const EnvSSHCleanup = "JARVIS_CONTRACT_WHISPER_SSH_CLEANUP"
+
+var safeID = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+
+func removeEmptyProfileDir(t *testing.T, householdID string) {
+	t.Helper()
+	target := os.Getenv(EnvSSHCleanup)
+	if target == "" || !safeID.MatchString(householdID) {
+		return
+	}
+	dest, repo, ok := strings.Cut(target, ":")
+	if !ok {
+		t.Logf("%s must be user@host:/path/to/jarvis-whisper-api", EnvSSHCleanup)
+		return
+	}
+	// rmdir only removes an empty directory, so this can never delete a real profile.
+	cmd := exec.Command("ssh", "-o", "BatchMode=yes", dest, "rmdir "+repo+"/voice_profiles/"+householdID+" 2>/dev/null; true")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("voice profile dir cleanup: %v %s", err, out)
+	}
 }
