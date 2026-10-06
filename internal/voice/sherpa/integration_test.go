@@ -24,7 +24,9 @@ func modelsDir(t *testing.T) string {
 	if d == "" {
 		t.Skip("JARVIS_SHERPA_MODELS not set")
 	}
-	if err := Load(t.TempDir()); err != nil {
+	// Not t.TempDir(): Windows keeps loaded DLLs locked, so per-test cleanup would fail.
+	// Extraction is content-addressed, so a shared directory is reused safely across runs.
+	if err := Load(filepath.Join(os.TempDir(), "jarvis-sherpa-test")); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	return d

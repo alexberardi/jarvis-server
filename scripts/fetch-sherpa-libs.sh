@@ -9,20 +9,23 @@ DEST="$ROOT/internal/voice/sherpa/libs"
 BASE="https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}"
 
 # goos-goarch -> release tarball (CPU, shared libs). Windows uses the MT (static CRT) build so no
-# VC++ redistributable is needed on the target machine.
-declare -A TARBALL=(
-  [linux-amd64]="sherpa-onnx-v${SHERPA_VERSION}-linux-x64-shared-lib"
-  [linux-arm64]="sherpa-onnx-v${SHERPA_VERSION}-linux-aarch64-shared-cpu-lib"
-  [darwin-arm64]="sherpa-onnx-v${SHERPA_VERSION}-osx-arm64-shared-lib"
-  [windows-amd64]="sherpa-onnx-v${SHERPA_VERSION}-win-x64-shared-MT-Release-lib"
-)
+# VC++ redistributable is needed on the target machine. (case, not an associative array: macOS
+# ships bash 3.2.)
+tarball() {
+  case "$1" in
+    linux-amd64)   echo "sherpa-onnx-v${SHERPA_VERSION}-linux-x64-shared-lib" ;;
+    linux-arm64)   echo "sherpa-onnx-v${SHERPA_VERSION}-linux-aarch64-shared-cpu-lib" ;;
+    darwin-arm64)  echo "sherpa-onnx-v${SHERPA_VERSION}-osx-arm64-shared-lib" ;;
+    windows-amd64) echo "sherpa-onnx-v${SHERPA_VERSION}-win-x64-shared-MT-Release-lib" ;;
+    *) echo "unsupported platform $1" >&2; return 1 ;;
+  esac
+}
 
 host="$(go env GOOS 2>/dev/null || mise exec go@1.25 -- go env GOOS)-$(go env GOARCH 2>/dev/null || mise exec go@1.25 -- go env GOARCH)"
-platforms=("$@")
-[ ${#platforms[@]} -eq 0 ] && platforms=("$host")
+if [ $# -eq 0 ]; then set -- "$host"; fi
 
-for p in "${platforms[@]}"; do
-  name="${TARBALL[$p]:?unsupported platform $p}"
+for p in "$@"; do
+  name="$(tarball "$p")"
   out="$DEST/$p"
   if [ -f "$out/.version" ] && [ "$(cat "$out/.version")" = "$SHERPA_VERSION" ]; then
     echo "$p: up to date"; continue
