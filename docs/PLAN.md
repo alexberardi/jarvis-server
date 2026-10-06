@@ -121,6 +121,16 @@ SQLite driver: `modernc.org/sqlite` (pure Go; keeps the build cgo-free, see §3.
 | ~~Intent classifier (fastText)~~ | **Cut** (D9: off in prod, F1). | — |
 | OCR | LLM vision via `llama-server` (`--mmproj`), `tesseract` (optional), and a macOS Swift Vision helper. | Engine |
 
+**GPU selection (user decision, 2026-10-06): auto-detect, always overridable, multi-GPU.**
+
+- jarvisd **detects** GPUs at startup and on demand (port of `gpu_select.py`: NVIDIA via `nvidia-smi`, AMD via `rocm-smi`, Vulkan devices, Apple Metal) and proposes an assignment.
+- The assignment is **always configurable in the admin/settings panel** and is stored in settings. A configured value always beats detection, and so does a visibility variable the operator set in the environment.
+- **Multi-GPU is first class.** Per engine (each llama-server slot, whisper, embeddings): a backend plus a device list. Options:
+  - pin different engines to different GPUs (prod today: live and background slots on separate 3090s)
+  - split one model across several GPUs (`--tensor-split` / `--split-mode`)
+  - CPU only
+- Detection results and the effective assignment are shown in `jarvisd doctor` and in admin.
+
 `internal/engines` handles, for each engine:
 
 - download and version-pin it

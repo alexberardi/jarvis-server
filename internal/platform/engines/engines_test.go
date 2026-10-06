@@ -81,6 +81,7 @@ func runHelper() {
 	}
 	healthyAfter, _ := dur("HELPER_HEALTHY_AFTER")
 	unhealthyAfter, sick := dur("HELPER_UNHEALTHY_AFTER")
+	recoverAfter, recovers := dur("HELPER_RECOVER_AFTER")
 	port := os.Getenv("HELPER_PORT")
 	if port == "" {
 		select {}
@@ -91,7 +92,7 @@ func runHelper() {
 	}
 	_ = http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		age := time.Since(start)
-		if age < healthyAfter || (sick && age >= unhealthyAfter) {
+		if age < healthyAfter || (sick && age >= unhealthyAfter && !(recovers && age >= recoverAfter)) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -472,5 +473,39 @@ func TestFreePort(t *testing.T) {
 	p, err := FreePort()
 	if err != nil || p <= 0 {
 		t.Fatalf("FreePort = %d, %v", p, err)
+	}
+}
+
+func TestDrainGraceDelaysHealthRestart(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	spec := f.spec(map[string]string{"HELPER_UNHEALTHY_AFTER": "200ms"})
+	spec.Health.DrainGrace = 400 * time.Millisecond
+	s := start(t, spec)
+	waitHealthy(t, s)
+	eventually(t, "draining", func() bool { return s.State() == Draining })
+	drainingAt := time.Now()
+	if f.startCount() != 1 {
+		t.Fatal("restarted before the grace ran out")
+	}
+	eventually(t, "restart after grace", func() bool { return f.startCount() >= 2 })
+	if waited := time.Since(drainingAt); waited < 300*time.Millisecond {
+		t.Fatalf("restarted after %s, want ~400ms grace", waited)
+	}
+}
+
+func TestDrainCalledOffWhenEngineRecovers(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	// Sick from 200ms to 400ms: long enough to start draining, then healthy again.
+	spec := f.spec(map[string]string{"HELPER_UNHEALTHY_AFTER": "200ms", "HELPER_RECOVER_AFTER": "400ms"})
+	spec.Health.DrainGrace = 2 * time.Second
+	s := start(t, spec)
+	waitHealthy(t, s)
+	eventually(t, "draining", func() bool { return s.State() == Draining })
+	eventually(t, "recovered", func() bool { return s.State() == Healthy })
+	time.Sleep(300 * time.Millisecond)
+	if n := f.startCount(); n != 1 {
+		t.Fatalf("engine restarted %d times; the recovery should have called it off", n-1)
 	}
 }

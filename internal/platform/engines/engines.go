@@ -39,6 +39,7 @@ const (
 	Starting   State = "starting"   // process launched, not yet healthy
 	Healthy    State = "healthy"    // passing health checks (or running, with no check)
 	Unhealthy  State = "unhealthy"  // was healthy, now failing checks below the threshold
+	Draining   State = "draining"   // failed the threshold; restarting after DrainGrace unless it recovers
 	Restarting State = "restarting" // down, waiting out the backoff
 	Stopped    State = "stopped"    // not running, by request (or never started)
 	Failed     State = "failed"     // gave up: too many restarts, or it could not be launched
@@ -90,6 +91,10 @@ type HealthCheck struct {
 	Interval         time.Duration // default 5s
 	Timeout          time.Duration // per request; default 2s
 	FailureThreshold int           // consecutive failures, once healthy, that force a restart; default 3
+	// DrainGrace delays a health-failure restart so requests already in flight can finish.
+	// The engine is marked Draining, so routers stop sending it new work; if it passes a
+	// health check during the grace, the restart is called off. 0 restarts at once.
+	DrainGrace time.Duration
 }
 
 // RestartPolicy bounds restarts. The delay before restart n within Window is
@@ -484,6 +489,8 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 	next := time.NewTimer(0)
 	defer next.Stop()
 	healthy, fails := false, 0
+	var drain <-chan time.Time // non-nil while draining
+	var drainCause error
 	for {
 		select {
 		case <-p.exited:
@@ -492,11 +499,19 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 			return true, nil
 		case <-startup.C:
 			return false, fmt.Errorf("not healthy within %s", s.spec.StartTimeout)
+		case <-drain:
+			return false, drainCause
 		case <-next.C:
 		}
 		err := s.check()
 		next.Reset(hc.Interval)
 		switch {
+		case err == nil && drain != nil:
+			s.log.Info("engine recovered while draining; restart called off")
+			drain, fails = nil, 0
+			s.set(Healthy, "")
+		case drain != nil:
+			// Still failing; the grace timer decides.
 		case err == nil:
 			fails = 0
 			if !healthy {
@@ -511,7 +526,14 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 			fails++
 			s.log.Warn("engine health check failed", "err", err, "consecutive", fails)
 			if fails >= hc.FailureThreshold {
-				return false, fmt.Errorf("%d consecutive failed health checks: %w", fails, err)
+				cause := fmt.Errorf("%d consecutive failed health checks: %w", fails, err)
+				if hc.DrainGrace <= 0 {
+					return false, cause
+				}
+				s.log.Warn("engine draining before restart", "grace", hc.DrainGrace)
+				s.set(Draining, cause.Error())
+				drain, drainCause = time.After(hc.DrainGrace), cause
+				continue
 			}
 			s.set(Unhealthy, err.Error())
 		}
