@@ -105,7 +105,7 @@ func (s *FS) Put(ctx context.Context, key string, r io.Reader, contentType strin
 	if err := tmp.Close(); err != nil {
 		return 0, fmt.Errorf("blob: put %q: %w", key, err)
 	}
-	if err := os.Rename(tmp.Name(), p); err != nil {
+	if err := replaceFile(tmp.Name(), p); err != nil {
 		return 0, fmt.Errorf("blob: put %q: %w", key, err)
 	}
 	ok = true
@@ -123,7 +123,7 @@ func (s *FS) Get(ctx context.Context, key string) (io.ReadCloser, Info, error) {
 	if err != nil {
 		return nil, Info{}, err
 	}
-	f, err := os.Open(p)
+	f, err := openShared(p)
 	if err != nil {
 		return nil, Info{}, notFound(key, err)
 	}
@@ -149,7 +149,7 @@ func (s *FS) Stat(ctx context.Context, key string) (Info, error) {
 }
 
 func (s *FS) statPath(p, key string) (Info, error) {
-	f, err := os.Open(p)
+	f, err := openShared(p)
 	if err != nil {
 		return Info{}, notFound(key, err)
 	}
@@ -166,7 +166,7 @@ func (s *FS) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := removeFile(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("blob: delete %q: %w", key, err)
 	}
 	return nil
