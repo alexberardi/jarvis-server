@@ -113,8 +113,8 @@ CREATE TABLE %[1]s (
     household_id    TEXT,
     node_id         TEXT,
     user_id         INTEGER,
-    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')),
+    updated_at      TEXT    NOT NULL DEFAULT (strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now'))
 );
 -- One row per (key, scope). COALESCE because NULLs never collide in a UNIQUE index; Postgres
 -- allowed duplicate system rows, SQLite won't.
