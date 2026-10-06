@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 0 (groundwork)
+## Current phase: 1 (control plane) — Phase 0 nearly done (0.5/0.6 have remaining slices)
 
 ### Phase 0 checklist
 
@@ -88,4 +88,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - CC spec questions: P1–P4 → D4–D11; Q-CAT → D12; S1–S14 → D13–D39; B list triaged (4 settled, 56 defaults as D40, 6 asked → D41–D46). Prod facts gathered read-only (errand/phone/attention/memory/routine counts). Notable: phone gateway absorbed into jarvisd (D16), situation matcher cut (D17), learn from voice (D19), account deletion scope (D20), unknown speaker refuses per-user tools (D21), routines run on the node and CC owns definitions (D24, D44), cameras deferred (D29), voiceprints only and recognition off by default (D34, D35).
   - Folded decisions into all 14 docs (D48–D49 loose ends); wrote EXTERNAL-CHANGES.md. Started 0.3: config, db, httpx, module runner, queue (all race-tested, 4-target cross-compile green).
   - 0.3 finished: authn, settings, blob, mdns, mqtt, engines, scheduler (fixed a DST infinite loop in cron), logging; serve wires queue/scheduler/blobs. Platform tests now run on all 4 OSes in CI; Windows caught a blob bug (can't replace an open file), fixed with POSIX-semantics rename (`FileRenameInfoEx`) + FILE_SHARE_DELETE readers. CI all green.
-- **Next:** 0.4 contract suite (black-box, run against the Python stack first), 0.5 golden fixtures, 0.6 wire-contract freeze, 0.7 schema baseline.
+  - Phase 1 started: **config module** done and passing the legacy contract tests unchanged (first parity proof). jarvisd self-registers its listeners in the registry and advertises mDNS.
+- **Next:** auth module (users, households, memberships, nodes, app clients, tokens, RS256 key in DB), then logs, notifications. Contract agents are finishing CC/MQTT and LLM/STT/TTS wire freezes.
