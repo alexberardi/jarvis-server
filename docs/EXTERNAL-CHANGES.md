@@ -43,6 +43,13 @@ keep shipping.
 | `LLM_INTERFACE_SEED` → seeds `llm.prompt_provider`; the `llm-interface-select` dropdown lists only kept providers | Setting rename and catalog cleanup | D11, D12 |
 | Long term: replaced by the jarvisd install scripts | Single binary | PLAN Phase 6 |
 
+## jarvis-recipes-server (optional add-on, stays Python)
+
+| Change | Why | When |
+|---|---|---|
+| Image import (`from_image.py`) submits OCR over HTTP (`POST /v1/ocr/jobs` with a `callback_url`) instead of LPUSHing to Redis `jarvis.ocr.jobs` | OCR moved into jarvisd; jarvisd owns the queue and has no Redis | When OCR cuts over to jarvisd |
+| Add a callback route that receives the OCR result (app-credential auth) and enqueues it onto recipes' own RQ queue | Replaces the pickled `ocr.completed` RQ job the Python OCR worker produced | Same |
+
 ## Command packages (`jarvis-cmd-*`, `jarvis-device-*`)
 
 No changes required. Contracts to keep working:
