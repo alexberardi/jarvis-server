@@ -9,6 +9,8 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D1 | 2026-10-06 | README / 07 | **Caddy is orphaned and not ported.** External OAuth (e.g. Nest) goes through the cloud relay bounce; local providers (HA) use CC's own callback over LAN HTTP. |
 | D2 | 2026-10-06 | 06 / 01 | **Drop the "last speaker" concept entirely.** The user says it "was supposed to be dropped" and there's "no situation where we'd want that anymore". Go CC **ignores** `node_context.speaker_user_id` / `speaker_confidence` on `/conversation/start`, which today is the node's never-expiring module-global `_last_speaker_user_id`. Speaker identity comes only from the current turn's audio, identified in-process. No node change is required: the field is accepted and ignored. Pending: whether CC's own 30 s per-node **stickiness** goes too (see Q-queue). |
 
+| D3 | 2026-10-06 | 06 / 01 | **Drop CC's 30 s per-node speaker stickiness too.** User's reason: within a multi-turn conversation the speaker already persists through the conversation context. A *new* conversation must never inherit a previous speaker, because permission gates for sensitive info are keyed on speaker ID, so remembering across conversations can leak. **Rule:** speaker identity is per conversation only. It comes from turns identified *in this conversation* and dies with the conversation (end or expiry). Nothing is keyed per node, and nothing survives across conversations. This removes `speaker_stickiness.py` and settings `voice.stickiness_*`. |
+
 ## Verified facts (resolve questions without asking)
 
 | # | Date | Fact | Effect |
@@ -28,7 +30,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **Q0. Speaker stickiness.** Follow-up to D2: should CC's own 30 s per-node stickiness go too, or stay scoped to one conversation? (06.Q1)
+- _(none)_. Q0 was answered as D3.
 
 ### P: policies (resolve many at once)
 

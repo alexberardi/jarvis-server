@@ -9,6 +9,8 @@ Voice is **greenfield** in Go (PLAN §2, D7, Appendix C). Kokoro TTS and speaker
 ---
 
 > **Decision D2 (2026-10-06, user):** the node "last speaker" mechanism (§3.5 step 1–2, §8 item 1) is **dropped entirely, not fixed**. Go ignores `node_context.speaker_user_id`/`speaker_confidence` on `/conversation/start`. See `QUESTIONS.md`.
+>
+> **Decision D3 (2026-10-06, user):** CC's per-node stickiness (§3.6) is **also dropped**. Speaker identity is per conversation only: set from turns identified in the current conversation, and cleared when the conversation ends or expires. Nothing persists per node or across conversations. Reason: sensitive-info permission gates are keyed on speaker ID, so cross-conversation memory leaks.
 
 ## 1. Purpose
 
