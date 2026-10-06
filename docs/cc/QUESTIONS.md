@@ -18,6 +18,7 @@ Questions are asked **one at a time** (user preference). Each answer is recorded
 | D10 | 2026-10-06 | 05 | **Factory reset: the tracked flow (flow 2) only.** `POST /admin/nodes/{id}/factory-reset` creates a persisted `NodeTask`, with a single-in-flight guard, node progress reports via `/nodes/factory-reset/{task_id}/status`, and the task-timeout sweeper. **Mobile's delete switches to it** (mobile change). Flow 1 (DELETE + `verify-reset` without a task_id) is dropped once mobile switches; keep `verify-reset` only as long as nodes on older builds need it. **Fix (D8):** today both flows keep the reset token in an in-memory dict with a 300 s TTL (`core/pending_resets.py`). Go persists it in SQLite with the task, so an offline node, or a server restart, can still complete the reset when the node comes back. |
 | D11 | 2026-10-06 | P4 | **Settings hygiene.** <br>(1) **Drop** defined-but-unread keys. <br>(2) The three read-but-undefined keys are **verified never set**: no alembic seed, no row in prod's `jarvis_command_center.settings`, and no env mapping. So **remove the checks and hard-code today's behaviour**: the embedding sweep is always on (unset meant enabled, `main.py:274`), every 60 s, and trace retention is 7 days. <br>(3) **`llm.interface` is set at install time:** the jarvis-admin LLM wizard writes each catalog model's `promptProvider` (`jarvis-admin/src/data/models.ts`, `server/src/routes/llm-setup.ts:122-174`), plus quick-sets and the installer's `LLM_INTERFACE_SEED`. Prod = `Qwen3_14B_Compressed`. **Rename the key** to `llm.prompt_provider` (proposed). Admin and installer change; import maps the old key. <br>(4) **An unknown provider name is a hard error**, not a fallback. **Consequence:** admin's catalog currently maps 4 of 6 models to dropped providers: `qwen3-14b`→`Qwen3LargeUntrained`, `qwen25-7b`→`Qwen25MediumUntrained`, `llama-3.1-8b`→`Llama31MediumUntrained`, `hermes-3-8b`→`HermesMediumUntrained`. See Q-CAT. |
 | D12 | 2026-10-06 | Q-CAT | **Admin model catalog offers only models with a kept provider.** Remove `qwen25-7b`, `llama-3.1-8b`, `hermes-3-8b`. Remap `qwen3-14b` → `Qwen3_14B_Compressed`. **Add** Qwen3.5-9B (→ `Qwen3_5_9B_Compressed`) and the prod 27B model (→ `Qwen3_14B_Compressed`). jarvis-admin change, landed alongside the `llm.prompt_provider` rename (D11). |
+| D13 | 2026-10-06 | 09 (S1) | **Errands ship in v1.** The user says they are useful and will be used. The hard part is **when to use one**, i.e. knowing when a request should become an errand rather than a normal turn; record this as a product/UX follow-up for after the port. Prod has 0 plans/runs/schedules, so there is no data to import (09.Q12: import active `schedules` only). The core (plan → card → Run, sync and phone steps, Revise/Cancel, scheduled re-plan) is in. Pause-and-replan scope is S1b (09.Q4). |
 
 ## Verified facts (resolve questions without asking)
 
@@ -38,7 +39,7 @@ There are about 166 raw questions. To keep each one asked worth real thought, th
 
 ### Pending (asked, awaiting answer)
 
-- **S1. Errands:** ship in v1, and how much? (Prod has 0 `errand_plans`, 0 `workflows`, 0 `schedules` ever, checked 2026-10-06.)
+- **S1b. Errands pause-and-replan (09.Q4):** port as-is, port with an always-shown delta card + approval deadline, or cut for v1?
 
 ### P: policies (resolve many at once)
 
