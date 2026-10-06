@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 1 (control plane) — Phase 0 nearly done (0.5/0.6 have remaining slices)
+## Current phase: 2 (recipes + OCR) — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
 
 ### Phase 0 checklist
 
@@ -92,4 +92,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - **logs module** written (SQLite store replacing Loki, same API, retention purge, sink for jarvisd's own logs); unit-tested, not yet wired into main (waits for the auth module, which provides `authn.Authority`).
   - **auth module** ported (63 routes) and passing all 62-route auth contract coverage against jarvisd; closes the X-Household-Id join hole (D4/D5). **logs module** wired and passing its contracts. Contract tests now branch on `JARVIS_CONTRACT_IMPL=jarvisd` for decided fixes. Shared `/settings` guards in the platform. jarvisd's own logs land in the log store.
   - Known follow-ups in auth (parity kept, decide later): access tokens stay valid until expiry after logout/password change; rotate re-activates a revoked app; admin can remove a member's last household; D20 per-household leave hook not built yet.
-- **Next:** notifications module (agent in progress) → wire it → Phase 1 control plane complete. Then Phase 2 (recipes + OCR).
+  - **Phase 1 done:** jarvisd serves config, auth, logs, notifications. 45 control-plane contract tests pass against one jarvisd process (only the registry's missing command-center row fails, expected until Phase 5). Notifications: pushes via the relay as durable queue jobs (D31); D20 purge + log de-identification.
+- **Next:** Phase 2, recipes + OCR (queue replaces RQ, files to the blob store). Contract tests first against the MBP, then the Go modules. CI should be checked after the latest pushes.
