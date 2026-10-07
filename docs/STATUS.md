@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 4 (voice) — Phases 1–3 done — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
+## Current phase: 5 (command-center) — Phases 1–4 done (whisper CI builds finishing) — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
 
 ### Phase 0 checklist
 
@@ -104,4 +104,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - **Phase 3 built:** llm module = engine stack (llama-server + whisper-server, pinned builds per OS/GPU flavour, GPU detection, label-keyed shared instances, model manager with Hugging Face installs) + Service/API (frozen stream format, request shaping, regex date keys, queue/callbacks, D8 fixes). End-to-end through jarvisd: here on CUDA (RTX 3080 Ti) and on the MBP on **Metal** (M2 Max, metal build, MTL0 device), one engine serving both labels; stopping jarvisd leaves no llama-server orphan. Fixed from the e2e run: explicit install backend now applies to the assigned labels.
   - whisper-server builds: our CI builds and hosts them (decision log). CUDA 12.x chosen for x64 (widest driver support).
   - Phase 3 verified: all LLM contract tests pass against jarvisd with real engines (CUDA here, MiniLM 384-d embeddings); real Qwen3-4B on the MBP via the model manager on **Metal**: no-think answer in 0.61 s, thinking at ~95 tok/s, `tomorrow_morning` date key extracted, no orphan engine on stop. OCR's LLM vision/validation now call the llm module in memory (`InProcessClient`).
-- **Next:** whisper-server CI builds (agent in progress) → Phase 4 voice: STT module on whisper-server (contract: contract/whisper_test.go), Kokoro TTS + ERes2Net speaker ID in-binary via internal/voice/sherpa, voice models via the model manager, enrollment/verify routes, threshold calibration on jarvis-dev enrollments.
+  - **Phase 4 done:** `stt` (whisper-server STT + in-binary ERes2Net speaker ID with the calibrated 0.43 threshold, D33–D38) and `tts` (Kokoro in-binary, sentence streaming, first audio ~200 ms) modules, wired; both get models from the model manager. Verified: Kokoro speech → whisper-server transcription round trip through one jarvisd, all engines in one /v1/hardware view. Open: CC must map a node-reported rejected enrollment take to `low_quality` (stt Q1) and pass validated member ids in-process (Q2); VAD/consistency gate still uncalibrated on real node takes.
+- **Next:** whisper-server CI builds (agent finishing; its engine/release.go changes are uncommitted on purpose until reviewed). Then **Phase 5, command-center**, in sub-phases 5a nodes+MQTT data plane → 5b voice pipeline + tool loop + prompts (G1 goldens gate) → 5c memory/errands/phone/signals/routines → 5d mobile surface; then the factory-reset + fresh-provision end-to-end on jarvis-dev with the user.
