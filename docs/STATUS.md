@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 3 (LLM) — Phases 1–2 done — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
+## Current phase: 3 (LLM) wrapping up — Phases 1–2 done — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
 
 ### Phase 0 checklist
 
@@ -99,4 +99,6 @@ Update it at the end of every working session, and whenever a task finishes or a
   - **Phase 1 done:** jarvisd serves config, auth, logs, notifications. 45 control-plane contract tests pass against one jarvisd process (only the registry's missing command-center row fails, expected until Phase 5). Notifications: pushes via the relay as durable queue jobs (D31); D20 purge + log de-identification.
   - **Phase 2 done:** OCR module in jarvisd (legacy routes + async job API with callbacks per the recipes handoff decision); 9 OCR contract tests green vs Python and vs the jarvisd binary. jarvisd now serves config, auth, logs, notifications, ocr. Recipes-side change listed in EXTERNAL-CHANGES.md. Note: the MBP's Docker Desktop leaked ~6k CLOSE_WAIT sockets (contract runs likely contributed); user restarted it. If it recurs, make the harness reuse connections.
   - Phase 3 spec written (`docs/llm/`), all LLM questions answered (LD1–LD8): labels with path-keyed engine sharing, OpenAI-compatible remotes only, first-class model manager (install from Hugging Face), images follow labels, prod cutover starts clean (dogfood fresh install), embeddings on llama-server with model-tagged vectors + auto re-embed, vLLM dropped, thinking is the user's choice.
-- **Next:** Phase 3 build in two tracks: (A) engines + GPU detection + model manager; (B) llm.Service API/streaming/queue/prompt shaping. Then Metal verification on the MBP.
+  - **Phase 3 built:** llm module = engine stack (llama-server + whisper-server, pinned builds per OS/GPU flavour, GPU detection, label-keyed shared instances, model manager with Hugging Face installs) + Service/API (frozen stream format, request shaping, regex date keys, queue/callbacks, D8 fixes). End-to-end through jarvisd: here on CUDA (RTX 3080 Ti) and on the MBP on **Metal** (M2 Max, metal build, MTL0 device), one engine serving both labels; stopping jarvisd leaves no llama-server orphan. Fixed from the e2e run: explicit install backend now applies to the assigned labels.
+  - Open from track A: no upstream whisper.cpp builds for macOS Metal / Linux GPU (only CPU + Windows CUDA) → for now set `stt.engine_path`; decide whether our CI builds whisper-server flavours. CUDA 12.x chosen for x64 (widest driver support).
+- **Next:** finish Phase 3: run the LLM contract tests against jarvisd with a real model; point OCR's LLM vision at the in-process Service; real-model smoke with a Qwen on the MBP. Then Phase 4 voice (Kokoro + speaker ID in-binary, whisper-server STT).
