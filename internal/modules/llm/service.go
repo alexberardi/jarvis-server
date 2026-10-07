@@ -179,10 +179,59 @@ func (s *Service) endpoint(ctx context.Context, label string) (Endpoint, error) 
 		return Endpoint{}, notLoaded(label, &NotReadyError{State: StateNotConfigured, Reason: "no engine resolver"})
 	}
 	ep, err := s.resolver.Resolve(ctx, label)
+	if err != nil && loading(err) {
+		if wait, _ := ctx.Value(readyWaitKey{}).(time.Duration); wait > 0 {
+			ep, err = s.waitReady(ctx, label, wait, err)
+		}
+	}
 	if err != nil {
 		return ep, notLoaded(label, err)
 	}
 	return ep, nil
+}
+
+type readyWaitKey struct{}
+
+// readyPoll is how often a waiting call asks the resolver again.
+var readyPoll = 250 * time.Millisecond
+
+// WithReadyWait makes Chat, Stream and Embed calls on ctx wait up to d for a label whose
+// engine is still loading (a restart or upgrade reloads the model for 5-10 s) instead of
+// failing at once with 503 model_not_loaded (A10 F22). A failed, unconfigured or remote label
+// fails at once as before. The HTTP API doesn't set it: its clients keep legacy's 503.
+func WithReadyWait(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, readyWaitKey{}, d)
+}
+
+func loading(err error) bool {
+	var nr *NotReadyError
+	return errors.As(err, &nr) && nr.State == StateLoading
+}
+
+// waitReady polls the resolver until the label is ready, stops loading, ctx ends or wait
+// passes; the last error says how long it waited.
+func (s *Service) waitReady(ctx context.Context, label string, wait time.Duration, err error) (Endpoint, error) {
+	deadline := time.Now().Add(wait)
+	t := time.NewTicker(readyPoll)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return Endpoint{}, err
+		case <-t.C:
+		}
+		ep, rerr := s.resolver.Resolve(ctx, label)
+		if rerr == nil || !loading(rerr) {
+			return ep, rerr
+		}
+		err = rerr
+		if !time.Now().Before(deadline) {
+			var nr *NotReadyError
+			errors.As(err, &nr)
+			reason := strings.TrimSpace(nr.Reason + fmt.Sprintf(" (still loading after waiting %s; try again in a moment)", wait))
+			return Endpoint{}, &NotReadyError{State: nr.State, Reason: reason}
+		}
+	}
 }
 
 func (s *Service) acquire(ctx context.Context, label string) (func(), error) {
