@@ -106,26 +106,69 @@ func (c Cron) dayMatches(t time.Time) bool {
 
 // Next returns the first matching minute strictly after `after`, in after's location. It
 // gives up (ok=false) for expressions that never match, e.g. Feb 31.
+//
+// Matching is on the wall clock, and DST is defined explicitly (docs/cc/08 §11):
+//   - a time the spring-forward gap skips (02:30 on the change day in New York) fires once,
+//     at the first valid instant after it (03:00 local);
+//   - a time the fall-back repeat shows twice (01:30) fires once, on its first occurrence.
 func (c Cron) Next(after time.Time) (time.Time, bool) {
 	loc := after.Location()
-	t := after.Truncate(time.Minute).Add(time.Minute)
-	limit := after.AddDate(5, 0, 0)
+	w := wall(after)
+	for range 4 { // a gap or repeat skips at most a couple of wall matches
+		n, ok := c.nextWall(w)
+		if !ok {
+			return time.Time{}, false
+		}
+		if t := resolveWall(n, loc); t.After(after) {
+			return t, true
+		}
+		w = n // the match resolved to an instant already past (the repeated hour): move on
+	}
+	return time.Time{}, false
+}
+
+// wall is t's wall-clock reading as a UTC time, so stepping through it never meets DST.
+func wall(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+}
+
+// resolveWall maps a wall-clock reading (as UTC) to an instant in loc: the earliest instant
+// showing it, or, in a spring-forward gap, the first instant after the gap.
+func resolveWall(w time.Time, loc *time.Location) time.Time {
+	var best time.Time
+	for _, probe := range []time.Duration{-24 * time.Hour, 0, 24 * time.Hour} {
+		_, off := w.Add(probe).In(loc).Zone() // the zone offsets in force around w
+		t := w.Add(-time.Duration(off) * time.Second).In(loc)
+		if wall(t).Equal(w) && (best.IsZero() || t.Before(best)) {
+			best = t
+		}
+	}
+	if !best.IsZero() {
+		return best
+	}
+	// In the gap: with the pre-gap offset w lands past the jump; walk back to the jump.
+	_, off := w.Add(-24 * time.Hour).In(loc).Zone()
+	t := w.Add(-time.Duration(off) * time.Second).In(loc)
+	for i := 0; i < 24*60 && wall(t.Add(-time.Minute)).After(w); i++ {
+		t = t.Add(-time.Minute)
+	}
+	return t
+}
+
+// nextWall is the first matching wall-clock minute strictly after w (a UTC wall reading).
+func (c Cron) nextWall(w time.Time) (time.Time, bool) {
+	t := w.Truncate(time.Minute).Add(time.Minute)
+	limit := w.AddDate(5, 0, 0)
 	for t.Before(limit) {
 		if !has(c.month, int(t.Month())) {
-			t = time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, loc)
+			t = time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 			continue
 		}
 		if !c.dayMatches(t) {
-			n := time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, loc)
-			if !n.After(t) { // a zone where midnight is skipped by DST
-				n = t.Add(time.Hour)
-			}
-			t = n
+			t = time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, time.UTC)
 			continue
 		}
 		if !has(c.hour, t.Hour()) {
-			// Step in absolute time: time.Date with a wall hour that a DST jump skips can
-			// normalize backwards and loop forever.
 			t = t.Add(time.Hour - time.Duration(t.Minute())*time.Minute)
 			continue
 		}
