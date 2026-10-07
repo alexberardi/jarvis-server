@@ -269,6 +269,7 @@ OCR moves to the embedded queue and the blob store, keeping its HTTP API, becaus
 - `import-legacy`.
 - Re-provision jarvis-dev and then the prod nodes.
 - Shrink or absorb jarvis-admin. Update the `./jarvis` CLI and jarvis-installer.
+  - Admin absorb spec (D9): [`docs/admin/00-inventory.md`](admin/00-inventory.md) covers the page and route fates, the same-origin gateway on 7710, the first-run wizard, the build/embed plan and the agent-sized port plan A0–A10. Open questions are in [`docs/admin/QUESTIONS.md`](admin/QUESTIONS.md).
 - Remote-GPU-satellite mode: a `jarvisd` instance with only `llm,stt` enabled.
 
 ### Phase 7: retire
