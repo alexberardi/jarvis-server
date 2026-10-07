@@ -34,7 +34,10 @@ func newQueue(t *testing.T) (*Queue, *db.DB) {
 func start(t *testing.T, q *Queue) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	t.Cleanup(func() {
+		cancel()
+		q.Wait() // before the DB closes (Windows can't remove a file still open)
+	})
 	q.Start(ctx)
 }
 

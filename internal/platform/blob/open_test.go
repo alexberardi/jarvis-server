@@ -27,7 +27,19 @@ func TestFSConformance(t *testing.T) {
 
 func TestOpen(t *testing.T) {
 	dir := t.TempDir()
-	for _, spec := range []string{filepath.Join(dir, "a"), "file://" + filepath.ToSlash(filepath.Join(dir, "b"))} {
+	// file:///path on Unix and file:///C:/path on Windows; file://C:/path is tolerated.
+	fileURL := func(p string) string {
+		p = filepath.ToSlash(p)
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		return "file://" + p
+	}
+	specs := []string{filepath.Join(dir, "a"), fileURL(filepath.Join(dir, "b"))}
+	if vol := filepath.VolumeName(dir); vol != "" {
+		specs = append(specs, "file://"+filepath.ToSlash(filepath.Join(dir, "c")))
+	}
+	for _, spec := range specs {
 		s, err := blob.Open(spec, quiet())
 		if err != nil {
 			t.Fatalf("%s: %v", spec, err)

@@ -36,10 +36,13 @@ func Register(scheme string, open Opener) {
 
 func init() {
 	Register("file", func(u *url.URL, log *slog.Logger) (Store, error) {
-		if u.Host != "" && u.Host != "localhost" {
+		p := u.Path
+		switch {
+		case len(u.Host) == 2 && u.Host[1] == ':': // file://C:/jarvis/blobs (a drive, not a host)
+			p = u.Host + u.Path
+		case u.Host != "" && u.Host != "localhost":
 			return nil, fmt.Errorf("blob: file URL with a remote host %q", u.Host)
 		}
-		p := u.Path
 		if len(p) >= 3 && p[0] == '/' && p[2] == ':' { // file:///C:/jarvis/blobs on Windows
 			p = p[1:]
 		}

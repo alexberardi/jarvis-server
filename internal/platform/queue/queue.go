@@ -104,6 +104,9 @@ type Queue struct {
 	handlers map[string]Handler
 	wake     map[string]chan struct{}
 	started  bool
+	// running tracks the workers and the reaper so shutdown can wait for them to let go of
+	// the database (Windows can't delete a file a connection still holds).
+	running sync.WaitGroup
 }
 
 // New creates a queue over d. Run Migrations before use.
@@ -292,11 +295,15 @@ func (q *Queue) Start(ctx context.Context) {
 
 	for jobType, h := range handlers {
 		for range h.Concurrency {
-			go q.worker(ctx, jobType, h)
+			q.running.Go(func() { q.worker(ctx, jobType, h) })
 		}
 	}
-	go q.reaper(ctx)
+	q.running.Go(func() { q.reaper(ctx) })
 }
+
+// Wait blocks until the workers and the reaper started by Start have returned (after its
+// context is cancelled): no job is running and no query is in flight.
+func (q *Queue) Wait() { q.running.Wait() }
 
 func (q *Queue) worker(ctx context.Context, jobType string, h Handler) {
 	q.mu.Lock()

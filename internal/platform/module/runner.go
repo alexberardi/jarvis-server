@@ -162,5 +162,15 @@ func (r *Runner) Run(ctx context.Context) error {
 		srv.Shutdown(sctx)
 	}
 	wg.Wait()
+	if r.Deps.Queue != nil {
+		// Running jobs saw ctx cancelled; let them finish before the caller closes the DB.
+		done := make(chan struct{})
+		go func() { r.Deps.Queue.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-sctx.Done():
+			r.Deps.Log.Warn("module: queue workers still running at shutdown timeout")
+		}
+	}
 	return runErr
 }
