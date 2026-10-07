@@ -53,7 +53,9 @@ if [ "$OS" = windows ]; then
   R() { "$@"; }
 else
   EXE=jarvisd
-  BINDIR=/usr/local/bin
+  # Not /usr/local/bin: on GitHub's macOS images Homebrew made it writable by the runner
+  # user, so jarvisd would swap itself. A real Mac's is root-owned, like this directory.
+  BINDIR=/opt/jarvisd-e2e/bin
   BIN="$BINDIR/jarvisd"
   NATIVE_BIN=$BIN
   HOME_DIR="$HOME/.jarvisd"
@@ -120,6 +122,12 @@ SRV_PID=$!
 say "1. install v0.0.1 (service + upgrade helper)"
 R mkdir -p "$BINDIR"
 R cp "$WR/build/v0.0.1/$EXE" "$BIN"
+if [ "$OS" = darwin ]; then
+  sudo chown -R root:wheel /opt/jarvisd-e2e
+  sudo chmod -R 755 /opt/jarvisd-e2e
+  # The point of the test: the account jarvisd runs as can't write its binary's directory.
+  if touch "$BINDIR/.w" 2>/dev/null; then fail "$BINDIR is writable by $(id -un)"; fi
+fi
 J service install --no-start
 printf 'JARVIS_UPDATE_API=%s\nJARVIS_UPGRADE_GATE_TIMEOUT=30s\nJARVIS_MDNS=0\nJARVIS_NO_BROWSER=1\n' "$API" >>"$HOME_DIR/jarvisd.env"
 J service start
