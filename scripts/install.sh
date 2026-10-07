@@ -87,7 +87,8 @@ if [ $UNINSTALL = 1 ]; then
   # shellcheck disable=SC2086 # flags are words
   if [ $TTY = 1 ]; then $RUN "$BIN" service uninstall $flags </dev/tty; else $RUN "$BIN" service uninstall $flags; fi \
     || { [ $PURGE = 1 ] && die "uninstall stopped; nothing more was removed"; warn "the service was not removed cleanly"; }
-  $RUN rm -f "$BIN" && $RUN rm -rf "$LIB_DIR"
+  # jarvisd.prev: `jarvisd upgrade` keeps the previous binary next to the executable.
+  $RUN rm -f "$BIN" "$BIN.prev" && $RUN rm -rf "$LIB_DIR"
   say "jarvisd removed."
   exit 0
 fi
