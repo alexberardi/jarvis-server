@@ -21,6 +21,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	mochi "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/listeners"
@@ -60,7 +61,10 @@ type Broker struct {
 	pending map[string]struct{} // response topics with a Request waiting
 	subID   int                 // last inline subscription id
 
+	conns []*connSet // each listener's connections (shutdown.go)
+
 	closeOnce sync.Once
+	closeErr  error
 	done      chan struct{}
 }
 
@@ -110,9 +114,13 @@ func (b *Broker) Start(ctx context.Context) error {
 		}
 		bound = append(bound, ln)
 		if l.id == "ws" {
-			ls = append(ls, newWSListener(l.id, ln))
+			wl := newWSListener(b, l.id, ln)
+			b.conns = append(b.conns, wl.set)
+			ls = append(ls, wl)
 		} else {
-			ls = append(ls, listeners.NewNet(l.id, ln))
+			tl := newTCPListener(b, l.id, ln)
+			b.conns = append(b.conns, tl.set)
+			ls = append(ls, tl)
 		}
 	}
 	for _, l := range ls {
@@ -152,13 +160,23 @@ func (b *Broker) addr(id string) string {
 }
 
 // Close stops the listeners and disconnects every client. Waiting Requests return ErrClosed.
+// It never hangs: connections are cut rather than waited for, and if mochi still has not
+// stopped after closeTimeout, Close gives up on it and returns an error.
 func (b *Broker) Close() error {
-	var err error
 	b.closeOnce.Do(func() {
 		close(b.done)
-		err = b.srv.Close()
+		errc := make(chan error, 1)
+		go func() { errc <- b.srv.Close() }()
+		t := time.NewTimer(closeTimeout)
+		defer t.Stop()
+		select {
+		case b.closeErr = <-errc:
+		case <-t.C:
+			b.closeErr = fmt.Errorf("mqtt: broker did not stop within %v", closeTimeout)
+			b.log.Error("mqtt: shutdown timed out; abandoning the broker", "timeout", closeTimeout)
+		}
 	})
-	return err
+	return b.closeErr
 }
 
 func (b *Broker) closed() bool {
