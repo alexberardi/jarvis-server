@@ -116,4 +116,5 @@ Update it at the end of every working session, and whenever a task finishes or a
     4. jarvis-dev node: PulseAudio is masked and doesn't attach to the Seeed HAT after reboot → TTS silent (node `output` ALSA device routes through pulse). Fixed by hand (`pulseaudio --start` + `module-alsa-sink device=hw:1,0`); needs a proper node-setup fix.
     5. Factory reset clears the node's Wi-Fi credentials; registration timed out until the node rejoined the LAN, then succeeded on retry.
   - Process lesson: a background agent checked out a branch in the shared working tree and 9 commits landed there; moved back to main. Future agents that need git branches work in their own `git worktree`.
-- **Next:** permanent fix for jarvis-dev audio (node-setup install/boot), then 5c (memory, errands, phone, signals, routines, packages, smart home) and 5d (mobile surface), driven by real use on jarvis-dev. Remaining 404s from the node today: `/nodes/{id}/routines`, `/node/devices` (5c).
+- **Deferred to a follow-up session (user, 2026-10-07):** permanent jarvis-dev PulseAudio fix (finding 4), investigated together with the other install-UX follow-ups above.
+- **Next:** 5c (memory, errands, phone, signals, routines, packages, smart home) and 5d (mobile surface), driven by real use on jarvis-dev. Remaining 404s from the node today: `/nodes/{id}/routines`, `/node/devices` (5c).
