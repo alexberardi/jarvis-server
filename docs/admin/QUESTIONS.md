@@ -20,7 +20,7 @@ path handling (§11.3), and error-shape handling (§3.2).
 | # | Date | Question | Decision |
 |---|---|---|---|
 | AD1 | 2026-10-07 | AQ1 origin model | **(c) in-process gateway on 7710.** Superuser-gated `/api/*`; allow-listed module routes dispatched in process; BFF endpoints call modules through Go interfaces. No CORS, no secrets in the browser. |
-| AD2 | 2026-10-07 | AQ2 setup token | **(c) one-time setup token.** `<home>/setup-token` (0600) written on first start; URL `http://<lan-ip>:7710/setup#token=…` logged and printed by the install script; `/auth/setup` requires it only while no superuser exists. |
+| AD2 | 2026-10-07 | AQ2 setup token | **(c) one-time setup token.** `<home>/setup-token` (0600) written on first start; URL `http://<lan-ip>:7710/setup#token=…` logged and printed by the install script; `/auth/setup` requires it only while no superuser exists. User refinement: jarvisd prints **both the raw token and the full link** plainly on stderr (not only as a log field), and opens a browser at the link only when started interactively at a desktop (stderr is a TTY, not under systemd/launchd/a Windows service or SSH, a display is available), best-effort, with an opt-out (`serve --no-browser`, `JARVIS_NO_BROWSER=1`). Built 2026-10-07. |
 | AD10 | 2026-10-07 | AQ10 code move | **(a) plain copy**, done in A0 at jarvis-admin `74e3637`. |
 
 ## Queue
