@@ -104,23 +104,25 @@ func nodeResponseShape() Obj {
 	return shape
 }
 
-func legacyNodeResponseShape() Obj { return Obj{
-	"node_id":    NonEmptyString,
-	"room":       String,
-	"user":       String,
-	"voice_mode": NullOr(String),
-	// LoRA leftover; D9 drops it once mobile is confirmed to ignore it.
-	"adapter_hash": NullOr(String),
-	"household_id": NullOr(String),
-	"online":       Bool,
-	// LEGACY-BUG: naive timestamp (datetime.utcnow()), no zone.
-	"last_seen":         NullOr(TimestampNaive),
-	"last_seen_version": NullOr(String),
-	"install_mode":      NullOr(String),
-	"git_sha":           NullOr(String),
-	"is_busy":           Bool,
-	"needs_k2":          Bool,
-}}
+func legacyNodeResponseShape() Obj {
+	return Obj{
+		"node_id":    NonEmptyString,
+		"room":       String,
+		"user":       String,
+		"voice_mode": NullOr(String),
+		// LoRA leftover; D9 drops it once mobile is confirmed to ignore it.
+		"adapter_hash": NullOr(String),
+		"household_id": NullOr(String),
+		"online":       Bool,
+		// LEGACY-BUG: naive timestamp (datetime.utcnow()), no zone.
+		"last_seen":         NullOr(TimestampNaive),
+		"last_seen_version": NullOr(String),
+		"install_mode":      NullOr(String),
+		"git_sha":           NullOr(String),
+		"is_busy":           Bool,
+		"needs_k2":          Bool,
+	}
+}
 
 func TestCCNodeCreateAndHeartbeat(t *testing.T) {
 	tg := T(t)
@@ -264,7 +266,16 @@ func TestCCDateContext(t *testing.T) {
 	})
 	t.Run("without_timezone", func(t *testing.T) {
 		// LEGACY-BUG: user_timezone and is_dst are null, which the node's strict model rejects
-		// (it then treats the context as None). D40 Q11: Go always fills both.
+		// (it then treats the context as None). D40 Q11: Go always fills both (UTC).
+		if Jarvisd() {
+			tg.Get(t, CommandCenter, "/api/v0/generate/date-context", n.APIKeyH()).
+				Expect(http.StatusOK, ccDateContextShape(Obj{
+					"user_timezone":    Eq("UTC"),
+					"current_timezone": Eq("UTC"),
+					"is_dst":           Bool,
+				}))
+			return
+		}
 		tg.Get(t, CommandCenter, "/api/v0/generate/date-context", n.APIKeyH()).
 			Expect(http.StatusOK, ccDateContextShape(Obj{
 				"user_timezone":    Null,
@@ -273,7 +284,17 @@ func TestCCDateContext(t *testing.T) {
 			}))
 	})
 	t.Run("unknown_timezone", func(t *testing.T) {
-		// LEGACY-BUG: an unknown zone is a 500 with a non-FastAPI {"error"} body.
+		// LEGACY-BUG: an unknown zone is a 500 with a non-FastAPI {"error"} body. jarvisd falls
+		// back to UTC (D8, docs/cc/03 §8: zone fallback), so the node always gets a context.
+		if Jarvisd() {
+			tg.Get(t, CommandCenter, "/api/v0/generate/date-context?timezone=Contract/Nowhere", n.APIKeyH()).
+				Expect(http.StatusOK, ccDateContextShape(Obj{
+					"user_timezone":    Eq("UTC"),
+					"current_timezone": Eq("UTC"),
+					"is_dst":           Bool,
+				}))
+			return
+		}
 		tg.Get(t, CommandCenter, "/api/v0/generate/date-context?timezone=Contract/Nowhere", n.APIKeyH()).
 			Expect(http.StatusInternalServerError, Obj{"error": Eq("Failed to generate date context: 'Contract/Nowhere'")})
 	})

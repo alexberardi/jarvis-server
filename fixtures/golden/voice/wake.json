@@ -1,0 +1,32 @@
+{
+"wake": [
+{"transcript":"jarvis","phrase":"jarvis","present":true,"similarity":1.0},
+{"transcript":"Hey Jarvis.","phrase":"jarvis","present":true,"similarity":1.0},
+{"transcript":"travis","phrase":"jarvis","present":true,"similarity":0.6666666666666666},
+{"transcript":"jervis","phrase":"jarvis","present":true,"similarity":0.8333333333333334},
+{"transcript":"service","phrase":"jarvis","present":false,"similarity":0.46153846153846156},
+{"transcript":"nervous","phrase":"jarvis","present":false,"similarity":0.46153846153846156},
+{"transcript":"","phrase":"jarvis","present":false,"similarity":0.0},
+{"transcript":"hello there","phrase":"jarvis","present":false,"similarity":0.18181818181818182},
+{"transcript":"Hey, Jarvis!","phrase":" Jarvis ","present":true,"similarity":1.0},
+{"transcript":"anything","phrase":"","present":true,"similarity":1.0},
+{"transcript":"jarviss","phrase":"jarvis","present":true,"similarity":1.0},
+{"transcript":"ajrvis","phrase":"jarvis","present":true,"similarity":0.8333333333333334},
+{"transcript":"j","phrase":"jarvis","present":false,"similarity":0.2857142857142857},
+{"transcript":"JARVIS what","phrase":"jarvis","present":true,"similarity":1.0},
+{"transcript":"hey computer","phrase":"computer","present":true,"similarity":1.0},
+{"transcript":"compooter","phrase":"computer","present":true,"similarity":0.8235294117647058},
+{"transcript":"- That's it.","phrase":"jarvis","present":false,"similarity":0.3333333333333333},
+{"transcript":"No, it's younger.","phrase":"jarvis","present":false,"similarity":0.4},
+{"transcript":"jar vis","phrase":"jarvis","present":false,"similarity":0.6666666666666666},
+{"transcript":"don't","phrase":"jarvis","present":false,"similarity":0.0},
+{"transcript":"Járvis","phrase":"jarvis","present":true,"similarity":0.8},
+{"transcript":"arvis jarv","phrase":"jarvis","present":true,"similarity":0.9090909090909091}
+],
+"slice": [
+{"seconds":3.0,"rate":16000,"channels":1,"width":2,"in_len":96044,"out_len":70444,"out_sha256":"c5c023a53feafc2e9c9735dbc4b6c034caadcecf5e170c3b7d71ebf921db7fec"},
+{"seconds":1.0,"rate":16000,"channels":1,"width":2,"in_len":32044,"out_len":32044,"out_sha256":"2a674eb8111640937c023745c9d2a508d326c3afc3a178dd8a49d17c9953cd40"},
+{"seconds":3.0,"rate":22050,"channels":2,"width":2,"in_len":264644,"out_len":194084,"out_sha256":"4b606faf070de2997d65ee25e0a393be7a6fabd13f30f600cd79ddbf52d49975"},
+{"seconds":2.2,"rate":8000,"channels":1,"width":1,"in_len":17644,"out_len":17644,"out_sha256":"e1956583ab7c18b16a7255e647c289cfd7e4425d5545a9fab33d92e19f7c5fbe"}
+]
+}

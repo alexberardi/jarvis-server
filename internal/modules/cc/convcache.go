@@ -1,0 +1,296 @@
+package cc
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
+)
+
+// The conversation cache (docs/cc/01 §4, §11). Legacy kept a process-global dict with an
+// absolute 10-minute TTL, no sweeper and no eviction on /conversation/end. Go (D40 01.Q2):
+// a sliding idle TTL, a sweeper, eviction on /conversation/end and an entry cap. Each
+// conversation has its own mutex, so turns of one conversation are serialized; the engine
+// works on a copy of the history and commits it back only on success (fixes §8.3).
+//
+// Speaker identity is conversation state (D2/D3): it starts empty, is set by turns jarvisd
+// identified itself, and dies with the conversation. Nothing is keyed per node.
+
+const (
+	convIdleTTL  = 10 * time.Minute
+	convMaxCount = 512
+	convSweep    = time.Minute
+)
+
+// chatMsg is one history message. transient marks the per-turn trailing system blocks
+// (speaker, ambient, recently shown, stream override), which are stripped and rebuilt every
+// turn: marked structurally instead of by content prefix (D8, 03.Q6).
+type chatMsg struct {
+	Role       string
+	Content    string
+	ToolCalls  []parse.ToolCall
+	ToolCallID string
+	Name       string
+	transient  bool
+}
+
+func sysMsg(s string) chatMsg       { return chatMsg{Role: "system", Content: s} }
+func transientSys(s string) chatMsg { return chatMsg{Role: "system", Content: s, transient: true} }
+
+// toLLM converts the history for the llm module (tool history forwarded as is).
+func toLLM(msgs []chatMsg) []llm.Message {
+	out := make([]llm.Message, 0, len(msgs))
+	for _, m := range msgs {
+		lm := llm.Message{Role: m.Role, Content: llm.TextContent(m.Content), ToolCallID: m.ToolCallID, Name: m.Name}
+		for _, tc := range m.ToolCalls {
+			lm.ToolCalls = append(lm.ToolCalls, llm.ToolCall{ID: tc.ID, Type: "function",
+				Function: llm.FunctionCall{Name: tc.Function.Name, Arguments: tc.Function.Arguments}})
+		}
+		out = append(out, lm)
+	}
+	return out
+}
+
+// issuedCall is one client tool call handed to the node (dedupe, 02 §3.2 j.8).
+type issuedCall struct {
+	name, argsHash string
+	at             time.Time
+}
+
+// wakeVerdict is the wake-clip verification result (01 §3.6), computed in process.
+type wakeVerdict struct {
+	Verified   bool
+	Verdict    string // verified | unverified | clip_unreliable
+	Transcript string
+	Similarity float64
+}
+
+// conversation is one cached voice conversation.
+type conversation struct {
+	mu sync.Mutex // serializes turns
+
+	id          string
+	nodeID      string
+	householdID string
+	room        string
+	memberIDs   []int64
+	memberNames []string
+	timezone    string
+	agents      *pyjson.Object
+	homeContext map[string]any
+
+	provider prompts.Provider
+	// messages[0] is the byte-stable system prompt.
+	messages []chatMsg
+	// tools are the offered tools (gated server tools, then the node's client tools), as raw
+	// ordered objects; serverNames are the offered server-tool names (explicit plane routing).
+	tools       []prompts.Tool
+	serverNames map[string]bool
+	commands    []*pyjson.Object // merged available commands (examples, flags, param types)
+	forceTools  bool
+
+	referenced []any // the RECENTLY SHOWN items (raw)
+
+	// Speaker (D3): set by identified turns of this conversation only.
+	speakerID      int64
+	speakerName    string
+	memories       string
+	recognitionOff bool
+
+	answeredRounds int
+	issued         []issuedCall
+	dateKeys       []string // the last turn's extracted date keys (native continue reuses them)
+
+	pendingTranscript *pendingTranscript
+
+	lastUsed time.Time
+}
+
+// convCache is the conversation store.
+type convCache struct {
+	mu    sync.Mutex
+	m     map[string]*conversation
+	now   func() time.Time
+	ttl   time.Duration
+	limit int
+}
+
+func newConvCache(now func() time.Time) *convCache {
+	if now == nil {
+		now = time.Now
+	}
+	return &convCache{m: map[string]*conversation{}, now: now, ttl: convIdleTTL, limit: convMaxCount}
+}
+
+// put stores a conversation (replacing one with the same id), evicting the least recently
+// used entries beyond the cap.
+func (c *convCache) put(conv *conversation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	conv.lastUsed = c.now()
+	c.m[conv.id] = conv
+	for len(c.m) > c.limit {
+		var oldest *conversation
+		for _, e := range c.m {
+			if oldest == nil || e.lastUsed.Before(oldest.lastUsed) {
+				oldest = e
+			}
+		}
+		delete(c.m, oldest.id)
+	}
+}
+
+// get returns a live conversation and slides its idle TTL; expired entries are dropped.
+func (c *convCache) get(id string) *conversation {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	conv := c.m[id]
+	if conv == nil {
+		return nil
+	}
+	now := c.now()
+	if now.Sub(conv.lastUsed) > c.ttl {
+		delete(c.m, id)
+		return nil
+	}
+	conv.lastUsed = now
+	return conv
+}
+
+// evict removes a conversation (/conversation/end).
+func (c *convCache) evict(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.m[id]
+	delete(c.m, id)
+	return ok
+}
+
+// sweep drops idle conversations; it returns how many went.
+func (c *convCache) sweep() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	n := 0
+	for id, conv := range c.m {
+		if now.Sub(conv.lastUsed) > c.ttl {
+			delete(c.m, id)
+			n++
+		}
+	}
+	return n
+}
+
+// purgeUser forgets a deleted user's identity in every live conversation (D20/M15).
+func (c *convCache) purgeUser(userID int64) {
+	c.mu.Lock()
+	convs := make([]*conversation, 0, len(c.m))
+	for _, conv := range c.m {
+		convs = append(convs, conv)
+	}
+	c.mu.Unlock()
+	for _, conv := range convs {
+		conv.mu.Lock()
+		if conv.speakerID == userID {
+			conv.speakerID, conv.speakerName, conv.memories = 0, "", ""
+		}
+		conv.mu.Unlock()
+	}
+}
+
+func (c *convCache) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.m)
+}
+
+// runSweeper sweeps until ctx ends.
+func (c *convCache) runSweeper(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			c.sweep()
+		}
+	}
+}
+
+// --- history helpers ---
+
+// stripTransient drops the per-turn trailing system blocks.
+func stripTransient(msgs []chatMsg) []chatMsg {
+	out := msgs[:0:0]
+	for _, m := range msgs {
+		if !m.transient {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// expectsContinuation: a tool result, or an assistant message that issued tool calls,
+// leaves its exchange open (conversation_cache._expects_continuation).
+func expectsContinuation(m chatMsg) bool {
+	return m.Role == "tool" || (m.Role == "assistant" && len(m.ToolCalls) > 0)
+}
+
+// trimHistory is trim_history_to_max_turns: keep the leading system prefix and the newest
+// maxTurns exchanges, dropping whole turns from the front. maxTurns <= 0 disables it.
+func trimHistory(msgs []chatMsg, maxTurns int) []chatMsg {
+	if maxTurns <= 0 {
+		return msgs
+	}
+	prefix := 0
+	for prefix < len(msgs) && msgs[prefix].Role == "system" {
+		prefix++
+	}
+	var turns [][]chatMsg
+	for _, m := range msgs[prefix:] {
+		switch {
+		case m.Role == "user" && (len(turns) == 0 || !expectsContinuation(turns[len(turns)-1][len(turns[len(turns)-1])-1])):
+			turns = append(turns, []chatMsg{m})
+		case len(turns) > 0:
+			turns[len(turns)-1] = append(turns[len(turns)-1], m)
+		default:
+			turns = append(turns, []chatMsg{m})
+		}
+	}
+	if len(turns) <= maxTurns {
+		return msgs
+	}
+	out := append([]chatMsg(nil), msgs[:prefix]...)
+	for _, t := range turns[len(turns)-maxTurns:] {
+		out = append(out, t...)
+	}
+	return out
+}
+
+// withoutRole drops messages of a role (the text path drops role=tool).
+func withoutRole(msgs []chatMsg, role string) []chatMsg {
+	out := make([]chatMsg, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role != role {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// lastUserContent is the content of the last user message ("" when none).
+func lastUserContent(msgs []chatMsg) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			return msgs[i].Content
+		}
+	}
+	return ""
+}
+
+func cloneMsgs(msgs []chatMsg) []chatMsg { return append([]chatMsg(nil), msgs...) }

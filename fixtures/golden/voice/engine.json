@@ -1,0 +1,67 @@
+{
+"canonical": [
+{"arguments":"{\"b\": 1, \"a\": 2}","key":"d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"},
+{"arguments":"{\"a\":2,\"b\":1}","key":"d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"},
+{"arguments":"null","key":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},
+{"arguments":"{}","key":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},
+{"arguments":"[1, 2]","key":"49a64717d5d4cb19952e6eac2946415cf6879adacf9908e7d872332d32c6e684"},
+{"arguments":"not json","key":null},
+{"arguments":"\"str\"","key":"72495b0e1f3c6c961f46d3f249ce968ac758c43b88e50d32aa138681f8a38804"},
+{"arguments":"{\"x\": \"é\", \"y\": [1.5, 1e20, true, null], \"z\": {\"d\": 1, \"c\": 2}}","key":"dd5dea03f93110f4dbbb9ec6158c486864b2af50c6fad86460349d3aad505e25"},
+{"arguments":"{\"a\": 1, \"a\": 2}","key":"7e8059f495589fcd981232cc11d00b00da3802c01d688fa1cf1f6bed6e5bb33c"},
+{"arguments":"{\"emoji\": \"😄\"}","key":"ad35a160cb8a5e504e7eae71cd7491f3fef6a220f968c54d995afdd9a7fc6292"},
+{"arguments":"{\"n\": 12345678901234567890123}","key":"f38cd47fb9cf6163e645fd5e3ca4f2b1dd937fe0909ccd2583ebb38c85b7b35a"},
+{"arguments":"{\"f\": 1.0, \"g\": -0.0}","key":"7d7d7f9165905a34e836b46086a2933ebf34a6061a3406cf89415367a080a3b2"},
+{"arguments":"  {}  ","key":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},
+{"arguments":"","key":null}
+],
+"keywords": [
+{"sources":[[{"command_name":"medication","keywords":["took my","medicine","Med","  ",5,"medicine"]},{"command_name":"weather","keywords":null},"junk",{"type":"function","function":{"name":"t","keywords":["Timer","alarm"]}},{"keywords":"notalist"},{"keywords":[],"function":{"keywords":["ignored"]}}],[{"function":{"name":"x","keywords":["lights","took my"]}}]],"pool":["took my","medicine","Med","Timer","alarm","lights"]}
+],
+"keyword_match": [
+{"utterance":"Leo took my pills","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"goodnight","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":false},
+{"utterance":"turn on the lights","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":false},
+{"utterance":"...","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":false},
+{"utterance":"TIMER please","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"med","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"the medicine-cabinet","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"took  my","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"Took-My stuff","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"alarms","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":false},
+{"utterance":"café timer","pool":["took my","medicine","Med","Timer","alarm","lights"],"match":true},
+{"utterance":"good night","pool":["night"],"match":true},
+{"utterance":"goodnight","pool":["night"],"match":false},
+{"utterance":"a bc","pool":["bc","a"],"match":false},
+{"utterance":"x","pool":[],"match":false},
+{"utterance":"set an alarm","pool":["ALARM!"],"match":true}
+],
+"normalize_param_type": [
+{"type":"string","base":"string","is_array":false},
+{"type":" Integer ","base":"integer","is_array":false},
+{"type":"array<string>","base":"string","is_array":true},
+{"type":"ARRAY[datetime]","base":"datetime","is_array":true},
+{"type":"string[]","base":"string","is_array":true},
+{"type":"","base":null,"is_array":false},
+{"type":"  ","base":"","is_array":false},
+{"type":"array<>","base":"","is_array":true},
+{"type":"array[]","base":"","is_array":true},
+{"type":"[]","base":"","is_array":true},
+{"type":"array< int >","base":"int","is_array":true},
+{"type":null,"base":null,"is_array":false}
+],
+"param_commands": [
+{"commands":[{"command_name":"set_timer","parameters":[{"name":"duration","type":"int"},{"name":"label","type":"string"},{"name":"unit","type":"string","enum_values":["seconds","minutes"]},{"name":"when","type":"datetime"},{"name":"day","type":"date"},{"name":"ratio","type":"float"},{"name":"on","type":"bool"},{"name":"times","type":"array<datetime>"},{"name":"tags","type":"string[]"},{"name":"x","type":"weird"},{"name":"flag","type":"string","enum_values":["True","False"]},{"name":"","type":"int"},{"name":"notype"},null]},{"command_name":"set_timer","parameters":[{"name":"label","type":"int"}]},{"parameters":[{"name":"a","type":"int"}]},{"command_name":"other","parameters":null}]}
+],
+"invalid_params": [
+{"calls":[{"name":"set_timer","arguments":"{\"duration\": 5, \"label\": \"tea\", \"unit\": \"minutes\"}"}],"invalid":["set_timer.label expected int"]},
+{"calls":[{"name":"set_timer","arguments":"{\"duration\": \"5\", \"label\": 3, \"unit\": \"hours\", \"when\": \"2026-10-06T10:00:00\", \"day\": \"2026-10-06\", \"ratio\": true, \"on\": 1, \"times\": [\"2026-10-06T10:00:00Z\", \"today\"], \"tags\": \"x\", \"x\": {}, \"flag\": true}"}],"invalid":["set_timer.duration expected int","set_timer.when expected datetime","set_timer.ratio expected float","set_timer.on expected bool","set_timer.times expected array<datetime>","set_timer.tags expected string[]","set_timer.flag expected string","set_timer.unit must be one of: seconds, minutes"]},
+{"calls":[{"name":"set_timer","arguments":"{\"duration\": 5.0, \"ratio\": 2, \"when\": \"2026-10-06T10:00:00+02:00\", \"day\": \"2026-1-6\", \"times\": [], \"unit\": null, \"flag\": \"True\"}"}],"invalid":["set_timer.duration expected int","set_timer.unit expected string","set_timer.day expected date"]},
+{"calls":[{"name":"set_timer","arguments":"not json"},{"name":"set_timer","arguments":"[1]"},{"name":"","arguments":"{}"},{"name":"unknown","arguments":"{\"a\": \"b\"}"}],"invalid":[]},
+{"calls":[{"name":"set_timer","arguments":"{\"duration\": true, \"on\": false, \"day\": \"２０２６-10-06\"}"}],"invalid":["set_timer.duration expected int"]}
+],
+"nags": [
+{"must_call_1":["[MUST_CALL_RETRY] You MUST call a tool. Do NOT answer directly. Pick the best matching function from the available tools. (attempt 1/2)","[MUST_CALL_RETRY] You MUST call a tool. Do NOT answer directly. Pick the best matching function from the available tools. (attempt "],"must_call_2":["[MUST_CALL_RETRY] You MUST call a tool. Do NOT answer directly. Pick the best matching function from the available tools. (attempt 2/2)","[MUST_CALL_RETRY] You MUST call a tool. Do NOT answer directly. Pick the best matching function from the available tools. (attempt "],"iso":["[ISO_DATE_RETRY]","[ISO_DATE_RETRY] The dates you provided were incorrect. Use date KEY STRINGS only: today, tomorrow, yesterday, this_weekend, etc. Example: {\"resolved_datetimes\": [\"today\"]}. Try again."],"dedupe":["[TOOL_DEDUPE] The results of get_weather with those arguments are already in this conversation above — answer from them concisely; do not re-run the tool or repeat the full results aloud."],"invalid":["[INVALID_PARAM_RETRY]","[INVALID_PARAM_RETRY 1/2] Some parameters have invalid types or formats. Fix the parameters to match expected types and return absolute date/time values when required. Invalid: a.b expected int, c.d must be one of: x, y","[INVALID_PARAM_RETRY "],"double_check":["[NOT_FOR_ME_DOUBLE_CHECK]","[NOT_FOR_ME_DOUBLE_CHECK] You dismissed that utterance with <not_for_me/>, but the wake evidence says it was directed at you (wake word fired; the room was quiet). Re-read it and reason it through. Remember: speech ABOUT a person or pet by name — \"who is Leo?\", \"where's mom?\" — is a question FOR you; answer it from the User Profile or the recall tool. Only if you still conclude the speech was not aimed at you, reply with <not_for_me/> alone again. Otherwise answer normally or call the right tool. /think"]}
+]
+}

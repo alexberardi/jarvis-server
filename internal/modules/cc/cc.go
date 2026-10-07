@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
@@ -43,6 +45,10 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 
 // Definitions are the module's settings declared so far.
 func Definitions() []settings.Definition {
+	return append(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona)...)
+}
+
+func nodeDefinitions() []settings.Definition {
 	return []settings.Definition{
 		{Key: settingUpdatesAllowCheck, Category: "updates", Type: settings.Bool, Default: false,
 			Description: "Allow outbound update-version lookups to api.github.com (node release checks). " +
@@ -93,6 +99,21 @@ type Module struct {
 	// Publisher replaces the embedded broker (tests).
 	Publisher Publisher
 
+	// Phase 5b, the voice pipeline: the other modules, in process. Nil disables what needs them.
+	LLM    LLM
+	STT    STT
+	TTS    TTS
+	Notify Notifier
+	Names  NameResolver
+	// Memory and Attention are 5c hooks (nil until those modules exist).
+	Memory    MemoryProfile
+	Attention AttentionGate
+	// WebSearch replaces DuckDuckGo for quick_search / deep_research (tests).
+	WebSearch servertools.WebSearcher
+	// DefaultPromptProvider names the prompt provider when llm.prompt_provider is unset (e.g.
+	// the live model's catalog entry). Nil: an unset setting is an error (D11).
+	DefaultPromptProvider func(ctx context.Context) string
+
 	deps     module.Deps
 	settings *settings.Service
 	broker   *mqtt.Broker
@@ -102,6 +123,12 @@ type Module struct {
 	resets   *resetStore
 	ambient  *ambientStore
 	releases *releaseCache
+
+	convs    *convCache
+	signals  *convSignals
+	enroll   *enrollments
+	tools    *servertools.Registry
+	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -144,6 +171,13 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.resets = newResetStore()
 	m.ambient = newAmbientStore()
 	m.releases = &releaseCache{}
+	m.convs = newConvCache(m.now)
+	m.signals = newConvSignals(m.now)
+	m.enroll = newEnrollments()
+	if m.tools == nil {
+		m.tools = servertools.NewRegistry()
+		m.registerServerTools()
+	}
 
 	svc, err := settings.New(deps.DB, "cc", Definitions(), deps.Log)
 	if err != nil {
@@ -216,9 +250,13 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/node-config", m.user(m.handleNodeConfig))
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/led/preview", m.user(m.handleLEDPreview))
 	mux.HandleFunc("POST "+v0+"/commands/{request_id}/verify", m.node(m.handleVerifyCommand))
-	for _, p := range []string{"/device-control-results/", "/device-state-results/", "/mobile/node-tool-reports/", "/mobile/voice-profile-results/"} {
+	for _, p := range []string{"/device-control-results/", "/device-state-results/", "/mobile/node-tool-reports/"} {
 		mux.HandleFunc("POST "+v0+p+"{request_id}", m.node(m.handleResult))
 	}
+	mux.HandleFunc("POST "+v0+"/mobile/voice-profile-results/{request_id}", m.node(m.handleVoiceProfileResult))
+
+	// Phase 5b: the voice pipeline, tool loop, media proxy and node plugin API.
+	m.registerVoice(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -252,6 +290,7 @@ func (m *Module) Start(ctx context.Context) error {
 			return err
 		}
 	}
+	go m.convs.runSweeper(ctx, convSweep)
 	if m.deps.Scheduler == nil {
 		return nil
 	}
@@ -270,7 +309,11 @@ func (m *Module) Start(ctx context.Context) error {
 // PurgeUser is the account-deletion hook (D20): the user's traces go; their id is removed
 // from short-lived rows that outlive them.
 func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error {
+	if m.convs != nil {
+		m.convs.purgeUser(userID) // D20/M15: no in-memory identity outlives the account
+	}
 	for _, q := range []string{
+		`DELETE FROM cc_conversation_transcripts WHERE user_id = ?`,
 		`DELETE FROM cc_request_traces WHERE user_id = ?`,
 		`DELETE FROM cc_settings_requests WHERE user_id = ?`,
 		`UPDATE cc_provisioning_tokens SET created_by_user_id = NULL WHERE created_by_user_id = ?`,

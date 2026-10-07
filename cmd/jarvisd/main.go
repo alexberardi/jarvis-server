@@ -80,12 +80,21 @@ func modules() []module.Module {
 	}
 	var auth *authmod.Module
 	var llm *llmmod.Module
+	var sttm *sttmod.Module
+	var ttsm *ttsmod.Module
+	var notif *notifmod.Module
 	for _, m := range mods {
 		switch x := m.(type) {
 		case *authmod.Module:
 			auth = x
 		case *llmmod.Module:
 			llm = x
+		case *sttmod.Module:
+			sttm = x
+		case *ttsmod.Module:
+			ttsm = x
+		case *notifmod.Module:
+			notif = x
 		}
 	}
 	superuser := settings.SuperuserGuard(auth.VerifyUser)
@@ -144,6 +153,12 @@ func modules() []module.Module {
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
 			c.SettingsWrite = superuser
 			c.Version = version
+			// The voice pipeline calls the other modules in process (5b).
+			c.LLM = llm.Service()
+			c.STT = sttm
+			c.TTS = ccmod.TTSFrom(ttsm)
+			c.Notify = notif
+			c.Names = auth
 			auth.OnUserDeleted(c.PurgeUser)
 		case *logsmod.Module:
 			c.Auth = auth

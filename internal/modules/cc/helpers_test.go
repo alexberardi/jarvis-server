@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -86,7 +87,12 @@ func (a *fakeAuth) ValidateNode(_ context.Context, id, key, svc string) (authn.N
 	}
 	for _, s := range n.services {
 		if s == svc {
-			return authn.NodeValidation{Valid: true, Node: authn.Node{ID: id, HouseholdID: n.household}}, nil
+			var members []int64
+			for uid := range a.roles[n.household] {
+				members = append(members, uid)
+			}
+			sort.Slice(members, func(i, j int) bool { return members[i] < members[j] })
+			return authn.NodeValidation{Valid: true, Node: authn.Node{ID: id, HouseholdID: n.household}, HouseholdMemberIDs: members}, nil
 		}
 	}
 	return authn.NodeValidation{Reason: fmt.Sprintf("Node is not authorized to access service '%s'", svc)}, nil
@@ -173,6 +179,8 @@ type envOpts struct {
 	auth   *fakeAuth
 	noMQTT bool
 	github string
+	// configure runs on the module before Register (voice dependencies, fakes).
+	configure func(m *Module)
 }
 
 func newEnv(t *testing.T, o ...envOpts) *env {
@@ -203,6 +211,9 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 		GitHubAPI: opt.github,
 	}
 	m.now = e.clock
+	if opt.configure != nil {
+		opt.configure(m)
+	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mux := http.NewServeMux()
 	m.Register(mux, module.Deps{DB: d, Log: log})
