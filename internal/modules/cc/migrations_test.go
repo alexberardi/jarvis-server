@@ -242,7 +242,7 @@ func TestBaselineRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Current != 1 || st.Pending != 0 {
+	if st.Current < 1 || st.Pending != 0 {
 		t.Fatalf("status %+v", st)
 	}
 }

@@ -16,10 +16,11 @@ import (
 // answer 503 (or, for best-effort lookups, degrade the way legacy did on an HTTP failure).
 
 // LLM is the llm module's in-process Service (Chat on the live label for the voice loop,
-// Stream for the continue-stream path).
+// Stream for the continue-stream path, Embed for memory vectors, LD6).
 type LLM interface {
 	Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error)
 	Stream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Frame, error)
+	Embed(ctx context.Context, texts []string) (llm.Embeddings, error)
 }
 
 // STT is the stt module in process: transcription with the speaker pass, and the voice-profile
