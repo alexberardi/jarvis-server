@@ -113,7 +113,15 @@ VERSION=$REL
 
 # Signature: pluggable. Verified when minisign is installed and the release is signed;
 # otherwise the TLS-anchored checksum alone (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
-if command -v minisign >/dev/null && fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null; then
+# `minisign -v` must run: a version-manager shim with no version selected (mise, asdf) is on
+# PATH but fails every call, which would read as an INVALID signature.
+if command -v minisign >/dev/null && ! minisign -v >/dev/null 2>&1; then
+  warn "minisign is on PATH but doesn't run (\`minisign -v\` failed); treating it as not installed"
+  MINISIGN_OK=0
+else
+  MINISIGN_OK=1
+fi
+if [ $MINISIGN_OK = 1 ] && command -v minisign >/dev/null && fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null; then
   minisign -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID; not installing"
   say "SHA256SUMS signature verified."
 else
@@ -140,7 +148,8 @@ if [ -x "$BIN" ]; then
   # running binary's key) takes over from here.
   if [ "$CUR" != "$VERSION" ] && "$BIN" help 2>/dev/null | grep -q '^  upgrade'; then
     say "Upgrading jarvisd $CUR -> $VERSION with \`jarvisd upgrade\`..."
-    exec $RUN env JARVISD_RELEASE_BASE="$BASE" "$BIN" upgrade --version "$VERSION"
+    # shellcheck disable=SC2086 # $SVC and $HOMEFLAG are words (--user, --home DIR)
+    exec $RUN env JARVISD_RELEASE_BASE="$BASE" "$BIN" upgrade --version "$VERSION" $SVC $HOMEFLAG
   fi
 else
   CUR=""
