@@ -1,0 +1,308 @@
+name: whisper-builds
+
+# Builds whisper.cpp's whisper-server per GPU flavour and publishes the archives, plus a
+# SHA256SUMS file, as the release `engines-whisper-<tag>` of this repo. jarvisd's engine
+# manager (internal/modules/llm/engine/release.go) pins every asset by name, size and sha256,
+# so a published release must never be rebuilt in place: the builds are not reproducible and a
+# rebuild would change every digest. Bump the whisper tag instead (or pass overwrite=true for a
+# release nothing pins yet).
+#
+# Archive layout mirrors upstream whisper.cpp's: one top-level directory holding whisper-server
+# (+ whisper-cli) and the shared libraries beside it, rpath $ORIGIN. The engine manager strips
+# the top directory and extracts a flavour's assets side by side.
+#
+# Windows builds are upstream's own release assets, re-hosted byte for byte (same CI, same
+# flags we would use), so every whisper asset lives behind one base URL.
+
+on:
+  workflow_dispatch:
+    inputs:
+      whisper_tag:
+        description: whisper.cpp tag to build
+        required: true
+        default: b5454
+      publish:
+        description: Publish the release (off = build and smoke-test only)
+        type: boolean
+        default: true
+      overwrite:
+        description: Replace assets of an existing release (only if nothing pins it yet)
+        type: boolean
+        default: false
+  push:
+    tags: ['whisper-b*']
+
+permissions:
+  contents: read
+
+env:
+  MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      whisper: ${{ steps.t.outputs.whisper }}
+      release: ${{ steps.t.outputs.release }}
+    steps:
+      - id: t
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            w="${GITHUB_REF_NAME#whisper-}"
+          else
+            w="${{ inputs.whisper_tag }}"
+          fi
+          echo "whisper=$w" >> "$GITHUB_OUTPUT"
+          echo "release=engines-whisper-$w" >> "$GITHUB_OUTPUT"
+
+  # Native runners: Metal on macOS, CPU and Vulkan on linux x64/arm64.
+  build:
+    needs: tag
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-metal-arm64
+            os: macos-14
+            # Static: one self-contained binary, Metal shaders embedded.
+            cmake: >-
+              -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+          - name: ubuntu-x64
+            os: ubuntu-22.04
+            cmake: -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON
+          - name: ubuntu-arm64
+            os: ubuntu-22.04-arm
+            cmake: -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON
+            gcc14: true
+          - name: ubuntu-vulkan-x64
+            os: ubuntu-22.04
+            cmake: -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON
+            vulkan: lunarg
+          - name: ubuntu-vulkan-arm64
+            os: ubuntu-24.04-arm
+            cmake: -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON
+            vulkan: apt
+            gcc14: true
+    runs-on: ${{ matrix.os }}
+    env:
+      ASSET: whisper-${{ needs.tag.outputs.whisper }}-bin-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ needs.tag.outputs.whisper }}
+
+      - name: Dependencies (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential cmake ninja-build
+          if [ "${{ matrix.gcc14 }}" = "true" ]; then
+            # The armv9.2 CPU variant needs a GCC that knows the 'sme' march feature.
+            if ! apt-cache show gcc-14 >/dev/null 2>&1; then
+              sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+              sudo apt-get update -y
+            fi
+            sudo apt-get install -y gcc-14 g++-14
+            echo "CC=gcc-14" >> "$GITHUB_ENV"
+            echo "CXX=g++-14" >> "$GITHUB_ENV"
+          fi
+          case "${{ matrix.vulkan }}" in
+            lunarg)
+              wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+              sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+              sudo apt-get update -y
+              sudo apt-get install -y vulkan-sdk mesa-vulkan-drivers ;;
+            apt)
+              sudo apt-get install -y glslc libvulkan-dev spirv-headers mesa-vulkan-drivers ;;
+          esac
+
+      - name: Build
+        run: |
+          gen=""; command -v ninja >/dev/null && gen="-G Ninja"
+          cmake -B build $gen \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_RPATH='${{ runner.os == 'macOS' && '@loader_path' || '$ORIGIN' }}' \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DGGML_NATIVE=OFF \
+            -DWHISPER_BUILD_IS_DEV=OFF \
+            -DWHISPER_BUILD_TESTS=OFF \
+            ${{ matrix.cmake }}
+          cmake --build build --config Release -j "$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p "pkg/$ASSET"
+          cp build/bin/whisper-server build/bin/whisper-cli LICENSE "pkg/$ASSET/"
+          # Shared libraries (linux): whisper, ggml-base, ggml and the dl backends. -P keeps
+          # the soname symlinks.
+          find build/bin build/src build/ggml/src -maxdepth 2 \( -name '*.so' -o -name '*.so.*' -o -name '*.dylib' \) \
+            -exec cp -P {} "pkg/$ASSET/" \; 2>/dev/null || true
+          ls -la "pkg/$ASSET"
+          tar -czf "$ASSET.tar.gz" -C pkg "$ASSET"
+
+      - name: Smoke test (extracted archive)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf smoke && mkdir smoke && tar -xzf "$ASSET.tar.gz" -C smoke
+          d="smoke/$ASSET"
+          "$d/whisper-server" --help >/dev/null
+          if [ "$RUNNER_OS" = Linux ]; then
+            missing=$(for f in "$d"/whisper-server "$d"/*.so*; do LD_LIBRARY_PATH="$d" ldd "$f"; done | grep 'not found' || true)
+            [ -z "$missing" ] || { echo "missing libraries: $missing"; exit 1; }
+          else
+            otool -L "$d/whisper-server"
+          fi
+          curl -fsSL -o tiny.bin "$MODEL_URL"
+          "$d/whisper-server" -m tiny.bin --host 127.0.0.1 --port 8178 > server.log 2>&1 &
+          pid=$!
+          for i in $(seq 60); do curl -fs http://127.0.0.1:8178/health >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS -F file=@samples/jfk.wav -F response_format=json http://127.0.0.1:8178/inference | tee out.json
+          kill $pid || true
+          grep -E -i 'metal|vulkan|cuda|backend|cpu' server.log | head -30 || true
+          grep -qi 'ask not what your country' out.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}.tar.gz
+          if-no-files-found: error
+
+  # CUDA 12.x (runs on any driver from the 12 series up), built in NVIDIA's container on
+  # Ubuntu 22.04 for an older glibc. The CUDA runtime (cudart, cublas, cublasLt) ships as a
+  # second archive that extracts beside the binary, like llama.cpp's cudart-* assets.
+  cuda:
+    needs: tag
+    runs-on: ubuntu-22.04
+    container: nvidia/cuda:12.8.1-devel-ubuntu22.04
+    env:
+      ASSET: whisper-${{ needs.tag.outputs.whisper }}-bin-ubuntu-cuda-12.8-x64
+      CUDART: cudart-whisper-${{ needs.tag.outputs.whisper }}-bin-ubuntu-cuda-12.8-x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git build-essential curl ca-certificates python3-pip
+          pip3 install --no-cache-dir 'cmake>=3.28,<4' ninja
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ needs.tag.outputs.whisper }}
+      - name: Build
+        # No CMAKE_CUDA_ARCHITECTURES: ggml's default set covers Maxwell through Blackwell
+        # (PTX for older, real code for 86/89/120).
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_RPATH='$ORIGIN' \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_BACKEND_DL=ON \
+            -DGGML_CPU_ALL_VARIANTS=ON \
+            -DGGML_CUDA=ON \
+            -DGGML_CUDA_NCCL=OFF \
+            -DWHISPER_BUILD_IS_DEV=OFF \
+            -DWHISPER_BUILD_TESTS=OFF
+          cmake --build build --config Release -j "$(nproc)"
+      - name: Package
+        run: |
+          mkdir -p "pkg/$ASSET" "pkg/$CUDART"
+          cp build/bin/whisper-server build/bin/whisper-cli LICENSE "pkg/$ASSET/"
+          find build/bin build/src build/ggml/src -maxdepth 2 \( -name '*.so' -o -name '*.so.*' \) \
+            -exec cp -P {} "pkg/$ASSET/" \;
+          ls -la "pkg/$ASSET"
+          tar -czf "$ASSET.tar.gz" -C pkg "$ASSET"
+          # -L turns the soname symlinks into plain files: exactly three libraries.
+          for l in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
+            cp -L "/usr/local/cuda/lib64/$l" "pkg/$CUDART/"
+          done
+          ls -la "pkg/$CUDART"
+          tar -czf "$CUDART.tar.gz" -C pkg "$CUDART"
+      - name: Smoke test (extracted archives; no GPU here, so CPU fallback)
+        run: |
+          set -euo pipefail
+          rm -rf smoke && mkdir smoke
+          tar -xzf "$ASSET.tar.gz" -C smoke && tar -xzf "$CUDART.tar.gz" -C smoke
+          d=smoke/all && mkdir "$d" && cp -a "smoke/$ASSET"/. "smoke/$CUDART"/. "$d"/
+          "$d/whisper-server" --help >/dev/null
+          # libcuda.so.1 is the driver: present on a GPU host, never shipped.
+          missing=$(for f in "$d"/whisper-server "$d"/*.so*; do LD_LIBRARY_PATH="$d" ldd "$f"; done | grep 'not found' | grep -v 'libcuda.so.1' || true)
+          [ -z "$missing" ] || { echo "missing libraries: $missing"; exit 1; }
+          curl -fsSL -o tiny.bin "$MODEL_URL"
+          "$d/whisper-server" -m tiny.bin --host 127.0.0.1 --port 8178 > server.log 2>&1 &
+          pid=$!
+          for i in $(seq 60); do curl -fs http://127.0.0.1:8178/health >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS -F file=@samples/jfk.wav -F response_format=json http://127.0.0.1:8178/inference | tee out.json
+          kill $pid || true
+          head -40 server.log
+          grep -qi 'ask not what your country' out.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.CUDART }}
+          path: ${{ env.CUDART }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [tag, build, cuda]
+    if: ${{ github.event_name == 'push' || inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WHISPER: ${{ needs.tag.outputs.whisper }}
+      RELEASE: ${{ needs.tag.outputs.release }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Windows assets (upstream, byte for byte)
+        working-directory: assets
+        run: |
+          gh release download "$WHISPER" -R ggml-org/whisper.cpp \
+            -p whisper-bin-x64.zip -p whisper-bin-win-cuda-12.4.0-x64.zip -p whisper-bin-win-cpu-arm64.zip
+          for z in whisper-bin-x64.zip whisper-bin-win-cuda-12.4.0-x64.zip whisper-bin-win-cpu-arm64.zip; do
+            unzip -l "$z" | grep -q 'whisper-server.exe' || { echo "$z has no whisper-server.exe"; exit 1; }
+          done
+      - name: Checksums
+        working-directory: assets
+        run: |
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+      - name: Publish
+        working-directory: assets
+        run: |
+          if gh release view "$RELEASE" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "${{ inputs.overwrite }}" != "true" ]; then
+              echo "release $RELEASE exists; its assets are pinned by sha256. Re-run with overwrite=true only if nothing pins it."
+              exit 1
+            fi
+            gh release upload "$RELEASE" -R "$GITHUB_REPOSITORY" --clobber ./*
+          else
+            gh release create "$RELEASE" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+              --title "whisper-server engines ($WHISPER)" \
+              --notes "whisper.cpp \`$WHISPER\` whisper-server builds for jarvisd's engine manager, built by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Windows archives are upstream's, re-hosted unchanged. Verify with SHA256SUMS." \
+              ./*
+          fi
+      - name: Verify downloads
+        run: |
+          mkdir verify && cd verify
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE"
+          curl -fsSL -o SHA256SUMS "$base/SHA256SUMS"
+          awk '{print $2}' SHA256SUMS | while read -r f; do curl -fsSL -o "$f" "$base/$f"; done
+          sha256sum -c SHA256SUMS
+          ls -l
