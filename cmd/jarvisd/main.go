@@ -256,7 +256,8 @@ func openDeps(ctx context.Context) (module.Deps, error) {
 		return module.Deps{}, err
 	}
 	log := newLogger()
-	blobs, err := blob.NewFS(filepath.Join(cfg.Home, "blobs"), log)
+	// JARVIS_BLOB_STORE picks the backend by URL (default: files under <home>/blobs).
+	blobs, err := blob.Open(envOr("JARVIS_BLOB_STORE", filepath.Join(cfg.Home, "blobs")), log)
 	if err != nil {
 		d.Close()
 		return module.Deps{}, err

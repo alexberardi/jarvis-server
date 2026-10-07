@@ -81,6 +81,7 @@ Update it at the end of every working session, and whenever a task finishes or a
 | 2026-10-07 | **Out-of-order migrations are applied** (goose `WithAllowOutofOrder`): sub-systems land in parallel and a fix may slot below a later release's migration; each module's migrations are independent. |
 | 2026-10-07 | **Household timezone = the zone its most recently seen active node reported** (`cc_nodes.timezone`, migration 00140, recorded at warmup from `node_context.timezone`); `Module.HouseholdClock` overrides. Used by attention quiet hours/journal (D18) and errands. Nothing stored a household zone before. User: works for now; **future: a UI to set the household timezone** (override the node-derived one). |
 | 2026-10-07 | **VRAM fit counts co-resident engines and other programs; warn, never refuse.** `jarvisd doctor` reads the host firewall and prints the allow command. |
+| 2026-10-07 | **Blob storage behind a backend registry** (user: facade so another provider is easy later): `blob.Store` (S3-shaped) was already the only API callers use; `blob.Open(JARVIS_BLOB_STORE)` now picks a backend by URL scheme (`file://…` or a bare path = FS, default `<home>/blobs`), `blob.Register(scheme, Opener)` adds one, and `blobtest.Run` is the conformance suite a new backend must pass. |
 
 ## Session log
 
