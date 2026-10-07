@@ -1,0 +1,136 @@
+name: release
+
+# Builds the one-file jarvisd download for every target and publishes it as a GitHub release.
+# A tag v* publishes; a manual run builds and checks only unless publish is set (a dry run).
+#
+# Each archive holds the single jarvisd binary (sherpa-onnx libraries embedded, CGO_ENABLED=0)
+# plus LICENSE and NOTICE. GPU engines (llama-server, whisper-server) are not bundled: the
+# model manager fetches the pinned build for the machine on first use.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to stamp (e.g. v0.1.0-rc1)
+        required: true
+      publish:
+        description: Publish a GitHub release (off = build and check only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - id: v
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then v="${GITHUB_REF_NAME}"; else v="${{ inputs.version }}"; fi
+          case "$v" in v[0-9]*) ;; *) echo "version must look like v1.2.3, got '$v'"; exit 1;; esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Fetch native libs (all targets)
+        run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64 darwin-arm64 windows-amd64
+      - name: Build and package
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+            os=${p%/*}; arch=${p#*/}; name="jarvisd-${VERSION}-${os}-${arch}"
+            exe=jarvisd; [ "$os" = windows ] && exe=jarvisd.exe
+            mkdir -p "stage/$name"
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" -o "stage/$name/$exe" ./cmd/jarvisd
+            cp LICENSE "stage/$name/"
+            [ -f NOTICE ] && cp NOTICE "stage/$name/"
+            if [ "$os" = windows ]; then
+              (cd stage && zip -qr "../dist/$name.zip" "$name")
+            else
+              tar -C stage -czf "dist/$name.tar.gz" "$name"
+            fi
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -l dist && cat dist/SHA256SUMS
+      - name: Smoke-test the linux/amd64 build
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          bin="stage/jarvisd-${VERSION}-linux-amd64/jarvisd"
+          test "$("$bin" version)" = "$VERSION"
+          export JARVIS_HOME="$RUNNER_TEMP/jarvis"
+          "$bin" migrate status
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvisd-${{ steps.v.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+  # Each OS proves its own binary starts and its embedded voice libraries load.
+  verify:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux-amd64, ext: tar.gz }
+          - { os: ubuntu-24.04-arm, target: linux-arm64, ext: tar.gz }
+          - { os: macos-14, target: darwin-arm64, ext: tar.gz }
+          - { os: windows-latest, target: windows-amd64, ext: zip }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvisd-${{ needs.build.outputs.version }}
+          path: dist
+      - name: Unpack and start
+        env:
+          NAME: jarvisd-${{ needs.build.outputs.version }}-${{ matrix.target }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          if [ "${{ matrix.ext }}" = zip ]; then unzip -q "$NAME.zip"; exe=jarvisd.exe; else tar -xzf "$NAME.tar.gz"; exe=jarvisd; fi
+          bin="$PWD/$NAME/$exe"
+          test "$("$bin" version | tr -d '\r')" = "$VERSION"
+          export JARVIS_HOME="$RUNNER_TEMP/jarvis"
+          "$bin" migrate status
+
+  publish:
+    needs: [build, verify]
+    if: ${{ github.event_name == 'push' || inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvisd-${{ needs.build.outputs.version }}
+          path: dist
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
+          gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
+            --notes "Single-binary Jarvis server. Download the archive for your platform, verify it against SHA256SUMS, and run \`jarvisd serve\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it." \
+            $pre
