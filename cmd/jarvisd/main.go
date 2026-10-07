@@ -171,6 +171,9 @@ func modules() []module.Module {
 			c.TTS = ccmod.TTSFrom(ttsm)
 			c.Notify = notif
 			c.Names = auth
+			// With llm.prompt_provider unset, the live model's catalog entry names it, so a
+			// fresh install answers its first voice turn without anyone choosing one.
+			c.DefaultPromptProvider = llm.LivePromptProvider
 			auth.OnUserDeleted(c.PurgeUser)
 			auth.OnMemberRemoved(c.PurgeUserHousehold)
 			auth.OnHouseholdDeleted(c.PurgeHousehold)

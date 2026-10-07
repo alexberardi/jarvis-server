@@ -3,9 +3,11 @@ package llm
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/models"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // The local engine stack (internal/modules/llm/engine + models: GPU detection, llama-server and
@@ -70,4 +72,30 @@ func (m *Module) ModelPath(ctx context.Context, kind string) (string, bool) {
 	}
 	vm, ok := m.stack.Manager.ModelPath(ctx, kind)
 	return vm.Path, ok
+}
+
+// LivePromptProvider is the prompt provider of the model on the live label: the installed
+// model's own (set from its catalog entry at install), else its catalog entry's. "" when the
+// live label has no installed model or the model names none (a hand-registered file); CC
+// then needs llm.prompt_provider set (D11). This is how a fresh install talks without anyone
+// choosing a provider.
+func (m *Module) LivePromptProvider(ctx context.Context) string {
+	if m.stack == nil || m.stack.Manager == nil || m.settings == nil {
+		return ""
+	}
+	id := strings.TrimSpace(m.settings.String(ctx, "llm.live.model", settings.Scope{}))
+	if id == "" {
+		return ""
+	}
+	mod, err := m.stack.Manager.Store.Get(ctx, id)
+	if err != nil {
+		return ""
+	}
+	if mod.PromptProvider != "" {
+		return mod.PromptProvider
+	}
+	if e, ok := models.CatalogEntry(mod.CatalogID); ok {
+		return e.PromptProvider
+	}
+	return ""
 }
