@@ -30,7 +30,7 @@ func runService(ctx context.Context, flagHome string, args []string, stdout io.W
 	fs.SetOutput(stdout)
 	user := fs.Bool("user", false, "Linux: a systemd --user unit for your account (no root)")
 	var bin, runAs *string
-	var noStart *bool
+	var noStart, purge, yes, keepFirewall *bool
 	var asJSON *bool
 	var wait *time.Duration
 	switch verb {
@@ -41,7 +41,11 @@ func runService(ctx context.Context, flagHome string, args []string, stdout io.W
 	case "status":
 		asJSON = fs.Bool("json", false, "print JSON")
 		wait = fs.Duration("wait", 0, "wait up to this long for jarvisd to be running and healthy")
-	case "uninstall", "start", "stop", "restart":
+	case "uninstall":
+		purge = fs.Bool("purge", false, "also delete the data directory, env file and service account")
+		yes = fs.Bool("yes", false, "with --purge: don't ask for confirmation")
+		keepFirewall = fs.Bool("keep-firewall", false, "leave the firewall rules doctor --fix added")
+	case "start", "stop", "restart":
 	default:
 		return fmt.Errorf("unknown service command %q", verb)
 	}
@@ -88,7 +92,8 @@ func runService(ctx context.Context, flagHome string, args []string, stdout io.W
 	}
 	switch verb {
 	case "uninstall":
-		return m.Uninstall(ctx)
+		return uninstall(ctx, m, uninstallOptions{Purge: *purge, Yes: *yes, KeepFirewall: *keepFirewall},
+			os.Stdin, stdinIsTerminal(), stdout)
 	case "start":
 		return m.Start(ctx)
 	case "stop":

@@ -94,13 +94,32 @@ func dialOK(context.Context, string, string) (net.Conn, error) {
 	return a, nil
 }
 
+func jarvisdHeader(context.Context, string) (string, error) { return "jarvisd", nil }
+
+// opts runs on linux with no external commands (no docker, no legacy dirs).
+func opts(fw Firewall, lans []*net.IPNet) Options {
+	return Options{Ports: jarvisPorts, LANs: lans, Firewall: fw, Dial: dialOK, ServerHeader: jarvisdHeader,
+		GOOS: "linux", Run: noFirewalld, LegacyDirs: []string{}}
+}
+
+func find(t *testing.T, checks []Check, name string) Check {
+	t.Helper()
+	for _, c := range checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("no %q check in %+v", name, checks)
+	return Check{}
+}
+
 // The jarvis-dev incident: ufw on, default DROP, no jarvisd rules. jarvisd answered on
 // localhost while the Pi's registration timed out.
 func TestDoctorFlagsUFWBlockingTheLAN(t *testing.T) {
 	home := lan(t, "10.0.0.0/24")
 	fw := &linuxFirewall{ufw: writeUFW(t, "yes", "DROP", "### tuple ### allow tcp 22 0.0.0.0/0 any 10.0.0.0/24 in\n"), run: noFirewalld}
-	checks := Run(context.Background(), Options{Ports: jarvisPorts, LANs: []*net.IPNet{home}, Firewall: fw, Dial: dialOK})
-	if len(checks) != 2 || checks[0].Status != OK {
+	checks := Run(context.Background(), opts(fw, []*net.IPNet{home}))
+	if len(checks) != 3 || checks[0].Status != OK || checks[2].Name != "legacy stack" {
 		t.Fatalf("checks %+v", checks)
 	}
 	c := checks[1]
@@ -112,25 +131,28 @@ func TestDoctorFlagsUFWBlockingTheLAN(t *testing.T) {
 	if c.Fix != want {
 		t.Errorf("fix:\n%s\nwant:\n%s", c.Fix, want)
 	}
+	if len(c.FixCmds) != 2 || strings.Join(c.FixCmds[1], " ") != "ufw allow from 10.0.0.0/24 to any port 5353 proto udp comment jarvisd" {
+		t.Errorf("fix_cmds %q", c.FixCmds)
+	}
 
 	// After the fix: all clear.
 	fw.ufw = writeUFW(t, "yes", "DROP", devRules)
-	if c := Run(context.Background(), Options{Ports: jarvisPorts, LANs: []*net.IPNet{home}, Firewall: fw, Dial: dialOK})[1]; c.Status != OK {
+	if c := Run(context.Background(), opts(fw, []*net.IPNet{home}))[1]; c.Status != OK {
 		t.Errorf("after fix %+v", c)
 	}
 	// Default ACCEPT, or ufw off: nothing to do.
 	fw.ufw = writeUFW(t, "yes", "ACCEPT", "")
-	if c := Run(context.Background(), Options{Ports: jarvisPorts, LANs: []*net.IPNet{home}, Firewall: fw, Dial: dialOK})[1]; c.Status != OK {
+	if c := Run(context.Background(), opts(fw, []*net.IPNet{home}))[1]; c.Status != OK {
 		t.Errorf("accept policy %+v", c)
 	}
 	fw.ufw = writeUFW(t, "no", "DROP", "")
-	if c := Run(context.Background(), Options{Ports: jarvisPorts, LANs: []*net.IPNet{home}, Firewall: fw, Dial: dialOK})[1]; c.Status != OK || c.Name != "firewall" {
+	if c := Run(context.Background(), opts(fw, []*net.IPNet{home}))[1]; c.Status != OK || c.Name != "firewall" {
 		t.Errorf("ufw off %+v", c)
 	}
 	// Unreadable rules: a warning, not a verdict.
 	fw.ufw = writeUFW(t, "yes", "DROP", "")
 	os.Remove(fw.ufw.Root + "/etc/ufw/user.rules")
-	if c := Run(context.Background(), Options{Ports: jarvisPorts, LANs: []*net.IPNet{home}, Firewall: fw, Dial: dialOK})[1]; c.Status != Warn || !strings.Contains(c.Detail, "sudo jarvisd doctor") {
+	if c := Run(context.Background(), opts(fw, []*net.IPNet{home}))[1]; c.Status != Warn || !strings.Contains(c.Detail, "sudo jarvisd doctor") {
 		t.Errorf("unreadable %+v", c)
 	}
 }
@@ -142,7 +164,9 @@ func TestDoctorListening(t *testing.T) {
 		}
 		return dialOK(nil, "", "")
 	}
-	c := Run(context.Background(), Options{Ports: jarvisPorts, LANs: []*net.IPNet{}, Firewall: &linuxFirewall{ufw: &UFW{Root: t.TempDir()}, run: noFirewalld}, Dial: dial})[0]
+	o := opts(&linuxFirewall{ufw: &UFW{Root: t.TempDir()}, run: noFirewalld}, []*net.IPNet{})
+	o.Dial = dial
+	c := Run(context.Background(), o)[0]
 	if c.Status != Fail || !strings.Contains(c.Detail, "command-center (7703)") {
 		t.Errorf("listening %+v", c)
 	}
@@ -169,8 +193,13 @@ func TestFirewalld(t *testing.T) {
 	if ok, _ := fw.Allows(context.Background(), Port{"ws", 9883, "tcp"}, home); ok {
 		t.Error("9883 not listed")
 	}
-	if fix := fw.FixFor([]Port{{"ws", 9883, "tcp"}}, home); !strings.Contains(fix, "source address=192.168.1.0/24 port port=9883 protocol=tcp") || !strings.HasSuffix(fix, "--reload") {
-		t.Errorf("fix %q", fix)
+	fix := RenderFix("linux", fw.FixCmds(context.Background(), []Port{{"ws", 9883, "tcp"}}, home), fw.FixNote())
+	want := "sudo firewall-cmd --permanent --new-service=jarvisd\n" +
+		"sudo firewall-cmd --permanent --service=jarvisd --add-port=9883/tcp\n" +
+		`sudo firewall-cmd --permanent '--add-rich-rule=rule family="ipv4" source address="192.168.1.0/24" service name="jarvisd" accept'` + "\n" +
+		"sudo firewall-cmd --reload"
+	if fix != want {
+		t.Errorf("fix:\n%s\nwant:\n%s", fix, want)
 	}
 }
 

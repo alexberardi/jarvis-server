@@ -321,3 +321,8 @@ func splitCommandLine(s string) []string {
 	}
 	return args
 }
+
+// PurgePlan is the data directory only: the virtual account goes with the service.
+func (w *scm) PurgePlan(home string) PurgePlan { return PurgePlan{Home: home} }
+
+func (w *scm) Purge(_ context.Context, p PurgePlan) error { return purgeFiles(p) }

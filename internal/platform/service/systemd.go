@@ -303,3 +303,26 @@ func (s *systemd) InstalledHome() string {
 	}
 	return ""
 }
+
+func (s *systemd) PurgePlan(home string) PurgePlan {
+	p := PurgePlan{Home: home}
+	if !s.user {
+		p.Extra = []string{s.envDir}
+		if _, err := s.lookupUser(Name); err == nil {
+			p.Account = Name
+		}
+	}
+	return p
+}
+
+func (s *systemd) Purge(ctx context.Context, p PurgePlan) error {
+	if err := purgeFiles(p); err != nil {
+		return err
+	}
+	if p.Account != "" {
+		if _, err := s.run(ctx, "userdel", p.Account); err != nil {
+			return err
+		}
+	}
+	return nil
+}

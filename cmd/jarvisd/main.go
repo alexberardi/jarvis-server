@@ -227,11 +227,18 @@ commands:
                    run the server; on first start it prints the admin setup link and, at a
                    desktop, opens it (--no-browser or JARVIS_NO_BROWSER=1 to not)
   service install [--user] [--bin PATH] [--run-as USER] [--no-start]
-  service uninstall|start|stop|restart [--user]
+  service uninstall [--user] [--purge [--yes]] [--keep-firewall]
+                   remove the service and the firewall rules doctor --fix added; --purge
+                   also deletes the data directory, env file and service account
+  service start|stop|restart [--user]
   service status [--user] [--json] [--wait DURATION]
                    register and control jarvisd with systemd, launchd or the Windows SCM
+  setup-link       print the first-run setup link and token (or the admin URL once set up)
   migrate status   show each module's migration state
-  doctor [--json]  check that nodes and phones can reach jarvisd (listeners, host firewall)
+  doctor [--json] [--fix]
+                   check that nodes and phones can reach jarvisd (listeners, ports held by
+                   another program, host firewall, data permissions, legacy stack); --fix
+                   applies the firewall fix for private LAN subnets (needs sudo/Administrator)
   version          print the version
 
 --home DIR picks the data directory; otherwise JARVIS_HOME, else the installed service's,
@@ -275,6 +282,10 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return nil
+	case "help", "-h", "--help":
+		// The install scripts read the command list to see what this binary supports.
+		fmt.Fprint(stdout, usage)
+		return nil
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		fs.SetOutput(stdout)
@@ -291,10 +302,20 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	case "service":
 		return runService(ctx, flagHome, args[1:], stdout)
 	case "doctor":
+		envErr, err := bootstrapEnv(flagHome)
+		if err != nil {
+			return err
+		}
+		return runDoctor(ctx, envErr, args[1:], stdout, os.Stderr)
+	case "setup-link":
 		if err := bootstrap(flagHome, false, os.Stderr); err != nil {
 			return err
 		}
-		return runDoctor(ctx, args[1:], stdout)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		return printSetupLink(cfg, stdout)
 	case "migrate":
 		if len(args) < 2 || args[1] != "status" {
 			return errors.New("usage: jarvisd migrate status")
