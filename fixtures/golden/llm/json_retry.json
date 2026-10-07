@@ -1,0 +1,213 @@
+[
+ {
+  "case": {
+   "invalid": "{\"a\": 1",
+   "schema": null,
+   "reply": "{\"a\": 1}",
+   "temperature": 0.7,
+   "max_tokens": null,
+   "reasoning_budget": null
+  },
+  "result": "{\"a\": 1}",
+  "messages": [
+   {
+    "role": "system",
+    "parts": [
+     "sys"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "question"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "The previous response was not valid JSON or did not match the required schema. The response was truncated. Please provide a COMPLETE response.\n\nPlease provide ONLY valid JSON with no explanation text. Ensure:\n- All brackets and braces are properly closed\n- All strings are properly quoted and escaped  \n- The response is complete\n\n\nPrevious (truncated/invalid) response preview:\n{\"a\": 1\n\nReturn the corrected, complete JSON:"
+    ]
+   }
+  ],
+  "params": {
+   "temperature": 0.49999999999999994,
+   "max_tokens": 8192,
+   "top_p": 0.9,
+   "seed": 7,
+   "reasoning_budget": null
+  }
+ },
+ {
+  "case": {
+   "invalid": "no json",
+   "schema": {
+    "type": "object",
+    "required": [
+     "facts"
+    ],
+    "properties": {
+     "facts": {
+      "type": "array"
+     }
+    }
+   },
+   "reply": "{\"facts\": []}",
+   "temperature": 0.0,
+   "max_tokens": 600,
+   "reasoning_budget": 0
+  },
+  "result": "{\"facts\": []}",
+  "messages": [
+   {
+    "role": "system",
+    "parts": [
+     "sys"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "question"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "The previous response was not valid JSON or did not match the required schema.\n\nPlease provide ONLY valid JSON with no explanation text. Ensure:\n- All brackets and braces are properly closed\n- All strings are properly quoted and escaped  \n- The response is complete\n\n\nSchema constraints:\nRequired keys: facts\nAllowed keys: facts:array\n\nPrevious (truncated/invalid) response preview:\nno json\n\nReturn the corrected, complete JSON:"
+    ]
+   }
+  ],
+  "params": {
+   "temperature": 0.3,
+   "max_tokens": 8192,
+   "top_p": 0.9,
+   "seed": 7,
+   "reasoning_budget": 0
+  }
+ },
+ {
+  "case": {
+   "invalid": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "schema": {
+    "required": [
+     "a"
+    ]
+   },
+   "reply": "still bad",
+   "temperature": 0.4,
+   "max_tokens": 9000,
+   "reasoning_budget": -1
+  },
+  "result": "\"still bad\"",
+  "messages": [
+   {
+    "role": "system",
+    "parts": [
+     "sys"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "question"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "The previous response was not valid JSON or did not match the required schema.\n\nPlease provide ONLY valid JSON with no explanation text. Ensure:\n- All brackets and braces are properly closed\n- All strings are properly quoted and escaped  \n- The response is complete\n\n\nSchema constraints:\nRequired keys: a\n\nPrevious (truncated/invalid) response preview:\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nReturn the corrected, complete JSON:"
+    ]
+   }
+  ],
+  "params": {
+   "temperature": 0.3,
+   "max_tokens": 13500,
+   "top_p": 0.9,
+   "seed": 7,
+   "reasoning_budget": -1
+  }
+ },
+ {
+  "case": {
+   "invalid": "{\"facts\": \"nope\"}",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "facts": {
+      "type": "array"
+     }
+    }
+   },
+   "reply": "{\"facts\": \"nope\"}",
+   "temperature": 0.3,
+   "max_tokens": 0,
+   "reasoning_budget": null
+  },
+  "result": null,
+  "messages": [
+   {
+    "role": "system",
+    "parts": [
+     "sys"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "question"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "The previous response was not valid JSON or did not match the required schema.\n\nPlease provide ONLY valid JSON with no explanation text. Ensure:\n- All brackets and braces are properly closed\n- All strings are properly quoted and escaped  \n- The response is complete\n\n\nSchema constraints:\nRequired keys: (none)\nAllowed keys: facts:array\n\nPrevious (truncated/invalid) response preview:\n{\"facts\": \"nope\"}\n\nReturn the corrected, complete JSON:"
+    ]
+   }
+  ],
+  "params": {
+   "temperature": 0.3,
+   "max_tokens": 8192,
+   "top_p": 0.9,
+   "seed": 7,
+   "reasoning_budget": null
+  }
+ },
+ {
+  "case": {
+   "invalid": "caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 ",
+   "schema": null,
+   "reply": "```json\n{\"a\": \"\u00e9\"}\n```",
+   "temperature": 1.0,
+   "max_tokens": 100,
+   "reasoning_budget": 2
+  },
+  "result": "{\"a\": \"\u00e9\"}",
+  "messages": [
+   {
+    "role": "system",
+    "parts": [
+     "sys"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "question"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "The previous response was not valid JSON or did not match the required schema.\n\nPlease provide ONLY valid JSON with no explanation text. Ensure:\n- All brackets and braces are properly closed\n- All strings are properly quoted and escaped  \n- The response is complete\n\n\nPrevious (truncated/invalid) response preview:\ncaf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 caf\u00e9 \n\nReturn the corrected, complete JSON:"
+    ]
+   }
+  ],
+  "params": {
+   "temperature": 0.8,
+   "max_tokens": 8192,
+   "top_p": 0.9,
+   "seed": 7,
+   "reasoning_budget": 2
+  }
+ }
+]

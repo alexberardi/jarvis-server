@@ -1,0 +1,221 @@
+[
+  {
+    "id": "qwen3-4b",
+    "display": "Qwen 3 4B (Q4_K_M)",
+    "kind": "llm",
+    "repo": "Qwen/Qwen3-4B-GGUF",
+    "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+    "file": "Qwen3-4B-Q4_K_M.gguf",
+    "size": 2497280256,
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "context_default": 16384,
+    "context_max": 40960,
+    "kv_bytes_per_token": 147456,
+    "prompt_provider": "Qwen3_8B_Compressed",
+    "thinking": true,
+    "tags": [
+      "live",
+      "background",
+      "small"
+    ]
+  },
+  {
+    "id": "qwen3-8b",
+    "display": "Qwen 3 8B (Q4_K_M)",
+    "kind": "llm",
+    "repo": "Qwen/Qwen3-8B-GGUF",
+    "revision": "7c41481f57cb95916b40956ab2f0b139b296d974",
+    "file": "Qwen3-8B-Q4_K_M.gguf",
+    "size": 5027783488,
+    "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "context_default": 16384,
+    "context_max": 40960,
+    "kv_bytes_per_token": 147456,
+    "prompt_provider": "Qwen3_8B_Compressed",
+    "thinking": true,
+    "tags": [
+      "live",
+      "background"
+    ]
+  },
+  {
+    "id": "qwen3.5-9b",
+    "display": "Qwen 3.5 9B (Q4_K_M, vision)",
+    "kind": "llm",
+    "repo": "unsloth/Qwen3.5-9B-GGUF",
+    "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+    "file": "Qwen3.5-9B-Q4_K_M.gguf",
+    "size": 5680522464,
+    "sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+    "mmproj": "qwen3.5-9b-mmproj",
+    "context_default": 32768,
+    "context_max": 262144,
+    "kv_bytes_per_token": 32768,
+    "prompt_provider": "Qwen3_5_9B_Compressed",
+    "thinking": true,
+    "tags": [
+      "live",
+      "background",
+      "vision"
+    ]
+  },
+  {
+    "id": "qwen3.5-9b-mmproj",
+    "display": "Qwen 3.5 9B vision projector (F16)",
+    "kind": "mmproj",
+    "repo": "unsloth/Qwen3.5-9B-GGUF",
+    "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+    "file": "mmproj-F16.gguf",
+    "size": 918166080,
+    "sha256": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"
+  },
+  {
+    "id": "qwen3-14b",
+    "display": "Qwen 3 14B (Q4_K_M)",
+    "kind": "llm",
+    "repo": "Qwen/Qwen3-14B-GGUF",
+    "revision": "530227a7d994db8eca5ab5ced2fb692b614357fd",
+    "file": "Qwen3-14B-Q4_K_M.gguf",
+    "size": 9001752960,
+    "sha256": "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0",
+    "context_default": 16384,
+    "context_max": 40960,
+    "kv_bytes_per_token": 163840,
+    "prompt_provider": "Qwen3_14B_Compressed",
+    "thinking": true,
+    "tags": [
+      "live",
+      "background"
+    ]
+  },
+  {
+    "id": "qwen3.8-27b",
+    "display": "Qwen 3.8 27B (UD-Q4_K_M, vision)",
+    "kind": "llm",
+    "repo": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+    "file": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+    "size": 16464440224,
+    "sha256": "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482",
+    "mmproj": "qwen3.8-27b-mmproj",
+    "context_default": 16384,
+    "context_max": 262144,
+    "kv_bytes_per_token": 65536,
+    "prompt_provider": "Qwen3_14B_Compressed",
+    "thinking": true,
+    "tags": [
+      "live",
+      "background",
+      "vision",
+      "large"
+    ],
+    "notes": "Prod's model (live 13312 ctx \u00d7 4 slots with vision; background 131072 ctx, q8_0 KV, flash attention on a second card)."
+  },
+  {
+    "id": "qwen3.8-27b-mmproj",
+    "display": "Qwen 3.8 27B vision projector (F16)",
+    "kind": "mmproj",
+    "repo": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+    "file": "mmproj-F16.gguf",
+    "size": 927607488,
+    "sha256": "cbb841a9ee0636b2ec172f5bb8df2ea8dfeb01e90fe7c6126581d662a0b4e43e"
+  },
+  {
+    "id": "all-minilm-l6-v2",
+    "display": "all-MiniLM-L6-v2 embeddings (F16, 384 dims)",
+    "kind": "embedding",
+    "repo": "second-state/All-MiniLM-L6-v2-Embedding-GGUF",
+    "revision": "544f204f2eaa2d71361ffc74d6df7170285b286a",
+    "file": "all-MiniLM-L6-v2-ggml-model-f16.gguf",
+    "size": 45949216,
+    "sha256": "797b70c4edf85907fe0a49eb85811256f65fa0f7bf52166b147fd16be2be4662",
+    "context_default": 512,
+    "dims": 384,
+    "tags": [
+      "embeddings"
+    ]
+  },
+  {
+    "id": "whisper-large-v3-turbo",
+    "display": "Whisper large-v3-turbo",
+    "kind": "stt",
+    "repo": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "file": "ggml-large-v3-turbo.bin",
+    "size": 1624555275,
+    "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+    "tags": [
+      "stt",
+      "gpu"
+    ]
+  },
+  {
+    "id": "whisper-large-v3-turbo-q5_0",
+    "display": "Whisper large-v3-turbo (Q5_0)",
+    "kind": "stt",
+    "repo": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "file": "ggml-large-v3-turbo-q5_0.bin",
+    "size": 574041195,
+    "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+    "tags": [
+      "stt"
+    ]
+  },
+  {
+    "id": "whisper-small.en",
+    "display": "Whisper small.en",
+    "kind": "stt",
+    "repo": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "file": "ggml-small.en.bin",
+    "size": 487614201,
+    "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+    "tags": [
+      "stt",
+      "cpu"
+    ]
+  },
+  {
+    "id": "whisper-base.en",
+    "display": "Whisper base.en",
+    "kind": "stt",
+    "repo": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "file": "ggml-base.en.bin",
+    "size": 147964211,
+    "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    "tags": [
+      "stt",
+      "cpu",
+      "small"
+    ]
+  },
+  {
+    "id": "kokoro-multi-lang-v1_0",
+    "display": "Kokoro v1.0 multi-language (TTS)",
+    "kind": "tts",
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2",
+    "archive": "tar.bz2",
+    "file": "kokoro-multi-lang-v1_0.tar.bz2",
+    "size": 349906910,
+    "sha256": "c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298",
+    "tags": [
+      "tts"
+    ],
+    "notes": "Extracted to a directory: model.onnx, voices.bin, tokens.txt, lexicons, espeak-ng-data. Default voice bm_george, speed 1.25."
+  },
+  {
+    "id": "eres2net-voxceleb-16k",
+    "display": "3D-Speaker ERes2Net (speaker ID)",
+    "kind": "speaker",
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx",
+    "file": "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx",
+    "size": 26485263,
+    "sha256": "c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5",
+    "tags": [
+      "speaker"
+    ]
+  }
+]

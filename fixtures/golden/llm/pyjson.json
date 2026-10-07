@@ -1,0 +1,518 @@
+{
+ "loads": [
+  {
+   "input": "{\"a\":1}",
+   "dumps": "{\"a\": 1}",
+   "dumps_ascii": "{\"a\": 1}"
+  },
+  {
+   "input": "{\"a\": 1}",
+   "dumps": "{\"a\": 1}",
+   "dumps_ascii": "{\"a\": 1}"
+  },
+  {
+   "input": "{\n  \"a\": 1,\n  \"b\": [1, 2]\n}",
+   "dumps": "{\"a\": 1, \"b\": [1, 2]}",
+   "dumps_ascii": "{\"a\": 1, \"b\": [1, 2]}"
+  },
+  {
+   "input": "[1,2,3]",
+   "dumps": "[1, 2, 3]",
+   "dumps_ascii": "[1, 2, 3]"
+  },
+  {
+   "input": "\"just a string\"",
+   "dumps": "\"just a string\"",
+   "dumps_ascii": "\"just a string\""
+  },
+  {
+   "input": "42",
+   "dumps": "42",
+   "dumps_ascii": "42"
+  },
+  {
+   "input": "null",
+   "dumps": "null",
+   "dumps_ascii": "null"
+  },
+  {
+   "input": "true",
+   "dumps": "true",
+   "dumps_ascii": "true"
+  },
+  {
+   "input": "  {\"a\": 1}  \n",
+   "dumps": "{\"a\": 1}",
+   "dumps_ascii": "{\"a\": 1}"
+  },
+  {
+   "input": "{\"a\": 1, \"a\": 2}",
+   "dumps": "{\"a\": 2}",
+   "dumps_ascii": "{\"a\": 2}"
+  },
+  {
+   "input": "{\"a\": [1], \"a\": 2}",
+   "dumps": "{\"a\": 2}",
+   "dumps_ascii": "{\"a\": 2}"
+  },
+  {
+   "input": "{\"a\": {\"b\": 1, \"b\": 2}}",
+   "dumps": "{\"a\": {\"b\": 2}}",
+   "dumps_ascii": "{\"a\": {\"b\": 2}}"
+  },
+  {
+   "input": "[{\"x\": 1, \"x\": {\"y\": 1, \"y\": 2}}]",
+   "dumps": "[{\"x\": {\"y\": 2}}]",
+   "dumps_ascii": "[{\"x\": {\"y\": 2}}]"
+  },
+  {
+   "input": "{\"a\": \"caf\u00e9\"}",
+   "dumps": "{\"a\": \"caf\u00e9\"}",
+   "dumps_ascii": "{\"a\": \"caf\\u00e9\"}"
+  },
+  {
+   "input": "{\"a\": \"caf\\u00e9\"}",
+   "dumps": "{\"a\": \"caf\u00e9\"}",
+   "dumps_ascii": "{\"a\": \"caf\\u00e9\"}"
+  },
+  {
+   "input": "{\"emoji\": \"\\ud83d\\ude00\"}",
+   "dumps": "{\"emoji\": \"\ud83d\ude00\"}",
+   "dumps_ascii": "{\"emoji\": \"\\ud83d\\ude00\"}"
+  },
+  {
+   "input": "{\"emoji\": \"\ud83d\ude00\"}",
+   "dumps": "{\"emoji\": \"\ud83d\ude00\"}",
+   "dumps_ascii": "{\"emoji\": \"\\ud83d\\ude00\"}"
+  },
+  {
+   "input": "{\"lone\": \"\\ud800\"}",
+   "dumps": "{\"lone\": \"\ud800\"}",
+   "dumps_ascii": "{\"lone\": \"\\ud800\"}"
+  },
+  {
+   "input": "{\"lone\": \"\\udc00x\"}",
+   "dumps": "{\"lone\": \"\udc00x\"}",
+   "dumps_ascii": "{\"lone\": \"\\udc00x\"}"
+  },
+  {
+   "input": "{\"ctl\": \"a\\u0001b\"}",
+   "dumps": "{\"ctl\": \"a\\u0001b\"}",
+   "dumps_ascii": "{\"ctl\": \"a\\u0001b\"}"
+  },
+  {
+   "input": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e\\/f\\bg\\fh\\ri\"}",
+   "dumps": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e/f\\bg\\fh\\ri\"}",
+   "dumps_ascii": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e/f\\bg\\fh\\ri\"}"
+  },
+  {
+   "input": "{\"f\": 1.0, \"g\": 1e20, \"h\": 1e-7, \"i\": 0.1, \"j\": -0.0}",
+   "dumps": "{\"f\": 1.0, \"g\": 1e+20, \"h\": 1e-07, \"i\": 0.1, \"j\": -0.0}",
+   "dumps_ascii": "{\"f\": 1.0, \"g\": 1e+20, \"h\": 1e-07, \"i\": 0.1, \"j\": -0.0}"
+  },
+  {
+   "input": "{\"big\": 123456789012345678901234567890, \"e\": 1E5, \"neg\": -12, \"z\": 0}",
+   "dumps": "{\"big\": 123456789012345678901234567890, \"e\": 100000.0, \"neg\": -12, \"z\": 0}",
+   "dumps_ascii": "{\"big\": 123456789012345678901234567890, \"e\": 100000.0, \"neg\": -12, \"z\": 0}"
+  },
+  {
+   "input": "{\"inf\": 1e400, \"ninf\": -1e400}",
+   "dumps": "{\"inf\": Infinity, \"ninf\": -Infinity}",
+   "dumps_ascii": "{\"inf\": Infinity, \"ninf\": -Infinity}"
+  },
+  {
+   "input": "[NaN, Infinity, -Infinity]",
+   "dumps": "[NaN, Infinity, -Infinity]",
+   "dumps_ascii": "[NaN, Infinity, -Infinity]"
+  },
+  {
+   "input": "{\"f\": 1e16, \"g\": 1e15, \"h\": 0.0001, \"k\": 0.00001, \"l\": 123456789.123456789}",
+   "dumps": "{\"f\": 1e+16, \"g\": 1000000000000000.0, \"h\": 0.0001, \"k\": 1e-05, \"l\": 123456789.12345679}",
+   "dumps_ascii": "{\"f\": 1e+16, \"g\": 1000000000000000.0, \"h\": 0.0001, \"k\": 1e-05, \"l\": 123456789.12345679}"
+  },
+  {
+   "input": "{\"f\": 2.5e-5, \"g\": 1.7976931348623157e308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+   "dumps": "{\"f\": 2.5e-05, \"g\": 1.7976931348623157e+308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+   "dumps_ascii": "{\"f\": 2.5e-05, \"g\": 1.7976931348623157e+308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}"
+  },
+  {
+   "input": "{\"a\": 1,}",
+   "error": "Expecting property name enclosed in double quotes: line 1 column 9 (char 8)"
+  },
+  {
+   "input": "[1, 2,]",
+   "error": "Expecting value: line 1 column 7 (char 6)"
+  },
+  {
+   "input": "{\"a\": 1 \"b\": 2}",
+   "error": "Expecting ',' delimiter: line 1 column 9 (char 8)"
+  },
+  {
+   "input": "{\"a\" 1}",
+   "error": "Expecting ':' delimiter: line 1 column 6 (char 5)"
+  },
+  {
+   "input": "{a: 1}",
+   "error": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+  },
+  {
+   "input": "{'a': 1}",
+   "error": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+  },
+  {
+   "input": "{\"a\": \"he said \"hi\"\"}",
+   "error": "Expecting ',' delimiter: line 1 column 17 (char 16)"
+  },
+  {
+   "input": "{\"text\": \"unterminated",
+   "error": "Unterminated string starting at: line 1 column 10 (char 9)"
+  },
+  {
+   "input": "{\"items\": [{\"name\": \"x\"}, {\"name\": \"y",
+   "error": "Unterminated string starting at: line 1 column 36 (char 35)"
+  },
+  {
+   "input": "{\"a\": 1, \"b\": {\"c\": [1, 2",
+   "error": "Expecting ',' delimiter: line 1 column 26 (char 25)"
+  },
+  {
+   "input": "{\"a\": 1, \"b\":",
+   "error": "Expecting value: line 1 column 14 (char 13)"
+  },
+  {
+   "input": "{\"a\": 1, \"b\": ",
+   "error": "Expecting value: line 1 column 15 (char 14)"
+  },
+  {
+   "input": "[1, 2, 3",
+   "error": "Expecting ',' delimiter: line 1 column 9 (char 8)"
+  },
+  {
+   "input": "{\"a\": [1, 2, 3], \"b\": \"x\"",
+   "error": "Expecting ',' delimiter: line 1 column 26 (char 25)"
+  },
+  {
+   "input": "{\"a\": \"x\",",
+   "error": "Expecting property name enclosed in double quotes: line 1 column 11 (char 10)"
+  },
+  {
+   "input": "{\"a\": \"x\",  ",
+   "error": "Expecting property name enclosed in double quotes: line 1 column 13 (char 12)"
+  },
+  {
+   "input": "Here is the JSON: {\"a\": 1} hope that helps",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "Sure!\n```json\n{\"answer\": \"yes\"}\n```",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "```\n[1, 2]\n```",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "prefix [1, 2] and {\"a\": 1}",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "text {\"a\": 1} more {\"b\": 2} end",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "no json here",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "   ",
+   "error": "Expecting value: line 1 column 4 (char 3)"
+  },
+  {
+   "input": "{}",
+   "dumps": "{}",
+   "dumps_ascii": "{}"
+  },
+  {
+   "input": "[]",
+   "dumps": "[]",
+   "dumps_ascii": "[]"
+  },
+  {
+   "input": "{",
+   "error": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+  },
+  {
+   "input": "[",
+   "error": "Expecting value: line 1 column 2 (char 1)"
+  },
+  {
+   "input": "}",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "]",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "{\"a\": tru}",
+   "error": "Expecting value: line 1 column 7 (char 6)"
+  },
+  {
+   "input": "{\"a\": nul}",
+   "error": "Expecting value: line 1 column 7 (char 6)"
+  },
+  {
+   "input": "01",
+   "error": "Extra data: line 1 column 2 (char 1)"
+  },
+  {
+   "input": "1.",
+   "error": "Extra data: line 1 column 2 (char 1)"
+  },
+  {
+   "input": "1e",
+   "error": "Extra data: line 1 column 2 (char 1)"
+  },
+  {
+   "input": "-",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "-1",
+   "dumps": "-1",
+   "dumps_ascii": "-1"
+  },
+  {
+   "input": "1.5e+3",
+   "dumps": "1500.0",
+   "dumps_ascii": "1500.0"
+  },
+  {
+   "input": "{\"a\": 1}{\"b\": 2}",
+   "error": "Extra data: line 1 column 9 (char 8)"
+  },
+  {
+   "input": "{\"a\": 1} trailing",
+   "error": "Extra data: line 1 column 10 (char 9)"
+  },
+  {
+   "input": "\ufeff{\"a\": 1}",
+   "error": "Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)"
+  },
+  {
+   "input": "{\"a\": \"line\nbreak\"}",
+   "error": "Invalid control character at: line 1 column 12 (char 11)"
+  },
+  {
+   "input": "{\"a\": \"\\x41\"}",
+   "error": "Invalid \\escape: line 1 column 8 (char 7)"
+  },
+  {
+   "input": "{\"a\": \"\\u12\"}",
+   "error": "Invalid \\uXXXX escape: line 1 column 9 (char 8)"
+  },
+  {
+   "input": "{\"a\": \"\\u12zz\"}",
+   "error": "Invalid \\uXXXX escape: line 1 column 9 (char 8)"
+  },
+  {
+   "input": "\"\\u0041",
+   "error": "Invalid \\uXXXX escape: line 1 column 3 (char 2)"
+  },
+  {
+   "input": "{\"k\": \"v\", \"k\": \"w\", \"k\": \"z\"}",
+   "dumps": "{\"k\": \"z\"}",
+   "dumps_ascii": "{\"k\": \"z\"}"
+  },
+  {
+   "input": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+   "dumps": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+   "dumps_ascii": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}"
+  },
+  {
+   "input": "<think>\nlet me think\n</think>\n{\"a\": 1}",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "{\"name\": \"Mr. \"Bob\" Smith\", \"age\": 30}",
+   "error": "Expecting ',' delimiter: line 1 column 16 (char 15)"
+  },
+  {
+   "input": "{\"msg\": \"it's fine\"}",
+   "dumps": "{\"msg\": \"it's fine\"}",
+   "dumps_ascii": "{\"msg\": \"it's fine\"}"
+  },
+  {
+   "input": "{\"a\": [1, 2, 3}",
+   "error": "Expecting ',' delimiter: line 1 column 15 (char 14)"
+  },
+  {
+   "input": "{\"a\": {\"b\": 1]}",
+   "error": "Expecting ',' delimiter: line 1 column 14 (char 13)"
+  },
+  {
+   "input": "[{\"a\": 1}, {\"b\": 2}",
+   "error": "Expecting ',' delimiter: line 1 column 20 (char 19)"
+  },
+  {
+   "input": "{\"x\": \"a,b\", \"y\": [1,2,],}",
+   "error": "Expecting value: line 1 column 24 (char 23)"
+  },
+  {
+   "input": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+   "dumps": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+   "dumps_ascii": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}"
+  },
+  {
+   "input": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+   "dumps": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+   "dumps_ascii": "{\"unicode_key_\\u00e9\": \"\\u65e5\\u672c\\u8a9e\"}"
+  },
+  {
+   "input": "{\"a\": 1}\n",
+   "dumps": "{\"a\": 1}",
+   "dumps_ascii": "{\"a\": 1}"
+  },
+  {
+   "input": "{\"a\":\"x\"}{\"a\":\"y\"}",
+   "error": "Extra data: line 1 column 10 (char 9)"
+  },
+  {
+   "input": "[1] [2]",
+   "error": "Extra data: line 1 column 5 (char 4)"
+  },
+  {
+   "input": "{\"a\": \"b\\\"c\"}",
+   "dumps": "{\"a\": \"b\\\"c\"}",
+   "dumps_ascii": "{\"a\": \"b\\\"c\"}"
+  },
+  {
+   "input": "{\"a\": \"\\\"quoted\\\"\"}",
+   "dumps": "{\"a\": \"\\\"quoted\\\"\"}",
+   "dumps_ascii": "{\"a\": \"\\\"quoted\\\"\"}"
+  },
+  {
+   "input": "He said \"hello\" and left",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "input": "\"a\" \"b\"",
+   "error": "Extra data: line 1 column 5 (char 4)"
+  },
+  {
+   "input": "{\"a\": \"x\" \"y\"}",
+   "error": "Expecting ',' delimiter: line 1 column 11 (char 10)"
+  }
+ ],
+ "float_repr": [
+  {
+   "repr": "0.0",
+   "json": "0.0",
+   "hex": "0x0.0p+0"
+  },
+  {
+   "repr": "-0.0",
+   "json": "-0.0",
+   "hex": "-0x0.0p+0"
+  },
+  {
+   "repr": "1.0",
+   "json": "1.0",
+   "hex": "0x1.0000000000000p+0"
+  },
+  {
+   "repr": "0.1",
+   "json": "0.1",
+   "hex": "0x1.999999999999ap-4"
+  },
+  {
+   "repr": "1e+16",
+   "json": "1e+16",
+   "hex": "0x1.1c37937e08000p+53"
+  },
+  {
+   "repr": "1000000000000000.0",
+   "json": "1000000000000000.0",
+   "hex": "0x1.c6bf526340000p+49"
+  },
+  {
+   "repr": "0.0001",
+   "json": "0.0001",
+   "hex": "0x1.a36e2eb1c432dp-14"
+  },
+  {
+   "repr": "1e-05",
+   "json": "1e-05",
+   "hex": "0x1.4f8b588e368f1p-17"
+  },
+  {
+   "repr": "1.2345678901234568e+17",
+   "json": "1.2345678901234568e+17",
+   "hex": "0x1.b69b4ba630f35p+56"
+  },
+  {
+   "repr": "1.5e-07",
+   "json": "1.5e-07",
+   "hex": "0x1.421f5f40d8376p-23"
+  },
+  {
+   "repr": "2.5",
+   "json": "2.5",
+   "hex": "0x1.4000000000000p+1"
+  },
+  {
+   "repr": "1e+22",
+   "json": "1e+22",
+   "hex": "0x1.0f0cf064dd592p+73"
+  },
+  {
+   "repr": "1e+100",
+   "json": "1e+100",
+   "hex": "0x1.249ad2594c37dp+332"
+  },
+  {
+   "repr": "5e-324",
+   "json": "5e-324",
+   "hex": "0x0.0000000000001p-1022"
+  },
+  {
+   "repr": "1.7976931348623157e+308",
+   "json": "1.7976931348623157e+308",
+   "hex": "0x1.fffffffffffffp+1023"
+  },
+  {
+   "repr": "0.30000000000000004",
+   "json": "0.30000000000000004",
+   "hex": "0x1.3333333333334p-2"
+  },
+  {
+   "repr": "100.0",
+   "json": "100.0",
+   "hex": "0x1.9000000000000p+6"
+  },
+  {
+   "repr": "1234567.0",
+   "json": "1234567.0",
+   "hex": "0x1.2d68700000000p+20"
+  },
+  {
+   "repr": "9999999999999998.0",
+   "json": "9999999999999998.0",
+   "hex": "0x1.1c37937e07fffp+53"
+  },
+  {
+   "repr": "inf",
+   "json": "Infinity",
+   "hex": "inf"
+  },
+  {
+   "repr": "-inf",
+   "json": "-Infinity",
+   "hex": "-inf"
+  }
+ ]
+}

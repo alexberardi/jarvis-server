@@ -62,3 +62,29 @@ Bugs visible in the data:
 | `date_context.json` | `generate_date_context_object` per instant × zone (or the error raised). |
 | `resolution.json` | `resolve_date_keys` for every key, `in_*` forms and combinations, per instant, UTC and New York. |
 | `normalize.json` | `normalize_date_key` samples. |
+
+## llm/ (G6, G7, G10–G12, docs/llm/02 §9, 03 §9, 04 §9)
+
+Two exporters, both importing the legacy llm-proxy's own code:
+
+    mise exec python@3.11 -- python tools/golden/export_llm.py \
+        --llm ../jarvis-llm-proxy-api --out fixtures/golden/llm
+    ../jarvis-llm-proxy-api/.venv/bin/python tools/golden/export_llm_wire.py \
+        --llm ../jarvis-llm-proxy-api --out fixtures/golden/llm
+
+`export_llm.py` must run on **Python 3.11**, the version prod's llm-proxy image pins: 3.13
+changed json's trailing-comma error text, which steers the JSON repair cascade. It needs only the
+standard library (the llm-proxy's heavy imports are stubbed).
+
+| File | Contents | Go test |
+|---|---|---|
+| `date_keys_corpus.jsonl` | G6: all 4,987 rows of `data/jarvis_training.jsonl` with `extract_date_keys` output (identical to the labels) | `llm/dates` |
+| `date_keys_edge.json` | G6: false positives, negatives, non-ASCII, Python Unicode classes (`İ`, `ı`, `ſ`, Arabic-Indic digits, NBSP, combining marks), CC-style multi-line text | `llm/dates` |
+| `vocabulary.json` | `GET /v1/adapters/date-keys` (`adapter_trained` pinned to false) | `llm/dates` |
+| `pyjson.json` | `json.loads` errors and `json.dumps` bytes (both `ensure_ascii` modes) over a malformed-JSON corpus, plus float repr | `llm/pyjson` |
+| `json_parse.json` | G7: `parse_json_response` and each repair helper over the same corpus | `llm/jsonmode` |
+| `json_inject.json`, `json_schema.json`, `json_retry.json` | G7: `inject_json_system_message`, `validate_json_schema`/`summarize_json_schema`, and `fix_json_with_retry`'s correction turn and retry parameters | `llm/jsonmode` |
+| `wire.json` | G10: upstream SSE transcripts → the legacy Jarvis frames; G11: `create_openai_response` defaults and `error_type_for_status`; G12: the callback envelope's keys | `llm` |
+
+Intended difference: the stream's done frame always carries the three usage counts (legacy passed
+the engine's dict through, `{}` when it sent none); the Go test normalises that one field.

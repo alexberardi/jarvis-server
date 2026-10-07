@@ -1,0 +1,812 @@
+{
+ "validate": [
+  {
+   "value": {
+    "a": 1
+   },
+   "schema": {},
+   "result": {
+    "ok": null
+   }
+  },
+  {
+   "value": {
+    "a": 1
+   },
+   "schema": {
+    "type": "object",
+    "required": [
+     "a",
+     "b"
+    ]
+   },
+   "result": {
+    "ok": "$.b is required"
+   }
+  },
+  {
+   "value": {
+    "a": "x"
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": "integer"
+     }
+    }
+   },
+   "result": {
+    "ok": "$.a expected type integer, got str"
+   }
+  },
+  {
+   "value": {
+    "a": 1.5
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": "integer"
+     }
+    }
+   },
+   "result": {
+    "ok": "$.a expected type integer, got float"
+   }
+  },
+  {
+   "value": {
+    "a": 1
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": "number"
+     }
+    }
+   },
+   "result": {
+    "ok": null
+   }
+  },
+  {
+   "value": {
+    "a": true
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": "integer"
+     }
+    }
+   },
+   "result": {
+    "ok": "$.a expected type integer, got bool"
+   }
+  },
+  {
+   "value": {
+    "a": null
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": [
+       "string",
+       "null"
+      ]
+     }
+    }
+   },
+   "result": {
+    "ok": null
+   }
+  },
+  {
+   "value": {
+    "a": 3
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": [
+       "string",
+       "null"
+      ]
+     }
+    }
+   },
+   "result": {
+    "ok": "$.a expected type ['string', 'null'], got int"
+   }
+  },
+  {
+   "value": [
+    1,
+    "x"
+   ],
+   "schema": {
+    "type": "array",
+    "items": {
+     "type": "integer"
+    }
+   },
+   "result": {
+    "ok": "$[1] expected type integer, got str"
+   }
+  },
+  {
+   "value": [
+    1,
+    2
+   ],
+   "schema": {
+    "type": "array",
+    "items": {
+     "type": "integer"
+    }
+   },
+   "result": {
+    "ok": null
+   }
+  },
+  {
+   "value": {
+    "a": [
+     {
+      "b": 1
+     },
+     {
+      "c": 2
+     }
+    ]
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "b"
+       ]
+      }
+     }
+    }
+   },
+   "result": {
+    "ok": "$.a[1].b is required"
+   }
+  },
+  {
+   "value": "x",
+   "schema": {
+    "type": "object"
+   },
+   "result": {
+    "ok": "$ expected type object, got str"
+   }
+  },
+  {
+   "value": {
+    "a": 1
+   },
+   "schema": {
+    "properties": {
+     "a": {
+      "type": "string"
+     }
+    }
+   },
+   "result": {
+    "ok": "$.a expected type string, got int"
+   }
+  },
+  {
+   "value": [
+    1
+   ],
+   "schema": {
+    "items": {
+     "type": "string"
+    }
+   },
+   "result": {
+    "ok": "$[0] expected type string, got int"
+   }
+  },
+  {
+   "value": {
+    "a": 1
+   },
+   "schema": {
+    "type": "weird"
+   },
+   "result": {
+    "ok": null
+   }
+  },
+  {
+   "value": {
+    "z": 1,
+    "a": "x"
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "z": {
+      "type": "string"
+     },
+     "a": {
+      "type": "integer"
+     }
+    }
+   },
+   "result": {
+    "ok": "$.z expected type string, got int"
+   }
+  },
+  {
+   "value": {
+    "a": 1
+   },
+   "schema": {
+    "type": "object",
+    "required": "ab"
+   },
+   "result": {
+    "ok": "$.b is required"
+   }
+  },
+  {
+   "value": {
+    "a": 1
+   },
+   "schema": {
+    "type": "object",
+    "required": [
+     1
+    ]
+   },
+   "result": {
+    "ok": "$.1 is required"
+   }
+  },
+  {
+   "value": {},
+   "schema": {
+    "type": "object",
+    "required": [
+     "x"
+    ],
+    "properties": {
+     "x": {
+      "type": "string"
+     },
+     "y": {}
+    }
+   },
+   "result": {
+    "ok": "$.x is required"
+   }
+  },
+  {
+   "value": {
+    "a": {}
+   },
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": "object",
+      "properties": {
+       "q": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "q"
+      ]
+     }
+    }
+   },
+   "result": {
+    "ok": "$.a.q is required"
+   }
+  },
+  {
+   "value": null,
+   "schema": {
+    "type": "null"
+   },
+   "result": {
+    "ok": null
+   }
+  },
+  {
+   "value": 1,
+   "schema": {
+    "type": [
+     "object",
+     "array"
+    ]
+   },
+   "result": {
+    "ok": "$ expected type ['object', 'array'], got int"
+   }
+  }
+ ],
+ "summarize": [
+  {
+   "schema": null,
+   "result": {
+    "ok": ""
+   }
+  },
+  {
+   "schema": {},
+   "result": {
+    "ok": ""
+   }
+  },
+  {
+   "schema": {
+    "type": "object"
+   },
+   "result": {
+    "ok": "Required keys: (none)"
+   }
+  },
+  {
+   "schema": {
+    "required": [
+     "a",
+     "b"
+    ]
+   },
+   "result": {
+    "ok": "Required keys: a, b"
+   }
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "a": {
+      "type": "string"
+     },
+     "b": {},
+     "c": {
+      "type": [
+       "string",
+       "null"
+      ]
+     }
+    },
+    "required": [
+     "a"
+    ]
+   },
+   "result": {
+    "ok": "Required keys: a\nAllowed keys: a:string, b:any, c:['string', 'null']"
+   }
+  },
+  {
+   "schema": {
+    "properties": {
+     "x": {
+      "type": "integer"
+     }
+    }
+   },
+   "result": {
+    "ok": "Required keys: (none)\nAllowed keys: x:integer"
+   }
+  },
+  {
+   "schema": {
+    "properties": {},
+    "required": []
+   },
+   "result": {
+    "ok": "Required keys: (none)"
+   }
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "facts": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "facts"
+    ]
+   },
+   "result": {
+    "ok": "Required keys: facts\nAllowed keys: facts:array"
+   }
+  }
+ ],
+ "is_json_truncated": [
+  {
+   "input": "{\"a\":1}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": 1}",
+   "result": false
+  },
+  {
+   "input": "{\n  \"a\": 1,\n  \"b\": [1, 2]\n}",
+   "result": false
+  },
+  {
+   "input": "[1,2,3]",
+   "result": false
+  },
+  {
+   "input": "\"just a string\"",
+   "result": false
+  },
+  {
+   "input": "42",
+   "result": false
+  },
+  {
+   "input": "null",
+   "result": false
+  },
+  {
+   "input": "true",
+   "result": false
+  },
+  {
+   "input": "  {\"a\": 1}  \n",
+   "result": false
+  },
+  {
+   "input": "{\"a\": 1, \"a\": 2}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": [1], \"a\": 2}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": {\"b\": 1, \"b\": 2}}",
+   "result": false
+  },
+  {
+   "input": "[{\"x\": 1, \"x\": {\"y\": 1, \"y\": 2}}]",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"caf\u00e9\"}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"caf\\u00e9\"}",
+   "result": false
+  },
+  {
+   "input": "{\"emoji\": \"\\ud83d\\ude00\"}",
+   "result": false
+  },
+  {
+   "input": "{\"emoji\": \"\ud83d\ude00\"}",
+   "result": false
+  },
+  {
+   "input": "{\"lone\": \"\\ud800\"}",
+   "result": false
+  },
+  {
+   "input": "{\"lone\": \"\\udc00x\"}",
+   "result": false
+  },
+  {
+   "input": "{\"ctl\": \"a\\u0001b\"}",
+   "result": false
+  },
+  {
+   "input": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e\\/f\\bg\\fh\\ri\"}",
+   "result": false
+  },
+  {
+   "input": "{\"f\": 1.0, \"g\": 1e20, \"h\": 1e-7, \"i\": 0.1, \"j\": -0.0}",
+   "result": false
+  },
+  {
+   "input": "{\"big\": 123456789012345678901234567890, \"e\": 1E5, \"neg\": -12, \"z\": 0}",
+   "result": false
+  },
+  {
+   "input": "{\"inf\": 1e400, \"ninf\": -1e400}",
+   "result": false
+  },
+  {
+   "input": "[NaN, Infinity, -Infinity]",
+   "result": false
+  },
+  {
+   "input": "{\"f\": 1e16, \"g\": 1e15, \"h\": 0.0001, \"k\": 0.00001, \"l\": 123456789.123456789}",
+   "result": false
+  },
+  {
+   "input": "{\"f\": 2.5e-5, \"g\": 1.7976931348623157e308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": 1,}",
+   "result": false
+  },
+  {
+   "input": "[1, 2,]",
+   "result": false
+  },
+  {
+   "input": "{\"a\": 1 \"b\": 2}",
+   "result": false
+  },
+  {
+   "input": "{\"a\" 1}",
+   "result": false
+  },
+  {
+   "input": "{a: 1}",
+   "result": false
+  },
+  {
+   "input": "{'a': 1}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"he said \"hi\"\"}",
+   "result": false
+  },
+  {
+   "input": "{\"text\": \"unterminated",
+   "result": true
+  },
+  {
+   "input": "{\"items\": [{\"name\": \"x\"}, {\"name\": \"y",
+   "result": true
+  },
+  {
+   "input": "{\"a\": 1, \"b\": {\"c\": [1, 2",
+   "result": true
+  },
+  {
+   "input": "{\"a\": 1, \"b\":",
+   "result": true
+  },
+  {
+   "input": "{\"a\": 1, \"b\": ",
+   "result": true
+  },
+  {
+   "input": "[1, 2, 3",
+   "result": true
+  },
+  {
+   "input": "{\"a\": [1, 2, 3], \"b\": \"x\"",
+   "result": true
+  },
+  {
+   "input": "{\"a\": \"x\",",
+   "result": true
+  },
+  {
+   "input": "{\"a\": \"x\",  ",
+   "result": true
+  },
+  {
+   "input": "Here is the JSON: {\"a\": 1} hope that helps",
+   "result": false
+  },
+  {
+   "input": "Sure!\n```json\n{\"answer\": \"yes\"}\n```",
+   "result": false
+  },
+  {
+   "input": "```\n[1, 2]\n```",
+   "result": false
+  },
+  {
+   "input": "prefix [1, 2] and {\"a\": 1}",
+   "result": false
+  },
+  {
+   "input": "text {\"a\": 1} more {\"b\": 2} end",
+   "result": false
+  },
+  {
+   "input": "no json here",
+   "result": false
+  },
+  {
+   "input": "",
+   "result": false
+  },
+  {
+   "input": "   ",
+   "result": false
+  },
+  {
+   "input": "{}",
+   "result": false
+  },
+  {
+   "input": "[]",
+   "result": false
+  },
+  {
+   "input": "{",
+   "result": true
+  },
+  {
+   "input": "[",
+   "result": true
+  },
+  {
+   "input": "}",
+   "result": false
+  },
+  {
+   "input": "]",
+   "result": false
+  },
+  {
+   "input": "{\"a\": tru}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": nul}",
+   "result": false
+  },
+  {
+   "input": "01",
+   "result": false
+  },
+  {
+   "input": "1.",
+   "result": false
+  },
+  {
+   "input": "1e",
+   "result": false
+  },
+  {
+   "input": "-",
+   "result": false
+  },
+  {
+   "input": "-1",
+   "result": false
+  },
+  {
+   "input": "1.5e+3",
+   "result": false
+  },
+  {
+   "input": "{\"a\": 1}{\"b\": 2}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": 1} trailing",
+   "result": true
+  },
+  {
+   "input": "\ufeff{\"a\": 1}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"line\nbreak\"}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"\\x41\"}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"\\u12\"}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"\\u12zz\"}",
+   "result": false
+  },
+  {
+   "input": "\"\\u0041",
+   "result": false
+  },
+  {
+   "input": "{\"k\": \"v\", \"k\": \"w\", \"k\": \"z\"}",
+   "result": false
+  },
+  {
+   "input": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+   "result": false
+  },
+  {
+   "input": "<think>\nlet me think\n</think>\n{\"a\": 1}",
+   "result": false
+  },
+  {
+   "input": "{\"name\": \"Mr. \"Bob\" Smith\", \"age\": 30}",
+   "result": false
+  },
+  {
+   "input": "{\"msg\": \"it's fine\"}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": [1, 2, 3}",
+   "result": true
+  },
+  {
+   "input": "{\"a\": {\"b\": 1]}",
+   "result": true
+  },
+  {
+   "input": "[{\"a\": 1}, {\"b\": 2}",
+   "result": true
+  },
+  {
+   "input": "{\"x\": \"a,b\", \"y\": [1,2,],}",
+   "result": false
+  },
+  {
+   "input": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+   "result": false
+  },
+  {
+   "input": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": 1}\n",
+   "result": false
+  },
+  {
+   "input": "{\"a\":\"x\"}{\"a\":\"y\"}",
+   "result": false
+  },
+  {
+   "input": "[1] [2]",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"b\\\"c\"}",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"\\\"quoted\\\"\"}",
+   "result": false
+  },
+  {
+   "input": "He said \"hello\" and left",
+   "result": false
+  },
+  {
+   "input": "\"a\" \"b\"",
+   "result": false
+  },
+  {
+   "input": "{\"a\": \"x\" \"y\"}",
+   "result": false
+  }
+ ]
+}

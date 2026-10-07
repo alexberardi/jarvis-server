@@ -165,7 +165,7 @@ LLM, STT and TTS (`llm_test.go`, `tts_test.go`):
 - **TTS empty text is 200 JSON `{"error":"No text provided"}`** on `/speak` and `/speak/stream`, which CC relabels as audio (docs/cc/06 §8 item 7). Test: `TestTTSEmptyText`.
 - **Stream final frame `usage` is `{}`** with the in-process GGUF backend (the REST backend sends counts). Test: `streamFinal`.
 - **Non-stream image to a text-only model is 500 `internal_server_error`** wrapping the model service's 400 in the message. llm-proxy #86 (2026-10-03) fixed this to a 400 `invalid_request_error`, but the MBP's running proxy predates it; the test accepts either. Test: `TestLLMImageToTextModel/non-stream`.
-- **The stream path never checks for images**: the same request streams a normal answer. Test: `TestLLMImageToTextModel/stream`.
+- **The stream path never checks for images**: the same request streams a normal answer. Test: `TestLLMImageToTextModel/stream`. jarvisd refuses it with the non-stream 400 before the stream opens (D8, docs/llm/02 §3.9); the test branches on `Jarvisd()`.
 
 Also seen, not frozen: on the stream path `reasoning_budget: 0` did not stop Qwen3 thinking on the MBP (deltas start with `<think>`). The queue worker's expiry branch calls `_send_callback` without the required `job_type`/`metadata` arguments (a `TypeError` instead of an `expired` callback). Whisper's account purge removes the user directory but leaves the empty `voice_profiles/<household_id>/` directory behind, so **each run of `TestWhisperVoiceProfiles` leaves one empty directory on the target** (no API removes it).
 

@@ -354,6 +354,14 @@ func TestLLMImageToTextModel(t *testing.T) {
 		r := tg.SlowJSON(t, LLM, "/v1/chat/completions",
 			chatReq("", map[string]any{"messages": msgs, "stream": true, "max_tokens": 2}), app.H())
 		skipIfNotLoaded(t, r.Resp)
+		if Jarvisd() {
+			// D8 (docs/llm/02 §3.9): the image check runs before the stream opens, so the
+			// stream refuses with the non-stream path's 400.
+			r.Expect(http.StatusBadRequest, Obj{"detail": Obj{"error": Obj{
+				"type": Eq("invalid_request_error"), "message": Eq(unsupported), "code": Null,
+			}}})
+			return
+		}
 		r.ExpectStatus(http.StatusOK).ExpectMediaType("text/event-stream")
 		frames, err := ParseSSE(r.Body)
 		if err != nil {

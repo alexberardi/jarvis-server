@@ -1,0 +1,289 @@
+[
+ {
+  "input": [
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "You must respond with valid JSON only. Do not include any text before or after the JSON.\nDo not wrap the JSON in markdown code blocks.\nOutput compact JSON without unnecessary whitespace.\nEnsure all strings are properly escaped and all brackets are balanced."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": [
+     "You are Jarvis."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "You are Jarvis.\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON.\nDo not wrap the JSON in markdown code blocks.\nOutput compact JSON without unnecessary whitespace.\nEnsure all strings are properly escaped and all brackets are balanced."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": [
+     "Respond in JSON."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "Respond in JSON.\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON.\nDo not wrap the JSON in markdown code blocks.\nOutput compact JSON without unnecessary whitespace.\nEnsure all strings are properly escaped and all brackets are balanced."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": [
+     "Always return valid JSON only."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "Always return valid JSON only.\n"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": [
+     "  valid json please  "
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "  valid json please  \n"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": [
+     "First."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   },
+   {
+    "role": "system",
+    "parts": [
+     "Second, valid JSON."
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "First.\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON.\nDo not wrap the JSON in markdown code blocks.\nOutput compact JSON without unnecessary whitespace.\nEnsure all strings are properly escaped and all brackets are balanced."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "hi"
+    ]
+   },
+   {
+    "role": "system",
+    "parts": [
+     "Second, valid JSON.\n"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": [
+     "part one",
+     "part two"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "x"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "part one\npart two\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON.\nDo not wrap the JSON in markdown code blocks.\nOutput compact JSON without unnecessary whitespace.\nEnsure all strings are properly escaped and all brackets are balanced."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "x"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": []
+   },
+   {
+    "role": "user",
+    "parts": [
+     "x"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON.\nDo not wrap the JSON in markdown code blocks.\nOutput compact JSON without unnecessary whitespace.\nEnsure all strings are properly escaped and all brackets are balanced."
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "x"
+    ]
+   }
+  ]
+ },
+ {
+  "input": [
+   {
+    "role": "system",
+    "parts": [
+     "\n\nYou are helpful.\n\n"
+    ]
+   },
+   {
+    "role": "assistant",
+    "parts": [
+     "ok"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "go"
+    ]
+   }
+  ],
+  "output": [
+   {
+    "role": "system",
+    "parts": [
+     "You are helpful.\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON.\nDo not wrap the JSON in markdown code blocks.\nOutput compact JSON without unnecessary whitespace.\nEnsure all strings are properly escaped and all brackets are balanced."
+    ]
+   },
+   {
+    "role": "assistant",
+    "parts": [
+     "ok"
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     "go"
+    ]
+   }
+  ]
+ }
+]

@@ -17,6 +17,7 @@ import (
 
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
+	llmmod "github.com/alexberardi/jarvis-server/internal/modules/llm"
 	logsmod "github.com/alexberardi/jarvis-server/internal/modules/logs"
 	notifmod "github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	ocrmod "github.com/alexberardi/jarvis-server/internal/modules/ocr"
@@ -41,6 +42,7 @@ func modules() []module.Module {
 		},
 		&logsmod.Module{},
 		&ocrmod.Module{},
+		&llmmod.Module{},
 		&notifmod.Module{
 			AdminKey: os.Getenv("ADMIN_API_KEY"),
 			RelayURL: os.Getenv("RELAY_URL"),
@@ -89,6 +91,13 @@ func modules() []module.Module {
 			c.LLMURL = os.Getenv("JARVIS_LLM_PROXY_API_URL")
 			c.LLMAppID, c.LLMAppKey = c.AppID, c.AppKey
 			c.AppleVisionURL, c.AppleVisionKey = os.Getenv("JARVIS_OSX_API_URL"), os.Getenv("JARVIS_OSX_API_KEY")
+		case *llmmod.Module:
+			c.Auth = auth
+			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
+			c.SettingsWrite = superuser
+			c.ManagerGuard = superuser
+			c.Version = version
+			c.AppID, c.AppKey = os.Getenv("JARVIS_APP_ID"), os.Getenv("JARVIS_APP_KEY")
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)

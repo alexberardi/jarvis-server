@@ -3,6 +3,7 @@ module github.com/alexberardi/jarvis-server
 go 1.25.14
 
 require (
+	github.com/dlclark/regexp2 v1.12.0
 	github.com/ebitengine/purego v0.11.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.0

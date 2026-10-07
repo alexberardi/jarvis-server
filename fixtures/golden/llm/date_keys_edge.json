@@ -1,0 +1,607 @@
+[
+ {
+  "text": "",
+  "date_keys": []
+ },
+ {
+  "text": "   ",
+  "date_keys": []
+ },
+ {
+  "text": "\n\t",
+  "date_keys": []
+ },
+ {
+  "text": "call Tom",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "the sun is out",
+  "date_keys": [
+   "this_sunday"
+  ]
+ },
+ {
+  "text": "I sat on it",
+  "date_keys": [
+   "this_saturday"
+  ]
+ },
+ {
+  "text": "Christmas eve",
+  "date_keys": [
+   "evening"
+  ]
+ },
+ {
+  "text": "we wed in june",
+  "date_keys": [
+   "this_wednesday"
+  ]
+ },
+ {
+  "text": "Can we talk tom?",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "last wed aft",
+  "date_keys": [
+   "afternoon",
+   "last_wednesday"
+  ]
+ },
+ {
+  "text": "set a timer for 10 minutes",
+  "date_keys": []
+ },
+ {
+  "text": "play Yesterday",
+  "date_keys": []
+ },
+ {
+  "text": "Play Saturday Night Live",
+  "date_keys": []
+ },
+ {
+  "text": "watch the game on sunday",
+  "date_keys": [
+   "this_sunday"
+  ]
+ },
+ {
+  "text": "night shift starts tomorrow",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "I waited 20 minutes",
+  "date_keys": []
+ },
+ {
+  "text": "it lasted 3 hours",
+  "date_keys": []
+ },
+ {
+  "text": "for 5 minutes from now",
+  "date_keys": [
+   "in_5_minutes"
+  ]
+ },
+ {
+  "text": "for 10 minutes.",
+  "date_keys": []
+ },
+ {
+  "text": "remind me later",
+  "date_keys": []
+ },
+ {
+  "text": "in a few minutes",
+  "date_keys": []
+ },
+ {
+  "text": "in a bit",
+  "date_keys": []
+ },
+ {
+  "text": "expires in 3 days",
+  "date_keys": []
+ },
+ {
+  "text": "about 2 hours long",
+  "date_keys": []
+ },
+ {
+  "text": "in about 2 hours long",
+  "date_keys": [
+   "in_120_minutes"
+  ]
+ },
+ {
+  "text": "who's playing tonight",
+  "date_keys": []
+ },
+ {
+  "text": "date night next friday",
+  "date_keys": [
+   "next_friday"
+  ]
+ },
+ {
+  "text": "remind me in 2 hours and 15 minutes",
+  "date_keys": [
+   "in_135_minutes"
+  ]
+ },
+ {
+  "text": "in two hours and 30 minutes",
+  "date_keys": [
+   "in_150_minutes"
+  ]
+ },
+ {
+  "text": "in two and a half hours",
+  "date_keys": [
+   "in_150_minutes"
+  ]
+ },
+ {
+  "text": "in an hour and a half",
+  "date_keys": [
+   "in_90_minutes"
+  ]
+ },
+ {
+  "text": "in an hour and 20 minutes",
+  "date_keys": [
+   "in_80_minutes"
+  ]
+ },
+ {
+  "text": "in a couple of hours",
+  "date_keys": [
+   "in_120_minutes"
+  ]
+ },
+ {
+  "text": "in half an hour",
+  "date_keys": [
+   "in_30_minutes"
+  ]
+ },
+ {
+  "text": "in a quarter of an hour",
+  "date_keys": [
+   "in_15_minutes"
+  ]
+ },
+ {
+  "text": "an hour from now",
+  "date_keys": [
+   "in_60_minutes"
+  ]
+ },
+ {
+  "text": "3 hours from now",
+  "date_keys": [
+   "in_180_minutes"
+  ]
+ },
+ {
+  "text": "in 45 minutes",
+  "date_keys": [
+   "in_45_minutes"
+  ]
+ },
+ {
+  "text": "in forty-five minutes",
+  "date_keys": [
+   "in_45_minutes"
+  ]
+ },
+ {
+  "text": "in a couple of days",
+  "date_keys": [
+   "day_after_tomorrow"
+  ]
+ },
+ {
+  "text": "in 2 days",
+  "date_keys": [
+   "day_after_tomorrow"
+  ]
+ },
+ {
+  "text": "in 10 days",
+  "date_keys": [
+   "in_10_days"
+  ]
+ },
+ {
+  "text": "in a week",
+  "date_keys": [
+   "in_7_days"
+  ]
+ },
+ {
+  "text": "in 3 weeks",
+  "date_keys": [
+   "in_21_days"
+  ]
+ },
+ {
+  "text": "quarter past 3pm",
+  "date_keys": [
+   "at_3_15pm"
+  ]
+ },
+ {
+  "text": "half past 11 am",
+  "date_keys": [
+   "at_11_30am"
+  ]
+ },
+ {
+  "text": "quarter to 1pm",
+  "date_keys": [
+   "at_12_45pm"
+  ]
+ },
+ {
+  "text": "quarter to 5 PM",
+  "date_keys": [
+   "at_4_45pm"
+  ]
+ },
+ {
+  "text": "at 12 am",
+  "date_keys": [
+   "midnight"
+  ]
+ },
+ {
+  "text": "12:00 pm",
+  "date_keys": [
+   "noon"
+  ]
+ },
+ {
+  "text": "at 7:30pm",
+  "date_keys": [
+   "at_7_30pm"
+  ]
+ },
+ {
+  "text": "at 7:00 am",
+  "date_keys": [
+   "at_7am"
+  ]
+ },
+ {
+  "text": "9am",
+  "date_keys": [
+   "at_9am"
+  ]
+ },
+ {
+  "text": "9 thirty pm",
+  "date_keys": [
+   "at_9_30pm"
+  ]
+ },
+ {
+  "text": "10 forty five am",
+  "date_keys": [
+   "at_10_45am"
+  ]
+ },
+ {
+  "text": "12 o'clock",
+  "date_keys": [
+   "noon"
+  ]
+ },
+ {
+  "text": "at noon tomorrow",
+  "date_keys": [
+   "noon",
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "midnight snack",
+  "date_keys": []
+ },
+ {
+  "text": "tomorrow morning at 8am",
+  "date_keys": [
+   "at_8am",
+   "tomorrow_morning"
+  ]
+ },
+ {
+  "text": "the day after tomorrow",
+  "date_keys": [
+   "day_after_tomorrow"
+  ]
+ },
+ {
+  "text": "day before yesterday",
+  "date_keys": [
+   "day_before_yesterday"
+  ]
+ },
+ {
+  "text": "2 days ago",
+  "date_keys": [
+   "day_before_yesterday"
+  ]
+ },
+ {
+  "text": "next tues",
+  "date_keys": [
+   "next_tuesday"
+  ]
+ },
+ {
+  "text": "the following sat",
+  "date_keys": [
+   "next_saturday"
+  ]
+ },
+ {
+  "text": "this weekend",
+  "date_keys": [
+   "this_weekend"
+  ]
+ },
+ {
+  "text": "next weekend",
+  "date_keys": [
+   "next_weekend"
+  ]
+ },
+ {
+  "text": "last month",
+  "date_keys": [
+   "last_month"
+  ]
+ },
+ {
+  "text": "after dinner",
+  "date_keys": [
+   "after_dinner"
+  ]
+ },
+ {
+  "text": "post-dinner",
+  "date_keys": [
+   "after_dinner"
+  ]
+ },
+ {
+  "text": "over lunch",
+  "date_keys": [
+   "during_lunch"
+  ]
+ },
+ {
+  "text": "TOMORROW NIGHT",
+  "date_keys": [
+   "tomorrow_night"
+  ]
+ },
+ {
+  "text": "Tomorrow:Morning",
+  "date_keys": [
+   "morning",
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "tomorrow,morning",
+  "date_keys": [
+   "morning",
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "tomorrow_morning",
+  "date_keys": []
+ },
+ {
+  "text": "tomorrows",
+  "date_keys": []
+ },
+ {
+  "text": "remind me tomorrow morning to call mom",
+  "date_keys": [
+   "tomorrow_morning"
+  ]
+ },
+ {
+  "text": "what's on my calendar for next monday afternoon?",
+  "date_keys": [
+   "afternoon",
+   "next_monday"
+  ]
+ },
+ {
+  "text": "turn on the lights /no_think",
+  "date_keys": []
+ },
+ {
+  "text": "Remind me tomorrow.\n\n[Turn hint: continue]\nAgent context: calendar says lunch on friday /no_think",
+  "date_keys": [
+   "this_friday",
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "mañana tomorrow",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "café at 9am",
+  "date_keys": [
+   "at_9am"
+  ]
+ },
+ {
+  "text": "tomorrow morning",
+  "date_keys": [
+   "morning",
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "tomorrow morning",
+  "date_keys": [
+   "morning",
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "Tomorrow İs fine",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "tomorrow ıs",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "the ſun",
+  "date_keys": [
+   "this_sunday"
+  ]
+ },
+ {
+  "text": "in ٣ hours",
+  "date_keys": [
+   "in_180_minutes"
+  ]
+ },
+ {
+  "text": "in ٢ days",
+  "date_keys": [
+   "in_٢_days"
+  ]
+ },
+ {
+  "text": "at ٩am",
+  "date_keys": [
+   "at_٩am"
+  ]
+ },
+ {
+  "text": "in 2 hours",
+  "date_keys": [
+   "in_120_minutes"
+  ]
+ },
+ {
+  "text": "toḿorrow",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "toḿ",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "tomorrow²",
+  "date_keys": []
+ },
+ {
+  "text": "x_tomorrow",
+  "date_keys": []
+ },
+ {
+  "text": "tomorrow_",
+  "date_keys": []
+ },
+ {
+  "text": "tonight\n",
+  "date_keys": [
+   "tonight"
+  ]
+ },
+ {
+  "text": "later tonight",
+  "date_keys": [
+   "tonight"
+  ]
+ },
+ {
+  "text": "this evening late",
+  "date_keys": [
+   "tonight"
+  ]
+ },
+ {
+  "text": "in 1 hour",
+  "date_keys": [
+   "in_60_minutes"
+  ]
+ },
+ {
+  "text": "in 90 minutes",
+  "date_keys": [
+   "in_90_minutes"
+  ]
+ },
+ {
+  "text": "in 007 minutes",
+  "date_keys": [
+   "in_007_minutes"
+  ]
+ },
+ {
+  "text": "in 00 hours",
+  "date_keys": [
+   "in_0_minutes"
+  ]
+ },
+ {
+  "text": "on monday blues",
+  "date_keys": []
+ },
+ {
+  "text": "taco tuesday",
+  "date_keys": []
+ },
+ {
+  "text": "monday motivation please",
+  "date_keys": []
+ },
+ {
+  "text": "set timer for 5 minutes tomorrow",
+  "date_keys": [
+   "tomorrow"
+  ]
+ },
+ {
+  "text": "listen to morning edition",
+  "date_keys": []
+ },
+ {
+  "text": "put on night music for an hour",
+  "date_keys": [
+   "night"
+  ]
+ }
+]

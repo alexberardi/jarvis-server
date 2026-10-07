@@ -1,0 +1,294 @@
+{
+ "stream": [
+  {
+   "name": "content_only",
+   "upstream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\ndata: [DONE]\n",
+   "frames": [
+    "{\"delta\": \"Hel\"}",
+    "{\"delta\": \"lo\"}",
+    "{\"delta\": \" world\"}",
+    "{\"done\": true, \"content\": \"Hello world\", \"usage\": {}, \"tool_calls\": null, \"finish_reason\": \"stop\"}"
+   ]
+  },
+  {
+   "name": "with_usage",
+   "upstream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"One\"}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\", two\"}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":2,\"total_tokens\":14}}\ndata: [DONE]\n",
+   "frames": [
+    "{\"delta\": \"One\"}",
+    "{\"delta\": \", two\"}",
+    "{\"done\": true, \"content\": \"One, two\", \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 2, \"total_tokens\": 14}, \"tool_calls\": null, \"finish_reason\": \"length\"}"
+   ]
+  },
+  {
+   "name": "parallel_tool_calls",
+   "upstream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"type\":\"function\",\"function\":{\"name\":\"get_time\",\"arguments\":\"\"}}]}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\": \"}}]}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"{\\\"tz\\\": \\\"UTC\\\"}\"}}]}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"Paris\\\"}\"}}]}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":40,\"completion_tokens\":20,\"total_tokens\":60}}\ndata: [DONE]\n",
+   "frames": [
+    "{\"done\": true, \"content\": \"\", \"usage\": {\"prompt_tokens\": 40, \"completion_tokens\": 20, \"total_tokens\": 60}, \"tool_calls\": [{\"id\": \"call_a\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"city\\\": \\\"Paris\\\"}\"}}, {\"id\": \"call_b\", \"type\": \"function\", \"function\": {\"name\": \"get_time\", \"arguments\": \"{\\\"tz\\\": \\\"UTC\\\"}\"}}], \"finish_reason\": \"tool_calls\"}"
+   ]
+  },
+  {
+   "name": "malformed_frame",
+   "upstream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"a\"}}]}\ndata: {not json\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"b\"}}]}\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n",
+   "frames": [
+    "{\"delta\": \"a\"}",
+    "{\"delta\": \"b\"}",
+    "{\"done\": true, \"content\": \"ab\", \"usage\": {}, \"tool_calls\": null, \"finish_reason\": \"stop\"}"
+   ]
+  },
+  {
+   "name": "framing_noise",
+   "upstream": ": keep-alive\r\nevent: message\r\n\r\ndata:{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"caf\\u00e9 \\u2014 \\ud83d\\ude00\"}}]}\r\n  data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"}}]}  \r\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>\\n</think>\\n\\nok\"}}]}\r\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\\"quoted\\\" \\\\ tab\\t\"}}]}\r\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\r\ndata: [DONE]\r\n\n",
+   "frames": [
+    "{\"delta\": \"caf\\u00e9 \\u2014 \\ud83d\\ude00\"}",
+    "{\"delta\": \"<think>\\n</think>\\n\\nok\"}",
+    "{\"delta\": \"\\\"quoted\\\" \\\\ tab\\t\"}",
+    "{\"done\": true, \"content\": \"caf\\u00e9 \\u2014 \\ud83d\\ude00<think>\\n</think>\\n\\nok\\\"quoted\\\" \\\\ tab\\t\", \"usage\": {}, \"tool_calls\": null, \"finish_reason\": \"stop\"}"
+   ]
+  }
+ ],
+ "envelopes": [
+  {
+   "input": {
+    "content": "hello",
+    "model_name": "live"
+   },
+   "output": {
+    "id": "<id>",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "live",
+    "choices": [
+     {
+      "index": 0,
+      "message": {
+       "role": "assistant",
+       "content": "hello",
+       "tool_calls": null,
+       "tool_call_id": null
+      },
+      "finish_reason": "stop"
+     }
+    ],
+    "usage": {
+     "prompt_tokens": 0,
+     "completion_tokens": 0,
+     "total_tokens": 0
+    },
+    "date_keys": null
+   }
+  },
+  {
+   "input": {
+    "content": "",
+    "model_name": "background",
+    "usage": {
+     "prompt_tokens": 3,
+     "completion_tokens": 0,
+     "total_tokens": 3
+    },
+    "date_keys": []
+   },
+   "output": {
+    "id": "<id>",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "background",
+    "choices": [
+     {
+      "index": 0,
+      "message": {
+       "role": "assistant",
+       "content": "",
+       "tool_calls": null,
+       "tool_call_id": null
+      },
+      "finish_reason": "stop"
+     }
+    ],
+    "usage": {
+     "prompt_tokens": 3,
+     "completion_tokens": 0,
+     "total_tokens": 3
+    },
+    "date_keys": []
+   }
+  },
+  {
+   "input": {
+    "content": "x",
+    "model_name": "live",
+    "date_keys": [
+     "tomorrow",
+     "morning"
+    ],
+    "finish_reason": "length"
+   },
+   "output": {
+    "id": "<id>",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "live",
+    "choices": [
+     {
+      "index": 0,
+      "message": {
+       "role": "assistant",
+       "content": "x",
+       "tool_calls": null,
+       "tool_call_id": null
+      },
+      "finish_reason": "length"
+     }
+    ],
+    "usage": {
+     "prompt_tokens": 0,
+     "completion_tokens": 0,
+     "total_tokens": 0
+    },
+    "date_keys": [
+     "tomorrow",
+     "morning"
+    ]
+   }
+  },
+  {
+   "input": {
+    "content": "",
+    "model_name": "live",
+    "tool_calls": [
+     {
+      "id": "call_1",
+      "type": "function",
+      "function": {
+       "name": "f",
+       "arguments": "{\"a\": 1}"
+      }
+     }
+    ]
+   },
+   "output": {
+    "id": "<id>",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "live",
+    "choices": [
+     {
+      "index": 0,
+      "message": {
+       "role": "assistant",
+       "content": "",
+       "tool_calls": [
+        {
+         "id": "call_1",
+         "type": "function",
+         "function": {
+          "name": "f",
+          "arguments": "{\"a\": 1}"
+         }
+        }
+       ],
+       "tool_call_id": null
+      },
+      "finish_reason": "tool_calls"
+     }
+    ],
+    "usage": {
+     "prompt_tokens": 0,
+     "completion_tokens": 0,
+     "total_tokens": 0
+    },
+    "date_keys": null
+   }
+  },
+  {
+   "input": {
+    "content": "",
+    "model_name": "live",
+    "tool_calls": [
+     {
+      "function": {
+       "name": "g"
+      }
+     }
+    ],
+    "finish_reason": "tool_calls"
+   },
+   "output": {
+    "id": "<id>",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "live",
+    "choices": [
+     {
+      "index": 0,
+      "message": {
+       "role": "assistant",
+       "content": "",
+       "tool_calls": [
+        {
+         "id": "<generated>",
+         "type": "function",
+         "function": {
+          "name": "g",
+          "arguments": "{}"
+         }
+        }
+       ],
+       "tool_call_id": null
+      },
+      "finish_reason": "tool_calls"
+     }
+    ],
+    "usage": {
+     "prompt_tokens": 0,
+     "completion_tokens": 0,
+     "total_tokens": 0
+    },
+    "date_keys": null
+   }
+  }
+ ],
+ "error_types": {
+  "400": "invalid_request_error",
+  "401": "invalid_request_error",
+  "403": "invalid_request_error",
+  "404": "not_found_error",
+  "408": "invalid_request_error",
+  "413": "invalid_request_error",
+  "422": "invalid_request_error",
+  "429": "rate_limit_error",
+  "499": "invalid_request_error",
+  "500": "internal_server_error",
+  "502": "internal_server_error",
+  "503": "internal_server_error"
+ },
+ "callback": {
+  "keys": [
+   "job_id",
+   "job_type",
+   "finished_at",
+   "status",
+   "result",
+   "error",
+   "timing",
+   "metadata"
+  ],
+  "envelope": {
+   "job_id": "j1",
+   "job_type": "chat",
+   "finished_at": "<YYYY-MM-DDTHH:MM:SSZ>",
+   "status": "succeeded",
+   "result": {
+    "content": "{}"
+   },
+   "error": null,
+   "timing": {
+    "processing_ms": 5
+   },
+   "metadata": {
+    "type": "memory",
+    "n": 1
+   }
+  }
+ }
+}

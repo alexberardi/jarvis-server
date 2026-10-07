@@ -1,0 +1,1106 @@
+[
+ {
+  "input": "{\"a\":1}",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": 1}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\":1}\"",
+  "extract_json_from_text": "{\"a\":1}",
+  "repair_truncated_json": "{\"a\":1}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": 1}",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": 1}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1}\"",
+  "extract_json_from_text": "{\"a\": 1}",
+  "repair_truncated_json": "{\"a\": 1}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\n  \"a\": 1,\n  \"b\": [1, 2]\n}",
+  "parse_json_response": {
+   "content": "{\"a\": 1, \"b\": [1, 2]}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": 1, \"b\": [1, 2]}",
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": "{\n  \"a\": 1,\n  \"b\": [1, 2]\n}",
+  "repair_truncated_json": "{\n  \"a\": 1,\n  \"b\": [1, 2]\n}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "[1,2,3]",
+  "parse_json_response": {
+   "content": "[1, 2, 3]",
+   "valid": true
+  },
+  "repair_duplicate_keys": "[1, 2, 3]",
+  "repair_unescaped_quotes": "\"[1,2,3]\"",
+  "extract_json_from_text": "[1,2,3]",
+  "repair_truncated_json": "[1,2,3]",
+  "is_json_truncated": false
+ },
+ {
+  "input": "\"just a string\"",
+  "parse_json_response": {
+   "content": "\"just a string\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": "\"just a string\"",
+  "repair_unescaped_quotes": "\"just a string\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "\"just a string\"",
+  "is_json_truncated": false
+ },
+ {
+  "input": "42",
+  "parse_json_response": {
+   "content": "42",
+   "valid": true
+  },
+  "repair_duplicate_keys": "42",
+  "repair_unescaped_quotes": "\"42\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "42",
+  "is_json_truncated": false
+ },
+ {
+  "input": "null",
+  "parse_json_response": {
+   "content": "null",
+   "valid": true
+  },
+  "repair_duplicate_keys": "null",
+  "repair_unescaped_quotes": "\"null\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "null",
+  "is_json_truncated": false
+ },
+ {
+  "input": "true",
+  "parse_json_response": {
+   "content": "true",
+   "valid": true
+  },
+  "repair_duplicate_keys": "true",
+  "repair_unescaped_quotes": "\"true\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "true",
+  "is_json_truncated": false
+ },
+ {
+  "input": "  {\"a\": 1}  \n",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": 1}",
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": "{\"a\": 1}",
+  "repair_truncated_json": "  {\"a\": 1}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": 1, \"a\": 2}",
+  "parse_json_response": {
+   "content": "{\"a\": [1, 2]}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": [1, 2]}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1, \\\"a\\\": 2}\"",
+  "extract_json_from_text": "{\"a\": 1, \"a\": 2}",
+  "repair_truncated_json": "{\"a\": 1, \"a\": 2}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": [1], \"a\": 2}",
+  "parse_json_response": {
+   "content": "{\"a\": [1, 2]}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": [1, 2]}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": [1], \\\"a\\\": 2}\"",
+  "extract_json_from_text": "{\"a\": [1], \"a\": 2}",
+  "repair_truncated_json": "{\"a\": [1], \"a\": 2}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": {\"b\": 1, \"b\": 2}}",
+  "parse_json_response": {
+   "content": "{\"a\": {\"b\": [1, 2]}}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": {\"b\": [1, 2]}}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": {\\\"b\\\": 1, \\\"b\\\": 2}}\"",
+  "extract_json_from_text": "{\"a\": {\"b\": 1, \"b\": 2}}",
+  "repair_truncated_json": "{\"a\": {\"b\": 1, \"b\": 2}}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "[{\"x\": 1, \"x\": {\"y\": 1, \"y\": 2}}]",
+  "parse_json_response": {
+   "content": "[{\"x\": [1, {\"y\": [1, 2]}]}]",
+   "valid": true
+  },
+  "repair_duplicate_keys": "[{\"x\": [1, {\"y\": [1, 2]}]}]",
+  "repair_unescaped_quotes": "\"[{\\\"x\\\": 1, \\\"x\\\": {\\\"y\\\": 1, \\\"y\\\": 2}}]\"",
+  "extract_json_from_text": "[{\"x\": 1, \"x\": {\"y\": 1, \"y\": 2}}]",
+  "repair_truncated_json": "[{\"x\": 1, \"x\": {\"y\": 1, \"y\": 2}}]",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"caf\u00e9\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"caf\u00e9\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": \"caf\u00e9\"}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"caf\\u00e9\\\"}\"",
+  "extract_json_from_text": "{\"a\": \"caf\u00e9\"}",
+  "repair_truncated_json": "{\"a\": \"caf\u00e9\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"caf\\u00e9\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"caf\u00e9\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": \"caf\u00e9\"}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"caf\\u00e9\\\"}\"",
+  "extract_json_from_text": "{\"a\": \"caf\\u00e9\"}",
+  "repair_truncated_json": "{\"a\": \"caf\\u00e9\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"emoji\": \"\\ud83d\\ude00\"}",
+  "parse_json_response": {
+   "content": "{\"emoji\": \"\ud83d\ude00\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"emoji\": \"\ud83d\ude00\"}",
+  "repair_unescaped_quotes": "\"{\\\"emoji\\\": \\\"\\ud83d\\ude00\\\"}\"",
+  "extract_json_from_text": "{\"emoji\": \"\\ud83d\\ude00\"}",
+  "repair_truncated_json": "{\"emoji\": \"\\ud83d\\ude00\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"emoji\": \"\ud83d\ude00\"}",
+  "parse_json_response": {
+   "content": "{\"emoji\": \"\ud83d\ude00\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"emoji\": \"\ud83d\ude00\"}",
+  "repair_unescaped_quotes": "\"{\\\"emoji\\\": \\\"\\ud83d\\ude00\\\"}\"",
+  "extract_json_from_text": "{\"emoji\": \"\ud83d\ude00\"}",
+  "repair_truncated_json": "{\"emoji\": \"\ud83d\ude00\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"lone\": \"\\ud800\"}",
+  "parse_json_response": {
+   "content": "{\"lone\": \"\ud800\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"lone\": \"\ud800\"}",
+  "repair_unescaped_quotes": "\"{\\\"lone\\\": \\\"\\ud800\\\"}\"",
+  "extract_json_from_text": "{\"lone\": \"\\ud800\"}",
+  "repair_truncated_json": "{\"lone\": \"\\ud800\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"lone\": \"\\udc00x\"}",
+  "parse_json_response": {
+   "content": "{\"lone\": \"\udc00x\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"lone\": \"\udc00x\"}",
+  "repair_unescaped_quotes": "\"{\\\"lone\\\": \\\"\\udc00x\\\"}\"",
+  "extract_json_from_text": "{\"lone\": \"\\udc00x\"}",
+  "repair_truncated_json": "{\"lone\": \"\\udc00x\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"ctl\": \"a\\u0001b\"}",
+  "parse_json_response": {
+   "content": "{\"ctl\": \"a\\u0001b\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"ctl\": \"a\\u0001b\"}",
+  "repair_unescaped_quotes": "\"{\\\"ctl\\\": \\\"a\\u0001b\\\"}\"",
+  "extract_json_from_text": "{\"ctl\": \"a\\u0001b\"}",
+  "repair_truncated_json": "{\"ctl\": \"a\\u0001b\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e\\/f\\bg\\fh\\ri\"}",
+  "parse_json_response": {
+   "content": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e/f\\bg\\fh\\ri\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e/f\\bg\\fh\\ri\"}",
+  "repair_unescaped_quotes": "\"{\\\"tab\\\": \\\"a\\tb\\nc\\\"d\\\\e/f\\bg\\fh\\ri\\\"}\"",
+  "extract_json_from_text": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e\\/f\\bg\\fh\\ri\"}",
+  "repair_truncated_json": "{\"tab\": \"a\\tb\\nc\\\"d\\\\e\\/f\\bg\\fh\\ri\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"f\": 1.0, \"g\": 1e20, \"h\": 1e-7, \"i\": 0.1, \"j\": -0.0}",
+  "parse_json_response": {
+   "content": "{\"f\": 1.0, \"g\": 1e+20, \"h\": 1e-07, \"i\": 0.1, \"j\": -0.0}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"f\": 1.0, \"g\": 1e+20, \"h\": 1e-07, \"i\": 0.1, \"j\": -0.0}",
+  "repair_unescaped_quotes": "\"{\\\"f\\\": 1.0, \\\"g\\\": 1e20, \\\"h\\\": 1e-7, \\\"i\\\": 0.1, \\\"j\\\": -0.0}\"",
+  "extract_json_from_text": "{\"f\": 1.0, \"g\": 1e20, \"h\": 1e-7, \"i\": 0.1, \"j\": -0.0}",
+  "repair_truncated_json": "{\"f\": 1.0, \"g\": 1e20, \"h\": 1e-7, \"i\": 0.1, \"j\": -0.0}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"big\": 123456789012345678901234567890, \"e\": 1E5, \"neg\": -12, \"z\": 0}",
+  "parse_json_response": {
+   "content": "{\"big\": 123456789012345678901234567890, \"e\": 100000.0, \"neg\": -12, \"z\": 0}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"big\": 123456789012345678901234567890, \"e\": 100000.0, \"neg\": -12, \"z\": 0}",
+  "repair_unescaped_quotes": "\"{\\\"big\\\": 123456789012345678901234567890, \\\"e\\\": 1E5, \\\"neg\\\": -12, \\\"z\\\": 0}\"",
+  "extract_json_from_text": "{\"big\": 123456789012345678901234567890, \"e\": 1E5, \"neg\": -12, \"z\": 0}",
+  "repair_truncated_json": "{\"big\": 123456789012345678901234567890, \"e\": 1E5, \"neg\": -12, \"z\": 0}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"inf\": 1e400, \"ninf\": -1e400}",
+  "parse_json_response": {
+   "content": "{\"inf\": Infinity, \"ninf\": -Infinity}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"inf\": Infinity, \"ninf\": -Infinity}",
+  "repair_unescaped_quotes": "\"{\\\"inf\\\": 1e400, \\\"ninf\\\": -1e400}\"",
+  "extract_json_from_text": "{\"inf\": 1e400, \"ninf\": -1e400}",
+  "repair_truncated_json": "{\"inf\": 1e400, \"ninf\": -1e400}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "[NaN, Infinity, -Infinity]",
+  "parse_json_response": {
+   "content": "[NaN, Infinity, -Infinity]",
+   "valid": true
+  },
+  "repair_duplicate_keys": "[NaN, Infinity, -Infinity]",
+  "repair_unescaped_quotes": "\"[NaN, Infinity, -Infinity]\"",
+  "extract_json_from_text": "[NaN, Infinity, -Infinity]",
+  "repair_truncated_json": "[NaN, Infinity, -Infinity]",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"f\": 1e16, \"g\": 1e15, \"h\": 0.0001, \"k\": 0.00001, \"l\": 123456789.123456789}",
+  "parse_json_response": {
+   "content": "{\"f\": 1e+16, \"g\": 1000000000000000.0, \"h\": 0.0001, \"k\": 1e-05, \"l\": 123456789.12345679}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"f\": 1e+16, \"g\": 1000000000000000.0, \"h\": 0.0001, \"k\": 1e-05, \"l\": 123456789.12345679}",
+  "repair_unescaped_quotes": "\"{\\\"f\\\": 1e16, \\\"g\\\": 1e15, \\\"h\\\": 0.0001, \\\"k\\\": 0.00001, \\\"l\\\": 123456789.123456789}\"",
+  "extract_json_from_text": "{\"f\": 1e16, \"g\": 1e15, \"h\": 0.0001, \"k\": 0.00001, \"l\": 123456789.123456789}",
+  "repair_truncated_json": "{\"f\": 1e16, \"g\": 1e15, \"h\": 0.0001, \"k\": 0.00001, \"l\": 123456789.123456789}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"f\": 2.5e-5, \"g\": 1.7976931348623157e308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+  "parse_json_response": {
+   "content": "{\"f\": 2.5e-05, \"g\": 1.7976931348623157e+308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"f\": 2.5e-05, \"g\": 1.7976931348623157e+308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+  "repair_unescaped_quotes": "\"{\\\"f\\\": 2.5e-5, \\\"g\\\": 1.7976931348623157e308, \\\"h\\\": 5e-324, \\\"i\\\": 100.0, \\\"j\\\": 3.14159}\"",
+  "extract_json_from_text": "{\"f\": 2.5e-5, \"g\": 1.7976931348623157e308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+  "repair_truncated_json": "{\"f\": 2.5e-5, \"g\": 1.7976931348623157e308, \"h\": 5e-324, \"i\": 100.0, \"j\": 3.14159}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": 1,}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": 1,}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1,}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "{\"a\": 1}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "[1, 2,]",
+  "parse_json_response": {
+   "content": "\"[1, 2,]\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"[1, 2,]\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "[1, 2]",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": 1 \"b\": 2}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": 1 \\\"b\\\": 2}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1 \\\"b\\\": 2}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\" 1}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\" 1}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\" 1}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{a: 1}",
+  "parse_json_response": {
+   "content": "\"{a: 1}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{a: 1}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{'a': 1}",
+  "parse_json_response": {
+   "content": "\"{'a': 1}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{'a': 1}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"he said \"hi\"\"}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": \\\"he said \\\"hi\\\"}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"he said \\\"hi\\\"}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"text\": \"unterminated",
+  "parse_json_response": {
+   "content": "\"{\\\"text\\\": \\\"unterminated\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"text\\\": \\\"unterminated\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"items\": [{\"name\": \"x\"}, {\"name\": \"y",
+  "parse_json_response": {
+   "content": "\"{\\\"items\\\": [{\\\"name\\\": \\\"x\\\"}, {\\\"name\\\": \\\"y\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"items\\\": [{\\\"name\\\": \\\"x\\\"}, {\\\"name\\\": \\\"y\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"a\": 1, \"b\": {\"c\": [1, 2",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": 1, \\\"b\\\": {\\\"c\\\": [1, 2\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1, \\\"b\\\": {\\\"c\\\": [1, 2\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"a\": 1, \"b\":",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": 1, \\\"b\\\":\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1, \\\"b\\\":\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"a\": 1, \"b\": ",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": 1, \\\"b\\\": \"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1, \\\"b\\\": \"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": true
+ },
+ {
+  "input": "[1, 2, 3",
+  "parse_json_response": {
+   "content": "\"[1, 2, 3\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"[1, 2, 3\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "[1, 2, 3]",
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"a\": [1, 2, 3], \"b\": \"x\"",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": [1, 2, 3], \\\"b\\\": \\\"x\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": [1, 2, 3], \\\"b\\\": \\\"x\"",
+  "extract_json_from_text": "[1, 2, 3]",
+  "repair_truncated_json": "{\"a\": [1, 2, 3], \"b\": \"x\"}",
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"a\": \"x\",",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": \\\"x\\\",\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"x\\\",\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "{\"a\": \"x\"}",
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"a\": \"x\",  ",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": \\\"x\\\",  \"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"x\\\",  \"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "{\"a\": \"x\"}",
+  "is_json_truncated": true
+ },
+ {
+  "input": "Here is the JSON: {\"a\": 1} hope that helps",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"Here is the JSON: {\\\"a\\\": 1} hope that helps\"",
+  "extract_json_from_text": "{\"a\": 1}",
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "Sure!\n```json\n{\"answer\": \"yes\"}\n```",
+  "parse_json_response": {
+   "content": "{\"answer\": \"yes\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": "{\"answer\": \"yes\"}",
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "```\n[1, 2]\n```",
+  "parse_json_response": {
+   "content": "[1, 2]",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": "[1, 2]",
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "prefix [1, 2] and {\"a\": 1}",
+  "parse_json_response": {
+   "content": "[1, 2]",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"prefix [1, 2] and {\\\"a\\\": 1}\"",
+  "extract_json_from_text": "[1, 2]",
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "text {\"a\": 1} more {\"b\": 2} end",
+  "parse_json_response": {
+   "content": "\"text {\\\"a\\\": 1} more {\\\"b\\\": 2} end\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"text {\\\"a\\\": 1} more {\\\"b\\\": 2} end\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "no json here",
+  "parse_json_response": {
+   "content": "\"no json here\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"no json here\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "",
+  "parse_json_response": {
+   "content": "\"\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "   ",
+  "parse_json_response": {
+   "content": "\"   \"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"   \"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{}",
+  "parse_json_response": {
+   "content": "{}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{}",
+  "repair_unescaped_quotes": "\"{}\"",
+  "extract_json_from_text": "{}",
+  "repair_truncated_json": "{}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "[]",
+  "parse_json_response": {
+   "content": "[]",
+   "valid": true
+  },
+  "repair_duplicate_keys": "[]",
+  "repair_unescaped_quotes": "\"[]\"",
+  "extract_json_from_text": "[]",
+  "repair_truncated_json": "[]",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{",
+  "parse_json_response": {
+   "content": "\"{\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "{}",
+  "is_json_truncated": true
+ },
+ {
+  "input": "[",
+  "parse_json_response": {
+   "content": "\"[\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"[\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "[]",
+  "is_json_truncated": true
+ },
+ {
+  "input": "}",
+  "parse_json_response": {
+   "content": "\"}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "]",
+  "parse_json_response": {
+   "content": "\"]\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"]\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": tru}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": tru}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": tru}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": nul}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": nul}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": nul}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "01",
+  "parse_json_response": {
+   "content": "\"01\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"01\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "1.",
+  "parse_json_response": {
+   "content": "\"1.\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"1.\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "1e",
+  "parse_json_response": {
+   "content": "\"1e\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"1e\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "-",
+  "parse_json_response": {
+   "content": "\"-\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"-\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "-1",
+  "parse_json_response": {
+   "content": "-1",
+   "valid": true
+  },
+  "repair_duplicate_keys": "-1",
+  "repair_unescaped_quotes": "\"-1\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "-1",
+  "is_json_truncated": false
+ },
+ {
+  "input": "1.5e+3",
+  "parse_json_response": {
+   "content": "1500.0",
+   "valid": true
+  },
+  "repair_duplicate_keys": "1500.0",
+  "repair_unescaped_quotes": "\"1.5e+3\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "1.5e+3",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": 1}{\"b\": 2}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": 1}{\\\"b\\\": 2}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1}{\\\"b\\\": 2}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": 1} trailing",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": 1} trailing\"",
+  "extract_json_from_text": "{\"a\": 1}",
+  "repair_truncated_json": "{\"a\": 1}",
+  "is_json_truncated": true
+ },
+ {
+  "input": "\ufeff{\"a\": 1}",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"\\ufeff{\\\"a\\\": 1}\"",
+  "extract_json_from_text": "{\"a\": 1}",
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"line\nbreak\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"line\nbreak\"}",
+   "valid": false
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"\\x41\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"\\x41\"}",
+   "valid": false
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"\\u12\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"\\u12\"}",
+   "valid": false
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"\\u12zz\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"\\u12zz\"}",
+   "valid": false
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "\"\\u0041",
+  "parse_json_response": {
+   "content": "\"A\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"A\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"k\": \"v\", \"k\": \"w\", \"k\": \"z\"}",
+  "parse_json_response": {
+   "content": "{\"k\": [\"v\", \"w\", \"z\"]}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"k\": [\"v\", \"w\", \"z\"]}",
+  "repair_unescaped_quotes": "\"{\\\"k\\\": \\\"v\\\", \\\"k\\\": \\\"w\\\", \\\"k\\\": \\\"z\\\"}\"",
+  "extract_json_from_text": "{\"k\": \"v\", \"k\": \"w\", \"k\": \"z\"}",
+  "repair_truncated_json": "{\"k\": \"v\", \"k\": \"w\", \"k\": \"z\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+  "parse_json_response": {
+   "content": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+  "repair_unescaped_quotes": "\"{\\\"reasoning\\\": \\\"<think>hmm</think>\\\", \\\"answer\\\": 1}\"",
+  "extract_json_from_text": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+  "repair_truncated_json": "{\"reasoning\": \"<think>hmm</think>\", \"answer\": 1}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "<think>\nlet me think\n</think>\n{\"a\": 1}",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": "{\"a\": 1}",
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"name\": \"Mr. \"Bob\" Smith\", \"age\": 30}",
+  "parse_json_response": {
+   "content": "\"{\\\"name\\\": \\\"Mr. \\\"Bob\\\" Smith\\\", \\\"age\\\": 30}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"name\\\": \\\"Mr. \\\"Bob\\\" Smith\\\", \\\"age\\\": 30}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"msg\": \"it's fine\"}",
+  "parse_json_response": {
+   "content": "{\"msg\": \"it's fine\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"msg\": \"it's fine\"}",
+  "repair_unescaped_quotes": "\"{\\\"msg\\\": \\\"it's fine\\\"}\"",
+  "extract_json_from_text": "{\"msg\": \"it's fine\"}",
+  "repair_truncated_json": "{\"msg\": \"it's fine\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": [1, 2, 3}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": [1, 2, 3}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": [1, 2, 3}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"a\": {\"b\": 1]}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": {\\\"b\\\": 1]}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": {\\\"b\\\": 1]}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": true
+ },
+ {
+  "input": "[{\"a\": 1}, {\"b\": 2}",
+  "parse_json_response": {
+   "content": "\"[{\\\"a\\\": 1}, {\\\"b\\\": 2}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"[{\\\"a\\\": 1}, {\\\"b\\\": 2}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "[{\"a\": 1}, {\"b\": 2}]",
+  "is_json_truncated": true
+ },
+ {
+  "input": "{\"x\": \"a,b\", \"y\": [1,2,],}",
+  "parse_json_response": {
+   "content": "\"{\\\"x\\\": \\\"a,b\\\", \\\"y\\\": [1,2,],}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"x\\\": \\\"a,b\\\", \\\"y\\\": [1,2,],}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": "{\"x\": \"a,b\", \"y\": [1,2]}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+  "parse_json_response": {
+   "content": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+  "repair_unescaped_quotes": "\"{\\\"deep\\\": [[[[[1]]]]], \\\"s\\\": \\\"]}\\\"}\"",
+  "extract_json_from_text": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+  "repair_truncated_json": "{\"deep\": [[[[[1]]]]], \"s\": \"]}\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+  "parse_json_response": {
+   "content": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+  "repair_unescaped_quotes": "\"{\\\"unicode_key_\\u00e9\\\": \\\"\\u65e5\\u672c\\u8a9e\\\"}\"",
+  "extract_json_from_text": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+  "repair_truncated_json": "{\"unicode_key_\u00e9\": \"\u65e5\u672c\u8a9e\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": 1}\n",
+  "parse_json_response": {
+   "content": "{\"a\": 1}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": 1}",
+  "repair_unescaped_quotes": null,
+  "extract_json_from_text": "{\"a\": 1}",
+  "repair_truncated_json": "{\"a\": 1}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\":\"x\"}{\"a\":\"y\"}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\":\\\"x\\\"}{\\\"a\\\":\\\"y\\\"}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\":\\\"x\\\"}{\\\"a\\\":\\\"y\\\"}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "[1] [2]",
+  "parse_json_response": {
+   "content": "\"[1] [2]\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"[1] [2]\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"b\\\"c\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"b\\\"c\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": \"b\\\"c\"}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"b\\\"c\\\"}\"",
+  "extract_json_from_text": "{\"a\": \"b\\\"c\"}",
+  "repair_truncated_json": "{\"a\": \"b\\\"c\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"\\\"quoted\\\"\"}",
+  "parse_json_response": {
+   "content": "{\"a\": \"\\\"quoted\\\"\"}",
+   "valid": true
+  },
+  "repair_duplicate_keys": "{\"a\": \"\\\"quoted\\\"\"}",
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"quoted\\\"}\"",
+  "extract_json_from_text": "{\"a\": \"\\\"quoted\\\"\"}",
+  "repair_truncated_json": "{\"a\": \"\\\"quoted\\\"\"}",
+  "is_json_truncated": false
+ },
+ {
+  "input": "He said \"hello\" and left",
+  "parse_json_response": {
+   "content": "\"He said \\\"hello\\\" and left\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"He said \\\"hello\\\" and left\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "\"a\" \"b\"",
+  "parse_json_response": {
+   "content": "\"a\\\" \\\"b\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"a\\\" \\\"b\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ },
+ {
+  "input": "{\"a\": \"x\" \"y\"}",
+  "parse_json_response": {
+   "content": "\"{\\\"a\\\": \\\"x\\\" \\\"y\\\"}\"",
+   "valid": true
+  },
+  "repair_duplicate_keys": null,
+  "repair_unescaped_quotes": "\"{\\\"a\\\": \\\"x\\\" \\\"y\\\"}\"",
+  "extract_json_from_text": null,
+  "repair_truncated_json": null,
+  "is_json_truncated": false
+ }
+]

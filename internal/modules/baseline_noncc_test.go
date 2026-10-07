@@ -35,7 +35,7 @@ var nonCCBaselines = []struct {
 		"notifications_device_tokens", "notifications_inbox_items", "notifications_notification_log",
 	}},
 	{"ocr", ocr.Migrations(), nil},
-	{"llm", llm.Migrations(), nil},
+	{"llm", llm.Migrations(), []string{"llm_dedupe", "llm_installs", "llm_models"}},
 	{"stt", stt.Migrations(), nil},
 	{"tts", tts.Migrations(), nil},
 }
