@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Brain, Server, GitMerge } from 'lucide-react'
 import { toast } from 'sonner'
 import { useContainers, useRestartContainer } from '@/hooks/useContainers'
-import { useLabels } from '@/hooks/useModelManager'
+import { useSetupState } from '@/hooks/useSetup'
 import { getInstallStatus } from '@/api/install'
 import ServiceHealthCard from '@/components/dashboard/ServiceHealthCard'
 import UpdateBanner from '@/components/dashboard/UpdateBanner'
@@ -17,7 +17,7 @@ export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useContainers()
   const restartMutation = useRestartContainer()
   // The banner fires while the live label has no model (A8 rewrites the rest of this page).
-  const labels = useLabels()
+  const setup = useSetupState()
   const [dismissed, setDismissed] = useState(
     () => !!localStorage.getItem(LLM_SETUP_DISMISSED_KEY),
   )
@@ -31,8 +31,8 @@ export default function DashboardPage() {
   }, [])
 
   const showLlmBanner =
-    !!labels.data &&
-    labels.data.labels.some((l) => l.label === 'live' && l.state === 'not_configured') &&
+    setup.data?.superuser === true &&
+    setup.data.models_configured === false &&
     !dismissed
 
   const handleRestart = (id: string) => {

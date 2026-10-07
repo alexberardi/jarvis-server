@@ -1,45 +1,109 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
+import { setupKeys } from '@/hooks/useSetup'
 import AccountStep from '@/components/wizard/AccountStep'
+import CheckStep from '@/components/wizard/CheckStep'
+import DoneStep from '@/components/wizard/DoneStep'
+import HardwareStep from '@/components/wizard/HardwareStep'
+import ModelsStep from '@/components/wizard/ModelsStep'
+import PrivacyStep from '@/components/wizard/PrivacyStep'
+import { buttonClass } from '@/components/models/styles'
+import { STEPS, TITLES, idx, initialStep, saveStep, type Step } from '@/components/wizard/steps'
 
-/**
- * First-run setup on jarvisd.
- *
- * Interim (A5): only the Account step is live; the Docker-era Welcome/Services/Review/Install
- * steps have no backend under jarvisd. A7 rebuilds this as Check → Account → Hardware → Models →
- * Privacy → Done (AD3, AD3a), reusing the Models page components (A6).
- */
+function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
+  return (
+    <ol className="mb-4 flex flex-wrap items-center gap-1 text-xs" aria-label="Setup steps">
+      {STEPS.map((s, i) => {
+        const done = i < idx(step)
+        const current = s === step
+        // Steps from Hardware on can be revisited; Check and Account are behind us for good.
+        const canPick = done && idx(s) >= idx('hardware')
+        return (
+          <li key={s} className="flex items-center gap-1">
+            {i > 0 && <span className="mx-1 h-px w-4 bg-[var(--color-border)]" aria-hidden />}
+            <button
+              type="button"
+              disabled={!canPick}
+              onClick={() => onPick(s)}
+              aria-current={current ? 'step' : undefined}
+              className={cn(
+                'flex items-center gap-1 rounded-full px-2.5 py-1',
+                current && 'bg-[var(--color-primary)] text-white',
+                done && 'text-[var(--color-text)]',
+                !done && !current && 'text-[var(--color-text-muted)]',
+                canPick && 'hover:bg-[var(--color-surface-alt)]',
+              )}
+            >
+              {done && <Check size={12} className="text-green-500" />}
+              {TITLES[s]}
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+/** First-run setup on jarvisd (S3, AQ3/AD3, AD3a). */
 export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolean }) {
   const { state } = useAuth()
   const navigate = useNavigate()
-  const [accountDone, setAccountDone] = useState(false)
+  const qc = useQueryClient()
+  const [step, setStepState] = useState<Step | null>(() => initialStep(needsSuperuser, state.isAuthenticated))
 
-  // Setup was already done before this page loaded: there is nothing to do here.
-  if (!needsSuperuser && !accountDone) {
-    return <Navigate to={state.isAuthenticated ? '/dashboard' : '/login'} replace />
+  const go = (s: Step | null) => {
+    saveStep(s)
+    setStepState(s)
   }
 
+  if (state.isLoading) return null
+  if (!step) return <Navigate to={state.isAuthenticated ? '/dashboard' : '/login'} replace />
+  // Past Account without a session (it expired, or was signed out): sign in first.
+  if (idx(step) > idx('account') && !state.isAuthenticated) return <Navigate to="/login" replace />
+
+  const next = () => go(STEPS[Math.min(idx(step) + 1, STEPS.length - 1)])
+
+  function finish() {
+    go(null)
+    void qc.invalidateQueries({ queryKey: setupKeys.state })
+    navigate('/dashboard', { replace: true })
+  }
+
+  const wide = step === 'models'
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)] p-4">
-      <div className="w-full max-w-2xl">
+    <div className="flex min-h-screen justify-center bg-[var(--color-background)] p-4 sm:items-center">
+      <div className={cn('w-full', wide ? 'max-w-4xl' : 'max-w-2xl')}>
+        <div className="mb-2 text-center text-lg font-bold text-[var(--color-primary)]">Jarvis setup</div>
+        <Stepper step={step} onPick={go} />
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-lg">
-          <AccountStep onCreated={() => setAccountDone(true)} />
-        </div>
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={() => navigate('/models')}
-            disabled={!state.isAuthenticated}
-            className={cn(
-              'rounded-lg bg-[var(--color-primary)] px-6 py-2 text-sm font-medium text-white',
-              'transition-opacity hover:opacity-90',
-              'disabled:cursor-not-allowed disabled:opacity-50',
-            )}
-          >
-            Next: models
-          </button>
+          {step === 'check' && (
+            <>
+              <CheckStep />
+              <div className="mt-4 flex justify-end">
+                <button type="button" className={buttonClass.primary} onClick={next}>
+                  Continue
+                </button>
+              </div>
+            </>
+          )}
+          {step === 'account' && (
+            <AccountStep
+              onCreated={() => {
+                // The session now exists: the superuser view of /api/setup/state drives the rest.
+                void qc.invalidateQueries({ queryKey: setupKeys.state })
+                go('hardware')
+              }}
+            />
+          )}
+          {step === 'hardware' && <HardwareStep onDone={next} />}
+          {step === 'models' && <ModelsStep onDone={next} />}
+          {step === 'privacy' && <PrivacyStep onDone={next} />}
+          {step === 'done' && <DoneStep onFinish={finish} />}
         </div>
       </div>
     </div>
