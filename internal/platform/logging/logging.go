@@ -49,6 +49,10 @@ type Shipper struct {
 	interval time.Duration
 	done     chan struct{}
 	stopOnce sync.Once
+	// mu orders offers against Close: goroutines still logging during shutdown (mDNS,
+	// engines) must not send on the closed channel. Their records still reach stderr.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // NewShipper starts shipping to sink. Call Close to flush and stop.
@@ -62,6 +66,12 @@ func NewShipper(sink Sink, buffer, batch int, interval time.Duration) *Shipper {
 func (s *Shipper) Dropped() int64 { return s.dropped.Load() }
 
 func (s *Shipper) offer(r Record) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		s.dropped.Add(1)
+		return
+	}
 	select {
 	case s.ch <- r:
 	default:
@@ -102,7 +112,12 @@ func (s *Shipper) run(sink Sink) {
 
 // Close flushes buffered records and stops the shipper.
 func (s *Shipper) Close() {
-	s.stopOnce.Do(func() { close(s.ch) })
+	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		close(s.ch)
+		s.mu.Unlock()
+	})
 	<-s.done
 }
 

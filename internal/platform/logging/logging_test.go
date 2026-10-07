@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -80,4 +81,24 @@ func TestParseLevel(t *testing.T) {
 			t.Errorf("%q", in)
 		}
 	}
+}
+
+// jarvisd panicked at shutdown when mDNS logged after main had closed the shipper.
+func TestLoggingAfterCloseIsSafe(t *testing.T) {
+	sh := NewShipper(&memSink{}, 16, 4, time.Millisecond)
+	log := New(io.Discard, slog.LevelInfo, sh)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 200 {
+				log.Info("still running")
+			}
+		}()
+	}
+	sh.Close()
+	wg.Wait()
+	log.Info("after close")
+	sh.Close() // idempotent
 }
