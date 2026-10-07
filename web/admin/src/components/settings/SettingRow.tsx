@@ -1,19 +1,23 @@
 import { useState } from 'react'
-import { Pencil, Database, AlertTriangle } from 'lucide-react'
+import { Pencil, Database, AlertTriangle, Lock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUpdateSetting } from '@/hooks/useSettings'
 import SettingEditor from './SettingEditor'
 import type { SettingResponse } from '@/types/settings'
 import { toast } from 'sonner'
+import { errorMessage } from '@/lib/errors'
+import { restartAction, secretIsSet } from '@/lib/settings'
 
 interface SettingRowProps {
   setting: SettingResponse
   serviceName: string
-  onRestartService?: () => void
 }
 
+const RELOAD_MESSAGE = 'Applies after jarvisd restarts'
+
 function formatValue(setting: SettingResponse): string {
-  if (setting.is_secret) return '********'
+  // Secrets are write-only (I5): never echo even the mask as if it were a value.
+  if (setting.is_secret) return secretIsSet(setting) ? 'set (hidden)' : 'not set'
   if (setting.value === null || setting.value === undefined) return '(not set)'
   if (setting.value_type === 'json') return JSON.stringify(setting.value)
   return String(setting.value)
@@ -27,7 +31,7 @@ const typeBadgeColors: Record<string, string> = {
   json: 'bg-purple-500/10 text-purple-500',
 }
 
-export default function SettingRow({ setting, serviceName, onRestartService }: SettingRowProps) {
+export default function SettingRow({ setting, serviceName }: SettingRowProps) {
   const [editing, setEditing] = useState(false)
   const mutation = useUpdateSetting()
 
@@ -38,18 +42,19 @@ export default function SettingRow({ setting, serviceName, onRestartService }: S
         onSuccess: (res) => {
           setEditing(false)
           if (res.requires_reload) {
-            toast.warning(`Setting updated. ${serviceName} requires a restart to apply.`, onRestartService ? {
-              action: {
-                label: 'Restart',
-                onClick: onRestartService,
-              },
-            } : undefined)
+            // No container to restart under jarvisd (AQ8). AD8's restart button plugs in
+            // through restartAction once POST /api/system/restart exists.
+            const action = restartAction
+            toast.warning(
+              `Setting updated. ${res.message || RELOAD_MESSAGE}.`,
+              action ? { action: { label: 'Restart jarvisd', onClick: action } } : undefined,
+            )
           } else {
             toast.success('Setting updated')
           }
         },
         onError: (err) => {
-          toast.error(`Failed to update: ${err.message}`)
+          toast.error(`Failed to update: ${errorMessage(err)}`)
         },
       },
     )
@@ -73,8 +78,13 @@ export default function SettingRow({ setting, serviceName, onRestartService }: S
               <Database size={12} className="text-[var(--color-tertiary)]" />
             </span>
           )}
+          {setting.is_secret && (
+            <span title="Secret: write-only">
+              <Lock size={12} className="text-[var(--color-text-muted)]" />
+            </span>
+          )}
           {setting.requires_reload && (
-            <span title="Requires service restart">
+            <span title={RELOAD_MESSAGE}>
               <AlertTriangle size={12} className="text-amber-500" />
             </span>
           )}

@@ -1,4 +1,5 @@
-import { LogOut, Moon, Sun } from 'lucide-react'
+import { KeyRound, LogOut, Moon, Sun } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/theme/ThemeProvider'
 
@@ -22,6 +23,14 @@ export default function Header() {
         >
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
+
+        <Link
+          to="/change-password"
+          className="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)]"
+          title="Change password"
+        >
+          <KeyRound size={18} />
+        </Link>
 
         <button
           onClick={logout}

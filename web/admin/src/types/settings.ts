@@ -13,6 +13,8 @@ export interface SettingResponse {
 
 export interface ServiceSettingsResult {
   service_name: string
+  /** Human label for the module (jarvisd); absent from older backends. */
+  display_name?: string
   success: boolean
   settings: SettingResponse[]
   error: string | null

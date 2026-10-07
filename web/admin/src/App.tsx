@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 
 import { ThemeProvider } from '@/theme/ThemeProvider'
-import { AuthProvider } from '@/auth/AuthContext'
+import { AuthProvider, useAuth } from '@/auth/AuthContext'
 import AppShell from '@/components/layout/AppShell'
 import LoginPage from '@/pages/LoginPage'
 import SettingsPage from '@/pages/SettingsPage'
@@ -22,30 +22,22 @@ import TraceDetailPage from '@/pages/TraceDetailPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import SetupWizard from '@/pages/SetupWizard'
 import LlmSetupWizard from '@/pages/LlmSetupWizard'
-import { getInstallStatus } from '@/api/install'
+import ChangePasswordPage from '@/pages/ChangePasswordPage'
+import { getSetupState } from '@/api/auth'
 
 const queryClient = new QueryClient()
 
 function AppRoutes() {
   const [checking, setChecking] = useState(true)
-  const [needsInstall, setNeedsInstall] = useState(false)
-  const [deployedNeedsAccount, setDeployedNeedsAccount] = useState(false)
+  const [needsSuperuser, setNeedsSuperuser] = useState(false)
+  const location = useLocation()
+  const { state: auth } = useAuth()
 
+  // Boot gate (S1): while no superuser exists, everything leads to first-run setup.
   useEffect(() => {
-    getInstallStatus()
-      .then((status) => {
-        if (status.state === 'deployed-needs-account') {
-          // Compose-export mode: skip to account creation
-          setDeployedNeedsAccount(true)
-          setNeedsInstall(true)
-        } else {
-          setNeedsInstall(!status.configured)
-        }
-      })
-      .catch(() => {
-        // If we can't reach the backend, don't force install wizard
-        setNeedsInstall(false)
-      })
+    getSetupState()
+      .then((s) => setNeedsSuperuser(s.needs_superuser))
+      .catch(() => setNeedsSuperuser(false))
       .finally(() => setChecking(false))
   }, [])
 
@@ -57,9 +49,15 @@ function AppRoutes() {
     )
   }
 
+  // Once setup signs the new superuser in, the stale flag no longer redirects.
+  if (needsSuperuser && !auth.isAuthenticated && location.pathname !== '/setup') {
+    return <Navigate to="/setup" replace />
+  }
+
   return (
     <Routes>
-      <Route path="/setup" element={<SetupWizard skipToAccount={deployedNeedsAccount} />} />
+      <Route path="/setup" element={<SetupWizard needsSuperuser={needsSuperuser} />} />
+      <Route path="/change-password" element={<ChangePasswordPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/llm-setup" element={<LlmSetupWizard />} />
       <Route element={<AppShell />}>
@@ -77,11 +75,7 @@ function AppRoutes() {
         <Route path="/native-services" element={<NativeServicesPage />} />
         <Route
           path="/"
-          element={
-            needsInstall
-              ? <Navigate to="/setup" replace />
-              : <Navigate to="/dashboard" replace />
-          }
+          element={<Navigate to="/dashboard" replace />}
         />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
