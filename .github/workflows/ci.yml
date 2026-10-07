@@ -262,6 +262,8 @@ jobs:
         shell: bash
     env:
       V: v0.0.0-ci
+      V2: v0.0.1-ci
+      V3: v0.0.2-ci
       BASE: http://127.0.0.1:8765
     steps:
       - uses: actions/checkout@v4
@@ -270,22 +272,36 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - name: Fetch native libs
         run: scripts/fetch-sherpa-libs.sh ${{ matrix.target }}
-      - name: Build a release-shaped archive
+      # Two releases signed with a throwaway key that the test builds trust (-X …extraTrustedKey,
+      # never in a real release): $V in dist/, $V2 in dist/next/ for the re-run that hands over
+      # to `jarvisd upgrade`, and an unsigned $V3 in dist/unsigned/ that jarvisd must refuse.
+      # The key is made and used by scripts/testsign, so no minisign lands on PATH (the scripts
+      # require the project's signature when it is there).
+      - name: Build release-shaped archives
         env:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          name="jarvisd-$V-${{ matrix.target }}"
+          key="$RUNNER_TEMP/test.key"
+          pub=$(go run ./scripts/testsign keygen "$key")
           exe=jarvisd; [ "$RUNNER_OS" = Windows ] && exe=jarvisd.exe
-          mkdir -p "stage/$name" dist
-          go build -trimpath -ldflags "-X main.version=$V" -o "stage/$name/$exe" ./cmd/jarvisd
-          if [ "${{ matrix.ext }}" = zip ]; then (cd stage && 7z a -tzip -bd "../dist/$name.zip" "$name" >/dev/null)
-          else tar -C stage -czf "dist/$name.tar.gz" "$name"; fi
+          sum() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+          release() { # tag dir
+            local name="jarvisd-$1-${{ matrix.target }}"
+            mkdir -p "stage/$name" "$2"
+            go build -trimpath -o "stage/$name/$exe" \
+              -ldflags "-X main.version=$1 -X github.com/alexberardi/jarvis-server/internal/update.extraTrustedKey=$pub" ./cmd/jarvisd
+            if [ "${{ matrix.ext }}" = zip ]; then (cd stage && 7z a -tzip -bd "../$2/$name.zip" "$name" >/dev/null)
+            else tar -C stage -czf "$2/$name.tar.gz" "$name"; fi
+            (cd "$2" && sum "$name.${{ matrix.ext }}" > SHA256SUMS)
+            go run ./scripts/testsign sign "$key" "$2/SHA256SUMS" "jarvisd $1 SHA256SUMS"
+            cat "$2/SHA256SUMS"
+          }
+          release "$V" dist
+          release "$V2" dist/next
+          mkdir -p dist/unsigned
+          echo "$(printf '0%.0s' $(seq 64))  jarvisd-$V3-${{ matrix.target }}.${{ matrix.ext }}" > dist/unsigned/SHA256SUMS
           cp scripts/install.sh scripts/install.ps1 dist/
-          cd dist
-          if command -v sha256sum >/dev/null; then sha256sum "$name.${{ matrix.ext }}" > SHA256SUMS
-          else shasum -a 256 "$name.${{ matrix.ext }}" > SHA256SUMS; fi
-          cat SHA256SUMS
 
       - name: shellcheck
         if: runner.os == 'Linux'
@@ -318,12 +334,37 @@ jobs:
           test ! -e /usr/local/bin/jarvisd && test ! -e /etc/systemd/system/jarvisd.service
           if sudo ufw status | grep -q jarvisd; then exit 1; fi
           sudo test -f /var/lib/jarvisd/jarvis.db && id jarvisd
-          # Reinstall over the kept data, then purge everything.
+          # Reinstall over the kept data.
           sh scripts/install.sh --base-url "$BASE" --yes
+          # A re-run with a newer release hands over to `jarvisd upgrade` (system unit, run as
+          # root through sudo): signature checked by the installed binary, snapshot, swap,
+          # restart, health gate.
+          sh scripts/install.sh --base-url "$BASE/next" --yes | tee up.log
+          grep -q 'with `jarvisd upgrade`' up.log
+          grep -q "jarvisd $V2 is up and healthy" up.log
+          test "$(jarvisd version)" = "$V2"
+          curl -fsS http://127.0.0.1:7710/health | python3 -c 'import json,sys,os; assert json.load(sys.stdin)["version"] == os.environ["V2"]'
+          test "$(/usr/local/bin/jarvisd.prev version)" = "$V"
+          sudo cat /var/lib/jarvisd/updates/last-upgrade.json | python3 -c 'import json,sys; assert json.load(sys.stdin)["outcome"] == "succeeded"'
+          sudo sh -c 'ls /var/lib/jarvisd/backups/jarvis-v0.0.0_ci-*.db' # the version, file-name safe
+          sh scripts/install.sh --base-url "$BASE/next" --yes | grep -q 'already installed'
+          # An unsigned release: jarvisd refuses it, nothing changes.
+          if sh scripts/install.sh --base-url "$BASE/unsigned" --yes 2>&1 | tee bad.log; then :; fi
+          grep -q 'only installs signed releases' bad.log
+          test "$(jarvisd version)" = "$V2"
+          curl -fsS http://127.0.0.1:7710/health
+          # Purge everything (jarvisd.prev included).
           sh scripts/install.sh --uninstall --purge --yes
+          test ! -e /usr/local/bin/jarvisd.prev
           sudo test ! -e /var/lib/jarvisd && sudo test ! -e /etc/jarvisd
           if id jarvisd; then exit 1; fi
           sudo ufw --force disable
+          # With minisign installed a fresh install requires the project's signature: this
+          # release is signed by the throwaway key, so the script refuses it.
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          if sh scripts/install.sh --base-url "$BASE" --yes 2>&1 | tee sig.log; then :; fi
+          grep -q 'signature is INVALID' sig.log
+          test ! -e /usr/local/bin/jarvisd
       - name: Linux journal
         if: failure() && runner.os == 'Linux'
         run: sudo journalctl -u jarvisd --no-pager | tail -200
@@ -354,8 +395,23 @@ jobs:
           if $fw --listapps | grep -q /usr/local/bin/jarvisd; then exit 1; fi
           test -f ~/.jarvisd/jarvis.db
           sh scripts/install.sh --base-url "$BASE" --yes
+          $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
+          # A re-run with a newer release hands over to `sudo jarvisd upgrade`; the new build has
+          # another ad-hoc signature, and the upgrade re-admits it to the firewall.
+          sh scripts/install.sh --base-url "$BASE/next" --yes | tee up.log
+          grep -q "jarvisd $V2 is up and healthy" up.log
+          test "$(jarvisd version)" = "$V2"
+          test "$(/usr/local/bin/jarvisd.prev version)" = "$V"
+          curl -fsS http://127.0.0.1:7710/health | python3 -c 'import json,sys,os; assert json.load(sys.stdin)["version"] == os.environ["V2"]'
+          python3 -c 'import json,os; assert json.load(open(os.path.expanduser("~/.jarvisd/updates/last-upgrade.json")))["outcome"] == "succeeded"'
+          $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
+          sudo jarvisd doctor
+          # The unsigned release is refused.
+          if sh scripts/install.sh --base-url "$BASE/unsigned" --yes 2>&1 | tee bad.log; then :; fi
+          grep -q 'only installs signed releases' bad.log
+          test "$(jarvisd version)" = "$V2"
           sh scripts/install.sh --uninstall --purge --yes
-          test ! -e ~/.jarvisd
+          test ! -e ~/.jarvisd && test ! -e /usr/local/bin/jarvisd.prev
           sudo $fw --setglobalstate off
       - name: macOS log
         if: failure() && runner.os == 'macOS'
@@ -392,6 +448,23 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw 'firewall rule not removed' }
           if (-not (Test-Path C:\ProgramData\jarvisd\jarvis.db)) { throw 'data not kept' }
           Install @('-Yes')
+          # A re-run with a newer release hands over to `jarvisd upgrade` (SCM restart, health gate).
+          $up = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl "$env:BASE/next" -Yes | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "upgrade re-run failed: $up" }
+          Write-Host $up
+          if ($up -notmatch "jarvisd $env:V2 is up and healthy") { throw 'no healthy upgrade reported' }
+          if ((& $exe version) -ne $env:V2) { throw 'not upgraded' }
+          if ((& (Join-Path $env:ProgramFiles 'jarvisd\jarvisd.prev.exe') version) -ne $env:V) { throw 'jarvisd.prev.exe is not the old version' }
+          $h = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7710/health | Select-Object -ExpandProperty Content | ConvertFrom-Json
+          if ($h.version -ne $env:V2) { throw "running $($h.version)" }
+          $last = Get-Content C:\ProgramData\jarvisd\updates\last-upgrade.json -Raw | ConvertFrom-Json
+          if ($last.outcome -ne 'succeeded') { throw "outcome $($last.outcome)" }
+          # The unsigned release is refused.
+          $ErrorActionPreference = 'Continue' # 5.1 turns redirected native stderr into errors
+          $bad = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl "$env:BASE/unsigned" -Yes 2>&1 | Out-String
+          $ErrorActionPreference = 'Stop'
+          if ($LASTEXITCODE -eq 0 -or $bad -notmatch 'only installs signed releases') { throw "unsigned release not refused: $bad" }
+          if ((& $exe version) -ne $env:V2) { throw 'the refused upgrade changed the binary' }
           Install @('-Uninstall', '-Purge', '-Yes')
           if (Test-Path C:\ProgramData\jarvisd) { throw 'data not purged' }
           $global:LASTEXITCODE = 0

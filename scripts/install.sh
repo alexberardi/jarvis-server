@@ -21,8 +21,10 @@ set -eu
 
 REPO=alexberardi/jarvis-server
 BASE=${JARVISD_RELEASE_BASE:-}
-# The project's minisign key (key id 725ba202b54fa2c9), shared with jarvis-node-setup.
-PUBKEY=${JARVISD_MINISIGN_PUBKEY:-RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L}
+# The project's minisign key, exactly jarvisd's own trust root (internal/update/key.go
+# ProjectPublicKey; a unit test keeps them equal). Not overridable: a different key here would
+# only install a release that jarvisd then can't upgrade from.
+PUBKEY=RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L
 VERSION="" USER_MODE=0 YES=0 STOP_LEGACY=0 FORCE=0 UNINSTALL=0 PURGE=0
 
 say() { printf '%s\n' "$*"; }
@@ -87,7 +89,7 @@ if [ $UNINSTALL = 1 ]; then
   # shellcheck disable=SC2086 # flags are words
   if [ $TTY = 1 ]; then $RUN "$BIN" service uninstall $flags </dev/tty; else $RUN "$BIN" service uninstall $flags; fi \
     || { [ $PURGE = 1 ] && die "uninstall stopped; nothing more was removed"; warn "the service was not removed cleanly"; }
-  $RUN rm -f "$BIN" && $RUN rm -rf "$LIB_DIR"
+  $RUN rm -f "$BIN" "$BIN.prev" && $RUN rm -rf "$LIB_DIR"
   say "jarvisd removed."
   exit 0
 fi
@@ -111,14 +113,38 @@ REL=${ASSET#jarvisd-}; REL=${REL%"-$OS-$ARCH.tar.gz"}
 [ -z "$VERSION" ] || [ "$VERSION" = "$REL" ] || die "asked for $VERSION but the release files are for $REL"
 VERSION=$REL
 
-# Signature: pluggable. Verified when minisign is installed and the release is signed;
-# otherwise the TLS-anchored checksum alone (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
-if command -v minisign >/dev/null && fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null; then
+CUR=""
+[ -x "$BIN" ] && CUR=$("$BIN" version 2>/dev/null || echo unknown)
+if [ -n "$CUR" ]; then
+  if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ] && "$BIN" service status $SVC >/dev/null 2>&1; then
+    say "jarvisd $VERSION is already installed and running."
+    # shellcheck disable=SC2086
+    $RUN "$BIN" setup-link $HOMEFLAG 2>/dev/null || true
+    exit 0
+  fi
+  # A jarvisd with its own upgrade takes over from here: it checks the signature itself with
+  # the key built into the installed binary (mandatory, no minisign needed), checks free disk,
+  # snapshots the database, swaps, waits for the health gate and rolls back on failure.
+  if [ "$CUR" != "$VERSION" ] && "$BIN" help 2>/dev/null | grep -q '^  upgrade'; then
+    say "Upgrading jarvisd $CUR -> $VERSION with \`jarvisd upgrade\`..."
+    rm -rf "$TMP"; trap - EXIT INT TERM # exec skips the trap
+    # shellcheck disable=SC2086 # RUN is sudo or nothing
+    exec $RUN env JARVISD_RELEASE_BASE="$BASE" "$BIN" upgrade --version "$VERSION"
+  fi
+fi
+
+# Signature, for a fresh install (or a jarvisd too old to upgrade itself). Releases are
+# signed, and every later upgrade is verified by jarvisd itself; here the downloaded binary
+# can't vouch for itself, so the check needs the minisign tool: with minisign installed the
+# signature is required (missing or invalid is fatal); without it the TLS-anchored checksum
+# alone, with a warning (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
+if command -v minisign >/dev/null; then
+  fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null || die "the release has no SHA256SUMS.minisig; not installing an unsigned release"
   minisign -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID; not installing"
   say "SHA256SUMS signature verified."
 else
-  [ "${JARVISD_REQUIRE_SIGNATURE:-0}" = 1 ] && die "no verifiable SHA256SUMS signature (minisign missing or release unsigned)"
-  warn "SHA256SUMS signature not checked (minisign not installed, or the release is unsigned); verifying checksums only"
+  [ "${JARVISD_REQUIRE_SIGNATURE:-0}" = 1 ] && die "JARVISD_REQUIRE_SIGNATURE=1 but minisign is not installed"
+  warn "minisign is not installed, so the release signature is not checked (checksums only); install minisign for a verified first install. Upgrades are verified by jarvisd itself."
 fi
 say "Downloading jarvisd $VERSION for $OS-$ARCH..."
 fetch "$ASSET" "$TMP/$ASSET" || die "could not download $(url "$ASSET")"
@@ -128,22 +154,7 @@ tar -xzf "$TMP/$ASSET" -C "$TMP"
 NEW=$TMP/jarvisd-$VERSION-$OS-$ARCH/jarvisd
 [ "$("$NEW" version)" = "$VERSION" ] || die "the downloaded jarvisd does not run here"
 
-if [ -x "$BIN" ]; then
-  CUR=$("$BIN" version 2>/dev/null || echo unknown)
-  if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ] && "$BIN" service status $SVC >/dev/null 2>&1; then
-    say "jarvisd $VERSION is already installed and running."
-    # shellcheck disable=SC2086
-    $RUN "$BIN" setup-link $HOMEFLAG 2>/dev/null || true
-    exit 0
-  fi
-  # A jarvisd with its own upgrade (snapshot, health gate, rollback, signature check by the
-  # running binary's key) takes over from here.
-  if [ "$CUR" != "$VERSION" ] && "$BIN" help 2>/dev/null | grep -q '^  upgrade'; then
-    say "Upgrading jarvisd $CUR -> $VERSION with \`jarvisd upgrade\`..."
-    exec $RUN env JARVISD_RELEASE_BASE="$BASE" "$BIN" upgrade --version "$VERSION"
-  fi
-else
-  CUR=""
+if [ -z "$CUR" ]; then
   # A fresh install next to the legacy stack (ID7): jarvisd needs its ports.
   if "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"'; then
     legacy=$(docker ps --format '{{.Names}}' 2>/dev/null || $SUDO docker ps --format '{{.Names}}' 2>/dev/null || true)

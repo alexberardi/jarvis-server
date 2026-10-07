@@ -874,9 +874,33 @@ rolled back after 2 failed starts, the admin button, the restart button, manual 
 runs the same script in `system` mode (the root `ExecStartPre` helper path). The release `verify` job
 checks the signature with each OS's own binary (`jarvisd upgrade --verify-dir`).
 
-**Not done / follow-ups.** macOS firewall re-add after a swap (§2.2); launchd/SCM privileged helpers
-(today: `sudo jarvisd upgrade`); the install scripts' re-run path (I3/I4) should call `jarvisd upgrade`;
-free-disk preflight; `jarvisd backup` as its own command; a binary that passes `version` but dies before
+**Integration with the install scripts (2026-10-07, §8.3).**
+- *Flat release directory.* `JARVISD_RELEASE_BASE=<URL|file URL|path>` points `jarvisd upgrade` (and
+  `--check`) at a directory holding `SHA256SUMS`, `SHA256SUMS.minisig` and the archives, with no API
+  (`update.Source.Base`, `internal/update/flat.go`): the releases are the tags in the archive names
+  `SHA256SUMS` lists (`jarvisd-<tag>-<os>-<arch>.tar.gz|.zip`), newest or `--version`; archive sizes
+  from a HEAD / `stat` when cheap (else only checksummed). The signature check is unchanged and
+  mandatory: a directory without `.minisig` is "no SHA256SUMS.minisig …; jarvisd only installs signed
+  releases". Local paths are read only for a `Base` source, never from GitHub asset URLs. The admin
+  button keeps using the API. This is what a script re-run hands over to.
+- *Which service.* No `--user` needed: `service.Open` on Linux falls back to the `--user` unit when no
+  system unit exists, and the home comes from the installed unit's `--home`. `--user` remains for the
+  rare box with both.
+- *Free-disk preflight* (`update.CheckDisk`, in `Stage` before anything is downloaded, so the admin
+  button gets it too): the home needs max(3 × archive, archive + current binary) + every `*.db` and
+  its `-wal`; the executable's directory needs 2 × the current binary (new + `jarvisd.prev`). An
+  unknown archive size counts as the current binary; a filesystem whose free space can't be read is
+  not checked. Error: "not enough free disk space in <dir>: the upgrade needs about N MB there (…),
+  M MB is free; free some space and try again".
+- *macOS firewall after a swap.* Every build has a new ad-hoc signature and socketfilterfw keys its
+  allow entry on it. `jarvisd upgrade` (and `--rollback`) checks the doctor's firewall checks before
+  the swap; if the old binary was admitted and the new one isn't, it runs their `fix_cmds` as root
+  (`sudo jarvisd upgrade`, which launchd installs need anyway), else prints the command. A fix the
+  operator declined at install stays declined.
+
+**Not done / follow-ups.** launchd/SCM privileged helpers (today: `sudo jarvisd upgrade`, an elevated
+PowerShell); the admin button on macOS therefore never needs the firewall re-add, but would once a
+helper exists; `jarvisd backup` as its own command; a binary that passes `version` but dies before
 serve counts its start relies on the waiting CLI to roll back.
 
 ### 8.3 I2, I3, I4 as built (2026-10-07)
@@ -932,15 +956,20 @@ exits 0; the scripts grep it for an `upgrade` command.
 `JARVISD_RELEASE_BASE`: a flat directory holding `SHA256SUMS` and the archives). Flow:
 OS/arch map (Intel Mac and non-systemd Linux refused) → `SHA256SUMS` from
 `releases/latest/download/` (no API) or the tag; the archive name in it gives the version →
-signature check **if `minisign` is installed and `SHA256SUMS.minisig` exists** (key
-725ba202b54fa2c9, `JARVISD_MINISIGN_PUBKEY` overrides; an invalid signature is fatal;
-`JARVISD_REQUIRE_SIGNATURE=1` makes a missing one fatal; otherwise a warning) → archive
-download to `$TMPDIR` or `/var/tmp`, SHA-256 must match → the extracted binary must print the
-version → if installed: same version + healthy = no-op (prints the setup link); different
-version and the installed binary lists `upgrade` = `exec jarvisd upgrade --version vX`
-(with `JARVISD_RELEASE_BASE` passed through); else the binary is renamed over the running one
-(`jarvisd.prev` kept in `/usr/local/lib/jarvisd`) and the service reinstall below restarts it
-→ fresh install: the new binary's `doctor --json` names a `ports`
+if installed: same version + healthy = no-op (prints the setup link); different version and
+the installed binary lists `upgrade` = `exec [sudo] env JARVISD_RELEASE_BASE=<base or empty>
+jarvisd upgrade --version vX` **before anything else is downloaded** (the installed binary checks
+the signature with its own key, free disk, snapshot, health gate, rollback; §8.2) → signature
+(fresh install, or a jarvisd too old to upgrade itself): the key is exactly
+`internal/update/key.go` `ProjectPublicKey` (no override; `TestScriptsTrustTheProjectKey` keeps
+both scripts equal to it). **With `minisign` installed the signature is required**: a missing
+`SHA256SUMS.minisig` or an invalid one is fatal. Without minisign: checksum only, with a warning
+(`JARVISD_REQUIRE_SIGNATURE=1` refuses that). Decision: a downloaded binary can't vouch for
+itself, so the first install is TLS-anchored unless the operator has minisign; every later
+upgrade is verified by the running jarvisd → archive download to `$TMPDIR` or `/var/tmp`,
+SHA-256 must match → the extracted binary must print the version → an installed jarvisd without
+`upgrade` (pre-§8.2): the binary is renamed over the running one (`jarvisd.prev` kept in
+`/usr/local/lib/jarvisd`) and the service reinstall below restarts it → fresh install: the new binary's `doctor --json` names a `ports`
 check → `jarvis-*` containers? refuse, or with `--stop-legacy` `docker update --restart=no`
 + `docker stop` (never `down`); no containers = "another program" refusal → atomic rename
 into `/usr/local/bin` (`~/.local/bin` with `--user`) → `jarvisd service install [--user]`
@@ -978,3 +1007,21 @@ windows-latest under `powershell.exe` 5.1 (rule `jarvisd` on the exe, machine PA
 link, no-op re-run, `-Uninstall` removes service, exe, rule and keeps ProgramData;
 `-Uninstall -Purge -Yes`). shellcheck runs on install.sh. Not run on this dev box (no
 passwordless sudo, and no services are installed here).
+
+**Upgrade glue (2026-10-07).** Both scripts now hand a re-run with another version to `jarvisd
+upgrade` before downloading the archive (§8.2 "Integration"), trust exactly `ProjectPublicKey`,
+require the signature when `minisign` is installed, and `--uninstall` also removes `jarvisd.prev`.
+The CI `install` job builds two releases (`v0.0.0-ci`, `v0.0.1-ci`) whose binaries trust a
+throwaway key (`-X …/internal/update.extraTrustedKey=`), signed by `scripts/testsign` (a ~60-line
+Go minisign-compatible signer, checked against minisign 0.12; no minisign on PATH, which would make
+the scripts demand the project signature), plus an unsigned `v0.0.2-ci`. On all three OSes: install
+`v0.0.0-ci`, re-run with `--base-url …/next` → "Upgrading … with `jarvisd upgrade`" → "v0.0.1-ci is up
+and healthy", `/health` and `jarvisd.prev` versions, `last-upgrade.json` `succeeded`; re-run of the
+unsigned one → "only installs signed releases", binary unchanged. Ubuntu (system unit; `sudo jarvisd
+upgrade` swaps in process as root, the unit's `ExecStartPre` helper finds nothing pending — the helper
+path itself is covered by the `upgrade` job's admin button) also checks the DB snapshot, the no-op
+re-run, and finally, with `apt install minisign`, that a fresh install of the throwaway-signed release
+is refused ("signature is INVALID"). macOS: the app stays `permitted` after the swap and `sudo jarvisd
+doctor` is clean; on the macos-14 runner socketfilterfw kept admitting the new build, so the re-admit
+step had nothing to do there (it is the guard for when it doesn't). Windows: SCM restart, rename-aside
+swap, `jarvisd.prev.exe`.

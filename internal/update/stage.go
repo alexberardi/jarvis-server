@@ -154,6 +154,9 @@ func Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 			return nil, err
 		}
 	}
+	if err := CheckDisk(p, plan.Archive.Size); err != nil {
+		return nil, err
+	}
 	dir := p.StagedDir()
 	_ = os.RemoveAll(dir)
 	if err := mkdirOwned(p.Home, p.UpdatesDir()); err != nil {
@@ -175,7 +178,7 @@ func Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 	}
 	sig, err := fetch(ctx, o.Source, plan.Sig.URL, 64<<10)
 	if err != nil {
-		return fail(err)
+		return fail(fmt.Errorf("release %s: no %s (%w); jarvisd only installs signed releases", plan.Release.Tag, SigName, err))
 	}
 	want, err := verifySums(sums, sig, keys, plan.Release.Tag, plan.Archive.Name)
 	if err != nil {
@@ -336,6 +339,13 @@ func fetch(ctx context.Context, s Source, url string, limit int64) ([]byte, erro
 }
 
 func get(ctx context.Context, s Source, url string) (*http.Response, error) {
+	if p, ok := s.local(url); ok {
+		f, err := os.Open(p)
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: f}, nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
