@@ -508,8 +508,11 @@ func TestDirectedProposalAndDispatcher(t *testing.T) {
 	n := se.createNode("n1", sigHH)
 	se.createNode("nx", "hh-other")
 	agent := &fakeNodeAgent{report: nodeReport()}
+	// Step F through the doc-13 node routes, as jarvis-node-setup's handle_callback does.
 	agent.callback = func(jobID string) {
-		_, _ = se.d.Write.Exec(`UPDATE cc_callback_jobs SET status = 'completed', result_context_data_json = '{"message": "Added"}' WHERE id = ?`, jobID)
+		if err := nodeCallback(se.srv.URL, n, jobID, map[string]any{"success": true, "context_data": map[string]any{"message": "Added"}}); err != nil {
+			t.Error(err)
+		}
 	}
 	se.runNode(n, agent)
 	b := signal("email.appt", "mail:1", nil)

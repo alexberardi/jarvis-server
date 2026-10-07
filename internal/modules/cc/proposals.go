@@ -23,9 +23,9 @@ import (
 //
 // Card taps arrive through the doc-13 server-callback plane (POST /callbacks without
 // target_node_id), which checks the caller's household membership and then calls the handler
-// SignalCallback returns. That plane is not ported yet; these handlers are its registrations
-// for jarvis.proposable_action.{execute,dismiss,suppress} and
-// jarvis.signal_automation.{execute,dismiss}.
+// SignalCallback returns (callbacks.go's static map registers them for
+// jarvis.proposable_action.{execute,dismiss,suppress} and
+// jarvis.signal_automation.{execute,dismiss}).
 
 const proposableCommand = "jarvis.proposable_action"
 
@@ -562,20 +562,27 @@ func (m *Module) callbackCompleted(ctx context.Context, hh, idem string) bool {
 // runNodeCallback is _execute_target_callback_on_node: a node-plane cc_callback_jobs row
 // (navigation_type "stack": this dispatcher owns the user-facing card), the MQTT `callback`
 // command, then wait for the row to leave pending. The node reads the job and posts its result
-// through the doc-13 callback routes, which update the row.
+// through the doc-13 callback routes (callbacks.go), which update the row and wake this waiter;
+// the row is also re-read every callbackPoll. An unreachable node fails fast (D40 Q4).
 func (m *Module) runNodeCallback(ctx context.Context, nodeID, hh string, userID *int64, command, callback string,
 	args map[string]any, idem string) (bool, map[string]any, string) {
-	jobID := uuid4()
-	data, _ := json.Marshal(args)
-	now := m.now()
-	if _, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_callback_jobs
-		(id, node_id, household_id, user_id, command_name, callback_name, data_json, status, navigation_type,
-		 idempotency_key, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'stack', ?, ?, ?)`,
-		jobID, nodeID, hh, userID, command, callback, string(data), nullIfBlank(idem), dbTime(now), dbTime(now.Add(5*time.Minute))); err != nil {
+	node, err := m.nodeByID(ctx, nodeID)
+	if err != nil {
+		return false, nil, "execution failed"
+	}
+	job, err := m.startNodeCallback(ctx, newCallbackJob{command: command, callback: callback,
+		dataJSON: pyjson.Dumps(toPy(args), true), nav: "stack", householdID: hh, idempotencyKey: idem,
+		userID: userID, node: node})
+	if errors.Is(err, errNodeUnreachable) {
+		return false, nil, "the device is offline"
+	}
+	if err != nil {
 		m.deps.Log.Error("cc: callback job insert failed", "err", err)
 		return false, nil, "execution failed"
 	}
-	m.bus.CommandWithID(nodeID, "callback", nil, jobID)
+	jobID := job.id
+	woken := m.cbWait.wait(jobID)
+	defer m.cbWait.forget(jobID)
 	deadline := time.NewTimer(callbackTimeout)
 	defer deadline.Stop()
 	tick := time.NewTicker(callbackPoll)
@@ -586,6 +593,8 @@ func (m *Module) runNodeCallback(ctx context.Context, nodeID, hh string, userID 
 			return false, nil, "the device didn't respond in time"
 		case <-deadline.C:
 			return false, nil, "the device didn't respond in time"
+		case <-woken:
+			woken = nil // read the row now; a nil channel never fires again
 		case <-tick.C:
 		}
 		var status string

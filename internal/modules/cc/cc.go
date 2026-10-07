@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
@@ -151,6 +152,11 @@ type Module struct {
 	sig     *signalState     // 5c signals, proposals and attention (signals.go)
 	phone   *phone.Service   // 5c phone calls (phone_wire.go)
 	errands *errands.Service // 5c errands and workflows (errands.go)
+
+	// 5d interactive callbacks (callbacks.go): the static server-callback map and result waiters.
+	cbOnce sync.Once
+	cbMap  map[string]serverCallbackFunc
+	cbWait callbackWaiters
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -293,6 +299,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerPhone(mux)
 	// Errands and workflows (doc 09).
 	m.registerErrands()
+	// Interactive callbacks (doc 13): after every subsystem that contributes server handlers.
+	m.registerCallbacks(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -352,6 +360,9 @@ func (m *Module) Start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	if err := m.startCallbacks(ctx); err != nil {
+		return err
+	}
 	return m.startRoutines(ctx)
 }
 
@@ -380,6 +391,9 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 		`DELETE FROM cc_auth_sessions WHERE user_id = ?`,
 		`UPDATE cc_bluetooth_scan_requests SET user_id = NULL WHERE user_id = ?`,
 		`DELETE FROM cc_schedules WHERE user_id = ?`, // their trigger finds no row and lapses
+		// Callback taps (doc 13): short-lived request rows carrying the tap's data; a queued
+		// server-plane run finds no row and does nothing.
+		`DELETE FROM cc_callback_jobs WHERE user_id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
 			return err
