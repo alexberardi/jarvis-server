@@ -52,12 +52,16 @@ type turnOutcome struct {
 
 // processTurn runs one turn. It returns errPrecondition when the conversation is unknown.
 func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (turnOutcome, error) {
+	tr := traceFrom(ctx)
+	endCache := tr.measure("cache_lookups", "cc", nil)
 	conv := m.convs.get(in.ConversationID)
 	if conv == nil {
+		endCache(errPrecondition)
 		return turnOutcome{}, errPrecondition
 	}
 	conv.mu.Lock()
 	defer conv.mu.Unlock()
+	endCache(nil)
 	m.flushPendingTranscript(ctx, conv)
 
 	// The turn's speaker: only jarvisd's own identification of this conversation's audio
@@ -67,7 +71,9 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	if conv.chatUserID != 0 {
 		turnSpeaker = conv.chatUserID // mobile chat: the JWT user, never a voice match (D2)
 	} else {
+		endSpeaker := tr.measure("speaker_resolve", "cc", nil)
 		turnSpeaker = m.applyTurnIdentity(ctx, conv)
+		endSpeaker(nil)
 	}
 
 	if isSTTNoise(in.VoiceCommand) {
@@ -110,10 +116,12 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	}
 	keys := lldates.Extract(in.VoiceCommand)
 	conv.dateKeys = keys
+	endLoop := tr.measure("tool_execution_loop", "cc", nil)
 	res, out := m.runEngine(ctx, engineInput{
 		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, dateKeys: keys,
 		doubleCheck: doubleCheckSentinel(in, st), turn: m.toolTurn(conv, in.VoiceCommand),
 	})
+	endLoop(nil)
 	if res.Stop == stopServerToolComplete {
 		var results []toolResult
 		for _, r := range res.ServerResults {

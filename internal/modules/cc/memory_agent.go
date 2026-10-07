@@ -30,6 +30,7 @@ func (m *Module) agentContextHint(ctx context.Context, conv *conversation, utter
 	if !m.settings.Bool(ctx, settingAdvancedContext, sc) || !m.settings.Bool(ctx, settingAgentContextEnabled, sc) {
 		return ""
 	}
+	defer traceFrom(ctx).measure("agent_context", "cc", nil)(nil)
 	limit := int(m.settings.Int(ctx, settingAgentContextMaxResults, sc))
 	maxChars := int(m.settings.Int(ctx, settingAgentContextMaxChars, sc))
 	threshold := m.settings.Float(ctx, settingAgentContextThreshold, sc)

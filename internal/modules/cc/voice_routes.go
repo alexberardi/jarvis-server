@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -176,37 +177,46 @@ func (m *Module) handleVoiceCommand(w http.ResponseWriter, r *http.Request, n *n
 		return
 	}
 	start := m.now()
-	out, err := m.processTurn(r.Context(), n, in)
+	tr, ctx := startVoiceTrace(r.Context())
+	endCache := tr.measure("cache_get_tools", "cc", nil)
+	_ = m.convs.get(in.ConversationID) // span parity only; processTurn does the real lookup
+	endCache(nil)
+	endTurn := tr.measure("process_voice_command_with_tools", "cc", nil)
+	out, err := m.processTurn(ctx, n, in)
+	endTurn(err)
 	info := requestInfo(in.VoiceCommand, in.ConversationID)
 	if errors.Is(err, errPrecondition) {
 		detail(w, http.StatusUnprocessableEntity, notInitialized)
 		return
 	}
 	if err != nil {
-		m.recordVoiceTrace(n, in.ConversationID, "voice_command", in.VoiceCommand, "", start, err)
+		m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command", in.VoiceCommand, "", start, err)
 		httpx.WriteJSON(w, http.StatusOK, voiceResponse([]any{errorCommand("processing_error", "Failed to process command: "+err.Error())},
 			info, stopComplete, []any{}, nil, nil, nil, nil))
 		return
 	}
 	res := out.res
-	m.recordVoiceTrace(n, in.ConversationID, "voice_command", in.VoiceCommand, res.Message, start, nil)
+	endBuild := tr.measure("build_response", "cc", nil)
+	var body *pyjson.Object
 	if res.Stop == stopError {
 		msg := res.Err
 		if msg == "" {
 			msg = "An internal error occurred"
 		}
-		httpx.WriteJSON(w, http.StatusOK, voiceResponse([]any{errorCommand("llm_error", msg)}, info, stopError,
-			[]any{}, nil, nil, nil, nil))
-		return
-	}
-	msg := res.Message
-	if strings.Contains(msg, "[Tool data:") {
-		if i := strings.Index(msg, "]\n\n"); i >= 0 {
-			msg = parse.PyStrip(msg[i+3:])
+		body = voiceResponse([]any{errorCommand("llm_error", msg)}, info, stopError, []any{}, nil, nil, nil, nil)
+	} else {
+		msg := res.Message
+		if strings.Contains(msg, "[Tool data:") {
+			if i := strings.Index(msg, "]\n\n"); i >= 0 {
+				msg = parse.PyStrip(msg[i+3:])
+			}
 		}
+		body = voiceResponse(nil, info, wireStop(res.Stop), toolCallsList(res.ToolCalls),
+			validationObject(res.Validation), nullIfBlank(msg), nullIfBlank(res.Reasoning), res.EndOfExchange)
 	}
-	httpx.WriteJSON(w, http.StatusOK, voiceResponse(nil, info, wireStop(res.Stop), toolCallsList(res.ToolCalls),
-		validationObject(res.Validation), nullIfBlank(msg), nullIfBlank(res.Reasoning), res.EndOfExchange))
+	endBuild(nil)
+	m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command", in.VoiceCommand, res.Message, start, nil)
+	httpx.WriteJSON(w, http.StatusOK, body)
 }
 
 // --- /voice/command/stream ---
@@ -224,19 +234,22 @@ func (m *Module) handleVoiceStream(w http.ResponseWriter, r *http.Request, n *no
 		return
 	}
 	start := m.now()
-	out, err := m.processTurn(r.Context(), n, in)
+	tr, ctx := startVoiceTrace(r.Context())
+	endTurn := tr.measure("process_voice_command_with_tools", "cc", nil)
+	out, err := m.processTurn(ctx, n, in)
+	endTurn(err)
 	if err != nil {
-		m.recordVoiceTrace(n, in.ConversationID, "voice_command_stream", in.VoiceCommand, "", start, err)
+		m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command_stream", in.VoiceCommand, "", start, err)
 		detail(w, http.StatusInternalServerError, "Failed to process command: "+err.Error())
 		return
 	}
 	res := out.res
 	if res.Stop == stopComplete && parse.PyStrip(res.Message) != "" {
-		m.streamSpeech(r.Context(), w, quotePy(res.Message), func(say func(string) bool) { say(res.Message) })
-		m.recordVoiceTrace(n, in.ConversationID, "voice_command_stream", in.VoiceCommand, res.Message, start, nil)
+		m.streamSpeech(ctx, w, quotePy(res.Message), func(say func(string) bool) { say(res.Message) })
+		m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command_stream", in.VoiceCommand, res.Message, start, nil)
 		return
 	}
-	m.recordVoiceTrace(n, in.ConversationID, "voice_command_stream", in.VoiceCommand, res.Message, start, nil)
+	m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command_stream", in.VoiceCommand, res.Message, start, nil)
 	msg := resultMessage(res)
 	httpx.WriteJSON(w, http.StatusAccepted, voiceResponse(nil, requestInfo(in.VoiceCommand, in.ConversationID),
 		wireStop(res.Stop), toolCallsList(res.ToolCalls), validationObject(res.Validation), msg, nil, res.EndOfExchange))
@@ -253,14 +266,19 @@ func (m *Module) handleContinue(w http.ResponseWriter, r *http.Request, n *nodeC
 		return
 	}
 	start := m.now()
+	tr, ctx := startVoiceTrace(r.Context())
 	info := requestInfo("[continuation with tool results]", cid)
-	res, _, err := m.continueBlocking(r.Context(), cid, results)
+	endCont := tr.measure("continue_conversation", "cc", nil)
+	res, _, err := m.continueBlocking(ctx, cid, results)
+	endCont(err)
 	if errors.Is(err, errPrecondition) {
 		detail(w, http.StatusUnprocessableEntity, "Conversation "+cid+" not found or expired")
 		return
 	}
+	endInbox := tr.measure("inbox_actions_push", "cc", nil)
 	m.pushActionsToInbox(r.Context(), n, results)
-	m.recordVoiceTrace(n, cid, "voice_command_continue", "[continuation with tool results]", res.Message, start, err)
+	endInbox(nil)
+	m.recordVoiceTrace(n, tr, cid, "voice_command_continue", "[continuation with tool results]", res.Message, start, err)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusOK, voiceResponse([]any{errorCommand("processing_error", "Failed to continue conversation: "+err.Error())},
 			info, nil, nil, nil, nil, nil, nil))
@@ -290,14 +308,16 @@ func (m *Module) handleContinueStream(w http.ResponseWriter, r *http.Request, n 
 		return
 	}
 	start := m.now()
+	tr, ctx := startVoiceTrace(r.Context())
 	// Inbox actions are a real background job here, so audio isn't delayed (01 §11).
 	go m.pushActionsToInbox(context.WithoutCancel(r.Context()), n, results)
+	endPlan := tr.measure("continue_stream_dispatch", "cc", nil)
 	plan := m.planContinueStream(cid, results)
+	endPlan(nil)
 	if plan == nil {
 		httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"fallback": "use_blocking_continue"})
 		return
 	}
-	ctx := r.Context()
 	if plan.spoken != "" {
 		m.streamSpeech(ctx, w, "", func(say func(string) bool) {
 			for _, s := range splitSentences(plan.spoken) {
@@ -307,7 +327,7 @@ func (m *Module) handleContinueStream(w http.ResponseWriter, r *http.Request, n 
 			}
 		})
 		m.commitContinueStream(ctx, plan, plan.spoken)
-		m.recordVoiceTrace(n, cid, "voice_command_continue", "[continuation]", plan.spoken, start, nil)
+		m.recordVoiceTrace(n, tr, cid, "voice_command_continue", "[continuation]", plan.spoken, start, nil)
 		return
 	}
 	answer := ""
@@ -315,7 +335,7 @@ func (m *Module) handleContinueStream(w http.ResponseWriter, r *http.Request, n 
 		answer = m.streamContinueLLM(ctx, plan, say)
 	})
 	m.commitContinueStream(context.WithoutCancel(ctx), plan, answer)
-	m.recordVoiceTrace(n, cid, "voice_command_continue", "[continuation]", answer, start, nil)
+	m.recordVoiceTrace(n, tr, cid, "voice_command_continue", "[continuation]", answer, start, nil)
 }
 
 // streamContinueLLM streams the post-tool-results answer sentence by sentence into say and
@@ -324,6 +344,8 @@ func (m *Module) streamContinueLLM(ctx context.Context, plan *continuePlan, say 
 	conv := plan.conv
 	maxTok := 512
 	temp := 0.7
+	tr := traceFrom(ctx)
+	llmStart := tr.since()
 	frames, err := m.LLM.Stream(ctx, llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(plan.llmMsgs), MaxTokens: &maxTok,
 		Temperature: &temp, ReasoningBudget: m.thinkingBudget(ctx, conv.householdID)})
 	if err != nil {
@@ -333,6 +355,8 @@ func (m *Module) streamContinueLLM(ctx context.Context, plan *continuePlan, say 
 	start, end := conv.provider.ThinkDelimiters()
 	cs := tf.NewContinueStreamer(start, end)
 	alive := true
+	firstToken := true
+	chars := 0
 	for f := range frames {
 		if f.Err != "" || f.Cancelled {
 			// Legacy returned silently on a stream exception: nothing is committed.
@@ -342,12 +366,19 @@ func (m *Module) streamContinueLLM(ctx context.Context, plan *continuePlan, say 
 		if f.Done {
 			break
 		}
+		if f.Delta != "" && firstToken {
+			firstToken = false
+			tr.span("llm_stream_first_token", "llm_proxy", llmStart, tr.since(), nil, nil)
+		}
+		chars += utf8.RuneCountInString(f.Delta)
 		for _, s := range cs.Push(f.Delta) {
 			if alive {
 				alive = say(s)
 			}
 		}
 	}
+	// The stream's envelope: TTS waits interleave with token arrival (legacy's caveat).
+	tr.span("llm_stream_total", "llm_proxy", llmStart, tr.since(), nil, map[string]any{"chars": chars})
 	if !alive {
 		return ""
 	}
@@ -383,24 +414,48 @@ func (m *Module) streamSpeech(ctx context.Context, w http.ResponseWriter, assist
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
 	_ = rc.Flush()
+	// Spans (legacy TTSClient.speak_stream + _end_trace_after_stream): per piece
+	// tts_first_chunk (Speak call → first PCM) and tts_stream_total; once first_audio_byte and
+	// the audio_stream envelope.
+	tr := traceFrom(ctx)
+	streamStart := tr.since()
+	firstByte := true
 	alive := true
 	say := func(text string) bool {
 		if !alive || ctx.Err() != nil {
 			return false
 		}
+		speakStart := tr.since()
 		st, err := m.TTS.Speak(ctx, text)
 		if err != nil {
 			m.deps.Log.Warn("cc: TTS failed for a sentence (skipped)", "err", err)
 			return true
 		}
 		defer st.Close()
+		chars := utf8.RuneCountInString(text)
+		audioBytes, gotChunk := 0, false
+		var streamErr error
+		defer func() {
+			tr.span("tts_stream_total", "tts", speakStart, tr.since(), streamErr,
+				map[string]any{"text_chars": chars, "audio_bytes": audioBytes})
+		}()
 		for {
 			b, err := st.Next()
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
+					streamErr = err
 					m.deps.Log.Warn("cc: TTS sentence produced no audio", "err", err)
 				}
 				return true
+			}
+			if !gotChunk {
+				gotChunk = true
+				tr.span("tts_first_chunk", "tts", speakStart, tr.since(), nil, map[string]any{"text_chars": chars})
+			}
+			audioBytes += len(b)
+			if firstByte {
+				firstByte = false
+				tr.checkpoint("first_audio_byte")
 			}
 			if _, err := w.Write(b); err != nil {
 				alive = false
@@ -410,6 +465,7 @@ func (m *Module) streamSpeech(ctx context.Context, w http.ResponseWriter, assist
 		}
 	}
 	produce(say)
+	tr.span("audio_stream", "cc", streamStart, tr.since(), nil, nil)
 }
 
 // quotePy is urllib.parse.quote(text, safe=""): everything but unreserved ASCII is

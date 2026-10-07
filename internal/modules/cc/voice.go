@@ -73,11 +73,19 @@ func (m *Module) registerServerTools() {
 // ServerTools is the registry 5c registers its tools in (valid after Register).
 func (m *Module) ServerTools() *servertools.Registry { return m.tools }
 
+// startVoiceTrace opens a node route's span trace (auth already passed: the auth_complete
+// checkpoint) and returns the context the pipeline records into.
+func startVoiceTrace(ctx context.Context) (*reqTrace, context.Context) {
+	tr := newReqTrace()
+	tr.checkpoint("auth_complete")
+	return tr, withTrace(ctx, tr)
+}
+
 // recordVoiceTrace stores a request trace for a voice route (latency_logger), off the
-// response path.
-func (m *Module) recordVoiceTrace(n *nodeCtx, convID, kind, command, answer string, start time.Time, err error) {
+// response path, with tr's spans (nil = none).
+func (m *Module) recordVoiceTrace(n *nodeCtx, tr *reqTrace, convID, kind, command, answer string, start time.Time, err error) {
 	t := Trace{ConversationID: convID, RequestType: kind, Source: "node", NodeID: n.ID, HouseholdID: n.HouseholdID,
-		UserCommand: command, AssistantMessage: answer,
+		UserCommand: command, AssistantMessage: answer, Spans: tr.spans(),
 		TotalDurationMS: float64(m.now().Sub(start).Microseconds()) / 1000}
 	if err != nil {
 		t.Status, t.ErrorMessage = "error", err.Error()

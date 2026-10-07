@@ -207,9 +207,13 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 	ctx := r.Context()
 	start := m.now()
 	scope := &stt.SpeakerScope{HouseholdID: n.HouseholdID, MemberIDs: n.HouseholdMemberIDs}
+	tr := newReqTrace()
+	// The speaker pass runs inside Transcribe, beside whisper (legacy: one whisper-api call).
+	endSTT := tr.measure("stt_transcribe", "whisper", map[string]any{"audio_bytes": len(file), "speaker_audio_bytes": len(speakerAudio)})
 	res, err := m.STT.Transcribe(ctx, file, stt.TranscribeOptions{SpeakerAudio: speakerAudio, Speaker: scope})
+	endSTT(err)
 	trace := Trace{ConversationID: convID, RequestType: "stt", Source: "node", NodeID: n.ID, HouseholdID: n.HouseholdID,
-		UserCommand: res.Text, TotalDurationMS: float64(m.now().Sub(start).Microseconds()) / 1000}
+		UserCommand: res.Text, TotalDurationMS: float64(m.now().Sub(start).Microseconds()) / 1000, Spans: tr.spans()}
 	if err != nil {
 		trace.Status, trace.ErrorMessage = "error", err.Error()
 		m.recordTraceAsync(trace)

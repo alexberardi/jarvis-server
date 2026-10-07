@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"errors"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	tf "github.com/alexberardi/jarvis-server/internal/modules/cc/textfilter"
@@ -41,7 +42,15 @@ func outputObject(v any) *pyjson.Object {
 }
 
 // formatTextMode is _format_tool_result_text_mode: the text path's single formatting call.
-func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []chatMsg, results []toolResult) (engineResult, []chatMsg) {
+func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []chatMsg, results []toolResult) (res engineResult, out []chatMsg) {
+	end := traceFrom(ctx).measure("final_response_generation", "llm_proxy", nil)
+	defer func() {
+		var err error
+		if res.Stop == stopError {
+			err = errors.New(res.Err)
+		}
+		end(err)
+	}()
 	outputs := resultOutputs(results)
 	if content, all := tf.FastPathMessage(outputs); all {
 		msgs = withoutRole(msgs, "tool")

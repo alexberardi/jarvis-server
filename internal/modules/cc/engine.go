@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,6 +145,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	nudged := map[[2]string]bool{}
 	dedupePending := false
 	nextMax := iterMaxTokens
+	tr := traceFrom(ctx)
 
 	for iter := 0; iter < in.maxIter; iter++ {
 		maxTok := nextMax
@@ -163,8 +165,12 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			ts, _ := t.(string)
 			req.ResponseFormat = &llm.ResponseFormat{Type: ts}
 		}
+		llmName := "llm_call_iter_" + strconv.Itoa(iter+1)
+		llmStart := tr.since()
 		resp, err := m.LLM.Chat(ctx, req)
+		llmEnd := tr.since()
 		if err != nil {
+			tr.span(llmName, "llm_proxy", llmStart, llmEnd, err, nil)
 			m.deps.Log.Error("cc: tool loop LLM call failed", "conversation_id", conv.id, "err", err)
 			return engineResult{Stop: stopError, Err: err.Error()}, msgs
 		}
@@ -193,6 +199,8 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			pr := parse.ParseToolCalls(content)
 			finish, calls, message = pr.FinishReason, pr.ToolCalls, pr.Message
 		}
+		tr.span(llmName, "llm_proxy", llmStart, llmEnd, nil, map[string]any{"prompt_tokens": resp.Usage.PromptTokens,
+			"completion_tokens": resp.Usage.CompletionTokens, "finish_reason": finish})
 
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: raw, ToolCalls: calls})
 		if doubleChecked {
@@ -277,6 +285,11 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			var clientCalls []parse.ToolCall
 			validation := false
 			var validationRes *pyjson.Object
+			names := make([]any, len(calls))
+			for i, c := range calls {
+				names[i] = c.Function.Name
+			}
+			endExec := tr.measure("tool_exec_iter_"+strconv.Itoa(iter+1), "cc", map[string]any{"tools": names})
 			for _, c := range calls {
 				if c.Function.Name == "request_validation" {
 					validation = true
@@ -285,7 +298,9 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					clientCalls = append(clientCalls, c)
 					continue
 				}
+				endTool := tr.measure("server_tool_"+c.Function.Name, "cc", nil)
 				res := m.tools.Execute(ctx, servertools.Call{ID: c.ID, Name: c.Function.Name, Args: argsObject(c.Function.Arguments)}, in.turn)
+				endTool(nil)
 				if o, ok := res.(*pyjson.Object); ok && c.Function.Name == "request_validation" {
 					if v, _ := o.Get("_validation_request"); v == true {
 						validationRes = o
@@ -294,6 +309,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				serverResults = append(serverResults, chatMsg{Role: "tool", ToolCallID: c.ID, Name: c.Function.Name,
 					Content: pyjson.Dumps(res, true)})
 			}
+			endExec(nil)
 			msgs = append(msgs, serverResults...)
 			others := len(calls) > 1 || len(clientCalls) > 0
 			if validation && others {

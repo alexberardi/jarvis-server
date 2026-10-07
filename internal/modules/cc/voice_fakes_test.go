@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
@@ -36,6 +37,7 @@ type fakeEngine struct {
 	mu     sync.Mutex
 	script []engineReply
 	reqs   []map[string]any
+	delay  time.Duration // added to every completion (span-duration tests)
 }
 
 func newFakeEngine(t *testing.T) *fakeEngine {
@@ -92,7 +94,9 @@ func (f *fakeEngine) serve(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &body)
 	f.mu.Lock()
 	f.reqs = append(f.reqs, body)
+	delay := f.delay
 	f.mu.Unlock()
+	time.Sleep(delay)
 	// The warmup (max_tokens 1) never consumes the script.
 	if mt, _ := body["max_tokens"].(float64); mt == 1 {
 		writeJSON(w, completionBody("", nil, "length"))
