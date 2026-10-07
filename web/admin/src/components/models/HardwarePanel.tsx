@@ -10,7 +10,7 @@ import { buttonClass, stateTone } from './styles'
 import { Pill, Section } from './ui'
 
 /** DetectedHardware is the GPU summary the A7 wizard's Hardware step starts from. */
-export function DetectedHardware({ data }: { data: HardwareResponse }) {
+export function DetectedHardware({ data }: { data: Pick<HardwareResponse, 'hardware' | 'proposal'> }) {
   const hw = data.hardware
   const devices = hw.devices ?? []
   return (

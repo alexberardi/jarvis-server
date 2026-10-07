@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Settings, Server, Cpu, Box, Activity, Boxes, Users, ArrowUpCircle } from 'lucide-react'
+import { LayoutDashboard, Settings, Link2, Cpu, Box, Activity, ScrollText, Users, ArrowUpCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import SystemInfoBar from './SystemInfoBar'
 import type { LucideIcon } from 'lucide-react'
@@ -12,13 +12,13 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
-  { label: 'Settings', icon: Settings, path: '/settings' },
-  { label: 'Services', icon: Server, path: '/services' },
   { label: 'Models', icon: Box, path: '/models' },
+  { label: 'Settings', icon: Settings, path: '/settings' },
+  { label: 'Connections', icon: Link2, path: '/connections' },
+  { label: 'Logs', icon: ScrollText, path: '/logs' },
   { label: 'Traces', icon: Activity, path: '/traces' },
   { label: 'Nodes', icon: Cpu, path: '/nodes' },
   { label: 'Users', icon: Users, path: '/users' },
-  { label: 'Native', icon: Boxes, path: '/native-services' },
   // /update used to be reachable ONLY via the dashboard's UpdateBanner, which
   // renders only when an update is available. With update checks off, the server
   // never contacts GitHub and always reports updateAvailable:false — so the

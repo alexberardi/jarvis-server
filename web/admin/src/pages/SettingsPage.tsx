@@ -1,15 +1,20 @@
 import { useState, useMemo } from 'react'
-import { RefreshCw, Search } from 'lucide-react'
+import { Power, RefreshCw, Search } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useAllSettings } from '@/hooks/useSettings'
 import ServiceCard from '@/components/settings/ServiceCard'
 import { errorMessage } from '@/lib/errors'
 import { withoutLabelSettings } from '@/lib/settings'
+import { restartJarvisd } from '@/lib/restart'
+import { useFeatureAvailable } from '@/hooks/useFeature'
 import { cn } from '@/lib/utils'
 
 export default function SettingsPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useAllSettings()
   const [search, setSearch] = useState('')
+  // AD8: hidden once POST /api/system/restart answers 404 (an older jarvisd).
+  const canRestart = useFeatureAvailable('restart')
+  const [restarting, setRestarting] = useState(false)
 
   const filtered = useMemo(() => {
     if (!data) return []
@@ -71,6 +76,21 @@ export default function SettingsPage() {
             <span>
               {data.successful_services}/{data.total_services} modules
             </span>
+          )}
+          {canRestart && (
+            <button
+              type="button"
+              disabled={restarting}
+              onClick={() => {
+                if (!window.confirm('Restart jarvisd now? Voice and the admin are unavailable for a few seconds.')) return
+                setRestarting(true)
+                void restartJarvisd().finally(() => setRestarting(false))
+              }}
+              className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2 py-1 text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:opacity-50"
+              title="Settings marked 'requires restart' apply after this"
+            >
+              <Power size={12} /> {restarting ? 'Restarting…' : 'Restart jarvisd'}
+            </button>
           )}
           <button
             onClick={() => refetch()}

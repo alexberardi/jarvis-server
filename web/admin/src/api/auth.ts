@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import { SETUP_TOKEN_HEADER } from '@/auth/setupToken'
+import type { Hardware, Label, Placement, PromptProvider } from './llm'
 
 export interface AuthUser {
   id: number
@@ -68,13 +69,43 @@ export async function changePassword(
   return data
 }
 
-/** setupState is the always-open GET /api/setup/state (reduced view without a superuser token). */
+/** The hardware summary the setup wizard's Hardware step starts from (llm `SetupHardware`, AD3). */
+export interface SetupHardware {
+  hardware: Hardware
+  proposal: Record<string, Placement>
+  /** Per engine kind ("llama-server", "whisper-server"), the flavours this platform has builds for. */
+  flavours: Record<string, string[]>
+}
+
+export interface SetupDoctorSummary {
+  status: 'ok' | 'warn' | 'fail' | string
+  failing: string[]
+  ran_at: string
+}
+
+/**
+ * setupState is the always-open GET /api/setup/state. Anonymous callers (or a non-superuser)
+ * get the reduced view; a superuser token adds the rest (A3 "As built" #6).
+ */
 export interface SetupState {
   needs_superuser: boolean
   setup_token_required: boolean
   version: string
   superuser: boolean
   setup_token_file?: string
+  // Superuser view only:
+  labels?: Partial<Record<Label, string>>
+  /** live is ready, degraded or remote. */
+  live_ready?: boolean
+  /** live has a model assigned, even while it is still loading. */
+  models_configured?: boolean
+  /** null without the local engine stack. */
+  hardware?: SetupHardware | null
+  hardware_url?: string
+  prompt_provider?: PromptProvider | null
+  doctor?: SetupDoctorSummary
+  households?: number
+  nodes?: number
 }
 
 export async function getSetupState(): Promise<SetupState> {
