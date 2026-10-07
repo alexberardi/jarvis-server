@@ -308,6 +308,7 @@ func (m *Module) handleRequestInstall(w http.ResponseWriter, r *http.Request) {
 	// for wire parity (D40 12.Q12).
 	m.publishPkg(p.nodeID, opInstall, map[string]any{
 		"request_id": p.id, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullStr(tag),
+		"pantry_url": m.PantryBaseURL(r.Context(), p.householdID),
 	})
 	writeCreated(w, p)
 }
@@ -449,6 +450,7 @@ func (m *Module) handleVerifyPackage(w http.ResponseWriter, r *http.Request, n *
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"confirmed": true, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullable(p.gitTag),
+		"pantry_url": m.PantryBaseURL(r.Context(), p.householdID), // additive (D48): the household's Pantry
 	})
 }
 

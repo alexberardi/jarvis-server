@@ -240,3 +240,32 @@ func TestHealthProbes(t *testing.T) {
 type tcpAddr = net.TCPAddr
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+// D48: the Pantry clients install from is listed in /services from cc's pantry.base_url.
+func TestExternalServices(t *testing.T) {
+	m, h := setup(t)
+	url := "https://pantry.example.org"
+	m.External = func(context.Context) map[string]string {
+		return map[string]string{"jarvis-pantry": url, "jarvis-bad": "not a url"}
+	}
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, body := do(t, h, "GET", "/services", "")
+	svc := services(body)
+	if got := svc["jarvis-pantry"]["url"]; got != "https://pantry.example.org:443" {
+		t.Errorf("pantry url %v (%v)", got, svc["jarvis-pantry"])
+	}
+	if _, ok := svc["jarvis-bad"]; ok {
+		t.Error("a malformed URL must be skipped")
+	}
+	// A changed setting moves the row on the next sync.
+	url = "http://10.0.0.5:7721"
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, body = do(t, h, "GET", "/services", "")
+	if got := services(body)["jarvis-pantry"]["url"]; got != "http://10.0.0.5:7721" {
+		t.Errorf("moved pantry url %v", got)
+	}
+}

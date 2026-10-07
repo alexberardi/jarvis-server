@@ -16,7 +16,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +82,10 @@ type Module struct {
 	// MQTTPort is the embedded broker's TCP port (cc module); when set, it is registered as
 	// jarvis-mqtt-broker (scheme mqtt), which nodes resolve the broker URL from.
 	MQTTPort int
+	// External lists registry rows for services jarvisd doesn't serve but clients resolve
+	// through /services, by name → base URL (e.g. jarvis-pantry from cc's pantry.base_url,
+	// D48). Synced at startup.
+	External func(ctx context.Context) map[string]string
 
 	settings *settings.Service
 
@@ -164,6 +170,13 @@ func (m *Module) syncSelf(ctx context.Context) error {
 			return fmt.Errorf("config: register %s: %w", name, err)
 		}
 	}
+	if m.External != nil {
+		for name, raw := range m.External(ctx) {
+			if err := m.syncExternal(ctx, name, raw); err != nil {
+				return err
+			}
+		}
+	}
 	if m.MQTTPort > 0 {
 		_, err := m.deps.DB.Write.ExecContext(ctx, `
 			INSERT INTO config_services (name, host, port, scheme, health_path, description)
@@ -176,6 +189,32 @@ func (m *Module) syncSelf(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("config: register jarvis-mqtt-broker: %w", err)
 		}
+	}
+	return nil
+}
+
+// syncExternal upserts an external service row from its base URL. A malformed URL is logged
+// and skipped: it must not stop startup.
+func (m *Module) syncExternal(ctx context.Context, name, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		m.deps.Log.Warn("config: skipping external service with a bad URL", "name", name, "url", raw)
+		return nil
+	}
+	port, _ := strconv.Atoi(u.Port())
+	if port == 0 {
+		port = map[string]int{"http": 80, "https": 443}[u.Scheme]
+	}
+	_, err = m.deps.DB.Write.ExecContext(ctx, `
+		INSERT INTO config_services (name, host, port, scheme, health_path, description)
+		VALUES (?, ?, ?, ?, '/health', 'external (jarvisd setting)')
+		ON CONFLICT (name) DO UPDATE SET host = excluded.host, port = excluded.port, scheme = excluded.scheme,
+			description = excluded.description, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		WHERE config_services.host != excluded.host OR config_services.port != excluded.port
+			OR config_services.scheme != excluded.scheme`,
+		name, u.Hostname(), port, u.Scheme)
+	if err != nil {
+		return fmt.Errorf("config: register %s: %w", name, err)
 	}
 	return nil
 }

@@ -139,7 +139,7 @@ func TestPackageInstallFlow(t *testing.T) {
 		t.Fatal(pk.TopicName)
 	}
 	if p := payload(t, pk); p["request_id"] != rid || p["command_name"] != "weather" || p["github_repo_url"] != "https://example.com/r.git" ||
-		p["git_tag"] != "abc123" || len(p) != 4 {
+		p["git_tag"] != "abc123" || p["pantry_url"] != defaultPantryBaseURL || len(p) != 5 {
 		t.Fatal(p)
 	}
 	// Admin key bypasses the household check.
@@ -161,7 +161,7 @@ func TestPackageInstallFlow(t *testing.T) {
 	e.do("GET", "/api/v0/nodes/n2/package-install/"+rid+"/verify", nil, other.h()).detail(404, "Package install request not found")
 	e.advance(4 * time.Minute)
 	v := e.do("GET", verify, nil, n.h()).want(200).json()
-	if v["confirmed"] != true || v["command_name"] != "weather" || v["github_repo_url"] != "https://example.com/r.git" || v["git_tag"] != "abc123" || len(v) != 4 {
+	if v["confirmed"] != true || v["command_name"] != "weather" || v["github_repo_url"] != "https://example.com/r.git" || v["git_tag"] != "abc123" || v["pantry_url"] != defaultPantryBaseURL || len(v) != 5 {
 		t.Fatal(v)
 	}
 	// D39: the pickup deadline became verify + 15 min; a repeat verify doesn't move it.

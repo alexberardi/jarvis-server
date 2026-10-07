@@ -83,6 +83,7 @@ func modules() []module.Module {
 	var sttm *sttmod.Module
 	var ttsm *ttsmod.Module
 	var notif *notifmod.Module
+	var cc *ccmod.Module
 	for _, m := range mods {
 		switch x := m.(type) {
 		case *authmod.Module:
@@ -95,6 +96,8 @@ func modules() []module.Module {
 			ttsm = x
 		case *notifmod.Module:
 			notif = x
+		case *ccmod.Module:
+			cc = x
 		}
 	}
 	superuser := settings.SuperuserGuard(auth.VerifyUser)
@@ -104,6 +107,10 @@ func modules() []module.Module {
 			c.Served = served
 			c.SettingsGuard = superuser
 			c.MQTTPort = portOf(envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr))
+			c.External = func(ctx context.Context) map[string]string {
+				// The system-level Pantry; households can override it for their own installs.
+				return map[string]string{"jarvis-pantry": cc.PantryBaseURL(ctx, "")}
+			}
 		case *authmod.Module:
 			c.InProcess = names
 		case *notifmod.Module:
