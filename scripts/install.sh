@@ -87,12 +87,14 @@ ask() { # ask "question": yes unless answered n; --yes says yes, no terminal say
 # project (a source checkout's per-service projects, the dockerized node), or any project
 # whose files are in ~/.jarvis/compose. Nothing else is touched.
 DOCKER=""
+docker_init() { # set DOCKER here, not in the $(legacy_containers) subshell
+  [ -z "$DOCKER" ] || return 0
+  command -v docker >/dev/null || return 0
+  DOCKER=docker; docker ps >/dev/null 2>&1 || DOCKER="$SUDO docker"
+}
 legacy_containers() {
   fmt='{{.Names}};{{.Label "com.docker.compose.project"}};{{.Label "com.docker.compose.project.working_dir"}}'
-  if [ -z "$DOCKER" ]; then
-    command -v docker >/dev/null || return 0
-    DOCKER=docker; docker ps >/dev/null 2>&1 || DOCKER="$SUDO docker"
-  fi
+  [ -n "$DOCKER" ] || return 0
   $DOCKER ps --format "$fmt" 2>/dev/null | awk -F';' '
     { wd = $3; sub(/\/$/, "", wd) }
     $1 ~ /^jarvis-/ || $2 == "jarvis" || $2 ~ /^jarvis-/ || wd ~ /\/\.jarvis\/compose$/ { printf "%s ", $1 }'
@@ -135,7 +137,7 @@ stop_legacy() { # stop_legacy NAMES: restart policy off + stop (never down/rm), 
   if [ -n "$1" ]; then
     say "Stopping the legacy stack: $1"
     # shellcheck disable=SC2086 # names are words
-    $DOCKER update --restart=no $1 >/dev/null && $DOCKER stop $1 >/dev/null
+    { $DOCKER update --restart=no $1 >/dev/null && $DOCKER stop $1 >/dev/null; } || die "could not stop the legacy stack ($1)"
   fi
   stop_legacy_admin
 }
@@ -179,7 +181,7 @@ CUR="" REUSE=0
 [ -x "$BIN" ] && CUR=$("$BIN" version 2>/dev/null || echo unknown)
 if [ -n "$CUR" ]; then
   # jarvisd is already here, so stopping the legacy stack can't leave the box with neither.
-  [ $STOP_LEGACY = 1 ] && stop_legacy "$(legacy_containers)"
+  if [ $STOP_LEGACY = 1 ]; then docker_init; stop_legacy "$(legacy_containers)"; fi
   if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ] && "$BIN" service status $SVC >/dev/null 2>&1; then
     say "jarvisd $VERSION is already installed and running."
     # shellcheck disable=SC2086
@@ -239,6 +241,7 @@ if [ -z "$CUR" ]; then
   held=0
   "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"' && held=1
   if [ $held = 1 ] || [ $STOP_LEGACY = 1 ]; then
+    docker_init
     legacy=$(legacy_containers)
     [ $held = 0 ] || [ -n "$legacy" ] || die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (\`sudo ss -ltnp\` or \`sudo lsof -iTCP -sTCP:LISTEN\` names it)"
     [ $STOP_LEGACY = 1 ] || die "the legacy Jarvis Docker stack is running ($legacy) and holds jarvisd's ports.
