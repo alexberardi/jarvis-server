@@ -25,8 +25,10 @@ type LLM interface {
 }
 
 // ReadyWait bounds how long a turn waits for a model that is still loading (A10 F22: for
-// 5-10 s after a restart or upgrade every turn got 503 model_not_loaded).
-const ReadyWait = 30 * time.Second
+// 5-10 s after a restart or upgrade every turn got 503 model_not_loaded). Nodes give up on a
+// voice request after 30 s (jarvis-node-setup's command-center client), so the wait stays
+// well under that: the node gets the "still loading" answer, not its own timeout.
+const ReadyWait = 15 * time.Second
 
 // WaitingLLM wraps the llm Service so cc's calls (voice, chat, background jobs) wait up to
 // wait for a loading label instead of failing at once; on timeout the error says it was
