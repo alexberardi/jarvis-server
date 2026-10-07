@@ -60,3 +60,14 @@ func (m *Module) attachStack() {
 	m.stack = st
 	m.Resolver = stackResolver{st.Resolver}
 }
+
+// ModelPath reports where the model assigned to a voice label ("tts", "speaker") is
+// installed, for the in-binary voice modules. ok is false until the stack is up and a model
+// is installed and assigned.
+func (m *Module) ModelPath(ctx context.Context, kind string) (string, bool) {
+	if m.stack == nil || m.stack.Manager == nil {
+		return "", false
+	}
+	vm, ok := m.stack.Manager.ModelPath(ctx, kind)
+	return vm.Path, ok
+}

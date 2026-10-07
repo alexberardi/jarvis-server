@@ -62,3 +62,18 @@ func pcmWAV(t *testing.T, pcm []int16, channels, rate int) []byte {
 	}
 	return buf.Bytes()
 }
+
+func TestWritePCM16WAV(t *testing.T) {
+	pcm := []byte{0x00, 0x40, 0x00, 0xC0} // 16384, -16384
+	var buf bytes.Buffer
+	if err := WritePCM16WAV(&buf, pcm, 1, 24000); err != nil {
+		t.Fatal(err)
+	}
+	if buf.Len() != 44+len(pcm) {
+		t.Fatalf("len %d", buf.Len())
+	}
+	out, rate, err := ReadWAV(bytes.NewReader(buf.Bytes()))
+	if err != nil || rate != 24000 || len(out) != 2 || out[0] != 0.5 || out[1] != -0.5 {
+		t.Fatalf("out=%v rate=%d err=%v", out, rate, err)
+	}
+}

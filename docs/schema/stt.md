@@ -11,13 +11,22 @@ Migration: `internal/modules/stt/migrations/00001_baseline.sql`. Source: jarvis-
 The only legacy table was `settings`. The baseline is an intentional no-op (`SELECT 1`).
 Voice profiles never lived in this DB, and voice is greenfield anyway (PLAN §5: users re-enroll).
 
+## Added (jarvisd)
+
+`00002_voiceprints.sql`: `stt_voiceprints(household_id, user_id, sample_index 0-999, model_id,
+dim, embedding BLOB, speech_ms, created_at)`, PK `(household_id, user_id, sample_index)`, index on
+`user_id`. One row per enrollment take: the L2-normalised speaker embedding as little-endian
+float32 × dim, tagged `<model basename>@<sha256[:12]>` (D34: no audio kept; rows from another
+model are ignored and cleared by the user's first take under the new model; D36: per household).
+Account deletion: `Module.PurgeUser` (D20); household deletion: `PurgeHousehold` (D49).
+
 ## Dropped
 
 `alembic_version`; `settings` (platform-owned).
 
 ## Setting keys
 
-From `jarvis-whisper-api/app/services/settings_definitions.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-whisper-api/app/services/settings_definitions.py` (the input for the module's settings `Definitions`, now implemented in `internal/modules/stt/stt.go`). `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|
@@ -46,6 +55,11 @@ From `jarvis-whisper-api/app/services/settings_definitions.py` (input for the mo
 | `server.log_remote_level` | string | `'DEBUG'` | JARVIS_LOG_REMOTE_LEVEL | Remote logging level |
 | `auth.cache_ttl_seconds` | int | `60` | NODE_AUTH_CACHE_TTL | Auth validation cache TTL in seconds |
 
+- **jarvisd keeps:** `whisper.default_temperature`, `whisper.default_temperature_inc`,
+  `whisper.default_beam_size`, `whisper.language`, `voice.recognition_enabled` (household-scoped,
+  D35), `voice.similarity_threshold` (**0.43**, ERes2Net), `voice.min_speaker_margin`; new
+  `voice.enroll_min_speech_seconds` (3.0) and `voice.enroll_min_consistency` (0.3) for D37.
+  The engine keys moved to the llm module's `stt.*` labels (D7).
 - **Cut/changed keys:** `voice.encoder` (`ecapa` is the cut torch stack; sherpa-onnx encoder replaces it), the `voice.*` thresholds need recalibration for the new encoder (PLAN §3.3) so imported values should not be trusted; `whisper.*` keys depend on D7 (whisper.cpp engine vs sherpa ASR).
 - Dev DB seeds 13 of the 24 keys.
 

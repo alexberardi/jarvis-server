@@ -104,3 +104,12 @@ func writeHeader(w io.Writer, dataBytes, channels, sampleRate int) error {
 	_, err := w.Write(h)
 	return err
 }
+
+// WritePCM16WAV wraps already-encoded little-endian 16-bit PCM in a WAV container.
+func WritePCM16WAV(w io.Writer, pcm []byte, channels, sampleRate int) error {
+	if err := writeHeader(w, len(pcm), channels, sampleRate); err != nil {
+		return err
+	}
+	_, err := w.Write(pcm)
+	return err
+}

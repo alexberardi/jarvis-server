@@ -36,7 +36,7 @@ var nonCCBaselines = []struct {
 	}},
 	{"ocr", ocr.Migrations(), nil},
 	{"llm", llm.Migrations(), []string{"llm_dedupe", "llm_installs", "llm_models"}},
-	{"stt", stt.Migrations(), nil},
+	{"stt", stt.Migrations(), []string{"stt_voiceprints"}},
 	{"tts", tts.Migrations(), nil},
 }
 

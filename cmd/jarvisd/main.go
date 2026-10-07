@@ -21,6 +21,8 @@ import (
 	logsmod "github.com/alexberardi/jarvis-server/internal/modules/logs"
 	notifmod "github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	ocrmod "github.com/alexberardi/jarvis-server/internal/modules/ocr"
+	sttmod "github.com/alexberardi/jarvis-server/internal/modules/stt"
+	ttsmod "github.com/alexberardi/jarvis-server/internal/modules/tts"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -43,6 +45,8 @@ func modules() []module.Module {
 		&logsmod.Module{},
 		&ocrmod.Module{},
 		&llmmod.Module{},
+		&ttsmod.Module{},
+		&sttmod.Module{},
 		&notifmod.Module{
 			AdminKey: os.Getenv("ADMIN_API_KEY"),
 			RelayURL: os.Getenv("RELAY_URL"),
@@ -103,6 +107,23 @@ func modules() []module.Module {
 			c.ManagerGuard = superuser
 			c.Version = version
 			c.AppID, c.AppKey = os.Getenv("JARVIS_APP_ID"), os.Getenv("JARVIS_APP_KEY")
+		case *ttsmod.Module:
+			c.Auth = auth
+			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
+			c.SettingsWrite = superuser
+			c.Version = version
+			c.Models = ttsmod.ModelPathFunc(llm.ModelPath)
+		case *sttmod.Module:
+			c.Auth = auth
+			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
+			c.SettingsWrite = superuser
+			c.Version = version
+			c.Engine = sttmod.ResolveFunc(func(ctx context.Context, label string) (string, error) {
+				ep, err := llm.Resolver.Resolve(ctx, label)
+				return ep.BaseURL, err
+			})
+			c.Models = sttmod.ModelPathFunc(llm.ModelPath)
+			auth.OnUserDeleted(c.PurgeUser)
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
