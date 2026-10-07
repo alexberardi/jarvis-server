@@ -45,7 +45,8 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 
 // Definitions are the module's settings declared so far.
 func Definitions() []settings.Definition {
-	return append(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona)...)
+	defs := append(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona)...)
+	return append(defs, packageDefinitions()...)
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -129,6 +130,8 @@ type Module struct {
 	enroll   *enrollments
 	tools    *servertools.Registry
 	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
+
+	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -257,6 +260,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 
 	// Phase 5b: the voice pipeline, tool loop, media proxy and node plugin API.
 	m.registerVoice(mux)
+
+	// Packages, command data and the node tools view (doc 12).
+	m.registerPackages(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)

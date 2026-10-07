@@ -213,5 +213,5 @@ func (m *Module) cleanup(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	return m.cleanupPackages(ctx, now)
 }
