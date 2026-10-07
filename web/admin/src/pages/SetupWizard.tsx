@@ -62,7 +62,9 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
     void qc.invalidateQueries({ queryKey: setupKeys.state })
   }
 
-  if (state.isLoading) return null
+  // No `state.isLoading` gate: the session is restored synchronously, so isLoading is only
+  // ever true during the setup call itself, and unmounting then wiped the Account form and
+  // the reason a refused setup gives (A10). AccountStep shows its own "Creating...".
   if (!step) return <Navigate to={state.isAuthenticated ? '/dashboard' : '/login'} replace />
   // Past Account without a session (it expired, or was signed out): sign in first.
   if (idx(step) > idx('account') && !state.isAuthenticated) return <Navigate to="/login" replace />
