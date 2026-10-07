@@ -36,8 +36,12 @@ Known intentional divergences (decisions in docs/cc/QUESTIONS.md):
 - The native path gets the text path's per-household server-tool gates (D22); fixtures here use
   the ungated legacy tool lists, so gated Go output is compared against the matching tool set.
 
-Not yet covered: G2/G3 date context and resolution (regenerated from the corrected spec, D8),
-G4 ISO guard, the recently-shown block.
+More prompt-side fixtures come from [`tools/golden/export_cc_extras.py`](../../tools/golden/export_cc_extras.py)
+(see "Extras" below): `_persona.json`, `_recently_shown.json`, `_toolparse.json`.
+
+Go tests: `internal/modules/cc/prompts` (G1 88/88 byte-exact, G5, blocks, constants; `rules.go`
+is generated from `_blocks.json` + `_persona.json` by `go generate`) and
+`internal/modules/cc/parse` (`_toolparse.json`).
 
 ## dates/ (G2 + G3, legacy reference)
 
@@ -62,6 +66,23 @@ Bugs visible in the data:
 | `date_context.json` | `generate_date_context_object` per instant × zone (or the error raised). |
 | `resolution.json` | `resolve_date_keys` for every key, `in_*` forms and combinations, per instant, UTC and New York. |
 | `normalize.json` | `normalize_date_key` samples. |
+| `iso_guard.json` | G4 (from `export_cc_extras.py`): `is_iso_datetime` over a format matrix, and the engine's `_try_fix_iso_dates` (clean / fixed-single / fixed-multi / bad) at 3 instants × UTC and New York. |
+
+The Go side (`internal/modules/cc/dates`) implements the corrected spec. Its golden test asserts
+equality for every legacy value that was right and claims each other value with a documented
+divergence rule that checks the Go value independently (weekday off-by-one, DST stale offset,
+±365-day years, zone fallback, local single-instant modifiers, the closed vocabulary gap).
+
+## Extras (G4, persona, recently-shown, ToolCallParser)
+
+    TZ=UTC ../jarvis-command-center/.venv/bin/python tools/golden/export_cc_extras.py \
+        --cc ../jarvis-command-center --out fixtures/golden
+
+`_try_fix_iso_dates` is a closure inside `ToolExecutionEngine.execute`, so the exporter cuts its
+source (and `_replace_datetimes`) out of the real method and runs it verbatim. Tool-call ids are
+random and masked as `call_MASKED`. The venv runs Python 3.14, while prod's command-center image
+pins 3.11: their `fromisoformat` differ only on hour `24:00` (accepted from 3.12), which the Go
+test overrides to the 3.11 answer (checked with `mise exec python@3.11`).
 
 ## llm/ (G6, G7, G10–G12, docs/llm/02 §9, 03 §9, 04 §9)
 

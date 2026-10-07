@@ -1,0 +1,365 @@
+[
+ {
+  "raw": "{\"message\": \"Hi\", \"tool_calls\": []}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "Hi"
+ },
+ {
+  "raw": "{\"message\": \"On it\", \"tool_calls\": [{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "set_timer",
+     "arguments": "{\"duration_seconds\": 300}"
+    }
+   }
+  ],
+  "message": "On it"
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_call\": {\"name\": \"get_weather\", \"arguments\": {}}}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"name\": \"quick_search\", \"arguments\": {\"query\": \"weather\"}}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "quick_search",
+     "arguments": "{\"query\": \"weather\"}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"name\": \"quick_search\", \"arguments\": {\"query\": \"x\"}, \"failure_message\": \"Search failed.\"}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "quick_search",
+     "arguments": "{\"query\": \"x\"}"
+    },
+    "failure_message": "Search failed."
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_calls\": [{\"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"city\\\": \\\"Paris\\\"}\"}}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{\"city\": \"Paris\"}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": \"{not json\"}]}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": ""
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": null}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": [1, 2]}]}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": ""
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": [\"Next Week\", \" TOMORROW:MORNING \", {\"resolved_datetimes\": [\"This Weekend\"]}, {\"resolved_datetimes\": \"Tonight\"}, {\"other\": 1}, 5]}}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{\"resolved_datetimes\": [\"next_week\", \"tomorrow_morning\", \"this_weekend\", \"tonight\", {\"other\": 1}, 5]}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"resolved_datetimes\": \"today\"}}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{\"resolved_datetimes\": \"today\"}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"message\": \"\", \"tool_calls\": [{\"name\": \"x\", \"arguments\": {}, \"failure_message\": \"\"}, {\"name\": \"y\", \"arguments\": {}, \"failure_message\": 5}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "x",
+     "arguments": "{}"
+    }
+   },
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "y",
+     "arguments": "{}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\n  \"message\": \"Done\", # a comment\n  \"tool_calls\": [] # trailing\n}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "Done"
+ },
+ {
+  "raw": "{\"message\": \"Use # inside strings\", \"tool_calls\": []}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "Use # inside strings"
+ },
+ {
+  "raw": "Sure! Here you go: {\"message\": \"Hi\", \"tool_calls\": []} hope that helps",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "Hi"
+ },
+ {
+  "raw": "first {\"broken\": } then {\"message\": \"second\", \"tool_calls\": []}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "second"
+ },
+ {
+  "raw": "prefix {\"a\": {\"b\": 1}} and {\"message\": \"x\"}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": ""
+ },
+ {
+  "raw": "text {\"message\": \"x\", \"tool_calls\": [] trailing } garbage }",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "text {\"message\": \"x\", \"tool_calls\": [] trailing } garbage }"
+ },
+ {
+  "raw": "no json here at all",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "no json here at all"
+ },
+ {
+  "raw": "[1, 2, 3]",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "[1, 2, 3]"
+ },
+ {
+  "raw": "\"just a string\"",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "\"just a string\""
+ },
+ {
+  "raw": "42",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "42"
+ },
+ {
+  "raw": "{\"message\": null, \"tool_calls\": []}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": null
+ },
+ {
+  "raw": "{\"message\": 7}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": 7
+ },
+ {
+  "raw": "{\"tool_calls\": [{\"function\": \"not a dict\"}]}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "{\"tool_calls\": [{\"function\": \"not a dict\"}]}"
+ },
+ {
+  "raw": "{\"tool_calls\": [{\"name\": \"\", \"arguments\": {}}, {\"no_name\": true}, \"str\", {\"name\": \"ok\", \"arguments\": {\"é\": \"ü \\ud83d\\ude00 <&>\"}}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "ok",
+     "arguments": "{\"\\u00e9\": \"\\u00fc \\ud83d\\ude00 <&>\"}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"tool_calls\": {\"name\": \"dict_not_list\"}}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": ""
+ },
+ {
+  "raw": "{\"tool_call\": null, \"message\": \"m\"}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "m"
+ },
+ {
+  "raw": "{\"message\": \"x\", \"tool_calls\": [], \"name\": \"would_be_bare\", \"arguments\": {}}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "x"
+ },
+ {
+  "raw": "{\"name\": \"bare_no_args\"}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "bare_no_args",
+     "arguments": "{}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "{\"function\": {\"name\": \"openai_bare\", \"arguments\": {\"a\": 1.5, \"b\": 10000000000000000000000, \"c\": true}}}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "openai_bare",
+     "arguments": "{\"a\": 1.5, \"b\": 10000000000000000000000, \"c\": true}"
+    }
+   }
+  ],
+  "message": ""
+ },
+ {
+  "raw": "",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": ""
+ },
+ {
+  "raw": "   ",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "   "
+ },
+ {
+  "raw": "{\"message\": \"unterminated",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "{\"message\": \"unterminated"
+ },
+ {
+  "raw": "```json\n{\"message\": \"fenced\", \"tool_calls\": [{\"name\": \"t\", \"arguments\": {}}]}\n```",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "t",
+     "arguments": "{}"
+    }
+   }
+  ],
+  "message": "fenced"
+ },
+ {
+  "raw": "{\"message\": \"esc \\\"quote\\\" { brace\", \"tool_calls\": []}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "esc \"quote\" { brace"
+ },
+ {
+  "raw": "{\"message\": \"dup\", \"message\": \"last wins\", \"tool_calls\": []}",
+  "finish_reason": "stop",
+  "tool_calls": [],
+  "message": "last wins"
+ },
+ {
+  "raw": "{\"message\": \"nan\", \"tool_calls\": [{\"name\": \"t\", \"arguments\": {\"v\": NaN, \"w\": -Infinity}}]}",
+  "finish_reason": "tool_calls",
+  "tool_calls": [
+   {
+    "id": "call_MASKED",
+    "type": "function",
+    "function": {
+     "name": "t",
+     "arguments": "{\"v\": NaN, \"w\": -Infinity}"
+    }
+   }
+  ],
+  "message": "nan"
+ }
+]

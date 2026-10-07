@@ -1,0 +1,190 @@
+[
+ {
+  "name": "empty",
+  "items": [],
+  "block": ""
+ },
+ {
+  "name": "one",
+  "items": [
+   {
+    "ref_id": "r1",
+    "label": "Email 1 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   }
+  ],
+  "block": "RECENTLY SHOWN (act on these by number; pass the ref_id to act_on_items):\n1 [r1] Email 1 from abc — “subject”\nValid actions: archive.\nWhen the user refers to these by a number, 'those', 'the first/last one', or by naming a sender/topic, resolve it to the matching ref_id(s) and call act_on_items. Only use ref_ids and actions listed above."
+ },
+ {
+  "name": "no_actions",
+  "items": [
+   {
+    "ref_id": "r1",
+    "label": "Email 1 from abc — “subject”",
+    "attrs": {},
+    "actions": []
+   },
+   {
+    "ref_id": "r2",
+    "label": "Email 2 from abc — “subject”",
+    "attrs": {},
+    "actions": null
+   }
+  ],
+  "block": "RECENTLY SHOWN (act on these by number; pass the ref_id to act_on_items):\n1 [r1] Email 1 from abc — “subject”\n2 [r2] Email 2 from abc — “subject”\nWhen the user refers to these by a number, 'those', 'the first/last one', or by naming a sender/topic, resolve it to the matching ref_id(s) and call act_on_items. Only use ref_ids and actions listed above."
+ },
+ {
+  "name": "three_mixed_actions",
+  "items": [
+   {
+    "ref_id": "r1",
+    "label": "Email 1 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "reply",
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r2",
+    "label": "Email 2 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive",
+     "delete"
+    ]
+   },
+   {
+    "ref_id": "r3",
+    "label": "Email 3 from abc — “subject”",
+    "attrs": {},
+    "actions": []
+   }
+  ],
+  "block": "RECENTLY SHOWN (act on these by number; pass the ref_id to act_on_items):\n1 [r1] Email 1 from abc — “subject”\n2 [r2] Email 2 from abc — “subject”\n3 [r3] Email 3 from abc — “subject”\nValid actions: archive, delete, reply.\nWhen the user refers to these by a number, 'those', 'the first/last one', or by naming a sender/topic, resolve it to the matching ref_id(s) and call act_on_items. Only use ref_ids and actions listed above."
+ },
+ {
+  "name": "ten_truncated",
+  "items": [
+   {
+    "ref_id": "r1",
+    "label": "Email 1 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r2",
+    "label": "Email 2 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r3",
+    "label": "Email 3 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r4",
+    "label": "Email 4 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r5",
+    "label": "Email 5 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r6",
+    "label": "Email 6 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r7",
+    "label": "Email 7 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r8",
+    "label": "Email 8 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r9",
+    "label": "Email 9 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   {
+    "ref_id": "r10",
+    "label": "Email 10 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   }
+  ],
+  "block": "RECENTLY SHOWN (act on these by number; pass the ref_id to act_on_items):\n1 [r1] Email 1 from abc — “subject”\n2 [r2] Email 2 from abc — “subject”\n3 [r3] Email 3 from abc — “subject”\n4 [r4] Email 4 from abc — “subject”\n5 [r5] Email 5 from abc — “subject”\n6 [r6] Email 6 from abc — “subject”\n7 [r7] Email 7 from abc — “subject”\n8 [r8] Email 8 from abc — “subject”\n(+2 more not shown — ask the user to narrow it down)\nValid actions: archive.\nWhen the user refers to these by a number, 'those', 'the first/last one', or by naming a sender/topic, resolve it to the matching ref_id(s) and call act_on_items. Only use ref_ids and actions listed above."
+ },
+ {
+  "name": "non_dict_item",
+  "items": [
+   {
+    "ref_id": "r1",
+    "label": "Email 1 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "archive"
+    ]
+   },
+   "junk",
+   {
+    "ref_id": "r3",
+    "label": "Email 3 from abc — “subject”",
+    "attrs": {},
+    "actions": [
+     "star"
+    ]
+   }
+  ],
+  "block": "RECENTLY SHOWN (act on these by number; pass the ref_id to act_on_items):\n1 [r1] Email 1 from abc — “subject”\n3 [r3] Email 3 from abc — “subject”\nValid actions: archive, star.\nWhen the user refers to these by a number, 'those', 'the first/last one', or by naming a sender/topic, resolve it to the matching ref_id(s) and call act_on_items. Only use ref_ids and actions listed above."
+ },
+ {
+  "name": "missing_fields",
+  "items": [
+   {
+    "actions": [
+     "b",
+     "a"
+    ]
+   }
+  ],
+  "block": "RECENTLY SHOWN (act on these by number; pass the ref_id to act_on_items):\n1 [] \nValid actions: a, b.\nWhen the user refers to these by a number, 'those', 'the first/last one', or by naming a sender/topic, resolve it to the matching ref_id(s) and call act_on_items. Only use ref_ids and actions listed above."
+ }
+]

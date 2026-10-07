@@ -1,0 +1,2939 @@
+{
+ "python": "3.14.7",
+ "is_iso_datetime": [
+  {
+   "value": "2025-01-15T10:30:00Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00+00:00",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00+05:30",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00-08:00",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30:00",
+   "is_iso": false
+  },
+  {
+   "value": "not-a-datetime",
+   "is_iso": false
+  },
+  {
+   "value": "",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00.123456Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00.1Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00.123+01:00",
+   "is_iso": true
+  },
+  {
+   "value": "20250115T103000Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T103000+0530",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15 10:30:00Z",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T24:00:00Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-02-30T10:00:00Z",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30:00+24:00",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30:00+05",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00+0530",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00z",
+   "is_iso": false
+  },
+  {
+   "value": "T",
+   "is_iso": false
+  },
+  {
+   "value": "2025-W03-3T10:00:00Z",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:00+05:30:15",
+   "is_iso": true
+  },
+  {
+   "value": "2025-01-15T10:30:60Z",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T1:30:00Z",
+   "is_iso": false
+  },
+  {
+   "value": "Tomorrow",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30:00ZZ",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30:00 Z",
+   "is_iso": true
+  },
+  {
+   "value": "+2025-01-15T10:30:00Z",
+   "is_iso": false
+  },
+  {
+   "value": "2025-001T10:00:00Z",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30:00,5Z",
+   "is_iso": true
+  },
+  {
+   "value": "２０２５-01-15T10:30:00Z",
+   "is_iso": false
+  },
+  {
+   "value": "2025-01-15T10:30:00-00:00",
+   "is_iso": true
+  },
+  {
+   "value": "0001-01-01T00:00:00Z",
+   "is_iso": true
+  },
+  {
+   "value": "9999-12-31T23:59:59Z",
+   "is_iso": true
+  }
+ ],
+ "try_fix_iso_dates": [
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "clean_keys",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "clean_no_param",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "clean_not_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_single",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"2026-10-05T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_single_string",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": \"2026-10-06T00:00:00Z\"}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_two_singles",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-06T00:00:00Z\", \"2026-10-05T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\", \"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_multi_weekend",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\", \"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_multi_month",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-01T00:00:00Z\", \"2026-10-31T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_month\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_mixed_key_and_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\", \"2026-10-06T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_saturday_alone",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "fixed_non_ascii_args",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"2026-10-05T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "bad_unknown_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "bad_partial",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T00:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T00:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "bad_and_fixed",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T00:00:00Z\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "skip_bad_json",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "UTC",
+   "name": "skip_non_dict",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_keys",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_no_param",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_not_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_single",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"2026-10-05T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_single_string",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": \"2026-10-06T04:00:00Z\"}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_two_singles",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-06T04:00:00Z\", \"2026-10-05T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\", \"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_multi_weekend",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\", \"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_multi_month",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-01T04:00:00Z\", \"2026-10-31T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_month\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_mixed_key_and_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\", \"2026-10-06T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_saturday_alone",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_non_ascii_args",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"2026-10-05T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_unknown_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_partial",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T04:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T04:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_and_fixed",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T04:00:00Z\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "skip_bad_json",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-05T14:30:00Z",
+   "timezone": "America/New_York",
+   "name": "skip_non_dict",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "clean_keys",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "clean_no_param",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "clean_not_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_single",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_single_string",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": \"2026-10-11T00:00:00Z\"}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_two_singles",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\", \"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_multi_weekend",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\", \"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_multi_month",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-01T00:00:00Z\", \"2026-10-31T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_month\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_mixed_key_and_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\", \"2026-10-11T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_saturday_alone",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "fixed_non_ascii_args",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "bad_unknown_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "bad_partial",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T00:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T00:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "bad_and_fixed",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T00:00:00Z\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "skip_bad_json",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "UTC",
+   "name": "skip_non_dict",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_keys",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_no_param",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_not_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_single",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_single_string",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": \"2026-10-11T04:00:00Z\"}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_two_singles",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\", \"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_multi_weekend",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\", \"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_multi_month",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-01T04:00:00Z\", \"2026-10-31T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_month\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_mixed_key_and_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\", \"2026-10-11T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_saturday_alone",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_non_ascii_args",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_unknown_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_partial",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T04:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T04:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_and_fixed",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T04:00:00Z\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "skip_bad_json",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-10T17:00:00Z",
+   "timezone": "America/New_York",
+   "name": "skip_non_dict",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "clean_keys",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "clean_no_param",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "clean_not_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_single",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"2026-10-11T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_single_string",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": \"2026-10-12T00:00:00Z\"}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_two_singles",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-12T00:00:00Z\", \"2026-10-11T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\", \"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_multi_weekend",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\", \"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_multi_month",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-01T00:00:00Z\", \"2026-10-31T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_month\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_mixed_key_and_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\", \"2026-10-12T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_saturday_alone",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"yesterday\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "fixed_non_ascii_args",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"2026-10-11T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "bad_unknown_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "bad_partial",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "bad_and_fixed",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "skip_bad_json",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T00:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "UTC",
+   "name": "skip_non_dict",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_keys",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_no_param",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\"}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "clean_not_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-05\", \"2026-10-05T10:00:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_single",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"2026-10-11T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Paris\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_single_string",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": \"2026-10-12T04:00:00Z\"}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_two_singles",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-12T04:00:00Z\", \"2026-10-11T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\", \"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_multi_weekend",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\", \"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_weekend\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_multi_month",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-01T04:00:00Z\", \"2026-10-31T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"this_month\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_mixed_key_and_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\", \"2026-10-12T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"tomorrow\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_saturday_alone",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-10T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"yesterday\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "fixed_non_ascii_args",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"2026-10-11T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"label\": \"caf\\u00e9 \\u2615\", \"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_unknown_iso",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_partial",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\", \"2019-03-04T05:06:07Z\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "bad_and_fixed",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ],
+   "status": "bad",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2019-03-04T05:06:07+02:00\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "skip_bad_json",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"2026-10-11T04:00:00Z\"]}"
+     }
+    }
+   ],
+   "status": "fixed",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{nope"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": [\"today\"]}"
+     }
+    }
+   ]
+  },
+  {
+   "now": "2026-10-11T23:59:00Z",
+   "timezone": "America/New_York",
+   "name": "skip_non_dict",
+   "calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ],
+   "status": "clean",
+   "after": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "[1]"
+     }
+    },
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"resolved_datetimes\": 5}"
+     }
+    }
+   ]
+  }
+ ]
+}

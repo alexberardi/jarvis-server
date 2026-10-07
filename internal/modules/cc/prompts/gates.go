@@ -1,0 +1,65 @@
+package prompts
+
+// ToolGates are the per-household (and per-conversation speaker) inputs that decide which
+// server tools a conversation is offered (conversation_handler.py:311-363).
+type ToolGates struct {
+	WebSearch     bool // web_search.enabled (default off, fail-closed)
+	SpeakerKnown  bool // a confidently identified speaker for this conversation (D21)
+	MemoryEnabled bool // memory.enabled
+	RecallEnabled bool // memory.recall_enabled
+}
+
+// textPathWhitelist is the legacy text-path whitelist, in offer order. answer_question is a
+// disabled server tool (it only resolves if a node offers a client tool of that name);
+// make_phone_call is offered even with phone off (its execute() refuses honestly).
+var textPathWhitelist = []string{
+	"answer_question", "make_phone_call", "run_errand", "schedule_errand", "list_scheduled_errands",
+}
+
+// ServerToolAllowed is the gate itself: web tools need web search on; remember/forget need a
+// known speaker and memory on; recall additionally needs recall on. Every other tool passes.
+func ServerToolAllowed(name string, g ToolGates) bool {
+	switch name {
+	case "deep_research", "quick_search":
+		return g.WebSearch
+	case "remember", "forget":
+		return g.SpeakerKnown && g.MemoryEnabled
+	case "recall":
+		return g.SpeakerKnown && g.MemoryEnabled && g.RecallEnabled
+	}
+	return true
+}
+
+// TextServerTools is the text path's server-tool list, in the legacy order: the whitelist,
+// then deep_research and quick_search, then remember, forget and recall, each behind its gate.
+// Names the caller's registry does not have are skipped by the caller (legacy get_tool).
+func TextServerTools(g ToolGates) []string {
+	out := append([]string(nil), textPathWhitelist...)
+	for _, n := range []string{"deep_research", "quick_search", "remember", "forget", "recall"} {
+		if ServerToolAllowed(n, g) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// NativeServerTools is the native path's server-tool list: every registered tool (in
+// registry order) that passes the same per-household gates as the text path (D22; legacy
+// offered all of them ungated).
+func NativeServerTools(registered []string, g ToolGates) []string {
+	var out []string
+	for _, n := range registered {
+		if ServerToolAllowed(n, g) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// ServerToolNames picks the path's list: TextServerTools, or NativeServerTools when native.
+func ServerToolNames(native bool, registered []string, g ToolGates) []string {
+	if native {
+		return NativeServerTools(registered, g)
+	}
+	return TextServerTools(g)
+}
