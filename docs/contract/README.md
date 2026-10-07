@@ -33,7 +33,7 @@ Tests skip with a message when the environment they need is missing. With no
 | `JARVIS_CONTRACT_HOST` | yes | Host or IP of the stack under test, e.g. the MBP `10.0.0.103`. **Never prod.** |
 | `JARVIS_CONTRACT_AUTH_ADMIN_TOKEN` | for fixtures | jarvis-auth's master admin token (`JARVIS_AUTH_ADMIN_TOKEN` on the target). Without it, every test that needs a user, app or node skips. |
 | `JARVIS_CONTRACT_APP_ID` / `JARVIS_CONTRACT_APP_KEY` | no | Reuse an existing app client instead of minting a throwaway one. |
-| `JARVIS_CONTRACT_SKIP` | no | Comma list of listeners the target doesn't run (`config,auth,logs,command-center,llm,whisper,tts,notifications,recipes,ocr`). |
+| `JARVIS_CONTRACT_SKIP` | no | Comma list of listeners the target doesn't run (`config,auth,logs,command-center,llm,whisper,tts,notifications,recipes,ocr,admin`). |
 | `JARVIS_CONTRACT_PORT_<LISTENER>` | no | Port override per listener. Dashes become underscores, e.g. `JARVIS_CONTRACT_PORT_COMMAND_CENTER=17703`. |
 | `JARVIS_CONTRACT_SCHEME` | no | `http` (default) or `https`. |
 | `JARVIS_CONTRACT_TIMEOUT` | no | Per-request timeout as a Go duration. The default is `15s`. |
@@ -54,8 +54,8 @@ The CC admin key and the broker credential come from the CC container the same w
 (`docker exec jarvis-command-center-jarvis-voice-api-1 printenv ADMIN_API_KEY MQTT_USERNAME MQTT_PASSWORD`).
 
 Default ports are the legacy ones (PLAN §3.1): 7700 config, 7701 auth, 7702 logs,
-7703 command-center, 7704 llm, 7706 whisper, 7707 tts, 7712 notifications, 7030 recipes and
-7031 ocr.
+7703 command-center, 7704 llm, 7706 whisper, 7707 tts, 7712 notifications, 7030 recipes,
+7031 ocr and 7710 admin (jarvisd only; not in `TestHealth`'s loop).
 
 ## Harness
 
@@ -412,10 +412,40 @@ LEGACY-BUGs (marked `// LEGACY-BUG:`; jarvisd fixes them, the tests branch on `J
   - D4/D5/D6 change auth on some of these. Freeze the Python behaviour first, then mark the
     changes as divergences.
 - [x] Node `X-API-Key` auth errors on CC (`TestCCNodeAuth`).
-- [ ] `/internal/validate-household-access` and `/internal/users/batch`.
+- [x] `/internal/validate-household-access` and `/internal/users/batch`: covered by
+  `TestAuthInternalHouseholdAccess` and `TestAuthInternalUsersBatch` (see the jarvis-auth section).
 
-The fakes from Phase 0 item 2 still to build: **fake LLM** (scripted OpenAI-compatible),
-**fake relay**, and **fake MQTT node**. They go in `contract/fakes/…` with the same build tag.
+Fakes from Phase 0 item 2: the **fake MQTT node** exists (`cc_mqtt.go`). The **fake LLM** is
+not needed: jarvisd's CC calls the llm module in process, so there is no CC→LLM wire left to
+freeze (the llm HTTP API is frozen by `llm_test.go`), and aiming legacy CC at a fake would mean
+re-registering services on the target. The **fake relay** is still to build (below).
+
+### What is actually left (2026-10-07)
+
+All of these need the legacy CC (and, for the relay, notifications) up on the MBP; on
+2026-10-07 the MBP's CC, logs, loki and notifications containers were down (`restart=no`, not
+restarted after a Docker restart on 2026-10-06 23:21Z), so nothing below has a legacy run yet.
+
+1. **CC media proxy** (PCM headers re-emitted by CC): `/api/v0/media/tts/speak`,
+   `/media/tts/speak/stream`, `/media/whisper/transcribe`, the node voice-profile
+   enroll/verify proxies, and mobile `/mobile/stt` and `/mobile/tts` (docs/cc/06 M1–M5, A1–A2).
+2. **CC voice hot path**, shape-only against the real model like `TestCCNodeLLMChat`:
+   `/conversation/start`, `/conversation/end`, `/voice/command` and `/voice/command/stream`,
+   `/voice/command/continue` and `/continue/stream`, `/voice/acknowledge`, `/wake-response`
+   (docs/cc/01).
+3. **CC node routes not yet covered** (docs/cc/05 §2.1): `/provisioning/token` +
+   `/nodes/register`, `PATCH /admin/nodes/{id}`, the `GET /admin/nodes` list, `/releases/latest`,
+   node updates and tasks (`/nodes/{id}/update`, `/nodes/tasks/{tid}/status`, `/tasks/{tid}`,
+   `/nodes/{id}/tasks[/{tid}/cancel]`), admin traces.
+4. **MQTT rows not yet covered** (docs/cc/05 §2.4): 5 config/push, 7 device-scan, 8 device-list,
+   9 device-state, 11 bluetooth-scan, 12 bluetooth-pair, 16–18 package-*, 21 context/query,
+   22 `jarvis/auth/+/ready`; verbs `tool_call`, `report_tools`, `enroll_voice`/`verify_voice`,
+   `toggle_command`, `invalidate_device_cache`, `device_removed`. (10 camera-credentials is
+   deferred by D29; 19 test-install is cut by D5.)
+5. **Fake relay**: freeze the notifications → relay request. Legacy `RELAY_URL` on the MBP is
+   `host.docker.internal:7735`, where nothing listens; a test-side listener reached through
+   `ssh -R 7735:127.0.0.1:<port>` would need no stack change (ask before setting it up). On
+   jarvisd it is the `relay.url` notifications setting.
 
 ## Running against jarvisd (parity)
 
@@ -445,4 +475,5 @@ JARVIS_CONTRACT_ENV_FILE=/tmp/jarvisd.env scripts/contract.sh -run 'TestConfig|T
 | cc (5a: nodes + MQTT) | Against the real `jarvisd` binary (all listeners on 277xx, broker `JARVIS_MQTT_ADDR=127.0.0.1:21884`, `JARVIS_CONTRACT_MQTT_PORT=21884`, `JARVIS_CONTRACT_CC_ADMIN_KEY` = jarvisd's `ADMIN_API_KEY`, 2026-10-06): `TestCCNodeAuth`, `TestCCNodeCreateAndHeartbeat`, `TestCCNodeMQTTCredentials`, `TestCCNodeSettingsRequestsList`, `TestHealth/command-center`, `TestSettings*/command-center`, and the 5a subtests of `TestCCMQTTCatalogue` (settings_request, k2_provision, update_node_config, preview_led_pattern, ambient_noise_and_verify, action, factory_reset, no_stray_publishes) pass. Still failing until their sub-phase: callback (13), routine_sync_and_run_now (08), bluetooth (07), command_data route (12), `TestCCSignals` (10). `Jarvisd()` branches (decided divergences): per-node broker credentials from `/node/mqtt-credentials` (`DialMQTTNode`, D4); no `trusted` in published details (D4/D7); `/device-control-results` needs the node key (D4); no `adapter_hash` in NodeResponse (D9); `include_values`/`user_id` in the node's pending settings list (D40 Q8); 403 for another household on the settings `/result` poll and the ambient-noise trigger (D4/D5). |
 | cc (5c/5d) | Against the real `jarvisd` binary (same 277xx setup, 2026-10-07; `RELAY_URL` set to a dead address so pushes queue): the formerly pending `TestCCMQTTCatalogue` subtests callback, routine_sync_and_run_now, bluetooth_fire_and_forget and command_data_request_response pass, as does all of `TestCCSignals`; the whole non-model suite (auth, config, logs, notifications, ocr, cc, health, settings: 62 top-level tests, `-skip 'TestLLM|TestTTS|TestWhisper|TestCCNodeLLMChat|TestRecipes'`) is green. `Jarvisd()` branch: `/signals` app auth is in process, so a valid app gets 400 "household_id required…" and unknown credentials 401, where legacy 502'd on every app call (its LEGACY-BUG). |
 | cc (5b: voice + plugin API) | `TestCCNodeLLMChat` (real Qwen3-4B on the live label via the model manager), `TestCCDateContext` and `TestCCNodePlugin` pass against the real `jarvisd` binary (same 277xx setup, 2026-10-06), and every 5a CC test still passes. `Jarvisd()` branches (decided divergences): `/generate/date-context` without a timezone fills `user_timezone`/`is_dst` with UTC (D40 03.Q11), and an unknown zone falls back to UTC instead of the legacy 500 (D8). |
+| admin | `TestAdminGate`, `TestAdminBFF` (`admin_test.go`, docs/admin/00-inventory.md §9) pass against a throwaway `jarvisd` binary (all listeners on 377xx, `JARVIS_CONTRACT_PORT_ADMIN=37710`, 2026-10-07). **jarvisd-only**: legacy jarvis-admin (Fastify) is replaced, not ported, so there is no Python oracle; the shapes freeze what the embedded SPA consumes (`web/admin/src/api`). Covered: login through `/api/auth/login`; the gate on BFF, pass-through and unknown `/api` paths (401 `Missing or invalid Authorization header` / `Invalid or expired token`, 403 `Superuser access required`); the bootstrap list (`setup-status`, reduced `/api/setup/state`, login error); `/api/settings` (AggregatedSettingsResponse + `display_name`, `?service=`, 404, a no-op PUT); `/api/admin/users` (= `/superuser/users`); `/api/llm/v1/hardware`; `/api/traces` (list, cc's 400 validation body, 404 `Trace not found`); the superuser `/api/setup/state`; a superuser's JSON 404 `Not Found`. Skips unless `JARVIS_CONTRACT_IMPL=jarvisd`. |
 | tts | All 5 `TestTTS*`, `TestHealth/tts` and `TestSettingsAppAuth/tts` pass against the Go module (2026-10-06) with real Kokoro (`kokoro-multi-lang-v1_0`, bm_george), through `internal/modules/tts/parity_test.go` (build tag `parity`), apps and JWTs checked against the MBP's jarvis-auth via `ssh -L 27701:localhost:7701`. Env: `JARVIS_CONTRACT_HOST=127.0.0.1 JARVIS_CONTRACT_PORT_AUTH=27701 JARVIS_CONTRACT_PORT_TTS=27707`; see the file header. |
