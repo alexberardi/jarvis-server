@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -86,6 +87,7 @@ type bffEnv struct {
 	prompts  *fakePrompts
 	doctors  *atomic.Int32
 	llm, cc  *settings.Service
+	logs     *bytes.Buffer // the module's log output
 }
 
 func newSettings(t *testing.T, d *db.DB, name string, defs []settings.Definition) *settings.Service {
@@ -109,7 +111,7 @@ func newBFF(t *testing.T) *bffEnv {
 	t.Cleanup(func() { d.Close() })
 	e := &bffEnv{
 		accounts: &fakeAccounts{c: authmod.SetupCounts{Superusers: 1, Households: 2, Nodes: 3}},
-		traces:   &fakeTraces{}, prompts: &fakePrompts{}, doctors: &atomic.Int32{},
+		traces:   &fakeTraces{}, prompts: &fakePrompts{}, doctors: &atomic.Int32{}, logs: &bytes.Buffer{},
 	}
 	e.llm = newSettings(t, d, "llm", []settings.Definition{
 		{Key: "llm.request_timeout_seconds", Category: "llm", Type: settings.Int, Default: int64(240)},
@@ -139,7 +141,7 @@ func newBFF(t *testing.T) *bffEnv {
 	e.mux = http.NewServeMux()
 	e.m.Register(e.mux, module.Deps{
 		Config: pconfig.Config{Home: home, Ports: map[string]int{pconfig.ListenerAdmin: 7710, pconfig.ListenerAuth: 7701}},
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:    slog.New(slog.NewTextHandler(e.logs, nil)),
 		Handler: func(l string) http.Handler {
 			if l == pconfig.ListenerAdmin {
 				return http.NotFoundHandler()
@@ -220,6 +222,25 @@ func TestSettingsAggregator(t *testing.T) {
 	}
 	if w := send(e.mux, "GET", "/api/settings?service=nope", "", root...); w.Code != 404 || detailOf(w) != "Service 'nope' not found" {
 		t.Fatalf("unknown service: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A browser that navigates away mid-request cancels it: that isn't a settings failure to log
+// as an ERROR per module (A10 rehearsal: eight of them on one quick page change).
+func TestSettingsAggregatorClientGone(t *testing.T) {
+	e := newBFF(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := httptest.NewRequest("GET", "/api/settings", nil).WithContext(ctx)
+	r.Header.Set(root[0], root[1])
+	e.mux.ServeHTTP(httptest.NewRecorder(), r)
+	if strings.Contains(e.logs.String(), "level=ERROR") {
+		t.Fatalf("logged an error for a cancelled request:\n%s", e.logs.String())
+	}
+	e.logs.Reset()
+	decode(t, send(e.mux, "GET", "/api/settings", "", root...))
+	if strings.Contains(e.logs.String(), "level=ERROR") {
+		t.Fatalf("a healthy listing logged an error:\n%s", e.logs.String())
 	}
 }
 
