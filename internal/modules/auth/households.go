@@ -146,8 +146,12 @@ func (m *Module) handleUpdateHousehold(w http.ResponseWriter, r *http.Request, u
 	httpx.WriteJSON(w, http.StatusOK, h.response())
 }
 
-// deleteHousehold removes a household; members, nodes, grants and invites cascade.
+// deleteHousehold removes a household; members, nodes, grants and invites cascade, and the
+// household-deleted hooks erase every other module's data for it (D49).
 func (m *Module) deleteHousehold(ctx context.Context, tx *sql.Tx, id string) error {
+	if err := m.householdDeleted(ctx, tx, id); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, `DELETE FROM auth_households WHERE id = ?`, id)
 	return err
 }
@@ -335,7 +339,7 @@ func (m *Module) handleRemoveMember(w http.ResponseWriter, r *http.Request, u *u
 		if n, _ := res.RowsAffected(); n == 0 {
 			return fail(http.StatusNotFound, "Member not found")
 		}
-		return nil
+		return m.memberRemoved(ctx, tx, uid, hh)
 	})
 	if err != nil {
 		m.writeErr(w, err)
@@ -380,6 +384,9 @@ func (m *Module) handleLeave(w http.ResponseWriter, r *http.Request, u *user) {
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM auth_household_memberships WHERE household_id = ? AND user_id = ?`, hh, u.id); err != nil {
+			return err
+		}
+		if err := m.memberRemoved(ctx, tx, u.id, hh); err != nil {
 			return err
 		}
 		if total == 1 {

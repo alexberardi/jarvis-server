@@ -22,6 +22,8 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
+	"github.com/alexberardi/jarvis-server/internal/platform/queue"
+	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 	"github.com/mochi-mqtt/server/v2/packets"
 )
 
@@ -202,6 +204,13 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 	}
 	t.Cleanup(func() { d.Close() })
 	if err := db.Migrate(ctx, d, "cc", Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	// The platform's tables, as in jarvisd (purges touch triggers and jobs).
+	if err := db.Migrate(ctx, d, queue.MigrationModule, queue.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx, d, scheduler.MigrationModule, scheduler.Migrations()); err != nil {
 		t.Fatal(err)
 	}
 	e := &env{t: t, auth: opt.auth, d: d, now: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}

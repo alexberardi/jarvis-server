@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1138,5 +1139,87 @@ func TestVerifyUserErrorsAreSentinels(t *testing.T) {
 		if _, err := e.m.VerifyUser(context.Background(), tok); !errors.Is(err, authn.ErrInvalid) {
 			t.Errorf("%q: %v, want authn.ErrInvalid", tok, err)
 		}
+	}
+}
+
+// D20/D49: membership ends → member hooks; a household deleted by any path → household hooks;
+// a failing hook rolls the change back.
+func TestHouseholdLifecycleHooks(t *testing.T) {
+	e := newEnv(t)
+	type removed struct {
+		uid int64
+		hh  string
+	}
+	var mu sync.Mutex
+	var gone []removed
+	var deleted []string
+	fail := ""
+	e.m.OnMemberRemoved(func(_ context.Context, _ *sql.Tx, uid int64, hh string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if fail == "member" {
+			return errors.New("boom")
+		}
+		gone = append(gone, removed{uid, hh})
+		return nil
+	})
+	e.m.OnHouseholdDeleted(func(_ context.Context, _ *sql.Tx, hh string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if fail == "household" {
+			return errors.New("boom")
+		}
+		deleted = append(deleted, hh)
+		return nil
+	})
+	owner, u := e.register(), e.register()
+	oh := bearerH(owner.access)
+	base := "/households/" + owner.household
+	e.expect(201, "", "POST", base+"/members", map[string]any{"user_id": u.id}, oh)
+
+	// Kick, with a failing hook first: rolled back, still a member.
+	fail = "member"
+	e.expect(500, "", "DELETE", fmt.Sprintf("%s/members/%d", base, u.id), nil, oh)
+	if ms := e.list("GET", base+"/members", oh); len(ms) != 2 {
+		t.Fatalf("rolled back kick: %v", ms)
+	}
+	fail = ""
+	e.expect(204, "", "DELETE", fmt.Sprintf("%s/members/%d", base, u.id), nil, oh)
+	if len(gone) != 1 || gone[0] != (removed{u.id, owner.household}) || len(deleted) != 0 {
+		t.Fatalf("kick: %v %v", gone, deleted)
+	}
+
+	// Leave (not the last member): member hook only.
+	e.expect(201, "", "POST", base+"/members", map[string]any{"user_id": u.id}, oh)
+	e.expect(200, "", "POST", base+"/leave", nil, bearerH(u.access))
+	if len(gone) != 2 || len(deleted) != 0 {
+		t.Fatalf("leave: %v %v", gone, deleted)
+	}
+
+	// Last member out: member hook, then household hook.
+	cabin := e.expect(201, "", "POST", "/households", map[string]any{"name": "Cabin"}, oh)["id"].(string)
+	e.expect(200, "", "POST", "/households/"+cabin+"/leave", nil, oh)
+	if len(gone) != 3 || gone[2] != (removed{owner.id, cabin}) || len(deleted) != 1 || deleted[0] != cabin {
+		t.Fatalf("last out: %v %v", gone, deleted)
+	}
+
+	// Admin deletes a household; a failing household hook keeps it.
+	barn := e.expect(201, "", "POST", "/households", map[string]any{"name": "Barn"}, oh)["id"].(string)
+	fail = "household"
+	e.expect(500, "", "DELETE", "/households/"+barn, nil, oh)
+	if _, found, _ := householdExists(context.Background(), e.db.Read, barn); !found {
+		t.Fatal("household deleted despite a failing hook")
+	}
+	fail = ""
+	code, _ := e.do("DELETE", "/households/"+barn, nil, oh)
+	if code/100 != 2 || deleted[len(deleted)-1] != barn {
+		t.Fatalf("admin delete: %d %v", code, deleted)
+	}
+
+	// Account deletion of a solo user deletes their household through the hook.
+	solo := e.register()
+	e.expect(204, "", "DELETE", "/auth/me", map[string]any{"password": solo.password}, bearerH(solo.access))
+	if deleted[len(deleted)-1] != solo.household {
+		t.Fatalf("solo account deletion: %v", deleted)
 	}
 }

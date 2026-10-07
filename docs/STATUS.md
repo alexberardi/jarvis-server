@@ -133,7 +133,7 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Fixes found on the way: shutdown panic (log after shipper close), startup crash (logs sink before Register), out-of-order migration refusal, VRAM fit, `jarvisd doctor`.
 - **5c follow-ups / open questions:**
   - **`POST /callbacks` (doc 13) is not ported**: card taps can't reach errands, phone `confirm_call`, signals, or `cancel_schedule` until 5d builds it. Handlers exist: `Errands().Callbacks()`, `phone.Service.Callbacks()`, `SignalCallback`, `CancelScheduleTap`. Signals' dispatcher step F also needs doc 13's node callback routes.
-  - D20 per-household leave hook in auth (memory's `PurgeUserHousehold` ready; others to add).
+  - ~~D20 per-household leave hook~~ **done 2026-10-07**: auth `OnMemberRemoved` (kick, leave) and `OnHouseholdDeleted` (last member leaves, solo account deletion, admin delete) run inside auth's transaction; cc, notifications and stt implement both. cc's household purge finds every `cc_` table with `household_id` from the schema (all FKs cascade/set null), plus node settings, OAuth sessions and scheduler triggers.
   - Superuser on a no-household node: packages deny (D40 Q5), older node routes allow; unify.
   - Node-side changes: accept inline `details.routine`, report Pantry routines, stop local default seeding (EXTERNAL-CHANGES).
   - Signals' own `report_tools` probe duplicates `nodetools.go`; errands' autorun resolver duplicates `cc/stepvalues` (dormant): unify.

@@ -651,10 +651,10 @@ func purgeMemoryUser(ctx context.Context, tx *sql.Tx, userID int64) error {
 	return nil
 }
 
-// PurgeUserHousehold deletes a user's data for one household, for when they leave it (D20):
+// purgeMemoryUserHousehold deletes a user's data for one household, for when they leave it (D20):
 // their memories, transcripts and characterization there. Their other households are kept.
-// It has the OnUserDeleted hook's shape plus the household; auth has no leave hook yet.
-func (m *Module) PurgeUserHousehold(ctx context.Context, tx *sql.Tx, userID int64, householdID string) error {
+// Module.PurgeUserHousehold (households.go) calls it.
+func purgeMemoryUserHousehold(ctx context.Context, tx *sql.Tx, userID int64, householdID string) error {
 	for _, q := range []string{
 		`DELETE FROM cc_user_memories WHERE user_id = ? AND household_id = ?`,
 		`DELETE FROM cc_conversation_transcripts WHERE user_id = ? AND household_id = ?`,

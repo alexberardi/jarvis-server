@@ -118,6 +118,8 @@ func modules() []module.Module {
 			c.Auth = auth
 			c.Users = auth
 			auth.OnUserDeleted(c.PurgeUser)
+			auth.OnMemberRemoved(c.PurgeUserHousehold)
+			auth.OnHouseholdDeleted(c.PurgeHousehold)
 		case *ocrmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
@@ -154,6 +156,8 @@ func modules() []module.Module {
 			})
 			c.Models = sttmod.ModelPathFunc(llm.ModelPath)
 			auth.OnUserDeleted(c.PurgeUser)
+			auth.OnMemberRemoved(c.PurgeUserHousehold)
+			auth.OnHouseholdDeleted(c.PurgeHousehold)
 		case *ccmod.Module:
 			c.Auth = auth
 			c.Users = auth
@@ -168,6 +172,8 @@ func modules() []module.Module {
 			c.Notify = notif
 			c.Names = auth
 			auth.OnUserDeleted(c.PurgeUser)
+			auth.OnMemberRemoved(c.PurgeUserHousehold)
+			auth.OnHouseholdDeleted(c.PurgeHousehold)
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)

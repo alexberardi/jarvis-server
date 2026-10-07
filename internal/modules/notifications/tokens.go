@@ -151,6 +151,20 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 	return err
 }
 
+// PurgeUserHousehold deletes a user's device tokens and inbox items in one household they
+// left (D20); the delivery log keeps them, as for account deletion.
+func (m *Module) PurgeUserHousehold(ctx context.Context, tx *sql.Tx, userID int64, householdID string) error {
+	for _, q := range []string{
+		`DELETE FROM notifications_device_tokens WHERE user_id = ? AND household_id = ?`,
+		`DELETE FROM notifications_inbox_items WHERE user_id = ? AND household_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, userID, householdID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // PurgeHousehold deletes a deleted household's inbox items (household-wide and personal) and
 // device tokens, inside tx (docs/cc D49: nothing is orphaned when auth deletes a household).
 func (m *Module) PurgeHousehold(ctx context.Context, tx *sql.Tx, householdID string) error {

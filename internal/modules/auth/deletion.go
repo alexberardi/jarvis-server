@@ -73,9 +73,14 @@ func (m *Module) handleDeleteMe(w http.ResponseWriter, r *http.Request, u *user)
 			return err
 		}
 		for _, hh := range hhs {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM auth_households WHERE id = ?
-				AND NOT EXISTS (SELECT 1 FROM auth_household_memberships WHERE household_id = ?)`, hh, hh); err != nil {
+			left, err := count(ctx, tx, `SELECT COUNT(*) FROM auth_household_memberships WHERE household_id = ?`, hh)
+			if err != nil {
 				return err
+			}
+			if left == 0 {
+				if err := m.deleteHousehold(ctx, tx, hh); err != nil {
+					return err
+				}
 			}
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM auth_users WHERE id = ?`, u.id)

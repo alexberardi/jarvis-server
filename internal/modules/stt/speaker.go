@@ -604,6 +604,12 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 	return err
 }
 
+// PurgeUserHousehold deletes a user's voiceprints in one household they left (D20).
+func (m *Module) PurgeUserHousehold(ctx context.Context, tx *sql.Tx, userID int64, householdID string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM stt_voiceprints WHERE user_id = ? AND household_id = ?`, userID, householdID)
+	return err
+}
+
 // PurgeHousehold deletes a deleted household's voiceprints, inside tx (D49).
 func (m *Module) PurgeHousehold(ctx context.Context, tx *sql.Tx, householdID string) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM stt_voiceprints WHERE household_id = ?`, householdID)

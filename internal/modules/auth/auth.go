@@ -104,8 +104,10 @@ type Module struct {
 	keyMu sync.Mutex
 	keys  []signingKey
 
-	hookMu sync.Mutex
-	hooks  []UserDeletedHook
+	hookMu         sync.Mutex
+	hooks          []UserDeletedHook
+	memberHooks    []MemberRemovedHook
+	householdHooks []HouseholdDeletedHook
 }
 
 var _ authn.Authority = (*Module)(nil)
