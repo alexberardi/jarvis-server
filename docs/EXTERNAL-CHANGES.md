@@ -14,7 +14,7 @@ keep shipping.
 | Change | Why | Decision | When |
 |---|---|---|---|
 | `chat_text()` calls `POST /api/v0/node/llm/chat` (node `X-API-Key`) instead of `/api/v0/chat` | `/api/v0/chat` is unauthenticated and is dropped | D5 | **Before cutover**. Confirm `/node/llm/chat` is the "live" path the user meant. |
-| Accept a full routine definition inline in the `routine` MQTT command, falling back to the local copy by slug when none is sent | App and scheduled runs never run a stale copy | D24 | Any time; the server can send both shapes |
+| Accept a full routine definition inline in the `routine` MQTT command, falling back to the local copy by slug when none is sent | App and scheduled runs never run a stale copy | D24 | **PR [#135](https://github.com/alexberardi/jarvis-node-setup/pull/135)** (backward compatible) |
 | Report installed Pantry routine packages to CC, and stop seeding default routines locally once CC seeds them | CC owns every routine definition; fixes permanent shadowing | D44 | After the routines port |
 | Use per-node MQTT broker credentials on fresh installs (no anonymous or shared broker login) | Per-node ACLs replace `trusted:true` | D4, D7 | **Before cutover** for new installs |
 | Keep sending `X-API-Key` on Bluetooth result posts, package verify/results and settings snapshots | These routes now require node auth | D4, D5 | Verify only; believed to be sent already |
