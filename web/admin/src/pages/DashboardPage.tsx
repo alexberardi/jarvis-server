@@ -1,281 +1,276 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Brain, Server, GitMerge } from 'lucide-react'
-import { toast } from 'sonner'
-import { useContainers, useRestartContainer } from '@/hooks/useContainers'
-import { useSetupState } from '@/hooks/useSetup'
-import { getInstallStatus } from '@/api/install'
-import ServiceHealthCard from '@/components/dashboard/ServiceHealthCard'
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Activity, Box, Brain, Cpu, Loader2, RefreshCw, Server, Stethoscope } from 'lucide-react'
+import { fetchTraces } from '@/api/traces'
+import { LABEL_TITLE, type Label } from '@/api/llm'
 import UpdateBanner from '@/components/dashboard/UpdateBanner'
+import DoctorChecks from '@/components/doctor/DoctorChecks'
+import { buttonClass, stateTone } from '@/components/models/styles'
+import { Pill, Section } from '@/components/models/ui'
+import { useLabels } from '@/hooks/useModelManager'
+import { useNodeLiveness } from '@/hooks/useNodes'
+import { useDoctor, useRerunDoctor, useSetupState } from '@/hooks/useSetup'
+import { useSystemInfo } from '@/hooks/useSystem'
+import { errorMessage } from '@/lib/errors'
+import { formatBytes, formatUptime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-const LLM_SETUP_DISMISSED_KEY = 'jarvis-admin:llm-setup-dismissed'
+const LABELS: Label[] = ['live', 'background', 'embeddings', 'stt', 'tts', 'speaker']
 
-export default function DashboardPage() {
-  const navigate = useNavigate()
-  const [isComposeExport, setIsComposeExport] = useState(false)
-  const { data, isLoading, isError, error, refetch, isFetching } = useContainers()
-  const restartMutation = useRestartContainer()
-  // The banner fires while the live label has no model (A8 rewrites the rest of this page).
-  const setup = useSetupState()
-  const [dismissed, setDismissed] = useState(
-    () => !!localStorage.getItem(LLM_SETUP_DISMISSED_KEY),
-  )
+const STATE_TEXT: Record<string, string> = {
+  not_configured: 'not configured',
+  fetching_engine: 'fetching engine',
+  no_engine_build: 'no engine build',
+}
 
-  useEffect(() => {
-    getInstallStatus().then((status) => {
-      if (status.deployMode === 'compose-export') {
-        setIsComposeExport(true)
-      }
-    }).catch(() => {})
-  }, [])
+function ago(iso: string | null | undefined): string {
+  if (!iso) return 'never'
+  const s = (Date.now() - new Date(iso).getTime()) / 1000
+  if (!Number.isFinite(s)) return iso
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)} min ago`
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`
+  return `${Math.round(s / 86400)} d ago`
+}
 
-  const showLlmBanner =
-    setup.data?.superuser === true &&
-    setup.data.models_configured === false &&
-    !dismissed
-
-  const handleRestart = (id: string) => {
-    restartMutation.mutate(id, {
-      onSuccess: () => toast.success('Container restart initiated'),
-      onError: (err) => toast.error(`Restart failed: ${err.message}`),
-    })
-  }
-
-  // Compose-export mode: no Docker socket, can't manage containers
-  if (isComposeExport) {
+/** The banner while the live label has no model, or has one that isn't serving yet. */
+function ModelBanner() {
+  const { data } = useSetupState()
+  if (!data?.superuser) return null
+  if (data.models_configured === false) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <h1 className="text-xl font-bold text-[var(--color-text)]">Dashboard</h1>
-
-        <UpdateBanner />
-
-        {showLlmBanner && (
-          <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
-            <div className="flex items-center gap-3">
-              <Brain size={20} className="text-[var(--color-primary)]" />
-              <div>
-                <p className="text-sm font-medium text-[var(--color-text)]">
-                  LLM not configured
-                </p>
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Set up a language model to enable voice command processing
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  localStorage.setItem(LLM_SETUP_DISMISSED_KEY, 'true')
-                  setDismissed(true)
-                }}
-                className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              >
-                Dismiss
-              </button>
-              <button
-                onClick={() => navigate('/models')}
-                className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90"
-              >
-                Set up LLM
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Sync is available in compose-export mode too — admin has the docker
-            socket + the compose mount, so it can regenerate + re-register
-            (e.g. to apply mobile-reachable service URLs). */}
-        <div className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="flex items-center gap-3">
-            <GitMerge size={20} className="text-[var(--color-text-muted)]" />
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">
-                Sync compose to latest registry
-              </p>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Regenerate docker-compose.yml, apply changes, and re-register services with config-service
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => navigate('/reconcile')}
-            className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]"
-          >
-            Sync now
-          </button>
-        </div>
-
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-8 text-center">
-          <Server size={32} className="mx-auto mb-3 text-[var(--color-text-muted)]" />
-          <p className="text-sm font-medium text-[var(--color-text)]">
-            Running in Docker Compose mode
-          </p>
-          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            Container management is handled by your Docker environment (TrueNAS, Portainer, etc.).
-            Use your platform's tools to view container status, logs, and restarts.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <RefreshCw className="animate-spin text-[var(--color-primary)]" size={24} />
-      </div>
-    )
-  }
-
-  if (isError) {
-    return (
-      <div className="py-20 text-center">
-        <p className="mb-2 text-red-500">Failed to load containers</p>
-        <p className="mb-4 text-sm text-[var(--color-text-muted)]">
-          {(error as Error)?.message ?? 'Unknown error'}
-        </p>
-        <button
-          onClick={() => refetch()}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white hover:opacity-90"
-        >
-          Retry
-        </button>
-      </div>
-    )
-  }
-
-  const containers = data?.containers ?? []
-  const running = containers.filter((c) => c.state === 'running')
-  const stopped = containers.filter((c) => c.state !== 'running')
-
-  return (
-    <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-[var(--color-text)]">Dashboard</h1>
-
-        <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-          <span>
-            {running.length}/{containers.length} running
-          </span>
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className={cn(
-              'rounded-lg p-1.5 hover:bg-[var(--color-surface-alt)]',
-              isFetching && 'animate-spin',
-            )}
-            title="Refresh"
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
-      </div>
-
-      <UpdateBanner />
-
-      {showLlmBanner && (
-        <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
-          <div className="flex items-center gap-3">
-            <Brain size={20} className="text-[var(--color-primary)]" />
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">
-                LLM not configured
-              </p>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Set up a language model to enable voice command processing
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                localStorage.setItem(LLM_SETUP_DISMISSED_KEY, 'true')
-                setDismissed(true)
-              }}
-              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            >
-              Dismiss
-            </button>
-            <button
-              onClick={() => navigate('/models')}
-              className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90"
-            >
-              Set up LLM
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
         <div className="flex items-center gap-3">
-          <GitMerge size={20} className="text-[var(--color-text-muted)]" />
+          <Brain size={20} className="text-[var(--color-primary)]" />
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">
-              Sync compose to latest registry
-            </p>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Regenerate docker-compose.yml and apply changes — adds new background workers and services without recreating unchanged containers
-            </p>
+            <p className="text-sm font-medium text-[var(--color-text)]">No language model yet</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Jarvis can't answer voice requests until the live job has a model.</p>
           </div>
         </div>
-        <button
-          onClick={() => navigate('/reconcile')}
-          className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]"
-        >
-          Sync now
-        </button>
+        <Link to="/models" className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90">
+          Set up models
+        </Link>
       </div>
+    )
+  }
+  if (data.models_configured && data.live_ready === false) {
+    const st = data.labels?.live ?? 'unknown'
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
+        <Loader2 size={18} className="animate-spin text-amber-500" />
+        <p className="text-sm text-[var(--color-text)]">
+          The live model is {STATE_TEXT[st] ?? st}. Voice requests are answered once it is ready.{' '}
+          <Link to="/models" className="text-[var(--color-primary)] hover:underline">
+            Details
+          </Link>
+        </p>
+      </div>
+    )
+  }
+  return null
+}
 
-      {containers.length === 0 && (
-        <div className="py-12 text-center">
-          <p className="text-sm text-[var(--color-text-muted)]">
-            {data?.error
-              ? data.error
-              : 'No Jarvis containers found. Is Docker running?'}
+function SystemCard() {
+  const { data, isError, error } = useSystemInfo()
+  return (
+    <Section title="System" icon={Server}>
+      {isError && <p className="text-sm text-red-500">{errorMessage(error)}</p>}
+      {data && (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+          <dt className="text-[var(--color-text-muted)]">Host</dt>
+          <dd className="text-[var(--color-text)]">{data.hostname}</dd>
+          <dt className="text-[var(--color-text-muted)]">Platform</dt>
+          <dd className="text-[var(--color-text)]">
+            {data.platform}
+            {data.arch ? `/${data.arch}` : ''} · {data.cpuCount} cores · {Math.round(data.totalMemoryMb / 1024)} GB
+          </dd>
+          <dt className="text-[var(--color-text-muted)]">jarvisd</dt>
+          <dd className="text-[var(--color-text)]">
+            {data.version} · up {formatUptime(data.uptime)}
+          </dd>
+          <dt className="text-[var(--color-text-muted)]">Data</dt>
+          <dd className="text-[var(--color-text)]" title={data.home}>
+            DB {formatBytes(data.db_bytes)} · {formatBytes(data.disk_free_bytes)} free
+          </dd>
+          <dt className="text-[var(--color-text-muted)]">Listeners</dt>
+          <dd className="text-[var(--color-text)]">
+            {(data.listeners ?? []).filter((l) => l.served).length} serving ·{' '}
+            <Link to="/connections" className="text-[var(--color-primary)] hover:underline">
+              connections
+            </Link>
+          </dd>
+        </dl>
+      )}
+    </Section>
+  )
+}
+
+function HealthCard() {
+  const { data, isLoading, isError, error } = useDoctor()
+  const rerun = useRerunDoctor()
+  const tone = data?.status === 'ok' ? 'ok' : data?.status === 'fail' ? 'bad' : 'warn'
+  return (
+    <Section
+      title="Health check"
+      icon={Stethoscope}
+      actions={
+        <button type="button" className={buttonClass.icon} title="Run again" aria-label="Run the health check again" disabled={rerun.isPending} onClick={() => rerun.mutate()}>
+          <RefreshCw size={14} className={cn(rerun.isPending && 'animate-spin')} />
+        </button>
+      }
+    >
+      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Running…</p>}
+      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'The health check could not run')}</p>}
+      {data && (
+        <div className="space-y-2">
+          <p className="text-sm text-[var(--color-text)]">
+            <Pill tone={tone}>{data.status}</Pill>{' '}
+            {data.checks.filter((c) => c.status === 'ok').length} of {data.checks.length} checks pass
           </p>
+          <DoctorChecks checks={data.checks} onlyProblems />
         </div>
       )}
+    </Section>
+  )
+}
 
-      {running.length > 0 && (
-        <div className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Running
-          </h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {running.map((c) => (
-              <ServiceHealthCard
-                key={c.id}
-                container={c}
-                onRestart={handleRestart}
-                isRestarting={
-                  restartMutation.isPending && restartMutation.variables === c.id
-                }
-              />
-            ))}
-          </div>
-        </div>
-      )}
+function ModelsCard() {
+  const setup = useSetupState()
+  const labels = useLabels()
+  const models = Object.fromEntries((labels.data?.labels ?? []).map((l) => [l.label, l.config.model]))
+  const voice = Object.fromEntries((labels.data?.voice ?? []).map((v) => [v.label, v.id]))
+  return (
+    <Section
+      title="Models"
+      icon={Box}
+      actions={
+        <Link to="/models" className="text-xs text-[var(--color-primary)] hover:underline">
+          Manage
+        </Link>
+      }
+    >
+      <ul className="space-y-1 text-sm">
+        {LABELS.map((l) => {
+          const st = setup.data?.labels?.[l] ?? labels.data?.labels.find((x) => x.label === l)?.state ?? 'unknown'
+          const model = models[l] || voice[l]
+          return (
+            <li key={l} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-[var(--color-text)]">
+                {LABEL_TITLE[l]}
+                {model && <span className="ml-2 text-xs text-[var(--color-text-muted)]">{model}</span>}
+              </span>
+              <Pill tone={stateTone(st)}>{STATE_TEXT[st] ?? st}</Pill>
+            </li>
+          )
+        })}
+      </ul>
+      {(labels.data?.warnings ?? []).map((w) => (
+        <p key={w} className="mt-2 text-xs text-amber-500">
+          {w}
+        </p>
+      ))}
+    </Section>
+  )
+}
 
-      {stopped.length > 0 && (
+function NodesCard() {
+  const setup = useSetupState()
+  const { data, isError } = useNodeLiveness()
+  const nodes = data ?? []
+  const online = nodes.filter((n) => n.online).length
+  return (
+    <Section
+      title="Nodes"
+      icon={Cpu}
+      actions={
+        <Link to="/nodes" className="text-xs text-[var(--color-primary)] hover:underline">
+          All nodes
+        </Link>
+      }
+    >
+      {isError ? (
+        <p className="text-sm text-[var(--color-text-muted)]">Node status is unavailable.</p>
+      ) : (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Stopped
-          </h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {stopped.map((c) => (
-              <ServiceHealthCard
-                key={c.id}
-                container={c}
-                onRestart={handleRestart}
-                isRestarting={
-                  restartMutation.isPending && restartMutation.variables === c.id
-                }
-              />
-            ))}
-          </div>
+          <p className="text-sm text-[var(--color-text)]">
+            <strong>{online}</strong> of {nodes.length} online
+            {setup.data?.households !== undefined && (
+              <span className="text-[var(--color-text-muted)]"> · {setup.data.households} households</span>
+            )}
+          </p>
+          {nodes.length === 0 ? (
+            <p className="text-xs text-[var(--color-text-muted)]">No nodes yet. Add one from the mobile app.</p>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {nodes.slice(0, 6).map((n) => (
+                <li key={n.node_id} className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className={cn('h-2 w-2 shrink-0 rounded-full', n.online ? 'bg-green-500' : 'bg-[var(--color-border)]')} />
+                    <span className="truncate text-[var(--color-text)]">{n.room || n.node_id}</span>
+                  </span>
+                  <span className="text-[var(--color-text-muted)]">{n.online ? 'online' : ago(n.last_seen)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
+    </Section>
+  )
+}
+
+function TracesCard() {
+  const { data, isError } = useQuery({
+    queryKey: ['traces', 'recent'],
+    queryFn: () => fetchTraces({ limit: 6 }),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  })
+  return (
+    <Section
+      title="Recent requests"
+      icon={Activity}
+      actions={
+        <Link to="/traces" className="text-xs text-[var(--color-primary)] hover:underline">
+          All traces
+        </Link>
+      }
+    >
+      {isError && <p className="text-sm text-[var(--color-text-muted)]">Traces are unavailable.</p>}
+      {data && data.traces.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No requests yet.</p>}
+      {data && data.traces.length > 0 && (
+        <ul className="space-y-1 text-xs">
+          {data.traces.map((t) => (
+            <li key={t.id}>
+              <Link to={`/traces/${t.id}`} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--color-surface-alt)]">
+                <span className="min-w-0 truncate text-[var(--color-text)]">{t.user_command || t.request_type}</span>
+                <span className="flex shrink-0 items-center gap-2 text-[var(--color-text-muted)]">
+                  <Pill tone={t.status === 'success' || t.status === 'ok' ? 'ok' : t.status === 'error' ? 'bad' : 'muted'}>{t.status}</Pill>
+                  {Math.round(t.total_duration_ms)} ms · {ago(t.created_at)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
+
+/** DashboardPage (S5): one look at the install, with no containers to manage. */
+export default function DashboardPage() {
+  return (
+    <div className="mx-auto max-w-5xl space-y-4">
+      <h1 className="text-xl font-bold text-[var(--color-text)]">Dashboard</h1>
+      <ModelBanner />
+      <UpdateBanner />
+      <div className="grid gap-4 md:grid-cols-2">
+        <SystemCard />
+        <HealthCard />
+        <ModelsCard />
+        <NodesCard />
+      </div>
+      <TracesCard />
     </div>
   )
 }

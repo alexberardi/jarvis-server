@@ -1,3 +1,5 @@
+import { featureMissing } from './features'
+import { restartJarvisd } from './restart'
 import type { ServiceSettingsResult, SettingResponse } from '@/types/settings'
 
 /**
@@ -25,9 +27,10 @@ export function secretIsSet(s: SettingResponse): boolean {
 }
 
 /**
- * restartAction is the hook for AD8's restart button (`POST /api/system/restart`, which lands
- * with or after installer I1). Until then it is null and a `requires_reload` save only says
- * "Applies after jarvisd restarts". When the route exists, set this to a function that calls it
- * (and polls /health), and SettingRow offers it as the toast's action.
+ * restartAction is the toast action for a `requires_reload` save (AD8): restart jarvisd through
+ * `POST /api/system/restart`. Null once that route has answered 404 (an older jarvisd), so the
+ * toast only says "Applies after jarvisd restarts".
  */
-export const restartAction: (() => void) | null = null
+export function restartAction(): (() => void) | null {
+  return featureMissing('restart') ? null : () => void restartJarvisd()
+}

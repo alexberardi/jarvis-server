@@ -12,8 +12,13 @@ export function useSetupState(enabled = true) {
   return useQuery<SetupState>({
     queryKey: setupKeys.state,
     queryFn: () => getSetupState(),
-    staleTime: 10_000,
+    staleTime: 5_000,
     enabled,
+    // While the live model loads, follow it closely; otherwise a slow refresh is enough.
+    refetchInterval: (q) => {
+      const d = q.state.data
+      return d?.superuser && d.models_configured && !d.live_ready ? 3_000 : 30_000
+    },
   })
 }
 

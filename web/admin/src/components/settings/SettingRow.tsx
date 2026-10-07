@@ -42,9 +42,8 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
         onSuccess: (res) => {
           setEditing(false)
           if (res.requires_reload) {
-            // No container to restart under jarvisd (AQ8). AD8's restart button plugs in
-            // through restartAction once POST /api/system/restart exists.
-            const action = restartAction
+            // AD8: offer a restart unless this jarvisd has no restart route.
+            const action = restartAction()
             toast.warning(
               `Setting updated. ${res.message || RELOAD_MESSAGE}.`,
               action ? { action: { label: 'Restart jarvisd', onClick: action } } : undefined,

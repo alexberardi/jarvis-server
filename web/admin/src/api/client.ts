@@ -18,6 +18,21 @@ export function setRefreshFunction(fn: () => Promise<string | null>): void {
   refreshFn = fn
 }
 
+/**
+ * accessToken is the bearer token for calls made outside axios (the fetch() stream readers,
+ * which `EventSource` can't do because it can't send a header).
+ */
+export function accessToken(): string | null {
+  const h = apiClient.defaults.headers.common['Authorization']
+  if (typeof h === 'string' && h.startsWith('Bearer ')) return h.slice(7)
+  return localStorage.getItem('jarvis-admin:access_token')
+}
+
+/** refreshAccessToken swaps the refresh token for a new access token (null when that fails). */
+export async function refreshAccessToken(): Promise<string | null> {
+  return refreshFn ? refreshFn() : null
+}
+
 let logoutFn: (() => void) | null = null
 
 export function setLogoutFunction(fn: () => void): void {

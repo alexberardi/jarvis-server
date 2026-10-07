@@ -58,6 +58,8 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   const go = (s: Step | null) => {
     saveStep(s)
     setStepState(s)
+    // Each step reads the install as it is now (labels change as installs finish).
+    void qc.invalidateQueries({ queryKey: setupKeys.state })
   }
 
   if (state.isLoading) return null
@@ -69,7 +71,6 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
 
   function finish() {
     go(null)
-    void qc.invalidateQueries({ queryKey: setupKeys.state })
     navigate('/dashboard', { replace: true })
   }
 
@@ -93,11 +94,8 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
           )}
           {step === 'account' && (
             <AccountStep
-              onCreated={() => {
-                // The session now exists: the superuser view of /api/setup/state drives the rest.
-                void qc.invalidateQueries({ queryKey: setupKeys.state })
-                go('hardware')
-              }}
+              // The session now exists: go() refetches the superuser view of /api/setup/state.
+              onCreated={() => go('hardware')}
             />
           )}
           {step === 'hardware' && <HardwareStep onDone={next} />}
