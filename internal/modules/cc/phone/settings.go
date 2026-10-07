@@ -25,7 +25,7 @@ const (
 
 // Definitions are the phone settings, appended to cc's.
 func Definitions() []settings.Definition {
-	return []settings.Definition{
+	return append([]settings.Definition{
 		{Key: SettingEnabled, Category: "phone_calls", Type: settings.Bool, Default: false,
 			Description: "Master toggle for AI phone calls (default OFF, fail-closed)"},
 		{Key: SettingCallContext, Category: "phone_calls", Type: settings.String, Default: "", IsSecret: true,
@@ -48,7 +48,7 @@ func Definitions() []settings.Definition {
 			Description: "Per-household monthly call minutes cap (fail-closed when exceeded)"},
 		{Key: SettingMaxConcurrent, Category: "phone_calls", Type: settings.Int, Default: int64(1),
 			Description: "Max simultaneous active calls per household"},
-	}
+	}, credentialDefinitions()...)
 }
 
 // Enabled is the fail-closed master gate: no household, a settings error or a non-true

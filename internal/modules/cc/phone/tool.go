@@ -44,6 +44,11 @@ func (t *Tool) Execute(ctx context.Context, call servertools.Call, turn serverto
 		return refusal("phone_calls_disabled", "Phone calls aren't set up on this Jarvis. A household "+
 			"admin can enable them in Household Settings."), nil
 	}
+	if _, err := t.s.Telephony(ctx, turn.HouseholdID); isNotConfigured(err) {
+		// AD6: say so now rather than after the user confirms a plan that can't dial.
+		t.s.log().Info("phone: make_phone_call refused — no telephony account", "household", turn.HouseholdID)
+		return refusal("phone_not_configured", NotConfiguredMessage(err)), nil
+	}
 	if !turn.Speaker.Known() {
 		// D21: the confirm card must land on an identified user's phone. M14: say why when
 		// speaker recognition is off.

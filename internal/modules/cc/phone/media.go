@@ -15,9 +15,10 @@ import (
 // The provider's Media Streams WebSocket (gateway main.py /media/{token} and
 // services/media_stream.py). Three gates before the upgrade, in order (PRD security
 // requirement 2): the single-use path token (claim pops it, so a replay or a duplicate stream
-// dies before the handshake), the provider signature (X-Twilio-Signature with the https↔wss
-// scheme fix; no signing key configured rejects everything), and a live call runtime whose
-// household still has phone on. After the upgrade the stream-start event must bind to the
+// dies before the handshake), a live call runtime for the token's session, the provider
+// signature (X-Twilio-Signature with the https↔wss scheme fix, checked with that session's
+// household's auth token, AD6; no signing key rejects everything), and the household still
+// having phone on. After the upgrade the stream-start event must bind to the
 // claimed session (session_id parameter + callSid) or the socket closes.
 
 const (
@@ -43,7 +44,16 @@ func (s *Service) handleMediaWS(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	if s.Options.AuthToken == "" {
+	// The token maps to the session, the session's runtime carries its household's signing
+	// key (AD6): a stream signed with another household's token fails here.
+	rt := s.runtime(pending.SessionID)
+	if rt == nil {
+		s.log().Warn("phone: rejected media stream: no live call", "session", pending.SessionID)
+		detail(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	key := rt.tel.SigningKey
+	if key == "" {
 		s.log().Error("phone: rejected media stream: no provider signing key configured", "session", pending.SessionID)
 		detail(w, http.StatusForbidden, "Forbidden")
 		return
@@ -52,13 +62,12 @@ func (s *Service) handleMediaWS(w http.ResponseWriter, r *http.Request) {
 	if s.Options.PublicURL == "" {
 		reqURL = "https://" + r.Host + r.URL.Path
 	}
-	if !live.ValidateWSSignature(s.Options.AuthToken, reqURL, r.Header.Get("X-Twilio-Signature")) {
+	if !live.ValidateWSSignature(key, reqURL, r.Header.Get("X-Twilio-Signature")) {
 		s.log().Warn("phone: rejected media stream: bad signature", "session", pending.SessionID)
 		detail(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	rt := s.runtime(pending.SessionID)
-	if rt == nil || !s.Enabled(r.Context(), rt.householdID) {
+	if !s.Enabled(r.Context(), rt.householdID) {
 		s.log().Warn("phone: rejected media stream: no live call", "session", pending.SessionID)
 		detail(w, http.StatusForbidden, "Forbidden")
 		return
