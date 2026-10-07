@@ -64,7 +64,7 @@ func (a *autoNode) Publish(topic string, payload []byte, _ byte, _ bool) error {
 	var body string
 	switch msgs[0]["command"] {
 	case "tool_call":
-		body = `{"output": {"success": true, "message": "sunny", "echo": ` + mustJSON(d["arguments"]) + `}}`
+		body = `{"output": {"success": true, "message": "sunny", "echo": ` + jsonString(d["arguments"]) + `}}`
 	case "report_tools":
 		body = `{"client_tools": [], "available_commands": [{"command_name": "get_weather", "description": "W"}]}`
 	}
@@ -77,7 +77,7 @@ func (a *autoNode) Publish(topic string, payload []byte, _ byte, _ bool) error {
 
 func (a *autoNode) Request(context.Context, string, []byte, string) ([]byte, error) { return nil, nil }
 
-func mustJSON(v any) string {
+func jsonString(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
