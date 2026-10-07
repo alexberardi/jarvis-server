@@ -1,0 +1,2 @@
+# Signed test vectors must keep their exact bytes (no CRLF conversion on Windows checkouts).
+internal/update/testdata/** -text
