@@ -17,7 +17,7 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Notes:
     - Windows: no by-value float args, because purego routes through `syscall.SyscallN`. TTS uses `GenerateWithConfig`.
     - The C structs live in `capi.go`. A version bump means replacing the header, updating the fetch script, and running the layout test.
-- [~] 0.2 CI: `.github/workflows/ci.yml` has the build job (vet, 4-target cross-compile, race tests) and the native-voice matrix on 4 OS runners. Still to do: release packaging.
+- [x] 0.2 CI: `.github/workflows/ci.yml` has the build job (vet, 4-target cross-compile, race tests) and the native-voice matrix on 4 OS runners. **Release packaging done 2026-10-07:** `.github/workflows/release.yml` (tag `v*` publishes; manual run is a dry run) builds the 4 one-file archives + SHA256SUMS and starts each on its own OS; dry run `v0.0.0-dryrun` green on all 4. Still to come: the embedded admin SPA build step (Phase 6), macOS notarization / Windows Authenticode.
 - [x] 0.3 `internal/platform` skeleton, all race-tested, cross-compiling for 4 targets, with platform tests in CI on every OS:
   - `config` (data dir, legacy ports + env overrides), `db` (modernc sqlite, one writer + read-only pool, WAL, FKs, per-module goose version tables), `httpx` (FastAPI-shaped errors, JSON decode, recover/log middleware), `module` (Module/Starter, Runner = one server per legacy listener; migrates and starts platform services)
   - `authn` (HS256+RS256 by algorithm family, forged-token test, principals, `Authority` interface for the auth module), `settings` (per-module tables, 5-level cascade, legacy `/settings` router)
