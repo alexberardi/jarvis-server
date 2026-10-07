@@ -205,12 +205,47 @@ func TestRunnerFailsOnPortConflict(t *testing.T) {
 	defer busy.Close()
 	d := deps(t)
 	d.Config.Ports[config.ListenerCC] = busy.Addr().(*net.TCPAddr).Port
+	var ready atomic.Bool
 	r := &Runner{Deps: d, Modules: []Module{
 		&fakeModule{name: "auth", listener: config.ListenerAuth},
 		&fakeModule{name: "cc", listener: config.ListenerCC},
-	}}
+	}, OnReady: func() { ready.Store(true) }}
 	if err := r.Run(context.Background()); err == nil {
 		t.Fatal("want bind error")
+	}
+	if ready.Load() {
+		t.Fatal("OnReady after a failed bind")
+	}
+}
+
+// OnReady (sd_notify READY=1, SCM Running) fires once every listener answers.
+func TestRunnerOnReadyAfterListenersBound(t *testing.T) {
+	cc := &fakeModule{name: "cc", listener: config.ListenerCC, routes: map[string]string{"GET /health": "ok"}}
+	auth := &fakeModule{name: "auth", listener: config.ListenerAuth, routes: map[string]string{"GET /health": "ok"}}
+	readyc := make(chan [2]string, 1)
+	var r *Runner
+	r = &Runner{Deps: deps(t), Modules: []Module{cc, auth}, OnReady: func() {
+		readyc <- [2]string{r.Addr(config.ListenerCC), r.Addr(config.ListenerAuth)}
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	select {
+	case addrs := <-readyc:
+		for _, a := range addrs {
+			if _, b := get(t, a, "/health"); b != "ok" {
+				t.Errorf("%s not serving at ready", a)
+			}
+		}
+		if !cc.started.Load() || !auth.started.Load() {
+			t.Error("ready before modules started")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnReady never called")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

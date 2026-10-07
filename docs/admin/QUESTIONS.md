@@ -91,7 +91,7 @@ admin's Check step plus the mDNS advertisement make the box easy to find on the 
 - **(b) Loopback-only until a superuser exists.** This breaks the common case of a headless box set up
   from a laptop.
 - **(c) A one-time setup token.**
-  - jarvisd writes `~/.jarvis/setup-token` (0600) on first start, logs a URL
+  - jarvisd writes `<home>/setup-token` (0600) on first start, logs a URL
     `http://<lan-ip>:7710/setup#token=…`, and the install script prints it.
   - `/auth/setup` requires the token **only while no superuser exists**; after that, setup returns 409
     as today.

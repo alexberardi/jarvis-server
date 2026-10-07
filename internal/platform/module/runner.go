@@ -23,6 +23,9 @@ var ShutdownTimeout = 10 * time.Second
 type Runner struct {
 	Deps    Deps
 	Modules []Module
+	// OnReady, if set, is called once every listener is bound and every module started,
+	// e.g. to tell systemd READY=1 or the Windows SCM "running".
+	OnReady func()
 
 	mu    sync.Mutex
 	addrs map[string]string        // listener -> bound address, filled once listening
@@ -156,13 +159,18 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.Deps.Scheduler != nil {
 		r.Deps.Scheduler.Start(ctx)
 	}
+	started := true
 	for _, m := range r.Modules {
 		if s, ok := m.(Starter); ok {
 			if err := s.Start(ctx); err != nil {
 				errc <- fmt.Errorf("module: start %s: %w", m.Name(), err)
+				started = false
 				break
 			}
 		}
+	}
+	if started && r.OnReady != nil {
+		r.OnReady()
 	}
 
 	var runErr error

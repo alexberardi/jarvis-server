@@ -610,6 +610,9 @@ func (s *Supervisor) spawn() (*proc, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("engines: start %s: %w", s.spec.Name, err)
 	}
+	if err := contain(cmd.Process); err != nil {
+		s.log.Warn("engine not tied to jarvisd's lifetime; it may outlive a crash", "err", err)
+	}
 	s.log.Info("engine started", "pid", cmd.Process.Pid, "path", s.spec.Path)
 	p := &proc{cmd: cmd, exited: make(chan struct{})}
 	go func() {

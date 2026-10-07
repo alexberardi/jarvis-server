@@ -1,0 +1,23 @@
+# Written by "jarvisd service install". Local changes are lost on the next install;
+# put overrides in "systemctl --user edit jarvisd" instead.
+[Unit]
+Description=Jarvis server (jarvisd)
+Documentation=https://github.com/alexberardi/jarvis-server
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=notify
+ExecStart=/home/alex/.local/bin/jarvisd serve --home /home/alex/.jarvisd
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=30
+KillMode=mixed
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=yes
+SyslogIdentifier=jarvisd
+
+[Install]
+WantedBy=default.target

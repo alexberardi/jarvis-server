@@ -1,0 +1,36 @@
+# Written by "jarvisd service install". Local changes are lost on the next install;
+# put overrides in "systemctl edit jarvisd" instead.
+[Unit]
+Description=Jarvis server (jarvisd)
+Documentation=https://github.com/alexberardi/jarvis-server
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=notify
+User=jarvisd
+Group=jarvisd
+ExecStart=/usr/local/bin/jarvisd serve --home /var/lib/jarvisd
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=30
+KillMode=mixed
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/jarvisd
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SyslogIdentifier=jarvisd
+
+[Install]
+WantedBy=multi-user.target

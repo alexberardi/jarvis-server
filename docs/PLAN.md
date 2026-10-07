@@ -26,7 +26,7 @@ What "single binary" means concretely:
 
 - `jarvisd` is one self-contained executable (about 45–60 MB) with no separate database, broker, queue or object store.
 - On first run it downloads **model weights** and, where the hardware needs them, **GPU inference engines** (`llama-server`, whisper). These come in GPU-specific flavours and are hundreds of MB to GB, so they can't be in the binary.
-- They live under `~/.jarvis/` and are fully managed by `jarvisd`.
+- They live under `~/.jarvisd/` (renamed from `~/.jarvis`, which the legacy stack owns; ID1) and are fully managed by `jarvisd`.
 
 **Non-goals.** These stay as they are:
 
@@ -96,12 +96,12 @@ Inside the process:
 
 | Today | In `jarvisd` |
 |---|---|
-| 11 Postgres DBs | **One SQLite file** (`~/.jarvis/jarvis.db`) in WAL mode, with one writer connection and a read pool. Tables are **prefixed per module** (`auth_users`, `cc_routines`, …) because every service has its own `settings` table. |
+| 11 Postgres DBs | **One SQLite file** (`~/.jarvisd/jarvis.db`) in WAL mode, with one writer connection and a read pool. Tables are **prefixed per module** (`auth_users`, `cc_routines`, …) because every service has its own `settings` table. |
 | Alembic ×11 | **goose** migrations, embedded and run at startup. `jarvisd migrate status` replaces "alembic current == heads". |
 | Queries | **sqlc** (supports SQLite). JSON stays in TEXT columns, which matches the current convention. |
 | pgvector (CC memory) | **Brute-force cosine in Go** over the household's memories. That's thousands of 384-d vectors, well under a millisecond. sqlite-vec is the fallback if it ever matters. |
 | Redis + RQ | **SQLite-backed durable job queue**: a jobs table with leases, retries, priorities and dedup keys, plus an in-process worker pool. **Concurrency is capped per job type**, e.g. one background LLM job at a time, so slow hardware keeps the live path responsive. Today's `llmproxy:dedupe` and enqueue/callback semantics are preserved. Job completions become function calls. |
-| SeaweedFS | A blob interface: **local filesystem** (`~/.jarvis/blobs`), with S3 optional. |
+| SeaweedFS | A blob interface: **local filesystem** (`~/.jarvisd/blobs`), with S3 optional. |
 | Mosquitto | **Embedded broker** (mochi-mqtt) on 1884 and WebSocket 9883, with the same topics. It authenticates against the credentials CC issues via `/node/mqtt-credentials`. |
 | Loki + Grafana | A log table with retention, plus the SSE tail. |
 | phone-gateway's Redis dial queue | Gone: the gateway is absorbed into jarvisd, so dial hand-off is in-process (docs/cc D16). |
@@ -145,7 +145,7 @@ SQLite driver: `modernc.org/sqlite` (pure Go; keeps the build cgo-free, see §3.
 Platforms: linux/amd64, linux/arm64, darwin/arm64 and **windows/amd64**, all native.
 
 - **Windows forces the approach.** sherpa-onnx's Windows static libraries are MSVC-built, and cgo's MinGW toolchain can't link them. Only DLLs are usable.
-- **So `jarvisd` uses no cgo on any platform.** It embeds the sherpa-onnx and onnxruntime shared libraries for its OS (`.so`, `.dylib` or `.dll`, about 31 MB) via `go:embed`. On first run it extracts them to `~/.jarvis/lib/<version-hash>/` and loads them at runtime with **purego** (`ebitengine/purego`), which provides dlopen/LoadLibrary and C calls from pure Go.
+- **So `jarvisd` uses no cgo on any platform.** It embeds the sherpa-onnx and onnxruntime shared libraries for its OS (`.so`, `.dylib` or `.dll`, about 31 MB) via `go:embed`. On first run it extracts them to `~/.jarvisd/lib/<version-hash>/` and loads them at runtime with **purego** (`ebitengine/purego`), which provides dlopen/LoadLibrary and C calls from pure Go.
 - **SQLite uses a pure-Go driver** (`modernc.org/sqlite`).
 - **Result:**
   - all four targets cross-compile from one CI runner with `CGO_ENABLED=0`

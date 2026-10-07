@@ -217,7 +217,7 @@ failed ──retry_failed_loads (cooldown 60s·2^(n-1) ≤ 600s; or force) ─�
 ### 3.6 Engine binaries
 
 - Prod pins `ghcr.io/ggml-org/llama.cpp@sha256:4d27e401…`, build **b10499**.
-- jarvisd pins one llama.cpp release tag. It downloads the matching asset to `~/.jarvis/engines/llama-server/<tag>-<flavour>/`:
+- jarvisd pins one llama.cpp release tag. It downloads the matching asset to `~/.jarvisd/engines/llama-server/<tag>-<flavour>/`:
 
   | Platform | Flavours |
   |---|---|

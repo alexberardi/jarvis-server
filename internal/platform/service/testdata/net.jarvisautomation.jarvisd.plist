@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by "jarvisd service install". -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>net.jarvisautomation.jarvisd</string>
+	<key>UserName</key>
+	<string>alex</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/jarvisd</string>
+		<string>serve</string>
+		<string>--home</string>
+		<string>/Users/alex/.jarvisd</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/alex</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/alex/.jarvisd</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>ExitTimeOut</key>
+	<integer>30</integer>
+	<key>SoftResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>65536</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/alex/.jarvisd/logs/jarvisd.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/alex/.jarvisd/logs/jarvisd.log</string>
+</dict>
+</plist>
