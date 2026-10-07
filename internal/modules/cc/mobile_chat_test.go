@@ -444,6 +444,16 @@ func TestMobileChatErrors(t *testing.T) {
 		detail(404, "Node node-other not found in household "+voiceHH)
 	chat("tok-9", map[string]any{"message": "hi", "node_id": ce.node.id, "household_id": "hh-other"}).
 		detail(404, "Node node-v1 not found in household hh-other")
+	// A10 F16: a household with no node at all (a fresh install) can't chat, as in legacy;
+	// the 404 says why and what to do.
+	ce.auth.addUser(11, "hh-empty", "member")
+	for _, id := range []string{"", "anything"} {
+		got := chat("tok-11", map[string]any{"message": "hi", "node_id": id, "household_id": "hh-empty"}).want(404).json()["detail"]
+		if s, _ := got.(string); !strings.HasPrefix(s, "Node "+id+" not found in household hh-empty: this household has no Jarvis node yet.") ||
+			!strings.Contains(s, "add one first") {
+			t.Fatalf("no-node detail %q", got)
+		}
+	}
 	// Validation (CC's 400 shape).
 	d := chat("tok-7", map[string]any{"message": "", "household_id": voiceHH}).want(400).json()["details"]
 	if fmt.Sprint(d) != "[body -> message: String should have at least 1 character body -> node_id: Field required]" {
