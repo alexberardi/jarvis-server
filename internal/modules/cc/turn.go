@@ -159,6 +159,7 @@ func (m *Module) applyTurnIdentity(ctx context.Context, conv *conversation) int6
 			conv.memories = m.Memory.ProfileText(ctx, id.UserID, conv.householdID)
 		}
 	}
+	m.noteVoicePresence(ctx, conv.householdID, id.UserID, conv.nodeID, conv.speakerName) // 5c, D40 10.Q7
 	m.deps.Log.Info("cc: identity-decision", "conversation_id", conv.id, "turn_speaker", id.UserID,
 		"effective", conv.speakerID, "source", "stt", "has_memories", conv.memories != "")
 	return id.UserID

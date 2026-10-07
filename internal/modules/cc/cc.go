@@ -47,7 +47,7 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 // Definitions are the module's settings declared so far.
 func Definitions() []settings.Definition {
 	return routineDefinitions(slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona),
-		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions()))
+		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions(), signalDefinitions()))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -109,7 +109,9 @@ type Module struct {
 	Names  NameResolver
 	// Memory and Attention are 5c hooks (nil until those modules exist).
 	Memory    MemoryProfile
-	Attention AttentionGate
+	Attention AttentionGate // nil: Register wires the 5c broker (attention.go)
+	// HouseholdClock gives a household's timezone to the attention broker (D18). Nil: UTC.
+	HouseholdClock HouseholdTimezone
 	// WebSearch replaces DuckDuckGo for quick_search / deep_research (tests).
 	WebSearch servertools.WebSearcher
 	// DefaultPromptProvider names the prompt provider when llm.prompt_provider is unset (e.g.
@@ -135,6 +137,7 @@ type Module struct {
 	cmdData *schemaCache  // command-data schema cache (doc 12, packages.go)
 	smart   *smartHome    // 5c smart home (smarthome.go)
 	rt      *routineState // 5c routines and errand schedules (routines.go)
+	sig     *signalState  // 5c signals, proposals and attention (signals.go)
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -272,6 +275,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// Routines and errand schedules (doc 08).
 	m.registerRoutines(mux)
 
+	// Phase 5c: signals, proposals and the attention broker.
+	m.registerSignals(mux)
+
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/update", m.user(m.handleRequestUpdate))
@@ -308,6 +314,9 @@ func (m *Module) Start(ctx context.Context) error {
 	if err := m.startMemory(ctx); err != nil {
 		return err
 	}
+	if err := m.startSignals(ctx); err != nil {
+		return err
+	}
 	if m.deps.Scheduler == nil {
 		return nil
 	}
@@ -333,6 +342,9 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 		m.convs.purgeUser(userID) // D20/M15: no in-memory identity outlives the account
 	}
 	if err := purgeMemoryUser(ctx, tx, userID); err != nil { // before transcripts: traces key off them
+		return err
+	}
+	if err := m.purgeSignals(ctx, tx, userID); err != nil {
 		return err
 	}
 	for _, q := range []string{
