@@ -19,7 +19,7 @@ import (
 func setupLink(cfg config.Config, token string) string {
 	host := cfg.Host
 	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = doctor.LANAddr()
+		host = doctor.LANAddr(cfg.MDNSInterfaces)
 	}
 	if host == "" {
 		host = "localhost"

@@ -138,7 +138,7 @@ func (m *Module) Start(ctx context.Context) error {
 	}
 	if port := m.deps.Config.Ports[pconfig.ListenerConfig]; m.Advertise && port != 0 {
 		// Best effort: a host without multicast still serves; the app can be pointed at it.
-		if _, err := mdns.Advertise(ctx, mdns.Options{Port: port, Logger: m.deps.Log}); err != nil {
+		if _, err := mdns.Advertise(ctx, mdns.Options{Port: port, Allow: m.deps.Config.MDNSInterfaces, Logger: m.deps.Log}); err != nil {
 			m.deps.Log.Warn("mdns advertisement failed; the app will need the server address", "err", err)
 		}
 	}

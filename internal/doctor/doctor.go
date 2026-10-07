@@ -7,9 +7,10 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"slices"
 	"strings"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/netaddr"
 )
 
 // Status is a check's outcome.
@@ -42,6 +43,9 @@ type Options struct {
 	// LANs are the subnets nodes and phones connect from (default: this host's private IPv4
 	// subnets).
 	LANs []*net.IPNet
+	// Interfaces names the LAN interfaces LANs defaults from (JARVIS_MDNS_INTERFACES); empty
+	// picks them automatically.
+	Interfaces []string
 	// GOOS picks the firewall checks (default runtime.GOOS).
 	GOOS string
 	// Firewall inspects the host firewall (default: the real one for GOOS).
@@ -68,7 +72,7 @@ func Run(ctx context.Context, o Options) []Check {
 		o.Dial = d.DialContext
 	}
 	if o.LANs == nil {
-		o.LANs = LocalLANs()
+		o.LANs = LocalLANs(o.Interfaces)
 	}
 	var out []Check
 	out = append(out, listening(ctx, o)...)
@@ -160,60 +164,15 @@ func portList(ps []Port) string {
 	return strings.Join(s, ", ")
 }
 
-// LocalLANs lists this host's private IPv4 subnets (RFC 1918), skipping container and VPN
-// bridges' usual ranges only by being private: callers that need fewer pass LANs.
-func LocalLANs() []*net.IPNet {
-	ifs, err := net.Interfaces()
-	if err != nil {
-		return nil
-	}
-	var out []*net.IPNet
-	for _, ifc := range ifs {
-		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || virtualInterface(ifc.Name) {
-			continue
-		}
-		addrs, _ := ifc.Addrs()
-		for _, a := range addrs {
-			n, ok := a.(*net.IPNet)
-			if !ok || n.IP.To4() == nil || !n.IP.IsPrivate() {
-				continue
-			}
-			sub := &net.IPNet{IP: n.IP.Mask(n.Mask), Mask: n.Mask}
-			if !slices.ContainsFunc(out, func(x *net.IPNet) bool { return x.String() == sub.String() }) {
-				out = append(out, sub)
-			}
-		}
-	}
-	return out
+// LocalLANs lists the private IPv4 subnets of this host's LAN interfaces (netaddr.LAN, so
+// container, VM and VPN bridges are left out; allow overrides the choice as
+// JARVIS_MDNS_INTERFACES does).
+func LocalLANs(allow []string) []*net.IPNet {
+	return netaddr.LANSubnets(allow)
 }
 
-// LANAddr is this host's address on its first private IPv4 LAN (by the same rules as
-// LocalLANs), for links shown to the operator, or "" when there is none.
-func LANAddr() string {
-	ifs, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	for _, ifc := range ifs {
-		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || virtualInterface(ifc.Name) {
-			continue
-		}
-		addrs, _ := ifc.Addrs()
-		for _, a := range addrs {
-			if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && n.IP.IsPrivate() {
-				return n.IP.String()
-			}
-		}
-	}
-	return ""
-}
-
-// virtualInterface is a container bridge or VPN, not the LAN nodes are on.
-func virtualInterface(name string) bool {
-	for _, p := range []string{"docker", "br-", "veth", "virbr", "tailscale", "tun", "wg", "zt", "vboxnet", "vmnet", "lxc", "cni", "flannel"} {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
+// LANAddr is this host's address on its first LAN interface (same rules as mDNS), for links
+// shown to the operator, or "" when there is none.
+func LANAddr(allow []string) string {
+	return netaddr.LANAddr(allow)
 }

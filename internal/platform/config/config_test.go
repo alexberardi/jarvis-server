@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -48,6 +49,23 @@ func TestLoadOverrides(t *testing.T) {
 func TestLoadRejectsBadPort(t *testing.T) {
 	if _, err := load(env(map[string]string{"JARVIS_HOME": "/d", "JARVIS_PORT_AUTH": "http"})); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestLoadMDNSInterfaces(t *testing.T) {
+	for in, want := range map[string][]string{
+		"":                 nil,
+		" , ":              nil,
+		"en0":              {"en0"},
+		" en0 , eth1,,wg0": {"en0", "eth1", "wg0"},
+	} {
+		c, err := load(env(map[string]string{"JARVIS_HOME": "/d", "JARVIS_MDNS_INTERFACES": in}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(c.MDNSInterfaces, want) {
+			t.Errorf("JARVIS_MDNS_INTERFACES=%q: got %v, want %v", in, c.MDNSInterfaces, want)
+		}
 	}
 }
 
