@@ -24,6 +24,7 @@ the doctor `--fix` mechanics (§6.1), and no GPU/model prefetch (§6.2, settled 
 | ID2 | 2026-10-07 | IQ2 Windows supervisor | **(a) SCM service** under `NT SERVICE\jarvisd` (delayed auto start, recovery actions, clean stop with engine drain). Session-0 GPU still to verify on a real NVIDIA Windows box; if CUDA fails there, switch to a logon task rather than carry both. |
 | ID3 | 2026-10-07 | IQ3 thin installers | **(a) thin scripts, logic in Go**: scripts detect/download/verify/place, then `jarvisd service install`; jarvisd generates every secret (0600) and reads its own `jarvisd.env` for unset variables; the service definition carries only `--home`. |
 | ID4 | 2026-10-07 | IQ4 legacy admin tokens | **(a) unset by default**; `jarvisd admin-token create <auth\|config\|cc>` generates one into `jarvisd.env` on demand. |
+| ID5 | 2026-10-07 | IQ5 firewall | **(a) ask, default yes** (`sudo jarvisd doctor --fix`); non-interactive applies only with `--yes`; private LAN subnets only; rules tagged `jarvisd` and removed on uninstall. |
 
 ## Queue
 
