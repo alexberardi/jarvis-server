@@ -133,6 +133,21 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("planner request = %+v", req)
 	}
 
+	// Thinking ran out the budget (jarvis-dev, Qwen3-8B): one retry without thinking.
+	n := len(e.llm.requests("plan"))
+	e.llm.say("plan", thoughtOut, planJSON("Weather then timer", step("get_weather", "Weather", "")))
+	if plan, err := e.s.PlanErrand(context.Background(), "goal", nil); err != nil || plan.Summary != "Weather then timer" {
+		t.Fatalf("retry: %+v %v", plan, err)
+	}
+	reqs := e.llm.requests("plan")[n:]
+	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
+		t.Fatalf("retry requests: %+v", reqs)
+	}
+	e.llm.say("plan", thoughtOut, thoughtOut)
+	if _, err := e.s.PlanErrand(context.Background(), "goal", nil); !errors.Is(err, ErrPlan) {
+		t.Fatalf("both thought out: %v", err)
+	}
+
 	for _, bad := range []string{"", "not json at all", planJSON("x", step("nope", "n", ""))} {
 		e.llm.say("plan", bad)
 		if _, err := e.s.PlanErrand(context.Background(), "goal", nil); !errors.Is(err, ErrPlan) {

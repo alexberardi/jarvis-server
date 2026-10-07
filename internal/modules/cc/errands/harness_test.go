@@ -91,8 +91,15 @@ func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespons
 		f.last = map[string]string{}
 	}
 	f.last[kind] = c
+	if c == thoughtOut {
+		return &llm.ChatResponse{Content: "", FinishReason: "length"}, nil
+	}
 	return &llm.ChatResponse{Content: c, FinishReason: "stop"}, nil
 }
+
+// thoughtOut scripts a reply where thinking used the whole max_tokens: no content, finish
+// "length".
+const thoughtOut = "\x00thought-out"
 
 func (f *fakeLLM) requests(kind string) []llm.ChatRequest {
 	f.mu.Lock()

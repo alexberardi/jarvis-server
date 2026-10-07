@@ -341,12 +341,24 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 		return nil, errors.New("errands: no LLM")
 	}
 	temp, maxTok := 0.0, plannerMaxTokens
-	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
+	req := llm.ChatRequest{
 		Label: "background", Temperature: &temp, MaxTokens: &maxTok,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
-	})
+	}
+	resp, err := s.LLM.Chat(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if resp.Content == "" && resp.FinishReason == "length" {
+		// The model thought through the whole budget without answering (Qwen3-8B does on
+		// simple two-step goals; legacy measured ~1900 think tokens on Qwen3.5-9B). Retry
+		// once without thinking: a plan that may merge steps beats no plan.
+		s.log().Warn("errands: planner thought past max_tokens; retrying without thinking")
+		off := 0
+		req.ReasoningBudget = &off
+		if resp, err = s.LLM.Chat(ctx, req); err != nil {
+			return nil, err
+		}
 	}
 	raw := resp.Content
 	if raw == "" {
