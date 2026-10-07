@@ -57,6 +57,10 @@ type Module struct {
 	Updates UpdateOptions
 	// LogPoll is the log tail's poll interval (tests); zero is one second.
 	LogPoll time.Duration
+	// Restarter restarts jarvisd through its supervisor (AD8, AD5); nil is unsupervised.
+	Restarter Restarter
+	// Upgrade configures the one-click signed update (AD5).
+	Upgrade UpgradeConfig
 
 	deps     module.Deps
 	settings *settings.Service
@@ -64,6 +68,7 @@ type Module struct {
 	gate     settings.Guard
 	doc      doctorCache
 	upd      updateCache
+	apply    applyState
 }
 
 func (m *Module) Name() string      { return "admin" }

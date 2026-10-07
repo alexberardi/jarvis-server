@@ -101,6 +101,10 @@ func (m *Module) mountBFF(mux *http.ServeMux, deps module.Deps) {
 	mux.Handle("GET /api/update", gated(m.handleUpdate))
 	mux.Handle("POST /api/update/check", gated(m.handleUpdateCheck))
 	mux.Handle("PUT /api/update/settings", gated(m.handleUpdateSettings))
+	// AD5 one-click signed update, AD8 restart button.
+	mux.Handle("POST /api/update/apply", gated(m.handleApply))
+	mux.Handle("GET /api/update/apply", gated(m.handleApplyStatus))
+	mux.Handle("POST /api/system/restart", gated(m.handleRestart))
 	// Open while no superuser exists (the wizard's Check step runs before Account), gated after.
 	mux.Handle("GET /api/doctor", open(m.handleDoctor))
 	// Always reachable: the reduced view anonymously, the full one with a superuser token.
@@ -319,6 +323,8 @@ func (m *Module) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	if version == "" {
 		version = "dev"
 	}
+	blocked, _ := m.applyBlocker(r.Context())
+	selfUpdate := blocked == ""
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"hostname":        host,
 		"platform":        runtime.GOOS,
@@ -329,11 +335,20 @@ func (m *Module) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		"uptime":          time.Since(processStart).Seconds(),
 		"arch":            runtime.GOARCH,
 		"go_version":      runtime.Version(),
-		"started_at":      processStart.UTC().Format(time.RFC3339),
+		"started_at":      processStart.UTC().Format(time.RFC3339Nano),
 		"home":            cfg.Home,
 		"db_bytes":        dbBytes,
 		"disk_free_bytes": diskFree,
 		"listeners":       listeners,
+		// AD8: who restarts jarvisd, and whether the restart button can.
+		"supervisor":        m.supervisor(),
+		"restart_supported": m.supervisor().Supervised(),
+		// What the SPA may offer without probing: restart (supervised) and the one-click
+		// update (POST /api/update/apply would be accepted now).
+		"capabilities": map[string]bool{
+			"restart":     m.supervisor().Supervised(),
+			"self_update": selfUpdate,
+		},
 	})
 }
 

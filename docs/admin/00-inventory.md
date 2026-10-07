@@ -495,8 +495,28 @@ superuser-gated, a nil interface answers 503):*
   set through `PUT /api/settings/cc/phone.twilio_*` (masked in `GET /api/settings`); households set their
   own from the app (`PUT /api/v0/mobile/household/{id}/settings/phone.twilio_*`, write-only).
 
-Optional, AQ8: `POST /api/system/restart`. It exits with a restart code when a supervisor is detected
-(systemd `INVOCATION_ID`, launchd, a Windows service); otherwise it returns 409 with the command to run.
+*As built (AD8 restart button and AD5 one-click signed update, 2026-10-07; `apply.go`, flow in
+`internal/update`, installers doc §8.2; every route superuser-gated):*
+
+- `POST /api/system/restart` → **202** `{status: "restarting", supervisor}` and, 300 ms later, serve's
+  `service.Restarter` ends serve so jarvisd exits 75 and its supervisor (systemd `Restart=always`, launchd
+  `KeepAlive`, SCM recovery) starts it again. Unsupervised → **409** `{detail, supervisor: "none", command}`
+  (`service.RestartCommand`). `GET /api/system/info` gains `supervisor` (`systemd` | `launchd` |
+  `windows-service` | `none`) and `restart_supported`.
+- `POST /api/update/apply [{version}]` → **202** `{job}` and a background run: resolve the release (newest, or
+  `version`, which must be newer), fetch and verify `SHA256SUMS.minisig` with the key built into the running
+  binary, download + checksum the archive, unpack, run `<new> version`, `VACUUM INTO` snapshot, swap (when
+  jarvisd can write its binary's directory; under the systemd system unit the unit's root `ExecStartPre=+`
+  helper re-verifies and swaps instead), then the supervised restart. **409** `{detail, supervisor,
+  command?}` when `updates.enabled` is off, when unsupervised (`command: "jarvisd upgrade"`), when jarvisd
+  can't write its binary and has no helper (launchd/SCM installs in root-owned dirs: `command: "sudo jarvisd
+  upgrade"`), or while another upgrade is pending.
+- `GET /api/update/apply` → `{job: {state: running|restarting|failed, step, bytes_done, bytes_total,
+  from_version, to_version, error, started_at} | null, pending: {state, from_version, to_version, attempts}
+  | null, last: {outcome: succeeded|rolled_back|failed, from_version, to_version, reason, db_restored, at} |
+  null, current_version, can_apply, blocked_reason?, command?}`. Poll it; after the restart the new process
+  answers with `pending` (health gate running) and then `last`.
+- `GET /api/update` and `POST /api/update/check` also carry `can_apply`, `apply_blocked`, `apply_command`.
 
 ---
 

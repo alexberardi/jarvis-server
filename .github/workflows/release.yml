@@ -77,6 +77,39 @@ jobs:
           done
           (cd dist && sha256sum * > SHA256SUMS)
           ls -l dist && cat dist/SHA256SUMS
+      # SHA256SUMS.minisig is the self-update trust root (AD5, ID9): jarvisd verifies it with
+      # the project key built into the running binary before it installs anything. Signed with
+      # the same minisign key as the node and admin releases (repo secrets MINISIGN_SECRET_KEY,
+      # the whole .key file, and MINISIGN_PASSWORD). The trusted comment names the version, so
+      # a signed list can't be replayed under another tag. Without the secret a dry run warns
+      # and ships unsigned; a publishing run fails (jarvisd refuses unsigned releases).
+      - name: Sign SHA256SUMS (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ steps.v.outputs.version }}
+          PUBLISHING: ${{ github.event_name == 'push' || inputs.publish }}
+          PROJECT_KEY: RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L
+        run: |
+          set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            if [ "$PUBLISHING" = true ]; then
+              echo "::error::MINISIGN_SECRET_KEY is not set: refusing to publish an unsigned release (jarvisd upgrade and the admin Update button would refuse it)"
+              exit 1
+            fi
+            echo "::warning::MINISIGN_SECRET_KEY is not set: this dry run is UNSIGNED (no SHA256SUMS.minisig)"
+            exit 0
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          umask 077
+          key="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          # minisign reads the password from stdin when it isn't a terminal.
+          printf '%s\n' "${MINISIGN_PASSWORD:-}" | minisign -S -s "$key" -m dist/SHA256SUMS -t "jarvisd ${VERSION} SHA256SUMS"
+          shred -u "$key" 2>/dev/null || rm -f "$key"
+          # The secret must be the project key the binaries trust.
+          minisign -V -P "$PROJECT_KEY" -m dist/SHA256SUMS
+          cat dist/SHA256SUMS.minisig
       - name: Smoke-test the linux/amd64 build
         env:
           VERSION: ${{ steps.v.outputs.version }}
@@ -124,6 +157,19 @@ jobs:
           test "$("$bin" version | tr -d '\r')" = "$VERSION"
           export JARVIS_HOME="$RUNNER_TEMP/jarvis"
           "$bin" migrate status
+      # The binary's own verifier (the one self-update uses) accepts the CI-made signature.
+      - name: Check the signature with jarvisd
+        env:
+          NAME: jarvisd-${{ needs.build.outputs.version }}-${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          cd dist
+          exe=jarvisd; [ "${{ matrix.ext }}" = zip ] && exe=jarvisd.exe
+          if [ -f SHA256SUMS.minisig ]; then
+            JARVIS_HOME="$RUNNER_TEMP/jarvis" "$PWD/$NAME/$exe" upgrade --verify-dir "$PWD"
+          else
+            echo "::warning::no SHA256SUMS.minisig (unsigned dry run); signature not checked"
+          fi
 
   publish:
     needs: [build, verify]
@@ -144,5 +190,5 @@ jobs:
           set -euo pipefail
           pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
           gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
-            --notes "Single-binary Jarvis server. Download the archive for your platform, verify it against SHA256SUMS, and run \`jarvisd serve\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it." \
+            --notes "Single-binary Jarvis server. Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it." \
             $pre

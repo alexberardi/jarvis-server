@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"slices"
@@ -26,9 +27,12 @@ type Runner struct {
 	// OnReady, if set, is called once every listener is bound and every module started,
 	// e.g. to tell systemd READY=1 or the Windows SCM "running".
 	OnReady func()
+	// AllowDowngrade skips the downgrade guard (serve --allow-downgrade): run even though a
+	// newer jarvisd migrated the database.
+	AllowDowngrade bool
 
 	mu    sync.Mutex
-	addrs map[string]string        // listener -> bound address, filled once listening
+	addrs map[string]string         // listener -> bound address, filled once listening
 	muxes map[string]*http.ServeMux // listener -> routes, filled before serving
 }
 
@@ -49,8 +53,47 @@ func (r *Runner) Handler(listener string) http.Handler {
 	return nil
 }
 
-// Migrate runs the platform's migrations, then every module's, in module order.
+// migrationSets lists the platform's and every module's migrations, in order.
+func (r *Runner) migrationSets() []migrationSet {
+	var sets []migrationSet
+	if r.Deps.Queue != nil {
+		sets = append(sets, migrationSet{queue.MigrationModule, queue.Migrations()})
+	}
+	if r.Deps.Scheduler != nil {
+		sets = append(sets, migrationSet{scheduler.MigrationModule, scheduler.Migrations()})
+	}
+	for _, m := range r.Modules {
+		if fsys := m.Migrations(); fsys != nil {
+			sets = append(sets, migrationSet{m.Name(), fsys})
+		}
+	}
+	return sets
+}
+
+type migrationSet struct {
+	module string
+	fsys   fs.FS
+}
+
+// CheckDowngrade refuses a database that a newer jarvisd migrated (ID10): an applied
+// migration this binary doesn't have means its schema is unknown here.
+func (r *Runner) CheckDowngrade(ctx context.Context) error {
+	for _, s := range r.migrationSets() {
+		if err := db.CheckDowngrade(ctx, r.Deps.DB, s.module, s.fsys); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Migrate runs the platform's migrations, then every module's, in module order. Unless
+// AllowDowngrade is set it first refuses a database a newer jarvisd migrated.
 func (r *Runner) Migrate(ctx context.Context) error {
+	if !r.AllowDowngrade {
+		if err := r.CheckDowngrade(ctx); err != nil {
+			return err
+		}
+	}
 	if r.Deps.Queue != nil {
 		if err := db.Migrate(ctx, r.Deps.DB, queue.MigrationModule, queue.Migrations()); err != nil {
 			return err

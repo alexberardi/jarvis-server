@@ -42,6 +42,28 @@ const (
 // Supervised reports whether something will start jarvisd again after it exits.
 func (k Kind) Supervised() bool { return k != None && k != "" }
 
+// EnvUpgradeHelper is set (to 1) by the systemd system unit, whose ExecStartPre=+ runs
+// `jarvisd upgrade --prestart` as root: a self-update can be staged by the unprivileged
+// service and swapped in by that helper on restart.
+const EnvUpgradeHelper = "JARVIS_UPGRADE_HELPER"
+
+// RestartCommand is what an operator runs to restart jarvisd under kind (user: a systemd
+// --user unit). Unsupervised, it says to restart the process by hand.
+func RestartCommand(kind Kind, user bool) string {
+	switch kind {
+	case Systemd:
+		if user {
+			return "systemctl --user restart " + Name
+		}
+		return "sudo systemctl restart " + Name
+	case Launchd:
+		return "sudo launchctl kickstart -k system/" + LaunchdLabel
+	case SCM:
+		return "Restart-Service " + Name
+	}
+	return "stop jarvisd (Ctrl-C) and start it again: jarvisd serve"
+}
+
 // probe is what Detect looks at, injectable for tests.
 type probe struct {
 	getenv     func(string) string
