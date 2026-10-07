@@ -87,11 +87,12 @@ type hub struct {
 	throttle time.Duration // sleep per 32 KiB written
 	cutOnce  map[string]bool
 	hits     map[string]int
+	hold     map[string]chan struct{} // URL path -> requests wait until it is closed
 }
 
 func newHub() *hub {
 	return &hub{files: map[string][]byte{}, repos: map[string]string{}, gated: map[string]bool{},
-		cutOnce: map[string]bool{}, hits: map[string]int{}}
+		cutOnce: map[string]bool{}, hits: map[string]int{}, hold: map[string]chan struct{}{}}
 }
 
 func (h *hub) addRepo(repo, rev string, files map[string][]byte) {
@@ -132,7 +133,15 @@ func (h *hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Lock()
 	data, ok := h.files[r.URL.Path]
+	hold := h.hold[r.URL.Path]
 	h.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -581,23 +590,24 @@ func TestHFRepo(t *testing.T) {
 func TestInstallCatalogWithProjectorEngineAndAssign(t *testing.T) {
 	e := newEnv(t)
 	e.testCatalog()
-	e.start()
+	// The queue starts after the checks on the queued install, so "queued" is deterministic.
 	inst, existing, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny", Assign: []string{"live", "background"}})
 	if err != nil || existing {
 		t.Fatal(err)
 	}
-	if inst.MMProjID != "tiny-mmproj" || inst.EngineKind != "llama-server" || inst.EngineFlavour != "cpu" || inst.State != InstallQueued {
+	if inst.MMProjID != "tiny-mmproj" || inst.EngineKind != "llama-server" || inst.EngineFlavour != "cpu" || inst.State != InstallQueued || inst.JobID == 0 {
 		t.Fatalf("%+v", inst)
 	}
 	engSize := engine.AssetsSize(engine.KindLlama, engine.Host(), engine.FlavourCPU)
 	if inst.BytesTotal != 300<<10+100<<10+engSize {
 		t.Fatalf("total %d", inst.BytesTotal)
 	}
-	// A second request while it runs returns the same install.
+	// A second request while it is pending returns the same install.
 	again, existing, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny"})
 	if err != nil || !existing || again.ID != inst.ID {
 		t.Fatalf("dedup: %+v %v %v", again, existing, err)
 	}
+	e.start()
 	done := e.waitInstall(inst.ID, InstallDone)
 	if done.BytesDone != done.BytesTotal || done.Phase != "done" {
 		t.Fatalf("%+v", done)
@@ -638,6 +648,41 @@ func TestInstallCatalogWithProjectorEngineAndAssign(t *testing.T) {
 	if e.hub.hits["/acme/Tiny-GGUF/resolve/rev1/Tiny-Q4_K_M.gguf"] != 1 {
 		t.Fatal("downloaded twice")
 	}
+}
+
+// A10 F7: a small install doesn't wait behind a big one.
+func TestSmallInstallOvertakesBigOne(t *testing.T) {
+	e := newEnv(t)
+	e.testCatalog()
+	e.mgr.SmallInstallBytes = 200 << 10
+	release := make(chan struct{})
+	e.hub.hold["/acme/Tiny-GGUF/resolve/rev1/Tiny-Q4_K_M.gguf"] = release
+	e.start()
+	big, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny", WithMMProj: new(bool)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	small, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "whisper-tiny"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		inst Install
+		lane string
+	}{{big, InstallJobType}, {small, InstallSmallJobType}} {
+		info, err := e.q.Get(e.ctx, c.inst.JobID)
+		if err != nil || info.Type != c.lane {
+			t.Fatalf("install %s: job %+v %v, want lane %s", c.inst.ModelID, info, err, c.lane)
+		}
+	}
+	e.waitInstall(big.ID, InstallRunning)
+	// The big install is held mid-download: the small one only finishes in its own lane.
+	e.waitInstall(small.ID, InstallDone)
+	if b, _ := e.mgr.Store.GetInstall(e.ctx, big.ID); b.State != InstallRunning {
+		t.Fatalf("big install %s while the small one finished", b.State)
+	}
+	close(release)
+	e.waitInstall(big.ID, InstallDone)
 }
 
 func TestInstallRepoShardsResumeAndSlices(t *testing.T) {

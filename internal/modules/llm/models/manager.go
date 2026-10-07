@@ -28,6 +28,15 @@ import (
 // InstallJobType is the queue job that downloads a model (and its projector and engine).
 const InstallJobType = "llm.models.install"
 
+// InstallSmallJobType is a second download lane for small installs (voice models,
+// embeddings, small engines), so they don't wait behind a multi-gigabyte LLM. Each lane runs
+// one install at a time, so at most two downloads share the link.
+const InstallSmallJobType = "llm.models.install.small"
+
+// defaultSmallInstallBytes is the largest install (model + projector + engine still to fetch)
+// that goes to the small lane.
+const defaultSmallInstallBytes = 2 << 30
+
 // installMaxAttempts bounds retries of transient failures within one install slice.
 const installMaxAttempts = 6
 
@@ -56,6 +65,8 @@ type Manager struct {
 	SliceDuration time.Duration
 	// ProgressEvery throttles progress writes (default 1s).
 	ProgressEvery time.Duration
+	// SmallInstallBytes is the size limit of the small install lane (default 2 GiB).
+	SmallInstallBytes int64
 
 	mu      sync.Mutex
 	running map[int64]context.CancelCauseFunc
@@ -68,17 +79,31 @@ func (m *Manager) slice() time.Duration {
 	return 8 * time.Minute
 }
 
-// RegisterJobs registers the install job on the queue.
+// RegisterJobs registers the install jobs (both lanes) on the queue.
 func (m *Manager) RegisterJobs(q *queue.Queue) {
-	q.Register(InstallJobType, queue.Handler{
-		Concurrency: 1,
-		MaxAttempts: installMaxAttempts,
-		Lease:       m.slice() + 2*time.Minute,
-		Backoff: func(attempt int) time.Duration {
-			return min(5*time.Second<<min(attempt-1, 6), 5*time.Minute)
-		},
-		Run: m.runInstall,
-	})
+	for _, t := range []string{InstallJobType, InstallSmallJobType} {
+		q.Register(t, queue.Handler{
+			Concurrency: 1,
+			MaxAttempts: installMaxAttempts,
+			Lease:       m.slice() + 2*time.Minute,
+			Backoff: func(attempt int) time.Duration {
+				return min(5*time.Second<<min(attempt-1, 6), 5*time.Minute)
+			},
+			Run: m.runInstall,
+		})
+	}
+}
+
+// installLane picks the job type for an install with total bytes still to download.
+func (m *Manager) installLane(total int64) string {
+	limit := m.SmallInstallBytes
+	if limit <= 0 {
+		limit = defaultSmallInstallBytes
+	}
+	if total <= limit {
+		return InstallSmallJobType
+	}
+	return InstallJobType
 }
 
 func (m *Manager) hardware(ctx context.Context) engine.Hardware {
@@ -368,16 +393,17 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest) (inst Install
 		return Install{}, false, err
 	}
 	payload, _ := json.Marshal(map[string]int64{"install_id": id})
-	jobID, err := m.Queue.Enqueue(ctx, InstallJobType, payload, queue.Options{DedupKey: fmt.Sprintf("llm.install:%d", id)})
+	jobID, err := m.Queue.Enqueue(ctx, m.installLane(total), payload, queue.Options{DedupKey: fmt.Sprintf("llm.install:%d", id)})
 	if err != nil {
+		return Install{}, false, err
+	}
+	// Only the job id: the worker may already have picked the job up, and a whole-row write
+	// here would put a running (or finished) install back to "queued".
+	if err := m.Store.SetInstallJob(ctx, id, jobID); err != nil {
 		return Install{}, false, err
 	}
 	inst, err = m.Store.GetInstall(ctx, id)
 	if err != nil {
-		return Install{}, false, err
-	}
-	inst.JobID = jobID
-	if err := m.Store.UpdateInstall(ctx, inst); err != nil {
 		return Install{}, false, err
 	}
 	return inst, false, nil
@@ -464,7 +490,11 @@ func (m *Manager) runInstall(ctx context.Context, job queue.Job) ([]byte, error)
 	case errors.Is(sctx.Err(), context.DeadlineExceeded):
 		// Slice over: continue in a fresh job (and a fresh lease).
 		payload, _ := json.Marshal(map[string]int64{"install_id": inst.ID})
-		id, qerr := m.Queue.Enqueue(ctx, InstallJobType, payload, queue.Options{})
+		lane := job.Type
+		if lane == "" {
+			lane = InstallJobType
+		}
+		id, qerr := m.Queue.Enqueue(ctx, lane, payload, queue.Options{})
 		if qerr != nil {
 			return nil, qerr
 		}
