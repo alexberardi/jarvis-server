@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -47,7 +48,8 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 // Definitions are the module's settings declared so far.
 func Definitions() []settings.Definition {
 	return routineDefinitions(slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona),
-		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions(), signalDefinitions()))
+		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions(), signalDefinitions(),
+		phone.Definitions()))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -117,6 +119,8 @@ type Module struct {
 	// DefaultPromptProvider names the prompt provider when llm.prompt_provider is unset (e.g.
 	// the live model's catalog entry). Nil: an unset setting is an error (D11).
 	DefaultPromptProvider func(ctx context.Context) string
+	// Phone configures phone calls (5c, docs/cc/11; phone_wire.go).
+	Phone PhoneConfig
 
 	deps     module.Deps
 	settings *settings.Service
@@ -134,10 +138,11 @@ type Module struct {
 	tools    *servertools.Registry
 	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
 
-	cmdData *schemaCache  // command-data schema cache (doc 12, packages.go)
-	smart   *smartHome    // 5c smart home (smarthome.go)
-	rt      *routineState // 5c routines and errand schedules (routines.go)
-	sig     *signalState  // 5c signals, proposals and attention (signals.go)
+	cmdData *schemaCache   // command-data schema cache (doc 12, packages.go)
+	smart   *smartHome     // 5c smart home (smarthome.go)
+	rt      *routineState  // 5c routines and errand schedules (routines.go)
+	sig     *signalState   // 5c signals, proposals and attention (signals.go)
+	phone   *phone.Service // 5c phone calls (phone_wire.go)
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -274,9 +279,10 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerMemory(mux)
 	// Routines and errand schedules (doc 08).
 	m.registerRoutines(mux)
-
-	// Phase 5c: signals, proposals and the attention broker.
+	// Signals, proposals and the attention broker (doc 10).
 	m.registerSignals(mux)
+	// Phone calls, phonebook and call context (doc 11).
+	m.registerPhone(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -315,6 +321,9 @@ func (m *Module) Start(ctx context.Context) error {
 		return err
 	}
 	if err := m.startSignals(ctx); err != nil {
+		return err
+	}
+	if err := m.startPhone(ctx); err != nil {
 		return err
 	}
 	if m.deps.Scheduler == nil {
@@ -362,5 +371,6 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 			return err
 		}
 	}
-	return nil
+	// Phone (D20): call drafts and call context go; sessions stay, de-identified.
+	return phone.PurgeUser(ctx, tx, "cc_settings", userID)
 }

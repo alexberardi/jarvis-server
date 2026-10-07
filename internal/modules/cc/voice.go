@@ -52,6 +52,7 @@ func (m *Module) registerServerTools() {
 	m.tools.Register(servertools.NewRequestValidation())
 	m.tools.Register(servertools.NewIdentifySpeaker())
 	m.tools.Register(servertools.NewHAEntities())
+	m.tools.Register(m.phoneService().Tool()) // make_phone_call (5c, phone_wire.go)
 	gate := func(ctx context.Context, hh string) bool {
 		return m.settings.Bool(ctx, settingWebSearch, settings.Scope{HouseholdID: hh})
 	}

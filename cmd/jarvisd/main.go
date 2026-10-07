@@ -64,6 +64,7 @@ func modules() []module.Module {
 				WSAddr:         envOr("JARVIS_MQTT_WS_ADDR", mqtt.DefaultWSAddr),
 				AllowAnonymous: os.Getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
 			},
+			Phone: phoneConfig(), // cmd/jarvisd/phone.go
 		},
 		&authmod.Module{
 			AdminToken: os.Getenv("JARVIS_AUTH_ADMIN_TOKEN"),
