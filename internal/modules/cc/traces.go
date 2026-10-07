@@ -213,5 +213,11 @@ func (m *Module) cleanup(ctx context.Context) error {
 			return err
 		}
 	}
-	return m.cleanupPackages(ctx, now)
+	// 5c subsystems' retention rides the same hourly trigger (D27).
+	for _, sweep := range []func(context.Context, time.Time) error{m.cleanupPackages, m.cleanupSmartHome} {
+		if err := sweep(ctx, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }

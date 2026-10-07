@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io/fs"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
@@ -45,8 +46,8 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 
 // Definitions are the module's settings declared so far.
 func Definitions() []settings.Definition {
-	defs := append(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona)...)
-	return append(defs, packageDefinitions()...)
+	return slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona), packageDefinitions(),
+		smartHomeDefinitions())
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -132,6 +133,7 @@ type Module struct {
 	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
 
 	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
+	smart   *smartHome   // 5c smart home (smarthome.go)
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -260,6 +262,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 
 	// Phase 5b: the voice pipeline, tool loop, media proxy and node plugin API.
 	m.registerVoice(mux)
+	// Phase 5c: smart home (doc 07).
+	m.registerSmartHome(mux)
 
 	// Packages, command data and the node tools view (doc 12).
 	m.registerPackages(mux)
@@ -323,6 +327,10 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 		`DELETE FROM cc_request_traces WHERE user_id = ?`,
 		`DELETE FROM cc_settings_requests WHERE user_id = ?`,
 		`UPDATE cc_provisioning_tokens SET created_by_user_id = NULL WHERE created_by_user_id = ?`,
+		// Smart home (D20): rooms and devices are the household's and stay; the user's OAuth
+		// sessions (their provider tokens) go, and voice-scan rows forget them.
+		`DELETE FROM cc_auth_sessions WHERE user_id = ?`,
+		`UPDATE cc_bluetooth_scan_requests SET user_id = NULL WHERE user_id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
 			return err
