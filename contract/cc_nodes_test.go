@@ -498,6 +498,15 @@ func TestCCSignals(t *testing.T) {
 		// app-to-app auth dials localhost:7701 inside the CC container and every app call,
 		// valid or not, is a 502. Go: valid app creds → 200 (no household → 400 below),
 		// invalid → 401 "Invalid app credentials".
+		if Jarvisd() {
+			// Auth is in process: a valid app reaches validation (no household in the body);
+			// unknown credentials are a 401.
+			tg.Post(t, CommandCenter, "/api/v0/signals", body(nil), app.H()).
+				ExpectError(http.StatusBadRequest, "household_id required (provide in body or use node auth)")
+			tg.Post(t, CommandCenter, "/api/v0/signals", body(nil), H{"X-Jarvis-App-Id": "contract-nosuch", "X-Jarvis-App-Key": "x"}).
+				ExpectError(http.StatusUnauthorized, "Invalid app credentials")
+			return
+		}
 		tg.Post(t, CommandCenter, "/api/v0/signals", body(nil), app.H()).
 			ExpectError(http.StatusBadGateway, "Auth service unavailable")
 		tg.Post(t, CommandCenter, "/api/v0/signals", body(nil), H{"X-Jarvis-App-Id": "contract-nosuch", "X-Jarvis-App-Key": "x"}).
