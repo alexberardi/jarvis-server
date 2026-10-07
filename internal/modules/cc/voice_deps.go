@@ -30,6 +30,9 @@ type STT interface {
 	RecognitionEnabled(ctx context.Context, householdID string) bool
 	Enroll(ctx context.Context, householdID string, userID int64, wav []byte, sampleIndex *int) (stt.EnrollResult, error)
 	Verify(ctx context.Context, householdID string, userID int64, wav []byte) (stt.VerifyResult, error)
+	// Samples and DeleteProfile back the mobile voice-profile routes (06 V1/V6).
+	Samples(ctx context.Context, householdID string, userID int64) ([]stt.Sample, error)
+	DeleteProfile(ctx context.Context, householdID string, userID int64) error
 }
 
 // TTS is the tts module in process (TTSFrom adapts *tts.Module).

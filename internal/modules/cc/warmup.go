@@ -31,6 +31,8 @@ type startRequest struct {
 	NodeContext    *pyjson.Object // client-supplied; only timezone, agents, recently_shown_items are read
 	Commands       []*pyjson.Object
 	ClientTools    []*pyjson.Object
+	// chatUserID marks a mobile chat warmup (mobile_chat.go): the JWT user is the speaker.
+	chatUserID int64
 }
 
 // readJSONBody reads a JSON object body twice over: as a validation map (pydantic-shaped 400s)
@@ -176,7 +178,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	conv := &conversation{
 		id: req.ConversationID, nodeID: n.ID, householdID: hh,
 		memberIDs: append([]int64(nil), n.HouseholdMemberIDs...),
-		provider:  provider, forceTools: provider.ForceToolCalls(),
+		provider:  provider, forceTools: provider.ForceToolCalls(), chatUserID: req.chatUserID,
 	}
 	room, voiceMode := prompts.DefaultRoom, prompts.DefaultVoiceMode
 	if n.row != nil {
@@ -199,7 +201,9 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	if nc := req.NodeContext; nc != nil {
 		if tz, ok := nc.Get("timezone"); ok {
 			conv.timezone, _ = tz.(string)
-			m.recordNodeTimezone(ctx, n.ID, conv.timezone)
+			if req.chatUserID == 0 { // a phone's zone says nothing about where the node is
+				m.recordNodeTimezone(ctx, n.ID, conv.timezone)
+			}
 		}
 		if a, ok := nc.Get("agents"); ok {
 			conv.agents, _ = a.(*pyjson.Object)
@@ -217,9 +221,13 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	// at execute time (D21).
 	recognition := m.STT != nil && m.STT.RecognitionEnabled(ctx, hh)
 	conv.recognitionOff = !recognition
+	if req.chatUserID != 0 {
+		m.setChatSpeaker(ctx, conv) // mobile chat: the speaker is known from the JWT
+	}
+	conv.ambient = m.ambientBundle(ctx, hh, conv.timezone)
 	gates := prompts.ToolGates{
 		WebSearch:     m.householdBool(ctx, settingWebSearch, hh),
-		SpeakerKnown:  recognition,
+		SpeakerKnown:  recognition || conv.chatUserID != 0,
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
 	}

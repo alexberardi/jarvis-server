@@ -63,7 +63,12 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	// The turn's speaker: only jarvisd's own identification of this conversation's audio
 	// (D2/D3). A confident id switches the conversation speaker; otherwise it keeps the one an
 	// earlier turn of this conversation established.
-	turnSpeaker := m.applyTurnIdentity(ctx, conv)
+	var turnSpeaker int64
+	if conv.chatUserID != 0 {
+		turnSpeaker = conv.chatUserID // mobile chat: the JWT user, never a voice match (D2)
+	} else {
+		turnSpeaker = m.applyTurnIdentity(ctx, conv)
+	}
 
 	if isSTTNoise(in.VoiceCommand) {
 		m.deps.Log.Info("cc: not_for_me_prefilter", "conversation_id", conv.id, "transcript", in.VoiceCommand)
@@ -82,6 +87,9 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 
 	speakerBlock := prompts.SpeakerBlock(conv.speakerNameOrDefault(), conv.memories)
 	msgs = append(msgs, transientSys(speakerBlock))
+	if block := prompts.AmbientBlock(conv.ambient); block != "" {
+		msgs = append(msgs, transientSys(block))
+	}
 	if block := m.recentlyShownBlock(conv); block != "" {
 		msgs = append(msgs, transientSys(block))
 	}

@@ -285,6 +285,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 
 	// Phase 5b: the voice pipeline, tool loop, media proxy and node plugin API.
 	m.registerVoice(mux)
+	// Phase 5d: mobile chat (doc 13 §3.1-3.2) and the mobile voice-profile routes (doc 06 V1/V6).
+	m.registerMobileChat(mux)
+	m.registerVoiceProfiles(mux)
 	// Phase 5c: smart home (doc 07).
 	m.registerSmartHome(mux)
 	// Packages, command data and the node tools view (doc 12).
