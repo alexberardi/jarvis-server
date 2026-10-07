@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -77,6 +78,50 @@ type Source struct {
 	Client *http.Client
 	// UserAgent identifies the caller ("jarvisd/<version>").
 	UserAgent string
+	// ReleaseBase, when set, replaces GitHub with one flat directory of release files
+	// (SHA256SUMS, SHA256SUMS.minisig and the archives), as `install.sh --base-url` reads it:
+	// a mirror, an offline copy, the CI and rehearsal servers. The release is the one its
+	// SHA256SUMS names; the signature check is unchanged.
+	ReleaseBase string
+}
+
+// archiveRE splits a release archive name into its tag: jarvisd-<tag>-<os>-<arch>.<ext>.
+var archiveRE = regexp.MustCompile(`^jarvisd-(.+)-[a-z0-9]+-[a-z0-9]+\.(?:tar\.gz|zip)$`)
+
+// flatRelease reads the one release a ReleaseBase directory holds.
+func (s Source) flatRelease(ctx context.Context) (*Release, error) {
+	base := strings.TrimRight(s.ReleaseBase, "/")
+	sums, err := fetch(ctx, s, base+"/"+SumsName, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("Couldn't read the release files at %s: %w", base, err)
+	}
+	r := &Release{HTMLURL: base}
+	for _, line := range strings.Split(string(sums), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			continue
+		}
+		name := strings.TrimPrefix(f[1], "*")
+		m := archiveRE.FindStringSubmatch(name)
+		if m == nil {
+			continue
+		}
+		if r.Tag == "" {
+			r.Tag = m[1]
+		} else if r.Tag != m[1] {
+			return nil, fmt.Errorf("%s/%s lists archives of more than one release (%s, %s)", base, SumsName, r.Tag, m[1])
+		}
+		r.Assets = append(r.Assets, Asset{Name: name, URL: base + "/" + name})
+	}
+	if r.Tag == "" {
+		return nil, fmt.Errorf("%s/%s lists no jarvisd archive", base, SumsName)
+	}
+	r.Assets = append(r.Assets, Asset{Name: SumsName, URL: base + "/" + SumsName})
+	// Listed only when present, so an unsigned directory gets Resolve's "not signed" refusal.
+	if _, err := fetch(ctx, s, base+"/"+SigName, 64<<10); err == nil {
+		r.Assets = append(r.Assets, Asset{Name: SigName, URL: base + "/" + SigName})
+	}
+	return r, nil
 }
 
 func (s Source) base() string {
@@ -126,6 +171,13 @@ func (s Source) get(ctx context.Context, path string, into any) error {
 
 // List returns the most recent releases.
 func (s Source) List(ctx context.Context) ([]Release, error) {
+	if s.ReleaseBase != "" {
+		r, err := s.flatRelease(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return []Release{*r}, nil
+	}
 	var out []Release
 	err := s.get(ctx, "/repos/"+Repo+"/releases?per_page=30", &out)
 	return out, err
@@ -133,6 +185,16 @@ func (s Source) List(ctx context.Context) ([]Release, error) {
 
 // ByTag returns one release.
 func (s Source) ByTag(ctx context.Context, tag string) (*Release, error) {
+	if s.ReleaseBase != "" {
+		r, err := s.flatRelease(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if r.Tag != tag {
+			return nil, fmt.Errorf("release %s: %w (%s holds %s)", tag, ErrNoRelease, strings.TrimRight(s.ReleaseBase, "/"), r.Tag)
+		}
+		return r, nil
+	}
 	var r Release
 	if err := s.get(ctx, "/repos/"+Repo+"/releases/tags/"+tag, &r); err != nil {
 		if errors.Is(err, ErrNoRelease) {

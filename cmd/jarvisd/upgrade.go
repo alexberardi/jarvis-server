@@ -26,11 +26,16 @@ import (
 // checked against the keys built into the binary.
 const EnvUpdateAPI = "JARVIS_UPDATE_API"
 
+// EnvReleaseBase points `jarvisd upgrade` at a flat directory of release files instead of
+// GitHub: what `install.sh --base-url` downloads from, passed through when the script hands an
+// upgrade over. Signature checks are unchanged.
+const EnvReleaseBase = "JARVISD_RELEASE_BASE"
+
 // EnvGateTimeout bounds the post-upgrade health gate (a Go duration; default 2 minutes).
 const EnvGateTimeout = "JARVIS_UPGRADE_GATE_TIMEOUT"
 
 func updateSource() update.Source {
-	return update.Source{APIBase: os.Getenv(EnvUpdateAPI), UserAgent: "jarvisd/" + version}
+	return update.Source{APIBase: os.Getenv(EnvUpdateAPI), ReleaseBase: os.Getenv(EnvReleaseBase), UserAgent: "jarvisd/" + version}
 }
 
 // selfExe is this executable with symlinks resolved: the path the service definition runs.
