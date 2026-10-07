@@ -1,2 +1,4 @@
 # Signed test vectors must keep their exact bytes (no CRLF conversion on Windows checkouts).
 internal/update/testdata/** -text
+# Pinned chat templates are checked against the sha256 in the model catalog.
+internal/modules/llm/models/templates/** -text

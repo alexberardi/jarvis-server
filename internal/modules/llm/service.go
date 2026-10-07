@@ -347,7 +347,8 @@ func schemaOf(req *ChatRequest) any {
 }
 
 // prepare runs the checks shared by Chat and Stream: label readiness (503), image URLs (400)
-// and image capability (400, LD4: no fallback to another label).
+// and image capability (400, LD4: no fallback to another label). It returns the messages to
+// send: JSON mode's instruction added, folded for a strict chat template.
 func (s *Service) prepare(ctx context.Context, req *ChatRequest) (string, Endpoint, []Message, error) {
 	label := NormalizeLabel(req.Label)
 	ep, err := s.endpoint(ctx, label)
@@ -365,6 +366,9 @@ func (s *Service) prepare(ctx context.Context, req *ChatRequest) (string, Endpoi
 	msgs := req.Messages
 	if jsonRequested(req) {
 		msgs = injectJSON(msgs)
+	}
+	if ep.FoldSystemMessages {
+		msgs = FoldSystemMessages(msgs) // strict chat template (ID12)
 	}
 	return label, ep, msgs, nil
 }

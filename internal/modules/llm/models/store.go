@@ -188,7 +188,16 @@ func (s *Store) LookupModel(ctx context.Context, id string) (engine.ModelInfo, e
 	if _, err := os.Stat(m.Path); err != nil {
 		return engine.ModelInfo{}, fmt.Errorf("model file missing: %w", err)
 	}
-	return engine.ModelInfo{ID: m.ID, Kind: m.Kind, Path: m.Path, MMProjID: m.MMProjID, ContextDefault: m.ContextDefault}, nil
+	info := engine.ModelInfo{ID: m.ID, Kind: m.Kind, Path: m.Path, MMProjID: m.MMProjID, ContextDefault: m.ContextDefault}
+	if e, ok := CatalogEntry(m.CatalogID); ok && m.Kind == engine.ModelLLM {
+		// The catalog's pinned template and fold flag (ID12) describe exactly this file: a
+		// catalog install is verified against the entry's sha256.
+		if info.ChatTemplate, err = e.Template(); err != nil {
+			return engine.ModelInfo{}, err
+		}
+		info.FoldSystemMessages = e.FoldSystemMessages
+	}
+	return info, nil
 }
 
 const installCols = `id, model_id, COALESCE(mmproj_id,''), COALESCE(engine_kind,''), COALESCE(engine_flavour,''), assign, state,

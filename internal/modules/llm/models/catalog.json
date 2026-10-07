@@ -13,6 +13,8 @@
     "kv_bytes_per_token": 147456,
     "prompt_provider": "Qwen3_8B_Compressed",
     "thinking": true,
+    "chat_template": "qwen3.jinja",
+    "chat_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
     "tags": [
       "live",
       "background",
@@ -33,6 +35,8 @@
     "kv_bytes_per_token": 147456,
     "prompt_provider": "Qwen3_8B_Compressed",
     "thinking": true,
+    "chat_template": "qwen3.jinja",
+    "chat_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
     "tags": [
       "live",
       "background"
@@ -53,6 +57,9 @@
     "kv_bytes_per_token": 32768,
     "prompt_provider": "Qwen3_5_9B_Compressed",
     "thinking": true,
+    "chat_template": "qwen3.5.jinja",
+    "chat_template_sha256": "7f0e529032c25183bcd66c7f238da2d377f43be754a94e2725a58c4e16d2ed67",
+    "fold_system_messages": true,
     "tags": [
       "live",
       "background",
@@ -83,6 +90,8 @@
     "kv_bytes_per_token": 163840,
     "prompt_provider": "Qwen3_14B_Compressed",
     "thinking": true,
+    "chat_template": "qwen3.jinja",
+    "chat_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
     "tags": [
       "live",
       "background"
@@ -103,6 +112,9 @@
     "kv_bytes_per_token": 65536,
     "prompt_provider": "Qwen3_14B_Compressed",
     "thinking": true,
+    "chat_template": "qwen3.8.jinja",
+    "chat_template_sha256": "12827f24b742ea4e80cdc12dbcf9622227056b9f797252a3149263d4f9aaadce",
+    "fold_system_messages": true,
     "tags": [
       "live",
       "background",

@@ -42,7 +42,8 @@ func NewStack(deps module.Deps, set *settings.Service) *Stack {
 			_, err := engine.EnqueueFetch(ctx, deps.Queue, k, f)
 			return err
 		},
-		Log: log,
+		Log:         log,
+		TemplateDir: filepath.Join(deps.Config.Home, "templates"),
 	}
 	hf := &HF{
 		Endpoint: func() string { return str(engine.KeyHFEndpoint) },
