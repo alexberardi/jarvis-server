@@ -237,7 +237,7 @@ sets `umask 077` at process start on Unix, chmods an existing home to 0700 and t
 
    `ProtectSystem=strict` is safe because everything jarvisd writes is under its home (extracted libs,
    engines, models, blobs, DB). `PrivateDevices` must **not** be set (GPU device nodes). `Type=notify`
-   needs a ~20-line `sd_notify` over `NOTIFY_SOCKET` in Go (no dependency); until then `Type=exec`.
+   uses jarvisd's own `sd_notify` over `NOTIFY_SOCKET` (no dependency; built in I1, see §8.1).
 4. `systemctl daemon-reload && systemctl enable --now jarvisd`.
 
 **`--user` mode.** For a box where the user has no sudo or wants models in their home: a user unit in
@@ -696,7 +696,7 @@ parallel worktrees. I7 is independent and large.
 | Step | Scope | Done when |
 |---|---|---|
 | **I0** | Spike, no product code. On the MBP: jarvisd from a LaunchDaemon with `UserName` serves a Metal chat and advertises mDNS that the Android app sees (no Local Network prompt). On Windows (runner or a real box): jarvisd as a service under `NT SERVICE\jarvisd` runs llama-server on CUDA and Vulkan in session 0; engines bind loopback only; a long HF path works; mDNS seen from the app next to the DNS Client service. Record results in STATUS. | Each row has a yes/no with evidence; IQ1/IQ2 confirmed or reopened. |
-| **I1** | Bootstrap: `--home` flag; per-OS service-default home; `<home>/jarvisd.env` (and `/etc/jarvisd/jarvisd.env`) loaded for unset variables; code default `~/.jarvisd`; Unix `umask 077`, home 0700, DB files 0600 at start (the §2.0 permissions gap); `sd_notify` READY; Windows `svc.IsWindowsService` run path with stop → context cancel and file logging; `jarvisd service install|uninstall|start|stop|restart|status` for systemd (system + `--user`), launchd (daemon), SCM (`mgr`, virtual account, recovery actions, ACLs). | Unit tests for env precedence and unit/plist rendering; CI installs and starts the service on ubuntu (system unit), macos-14 (LaunchDaemon) and windows-latest (SCM), then `GET :7700/health`, then uninstalls. |
+| **I1** (done, §8.1) | Bootstrap: `--home` flag; per-OS service-default home; `<home>/jarvisd.env` (and `/etc/jarvisd/jarvisd.env`) loaded for unset variables; code default `~/.jarvisd`; Unix `umask 077`, home 0700, DB files 0600 at start (the §2.0 permissions gap); `sd_notify` READY; Windows `svc.IsWindowsService` run path with stop → context cancel and file logging; `jarvisd service install|uninstall|start|stop|restart|status` for systemd (system + `--user`), launchd (daemon), SCM (`mgr`, virtual account, recovery actions, ACLs). | Unit tests for env precedence and unit/plist rendering; CI installs and starts the service on ubuntu (system unit), macos-14 (LaunchDaemon) and windows-latest (SCM), then `GET :7700/health`, then uninstalls. |
 | **I2** | Doctor for installs: `fix_cmds` in `Check`, `--fix` (privilege check, LAN-only, tagged rules), new checks (port held by another program, Windows Public profile, home/DB permissions, macOS sleep, legacy running, unsupervised). Move `doctorPorts` out of `cmd/` (shared with admin A3). | Table tests per firewall backend for generated commands; `--fix` applied on this box's ufw and removed by `service uninstall`. |
 | **I3** | `install.sh` (Linux + macOS, POSIX sh): flags `--version`, `--channel`, `--user`, `--yes`, `--stop-legacy`, `--uninstall [--purge]`, `--rollback`; arch map; download to disk + size + `SHA256SUMS` (+ minisign if present); `jarvisd service install`; doctor + offer `--fix`; print `http://<lan-ip>:7710/setup#token=…`, the detected GPU line, the doctor result, and how to see logs. jarvisd side: first-start setup token file (with admin AQ2) and jarvisd's own app client (§3.1). | CI job runs the script against the workflow's own built archive (a `--from-dir` test hook) on ubuntu and macos-14; idempotent re-run is a no-op; `--uninstall` leaves no unit/binary. |
 | **I4** | `install.ps1` (Windows PowerShell 5.1): self-elevation, TLS 1.2, `Get-FileHash`, `Unblock-File`, `%ProgramFiles%` placement + machine PATH, `jarvisd service install`, `jarvisd doctor --fix`, same printout, `-Uninstall`, `-Purge`. | CI on windows-latest under `powershell.exe` (5.1), not `pwsh`; re-run idempotent. |
@@ -705,3 +705,87 @@ parallel worktrees. I7 is independent and large.
 | **I7** | `jarvisd import-legacy` per `docs/schema/*.md` (pgx, dry-run, refuses a non-empty DB, blobs via S3 GET, legacy JWT keys into `auth_signing_keys` as verify-only incl. HS256 so the env var goes away). Likely split per module (auth+config, cc, notifications, blobs). | Dry run and real run against a prod snapshot restored on this box; a node and a phone from the snapshot work against the imported jarvisd without re-provisioning. |
 | **I8** | Release and docs: publish `install.sh`/`install.ps1` as release assets and at a stable URL; landing page in jarvis-installer switches to them (EXTERNAL-CHANGES row); release notes template with the one-liners; minimal container image (PLAN §3.4) for NAS users; `./jarvis init` prints a jarvisd pointer. | A fresh VM per OS installs from the published one-liner. |
 | **I9** | Fresh-install rehearsal with admin A10 (LD5): this box (CUDA), the MBP (Metal), a Windows box; then the prod cutover runbook (import, stop legacy, install, wizard Models step, re-check nodes). Log friction in STATUS. | Friction list recorded; blockers fixed or filed. |
+
+### 8.1 I1 as built (2026-10-07)
+
+Code: `cmd/jarvisd/{bootstrap,service}.go`, `internal/platform/service` (managers, templates,
+detection, sd_notify, Windows run path), `internal/platform/config/home.go`,
+`internal/platform/engines/job_windows.go`, `internal/modules/llm/models/layout.go`.
+
+**Home and env file.** `--home DIR` (or `--home=DIR`) is accepted anywhere on the command line.
+Order: `--home`, `JARVIS_HOME`, the `--home` of an installed service (read back from the unit's
+`ExecStart`, the plist's `ProgramArguments`, or the SCM `BinaryPathName`), then `~/.jarvisd`. The
+result is exported as `JARVIS_HOME`. Then `<home>/jarvisd.env` and, on Linux/macOS,
+`/etc/jarvisd/jarvisd.env` fill in variables **not already in the environment** (environment >
+home file > `/etc` file; `KEY=VALUE`, `#` comments, optional `export ` and matching quotes, a
+BOM is tolerated; `JARVIS_HOME` inside a file is ignored). `serve` refuses to start on an
+unreadable or malformed env file; `doctor`/`migrate`/`service status` only warn, since a user
+running them can't read the system service's 0640 file (they then use the default ports).
+`serve` and `migrate` set `umask 077` (unix) and chmod the home 0700; `db.Open` keeps the DB
+files 0600.
+
+**Readiness.** `module.Runner.OnReady` fires once every listener is bound and every module's
+`Start` returned; `serve` sends `READY=1` (datagram to `$NOTIFY_SOCKET`, abstract `@` sockets
+supported, no cgo) and, under the SCM, reports Running. `STOPPING=1` when shutdown begins.
+
+**Windows run path.** `main` checks `svc.IsWindowsService()`; stderr (Go's `os.Stderr` and the
+process's standard error handle, so crash traces land too) goes to `<home>\logs\jarvisd.log`,
+rotated at start when over 10 MB (3 kept). Stop/Shutdown → StopPending and the same context cancel
+as SIGTERM. A non-clean exit is reported as a service-specific exit code, so the recovery actions
+(with "non-crash failures" on) restart it. Every engine child goes into one job object per jarvisd
+with `KILL_ON_JOB_CLOSE`, so a crashed or killed jarvisd can't orphan a llama-server.
+
+**Long model paths.** I0 run 2 never proved `\\?\` paths work with the upstream engines, so
+model paths are kept short instead: repo dir ≤ 48 characters, subdirectories collapsed into one
+≤ 24, base name ≤ 88 (extension and `-NNNNN-of-NNNNN.gguf` shard suffix kept, same stem for every
+shard), over-long parts become prefix + 8 hex of SHA-256. A model path stays under 200 characters
+below `C:\ProgramData\jarvisd` (test with I0's 314-character case). Short names are unchanged and
+models placed before the caps keep resolving (legacy-layout check on the stored path).
+
+**`jarvisd service install|uninstall|start|stop|restart|status`.**
+
+| | Linux system | Linux `--user` | macOS | Windows |
+|---|---|---|---|---|
+| Needs | root | not root | root (`sudo`) | elevated prompt |
+| Account | `jarvisd` (`useradd --system --user-group`, `nologin`), added to `video`/`render` when they exist | invoking user | `UserName` = `--run-as`, else `$SUDO_USER` (root refused) | `NT SERVICE\jarvisd` |
+| Home default | `/var/lib/jarvisd` (chowned recursively to `jarvisd`) | `~/.jarvisd` | `~<user>/.jarvisd` (+ `logs/`), chowned | `%ProgramData%\jarvisd` (+ `logs\`) |
+| Env file written if missing (comments only) | `/etc/jarvisd/jarvisd.env` 0640 root:jarvisd, dir 0750 | `<home>/jarvisd.env` 0600 | `<home>/jarvisd.env` 0600 | `<home>\jarvisd.env` (home ACL) |
+| Definition | `/etc/systemd/system/jarvisd.service` | `$XDG_CONFIG_HOME/systemd/user/jarvisd.service` | `/Library/LaunchDaemons/net.jarvisautomation.jarvisd.plist` | SCM service `jarvisd` |
+| Start | `daemon-reload`, `enable`, `restart` | same with `--user`, then `loginctl enable-linger` (failure explained, not fatal) | `bootout` if loaded, `bootstrap system`, `enable`, `kickstart` (I0 finding 4) | create or `UpdateConfig`, recovery 5 s/30 s/60 s (reset 1 day, non-crash failures on), `icacls /inheritance:r` SYSTEM+Administrators F, `NT SERVICE\jarvisd` M, start and wait for Running |
+
+The binary is this executable (or `--bin`), symlinks resolved. Guards: a Linux system unit refuses a
+binary under `/home`, `/root`, `/run/user`, `/tmp`, `/var/tmp` (hidden by `ProtectHome`/`PrivateTmp`);
+Windows refuses one inside `%USERPROFILE%` (the virtual account can't read it). `--no-start`
+registers only. Reinstall is idempotent: same account, env file kept, unit/plist/config rewritten,
+service restarted. `install` then waits up to 2 minutes for the service to be running **and** `GET
+/health` on the config listener (host/port from the service's env file) to answer, and fails
+otherwise. `status [--json] [--wait D]` prints the supervisor's view (state, PID, restarts or last
+exit, home) plus that health check and exits non-zero unless both are good. `stop` on macOS is
+`bootout` (with `KeepAlive` a kill would just restart it). `uninstall` stops and removes the
+definition only: data, env file and the `jarvisd` account are kept and their paths printed
+(`--purge`, binary removal and firewall-rule removal are I2/I3).
+
+Unit/plist differences from §2.1/§2.2: the unit adds `TimeoutStartSec=300`, `ProtectKernelTunables`,
+`ProtectKernelModules`, `ProtectControlGroups`, `RestrictSUIDSGID`, `LockPersonality` (no
+`MemoryDenyWriteExecute`: the onnxruntime/llama.cpp backends JIT) and paths are quoted when needed;
+the plist adds `HOME` (the engines' Metal shader cache), `WorkingDirectory`, `ExitTimeOut` 30 and
+sends stdout to the same log. Golden files: `internal/platform/service/testdata/`.
+
+**Supervisor detection and restart (for AD5/AD8).** `service.Detect()` → `systemd` (INVOCATION_ID
+**and** this process in a `jarvisd.service` cgroup, so a shell inheriting INVOCATION_ID from a
+terminal unit doesn't count), `launchd` (parent pid 1 and a real `XPC_SERVICE_NAME`),
+`windows-service`, or `none`. `serve` builds a `service.Restarter` with its own cancel;
+`Request()` returns `ErrUnsupervised` when nothing would restart jarvisd (the route answers 409),
+else cancels serve, which returns `ErrRestart`, and `main` exits 75 (`RestartExitCode`): systemd
+`Restart=always`, launchd `KeepAlive` and the SCM recovery actions each start it again. Not wired to
+a route yet: `POST /api/system/restart` gets the restarter handed to the admin module.
+
+**Verified.** CI job `service` (ci.yml) installs from `/usr/local/bin` / `%ProgramFiles%\jarvisd`
+on ubuntu-latest (system unit: runs as `jarvisd`, `Type=notify`, home 0700, DB 0600, env file
+root:jarvisd 0640), macos-14 (LaunchDaemon as the runner user, log written) and windows-latest
+(`NT SERVICE\jarvisd`, delayed auto start, `--home` in the command line, DB under ProgramData, log
+written), then checks `/health`, kills the process and sees the supervisor bring it back, restarts,
+stops (Windows: the process exits), uninstalls and checks the data is kept. `--user` mode was run
+on the dev box with a throwaway home and alternate ports from its env file (install → healthy,
+kill → restarted, stop → graceful MQTT/HTTP shutdown, status exit codes, `migrate status` finding
+the installed home), then uninstalled and linger turned back off.
