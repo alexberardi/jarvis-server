@@ -3,7 +3,7 @@
 //
 // Store is S3-shaped (flat slash-separated keys, prefix listing, a content type per object)
 // so an S3 backend can be added later without touching callers. FS is the default backend,
-// rooted at a directory such as ~/.jarvis/blobs.
+// rooted at a directory such as ~/.jarvisd/blobs.
 package blob
 
 import (

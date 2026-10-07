@@ -22,3 +22,7 @@ func killTree(p *os.Process) {
 func killLeftovers(pid int) {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
+
+// contain is a no-op on unix: the engine's process group and, on Linux, Pdeathsig already
+// keep it from outliving jarvisd.
+func contain(*os.Process) error { return nil }

@@ -42,7 +42,7 @@ var DefaultPorts = map[string]int{
 }
 
 type Config struct {
-	// Home is the data directory (~/.jarvis by default): database, blobs, extracted libs, engines.
+	// Home is the data directory (~/.jarvisd by default): database, blobs, extracted libs, engines.
 	Home string
 	// Host is the bind address shared by every listener.
 	Host string
@@ -67,7 +67,7 @@ func (c Config) Addr(listener string) (string, error) {
 
 // Load builds the config from the environment:
 //
-//	JARVIS_HOME              data directory (default ~/.jarvis)
+//	JARVIS_HOME              data directory (default ~/.jarvisd; cmd/jarvisd resolves it with ResolveHome)
 //	JARVIS_HOST              bind address (default 0.0.0.0)
 //	JARVIS_PORT_<LISTENER>   per-listener port override, e.g. JARVIS_PORT_COMMAND_CENTER=17703
 //	JARVIS_MDNS_INTERFACES   comma-separated LAN interface names, e.g. "en0" or "eth0,wlan0"
@@ -82,7 +82,7 @@ func load(getenv func(string) string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("config: no JARVIS_HOME and no home dir: %w", err)
 		}
-		c.Home = filepath.Join(h, ".jarvis")
+		c.Home = filepath.Join(h, DefaultHomeName)
 	}
 	if c.Host == "" {
 		c.Host = "0.0.0.0"

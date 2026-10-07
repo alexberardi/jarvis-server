@@ -35,6 +35,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
+	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -219,25 +220,53 @@ func envOr(key, def string) string {
 	return def
 }
 
-const usage = `usage: jarvisd <command>
+const usage = `usage: jarvisd <command> [--home DIR]
 
 commands:
   serve [--no-browser]
                    run the server; on first start it prints the admin setup link and, at a
                    desktop, opens it (--no-browser or JARVIS_NO_BROWSER=1 to not)
+  service install [--user] [--bin PATH] [--run-as USER] [--no-start]
+  service uninstall|start|stop|restart [--user]
+  service status [--user] [--json] [--wait DURATION]
+                   register and control jarvisd with systemd, launchd or the Windows SCM
   migrate status   show each module's migration state
   doctor [--json]  check that nodes and phones can reach jarvisd (listeners, host firewall)
   version          print the version
+
+--home DIR picks the data directory; otherwise JARVIS_HOME, else the installed service's,
+else ~/.jarvisd. Variables in <home>/jarvisd.env (and /etc/jarvisd/jarvisd.env on Linux/macOS)
+apply when not already set in the environment.
 `
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "jarvisd:", err)
-		os.Exit(1)
+	args := os.Args[1:]
+	if service.IsWindowsService() {
+		os.Exit(runWindowsService(args))
 	}
+	err := run(context.Background(), args, os.Stdout)
+	if err != nil && !errors.Is(err, service.ErrRestart) {
+		fmt.Fprintln(os.Stderr, "jarvisd:", err)
+	}
+	os.Exit(service.ExitCode(err))
+}
+
+// runWindowsService is main under the Windows SCM: stderr goes to <home>\logs\jarvisd.log
+// (it goes nowhere otherwise), and Stop/Shutdown cancel serve's context.
+func runWindowsService(args []string) int {
+	flagHome, _ := takeHome(args)
+	if home, err := config.ResolveHome(flagHome, "", os.Getenv); err == nil {
+		_ = service.RedirectStderr(service.LogPath(home))
+	}
+	err := service.RunWindowsService(func(ctx context.Context) error { return run(ctx, args, os.Stderr) })
+	if err != nil && !errors.Is(err, service.ErrRestart) {
+		fmt.Fprintln(os.Stderr, "jarvisd:", err)
+	}
+	return service.ExitCode(err)
 }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
+	flagHome, args := takeHome(args)
 	if len(args) == 0 {
 		fmt.Fprint(stdout, usage)
 		return errors.New("no command")
@@ -253,13 +282,25 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
+		// serve refuses to start on an env file it can't read; the CLI commands only warn.
+		if err := bootstrap(flagHome, true, os.Stderr); err != nil {
+			return err
+		}
 		v := os.Getenv("JARVIS_NO_BROWSER")
 		return serve(ctx, !*noBrowser && (v == "" || v == "0"))
+	case "service":
+		return runService(ctx, flagHome, args[1:], stdout)
 	case "doctor":
+		if err := bootstrap(flagHome, false, os.Stderr); err != nil {
+			return err
+		}
 		return runDoctor(ctx, args[1:], stdout)
 	case "migrate":
 		if len(args) < 2 || args[1] != "status" {
 			return errors.New("usage: jarvisd migrate status")
+		}
+		if err := bootstrap(flagHome, false, os.Stderr); err != nil {
+			return err
 		}
 		return migrateStatus(ctx, stdout)
 	default:
@@ -275,6 +316,9 @@ func newLogger() *slog.Logger {
 func openDeps(ctx context.Context) (module.Deps, error) {
 	cfg, err := config.Load()
 	if err != nil {
+		return module.Deps{}, err
+	}
+	if err := secureHome(cfg.Home); err != nil {
 		return module.Deps{}, err
 	}
 	d, err := db.Open(ctx, cfg.DBPath())
@@ -298,6 +342,11 @@ func openDeps(ctx context.Context) (module.Deps, error) {
 func serve(ctx context.Context, browser bool) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Ending serve with a restart request makes the supervisor start jarvisd again (AD5,
+	// AD8). Nothing calls Request yet; the restart route and self-update will.
+	restarter := service.NewRestarter(service.Detect(), cancel)
 	deps, err := openDeps(ctx)
 	if err != nil {
 		return err
@@ -320,8 +369,23 @@ func serve(ctx context.Context, browser bool) error {
 			a.OnSetupToken = func(token, path string) { announceSetup(os.Stderr, log, cfg, token, path, browser) }
 		}
 	}
-	deps.Log.Info("starting jarvisd", "version", version, "home", deps.Config.Home)
-	return (&module.Runner{Deps: deps, Modules: mods}).Run(ctx)
+	log := deps.Log
+	log.Info("starting jarvisd", "version", version, "home", deps.Config.Home, "supervisor", restarter.Kind())
+	go func() {
+		<-ctx.Done()
+		_ = service.Stopping()
+	}()
+	runner := &module.Runner{Deps: deps, Modules: mods, OnReady: func() {
+		if err := service.Ready(ctx); err != nil {
+			log.Warn("could not notify the service manager", "err", err)
+		}
+		log.Info("jarvisd ready")
+	}}
+	err = restarter.Err(runner.Run(ctx))
+	if errors.Is(err, service.ErrRestart) {
+		log.Info("exiting for the service manager to restart jarvisd", "supervisor", restarter.Kind())
+	}
+	return err
 }
 
 func migrateStatus(ctx context.Context, stdout io.Writer) error {

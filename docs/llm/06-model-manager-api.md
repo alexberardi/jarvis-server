@@ -66,7 +66,7 @@ Assets hang under `<base>/<tag>/<asset>`, where the tag is `Release.Tag()` = `Ta
 | windows/arm64 | cpu, vulkan | cpu |
 
 Every asset is pinned by name, size and sha256 (`engine.Releases`). A build installs to
-`~/.jarvis/engines/<kind>/<build>-<flavour>/` (archive root stripped, CUDA runtime extracted
+`~/.jarvisd/engines/<kind>/<build>-<flavour>/` (archive root stripped, CUDA runtime extracted
 beside the binary, `LD_LIBRARY_PATH` set to that directory on Linux). A `.jarvis-complete`
 marker is written last, so a half-extracted build is never used.
 
@@ -281,13 +281,18 @@ install still proceeds (the estimate is a guide, the user decides). `GET /v1/mod
 returns `"warnings": [...]`, one per card whose assigned engines together exceed it. One durable job fetches, in order, the engine build the model needs
 (`gpu_backend`, else the first assigned label's setting, else detection; `note` explains a
 CPU fallback or a missing build), the projector, then the model, then assigns the labels.
-Downloads resume (HTTP Range into `~/.jarvis/models/.partial/`, sha256 state saved every
+Downloads resume (HTTP Range into `~/.jarvisd/models/.partial/`, sha256 state saved every
 64 MB), are size- and sha256-checked, and are renamed into place only when verified. Long
 downloads run in 8-minute job slices, so after a crash or restart the download resumes
 within one lease (10 min). Auth/404 errors fail at once; others retry with backoff.
 
-Layout: `~/.jarvis/models/<owner>--<repo>/<file>` (Hugging Face), `~/.jarvis/models/<id>/`
-(direct-URL models; archives such as Kokoro are extracted there).
+Layout: `~/.jarvisd/models/<owner>--<repo>/<file>` (Hugging Face), `~/.jarvisd/models/<id>/`
+(direct-URL models; archives such as Kokoro are extracted there). Since I1 every part is capped so
+a model path stays under 200 characters below `C:\ProgramData\jarvisd` (the Windows engines are not
+long-path aware, I0): the repo dir at 48 characters, subdirectories collapsed into one ≤ 24, base names
+≤ 88 keeping the extension and any `-NNNNN-of-NNNNN.gguf` shard suffix; an over-long part keeps a
+prefix plus 8 hex characters of its SHA-256 (`internal/modules/llm/models/layout.go`). Models placed
+before that keep their old paths.
 
 ### `GET /v1/models/installs`, `GET /v1/models/installs/{id}`
 
@@ -312,7 +317,7 @@ finished. 409 when already final.
    "files": [{"name": "…", "size": …, "sha256": "…"}], "path": "…", "size": …, "mmproj_id": "…",
    "context_default": 16384, "prompt_provider": "Qwen3_14B_Compressed", "state": "ready", "bytes_done": …,
    "external": false, "labels": ["live", "background"]}],
- "disk_bytes": 17392047712, "dir": "/home/…/.jarvis/models"}
+ "disk_bytes": 17392047712, "dir": "/home/…/.jarvisd/models"}
 ```
 
 Every kind is listed here, voice models included.

@@ -120,8 +120,6 @@ func badRequest(format string, a ...any) error {
 	return &RequestError{Status: http.StatusUnprocessableEntity, Msg: fmt.Sprintf(format, a...)}
 }
 
-func repoDir(repo string) string { return strings.ReplaceAll(repo, "/", "--") }
-
 // modelFromFiles builds a model row for files of a repo.
 func (m *Manager) modelRow(id, kind, display, catalogID, repo, rev string, files []File) Model {
 	dir := filepath.Join(m.ModelsDir, repoDir(repo))
@@ -130,7 +128,7 @@ func (m *Manager) modelRow(id, kind, display, catalogID, repo, rev string, files
 		size += f.Size
 	}
 	return Model{ID: id, Kind: kind, Display: display, CatalogID: catalogID, Repo: repo, Revision: rev, Files: files,
-		Path: filepath.Join(dir, filepath.FromSlash(files[0].Name)), Size: size, State: StateDownloading}
+		Path: filepath.Join(dir, filepath.FromSlash(fileRel(files[0].Name))), Size: size, State: StateDownloading}
 }
 
 // entryRow builds a model row for a catalog entry: from Hugging Face, or from a direct URL
@@ -152,6 +150,9 @@ func (m *Manager) entryRow(e Entry) Model {
 func (m *Manager) modelRoot(mod Model) string {
 	if mod.SourceURL != "" {
 		return filepath.Join(m.ModelsDir, mod.ID)
+	}
+	if m.usesLegacyLayout(mod) {
+		return filepath.Join(m.ModelsDir, legacyRepoDir(mod.Repo))
 	}
 	return filepath.Join(m.ModelsDir, repoDir(mod.Repo))
 }
@@ -531,7 +532,7 @@ func (m *Manager) doInstall(ctx context.Context, inst *Install) error {
 		partial := filepath.Join(m.ModelsDir, ".partial", mod.ID)
 		var modDone int64
 		for _, f := range mod.Files {
-			dest := filepath.Join(root, filepath.FromSlash(f.Name))
+			dest := m.filePath(mod, f.Name)
 			url := m.HF.FileURL(mod.Repo, mod.Revision, f.Name)
 			var header http.Header = m.HF.AuthHeader()
 			if mod.SourceURL != "" {
@@ -694,7 +695,7 @@ func (m *Manager) Delete(ctx context.Context, id string, force bool) error {
 	} else if !mod.External && (mod.Repo != "" || mod.SourceURL != "") {
 		root := m.modelRoot(mod)
 		for _, f := range mod.Files {
-			p := filepath.Join(root, filepath.FromSlash(f.Name))
+			p := m.filePath(mod, f.Name)
 			if strings.HasPrefix(p, root+string(filepath.Separator)) {
 				os.Remove(p)
 			}

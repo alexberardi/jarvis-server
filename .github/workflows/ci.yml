@@ -92,3 +92,134 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: go test ./cmd/... ./internal/platform/... ./internal/audio/...
+
+  # I1: register jarvisd with each OS's service manager the way the installers will, check it
+  # serves /health under that supervisor and comes back after being killed, then uninstall.
+  # Runners have passwordless sudo / admin. (`! cmd` doesn't trip `bash -e`, hence the ifs.)
+  service:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: linux-amd64 }
+          - { os: macos-14,       target: darwin-arm64 }
+          - { os: windows-latest, target: windows-amd64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh ${{ matrix.target }}
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o dist/ ./cmd/jarvisd
+
+      - name: Linux system unit
+        if: runner.os == 'Linux'
+        run: |
+          set -x
+          sudo install -m 755 dist/jarvisd /usr/local/bin/jarvisd
+          sudo jarvisd service install
+          # As a plain user: the 0640 env file is unreadable, so the default ports apply.
+          jarvisd service status --wait 90s
+          curl -fsS http://127.0.0.1:7700/health
+          pid=$(systemctl show -p MainPID --value jarvisd)
+          test "$(ps -o user= -p "$pid")" = jarvisd
+          test "$(systemctl show -p Type --value jarvisd)" = notify
+          test "$(sudo stat -c %a /var/lib/jarvisd)" = 700
+          test "$(sudo stat -c %a /var/lib/jarvisd/jarvis.db)" = 600
+          test "$(sudo stat -c %U:%G:%a /etc/jarvisd/jarvisd.env)" = root:jarvisd:640
+          # The supervisor brings a killed jarvisd back.
+          sudo kill -9 "$pid"
+          sleep 2
+          sudo jarvisd service status --wait 90s
+          test "$(systemctl show -p MainPID --value jarvisd)" != "$pid"
+          sudo jarvisd service restart
+          sudo jarvisd service status --wait 90s
+          sudo jarvisd service uninstall
+          test ! -e /etc/systemd/system/jarvisd.service
+          if systemctl is-active --quiet jarvisd; then exit 1; fi
+          if curl -fsS http://127.0.0.1:7700/health; then exit 1; fi
+          sudo test -d /var/lib/jarvisd          # data kept
+      - name: Linux journal
+        if: failure() && runner.os == 'Linux'
+        run: sudo journalctl -u jarvisd --no-pager | tail -200
+
+      - name: macOS LaunchDaemon
+        if: runner.os == 'macOS'
+        run: |
+          set -x
+          sudo mkdir -p /usr/local/bin
+          sudo install -m 755 dist/jarvisd /usr/local/bin/jarvisd
+          sudo jarvisd service install           # runs as $SUDO_USER, data in ~/.jarvisd
+          jarvisd service status --wait 90s
+          curl -fsS http://127.0.0.1:7700/health
+          pid=$(pgrep -x jarvisd)
+          test "$(ps -o user= -p "$pid" | tr -d ' ')" = "$(id -un)"
+          test "$(stat -f %Lp ~/.jarvisd)" = 700
+          test "$(stat -f %Lp ~/.jarvisd/jarvis.db)" = 600
+          test -s ~/.jarvisd/logs/jarvisd.log
+          sudo kill -9 "$pid"
+          sleep 2
+          jarvisd service status --wait 90s
+          test "$(pgrep -x jarvisd)" != "$pid"
+          sudo jarvisd service restart
+          jarvisd service status --wait 90s
+          sudo jarvisd service uninstall
+          test ! -e /Library/LaunchDaemons/net.jarvisautomation.jarvisd.plist
+          sleep 2
+          if curl -fsS http://127.0.0.1:7700/health; then exit 1; fi
+          test -d ~/.jarvisd                     # data kept
+      - name: macOS log
+        if: failure() && runner.os == 'macOS'
+        run: tail -200 ~/.jarvisd/logs/jarvisd.log || true
+
+      - name: Windows service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dir = Join-Path $env:ProgramFiles 'jarvisd'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item dist\jarvisd.exe $dir
+          $exe = Join-Path $dir 'jarvisd.exe'
+          & $exe service install
+          & $exe service status --wait 120s
+          Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7700/health | Select-Object -ExpandProperty Content
+          $svc = Get-CimInstance Win32_Service -Filter "Name='jarvisd'"
+          if ($svc.StartName -ne 'NT SERVICE\jarvisd') { throw "account: $($svc.StartName)" }
+          if (-not $svc.DelayedAutoStart) { throw 'not delayed auto start' }
+          if ($svc.PathName -notmatch '--home') { throw "no --home: $($svc.PathName)" }
+          sc.exe qsidtype jarvisd
+          sc.exe qfailure jarvisd
+          sc.exe qfailureflag jarvisd
+          icacls C:\ProgramData\jarvisd
+          $p = Get-Process -Id $svc.ProcessId -IncludeUserName
+          if ($p.UserName -ne 'NT SERVICE\jarvisd') { throw "runs as $($p.UserName)" }
+          if (-not (Test-Path C:\ProgramData\jarvisd\jarvis.db)) { throw 'no DB under ProgramData' }
+          if ((Get-Item C:\ProgramData\jarvisd\logs\jarvisd.log).Length -eq 0) { throw 'empty service log' }
+          # A crash is restarted by the recovery actions (first after 5 s).
+          Stop-Process -Id $svc.ProcessId -Force
+          Start-Sleep 2
+          & $exe service status --wait 90s
+          $new = (Get-CimInstance Win32_Service -Filter "Name='jarvisd'").ProcessId
+          if ($new -eq $svc.ProcessId) { throw 'not restarted' }
+          # A clean stop ends the process (the SCM Stop cancels serve's context).
+          & $exe service stop
+          if (Get-Process -Id $new -ErrorAction SilentlyContinue) { throw 'still running after stop' }
+          & $exe service restart
+          & $exe service status --wait 120s
+          & $exe service uninstall
+          if (Get-Service jarvisd -ErrorAction SilentlyContinue) { throw 'service still registered' }
+          if (-not (Test-Path C:\ProgramData\jarvisd\jarvis.db)) { throw 'data not kept' }
+      - name: Windows log
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: Get-Content C:\ProgramData\jarvisd\logs\jarvisd.log -Tail 200
