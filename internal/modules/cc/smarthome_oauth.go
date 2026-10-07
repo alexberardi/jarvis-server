@@ -230,14 +230,24 @@ func (m *Module) checkExchangeURL(raw string, local bool) error {
 		return fail(http.StatusBadRequest, "Invalid exchange URL: an external provider's exchange_url must be https")
 	}
 	host := strings.ToLower(u.Hostname())
+	// Same-machine providers (Home Assistant next to jarvisd) must be addressed by the machine's
+	// network address: nodes reach the provider at the same URL, and to a node "localhost" is
+	// itself.
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return fail(http.StatusBadRequest, "Invalid exchange URL: host not allowed")
+		return fail(http.StatusBadRequest, localhostHint)
 	}
 	if ip, err := netip.ParseAddr(host); err == nil && m.smart.guard(ip, local) {
+		if ip.Unmap().IsLoopback() {
+			return fail(http.StatusBadRequest, localhostHint)
+		}
 		return fail(http.StatusBadRequest, "Invalid exchange URL: host not allowed")
 	}
 	return nil
 }
+
+const localhostHint = "Invalid exchange URL: use the provider's network address (for example " +
+	"http://192.168.1.20:8123 or http://homeassistant.local:8123), not localhost. Nodes and phones " +
+	"reach it at the same address, even when it runs on the same computer as Jarvis."
 
 var errExchangeBlocked = errors.New("destination address not allowed")
 

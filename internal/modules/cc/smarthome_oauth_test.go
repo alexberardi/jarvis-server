@@ -288,6 +288,11 @@ func TestOAuthSessionGuards(t *testing.T) {
 	}
 	// A LAN provider (Home Assistant on 192.168.x) is allowed.
 	create(bearer(tok), map[string]any{"authorize_path": "/a", "exchange_path": "/t"}, "http://192.168.1.50:8123").want(201)
+	// Home Assistant on jarvisd's own computer: its network address works; localhost gets a hint.
+	create(bearer(tok), map[string]any{"authorize_path": "/a", "exchange_path": "/t"}, "http://10.0.0.122:8123").want(201)
+	for _, base := range []string{"http://localhost:8123", "http://127.0.0.1:8123", "http://[::1]:8123"} {
+		create(bearer(tok), map[string]any{"authorize_path": "/a", "exchange_path": "/t"}, base).detail(400, localhostHint)
+	}
 
 	// Exchange re-checks the stored URL, and the dial guard refuses the connected address
 	// whatever name led there (DNS rebinding).
