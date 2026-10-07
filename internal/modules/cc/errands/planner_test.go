@@ -133,6 +133,14 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("planner request = %+v", req)
 	}
 
+	// Steps a model puts after a checkpoint are dropped: the replan decides them (jarvis-dev:
+	// "if it's raining set a timer" set it on a clear day).
+	e.llm.say("plan", planJSON("Rain timer", step("get_weather", "Weather", ""),
+		step("request_replan", "Check result", `{"reason": "whether it's raining"}`), step("tell_joke", "Timer", "")))
+	if plan, err := e.s.PlanErrand(context.Background(), "goal", nil); err != nil || len(plan.Steps) != 2 || plan.Steps[1].Command != "request_replan" {
+		t.Fatalf("checkpoint must end the plan: %+v %v", plan, err)
+	}
+
 	// Thinking ran out the budget (jarvis-dev, Qwen3-8B): one retry without thinking.
 	n := len(e.llm.requests("plan"))
 	e.llm.say("plan", thoughtOut, planJSON("Weather then timer", step("get_weather", "Weather", "")))

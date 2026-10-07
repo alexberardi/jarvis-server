@@ -426,6 +426,12 @@ func planFromData(data *pyjson.Object, allowed map[string]bool, fallbackSummary 
 			label = cmd
 		}
 		steps = append(steps, Step{Command: cmd, Args: args, Label: label, IsRisky: risky[cmd]})
+		if cmd == cmdReplan {
+			// A checkpoint ends the plan (the prompt's rule): what follows it depends on results
+			// not known yet, and the replan decides it. Steps a model guessed past it anyway are
+			// dropped; legacy kept them, so "set a timer IF it's raining" set it regardless.
+			break
+		}
 	}
 	if len(steps) == 0 && requireNonEmpty {
 		return Plan{}, fmt.Errorf("%w: planner produced no usable steps", ErrPlan)
