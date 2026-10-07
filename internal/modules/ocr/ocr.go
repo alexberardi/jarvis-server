@@ -122,6 +122,9 @@ func (m *Module) Name() string      { return "ocr" }
 func (m *Module) Listener() string  { return pconfig.ListenerOCR }
 func (m *Module) Migrations() fs.FS { return Migrations() }
 
+// Settings is the module's settings service (valid after Register), for the admin aggregator.
+func (m *Module) Settings() *settings.Service { return m.settings }
+
 func (m *Module) httpClient() *http.Client {
 	if m.HTTPClient != nil {
 		return m.HTTPClient

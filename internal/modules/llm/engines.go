@@ -99,3 +99,59 @@ func (m *Module) LivePromptProvider(ctx context.Context) string {
 	}
 	return ""
 }
+
+// LabelStates reports every label's state for the admin's setup state: the engine labels
+// (live, background, embeddings, stt) as GET /v1/models/labels reports them (ready, degraded,
+// remote, not_configured, a loading state, ...), and the in-binary voice labels (tts,
+// speaker) as ready or not_configured. Nil without the local engine stack.
+func (m *Module) LabelStates(ctx context.Context) map[string]string {
+	if m.stack == nil || m.stack.Resolver == nil || m.stack.Manager == nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, ls := range m.stack.Resolver.Status(ctx) {
+		out[ls.Label] = ls.State
+	}
+	for _, v := range m.stack.Manager.VoiceStatus(ctx) {
+		switch v.Problem {
+		case "":
+			out[v.Label] = "ready"
+		case "not configured":
+			out[v.Label] = StateNotConfigured
+		default:
+			out[v.Label] = "error"
+		}
+	}
+	return out
+}
+
+// SetupHardware is the summary the admin setup wizard's Hardware step starts from (AD3). The
+// full view, with installed engine builds and running engines, is GET /v1/hardware.
+type SetupHardware struct {
+	Hardware engine.Hardware             `json:"hardware"`
+	Proposal map[string]engine.Placement `json:"proposal"`
+	// Flavours lists, per engine kind ("llama-server", "whisper-server"), the flavours this
+	// platform has builds for: the only choices the step offers.
+	Flavours map[string][]string `json:"flavours"`
+}
+
+// HardwareSummary returns the (cached) hardware detection with its proposal; ok is false
+// without the local engine stack.
+func (m *Module) HardwareSummary(ctx context.Context) (SetupHardware, bool) {
+	if m.stack == nil || m.stack.Manager == nil {
+		return SetupHardware{}, false
+	}
+	hw := engine.Hardware{Flavour: engine.FlavourCPU}
+	if m.stack.Detector != nil {
+		hw = m.stack.Detector.Hardware(ctx, false)
+	}
+	fl := map[string][]string{}
+	for _, k := range engine.Kinds {
+		f := []string{}
+		if m.stack.Binaries != nil {
+			f = append(f, engine.FlavoursFor(k, m.stack.Binaries.Platform)...)
+		}
+		fl[string(k)] = f
+	}
+	return SetupHardware{Hardware: hw, Proposal: engine.Propose(hw), Flavours: fl}, true
+}

@@ -109,6 +109,9 @@ func (m *Module) Name() string      { return "llm" }
 func (m *Module) Listener() string  { return pconfig.ListenerLLM }
 func (m *Module) Migrations() fs.FS { return Migrations() }
 
+// Settings is the module's settings service (valid after Register), for the admin aggregator.
+func (m *Module) Settings() *settings.Service { return m.settings }
+
 // Service is the in-process API. It exists before Register (so callers can wire OnComplete
 // handlers early) and works once the module is registered.
 func (m *Module) Service() *Service {

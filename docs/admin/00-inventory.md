@@ -248,7 +248,8 @@ llm 7704. Two of them are unusable from a browser:
 
 *As built (A2, `internal/modules/admin/gateway.go`):* the bootstrap list is login, refresh, **logout**
 (it only revokes the refresh token it is sent, and an expired session must still be able to log out),
-setup-status and setup; `/api/setup/state` joins it with A3. The table is exact method+path patterns,
+setup-status and setup. *A3:* `GET /api/setup/state` is always open (reduced view unless a superuser
+token is sent) and `GET /api/doctor` is open only while no superuser exists. The table is exact method+path patterns,
 not prefixes (the llm rows are the model manager's 13 routes; `/api/cc/api/v0/admin/nodes` is included).
 Any other `/api/*` is gated first (401 anonymous, 403 non-superuser) and then a JSON 404, so the route
 surface can't be probed anonymously. A target listener that is not served answers 503. The empty-body
@@ -411,6 +412,35 @@ The install script (Phase 6) installs the binary and service unit, starts jarvis
 | 9 | **Update check (AQ5).** | `GET /api/update` returns `{current_version, latest_version, update_available, updates_enabled, release_url, release_notes, published_at, install_hint}`. `POST /api/update/check` forces a check. `PUT /api/update/settings` takes `{enabled}`. When disabled: no network call, `update_available:false`, `updates_enabled:false` (keep the honesty rule, `src/api/update.ts:10-18`). |
 | 10 | **Prompt-provider default (G1).** Not a route: in `main.go` set `cc.DefaultPromptProvider` to the live label's installed model `prompt_provider`. | Surfaced in `/api/setup/state.prompt_provider`. |
 | 11 | **Runner handler lookup** for pass-through (§3.2 "Mechanism"). | `module.Deps.Handler(listener) http.Handler`, resolved at request time. Built (A2). |
+
+*As built (A3, `internal/modules/admin/bff.go`; interfaces `SettingsSource`, `TraceStore`, `Accounts`,
+`Models`, `PromptProviders`, wired in `cmd/jarvisd/main.go`; a nil one answers 503):*
+
+- **#2** every module with settings has `Settings() *settings.Service`; `settings.Service.List` and
+  `SettingResponse` are exported. Modules are sorted by name; `display_name` is a fixed label per module.
+  `GET /api/settings` and `/api/settings/` both work (the SPA calls the latter). PUT checks the value
+  against the setting's type and `options` (422; `null` clears to the default), 404 for an unknown service
+  or key, and audit-logs service+key. `requires_reload` answers `message: "Applies after jarvisd
+  restarts"` (AQ8 a). `cc/llm.prompt_provider` goes through cc's validated setter. `llm.<label>.*` keys are
+  still listed and writable here; hiding them (I4) is SPA work in A5.
+- **#3** cc exports `TraceFilter`, `ParseTraceFilter(url.Values)`, `ListTraces`, `GetTrace(ctx,id) (map,
+  found, err)`; the admin-key routes use them too. A bad query is cc's own 400 `validation_error` shape.
+- **#4** `doctor.Exposure{Listeners,MQTTAddr,MQTTWSAddr,MDNS}.Ports(cfg.Ports)` replaces `doctorPorts`'
+  body (CLI and admin share it). Response `{status: ok|warn|fail, checks, ran_at}`; open while no
+  superuser exists, gated after.
+- **#5** as listed, minus `modules[]`, plus `go_version`, `started_at` and `listeners: [{name, port,
+  served}]` sorted by port. `uptime` is the process's, in seconds. RAM/release/disk come from
+  `internal/platform/sysinfo` (x/sys; Windows via `GlobalMemoryStatusEx`).
+- **#6** anonymous (or a non-superuser/invalid token, never a 401): `{needs_superuser,
+  setup_token_required, version, superuser:false}` plus `setup_token_file` while setup is open. A
+  superuser token adds `superuser:true, labels{live,background,embeddings,stt,tts,speaker}, live_ready
+  (live is ready|degraded|remote), models_configured (live assigned, even while loading), hardware
+  ({hardware, proposal, flavours{llama-server,whisper-server}} from llm `HardwareSummary`, the Hardware
+  step's starting point), hardware_url ("/api/llm/v1/hardware"), prompt_provider, doctor{status, failing,
+  ran_at}, households, nodes`.
+- **AD4** `GET /api/prompt-provider` → `{value, derived, effective, source: "setting"|"model"|"", valid,
+  options}`; `PUT /api/prompt-provider {value}` overrides (`""`/`null` clears; unknown → 422). The
+  Models page offers the pick-list when `derived` is empty.
 
 Optional, AQ8: `POST /api/system/restart`. It exits with a restart code when a supervisor is detected
 (systemd `INVOCATION_ID`, launchd, a Windows service); otherwise it returns 409 with the command to run.
@@ -662,7 +692,7 @@ they can run in parallel worktrees.
 | **A0** | Copy the SPA into `web/admin/` at a recorded jarvis-admin SHA (AQ10). Change Vite `outDir: dist/ui` and the dev proxy target to 7710. Add `.nvmrc`, the `dist/placeholder.html`, `.gitignore` and the CI `admin` job. No behaviour change. | `npm run build` and the CI job are green, the bundle size is recorded, and `go build ./...` still works without Node. |
 | **A1** | `internal/modules/admin` skeleton: `ListenerAdmin`/7710/`jarvis-admin` in config and registry, `web/admin/embed.go`, static handler (fallback, MIME table, cache and CSP headers, `JARVIS_ADMIN_UI_DIR`), `GET /health`. Wire it in `main.go`. Add the release-job embed check. | `jarvisd serve` serves the SPA on :7710, doctor lists the admin port, and the static tests from §9 pass. |
 | **A2** | Gateway: superuser gate with the bootstrap allow-list, the runner `Handler(listener)` lookup, the pass-through prefix table (§3.2), and the empty-JSON-body rule (I9). | Login through `/api/auth/login` and `/api/admin/users` work against a real jarvisd; gate tests pass. **Done 2026-10-07**, with AD2 (setup token) in the same pass. |
-| **A3** | BFF part 1: settings aggregator (module accessors), `/api/system/info`, `/api/traces*` (export cc methods), `/api/doctor` (move `doctorPorts` out of `cmd/`), `/api/setup/state`. Plus G1 (`DefaultPromptProvider` wiring) if AQ4 = (a). | Unit and contract tests pass; Settings, Users, Traces and Nodes render with **no SPA change** beyond S2/S13. |
+| **A3** | BFF part 1: settings aggregator (module accessors), `/api/system/info`, `/api/traces*` (export cc methods), `/api/doctor` (move `doctorPorts` out of `cmd/`), `/api/setup/state`. Plus G1 (`DefaultPromptProvider` wiring) if AQ4 = (a). | Unit and contract tests pass; Settings, Users, Traces and Nodes render with **no SPA change** beyond S2/S13. **Done 2026-10-07** (G1 was already wired; AD4 route added; see "As built (A3)" under §6.2). Unit + end-to-end tests and a smoke run against a real jarvisd; no `contract/` admin test yet and no SPA change. |
 | **A4** | BFF part 2: `/api/logs*` (export logs methods, fetch-stream tail), `/api/connections*` (export config and auth methods), `/api/update*` plus the `admin` settings set (AQ5), Twilio secret settings (AQ6). | Unit tests pass; the opt-in-off path makes no network call (test with a failing transport). |
 | **A5** | SPA, small edits: the setup token (read `#token=` from the `/setup` URL fragment, strip it from the address bar, send it as `X-Jarvis-Setup-Token` on `POST /api/auth/setup`; on 401/403 ask the operator to paste it from `<home>/setup-token`), the `errorMessage` helper, LoginPage probe removal (S2), AccountStep through `AuthContext.setup` (O5), the must-change-password screen (O4), Nodes on `/api/admin/*` with Train Adapter cut (S13), the Settings restart action replaced (AQ8) with `llm.<label>.*` hidden (I4), the SystemInfoBar fields. | `tsc -b`, lint and Vitest are green, and a manual pass on jarvisd. |
 | **A6** | SPA Models page rewrite on the model manager (S8): catalog with fit, HF browser, installs with progress, installed with delete/force, labels editor, hardware/engines panel, remote (LD2), HF token prompt, prompt-provider display (AQ4). Delete `data/models.ts`, Quick Sets and LlmSetupWizard. | Install, assign and delete a real small model on this box through the UI; Vitest covers the install flow. |

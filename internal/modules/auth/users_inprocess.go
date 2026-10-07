@@ -5,6 +5,35 @@ import (
 	"strings"
 )
 
+// SetupCounts is the admin setup state's view of the accounts: whether a superuser exists (no
+// superuser means first-run setup is open, behind the setup token, AD2), and how many
+// households and active nodes there are.
+type SetupCounts struct {
+	Superusers int `json:"superusers"`
+	Households int `json:"households"`
+	Nodes      int `json:"nodes"`
+}
+
+// SetupCounts counts superusers, households and active nodes.
+func (m *Module) SetupCounts(ctx context.Context) (SetupCounts, error) {
+	var c SetupCounts
+	for _, q := range []struct {
+		dst   *int
+		query string
+	}{
+		{&c.Superusers, `SELECT COUNT(*) FROM auth_users WHERE is_superuser = 1`},
+		{&c.Households, `SELECT COUNT(*) FROM auth_households`},
+		{&c.Nodes, `SELECT COUNT(*) FROM auth_node_registrations WHERE is_active = 1`},
+	} {
+		n, err := count(ctx, m.deps.DB.Read, q.query)
+		if err != nil {
+			return SetupCounts{}, err
+		}
+		*q.dst = n
+	}
+	return c, nil
+}
+
 // UserNames is GET /internal/users/batch in process (command-center's speaker and household
 // member name resolution, docs/cc/06 §3.7): id → username for the ids that exist. Unknown ids
 // are simply absent.

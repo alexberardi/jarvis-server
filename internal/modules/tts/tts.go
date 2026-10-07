@@ -123,6 +123,9 @@ func (m *Module) Name() string      { return "tts" }
 func (m *Module) Listener() string  { return pconfig.ListenerTTS }
 func (m *Module) Migrations() fs.FS { return Migrations() }
 
+// Settings is the module's settings service (valid after Register), for the admin aggregator.
+func (m *Module) Settings() *settings.Service { return m.settings }
+
 func (m *Module) log() *slog.Logger {
 	if m.deps.Log != nil {
 		return m.deps.Log

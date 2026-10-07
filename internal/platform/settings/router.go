@@ -49,7 +49,9 @@ func scopeFrom(w http.ResponseWriter, r *http.Request) (Scope, bool) {
 	return sc, true
 }
 
-type settingResponse struct {
+// SettingResponse is one setting as /settings (and the admin's settings aggregator) renders
+// it. Secret values are masked.
+type SettingResponse struct {
 	Key            string `json:"key"`
 	Value          any    `json:"value"`
 	ValueType      Type   `json:"value_type"`
@@ -62,10 +64,27 @@ type settingResponse struct {
 	Options        []any  `json:"options"`
 }
 
-func (s *Service) render(ctx context.Context, def Definition, sc Scope) (settingResponse, error) {
+// List renders every setting resolved at sc, sorted by (category, key). A non-empty category
+// keeps only that category.
+func (s *Service) List(ctx context.Context, sc Scope, category string) ([]SettingResponse, error) {
+	out := []SettingResponse{}
+	for _, def := range s.Definitions() {
+		if category != "" && def.Category != category {
+			continue
+		}
+		resp, err := s.render(ctx, def, sc)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resp)
+	}
+	return out, nil
+}
+
+func (s *Service) render(ctx context.Context, def Definition, sc Scope) (SettingResponse, error) {
 	v, err := s.Get(ctx, def.Key, sc)
 	if err != nil {
-		return settingResponse{}, err
+		return SettingResponse{}, err
 	}
 	val := v.Value
 	if def.IsSecret && truthy(val) {
@@ -75,7 +94,7 @@ func (s *Service) render(ctx context.Context, def Definition, sc Scope) (setting
 	if def.EnvFallback != "" {
 		envFallback = def.EnvFallback
 	}
-	return settingResponse{
+	return SettingResponse{
 		Key: def.Key, Value: val, ValueType: def.Type, Category: def.Category,
 		Description: def.Description, RequiresReload: def.RequiresReload, IsSecret: def.IsSecret,
 		EnvFallback: envFallback, FromDB: v.FromDB, Options: def.Options,
@@ -90,18 +109,10 @@ func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	category := r.URL.Query().Get("category")
-	out := []settingResponse{}
-	for _, def := range s.Definitions() {
-		if category != "" && def.Category != category {
-			continue
-		}
-		resp, err := s.render(r.Context(), def, sc)
-		if err != nil {
-			apiError(w, http.StatusInternalServerError, "internal_error", "Failed to list settings", "list_failed")
-			return
-		}
-		out = append(out, resp)
+	out, err := s.List(r.Context(), sc, r.URL.Query().Get("category"))
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal_error", "Failed to list settings", "list_failed")
+		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"settings": out, "total": len(out)})
 }

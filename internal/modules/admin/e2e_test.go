@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/doctor"
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -37,7 +38,11 @@ func gatewayStack(t *testing.T) (string, *authmod.Module, pconfig.Config) {
 	r := &module.Runner{
 		Deps: module.Deps{Config: cfg, DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil))},
 		// Admin first: the handler lookup must not depend on registration order.
-		Modules: []module.Module{&Module{UI: builtUI(), Verify: auth.VerifyUser}, auth},
+		Modules: []module.Module{&Module{UI: builtUI(), Verify: auth.VerifyUser,
+			Accounts: auth, Settings: []SettingsSource{auth},
+			RunDoctor: func(context.Context, doctor.Options) []doctor.Check {
+				return []doctor.Check{{Name: "listening", Status: doctor.OK}}
+			}}, auth},
 	}
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
@@ -86,6 +91,14 @@ func TestGatewayEndToEnd(t *testing.T) {
 	if code, out := call(t, "GET", base+"/api/auth/setup-status", nil); code != 200 || out.(map[string]any)["needs_setup"] != true {
 		t.Fatalf("setup-status: %d %v", code, out)
 	}
+	// The boot gate and the wizard's Check step work before any account exists.
+	if code, out := call(t, "GET", base+"/api/setup/state", nil); code != 200 || out.(map[string]any)["needs_superuser"] != true ||
+		out.(map[string]any)["setup_token_required"] != true {
+		t.Fatalf("setup state before setup: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/doctor", nil); code != 200 || out.(map[string]any)["status"] != "ok" {
+		t.Fatalf("doctor before setup: %d %v", code, out)
+	}
 	// First-run setup through the gateway needs the token jarvisd wrote (AD2).
 	setup := map[string]any{"email": "root@example.com", "password": "password1"}
 	if code, _ := call(t, "POST", base+"/api/auth/setup", setup); code != 401 {
@@ -119,6 +132,23 @@ func TestGatewayEndToEnd(t *testing.T) {
 	}
 	if code, _ := call(t, "GET", base+"/api/admin/users", nil); code != 401 {
 		t.Fatalf("anonymous users: %d", code)
+	}
+	// Once the superuser exists: the doctor is gated, the setup state reports the account.
+	if code, _ := call(t, "GET", base+"/api/doctor", nil); code != 401 {
+		t.Fatalf("anonymous doctor after setup: %d", code)
+	}
+	code, out = call(t, "GET", base+"/api/setup/state", nil, root...)
+	if st := out.(map[string]any); code != 200 || st["needs_superuser"] != false || st["superuser"] != true || st["households"] != 1.0 {
+		t.Fatalf("setup state after setup: %d %v", code, out)
+	}
+	// The real auth module's settings through the aggregator, and a write back.
+	code, out = call(t, "GET", base+"/api/settings/", nil, root...)
+	if svcs, _ := out.(map[string]any)["services"].([]any); code != 200 || len(svcs) != 1 || svcs[0].(map[string]any)["service_name"] != "auth" {
+		t.Fatalf("settings: %d %v", code, out)
+	}
+	code, out = call(t, "PUT", base+"/api/settings/auth/auth.token.access_expire_minutes", map[string]any{"value": 45}, root...)
+	if code != 200 || out.(map[string]any)["success"] != true {
+		t.Fatalf("settings put: %d %v", code, out)
 	}
 
 	code, out = call(t, "POST", base+"/api/auth/refresh", map[string]any{"refresh_token": login["refresh_token"]})

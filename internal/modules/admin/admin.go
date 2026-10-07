@@ -2,15 +2,19 @@
 // embedded admin SPA (web/admin) with client-side-route fallback, GET /health, and the
 // same-origin /api gateway (docs/admin/00-inventory.md §3.2, AD1): every /api route but a
 // small bootstrap allow-list needs a superuser token, and allow-listed module routes are
-// dispatched to their listener in process (gateway.go). The BFF endpoints come in A3/A4.
+// dispatched to their listener in process (gateway.go). The BFF endpoints (bff.go) call the
+// modules through Go interfaces; A3 built settings, system info, traces, doctor, setup state
+// and the prompt provider, A4 adds logs, connections and updates.
 package admin
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/doctor"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
@@ -34,6 +38,23 @@ type Module struct {
 	// Verify checks a user access token for the /api superuser gate (the auth module's
 	// VerifyUser). Nil rejects every gated call.
 	Verify settings.UserVerifier
+
+	// The BFF endpoints' module interfaces (bff.go), set by cmd/jarvisd. A nil one makes its
+	// routes answer 503.
+	Settings []SettingsSource // every module with a settings service
+	Traces   TraceStore       // cc
+	Accounts Accounts         // auth
+	Models   Models           // llm
+	Prompts  PromptProviders  // cc
+	// Exposure is what /api/doctor checks (the listeners served, MQTT, mDNS).
+	Exposure doctor.Exposure
+	// RunDoctor runs the checks (tests); nil is doctor.Run.
+	RunDoctor func(context.Context, doctor.Options) []doctor.Check
+
+	deps   module.Deps
+	verify settings.UserVerifier
+	gate   settings.Guard
+	doc    doctorCache
 }
 
 func (m *Module) Name() string      { return "admin" }
@@ -41,6 +62,7 @@ func (m *Module) Listener() string  { return pconfig.ListenerAdmin }
 func (m *Module) Migrations() fs.FS { return nil }
 
 func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
+	m.deps = deps
 	ui, source := m.resolveUI()
 	if ui == nil {
 		deps.Log.Warn("admin UI not built; serving the placeholder page", "source", source)

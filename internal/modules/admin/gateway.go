@@ -89,7 +89,9 @@ func (m *Module) mountGateway(mux *http.ServeMux, deps module.Deps) {
 		// Not wired (tests of the static side): no token verifies.
 		verify = func(context.Context, string) (authn.User, error) { return authn.User{}, errNoVerifier }
 	}
+	m.verify = verify
 	gate := settings.SuperuserGuard(verify)
+	m.gate = gate
 	gated := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if gate(w, r) {
@@ -97,6 +99,7 @@ func (m *Module) mountGateway(mux *http.ServeMux, deps module.Deps) {
 			}
 		})
 	}
+	m.mountBFF(mux, deps)
 	for _, rt := range passRoutes {
 		h := pass(deps, rt)
 		if !rt.open {

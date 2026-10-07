@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
+	adminmod "github.com/alexberardi/jarvis-server/internal/modules/admin"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
@@ -44,4 +46,30 @@ func TestDoctorPortsIncludeAdmin(t *testing.T) {
 		}
 	}
 	t.Fatalf("admin listener 7710 missing from %v", ports)
+}
+
+// The admin BFF reaches every module it reads in process (A3).
+func TestAdminWiring(t *testing.T) {
+	for _, m := range modules() {
+		a, ok := m.(*adminmod.Module)
+		if !ok {
+			continue
+		}
+		var names []string
+		for _, s := range a.Settings {
+			names = append(names, s.Name())
+		}
+		slices.Sort(names)
+		if want := []string{"auth", "cc", "config", "llm", "logs", "ocr", "stt", "tts"}; !slices.Equal(names, want) {
+			t.Errorf("settings sources %v, want %v", names, want)
+		}
+		if a.Traces == nil || a.Prompts == nil || a.Accounts == nil || a.Models == nil || a.Verify == nil {
+			t.Errorf("admin not wired: %+v", a)
+		}
+		if !slices.Contains(a.Exposure.Listeners, config.ListenerAdmin) || a.Exposure.MQTTAddr == "" {
+			t.Errorf("doctor exposure: %+v", a.Exposure)
+		}
+		return
+	}
+	t.Fatal("no admin module")
 }
