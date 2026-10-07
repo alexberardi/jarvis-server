@@ -18,7 +18,10 @@ import (
 	"time"
 )
 
-const launchdPlist = "/Library/LaunchDaemons/" + LaunchdLabel + ".plist"
+const (
+	launchdPlist = "/Library/LaunchDaemons/" + LaunchdLabel + ".plist"
+	helperPlist  = "/Library/LaunchDaemons/" + HelperLabel + ".plist"
+)
 
 // launchd manages the LaunchDaemon (00-installers §2.2): it runs before anyone logs in, as
 // the installing user, with data in that user's ~/.jarvisd.
@@ -26,6 +29,8 @@ type launchd struct {
 	out       io.Writer
 	run       runFunc
 	plistPath string
+	// helperPath is the updater LaunchDaemon's plist (ID11).
+	helperPath string
 
 	euid       func() int
 	getenv     func(string) string
@@ -37,7 +42,7 @@ type launchd struct {
 
 func newLaunchd(out io.Writer) *launchd {
 	return &launchd{
-		out: out, run: execRun, plistPath: launchdPlist,
+		out: out, run: execRun, plistPath: launchdPlist, helperPath: helperPlist,
 		euid: os.Geteuid, getenv: os.Getenv, lookupUser: user.Lookup, chown: os.Lchown,
 		settle: 30 * time.Second,
 	}
@@ -45,7 +50,10 @@ func newLaunchd(out io.Writer) *launchd {
 
 func (l *launchd) Kind() Kind { return Launchd }
 
-const target = "system/" + LaunchdLabel
+const (
+	target       = "system/" + LaunchdLabel
+	helperTarget = "system/" + HelperLabel
+)
 
 func (l *launchd) loaded(ctx context.Context) bool {
 	_, err := l.run(ctx, "launchctl", "print", target)
@@ -79,15 +87,20 @@ func (l *launchd) Install(ctx context.Context, o InstallOptions) error {
 		return err
 	}
 	logs := filepath.Join(o.Home, "logs")
-	if err := os.MkdirAll(logs, 0o700); err != nil {
-		return err
+	// The updater's request queue must exist for launchd to watch it.
+	updates := filepath.Join(o.Home, "updates")
+	requests := filepath.Join(updates, "requests")
+	for _, d := range []string{logs, requests} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return err
+		}
 	}
 	envFile := filepath.Join(o.Home, "jarvisd.env")
 	if _, err := writeEnvTemplate(envFile, 0o600); err != nil {
 		return err
 	}
 	// Everything created as root here belongs to the account jarvisd runs as.
-	for _, p := range []string{o.Home, logs, envFile} {
+	for _, p := range []string{o.Home, logs, updates, requests, envFile} {
 		if err := l.chown(p, uid, gid); err != nil {
 			return err
 		}
@@ -96,15 +109,28 @@ func (l *launchd) Install(ctx context.Context, o InstallOptions) error {
 	if err != nil {
 		return err
 	}
+	helper, err := RenderLaunchdHelper(HelperPlist{Binary: o.Binary, Home: o.Home, UserName: runAs})
+	if err != nil {
+		return err
+	}
 	if l.loaded(ctx) {
 		if err := l.bootout(ctx); err != nil {
+			return err
+		}
+	}
+	if l.helperLoaded(ctx) {
+		if err := l.bootoutHelper(ctx); err != nil {
 			return err
 		}
 	}
 	if err := writeFile(l.plistPath, plist, 0o644); err != nil {
 		return err
 	}
+	if err := writeFile(l.helperPath, helper, 0o644); err != nil {
+		return err
+	}
 	printf(l.out, "wrote %s (runs %s as %s, data in %s, log %s)\n", l.plistPath, o.Binary, runAs, o.Home, LogPath(o.Home))
+	printf(l.out, "wrote %s (the self-update helper, runs as root, log %s)\n", l.helperPath, HelperLog)
 	if o.NoStart {
 		return nil
 	}
@@ -123,11 +149,45 @@ func (l *launchd) bootout(ctx context.Context) error {
 	return nil
 }
 
+// helperLoaded reports whether launchd has the updater job.
+func (l *launchd) helperLoaded(ctx context.Context) bool {
+	_, err := l.run(ctx, "launchctl", "print", helperTarget)
+	return err == nil
+}
+
+func (l *launchd) bootoutHelper(ctx context.Context) error {
+	if _, err := l.run(ctx, "launchctl", "bootout", helperTarget); err != nil && l.helperLoaded(ctx) {
+		return err
+	}
+	if !poll(ctx, l.settle, 200*time.Millisecond, func() bool { return !l.helperLoaded(ctx) }) {
+		return fmt.Errorf("launchd still has %s loaded after bootout", HelperLabel)
+	}
+	return nil
+}
+
+// loadHelper bootstraps the updater job if its plist exists and it isn't loaded (RunAtLoad
+// makes it look for pending work once).
+func (l *launchd) loadHelper(ctx context.Context) error {
+	if _, err := os.Stat(l.helperPath); err != nil || l.helperLoaded(ctx) {
+		return nil
+	}
+	_, err := l.run(ctx, "launchctl", "bootstrap", "system", l.helperPath)
+	return err
+}
+
 func (l *launchd) Uninstall(ctx context.Context) error {
 	if _, err := os.Stat(l.plistPath); errors.Is(err, fs.ErrNotExist) {
 		return ErrNotInstalled
 	}
 	home := l.InstalledHome()
+	if l.helperLoaded(ctx) {
+		if err := l.bootoutHelper(ctx); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(l.helperPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	if l.loaded(ctx) {
 		if err := l.bootout(ctx); err != nil {
 			return err
@@ -152,6 +212,9 @@ func (l *launchd) Start(ctx context.Context) error {
 		}
 	}
 	if _, err := l.run(ctx, "launchctl", "enable", target); err != nil {
+		return err
+	}
+	if err := l.loadHelper(ctx); err != nil {
 		return err
 	}
 	_, err := l.run(ctx, "launchctl", "kickstart", target)
@@ -209,7 +272,19 @@ func (l *launchd) Status(ctx context.Context) (Status, error) {
 	if m := launchdExit.FindSubmatch(out); m != nil {
 		st.Detail += ", last exit " + strings.TrimSpace(string(m[1]))
 	}
+	st.UpgradeHelper = l.helperStatus(ctx)
 	return st, nil
+}
+
+// helperStatus describes the updater LaunchDaemon.
+func (l *launchd) helperStatus(ctx context.Context) string {
+	if _, err := os.Stat(l.helperPath); err != nil {
+		return "none: run `sudo jarvisd service install` again to add it"
+	}
+	if !l.helperLoaded(ctx) {
+		return HelperLabel + " (not loaded)"
+	}
+	return HelperLabel + " (loaded; log " + HelperLog + ")"
 }
 
 var plistString = regexp.MustCompile(`<string>([^<]*)</string>`)

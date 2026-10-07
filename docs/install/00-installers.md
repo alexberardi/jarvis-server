@@ -807,12 +807,14 @@ on the dev box with a throwaway home and alternate ports from its env file (inst
 kill → restarted, stop → graceful MQTT/HTTP shutdown, status exit codes, `migrate status` finding
 the installed home), then uninstalled and linger turned back off.
 
-### 8.2 Self-update as built (AD5, ID10; 2026-10-07)
+### 8.2 Self-update as built (AD5, ID10, ID11; 2026-10-07)
 
-Code: `internal/update` (minisign, release lookup, stage, swap, rollback, marker state machine),
-`cmd/jarvisd/upgrade.go` (CLI, serve's start step and health gate), `internal/modules/admin/apply.go`
-(admin routes, inventory §6.2), `internal/platform/db/versions.go` (downgrade guard), the systemd unit's
-pre-start helper (`internal/platform/service/render.go`), `scripts/upgrade-e2e.sh`.
+Code: `internal/update` (minisign, release lookup, stage, swap, rollback, marker state machine; the
+privileged helper's core in `privileged.go`), `cmd/jarvisd/upgrade.go` (CLI, serve's start step and health
+gate), `cmd/jarvisd/helper.go` (the helper's entry point), `internal/modules/admin/apply.go` (admin routes,
+inventory §6.2), `internal/platform/db/versions.go` (downgrade guard), the helpers' definitions
+(`internal/platform/service/render.go`, `launchd.go`, `helper_*.go`), `scripts/upgrade-e2e.sh`,
+`scripts/upgrade-helper-e2e.sh`.
 
 **Trust root.** The release workflow signs `SHA256SUMS` with the project minisign key (the node/admin key,
 id `C9A24FB502A25B72`; secrets `MINISIGN_SECRET_KEY` + `MINISIGN_PASSWORD`) with the trusted comment
@@ -843,23 +845,35 @@ GitHub API base (the e2e uses it); it can't weaken anything since the signature 
 5. Restart: the admin uses serve's `Restarter` (exit 75); the CLI restarts the installed service through
    the service manager and waits for the outcome.
 
-**Who can write the binary.** The systemd system unit runs as `jarvisd` with `ProtectSystem=strict`, so it
-can't replace `/usr/local/bin/jarvisd`. The unit now carries `Environment=JARVIS_UPGRADE_HELPER=1` and
-`ExecStartPre=-+<bin> upgrade --prestart --home <home>`: on every start, as root and outside the sandbox
-(`+`), never blocking the start (`-`), it performs a pending swap (re-verifying the staged archive with the
-keys of the binary it runs, and refusing anything not newer than itself, so an unprivileged writer of the
-data dir can't install or downgrade anything) or a requested rollback, chowning what it writes to the
-home's owner. So the admin button stages as `jarvisd` and the restart does the swap. Existing system units
-get the helper on the next `jarvisd service install`. `--user` units and unsupervised runs own their binary
-and swap in process. launchd and SCM installs in root-owned dirs have no helper yet: the admin answers 409
-with `sudo jarvisd upgrade` (Windows: an elevated PowerShell). Unsupervised: the admin answers 409
-(`jarvisd upgrade`); the CLI refuses while an unsupervised jarvisd answers `/health` ("stop it first"),
-otherwise swaps and tells you to start it.
+**Who can write the binary.** No service account can: the binary lives in `/usr/local/bin` or
+`%ProgramFiles%\jarvisd`, owned by root / Administrators. A **privileged helper** installed with the
+service does the one step that needs to write there (ID11; details below):
+
+| | Helper | Runs as | Woken by | Then |
+|---|---|---|---|---|
+| Linux system unit | `ExecStartPre=-+<bin> upgrade --prestart --home <home> --owner jarvisd` (+ `Environment=JARVIS_UPGRADE_HELPER=1`) | root, outside the sandbox (`+`), never blocking the start (`-`) | every (re)start: jarvisd exits 75 | the start continues |
+| macOS | LaunchDaemon `net.jarvisautomation.jarvisd-updater`: `<bin> upgrade --helper --home <home> --owner <user>` | root (no `UserName`) | `QueueDirectories` = `<home>/updates/requests`: jarvisd drops a file there; also `RunAtLoad` | `launchctl kickstart -k system/net.jarvisautomation.jarvisd` |
+| Windows | service `jarvisd-updater`: `jarvisd.exe upgrade --helper --home <home>` | LocalSystem, manual start | jarvisd starts it through the SCM (its DACL grants `NT SERVICE\jarvisd` query + start, nothing else) | SCM stop, then start of `jarvisd` |
+
+So the admin button stages as the service account, wakes the helper (or, under systemd, restarts), and
+the helper re-verifies, swaps and restarts jarvisd; the new version's health gate decides as before.
+`/api/system/info` `capabilities.self_update` and `GET /api/update` `can_apply` are true when a helper is
+installed (`service.DetectHelper`: the unit's env var; the updater plist; the updater service openable
+for start). `jarvisd service install` creates the helper (existing installs get it on the next install),
+`uninstall` removes it, `service status` reports it (`updater:`; `upgrade_helper` in `--json`).
+`jarvisd upgrade` as root/Administrator still swaps in process; as the macOS login user (which owns the
+home) with a helper installed it stages, wakes the helper and waits for the outcome, so `sudo` is no
+longer needed there. `--user` units and unsupervised runs own their binary and swap in process.
+Unsupervised: the admin answers 409 (`jarvisd upgrade`); the CLI refuses while an unsupervised jarvisd
+answers `/health` ("stop it first"), otherwise swaps and tells you to start it.
 
 **Start step and health gate** (serve, before the DB opens). `PreStart` does any pending swap/rollback (a
 no-op when the helper already did); a process that just swapped itself exits 75 to run the new binary.
 `BeginStart`: when the marker is `swapped` and this binary is the target version, count the attempt; with
-`MaxFailedStarts` (2) failed starts already counted, request a rollback instead. Then the gate: once every
+`MaxFailedStarts` (2) failed starts already counted, request a rollback instead (then: in process if
+writable, else exit 75 for the systemd helper, else wake the macOS/Windows helper and wait up to 3 minutes for
+it). A staged or rollback-requested marker that serve can't act on wakes the on-demand helper the same way.
+Then the gate: once every
 listener is bound (`OnReady`) jarvisd polls its own config listener's `/health` (admin's if config is
 disabled); success within `JARVIS_UPGRADE_GATE_TIMEOUT` (default 2 m) records `succeeded` in
 `<home>/updates/last-upgrade.json` and clears the marker. Timeout → serve stops, the DB is closed, and
@@ -883,12 +897,15 @@ upgrade the CLI is the old version) and prints any failed check with its fix and
 --fix` applies the firewall fix" (A10d V1: rc3 added 7030 and the firewall didn't admit it). The admin's
 Update button has no such step; its dashboard shows the doctor checks.
 
-**What the root helper trusts.** Only paths derived from the executable and `--home`: the marker is in the
-data dir, which the service account writes. A rollback restores `<exe>.prev` (never the marker's `prev`),
-restores only snapshot entries naming a regular `*.db` directly in the home from a regular file directly
-in `backups/` (neither a symlink), and creates its temporaries in the data dir (`*.tmp`, `*.restore`)
-fresh with `O_EXCL` instead of writing through whatever is at that name (fixed 2026-10-08 with A10c U4;
-before, the marker's `prev` was copied over the root-run binary).
+**What a root rollback trusts.** Only paths derived from the executable and `--home`: the marker is in the
+data dir, which the service account writes. Every rollback, in process or by a helper, puts the binary back
+through one function (`restorePrevBinary`): it restores `<exe>.prev` (never the marker's `prev`) and keeps
+the replaced binary as `jarvisd.rolledback`. The in-process `Rollback` (serve with a writable binary, or
+`sudo jarvisd upgrade --rollback`) also restores only snapshot entries naming a regular `*.db` directly in
+the home from a regular file directly in `backups/` (neither a symlink), and creates its temporaries in the
+data dir (`*.tmp`, `*.restore`) fresh with `O_EXCL` instead of writing through whatever is at that name
+(fixed 2026-10-08 with A10c U4; before, the marker's `prev` was copied over the root-run binary). The
+helpers below go further: they never touch a database, and read the home only through an `os.Root`.
 
 **Downgrade guard.** Before migrating, every module's (and the queue's/scheduler's) applied goose versions
 must all be migrations this binary has: "unknown" rather than "higher", since out-of-order migrations are
@@ -934,10 +951,111 @@ checks the signature with each OS's own binary (`jarvisd upgrade --verify-dir`).
   (`sudo jarvisd upgrade`, which launchd installs need anyway), else prints the command. A fix the
   operator declined at install stays declined.
 
-**Not done / follow-ups.** launchd/SCM privileged helpers (today: `sudo jarvisd upgrade`, an elevated
-PowerShell); the admin button on macOS therefore never needs the firewall re-add, but would once a
-helper exists; `jarvisd backup` as its own command; a binary that passes `version` but dies before
-serve counts its start relies on the waiting CLI to roll back.
+**The privileged helper (ID11, 2026-10-07).** One code path, `update.PrivilegedStep`, for all three
+helpers. It acts on the marker only:
+
+- `staged` → the verified swap below → marker `swapped` → (on demand) restart jarvisd. Any refusal closes the
+  upgrade as `failed` with the reason in `last-upgrade.json`; the binary is untouched.
+- `rollback_requested` → copy the binary's own `jarvisd.prev` back, keeping the replaced one as
+  `jarvisd.rolledback` (nothing else) → marker `binary_restored` → restart jarvisd. The restarted,
+  unprivileged jarvisd sees `binary_restored`, restores the database snapshot when migrations ran (with the
+  same snapshot-entry checks as any `Rollback`), records `rolled_back` and carries on serving. (Before ID11
+  the root pre-start did the database part too; it now never touches a database.) A helper swap, like
+  `Swap`, deletes a stale `jarvisd.rolledback`.
+- *Rolling back to v0.1.0-rc5 or older.* Those releases don't know `binary_restored` (they would leave it
+  forever, and their `sudo jarvisd upgrade --rollback` refuses an unknown state). `Stage` now sets
+  `from_finishes_restore` in the marker when the staging jarvisd is the binary a rollback would restore
+  (not for `jarvisd upgrade --bin <other>`); a marker without it, i.e. one staged by rc5 or older, makes
+  the helper restore the binary but leave `rollback_requested`, which the restored release logs as needing
+  administrator rights and its own `sudo jarvisd upgrade --rollback` finishes (database, result). The flag
+  only chooses between those two states, so a forged one gains the service account nothing. Note the
+  pre-start line now passes `--owner`, which rc5 and older reject: under a restored old release the
+  `ExecStartPre` fails harmlessly (`-`), so the operator command is the way to finish there too.
+
+*Why these designs.* macOS: a second, root LaunchDaemon rather than running the main daemon as root and
+dropping privileges (which would put the whole server one bug away from root) or a setuid wrapper.
+`QueueDirectories` is level-triggered (launchd keeps starting the job while the directory is non-empty),
+so a wake-up can't be lost the way an edge-triggered `WatchPaths` event can, and an unprivileged process
+can create the trigger without any IPC the helper would have to authenticate; the request files carry no
+data, the helper deletes them first and reads only the marker. Windows: a demand-start LocalSystem
+service rather than a scheduled task, because the SCM's per-service DACL can grant exactly "start" to
+the `NT SERVICE\jarvisd` SID (a task's permissions can't be scoped that narrowly without also allowing
+it to be read and changed), and the SCM gives the helper a supervised lifetime, a log and `sc query`.
+Order on both: swap first (rename over the running binary on unix; Windows renames the running exe
+aside), then restart, so jarvisd is never started half-swapped; a jarvisd waiting for the helper during
+its own start sees the marker move on and exits 75 itself (Windows can't deliver a stop to a service
+that is still starting).
+
+*The untrusted-input boundary.* Everything in the home was written by the service account; the helper
+runs as root/LocalSystem:
+
+- Its inputs are only its own command line (from the unit / plist / SCM entry, root-owned) and the files
+  in the home. It does not read `<home>/jarvisd.env` or `/etc/jarvisd/jarvisd.env` (`--prestart`/`--helper`
+  are handled before bootstrap), and execs nothing but `/bin/launchctl` and `socketfilterfw` by absolute
+  path; launchd gives it the system `PATH`, a root-owned log (`/Library/Logs/jarvisd-updater.log`) and `/`
+  as working directory; the Windows helper logs to `jarvisd-updater.log` next to the binary, never into
+  the home (a junction there could aim a SYSTEM write anywhere).
+- The home is opened once as an `os.Root`; every read, write, rename and delete goes through it, so no
+  symlink, junction or `..` inside the home can reach outside it. The home itself must be a plain
+  directory (`Lstat`: not a symlink, junction or reparse point; same file as the opened root) and, on
+  unix, owned by `--owner` (root-owned homes are refused even without it).
+- Files it reads must be regular, have exactly one link (macOS lets anyone hard-link a file they can't
+  write; `nlink` via `fstat` / `GetFileInformationByHandle`) and stay under a size limit (marker 1 MiB,
+  `SHA256SUMS` 1 MiB, signature 64 KiB, archive 4 GiB). A marker that doesn't parse is reported without
+  echoing its content.
+- The marker only selects a release. `exe` must equal the helper's own executable; the archive name is
+  derived from `to_version` and the platform (any other `asset`, a traversal, a non-version `to` is
+  refused); `archive`/`sums`/`sig`/`prev`/`snapshots` paths in the marker are ignored.
+- `SHA256SUMS` and its signature are verified with the keys compiled into the **running** helper (never
+  the staged binary), the trusted comment must name `to_version`, and `to_version` must be strictly newer
+  than the helper's own version (a non-release `dev` helper refuses everything).
+- The archive is copied out of the home into a fresh `O_EXCL` temp file in the binary's directory
+  (root-owned) and hashed there; that private copy is what gets unpacked, so the service account can't
+  swap the file between the check and the extraction.
+- What it writes in the home (marker, result) is created `O_EXCL` after removing any existing temp name,
+  `fchown`ed to the home's owner through the descriptor, then renamed into place: a planted symlink or
+  hard link is replaced, never written through.
+- What the service account can still do, by design: ask for an upgrade to any **newer signed** release
+  (what the admin button does), make the helper refuse (fail its own upgrade), or request a rollback,
+  which restores `jarvisd.prev`, the release the administrator had installed before. It can't install
+  an unsigned, foreign-signed, older or tampered binary, or make the helper read or write outside the home.
+
+**Verified (ID11).** Unit tests (`internal/update/privileged_test.go`, run on all three OSes in CI's
+platform tests): privileged swap; refusals of a tampered archive, tampered `SHA256SUMS`, wrong key,
+same/older version, a `dev` helper, forged markers (other exe, asset traversal, other platform, non-version
+`to`), a hard-linked staged file, an oversized/garbled marker; a symlinked home, a home owned by another
+uid, a relative home; symlinks out of the home for the archive, the staged directory and the marker; a
+planted symlink/hard link at the temp names (never written through); rollback ignoring a forged `prev`
+and leaving the database to the unprivileged finish; request drain not following symlinks. Windows-only:
+a junction home and a junction staged directory are refused; the updater's SDDL parses and gives the
+service SID exactly query config + query status + start. Rendering goldens for the updater plist and the
+unit's `--owner`; the launchd manager installs, reinstalls, reports and removes the helper. Admin: with a
+helper the button is offered (`can_apply`, `self_update`), stages, wakes it and doesn't restart by
+itself; a refusal fails the job with the helper's reason. Serve's start step waits for the helper and
+finishes a helper-begun rollback (and a helper rollback to a pre-ID11 marker is left for the operator's
+`--rollback`, keeping `jarvisd.rolledback`: `privileged_compat_test.go`). CI job `upgrade` now runs on macos-14 and windows-latest too
+(`scripts/upgrade-helper-e2e.sh`, releases signed by `scripts/testsign` with a throwaway key): install from
+`/usr/local/bin` / `%ProgramFiles%\jarvisd`, `service status` names the helper; admin button → swapped by
+the helper, `jarvisd.prev` kept, result owned by the service account (macOS); hostile staged upgrades
+planted by the service account (older signed release, newer signed list over another archive, archive
+symlinked to the root-owned binary on macOS) are refused and the binary stays; a crashing release is
+swapped in, crash-loops, and the helper restores the binary while the restarted old version records
+`rolled_back`; a further upgrade succeeds; uninstall removes the helper. Ubuntu keeps running
+`scripts/upgrade-e2e.sh system` (now through the hardened pre-start).
+
+**Not done / follow-ups.** `jarvisd backup` as its own command; a binary that passes `version` but dies
+before serve counts its start relies on the waiting CLI (or, from the admin, the operator) to roll back; a
+helper rollback to v0.1.0-rc5 or older needs the operator's `sudo jarvisd upgrade --rollback` (above).
+
+**Re-port (2026-10-08).** The first ID11 build (`d2841e1`, `9a4b71c` on `ci/update-helper`, CI green) was
+never merged: its merge targeted an empty branch. Meanwhile main gained the root-rollback hardening (paths
+only from the exe/`--home`, `O_EXCL` temporaries, snapshot-entry checks), `jarvisd.rolledback`, the doctor
+and admin URL after an upgrade, and rc1–rc5 were released. Re-ported on `ci/update-helper-2`, keeping both:
+one `restorePrevBinary` for every rollback (main's `<exe>.prev`-only rule plus `.rolledback`), the helper's
+`os.Root`/single-link/copy-then-hash/strictly-newer core unchanged, `RestorePrevious` keeps main's
+signature (records `rolled_back`), the CLI's helper path ends with the doctor and the admin URL like the
+in-process one, and the compatibility rule for rc5-and-older markers above (new: the first build assumed
+no pre-ID11 release existed).
 
 ### 8.3 I2, I3, I4 as built (2026-10-07)
 

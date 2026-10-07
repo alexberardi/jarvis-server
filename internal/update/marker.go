@@ -59,8 +59,8 @@ func (p Paths) old() string { return p.Exe + ".old" }
 
 // States of an upgrade in the marker.
 const (
-	// StateStaged: verified and unpacked under updates/staged, waiting for a privileged
-	// pre-start (systemd ExecStartPre=+) to swap it in.
+	// StateStaged: verified and unpacked under updates/staged, waiting for the swap (in
+	// process, or by a privileged helper: PrivilegedStep).
 	StateStaged = "staged"
 	// StateSwapped: the new binary is in place; the next start of that version runs the
 	// health gate.
@@ -105,6 +105,10 @@ type Marker struct {
 	SwappedAt time.Time `json:"swapped_at,omitzero"`
 	// By is who started it: "cli" or "admin".
 	By string `json:"by,omitempty"`
+	// FromFinishesRestore: the From binary (the one a rollback restores) finishes a rollback a
+	// privileged helper began (StateBinaryRestored). Stage sets it when the staging jarvisd is
+	// that binary; markers staged by v0.1.0-rc5 and older lack it.
+	FromFinishesRestore bool `json:"from_finishes_restore,omitempty"`
 }
 
 // Result is updates/last-upgrade.json.

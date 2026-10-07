@@ -53,12 +53,15 @@ func connect() (*mgr.Mgr, error) {
 }
 
 // openQuery opens the service with read-only rights, which a non-elevated user has.
-func openQuery() (*mgr.Service, func(), error) {
+func openQuery() (*mgr.Service, func(), error) { return openQueryName(Name) }
+
+// openQueryName is openQuery for any service (the updater).
+func openQueryName(svcName string) (*mgr.Service, func(), error) {
 	h, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return nil, nil, err
 	}
-	name, _ := windows.UTF16PtrFromString(Name)
+	name, _ := windows.UTF16PtrFromString(svcName)
 	sh, err := windows.OpenService(h, name, windows.SERVICE_QUERY_CONFIG|windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		windows.CloseServiceHandle(h)
@@ -67,7 +70,7 @@ func openQuery() (*mgr.Service, func(), error) {
 		}
 		return nil, nil, err
 	}
-	return &mgr.Service{Name: Name, Handle: sh}, func() {
+	return &mgr.Service{Name: svcName, Handle: sh}, func() {
 		windows.CloseServiceHandle(sh)
 		windows.CloseServiceHandle(h)
 	}, nil
@@ -162,6 +165,10 @@ func (w *scm) Install(ctx context.Context, o InstallOptions) error {
 		return err
 	}
 	printf(w.out, "registered service %s (runs %s as %s, data in %s, log %s)\n", Name, o.Binary, WindowsAccount, o.Home, LogPath(o.Home))
+	// The self-update helper (ID11): the virtual account can't write %ProgramFiles%.
+	if err := installHelper(m, o.Binary, o.Home, w.out); err != nil {
+		return err
+	}
 	if o.NoStart {
 		return nil
 	}
@@ -236,6 +243,13 @@ func withService(f func(*mgr.Service) error) error {
 
 func (w *scm) Uninstall(ctx context.Context) error {
 	home := w.InstalledHome()
+	if m, err := connect(); err == nil {
+		err = uninstallHelper(ctx, m)
+		m.Disconnect()
+		if err != nil {
+			return fmt.Errorf("remove %s: %w", HelperName, err)
+		}
+	}
 	return withService(func(s *mgr.Service) error {
 		if err := stopService(ctx, s); err != nil {
 			return err
@@ -288,6 +302,7 @@ func (w *scm) Status(ctx context.Context) (Status, error) {
 		st.Home = homeFromArgs(splitCommandLine(c.BinaryPathName))
 		st.Detail = "account " + c.ServiceStartName
 	}
+	st.UpgradeHelper = helperStatus()
 	q, err := s.Query()
 	if err != nil {
 		return st, err

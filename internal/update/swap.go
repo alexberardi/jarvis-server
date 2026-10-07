@@ -13,12 +13,16 @@ import (
 
 // The swap, the rollback and the start-time state machine.
 //
-//	stage ──(writable)──▶ Swap ─────────────────────▶ swapped ──gate ok──▶ (result: succeeded)
+//	stage ──(binary dir writable)──▶ Swap ──────────▶ swapped ──gate ok──▶ (result: succeeded)
 //	  │                                                  │
-//	  └─(binary dir not writable: systemd system unit)   ├─gate fails / 2 failed starts
-//	     staged ──PreStart (ExecStartPre=+, root)──▶ ────┘        ▼
-//	                                                     rollback_requested ──PreStart / in
-//	                                                     process──▶ Rollback (result: rolled_back)
+//	  └─(not writable: system unit, LaunchDaemon, SCM)   ├─gate fails / 2 failed starts
+//	     staged ──PrivilegedStep (helper)──▶ ────────────┘        ▼
+//	                                                     rollback_requested
+//	                                     writable: Rollback ─────┤
+//	                         not writable: PrivilegedStep restores jarvisd.prev
+//	                                     ▼                       │
+//	                              binary_restored ──next start───┴──▶ databases, result:
+//	                                                                   rolled_back
 
 // ErrNeedPrivilege means this process can't write the executable's directory; a privileged
 // pre-start (or `sudo jarvisd upgrade`) has to finish the step.
@@ -216,24 +220,13 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 		res.Outcome = ResultFailed
 		return &res, finish(p, res)
 	case StateSwapped, StateRollbackRequested:
+		if err := restorePrevBinary(p); err != nil {
+			return nil, err
+		}
+	case StateBinaryRestored:
+		// A privileged helper already put the previous binary back; the databases are ours.
 	default:
 		return nil, fmt.Errorf("update: unknown upgrade state %q", m.State)
-	}
-	if !CanWrite(p.Exe) {
-		return nil, fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
-	}
-	// Every path comes from p (the executable, the home), never from the marker: the marker
-	// lives in the data directory, which the service account can write, and this may run as
-	// root (the systemd pre-start helper).
-	prev := p.Prev()
-	tmp := filepath.Join(filepath.Dir(p.Exe), ".jarvisd.rollback")
-	if err := copyFile(prev, tmp); err != nil {
-		return nil, fmt.Errorf("update: restore %s: %w", prev, err)
-	}
-	keepRolledBack(p)
-	if err := installBinary(p, tmp, false); err != nil {
-		os.Remove(tmp)
-		return nil, err
 	}
 	for file, snap := range m.Snapshots {
 		if !snapshotPathsOK(p, file, snap) {
@@ -292,25 +285,39 @@ func snapshotPathsOK(p Paths, file, snap string) bool {
 	return true
 }
 
+// restorePrevBinary puts <exe>.prev back over the executable, keeping the binary it replaces
+// as RolledBack. It is the binary half of every rollback: Rollback (in process, or `sudo
+// jarvisd upgrade --rollback`), RestorePrevious and the privileged helper's (PrivilegedStep).
+// Every path comes from p (the executable), never from the marker: the marker lives in the
+// data directory, which the service account can write, and the caller may be root.
+func restorePrevBinary(p Paths) error {
+	prev := p.Prev()
+	if _, err := os.Stat(prev); err != nil {
+		return fmt.Errorf("update: no previous binary to restore: %w", err)
+	}
+	if !CanWrite(p.Exe) {
+		return fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
+	}
+	tmp := filepath.Join(filepath.Dir(p.Exe), ".jarvisd.rollback")
+	if err := copyFile(prev, tmp); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("update: restore %s: %w", prev, err)
+	}
+	keepRolledBack(p)
+	if err := installBinary(p, tmp, false); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // RestorePrevious puts Prev back in place with no upgrade in progress (a manual rollback after
 // an upgrade passed its gate) and records it in last-upgrade.json as rolled back from `to`
 // (the version that was running) to `from` (Prev's; "" when unknown). Databases are left
 // alone: if the newer version migrated them, the downgrade guard refuses to start and the
 // snapshots under BackupsDir are the way back.
 func RestorePrevious(p Paths, from, to, reason string) (*Result, error) {
-	if _, err := os.Stat(p.Prev()); err != nil {
-		return nil, fmt.Errorf("update: no previous binary to restore: %w", err)
-	}
-	if !CanWrite(p.Exe) {
-		return nil, fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
-	}
-	tmp := filepath.Join(filepath.Dir(p.Exe), ".jarvisd.rollback")
-	if err := copyFile(p.Prev(), tmp); err != nil {
-		return nil, err
-	}
-	keepRolledBack(p)
-	if err := installBinary(p, tmp, false); err != nil {
-		os.Remove(tmp)
+	if err := restorePrevBinary(p); err != nil {
 		return nil, err
 	}
 	res := Result{Outcome: ResultRolledBack, From: from, To: to, Reason: reason, At: time.Now().UTC()}
@@ -320,10 +327,12 @@ func RestorePrevious(p Paths, from, to, reason string) (*Result, error) {
 	return &res, nil
 }
 
-// PreStart does the pending file work before jarvisd opens its database: swap a staged
-// release in, or carry out a requested rollback. It runs as the systemd ExecStartPre=+ helper
-// (root) and at the start of serve (a no-op when the helper already did it). version is the
-// running binary's. It returns the action taken ("", "swapped", "rolled_back").
+// PreStart does the pending file work at the start of serve, before jarvisd opens its
+// database: swap a staged release in or carry out a requested rollback when this process can
+// write the binary (else ErrNeedPrivilege: a privileged helper does that part, see
+// PrivilegedStep), and finish a rollback a helper began (StateBinaryRestored). version is the
+// running binary's. It returns the action taken ("", "swapped", "rolled_back",
+// "rollback_finished": the binary running is already the restored one).
 func PreStart(ctx context.Context, p Paths, version string) (string, *Marker, error) {
 	CleanupOld(p)
 	m, err := ReadMarker(p)
@@ -345,6 +354,13 @@ func PreStart(ctx context.Context, p Paths, version string) (string, *Marker, er
 			return "", m, err
 		}
 		return "rolled_back", m, nil
+	case StateBinaryRestored:
+		// The helper restored the binary this process runs: finish here (database snapshot,
+		// result) and carry on.
+		if _, err := Rollback(ctx, p, ""); err != nil {
+			return "", m, err
+		}
+		return "rollback_finished", m, nil
 	}
 	return "", m, nil
 }

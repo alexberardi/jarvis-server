@@ -342,8 +342,9 @@ func testLaunchd(t *testing.T, euid int, sudoUser string) (*launchd, *fakeRun, *
 	var chowns []chownCall
 	l := &launchd{
 		out: &bytes.Buffer{}, run: f.run, plistPath: filepath.Join(root, "LaunchDaemons", LaunchdLabel+".plist"),
-		euid:   func() int { return euid },
-		getenv: func(k string) string { return map[string]string{"SUDO_USER": sudoUser}[k] },
+		helperPath: filepath.Join(root, "LaunchDaemons", HelperLabel+".plist"),
+		euid:       func() int { return euid },
+		getenv:     func(k string) string { return map[string]string{"SUDO_USER": sudoUser}[k] },
 		lookupUser: func(n string) (*user.User, error) {
 			if n == "alex" {
 				return &user.User{Username: n, Uid: "501", Gid: "20", HomeDir: filepath.Join(root, "Users", "alex")}, nil
@@ -356,27 +357,37 @@ func testLaunchd(t *testing.T, euid int, sudoUser string) (*launchd, *fakeRun, *
 		},
 		settle: 0,
 	}
+	f.fail["launchctl print "+helperTarget] = errors.New("Could not find service")
 	return l, f, &chowns, root
 }
 
 func TestLaunchdInstall(t *testing.T) {
 	l, f, chowns, root := testLaunchd(t, 0, "alex")
 	ctx := context.Background()
-	loaded := false
+	loaded, helperLoaded := false, false
 	f.hook = func(line string) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		switch {
-		case strings.HasPrefix(line, "launchctl bootstrap"):
+		switch line {
+		case "launchctl bootstrap system " + l.plistPath:
 			loaded = true
-		case strings.HasPrefix(line, "launchctl bootout"):
+		case "launchctl bootout " + target:
 			loaded = false
+		case "launchctl bootstrap system " + l.helperPath:
+			helperLoaded = true
+		case "launchctl bootout " + helperTarget:
+			helperLoaded = false
 		}
 		if loaded {
 			delete(f.fail, "launchctl print "+target)
 			f.out["launchctl print "+target] = "system/net.jarvisautomation.jarvisd = {\n\tstate = running\n\tpid = 777\n\tlast exit code = (never exited)\n}\n"
 		} else {
 			f.fail["launchctl print "+target] = errors.New("Could not find service")
+		}
+		if helperLoaded {
+			delete(f.fail, "launchctl print "+helperTarget)
+		} else {
+			f.fail["launchctl print "+helperTarget] = errors.New("Could not find service")
 		}
 	}
 	f.fail["launchctl print "+target] = errors.New("Could not find service")
@@ -386,23 +397,33 @@ func TestLaunchdInstall(t *testing.T) {
 	home := filepath.Join(root, "Users", "alex", ".jarvisd")
 	want := []string{
 		"launchctl print " + target,
+		"launchctl print " + helperTarget,
 		"launchctl print " + target,
 		"launchctl bootstrap system " + l.plistPath,
 		"launchctl enable " + target,
+		"launchctl print " + helperTarget,
+		"launchctl bootstrap system " + l.helperPath,
 		"launchctl kickstart " + target,
 	}
 	if !slices.Equal(f.calls, want) {
 		t.Fatalf("calls\n%q\nwant\n%q", f.calls, want)
 	}
-	if !slices.Contains(*chowns, chownCall{home, 501, 20}) || !slices.Contains(*chowns, chownCall{filepath.Join(home, "jarvisd.env"), 501, 20}) {
+	if !slices.Contains(*chowns, chownCall{home, 501, 20}) || !slices.Contains(*chowns, chownCall{filepath.Join(home, "jarvisd.env"), 501, 20}) ||
+		!slices.Contains(*chowns, chownCall{filepath.Join(home, "updates", "requests"), 501, 20}) {
 		t.Errorf("chowns %v", *chowns)
+	}
+	// The updater LaunchDaemon: root (no UserName), woken by the request queue in the home.
+	hb, _ := os.ReadFile(l.helperPath)
+	if strings.Contains(string(hb), "UserName") || !strings.Contains(string(hb), "<string>"+filepath.Join(home, "updates", "requests")+"</string>") ||
+		!strings.Contains(string(hb), "<string>--owner</string>\n\t\t<string>alex</string>") || !helperLoaded {
+		t.Errorf("helper plist (loaded %v):\n%s", helperLoaded, hb)
 	}
 	b, _ := os.ReadFile(l.plistPath)
 	if !strings.Contains(string(b), "<string>alex</string>") || l.InstalledHome() != home {
 		t.Errorf("plist:\n%s", b)
 	}
 	st, err := l.Status(ctx)
-	if err != nil || !st.Running || st.PID != 777 {
+	if err != nil || !st.Running || st.PID != 777 || !strings.Contains(st.UpgradeHelper, HelperLabel+" (loaded") {
 		t.Fatalf("status %+v %v", st, err)
 	}
 
@@ -411,7 +432,8 @@ func TestLaunchdInstall(t *testing.T) {
 	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd"}); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(f.calls, "launchctl bootout "+target) {
+	if !slices.Contains(f.calls, "launchctl bootout "+target) || !slices.Contains(f.calls, "launchctl bootout "+helperTarget) ||
+		!helperLoaded {
 		t.Errorf("reinstall calls %q", f.calls)
 	}
 
@@ -427,6 +449,9 @@ func TestLaunchdInstall(t *testing.T) {
 	}
 	if _, err := os.Stat(l.plistPath); !errors.Is(err, os.ErrNotExist) {
 		t.Error("plist not removed")
+	}
+	if _, err := os.Stat(l.helperPath); !errors.Is(err, os.ErrNotExist) || helperLoaded {
+		t.Error("helper not removed")
 	}
 	if _, err := os.Stat(home); err != nil {
 		t.Error("uninstall must keep the data")
@@ -456,7 +481,7 @@ func TestLaunchdRefusals(t *testing.T) {
 	}
 	// --run-as names the account without sudo's help.
 	l, _, _, _ := testLaunchd(t, 0, "")
-	l.run = (&fakeRun{fail: map[string]error{"launchctl print " + target: errors.New("no")}}).run
+	l.run = (&fakeRun{fail: map[string]error{"launchctl print " + target: errors.New("no"), "launchctl print " + helperTarget: errors.New("no")}}).run
 	if err := l.Install(ctx, InstallOptions{Binary: "/b", RunAs: "alex", NoStart: true}); err != nil {
 		t.Fatal(err)
 	}

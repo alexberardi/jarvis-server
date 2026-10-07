@@ -7,3 +7,4 @@
 /internal/voice/sherpa/libs/
 /.models/
 /.contract.env
+/.helper-e2e/
