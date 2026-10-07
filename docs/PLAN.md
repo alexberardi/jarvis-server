@@ -164,7 +164,7 @@ Platforms: linux/amd64, linux/arm64, darwin/arm64 and **windows/amd64**, all nat
 ### 3.5 Repository layout (`jarvis-server`)
 
 ```
-cmd/jarvisd/            serve | migrate | import-legacy | doctor | engines
+cmd/jarvisd/            serve | migrate | doctor | engines
 internal/platform/      httpx (router, errors, SSE, chunked), authn (JWT HS256+RS256, node, app, admin),
                         settings (definitions, cascade, cache, /settings router), db (sqlite, sqlc, goose),
                         queue, blob, mqtt (broker + req/resp), logging (slog → logs module), mdns, engines
@@ -197,7 +197,7 @@ Go code follows TDD per RULES.md, plus `go test -race`. Coverage target: 80%.
 
 **Strangler caveat:** while modules are split between Go (SQLite) and Python (Postgres), each side owns its own data. Modules move with their data.
 
-**Legacy data import (wanted, not required):** `jarvisd import-legacy --from postgres://…` reads each legacy DB at alembic head and writes the module's SQLite tables.
+**Legacy data import: dropped (ID6, 2026-10-07; clean-start cutover).** Was: `jarvisd import-legacy --from postgres://…` reads each legacy DB at alembic head and writes the module's SQLite tables.
 
 - **Covered:** users, households, nodes and keys, app clients, settings, routines, memories (re-embedded), inbox, rooms and devices.
 - **Blob files** are copied from S3/SeaweedFS.
@@ -267,7 +267,7 @@ OCR moves to the embedded queue and the blob store, keeping its HTTP API, becaus
 
 - Release binaries and image, plus the install script.
   - Installer spec: [`docs/install/00-installers.md`](install/00-installers.md) covers the legacy installers' fates, per-OS service registration, secrets, upgrades/rollback, legacy coexistence and import, doctor integration, and the port plan I0–I9. Open questions are in [`docs/install/QUESTIONS.md`](install/QUESTIONS.md).
-- `import-legacy`.
+- ~~`import-legacy`~~ dropped (ID6: clean-start cutover).
 - Re-provision jarvis-dev and then the prod nodes.
 - Shrink or absorb jarvis-admin. Update the `./jarvis` CLI and jarvis-installer.
   - Admin absorb spec (D9): [`docs/admin/00-inventory.md`](admin/00-inventory.md) covers the page and route fates, the same-origin gateway on 7710, the first-run wizard, the build/embed plan and the agent-sized port plan A0–A10. Open questions are in [`docs/admin/QUESTIONS.md`](admin/QUESTIONS.md).

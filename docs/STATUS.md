@@ -127,6 +127,7 @@ Update it at the end of every working session, and whenever a task finishes or a
   - A timezone UI (household timezone is taken from the most recently seen node today).
   - A really nice logging system to replace the simple admin Logs page (AD9).
   - Permanent jarvis-dev PulseAudio fix (above).
+  - Node re-provisioning keeps Wi-Fi (factory reset wipes it today): needed for the clean-start cutover (ID6).
   - A controlled benchmark: legacy stack vs jarvisd on the same box and model (server overhead, first-audio latency, memory, CPU); jarvisd voice traces need per-span timings first.
 - **2026-10-07 (cont.): Phase 5c done.** Seven sub-systems ported by parallel agents in worktrees, merged onto main by the coordinator (all cc tests + race green):
   - **doc 12 packages:** install/uninstall/revert (5 min pickup, verify + 15 min, D39), command-data browser, node tools view; Forge test install dropped (D5). `pantry.base_url` reaches nodes (`pantry_url` in payload/verify) and `/services` (`jarvis-pantry`, synced at startup).

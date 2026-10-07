@@ -25,6 +25,7 @@ the doctor `--fix` mechanics (§6.1), and no GPU/model prefetch (§6.2, settled 
 | ID3 | 2026-10-07 | IQ3 thin installers | **(a) thin scripts, logic in Go**: scripts detect/download/verify/place, then `jarvisd service install`; jarvisd generates every secret (0600) and reads its own `jarvisd.env` for unset variables; the service definition carries only `--home`. |
 | ID4 | 2026-10-07 | IQ4 legacy admin tokens | **(a) unset by default**; `jarvisd admin-token create <auth\|config\|cc>` generates one into `jarvisd.env` on demand. |
 | ID5 | 2026-10-07 | IQ5 firewall | **(a) ask, default yes** (`sudo jarvisd doctor --fix`); non-interactive applies only with `--yes`; private LAN subnets only; rules tagged `jarvisd` and removed on uninstall. |
+| ID6 | 2026-10-07 | IQ6 cutover data | **(b) start clean; `import-legacy` dropped from Phase 6** (user: removes a ton of complexity). Prod scale checked read-only: 10 users, 8 households, 2 active nodes, 2 memories, 2 routines, 2 contacts. Legacy Postgres kept read-only after cutover for manual recovery. Follow-up: node re-provisioning keeps Wi-Fi (STATUS finding 5). The legacy-JWT-key copy in the decision log no longer applies. |
 
 ## Queue
 
