@@ -153,10 +153,13 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 			contact.Name, req.Business)
 	}
 
-	if resolved != "" && lineType == "unknown" && s.Provider != nil {
-		lctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		lineType = normalizeLineType(s.Provider.LineType(lctx, resolved))
-		cancel()
+	if resolved != "" && lineType == "unknown" {
+		// The lookup bills the household's own account; none configured leaves it unknown.
+		if tel, err := s.Telephony(ctx, hh); err == nil {
+			lctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			lineType = normalizeLineType(tel.Provider.LineType(lctx, resolved))
+			cancel()
+		}
 	}
 
 	initiator := s.initiatorName(ctx, req.UserID)

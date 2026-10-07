@@ -58,6 +58,7 @@ var processStart = time.Now()
 
 // displayNames label each module's card on the Settings page.
 var displayNames = map[string]string{
+	"admin":  "Admin & updates",
 	"auth":   "Accounts & sign-in",
 	"cc":     "Command center",
 	"config": "Service registry",
@@ -87,6 +88,19 @@ func (m *Module) mountBFF(mux *http.ServeMux, deps module.Deps) {
 	mux.Handle("GET /api/traces/{id}", gated(m.handleTrace))
 	mux.Handle("GET /api/prompt-provider", gated(m.handlePromptProvider))
 	mux.Handle("PUT /api/prompt-provider", gated(m.handlePutPromptProvider))
+	// A4: logs (AD9), connections (AD7), the update check (AD5).
+	mux.Handle("GET /api/logs", gated(m.handleLogs))
+	mux.Handle("GET /api/logs/sources", gated(m.handleLogSources))
+	mux.Handle("GET /api/logs/stream", gated(m.handleLogStream))
+	mux.Handle("GET /api/connections", gated(m.handleConnections))
+	mux.Handle("POST /api/connections/services", gated(m.handleAddService))
+	mux.Handle("DELETE /api/connections/services/{name}", gated(m.handleRemoveService))
+	mux.Handle("POST /api/connections/apps", gated(m.handleCreateApp))
+	mux.Handle("POST /api/connections/apps/{app_id}/rotate", gated(m.handleRotateApp))
+	mux.Handle("POST /api/connections/apps/{app_id}/revoke", gated(m.handleRevokeApp))
+	mux.Handle("GET /api/update", gated(m.handleUpdate))
+	mux.Handle("POST /api/update/check", gated(m.handleUpdateCheck))
+	mux.Handle("PUT /api/update/settings", gated(m.handleUpdateSettings))
 	// Open while no superuser exists (the wizard's Check step runs before Account), gated after.
 	mux.Handle("GET /api/doctor", open(m.handleDoctor))
 	// Always reachable: the reduced view anonymously, the full one with a superuser token.
@@ -111,8 +125,10 @@ type serviceSettings struct {
 // settingsSources lists the ready settings services by module name.
 func (m *Module) settingsSources() []SettingsSource {
 	var out []SettingsSource
-	for _, s := range m.Settings {
-		if s != nil && s.Settings() != nil {
+	seen := map[string]bool{}
+	for _, s := range append([]SettingsSource{m}, m.SettingsSources...) {
+		if s != nil && s.Settings() != nil && !seen[s.Name()] {
+			seen[s.Name()] = true
 			out = append(out, s)
 		}
 	}

@@ -89,6 +89,8 @@ func modules() []module.Module {
 	var ttsm *ttsmod.Module
 	var notif *notifmod.Module
 	var cc *ccmod.Module
+	var logs *logsmod.Module
+	var cfg *configmod.Module
 	for _, m := range mods {
 		switch x := m.(type) {
 		case *authmod.Module:
@@ -103,6 +105,10 @@ func modules() []module.Module {
 			notif = x
 		case *ccmod.Module:
 			cc = x
+		case *logsmod.Module:
+			logs = x
+		case *configmod.Module:
+			cfg = x
 		}
 	}
 	superuser := settings.SuperuserGuard(auth.VerifyUser)
@@ -186,13 +192,15 @@ func modules() []module.Module {
 			// The BFF calls the modules in process (A3).
 			for _, s := range mods {
 				if src, ok := s.(adminmod.SettingsSource); ok {
-					c.Settings = append(c.Settings, src)
+					c.SettingsSources = append(c.SettingsSources, src)
 				}
 			}
 			c.Traces, c.Prompts = cc, cc
 			c.Accounts = auth
 			c.Models = llm
 			c.Exposure = exposure(served)
+			// A4: logs (AD9), connections (AD7: registry + app clients).
+			c.Logs, c.Registry, c.Apps = logs, cfg, auth
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)

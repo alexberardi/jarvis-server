@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -22,41 +23,55 @@ import (
 // household admin flips an allowlisted set of household-scoped settings; any member reads them.
 // The allowlist is the security boundary: this route is never a household-admin write to any
 // other CC setting. D40 Q6 keeps all 12 legacy keys; D19 adds memory.enabled and
-// memory.extraction_enabled so a household can turn learning off.
+// memory.extraction_enabled so a household can turn learning off. AD6 adds the household's own
+// Twilio account (phone.twilio_*): read back only as the household's own value (never the
+// system default's), and the SID and auth token are write-only ("********" once set).
 
 const settingWebScrapingExternal = "web_scraping.allow_external"
 
 type householdSetting struct {
 	key, typ string // typ: "bool" | "int" | "string"
+	// own: read the household's own row only (no cascade to the system default or env).
+	// secret: never echo the value; "********" when set, null when not.
+	own, secret bool
 }
+
+// e164 is a phone number in international format (the Twilio from number).
+var e164 = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
 
 // householdControllable is HOUSEHOLD_CONTROLLABLE_SETTINGS, in its legacy order (the GET
 // response's key order).
 var householdControllable = []householdSetting{
-	{settingWebSearch, "bool"},
-	{settingWebScrapingExternal, "bool"},
-	{settingProposalsEnabled, "bool"},
-	{phone.SettingEnabled, "bool"},
-	{phone.SettingPlanTTL, "int"},
-	{phone.SettingRetentionDays, "int"},
-	{phone.SettingMaxCallSeconds, "int"},
-	{phone.SettingCallsPerDay, "int"},
-	{phone.SettingMonthlyMinutes, "int"},
-	{phone.SettingMaxConcurrent, "int"},
-	{settingHouseholdLocation, "string"},
-	{settingPersona, "string"},
-	{settingMemoryEnabled, "bool"},     // D19
-	{settingExtractionEnabled, "bool"}, // D19
+	{key: settingWebSearch, typ: "bool"},
+	{key: settingWebScrapingExternal, typ: "bool"},
+	{key: settingProposalsEnabled, typ: "bool"},
+	{key: phone.SettingEnabled, typ: "bool"},
+	{key: phone.SettingPlanTTL, typ: "int"},
+	{key: phone.SettingRetentionDays, typ: "int"},
+	{key: phone.SettingMaxCallSeconds, typ: "int"},
+	{key: phone.SettingCallsPerDay, typ: "int"},
+	{key: phone.SettingMonthlyMinutes, typ: "int"},
+	{key: phone.SettingMaxConcurrent, typ: "int"},
+	{key: settingHouseholdLocation, typ: "string"},
+	{key: settingPersona, typ: "string"},
+	{key: settingMemoryEnabled, typ: "bool"},     // D19
+	{key: settingExtractionEnabled, typ: "bool"}, // D19
+	// AD6: the household's own Twilio account.
+	{key: phone.SettingTwilioAccountSID, typ: "string", own: true, secret: true},
+	{key: phone.SettingTwilioAuthToken, typ: "string", own: true, secret: true},
+	{key: phone.SettingTwilioFromNumber, typ: "string", own: true},
 }
 
-func householdSettingType(key string) (string, bool) {
+func householdSettingType(key string) (householdSetting, bool) {
 	for _, s := range householdControllable {
 		if s.key == key {
-			return s.typ, true
+			return s, true
 		}
 	}
-	return "", false
+	return householdSetting{}, false
 }
+
+const masked = "********"
 
 // householdSettingDefinitions declares the allowlisted keys nothing else declares yet.
 func householdSettingDefinitions() []settings.Definition {
@@ -84,6 +99,22 @@ func (m *Module) handleGetHouseholdSettings(w http.ResponseWriter, r *http.Reque
 	}
 	values := pyjson.NewObject()
 	for _, s := range householdControllable {
+		if s.own {
+			v, found, err := m.settings.GetExact(ctx, s.key, settings.Scope{HouseholdID: hh})
+			if err != nil {
+				m.internalError(w, err)
+				return
+			}
+			switch {
+			case !found:
+				values.Set(s.key, nil)
+			case s.secret:
+				values.Set(s.key, masked)
+			default:
+				values.Set(s.key, toPyValue(v))
+			}
+			continue
+		}
 		v, err := m.settings.Get(ctx, s.key, settings.Scope{HouseholdID: hh})
 		if err != nil {
 			m.internalError(w, err)
@@ -129,7 +160,7 @@ func (m *Module) handlePutHouseholdSetting(w http.ResponseWriter, r *http.Reques
 	}
 
 	// The allowlist first (404 leaks nothing to a non-admin), then the role.
-	typ, ok := householdSettingType(key)
+	hs, ok := householdSettingType(key)
 	if !ok {
 		detail(w, http.StatusNotFound, "Setting is not household-controllable: "+key)
 		return
@@ -139,10 +170,28 @@ func (m *Module) handlePutHouseholdSetting(w http.ResponseWriter, r *http.Reques
 		m.writeErr(w, err)
 		return
 	}
-	coerced, cerr := coerceHouseholdWrite(value, typ)
+	coerced, cerr := coerceHouseholdWrite(value, hs.typ)
 	if cerr != "" {
 		detail(w, http.StatusBadRequest, fmt.Sprintf("Invalid value for %s: %s", key, cerr))
 		return
+	}
+	if hs.own {
+		// Credentials are strings; "" and null clear the household's own value. Errors never
+		// echo the value.
+		str, isStr := coerced.(string)
+		if coerced != nil && !isStr {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("Invalid value for %s: expected a string", key))
+			return
+		}
+		str = strings.TrimSpace(str)
+		if key == phone.SettingTwilioFromNumber && str != "" && !e164.MatchString(str) {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("Invalid value for %s: expected an E.164 number like +15551234567", key))
+			return
+		}
+		coerced = str
+		if str == "" {
+			coerced = nil
+		}
 	}
 	if key == settingPersona {
 		if n := utf8.RuneCountInString(pyjson.Str(coerced)); n > prompts.PersonaMaxChars {
@@ -159,7 +208,11 @@ func (m *Module) handlePutHouseholdSetting(w http.ResponseWriter, r *http.Reques
 	out := pyjson.NewObject()
 	out.Set("success", true)
 	out.Set("key", key)
-	out.Set("value", coerced)
+	if hs.secret && coerced != nil {
+		out.Set("value", masked) // write-only: never echo a secret
+	} else {
+		out.Set("value", coerced)
+	}
 	writePy(w, http.StatusOK, out)
 }
 

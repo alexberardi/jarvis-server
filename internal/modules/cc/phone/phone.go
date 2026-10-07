@@ -103,15 +103,16 @@ type CallSnapshot struct {
 	ConfirmedAt time.Time
 }
 
-// Options are the bootstrap/secret values (env, never the settings DB: the telephony
-// credentials stay out of the settings table, as they stayed in the gateway's env).
+// Options are the bootstrap values (env). The telephony credentials are per-household
+// settings (AD6, telephony.go), not options.
 type Options struct {
 	// PublicURL is the public https base a tunnel maps to the CC listener (Twilio reaches the
 	// media WebSocket through it). PublicWSSURL overrides the derived wss base.
 	PublicURL    string
 	PublicWSSURL string
-	// AuthToken is the provider's webhook signing key (Twilio auth token). Empty rejects every
-	// media WebSocket: without it nothing can prove a stream came from the provider.
+	// AuthToken is the signing key for the single-provider path only (Service.Provider set);
+	// otherwise each call verifies with its household's resolved auth token. Empty rejects
+	// every media WebSocket on that path.
 	AuthToken string
 }
 
@@ -127,9 +128,15 @@ type Service struct {
 	Notify   Notifier
 	Names    NameResolver
 	Blobs    blob.Store
-	// Provider places and ends calls; nil means no telephony is configured (a confirmed call
-	// fails with an honest card).
+	// Provider, when set, places and ends every household's calls, signed with
+	// Options.AuthToken (the single-provider path: tests, a fake). Nil (production) resolves a
+	// provider per call from the household's credentials (Telephony): household settings →
+	// system default → EnvCredentials; none anywhere is a clear "phone not configured".
 	Provider Provider
+	// EnvCredentials are the TWILIO_* environment values, the last fallback.
+	EnvCredentials Credentials
+	// NewProvider builds a provider from resolved credentials; nil builds the Twilio client.
+	NewProvider func(Credentials) Provider
 	// Search finds a business's number on the web (gated on web_search.enabled).
 	Search   servertools.WebSearcher
 	Fetch    *servertools.Fetcher

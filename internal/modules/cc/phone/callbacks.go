@@ -89,6 +89,16 @@ func (s *Service) ConfirmCall(ctx context.Context, cb CallbackContext) CallbackR
 		s.resumeErrand(ctx, sess)
 		return cbErr(refusal)
 	}
+	// AD6: no telephony account for this household is said plainly, and the plan stays a
+	// draft so a tap after an admin adds the credentials still works.
+	if _, err := s.Telephony(ctx, cb.HouseholdID); err != nil {
+		if !isNotConfigured(err) {
+			s.log().Error("phone: telephony lookup failed", "err", err)
+			return cbErr("Phone calls are temporarily unavailable.")
+		}
+		s.log().Warn("phone: confirm refused: telephony not configured", "household", cb.HouseholdID, "err", err)
+		return cbErr(NotConfiguredMessage(err))
+	}
 	dialed, err := NormalizeUS(strings.TrimSpace(dataStr(cb.Data, "dialed_number")))
 	if err != nil {
 		return cbErr(err.Error())
@@ -121,7 +131,7 @@ func (s *Service) ConfirmCall(ctx context.Context, cb CallbackContext) CallbackR
 	sess.DialedNumber, sess.Details, sess.NumberEdited = dialed, details, edited == 1
 	uid := cb.UserID
 	sess.ConfirmedBy = &uid
-	if err := s.enqueueDial(sess); err != nil {
+	if err := s.enqueueDial(ctx, sess); err != nil {
 		s.log().Error("phone: dial hand-off failed", "session", sess.ID, "err", err)
 		_, _ = s.transition(ctx, sess, StateFailed, map[string]any{"error_message": "dial enqueue failed: " + err.Error()})
 		s.resumeErrand(ctx, sess)

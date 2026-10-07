@@ -16,7 +16,7 @@ func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
 	for _, d := range Definitions() {
 		defs[d.Key] = d.Type
 	}
-	if len(householdControllable) != 14 {
+	if len(householdControllable) != 17 {
 		t.Fatal(len(householdControllable))
 	}
 	for _, s := range householdControllable {
@@ -36,7 +36,8 @@ func TestHouseholdSettingsGet(t *testing.T) {
 		`"proposals.enabled":false,"phone_calls.enabled":false,"phone_calls.plan_ttl_minutes":20,` +
 		`"phone_calls.audio_retention_days":30,"phone_calls.max_call_seconds":600,"phone_calls.calls_per_day":10,` +
 		`"phone_calls.monthly_minutes_cap":60,"phone_calls.max_concurrent_calls":1,"household.location":"",` +
-		`"persona.household_prompt":` + jsonStr(prompts.DefaultPersona) + `,"memory.enabled":true,"memory.extraction_enabled":true}}`
+		`"persona.household_prompt":` + jsonStr(prompts.DefaultPersona) + `,"memory.enabled":true,"memory.extraction_enabled":true,` +
+		`"phone.twilio_account_sid":null,"phone.twilio_auth_token":null,"phone.twilio_from_number":null}}`
 	if got := string(bytes.TrimSpace(r.body)); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

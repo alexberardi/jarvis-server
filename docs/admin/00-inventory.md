@@ -442,6 +442,59 @@ The install script (Phase 6) installs the binary and service unit, starts jarvis
   options}`; `PUT /api/prompt-provider {value}` overrides (`""`/`null` clears; unknown → 422). The
   Models page offers the pick-list when `derived` is empty.
 
+*As built (A4; interfaces `LogStore`, `Registry`, `AppClients` wired in `cmd/jarvisd/main.go`; every route
+superuser-gated, a nil interface answers 503):*
+
+- **#7 Logs (AD9)**, `internal/modules/admin/logs.go` over logs' new in-process API (`logs.Filter`,
+  `Query`, `After`, `LatestID`, `Sources`; `internal/modules/logs/inprocess.go`). Shared filters: `service`,
+  `node_id` (context.node_id), `level` (comma list, exact), `min_level` (that level and worse), `since`/`until`
+  (RFC 3339), `q` (case-insensitive literal substring of message or context, not a regexp). Bad values are
+  422s.
+  - `GET /api/logs[?…&limit=1..1000 (default 200)&cursor=]` → `{logs: [{id, timestamp (RFC 3339 UTC), service,
+    level, message, context, node_id?}], next_cursor}`, newest first; `next_cursor` (`"<ts>_<id>"`, opaque)
+    fetches the next older page, `null` on the last.
+  - `GET /api/logs/sources[?since=]` → `{services, nodes, since}` (default the last 24 h), for the dropdowns.
+  - `GET /api/logs/stream[?filters&after=<id>]` → `text/event-stream` read with `fetch()` (the bearer header
+    rules out `EventSource`): one event per entry (`id: <id>`, `data: <entry JSON>`), `: ping` every 15 s
+    when idle, polled every second. Starts after the newest entry; `after=` or `Last-Event-ID` resumes with
+    no gap. The legacy app-credential `/api/v0/logs/stream` is unchanged.
+- **#8 Connections (AD7)**, `connections.go` over config's `Services`/`ProbeAll`/`AddService`/
+  `RemoveService` (`internal/modules/config/inprocess.go`; rows carry `managed`: `listener`, `broker`,
+  `setting` (synced from a jarvisd setting, e.g. jarvis-pantry) or `""`) and auth's `AppClients`/
+  `CreateAppClient`/`RotateAppClient`/`RevokeAppClient` (`internal/modules/auth/apps_inprocess.go`; the
+  legacy `/admin/app-clients*` handlers now call them).
+  - `GET /api/connections[?health=false]` → `{listeners: [{name, url, port, managed, health}], external:
+    [{name, url, health_path, description, managed, removable, health}], apps: [{app_id, name, is_active,
+    created_at, last_rotated_at}]}`. `health` is config's `{healthy, latency_ms, error}` (http rows GET their
+    health path, the MQTT broker a TCP connect; all concurrent), `null` with `health=false`.
+  - `POST /api/connections/services {name, url, health_path?, description?}` → 201 entry. `url` is a base URL
+    (scheme http/https/ws/wss/mqtt/mqtts, host, optional port; no path/user/query); 422 invalid, 409 taken or
+    a jarvisd-managed name. `DELETE /api/connections/services/{name}` → 204, 404, 409 for managed rows.
+  - `POST /api/connections/apps {app_id, name}` → 201 `{app_id, name, is_active, created_at,
+    last_rotated_at, app_key}` (app_id `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, name 1–128; 409 taken).
+    `POST …/apps/{id}/rotate` → `{app_id, app_key, last_rotated_at, is_active: true}` (reactivates, the
+    "reissue" action). `POST …/apps/{id}/revoke` → `{app_id, is_active: false}`. Key responses are
+    `Cache-Control: no-store`; keys are shown once and never logged (only app_id is audit-logged).
+- **#9 Update check (AD5, check only)**, `update.go`. New `admin` settings service (`updates.enabled`, bool,
+  default false, env fallback `JARVIS_ALLOW_UPDATES`), listed in the Settings page as "Admin & updates".
+  - `GET /api/update` (cached 1 h), `POST /api/update/check` (forced), `PUT /api/update/settings {enabled}`
+    (stores it; never checks by itself). All answer `{updates_enabled, checked, reason, checked_at,
+    current_version, latest_version, update_available, up_to_date, prerelease, release_url, release_notes,
+    published_at, platform ("linux-amd64"…), asset {name, url, size}, checksums_url, install_command,
+    install_hint}`.
+  - Off: **no outbound request** (tested with a transport that fails the test), `checked: false` + reason.
+  - On: GitHub `GET /repos/alexberardi/jarvis-server/releases?per_page=30`; drafts skipped; prereleases only
+    when the running build is a prerelease; highest semver wins. `asset` is
+    `jarvisd-<tag>-<os>-<arch>.tar.gz` (`.zip` on Windows); `install_command` only when the release carries
+    `install.sh` (`curl -fsSL … | sh`) or `install.ps1` (`irm … | iex`), which I8 will publish; until then
+    `install_hint` says to download, verify against SHA256SUMS and replace the binary.
+  - Honesty (I1): `up_to_date` is true only after a successful check of a comparable version. A failed
+    check is `checked: false` with the reason; a dev build is `checked: true` but neither available nor up
+    to date, with a reason.
+- **AD6 Twilio** (cc, not a BFF route): `internal/modules/cc/phone/telephony.go`, STATUS 2026-10-07 (A4). The system default is
+  set through `PUT /api/settings/cc/phone.twilio_*` (masked in `GET /api/settings`); households set their
+  own from the app (`PUT /api/v0/mobile/household/{id}/settings/phone.twilio_*`, write-only).
+
 Optional, AQ8: `POST /api/system/restart`. It exits with a restart code when a supervisor is detected
 (systemd `INVOCATION_ID`, launchd, a Windows service); otherwise it returns 409 with the command to run.
 
@@ -693,7 +746,7 @@ they can run in parallel worktrees.
 | **A1** | `internal/modules/admin` skeleton: `ListenerAdmin`/7710/`jarvis-admin` in config and registry, `web/admin/embed.go`, static handler (fallback, MIME table, cache and CSP headers, `JARVIS_ADMIN_UI_DIR`), `GET /health`. Wire it in `main.go`. Add the release-job embed check. | `jarvisd serve` serves the SPA on :7710, doctor lists the admin port, and the static tests from §9 pass. |
 | **A2** | Gateway: superuser gate with the bootstrap allow-list, the runner `Handler(listener)` lookup, the pass-through prefix table (§3.2), and the empty-JSON-body rule (I9). | Login through `/api/auth/login` and `/api/admin/users` work against a real jarvisd; gate tests pass. **Done 2026-10-07**, with AD2 (setup token) in the same pass. |
 | **A3** | BFF part 1: settings aggregator (module accessors), `/api/system/info`, `/api/traces*` (export cc methods), `/api/doctor` (move `doctorPorts` out of `cmd/`), `/api/setup/state`. Plus G1 (`DefaultPromptProvider` wiring) if AQ4 = (a). | Unit and contract tests pass; Settings, Users, Traces and Nodes render with **no SPA change** beyond S2/S13. **Done 2026-10-07** (G1 was already wired; AD4 route added; see "As built (A3)" under §6.2). Unit + end-to-end tests and a smoke run against a real jarvisd; no `contract/` admin test yet and no SPA change. |
-| **A4** | BFF part 2: `/api/logs*` (export logs methods, fetch-stream tail), `/api/connections*` (export config and auth methods), `/api/update*` plus the `admin` settings set (AQ5), Twilio secret settings (AQ6). | Unit tests pass; the opt-in-off path makes no network call (test with a failing transport). |
+| **A4** | BFF part 2: `/api/logs*` (export logs methods, fetch-stream tail), `/api/connections*` (export config and auth methods), `/api/update*` plus the `admin` settings set (AQ5), Twilio secret settings (AQ6). | Unit tests pass; the opt-in-off path makes no network call (test with a failing transport). **Done 2026-10-07** (see "As built (A4)" under §6.2); no SPA change yet. |
 | **A5** | SPA, small edits: the setup token (read `#token=` from the `/setup` URL fragment, strip it from the address bar, send it as `X-Jarvis-Setup-Token` on `POST /api/auth/setup`; on 401/403 ask the operator to paste it from `<home>/setup-token`), the `errorMessage` helper, LoginPage probe removal (S2), AccountStep through `AuthContext.setup` (O5), the must-change-password screen (O4), Nodes on `/api/admin/*` with Train Adapter cut (S13), the Settings restart action replaced (AQ8) with `llm.<label>.*` hidden (I4), the SystemInfoBar fields. | `tsc -b`, lint and Vitest are green, and a manual pass on jarvisd. |
 | **A6** | SPA Models page rewrite on the model manager (S8): catalog with fit, HF browser, installs with progress, installed with delete/force, labels editor, hardware/engines panel, remote (LD2), HF token prompt, prompt-provider display (AQ4). Delete `data/models.ts`, Quick Sets and LlmSetupWizard. | Install, assign and delete a real small model on this box through the UI; Vitest covers the install flow. |
 | **A7** | SPA setup wizard rewrite (S3, AQ3): Check, Account, Models (reusing A6 components), Done. App gate on `/api/setup/state` (S1). | A wiped `~/.jarvis` reaches a working voice turn through the browser only, on CUDA and on Metal. |

@@ -222,6 +222,39 @@ func (s *Service) Get(ctx context.Context, key string, sc Scope) (Value, error) 
 	return Value{Value: s.fallback(def)}, nil
 }
 
+// GetExact reads key at exactly sc, with no cascade and no env or default fallback: found is
+// false when that scope has no row or the row's value is NULL or empty. For values that must
+// come as a set from one level (per-household credentials), where the cascade would mix them.
+func (s *Service) GetExact(ctx context.Context, key string, sc Scope) (value any, found bool, err error) {
+	def, ok := s.defs[key]
+	if !ok {
+		return nil, false, ErrUnknownKey
+	}
+	where := "household_id IS NULL AND node_id IS NULL AND user_id IS NULL"
+	var args []any
+	for _, l := range cascade {
+		if l.need(sc) {
+			where, args = l.where, l.args(sc)
+			break
+		}
+	}
+	var raw sql.NullString
+	var vt string
+	err = s.db.Read.QueryRowContext(ctx,
+		"SELECT value, value_type FROM "+s.table+" WHERE key = ? AND "+where+" ORDER BY id LIMIT 1",
+		append([]any{key}, args...)...).Scan(&raw, &vt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("settings: get %s: %w", key, err)
+	}
+	if !raw.Valid || raw.String == "" {
+		return nil, false, nil
+	}
+	return s.coerce(raw.String, Type(vt), def), true, nil
+}
+
 func (s *Service) fallback(def Definition) any {
 	if def.EnvFallback != "" {
 		if v, ok := lookupEnv(s.getenv, def.EnvFallback); ok {
