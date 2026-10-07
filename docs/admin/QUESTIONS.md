@@ -22,6 +22,7 @@ path handling (§11.3), and error-shape handling (§3.2).
 | AD1 | 2026-10-07 | AQ1 origin model | **(c) in-process gateway on 7710.** Superuser-gated `/api/*`; allow-listed module routes dispatched in process; BFF endpoints call modules through Go interfaces. No CORS, no secrets in the browser. |
 | AD2 | 2026-10-07 | AQ2 setup token | **(c) one-time setup token.** `<home>/setup-token` (0600) written on first start; URL `http://<lan-ip>:7710/setup#token=…` logged and printed by the install script; `/auth/setup` requires it only while no superuser exists. |
 | AD3 | 2026-10-07 | AQ3 wizard shape | **Check → Account → Hardware → Models → Done** (user asked for a hardware step). Hardware sits after Account (settings writes need the superuser) and before Models (recommendations depend on what is on the GPU). Detected backend/GPUs shown with every choice pre-filled to the detection default and a one-click "Looks good". Choices: engine flavour (only flavours this platform has builds for), STT on GPU/CPU + device, per-label devices when >1 GPU. TTS and speaker ID are CPU-only (embedded sherpa libs are CPU builds), so no toggle is shown; GPU sherpa is a possible later addition. |
+| AD4 | 2026-10-07 | AQ4 prompt provider | **(a) derive + override.** Effective provider shown with its source ("from model" / "set by you"); override allowed; pick-list only when the model declares none. Derivation already wired (987f4ea). |
 | AD10 | 2026-10-07 | AQ10 code move | **(a) plain copy**, done in A0 at jarvis-admin `74e3637`. |
 
 ## Queue
