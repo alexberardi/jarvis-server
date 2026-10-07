@@ -266,6 +266,7 @@ OCR moves to the embedded queue and the blob store, keeping its HTTP API, becaus
 ### Phase 6: packaging and install
 
 - Release binaries and image, plus the install script.
+  - Installer spec: [`docs/install/00-installers.md`](install/00-installers.md) covers the legacy installers' fates, per-OS service registration, secrets, upgrades/rollback, legacy coexistence and import, doctor integration, and the port plan I0–I9. Open questions are in [`docs/install/QUESTIONS.md`](install/QUESTIONS.md).
 - `import-legacy`.
 - Re-provision jarvis-dev and then the prod nodes.
 - Shrink or absorb jarvis-admin. Update the `./jarvis` CLI and jarvis-installer.
