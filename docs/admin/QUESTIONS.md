@@ -19,7 +19,8 @@ path handling (§11.3), and error-shape handling (§3.2).
 
 | # | Date | Question | Decision |
 |---|---|---|---|
-| | | | |
+| AD1 | 2026-10-07 | AQ1 origin model | **(c) in-process gateway on 7710.** Superuser-gated `/api/*`; allow-listed module routes dispatched in process; BFF endpoints call modules through Go interfaces. No CORS, no secrets in the browser. |
+| AD10 | 2026-10-07 | AQ10 code move | **(a) plain copy**, done in A0 at jarvis-admin `74e3637`. |
 
 ## Queue
 
