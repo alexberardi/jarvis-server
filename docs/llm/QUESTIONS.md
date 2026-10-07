@@ -18,6 +18,7 @@ These are asked **one at a time**, most consequential first. Record each answer 
 | LD3 | 2026-10-06 | LQ3 | **No automatic model download; a first-class model manager instead** (user: "a really simple way to install one via Hugging Face"). jarvisd starts without a model (`/health`: LLM "not configured") and owns a model-management API: hardware-aware recommendations from the catalog, **install from Hugging Face** by picking a catalog entry or pasting a repo (and choosing a GGUF file/quant, with size and fit-for-VRAM shown), resumable downloads with progress and checksum verification on the durable queue, the matching llama-server engine fetched in the same job, list/delete installed models, and assigning models to the `live`/`background` labels (LD1). The UI is a first-class screen in admin (setup flow + a Models page), built on that API. |
 | LD4 | 2026-10-06 | LQ4 | **Image requests follow the slot label strictly** (consistent with LD1): OCR vision is background work → background label; images in voice/chat turns → live. A slot whose model has no vision projector answers a clear error (no silent fallback to the other slot). Admin shows which labels can see images and offers adding the mmproj when installing a model (LD3). Prod fix at cutover: give the background model its projector. User expects to rework vision routing later. |
 | LD5 | 2026-10-06 | LQ5 | **Prod cutover starts clean** (user: "I'll want to see the pain points of a fresh install"). No 1:1 translation of the hand-edited compose/.env; prod goes through the same first-run path as a new install: the model manager (LD3) recommends and downloads the 27B + projector, and slot settings come from catalog defaults, then get tuned in admin. The old `~/.jarvis/.models/` is left untouched (not imported); the user can delete it. Record every friction point hit during the prod cutover as install-UX input. |
+| LD6 | 2026-10-06 | LQ6 | **Embeddings follow the configured engine; memories carry over on a switch.** The embedding source is whichever backend is configured (llama-server with an embedding GGUF, vLLM `/v1/embeddings`, or a remote OpenAI-compatible embeddings endpoint). Every stored vector is tagged with the embedding model id; changing engine or embedding model triggers a background re-embed (the existing embedding sweep, D11) of every memory whose tag differs. Memory text never changes. Until a memory is re-embedded, recall falls back to keyword search for it (M1). Similarity thresholds are stored per embedding model, with catalog defaults. The port starts with MiniLM (same 384 dims and thresholds); trying a better model later is a setting plus a re-embed, evaluated on real memories. |
 
 ## Queue
 
@@ -126,6 +127,14 @@ A stronger small model, such as bge-small or nomic-embed (about 100–300 MB), w
 - **(b) Switch to a better model now,** and recalibrate the thresholds on prod's memories.
 
 **Recommendation: (a) for the port.** Make the embedding model a setting, so (b) can be tried after the cutover against a recall eval.
+
+### LQ8 [scope] vLLM: a supervised engine jarvisd runs, or only a remote endpoint?
+
+**Context.** PLAN §7 cut the in-process vLLM backend (Python) and kept vLLM reachable as a remote OpenAI-compatible server (LD2). The user says vLLM is supported. jarvisd can't host vLLM in-process (Python), but it can supervise a `vllm serve` subprocess like llama-server (internal/platform/engines), when vLLM is installed on the box (Linux + CUDA/ROCm only; no Windows/macOS).
+
+**Options.** (a) Remote only: point a slot label at a vLLM server's URL (LD2). (b) Also a supervised engine: if `vllm` is installed, admin can choose it as the engine for a label; jarvisd starts/stops/health-checks `vllm serve` with the model, GPU and settings from admin. (c) (b), and jarvisd also installs vLLM (a Python env) — heavy, contradicts the single-binary goal.
+
+**Recommendation: (b).** No Python inside jarvisd; vLLM stays an optional, user-installed engine for big Linux GPU boxes, managed like llama-server.
 
 ### LQ7 [behaviour] Should background jobs be allowed to "think" without a limit?
 
