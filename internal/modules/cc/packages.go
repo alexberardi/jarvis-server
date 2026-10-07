@@ -272,12 +272,16 @@ func (m *Module) transitionPkg(ctx context.Context, rid, nodeID string, fn func(
 
 // requirePkgHousehold is require_household_access: the admin key bypasses; a JWT caller must
 // be a member of the household among all of their memberships (D5). A node with no household
-// fails closed for every JWT caller (D40 12.Q5).
+// fails closed for members (D40 12.Q5); a superuser, the install's operator, may still manage
+// it, as on every other node route (requireNodeAccess).
 func (m *Module) requirePkgHousehold(ctx context.Context, auth provAuth, householdID string) error {
 	if auth.admin {
 		return nil
 	}
 	if householdID == "" {
+		if auth.user.IsSuperuser {
+			return nil
+		}
 		return fail(http.StatusForbidden, "Not authorized")
 	}
 	return m.requireRole(ctx, auth.user.ID, householdID, authn.RoleMember)

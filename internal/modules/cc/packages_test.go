@@ -299,12 +299,13 @@ func TestPackageHouseholdRules(t *testing.T) {
 	body := map[string]any{"command_name": "weather", "github_repo_url": "u"}
 	e.do("POST", "/api/v0/nodes/n1/package-install", body, bearer(multi)).want(201)
 
-	// D40 12.Q5: a node with no household fails closed for every JWT caller; the admin key works.
+	// D40 12.Q5: a node with no household fails closed for members; a superuser and the admin
+	// key can still manage it (as on the other node routes).
 	if _, err := e.d.Write.Exec(`INSERT INTO cc_nodes (node_id, room) VALUES ('loose', 'attic')`); err != nil {
 		t.Fatal(err)
 	}
 	e.do("POST", "/api/v0/nodes/loose/package-install", body, bearer(multi)).detail(403, "Not authorized")
-	e.do("POST", "/api/v0/nodes/loose/package-install", body, bearer(super)).detail(403, "Not authorized")
+	e.do("POST", "/api/v0/nodes/loose/package-install", body, bearer(super)).want(201)
 	rid := e.do("POST", "/api/v0/nodes/loose/package-install", body, adminH()).want(201).json()["id"].(string)
 	var hh string
 	e.d.Read.QueryRow(`SELECT household_id FROM cc_package_install_requests WHERE id = ?`, rid).Scan(&hh)
