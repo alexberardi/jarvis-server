@@ -28,6 +28,15 @@ import (
 // InstallJobType is the queue job that downloads a model (and its projector and engine).
 const InstallJobType = "llm.models.install"
 
+// InstallSmallJobType is a second download lane for small installs (voice models,
+// embeddings, small engines), so they don't wait behind a multi-gigabyte LLM. Each lane runs
+// one install at a time, so at most two downloads share the link.
+const InstallSmallJobType = "llm.models.install.small"
+
+// defaultSmallInstallBytes is the largest install (model + projector + engine still to fetch)
+// that goes to the small lane.
+const defaultSmallInstallBytes = 2 << 30
+
 // installMaxAttempts bounds retries of transient failures within one install slice.
 const installMaxAttempts = 6
 
@@ -56,6 +65,8 @@ type Manager struct {
 	SliceDuration time.Duration
 	// ProgressEvery throttles progress writes (default 1s).
 	ProgressEvery time.Duration
+	// SmallInstallBytes is the size limit of the small install lane (default 2 GiB).
+	SmallInstallBytes int64
 
 	mu      sync.Mutex
 	running map[int64]context.CancelCauseFunc
@@ -68,17 +79,31 @@ func (m *Manager) slice() time.Duration {
 	return 8 * time.Minute
 }
 
-// RegisterJobs registers the install job on the queue.
+// RegisterJobs registers the install jobs (both lanes) on the queue.
 func (m *Manager) RegisterJobs(q *queue.Queue) {
-	q.Register(InstallJobType, queue.Handler{
-		Concurrency: 1,
-		MaxAttempts: installMaxAttempts,
-		Lease:       m.slice() + 2*time.Minute,
-		Backoff: func(attempt int) time.Duration {
-			return min(5*time.Second<<min(attempt-1, 6), 5*time.Minute)
-		},
-		Run: m.runInstall,
-	})
+	for _, t := range []string{InstallJobType, InstallSmallJobType} {
+		q.Register(t, queue.Handler{
+			Concurrency: 1,
+			MaxAttempts: installMaxAttempts,
+			Lease:       m.slice() + 2*time.Minute,
+			Backoff: func(attempt int) time.Duration {
+				return min(5*time.Second<<min(attempt-1, 6), 5*time.Minute)
+			},
+			Run: m.runInstall,
+		})
+	}
+}
+
+// installLane picks the job type for an install with total bytes still to download.
+func (m *Manager) installLane(total int64) string {
+	limit := m.SmallInstallBytes
+	if limit <= 0 {
+		limit = defaultSmallInstallBytes
+	}
+	if total <= limit {
+		return InstallSmallJobType
+	}
+	return InstallJobType
 }
 
 func (m *Manager) hardware(ctx context.Context) engine.Hardware {
@@ -368,16 +393,17 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest) (inst Install
 		return Install{}, false, err
 	}
 	payload, _ := json.Marshal(map[string]int64{"install_id": id})
-	jobID, err := m.Queue.Enqueue(ctx, InstallJobType, payload, queue.Options{DedupKey: fmt.Sprintf("llm.install:%d", id)})
+	jobID, err := m.Queue.Enqueue(ctx, m.installLane(total), payload, queue.Options{DedupKey: fmt.Sprintf("llm.install:%d", id)})
 	if err != nil {
+		return Install{}, false, err
+	}
+	// Only the job id: the worker may already have picked the job up, and a whole-row write
+	// here would put a running (or finished) install back to "queued".
+	if err := m.Store.SetInstallJob(ctx, id, jobID); err != nil {
 		return Install{}, false, err
 	}
 	inst, err = m.Store.GetInstall(ctx, id)
 	if err != nil {
-		return Install{}, false, err
-	}
-	inst.JobID = jobID
-	if err := m.Store.UpdateInstall(ctx, inst); err != nil {
 		return Install{}, false, err
 	}
 	return inst, false, nil
@@ -464,7 +490,11 @@ func (m *Manager) runInstall(ctx context.Context, job queue.Job) ([]byte, error)
 	case errors.Is(sctx.Err(), context.DeadlineExceeded):
 		// Slice over: continue in a fresh job (and a fresh lease).
 		payload, _ := json.Marshal(map[string]int64{"install_id": inst.ID})
-		id, qerr := m.Queue.Enqueue(ctx, InstallJobType, payload, queue.Options{})
+		lane := job.Type
+		if lane == "" {
+			lane = InstallJobType
+		}
+		id, qerr := m.Queue.Enqueue(ctx, lane, payload, queue.Options{})
 		if qerr != nil {
 			return nil, qerr
 		}
@@ -1086,9 +1116,16 @@ func (m *Manager) otherPrograms(ctx context.Context, residents []Resident) []Res
 	}
 	running := map[string]bool{}
 	for _, in := range m.Labels.Instances() {
+		// The process's launch time, not the state's: an engine still loading at detection
+		// (or that went unhealthy and back since) already held its memory then, and counting
+		// it as other programs too would double it (A10 F8).
+		launched := in.Started
+		if launched.IsZero() {
+			launched = in.Since
+		}
 		switch in.State {
-		case engines.Healthy, engines.Unhealthy, engines.Draining:
-			if !in.Since.After(hw.DetectedAt) {
+		case engines.Starting, engines.Healthy, engines.Unhealthy, engines.Draining:
+			if !launched.After(hw.DetectedAt) {
 				for _, l := range in.Labels {
 					running[l] = true
 				}
@@ -1168,6 +1205,41 @@ func without(rs []Resident, labels ...string) []Resident {
 		}
 	}
 	return out
+}
+
+// fitFor judges a model of kind for the labels that take that kind: next to the residents
+// without those labels (the model would replace what they run, so it is not counted against
+// itself or its predecessor), and as "cpu" when every such label runs on the CPU (the
+// embeddings label by default), where VRAM doesn't matter (A10 F8).
+func (m *Manager) fitFor(ctx context.Context, hw engine.Hardware, kind string, weights, kvPerTok int64, n int, residents []Resident) Fit {
+	var labels []string
+	cpuOnly := m.Settings != nil
+	for _, d := range engine.LabelDefs {
+		if d.ModelKind != kind {
+			continue
+		}
+		labels = append(labels, d.Name)
+		if cpuOnly && m.Settings.Int(ctx, d.Prefix+".gpu_layers", settings.Scope{}) != 0 &&
+			m.Settings.String(ctx, d.Prefix+".gpu_backend", settings.Scope{}) != string(engine.FlavourCPU) {
+			cpuOnly = false
+		}
+	}
+	f := FitAlongside(hw, kind, weights, kvPerTok, n, without(residents, labels...))
+	if cpuOnly && len(labels) > 0 && f.Verdict != "in_binary" {
+		f = Fit{Verdict: "cpu", NeededMB: f.NeededMB, Context: f.Context, KVEstimate: f.KVEstimate}
+	}
+	return f
+}
+
+// entryFit is fitFor for a catalog entry (with its projector) at its default context.
+func (m *Manager) entryFit(ctx context.Context, hw engine.Hardware, e Entry, residents []Resident) Fit {
+	w := e.Size
+	if e.MMProj != "" {
+		if p, ok := CatalogEntry(e.MMProj); ok {
+			w += p.Size
+		}
+	}
+	return m.fitFor(ctx, hw, e.Kind, w, e.KVBytesPerTok, e.ContextDefault, residents)
 }
 
 // FitWarning says when a model being installed for engine labels won't fit on its card next

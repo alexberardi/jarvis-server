@@ -82,14 +82,14 @@ const superState: authApi.SetupState = {
   doctor: { status: 'ok', failing: [], ran_at: '' },
 }
 
-function renderWizard() {
+function renderWizard(needsSuperuser = true) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={qc}>
       <AuthProvider>
         <MemoryRouter initialEntries={['/setup']}>
           <Routes>
-            <Route path="/setup" element={<SetupWizard needsSuperuser />} />
+            <Route path="/setup" element={<SetupWizard needsSuperuser={needsSuperuser} />} />
             <Route path="/dashboard" element={<p>dashboard page</p>} />
             <Route path="/login" element={<p>login page</p>} />
           </Routes>
@@ -207,11 +207,12 @@ describe('setup wizard (AD3, AD3a)', () => {
     expect(screen.getByRole('switch', { name: /Speaker recognition/ })).toBeDisabled() // stt not listed here
     fireEvent.click(search)
     fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }))
-    await waitFor(() => expect(settings.updateSetting).toHaveBeenCalledTimes(1))
-    expect(settings.updateSetting).toHaveBeenCalledWith('cc', 'web_search.enabled', true)
+    await waitFor(() => expect(settings.updateSetting).toHaveBeenCalledWith('cc', 'web_search.enabled', true))
 
-    // Done.
+    // Done: recorded on the server, so no tab or browser resumes the wizard again (A10 F9).
     expect(await screen.findByText('Jarvis is set up')).toBeInTheDocument()
+    expect(settings.updateSetting).toHaveBeenCalledWith('admin', 'setup.completed', true)
+    expect(settings.updateSetting).toHaveBeenCalledTimes(2)
     expect(screen.getByText(/No language model is assigned yet/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Go to the dashboard/ }))
     expect(await screen.findByText('dashboard page')).toBeInTheDocument()
@@ -271,5 +272,26 @@ describe('setup wizard (AD3, AD3a)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }))
     await waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ stt: { gpu_backend: 'cpu' } }))
     expect(await screen.findByText(/Install recommended/)).toBeInTheDocument()
+  })
+
+  // A10 F9: closing the tab mid-download and signing in again (or another browser) used to land
+  // on the dashboard, skipping Privacy and Done; the server now says where setup stands.
+  it('resumes in a new tab from the server state', async () => {
+    localStorage.setItem('jarvis-admin:access_token', 'a')
+    localStorage.setItem('jarvis-admin:refresh_token', 'r')
+    localStorage.setItem('jarvis-admin:user', JSON.stringify({ id: 1, email: 'op@example.com', is_superuser: true }))
+    auth.getSetupState.mockResolvedValue({ ...superState, models_configured: true, setup_completed: false, setup_step: 'models' })
+    renderWizard(false)
+    expect(await screen.findByRole('heading', { name: /Models/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Privacy/ })).toBeDisabled()
+  })
+
+  it('forwards to the dashboard once setup was finished', async () => {
+    localStorage.setItem('jarvis-admin:access_token', 'a')
+    localStorage.setItem('jarvis-admin:refresh_token', 'r')
+    localStorage.setItem('jarvis-admin:user', JSON.stringify({ id: 1, email: 'op@example.com', is_superuser: true }))
+    auth.getSetupState.mockResolvedValue({ ...superState, setup_completed: true, setup_step: '' })
+    renderWizard(false)
+    expect(await screen.findByText('dashboard page')).toBeInTheDocument()
   })
 })

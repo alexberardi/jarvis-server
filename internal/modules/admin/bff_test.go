@@ -425,11 +425,29 @@ func TestSetupState(t *testing.T) {
 	if out["live_ready"] != false || out["models_configured"] != false {
 		t.Fatalf("unconfigured: %v", out)
 	}
+	// A10 F9: the wizard resumes from the install, not from one tab's storage.
+	if out["setup_completed"] != false || out["setup_step"] != "hardware" {
+		t.Fatalf("resume before models: %v", out)
+	}
 	// A loading model is configured but not ready.
 	e.m.Models = fakeModels{states: map[string]string{"live": "starting"}}
 	out = decode(t, send(e.mux, "GET", "/api/setup/state", "", root...))
-	if out["live_ready"] != false || out["models_configured"] != true {
+	if out["live_ready"] != false || out["models_configured"] != true || out["setup_step"] != "models" {
 		t.Fatalf("loading: %v", out)
+	}
+	// The wizard's last step records it finished: no more resuming.
+	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "admin.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	e.m.settings = newSettings(t, d, "admin", Definitions)
+	if err := e.m.settings.Set(context.Background(), SettingSetupCompleted, true, settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
+	out = decode(t, send(e.mux, "GET", "/api/setup/state", "", root...))
+	if out["setup_completed"] != true || out["setup_step"] != "" {
+		t.Fatalf("completed: %v", out)
 	}
 }
 

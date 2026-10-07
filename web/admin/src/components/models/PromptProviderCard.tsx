@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AlertTriangle, MessageSquareCode } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePromptProvider, useSetPromptProvider } from '@/hooks/useModelManager'
+import { useSetupState } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
 import { buttonClass, inputClass } from './styles'
 import { Pill, Section } from './ui'
@@ -18,6 +19,7 @@ const SOURCE_TEXT: Record<string, string> = {
 export default function PromptProviderCard() {
   const { data, isLoading, isError, error } = usePromptProvider()
   const set = useSetPromptProvider()
+  const setup = useSetupState()
   const [editing, setEditing] = useState(false)
   const [choice, setChoice] = useState('')
 
@@ -32,8 +34,15 @@ export default function PromptProviderCard() {
   }
 
   const options = data?.options ?? []
+  // A10 F18: with no live model assigned yet, "names none" is expected (installing one
+  // supplies it), so there is nothing to warn about or pick until one is. Unknown = assigned.
+  // While that is still loading, wait rather than flash the warning.
+  const awaitingModel =
+    (setup.data?.superuser === true && setup.data.models_configured === false) || (setup.isPending && !setup.isError)
+  const unset = Boolean(data && !data.derived && !data.value)
   // AD4: the pick-list is offered when the model declares no provider; otherwise "override".
-  const mustPick = Boolean(data && !data.derived && !data.value)
+  const mustPick = unset && !awaitingModel
+  const warn = Boolean(data && !data.valid && !(awaitingModel && unset))
 
   return (
     <Section
@@ -53,7 +62,13 @@ export default function PromptProviderCard() {
             )}
           </div>
 
-          {!data.valid && (
+          {awaitingModel && unset && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              It comes from the live model once one is assigned; catalog models name theirs.
+            </p>
+          )}
+
+          {warn && (
             <p role="alert" className="flex items-start gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               {data.effective
@@ -62,7 +77,7 @@ export default function PromptProviderCard() {
             </p>
           )}
 
-          {(editing || mustPick || !data.valid) && (
+          {(editing || mustPick || warn) && (
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="prompt-provider" className="sr-only">
                 Prompt provider
@@ -108,7 +123,7 @@ export default function PromptProviderCard() {
           )}
 
           <div className="flex flex-wrap gap-2">
-            {!editing && !mustPick && data.valid && (
+            {!editing && !mustPick && (data.valid || (awaitingModel && unset)) && (
               <button type="button" className={buttonClass.secondary} onClick={() => setEditing(true)}>
                 Override
               </button>

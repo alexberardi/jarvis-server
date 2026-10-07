@@ -151,6 +151,18 @@ try {
             Invoke-Native $Bin upgrade --version $Version
             return
         }
+        # Installed but not running: reinstall the service on the binary already here; nothing
+        # to download (A10 F21: the version is checked before any archive is fetched).
+        if ($cur -eq $Version -and -not $Force) {
+            Write-Host "jarvisd $Version is installed but not running; reinstalling its service (nothing to download)."
+            & $Bin service install
+            if ($LASTEXITCODE -eq 0) { Get-NativeOutput $Bin service status --wait 90s | Out-Null }
+            if ($LASTEXITCODE -ne 0) { throw "the jarvisd service is not healthy; see 'jarvisd service status' and $env:ProgramData\jarvisd\logs\jarvisd.log" }
+            Write-Host "jarvisd $Version is running."
+            & $Bin setup-link
+            $global:LASTEXITCODE = 0
+            return
+        }
     }
 
     # Signature, for a fresh install (or a jarvisd too old to upgrade itself): the downloaded

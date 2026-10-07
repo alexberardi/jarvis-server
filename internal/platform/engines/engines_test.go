@@ -210,14 +210,20 @@ func waitHealthy(t *testing.T, s *Supervisor) {
 func TestBecomesHealthyAndStops(t *testing.T) {
 	t.Parallel()
 	f := newFake(t)
+	before := time.Now()
 	s := start(t, f.spec(map[string]string{"HELPER_HEALTHY_AFTER": "150ms"}))
 	if st := s.State(); st != Starting {
 		t.Fatalf("state = %s, want starting while loading", st)
 	}
+	launched := s.Status().Started
 	waitHealthy(t, s)
 	st := s.Status()
 	if st.PID == 0 || st.Restarts != 0 {
 		t.Fatalf("status = %+v", st)
+	}
+	// Started is the process launch, unchanged by the state change; Since is the state's.
+	if launched.Before(before) || !st.Started.Equal(launched) || !st.Since.After(launched) {
+		t.Fatalf("started %v (launched %v), since %v", st.Started, launched, st.Since)
 	}
 	eventually(t, "output captured", func() bool {
 		out := s.Status().Output
@@ -226,7 +232,7 @@ func TestBecomesHealthyAndStops(t *testing.T) {
 	if err := s.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if st := s.Status(); st.State != Stopped || st.PID != 0 {
+	if st := s.Status(); st.State != Stopped || st.PID != 0 || !st.Started.IsZero() {
 		t.Fatalf("after stop: %+v", st)
 	}
 	if err := s.WaitHealthy(context.Background()); !errors.Is(err, ErrStopped) {

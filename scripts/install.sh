@@ -114,7 +114,9 @@ REL=${ASSET#jarvisd-}; REL=${REL%"-$OS-$ARCH.tar.gz"}
 [ -z "$VERSION" ] || [ "$VERSION" = "$REL" ] || die "asked for $VERSION but the release files are for $REL"
 VERSION=$REL
 
-CUR=""
+# The installed version is checked before anything else is downloaded (A10 F21): a re-run
+# of the same version fetches only SHA256SUMS.
+CUR="" REUSE=0
 [ -x "$BIN" ] && CUR=$("$BIN" version 2>/dev/null || echo unknown)
 if [ -n "$CUR" ]; then
   if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ] && "$BIN" service status $SVC >/dev/null 2>&1; then
@@ -132,6 +134,11 @@ if [ -n "$CUR" ]; then
     # shellcheck disable=SC2086 # RUN is sudo or nothing
     exec $RUN env JARVISD_RELEASE_BASE="$BASE" "$BIN" upgrade --version "$VERSION"
   fi
+  # Installed but not running: reinstall the service on the binary already here.
+  if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ]; then
+    say "jarvisd $VERSION is installed but not running; reinstalling its service (nothing to download)."
+    REUSE=1
+  fi
 fi
 
 # Signature, for a fresh install (or a jarvisd too old to upgrade itself). Releases are
@@ -141,25 +148,28 @@ fi
 # alone, with a warning (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
 # `minisign -v` must run: a version-manager shim with no version selected (mise, asdf) is on
 # PATH but fails every call, which would read as an INVALID signature.
-MINISIGN_OK=0
-if command -v minisign >/dev/null; then
-  if minisign -v >/dev/null 2>&1; then MINISIGN_OK=1; else warn "minisign is on PATH but doesn't run (\`minisign -v\` failed); treating it as not installed"; fi
+NEW=$BIN
+if [ $REUSE = 0 ]; then
+  MINISIGN_OK=0
+  if command -v minisign >/dev/null; then
+    if minisign -v >/dev/null 2>&1; then MINISIGN_OK=1; else warn "minisign is on PATH but doesn't run (\`minisign -v\` failed); treating it as not installed"; fi
+  fi
+  if [ $MINISIGN_OK = 1 ]; then
+    fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null || die "the release has no SHA256SUMS.minisig; not installing an unsigned release"
+    minisign -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID; not installing"
+    say "SHA256SUMS signature verified."
+  else
+    [ "${JARVISD_REQUIRE_SIGNATURE:-0}" = 1 ] && die "JARVISD_REQUIRE_SIGNATURE=1 but minisign is not installed"
+    warn "minisign is not installed, so the release signature is not checked (checksums only); install minisign for a verified first install. Upgrades are verified by jarvisd itself."
+  fi
+  say "Downloading jarvisd $VERSION for $OS-$ARCH..."
+  fetch "$ASSET" "$TMP/$ASSET" || die "could not download $(url "$ASSET")"
+  want=$(awk -v f="$ASSET" '$2 == f || $2 == "*" f {print $1; exit}' "$TMP/SHA256SUMS")
+  [ "$(sha256 "$TMP/$ASSET")" = "$want" ] || die "checksum mismatch for $ASSET (corrupt or tampered download)"
+  tar -xzf "$TMP/$ASSET" -C "$TMP"
+  NEW=$TMP/jarvisd-$VERSION-$OS-$ARCH/jarvisd
+  [ "$("$NEW" version)" = "$VERSION" ] || die "the downloaded jarvisd does not run here"
 fi
-if [ $MINISIGN_OK = 1 ]; then
-  fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null || die "the release has no SHA256SUMS.minisig; not installing an unsigned release"
-  minisign -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID; not installing"
-  say "SHA256SUMS signature verified."
-else
-  [ "${JARVISD_REQUIRE_SIGNATURE:-0}" = 1 ] && die "JARVISD_REQUIRE_SIGNATURE=1 but minisign is not installed"
-  warn "minisign is not installed, so the release signature is not checked (checksums only); install minisign for a verified first install. Upgrades are verified by jarvisd itself."
-fi
-say "Downloading jarvisd $VERSION for $OS-$ARCH..."
-fetch "$ASSET" "$TMP/$ASSET" || die "could not download $(url "$ASSET")"
-want=$(awk -v f="$ASSET" '$2 == f || $2 == "*" f {print $1; exit}' "$TMP/SHA256SUMS")
-[ "$(sha256 "$TMP/$ASSET")" = "$want" ] || die "checksum mismatch for $ASSET (corrupt or tampered download)"
-tar -xzf "$TMP/$ASSET" -C "$TMP"
-NEW=$TMP/jarvisd-$VERSION-$OS-$ARCH/jarvisd
-[ "$("$NEW" version)" = "$VERSION" ] || die "the downloaded jarvisd does not run here"
 
 if [ -z "$CUR" ]; then
   # A fresh install next to the legacy stack (ID7): jarvisd needs its ports.
@@ -177,15 +187,17 @@ if [ -z "$CUR" ]; then
   fi
 fi
 
-say "Installing $BIN..."
-$RUN mkdir -p "$BIN_DIR" "$LIB_DIR"
-[ -n "$CUR" ] && $RUN cp -p "$BIN" "$LIB_DIR/jarvisd.prev"
-$RUN cp "$NEW" "$BIN_DIR/.jarvisd.new" && $RUN chmod 755 "$BIN_DIR/.jarvisd.new" && $RUN mv -f "$BIN_DIR/.jarvisd.new" "$BIN"
+if [ $REUSE = 0 ]; then
+  say "Installing $BIN..."
+  $RUN mkdir -p "$BIN_DIR" "$LIB_DIR"
+  [ -n "$CUR" ] && $RUN cp -p "$BIN" "$LIB_DIR/jarvisd.prev"
+  $RUN cp "$NEW" "$BIN_DIR/.jarvisd.new" && $RUN chmod 755 "$BIN_DIR/.jarvisd.new" && $RUN mv -f "$BIN_DIR/.jarvisd.new" "$BIN"
+fi
 # Reinstalling the service rewrites its definition and restarts it on the new binary, then
 # waits for /health. An upgrade that doesn't come up goes back to the previous binary.
 # shellcheck disable=SC2086
 if ! $RUN "$BIN" service install $SVC || ! "$BIN" service status $SVC --wait 90s >/dev/null; then
-  if [ -n "$CUR" ]; then
+  if [ -n "$CUR" ] && [ $REUSE = 0 ]; then
     warn "jarvisd $VERSION did not come up; going back to $CUR"
     $RUN mv -f "$LIB_DIR/jarvisd.prev" "$BIN"
     $RUN "$BIN" service install $SVC || true

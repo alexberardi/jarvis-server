@@ -128,6 +128,9 @@ func TestLivenessDebounce(t *testing.T) {
 		e.d.Read.QueryRow(`SELECT last_seen FROM cc_nodes WHERE node_id = 'n1'`).Scan(&s)
 		return s
 	}
+	// The first contact always writes (registration's stamp doesn't count, A10 F19).
+	e.advance(10 * time.Second)
+	e.do("GET", "/api/v0/node/mqtt-credentials", nil, n.h()).want(200)
 	first := seen()
 	e.advance(30 * time.Second)
 	e.do("GET", "/api/v0/node/mqtt-credentials", nil, n.h()).want(200)

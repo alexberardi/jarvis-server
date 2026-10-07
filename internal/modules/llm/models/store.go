@@ -276,6 +276,13 @@ func (s *Store) UpdateInstall(ctx context.Context, i Install) error {
 	return err
 }
 
+// SetInstallJob records the queue job of a new install, unless a worker already recorded one.
+func (s *Store) SetInstallJob(ctx context.Context, id, jobID int64) error {
+	_, err := s.DB.Write.ExecContext(ctx, `
+		UPDATE llm_installs SET job_id = ? WHERE id = ? AND COALESCE(job_id, 0) = 0`, jobID, id)
+	return err
+}
+
 // SetInstallState changes only an install's state (and error), unless it is already final.
 func (s *Store) SetInstallState(ctx context.Context, id int64, state, errMsg string) (bool, error) {
 	res, err := s.DB.Write.ExecContext(ctx, `

@@ -36,12 +36,16 @@ export function saveStep(s: Step | null): void {
 
 export const idx = (s: Step) => STEPS.indexOf(s)
 
+/** 'server': signed in with nothing saved in this tab, so the install decides (A10 F9). */
+export type Initial = Step | 'server' | null
+
 /**
  * initialStep picks where the wizard opens. Before the first superuser exists it is Check (or
- * Account when that is where the tab was). Once signed in, a reload resumes where it was, never
- * before Hardware. Signed in with no wizard in progress means setup is over: null.
+ * Account when that is where the tab was). Once signed in, a reload resumes where this tab was,
+ * never before Hardware; a new tab or browser asks the server ('server'), which knows whether
+ * the wizard was finished and how far the install got.
  */
-export function initialStep(needsSuperuser: boolean, signedIn: boolean): Step | null {
+export function initialStep(needsSuperuser: boolean, signedIn: boolean): Initial {
   const saved = savedStep()
   if (!signedIn) {
     if (!needsSuperuser) return null
@@ -49,5 +53,10 @@ export function initialStep(needsSuperuser: boolean, signedIn: boolean): Step | 
   }
   if (saved && idx(saved) >= idx('hardware')) return saved
   if (saved || needsSuperuser) return 'hardware'
-  return null
+  return 'server'
+}
+
+/** serverStep turns /api/setup/state's setup_step into a step; null when setup is finished. */
+export function serverStep(step: string | undefined): Step | null {
+  return step && STEPS.includes(step as Step) && idx(step as Step) >= idx('hardware') ? (step as Step) : null
 }

@@ -374,7 +374,7 @@ func (m *Module) routineTargetUp(ctx context.Context, hh, nodeID string, now tim
 		return false
 	}
 	n, err := m.nodeByID(ctx, nodeID)
-	return err == nil && n.householdID.String == hh && n.isActive && n.online(now)
+	return err == nil && n.householdID.String == hh && n.isActive && n.reachable(now)
 }
 
 // pyAware renders an aware UTC time like Python's isoformat(): "...+00:00", microseconds

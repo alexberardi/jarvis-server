@@ -29,17 +29,18 @@ type nodeRow struct {
 	isActive        bool
 	protocols       sql.NullString
 	needsK2         bool
+	contacted       bool // false from registration until the node first reaches us (F19)
 }
 
 const nodeCols = `node_id, room, "user", voice_mode, last_seen, household_id, last_seen_version,
-	install_mode, is_busy, git_sha, is_active, protocols, needs_k2`
+	install_mode, is_busy, git_sha, is_active, protocols, needs_k2, contacted`
 
 type scanner interface{ Scan(...any) error }
 
 func scanNode(s scanner) (*nodeRow, error) {
 	var n nodeRow
 	err := s.Scan(&n.nodeID, &n.room, &n.user, &n.voiceMode, &n.lastSeen, &n.householdID, &n.lastSeenVersion,
-		&n.installMode, &n.isBusy, &n.gitSHA, &n.isActive, &n.protocols, &n.needsK2)
+		&n.installMode, &n.isBusy, &n.gitSHA, &n.isActive, &n.protocols, &n.needsK2, &n.contacted)
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +51,16 @@ func (m *Module) nodeByID(ctx context.Context, id string) (*nodeRow, error) {
 	return scanNode(m.deps.DB.Read.QueryRowContext(ctx, `SELECT `+nodeCols+` FROM cc_nodes WHERE node_id = ?`, id))
 }
 
+// online is legacy's is_online: last_seen within the threshold, which registration stamps.
 func (n *nodeRow) online(now time.Time) bool {
 	return n.lastSeen.Valid && !parseTS(n.lastSeen.String).Before(now.Add(-onlineThreshold))
+}
+
+// reachable gates round trips to the node (report_tools, tool calls, callbacks): online and
+// heard from at least once. A node registered but never connected would otherwise count as
+// online for 15 minutes and every round trip would wait out its timeout (A10 F19).
+func (n *nodeRow) reachable(now time.Time) bool {
+	return n.contacted && n.online(now)
 }
 
 func nullable(ns sql.NullString) any {
@@ -271,8 +280,8 @@ func createdNode(id, room, user, voiceMode, key string) map[string]any {
 // insertNode writes the local row; on failure the auth registration is rolled back (legacy
 // left it orphaned, §3.1).
 func (m *Module) insertNode(ctx context.Context, tx *sql.Tx, id, room, user, voiceMode, householdID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO cc_nodes (node_id, room, "user", voice_mode, household_id, last_seen)
-		VALUES (?, ?, ?, ?, ?, ?)`, id, room, user, voiceMode, householdID, dbTime(m.now()))
+	_, err := tx.ExecContext(ctx, `INSERT INTO cc_nodes (node_id, room, "user", voice_mode, household_id, last_seen, contacted)
+		VALUES (?, ?, ?, ?, ?, ?, 0)`, id, room, user, voiceMode, householdID, dbTime(m.now()))
 	return err
 }
 

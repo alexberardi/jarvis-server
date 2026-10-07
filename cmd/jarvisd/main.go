@@ -186,7 +186,7 @@ func modules() []module.Module {
 			c.SettingsWrite = superuser
 			c.Version = version
 			// The voice pipeline calls the other modules in process (5b).
-			c.LLM = llm.Service()
+			c.LLM = ccmod.WaitingLLM(llm.Service(), ccmod.ReadyWait)
 			c.STT = sttm
 			c.TTS = ccmod.TTSFrom(ttsm)
 			c.Notify = notif

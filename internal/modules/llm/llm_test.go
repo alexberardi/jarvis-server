@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -283,6 +284,65 @@ func TestNotLoaded(t *testing.T) {
 		if typ, msg := errType(t, r); r.status != 503 || typ != "model_not_loaded" || msg != "live model is loading: not loaded yet" {
 			t.Fatalf("stream=%v: %d %s", stream, r.status, r.body)
 		}
+	}
+}
+
+// A10 F22: after a restart or upgrade the live model reloads for 5-10 s; in-process voice and
+// chat calls (WithReadyWait) wait for it, bounded, instead of failing at once.
+func TestReadyWait(t *testing.T) {
+	e := setup(t)
+	old := readyPoll
+	readyPoll = 5 * time.Millisecond
+	t.Cleanup(func() { readyPoll = old })
+	good := e.res.eps[LabelLive]
+	req := ChatRequest{Label: LabelLive, Messages: []Message{{Role: "user", Content: TextContent("hi")}}}
+	svc := e.m.Service()
+
+	e.res.set(LabelLive, good, &NotReadyError{State: StateLoading, Reason: "starting"})
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		e.res.set(LabelLive, good, nil)
+	}()
+	if _, err := svc.Chat(WithReadyWait(e.ctx, 10*time.Second), req); err != nil {
+		t.Fatalf("waited chat: %v", err)
+	}
+
+	// Still loading when the wait runs out: 503 that says so.
+	e.res.set(LabelLive, good, &NotReadyError{State: StateLoading, Reason: "starting"})
+	start := time.Now()
+	_, err := svc.Chat(WithReadyWait(e.ctx, 40*time.Millisecond), req)
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 503 || !strings.Contains(ae.Message, "still loading after waiting 40ms") {
+		t.Fatalf("timeout: %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("wait not bounded")
+	}
+	// Without it (the HTTP API) and for a failed model, no wait.
+	for _, c := range []struct {
+		ctx context.Context
+		err error
+	}{
+		{e.ctx, &NotReadyError{State: StateLoading}},
+		{WithReadyWait(e.ctx, time.Hour), &NotReadyError{State: StateFailed, Reason: "exit 1"}},
+	} {
+		e.res.set(LabelLive, good, c.err)
+		start := time.Now()
+		if _, err := svc.Chat(c.ctx, req); err == nil || time.Since(start) > time.Second {
+			t.Fatalf("%v: err %v after %v", c.err, err, time.Since(start))
+		}
+	}
+	// Streams wait too.
+	e.res.set(LabelLive, good, &NotReadyError{State: StateLoading})
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		e.res.set(LabelLive, good, nil)
+	}()
+	ch, err := svc.Stream(WithReadyWait(e.ctx, 10*time.Second), req)
+	if err != nil {
+		t.Fatalf("waited stream: %v", err)
+	}
+	for range ch {
 	}
 }
 

@@ -4,7 +4,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
-import { setupKeys } from '@/hooks/useSetup'
+import { setupKeys, useSetupState } from '@/hooks/useSetup'
+import { updateSetting } from '@/api/settings'
 import AccountStep from '@/components/wizard/AccountStep'
 import CheckStep from '@/components/wizard/CheckStep'
 import DoneStep from '@/components/wizard/DoneStep'
@@ -12,7 +13,7 @@ import HardwareStep from '@/components/wizard/HardwareStep'
 import ModelsStep from '@/components/wizard/ModelsStep'
 import PrivacyStep from '@/components/wizard/PrivacyStep'
 import { buttonClass } from '@/components/models/styles'
-import { STEPS, TITLES, idx, initialStep, saveStep, type Step } from '@/components/wizard/steps'
+import { STEPS, TITLES, idx, initialStep, saveStep, serverStep, type Initial, type Step } from '@/components/wizard/steps'
 
 function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
   return (
@@ -53,15 +54,34 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   const { state } = useAuth()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [step, setStepState] = useState<Step | null>(() => initialStep(needsSuperuser, state.isAuthenticated))
+  const [initial, setStepState] = useState<Initial>(() => initialStep(needsSuperuser, state.isAuthenticated))
+  // A new tab or browser: where the install is, from the server (A10 F9).
+  const server = useSetupState(initial === 'server')
+  const d = server.data
+  let step: Step | null | 'wait' = initial === 'server' ? 'wait' : initial
+  if (initial === 'server') {
+    if (d?.superuser) step = serverStep(d.setup_step)
+    else if (server.isError || (d && !server.isFetching)) step = null
+    // Decided once: a later refetch (an install finishing) must not move the wizard.
+    if (step !== 'wait') setStepState(step)
+  }
 
   const go = (s: Step | null) => {
     saveStep(s)
     setStepState(s)
+    // Reaching Done finishes setup for every tab and browser: sign-ins stop resuming it.
+    if (s === 'done') updateSetting('admin', 'setup.completed', true).catch(() => {})
     // Each step reads the install as it is now (labels change as installs finish).
     void qc.invalidateQueries({ queryKey: setupKeys.state })
   }
 
+  if (step === 'wait') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-primary)] border-t-transparent" />
+      </div>
+    )
+  }
   // No `state.isLoading` gate: the session is restored synchronously, so isLoading is only
   // ever true during the setup call itself, and unmounting then wiped the Account form and
   // the reason a refused setup gives (A10). AccountStep shows its own "Creating...".

@@ -32,7 +32,13 @@ var Definitions = []settings.Definition{
 	{Key: SettingUpdatesEnabled, Category: "updates", Type: settings.Bool, Default: false, EnvFallback: EnvAllowUpdates,
 		Description: "Check GitHub for new jarvisd releases. Off by default: with it off jarvisd makes no " +
 			"update request at all."},
+	{Key: SettingSetupCompleted, Category: "setup", Type: settings.Bool, Default: false,
+		Description: "The setup wizard reached its last step. While off, signing in resumes the wizard " +
+			"where the install is (any tab or browser)."},
 }
+
+// SettingSetupCompleted records that the setup wizard was finished (A10 F9).
+const SettingSetupCompleted = "setup.completed"
 
 const (
 	// UpdateRepo is where releases are published.

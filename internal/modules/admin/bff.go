@@ -526,6 +526,20 @@ func (m *Module) isSuperuser(r *http.Request) bool {
 	return err == nil && u.IsSuperuser
 }
 
+// setupStep is where a signed-in superuser resumes the wizard, from the install itself rather
+// than one tab's storage (A10 F9): "" once it was finished, Models once a live model is
+// assigned (its downloads, then Privacy and Done), else Hardware.
+func setupStep(completed, modelsConfigured bool) string {
+	switch {
+	case completed:
+		return ""
+	case modelsConfigured:
+		return "models"
+	default:
+		return "hardware"
+	}
+}
+
 // handleSetupState is GET /api/setup/state, the SPA's boot gate and the setup wizard's driver
 // (AD3: Check → Account → Hardware → Models → Done). Anonymous callers get the reduced view
 // (needs_superuser, setup_token_required, version); a superuser also gets label states, the
@@ -571,6 +585,9 @@ func (m *Module) handleSetupState(w http.ResponseWriter, r *http.Request) {
 	out["models_configured"] = live != "" && live != llmmod.StateNotConfigured
 	out["hardware"] = hardware
 	out["hardware_url"] = "/api/llm/v1/hardware"
+	completed := m.settings != nil && m.settings.Bool(ctx, SettingSetupCompleted, settings.Scope{})
+	out["setup_completed"] = completed
+	out["setup_step"] = setupStep(completed, out["models_configured"] == true)
 
 	var prompt any
 	if m.Prompts != nil {

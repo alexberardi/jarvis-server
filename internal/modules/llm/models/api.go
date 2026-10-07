@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strconv"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
@@ -139,9 +138,9 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
 	residents := a.Manager.Residents(ctx)
 	items := []catalogItem{}
 	for _, e := range Catalog() {
-		// A model already assigned is judged next to the others, not next to itself.
-		others := slices.DeleteFunc(slices.Clone(residents), func(r Resident) bool { return r.Model == e.ID })
-		items = append(items, catalogItem{Entry: e, Fit: entryFitAlongside(hw, e, others), Installed: state[e.ID] == StateReady, State: state[e.ID]})
+		// Judged for the labels of its kind: next to the other engines, not to itself or to
+		// the model it would replace.
+		items = append(items, catalogItem{Entry: e, Fit: a.Manager.entryFit(ctx, hw, e, residents), Installed: state[e.ID] == StateReady, State: state[e.ID]})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": items, "recommended": Recommend(hw), "hardware": hw, "residents": residents})
 }
@@ -173,7 +172,7 @@ func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
 	residents := a.Manager.Residents(ctx)
 	choices := []hfChoice{}
 	for _, c := range Choices(repo) {
-		choices = append(choices, hfChoice{Choice: c, Fit: FitAlongside(hw, c.Kind, c.Size, 0, ctxLen, residents)})
+		choices = append(choices, hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, ctxLen, residents)})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices})
 }

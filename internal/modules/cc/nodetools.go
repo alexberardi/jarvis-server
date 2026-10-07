@@ -79,6 +79,9 @@ func (m *Module) requestNodeTools(ctx context.Context, nodeID string) (map[strin
 	return report, true
 }
 
+// errNodeNeverSeen: the node was registered but has never connected.
+var errNodeNeverSeen = errors.New("cc: the node has never connected")
+
 // reportTools is the one report_tools round trip every caller shares (node tools view, mobile
 // chat warmup, errand menus, signal reactions): publish with reply_request_id = the command's
 // request id (no `trusted`, D4) and wait up to timeout for the node's POST to
@@ -86,6 +89,10 @@ func (m *Module) requestNodeTools(ctx context.Context, nodeID string) (map[strin
 func (m *Module) reportTools(ctx context.Context, nodeID string, timeout time.Duration) (json.RawMessage, error) {
 	if m.bus == nil || !m.bus.Available() {
 		return nil, ErrNoBroker
+	}
+	// Registered but never connected: nothing will answer, so don't wait (A10 F19).
+	if row, err := m.nodeByID(ctx, nodeID); err == nil && !row.contacted {
+		return nil, errNodeNeverSeen
 	}
 	rid := uuid4()
 	m.bus.Expect(rid, nodeID)

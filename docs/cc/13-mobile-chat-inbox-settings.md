@@ -97,6 +97,12 @@ Pre-stream checks are ordinary HTTP errors, not SSE events:
 
 - `verify_household_role(member)` gives 403. It is a round trip to auth (doc 00).
 - `_validate_node_in_household` gives 404 with `"Node {id} not found in household {hh}"` (`:105-118`, `:575-576`).
+  - **Chat requires a node, in legacy too** (A10 F16). No virtual node and no server-tools-only mode: the
+    request needs `node_id`, the flow is built on the node (context, `report_tools`, tool dispatch), and the app
+    disables the input ("Select a node first") until one is picked. So a fresh install with no node can't chat.
+    jarvisd keeps the 404 but, when the household has **no nodes at all**, appends what to do:
+    `"…: this household has no Jarvis node yet. Chat runs through a node (…), so add one first (…)"`.
+    A server-only chat (server tools, no node) would be a product change for later, not parity.
 
 Response headers: `text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no` (`:578-586`).
 

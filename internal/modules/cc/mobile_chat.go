@@ -109,18 +109,28 @@ func (m *Module) chatNode(ctx context.Context, u authn.User, req chatRequest) (*
 	if err := m.requireRole(ctx, u.ID, req.HouseholdID, authn.RoleMember); err != nil {
 		return nil, err
 	}
-	notFound := fail(http.StatusNotFound, fmt.Sprintf("Node %s not found in household %s", req.NodeID, req.HouseholdID))
 	row, err := m.nodeByID(ctx, req.NodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, notFound
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if !row.householdID.Valid || row.householdID.String != req.HouseholdID {
-		return nil, notFound
+	if err != nil || !row.householdID.Valid || row.householdID.String != req.HouseholdID {
+		return nil, m.chatNodeNotFound(ctx, req)
 	}
 	return row, nil
+}
+
+// chatNodeNotFound is legacy's 404. Chat needs a node, in legacy too (its tools, room and
+// speaker context; the app disables the input until one is picked), so a fresh install with
+// none can't chat (A10 F16): for a household with no nodes the detail says what to do.
+func (m *Module) chatNodeNotFound(ctx context.Context, req chatRequest) error {
+	msg := fmt.Sprintf("Node %s not found in household %s", req.NodeID, req.HouseholdID)
+	var n int
+	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT COUNT(*) FROM cc_nodes WHERE household_id = ?`, req.HouseholdID).Scan(&n)
+	if err == nil && n == 0 {
+		msg += ": this household has no Jarvis node yet. Chat runs through a node (its commands, room and " +
+			"speaker), so add one first (in the mobile app: Nodes, Add a node), then pick it for chat."
+	}
+	return fail(http.StatusNotFound, msg)
 }
 
 func newMobileConversationID() string { return "mobile-" + randHex(6) }
@@ -161,7 +171,7 @@ func (m *Module) chatWarmup(ctx context.Context, u authn.User, row *nodeRow, req
 		nc.Set("agents", agents)
 	}
 	clientTools, commands := req.ClientTools, req.Commands
-	if row.online(m.now()) {
+	if row.reachable(m.now()) {
 		if ct, ac, ok := m.fetchNodeTools(ctx, row.nodeID); ok {
 			clientTools, commands = ct, ac
 		}
@@ -497,7 +507,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 	calls []parse.ToolCall, st *chatState) []toolResult {
 	online := false
 	if row, err := m.nodeByID(ctx, nodeID); err == nil {
-		online = row.online(m.now())
+		online = row.reachable(m.now())
 	}
 	if online {
 		sse.send(servertools.Obj("type", "status", "message", "Running command on node..."))

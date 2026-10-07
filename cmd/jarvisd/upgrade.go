@@ -178,19 +178,9 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		return errors.New("jarvisd is running outside a service manager; stop it first (Ctrl-C), then run `jarvisd upgrade` again")
 	}
 
-	last := ""
 	m, err := update.Stage(ctx, update.StageOptions{
 		Paths: paths, Current: current, Target: *target, AllowOlder: *allowOlder, Source: src, By: "cli",
-		Progress: func(p update.Progress) {
-			line := p.Step
-			if p.Total > 0 {
-				line = fmt.Sprintf("%s %d%%", p.Step, p.Done*100/p.Total)
-			}
-			if line != last && (p.Total == 0 || p.Done == p.Total || !strings.HasPrefix(last, p.Step)) {
-				fmt.Fprintln(stdout, line)
-			}
-			last = line
-		},
+		Progress: progressPrinter(stdout),
 	})
 	if err != nil {
 		if errors.Is(err, update.ErrUpToDate) {
@@ -450,4 +440,33 @@ func healthy(ctx context.Context, addr string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// progressPrinter prints staging progress: each step once, a download every 10% of its size,
+// and, when the size is unknown (a server that doesn't say), every 10 MB downloaded so a
+// download from any release base shows it is moving (A10 F24).
+func progressPrinter(w io.Writer) func(update.Progress) {
+	step, mark := "", int64(-1)
+	return func(p update.Progress) {
+		if p.Step != step {
+			step, mark = p.Step, -1
+			if p.Total == 0 && p.Done == 0 {
+				fmt.Fprintln(w, p.Step)
+				mark = 0 // the next line is at 10 MB
+				return
+			}
+		}
+		switch {
+		case p.Total > 0:
+			if pct := min(p.Done*100/p.Total, 100) / 10 * 10; pct > mark {
+				mark = pct
+				fmt.Fprintf(w, "%s %d%%\n", p.Step, pct)
+			}
+		case p.Done > 0:
+			if mb := p.Done >> 20 / 10 * 10; mb > mark {
+				mark = mb
+				fmt.Fprintf(w, "%s %d MB\n", p.Step, mb)
+			}
+		}
+	}
 }

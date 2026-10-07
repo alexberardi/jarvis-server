@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
@@ -21,6 +22,32 @@ type LLM interface {
 	Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error)
 	Stream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Frame, error)
 	Embed(ctx context.Context, texts []string) (llm.Embeddings, error)
+}
+
+// ReadyWait bounds how long a turn waits for a model that is still loading (A10 F22: for
+// 5-10 s after a restart or upgrade every turn got 503 model_not_loaded).
+const ReadyWait = 30 * time.Second
+
+// WaitingLLM wraps the llm Service so cc's calls (voice, chat, background jobs) wait up to
+// wait for a loading label instead of failing at once; on timeout the error says it was
+// still loading. The llm HTTP API is unaffected.
+func WaitingLLM(inner LLM, wait time.Duration) LLM { return waitingLLM{inner, wait} }
+
+type waitingLLM struct {
+	inner LLM
+	wait  time.Duration
+}
+
+func (w waitingLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	return w.inner.Chat(llm.WithReadyWait(ctx, w.wait), req)
+}
+
+func (w waitingLLM) Stream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Frame, error) {
+	return w.inner.Stream(llm.WithReadyWait(ctx, w.wait), req)
+}
+
+func (w waitingLLM) Embed(ctx context.Context, texts []string) (llm.Embeddings, error) {
+	return w.inner.Embed(llm.WithReadyWait(ctx, w.wait), texts)
 }
 
 // STT is the stt module in process: transcription with the speaker pass, and the voice-profile

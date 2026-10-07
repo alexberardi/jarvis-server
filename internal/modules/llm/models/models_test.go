@@ -87,11 +87,12 @@ type hub struct {
 	throttle time.Duration // sleep per 32 KiB written
 	cutOnce  map[string]bool
 	hits     map[string]int
+	hold     map[string]chan struct{} // URL path -> requests wait until it is closed
 }
 
 func newHub() *hub {
 	return &hub{files: map[string][]byte{}, repos: map[string]string{}, gated: map[string]bool{},
-		cutOnce: map[string]bool{}, hits: map[string]int{}}
+		cutOnce: map[string]bool{}, hits: map[string]int{}, hold: map[string]chan struct{}{}}
 }
 
 func (h *hub) addRepo(repo, rev string, files map[string][]byte) {
@@ -132,7 +133,15 @@ func (h *hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Lock()
 	data, ok := h.files[r.URL.Path]
+	hold := h.hold[r.URL.Path]
 	h.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -407,6 +416,48 @@ func TestFitAndRecommend(t *testing.T) {
 	}
 }
 
+// A10 F8: once a model is installed and assigned, catalog verdicts judged every model next
+// to it, even one that would replace it ("Qwen 3 4B: Too big"), and the CPU-only embeddings
+// model against a full card.
+func TestCatalogFitExcludesTheLabelsItWouldReplace(t *testing.T) {
+	e := newEnv(t)
+	card := engine.Hardware{Flavour: engine.FlavourCUDA, Devices: []engine.Device{
+		{Backend: engine.FlavourCUDA, Index: 0, ID: "CUDA0", Name: "RTX 3080 Ti", TotalMB: 12288}}}
+	q9 := Resident{Labels: []string{"live", "background"}, Model: "qwen3.5-9b", NeededMB: 9500}
+	stt := Resident{Labels: []string{"stt"}, Model: "whisper-small.en", NeededMB: 1100}
+	desk := Resident{Labels: []string{OtherPrograms}, NeededMB: 600, Devices: []int{0}}
+	rs := []Resident{q9, stt, desk}
+
+	q4, _ := CatalogEntry("qwen3-4b")
+	f := e.mgr.entryFit(e.ctx, card, q4, rs)
+	if f.Verdict != "fits" || slices.Contains(f.Alongside, "live") || f.CommittedMB != stt.NeededMB+desk.NeededMB {
+		t.Errorf("qwen3-4b replacing the live model: %+v", f)
+	}
+	// Next to the live model it would not fit: the old judgement.
+	if f := EntryFit(card, q4); f.Verdict != "fits" {
+		t.Fatalf("qwen3-4b alone: %+v", f)
+	}
+	if f := FitAlongside(card, q4.Kind, q4.Size, q4.KVBytesPerTok, q4.ContextDefault, rs); f.Verdict != "too_big" {
+		t.Fatalf("test premise: qwen3-4b next to the 9B should be too big: %+v", f)
+	}
+	// A whisper model is judged without the current stt engine but next to the LLM.
+	turbo, _ := CatalogEntry("whisper-large-v3-turbo")
+	f = e.mgr.entryFit(e.ctx, card, turbo, rs)
+	if slices.Contains(f.Alongside, "stt") || !slices.Contains(f.Alongside, "live") {
+		t.Errorf("turbo replacing stt: %+v", f)
+	}
+	// Embeddings run on the CPU by default (gpu_layers 0): no VRAM verdict.
+	emb, _ := CatalogEntry("all-minilm-l6-v2")
+	if f := e.mgr.entryFit(e.ctx, card, emb, rs); f.Verdict != "cpu" || f.NeededMB == 0 {
+		t.Errorf("embeddings on the CPU: %+v", f)
+	}
+	// Moved to the GPU, it is judged there.
+	e.set.Set(e.ctx, "llm.embeddings.gpu_layers", int64(999), settings.Scope{})
+	if f := e.mgr.entryFit(e.ctx, card, emb, rs); f.Verdict == "cpu" || f.Device == "" {
+		t.Errorf("embeddings on the GPU: %+v", f)
+	}
+}
+
 // The jarvis-dev incident: whisper large-v3-turbo "fit" a 12 GB card on its own, was
 // recommended and assigned next to Qwen3-8B, and crash-looped on cudaMalloc.
 func TestFitCountsCoResidentEngines(t *testing.T) {
@@ -504,6 +555,15 @@ func TestResidentsShareEnginesAndSkipCPU(t *testing.T) {
 	if rs := e.mgr.Residents(e.ctx); rs[len(rs)-1].NeededMB != 6000 {
 		t.Errorf("engine started after detection: %+v", rs)
 	}
+	// A10 F8: launched before detection but still loading then (it turned healthy after):
+	// its memory is its own, not other programs' as well.
+	for _, st := range []engines.State{engines.Starting, engines.Healthy} {
+		e.labels.instances[0].State = st
+		e.labels.instances[0].Started = hw.DetectedAt.Add(-time.Minute)
+		if rs := e.mgr.Residents(e.ctx); rs[len(rs)-1].NeededMB != 6000-rs[0].NeededMB {
+			t.Errorf("%s engine launched before detection counted twice: %+v", st, rs)
+		}
+	}
 	e.labels.instances, e.mgr.Detector = nil, nil
 
 	// A different context is a different engine.
@@ -581,23 +641,24 @@ func TestHFRepo(t *testing.T) {
 func TestInstallCatalogWithProjectorEngineAndAssign(t *testing.T) {
 	e := newEnv(t)
 	e.testCatalog()
-	e.start()
+	// The queue starts after the checks on the queued install, so "queued" is deterministic.
 	inst, existing, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny", Assign: []string{"live", "background"}})
 	if err != nil || existing {
 		t.Fatal(err)
 	}
-	if inst.MMProjID != "tiny-mmproj" || inst.EngineKind != "llama-server" || inst.EngineFlavour != "cpu" || inst.State != InstallQueued {
+	if inst.MMProjID != "tiny-mmproj" || inst.EngineKind != "llama-server" || inst.EngineFlavour != "cpu" || inst.State != InstallQueued || inst.JobID == 0 {
 		t.Fatalf("%+v", inst)
 	}
 	engSize := engine.AssetsSize(engine.KindLlama, engine.Host(), engine.FlavourCPU)
 	if inst.BytesTotal != 300<<10+100<<10+engSize {
 		t.Fatalf("total %d", inst.BytesTotal)
 	}
-	// A second request while it runs returns the same install.
+	// A second request while it is pending returns the same install.
 	again, existing, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny"})
 	if err != nil || !existing || again.ID != inst.ID {
 		t.Fatalf("dedup: %+v %v %v", again, existing, err)
 	}
+	e.start()
 	done := e.waitInstall(inst.ID, InstallDone)
 	if done.BytesDone != done.BytesTotal || done.Phase != "done" {
 		t.Fatalf("%+v", done)
@@ -638,6 +699,41 @@ func TestInstallCatalogWithProjectorEngineAndAssign(t *testing.T) {
 	if e.hub.hits["/acme/Tiny-GGUF/resolve/rev1/Tiny-Q4_K_M.gguf"] != 1 {
 		t.Fatal("downloaded twice")
 	}
+}
+
+// A10 F7: a small install doesn't wait behind a big one.
+func TestSmallInstallOvertakesBigOne(t *testing.T) {
+	e := newEnv(t)
+	e.testCatalog()
+	e.mgr.SmallInstallBytes = 200 << 10
+	release := make(chan struct{})
+	e.hub.hold["/acme/Tiny-GGUF/resolve/rev1/Tiny-Q4_K_M.gguf"] = release
+	e.start()
+	big, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny", WithMMProj: new(bool)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	small, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "whisper-tiny"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		inst Install
+		lane string
+	}{{big, InstallJobType}, {small, InstallSmallJobType}} {
+		info, err := e.q.Get(e.ctx, c.inst.JobID)
+		if err != nil || info.Type != c.lane {
+			t.Fatalf("install %s: job %+v %v, want lane %s", c.inst.ModelID, info, err, c.lane)
+		}
+	}
+	e.waitInstall(big.ID, InstallRunning)
+	// The big install is held mid-download: the small one only finishes in its own lane.
+	e.waitInstall(small.ID, InstallDone)
+	if b, _ := e.mgr.Store.GetInstall(e.ctx, big.ID); b.State != InstallRunning {
+		t.Fatalf("big install %s while the small one finished", b.State)
+	}
+	close(release)
+	e.waitInstall(big.ID, InstallDone)
 }
 
 func TestInstallRepoShardsResumeAndSlices(t *testing.T) {

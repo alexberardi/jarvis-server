@@ -329,6 +329,14 @@ jobs:
           # Re-running the same version is a no-op.
           sh scripts/install.sh --base-url "$BASE" --yes | tee rerun.log
           grep -q 'already installed' rerun.log
+          # ...and it fetches nothing but SHA256SUMS (A10 F21): a base with only that file works.
+          mkdir -p dist/sumsonly && cp dist/SHA256SUMS dist/sumsonly/
+          sh scripts/install.sh --base-url "$BASE/sumsonly" --yes | grep -q 'already installed'
+          # Installed but stopped: the service comes back on the installed binary, no download.
+          sudo jarvisd service stop
+          sh scripts/install.sh --base-url "$BASE/sumsonly" --yes | tee restart.log
+          grep -q 'nothing to download' restart.log
+          curl -fsS http://127.0.0.1:7700/health
           # Uninstall: service, binary and firewall rules go; data and account stay.
           sh scripts/install.sh --uninstall
           test ! -e /usr/local/bin/jarvisd && test ! -e /etc/systemd/system/jarvisd.service

@@ -29,7 +29,9 @@ export default function LoginPage() {
   }, [navigate])
 
   if (state.isAuthenticated) {
-    return <Navigate to={mustChangePassword ? '/change-password' : '/dashboard'} replace />
+    // /setup resumes an unfinished wizard from the server's state (A10 F9) and otherwise
+    // forwards to the dashboard.
+    return <Navigate to={mustChangePassword ? '/change-password' : '/setup'} replace />
   }
 
   const handleLogin = (e: FormEvent) => {
