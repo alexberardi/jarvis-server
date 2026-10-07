@@ -33,17 +33,16 @@ keep shipping.
 | Household settings: a write-only "Twilio account" section for `phone.twilio_account_sid`, `phone.twilio_auth_token`, `phone.twilio_from_number` (GET shows `"********"`/null for the SID and token and the household's own from number or null; PUT `""` clears; from number must be E.164) | Multi-tenant installs give each household its own Twilio account | AD6 | Before phone calls go to friends and family |
 | (Future) a "leave-by" built-in rule in the automations list; per-node voice enrollment | Deferred product work | D46, D36 | Post-port |
 
-## jarvis-admin (moving into the monorepo, D9)
+## jarvis-admin (moved into the monorepo, D9)
 
-These now land in `web/admin/` inside jarvis-server once admin is absorbed; no PRs to the old repo.
+The SPA now lives in `web/admin/` inside jarvis-server (A0–A9); no PRs to the old repo, which is
+frozen for the legacy stack.
 
-
-| Change | Why | Decision |
-|---|---|---|
-| Model catalog (`src/data/models.ts`): remove `qwen25-7b`, `llama-3.1-8b`, `hermes-3-8b`; remap `qwen3-14b` → `Qwen3_14B_Compressed`; add Qwen3.5-9B (→ `Qwen3_5_9B_Compressed`) and the 27B prod model (→ `Qwen3_14B_Compressed`) | Only providers that ship may be offered; an unknown provider is a hard error | D11, D12 |
-| LLM wizard and quick-sets write `llm.prompt_provider` instead of `llm.interface` | Setting renamed (legacy import maps the old key) | D11 |
-
-| Models page + setup step: hardware-aware recommendation, one-click install, install from a Hugging Face repo (pick a GGUF file/quant, see size and VRAM fit), download progress, delete, assign to live/background | First-class model management on jarvisd's model API; no automatic download | docs/llm LD3 |
+| Change | Why | Decision | Status |
+|---|---|---|---|
+| Model catalog (`src/data/models.ts`): remove `qwen25-7b`, `llama-3.1-8b`, `hermes-3-8b`; remap `qwen3-14b` → `Qwen3_14B_Compressed`; add Qwen3.5-9B (→ `Qwen3_5_9B_Compressed`) and the 27B prod model (→ `Qwen3_14B_Compressed`) | Only providers that ship may be offered; an unknown provider is a hard error | D11, D12 | **Moot**: the static catalog is deleted (A6); the server catalog `GET /v1/models/catalog` carries `prompt_provider` |
+| LLM wizard and quick-sets write `llm.prompt_provider` instead of `llm.interface` | Setting renamed (legacy import maps the old key) | D11 | **Moot**: LLM wizard and Quick Sets are cut (A6); the prompt provider is derived from the live model, with an override on the Models page and in the wizard (AD4) |
+| Models page + setup step: hardware-aware recommendation, one-click install, install from a Hugging Face repo (pick a GGUF file/quant, see size and VRAM fit), download progress, delete, assign to live/background | First-class model management on jarvisd's model API; no automatic download | docs/llm LD3 | **Done**: Models page (A6), wizard Hardware + Models steps (A7) |
 
 ## jarvis-installer
 
