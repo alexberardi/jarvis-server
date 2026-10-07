@@ -270,9 +270,12 @@ func TestMediaGates(t *testing.T) {
 
 func TestStreamBindingMismatchCloses(t *testing.T) {
 	e := newEnv(t)
-	e.s.StreamStartTimeout = 300 * time.Millisecond
+	e.s.StreamStartTimeout = time.Second
 	id := e.confirmed(t)
 	call := <-e.provider.started
+	// The fake signals inside StartCall, before the dialer binds the call SID to the stream
+	// token; a start event sent earlier would carry nothing to mismatch against.
+	waitCallSID(t, e.s, id)
 	wss := streamURLRE.FindStringSubmatch(call.twiml)[1]
 	sim := &twilioSim{t: t, e: e}
 	conn, _, err := sim.dial(wss, live.ComputeSignature(authToken, wss, nil))
@@ -457,4 +460,23 @@ func TestGateOffEndsLiveCall(t *testing.T) {
 		t.Fatalf("reason: %q", s.ErrorMessage)
 	}
 	sim.expectClosed()
+}
+
+// waitCallSID waits until the dialer has recorded the provider's call SID (and so bound it to
+// the stream token).
+func waitCallSID(t *testing.T, s *Service, id string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if rt := s.runtime(id); rt != nil {
+			rt.mu.Lock()
+			bound := rt.callSID != ""
+			rt.mu.Unlock()
+			if bound {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("call SID never bound")
 }
