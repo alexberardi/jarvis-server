@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	adminmod "github.com/alexberardi/jarvis-server/internal/modules/admin"
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	ccmod "github.com/alexberardi/jarvis-server/internal/modules/cc"
 	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
@@ -71,6 +72,9 @@ func modules() []module.Module {
 			// Legacy HS256 secret: HS256 is minted (auth.algorithm=HS256) and verified only when set.
 			HMACSecret: os.Getenv("AUTH_SECRET_KEY"),
 		},
+		// The admin SPA on 7710. JARVIS_ADMIN_UI_DIR serves a built UI from disk instead of
+		// the embedded one (testing a rebuilt SPA without rebuilding jarvisd).
+		&adminmod.Module{UIDir: os.Getenv("JARVIS_ADMIN_UI_DIR"), Version: version},
 	}
 	// The registry lists exactly the listeners jarvisd serves; account deletion skips the
 	// legacy HTTP purge for the same services.

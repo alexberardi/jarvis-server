@@ -54,6 +54,7 @@ var ServiceNames = map[string]string{
 	pconfig.ListenerNotifications: "jarvis-notifications",
 	pconfig.ListenerRecipes:       "jarvis-recipes-server",
 	pconfig.ListenerOCR:           "jarvis-ocr-service",
+	pconfig.ListenerAdmin:         "jarvis-admin",
 }
 
 // Definitions are config-service's settings. Health probes use health_check.timeout.

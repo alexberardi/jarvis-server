@@ -43,6 +43,18 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Fetch native libs (all targets)
         run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64 darwin-arm64 windows-amd64
+      # The admin SPA is static files, built once and embedded in every target.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/admin/.nvmrc
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+      - name: Build the admin UI
+        run: |
+          npm --prefix web/admin ci
+          npm --prefix web/admin run build
+      - name: Check the admin UI is embedded (not the placeholder)
+        run: go test ./web/admin -run TestEmbeddedUI -tags release_ui -count=1 -v
       - name: Build and package
         env:
           VERSION: ${{ steps.v.outputs.version }}

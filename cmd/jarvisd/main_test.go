@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
 func TestRunCommands(t *testing.T) {
@@ -26,4 +28,20 @@ func TestRunCommands(t *testing.T) {
 			t.Errorf("%v: want error", bad)
 		}
 	}
+}
+
+func TestDoctorPortsIncludeAdmin(t *testing.T) {
+	t.Setenv("JARVIS_HOME", t.TempDir())
+	t.Setenv("JARVIS_PORT_ADMIN", "")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports := doctorPorts(cfg)
+	for _, p := range ports {
+		if p.Name == config.ListenerAdmin && p.Port == 7710 && p.Proto == "tcp" {
+			return
+		}
+	}
+	t.Fatalf("admin listener 7710 missing from %v", ports)
 }

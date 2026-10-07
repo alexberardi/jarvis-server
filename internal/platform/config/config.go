@@ -23,6 +23,7 @@ const (
 	ListenerNotifications = "notifications"
 	ListenerRecipes       = "recipes"
 	ListenerOCR           = "ocr"
+	ListenerAdmin         = "admin"
 )
 
 // DefaultPorts maps each listener to its legacy port.
@@ -37,6 +38,7 @@ var DefaultPorts = map[string]int{
 	ListenerNotifications: 7712,
 	ListenerRecipes:       7030,
 	ListenerOCR:           7031,
+	ListenerAdmin:         7710,
 }
 
 type Config struct {

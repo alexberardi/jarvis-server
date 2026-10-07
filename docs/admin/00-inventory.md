@@ -589,12 +589,17 @@ internal/modules/admin/       listener 7710: static handler, gateway, BFF handle
 - `npm ci`, `npm run lint`, `npx tsc -b`, `npx vitest run`, `npm run build`
 - upload `web/admin/dist/ui` as an artifact
 
-The release cross-compile matrix downloads that artifact into `web/admin/dist/ui` before `go build`.
+The release workflow builds the SPA itself (setup-node from `.nvmrc`, `npm ci`, `npm run build`) before
+the cross-compile loop, then runs the `release_ui` embed check. *As built (A0):* CI and release are
+separate workflows, so release does not download the CI artifact; it rebuilds from the same lockfile.
 
 - The bundle is **platform-independent**: built once on Linux, embedded in all four targets.
 - `CGO_ENABLED=0` is untouched, since these are static files.
-- jarvisd stays one download. The binary grows by the bundle size, an estimated ~1 MB (to be measured in
-  the first step and recorded in STATUS).
+- jarvisd stays one download. The binary grows by the bundle size. **Measured at A0** (jarvis-admin
+  `74e3637`, linux/amd64, `-trimpath -s -w`): `dist/ui` is 637 KB (JS 599 KB, CSS 36 KB, gzip ~171 KB),
+  and jarvisd grows from 52,285,732 to 52,924,708 bytes, **+639 KB**.
+- `go.mod` has `ignore ./web/admin/node_modules`, so `go build ./...` and `go vet ./...` never walk the
+  npm tree (some npm packages ship stray `.go` files).
 - No compression step is needed. Optionally gzip assets at build time and serve `.gz` when
   `Accept-Encoding` allows.
 
@@ -619,6 +624,11 @@ The release cross-compile matrix downloads that artifact into `web/admin/dist/ui
   `.js` is sometimes `text/plain`, and browsers refuse module scripts served that way.
 - Caching: hashed `assets/*` get `Cache-Control: public, max-age=31536000, immutable`; `index.html` gets
   `no-cache`, so an upgraded binary is picked up at once.
+  *As built (A1):* every response carries a content-hash `ETag`, so `no-cache` files revalidate with a
+  304. A **missing** file under `assets/` is a 404, not the `index.html` fallback, so a stale page asking
+  for an old chunk never gets HTML cached as immutable JavaScript. Request paths go through
+  `fs.ValidPath` and reject `\` and `:` before reaching the FS (embedded or `JARVIS_ADMIN_UI_DIR`).
+  `/health` adds `ui_built` (whether the real UI or the placeholder is served).
 - Node is only a CI and dev dependency. A Windows developer runs the same `npm` scripts. The Vite output
   is identical, and line endings don't matter for built assets.
 
