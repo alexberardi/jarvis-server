@@ -340,14 +340,21 @@ func (e *tenv) waitFor(what string, cond func() bool) {
 	e.t.Fatalf("timed out waiting for %s", what)
 }
 
-// idle waits until no queued or running job is due.
+// idle waits until no queued or running job is due, and stays so for a few polls: a step that
+// finishes its job before enqueuing the next leaves a brief gap that a single check can land in.
 func (e *tenv) idle() {
 	e.t.Helper()
+	quiet := 0
 	e.waitFor("queue idle", func() bool {
 		var n int
 		_ = e.d.Read.QueryRow(`SELECT COUNT(*) FROM platform_jobs WHERE state IN ('queued','running') AND run_at <= ?`,
 			time.Now().UnixMilli()).Scan(&n)
-		return n == 0
+		if n != 0 {
+			quiet = 0
+			return false
+		}
+		quiet++
+		return quiet >= 10
 	})
 }
 
