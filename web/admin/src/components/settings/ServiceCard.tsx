@@ -1,9 +1,7 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, CheckCircle2, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { toast } from 'sonner'
 import CategoryGroup from './CategoryGroup'
-import { useContainers, useRestartContainer } from '@/hooks/useContainers'
 import type { ServiceSettingsResult } from '@/types/settings'
 
 interface ServiceCardProps {
@@ -13,23 +11,6 @@ interface ServiceCardProps {
 
 export default function ServiceCard({ result, defaultExpanded = false }: ServiceCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const { data: containersData } = useContainers()
-  const restartMutation = useRestartContainer()
-
-  const handleRestart = useCallback(() => {
-    const container = containersData?.containers.find(
-      (c) => c.name.includes(result.service_name) || c.name.includes(result.service_name.replace('jarvis-', '')),
-    )
-    if (container) {
-      restartMutation.mutate(container.id, {
-        onSuccess: () => toast.success(`${result.service_name} is restarting...`),
-        onError: (err) => toast.error(`Restart failed: ${err.message}`),
-      })
-    } else {
-      toast.error(`Could not find container for ${result.service_name}`)
-    }
-  }, [containersData, result.service_name, restartMutation])
-
   const grouped = useMemo(() => {
     const map = new Map<string, typeof result.settings>()
     for (const s of result.settings) {
@@ -51,7 +32,12 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
           <ChevronRight size={18} className="text-[var(--color-text-muted)]" />
         )}
 
-        <span className="font-medium text-[var(--color-text)]">{result.service_name}</span>
+        <span className="font-medium text-[var(--color-text)]">
+          {result.display_name || result.service_name}
+        </span>
+        {result.display_name && (
+          <code className="text-xs text-[var(--color-text-muted)]">{result.service_name}</code>
+        )}
 
         {result.success ? (
           <CheckCircle2 size={16} className="text-[var(--color-secondary)]" />
@@ -85,7 +71,6 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
               category={category}
               settings={settings}
               serviceName={result.service_name}
-              onRestartService={handleRestart}
             />
           ))}
         </div>

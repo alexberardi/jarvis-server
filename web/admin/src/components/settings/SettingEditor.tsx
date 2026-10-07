@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { cn } from '@/lib/utils'
 import type { SettingResponse } from '@/types/settings'
+import { secretIsSet } from '@/lib/settings'
 
 interface SettingEditorProps {
   setting: SettingResponse
@@ -11,18 +12,25 @@ interface SettingEditorProps {
 
 export default function SettingEditor({ setting, onSave, onCancel, isSaving }: SettingEditorProps) {
   const [rawValue, setRawValue] = useState(() => {
+    // Write-only: a secret's editor starts empty, never with the mask (I5).
+    if (setting.is_secret) return ''
     if (setting.value_type === 'json') return JSON.stringify(setting.value, null, 2)
     if (setting.value_type === 'bool') return ''
     return String(setting.value ?? '')
   })
   const [boolValue, setBoolValue] = useState(() => Boolean(setting.value))
   const [validationError, setValidationError] = useState<string | null>(null)
-  const hasOptions = Boolean(setting.options?.length)
+  const hasOptions = !setting.is_secret && Boolean(setting.options?.length)
   const isCustomValue = hasOptions && !setting.options!.includes(rawValue)
   const [showCustomInput, setShowCustomInput] = useState(isCustomValue)
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
+
+    if (setting.is_secret && setting.value_type === 'string' && !rawValue) {
+      setValidationError(secretIsSet(setting) ? 'Enter a new value, or use Clear' : 'Enter a value')
+      return
+    }
 
     let parsed: unknown
     switch (setting.value_type) {
@@ -135,6 +143,14 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
           <input
             type={setting.value_type === 'int' || setting.value_type === 'float' ? 'number' : setting.is_secret ? 'password' : 'text'}
             step={setting.value_type === 'float' ? 'any' : undefined}
+            autoComplete={setting.is_secret ? 'off' : undefined}
+            placeholder={
+              setting.is_secret
+                ? secretIsSet(setting)
+                  ? 'Enter a new value to replace it'
+                  : 'Paste value'
+                : undefined
+            }
             value={rawValue}
             onChange={(e) => {
               setRawValue(e.target.value)
@@ -153,6 +169,17 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
       >
         {isSaving ? 'Saving...' : 'Save'}
       </button>
+      {setting.is_secret && secretIsSet(setting) && (
+        <button
+          type="button"
+          disabled={isSaving}
+          onClick={() => onSave(null)}
+          title="Remove the stored value (falls back to the default or environment)"
+          className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+        >
+          Clear
+        </button>
+      )}
       <button
         type="button"
         onClick={onCancel}

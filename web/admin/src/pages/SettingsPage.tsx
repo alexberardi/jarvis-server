@@ -1,22 +1,24 @@
 import { useState, useMemo } from 'react'
 import { RefreshCw, Search } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useAllSettings } from '@/hooks/useSettings'
-import { useServiceEnv } from '@/hooks/useServiceEnv'
 import ServiceCard from '@/components/settings/ServiceCard'
-import ServiceEnvCard from '@/components/settings/ServiceEnvCard'
+import { errorMessage } from '@/lib/errors'
+import { withoutLabelSettings } from '@/lib/settings'
 import { cn } from '@/lib/utils'
 
 export default function SettingsPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useAllSettings()
-  const { data: envData } = useServiceEnv()
   const [search, setSearch] = useState('')
 
   const filtered = useMemo(() => {
     if (!data) return []
-    if (!search.trim()) return data.services
+    // Model-label keys are edited on the Models page only (I4).
+    const services = withoutLabelSettings(data.services)
+    if (!search.trim()) return services
 
     const q = search.toLowerCase()
-    return data.services
+    return services
       .map((svc) => ({
         ...svc,
         settings: svc.settings.filter(
@@ -26,7 +28,12 @@ export default function SettingsPage() {
             (s.description?.toLowerCase().includes(q) ?? false),
         ),
       }))
-      .filter((svc) => svc.settings.length > 0 || svc.service_name.toLowerCase().includes(q))
+      .filter(
+        (svc) =>
+          svc.settings.length > 0 ||
+          svc.service_name.toLowerCase().includes(q) ||
+          (svc.display_name?.toLowerCase().includes(q) ?? false),
+      )
   }, [data, search])
 
   if (isLoading) {
@@ -42,7 +49,7 @@ export default function SettingsPage() {
       <div className="py-20 text-center">
         <p className="mb-2 text-red-500">Failed to load settings</p>
         <p className="mb-4 text-sm text-[var(--color-text-muted)]">
-          {(error as Error)?.message ?? 'Unknown error'}
+          {errorMessage(error, 'Unknown error')}
         </p>
         <button
           onClick={() => refetch()}
@@ -62,7 +69,7 @@ export default function SettingsPage() {
         <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
           {data && (
             <span>
-              {data.successful_services}/{data.total_services} services
+              {data.successful_services}/{data.total_services} modules
             </span>
           )}
           <button
@@ -97,6 +104,14 @@ export default function SettingsPage() {
         />
       </div>
 
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Model choices (which model each label runs, GPUs, context, remote endpoints) are set on the{' '}
+        <Link to="/models" className="text-[var(--color-primary)] hover:underline">
+          Models
+        </Link>{' '}
+        page.
+      </p>
+
       <div className="space-y-3">
         {filtered.map((svc, i) => (
           <ServiceCard key={svc.service_name} result={svc} defaultExpanded={i === 0} />
@@ -108,23 +123,6 @@ export default function SettingsPage() {
           </p>
         )}
       </div>
-
-      {envData && envData.services.length > 0 && (
-        <div className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--color-text)]">
-              Service credentials
-            </h2>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Third-party keys these services need (stored in the stack .env, never in
-              the settings database — secrets are write-only here).
-            </p>
-          </div>
-          {envData.services.map((entry) => (
-            <ServiceEnvCard key={entry.service_id} entry={entry} />
-          ))}
-        </div>
-      )}
     </div>
   )
 }

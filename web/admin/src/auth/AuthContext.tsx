@@ -10,7 +10,9 @@ import {
 
 import * as authApi from '@/api/auth'
 import { setAuthToken, setLogoutFunction, setRefreshFunction } from '@/api/client'
-import type { AuthUser } from '@/api/auth'
+import type { AuthUser, TokenResponse } from '@/api/auth'
+import { clearSetupToken, getSetupToken } from '@/auth/setupToken'
+import { errorMessage, errorStatus } from '@/lib/errors'
 
 interface AuthState {
   user: AuthUser | null
@@ -21,10 +23,22 @@ interface AuthState {
   error: string | null
 }
 
+/**
+ * SetupResult tells the caller why first-superuser setup failed. `tokenProblem` is a 401
+ * (no token) or 403 (wrong token): the UI then asks the operator to paste the token from the
+ * setup-token file (AD2).
+ */
+export type SetupResult =
+  | { ok: true }
+  | { ok: false; tokenProblem: boolean; status?: number; message: string }
+
 interface AuthContextValue {
   state: AuthState
+  /** True when the signed-in user holds a temporary password and must change it (O4). */
+  mustChangePassword: boolean
   login: (email: string, password: string) => Promise<void>
-  setup: (email: string, password: string, username?: string) => Promise<void>
+  setup: (email: string, password: string, username?: string) => Promise<SetupResult>
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>
   logout: () => void
 }
 
@@ -35,6 +49,23 @@ const REFRESH_KEY = 'jarvis-admin:refresh_token'
 const USER_KEY = 'jarvis-admin:user'
 
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000
+
+const signedOut: AuthState = {
+  user: null,
+  accessToken: null,
+  refreshToken: null,
+  isAuthenticated: false,
+  isLoading: false,
+  error: null,
+}
+
+/** userFrom folds the top-level must_change_password into the stored user. */
+function userFrom(res: TokenResponse): AuthUser {
+  return {
+    ...res.user,
+    must_change_password: Boolean(res.must_change_password ?? res.user.must_change_password),
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(() => {
@@ -58,30 +89,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Corrupted stored data — fall through to defaults
       }
     }
-
-    return {
-      user: null,
-      accessToken: null,
-      refreshToken: null,
-      isAuthenticated: false,
-      isLoading: false,
-      error: null,
-    }
+    return signedOut
   })
 
-  const logout = useCallback(() => {
-    localStorage.removeItem(ACCESS_KEY)
-    localStorage.removeItem(REFRESH_KEY)
-    localStorage.removeItem(USER_KEY)
-    setAuthToken(null)
+  /** adopt stores a token pair and its user: the one place a session starts (O5). */
+  const adopt = useCallback((res: TokenResponse) => {
+    const user = userFrom(res)
+    localStorage.setItem(ACCESS_KEY, res.access_token)
+    localStorage.setItem(REFRESH_KEY, res.refresh_token)
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
+    setAuthToken(res.access_token)
     setState({
-      user: null,
-      accessToken: null,
-      refreshToken: null,
-      isAuthenticated: false,
+      user,
+      accessToken: res.access_token,
+      refreshToken: res.refresh_token,
+      isAuthenticated: true,
       isLoading: false,
       error: null,
     })
+  }, [])
+
+  const logout = useCallback(() => {
+    const refreshToken = localStorage.getItem(REFRESH_KEY)
+    if (refreshToken) {
+      // Best effort: revoke the refresh token's family server-side.
+      authApi.logout(refreshToken).catch(() => {})
+    }
+    localStorage.removeItem(ACCESS_KEY)
+    localStorage.removeItem(REFRESH_KEY)
+    localStorage.removeItem(USER_KEY)
+    // Leftovers from the old setup wizard, which wrote un-namespaced keys.
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    setAuthToken(null)
+    setState(signedOut)
   }, [])
 
   const refreshAccessToken = useCallback(async (): Promise<string | null> => {
@@ -125,79 +166,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(timer)
   }, [state.isAuthenticated, refreshAccessToken])
 
-  const login = useCallback(async (email: string, password: string) => {
-    setState((prev) => ({ ...prev, error: null, isLoading: true }))
-
-    try {
-      const res = await authApi.login(email, password)
-
-      // UX gate only — the real security boundary is server-side
-      if (!res.user.is_superuser) {
-        setState((prev) => ({
-          ...prev,
-          isLoading: false,
-          error: 'Admin access required. This account is not a superuser.',
-        }))
-        return
+  const login = useCallback(
+    async (email: string, password: string) => {
+      setState((prev) => ({ ...prev, error: null, isLoading: true }))
+      try {
+        const res = await authApi.login(email, password)
+        // UX gate only — the real security boundary is server-side
+        if (!res.user.is_superuser) {
+          setState((prev) => ({
+            ...prev,
+            isLoading: false,
+            error: 'Admin access required. This account is not a superuser.',
+          }))
+          return
+        }
+        adopt(res)
+      } catch (err: unknown) {
+        setState((prev) => ({ ...prev, isLoading: false, error: errorMessage(err, 'Login failed') }))
       }
+    },
+    [adopt],
+  )
 
-      localStorage.setItem(ACCESS_KEY, res.access_token)
-      localStorage.setItem(REFRESH_KEY, res.refresh_token)
-      localStorage.setItem(USER_KEY, JSON.stringify(res.user))
-      setAuthToken(res.access_token)
+  const setup = useCallback(
+    async (email: string, password: string, username?: string): Promise<SetupResult> => {
+      setState((prev) => ({ ...prev, error: null, isLoading: true }))
+      try {
+        const res = await authApi.setup(email, password, username, getSetupToken())
+        clearSetupToken()
+        adopt(res)
+        return { ok: true }
+      } catch (err: unknown) {
+        const status = errorStatus(err)
+        const message = errorMessage(err, 'Setup failed')
+        setState((prev) => ({ ...prev, isLoading: false, error: message }))
+        return { ok: false, tokenProblem: status === 401 || status === 403, status, message }
+      }
+    },
+    [adopt],
+  )
 
-      setState({
-        user: res.user,
-        accessToken: res.access_token,
-        refreshToken: res.refresh_token,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null,
-      })
-    } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        'Login failed'
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: message,
-      }))
-    }
-  }, [])
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      // Throws on failure; the page shows errorMessage(err). The response is a fresh pair:
+      // every other session was revoked.
+      const res = await authApi.changePassword(currentPassword, newPassword)
+      adopt(res)
+    },
+    [adopt],
+  )
 
-  const setup = useCallback(async (email: string, password: string, username?: string) => {
-    setState((prev) => ({ ...prev, error: null, isLoading: true }))
+  const mustChangePassword = Boolean(state.user?.must_change_password)
 
-    try {
-      const res = await authApi.setup(email, password, username)
-
-      localStorage.setItem(ACCESS_KEY, res.access_token)
-      localStorage.setItem(REFRESH_KEY, res.refresh_token)
-      localStorage.setItem(USER_KEY, JSON.stringify(res.user))
-      setAuthToken(res.access_token)
-
-      setState({
-        user: res.user,
-        accessToken: res.access_token,
-        refreshToken: res.refresh_token,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null,
-      })
-    } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        'Setup failed'
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: message,
-      }))
-    }
-  }, [])
-
-  const value = useMemo(() => ({ state, login, setup, logout }), [state, login, setup, logout])
+  const value = useMemo(
+    () => ({ state, mustChangePassword, login, setup, changePassword, logout }),
+    [state, mustChangePassword, login, setup, changePassword, logout],
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

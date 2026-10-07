@@ -4,7 +4,7 @@ import Sidebar from './Sidebar'
 import Header from './Header'
 
 export default function AppShell() {
-  const { state } = useAuth()
+  const { state, mustChangePassword } = useAuth()
 
   if (state.isLoading) {
     return (
@@ -16,6 +16,11 @@ export default function AppShell() {
 
   if (!state.isAuthenticated) {
     return <Navigate to="/login" replace />
+  }
+
+  // A temporary password opens nothing but the change-password screen (O4).
+  if (mustChangePassword) {
+    return <Navigate to="/change-password" replace />
   }
 
   return (

@@ -7,10 +7,9 @@ interface CategoryGroupProps {
   category: string
   settings: SettingResponse[]
   serviceName: string
-  onRestartService?: () => void
 }
 
-export default function CategoryGroup({ category, settings, serviceName, onRestartService }: CategoryGroupProps) {
+export default function CategoryGroup({ category, settings, serviceName }: CategoryGroupProps) {
   const [expanded, setExpanded] = useState(true)
 
   return (
@@ -27,7 +26,7 @@ export default function CategoryGroup({ category, settings, serviceName, onResta
       {expanded && (
         <div className="space-y-0.5">
           {settings.map((setting) => (
-            <SettingRow key={setting.key} setting={setting} serviceName={serviceName} onRestartService={onRestartService} />
+            <SettingRow key={setting.key} setting={setting} serviceName={serviceName} />
           ))}
         </div>
       )}

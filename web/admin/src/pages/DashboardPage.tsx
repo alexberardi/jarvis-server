@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Brain, Server, GitMerge } from 'lucide-react'
 import { toast } from 'sonner'
 import { useContainers, useRestartContainer } from '@/hooks/useContainers'
-import { useLlmStatus } from '@/hooks/useLlmSetup'
+import { useLabels } from '@/hooks/useModelManager'
 import { getInstallStatus } from '@/api/install'
 import ServiceHealthCard from '@/components/dashboard/ServiceHealthCard'
 import UpdateBanner from '@/components/dashboard/UpdateBanner'
@@ -16,7 +16,8 @@ export default function DashboardPage() {
   const [isComposeExport, setIsComposeExport] = useState(false)
   const { data, isLoading, isError, error, refetch, isFetching } = useContainers()
   const restartMutation = useRestartContainer()
-  const llmStatus = useLlmStatus()
+  // The banner fires while the live label has no model (A8 rewrites the rest of this page).
+  const labels = useLabels()
   const [dismissed, setDismissed] = useState(
     () => !!localStorage.getItem(LLM_SETUP_DISMISSED_KEY),
   )
@@ -30,7 +31,9 @@ export default function DashboardPage() {
   }, [])
 
   const showLlmBanner =
-    !!llmStatus.data && !llmStatus.data.configured && !dismissed
+    !!labels.data &&
+    labels.data.labels.some((l) => l.label === 'live' && l.state === 'not_configured') &&
+    !dismissed
 
   const handleRestart = (id: string) => {
     restartMutation.mutate(id, {
@@ -71,7 +74,7 @@ export default function DashboardPage() {
                 Dismiss
               </button>
               <button
-                onClick={() => navigate('/llm-setup')}
+                onClick={() => navigate('/models')}
                 className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90"
               >
                 Set up LLM
@@ -195,7 +198,7 @@ export default function DashboardPage() {
               Dismiss
             </button>
             <button
-              onClick={() => navigate('/llm-setup')}
+              onClick={() => navigate('/models')}
               className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90"
             >
               Set up LLM
