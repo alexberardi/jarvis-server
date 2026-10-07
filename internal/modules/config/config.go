@@ -77,6 +77,9 @@ type Module struct {
 	// SettingsGuard protects /settings (legacy: superuser JWT for reads and writes). Nil
 	// leaves /settings unmounted.
 	SettingsGuard settings.Guard
+	// MQTTPort is the embedded broker's TCP port (cc module); when set, it is registered as
+	// jarvis-mqtt-broker (scheme mqtt), which nodes resolve the broker URL from.
+	MQTTPort int
 
 	settings *settings.Service
 
@@ -159,6 +162,19 @@ func (m *Module) syncSelf(ctx context.Context) error {
 			name, port)
 		if err != nil {
 			return fmt.Errorf("config: register %s: %w", name, err)
+		}
+	}
+	if m.MQTTPort > 0 {
+		_, err := m.deps.DB.Write.ExecContext(ctx, `
+			INSERT INTO config_services (name, host, port, scheme, health_path, description)
+			VALUES ('jarvis-mqtt-broker', 'localhost', ?, 'mqtt', NULL, 'embedded MQTT broker (jarvisd)')
+			ON CONFLICT (name) DO UPDATE SET host = 'localhost', port = excluded.port, scheme = 'mqtt',
+				health_path = NULL, description = excluded.description,
+				updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+			WHERE config_services.host != 'localhost' OR config_services.port != excluded.port
+				OR config_services.scheme != 'mqtt'`, m.MQTTPort)
+		if err != nil {
+			return fmt.Errorf("config: register jarvis-mqtt-broker: %w", err)
 		}
 	}
 	return nil

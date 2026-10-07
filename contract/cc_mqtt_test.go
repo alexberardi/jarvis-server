@@ -76,6 +76,26 @@ func commandShape(verb string, details Obj) Matcher {
 	return All(ArrayOf(Obj{"command": Eq(verb), "details": details}), ccArrayLen(1))
 }
 
+// legacyTrusted keeps details' trusted:true for Python only. jarvisd never publishes it
+// (D4/D7): per-node broker ACLs make commands authentic, and the node verifies an action
+// through /commands/{rid}/verify (D48).
+func legacyTrusted(details Obj) Obj {
+	if Jarvisd() {
+		delete(details, "trusted")
+	}
+	return details
+}
+
+// resultSinkH is the auth a node sends on /device-control-results. Python's sink is
+// unauthenticated; jarvisd requires the node's key and that the rid was issued to it (D4).
+// The real node always sends X-API-Key (RestClient).
+func resultSinkH(n *CCNode) H {
+	if Jarvisd() {
+		return n.APIKeyH()
+	}
+	return H{}
+}
+
 func details(v any) map[string]any {
 	return v.([]any)[0].(map[string]any)["details"].(map[string]any)
 }
@@ -90,7 +110,7 @@ func TestCCMQTTCatalogue(t *testing.T) {
 
 	// The node's own client id and subscription (mqtt_tts_listener.py:2733-2753); clean
 	// session here so nothing lingers on the broker after the run.
-	c := DialMQTT(t, "jarvis-node-"+nid)
+	c := DialMQTTNode(t, n)
 	c.Subscribe(t, base+"#")
 
 	t.Run("settings_request", func(t *testing.T) {
@@ -110,7 +130,7 @@ func TestCCMQTTCatalogue(t *testing.T) {
 			Obj{"request_id": Eq(rid2), "node_id": Eq(nid), "include_values": Eq(true), "user_id": Eq(u.ID)})
 
 		// The node's reconnect backstop lists both, oldest first.
-		list := tg.Get(t, CommandCenter, path, n.APIKeyH()).Expect(http.StatusOK, ArrayOf(settingsRequestShape)).JSON().([]any)
+		list := tg.Get(t, CommandCenter, path, n.APIKeyH()).Expect(http.StatusOK, ArrayOf(settingsRequestListShape())).JSON().([]any)
 		if len(list) < 2 || list[len(list)-2].(map[string]any)["request_id"] != rid || list[len(list)-1].(map[string]any)["request_id"] != rid2 {
 			t.Fatalf("pending list: %v", list)
 		}
@@ -144,7 +164,12 @@ func TestCCMQTTCatalogue(t *testing.T) {
 		// LEGACY-BUG: the /result poll has no household check (doc 05 §8.4); any signed-in
 		// user can poll another household's request. D4: Go checks membership.
 		other := NewUser(t)
-		tg.Get(t, CommandCenter, path+"/"+rid2+"/result", other.H()).ExpectStatus(http.StatusAccepted)
+		if Jarvisd() {
+			tg.Get(t, CommandCenter, path+"/"+rid2+"/result", other.H()).
+				ExpectError(http.StatusForbidden, "User is not a member of this household")
+		} else {
+			tg.Get(t, CommandCenter, path+"/"+rid2+"/result", other.H()).ExpectStatus(http.StatusAccepted)
+		}
 		// Creating one does check: power_user in the node's household.
 		tg.Post(t, CommandCenter, path, nil, other.H()).ExpectStatus(http.StatusForbidden)
 	})
@@ -278,6 +303,11 @@ func TestCCMQTTCatalogue(t *testing.T) {
 		// LEGACY-BUG: trigger and poll have no household check (doc 05 §8.4). A user from
 		// another household can make this node measure. D4: Go checks membership.
 		stranger := NewUser(t)
+		if Jarvisd() {
+			tg.Post(t, CommandCenter, path, nil, stranger.H()).
+				ExpectError(http.StatusForbidden, "User is not a member of this household")
+			return
+		}
 		r2 := tg.Post(t, CommandCenter, path, nil, stranger.H()).Expect(http.StatusOK, Obj{"request_id": UUID, "status": Eq("sent")}).Object()
 		ExpectMQTT(t, c.Next(t, mqttWait, commandMsg(nid, "measure_ambient_noise")),
 			commandShape("measure_ambient_noise", Obj{"duration_seconds": Eq(3.0), "request_id": Eq(r2["request_id"])}))
@@ -289,14 +319,14 @@ func TestCCMQTTCatalogue(t *testing.T) {
 		}, u.H())
 		// LEGACY-BUG: trusted:true rides in the payload and makes the node skip verify (D4/D7:
 		// Go never sends it; per-node broker ACLs make commands authentic).
-		v := ExpectMQTT(t, c.Next(t, mqttWait, commandMsg(nid, "action")), commandShape("action", Obj{
+		v := ExpectMQTT(t, c.Next(t, mqttWait, commandMsg(nid, "action")), commandShape("action", legacyTrusted(Obj{
 			"command_name": Eq("contract_cmd"), "action_name": Eq("send"), "context": Obj{"k": Eq("v")},
 			"trusted": Eq(true), "user_id": Eq(u.ID),
-		}))
+		})))
 		rid := details(v)["request_id"].(string)
 		// LEGACY-BUG: the result sink is unauthenticated (doc 05 §8.2). D4: node auth, and the
 		// rid must belong to that node.
-		tg.Post(t, CommandCenter, "/api/v0/device-control-results/"+rid, map[string]any{"success": true}).
+		tg.Post(t, CommandCenter, "/api/v0/device-control-results/"+rid, map[string]any{"success": true}, resultSinkH(n)).
 			Expect(http.StatusOK, Obj{"status": Eq("ok")})
 		awaitHTTP(t, pending).Expect(http.StatusOK, Obj{
 			"status": Eq("completed"), "request_id": Eq(rid), "success": Eq(true), "error": Null,
@@ -324,18 +354,18 @@ func TestCCMQTTCatalogue(t *testing.T) {
 			map[string]any{"node_id": nid}, u.H())
 		// Row 1, verb routine. Today details carry only the slug (the node pulls the
 		// definition); D24 makes Go carry the full definition.
-		v := ExpectMQTT(t, c.Next(t, mqttWait, commandMsg(nid, "routine")), commandShape("routine", Obj{
+		v := ExpectMQTT(t, c.Next(t, mqttWait, commandMsg(nid, "routine")), commandShape("routine", legacyTrusted(Obj{
 			"routine_name": Eq(slug), "reply_request_id": UUID, "tool_call_id": UUID,
 			"trusted":       Eq(true), // LEGACY-BUG: see the action subtest.
 			"voice_command": Eq("routine: " + slug),
-		}))
+		})))
 		d := details(v)
 		if d["reply_request_id"] != d["request_id"] {
 			t.Fatalf("routine reply_request_id should equal request_id: %v", d)
 		}
 		tg.Post(t, CommandCenter, "/api/v0/device-control-results/"+d["reply_request_id"].(string), map[string]any{
 			"output": map[string]any{"success": true, "passed": 1, "failed": 0, "message": "contract done"},
-		}).Expect(http.StatusOK, Obj{"status": Eq("ok")})
+		}, resultSinkH(n)).Expect(http.StatusOK, Obj{"status": Eq("ok")})
 		awaitHTTP(t, pending).Expect(http.StatusOK, Obj{
 			"success": Eq(true), "status": Eq("success"), "message": Eq("contract done"), "passed": Eq(1), "failed": Eq(0),
 		})
@@ -373,7 +403,7 @@ func TestCCMQTTCatalogue(t *testing.T) {
 
 	t.Run("factory_reset", func(t *testing.T) {
 		victim := NewCCNode(t, u)
-		vc := DialMQTT(t, "jarvis-node-"+victim.ID)
+		vc := DialMQTTNode(t, victim)
 		vc.Subscribe(t, "jarvis/nodes/"+victim.ID+"/#")
 
 		tg.Do(t, CommandCenter, http.MethodDelete, "/api/v0/admin/nodes/"+victim.ID, nil, u.H()).

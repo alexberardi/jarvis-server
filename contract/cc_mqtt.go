@@ -113,6 +113,27 @@ func DialMQTT(t testing.TB, clientID string) *MQTTClient {
 	return c
 }
 
+// DialMQTTNode connects as node n's fake client ("jarvis-node-{id}"). Python's broker takes
+// the shared credential from the environment; jarvisd gives every node its own credential
+// and ACLs (D4), handed out by GET /node/mqtt-credentials, so the fake node fetches its own.
+func DialMQTTNode(t testing.TB, n *CCNode) *MQTTClient {
+	t.Helper()
+	if !Jarvisd() {
+		return DialMQTT(t, "jarvis-node-"+n.ID)
+	}
+	tg := T(t)
+	addr := tg.NeedMQTT(t)
+	cr := tg.Get(t, CommandCenter, "/api/v0/node/mqtt-credentials", n.APIKeyH()).ExpectStatus(200).Object()
+	user, _ := cr["username"].(string)
+	pass, _ := cr["password"].(string)
+	c, err := dialMQTT(addr, "jarvis-node-"+n.ID, user, pass)
+	if err != nil {
+		t.Fatalf("mqtt dial %s as node %s: %v", addr, n.ID, err)
+	}
+	t.Cleanup(c.Close)
+	return c
+}
+
 func dialMQTT(addr, clientID, user, pass string) (*MQTTClient, error) {
 	conn, err := net.DialTimeout("tcp", addr, mqttDialTimeout)
 	if err != nil {

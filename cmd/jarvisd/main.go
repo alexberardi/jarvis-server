@@ -9,13 +9,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
+	ccmod "github.com/alexberardi/jarvis-server/internal/modules/cc"
 	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
 	llmmod "github.com/alexberardi/jarvis-server/internal/modules/llm"
 	logsmod "github.com/alexberardi/jarvis-server/internal/modules/logs"
@@ -28,6 +31,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/logging"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
+	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -52,6 +56,14 @@ func modules() []module.Module {
 			RelayURL: os.Getenv("RELAY_URL"),
 			// Normally empty: the relay token is registered per household.
 			RelayHouseholdJWT: os.Getenv("RELAY_HOUSEHOLD_JWT"),
+		},
+		&ccmod.Module{
+			AdminKey: os.Getenv("ADMIN_API_KEY"),
+			MQTT: ccmod.MQTTOptions{
+				TCPAddr:        envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr),
+				WSAddr:         envOr("JARVIS_MQTT_WS_ADDR", mqtt.DefaultWSAddr),
+				AllowAnonymous: os.Getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
+			},
 		},
 		&authmod.Module{
 			AdminToken: os.Getenv("JARVIS_AUTH_ADMIN_TOKEN"),
@@ -82,6 +94,7 @@ func modules() []module.Module {
 		case *configmod.Module:
 			c.Served = served
 			c.SettingsGuard = superuser
+			c.MQTTPort = portOf(envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr))
 		case *authmod.Module:
 			c.InProcess = names
 		case *notifmod.Module:
@@ -124,6 +137,14 @@ func modules() []module.Module {
 			})
 			c.Models = sttmod.ModelPathFunc(llm.ModelPath)
 			auth.OnUserDeleted(c.PurgeUser)
+		case *ccmod.Module:
+			c.Auth = auth
+			c.Users = auth
+			c.Nodes = auth
+			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
+			c.SettingsWrite = superuser
+			c.Version = version
+			auth.OnUserDeleted(c.PurgeUser)
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
@@ -131,6 +152,25 @@ func modules() []module.Module {
 		}
 	}
 	return mods
+}
+
+// envOr returns the variable's value when it is set, even to "" (which disables a listener),
+// and def when it is unset.
+func envOr(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return def
+}
+
+// portOf is the port of a listen address like ":1884", or 0.
+func portOf(addr string) int {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(p)
+	return n
 }
 
 const usage = `usage: jarvisd <command>

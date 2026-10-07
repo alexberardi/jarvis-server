@@ -94,8 +94,17 @@ func TestCCNodeAuth(t *testing.T) {
 	})
 }
 
-// nodeResponseShape is admin.py NodeResponse (mobile getNode / listNodes).
-var nodeResponseShape = Obj{
+// nodeResponseShape is admin.py NodeResponse (mobile getNode / listNodes). jarvisd drops the
+// LoRA-only adapter_hash (D9; mobile's node type never reads it).
+func nodeResponseShape() Obj {
+	shape := legacyNodeResponseShape()
+	if Jarvisd() {
+		delete(shape, "adapter_hash")
+	}
+	return shape
+}
+
+func legacyNodeResponseShape() Obj { return Obj{
 	"node_id":    NonEmptyString,
 	"room":       String,
 	"user":       String,
@@ -111,7 +120,7 @@ var nodeResponseShape = Obj{
 	"git_sha":           NullOr(String),
 	"is_busy":           Bool,
 	"needs_k2":          Bool,
-}
+}}
 
 func TestCCNodeCreateAndHeartbeat(t *testing.T) {
 	tg := T(t)
@@ -125,7 +134,7 @@ func TestCCNodeCreateAndHeartbeat(t *testing.T) {
 	}, CCAdminH()).ExpectError(http.StatusBadRequest, "Node already exists locally")
 
 	got := tg.Get(t, CommandCenter, "/api/v0/admin/nodes/"+n.ID, u.H()).
-		Expect(http.StatusOK, nodeResponseShape).Object()
+		Expect(http.StatusOK, nodeResponseShape()).Object()
 	if got["node_id"] != n.ID || got["room"] != "contract" || got["user"] != "default" ||
 		got["voice_mode"] != "brief" || got["household_id"] != u.HouseholdID || got["needs_k2"] != true {
 		t.Fatalf("fresh node fields: %v", got)
@@ -145,7 +154,7 @@ func TestCCNodeCreateAndHeartbeat(t *testing.T) {
 	}, n.APIKeyH()).Expect(http.StatusOK, Obj{"status": Eq("ok")})
 
 	got = tg.Get(t, CommandCenter, "/api/v0/admin/nodes/"+n.ID, u.H()).
-		Expect(http.StatusOK, nodeResponseShape).Object()
+		Expect(http.StatusOK, nodeResponseShape()).Object()
 	if got["last_seen_version"] != "0.0.1-contract" || got["install_mode"] != "dev" || got["git_sha"] != "c0ffee" ||
 		got["is_busy"] != true || got["needs_k2"] != false || got["online"] != true {
 		t.Fatalf("heartbeat not reflected: %v", got)
@@ -172,11 +181,25 @@ var settingsRequestShape = Obj{
 	"expires_at": TimestampNaive,
 }
 
+// settingsRequestListShape is the node's pending list. jarvisd adds include_values and
+// user_id, which used to ride only in the MQTT payload, so the node's reconnect backstop can
+// honour secret sync (D40 05.Q8).
+func settingsRequestListShape() Obj {
+	if !Jarvisd() {
+		return settingsRequestShape
+	}
+	shape := Obj{"include_values": Bool, "user_id": NullOr(Int)}
+	for k, v := range settingsRequestShape {
+		shape[k] = v
+	}
+	return shape
+}
+
 func TestCCNodeSettingsRequestsList(t *testing.T) {
 	tg := T(t)
 	n := SharedCCNode(t)
 	tg.Get(t, CommandCenter, "/api/v0/nodes/"+n.ID+"/settings/requests", n.APIKeyH()).
-		Expect(http.StatusOK, ArrayOf(settingsRequestShape))
+		Expect(http.StatusOK, ArrayOf(settingsRequestListShape()))
 	tg.Get(t, CommandCenter, "/api/v0/nodes/contract-other/settings/requests", n.APIKeyH()).
 		ExpectError(http.StatusForbidden, "Cannot access other node's requests")
 }
