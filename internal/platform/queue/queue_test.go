@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"os"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -18,7 +19,22 @@ import (
 func newQueue(t *testing.T) (*Queue, *db.DB) {
 	t.Helper()
 	ctx := context.Background()
-	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
+	// Not t.TempDir: on Windows CI the file can stay locked briefly after Close (the virus
+	// scanner opening the just-written DB), and TempDir's cleanup fails the test for it. No
+	// connection is left open (checked: all idle, closed by Close).
+	dir, err := os.MkdirTemp("", "queue-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for range 50 {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	d, err := db.Open(ctx, filepath.Join(dir, "jarvis.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

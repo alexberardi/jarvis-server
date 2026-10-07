@@ -593,13 +593,15 @@ func (m *Manager) finish(ctx context.Context, inst *Install) error {
 }
 
 func (m *Manager) fail(ctx context.Context, inst *Install, err error) {
-	inst.State, inst.Error = InstallFailed, err.Error()
-	_ = m.Store.UpdateInstall(ctx, *inst)
+	// Model rows first, the install last: pollers watch the install, and must not see it
+	// failed while its model still reads "downloading".
 	for _, id := range []string{inst.MMProjID, inst.ModelID} {
 		if mod, gerr := m.Store.Get(ctx, id); gerr == nil && mod.State != StateReady {
 			_ = m.Store.SetModelState(ctx, id, StateFailed, mod.BytesDone, err.Error())
 		}
 	}
+	inst.State, inst.Error = InstallFailed, err.Error()
+	_ = m.Store.UpdateInstall(ctx, *inst)
 	m.log().Warn("model install failed", "model", inst.ModelID, "err", err)
 }
 

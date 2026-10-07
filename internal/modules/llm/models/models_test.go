@@ -307,7 +307,7 @@ func (e *env) start() {
 
 func (e *env) waitInstall(id int64, want string) Install {
 	e.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second) // sliced downloads under -race on CI runners are slow
 	for {
 		inst, err := e.mgr.Store.GetInstall(e.ctx, id)
 		if err != nil {
