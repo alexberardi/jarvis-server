@@ -319,13 +319,18 @@ jobs:
           test "$(jarvisd version)" = "$V"
           curl -fsS http://127.0.0.1:7700/health
           $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
+          # macOS may admit a new program by itself; take it out so doctor --fix has work.
+          sudo $fw --remove /usr/local/bin/jarvisd
+          if sudo jarvisd doctor; then exit 1; fi
+          sudo jarvisd doctor --fix
+          $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
           test "$(stat -f %Lp ~/.jarvisd)" = 700
           sudo jarvisd setup-link | grep -q '/setup#token='
           sh scripts/install.sh --base-url "$BASE" --yes | tee rerun.log
           grep -q 'already installed' rerun.log
           sh scripts/install.sh --uninstall
           test ! -e /usr/local/bin/jarvisd && test ! -e /Library/LaunchDaemons/net.jarvisautomation.jarvisd.plist
-          $fw --getappblocked /usr/local/bin/jarvisd | grep -q 'not part of the firewall'
+          if $fw --listapps | grep -q /usr/local/bin/jarvisd; then exit 1; fi
           test -f ~/.jarvisd/jarvis.db
           sh scripts/install.sh --base-url "$BASE" --yes
           sh scripts/install.sh --uninstall --purge --yes

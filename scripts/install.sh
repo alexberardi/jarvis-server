@@ -148,7 +148,7 @@ else
   if "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"'; then
     legacy=$(docker ps --format '{{.Names}}' 2>/dev/null || $SUDO docker ps --format '{{.Names}}' 2>/dev/null || true)
     legacy=$(printf '%s\n' "$legacy" | grep '^jarvis-' | tr '\n' ' ' || true)
-    [ -n "$legacy" ] || die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); run \`$NEW doctor\` to see which"
+    [ -n "$legacy" ] || die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (\`sudo ss -ltnp\` or \`sudo lsof -iTCP -sTCP:LISTEN\` names it)"
     [ $STOP_LEGACY = 1 ] || die "the legacy Jarvis Docker stack is running ($legacy) and holds jarvisd's ports.
   Re-run with --stop-legacy to stop it (docker stop + restart policy off; its data is kept).
   To go back to it later: jarvisd service stop && docker start $legacy"

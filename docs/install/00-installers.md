@@ -697,9 +697,9 @@ parallel worktrees. I7 is independent and large.
 |---|---|---|
 | **I0** | Spike, no product code. On the MBP: jarvisd from a LaunchDaemon with `UserName` serves a Metal chat and advertises mDNS that the Android app sees (no Local Network prompt). On Windows (runner or a real box): jarvisd as a service under `NT SERVICE\jarvisd` runs llama-server on CUDA and Vulkan in session 0; engines bind loopback only; a long HF path works; mDNS seen from the app next to the DNS Client service. Record results in STATUS. | Each row has a yes/no with evidence; IQ1/IQ2 confirmed or reopened. |
 | **I1** (done, §8.1) | Bootstrap: `--home` flag; per-OS service-default home; `<home>/jarvisd.env` (and `/etc/jarvisd/jarvisd.env`) loaded for unset variables; code default `~/.jarvisd`; Unix `umask 077`, home 0700, DB files 0600 at start (the §2.0 permissions gap); `sd_notify` READY; Windows `svc.IsWindowsService` run path with stop → context cancel and file logging; `jarvisd service install|uninstall|start|stop|restart|status` for systemd (system + `--user`), launchd (daemon), SCM (`mgr`, virtual account, recovery actions, ACLs). | Unit tests for env precedence and unit/plist rendering; CI installs and starts the service on ubuntu (system unit), macos-14 (LaunchDaemon) and windows-latest (SCM), then `GET :7700/health`, then uninstalls. |
-| **I2** | Doctor for installs: `fix_cmds` in `Check`, `--fix` (privilege check, LAN-only, tagged rules), new checks (port held by another program, Windows Public profile, home/DB permissions, macOS sleep, legacy running, unsupervised). Move `doctorPorts` out of `cmd/` (shared with admin A3). | Table tests per firewall backend for generated commands; `--fix` applied on this box's ufw and removed by `service uninstall`. |
-| **I3** | `install.sh` (Linux + macOS, POSIX sh): flags `--version`, `--channel`, `--user`, `--yes`, `--stop-legacy`, `--uninstall [--purge]`, `--rollback`; arch map; download to disk + size + `SHA256SUMS` (+ minisign if present); `jarvisd service install`; doctor + offer `--fix`; print `http://<lan-ip>:7710/setup#token=…`, the detected GPU line, the doctor result, and how to see logs. jarvisd side: first-start setup token file (with admin AQ2) and jarvisd's own app client (§3.1). | CI job runs the script against the workflow's own built archive (a `--from-dir` test hook) on ubuntu and macos-14; idempotent re-run is a no-op; `--uninstall` leaves no unit/binary. |
-| **I4** | `install.ps1` (Windows PowerShell 5.1): self-elevation, TLS 1.2, `Get-FileHash`, `Unblock-File`, `%ProgramFiles%` placement + machine PATH, `jarvisd service install`, `jarvisd doctor --fix`, same printout, `-Uninstall`, `-Purge`. | CI on windows-latest under `powershell.exe` (5.1), not `pwsh`; re-run idempotent. |
+| **I2** (done, §8.2) | Doctor for installs: `fix_cmds` in `Check`, `--fix` (privilege check, LAN-only, tagged rules), new checks (port held by another program, Windows Public profile, home/DB permissions, macOS sleep, legacy running, unsupervised). Move `doctorPorts` out of `cmd/` (shared with admin A3). | Table tests per firewall backend for generated commands; `--fix` applied on this box's ufw and removed by `service uninstall`. |
+| **I3** (done, §8.2) | `install.sh` (Linux + macOS, POSIX sh): flags `--version`, `--channel`, `--user`, `--yes`, `--stop-legacy`, `--uninstall [--purge]`, `--rollback`; arch map; download to disk + size + `SHA256SUMS` (+ minisign if present); `jarvisd service install`; doctor + offer `--fix`; print `http://<lan-ip>:7710/setup#token=…`, the detected GPU line, the doctor result, and how to see logs. jarvisd side: first-start setup token file (with admin AQ2) and jarvisd's own app client (§3.1). | CI job runs the script against the workflow's own built archive (a `--from-dir` test hook) on ubuntu and macos-14; idempotent re-run is a no-op; `--uninstall` leaves no unit/binary. |
+| **I4** (done, §8.2) | `install.ps1` (Windows PowerShell 5.1): self-elevation, TLS 1.2, `Get-FileHash`, `Unblock-File`, `%ProgramFiles%` placement + machine PATH, `jarvisd service install`, `jarvisd doctor --fix`, same printout, `-Uninstall`, `-Purge`. | CI on windows-latest under `powershell.exe` (5.1), not `pwsh`; re-run idempotent. |
 | **I5** | Upgrades: `jarvisd backup` (`VACUUM INTO`, keep 3), downgrade guard at start, upgrade sequence in both scripts (stop, swap, start, health-gate, rollback incl. snapshot restore when migrations ran), `jarvisd upgrade` with in-Go minisign verify (key embedded); release workflow signs `SHA256SUMS` with the existing key (secret in repo settings). | CI: install vN-1 archive, upgrade to the built one, check data survives; a deliberately broken "release" rolls back; an old binary refuses a newer DB. |
 | **I6** | Legacy detection and coexistence in both scripts and doctor; `--stop-legacy` (compose stop + restart policy off). | Tested on this box with the legacy containers stopped/started; never runs `down`. |
 | **I7** | `jarvisd import-legacy` per `docs/schema/*.md` (pgx, dry-run, refuses a non-empty DB, blobs via S3 GET, legacy JWT keys into `auth_signing_keys` as verify-only incl. HS256 so the env var goes away). Likely split per module (auth+config, cc, notifications, blobs). | Dry run and real run against a prod snapshot restored on this box; a node and a phone from the snapshot work against the imported jarvisd without re-provisioning. |
@@ -789,3 +789,88 @@ stops (Windows: the process exits), uninstalls and checks the data is kept. `--u
 on the dev box with a throwaway home and alternate ports from its env file (install → healthy,
 kill → restarted, stop → graceful MQTT/HTTP shutdown, status exit codes, `migrate status` finding
 the installed home), then uninstalled and linger turned back off.
+
+### 8.2 I2, I3, I4 as built (2026-10-07)
+
+Code: `internal/doctor/{doctor,checks,backends,firewall,command_*,owner_*}.go`,
+`cmd/jarvisd/{doctor,uninstall,setup}.go`, `internal/platform/service/purge.go`,
+`scripts/install.sh`, `scripts/install.ps1`; CI job `install` (ci.yml); release step "Add the
+install scripts" (release.yml).
+
+**Doctor (I2).** A `Check` now carries `fix_cmds` (argv lists, no `sudo`); `fix` is rendered
+from them (`sudo` + shell quoting on unix, verbatim + "(from an Administrator prompt)" on
+Windows). Only the firewall checks set them, and only for a `PrivateLAN` (private IPv4, no
+wider than /8). `jarvisd doctor --fix` refuses without root / an elevated token, runs each
+distinct command once (stops at the first failure), then checks again; with `--json` the
+progress goes to stderr. Per backend, everything is tagged so uninstall finds it:
+
+| Firewall | Fix | Removed by `service uninstall` |
+|---|---|---|
+| ufw | `ufw allow from <lan> to any port <list> proto tcp\|udp comment jarvisd` (idempotent) | each `user.rules` tuple with the hex `jarvisd` comment → `ufw delete allow from … port … proto …` |
+| firewalld | `--new-service=jarvisd` (if missing), `--service=jarvisd --add-port=…` per port, one rich rule `source address=<lan> service name="jarvisd" accept`, `--reload`; the check now also reads rich rules and the service's ports | rich rules naming the service, `--delete-service=jarvisd`, `--reload` |
+| macOS | `socketfilterfw --add` + `--unblockapp` on the binary (block-all is left to the user, noted) | `socketfilterfw --remove` if listed |
+| Windows | `delete rule name=all dir=in program="<exe>"` when any rule names the exe (a "Cancel" block rule beats any allow), then `add rule name=jarvisd … profile=private`; netsh gets its command line verbatim (`SysProcAttr.CmdLine`) | `delete rule name=jarvisd` if it exists |
+
+New checks: **ports** (fail): a TCP port answers but its HTTP `/health` lacks `Server: jarvisd`
+(every jarvisd listener now sends it, `httpx.ServerName`); the broker's ports count as
+foreign only when no HTTP listener is jarvisd's; fix names `ss`/`lsof`/`Get-NetTCPConnection`.
+**data directory** (warn): home not 0700, `jarvis.db*`/`setup-token` not 0600, or files owned
+by another account than the home (a `sudo jarvisd serve`); unreadable as a plain user is
+"OK, run sudo to check" (`Options.Home`; the admin's in-process doctor passes none).
+**legacy stack** (warn): running `jarvis-*` containers that publish a jarvisd port, or any
+while the ports check failed (host-network stacks publish nothing); infra-only containers
+and a leftover `~/.jarvis/compose` are OK. Fix: `docker update --restart=no` + `docker stop`.
+**network profile** (Windows, warn on Public) and **sleep** (macOS, `pmset -g` sleep > 0).
+**env file** (warn): the env file a plain user can't read (the system unit's 0640 file) is
+now a check pointing at `sudo jarvisd doctor` instead of a stderr warning. Not done:
+"unsupervised" (info), and `doctorPorts` stays in `cmd/` (the admin uses `doctor.Exposure`).
+
+**Uninstall / purge.** `jarvisd service uninstall [--purge [--yes]] [--keep-firewall]`:
+removes the definition, then the tagged firewall rules (as root/Administrator; otherwise it
+prints the removal commands), also when the service was already gone. `--purge` first shows
+what goes (home with its size, `/etc/jarvisd`, the `jarvisd` account on Linux system mode)
+and needs the home path typed back (or `--yes`; no terminal and no `--yes` refuses before
+anything changes). `CheckPurgeHome` refuses a relative path, a root, a user's home, any
+`.jarvis`, and a directory neither named for jarvisd nor holding `jarvis.db`. Binaries are
+the scripts' to remove (a running `jarvisd.exe` can't delete itself).
+
+**`jarvisd setup-link`** prints the link + token from `<home>/setup-token` (the scripts run
+it with sudo for a system home), else the admin URL. **`jarvisd help`** prints the usage and
+exits 0; the scripts grep it for an `upgrade` command.
+
+**`install.sh` (I3)** — POSIX sh, ~200 lines, shellcheck clean. Flags: `--version`, `--user`,
+`--yes`, `--stop-legacy`, `--force`, `--uninstall [--purge]`, `--base-url` (or
+`JARVISD_RELEASE_BASE`: a flat directory holding `SHA256SUMS` and the archives). Flow:
+OS/arch map (Intel Mac and non-systemd Linux refused) → `SHA256SUMS` from
+`releases/latest/download/` (no API) or the tag; the archive name in it gives the version →
+signature check **if `minisign` is installed and `SHA256SUMS.minisig` exists** (key
+725ba202b54fa2c9, `JARVISD_MINISIGN_PUBKEY` overrides; an invalid signature is fatal;
+`JARVISD_REQUIRE_SIGNATURE=1` makes a missing one fatal; otherwise a warning) → archive
+download to `$TMPDIR` or `/var/tmp`, SHA-256 must match → the extracted binary must print the
+version → if installed: same version + healthy = no-op (prints the setup link); different
+version and the installed binary lists `upgrade` = `exec jarvisd upgrade --version vX`
+(with `JARVISD_RELEASE_BASE` passed through); else stop-free replace (`jarvisd.prev` kept in
+`/usr/local/lib/jarvisd`) → fresh install: the new binary's `doctor --json` names a `ports`
+check → `jarvis-*` containers? refuse, or with `--stop-legacy` `docker update --restart=no`
++ `docker stop` (never `down`); no containers = "another program" refusal → atomic rename
+into `/usr/local/bin` (`~/.local/bin` with `--user`) → `jarvisd service install [--user]`
+(waits for /health) + `service status --wait 90s`; an upgrade that fails goes back to
+`jarvisd.prev` → `sudo jarvisd doctor --json`: any `fix_cmds` → "[Y/n]" on `/dev/tty`
+(default yes), `--yes` without a terminal, else the command is printed → `doctor`,
+`setup-link`, log and manage hints. Deviations from the row: no `--channel`/`--rollback`
+(ID10's rollback belongs to `jarvisd upgrade`), no GPU line, no separate HEAD size check (the
+checksum covers truncation), downloads go to the temp dir rather than beside the binary.
+
+**`install.ps1` (I4)** — Windows PowerShell 5.1. Same flow with `-Version`, `-BaseUrl`,
+`-Yes`, `-StopLegacy`, `-Force`, `-Uninstall`, `-Purge` (under `irm | iex`:
+`JARVISD_VERSION`, `JARVISD_RELEASE_BASE`, `JARVISD_YES=1`). Self-elevates with
+`Start-Process -Verb RunAs` (re-downloading itself when run from `iex`), TLS 1.2, progress bar
+off, `Get-FileHash`, `Unblock-File` on the zip and exe, `%ProgramFiles%\jarvisd\jarvisd.exe` +
+machine PATH entry, `jarvisd.prev.exe` for the rollback, `throw` never `exit`. Native stderr
+is read through a helper with `ErrorActionPreference=Continue` (5.1 turns redirected stderr
+into error records). Uninstall retries removing the directory while the exe lock clears and
+drops the PATH entry.
+
+**Release.** A separate step after "Build and package" copies both scripts into `dist/`;
+they are published as assets but kept out of `SHA256SUMS` (fetched on their own over TLS),
+so a signing step over `SHA256SUMS` is unaffected.

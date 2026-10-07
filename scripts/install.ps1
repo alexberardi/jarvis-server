@@ -182,7 +182,7 @@ try {
             if (Get-Command docker -ErrorAction SilentlyContinue) {
                 $legacy = @((Get-NativeOutput docker ps --format '{{.Names}}') -split '\s+' | Where-Object { $_ -like 'jarvis-*' })
             }
-            if (-not $legacy) { throw "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); run '$new doctor' to see which" }
+            if (-not $legacy) { throw "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (Get-NetTCPConnection -State Listen -LocalPort 7700 names it)" }
             if (-not $StopLegacy) {
                 throw ("the legacy Jarvis Docker stack is running ($($legacy -join ' ')) and holds jarvisd's ports.`n" +
                     "Re-run with -StopLegacy to stop it (docker stop + restart policy off; its data is kept).`n" +
