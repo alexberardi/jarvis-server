@@ -990,7 +990,10 @@ planted by the service account (older signed release, newer signed list over ano
 symlinked to the root-owned binary on macOS) are refused and the binary stays; a crashing release is
 swapped in, crash-loops, and the helper restores the binary while the restarted old version records
 `rolled_back`; a further upgrade succeeds; uninstall removes the helper. Ubuntu keeps running
-`scripts/upgrade-e2e.sh system` (now through the hardened pre-start).
+`scripts/upgrade-e2e.sh system` (now through the hardened pre-start). Green on PR #4. Finding: on GitHub's
+macOS images Homebrew makes `/usr/local/bin` writable by the runner user, so a LaunchDaemon there swaps
+in process without the helper (as on any Mac where the login user owns it); the e2e installs into a
+root-only `/opt/jarvisd-e2e/bin` and asserts the service account can't write it.
 
 **Not done / follow-ups.** `jarvisd backup` as its own command; a binary that passes `version` but dies
 before serve counts its start relies on the waiting CLI (or, from the admin, the operator) to roll back; a
