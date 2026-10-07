@@ -193,6 +193,7 @@ const usage = `usage: jarvisd <command>
 commands:
   serve            run the server
   migrate status   show each module's migration state
+  doctor [--json]  check that nodes and phones can reach jarvisd (listeners, host firewall)
   version          print the version
 `
 
@@ -214,6 +215,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return nil
 	case "serve":
 		return serve(ctx)
+	case "doctor":
+		return runDoctor(ctx, args[1:], stdout)
 	case "migrate":
 		if len(args) < 2 || args[1] != "status" {
 			return errors.New("usage: jarvisd migrate status")
