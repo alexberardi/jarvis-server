@@ -596,20 +596,3 @@ func TestUpdateCheckFailureIsHonest(t *testing.T) {
 		t.Fatalf("unreachable: %v", st)
 	}
 }
-
-func TestSemverOrder(t *testing.T) {
-	ordered := []string{"v0.9.9", "v1.0.0-alpha", "v1.0.0-alpha.1", "v1.0.0-alpha.beta", "v1.0.0-beta.2", "v1.0.0-beta.11",
-		"v1.0.0-rc.1", "v1.0.0", "1.0.1", "v1.10.0", "v2.0.0+build.5"}
-	for i := 0; i+1 < len(ordered); i++ {
-		a, okA := parseSemver(ordered[i])
-		b, okB := parseSemver(ordered[i+1])
-		if !okA || !okB || a.compare(b) >= 0 || b.compare(a) <= 0 {
-			t.Fatalf("%s < %s", ordered[i], ordered[i+1])
-		}
-	}
-	for _, bad := range []string{"dev", "", "v1.2", "v01.2.3", "1.2.x", "abc123"} {
-		if _, ok := parseSemver(bad); ok {
-			t.Errorf("%q parsed", bad)
-		}
-	}
-}

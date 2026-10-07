@@ -12,6 +12,11 @@ StartLimitBurst=10
 Type=notify
 User=jarvisd
 Group=jarvisd
+# Self-update (AD5): the service account can't write the binary, so a privileged pre-start
+# ("+": full privileges, no sandbox; "-": never blocks the start) swaps in a release the
+# service staged and verified, re-verifying it first, or carries out a requested rollback.
+Environment=JARVIS_UPGRADE_HELPER=1
+ExecStartPre=-+/usr/local/bin/jarvisd upgrade --prestart --home /var/lib/jarvisd
 ExecStart=/usr/local/bin/jarvisd serve --home /var/lib/jarvisd
 Restart=always
 RestartSec=5

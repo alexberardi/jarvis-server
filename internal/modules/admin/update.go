@@ -2,18 +2,15 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/update"
 )
 
 // The update check (AD5, inventory §6.2 #9, invariants I1/I2). Opt-in: with
@@ -22,7 +19,7 @@ import (
 // stable release (prereleases only when this build is itself a prerelease), and reports the
 // download for this platform. Honesty rule: "up to date" is only ever said after a successful
 // check that could compare versions; otherwise checked is false with the reason.
-// Installing is a later step (AD5 signed self-update, after installer I1).
+// Installing is POST /api/update/apply (apply.go, AD5): signed, with snapshot and rollback.
 
 // Admin settings.
 const (
@@ -39,9 +36,7 @@ var Definitions = []settings.Definition{
 
 const (
 	// UpdateRepo is where releases are published.
-	UpdateRepo = "alexberardi/jarvis-server"
-	// defaultGitHubAPI is the GitHub REST base (UpdateOptions.APIBase overrides it in tests).
-	defaultGitHubAPI = "https://api.github.com"
+	UpdateRepo = update.Repo
 	// updateTTL is how long a successful check is reused (GitHub allows 60 anonymous
 	// requests an hour).
 	updateTTL = time.Hour
@@ -82,6 +77,11 @@ type updateStatus struct {
 	ChecksumsURL    *string       `json:"checksums_url"`
 	InstallCommand  *string       `json:"install_command"`
 	InstallHint     string        `json:"install_hint"`
+	// CanApply: POST /api/update/apply can run here; else ApplyBlocked says why and
+	// ApplyCommand is what to run on the server instead.
+	CanApply     bool    `json:"can_apply"`
+	ApplyBlocked *string `json:"apply_blocked"`
+	ApplyCommand *string `json:"apply_command"`
 }
 
 // updateCache keeps the last successful check.
@@ -91,23 +91,14 @@ type updateCache struct {
 	at     time.Time
 }
 
-type ghRelease struct {
-	TagName     string `json:"tag_name"`
-	HTMLURL     string `json:"html_url"`
-	Body        string `json:"body"`
-	Draft       bool   `json:"draft"`
-	Prerelease  bool   `json:"prerelease"`
-	PublishedAt string `json:"published_at"`
-	Assets      []struct {
-		Name string `json:"name"`
-		URL  string `json:"browser_download_url"`
-		Size int64  `json:"size"`
-	} `json:"assets"`
-}
-
 func strp(s string) *string { return &s }
 
-func platform() string { return runtime.GOOS + "-" + runtime.GOARCH }
+func platform() string { return update.Platform() }
+
+// releaseSource reads the GitHub releases (Updates overrides the API base in tests).
+func (m *Module) releaseSource() update.Source {
+	return update.Source{APIBase: m.Updates.APIBase, Client: m.Updates.Client, UserAgent: "jarvisd/" + m.version()}
+}
 
 func (m *Module) version() string {
 	if m.Version == "" {
@@ -124,8 +115,8 @@ func (m *Module) updatesEnabled(ctx context.Context) bool {
 func (m *Module) baseStatus(enabled bool) *updateStatus {
 	return &updateStatus{
 		UpdatesEnabled: enabled, CurrentVersion: m.version(), Platform: platform(),
-		InstallHint: "Updates are installed by replacing the jarvisd binary and restarting it; " +
-			"one-click updates arrive with the installer.",
+		InstallHint: "Install updates from here (jarvisd checks the release signature, keeps the previous " +
+			"version and rolls back if the new one doesn't come up) or run `jarvisd upgrade` on the server.",
 	}
 }
 
@@ -161,47 +152,15 @@ func (m *Module) checkReleases(ctx context.Context) *updateStatus {
 		m.deps.Log.Warn("admin: update check failed", "reason", reason)
 		return st
 	}
-	base := strings.TrimRight(m.Updates.APIBase, "/")
-	if base == "" {
-		base = defaultGitHubAPI
-	}
-	client := m.Updates.Client
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/repos/"+UpdateRepo+"/releases?per_page=30", nil)
+	releases, err := m.releaseSource().List(ctx)
 	if err != nil {
-		return fail("Couldn't build the update request: " + err.Error())
+		return fail(err.Error())
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "jarvisd/"+m.version())
-	resp, err := client.Do(req)
-	if err != nil {
-		return fail("Couldn't reach GitHub to check for updates: " + err.Error())
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fail(fmt.Sprintf("GitHub answered HTTP %d to the update check", resp.StatusCode))
-	}
-	var releases []ghRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&releases); err != nil {
-		return fail("GitHub's release list couldn't be read: " + err.Error())
-	}
-	current, currentOK := parseSemver(m.version())
-	allowPre := currentOK && current.pre != ""
-	var best *ghRelease
-	var bestV semver
-	for i := range releases {
-		r := &releases[i]
-		v, ok := parseSemver(r.TagName)
-		if r.Draft || !ok || (r.Prerelease && !allowPre) || (v.pre != "" && !allowPre) {
-			continue
-		}
-		if best == nil || v.compare(bestV) > 0 {
-			best, bestV = r, v
-		}
+	current, currentOK := update.ParseVersion(m.version())
+	best := update.Newest(releases, m.version())
+	var bestV update.Version
+	if best != nil {
+		bestV, _ = update.ParseVersion(best.Tag)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if best == nil {
@@ -210,7 +169,7 @@ func (m *Module) checkReleases(ctx context.Context) *updateStatus {
 		return st
 	}
 	st.Checked, st.CheckedAt = true, &now
-	st.LatestVersion, st.Prerelease = strp(best.TagName), best.Prerelease
+	st.LatestVersion, st.Prerelease = strp(best.Tag), best.Prerelease
 	st.ReleaseURL, st.PublishedAt = strp(best.HTMLURL), strp(best.PublishedAt)
 	notes := best.Body
 	if len(notes) > maxNotes {
@@ -242,15 +201,16 @@ func (m *Module) checkReleases(ctx context.Context) *updateStatus {
 	case st.InstallCommand != nil:
 		st.InstallHint = "Run the install command; it verifies the download and restarts jarvisd."
 	default:
-		st.InstallHint = "Download " + st.Asset.Name + ", check it against SHA256SUMS, replace the jarvisd " +
-			"binary and restart jarvisd. One-click updates arrive with the installer."
+		st.InstallHint = "Install it from here, or run `jarvisd upgrade` on the server: either checks the " +
+			"release signature, snapshots the database, keeps the previous version and rolls back if the new " +
+			"one doesn't come up."
 	}
 	if !currentOK {
 		// Honest: a development build can't be compared, so neither "available" nor "up to date".
 		st.Reason = strp("This build (" + m.version() + ") has no release version to compare with.")
 		return st
 	}
-	if bestV.compare(current) > 0 {
+	if bestV.Compare(current) > 0 {
 		st.UpdateAvailable = true
 	} else {
 		st.UpToDate = true
@@ -261,12 +221,25 @@ func (m *Module) checkReleases(ctx context.Context) *updateStatus {
 // handleUpdate is GET /api/update: the status, checking GitHub only when updates are on and
 // the last check is older than an hour.
 func (m *Module) handleUpdate(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteJSON(w, http.StatusOK, m.updateStatusFor(r.Context(), false))
+	httpx.WriteJSON(w, http.StatusOK, m.withApply(r.Context(), m.updateStatusFor(r.Context(), false)))
+}
+
+// withApply adds whether the one-click update can run here.
+func (m *Module) withApply(ctx context.Context, st *updateStatus) *updateStatus {
+	reason, cmd := m.applyBlocker(ctx)
+	st.CanApply = reason == ""
+	if reason != "" {
+		st.ApplyBlocked = strp(reason)
+	}
+	if cmd != "" {
+		st.ApplyCommand = strp(cmd)
+	}
+	return st
 }
 
 // handleUpdateCheck is POST /api/update/check: check now (still nothing when updates are off).
 func (m *Module) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteJSON(w, http.StatusOK, m.updateStatusFor(r.Context(), true))
+	httpx.WriteJSON(w, http.StatusOK, m.withApply(r.Context(), m.updateStatusFor(r.Context(), true)))
 }
 
 // handleUpdateSettings is PUT /api/update/settings {enabled}: turn checks on or off, then
@@ -310,78 +283,4 @@ func (m *Module) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		st.Reason = strp("Update checks are off.")
 	}
 	httpx.WriteJSON(w, http.StatusOK, st)
-}
-
-// --- semver (vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]) ---
-
-type semver struct {
-	major, minor, patch int
-	pre                 string
-}
-
-// parseSemver reads a release tag; ok is false for anything else ("dev", a commit hash).
-func parseSemver(s string) (semver, bool) {
-	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
-	s, _, _ = strings.Cut(s, "+")
-	core, pre, _ := strings.Cut(s, "-")
-	parts := strings.Split(core, ".")
-	if len(parts) != 3 {
-		return semver{}, false
-	}
-	var n [3]int
-	for i, p := range parts {
-		x, err := strconv.Atoi(p)
-		if err != nil || x < 0 || (len(p) > 1 && p[0] == '0') || strings.HasPrefix(p, "+") {
-			return semver{}, false
-		}
-		n[i] = x
-	}
-	return semver{n[0], n[1], n[2], pre}, true
-}
-
-// compare orders by precedence (semver §11): a prerelease sorts before its release.
-func (a semver) compare(b semver) int {
-	for _, d := range []int{a.major - b.major, a.minor - b.minor, a.patch - b.patch} {
-		if d != 0 {
-			return sign(d)
-		}
-	}
-	switch {
-	case a.pre == b.pre:
-		return 0
-	case a.pre == "":
-		return 1
-	case b.pre == "":
-		return -1
-	}
-	ap, bp := strings.Split(a.pre, "."), strings.Split(b.pre, ".")
-	for i := 0; i < len(ap) && i < len(bp); i++ {
-		x, xErr := strconv.Atoi(ap[i])
-		y, yErr := strconv.Atoi(bp[i])
-		switch {
-		case xErr == nil && yErr == nil:
-			if x != y {
-				return sign(x - y)
-			}
-		case xErr == nil:
-			return -1 // numeric identifiers sort before alphanumeric
-		case yErr == nil:
-			return 1
-		default:
-			if c := strings.Compare(ap[i], bp[i]); c != 0 {
-				return c
-			}
-		}
-	}
-	return sign(len(ap) - len(bp))
-}
-
-func sign(d int) int {
-	switch {
-	case d > 0:
-		return 1
-	case d < 0:
-		return -1
-	}
-	return 0
 }

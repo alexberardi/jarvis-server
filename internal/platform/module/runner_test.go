@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -185,6 +186,30 @@ func TestRunnerRunsMigrations(t *testing.T) {
 	}
 	if _, err := r.Deps.DB.Write.Exec(`INSERT INTO auth_users VALUES (1)`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestRunnerDowngradeGuard: an older binary (fewer migrations) refuses a database a newer one
+// migrated, unless AllowDowngrade.
+func TestRunnerDowngradeGuard(t *testing.T) {
+	v1 := fstest.MapFS{"00001_users.sql": {Data: []byte("-- +goose Up\nCREATE TABLE auth_users (id INTEGER PRIMARY KEY);\n")}}
+	v2 := fstest.MapFS{
+		"00001_users.sql": v1["00001_users.sql"],
+		"00002_more.sql":  {Data: []byte("-- +goose Up\nCREATE TABLE auth_more (id INTEGER PRIMARY KEY);\n")},
+	}
+	d := deps(t)
+	newer := &Runner{Deps: d, Modules: []Module{&fakeModule{name: "auth", listener: config.ListenerAuth, migrations: v2}}}
+	if err := newer.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	older := &Runner{Deps: d, Modules: []Module{&fakeModule{name: "auth", listener: config.ListenerAuth, migrations: v1}}}
+	var de *db.DowngradeError
+	if err := older.Run(context.Background()); !errors.As(err, &de) || de.Module != "auth" || de.Unknown[0] != 2 {
+		t.Fatalf("older binary: %v", err)
+	}
+	older.AllowDowngrade = true
+	if err := older.Migrate(context.Background()); err != nil {
+		t.Fatalf("allowed downgrade: %v", err)
 	}
 }
 

@@ -91,7 +91,7 @@ jobs:
       - name: Platform tests (CGO_ENABLED=0)
         env:
           CGO_ENABLED: "0"
-        run: go test ./cmd/... ./internal/platform/... ./internal/audio/...
+        run: go test ./cmd/... ./internal/platform/... ./internal/audio/... ./internal/update/...
 
   # I1: register jarvisd with each OS's service manager the way the installers will, check it
   # serves /health under that supervisor and comes back after being killed, then uninstall.
@@ -223,3 +223,24 @@ jobs:
         if: failure() && runner.os == 'Windows'
         shell: pwsh
         run: Get-Content C:\ProgramData\jarvisd\logs\jarvisd.log -Tail 200
+
+  # AD5/ID10: self-update end to end under the systemd system unit, from fake signed releases
+  # (a throwaway minisign key trusted by test builds only): CLI upgrade, a broken release that
+  # rolls back, the admin Update button through the unit's privileged ExecStartPre helper, the
+  # restart button, and a manual rollback. See scripts/upgrade-e2e.sh.
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh linux-amd64
+      - name: Install minisign
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+      - name: Upgrade end to end (system unit)
+        run: scripts/upgrade-e2e.sh system
+      - name: Journal
+        if: failure()
+        run: sudo journalctl -u jarvisd --no-pager | tail -300

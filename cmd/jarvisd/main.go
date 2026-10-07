@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -37,9 +39,14 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/update"
 )
 
 var version = "dev"
+
+// crashForTest, set only by test builds (-ldflags "-X main.crashForTest=1"), makes serve fail
+// right after counting its start: the CI upgrade job's broken release, which must roll back.
+var crashForTest string
 
 // modules lists every module jarvisd serves. Modules are added here as they are ported.
 func modules() []module.Module {
@@ -225,9 +232,14 @@ func envOr(key, def string) string {
 const usage = `usage: jarvisd <command> [--home DIR]
 
 commands:
-  serve [--no-browser]
+  serve [--no-browser] [--allow-downgrade]
                    run the server; on first start it prints the admin setup link and, at a
-                   desktop, opens it (--no-browser or JARVIS_NO_BROWSER=1 to not)
+                   desktop, opens it (--no-browser or JARVIS_NO_BROWSER=1 to not).
+                   --allow-downgrade runs on a database a newer jarvisd migrated (experts)
+  upgrade [--version vX.Y.Z [--allow-older]] [--check] [--rollback] [--bin PATH] [--user]
+                   install a signed release: verify, snapshot the database, swap the binary
+                   (previous kept as jarvisd.prev), restart the service, roll back if the new
+                   version doesn't come up healthy
   service install [--user] [--bin PATH] [--run-as USER] [--no-start]
   service uninstall|start|stop|restart [--user]
   service status [--user] [--json] [--wait DURATION]
@@ -281,6 +293,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		fs.SetOutput(stdout)
 		noBrowser := fs.Bool("no-browser", false, "don't open the setup link in a browser")
+		allowDowngrade := fs.Bool("allow-downgrade", false, "start even though a newer jarvisd migrated the database")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -289,7 +302,9 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 			return err
 		}
 		v := os.Getenv("JARVIS_NO_BROWSER")
-		return serve(ctx, !*noBrowser && (v == "" || v == "0"))
+		return serve(ctx, !*noBrowser && (v == "" || v == "0"), *allowDowngrade)
+	case "upgrade":
+		return runUpgrade(ctx, flagHome, args[1:], stdout)
 	case "service":
 		return runService(ctx, flagHome, args[1:], stdout)
 	case "doctor":
@@ -341,19 +356,47 @@ func openDeps(ctx context.Context) (module.Deps, error) {
 	}, nil
 }
 
-func serve(ctx context.Context, browser bool) error {
+func serve(ctx context.Context, browser, allowDowngrade bool) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	// Ending serve with a restart request makes the supervisor start jarvisd again (AD5,
-	// AD8). Nothing calls Request yet; the restart route and self-update will.
+	// Ending serve with a restart request makes the supervisor start jarvisd again: the admin
+	// restart button (AD8) and self-update (AD5).
 	restarter := service.NewRestarter(service.Detect(), cancel)
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	exe, err := selfExe()
+	if err != nil {
+		return err
+	}
+	upaths := update.Paths{Home: cfg.Home, Exe: exe}
+	// A pending upgrade step (swap, rollback) and the start count run before the database
+	// opens (ID10).
+	gate, restart, err := upgradeStart(ctx, newLogger(), upaths, restarter.Kind().Supervised())
+	if err != nil {
+		return err
+	}
+	if restart {
+		return service.ErrRestart
+	}
+	if crashForTest != "" {
+		return errors.New("crashing on purpose (test build)")
+	}
 	deps, err := openDeps(ctx)
 	if err != nil {
 		return err
 	}
-	defer deps.DB.Close()
+	dbOpen := true
+	closeDB := func() {
+		if dbOpen {
+			deps.DB.Close()
+			dbOpen = false
+		}
+	}
+	defer closeDB()
 	mods := modules()
 	// jarvisd's own records go to stderr and, once migrated, into the logs module's store.
 	for _, m := range mods {
@@ -366,9 +409,18 @@ func serve(ctx context.Context, browser bool) error {
 		}
 	}
 	for _, m := range mods {
-		if a, ok := m.(*authmod.Module); ok {
+		switch x := m.(type) {
+		case *authmod.Module:
 			log, cfg := deps.Log, deps.Config
-			a.OnSetupToken = func(token, path string) { announceSetup(os.Stderr, log, cfg, token, path, browser) }
+			x.OnSetupToken = func(token, path string) { announceSetup(os.Stderr, log, cfg, token, path, browser) }
+		case *adminmod.Module:
+			// AD8 restart button and AD5 one-click update.
+			x.Restarter = restarter
+			x.Upgrade = adminmod.UpgradeConfig{
+				Exe:    exe,
+				Helper: os.Getenv(service.EnvUpgradeHelper) == "1",
+				Source: updateSource(),
+			}
 		}
 	}
 	log := deps.Log
@@ -377,17 +429,113 @@ func serve(ctx context.Context, browser bool) error {
 		<-ctx.Done()
 		_ = service.Stopping()
 	}()
-	runner := &module.Runner{Deps: deps, Modules: mods, OnReady: func() {
+	// The post-upgrade health gate: every listener bound and /health answering within the
+	// timeout, else roll back.
+	var gateFailed atomic.Value // string: why
+	gateDone := make(chan struct{})
+	var gateOnce sync.Once
+	endGate := func() bool {
+		first := false
+		gateOnce.Do(func() { first = true; close(gateDone) })
+		return first
+	}
+	if gate != nil {
+		timer := time.AfterFunc(gateTimeout(), func() {
+			reason := fmt.Sprintf("%s did not become healthy within %s", gate.To, gateTimeout())
+			if !endGate() {
+				return
+			}
+			gateFailed.Store(reason)
+			log.Error("upgrade: health gate failed; rolling back", "reason", reason)
+			cancel()
+		})
+		defer timer.Stop()
+	}
+	var runner *module.Runner
+	runner = &module.Runner{Deps: deps, Modules: mods, AllowDowngrade: allowDowngrade, OnReady: func() {
 		if err := service.Ready(ctx); err != nil {
 			log.Warn("could not notify the service manager", "err", err)
 		}
 		log.Info("jarvisd ready")
+		if gate != nil {
+			go passGate(ctx, log, runner, upaths, gate, gateDone, endGate)
+		}
 	}}
 	err = restarter.Err(runner.Run(ctx))
+	var de *db.DowngradeError
+	if errors.As(err, &de) {
+		err = downgradeHelp(de, upaths)
+	}
+	if v := gateFailed.Load(); v != nil {
+		return rollbackAfterGate(ctx, log, upaths, v.(string), restarter.Kind().Supervised(), closeDB)
+	}
+	if gate != nil && err != nil && !errors.Is(err, service.ErrRestart) {
+		// The new version failed to start: the marker holds the attempt, and the next start
+		// rolls back once MaxFailedStarts is reached.
+		log.Error("upgrade: the new version failed to start", "err", err, "attempt", gate.Attempts)
+	}
 	if errors.Is(err, service.ErrRestart) {
 		log.Info("exiting for the service manager to restart jarvisd", "supervisor", restarter.Kind())
 	}
 	return err
+}
+
+// passGate polls the config listener's /health (admin's when config is disabled) once every
+// listener is bound, and records the upgrade's success unless the gate timer fired first.
+func passGate(ctx context.Context, log *slog.Logger, runner *module.Runner, p update.Paths, gate *update.Marker,
+	done <-chan struct{}, end func() bool) {
+	addr := runner.Addr(config.ListenerConfig)
+	if addr == "" {
+		addr = runner.Addr(config.ListenerAdmin)
+	}
+	for addr != "" && !healthy(ctx, addr) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-time.After(time.Second):
+		}
+	}
+	if !end() {
+		return // the timer fired first
+	}
+	if err := update.Confirm(p); err != nil {
+		log.Error("upgrade: recording success failed", "err", err)
+		return
+	}
+	log.Info("upgrade: passed the health gate", "from", gate.From, "to", gate.To)
+}
+
+// rollbackAfterGate rolls back once serve has stopped and the database is closed.
+func rollbackAfterGate(ctx context.Context, log *slog.Logger, p update.Paths, reason string, supervised bool, closeDB func()) error {
+	closeDB()
+	if err := update.RequestRollback(p, reason); err != nil {
+		return err
+	}
+	if !update.CanWrite(p.Exe) {
+		if os.Getenv(service.EnvUpgradeHelper) == "1" && supervised {
+			return service.ErrRestart // the privileged pre-start rolls back
+		}
+		return fmt.Errorf("upgrade: %s; rolling back needs administrator rights: run %s", reason, elevated("jarvisd upgrade --rollback"))
+	}
+	res, err := update.Rollback(context.WithoutCancel(ctx), p, reason)
+	if err != nil {
+		return err
+	}
+	log.Info("upgrade: rolled back", "from", res.To, "to", res.From, "db_restored", res.DBRestored)
+	if supervised {
+		return service.ErrRestart
+	}
+	return fmt.Errorf("upgrade: %s; rolled back to %s; start jarvisd again", reason, res.From)
+}
+
+// downgradeHelp explains the downgrade guard's refusal.
+func downgradeHelp(de *db.DowngradeError, p update.Paths) error {
+	return fmt.Errorf("%w.\nThis jarvisd (%s) is older than the one that last ran on this data. Either install that "+
+		"newer version again (jarvisd upgrade --version vX), or restore a database snapshot taken before the "+
+		"upgrade from %s (stop jarvisd, copy it over %s). Experts: serve --allow-downgrade runs anyway",
+		de, version, p.BackupsDir(), filepath.Join(p.Home, "jarvis.db"))
 }
 
 func migrateStatus(ctx context.Context, stdout io.Writer) error {

@@ -42,6 +42,13 @@ Type=notify
 User={{.Account}}
 Group={{.Account}}
 {{- end}}
+{{- if not .User}}
+# Self-update (AD5): the service account can't write the binary, so a privileged pre-start
+# ("+": full privileges, no sandbox; "-": never blocks the start) swaps in a release the
+# service staged and verified, re-verifying it first, or carries out a requested rollback.
+Environment=JARVIS_UPGRADE_HELPER=1
+ExecStartPre=-+{{q .Binary}} upgrade --prestart --home {{q .Home}}
+{{- end}}
 ExecStart={{q .Binary}} serve --home {{q .Home}}
 Restart=always
 RestartSec=5

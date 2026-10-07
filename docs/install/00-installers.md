@@ -426,6 +426,10 @@ Backups (§4.3) contain the signing key; they are written 0600 beside the DB.
 
 ### 4.1 Getting and verifying a release
 
+*Built 2026-10-07: §8.2 is what `jarvisd upgrade` and the admin button actually do; it supersedes the
+sequence below where they differ (the swap happens before the restart, a privileged systemd pre-start
+helper does it for the system unit, and the health gate runs inside the new jarvisd).*
+
 - **Default channel: latest non-prerelease** via `https://github.com/alexberardi/jarvis-server/releases/latest/download/<asset>`
   (a redirect; no API call, no rate limit). `--version vX.Y.Z` pins; `--channel pre` picks the newest
   prerelease through the API (prereleases are marked by `release.yml:145`).
@@ -700,7 +704,7 @@ parallel worktrees. I7 is independent and large.
 | **I2** | Doctor for installs: `fix_cmds` in `Check`, `--fix` (privilege check, LAN-only, tagged rules), new checks (port held by another program, Windows Public profile, home/DB permissions, macOS sleep, legacy running, unsupervised). Move `doctorPorts` out of `cmd/` (shared with admin A3). | Table tests per firewall backend for generated commands; `--fix` applied on this box's ufw and removed by `service uninstall`. |
 | **I3** | `install.sh` (Linux + macOS, POSIX sh): flags `--version`, `--channel`, `--user`, `--yes`, `--stop-legacy`, `--uninstall [--purge]`, `--rollback`; arch map; download to disk + size + `SHA256SUMS` (+ minisign if present); `jarvisd service install`; doctor + offer `--fix`; print `http://<lan-ip>:7710/setup#token=…`, the detected GPU line, the doctor result, and how to see logs. jarvisd side: first-start setup token file (with admin AQ2) and jarvisd's own app client (§3.1). | CI job runs the script against the workflow's own built archive (a `--from-dir` test hook) on ubuntu and macos-14; idempotent re-run is a no-op; `--uninstall` leaves no unit/binary. |
 | **I4** | `install.ps1` (Windows PowerShell 5.1): self-elevation, TLS 1.2, `Get-FileHash`, `Unblock-File`, `%ProgramFiles%` placement + machine PATH, `jarvisd service install`, `jarvisd doctor --fix`, same printout, `-Uninstall`, `-Purge`. | CI on windows-latest under `powershell.exe` (5.1), not `pwsh`; re-run idempotent. |
-| **I5** | Upgrades: `jarvisd backup` (`VACUUM INTO`, keep 3), downgrade guard at start, upgrade sequence in both scripts (stop, swap, start, health-gate, rollback incl. snapshot restore when migrations ran), `jarvisd upgrade` with in-Go minisign verify (key embedded); release workflow signs `SHA256SUMS` with the existing key (secret in repo settings). | CI: install vN-1 archive, upgrade to the built one, check data survives; a deliberately broken "release" rolls back; an old binary refuses a newer DB. |
+| **I5** (jarvisd side done, §8.2; script re-run path left for I3/I4) | Upgrades: `jarvisd backup` (`VACUUM INTO`, keep 3), downgrade guard at start, upgrade sequence in both scripts (stop, swap, start, health-gate, rollback incl. snapshot restore when migrations ran), `jarvisd upgrade` with in-Go minisign verify (key embedded); release workflow signs `SHA256SUMS` with the existing key (secret in repo settings). | CI: install vN-1 archive, upgrade to the built one, check data survives; a deliberately broken "release" rolls back; an old binary refuses a newer DB. |
 | **I6** | Legacy detection and coexistence in both scripts and doctor; `--stop-legacy` (compose stop + restart policy off). | Tested on this box with the legacy containers stopped/started; never runs `down`. |
 | **I7** | `jarvisd import-legacy` per `docs/schema/*.md` (pgx, dry-run, refuses a non-empty DB, blobs via S3 GET, legacy JWT keys into `auth_signing_keys` as verify-only incl. HS256 so the env var goes away). Likely split per module (auth+config, cc, notifications, blobs). | Dry run and real run against a prod snapshot restored on this box; a node and a phone from the snapshot work against the imported jarvisd without re-provisioning. |
 | **I8** | Release and docs: publish `install.sh`/`install.ps1` as release assets and at a stable URL; landing page in jarvis-installer switches to them (EXTERNAL-CHANGES row); release notes template with the one-liners; minimal container image (PLAN §3.4) for NAS users; `./jarvis init` prints a jarvisd pointer. | A fresh VM per OS installs from the published one-liner. |
@@ -789,3 +793,88 @@ stops (Windows: the process exits), uninstalls and checks the data is kept. `--u
 on the dev box with a throwaway home and alternate ports from its env file (install → healthy,
 kill → restarted, stop → graceful MQTT/HTTP shutdown, status exit codes, `migrate status` finding
 the installed home), then uninstalled and linger turned back off.
+
+### 8.2 Self-update as built (AD5, ID10; 2026-10-07)
+
+Code: `internal/update` (minisign, release lookup, stage, swap, rollback, marker state machine),
+`cmd/jarvisd/upgrade.go` (CLI, serve's start step and health gate), `internal/modules/admin/apply.go`
+(admin routes, inventory §6.2), `internal/platform/db/versions.go` (downgrade guard), the systemd unit's
+pre-start helper (`internal/platform/service/render.go`), `scripts/upgrade-e2e.sh`.
+
+**Trust root.** The release workflow signs `SHA256SUMS` with the project minisign key (the node/admin key,
+id `C9A24FB502A25B72`; secrets `MINISIGN_SECRET_KEY` + `MINISIGN_PASSWORD`) with the trusted comment
+`jarvisd <tag> SHA256SUMS`, producing `SHA256SUMS.minisig`. jarvisd verifies it in Go with the public key
+compiled into the **running** binary (legacy `Ed` and prehashed `ED` signatures, plus the global signature
+over the trusted comment), requires the comment to name the release being installed, then checks the
+archive's SHA-256 from that list. Unsigned releases are refused; there is no override. A publishing
+release run fails without the secret; a dry run warns and ships unsigned. Test builds may trust one extra
+key via `-ldflags -X …/internal/update.extraTrustedKey=` (never an env var). `JARVIS_UPDATE_API` replaces the
+GitHub API base (the e2e uses it); it can't weaken anything since the signature is still checked.
+
+**One flow, two front ends** (`jarvisd upgrade [--version vX [--allow-older]] [--check] [--rollback]
+[--bin PATH] [--user]` and `POST /api/update/apply`):
+
+1. Resolve: newest release this build may move to (prereleases only from a prerelease), or `--version`
+   (older/same needs `--allow-older`; the admin only goes forward). Refuse if an upgrade marker exists.
+2. Stage under `<home>/updates/staged`: fetch `SHA256SUMS` + `.minisig` first (nothing big is downloaded
+   for an unsigned release), verify, download the archive (size-checked, progress reported), checksum,
+   extract `jarvisd(.exe)`, run `<new> version` and require the tag.
+3. Snapshot every `<home>/*.db` with `VACUUM INTO` → `<home>/backups/<db>-<fromver>-<UTC>.db` (0600, keep 3
+   per DB) and record every `goose_*` table's applied versions. Write the marker
+   `<home>/updates/upgrade.json` (`staged`).
+4. Swap, when this process can write the executable's directory: re-verify the staged files, extract the
+   binary next to the executable, copy the executable to `jarvisd.prev` (`jarvisd.prev.exe`), rename the
+   new one over it (Windows: the running exe is renamed to `jarvisd.exe.old` first, deleted on the next
+   start). Marker → `swapped`. The executable is `os.Executable()` with symlinks resolved (what the unit /
+   plist / SCM entry runs); the CLI takes `--bin`.
+5. Restart: the admin uses serve's `Restarter` (exit 75); the CLI restarts the installed service through
+   the service manager and waits for the outcome.
+
+**Who can write the binary.** The systemd system unit runs as `jarvisd` with `ProtectSystem=strict`, so it
+can't replace `/usr/local/bin/jarvisd`. The unit now carries `Environment=JARVIS_UPGRADE_HELPER=1` and
+`ExecStartPre=-+<bin> upgrade --prestart --home <home>`: on every start, as root and outside the sandbox
+(`+`), never blocking the start (`-`), it performs a pending swap (re-verifying the staged archive with the
+keys of the binary it runs, and refusing anything not newer than itself, so an unprivileged writer of the
+data dir can't install or downgrade anything) or a requested rollback, chowning what it writes to the
+home's owner. So the admin button stages as `jarvisd` and the restart does the swap. Existing system units
+get the helper on the next `jarvisd service install`. `--user` units and unsupervised runs own their binary
+and swap in process. launchd and SCM installs in root-owned dirs have no helper yet: the admin answers 409
+with `sudo jarvisd upgrade` (Windows: an elevated PowerShell). Unsupervised: the admin answers 409
+(`jarvisd upgrade`); the CLI refuses while an unsupervised jarvisd answers `/health` ("stop it first"),
+otherwise swaps and tells you to start it.
+
+**Start step and health gate** (serve, before the DB opens). `PreStart` does any pending swap/rollback (a
+no-op when the helper already did); a process that just swapped itself exits 75 to run the new binary.
+`BeginStart`: when the marker is `swapped` and this binary is the target version, count the attempt; with
+`MaxFailedStarts` (2) failed starts already counted, request a rollback instead. Then the gate: once every
+listener is bound (`OnReady`) jarvisd polls its own config listener's `/health` (admin's if config is
+disabled); success within `JARVIS_UPGRADE_GATE_TIMEOUT` (default 2 m) records `succeeded` in
+`<home>/updates/last-upgrade.json` and clears the marker. Timeout → serve stops, the DB is closed, and
+rollback runs (in process if writable, else exit 75 for the helper). Rollback copies `jarvisd.prev` back
+and restores a DB snapshot **only if** that DB's goose versions differ from the recorded ones, then records
+`rolled_back` with the reason. A swapped marker seen by another version is closed as `failed`. If the new
+binary never reports anything (can't start far enough to count), the waiting CLI rolls back itself after
+`2 × (gate + 15 s) + 1 m`. `jarvisd upgrade --rollback` rolls back a pending upgrade, or (no marker) just
+restores `jarvisd.prev` and leaves the DB (the guard then tells you about snapshots if needed).
+
+**Downgrade guard.** Before migrating, every module's (and the queue's/scheduler's) applied goose versions
+must all be migrations this binary has: "unknown" rather than "higher", since out-of-order migrations are
+allowed. Otherwise serve refuses with the module, the unknown versions, and how to recover (reinstall the
+newer version, or restore a snapshot from `<home>/backups`); `serve --allow-downgrade` runs anyway.
+Settings tables (`goose_*_settings`) are not checked.
+
+**Verified.** Unit tests: minisign against a real project-key signature (node-setup v0.3.1 checksums) and
+an independent implementation's legacy + prehashed vectors (aead.dev/minisign, throwaway key); fake GitHub
+over httptest for stage and refusals (unsigned, wrong key, other tag in the comment, default comment, bad
+checksum, wrong version); swap, re-verification of tampered staged files, the pre-start downgrade refusal,
+crash-loop and gate rollbacks with and without DB restore, the Windows rename-aside path, snapshot pruning,
+`VerifyDir`; runner and db downgrade guard; admin routes with a fake restarter. `scripts/upgrade-e2e.sh
+user` passed twice on the dev box (systemd --user, throwaway home and ports): CLI upgrade, a crashing release
+rolled back after 2 failed starts, the admin button, the restart button, manual rollback. CI job `upgrade`
+runs the same script in `system` mode (the root `ExecStartPre` helper path). The release `verify` job
+checks the signature with each OS's own binary (`jarvisd upgrade --verify-dir`).
+
+**Not done / follow-ups.** macOS firewall re-add after a swap (§2.2); launchd/SCM privileged helpers
+(today: `sudo jarvisd upgrade`); the install scripts' re-run path (I3/I4) should call `jarvisd upgrade`;
+free-disk preflight; `jarvisd backup` as its own command; a binary that passes `version` but dies before
+serve counts its start relies on the waiting CLI to roll back.
