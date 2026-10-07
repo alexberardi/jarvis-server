@@ -24,16 +24,8 @@ func (m *Module) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	if !b.done(w) {
 		return
 	}
-	key := tokenURLSafe(48)
-	hash, err := hashSecret(key)
-	if err != nil {
-		m.internalError(w, err)
-		return
-	}
-	t := dbTime(now())
-	_, err = m.deps.DB.Write.ExecContext(r.Context(), `INSERT INTO auth_app_clients
-		(app_id, name, key_hash, is_active, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)`, id, name, hash, t, t)
-	if isUnique(err) {
+	a, key, err := m.CreateAppClient(r.Context(), id, name)
+	if errors.Is(err, ErrAppExists) {
 		detail(w, http.StatusBadRequest, "app_id already exists")
 		return
 	}
@@ -42,74 +34,46 @@ func (m *Module) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-		"app_id": id, "name": name, "key": key, "created_at": pyTime(t), "last_rotated_at": nil,
+		"app_id": a.AppID, "name": a.Name, "key": key, "created_at": a.CreatedAt, "last_rotated_at": nil,
 	})
 }
 
 // handleRotateApp issues a new key and reactivates the client.
 func (m *Module) handleRotateApp(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("app_id")
-	key := tokenURLSafe(48)
-	hash, err := hashSecret(key)
-	if err != nil {
-		m.internalError(w, err)
-		return
-	}
-	t := now()
-	res, err := m.deps.DB.Write.ExecContext(r.Context(), `UPDATE auth_app_clients
-		SET key_hash = ?, last_rotated_at = ?, is_active = 1, updated_at = ? WHERE app_id = ?`, hash, dbTime(t), dbTime(t), id)
-	if err != nil {
-		m.internalError(w, err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	key, rotated, err := m.RotateAppClient(r.Context(), id)
+	if errors.Is(err, ErrAppNotFound) {
 		detail(w, http.StatusNotFound, "App client not found")
 		return
 	}
-	m.verified.invalidate("app", id)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"app_id": id, "key": key, "last_rotated_at": pyTimeOf(t)})
+	if err != nil {
+		m.internalError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"app_id": id, "key": key, "last_rotated_at": rotated})
 }
 
 func (m *Module) handleRevokeApp(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("app_id")
-	res, err := m.deps.DB.Write.ExecContext(r.Context(),
-		`UPDATE auth_app_clients SET is_active = 0, updated_at = ? WHERE app_id = ?`, dbTime(now()), id)
+	err := m.RevokeAppClient(r.Context(), id)
+	if errors.Is(err, ErrAppNotFound) {
+		detail(w, http.StatusNotFound, "App client not found")
+		return
+	}
 	if err != nil {
 		m.internalError(w, err)
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		detail(w, http.StatusNotFound, "App client not found")
-		return
-	}
-	m.verified.invalidate("app", id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"app_id": id, "is_active": false})
 }
 
 func (m *Module) handleListApps(w http.ResponseWriter, r *http.Request) {
-	rows, err := m.deps.DB.Read.QueryContext(r.Context(), `SELECT `+appCols+` FROM auth_app_clients ORDER BY id`)
+	apps, err := m.AppClients(r.Context())
 	if err != nil {
 		m.internalError(w, err)
 		return
 	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		a, err := scanApp(rows)
-		if err != nil {
-			m.internalError(w, err)
-			return
-		}
-		out = append(out, map[string]any{
-			"app_id": a.appID, "name": a.name, "is_active": a.isActive,
-			"created_at": pyTime(a.createdAt), "last_rotated_at": pyTimeNull(a.lastRotatedAt),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		m.internalError(w, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, apps)
 }
 
 func (m *Module) handleAppPing(w http.ResponseWriter, _ *http.Request, a *appClient) {

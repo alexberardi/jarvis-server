@@ -166,7 +166,7 @@ func (s *Service) runCall(id string, tel Telephony) {
 		sessionID: id, householdID: sess.HouseholdID, brief: brief,
 		maxSeconds: s.intSetting(ctx, SettingMaxCallSeconds, sess.HouseholdID, 600),
 		escalation: &live.EscalationWindow{Timeout: s.EscalationWindow}, tel: tel,
-		recorder:   &live.Recorder{}, disclosure: disclosure, ctx: ctx, cancel: cancel,
+		recorder: &live.Recorder{}, disclosure: disclosure, ctx: ctx, cancel: cancel,
 		started: make(chan struct{}), done: make(chan struct{}),
 	}
 	rt.pipeline = s.newTurnPipeline(rt, s.restrictedFor(ctx, sess))

@@ -30,6 +30,7 @@ keep shipping.
 | Voice enrollment screen says when speaker recognition is off for the household | Recognition is off by default; enrolling doesn't turn it on | D35, M14 | With the voice port |
 | Hide the Forge `TestInstallScreen` (share-code test install) | Its four `test-install` routes are not ported | D5 | Before cutover |
 | Hide or label "Install to Command Center" for Pantry `prompt_provider` packages | The install route becomes a stub that always fails cleanly | 03.Q2 | Optional |
+| Household settings: a write-only "Twilio account" section for `phone.twilio_account_sid`, `phone.twilio_auth_token`, `phone.twilio_from_number` (GET shows `"********"`/null for the SID and token and the household's own from number or null; PUT `""` clears; from number must be E.164) | Multi-tenant installs give each household its own Twilio account | AD6 | Before phone calls go to friends and family |
 | (Future) a "leave-by" built-in rule in the automations list; per-node voice enrollment | Deferred product work | D46, D36 | Post-port |
 
 ## jarvis-admin (moving into the monorepo, D9)

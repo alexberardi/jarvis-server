@@ -39,7 +39,7 @@ func gatewayStack(t *testing.T) (string, *authmod.Module, pconfig.Config) {
 		Deps: module.Deps{Config: cfg, DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil))},
 		// Admin first: the handler lookup must not depend on registration order.
 		Modules: []module.Module{&Module{UI: builtUI(), Verify: auth.VerifyUser,
-			Accounts: auth, Settings: []SettingsSource{auth},
+			Accounts: auth, SettingsSources: []SettingsSource{auth},
 			RunDoctor: func(context.Context, doctor.Options) []doctor.Check {
 				return []doctor.Check{{Name: "listening", Status: doctor.OK}}
 			}}, auth},
@@ -141,9 +141,10 @@ func TestGatewayEndToEnd(t *testing.T) {
 	if st := out.(map[string]any); code != 200 || st["needs_superuser"] != false || st["superuser"] != true || st["households"] != 1.0 {
 		t.Fatalf("setup state after setup: %d %v", code, out)
 	}
-	// The real auth module's settings through the aggregator, and a write back.
+	// The real auth module's settings (and the admin module's own) through the aggregator, and a write back.
 	code, out = call(t, "GET", base+"/api/settings/", nil, root...)
-	if svcs, _ := out.(map[string]any)["services"].([]any); code != 200 || len(svcs) != 1 || svcs[0].(map[string]any)["service_name"] != "auth" {
+	if svcs, _ := out.(map[string]any)["services"].([]any); code != 200 || len(svcs) != 2 ||
+		svcs[0].(map[string]any)["service_name"] != "admin" || svcs[1].(map[string]any)["service_name"] != "auth" {
 		t.Fatalf("settings: %d %v", code, out)
 	}
 	code, out = call(t, "PUT", base+"/api/settings/auth/auth.token.access_expire_minutes", map[string]any{"value": 45}, root...)

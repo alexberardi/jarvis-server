@@ -417,18 +417,19 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 
 // --- health probes ---
 
-type healthStatus struct {
+// HealthStatus is one probe result (GET /services/health and the admin Connections page).
+type HealthStatus struct {
 	Healthy   bool     `json:"healthy"`
 	LatencyMS *float64 `json:"latency_ms"`
 	Error     *string  `json:"error"`
 }
 
-func (m *Module) probe(ctx context.Context, s service) healthStatus {
+func (m *Module) probe(ctx context.Context, s service) HealthStatus {
 	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.healthURL(), nil)
 	if err != nil {
 		e := err.Error()
-		return healthStatus{Error: &e}
+		return HealthStatus{Error: &e}
 	}
 	client := m.client
 	if secs := m.settings.Float(ctx, "health_check.timeout", settings.Scope{}); secs > 0 {
@@ -445,16 +446,16 @@ func (m *Module) probe(ctx context.Context, s service) healthStatus {
 		default:
 			e = err.Error()
 		}
-		return healthStatus{Error: &e}
+		return HealthStatus{Error: &e}
 	}
 	res.Body.Close()
 	lat := float64(time.Since(start).Microseconds()) / 1000
 	lat = float64(int64(lat*100+0.5)) / 100
 	if res.StatusCode == http.StatusOK {
-		return healthStatus{Healthy: true, LatencyMS: &lat}
+		return HealthStatus{Healthy: true, LatencyMS: &lat}
 	}
 	e := fmt.Sprintf("HTTP %d", res.StatusCode)
-	return healthStatus{LatencyMS: &lat, Error: &e}
+	return HealthStatus{LatencyMS: &lat, Error: &e}
 }
 
 func isTimeout(err error) bool {
@@ -468,11 +469,11 @@ func (m *Module) healthAll(w http.ResponseWriter, r *http.Request) {
 		m.internalError(w, err)
 		return
 	}
-	results := make(map[string]healthStatus, len(svcs))
+	results := make(map[string]HealthStatus, len(svcs))
 	healthy := 0
 	type res struct {
 		name string
-		h    healthStatus
+		h    HealthStatus
 	}
 	ch := make(chan res, len(svcs))
 	for _, s := range svcs {

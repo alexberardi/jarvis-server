@@ -41,28 +41,55 @@ type Module struct {
 
 	// The BFF endpoints' module interfaces (bff.go), set by cmd/jarvisd. A nil one makes its
 	// routes answer 503.
-	Settings []SettingsSource // every module with a settings service
-	Traces   TraceStore       // cc
-	Accounts Accounts         // auth
-	Models   Models           // llm
-	Prompts  PromptProviders  // cc
+	SettingsSources []SettingsSource // every module with a settings service (admin adds its own)
+	Traces          TraceStore       // cc
+	Accounts        Accounts         // auth
+	Models          Models           // llm
+	Prompts         PromptProviders  // cc
+	Logs            LogStore         // logs (A4)
+	Registry        Registry         // config (A4)
+	Apps            AppClients       // auth (A4)
 	// Exposure is what /api/doctor checks (the listeners served, MQTT, mDNS).
 	Exposure doctor.Exposure
 	// RunDoctor runs the checks (tests); nil is doctor.Run.
 	RunDoctor func(context.Context, doctor.Options) []doctor.Check
+	// Updates configures the release check (tests point it at a fake GitHub).
+	Updates UpdateOptions
+	// LogPoll is the log tail's poll interval (tests); zero is one second.
+	LogPoll time.Duration
 
-	deps   module.Deps
-	verify settings.UserVerifier
-	gate   settings.Guard
-	doc    doctorCache
+	deps     module.Deps
+	settings *settings.Service
+	verify   settings.UserVerifier
+	gate     settings.Guard
+	doc      doctorCache
+	upd      updateCache
 }
 
 func (m *Module) Name() string      { return "admin" }
 func (m *Module) Listener() string  { return pconfig.ListenerAdmin }
 func (m *Module) Migrations() fs.FS { return nil }
 
+// Settings is the admin module's settings service (updates.enabled), valid after Register.
+func (m *Module) Settings() *settings.Service { return m.settings }
+
+// Start creates the admin settings table.
+func (m *Module) Start(ctx context.Context) error {
+	if m.settings == nil {
+		return nil
+	}
+	return m.settings.Migrate(ctx)
+}
+
 func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.deps = deps
+	if deps.DB != nil {
+		svc, err := settings.New(deps.DB, "admin", Definitions, deps.Log)
+		if err != nil {
+			panic(err) // static definitions
+		}
+		m.settings = svc
+	}
 	ui, source := m.resolveUI()
 	if ui == nil {
 		deps.Log.Warn("admin UI not built; serving the placeholder page", "source", source)

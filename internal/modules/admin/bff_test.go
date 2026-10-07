@@ -123,8 +123,8 @@ func newBFF(t *testing.T) *bffEnv {
 	})
 	e.m = &Module{
 		UI: builtUI(), Verify: fakeVerify, Version: "1.2.3",
-		Settings: []SettingsSource{fakeSettings{"llm", e.llm}, fakeSettings{"cc", e.cc}, fakeSettings{"notready", nil}},
-		Traces:   e.traces, Accounts: e.accounts, Prompts: e.prompts,
+		SettingsSources: []SettingsSource{fakeSettings{"llm", e.llm}, fakeSettings{"cc", e.cc}, fakeSettings{"notready", nil}},
+		Traces:          e.traces, Accounts: e.accounts, Prompts: e.prompts,
 		Models:   fakeModels{states: map[string]string{"live": "ready", "background": "not_configured"}},
 		Exposure: doctor.Exposure{Listeners: []string{pconfig.ListenerAdmin}},
 		RunDoctor: func(_ context.Context, o doctor.Options) []doctor.Check {

@@ -48,7 +48,7 @@ func TestDoctorPortsIncludeAdmin(t *testing.T) {
 	t.Fatalf("admin listener 7710 missing from %v", ports)
 }
 
-// The admin BFF reaches every module it reads in process (A3).
+// The admin BFF reaches every module it reads in process (A3, A4).
 func TestAdminWiring(t *testing.T) {
 	for _, m := range modules() {
 		a, ok := m.(*adminmod.Module)
@@ -56,14 +56,15 @@ func TestAdminWiring(t *testing.T) {
 			continue
 		}
 		var names []string
-		for _, s := range a.Settings {
+		for _, s := range a.SettingsSources {
 			names = append(names, s.Name())
 		}
 		slices.Sort(names)
-		if want := []string{"auth", "cc", "config", "llm", "logs", "ocr", "stt", "tts"}; !slices.Equal(names, want) {
+		if want := []string{"admin", "auth", "cc", "config", "llm", "logs", "ocr", "stt", "tts"}; !slices.Equal(names, want) {
 			t.Errorf("settings sources %v, want %v", names, want)
 		}
-		if a.Traces == nil || a.Prompts == nil || a.Accounts == nil || a.Models == nil || a.Verify == nil {
+		if a.Traces == nil || a.Prompts == nil || a.Accounts == nil || a.Models == nil || a.Verify == nil ||
+			a.Logs == nil || a.Registry == nil || a.Apps == nil {
 			t.Errorf("admin not wired: %+v", a)
 		}
 		if !slices.Contains(a.Exposure.Listeners, config.ListenerAdmin) || a.Exposure.MQTTAddr == "" {
