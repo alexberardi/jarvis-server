@@ -460,7 +460,7 @@ func (m *Module) handleStartNodeVoice(kind string, defaultSecs float64) userHand
 			detail(w, http.StatusNotFound, "Node not found")
 			return
 		}
-		if !row.online(m.now()) {
+		if !row.reachable(m.now()) {
 			detail(w, http.StatusConflict, "Node is offline")
 			return
 		}

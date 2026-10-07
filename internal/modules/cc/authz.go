@@ -85,14 +85,16 @@ func (m *Module) node(h nodeHandler) http.HandlerFunc {
 // touchLastSeen is touch_node_last_seen: best effort, debounced, never fails the request.
 func (m *Module) touchLastSeen(ctx context.Context, row *nodeRow) {
 	now := m.now()
-	if row.lastSeen.Valid && now.Sub(parseTS(row.lastSeen.String)) < livenessDebounce {
+	// The first contact always writes: registration's last_seen would debounce it away.
+	if row.contacted && row.lastSeen.Valid && now.Sub(parseTS(row.lastSeen.String)) < livenessDebounce {
 		return
 	}
-	if _, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_nodes SET last_seen = ? WHERE node_id = ?`, dbTime(now), row.nodeID); err != nil {
+	if _, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_nodes SET last_seen = ?, contacted = 1 WHERE node_id = ?`, dbTime(now), row.nodeID); err != nil {
 		m.deps.Log.Debug("cc: liveness write failed", "node", row.nodeID, "err", err)
 		return
 	}
 	row.lastSeen = sql.NullString{String: dbTime(now), Valid: true}
+	row.contacted = true
 }
 
 // recordSeen refreshes last_seen for a node with no request context (MQTT round trips).

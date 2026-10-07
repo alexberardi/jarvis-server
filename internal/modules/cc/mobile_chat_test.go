@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -92,7 +93,7 @@ func (ce *chatEnv) setOnline(online bool) {
 	if !online {
 		seen = seen.Add(-time.Hour)
 	}
-	if _, err := ce.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ? WHERE node_id = ?`, dbTime(seen), ce.node.id); err != nil {
+	if _, err := ce.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ?, contacted = 1 WHERE node_id = ?`, dbTime(seen), ce.node.id); err != nil {
 		ce.t.Fatal(err)
 	}
 }
@@ -270,6 +271,40 @@ func TestMobileChatColdStart(t *testing.T) {
 	if frames[0] != `{"type": "status", "message": "Starting conversation..."}` ||
 		event(t, frames[len(frames)-1])["conversation_id"] != "mobile-abcdefabcdef" {
 		t.Fatalf("expired id %v", frames)
+	}
+}
+
+// A10 F19: the first chat to a node registered moments ago but never connected waited 10 s
+// for report_tools; registration's last_seen made it look online. It is offline until heard.
+func TestMobileChatNeverConnectedNodeFailsFast(t *testing.T) {
+	ce := newChatEnv(t, prompts.Qwen3_8B)
+	if _, err := ce.d.Write.Exec(`UPDATE cc_nodes SET contacted = 0 WHERE node_id = ?`, ce.node.id); err != nil {
+		t.Fatal(err)
+	}
+	ce.eng.say("Hello there.")
+	start := time.Now()
+	r := ce.do("POST", "/api/v0/mobile/chat/warmup", map[string]any{"node_id": ce.node.id, "household_id": voiceHH}, bearer("tok-7")).want(200).json()
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("warmup waited %v for a node that never connected", took)
+	}
+	if len(ce.pub.commands("report_tools")) != 0 {
+		t.Fatal("asked a never-connected node for its tools")
+	}
+	if r["tools_loaded"] != 0.0 {
+		t.Fatalf("warmup %v", r)
+	}
+	// reportTools itself refuses too, for every caller (errands, signals, the tools view).
+	if _, err := ce.m.reportTools(context.Background(), ce.node.id, time.Minute); !errors.Is(err, errNodeNeverSeen) {
+		t.Fatalf("reportTools: %v", err)
+	}
+	// Its first authenticated request makes it reachable.
+	row, err := ce.m.nodeByID(context.Background(), ce.node.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ce.m.touchLastSeen(context.Background(), row)
+	if row, _ = ce.m.nodeByID(context.Background(), ce.node.id); !row.reachable(ce.clock()) {
+		t.Fatalf("not reachable after first contact: %+v", row)
 	}
 }
 

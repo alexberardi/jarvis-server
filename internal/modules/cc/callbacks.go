@@ -453,7 +453,7 @@ func (m *Module) startNodeCallback(ctx context.Context, nj newCallbackJob) (*cal
 	switch {
 	case m.bus == nil || !m.bus.Available():
 		reason = "MQTT is not available"
-	case !nj.node.online(m.now()):
+	case !nj.node.reachable(m.now()):
 		reason = "Node is offline"
 	default:
 		payload := []map[string]any{{"command": "callback", "details": map[string]any{"request_id": job.id}}}
