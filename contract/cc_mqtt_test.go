@@ -354,11 +354,20 @@ func TestCCMQTTCatalogue(t *testing.T) {
 			map[string]any{"node_id": nid}, u.H())
 		// Row 1, verb routine. Today details carry only the slug (the node pulls the
 		// definition); D24 makes Go carry the full definition.
-		v := ExpectMQTT(t, c.Next(t, mqttWait, commandMsg(nid, "routine")), commandShape("routine", legacyTrusted(Obj{
+		routineDetails := legacyTrusted(Obj{
 			"routine_name": Eq(slug), "reply_request_id": UUID, "tool_call_id": UUID,
 			"trusted":       Eq(true), // LEGACY-BUG: see the action subtest.
 			"voice_command": Eq("routine: " + slug),
-		})))
+		})
+		if Jarvisd() {
+			// D24: the node-pull shape of the routine, so the node never runs a stale copy.
+			routineDetails["routine"] = Obj{
+				"trigger_phrases":      Eq([]any{"contract run"}),
+				"steps":                Eq([]any{map[string]any{"command": "contract_cmd", "args": map[string]any{"a": "1"}, "label": ""}}),
+				"response_instruction": Eq(""), "response_length": Eq("short"),
+			}
+		}
+		v := ExpectMQTT(t, c.Next(t, mqttWait, commandMsg(nid, "routine")), commandShape("routine", routineDetails))
 		d := details(v)
 		if d["reply_request_id"] != d["request_id"] {
 			t.Fatalf("routine reply_request_id should equal request_id: %v", d)

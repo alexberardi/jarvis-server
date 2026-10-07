@@ -46,8 +46,8 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 
 // Definitions are the module's settings declared so far.
 func Definitions() []settings.Definition {
-	return slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona), packageDefinitions(),
-		smartHomeDefinitions(), memoryDefinitions())
+	return routineDefinitions(slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona),
+		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions()))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -132,8 +132,9 @@ type Module struct {
 	tools    *servertools.Registry
 	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
 
-	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
-	smart   *smartHome   // 5c smart home (smarthome.go)
+	cmdData *schemaCache  // command-data schema cache (doc 12, packages.go)
+	smart   *smartHome    // 5c smart home (smarthome.go)
+	rt      *routineState // 5c routines and errand schedules (routines.go)
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -268,6 +269,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerPackages(mux)
 	// Memory and knowledge (doc 04).
 	m.registerMemory(mux)
+	// Routines and errand schedules (doc 08).
+	m.registerRoutines(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -314,10 +317,13 @@ func (m *Module) Start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	return m.deps.Scheduler.Ensure(ctx, scheduler.Trigger{
+	if err := m.deps.Scheduler.Ensure(ctx, scheduler.Trigger{
 		Name: taskSweepJob, Kind: scheduler.KindInterval, JobType: taskSweepJob,
 		Spec: scheduler.Spec{Every: 120 * time.Second},
-	})
+	}); err != nil {
+		return err
+	}
+	return m.startRoutines(ctx)
 }
 
 // PurgeUser is the account-deletion hook (D20): the user's traces go; their id is removed
@@ -338,6 +344,7 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 		// sessions (their provider tokens) go, and voice-scan rows forget them.
 		`DELETE FROM cc_auth_sessions WHERE user_id = ?`,
 		`UPDATE cc_bluetooth_scan_requests SET user_id = NULL WHERE user_id = ?`,
+		`DELETE FROM cc_schedules WHERE user_id = ?`, // their trigger finds no row and lapses
 	} {
 		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
 			return err

@@ -22,7 +22,7 @@ var expectedTables = []string{
 	// 04 memory
 	"cc_user_memories", "cc_conversation_transcripts", "cc_person_characterizations",
 	// 08 routines and schedules
-	"cc_routines", "cc_schedules",
+	"cc_routines", "cc_schedules", "cc_routine_seeds",
 	// 09 errands
 	"cc_errand_plans", "cc_workflows",
 	// 10 signals, attention, proposals
