@@ -225,3 +225,7 @@ func (l *launchd) InstalledHome() string {
 	}
 	return homeFromArgs(args)
 }
+
+func (l *launchd) PurgePlan(home string) PurgePlan { return PurgePlan{Home: home} }
+
+func (l *launchd) Purge(_ context.Context, p PurgePlan) error { return purgeFiles(p) }

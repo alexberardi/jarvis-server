@@ -55,6 +55,11 @@ type Manager interface {
 	Status(ctx context.Context) (Status, error)
 	// InstalledHome is the --home of the installed service, "" when none is installed.
 	InstalledHome() string
+	// PurgePlan lists what Purge deletes for a service that used home.
+	PurgePlan(home string) PurgePlan
+	// Purge deletes the plan's data directory, paths and account (`service uninstall
+	// --purge`, after Uninstall).
+	Purge(ctx context.Context, p PurgePlan) error
 }
 
 // ErrNotInstalled is returned when the service is not registered.

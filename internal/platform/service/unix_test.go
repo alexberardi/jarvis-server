@@ -162,6 +162,47 @@ func TestSystemdInstallSystem(t *testing.T) {
 	if err := s.Start(ctx); !errors.Is(err, ErrNotInstalled) {
 		t.Errorf("start after uninstall: %v", err)
 	}
+
+	// --purge: the home, /etc/jarvisd and the account.
+	plan := s.PurgePlan(home)
+	if plan.Home != home || !slices.Equal(plan.Extra, []string{s.envDir}) || plan.Account != Name {
+		t.Fatalf("plan %+v", plan)
+	}
+	f.calls = nil
+	if err := s.Purge(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{home, s.envDir} {
+		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s not purged", p)
+		}
+	}
+	if !slices.Equal(f.calls, []string{"userdel jarvisd"}) {
+		t.Errorf("calls %q", f.calls)
+	}
+	// User mode: the home only.
+	u, _, _, _ := testSystemd(t, true, 1000)
+	if p := u.PurgePlan(home); p.Extra != nil || p.Account != "" {
+		t.Errorf("user plan %+v", p)
+	}
+}
+
+func TestCheckPurgeHome(t *testing.T) {
+	dir := t.TempDir()
+	userHome, _ := os.UserHomeDir()
+	other := filepath.Join(dir, "data")
+	os.Mkdir(other, 0o700)
+	for _, bad := range []string{"", "relative/jarvisd", "/", userHome, filepath.Join(dir, ".jarvis"), other} {
+		if err := CheckPurgeHome(bad); err == nil {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+	os.WriteFile(filepath.Join(other, "jarvis.db"), nil, 0o600)
+	for _, ok := range []string{"/var/lib/jarvisd", filepath.Join(dir, ".jarvisd"), other} {
+		if err := CheckPurgeHome(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
 }
 
 func TestSystemdInstallRefusals(t *testing.T) {

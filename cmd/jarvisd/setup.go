@@ -1,16 +1,20 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/doctor"
+	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
@@ -25,6 +29,24 @@ func setupLink(cfg config.Config, token string) string {
 		host = "localhost"
 	}
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Ports[config.ListenerAdmin])) + "/setup#token=" + token
+}
+
+// printSetupLink is `jarvisd setup-link`: the install scripts' last word. While no admin
+// account exists it prints the setup link and token from <home>/setup-token (written by the
+// running service, 0600, so the scripts run it with sudo for a system service); afterwards
+// the admin URL.
+func printSetupLink(cfg config.Config, w io.Writer) error {
+	b, err := os.ReadFile(authmod.SetupTokenPath(cfg.Home))
+	if tok := strings.TrimSpace(string(b)); err == nil && tok != "" {
+		fmt.Fprintf(w, "Finish setup in a browser:\n\n    %s\n\nSetup token: %s\n", setupLink(cfg, tok), tok)
+		return nil
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	link := strings.TrimSuffix(setupLink(cfg, ""), "setup#token=")
+	fmt.Fprintf(w, "Setup is done (or jarvisd hasn't started yet). The admin is at %s\n", link)
+	return nil
 }
 
 // announceSetup shows the operator the setup token and link: plainly on w (stderr), since

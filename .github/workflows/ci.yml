@@ -244,3 +244,158 @@ jobs:
       - name: Journal
         if: failure()
         run: sudo journalctl -u jarvisd --no-pager | tail -300
+
+  # The install scripts (I3, I4) end to end against a release-shaped archive of this commit,
+  # served from a local HTTP server (--base-url): verify, install, firewall fix, health,
+  # idempotent re-run, uninstall (data kept), reinstall, uninstall --purge.
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: linux-amd64,   ext: tar.gz }
+          - { os: macos-14,       target: darwin-arm64,  ext: tar.gz }
+          - { os: windows-latest, target: windows-amd64, ext: zip }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      V: v0.0.0-ci
+      BASE: http://127.0.0.1:8765
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh ${{ matrix.target }}
+      - name: Build a release-shaped archive
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          name="jarvisd-$V-${{ matrix.target }}"
+          exe=jarvisd; [ "$RUNNER_OS" = Windows ] && exe=jarvisd.exe
+          mkdir -p "stage/$name" dist
+          go build -trimpath -ldflags "-X main.version=$V" -o "stage/$name/$exe" ./cmd/jarvisd
+          if [ "${{ matrix.ext }}" = zip ]; then (cd stage && 7z a -tzip -bd "../dist/$name.zip" "$name" >/dev/null)
+          else tar -C stage -czf "dist/$name.tar.gz" "$name"; fi
+          cp scripts/install.sh scripts/install.ps1 dist/
+          cd dist
+          if command -v sha256sum >/dev/null; then sha256sum "$name.${{ matrix.ext }}" > SHA256SUMS
+          else shasum -a 256 "$name.${{ matrix.ext }}" > SHA256SUMS; fi
+          cat SHA256SUMS
+
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck -s sh scripts/install.sh
+
+      - name: Linux install.sh
+        if: runner.os == 'Linux'
+        run: |
+          set -x
+          (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          sleep 1
+          # ufw on (default deny incoming) so the firewall fix has something to do.
+          sudo ufw --force enable
+          # A legacy container holding 7700: refused without --stop-legacy, stopped with it.
+          docker run -d --name jarvis-config-service --restart unless-stopped -p 7700:80 nginx:alpine
+          if sh scripts/install.sh --base-url "$BASE" --yes; then exit 1; fi
+          sh scripts/install.sh --base-url "$BASE" --yes --stop-legacy
+          test "$(docker inspect -f '{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}' jarvis-config-service)" = "false no"
+          test "$(jarvisd version)" = "$V"
+          curl -fsS http://127.0.0.1:7700/health
+          curl -fsSI http://127.0.0.1:7700/health | grep -i '^server: jarvisd'
+          sudo ufw status | grep -q '# jarvisd'
+          sudo jarvisd doctor
+          sudo jarvisd setup-link | grep -q '/setup#token='
+          # Re-running the same version is a no-op.
+          sh scripts/install.sh --base-url "$BASE" --yes | tee rerun.log
+          grep -q 'already installed' rerun.log
+          # Uninstall: service, binary and firewall rules go; data and account stay.
+          sh scripts/install.sh --uninstall
+          test ! -e /usr/local/bin/jarvisd && test ! -e /etc/systemd/system/jarvisd.service
+          if sudo ufw status | grep -q jarvisd; then exit 1; fi
+          sudo test -f /var/lib/jarvisd/jarvis.db && id jarvisd
+          # Reinstall over the kept data, then purge everything.
+          sh scripts/install.sh --base-url "$BASE" --yes
+          sh scripts/install.sh --uninstall --purge --yes
+          sudo test ! -e /var/lib/jarvisd && sudo test ! -e /etc/jarvisd
+          if id jarvisd; then exit 1; fi
+          sudo ufw --force disable
+      - name: Linux journal
+        if: failure() && runner.os == 'Linux'
+        run: sudo journalctl -u jarvisd --no-pager | tail -200
+
+      - name: macOS install.sh
+        if: runner.os == 'macOS'
+        run: |
+          set -x
+          fw=/usr/libexec/ApplicationFirewall/socketfilterfw
+          (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          sleep 1
+          sudo $fw --setglobalstate on
+          sh scripts/install.sh --base-url "$BASE" --yes
+          test "$(jarvisd version)" = "$V"
+          curl -fsS http://127.0.0.1:7700/health
+          $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
+          # macOS may admit a new program by itself; take it out so doctor --fix has work.
+          sudo $fw --remove /usr/local/bin/jarvisd
+          if sudo jarvisd doctor; then exit 1; fi
+          sudo jarvisd doctor --fix
+          $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
+          test "$(stat -f %Lp ~/.jarvisd)" = 700
+          sudo jarvisd setup-link | grep -q '/setup#token='
+          sh scripts/install.sh --base-url "$BASE" --yes | tee rerun.log
+          grep -q 'already installed' rerun.log
+          sh scripts/install.sh --uninstall
+          test ! -e /usr/local/bin/jarvisd && test ! -e /Library/LaunchDaemons/net.jarvisautomation.jarvisd.plist
+          if $fw --listapps | grep -q /usr/local/bin/jarvisd; then exit 1; fi
+          test -f ~/.jarvisd/jarvis.db
+          sh scripts/install.sh --base-url "$BASE" --yes
+          sh scripts/install.sh --uninstall --purge --yes
+          test ! -e ~/.jarvisd
+          sudo $fw --setglobalstate off
+      - name: macOS log
+        if: failure() && runner.os == 'macOS'
+        run: tail -200 ~/.jarvisd/logs/jarvisd.log || true
+
+      # Windows PowerShell 5.1 (powershell.exe, not pwsh), as `irm | iex` runs it.
+      - name: Windows install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSVersionTable.PSVersion
+          Start-Process python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', 'dist' -WindowStyle Hidden
+          Start-Sleep 2
+          netsh advfirewall set allprofiles state on
+          function Install([string[]]$more) {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl $env:BASE @more
+            if ($LASTEXITCODE -ne 0) { throw "install.ps1 $more failed ($LASTEXITCODE)" }
+          }
+          $exe = Join-Path $env:ProgramFiles 'jarvisd\jarvisd.exe'
+          Install @('-Yes')
+          if ((& $exe version) -ne $env:V) { throw 'wrong version' }
+          Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7700/health | Select-Object -ExpandProperty Content
+          netsh advfirewall firewall show rule name=jarvisd verbose
+          if ($LASTEXITCODE -ne 0) { throw 'no jarvisd firewall rule' }
+          if ([Environment]::GetEnvironmentVariable('Path', 'Machine') -notmatch [regex]::Escape((Split-Path $exe))) { throw 'not on the machine PATH' }
+          if (-not ((& $exe setup-link) -match '/setup#token=')) { throw 'no setup link' }
+          $rerun = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl $env:BASE -Yes | Out-String
+          if ($rerun -notmatch 'already installed') { throw "re-run was not a no-op: $rerun" }
+          Install @('-Uninstall')
+          if (Get-Service jarvisd -ErrorAction SilentlyContinue) { throw 'service still registered' }
+          if (Test-Path $exe) { throw 'binary not removed' }
+          netsh advfirewall firewall show rule name=jarvisd | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw 'firewall rule not removed' }
+          if (-not (Test-Path C:\ProgramData\jarvisd\jarvis.db)) { throw 'data not kept' }
+          Install @('-Yes')
+          Install @('-Uninstall', '-Purge', '-Yes')
+          if (Test-Path C:\ProgramData\jarvisd) { throw 'data not purged' }
+          $global:LASTEXITCODE = 0
+      - name: Windows log
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: Get-Content C:\ProgramData\jarvisd\logs\jarvisd.log -Tail 200

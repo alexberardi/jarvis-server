@@ -23,6 +23,21 @@ func TestSetupLink(t *testing.T) {
 	}
 }
 
+func TestPrintSetupLink(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Config{Home: home, Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710}}
+	var out bytes.Buffer
+	if err := printSetupLink(cfg, &out); err != nil || !strings.Contains(out.String(), "admin is at http://127.0.0.1:7710/\n") {
+		t.Fatalf("no token: %v %q", err, out.String())
+	}
+	os.WriteFile(filepath.Join(home, "setup-token"), []byte("abc123\n"), 0o600)
+	out.Reset()
+	if err := printSetupLink(cfg, &out); err != nil || !strings.Contains(out.String(), "http://127.0.0.1:7710/setup#token=abc123") ||
+		!strings.Contains(out.String(), "Setup token: abc123") {
+		t.Fatalf("token: %v %q", err, out.String())
+	}
+}
+
 func TestAnnounceSetupPrintsTokenAndLink(t *testing.T) {
 	var out bytes.Buffer
 	cfg := config.Config{Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710}}

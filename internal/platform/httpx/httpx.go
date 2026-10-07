@@ -79,9 +79,15 @@ func (s *statusRecorder) Flush() {
 
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
+// ServerName is the Server header every jarvisd listener sends.
+const ServerName = "jarvisd"
+
 // Middleware wraps a handler with panic recovery and access logging for one listener.
 func Middleware(log *slog.Logger, listener string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// `jarvisd doctor` tells jarvisd's listeners from another program on the same port
+		// (the legacy stack) by this header.
+		w.Header().Set("Server", ServerName)
 		rec := &statusRecorder{ResponseWriter: w}
 		start := time.Now()
 		defer func() {

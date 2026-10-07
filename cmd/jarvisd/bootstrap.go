@@ -39,24 +39,35 @@ func takeHome(args []string) (string, []string) {
 // env file is fatal when strict (serve) and a warning otherwise: `jarvisd doctor` run by a
 // user can't read the system service's 0640 file and still wants the default ports.
 func bootstrap(flagHome string, strict bool, stderr io.Writer) error {
+	envErr, err := bootstrapEnv(flagHome)
+	if err != nil {
+		return err
+	}
+	if envErr != nil {
+		if strict {
+			return envErr
+		}
+		fmt.Fprintf(stderr, "jarvisd: warning: %v (using the defaults for its variables)\n", envErr)
+	}
+	return nil
+}
+
+// bootstrapEnv is bootstrap handing back the env-file error (envErr) for the caller to
+// report; err is a home that can't be resolved.
+func bootstrapEnv(flagHome string) (envErr, err error) {
 	var svcHome string
 	if flagHome == "" && os.Getenv("JARVIS_HOME") == "" {
 		svcHome = service.InstalledHome()
 	}
 	home, err := config.ResolveHome(flagHome, svcHome, os.Getenv)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.Setenv("JARVIS_HOME", home); err != nil {
-		return err
+		return nil, err
 	}
-	if _, err := config.LoadEnvFiles(config.EnvFiles(home)...); err != nil {
-		if strict {
-			return err
-		}
-		fmt.Fprintf(stderr, "jarvisd: warning: %v (using the defaults for its variables)\n", err)
-	}
-	return nil
+	_, envErr = config.LoadEnvFiles(config.EnvFiles(home)...)
+	return envErr, nil
 }
 
 // secureHome makes everything jarvisd creates owner-only (umask 077 on unix) and the data
