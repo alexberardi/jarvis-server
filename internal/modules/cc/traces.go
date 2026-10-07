@@ -280,8 +280,30 @@ type traceSpan struct {
 type reqTrace struct {
 	t0     time.Time
 	status string
+	errMsg string // set by fail: the request answered but its turn failed
 	mu     sync.Mutex
 	list   []traceSpan
+}
+
+// fail marks the request as failed although its route answered normally (a turn whose LLM
+// call failed still returns 202 stop_reason "error" to the node).
+func (t *reqTrace) fail(msg string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.status, t.errMsg = "error", msg
+	t.mu.Unlock()
+}
+
+// failure is what fail recorded ("" when the request didn't fail).
+func (t *reqTrace) failure() (string, bool) {
+	if t == nil {
+		return "", false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.errMsg, t.status == "error"
 }
 
 func newReqTrace() *reqTrace { return &reqTrace{t0: time.Now(), status: "ok"} }

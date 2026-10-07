@@ -89,6 +89,8 @@ func (m *Module) recordVoiceTrace(n *nodeCtx, tr *reqTrace, convID, kind, comman
 		TotalDurationMS: float64(m.now().Sub(start).Microseconds()) / 1000}
 	if err != nil {
 		t.Status, t.ErrorMessage = "error", err.Error()
+	} else if msg, failed := tr.failure(); failed {
+		t.Status, t.ErrorMessage = "error", msg
 	}
 	m.recordTraceAsync(t)
 }

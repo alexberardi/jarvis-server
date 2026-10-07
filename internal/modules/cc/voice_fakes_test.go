@@ -27,6 +27,7 @@ type engineReply struct {
 	content   string
 	toolCalls []map[string]any // native tool calls (OpenAI shape)
 	finish    string
+	status    int // non-zero: answer this HTTP status with an OpenAI-style error (content = message)
 }
 
 // fakeEngine is an httptest llama-server stand-in: it records every request body and answers
@@ -103,6 +104,12 @@ func (f *fakeEngine) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rep := f.next()
+	if rep.status != 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(rep.status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": rep.status, "message": rep.content, "type": "server_error"}})
+		return
+	}
 	finish := rep.finish
 	if finish == "" {
 		finish = "stop"

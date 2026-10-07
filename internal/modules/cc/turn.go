@@ -121,7 +121,12 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, dateKeys: keys,
 		doubleCheck: doubleCheckSentinel(in, st), turn: m.toolTurn(conv, in.VoiceCommand),
 	})
-	endLoop(nil)
+	if res.Stop == stopError {
+		endLoop(errors.New(res.Err))
+		tr.fail(res.Err)
+	} else {
+		endLoop(nil)
+	}
 	if res.Stop == stopServerToolComplete {
 		var results []toolResult
 		for _, r := range res.ServerResults {
