@@ -51,7 +51,7 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 func Definitions() []settings.Definition {
 	return routineDefinitions(slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona),
 		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions(), signalDefinitions(),
-		phone.Definitions(), errands.Definitions()))
+		phone.Definitions(), errands.Definitions(), householdSettingDefinitions()))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -301,6 +301,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerErrands()
 	// Interactive callbacks (doc 13): after every subsystem that contributes server handlers.
 	m.registerCallbacks(mux)
+	// Household settings from mobile (doc 13 §3.7).
+	m.registerHouseholdSettings(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
