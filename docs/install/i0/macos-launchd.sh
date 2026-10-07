@@ -96,12 +96,16 @@ cmd_up() {
     agent)
       local p; p=$(plist_path agent); mkdir -p "$(dirname "$p")"
       (umask 077; render_plist agent > "$p"); plutil -lint "$p"
-      launchctl bootstrap "gui/$UID_N" "$p" ;;
+      launchctl bootstrap "gui/$UID_N" "$p"
+      # Bootstrapped from an SSH session the job sat in "pended nondemand spawn = speculative"
+      # and RunAtLoad did not fire; kickstart starts it now (a no-op if already running).
+      launchctl kickstart "gui/$UID_N/$LABEL" ;;
     daemon)
       local p tmp; p=$(plist_path daemon); tmp=$(mktemp)
       render_plist daemon > "$tmp"; plutil -lint "$tmp"
       sudo install -m 0600 -o root -g wheel "$tmp" "$p"; rm -f "$tmp"
-      sudo launchctl bootstrap system "$p" ;;
+      sudo launchctl bootstrap system "$p"
+      sudo launchctl kickstart "system/$LABEL" ;;
   esac
   wait_health
 }

@@ -98,6 +98,10 @@ $up = WaitHealth 7700 120
 sc.exe query jarvisd
 $svc = @(Procs 'jarvisd.exe'); $svc | Format-List
 Get-Content "$jh\logs\jarvisd.log" -Tail 40
+"5353/udp right after jarvisd started:"
+Get-NetUDPEndpoint -LocalPort 5353 -ErrorAction SilentlyContinue | ForEach-Object {
+    "  {0}:{1} pid={2} {3}" -f $_.LocalAddress, $_.LocalPort, $_.OwningProcess, (Get-Process -Id $_.OwningProcess).ProcessName
+}
 Row 'jarvisd as SCM service under NT SERVICE\jarvisd (svcwrap)' $(if ($up) { 'yes' } else { 'no' }) "health=$up owner=$($svc[0].Owner) session=$($svc[0].Session) home=$jh"
 
 # ---------------------------------------------------------------------------------------------
@@ -166,26 +170,51 @@ try {
     Invoke-RestMethod -Method Post "$api/v1/models/installed" -Headers $H -ContentType 'application/json' -Body $reg | ConvertTo-Json -Depth 4
 } catch { "register error: $_" }
 
-$lpResults = @{}
-foreach ($lp in @(0, 1)) {
-    Section "long path with LongPathsEnabled=$lp"
+"8.3 names: $(fsutil 8dot3name query C: | Out-String)"
+Add-Type -Namespace I0 -Name Native -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern uint GetShortPathName(string lpszLongPath, System.Text.StringBuilder lpszShortPath, uint cchBuffer);
+'@
+$sb = New-Object System.Text.StringBuilder 1024
+$n = [I0.Native]::GetShortPathName("\\?\$file", $sb, 1024)
+$shortPath = $sb.ToString() -replace '^\\\\\?\\', ''
+"8.3 short path ($n chars): $shortPath"
+# Workarounds a service could apply when handing the path to the engine.
+$variants = [ordered]@{ 'longpath-unc' = "\\?\$file" }
+if ($n -gt 0 -and $shortPath.Length -lt 260 -and $shortPath -ne $file) { $variants['longpath-83'] = $shortPath }
+foreach ($id in $variants.Keys) {
+    try {
+        $reg = @{ path = $variants[$id]; kind = 'llm'; id = $id } | ConvertTo-Json
+        Invoke-RestMethod -Method Post "$api/v1/models/installed" -Headers $H -ContentType 'application/json' -Body $reg | Out-Null
+        "registered $id -> $($variants[$id])"
+    } catch { "register $id error: $_" }
+}
+
+function TryModel($id, $lp) {
+    Section "long path: model $id with LongPathsEnabled=$lp"
     Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value $lp
     # Go back to the short model first so the long one starts a fresh engine process.
     Invoke-RestMethod -Method Put "$api/v1/models/labels" -Headers $H -ContentType 'application/json' -Body '{"live":{"model":"qwen2.5-0.5b-i0"}}' | Out-Null
     [void](WaitLive 'qwen2.5-0.5b-i0' 120)
     try {
-        Invoke-RestMethod -Method Put "$api/v1/models/labels" -Headers $H -ContentType 'application/json' -Body '{"live":{"model":"longpath-i0"}}' | Out-Null
+        Invoke-RestMethod -Method Put "$api/v1/models/labels" -Headers $H -ContentType 'application/json' -Body ('{"live":{"model":"' + $id + '"}}') | Out-Null
     } catch { "labels PUT error: $_" }
-    $l = WaitLive 'longpath-i0' 120
+    $l = WaitLive $id 120
     $r = if ($l.state -eq 'ready') { Chat } else { '' }
-    "live: state=$($l.state) reason=$($l.reason) model_path=$($l.config.model_path) chat='$r'"
+    "live: state=$($l.state) reason=$($l.reason) model_path=$($l.config.model_path) chat='$r'" | Write-Host
     $e = LiveEngine
-    "engine output (tail):"; $e.output | Select-Object -Last 25
-    $lpResults[$lp] = "LongPathsEnabled=${lp}: live=$($l.state) chat='$r' reason='$($l.reason)'"
+    "engine output (tail):" | Write-Host
+    $e.output | Select-Object -Last 12 | Write-Host
+    return "$id LongPathsEnabled=${lp}: live=$($l.state) chat='$r'"
 }
+$lpResults = @()
+$lpResults += TryModel 'longpath-i0' 0
+$lpResults += TryModel 'longpath-i0' 1
+foreach ($id in $variants.Keys) { $lpResults += TryModel $id 0 }
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value $lpOrig
 $lpOk = ($lpResults[0] -match 'live=ready') -and ($lpResults[1] -match 'live=ready')
-Row "model path of $($file.Length) chars" $(if ($lpOk) { 'yes' } elseif ($lpResults[1] -match 'live=ready') { 'only with LongPathsEnabled=1' } else { 'no' }) "$($lpResults[0]); $($lpResults[1]); runner default LongPathsEnabled=$lpOrig"
+Row "model path of $($file.Length) chars, plain" $(if ($lpOk) { 'yes' } else { 'no' }) ((($lpResults | Select-Object -First 2) -join '; ') + "; runner default LongPathsEnabled=$lpOrig")
+Row "model path of $($file.Length) chars, workarounds" 'see evidence' (($lpResults | Select-Object -Skip 2) -join '; ')
 
 # ---------------------------------------------------------------------------------------------
 Section 'row: mDNS next to the DNS Client service'
@@ -196,14 +225,20 @@ $owners = Get-NetUDPEndpoint -LocalPort 5353 -ErrorAction SilentlyContinue | For
     "{0}:{1} pid={2} {3}" -f $_.LocalAddress, $_.LocalPort, $_.OwningProcess, (Get-Process -Id $_.OwningProcess).ProcessName
 }
 $owners
+"Dnscache: $((Get-Service Dnscache).Status)"
+$winRes = try { (Resolve-DnsName "$env:COMPUTERNAME.local" -Type A -ErrorAction Stop | ForEach-Object { $_.IPAddress }) -join ',' } catch { "error: $_" }
+"Windows resolver (Dnscache mDNS) for $env:COMPUTERNAME.local: $winRes"
 $browse = & "$pf\mdnsbrowse.exe" -t 6s 2>&1 | Out-String
 $browse
 $seen = $browse -match 'port=7700'
 $advertised = ($mlog -join ' ') -match 'mdns advertising'
-Row 'mDNS: bind 5353 next to Dnscache, seen by a browser' $(if ($advertised -and $seen) { 'yes' } else { 'no' }) "advertising=$advertised; browse saw port 7700=$seen; 5353 owners: $((($owners | ForEach-Object { ($_ -split ' ')[-1] }) | Sort-Object -Unique) -join ', ')"
+Row 'mDNS: bind 5353 next to Dnscache, seen by a browser' $(if ($advertised -and $seen) { 'yes' } else { 'no' }) "advertising=$advertised; browse saw port 7700=$seen; Windows resolver $env:COMPUTERNAME.local -> $winRes; 5353 owners: $((($owners | ForEach-Object { ($_ -split ' ')[-1] }) | Sort-Object -Unique) -join ', ')"
 
 # ---------------------------------------------------------------------------------------------
 Section 'row: stop'
+# Stop with an engine running, to see whether killing jarvisd orphans it.
+Invoke-RestMethod -Method Put "$api/v1/models/labels" -Headers $H -ContentType 'application/json' -Body '{"live":{"model":"qwen2.5-0.5b-i0"}}' | Out-Null
+[void](WaitLive 'qwen2.5-0.5b-i0' 120)
 $before = @(Procs 'llama-server.exe')
 sc.exe stop jarvisd
 Start-Sleep 8
