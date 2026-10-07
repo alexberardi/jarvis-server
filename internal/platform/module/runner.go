@@ -25,7 +25,8 @@ type Runner struct {
 	Modules []Module
 
 	mu    sync.Mutex
-	addrs map[string]string // listener -> bound address, filled once listening
+	addrs map[string]string        // listener -> bound address, filled once listening
+	muxes map[string]*http.ServeMux // listener -> routes, filled before serving
 }
 
 // Addr returns the bound address of a listener (useful with port 0), or "" if not listening.
@@ -33,6 +34,16 @@ func (r *Runner) Addr(listener string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.addrs[listener]
+}
+
+// Handler returns a listener's routes, or nil if no module serves that listener (yet).
+func (r *Runner) Handler(listener string) http.Handler {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if mux := r.muxes[listener]; mux != nil {
+		return mux
+	}
+	return nil
 }
 
 // Migrate runs the platform's migrations, then every module's, in module order.
@@ -72,12 +83,17 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	muxes := map[string]*http.ServeMux{}
 	for _, m := range r.Modules {
-		mux := muxes[m.Listener()]
-		if mux == nil {
-			mux = http.NewServeMux()
-			muxes[m.Listener()] = mux
+		if muxes[m.Listener()] == nil {
+			muxes[m.Listener()] = http.NewServeMux()
 		}
-		m.Register(mux, r.Deps)
+	}
+	r.mu.Lock()
+	r.muxes = muxes
+	r.mu.Unlock()
+	deps := r.Deps
+	deps.Handler = r.Handler
+	for _, m := range r.Modules {
+		m.Register(muxes[m.Listener()], deps)
 	}
 
 	names := make([]string, 0, len(muxes))

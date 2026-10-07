@@ -132,6 +132,49 @@ func TestRunnerServesModulesOnTheirListeners(t *testing.T) {
 	}
 }
 
+// gatewayModule forwards GET /via/{path...} to another listener's routes in process.
+type gatewayModule struct{ target string }
+
+func (g *gatewayModule) Name() string      { return "gw" }
+func (g *gatewayModule) Listener() string  { return config.ListenerAdmin }
+func (g *gatewayModule) Migrations() fs.FS { return nil }
+func (g *gatewayModule) Register(mux *http.ServeMux, deps Deps) {
+	mux.HandleFunc("GET /via/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		h := deps.Handler(g.target)
+		if h == nil {
+			http.Error(w, "not served", http.StatusServiceUnavailable)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/" + r.PathValue("path")
+		h.ServeHTTP(w, r2)
+	})
+}
+
+func TestRunnerHandlerLookup(t *testing.T) {
+	// The gateway registers before its target: the lookup must resolve at request time.
+	auth := &fakeModule{name: "auth", listener: config.ListenerAuth, routes: map[string]string{"GET /auth/me": "me"}}
+	r := &Runner{Deps: deps(t), Modules: []Module{&gatewayModule{target: config.ListenerAuth}, auth}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	addr := waitAddr(t, r, config.ListenerAdmin)
+	if code, b := get(t, addr, "/via/auth/me"); code != 200 || b != "me" {
+		t.Errorf("in-process dispatch: %d %q", code, b)
+	}
+	if code, _ := get(t, addr, "/via/nope"); code != 404 {
+		t.Errorf("unknown target path: %d", code)
+	}
+	if r.Handler(config.ListenerLLM) != nil {
+		t.Error("an unserved listener returned a handler")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunnerRunsMigrations(t *testing.T) {
 	m := &fakeModule{name: "auth", listener: config.ListenerAuth, migrations: fstest.MapFS{
 		"00001_users.sql": {Data: []byte("-- +goose Up\nCREATE TABLE auth_users (id INTEGER PRIMARY KEY);\n")},

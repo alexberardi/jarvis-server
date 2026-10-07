@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -39,11 +40,12 @@ func TestMain(m *testing.M) {
 }
 
 type env struct {
-	t   *testing.T
-	m   *Module
-	h   http.Handler
-	db  *db.DB
-	app struct{ id, key string }
+	t    *testing.T
+	m    *Module
+	h    http.Handler
+	db   *db.DB
+	home string
+	app  struct{ id, key string }
 }
 
 func newEnv(t *testing.T, opts ...func(*Module)) *env {
@@ -61,16 +63,17 @@ func newEnv(t *testing.T, opts ...func(*Module)) *env {
 	for _, o := range opts {
 		o(m)
 	}
+	home := t.TempDir()
 	mux := http.NewServeMux()
 	m.Register(mux, module.Deps{
-		Config: pconfig.Config{Host: "127.0.0.1", Ports: map[string]int{}},
+		Config: pconfig.Config{Home: home, Host: "127.0.0.1", Ports: map[string]int{}},
 		DB:     d,
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err := m.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, m: m, h: mux, db: d}
+	e := &env{t: t, m: m, h: mux, db: d, home: home}
 	_, body := e.do("POST", "/admin/app-clients", map[string]any{"app_id": "test-app", "name": "Test"}, hAdmin)
 	e.app.id, e.app.key = "test-app", body["key"].(string)
 	return e
@@ -415,7 +418,8 @@ func TestSetup(t *testing.T) {
 	if m := e.expect(200, "", "GET", "/auth/setup-status", nil, nil); m["needs_setup"] != true {
 		t.Fatal(m)
 	}
-	m := e.expect(201, "", "POST", "/auth/setup", map[string]any{"email": "root@example.com", "password": "password1"}, nil)
+	m := e.expect(201, "", "POST", "/auth/setup", map[string]any{"email": "root@example.com", "password": "password1"},
+		hdrs{SetupTokenHeader: e.setupToken()})
 	if m["user"].(map[string]any)["is_superuser"] != true {
 		t.Fatal(m)
 	}
@@ -426,6 +430,118 @@ func TestSetup(t *testing.T) {
 		t.Fatal(m)
 	}
 	e.expect(409, "Setup already completed", "POST", "/auth/setup", map[string]any{"email": "x@example.com", "password": "password1"}, nil)
+}
+
+// setupToken reads the token file the module wrote at Start.
+func (e *env) setupToken() string {
+	e.t.Helper()
+	b, err := os.ReadFile(SetupTokenPath(e.home))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func TestSetupToken(t *testing.T) {
+	var announced, announcedPath string
+	e := newEnv(t, func(m *Module) { m.OnSetupToken = func(tok, path string) { announced, announcedPath = tok, path } })
+	tok := e.setupToken()
+	if raw, err := base64.RawURLEncoding.DecodeString(tok); err != nil || len(raw) != 32 {
+		t.Fatalf("token %q: %v (%d bytes)", tok, err, len(raw))
+	}
+	if announced != tok || announcedPath != SetupTokenPath(e.home) {
+		t.Fatalf("announced %q at %q", announced, announcedPath)
+	}
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(SetupTokenPath(e.home))
+		if err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("token file mode %v (%v)", fi.Mode(), err)
+		}
+	}
+
+	body := map[string]any{"email": "root@example.com", "password": "password1"}
+	e.expect(401, "Setup token required", "POST", "/auth/setup", body, nil)
+	e.expect(403, "Invalid setup token", "POST", "/auth/setup", body, hdrs{SetupTokenHeader: "wrong"})
+	e.expect(403, "Invalid setup token", "POST", "/auth/setup", body, hdrs{SetupTokenHeader: tok[:len(tok)-1]})
+	e.expect(403, "Invalid setup token", "POST", "/auth/setup",
+		map[string]any{"email": "root@example.com", "password": "password1", "setup_token": "nope"}, nil)
+	// Validation still comes first, as before.
+	e.expect(422, "", "POST", "/auth/setup", map[string]any{"email": "nope", "password": "password1"}, nil)
+	if m := e.expect(200, "", "GET", "/auth/setup-status", nil, nil); m["needs_setup"] != true {
+		t.Fatal("a rejected setup created a superuser")
+	}
+
+	// A restart before setup keeps the same token (the printed link still works).
+	if err := e.m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if e.setupToken() != tok {
+		t.Fatal("restart replaced the token")
+	}
+
+	// The body field works too; success deletes the file.
+	e.expect(201, "", "POST", "/auth/setup",
+		map[string]any{"email": "root@example.com", "password": "password1", "setup_token": tok}, nil)
+	if _, err := os.Stat(SetupTokenPath(e.home)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("token file still there: %v", err)
+	}
+	// Afterwards the token is irrelevant: always the legacy 409.
+	for _, h := range []hdrs{nil, {SetupTokenHeader: tok}, {SetupTokenHeader: "wrong"}} {
+		e.expect(409, "Setup already completed", "POST", "/auth/setup", map[string]any{"email": "x@example.com", "password": "password1"}, h)
+	}
+	// A restart with a superuser writes no new token.
+	announced = ""
+	if err := e.m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(SetupTokenPath(e.home)); !errors.Is(err, os.ErrNotExist) || announced != "" {
+		t.Fatalf("token re-created after setup: %v %q", err, announced)
+	}
+}
+
+// Two setups racing with the right token: exactly one wins.
+func TestSetupTokenRace(t *testing.T) {
+	e := newEnv(t)
+	tok := e.setupToken()
+	var wg sync.WaitGroup
+	codes := make([]int, 6)
+	for i := range codes {
+		wg.Go(func() {
+			rec := e.raw("POST", "/auth/setup", map[string]any{"email": fmt.Sprintf("r%d@example.com", i), "password": "password1"},
+				hdrs{SetupTokenHeader: tok})
+			codes[i] = rec.Code
+		})
+	}
+	wg.Wait()
+	won := 0
+	for _, c := range codes {
+		switch c {
+		case 201:
+			won++
+		case 409:
+		default:
+			t.Fatalf("codes %v", codes)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("codes %v", codes)
+	}
+}
+
+// A stale token file left by an install that already has a superuser is removed at start.
+func TestSetupTokenStaleFileRemoved(t *testing.T) {
+	e := newEnv(t)
+	e.expect(201, "", "POST", "/auth/setup", map[string]any{"email": "root@example.com", "password": "password1"},
+		hdrs{SetupTokenHeader: e.setupToken()})
+	if err := os.WriteFile(SetupTokenPath(e.home), []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(SetupTokenPath(e.home)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale token file kept: %v", err)
+	}
 }
 
 // A user in two households: checks use the target (path) household, never the token's.

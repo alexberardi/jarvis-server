@@ -117,12 +117,12 @@ func TestSPAFallback(t *testing.T) {
 }
 
 func TestAPIIsJSON404(t *testing.T) {
-	mux := newMux(t, &Module{UI: builtUI()})
+	mux := newMux(t, &Module{UI: builtUI(), Verify: fakeVerify})
 	for _, c := range []struct{ method, path string }{
-		{"GET", "/api"}, {"GET", "/api/"}, {"GET", "/api/settings"}, {"POST", "/api/auth/login"},
+		{"GET", "/api"}, {"GET", "/api/"}, {"GET", "/api/nope"}, {"GET", "/api/auth/login"},
 		{"DELETE", "/api/admin/users/1"},
 	} {
-		w := get(t, mux, c.method, c.path)
+		w := get(t, mux, c.method, c.path, "Authorization", "Bearer root")
 		if w.Code != http.StatusNotFound || !strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
 			t.Errorf("%s %s: %d %s", c.method, c.path, w.Code, w.Header().Get("Content-Type"))
 		}

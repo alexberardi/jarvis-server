@@ -176,6 +176,10 @@ func TestAuthSetup(t *testing.T) {
 	}
 	body := map[string]string{"email": "contract-" + tg.RunID + "-setup@example.com", "password": "contract-password"}
 	tg.Post(t, Auth, "/auth/setup", body).ExpectError(http.StatusConflict, "Setup already completed")
+	// jarvisd's setup token (AD2) only matters before the first superuser: a wrong one still
+	// gets the 409 (legacy ignores the header).
+	tg.Post(t, Auth, "/auth/setup", body, H{"X-Jarvis-Setup-Token": "contract-wrong-token"}).
+		ExpectError(http.StatusConflict, "Setup already completed")
 	tg.Post(t, Auth, "/auth/setup", map[string]string{"email": "not-an-email", "password": "contract-password"}).
 		ExpectStatus(http.StatusUnprocessableEntity).ExpectShape(ValidationError("body", "email"))
 }
