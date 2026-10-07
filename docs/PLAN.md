@@ -64,7 +64,7 @@ The route audit (Appendix A) found **about 180 live command-center routes**. Tho
 | command-center | **Port** the roughly 180 live routes and the voice loop. Cut lists are in §7. |
 | settings-server | **Drop.** Nothing calls it. |
 | mcp | **Drop.** It's a deprecated dev tool. |
-| admin backend (Fastify) | **Phase 6.** Its compose and installer machinery mostly disappears. What's left either stays a thin Fastify app or moves into `jarvisd`. |
+| admin backend (Fastify) + SPA | **Absorbed (D9, Phase 6).** SPA embedded in jarvisd; backend reduced to Go endpoints; compose/installer machinery dropped. |
 
 Python libraries:
 
@@ -317,7 +317,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 - **D5 (Phase 1):** confirm Go auth ships RS256 minting from day one. Recommended: yes.
 - **D7 (Phase 4): decided 2026-10-06 → whisper.cpp `whisper-server` as a supervised engine**, on the same machinery as llama-server (GPU detection/assignment incl. Metal, engine download, model manager installing whisper GGML models from Hugging Face, supervision, health). Same model as prod today (large-v3-turbo). User priority: everything tied together neatly, maintainable and debuggable — one engine/model code path for both kinds. sherpa-onnx ASR may be added later as a no-download CPU fallback if an evaluation supports it.
 - ~~**D8 (Phase 5):** phone-gateway dial queue~~ → resolved: gateway absorbed into jarvisd (docs/cc D16).
-- **D9 (Phase 6):** whether jarvis-admin stays as a Fastify app or is absorbed into `jarvisd`.
+- **D9 (Phase 6): decided 2026-10-06 → absorb jarvis-admin into the monorepo.** The React SPA moves to `web/admin/`, is built in CI and embedded in jarvisd with `go:embed`, served on the legacy 7710. The Fastify backend's compose/installer machinery is dropped; what remains becomes Go endpoints (model manager replaces the LLM wizard; settings via each module's `/settings`; users/nodes/households via auth). Admin work from EXTERNAL-CHANGES (Models page, catalog, `llm.prompt_provider`) happens in the monorepo copy; the jarvis-admin repo is retired like the Python services.
 
 **Future work (after the migration):**
 - **Recipes in Go.** A separate effort, outside this rewrite: port jarvis-recipes-server as its own Go service (or an optional jarvisd module) once jarvisd is done. Until then it runs as the existing Python add-on.

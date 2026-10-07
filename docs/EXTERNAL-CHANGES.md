@@ -1,5 +1,7 @@
 # Changes needed outside jarvis-server
 
+**Process (user-approved 2026-10-06):** each client change goes on a branch with a PR in that repo for the user to review before it ships to devices or prod.
+
 jarvisd keeps every client's wire contract, so most clients need no change. A few decisions in
 [`docs/cc/QUESTIONS.md`](cc/QUESTIONS.md) do need changes in other repos. They are listed here so
 they can be scheduled; none are blockers for porting the server unless marked **before cutover**.
@@ -29,7 +31,10 @@ keep shipping.
 | Hide or label "Install to Command Center" for Pantry `prompt_provider` packages | The install route becomes a stub that always fails cleanly | 03.Q2 | Optional |
 | (Future) a "leave-by" built-in rule in the automations list; per-node voice enrollment | Deferred product work | D46, D36 | Post-port |
 
-## jarvis-admin
+## jarvis-admin (moving into the monorepo, D9)
+
+These now land in `web/admin/` inside jarvis-server once admin is absorbed; no PRs to the old repo.
+
 
 | Change | Why | Decision |
 |---|---|---|
