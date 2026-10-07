@@ -24,7 +24,10 @@ func provider(d *DB, module string, migrations fs.FS) (*goose.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return goose.NewProvider("", d.Write, migrations, goose.WithStore(store))
+	// Out-of-order: a migration numbered below one already applied still runs (sub-systems
+	// land in parallel, and a fix can be slotted in below a later release's). Each is
+	// independent of the others' tables, so applying it late is safe.
+	return goose.NewProvider("", d.Write, migrations, goose.WithStore(store), goose.WithAllowOutofOrder(true))
 }
 
 // Migrate applies a module's pending migrations (goose SQL files at the root of migrations).

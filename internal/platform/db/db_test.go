@@ -171,3 +171,28 @@ func TestMigrateRejectsBadModuleName(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+// Sub-systems land in parallel: a DB that already applied 00090 must still apply a 00080
+// that arrives later (jarvis-dev hit "missing (out-of-order) migration" and wouldn't start).
+func TestMigrateAppliesOutOfOrder(t *testing.T) {
+	d := open(t)
+	ctx := context.Background()
+	m90 := "-- +goose Up\nCREATE TABLE cc_memory (id INTEGER);\n-- +goose Down\nDROP TABLE cc_memory;\n"
+	m80 := "-- +goose Up\nCREATE TABLE cc_routine_seeds (id INTEGER);\n-- +goose Down\nDROP TABLE cc_routine_seeds;\n"
+	if err := Migrate(ctx, d, "cc", migrations(map[string]string{"00090_memory.sql": m90})); err != nil {
+		t.Fatal(err)
+	}
+	both := migrations(map[string]string{"00080_routines.sql": m80, "00090_memory.sql": m90})
+	if st, err := Status(ctx, d, "cc", both); err != nil || st.Pending != 1 {
+		t.Fatalf("status %+v %v", st, err)
+	}
+	if err := Migrate(ctx, d, "cc", both); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`INSERT INTO cc_routine_seeds (id) VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := Status(ctx, d, "cc", both); st.Pending != 0 {
+		t.Fatalf("after %+v", st)
+	}
+}
