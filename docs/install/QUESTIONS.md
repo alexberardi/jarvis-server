@@ -286,3 +286,30 @@ migrations it doesn't know is unverified. Node-setup already has a health-gated 
 - **(b) Plain replace**, with manual recovery.
 
 **Recommendation: (a).** Prod is the user's home instance and tolerates outages, but not lost data.
+
+### IQ11 [behaviour] The recommended Qwen3.5-9B fails every turn (A10 F10)
+
+**Context.**
+
+Found in the A10 rehearsal ([A10-rehearsal.md](A10-rehearsal.md) F10). The catalog recommends Qwen3.5-9B
+(`Qwen3_5_9B_Compressed`) for a 12 GB GPU. Its current Unsloth GGUF's chat template raises on two things
+jarvisd sends to every provider: a `system` message after the first one (the per-turn speaker, ambient and
+recently-shown blocks, the engine's retry nags, the continue override) and a request with no user message
+(the warmup). Every chat and voice turn fails with a llama-server 500. Qwen3-8B's template accepts the same
+layout. The legacy stack ran an older upload whose template silently dropped every system message after
+the first, so on legacy the model never saw those blocks: the layout matched Python, which is why the
+goldens passed.
+
+**Options.**
+
+- **(a) Fold for strict templates.** Providers flagged `SystemOnlyFirst` (Qwen3.5) get each later system
+  message merged into the next user message (or sent as `user` when none follows); the stored conversation
+  is unchanged, the system prefix stays byte-identical (prompt cache kept). The warmup gains a fixed user
+  message for every provider. Pin each catalog model's chat template (`--chat-template-file`) so a
+  re-upload can't change it again. A template-compliance test runs the golden message lists through the
+  two rules. About 100 lines plus tests; the 3.5 goldens change (intentional divergence from Python).
+- **(b) Pin the older, permissive template** for Qwen3.5. One-line catalog change, but the model keeps
+  never seeing speaker/ambient/recently-shown context (legacy's latent bug).
+- **(c) Recommend Qwen3-8B** until (a) lands.
+
+**Recommendation: (a), with (c) as the stop-gap** if (a) can't land before the next release.
