@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -49,7 +50,7 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 func Definitions() []settings.Definition {
 	return routineDefinitions(slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona),
 		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions(), signalDefinitions(),
-		phone.Definitions()))
+		phone.Definitions(), errands.Definitions()))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -122,6 +123,13 @@ type Module struct {
 	// Phone configures phone calls (5c, docs/cc/11; phone_wire.go).
 	Phone PhoneConfig
 
+	// 5c errand hooks (docs/cc/09): the phone module (doc 11) and the schedules store (doc 08);
+	// nil leaves calls / scheduling unavailable to errands. HouseholdTZ is the household's IANA
+	// zone (D18; nil or "" = UTC).
+	ErrandPhone     errands.PhoneCalls
+	ErrandSchedules errands.Schedules
+	HouseholdTZ     func(ctx context.Context, householdID string) string
+
 	deps     module.Deps
 	settings *settings.Service
 	broker   *mqtt.Broker
@@ -138,11 +146,12 @@ type Module struct {
 	tools    *servertools.Registry
 	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
 
-	cmdData *schemaCache   // command-data schema cache (doc 12, packages.go)
-	smart   *smartHome     // 5c smart home (smarthome.go)
-	rt      *routineState  // 5c routines and errand schedules (routines.go)
-	sig     *signalState   // 5c signals, proposals and attention (signals.go)
-	phone   *phone.Service // 5c phone calls (phone_wire.go)
+	cmdData *schemaCache     // command-data schema cache (doc 12, packages.go)
+	smart   *smartHome       // 5c smart home (smarthome.go)
+	rt      *routineState    // 5c routines and errand schedules (routines.go)
+	sig     *signalState     // 5c signals, proposals and attention (signals.go)
+	phone   *phone.Service   // 5c phone calls (phone_wire.go)
+	errands *errands.Service // 5c errands and workflows (errands.go)
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -283,6 +292,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerSignals(mux)
 	// Phone calls, phonebook and call context (doc 11).
 	m.registerPhone(mux)
+	// Errands and workflows (doc 09).
+	m.registerErrands()
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -326,6 +337,7 @@ func (m *Module) Start(ctx context.Context) error {
 	if err := m.startPhone(ctx); err != nil {
 		return err
 	}
+	m.startErrands(ctx)
 	if m.deps.Scheduler == nil {
 		return nil
 	}
@@ -349,6 +361,9 @@ func (m *Module) Start(ctx context.Context) error {
 func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error {
 	if m.convs != nil {
 		m.convs.purgeUser(userID) // D20/M15: no in-memory identity outlives the account
+	}
+	if err := m.purgeErrands(ctx, tx, userID); err != nil {
+		return err
 	}
 	if err := purgeMemoryUser(ctx, tx, userID); err != nil { // before transcripts: traces key off them
 		return err

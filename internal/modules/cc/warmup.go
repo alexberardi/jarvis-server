@@ -224,7 +224,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	}
 	persona := parse.PyStrip(m.settings.String(ctx, settingPersona, settings.Scope{HouseholdID: hh}))
 
-	serverNames := prompts.ServerToolNames(provider.SupportsNativeTools(), m.tools.Names(), gates)
+	serverNames := m.gateErrandTools(ctx, hh, prompts.ServerToolNames(provider.SupportsNativeTools(), m.tools.Names(), gates))
 	serverDefs := m.tools.Definitions(serverNames)
 	conv.serverNames = map[string]bool{}
 	for _, d := range serverDefs {
