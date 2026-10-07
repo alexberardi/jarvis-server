@@ -42,7 +42,7 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	checks := doctor.Run(ctx, doctor.Options{Ports: doctorPorts(cfg)})
+	checks := doctor.Run(ctx, doctor.Options{Ports: doctorPorts(cfg), Interfaces: cfg.MDNSInterfaces})
 	if len(args) > 0 && args[0] == "--json" {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")

@@ -48,6 +48,9 @@ type Config struct {
 	Host string
 	// Ports maps listener name to port.
 	Ports map[string]int
+	// MDNSInterfaces, when set, names the LAN interfaces to advertise on and take the setup
+	// link's address from, instead of picking them automatically (netaddr.LAN).
+	MDNSInterfaces []string
 }
 
 // DBPath is the single SQLite database file.
@@ -67,6 +70,7 @@ func (c Config) Addr(listener string) (string, error) {
 //	JARVIS_HOME              data directory (default ~/.jarvis)
 //	JARVIS_HOST              bind address (default 0.0.0.0)
 //	JARVIS_PORT_<LISTENER>   per-listener port override, e.g. JARVIS_PORT_COMMAND_CENTER=17703
+//	JARVIS_MDNS_INTERFACES   comma-separated LAN interface names, e.g. "en0" or "eth0,wlan0"
 func Load() (Config, error) {
 	return load(os.Getenv)
 }
@@ -82,6 +86,11 @@ func load(getenv func(string) string) (Config, error) {
 	}
 	if c.Host == "" {
 		c.Host = "0.0.0.0"
+	}
+	for _, n := range strings.Split(getenv("JARVIS_MDNS_INTERFACES"), ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			c.MDNSInterfaces = append(c.MDNSInterfaces, n)
+		}
 	}
 	for name, def := range DefaultPorts {
 		c.Ports[name] = def
