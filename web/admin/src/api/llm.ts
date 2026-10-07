@@ -367,6 +367,10 @@ export interface LabelConfig {
   kv_cache_type: string
   flash_attn: string
   extra_args: string
+  /** ID12: auto (the model's catalog flag; never for remote), on or off. */
+  fold_system_messages?: string
+  /** Whether requests are folded for a strict chat template right now. */
+  fold_system_messages_effective?: boolean
   embedding: boolean
   remote_url: string
   remote_model: string
@@ -386,6 +390,7 @@ export interface Endpoint {
   parallel: number
   engine?: string
   degraded?: boolean
+  fold_system_messages?: boolean
 }
 
 export interface LabelStatus {
@@ -426,6 +431,7 @@ export type LabelUpdate = Partial<{
   kv_cache_type: string
   flash_attn: string
   extra_args: string
+  fold_system_messages: string
   remote_url: string
   remote_model: string
   remote_api_key: string

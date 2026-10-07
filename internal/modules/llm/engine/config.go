@@ -232,9 +232,11 @@ type LabelConfig struct {
 	// ChatTemplate is the model's pinned chat template (from its catalog entry), which the
 	// engine is launched with instead of the GGUF's own; "" = the GGUF's (ID12).
 	ChatTemplate string `json:"-"`
-	// FoldSystemMessages: requests are folded for a strict chat template (ID12), from
-	// fold_system_messages, auto = the model's catalog flag.
-	FoldSystemMessages bool `json:"fold_system_messages"`
+	// FoldMode is the fold_system_messages setting (auto, on, off; ID12) and
+	// FoldSystemMessages its effect: requests are folded for a strict chat template (auto = the
+	// model's catalog flag, never for remote).
+	FoldMode           string `json:"fold_system_messages"`
+	FoldSystemMessages bool   `json:"fold_system_messages_effective"`
 
 	RemoteURL    string `json:"remote_url"`
 	RemoteModel  string `json:"remote_model"`
@@ -320,8 +322,8 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	if has("remote_vision") {
 		c.RemoteVision = s.Settings.Bool(ctx, p+"remote_vision", settings.Scope{})
 	}
-	fold := strings.ToLower(str("fold_system_messages"))
-	c.FoldSystemMessages = fold == FoldOn
+	c.FoldMode = strings.ToLower(str("fold_system_messages"))
+	c.FoldSystemMessages = c.FoldMode == FoldOn
 	if c.Engine == "" {
 		c.Engine = ModeLocal
 	}
@@ -341,7 +343,7 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	if c.Engine != ModeLocal {
 		return c, nil
 	}
-	s.resolveModels(ctx, d, &c, fold != FoldOn && fold != FoldOff)
+	s.resolveModels(ctx, d, &c, c.FoldMode != FoldOn && c.FoldMode != FoldOff)
 	return c, nil
 }
 

@@ -126,7 +126,7 @@ func TestLookupModelAndLabelFold(t *testing.T) {
 		t.Fatalf("auto, strict model: %+v", c)
 	}
 	e.set.Set(e.ctx, "llm.live.fold_system_messages", "off", sc)
-	if c := label(); c.FoldSystemMessages || c.ChatTemplate != want {
+	if c := label(); c.FoldSystemMessages || c.FoldMode != "off" || c.ChatTemplate != want {
 		t.Fatalf("off: %+v", c)
 	}
 	e.set.Set(e.ctx, "llm.live.model", "mine", sc)
