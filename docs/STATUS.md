@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 5 (command-center) — 5a/5b/5c done, 5d (mobile surface) next — Phases 1–4 done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
+## Current phase: 6 (packaging, admin absorb) — Phases 1–5 done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
 
 ### Phase 0 checklist
 
@@ -144,4 +144,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - **Errands on Qwen3-8B (2026-10-07)**: thinking exceeded legacy's 6000-token cap → `errands.planner_max_tokens` (default 12000; first measured plan used 1601 tokens/14 s) + one no-thinking retry on an empty finish=length. Plans are now cut at the first `request_replan` checkpoint (the model put "set a timer" after "is it raining?" and it ran on a clear day; legacy kept post-checkpoint steps).
   - One cc test run hung once (binary idle ~2 min, after the 5d merges); 8 uncached runs since passed. If it recurs, run `go test -v -timeout 90s ./internal/modules/cc/` to name the test (suspect: something waiting on the network).
   - Smaller: directed signal cards household-wide (legacy); automation dedup TTLs chosen by the agent; phone caps counted in UTC; phone gate-off cancel is lazy (25 s heartbeat).
-- **Next:** 5d (mobile surface: chat SSE, callbacks plane, inbox, settings screens, voice-profile V1/V6), then Phase 6 (admin absorb, installers running `jarvisd doctor`). Test 5c by voice on jarvis-dev as it's used.
+- **2026-10-07 (cont.): Phase 5 done; Phase 6 started.** 5c/5d contract parity green against the jarvisd binary (whole non-model suite). Release workflow green on 4 targets (dry run). Node-setup PR #135 (inline routine definitions, D24). Fresh-install blocker fixed: `cc.DefaultPromptProvider` ← `llm.LivePromptProvider`. Admin absorb spec written (`docs/admin/00-inventory.md`, questions AQ1–AQ10 in `docs/admin/QUESTIONS.md`); A0/A1 (copy SPA into `web/admin`, embed, admin listener 7710 serving it) in progress, independent of the open questions.
+- **Next:** answer AQ1 (origin model: in-process gateway on 7710 recommended) and the rest one at a time, then A2+ (gateway/BFF, Models page, wizard). Installers run `jarvisd doctor`. Test by voice/app on jarvis-dev as it's used.
