@@ -2,18 +2,19 @@
 
 package models
 
-// Real-engine integration test: downloads the pinned llama.cpp and whisper.cpp CPU builds and
-// tiny models from GitHub and Hugging Face, installs them through the model manager, and runs
-// a completion, an embedding and a transcription through Resolve.
+// Real-engine integration test: downloads the pinned llama.cpp and whisper.cpp CPU builds (the
+// whisper ones from this repo's engines-whisper-<build> release) and tiny models from GitHub and
+// Hugging Face, installs them through the model manager, and runs a completion, an embedding
+// and a transcription of whisper.cpp's jfk.wav through Resolve.
 //
 //	JARVIS_ENGINE_TEST_HOME=/some/cache go test -tags llamaserver -run TestRealEngines -v ./internal/modules/llm/models/
 //
 // JARVIS_ENGINE_TEST_HOME keeps downloads between runs (default: a temp dir).
+// JARVIS_ENGINE_TEST_GPU=1 also runs live and stt on the detected GPU flavour's builds.
 
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -161,15 +162,25 @@ func TestRealEngines(t *testing.T) {
 	}
 	t.Logf("embedding: %d dims", len(er.Data[0].Embedding))
 
+	speech := fetchJFK(ctx, t, home)
+	transcribe := func(ep engine.Endpoint) string {
+		t.Helper()
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		fw, _ := mw.CreateFormFile("file", "jfk.wav")
+		fw.Write(speech)
+		mw.WriteField("response_format", "json")
+		mw.Close()
+		out := post(ep, "/inference", mw.FormDataContentType(), &body)
+		var tr struct{ Text string }
+		json.Unmarshal([]byte(out), &tr)
+		if !strings.Contains(strings.ToLower(tr.Text), "ask not what your country") {
+			t.Fatalf("transcription of jfk.wav: %s", out)
+		}
+		return strings.TrimSpace(tr.Text)
+	}
 	stt := resolve("stt")
-	var body bytes.Buffer
-	mw := multipart.NewWriter(&body)
-	fw, _ := mw.CreateFormFile("file", "silence.wav")
-	fw.Write(silentWAV(16000))
-	mw.WriteField("response_format", "json")
-	mw.Close()
-	out = post(stt, "/inference", mw.FormDataContentType(), &body)
-	t.Logf("transcription of 1 s of silence: %s", strings.TrimSpace(out))
+	t.Logf("cpu transcription: %q", transcribe(stt))
 	for _, i := range st.Resolver.Instances() {
 		t.Logf("engine %s labels=%v args=%v", i.Name, i.Labels, i.Args)
 	}
@@ -184,30 +195,62 @@ func TestRealEngines(t *testing.T) {
 		}
 		out := post(gpu, "/completions", "application/json", strings.NewReader(`{"prompt":"Once upon a time","max_tokens":16}`))
 		t.Logf("%s completion: %.200s", hw.Flavour, out)
-		for _, i := range st.Resolver.Instances() {
-			if i.Name == gpu.Engine {
-				for _, l := range i.Output {
-					if strings.Contains(l, "CUDA") || strings.Contains(l, "offload") || strings.Contains(l, "Vulkan") || strings.Contains(l, "Metal") {
-						t.Logf("  %s", l)
-					}
-				}
-			}
+		logGPU(t, st, gpu.Engine, "")
+
+		// whisper-server on the GPU build too (our CI's CUDA/Vulkan/Metal builds).
+		must(st.Manager.UpdateLabels(ctx, map[string]map[string]any{"stt": {"gpu_backend": string(hw.Flavour)}}))
+		gstt := resolve("stt")
+		if gstt.Engine == stt.Engine {
+			t.Fatal("GPU stt still runs the CPU engine")
+		}
+		t.Logf("%s transcription: %q", hw.Flavour, transcribe(gstt))
+		if !logGPU(t, st, gstt.Engine, gpuLogName[hw.Flavour]) {
+			t.Errorf("whisper-server output never mentions %s", gpuLogName[hw.Flavour])
 		}
 	}
 }
 
-// silentWAV is n samples of 16 kHz mono 16-bit silence.
-func silentWAV(n int) []byte {
-	var b bytes.Buffer
-	data := n * 2
-	b.WriteString("RIFF")
-	binary.Write(&b, binary.LittleEndian, uint32(36+data))
-	b.WriteString("WAVEfmt ")
-	for _, v := range []any{uint32(16), uint16(1), uint16(1), uint32(16000), uint32(32000), uint16(2), uint16(16)} {
-		binary.Write(&b, binary.LittleEndian, v)
+// gpuLogName is how ggml names each GPU backend in its log lines.
+var gpuLogName = map[engine.Flavour]string{engine.FlavourCUDA: "CUDA", engine.FlavourVulkan: "Vulkan",
+	engine.FlavourMetal: "Metal", engine.FlavourROCm: "ROCm"}
+
+// logGPU logs an engine's GPU-related output lines and reports whether any mentions want.
+func logGPU(t *testing.T, st *Stack, name, want string) bool {
+	t.Helper()
+	found := false
+	for _, i := range st.Resolver.Instances() {
+		if i.Name != name {
+			continue
+		}
+		for _, l := range i.Output {
+			if strings.Contains(l, "CUDA") || strings.Contains(l, "offload") || strings.Contains(l, "Vulkan") ||
+				strings.Contains(l, "Metal") || strings.Contains(l, "ROCm") || strings.Contains(l, "backend") {
+				t.Logf("  %s", l)
+				found = found || (want != "" && strings.Contains(l, want))
+			}
+		}
 	}
-	b.WriteString("data")
-	binary.Write(&b, binary.LittleEndian, uint32(data))
-	b.Write(make([]byte, data))
-	return b.Bytes()
+	return found
+}
+
+// fetchJFK returns whisper.cpp's 11 s jfk.wav sample (16 kHz mono), cached under home.
+func fetchJFK(ctx context.Context, t *testing.T, home string) []byte {
+	t.Helper()
+	p := filepath.Join(home, "jfk.wav")
+	if b, err := os.ReadFile(p); err == nil {
+		return b
+	}
+	url := "https://raw.githubusercontent.com/ggml-org/whisper.cpp/" + engine.Releases[engine.KindWhisper].Build + "/samples/jfk.wav"
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("%s: %d %v", url, resp.StatusCode, err)
+	}
+	os.WriteFile(p, b, 0o644)
+	return b
 }

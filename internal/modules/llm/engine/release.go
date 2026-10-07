@@ -64,16 +64,25 @@ const (
 // Kinds lists the engine kinds.
 var Kinds = []Kind{KindLlama, KindWhisper}
 
-// Release pins one kind's upstream build (01 §3.6). Bumping it means replacing Assets with the
-// new release's names and sha256 digests (GitHub's API lists both: `digest` per asset).
+// Release pins one kind's build (01 §3.6). Bumping it means replacing Assets with the new
+// release's names, sizes and sha256 digests (GitHub's API lists them: `size`, `digest` per
+// asset; our own engine releases also carry a SHA256SUMS file).
 type Release struct {
 	Kind  Kind
-	Build string // release tag
-	// DefaultBaseURL is where assets are downloaded from: <base>/<Build>/<asset name>. The
-	// settings llm.engine_base_url / stt.engine_base_url override it (a mirror, a test server).
+	Build string // upstream build tag (b11457); names the install directory
+	// TagPrefix is prepended to Build to form the release tag the assets hang under: "" for
+	// upstream llama.cpp releases (tag b11457), "engines-whisper-" for the whisper builds this
+	// repo's CI publishes (tag engines-whisper-b5454).
+	TagPrefix string
+	// DefaultBaseURL is where assets are downloaded from: <base>/<Tag()>/<asset name>. The
+	// settings llm.engine_base_url / stt.engine_base_url override it (a mirror, a test server),
+	// with the same <tag>/<asset> layout below it.
 	DefaultBaseURL string
 	Assets         map[Platform]map[Flavour][]Asset
 }
+
+// Tag is the release tag the assets are published under.
+func (r Release) Tag() string { return r.TagPrefix + r.Build }
 
 // Asset is one release file. A flavour may need several (CUDA ships its runtime separately);
 // all are extracted into the same directory.
@@ -96,10 +105,13 @@ func (p Platform) String() string { return p.OS + "/" + p.Arch }
 // llama.cpp: CUDA is 12.x on x64 (it runs on any driver from the 12 series up) and 13.x where
 // that is the only build (arm64). Upstream ships ROCm for x64 only; AMD elsewhere uses Vulkan.
 //
-// whisper.cpp ships far fewer binaries: CPU for linux and windows, CUDA for windows. There is
-// no upstream macOS (Metal) or linux GPU build; those hosts use a binary the operator installs
-// (e.g. Homebrew's whisper-cpp), named by the stt.engine_path setting, until jarvis hosts its
-// own builds behind stt.engine_base_url.
+// whisper.cpp: upstream ships only CPU builds for linux and windows plus CUDA for windows, so
+// whisper-server builds come from this repo's own CI (.github/workflows/whisper-builds.yml),
+// published as the release engines-whisper-<build> with a SHA256SUMS file: Metal on
+// darwin/arm64 (static, shaders embedded), CPU, CUDA 12.8 (+ a cudart archive holding
+// libcudart/libcublas/libcublasLt) and Vulkan on linux/amd64, CPU and Vulkan on linux/arm64.
+// The windows archives in that release are upstream's, re-hosted byte for byte. No ROCm build:
+// AMD GPUs use Vulkan. stt.engine_path still names an operator-installed binary instead.
 var Releases = map[Kind]Release{
 	KindLlama: {
 		Kind: KindLlama, Build: "b11457",
@@ -146,15 +158,27 @@ var Releases = map[Kind]Release{
 		},
 	},
 	KindWhisper: {
-		Kind: KindWhisper, Build: "b5454",
-		DefaultBaseURL: "https://github.com/ggml-org/whisper.cpp/releases/download",
+		Kind: KindWhisper, Build: "b5454", TagPrefix: "engines-whisper-",
+		DefaultBaseURL: "https://github.com/alexberardi/jarvis-server/releases/download",
 		Assets: map[Platform]map[Flavour][]Asset{
 			{"linux", "amd64"}: {
-				FlavourCPU: {{"whisper-bin-ubuntu-x64.tar.gz", 10364195, "a72becf15d7917f990f6313867a52638b82b7f9ef237fb0c980dac56a135781c"}},
+				FlavourCPU:    {{"whisper-b5454-bin-ubuntu-x64.tar.gz", 7788163, "318ec9d6ec4b4fffa27fc8c7053b0c2a909cbde3f7e999c2c2b40784d6d41c90"}},
+				FlavourVulkan: {{"whisper-b5454-bin-ubuntu-vulkan-x64.tar.gz", 21734696, "b3501e8dcb0d76c02ece96ee9be4a57931694bda97b7117a9838e51542ef3244"}},
+				FlavourCUDA: {
+					{"whisper-b5454-bin-ubuntu-cuda-12.8-x64.tar.gz", 161637727, "389a83cff995a22f1294fe64203bf723e34a3f2eafcaea8c5eade62155ab5b8a"},
+					{"cudart-whisper-b5454-bin-ubuntu-cuda-12.8-x64.tar.gz", 594370562, "7571d0c703f7ccd56bde9d90aa65749bfcead6961dab9e843f15afa801f76bd9"},
+				},
 			},
 			{"linux", "arm64"}: {
-				FlavourCPU: {{"whisper-bin-ubuntu-arm64.tar.gz", 4608377, "6b95ebfc60447df48e70ef00a73bdc3f41679ed2d01ef465827206a2ff325149"}},
+				FlavourCPU:    {{"whisper-b5454-bin-ubuntu-arm64.tar.gz", 4698052, "31d81c0daec8706ac507410cbbc7963a80d78f7969b6615454ed725257c5a494"}},
+				FlavourVulkan: {{"whisper-b5454-bin-ubuntu-vulkan-arm64.tar.gz", 15879686, "a615a489d471128f47a44cb5ba76e98ac8806b37afcf5aaab9cb566dc01f9399"}},
 			},
+			{"darwin", "arm64"}: {
+				// One Metal binary; "cpu" runs the same one with --no-gpu.
+				FlavourMetal: {{"whisper-b5454-bin-macos-metal-arm64.tar.gz", 4318701, "abe0046724fe66408c82aa7fff753e3665235a943b44d4e85c403f10186a5308"}},
+				FlavourCPU:   {{"whisper-b5454-bin-macos-metal-arm64.tar.gz", 4318701, "abe0046724fe66408c82aa7fff753e3665235a943b44d4e85c403f10186a5308"}},
+			},
+			// Windows: upstream's archives, re-hosted unchanged.
 			{"windows", "amd64"}: {
 				FlavourCPU:  {{"whisper-bin-x64.zip", 8928640, "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb"}},
 				FlavourCUDA: {{"whisper-bin-win-cuda-12.4.0-x64.zip", 684913404, "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a"}},

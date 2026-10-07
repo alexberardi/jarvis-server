@@ -208,8 +208,21 @@ func TestReleases(t *testing.T) {
 	if _, err := AssetsFor(KindLlama, Platform{"darwin", "arm64"}, FlavourMetal); err != nil {
 		t.Error(err)
 	}
-	if _, err := AssetsFor(KindWhisper, Platform{"darwin", "arm64"}, FlavourMetal); err == nil {
-		t.Error("whisper has no upstream macOS build")
+	// whisper-server builds come from our CI: Metal on macOS, CUDA (+ runtime) and Vulkan on linux.
+	if _, err := AssetsFor(KindWhisper, Platform{"darwin", "arm64"}, FlavourMetal); err != nil {
+		t.Error(err)
+	}
+	if got := FlavoursFor(KindWhisper, Platform{"linux", "amd64"}); strings.Join(got, ",") != "cpu,cuda,vulkan" {
+		t.Errorf("whisper linux/amd64 flavours %v", got)
+	}
+	if a, _ := AssetsFor(KindWhisper, Platform{"linux", "amd64"}, FlavourCUDA); len(a) != 2 || !strings.HasPrefix(a[1].Name, "cudart-") {
+		t.Errorf("whisper cuda assets %+v", a)
+	}
+	if r := Releases[KindWhisper]; r.DefaultBaseURL+"/"+r.Tag() != "https://github.com/alexberardi/jarvis-server/releases/download/engines-whisper-"+r.Build {
+		t.Errorf("whisper release URL %s/%s", r.DefaultBaseURL, r.Tag())
+	}
+	if r := Releases[KindLlama]; r.Tag() != r.Build {
+		t.Errorf("llama tag %q", r.Tag())
 	}
 	if _, err := AssetsFor(KindLlama, Platform{"linux", "amd64"}, FlavourMetal); err == nil || !strings.Contains(err.Error(), "available: cpu, cuda, rocm, vulkan") {
 		t.Errorf("err = %v", err)

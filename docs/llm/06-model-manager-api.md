@@ -50,14 +50,18 @@ of the key. Give `live` and `background` the same model and settings (or set
 
 | Kind | Build | Source |
 |---|---|---|
-| llama-server | `b11457` | `github.com/ggml-org/llama.cpp/releases/download/<build>/<asset>` |
-| whisper-server | `b5454` | `github.com/ggml-org/whisper.cpp/releases/download/<build>/<asset>` |
+| llama-server | `b11457` | upstream: `github.com/ggml-org/llama.cpp/releases/download/<build>/<asset>` |
+| whisper-server | `b5454` | **our CI**: `github.com/alexberardi/jarvis-server/releases/download/engines-whisper-<build>/<asset>` |
+
+Assets hang under `<base>/<tag>/<asset>`, where the tag is `Release.Tag()` = `TagPrefix + Build`
+(`b11457` for llama, `engines-whisper-b5454` for whisper). A mirror set in
+`llm.engine_base_url` / `stt.engine_base_url` uses the same layout below its base.
 
 | Platform | llama-server flavours | whisper-server flavours |
 |---|---|---|
-| linux/amd64 | cpu, cuda (12.8 + cudart), rocm (10.0), vulkan | cpu |
-| linux/arm64 | cpu, cuda (13.4 + cudart), vulkan | cpu |
-| darwin/arm64 | metal (also used as `cpu` with `-ngl 0`) | **none upstream** |
+| linux/amd64 | cpu, cuda (12.8 + cudart), rocm (10.0), vulkan | cpu, cuda (12.8 + cudart), vulkan |
+| linux/arm64 | cpu, cuda (13.4 + cudart), vulkan | cpu, vulkan |
+| darwin/arm64 | metal (also used as `cpu` with `-ngl 0`) | metal (also `cpu`, run with `--no-gpu`) |
 | windows/amd64 | cpu, cuda (12.4 + cudart), rocm, vulkan | cpu, cuda (12.4) |
 | windows/arm64 | cpu, vulkan | cpu |
 
@@ -66,10 +70,27 @@ Every asset is pinned by name, size and sha256 (`engine.Releases`). A build inst
 beside the binary, `LD_LIBRARY_PATH` set to that directory on Linux). A `.jarvis-complete`
 marker is written last, so a half-extracted build is never used.
 
-Upstream whisper.cpp ships no macOS or Linux GPU binaries. Until jarvis hosts its own
-builds (point `stt.engine_base_url` at them), a macOS box sets `stt.engine_path` to an
-installed binary, e.g. Homebrew's `whisper-server`, which is Metal. With `gpu_backend=auto`, a
-kind without a build for the detected flavour falls back to its CPU build.
+**whisper-server builds come from our CI** (`.github/workflows/whisper-builds.yml`; upstream
+ships only CPU for linux/windows and CUDA for windows). It checks out whisper.cpp at the pinned
+tag, builds each flavour with CMake (`GGML_NATIVE=OFF`; on linux `GGML_BACKEND_DL` +
+`GGML_CPU_ALL_VARIANTS`, rpath `$ORIGIN`, the way upstream packs its own linux archives),
+smoke-tests the extracted archive (`--help`, no missing shared libraries, a real transcription
+of `jfk.wav` through whisper-server), and publishes the release `engines-whisper-<build>` with a
+`SHA256SUMS` file:
+
+- darwin/arm64 Metal: one static binary, Metal shaders embedded (macOS 13.3+).
+- linux/amd64 CPU, Vulkan, CUDA 12.8 (Ubuntu 22.04 / glibc 2.35; CUDA built for ggml's default
+  arch list, 50 → 120). CUDA ships like llama.cpp's: the main archive (with `libggml-cuda.so`)
+  plus `cudart-…` holding `libcudart.so.12`, `libcublas.so.12`, `libcublasLt.so.12`, extracted
+  beside it. Only the driver (`libcuda.so.1`) comes from the host.
+- linux/arm64 CPU (glibc 2.35) and Vulkan (Ubuntu 24.04 / glibc 2.39).
+- windows: upstream's own archives, re-hosted byte for byte so one base URL serves every asset.
+- No ROCm build (the toolchain and rocBLAS kernels are heavy); AMD GPUs use Vulkan.
+
+A published release is never rebuilt in place (the builds are not reproducible, and every asset
+is pinned by sha256): a new whisper.cpp tag means a new release and new pins. `stt.engine_path`
+still overrides the download with an operator-installed binary. With `gpu_backend=auto`, a kind
+without a build for the detected flavour falls back to its CPU build.
 
 ## 3. Settings
 
@@ -326,5 +347,6 @@ quoting in `extra_args`); 422 otherwise. Answers like `GET`. Voice labels take o
   register, label validation, voice models, the HTTP API end to end through `NewStack`).
 - Integration, build tag `llamaserver`: real pinned CPU builds of llama-server and
   whisper-server, `stories15M` (completion), MiniLM (384-d embedding) and whisper tiny.en
-  (transcription), installed through the manager; `JARVIS_ENGINE_TEST_GPU=1` adds a live
-  label on the detected GPU build.
+  (transcription of `jfk.wav`), installed through the manager; `JARVIS_ENGINE_TEST_GPU=1`
+  also runs live and stt on the detected GPU flavour's builds (fetched on demand) and checks
+  whisper-server's output names that backend.

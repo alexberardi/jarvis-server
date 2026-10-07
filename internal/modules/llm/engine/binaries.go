@@ -171,7 +171,7 @@ func (b *Binaries) Fetch(ctx context.Context, k Kind, f Flavour, progress func(d
 		}
 		start := before
 		err := Download{
-			URL: base + "/" + Releases[k].Build + "/" + a.Name, Dest: dest, Size: a.Size, SHA256: a.SHA256,
+			URL: base + "/" + Releases[k].Tag() + "/" + a.Name, Dest: dest, Size: a.Size, SHA256: a.SHA256,
 			Client: b.Client,
 			Progress: func(done int64) {
 				if progress != nil {

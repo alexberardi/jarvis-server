@@ -265,10 +265,11 @@ func newEnv(t *testing.T) *env {
 	host := engine.Host()
 	for _, k := range engine.Kinds {
 		archive := tarGz(t, map[string]string{"pkg/" + k.BinaryName(host): "bin", "pkg/libggml.so": "lib"})
-		h.files["/"+map[engine.Kind]string{engine.KindLlama: "llama", engine.KindWhisper: "whisper"}[k]+"/b0/eng.tar.gz"] = archive
 		old := engine.Releases[k]
 		r := old
 		r.Build = "b0"
+		// <base>/<tag>/<asset>: tag b0 for llama, engines-whisper-b0 for our whisper builds.
+		h.files["/"+map[engine.Kind]string{engine.KindLlama: "llama", engine.KindWhisper: "whisper"}[k]+"/"+r.Tag()+"/eng.tar.gz"] = archive
 		r.Assets = map[engine.Platform]map[engine.Flavour][]engine.Asset{host: {
 			engine.FlavourCPU: {{Name: "eng.tar.gz", Size: int64(len(archive)), SHA256: sum(archive)}},
 		}}

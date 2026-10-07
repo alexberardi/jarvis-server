@@ -356,7 +356,8 @@ func TestBinariesFetchWindowsZipAndErrors(t *testing.T) {
 		FlavourCUDA:   {{"bad.zip", 3, strings.Repeat("0", 64)}},
 	})
 	ts := httptest.NewServer(&rangeServer{files: map[string][]byte{
-		"/b1/w.zip": zipData, "/b1/evil.tar.gz": evil, "/b1/evil2.tar.gz": evilLink, "/b1/bad.zip": []byte("abc")}})
+		"/engines-whisper-b1/w.zip": zipData, "/engines-whisper-b1/evil.tar.gz": evil,
+		"/engines-whisper-b1/evil2.tar.gz": evilLink, "/engines-whisper-b1/bad.zip": []byte("abc")}})
 	defer ts.Close()
 	b := &Binaries{Dir: filepath.Join(t.TempDir(), "engines"), Platform: plat, Client: ts.Client(),
 		BaseURL: func(Kind) string { return ts.URL }}
