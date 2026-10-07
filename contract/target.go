@@ -38,6 +38,9 @@ const (
 	Notifications = "notifications"
 	Recipes       = "recipes"
 	OCR           = "ocr"
+	// Admin is jarvisd's admin listener (gateway + BFF, docs/admin). Legacy jarvis-admin used
+	// the same port, but it is not in Listeners: no Python oracle exists (admin_test.go).
+	Admin = "admin"
 )
 
 // DefaultPorts maps each listener to its legacy port (PLAN §3.1).
@@ -52,6 +55,7 @@ var DefaultPorts = map[string]int{
 	Notifications: 7712,
 	Recipes:       7030,
 	OCR:           7031,
+	Admin:         7710,
 }
 
 // Listeners is DefaultPorts' keys in a stable order.

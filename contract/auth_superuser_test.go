@@ -43,6 +43,19 @@ func TestAuthSuperuserAuth(t *testing.T) {
 	}
 }
 
+// superuserUserItem is one row of GET /superuser/users (also jarvisd admin's /api/admin/users).
+var superuserUserItem = Obj{
+	"id":                   Int,
+	"email":                NonEmptyString,
+	"username":             String,
+	"is_active":            Bool,
+	"is_superuser":         Bool,
+	"must_change_password": Bool,
+	"created_at":           TimestampUTC,
+	"updated_at":           NullOr(TimestampUTC),
+	"households":           ArrayOf(Obj{"household_id": UUID, "household_name": String, "role": householdRole}),
+}
+
 func TestAuthSuperuserViews(t *testing.T) {
 	super := SharedSuperuser(t)
 	user := SharedUser(t)
@@ -60,18 +73,7 @@ func TestAuthSuperuserViews(t *testing.T) {
 
 	t.Run("users", func(t *testing.T) {
 		list := listOf(t, "/superuser/users", super.H())
-		item := Obj{
-			"id":                   Int,
-			"email":                NonEmptyString,
-			"username":             String,
-			"is_active":            Bool,
-			"is_superuser":         Bool,
-			"must_change_password": Bool,
-			"created_at":           TimestampUTC,
-			"updated_at":           NullOr(TimestampUTC),
-			"households":           ArrayOf(Obj{"household_id": UUID, "household_name": String, "role": householdRole}),
-		}
-		if errs := NonEmptyArrayOf(item).Match("$", list); len(errs) > 0 {
+		if errs := NonEmptyArrayOf(superuserUserItem).Match("$", list); len(errs) > 0 {
 			t.Fatalf("shape: %v", errs)
 		}
 		got := findBy(list, "id", user.ID)
