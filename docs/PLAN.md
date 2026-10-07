@@ -115,7 +115,7 @@ SQLite driver: `modernc.org/sqlite` (pure Go; keeps the build cgo-free, see §3.
 |---|---|---|
 | LLM | `llama-server`, one per slot (live and background), with `--jinja`, `--mmproj` and grammar/JSON-schema. This mirrors prod today. Remote providers go through the Go REST backend. | Engine subprocess, downloaded per GPU flavour |
 | Embeddings (memory) | `llama-server --embedding` with a MiniLM GGUF, or sherpa-onnx. Existing memories are re-embedded by the existing sweep worker. | Engine or in-binary |
-| STT | whisper.cpp `whisper-server` on GPU. The alternative is sherpa-onnx ASR on CPU (D7). | Engine |
+| STT | whisper.cpp `whisper-server` (D7 decided), managed like llama-server; GPU or CPU, Metal on macOS. | Engine |
 | Speaker ID | **sherpa-onnx**: 3D-Speaker ERes2Net or NeMo TitaNet-small. Pick and calibrate thresholds on a real enrollment set. | **In-binary** |
 | TTS | **sherpa-onnx Kokoro** v1.0, `bm_george`, speed 1.25, CPU, fp32 (RTF 0.17). It streams per sentence. | **In-binary** |
 | ~~Intent classifier (fastText)~~ | **Cut** (D9: off in prod, F1). | — |
@@ -315,7 +315,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 **Still open, decided at the start of the relevant phase:**
 
 - **D5 (Phase 1):** confirm Go auth ships RS256 minting from day one. Recommended: yes.
-- **D7 (Phase 4):** STT engine. Options are whisper.cpp on GPU (today's quality, needs an engine download), or sherpa-onnx ASR on CPU in-binary (e.g. Parakeet or Whisper ONNX; simpler, needs a latency and accuracy check).
+- **D7 (Phase 4): decided 2026-10-06 → whisper.cpp `whisper-server` as a supervised engine**, on the same machinery as llama-server (GPU detection/assignment incl. Metal, engine download, model manager installing whisper GGML models from Hugging Face, supervision, health). Same model as prod today (large-v3-turbo). User priority: everything tied together neatly, maintainable and debuggable — one engine/model code path for both kinds. sherpa-onnx ASR may be added later as a no-download CPU fallback if an evaluation supports it.
 - ~~**D8 (Phase 5):** phone-gateway dial queue~~ → resolved: gateway absorbed into jarvisd (docs/cc D16).
 - **D9 (Phase 6):** whether jarvis-admin stays as a Fastify app or is absorbed into `jarvisd`.
 

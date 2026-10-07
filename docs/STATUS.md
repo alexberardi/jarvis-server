@@ -72,6 +72,7 @@ Update it at the end of every working session, and whenever a task finishes or a
 | 2026-10-06 | Auth follow-ups settled (user): (1) access tokens stay valid until expiry (30 min) after logout/password change: fine for now. (2) Rotating a revoked app client re-activates it: kept as the one explicit "reissue + reactivate" admin action (there is no separate un-revoke route), documented rather than changed. (3) An admin removing a member from their only household is by design. |
 | 2026-10-06 | **Recipes stays out of jarvisd** (user): it is an optional add-on server. It keeps running as jarvis-recipes-server and uses jarvisd over HTTP (auth, registry, OCR). OCR folds into jarvisd. |
 | 2026-10-06 | **Recipes ↔ OCR handoff stays queue-based, owned by jarvisd** (user: OCR is long-running, it needs a queue). jarvisd OCR exposes an async HTTP job API (`POST /v1/ocr/jobs` → 202 job_id, `GET /v1/ocr/jobs/{id}`, optional `callback_url` POSTed with app creds on completion, retried) on the durable queue. Recipes changes `from_image.py` to submit over HTTP and adds a callback route that enqueues onto its own RQ. No Redis between them, no pickled jobs. Legacy sync `/v1/ocr/batch` kept. |
+| 2026-10-06 | **D7 STT: whisper.cpp `whisper-server` as a supervised engine**, sharing llama-server's engine/GPU/model-manager machinery (one code path for both engine kinds). Priority: neat, maintainable, debuggable. |
 
 ## Session log
 
