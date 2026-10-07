@@ -11,11 +11,13 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
+	"github.com/alexberardi/jarvis-server/internal/platform/engines"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -944,9 +946,195 @@ func Recommend(hw engine.Hardware) map[string]string {
 	out[engine.LabelLive], out[engine.LabelBackground] = best.ID, best.ID
 	out[engine.LabelSTT] = "whisper-small.en"
 	if hw.Flavour != engine.FlavourCPU && hw.Flavour != "" {
-		if e, ok := CatalogEntry("whisper-large-v3-turbo"); ok && EntryFit(hw, e).Verdict == "fits" {
-			out[engine.LabelSTT] = e.ID
+		// STT shares a card with the live model: large-v3-turbo only when it fits next to it.
+		live := []Resident{{Labels: []string{engine.LabelLive}, Model: best.ID, NeededMB: EntryFit(hw, best).NeededMB,
+			Devices: deviceList(engine.Propose(hw)[engine.LabelLive].Devices)}}
+		if e, ok := CatalogEntry("whisper-large-v3-turbo"); ok {
+			if FitAlongside(hw, e.Kind, e.Size, 0, 0, live).Verdict == "fits" {
+				out[engine.LabelSTT] = e.ID
+			}
 		}
 	}
 	return out
+}
+
+// deviceList parses a gpu_devices setting ("0,1"); empty or invalid is nil (the default card).
+func deviceList(s string) []int {
+	var out []int
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// Residents lists the GPU memory assigned local engines need, from the current label
+// settings. Labels sharing one engine (same model, context and devices, LD1) count once.
+// Labels on the CPU (gpu_layers 0 or gpu_backend cpu), remote, shared or off need none.
+func (m *Manager) Residents(ctx context.Context) []Resident {
+	if m.Labels == nil {
+		return nil
+	}
+	var out []Resident
+	idx := map[string]int{}
+	for _, ls := range m.Labels.Status(ctx) {
+		c := ls.Config
+		if c.Engine != engine.ModeLocal || c.Model == "" || c.GPULayers == 0 || c.GPUBackend == string(engine.FlavourCPU) {
+			continue
+		}
+		need, ok := m.residentNeed(ctx, c)
+		if !ok {
+			continue
+		}
+		key := fmt.Sprintf("%s|%s|%d|%s", c.Kind, c.Model, c.Context, c.GPUDevices)
+		if i, ok := idx[key]; ok {
+			out[i].Labels = append(out[i].Labels, c.Label)
+			continue
+		}
+		idx[key] = len(out)
+		out = append(out, Resident{Labels: []string{c.Label}, Model: c.Model, NeededMB: need, Devices: deviceList(c.GPUDevices)})
+	}
+	return append(out, m.otherPrograms(ctx, out)...)
+}
+
+// OtherPrograms labels GPU memory jarvisd's engines don't account for: the desktop, a game
+// streamer, an emulator. It shows up in fit verdicts and overcommit warnings like an engine.
+const OtherPrograms = "other programs"
+
+// otherPrograms estimates, per card, the memory in use at detection time that isn't ours:
+// used minus what our engines running then were estimated to need.
+func (m *Manager) otherPrograms(ctx context.Context, residents []Resident) []Resident {
+	hw := m.hardware(ctx)
+	devs := hw.Discrete(hw.Flavour)
+	if len(devs) == 0 || hw.Flavour == engine.FlavourMetal {
+		return nil // unified memory reports no per-process use
+	}
+	running := map[string]bool{}
+	for _, in := range m.Labels.Instances() {
+		switch in.State {
+		case engines.Healthy, engines.Unhealthy, engines.Draining:
+			if !in.Since.After(hw.DetectedAt) {
+				for _, l := range in.Labels {
+					running[l] = true
+				}
+			}
+		}
+	}
+	var out []Resident
+	for _, d := range devs {
+		if d.FreeMB <= 0 || d.FreeMB > d.TotalMB {
+			continue
+		}
+		used := d.TotalMB - d.FreeMB
+		for _, r := range residents {
+			if !slices.ContainsFunc(r.Labels, func(l string) bool { return running[l] }) {
+				continue
+			}
+			on := r.Devices
+			if len(on) == 0 {
+				on = []int{devs[0].Index}
+			}
+			if slices.Contains(on, d.Index) {
+				used -= r.NeededMB / int64(len(on))
+			}
+		}
+		if used > 256 { // below this it's noise in our own estimates
+			out = append(out, Resident{Labels: []string{OtherPrograms}, NeededMB: used, Devices: []int{d.Index}})
+		}
+	}
+	return out
+}
+
+// residentNeed estimates a label's engine in MB: its installed model (plus projector) at the
+// label's context, or an external file by its size.
+func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64, bool) {
+	var weights, kv int64
+	n := c.Context
+	if mod, err := m.Store.Get(ctx, c.Model); err == nil {
+		weights = mod.Size
+		proj := c.MMProj
+		if proj == "" {
+			proj = mod.MMProjID
+		}
+		if proj != "" && !strings.EqualFold(proj, "none") {
+			if p, err := m.Store.Get(ctx, proj); err == nil {
+				weights += p.Size
+			}
+		}
+		if e, ok := CatalogEntry(mod.CatalogID); ok {
+			kv = e.KVBytesPerTok
+			if n <= 0 {
+				n = e.ContextDefault
+			}
+		}
+		if n <= 0 {
+			n = mod.ContextDefault
+		}
+	} else if fi, err := os.Stat(c.Model); err == nil {
+		weights = fi.Size()
+	} else {
+		return 0, false
+	}
+	need, _ := estimateNeed(c.ModelKind, weights, kv, max(n, 0))
+	if n <= 0 && c.ModelKind == engine.ModelLLM {
+		need, _ = estimateNeed(c.ModelKind, weights, kv, 8192)
+	}
+	return need / mb, true
+}
+
+// without drops labels from the residents (they are being reassigned); a resident left with
+// no labels goes.
+func without(rs []Resident, labels ...string) []Resident {
+	var out []Resident
+	for _, r := range rs {
+		r.Labels = slices.DeleteFunc(slices.Clone(r.Labels), func(l string) bool { return slices.Contains(labels, l) })
+		if len(r.Labels) > 0 {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// FitWarning says when a model being installed for engine labels won't fit on its card next
+// to the engines the other labels already run; "" when it fits or nothing is assigned. The
+// install still goes ahead: the estimate is a guide, and the user decides.
+func (m *Manager) FitWarning(ctx context.Context, modelID string, assign []string) string {
+	var engineLabels []string
+	for _, l := range assign {
+		if d, ok := lookupLabel(l); ok && !d.Voice {
+			engineLabels = append(engineLabels, l)
+		}
+	}
+	if len(engineLabels) == 0 || m.Store == nil {
+		return ""
+	}
+	mod, err := m.Store.Get(ctx, modelID)
+	if err != nil {
+		return ""
+	}
+	var kv int64
+	n := mod.ContextDefault
+	if e, ok := CatalogEntry(mod.CatalogID); ok {
+		kv = e.KVBytesPerTok
+	}
+	w := mod.Size
+	if mod.MMProjID != "" {
+		if p, err := m.Store.Get(ctx, mod.MMProjID); err == nil {
+			w += p.Size
+		}
+	}
+	hw := m.hardware(ctx)
+	f := FitAlongside(hw, mod.Kind, w, kv, n, without(m.Residents(ctx), engineLabels...))
+	if f.Verdict != "too_big" || len(f.Alongside) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s needs about %d MB but %s has only %d MB left next to %s; it may fail to start. "+
+		"Move a label to another card, lower a context, or pick a smaller model.",
+		mod.ID, f.NeededMB, f.Device, f.DeviceMB*95/100-f.CommittedMB, strings.Join(f.Alongside, ", "))
 }

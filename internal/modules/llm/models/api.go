@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
@@ -134,11 +135,14 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
 	for _, m := range installed {
 		state[m.ID] = m.State
 	}
+	residents := a.Manager.Residents(ctx)
 	items := []catalogItem{}
 	for _, e := range Catalog() {
-		items = append(items, catalogItem{Entry: e, Fit: EntryFit(hw, e), Installed: state[e.ID] == StateReady, State: state[e.ID]})
+		// A model already assigned is judged next to the others, not next to itself.
+		others := slices.DeleteFunc(slices.Clone(residents), func(r Resident) bool { return r.Model == e.ID })
+		items = append(items, catalogItem{Entry: e, Fit: entryFitAlongside(hw, e, others), Installed: state[e.ID] == StateReady, State: state[e.ID]})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": items, "recommended": Recommend(hw), "hardware": hw})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": items, "recommended": Recommend(hw), "hardware": hw, "residents": residents})
 }
 
 type hfChoice struct {
@@ -165,9 +169,10 @@ func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	hw := a.Manager.hardware(ctx)
 	ctxLen, _ := strconv.Atoi(r.URL.Query().Get("context"))
+	residents := a.Manager.Residents(ctx)
 	choices := []hfChoice{}
 	for _, c := range Choices(repo) {
-		choices = append(choices, hfChoice{Choice: c, Fit: FitFor(hw, c.Kind, c.Size, 0, ctxLen)})
+		choices = append(choices, hfChoice{Choice: c, Fit: FitAlongside(hw, c.Kind, c.Size, 0, ctxLen, residents)})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices})
 }
@@ -186,7 +191,11 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	if existing {
 		status = http.StatusOK
 	}
-	httpx.WriteJSON(w, status, map[string]any{"install": inst, "existing": existing})
+	out := map[string]any{"install": inst, "existing": existing}
+	if warn := a.Manager.FitWarning(r.Context(), inst.ModelID, req.Assign); warn != "" {
+		out["warning"] = warn
+	}
+	httpx.WriteJSON(w, status, out)
 }
 
 func (a *API) installs(w http.ResponseWriter, r *http.Request) {
@@ -290,6 +299,7 @@ func (a *API) labels(w http.ResponseWriter, r *http.Request) {
 		"engines":   a.Resolver.Instances(),
 		"proposal":  engine.Propose(hw),
 		"recommend": Recommend(hw),
+		"warnings":  Overcommitted(hw, a.Manager.Residents(ctx)),
 	})
 }
 

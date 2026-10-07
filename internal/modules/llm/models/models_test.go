@@ -17,12 +17,14 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
+	"github.com/alexberardi/jarvis-server/internal/platform/engines"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
@@ -175,10 +177,12 @@ func (h *hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type fakeLabels struct {
 	mu       sync.Mutex
 	notified int
+	status    []engine.LabelStatus
+	instances []engine.InstanceStatus
 }
 
-func (f *fakeLabels) Status(context.Context) []engine.LabelStatus { return nil }
-func (f *fakeLabels) Instances() []engine.InstanceStatus          { return nil }
+func (f *fakeLabels) Status(context.Context) []engine.LabelStatus { return f.status }
+func (f *fakeLabels) Instances() []engine.InstanceStatus          { return f.instances }
 func (f *fakeLabels) Notify() {
 	f.mu.Lock()
 	f.notified++
@@ -400,6 +404,112 @@ func TestFitAndRecommend(t *testing.T) {
 	}
 	if f := FitFor(cpu, "llm", 1<<30, 0, 0); f.Verdict != "cpu" || !f.KVEstimate {
 		t.Errorf("cpu fit %+v", f)
+	}
+}
+
+// The jarvis-dev incident: whisper large-v3-turbo "fit" a 12 GB card on its own, was
+// recommended and assigned next to Qwen3-8B, and crash-looped on cudaMalloc.
+func TestFitCountsCoResidentEngines(t *testing.T) {
+	card := engine.Hardware{Flavour: engine.FlavourCUDA, Devices: []engine.Device{
+		{Backend: engine.FlavourCUDA, Index: 0, ID: "CUDA0", Name: "RTX 3080 Ti", TotalMB: 12288}}}
+	turbo, _ := CatalogEntry("whisper-large-v3-turbo")
+	q8, _ := CatalogEntry("qwen3-8b")
+	if f := EntryFit(card, turbo); f.Verdict != "fits" {
+		t.Fatalf("turbo alone: %+v", f)
+	}
+	qwen := Resident{Labels: []string{"live", "background"}, Model: q8.ID, NeededMB: EntryFit(card, q8).NeededMB}
+	// The desktop, Sunshine and the emulator held about 2.4 GB of that card.
+	desk := Resident{Labels: []string{OtherPrograms}, NeededMB: 2400, Devices: []int{0}}
+	f := FitAlongside(card, turbo.Kind, turbo.Size, 0, 0, []Resident{qwen, desk})
+	if f.Verdict != "too_big" || f.CommittedMB != qwen.NeededMB+desk.NeededMB || !slices.Equal(f.Alongside, []string{"live", "background", OtherPrograms}) {
+		t.Errorf("turbo next to qwen3-8b and the desktop: %+v", f)
+	}
+	if r := Recommend(card); r["stt"] != "whisper-small.en" {
+		t.Errorf("12 GB recommends %v; turbo does not fit next to the live model", r)
+	}
+	// Two cards: the model goes where there is room.
+	two := card
+	two.Devices = append(slices.Clone(card.Devices), engine.Device{Backend: engine.FlavourCUDA, Index: 1, ID: "CUDA1", Name: "RTX 3060", TotalMB: 12288})
+	if f := FitAlongside(two, turbo.Kind, turbo.Size, 0, 0, []Resident{qwen}); f.Verdict != "fits" || f.Device != "RTX 3060" || f.Alongside != nil {
+		t.Errorf("second card: %+v", f)
+	}
+	if w := Overcommitted(card, []Resident{qwen, {Labels: []string{"stt"}, NeededMB: 9000}}); len(w) != 1 || !strings.Contains(w[0], "live, background, stt") {
+		t.Errorf("overcommit warnings %q", w)
+	}
+	if w := Overcommitted(card, []Resident{qwen}); len(w) != 0 {
+		t.Errorf("no overcommit: %q", w)
+	}
+}
+
+func TestResidentsShareEnginesAndSkipCPU(t *testing.T) {
+	e := newEnv(t)
+	file := func(name string, size int64) string {
+		p := filepath.Join(e.home, name)
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := f.Truncate(size); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	llm, stt := file("m.gguf", 4<<30), file("w.bin", 1<<30)
+	cfg := func(label, model string, mod func(*engine.LabelConfig)) engine.LabelStatus {
+		d, _ := engine.LabelDefFor(label)
+		c := engine.LabelConfig{Label: label, Kind: d.Kind, ModelKind: d.ModelKind, Engine: engine.ModeLocal, Model: model, Context: 8192, GPULayers: 999}
+		if mod != nil {
+			mod(&c)
+		}
+		return engine.LabelStatus{Label: label, Config: c}
+	}
+	e.labels.status = []engine.LabelStatus{
+		cfg("live", llm, nil),
+		cfg("background", llm, nil),
+		cfg("embeddings", llm, func(c *engine.LabelConfig) { c.GPULayers = 0 }),
+		cfg("stt", stt, func(c *engine.LabelConfig) { c.GPUDevices = "1" }),
+	}
+	rs := e.mgr.Residents(e.ctx)
+	if len(rs) != 2 || !slices.Equal(rs[0].Labels, []string{"live", "background"}) || !slices.Equal(rs[1].Devices, []int{1}) {
+		t.Fatalf("residents %+v", rs)
+	}
+	if got := without(rs, "live", "background"); len(got) != 1 || got[0].Labels[0] != "stt" {
+		t.Errorf("without: %+v", got)
+	}
+	// Card memory in use at detection that our running engines don't explain is someone
+	// else's: the 4 GB live/background engine was running, so 6 GB used leaves ~2 GB other.
+	e.mgr.Detector = &engine.Detector{Platform: engine.Platform{OS: "linux", Arch: "amd64"},
+		Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+			if name == "nvidia-smi" {
+				return []byte("0, NVIDIA GeForce RTX 3080 Ti, 12288, 6288\n1, NVIDIA GeForce RTX 3060, 12288, 12100\n"), nil
+			}
+			return nil, io.EOF
+		}}
+	linux := engine.Platform{OS: "linux", Arch: "amd64"}
+	rel := engine.Releases[engine.KindLlama]
+	saved := rel.Assets
+	rel.Assets = map[engine.Platform]map[engine.Flavour][]engine.Asset{linux: {engine.FlavourCUDA: {{Name: "x"}}}}
+	engine.Releases[engine.KindLlama] = rel
+	t.Cleanup(func() { rel.Assets = saved; engine.Releases[engine.KindLlama] = rel })
+	hw := e.mgr.Detector.Hardware(e.ctx, true)
+	e.labels.instances = []engine.InstanceStatus{{State: engines.Healthy, Since: hw.DetectedAt.Add(-time.Minute), Labels: []string{"live", "background"}}}
+	rs = e.mgr.Residents(e.ctx)
+	other := rs[len(rs)-1]
+	if len(rs) != 3 || other.Labels[0] != OtherPrograms || other.Devices[0] != 0 || other.NeededMB != 6000-rs[0].NeededMB {
+		t.Fatalf("other programs: %+v", rs)
+	}
+	// Not running at detection: all 6 GB counts as other programs (conservative).
+	e.labels.instances[0].Since = hw.DetectedAt.Add(time.Minute)
+	if rs := e.mgr.Residents(e.ctx); rs[len(rs)-1].NeededMB != 6000 {
+		t.Errorf("engine started after detection: %+v", rs)
+	}
+	e.labels.instances, e.mgr.Detector = nil, nil
+
+	// A different context is a different engine.
+	e.labels.status[1] = cfg("background", llm, func(c *engine.LabelConfig) { c.Context = 32768 })
+	if rs := e.mgr.Residents(e.ctx); len(rs) != 3 || rs[1].NeededMB <= rs[0].NeededMB {
+		t.Errorf("unshared background: %+v", rs)
 	}
 }
 

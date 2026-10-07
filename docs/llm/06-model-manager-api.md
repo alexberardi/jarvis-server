@@ -235,9 +235,25 @@ Catalog (D12): Qwen3 4B/8B/14B, Qwen3.5-9B (+ projector), Qwen3.8-27B UD-Q4_K_M 
 prod's model), all-MiniLM-L6-v2 F16, whisper large-v3-turbo / large-v3-turbo-q5_0 / small.en /
 base.en, Kokoro multi-lang v1.0, ERes2Net. Hugging Face entries pin a commit.
 
-Fit verdicts: `fits`, `tight` (within 10% of the largest card), `split` (only with tensor
+Fit verdicts: `fits`, `tight` (within 10% of the card), `split` (only with tensor
 split across cards), `too_big`, `cpu` (no usable GPU), `in_binary` (tts/speaker). The estimate
-is weights + KV (`kv_bytes_per_token` × context, f16) + ~3% + 600 MB, per card, never summed.
+is weights + KV (`kv_bytes_per_token` × context, f16) + ~3% + 600 MB for LLMs, weights × 1.25 +
+500 MB for whisper.
+
+**Co-residency.** A verdict is for the model *next to what is already on the card*, not on an
+empty one (the jarvis-dev incident: large-v3-turbo "fit" a 12 GB card alone and crash-looped
+next to Qwen3-8B and the desktop). `residents` lists that load: each local engine label's
+estimate (labels sharing one engine, same model + context + devices, count once; CPU, remote,
+shared and off labels count nothing), plus `"other programs"`: card memory in use at detection
+that our engines running then don't explain (desktop, streamer, emulator; not on Metal). A
+model is judged on the card with the most left; `fit.committed_mb` and `fit.alongside` say
+what it shares with. A catalog entry already assigned is judged next to the others, not itself.
+`recommended.stt` is large-v3-turbo only when it fits next to the recommended live model.
+
+```json
+"residents": [{"labels": ["live", "background"], "model": "qwen3-8b", "needed_mb": 7842},
+              {"labels": ["other programs"], "needed_mb": 2410, "devices": [0]}]
+```
 
 ### `GET /v1/models/hf/{owner}/{name}[?revision=…&context=…]`
 
@@ -259,7 +275,10 @@ are grouped (`shards`). 403 = gated (set `llm.hf_token`), 404 = no such repo.
 ```
 
 202 `{"install": Install, "existing": false}`; 200 with `existing: true` when that model is
-already installing. One durable job fetches, in order, the engine build the model needs
+already installing. When the model, assigned to engine labels, won't fit next to the other
+residents, the response adds `"warning": "<what is on the card and what to change>"`; the
+install still proceeds (the estimate is a guide, the user decides). `GET /v1/models/labels`
+returns `"warnings": [...]`, one per card whose assigned engines together exceed it. One durable job fetches, in order, the engine build the model needs
 (`gpu_backend`, else the first assigned label's setting, else detection; `note` explains a
 CPU fallback or a missing build), the projector, then the model, then assigns the labels.
 Downloads resume (HTTP Range into `~/.jarvis/models/.partial/`, sha256 state saved every

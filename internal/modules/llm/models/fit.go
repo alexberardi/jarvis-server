@@ -1,6 +1,9 @@
 package models
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
 )
 
@@ -18,6 +21,20 @@ type Fit struct {
 	DeviceMB   int64  `json:"device_mb,omitempty"`
 	FreeMB     int64  `json:"free_mb,omitempty"`
 	KVEstimate bool   `json:"kv_estimated"` // true when the KV size is a guess
+	// CommittedMB is what engines already assigned to that card need, and Alongside names
+	// their labels: the verdict is for this model next to them, not on an empty card.
+	CommittedMB int64    `json:"committed_mb,omitempty"`
+	Alongside   []string `json:"alongside,omitempty"`
+}
+
+// Resident is GPU memory an assigned local engine already needs. Labels sharing one engine
+// (same model, context and devices) are one resident.
+type Resident struct {
+	Labels   []string `json:"labels"`
+	Model    string   `json:"model"`
+	NeededMB int64    `json:"needed_mb"`
+	// Devices are backend device indexes; empty means the largest card (the engine default).
+	Devices []int `json:"devices,omitempty"`
 }
 
 const mb = 1 << 20
@@ -27,8 +44,9 @@ func estimateNeed(kind string, weights, kvPerTok int64, ctx int) (int64, bool) {
 	guessed := false
 	switch kind {
 	case engine.ModelSTT:
-		// whisper: weights plus encoder/decoder buffers.
-		return weights + weights/4 + 200*mb, false
+		// whisper: weights plus encoder/decoder buffers and the CUDA context (small.en: 466 MB
+		// of weights measured 1056 MB in whisper-server on a 3080 Ti).
+		return weights + weights/4 + 500*mb, false
 	case engine.ModelEmbedding, engine.ModelMMProj:
 		return weights + 100*mb, false
 	}
@@ -41,8 +59,15 @@ func estimateNeed(kind string, weights, kvPerTok int64, ctx int) (int64, bool) {
 	return weights + kvPerTok*int64(ctx) + weights*3/100 + 600*mb, guessed
 }
 
-// FitFor estimates a model of weights bytes (plus projector) at ctx on hw.
+// FitFor estimates a model of weights bytes (plus projector) at ctx on an otherwise empty hw.
 func FitFor(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx int) Fit {
+	return FitAlongside(hw, kind, weights, kvPerTok, ctx, nil)
+}
+
+// FitAlongside estimates a model next to the residents: each card's usable memory is reduced
+// by what the residents placed on it need, and the model is judged on the card with the most
+// left.
+func FitAlongside(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx int, residents []Resident) Fit {
 	if ctx <= 0 {
 		ctx = 8192
 	}
@@ -57,15 +82,32 @@ func FitFor(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx int) F
 		f.Verdict = "cpu"
 		return f
 	}
+	committed := map[int]int64{}
+	labels := map[int][]string{}
+	for _, r := range residents {
+		on := r.Devices
+		if len(on) == 0 {
+			on = []int{devs[0].Index}
+		}
+		for _, i := range on {
+			committed[i] += r.NeededMB / int64(len(on))
+			labels[i] = append(labels[i], r.Labels...)
+		}
+	}
+	left := func(d engine.Device) int64 { return d.TotalMB*95/100 - committed[d.Index] }
 	best := devs[0]
-	f.Device, f.DeviceMB, f.FreeMB = best.Name, best.TotalMB, best.FreeMB
-	usable := best.TotalMB * 95 / 100
 	var total int64
 	for _, d := range devs {
-		total += d.TotalMB * 95 / 100
+		if left(d) > left(best) {
+			best = d
+		}
+		total += max(left(d), 0)
 	}
+	f.Device, f.DeviceMB, f.FreeMB = best.Name, best.TotalMB, best.FreeMB
+	f.CommittedMB, f.Alongside = committed[best.Index], labels[best.Index]
+	usable := left(best)
 	switch {
-	case f.NeededMB <= usable*9/10:
+	case f.NeededMB <= usable-(best.TotalMB*95/100)/10:
 		f.Verdict = "fits"
 	case f.NeededMB <= usable:
 		f.Verdict = "tight"
@@ -79,11 +121,46 @@ func FitFor(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx int) F
 
 // EntryFit estimates a catalog entry (with its projector) at its default context.
 func EntryFit(hw engine.Hardware, e Entry) Fit {
+	return entryFitAlongside(hw, e, nil)
+}
+
+func entryFitAlongside(hw engine.Hardware, e Entry, residents []Resident) Fit {
 	w := e.Size
 	if e.MMProj != "" {
 		if p, ok := CatalogEntry(e.MMProj); ok {
 			w += p.Size
 		}
 	}
-	return FitFor(hw, e.Kind, w, e.KVBytesPerTok, e.ContextDefault)
+	return FitAlongside(hw, e.Kind, w, e.KVBytesPerTok, e.ContextDefault, residents)
+}
+
+// Overcommitted warns, per card, when the assigned engines together need more than it has
+// (they would crash-loop on out-of-memory). Empty when everything fits.
+func Overcommitted(hw engine.Hardware, residents []Resident) []string {
+	devs := hw.Discrete(hw.Flavour)
+	if hw.Flavour == engine.FlavourCPU || len(devs) == 0 {
+		return []string{}
+	}
+	out := []string{}
+	for _, d := range devs {
+		var need int64
+		var labels []string
+		for _, r := range residents {
+			on := r.Devices
+			if len(on) == 0 {
+				on = []int{devs[0].Index}
+			}
+			for _, i := range on {
+				if i == d.Index {
+					need += r.NeededMB / int64(len(on))
+					labels = append(labels, r.Labels...)
+				}
+			}
+		}
+		if usable := d.TotalMB * 95 / 100; need > usable {
+			out = append(out, fmt.Sprintf("%s (%s, %d MB): %s need about %d MB together; move one to another card, "+
+				"lower its context, or pick a smaller model", d.ID, d.Name, d.TotalMB, strings.Join(labels, ", "), need))
+		}
+	}
+	return out
 }
