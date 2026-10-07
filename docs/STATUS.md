@@ -140,6 +140,8 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Node-side changes: accept inline `details.routine`, report Pantry routines, stop local default seeding (EXTERNAL-CHANGES).
   - Signals' own `report_tools` probe duplicates `nodetools.go`; errands' autorun resolver duplicates `cc/stepvalues` (dormant): unify.
   - ~~cc race tests take ~7 min~~: that was CPU contention with parallel agents; alone they take ~55 s.
+  - errands race tests failed once when run alongside the cc race tests (CPU contention); 6 solo `-race -count` runs passed. Likely a timing-sensitive test: find it if it recurs.
+  - **Errands on Qwen3-8B (2026-10-07)**: thinking exceeded legacy's 6000-token cap → `errands.planner_max_tokens` (default 12000; first measured plan used 1601 tokens/14 s) + one no-thinking retry on an empty finish=length. Plans are now cut at the first `request_replan` checkpoint (the model put "set a timer" after "is it raining?" and it ran on a clear day; legacy kept post-checkpoint steps).
   - One cc test run hung once (binary idle ~2 min, after the 5d merges); 8 uncached runs since passed. If it recurs, run `go test -v -timeout 90s ./internal/modules/cc/` to name the test (suspect: something waiting on the network).
   - Smaller: directed signal cards household-wide (legacy); automation dedup TTLs chosen by the agent; phone caps counted in UTC; phone gate-off cancel is lazy (25 s heartbeat).
 - **Next:** 5d (mobile surface: chat SSE, callbacks plane, inbox, settings screens, voice-profile V1/V6), then Phase 6 (admin absorb, installers running `jarvisd doctor`). Test 5c by voice on jarvis-dev as it's used.
