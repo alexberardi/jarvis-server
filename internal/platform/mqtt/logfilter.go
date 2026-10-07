@@ -3,7 +3,6 @@ package mqtt
 import (
 	"context"
 	"log/slog"
-	"strings"
 )
 
 // connLogHandler tidies one mochi log line. mochi's TCP listener logs every connection that
@@ -23,9 +22,7 @@ func (h connLogHandler) Handle(ctx context.Context, r slog.Record) error {
 		hangUp := false
 		r.Attrs(func(a slog.Attr) bool {
 			if a.Key == "error" {
-				s := a.Value.String()
-				hangUp = strings.HasSuffix(s, "EOF") || strings.Contains(s, "use of closed network connection") ||
-					strings.Contains(s, "connection reset by peer")
+				hangUp = isHangUpText(a.Value.String())
 			}
 			return true
 		})
