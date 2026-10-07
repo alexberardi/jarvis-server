@@ -33,7 +33,7 @@ export default function SystemInfoBar() {
         {data.hostname} &middot; {platform}
       </div>
       <div title={listenerTitle || undefined}>
-        jarvisd v{data.version} &middot; up {formatUptime(data.uptime)}
+        jarvisd {/^\d/.test(data.version) ? `v${data.version}` : data.version} &middot; up {formatUptime(data.uptime)}
         {served.length > 0 && <> &middot; {served.length} listeners</>}
       </div>
     </div>
