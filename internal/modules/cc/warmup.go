@@ -199,6 +199,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	if nc := req.NodeContext; nc != nil {
 		if tz, ok := nc.Get("timezone"); ok {
 			conv.timezone, _ = tz.(string)
+			m.recordNodeTimezone(ctx, n.ID, conv.timezone)
 		}
 		if a, ok := nc.Get("agents"); ok {
 			conv.agents, _ = a.(*pyjson.Object)

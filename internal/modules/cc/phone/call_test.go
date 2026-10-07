@@ -437,6 +437,8 @@ func TestMaxCallSecondsHangsUp(t *testing.T) {
 	sim.send(map[string]any{"event": "stop"}) // what Twilio does after a REST hang-up
 	sim.expectClosed()
 	s := e.waitState(t, id, StateDone)
+	// The outcome card is posted just after the terminal state lands.
+	waitFor(t, "outcome card", func() bool { return len(e.notify.titled("⚠️ Call finished: Tony's Pizzeria")) > 0 })
 	if c := e.notify.titled("⚠️ Call finished: Tony's Pizzeria"); len(c) != 1 || s.Duration == nil {
 		t.Fatalf("outcome: %v", e.notify.all())
 	}

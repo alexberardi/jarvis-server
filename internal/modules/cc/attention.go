@@ -28,9 +28,6 @@ import (
 
 // HouseholdTimezone resolves a household's IANA zone (quiet hours, the budgets' local day and
 // the journal cron, D18). Nil, "" or an unknown zone mean UTC.
-type HouseholdTimezone interface {
-	HouseholdTimezone(ctx context.Context, householdID string) string
-}
 
 const (
 	attentionCleanupJob = "cc.attention_cleanup"
@@ -69,11 +66,9 @@ func fallbackDedupeKey(title string) string {
 type attentionBroker struct{ m *Module }
 
 func (m *Module) householdLocation(ctx context.Context, hh string) *time.Location {
-	if m.HouseholdClock != nil {
-		if tz := m.HouseholdClock.HouseholdTimezone(ctx, hh); tz != "" {
-			if loc, err := time.LoadLocation(tz); err == nil {
-				return loc
-			}
+	if tz := m.householdTimezone(ctx, hh); tz != "" {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			return loc
 		}
 	}
 	return time.UTC

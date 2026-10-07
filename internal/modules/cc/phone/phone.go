@@ -98,6 +98,9 @@ type CallSnapshot struct {
 	HouseholdID  string
 	UserID       *int64
 	OutcomeJSON  string
+	// ConfirmedAt is when the user confirmed the call card (zero while it is a draft); the
+	// errand's phone deadline runs from it (D40 09.Q6).
+	ConfirmedAt time.Time
 }
 
 // Options are the bootstrap/secret values (env, never the settings DB: the telephony

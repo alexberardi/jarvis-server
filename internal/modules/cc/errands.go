@@ -3,9 +3,11 @@ package cc
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
@@ -18,10 +20,17 @@ import (
 // registerErrands builds the errand runner (after settings and the Bus exist) and installs its
 // queue jobs.
 func (m *Module) registerErrands() {
+	phoneCalls, schedules := m.ErrandPhone, m.ErrandSchedules
+	if phoneCalls == nil {
+		phoneCalls = errandPhone{m}
+	}
+	if schedules == nil {
+		schedules = errandSchedules{m}
+	}
 	s := &errands.Service{
 		DB: m.deps.DB, Log: m.deps.Log, LLM: m.LLM, Tools: m.tools, Settings: m.settings,
-		Nodes: errandNodes{m}, Cards: errandCards{m}, Phone: m.ErrandPhone, Schedules: m.ErrandSchedules,
-		Timezone: m.HouseholdTZ, Now: m.now,
+		Nodes: errandNodes{m}, Cards: errandCards{m}, Phone: phoneCalls, Schedules: schedules,
+		Timezone: m.householdTimezone, Now: m.now,
 	}
 	if m.deps.Queue != nil {
 		s.Register(m.deps.Queue)
@@ -29,6 +38,86 @@ func (m *Module) registerErrands() {
 		s.Init()
 	}
 	m.errands = s
+	// A due errand schedule (doc 08) drafts the plan; a linked call's terminal transition
+	// (doc 11) resumes the run.
+	m.rt.scheduleFire = func(ctx context.Context, sch ScheduledErrand) error {
+		return s.DraftErrand(ctx, errands.DraftRequest{HouseholdID: sch.HouseholdID, NodeID: sch.NodeID,
+			UserID: sch.UserID, Goal: sch.Intent})
+	}
+	if m.phone != nil && m.phone.Errands == nil {
+		m.phone.Errands = phoneErrandHook{m}
+	}
+}
+
+// errandSchedules is doc 08's schedule store as errands see it.
+type errandSchedules struct{ m *Module }
+
+func (a errandSchedules) CreateSchedule(ctx context.Context, s errands.NewSchedule) (string, error) {
+	return a.m.CreateSchedule(ctx, NewSchedule(s))
+}
+
+func (a errandSchedules) PostListCard(ctx context.Context, hh string, userID *int64) (int, error) {
+	n, _, err := a.m.postScheduleListCard(ctx, hh, userID)
+	return n, err
+}
+
+// errandPhone is doc 11's phone service as errands see it.
+type errandPhone struct{ m *Module }
+
+func (a errandPhone) Enabled(ctx context.Context, hh string) bool {
+	return a.m.phone != nil && a.m.phone.Enabled(ctx, hh)
+}
+
+func (a errandPhone) PlaceErrandCall(ctx context.Context, c errands.ErrandCall) (string, error) {
+	if a.m.phone == nil {
+		return "", errors.New("phone calls are not available")
+	}
+	step := int64(c.Step)
+	id := a.m.phone.CreatePlan(ctx, phone.PlanRequest{Business: c.Business, Goal: c.Goal, HouseholdID: c.HouseholdID,
+		UserID: c.UserID, ErrandID: c.WorkflowID, ErrandStep: &step, PriorContext: c.PriorContext})
+	if id == "" {
+		return "", errors.New("the call could not be drafted")
+	}
+	return id, nil
+}
+
+func (a errandPhone) CallStatus(ctx context.Context, sessionID string) (errands.CallOutcome, bool, error) {
+	if a.m.phone == nil {
+		return errands.CallOutcome{}, false, nil
+	}
+	snap, ok, err := a.m.phone.Snapshot(ctx, sessionID)
+	if !ok || err != nil {
+		return errands.CallOutcome{}, ok, err
+	}
+	return callOutcome(snap), true, nil
+}
+
+func (a errandPhone) DeclineErrandCalls(ctx context.Context, workflowID string) (bool, error) {
+	if a.m.phone == nil {
+		return false, nil
+	}
+	return a.m.phone.DeclineErrand(ctx, workflowID)
+}
+
+// phoneErrandHook resumes the errand a terminal call belongs to.
+type phoneErrandHook struct{ m *Module }
+
+func (h phoneErrandHook) CallTerminal(ctx context.Context, snap phone.CallSnapshot) {
+	if h.m.errands == nil {
+		return
+	}
+	if err := h.m.errands.OnCallTerminal(ctx, callOutcome(snap)); err != nil {
+		h.m.deps.Log.Warn("cc: errand resume after call failed", "session", snap.SessionID, "err", err)
+	}
+}
+
+func callOutcome(s phone.CallSnapshot) errands.CallOutcome {
+	o := errands.CallOutcome{SessionID: s.SessionID, WorkflowID: s.ErrandID, State: s.State,
+		ContactName: s.ContactName, ErrorMessage: s.ErrorMessage, OutcomeJSON: s.OutcomeJSON, ConfirmedAt: s.ConfirmedAt}
+	if s.ErrandStep != nil {
+		o.Step = int(*s.ErrandStep)
+	}
+	return o
 }
 
 // Errands is the errand runner (valid after Register): the phone module calls

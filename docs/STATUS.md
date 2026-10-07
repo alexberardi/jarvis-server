@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 5 (command-center) — Phases 1–4 done (whisper CI builds finishing) — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
+## Current phase: 5 (command-center) — 5a/5b/5c done, 5d (mobile surface) next — Phases 1–4 done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
 
 ### Phase 0 checklist
 
@@ -77,6 +77,11 @@ Update it at the end of every working session, and whenever a task finishes or a
 | 2026-10-06 | **Speaker-ID threshold for ERes2Net: 0.43** (D33 calibration). One real speaker (user, 14 clips from the jarvis-dev Seeed mic: 3 enrollment lines, 8 near + 3 far commands) vs 684 impostors (LibriSpeech 40 speakers + 28 Kokoro voices saying commands): genuine min 0.475 (far), median 0.603; impostor max 0.387 (TTS max 0.326). Zero errors anywhere in 0.40–0.45; 0.43 is the midpoint. Caveat: impostors are not same-room household members; the margin gate covers multi-member homes, and the setting stays tunable. Recording kept locally (spikes/, not in the public repo). Re-check once more household voices are enrolled. |
 | 2026-10-06 | **D9: jarvis-admin is absorbed into the monorepo** (SPA embedded in jarvisd, backend to Go endpoints; old repo retired). Client-side changes (node-setup, mobile, recipes) go on branches with PRs for user review. Phone: built against a fake Twilio; first real call at prod cutover unless a dev Twilio number appears. |
 
+| 2026-10-07 | **Cron DST on the wall clock** (routines port; kept by the coordinator, flag to user): a time skipped by spring-forward fires once at the first valid instant after it; a time repeated by fall-back fires once, on its first occurrence. Applies to every cron trigger. |
+| 2026-10-07 | **Out-of-order migrations are applied** (goose `WithAllowOutofOrder`): sub-systems land in parallel and a fix may slot below a later release's migration; each module's migrations are independent. |
+| 2026-10-07 | **Household timezone = the zone its most recently seen active node reported** (`cc_nodes.timezone`, migration 00140, recorded at warmup from `node_context.timezone`); `Module.HouseholdClock` overrides. Used by attention quiet hours/journal (D18) and errands. Nothing stored a household zone before. |
+| 2026-10-07 | **VRAM fit counts co-resident engines and other programs; warn, never refuse.** `jarvisd doctor` reads the host firewall and prints the allow command. |
+
 ## Session log
 
 - **2026-10-06:**
@@ -117,4 +122,22 @@ Update it at the end of every working session, and whenever a task finishes or a
     5. Factory reset clears the node's Wi-Fi credentials; registration timed out until the node rejoined the LAN, then succeeded on retry.
   - Process lesson: a background agent checked out a branch in the shared working tree and 9 commits landed there; moved back to main. Future agents that need git branches work in their own `git worktree`.
 - **Deferred to a follow-up session (user, 2026-10-07):** permanent jarvis-dev PulseAudio fix (finding 4), investigated together with the other install-UX follow-ups above.
-- **Next:** 5c (memory, errands, phone, signals, routines, packages, smart home) and 5d (mobile surface), driven by real use on jarvis-dev. Remaining 404s from the node today: `/nodes/{id}/routines`, `/node/devices` (5c).
+- **2026-10-07 (cont.): Phase 5c done.** Seven sub-systems ported by parallel agents in worktrees, merged onto main by the coordinator (all cc tests + race green):
+  - **doc 12 packages:** install/uninstall/revert (5 min pickup, verify + 15 min, D39), command-data browser, node tools view; Forge test install dropped (D5). `pantry.base_url` reaches nodes (`pantry_url` in payload/verify) and `/services` (`jarvis-pantry`, synced at startup).
+  - **doc 07 smart home:** rooms, devices (`/node/devices` fixed on jarvis-dev), control/state, scans, device lists, Bluetooth, OAuth (exchange URL fenced: https+public, or LAN-not-loopback; no allow-list setting yet), camera stubs (D29). `control_device` cut (D9/M7).
+  - **doc 04 memory:** CRUD, remember/recall/forget, extraction job on background label, model-tagged vectors + re-embed sweep (LD6, migration 00090), User Profile (D43), D20 purge, `PurgeUserHousehold` ready for a leave hook.
+  - **doc 08 routines/schedules:** CRUD + node pull (`/nodes/{id}/routines` fixed), run-now (~60 s wait), one trigger per scheduled routine, errand schedules with claim/re-arm, lazy once-per-household default seeding (D44, migration 00080 `cc_routine_seeds`). Pure `cc/timewindow` + `cc/stepvalues`.
+  - **doc 10 signals/attention:** `/signals`, presence, automations (server-side actions, opaque card ids), proposals + suppressions, attention broker (dedupe, safety bypass, budgets, quiet hours) wired as `m.Attention`, per-household journal trigger. Situation matcher cut (D17).
+  - **doc 11 phone (D16 gateway absorbed):** phonebook, call context, `make_phone_call`, Twilio Media Streams WS (`/phone/media/{token}`, signature-checked), live call loop in process, reaper, caps/DNC. Never called real Twilio (first real call at cutover). Env: `TWILIO_*`, `JARVIS_PHONE_PUBLIC_URL`.
+  - **doc 09 errands:** planner/engine on the queue, pause-and-replan with envelope check (D14/D15), deadlines as delayed jobs, restart recovery, run_errand/schedule_errand/list_scheduled_errands. Wired to schedules (fire → DraftErrand), phone (CreatePlan/Snapshot/DeclineErrand, terminal hook) and the household timezone.
+  - Fixes found on the way: shutdown panic (log after shipper close), startup crash (logs sink before Register), out-of-order migration refusal, VRAM fit, `jarvisd doctor`.
+- **5c follow-ups / open questions:**
+  - **`POST /callbacks` (doc 13) is not ported**: card taps can't reach errands, phone `confirm_call`, signals, or `cancel_schedule` until 5d builds it. Handlers exist: `Errands().Callbacks()`, `phone.Service.Callbacks()`, `SignalCallback`, `CancelScheduleTap`. Signals' dispatcher step F also needs doc 13's node callback routes.
+  - D20 per-household leave hook in auth (memory's `PurgeUserHousehold` ready; others to add).
+  - Superuser on a no-household node: packages deny (D40 Q5), older node routes allow; unify.
+  - Node-side changes: accept inline `details.routine`, report Pantry routines, stop local default seeding (EXTERNAL-CHANGES).
+  - Signals' own `report_tools` probe duplicates `nodetools.go`; errands' autorun resolver duplicates `cc/stepvalues` (dormant): unify.
+  - `ambient_context` render: `SignalContext(ctx, hh)` exposed, not yet in the prompt.
+  - cc race tests now take ~7 min (signals' real-broker tests?): profile.
+  - Smaller: directed signal cards household-wide (legacy); automation dedup TTLs chosen by the agent; phone caps counted in UTC; phone gate-off cancel is lazy (25 s heartbeat).
+- **Next:** 5d (mobile surface: chat SSE, callbacks plane, inbox, settings screens, voice-profile V1/V6), then Phase 6 (admin absorb, installers running `jarvisd doctor`). Test 5c by voice on jarvis-dev as it's used.

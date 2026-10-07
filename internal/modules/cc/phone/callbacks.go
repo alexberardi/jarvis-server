@@ -181,8 +181,5 @@ func (s *Service) resumeErrand(ctx context.Context, sess *Session) {
 	if err != nil {
 		cur = sess
 	}
-	snap := CallSnapshot{SessionID: cur.ID, ErrandID: cur.ErrandID, ErrandStep: cur.ErrandStep, State: cur.State,
-		ContactName: cur.ContactName, ErrorMessage: cur.ErrorMessage, HouseholdID: cur.HouseholdID,
-		UserID: cur.UserID, OutcomeJSON: cur.OutcomeJSON}
-	go s.Errands.CallTerminal(context.WithoutCancel(ctx), snap)
+	go s.Errands.CallTerminal(context.WithoutCancel(ctx), snapshotOf(cur))
 }

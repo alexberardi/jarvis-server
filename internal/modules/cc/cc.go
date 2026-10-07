@@ -113,7 +113,8 @@ type Module struct {
 	// Memory and Attention are 5c hooks (nil until those modules exist).
 	Memory    MemoryProfile
 	Attention AttentionGate // nil: Register wires the 5c broker (attention.go)
-	// HouseholdClock gives a household's timezone to the attention broker (D18). Nil: UTC.
+	// HouseholdClock overrides the household timezone (default: the zone its most recently seen
+	// node reported, timezone.go). Used by attention (D18) and errands.
 	HouseholdClock HouseholdTimezone
 	// WebSearch replaces DuckDuckGo for quick_search / deep_research (tests).
 	WebSearch servertools.WebSearcher
@@ -123,12 +124,10 @@ type Module struct {
 	// Phone configures phone calls (5c, docs/cc/11; phone_wire.go).
 	Phone PhoneConfig
 
-	// 5c errand hooks (docs/cc/09): the phone module (doc 11) and the schedules store (doc 08);
-	// nil leaves calls / scheduling unavailable to errands. HouseholdTZ is the household's IANA
-	// zone (D18; nil or "" = UTC).
+	// 5c errand hooks (docs/cc/09): default to the module's own phone service (doc 11) and
+	// schedules store (doc 08); tests replace them.
 	ErrandPhone     errands.PhoneCalls
 	ErrandSchedules errands.Schedules
-	HouseholdTZ     func(ctx context.Context, householdID string) string
 
 	deps     module.Deps
 	settings *settings.Service
