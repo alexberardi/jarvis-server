@@ -189,7 +189,7 @@ func (m *Module) send(ctx context.Context, tx *sql.Tx, source string, n Notifica
 		d, err := logRow("skipped", 0)
 		return d, false, err
 	}
-	if m.relay.url == "" || m.deps.Queue == nil {
+	if m.relayURL(ctx) == "" || m.deps.Queue == nil {
 		// Legacy: with no RELAY_URL every result was "skipped" and so was the row.
 		d, err := logRow("skipped", len(tokens))
 		return d, false, err
@@ -336,15 +336,28 @@ func (m *Module) stillActive(ctx context.Context, tokens []string) ([]string, er
 //	POST {url}/v1/send  Authorization: Bearer <jwt>, X-Household-Id
 //	     {"tokens", "title", "body", "data", "priority"} → {"results": [{status, error?, token?}]}
 type relayClient struct {
-	url       string
+	url       func(context.Context) string // read per push, so a settings change applies at once
 	pinnedJWT string
 	http      *http.Client
 
-	mu    sync.Mutex
-	cache map[string]string // household id → JWT (process-local, like before)
+	mu      sync.Mutex
+	cache   map[string]string // household id → JWT (process-local, like before)
+	cacheOf string            // the relay the cached JWTs came from
 }
 
-func (c *relayClient) jwt(ctx context.Context, household string, refresh bool) (string, error) {
+// base returns the relay in effect, dropping cached JWTs when it changed (they were issued by
+// another relay).
+func (c *relayClient) base(ctx context.Context) string {
+	u := c.url(ctx)
+	c.mu.Lock()
+	if u != c.cacheOf {
+		c.cache, c.cacheOf = map[string]string{}, u
+	}
+	c.mu.Unlock()
+	return u
+}
+
+func (c *relayClient) jwt(ctx context.Context, base, household string, refresh bool) (string, error) {
 	if !refresh {
 		if c.pinnedJWT != "" {
 			return c.pinnedJWT, nil
@@ -359,7 +372,7 @@ func (c *relayClient) jwt(ctx context.Context, household string, refresh bool) (
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"household_id": household})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/v1/register", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/register", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -384,10 +397,10 @@ func (c *relayClient) jwt(ctx context.Context, household string, refresh bool) (
 	return out.JWT, nil
 }
 
-func (c *relayClient) post(ctx context.Context, jwt, household string, payload []byte) (int, []byte, error) {
+func (c *relayClient) post(ctx context.Context, base, jwt, household string, payload []byte) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/v1/send", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/send", bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -413,10 +426,11 @@ func (c *relayClient) deliver(ctx context.Context, tokens []string, p pushJob) (
 		}
 		return out
 	}
-	if c.url == "" {
+	base := c.base(ctx)
+	if base == "" {
 		return all("skipped", ""), nil
 	}
-	jwt, err := c.jwt(ctx, p.HouseholdID, false)
+	jwt, err := c.jwt(ctx, base, p.HouseholdID, false)
 	if err != nil {
 		// Legacy reported "skipped" and dropped the push; here it is a retried failure.
 		return all("error", "relay_register_failed"), fmt.Errorf("relay: no JWT for household %s: %w", p.HouseholdID, err)
@@ -427,13 +441,13 @@ func (c *relayClient) deliver(ctx context.Context, tokens []string, p pushJob) (
 	}
 	payload, _ := json.Marshal(map[string]any{"tokens": tokens, "title": p.Title, "body": p.Body, "data": data, "priority": p.Priority})
 
-	status, body, err := c.post(ctx, jwt, p.HouseholdID, payload)
+	status, body, err := c.post(ctx, base, jwt, p.HouseholdID, payload)
 	if err == nil && status == http.StatusUnauthorized {
 		// The cached or pinned JWT went stale: register again and retry once.
-		if jwt, err = c.jwt(ctx, p.HouseholdID, true); err != nil {
+		if jwt, err = c.jwt(ctx, base, p.HouseholdID, true); err != nil {
 			return all("error", "relay_http_401"), nil
 		}
-		status, body, err = c.post(ctx, jwt, p.HouseholdID, payload)
+		status, body, err = c.post(ctx, base, jwt, p.HouseholdID, payload)
 	}
 	if err != nil {
 		return all("error", "relay_unreachable"), fmt.Errorf("relay unreachable: %w", err)

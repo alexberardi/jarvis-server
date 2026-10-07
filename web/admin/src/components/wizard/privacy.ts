@@ -99,3 +99,16 @@ export function privacyChanges(current: PrivacyValues, chosen: PrivacyValues): {
     value: chosen[privacyId(t)],
   }))
 }
+
+/** The project's push relay (the legacy installer's default), offered when push is turned on. */
+export const DEFAULT_RELAY_URL = 'https://relay.jarvisautomation.io'
+
+/**
+ * relayChange is the notifications relay.url write for the push toggle, or null when nothing
+ * changes. Turning it on keeps a relay already configured (e.g. a self-hosted one) and otherwise
+ * uses the project's; turning it off clears it.
+ */
+export function relayChange(current: string, on: boolean): { service: string; key: string; value: string } | null {
+  if (on === (current !== '')) return null
+  return { service: 'notifications', key: 'relay.url', value: on ? DEFAULT_RELAY_URL : '' }
+}

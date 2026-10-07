@@ -58,15 +58,16 @@ var processStart = time.Now()
 
 // displayNames label each module's card on the Settings page.
 var displayNames = map[string]string{
-	"admin":  "Admin & updates",
-	"auth":   "Accounts & sign-in",
-	"cc":     "Command center",
-	"config": "Service registry",
-	"llm":    "Language models",
-	"logs":   "Logs",
-	"ocr":    "OCR",
-	"stt":    "Speech to text",
-	"tts":    "Text to speech",
+	"admin":         "Admin & updates",
+	"auth":          "Accounts & sign-in",
+	"cc":            "Command center",
+	"config":        "Service registry",
+	"llm":           "Language models",
+	"logs":          "Logs",
+	"notifications": "Notifications",
+	"ocr":           "OCR",
+	"stt":           "Speech to text",
+	"tts":           "Text to speech",
 }
 
 // mountBFF registers the BFF routes; mountGateway calls it after setting the gate.

@@ -35,6 +35,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 //go:embed migrations/*.sql
@@ -96,8 +97,10 @@ type Module struct {
 	// AdminKey guards /api/v0/admin/* (legacy ADMIN_API_KEY, header X-Api-Key). Empty
 	// rejects every admin call.
 	AdminKey string
-	// RelayURL is the push relay (legacy RELAY_URL). Empty disables delivery: sends are logged
-	// as "skipped", as before; the inbox and tokens work regardless.
+	// RelayURL pins the push relay, overriding the relay.url setting (tests). Normally empty:
+	// the setting (env fallback RELAY_URL) decides. No relay disables delivery: sends are
+	// logged as "skipped", as before; the inbox and tokens work regardless. Off by default
+	// (ID8): the operator opts in from the setup wizard's privacy step.
 	RelayURL string
 	// RelayHouseholdJWT pins the relay JWT (legacy RELAY_HOUSEHOLD_JWT). Normally empty: the
 	// module registers each household with the relay on first push and caches the JWT.
@@ -111,11 +114,39 @@ type Module struct {
 	CleanupInterval time.Duration
 	// PushRetryDelays are the waits before each push retry (legacy 30 s, 60 s, 120 s).
 	PushRetryDelays []time.Duration
+	// SettingsRead and SettingsWrite guard the /settings routes; both nil leaves them unmounted.
+	SettingsRead, SettingsWrite settings.Guard
 
 	deps  module.Deps
 	now   func() time.Time
 	dedup *dedupCache
 	relay *relayClient
+
+	settings *settings.Service
+}
+
+// SettingRelayURL is the push relay's base URL. Every push's title and body leave the box
+// through it (to Expo), so it is empty unless the operator turns it on.
+const SettingRelayURL = "relay.url"
+
+// Definitions are the module's settings.
+var Definitions = []settings.Definition{
+	{Key: SettingRelayURL, Category: "relay", Type: settings.String, Default: "", EnvFallback: "RELAY_URL",
+		Description: "Push relay URL (e.g. https://relay.jarvisautomation.io). Push titles and bodies are sent through it to Expo. Empty disables push delivery; the inbox still works."},
+}
+
+// Settings returns the module's settings service.
+func (m *Module) Settings() *settings.Service { return m.settings }
+
+// relayURL is the relay in effect: the pinned RelayURL, else the setting.
+func (m *Module) relayURL(ctx context.Context) string {
+	if m.RelayURL != "" {
+		return strings.TrimRight(m.RelayURL, "/")
+	}
+	if m.settings == nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(m.settings.String(ctx, SettingRelayURL, settings.Scope{})), "/")
 }
 
 func (m *Module) Name() string      { return "notifications" }
@@ -141,7 +172,15 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 		client = &http.Client{}
 	}
 	m.dedup = newDedupCache()
-	m.relay = &relayClient{url: strings.TrimRight(m.RelayURL, "/"), pinnedJWT: m.RelayHouseholdJWT, http: client, cache: map[string]string{}}
+	svc, err := settings.New(deps.DB, "notifications", Definitions, deps.Log)
+	if err != nil {
+		panic(err) // static definitions
+	}
+	m.settings = svc
+	if m.SettingsRead != nil && m.SettingsWrite != nil {
+		svc.Mount(mux, m.SettingsRead, m.SettingsWrite)
+	}
+	m.relay = &relayClient{url: m.relayURL, pinnedJWT: m.RelayHouseholdJWT, http: client, cache: map[string]string{}}
 
 	mux.HandleFunc("GET /info", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"service": ServiceName})
@@ -189,6 +228,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 // Start schedules the periodic cleanup. Like the legacy loop, the first run is one interval
 // after the trigger is created.
 func (m *Module) Start(ctx context.Context) error {
+	if err := m.settings.Migrate(ctx); err != nil {
+		return err
+	}
 	if m.deps.Scheduler == nil || m.CleanupInterval < 0 {
 		return nil
 	}

@@ -55,7 +55,7 @@ func modules() []module.Module {
 		&sttmod.Module{},
 		&notifmod.Module{
 			AdminKey: os.Getenv("ADMIN_API_KEY"),
-			RelayURL: os.Getenv("RELAY_URL"),
+			// The relay is the notifications relay.url setting (env fallback RELAY_URL; ID8).
 			// Normally empty: the relay token is registered per household.
 			RelayHouseholdJWT: os.Getenv("RELAY_HOUSEHOLD_JWT"),
 		},
@@ -128,6 +128,8 @@ func modules() []module.Module {
 		case *notifmod.Module:
 			c.Auth = auth
 			c.Users = auth
+			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
+			c.SettingsWrite = superuser
 			auth.OnUserDeleted(c.PurgeUser)
 			auth.OnMemberRemoved(c.PurgeUserHousehold)
 			auth.OnHouseholdDeleted(c.PurgeHousehold)

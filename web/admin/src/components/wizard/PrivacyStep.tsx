@@ -8,7 +8,15 @@ import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import type { ServiceSettingsResult } from '@/types/settings'
 import { useQueryClient } from '@tanstack/react-query'
-import { PRIVACY_TOGGLES, privacyChanges, privacyId, readPrivacy, type PrivacyValues } from './privacy'
+import {
+  DEFAULT_RELAY_URL,
+  PRIVACY_TOGGLES,
+  privacyChanges,
+  privacyId,
+  readPrivacy,
+  relayChange,
+  type PrivacyValues,
+} from './privacy'
 
 function settingValue(services: ServiceSettingsResult[] | undefined, service: string, key: string): unknown {
   return services?.find((s) => s.service_name === service)?.settings.find((s) => s.key === key)?.value
@@ -43,7 +51,12 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
   const [current] = useState<PrivacyValues>(() => readPrivacy(services))
   const [chosen, setChosen] = useState<PrivacyValues>(() => readPrivacy(services))
   const [saving, setSaving] = useState(false)
-  const changes = privacyChanges(current, chosen)
+  const relayRaw = settingValue(services, 'notifications', 'relay.url')
+  const relayKnown = relayRaw !== undefined
+  const relay = typeof relayRaw === 'string' ? relayRaw : ''
+  const [push, setPush] = useState(relay !== '')
+  const relayWrite = relayKnown ? relayChange(relay, push) : null
+  const changes = [...privacyChanges(current, chosen), ...(relayWrite ? [relayWrite] : [])]
 
   async function save() {
     if (changes.length === 0) {
@@ -100,6 +113,18 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
         </h3>
         <p className="text-xs text-[var(--color-text-muted)]">Off unless you turn them on.</p>
         {group(true)}
+        <div className="flex items-start gap-3">
+          <Toggle id="privacy-push" checked={relayKnown && push} disabled={!relayKnown} onChange={setPush} />
+          <label htmlFor="privacy-push" className={cn('min-w-0', !relayKnown && 'opacity-60')}>
+            <span className="block text-sm font-medium text-[var(--color-text)]">Phone push notifications</span>
+            <span className="block text-xs text-[var(--color-text-muted)]">
+              Each notification's title and text go through a push relay (
+              <code className="break-all">{relay || DEFAULT_RELAY_URL}</code>) to Apple or Google so phones get them.
+              Off: notifications stay in the app's inbox.
+              {!relayKnown && ' (Not available in this jarvisd version.)'}
+            </span>
+          </label>
+        </div>
       </section>
 
       <section className="space-y-2">
@@ -113,11 +138,6 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
         <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
           <Info size={14} /> Also good to know
         </h3>
-        <p>
-          <strong className="text-[var(--color-text)]">Phone notifications</strong> go through a push relay only when
-          jarvisd is started with one (<code>RELAY_URL</code> in <code>jarvisd.env</code>); the relay then sees each
-          notification's text. Without it, notifications stay in the app's inbox.
-        </p>
         <p>
           <strong className="text-[var(--color-text)]">Command packages</strong> are browsed and installed from the Pantry
           {typeof pantry === 'string' && pantry ? (

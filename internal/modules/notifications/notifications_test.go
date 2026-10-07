@@ -25,6 +25,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 type fakeAuth struct{}
@@ -100,6 +101,9 @@ func setup(t *testing.T, opts ...opt) *env {
 	}
 	mux := http.NewServeMux()
 	m.Register(mux, module.Deps{DB: d, Log: log, Queue: q, Scheduler: scheduler.New(d, q, log)})
+	if err := m.settings.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
 	q.Start(ctx)
 	return &env{m: m, h: mux, d: d, q: q, ctx: ctx}
 }
@@ -867,5 +871,60 @@ func TestStartSchedulesCleanup(t *testing.T) {
 	}
 	if _, err := e2.m.deps.Scheduler.Status(e2.ctx, cleanupJobType); err == nil {
 		t.Fatal("disabled cleanup was scheduled")
+	}
+}
+
+// ID8: the relay is the relay.url setting (env fallback RELAY_URL), read per push, so turning
+// it on in the wizard needs no restart; switching relays drops JWTs the old one issued.
+func TestRelayFromSetting(t *testing.T) {
+	a, b := newRelay(t), newRelay(t)
+	e := setup(t)
+	e.registerToken(t, 1, "hh1", "tok-a")
+	n := 0
+	send := func(want string) Delivery {
+		t.Helper()
+		n++ // distinct titles: identical pushes are deduplicated
+		v := asObj(e.json(t, 200, "POST", "/api/v0/notify", notify("user", "1", "t"+strconv.Itoa(n)), appH...))
+		if v["delivery_status"] != want {
+			t.Fatalf("status %v, want %s", v, want)
+		}
+		if want == "skipped" {
+			return Delivery{}
+		}
+		return e.logRow(t, v["id"].(string))
+	}
+	send("skipped") // off by default
+	set := func(v any) {
+		t.Helper()
+		if err := e.m.Settings().Set(e.ctx, SettingRelayURL, v, settings.Scope{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(a.srv.URL + "/")
+	if d := send("pending"); d.DeliveryStatus != "delivered" || a.count() != 1 {
+		t.Fatalf("relay a: %+v sends=%d", d, a.count())
+	}
+	set(b.srv.URL)
+	if d := send("pending"); d.DeliveryStatus != "delivered" || b.count() != 1 || b.registers.Load() != 1 {
+		t.Fatalf("relay b: %+v sends=%d registers=%d", d, b.count(), b.registers.Load())
+	}
+	b.mu.Lock()
+	auth := b.auth[0]
+	b.mu.Unlock()
+	if auth != "Bearer jwt-hh1-1|hh1" {
+		t.Fatalf("relay b used a JWT from relay a: %s", auth)
+	}
+	set("")
+	send("skipped")
+}
+
+func TestRelayEnvFallback(t *testing.T) {
+	rl := newRelay(t)
+	t.Setenv("RELAY_URL", rl.srv.URL)
+	e := setup(t)
+	e.registerToken(t, 1, "hh1", "tok-a")
+	v := asObj(e.json(t, 200, "POST", "/api/v0/notify", notify("user", "1", "t"), appH...))
+	if d := e.logRow(t, v["id"].(string)); d.DeliveryStatus != "delivered" || rl.count() != 1 {
+		t.Fatalf("env relay: %+v", d)
 	}
 }
