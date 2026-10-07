@@ -2,6 +2,9 @@ module github.com/alexberardi/jarvis-server
 
 go 1.25.14
 
+// The admin SPA's npm dependencies are not Go packages; some ship stray .go files.
+ignore ./web/admin/node_modules
+
 require (
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/ebitengine/purego v0.11.1

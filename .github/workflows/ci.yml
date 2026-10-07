@@ -29,6 +29,31 @@ jobs:
       - name: Unit tests (race)
         run: CGO_ENABLED=1 go test -race ./...
 
+  # The admin SPA (web/admin). The Go jobs don't need it: without a build they embed the
+  # placeholder page. The bundle is platform-independent, so it is built once here.
+  admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/admin/.nvmrc
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b
+      - run: npx vitest run
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: admin-ui
+          path: web/admin/dist/ui
+          if-no-files-found: error
+
   # Load the embedded native libraries via purego and run real models on each OS.
   native-voice:
     strategy:

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jarvis Admin</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; }
+      code { background: #8882; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Jarvis Admin</h1>
+    <p>
+      admin UI not built — run <code>make admin</code> or
+      <code>npm --prefix web/admin ci &amp;&amp; npm --prefix web/admin run build</code>,
+      then rebuild jarvisd.
+    </p>
+    <p>
+      To serve a built UI from disk without rebuilding jarvisd, set
+      <code>JARVIS_ADMIN_UI_DIR=web/admin/dist/ui</code>.
+    </p>
+  </body>
+</html>

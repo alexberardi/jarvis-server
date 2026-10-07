@@ -1,0 +1,4 @@
+# Vite output (embedded by jarvisd); only dist/placeholder.html is committed.
+/dist/ui/
+/node_modules/
+*.local
