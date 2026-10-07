@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/doctor"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/update"
@@ -25,6 +26,12 @@ import (
 // CI upgrade job serves fake releases). It can't weaken anything: the signature is still
 // checked against the keys built into the binary.
 const EnvUpdateAPI = "JARVIS_UPDATE_API"
+
+// EnvReleaseBase points `jarvisd upgrade` at a flat release directory (a URL or a local path
+// holding SHA256SUMS, SHA256SUMS.minisig and the archives) instead of the GitHub API. The install
+// scripts pass their --base-url through it when a re-run hands the upgrade over. Like
+// EnvUpdateAPI it can't weaken anything: the signature is checked with the built-in keys.
+const EnvReleaseBase = "JARVISD_RELEASE_BASE"
 
 // EnvGateTimeout bounds the post-upgrade health gate (a Go duration; default 2 minutes).
 const EnvGateTimeout = "JARVIS_UPGRADE_GATE_TIMEOUT"
@@ -113,6 +120,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		}
 	}
 	src := updateSource()
+	src.Base = os.Getenv(EnvReleaseBase)
 
 	if *check {
 		plan, err := update.Resolve(ctx, update.StageOptions{Current: current, Target: *target, AllowOlder: true, Source: src})
@@ -130,6 +138,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	mgr, st := installedService(ctx, *user)
 
 	if *rollback {
+		fwOK := runtime.GOOS == "darwin" && len(firewallFixes(ctx, cfg)) == 0
 		if m, err := update.ReadMarker(paths); err != nil {
 			return err
 		} else if m == nil {
@@ -151,7 +160,9 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 			return nil
 		}
 		fmt.Fprintln(stdout, "restarting the service")
-		return mgr.Restart(ctx)
+		err := mgr.Restart(ctx)
+		refirewall(ctx, cfg, fwOK, stdout)
+		return err
 	}
 
 	if !update.CanWrite(exe) {
@@ -191,6 +202,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	for f, s := range m.Snapshots {
 		fmt.Fprintf(stdout, "snapshot of %s: %s\n", filepath.Base(f), s)
 	}
+	fwOK := runtime.GOOS == "darwin" && len(firewallFixes(ctx, cfg)) == 0
 	fmt.Fprintf(stdout, "installing %s over %s (previous kept as %s)\n", m.To, exe, paths.Prev())
 	if _, err := update.Swap(ctx, paths, update.SwapOptions{}); err != nil {
 		_ = update.Abort(paths, err.Error())
@@ -198,9 +210,54 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	}
 	if !st.Installed {
 		fmt.Fprintf(stdout, "installed %s. Start jarvisd (jarvisd serve); if %s doesn't come up healthy it rolls back by itself.\n", m.To, m.To)
+		refirewall(ctx, cfg, fwOK, stdout)
 		return nil
 	}
-	return restartAfter(ctx, mgr, st, paths, stdout)
+	err = restartAfter(ctx, mgr, st, paths, stdout)
+	refirewall(ctx, cfg, fwOK, stdout) // after a rollback too: jarvisd.prev was copied, not renamed
+	return err
+}
+
+// firewallFixes are the doctor's firewall checks that have a fix to run, on macOS only: every
+// build is ad-hoc signed with a different signature and socketfilterfw keys its allow entry on
+// it, so a swapped binary may be blocked although its path is listed. Other firewalls match
+// ports or the program path, which a swap doesn't change.
+func firewallFixes(ctx context.Context, cfg config.Config) []doctor.Check {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	var fixes []doctor.Check
+	for _, c := range doctor.Run(ctx, doctor.Options{Ports: doctorPorts(cfg), Interfaces: cfg.MDNSInterfaces, Home: cfg.Home}) {
+		if len(c.FixCmds) > 0 {
+			fixes = append(fixes, c)
+		}
+	}
+	return fixes
+}
+
+// refirewall re-admits the swapped binary to the macOS application firewall when the binary it
+// replaced was admitted (wasOK: no firewall fix pending before the swap; a fix the operator
+// declined at install stays declined). With root it runs the doctor's firewall fix; otherwise
+// it prints the command.
+func refirewall(ctx context.Context, cfg config.Config, wasOK bool, stdout io.Writer) {
+	if !wasOK {
+		return
+	}
+	fixes := firewallFixes(ctx, cfg)
+	if len(fixes) == 0 {
+		return
+	}
+	if !doctor.Elevated() {
+		fmt.Fprintln(stdout, "the firewall no longer admits the new binary; to let nodes and phones reach it, run:")
+		for _, c := range fixes {
+			fmt.Fprintf(stdout, "  %s\n", strings.ReplaceAll(c.Fix, "\n", "\n  "))
+		}
+		return
+	}
+	fmt.Fprintln(stdout, "re-admitting the new binary to the application firewall")
+	if _, err := doctor.Apply(ctx, fixes, nil, stdout); err != nil {
+		fmt.Fprintf(stdout, "the firewall fix failed (%v); run `sudo jarvisd doctor --fix`\n", err)
+	}
 }
 
 // restartAfter restarts the installed service and waits for the upgrade's outcome. If the

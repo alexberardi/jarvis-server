@@ -69,10 +69,15 @@ func ArchiveName(tag, platform string) string {
 	return "jarvisd-" + tag + "-" + platform + ext
 }
 
-// Source reads releases from GitHub.
+// Source reads releases from GitHub, or from a flat release directory (Base).
 type Source struct {
 	// APIBase replaces https://api.github.com (tests, the CI upgrade job).
 	APIBase string
+	// Base, when set, replaces the API with a flat release directory: an http(s) or file URL,
+	// or a local path, holding SHA256SUMS, SHA256SUMS.minisig and the archives side by side
+	// (the install scripts' --base-url / JARVISD_RELEASE_BASE). The releases are read from the
+	// archive names SHA256SUMS lists; the signature is checked exactly as for GitHub's.
+	Base string
 	// Client makes the requests; nil is a 15 s client.
 	Client *http.Client
 	// UserAgent identifies the caller ("jarvisd/<version>").
@@ -126,6 +131,9 @@ func (s Source) get(ctx context.Context, path string, into any) error {
 
 // List returns the most recent releases.
 func (s Source) List(ctx context.Context) ([]Release, error) {
+	if s.Base != "" {
+		return s.flatReleases(ctx)
+	}
 	var out []Release
 	err := s.get(ctx, "/repos/"+Repo+"/releases?per_page=30", &out)
 	return out, err
@@ -133,6 +141,9 @@ func (s Source) List(ctx context.Context) ([]Release, error) {
 
 // ByTag returns one release.
 func (s Source) ByTag(ctx context.Context, tag string) (*Release, error) {
+	if s.Base != "" {
+		return s.flatByTag(ctx, tag)
+	}
 	var r Release
 	if err := s.get(ctx, "/repos/"+Repo+"/releases/tags/"+tag, &r); err != nil {
 		if errors.Is(err, ErrNoRelease) {

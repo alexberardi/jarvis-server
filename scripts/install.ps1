@@ -30,8 +30,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue' # the progress bar makes Invoke-WebRequest crawl on 5.1
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $Repo = 'alexberardi/jarvis-server'
-# The project's minisign key (key id 725ba202b54fa2c9), shared with jarvis-node-setup.
-$PubKey = if ($env:JARVISD_MINISIGN_PUBKEY) { $env:JARVISD_MINISIGN_PUBKEY } else { 'RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L' }
+# The project's minisign key, exactly jarvisd's own trust root (internal/update/key.go
+# ProjectPublicKey; a unit test keeps them equal). Not overridable.
+$PubKey = 'RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L'
 $BaseUrl = "$BaseUrl".TrimEnd('/')
 $Dir = Join-Path $env:ProgramFiles 'jarvisd'
 $Bin = Join-Path $Dir 'jarvisd.exe'
@@ -131,19 +132,42 @@ try {
     if ($Version -and $Version -ne $rel) { throw "asked for $Version but the release files are for $rel" }
     $Version = $rel
 
-    # Signature: pluggable. Checked when minisign is installed and the release is signed.
+    $cur = $null
+    if (Test-Path $Bin) {
+        $cur = (Get-NativeOutput $Bin version).Trim()
+        if (-not $cur) { $cur = 'unknown' }
+        Get-NativeOutput $Bin service status | Out-Null
+        if ($cur -eq $Version -and -not $Force -and $LASTEXITCODE -eq 0) {
+            Write-Host "jarvisd $Version is already installed and running."
+            & $Bin setup-link
+            return
+        }
+        # A jarvisd with its own upgrade takes over from here: it checks the signature itself
+        # with the key built into the installed binary (mandatory, no minisign needed), checks
+        # free disk, snapshots the database, swaps, waits for the health gate, rolls back.
+        if ($cur -ne $Version -and ((Get-NativeOutput $Bin help) -match '(?m)^  upgrade')) {
+            Write-Host "Upgrading jarvisd $cur -> $Version with jarvisd upgrade..."
+            $env:JARVISD_RELEASE_BASE = $BaseUrl
+            Invoke-Native $Bin upgrade --version $Version
+            return
+        }
+    }
+
+    # Signature, for a fresh install (or a jarvisd too old to upgrade itself): the downloaded
+    # binary can't vouch for itself, so this needs the minisign tool. With minisign installed
+    # the signature is required; without it the checksum alone, with a warning
+    # (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
     $minisign = Get-Command minisign -ErrorAction SilentlyContinue
     $sig = "$sums.minisig"
-    $signed = $false
-    if ($minisign) { try { Get-Asset 'SHA256SUMS.minisig' $sig; $signed = $true } catch { $signed = $false } }
-    if ($signed) {
+    if ($minisign) {
+        try { Get-Asset 'SHA256SUMS.minisig' $sig } catch { throw 'the release has no SHA256SUMS.minisig; not installing an unsigned release' }
         Get-NativeOutput $minisign.Source -Vq -P $PubKey -m $sums -x $sig | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'SHA256SUMS signature is INVALID; not installing' }
         Write-Host 'SHA256SUMS signature verified.'
     } elseif ($env:JARVISD_REQUIRE_SIGNATURE -eq '1') {
-        throw 'no verifiable SHA256SUMS signature (minisign missing or release unsigned)'
+        throw 'JARVISD_REQUIRE_SIGNATURE=1 but minisign is not installed'
     } else {
-        Write-Warning 'SHA256SUMS signature not checked (minisign not installed, or the release is unsigned); verifying checksums only'
+        Write-Warning 'minisign is not installed, so the release signature is not checked (checksums only); install minisign for a verified first install. Upgrades are verified by jarvisd itself.'
     }
 
     Write-Host "Downloading jarvisd $Version for windows-amd64..."
@@ -156,23 +180,7 @@ try {
     Unblock-File $new
     if ((Get-NativeOutput $new version).Trim() -ne $Version) { throw 'the downloaded jarvisd does not run here' }
 
-    $cur = $null
-    if (Test-Path $Bin) {
-        $cur = (Get-NativeOutput $Bin version).Trim()
-        Get-NativeOutput $Bin service status | Out-Null
-        if ($cur -eq $Version -and -not $Force -and $LASTEXITCODE -eq 0) {
-            Write-Host "jarvisd $Version is already installed and running."
-            & $Bin setup-link
-            return
-        }
-        # A jarvisd with its own upgrade (snapshot, health gate, rollback, signature check by
-        # the running binary's key) takes over from here.
-        if ($cur -ne $Version -and ((Get-NativeOutput $Bin help) -match '(?m)^  upgrade')) {
-            Write-Host "Upgrading jarvisd $cur -> $Version with jarvisd upgrade..."
-            $env:JARVISD_RELEASE_BASE = $BaseUrl
-            Invoke-Native $Bin upgrade --version $Version
-            return
-        }
+    if ($cur) {
         Get-NativeOutput $Bin service stop | Out-Null # releases the exe
         Copy-Item -Force $Bin $Prev
     } else {

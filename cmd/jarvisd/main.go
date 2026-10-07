@@ -239,7 +239,8 @@ commands:
   upgrade [--version vX.Y.Z [--allow-older]] [--check] [--rollback] [--bin PATH] [--user]
                    install a signed release: verify, snapshot the database, swap the binary
                    (previous kept as jarvisd.prev), restart the service, roll back if the new
-                   version doesn't come up healthy
+                   version doesn't come up healthy. JARVISD_RELEASE_BASE=URL|DIR reads a flat
+                   release directory (SHA256SUMS, its .minisig, the archives) instead of GitHub
   service install [--user] [--bin PATH] [--run-as USER] [--no-start]
   service uninstall [--user] [--purge [--yes]] [--keep-firewall]
                    remove the service and the firewall rules doctor --fix added; --purge
