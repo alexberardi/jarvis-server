@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,13 +81,26 @@ func call(t *testing.T, method, url string, body any, hdr ...string) (int, any) 
 }
 
 func TestGatewayEndToEnd(t *testing.T) {
-	base, _, _ := gatewayStack(t)
+	base, _, cfg := gatewayStack(t)
 
 	if code, out := call(t, "GET", base+"/api/auth/setup-status", nil); code != 200 || out.(map[string]any)["needs_setup"] != true {
 		t.Fatalf("setup-status: %d %v", code, out)
 	}
-	if code, _ := call(t, "POST", base+"/api/auth/setup", map[string]any{"email": "root@example.com", "password": "password1"}); code != 201 {
-		t.Fatalf("setup: %d", code)
+	// First-run setup through the gateway needs the token jarvisd wrote (AD2).
+	setup := map[string]any{"email": "root@example.com", "password": "password1"}
+	if code, _ := call(t, "POST", base+"/api/auth/setup", setup); code != 401 {
+		t.Fatalf("setup without the token: %d", code)
+	}
+	var tok []byte
+	for range 400 { // auth's Start runs once the listeners are bound
+		if b, err := os.ReadFile(authmod.SetupTokenPath(cfg.Home)); err == nil {
+			tok = b
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if code, out := call(t, "POST", base+"/api/auth/setup", setup, authmod.SetupTokenHeader, strings.TrimSpace(string(tok))); code != 201 {
+		t.Fatalf("setup: %d %v", code, out)
 	}
 	code, out := call(t, "POST", base+"/api/auth/login", map[string]any{"email": "root@example.com", "password": "password1"})
 	if code != 200 {

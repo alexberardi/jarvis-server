@@ -93,6 +93,10 @@ type Module struct {
 	TempPasswordTTL time.Duration
 	// PurgeTimeout bounds each legacy downstream purge call (5 s).
 	PurgeTimeout time.Duration
+	// OnSetupToken is told the first-run setup token at Start while no superuser exists
+	// (setuptoken.go), with the file holding it ("" without a data directory), so the
+	// operator can be shown it. Set it before serving.
+	OnSetupToken func(token, path string)
 
 	deps     module.Deps
 	settings *settings.Service
@@ -103,6 +107,9 @@ type Module struct {
 
 	keyMu sync.Mutex
 	keys  []signingKey
+
+	setupMu   sync.Mutex
+	setupHash []byte // SHA-256 of the setup token; nil once a superuser exists
 
 	hookMu         sync.Mutex
 	hooks          []UserDeletedHook
@@ -225,12 +232,13 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("GET /superuser/nodes", m.superuser(m.handleSuperNodes))
 }
 
-// Start makes sure the signing key exists before the first login needs it.
+// Start makes sure the signing key exists before the first login needs it, and prepares the
+// setup token while no superuser exists.
 func (m *Module) Start(ctx context.Context) error {
 	if _, err := m.loadKeys(ctx); err != nil {
 		return err
 	}
-	return nil
+	return m.prepareSetupToken(ctx)
 }
 
 func (m *Module) internalError(w http.ResponseWriter, err error) {

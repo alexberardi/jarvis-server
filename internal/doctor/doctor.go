@@ -187,6 +187,27 @@ func LocalLANs() []*net.IPNet {
 	return out
 }
 
+// LANAddr is this host's address on its first private IPv4 LAN (by the same rules as
+// LocalLANs), for links shown to the operator, or "" when there is none.
+func LANAddr() string {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, ifc := range ifs {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || virtualInterface(ifc.Name) {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && n.IP.IsPrivate() {
+				return n.IP.String()
+			}
+		}
+	}
+	return ""
+}
+
 // virtualInterface is a container bridge or VPN, not the LAN nodes are on.
 func virtualInterface(name string) bool {
 	for _, p := range []string{"docker", "br-", "veth", "virbr", "tailscale", "tun", "wg", "zt", "vboxnet", "vmnet", "lxc", "cni", "flannel"} {

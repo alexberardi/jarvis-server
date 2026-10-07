@@ -120,6 +120,7 @@ type registerInput struct {
 	email, password string
 	username        *string
 	inviteCode      *string
+	setupToken      *string // /auth/setup only (AD2); the header is preferred
 }
 
 func readRegister(w http.ResponseWriter, r *http.Request) (registerInput, bool) {
@@ -132,6 +133,7 @@ func readRegister(w http.ResponseWriter, r *http.Request) (registerInput, bool) 
 	in.username = b.optStr("username", 0, 0)
 	in.password, _ = b.str("password", true, 8, 255)
 	in.inviteCode = b.optStr("invite_code", 0, 0)
+	in.setupToken = b.optStr("setup_token", 0, 0)
 	return in, b.done(w)
 }
 
@@ -303,10 +305,18 @@ func (m *Module) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetup is POST /auth/setup: create the first superuser, only while none exists.
+//
+// Deviation (AD2): while no superuser exists it also needs the setup token (setuptoken.go),
+// from the X-Jarvis-Setup-Token header or a `setup_token` body field: 401 without one, 403
+// for a wrong one. Once a superuser exists it is the legacy 409 whatever the token.
 func (m *Module) handleSetup(w http.ResponseWriter, r *http.Request) {
 	in, ok := readRegister(w, r)
 	if !ok {
 		return
+	}
+	tok := r.Header.Get(SetupTokenHeader)
+	if tok == "" && in.setupToken != nil {
+		tok = *in.setupToken
 	}
 	ctx := r.Context()
 	hash, err := hashSecret(in.password)
@@ -325,6 +335,9 @@ func (m *Module) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return err
 		} else if n > 0 {
 			return fail(http.StatusConflict, "Setup already completed")
+		}
+		if err := m.checkSetupToken(tok); err != nil {
+			return err
 		}
 		if n, err := count(ctx, tx, `SELECT COUNT(*) FROM auth_users WHERE email = ?`, in.email); err != nil {
 			return err
@@ -348,6 +361,7 @@ func (m *Module) handleSetup(w http.ResponseWriter, r *http.Request) {
 		m.writeErr(w, err)
 		return
 	}
+	m.consumeSetupToken()
 	m.respondRegistered(w, r, u, hh, refresh)
 }
 

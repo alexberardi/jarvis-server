@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -214,7 +215,9 @@ func portOf(addr string) int {
 const usage = `usage: jarvisd <command>
 
 commands:
-  serve            run the server
+  serve [--no-browser]
+                   run the server; on first start it prints the admin setup link and, at a
+                   desktop, opens it (--no-browser or JARVIS_NO_BROWSER=1 to not)
   migrate status   show each module's migration state
   doctor [--json]  check that nodes and phones can reach jarvisd (listeners, host firewall)
   version          print the version
@@ -237,7 +240,14 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		fmt.Fprintln(stdout, version)
 		return nil
 	case "serve":
-		return serve(ctx)
+		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+		fs.SetOutput(stdout)
+		noBrowser := fs.Bool("no-browser", false, "don't open the setup link in a browser")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		v := os.Getenv("JARVIS_NO_BROWSER")
+		return serve(ctx, !*noBrowser && (v == "" || v == "0"))
 	case "doctor":
 		return runDoctor(ctx, args[1:], stdout)
 	case "migrate":
@@ -278,7 +288,7 @@ func openDeps(ctx context.Context) (module.Deps, error) {
 	}, nil
 }
 
-func serve(ctx context.Context) error {
+func serve(ctx context.Context, browser bool) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	deps, err := openDeps(ctx)
@@ -295,6 +305,12 @@ func serve(ctx context.Context) error {
 			deps.Log = logging.New(os.Stderr, logging.ParseLevel(os.Getenv("JARVIS_LOG_LEVEL")), shipper)
 			deps.Queue = queue.New(deps.DB, deps.Log)
 			deps.Scheduler = scheduler.New(deps.DB, deps.Queue, deps.Log)
+		}
+	}
+	for _, m := range mods {
+		if a, ok := m.(*authmod.Module); ok {
+			log, cfg := deps.Log, deps.Config
+			a.OnSetupToken = func(token, path string) { announceSetup(os.Stderr, log, cfg, token, path, browser) }
 		}
 	}
 	deps.Log.Info("starting jarvisd", "version", version, "home", deps.Config.Home)

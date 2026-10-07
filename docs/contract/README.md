@@ -217,7 +217,7 @@ nodes, active app clients, memberless households, or orphaned user-scoped settin
 | `DELETE /auth/me` | `TestAuthDeleteMe`: 401 `Incorrect password`, 409 `Cannot delete account with nodes registered to it`, 409 sole-admin-of-shared-household, then 204, after which token, refresh and login fail, the solo household's nodes are gone and the shared household survives |
 | `GET /auth/public-key` | `TestAuthPublicKey` |
 | `GET /auth/setup-status` | `TestAuthSetupStatus` |
-| `POST /auth/setup` | `TestAuthSetup`: 409 `Setup already completed` only (see below) |
+| `POST /auth/setup` | `TestAuthSetup`: 409 `Setup already completed` only (see below), also with a wrong `X-Jarvis-Setup-Token` (jarvisd AD2: the token only matters before the first superuser) |
 | `POST /auth/switch-household` | `TestAuthSwitchHousehold`: `{access_token, household_id}`, new jti, the `household_id` claim is the target; 403 `Not a member of this household` for another or nonexistent household |
 | `POST/GET /households`, `GET/PATCH/DELETE /households/{id}` | `TestAuthHouseholdsCRUD` |
 | `GET/POST /households/{id}/members`, `PATCH/DELETE …/members/{uid}`, `POST …/leave` | `TestAuthHouseholdMembers` |
@@ -250,7 +250,7 @@ Auth error conventions, frozen across these tests:
 
 Not testable black-box, and why:
 
-- `POST /auth/setup` happy path: it only runs when the target has no superuser.
+- `POST /auth/setup` happy path, and jarvisd's setup-token 401/403 (AD2): they only run when the target has no superuser (unit-tested in `internal/modules/auth` `TestSetupToken*`).
 - `POST /settings/sync-from-env` happy path: it rewrites system settings from the target's env.
 - Expiry paths: `Refresh token expired` (14 days), `Temporary password expired…` (the minimum
   is 1 h), and invite expiry (the minimum is 1 day).
