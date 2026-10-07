@@ -194,13 +194,7 @@ func (m *Module) fetchNodeTools(ctx context.Context, nodeID string) (clientTools
 	if !m.bus.Available() {
 		return nil, nil, false
 	}
-	rid := uuid4()
-	m.bus.Expect(rid, nodeID)
-	defer m.bus.Drop(rid)
-	m.bus.CommandWithID(nodeID, "report_tools", map[string]any{"reply_request_id": rid}, rid)
-	wctx, cancel := context.WithTimeout(ctx, nodeToolsWait)
-	defer cancel()
-	raw, err := m.bus.Await(wctx, rid)
+	raw, err := m.reportTools(ctx, nodeID, nodeToolsWait)
 	if err != nil {
 		m.deps.Log.Warn("cc: MQTT tool fetch failed", "node", nodeID, "err", err)
 		return nil, nil, false

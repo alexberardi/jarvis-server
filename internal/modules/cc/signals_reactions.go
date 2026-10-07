@@ -257,13 +257,7 @@ func (m *Module) nodeTools(ctx context.Context, nodeID string, timeout time.Dura
 		return e.report, nil
 	}
 	s.mu.Unlock()
-	if !m.bus.Available() {
-		return nil, ErrNoBroker
-	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	key := uuid4()
-	_, raw, err := m.bus.CommandAwait(cctx, nodeID, "report_tools", map[string]any{"reply_request_id": key}, key)
+	raw, err := m.reportTools(ctx, nodeID, timeout)
 	if err != nil {
 		return nil, err
 	}

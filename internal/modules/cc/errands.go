@@ -230,10 +230,7 @@ func (n errandNodes) ReportCommands(ctx context.Context, nodeID string, timeout 
 	if n.m.bus == nil || !n.m.bus.Available() {
 		return nil, false
 	}
-	key := uuid4()
-	wctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	_, res, err := n.m.bus.CommandAwait(wctx, nodeID, "report_tools", map[string]any{"reply_request_id": key}, key)
+	res, err := n.m.reportTools(ctx, nodeID, timeout)
 	if err != nil {
 		return nil, false
 	}

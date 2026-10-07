@@ -65,15 +65,9 @@ func (m *Module) requestNodeTools(ctx context.Context, nodeID string) (map[strin
 		m.deps.Log.Warn("cc: node tools unavailable: MQTT not available", "node", nodeID)
 		return nil, false
 	}
-	rid := uuid4()
-	m.bus.Expect(rid, nodeID)
-	defer m.bus.Drop(rid)
-	m.bus.CommandWithID(nodeID, "report_tools", map[string]any{"reply_request_id": rid}, rid)
-	wctx, cancel := context.WithTimeout(ctx, nodeToolsWait)
-	defer cancel()
-	raw, err := m.bus.Await(wctx, rid)
+	raw, err := m.reportTools(ctx, nodeID, nodeToolsWait)
 	if err != nil {
-		m.deps.Log.Warn("cc: node did not report its tools; answering empty", "node", nodeID, "request_id", rid, "err", err)
+		m.deps.Log.Warn("cc: node did not report its tools; answering empty", "node", nodeID, "err", err)
 		return nil, false
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -83,4 +77,21 @@ func (m *Module) requestNodeTools(ctx context.Context, nodeID string) (map[strin
 		return nil, false
 	}
 	return report, true
+}
+
+// reportTools is the one report_tools round trip every caller shares (node tools view, mobile
+// chat warmup, errand menus, signal reactions): publish with reply_request_id = the command's
+// request id (no `trusted`, D4) and wait up to timeout for the node's POST to
+// /mobile/node-tool-reports/{rid}. Callers decode the raw report their own way.
+func (m *Module) reportTools(ctx context.Context, nodeID string, timeout time.Duration) (json.RawMessage, error) {
+	if m.bus == nil || !m.bus.Available() {
+		return nil, ErrNoBroker
+	}
+	rid := uuid4()
+	m.bus.Expect(rid, nodeID)
+	defer m.bus.Drop(rid)
+	m.bus.CommandWithID(nodeID, "report_tools", map[string]any{"reply_request_id": rid}, rid)
+	wctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return m.bus.Await(wctx, rid)
 }
