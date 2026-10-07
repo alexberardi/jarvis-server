@@ -77,6 +77,10 @@ func runHelper() {
 		_ = os.WriteFile(f, []byte(fmt.Sprint(c.Process.Pid)), 0o600)
 	}
 	if d, ok := dur("HELPER_CRASH_AFTER"); ok {
+		if d == 0 {
+			// Before listening: a timer can lose the race to the first health check.
+			os.Exit(3)
+		}
 		time.AfterFunc(d, func() { os.Exit(3) })
 	}
 	healthyAfter, _ := dur("HELPER_HEALTHY_AFTER")
