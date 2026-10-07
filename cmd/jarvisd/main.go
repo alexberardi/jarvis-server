@@ -10,14 +10,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/doctor"
 	adminmod "github.com/alexberardi/jarvis-server/internal/modules/admin"
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	ccmod "github.com/alexberardi/jarvis-server/internal/modules/cc"
@@ -112,7 +111,7 @@ func modules() []module.Module {
 		case *configmod.Module:
 			c.Served = served
 			c.SettingsGuard = superuser
-			c.MQTTPort = portOf(envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr))
+			c.MQTTPort = doctor.PortOf(envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr))
 			c.External = func(ctx context.Context) map[string]string {
 				// The system-level Pantry; households can override it for their own installs.
 				return map[string]string{"jarvis-pantry": cc.PantryBaseURL(ctx, "")}
@@ -184,6 +183,16 @@ func modules() []module.Module {
 			auth.OnHouseholdDeleted(c.PurgeHousehold)
 		case *adminmod.Module:
 			c.Verify = auth.VerifyUser
+			// The BFF calls the modules in process (A3).
+			for _, s := range mods {
+				if src, ok := s.(adminmod.SettingsSource); ok {
+					c.Settings = append(c.Settings, src)
+				}
+			}
+			c.Traces, c.Prompts = cc, cc
+			c.Accounts = auth
+			c.Models = llm
+			c.Exposure = exposure(served)
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
@@ -200,16 +209,6 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-// portOf is the port of a listen address like ":1884", or 0.
-func portOf(addr string) int {
-	_, p, err := net.SplitHostPort(addr)
-	if err != nil {
-		return 0
-	}
-	n, _ := strconv.Atoi(p)
-	return n
 }
 
 const usage = `usage: jarvisd <command>

@@ -134,6 +134,9 @@ func (m *Module) Name() string      { return "stt" }
 func (m *Module) Listener() string  { return pconfig.ListenerSTT }
 func (m *Module) Migrations() fs.FS { return Migrations() }
 
+// Settings is the module's settings service (valid after Register), for the admin aggregator.
+func (m *Module) Settings() *settings.Service { return m.settings }
+
 func (m *Module) libDir() string {
 	if m.LibDir != "" {
 		return m.LibDir

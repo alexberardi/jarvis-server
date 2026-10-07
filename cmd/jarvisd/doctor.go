@@ -14,26 +14,25 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 )
 
-// doctorPorts lists what the LAN must reach: every served listener, the MQTT broker's TCP and
-// WebSocket ports, and mDNS when advertising.
+// exposure is what the LAN must reach: the listeners the given modules serve, the MQTT
+// broker's TCP and WebSocket ports, and mDNS when advertising. The CLI doctor and the admin's
+// /api/doctor share it.
+func exposure(listeners []string) doctor.Exposure {
+	return doctor.Exposure{
+		Listeners:  listeners,
+		MQTTAddr:   envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr),
+		MQTTWSAddr: envOr("JARVIS_MQTT_WS_ADDR", mqtt.DefaultWSAddr),
+		MDNS:       os.Getenv("JARVIS_MDNS") != "0",
+	}
+}
+
+// doctorPorts lists the ports `jarvisd doctor` checks.
 func doctorPorts(cfg config.Config) []doctor.Port {
-	var out []doctor.Port
-	seen := map[int]bool{}
-	add := func(name string, port int, proto string) {
-		if port > 0 && !seen[port] {
-			seen[port] = true
-			out = append(out, doctor.Port{Name: name, Port: port, Proto: proto})
-		}
-	}
+	var listeners []string
 	for _, m := range modules() {
-		add(m.Listener(), cfg.Ports[m.Listener()], "tcp")
+		listeners = append(listeners, m.Listener())
 	}
-	add("mqtt", portOf(envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr)), "tcp")
-	add("mqtt-ws", portOf(envOr("JARVIS_MQTT_WS_ADDR", mqtt.DefaultWSAddr)), "tcp")
-	if os.Getenv("JARVIS_MDNS") != "0" {
-		add("mdns", 5353, "udp")
-	}
-	return out
+	return exposure(listeners).Ports(cfg.Ports)
 }
 
 // runDoctor prints each check (or JSON with --json) and fails when any check fails.
@@ -57,10 +56,8 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 			}
 		}
 	}
-	for _, c := range checks {
-		if c.Status == doctor.Fail {
-			return errors.New("doctor found problems")
-		}
+	if doctor.Worst(checks) == doctor.Fail {
+		return errors.New("doctor found problems")
 	}
 	return nil
 }

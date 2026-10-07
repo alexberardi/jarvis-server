@@ -98,6 +98,9 @@ func (m *Module) Name() string      { return "config" }
 func (m *Module) Listener() string  { return pconfig.ListenerConfig }
 func (m *Module) Migrations() fs.FS { return Migrations() }
 
+// Settings is the module's settings service (valid after Register), for the admin aggregator.
+func (m *Module) Settings() *settings.Service { return m.settings }
+
 func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.deps = deps
 	if m.HealthTimeout <= 0 {

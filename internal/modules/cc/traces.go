@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -112,63 +113,101 @@ func (t *traceRow) base() map[string]any {
 	}
 }
 
-func (m *Module) handleListTraces(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit, offset := 50, 0
+// TraceFilter selects traces for ListTraces. Empty strings don't filter.
+type TraceFilter struct {
+	Limit, Offset                       int
+	Status, Source, HouseholdID, NodeID string
+}
+
+// ParseTraceFilter reads the trace list's query (limit 1–200, default 50; offset ≥ 0; the four
+// equality filters). problem is the legacy validation detail ("query -> limit: …"), or "".
+func ParseTraceFilter(q url.Values) (f TraceFilter, problem string) {
+	f.Limit = 50
 	for _, p := range []struct {
 		name     string
 		dst      *int
 		min, max int
-	}{{"limit", &limit, 1, 200}, {"offset", &offset, 0, 1 << 30}} {
+	}{{"limit", &f.Limit, 1, 200}, {"offset", &f.Offset, 0, 1 << 30}} {
 		if v := q.Get(p.name); v != "" {
 			n, err := strconv.Atoi(v)
 			if err != nil {
-				validationError(w, "query -> "+p.name+": Input should be a valid integer, unable to parse string as an integer")
-				return
+				return f, "query -> " + p.name + ": Input should be a valid integer, unable to parse string as an integer"
 			}
 			if n < p.min {
-				validationError(w, "query -> "+p.name+": Input should be greater than or equal to "+strconv.Itoa(p.min))
-				return
+				return f, "query -> " + p.name + ": Input should be greater than or equal to " + strconv.Itoa(p.min)
 			}
 			if n > p.max {
-				validationError(w, "query -> "+p.name+": Input should be less than or equal to "+strconv.Itoa(p.max))
-				return
+				return f, "query -> " + p.name + ": Input should be less than or equal to " + strconv.Itoa(p.max)
 			}
 			*p.dst = n
 		}
 	}
+	f.Status, f.Source, f.HouseholdID, f.NodeID = q.Get("status"), q.Get("source"), q.Get("household_id"), q.Get("node_id")
+	return f, ""
+}
+
+// ListTraces returns one page of traces, newest first, in the admin list shape (each with
+// span_count, without spans), and the total matching f. The admin gateway calls it in process;
+// /api/v0/admin/traces serves it to the legacy admin key.
+func (m *Module) ListTraces(ctx context.Context, f TraceFilter) ([]map[string]any, int, error) {
+	if f.Limit <= 0 {
+		f.Limit = 50
+	}
 	where, args := " WHERE 1=1", []any{}
-	for _, f := range []string{"status", "source", "household_id", "node_id"} {
-		if v := q.Get(f); v != "" {
-			where += " AND " + f + " = ?"
-			args = append(args, v)
+	for _, c := range []struct{ col, v string }{
+		{"status", f.Status}, {"source", f.Source}, {"household_id", f.HouseholdID}, {"node_id", f.NodeID},
+	} {
+		if c.v != "" {
+			where += " AND " + c.col + " = ?"
+			args = append(args, c.v)
 		}
 	}
-	ctx := r.Context()
 	var total int
 	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT COUNT(*) FROM cc_request_traces`+where, args...).Scan(&total); err != nil {
-		m.internalError(w, err)
-		return
+		return nil, 0, err
 	}
 	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT `+traceCols+` FROM cc_request_traces`+where+
-		` ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+		` ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
-		m.internalError(w, err)
-		return
+		return nil, 0, err
 	}
 	defer rows.Close()
 	traces := []map[string]any{}
 	for rows.Next() {
 		t, err := scanTrace(rows)
 		if err != nil {
-			m.internalError(w, err)
-			return
+			return nil, 0, err
 		}
 		out := t.base()
 		out["span_count"] = len(t.spanList())
 		traces = append(traces, out)
 	}
-	if err := rows.Err(); err != nil {
+	return traces, total, rows.Err()
+}
+
+// GetTrace returns one trace with its spans and error_message; found is false for an unknown id.
+func (m *Module) GetTrace(ctx context.Context, id string) (trace map[string]any, found bool, err error) {
+	t, err := scanTrace(m.deps.DB.Read.QueryRowContext(ctx, `SELECT `+traceCols+` FROM cc_request_traces WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	out := t.base()
+	out["error_message"] = nullable(t.errorMessage)
+	out["spans"] = t.spanList()
+	return out, true, nil
+}
+
+func (m *Module) handleListTraces(w http.ResponseWriter, r *http.Request) {
+	f, problem := ParseTraceFilter(r.URL.Query())
+	if problem != "" {
+		validationError(w, problem)
+		return
+	}
+	traces, total, err := m.ListTraces(r.Context(), f)
+	if err != nil {
 		m.internalError(w, err)
 		return
 	}
@@ -176,20 +215,16 @@ func (m *Module) handleListTraces(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleGetTrace(w http.ResponseWriter, r *http.Request) {
-	t, err := scanTrace(m.deps.DB.Read.QueryRowContext(r.Context(), `SELECT `+traceCols+` FROM cc_request_traces WHERE id = ?`,
-		r.PathValue("trace_id")))
-	if errors.Is(err, sql.ErrNoRows) {
-		detail(w, http.StatusNotFound, "Trace not found")
-		return
-	}
+	t, found, err := m.GetTrace(r.Context(), r.PathValue("trace_id"))
 	if err != nil {
 		m.internalError(w, err)
 		return
 	}
-	out := t.base()
-	out["error_message"] = nullable(t.errorMessage)
-	out["spans"] = t.spanList()
-	httpx.WriteJSON(w, http.StatusOK, out)
+	if !found {
+		detail(w, http.StatusNotFound, "Trace not found")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, t)
 }
 
 // runCleanup is the hourly loop: provisioning tokens expired or consumed over 24 h ago,

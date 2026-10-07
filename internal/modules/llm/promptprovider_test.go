@@ -64,3 +64,51 @@ func TestLivePromptProvider(t *testing.T) {
 		t.Fatalf("row provider: %q", p)
 	}
 }
+
+// The admin setup state reads label states and the hardware summary in process (A3).
+func TestSetupSummary(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	d, err := db.Open(ctx, filepath.Join(home, "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	if err := db.Migrate(ctx, d, queue.MigrationModule, queue.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx, d, "llm", Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := &Module{Auth: fakeAuth{}, Version: "test"}
+	if m.LabelStates(ctx) != nil {
+		t.Fatal("label states before Register")
+	}
+	m.Register(http.NewServeMux(), module.Deps{Config: config.Config{Home: home}, DB: d, Log: log, Queue: queue.New(d, log)})
+	if err := m.settings.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if m.Settings() == nil {
+		t.Fatal("no settings accessor")
+	}
+
+	states := m.LabelStates(ctx)
+	for _, l := range []string{"live", "background", "stt", "tts", "speaker"} {
+		if states[l] != StateNotConfigured {
+			t.Errorf("%s = %q on a fresh install, want not_configured (all: %v)", l, states[l], states)
+		}
+	}
+	if _, ok := states["embeddings"]; !ok {
+		t.Errorf("no embeddings state: %v", states)
+	}
+	hw, ok := m.HardwareSummary(ctx)
+	if !ok || hw.Hardware.Flavour == "" || hw.Proposal == nil {
+		t.Fatalf("hardware summary: %+v %v", hw, ok)
+	}
+	for _, k := range []string{"llama-server", "whisper-server"} {
+		if _, ok := hw.Flavours[k]; !ok {
+			t.Errorf("no %s flavours: %v", k, hw.Flavours)
+		}
+	}
+}
