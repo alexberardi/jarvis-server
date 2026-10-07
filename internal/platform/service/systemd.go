@@ -288,6 +288,11 @@ func (s *systemd) Status(ctx context.Context) (Status, error) {
 		mode = "user unit"
 	}
 	st.Detail = fmt.Sprintf("%s %s, restarts %s", mode, s.unitPath, props["NRestarts"])
+	if b, err := os.ReadFile(s.unitPath); err == nil && strings.Contains(string(b), " upgrade --prestart ") {
+		st.UpgradeHelper = "root ExecStartPre (upgrade --prestart)"
+	} else if !s.user {
+		st.UpgradeHelper = "none: run `sudo jarvisd service install` again to add it"
+	}
 	return st, nil
 }
 

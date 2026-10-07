@@ -40,6 +40,9 @@ type Status struct {
 	PID       int    `json:"pid,omitempty"`
 	Home      string `json:"home,omitempty"`
 	Detail    string `json:"detail,omitempty"` // e.g. the definition's path, restart count
+	// UpgradeHelper describes the privileged self-update helper (ID11): the unit's root
+	// ExecStartPre, the updater LaunchDaemon or the updater Windows service; "" when none.
+	UpgradeHelper string `json:"upgrade_helper,omitempty"`
 }
 
 // Manager registers and controls the jarvisd service with one service manager.

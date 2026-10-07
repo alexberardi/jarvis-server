@@ -13,12 +13,16 @@ import (
 
 // The swap, the rollback and the start-time state machine.
 //
-//	stage ──(writable)──▶ Swap ─────────────────────▶ swapped ──gate ok──▶ (result: succeeded)
+//	stage ──(binary dir writable)──▶ Swap ──────────▶ swapped ──gate ok──▶ (result: succeeded)
 //	  │                                                  │
-//	  └─(binary dir not writable: systemd system unit)   ├─gate fails / 2 failed starts
-//	     staged ──PreStart (ExecStartPre=+, root)──▶ ────┘        ▼
-//	                                                     rollback_requested ──PreStart / in
-//	                                                     process──▶ Rollback (result: rolled_back)
+//	  └─(not writable: system unit, LaunchDaemon, SCM)   ├─gate fails / 2 failed starts
+//	     staged ──PrivilegedStep (helper)──▶ ────────────┘        ▼
+//	                                                     rollback_requested
+//	                                     writable: Rollback ─────┤
+//	                         not writable: PrivilegedStep restores jarvisd.prev
+//	                                     ▼                       │
+//	                              binary_restored ──next start───┴──▶ databases, result:
+//	                                                                   rolled_back
 
 // ErrNeedPrivilege means this process can't write the executable's directory; a privileged
 // pre-start (or `sudo jarvisd upgrade`) has to finish the step.
@@ -215,23 +219,15 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 		res.Outcome = ResultFailed
 		return &res, finish(p, res)
 	case StateSwapped, StateRollbackRequested:
+		// The previous binary is always the one next to the executable, never a path from
+		// the marker (which the service account can write).
+		if err := RestorePrevious(p); err != nil {
+			return nil, err
+		}
+	case StateBinaryRestored:
+		// A privileged helper already put the previous binary back; the databases are ours.
 	default:
 		return nil, fmt.Errorf("update: unknown upgrade state %q", m.State)
-	}
-	if !CanWrite(p.Exe) {
-		return nil, fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
-	}
-	prev := m.Prev
-	if prev == "" {
-		prev = p.Prev()
-	}
-	tmp := filepath.Join(filepath.Dir(p.Exe), ".jarvisd.rollback")
-	if err := copyFile(prev, tmp); err != nil {
-		return nil, fmt.Errorf("update: restore %s: %w", prev, err)
-	}
-	if err := installBinary(p, tmp, false); err != nil {
-		os.Remove(tmp)
-		return nil, err
 	}
 	for file, snap := range m.Snapshots {
 		changed, err := migrationsChanged(ctx, p.Home, file, m.GooseBefore[file])
@@ -273,10 +269,12 @@ func RestorePrevious(p Paths) error {
 	return nil
 }
 
-// PreStart does the pending file work before jarvisd opens its database: swap a staged
-// release in, or carry out a requested rollback. It runs as the systemd ExecStartPre=+ helper
-// (root) and at the start of serve (a no-op when the helper already did it). version is the
-// running binary's. It returns the action taken ("", "swapped", "rolled_back").
+// PreStart does the pending file work at the start of serve, before jarvisd opens its
+// database: swap a staged release in or carry out a requested rollback when this process can
+// write the binary (else ErrNeedPrivilege: a privileged helper does that part, see
+// PrivilegedStep), and finish a rollback a helper began (StateBinaryRestored). version is the
+// running binary's. It returns the action taken ("", "swapped", "rolled_back",
+// "rollback_finished": the binary running is already the restored one).
 func PreStart(ctx context.Context, p Paths, version string) (string, *Marker, error) {
 	CleanupOld(p)
 	m, err := ReadMarker(p)
@@ -298,6 +296,13 @@ func PreStart(ctx context.Context, p Paths, version string) (string, *Marker, er
 			return "", m, err
 		}
 		return "rolled_back", m, nil
+	case StateBinaryRestored:
+		// The helper restored the binary this process runs: finish here (database snapshot,
+		// result) and carry on.
+		if _, err := Rollback(ctx, p, ""); err != nil {
+			return "", m, err
+		}
+		return "rollback_finished", m, nil
 	}
 	return "", m, nil
 }

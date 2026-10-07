@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 )
@@ -46,6 +47,42 @@ func (k Kind) Supervised() bool { return k != None && k != "" }
 // `jarvisd upgrade --prestart` as root: a self-update can be staged by the unprivileged
 // service and swapped in by that helper on restart.
 const EnvUpgradeHelper = "JARVIS_UPGRADE_HELPER"
+
+// The privileged upgrade helpers of macOS and Windows (ID11), installed next to the service.
+const (
+	// HelperLabel is the root LaunchDaemon that swaps a staged release in.
+	HelperLabel = "net.jarvisautomation.jarvisd-updater"
+	// HelperName is the LocalSystem Windows service that does the same.
+	HelperName = "jarvisd-updater"
+)
+
+// Helper is the privileged upgrade helper installed for this service: how a self-update
+// staged by the unprivileged service gets its binary swapped (00-installers §8.2, ID11).
+type Helper string
+
+const (
+	// HelperNone: no helper; the binary must be writable by jarvisd, or the operator runs
+	// `sudo jarvisd upgrade`.
+	HelperNone Helper = ""
+	// HelperPrestart: the systemd unit's root ExecStartPre=+, run on every (re)start.
+	HelperPrestart Helper = "prestart"
+	// HelperLaunchd: the root LaunchDaemon HelperLabel, woken by a request file.
+	HelperLaunchd Helper = "launchd"
+	// HelperSCM: the LocalSystem service HelperName, started by jarvisd through the SCM.
+	HelperSCM Helper = "scm"
+)
+
+// OnDemand reports whether jarvisd has to wake the helper (which then restarts jarvisd),
+// rather than the helper running before every start.
+func (h Helper) OnDemand() bool { return h == HelperLaunchd || h == HelperSCM }
+
+// HelperLogPath is the Windows updater's log, next to the binary in the administrators'
+// directory: the home is writable by the service account, so a LocalSystem process must not
+// open files there by path (a junction could send the write anywhere). The macOS updater
+// logs to HelperLog.
+func HelperLogPath(binary string) string {
+	return filepath.Join(filepath.Dir(binary), "jarvisd-updater.log")
+}
 
 // RestartCommand is what an operator runs to restart jarvisd under kind (user: a systemd
 // --user unit). Unsupervised, it says to restart the process by hand.

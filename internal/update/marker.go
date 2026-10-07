@@ -49,8 +49,8 @@ func (p Paths) old() string { return p.Exe + ".old" }
 
 // States of an upgrade in the marker.
 const (
-	// StateStaged: verified and unpacked under updates/staged, waiting for a privileged
-	// pre-start (systemd ExecStartPre=+) to swap it in.
+	// StateStaged: verified and unpacked under updates/staged, waiting for the swap (in
+	// process, or by a privileged helper: PrivilegedStep).
 	StateStaged = "staged"
 	// StateSwapped: the new binary is in place; the next start of that version runs the
 	// health gate.

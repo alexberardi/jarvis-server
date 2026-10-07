@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by "jarvisd service install". -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>net.jarvisautomation.jarvisd-updater</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/jarvisd</string>
+		<string>upgrade</string>
+		<string>--helper</string>
+		<string>--home</string>
+		<string>/Users/alex/.jarvisd</string>
+		<string>--owner</string>
+		<string>alex</string>
+	</array>
+	<key>QueueDirectories</key>
+	<array>
+		<string>/Users/alex/.jarvisd/updates/requests</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/</string>
+	<key>Umask</key>
+	<integer>18</integer>
+	<key>ExitTimeOut</key>
+	<integer>120</integer>
+	<key>StandardOutPath</key>
+	<string>/Library/Logs/jarvisd-updater.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/jarvisd-updater.log</string>
+</dict>
+</plist>

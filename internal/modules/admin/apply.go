@@ -27,9 +27,13 @@ type Restarter interface {
 type UpgradeConfig struct {
 	// Exe is the running executable, symlinks resolved (the path the service runs).
 	Exe string
-	// Helper is set under the systemd system unit, whose privileged ExecStartPre swaps a
-	// staged release in: the service account itself can't write the binary.
-	Helper bool
+	// Helper is the privileged upgrade helper installed with the service (ID11): the systemd
+	// unit's root ExecStartPre swaps a staged release in on the restart; the macOS
+	// LaunchDaemon and Windows service helpers are woken through Trigger and restart jarvisd
+	// themselves. The service account itself can't write the binary.
+	Helper service.Helper
+	// Trigger wakes an on-demand helper (service.Helper.OnDemand).
+	Trigger func(context.Context) error
 	// Source reads releases (JARVIS_UPDATE_API in the CI upgrade job).
 	Source update.Source
 	// Keys replace the embedded trusted keys (tests).
@@ -104,7 +108,7 @@ func (m *Module) applyBlocker(ctx context.Context) (reason, command string) {
 	case !kind.Supervised():
 		return "jarvisd isn't running under a service manager, so nothing would start the new version. " +
 			"Stop jarvisd, then run the command.", "jarvisd upgrade"
-	case !m.Upgrade.Helper && !update.CanWrite(m.Upgrade.Exe):
+	case m.Upgrade.Helper == service.HelperNone && !update.CanWrite(m.Upgrade.Exe):
 		cmd := "sudo jarvisd upgrade"
 		if runtime.GOOS == "windows" {
 			cmd = "jarvisd upgrade (from an elevated PowerShell)"
@@ -205,6 +209,15 @@ func (m *Module) runApply(target string) {
 			fail(err)
 			return
 		}
+	} else if m.Upgrade.Helper.OnDemand() && m.Upgrade.Trigger != nil {
+		// The macOS/Windows helper re-verifies, swaps and restarts jarvisd (ending this
+		// process); if it refuses, the upgrade is closed as failed.
+		m.setJob(func(j *applyJob) { j.State, j.Step = "restarting", "restarting" })
+		m.deps.Log.Info("admin: update staged; handing it to the privileged helper", "from", mk.From, "to", mk.To, "helper", m.Upgrade.Helper)
+		if err := m.awaitHelper(ctx, p); err != nil {
+			fail(err)
+		}
+		return
 	} // else the systemd pre-start (root) re-verifies and swaps it in on the restart
 	m.setJob(func(j *applyJob) { j.State, j.Step = "restarting", "restarting" })
 	m.deps.Log.Info("admin: update installed; restarting", "from", mk.From, "to", mk.To)
@@ -212,6 +225,42 @@ func (m *Module) runApply(target string) {
 	if err := m.Restarter.Request(); err != nil {
 		fail(err)
 	}
+}
+
+// helperWait bounds how long the admin waits for an on-demand helper to take a staged upgrade.
+var helperWait = 3 * time.Minute
+
+// awaitHelper wakes the on-demand helper (again every 15 s) until it takes the staged upgrade.
+// Normally the helper restarts jarvisd before this returns; an error means it refused the
+// upgrade or never acted (the staged upgrade is then dropped so it can be retried).
+func (m *Module) awaitHelper(ctx context.Context, p update.Paths) error {
+	deadline := time.Now().Add(helperWait)
+	var next time.Time
+	for time.Now().Before(deadline) {
+		if time.Now().After(next) {
+			if err := m.Upgrade.Trigger(ctx); err != nil {
+				m.deps.Log.Error("admin: waking the upgrade helper failed", "err", err)
+			}
+			next = time.Now().Add(15 * time.Second)
+		}
+		mk, err := update.ReadMarker(p)
+		if err == nil && mk == nil {
+			if res, _ := update.ReadResult(p); res != nil && res.Outcome == update.ResultFailed {
+				return errors.New("the update was refused: " + res.Reason)
+			}
+			return nil
+		}
+		if err == nil && mk.State != update.StateStaged {
+			return nil // swapped: the restart is coming
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	_ = update.Abort(p, "the privileged upgrade helper did not act")
+	return errors.New("the privileged upgrade helper did not act within " + helperWait.String())
 }
 
 // handleApplyStatus is GET /api/update/apply: this process's run (if any), the upgrade in

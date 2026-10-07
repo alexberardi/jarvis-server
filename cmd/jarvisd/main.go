@@ -276,7 +276,10 @@ func main() {
 // runWindowsService is main under the Windows SCM: stderr goes to <home>\logs\jarvisd.log
 // (it goes nowhere otherwise), and Stop/Shutdown cancel serve's context.
 func runWindowsService(args []string) int {
-	flagHome, _ := takeHome(args)
+	flagHome, rest := takeHome(args)
+	if helperArgs(rest) {
+		return runWindowsHelper(flagHome, rest)
+	}
 	if home, err := config.ResolveHome(flagHome, "", os.Getenv); err == nil {
 		_ = service.RedirectStderr(service.LogPath(home))
 	}
@@ -395,9 +398,10 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		return err
 	}
 	upaths := update.Paths{Home: cfg.Home, Exe: exe}
+	helper := service.DetectHelper()
 	// A pending upgrade step (swap, rollback) and the start count run before the database
 	// opens (ID10).
-	gate, restart, err := upgradeStart(ctx, newLogger(), upaths, restarter.Kind().Supervised())
+	gate, restart, err := upgradeStart(ctx, newLogger(), upaths, restarter.Kind().Supervised(), helper)
 	if err != nil {
 		return err
 	}
@@ -440,8 +444,11 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 			x.Restarter = restarter
 			x.Upgrade = adminmod.UpgradeConfig{
 				Exe:    exe,
-				Helper: os.Getenv(service.EnvUpgradeHelper) == "1",
+				Helper: helper,
 				Source: updateSource(),
+			}
+			if helper.OnDemand() {
+				x.Upgrade.Trigger = func(ctx context.Context) error { return triggerHelper(ctx, upaths, helper) }
 			}
 		}
 	}
@@ -489,7 +496,7 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		err = downgradeHelp(de, upaths)
 	}
 	if v := gateFailed.Load(); v != nil {
-		return rollbackAfterGate(ctx, log, upaths, v.(string), restarter.Kind().Supervised(), closeDB)
+		return rollbackAfterGate(ctx, log, upaths, v.(string), restarter.Kind().Supervised(), helper, closeDB)
 	}
 	if gate != nil && err != nil && !errors.Is(err, service.ErrRestart) {
 		// The new version failed to start: the marker holds the attempt, and the next start
@@ -530,14 +537,20 @@ func passGate(ctx context.Context, log *slog.Logger, runner *module.Runner, p up
 }
 
 // rollbackAfterGate rolls back once serve has stopped and the database is closed.
-func rollbackAfterGate(ctx context.Context, log *slog.Logger, p update.Paths, reason string, supervised bool, closeDB func()) error {
+func rollbackAfterGate(ctx context.Context, log *slog.Logger, p update.Paths, reason string, supervised bool,
+	helper service.Helper, closeDB func()) error {
 	closeDB()
 	if err := update.RequestRollback(p, reason); err != nil {
 		return err
 	}
 	if !update.CanWrite(p.Exe) {
-		if os.Getenv(service.EnvUpgradeHelper) == "1" && supervised {
+		if helper == service.HelperPrestart && supervised {
 			return service.ErrRestart // the privileged pre-start rolls back
+		}
+		if helper.OnDemand() && supervised {
+			// serve's context is over; wait on our own (the helper restarts jarvisd next).
+			awaitHelper(context.WithoutCancel(ctx), log, p, helper, update.StateRollbackRequested)
+			return service.ErrRestart
 		}
 		return fmt.Errorf("upgrade: %s; rolling back needs administrator rights: run %s", reason, elevated("jarvisd upgrade --rollback"))
 	}

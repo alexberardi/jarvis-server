@@ -211,6 +211,9 @@ func printStatus(w io.Writer, st serviceStatus) {
 	if st.Home != "" {
 		fmt.Fprintf(w, "home:       %s\n", st.Home)
 	}
+	if st.UpgradeHelper != "" {
+		fmt.Fprintf(w, "updater:    %s\n", st.UpgradeHelper)
+	}
 	if st.HealthURL != "" {
 		h := "ok"
 		if !st.Healthy {
