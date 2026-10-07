@@ -7,7 +7,7 @@
 #   --version vX.Y.Z  install that release (default: the latest)
 #   --user            Linux: a systemd --user service for your account (~/.local/bin, ~/.jarvisd)
 #   --yes             answer yes: apply the firewall fix without asking
-#   --stop-legacy     stop the legacy Docker stack if it holds jarvisd's ports (docker stop +
+#   --stop-legacy     stop the legacy Docker stack and its admin unit (docker stop +
 #                     restart policy off; its data is kept, nothing is removed)
 #   --force           reinstall even when this version is installed
 #   --uninstall       remove the service, firewall rules and binary (data is kept)
@@ -81,6 +81,65 @@ ask() { # ask "question": yes unless answered n; --yes says yes, no terminal say
   case $ans in [nN]*) return 1 ;; esac
 }
 
+# The legacy Docker stack (ID7), by the same rule as `jarvisd doctor` (internal/doctor
+# LegacyContainer): a running container named jarvis-*, or in the Compose project "jarvis"
+# (~/.jarvis/compose: llama-server, llama-server-bg, llm-proxy-worker, go2rtc), a "jarvis-*"
+# project (a source checkout's per-service projects, the dockerized node), or any project
+# whose files are in ~/.jarvis/compose. Nothing else is touched.
+DOCKER=""
+legacy_containers() {
+  fmt='{{.Names}};{{.Label "com.docker.compose.project"}};{{.Label "com.docker.compose.project.working_dir"}}'
+  if [ -z "$DOCKER" ]; then
+    command -v docker >/dev/null || return 0
+    DOCKER=docker; docker ps >/dev/null 2>&1 || DOCKER="$SUDO docker"
+  fi
+  $DOCKER ps --format "$fmt" 2>/dev/null | awk -F';' '
+    { wd = $3; sub(/\/$/, "", wd) }
+    $1 ~ /^jarvis-/ || $2 == "jarvis" || $2 ~ /^jarvis-/ || wd ~ /\/\.jarvis\/compose$/ { printf "%s ", $1 }'
+}
+# The legacy admin (finding 2): a systemd *user* unit, jarvis-admin.service on 7711, whose
+# reconcile runs `docker compose up -d` and would start the stack again. It belongs to the
+# account that installed it: this user, or under sudo $SUDO_USER (reached through its user
+# manager with `systemctl --user -M user@`). Not reachable when that account has no running
+# user manager (no session, no linger); then it isn't running either, and the command to run
+# as that account is printed. macOS (launchd agent com.jarvis.admin) is not handled.
+admin_unit() { # admin_unit ARGS...: systemctl --user for the legacy admin's account
+  if [ "$(id -u)" -ne 0 ]; then
+    [ -n "${XDG_RUNTIME_DIR:-}" ] || XDG_RUNTIME_DIR=/run/user/$(id -u)
+    XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR systemctl --user "$@"
+  elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    systemctl --user -M "$SUDO_USER@" "$@"
+  else
+    return 2
+  fi
+}
+stop_legacy_admin() {
+  [ "$OS" = linux ] || return 0
+  who=$(id -un)
+  [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && who=$SUDO_USER
+  if admin_unit list-unit-files jarvis-admin.service --no-legend 2>/dev/null | grep -q '^jarvis-admin\.service'; then
+    say "Stopping the legacy admin (systemd user unit jarvis-admin.service of $who) and turning it off at login"
+    admin_unit disable --now jarvis-admin.service >/dev/null 2>&1 \
+      || warn "could not stop jarvis-admin.service; as $who run: systemctl --user disable --now jarvis-admin.service"
+    return 0
+  fi
+  # Not listed although its file (where the admin's installer writes it) is there: the user
+  # manager wasn't reachable.
+  home=$HOME
+  [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+  if [ -f "$home/.config/systemd/user/jarvis-admin.service" ]; then
+    warn "the legacy admin's unit is in $home/.config/systemd/user but $who's user manager isn't reachable from here; as $who run: systemctl --user disable --now jarvis-admin.service"
+  fi
+}
+stop_legacy() { # stop_legacy NAMES: restart policy off + stop (never down/rm), then the admin
+  if [ -n "$1" ]; then
+    say "Stopping the legacy stack: $1"
+    # shellcheck disable=SC2086 # names are words
+    $DOCKER update --restart=no $1 >/dev/null && $DOCKER stop $1 >/dev/null
+  fi
+  stop_legacy_admin
+}
+
 if [ $UNINSTALL = 1 ]; then
   [ -x "$BIN" ] || die "jarvisd is not installed in $BIN_DIR"
   flags="$SVC"
@@ -119,6 +178,8 @@ VERSION=$REL
 CUR="" REUSE=0
 [ -x "$BIN" ] && CUR=$("$BIN" version 2>/dev/null || echo unknown)
 if [ -n "$CUR" ]; then
+  # jarvisd is already here, so stopping the legacy stack can't leave the box with neither.
+  [ $STOP_LEGACY = 1 ] && stop_legacy "$(legacy_containers)"
   if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ] && "$BIN" service status $SVC >/dev/null 2>&1; then
     say "jarvisd $VERSION is already installed and running."
     # shellcheck disable=SC2086
@@ -172,18 +233,18 @@ if [ $REUSE = 0 ]; then
 fi
 
 if [ -z "$CUR" ]; then
-  # A fresh install next to the legacy stack (ID7): jarvisd needs its ports.
-  if "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"'; then
-    legacy=$(docker ps --format '{{.Names}}' 2>/dev/null || $SUDO docker ps --format '{{.Names}}' 2>/dev/null || true)
-    legacy=$(printf '%s\n' "$legacy" | grep '^jarvis-' | tr '\n' ' ' || true)
-    [ -n "$legacy" ] || die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (\`sudo ss -ltnp\` or \`sudo lsof -iTCP -sTCP:LISTEN\` names it)"
+  # A fresh install next to the legacy stack (ID7): jarvisd needs its ports, and its GPUs
+  # (the legacy llama-servers hold whole cards), so --stop-legacy stops the stack even when
+  # its ports are free.
+  held=0
+  "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"' && held=1
+  if [ $held = 1 ] || [ $STOP_LEGACY = 1 ]; then
+    legacy=$(legacy_containers)
+    [ $held = 0 ] || [ -n "$legacy" ] || die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (\`sudo ss -ltnp\` or \`sudo lsof -iTCP -sTCP:LISTEN\` names it)"
     [ $STOP_LEGACY = 1 ] || die "the legacy Jarvis Docker stack is running ($legacy) and holds jarvisd's ports.
-  Re-run with --stop-legacy to stop it (docker stop + restart policy off; its data is kept).
+  Re-run with --stop-legacy to stop it (docker stop + restart policy off, and its admin's user unit off; its data is kept).
   To go back to it later: jarvisd service stop && docker start $legacy"
-    docker=docker; docker ps >/dev/null 2>&1 || docker="$SUDO docker"
-    say "Stopping the legacy stack: $legacy"
-    # shellcheck disable=SC2086 # names are words
-    $docker update --restart=no $legacy >/dev/null && $docker stop $legacy >/dev/null
+    stop_legacy "$legacy"
   fi
 fi
 

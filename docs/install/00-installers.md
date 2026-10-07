@@ -930,9 +930,24 @@ foreign only when no HTTP listener is jarvisd's; fix names `ss`/`lsof`/`Get-NetT
 **data directory** (warn): home not 0700, `jarvis.db*`/`setup-token` not 0600, or files owned
 by another account than the home (a `sudo jarvisd serve`); unreadable as a plain user is
 "OK, run sudo to check" (`Options.Home`; the admin's in-process doctor passes none).
-**legacy stack** (warn): running `jarvis-*` containers that publish a jarvisd port, or any
-while the ports check failed (host-network stacks publish nothing); infra-only containers
-and a leftover `~/.jarvis/compose` are OK. Fix: `docker update --restart=no` + `docker stop`.
+**legacy stack** (warn): running legacy containers that publish a jarvisd port, or any
+while the ports check failed (host-network stacks publish nothing), or that hold GPU memory;
+infra-only containers and a leftover `~/.jarvis/compose` are OK. Fix: `docker update
+--restart=no` + `docker stop`, and `systemctl --user disable --now jarvis-admin.service`.
+*Legacy* (`doctor.LegacyContainer`, revised 2026-10-07 after the prod survey, cutover-runbook
+§1): named `jarvis-*`, or by Compose labels in project `jarvis` (the admin installer pins
+`name: jarvis` in `~/.jarvis/compose`; on prod that project also runs `llama-server`,
+`llama-server-bg`, `llm-proxy-worker` — ~40 GB of VRAM — and `go2rtc`), in a `jarvis-*`
+project (a source checkout's per-service projects such as `jarvis-llm-proxy-api`'s
+`llm-proxy-*`; the dockerized node's `jarvis-node`), or in any project whose
+`working_dir` is `…/.jarvis/compose` (installs from before the pin, project `compose`).
+Anything else (plex, a user's own projects) is never touched; the scripts apply the same rule.
+**gpu memory** (Linux + nvidia-smi, info): `--query-compute-apps` per process, sorted by
+`/proc/<pid>/cgroup` (which names the container's ID) into the legacy containers' share
+(reported, and warned about, under "legacy stack"), jarvisd's own engines (a `jarvisd`
+ancestor in `/proc/<pid>/stat`; not reported) and other programs (named, "in a Docker
+container" when the cgroup says so — the admin's in-process doctor has no docker access).
+The llm module's fit verdicts already count the remainder as "other programs".
 **network profile** (Windows, warn on Public) and **sleep** (macOS, `pmset -g` sleep > 0).
 **env file** (warn): the env file a plain user can't read (the system unit's 0640 file) is
 now a check pointing at `sudo jarvisd doctor` instead of a stderr warning. Not done:
@@ -970,8 +985,17 @@ upgrade is verified by the running jarvisd → archive download to `$TMPDIR` or 
 SHA-256 must match → the extracted binary must print the version → an installed jarvisd without
 `upgrade` (pre-§8.2): the binary is renamed over the running one (`jarvisd.prev` kept in
 `/usr/local/lib/jarvisd`) and the service reinstall below restarts it → fresh install: the new binary's `doctor --json` names a `ports`
-check → `jarvis-*` containers? refuse, or with `--stop-legacy` `docker update --restart=no`
-+ `docker stop` (never `down`); no containers = "another program" refusal → atomic rename
+check → legacy containers (the doctor's rule above)? refuse, or with `--stop-legacy` `docker
+update --restart=no` + `docker stop` (never `down`/`rm`); no containers = "another program"
+refusal. `--stop-legacy` also stops the legacy stack when its ports are free (its
+llama-servers still hold the GPUs) and on a re-run over an installed jarvisd, and turns off the
+legacy admin's **systemd user unit** `jarvis-admin.service` (7711; its reconcile runs `docker
+compose up -d`): `systemctl --user disable --now` for the invoking user, under sudo for
+`$SUDO_USER` via `systemctl --user -M $SUDO_USER@` (systemd ≥ 248). Limits: needs that user's
+manager running (the admin's installer enables linger, so it is); when it isn't reachable but
+`~/.config/systemd/user/jarvis-admin.service` exists, a warning prints the command to run as
+that user; run as root without sudo, the unit is not looked for; macOS's
+`com.jarvis.admin` LaunchAgent and Windows are not handled → atomic rename
 into `/usr/local/bin` (`~/.local/bin` with `--user`) → `jarvisd service install [--user]`
 (waits for /health) + `service status --wait 90s`; an upgrade that fails goes back to
 `jarvisd.prev` → `sudo jarvisd doctor --json`: any `fix_cmds` → "[Y/n]" on `/dev/tty`
@@ -996,8 +1020,12 @@ so a signing step over `SHA256SUMS` is unaffected.
 
 **Verified.** CI job `install` (ci.yml) builds a release-shaped archive (`v0.0.0-ci`) plus
 `SHA256SUMS`, serves it with `python3 -m http.server` and runs the scripts with `--base-url`:
-ubuntu-latest (ufw enabled; an nginx container named `jarvis-config-service` on 7700 makes the
-script refuse, `--stop-legacy` stops it with restart policy `no`; ufw gains the `# jarvisd`
+ubuntu-latest (ufw enabled; a fake legacy stack — Compose project `jarvis` in
+`~/.jarvis/compose` with `jarvis-config-service` on 7700 and a `llama-server`, plus a
+`jarvis-admin.service` user unit (linger on) — makes the script refuse; `--stop-legacy`
+stops both containers with restart policy `no` and disables + stops the unit, while `plex`
+(no project) and `go2rtc` in project `cameras` keep running `unless-stopped`; a later
+reinstall as root through sudo stops the re-enabled unit via `-M $SUDO_USER@`; ufw gains the `# jarvisd`
 rules for the runner's 10.1.0.0/20; `Server: jarvisd` on /health; `sudo jarvisd doctor`
 clean; re-run is a no-op; `--uninstall` removes unit, binary and both ufw rules and keeps
 `/var/lib/jarvisd` and the account; reinstall; `--uninstall --purge --yes` removes home,

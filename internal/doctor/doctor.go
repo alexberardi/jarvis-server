@@ -68,7 +68,7 @@ type Options struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// ServerHeader GETs a URL and returns its Server header (default: an HTTP client, 2 s).
 	ServerHeader func(ctx context.Context, url string) (string, error)
-	// Run runs the external commands the OS checks use (docker, pmset, netsh).
+	// Run runs the external commands the OS checks use (docker, nvidia-smi, pmset, netsh).
 	Run Runner
 	// Home is jarvisd's data directory; "" skips the permission checks (the admin's
 	// in-process doctor runs as the owner and secures it at start anyway).
@@ -76,6 +76,8 @@ type Options struct {
 	// LegacyDirs are the legacy stack's directories to look for (default: ~/.jarvis of this
 	// user and of $SUDO_USER).
 	LegacyDirs []string
+	// ReadFile reads /proc for the GPU memory check (default os.ReadFile).
+	ReadFile func(name string) ([]byte, error)
 }
 
 // Firewall reports whether the host firewall admits a port from a subnet, and how to make

@@ -8,7 +8,7 @@
 # Under `irm | iex` the options come from JARVISD_VERSION, JARVISD_RELEASE_BASE and JARVISD_YES=1.
 #
 #   -Yes          apply the firewall fix without asking
-#   -StopLegacy   stop the legacy Docker stack if it holds jarvisd's ports (data is kept)
+#   -StopLegacy   stop the legacy Docker stack (docker stop + restart policy off; data is kept)
 #   -Force        reinstall even when this version is installed
 #   -Uninstall    remove the service, firewall rule, binary and PATH entry (data is kept)
 #   -Purge        with -Uninstall: also delete %ProgramData%\jarvisd, after confirmation
@@ -87,6 +87,28 @@ function Confirm-Step([string]$question) {
     return -not ($a -match '^[nN]')
 }
 
+function Get-LegacyContainers {
+    # The legacy Docker stack (ID7), by the same rule as `jarvisd doctor` (internal/doctor
+    # LegacyContainer): a running container named jarvis-*, or in the Compose project "jarvis",
+    # a "jarvis-*" project, or a project whose files are in .jarvis\compose. Nothing else.
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return }
+    $fmt = '{{.Names}};{{.Label "com.docker.compose.project"}};{{.Label "com.docker.compose.project.working_dir"}}'
+    foreach ($line in ((Get-NativeOutput docker ps --format $fmt) -split "`r?`n")) {
+        $f = @($line.Trim() -split ';', 3)
+        if ($f.Count -lt 3 -or -not $f[0]) { continue }
+        $wd = $f[2].Replace('\', '/').TrimEnd('/')
+        if ($f[0] -like 'jarvis-*' -or $f[1] -eq 'jarvis' -or $f[1] -like 'jarvis-*' -or $wd -like '*/.jarvis/compose') { $f[0] }
+    }
+}
+
+function Stop-Legacy([string[]]$names) {
+    # Restart policy off, then stop; never down/rm (its data is kept).
+    if (-not $names) { return }
+    Write-Host "Stopping the legacy stack: $($names -join ' ')"
+    Invoke-Native docker update --restart=no @names | Out-Null
+    Invoke-Native docker stop @names | Out-Null
+}
+
 function Set-MachinePath([bool]$present) {
     $path = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $parts = @($path -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ne $Dir) })
@@ -136,6 +158,8 @@ try {
     if (Test-Path $Bin) {
         $cur = (Get-NativeOutput $Bin version).Trim()
         if (-not $cur) { $cur = 'unknown' }
+        # jarvisd is already here, so stopping the legacy stack can't leave neither.
+        if ($StopLegacy) { Stop-Legacy @(Get-LegacyContainers) }
         Get-NativeOutput $Bin service status | Out-Null
         if ($cur -eq $Version -and -not $Force -and $LASTEXITCODE -eq 0) {
             Write-Host "jarvisd $Version is already installed and running."
@@ -197,20 +221,18 @@ try {
         Copy-Item -Force $Bin $Prev
     } else {
         # A fresh install next to the legacy stack (ID7): jarvisd needs its ports.
-        if ((Get-NativeOutput $new doctor --json) -match '"name": "ports"') {
-            $legacy = @()
-            if (Get-Command docker -ErrorAction SilentlyContinue) {
-                $legacy = @((Get-NativeOutput docker ps --format '{{.Names}}') -split '\s+' | Where-Object { $_ -like 'jarvis-*' })
-            }
-            if (-not $legacy) { throw "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (Get-NetTCPConnection -State Listen -LocalPort 7700 names it)" }
+        # Its GPUs too (the legacy llama-servers hold whole cards): -StopLegacy stops the stack
+        # even when its ports are free.
+        $held = (Get-NativeOutput $new doctor --json) -match '"name": "ports"'
+        if ($held -or $StopLegacy) {
+            $legacy = @(Get-LegacyContainers)
+            if ($held -and -not $legacy) { throw "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (Get-NetTCPConnection -State Listen -LocalPort 7700 names it)" }
             if (-not $StopLegacy) {
                 throw ("the legacy Jarvis Docker stack is running ($($legacy -join ' ')) and holds jarvisd's ports.`n" +
                     "Re-run with -StopLegacy to stop it (docker stop + restart policy off; its data is kept).`n" +
                     "To go back to it later: jarvisd service stop; docker start $($legacy -join ' ')")
             }
-            Write-Host "Stopping the legacy stack: $($legacy -join ' ')"
-            Invoke-Native docker update --restart=no @legacy | Out-Null
-            Invoke-Native docker stop @legacy | Out-Null
+            Stop-Legacy $legacy
         }
     }
 
