@@ -44,7 +44,7 @@ Migration: `internal/modules/cc/migrations/00001_baseline.sql` (goose, version t
 | 05 nodes | `cc_nodes`, `cc_node_tasks`, `cc_provisioning_tokens`, `cc_settings_requests`, `cc_settings_snapshots`, `cc_request_traces` |
 | 06 media / voice identity | none. Voiceprints belong to the stt module (D34/D36). |
 | 07 smart home | `cc_rooms`, `cc_devices`, `cc_device_scan_requests`, `cc_device_list_requests`, `cc_config_pushes`, `cc_auth_sessions`, `cc_bluetooth_scan_requests`, `cc_bluetooth_pair_requests` |
-| 08 routines | `cc_routines`, `cc_schedules` |
+| 08 routines | `cc_routines`, `cc_schedules`, `cc_routine_seeds` (00080: households whose D44 defaults were seeded, so a deleted default stays deleted) |
 | 09 errands | `cc_errand_plans`, `cc_workflows` |
 | 10 signals / attention / proposals | `cc_signals`, `cc_proposal_suppressions`, `cc_attention_events`, `cc_attention_deliveries`, **`cc_automation_actions`** (new), **`cc_reaction_claims`** (new) |
 | 11 phone | `cc_phone_contacts`, `cc_phone_call_sessions` |
@@ -104,7 +104,7 @@ General transforms:
 |---|---|
 | `nodes` | Yes. Drop `api_key` and `adapter_hash`; node credentials come from the auth module's import. |
 | `rooms`, `devices` | Yes, as-is. Camera rows import and stay listed (D29). |
-| `routines` | Yes. Then seed the node default routines per household (D44). |
+| `routines` | Yes. The node defaults are seeded lazily per household on first access (D44); an imported same-slug routine wins. |
 | `schedules` | Only `state = 'active'` (D13, D40 08.Q12). Drop `title`. |
 | `user_memories` | Yes. Re-embed. **Skip `is_active = false` rows**: forget is a hard delete in Go (D40 04.Q6), and a soft-deleted memory is one the user asked to forget. Skip rows already past `expires_at`. |
 | `conversation_transcripts` | Optional, only rows inside the 7-day TTL. Nothing breaks without them. |
