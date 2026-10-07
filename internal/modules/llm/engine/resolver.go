@@ -503,6 +503,7 @@ type InstanceStatus struct {
 	PID       int           `json:"pid"`
 	Restarts  int           `json:"restarts"`
 	Since     time.Time     `json:"since"`
+	Started   time.Time     `json:"started,omitzero"` // process launch; zero when none runs
 	LastError string        `json:"last_error,omitempty"`
 	Output    []string      `json:"output"`
 	Kind      Kind          `json:"kind"`
@@ -570,7 +571,7 @@ func (r *Resolver) Instances() []InstanceStatus {
 		args, _ := inst.key.args(inst.port, inst.alias)
 		st := inst.sup.Status()
 		out = append(out, InstanceStatus{Name: st.Name, State: st.State, PID: st.PID, Restarts: st.Restarts,
-			Since: st.Since, LastError: st.LastError, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
+			Since: st.Since, Started: st.Started, LastError: st.LastError, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
 			Port: inst.port, Model: inst.key.Model, Labels: labels, Args: args})
 	}
 	slices.SortFunc(out, func(a, b InstanceStatus) int { return strings.Compare(a.Name, b.Name) })

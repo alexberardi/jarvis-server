@@ -233,6 +233,7 @@ type Status struct {
 	PID       int       // 0 when not running
 	Restarts  int       // since the last Start
 	Since     time.Time // when State was entered
+	Started   time.Time // when the running process was launched; zero when none
 	LastError string    // why it last went down or unhealthy
 	Output    []string  // last lines of stdout and stderr
 }
@@ -250,6 +251,7 @@ type Supervisor struct {
 	since    time.Time
 	changed  chan struct{} // closed and replaced on every state change
 	pid      int
+	started  time.Time
 	restarts int
 	lastErr  string
 	tail     []string
@@ -298,10 +300,14 @@ func (s *Supervisor) State() State {
 func (s *Supervisor) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Status{
+	st := Status{
 		Name: s.spec.Name, State: s.state, PID: s.pid, Restarts: s.restarts,
 		Since: s.since, LastError: s.lastErr, Output: slices.Clone(s.tail),
 	}
+	if s.pid != 0 {
+		st.Started = s.started
+	}
+	return st
 }
 
 // setLocked changes state; s.mu must be held.
@@ -338,7 +344,7 @@ func (s *Supervisor) Start() error {
 		return err
 	}
 	r := &run{stop: make(chan struct{}), force: make(chan struct{}), done: make(chan struct{})}
-	s.cur, s.pid, s.restarts, s.lastErr = r, p.cmd.Process.Pid, 0, ""
+	s.cur, s.pid, s.started, s.restarts, s.lastErr = r, p.cmd.Process.Pid, time.Now(), 0, ""
 	s.setLocked(Starting, "")
 	if s.spec.Health == nil {
 		s.setLocked(Healthy, "")
@@ -463,7 +469,7 @@ func (s *Supervisor) loop(r *run, p *proc) {
 			p, cause = nil, err
 		} else {
 			p = np
-			s.pid = p.cmd.Process.Pid
+			s.pid, s.started = p.cmd.Process.Pid, time.Now()
 			s.setLocked(Starting, "")
 			if s.spec.Health == nil {
 				s.setLocked(Healthy, "")

@@ -1116,9 +1116,16 @@ func (m *Manager) otherPrograms(ctx context.Context, residents []Resident) []Res
 	}
 	running := map[string]bool{}
 	for _, in := range m.Labels.Instances() {
+		// The process's launch time, not the state's: an engine still loading at detection
+		// (or that went unhealthy and back since) already held its memory then, and counting
+		// it as other programs too would double it (A10 F8).
+		launched := in.Started
+		if launched.IsZero() {
+			launched = in.Since
+		}
 		switch in.State {
-		case engines.Healthy, engines.Unhealthy, engines.Draining:
-			if !in.Since.After(hw.DetectedAt) {
+		case engines.Starting, engines.Healthy, engines.Unhealthy, engines.Draining:
+			if !launched.After(hw.DetectedAt) {
 				for _, l := range in.Labels {
 					running[l] = true
 				}
@@ -1198,6 +1205,41 @@ func without(rs []Resident, labels ...string) []Resident {
 		}
 	}
 	return out
+}
+
+// fitFor judges a model of kind for the labels that take that kind: next to the residents
+// without those labels (the model would replace what they run, so it is not counted against
+// itself or its predecessor), and as "cpu" when every such label runs on the CPU (the
+// embeddings label by default), where VRAM doesn't matter (A10 F8).
+func (m *Manager) fitFor(ctx context.Context, hw engine.Hardware, kind string, weights, kvPerTok int64, n int, residents []Resident) Fit {
+	var labels []string
+	cpuOnly := m.Settings != nil
+	for _, d := range engine.LabelDefs {
+		if d.ModelKind != kind {
+			continue
+		}
+		labels = append(labels, d.Name)
+		if cpuOnly && m.Settings.Int(ctx, d.Prefix+".gpu_layers", settings.Scope{}) != 0 &&
+			m.Settings.String(ctx, d.Prefix+".gpu_backend", settings.Scope{}) != string(engine.FlavourCPU) {
+			cpuOnly = false
+		}
+	}
+	f := FitAlongside(hw, kind, weights, kvPerTok, n, without(residents, labels...))
+	if cpuOnly && len(labels) > 0 && f.Verdict != "in_binary" {
+		f = Fit{Verdict: "cpu", NeededMB: f.NeededMB, Context: f.Context, KVEstimate: f.KVEstimate}
+	}
+	return f
+}
+
+// entryFit is fitFor for a catalog entry (with its projector) at its default context.
+func (m *Manager) entryFit(ctx context.Context, hw engine.Hardware, e Entry, residents []Resident) Fit {
+	w := e.Size
+	if e.MMProj != "" {
+		if p, ok := CatalogEntry(e.MMProj); ok {
+			w += p.Size
+		}
+	}
+	return m.fitFor(ctx, hw, e.Kind, w, e.KVBytesPerTok, e.ContextDefault, residents)
 }
 
 // FitWarning says when a model being installed for engine labels won't fit on its card next
