@@ -123,6 +123,11 @@ Update it at the end of every working session, and whenever a task finishes or a
     5. Factory reset clears the node's Wi-Fi credentials; registration timed out until the node rejoined the LAN, then succeeded on retry.
   - Process lesson: a background agent checked out a branch in the shared working tree and 9 commits landed there; moved back to main. Future agents that need git branches work in their own `git worktree`.
 - **Deferred to a follow-up session (user, 2026-10-07):** permanent jarvis-dev PulseAudio fix (finding 4), investigated together with the other install-UX follow-ups above.
+- **Future TODOs the user asked to track (not Phase 6 blockers):**
+  - A timezone UI (household timezone is taken from the most recently seen node today).
+  - A really nice logging system to replace the simple admin Logs page (AD9).
+  - Permanent jarvis-dev PulseAudio fix (above).
+  - A controlled benchmark: legacy stack vs jarvisd on the same box and model (server overhead, first-audio latency, memory, CPU); jarvisd voice traces need per-span timings first.
 - **2026-10-07 (cont.): Phase 5c done.** Seven sub-systems ported by parallel agents in worktrees, merged onto main by the coordinator (all cc tests + race green):
   - **doc 12 packages:** install/uninstall/revert (5 min pickup, verify + 15 min, D39), command-data browser, node tools view; Forge test install dropped (D5). `pantry.base_url` reaches nodes (`pantry_url` in payload/verify) and `/services` (`jarvis-pantry`, synced at startup).
   - **doc 07 smart home:** rooms, devices (`/node/devices` fixed on jarvis-dev), control/state, scans, device lists, Bluetooth, OAuth (exchange URL fenced: https+public, or LAN-not-loopback; no allow-list setting yet), camera stubs (D29). `control_device` cut (D9/M7).
