@@ -169,6 +169,9 @@ func (m *Module) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		start := time.Now()
 		list, err := src.Settings().List(r.Context(), settings.Scope{}, "")
+		if err != nil && r.Context().Err() != nil {
+			return // the client went away (navigated off the page): nothing failed, nobody reads the reply
+		}
 		res := serviceSettings{ServiceName: src.Name(), DisplayName: displayName(src.Name()), Success: err == nil,
 			Settings: list, LatencyMS: float64(time.Since(start).Microseconds()) / 1000}
 		if err != nil {

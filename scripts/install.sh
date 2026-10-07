@@ -89,6 +89,7 @@ if [ $UNINSTALL = 1 ]; then
   # shellcheck disable=SC2086 # flags are words
   if [ $TTY = 1 ]; then $RUN "$BIN" service uninstall $flags </dev/tty; else $RUN "$BIN" service uninstall $flags; fi \
     || { [ $PURGE = 1 ] && die "uninstall stopped; nothing more was removed"; warn "the service was not removed cleanly"; }
+  # jarvisd.prev: `jarvisd upgrade` keeps the previous binary next to the executable.
   $RUN rm -f "$BIN" "$BIN.prev" && $RUN rm -rf "$LIB_DIR"
   say "jarvisd removed."
   exit 0
@@ -138,7 +139,13 @@ fi
 # can't vouch for itself, so the check needs the minisign tool: with minisign installed the
 # signature is required (missing or invalid is fatal); without it the TLS-anchored checksum
 # alone, with a warning (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
+# `minisign -v` must run: a version-manager shim with no version selected (mise, asdf) is on
+# PATH but fails every call, which would read as an INVALID signature.
+MINISIGN_OK=0
 if command -v minisign >/dev/null; then
+  if minisign -v >/dev/null 2>&1; then MINISIGN_OK=1; else warn "minisign is on PATH but doesn't run (\`minisign -v\` failed); treating it as not installed"; fi
+fi
+if [ $MINISIGN_OK = 1 ]; then
   fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null || die "the release has no SHA256SUMS.minisig; not installing an unsigned release"
   minisign -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID; not installing"
   say "SHA256SUMS signature verified."
@@ -188,7 +195,7 @@ fi
 
 # Firewall (ID5): ask, default yes; without a terminal only with --yes. Private LANs only.
 # shellcheck disable=SC2086
-report=$($SUDO "$BIN" doctor --json $HOMEFLAG 2>/dev/null || true)
+report=$($RUN "$BIN" doctor --json $HOMEFLAG 2>/dev/null || true)
 if printf '%s' "$report" | grep -q '"fix_cmds"'; then
   lans=$(printf '%s' "$report" | sed -n 's/.*"name": "firewall \([0-9./]*\)".*/\1/p' | tr '\n' ' ' | sed 's/ $//')
   if ask "Allow nodes and phones on ${lans:-your LAN} to reach jarvisd through the host firewall?"; then
@@ -201,7 +208,7 @@ fi
 
 say ""
 # shellcheck disable=SC2086
-$SUDO "$BIN" doctor $HOMEFLAG || true
+$RUN "$BIN" doctor $HOMEFLAG || true
 say ""
 say "jarvisd $VERSION is running."
 # shellcheck disable=SC2086
@@ -211,4 +218,4 @@ case "$OS$SVC" in
   linux) say "Logs: journalctl -u jarvisd -f" ;;
   darwin) say "Logs: tail -f ~/.jarvisd/logs/jarvisd.log" ;;
 esac
-say "Manage: jarvisd service status | ${SUDO:+sudo }jarvisd service restart | sh install.sh --uninstall"
+say "Manage: jarvisd service status${SVC:+ $SVC} | ${RUN:+sudo }jarvisd service restart${SVC:+ $SVC} | sh install.sh --uninstall${SVC:+ $SVC}"

@@ -129,6 +129,27 @@ func TestVoiceStreamTraceSpans(t *testing.T) {
 	}
 }
 
+// A10 rehearsal: every turn failed in the LLM (stop_reason "error", nothing spoken) yet the
+// Traces page and the dashboard showed each one green.
+func TestVoiceTraceMarksLLMFailure(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.start("c9", weatherTool)
+	ve.eng.push(engineReply{status: 500, content: "Jinja Exception: System message must be at the beginning."})
+	res := ve.turn("/api/v0/voice/command/stream", "c9", "what time is it", nil).want(202).json()
+	if res["stop_reason"] != "error" {
+		t.Fatalf("stop_reason %v", res["stop_reason"])
+	}
+	id := ve.traceIDs("voice_command_stream", 1)[0]
+	d := ve.do("GET", "/api/v0/admin/traces/"+id, nil, adminH()).want(200).json()
+	if d["status"] != "error" || !strings.Contains(fmt.Sprint(d["error_message"]), "System message must be at the beginning") {
+		t.Fatalf("trace status %v error %v", d["status"], d["error_message"])
+	}
+	_, by := ve.traceSpans(id)
+	if by["tool_execution_loop"]["status"] != "error" {
+		t.Fatalf("tool_execution_loop %v", by["tool_execution_loop"])
+	}
+}
+
 func TestVoiceBlockingTraceServerTool(t *testing.T) {
 	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
 	ve.stt.recognition = true

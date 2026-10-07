@@ -29,7 +29,7 @@ export default function LoginPage() {
   }, [navigate])
 
   if (state.isAuthenticated) {
-    return <Navigate to={mustChangePassword ? '/change-password' : '/settings'} replace />
+    return <Navigate to={mustChangePassword ? '/change-password' : '/dashboard'} replace />
   }
 
   const handleLogin = (e: FormEvent) => {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -215,6 +216,46 @@ describe('setup wizard (AD3, AD3a)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Go to the dashboard/ }))
     expect(await screen.findByText('dashboard page')).toBeInTheDocument()
     expect(sessionStorage.getItem(STEP_STORAGE_KEY)).toBeNull()
+  })
+
+  // A10 rehearsal: a refused setup (a .local email → 422) blanked the whole form and showed
+  // nothing, because the wizard unmounted while the auth call was in flight.
+  it('keeps the account form and shows why setup was refused', async () => {
+    setSetupToken('tok')
+    auth.setup.mockRejectedValueOnce(
+      new AxiosError('Request failed with status code 422', 'ERR_BAD_REQUEST', undefined, undefined, {
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        headers: {},
+        config: {} as InternalAxiosRequestConfig,
+        data: {
+          detail: [
+            {
+              type: 'value_error',
+              loc: ['body', 'email'],
+              msg: 'value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email.',
+            },
+          ],
+        },
+      }),
+    )
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    fireEvent.change(await screen.findByLabelText('Display Name'), { target: { value: 'Op' } })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@jarvis.local' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/special-use or reserved name/)
+    expect(screen.getByLabelText('Email')).toHaveValue('op@jarvis.local')
+    expect(screen.getByLabelText('Display Name')).toHaveValue('Op')
+
+    // Corrected, it goes through on the same form.
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    await waitFor(() => expect(auth.setup).toHaveBeenLastCalledWith('op@example.com', 'password123', 'Op', 'tok'))
+    expect(await screen.findByText('RTX 3080 Ti')).toBeInTheDocument()
   })
 
   it('saves changed hardware choices through the labels PUT', async () => {

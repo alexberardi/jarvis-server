@@ -71,7 +71,7 @@ func New(auth Authenticator, opts Options) (*Broker, error) {
 		log = slog.Default()
 	}
 	log = log.With("component", "mqtt")
-	srv := mochi.New(&mochi.Options{InlineClient: true, Logger: log})
+	srv := mochi.New(&mochi.Options{InlineClient: true, Logger: slog.New(connLogHandler{log.Handler()})})
 	if err := srv.AddHook(newAuthHook(auth, opts.AllowAnonymous, log), nil); err != nil {
 		return nil, fmt.Errorf("mqtt: add auth hook: %w", err)
 	}
