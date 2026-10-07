@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-## Current phase: 3 (LLM) wrapping up — Phases 1–2 done — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
+## Current phase: 4 (voice) — Phases 1–3 done — Phase 1 control plane done; Phase 0 leftovers: 0.5 G4 ISO guard, 0.6 a few wire rows
 
 ### Phase 0 checklist
 
@@ -102,4 +102,5 @@ Update it at the end of every working session, and whenever a task finishes or a
   - Phase 3 spec written (`docs/llm/`), all LLM questions answered (LD1–LD8): labels with path-keyed engine sharing, OpenAI-compatible remotes only, first-class model manager (install from Hugging Face), images follow labels, prod cutover starts clean (dogfood fresh install), embeddings on llama-server with model-tagged vectors + auto re-embed, vLLM dropped, thinking is the user's choice.
   - **Phase 3 built:** llm module = engine stack (llama-server + whisper-server, pinned builds per OS/GPU flavour, GPU detection, label-keyed shared instances, model manager with Hugging Face installs) + Service/API (frozen stream format, request shaping, regex date keys, queue/callbacks, D8 fixes). End-to-end through jarvisd: here on CUDA (RTX 3080 Ti) and on the MBP on **Metal** (M2 Max, metal build, MTL0 device), one engine serving both labels; stopping jarvisd leaves no llama-server orphan. Fixed from the e2e run: explicit install backend now applies to the assigned labels.
   - whisper-server builds: our CI builds and hosts them (decision log). CUDA 12.x chosen for x64 (widest driver support).
-- **Next:** finish Phase 3: run the LLM contract tests against jarvisd with a real model; point OCR's LLM vision at the in-process Service; real-model smoke with a Qwen on the MBP. Then Phase 4 voice (Kokoro + speaker ID in-binary, whisper-server STT).
+  - Phase 3 verified: all LLM contract tests pass against jarvisd with real engines (CUDA here, MiniLM 384-d embeddings); real Qwen3-4B on the MBP via the model manager on **Metal**: no-think answer in 0.61 s, thinking at ~95 tok/s, `tomorrow_morning` date key extracted, no orphan engine on stop. OCR's LLM vision/validation now call the llm module in memory (`InProcessClient`).
+- **Next:** whisper-server CI builds (agent in progress) → Phase 4 voice: STT module on whisper-server (contract: contract/whisper_test.go), Kokoro TTS + ERes2Net speaker ID in-binary via internal/voice/sherpa, voice models via the model manager, enrollment/verify routes, threshold calibration on jarvis-dev enrollments.
