@@ -51,6 +51,8 @@ type Endpoint struct {
 	Engine string `json:"engine,omitempty"`
 	// Degraded is set while the engine fails health checks but hasn't been restarted yet.
 	Degraded bool `json:"degraded,omitempty"`
+	// FoldSystemMessages: requests must be folded for a strict chat template (ID12).
+	FoldSystemMessages bool `json:"fold_system_messages,omitempty"`
 }
 
 // ErrNotConfigured is returned for a label with no model (or engine=off): 01 §3.9 "not
@@ -108,6 +110,9 @@ type Resolver struct {
 	RetryFailed time.Duration
 	// Interval is how often Start's loop reconciles; default 15s.
 	Interval time.Duration
+	// TemplateDir holds the pinned chat templates engines are launched with
+	// (<home>/templates); default <tmp>/jarvisd-chat-templates.
+	TemplateDir string
 
 	mu        sync.Mutex
 	instances map[string]*instance // by key hash
@@ -179,7 +184,7 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 			return ep, nil, ErrNotConfigured
 		}
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
-		ep.Vision = c.RemoteVision
+		ep.Vision, ep.FoldSystemMessages = c.RemoteVision, c.FoldSystemMessages
 		return ep, nil, nil
 	case c.Problem != "":
 		delete(r.bound, label)
@@ -209,6 +214,12 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 			Reason: fmt.Sprintf("downloading %s %s build %s", c.Kind, f, Releases[c.Kind].Build)}
 	}
 	key := keyFor(c, f, bin)
+	if c.ChatTemplate != "" && c.Kind == KindLlama && !c.Embedding {
+		if key.ChatTemplate, err = r.templateFile(c.ChatTemplate); err != nil {
+			delete(r.bound, label)
+			return ep, nil, &NotReadyError{Label: label, State: "misconfigured", Reason: "chat template: " + err.Error()}
+		}
+	}
 	h := key.hash()
 	inst := r.instances[h]
 	if inst == nil {
@@ -225,6 +236,7 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 	}
 	r.bound[label] = h
 	ep.Engine, ep.APIKey, ep.Model = inst.name, inst.apiKey, inst.alias
+	ep.FoldSystemMessages = c.FoldSystemMessages
 	ep.ContextLength, ep.Parallel = key.Context, key.Parallel
 	ep.Vision = key.MMProj != ""
 	if c.Kind == KindWhisper {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +40,8 @@ type fakeEngine struct {
 	script []engineReply
 	reqs   []map[string]any
 	delay  time.Duration // added to every completion (span-duration tests)
+	// strict makes the endpoint a strict-template one (FoldSystemMessages, ID12).
+	strict atomic.Bool
 }
 
 func newFakeEngine(t *testing.T) *fakeEngine {
@@ -162,10 +165,11 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-type engineResolver struct{ url string }
+type engineResolver struct{ eng *fakeEngine }
 
 func (r engineResolver) Resolve(context.Context, string) (llm.Endpoint, error) {
-	return llm.Endpoint{BaseURL: r.url, Model: "fake.gguf", ContextLength: 8192}, nil
+	return llm.Endpoint{BaseURL: r.eng.srv.URL, Model: "fake.gguf", ContextLength: 8192,
+		FoldSystemMessages: r.eng.strict.Load()}, nil
 }
 
 // messagesOf returns a recorded request's messages as (role, content) pairs.
@@ -322,7 +326,7 @@ func newVoiceEnv(t *testing.T, provider string, configure ...func(m *Module)) *v
 	t.Helper()
 	eng := newFakeEngine(t)
 	ve := &voiceEnv{eng: eng, stt: &fakeSTT{text: "what time is it"}, tts: &fakeTTS{}, notify: &fakeNotifier{}}
-	svc := llm.NewService(llm.ServiceConfig{Resolver: engineResolver{eng.srv.URL}})
+	svc := llm.NewService(llm.ServiceConfig{Resolver: engineResolver{eng}})
 	ve.env = newEnv(t, envOpts{noMQTT: true, configure: func(m *Module) {
 		m.LLM, m.STT, m.TTS, m.Notify = svc, ve.stt, ve.tts, ve.notify
 		m.Names = fakeNames{7: "alex", 8: "sam"}

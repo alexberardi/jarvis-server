@@ -165,6 +165,26 @@ function EngineLabelCard({
 
   const num = (s: string) => (s === '' ? 0 : Math.max(0, Math.floor(Number(s)) || 0))
 
+  // ID12: strict chat templates (Qwen 3.5/3.8) reject a system message that isn't first.
+  const foldField = () => (
+    <Field
+      label="Later system messages"
+      htmlFor={id('fold_system_messages')}
+      hint={cfg.fold_system_messages_effective ? 'Folded into the user turn now' : 'Sent as system messages now'}
+    >
+      <select
+        id={id('fold_system_messages')}
+        value={v('fold_system_messages') ?? 'auto'}
+        onChange={(e) => set({ fold_system_messages: e.target.value })}
+        className={selectClass}
+      >
+        <option value="auto">{mode === 'remote' ? 'auto (send as is)' : "auto (the model's catalog entry)"}</option>
+        <option value="on">fold into the user turn</option>
+        <option value="off">send as is</option>
+      </select>
+    </Field>
+  )
+
   return (
     <div className="space-y-3 rounded-lg border border-[var(--color-border)] p-3" data-testid={`label-${label}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -246,6 +266,7 @@ function EngineLabelCard({
                 The remote model accepts images
               </label>
             )}
+            {isLLM && foldField()}
           </div>
         </div>
       )}
@@ -361,6 +382,7 @@ function EngineLabelCard({
                   </Field>
                 </>
               )}
+              {isLLM && foldField()}
               <Field label="Extra engine flags" htmlFor={id('extra_args')}>
                 <input id={id('extra_args')} value={v('extra_args')} onChange={(e) => set({ extra_args: e.target.value })} className={inputClass} />
               </Field>

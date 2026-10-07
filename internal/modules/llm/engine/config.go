@@ -100,7 +100,10 @@ var fields = []field{
 	{name: "kv_cache_type", typ: settings.String, def: "f16", desc: "KV cache type (f16, q8_0, q4_0)", only: []string{ModelLLM},
 		opts: []any{"f16", "q8_0", "q4_0"}},
 	{name: "flash_attn", typ: settings.String, def: "auto", desc: "Flash attention: auto, on or off", opts: []any{"auto", "on", "off"}},
-	{name: "extra_args", typ: settings.String, def: "", desc: "Extra engine flags (shell-quoted)"},
+	{name: "fold_system_messages", typ: settings.String, def: FoldAuto,
+		desc: "Fold later system messages into the user turn, for chat templates that reject them (Qwen 3.5, 3.8): auto = as the model's catalog entry says (never for remote), on or off",
+		opts: []any{FoldAuto, FoldOn, FoldOff}, only: []string{ModelLLM}},
+	{name: "extra_args", typ: settings.String, def: "", desc: "Extra engine flags (shell-quoted); a --chat-template-file here overrides the model's pinned template"},
 	{name: "remote_url", typ: settings.String, def: "", desc: "Remote OpenAI-compatible base URL, e.g. https://api.openai.com/v1",
 		only: []string{ModelLLM, ModelEmbedding}},
 	{name: "remote_model", typ: settings.String, def: "", desc: "Model name sent to the remote endpoint", only: []string{ModelLLM, ModelEmbedding}},
@@ -123,6 +126,13 @@ func (f field) appliesTo(d LabelDef) bool {
 	}
 	return false
 }
+
+// Values of llm.<label>.fold_system_messages (ID12).
+const (
+	FoldAuto = "auto"
+	FoldOn   = "on"
+	FoldOff  = "off"
+)
 
 // Global setting keys owned by this package.
 const (
@@ -219,6 +229,14 @@ type LabelConfig struct {
 	FlashAttn   string `json:"flash_attn"`
 	ExtraArgs   string `json:"extra_args"`
 	Embedding   bool   `json:"embedding"`
+	// ChatTemplate is the model's pinned chat template (from its catalog entry), which the
+	// engine is launched with instead of the GGUF's own; "" = the GGUF's (ID12).
+	ChatTemplate string `json:"-"`
+	// FoldMode is the fold_system_messages setting (auto, on, off; ID12) and
+	// FoldSystemMessages its effect: requests are folded for a strict chat template (auto = the
+	// model's catalog flag, never for remote).
+	FoldMode           string `json:"fold_system_messages"`
+	FoldSystemMessages bool   `json:"fold_system_messages_effective"`
 
 	RemoteURL    string `json:"remote_url"`
 	RemoteModel  string `json:"remote_model"`
@@ -236,6 +254,9 @@ type ModelInfo struct {
 	Path           string
 	MMProjID       string // the model's own projector, when installed with one
 	ContextDefault int
+	// ChatTemplate and FoldSystemMessages come from the model's catalog entry (ID12).
+	ChatTemplate       string
+	FoldSystemMessages bool
 }
 
 // ErrModelNotFound is returned by a ModelLookup for an unknown or not-ready id.
@@ -301,6 +322,8 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	if has("remote_vision") {
 		c.RemoteVision = s.Settings.Bool(ctx, p+"remote_vision", settings.Scope{})
 	}
+	c.FoldMode = strings.ToLower(str("fold_system_messages"))
+	c.FoldSystemMessages = c.FoldMode == FoldOn
 	if c.Engine == "" {
 		c.Engine = ModeLocal
 	}
@@ -320,11 +343,13 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	if c.Engine != ModeLocal {
 		return c, nil
 	}
-	s.resolveModels(ctx, d, &c)
+	s.resolveModels(ctx, d, &c, c.FoldMode != FoldOn && c.FoldMode != FoldOff)
 	return c, nil
 }
 
-func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelConfig) {
+// resolveModels fills in the model and projector paths; autoFold takes the fold flag from
+// the model's catalog entry.
+func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelConfig, autoFold bool) {
 	ref := c.Model
 	if ref == "" && d.DefaultModel != "" && s.Models != nil {
 		if _, err := s.Models.LookupModel(ctx, d.DefaultModel); err == nil {
@@ -355,6 +380,12 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 		}
 	}
 	c.ModelPath = info.Path
+	if d.ModelKind == ModelLLM {
+		c.ChatTemplate = info.ChatTemplate
+		if autoFold {
+			c.FoldSystemMessages = info.FoldSystemMessages
+		}
+	}
 	if c.Context == 0 && d.ModelKind != ModelSTT {
 		c.Context = info.ContextDefault
 		if c.Context == 0 {

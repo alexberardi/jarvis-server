@@ -2,9 +2,12 @@ package models
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -733,6 +736,34 @@ type RegisterRequest struct {
 	Display        string `json:"display,omitempty"`
 	MMProjID       string `json:"mmproj_id,omitempty"`
 	ContextDefault int    `json:"context_default,omitempty"`
+	// CatalogID says the file is that catalog entry's (a copy downloaded elsewhere): its size
+	// and sha256 must match, and the model then gets the entry's prompt provider, pinned chat
+	// template and fold flag like a catalog install.
+	CatalogID string `json:"catalog_id,omitempty"`
+}
+
+// fileSHA256 hashes a file, stopping when ctx ends.
+func fileSHA256(ctx context.Context, path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	buf := make([]byte, 4<<20)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, err := f.Read(buf)
+		h.Write(buf[:n])
+		if errors.Is(err, io.EOF) {
+			return hex.EncodeToString(h.Sum(nil)), nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
 }
 
 // Register adds an existing local file as a ready model.
@@ -743,6 +774,38 @@ func (m *Manager) Register(ctx context.Context, req RegisterRequest) (Model, err
 	st, err := os.Stat(req.Path)
 	if err != nil || st.IsDir() {
 		return Model{}, badRequest("no file at %s", req.Path)
+	}
+	var entry Entry
+	if req.CatalogID != "" {
+		var ok bool
+		if entry, ok = CatalogEntry(req.CatalogID); !ok {
+			return Model{}, badRequest("unknown catalog entry %q", req.CatalogID)
+		}
+		if entry.Archive != "" {
+			return Model{}, badRequest("catalog entry %s is an archive; install it instead", entry.ID)
+		}
+		if req.Kind == "" {
+			req.Kind = entry.Kind
+		}
+		if req.Kind != entry.Kind {
+			return Model{}, badRequest("catalog entry %s is a %s model, not %s", entry.ID, entry.Kind, req.Kind)
+		}
+		if st.Size() != entry.Size {
+			return Model{}, badRequest("%s is %d bytes; catalog entry %s is %d", req.Path, st.Size(), entry.ID, entry.Size)
+		}
+		sum, err := fileSHA256(ctx, req.Path)
+		if err != nil {
+			return Model{}, err
+		}
+		if !strings.EqualFold(sum, entry.SHA256) {
+			return Model{}, badRequest("%s has sha256 %s; catalog entry %s pins %s", req.Path, sum, entry.ID, entry.SHA256)
+		}
+		if req.Display == "" {
+			req.Display = entry.Display
+		}
+		if req.ContextDefault == 0 {
+			req.ContextDefault = entry.ContextDefault
+		}
 	}
 	if req.Kind == "" {
 		req.Kind = engine.ModelLLM
@@ -770,6 +833,9 @@ func (m *Manager) Register(ctx context.Context, req RegisterRequest) (Model, err
 	mod := Model{ID: req.ID, Kind: req.Kind, Display: req.Display, Files: []File{{Name: filepath.Base(req.Path), Size: st.Size()}},
 		Path: req.Path, Size: st.Size(), MMProjID: req.MMProjID, ContextDefault: req.ContextDefault, State: StateReady,
 		BytesDone: st.Size(), External: true}
+	if entry.ID != "" {
+		mod.CatalogID, mod.Repo, mod.Revision, mod.PromptProvider = entry.ID, entry.Repo, entry.Revision, entry.PromptProvider
+	}
 	if err := m.Store.Upsert(ctx, mod); err != nil {
 		return Model{}, err
 	}

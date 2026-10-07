@@ -115,7 +115,8 @@ and background only):
 | `<p>.gpu_layers` | 999 (embeddings 0) | `-ngl`; 0 on a GPU build adds `-dev none`; for stt 0 means `--no-gpu` |
 | `<p>.kv_cache_type` (llm) | `f16` | `-ctk/-ctv` |
 | `<p>.flash_attn` | `auto` | `-fa on/off` (stt: `off` → `-nfa`) |
-| `<p>.extra_args` | `""` | shell-quoted extra flags |
+| `<p>.extra_args` | `""` | shell-quoted extra flags (after jarvisd's own, so a `--chat-template-file` here overrides the pinned one) |
+| `<p>.fold_system_messages` (llm) | `auto` | ID12: `auto` = the model's catalog flag (never for remote), `on`, `off`. When on, requests are folded for a strict chat template (04 §3.7) |
 | `<p>.remote_url`, `remote_model`, `remote_api_key` (secret), `remote_vision` (llm) | | LD2 remote endpoint |
 
 Global:
@@ -235,6 +236,20 @@ Catalog (D12): Qwen3 4B/8B/14B, Qwen3.5-9B (+ projector), Qwen3.8-27B UD-Q4_K_M 
 prod's model), all-MiniLM-L6-v2 F16, whisper large-v3-turbo / large-v3-turbo-q5_0 / small.en /
 base.en, Kokoro multi-lang v1.0, ERes2Net. Hugging Face entries pin a commit.
 
+**Pinned chat templates (ID12).** Every LLM entry names a chat template, `chat_template` (a file
+under `internal/modules/llm/models/templates/`, embedded in the binary) with its
+`chat_template_sha256`. Each file is, byte for byte, the template the GGUF at the pinned revision
+ships (read from the GGUF header). An engine for an installed catalog model (or a file registered
+with `catalog_id`) is launched with `--jinja --chat-template-file <home>/templates/<digest>.jinja`,
+so a re-uploaded GGUF or a catalog bump to a new revision can't change how requests render
+without a reviewed template change here. The GGUF itself was already sha256-pinned; the template
+pin keeps the two decoupled and reviewable. Hand-registered files and arbitrary Hugging Face
+installs use the GGUF's own template. `fold_system_messages: true` marks a strict template
+(Qwen 3.5 9B, Qwen 3.8 27B); a test keeps the flag equal to "the pinned template raises on a
+later system message or a missing user query". Refreshing a pin: fetch the GGUF's
+`tokenizer.chat_template` at the new revision, replace the file, update the digest (the test
+fails on a mismatch).
+
 Fit verdicts: `fits`, `tight` (within 10% of the card), `split` (only with tensor
 split across cards), `too_big`, `cpu` (no usable GPU), `in_binary` (tts/speaker). The estimate
 is weights + KV (`kv_bytes_per_token` × context, f16) + ~3% + 600 MB for LLMs, weights × 1.25 +
@@ -326,6 +341,11 @@ Every kind is listed here, voice models included.
 
 `{"path": "/abs/file.gguf", "kind": "llm", "id": "", "display": "", "mmproj_id": "", "context_default": 0}`
 → 201 Model with `external: true`. Deleting it later never removes the file (05 §4).
+
+`"catalog_id": "qwen3.5-9b"` adopts a copy of a catalog file downloaded elsewhere: its size and
+sha256 must match the entry (422 otherwise; the file is hashed in the request), `kind`,
+`display` and `context_default` default to the entry's, and the model gets the entry's prompt
+provider, pinned chat template and fold flag like a catalog install.
 
 ### `DELETE /v1/models/installed/{id}[?force=true]`
 

@@ -165,7 +165,7 @@ CC paths below are in `jarvis-command-center/app/services/`.
 
 On the REST text path, each `NormalizedMessage` becomes `{"role", "content": " ".join(text_parts)}` (`rest_backend.py:646-655`; stream `:524-527`). This has four consequences:
 
-- **Native tool turns break.** `tool_calls` on assistant messages and `tool_call_id` on tool messages are **dropped**: only role and text survive. CC's native path (shape B) re-sends history containing tool turns. llama-server sees a `role=tool` message with no `tool_call_id` and an assistant turn without its call (§8.3). Prod's 500s on 2026-10-04, "System message must be at the beginning" from the Jinja template, show that the proxy forwards message order unvalidated.
+- **Native tool turns break.** `tool_calls` on assistant messages and `tool_call_id` on tool messages are **dropped**: only role and text survive. CC's native path (shape B) re-sends history containing tool turns. llama-server sees a `role=tool` message with no `tool_call_id` and an assistant turn without its call (§8.3). Prod's 500s on 2026-10-04, "System message must be at the beginning" from the Jinja template, show that the proxy forwards message order unvalidated (jarvisd: §3.7).
 - **Text parts joined with a space,** not a newline.
 - **Images dropped on the text path.** They are only reachable through `generate_vision_chat` (`chat_runner.py:620-638`). That path is taken when any message has an image, and it keeps structured content (`rest_backend.py:752-778`).
 - **Extra keys dropped.** Extra message keys are accepted (`extra="allow"`, `api_models.py:8-9`) but dropped.
@@ -190,6 +190,40 @@ Settings `inference.general.{max_tokens,top_p,top_k,repeat_penalty}` are read on
 - **`<think>` is never stripped by the proxy.** CC strips it (docs/cc/02 §3.4).
 - **`reasoning_content` is dropped.** If llama-server returns it (when `--reasoning-format` separates it), the proxy ignores it. Prod runs `reasoning_format: none`, so think text arrives inline in `content`.
 - **Missing `finish_reason`** defaults to `"stop"`, or to `"tool_calls"` when tool calls are present (`services/response_helpers.py:36-37`). The REST text path hard-codes `"stop"` (`rest_backend.py:675`), so **`length` is never reported on the non-stream text path** (§8.7).
+
+### 3.7 Strict chat templates: system-message folding (jarvisd, ID12)
+
+**Why.** The Qwen 3.5 and 3.8 GGUF templates raise "System message must be at the beginning" on
+any system message after the first, and Qwen 3.5's raises "No user query found in messages" on a
+request without a user message (A10 F10). CC sends both: the per-turn speaker / ambient /
+recently-shown blocks, the engine's retry nags and the continue override are later system
+messages, and the warmup is the system prompt alone. Legacy hid it (an older upload's template
+silently dropped later system messages, so the model never saw those blocks) or 500ed (prod,
+2026-10-04, §3.4).
+
+**What.** `llm.FoldSystemMessages`, applied in `Service.prepare` (after JSON mode's injection,
+so Chat, Stream, queued jobs and the HTTP API all get it) when the resolved endpoint has
+`FoldSystemMessages` (the model's catalog flag, or `llm.<label>.fold_system_messages`, 06 §3):
+
+- `messages[0]`, when it is a system message, is sent unchanged (byte-exact prompt, prefix cache).
+- Each later run of consecutive system messages becomes one block, merged into the user message
+  directly after the run; else appended to the user message directly before it (the continue
+  override after the tool-results message); else sent as a user message of its own (a nag after
+  an assistant or tool message). Order is preserved.
+- A request left without a user message gets `PrimeUserMessage` ("Hi.") as its user turn: the
+  warmup still primes the whole system prompt, and the first turn's prefix matches it up to
+  `<|im_start|>user`.
+
+The block is `<system>\n` + the messages' text joined by a blank line + `\n</system>`, separated
+from the user's own text by a blank line. Tag-style delimiters are what these models are trained
+on (`<tools>`, `<tool_response>`, `<think>`) and what the prompts already use
+(`<ambient_context>`), so the model reads the block as structure rather than as the user's words;
+naming it `system` keeps the operator authority the system role carried. It can't be mistaken
+for a tool result (the template only skips user messages wrapped in `<tool_response>`).
+
+Only the outgoing request changes: CC's conversation history, the prompt builders and the
+golden fixtures are untouched, and unflagged endpoints (Qwen 3 4B/8B/14B, remote by default) get
+exactly the bytes they got before. Verified on Qwen3.5-9B through llama-server b11457 (A10 F10).
 
 ## 4. Data
 

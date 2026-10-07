@@ -28,7 +28,10 @@ type instanceKey struct {
 	KVCacheType string  `json:"kv,omitempty"`
 	FlashAttn   string  `json:"fa,omitempty"`
 	Embedding   bool    `json:"embedding,omitempty"`
-	ExtraArgs   string  `json:"extra,omitempty"`
+	// ChatTemplate is the pinned template's file, named by its digest, so another template is
+	// another instance (ID12).
+	ChatTemplate string `json:"tpl,omitempty"`
+	ExtraArgs    string `json:"extra,omitempty"`
 }
 
 func (k instanceKey) hash() string {
@@ -98,6 +101,10 @@ func (k instanceKey) args(port int, alias string) ([]string, error) {
 			a = append(a, "--embedding", "--pooling", "mean", "-b", "2048", "-ub", "2048")
 		} else {
 			a = append(a, "--jinja")
+			if k.ChatTemplate != "" {
+				// Before the extra args, so an operator's own --chat-template-file wins.
+				a = append(a, "--chat-template-file", k.ChatTemplate)
+			}
 		}
 		if k.MMProj != "" {
 			a = append(a, "--mmproj", k.MMProj)

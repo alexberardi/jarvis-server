@@ -339,6 +339,7 @@ The live slot's thinking flags become redundant once jarvisd sends the kwarg per
 - The settings platform (requires-reload means restart the engine).
 - llama-server features relied on:
   - `--jinja` (tools, `chat_template_kwargs`)
+  - `--chat-template-file` (the catalog's pinned template, ID12; last one wins, so `extra_args` can override)
   - `--mmproj`
   - `--embedding`
   - `--list-devices`

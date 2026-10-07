@@ -28,6 +28,9 @@ type Endpoint struct {
 	ContextLength int
 	// Remote marks a remote endpoint (for /v1/engine).
 	Remote bool
+	// FoldSystemMessages: the model's chat template accepts a system message only first and
+	// needs a user turn, so requests are reshaped by FoldSystemMessages (ID12).
+	FoldSystemMessages bool
 }
 
 // Resolver maps a label to its engine (track A's model manager implements it). Resolve
