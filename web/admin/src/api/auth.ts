@@ -106,6 +106,10 @@ export interface SetupState {
   doctor?: SetupDoctorSummary
   households?: number
   nodes?: number
+  /** The wizard reached Done (admin setting setup.completed). */
+  setup_completed?: boolean
+  /** Where the wizard resumes in any tab or browser; "" once it was finished (A10 F9). */
+  setup_step?: 'hardware' | 'models' | ''
 }
 
 export async function getSetupState(): Promise<SetupState> {

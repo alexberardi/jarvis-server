@@ -37,6 +37,17 @@ function ago(iso: string | null | undefined): string {
 function ModelBanner() {
   const { data } = useSetupState()
   if (!data?.superuser) return null
+  if (data.setup_step) {
+    // A10 F9: the wizard was left before Done (another tab, a closed browser).
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
+        <p className="text-sm text-[var(--color-text)]">Setup isn't finished: models, privacy choices and next steps.</p>
+        <Link to="/setup" className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90">
+          Finish setup
+        </Link>
+      </div>
+    )
+  }
   if (data.models_configured === false) {
     return (
       <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
