@@ -14,14 +14,12 @@ import NodesPage from '@/pages/NodesPage'
 import UsersPage from '@/pages/UsersPage'
 import NativeServicesPage from '@/pages/NativeServicesPage'
 import ModelsPage from '@/pages/ModelsPage'
-import QuickSetsPage from '@/pages/QuickSetsPage'
 import UpdatePage from '@/pages/UpdatePage'
 import ReconcilePage from '@/pages/ReconcilePage'
 import TracesPage from '@/pages/TracesPage'
 import TraceDetailPage from '@/pages/TraceDetailPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import SetupWizard from '@/pages/SetupWizard'
-import LlmSetupWizard from '@/pages/LlmSetupWizard'
 import ChangePasswordPage from '@/pages/ChangePasswordPage'
 import { getSetupState } from '@/api/auth'
 
@@ -59,13 +57,11 @@ function AppRoutes() {
       <Route path="/setup" element={<SetupWizard needsSuperuser={needsSuperuser} />} />
       <Route path="/change-password" element={<ChangePasswordPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/llm-setup" element={<LlmSetupWizard />} />
       <Route element={<AppShell />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/models" element={<ModelsPage />} />
-        <Route path="/quick-sets" element={<QuickSetsPage />} />
         <Route path="/traces" element={<TracesPage />} />
         <Route path="/traces/:id" element={<TraceDetailPage />} />
         <Route path="/update" element={<UpdatePage />} />
