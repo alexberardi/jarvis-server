@@ -252,6 +252,10 @@ func (s *Service) supervise(ctx context.Context, rt *callRuntime) {
 			s.log().Warn("phone: max_call_seconds reached — ending call", "session", rt.sessionID)
 			s.endCallQuietly(rt.sid())
 			<-s.waitDone(rt, hangupGrace)
+			// The provider should have stopped the stream; if not, close it ourselves so the
+			// wrap-up never runs alongside a live turn.
+			rt.cancel()
+			<-s.waitDone(rt, hangupGrace)
 			return
 		case <-hb.C:
 			if !s.Enabled(ctx, rt.householdID) {

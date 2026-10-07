@@ -426,6 +426,22 @@ func TestGuardSuppressesUnaskedSecret(t *testing.T) {
 	}
 }
 
+func TestMaxCallSecondsHangsUp(t *testing.T) {
+	e := newEnv(t)
+	e.set(SettingMaxCallSeconds, int64(1), settings.Scope{HouseholdID: hh})
+	e.llm.assess = `{"summary": "Ran out of time.", "goal_achieved": false}`
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	waitFor(t, "REST hang-up", func() bool { return len(e.provider.endedCalls()) == 1 })
+	sim.send(map[string]any{"event": "stop"}) // what Twilio does after a REST hang-up
+	sim.expectClosed()
+	s := e.waitState(t, id, StateDone)
+	if c := e.notify.titled("⚠️ Call finished: Tony's Pizzeria"); len(c) != 1 || s.Duration == nil {
+		t.Fatalf("outcome: %v", e.notify.all())
+	}
+}
+
 func TestGateOffEndsLiveCall(t *testing.T) {
 	e := newEnv(t)
 	e.s.HeartbeatInterval = 20 * time.Millisecond
