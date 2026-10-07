@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -303,7 +304,19 @@ func BuildReplanPrompt(goal string, done []Step, progress, reason string, menu [
 // or unparseable response, or no usable step.
 var ErrPlan = errors.New("errands: no usable plan")
 
-const plannerMaxTokens = 6000
+// defaultPlannerMaxTokens is errands.planner_max_tokens' default. Legacy used 6000, measured on
+// Qwen3.5-9B (~1900 think tokens); Qwen3-8B thought past 6000 on "check the weather, then set a
+// timer if it's sunny" and never planned (jarvis-dev, 2026-10-07).
+const defaultPlannerMaxTokens = 12000
+
+func (s *Service) plannerMaxTokens(ctx context.Context) int {
+	if s.Settings != nil {
+		if n := s.Settings.Int(ctx, SettingPlannerMaxTokens, settings.Scope{}); n > 0 {
+			return int(n)
+		}
+	}
+	return defaultPlannerMaxTokens
+}
 
 // stripThink keeps only what follows the last </think>.
 func stripThink(text string) string {
@@ -340,7 +353,8 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 	if s.LLM == nil {
 		return nil, errors.New("errands: no LLM")
 	}
-	temp, maxTok := 0.0, plannerMaxTokens
+	temp, maxTok := 0.0, s.plannerMaxTokens(ctx)
+	start := time.Now()
 	req := llm.ChatRequest{
 		Label: "background", Temperature: &temp, MaxTokens: &maxTok,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
@@ -349,6 +363,9 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 	if err != nil {
 		return nil, err
 	}
+	s.log().Info("errands: planner call", "completion_tokens", resp.Usage.CompletionTokens,
+		"prompt_tokens", resp.Usage.PromptTokens, "max_tokens", maxTok, "finish", resp.FinishReason,
+		"elapsed", time.Since(start).Round(100*time.Millisecond))
 	if resp.Content == "" && resp.FinishReason == "length" {
 		// The model thought through the whole budget without answering (Qwen3-8B does on
 		// simple two-step goals; legacy measured ~1900 think tokens on Qwen3.5-9B). Retry

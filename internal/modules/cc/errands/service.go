@@ -38,6 +38,7 @@ type Tools interface {
 // Settings reads the cc settings (*settings.Service).
 type Settings interface {
 	Bool(ctx context.Context, key string, sc settings.Scope) bool
+	Int(ctx context.Context, key string, sc settings.Scope) int64
 }
 
 // Nodes is the node data plane (the cc Bus), headless.
@@ -149,6 +150,8 @@ func (s *Service) timezone(ctx context.Context, hh string) string {
 const (
 	SettingEnabled    = "errands.enabled"
 	SettingAutonomous = "errands.autonomous_enabled"
+	// SettingPlannerMaxTokens caps one planning call's output, thinking included.
+	SettingPlannerMaxTokens = "errands.planner_max_tokens"
 )
 
 // Definitions are the errand settings (D40 Q12, D9).
@@ -166,6 +169,11 @@ func Definitions() []settings.Definition {
 				"counterparty, few steps) autorun; anything else falls back to a card. " +
 				"Fail-closed — any settings error disables autorun — because it lets a " +
 				"background signal originate real writes with no human confirmation."},
+		{Key: SettingPlannerMaxTokens, Category: "errands", Type: settings.Int, Default: int64(defaultPlannerMaxTokens),
+			Description: "Most tokens one errand planning call may produce, thinking included. Planning needs " +
+				"thinking to split multi-step and conditional goals; if the model thinks past this it retries " +
+				"once without thinking (a rougher plan). Must fit the background model's context with the " +
+				"prompt. Higher = better plans on chatty models, slower to arrive."},
 	}
 }
 

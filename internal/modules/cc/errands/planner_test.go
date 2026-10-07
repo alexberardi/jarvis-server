@@ -129,7 +129,7 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("checkpoint = %+v", plan.Steps[1])
 	}
 	req := e.llm.requests("plan")[0]
-	if req.Label != "background" || *req.Temperature != 0 || *req.MaxTokens != 6000 || req.ReasoningBudget != nil {
+	if req.Label != "background" || *req.Temperature != 0 || *req.MaxTokens != defaultPlannerMaxTokens || req.ReasoningBudget != nil {
 		t.Fatalf("planner request = %+v", req)
 	}
 

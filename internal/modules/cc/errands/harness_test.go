@@ -200,6 +200,8 @@ func (f *fakeCards) titles() []string {
 
 type fakeSettings map[string]bool
 
+func (f fakeSettings) Int(context.Context, string, settings.Scope) int64 { return 0 }
+
 func (f fakeSettings) Bool(_ context.Context, key string, _ settings.Scope) bool {
 	if v, ok := f[key]; ok {
 		return v
