@@ -1007,3 +1007,21 @@ windows-latest under `powershell.exe` 5.1 (rule `jarvisd` on the exe, machine PA
 link, no-op re-run, `-Uninstall` removes service, exe, rule and keeps ProgramData;
 `-Uninstall -Purge -Yes`). shellcheck runs on install.sh. Not run on this dev box (no
 passwordless sudo, and no services are installed here).
+
+**Upgrade glue (2026-10-07).** Both scripts now hand a re-run with another version to `jarvisd
+upgrade` before downloading the archive (§8.2 "Integration"), trust exactly `ProjectPublicKey`,
+require the signature when `minisign` is installed, and `--uninstall` also removes `jarvisd.prev`.
+The CI `install` job builds two releases (`v0.0.0-ci`, `v0.0.1-ci`) whose binaries trust a
+throwaway key (`-X …/internal/update.extraTrustedKey=`), signed by `scripts/testsign` (a ~60-line
+Go minisign-compatible signer, checked against minisign 0.12; no minisign on PATH, which would make
+the scripts demand the project signature), plus an unsigned `v0.0.2-ci`. On all three OSes: install
+`v0.0.0-ci`, re-run with `--base-url …/next` → "Upgrading … with `jarvisd upgrade`" → "v0.0.1-ci is up
+and healthy", `/health` and `jarvisd.prev` versions, `last-upgrade.json` `succeeded`; re-run of the
+unsigned one → "only installs signed releases", binary unchanged. Ubuntu (system unit; `sudo jarvisd
+upgrade` swaps in process as root, the unit's `ExecStartPre` helper finds nothing pending — the helper
+path itself is covered by the `upgrade` job's admin button) also checks the DB snapshot, the no-op
+re-run, and finally, with `apt install minisign`, that a fresh install of the throwaway-signed release
+is refused ("signature is INVALID"). macOS: the app stays `permitted` after the swap and `sudo jarvisd
+doctor` is clean; on the macos-14 runner socketfilterfw kept admitting the new build, so the re-admit
+step had nothing to do there (it is the guard for when it doesn't). Windows: SCM restart, rename-aside
+swap, `jarvisd.prev.exe`.
