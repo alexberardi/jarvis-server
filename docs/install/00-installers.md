@@ -849,8 +849,9 @@ signature check **if `minisign` is installed and `SHA256SUMS.minisig` exists** (
 download to `$TMPDIR` or `/var/tmp`, SHA-256 must match → the extracted binary must print the
 version → if installed: same version + healthy = no-op (prints the setup link); different
 version and the installed binary lists `upgrade` = `exec jarvisd upgrade --version vX`
-(with `JARVISD_RELEASE_BASE` passed through); else stop-free replace (`jarvisd.prev` kept in
-`/usr/local/lib/jarvisd`) → fresh install: the new binary's `doctor --json` names a `ports`
+(with `JARVISD_RELEASE_BASE` passed through); else the binary is renamed over the running one
+(`jarvisd.prev` kept in `/usr/local/lib/jarvisd`) and the service reinstall below restarts it
+→ fresh install: the new binary's `doctor --json` names a `ports`
 check → `jarvis-*` containers? refuse, or with `--stop-legacy` `docker update --restart=no`
 + `docker stop` (never `down`); no containers = "another program" refusal → atomic rename
 into `/usr/local/bin` (`~/.local/bin` with `--user`) → `jarvisd service install [--user]`
@@ -874,3 +875,17 @@ drops the PATH entry.
 **Release.** A separate step after "Build and package" copies both scripts into `dist/`;
 they are published as assets but kept out of `SHA256SUMS` (fetched on their own over TLS),
 so a signing step over `SHA256SUMS` is unaffected.
+
+**Verified.** CI job `install` (ci.yml) builds a release-shaped archive (`v0.0.0-ci`) plus
+`SHA256SUMS`, serves it with `python3 -m http.server` and runs the scripts with `--base-url`:
+ubuntu-latest (ufw enabled; an nginx container named `jarvis-config-service` on 7700 makes the
+script refuse, `--stop-legacy` stops it with restart policy `no`; ufw gains the `# jarvisd`
+rules for the runner's 10.1.0.0/20; `Server: jarvisd` on /health; `sudo jarvisd doctor`
+clean; re-run is a no-op; `--uninstall` removes unit, binary and both ufw rules and keeps
+`/var/lib/jarvisd` and the account; reinstall; `--uninstall --purge --yes` removes home,
+`/etc/jarvisd` and the account), macos-14 (application firewall on; after taking the app
+out, doctor fails and `--fix` re-admits it; uninstall removes it from the app list; purge),
+windows-latest under `powershell.exe` 5.1 (rule `jarvisd` on the exe, machine PATH, setup
+link, no-op re-run, `-Uninstall` removes service, exe, rule and keeps ProgramData;
+`-Uninstall -Purge -Yes`). shellcheck runs on install.sh. Not run on this dev box (no
+passwordless sudo, and no services are installed here).
