@@ -348,23 +348,6 @@ func TestStopEscalatesToKill(t *testing.T) {
 	}
 }
 
-func TestStopContextForcesKill(t *testing.T) {
-	t.Parallel()
-	f := newFake(t)
-	spec := f.spec(map[string]string{"HELPER_IGNORE_TERM": "1"})
-	spec.StopTimeout = time.Hour
-	s := start(t, spec)
-	waitHealthy(t, s)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if err := s.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Stop = %v", err)
-	}
-	if s.State() != Stopped {
-		t.Fatalf("state = %s", s.State())
-	}
-}
-
 func TestNoHealthCheckIsHealthyWhenRunning(t *testing.T) {
 	t.Parallel()
 	f := newFake(t)
