@@ -47,7 +47,7 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 // Definitions are the module's settings declared so far.
 func Definitions() []settings.Definition {
 	return slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona), packageDefinitions(),
-		smartHomeDefinitions())
+		smartHomeDefinitions(), memoryDefinitions())
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -264,9 +264,10 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerVoice(mux)
 	// Phase 5c: smart home (doc 07).
 	m.registerSmartHome(mux)
-
 	// Packages, command data and the node tools view (doc 12).
 	m.registerPackages(mux)
+	// Memory and knowledge (doc 04).
+	m.registerMemory(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -301,6 +302,9 @@ func (m *Module) Start(ctx context.Context) error {
 		}
 	}
 	go m.convs.runSweeper(ctx, convSweep)
+	if err := m.startMemory(ctx); err != nil {
+		return err
+	}
 	if m.deps.Scheduler == nil {
 		return nil
 	}
@@ -321,6 +325,9 @@ func (m *Module) Start(ctx context.Context) error {
 func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error {
 	if m.convs != nil {
 		m.convs.purgeUser(userID) // D20/M15: no in-memory identity outlives the account
+	}
+	if err := purgeMemoryUser(ctx, tx, userID); err != nil { // before transcripts: traces key off them
+		return err
 	}
 	for _, q := range []string{
 		`DELETE FROM cc_conversation_transcripts WHERE user_id = ?`,

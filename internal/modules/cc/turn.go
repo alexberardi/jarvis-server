@@ -92,6 +92,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		affectHint(in.Affect),
 		turnHint(in, st, conv.memberNames),
 		profileMatchHint(in.VoiceCommand, speakerBlock),
+		m.agentContextHint(ctx, conv, in.VoiceCommand),
 	}
 	msgs = append(msgs, chatMsg{Role: "user", Content: prompts.UserMessage(in.VoiceCommand, hints, suffix)})
 
