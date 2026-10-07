@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// The real envelope from the live calls (session 804c0806 / b6c51d78).
-const envelope = "Acceptable times: Tue 4-8pm; Wed 5-8pm; Thu 9am-8pm; Fri 9am-8pm; " +
+// The real phoneEnvelope from the live calls (session 804c0806 / b6c51d78).
+const phoneEnvelope = "Acceptable times: Tue 4-8pm; Wed 5-8pm; Thu 9am-8pm; Fri 9am-8pm; " +
 	"Sat 9am-8pm; Sun 9am-8pm\n" +
 	"Do not book: Mon 7am-5pm (Work); Tue 8am-4pm (Same day Epic training); " +
 	"Wed 7am-5pm (Work)"
@@ -53,7 +53,7 @@ func TestTheCasesTheModelFailed(t *testing.T) {
 		{"Is Saturday at 8am possible?", false},
 		{"How about Monday at 6pm?", false},
 	} {
-		r := Check(envelope, c.utt)
+		r := Check(phoneEnvelope, c.utt)
 		if !r.TimeDetected || r.Available == nil || *r.Available != c.want {
 			t.Errorf("%q: got detected=%v available=%v, want %v", c.utt, r.TimeDetected, show(r.Available), c.want)
 		}
@@ -100,7 +100,7 @@ func TestParseProposed(t *testing.T) {
 	}
 }
 
-func TestParseWindows(t *testing.T) {
+func TestPhoneParseWindows(t *testing.T) {
 	if w := ParseWindows("Acceptable times: Tue 4-8pm").Acceptable; len(w) != 1 || w[0] != (Interval{1, 16 * 60, 20 * 60}) {
 		t.Errorf("inherit meridiem: %+v", w)
 	}
@@ -116,7 +116,7 @@ func TestParseWindows(t *testing.T) {
 }
 
 func TestDegradation(t *testing.T) {
-	r := Check(envelope, "Okay, and the patient's name?")
+	r := Check(phoneEnvelope, "Okay, and the patient's name?")
 	if r.TimeDetected || r.Available != nil {
 		t.Errorf("no time: %+v", r)
 	}
@@ -158,7 +158,7 @@ func TestGoldenAgainstPython(t *testing.T) {
 		t.Fatalf("only %d golden cases", len(cases))
 	}
 	for _, c := range cases {
-		b, _ := json.Marshal(Check(c.Env, c.Utt).JSON())
+		b, _ := json.Marshal(Check(c.Env, c.Utt))
 		var got map[string]any
 		_ = json.Unmarshal(b, &got)
 		if !reflect.DeepEqual(got, c.Want) {
@@ -168,7 +168,9 @@ func TestGoldenAgainstPython(t *testing.T) {
 }
 
 func TestJSONShape(t *testing.T) {
-	got := Check("", "nothing").JSON()
+	b, _ := json.Marshal(Check("", "nothing"))
+	var got map[string]any
+	_ = json.Unmarshal(b, &got)
 	want := map[string]any{"time_detected": false, "available": nil, "proposed_label": nil, "acceptable_summary": nil}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v", got)
@@ -176,7 +178,7 @@ func TestJSONShape(t *testing.T) {
 }
 
 func FuzzCheckNeverPanics(f *testing.F) {
-	f.Add(envelope, "Wednesday at 12:99pm to 25")
+	f.Add(phoneEnvelope, "Wednesday at 12:99pm to 25")
 	f.Add("Acceptable times: Mon 99-1am;;", "mon 0:00 a.m.")
 	f.Fuzz(func(_ *testing.T, env, utt string) { _ = Check(env, utt) })
 }

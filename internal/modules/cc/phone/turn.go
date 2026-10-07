@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
-	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/timewindow"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/timewindow"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 )
