@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -194,5 +196,35 @@ func TestMigrateAppliesOutOfOrder(t *testing.T) {
 	}
 	if st, _ := Status(ctx, d, "cc", both); st.Pending != 0 {
 		t.Fatalf("after %+v", st)
+	}
+}
+
+// The DB holds signing keys: its file and WAL/shm are owner-only, including a file an older
+// build created world-readable.
+func TestFilesAreOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ignores Unix modes")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jarvis.db")
+	if err := os.WriteFile(path, nil, 0o644); err != nil { // an old install's file
+		t.Fatal(err)
+	}
+	d, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := d.Write.Exec(`CREATE TABLE t (x)`); err != nil { // touches the WAL
+		t.Fatal(err)
+	}
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode %v", filepath.Base(p), fi.Mode().Perm())
+		}
 	}
 }

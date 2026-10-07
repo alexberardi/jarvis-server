@@ -26,10 +26,31 @@ type DB struct {
 	Read  *sql.DB
 }
 
-// Open opens (creating if needed) the database file at path.
+// ownerOnly makes the database file (created empty if missing) and any WAL/shm files
+// readable by the owner only: the DB holds signing keys and credentials. SQLite creates the
+// -wal and -shm files with the database file's permissions. (Windows ignores the mode; the
+// data dir's ACL protects it there.)
+func ownerOnly(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("db: create file: %w", err)
+	}
+	f.Close()
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(p, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("db: restrict %s: %w", filepath.Base(p), err)
+		}
+	}
+	return nil
+}
+
+// Open opens (creating if needed) the database file at path, owner-only.
 func Open(ctx context.Context, path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("db: create dir: %w", err)
+	}
+	if err := ownerOnly(path); err != nil {
+		return nil, err
 	}
 	w, err := sql.Open("sqlite", dsn(path, false))
 	if err != nil {
