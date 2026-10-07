@@ -21,6 +21,7 @@ the doctor `--fix` mechanics (§6.1), and no GPU/model prefetch (§6.2, settled 
 | # | Date | Question | Decision |
 |---|---|---|---|
 | ID1 | 2026-10-07 | IQ1 service account + data dir | **(a) dedicated service identity**, everything named `jarvisd`: Linux system user `jarvisd` (video/render), `/var/lib/jarvisd`, `/usr/local/bin/jarvisd`, hardened unit, plus a `--user` installer flag (systemd --user + linger, `~/.jarvisd`); macOS LaunchDaemon with `UserName` = installing user, `~/.jarvisd`; Windows SCM service under `NT SERVICE\jarvisd`, `%ProgramData%\jarvisd` (I0 confirmed; explicit `--home` required). Code default changes `~/.jarvis` → `~/.jarvisd`. |
+| ID2 | 2026-10-07 | IQ2 Windows supervisor | **(a) SCM service** under `NT SERVICE\jarvisd` (delayed auto start, recovery actions, clean stop with engine drain). Session-0 GPU still to verify on a real NVIDIA Windows box; if CUDA fails there, switch to a logon task rather than carry both. |
 
 ## Queue
 
