@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -63,6 +64,9 @@ type Module struct {
 	deps     module.Deps
 	settings *settings.Service
 	now      func() time.Time
+	// ready is set once Register has run (migrations are done by then): jarvisd's own log
+	// shipper starts before the modules and must not write into a module that isn't wired.
+	ready atomic.Bool
 }
 
 func (m *Module) Name() string      { return "logs" }
@@ -107,6 +111,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	if deps.Queue != nil {
 		deps.Queue.Register(purgeJob, queue.Handler{Run: m.purge})
 	}
+	m.ready.Store(true)
 }
 
 // Start migrates the settings table and schedules the daily retention purge.
@@ -362,6 +367,9 @@ func (m *Module) Sink() logging.Sink { return sink{m} }
 type sink struct{ m *Module }
 
 func (s sink) Write(ctx context.Context, batch []logging.Record) error {
+	if !s.m.ready.Load() {
+		return logging.ErrNotReady
+	}
 	es := make([]entry, 0, len(batch))
 	for _, r := range batch {
 		lvl := "INFO"

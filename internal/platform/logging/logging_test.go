@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -101,4 +102,32 @@ func TestLoggingAfterCloseIsSafe(t *testing.T) {
 	wg.Wait()
 	log.Info("after close")
 	sh.Close() // idempotent
+}
+
+type lateSink struct {
+	memSink
+	ready atomic.Bool
+}
+
+func (l *lateSink) Write(ctx context.Context, b []Record) error {
+	if !l.ready.Load() {
+		return ErrNotReady
+	}
+	return l.memSink.Write(ctx, b)
+}
+
+// jarvisd's shipper starts before the logs module is wired; a slow startup (migrations) let
+// the first flush hit an unwired module and crash. Records wait until the sink is ready.
+func TestShipperHoldsRecordsUntilSinkReady(t *testing.T) {
+	sink := &lateSink{}
+	sh := NewShipper(sink, 100, 10, time.Millisecond)
+	log := New(io.Discard, slog.LevelInfo, sh)
+	log.Info("starting jarvisd")
+	time.Sleep(20 * time.Millisecond) // several flushes while not ready
+	sink.ready.Store(true)
+	log.Info("listening")
+	sh.Close()
+	if len(sink.records) != 2 || sink.records[0].Message != "starting jarvisd" {
+		t.Fatalf("records %+v", sink.records)
+	}
 }

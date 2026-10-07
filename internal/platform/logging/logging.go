@@ -6,6 +6,7 @@ package logging
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -22,6 +23,10 @@ type Record struct {
 	Source  string // the "module" attribute, or "jarvisd"
 	Attrs   map[string]any
 }
+
+// ErrNotReady is a Sink's answer before it can store anything (its module isn't wired yet):
+// the shipper keeps the batch and tries again on the next flush.
+var ErrNotReady = errors.New("logging: sink not ready")
 
 // Sink stores batches of records (the logs module's table).
 type Sink interface {
@@ -89,8 +94,16 @@ func (s *Shipper) run(sink Sink) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = sink.Write(ctx, buf) // nowhere to report a logging failure but stderr, which has the record already
+		err := sink.Write(ctx, buf) // nowhere to report a logging failure but stderr, which has the record already
 		cancel()
+		if errors.Is(err, ErrNotReady) {
+			// Startup: hold the records, bounded by the buffer size (oldest dropped).
+			if over := len(buf) - cap(s.ch); over > 0 {
+				s.dropped.Add(int64(over))
+				buf = append(buf[:0], buf[over:]...)
+			}
+			return
+		}
 		buf = make([]Record, 0, s.batch)
 	}
 	for {
