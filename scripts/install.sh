@@ -186,7 +186,7 @@ fi
 
 # Firewall (ID5): ask, default yes; without a terminal only with --yes. Private LANs only.
 # shellcheck disable=SC2086
-report=$($SUDO "$BIN" doctor --json $HOMEFLAG 2>/dev/null || true)
+report=$($RUN "$BIN" doctor --json $HOMEFLAG 2>/dev/null || true)
 if printf '%s' "$report" | grep -q '"fix_cmds"'; then
   lans=$(printf '%s' "$report" | sed -n 's/.*"name": "firewall \([0-9./]*\)".*/\1/p' | tr '\n' ' ' | sed 's/ $//')
   if ask "Allow nodes and phones on ${lans:-your LAN} to reach jarvisd through the host firewall?"; then
@@ -199,7 +199,7 @@ fi
 
 say ""
 # shellcheck disable=SC2086
-$SUDO "$BIN" doctor $HOMEFLAG || true
+$RUN "$BIN" doctor $HOMEFLAG || true
 say ""
 say "jarvisd $VERSION is running."
 # shellcheck disable=SC2086
@@ -209,4 +209,4 @@ case "$OS$SVC" in
   linux) say "Logs: journalctl -u jarvisd -f" ;;
   darwin) say "Logs: tail -f ~/.jarvisd/logs/jarvisd.log" ;;
 esac
-say "Manage: jarvisd service status | ${SUDO:+sudo }jarvisd service restart | sh install.sh --uninstall"
+say "Manage: jarvisd service status${SVC:+ $SVC} | ${RUN:+sudo }jarvisd service restart${SVC:+ $SVC} | sh install.sh --uninstall${SVC:+ $SVC}"
