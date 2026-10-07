@@ -1,8 +1,8 @@
 // Package admin is the jarvisd admin module (jarvis-admin, legacy port 7710): it serves the
-// embedded admin SPA (web/admin) with client-side-route fallback, and GET /health.
-//
-// This is the skeleton (docs/admin/00-inventory.md §11.5, A1). /api/* answers a JSON 404
-// until the same-origin gateway and BFF endpoints land (§3.2, pending AQ1).
+// embedded admin SPA (web/admin) with client-side-route fallback, GET /health, and the
+// same-origin /api gateway (docs/admin/00-inventory.md §3.2, AD1): every /api route but a
+// small bootstrap allow-list needs a superuser token, and allow-listed module routes are
+// dispatched to their listener in process (gateway.go). The BFF endpoints come in A3/A4.
 package admin
 
 import (
@@ -14,6 +14,7 @@ import (
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 	adminui "github.com/alexberardi/jarvis-server/web/admin"
 )
 
@@ -30,6 +31,9 @@ type Module struct {
 	UI fs.FS
 	// Version is reported by /health.
 	Version string
+	// Verify checks a user access token for the /api superuser gate (the auth module's
+	// VerifyUser). Nil rejects every gated call.
+	Verify settings.UserVerifier
 }
 
 func (m *Module) Name() string      { return "admin" }
@@ -55,12 +59,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 			"ui_built":  built,
 		})
 	})))
-	// The gateway and BFF endpoints are not built yet; /api must never fall through to the SPA.
-	api := secure(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		httpx.Error(w, http.StatusNotFound, "Not Found")
-	}))
-	mux.Handle("/api", api)
-	mux.Handle("/api/", api)
+	m.mountGateway(mux, deps)
 	mux.Handle("/", secure(static))
 }
 

@@ -45,4 +45,9 @@ type Deps struct {
 	Queue     *queue.Queue
 	Scheduler *scheduler.Scheduler
 	Blobs     blob.Store
+	// Handler returns the routes of another listener served by this process, for dispatching
+	// a request to it in process (the admin gateway), or nil when that listener is not
+	// served. The runner fills it in; call it at request time, after every module registered.
+	// The returned handler is the bare mux, without the listener's recover/log middleware.
+	Handler func(listener string) http.Handler
 }

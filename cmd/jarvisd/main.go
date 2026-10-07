@@ -181,6 +181,8 @@ func modules() []module.Module {
 			auth.OnUserDeleted(c.PurgeUser)
 			auth.OnMemberRemoved(c.PurgeUserHousehold)
 			auth.OnHouseholdDeleted(c.PurgeHousehold)
+		case *adminmod.Module:
+			c.Verify = auth.VerifyUser
 		case *logsmod.Module:
 			c.Auth = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
