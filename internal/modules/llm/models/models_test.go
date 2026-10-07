@@ -16,17 +16,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
-	"github.com/alexberardi/jarvis-server/internal/platform/engines"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
+	"github.com/alexberardi/jarvis-server/internal/platform/engines"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -175,8 +175,8 @@ func (h *hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type fakeLabels struct {
-	mu       sync.Mutex
-	notified int
+	mu        sync.Mutex
+	notified  int
 	status    []engine.LabelStatus
 	instances []engine.InstanceStatus
 }
