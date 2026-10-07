@@ -20,7 +20,7 @@ the doctor `--fix` mechanics (§6.1), and no GPU/model prefetch (§6.2, settled 
 
 | # | Date | Question | Decision |
 |---|---|---|---|
-| | | | |
+| ID1 | 2026-10-07 | IQ1 service account + data dir | **(a) dedicated service identity**, everything named `jarvisd`: Linux system user `jarvisd` (video/render), `/var/lib/jarvisd`, `/usr/local/bin/jarvisd`, hardened unit, plus a `--user` installer flag (systemd --user + linger, `~/.jarvisd`); macOS LaunchDaemon with `UserName` = installing user, `~/.jarvisd`; Windows SCM service under `NT SERVICE\jarvisd`, `%ProgramData%\jarvisd` (I0 confirmed; explicit `--home` required). Code default changes `~/.jarvis` → `~/.jarvisd`. |
 
 ## Queue
 
