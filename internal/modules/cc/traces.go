@@ -5,11 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 )
@@ -255,4 +260,153 @@ func (m *Module) cleanup(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// --- spans (latency_logger.RequestTiming, to_spans, to_trace_summary) ---
+
+// Span names match legacy's so a legacy and a jarvisd trace of the same turn line up
+// (docs/cc/01-voice-pipeline.md "Trace spans" lists them). jarvisd-only: warmup_inference,
+// speaker_resolve and server_tool_<name>.
+
+type traceSpan struct {
+	name, service, status string
+	start, end            time.Duration
+	meta                  map[string]any
+}
+
+// reqTrace collects one request's spans. It rides the request context (withTrace) so the
+// pipeline adds spans without threading it through every call; a nil *reqTrace records
+// nothing.
+type reqTrace struct {
+	t0     time.Time
+	status string
+	mu     sync.Mutex
+	list   []traceSpan
+}
+
+func newReqTrace() *reqTrace { return &reqTrace{t0: time.Now(), status: "ok"} }
+
+type traceCtxKey struct{}
+
+func withTrace(ctx context.Context, t *reqTrace) context.Context {
+	return context.WithValue(ctx, traceCtxKey{}, t)
+}
+
+// traceFrom is the context's trace, or nil.
+func traceFrom(ctx context.Context) *reqTrace {
+	t, _ := ctx.Value(traceCtxKey{}).(*reqTrace)
+	return t
+}
+
+// since is the offset from the request start (a span boundary).
+func (t *reqTrace) since() time.Duration {
+	if t == nil {
+		return 0
+	}
+	return time.Since(t.t0)
+}
+
+// span records a finished span between two offsets (record_span); a non-nil error marks it
+// "error".
+func (t *reqTrace) span(name, service string, start, end time.Duration, err error, meta map[string]any) {
+	if t == nil {
+		return
+	}
+	s := traceSpan{name: name, service: service, status: "ok", start: start, end: end, meta: meta}
+	if err != nil {
+		s.status = "error"
+	}
+	t.mu.Lock()
+	t.list = append(t.list, s)
+	t.mu.Unlock()
+}
+
+// measure opens a span; the returned func closes it (measure()).
+func (t *reqTrace) measure(name, service string, meta map[string]any) func(error) {
+	if t == nil {
+		return func(error) {}
+	}
+	start := t.since()
+	return func(err error) { t.span(name, service, start, t.since(), err, meta) }
+}
+
+// checkpoint records a zero-length span now.
+func (t *reqTrace) checkpoint(name string) {
+	now := t.since()
+	t.span(name, "cc", now, now, nil, nil)
+}
+
+func ms(d time.Duration) float64 { return math.Round(float64(d.Microseconds())/100) / 10 }
+
+func (t *reqTrace) totalMS() float64 { return ms(time.Since(t.t0)) }
+
+func (t *reqTrace) sorted() []traceSpan {
+	t.mu.Lock()
+	out := append([]traceSpan(nil), t.list...)
+	t.mu.Unlock()
+	sort.SliceStable(out, func(i, j int) bool { return out[i].start < out[j].start })
+	return out
+}
+
+// spans is to_spans (stored on the request trace). Nil-safe.
+func (t *reqTrace) spans() []any {
+	if t == nil {
+		return nil
+	}
+	var out []any
+	for _, s := range t.sorted() {
+		meta := s.meta
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		out = append(out, map[string]any{"name": s.name, "service": s.service, "start_ms": ms(s.start),
+			"end_ms": ms(s.end), "duration_ms": ms(s.end - s.start), "status": s.status, "metadata": meta})
+	}
+	return out
+}
+
+// summary is to_trace_summary: leaf spans (no other non-zero span inside them), merged into
+// consecutive same-service hops.
+func (t *reqTrace) summary() *pyjson.Object {
+	all := t.sorted()
+	var nonzero []traceSpan
+	for _, s := range all {
+		if ms(s.end-s.start) > 0 {
+			nonzero = append(nonzero, s)
+		}
+	}
+	type hop struct {
+		service, status string
+		ms              float64
+		steps           []any
+	}
+	var hops []*hop
+	for i, s := range nonzero {
+		parent := false
+		for j, o := range nonzero {
+			if i != j && s.start <= o.start && s.end >= o.end {
+				parent = true
+				break
+			}
+		}
+		if parent {
+			continue
+		}
+		d := ms(s.end - s.start)
+		if n := len(hops); n > 0 && hops[n-1].service == s.service {
+			h := hops[n-1]
+			h.ms = math.Round((h.ms+d)*10) / 10
+			h.steps = append(h.steps, s.name)
+			if s.status == "error" {
+				h.status = "error"
+			}
+			continue
+		}
+		hops = append(hops, &hop{service: s.service, status: s.status, ms: d, steps: []any{s.name}})
+	}
+	out := make([]any, 0, len(hops))
+	for _, h := range hops {
+		out = append(out, servertools.Obj("service", h.service, "duration_ms", h.ms, "status", h.status, "steps", h.steps))
+	}
+	return servertools.Obj("total_duration_ms", t.totalMS(), "span_count", len(all), "status", t.status, "service_hops", out)
 }

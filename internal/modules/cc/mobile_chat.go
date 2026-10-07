@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/rand/v2"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -311,12 +309,12 @@ type chatState struct {
 // steps run on a context that outlives a client hang-up so the conversation history still
 // commits (§11); node waits stop when the client is gone.
 func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, row *nodeRow, req chatRequest) {
-	llmCtx := context.WithoutCancel(ctx)
+	tr := newReqTrace()
+	llmCtx := withTrace(context.WithoutCancel(ctx), tr) // the pipeline's spans land on tr
 	cid := req.ConversationID
 	if cid == "" {
 		cid = newMobileConversationID()
 	}
-	tr := newChatTrace()
 	trace := Trace{ConversationID: cid, RequestType: "mobile_chat", Source: "mobile", NodeID: row.nodeID,
 		HouseholdID: req.HouseholdID, UserID: u.ID, UserCommand: req.Message}
 	finish := func(answer, errMsg string) {
@@ -495,7 +493,7 @@ func (m *Module) replayWords(ctx context.Context, sse *sseWriter, answer string)
 // runChatTools routes each client tool call to the selected node, sequentially (13 §7.5),
 // harvesting actions into st. An offline node fails every call fast with a `status` event
 // instead of waiting out each timeout (D40 Q8); the LLM still narrates the failure.
-func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *chatTrace, u authn.User, nodeID, message string,
+func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace, u authn.User, nodeID, message string,
 	calls []parse.ToolCall, st *chatState) []toolResult {
 	online := false
 	if row, err := m.nodeByID(ctx, nodeID); err == nil {
@@ -600,102 +598,4 @@ func harvestActions(st *chatState, command string, output *pyjson.Object) {
 			st.actionPreview = msg
 		}
 	}
-}
-
-// --- latency trace (latency_logger.RequestTiming, to_trace_summary) ---
-
-type chatSpan struct {
-	name, service, status string
-	start, end            time.Duration
-	meta                  map[string]any
-}
-
-type chatTrace struct {
-	t0     time.Time
-	status string
-	list   []chatSpan
-}
-
-func newChatTrace() *chatTrace { return &chatTrace{t0: time.Now(), status: "ok"} }
-
-// measure opens a span; the returned func closes it (a non-nil error marks it "error").
-func (t *chatTrace) measure(name, service string, meta map[string]any) func(error) {
-	start := time.Since(t.t0)
-	return func(err error) {
-		s := chatSpan{name: name, service: service, status: "ok", start: start, end: time.Since(t.t0), meta: meta}
-		if err != nil {
-			s.status = "error"
-		}
-		t.list = append(t.list, s)
-	}
-}
-
-func ms(d time.Duration) float64 { return math.Round(float64(d.Microseconds())/100) / 10 }
-
-func (t *chatTrace) totalMS() float64 { return ms(time.Since(t.t0)) }
-
-func (t *chatTrace) sorted() []chatSpan {
-	out := append([]chatSpan(nil), t.list...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].start < out[j].start })
-	return out
-}
-
-// spans is to_spans (stored on the request trace).
-func (t *chatTrace) spans() []any {
-	var out []any
-	for _, s := range t.sorted() {
-		meta := s.meta
-		if meta == nil {
-			meta = map[string]any{}
-		}
-		out = append(out, map[string]any{"name": s.name, "service": s.service, "start_ms": ms(s.start),
-			"end_ms": ms(s.end), "duration_ms": ms(s.end - s.start), "status": s.status, "metadata": meta})
-	}
-	return out
-}
-
-// summary is to_trace_summary: leaf spans (no other non-zero span inside them), merged into
-// consecutive same-service hops.
-func (t *chatTrace) summary() *pyjson.Object {
-	all := t.sorted()
-	var nonzero []chatSpan
-	for _, s := range all {
-		if ms(s.end-s.start) > 0 {
-			nonzero = append(nonzero, s)
-		}
-	}
-	type hop struct {
-		service, status string
-		ms              float64
-		steps           []any
-	}
-	var hops []*hop
-	for i, s := range nonzero {
-		parent := false
-		for j, o := range nonzero {
-			if i != j && s.start <= o.start && s.end >= o.end {
-				parent = true
-				break
-			}
-		}
-		if parent {
-			continue
-		}
-		d := ms(s.end - s.start)
-		if n := len(hops); n > 0 && hops[n-1].service == s.service {
-			h := hops[n-1]
-			h.ms = math.Round((h.ms+d)*10) / 10
-			h.steps = append(h.steps, s.name)
-			if s.status == "error" {
-				h.status = "error"
-			}
-			continue
-		}
-		hops = append(hops, &hop{service: s.service, status: s.status, ms: d, steps: []any{s.name}})
-	}
-	out := make([]any, 0, len(hops))
-	for _, h := range hops {
-		out = append(out, servertools.Obj("service", h.service, "duration_ms", h.ms, "status", h.status, "steps", h.steps))
-	}
-	return servertools.Obj("total_duration_ms", t.totalMS(), "span_count", len(all), "status", t.status, "service_hops", out)
 }

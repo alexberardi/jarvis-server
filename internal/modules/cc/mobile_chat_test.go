@@ -204,11 +204,13 @@ func TestMobileChatGoldenProse(t *testing.T) {
 	}
 	// The trace summary has the legacy shape.
 	ts := event(t, frames[len(frames)-1])["trace_summary"].(map[string]any)
-	if ts["span_count"] != 1.0 || ts["status"] != "ok" {
+	// process_command > cache_lookups, tool_execution_loop > llm_call_iter_1, as legacy's
+	// engine recorded into the chat's timing.
+	if ts["span_count"] != 4.0 || ts["status"] != "ok" {
 		t.Fatalf("trace summary %v", ts)
 	}
 	hops := ts["service_hops"].([]any)
-	if len(hops) != 1 || fmt.Sprint(hops[0].(map[string]any)["steps"]) != "[process_command]" {
+	if !strings.Contains(fmt.Sprint(hops), "service:llm_proxy status:ok steps:[llm_call_iter_1]") {
 		t.Fatalf("hops %v", hops)
 	}
 
@@ -255,7 +257,7 @@ func TestMobileChatColdStart(t *testing.T) {
 		t.Fatalf("done %v", done)
 	}
 	ts := done["trace_summary"].(map[string]any)
-	if ts["span_count"] != 2.0 {
+	if ts["span_count"] != 6.0 { // + warmup, warmup_inference
 		t.Fatalf("spans %v", ts)
 	}
 	// The cold warmup asked the (online) node for its tools.
@@ -567,7 +569,7 @@ func TestMobileChatNotForMe(t *testing.T) {
 }
 
 func TestChatTraceSummaryLeafHops(t *testing.T) {
-	tr := &chatTrace{t0: time.Now(), status: "ok", list: []chatSpan{
+	tr := &reqTrace{t0: time.Now(), status: "ok", list: []traceSpan{
 		{name: "warmup", service: "cc", status: "ok", start: 0, end: 10 * time.Millisecond},
 		{name: "process_command", service: "cc", status: "ok", start: 10 * time.Millisecond, end: 30 * time.Millisecond},
 		{name: "llm", service: "llm_proxy", status: "ok", start: 12 * time.Millisecond, end: 20 * time.Millisecond},

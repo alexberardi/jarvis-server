@@ -640,3 +640,23 @@ Shadow replay (PLAN §4 layer 4) must ignore `X-Audio-*` values if Go emits the 
 - **Byte-exact prompt assembly is the top risk.** Any drift in hint strings, block ordering or whitespace silently costs prefix-cache hits. Shadow replay on the assembled `messages` is mandatory.
 - **FastAPI response semantics.** `response_model` serialisation emits every optional field as `null` (`end_of_exchange: null` is handled by the node, `tool_calling_response.py:85-96`). The 422 body shape uses the custom handler at `main.py:111`.
 - **The single-process blast radius**, now that the cache lives in the same process as everything else. Recover per request.
+
+## 12. Trace spans (as built, 2026-10-07)
+
+Request traces (`cc_request_traces.spans_json`, read by the admin `/api/traces/{id}`) carry per-step spans named as legacy's `latency_logger` names them, so a legacy and a jarvisd trace of the same turn line up. The span shape is unchanged: `{name, service, start_ms, end_ms, duration_ms, status, metadata}`, sorted by start. Code: `reqTrace` in `internal/modules/cc/traces.go`; it rides the request context (`withTrace` / `traceFrom`), and a nil trace records nothing.
+
+| Route (`request_type`) | Spans (nesting by indent) |
+|---|---|
+| `/conversation/start` (`warmup`) | `auth_complete` (checkpoint); `warmup_conversation_with_tools` > `warmup_inference` (llm_proxy, jarvisd-only) |
+| `/media/whisper/transcribe` (`stt`) | `stt_transcribe` (whisper; `audio_bytes`, `speaker_audio_bytes`). The speaker pass runs inside it, as in legacy's single whisper-api call. |
+| `/voice/command` (`voice_command`) | `auth_complete`; `cache_get_tools`; `process_voice_command_with_tools` > [turn]; `build_response` |
+| `/voice/command/stream` (`voice_command_stream`) | `auth_complete`; `process_voice_command_with_tools` > [turn]; on 200 also `audio_stream` > per spoken piece `tts_first_chunk` and `tts_stream_total` (tts; `text_chars`, `audio_bytes`), plus the `first_audio_byte` checkpoint |
+| `/voice/command/continue` (`voice_command_continue`) | `auth_complete`; `continue_conversation` > [loop or `final_response_generation`]; `inbox_actions_push` (legacy didn't trace this route) |
+| `/voice/command/continue/stream` (`voice_command_continue`) | `auth_complete`; `continue_stream_dispatch`; `audio_stream` > `llm_stream_first_token`, `llm_stream_total` (llm_proxy; `chars`), TTS spans as above |
+| mobile chat (`mobile_chat`) | `warmup`; `process_command` > [turn]; `mqtt_tool_<name>` (node); `continue_conversation` |
+
+[turn] is `cache_lookups`; `speaker_resolve` (voice only, jarvisd-only); `agent_context` (only when advanced context is on); `tool_execution_loop` > per iteration `llm_call_iter_N` (llm_proxy; `prompt_tokens`, `completion_tokens`, `finish_reason`) and, when it ran tools, `tool_exec_iter_N` (`tools`: every call's name) > `server_tool_<name>` (jarvisd-only); then `final_response_generation` (llm_proxy) when the text path formats server-tool results.
+
+Model time is the sum of the llm_proxy, tts and whisper spans; server overhead is `total_duration_ms` minus that. First audio is the `first_audio_byte` checkpoint.
+
+No jarvisd equivalent: `tool_filtering` and `tool_routing` (keyword filter and router cut, D9); the fast-path `llm_stream_*` spans of `/voice/command/stream` (paths A/B cut, D9; the continue stream keeps them); `inbox_actions_push` on the continue stream (a background goroutine here, so it isn't on the request's critical path). The blocking LLM calls have no time-to-first-token (they don't stream).

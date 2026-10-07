@@ -149,9 +149,11 @@ func (m *Module) handleConversationStart(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	start := m.now()
-	ctx := r.Context()
+	tr, ctx := startVoiceTrace(r.Context())
+	endWarm := tr.measure("warmup_conversation_with_tools", "cc", nil)
 	conv, err := m.warmup(ctx, n, req)
-	m.recordVoiceTrace(n, req.ConversationID, "warmup", "", "", start, err)
+	endWarm(err)
+	m.recordVoiceTrace(n, tr, req.ConversationID, "warmup", "", "", start, err)
 	if err != nil {
 		m.deps.Log.Error("cc: start conversation failed", "conversation_id", req.ConversationID, "err", err)
 		detail(w, http.StatusInternalServerError, "Failed to start conversation: "+err.Error())
@@ -264,7 +266,15 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 			creq.ToolChoice = json.RawMessage(`"auto"`)
 		}
 		creq.ReasoningBudget = m.thinkingBudget(ctx, hh)
-		if _, err := m.LLM.Chat(wctx, creq); err != nil {
+		tr := traceFrom(ctx)
+		llmStart := tr.since()
+		resp, err := m.LLM.Chat(wctx, creq)
+		var meta map[string]any
+		if err == nil {
+			meta = map[string]any{"prompt_tokens": resp.Usage.PromptTokens}
+		}
+		tr.span("warmup_inference", "llm_proxy", llmStart, tr.since(), err, meta)
+		if err != nil {
 			m.deps.Log.Warn("cc: warmup inference failed (non-fatal)", "conversation_id", conv.id, "err", err)
 		}
 	}
