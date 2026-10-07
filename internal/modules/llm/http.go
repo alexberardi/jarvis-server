@@ -39,6 +39,10 @@ func writeAPIError(w http.ResponseWriter, ae *APIError) {
 // app is the proxy's require_app_auth, checked in-process.
 func (m *Module) app(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if inProcess(r) {
+			h(w, r) // another jarvisd module, dispatched in memory (see InProcessClient)
+			return
+		}
 		id, key, ok := authn.AppCreds(r)
 		if !ok {
 			httpx.Error(w, http.StatusUnauthorized, "Missing app credentials")

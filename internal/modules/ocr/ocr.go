@@ -103,6 +103,9 @@ type Module struct {
 	// CallbackAttempts bounds callback retries (default 12, exponential backoff up to 5 min).
 	CallbackAttempts int
 	HTTPClient       *http.Client
+	// LLMClient carries the LLM vision and validation calls (jarvisd routes them in memory to
+	// its llm module). Nil uses HTTPClient.
+	LLMClient *http.Client
 
 	// Engines, when set, replaces the engines built from the fields above (tests).
 	Engines []Engine
@@ -142,7 +145,7 @@ func (m *Module) buildEngines() []Engine {
 		out = append(out, &AppleVision{URL: m.AppleVisionURL, Key: m.AppleVisionKey, Client: m.HTTPClient})
 	}
 	if m.LLMURL != "" {
-		out = append(out, &LLMVision{URL: m.LLMURL, AppID: m.LLMAppID, AppKey: m.LLMAppKey, Client: m.HTTPClient})
+		out = append(out, &LLMVision{URL: m.LLMURL, AppID: m.LLMAppID, AppKey: m.LLMAppKey, Client: m.llmClient()})
 	}
 	return out
 }
@@ -530,4 +533,11 @@ func readPart(fh *multipart.FileHeader) (Image, error) {
 		ct = strings.TrimSpace(ct[:i])
 	}
 	return Image{Data: data, ContentType: ct}, nil
+}
+
+func (m *Module) llmClient() *http.Client {
+	if m.LLMClient != nil {
+		return m.LLMClient
+	}
+	return m.HTTPClient
 }

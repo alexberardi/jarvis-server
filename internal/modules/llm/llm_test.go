@@ -692,3 +692,28 @@ func mustLoads(t *testing.T, s string) any {
 	}
 	return v
 }
+
+func TestInProcessClientSkipsAppAuth(t *testing.T) {
+	e := setup(t)
+	c := e.m.InProcessClient()
+	res, err := c.Post(InProcessBaseURL+"/v1/chat/completions", "application/json",
+		strings.NewReader(`{"model":"live","messages":[{"role":"user","content":"hi"}],"max_tokens":5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("in-process chat: %d %s", res.StatusCode, b)
+	}
+	// The same request over the network without credentials is still refused.
+	nr, err := http.Post(e.srv.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(`{"model":"live","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nr.Body.Close()
+	if nr.StatusCode != 401 {
+		t.Fatalf("network request without creds: %d", nr.StatusCode)
+	}
+}

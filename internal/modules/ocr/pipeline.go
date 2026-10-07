@@ -156,7 +156,7 @@ IMPORTANT INSTRUCTIONS:
   "confidence": 0.0-1.0,
   "reason": "brief explanation (max 200 characters)"
 }`, truncRunes(text, 500))
-	content, err := chatCompletion(ctx, m.HTTPClient, m.LLMURL, m.LLMAppID, m.LLMAppKey, 10*time.Second, map[string]any{
+	content, err := chatCompletion(ctx, m.llmClient(), m.LLMURL, m.LLMAppID, m.LLMAppKey, 10*time.Second, map[string]any{
 		"model":           model,
 		"messages":        []any{map[string]any{"role": "user", "content": prompt}},
 		"response_format": map[string]any{"type": "json_object"},
