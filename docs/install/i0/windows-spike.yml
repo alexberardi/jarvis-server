@@ -1,0 +1,50 @@
+# I0 Windows spike workflow (reference copy). It ran from the throwaway branch spike/i0-windows
+# as .github/workflows/i0-windows-spike.yml; it is not installed on main.
+name: i0-windows-spike
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: scripts/fetch-sherpa-libs.sh windows-amd64
+      - name: Build jarvisd.exe and the spike helpers
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          export GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          go build -trimpath -ldflags "-s -w -X main.version=i0-spike" -o out/jarvisd.exe ./cmd/jarvisd
+          go build -o out/svcwrap.exe ./docs/install/i0/svcwrap
+          go build -o out/mdnsbrowse.exe ./docs/install/i0/mdnsbrowse
+          cp docs/install/i0/windows-spike.ps1 out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: i0-bin
+          path: out/
+
+  spike:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: i0-bin
+          path: bin
+      - name: Run the spike (Windows PowerShell 5.1)
+        shell: powershell
+        run: '& "$PWD\bin\windows-spike.ps1" -Bin "$PWD\bin"'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: i0-results
+          path: C:\i0-results
