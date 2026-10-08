@@ -54,6 +54,8 @@ frozen for the legacy stack.
 
 ## jarvis-recipes-server (optional add-on, stays Python)
 
+> **Superseded 2026-10-08:** recipes is being ported into jarvisd (`docs/recipes/00-inventory.md`); the rows below and PR #39 will not ship. Remaining external changes for recipes: install-e2e `test_recipes.py` stops asserting `/openapi.json` (inventory §11.6); the mobile app needs none unless RQ3 picks the app-side fix.
+
 | Change | Why | When |
 |---|---|---|
 | Image import (`from_image.py`) submits OCR over HTTP (`POST /v1/ocr/jobs` with a `callback_url`) instead of LPUSHing to Redis `jarvis.ocr.jobs` | OCR moved into jarvisd; jarvisd owns the queue and has no Redis | When OCR cuts over to jarvisd |
