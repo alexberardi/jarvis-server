@@ -63,8 +63,12 @@ All FKs and ON DELETE actions kept. `grocery_sku_map`, `recipe_parse_jobs` never
 ## Legacy-import notes
 
 - **Enum spelling:** SQLAlchemy non-native enums store the member *name*, so legacy
-  `recipes.source_type` holds `MANUAL`/`IMAGE`/`URL`. Import must `lower()` it (verify against a
-  prod snapshot; the dev DB is empty).
+  `recipes.source_type` holds `MANUAL`/`IMAGE`/`URL`. Import must `lower()` it (confirmed on the
+  MBP in the R11 rehearsal: `MANUAL`).
+- **As built (R11):** `jarvisd import-recipes` (docs/recipes/00-inventory.md §13) imports recipes,
+  ingredients, steps, tags, recipe_tags, meal plans + items, staples and SKU mappings only (RD6);
+  migration `00002_import_log.sql` adds `recipes_import_log(legacy_kind, legacy_id, new_id,
+  imported_at)`, PK (kind, legacy id), for idempotent and incremental runs.
 - Preserve integer ids (meal plans, ingestions and mobile clients reference recipe ids).
 - Insert order: users → recipes → ingredients/steps/tags/recipe_tags → meal_plans → items →
   everything else.
