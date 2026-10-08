@@ -1,9 +1,14 @@
 #!/bin/sh
 # Install or upgrade jarvisd, the single-binary Jarvis server, on Linux (systemd) or macOS.
 #
-#   curl -fsSL https://github.com/alexberardi/jarvis-server/releases/latest/download/install.sh | sh
+#   curl -fsSLo install.sh https://github.com/alexberardi/jarvis-server/releases/latest/download/install.sh && sh install.sh
 #
-# Options (after `sh -s --` when piped):
+# Download, then run: piped (`curl … | sh`), a failed download (a 404) leaves sh an empty script
+# and the pipeline exits 0 having done nothing (A10b R1). releases/latest is the newest full
+# release; while only release candidates exist it 404s, so install an rc from its own URL
+# (releases/download/vX.Y.Z-rcN/install.sh): a published script installs its own release.
+#
+# Options (after `sh install.sh`, or after `sh -s --` when piped):
 #   --version vX.Y.Z  install that release (default: the release this script came from, or
 #                     the latest for a copy from the repository)
 #   --user            Linux: a systemd --user service for your account (~/.local/bin, ~/.jarvisd)

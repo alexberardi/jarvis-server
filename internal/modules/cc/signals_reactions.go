@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
+	lldates "github.com/alexberardi/jarvis-server/internal/modules/llm/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 )
@@ -731,7 +733,7 @@ func (m *Module) reactAutomation(ctx context.Context, rc reactionCtx) string {
 	if k, ok := catalogKind(rc.Kind); ok {
 		label = k.label
 	}
-	name, args, err := m.pickAction(ctx, label, rule.Instruction, rc.facts(), tools)
+	name, args, err := m.pickAction(ctx, rc.HouseholdID, label, rule.Instruction, rc.facts(), tools)
 	if err != nil {
 		m.deps.Log.Warn("cc: signal automation inference failed", "household", rc.HouseholdID, "err", err)
 		return "error"
@@ -786,7 +788,7 @@ func (m *Module) resolveNodeAndTools(ctx context.Context, hh, preferred string) 
 
 // pickAction is _pick_action: one background-slot tool-call inference (thinking off). An
 // empty name means the model called no tool.
-func (m *Module) pickAction(ctx context.Context, label, instruction string, facts *pyjson.Object, tools []prompts.Tool) (string, map[string]any, error) {
+func (m *Module) pickAction(ctx context.Context, hh, label, instruction string, facts *pyjson.Object, tools []prompts.Tool) (string, map[string]any, error) {
 	if m.LLM == nil {
 		return "", nil, errors.New("LLM unavailable")
 	}
@@ -794,14 +796,11 @@ func (m *Module) pickAction(ctx context.Context, label, instruction string, fact
 		"Event details: " + pyjson.Dumps(facts, true) + "\n" +
 		"The user's instruction for this event: \"" + instruction + "\"\n" +
 		"Call the single tool that carries out the instruction, or none if nothing fits."
-	llmTools := make([]llm.Tool, 0, len(tools))
-	for _, t := range tools {
-		llmTools = append(llmTools, llm.Tool{Raw: json.RawMessage(prompts.CompactASCII(t)), Type: "function"})
-	}
 	temp, maxTok, budget := 0.0, automationMaxTok, 0
 	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{
 		Label: "background", Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
-		Tools: llmTools, ToolChoice: json.RawMessage(`"auto"`),
+		// The engine copy drops the date-time marker, as on the voice path (A10b R6/R9).
+		Tools: llmTools(tools), ToolChoice: json.RawMessage(`"auto"`),
 		Messages: []llm.Message{{Role: "system", Content: llm.TextContent(automationSystem)},
 			{Role: "user", Content: llm.TextContent(user)}},
 	})
@@ -812,6 +811,7 @@ func (m *Module) pickAction(ctx context.Context, label, instruction string, fact
 		return "", nil, nil
 	}
 	fn := resp.ToolCalls[0].Function
+	fn.Arguments = m.automationDates(ctx, hh, instruction, tools, fn.Name, fn.Arguments)
 	args := map[string]any{}
 	if fn.Arguments != "" {
 		dec := json.NewDecoder(strings.NewReader(fn.Arguments))
@@ -824,6 +824,26 @@ func (m *Module) pickAction(ctx context.Context, label, instruction string, fact
 		}
 	}
 	return fn.Name, args, nil
+}
+
+// automationDates resolves the chosen call's date-time parameters the way the voice engine
+// does (A10b R9): ISO values in resolved_datetimes are mapped back to keys, then every
+// date-time parameter is filled or resolved from date keys in the household's zone, with the
+// keys named in the rule's instruction ("remind me tomorrow") as the turn's keys. Without it a
+// dated client tool got whatever the model wrote (an invented ISO date, or a raw key).
+func (m *Module) automationDates(ctx context.Context, hh, instruction string, tools []prompts.Tool, name, args string) string {
+	props := dates.SchemaProperties(tools, name)
+	if props == nil {
+		return args
+	}
+	dctx := dates.New(m.now(), m.householdTimezone(ctx, hh))
+	if _, fixed := dctx.FixISODates([]string{args}); len(fixed) == 1 {
+		args = fixed[0]
+	}
+	if out, changed := dctx.InjectDates(args, props, lldates.Extract(instruction)); changed {
+		args = out
+	}
+	return args
 }
 
 // pySorted turns pyjson objects into maps so pyjson.Dumps writes sorted keys

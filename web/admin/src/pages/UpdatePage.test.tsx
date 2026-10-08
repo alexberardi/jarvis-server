@@ -142,7 +142,7 @@ describe('updates honesty rule (I1)', () => {
 
 describe('update apply (AD5, feature-detected)', () => {
   it('shows the command, and hides Update now once the route answers 404', async () => {
-    current = info({ update_available: true, latest_version: 'v0.2.0', install_command: 'curl -fsSL https://x/install.sh | sh' })
+    current = info({ update_available: true, latest_version: 'v0.2.0', install_command: 'curl -fsSLo install.sh https://x/install.sh && sh install.sh' })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     post.mockRejectedValue(
       Object.assign(new Error('404'), { isAxiosError: true, response: { status: 404, data: { detail: 'Not found' } } }),
@@ -150,7 +150,7 @@ describe('update apply (AD5, feature-detected)', () => {
     renderPage(true)
     // Both the dashboard banner and the page say so.
     expect(await screen.findAllByText('jarvisd v0.2.0 is available')).toHaveLength(2)
-    expect(screen.getByText('curl -fsSL https://x/install.sh | sh')).toBeInTheDocument()
+    expect(screen.getByText('curl -fsSLo install.sh https://x/install.sh && sh install.sh')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Update now/ }))
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/update/apply', { version: 'v0.2.0' }))

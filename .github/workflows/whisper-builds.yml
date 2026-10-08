@@ -292,11 +292,25 @@ jobs:
               exit 1
             fi
             gh release upload "$RELEASE" -R "$GITHUB_REPOSITORY" --clobber ./*
+            gh release edit "$RELEASE" -R "$GITHUB_REPOSITORY" --prerelease --latest=false
           else
-            gh release create "$RELEASE" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+            # An engine release must never be the repository's "latest": jarvisd's documented
+            # installer is releases/latest/download/install.sh. --latest=false alone is not
+            # enough: while no jarvisd release is a full release, GitHub's releases/latest falls
+            # back to the newest full release, which was this one (A10b R1). A prerelease is
+            # never latest; the engine manager fetches by tag (releases/download/<tag>/<asset>)
+            # and jarvisd's update check skips non-version tags, so nothing else changes.
+            gh release create "$RELEASE" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
               --title "whisper-server engines ($WHISPER)" \
               --notes "whisper.cpp \`$WHISPER\` whisper-server builds for jarvisd's engine manager, built by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Windows archives are upstream's, re-hosted unchanged. Verify with SHA256SUMS." \
               ./*
+          fi
+      - name: Not the latest release
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)
+          if [ "$latest" = "$RELEASE" ]; then
+            echo "$RELEASE is the repository's latest release: releases/latest/download/install.sh would 404"
+            exit 1
           fi
       - name: Verify downloads
         run: |

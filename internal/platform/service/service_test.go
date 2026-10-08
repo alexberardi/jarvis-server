@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+// A10b R3: the admin's install command needs --user for a --user install.
+func TestInUserUnitCgroup(t *testing.T) {
+	for cg, want := range map[string]bool{
+		"0::/system.slice/jarvisd.service\n":                                                       false,
+		"0::/user.slice/user-1000.slice/user@1000.service/app.slice/jarvisd.service\n":             true,
+		"12:pids:/user.slice/user-1000.slice/user@1000.service/jarvisd.service\n0::/\n":            true,
+		"0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-kitty-123.scope\n":         false,
+		"0::/user.slice/user-1000.slice/user@1000.service/app.slice/other-jarvisd.service.scope\n": false,
+		"": false,
+	} {
+		if got := inUserUnitCgroup(cg); got != want {
+			t.Errorf("%q: %v, want %v", cg, got, want)
+		}
+	}
+}
+
 func TestDetect(t *testing.T) {
 	const unitCgroup = "0::/system.slice/jarvisd.service\n"
 	const userCgroup = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/jarvisd.service\n"

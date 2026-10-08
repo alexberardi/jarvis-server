@@ -30,6 +30,9 @@ type UpgradeConfig struct {
 	// Helper is set under the systemd system unit, whose privileged ExecStartPre swaps a
 	// staged release in: the service account itself can't write the binary.
 	Helper bool
+	// UserUnit is set under the systemd --user unit (a `--user` install): the suggested
+	// install command then passes --user (A10b R3).
+	UserUnit bool
 	// Source reads releases (JARVIS_UPDATE_API in the CI upgrade job).
 	Source update.Source
 	// Keys replace the embedded trusted keys (tests).

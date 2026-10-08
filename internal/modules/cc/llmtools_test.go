@@ -1,8 +1,10 @@
 package cc
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
@@ -51,5 +53,54 @@ func TestLLMToolsDropDateTimeFormat(t *testing.T) {
 	}
 	if strings.Contains(got, "date-time") {
 		t.Fatal("marker still sent to the engine")
+	}
+}
+
+// A10b R9: the automation path (signal reactions) sends the engine the same stripped copy and
+// resolves the chosen call's date parameters as the voice engine does: a key the model wrote is
+// resolved, and an empty date takes the keys named in the rule's instruction (else today).
+func TestPickActionStripsMarkerAndResolvesDates(t *testing.T) {
+	var reply, sent string
+	se := newSigEnv(t, func(m *Module) {
+		m.LLM = fakeLLMFunc(func(req map[string]any) (string, string) {
+			sent = req["tools"].(string)
+			return "set_reminder", reply
+		})
+		m.HouseholdClock = fixedTZ("America/New_York")
+	})
+	now := time.Date(2026, 10, 8, 16, 0, 0, 0, time.UTC)
+	se.m.now = func() time.Time { return now }
+	v, err := pyjson.Loads(`{"type":"function","function":{"name":"set_reminder","description":"Remind.",` +
+		`"parameters":{"type":"object","properties":{"text":{"type":"string"},` +
+		`"when":{"type":"string","format":"date-time"}},"required":["text"]}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []prompts.Tool{v.(*pyjson.Object)}
+	dctx := dates.New(now, "America/New_York")
+	want := func(key string) string {
+		r, _ := dctx.Resolve([]string{key})
+		if len(r) == 0 {
+			t.Fatalf("no resolution for %s", key)
+		}
+		return r[0]
+	}
+
+	for _, c := range []struct{ instruction, reply, when string }{
+		{"Remind me to water the plants", `{"text": "water the plants", "when": "tomorrow"}`, want("tomorrow")},
+		{"Remind me tomorrow to water the plants", `{"text": "water the plants"}`, want("tomorrow")},
+		{"Remind me to water the plants", `{"text": "water the plants"}`, want("today")},
+	} {
+		reply = c.reply
+		name, args, err := se.m.pickAction(context.Background(), sigHH, "I leave home", c.instruction, pyjson.NewObject(), tools)
+		if err != nil || name != "set_reminder" {
+			t.Fatal(name, err)
+		}
+		if args["when"] != c.when || args["text"] != "water the plants" {
+			t.Fatalf("%q / %s: args %v, want when %s", c.instruction, c.reply, args, c.when)
+		}
+		if strings.Contains(sent, "date-time") || !strings.Contains(sent, `"when":{"type":"string"}`) {
+			t.Fatalf("engine tools: %s", sent)
+		}
 	}
 }

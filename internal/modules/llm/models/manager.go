@@ -29,9 +29,14 @@ import (
 const InstallJobType = "llm.models.install"
 
 // InstallSmallJobType is a second download lane for small installs (voice models,
-// embeddings, small engines), so they don't wait behind a multi-gigabyte LLM. Each lane runs
-// one install at a time, so at most two downloads share the link.
+// embeddings, small engines), so they don't wait behind a multi-gigabyte LLM. The big lane
+// runs one install at a time and the small lane smallLaneConcurrency, so a voice model doesn't
+// wait behind a ~1.2 GB CUDA engine build either (A10b R8): at most three downloads share the
+// link. Engine fetches are serialised per engine by Binaries.Fetch.
 const InstallSmallJobType = "llm.models.install.small"
+
+// smallLaneConcurrency is how many small installs download at once.
+const smallLaneConcurrency = 2
 
 // defaultSmallInstallBytes is the largest install (model + projector + engine still to fetch)
 // that goes to the small lane.
@@ -81,9 +86,9 @@ func (m *Manager) slice() time.Duration {
 
 // RegisterJobs registers the install jobs (both lanes) on the queue.
 func (m *Manager) RegisterJobs(q *queue.Queue) {
-	for _, t := range []string{InstallJobType, InstallSmallJobType} {
+	for t, n := range map[string]int{InstallJobType: 1, InstallSmallJobType: smallLaneConcurrency} {
 		q.Register(t, queue.Handler{
-			Concurrency: 1,
+			Concurrency: n,
 			MaxAttempts: installMaxAttempts,
 			Lease:       m.slice() + 2*time.Minute,
 			Backoff: func(attempt int) time.Duration {

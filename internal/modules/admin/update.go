@@ -194,7 +194,13 @@ func (m *Module) checkReleases(ctx context.Context) *updateStatus {
 		case a.Name == "SHA256SUMS":
 			st.ChecksumsURL = strp(a.URL)
 		case a.Name == installer:
-			cmd := "curl -fsSL " + a.URL + " | sh"
+			// Download, then run: piped, a failed download runs an empty script and exits 0
+			// (A10b R1).
+			cmd := "curl -fsSLo install.sh " + a.URL + " && sh install.sh"
+			if m.Upgrade.UserUnit {
+				// A --user install: the bare script would attempt a system install (A10b R3).
+				cmd += " --user"
+			}
 			if installer == "install.ps1" {
 				cmd = "irm " + a.URL + " | iex"
 			}

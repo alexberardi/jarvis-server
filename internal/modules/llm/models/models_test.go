@@ -736,6 +736,38 @@ func TestSmallInstallOvertakesBigOne(t *testing.T) {
 	e.waitInstall(big.ID, InstallDone)
 }
 
+// A10b R8: the small lane runs two installs at once, so a voice model doesn't wait behind a
+// slow engine download in the same lane.
+func TestSmallLaneRunsTwoAtOnce(t *testing.T) {
+	e := newEnv(t)
+	e.testCatalog()
+	e.mgr.SmallInstallBytes = 1 << 30 // both installs go to the small lane
+	release := make(chan struct{})
+	// The whisper install holds mid-download, in its engine archive.
+	e.hub.hold["/whisper/"+engine.Releases[engine.KindWhisper].Tag()+"/eng.tar.gz"] = release
+	e.start()
+	slow, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "whisper-tiny"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.waitInstall(slow.ID, InstallRunning)
+	fast, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny", WithMMProj: new(bool)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, inst := range []Install{slow, fast} {
+		if info, err := e.q.Get(e.ctx, inst.JobID); err != nil || info.Type != InstallSmallJobType {
+			t.Fatalf("install %s: job %+v %v, want the small lane", inst.ModelID, info, err)
+		}
+	}
+	e.waitInstall(fast.ID, InstallDone)
+	if s, _ := e.mgr.Store.GetInstall(e.ctx, slow.ID); s.State != InstallRunning {
+		t.Fatalf("held install %s while the other finished", s.State)
+	}
+	close(release)
+	e.waitInstall(slow.ID, InstallDone)
+}
+
 func TestInstallRepoShardsResumeAndSlices(t *testing.T) {
 	e := newEnv(t)
 	s1, s2, proj := blob(400<<10, 4), blob(200<<10, 5), blob(64<<10, 6)
