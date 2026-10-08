@@ -15,8 +15,10 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
-// provisioningTTL: a provisioning token lives 10 minutes (provisioning.py).
-const provisioningTTL = 600 * time.Second
+// provisioningTTL: a provisioning token lives 30 minutes (legacy provisioning.py: 10). A user
+// who power-cycles a node mid-setup could outlast 10 minutes; the token is still single-use and
+// bound to one household.
+const provisioningTTL = 30 * time.Minute
 
 func hashToken(raw string) string {
 	s := sha256.Sum256([]byte(raw))

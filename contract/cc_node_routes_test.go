@@ -34,7 +34,16 @@ var provisioningTokenShape = Obj{
 	"token":      Regexp(`^prov_[A-Za-z0-9_-]{43}$`),
 	"node_id":    NonEmptyString,
 	"expires_at": TimestampNaive, // LEGACY-BUG: naive (datetime.utcnow()), as elsewhere in CC.
-	"expires_in": Eq(600),
+	"expires_in": Eq(provisioningTTLSeconds()),
+}
+
+// provisioningTTLSeconds: legacy tokens live 10 minutes; jarvisd's 30 (a node power-cycled
+// mid-setup outlasted 10, 2026-10-08).
+func provisioningTTLSeconds() int {
+	if Jarvisd() {
+		return 1800
+	}
+	return 600
 }
 
 var nodeCreateShape = Obj{

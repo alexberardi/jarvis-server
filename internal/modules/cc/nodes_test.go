@@ -152,7 +152,7 @@ func TestProvisioning(t *testing.T) {
 
 	// D5: the target household's membership, among all of the caller's.
 	tok := e.do("POST", "/api/v0/provisioning/token", map[string]any{"household_id": "hh3", "room": "office"}, bearer(member)).want(201).json()
-	if !strings.HasPrefix(tok["token"].(string), "prov_") || tok["expires_in"] != 600.0 {
+	if !strings.HasPrefix(tok["token"].(string), "prov_") || tok["expires_in"] != 1800.0 {
 		t.Fatalf("token: %v", tok)
 	}
 	e.do("POST", "/api/v0/provisioning/token", map[string]any{"household_id": "hh3"}, bearer(other)).
