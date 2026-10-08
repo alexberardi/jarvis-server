@@ -145,6 +145,10 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("GET /ingredients/stock", m.user(m.handleStockIngredients))
 	mux.HandleFunc("GET /units/stock", m.user(m.handleStockUnits))
 
+	// §3.2 editor photos (R3).
+	mux.HandleFunc("POST /recipes/import/image", m.user(m.handleImportImage))
+	mux.HandleFunc("GET /media/{name...}", m.handleMedia) // #22: no auth
+
 	if deps.Queue != nil {
 		deps.Queue.Register(blobPurgeJobType, queue.Handler{Run: m.runBlobPurge, MaxAttempts: 5, Lease: time.Minute})
 	}

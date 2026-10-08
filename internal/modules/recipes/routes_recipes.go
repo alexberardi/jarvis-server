@@ -570,8 +570,9 @@ func (m *Module) handleUpdateRecipe(w http.ResponseWriter, r *http.Request, c ca
 	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
 		pred, args := c.visible("r")
 		var found int64
-		err := tx.QueryRowContext(ctx, `SELECT r.id FROM recipes_recipes r WHERE r.id = ? AND `+pred,
-			append([]any{id}, args...)...).Scan(&found)
+		var oldImage sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT r.id, r.image_url FROM recipes_recipes r WHERE r.id = ? AND `+pred,
+			append([]any{id}, args...)...).Scan(&found, &oldImage)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errRecipeNotFound
 		}
@@ -600,6 +601,11 @@ func (m *Module) handleUpdateRecipe(w http.ResponseWriter, r *http.Request, c ca
 		}
 		if in.imageURL != nil {
 			set("image_url", *in.imageURL)
+			if *in.imageURL != oldImage.String {
+				if err := m.releaseMedia(ctx, tx, oldImage.String); err != nil {
+					return err
+				}
+			}
 		}
 		if in.prep != nil {
 			set("prep_time_minutes", *in.prep)
@@ -653,15 +659,16 @@ func (m *Module) handleDeleteRecipe(w http.ResponseWriter, r *http.Request, c ca
 	ctx := r.Context()
 	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
 		pred, args := c.visible("r")
-		res, err := tx.ExecContext(ctx, `DELETE FROM recipes_recipes AS r WHERE r.id = ? AND `+pred,
-			append([]any{id}, args...)...)
+		var img sql.NullString
+		err := tx.QueryRowContext(ctx, `DELETE FROM recipes_recipes AS r WHERE r.id = ? AND `+pred+` RETURNING image_url`,
+			append([]any{id}, args...)...).Scan(&img)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errRecipeNotFound
+		}
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return errRecipeNotFound
-		}
-		return nil
+		return m.releaseMedia(ctx, tx, img.String) // R3: the photo goes with its last recipe
 	})
 	if err != nil {
 		m.writeErr(w, err)
