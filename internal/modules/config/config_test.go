@@ -241,6 +241,35 @@ type tcpAddr = net.TCPAddr
 
 func itoa(i int) string { return strconv.Itoa(i) }
 
+// A served listener whose row pointed at an external server (the legacy recipes add-on) is
+// taken over, with a warning naming the old address.
+func TestSelfRegistrationTakesOverExternalRow(t *testing.T) {
+	m, h := setup(t)
+	if c, _ := do(t, h, "POST", "/services", `{"name":"jarvis-recipes-server","host":"10.0.0.103","port":7030}`, "X-Admin-Token", token); c != 201 {
+		t.Fatal(c)
+	}
+	var logs strings.Builder
+	m.deps.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	m.Served = []string{pconfig.ListenerRecipes}
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, body := do(t, h, "GET", "/services/jarvis-recipes-server", "")
+	if body["host"] != "localhost" || body["port"] != float64(7030) {
+		t.Fatalf("row %v", body)
+	}
+	if !strings.Contains(logs.String(), "was=10.0.0.103:7030") {
+		t.Fatalf("no takeover warning: %s", logs.String())
+	}
+	logs.Reset()
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "taking over") {
+		t.Fatalf("warned again for its own row: %s", logs.String())
+	}
+}
+
 // D48: the Pantry clients install from is listed in /services from cc's pantry.base_url.
 func TestExternalServices(t *testing.T) {
 	m, h := setup(t)

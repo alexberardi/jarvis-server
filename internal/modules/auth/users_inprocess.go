@@ -34,6 +34,12 @@ func (m *Module) SetupCounts(ctx context.Context) (SetupCounts, error) {
 	return c, nil
 }
 
+// UserHouseholds lists the households userID belongs to, oldest membership first (the first
+// is the one a fresh token names). Recipes reads the union of them (docs/recipes RD7).
+func (m *Module) UserHouseholds(ctx context.Context, userID int64) ([]string, error) {
+	return userHouseholds(ctx, m.deps.DB.Read, userID)
+}
+
 // UserNames is GET /internal/users/batch in process (command-center's speaker and household
 // member name resolution, docs/cc/06 §3.7): id → username for the ids that exist. Unknown ids
 // are simply absent.
