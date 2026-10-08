@@ -1207,6 +1207,23 @@ func TestVoiceModels(t *testing.T) {
 	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"tts": {"gpu_devices": "0"}}); err == nil {
 		t.Fatal("voice label took an engine field")
 	}
+	// An absolute tts path is the Kokoro directory (what ModelPath hands sherpa); a file inside
+	// it is refused, since synthesis would look for model*.onnx under it.
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"tts": {"model": dir}}); err != nil {
+		t.Fatalf("tts directory path refused: %v", err)
+	}
+	if tts, ok := e.mgr.ModelPath(e.ctx, "tts"); !ok || tts.Path != dir {
+		t.Fatalf("tts by path %+v", tts)
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"tts": {"model": filepath.Join(dir, "model.onnx")}}); err == nil {
+		t.Fatal("tts file path accepted")
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"speaker": {"model": dir}}); err == nil {
+		t.Fatal("speaker directory path accepted")
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"tts": {"model": "kokoro-x"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := e.mgr.Delete(e.ctx, "kokoro-x", true); err != nil {
 		t.Fatal(err)
 	}
