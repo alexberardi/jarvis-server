@@ -38,6 +38,7 @@ Technical choices that need no product call are already made in the inventory:
 | RD4 | 2026-10-08 | RQ4 leaver data | **(a) household keeps shared rows**; delete only the leaver's private rows, jobs, imports and staged recipes; household deletion removes everything. |
 | RD5 | 2026-10-08 | RQ5 prep/cook times | **(a) add `prep_time_minutes` and `cook_time_minutes` columns** and return them. |
 | RD6 | 2026-10-08 | RQ6 cutover import scope | **(a) recipes, meal plans, staples and SKU mappings only**; photo-import originals kept 30 days after the job, then deleted with their OCR readings (hourly cleanup). User asked first whether "everything" was much more work: not much, but jobs/staged rows would be purged on the first cleanup anyway. |
+| RD7 | 2026-10-08 | RQ7 multi-household users | **(b) union** (user): reads (recipes, search, plans, staples, shopping list inputs, SKU map) cover every household the user belongs to; new rows are written to the token's household; a member may edit/delete rows of any household they belong to (security stance: never restrict members; outsiders and non-members still 404). Port note: the shopping list aggregates the plans it is asked for regardless of household; random/AI plan candidates come from the union. |
 | RD1 | 2026-10-08 | RQ1 scope | **(a) port everything**, including the LLM SKU-matching job (user). |
 
 ## Queue
