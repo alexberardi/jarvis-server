@@ -177,7 +177,7 @@ func TestProvisioning(t *testing.T) {
 
 	// Expiry, and body room beating the token's.
 	t2 := e.do("POST", "/api/v0/provisioning/token", map[string]any{"household_id": "hh1", "room": "a"}, adminH()).want(201).json()
-	e.advance(11 * time.Minute)
+	e.advance(31 * time.Minute)
 	e.do("POST", "/api/v0/nodes/register", map[string]any{"node_id": t2["node_id"], "provisioning_token": t2["token"]}, nil).want(401)
 	t3 := e.do("POST", "/api/v0/provisioning/token", map[string]any{"household_id": "hh1", "room": "a"}, adminH()).want(201).json()
 	r3 := e.do("POST", "/api/v0/nodes/register", map[string]any{"node_id": t3["node_id"], "provisioning_token": t3["token"], "room": "b"}, nil).want(201).json()
