@@ -315,11 +315,42 @@ jobs:
           sleep 1
           # ufw on (default deny incoming) so the firewall fix has something to do.
           sudo ufw --force enable
-          # A legacy container holding 7700: refused without --stop-legacy, stopped with it.
-          docker run -d --name jarvis-config-service --restart unless-stopped -p 7700:80 nginx:alpine
+          # A fake legacy stack shaped like prod's: Compose project "jarvis" in ~/.jarvis/compose
+          # with a jarvis-* container holding 7700 and a llama-server that isn't named jarvis-*,
+          # plus the legacy admin as a systemd user unit (linger on, as its installer does).
+          # Next to it, containers that are not legacy and must keep running: a plain one and
+          # one in another Compose project. Refused without --stop-legacy, stopped with it.
+          mkdir -p ~/.jarvis/compose
+          printf '%s\n' 'name: jarvis' 'services:' \
+            '  jarvis-config-service:' '    container_name: jarvis-config-service' '    image: nginx:alpine' \
+            '    restart: unless-stopped' '    ports: ["7700:80"]' \
+            '  llama-server:' '    container_name: llama-server' '    image: nginx:alpine' '    restart: unless-stopped' \
+            > ~/.jarvis/compose/docker-compose.yml
+          docker compose -f ~/.jarvis/compose/docker-compose.yml up -d
+          docker run -d --name plex --restart unless-stopped nginx:alpine
+          docker run -d --name go2rtc --restart unless-stopped --label com.docker.compose.project=cameras \
+            --label com.docker.compose.project.working_dir=/srv/cameras nginx:alpine
+          sudo loginctl enable-linger "$(id -un)"
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          for _ in $(seq 40); do [ -S "$XDG_RUNTIME_DIR/systemd/private" ] && break; sleep 0.5; done
+          mkdir -p ~/.config/systemd/user
+          printf '%s\n' '[Service]' 'ExecStart=/bin/sleep infinity' '[Install]' 'WantedBy=default.target' \
+            > ~/.config/systemd/user/jarvis-admin.service
+          systemctl --user daemon-reload
+          systemctl --user enable --now jarvis-admin.service
           if sh scripts/install.sh --base-url "$BASE" --yes; then exit 1; fi
-          sh scripts/install.sh --base-url "$BASE" --yes --stop-legacy
-          test "$(docker inspect -f '{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}' jarvis-config-service)" = "false no"
+          sh scripts/install.sh --base-url "$BASE" --yes --stop-legacy | tee legacy.log
+          grep -q 'Stopping the legacy stack: .*jarvis-config-service' legacy.log
+          grep -q 'Stopping the legacy stack: .*llama-server' legacy.log
+          for c in jarvis-config-service llama-server; do
+            test "$(docker inspect -f '{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}' $c)" = "false no"
+          done
+          for c in plex go2rtc; do
+            test "$(docker inspect -f '{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}' $c)" = "true unless-stopped"
+          done
+          test "$(systemctl --user is-active jarvis-admin.service || true)" = inactive
+          test "$(systemctl --user is-enabled jarvis-admin.service || true)" = disabled
+          docker inspect jarvis-config-service llama-server >/dev/null # stopped, never removed
           test "$(jarvisd version)" = "$V"
           curl -fsS http://127.0.0.1:7700/health
           curl -fsSI http://127.0.0.1:7700/health | grep -i '^server: jarvisd'
@@ -342,8 +373,14 @@ jobs:
           test ! -e /usr/local/bin/jarvisd && test ! -e /etc/systemd/system/jarvisd.service
           if sudo ufw status | grep -q jarvisd; then exit 1; fi
           sudo test -f /var/lib/jarvisd/jarvis.db && id jarvisd
-          # Reinstall over the kept data.
-          sh scripts/install.sh --base-url "$BASE" --yes
+          # Reinstall over the kept data, as root through sudo: --stop-legacy reaches the
+          # invoking user's admin unit through `systemctl --user -M $SUDO_USER@`.
+          systemctl --user enable --now jarvis-admin.service
+          sudo sh scripts/install.sh --base-url "$BASE" --yes --stop-legacy | tee legacy2.log
+          grep -q "jarvis-admin.service of $(id -un)" legacy2.log
+          test "$(systemctl --user is-active jarvis-admin.service || true)" = inactive
+          test "$(systemctl --user is-enabled jarvis-admin.service || true)" = disabled
+          docker inspect -f '{{.State.Running}}' plex | grep -q true
           # A re-run with a newer release hands over to `jarvisd upgrade` (system unit, run as
           # root through sudo): signature checked by the installed binary, snapshot, swap,
           # restart, health gate.
@@ -440,7 +477,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "install.ps1 $more failed ($LASTEXITCODE)" }
           }
           $exe = Join-Path $env:ProgramFiles 'jarvisd\jarvisd.exe'
-          Install @('-Yes')
+          Install @('-Yes', '-StopLegacy') # no legacy stack here: a no-op
           if ((& $exe version) -ne $env:V) { throw 'wrong version' }
           Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7700/health | Select-Object -ExpandProperty Content
           netsh advfirewall firewall show rule name=jarvisd verbose

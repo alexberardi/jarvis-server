@@ -231,22 +231,26 @@ func TestLegacy(t *testing.T) {
 	o := opts(nil, []*net.IPNet{})
 	o.Firewall = &linuxFirewall{ufw: &UFW{Root: t.TempDir()}, run: noFirewalld}
 	o.LegacyDirs = []string{filepath.Join(dir, ".jarvis")}
-	const ps = "docker ps --format {{.Names}};{{.Ports}}"
-	o.Run = fakeRun(map[string]string{ps: "jarvis-auth;0.0.0.0:7701->7701/tcp, :::7701->7701/tcp\n" +
-		"jarvis-config-service;0.0.0.0:7700->7700/tcp\nhome-assistant;\n"})
+	ps := "docker ps --format " + dockerPS
+	// llama-server is in the legacy Compose project without a jarvis- name.
+	o.Run = fakeRun(map[string]string{ps: "a1;jarvis-auth;0.0.0.0:7701->7701/tcp, :::7701->7701/tcp;jarvis;/home/j/.jarvis/compose\n" +
+		"a2;jarvis-config-service;0.0.0.0:7700->7700/tcp;;\n" +
+		"a3;llama-server;;jarvis;/home/j/.jarvis/compose\n" +
+		"a4;home-assistant;;;\n"})
 	c := find(t, Run(context.Background(), o), "legacy stack")
-	if c.Status != Warn || !strings.Contains(c.Fix, "docker update --restart=no jarvis-auth jarvis-config-service\n") ||
+	if c.Status != Warn || !strings.Contains(c.Fix, "docker update --restart=no jarvis-auth jarvis-config-service llama-server\n") ||
+		!strings.Contains(c.Fix, "systemctl --user disable --now jarvis-admin.service") ||
 		strings.Contains(c.Fix, "home-assistant") || strings.Contains(c.Fix, "down") {
 		t.Errorf("running %+v", c)
 	}
 	// Only its infrastructure runs, on other ports: no conflict.
-	o.Run = fakeRun(map[string]string{ps: "jarvis-postgres;0.0.0.0:5432->5432/tcp\njarvis-redis;\n"})
+	o.Run = fakeRun(map[string]string{ps: "b1;jarvis-postgres;0.0.0.0:5432->5432/tcp;;\nb2;jarvis-redis;;;\n"})
 	if c := find(t, Run(context.Background(), o), "legacy stack"); c.Status != OK || !strings.Contains(c.Detail, "jarvis-postgres, jarvis-redis") {
 		t.Errorf("infra only %+v", c)
 	}
 	// A host-network stack publishes nothing, but holds the ports.
 	o.ServerHeader = func(context.Context, string) (string, error) { return "uvicorn", nil }
-	o.Run = fakeRun(map[string]string{ps: "jarvis-config-service;\n"})
+	o.Run = fakeRun(map[string]string{ps: "c1;jarvis-config-service;;;\n"})
 	if c := find(t, Run(context.Background(), o), "legacy stack"); c.Status != Warn {
 		t.Errorf("host network %+v", c)
 	}
@@ -255,7 +259,7 @@ func TestLegacy(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".jarvis", "compose"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	o.Run = fakeRun(map[string]string{ps: "home-assistant;\n"})
+	o.Run = fakeRun(map[string]string{ps: "d1;home-assistant;;;\n"})
 	if c := find(t, Run(context.Background(), o), "legacy stack"); c.Status != OK || !strings.Contains(c.Detail, "none of its containers run") {
 		t.Errorf("stopped %+v", c)
 	}

@@ -13,8 +13,9 @@ What this runbook does (decisions it rests on):
 - **LD5.** Models and LLM settings start clean through the wizard (the 150 GB `~/.jarvis/compose/.models`
   is left alone; §4.5 has a no-download fallback for the 27B file).
 - **ID7.** `install.sh --stop-legacy` stops the legacy containers (`docker update --restart=no` +
-  `docker stop`, never `down`). Rollback is `jarvisd` off + the legacy containers started again with their
-  restart policies put back (§6).
+  `docker stop`, never `down`): every running one in the legacy Compose project or named `jarvis-*`,
+  and turns off the legacy admin's user unit. Rollback is `jarvisd` off + the legacy containers
+  started again with their restart policies put back, and the admin unit on again (§6).
 - **ID8 / AD3a.** The wizard's Privacy step; prod used the push relay, so it goes on.
 - **A10 node technique.** Active nodes are re-pointed without a factory reset (keeps Wi-Fi): register the
   node's **existing** `node_id` on jarvisd with a provisioning token, swap `api_key` in its `config.json`,
@@ -38,7 +39,8 @@ ufw is installed but **disabled** (`ENABLED=no`), firewalld absent, avahi-daemon
 
 **GPUs today.** GPU 0: `llama-server-bg` 20.2 GB + llm-proxy 0.4 GB. GPU 1: `llama-server` (live) 18.1 GB +
 whisper 2.5 GB + TTS 1.5 GB. Both nearly full, so **every legacy GPU container must be stopped before
-jarvisd can load a model** (see the `--stop-legacy` gap below).
+jarvisd can load a model**. `--stop-legacy` does that (it used to stop only `jarvis-*` names and missed
+the llama-servers; fixed 2026-10-07, see below), and `jarvisd doctor` warns while the legacy stack holds GPU memory.
 
 | Legacy LLM | live (`llama-server`, GPU 1) | background (`llama-server-bg`, GPU 0) |
 |---|---|---|
@@ -56,18 +58,31 @@ carry over).
 except `jarvis-minio-init`, `on-failure`), plus project `jarvis-node` in `~/jarvis-node` and an unrelated
 `plex`.
 
+`--stop-legacy` (and the doctor's "legacy stack" check) picks a running container when it is named
+`jarvis-*`, or its Compose labels put it in project `jarvis` (what the jarvis-admin installer pins in
+`~/.jarvis/compose`), in a `jarvis-*` project (source checkouts, the dockerized node), or in any project
+whose working directory is `~/.jarvis/compose`. Nothing else is touched (`internal/doctor/legacy.go`
+`LegacyContainer`; the scripts apply the same rule).
+
 | Group | Containers | Stopped by `--stop-legacy`? |
 |---|---|---|
 | Core (hold jarvisd's ports) | `jarvis-config-service` 7700, `-auth` 7701, `-logs` 7702, `-command-center` 7703, `-llm-proxy-api` 7704, `-whisper-api` 7706, `-tts` 7707, `-admin` 7710, `-notifications` 7712, `-ocr-service` 7031, `-mosquitto` 1884/9883 | yes |
-| Other `jarvis-*` | `-settings-server` 7708, `-phone-gateway` 7713, `-web` 7722, `-recipes-server` 7030, `-recipes-worker`, `-ocr-worker`, `-postgres`, `-redis`, `-minio`, `-seaweedfs`, `-loki`, `-grafana` 3001, **`-demo-node` 7771** (a dockerized node, project `jarvis-node`) | yes (every running `jarvis-*`) |
-| **Not named `jarvis-*`** | **`llama-server`, `llama-server-bg`, `llm-proxy-worker`** (GPU), `go2rtc` 1984 | **no** |
-| Already exited | `ollama` (exited 8 days, 16 GB volume), `jarvis-minio-init` | — |
+| Other `jarvis-*` | `-settings-server` 7708, `-phone-gateway` 7713, `-web` 7722, `-recipes-server` 7030, `-recipes-worker`, `-ocr-worker`, `-postgres`, `-redis`, `-minio`, `-seaweedfs`, `-loki`, `-grafana` 3001, **`-demo-node` 7771** (a dockerized node, project `jarvis-node`) | yes |
+| In project `jarvis`, not named `jarvis-*` | **`llama-server`, `llama-server-bg`, `llm-proxy-worker`** (GPU), `go2rtc` 1984 | **yes** (by project; Q7 for go2rtc) |
+| Unrelated | `plex` | no |
+| Already exited | `ollama` (exited 8 days, 16 GB volume), `jarvis-minio-init` | — (only running ones are touched) |
+
+T-1 (§3): confirm the project labels with
+`docker ps --format '{{.Names}} {{.Label "com.docker.compose.project"}}'`; every legacy container should
+say `jarvis` (or `jarvis-node`), `plex` nothing or another name.
 
 **Host services.** Two legacy pieces run outside Docker as `jarvis` **user** units:
 
 - `jarvis-admin.service`: the legacy admin backend, listening on **7711** (the 7711 in 00-installers §5.2).
   jarvisd doesn't use 7711, so it is not a port clash, but its "reconcile" button runs `docker compose up -d`,
-  which would bring the GPU containers back. Stop it for the cutover.
+  which would bring the GPU containers back. `--stop-legacy` runs `systemctl --user disable --now
+  jarvis-admin.service` for the invoking user (under `sudo`, for `$SUDO_USER` through
+  `systemctl --user -M $SUDO_USER@`); prod's unit has linger on, so its user manager is reachable.
 - `cloudflared-jarvis.service`: a Cloudflare tunnel (`~/.cloudflared/jarvis-services.yml`) that maps public
   hostnames to `localhost` 7700–7708, 7710, 7712, 7713, 7722, 7030, 7031, 9883 and SSH. The system
   `cloudflared.service` serves Plex only. **The legacy registry points most services at those public
@@ -175,27 +190,29 @@ Budget about 75 min with a fast download, about 2 h at 10 MB/s. Times are from A
    docker exec jarvis-postgres pg_dumpall -U jarvis | gzip > "$BK/pg_dumpall-t0.sql.gz" && ls -lh "$BK"
    ```
 
-### 4.2 Stop what `--stop-legacy` does not stop (2 min)
+### 4.2 See what `--stop-legacy` will stop (1 min)
 
-`install.sh --stop-legacy` stops only running containers named `jarvis-*`. On prod the two llama-servers
-and the llm-proxy worker are not, and they hold 40 GB of VRAM. Stop them first, and the legacy admin
-unit, so nothing brings the stack back during the window:
+No manual stop is needed any more: `--stop-legacy` stops the llama-servers, `llm-proxy-worker` and
+`go2rtc` (project `jarvis`) as well as every `jarvis-*`, and turns off the legacy admin unit, so nothing
+brings the stack back during the window. Look at the list first (read-only):
 
 ```sh
-systemctl --user stop jarvis-admin.service          # 7711 goes away; reversible (§6)
-docker update --restart=no llama-server llama-server-bg llm-proxy-worker
-docker stop llama-server llama-server-bg llm-proxy-worker      # ~10 s
-nvidia-smi --query-gpu=index,memory.used --format=csv          # GPU 0 ~0.4 GB, GPU 1 ~4 GB (whisper/tts still up)
+docker ps --format '{{.Names}};{{.Label "com.docker.compose.project"}};{{.Label "com.docker.compose.project.working_dir"}}' |
+  awk -F';' '{wd=$3; sub(/\/$/,"",wd)} $1 ~ /^jarvis-/ || $2 == "jarvis" || $2 ~ /^jarvis-/ || wd ~ /\/\.jarvis\/compose$/ {print $1}'
+# expect the ~28 running legacy containers of §1 including llama-server, llama-server-bg, llm-proxy-worker,
+# go2rtc and jarvis-demo-node; never plex
+systemctl --user is-enabled jarvis-admin.service    # enabled (it will be disabled and stopped)
 ```
 
-`go2rtc` is left running (no port clash; cameras are deferred, D29; Q7).
+If something on that list must keep running (go2rtc, Q7), start it again after §4.3 with
+`docker update --restart=unless-stopped go2rtc && docker start go2rtc`.
 
 ### 4.3 Install (2–3 min)
 
 ```sh
 cd /tmp
 curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/<tag>/install.sh
-less install.sh                                     # read it; it is ~200 lines
+less install.sh                                     # read it; it is ~300 lines
 sh install.sh --version <tag> --stop-legacy         # prompts for sudo
 ```
 
@@ -205,8 +222,10 @@ Expected, in order (no firewall prompt: ufw is disabled, so doctor has nothing t
 
 1. `SHA256SUMS signature verified.` (minisign installed in §3.5; a missing or bad signature is fatal).
 2. Download of ~20 MB, checksum OK, the binary prints `<tag>`.
-3. `Stopping the legacy stack: jarvis-… jarvis-…` (every running `jarvis-*`, including
-   `jarvis-demo-node`), each now `restart=no`. About 10–20 s.
+3. `Stopping the legacy stack: …` (the §4.2 list: every `jarvis-*`, including `jarvis-demo-node`, plus
+   `llama-server`, `llama-server-bg`, `llm-proxy-worker` and `go2rtc`), each now `restart=no`. About
+   10–20 s. Then `Stopping the legacy admin (systemd user unit jarvis-admin.service of jarvis) and turning
+   it off at login`; 7711 goes away. A warning there instead names the command to run as `jarvis`.
 4. `Installing /usr/local/bin/jarvisd...`, then `jarvisd service install`: system user `jarvisd`
    (groups `video`, `render`), `/var/lib/jarvisd` 0700, `/etc/jarvisd/jarvisd.env` 0640 root:jarvisd,
    `/etc/systemd/system/jarvisd.service`, enabled and started; waits for `/health` (A10: 4 s in total).
@@ -221,12 +240,14 @@ for p in 7700 7701 7702 7703 7704 7706 7707 7710 7712 7031; do
   printf '%s %s\n' $p "$(curl -s -o /dev/null -w '%{http_code}' -D - http://localhost:$p/health | grep -i '^server:' | tr -d '\r')"
 done                                                 # every line "Server: jarvisd"
 ss -ltnH '( sport = :1884 or sport = :9883 )'        # two listeners, jarvisd's broker
-docker ps --format '{{.Names}}'                      # only go2rtc and plex
+docker ps --format '{{.Names}}'                      # only plex (and go2rtc if restarted, Q7)
+nvidia-smi --query-gpu=index,memory.used --format=csv # both cards near 0 until a model loads
+ss -ltnH '( sport = :7711 )'                         # empty: the legacy admin is off
 journalctl -u jarvisd -n 50 --no-pager               # no ERROR lines
 ```
 
-If `install.sh` refuses with "another program holds jarvisd's ports" and no `jarvis-*` container is
-named, find it with `sudo ss -ltnp` and stop it. If the service is not healthy:
+If `install.sh` refuses with "another program holds jarvisd's ports" and names no legacy container,
+find it with `sudo ss -ltnp` and stop it. If the service is not healthy:
 `journalctl -u jarvisd -n 200`, fix, re-run `install.sh` once; still bad → §6.
 
 If you lost the link: `sudo jarvisd setup-link`.
@@ -451,7 +472,7 @@ ss -ltnH '( sport = :7700 or sport = :1884 )'                     # empty
 # 2. Restart policies back exactly as recorded, then start what was running.
 while read -r name policy state; do docker update --restart="$policy" "$name" >/dev/null; done < "$BK/containers.txt"
 docker start $(awk '$3 == "running" {print $1}' "$BK/containers.txt")   # not ollama / minio-init
-systemctl --user start jarvis-admin.service
+systemctl --user enable --now jarvis-admin.service    # --stop-legacy disabled it; 7711 back
 
 # 3. Check.
 docker ps --format '{{.Names}} {{.Status}}' | sort                # every line "Up"; healthy within ~2 min
@@ -511,7 +532,7 @@ Things the read-only survey could not settle. Each has a recommendation.
 | Q4 | The **living_room** node (0.3.1, last seen 2026-09-02): unplugged on purpose, or should it be re-pointed when it's back? Same for the four older nodes. | Re-point on return with §4.8; ignore the rest. |
 | Q5 | Does the kitchen node's **0.3.1** include the "before cutover" node changes (`/node/llm/chat`, per-node MQTT)? (Nodes were not SSH'd into.) | Check the tag; update the node first if not. |
 | Q6 | **Phone calls**: keep at cutover (needs Twilio settings + tunnel change, §4.10) or turn on later? | Later, as a follow-up, unless someone relies on it. |
-| Q7 | **go2rtc** (cameras, deferred D29) is in the legacy compose project but not named `jarvis-*`, so it keeps running. Leave it? | Leave it. |
+| Q7 | **go2rtc** (cameras, deferred D29) is in the legacy compose project `jarvis`, so `--stop-legacy` now stops it with the rest (nothing on jarvisd uses it; the legacy CC that did is stopped too). Start it again after the install (§4.2), or leave it off? | Leave it off; nothing consumes it until cameras land. |
 | Q8 | **Privacy step** values not read from prod: reader proxy (`web_scraping.allow_external`) and update checks. | Update checks on (needed for `jarvisd upgrade --check` in the admin); reader proxy as prod had it (tell me). |
 | Q9 | Legacy had **2 superusers**. Does the second one need superuser on jarvisd? (Needs `jarvisd admin-token create auth` + `PUT /admin/users/{id}/superuser`, ID4.) | Only if they use the admin. |
 | Q10 | When may the legacy stack be **removed** (containers, 150 GB of models, 16 GB ollama volume)? | Two stable weeks, then ask again. |
