@@ -490,9 +490,10 @@ func TestDrainGraceDelaysHealthRestart(t *testing.T) {
 func TestDrainCalledOffWhenEngineRecovers(t *testing.T) {
 	t.Parallel()
 	f := newFake(t)
-	// Sick from 200ms to 400ms: long enough to start draining, then healthy again.
-	spec := f.spec(map[string]string{"HELPER_UNHEALTHY_AFTER": "200ms", "HELPER_RECOVER_AFTER": "400ms"})
-	spec.Health.DrainGrace = 2 * time.Second
+	// Sick from 200ms to 1.5s: long enough to start draining even on a slow runner (a 200ms
+	// window was missed on windows-latest), then healthy again well inside the grace.
+	spec := f.spec(map[string]string{"HELPER_UNHEALTHY_AFTER": "200ms", "HELPER_RECOVER_AFTER": "1500ms"})
+	spec.Health.DrainGrace = 5 * time.Second
 	s := start(t, spec)
 	waitHealthy(t, s)
 	eventually(t, "draining", func() bool { return s.State() == Draining })
