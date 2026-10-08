@@ -46,7 +46,8 @@ var ErrNoEngines = errors.New("No OCR providers available")
 
 // Recognize runs engine names (empty = every enabled, available engine, in EngineRank order)
 // over imgs and returns one reading per engine run, best engine first. Per-image errors are in
-// the readings, not err; err is ErrNoEngines when nothing could run, or the context's error.
+// the readings, not err (a passed deadline too); err is ErrNoEngines when nothing could run, or
+// context.Canceled.
 // Engines run concurrently; each reads the images in order. Text is normalised as the OCR
 // service normalises it.
 func (m *Module) Recognize(ctx context.Context, imgs []Image, o Options, engines []string) ([]Reading, error) {
@@ -75,8 +76,13 @@ func (m *Module) Recognize(ctx context.Context, imgs []Image, o Options, engines
 		wg.Go(func() {
 			rd := Reading{Engine: e.Name(), Results: make([]ImageReading, 0, len(imgs))}
 			for idx, img := range imgs {
-				r, err := e.Recognize(ctx, img, o)
 				ir := ImageReading{Index: idx}
+				if err := ctx.Err(); err != nil {
+					ir.Error = truncRunes(err.Error(), 200)
+					rd.Results = append(rd.Results, ir)
+					continue
+				}
+				r, err := e.Recognize(ctx, img, o)
 				if err != nil {
 					ir.Error = truncRunes(err.Error(), 200)
 				} else {
@@ -89,7 +95,9 @@ func (m *Module) Recognize(ctx context.Context, imgs []Image, o Options, engines
 		})
 	}
 	wg.Wait()
-	if err := ctx.Err(); err != nil {
+	// A deadline keeps what the faster engines read (a slow LLM vision reading must not throw
+	// away Apple Vision's); the images it cut short carry the error. Cancellation is an error.
+	if err := ctx.Err(); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return nil, err
 	}
 	return out, nil

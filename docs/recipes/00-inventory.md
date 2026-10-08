@@ -518,6 +518,10 @@ func (m *Module) Recognize(ctx context.Context, imgs []Image, o Options, engines
 - **Ensemble default: every available engine.** On the Mac that means Apple Vision + tesseract (+ LLM vision when configured);
   on Linux it is tesseract (+ LLM vision). This matches legacy's best case without the join.
 - The `ENGINE_RANK` order moves into the OCR module.
+- **A passed deadline keeps the finished readings** (ID13/M4): when the caller's context times out
+  (recipes' `ocrTimeout`, 5 min), the engines that finished keep their text and the cut-short images
+  carry the error, so a slow LLM vision reading cannot discard Apple Vision's; only cancellation
+  is an error.
 - **Confidence scale:** `meta.confidence` arrived as 0–1 on the queue path, but the gate tested ≥ 50, so it never
   scored (B4). Go passes 0–100 to the gate.
 

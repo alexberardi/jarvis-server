@@ -10,8 +10,9 @@
 //     (docs/schema/ocr.md, "recipes handoff").
 //   - GET /v1/providers, GET /v1/queue/status, /settings.
 //
-// Engines (PLAN §3.3): tesseract via exec when the binary is present, Apple Vision through the
-// jarvis-osx-api helper, and LLM vision through an OpenAI-compatible endpoint. EasyOCR,
+// Engines (PLAN §3.3): tesseract via exec when the binary is present, Apple Vision (in process
+// through purego on macOS, ID13; through the jarvis-osx-api helper when JARVIS_OSX_API_URL is
+// set, as the fallback there and the only route elsewhere), and LLM vision through an OpenAI-compatible endpoint. EasyOCR,
 // PaddleOCR and RapidOCR are cut. Images and job state live in the blob store; the work runs
 // as durable queue jobs.
 package ocr
@@ -63,11 +64,15 @@ const ServiceName = "jarvis-ocr-service"
 // engines' flags (easyocr, paddleocr, rapidocr), ocr.enable_llm_proxy_cloud (a second LLM
 // tier on the same model), server.log_level (jarvisd logs) and auth.cache_ttl_seconds (auth is
 // in-process). No env fallbacks (M3). The two engine flags are read live, so no restart.
+// ocr.enable_apple_vision defaults on where Vision is built in (macOS, ID13);
+// ocr.llm_vision_timeout_seconds is new (A10e M4: the legacy 60 s was too short).
 var Definitions = []settings.Definition{
-	{Key: "ocr.enable_apple_vision", Category: "ocr.providers", Type: settings.Bool, Default: false,
-		Description: "Enable Apple Vision OCR through the jarvis-osx-api helper on a Mac (needs its URL and key)"},
+	{Key: "ocr.enable_apple_vision", Category: "ocr.providers", Type: settings.Bool, Default: defaultAppleVision,
+		Description: "Enable Apple Vision OCR (built in on macOS; elsewhere through a jarvis-osx-api helper on a Mac)"},
 	{Key: "ocr.enable_llm_proxy_vision", Category: "ocr.providers", Type: settings.Bool, Default: false,
 		Description: "Enable LLM vision mode for OCR"},
+	{Key: "ocr.llm_vision_timeout_seconds", Category: "ocr.processing", Type: settings.Int, Default: int64(180),
+		Description: "Per-image timeout for LLM vision OCR, in seconds (a dense page on a 9B model can need minutes)"},
 	{Key: "ocr.max_text_bytes", Category: "ocr.processing", Type: settings.Int, Default: int64(51200),
 		Description: "Maximum output text size in bytes (truncates if exceeded)"},
 	{Key: "ocr.min_valid_chars", Category: "ocr.processing", Type: settings.Int, Default: int64(3),
@@ -95,7 +100,8 @@ type Module struct {
 	// llm-proxy, later jarvisd's own) used for LLM vision and for text validation, with
 	// LLMAppID/LLMAppKey as app credentials. Empty: no LLM vision, validation fails open.
 	LLMURL, LLMAppID, LLMAppKey string
-	// AppleVisionURL/AppleVisionKey reach jarvis-osx-api (POST /v1/ocr, an ocr:read key).
+	// AppleVisionURL/AppleVisionKey reach jarvis-osx-api (POST /v1/ocr, an ocr:read key). On
+	// macOS jarvisd reads with Vision in process (ID13) and this is only the fallback.
 	AppleVisionURL, AppleVisionKey string
 	// TesseractPath is the tesseract binary. Empty: looked up on PATH; "-": disabled.
 	TesseractPath string
@@ -150,13 +156,30 @@ func (m *Module) buildEngines() []Engine {
 	if path != "" && path != "-" {
 		out = append(out, &Tesseract{Path: path})
 	}
+	native, err := newNativeAppleVision()
+	if err != nil && runtime.GOOS == "darwin" && m.deps.Log != nil {
+		m.deps.Log.Warn("ocr: native Apple Vision unavailable", "err", err)
+	}
+	var remote Engine
 	if m.AppleVisionURL != "" {
-		out = append(out, &AppleVision{URL: m.AppleVisionURL, Key: m.AppleVisionKey, Client: m.HTTPClient})
+		remote = &AppleVision{URL: m.AppleVisionURL, Key: m.AppleVisionKey, Client: m.HTTPClient}
+	}
+	if av := appleVisionEngine(native, remote); av != nil {
+		out = append(out, av)
 	}
 	if m.LLMURL != "" {
-		out = append(out, &LLMVision{URL: m.LLMURL, AppID: m.LLMAppID, AppKey: m.LLMAppKey, Client: m.llmClient()})
+		out = append(out, &LLMVision{URL: m.LLMURL, AppID: m.LLMAppID, AppKey: m.LLMAppKey, Client: m.llmClient(),
+			TimeoutFn: m.llmVisionTimeout})
 	}
 	return out
+}
+
+// llmVisionTimeout is ocr.llm_vision_timeout_seconds, read live (at least 1 s).
+func (m *Module) llmVisionTimeout(ctx context.Context) time.Duration {
+	if m.settings == nil {
+		return defaultLLMVisionTimeout
+	}
+	return time.Duration(max(1, m.settings.Int(ctx, "ocr.llm_vision_timeout_seconds", settings.Scope{}))) * time.Second
 }
 
 // tesseractDirs are where package managers install tesseract, searched after PATH: launchd

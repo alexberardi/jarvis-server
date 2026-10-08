@@ -15,7 +15,11 @@ func TestRecognize(t *testing.T) {
 	ctx := e.ctx
 	imgs := []Image{{Data: []byte("a")}, {Data: []byte("b")}}
 
-	// Apple Vision and LLM vision are off by default: only tesseract runs.
+	// Apple Vision (off by default off macOS; pinned off here for every OS) and LLM vision are
+	// off: only tesseract runs.
+	if err := e.m.settings.Set(ctx, "ocr.enable_apple_vision", false, settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
 	rs, err := e.m.Recognize(ctx, imgs, Options{}, nil)
 	if err != nil || len(rs) != 1 || rs[0].Engine != EngineTesseract || len(rs[0].Results) != 2 {
 		t.Fatalf("default: %+v %v", rs, err)
