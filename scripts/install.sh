@@ -4,7 +4,8 @@
 #   curl -fsSL https://github.com/alexberardi/jarvis-server/releases/latest/download/install.sh | sh
 #
 # Options (after `sh -s --` when piped):
-#   --version vX.Y.Z  install that release (default: the latest)
+#   --version vX.Y.Z  install that release (default: the release this script came from, or
+#                     the latest for a copy from the repository)
 #   --user            Linux: a systemd --user service for your account (~/.local/bin, ~/.jarvisd)
 #   --yes             answer yes: apply the firewall fix without asking
 #   --stop-legacy     stop the legacy Docker stack and its admin unit (docker stop +
@@ -25,6 +26,11 @@ BASE=${JARVISD_RELEASE_BASE:-}
 # ProjectPublicKey; a unit test keeps them equal). Not overridable: a different key here would
 # only install a release that jarvisd then can't upgrade from.
 PUBKEY=RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L
+# The release this copy was published with: release.yml writes the tag here, so a script
+# fetched from a release's URL installs that release (a prerelease too: GitHub's
+# releases/latest never points at one) and the admin's install command needs no flags.
+# Empty in the repository (the latest). --version and --base-url win.
+RELEASE_VERSION=""
 VERSION="" USER_MODE=0 YES=0 STOP_LEGACY=0 FORCE=0 UNINSTALL=0 PURGE=0
 
 say() { printf '%s\n' "$*"; }
@@ -49,6 +55,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 BASE=${BASE%/}
+[ -n "$VERSION" ] || [ -n "$BASE" ] || VERSION=$RELEASE_VERSION
 
 case $(uname -s) in Linux) OS=linux ;; Darwin) OS=darwin ;; *) die "unsupported OS $(uname -s); see install.ps1 for Windows" ;; esac
 case $(uname -m) in x86_64|amd64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; *) die "unsupported CPU $(uname -m)" ;; esac

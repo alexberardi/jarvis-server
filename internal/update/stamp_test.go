@@ -1,0 +1,112 @@
+package update
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+// The release workflow writes the tag into the install scripts it publishes (A10b): a script
+// fetched from a release's own URL installs that release. Without it, a prerelease could only
+// be installed with --version (GitHub's releases/latest skips prereleases, and here it pointed
+// at a whisper-engines release), and the admin's install command ran the bare script.
+
+// stampLines are the placeholders release.yml rewrites; each script has exactly one.
+var stampLines = map[string]string{
+	"install.sh":  `RELEASE_VERSION=""`,
+	"install.ps1": `$ReleaseVersion = ''`,
+}
+
+func TestScriptsCarryAReleaseStamp(t *testing.T) {
+	wf, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for f, line := range stampLines {
+		b, err := os.ReadFile(filepath.Join("..", "..", "scripts", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.TrimRight(l, "\r") == line {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s: %d lines %q, want exactly 1 (release.yml stamps it)", f, n, line)
+		}
+		if !strings.Contains(string(wf), f) || !strings.Contains(string(wf), stampSedPattern(line)) {
+			t.Errorf("release.yml does not stamp %s (want a sed on %q)", f, stampSedPattern(line))
+		}
+	}
+}
+
+// stampSedPattern is the line as it appears in release.yml's sed expression.
+func stampSedPattern(line string) string {
+	return "^" + strings.NewReplacer("$", `\$`, `"`, `\"`).Replace(line) + "$"
+}
+
+// install.sh asks for the stamped release unless --version or --base-url says otherwise. A fake
+// curl records the first URL and fails, so nothing is installed.
+func TestInstallShUsesItsStamp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX sh")
+	}
+	if _, err := os.Stat("/run/systemd/system"); runtime.GOOS == "linux" && err != nil {
+		t.Skip("install.sh refuses to run without systemd")
+	}
+	src, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "urls")
+	fake := "#!/bin/sh\nfor a; do u=$a; done\necho \"$u\" >> " + log + "\nexit 22\n"
+	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stamped := strings.Replace(string(src), "\n"+stampLines["install.sh"]+"\n", "\nRELEASE_VERSION=\"v9.9.9-rc1\"\n", 1)
+	if stamped == string(src) {
+		t.Fatal("stamp placeholder not found")
+	}
+	script := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	plain, withStamp := script("plain.sh", string(src)), script("stamped.sh", stamped)
+	const rel = "https://github.com/alexberardi/jarvis-server/releases/"
+	for _, c := range []struct {
+		name   string
+		script string
+		args   []string
+		want   string
+	}{
+		{"stamped", withStamp, nil, rel + "download/v9.9.9-rc1/SHA256SUMS"},
+		{"stamped, --version wins", withStamp, []string{"--version", "v1.2.3"}, rel + "download/v1.2.3/SHA256SUMS"},
+		{"stamped, --base-url wins", withStamp, []string{"--base-url", "http://mirror.invalid/rel"}, "http://mirror.invalid/rel/SHA256SUMS"},
+		{"unstamped: latest", plain, nil, rel + "latest/download/SHA256SUMS"},
+	} {
+		_ = os.Remove(log)
+		cmd := exec.Command("sh", append([]string{c.script, "--user"}, c.args...)...)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "HOME="+dir, "JARVISD_RELEASE_BASE=")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("%s: install.sh succeeded with a failing curl:\n%s", c.name, out)
+		}
+		got, _ := os.ReadFile(log)
+		if first, _, _ := strings.Cut(string(got), "\n"); first != c.want {
+			t.Errorf("%s: fetched %q, want %q\n%s", c.name, first, c.want, out)
+		}
+	}
+}
