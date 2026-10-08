@@ -864,7 +864,9 @@ and restores a DB snapshot **only if** that DB's goose versions differ from the 
 `rolled_back` with the reason. A swapped marker seen by another version is closed as `failed`. If the new
 binary never reports anything (can't start far enough to count), the waiting CLI rolls back itself after
 `2 × (gate + 15 s) + 1 m`. `jarvisd upgrade --rollback` rolls back a pending upgrade, or (no marker) just
-restores `jarvisd.prev` and leaves the DB (the guard then tells you about snapshots if needed).
+restores `jarvisd.prev` and leaves the DB (the guard then tells you about snapshots if needed), recording
+`rolled_back` in `last-upgrade.json`; under a service manager it then restarts it and waits for `/health`
+(the gate timeout) before saying "jarvisd vX is up and healthy" (A10c U1, U2).
 
 **Downgrade guard.** Before migrating, every module's (and the queue's/scheduler's) applied goose versions
 must all be migrations this binary has: "unknown" rather than "higher", since out-of-order migrations are

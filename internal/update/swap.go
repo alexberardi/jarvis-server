@@ -253,24 +253,30 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 }
 
 // RestorePrevious puts Prev back in place with no upgrade in progress (a manual rollback after
-// an upgrade passed its gate). Databases are left alone: if the newer version migrated them,
-// the downgrade guard refuses to start and the snapshots under BackupsDir are the way back.
-func RestorePrevious(p Paths) error {
+// an upgrade passed its gate) and records it in last-upgrade.json as rolled back from `to`
+// (the version that was running) to `from` (Prev's; "" when unknown). Databases are left
+// alone: if the newer version migrated them, the downgrade guard refuses to start and the
+// snapshots under BackupsDir are the way back.
+func RestorePrevious(p Paths, from, to, reason string) (*Result, error) {
 	if _, err := os.Stat(p.Prev()); err != nil {
-		return fmt.Errorf("update: no previous binary to restore: %w", err)
+		return nil, fmt.Errorf("update: no previous binary to restore: %w", err)
 	}
 	if !CanWrite(p.Exe) {
-		return fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
+		return nil, fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
 	}
 	tmp := filepath.Join(filepath.Dir(p.Exe), ".jarvisd.rollback")
 	if err := copyFile(p.Prev(), tmp); err != nil {
-		return err
+		return nil, err
 	}
 	if err := installBinary(p, tmp, false); err != nil {
 		os.Remove(tmp)
-		return err
+		return nil, err
 	}
-	return nil
+	res := Result{Outcome: ResultRolledBack, From: from, To: to, Reason: reason, At: time.Now().UTC()}
+	if err := finish(p, res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 // PreStart does the pending file work before jarvisd opens its database: swap a staged

@@ -185,5 +185,6 @@ done
 say "5. jarvisd upgrade --rollback"
 J "${UP[@]}" --rollback
 wait_version v0.0.2
+[ "$(outcome)" = rolled_back ] || fail "last-upgrade.json doesn't record the manual rollback: $(outcome)"
 
 say "PASS ($MODE)"

@@ -517,3 +517,40 @@ func TestVerifyDir(t *testing.T) {
 		t.Fatal("tampered archive accepted")
 	}
 }
+
+// TestRestorePreviousRecordsResult (A10c): a manual rollback after an upgrade passed its gate
+// left last-upgrade.json saying "succeeded v1.0.0 -> v1.1.0" while v1.0.0 ran again; it now
+// records the rollback.
+func TestRestorePreviousRecordsResult(t *testing.T) {
+	in := newInstall(t)
+	if err := os.WriteFile(in.paths.Prev(), []byte("previous binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := finish(in.paths, Result{Outcome: ResultSucceeded, From: "v1.0.0", To: "v1.1.0"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := RestorePrevious(in.paths, "v1.0.0", "v1.1.0", "rolled back by hand")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readString(t, in.paths.Exe) != "previous binary" {
+		t.Fatal("binary not restored")
+	}
+	got, _ := ReadResult(in.paths)
+	if got == nil || !got.At.Equal(res.At) || got.Outcome != ResultRolledBack || got.From != "v1.0.0" ||
+		got.To != "v1.1.0" || got.Reason != "rolled back by hand" || got.DBRestored || got.At.IsZero() {
+		t.Fatalf("result %+v (returned %+v)", got, res)
+	}
+	if got := in.users(t); len(got) != 1 {
+		t.Fatalf("database changed: %v", got)
+	}
+
+	// No previous binary: an error, and the result is left alone.
+	os.Remove(in.paths.Prev())
+	if _, err := RestorePrevious(in.paths, "v1.0.0", "v1.1.0", "again"); err == nil {
+		t.Fatal("restored without a previous binary")
+	}
+	if got, _ := ReadResult(in.paths); got.Reason != "rolled back by hand" {
+		t.Fatalf("result rewritten: %+v", got)
+	}
+}
