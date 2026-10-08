@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -390,7 +391,7 @@ func TestCrashLoopRollsBack(t *testing.T) {
 // TestGateFailureRestoresMigratedDB: the new version migrated, then failed its gate: the
 // rollback restores the snapshot.
 func TestGateFailureRestoresMigratedDB(t *testing.T) {
-	in, _, _ := swapped(t)
+	in, o, bin := swapped(t)
 	ctx := context.Background()
 	if _, err := BeginStart(in.paths, "v1.1.0"); err != nil {
 		t.Fatal(err)
@@ -415,6 +416,20 @@ func TestGateFailureRestoresMigratedDB(t *testing.T) {
 	// The previous binary is kept (a second rollback stays possible by hand).
 	if readString(t, in.paths.Prev()) != "old binary" {
 		t.Fatal("prev removed")
+	}
+	// A10c U4: the version rolled back from is kept too, not lost.
+	if readString(t, in.paths.RolledBack()) != string(bin) {
+		t.Fatal("the rolled-back binary was not kept")
+	}
+	// The next swap drops it (stale).
+	if _, err := Stage(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Swap(ctx, in.paths, SwapOptions{Keys: o.Keys}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(in.paths.RolledBack()); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stale rolled-back binary left: %v", err)
 	}
 }
 
@@ -535,6 +550,9 @@ func TestRestorePreviousRecordsResult(t *testing.T) {
 	}
 	if readString(t, in.paths.Exe) != "previous binary" {
 		t.Fatal("binary not restored")
+	}
+	if readString(t, in.paths.RolledBack()) != "old binary" || readString(t, in.paths.Prev()) != "previous binary" {
+		t.Fatal("the rolled-back binary was not kept beside jarvisd.prev (A10c U4)")
 	}
 	got, _ := ReadResult(in.paths)
 	if got == nil || !got.At.Equal(res.At) || got.Outcome != ResultRolledBack || got.From != "v1.0.0" ||

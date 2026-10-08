@@ -112,6 +112,7 @@ func Swap(ctx context.Context, p Paths, o SwapOptions) (*Marker, error) {
 		os.Remove(newBin)
 		return nil, err
 	}
+	_ = os.Remove(p.RolledBack()) // from an earlier rollback; stale now
 	m.State, m.Attempts, m.SwappedAt, m.Reason = StateSwapped, 0, time.Now().UTC(), ""
 	if err := WriteMarker(p, m); err != nil {
 		return nil, err
@@ -229,6 +230,7 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 	if err := copyFile(prev, tmp); err != nil {
 		return nil, fmt.Errorf("update: restore %s: %w", prev, err)
 	}
+	keepRolledBack(p)
 	if err := installBinary(p, tmp, false); err != nil {
 		os.Remove(tmp)
 		return nil, err
@@ -253,6 +255,21 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 		return nil, err
 	}
 	return &res, nil
+}
+
+// keepRolledBack copies the executable about to be rolled back to RolledBack, so the newer
+// binary isn't lost (jarvisd.prev stays the older one). Best effort: a rollback never fails
+// for want of this copy. Both paths derive from the executable, whose directory a privileged
+// caller owns.
+func keepRolledBack(p Paths) {
+	tmp := p.RolledBack() + ".tmp"
+	if err := copyFile(p.Exe, tmp); err != nil {
+		os.Remove(tmp)
+		return
+	}
+	if err := os.Rename(tmp, p.RolledBack()); err != nil {
+		os.Remove(tmp)
+	}
 }
 
 // snapshotPathsOK reports whether a marker's snapshot entry names a database directly in the
@@ -291,6 +308,7 @@ func RestorePrevious(p Paths, from, to, reason string) (*Result, error) {
 	if err := copyFile(p.Prev(), tmp); err != nil {
 		return nil, err
 	}
+	keepRolledBack(p)
 	if err := installBinary(p, tmp, false); err != nil {
 		os.Remove(tmp)
 		return nil, err

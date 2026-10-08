@@ -14,7 +14,7 @@
 #   4. the admin button: setup → enable updates → POST /api/update/apply {v0.0.4} → v0.0.4
 #      (system mode: the service account can't write /usr/local/bin, so the unit's
 #      ExecStartPre=+ helper swaps it in);
-#   5. `jarvisd upgrade --rollback`               → v0.0.2 again;
+#   5. `jarvisd upgrade --rollback`               → v0.0.2 again, jarvisd.rolledback = v0.0.4;
 # and uninstalls.
 set -euo pipefail
 
@@ -186,5 +186,6 @@ say "5. jarvisd upgrade --rollback"
 J "${UP[@]}" --rollback
 wait_version v0.0.2
 [ "$(outcome)" = rolled_back ] || fail "last-upgrade.json doesn't record the manual rollback: $(outcome)"
+[ "$(R "$BIN.rolledback" version)" = v0.0.4 ] || fail "jarvisd.rolledback is not v0.0.4"
 
 say "PASS ($MODE)"

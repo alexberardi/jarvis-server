@@ -159,6 +159,9 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 			back = res.From
 			fmt.Fprintf(stdout, "rolled back %s to %s (database restored: %v)\n", res.To, res.From, res.DBRestored)
 		}
+		if _, err := os.Stat(paths.RolledBack()); err == nil {
+			fmt.Fprintf(stdout, "the binary rolled back from is kept as %s\n", paths.RolledBack())
+		}
 		if mgr == nil || !st.Installed {
 			fmt.Fprintln(stdout, "start jarvisd again to run it")
 			return nil

@@ -43,6 +43,16 @@ func (p Paths) Prev() string {
 	return p.Exe + ".prev"
 }
 
+// RolledBack is the binary a rollback replaced (the newer version), kept next to the
+// executable for inspection or to put back by hand: jarvisd.rolledback (jarvisd.rolledback.exe
+// on Windows). One copy; the next swap removes it.
+func (p Paths) RolledBack() string {
+	if ext := filepath.Ext(p.Exe); strings.EqualFold(ext, ".exe") {
+		return strings.TrimSuffix(p.Exe, ext) + ".rolledback" + ext
+	}
+	return p.Exe + ".rolledback"
+}
+
 // old is where Windows parks the running executable (it can be renamed, not replaced, while it
 // runs); CleanupOld removes it on the next start.
 func (p Paths) old() string { return p.Exe + ".old" }
