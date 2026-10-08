@@ -24,7 +24,7 @@ BASE=${JARVISD_RELEASE_BASE:-}
 # The project's minisign key, exactly jarvisd's own trust root (internal/update/key.go
 # ProjectPublicKey; a unit test keeps them equal). Not overridable: a different key here would
 # only install a release that jarvisd then can't upgrade from.
-PUBKEY=RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L
+PUBKEY=RWRl8nxLAgizV2ZlGLPIfxp71+OvcD6PSbdoRy/evF9EbXxpwsQTB3/F
 VERSION="" USER_MODE=0 YES=0 STOP_LEGACY=0 FORCE=0 UNINSTALL=0 PURGE=0
 
 say() { printf '%s\n' "$*"; }

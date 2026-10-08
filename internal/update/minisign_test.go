@@ -19,11 +19,31 @@ func readTestdata(t *testing.T, name string) []byte {
 	return b
 }
 
-// TestProjectKeyVerifiesRealRelease checks the embedded key against a real signature made by
-// the minisign CLI with the project's secret key (jarvis-node-setup v0.3.1's checksums.txt,
-// prehashed "ED", default trusted comment).
-func TestProjectKeyVerifiesRealRelease(t *testing.T) {
+// nodeSetupKey is the node-setup/admin release key: a real-world minisign key with a real
+// release signature, kept as a verifier test vector (jarvisd itself no longer trusts it).
+const nodeSetupKey = "RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L"
+
+// TestProjectKey checks the embedded key is jarvisd's and verifies a signature its secret half
+// made with the minisign CLI (testdata/jarvisd-key-check.txt).
+func TestProjectKey(t *testing.T) {
 	k, err := ParsePublicKey(ProjectPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := k.KeyID(); got != "57B308024B7CF265" {
+		t.Fatalf("key id %s", got)
+	}
+	msg := readTestdata(t, "jarvisd-key-check.txt")
+	sig := readTestdata(t, "jarvisd-key-check.txt.minisig")
+	if _, err := VerifyFile(msg, sig, k); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestVerifiesRealRelease checks the verifier against a real signature made by the minisign CLI
+// (jarvis-node-setup v0.3.1's checksums.txt, prehashed "ED", default trusted comment).
+func TestVerifiesRealRelease(t *testing.T) {
+	k, err := ParsePublicKey(nodeSetupKey)
 	if err != nil {
 		t.Fatal(err)
 	}

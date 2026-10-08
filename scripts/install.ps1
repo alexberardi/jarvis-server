@@ -32,7 +32,7 @@ $ProgressPreference = 'SilentlyContinue' # the progress bar makes Invoke-WebRequ
 $Repo = 'alexberardi/jarvis-server'
 # The project's minisign key, exactly jarvisd's own trust root (internal/update/key.go
 # ProjectPublicKey; a unit test keeps them equal). Not overridable.
-$PubKey = 'RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L'
+$PubKey = 'RWRl8nxLAgizV2ZlGLPIfxp71+OvcD6PSbdoRy/evF9EbXxpwsQTB3/F'
 $BaseUrl = "$BaseUrl".TrimEnd('/')
 $Dir = Join-Path $env:ProgramFiles 'jarvisd'
 $Bin = Join-Path $Dir 'jarvisd.exe'
