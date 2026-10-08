@@ -100,7 +100,7 @@ func (m *Module) recordTraceAsync(t Trace) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if _, err := m.RecordTrace(ctx, t); err != nil {
-			m.deps.Log.Debug("cc: trace write failed", "err", err)
+			m.deps.Log.Warn("cc: trace write failed", "type", t.RequestType, "err", err)
 		}
 	}()
 }
