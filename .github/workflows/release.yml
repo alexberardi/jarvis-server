@@ -184,13 +184,18 @@ jobs:
             exit 1
           fi
 
-          # Gatekeeper's verdict (online ticket lookup; the ticket can take a moment to appear).
+          # Gatekeeper's verdict, with the ticket looked up online (it can take a moment to
+          # appear). `spctl -t execute` only judges app bundles ("the code is valid but does not
+          # seem to be an app" for any bare Mach-O); `-t open` on the primary signature is the
+          # assessment that applies to a command-line tool and names the notarization.
           ok=""
           for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            if spctl --assess --type execute --verbose=4 "$bin"; then ok=1; break; fi
+            v="$(spctl --assess --type open --context context:primary-signature --verbose=4 "$bin" 2>&1 || true)"
+            echo "$v"
+            if echo "$v" | grep -q "accepted" && echo "$v" | grep -q "source=Notarized Developer ID"; then ok=1; break; fi
             sleep 10
           done
-          [ -n "$ok" ] || { echo "::error::spctl rejects the notarized binary"; exit 1; }
+          [ -n "$ok" ] || { echo "::error::Gatekeeper does not accept the binary as notarized"; exit 1; }
           mkdir -p signed && cp "$bin" signed/jarvisd
           echo "signed=true" >> "$GITHUB_OUTPUT"
       - name: Remove the signing keychain and keys
@@ -345,12 +350,16 @@ jobs:
           echo "$info" | grep -qx "Identifier=net.jarvisautomation.jarvisd"
           echo "$info" | grep -q "^Authority=Developer ID Application:"
           echo "$info" | grep -Eq "flags=0x[0-9a-f]+\(runtime\)"
-          spctl --assess --type execute --verbose=4 "$bin"
-          # A browser download: quarantined, then run. Gatekeeper must let it start.
-          cp "$bin" "$RUNNER_TEMP/jarvisd-quarantined"
-          xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" "$RUNNER_TEMP/jarvisd-quarantined"
-          spctl --assess --type execute --verbose=4 "$RUNNER_TEMP/jarvisd-quarantined"
-          "$RUNNER_TEMP/jarvisd-quarantined" version
+          # (-t execute only judges app bundles; -t open on the primary signature is the CLI form.)
+          v="$(spctl --assess --type open --context context:primary-signature --verbose=4 "$bin" 2>&1)"; echo "$v"
+          echo "$v" | grep -q "source=Notarized Developer ID"
+          # A browser download: quarantined, then run. Gatekeeper assesses it on exec and must
+          # let it start (it then records the verdict in the quarantine flags).
+          q="$RUNNER_TEMP/jarvisd-quarantined"
+          cp "$bin" "$q"
+          xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" "$q"
+          "$q" version
+          xattr -p com.apple.quarantine "$q"
       # The binary's own verifier (the one self-update uses) accepts the CI-made signature.
       - name: Check the signature with jarvisd
         env:
