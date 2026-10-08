@@ -47,13 +47,13 @@ type visionRuntime struct {
 	pool, data, marray, dict, handler, request objc.Class
 
 	alloc, init, release, drain, respondsTo, instancesRespondTo objc.SEL
-	dataWithBytesLength, array, addObject, dictionary          objc.SEL
-	stringWithUTF8, utf8String, count, objectAtIndex           objc.SEL
-	initWithDataOptions, performRequestsError                  objc.SEL
-	setRecognitionLevel, setUsesLanguageCorrection             objc.SEL
-	setRecognitionLanguages, results, cancel                   objc.SEL
-	topCandidates, boundingBox, str, confidence                objc.SEL
-	localizedDescription                                       objc.SEL
+	dataWithBytesLength, array, addObject, dictionary           objc.SEL
+	stringWithUTF8, utf8String, count, objectAtIndex            objc.SEL
+	initWithDataOptions, performRequestsError                   objc.SEL
+	setRecognitionLevel, setUsesLanguageCorrection              objc.SEL
+	setRecognitionLanguages, results, cancel                    objc.SEL
+	topCandidates, boundingBox, str, confidence                 objc.SEL
+	localizedDescription                                        objc.SEL
 
 	nsString objc.Class
 }
