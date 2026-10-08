@@ -77,7 +77,8 @@ func legacyDirs() []string {
 // host-network stack publishes nothing), or when they hold GPU memory (its llama-servers hold
 // whole cards, so jarvisd's models don't fit). Its infrastructure alone (postgres, redis, ...)
 // and its directory are harmless. On Linux with nvidia-smi it also reports the GPU memory other
-// programs hold ("gpu memory").
+// programs hold ("gpu memory"). On macOS it also looks for the legacy native services
+// (LegacyAgents), which are in the way whenever one is loaded.
 func legacy(ctx context.Context, o Options, portsHeld bool) []Check {
 	const name = "legacy stack"
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -98,8 +99,8 @@ func legacy(ctx context.Context, o Options, portsHeld bool) []Check {
 	for i, c := range running {
 		names[i] = c.Name
 	}
-	switch {
-	case len(running) > 0 && (clash || len(onGPU) > 0):
+	var details, fixes []string
+	if len(running) > 0 && (clash || len(onGPU) > 0) {
 		list := strings.Join(names, " ")
 		var why []string
 		if clash {
@@ -108,18 +109,114 @@ func legacy(ctx context.Context, o Options, portsHeld bool) []Check {
 		if len(onGPU) > 0 {
 			why = append(why, "holds "+onGPU.String()+" of GPU memory that jarvisd's models need")
 		}
-		out = append(out, Check{Name: name, Status: Warn,
-			Detail: fmt.Sprintf("the legacy Jarvis Docker stack is running (%s) and %s", list, strings.Join(why, ", and ")),
-			Fix: "stop it and keep it from starting at boot (its data is kept; `docker start` brings it back):\n" +
-				"docker update --restart=no " + list + "\ndocker stop " + list + "\n" +
-				"and, if the legacy admin runs as your user service (port 7711), whose reconcile starts it again:\n" +
-				"systemctl --user disable --now jarvis-admin.service"})
+		details = append(details, fmt.Sprintf("the legacy Jarvis Docker stack is running (%s) and %s", list, strings.Join(why, ", and ")))
+		fixes = append(fixes, "stop it and keep it from starting at boot (its data is kept; `docker start` brings it back):\n"+
+			"docker update --restart=no "+list+"\ndocker stop "+list+"\n"+
+			"and, if the legacy admin runs as your user service (port 7711), whose reconcile starts it again:\n"+
+			"systemctl --user disable --now jarvis-admin.service")
+	}
+	if agents := legacyAgents(ctx, o); len(agents) > 0 {
+		d, f := agentsAdvice(o.LegacyUID, agents)
+		details, fixes = append(details, d), append(fixes, f)
+	}
+	switch {
+	case len(details) > 0:
+		out = append(out, Check{Name: name, Status: Warn, Detail: strings.Join(details, "; "), Fix: strings.Join(fixes, "\n")})
 	case len(running) > 0:
 		out = append(out, Check{Name: name, Status: OK, Detail: "legacy containers run (" + strings.Join(names, ", ") + ") but none uses jarvisd's ports or the GPU"})
 	default:
 		out = append(out, legacyIdle(o))
 	}
 	return out
+}
+
+// LegacyAgents are the legacy stack's native services on macOS: user LaunchAgents (in
+// ~/Library/LaunchAgents of the account that installed them) that each GPU service's
+// deploy-launchd.sh, and through it the legacy admin's native mode, installs for Metal and
+// Apple Vision: llm-proxy 7704/7705, whisper 7706, TTS 7707, OCR 7031 and its queue worker;
+// plus the legacy admin itself (com.jarvis.admin, whose reconcile starts the Docker stack
+// again). The legacy tooling has no Linux counterpart: there the services run in Docker (the
+// admin's systemd user unit aside, which the Docker fix names), and a source checkout's
+// `./jarvis` CLI runs "local" services as plain background processes, not units. Other
+// com.jarvis.* and io.jarvis.* agents (osx-api, host-agent, nightly-benchmark) are not the
+// server's and are never touched. scripts/install.sh --stop-legacy stops the same list.
+var LegacyAgents = []string{"com.jarvis.llm-proxy", "com.jarvis.whisper-api", "com.jarvis.tts",
+	"com.jarvis.ocr.service", "com.jarvis.ocr.worker", "com.jarvis.admin"}
+
+// agent is a loaded legacy LaunchAgent.
+type agent struct {
+	Label, Path string
+	PID         int // 0: loaded, not running
+}
+
+// legacyUID is the account whose LaunchAgents count: this user, or under sudo the one who
+// ran it.
+func legacyUID() string {
+	if uid := os.Getuid(); uid > 0 {
+		return strconv.Itoa(uid)
+	}
+	if su := os.Getenv("SUDO_UID"); su != "" && su != "0" {
+		return su
+	}
+	return ""
+}
+
+// legacyAgents reads which LegacyAgents are loaded in o.LegacyUID's GUI domain (`launchctl
+// print gui/<uid>/<label>` fails for one that isn't).
+func legacyAgents(ctx context.Context, o Options) []agent {
+	if o.GOOS != "darwin" || o.LegacyUID == "" {
+		return nil
+	}
+	var as []agent
+	for _, l := range LegacyAgents {
+		out, err := o.Run(ctx, "launchctl", "print", "gui/"+o.LegacyUID+"/"+l)
+		if err != nil {
+			continue
+		}
+		a := agent{Label: l}
+		for _, line := range strings.Split(string(out), "\n") {
+			k, v, ok := strings.Cut(strings.TrimSpace(line), " = ")
+			if !ok {
+				continue
+			}
+			switch {
+			case k == "path" && a.Path == "":
+				a.Path = v
+			case k == "pid" && a.PID == 0:
+				a.PID, _ = strconv.Atoi(v)
+			}
+		}
+		as = append(as, a)
+	}
+	return as
+}
+
+// agentsAdvice is the warning's detail and fix for uid's loaded legacy agents.
+func agentsAdvice(uid string, as []agent) (detail, fix string) {
+	who := "uid " + uid
+	if u, err := user.LookupId(uid); err == nil {
+		who = u.Username
+	}
+	names := make([]string, len(as))
+	var stop, back []string
+	for i, a := range as {
+		names[i] = a.Label + " (not running)"
+		if a.PID > 0 {
+			names[i] = fmt.Sprintf("%s (pid %d)", a.Label, a.PID)
+		}
+		d := "gui/" + uid + "/" + a.Label
+		stop = append(stop, "launchctl disable "+d, "launchctl bootout "+d)
+		path := a.Path
+		if path == "" {
+			path = "~/Library/LaunchAgents/" + a.Label + ".plist"
+		}
+		back = append(back, "launchctl enable "+d+" && launchctl bootstrap gui/"+uid+" "+path)
+	}
+	detail = fmt.Sprintf("the legacy Jarvis native services are loaded as LaunchAgents of %s (%s): they use jarvisd's ports and start again at login",
+		who, strings.Join(names, ", "))
+	fix = "stop them and keep them from starting at login (`sudo sh install.sh --stop-legacy` does this), as " + who + ":\n" +
+		strings.Join(stop, "\n") + "\nto bring them back later:\n" + strings.Join(back, "\n")
+	return detail, fix
 }
 
 func legacyIdle(o Options) Check {

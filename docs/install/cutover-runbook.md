@@ -89,6 +89,12 @@ say `jarvis` (or `jarvis-node`), `plex` nothing or another name.
   HTTPS hostnames** (config-service, auth, CC, logs, notifications, OCR, recipes, settings, MQTT as
   `wss` on 443), so today nodes and phones reach prod through the tunnel. See §4.11 and open question Q1.
 
+No legacy GPU service runs natively on prod: they are all containers (the survey's `systemctl --user`
+list has only the two units above). Native legacy services exist only on macOS, as user LaunchAgents
+(`com.jarvis.llm-proxy`, `-whisper-api`, `-tts`, `-ocr.service`, `-ocr.worker`, and the admin
+`com.jarvis.admin`); `--stop-legacy` disables and boots those out there and prints how to bring them
+back (§6 step 2b), so a Mac dev box follows the same runbook.
+
 **Data (counts only).** 10 users (2 superusers), 8 households, 10 memberships: 2 households with 2 members,
 6 with one. 23 CC node rows and 36 auth registrations, mostly test/canary rows from 2026-08-11/12.
 49 memories, 2 routines, 0 schedules, 2 phone contacts, 17 phone calls (last 2026-08-30), 7 devices,
@@ -264,8 +270,8 @@ ss -ltnH '( sport = :7711 )'                         # empty: the legacy admin i
 journalctl -u jarvisd -n 50 --no-pager               # no ERROR lines
 ```
 
-If `install.sh` refuses with "another program holds jarvisd's ports" and names no legacy container,
-find it with `sudo ss -ltnp` and stop it. If the service is not healthy:
+If `install.sh` refuses with "another program holds jarvisd's ports" (it lists the listeners: by then
+the legacy containers and agents are already stopped), stop what it names (`sudo ss -ltnp` for more). If the service is not healthy:
 `journalctl -u jarvisd -n 200`, fix, re-run `install.sh` once; still bad → §6.
 
 If you lost the link: `sudo jarvisd setup-link`.
@@ -587,6 +593,9 @@ ss -ltnH '( sport = :7700 or sport = :1884 )'                     # empty
 while read -r name policy state; do docker update --restart="$policy" "$name" >/dev/null; done < "$BK/containers.txt"
 docker start $(awk '$3 == "running" {print $1}' "$BK/containers.txt")   # not ollama / minio-init
 systemctl --user enable --now jarvis-admin.service    # --stop-legacy disabled it; 7711 back
+# 2b. macOS only (not prod): the LaunchAgents --stop-legacy stopped, as the user, with the lines it
+#     printed after "To bring them back later", one per agent, e.g.:
+#     launchctl enable gui/$(id -u)/com.jarvis.llm-proxy && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jarvis.llm-proxy.plist
 
 # 3. Check.
 docker ps --format '{{.Names}} {{.Status}}' | sort                # every line "Up"; healthy within ~2 min

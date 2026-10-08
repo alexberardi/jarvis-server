@@ -13,8 +13,8 @@
 #                     the latest for a copy from the repository)
 #   --user            Linux: a systemd --user service for your account (~/.local/bin, ~/.jarvisd)
 #   --yes             answer yes: apply the firewall fix without asking
-#   --stop-legacy     stop the legacy Docker stack and its admin unit (docker stop +
-#                     restart policy off; its data is kept, nothing is removed)
+#   --stop-legacy     stop the legacy stack: Docker containers (restart policy off), macOS
+#                     LaunchAgents and its admin (off at login); data kept, nothing removed
 #   --force           reinstall even when this version is installed
 #   --uninstall       remove the service, firewall rules and binary (data is kept)
 #   --purge           with --uninstall: also delete the data, after a typed confirmation
@@ -65,6 +65,15 @@ BASE=${BASE%/}
 case $(uname -s) in Linux) OS=linux ;; Darwin) OS=darwin ;; *) die "unsupported OS $(uname -s); see install.ps1 for Windows" ;; esac
 case $(uname -m) in x86_64|amd64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; *) die "unsupported CPU $(uname -m)" ;; esac
 [ "$OS-$ARCH" = darwin-amd64 ] && die "Intel Macs are not supported (jarvisd ships for Apple silicon)"
+# Under sudo, PATH is sudo's secure_path, which on macOS leaves out /usr/local/bin (Docker
+# Desktop's docker CLI) and /opt/homebrew/bin (minisign): without them the legacy containers
+# look like "another program" and the signature check is skipped.
+if [ "$OS" = darwin ]; then
+  for d in /usr/local/bin /opt/homebrew/bin; do
+    case :$PATH: in *:$d:*) ;; *) [ -d $d ] && PATH=$d:$PATH ;; esac
+  done
+  export PATH
+fi
 [ "$OS" = linux ] && [ ! -d /run/systemd/system ] && die "systemd is not running here; download the release and run \`jarvisd serve\` under your own supervisor"
 
 # Privileges: the system service needs root; --user needs it only for the firewall fix.
@@ -116,7 +125,7 @@ legacy_containers() {
 # account that installed it: this user, or under sudo $SUDO_USER (reached through its user
 # manager with `systemctl --user -M user@`). Not reachable when that account has no running
 # user manager (no session, no linger); then it isn't running either, and the command to run
-# as that account is printed. macOS (launchd agent com.jarvis.admin) is not handled.
+# as that account is printed. On macOS it is a LaunchAgent, com.jarvis.admin (LEGACY_AGENTS).
 admin_unit() { # admin_unit ARGS...: systemctl --user for the legacy admin's account
   if [ "$(id -u)" -ne 0 ]; then
     [ -n "${XDG_RUNTIME_DIR:-}" ] || XDG_RUNTIME_DIR=/run/user/$(id -u)
@@ -145,12 +154,48 @@ stop_legacy_admin() {
     warn "the legacy admin's unit is in $home/.config/systemd/user but $who's user manager isn't reachable from here; as $who run: systemctl --user disable --now jarvis-admin.service"
   fi
 }
-stop_legacy() { # stop_legacy NAMES: restart policy off + stop (never down/rm), then the admin
+# The legacy native services (macOS): user LaunchAgents of the account that installed them,
+# exactly internal/doctor LegacyAgents (a test keeps them equal): the GPU services that each
+# service's deploy-launchd.sh, and through it the legacy admin's native mode, install
+# (llm-proxy 7704/7705, whisper 7706, TTS 7707, OCR 7031 and its worker), and the legacy admin
+# itself, whose reconcile starts the Docker stack again. They live in the GUI domain of this
+# user, or under sudo of $SUDO_UID, which root reaches as gui/<uid>. Other agents
+# (com.jarvis.osx-api, io.jarvis.host-agent, ...) are never touched. On Linux the legacy
+# tooling runs no service units but the admin's (above).
+LEGACY_AGENTS="com.jarvis.llm-proxy com.jarvis.whisper-api com.jarvis.tts com.jarvis.ocr.service com.jarvis.ocr.worker com.jarvis.admin"
+AGENT_UID=""
+if [ "$(id -u)" -ne 0 ]; then AGENT_UID=$(id -u); elif [ "${SUDO_UID:-0}" != 0 ]; then AGENT_UID=$SUDO_UID; fi
+legacy_agents() { # the loaded ones
+  [ "$OS" = darwin ] && [ -n "$AGENT_UID" ] || return 0
+  for l in $LEGACY_AGENTS; do
+    if launchctl print "gui/$AGENT_UID/$l" >/dev/null 2>&1; then printf '%s ' "$l"; fi
+  done
+}
+stop_legacy_agents() { # stop_legacy_agents LABELS: off at login (disable), then stopped (bootout)
+  [ -n "$1" ] || return 0
+  who=$(id -un)
+  [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && who=$SUDO_USER
+  say "Stopping the legacy native services (LaunchAgents of $who) and turning them off at login: $1"
+  back=""
+  for l in $1; do
+    d=gui/$AGENT_UID/$l
+    plist=$(launchctl print "$d" 2>/dev/null | sed -n 's/^[[:space:]]*path = //p' | head -n 1)
+    [ -n "$plist" ] || plist=/Users/$who/Library/LaunchAgents/$l.plist
+    launchctl disable "$d" || die "could not disable $l; as $who run: launchctl disable $d && launchctl bootout $d"
+    launchctl bootout "$d" 2>/dev/null || true # "Boot-out failed: 5" for one already exiting
+    if launchctl print "$d" >/dev/null 2>&1; then die "could not stop $l; as $who run: launchctl bootout $d"; fi
+    back="$back
+  launchctl enable $d && launchctl bootstrap gui/$AGENT_UID $plist"
+  done
+  say "To bring them back later (after \`sudo jarvisd service stop\`), as $who:$back"
+}
+stop_legacy() { # stop_legacy NAMES AGENTS: restart policy off + stop (never down/rm), the agents, the admin
   if [ -n "$1" ]; then
     say "Stopping the legacy stack: $1"
     # shellcheck disable=SC2086 # names are words
     { $DOCKER update --restart=no $1 >/dev/null && $DOCKER stop $1 >/dev/null; } || die "could not stop the legacy stack ($1)"
   fi
+  stop_legacy_agents "$2"
   stop_legacy_admin
 }
 
@@ -194,7 +239,7 @@ CUR="" REUSE=0
 [ -x "$BIN" ] && CUR=$("$BIN" version 2>/dev/null || echo unknown)
 if [ -n "$CUR" ]; then
   # jarvisd is already here, so stopping the legacy stack can't leave the box with neither.
-  if [ $STOP_LEGACY = 1 ]; then docker_init; stop_legacy "$(legacy_containers)"; fi
+  if [ $STOP_LEGACY = 1 ]; then docker_init; stop_legacy "$(legacy_containers)" "$(legacy_agents)"; fi
   if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ] && "$BIN" service status $SVC >/dev/null 2>&1; then
     say "jarvisd $VERSION is already installed and running."
     # shellcheck disable=SC2086
@@ -224,15 +269,35 @@ fi
 # alone, with a warning (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
 # `minisign -v` must run: a version-manager shim with no version selected (mise, asdf) is on
 # PATH but fails every call, which would read as an INVALID signature.
+# Under sudo, PATH is sudo's secure_path, which leaves out Homebrew (on macOS added back
+# above) and MacPorts, so their bin dirs are looked in too, and then the invoking user's own
+# PATH (mise, nix, ~/bin) as their login shell sets it.
+MINISIGN="" tried=" "
+minisign_try() { # minisign_try PATH: use it when it runs
+  [ -n "$1" ] && [ -x "$1" ] || return 1
+  case $tried in *" $1 "*) return 1 ;; esac
+  tried="$tried$1 "
+  if "$1" -v >/dev/null 2>&1; then MINISIGN=$1; return 0; fi
+  warn "$1 doesn't run (\`minisign -v\` failed); not using it"
+  return 1
+}
+find_minisign() {
+  for m in "$(command -v minisign 2>/dev/null || true)" /opt/homebrew/bin/minisign /usr/local/bin/minisign /opt/local/bin/minisign; do
+    minisign_try "$m" && return 0
+  done
+  [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] || return 0
+  if [ "$OS" = darwin ]; then ush=$(dscl . -read "/Users/$SUDO_USER" UserShell 2>/dev/null | awk '{print $2}')
+  else ush=$(getent passwd "$SUDO_USER" | cut -d: -f7); fi
+  [ -x "${ush:-}" ] || ush=/bin/sh
+  m=$(sudo -H -u "$SUDO_USER" "$ush" -lc 'command -v minisign' </dev/null 2>/dev/null | tail -n 1) || m=""
+  case $m in /*) minisign_try "$m" || true ;; esac
+}
 NEW=$BIN
 if [ $REUSE = 0 ]; then
-  MINISIGN_OK=0
-  if command -v minisign >/dev/null; then
-    if minisign -v >/dev/null 2>&1; then MINISIGN_OK=1; else warn "minisign is on PATH but doesn't run (\`minisign -v\` failed); treating it as not installed"; fi
-  fi
-  if [ $MINISIGN_OK = 1 ]; then
+  find_minisign
+  if [ -n "$MINISIGN" ]; then
     fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null || die "the release has no SHA256SUMS.minisig; not installing an unsigned release"
-    minisign -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID; not installing"
+    "$MINISIGN" -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID ($MINISIGN); not installing"
     say "SHA256SUMS signature verified."
   else
     [ "${JARVISD_REQUIRE_SIGNATURE:-0}" = 1 ] && die "JARVISD_REQUIRE_SIGNATURE=1 but minisign is not installed"
@@ -250,17 +315,40 @@ fi
 if [ -z "$CUR" ]; then
   # A fresh install next to the legacy stack (ID7): jarvisd needs its ports, and its GPUs
   # (the legacy llama-servers hold whole cards), so --stop-legacy stops the stack even when
-  # its ports are free.
-  held=0
-  "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"' && held=1
-  if [ $held = 1 ] || [ $STOP_LEGACY = 1 ]; then
+  # its ports are free, and only then looks at what still holds them.
+  ports_held() { "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"'; }
+  holders() { # "  COMMAND (pid N) on PORT" for each listener on a jarvisd port (all of them as root)
+    jp='p = port + 0; if ((p >= 7700 && p <= 7712) || p == 7030 || p == 7031 || p == 1884 || p == 9883)'
+    if command -v lsof >/dev/null; then
+      lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk "NR > 1 { port = \$9; sub(/.*:/, \"\", port); $jp printf \"  %s (pid %s) on %s\\n\", \$1, \$2, port }"
+    elif command -v ss >/dev/null; then
+      ss -ltnpH 2>/dev/null | awk "{ port = \$4; sub(/.*:/, \"\", port); $jp printf \"  %s on %s\\n\", \$6, port }"
+    fi | sort -u
+  }
+  other_die() {
+    h=$(holders || true)
+    die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first${h:+:
+$h}
+  (\`sudo lsof -nP -iTCP -sTCP:LISTEN\` or \`sudo ss -ltnp\` names it; a source checkout's \`./jarvis\` CLI runs services as background processes: \`./jarvis stop\`)"
+  }
+  if [ $STOP_LEGACY = 1 ]; then
     docker_init
-    legacy=$(legacy_containers)
-    [ $held = 0 ] || [ -n "$legacy" ] || die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (\`sudo ss -ltnp\` or \`sudo lsof -iTCP -sTCP:LISTEN\` names it)"
-    [ $STOP_LEGACY = 1 ] || die "the legacy Jarvis Docker stack is running ($legacy) and holds jarvisd's ports.
-  Re-run with --stop-legacy to stop it (docker stop + restart policy off, and its admin's user unit off; its data is kept).
-  To go back to it later: jarvisd service stop && docker start $legacy"
-    stop_legacy "$legacy"
+    legacy=$(legacy_containers) agents=$(legacy_agents)
+    stop_legacy "$legacy" "$agents"
+    if [ -n "$legacy$agents" ]; then # a stopped server can take a moment to let go of its ports
+      i=0; while [ $i -lt 15 ] && ports_held; do sleep 1; i=$((i + 1)); done
+    fi
+    if ports_held; then other_die; fi
+  elif ports_held; then
+    docker_init
+    legacy=$(legacy_containers) agents=$(legacy_agents)
+    [ -n "$legacy$agents" ] || other_die
+    die "the legacy Jarvis stack is running and holds jarvisd's ports:${legacy:+
+  Docker containers: $legacy}${agents:+
+  LaunchAgents: $agents}
+  Re-run with --stop-legacy to stop it (containers: docker stop + restart policy off; LaunchAgents: stopped
+  and off at login; its admin's user unit off; its data is kept). It prints how to go back${legacy:+;
+  for the containers: jarvisd service stop && docker start $legacy}"
   fi
 fi
 

@@ -78,6 +78,9 @@ type Options struct {
 	LegacyDirs []string
 	// ReadFile reads /proc for the GPU memory check (default os.ReadFile).
 	ReadFile func(name string) ([]byte, error)
+	// LegacyUID is the account whose LaunchAgents (macOS) the legacy check looks at (default:
+	// this user, or $SUDO_UID under sudo; "" with neither skips them).
+	LegacyUID string
 }
 
 // Firewall reports whether the host firewall admits a port from a subnet, and how to make
@@ -118,6 +121,9 @@ func Run(ctx context.Context, o Options) []Check {
 	}
 	if o.LegacyDirs == nil {
 		o.LegacyDirs = legacyDirs()
+	}
+	if o.LegacyUID == "" && o.GOOS == "darwin" {
+		o.LegacyUID = legacyUID()
 	}
 	out := listening(ctx, o)
 	portsHeld := out[0].Name == "ports"

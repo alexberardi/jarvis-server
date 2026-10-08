@@ -1030,8 +1030,8 @@ compose up -d`): `systemctl --user disable --now` for the invoking user, under s
 `$SUDO_USER` via `systemctl --user -M $SUDO_USER@` (systemd ≥ 248). Limits: needs that user's
 manager running (the admin's installer enables linger, so it is); when it isn't reachable but
 `~/.config/systemd/user/jarvis-admin.service` exists, a warning prints the command to run as
-that user; run as root without sudo, the unit is not looked for; macOS's
-`com.jarvis.admin` LaunchAgent and Windows are not handled → atomic rename
+that user; run as root without sudo, the unit is not looked for; Windows is not handled (macOS's
+`com.jarvis.admin` and GPU LaunchAgents: since 2026-10-08, below) → atomic rename
 into `/usr/local/bin` (`~/.local/bin` with `--user`) → `jarvisd service install [--user]`
 (waits for /health) + `service status --wait 90s`; an upgrade that fails goes back to
 `jarvisd.prev` → `sudo jarvisd doctor --json`: any `fix_cmds` → "[Y/n]" on `/dev/tty`
@@ -1089,6 +1089,40 @@ is refused ("signature is INVALID"). macOS: the app stays `permitted` after the 
 doctor` is clean; on the macos-14 runner socketfilterfw kept admitting the new build, so the re-admit
 step had nothing to do there (it is the guard for when it doesn't). Windows: SCM restart, rename-aside
 swap, `jarvisd.prev.exe`.
+
+**macOS legacy native services + sudo PATH (2026-10-08, after `sudo sh install.sh --stop-legacy`
+on rc3 refused on a Mac dev box).** Two causes, both fixed (branch `ci/stop-legacy-native`):
+(1) On a Mac the legacy GPU services are not containers but user **LaunchAgents** — what each
+service's `deploy-launchd.sh` (and through it the legacy admin's native mode) installs:
+`com.jarvis.llm-proxy` (7704/7705), `com.jarvis.whisper-api` (7706), `com.jarvis.tts` (7707),
+`com.jarvis.ocr.service` (7031), `com.jarvis.ocr.worker`; plus the admin, `com.jarvis.admin`.
+`doctor.LegacyAgents` lists them (install.sh's `LEGACY_AGENTS` is kept equal by a test); nothing
+else is touched (`com.jarvis.osx-api`, `io.jarvis.host-agent`, `com.jarvis.nightly-benchmark`
+are not the server's). The doctor's **legacy stack** check runs `launchctl print gui/<uid>/<label>`
+for this user (under sudo `$SUDO_UID`) and warns on any loaded one, naming its pid and giving
+`launchctl disable` + `bootout` and the restore commands (`launchctl enable … && launchctl
+bootstrap gui/<uid> <plist>`). `--stop-legacy` disables (off at login) and boots them out in
+that domain, refuses if one stays loaded, and prints the restore lines. The legacy tooling has
+no Linux unit equivalents (there the services are containers; the `./jarvis` CLI's "local"
+services are background processes, which the refusal now mentions: `./jarvis stop`); prod has
+none (runbook §1). **Order:** with `--stop-legacy` a fresh install now stops the legacy
+containers, agents and admin *first*, waits up to 15 s for the ports, and only then refuses for
+"another program"; without it the refusal names both containers and agents.
+(2) Under `sudo`, PATH is sudo's `secure_path`, which on macOS lacks `/usr/local/bin` and
+`/opt/homebrew/bin`: Docker Desktop's CLI went missing (so the legacy containers looked like
+"another program") and so did Homebrew's minisign (signature silently skipped). The script now
+puts both dirs back on PATH on macOS (root reaches Docker Desktop through the
+`/var/run/docker.sock` symlink), and looks for minisign on PATH, then in the Homebrew/MacPorts
+dirs, then in the invoking user's login-shell PATH (`sudo -u $SUDO_USER $SHELL -lc 'command -v
+minisign'`); every candidate must pass `minisign -v` (the version-manager shim guard), and the
+INVALID message names the binary used. The "another program holds jarvisd's ports" refusal lists
+the listeners (`lsof`, else `ss`). CI `install` on macos-14: a fake `com.jarvis.llm-proxy`
+agent (python on 7704) is named by the doctor; under sudo's minimal PATH a fake
+`/usr/local/bin/docker` reports a legacy container; the plain run refuses naming both, `sudo env
+PATH=<secure_path> sh install.sh --stop-legacy` stops the container (`update --restart=no` +
+`stop`) and the agent (booted out, disabled, restore line printed) while `com.jarvis.osx-api`
+keeps running; a plain python on 7700 is listed in the refusal; and with `brew install minisign`
+the throwaway-signed release is refused under the minimal PATH.
 
 ### 8.4 macOS signing and notarization as built (ID9; 2026-10-08)
 
