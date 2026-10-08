@@ -537,3 +537,9 @@ Things the read-only survey could not settle. Each has a recommendation.
 | Q9 | Legacy had **2 superusers**. Does the second one need superuser on jarvisd? (Needs `jarvisd admin-token create auth` + `PUT /admin/users/{id}/superuser`, ID4.) | Only if they use the admin. |
 | Q10 | When may the legacy stack be **removed** (containers, 150 GB of models, 16 GB ollama volume)? | Two stable weeks, then ask again. |
 | Q11 | Memories (49) and inbox (100) are lost under ID6 (ID6 counted 2 memories; it is 49 now). Re-confirm clean start, or hand-copy a few memories? | Clean start as decided; the dump keeps them. |
+
+
+## Answers (2026-10-07)
+
+- Q11: clean start re-confirmed by the user with the corrected counts.
+- Q1: the Cloudflare tunnel **stays**. Off-LAN service discovery through it needs jarvisd to hand out public URLs (follow-up being designed; see STATUS).
