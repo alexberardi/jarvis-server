@@ -35,6 +35,7 @@ Technical choices that need no product call are already made in the inventory:
 |---|---|---|---|
 | RD2 | 2026-10-08 | RQ2 core recipes | **(a) drop from LLM plan candidates**; routes stay on the wire; real starter recipes possible later. |
 | RD3 | 2026-10-08 | RQ3 editor photos | **(b) relative on the wire, resolved by the app** (user: store relative, the app appends it to its current recipes base URL, so IP moves and LAN/public both work). Server keeps legacy `/media/<name>` (no rewrite). App change in jarvis-recipes-mobile: resolve relative `image_url` against the discovered recipes base URL; absolute URLs (web imports) unchanged. Must ship before cutover. SKU matching prior art: recipes `grocery_service.py` + queue worker (ported per RD1). |
+| RD4 | 2026-10-08 | RQ4 leaver data | **(a) household keeps shared rows**; delete only the leaver's private rows, jobs, imports and staged recipes; household deletion removes everything. |
 | RD1 | 2026-10-08 | RQ1 scope | **(a) port everything**, including the LLM SKU-matching job (user). |
 
 ## Queue
