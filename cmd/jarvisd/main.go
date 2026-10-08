@@ -271,6 +271,10 @@ commands:
                    register and control jarvisd with systemd, launchd or the Windows SCM
   setup-link       print the first-run setup link and token (or the admin URL once set up)
   migrate status   show each module's migration state
+  import-recipes [--apply] [--household OLD=NEW]... [--park-unmatched] [--legacy-host HOST]... BUNDLE
+                   import recipes, meal plans, staples and SKU mappings from a legacy export
+                   (scripts/legacy/recipes-export.sh), owned by the accounts whose emails match;
+                   a dry run unless --apply; re-run after more people sign up
   doctor [--json] [--fix]
                    check that nodes and phones can reach jarvisd (listeners, ports held by
                    another program, host firewall, data permissions, legacy stack); --fix
@@ -355,6 +359,11 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 			return err
 		}
 		return printSetupLink(cfg, stdout)
+	case "import-recipes":
+		if err := bootstrap(flagHome, false, os.Stderr); err != nil {
+			return err
+		}
+		return runImportRecipes(ctx, args[1:], stdout)
 	case "migrate":
 		if len(args) < 2 || args[1] != "status" {
 			return errors.New("usage: jarvisd migrate status")

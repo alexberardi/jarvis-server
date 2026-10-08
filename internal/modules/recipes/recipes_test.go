@@ -434,7 +434,8 @@ func TestOneScopingPredicate(t *testing.T) {
 	raw := regexp.MustCompile(`(user_id|household_id)\s*(=|IN|IS)`)
 	for _, f := range files {
 		n := f.Name()
-		if !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") || n == "auth.go" || n == "hooks.go" {
+		// legacy_import.go is the operator's cutover import (no caller): it writes every scope.
+		if !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") || n == "auth.go" || n == "hooks.go" || n == "legacy_import.go" {
 			continue
 		}
 		b, err := os.ReadFile(n)

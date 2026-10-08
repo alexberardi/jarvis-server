@@ -115,7 +115,6 @@ func TestFetcherRedirects(t *testing.T) {
 	}
 }
 
-
 // loopbackOK lets tests reach httptest servers while everything else stays guarded.
 func loopbackOK() *Fetcher {
 	return &Fetcher{Blocked: func(ip netip.Addr) bool { return !ip.Unmap().IsLoopback() && IPBlocked(ip) }}

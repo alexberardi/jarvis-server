@@ -119,7 +119,7 @@ All must be **yes** before the window starts. Record the answers in STATUS.
 | G2 | The same `<tag>` passed a fresh install + voice turn on the dev box (A10 again, system unit if anyone can sudo there) | STATUS entry |
 | G3 | Kitchen node software has the "before cutover" node changes: `chat_text()` → `/api/v0/node/llm/chat` (EXTERNAL-CHANGES D5) and per-node MQTT credentials (D4/D7). jarvis-dev passed A10 with them; confirm 0.3.1 includes them (Q5) | node-setup release notes / `git tag --contains` |
 | G4 | Mobile app build in users' hands hides the Forge test-install screen (EXTERNAL-CHANGES, "before cutover") or that screen is accepted as broken | app release |
-| G5 | Users told: accounts, memories, routines, contacts and voice enrollment start over; the app needs a fresh sign-up; browser chat (jarvis-web) and recipes go away (Q2, Q3) | message sent |
+| G5 | Users told: accounts, memories, routines, contacts and voice enrollment start over; the app needs a fresh sign-up **with the same email as before** (recipes, plans and staples follow the email, §4.7.1); browser chat (jarvis-web) goes away (Q2, Q3) | message sent |
 | G6 | Off-LAN access decision made (Q1) | answer recorded |
 | G7 | Pre-flight §3 done within 24 h: backups written and readable, ≥ 40 GB free on `/`, `sudo` works | §3 checklist |
 | G8 | A 2-hour window when nobody needs voice, chat, push or phone | — |
@@ -163,6 +163,17 @@ grep -E 'hostname|service' ~/.cloudflared/jarvis-services.yml > "$BK/tunnel-ingr
 
 # 3.5 Install minisign so install.sh *requires* the release signature (00-installers §8.3).
 sudo apt-get install -y minisign
+
+# 3.6 Recipes: survey + dress-rehearsal export (strictly read-only; docs/recipes §13). The script
+#     refuses unless the legacy recipes schema is e1f2a3b4c5d6. It finds the container
+#     (jarvis-recipes-server), the Postgres role (the container's POSTGRES_USER) and the DBs
+#     (jarvis_recipes, jarvis_auth) itself; override with --recipes-container/--pg-user/... if not.
+curl -fsSL -o "$BK/recipes-export.sh" https://raw.githubusercontent.com/alexberardi/jarvis-server/<tag>/scripts/legacy/recipes-export.sh
+bash "$BK/recipes-export.sh" --out "$BK/recipes-export-t1.tar.gz"
+#   expect: "image_url: none=… media=… absolute=… other=0", "photos: N copied, 0 missing",
+#   recipes: 48 rows, meal_plans: 2 rows. "missing" photos are dropped (null) by the import, so
+#   look before cutover. Where the media live (informational):
+docker inspect jarvis-recipes-server --format '{{json .Mounts}}' | jq -r '.[] | select(.Destination=="/app/media")'
 ```
 
 Re-run the §1 survey commands that matter and stop if anything moved: the two llama-server containers
@@ -191,6 +202,10 @@ Budget about 75 min with a fast download, about 2 h at 10 MB/s. Times are from A
    ```sh
    BK=/mnt/fast/jarvis-legacy-$(date +%Y%m%d)
    docker exec jarvis-postgres pg_dumpall -U jarvis | gzip > "$BK/pg_dumpall-t0.sql.gz" && ls -lh "$BK"
+   ```
+3. Final recipes export while Postgres still runs (read-only, ~5 s; §3.6 fetched the script):
+   ```sh
+   bash "$BK/recipes-export.sh" --out "$BK/recipes-export-t0.tar.gz"
    ```
 
 ### 4.2 See what `--stop-legacy` will stop (1 min)
@@ -239,7 +254,7 @@ Check:
 
 ```sh
 sudo jarvisd service status                          # running, health OK, exit 0
-for p in 7700 7701 7702 7703 7704 7706 7707 7710 7712 7031; do
+for p in 7700 7701 7702 7703 7704 7706 7707 7710 7712 7031 7030; do
   printf '%s %s\n' $p "$(curl -s -o /dev/null -w '%{http_code}' -D - http://localhost:$p/health | grep -i '^server:' | tr -d '\r')"
 done                                                 # every line "Server: jarvisd"
 ss -ltnH '( sport = :1884 or sport = :9883 )'        # two listeners, jarvisd's broker
@@ -386,6 +401,47 @@ curl -s localhost:7701/households -H "authorization: Bearer $J" | jq     # [{id,
 
 Access tokens from legacy fail against jarvisd (new signing key), so apps land on the sign-in screen.
 
+### 4.7.1 Recipes import (5 min, then again as people sign up)
+
+`jarvisd import-recipes` brings in recipes, meal plans, staples and SKU mappings, owned by the jarvisd
+account with the **same email** as the legacy one (docs/recipes/00-inventory.md §13). Run it once the
+kitchen household is set up (§4.7 steps 1–3) and its members have signed up; run it again whenever
+more people have. It never touches the legacy stack, and a dry run (the default) writes nothing.
+
+```sh
+# The jarvisd service account must be able to read the bundle, and must be the one writing
+# (photos land in /var/lib/jarvisd/blobs; the command refuses to run as root there).
+sudo install -m 0600 -o jarvisd -g jarvisd "$BK/recipes-export-t0.tar.gz" /var/lib/jarvisd/recipes-export-t0.tar.gz
+B=/var/lib/jarvisd/recipes-export-t0.tar.gz
+sudo -u jarvisd jarvisd import-recipes --home /var/lib/jarvisd "$B"            # dry run: read the report
+```
+
+Read the report:
+
+- **Users matched / not matched.** Emails are shown masked (`a***@domain`). Not matched = no jarvisd
+  account with that email yet: their rows are skipped and come in on a later run.
+- **Households not mapped.** "no member of it has a jarvisd account yet" waits like a user. "ambiguous"
+  (the owner is in several jarvisd households with no unique name match) needs a decision:
+  `--household <legacy id>=<jarvisd id>` (ids from the report; `GET /households` lists the jarvisd ones).
+- **REFUSED** (nothing written): two legacy accounts match one jarvisd account (emails differing only in
+  case), or two legacy households map to one jarvisd household. Fix the accounts (or pick distinct
+  `--household` targets) and re-run. Never work around it.
+- **photos … dropped**: the image URL pointed at a file the export did not find (§3.6 "missing").
+
+```sh
+sudo -u jarvisd jarvisd import-recipes --home /var/lib/jarvisd "$B" --apply  # add any --household seen above
+sudo -u jarvisd jarvisd import-recipes --home /var/lib/jarvisd "$B"          # again: every row now "earlier"
+```
+
+Later, after more sign-ups: the same `--apply` command imports only the newcomers' rows (a mapping
+settled by `--household` is remembered). If a household wants a member's shared recipes before that
+member signs up, add `--park-unmatched` (their household rows come in owned by nobody; the run after
+they sign up gives them back). When nobody is left to wait for: `sudo rm "$B"` (`$BK` keeps a copy).
+
+If the survey (§3.6) showed `absolute=` URLs pointing at the legacy recipes host's own `/media/`, they
+are made relative automatically when the bundle has the file; add `--legacy-host <host:port>` for any
+that do not.
+
 ### 4.8 Nodes: re-point without a factory reset (5 min each, ~1 min of it waiting)
 
 For each node: register its **existing** `node_id` on jarvisd, give it the new key, restart it. The node
@@ -510,6 +566,9 @@ Ingress changes, in `~/.cloudflared/jarvis-services.yml` (backup in §3.4), then
 | V10 | Phone (if kept): call a contact from the app or by voice | call connects, two-way audio |
 | V11 | Reboot test, if the window allows: `sudo reboot` | jarvisd back by itself (`service status`), legacy containers stay down (`docker ps`), nodes reconnect |
 | V12 | `nvidia-smi` | two llama-server (one per GPU) + whisper-server; no legacy processes |
+| V14 | Recipes, per imported user: the import report's `recipe` imported count (plus "earlier") equals that user's legacy count (§3.6 export: 48 recipes, one author); in the app, as that user, the recipe box shows them | equal; skipped rows only for people not yet signed up |
+| V15 | A meal plan renders: the app's planner as the plan's household (legacy had 2 plans, users 1 and 4) | plan with its days and recipe titles |
+| V16 | A `/media` photo loads (if the export had any): `curl -s -o /dev/null -w '%{http_code} %{content_type}\n' localhost:7030/media/$(tar -tzf "$BK/recipes-export-t0.tar.gz" \| sed -n 's#^\./media/##p' \| grep . \| head -1)` | `200 image/jpeg` (or the photo's type); the app shows the photo (needs recipes-mobile #20) |
 | V13 | Off-LAN discovery: `curl -s https://<config hostname>/services \| jq -r '.services[]\|"\(.name) \(.url)"'`, then a phone on mobile data (Wi-Fi off): app chat | the §4.6.1 rows print `https://<hostname>:443` / `wss://<mqtt hostname>:443`; the phone chats over mobile data |
 
 ---
@@ -600,4 +659,9 @@ Things the read-only survey could not settle. Each has a recommendation.
 - Q1: the Cloudflare tunnel **stays**. Off-LAN service discovery through it needs jarvisd to hand out public URLs. **Built (2026-10-07):** a public URL per registry row (admin Connections), answered "in kind" by `/services` and `/services/{name}`. Entered at §4.6.1; tunnel ingress changes are in §4.11.
 - Q5 (checked 2026-10-08 against the node-setup repo): **v0.3.1 does NOT have the cutover node changes.** It has per-node MQTT credentials and `NodeLLMClient`, but `chat_text()`/`chat()` still call `/api/v0/chat` (jarvisd drops it, D5) — that's open PR #134 — and inline routine definitions (D24) are open PR #135. Go/no-go G3 needs both merged, a node-setup release (v0.3.2), and the kitchen + demo nodes updated before cutover. Without them: jokes, routine briefings and "what's up" fail, and server-sent routine definitions don't run.
 - Q2 (user 2026-10-08): **recipes must work at cutover** — "we need to get everything working at the same time so we can delay deploying". Cutover waits for one coordinated release: jarvisd + the recipes add-on on jarvisd (OCR over HTTP + callback, auth against jarvisd) + node-setup v0.3.2 (#134, #135) + the mobile Twilio section. Recipe ownership: **remap by email** with a one-time recipes-side script run after users re-register (legacy user id → new jarvisd id; unmatched rows stay orphaned for later cleanup).
+- Q2 follow-up (2026-10-08, recipes R11): recipes moved into jarvisd (2026-10-08 decision), so the
+  "recipes-side script" is now `jarvisd import-recipes` run against a read-only export taken in the
+  window: §3.6 (survey + dress rehearsal), §4.1 step 3 (final export), §4.7.1 (import, re-run as people
+  sign up), V14–V16. Unmatched rows are not orphaned in jarvisd: they wait in the bundle for a later run.
+  Rehearsed end to end against the MBP legacy stack (docs/recipes/00-inventory.md R11).
 - G3 follow-up (2026-10-08): #134 and #135 merged (user: merge if green) and **node-setup v0.3.2 released** (signed, arm64 tarball + images). Both changes also work against the legacy CC, so the kitchen and demo nodes can be updated to 0.3.2 *before* cutover through the legacy admin's node update (pending_update) — that touches prod, so only with the user's go. Mobile Twilio section: jarvis-node-mobile PR #83 awaiting review (admin-only editing, matching the server's RoleAdmin check).
