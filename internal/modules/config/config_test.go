@@ -278,7 +278,9 @@ func TestSelfRegistrationDropsUnservedRows(t *testing.T) {
 	if c, _ := do(t, h, "POST", "/services", `{"name":"my-addon","host":"localhost","port":9000}`, "X-Admin-Token", token); c != 201 {
 		t.Fatal(c)
 	}
-	m.External = func(context.Context) map[string]string { return map[string]string{"jarvis-pantry": "https://pantry.example.org"} }
+	m.External = func(context.Context) map[string]string {
+		return map[string]string{"jarvis-pantry": "https://pantry.example.org"}
+	}
 	if err := m.syncSelf(context.Background()); err != nil {
 		t.Fatal(err)
 	}
