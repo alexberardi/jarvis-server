@@ -208,6 +208,7 @@ func TestProvidersFollowSettings(t *testing.T) {
 	av := &fakeEngine{name: EngineAppleVision, text: "x", down: true}
 	llm := &fakeEngine{name: EngineLLMVision, text: "x"}
 	e := setup(t, &Module{Engines: []Engine{tess, av, llm}})
+	e.setSetting(t, "ocr.enable_apple_vision", false) // the default on macOS is on (ID13)
 	code, out := e.do(t, "GET", "/v1/providers", nil, appH)
 	p := out["providers"].(map[string]any)
 	if code != 200 || p["tesseract"] != true || p["apple_vision"] != false || p["llm_proxy_vision"] != false {

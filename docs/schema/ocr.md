@@ -71,13 +71,37 @@ updated_at`). Import copies rows 1:1, with these transforms:
   `ocr.enable_llm_proxy_vision`, `ocr.max_text_bytes`, `ocr.min_valid_chars`,
   `ocr.language_default`, `ocr.max_attempts`, `ocr.enabled_tiers` (default now
   `tesseract,apple_vision,llm_local`; the legacy `remote_ocr` tier name is accepted as an alias
-  for `apple_vision`), `ocr.validation_model`.
+  for `apple_vision`), `ocr.validation_model`. `ocr.enable_apple_vision` defaults **on on macOS**
+  (Vision is built in there, ID13) and off elsewhere. **New:** `ocr.llm_vision_timeout_seconds`
+  (int, default 180, read live): LLM vision's per-image timeout, legacy 60 s (A10e M4).
   **Dropped:** the three cut-engine flags, `ocr.enable_llm_proxy_cloud` (a second LLM tier on the
   same `background` model), `server.log_level` (jarvisd logs), `auth.cache_ttl_seconds` (auth is
   in-process). Import skips their rows. The two `enable_*` flags are no longer `requires_reload`.
-- **Engines.** tesseract via exec when on PATH (`Module.TesseractPath`, `-` disables). Apple
-  Vision only through jarvis-osx-api (`POST /v1/ocr`, Bearer an `ocr:read` key; the legacy
-  in-process PyObjC provider and the separate `remote_ocr` name are folded into `apple_vision`).
+- **Engines.** tesseract via exec when on PATH or in the Homebrew/MacPorts dirs
+  (`Module.TesseractPath`, `-` disables). **Apple Vision** (one engine, `apple_vision`):
+  - **macOS: in process** (ID13, `vision_darwin.go`): `VNRecognizeTextRequest` through purego's
+    Objective-C runtime, no cgo, no helper. Foundation + Vision are `dlopen`ed from
+    `/System/Library/Frameworks`; the image bytes go to `VNImageRequestHandler
+    initWithData:options:` as an `NSData` (Vision decodes JPEG/PNG/HEIC and honours EXIF
+    orientation, as jarvis-osx-api did), recognition level **Accurate (0)**, language correction
+    on, recognition languages from the hints (`en` → `en-US` …; retried with Vision's defaults if
+    a language is refused), then `results` → `topCandidates:1` → `string`, `confidence`,
+    `boundingBox`. Mapping (`mapVision`, pure Go): one observation per line joined with `\n`; boxes
+    flipped to a top-left origin and scaled to pixels when Go can size the image (else left
+    normalised, like the HTTP route); block confidence 0–1 (Recognize reports the mean on 0–100).
+    Crash safety: every class is looked up and every selector checked with
+    `respondsToSelector:`/`instancesRespondToSelector:` at load and on each returned object
+    before it is messaged (an ObjC exception would abort jarvisd); Go panics recovered; anything
+    missing → not built, a start-up WARN with the reason. Memory: one locked OS thread and one
+    `NSAutoreleasePool` per recognition, the alloc'd handler and request released. One recognition
+    at a time; a cancelled context sends the request `cancel`. No entitlement and no TCC grant:
+    Vision is an Apple system framework (the notarized binary keeps only
+    `disable-library-validation`; verified under an ad-hoc hardened-runtime signature with that
+    entitlement on the MBP).
+  - **Through jarvis-osx-api** (`POST /v1/ocr`, Bearer an `ocr:read` key) when
+    `JARVIS_OSX_API_URL`/`JARVIS_OSX_API_KEY` are set: the fallback behind the native reader on
+    macOS (used when it is unavailable or fails), the only route on other OSes. The legacy
+    in-process PyObjC provider and the separate `remote_ocr` name are folded into `apple_vision`.
   LLM vision and text validation through an OpenAI-compatible URL (`Module.LLMURL`, the legacy
   llm-proxy during the strangler phase).
 - **Where tiers apply.** As before, `POST /v1/ocr/batch` with `auto` walks the fixed engine order
