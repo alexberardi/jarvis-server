@@ -139,30 +139,37 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 
 	if *rollback {
 		fwOK := runtime.GOOS == "darwin" && len(firewallFixes(ctx, cfg)) == 0
+		const reason = "rolled back by hand (jarvisd upgrade --rollback)"
+		var back string // the version being restored, for the closing line
 		if m, err := update.ReadMarker(paths); err != nil {
 			return err
 		} else if m == nil {
 			// The upgrade already passed its gate: put the previous binary back only.
-			if err := update.RestorePrevious(paths); err != nil {
+			back, _ = binaryVersion(ctx, paths.Prev())
+			if _, err := update.RestorePrevious(paths, back, current, reason); err != nil {
 				return err
 			}
 			fmt.Fprintf(stdout, "restored %s; the database is unchanged (if the newer version migrated it, "+
 				"jarvisd refuses to start: restore a snapshot from %s)\n", paths.Prev(), paths.BackupsDir())
 		} else {
-			res, err := update.Rollback(ctx, paths, "rolled back by hand (jarvisd upgrade --rollback)")
+			res, err := update.Rollback(ctx, paths, reason)
 			if err != nil {
 				return err
 			}
+			back = res.From
 			fmt.Fprintf(stdout, "rolled back %s to %s (database restored: %v)\n", res.To, res.From, res.DBRestored)
 		}
 		if mgr == nil || !st.Installed {
 			fmt.Fprintln(stdout, "start jarvisd again to run it")
 			return nil
 		}
-		fmt.Fprintln(stdout, "restarting the service")
+		fmt.Fprintln(stdout, "restarting the service; waiting for it to answer its health check")
 		err := mgr.Restart(ctx)
 		refirewall(ctx, cfg, fwOK, stdout)
-		return err
+		if err != nil {
+			return err
+		}
+		return reportHealthy(ctx, mgr, gateTimeout(), back, logHint(st.Kind, paths.Home), stdout)
 	}
 
 	if !update.CanWrite(exe) {
@@ -288,6 +295,20 @@ func restartAfter(ctx context.Context, mgr service.Manager, st service.Status, p
 }
 
 var errNoOutcome = errors.New("no upgrade outcome")
+
+// reportHealthy waits for the restarted service to run and answer /health, and says so; an
+// error naming the log when it doesn't within wait. version is what was started ("" unknown).
+func reportHealthy(ctx context.Context, mgr service.Manager, wait time.Duration, version, logs string, stdout io.Writer) error {
+	name := "jarvisd"
+	if version != "" {
+		name += " " + version
+	}
+	if _, err := waitHealthy(ctx, mgr, wait); err != nil {
+		return fmt.Errorf("%s didn't come up healthy within %s: %w; see %s", name, wait, err, logs)
+	}
+	fmt.Fprintf(stdout, "%s is up and healthy\n", name)
+	return nil
+}
 
 // waitOutcome waits for the restarted service to clear the upgrade marker and reports the
 // result (succeeded, rolled back); errNoOutcome when the wait runs out.
