@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,8 +67,13 @@ type Options struct {
 	Firewall Firewall
 	// Dial checks a local listener (default net.Dialer, 1 s).
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
-	// ServerHeader GETs a URL and returns its Server header (default: an HTTP client, 2 s).
+	// ServerHeader GETs a URL and returns its Server header (default: an HTTP client, 2 s
+	// unless ctx has a deadline of its own).
 	ServerHeader func(ctx context.Context, url string) (string, error)
+	// ListenerOwner names the process listening on a local TCP port, "" when it can't be told
+	// (default: lsof, ss or Get-NetTCPConnection through Run; another account's sockets need
+	// root).
+	ListenerOwner func(ctx context.Context, port int) string
 	// Run runs the external commands the OS checks use (docker, nvidia-smi, pmset, netsh).
 	Run Runner
 	// Home is jarvisd's data directory; "" skips the permission checks (the admin's
@@ -116,6 +122,10 @@ func Run(ctx context.Context, o Options) []Check {
 	if o.Run == nil {
 		o.Run = execRunner
 	}
+	if o.ListenerOwner == nil {
+		goos, run := o.GOOS, o.Run
+		o.ListenerOwner = func(ctx context.Context, port int) string { return listenerOwner(ctx, goos, run, port) }
+	}
 	if o.LANs == nil {
 		o.LANs = LocalLANs(o.Interfaces)
 	}
@@ -134,9 +144,19 @@ func Run(ctx context.Context, o Options) []Check {
 	return out
 }
 
+// headerTimeout bounds the first /health request on each port; slowHeaderTimeout the second
+// try on a port that didn't answer the first and whose owner can't be told.
+var (
+	headerTimeout     = 2 * time.Second
+	slowHeaderTimeout = 8 * time.Second
+)
+
 func serverHeader(ctx context.Context, url string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, headerTimeout)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -152,8 +172,15 @@ func serverHeader(ctx context.Context, url string) (string, error) {
 // listening dials every TCP port. Something answering on an HTTP listener without jarvisd's
 // Server header is another program (typically the legacy stack), which keeps jarvisd from
 // starting at all: it binds every listener before serving.
+//
+// A listener that accepts but doesn't answer /health in time is not taken for another program
+// on that alone (A10e: right after an upgrade the llm listener of a jarvisd still loading its
+// models was reported as "another program holds llm (7704)"): its owner is looked up (the
+// process behind the socket), then /health asked again with more time; a jarvisd that is only
+// slow is a warning. Only a port nobody can vouch for, on a host where no listener answers as
+// jarvisd, stays "another program".
 func listening(ctx context.Context, o Options) []Check {
-	var down, foreign []Port
+	var down, foreign, slow, unanswered []Port
 	jarvisd := false // some HTTP listener is jarvisd's
 	var other []Port // non-HTTP ports that answer
 	for _, p := range o.Ports {
@@ -170,15 +197,58 @@ func listening(ctx context.Context, o Options) []Check {
 			other = append(other, p)
 			continue
 		}
-		srv, err := o.ServerHeader(ctx, fmt.Sprintf("http://127.0.0.1:%d/health", p.Port))
-		if err == nil && strings.EqualFold(srv, httpx.ServerName) {
+		srv, err := o.ServerHeader(ctx, healthOn(p.Port))
+		switch {
+		case err != nil:
+			unanswered = append(unanswered, p)
+		case strings.EqualFold(srv, httpx.ServerName):
 			jarvisd = true
-		} else {
+		default:
 			foreign = append(foreign, p)
 		}
 	}
+	var unknown []Port
+	for _, p := range unanswered {
+		switch owner := o.ListenerOwner(ctx, p.Port); {
+		case isJarvisd(owner):
+			slow = append(slow, p)
+		case owner != "":
+			foreign = append(foreign, p)
+		default:
+			unknown = append(unknown, p)
+		}
+	}
+	for _, p := range unknown {
+		rctx, cancel := context.WithTimeout(ctx, slowHeaderTimeout)
+		srv, err := o.ServerHeader(rctx, healthOn(p.Port))
+		cancel()
+		switch {
+		case err == nil && strings.EqualFold(srv, httpx.ServerName):
+			jarvisd = true
+		case err == nil:
+			foreign = append(foreign, p)
+		case jarvisd || len(slow) > 0:
+			// jarvisd binds every listener before it serves any, so a port that accepts
+			// next to one that answers as jarvisd is its own.
+			slow = append(slow, p)
+		default:
+			foreign = append(foreign, p)
+		}
+	}
+	// A late answer above can vouch for ports that looked foreign only for not answering.
+	if jarvisd {
+		var still []Port
+		for _, p := range foreign {
+			if slices.Contains(unknown, p) {
+				slow = append(slow, p)
+				continue
+			}
+			still = append(still, p)
+		}
+		foreign = still
+	}
 	// The broker's ports can't be asked; they are jarvisd's when its HTTP listeners are.
-	if !jarvisd {
+	if !jarvisd && len(slow) == 0 {
 		foreign = append(foreign, other...)
 	}
 	var out []Check
@@ -195,10 +265,71 @@ func listening(ctx context.Context, o Options) []Check {
 			Fix:    "start jarvisd (jarvisd service start, or jarvisd serve), or check its log for a port already in use"})
 	case len(down) > 0:
 		out = append(out, Check{Name: "listening", Status: Fail, Detail: "nothing answers on " + names(down)})
-	case len(foreign) == 0:
+	case len(foreign) > 0:
+	case len(slow) > 0:
+		out = append(out, Check{Name: "listening", Status: Warn,
+			Detail: fmt.Sprintf("jarvisd holds all %d TCP ports, but /health on %s did not answer in time "+
+				"(it may still be starting, e.g. loading models); run jarvisd doctor again in a minute", countTCP(o.Ports), names(slow))})
+	default:
 		out = append(out, Check{Name: "listening", Status: OK, Detail: fmt.Sprintf("jarvisd answers on all %d TCP ports", countTCP(o.Ports))})
 	}
 	return out
+}
+
+func healthOn(port int) string { return fmt.Sprintf("http://127.0.0.1:%d/health", port) }
+
+// isJarvisd reports whether a process name is jarvisd's.
+func isJarvisd(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		name = name[i+1:]
+	}
+	return strings.TrimSuffix(name, ".exe") == "jarvisd"
+}
+
+// listenerOwner names the process listening on 127.0.0.1:port (or the wildcard), "" when
+// the OS tool isn't there or won't say (another account's socket without root).
+func listenerOwner(ctx context.Context, goos string, run Runner, port int) string {
+	switch goos {
+	case "darwin":
+		out, err := run(ctx, "lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-Fc")
+		if err != nil {
+			return ""
+		}
+		return lsofCommand(string(out))
+	case "windows":
+		out, err := run(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+			fmt.Sprintf("(Get-Process -Id (Get-NetTCPConnection -LocalPort %d -State Listen -ErrorAction Stop | Select-Object -First 1).OwningProcess).ProcessName", port))
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	out, err := run(ctx, "ss", "-ltnpH", fmt.Sprintf("sport = :%d", port))
+	if err != nil {
+		return ""
+	}
+	return ssProcess(string(out))
+}
+
+// lsofCommand is the first command name ("c" field) of `lsof -F c` output.
+func lsofCommand(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "c"); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// ssProcess is the first process name in `ss -p` output: users:(("jarvisd",pid=1,fd=9)).
+func ssProcess(out string) string {
+	_, rest, ok := strings.Cut(out, `users:(("`)
+	if !ok {
+		return ""
+	}
+	name, _, _ := strings.Cut(rest, `"`)
+	return name
 }
 
 func names(ps []Port) string {
