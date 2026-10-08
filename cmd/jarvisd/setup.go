@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -45,7 +46,19 @@ func printSetupLink(cfg config.Config, w io.Writer) error {
 		return err
 	}
 	link := strings.TrimSuffix(setupLink(cfg, ""), "setup#token=")
-	fmt.Fprintf(w, "Setup is done (or jarvisd hasn't started yet). The admin is at %s\n", link)
+	// No token: setup is done, or jarvisd hasn't started (it writes the token when it starts
+	// without an admin account). Its /health tells which.
+	host := cfg.Host
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	health := "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Ports[config.ListenerConfig])) + "/health"
+	if probeHealth(context.Background(), health) == "" {
+		fmt.Fprintf(w, "jarvisd is set up. The admin is at %s\n", link)
+		return nil
+	}
+	fmt.Fprintf(w, "jarvisd isn't answering yet; once it is, `jarvisd setup-link` prints the setup link if setup "+
+		"is still to do. The admin is at %s\n", link)
 	return nil
 }
 

@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -25,10 +29,27 @@ func TestSetupLink(t *testing.T) {
 
 func TestPrintSetupLink(t *testing.T) {
 	home := t.TempDir()
-	cfg := config.Config{Home: home, Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710}}
+	// No token and jarvisd answering: setup is done (A10c: it used to say "Setup is done (or
+	// jarvisd hasn't started yet)" whichever it was).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	_, p, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	port, _ := strconv.Atoi(p)
+	cfg := config.Config{Home: home, Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710, config.ListenerConfig: port}}
 	var out bytes.Buffer
-	if err := printSetupLink(cfg, &out); err != nil || !strings.Contains(out.String(), "admin is at http://127.0.0.1:7710/\n") {
-		t.Fatalf("no token: %v %q", err, out.String())
+	if err := printSetupLink(cfg, &out); err != nil || out.String() != "jarvisd is set up. The admin is at http://127.0.0.1:7710/\n" {
+		t.Fatalf("no token, running: %v %q", err, out.String())
+	}
+	// No token and nothing answering: not started yet.
+	srv.Close()
+	out.Reset()
+	if err := printSetupLink(cfg, &out); err != nil || !strings.Contains(out.String(), "isn't answering yet") ||
+		!strings.Contains(out.String(), "jarvisd setup-link") || !strings.Contains(out.String(), "http://127.0.0.1:7710/\n") {
+		t.Fatalf("no token, not running: %v %q", err, out.String())
 	}
 	os.WriteFile(filepath.Join(home, "setup-token"), []byte("abc123\n"), 0o600)
 	out.Reset()
