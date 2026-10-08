@@ -237,14 +237,17 @@ type service struct {
 	ExternalPort sql.NullInt64
 	CreatedAt    sql.NullString
 	UpdatedAt    sql.NullString
+	// ExternalScheme set (with ExternalHost) makes external_* the row's public base URL
+	// (public.go). NULL keeps the legacy external_host/external_port meaning.
+	ExternalScheme sql.NullString
 }
 
-const serviceCols = `id, name, host, port, scheme, health_path, description, external_host, external_port, created_at, updated_at`
+const serviceCols = `id, name, host, port, scheme, health_path, description, external_host, external_port, created_at, updated_at, external_scheme`
 
 func scanService(sc interface{ Scan(...any) error }) (service, error) {
 	var s service
 	err := sc.Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.Scheme, &s.HealthPath, &s.Description,
-		&s.ExternalHost, &s.ExternalPort, &s.CreatedAt, &s.UpdatedAt)
+		&s.ExternalHost, &s.ExternalPort, &s.CreatedAt, &s.UpdatedAt, &s.ExternalScheme)
 	return s, err
 }
 
@@ -253,13 +256,22 @@ type urlStyle struct {
 	dockerized bool
 	external   bool
 	remoteHost string
+	// public: answer public base URLs where set (public.go): the request arrived through one
+	// of the operator's public hostnames, or asked for ?style=external.
+	public bool
 }
 
 func isLocal(h string) bool { return h == "localhost" || h == "127.0.0.1" }
 
 func (s service) url(st urlStyle) string {
+	// A row with a public base URL answers it to requests that came in through a public
+	// hostname and to ?style=external (the published coordinates, as legacy).
+	if pub, ok := s.publicURL(); ok && st.public {
+		return pub
+	}
 	host, port := s.Host, s.Port
-	if st.external {
+	// With a public URL, external_* are that URL's parts, not legacy published coordinates.
+	if st.external && !s.hasPublic() {
 		if s.ExternalHost.Valid && s.ExternalHost.String != "" {
 			host = s.ExternalHost.String
 		}
@@ -335,8 +347,12 @@ func parseStyle(w http.ResponseWriter, r *http.Request) (urlStyle, bool) {
 		return urlStyle{}, true
 	case "dockerized":
 		return urlStyle{dockerized: true}, true
-	case "external", "remote":
-		// Both use the published coordinates and swap a localhost host for the caller's.
+	case "external":
+		// The published coordinates, with a localhost host swapped for the caller's; a public
+		// base URL wins where one is set (the mobile app always asks for this style).
+		return urlStyle{external: true, remoteHost: remote, public: true}, true
+	case "remote":
+		// As external, but LAN-side: a node on the LAN pointed at the config IP stays there.
 		return urlStyle{external: true, remoteHost: remote}, true
 	default:
 		httpx.ValidationError(w, httpx.FieldError{
@@ -390,6 +406,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		m.internalError(w, err)
 		return
 	}
+	st.public = st.public || viaPublicHost(r, publicHosts(svcs))
 	out := make([]map[string]any, 0, len(svcs))
 	for _, s := range svcs {
 		out = append(out, s.response(st))
@@ -403,16 +420,19 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	s, err := m.byName(r.Context(), name)
-	if errors.Is(err, sql.ErrNoRows) {
-		notFound(w, name)
-		return
-	}
+	svcs, err := m.all(r.Context())
 	if err != nil {
 		m.internalError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, s.response(st))
+	st.public = st.public || viaPublicHost(r, publicHosts(svcs))
+	for _, s := range svcs {
+		if s.Name == name {
+			httpx.WriteJSON(w, http.StatusOK, s.response(st))
+			return
+		}
+	}
+	notFound(w, name)
 }
 
 // --- health probes ---

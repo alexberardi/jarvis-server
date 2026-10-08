@@ -470,6 +470,13 @@ superuser-gated, a nil interface answers 503):*
   - `POST /api/connections/services {name, url, health_path?, description?}` → 201 entry. `url` is a base URL
     (scheme http/https/ws/wss/mqtt/mqtts, host, optional port; no path/user/query); 422 invalid, 409 taken or
     a jarvisd-managed name. `DELETE /api/connections/services/{name}` → 204, 404, 409 for managed rows.
+  - **Public URLs (cutover Q1, 2026-10-07):** every listener/external row also carries `public_url` (string or
+    null). `PUT /api/connections/services/{name}/public_url {public_url}` sets it on any row, managed ones
+    included; `null`/`""` clears it. It returns 200 `{name, url, public_url}`, 404 for an unknown row, and
+    422 when the URL is not a base URL (scheme http/https/ws/wss/mqtt/mqtts matching the row's protocol,
+    host, optional port, no path/user/query/fragment, not loopback). `POST …/services` also takes an
+    optional `public_url`. The config module's `/services` and `/services/{name}` return it to requests
+    that arrived through a public hostname, and for `?style=external` (`internal/modules/config/public.go`).
   - `POST /api/connections/apps {app_id, name}` → 201 `{app_id, name, is_active, created_at,
     last_rotated_at, app_key}` (app_id `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, name 1–128; 409 taken).
     `POST …/apps/{id}/rotate` → `{app_id, app_key, last_rotated_at, is_active: true}` (reactivates, the

@@ -36,7 +36,9 @@ type ServiceEntry struct {
 	HealthPath  string `json:"health_path"`
 	Description string `json:"description"`
 	Managed     string `json:"managed"`
-	svc         service
+	// PublicURL is the operator's public base URL (public.go) as entered, "" when unset.
+	PublicURL string `json:"public_url"`
+	svc       service
 }
 
 // NewService is an external entry to add: a base URL (scheme://host[:port], no path).
@@ -45,6 +47,7 @@ type NewService struct {
 	URL         string
 	HealthPath  string // "" is /health
 	Description string
+	PublicURL   string // optional public base URL (public.go)
 }
 
 var (
@@ -95,12 +98,18 @@ func (m *Module) Services(ctx context.Context) ([]ServiceEntry, error) {
 	managed := m.managed(ctx)
 	out := make([]ServiceEntry, 0, len(svcs))
 	for _, s := range svcs {
-		out = append(out, ServiceEntry{
-			Name: s.Name, URL: s.url(urlStyle{}), Scheme: s.Scheme, Host: s.Host, Port: s.Port,
-			HealthPath: s.HealthPath.String, Description: s.Description.String, Managed: managed[s.Name], svc: s,
-		})
+		out = append(out, m.toEntry(s, managed))
 	}
 	return out, nil
+}
+
+// toEntry is a row as the admin shows it: its LAN URL, plus the public one when set.
+func (m *Module) toEntry(s service, managed map[string]string) ServiceEntry {
+	return ServiceEntry{
+		Name: s.Name, URL: s.url(urlStyle{}), Scheme: s.Scheme, Host: s.Host, Port: s.Port,
+		HealthPath: s.HealthPath.String, Description: s.Description.String, Managed: managed[s.Name],
+		PublicURL: s.publicDisplay(), svc: s,
+	}
 }
 
 // Probe checks one entry: GET its health path for http(s) rows, a TCP connect for the rest
@@ -200,6 +209,12 @@ func (m *Module) AddService(ctx context.Context, n NewService) (ServiceEntry, er
 		}
 		fields = append(fields, f)
 	}
+	var pub *publicParts
+	if strings.TrimSpace(n.PublicURL) != "" && scheme != "" {
+		p, errs := parsePublicURL(n.PublicURL, scheme, "public_url")
+		fields = append(fields, errs...)
+		pub = &p
+	}
 	if len(fields) > 0 {
 		return ServiceEntry{}, &ValidationError{Fields: fields}
 	}
@@ -219,12 +234,12 @@ func (m *Module) AddService(ctx context.Context, n NewService) (ServiceEntry, er
 	if err != nil {
 		return ServiceEntry{}, err
 	}
-	s, err := m.byName(ctx, name)
-	if err != nil {
-		return ServiceEntry{}, err
+	if pub != nil {
+		if err := m.writePublic(ctx, name, *pub); err != nil {
+			return ServiceEntry{}, err
+		}
 	}
-	return ServiceEntry{Name: s.Name, URL: s.url(urlStyle{}), Scheme: s.Scheme, Host: s.Host, Port: s.Port,
-		HealthPath: s.HealthPath.String, Description: s.Description.String, svc: s}, nil
+	return m.entry(ctx, name)
 }
 
 // RemoveService deletes an operator-added entry. Errors: ErrServiceNotFound,

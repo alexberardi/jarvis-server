@@ -87,6 +87,21 @@ func (f *fakeRegistry) RemoveService(_ context.Context, name string) error {
 	return configmod.ErrServiceNotFound
 }
 
+func (f *fakeRegistry) SetPublicURL(_ context.Context, name, raw string) (configmod.ServiceEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if raw == "bad" {
+		return configmod.ServiceEntry{}, &configmod.ValidationError{Fields: nil}
+	}
+	for i, e := range f.entries {
+		if e.Name == name {
+			f.entries[i].PublicURL = raw
+			return f.entries[i], nil
+		}
+	}
+	return configmod.ServiceEntry{}, configmod.ErrServiceNotFound
+}
+
 type fakeApps struct {
 	mu   sync.Mutex
 	apps map[string]*authmod.AppClient
@@ -224,6 +239,7 @@ func TestA4RoutesAreGated(t *testing.T) {
 		{"GET", "/api/connections?health=false", "", 200},
 		{"POST", "/api/connections/services", `{"name":"x","url":"http://h:1"}`, 201},
 		{"DELETE", "/api/connections/services/x", "", 204},
+		{"PUT", "/api/connections/services/jarvis-auth/public_url", `{"public_url":"https://a.example.io"}`, 200},
 		{"POST", "/api/connections/apps", `{"app_id":"a1","name":"A"}`, 201},
 		{"POST", "/api/connections/apps/a1/rotate", "", 200},
 		{"POST", "/api/connections/apps/a1/revoke", "", 200},
@@ -377,6 +393,37 @@ func TestLogsStreamTails(t *testing.T) {
 	}
 	if w := send(e.mux, "GET", "/api/logs/stream?after=x", "", root...); w.Code != 422 {
 		t.Fatalf("bad after: %d", w.Code)
+	}
+}
+
+func TestConnectionsPublicURL(t *testing.T) {
+	e := newA4(t, "v1.2.3")
+	list := func() (map[string]any, map[string]any) {
+		out := decode(t, send(e.mux, "GET", "/api/connections?health=false", "", root...))
+		return out["listeners"].([]any)[0].(map[string]any), out["external"].([]any)[1].(map[string]any)
+	}
+	if l, x := list(); l["public_url"] != nil || x["public_url"] != nil {
+		t.Fatalf("unset public_url should be null: %v %v", l, x)
+	}
+	w := send(e.mux, "PUT", "/api/connections/services/jarvis-auth/public_url", `{"public_url":"https://auth.example.io"}`, root...)
+	if w.Code != 200 || decode(t, w)["public_url"] != "https://auth.example.io" {
+		t.Fatalf("set: %d %s", w.Code, w.Body.String())
+	}
+	if l, _ := list(); l["public_url"] != "https://auth.example.io" || l["url"] != "http://localhost:7701" {
+		t.Fatalf("listener after set: %v", l)
+	}
+	for body, code := range map[string]int{`{"public_url":"bad"}`: 422, `nope`: 422} {
+		if w := send(e.mux, "PUT", "/api/connections/services/jarvis-auth/public_url", body, root...); w.Code != code {
+			t.Errorf("set %s: %d", body, w.Code)
+		}
+	}
+	if w := send(e.mux, "PUT", "/api/connections/services/nope/public_url", `{"public_url":"https://x.io"}`, root...); w.Code != 404 {
+		t.Errorf("unknown: %d", w.Code)
+	}
+	// null clears.
+	if w := send(e.mux, "PUT", "/api/connections/services/jarvis-auth/public_url", `{"public_url":null}`, root...); w.Code != 200 ||
+		decode(t, w)["public_url"] != nil {
+		t.Fatalf("clear: %d %s", w.Code, w.Body.String())
 	}
 }
 

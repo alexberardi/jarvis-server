@@ -96,6 +96,7 @@ func (m *Module) mountBFF(mux *http.ServeMux, deps module.Deps) {
 	mux.Handle("GET /api/connections", gated(m.handleConnections))
 	mux.Handle("POST /api/connections/services", gated(m.handleAddService))
 	mux.Handle("DELETE /api/connections/services/{name}", gated(m.handleRemoveService))
+	mux.Handle("PUT /api/connections/services/{name}/public_url", gated(m.handleSetPublicURL))
 	mux.Handle("POST /api/connections/apps", gated(m.handleCreateApp))
 	mux.Handle("POST /api/connections/apps/{app_id}/rotate", gated(m.handleRotateApp))
 	mux.Handle("POST /api/connections/apps/{app_id}/revoke", gated(m.handleRevokeApp))
