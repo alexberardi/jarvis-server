@@ -74,6 +74,14 @@ func (m *Module) CreateAppClient(ctx context.Context, appID, name string) (AppCl
 // RotateAppClient issues a new key (shown once) and reactivates the client (the one explicit
 // "reissue + reactivate" action, STATUS 2026-10-06). It returns the rotation time.
 func (m *Module) RotateAppClient(ctx context.Context, appID string) (key, rotatedAt string, err error) {
+	key, rotatedAt, err = m.rotateAppClient(ctx, appID)
+	if err == nil && appID == SelfAppID {
+		m.ForgetSelfAppKey() // rotated from outside: the cached key is dead
+	}
+	return key, rotatedAt, err
+}
+
+func (m *Module) rotateAppClient(ctx context.Context, appID string) (key, rotatedAt string, err error) {
 	key = tokenURLSafe(48)
 	hash, err := hashSecret(key)
 	if err != nil {
@@ -103,5 +111,8 @@ func (m *Module) RevokeAppClient(ctx context.Context, appID string) error {
 		return ErrAppNotFound
 	}
 	m.verified.invalidate("app", appID)
+	if appID == SelfAppID {
+		m.ForgetSelfAppKey()
+	}
 	return nil
 }

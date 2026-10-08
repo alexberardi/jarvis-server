@@ -278,9 +278,13 @@ func (m *Module) runCallback(ctx context.Context, qj queue.Job) ([]byte, error) 
 	if c.Callback.AuthType == "bearer" && c.Callback.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Callback.Token)
 	}
-	if m.AppID != "" && m.AppKey != "" {
-		req.Header.Set("X-Jarvis-App-Id", m.AppID)
-		req.Header.Set("X-Jarvis-App-Key", m.AppKey)
+	id, key, err := m.appCreds(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("llm: callback %s: %w", c.JobID, err)
+	}
+	if id != "" && key != "" {
+		req.Header.Set("X-Jarvis-App-Id", id)
+		req.Header.Set("X-Jarvis-App-Key", key)
 	}
 	resp, err := m.httpClient().Do(req)
 	if err != nil {
@@ -315,4 +319,13 @@ func (s *Service) runNotify(ctx context.Context, qj queue.Job) ([]byte, error) {
 func (s *Service) runPurge(ctx context.Context, _ queue.Job) ([]byte, error) {
 	_, err := s.db.Write.ExecContext(ctx, `DELETE FROM llm_dedupe WHERE expires_at <= ?`, s.now().UnixMilli())
 	return nil, err
+}
+
+// appCreds are the credentials callbacks are signed with: AppID/AppKey when set (the legacy
+// JARVIS_APP_ID/JARVIS_APP_KEY env), else jarvisd's own app client via AppCreds.
+func (m *Module) appCreds(ctx context.Context) (id, key string, err error) {
+	if m.AppID != "" || m.AppCreds == nil {
+		return m.AppID, m.AppKey, nil
+	}
+	return m.AppCreds(ctx)
 }

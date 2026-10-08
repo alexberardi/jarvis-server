@@ -111,6 +111,9 @@ type Module struct {
 	setupMu   sync.Mutex
 	setupHash []byte // SHA-256 of the setup token; nil once a superuser exists
 
+	selfMu  sync.Mutex
+	selfKey string // jarvisd's own app key (selfapp.go), once read or issued
+
 	hookMu         sync.Mutex
 	hooks          []UserDeletedHook
 	memberHooks    []MemberRemovedHook

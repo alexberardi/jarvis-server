@@ -78,6 +78,9 @@ type Module struct {
 	Resolver Resolver
 	// AppID/AppKey are jarvisd's own app credentials, sent on queue callbacks.
 	AppID, AppKey string
+	// AppCreds supplies them when AppID is empty (jarvisd's self-issued app client, auth
+	// SelfAppCreds). Both empty: callbacks go out unsigned.
+	AppCreds func(ctx context.Context) (id, key string, err error)
 	// BackgroundParallel caps concurrent background calls and queued jobs (default 1).
 	BackgroundParallel int
 	// CallbackAttempts bounds callback retries (default 12, exponential backoff up to 5 min).
