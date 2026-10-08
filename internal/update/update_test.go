@@ -554,3 +554,67 @@ func TestRestorePreviousRecordsResult(t *testing.T) {
 		t.Fatalf("result rewritten: %+v", got)
 	}
 }
+
+// TestRollbackIgnoresMarkerPaths: the marker lives in the data directory, which the service
+// account can write, and the rollback may run as root (the systemd pre-start). A tampered
+// marker must not choose the binary put in place or the files a snapshot is restored over or
+// read from, and a symlink left at a temporary name must not be written through.
+func TestRollbackIgnoresMarkerPaths(t *testing.T) {
+	in, _, _ := swapped(t)
+	ctx := context.Background()
+	outside := t.TempDir()
+	write := func(p, s string) {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evil := filepath.Join(outside, "evil")
+	write(evil, "evil binary")
+	victimDB := filepath.Join(outside, "victim.db")
+	write(victimDB, "victim")
+	fakeSnap := filepath.Join(in.paths.Home, "fake-snapshot.db")
+	write(fakeSnap, "attacker data")
+
+	m, err := ReadMarker(in.paths)
+	if err != nil || m == nil {
+		t.Fatal(m, err)
+	}
+	m.Prev = evil
+	m.Snapshots[victimDB] = fakeSnap
+	m.GooseBefore[victimDB] = map[string][]int64{"goose_x": {1}}
+	if err := WriteMarker(in.paths, m); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "victim")
+	write(victim, "untouched")
+	if runtime.GOOS != "windows" {
+		for _, link := range []string{in.paths.ResultPath() + ".tmp", in.db + ".restore"} {
+			if err := os.Symlink(victim, link); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	in.exec(t, `INSERT INTO goose_auth (version_id, is_applied) VALUES (3, 1)`, `INSERT INTO users VALUES ('after')`)
+	if err := RequestRollback(in.paths, "gate"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Rollback(ctx, in.paths, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readString(t, in.paths.Exe); got != "old binary" {
+		t.Fatalf("binary %q: the marker's prev was used", got)
+	}
+	if !res.DBRestored {
+		t.Fatal("the real snapshot was not restored")
+	}
+	if got := in.users(t); len(got) != 1 || got[0] != "before" {
+		t.Fatalf("users %v", got)
+	}
+	for p, want := range map[string]string{victimDB: "victim", victim: "untouched"} {
+		if got := readString(t, p); got != want {
+			t.Fatalf("%s written: %q", p, got)
+		}
+	}
+}

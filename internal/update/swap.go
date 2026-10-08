@@ -221,10 +221,10 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 	if !CanWrite(p.Exe) {
 		return nil, fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
 	}
-	prev := m.Prev
-	if prev == "" {
-		prev = p.Prev()
-	}
+	// Every path comes from p (the executable, the home), never from the marker: the marker
+	// lives in the data directory, which the service account can write, and this may run as
+	// root (the systemd pre-start helper).
+	prev := p.Prev()
 	tmp := filepath.Join(filepath.Dir(p.Exe), ".jarvisd.rollback")
 	if err := copyFile(prev, tmp); err != nil {
 		return nil, fmt.Errorf("update: restore %s: %w", prev, err)
@@ -234,6 +234,9 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 		return nil, err
 	}
 	for file, snap := range m.Snapshots {
+		if !snapshotPathsOK(p, file, snap) {
+			continue // not an entry Stage writes: never restore it
+		}
 		changed, err := migrationsChanged(ctx, p.Home, file, m.GooseBefore[file])
 		if err != nil {
 			return nil, err
@@ -250,6 +253,26 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 		return nil, err
 	}
 	return &res, nil
+}
+
+// snapshotPathsOK reports whether a marker's snapshot entry names a database directly in the
+// home and a regular file directly in its backups directory, neither a symlink. Stage only
+// writes such entries; anything else was edited in by someone who can write the data
+// directory and must not steer a root rollback into reading or overwriting other files.
+func snapshotPathsOK(p Paths, file, snap string) bool {
+	if !filepath.IsAbs(file) || filepath.Dir(filepath.Clean(file)) != filepath.Clean(p.Home) || filepath.Ext(file) != ".db" {
+		return false
+	}
+	if !filepath.IsAbs(snap) || filepath.Dir(filepath.Clean(snap)) != filepath.Clean(p.BackupsDir()) {
+		return false
+	}
+	for _, f := range []string{file, snap} {
+		st, err := os.Lstat(f)
+		if err != nil || !st.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
 }
 
 // RestorePrevious puts Prev back in place with no upgrade in progress (a manual rollback after
