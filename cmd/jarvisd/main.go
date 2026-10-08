@@ -439,9 +439,10 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 			// AD8 restart button and AD5 one-click update.
 			x.Restarter = restarter
 			x.Upgrade = adminmod.UpgradeConfig{
-				Exe:    exe,
-				Helper: os.Getenv(service.EnvUpgradeHelper) == "1",
-				Source: updateSource(),
+				Exe:      exe,
+				Helper:   os.Getenv(service.EnvUpgradeHelper) == "1",
+				UserUnit: restarter.Kind() == service.Systemd && service.UserUnit(),
+				Source:   updateSource(),
 			}
 		}
 	}

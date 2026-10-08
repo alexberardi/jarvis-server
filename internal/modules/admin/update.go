@@ -195,6 +195,10 @@ func (m *Module) checkReleases(ctx context.Context) *updateStatus {
 			st.ChecksumsURL = strp(a.URL)
 		case a.Name == installer:
 			cmd := "curl -fsSL " + a.URL + " | sh"
+			if m.Upgrade.UserUnit {
+				// A --user install: the bare script would attempt a system install (A10b R3).
+				cmd += " -s -- --user"
+			}
 			if installer == "install.ps1" {
 				cmd = "irm " + a.URL + " | iex"
 			}

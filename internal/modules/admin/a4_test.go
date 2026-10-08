@@ -602,6 +602,19 @@ func TestUpdateCheckAgainstGitHub(t *testing.T) {
 		t.Fatalf("forced check: %d", hits.Load())
 	}
 
+	// The system install's command is the bare script; a --user install's passes --user (A10b R3).
+	if runtime.GOOS != "windows" {
+		if cmd := st["install_command"].(string); cmd != "curl -fsSL https://dl.example/v1.3.0/install.sh | sh" {
+			t.Fatalf("system install command: %s", cmd)
+		}
+		user := newA4(t, "v1.2.3")
+		user.m.Updates = UpdateOptions{APIBase: gh.URL}
+		user.m.Upgrade.UserUnit = true
+		if cmd := decode(t, send(user.mux, "GET", "/api/update", "", root...))["install_command"]; cmd != "curl -fsSL https://dl.example/v1.3.0/install.sh | sh -s -- --user" {
+			t.Fatalf("--user install command: %v", cmd)
+		}
+	}
+
 	// A prerelease build follows prereleases.
 	pre := newA4(t, "v1.4.0-rc.0")
 	pre.m.Updates = UpdateOptions{APIBase: gh.URL}

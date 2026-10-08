@@ -99,6 +99,26 @@ func detect(p probe) Kind {
 	return None
 }
 
+// UserUnit reports whether this process runs in the jarvisd systemd --user unit (a `--user`
+// install) rather than the system unit: the admin's suggested install command then needs
+// --user (A10b R3). Only meaningful when Detect is Systemd.
+func UserUnit() bool {
+	b, err := os.ReadFile("/proc/self/cgroup")
+	return err == nil && inUserUnitCgroup(string(b))
+}
+
+// inUserUnitCgroup reports whether the jarvisd.service cgroup line sits under a user manager
+// (…/user@<uid>.service/…/jarvisd.service); the system unit is /system.slice/jarvisd.service.
+func inUserUnitCgroup(cgroup string) bool {
+	for _, line := range strings.Split(cgroup, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasSuffix(line, "/"+Name+".service") && strings.Contains(line, "/user@") {
+			return true
+		}
+	}
+	return false
+}
+
 // inUnitCgroup reports whether any line of /proc/self/cgroup ends in the unit's cgroup.
 func inUnitCgroup(cgroup, unit string) bool {
 	for _, line := range strings.Split(cgroup, "\n") {
