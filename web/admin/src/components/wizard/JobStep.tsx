@@ -27,6 +27,7 @@ import { useSetupState } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
 import { formatBytes } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { currentChoices } from './hardware'
 import VoicePicker from './VoicePicker'
 
 const ICONS: Record<string, LucideIcon> = {
@@ -40,15 +41,16 @@ const ICONS: Record<string, LucideIcon> = {
 /** Where speech-to-text runs, as the Hardware step left it. */
 function SttPlacement() {
   const { data } = useLabels()
-  const stt = data?.labels.find((l) => l.label === 'stt')
-  if (!stt) return null
-  const set = stt.config.gpu_backend
-  const backend = !set || set === 'auto' ? data?.proposal?.stt?.gpu_backend || 'cpu' : set
+  const setup = useSetupState()
+  const hw = setup.data?.hardware
+  if (!data || !hw) return null
+  // The Hardware step's own reading of the labels, so both steps say the same thing.
+  const c = currentChoices(hw, data.labels)
   return (
     <p className="text-xs text-[var(--color-text-muted)]">
-      {backend === 'cpu'
+      {c.stt === 'cpu'
         ? 'Runs on the CPU, as set in the Hardware step.'
-        : `Runs on the GPU (${backend}${stt.config.gpu_devices ? `, device ${stt.config.gpu_devices}` : ''}), as set in the Hardware step.`}
+        : `Runs on the GPU (${c.flavour}${c.sttDevice ? `, device ${c.sttDevice}` : ''}), as set in the Hardware step.`}
     </p>
   )
 }
@@ -87,8 +89,12 @@ export default function JobStep({
   const choice = picked ?? defaultChoice(def, catalog.data, current, job)
   const entry = options.find((m) => m.id === choice)
   const recommended = recommendedEntry(def, catalog.data)
+  // The server's job state can be newer than the labels list (an install finished between two
+  // label polls): a job that runs, with the pre-filled choice untouched, needs no install.
   const settled =
-    current[def.label] === choice || (job.state === 'downloading' && job.install?.model_id === choice)
+    current[def.label] === choice ||
+    (job.state === 'downloading' && job.install?.model_id === choice) ||
+    ((job.state === 'ready' || job.state === 'loading') && !current[def.label] && picked === null)
   const everything = catalog.data ? everythingRecommended(catalog.data, state.data?.jobs, current) : []
   const everythingBytes = everything.reduce((n, it) => {
     const e = catalog.data?.models.find((m) => m.id === it.req.catalog_id)
