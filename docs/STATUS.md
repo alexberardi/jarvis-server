@@ -4,6 +4,8 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
+**Cutover gate (user 2026-10-08): one coordinated release — jarvisd + recipes add-on on jarvisd + node-setup v0.3.2 (#134/#135) + mobile Twilio section; recipes remapped by email.**
+
 ## Current phase: 6 (packaging, admin absorb) — feature-complete; `v0.1.0-rc1` and `v0.1.0-rc2` published; fresh install (A10b) and rc1 → rc2 upgrade/rollback (A10c) rehearsed. Phases 0–5 done
 
 ### Phase 0 checklist
