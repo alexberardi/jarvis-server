@@ -58,7 +58,7 @@ func testSystemd(t *testing.T, userMode bool, euid int) (*systemd, *fakeRun, *[]
 		user: userMode, out: &bytes.Buffer{}, run: f.run,
 		unitPath: filepath.Join(root, "unit", unitName), envDir: filepath.Join(root, "etc-jarvisd"),
 		lingerMark: filepath.Join(root, "config", Name, "linger-enabled"),
-		euid: func() int { return euid },
+		euid:       func() int { return euid },
 		lookupUser: func(n string) (*user.User, error) {
 			if n == Name && accountExists {
 				return &user.User{Username: Name, Uid: "990", Gid: "985"}, nil
