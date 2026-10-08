@@ -30,7 +30,8 @@ func TestReportDoctor(t *testing.T) {
 		"jarvisd doctor found problems:\n",
 		"FAIL  firewall 10.0.0.0/24: ufw drops 7030/tcp from 10.0.0.0/24\n",
 		"      fix:\n        sudo ufw allow from 10.0.0.0/24 to any port 7030 proto tcp comment jarvisd\n",
-		"jarvisd doctor --fix` applies the firewall fix\n",
+		"jarvisd doctor --fix` ", // the hint's wording is per OS (sudo vs an elevated PowerShell)
+		"applies the firewall fix\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
