@@ -378,6 +378,42 @@ func TestTraces(t *testing.T) {
 	}
 }
 
+// capturePub records publishes.
+type capturePub struct{ payloads [][]byte }
+
+func (p *capturePub) Publish(_ string, payload []byte, _ byte, _ bool) error {
+	p.payloads = append(p.payloads, payload)
+	return nil
+}
+
+func (p *capturePub) Request(context.Context, string, []byte, string) ([]byte, error) {
+	return nil, context.Canceled
+}
+
+// A reply key is also the published request_id, as legacy publish_command_with_id(...,
+// request_id) did for tool_call (request_id == reply_request_id == tool_call_id).
+func TestBusCommandAwaitReplyKeyIsRequestID(t *testing.T) {
+	pub := &capturePub{}
+	b := newBus(pub, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rid, _, _ := b.CommandAwait(ctx, "n1", "tool_call", map[string]any{"reply_request_id": "k1"}, "k1")
+	var msg []struct {
+		Details map[string]any `json:"details"`
+	}
+	if len(pub.payloads) != 1 || json.Unmarshal(pub.payloads[0], &msg) != nil || len(msg) != 1 {
+		t.Fatalf("published %q", pub.payloads)
+	}
+	if rid != "k1" || msg[0].Details["request_id"] != "k1" {
+		t.Fatalf("rid %q, details %v", rid, msg[0].Details)
+	}
+	// No reply key: a fresh rid, used for both.
+	rid, _, _ = b.CommandAwait(ctx, "n1", "action", map[string]any{}, "")
+	if err := json.Unmarshal(pub.payloads[1], &msg); err != nil || rid == "" || msg[0].Details["request_id"] != rid {
+		t.Fatalf("rid %q, details %v", rid, msg[0].Details)
+	}
+}
+
 func TestBusVerifyExpiry(t *testing.T) {
 	now := time.Now()
 	b := newBus(nil, nil, func() time.Time { return now })
