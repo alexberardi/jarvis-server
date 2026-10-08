@@ -142,7 +142,7 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
 		// the model it would replace.
 		items = append(items, catalogItem{Entry: e, Fit: a.Manager.entryFit(ctx, hw, e, residents), Installed: state[e.ID] == StateReady, State: state[e.ID]})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": items, "recommended": Recommend(hw), "hardware": hw, "residents": residents})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": items, "recommended": a.Manager.Recommend(ctx, hw), "hardware": hw, "residents": residents})
 }
 
 type hfChoice struct {
@@ -298,7 +298,7 @@ func (a *API) labels(w http.ResponseWriter, r *http.Request) {
 		"voice":     a.Manager.VoiceStatus(ctx),
 		"engines":   a.Resolver.Instances(),
 		"proposal":  engine.Propose(hw),
-		"recommend": Recommend(hw),
+		"recommend": a.Manager.Recommend(ctx, hw),
 		"warnings":  Overcommitted(hw, a.Manager.Residents(ctx)),
 	})
 }

@@ -100,6 +100,12 @@ func fakeRunner(outputs map[string]string) Runner {
 }
 
 func TestDetector(t *testing.T) {
+	t.Run("reports system RAM", func(t *testing.T) {
+		d := &Detector{Platform: Platform{"linux", "amd64"}, Run: fakeRunner(nil), Memory: func() uint64 { return 32 << 30 }}
+		if h := d.Hardware(context.Background(), false); h.RAMMB != 32768 || h.Flavour != FlavourCPU {
+			t.Fatalf("%+v", h)
+		}
+	})
 	t.Run("nvidia before any engine", func(t *testing.T) {
 		d := &Detector{Platform: Platform{"linux", "amd64"}, Run: fakeRunner(map[string]string{
 			"nvidia-smi": "0, NVIDIA GeForce RTX 3090, 24576, 400\n1, NVIDIA GeForce RTX 3090, 24576, 23000\n",

@@ -9,7 +9,7 @@ const verdicts: Record<string, { label: string; tone: Tone }> = {
   tight: { label: 'Tight', tone: 'warn' },
   split: { label: 'Needs 2+ GPUs', tone: 'warn' },
   too_big: { label: 'Too big', tone: 'bad' },
-  cpu: { label: 'CPU', tone: 'muted' },
+  cpu: { label: 'Runs on CPU', tone: 'muted' },
   in_binary: { label: 'Built in', tone: 'muted' },
 }
 

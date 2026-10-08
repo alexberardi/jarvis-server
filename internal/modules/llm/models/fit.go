@@ -12,7 +12,8 @@ import (
 // size-based guess.
 type Fit struct {
 	// Verdict: "fits", "tight" (within 10% of the card), "split" (only across several cards
-	// with tensor split), "cpu" (no usable GPU: runs in RAM, slowly), "too_big", or
+	// with tensor split), "cpu" (runs on the CPU in system RAM: no usable GPU, or the labels
+	// that take it are set to the CPU), "too_big" (for the card, or for RAM on the CPU), or
 	// "in_binary" (tts/speaker: sherpa-onnx on the CPU inside jarvisd).
 	Verdict    string `json:"verdict"`
 	NeededMB   int64  `json:"needed_mb"`
@@ -25,6 +26,8 @@ type Fit struct {
 	// their labels: the verdict is for this model next to them, not on an empty card.
 	CommittedMB int64    `json:"committed_mb,omitempty"`
 	Alongside   []string `json:"alongside,omitempty"`
+	// RAMMB is the host's RAM when the model is judged for the CPU (0 = unknown).
+	RAMMB int64 `json:"ram_mb,omitempty"`
 }
 
 // Resident is GPU memory an assigned local engine already needs. Labels sharing one engine
@@ -38,6 +41,18 @@ type Resident struct {
 }
 
 const mb = 1 << 20
+
+// cpuRAMShare is the percentage of system RAM a model on the CPU may take: the OS, jarvisd
+// and the other engines need the rest.
+const cpuRAMShare = 70
+
+// OnFlavour is hw as a label running the f build sees it: on CPU no card counts.
+func OnFlavour(hw engine.Hardware, f engine.Flavour) engine.Hardware {
+	if f != "" {
+		hw.Flavour = f
+	}
+	return hw
+}
 
 // estimateNeed returns the bytes a model needs at ctx tokens of f16 KV cache.
 func estimateNeed(kind string, weights, kvPerTok int64, ctx int) (int64, bool) {
@@ -79,7 +94,11 @@ func FitAlongside(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx 
 	f := Fit{NeededMB: need / mb, Context: ctx, KVEstimate: guessed}
 	devs := hw.Discrete(hw.Flavour)
 	if hw.Flavour == engine.FlavourCPU || len(devs) == 0 {
-		f.Verdict = "cpu"
+		// On the CPU the model lives in system RAM.
+		f.Verdict, f.RAMMB = "cpu", hw.RAMMB
+		if hw.RAMMB > 0 && f.NeededMB > hw.RAMMB*cpuRAMShare/100 {
+			f.Verdict = "too_big"
+		}
 		return f
 	}
 	committed := map[int]int64{}

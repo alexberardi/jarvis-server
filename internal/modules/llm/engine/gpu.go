@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/sysinfo"
 )
 
 // Device is one accelerator an engine can use.
@@ -39,7 +41,10 @@ type Hardware struct {
 	// Sources names the tools that answered, e.g. ["llama-server --list-devices", "nvidia-smi"].
 	Sources []string `json:"sources"`
 	// Flavour is the proposed engine build for this machine.
-	Flavour    Flavour   `json:"flavour"`
+	Flavour Flavour `json:"flavour"`
+	// RAMMB is the host's physical memory, what a model on the CPU is judged against (0 =
+	// unknown).
+	RAMMB      int64     `json:"ram_mb,omitempty"`
 	DetectedAt time.Time `json:"detected_at"`
 }
 
@@ -230,6 +235,8 @@ type Detector struct {
 	Binaries func() map[Flavour]string
 	// Timeout bounds each tool; default 20s.
 	Timeout time.Duration
+	// Memory reports the host's physical RAM in bytes (nil or 0 = unknown).
+	Memory func() uint64
 
 	mu     sync.Mutex
 	cached *Hardware
@@ -237,7 +244,7 @@ type Detector struct {
 
 // NewDetector returns a detector for this host.
 func NewDetector(binaries func() map[Flavour]string) *Detector {
-	return &Detector{Platform: Host(), Run: execRunner, Binaries: binaries}
+	return &Detector{Platform: Host(), Run: execRunner, Binaries: binaries, Memory: sysinfo.TotalMemory}
 }
 
 // Hardware returns the last detection, detecting first if there is none or refresh is set.
@@ -267,6 +274,9 @@ func (d *Detector) run(ctx context.Context, name string, args ...string) (string
 
 func (d *Detector) detect(ctx context.Context) Hardware {
 	h := Hardware{OS: d.Platform.OS, Arch: d.Platform.Arch, DetectedAt: time.Now().UTC()}
+	if d.Memory != nil {
+		h.RAMMB = int64(d.Memory() >> 20)
+	}
 	add := func(src string, devs []Device) {
 		if len(devs) == 0 {
 			return
