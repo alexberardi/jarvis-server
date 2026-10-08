@@ -193,6 +193,23 @@ func TestUnknownKeyAndBadDefs(t *testing.T) {
 	}
 }
 
+// A read whose context ended (jarvisd stopping, a request gone) yields the default and logs at
+// debug: a restart used to log ERROR "settings: read failed; using default ... context
+// canceled" for several keys.
+func TestCancelledReadIsNotAnError(t *testing.T) {
+	s := newService(t, nil)
+	var out strings.Builder
+	s.log = slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := s.Int(ctx, "memory.pinned_max_chars", Scope{}); got != 500 {
+		t.Fatalf("got %d, want the default", got)
+	}
+	if strings.Contains(out.String(), "level=ERROR") || !strings.Contains(out.String(), "level=DEBUG msg=\"settings: read cancelled") {
+		t.Fatalf("log %q", out.String())
+	}
+}
+
 // --- router ---
 
 func allow(http.ResponseWriter, *http.Request) bool { return true }

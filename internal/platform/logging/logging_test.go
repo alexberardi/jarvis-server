@@ -3,6 +3,8 @@ package logging
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -129,5 +131,36 @@ func TestShipperHoldsRecordsUntilSinkReady(t *testing.T) {
 	sh.Close()
 	if len(sink.records) != 2 || sink.records[0].Message != "starting jarvisd" {
 		t.Fatalf("records %+v", sink.records)
+	}
+}
+
+// A restart used to log `level=ERROR msg="settings: read failed; using default" ... context
+// canceled` for several keys: work the stop cut short is not an error.
+func TestCancelledErrorsAtShutdownAreDebug(t *testing.T) {
+	t.Cleanup(func() { SetShuttingDown(false) })
+	var out bytes.Buffer
+	log := New(&out, slog.LevelInfo, nil)
+	wrapped := fmt.Errorf("settings: get llm.background.remote_vision: %w", context.Canceled)
+	log.Error("read failed", "err", wrapped)
+	if !strings.Contains(out.String(), "level=ERROR") {
+		t.Fatalf("before shutdown a cancelled read is still an error: %q", out.String())
+	}
+	out.Reset()
+	SetShuttingDown(true)
+	log.Error("read failed", "err", wrapped)
+	log.With("err", context.DeadlineExceeded).Error("poll failed")
+	log.Error("query failed", "err", "sql: interrupted: context canceled") // only the text survived
+	if out.Len() != 0 {
+		t.Fatalf("cancelled errors at shutdown logged at info level: %q", out.String())
+	}
+	log.Error("disk full", "err", errors.New("no space left on device"))
+	if !strings.Contains(out.String(), `level=ERROR msg="disk full"`) {
+		t.Fatalf("a real error at shutdown is still an error: %q", out.String())
+	}
+	out.Reset()
+	debug := New(&out, slog.LevelDebug, nil)
+	debug.Error("read failed", "err", wrapped)
+	if !strings.Contains(out.String(), `level=DEBUG msg="read failed"`) {
+		t.Fatalf("at debug level it is still shown, as debug: %q", out.String())
 	}
 }

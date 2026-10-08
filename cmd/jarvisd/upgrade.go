@@ -212,6 +212,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		// The helper re-admits the swapped binary to the macOS firewall itself.
 		err := upgradeViaHelper(ctx, paths, helper, st, stdout)
 		if err == nil {
+			refreshDefinition(ctx, exe, *user, stdout)
 			doctorAfter(ctx, exe, stdout)
 		}
 		return endWithAdmin(cfg, err, stdout)
@@ -230,6 +231,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	err = restartAfter(ctx, mgr, st, paths, stdout)
 	refirewall(ctx, cfg, fwOK, stdout) // after a rollback too: jarvisd.prev was copied, not renamed
 	if err == nil {
+		refreshDefinition(ctx, exe, *user, stdout)
 		doctorAfter(ctx, exe, stdout)
 	}
 	return endWithAdmin(cfg, err, stdout)
@@ -257,6 +259,56 @@ func doctorAfter(ctx context.Context, exe string, stdout io.Writer) {
 	defer cancel()
 	out, _ := exec.CommandContext(ctx, exe, "doctor", "--json").Output() // exits 1 on a failed check
 	reportDoctor(out, stdout)
+}
+
+// refreshDefinition makes an upgrade end with the service definition the new version writes:
+// it asks the binary now installed at exe (`service status --json`) whether the installed
+// definition is stale and, when it is, runs its `service install`, which rewrites the unit,
+// LaunchDaemons or Windows services keeping the binary path, home, account and data, and
+// restarts on them. Upgrading a Mac from rc4 to rc6 swapped the binary but left it without the
+// updater LaunchDaemon rc5 added (`service status`: "updater: none"), and a Linux unit keeps
+// an older ExecStartPre. Without administrator rights it says what to run instead. It runs the
+// new binary, not this process: on a script upgrade this is the old version (install.sh runs
+// the installed jarvisd's upgrade), which can't know what the new one writes.
+func refreshDefinition(ctx context.Context, exe string, user bool, stdout io.Writer) {
+	stale, reason := definitionStale(ctx, exe, user)
+	if !stale {
+		return
+	}
+	if !user && !doctor.Elevated() {
+		fmt.Fprintf(stdout, "the service definition is outdated: %s\n", reason)
+		return
+	}
+	fmt.Fprintf(stdout, "updating the service definition for the new version (%s)\n", reason)
+	args := []string{"service", "install"}
+	if user {
+		args = append(args, "--user")
+	}
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Stdout, cmd.Stderr = stdout, stdout
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(stdout, "updating the service definition failed (%v); run %s\n", err, elevated("jarvisd service install"))
+	}
+}
+
+// definitionStale runs `exe service status --json` and reports its definition_stale; false
+// when the binary can't say (an older one has no such field).
+func definitionStale(ctx context.Context, exe string, user bool) (bool, string) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	args := []string{"service", "status", "--json"}
+	if user {
+		args = append(args, "--user")
+	}
+	out, _ := exec.CommandContext(ctx, exe, args...).Output() // exits 1 when not healthy
+	var st struct {
+		Stale  bool   `json:"definition_stale"`
+		Reason string `json:"stale_reason"`
+	}
+	if json.Unmarshal(out, &st) != nil {
+		return false, ""
+	}
+	return st.Stale, st.Reason
 }
 
 // reportDoctor prints the failed checks of `jarvisd doctor --json` output, in the doctor's own

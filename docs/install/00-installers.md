@@ -1060,6 +1060,47 @@ signature (records `rolled_back`), the CLI's helper path ends with the doctor an
 in-process one, and the compatibility rule for rc5-and-older markers above (new: the first build assumed
 no pre-ID11 release existed).
 
+**An upgrade ends with the new version's service definition (2026-10-08, A10e).** Upgrading a real Mac
+from rc4 to rc6 by re-running rc6's `install.sh` under sudo left it without the updater LaunchDaemon
+(`service status`: `updater: none: run sudo jarvisd service install again`): the script handed off to
+the *installed* (rc4) binary's `jarvisd upgrade`, which swaps and restarts but never re-registers the
+service, and only `service install` writes the helper (and the Linux unit's `ExecStartPre`, which gained
+`--owner` in rc6). Fix, the same on all three OSes, with the decision in the *new* binary (the old one
+can't know what the new one writes):
+- `service status` compares the installed definition with what this build's `service install` renders
+  for the same binary path, home and account (systemd: the unit file byte for byte; launchd: both plists,
+  a missing updater plist is stale; Windows: the jarvisd service's command line and account, and the
+  `jarvisd-updater` service's command line and LocalSystem account) and reports `definition_stale` /
+  `stale_reason` in `--json`, plus a `definition: outdated: …` line.
+- `service install` without `--home` keeps the installed service's home (it used to fall back to the
+  default), and on macOS without `--run-as` the account in the installed plist (before `$SUDO_USER`), so
+  a re-run is a pure refresh: data, home, account, env file and firewall rules stay.
+- `install.sh` / `install.ps1` no longer `exec` the upgrade: they run it, check `$BIN version` is the
+  new one, then run the new binary's `service status --json` and, when stale, its `service install`
+  (`Updating the jarvisd service definition …`). The "already installed and running" re-run does the same
+  check, so re-running the current script on a box upgraded the old way repairs it.
+- `jarvisd upgrade` itself (from this version on, as the *old* binary of the next upgrade) does the same
+  after a successful upgrade (`refreshDefinition`): with root (or `--user`) it runs the new binary's
+  `service install`; without (the admin's or a helper-driven upgrade) it prints the stale reason. The
+  definition refresh restarts jarvisd a second time; it only happens when something differs.
+- Not covered: an upgrade started from the admin page leaves a stale definition until someone runs the
+  script or `sudo jarvisd service install` (the unprivileged service can't write it; `service status`
+  says so). The Linux pre-start runs as root and could re-render the unit itself, but rewriting the unit
+  from inside its own start job was judged not worth the risk.
+- CI `install` job (all three OSes): builds `v0.0.0-old-ci` from the `v0.1.0-rc4` tag (no updater, unit
+  without `--owner`), installs it, checks this build's `service status --json` says stale, re-runs the
+  script with `…/next` and asserts the healthy upgrade, the "Updating the jarvisd service definition"
+  line, the helper (the `--owner` ExecStartPre; the loaded `jarvisd-updater` LaunchDaemon with the
+  runner account; the `jarvisd-updater` Windows service) and `definition_stale: false`.
+
+**Shutdown log noise (2026-10-08).** A restart logged `level=ERROR msg="settings: read failed; using
+default" key=… err="…context canceled"` for several keys: reads cut short by the stop. The settings getter
+now logs a read whose context ended (or a `context.Canceled`) at debug, and the logging handler, once
+serve's context is done (`logging.SetShuttingDown`), downgrades any ERROR record whose error attribute
+(or its text, when a driver flattened it) is `context.Canceled` / `context.DeadlineExceeded` to DEBUG,
+which covers the queue, scheduler, engines and request handlers without touching each call site. A real
+error during shutdown stays ERROR.
+
 ### 8.3 I2, I3, I4 as built (2026-10-07)
 
 Code: `internal/doctor/{doctor,checks,backends,firewall,command_*,owner_*}.go`,
@@ -1244,6 +1285,20 @@ PATH=<secure_path> sh install.sh --stop-legacy` stops the container (`update --r
 `stop`) and the agent (booted out, disabled, restore line printed) while `com.jarvis.osx-api`
 keeps running; a plain python on 7700 is listed in the refusal; and with `brew install minisign`
 the throwaway-signed release is refused under the minimal PATH.
+
+**Ports check vs a slow jarvisd (2026-10-08, A10e).** Right after `jarvisd upgrade` passed its gate on
+the Mac, the post-upgrade doctor said `FAIL ports: another program holds llm (7704)` although `lsof`
+showed jarvisd (same pid) there and `curl -I :7704/health` answered `Server: jarvisd`: the llm
+listener's `/health` was slow while the module loaded models, and the check took "no answer within 2 s"
+for "not jarvisd". Now a port that accepts but doesn't answer is classified by the process behind the
+socket first (`Options.ListenerOwner`: `lsof -Fc` on macOS, `ss -ltnpH` on Linux,
+`Get-NetTCPConnection` + `Get-Process` on Windows; another account's socket needs root, so it may come
+back empty): jarvisd → slow, another name → another program. Unknown owner: `/health` is asked again with
+8 s; still no answer counts as jarvisd's when another listener answered as jarvisd (it binds every
+listener before serving any), else another program (a wedged legacy service). "jarvisd but slow" is a
+`listening` **warn** ("…did not answer in time (it may still be starting, e.g. loading models); run
+jarvisd doctor again in a minute"), never `ports` fail. Test: `internal/doctor/listening_test.go` with
+real slow and hung jarvisd listeners.
 
 ### 8.4 macOS signing and notarization as built (ID9; 2026-10-08)
 

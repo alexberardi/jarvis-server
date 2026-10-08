@@ -84,6 +84,17 @@ function Get-NativeOutput([string]$exe) {
     & $exe @args 2>$null | Out-String
 }
 
+function Update-ServiceDefinition {
+    # An upgrade swaps the binary, but the services are still the ones the old version
+    # registered (one upgraded from before ID11 has no jarvisd-updater service). The new binary
+    # says whether its definition is stale (`service status --json`, definition_stale) and
+    # `service install` registers it again, keeping the binary path, home, data and firewall rule.
+    if ((Get-NativeOutput $Bin service status --json) -notmatch '"definition_stale":\s*true') { return }
+    Write-Host 'Updating the jarvisd service definition (an older version registered it)...'
+    & $Bin service install
+    if ($LASTEXITCODE -ne 0) { throw "updating the service definition failed; run 'jarvisd service install' as Administrator" }
+}
+
 function Confirm-Step([string]$question) {
     # Yes unless answered n; -Yes says yes; no console to ask says no.
     if ($Yes) { return $true }
@@ -168,16 +179,22 @@ try {
         Get-NativeOutput $Bin service status | Out-Null
         if ($cur -eq $Version -and -not $Force -and $LASTEXITCODE -eq 0) {
             Write-Host "jarvisd $Version is already installed and running."
+            Update-ServiceDefinition
             & $Bin setup-link
+            $global:LASTEXITCODE = 0
             return
         }
         # A jarvisd with its own upgrade takes over from here: it checks the signature itself
         # with the key built into the installed binary (mandatory, no minisign needed), checks
-        # free disk, snapshots the database, swaps, waits for the health gate, rolls back.
+        # free disk, snapshots the database, swaps, waits for the health gate, rolls back. Then
+        # the new binary's service definition (Update-ServiceDefinition).
         if ($cur -ne $Version -and ((Get-NativeOutput $Bin help) -match '(?m)^  upgrade')) {
             Write-Host "Upgrading jarvisd $cur -> $Version with jarvisd upgrade..."
             $env:JARVISD_RELEASE_BASE = $BaseUrl
             Invoke-Native $Bin upgrade --version $Version
+            if ((Get-NativeOutput $Bin version).Trim() -ne $Version) { throw "jarvisd upgrade finished but $Bin is not $Version" }
+            Update-ServiceDefinition
+            $global:LASTEXITCODE = 0
             return
         }
         # Installed but not running: reinstall the service on the binary already here; nothing

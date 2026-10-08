@@ -299,8 +299,11 @@ func (w *scm) Status(ctx context.Context) (Status, error) {
 	defer done()
 	st.Installed = true
 	if c, err := s.Config(); err == nil {
-		st.Home = homeFromArgs(splitCommandLine(c.BinaryPathName))
+		args := splitCommandLine(c.BinaryPathName)
+		st.Home = homeFromArgs(args)
 		st.Detail = "account " + c.ServiceStartName
+		st.StaleReason = staleness(args, st.Home, c.ServiceStartName)
+		st.Stale = st.StaleReason != ""
 	}
 	st.UpgradeHelper = helperStatus()
 	q, err := s.Query()
@@ -327,6 +330,36 @@ func (w *scm) InstalledHome() string {
 		return ""
 	}
 	return homeFromArgs(splitCommandLine(c.BinaryPathName))
+}
+
+// winStaleNote is staleNote for an elevated PowerShell.
+const winStaleNote = "run `jarvisd service install` again from an elevated PowerShell (it keeps the data, home and firewall rule)"
+
+// staleness compares the installed jarvisd service (its command line args and account) and
+// the updater service with what this build's `service install` registers: "" when they
+// match, else why it should run again (an older version registered them, or the updater is
+// missing).
+func staleness(args []string, home, account string) string {
+	if len(args) == 0 || home == "" {
+		return "the service's command line has no binary or --home this version can read; " + winStaleNote
+	}
+	binary := args[0]
+	if commandLine(binary, args[1:]...) != commandLine(binary, "serve", "--home", home) || !strings.EqualFold(account, WindowsAccount) {
+		return "the jarvisd service differs from what this version registers (an older version registered it); " + winStaleNote
+	}
+	h, done, err := openQueryName(HelperName)
+	if err != nil {
+		return "the upgrade helper service " + HelperName + " is not installed (an older version registered the service); " + winStaleNote
+	}
+	defer done()
+	c, err := h.Config()
+	if err != nil {
+		return ""
+	}
+	if !strings.EqualFold(c.BinaryPathName, commandLine(binary, helperArgs(home)...)) || !strings.EqualFold(c.ServiceStartName, "LocalSystem") {
+		return "the " + HelperName + " service differs from what this version registers; " + winStaleNote
+	}
+	return ""
 }
 
 func splitCommandLine(s string) []string {

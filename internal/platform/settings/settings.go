@@ -416,7 +416,12 @@ func nullInt(i int64) any {
 func (s *Service) value(ctx context.Context, key string, sc Scope) any {
 	v, err := s.Get(ctx, key, sc)
 	if err != nil {
-		if !errors.Is(err, ErrUnknownKey) {
+		switch {
+		case errors.Is(err, ErrUnknownKey):
+		case ctx.Err() != nil || errors.Is(err, context.Canceled):
+			// The caller went away (its request ended, jarvisd is stopping): nothing failed.
+			s.log.Debug("settings: read cancelled; using default", "key", key, "err", err)
+		default:
 			s.log.Error("settings: read failed; using default", "key", key, "err", err)
 		}
 		return s.defs[key].Default
