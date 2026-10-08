@@ -157,6 +157,9 @@ gunzip -c "$BK/pg_dumpall-t1.sql.gz" | grep -c '^CREATE DATABASE'   # expect 9
 tar czf "$BK/compose-dir.tgz" --exclude=.models -C ~/.jarvis compose   # .env files, compose files, backups
 cp -p ~/.cloudflared/jarvis-services.yml "$BK/"
 sudo cp -p ~/jarvis-node/config/config.json "$BK/demo-node-config.json"
+# The public hostname of every service, which §4.6.1 enters into jarvisd (legacy stops at T-0).
+curl -s localhost:7700/services | jq -r '.services[] | "\(.name) \(.url)"' | sort > "$BK/legacy-services.txt"
+grep -E 'hostname|service' ~/.cloudflared/jarvis-services.yml > "$BK/tunnel-ingress.txt"
 
 # 3.5 Install minisign so install.sh *requires* the release signature (00-installers §8.3).
 sudo apt-get install -y minisign
@@ -328,6 +331,40 @@ Hashing 16 GB takes about a minute.)
 
 Done step: all labels ready, prompt provider valid, every check passed.
 
+### 4.6.1 Public URLs for the tunnel (5 min)
+
+The tunnel stays (Q1). jarvisd answers discovery "in kind": a client that reaches `/services` through a
+public hostname gets each service's **public URL**; a client on the LAN gets the LAN URL. The mobile
+app always asks `?style=external`, which also returns the public URL where one is set, so phones use the
+tunnel on the LAN too, as they did with the legacy registry. The wizard has no step for this, so set
+the URLs on the admin **Connections** page right after Done: on each listener, the pencil next to
+"no public URL". The value is a base URL (scheme, host, optional port, no path). It is stored in the
+registry, and jarvisd's startup sync never overwrites it.
+
+Take the hostnames from `$BK/legacy-services.txt` (§3.4). Drop the legacy `:443`; it is implied.
+
+| Row on Connections | Public URL | Tunnel target (unchanged) |
+|---|---|---|
+| jarvis-config-service | `https://<config hostname>` | `localhost:7700` |
+| jarvis-auth | `https://<auth hostname>` | `localhost:7701` |
+| jarvis-logs | `https://<logs hostname>` | `localhost:7702` |
+| jarvis-command-center | `https://<command-center hostname>` | `localhost:7703` |
+| jarvis-notifications | `https://<notifications hostname>` | `localhost:7712` |
+| jarvis-ocr-service | `https://<ocr hostname>` | `localhost:7031` |
+| jarvis-mqtt-broker | `wss://<mqtt hostname>` (legacy `wss …:443`) | `localhost:9883`, jarvisd's MQTT WebSocket port |
+
+- The config-service row is required: the public host a client connects to is how jarvisd knows the
+  request came through the tunnel. Any configured public host counts, so a client that discovers
+  through the command-center hostname is also answered in kind.
+- A row without a public URL keeps its LAN URL even through the tunnel. The legacy registry had no public
+  name for LLM (7704), whisper (7706) or TTS (7707), so leave them empty. They are tunnelled, but nodes
+  reach them through CC.
+- The broker accepts only `mqtt`, `mqtts`, `ws` or `wss`; the HTTP services accept only `http` or
+  `https`. Anything else is refused with a 422.
+- Check through the tunnel: `curl -s https://<config hostname>/services | jq -r '.services[]|"\(.name) \(.url)"'`
+  should print the public URLs (`https://…:443`, `wss://…:443`). `curl -s localhost:7700/services` should
+  still print `http://localhost:<port>`.
+
 ### 4.7 Accounts and households (10 min for the superuser, then users at their pace)
 
 Legacy had 10 users / 8 households / 10 memberships; the two 2-member households are the kitchen node's
@@ -393,8 +430,9 @@ docker update --restart=unless-stopped jarvis-demo-node && docker start jarvis-d
 docker logs --since 2m jarvis-demo-node | tail -20    # MQTT connected, no 401s
 ```
 
-The demo node runs with `JARVIS_CONFIG_URL_STYLE=remote`; if its config URL is a public hostname it now
-goes through the tunnel to jarvisd (§4.11).
+The demo node runs with `JARVIS_CONFIG_URL_STYLE=remote`. If its config URL is a public hostname, it goes
+through the tunnel and gets the public URLs (§4.6.1). If its config URL is the LAN IP, it gets LAN URLs:
+`remote` keeps its LAN meaning.
 
 **Not migrated now:** the dormant living_room node (last seen 2026-09-02) and four older nodes. When one
 comes back it will retry against jarvisd with its old key (A10 F17: WARN lines, no harm); re-point it
@@ -403,7 +441,8 @@ the same way then (Q4). The test/canary rows are dropped.
 ### 4.9 Phones (each user, 5 min)
 
 On the LAN the app finds jarvisd by mDNS (`_jarvis-config._tcp`) or by the manual config URL
-`http://10.0.0.107:7700`. Each user: sign out, sign up (with the invite code for the kitchen household's
+`http://10.0.0.107:7700`. Off the LAN, use the config service's public hostname. Either way, once §4.6.1
+is done, the app is handed the public URLs, so it keeps working when the phone leaves the house. Each user: sign out, sign up (with the invite code for the kitchen household's
 second member), allow notifications so the app registers its push token, pick their node for chat.
 Optional voice enrollment, then the superuser turns speaker recognition on (admin Settings,
 `voice.recognition_enabled`; threshold 0.43 default, not prod's 0.49).
@@ -431,12 +470,27 @@ Public ingress: jarvisd serves the Media Streams WebSocket on the **CC listener*
 
 ### 4.11 The Cloudflare tunnel
 
-Leave `cloudflared-jarvis` running: its targets are `localhost:<port>` and jarvisd now answers on the same
-ports, so anything holding a full public URL (a node's cached CC URL, a phone off the LAN) still reaches
-jarvisd. What changes: jarvisd's `/services` answers `http://<host the client used>:<port>` for its own
-listeners, never the legacy rows' `https://<public name>:443`, so a client that **discovers** through a
-public hostname gets a URL the tunnel doesn't serve. LAN clients are fine. Decide Q1 before the window.
-Hostnames for 7708, 7713 (unless re-pointed in §4.10), 7722 and 7030 now return errors.
+Leave `cloudflared-jarvis` running (Q1). Its targets are `localhost:<port>`, and jarvisd answers on the
+same ports, so anything holding a full public URL still reaches jarvisd, for example a node's cached CC
+URL or a phone off the LAN. Discovery through a public hostname returns the public URLs entered in
+§4.6.1.
+
+How jarvisd tells: the request's `Host` matches a configured public hostname (Cloudflare passes the
+visitor's `Host` through). From a loopback peer (cloudflared itself) only, `X-Forwarded-Host` or
+`CF-Connecting-IP` also count, in case an ingress rule sets `httpHostHeader`. The only effect is which of
+the two URLs is returned, and `?style=external` returns the public one to anyone anyway, so nothing
+security-related depends on these headers.
+
+Ingress changes, in `~/.cloudflared/jarvis-services.yml` (backup in §3.4), then
+`systemctl --user restart cloudflared-jarvis`:
+
+- **Phone media:** jarvisd serves Twilio Media Streams on the CC listener at `/phone/media/`. The legacy
+  gateway used 7713. Point the phone hostname at `http://localhost:7703` (§4.10 step 2), or use the CC
+  hostname in `JARVIS_PHONE_PUBLIC_URL`. Either way 7713 has nothing behind it.
+- **Dead targets:** hostnames for 7708 (settings-server), 7713 (unless re-pointed), 7722 (jarvis-web) and
+  7030 (recipes) now return errors. Remove them, or leave them until the rollback window closes.
+- **Exposure:** the tunnel still publishes 7702 logs, 7704 LLM, 7710 admin and SSH, as Q1 noted. Nothing
+  in this runbook needs them from off the LAN. Dropping them is a separate tidy-up.
 
 ---
 
@@ -456,6 +510,7 @@ Hostnames for 7708, 7713 (unless re-pointed in §4.10), 7722 and 7030 now return
 | V10 | Phone (if kept): call a contact from the app or by voice | call connects, two-way audio |
 | V11 | Reboot test, if the window allows: `sudo reboot` | jarvisd back by itself (`service status`), legacy containers stay down (`docker ps`), nodes reconnect |
 | V12 | `nvidia-smi` | two llama-server (one per GPU) + whisper-server; no legacy processes |
+| V13 | Off-LAN discovery: `curl -s https://<config hostname>/services \| jq -r '.services[]\|"\(.name) \(.url)"'`, then a phone on mobile data (Wi-Fi off): app chat | the §4.6.1 rows print `https://<hostname>:443` / `wss://<mqtt hostname>:443`; the phone chats over mobile data |
 
 ---
 
@@ -542,4 +597,4 @@ Things the read-only survey could not settle. Each has a recommendation.
 ## Answers (2026-10-07)
 
 - Q11: clean start re-confirmed by the user with the corrected counts.
-- Q1: the Cloudflare tunnel **stays**. Off-LAN service discovery through it needs jarvisd to hand out public URLs (follow-up being designed; see STATUS).
+- Q1: the Cloudflare tunnel **stays**. Off-LAN service discovery through it needs jarvisd to hand out public URLs. **Built (2026-10-07):** a public URL per registry row (admin Connections), answered "in kind" by `/services` and `/services/{name}`. Entered at §4.6.1; tunnel ingress changes are in §4.11.
