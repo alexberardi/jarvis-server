@@ -147,6 +147,7 @@ func modules() []module.Module {
 			c.Users = auth
 			c.Households = auth
 			c.Clock = cc // "today" for the planner is the household's date
+			c.LLM = llm.Service()
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
 			c.SettingsWrite = superuser
 			// RD4: the household keeps shared rows; private rows, jobs and imports go.

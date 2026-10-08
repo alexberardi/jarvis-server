@@ -91,6 +91,8 @@ type Module struct {
 	// Households resolves the caller's memberships for the RD7 union. Nil trusts the token's
 	// household claim alone (tests).
 	Households HouseholdLister
+	// LLM runs the background passes (the grocery SKU match) in process. Nil: they learn nothing.
+	LLM LLM
 	// Clock gives "today" for /planner/current in the household's zone (cc's household clock).
 	// Nil uses the host's zone.
 	Clock HouseholdClock
@@ -164,12 +166,22 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST /staples", m.user(m.handleAddStaple))
 	mux.HandleFunc("DELETE /staples/{staple_id}", m.user(m.handleDeleteStaple))
 
+	// §3.5 grocery SKU map and cart (R5), and the job status poll (#13) its match job needs.
+	mux.HandleFunc("GET /grocery/sku-map", m.user(m.handleListSKUMap))
+	mux.HandleFunc("PUT /grocery/sku-map", m.user(m.handlePutSKUMap))
+	mux.HandleFunc("DELETE /grocery/sku-map/{mapping_id}", m.user(m.handleDeleteSKUMap))
+	mux.HandleFunc("POST /grocery/cart", m.user(m.handleCart))
+	mux.HandleFunc("GET /recipes/jobs/{job_id}", m.user(m.handleGetJob))
+
 	// §3.2 editor photos (R3).
 	mux.HandleFunc("POST /recipes/import/image", m.user(m.handleImportImage))
 	mux.HandleFunc("GET /media/{name...}", m.handleMedia) // #22: no auth
 
 	if deps.Queue != nil {
 		deps.Queue.Register(blobPurgeJobType, queue.Handler{Run: m.runBlobPurge, MaxAttempts: 5, Lease: time.Minute})
+		// §6: one attempt (legacy never retried); a model failure completes with nothing learned.
+		deps.Queue.Register(groceryMatchJobType, queue.Handler{Run: m.runGroceryMatch, Concurrency: 1, MaxAttempts: 1,
+			Lease: matchTimeout + time.Minute})
 	}
 }
 
