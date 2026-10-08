@@ -132,6 +132,8 @@ func TestPurgeUser(t *testing.T) {
 			t.Errorf("%s should stay", k)
 		}
 	}
+	// The household still sees the leaver's shared recipe.
+	e.obj(t, 200, "GET", "/recipes/1", nil, tok(1, "A")...)
 }
 
 func TestPurgeUserHousehold(t *testing.T) {
@@ -158,6 +160,12 @@ func TestPurgeUserHousehold(t *testing.T) {
 	if !e.blobExists(t, "recipes/ingest/2/iB/0.jpg") {
 		t.Fatalf("B's import must stay")
 	}
+	// The leaver keeps their private recipe and B's, and no longer sees A's.
+	e.obj(t, 200, "GET", "/recipes/3", nil, tok(2, "B")...)
+	e.obj(t, 200, "GET", "/recipes/4", nil, tok(2, "B")...)
+	e.expectDetail(t, 404, "Recipe not found", "GET", "/recipes/1", nil, tok(2, "A")...)
+	// A keeps it.
+	e.obj(t, 200, "GET", "/recipes/1", nil, tok(1, "A")...)
 }
 
 func TestPurgeHousehold(t *testing.T) {

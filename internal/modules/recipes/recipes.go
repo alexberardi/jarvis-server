@@ -127,7 +127,21 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"service": ServiceName})
 	})
 
-	// §3.3 stock.
+	// §3.1 recipes. GET /recipes/jobs (#16) and /recipes/stock (#9) are deliberately not
+	// registered: they fall through to /recipes/{recipe_id} and answer its 422, as legacy's
+	// shadowed route did.
+	mux.HandleFunc("GET /recipes", m.user(m.handleListRecipes))
+	mux.HandleFunc("POST /recipes", m.user(m.handleCreateRecipe))
+	mux.HandleFunc("GET /recipes/{recipe_id}", m.user(m.handleGetRecipe))
+	mux.HandleFunc("PATCH /recipes/{recipe_id}", m.user(m.handleUpdateRecipe))
+	mux.HandleFunc("DELETE /recipes/{recipe_id}", m.user(m.handleDeleteRecipe))
+	mux.HandleFunc("GET /recipes/user/{recipe_id}", m.user(m.handleGetOwnRecipe))
+	mux.HandleFunc("GET /recipes/stage/{stage_id}", m.user(m.handleGetStageRecipe))
+	mux.HandleFunc("GET /recipes/core/{recipe_id}", handleCoreRecipe) // #8: no auth, always 404
+
+	// §3.3 tags and stock.
+	mux.HandleFunc("GET /tags", m.user(m.handleListTags))
+	mux.HandleFunc("POST /tags", m.user(m.handleCreateTag))
 	mux.HandleFunc("GET /ingredients/stock", m.user(m.handleStockIngredients))
 	mux.HandleFunc("GET /units/stock", m.user(m.handleStockUnits))
 
