@@ -56,7 +56,7 @@ The route audit (Appendix A) found **about 180 live command-center routes**. Tho
 | auth | **Port**, including the unmerged `feat/rs256-minting` work (RS256 minting plus `/auth/public-key`). It keeps verifying HS256 during the window. |
 | logs | **Port.** Logs live in the DB with retention, plus the SSE tail. A Loki push sink is optional. |
 | notifications | **Port.** Fix the retry worker that is never started. |
-| recipes-server + worker | **Not ported (user decision 2026-10-06).** Recipes is an optional add-on server: it stays the separate jarvis-recipes-server and talks to jarvisd over HTTP (auth, config registry, OCR). |
+| recipes-server + worker | **Port (user decision 2026-10-08, reversing 2026-10-06).** A `recipes` module on 7030, wire-compatible for jarvis-recipes-mobile; SQLite, the durable queue and the blob store; OCR and LLM in process. Spec and port plan R0–R11: [`docs/recipes/00-inventory.md`](recipes/00-inventory.md), questions in [`docs/recipes/QUESTIONS.md`](recipes/QUESTIONS.md). |
 | ocr-service + worker | **Port the orchestration.** Engines: LLM vision, `tesseract` as an optional engine, and the macOS Vision helper. Fix the broken `POST /v1/ocr` job path. |
 | llm-proxy (API, model service, worker) | **Port the orchestration**, which is about 60% of the code. Inference runs in `llama-server` subprocesses, as prod already does. The REST backend is ported (OpenAI, Anthropic, Ollama, LM Studio). |
 | whisper-api | **Rebuild, greenfield.** STT on whisper.cpp as an engine (see D7). Speaker ID is in-binary via sherpa-onnx. |
@@ -231,9 +231,9 @@ Go code follows TDD per RULES.md, plus `go test -race`. Coverage target: 80%.
 
 config, auth (with RS256), logs, notifications.
 
-### Phase 2: OCR (recipes stays an external add-on)
+### Phase 2: OCR
 
-OCR moves to the embedded queue and the blob store, keeping its HTTP API, because the external recipes server is its consumer. If recipes hands work to OCR through a shared Redis/RQ queue rather than HTTP, that coupling needs a bridge or a small recipes change (decided when the OCR port finds out).
+(Written when recipes was an external add-on; since 2026-10-08 recipes is a jarvisd module that calls OCR in process, see `docs/recipes/00-inventory.md` §7.3. The HTTP job API stays.) OCR moves to the embedded queue and the blob store, keeping its HTTP API, because the external recipes server is its consumer. If recipes hands work to OCR through a shared Redis/RQ queue rather than HTTP, that coupling needs a bridge or a small recipes change (decided when the OCR port finds out).
 
 ### Phase 3: LLM
 
@@ -322,7 +322,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 - **D9 (Phase 6): decided 2026-10-06 → absorb jarvis-admin into the monorepo.** The React SPA moves to `web/admin/`, is built in CI and embedded in jarvisd with `go:embed`, served on the legacy 7710. The Fastify backend's compose/installer machinery is dropped; what remains becomes Go endpoints (model manager replaces the LLM wizard; settings via each module's `/settings`; users/nodes/households via auth). Admin work from EXTERNAL-CHANGES (Models page, catalog, `llm.prompt_provider`) happens in the monorepo copy; the jarvis-admin repo is retired like the Python services.
 
 **Future work (after the migration):**
-- **Recipes in Go.** A separate effort, outside this rewrite: port jarvis-recipes-server as its own Go service (or an optional jarvisd module) once jarvisd is done. Until then it runs as the existing Python add-on.
+- ~~**Recipes in Go.**~~ Moved into the rewrite (2026-10-08): see `docs/recipes/00-inventory.md`.
 - **Per-node voiceprints.** Scope speaker profiles per (node, user) instead of per (household, user), because a voice sounds different per room (docs/cc D36).
 - **External-API connector.** A first-class way for 3rd-party apps to use Jarvis, with scoped credentials.
 - **Forge test install.** Dropped from the Go port; Forge test installs were dropped temporarily upstream. Re-add if Forge returns.
