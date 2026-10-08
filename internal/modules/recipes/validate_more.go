@@ -206,6 +206,22 @@ func (v *queryVals) literal(name, def string, allowed ...string) string {
 	return s
 }
 
+// boolean reads an optional bool parameter (FastAPI: true/false, 1/0, on/off, yes/no, t/f, y/n).
+func (v *queryVals) boolean(name string, def bool) bool {
+	vals, ok := v.q[name]
+	if !ok || len(vals) == 0 {
+		return def
+	}
+	switch strings.ToLower(vals[len(vals)-1]) {
+	case "0", "off", "f", "false", "n", "no":
+		return false
+	case "1", "on", "t", "true", "y", "yes":
+		return true
+	}
+	v.fail(name, msgBoolStr)
+	return def
+}
+
 func (v *queryVals) done(w http.ResponseWriter) bool {
 	if len(v.errs) > 0 {
 		writeValidation(w, v.errs...)
