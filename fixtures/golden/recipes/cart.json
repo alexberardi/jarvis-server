@@ -1,0 +1,487 @@
+{
+ "parse_pack_size": [
+  {
+   "input": "1 lb",
+   "out": [
+    "1",
+    "lb"
+   ]
+  },
+  {
+   "input": "2 lb",
+   "out": [
+    "2",
+    "lb"
+   ]
+  },
+  {
+   "input": "12 oz",
+   "out": [
+    "12",
+    "oz"
+   ]
+  },
+  {
+   "input": "12oz",
+   "out": [
+    "12",
+    "oz"
+   ]
+  },
+  {
+   "input": "6",
+   "out": [
+    "6",
+    null
+   ]
+  },
+  {
+   "input": "12",
+   "out": [
+    "12",
+    null
+   ]
+  },
+  {
+   "input": "6 ct",
+   "out": [
+    "6",
+    "ct"
+   ]
+  },
+  {
+   "input": "0 lb",
+   "out": [
+    "0",
+    "lb"
+   ]
+  },
+  {
+   "input": "about 1 lb",
+   "out": [
+    null,
+    null
+   ]
+  },
+  {
+   "input": "0.5 kg",
+   "out": [
+    "0.5",
+    "kg"
+   ]
+  },
+  {
+   "input": "1.5 lb",
+   "out": [
+    "1.5",
+    "lb"
+   ]
+  },
+  {
+   "input": "12-oz",
+   "out": [
+    "12",
+    null
+   ]
+  },
+  {
+   "input": " 16 OZ ",
+   "out": [
+    "16",
+    "OZ"
+   ]
+  },
+  {
+   "input": "abc",
+   "out": [
+    null,
+    null
+   ]
+  }
+ ],
+ "pack_quantity": [
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "1.4"
+     }
+    ],
+    "unit_size": "1 lb"
+   },
+   "out": 2
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "1"
+     }
+    ],
+    "unit_size": "1 lb"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "0.25"
+     }
+    ],
+    "unit_size": "1 lb"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "LB",
+      "quantity": "3"
+     }
+    ],
+    "unit_size": "2 lb"
+   },
+   "out": 2
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "oz",
+      "quantity": "30"
+     }
+    ],
+    "unit_size": "12 oz"
+   },
+   "out": 3
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "oz",
+      "quantity": "30"
+     }
+    ],
+    "unit_size": "12oz"
+   },
+   "out": 3
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "cloves",
+      "quantity": "3"
+     }
+    ],
+    "unit_size": "2 lb"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": null,
+      "quantity": "3"
+     }
+    ],
+    "unit_size": "6"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": null,
+      "quantity": "13"
+     }
+    ],
+    "unit_size": "12"
+   },
+   "out": 2
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": null,
+      "quantity": "3"
+     }
+    ],
+    "unit_size": "6 ct"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": null,
+      "unparsed": [
+       "some"
+      ]
+     }
+    ],
+    "unit_size": "1 lb"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "2"
+     }
+    ],
+    "unit_size": null
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "2"
+     }
+    ],
+    "unit_size": ""
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "2"
+     }
+    ],
+    "unit_size": "0 lb"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "2"
+     }
+    ],
+    "unit_size": "about 1 lb"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "cup",
+      "quantity": "2"
+     },
+     {
+      "unit": "lb",
+      "quantity": "5"
+     }
+    ],
+    "unit_size": "2 lb"
+   },
+   "out": 3
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "lb",
+      "quantity": "0"
+     }
+    ],
+    "unit_size": "1 lb"
+   },
+   "out": 1
+  },
+  {
+   "input": {
+    "amounts": [
+     {
+      "unit": "kg",
+      "quantity": "2.5"
+     }
+    ],
+    "unit_size": "0.5 kg"
+   },
+   "out": 5
+  },
+  {
+   "input": {
+    "amounts": [],
+    "unit_size": "1 lb"
+   },
+   "out": 1
+  }
+ ],
+ "amount_display": [
+  {
+   "input": [
+    {
+     "unit": "lb",
+     "quantity": "1.5"
+    }
+   ],
+   "out": "1.5 lb"
+  },
+  {
+   "input": [
+    {
+     "unit": "lb",
+     "quantity": "2.0000"
+    }
+   ],
+   "out": "2 lb"
+  },
+  {
+   "input": [
+    {
+     "unit": null,
+     "quantity": "3"
+    }
+   ],
+   "out": "3"
+  },
+  {
+   "input": [
+    {
+     "unit": "cup",
+     "quantity": "0.25"
+    },
+    {
+     "unit": null,
+     "quantity": null,
+     "unparsed": [
+      "a pinch",
+      "some"
+     ]
+    }
+   ],
+   "out": "0.25 cup, a pinch, some"
+  },
+  {
+   "input": [
+    {
+     "unit": "g",
+     "quantity": "100"
+    }
+   ],
+   "out": "1 g"
+  },
+  {
+   "input": [
+    {
+     "unit": "g",
+     "quantity": "1E+2"
+    }
+   ],
+   "out": "1 g"
+  },
+  {
+   "input": [],
+   "out": ""
+  }
+ ],
+ "cart_url": [
+  {
+   "input": [],
+   "out": null
+  },
+  {
+   "input": [
+    {
+     "sku": "123",
+     "quantity": 1
+    }
+   ],
+   "out": "https://affil.walmart.com/cart/addToCart?items=123_1"
+  },
+  {
+   "input": [
+    {
+     "sku": "123",
+     "quantity": 2
+    },
+    {
+     "sku": "456",
+     "quantity": 1
+    }
+   ],
+   "out": "https://affil.walmart.com/cart/addToCart?items=123_2,456_1"
+  },
+  {
+   "input": [
+    {
+     "sku": "",
+     "quantity": 2
+    },
+    {
+     "sku": "789",
+     "quantity": 3
+    }
+   ],
+   "out": "https://affil.walmart.com/cart/addToCart?items=789_3"
+  },
+  {
+   "input": [
+    {
+     "sku": "a b/c&d",
+     "quantity": 1
+    },
+    {
+     "sku": "ü",
+     "quantity": 1
+    }
+   ],
+   "out": "https://affil.walmart.com/cart/addToCart?items=a%20b%2Fc%26d_1,%C3%BC_1"
+  },
+  {
+   "input": [
+    {
+     "sku": "12,34",
+     "quantity": 1
+    }
+   ],
+   "out": "https://affil.walmart.com/cart/addToCart?items=12,34_1"
+  }
+ ],
+ "map_key": [
+  {
+   "input": "90/10 ground beef",
+   "out": "ground beef"
+  },
+  {
+   "input": "2% milk",
+   "out": "2% milk"
+  },
+  {
+   "input": "7up",
+   "out": "7up"
+  },
+  {
+   "input": "1 lb ground beef",
+   "out": "ground beef"
+  },
+  {
+   "input": "Garlic, minced",
+   "out": "garlic"
+  }
+ ]
+}

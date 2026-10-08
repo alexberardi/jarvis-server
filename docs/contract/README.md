@@ -43,6 +43,9 @@ Tests skip with a message when the environment they need is missing. With no
 | `JARVIS_CONTRACT_SLOW_TIMEOUT` | no | Timeout for inference calls (LLM, STT, TTS synthesis). The default is `180s`. |
 | `JARVIS_CONTRACT_CALLBACK_HOST` | for the OCR callback test | An address the target can reach this test process at (jarvisd only; `127.0.0.1` for a local jarvisd). Without it `TestOCRFlowJobs/callback` skips. |
 | `JARVIS_CONTRACT_RELAY_PORT` | for the fake relay test | Local port the fake push relay listens on (`127.0.0.1`). The target must reach it: on the MBP through `ssh -f -N -o ExitOnForwardFailure=yes -R 7735:127.0.0.1:<port> alexanderberardi@10.0.0.103` (legacy `RELAY_URL` is `host.docker.internal:7735`; Docker Desktop reaches the Mac's loopback); on jarvisd the `relay.url` notifications setting. Open the tunnel only around `TestNotificationsRelay`. Without it `TestNotificationsRelay` skips. |
+| `JARVIS_CONTRACT_RECIPES_SLOW` | for the slow recipes tier | `1` runs LLM meal-plan generation, the grocery SKU-match job and photo import against the target's real model (`TestRecipesMealPlanGenerate`, `TestRecipesGroceryMatchJob`, `TestRecipesFromImageJob`). Uses `JARVIS_CONTRACT_SLOW_TIMEOUT` for polling. |
+| `JARVIS_CONTRACT_RECIPES_PHOTO` | for the photo-import test | Path to a JPEG of a printed recipe (e.g. one of jarvis-recipes-server's `recipe_parsing_tests/image_based/*/1.jpeg`). |
+| `JARVIS_CONTRACT_RECIPES_ADMIN_SECRET` | legacy, once | recipes' `ADMIN_SECRET`. `TestRecipesStock` seeds the stock reference data through `/admin/static-data/seed` when it is empty (reference data, never cleaned up). The MBP container sets none, so it is the code default `admin-secret`. |
 | `JARVIS_CONTRACT_NOTIFICATIONS_ADMIN_KEY` | for the notifications admin test | jarvis-notifications' `ADMIN_API_KEY` (MBP: `docker exec jarvis-notifications-jarvis-notifications-1 printenv ADMIN_API_KEY`). Without it `TestNotificationsAdmin` skips. |
 
 To get the admin token from the MBP without echoing it:
@@ -370,6 +373,64 @@ LEGACY-BUGs (marked `// LEGACY-BUG:`; jarvisd fixes them, the tests branch on `J
   `pending` until its TTL. jarvisd runs it (the tier chain) to `completed`/`failed`.
 - Not frozen (shape-level only): the batch path's LLM validation tested a tuple's truthiness,
   so garbled output was never rejected there; jarvisd honours the verdict.
+
+## jarvis-recipes-server: every kept route the app calls (green twice against the MBP, 2026-10-08)
+
+R0 of [docs/recipes/00-inventory.md](../recipes/00-inventory.md) §14. Files: `recipes_test.go`
+(synchronous routes), `recipes_jobs_test.go` (jobs), `recipes_helpers.go` (fixtures, shapes).
+`scripts/contract.sh -run TestRecipes` takes about 17 s; the slow tier
+(`JARVIS_CONTRACT_RECIPES_SLOW=1`) adds about 30 s on the MBP's Qwen3-8B. The target needs its RQ
+worker (`jarvis-recipes-server-parse-worker-1` on the MBP) for the job tests.
+
+**Fixture.** `SharedKitchen`: Owner and Member in Owner's household (Member's token from
+`/auth/switch-household`, because a login token names the *first* membership) plus an Outsider. Every
+recipe, plan, staple and mapping is deleted through the API; plan cleanups run before recipe cleanups.
+**Leftovers the API cannot delete**, all tied to throwaway user ids: parse-job rows, stage recipes (from
+LLM generation), the recipes `users` shadow rows (recipes has no account purge), global tags
+(`contract-tag-*`, fixed names so they are reused), and `/media` uploads.
+
+| Route (§3 #) | Test |
+|---|---|
+| #1–#5 recipes CRUD | `TestRecipesCRUD`, `TestRecipesQuantityEdgeCases`: RecipeRead key set; `quantity_value` a 4-decimal string re-parsed from `quantity_display` (`1/0` → null); prep/cook fold into total; PATCH null-keeps, lists replace; 404 `Recipe not found`; 422 `path.recipe_id` (also `GET /recipes/jobs`, #16, which jarvisd leaves unregistered) |
+| #6, scoping | `TestRecipesScoping`: member reads and edits, outsider 404 everywhere, author-only `/recipes/user/{id}` |
+| #7, #8 | `TestRecipesMealPlanJobRoutes` (stage 404 `Not found`, 422), `TestRecipesAuth` (core stub 404, no auth) |
+| #11 preflight | `TestRecipesParseURLAsync`: blocked hosts 400 `{"detail":{error_code:"invalid_url", message, status_code:null, job_id}}`; public URL 200 `next_action:"webview_extract"`; the id 404s |
+| #12, #13, #15, #2 + `parse_job_id` | `TestRecipesWebviewImport`: JSON-LD payload → COMPLETE, `result` key sets frozen (`recipe_draft`, `pipeline`), author-only, job list item, commit → COMMITTED → 409 `Parse job not ready`, 404 `Parse job not found` |
+| #12 errors | `TestRecipesJobErrors`: empty payload → ERROR `invalid_payload`/`no content to parse`; `image_upload` → `not_implemented` |
+| #17 | `TestRecipesCancel`: cancel at once → 200 CANCELED and it sticks; COMPLETE → CANCELED; COMMITTED/ERROR/CANCELED → 409 `Job cannot be canceled`; 404s |
+| #19 | `TestRecipesFromImageValidation` (422 `body.images`, 400 too many/empty/unrecognized, 413); slow `TestRecipesFromImageJob` |
+| #20, #22 | `TestRecipesMedia`: draft literal, relative `/media/<32 hex>.jpg` (RD3), unauthenticated GET with ETag/Last-Modified, 404 `Not Found` |
+| #23, #24 | `TestRecipesTags` |
+| #27, #28 | `TestRecipesStock`: 198 ingredients, 51 units, default limit 10, `q`, limit bounds |
+| #31, #32 | `TestRecipesMealPlanJobRoutes` (422 locs, 404); slow `TestRecipesMealPlanGenerate` (MealPlanResult shape, stage read) |
+| #33, #34 | `TestRecipesRandomPlan`: tag preference, no repeats, `incomplete`, reroll `date:null`/`meal_type:""`, 409 detail |
+| #36–#41 | `TestRecipesPlanner`: commit 200, lax `recipe_id`, current `{}`, summaries span the items, swap on move, 409/404 details, stage 404, delete |
+| #42 | `TestRecipesShoppingAndCart`: grouping by key then lowercased unit, sums, `unparsed`, sorted, staples flagged, out-of-range items excluded |
+| #43–#45 | `TestRecipesStaples`: normalised name, idempotent 201 across members, 422 shapes, 404 |
+| #46–#48 | `TestRecipesSkuMap`: upsert, `raw`, retailer literal, 404 |
+| #49 | `TestRecipesShoppingAndCart` (staples excluded, `amount_display`, pack quantity, URL quoting, `match_job_id` null cases, plain-detail 422); slow `TestRecipesGroceryMatchJob` (job result, manual row never overwritten) |
+| auth | `TestRecipesAuth`: 401 `Not authenticated` + `WWW-Authenticate: Bearer` (also Basic), 401 `Invalid or expired token` for garbage, `alg:none` and an HS256 token signed with `change-me` (PR #39); auth before body validation |
+| 422 shape | `TestRecipesValidation`: `{error_code:"validation_error", message:"Invalid request payload.", details:[{field, message}], job_id}`, `field` = dotted loc, fresh `job_id` per response |
+
+Already covered elsewhere: `/health` (`TestHealth/recipes`) and `/settings` (`TestSettingsAppAuth/recipes`).
+CUT routes (#9, #10, #14, #16, #18, #21, #25, #26, #29, #30, #35) have no tests; #29 is used only to seed.
+
+LEGACY-BUGs and decided changes (`Jarvisd()` branches):
+
+- **B1 / RD5**: prep/cook always null on legacy; jarvisd returns them (`expectPrepCook`).
+- **B9**: `POST /tags` never commits, so a repeat mints a new phantom id; jarvisd returns the same id.
+- **B14**: `/planner/commit` accepts another household's recipe (its title leaks into the plan) and 500s on a
+  missing id; jarvisd 404 `Recipe not found`.
+- **Delete a recipe in a plan**: legacy 500 (NotNullViolation, nothing deleted, keep-alive dropped); jarvisd 204 and
+  the plan loses the item.
+- **B6**: the job list's `preview` is `{title:null, source_host:null}` on legacy; jarvisd fills it.
+- **RD7**: legacy scopes to the token's household only; jarvisd reads the union of the caller's households (a
+  member's solo-household token sees the kitchen and vice versa; outsiders still 404).
+- **RD2**: jarvisd never selects a core/stage recipe in generation.
+
+Not proven against legacy: **`TestRecipesFromImageJob`**. The MBP's recipes container has no `S3_BUCKET`, so
+from-image answers 500 `Failed to upload images: …`; the test is for jarvisd (R8). Not testable black-box:
+the 410 `Stage recipe expired` (72 h), staples delete-by-name (needs duplicate rows the API cannot create).
 
 ## Remaining wire contracts (PLAN §6 Phase 0 item 4)
 

@@ -1,0 +1,560 @@
+{
+ "extract_ingredients_line": [
+  {
+   "input": "1 cup flour",
+   "out": [
+    {
+     "text": "flour",
+     "quantity_display": "1",
+     "unit": "cup"
+    }
+   ]
+  },
+  {
+   "input": "1 1/2 cups milk",
+   "out": [
+    {
+     "text": "milk",
+     "quantity_display": "1 1/2",
+     "unit": "cups"
+    }
+   ]
+  },
+  {
+   "input": "1½ cups sugar",
+   "out": [
+    {
+     "text": "sugar",
+     "quantity_display": "1 1/2",
+     "unit": "cups"
+    }
+   ]
+  },
+  {
+   "input": "2 tbsp. butter, melted",
+   "out": [
+    {
+     "text": "butter, melted",
+     "quantity_display": "2",
+     "unit": "tbsp."
+    }
+   ]
+  },
+  {
+   "input": "3 eggs",
+   "out": [
+    {
+     "text": "eggs",
+     "quantity_display": "3",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "salt",
+   "out": [
+    {
+     "text": "salt",
+     "quantity_display": null,
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "Salt and pepper to taste",
+   "out": [
+    {
+     "text": "Salt and pepper to taste",
+     "quantity_display": null,
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "1 (14 oz) can tomatoes",
+   "out": [
+    {
+     "text": "can tomatoes",
+     "quantity_display": "1",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "2 cloves garlic, minced",
+   "out": [
+    {
+     "text": "garlic, minced",
+     "quantity_display": "2",
+     "unit": "cloves"
+    }
+   ]
+  },
+  {
+   "input": "1/4 tsp salt",
+   "out": [
+    {
+     "text": "salt",
+     "quantity_display": "1/4",
+     "unit": "tsp"
+    }
+   ]
+  },
+  {
+   "input": "Recipe ingredient one",
+   "out": [
+    {
+     "text": "ingredient one",
+     "quantity_display": null,
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "2 large eggs (beaten)",
+   "out": [
+    {
+     "text": "large eggs",
+     "quantity_display": "2",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "1 lb ground beef",
+   "out": [
+    {
+     "text": "ground beef",
+     "quantity_display": "1",
+     "unit": "lb"
+    }
+   ]
+  },
+  {
+   "input": "½ teaspoon vanilla extract",
+   "out": [
+    {
+     "text": "vanilla extract",
+     "quantity_display": "1/2",
+     "unit": "teaspoon"
+    }
+   ]
+  },
+  {
+   "input": "1-2 jalapenos",
+   "out": [
+    {
+     "text": "jalapenos",
+     "quantity_display": "1-2",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "1 glass water",
+   "out": [
+    {
+     "text": "glass water",
+     "quantity_display": "1",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "4 heads lettuce",
+   "out": [
+    {
+     "text": "lettuce",
+     "quantity_display": "4",
+     "unit": "heads"
+    }
+   ]
+  },
+  {
+   "input": "2 C. flour",
+   "out": [
+    {
+     "text": "flour",
+     "quantity_display": "2",
+     "unit": "C."
+    }
+   ]
+  },
+  {
+   "input": "  10   grams   yeast  ",
+   "out": [
+    {
+     "text": "yeast",
+     "quantity_display": "10",
+     "unit": "grams"
+    }
+   ]
+  },
+  {
+   "input": "1/2 stick butter (softened)",
+   "out": [
+    {
+     "text": "butter",
+     "quantity_display": "1/2",
+     "unit": "stick"
+    }
+   ]
+  },
+  {
+   "input": "100 ml cream",
+   "out": [
+    {
+     "text": "cream",
+     "quantity_display": "100",
+     "unit": "ml"
+    }
+   ]
+  },
+  {
+   "input": "3 ears corn",
+   "out": [
+    {
+     "text": "corn",
+     "quantity_display": "3",
+     "unit": "ears"
+    }
+   ]
+  },
+  {
+   "input": "2 pkg cream cheese",
+   "out": [
+    {
+     "text": "cream cheese",
+     "quantity_display": "2",
+     "unit": "pkg"
+    }
+   ]
+  },
+  {
+   "input": "1 bunch cilantro",
+   "out": [
+    {
+     "text": "cilantro",
+     "quantity_display": "1",
+     "unit": "bunch"
+    }
+   ]
+  },
+  {
+   "input": "a handful of spinach",
+   "out": [
+    {
+     "text": "a handful of spinach",
+     "quantity_display": null,
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": "6 slices bacon",
+   "out": [
+    {
+     "text": "bacon",
+     "quantity_display": "6",
+     "unit": "slices"
+    }
+   ]
+  },
+  {
+   "input": "2 + 1 cups water",
+   "out": [
+    {
+     "text": "water",
+     "quantity_display": "2 + 1",
+     "unit": "cups"
+    }
+   ]
+  },
+  {
+   "input": "0.5 kg potatoes",
+   "out": [
+    {
+     "text": "potatoes",
+     "quantity_display": "0.5",
+     "unit": "kg"
+    }
+   ]
+  },
+  {
+   "input": "",
+   "out": []
+  }
+ ],
+ "extract_ingredients_dict": [
+  {
+   "input": {
+    "text": "1 cup flour"
+   },
+   "out": [
+    {
+     "text": "flour",
+     "quantity_display": "1",
+     "unit": "cup"
+    }
+   ]
+  },
+  {
+   "input": {
+    "name": "2 eggs"
+   },
+   "out": [
+    {
+     "text": "eggs",
+     "quantity_display": "2",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "sugar",
+    "amount": "1/2",
+    "unit": "cup"
+   },
+   "out": [
+    {
+     "text": "sugar",
+     "quantity_display": "1/2",
+     "unit": "cup"
+    }
+   ]
+  },
+  {
+   "input": {
+    "name": "milk",
+    "quantity": "1 1/2",
+    "unit": ""
+   },
+   "out": [
+    {
+     "text": "milk",
+     "quantity_display": "1 1/2",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "butter",
+    "quantity": "2 tbsp"
+   },
+   "out": [
+    {
+     "text": "butter",
+     "quantity_display": "2 tbsp",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": {
+    "amount": "1",
+    "unit": "cup"
+   },
+   "out": []
+  },
+  {
+   "input": {
+    "text": ""
+   },
+   "out": []
+  },
+  {
+   "input": {
+    "text": "salt",
+    "unit": "pinch"
+   },
+   "out": [
+    {
+     "text": "salt",
+     "quantity_display": null,
+     "unit": "pinch"
+    }
+   ]
+  }
+ ],
+ "extract_ingredients_string_arg": [
+  {
+   "input": "2 cups rice",
+   "out": [
+    {
+     "text": "rice",
+     "quantity_display": "2",
+     "unit": "cups"
+    }
+   ]
+  },
+  {
+   "input": 5,
+   "out": []
+  }
+ ],
+ "clean_parsed_ingredients": [
+  {
+   "input": {
+    "text": "1 cup flour"
+   },
+   "out": [
+    {
+     "text": "flour",
+     "quantity_display": "1",
+     "unit": "cup"
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "flour",
+    "quantity_display": "1 cup"
+   },
+   "out": [
+    {
+     "text": "flour",
+     "quantity_display": "1",
+     "unit": "cup"
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "flour",
+    "quantity_display": "1 cup",
+    "unit": "cup"
+   },
+   "out": [
+    {
+     "text": "flour",
+     "quantity_display": "1",
+     "unit": "cup"
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "2 tbsp butter",
+    "quantity_display": null,
+    "unit": null
+   },
+   "out": [
+    {
+     "text": "butter",
+     "quantity_display": "2",
+     "unit": "tbsp"
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "sugar",
+    "quantity_display": "½",
+    "unit": "cup"
+   },
+   "out": [
+    {
+     "text": "sugar",
+     "quantity_display": "1/2",
+     "unit": "cup"
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "eggs",
+    "quantity_display": "3"
+   },
+   "out": [
+    {
+     "text": "eggs",
+     "quantity_display": "3",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "3 eggs",
+    "quantity_display": "2"
+   },
+   "out": [
+    {
+     "text": "eggs",
+     "quantity_display": "2",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "milk",
+    "quantity_display": "1 1/2 cups milk"
+   },
+   "out": [
+    {
+     "text": "milk",
+     "quantity_display": "1 1/2",
+     "unit": "cups"
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "  salt  ",
+    "quantity_display": "",
+    "unit": ""
+   },
+   "out": [
+    {
+     "text": "salt",
+     "quantity_display": "",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "water",
+    "quantity_display": "2 glasses"
+   },
+   "out": [
+    {
+     "text": "water",
+     "quantity_display": "2 glasses",
+     "unit": null
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "beef",
+    "quantity_display": "1 lbs",
+    "unit": "lb"
+   },
+   "out": [
+    {
+     "text": "beef",
+     "quantity_display": "1",
+     "unit": "lb"
+    }
+   ]
+  },
+  {
+   "input": {
+    "text": "oil",
+    "quantity_display": "2 tablespoons",
+    "unit": "Tbsp"
+   },
+   "out": [
+    {
+     "text": "oil",
+     "quantity_display": "2 tablespoons",
+     "unit": "Tbsp"
+    }
+   ]
+  }
+ ]
+}

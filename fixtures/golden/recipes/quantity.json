@@ -1,0 +1,996 @@
+{
+ "parse_quantity_display": [
+  {
+   "input": null,
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "   ",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1",
+   "out": "1",
+   "wire_numeric_10_4": "1.0000"
+  },
+  {
+   "input": "0.5",
+   "out": "0.5",
+   "wire_numeric_10_4": "0.5000"
+  },
+  {
+   "input": "1.5",
+   "out": "1.5",
+   "wire_numeric_10_4": "1.5000"
+  },
+  {
+   "input": ".5",
+   "out": "0.5",
+   "wire_numeric_10_4": "0.5000"
+  },
+  {
+   "input": "2.",
+   "out": "2",
+   "wire_numeric_10_4": "2.0000"
+  },
+  {
+   "input": "02",
+   "out": "2",
+   "wire_numeric_10_4": "2.0000"
+  },
+  {
+   "input": "1/2",
+   "out": "0.5",
+   "wire_numeric_10_4": "0.5000"
+  },
+  {
+   "input": "3/4",
+   "out": "0.75",
+   "wire_numeric_10_4": "0.7500"
+  },
+  {
+   "input": "1/3",
+   "out": "0.3333333333333333333333333333",
+   "wire_numeric_10_4": "0.3333"
+  },
+  {
+   "input": "2/3",
+   "out": "0.6666666666666666666666666667",
+   "wire_numeric_10_4": "0.6667"
+  },
+  {
+   "input": "1 1/2",
+   "out": "1.5",
+   "wire_numeric_10_4": "1.5000"
+  },
+  {
+   "input": "2 3/4",
+   "out": "2.75",
+   "wire_numeric_10_4": "2.7500"
+  },
+  {
+   "input": "1/0",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1 1/0",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "0/0",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "-1",
+   "out": "-1",
+   "wire_numeric_10_4": "-1.0000"
+  },
+  {
+   "input": "+1",
+   "out": "1",
+   "wire_numeric_10_4": "1.0000"
+  },
+  {
+   "input": "1-2",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1 - 2",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1/2 cup",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "½",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1½",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1 ½",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "abc",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "NaN",
+   "out": "NaN",
+   "wire_numeric_10_4": {
+    "error": "ValidationError",
+    "message": "1 validation error for IngredientRead\nquantity_value\n  Input should be a finite number [type=finite_number, input_value=Decimal('NaN'), input_type=Decimal]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number"
+   }
+  },
+  {
+   "input": "nan",
+   "out": "NaN",
+   "wire_numeric_10_4": {
+    "error": "ValidationError",
+    "message": "1 validation error for IngredientRead\nquantity_value\n  Input should be a finite number [type=finite_number, input_value=Decimal('NaN'), input_type=Decimal]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number"
+   }
+  },
+  {
+   "input": "Infinity",
+   "out": "Infinity",
+   "wire_numeric_10_4": {
+    "error": "ValidationError",
+    "message": "1 validation error for IngredientRead\nquantity_value\n  Input should be a finite number [type=finite_number, input_value=Decimal('Infinity'), input_type=Decimal]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number"
+   }
+  },
+  {
+   "input": "-Infinity",
+   "out": "-Infinity",
+   "wire_numeric_10_4": {
+    "error": "ValidationError",
+    "message": "1 validation error for IngredientRead\nquantity_value\n  Input should be a finite number [type=finite_number, input_value=Decimal('-Infinity'), input_type=Decimal]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number"
+   }
+  },
+  {
+   "input": "1e3",
+   "out": "1E+3",
+   "wire_numeric_10_4": "1000.0000"
+  },
+  {
+   "input": "1E-2",
+   "out": "0.01",
+   "wire_numeric_10_4": "0.0100"
+  },
+  {
+   "input": "1_000",
+   "out": "1000",
+   "wire_numeric_10_4": "1000.0000"
+  },
+  {
+   "input": " 1 ",
+   "out": "1",
+   "wire_numeric_10_4": "1.0000"
+  },
+  {
+   "input": "1  1/2",
+   "out": "1.5",
+   "wire_numeric_10_4": "1.5000"
+  },
+  {
+   "input": "1 1/2 3",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1/2/3",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "a/b",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "1 a/b",
+   "out": null,
+   "wire_numeric_10_4": null
+  },
+  {
+   "input": "0",
+   "out": "0",
+   "wire_numeric_10_4": "0.0000"
+  },
+  {
+   "input": "0.0",
+   "out": "0.0",
+   "wire_numeric_10_4": "0.0000"
+  },
+  {
+   "input": "10000000",
+   "out": "10000000",
+   "wire_numeric_10_4": "10000000.0000"
+  },
+  {
+   "input": "123456.78901",
+   "out": "123456.78901",
+   "wire_numeric_10_4": "123456.7890"
+  },
+  {
+   "input": "0.33333",
+   "out": "0.33333",
+   "wire_numeric_10_4": "0.3333"
+  },
+  {
+   "input": "1/7",
+   "out": "0.1428571428571428571428571429",
+   "wire_numeric_10_4": "0.1429"
+  },
+  {
+   "input": "1 1/3",
+   "out": "1.333333333333333333333333333",
+   "wire_numeric_10_4": "1.3333"
+  },
+  {
+   "input": "٣",
+   "out": "3",
+   "wire_numeric_10_4": "3.0000"
+  },
+  {
+   "input": "1,5",
+   "out": null,
+   "wire_numeric_10_4": null
+  }
+ ],
+ "normalize_fraction_display": [
+  {
+   "input": null,
+   "out": null
+  },
+  {
+   "input": "",
+   "out": ""
+  },
+  {
+   "input": "1",
+   "out": "1"
+  },
+  {
+   "input": "02",
+   "out": "2"
+  },
+  {
+   "input": "2.0",
+   "out": "2"
+  },
+  {
+   "input": "1.50",
+   "out": "1.5"
+  },
+  {
+   "input": "-0",
+   "out": "0"
+  },
+  {
+   "input": "1½",
+   "out": "1 1/2"
+  },
+  {
+   "input": "2¼",
+   "out": "2 1/4"
+  },
+  {
+   "input": "½",
+   "out": "1/2"
+  },
+  {
+   "input": "1 ½",
+   "out": "1 1/2"
+  },
+  {
+   "input": "1  ½ ",
+   "out": "1 1/2"
+  },
+  {
+   "input": "⅓",
+   "out": "1/3"
+  },
+  {
+   "input": "1⅔",
+   "out": "1 2/3"
+  },
+  {
+   "input": "3/4",
+   "out": "3/4"
+  },
+  {
+   "input": "1-2",
+   "out": "1-2"
+  },
+  {
+   "input": "1 to 2",
+   "out": "1 to 2"
+  },
+  {
+   "input": "10.25",
+   "out": "10.25"
+  },
+  {
+   "input": "0.1",
+   "out": "0.1"
+  },
+  {
+   "input": "1e3",
+   "out": "1e3"
+  },
+  {
+   "input": "¾ cup",
+   "out": "3/4 cup"
+  },
+  {
+   "input": "1½½",
+   "out": "1 1/21/2"
+  }
+ ],
+ "normalize_unit_token": [
+  {
+   "input": "cup",
+   "out": "cup",
+   "is_known_unit": true
+  },
+  {
+   "input": "cups",
+   "out": "cup",
+   "is_known_unit": true
+  },
+  {
+   "input": "Cups",
+   "out": "cup",
+   "is_known_unit": true
+  },
+  {
+   "input": "CUP.",
+   "out": "cup",
+   "is_known_unit": true
+  },
+  {
+   "input": "tsp",
+   "out": "tsp",
+   "is_known_unit": true
+  },
+  {
+   "input": "tsp.",
+   "out": "tsp",
+   "is_known_unit": true
+  },
+  {
+   "input": "Tbsp",
+   "out": "tbsp",
+   "is_known_unit": true
+  },
+  {
+   "input": "tbsps",
+   "out": "tbsp",
+   "is_known_unit": true
+  },
+  {
+   "input": "glass",
+   "out": "glas",
+   "is_known_unit": false
+  },
+  {
+   "input": "glasses",
+   "out": "glasse",
+   "is_known_unit": false
+  },
+  {
+   "input": "lbs",
+   "out": "lb",
+   "is_known_unit": true
+  },
+  {
+   "input": "lb.",
+   "out": "lb",
+   "is_known_unit": true
+  },
+  {
+   "input": "oz",
+   "out": "oz",
+   "is_known_unit": true
+  },
+  {
+   "input": "ozs",
+   "out": "oz",
+   "is_known_unit": true
+  },
+  {
+   "input": "grams",
+   "out": "gram",
+   "is_known_unit": true
+  },
+  {
+   "input": "g",
+   "out": "g",
+   "is_known_unit": true
+  },
+  {
+   "input": "gs",
+   "out": "g",
+   "is_known_unit": true
+  },
+  {
+   "input": "kg",
+   "out": "kg",
+   "is_known_unit": true
+  },
+  {
+   "input": "ml",
+   "out": "ml",
+   "is_known_unit": true
+  },
+  {
+   "input": "l",
+   "out": "l",
+   "is_known_unit": true
+  },
+  {
+   "input": "ls",
+   "out": "l",
+   "is_known_unit": true
+  },
+  {
+   "input": "liters",
+   "out": "liter",
+   "is_known_unit": true
+  },
+  {
+   "input": "litre",
+   "out": "litre",
+   "is_known_unit": true
+  },
+  {
+   "input": "s",
+   "out": "",
+   "is_known_unit": false
+  },
+  {
+   "input": "",
+   "out": "",
+   "is_known_unit": false
+  },
+  {
+   "input": ".",
+   "out": "",
+   "is_known_unit": false
+  },
+  {
+   "input": "fl",
+   "out": "fl",
+   "is_known_unit": true
+  },
+  {
+   "input": "fl-oz",
+   "out": "fl-oz",
+   "is_known_unit": true
+  },
+  {
+   "input": "pinch",
+   "out": "pinch",
+   "is_known_unit": false
+  },
+  {
+   "input": "dash",
+   "out": "dash",
+   "is_known_unit": false
+  },
+  {
+   "input": "cloves",
+   "out": "clove",
+   "is_known_unit": true
+  },
+  {
+   "input": "heads",
+   "out": "head",
+   "is_known_unit": true
+  },
+  {
+   "input": "ears",
+   "out": "ear",
+   "is_known_unit": true
+  },
+  {
+   "input": "bunches",
+   "out": "bunche",
+   "is_known_unit": false
+  },
+  {
+   "input": "pieces",
+   "out": "piece",
+   "is_known_unit": true
+  },
+  {
+   "input": "pkg",
+   "out": "pkg",
+   "is_known_unit": true
+  },
+  {
+   "input": "packets",
+   "out": "packet",
+   "is_known_unit": true
+  },
+  {
+   "input": "c",
+   "out": "c",
+   "is_known_unit": true
+  },
+  {
+   "input": "c.",
+   "out": "c",
+   "is_known_unit": true
+  },
+  {
+   "input": "stick",
+   "out": "stick",
+   "is_known_unit": true
+  },
+  {
+   "input": "sticks",
+   "out": "stick",
+   "is_known_unit": true
+  },
+  {
+   "input": "slices",
+   "out": "slice",
+   "is_known_unit": true
+  },
+  {
+   "input": "cans",
+   "out": "can",
+   "is_known_unit": true
+  },
+  {
+   "input": "packages",
+   "out": "package",
+   "is_known_unit": true
+  },
+  {
+   "input": "gallon",
+   "out": "gallon",
+   "is_known_unit": true
+  },
+  {
+   "input": "gals",
+   "out": "gal",
+   "is_known_unit": true
+  },
+  {
+   "input": "quarts",
+   "out": "quart",
+   "is_known_unit": true
+  },
+  {
+   "input": "qt",
+   "out": "qt",
+   "is_known_unit": true
+  },
+  {
+   "input": "pts",
+   "out": "pt",
+   "is_known_unit": true
+  },
+  {
+   "input": "pounds",
+   "out": "pound",
+   "is_known_unit": true
+  }
+ ],
+ "parse_iso8601_duration": [
+  {
+   "input": null,
+   "out": null
+  },
+  {
+   "input": "",
+   "out": null
+  },
+  {
+   "input": "PT30M",
+   "out": 30
+  },
+  {
+   "input": "PT1H",
+   "out": 60
+  },
+  {
+   "input": "PT1H30M",
+   "out": 90
+  },
+  {
+   "input": "PT90M",
+   "out": 90
+  },
+  {
+   "input": "PT0M",
+   "out": null
+  },
+  {
+   "input": "PT0S",
+   "out": null
+  },
+  {
+   "input": "PT29S",
+   "out": null
+  },
+  {
+   "input": "PT30S",
+   "out": 1
+  },
+  {
+   "input": "PT1H0M30S",
+   "out": 61
+  },
+  {
+   "input": "P1DT2H",
+   "out": null
+  },
+  {
+   "input": "P1D",
+   "out": null
+  },
+  {
+   "input": "PT",
+   "out": null
+  },
+  {
+   "input": "P",
+   "out": null
+  },
+  {
+   "input": "PT1.5H",
+   "out": null
+  },
+  {
+   "input": "pt30m",
+   "out": null
+  },
+  {
+   "input": "30 minutes",
+   "out": null
+  },
+  {
+   "input": "1 hour 20 minutes",
+   "out": null
+  },
+  {
+   "input": "PT2H5M10S",
+   "out": 125
+  },
+  {
+   "input": "PT45M ",
+   "out": 45
+  },
+  {
+   "input": "P0DT0H20M",
+   "out": null
+  },
+  {
+   "input": "PT100H",
+   "out": 6000
+  },
+  {
+   "input": "xPT10M",
+   "out": null
+  }
+ ],
+ "parse_minutes": [
+  {
+   "input": null,
+   "out": null
+  },
+  {
+   "input": 5,
+   "out": 5
+  },
+  {
+   "input": 5.9,
+   "out": 5
+  },
+  {
+   "input": "PT15M",
+   "out": 15
+  },
+  {
+   "input": "15 min",
+   "out": 15
+  },
+  {
+   "input": "about 20 minutes",
+   "out": 20
+  },
+  {
+   "input": "1 hour",
+   "out": null
+  },
+  {
+   "input": "45",
+   "out": null
+  },
+  {
+   "input": "ten minutes",
+   "out": null
+  },
+  {
+   "input": "P1DT2H",
+   "out": null
+  },
+  {
+   "input": "PT0M",
+   "out": null
+  }
+ ],
+ "parse_servings": [
+  {
+   "input": null,
+   "out": null
+  },
+  {
+   "input": 4,
+   "out": 4
+  },
+  {
+   "input": 4.7,
+   "out": 4
+  },
+  {
+   "input": "4",
+   "out": 4
+  },
+  {
+   "input": "4 servings",
+   "out": 4
+  },
+  {
+   "input": "Serves 6-8",
+   "out": 6
+  },
+  {
+   "input": "Makes about 24 cookies",
+   "out": 24
+  },
+  {
+   "input": "one",
+   "out": null
+  },
+  {
+   "input": "",
+   "out": null
+  },
+  {
+   "input": "0",
+   "out": 0
+  }
+ ],
+ "parse_servings_from_text": [
+  {
+   "input": "",
+   "out": null
+  },
+  {
+   "input": "Serves 4",
+   "out": 4
+  },
+  {
+   "input": "serves: 6",
+   "out": 6
+  },
+  {
+   "input": "Yield: 12 cookies",
+   "out": 12
+  },
+  {
+   "input": "Yields: 2 loaves",
+   "out": 2
+  },
+  {
+   "input": "Serves four",
+   "out": null
+  },
+  {
+   "input": "This recipe SERVES 8 people",
+   "out": 8
+  }
+ ],
+ "split_qty_unit": [
+  {
+   "input": "",
+   "out": [
+    null,
+    null
+   ]
+  },
+  {
+   "input": "1",
+   "out": [
+    "1",
+    null
+   ]
+  },
+  {
+   "input": "1 cup",
+   "out": [
+    "1",
+    "cup"
+   ]
+  },
+  {
+   "input": "1 cups",
+   "out": [
+    "1",
+    "cups"
+   ]
+  },
+  {
+   "input": "3/4 teaspoon",
+   "out": [
+    "3/4",
+    "teaspoon"
+   ]
+  },
+  {
+   "input": "1 pound (85% lean)",
+   "out": [
+    "1",
+    "pound"
+   ]
+  },
+  {
+   "input": "2 large",
+   "out": [
+    "2 large",
+    null
+   ]
+  },
+  {
+   "input": "pinch",
+   "out": [
+    "pinch",
+    null
+   ]
+  },
+  {
+   "input": "pinch salt",
+   "out": [
+    null,
+    "pinch"
+   ]
+  },
+  {
+   "input": "a pinch",
+   "out": [
+    "a pinch",
+    null
+   ]
+  },
+  {
+   "input": "1 (14 oz) can",
+   "out": [
+    "1 14",
+    "oz"
+   ]
+  },
+  {
+   "input": "1 can (14 oz)",
+   "out": [
+    "1",
+    "can"
+   ]
+  },
+  {
+   "input": "2 sticks, softened",
+   "out": [
+    "2",
+    "sticks"
+   ]
+  },
+  {
+   "input": "1 lb.",
+   "out": [
+    "1",
+    "lb"
+   ]
+  },
+  {
+   "input": "1 1/2 cups",
+   "out": [
+    "1 1/2",
+    "cups"
+   ]
+  },
+  {
+   "input": "about 2 cups",
+   "out": [
+    "about 2 cups",
+    null
+   ]
+  },
+  {
+   "input": "2-3 cloves",
+   "out": [
+    "2-3",
+    "cloves"
+   ]
+  },
+  {
+   "input": "12 ounces",
+   "out": [
+    "12",
+    "ounces"
+   ]
+  },
+  {
+   "input": "1 G",
+   "out": [
+    "1",
+    "G"
+   ]
+  },
+  {
+   "input": "200 g",
+   "out": [
+    "200",
+    "g"
+   ]
+  },
+  {
+   "input": "1 l",
+   "out": [
+    "1",
+    "l"
+   ]
+  },
+  {
+   "input": "to taste",
+   "out": [
+    "to taste",
+    null
+   ]
+  },
+  {
+   "input": "3 slices",
+   "out": [
+    "3",
+    "slices"
+   ]
+  },
+  {
+   "input": "4 pieces",
+   "out": [
+    "4",
+    "pieces"
+   ]
+  },
+  {
+   "input": "2 Tbsp.",
+   "out": [
+    "2",
+    "Tbsp"
+   ]
+  }
+ ]
+}

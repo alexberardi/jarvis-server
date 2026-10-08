@@ -1,0 +1,3032 @@
+[
+ {
+  "source": "tests",
+  "input": "8 oz cremini mushrooms, quartered",
+  "out": "cremini mushrooms"
+ },
+ {
+  "source": "tests",
+  "input": "cremini mushrooms",
+  "out": "cremini mushrooms"
+ },
+ {
+  "source": "tests",
+  "input": "2 tbsp olive oil, divided",
+  "out": "olive oil"
+ },
+ {
+  "source": "tests",
+  "input": "1 tbsp olive oil",
+  "out": "olive oil"
+ },
+ {
+  "source": "tests",
+  "input": "A",
+  "out": "a"
+ },
+ {
+  "source": "tests",
+  "input": "B",
+  "out": "b"
+ },
+ {
+  "source": "tests",
+  "input": "butter",
+  "out": "butter"
+ },
+ {
+  "source": "tests",
+  "input": "salt and black pepper",
+  "out": "salt and black pepper"
+ },
+ {
+  "source": "tests",
+  "input": "Stroganoff",
+  "out": "stroganoff"
+ },
+ {
+  "source": "tests",
+  "input": "Risotto",
+  "out": "risotto"
+ },
+ {
+  "source": "tests",
+  "input": "Inside",
+  "out": "inside"
+ },
+ {
+  "source": "tests",
+  "input": "Outside",
+  "out": "outside"
+ },
+ {
+  "source": "tests",
+  "input": "other-house",
+  "out": "other-house"
+ },
+ {
+  "source": "tests",
+  "input": "Theirs",
+  "out": "theirs"
+ },
+ {
+  "source": "tests",
+  "input": "Hers",
+  "out": "hers"
+ },
+ {
+  "source": "tests",
+  "input": "1 1/2 lb beef sirloin, sliced thin",
+  "out": "beef sirloin"
+ },
+ {
+  "source": "tests",
+  "input": "1 cup sour cream",
+  "out": "sour cream"
+ },
+ {
+  "source": "tests",
+  "input": "1 cup heavy cream",
+  "out": "heavy cream"
+ },
+ {
+  "source": "tests",
+  "input": "tbsp",
+  "out": "tbsp"
+ },
+ {
+  "source": "tests",
+  "input": "cup",
+  "out": "cup"
+ },
+ {
+  "source": "tests",
+  "input": "Salt and black pepper to taste",
+  "out": "salt and black pepper"
+ },
+ {
+  "source": "tests",
+  "input": "2 tbsp butter",
+  "out": "butter"
+ },
+ {
+  "source": "tests",
+  "input": "2",
+  "out": "2"
+ },
+ {
+  "source": "tests",
+  "input": "3 tbsp butter",
+  "out": "butter"
+ },
+ {
+  "source": "tests",
+  "input": "3",
+  "out": "3"
+ },
+ {
+  "source": "tests",
+  "input": "1/4 cup butter",
+  "out": "butter"
+ },
+ {
+  "source": "tests",
+  "input": "1/4",
+  "out": "1/4"
+ },
+ {
+  "source": "tests",
+  "input": "4 tbsp butter",
+  "out": "butter"
+ },
+ {
+  "source": "tests",
+  "input": "4",
+  "out": "4"
+ },
+ {
+  "source": "tests",
+  "input": "1 cup rice",
+  "out": "rice"
+ },
+ {
+  "source": "tests",
+  "input": "1",
+  "out": "1"
+ },
+ {
+  "source": "tests",
+  "input": "1 cup beans",
+  "out": "beans"
+ },
+ {
+  "source": "tests",
+  "input": "1 cup saffron",
+  "out": "saffron"
+ },
+ {
+  "source": "tests",
+  "input": "2 cups flour",
+  "out": "flour"
+ },
+ {
+  "source": "tests",
+  "input": "Cook.",
+  "out": "cook."
+ },
+ {
+  "source": "tests",
+  "input": "dinner",
+  "out": "dinner"
+ },
+ {
+  "source": "tests",
+  "input": "written,expected",
+  "out": "written,expected"
+ },
+ {
+  "source": "tests",
+  "input": "a,b",
+  "out": "a,b"
+ },
+ {
+  "source": "tests",
+  "input": "1 1/2 lb lean ground beef (93/7 or leaner)",
+  "out": "lean ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "lean ground beef",
+  "out": "lean ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "1 lb lean ground beef, drained",
+  "out": "lean ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "lean ground beef (93/7 or leaner)",
+  "out": "lean ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "lean ground beef (93/7 or 96/4)",
+  "out": "lean ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "honey (or agave)",
+  "out": "honey"
+ },
+ {
+  "source": "tests",
+  "input": "honey",
+  "out": "honey"
+ },
+ {
+  "source": "tests",
+  "input": "honey (optional, balances heat)",
+  "out": "honey"
+ },
+ {
+  "source": "tests",
+  "input": "sriracha (optional)",
+  "out": "sriracha"
+ },
+ {
+  "source": "tests",
+  "input": "sriracha",
+  "out": "sriracha"
+ },
+ {
+  "source": "tests",
+  "input": "taco seasoning (or homemade)",
+  "out": "taco seasoning"
+ },
+ {
+  "source": "tests",
+  "input": "taco seasoning",
+  "out": "taco seasoning"
+ },
+ {
+  "source": "tests",
+  "input": "pico de gallo (store-bought or homemade)",
+  "out": "pico de gallo"
+ },
+ {
+  "source": "tests",
+  "input": "pico de gallo",
+  "out": "pico de gallo"
+ },
+ {
+  "source": "tests",
+  "input": "corn (fresh, canned, or frozen)",
+  "out": "corn"
+ },
+ {
+  "source": "tests",
+  "input": "corn",
+  "out": "corn"
+ },
+ {
+  "source": "tests",
+  "input": "russet potatoes (about 4 medium)",
+  "out": "russet potatoes"
+ },
+ {
+  "source": "tests",
+  "input": "russet potatoes",
+  "out": "russet potatoes"
+ },
+ {
+  "source": "tests",
+  "input": "sweet potatoes (approx. 600g)",
+  "out": "sweet potatoes"
+ },
+ {
+  "source": "tests",
+  "input": "sweet potatoes",
+  "out": "sweet potatoes"
+ },
+ {
+  "source": "tests",
+  "input": "hoisin sauce (32g)",
+  "out": "hoisin sauce"
+ },
+ {
+  "source": "tests",
+  "input": "hoisin sauce",
+  "out": "hoisin sauce"
+ },
+ {
+  "source": "tests",
+  "input": "lemon juice (50 ml)",
+  "out": "lemon juice"
+ },
+ {
+  "source": "tests",
+  "input": "lemon juice",
+  "out": "lemon juice"
+ },
+ {
+  "source": "tests",
+  "input": "gochujang (korean chili paste)",
+  "out": "gochujang (korean chili paste)"
+ },
+ {
+  "source": "tests",
+  "input": "greek yogurt (greek yogurt base)",
+  "out": "greek yogurt (greek yogurt base)"
+ },
+ {
+  "source": "tests",
+  "input": "heavy cream",
+  "out": "heavy cream"
+ },
+ {
+  "source": "tests",
+  "input": "sour cream",
+  "out": "sour cream"
+ },
+ {
+  "source": "tests",
+  "input": "ground beef",
+  "out": "ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "ground turkey",
+  "out": "ground turkey"
+ },
+ {
+  "source": "tests",
+  "input": "chicken breast",
+  "out": "chicken breast"
+ },
+ {
+  "source": "tests",
+  "input": "chicken thighs",
+  "out": "chicken thighs"
+ },
+ {
+  "source": "tests",
+  "input": "2% milk",
+  "out": "2% milk"
+ },
+ {
+  "source": "tests",
+  "input": "whole milk",
+  "out": "whole milk"
+ },
+ {
+  "source": "tests",
+  "input": "1% milk",
+  "out": "1% milk"
+ },
+ {
+  "source": "tests",
+  "input": "2 cups whole milk",
+  "out": "whole milk"
+ },
+ {
+  "source": "tests",
+  "input": "beef sirloin",
+  "out": "beef sirloin"
+ },
+ {
+  "source": "tests",
+  "input": "3 cloves garlic, minced",
+  "out": "garlic"
+ },
+ {
+  "source": "tests",
+  "input": "garlic",
+  "out": "garlic"
+ },
+ {
+  "source": "tests",
+  "input": "567 g chicken tenders",
+  "out": "chicken tenders"
+ },
+ {
+  "source": "tests",
+  "input": "chicken tenders",
+  "out": "chicken tenders"
+ },
+ {
+  "source": "tests",
+  "input": "Dinner",
+  "out": "dinner"
+ },
+ {
+  "source": "tests",
+  "input": "2 tbsp Olive Oil, divided",
+  "out": "olive oil"
+ },
+ {
+  "source": "tests",
+  "input": "salt",
+  "out": "salt"
+ },
+ {
+  "source": "tests",
+  "input": "Salt",
+  "out": "salt"
+ },
+ {
+  "source": "tests",
+  "input": "2 tbsp",
+  "out": "2 tbsp"
+ },
+ {
+  "source": "tests",
+  "input": "olive oil",
+  "out": "olive oil"
+ },
+ {
+  "source": "tests",
+  "input": "/staples",
+  "out": "/staples"
+ },
+ {
+  "source": "tests",
+  "input": "   ",
+  "out": ""
+ },
+ {
+  "source": "tests",
+  "input": "1 tsp salt",
+  "out": "salt"
+ },
+ {
+  "source": "tests",
+  "input": "2 chicken breasts",
+  "out": "chicken breasts"
+ },
+ {
+  "source": "tests",
+  "input": "chicken breasts",
+  "out": "chicken breasts"
+ },
+ {
+  "source": "tests",
+  "input": "2 tbsp olive oil",
+  "out": "olive oil"
+ },
+ {
+  "source": "tests",
+  "input": "123",
+  "out": "123"
+ },
+ {
+  "source": "tests",
+  "input": "Beef Sirloin",
+  "out": "beef sirloin"
+ },
+ {
+  "source": "tests",
+  "input": "90/10 ground beef",
+  "out": "ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "7up",
+  "out": "7up"
+ },
+ {
+  "source": "tests",
+  "input": "456",
+  "out": "456"
+ },
+ {
+  "source": "tests",
+  "input": "MINE",
+  "out": "mine"
+ },
+ {
+  "source": "tests",
+  "input": "manual",
+  "out": "manual"
+ },
+ {
+  "source": "tests",
+  "input": "GUESS",
+  "out": "guess"
+ },
+ {
+  "source": "tests",
+  "input": "llm",
+  "out": "llm"
+ },
+ {
+  "source": "tests",
+  "input": "10450114",
+  "out": "10450114"
+ },
+ {
+  "source": "tests",
+  "input": "1 lb",
+  "out": "1 lb"
+ },
+ {
+  "source": "tests",
+  "input": "2 lb",
+  "out": "2 lb"
+ },
+ {
+  "source": "tests",
+  "input": "jasmine rice",
+  "out": "jasmine rice"
+ },
+ {
+  "source": "tests",
+  "input": "80/20 Beef",
+  "out": "beef"
+ },
+ {
+  "source": "tests",
+  "input": "THEIRS",
+  "out": "theirs"
+ },
+ {
+  "source": "tests",
+  "input": "flour",
+  "out": "flour"
+ },
+ {
+  "source": "tests",
+  "input": "x",
+  "out": "x"
+ },
+ {
+  "source": "tests",
+  "input": "costco",
+  "out": "costco"
+ },
+ {
+  "source": "tests",
+  "input": "1 lb ground beef",
+  "out": "ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "lb",
+  "out": "lb"
+ },
+ {
+  "source": "tests",
+  "input": "2 cups jasmine rice",
+  "out": "jasmine rice"
+ },
+ {
+  "source": "tests",
+  "input": "cups",
+  "out": "cups"
+ },
+ {
+  "source": "tests",
+  "input": "3 lb ground beef",
+  "out": "ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "1.4 lb ground beef",
+  "out": "ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "1.4",
+  "out": "1.4"
+ },
+ {
+  "source": "tests",
+  "input": "3 cloves garlic",
+  "out": "garlic"
+ },
+ {
+  "source": "tests",
+  "input": "cloves",
+  "out": "cloves"
+ },
+ {
+  "source": "tests",
+  "input": "1 lb 90/10 ground beef",
+  "out": "90/10 ground beef"
+ },
+ {
+  "source": "tests",
+  "input": "buttermilk",
+  "out": "buttermilk"
+ },
+ {
+  "source": "tests",
+  "input": "y",
+  "out": "y"
+ },
+ {
+  "source": "tests",
+  "input": "0.5",
+  "out": "0.5"
+ },
+ {
+  "source": "tests",
+  "input": "1/2",
+  "out": "1/2"
+ },
+ {
+  "source": "tests",
+  "input": "1 1/2",
+  "out": "1 1/2"
+ },
+ {
+  "source": "tests",
+  "input": "1.5",
+  "out": "1.5"
+ },
+ {
+  "source": "tests",
+  "input": "1/0",
+  "out": "1/0"
+ },
+ {
+  "source": "tests",
+  "input": "abc",
+  "out": "abc"
+ },
+ {
+  "source": "tests",
+  "input": "qty,expected_qty,expected_unit",
+  "out": "qty,expected_qty,expected_unit"
+ },
+ {
+  "source": "tests",
+  "input": "2 cups",
+  "out": "2 cups"
+ },
+ {
+  "source": "tests",
+  "input": "1 1/2 cups",
+  "out": "1 1/2 cups"
+ },
+ {
+  "source": "tests",
+  "input": "3/4 teaspoon",
+  "out": "3/4 teaspoon"
+ },
+ {
+  "source": "tests",
+  "input": "3/4",
+  "out": "3/4"
+ },
+ {
+  "source": "tests",
+  "input": "teaspoon",
+  "out": "teaspoon"
+ },
+ {
+  "source": "tests",
+  "input": "1 pound (85% lean)",
+  "out": "(85% lean)"
+ },
+ {
+  "source": "tests",
+  "input": "pound",
+  "out": "pound"
+ },
+ {
+  "source": "tests",
+  "input": "2 green onions, thinly sliced",
+  "out": "green onions"
+ },
+ {
+  "source": "tests",
+  "input": "pinch salt",
+  "out": "salt"
+ },
+ {
+  "source": "tests",
+  "input": "pinch",
+  "out": "pinch"
+ },
+ {
+  "source": "tests",
+  "input": "%3 cup",
+  "out": "%3 cup"
+ },
+ {
+  "source": "tests",
+  "input": "2 tablespoons.",
+  "out": "2 tablespoons."
+ },
+ {
+  "source": "tests",
+  "input": "tablespoons",
+  "out": "tablespoons"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com/test",
+  "out": "https://example.com/test"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com/soup",
+  "out": "https://example.com/soup"
+ },
+ {
+  "source": "tests",
+  "input": "Heat",
+  "out": "heat"
+ },
+ {
+  "source": "tests",
+  "input": "AsyncClient",
+  "out": "asyncclient"
+ },
+ {
+  "source": "tests",
+  "input": "fetch_html",
+  "out": "fetch_html"
+ },
+ {
+  "source": "tests",
+  "input": "extract_recipe_from_schema_org",
+  "out": "extract_recipe_from_schema_org"
+ },
+ {
+  "source": "tests",
+  "input": "extract_recipe_heuristic",
+  "out": "extract_recipe_heuristic"
+ },
+ {
+  "source": "tests",
+  "input": "Mix",
+  "out": "mix"
+ },
+ {
+  "source": "tests",
+  "input": "Bake",
+  "out": "bake"
+ },
+ {
+  "source": "tests",
+  "input": "<html><body>Some content</body></html>",
+  "out": "<html><body>some content</body></html>"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com",
+  "out": "https://example.com"
+ },
+ {
+  "source": "tests",
+  "input": "Cook rice",
+  "out": "cook rice"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com/schema",
+  "out": "https://example.com/schema"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com/heuristic",
+  "out": "https://example.com/heuristic"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com/llm",
+  "out": "https://example.com/llm"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com/noisy",
+  "out": "https://example.com/noisy"
+ },
+ {
+  "source": "tests",
+  "input": "https://example.com/fail",
+  "out": "https://example.com/fail"
+ },
+ {
+  "source": "tests",
+  "input": "application/json",
+  "out": "application/json"
+ },
+ {
+  "source": "tests",
+  "input": "LLM Recipe",
+  "out": "llm recipe"
+ },
+ {
+  "source": "tests",
+  "input": "LLM generated",
+  "out": "llm generated"
+ },
+ {
+  "source": "tests",
+  "input": "LLM Dish",
+  "out": "llm dish"
+ },
+ {
+  "source": "tests",
+  "input": "1 cup water",
+  "out": "water"
+ },
+ {
+  "source": "tests",
+  "input": "Test assertion needs update",
+  "out": "test assertion needs update"
+ },
+ {
+  "source": "tests",
+  "input": "client_webview",
+  "out": "client_webview"
+ },
+ {
+  "source": "tests",
+  "input": "tests/fixtures/ingestion/html_snippet.html",
+  "out": "tests/fixtures/ingestion/html_snippet.html"
+ },
+ {
+  "source": "tests",
+  "input": "server_fetch",
+  "out": "server_fetch"
+ },
+ {
+  "source": "tests",
+  "input": "https://blocked.test",
+  "out": "https://blocked.test"
+ },
+ {
+  "source": "tests",
+  "input": "GET",
+  "out": "get"
+ },
+ {
+  "source": "tests",
+  "input": "forbidden",
+  "out": "forbidden"
+ },
+ {
+  "source": "tests",
+  "input": "tests/fixtures/ingestion/jsonld_valid.json",
+  "out": "tests/fixtures/ingestion/jsonld_valid.json"
+ },
+ {
+  "source": "tests",
+  "input": "req",
+  "out": "req"
+ },
+ {
+  "source": "tests",
+  "input": "Poke Bowl",
+  "out": "poke bowl"
+ },
+ {
+  "source": "tests",
+  "input": "Big Batch Chili",
+  "out": "big batch chili"
+ },
+ {
+  "source": "tests",
+  "input": "Melt it.",
+  "out": "melt it."
+ },
+ {
+  "source": "tests",
+  "input": "1 cup flour",
+  "out": "flour"
+ },
+ {
+  "source": "tests",
+  "input": "stage",
+  "out": "stage"
+ },
+ {
+  "source": "tests",
+  "input": "Test Recipe",
+  "out": "test recipe"
+ },
+ {
+  "source": "tests",
+  "input": "Tasty",
+  "out": "tasty"
+ },
+ {
+  "source": "tests",
+  "input": "/recipes",
+  "out": "/recipes"
+ },
+ {
+  "source": "tests",
+  "input": "/recipes/import/url",
+  "out": "/recipes/import/url"
+ },
+ {
+  "source": "tests",
+  "input": "/recipes/import/image",
+  "out": "/recipes/import/image"
+ },
+ {
+  "source": "tests",
+  "input": "/media/",
+  "out": "/media/"
+ },
+ {
+  "source": "tests",
+  "input": "veg",
+  "out": "veg"
+ },
+ {
+  "source": "tests",
+  "input": "/planner/draft",
+  "out": "/planner/draft"
+ },
+ {
+  "source": "tests",
+  "input": "/recipes/parse-url/jobs",
+  "out": "/recipes/parse-url/jobs"
+ },
+ {
+  "source": "tests",
+  "input": "/recipes/jobs",
+  "out": "/recipes/jobs"
+ },
+ {
+  "source": "tests",
+  "input": "baking",
+  "out": "baking"
+ },
+ {
+  "source": "tests",
+  "input": "test.jpg",
+  "out": "test.jpg"
+ },
+ {
+  "source": "tests",
+  "input": "image/jpeg",
+  "out": "image/jpeg"
+ },
+ {
+  "source": "tests",
+  "input": "2 eggs",
+  "out": "eggs"
+ },
+ {
+  "source": "tests",
+  "input": "image_url",
+  "out": "image_url"
+ },
+ {
+  "source": "stock",
+  "input": "chicken thigh",
+  "out": "chicken thigh"
+ },
+ {
+  "source": "stock",
+  "input": "whole chicken",
+  "out": "whole chicken"
+ },
+ {
+  "source": "stock",
+  "input": "beef steak",
+  "out": "beef steak"
+ },
+ {
+  "source": "stock",
+  "input": "beef chuck roast",
+  "out": "beef chuck roast"
+ },
+ {
+  "source": "stock",
+  "input": "pork loin",
+  "out": "pork loin"
+ },
+ {
+  "source": "stock",
+  "input": "pork shoulder",
+  "out": "pork shoulder"
+ },
+ {
+  "source": "stock",
+  "input": "bacon",
+  "out": "bacon"
+ },
+ {
+  "source": "stock",
+  "input": "ham",
+  "out": "ham"
+ },
+ {
+  "source": "stock",
+  "input": "prosciutto",
+  "out": "prosciutto"
+ },
+ {
+  "source": "stock",
+  "input": "salami",
+  "out": "salami"
+ },
+ {
+  "source": "stock",
+  "input": "turkey breast",
+  "out": "turkey breast"
+ },
+ {
+  "source": "stock",
+  "input": "salmon fillet",
+  "out": "salmon fillet"
+ },
+ {
+  "source": "stock",
+  "input": "tuna steak",
+  "out": "tuna steak"
+ },
+ {
+  "source": "stock",
+  "input": "cod fillet",
+  "out": "cod fillet"
+ },
+ {
+  "source": "stock",
+  "input": "tilapia fillet",
+  "out": "tilapia fillet"
+ },
+ {
+  "source": "stock",
+  "input": "shrimp",
+  "out": "shrimp"
+ },
+ {
+  "source": "stock",
+  "input": "scallops",
+  "out": "scallops"
+ },
+ {
+  "source": "stock",
+  "input": "clams",
+  "out": "clams"
+ },
+ {
+  "source": "stock",
+  "input": "mussels",
+  "out": "mussels"
+ },
+ {
+  "source": "stock",
+  "input": "crab",
+  "out": "crab"
+ },
+ {
+  "source": "stock",
+  "input": "lobster",
+  "out": "lobster"
+ },
+ {
+  "source": "stock",
+  "input": "onion",
+  "out": "onion"
+ },
+ {
+  "source": "stock",
+  "input": "red onion",
+  "out": "red onion"
+ },
+ {
+  "source": "stock",
+  "input": "shallot",
+  "out": "shallot"
+ },
+ {
+  "source": "stock",
+  "input": "green onion",
+  "out": "green onion"
+ },
+ {
+  "source": "stock",
+  "input": "carrot",
+  "out": "carrot"
+ },
+ {
+  "source": "stock",
+  "input": "celery",
+  "out": "celery"
+ },
+ {
+  "source": "stock",
+  "input": "bell pepper",
+  "out": "bell pepper"
+ },
+ {
+  "source": "stock",
+  "input": "jalapeño",
+  "out": "jalapeño"
+ },
+ {
+  "source": "stock",
+  "input": "serrano pepper",
+  "out": "serrano pepper"
+ },
+ {
+  "source": "stock",
+  "input": "habanero pepper",
+  "out": "habanero pepper"
+ },
+ {
+  "source": "stock",
+  "input": "tomato",
+  "out": "tomato"
+ },
+ {
+  "source": "stock",
+  "input": "cherry tomatoes",
+  "out": "cherry tomatoes"
+ },
+ {
+  "source": "stock",
+  "input": "grape tomatoes",
+  "out": "grape tomatoes"
+ },
+ {
+  "source": "stock",
+  "input": "potato",
+  "out": "potato"
+ },
+ {
+  "source": "stock",
+  "input": "sweet potato",
+  "out": "sweet potato"
+ },
+ {
+  "source": "stock",
+  "input": "broccoli",
+  "out": "broccoli"
+ },
+ {
+  "source": "stock",
+  "input": "cauliflower",
+  "out": "cauliflower"
+ },
+ {
+  "source": "stock",
+  "input": "spinach",
+  "out": "spinach"
+ },
+ {
+  "source": "stock",
+  "input": "kale",
+  "out": "kale"
+ },
+ {
+  "source": "stock",
+  "input": "zucchini",
+  "out": "zucchini"
+ },
+ {
+  "source": "stock",
+  "input": "cucumber",
+  "out": "cucumber"
+ },
+ {
+  "source": "stock",
+  "input": "mushroom",
+  "out": "mushroom"
+ },
+ {
+  "source": "stock",
+  "input": "portobello mushroom",
+  "out": "portobello mushroom"
+ },
+ {
+  "source": "stock",
+  "input": "eggplant",
+  "out": "eggplant"
+ },
+ {
+  "source": "stock",
+  "input": "green beans",
+  "out": "green beans"
+ },
+ {
+  "source": "stock",
+  "input": "asparagus",
+  "out": "asparagus"
+ },
+ {
+  "source": "stock",
+  "input": "brussels sprouts",
+  "out": "brussels sprouts"
+ },
+ {
+  "source": "stock",
+  "input": "cabbage",
+  "out": "cabbage"
+ },
+ {
+  "source": "stock",
+  "input": "lettuce",
+  "out": "lettuce"
+ },
+ {
+  "source": "stock",
+  "input": "parsley",
+  "out": "parsley"
+ },
+ {
+  "source": "stock",
+  "input": "cilantro",
+  "out": "cilantro"
+ },
+ {
+  "source": "stock",
+  "input": "basil",
+  "out": "basil"
+ },
+ {
+  "source": "stock",
+  "input": "thyme",
+  "out": "thyme"
+ },
+ {
+  "source": "stock",
+  "input": "rosemary",
+  "out": "rosemary"
+ },
+ {
+  "source": "stock",
+  "input": "oregano",
+  "out": "oregano"
+ },
+ {
+  "source": "stock",
+  "input": "sage",
+  "out": "sage"
+ },
+ {
+  "source": "stock",
+  "input": "dill",
+  "out": "dill"
+ },
+ {
+  "source": "stock",
+  "input": "chives",
+  "out": "chives"
+ },
+ {
+  "source": "stock",
+  "input": "mint",
+  "out": "mint"
+ },
+ {
+  "source": "stock",
+  "input": "black pepper",
+  "out": "black pepper"
+ },
+ {
+  "source": "stock",
+  "input": "white pepper",
+  "out": "white pepper"
+ },
+ {
+  "source": "stock",
+  "input": "paprika",
+  "out": "paprika"
+ },
+ {
+  "source": "stock",
+  "input": "smoked paprika",
+  "out": "smoked paprika"
+ },
+ {
+  "source": "stock",
+  "input": "cumin",
+  "out": "cumin"
+ },
+ {
+  "source": "stock",
+  "input": "coriander",
+  "out": "coriander"
+ },
+ {
+  "source": "stock",
+  "input": "curry powder",
+  "out": "curry powder"
+ },
+ {
+  "source": "stock",
+  "input": "garam masala",
+  "out": "garam masala"
+ },
+ {
+  "source": "stock",
+  "input": "chili powder",
+  "out": "chili powder"
+ },
+ {
+  "source": "stock",
+  "input": "turmeric",
+  "out": "turmeric"
+ },
+ {
+  "source": "stock",
+  "input": "ginger",
+  "out": "ginger"
+ },
+ {
+  "source": "stock",
+  "input": "cinnamon",
+  "out": "cinnamon"
+ },
+ {
+  "source": "stock",
+  "input": "nutmeg",
+  "out": "nutmeg"
+ },
+ {
+  "source": "stock",
+  "input": "allspice",
+  "out": "allspice"
+ },
+ {
+  "source": "stock",
+  "input": "bay leaf",
+  "out": "bay leaf"
+ },
+ {
+  "source": "stock",
+  "input": "red pepper flakes",
+  "out": "red pepper flakes"
+ },
+ {
+  "source": "stock",
+  "input": "vegetable oil",
+  "out": "vegetable oil"
+ },
+ {
+  "source": "stock",
+  "input": "canola oil",
+  "out": "canola oil"
+ },
+ {
+  "source": "stock",
+  "input": "avocado oil",
+  "out": "avocado oil"
+ },
+ {
+  "source": "stock",
+  "input": "sesame oil",
+  "out": "sesame oil"
+ },
+ {
+  "source": "stock",
+  "input": "ghee",
+  "out": "ghee"
+ },
+ {
+  "source": "stock",
+  "input": "eggs",
+  "out": "eggs"
+ },
+ {
+  "source": "stock",
+  "input": "egg whites",
+  "out": "egg whites"
+ },
+ {
+  "source": "stock",
+  "input": "milk",
+  "out": "milk"
+ },
+ {
+  "source": "stock",
+  "input": "skim milk",
+  "out": "skim milk"
+ },
+ {
+  "source": "stock",
+  "input": "half and half",
+  "out": "half and half"
+ },
+ {
+  "source": "stock",
+  "input": "cheddar cheese",
+  "out": "cheddar cheese"
+ },
+ {
+  "source": "stock",
+  "input": "mozzarella cheese",
+  "out": "mozzarella cheese"
+ },
+ {
+  "source": "stock",
+  "input": "parmesan cheese",
+  "out": "parmesan cheese"
+ },
+ {
+  "source": "stock",
+  "input": "feta cheese",
+  "out": "feta cheese"
+ },
+ {
+  "source": "stock",
+  "input": "goat cheese",
+  "out": "goat cheese"
+ },
+ {
+  "source": "stock",
+  "input": "cream cheese",
+  "out": "cream cheese"
+ },
+ {
+  "source": "stock",
+  "input": "plain yogurt",
+  "out": "plain yogurt"
+ },
+ {
+  "source": "stock",
+  "input": "greek yogurt",
+  "out": "greek yogurt"
+ },
+ {
+  "source": "stock",
+  "input": "all-purpose flour",
+  "out": "all-purpose flour"
+ },
+ {
+  "source": "stock",
+  "input": "bread flour",
+  "out": "bread flour"
+ },
+ {
+  "source": "stock",
+  "input": "whole wheat flour",
+  "out": "whole wheat flour"
+ },
+ {
+  "source": "stock",
+  "input": "cornmeal",
+  "out": "cornmeal"
+ },
+ {
+  "source": "stock",
+  "input": "baking powder",
+  "out": "baking powder"
+ },
+ {
+  "source": "stock",
+  "input": "baking soda",
+  "out": "baking soda"
+ },
+ {
+  "source": "stock",
+  "input": "yeast",
+  "out": "yeast"
+ },
+ {
+  "source": "stock",
+  "input": "cocoa powder",
+  "out": "cocoa powder"
+ },
+ {
+  "source": "stock",
+  "input": "chocolate chips",
+  "out": "chocolate chips"
+ },
+ {
+  "source": "stock",
+  "input": "white sugar",
+  "out": "white sugar"
+ },
+ {
+  "source": "stock",
+  "input": "brown sugar",
+  "out": "brown sugar"
+ },
+ {
+  "source": "stock",
+  "input": "powdered sugar",
+  "out": "powdered sugar"
+ },
+ {
+  "source": "stock",
+  "input": "maple syrup",
+  "out": "maple syrup"
+ },
+ {
+  "source": "stock",
+  "input": "agave syrup",
+  "out": "agave syrup"
+ },
+ {
+  "source": "stock",
+  "input": "rice",
+  "out": "rice"
+ },
+ {
+  "source": "stock",
+  "input": "brown rice",
+  "out": "brown rice"
+ },
+ {
+  "source": "stock",
+  "input": "basmati rice",
+  "out": "basmati rice"
+ },
+ {
+  "source": "stock",
+  "input": "quinoa",
+  "out": "quinoa"
+ },
+ {
+  "source": "stock",
+  "input": "couscous",
+  "out": "couscous"
+ },
+ {
+  "source": "stock",
+  "input": "rolled oats",
+  "out": "rolled oats"
+ },
+ {
+  "source": "stock",
+  "input": "steel-cut oats",
+  "out": "steel-cut oats"
+ },
+ {
+  "source": "stock",
+  "input": "spaghetti",
+  "out": "spaghetti"
+ },
+ {
+  "source": "stock",
+  "input": "penne",
+  "out": "penne"
+ },
+ {
+  "source": "stock",
+  "input": "fettuccine",
+  "out": "fettuccine"
+ },
+ {
+  "source": "stock",
+  "input": "macaroni",
+  "out": "macaroni"
+ },
+ {
+  "source": "stock",
+  "input": "lasagna noodles",
+  "out": "lasagna noodles"
+ },
+ {
+  "source": "stock",
+  "input": "egg noodles",
+  "out": "egg noodles"
+ },
+ {
+  "source": "stock",
+  "input": "black beans",
+  "out": "black beans"
+ },
+ {
+  "source": "stock",
+  "input": "kidney beans",
+  "out": "kidney beans"
+ },
+ {
+  "source": "stock",
+  "input": "pinto beans",
+  "out": "pinto beans"
+ },
+ {
+  "source": "stock",
+  "input": "chickpeas",
+  "out": "chickpeas"
+ },
+ {
+  "source": "stock",
+  "input": "lentils",
+  "out": "lentils"
+ },
+ {
+  "source": "stock",
+  "input": "edamame",
+  "out": "edamame"
+ },
+ {
+  "source": "stock",
+  "input": "tofu",
+  "out": "tofu"
+ },
+ {
+  "source": "stock",
+  "input": "peanuts",
+  "out": "peanuts"
+ },
+ {
+  "source": "stock",
+  "input": "almonds",
+  "out": "almonds"
+ },
+ {
+  "source": "stock",
+  "input": "walnuts",
+  "out": "walnuts"
+ },
+ {
+  "source": "stock",
+  "input": "pecans",
+  "out": "pecans"
+ },
+ {
+  "source": "stock",
+  "input": "pistachios",
+  "out": "pistachios"
+ },
+ {
+  "source": "stock",
+  "input": "cashews",
+  "out": "cashews"
+ },
+ {
+  "source": "stock",
+  "input": "hazelnuts",
+  "out": "hazelnuts"
+ },
+ {
+  "source": "stock",
+  "input": "macadamia nuts",
+  "out": "macadamia nuts"
+ },
+ {
+  "source": "stock",
+  "input": "sesame seeds",
+  "out": "sesame seeds"
+ },
+ {
+  "source": "stock",
+  "input": "tahini",
+  "out": "tahini"
+ },
+ {
+  "source": "stock",
+  "input": "soy sauce",
+  "out": "soy sauce"
+ },
+ {
+  "source": "stock",
+  "input": "tamari",
+  "out": "tamari"
+ },
+ {
+  "source": "stock",
+  "input": "fish sauce",
+  "out": "fish sauce"
+ },
+ {
+  "source": "stock",
+  "input": "oyster sauce",
+  "out": "oyster sauce"
+ },
+ {
+  "source": "stock",
+  "input": "hot sauce",
+  "out": "hot sauce"
+ },
+ {
+  "source": "stock",
+  "input": "bbq sauce",
+  "out": "bbq sauce"
+ },
+ {
+  "source": "stock",
+  "input": "ketchup",
+  "out": "ketchup"
+ },
+ {
+  "source": "stock",
+  "input": "mustard",
+  "out": "mustard"
+ },
+ {
+  "source": "stock",
+  "input": "mayonnaise",
+  "out": "mayonnaise"
+ },
+ {
+  "source": "stock",
+  "input": "tomato sauce",
+  "out": "tomato sauce"
+ },
+ {
+  "source": "stock",
+  "input": "tomato paste",
+  "out": "tomato paste"
+ },
+ {
+  "source": "stock",
+  "input": "salsa",
+  "out": "salsa"
+ },
+ {
+  "source": "stock",
+  "input": "pesto",
+  "out": "pesto"
+ },
+ {
+  "source": "stock",
+  "input": "canned tomatoes",
+  "out": "canned tomatoes"
+ },
+ {
+  "source": "stock",
+  "input": "canned corn",
+  "out": "canned corn"
+ },
+ {
+  "source": "stock",
+  "input": "canned tuna",
+  "out": "canned tuna"
+ },
+ {
+  "source": "stock",
+  "input": "coconut milk",
+  "out": "coconut milk"
+ },
+ {
+  "source": "stock",
+  "input": "lemon",
+  "out": "lemon"
+ },
+ {
+  "source": "stock",
+  "input": "lime",
+  "out": "lime"
+ },
+ {
+  "source": "stock",
+  "input": "orange",
+  "out": "orange"
+ },
+ {
+  "source": "stock",
+  "input": "apple",
+  "out": "apple"
+ },
+ {
+  "source": "stock",
+  "input": "banana",
+  "out": "banana"
+ },
+ {
+  "source": "stock",
+  "input": "strawberries",
+  "out": "strawberries"
+ },
+ {
+  "source": "stock",
+  "input": "blueberries",
+  "out": "blueberries"
+ },
+ {
+  "source": "stock",
+  "input": "raspberries",
+  "out": "raspberries"
+ },
+ {
+  "source": "stock",
+  "input": "blackberries",
+  "out": "blackberries"
+ },
+ {
+  "source": "stock",
+  "input": "pineapple",
+  "out": "pineapple"
+ },
+ {
+  "source": "stock",
+  "input": "mango",
+  "out": "mango"
+ },
+ {
+  "source": "stock",
+  "input": "grapes",
+  "out": "grapes"
+ },
+ {
+  "source": "stock",
+  "input": "pear",
+  "out": "pear"
+ },
+ {
+  "source": "stock",
+  "input": "peach",
+  "out": "peach"
+ },
+ {
+  "source": "stock",
+  "input": "plum",
+  "out": "plum"
+ },
+ {
+  "source": "stock",
+  "input": "watermelon",
+  "out": "watermelon"
+ },
+ {
+  "source": "stock",
+  "input": "avocado",
+  "out": "avocado"
+ },
+ {
+  "source": "stock",
+  "input": "tortilla chips",
+  "out": "tortilla chips"
+ },
+ {
+  "source": "stock",
+  "input": "corn tortillas",
+  "out": "corn tortillas"
+ },
+ {
+  "source": "stock",
+  "input": "flour tortillas",
+  "out": "flour tortillas"
+ },
+ {
+  "source": "stock",
+  "input": "gochujang",
+  "out": "gochujang"
+ },
+ {
+  "source": "stock",
+  "input": "miso paste",
+  "out": "miso paste"
+ },
+ {
+  "source": "stock",
+  "input": "harissa",
+  "out": "harissa"
+ },
+ {
+  "source": "stock",
+  "input": "tikka masala paste",
+  "out": "tikka masala paste"
+ },
+ {
+  "source": "stock",
+  "input": "curry paste",
+  "out": "curry paste"
+ },
+ {
+  "source": "stock",
+  "input": "paneer",
+  "out": "paneer"
+ },
+ {
+  "source": "stock",
+  "input": "naan bread",
+  "out": "naan bread"
+ },
+ {
+  "source": "stock",
+  "input": "soy milk",
+  "out": "soy milk"
+ },
+ {
+  "source": "stock",
+  "input": "almond milk",
+  "out": "almond milk"
+ },
+ {
+  "source": "stock",
+  "input": "oat milk",
+  "out": "oat milk"
+ },
+ {
+  "source": "stock",
+  "input": "boneless chicken breast",
+  "out": "boneless chicken breast"
+ },
+ {
+  "source": "stock",
+  "input": "boneless chicken thigh",
+  "out": "boneless chicken thigh"
+ },
+ {
+  "source": "stock",
+  "input": "roasting chicken",
+  "out": "roasting chicken"
+ },
+ {
+  "source": "stock",
+  "input": "broiler chicken",
+  "out": "broiler chicken"
+ },
+ {
+  "source": "stock",
+  "input": "minced beef",
+  "out": "minced beef"
+ },
+ {
+  "source": "stock",
+  "input": "sirloin steak",
+  "out": "sirloin steak"
+ },
+ {
+  "source": "stock",
+  "input": "ribeye steak",
+  "out": "ribeye steak"
+ },
+ {
+  "source": "stock",
+  "input": "chuck roast",
+  "out": "chuck roast"
+ },
+ {
+  "source": "stock",
+  "input": "pork loin roast",
+  "out": "pork loin roast"
+ },
+ {
+  "source": "stock",
+  "input": "pork butt",
+  "out": "pork butt"
+ },
+ {
+  "source": "stock",
+  "input": "boston butt",
+  "out": "boston butt"
+ },
+ {
+  "source": "stock",
+  "input": "streaky bacon",
+  "out": "streaky bacon"
+ },
+ {
+  "source": "stock",
+  "input": "cooked ham",
+  "out": "cooked ham"
+ },
+ {
+  "source": "stock",
+  "input": "deli ham",
+  "out": "deli ham"
+ },
+ {
+  "source": "stock",
+  "input": "parma ham",
+  "out": "parma ham"
+ },
+ {
+  "source": "stock",
+  "input": "salmon",
+  "out": "salmon"
+ },
+ {
+  "source": "stock",
+  "input": "tuna",
+  "out": "tuna"
+ },
+ {
+  "source": "stock",
+  "input": "cod",
+  "out": "cod"
+ },
+ {
+  "source": "stock",
+  "input": "tilapia",
+  "out": "tilapia"
+ },
+ {
+  "source": "stock",
+  "input": "prawns",
+  "out": "prawns"
+ },
+ {
+  "source": "stock",
+  "input": "yellow onion",
+  "out": "yellow onion"
+ },
+ {
+  "source": "stock",
+  "input": "white onion",
+  "out": "white onion"
+ },
+ {
+  "source": "stock",
+  "input": "scallion",
+  "out": "scallion"
+ },
+ {
+  "source": "stock",
+  "input": "spring onion",
+  "out": "spring onion"
+ },
+ {
+  "source": "stock",
+  "input": "garlic clove",
+  "out": "garlic clove"
+ },
+ {
+  "source": "stock",
+  "input": "capsicum",
+  "out": "capsicum"
+ },
+ {
+  "source": "stock",
+  "input": "jalapeno",
+  "out": "jalapeno"
+ },
+ {
+  "source": "stock",
+  "input": "roma tomato",
+  "out": "roma tomato"
+ },
+ {
+  "source": "stock",
+  "input": "vine tomato",
+  "out": "vine tomato"
+ },
+ {
+  "source": "stock",
+  "input": "russet potato",
+  "out": "russet potato"
+ },
+ {
+  "source": "stock",
+  "input": "yam",
+  "out": "yam"
+ },
+ {
+  "source": "stock",
+  "input": "courgette",
+  "out": "courgette"
+ },
+ {
+  "source": "stock",
+  "input": "button mushroom",
+  "out": "button mushroom"
+ },
+ {
+  "source": "stock",
+  "input": "portabella mushroom",
+  "out": "portabella mushroom"
+ },
+ {
+  "source": "stock",
+  "input": "aubergine",
+  "out": "aubergine"
+ },
+ {
+  "source": "stock",
+  "input": "string beans",
+  "out": "string beans"
+ },
+ {
+  "source": "stock",
+  "input": "romaine lettuce",
+  "out": "romaine lettuce"
+ },
+ {
+  "source": "stock",
+  "input": "iceberg lettuce",
+  "out": "iceberg lettuce"
+ },
+ {
+  "source": "stock",
+  "input": "flat-leaf parsley",
+  "out": "flat-leaf parsley"
+ },
+ {
+  "source": "stock",
+  "input": "italian parsley",
+  "out": "italian parsley"
+ },
+ {
+  "source": "stock",
+  "input": "coriander leaves",
+  "out": "coriander leaves"
+ },
+ {
+  "source": "stock",
+  "input": "table salt",
+  "out": "table salt"
+ },
+ {
+  "source": "stock",
+  "input": "kosher salt",
+  "out": "kosher salt"
+ },
+ {
+  "source": "stock",
+  "input": "ground black pepper",
+  "out": "ground black pepper"
+ },
+ {
+  "source": "stock",
+  "input": "ground cumin",
+  "out": "ground cumin"
+ },
+ {
+  "source": "stock",
+  "input": "ground coriander",
+  "out": "ground coriander"
+ },
+ {
+  "source": "stock",
+  "input": "ground ginger",
+  "out": "ground ginger"
+ },
+ {
+  "source": "stock",
+  "input": "ground cinnamon",
+  "out": "ground cinnamon"
+ },
+ {
+  "source": "stock",
+  "input": "bay leaves",
+  "out": "bay leaves"
+ },
+ {
+  "source": "stock",
+  "input": "crushed red pepper",
+  "out": "crushed red pepper"
+ },
+ {
+  "source": "stock",
+  "input": "extra virgin olive oil",
+  "out": "extra virgin olive oil"
+ },
+ {
+  "source": "stock",
+  "input": "clarified butter",
+  "out": "clarified butter"
+ },
+ {
+  "source": "stock",
+  "input": "large eggs",
+  "out": "large eggs"
+ },
+ {
+  "source": "stock",
+  "input": "heavy whipping cream",
+  "out": "heavy whipping cream"
+ },
+ {
+  "source": "stock",
+  "input": "sharp cheddar",
+  "out": "sharp cheddar"
+ },
+ {
+  "source": "stock",
+  "input": "parmigiano reggiano",
+  "out": "parmigiano reggiano"
+ },
+ {
+  "source": "stock",
+  "input": "chèvre",
+  "out": "chèvre"
+ },
+ {
+  "source": "stock",
+  "input": "yogurt",
+  "out": "yogurt"
+ },
+ {
+  "source": "stock",
+  "input": "ap flour",
+  "out": "ap flour"
+ },
+ {
+  "source": "stock",
+  "input": "bicarbonate of soda",
+  "out": "bicarbonate of soda"
+ },
+ {
+  "source": "stock",
+  "input": "active dry yeast",
+  "out": "active dry yeast"
+ },
+ {
+  "source": "stock",
+  "input": "granulated sugar",
+  "out": "granulated sugar"
+ },
+ {
+  "source": "stock",
+  "input": "confectioners sugar",
+  "out": "confectioners sugar"
+ },
+ {
+  "source": "stock",
+  "input": "agave nectar",
+  "out": "agave nectar"
+ },
+ {
+  "source": "stock",
+  "input": "white rice",
+  "out": "white rice"
+ },
+ {
+  "source": "stock",
+  "input": "oats",
+  "out": "oats"
+ },
+ {
+  "source": "stock",
+  "input": "garbanzo beans",
+  "out": "garbanzo beans"
+ },
+ {
+  "source": "stock",
+  "input": "soybeans",
+  "out": "soybeans"
+ },
+ {
+  "source": "stock",
+  "input": "bean curd",
+  "out": "bean curd"
+ },
+ {
+  "source": "stock",
+  "input": "filberts",
+  "out": "filberts"
+ },
+ {
+  "source": "stock",
+  "input": "barbecue sauce",
+  "out": "barbecue sauce"
+ },
+ {
+  "source": "stock",
+  "input": "mayo",
+  "out": "mayo"
+ },
+ {
+  "source": "stock",
+  "input": "marinara",
+  "out": "marinara"
+ },
+ {
+  "source": "stock",
+  "input": "diced tomatoes",
+  "out": "diced tomatoes"
+ },
+ {
+  "source": "stock",
+  "input": "korean chili paste",
+  "out": "korean chili paste"
+ },
+ {
+  "source": "units",
+  "input": "tablespoon",
+  "out": "tablespoon"
+ },
+ {
+  "source": "units",
+  "input": "fluid ounce",
+  "out": "fluid ounce"
+ },
+ {
+  "source": "units",
+  "input": "pint",
+  "out": "pint"
+ },
+ {
+  "source": "units",
+  "input": "quart",
+  "out": "quart"
+ },
+ {
+  "source": "units",
+  "input": "gallon",
+  "out": "gallon"
+ },
+ {
+  "source": "units",
+  "input": "milliliter",
+  "out": "milliliter"
+ },
+ {
+  "source": "units",
+  "input": "liter",
+  "out": "liter"
+ },
+ {
+  "source": "units",
+  "input": "deciliter",
+  "out": "deciliter"
+ },
+ {
+  "source": "units",
+  "input": "dash",
+  "out": "dash"
+ },
+ {
+  "source": "units",
+  "input": "drop",
+  "out": "drop"
+ },
+ {
+  "source": "units",
+  "input": "smidgen",
+  "out": "smidgen"
+ },
+ {
+  "source": "units",
+  "input": "splash",
+  "out": "splash"
+ },
+ {
+  "source": "units",
+  "input": "shot",
+  "out": "shot"
+ },
+ {
+  "source": "units",
+  "input": "jigger",
+  "out": "jigger"
+ },
+ {
+  "source": "units",
+  "input": "milligram",
+  "out": "milligram"
+ },
+ {
+  "source": "units",
+  "input": "gram",
+  "out": "gram"
+ },
+ {
+  "source": "units",
+  "input": "kilogram",
+  "out": "kilogram"
+ },
+ {
+  "source": "units",
+  "input": "ounce",
+  "out": "ounce"
+ },
+ {
+  "source": "units",
+  "input": "millimeter",
+  "out": "millimeter"
+ },
+ {
+  "source": "units",
+  "input": "centimeter",
+  "out": "centimeter"
+ },
+ {
+  "source": "units",
+  "input": "meter",
+  "out": "meter"
+ },
+ {
+  "source": "units",
+  "input": "inch",
+  "out": "inch"
+ },
+ {
+  "source": "units",
+  "input": "foot",
+  "out": "foot"
+ },
+ {
+  "source": "units",
+  "input": "degree Celsius",
+  "out": "degree celsius"
+ },
+ {
+  "source": "units",
+  "input": "degree Fahrenheit",
+  "out": "degree fahrenheit"
+ },
+ {
+  "source": "units",
+  "input": "clove",
+  "out": "clove"
+ },
+ {
+  "source": "units",
+  "input": "bulb",
+  "out": "bulb"
+ },
+ {
+  "source": "units",
+  "input": "head",
+  "out": "head"
+ },
+ {
+  "source": "units",
+  "input": "bunch",
+  "out": "bunch"
+ },
+ {
+  "source": "units",
+  "input": "sprig",
+  "out": "sprig"
+ },
+ {
+  "source": "units",
+  "input": "stalk",
+  "out": "stalk"
+ },
+ {
+  "source": "units",
+  "input": "slice",
+  "out": "slice"
+ },
+ {
+  "source": "units",
+  "input": "wedge",
+  "out": "wedge"
+ },
+ {
+  "source": "units",
+  "input": "piece",
+  "out": "piece"
+ },
+ {
+  "source": "units",
+  "input": "stick",
+  "out": "stick"
+ },
+ {
+  "source": "units",
+  "input": "fillet",
+  "out": "fillet"
+ },
+ {
+  "source": "units",
+  "input": "rack",
+  "out": "rack"
+ },
+ {
+  "source": "units",
+  "input": "can",
+  "out": "can"
+ },
+ {
+  "source": "units",
+  "input": "jar",
+  "out": "jar"
+ },
+ {
+  "source": "units",
+  "input": "package",
+  "out": "package"
+ },
+ {
+  "source": "units",
+  "input": "bag",
+  "out": "bag"
+ },
+ {
+  "source": "units",
+  "input": "block",
+  "out": "block"
+ },
+ {
+  "source": "units",
+  "input": "sheet",
+  "out": "sheet"
+ },
+ {
+  "source": "units",
+  "input": "cup cooked",
+  "out": "cooked"
+ },
+ {
+  "source": "units",
+  "input": "cup uncooked",
+  "out": "uncooked"
+ },
+ {
+  "source": "units",
+  "input": "leaf",
+  "out": "leaf"
+ },
+ {
+  "source": "units",
+  "input": "handful",
+  "out": "handful"
+ },
+ {
+  "source": "units",
+  "input": "tsp",
+  "out": "tsp"
+ },
+ {
+  "source": "units",
+  "input": "fl oz",
+  "out": "fl oz"
+ },
+ {
+  "source": "units",
+  "input": "c",
+  "out": "c"
+ },
+ {
+  "source": "units",
+  "input": "pt",
+  "out": "pt"
+ },
+ {
+  "source": "units",
+  "input": "qt",
+  "out": "qt"
+ },
+ {
+  "source": "units",
+  "input": "gal",
+  "out": "gal"
+ },
+ {
+  "source": "units",
+  "input": "ml",
+  "out": "ml"
+ },
+ {
+  "source": "units",
+  "input": "l",
+  "out": "l"
+ },
+ {
+  "source": "units",
+  "input": "dl",
+  "out": "dl"
+ },
+ {
+  "source": "units",
+  "input": "",
+  "out": ""
+ },
+ {
+  "source": "units",
+  "input": "mg",
+  "out": "mg"
+ },
+ {
+  "source": "units",
+  "input": "g",
+  "out": "g"
+ },
+ {
+  "source": "units",
+  "input": "kg",
+  "out": "kg"
+ },
+ {
+  "source": "units",
+  "input": "oz",
+  "out": "oz"
+ },
+ {
+  "source": "units",
+  "input": "mm",
+  "out": "mm"
+ },
+ {
+  "source": "units",
+  "input": "cm",
+  "out": "cm"
+ },
+ {
+  "source": "units",
+  "input": "m",
+  "out": "m"
+ },
+ {
+  "source": "units",
+  "input": "in",
+  "out": "in"
+ },
+ {
+  "source": "units",
+  "input": "ft",
+  "out": "ft"
+ },
+ {
+  "source": "units",
+  "input": "°C",
+  "out": "°c"
+ },
+ {
+  "source": "units",
+  "input": "°F",
+  "out": "°f"
+ },
+ {
+  "source": "synthetic",
+  "input": "salt to taste",
+  "out": "salt"
+ },
+ {
+  "source": "synthetic",
+  "input": "olive oil, divided",
+  "out": "olive oil"
+ },
+ {
+  "source": "synthetic",
+  "input": "1½ cups sugar",
+  "out": "sugar"
+ },
+ {
+  "source": "synthetic",
+  "input": "¼ cup honey (or agave)",
+  "out": "honey"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 Tbsp. butter, melted",
+  "out": "butter"
+ },
+ {
+  "source": "synthetic",
+  "input": "3 cloves garlic, finely chopped",
+  "out": "garlic"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 (14 oz) can diced tomatoes",
+  "out": "diced tomatoes"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 lb lean ground beef (93/7 or leaner)",
+  "out": "lean ground beef"
+ },
+ {
+  "source": "synthetic",
+  "input": "1-2 jalapenos, seeded",
+  "out": "jalapenos, seeded"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 lbs. potatoes, peeled and cubed",
+  "out": "potatoes"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 g saffron",
+  "out": "saffron"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 l water",
+  "out": "water"
+ },
+ {
+  "source": "synthetic",
+  "input": "lemon (optional)",
+  "out": "lemon"
+ },
+ {
+  "source": "synthetic",
+  "input": "lettuce (about 1 head)",
+  "out": "lettuce"
+ },
+ {
+  "source": "synthetic",
+  "input": "parsley (fresh, chopped)",
+  "out": "parsley"
+ },
+ {
+  "source": "synthetic",
+  "input": "pasta (75g)",
+  "out": "pasta"
+ },
+ {
+  "source": "synthetic",
+  "input": "pasta (225)",
+  "out": "pasta"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 kg",
+  "out": "2 kg"
+ },
+ {
+  "source": "synthetic",
+  "input": "Cups of flour",
+  "out": "of flour"
+ },
+ {
+  "source": "synthetic",
+  "input": "cupcake liners",
+  "out": "cupcake liners"
+ },
+ {
+  "source": "synthetic",
+  "input": "gallon bag",
+  "out": "bag"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 dash hot sauce",
+  "out": "hot sauce"
+ },
+ {
+  "source": "synthetic",
+  "input": "pinch of salt",
+  "out": "of salt"
+ },
+ {
+  "source": "synthetic",
+  "input": "a pinch salt",
+  "out": "a pinch salt"
+ },
+ {
+  "source": "synthetic",
+  "input": "12 oz. chocolate chips",
+  "out": "chocolate chips"
+ },
+ {
+  "source": "synthetic",
+  "input": "1/2 tsp. vanilla extract",
+  "out": "vanilla extract"
+ },
+ {
+  "source": "synthetic",
+  "input": "3 large eggs, beaten",
+  "out": "large eggs"
+ },
+ {
+  "source": "synthetic",
+  "input": "4 Roma tomatoes, quartered",
+  "out": "roma tomatoes"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 bunch cilantro, rinsed",
+  "out": "cilantro"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 package cream cheese, softened",
+  "out": "cream cheese"
+ },
+ {
+  "source": "synthetic",
+  "input": "sprig rosemary",
+  "out": "rosemary"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 sprigs thyme",
+  "out": "thyme"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 stick butter",
+  "out": "butter"
+ },
+ {
+  "source": "synthetic",
+  "input": "chopped onion",
+  "out": "chopped onion"
+ },
+ {
+  "source": "synthetic",
+  "input": "onion, chopped",
+  "out": "onion"
+ },
+ {
+  "source": "synthetic",
+  "input": "onion, Chopped",
+  "out": "onion"
+ },
+ {
+  "source": "synthetic",
+  "input": "ONION, DICED",
+  "out": "onion"
+ },
+ {
+  "source": "synthetic",
+  "input": "beans, rinsed and drained",
+  "out": "beans"
+ },
+ {
+  "source": "synthetic",
+  "input": "5 ml vanilla",
+  "out": "vanilla"
+ },
+ {
+  "source": "synthetic",
+  "input": "1.5 oz gin",
+  "out": "gin"
+ },
+ {
+  "source": "synthetic",
+  "input": "1/3 cup",
+  "out": "1/3 cup"
+ },
+ {
+  "source": "synthetic",
+  "input": "(optional) basil",
+  "out": "basil"
+ },
+ {
+  "source": "synthetic",
+  "input": "basil (Optional)",
+  "out": "basil"
+ },
+ {
+  "source": "synthetic",
+  "input": "corn (or 2 cans)",
+  "out": "corn"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 cups (500 ml) stock",
+  "out": "stock"
+ },
+ {
+  "source": "synthetic",
+  "input": "salt & pepper",
+  "out": "salt & pepper"
+ },
+ {
+  "source": "synthetic",
+  "input": "Kosher salt, to taste",
+  "out": "kosher salt"
+ },
+ {
+  "source": "synthetic",
+  "input": "ground cinnamon to taste ",
+  "out": "ground cinnamon"
+ },
+ {
+  "source": "synthetic",
+  "input": "  2   cups  flour  ",
+  "out": "flour"
+ },
+ {
+  "source": "synthetic",
+  "input": "- 1 cup sugar",
+  "out": "sugar"
+ },
+ {
+  "source": "synthetic",
+  "input": ". 5 eggs",
+  "out": "eggs"
+ },
+ {
+  "source": "synthetic",
+  "input": "100g flour",
+  "out": "100g flour"
+ },
+ {
+  "source": "synthetic",
+  "input": "100 g flour",
+  "out": "flour"
+ },
+ {
+  "source": "synthetic",
+  "input": "1/2-inch ginger",
+  "out": "1/2-inch ginger"
+ },
+ {
+  "source": "synthetic",
+  "input": "12-ounce can beer",
+  "out": "12-ounce can beer"
+ },
+ {
+  "source": "synthetic",
+  "input": "6–8 chicken thighs",
+  "out": "6–8 chicken thighs"
+ },
+ {
+  "source": "synthetic",
+  "input": "tablespoon butter",
+  "out": "butter"
+ },
+ {
+  "source": "synthetic",
+  "input": "tbsp butter",
+  "out": "butter"
+ },
+ {
+  "source": "synthetic",
+  "input": "tbspbutter",
+  "out": "tbspbutter"
+ },
+ {
+  "source": "synthetic",
+  "input": "l'oreal",
+  "out": "'oreal"
+ },
+ {
+  "source": "synthetic",
+  "input": "lbs",
+  "out": "lbs"
+ },
+ {
+  "source": "synthetic",
+  "input": "liters of water",
+  "out": "of water"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 1/2 cups milk",
+  "out": "milk"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 tbsp. butter, melted",
+  "out": "butter"
+ },
+ {
+  "source": "synthetic",
+  "input": "3 eggs",
+  "out": "eggs"
+ },
+ {
+  "source": "synthetic",
+  "input": "Salt and pepper to taste",
+  "out": "salt and pepper"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 (14 oz) can tomatoes",
+  "out": "tomatoes"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 cloves garlic, minced",
+  "out": "garlic"
+ },
+ {
+  "source": "synthetic",
+  "input": "1/4 tsp salt",
+  "out": "salt"
+ },
+ {
+  "source": "synthetic",
+  "input": "Recipe ingredient one",
+  "out": "recipe ingredient one"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 large eggs (beaten)",
+  "out": "large eggs (beaten)"
+ },
+ {
+  "source": "synthetic",
+  "input": "½ teaspoon vanilla extract",
+  "out": "vanilla extract"
+ },
+ {
+  "source": "synthetic",
+  "input": "1-2 jalapenos",
+  "out": "jalapenos"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 glass water",
+  "out": "glass water"
+ },
+ {
+  "source": "synthetic",
+  "input": "4 heads lettuce",
+  "out": "heads lettuce"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 C. flour",
+  "out": "c. flour"
+ },
+ {
+  "source": "synthetic",
+  "input": "  10   grams   yeast  ",
+  "out": "yeast"
+ },
+ {
+  "source": "synthetic",
+  "input": "1/2 stick butter (softened)",
+  "out": "butter (softened)"
+ },
+ {
+  "source": "synthetic",
+  "input": "100 ml cream",
+  "out": "cream"
+ },
+ {
+  "source": "synthetic",
+  "input": "3 ears corn",
+  "out": "ears corn"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 pkg cream cheese",
+  "out": "cream cheese"
+ },
+ {
+  "source": "synthetic",
+  "input": "1 bunch cilantro",
+  "out": "cilantro"
+ },
+ {
+  "source": "synthetic",
+  "input": "a handful of spinach",
+  "out": "a handful of spinach"
+ },
+ {
+  "source": "synthetic",
+  "input": "6 slices bacon",
+  "out": "bacon"
+ },
+ {
+  "source": "synthetic",
+  "input": "2 + 1 cups water",
+  "out": "+ 1 cups water"
+ },
+ {
+  "source": "synthetic",
+  "input": "0.5 kg potatoes",
+  "out": "potatoes"
+ }
+]

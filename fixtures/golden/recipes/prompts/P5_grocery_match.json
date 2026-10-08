@@ -1,0 +1,398 @@
+{
+ "inputs": {
+  "candidates": [
+   {
+    "id": 1,
+    "ingredient_name": "item 1",
+    "product_name": "Product 1 (12 oz)"
+   },
+   {
+    "id": 2,
+    "ingredient_name": "item 2",
+    "product_name": null
+   },
+   {
+    "id": 3,
+    "ingredient_name": "item 3",
+    "product_name": "Product 3 (12 oz)"
+   },
+   {
+    "id": 4,
+    "ingredient_name": "item 4",
+    "product_name": null
+   },
+   {
+    "id": 5,
+    "ingredient_name": "item 5",
+    "product_name": "Product 5 (12 oz)"
+   },
+   {
+    "id": 6,
+    "ingredient_name": "item 6",
+    "product_name": null
+   },
+   {
+    "id": 7,
+    "ingredient_name": "item 7",
+    "product_name": "Product 7 (12 oz)"
+   },
+   {
+    "id": 8,
+    "ingredient_name": "item 8",
+    "product_name": null
+   },
+   {
+    "id": 9,
+    "ingredient_name": "item 9",
+    "product_name": "Product 9 (12 oz)"
+   },
+   {
+    "id": 10,
+    "ingredient_name": "item 10",
+    "product_name": null
+   },
+   {
+    "id": 11,
+    "ingredient_name": "item 11",
+    "product_name": "Product 11 (12 oz)"
+   },
+   {
+    "id": 12,
+    "ingredient_name": "item 12",
+    "product_name": null
+   },
+   {
+    "id": 13,
+    "ingredient_name": "item 13",
+    "product_name": "Product 13 (12 oz)"
+   },
+   {
+    "id": 14,
+    "ingredient_name": "item 14",
+    "product_name": null
+   },
+   {
+    "id": 15,
+    "ingredient_name": "item 15",
+    "product_name": "Product 15 (12 oz)"
+   },
+   {
+    "id": 16,
+    "ingredient_name": "item 16",
+    "product_name": null
+   },
+   {
+    "id": 17,
+    "ingredient_name": "item 17",
+    "product_name": "Product 17 (12 oz)"
+   },
+   {
+    "id": 18,
+    "ingredient_name": "item 18",
+    "product_name": null
+   },
+   {
+    "id": 19,
+    "ingredient_name": "item 19",
+    "product_name": "Product 19 (12 oz)"
+   },
+   {
+    "id": 20,
+    "ingredient_name": "item 20",
+    "product_name": null
+   },
+   {
+    "id": 21,
+    "ingredient_name": "item 21",
+    "product_name": "Product 21 (12 oz)"
+   },
+   {
+    "id": 22,
+    "ingredient_name": "item 22",
+    "product_name": null
+   },
+   {
+    "id": 23,
+    "ingredient_name": "item 23",
+    "product_name": "Product 23 (12 oz)"
+   },
+   {
+    "id": 24,
+    "ingredient_name": "item 24",
+    "product_name": null
+   },
+   {
+    "id": 25,
+    "ingredient_name": "item 25",
+    "product_name": "Product 25 (12 oz)"
+   },
+   {
+    "id": 26,
+    "ingredient_name": "item 26",
+    "product_name": null
+   },
+   {
+    "id": 27,
+    "ingredient_name": "item 27",
+    "product_name": "Product 27 (12 oz)"
+   },
+   {
+    "id": 28,
+    "ingredient_name": "item 28",
+    "product_name": null
+   },
+   {
+    "id": 29,
+    "ingredient_name": "item 29",
+    "product_name": "Product 29 (12 oz)"
+   },
+   {
+    "id": 30,
+    "ingredient_name": "item 30",
+    "product_name": null
+   },
+   {
+    "id": 31,
+    "ingredient_name": "item 31",
+    "product_name": "Product 31 (12 oz)"
+   },
+   {
+    "id": 32,
+    "ingredient_name": "item 32",
+    "product_name": null
+   },
+   {
+    "id": 33,
+    "ingredient_name": "item 33",
+    "product_name": "Product 33 (12 oz)"
+   },
+   {
+    "id": 34,
+    "ingredient_name": "item 34",
+    "product_name": null
+   },
+   {
+    "id": 35,
+    "ingredient_name": "item 35",
+    "product_name": "Product 35 (12 oz)"
+   },
+   {
+    "id": 36,
+    "ingredient_name": "item 36",
+    "product_name": null
+   },
+   {
+    "id": 37,
+    "ingredient_name": "item 37",
+    "product_name": "Product 37 (12 oz)"
+   },
+   {
+    "id": 38,
+    "ingredient_name": "item 38",
+    "product_name": null
+   },
+   {
+    "id": 39,
+    "ingredient_name": "item 39",
+    "product_name": "Product 39 (12 oz)"
+   },
+   {
+    "id": 40,
+    "ingredient_name": "item 40",
+    "product_name": null
+   },
+   {
+    "id": 41,
+    "ingredient_name": "item 41",
+    "product_name": "Product 41 (12 oz)"
+   },
+   {
+    "id": 42,
+    "ingredient_name": "item 42",
+    "product_name": null
+   },
+   {
+    "id": 43,
+    "ingredient_name": "item 43",
+    "product_name": "Product 43 (12 oz)"
+   },
+   {
+    "id": 44,
+    "ingredient_name": "item 44",
+    "product_name": null
+   },
+   {
+    "id": 45,
+    "ingredient_name": "item 45",
+    "product_name": "Product 45 (12 oz)"
+   },
+   {
+    "id": 46,
+    "ingredient_name": "item 46",
+    "product_name": null
+   },
+   {
+    "id": 47,
+    "ingredient_name": "item 47",
+    "product_name": "Product 47 (12 oz)"
+   },
+   {
+    "id": 48,
+    "ingredient_name": "item 48",
+    "product_name": null
+   },
+   {
+    "id": 49,
+    "ingredient_name": "item 49",
+    "product_name": "Product 49 (12 oz)"
+   },
+   {
+    "id": 50,
+    "ingredient_name": "item 50",
+    "product_name": null
+   },
+   {
+    "id": 51,
+    "ingredient_name": "item 51",
+    "product_name": "Product 51 (12 oz)"
+   },
+   {
+    "id": 52,
+    "ingredient_name": "item 52",
+    "product_name": null
+   },
+   {
+    "id": 53,
+    "ingredient_name": "item 53",
+    "product_name": "Product 53 (12 oz)"
+   },
+   {
+    "id": 54,
+    "ingredient_name": "item 54",
+    "product_name": null
+   },
+   {
+    "id": 55,
+    "ingredient_name": "item 55",
+    "product_name": "Product 55 (12 oz)"
+   },
+   {
+    "id": 56,
+    "ingredient_name": "item 56",
+    "product_name": null
+   },
+   {
+    "id": 57,
+    "ingredient_name": "item 57",
+    "product_name": "Product 57 (12 oz)"
+   },
+   {
+    "id": 58,
+    "ingredient_name": "item 58",
+    "product_name": null
+   },
+   {
+    "id": 59,
+    "ingredient_name": "item 59",
+    "product_name": "Product 59 (12 oz)"
+   },
+   {
+    "id": 60,
+    "ingredient_name": "item 60",
+    "product_name": null
+   },
+   {
+    "id": 61,
+    "ingredient_name": "item 61",
+    "product_name": "Product 61 (12 oz)"
+   },
+   {
+    "id": 62,
+    "ingredient_name": "item 62",
+    "product_name": null
+   },
+   {
+    "id": 63,
+    "ingredient_name": "item 63",
+    "product_name": "Product 63 (12 oz)"
+   },
+   {
+    "id": 64,
+    "ingredient_name": "item 64",
+    "product_name": null
+   },
+   {
+    "id": 65,
+    "ingredient_name": "item 65",
+    "product_name": "Product 65 (12 oz)"
+   }
+  ],
+  "unmatched": [
+   "ingredient 1",
+   "ingredient 2",
+   "ingredient 3",
+   "ingredient 4",
+   "ingredient 5",
+   "ingredient 6",
+   "ingredient 7",
+   "ingredient 8",
+   "ingredient 9",
+   "ingredient 10",
+   "ingredient 11",
+   "ingredient 12",
+   "ingredient 13",
+   "ingredient 14",
+   "ingredient 15",
+   "ingredient 16",
+   "ingredient 17",
+   "ingredient 18",
+   "ingredient 19",
+   "ingredient 20",
+   "ingredient 21",
+   "ingredient 22",
+   "ingredient 23",
+   "ingredient 24",
+   "ingredient 25",
+   "ingredient 26",
+   "ingredient 27",
+   "ingredient 28",
+   "ingredient 29",
+   "ingredient 30"
+  ]
+ },
+ "requests": [
+  {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 120.0,
+    "write": 120.0,
+    "pool": 120.0
+   },
+   "body": {
+    "model": "background",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "You map recipe ingredients onto grocery products a household has already bought.\n\nYou are given CANDIDATES (products already in their list, each with an id) and INGREDIENTS that have no product yet.\n\nFor each ingredient, choose the candidate id that is the SAME GROCERY ITEM, or null if none is.\n\nRules:\n- Different amounts of the same thing DO match: '1.4 lb 90/10 ground beef' is the candidate 'ground beef'.\n- Different forms of the same thing DO match: 'garlic cloves' is 'garlic'.\n- Related but distinct items DO NOT match: 'sour cream' is not 'cream', 'chicken thighs' is not 'chicken broth', 'buttermilk' is not 'butter'.\n- When unsure, answer null. A wrong product ends up in someone's cart and is only discovered at the checkout.\n\nReturn ONLY JSON: {\"matches\": [{\"ingredient\": \"<exact input string>\", \"candidate_id\": <id or null>}]}"
+     },
+     {
+      "role": "user",
+      "content": "CANDIDATES:\n1: item 1 (Product 1 (12 oz))\n2: item 2\n3: item 3 (Product 3 (12 oz))\n4: item 4\n5: item 5 (Product 5 (12 oz))\n6: item 6\n7: item 7 (Product 7 (12 oz))\n8: item 8\n9: item 9 (Product 9 (12 oz))\n10: item 10\n11: item 11 (Product 11 (12 oz))\n12: item 12\n13: item 13 (Product 13 (12 oz))\n14: item 14\n15: item 15 (Product 15 (12 oz))\n16: item 16\n17: item 17 (Product 17 (12 oz))\n18: item 18\n19: item 19 (Product 19 (12 oz))\n20: item 20\n21: item 21 (Product 21 (12 oz))\n22: item 22\n23: item 23 (Product 23 (12 oz))\n24: item 24\n25: item 25 (Product 25 (12 oz))\n26: item 26\n27: item 27 (Product 27 (12 oz))\n28: item 28\n29: item 29 (Product 29 (12 oz))\n30: item 30\n31: item 31 (Product 31 (12 oz))\n32: item 32\n33: item 33 (Product 33 (12 oz))\n34: item 34\n35: item 35 (Product 35 (12 oz))\n36: item 36\n37: item 37 (Product 37 (12 oz))\n38: item 38\n39: item 39 (Product 39 (12 oz))\n40: item 40\n41: item 41 (Product 41 (12 oz))\n42: item 42\n43: item 43 (Product 43 (12 oz))\n44: item 44\n45: item 45 (Product 45 (12 oz))\n46: item 46\n47: item 47 (Product 47 (12 oz))\n48: item 48\n49: item 49 (Product 49 (12 oz))\n50: item 50\n51: item 51 (Product 51 (12 oz))\n52: item 52\n53: item 53 (Product 53 (12 oz))\n54: item 54\n55: item 55 (Product 55 (12 oz))\n56: item 56\n57: item 57 (Product 57 (12 oz))\n58: item 58\n59: item 59 (Product 59 (12 oz))\n60: item 60\n\nINGREDIENTS:\n- ingredient 1\n- ingredient 2\n- ingredient 3\n- ingredient 4\n- ingredient 5\n- ingredient 6\n- ingredient 7\n- ingredient 8\n- ingredient 9\n- ingredient 10\n- ingredient 11\n- ingredient 12\n- ingredient 13\n- ingredient 14\n- ingredient 15\n- ingredient 16\n- ingredient 17\n- ingredient 18\n- ingredient 19\n- ingredient 20\n- ingredient 21\n- ingredient 22\n- ingredient 23\n- ingredient 24\n- ingredient 25"
+     }
+    ],
+    "max_tokens": 1500,
+    "stream": false
+   }
+  }
+ ]
+}

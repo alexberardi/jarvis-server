@@ -1,0 +1,40 @@
+{
+ "inputs": {
+  "broken": "not json"
+ },
+ "requests": [
+  {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 60,
+    "write": 60,
+    "pool": 60
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "Repair malformed JSON to match the schema. Return ONLY valid JSON."
+     },
+     {
+      "role": "user",
+      "content": "Schema: { \"title\": string, \"description\": string|null, \"source_url\": string|null, \"image_url\": string|null, \"tags\": [string], \"servings\": number|null, \"estimated_time_minutes\": number|null, \"ingredients\": [{\"text\": string, \"quantity_display\": string|null, \"unit\": string|null}], \"steps\": [string], \"notes\": [string] }\nMalformed JSON:\nnot json"
+     }
+    ],
+    "max_tokens": 800,
+    "stream": false
+   }
+  }
+ ]
+}

@@ -1,0 +1,110 @@
+{
+ "inputs": {
+  "draft": {
+   "title": "Crepes",
+   "description": "Thin.",
+   "ingredients": [
+    {
+     "name": "flour",
+     "quantity": "1",
+     "unit": "cup",
+     "notes": null
+    },
+    {
+     "name": "eggs",
+     "quantity": "3",
+     "unit": null,
+     "notes": null
+    },
+    {
+     "name": "milk",
+     "quantity": "2",
+     "unit": "cups",
+     "notes": null
+    }
+   ],
+   "steps": [
+    "Beat",
+    "Cook"
+   ],
+   "prep_time_minutes": 0,
+   "cook_time_minutes": 0,
+   "total_time_minutes": 0,
+   "servings": null,
+   "tags": [],
+   "source": {
+    "type": "ocr",
+    "original_filename": null,
+    "ocr_tier_used": null
+   }
+  }
+ },
+ "requests": {
+  "model_live": {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 30.0,
+    "write": 30.0,
+    "pool": 30.0
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "Clean recipe data. Return ONLY valid JSON matching RecipeDraft schema.\n\nRules:\n- Separate ingredients: 'salt and pepper' = 2 entries\n- Extract units from names: '1 cup flour' → quantity:'1', unit:'cup', name:'flour'\n- Put prep notes in 'notes' field\n- Add description if missing (1-2 sentences based on title/ingredients)\n- Preserve all valid data, only clean formatting\n"
+     },
+     {
+      "role": "user",
+      "content": "Clean this recipe:\n{\n  \"title\": \"Crepes\",\n  \"description\": \"Thin.\",\n  \"ingredients\": [\n    {\n      \"name\": \"flour\",\n      \"quantity\": \"1\",\n      \"unit\": \"cup\",\n      \"notes\": null\n    },\n    {\n      \"name\": \"eggs\",\n      \"quantity\": \"3\",\n      \"unit\": null,\n      \"notes\": null\n    },\n    {\n      \"name\": \"milk\",\n      \"quantity\": \"2\",\n      \"unit\": \"cups\",\n      \"notes\": null\n    }\n  ],\n  \"steps\": [\n    \"Beat\",\n    \"Cook\"\n  ],\n  \"prep_time_minutes\": 0,\n  \"cook_time_minutes\": 0,\n  \"total_time_minutes\": 0,\n  \"servings\": null,\n  \"tags\": [],\n  \"source\": {\n    \"type\": \"ocr\",\n    \"original_filename\": null,\n    \"ocr_tier_used\": null\n  }\n}"
+     }
+    ],
+    "max_tokens": 1000,
+    "stream": false
+   }
+  },
+  "empty_model_name": {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 30.0,
+    "write": 30.0,
+    "pool": 30.0
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "Clean recipe data. Return ONLY valid JSON matching RecipeDraft schema.\n\nRules:\n- Separate ingredients: 'salt and pepper' = 2 entries\n- Extract units from names: '1 cup flour' → quantity:'1', unit:'cup', name:'flour'\n- Put prep notes in 'notes' field\n- Add description if missing (1-2 sentences based on title/ingredients)\n- Preserve all valid data, only clean formatting\n"
+     },
+     {
+      "role": "user",
+      "content": "Clean this recipe:\n{\n  \"title\": \"Crepes\",\n  \"description\": \"Thin.\",\n  \"ingredients\": [\n    {\n      \"name\": \"flour\",\n      \"quantity\": \"1\",\n      \"unit\": \"cup\",\n      \"notes\": null\n    },\n    {\n      \"name\": \"eggs\",\n      \"quantity\": \"3\",\n      \"unit\": null,\n      \"notes\": null\n    },\n    {\n      \"name\": \"milk\",\n      \"quantity\": \"2\",\n      \"unit\": \"cups\",\n      \"notes\": null\n    }\n  ],\n  \"steps\": [\n    \"Beat\",\n    \"Cook\"\n  ],\n  \"prep_time_minutes\": 0,\n  \"cook_time_minutes\": 0,\n  \"total_time_minutes\": 0,\n  \"servings\": null,\n  \"tags\": [],\n  \"source\": {\n    \"type\": \"ocr\",\n    \"original_filename\": null,\n    \"ocr_tier_used\": null\n  }\n}"
+     }
+    ],
+    "max_tokens": 1000,
+    "stream": false
+   }
+  }
+ }
+}

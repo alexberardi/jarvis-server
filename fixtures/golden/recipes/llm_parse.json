@@ -1,0 +1,2139 @@
+{
+ "coerce_recipe_draft": [
+  {
+   "name": "valid_draft",
+   "input": {
+    "title": "Pancakes",
+    "description": "Fluffy.",
+    "ingredients": [
+     {
+      "name": "flour",
+      "quantity": "1",
+      "unit": "cup",
+      "notes": null
+     },
+     {
+      "name": "milk",
+      "quantity": "1",
+      "unit": "cup"
+     },
+     {
+      "name": "egg",
+      "quantity": "1"
+     }
+    ],
+    "steps": [
+     "Mix",
+     "Cook"
+    ],
+    "prep_time_minutes": 5,
+    "cook_time_minutes": 10,
+    "total_time_minutes": 15,
+    "servings": "4",
+    "tags": [
+     "breakfast"
+    ],
+    "source": {
+     "type": "ocr"
+    }
+   },
+   "out": {
+    "title": "Pancakes",
+    "description": "Fluffy.",
+    "ingredients": [
+     {
+      "name": "flour",
+      "quantity": "1",
+      "unit": "cup",
+      "notes": null
+     },
+     {
+      "name": "milk",
+      "quantity": "1",
+      "unit": "cup",
+      "notes": null
+     },
+     {
+      "name": "egg",
+      "quantity": "1",
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Mix",
+     "Cook"
+    ],
+    "prep_time_minutes": 5,
+    "cook_time_minutes": 10,
+    "total_time_minutes": 15,
+    "servings": "4",
+    "tags": [
+     "breakfast"
+    ],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "valid_draft_string",
+   "input": "{\"title\": \"Pancakes\", \"ingredients\": [{\"name\": \"flour\"}, {\"name\": \"milk\"}, {\"name\": \"egg\"}], \"steps\": [\"Mix\", \"Cook\"], \"source\": {\"type\": \"ocr\"}}",
+   "out": {
+    "title": "Pancakes",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "flour",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "milk",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "egg",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Mix",
+     "Cook"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "code_fence",
+   "input": "```json\n{\"title\": \"Pancakes\", \"ingredients\": [{\"name\": \"flour\"}, {\"name\": \"milk\"}, {\"name\": \"egg\"}], \"steps\": [\"Mix\", \"Cook\"]}\n```",
+   "out": {
+    "title": "Pancakes",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "flour",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "milk",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "egg",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Mix",
+     "Cook"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "code_fence_no_lang",
+   "input": "```\n{\"title\": \"Pancakes\", \"ingredients\": [{\"name\": \"flour\"}, {\"name\": \"milk\"}, {\"name\": \"egg\"}], \"steps\": [\"Mix\", \"Cook\"]}\n```",
+   "out": {
+    "title": "Pancakes",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "flour",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "milk",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "egg",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Mix",
+     "Cook"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "recipe_wrapper",
+   "input": {
+    "recipe": {
+     "name": "Soup",
+     "ingredients": [
+      {
+       "label": "water"
+      },
+      {
+       "label": "salt"
+      },
+      {
+       "label": "onion"
+      }
+     ],
+     "directions": [
+      {
+       "text": "Boil"
+      },
+      {
+       "text": "Serve"
+      }
+     ]
+    }
+   },
+   "out": {
+    "title": "Soup",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "water",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "salt",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "onion",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Boil",
+     "Serve"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "numeric_servings_B5",
+   "input": {
+    "title": "Stew",
+    "ingredients": [
+     {
+      "name": "beef"
+     },
+     {
+      "name": "carrot"
+     },
+     {
+      "name": "potato"
+     }
+    ],
+    "steps": [
+     "Brown",
+     "Simmer"
+    ],
+    "servings": 4
+   },
+   "error": "ValidationError",
+   "message": "1 validation error for RecipeDraft\nservings\n  Input should be a valid string [type=string_type, input_value=4, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type"
+  },
+  {
+   "name": "float_servings",
+   "input": {
+    "title": "Stew",
+    "ingredients": [
+     {
+      "name": "beef"
+     },
+     {
+      "name": "carrot"
+     },
+     {
+      "name": "potato"
+     }
+    ],
+    "steps": [
+     "Brown",
+     "Simmer"
+    ],
+    "servings": 2.5
+   },
+   "error": "ValidationError",
+   "message": "1 validation error for RecipeDraft\nservings\n  Input should be a valid string [type=string_type, input_value=2.5, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type"
+  },
+  {
+   "name": "numeric_quantity",
+   "input": {
+    "title": "Stew",
+    "ingredients": [
+     {
+      "name": "beef",
+      "quantity": 2,
+      "unit": "lb"
+     },
+     {
+      "name": "carrot",
+      "quantity": 1.5
+     },
+     {
+      "name": "potato",
+      "quantity": 0
+     }
+    ],
+    "steps": [
+     "Brown",
+     "Simmer"
+    ]
+   },
+   "out": {
+    "title": "Stew",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "beef",
+      "quantity": "2",
+      "unit": "lb",
+      "notes": null
+     },
+     {
+      "name": "carrot",
+      "quantity": "1.5",
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "potato",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Brown",
+     "Simmer"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "dict_quantity",
+   "input": {
+    "title": "Cake",
+    "ingredients": [
+     {
+      "name": "flour",
+      "quantity": {
+       "value": 1.5,
+       "unit": "cups"
+      }
+     },
+     {
+      "name": "sugar",
+      "quantity": {
+       "value": 1
+      }
+     },
+     {
+      "name": "egg",
+      "quantity": {
+       "unit": "each"
+      }
+     }
+    ],
+    "steps": [
+     "Mix",
+     "Bake"
+    ]
+   },
+   "error": "ValidationError",
+   "message": "1 validation error for RecipeDraft\ningredients.2.quantity\n  Input should be a valid string [type=string_type, input_value={'unit': 'each'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type"
+  },
+  {
+   "name": "quantity_with_unit_text",
+   "input": {
+    "title": "Salad",
+    "ingredients": [
+     {
+      "name": "",
+      "quantity": "1 cup mayonnaise"
+     },
+     {
+      "name": "celery",
+      "quantity": "2 cups"
+     },
+     {
+      "name": "salt",
+      "quantity": "1 pinch"
+     }
+    ],
+    "steps": [
+     "Chop",
+     "Toss"
+    ]
+   },
+   "out": {
+    "title": "Salad",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "mayonnaise",
+      "quantity": "1",
+      "unit": "cup",
+      "notes": null
+     },
+     {
+      "name": "celery",
+      "quantity": "2",
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "salt",
+      "quantity": "1",
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Chop",
+     "Toss"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "quantity_is_unit_only",
+   "input": {
+    "title": "Salad",
+    "ingredients": [
+     {
+      "name": "lettuce",
+      "quantity": "head"
+     },
+     {
+      "name": "oil",
+      "quantity": "cup"
+     },
+     {
+      "name": "vinegar",
+      "quantity": "dash",
+      "unit": "tbsp"
+     }
+    ],
+    "steps": [
+     "Chop",
+     "Toss"
+    ]
+   },
+   "out": {
+    "title": "Salad",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "lettuce",
+      "quantity": "head",
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "oil",
+      "quantity": "cup",
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "vinegar",
+      "quantity": "dash",
+      "unit": "tbsp",
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Chop",
+     "Toss"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "qty_in_name",
+   "input": {
+    "title": "Bread",
+    "ingredients": [
+     {
+      "name": "3 cups flour"
+     },
+     {
+      "name": "1 tsp salt"
+     },
+     {
+      "name": "2 eggs"
+     },
+     {
+      "name": "½ cup water"
+     }
+    ],
+    "steps": [
+     "Knead",
+     "Bake"
+    ]
+   },
+   "out": {
+    "title": "Bread",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "flour",
+      "quantity": "3",
+      "unit": "cups",
+      "notes": null
+     },
+     {
+      "name": "salt",
+      "quantity": "1",
+      "unit": "tsp",
+      "notes": null
+     },
+     {
+      "name": "eggs",
+      "quantity": "2",
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "water",
+      "quantity": "½",
+      "unit": "cup",
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Knead",
+     "Bake"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "qty_in_name_unknown_unit",
+   "input": {
+    "title": "Bread",
+    "ingredients": [
+     {
+      "name": "3 handfuls flour"
+     },
+     {
+      "name": "1 Tsp salt"
+     },
+     {
+      "name": "2 large eggs"
+     }
+    ],
+    "steps": [
+     "Knead",
+     "Bake"
+    ]
+   },
+   "out": {
+    "title": "Bread",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "handfuls flour",
+      "quantity": "3",
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "salt",
+      "quantity": "1",
+      "unit": "tsp",
+      "notes": null
+     },
+     {
+      "name": "large eggs",
+      "quantity": "2",
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Knead",
+     "Bake"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "step_dict_variants",
+   "input": {
+    "title": "Tea",
+    "ingredients": [
+     {
+      "name": "tea"
+     },
+     {
+      "name": "water"
+     },
+     {
+      "name": "milk"
+     }
+    ],
+    "steps": [
+     {
+      "action": "Boil water"
+     },
+     {
+      "description": "Steep"
+     },
+     {
+      "label": "Pour"
+     },
+     {
+      "text": "  "
+     },
+     "  Sip  ",
+     5
+    ]
+   },
+   "out": {
+    "title": "Tea",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "tea",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "water",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "milk",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "Boil water",
+     "Steep",
+     "Pour",
+     "Sip"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "time_aliases",
+   "input": {
+    "title": "Roast",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prepTime": 10,
+    "cookTime": 50
+   },
+   "out": {
+    "title": "Roast",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 10,
+    "cook_time_minutes": 50,
+    "total_time_minutes": 60,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "total_only",
+   "input": {
+    "title": "Roast",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "totalTime": 60
+   },
+   "out": {
+    "title": "Roast",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 60,
+    "total_time_minutes": 60,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "active_time",
+   "input": {
+    "title": "Roast",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "activeTime": 25
+   },
+   "out": {
+    "title": "Roast",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 25,
+    "total_time_minutes": 25,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "string_times",
+   "input": {
+    "title": "Roast",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": "10",
+    "cook_time_minutes": "20"
+   },
+   "out": {
+    "title": "Roast",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 10,
+    "cook_time_minutes": 20,
+    "total_time_minutes": 30,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "bad_string_times",
+   "input": {
+    "title": "Roast",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": "ten",
+    "cook_time_minutes": "20"
+   },
+   "error": "ValidationError",
+   "message": "1 validation error for RecipeDraft\nprep_time_minutes\n  Input should be a valid integer, unable to parse string as an integer [type=int_parsing, input_value='ten', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/int_parsing"
+  },
+  {
+   "name": "float_total",
+   "input": {
+    "title": "Roast",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 7.5,
+    "cook_time_minutes": 2.5
+   },
+   "error": "ValidationError",
+   "message": "2 validation errors for RecipeDraft\nprep_time_minutes\n  Input should be a valid integer, got a number with a fractional part [type=int_from_float, input_value=7.5, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/int_from_float\ncook_time_minutes\n  Input should be a valid integer, got a number with a fractional part [type=int_from_float, input_value=2.5, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/int_from_float"
+  },
+  {
+   "name": "error_garbage",
+   "input": {
+    "error": "garbage_ocr"
+   },
+   "error": "ValueError",
+   "message": "LLM returned error: garbage_ocr"
+  },
+  {
+   "name": "error_brace",
+   "input": {
+    "error": "{",
+    "title": "Ok Dish",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ]
+   },
+   "out": {
+    "title": "Ok Dish",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "error_dict",
+   "input": {
+    "error": {
+     "code": "x",
+     "message": "bad"
+    }
+   },
+   "error": "ValueError",
+   "message": "LLM returned error: {'code': 'x', 'message': 'bad'}"
+  },
+  {
+   "name": "error_empty_dict",
+   "input": {
+    "error": {},
+    "title": "Ok Dish",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ]
+   },
+   "out": {
+    "title": "Ok Dish",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "too_few_ingredients",
+   "input": {
+    "title": "Toast",
+    "ingredients": [
+     {
+      "name": "bread"
+     }
+    ],
+    "steps": [
+     "Toast",
+     "Butter"
+    ]
+   },
+   "error": "ValueError",
+   "message": "not enough ingredients"
+  },
+  {
+   "name": "too_few_steps",
+   "input": {
+    "title": "Toast",
+    "ingredients": [
+     {
+      "name": "bread"
+     },
+     {
+      "name": "butter"
+     },
+     {
+      "name": "jam"
+     }
+    ],
+    "steps": [
+     "Toast"
+    ]
+   },
+   "error": "ValueError",
+   "message": "not enough steps"
+  },
+  {
+   "name": "short_title",
+   "input": {
+    "title": "Ok",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ]
+   },
+   "error": "ValueError",
+   "message": "title too short"
+  },
+  {
+   "name": "no_title",
+   "input": {
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ]
+   },
+   "out": {
+    "title": "Untitled",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "non_dict_ingredients",
+   "input": {
+    "title": "Mix",
+    "ingredients": [
+     "flour",
+     "milk",
+     {
+      "name": "egg"
+     },
+     {
+      "name": "oil"
+     },
+     {
+      "name": "salt"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ]
+   },
+   "out": {
+    "title": "Mix",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "egg",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "oil",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "salt",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "empty_strings",
+   "input": {
+    "title": "Mix",
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": "",
+      "unit": "",
+      "notes": ""
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     },
+     {
+      "name": "   "
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ]
+   },
+   "out": {
+    "title": "Mix",
+    "description": null,
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "tags_null",
+   "input": {
+    "title": "Mix",
+    "ingredients": [
+     {
+      "name": "a"
+     },
+     {
+      "name": "b"
+     },
+     {
+      "name": "c"
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "tags": null,
+    "description": ""
+   },
+   "out": {
+    "title": "Mix",
+    "description": "",
+    "ingredients": [
+     {
+      "name": "a",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "b",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     },
+     {
+      "name": "c",
+      "quantity": null,
+      "unit": null,
+      "notes": null
+     }
+    ],
+    "steps": [
+     "x",
+     "y"
+    ],
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 0,
+    "total_time_minutes": 0,
+    "servings": null,
+    "tags": [],
+    "source": {
+     "type": "ocr",
+     "original_filename": null,
+     "ocr_tier_used": null
+    }
+   }
+  },
+  {
+   "name": "list_top_level",
+   "input": [
+    {
+     "title": "Mix"
+    }
+   ],
+   "error": "ValueError",
+   "message": "LLM response is not a JSON object"
+  },
+  {
+   "name": "not_json",
+   "input": "Sorry, I cannot help with that.",
+   "error": "JSONDecodeError",
+   "message": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "name": "number",
+   "input": 42,
+   "error": "ValueError",
+   "message": "LLM response is not a JSON object"
+  }
+ ],
+ "try_local_json_repair": [
+  {
+   "input": "{\"a\": 1}",
+   "out": "{\"a\": 1}"
+  },
+  {
+   "input": "  {\"a\": 1}  ",
+   "out": "{\"a\": 1}"
+  },
+  {
+   "input": "```json\n{\"a\": 1}\n```",
+   "out": "{\"a\": 1}"
+  },
+  {
+   "input": "```\n{\"a\": 1}```",
+   "out": "{\"a\": 1}"
+  },
+  {
+   "input": "Here you go: {\"a\": 1} hope that helps",
+   "out": "{\"a\": 1}"
+  },
+  {
+   "input": "{\"a\": 1,}",
+   "out": null
+  },
+  {
+   "input": "{\"a\": \"x\u0001y\"}",
+   "out": "{\"a\": \"xy\"}"
+  },
+  {
+   "input": "{\"a\": \"line\nbreak\"}",
+   "out": null
+  },
+  {
+   "input": "no braces here",
+   "out": null
+  },
+  {
+   "input": "} backwards {",
+   "out": null
+  },
+  {
+   "input": "{\"a\": {\"b\": 2}} trailing }",
+   "out": null
+  },
+  {
+   "input": "[1, 2, 3]",
+   "out": null
+  },
+  {
+   "input": "{\"a\": 1} {\"b\": 2}",
+   "out": null
+  },
+  {
+   "input": "",
+   "out": null
+  },
+  {
+   "input": "\u0000{\"a\":\u0007 1}",
+   "out": "{\"a\": 1}"
+  }
+ ],
+ "strip_invalid_control_chars": [
+  {
+   "input": "{\"a\": 1}",
+   "out": "{\"a\": 1}"
+  },
+  {
+   "input": "  {\"a\": 1}  ",
+   "out": "  {\"a\": 1}  "
+  },
+  {
+   "input": "```json\n{\"a\": 1}\n```",
+   "out": "```json\n{\"a\": 1}\n```"
+  },
+  {
+   "input": "```\n{\"a\": 1}```",
+   "out": "```\n{\"a\": 1}```"
+  },
+  {
+   "input": "Here you go: {\"a\": 1} hope that helps",
+   "out": "Here you go: {\"a\": 1} hope that helps"
+  },
+  {
+   "input": "{\"a\": 1,}",
+   "out": "{\"a\": 1,}"
+  },
+  {
+   "input": "{\"a\": \"x\u0001y\"}",
+   "out": "{\"a\": \"xy\"}"
+  },
+  {
+   "input": "{\"a\": \"line\nbreak\"}",
+   "out": "{\"a\": \"line\nbreak\"}"
+  },
+  {
+   "input": "no braces here",
+   "out": "no braces here"
+  },
+  {
+   "input": "} backwards {",
+   "out": "} backwards {"
+  },
+  {
+   "input": "{\"a\": {\"b\": 2}} trailing }",
+   "out": "{\"a\": {\"b\": 2}} trailing }"
+  },
+  {
+   "input": "[1, 2, 3]",
+   "out": "[1, 2, 3]"
+  },
+  {
+   "input": "{\"a\": 1} {\"b\": 2}",
+   "out": "{\"a\": 1} {\"b\": 2}"
+  },
+  {
+   "input": "",
+   "out": ""
+  },
+  {
+   "input": "\u0000{\"a\":\u0007 1}",
+   "out": "{\"a\": 1}"
+  }
+ ],
+ "parse_llm_json_content": [
+  {
+   "input": "{\"a\": 1}",
+   "out": {
+    "a": 1
+   }
+  },
+  {
+   "input": "  {\"a\": 1}  ",
+   "out": {
+    "a": 1
+   }
+  },
+  {
+   "input": "```json\n{\"a\": 1}\n```",
+   "out": {
+    "a": 1
+   }
+  },
+  {
+   "input": "```\n{\"a\": 1}```",
+   "out": {
+    "a": 1
+   }
+  },
+  {
+   "input": "Here you go: {\"a\": 1} hope that helps",
+   "out": {
+    "a": 1
+   }
+  },
+  {
+   "input": "{\"a\": 1,}",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "{\"a\": \"x\u0001y\"}",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "{\"a\": \"line\nbreak\"}",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "no braces here",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "} backwards {",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "{\"a\": {\"b\": 2}} trailing }",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "[1, 2, 3]",
+   "out": [
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "input": "{\"a\": 1} {\"b\": 2}",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  },
+  {
+   "input": "\u0000{\"a\":\u0007 1}",
+   "error": "ValueError",
+   "message": "LLM response was not valid JSON"
+  }
+ ],
+ "meal_plan_select": [
+  {
+   "name": "ranked_three",
+   "reply": {
+    "name": "ranked_three",
+    "content": "{\"ranked_recipes\": [{\"recipe_id\": \"2\", \"confidence\": 0.9, \"reason\": \"fits\"}, {\"recipe_id\": \"1\", \"confidence\": 0.7, \"reason\": \"ok\"}, {\"recipe_id\": \"3\", \"confidence\": 0.6}], \"warnings\": []}"
+   },
+   "out": {
+    "selected_recipe_id": "2",
+    "confidence": 0.9,
+    "reason": "fits",
+    "warnings": [],
+    "alternatives": [
+     {
+      "recipe_id": "1",
+      "confidence": 0.7,
+      "reason": "ok"
+     },
+     {
+      "recipe_id": "3",
+      "confidence": 0.6,
+      "reason": ""
+     }
+    ]
+   }
+  },
+  {
+   "name": "unknown_id_skipped",
+   "reply": {
+    "name": "unknown_id_skipped",
+    "content": "{\"ranked_recipes\": [{\"recipe_id\": \"99\", \"confidence\": 0.9}, {\"recipe_id\": \"1\", \"confidence\": 0.8, \"reason\": \"r\"}], \"warnings\": [\"w\"]}"
+   },
+   "out": {
+    "selected_recipe_id": "1",
+    "confidence": 0.8,
+    "reason": "r",
+    "warnings": [
+     "w"
+    ],
+    "alternatives": []
+   }
+  },
+  {
+   "name": "int_id_not_matching_str",
+   "reply": {
+    "name": "int_id_not_matching_str",
+    "content": "{\"ranked_recipes\": [{\"recipe_id\": 1, \"confidence\": 0.9}]}"
+   },
+   "out": {
+    "selected_recipe_id": null,
+    "confidence": 0.0,
+    "reason": "No valid recipes returned by LLM",
+    "warnings": [
+     "LLM returned no valid selections"
+    ],
+    "alternatives": []
+   }
+  },
+  {
+   "name": "confidence_out_of_range",
+   "reply": {
+    "name": "confidence_out_of_range",
+    "content": "{\"ranked_recipes\": [{\"recipe_id\": \"1\", \"confidence\": 1.5}, {\"recipe_id\": \"2\", \"confidence\": -0.1}, {\"recipe_id\": \"3\", \"confidence\": \"high\"}]}"
+   },
+   "out": {
+    "selected_recipe_id": "1",
+    "confidence": 0.5,
+    "reason": "",
+    "warnings": [],
+    "alternatives": [
+     {
+      "recipe_id": "2",
+      "confidence": 0.5,
+      "reason": ""
+     },
+     {
+      "recipe_id": "3",
+      "confidence": 0.5,
+      "reason": ""
+     }
+    ]
+   }
+  },
+  {
+   "name": "confidence_missing_and_bool",
+   "reply": {
+    "name": "confidence_missing_and_bool",
+    "content": "{\"ranked_recipes\": [{\"recipe_id\": \"1\"}, {\"recipe_id\": \"2\", \"confidence\": true}]}"
+   },
+   "out": {
+    "selected_recipe_id": "1",
+    "confidence": 0.5,
+    "reason": "",
+    "warnings": [],
+    "alternatives": [
+     {
+      "recipe_id": "2",
+      "confidence": 1.0,
+      "reason": ""
+     }
+    ]
+   }
+  },
+  {
+   "name": "more_than_three",
+   "reply": {
+    "name": "more_than_three",
+    "content": "{\"ranked_recipes\": [{\"recipe_id\": \"1\"}, {\"recipe_id\": \"2\"}, {\"recipe_id\": \"3\"}, {\"recipe_id\": \"core_1\"}]}"
+   },
+   "out": {
+    "selected_recipe_id": "1",
+    "confidence": 0.5,
+    "reason": "",
+    "warnings": [],
+    "alternatives": [
+     {
+      "recipe_id": "2",
+      "confidence": 0.5,
+      "reason": ""
+     },
+     {
+      "recipe_id": "3",
+      "confidence": 0.5,
+      "reason": ""
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_ranked",
+   "reply": {
+    "name": "empty_ranked",
+    "content": "{\"ranked_recipes\": [], \"warnings\": [\"nothing fits\"]}"
+   },
+   "out": {
+    "selected_recipe_id": null,
+    "confidence": 0.0,
+    "reason": "No valid recipes returned by LLM",
+    "warnings": [
+     "nothing fits",
+     "LLM returned no valid selections"
+    ],
+    "alternatives": []
+   }
+  },
+  {
+   "name": "empty_content",
+   "reply": {
+    "name": "empty_content",
+    "content": ""
+   },
+   "out": {
+    "selected_recipe_id": null,
+    "confidence": 0.0,
+    "reason": "LLM returned empty response",
+    "warnings": [
+     "Empty LLM response"
+    ],
+    "alternatives": []
+   }
+  },
+  {
+   "name": "not_json",
+   "reply": {
+    "name": "not_json",
+    "content": "I pick recipe 1"
+   },
+   "out": {
+    "selected_recipe_id": null,
+    "confidence": 0.0,
+    "reason": "Exception: Expecting value: line 1 column 1 (char 0)",
+    "warnings": [
+     "LLM error"
+    ],
+    "alternatives": []
+   }
+  },
+  {
+   "name": "proxy_error",
+   "reply": {
+    "name": "proxy_error",
+    "body": {
+     "error": {
+      "type": "model_error",
+      "message": "boom"
+     }
+    }
+   },
+   "out": {
+    "selected_recipe_id": null,
+    "confidence": 0.0,
+    "reason": "LLM proxy error (model_error)",
+    "warnings": [
+     "LLM proxy error"
+    ]
+   }
+  },
+  {
+   "name": "http_500",
+   "reply": {
+    "name": "http_500",
+    "status": 500,
+    "body": {
+     "detail": "x"
+    }
+   },
+   "out": {
+    "selected_recipe_id": null,
+    "confidence": 0.0,
+    "reason": "LLM request failed: 500",
+    "warnings": [
+     "LLM unavailable"
+    ]
+   }
+  }
+ ],
+ "grocery_match": {
+  "visible_map": [
+   {
+    "id": 1,
+    "ingredient_name": "ground beef",
+    "sku": "111",
+    "product_name": "Ground Beef 1 lb",
+    "unit_size": "1 lb",
+    "source": "manual"
+   },
+   {
+    "id": 2,
+    "ingredient_name": "garlic",
+    "sku": "222",
+    "product_name": null,
+    "unit_size": null,
+    "source": "manual"
+   }
+  ],
+  "cases": [
+   {
+    "name": "two_matches",
+    "reply": {
+     "name": "two_matches",
+     "content": "{\"matches\": [{\"ingredient\": \"90/10 ground beef\", \"candidate_id\": 1}, {\"ingredient\": \"garlic cloves\", \"candidate_id\": 2}]}"
+    },
+    "out": {
+     "matches": [
+      {
+       "ingredient": "90/10 ground beef",
+       "candidate_id": 1
+      },
+      {
+       "ingredient": "garlic cloves",
+       "candidate_id": 2
+      }
+     ],
+     "upserts": [
+      {
+       "ingredient_name": "90/10 ground beef",
+       "sku": "111",
+       "retailer": "walmart",
+       "product_name": "Ground Beef 1 lb",
+       "unit_size": "1 lb",
+       "source": "llm"
+      },
+      {
+       "ingredient_name": "garlic cloves",
+       "sku": "222",
+       "retailer": "walmart",
+       "product_name": null,
+       "unit_size": null,
+       "source": "llm"
+      }
+     ]
+    }
+   },
+   {
+    "name": "null_and_invisible",
+    "reply": {
+     "name": "null_and_invisible",
+     "content": "{\"matches\": [{\"ingredient\": \"buttermilk\", \"candidate_id\": null}, {\"ingredient\": \"chicken thighs\", \"candidate_id\": 999}, {\"ingredient\": \"\", \"candidate_id\": 1}]}"
+    },
+    "out": {
+     "matches": [
+      {
+       "ingredient": "buttermilk",
+       "candidate_id": null
+      },
+      {
+       "ingredient": "chicken thighs",
+       "candidate_id": 999
+      },
+      {
+       "ingredient": "",
+       "candidate_id": 1
+      }
+     ],
+     "upserts": []
+    }
+   },
+   {
+    "name": "invented_ingredient_B16",
+    "reply": {
+     "name": "invented_ingredient_B16",
+     "content": "{\"matches\": [{\"ingredient\": \"never asked about\", \"candidate_id\": 1}]}"
+    },
+    "out": {
+     "matches": [
+      {
+       "ingredient": "never asked about",
+       "candidate_id": 1
+      }
+     ],
+     "upserts": [
+      {
+       "ingredient_name": "never asked about",
+       "sku": "111",
+       "retailer": "walmart",
+       "product_name": "Ground Beef 1 lb",
+       "unit_size": "1 lb",
+       "source": "llm"
+      }
+     ]
+    }
+   },
+   {
+    "name": "string_id",
+    "reply": {
+     "name": "string_id",
+     "content": "{\"matches\": [{\"ingredient\": \"garlic cloves\", \"candidate_id\": \"2\"}]}"
+    },
+    "out": {
+     "matches": [
+      {
+       "ingredient": "garlic cloves",
+       "candidate_id": "2"
+      }
+     ],
+     "upserts": []
+    }
+   },
+   {
+    "name": "non_list_matches",
+    "reply": {
+     "name": "non_list_matches",
+     "content": "{\"matches\": {\"ingredient\": \"x\"}}"
+    },
+    "out": {
+     "matches": [],
+     "upserts": []
+    }
+   },
+   {
+    "name": "non_dict_entries",
+    "reply": {
+     "name": "non_dict_entries",
+     "content": "{\"matches\": [\"x\", 1, {\"ingredient\": \"garlic cloves\", \"candidate_id\": 2}]}"
+    },
+    "out": {
+     "matches": [
+      {
+       "ingredient": "garlic cloves",
+       "candidate_id": 2
+      }
+     ],
+     "upserts": [
+      {
+       "ingredient_name": "garlic cloves",
+       "sku": "222",
+       "retailer": "walmart",
+       "product_name": null,
+       "unit_size": null,
+       "source": "llm"
+      }
+     ]
+    }
+   },
+   {
+    "name": "control_chars",
+    "reply": {
+     "name": "control_chars",
+     "content": "{\"matches\": [{\"ingredient\": \"garlic\u0001 cloves\", \"candidate_id\": 2}]}"
+    },
+    "out": {
+     "matches": [
+      {
+       "ingredient": "garlic cloves",
+       "candidate_id": 2
+      }
+     ],
+     "upserts": [
+      {
+       "ingredient_name": "garlic cloves",
+       "sku": "222",
+       "retailer": "walmart",
+       "product_name": null,
+       "unit_size": null,
+       "source": "llm"
+      }
+     ]
+    }
+   },
+   {
+    "name": "not_json",
+    "reply": {
+     "name": "not_json",
+     "content": "nope"
+    },
+    "out": {
+     "matches": [],
+     "upserts": []
+    }
+   },
+   {
+    "name": "proxy_error",
+    "reply": {
+     "name": "proxy_error",
+     "body": {
+      "error": {
+       "type": "x",
+       "message": "y"
+      }
+     }
+    },
+    "out": {
+     "matches": [],
+     "upserts": []
+    }
+   }
+  ]
+ }
+}
