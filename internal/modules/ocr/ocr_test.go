@@ -438,6 +438,34 @@ func (c *callbackSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.got <- struct{}{}
 }
 
+// TestFlowJobCallbackSelfCreds: with no JARVIS_APP_ID (every fresh install), the callback is
+// signed with whatever AppCreds supplies (jarvisd's own app client), not sent unsigned.
+func TestFlowJobCallbackSelfCreds(t *testing.T) {
+	sink := &callbackSink{got: make(chan struct{}, 4)}
+	srv := httptest.NewServer(sink)
+	defer srv.Close()
+	tess := &fakeEngine{name: EngineTesseract, text: "Pancakes\n1 cup flour"}
+	e := setup(t, &Module{Engines: []Engine{tess},
+		AppCreds: func(context.Context) (string, string, error) { return "jarvisd", "self-key", nil }})
+	code, out := e.do(t, "POST", "/v1/ocr/jobs", map[string]any{
+		"images": []any{img(pngB64())}, "callback_url": srv.URL + "/cb", "workflow_id": "wf-2",
+	}, appH)
+	if code != 202 {
+		t.Fatalf("submit: %d %v", code, out)
+	}
+	select {
+	case <-sink.got:
+	case <-time.After(30 * time.Second):
+		t.Fatal("no callback")
+	}
+	sink.mu.Lock()
+	hdr := sink.headers[0]
+	sink.mu.Unlock()
+	if hdr.Get("X-Jarvis-App-Id") != "jarvisd" || hdr.Get("X-Jarvis-App-Key") != "self-key" {
+		t.Fatalf("callback creds: %v", hdr)
+	}
+}
+
 func TestFlowJobs(t *testing.T) {
 	sink := &callbackSink{failN: 1, got: make(chan struct{}, 4)}
 	srv := httptest.NewServer(sink)

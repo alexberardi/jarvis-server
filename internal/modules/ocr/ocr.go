@@ -98,6 +98,9 @@ type Module struct {
 	TesseractPath string
 	// AppID/AppKey are jarvisd's own app credentials, sent on job completion callbacks.
 	AppID, AppKey string
+	// AppCreds supplies them when AppID is empty (jarvisd's self-issued app client, auth
+	// SelfAppCreds). Both empty: callbacks go out unsigned.
+	AppCreds func(ctx context.Context) (id, key string, err error)
 	// Concurrency caps OCR jobs running at once (legacy: one worker). Default 1.
 	Concurrency int
 	// CallbackAttempts bounds callback retries (default 12, exponential backoff up to 5 min).

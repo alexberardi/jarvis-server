@@ -58,6 +58,12 @@ frozen for the legacy stack.
 |---|---|---|
 | Image import (`from_image.py`) submits OCR over HTTP (`POST /v1/ocr/jobs` with a `callback_url`) instead of LPUSHing to Redis `jarvis.ocr.jobs` | OCR moved into jarvisd; jarvisd owns the queue and has no Redis | When OCR cuts over to jarvisd |
 | Add a callback route that receives the OCR result (app-credential auth) and enqueues it onto recipes' own RQ queue | Replaces the pickled `ocr.completed` RQ job the Python OCR worker produced | Same |
+| Verify jarvisd tokens: RS256 only, key from `/auth/public-key`, refetched when a token's `kid` differs; HS256 off unless `AUTH_SECRET_KEY` is set | jarvisd never mints HS256; recipes defaulted the secret to `change-me` | Same |
+| One-time `python -m scripts.remap_users` after users re-register: legacy user/household ids → jarvisd's by email (cutover runbook Q2) | Clean-start accounts get new ids | Cutover, after sign-ups |
+| Register the add-on on the Connections page: external row `jarvis-recipes-server` (a URL jarvisd can reach; the OCR callback is built from it) + app client `jarvis-recipes-server` | Discovery and app-to-app auth | Install |
+
+**Status (2026-10-08):** all five rows are in recipes PR [#39](https://github.com/alexberardi/jarvis-recipes-server/pull/39) (branch `feat/jarvisd-addon`), verified end to end against a throwaway jarvisd: photo → `POST /v1/ocr/jobs` → tesseract → callback → RQ → Qwen3-4B draft.
+Shapes as built: the route is `POST /internal/ocr/callback`; recipes sends the images inline as JSON (`images[{content_type, base64}]`, `workflow_id` = `parent_job_id` = its parse-job id, `source`); the envelope is queued unchanged and must carry the `ocr_job_id` recipes got back from the submit. jarvisd side: callbacks need app credentials, which a fresh install did not have (`JARVIS_APP_ID/KEY` unset → unsigned → 401). Fixed on branch `fix/jarvisd-own-app-client`: jarvisd mints its own app client `jarvisd` and keeps the key in `<home>/app-key` (installers §3.1, I3).
 
 ## Command packages (`jarvis-cmd-*`, `jarvis-device-*`)
 

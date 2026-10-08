@@ -400,9 +400,13 @@ func (m *Module) runCallback(ctx context.Context, job queue.Job) ([]byte, error)
 		return nil, queue.Permanent(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if m.AppID != "" {
-		req.Header.Set("X-Jarvis-App-Id", m.AppID)
-		req.Header.Set("X-Jarvis-App-Key", m.AppKey)
+	id, key, err := m.appCreds(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ocr: callback %s: %w", j.JobID, err)
+	}
+	if id != "" {
+		req.Header.Set("X-Jarvis-App-Id", id)
+		req.Header.Set("X-Jarvis-App-Key", key)
 	}
 	resp, err := m.httpClient().Do(req)
 	if err != nil {
@@ -477,4 +481,13 @@ func (m *Module) queueCounts(ctx context.Context) (pending, processing int, err 
 		}
 	}
 	return pending, processing, nil
+}
+
+// appCreds are the credentials callbacks are signed with: AppID/AppKey when set (the legacy
+// JARVIS_APP_ID/JARVIS_APP_KEY env), else jarvisd's own app client via AppCreds.
+func (m *Module) appCreds(ctx context.Context) (id, key string, err error) {
+	if m.AppID != "" || m.AppCreds == nil {
+		return m.AppID, m.AppKey, nil
+	}
+	return m.AppCreds(ctx)
 }
