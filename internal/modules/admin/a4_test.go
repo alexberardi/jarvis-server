@@ -603,14 +603,15 @@ func TestUpdateCheckAgainstGitHub(t *testing.T) {
 	}
 
 	// The system install's command is the bare script; a --user install's passes --user (A10b R3).
+	// Downloaded, then run: piped, a failed download would exit 0 having done nothing (R1).
 	if runtime.GOOS != "windows" {
-		if cmd := st["install_command"].(string); cmd != "curl -fsSL https://dl.example/v1.3.0/install.sh | sh" {
+		if cmd := st["install_command"].(string); cmd != "curl -fsSLo install.sh https://dl.example/v1.3.0/install.sh && sh install.sh" {
 			t.Fatalf("system install command: %s", cmd)
 		}
 		user := newA4(t, "v1.2.3")
 		user.m.Updates = UpdateOptions{APIBase: gh.URL}
 		user.m.Upgrade.UserUnit = true
-		if cmd := decode(t, send(user.mux, "GET", "/api/update", "", root...))["install_command"]; cmd != "curl -fsSL https://dl.example/v1.3.0/install.sh | sh -s -- --user" {
+		if cmd := decode(t, send(user.mux, "GET", "/api/update", "", root...))["install_command"]; cmd != "curl -fsSLo install.sh https://dl.example/v1.3.0/install.sh && sh install.sh --user" {
 			t.Fatalf("--user install command: %v", cmd)
 		}
 	}

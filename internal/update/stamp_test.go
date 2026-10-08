@@ -147,3 +147,70 @@ func TestInstallShUsesItsStamp(t *testing.T) {
 		}
 	}
 }
+
+// A10b R1: the documented one-liner (install.sh's header) fails loudly when the download does:
+// piped, a 404 handed sh an empty script and the command exited 0 having done nothing. It is
+// run here with a fake curl that 404s (exit 22, as curl -f does) and must exit non-zero.
+func TestDocumentedOneLinerFailsOnA404(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX sh")
+	}
+	src, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var line string
+	for _, l := range strings.Split(string(src), "\n") {
+		if strings.HasPrefix(l, "#   curl ") {
+			line = strings.TrimPrefix(l, "#   ")
+			break
+		}
+	}
+	if !strings.Contains(line, "releases/latest/download/install.sh") || strings.Contains(line, "| sh") ||
+		!strings.Contains(line, "curl -fsSL") {
+		t.Fatalf("documented command %q: want a curl -f download of releases/latest, then sh", line)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := "#!/bin/sh\necho 'curl: (22) The requested URL returned error: 404' >&2\nexit 22\n"
+	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", line)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "HOME="+dir)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("%q exited 0 after a 404:\n%s", line, out)
+	}
+	// The pipe form this replaced really does exit 0, which is why it is not documented.
+	pipe := exec.Command("sh", "-c", "curl -fsSL https://example.invalid/install.sh | sh")
+	pipe.Env = cmd.Env
+	if err := pipe.Run(); err != nil {
+		t.Fatalf("expected the piped form to exit 0 on a 404 (the bug), got %v", err)
+	}
+}
+
+// A10b R1: engine-build releases are prereleases and never "latest", so releases/latest keeps
+// pointing at jarvisd (GitHub falls back to the newest full release even with --latest=false).
+func TestEngineReleasesAreNeverLatest(t *testing.T) {
+	wf, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "whisper-builds.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, l := range strings.Split(string(wf), "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "gh release create") || strings.HasPrefix(l, "gh release edit") {
+			n++
+			if !strings.Contains(l, "--prerelease") || !strings.Contains(l, "--latest=false") {
+				t.Errorf("whisper-builds.yml: %q lacks --prerelease --latest=false", l)
+			}
+		}
+	}
+	if n < 2 {
+		t.Fatalf("found %d gh release create/edit lines, want the create and the overwrite edit", n)
+	}
+}

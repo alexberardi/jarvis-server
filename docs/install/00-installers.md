@@ -437,6 +437,11 @@ helper does it for the system unit, and the health gate runs inside the new jarv
 - **Default channel: latest non-prerelease** via `https://github.com/alexberardi/jarvis-server/releases/latest/download/<asset>`
   (a redirect; no API call, no rate limit). `--version vX.Y.Z` pins; `--channel pre` picks the newest
   prerelease through the API (prereleases are marked by `release.yml:145`).
+  *A10b R1:* the documented command is `curl -fsSLo install.sh …/releases/latest/download/install.sh && sh install.sh`
+  (download, then run: piped, a 404 ran an empty script and exited 0). While only release candidates
+  exist, `releases/latest` 404s; an rc is installed from its own URL (`releases/download/<tag>/install.sh`,
+  flag-free since R2). Engine-build releases (`engines-whisper-*`) are published as prereleases so they
+  are never `latest` (GitHub falls back to the newest full release even with `--latest=false`).
 - **Verify `SHA256SUMS`** (`release.yml:78`): `sha256sum -c --ignore-missing` / `shasum -a 256` on macOS /
   `Get-FileHash` on Windows. Missing or mismatched is fatal. Both files come over TLS from the same
   origin, so this guards against truncation and mirror corruption, not a compromised release.
