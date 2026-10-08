@@ -36,7 +36,7 @@ var nonCCBaselines = []struct {
 		"notifications_device_tokens", "notifications_inbox_items", "notifications_notification_log",
 	}},
 	{"recipes", recipes.Migrations(), []string{
-		"recipes_grocery_sku_map", "recipes_ingredients", "recipes_meal_plan_items", "recipes_meal_plans",
+		"recipes_grocery_sku_map", "recipes_import_log", "recipes_ingredients", "recipes_meal_plan_items", "recipes_meal_plans",
 		"recipes_meta", "recipes_recipe_ingestions", "recipes_recipe_parse_jobs", "recipes_recipe_tags",
 		"recipes_recipes", "recipes_stage_recipes", "recipes_staples", "recipes_steps", "recipes_stock_ingredients",
 		"recipes_stock_units_of_measure", "recipes_tags", "recipes_users",
