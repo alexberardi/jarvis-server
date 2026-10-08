@@ -208,7 +208,7 @@ func TestCleanup(t *testing.T) {
 	// Reaper: RUNNING past twice the lease → ERROR worker_lost.
 	e.exec(t, `INSERT INTO recipes_recipe_parse_jobs (id, user_id, job_type, status, started_at) VALUES
 		('r-stuck', '1', ?, 'RUNNING', ?), ('r-live', '1', ?, 'RUNNING', ?)`,
-		jobTypeIngestion, ts(now.Add(-7*time.Minute)), jobTypeImage, ts(now.Add(-7*time.Minute)))
+		jobTypeIngestion, ts(now.Add(-11*time.Minute)), jobTypeImage, ts(now.Add(-11*time.Minute)))
 
 	// Old finished jobs go after 30 days.
 	e.exec(t, `INSERT INTO recipes_recipe_parse_jobs (id, user_id, job_type, status, updated_at) VALUES

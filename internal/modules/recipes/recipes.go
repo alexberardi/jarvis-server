@@ -22,6 +22,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/platform/ssrf"
 )
 
 //go:embed migrations/*.sql
@@ -93,6 +94,9 @@ type Module struct {
 	Households HouseholdLister
 	// LLM runs the background passes (the grocery SKU match) in process. Nil: they learn nothing.
 	LLM LLM
+	// Fetch is the SSRF-guarded client for the URL preflight and server_fetch payloads. Nil
+	// uses the default guard (tests allow loopback).
+	Fetch *ssrf.Fetcher
 	// Clock gives "today" for /planner/current in the household's zone (cc's household clock).
 	// Nil uses the host's zone.
 	Clock HouseholdClock
@@ -177,6 +181,10 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("GET /recipes/parse-url/jobs", m.user(m.handleListJobs))
 	mux.HandleFunc("POST /recipes/jobs/{job_id}/cancel", m.user(m.handleCancelJob))
 
+	// §3.2 URL import (R7).
+	mux.HandleFunc("POST /recipes/parse-url/async", m.user(m.handleParseURLAsync))
+	mux.HandleFunc("POST /recipes/parse-payload/async", m.user(m.handleParsePayloadAsync))
+
 	// §3.2 editor photos (R3).
 	mux.HandleFunc("POST /recipes/import/image", m.user(m.handleImportImage))
 	mux.HandleFunc("GET /media/{name...}", m.handleMedia) // #22: no auth
@@ -186,6 +194,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 		// §6: one attempt (legacy never retried); a model failure completes with nothing learned.
 		deps.Queue.Register(groceryMatchJobType, queue.Handler{Run: m.runGroceryMatch, Concurrency: 1, MaxAttempts: 1,
 			Lease: matchTimeout + time.Minute})
+		// §6: retries (llm_failed etc.) are decided by the handler against queue.max_retries.
+		deps.Queue.Register(ingestJobType, queue.Handler{Run: m.runIngest, Concurrency: 2, MaxAttempts: maxIngestAttempts,
+			Lease: ingestLease})
 		deps.Queue.Register(cleanupJobType, queue.Handler{Run: m.runCleanup, MaxAttempts: 1, Lease: 10 * time.Minute})
 	}
 }
