@@ -492,11 +492,40 @@ func commandFlags(cmds []*pyjson.Object) []prompts.CommandFlag {
 	return out
 }
 
-// llmTools turns ordered tool objects into llm tools whose bytes go upstream unchanged.
+// llmTools turns ordered tool objects into llm tools whose bytes go upstream unchanged, but
+// for the "format": "date-time" marker (withoutDateTimeFormat).
 func llmTools(tools []prompts.Tool) []llm.Tool {
 	out := make([]llm.Tool, 0, len(tools))
 	for _, t := range tools {
-		out = append(out, llm.Tool{Raw: json.RawMessage(prompts.CompactASCII(t)), Type: "function"})
+		out = append(out, llm.Tool{Raw: json.RawMessage(prompts.CompactASCII(withoutDateTimeFormat(t))), Type: "function"})
 	}
 	return out
+}
+
+// withoutDateTimeFormat returns a copy of a tool schema without its "format": "date-time"
+// keys (A10b). The SDK puts that marker on date parameters and CC reads it, from the cached
+// schemas, to know where to resolve date keys; the model is told to write keys ("today",
+// "this_weekend"). Sent to llama-server, the marker became a grammar admitting only ISO
+// timestamps (Qwen 3.5's XML tool calls constrain every argument to its schema), so the model
+// could not write a key and guessed a date instead. Other formats are kept; v is not changed.
+func withoutDateTimeFormat(v any) any {
+	switch x := v.(type) {
+	case *pyjson.Object:
+		o := pyjson.NewObject()
+		for _, k := range x.Keys() {
+			val, _ := x.Get(k)
+			if k == "format" && val == "date-time" {
+				continue
+			}
+			o.Set(k, withoutDateTimeFormat(val))
+		}
+		return o
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = withoutDateTimeFormat(e)
+		}
+		return out
+	}
+	return v
 }
