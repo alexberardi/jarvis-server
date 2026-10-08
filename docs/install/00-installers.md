@@ -292,16 +292,20 @@ Loaded with `launchctl bootstrap system <plist>` and `launchctl enable system/ne
 (not the deprecated `load`/`unload` used at `jarvis-admin/install.sh:263-264`). The label uses a domain the
 project controls rather than `com.jarvis.*` (the legacy admin's `com.jarvis.admin` stays distinct).
 
-**Gatekeeper.** `curl` does not set `com.apple.quarantine`, so the one-liner path needs nothing; the Go
-linker already ad-hoc signs darwin/arm64 binaries, which arm64 requires. A **browser** download of the
-`.tar.gz` gets quarantined and Gatekeeper blocks the unsigned binary ("cannot be opened because the
-developer cannot be verified"). Options: tell the user `xattr -d com.apple.quarantine jarvisd`, or sign
-with a Developer ID and notarize (IQ9). Engines jarvisd downloads itself (llama-server, whisper-server)
-are fetched over HTTP by Go and are not quarantined.
+**Gatekeeper.** Release binaries are signed with the project's Developer ID (hardened runtime,
+identifier `net.jarvisautomation.jarvisd`) and notarized (ID9; release.yml `sign-macos`, §8.4). A
+**browser** download of the `.tar.gz` is quarantined, and Gatekeeper lets the notarized binary run
+(a bare Mach-O can't be stapled, so the first assessment looks the ticket up online; offline, a
+quarantined copy is refused until the Mac has been online once). `curl` (the one-liner) and
+`jarvisd upgrade` don't set `com.apple.quarantine`, so those paths never meet Gatekeeper. Engines
+jarvisd downloads itself (llama-server, whisper-server) are fetched over HTTP by Go and are not
+quarantined; they are separate executables with their own signatures. Dry-run builds without the
+Apple secrets keep the Go linker's ad-hoc signature (`xattr -d com.apple.quarantine jarvisd` then).
 
 **Application firewall.** It admits or blocks *programs*, not ports (`internal/doctor/firewall.go:205-243`).
-An ad-hoc signature changes with every build, so each upgrade may look like a new program; the upgrade
-path re-runs `socketfilterfw --add` (§4.2).
+A Developer ID signature has a stable designated requirement (identifier + team), so the allow entry
+survives upgrades; ad-hoc builds (dry runs, source builds) change it every build, which is why the
+upgrade path still checks and re-runs `socketfilterfw --add` when needed (§4.2, §8.2).
 
 **Sleep.** A Mac acting as a server should not sleep. The installer prints (does not run)
 `sudo pmset -a sleep 0` when `pmset -g` shows sleep enabled on AC; doctor can warn (I2).
@@ -892,8 +896,11 @@ checks the signature with each OS's own binary (`jarvisd upgrade --verify-dir`).
   unknown archive size counts as the current binary; a filesystem whose free space can't be read is
   not checked. Error: "not enough free disk space in <dir>: the upgrade needs about N MB there (…),
   M MB is free; free some space and try again".
-- *macOS firewall after a swap.* Every build has a new ad-hoc signature and socketfilterfw keys its
-  allow entry on it. `jarvisd upgrade` (and `--rollback`) checks the doctor's firewall checks before
+- *macOS firewall after a swap.* socketfilterfw keys its allow entry on the code signature. Release
+  builds are Developer ID-signed (§8.4), whose designated requirement (identifier
+  `net.jarvisautomation.jarvisd` + team) is the same in every version, so the entry carries over and
+  this guard finds nothing to do; an ad-hoc build (dry run, source build) gets a new signature every
+  build. `jarvisd upgrade` (and `--rollback`) checks the doctor's firewall checks before
   the swap; if the old binary was admitted and the new one isn't, it runs their `fix_cmds` as root
   (`sudo jarvisd upgrade`, which launchd installs need anyway), else prints the command. A fix the
   operator declined at install stays declined.
@@ -1053,3 +1060,69 @@ is refused ("signature is INVALID"). macOS: the app stays `permitted` after the 
 doctor` is clean; on the macos-14 runner socketfilterfw kept admitting the new build, so the re-admit
 step had nothing to do there (it is the guard for when it doesn't). Windows: SCM restart, rename-aside
 swap, `jarvisd.prev.exe`.
+
+### 8.4 macOS signing and notarization as built (ID9; 2026-10-08)
+
+Code: `.github/workflows/release.yml` (jobs `build` → `sign-macos` → `package` → `verify` →
+`publish`), `scripts/macos/jarvisd.entitlements`.
+
+**Order.** `build` compiles all four targets and hands them on as a tar (artifacts drop the
+executable bit). `sign-macos` (macos-14) signs and notarizes the darwin binary and hands it back;
+`package` swaps it in, then archives, computes `SHA256SUMS` and minisign-signs it. So the checksums
+and `SHA256SUMS.minisig` cover the notarized binary, and the self-update chain (§8.2) is unchanged.
+
+**Signing.** A throwaway keychain (random password, masked) gets the `.p12`
+(`APPLE_DEVELOPER_ID_P12`, base64, + `APPLE_DEVELOPER_ID_P12_PASSWORD`); `codesign --force
+--timestamp --options runtime --identifier net.jarvisautomation.jarvisd --entitlements …` with the
+"Developer ID Application" identity found in it. Checked right after: `codesign --verify --strict`,
+identifier, `TeamIdentifier` = `APPLE_TEAM_ID`, the `runtime` flag, a secure timestamp. An
+`always()` step deletes the keychain, the `.p12`, the `.p8` and the zip.
+
+**Entitlements: `com.apple.security.cs.disable-library-validation` only.** The hardened runtime
+turns on library validation (only Apple- or same-team-signed libraries may load); the sherpa-onnx
+and onnxruntime dylibs jarvisd extracts to `<home>/lib/sherpa-<hash>/` and dlopens (purego) carry
+upstream **ad-hoc** signatures, so without it Kokoro and speaker ID would fail to load. Not needed
+and not granted: `allow-jit` / `allow-unsigned-executable-memory` (onnxruntime's CPU kernels are
+precompiled; purego's callback trampolines are in the binary's text), `allow-dyld-environment-variables`.
+Verified: the notarized binary renders Kokoro TTS on the MBP (below). The alternative — signing the
+two dylibs with the Developer ID before embedding, which would make the entitlement unnecessary —
+needs the darwin build on a Mac; not worth it while the libraries live in the user's own data dir.
+
+**Notarization.** `ditto -c -k --keepParent` → `xcrun notarytool submit --key/--key-id/--issuer
+--wait` (App Store Connect API key: `APPLE_API_KEY_P8`, the `.p8` text or its base64,
+`APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`); the job prints `notarytool log` always and fails unless
+the status is `Accepted`. **A bare Mach-O can't be stapled**: Gatekeeper fetches the ticket online
+the first time it assesses a quarantined copy, so an offline Mac refuses a browser-downloaded
+`jarvisd` until it has been online once. (`curl`, the install scripts and `jarvisd upgrade` don't
+quarantine, so they never meet Gatekeeper.)
+
+**Gatekeeper check.** `spctl --assess --type execute` rejects every bare binary ("the code is valid
+but does not seem to be an app"; it judges app bundles), so the job uses `spctl --assess --type open
+--context context:primary-signature` and requires `accepted` + `source=Notarized Developer ID`
+(retried for 2 min while the ticket propagates). The macos-14 `verify` job re-checks the archived
+binary (codesign strict, identifier, Developer ID authority, runtime flag, the same `spctl`), then
+runs a copy carrying a Safari-style `com.apple.quarantine` and requires `version` to print within
+90 s: Gatekeeper *holds* a quarantined binary it doesn't accept at exec (a dialog no one answers),
+which the watchdog turns into a failure.
+
+**Without the secrets** a dry run warns and keeps the Go linker's ad-hoc signature (`verify` warns
+too); a publishing run (tag push or `publish: true`) fails, like the minisign step. Windows stays
+unsigned (ID9).
+
+**Firewall.** With a Developer ID signature the application firewall's allow entry is keyed on a
+designated requirement that is the same for every release (identifier + team), so it survives
+upgrades; the §8.2 re-admit guard stays for ad-hoc builds. (Not exercised on a real upgrade yet:
+the MBP has no passwordless sudo.)
+
+**Verified (2026-10-08).** Dry run `v0.0.0-notarize1` (run 37723014237): signed, notarization
+`Accepted` in ~30 s with no issues in the log, then failed on `spctl -t execute` (the bare-binary
+rejection above). `v0.0.0-notarize2` (run 37723548277): every job green; `spctl` "accepted,
+source=Notarized Developer ID"; `SHA256SUMS.minisig` made with the shared project key and checked by
+each OS's own binary; publish skipped. On the MBP (macOS 26.1, M2 Max) from that artifact: codesign
+strict valid, runtime flag, only the one entitlement; `spctl -t open` accepted as Notarized Developer
+ID; a quarantined copy runs `jarvisd version` at once, while a quarantined **ad-hoc** jarvisd
+(control) hung at exec until killed. `jarvisd serve` from the quarantined copy (throwaway home,
+ports 27xxx on loopback, mDNS off) installed Kokoro + ERes2Net through the model API and rendered
+`/speak` (HTTP 200, 108 KB WAV, 24 kHz) — `tts: engine loaded` in 1.5 s, both dylibs mapped. The
+extracted dylibs carry no quarantine attribute (none propagates from a quarantined parent) and keep
+their ad-hoc signatures. `v0.0.0-notarize3` (run 37725013988) checked the exec watchdog.
