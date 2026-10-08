@@ -184,6 +184,9 @@ func (m *Module) syncSelf(ctx context.Context) error {
 			return fmt.Errorf("config: register %s: %w", name, err)
 		}
 	}
+	if err := m.dropUnserved(ctx); err != nil {
+		return err
+	}
 	if m.External != nil {
 		for name, raw := range m.External(ctx) {
 			if err := m.syncExternal(ctx, name, raw); err != nil {
@@ -203,6 +206,32 @@ func (m *Module) syncSelf(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("config: register jarvis-mqtt-broker: %w", err)
 		}
+	}
+	return nil
+}
+
+// dropUnserved deletes the rows an earlier jarvisd registered for listeners this one doesn't
+// serve: after a rollback to a version without a module (A10d V2: rc3 → rc2 left
+// jarvis-recipes-server at localhost:7030 with nothing listening), clients would discover a
+// service that refuses connections. Only rows syncSelf wrote ("served by jarvisd") go; an
+// operator's rows and external ones stay.
+func (m *Module) dropUnserved(ctx context.Context) error {
+	q := `DELETE FROM config_services WHERE description = 'served by jarvisd'`
+	var args []any
+	for _, l := range m.Served {
+		if name, ok := ServiceNames[l]; ok {
+			args = append(args, name)
+		}
+	}
+	if len(args) > 0 {
+		q += ` AND name NOT IN (?` + strings.Repeat(`, ?`, len(args)-1) + `)`
+	}
+	res, err := m.deps.DB.Write.ExecContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("config: drop unserved rows: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		m.deps.Log.Info("config: removed registry rows for services this jarvisd doesn't serve", "rows", n)
 	}
 	return nil
 }

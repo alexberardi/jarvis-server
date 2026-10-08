@@ -270,6 +270,40 @@ func TestSelfRegistrationTakesOverExternalRow(t *testing.T) {
 	}
 }
 
+// A10d V2: after rolling back from a version with the recipes module to one without, the
+// registry still listed jarvis-recipes-server at localhost:7030 with nothing listening. A
+// jarvisd drops its own rows for listeners it doesn't serve, and only those.
+func TestSelfRegistrationDropsUnservedRows(t *testing.T) {
+	m, h := setup(t, pconfig.ListenerConfig, pconfig.ListenerRecipes)
+	if c, _ := do(t, h, "POST", "/services", `{"name":"my-addon","host":"localhost","port":9000}`, "X-Admin-Token", token); c != 201 {
+		t.Fatal(c)
+	}
+	m.External = func(context.Context) map[string]string { return map[string]string{"jarvis-pantry": "https://pantry.example.org"} }
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, body := do(t, h, "GET", "/services", "")
+	if _, ok := services(body)["jarvis-recipes-server"]; !ok {
+		t.Fatalf("recipes not registered: %v", body)
+	}
+
+	// The older version: no recipes listener.
+	m.Served = []string{pconfig.ListenerConfig}
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, body = do(t, h, "GET", "/services", "")
+	svc := services(body)
+	if _, ok := svc["jarvis-recipes-server"]; ok {
+		t.Errorf("an unserved listener's row was kept: %v", svc["jarvis-recipes-server"])
+	}
+	for _, keep := range []string{"jarvis-config-service", "my-addon", "jarvis-pantry"} {
+		if _, ok := svc[keep]; !ok {
+			t.Errorf("%s was dropped", keep)
+		}
+	}
+}
+
 // D48: the Pantry clients install from is listed in /services from cc's pantry.base_url.
 func TestExternalServices(t *testing.T) {
 	m, h := setup(t)
