@@ -776,7 +776,11 @@ otherwise. `status [--json] [--wait D]` prints the supervisor's view (state, PID
 exit, home) plus that health check and exits non-zero unless both are good. `stop` on macOS is
 `bootout` (with `KeepAlive` a kill would just restart it). `uninstall` stops and removes the
 definition only: data, env file and the `jarvisd` account are kept and their paths printed
-(`--purge`, binary removal and firewall-rule removal are I2/I3).
+(`--purge`, binary removal and firewall-rule removal are I2/I3). Lingering (`--user`): install reads
+`loginctl show-user -p Linger` first and, when it was off and `enable-linger` worked, writes
+`$XDG_CONFIG_HOME/jarvisd/linger-enabled` (the config dir, not the data home); uninstall runs
+`disable-linger` only when that mark exists, then removes it. Lingering that was already on is left on
+(A10c U8).
 
 Unit/plist differences from §2.1/§2.2: the unit adds `TimeoutStartSec=300`, `ProtectKernelTunables`,
 `ProtectKernelModules`, `ProtectControlGroups`, `RestrictSUIDSGID`, `LockPersonality` (no
@@ -866,7 +870,21 @@ binary never reports anything (can't start far enough to count), the waiting CLI
 `2 × (gate + 15 s) + 1 m`. `jarvisd upgrade --rollback` rolls back a pending upgrade, or (no marker) just
 restores `jarvisd.prev` and leaves the DB (the guard then tells you about snapshots if needed), recording
 `rolled_back` in `last-upgrade.json`; under a service manager it then restarts it and waits for `/health`
-(the gate timeout) before saying "jarvisd vX is up and healthy" (A10c U1, U2).
+(the gate timeout) before saying "jarvisd vX is up and healthy" (A10c U1, U2). Every rollback first
+copies the binary it replaces to `jarvisd.rolledback` (`.rolledback.exe`; best effort, one copy, the next
+swap deletes it, `install.sh --uninstall` too), so `jarvisd.prev` stays the older version and the newer
+one isn't lost (A10c U4). It is for inspection or copying back by hand: a re-upgrade still downloads,
+since a swap only installs what it re-verifies against the signed `SHA256SUMS` and the root helper must
+not trust a bare binary. A successful upgrade or rollback of the installed service ends with
+`setup-link`'s line (the admin URL, or the setup link before setup): install.sh `exec`s `jarvisd
+upgrade`, so that is the script's last word too (A10c U6).
+
+**What the root helper trusts.** Only paths derived from the executable and `--home`: the marker is in the
+data dir, which the service account writes. A rollback restores `<exe>.prev` (never the marker's `prev`),
+restores only snapshot entries naming a regular `*.db` directly in the home from a regular file directly
+in `backups/` (neither a symlink), and creates its temporaries in the data dir (`*.tmp`, `*.restore`)
+fresh with `O_EXCL` instead of writing through whatever is at that name (fixed 2026-10-08 with A10c U4;
+before, the marker's `prev` was copied over the root-run binary).
 
 **Downgrade guard.** Before migrating, every module's (and the queue's/scheduler's) applied goose versions
 must all be migrations this binary has: "unknown" rather than "higher", since out-of-order migrations are
