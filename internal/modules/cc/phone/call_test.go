@@ -259,6 +259,8 @@ func TestMediaGates(t *testing.T) {
 	if s.ErrorMessage != "no media stream within 60s (no answer?)" {
 		t.Fatalf("reason: %q", s.ErrorMessage)
 	}
+	// The failure card is posted just after the state changes.
+	waitFor(t, "failure card", func() bool { return len(e.notify.titled("⚠️ Call failed: Tony's Pizzeria")) == 1 })
 	if c := e.notify.titled("⚠️ Call failed: Tony's Pizzeria"); len(c) != 1 || c[0].Summary != s.ErrorMessage {
 		t.Fatalf("failure card: %v", e.notify.all())
 	}
