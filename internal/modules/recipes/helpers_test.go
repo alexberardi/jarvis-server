@@ -244,3 +244,5 @@ func (e *env) exec(t *testing.T, query string, args ...any) {
 		t.Fatal(err)
 	}
 }
+
+func authUser(id int64, hh string) authn.User { return authn.User{ID: id, HouseholdID: hh} }

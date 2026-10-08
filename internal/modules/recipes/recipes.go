@@ -173,6 +173,10 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST /grocery/cart", m.user(m.handleCart))
 	mux.HandleFunc("GET /recipes/jobs/{job_id}", m.user(m.handleGetJob))
 
+	// §3.2 the job list and cancel (R6).
+	mux.HandleFunc("GET /recipes/parse-url/jobs", m.user(m.handleListJobs))
+	mux.HandleFunc("POST /recipes/jobs/{job_id}/cancel", m.user(m.handleCancelJob))
+
 	// §3.2 editor photos (R3).
 	mux.HandleFunc("POST /recipes/import/image", m.user(m.handleImportImage))
 	mux.HandleFunc("GET /media/{name...}", m.handleMedia) // #22: no auth
@@ -182,15 +186,20 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 		// §6: one attempt (legacy never retried); a model failure completes with nothing learned.
 		deps.Queue.Register(groceryMatchJobType, queue.Handler{Run: m.runGroceryMatch, Concurrency: 1, MaxAttempts: 1,
 			Lease: matchTimeout + time.Minute})
+		deps.Queue.Register(cleanupJobType, queue.Handler{Run: m.runCleanup, MaxAttempts: 1, Lease: 10 * time.Minute})
 	}
 }
 
-// Start migrates the settings table and upserts the embedded stock reference data.
+// Start migrates the settings table, upserts the embedded stock reference data and schedules
+// the hourly cleanup.
 func (m *Module) Start(ctx context.Context) error {
 	if err := m.settings.Migrate(ctx); err != nil {
 		return err
 	}
-	return m.seedStock(ctx)
+	if err := m.seedStock(ctx); err != nil {
+		return err
+	}
+	return m.startCleanup(ctx)
 }
 
 // --- timestamps ---
