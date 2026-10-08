@@ -185,6 +185,19 @@ func findTesseract(lookPath func(string) (string, error), dirs []string) string 
 	return ""
 }
 
+// noTextEngineHint is the start-up warning for a jarvisd with neither tesseract nor Apple
+// Vision: recipe photo import then fails with ocr_unavailable unless LLM vision is on.
+func noTextEngineHint(engines []Engine) string {
+	for _, e := range engines {
+		if n := e.Name(); n == EngineTesseract || n == EngineAppleVision {
+			return ""
+		}
+	}
+	return "ocr: no tesseract found and Apple Vision is not configured, so recipe photo import fails " +
+		"(ocr_unavailable) unless ocr.enable_llm_proxy_vision is on with a vision model; install tesseract " +
+		"(brew install tesseract / apt install tesseract-ocr) and restart jarvisd"
+}
+
 func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.deps = deps
 	if m.now == nil {
@@ -199,6 +212,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	}
 	m.settings = svc
 	m.engines = m.buildEngines()
+	if hint := noTextEngineHint(m.engines); hint != "" && deps.Log != nil {
+		deps.Log.Warn(hint)
+	}
 	if m.SettingsRead != nil && m.SettingsWrite != nil {
 		svc.Mount(mux, m.SettingsRead, m.SettingsWrite)
 	}
