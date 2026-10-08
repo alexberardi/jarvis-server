@@ -57,6 +57,7 @@ func testSystemd(t *testing.T, userMode bool, euid int) (*systemd, *fakeRun, *[]
 	s := &systemd{
 		user: userMode, out: &bytes.Buffer{}, run: f.run,
 		unitPath: filepath.Join(root, "unit", unitName), envDir: filepath.Join(root, "etc-jarvisd"),
+		lingerMark: filepath.Join(root, "config", Name, "linger-enabled"),
 		euid: func() int { return euid },
 		lookupUser: func(n string) (*user.User, error) {
 			if n == Name && accountExists {
@@ -237,10 +238,14 @@ func TestSystemdInstallUser(t *testing.T) {
 		"systemctl --user daemon-reload",
 		"systemctl --user enable jarvisd.service",
 		"systemctl --user restart jarvisd.service",
+		"loginctl show-user alex -p Linger --value",
 		"loginctl enable-linger alex",
 	}
 	if !slices.Equal(f.calls, want) {
 		t.Fatalf("calls %q", f.calls)
+	}
+	if _, err := os.Stat(s.lingerMark); err == nil {
+		t.Error("lingering wasn't turned on, but it was recorded as such")
 	}
 	if len(*chowns) != 0 {
 		t.Errorf("user mode chowned %v", *chowns)
@@ -254,6 +259,69 @@ func TestSystemdInstallUser(t *testing.T) {
 	b, _ := os.ReadFile(s.unitPath)
 	if strings.Contains(string(b), "User=") || !strings.Contains(string(b), "WantedBy=default.target") {
 		t.Errorf("user unit:\n%s", b)
+	}
+}
+
+// A10c U8: `service uninstall --user` left lingering on although install had turned it on. It
+// now turns it off again, but only when install was what turned it on.
+func TestSystemdUserLinger(t *testing.T) {
+	ctx := context.Background()
+	const show = "loginctl show-user alex -p Linger --value"
+	for _, tc := range []struct {
+		before      string // Linger before install
+		wantDisable bool
+	}{
+		{"no", true},
+		{"yes", false},
+		{"", false}, // unknown: don't claim it
+	} {
+		s, f, _, root := testSystemd(t, true, 1000)
+		f.out[show] = tc.before + "\n"
+		if tc.before == "" {
+			f.fail[show] = errors.New("no logind")
+		}
+		home := filepath.Join(root, "h")
+		if err := s.Install(ctx, InstallOptions{Binary: "/home/alex/.local/bin/jarvisd", Home: home}); err != nil {
+			t.Fatal(err)
+		}
+		// A reinstall sees lingering on (we turned it on) and must keep the mark.
+		f.out[show] = "yes\n"
+		delete(f.fail, show)
+		if err := s.Install(ctx, InstallOptions{Binary: "/home/alex/.local/bin/jarvisd", Home: home}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(s.lingerMark); (err == nil) != tc.wantDisable {
+			t.Errorf("before %q: mark present = %v", tc.before, err == nil)
+		}
+		f.calls = nil
+		if err := s.Uninstall(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if got := slices.Contains(f.calls, "loginctl disable-linger alex"); got != tc.wantDisable {
+			t.Errorf("before %q: disable-linger %v, calls %q", tc.before, got, f.calls)
+		}
+		if _, err := os.Stat(s.lingerMark); err == nil {
+			if tc.wantDisable {
+				t.Errorf("before %q: mark left after uninstall", tc.before)
+			}
+		}
+	}
+
+	// disable-linger failing: explained, and the mark kept for a retry.
+	s, f, _, root := testSystemd(t, true, 1000)
+	f.out["loginctl show-user alex -p Linger --value"] = "no\n"
+	if err := s.Install(ctx, InstallOptions{Binary: "/x/jarvisd", Home: filepath.Join(root, "h")}); err != nil {
+		t.Fatal(err)
+	}
+	f.fail["loginctl disable-linger alex"] = errors.New("polkit says no")
+	if err := s.Uninstall(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.out.(*bytes.Buffer).String(), "loginctl disable-linger alex") {
+		t.Errorf("failure not explained: %s", s.out)
+	}
+	if _, err := os.Stat(s.lingerMark); err != nil {
+		t.Error("mark dropped although lingering is still on")
 	}
 }
 

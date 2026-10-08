@@ -25,7 +25,8 @@ cd "$(dirname "$0")/.."
 
 W=$(mktemp -d)
 SRV_PID=""
-# `service install --user` turns lingering on; put it back as it was.
+# `service install --user` turns lingering on and uninstall turns it back off; this also puts
+# it back as it was when a run dies before uninstalling.
 LINGER=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || echo unknown)
 cleanup() {
   set +e

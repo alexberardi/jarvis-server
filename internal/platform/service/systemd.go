@@ -32,6 +32,10 @@ type systemd struct {
 
 	unitPath string // where the unit file lives
 	envDir   string // system mode: /etc/jarvisd
+	// lingerMark (user mode) records that install turned lingering on, so uninstall turns it
+	// off again only then. It lives in the user's config dir, beside the unit, not in the
+	// data home (which --purge deletes and a --home can move).
+	lingerMark string
 
 	euid        func() int
 	lookupUser  func(string) (*user.User, error)
@@ -50,18 +54,29 @@ func newSystemd(userMode bool, out io.Writer) *systemd {
 	}
 	if userMode {
 		s.unitPath = userUnitPath(os.Getenv, os.UserHomeDir)
+		s.lingerMark = lingerMarkPath(os.Getenv, os.UserHomeDir)
 	}
 	return s
 }
 
+// userConfigDir is $XDG_CONFIG_HOME (default ~/.config).
+func userConfigDir(getenv func(string) string, home func() (string, error)) string {
+	if cfg := getenv("XDG_CONFIG_HOME"); cfg != "" {
+		return cfg
+	}
+	h, _ := home()
+	return filepath.Join(h, ".config")
+}
+
 // userUnitPath is $XDG_CONFIG_HOME/systemd/user/jarvisd.service (default ~/.config).
 func userUnitPath(getenv func(string) string, home func() (string, error)) string {
-	cfg := getenv("XDG_CONFIG_HOME")
-	if cfg == "" {
-		h, _ := home()
-		cfg = filepath.Join(h, ".config")
-	}
-	return filepath.Join(cfg, "systemd", "user", unitName)
+	return filepath.Join(userConfigDir(getenv, home), "systemd", "user", unitName)
+}
+
+// lingerMarkPath is $XDG_CONFIG_HOME/jarvisd/linger-enabled: present when `service install
+// --user` turned lingering on (it was off).
+func lingerMarkPath(getenv func(string) string, home func() (string, error)) string {
+	return filepath.Join(userConfigDir(getenv, home), Name, "linger-enabled")
 }
 
 func (s *systemd) Kind() Kind { return Systemd }
@@ -200,15 +215,59 @@ func (s *systemd) installUser(ctx context.Context, o InstallOptions) error {
 		return err
 	}
 	// Without lingering, the user manager (and jarvisd) stops at logout and starts at login.
-	name := s.getenv("USER")
-	if u, err := s.current(); err == nil {
-		name = u.Username
-	}
+	name := s.userName()
+	was := s.linger(ctx, name)
 	if _, err := s.run(ctx, "loginctl", "enable-linger", name); err != nil {
 		printf(s.out, "warning: could not keep jarvisd running while you are logged out (%v).\n"+
 			"  Run once: sudo loginctl enable-linger %s\n", err, name)
+		return nil
+	}
+	if was == "no" { // remember it was us, for uninstall (an earlier mark is kept on reinstall)
+		if err := os.MkdirAll(filepath.Dir(s.lingerMark), 0o700); err == nil {
+			err = os.WriteFile(s.lingerMark, []byte(name+"\n"), 0o600)
+		}
+		if err != nil {
+			printf(s.out, "warning: could not record that lingering was turned on (%v); "+
+				"`jarvisd service uninstall --user` will leave it on\n", err)
+		}
 	}
 	return nil
+}
+
+// userName is the account a --user unit runs as.
+func (s *systemd) userName() string {
+	if u, err := s.current(); err == nil {
+		return u.Username
+	}
+	return s.getenv("USER")
+}
+
+// linger is logind's Linger property for name: "yes", "no", or "" when unknown.
+func (s *systemd) linger(ctx context.Context, name string) string {
+	out, err := s.run(ctx, "loginctl", "show-user", name, "-p", "Linger", "--value")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// undoLinger turns lingering off when install turned it on (the mark is there), and drops the
+// mark. Lingering that was on before jarvisd is left alone.
+func (s *systemd) undoLinger(ctx context.Context) {
+	if s.lingerMark == "" {
+		return
+	}
+	if _, err := os.Stat(s.lingerMark); err != nil {
+		return
+	}
+	name := s.userName()
+	if _, err := s.run(ctx, "loginctl", "disable-linger", name); err != nil {
+		printf(s.out, "warning: could not turn lingering back off (%v); run: loginctl disable-linger %s\n", err, name)
+		return
+	}
+	_ = os.Remove(s.lingerMark)
+	_ = os.Remove(filepath.Dir(s.lingerMark)) // only if empty
+	printf(s.out, "turned lingering off again (service install had turned it on)\n")
 }
 
 func (s *systemd) enable(ctx context.Context, noStart bool) error {
@@ -246,6 +305,9 @@ func (s *systemd) Uninstall(ctx context.Context) error {
 		printf(s.out, " and %s (the %s account is kept too)", s.envDir, Name)
 	}
 	printf(s.out, "\n")
+	if s.user {
+		s.undoLinger(ctx)
+	}
 	return nil
 }
 
