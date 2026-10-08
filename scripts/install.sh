@@ -301,4 +301,7 @@ case "$OS$SVC" in
   linux) say "Logs: journalctl -u jarvisd -f" ;;
   darwin) say "Logs: tail -f ~/.jarvisd/logs/jarvisd.log" ;;
 esac
-say "Manage: jarvisd service status${SVC:+ $SVC} | ${RUN:+sudo }jarvisd service restart${SVC:+ $SVC} | sh install.sh --uninstall${SVC:+ $SVC}"
+# Under `curl | sh` there is no install.sh on disk to re-run (A10b): name the URL instead.
+if [ -f "$0" ]; then uninst="sh $0 --uninstall${SVC:+ $SVC}"
+else uninst="curl -fsSL $(url install.sh) | sh -s -- --uninstall${SVC:+ $SVC}"; fi
+say "Manage: jarvisd service status${SVC:+ $SVC} | ${RUN:+sudo }jarvisd service restart${SVC:+ $SVC} | $uninst"

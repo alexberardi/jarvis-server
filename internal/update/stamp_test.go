@@ -45,6 +45,43 @@ func TestScriptsCarryAReleaseStamp(t *testing.T) {
 	}
 }
 
+// The closing "Manage:" line names an uninstall command that exists: under `curl | sh` there is
+// no install.sh to re-run, so it gives the script's URL (A10b).
+func TestInstallShManageLine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX sh")
+	}
+	src, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, tail, ok := strings.Cut(string(src), "# Under `curl | sh` there is no install.sh")
+	if !ok {
+		t.Fatal("Manage block not found")
+	}
+	_, block, _ := strings.Cut(tail, "\n")
+	block, _, _ = strings.Cut(block, "\nsay \"Manage:")
+	block += "\nsay \"Manage: x | $uninst\"\n"
+	// url as in the script (defined far above; TestInstallShUsesItsStamp covers it).
+	harness := "url() { echo \"https://github.com/alexberardi/jarvis-server/releases/download/$VERSION/$1\"; }\n" +
+		"say() { printf '%s\\n' \"$*\"; }\nVERSION=v0.1.0-rc1 SVC=--user RUN=\n" + block
+	file := filepath.Join(t.TempDir(), "install.sh")
+	if err := os.WriteFile(file, []byte(harness), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("sh", file).CombinedOutput()
+	if want := "Manage: x | sh " + file + " --uninstall --user"; err != nil || strings.TrimSpace(string(out)) != want {
+		t.Errorf("from a file: %q %v, want %q", out, err, want)
+	}
+	cmd := exec.Command("sh", "-s")
+	cmd.Stdin = strings.NewReader(harness)
+	out, err = cmd.CombinedOutput()
+	want := "Manage: x | curl -fsSL https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc1/install.sh | sh -s -- --uninstall --user"
+	if err != nil || strings.TrimSpace(string(out)) != want {
+		t.Errorf("piped: %q %v, want %q", out, err, want)
+	}
+}
+
 // stampSedPattern is the line as it appears in release.yml's sed expression.
 func stampSedPattern(line string) string {
 	return "^" + strings.NewReplacer("$", `\$`, `"`, `\"`).Replace(line) + "$"
