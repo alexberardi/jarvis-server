@@ -65,6 +65,15 @@ BASE=${BASE%/}
 case $(uname -s) in Linux) OS=linux ;; Darwin) OS=darwin ;; *) die "unsupported OS $(uname -s); see install.ps1 for Windows" ;; esac
 case $(uname -m) in x86_64|amd64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; *) die "unsupported CPU $(uname -m)" ;; esac
 [ "$OS-$ARCH" = darwin-amd64 ] && die "Intel Macs are not supported (jarvisd ships for Apple silicon)"
+# Under sudo, PATH is sudo's secure_path, which on macOS leaves out /usr/local/bin (Docker
+# Desktop's docker CLI) and /opt/homebrew/bin (minisign): without them the legacy containers
+# look like "another program" and the signature check is skipped.
+if [ "$OS" = darwin ]; then
+  for d in /usr/local/bin /opt/homebrew/bin; do
+    case :$PATH: in *:$d:*) ;; *) [ -d $d ] && PATH=$d:$PATH ;; esac
+  done
+  export PATH
+fi
 [ "$OS" = linux ] && [ ! -d /run/systemd/system ] && die "systemd is not running here; download the release and run \`jarvisd serve\` under your own supervisor"
 
 # Privileges: the system service needs root; --user needs it only for the firewall fix.
@@ -260,15 +269,35 @@ fi
 # alone, with a warning (JARVISD_REQUIRE_SIGNATURE=1 refuses that).
 # `minisign -v` must run: a version-manager shim with no version selected (mise, asdf) is on
 # PATH but fails every call, which would read as an INVALID signature.
+# Under sudo, PATH is sudo's secure_path, which leaves out Homebrew (on macOS added back
+# above) and MacPorts, so their bin dirs are looked in too, and then the invoking user's own
+# PATH (mise, nix, ~/bin) as their login shell sets it.
+MINISIGN="" tried=" "
+minisign_try() { # minisign_try PATH: use it when it runs
+  [ -n "$1" ] && [ -x "$1" ] || return 1
+  case $tried in *" $1 "*) return 1 ;; esac
+  tried="$tried$1 "
+  if "$1" -v >/dev/null 2>&1; then MINISIGN=$1; return 0; fi
+  warn "$1 doesn't run (\`minisign -v\` failed); not using it"
+  return 1
+}
+find_minisign() {
+  for m in "$(command -v minisign 2>/dev/null || true)" /opt/homebrew/bin/minisign /usr/local/bin/minisign /opt/local/bin/minisign; do
+    minisign_try "$m" && return 0
+  done
+  [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] || return 0
+  if [ "$OS" = darwin ]; then ush=$(dscl . -read "/Users/$SUDO_USER" UserShell 2>/dev/null | awk '{print $2}')
+  else ush=$(getent passwd "$SUDO_USER" | cut -d: -f7); fi
+  [ -x "${ush:-}" ] || ush=/bin/sh
+  m=$(sudo -H -u "$SUDO_USER" "$ush" -lc 'command -v minisign' </dev/null 2>/dev/null | tail -n 1) || m=""
+  case $m in /*) minisign_try "$m" || true ;; esac
+}
 NEW=$BIN
 if [ $REUSE = 0 ]; then
-  MINISIGN_OK=0
-  if command -v minisign >/dev/null; then
-    if minisign -v >/dev/null 2>&1; then MINISIGN_OK=1; else warn "minisign is on PATH but doesn't run (\`minisign -v\` failed); treating it as not installed"; fi
-  fi
-  if [ $MINISIGN_OK = 1 ]; then
+  find_minisign
+  if [ -n "$MINISIGN" ]; then
     fetch SHA256SUMS.minisig "$TMP/SHA256SUMS.minisig" 2>/dev/null || die "the release has no SHA256SUMS.minisig; not installing an unsigned release"
-    minisign -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID; not installing"
+    "$MINISIGN" -Vq -P "$PUBKEY" -m "$TMP/SHA256SUMS" -x "$TMP/SHA256SUMS.minisig" >/dev/null || die "SHA256SUMS signature is INVALID ($MINISIGN); not installing"
     say "SHA256SUMS signature verified."
   else
     [ "${JARVISD_REQUIRE_SIGNATURE:-0}" = 1 ] && die "JARVISD_REQUIRE_SIGNATURE=1 but minisign is not installed"
@@ -288,8 +317,19 @@ if [ -z "$CUR" ]; then
   # (the legacy llama-servers hold whole cards), so --stop-legacy stops the stack even when
   # its ports are free, and only then looks at what still holds them.
   ports_held() { "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"'; }
+  holders() { # "  COMMAND (pid N) on PORT" for each listener on a jarvisd port (all of them as root)
+    jp='p = port + 0; if ((p >= 7700 && p <= 7712) || p == 7030 || p == 7031 || p == 1884 || p == 9883)'
+    if command -v lsof >/dev/null; then
+      lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk "NR > 1 { port = \$9; sub(/.*:/, \"\", port); $jp printf \"  %s (pid %s) on %s\\n\", \$1, \$2, port }"
+    elif command -v ss >/dev/null; then
+      ss -ltnpH 2>/dev/null | awk "{ port = \$4; sub(/.*:/, \"\", port); $jp printf \"  %s on %s\\n\", \$6, port }"
+    fi | sort -u
+  }
   other_die() {
-    die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first (\`sudo lsof -nP -iTCP -sTCP:LISTEN\` or \`sudo ss -ltnp\` names it; a source checkout's \`./jarvis\` CLI runs services as background processes: \`./jarvis stop\`)"
+    h=$(holders || true)
+    die "another program holds jarvisd's ports (7700-7712, 7030-7031, 1884, 9883); stop it first${h:+:
+$h}
+  (\`sudo lsof -nP -iTCP -sTCP:LISTEN\` or \`sudo ss -ltnp\` names it; a source checkout's \`./jarvis\` CLI runs services as background processes: \`./jarvis stop\`)"
   }
   if [ $STOP_LEGACY = 1 ]; then
     docker_init

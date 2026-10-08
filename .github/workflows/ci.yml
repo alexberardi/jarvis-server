@@ -442,16 +442,33 @@ jobs:
           }
           agent com.jarvis.llm-proxy 7704
           agent com.jarvis.osx-api 7723
+          # Docker Desktop's CLI is /usr/local/bin/docker, which sudo's secure_path leaves out; the
+          # runner has no Docker, so a fake one there reports a legacy container until stopped.
+          printf '%s\n' '#!/bin/sh' 'echo "$*" >> /tmp/fakedocker.log' 'case $1 in' \
+            'ps) [ -e /tmp/fakedocker.stopped ] && exit 0' \
+            '  case $* in *"{{.ID}}"*) echo "abcdefabcdef;jarvis-config-service;;jarvis;/x/.jarvis/compose" ;;' \
+            '  *) echo "jarvis-config-service;jarvis;/x/.jarvis/compose" ;; esac ;;' \
+            'stop) touch /tmp/fakedocker.stopped ;;' 'esac' > fakedocker
+          test ! -e /usr/local/bin/docker
+          sudo install -m 755 fakedocker /usr/local/bin/docker
+          touch /tmp/fakedocker.log && chmod 666 /tmp/fakedocker.log
+          # sudo's secure_path, which the script must widen to find docker (and minisign).
+          minpath=/usr/bin:/bin:/usr/sbin:/sbin
           # The doctor names the agent and the fix.
           if stage/jarvisd-$V-${{ matrix.target }}/jarvisd doctor > doc.log 2>&1; then cat doc.log; exit 1; fi
           cat doc.log
           grep -q 'LaunchAgents of .*com.jarvis.llm-proxy (pid [0-9]' doc.log
           grep -q "launchctl bootout gui/$uid/com.jarvis.llm-proxy" doc.log
           if grep -q osx-api doc.log; then exit 1; fi
-          if sh scripts/install.sh --base-url "$BASE" --yes > refuse.log 2>&1; then cat refuse.log; exit 1; fi
+          if env PATH=$minpath sh scripts/install.sh --base-url "$BASE" --yes > refuse.log 2>&1; then cat refuse.log; exit 1; fi
           cat refuse.log
+          grep -q 'Docker containers: jarvis-config-service' refuse.log
           grep -q 'LaunchAgents: com.jarvis.llm-proxy' refuse.log
-          sudo sh scripts/install.sh --base-url "$BASE" --yes --stop-legacy | tee legacy.log
+          sudo env PATH=$minpath sh scripts/install.sh --base-url "$BASE" --yes --stop-legacy | tee legacy.log
+          grep -q 'Stopping the legacy stack: jarvis-config-service' legacy.log
+          grep -qx 'update --restart=no jarvis-config-service' /tmp/fakedocker.log
+          grep -qx 'stop jarvis-config-service' /tmp/fakedocker.log
+          sudo rm /usr/local/bin/docker
           grep -q "LaunchAgents of $(id -un)) and turning them off at login: com.jarvis.llm-proxy" legacy.log
           grep -qF "launchctl enable gui/$uid/com.jarvis.llm-proxy && launchctl bootstrap gui/$uid $HOME/Library/LaunchAgents/com.jarvis.llm-proxy.plist" legacy.log
           if launchctl print gui/$uid/com.jarvis.llm-proxy; then exit 1; fi
@@ -493,6 +510,20 @@ jobs:
           sh scripts/install.sh --uninstall --purge --yes
           test ! -e ~/.jarvisd && test ! -e /usr/local/bin/jarvisd.prev
           sudo $fw --setglobalstate off
+          # Something else on a jarvisd port: refused, naming it.
+          (cd /tmp && exec "$py" -m http.server 7700 >/dev/null 2>&1) & other=$!
+          for _ in $(seq 30); do curl -fsS -o /dev/null http://127.0.0.1:7700/ && break; sleep 1; done
+          if sudo env PATH=$minpath sh scripts/install.sh --base-url "$BASE" --yes > other.log 2>&1; then cat other.log; exit 1; fi
+          cat other.log
+          grep -q 'another program holds' other.log
+          grep -Eiq 'python.* on 7700' other.log
+          kill $other
+          # Homebrew's minisign under sudo, whose PATH (secure_path) leaves /opt/homebrew/bin out:
+          # the script still finds it, so this throwaway-signed release is refused.
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install minisign
+          if sudo env PATH=$minpath sh scripts/install.sh --base-url "$BASE" --yes 2>&1 | tee sig.log; then :; fi
+          grep -q 'signature is INVALID (/opt/homebrew/bin/minisign)' sig.log
+          test ! -e /usr/local/bin/jarvisd
       - name: macOS log
         if: failure() && runner.os == 'macOS'
         run: tail -200 ~/.jarvisd/logs/jarvisd.log || true
