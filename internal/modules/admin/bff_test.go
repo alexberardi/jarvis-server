@@ -52,9 +52,15 @@ type fakeAccounts struct{ c authmod.SetupCounts }
 
 func (f *fakeAccounts) SetupCounts(context.Context) (authmod.SetupCounts, error) { return f.c, nil }
 
-type fakeModels struct{ states map[string]string }
+type fakeModels struct {
+	states   map[string]string
+	installs []llmmod.SetupInstall
+}
 
 func (f fakeModels) LabelStates(context.Context) map[string]string { return f.states }
+func (f fakeModels) RecentInstalls(context.Context) []llmmod.SetupInstall {
+	return f.installs
+}
 func (f fakeModels) HardwareSummary(context.Context) (llmmod.SetupHardware, bool) {
 	return llmmod.SetupHardware{Flavours: map[string][]string{"llama-server": {"cpu", "cuda"}}}, true
 }
@@ -429,11 +435,21 @@ func TestSetupState(t *testing.T) {
 	if out["setup_completed"] != false || out["setup_step"] != "hardware" {
 		t.Fatalf("resume before models: %v", out)
 	}
-	// A loading model is configured but not ready.
+	// A loading model is configured but not ready; the next job nobody started is STT.
 	e.m.Models = fakeModels{states: map[string]string{"live": "starting"}}
 	out = decode(t, send(e.mux, "GET", "/api/setup/state", "", root...))
-	if out["live_ready"] != false || out["models_configured"] != true || out["setup_step"] != "models" {
+	if out["live_ready"] != false || out["models_configured"] != true || out["setup_step"] != "stt" {
 		t.Fatalf("loading: %v", out)
+	}
+	// AD3b: the per-job checklist rides along, a downloading install counting as under way.
+	e.m.Models = fakeModels{states: map[string]string{"live": "ready", "stt": "not_configured"},
+		installs: []llmmod.SetupInstall{{ID: 4, ModelID: "whisper-base.en", Assign: []string{"stt"}, State: "running",
+			BytesDone: 50, BytesTotal: 100}}}
+	out = decode(t, send(e.mux, "GET", "/api/setup/state", "", root...))
+	jobs := out["jobs"].([]any)
+	if len(jobs) != 5 || jobs[0].(map[string]any)["state"] != "ready" || jobs[1].(map[string]any)["state"] != "downloading" ||
+		jobs[1].(map[string]any)["install"].(map[string]any)["bytes_done"] != 50.0 || out["setup_step"] != "voice" {
+		t.Fatalf("jobs: %v", out)
 	}
 	// The wizard's last step records it finished: no more resuming.
 	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "admin.db"))
@@ -442,6 +458,13 @@ func TestSetupState(t *testing.T) {
 	}
 	t.Cleanup(func() { d.Close() })
 	e.m.settings = newSettings(t, d, "admin", Definitions)
+	// The step the wizard last recorded wins over the derived one (another tab or browser).
+	if err := e.m.settings.Set(context.Background(), SettingSetupStep, "speaker", settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
+	if out = decode(t, send(e.mux, "GET", "/api/setup/state", "", root...)); out["setup_step"] != "speaker" {
+		t.Fatalf("saved step: %v", out)
+	}
 	if err := e.m.settings.Set(context.Background(), SettingSetupCompleted, true, settings.Scope{}); err != nil {
 		t.Fatal(err)
 	}

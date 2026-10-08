@@ -35,10 +35,16 @@ var Definitions = []settings.Definition{
 	{Key: SettingSetupCompleted, Category: "setup", Type: settings.Bool, Default: false,
 		Description: "The setup wizard reached its last step. While off, signing in resumes the wizard " +
 			"where the install is (any tab or browser)."},
+	{Key: SettingSetupStep, Category: "setup", Type: settings.String, Default: "",
+		Description: "The setup wizard step last shown, so signing in from another tab or browser resumes " +
+			"there (AD3b). Empty: resume from the model jobs' state."},
 }
 
 // SettingSetupCompleted records that the setup wizard was finished (A10 F9).
 const SettingSetupCompleted = "setup.completed"
+
+// SettingSetupStep records the wizard step last shown (AD3b).
+const SettingSetupStep = "setup.step"
 
 const (
 	// UpdateRepo is where releases are published.

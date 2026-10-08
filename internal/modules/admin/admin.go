@@ -49,6 +49,7 @@ type Module struct {
 	Logs            LogStore         // logs (A4)
 	Registry        Registry         // config (A4)
 	Apps            AppClients       // auth (A4)
+	TTS             Speech           // tts: the wizard's voice sample (AD3b)
 	// Exposure is what /api/doctor checks (the listeners served, MQTT, mDNS).
 	Exposure doctor.Exposure
 	// RunDoctor runs the checks (tests); nil is doctor.Run.
