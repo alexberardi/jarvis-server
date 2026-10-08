@@ -1,0 +1,870 @@
+{
+ "score_quality": [
+  {
+   "name": "ocr_samples.CREPE_CARD_APPLE_VISION",
+   "confidence": null,
+   "text": "Crepe\n/ cup flour\n/ tsp suçau\n1/4 tsp sacr\n/ top Vaneer\n3 eggs\n2 cups er\n2 Has butter melted\nBeat eggs t me togern i blende ou nuxer.\nAdd flowmete te smorte, Stu i netted butter\n+ Varila\nHeat par a wipe with oiled papa, cle.\ni parishes\nUs appux 2= tos por end cupe. Tyr\nrosemarys\nlotate fu to ger en.. Bourn bote see.\nde treme\nSoups • Salads\nAppetizers •\nMain Dishes",
+   "out": {
+    "char_count": 366,
+    "line_count": 20,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7295081967213115,
+    "vowel_ratio": 0.3893129770992366,
+    "token_count": 62,
+    "vowelful_tokens": 59,
+    "score": 2,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "ocr_samples.CREPE_CARD_APPLE_VISION",
+   "confidence": 90.0,
+   "text": "Crepe\n/ cup flour\n/ tsp suçau\n1/4 tsp sacr\n/ top Vaneer\n3 eggs\n2 cups er\n2 Has butter melted\nBeat eggs t me togern i blende ou nuxer.\nAdd flowmete te smorte, Stu i netted butter\n+ Varila\nHeat par a wipe with oiled papa, cle.\ni parishes\nUs appux 2= tos por end cupe. Tyr\nrosemarys\nlotate fu to ger en.. Bourn bote see.\nde treme\nSoups • Salads\nAppetizers •\nMain Dishes",
+   "out": {
+    "char_count": 366,
+    "line_count": 20,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7295081967213115,
+    "vowel_ratio": 0.3893129770992366,
+    "token_count": 62,
+    "vowelful_tokens": 59,
+    "score": 3,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "ocr_samples.CREPE_CARD_RAPIDOCR",
+   "confidence": null,
+   "text": "drepe\n56688\n1cupblouR\n1tspsugau\nHhsbuuenmelten\nsds\n1tsp Vaniele\nino\nBeateggsalgrubleoe\nGddflowmyhutulcottr)tneltdbutte\ntvavieia\nHeatpanewyeewutldpaclit\nparsleyp\nUapRia Hhs poou cuuT4\nsage\nBioura brt4u\nLotatepuhureh.\nrosemary\nSerreguingans Ncotarce\n&ethapne",
+   "out": {
+    "char_count": 256,
+    "line_count": 20,
+    "hard_fail": true,
+    "gibberish": true,
+    "alpha_ratio": 0.8515625,
+    "vowel_ratio": 0.391705069124424,
+    "token_count": 26,
+    "vowelful_tokens": 22,
+    "score": 1,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "ocr_samples.CREPE_CARD_RAPIDOCR",
+   "confidence": 90.0,
+   "text": "drepe\n56688\n1cupblouR\n1tspsugau\nHhsbuuenmelten\nsds\n1tsp Vaniele\nino\nBeateggsalgrubleoe\nGddflowmyhutulcottr)tneltdbutte\ntvavieia\nHeatpanewyeewutldpaclit\nparsleyp\nUapRia Hhs poou cuuT4\nsage\nBioura brt4u\nLotatepuhureh.\nrosemary\nSerreguingans Ncotarce\n&ethapne",
+   "out": {
+    "char_count": 256,
+    "line_count": 20,
+    "hard_fail": true,
+    "gibberish": true,
+    "alpha_ratio": 0.8515625,
+    "vowel_ratio": 0.391705069124424,
+    "token_count": 26,
+    "vowelful_tokens": 22,
+    "score": 2,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "printed_good",
+   "confidence": 92.5,
+   "text": "Classic Banana Bread\nServes 8\nIngredients\n3 ripe bananas, mashed\n1/3 cup melted butter\n1 teaspoon baking soda\nPinch of salt\n3/4 cup sugar\n1 large egg, beaten\n1 teaspoon vanilla extract\n1 1/2 cups all-purpose flour\nDirections\n1. Preheat the oven to 350 degrees and butter a loaf pan.\n2. In a mixing bowl, mash the ripe bananas with a fork until completely smooth.\n3. Stir the melted butter into the mashed bananas.\n4. Mix in the baking soda and salt. Stir in the sugar, beaten egg, and vanilla extract.\n5. Mix in the flour. Pour the batter into your prepared loaf pan.\n6. Bake for 55 minutes to one hour, until a tester inserted into the center comes out clean.\n7. Remove from oven and let cool in the pan for a few minutes.",
+   "out": {
+    "char_count": 723,
+    "line_count": 19,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7441217150760719,
+    "vowel_ratio": 0.38649155722326456,
+    "token_count": 114,
+    "vowelful_tokens": 114,
+    "score": 4,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "printed_good_no_conf",
+   "confidence": null,
+   "text": "Classic Banana Bread\nServes 8\nIngredients\n3 ripe bananas, mashed\n1/3 cup melted butter\n1 teaspoon baking soda\nPinch of salt\n3/4 cup sugar\n1 large egg, beaten\n1 teaspoon vanilla extract\n1 1/2 cups all-purpose flour\nDirections\n1. Preheat the oven to 350 degrees and butter a loaf pan.\n2. In a mixing bowl, mash the ripe bananas with a fork until completely smooth.\n3. Stir the melted butter into the mashed bananas.\n4. Mix in the baking soda and salt. Stir in the sugar, beaten egg, and vanilla extract.\n5. Mix in the flour. Pour the batter into your prepared loaf pan.\n6. Bake for 55 minutes to one hour, until a tester inserted into the center comes out clean.\n7. Remove from oven and let cool in the pan for a few minutes.",
+   "out": {
+    "char_count": 723,
+    "line_count": 19,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7441217150760719,
+    "vowel_ratio": 0.38649155722326456,
+    "token_count": 114,
+    "vowelful_tokens": 114,
+    "score": 3,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "printed_good_conf_0_1_scale_B4",
+   "confidence": 0.92,
+   "text": "Classic Banana Bread\nServes 8\nIngredients\n3 ripe bananas, mashed\n1/3 cup melted butter\n1 teaspoon baking soda\nPinch of salt\n3/4 cup sugar\n1 large egg, beaten\n1 teaspoon vanilla extract\n1 1/2 cups all-purpose flour\nDirections\n1. Preheat the oven to 350 degrees and butter a loaf pan.\n2. In a mixing bowl, mash the ripe bananas with a fork until completely smooth.\n3. Stir the melted butter into the mashed bananas.\n4. Mix in the baking soda and salt. Stir in the sugar, beaten egg, and vanilla extract.\n5. Mix in the flour. Pour the batter into your prepared loaf pan.\n6. Bake for 55 minutes to one hour, until a tester inserted into the center comes out clean.\n7. Remove from oven and let cool in the pan for a few minutes.",
+   "out": {
+    "char_count": 723,
+    "line_count": 19,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7441217150760719,
+    "vowel_ratio": 0.38649155722326456,
+    "token_count": 114,
+    "vowelful_tokens": 114,
+    "score": 3,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "printed_good_conf_50",
+   "confidence": 50,
+   "text": "Classic Banana Bread\nServes 8\nIngredients\n3 ripe bananas, mashed\n1/3 cup melted butter\n1 teaspoon baking soda\nPinch of salt\n3/4 cup sugar\n1 large egg, beaten\n1 teaspoon vanilla extract\n1 1/2 cups all-purpose flour\nDirections\n1. Preheat the oven to 350 degrees and butter a loaf pan.\n2. In a mixing bowl, mash the ripe bananas with a fork until completely smooth.\n3. Stir the melted butter into the mashed bananas.\n4. Mix in the baking soda and salt. Stir in the sugar, beaten egg, and vanilla extract.\n5. Mix in the flour. Pour the batter into your prepared loaf pan.\n6. Bake for 55 minutes to one hour, until a tester inserted into the center comes out clean.\n7. Remove from oven and let cool in the pan for a few minutes.",
+   "out": {
+    "char_count": 723,
+    "line_count": 19,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7441217150760719,
+    "vowel_ratio": 0.38649155722326456,
+    "token_count": 114,
+    "vowelful_tokens": 114,
+    "score": 4,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "printed_good_conf_49",
+   "confidence": 49.99,
+   "text": "Classic Banana Bread\nServes 8\nIngredients\n3 ripe bananas, mashed\n1/3 cup melted butter\n1 teaspoon baking soda\nPinch of salt\n3/4 cup sugar\n1 large egg, beaten\n1 teaspoon vanilla extract\n1 1/2 cups all-purpose flour\nDirections\n1. Preheat the oven to 350 degrees and butter a loaf pan.\n2. In a mixing bowl, mash the ripe bananas with a fork until completely smooth.\n3. Stir the melted butter into the mashed bananas.\n4. Mix in the baking soda and salt. Stir in the sugar, beaten egg, and vanilla extract.\n5. Mix in the flour. Pour the batter into your prepared loaf pan.\n6. Bake for 55 minutes to one hour, until a tester inserted into the center comes out clean.\n7. Remove from oven and let cool in the pan for a few minutes.",
+   "out": {
+    "char_count": 723,
+    "line_count": 19,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7441217150760719,
+    "vowel_ratio": 0.38649155722326456,
+    "token_count": 114,
+    "vowelful_tokens": 114,
+    "score": 3,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "too_short",
+   "confidence": 95,
+   "text": "Toast\n1 slice bread\nToast it.",
+   "out": {
+    "char_count": 29,
+    "line_count": 3,
+    "hard_fail": true,
+    "gibberish": true,
+    "alpha_ratio": 0.7586206896551724,
+    "vowel_ratio": 0.4090909090909091,
+    "token_count": 5,
+    "vowelful_tokens": 5,
+    "score": 3,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "nine_lines",
+   "confidence": 95,
+   "text": "Ingredients for a lovely lemonade that the whole family will enjoy on a hot day\n1 cup freshly squeezed lemon juice from about six lemons\n1 cup granulated white sugar, or a little less to taste\n5 cups cold water, divided into one and four cups\nDirections for making the syrup and mixing everything together\n1. Heat one cup of water with the sugar until dissolved completely\n2. Add the lemon juice and the remaining four cups of cold water\n3. Chill in the refrigerator for at least one hour before serving\nServe over plenty of ice with a slice of lemon on each glass",
+   "out": {
+    "char_count": 564,
+    "line_count": 9,
+    "hard_fail": true,
+    "gibberish": false,
+    "alpha_ratio": 0.7960992907801419,
+    "vowel_ratio": 0.3797752808988764,
+    "token_count": 95,
+    "vowelful_tokens": 95,
+    "score": 4,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "gibberish_consonants",
+   "confidence": 80,
+   "text": "xkcd qwrt plmn zxcv bnmk lkjh gfds trwq\nmnbv cxzl kjhg fdsp oiuy trew qasd fghj\nzxcv bnml kjhg fdsa qwer tyui opas dfgh\nkjhg fdsa lkjh gfds mnbv cxza qwer tyui\nplmk ojnh ubyg vtfc rdxe zswq aqws edrf\ntgyh ujik olpm nbvc xzas dfgh jklq wert\nyuio pasd fghj klzx cvbn mqwe rtyu iopa\nsdfg hjkl zxcv bnmq wert yuio pasd fghj\nklzx cvbn mqwe rtyu iopa sdfg hjkl zxcv\nbnmq wert yuio pasd fghj klzx cvbn mqwe\nrtyu iopa sdfg hjkl zxcv bnmq wert yuio",
+   "out": {
+    "char_count": 439,
+    "line_count": 11,
+    "hard_fail": true,
+    "gibberish": true,
+    "alpha_ratio": 0.8018223234624146,
+    "vowel_ratio": 0.16761363636363635,
+    "token_count": 88,
+    "vowelful_tokens": 39,
+    "score": 1,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "numbers_mostly",
+   "confidence": 80,
+   "text": "1 2 3 4 5 6 7 8 9 10\n11 12 13 14 15 16 17 18 19 20\n21 22 23 24 25 26 27 28 29 30\n31 32 33 34 35 36 37 38 39 40\n41 42 43 44 45 46 47 48 49 50\n51 52 53 54 55 56 57 58 59 60\n61 62 63 64 65 66 67 68 69 70\n71 72 73 74 75 76 77 78 79 80\n81 82 83 84 85 86 87 88 89 90\n91 92 93 94 95 96 97 98 99 100\n101 102 103 104 105 106 107 108 109 110",
+   "out": {
+    "char_count": 331,
+    "line_count": 11,
+    "hard_fail": true,
+    "gibberish": true,
+    "alpha_ratio": 0.0,
+    "vowel_ratio": 0.0,
+    "token_count": 0,
+    "vowelful_tokens": 0,
+    "score": 3,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "prose_no_recipe_signals",
+   "confidence": 10,
+   "text": "It was a bright cold day in April and the clocks were striking.\nWinston Smith, his chin nuzzled into his breast in an effort to escape\nthe vile wind, slipped quickly through the glass doors of Victory Mansions,\nthough not quickly enough to prevent a swirl of gritty dust from entering\nalong with him. The hallway smelt of boiled cabbage and old rag mats.\nAt one end of it a coloured poster, too large for indoor display,\nhad been tacked to the wall. It depicted simply an enormous face,\nmore than a metre wide: the face of a man of about forty-five,\nwith a heavy black moustache and ruggedly handsome features.\nWinston made for the stairs. It was no use trying the lift.\nEven at the best of times it was seldom working.",
+   "out": {
+    "char_count": 719,
+    "line_count": 11,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7927677329624478,
+    "vowel_ratio": 0.35815602836879434,
+    "token_count": 128,
+    "vowelful_tokens": 128,
+    "score": 0,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "prose_one_signal",
+   "confidence": 90,
+   "text": "It was a bright cold day in April and the clocks were striking.\nWinston Smith, his chin nuzzled into his breast in an effort to escape\nthe vile wind, slipped quickly through the glass doors of Victory Mansions,\nthough not quickly enough to prevent a swirl of gritty dust from entering\nalong with him. The hallway smelt of boiled cabbage and old rag mats.\nAt one end of it a coloured poster, too large for indoor display,\nhad been tacked to the wall. It depicted simply an enormous face,\nmore than a metre wide: the face of a man of about forty-five,\nwith a heavy black moustache and ruggedly handsome features.\nWinston made for the stairs. It was no use trying the lift.\nEven at the best of times it was seldom working.",
+   "out": {
+    "char_count": 719,
+    "line_count": 11,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7927677329624478,
+    "vowel_ratio": 0.35815602836879434,
+    "token_count": 128,
+    "vowelful_tokens": 128,
+    "score": 1,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "keywords_only",
+   "confidence": null,
+   "text": "Ingredients are listed below for this wonderful family dish we love\nthe flour and the butter and the sugar go into a large mixing bowl\nwith some eggs and a splash of milk and a pinch of good sea salt\nDirections follow after the list so read them carefully before you start\nwhisk everything together until the batter is smooth and glossy\npour the batter into a buttered tin and bake it in a moderate oven\nuntil the top is golden and a skewer comes out clean from the middle\nleave it to cool on a rack before turning it out onto a plate\nthis cake keeps well for several days in an airtight container\nserve with whipped cream or a spoonful of fruit compote on top\nenjoy it with a cup of tea in the afternoon with your friends",
+   "out": {
+    "char_count": 722,
+    "line_count": 11,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.8074792243767313,
+    "vowel_ratio": 0.3787085514834206,
+    "token_count": 130,
+    "vowelful_tokens": 130,
+    "score": 1,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "windows_newlines_blank_lines",
+   "confidence": 70,
+   "text": "Ingredients\r\n\r\n2 cups flour\r\n1 cup sugar\r\n\r\n2 eggs\r\nInstructions\r\n1) Mix the dry ingredients together in a bowl until combined\r\n2) Beat in the eggs one at a time and stir well after each one\r\n3) Pour into a pan and bake at 350 degrees for thirty minutes\r\n4) Let it cool completely before you slice and serve it to everyone\r\n5) Store any leftovers covered at room temperature for a day or two\r\nServes 6 people as a dessert or as an afternoon snack with coffee\r\nYield one nine inch round cake that is about two inches tall",
+   "out": {
+    "char_count": 520,
+    "line_count": 12,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7480769230769231,
+    "vowel_ratio": 0.3932291666666667,
+    "token_count": 85,
+    "vowelful_tokens": 84,
+    "score": 4,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "empty",
+   "confidence": null,
+   "text": "",
+   "out": {
+    "char_count": 0,
+    "line_count": 0,
+    "hard_fail": true,
+    "gibberish": true,
+    "alpha_ratio": 0.0,
+    "vowel_ratio": 0.0,
+    "token_count": 0,
+    "vowelful_tokens": 0,
+    "score": 0,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "unicode_fractions",
+   "confidence": 88,
+   "text": "Ingredients\n½ cup butter\n¼ cup sugar\n⅓ cup honey\n2 eggs\nMethod\n1. Cream the butter and sugar together until the mixture is light\n2. Add the honey and beat until smooth and well incorporated\n3. Add the eggs and mix thoroughly so there are no streaks left\n4. Spread in a buttered dish and bake until golden on the top\n5. Cool before cutting into squares and serving with the tea\nYield sixteen small squares that keep for about four days\nServes a crowd of hungry children after school on a cold day",
+   "out": {
+    "char_count": 495,
+    "line_count": 13,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7818181818181819,
+    "vowel_ratio": 0.3619791666666667,
+    "token_count": 83,
+    "vowelful_tokens": 83,
+    "score": 4,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "boundary_10_lines",
+   "confidence": 90.0,
+   "text": "1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients",
+   "out": {
+    "char_count": 489,
+    "line_count": 10,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.7975460122699386,
+    "vowel_ratio": 0.3333333333333333,
+    "token_count": 80,
+    "vowelful_tokens": 70,
+    "score": 4,
+    "pass_gate": true,
+    "warnings": []
+   }
+  },
+  {
+   "name": "boundary_9_lines",
+   "confidence": 90.0,
+   "text": "1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients\n1 cup flour mixed with the other dry ingredients",
+   "out": {
+    "char_count": 440,
+    "line_count": 9,
+    "hard_fail": true,
+    "gibberish": false,
+    "alpha_ratio": 0.7977272727272727,
+    "vowel_ratio": 0.3333333333333333,
+    "token_count": 72,
+    "vowelful_tokens": 63,
+    "score": 4,
+    "pass_gate": false,
+    "warnings": []
+   }
+  },
+  {
+   "name": "boundary_250_chars",
+   "confidence": 90.0,
+   "text": "ab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\nab\na",
+   "out": {
+    "char_count": 250,
+    "line_count": 84,
+    "hard_fail": false,
+    "gibberish": false,
+    "alpha_ratio": 0.668,
+    "vowel_ratio": 0.5,
+    "token_count": 83,
+    "vowelful_tokens": 83,
+    "score": 1,
+    "pass_gate": false,
+    "warnings": []
+   }
+  }
+ ],
+ "engine_rank": [
+  "apple_vision",
+  "llm_proxy_vision",
+  "llm_proxy_cloud",
+  "rapidocr",
+  "tesseract",
+  "paddleocr",
+  "easyocr"
+ ],
+ "readings": [
+  {
+   "input": [
+    {
+     "provider": "tesseract",
+     "received_at": "2026-01-01T00:00:01",
+     "results": [
+      {
+       "index": 1,
+       "ocr_text": "B"
+      },
+      {
+       "index": 0,
+       "ocr_text": "A"
+      }
+     ]
+    },
+    {
+     "provider": "apple_vision",
+     "received_at": "2026-01-01T00:00:05",
+     "results": [
+      {
+       "index": 0,
+       "ocr_text": "apple one two"
+      }
+     ]
+    },
+    {
+     "provider": "mystery",
+     "received_at": "2026-01-01T00:00:00",
+     "results": [
+      {
+       "index": 0,
+       "ocr_text": "m"
+      }
+     ]
+    },
+    {
+     "provider": "rapidocr",
+     "received_at": "2026-01-01T00:00:02",
+     "results": [
+      {
+       "index": 0,
+       "ocr_text": ""
+      },
+      {
+       "index": 1,
+       "ocr_text": "   "
+      }
+     ]
+    },
+    {
+     "provider": null,
+     "received_at": null,
+     "results": [
+      {
+       "index": 0,
+       "ocr_text": "none provider"
+      }
+     ]
+    }
+   ],
+   "out": {
+    "order": [
+     "apple_vision",
+     "rapidocr",
+     "tesseract",
+     null,
+     "mystery"
+    ],
+    "texts": [
+     [
+      "apple_vision",
+      "apple one two"
+     ],
+     [
+      "tesseract",
+      "A\n\nB"
+     ],
+     [
+      "",
+      "none provider"
+     ],
+     [
+      "mystery",
+      "m"
+     ]
+    ],
+    "gate_text": "apple one two",
+    "describe": "apple_vision, rapidocr, tesseract, ?, mystery (5/5)"
+   }
+  },
+  {
+   "input": [
+    {
+     "provider": "easyocr",
+     "received_at": "b",
+     "results": [
+      {
+       "index": 0,
+       "ocr_text": "a b c d e"
+      }
+     ]
+    },
+    {
+     "provider": "easyocr",
+     "received_at": "a",
+     "results": [
+      {
+       "index": 0,
+       "ocr_text": "longer-by-chars-but-one-word"
+      }
+     ]
+    }
+   ],
+   "out": {
+    "order": [
+     "easyocr",
+     "easyocr"
+    ],
+    "texts": [
+     [
+      "easyocr",
+      "longer-by-chars-but-one-word"
+     ],
+     [
+      "easyocr",
+      "a b c d e"
+     ]
+    ],
+    "gate_text": "a b c d e",
+    "describe": "easyocr, easyocr (2/2)"
+   }
+  },
+  {
+   "input": [],
+   "out": {
+    "order": [],
+    "texts": [],
+    "gate_text": null,
+    "describe": "none (0/1)"
+   }
+  }
+ ],
+ "p3_trigger": [
+  {
+   "name": "clean",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "butter",
+      "unit": null
+     },
+     {
+      "name": "eggs",
+      "unit": null
+     },
+     {
+      "name": "rice",
+      "unit": null
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "letter_g_in_name_no_unit",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "egg",
+      "unit": null
+     },
+     {
+      "name": "milk",
+      "unit": null
+     },
+     {
+      "name": "rice",
+      "unit": null
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "letter_g_in_name_with_unit",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "egg",
+      "unit": ""
+     },
+     {
+      "name": "milk",
+      "unit": "cup"
+     },
+     {
+      "name": "rice",
+      "unit": "cup"
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "unit_word_with_unit_set",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "cup of tea",
+      "unit": "cup"
+     },
+     {
+      "name": "milk",
+      "unit": null
+     },
+     {
+      "name": "rice",
+      "unit": null
+     }
+    ]
+   },
+   "out": false
+  },
+  {
+   "name": "unit_substring_no_unit",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "cupcake",
+      "unit": null
+     },
+     {
+      "name": "milk",
+      "unit": null
+     },
+     {
+      "name": "rice",
+      "unit": null
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "and_in_name",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "salt and pepper",
+      "unit": "x"
+     },
+     {
+      "name": "milk",
+      "unit": "x"
+     },
+     {
+      "name": "rice",
+      "unit": "x"
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "comma_in_name",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "onion, chopped",
+      "unit": "x"
+     },
+     {
+      "name": "milk",
+      "unit": "x"
+     },
+     {
+      "name": "rice",
+      "unit": "x"
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "trailing_comma",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "onion,",
+      "unit": "x"
+     },
+     {
+      "name": "milk",
+      "unit": "x"
+     },
+     {
+      "name": "rice",
+      "unit": "x"
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "no_description",
+   "draft": {
+    "title": "Dish",
+    "description": null,
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "butter",
+      "unit": null
+     },
+     {
+      "name": "rice",
+      "unit": null
+     },
+     {
+      "name": "milk",
+      "unit": null
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "empty_description",
+   "draft": {
+    "title": "Dish",
+    "description": "",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "butter",
+      "unit": null
+     },
+     {
+      "name": "rice",
+      "unit": null
+     },
+     {
+      "name": "milk",
+      "unit": null
+     }
+    ]
+   },
+   "out": true
+  },
+  {
+   "name": "fails_minimums",
+   "draft": {
+    "title": "Dish",
+    "description": "A dish.",
+    "steps": [
+     "a",
+     "b"
+    ],
+    "source": {
+     "type": "ocr"
+    },
+    "ingredients": [
+     {
+      "name": "butter",
+      "unit": null
+     },
+     {
+      "name": "rice",
+      "unit": null
+     }
+    ]
+   },
+   "out": true
+  }
+ ]
+}

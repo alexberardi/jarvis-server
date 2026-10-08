@@ -135,7 +135,7 @@ quantity_display, quantity_value, unit}], steps:[{id, step_number, text}], tags:
 
 - `prep_time_minutes` and `cook_time_minutes` are **always null**. There are no such columns: create and
   update fold them into `total_time_minutes` when total is absent (§10 B1).
-- `quantity_value` is a pydantic Decimal, serialised as a **string** (e.g. `"1.5"`). The **server re-parses it from
+- `quantity_value` is a pydantic Decimal, serialised as a **string** read back from a `Numeric(10,4)` column, so always 4 decimals (`"1.5000"`, `"2.0000"`, `"0.3333"`, `"1000.0000"`; seen live, R0). The **server re-parses it from
   `quantity_display`** and ignores the client's value.
 - `created_at` and `updated_at` are naive ISO timestamps without a zone.
 - Ingredient order is insertion order. Steps are ordered by `step_number`.
@@ -147,7 +147,7 @@ quantity_display, quantity_value, unit}], steps:[{id, step_number, text}], tags:
 | 10 | `POST /recipes/parse-url` | user | `{url, use_llm_fallback=true, save=false}` | `ParseUrlResponse` | 200 (failures in the body) | — | **CUT**. A synchronous debug path with no caller. The Go extractor chain stays testable through goldens. |
 | 11 | `POST /recipes/parse-url/async` | user | `{url: AnyHttpUrl, use_llm_fallback=true}` | `{job_id, status:"PENDING", result:null, error_code:null, error_message:null, next_action:"webview_extract", next_action_reason:"webview_required"}`. **No row is created**; the id is a fresh uuid that 404s if polled. | 200; 400 `{"detail":{error_code, message, status_code, job_id, next_action?, next_action_reason?}}` when the preflight fails (§4.3); 422 | M (add from URL; it never polls this id) | KEEP |
 | 12 | `POST /recipes/parse-payload/async` | user | `{input:{source_type:"server_fetch"\|"client_webview"\|"image_upload", source_url?, jsonld_blocks?:[str], html_snippet?, extracted_at?, client?, images?:[{filename, content_type?, data_base64}]}}` | `{id, status:"PENDING"}` | 200; 422 | M (WebViewExtract: `client_webview`) | KEEP. `server_fetch` and `image_upload` are kept on the wire but behave as §4.3 says. |
-| 13 | `GET /recipes/jobs/{job_id}` | user | — | `ParseJobStatus` `{job_id, status, result, error_code, error_message, next_action:null, next_action_reason:null}` (the key is `job_id`, the alias `id` is input only). **Author only.** | 200; 404 "Job not found" | M (every poller) | KEEP |
+| 13 | `GET /recipes/jobs/{job_id}` | user | — | `ParseJobStatus` `{id, status, result, error_code, error_message, next_action:null, next_action_reason:null}` (FastAPI serialises by alias, so the wire key is **`id`**, also on #11 and #17; corrected in R0). **Author only.** | 200; 404 "Job not found" | M (every poller) | KEEP |
 | 14 | `GET /recipes/parse-url/status/{job_id}` | user | — | same as #13 | | — | **CUT** (an alias with no caller) |
 | 15 | `GET /recipes/parse-url/jobs` | user | `status="COMPLETE"`, `include_expired=false` | `{jobs:[{id, job_type, url, status, completed_at, warnings, preview:{title, source_host}\|null}]}`. Author only. Limit 50, `completed_at` desc. When `status` is COMPLETE (or empty) and `include_expired` is false, only jobs with `completed_at` within `parse_job.abandon_minutes` are listed. | 200 | M (recipe list badge, Mailbox screen) | **CHANGE**: fix `preview` and `warnings`, which read keys that no longer exist and so are always null and `[]` (B6) |
 | 16 | `GET /recipes/jobs` | user | — | **unreachable**: `/recipes/{recipe_id:int}` matches first, so this answers 422 | 422 | — | **CUT**. A Go mux would make it reachable, so it is deliberately not registered. It then falls through to #3 and answers the same 422 as legacy. |
@@ -258,7 +258,7 @@ directly instead. The mobile app tolerates both forms. It reads `result.recipe_d
   when `total_time_minutes` is absent.
 - `POST /recipes` with `parse_job_id` checks the job (author only, COMPLETE) and marks it **COMMITTED**
   (`committed_at`) after the insert.
-- Deleting a recipe **cascades to `meal_plan_items`**. A plan silently loses that meal (kept; noted in §8).
+- Deleting a recipe that a plan uses: **legacy answers 500** (the ORM nulls `meal_plan_items.recipe_id`, a NotNullViolation, and nothing is deleted; R0). jarvisd **fixes** it: the item cascades, 204, and the plan silently loses that meal (§8 item 11). Contract: `LEGACY-BUG` branch in `TestRecipesPlanner`.
 
 ### 4.3 URL import (webview flow)
 
@@ -279,7 +279,7 @@ directly instead. The mobile app tolerates both forms. It reads `result.recipe_d
 
 Extractors:
 
-- **schema.org:** every ld+json script, including `@graph` and lists. `@type` must contain `recipe`, case-insensitively.
+- **schema.org:** every ld+json script, including `@graph` and lists. `@type` must **equal** `recipe` case-insensitively (or a list containing it); `RecipeCollection` is rejected. A missing description becomes `""`; `HowToSection` steps are dropped (R0 goldens).
   A recipe needs a title, ≥1 ingredient and ≥1 step. Tags come from keywords + recipeCategory + recipeCuisine. Servings is the first integer of
   recipeYield. Times come from an ISO 8601 duration with no day part.
 - **heuristic:** title from h1, else `<title>`. Container: article, main, then class `recipe|post|content`, then body.
@@ -408,7 +408,7 @@ jarvisd SQLite file.
 |---|---|---|---|
 | `users` | `recipes_users` | ? (≥ 2) | A shadow of auth user ids (TEXT). Keep: the FK target for cascade-on-delete. |
 | `recipes` | `recipes_recipes` | 48 (one user) | `source_type` is lowercased on import (legacy stores `MANUAL`/`URL`/`IMAGE`). The ids are referenced by plan items. |
-| `ingredients` | `recipes_ingredients` | ? | `quantity_value` is REAL. The API renders it as a decimal **string** (§3.1), so the Go renderer formats it with up to 4 decimals and trims trailing zeros, matching Python's `Decimal(str)` for values parsed from text (e.g. `"0.5"`, `"1.5"`, `"0.3333"`). |
+| `ingredients` | `recipes_ingredients` | ? | `quantity_value` is REAL. The API renders it as a decimal **string** (§3.1), so the Go renderer formats it with **exactly 4 decimals** (`"0.5000"`, `"1.5000"`, `"0.3333"`), matching the legacy `Numeric(10,4)` round trip (R0 correction; the earlier "trim trailing zeros" was wrong). |
 | `steps` | `recipes_steps` | ? | |
 | `tags`, `recipe_tags` | `recipes_tags`, `recipes_recipe_tags` | ? | Global tags. |
 | `meal_plans`, `meal_plan_items` | same, prefixed | 2 plans (users 1 and 4) | `date` is TEXT `YYYY-MM-DD`. |
@@ -706,6 +706,42 @@ probe the routes directly: `GET /planner/plans` etc. without a token → 401. Li
 ---
 
 ## 12. Tests
+
+### 12.0 Corrections found in R0 (2026-10-08)
+
+Found while freezing the contract against the MBP and dumping the goldens. The inline text above is
+already corrected where marked; the rest:
+
+- **Recipe tags** come back in insertion order (no `ORDER BY` on the relationship); `GET /tags` is ordered by name.
+  Stock pickers are ordered by name in the **database collation** (Postgres en_US puts "blackberries" before
+  "black pepper"); the contract does not freeze the tie-break.
+- **#15 B6** legacy `preview` is `{"title": null, "source_host": null}` (not `null`) for a job with a result.
+- **§4.3 step 4**: the webview input has no `use_llm_fallback`; the LLM fallback **always** runs when there is HTML and
+  the extractors fail. JSON-LD inside `html_snippet` is stripped by `clean_soup_for_content`; only `jsonld_blocks`
+  reach schema.org. A schema.org draft has `prep_time_minutes: 0`, `cook_time_minutes` = the total, and `tags` from
+  `keywords` minus the first entry seen live (`"soup, easy"` → `["easy"]`); frozen by the extract goldens.
+- **§4.4**: the quality gate judges the reading with the most whitespace-separated words, not the longest. The P3
+  trigger's unit check is a substring test over a list that includes `"g"`, so any unit-less ingredient containing a
+  "g" ("eggs") triggers cleanup: it fires almost always.
+- **§3.2 photo result**: the OCR path's `recipe_draft.source` is `{type, original_filename, ocr_tier_used}`, not the
+  URL path's `{type, source_url, image_url}`.
+- **§7.4**: P1 read timeout is 80 s (connect 10, write/pool 90); the LLM sees JSON-LD text (≤ 2000 chars a block) only
+  when no main node is found. P1r is `llm_client.py:352-369`, `_ENSEMBLE_RULES` 544-554. P2 with an empty model name
+  falls back to `llm.full_model_name`. P4 accepts `confidence: true` as 1.0; integer `recipe_id`s from the model never
+  match (candidate ids are strings); user candidates send `prep_time_minutes: 0` and the total as `cook_time`.
+- **B2** is wider: `NaN`, `Infinity`, `1_000` and Arabic-Indic digits parse too; NaN/Infinity then fail
+  `IngredientRead`'s finite check. **B5** is wider: a quantity dict without `value` and fractional minutes also
+  reject the draft.
+- **RQ9 / B23**: `excluded_ingredients` and `max_prep/cook_minutes` *are* sent to P4 (`diet` always null there), and
+  soft `tags` filter candidates when the slot has none. Fully ignored: `allergens`, `diet`, `cuisines`, `repeat`.
+- **§12 names**: `ingredient_parser.parse_ingredient` is `extract_ingredients`; `_split_qty_unit` lives in
+  `parse_job_service.py`. The dumper is `tools/golden/export_recipes.py` (beside the cc ones), not `scripts/golden/`.
+- **Staples delete-by-name** cannot be exercised through the API: `POST /staples` returns the existing visible row,
+  so two same-name rows only arise from pre-household data. Unit-test it in R4.
+- **The MBP cannot run photo import**: its recipes container has no `S3_BUCKET`, so `POST /recipes/from-image/jobs`
+  answers 500 `Failed to upload images: S3_BUCKET or RECIPE_IMAGE_S3_BUCKET must be configured`. The slow
+  `TestRecipesFromImageJob` is therefore proven against jarvisd only (R8).
+
 
 - **Contract** (`contract/recipes_*_test.go`, listener `recipes`): frozen against the MBP legacy stack first (R0), then run
   against jarvisd (R10). The fixtures are throwaway users and households from `auth_fixtures.go` (two users in one household + one

@@ -1,0 +1,1112 @@
+{
+ "schema_org": [
+  {
+   "name": "tests:test_extract_recipe_from_schema_org#1",
+   "html": "\n    <html>\n      <head>\n        <script type=\"application/ld+json\">\n        {\n          \"@context\": \"https://schema.org\",\n          \"@type\": \"Recipe\",\n          \"name\": \"Test Recipe\",\n          \"recipeIngredient\": [\"1 cup flour\", \"2 eggs\"],\n          \"recipeInstructions\": [\"Mix\", \"Bake\"],\n          \"totalTime\": \"PT30M\",\n          \"recipeYield\": \"4\"\n        }\n        </script>\n      </head>\n    </html>\n    ",
+   "out": {
+    "title": "Test Recipe",
+    "description": "",
+    "source_url": "https://example.com/test",
+    "image_url": null,
+    "tags": [],
+    "servings": 4,
+    "estimated_time_minutes": 30,
+    "ingredients": [
+     {
+      "text": "flour",
+      "quantity_display": "1",
+      "unit": "cup"
+     },
+     {
+      "text": "eggs",
+      "quantity_display": "2",
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Mix",
+     "Bake"
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "tests:test_extract_recipe_heuristic#1",
+   "html": "\n    <html>\n      <body>\n        <h1>Heuristic Soup</h1>\n        <article>\n          <ul>\n            <li>1 cup broth</li>\n            <li>2 tsp salt</li>\n          </ul>\n          <h2>Directions</h2>\n          <ol>\n            <li>Heat the broth.</li>\n            <li>Add salt.</li>\n          </ol>\n        </article>\n      </body>\n    </html>\n    ",
+   "out": null
+  },
+  {
+   "name": "fixtures:html_snippet.html",
+   "html": "<html>\n<head>\n<script type=\"application/ld+json\">\n{\n  \"@context\": \"http://schema.org\",\n  \"@type\": \"Recipe\",\n  \"name\": \"Snippet Soup\",\n  \"recipeIngredient\": [\"2 cups broth\", \"1 onion\", \"salt\"],\n  \"recipeInstructions\": [\"Simmer broth\", \"Add onion\", \"Season\"]\n}\n</script>\n</head>\n<body>Snippet test</body>\n</html>\n\n",
+   "out": {
+    "title": "Snippet Soup",
+    "description": "",
+    "source_url": "https://example.com/fixture",
+    "image_url": null,
+    "tags": [],
+    "servings": null,
+    "estimated_time_minutes": null,
+    "ingredients": [
+     {
+      "text": "broth",
+      "quantity_display": "2",
+      "unit": "cups"
+     },
+     {
+      "text": "onion",
+      "quantity_display": "1",
+      "unit": null
+     },
+     {
+      "text": "salt",
+      "quantity_display": null,
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Simmer broth",
+     "Add onion",
+     "Season"
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "jsonld_graph",
+   "html": "<html><head><title>Graph Page</title><script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@graph\":[{\"@type\":\"WebSite\",\"name\":\"Site\"},{\"@type\":[\"Recipe\",\"NewsArticle\"],\"name\":\"  Garlic   Butter Shrimp \",\"description\":\" Quick weeknight shrimp. \",\"image\":[\"https://img.example.com/a.jpg\",\"https://img.example.com/b.jpg\"],\"recipeYield\":[\"4\",\"4 servings\"],\"totalTime\":\"PT1H15M\",\"keywords\":\"shrimp, garlic butter shrimp recipe, easy dinner, gluten free, quick and easy weeknight meals, Garlic Butter Shrimp\",\"recipeCategory\":\"Main Course\",\"recipeCuisine\":[\"American\",\"Cajun Creole Southern\"],\"recipeIngredient\":[\"1 ½ lb shrimp, peeled\",\"4 tbsp butter\",\"6 cloves garlic (minced)\",\"Salt and pepper to taste\",\"2 Tbsp. parsley\"],\"recipeInstructions\":[{\"@type\":\"HowToStep\",\"text\":\"Melt   butter.\"},{\"@type\":\"HowToStep\",\"text\":\"Add garlic and shrimp.\"},{\"@type\":\"HowToSection\",\"name\":\"Finish\",\"itemListElement\":[{\"text\":\"Season.\"}]}]}]}</script></head><body></body></html>",
+   "out": {
+    "title": "Garlic Butter Shrimp",
+    "description": "Quick weeknight shrimp.",
+    "source_url": "https://example.com/graph",
+    "image_url": "https://img.example.com/a.jpg",
+    "tags": [
+     "easy dinner",
+     "gluten free",
+     "quick and easy weeknight meals",
+     "Main Course",
+     "American"
+    ],
+    "servings": null,
+    "estimated_time_minutes": 75,
+    "ingredients": [
+     {
+      "text": "shrimp, peeled",
+      "quantity_display": "1 1/2",
+      "unit": "lb"
+     },
+     {
+      "text": "butter",
+      "quantity_display": "4",
+      "unit": "tbsp"
+     },
+     {
+      "text": "garlic",
+      "quantity_display": "6",
+      "unit": "cloves"
+     },
+     {
+      "text": "Salt and pepper to taste",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "parsley",
+      "quantity_display": "2",
+      "unit": "Tbsp."
+     }
+    ],
+    "steps": [
+     "Melt butter.",
+     "Add garlic and shrimp."
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "jsonld_list_lowercase_type",
+   "html": "<script type=\"application/ld+json\">[{\"@type\":\"Organization\"},{\"@type\":\"recipe\",\"name\":\"Lower Type\",\"recipeIngredient\":\"2 cups rice\",\"recipeInstructions\":\"Cook the rice.\",\"recipeYield\":3,\"totalTime\":\"P1DT2H\",\"image\":{\"url\":\"https://img.example.com/x.jpg\"}}]</script>",
+   "out": {
+    "title": "Lower Type",
+    "description": "",
+    "source_url": "https://example.com/list",
+    "image_url": null,
+    "tags": [],
+    "servings": 3,
+    "estimated_time_minutes": null,
+    "ingredients": [
+     {
+      "text": "rice",
+      "quantity_display": "2",
+      "unit": "cups"
+     }
+    ],
+    "steps": [
+     "Cook the rice."
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "jsonld_type_contains_recipe",
+   "html": "<script type=\"application/ld+json\">{\"@type\":\"RecipeCollection\",\"name\":\"Not a recipe\",\"recipeIngredient\":[\"1 cup a\"],\"recipeInstructions\":[\"b\"]}</script>",
+   "out": null
+  },
+  {
+   "name": "jsonld_missing_steps_then_valid",
+   "html": "<script type=\"application/ld+json\">{\"@type\":\"Recipe\",\"name\":\"No Steps\",\"recipeIngredient\":[\"1 egg\"]}</script><script type=\"application/ld+json\">not json</script><script type=\"application/ld+json\">{\"@type\":\"Recipe\",\"name\":\"Second\",\"recipeIngredient\":[{\"text\":\"1 cup milk\"},\"2 eggs\"],\"recipeInstructions\":[\"Whisk\",{\"description\":\"Fry\"}],\"recipeYield\":\"Makes 12\",\"totalTime\":\"45 minutes\"}</script>",
+   "out": {
+    "title": "Second",
+    "description": "",
+    "source_url": "https://example.com/two",
+    "image_url": null,
+    "tags": [],
+    "servings": 12,
+    "estimated_time_minutes": 45,
+    "ingredients": [
+     {
+      "text": "milk",
+      "quantity_display": "1",
+      "unit": "cup"
+     },
+     {
+      "text": "eggs",
+      "quantity_display": "2",
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Whisk",
+     "Fry"
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "jsonld_no_title",
+   "html": "<script type=\"application/ld+json\">{\"@type\":\"Recipe\",\"recipeIngredient\":[\"1 egg\"],\"recipeInstructions\":[\"Boil\"]}</script>",
+   "out": null
+  },
+  {
+   "name": "heuristic_article_directions",
+   "html": "<html><head><title>Tab Title</title></head><body><header><h1>Header H1</h1></header><article><h1>Lentil Soup</h1><p>Serves 6</p><ul><li>Home</li><li>About</li></ul><ul><li>1 cup lentils</li><li>2 carrots</li><li>salt</li><li>1 tbsp oil</li></ul><h2>Directions</h2><ol><li>Rinse  lentils.</li><li>Simmer 30 minutes.</li></ol></article></body></html>",
+   "out": null
+  },
+  {
+   "name": "heuristic_method_paragraphs",
+   "html": "<html><body><main><h1>Flatbread</h1><ul><li>2 cups flour</li><li>1 tsp salt</li><li>3/4 cup water</li></ul><h3>Method</h3><div><p>Mix everything.</p><p>Roll and cook.</p></div></main></body></html>",
+   "out": null
+  },
+  {
+   "name": "heuristic_first_ol_fallback",
+   "html": "<html><head><title>Only Title</title></head><body><div class=\"recipe-card\"><ul><li>1 cup oats</li><li>2 cups milk</li></ul><ol><li>Combine.</li><li>Microwave.</li></ol></div></body></html>",
+   "out": null
+  },
+  {
+   "name": "heuristic_not_enough_quantities",
+   "html": "<html><body><article><h1>Vague</h1><ul><li>some flour</li><li>a bit of water</li><li>1 egg</li><li>salt</li><li>pepper</li></ul><ol><li>Mix.</li></ol></article></body></html>",
+   "out": null
+  },
+  {
+   "name": "heuristic_no_steps",
+   "html": "<html><body><article><h1>No Steps</h1><ul><li>1 cup a</li><li>2 cups b</li></ul></article></body></html>",
+   "out": null
+  },
+  {
+   "name": "microdata_itemtype",
+   "html": "<html><body><nav><ul><li>1 nav</li><li>2 nav</li></ul></nav><div itemscope itemtype=\"http://schema.org/Recipe\"><h1 itemprop=\"name\">Microdata Pie</h1><ul><li itemprop=\"recipeIngredient\">1 crust</li><li itemprop=\"recipeIngredient\">3 apples</li></ul><h2>Instructions</h2><ol><li>Fill.</li><li>Bake.</li></ol></div></body></html>",
+   "out": null
+  },
+  {
+   "name": "empty",
+   "html": "<html><body></body></html>",
+   "out": null
+  }
+ ],
+ "heuristic": [
+  {
+   "name": "tests:test_extract_recipe_from_schema_org#1",
+   "html": "\n    <html>\n      <head>\n        <script type=\"application/ld+json\">\n        {\n          \"@context\": \"https://schema.org\",\n          \"@type\": \"Recipe\",\n          \"name\": \"Test Recipe\",\n          \"recipeIngredient\": [\"1 cup flour\", \"2 eggs\"],\n          \"recipeInstructions\": [\"Mix\", \"Bake\"],\n          \"totalTime\": \"PT30M\",\n          \"recipeYield\": \"4\"\n        }\n        </script>\n      </head>\n    </html>\n    ",
+   "out": null
+  },
+  {
+   "name": "tests:test_extract_recipe_heuristic#1",
+   "html": "\n    <html>\n      <body>\n        <h1>Heuristic Soup</h1>\n        <article>\n          <ul>\n            <li>1 cup broth</li>\n            <li>2 tsp salt</li>\n          </ul>\n          <h2>Directions</h2>\n          <ol>\n            <li>Heat the broth.</li>\n            <li>Add salt.</li>\n          </ol>\n        </article>\n      </body>\n    </html>\n    ",
+   "out": {
+    "title": "Heuristic Soup",
+    "description": null,
+    "source_url": "https://example.com/test",
+    "image_url": null,
+    "tags": [],
+    "servings": null,
+    "estimated_time_minutes": null,
+    "ingredients": [
+     {
+      "text": "1 cup broth",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "2 tsp salt",
+      "quantity_display": null,
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Heat the broth.",
+     "Add salt."
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "fixtures:html_snippet.html",
+   "html": "<html>\n<head>\n<script type=\"application/ld+json\">\n{\n  \"@context\": \"http://schema.org\",\n  \"@type\": \"Recipe\",\n  \"name\": \"Snippet Soup\",\n  \"recipeIngredient\": [\"2 cups broth\", \"1 onion\", \"salt\"],\n  \"recipeInstructions\": [\"Simmer broth\", \"Add onion\", \"Season\"]\n}\n</script>\n</head>\n<body>Snippet test</body>\n</html>\n\n",
+   "out": null
+  },
+  {
+   "name": "jsonld_graph",
+   "html": "<html><head><title>Graph Page</title><script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@graph\":[{\"@type\":\"WebSite\",\"name\":\"Site\"},{\"@type\":[\"Recipe\",\"NewsArticle\"],\"name\":\"  Garlic   Butter Shrimp \",\"description\":\" Quick weeknight shrimp. \",\"image\":[\"https://img.example.com/a.jpg\",\"https://img.example.com/b.jpg\"],\"recipeYield\":[\"4\",\"4 servings\"],\"totalTime\":\"PT1H15M\",\"keywords\":\"shrimp, garlic butter shrimp recipe, easy dinner, gluten free, quick and easy weeknight meals, Garlic Butter Shrimp\",\"recipeCategory\":\"Main Course\",\"recipeCuisine\":[\"American\",\"Cajun Creole Southern\"],\"recipeIngredient\":[\"1 ½ lb shrimp, peeled\",\"4 tbsp butter\",\"6 cloves garlic (minced)\",\"Salt and pepper to taste\",\"2 Tbsp. parsley\"],\"recipeInstructions\":[{\"@type\":\"HowToStep\",\"text\":\"Melt   butter.\"},{\"@type\":\"HowToStep\",\"text\":\"Add garlic and shrimp.\"},{\"@type\":\"HowToSection\",\"name\":\"Finish\",\"itemListElement\":[{\"text\":\"Season.\"}]}]}]}</script></head><body></body></html>",
+   "out": null
+  },
+  {
+   "name": "jsonld_list_lowercase_type",
+   "html": "<script type=\"application/ld+json\">[{\"@type\":\"Organization\"},{\"@type\":\"recipe\",\"name\":\"Lower Type\",\"recipeIngredient\":\"2 cups rice\",\"recipeInstructions\":\"Cook the rice.\",\"recipeYield\":3,\"totalTime\":\"P1DT2H\",\"image\":{\"url\":\"https://img.example.com/x.jpg\"}}]</script>",
+   "out": null
+  },
+  {
+   "name": "jsonld_type_contains_recipe",
+   "html": "<script type=\"application/ld+json\">{\"@type\":\"RecipeCollection\",\"name\":\"Not a recipe\",\"recipeIngredient\":[\"1 cup a\"],\"recipeInstructions\":[\"b\"]}</script>",
+   "out": null
+  },
+  {
+   "name": "jsonld_missing_steps_then_valid",
+   "html": "<script type=\"application/ld+json\">{\"@type\":\"Recipe\",\"name\":\"No Steps\",\"recipeIngredient\":[\"1 egg\"]}</script><script type=\"application/ld+json\">not json</script><script type=\"application/ld+json\">{\"@type\":\"Recipe\",\"name\":\"Second\",\"recipeIngredient\":[{\"text\":\"1 cup milk\"},\"2 eggs\"],\"recipeInstructions\":[\"Whisk\",{\"description\":\"Fry\"}],\"recipeYield\":\"Makes 12\",\"totalTime\":\"45 minutes\"}</script>",
+   "out": null
+  },
+  {
+   "name": "jsonld_no_title",
+   "html": "<script type=\"application/ld+json\">{\"@type\":\"Recipe\",\"recipeIngredient\":[\"1 egg\"],\"recipeInstructions\":[\"Boil\"]}</script>",
+   "out": null
+  },
+  {
+   "name": "heuristic_article_directions",
+   "html": "<html><head><title>Tab Title</title></head><body><header><h1>Header H1</h1></header><article><h1>Lentil Soup</h1><p>Serves 6</p><ul><li>Home</li><li>About</li></ul><ul><li>1 cup lentils</li><li>2 carrots</li><li>salt</li><li>1 tbsp oil</li></ul><h2>Directions</h2><ol><li>Rinse  lentils.</li><li>Simmer 30 minutes.</li></ol></article></body></html>",
+   "out": {
+    "title": "Header H1",
+    "description": null,
+    "source_url": "https://example.com/h1",
+    "image_url": null,
+    "tags": [],
+    "servings": 6,
+    "estimated_time_minutes": null,
+    "ingredients": [
+     {
+      "text": "1 cup lentils",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "2 carrots",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "salt",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "1 tbsp oil",
+      "quantity_display": null,
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Rinse lentils.",
+     "Simmer 30 minutes."
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "heuristic_method_paragraphs",
+   "html": "<html><body><main><h1>Flatbread</h1><ul><li>2 cups flour</li><li>1 tsp salt</li><li>3/4 cup water</li></ul><h3>Method</h3><div><p>Mix everything.</p><p>Roll and cook.</p></div></main></body></html>",
+   "out": {
+    "title": "Flatbread",
+    "description": null,
+    "source_url": "https://example.com/h2",
+    "image_url": null,
+    "tags": [],
+    "servings": null,
+    "estimated_time_minutes": null,
+    "ingredients": [
+     {
+      "text": "2 cups flour",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "1 tsp salt",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "3/4 cup water",
+      "quantity_display": null,
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Mix everything.",
+     "Roll and cook."
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "heuristic_first_ol_fallback",
+   "html": "<html><head><title>Only Title</title></head><body><div class=\"recipe-card\"><ul><li>1 cup oats</li><li>2 cups milk</li></ul><ol><li>Combine.</li><li>Microwave.</li></ol></div></body></html>",
+   "out": {
+    "title": "Only Title",
+    "description": null,
+    "source_url": "https://example.com/h3",
+    "image_url": null,
+    "tags": [],
+    "servings": null,
+    "estimated_time_minutes": null,
+    "ingredients": [
+     {
+      "text": "1 cup oats",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "2 cups milk",
+      "quantity_display": null,
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Combine.",
+     "Microwave."
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "heuristic_not_enough_quantities",
+   "html": "<html><body><article><h1>Vague</h1><ul><li>some flour</li><li>a bit of water</li><li>1 egg</li><li>salt</li><li>pepper</li></ul><ol><li>Mix.</li></ol></article></body></html>",
+   "out": null
+  },
+  {
+   "name": "heuristic_no_steps",
+   "html": "<html><body><article><h1>No Steps</h1><ul><li>1 cup a</li><li>2 cups b</li></ul></article></body></html>",
+   "out": null
+  },
+  {
+   "name": "microdata_itemtype",
+   "html": "<html><body><nav><ul><li>1 nav</li><li>2 nav</li></ul></nav><div itemscope itemtype=\"http://schema.org/Recipe\"><h1 itemprop=\"name\">Microdata Pie</h1><ul><li itemprop=\"recipeIngredient\">1 crust</li><li itemprop=\"recipeIngredient\">3 apples</li></ul><h2>Instructions</h2><ol><li>Fill.</li><li>Bake.</li></ol></div></body></html>",
+   "out": {
+    "title": "Microdata Pie",
+    "description": null,
+    "source_url": "https://example.com/md",
+    "image_url": null,
+    "tags": [],
+    "servings": null,
+    "estimated_time_minutes": null,
+    "ingredients": [
+     {
+      "text": "1 nav",
+      "quantity_display": null,
+      "unit": null
+     },
+     {
+      "text": "2 nav",
+      "quantity_display": null,
+      "unit": null
+     }
+    ],
+    "steps": [
+     "Fill.",
+     "Bake."
+    ],
+    "notes": []
+   }
+  },
+  {
+   "name": "empty",
+   "html": "<html><body></body></html>",
+   "out": null
+  }
+ ],
+ "ingestion": [
+  {
+   "name": "fixtures:jsonld_valid.json",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/fixture",
+    "jsonld_blocks": [
+     "{ \"@context\": \"http://schema.org\", \"@type\": \"Recipe\", \"name\": \"Test JSONLD Pasta\", \"recipeIngredient\": [\"1 cup pasta\", \"2 tbsp oil\"], \"recipeInstructions\": [\"Boil pasta\", \"Drain\", \"Serve\"] }"
+    ]
+   },
+   "out": {
+    "parse_result": {
+     "success": true,
+     "recipe": {
+      "title": "Test JSONLD Pasta",
+      "description": "",
+      "source_url": "https://example.com/fixture",
+      "image_url": null,
+      "tags": [],
+      "servings": null,
+      "estimated_time_minutes": null,
+      "ingredients": [
+       {
+        "text": "pasta",
+        "quantity_display": "1",
+        "unit": "cup"
+       },
+       {
+        "text": "oil",
+        "quantity_display": "2",
+        "unit": "tbsp"
+       }
+      ],
+      "steps": [
+       "Boil pasta",
+       "Drain",
+       "Serve"
+      ],
+      "notes": []
+     },
+     "used_llm": false,
+     "parser_strategy": "client_json_ld",
+     "warnings": [],
+     "error_code": null,
+     "error_message": null,
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 0,
+    "debug_log_writes_B24": [],
+    "mark_complete": {
+     "status": "COMPLETE",
+     "result_json": {
+      "recipe_draft": {
+       "title": "Test JSONLD Pasta",
+       "description": "",
+       "ingredients": [
+        {
+         "name": "pasta",
+         "quantity": "1",
+         "unit": "cup",
+         "notes": null
+        },
+        {
+         "name": "oil",
+         "quantity": "2",
+         "unit": "tbsp",
+         "notes": null
+        }
+       ],
+       "steps": [
+        "Boil pasta",
+        "Drain",
+        "Serve"
+       ],
+       "prep_time_minutes": 0,
+       "cook_time_minutes": 0,
+       "total_time_minutes": 0,
+       "servings": null,
+       "tags": [],
+       "source": {
+        "type": "url",
+        "source_url": "https://example.com/fixture",
+        "image_url": null
+       }
+      },
+      "pipeline": {
+       "parser_strategy": "client_json_ld",
+       "used_llm": false,
+       "warnings": [],
+       "source_url": "https://example.com/fixture",
+       "error_code": null,
+       "error_message": null,
+       "next_action": null,
+       "next_action_reason": null,
+       "raw_pipeline": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "jsonld_ok",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/r1",
+    "jsonld_blocks": [
+     "{\"@type\":\"Recipe\",\"name\":\"Webview Pasta\",\"recipeIngredient\":[\"1 cup pasta\",\"2 tbsp oil\",\"1 ½ cups sauce\"],\"recipeInstructions\":[\"Boil\",\"Toss\"],\"recipeYield\":\"2\",\"totalTime\":\"PT20M\",\"image\":\"https://img.example.com/p.jpg\"}"
+    ]
+   },
+   "out": {
+    "parse_result": {
+     "success": true,
+     "recipe": {
+      "title": "Webview Pasta",
+      "description": "",
+      "source_url": "https://example.com/r1",
+      "image_url": "https://img.example.com/p.jpg",
+      "tags": [],
+      "servings": 2,
+      "estimated_time_minutes": 20,
+      "ingredients": [
+       {
+        "text": "pasta",
+        "quantity_display": "1",
+        "unit": "cup"
+       },
+       {
+        "text": "oil",
+        "quantity_display": "2",
+        "unit": "tbsp"
+       },
+       {
+        "text": "sauce",
+        "quantity_display": "1 1/2",
+        "unit": "cups"
+       }
+      ],
+      "steps": [
+       "Boil",
+       "Toss"
+      ],
+      "notes": []
+     },
+     "used_llm": false,
+     "parser_strategy": "client_json_ld",
+     "warnings": [],
+     "error_code": null,
+     "error_message": null,
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 0,
+    "debug_log_writes_B24": [],
+    "mark_complete": {
+     "status": "COMPLETE",
+     "result_json": {
+      "recipe_draft": {
+       "title": "Webview Pasta",
+       "description": "",
+       "ingredients": [
+        {
+         "name": "pasta",
+         "quantity": "1",
+         "unit": "cup",
+         "notes": null
+        },
+        {
+         "name": "oil",
+         "quantity": "2",
+         "unit": "tbsp",
+         "notes": null
+        },
+        {
+         "name": "sauce",
+         "quantity": "1 1/2",
+         "unit": "cups",
+         "notes": null
+        }
+       ],
+       "steps": [
+        "Boil",
+        "Toss"
+       ],
+       "prep_time_minutes": 0,
+       "cook_time_minutes": 20,
+       "total_time_minutes": 20,
+       "servings": 2,
+       "tags": [],
+       "source": {
+        "type": "url",
+        "source_url": "https://example.com/r1",
+        "image_url": "https://img.example.com/p.jpg"
+       }
+      },
+      "pipeline": {
+       "parser_strategy": "client_json_ld",
+       "used_llm": false,
+       "warnings": [],
+       "source_url": "https://example.com/r1",
+       "error_code": null,
+       "error_message": null,
+       "next_action": null,
+       "next_action_reason": null,
+       "raw_pipeline": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "jsonld_bad_html_heuristic",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/r2",
+    "jsonld_blocks": [
+     "{\"@type\":\"WebPage\"}"
+    ],
+    "html_snippet": "<article><h1>Snippet Soup</h1><ul><li>2 cups broth</li><li>1 onion</li></ul><h2>Instructions</h2><ol><li>Simmer.</li><li>Serve.</li></ol></article>"
+   },
+   "out": {
+    "parse_result": {
+     "success": true,
+     "recipe": {
+      "title": "Snippet Soup",
+      "description": null,
+      "source_url": "https://example.com/r2",
+      "image_url": null,
+      "tags": [],
+      "servings": null,
+      "estimated_time_minutes": null,
+      "ingredients": [
+       {
+        "text": "2 cups broth",
+        "quantity_display": null,
+        "unit": null
+       },
+       {
+        "text": "1 onion",
+        "quantity_display": null,
+        "unit": null
+       }
+      ],
+      "steps": [
+       "Simmer.",
+       "Serve."
+      ],
+      "notes": []
+     },
+     "used_llm": false,
+     "parser_strategy": "client_html",
+     "warnings": [],
+     "error_code": null,
+     "error_message": null,
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 0,
+    "debug_log_writes_B24": [],
+    "mark_complete": {
+     "status": "COMPLETE",
+     "result_json": {
+      "recipe_draft": {
+       "title": "Snippet Soup",
+       "description": null,
+       "ingredients": [
+        {
+         "name": "2 cups broth",
+         "quantity": null,
+         "unit": null,
+         "notes": null
+        },
+        {
+         "name": "1 onion",
+         "quantity": null,
+         "unit": null,
+         "notes": null
+        }
+       ],
+       "steps": [
+        "Simmer.",
+        "Serve."
+       ],
+       "prep_time_minutes": 0,
+       "cook_time_minutes": 0,
+       "total_time_minutes": 0,
+       "servings": null,
+       "tags": [],
+       "source": {
+        "type": "url",
+        "source_url": "https://example.com/r2",
+        "image_url": null
+       }
+      },
+      "pipeline": {
+       "parser_strategy": "client_html",
+       "used_llm": false,
+       "warnings": [],
+       "source_url": "https://example.com/r2",
+       "error_code": null,
+       "error_message": null,
+       "next_action": null,
+       "next_action_reason": null,
+       "raw_pipeline": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "html_jsonld_in_snippet",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/r3",
+    "html_snippet": "<html><head><script type=\"application/ld+json\">{\"@type\":\"Recipe\",\"name\":\"Inline LD\",\"recipeIngredient\":[\"1 egg\"],\"recipeInstructions\":[\"Fry\"]}</script></head><body><main><p>text</p></main></body></html>"
+   },
+   "out": {
+    "parse_result": {
+     "success": false,
+     "recipe": null,
+     "used_llm": false,
+     "parser_strategy": null,
+     "warnings": [
+      "llm_failed"
+     ],
+     "error_code": "llm_failed",
+     "error_message": "1 validation error for ParsedRecipe\ntitle\n  Field required [type=missing, input_value={'notes': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 1,
+    "debug_log_writes_B24": [
+     "/tmp/llm_raw_f34e172598c86754aabe918083f01ea2419670f4.log"
+    ]
+   }
+  },
+  {
+   "name": "llm_fallback_short",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/r4",
+    "html_snippet": "<html><head><title>Grandma's Stew</title></head><body><header>Site header</header><article><h1>Grandma's Stew</h1><p>Brown the beef in a little oil.</p><p>Add carrots and potatoes and cover with stock.</p><p>Simmer two hours.</p></article><footer>footer</footer></body></html>"
+   },
+   "out": {
+    "parse_result": {
+     "success": true,
+     "recipe": {
+      "title": "Grandma's Stew",
+      "description": null,
+      "source_url": "https://example.com/r4",
+      "image_url": null,
+      "tags": [
+       "dinner"
+      ],
+      "servings": 4,
+      "estimated_time_minutes": 130,
+      "ingredients": [
+       {
+        "text": "beef",
+        "quantity_display": "2",
+        "unit": "lb"
+       },
+       {
+        "text": "carrots",
+        "quantity_display": "3",
+        "unit": null
+       },
+       {
+        "text": "stock",
+        "quantity_display": "1 quart",
+        "unit": null
+       }
+      ],
+      "steps": [
+       "Brown the beef.",
+       "Add vegetables and stock.",
+       "Simmer two hours."
+      ],
+      "notes": []
+     },
+     "used_llm": true,
+     "parser_strategy": "llm_fallback",
+     "warnings": [],
+     "error_code": null,
+     "error_message": null,
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 1,
+    "debug_log_writes_B24": [
+     "/tmp/llm_raw_4c54e46fcf9f934fd87d785355f81f6a967068f5.log"
+    ],
+    "mark_complete": {
+     "status": "COMPLETE",
+     "result_json": {
+      "recipe_draft": {
+       "title": "Grandma's Stew",
+       "description": null,
+       "ingredients": [
+        {
+         "name": "beef",
+         "quantity": "2",
+         "unit": "lb",
+         "notes": null
+        },
+        {
+         "name": "carrots",
+         "quantity": "3",
+         "unit": null,
+         "notes": null
+        },
+        {
+         "name": "stock",
+         "quantity": "1 quart",
+         "unit": null,
+         "notes": null
+        }
+       ],
+       "steps": [
+        "Brown the beef.",
+        "Add vegetables and stock.",
+        "Simmer two hours."
+       ],
+       "prep_time_minutes": 0,
+       "cook_time_minutes": 130,
+       "total_time_minutes": 130,
+       "servings": 4,
+       "tags": [
+        "dinner"
+       ],
+       "source": {
+        "type": "url",
+        "source_url": "https://example.com/r4",
+        "image_url": null
+       }
+      },
+      "pipeline": {
+       "parser_strategy": "llm_fallback",
+       "used_llm": true,
+       "warnings": [],
+       "source_url": "https://example.com/r4",
+       "error_code": null,
+       "error_message": null,
+       "next_action": null,
+       "next_action_reason": null,
+       "raw_pipeline": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "llm_fallback_invalid",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/r5",
+    "html_snippet": "<main><p>Just a blog post about my day.</p></main>"
+   },
+   "out": {
+    "parse_result": {
+     "success": false,
+     "recipe": null,
+     "used_llm": false,
+     "parser_strategy": null,
+     "warnings": [
+      "llm_failed"
+     ],
+     "error_code": "llm_failed",
+     "error_message": "1 validation error for ParsedRecipe\ntitle\n  Field required [type=missing, input_value={'error': 'invalid', 'notes': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 1,
+    "debug_log_writes_B24": [
+     "/tmp/llm_raw_a77ebce0f6010b5812897d80e3fa1fdf70b68ee8.log"
+    ]
+   }
+  },
+  {
+   "name": "llm_fallback_repair",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/r6",
+    "html_snippet": "<main><h1>Toast</h1><p>Toast bread. Butter it.</p></main>"
+   },
+   "out": {
+    "parse_result": {
+     "success": true,
+     "recipe": {
+      "title": "Toast",
+      "description": null,
+      "source_url": "https://example.com/r6",
+      "image_url": null,
+      "tags": [],
+      "servings": null,
+      "estimated_time_minutes": null,
+      "ingredients": [
+       {
+        "text": "bread",
+        "quantity_display": null,
+        "unit": null
+       }
+      ],
+      "steps": [
+       "Toast",
+       "Butter"
+      ],
+      "notes": []
+     },
+     "used_llm": true,
+     "parser_strategy": "llm_fallback",
+     "warnings": [],
+     "error_code": null,
+     "error_message": null,
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 1,
+    "debug_log_writes_B24": [
+     "/tmp/llm_raw_f9768b5bbc5cd4920e0ea9d14f57c9997bf6aa0f.log"
+    ],
+    "mark_complete": {
+     "status": "COMPLETE",
+     "result_json": {
+      "recipe_draft": {
+       "title": "Toast",
+       "description": null,
+       "ingredients": [
+        {
+         "name": "bread",
+         "quantity": null,
+         "unit": null,
+         "notes": null
+        }
+       ],
+       "steps": [
+        "Toast",
+        "Butter"
+       ],
+       "prep_time_minutes": 0,
+       "cook_time_minutes": 0,
+       "total_time_minutes": 0,
+       "servings": null,
+       "tags": [],
+       "source": {
+        "type": "url",
+        "source_url": "https://example.com/r6",
+        "image_url": null
+       }
+      },
+      "pipeline": {
+       "parser_strategy": "llm_fallback",
+       "used_llm": true,
+       "warnings": [],
+       "source_url": "https://example.com/r6",
+       "error_code": null,
+       "error_message": null,
+       "next_action": null,
+       "next_action_reason": null,
+       "raw_pipeline": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "image_upload_not_implemented",
+   "input": {
+    "source_type": "image_upload",
+    "images": [
+     {
+      "filename": "a.jpg",
+      "data_base64": "aGVsbG8="
+     }
+    ]
+   },
+   "out": {
+    "parse_result": {
+     "success": false,
+     "recipe": null,
+     "used_llm": false,
+     "parser_strategy": null,
+     "warnings": [],
+     "error_code": "not_implemented",
+     "error_message": "image_ingestion_not_implemented",
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 0,
+    "debug_log_writes_B24": []
+   }
+  },
+  {
+   "name": "server_fetch_no_url",
+   "input": {
+    "source_type": "server_fetch"
+   },
+   "out": {
+    "parse_result": {
+     "success": false,
+     "recipe": null,
+     "used_llm": false,
+     "parser_strategy": null,
+     "warnings": [],
+     "error_code": "invalid_payload",
+     "error_message": "source_url required",
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 0,
+    "debug_log_writes_B24": []
+   }
+  },
+  {
+   "name": "no_content",
+   "input": {
+    "source_type": "client_webview",
+    "source_url": "https://example.com/r7"
+   },
+   "out": {
+    "parse_result": {
+     "success": false,
+     "recipe": null,
+     "used_llm": false,
+     "parser_strategy": null,
+     "warnings": [],
+     "error_code": "invalid_payload",
+     "error_message": "no content to parse",
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 0,
+    "debug_log_writes_B24": []
+   }
+  },
+  {
+   "name": "too_many_blocks",
+   "input": {
+    "source_type": "client_webview",
+    "jsonld_blocks": [
+     "{}",
+     "{}",
+     "{}",
+     "{}",
+     "{}",
+     "{}",
+     "{}",
+     "{}",
+     "{}",
+     "{}",
+     "{}"
+    ]
+   },
+   "out": {
+    "parse_result": {
+     "success": false,
+     "recipe": null,
+     "used_llm": false,
+     "parser_strategy": null,
+     "warnings": [],
+     "error_code": "invalid_payload",
+     "error_message": "too_many_jsonld_blocks",
+     "next_action": null,
+     "next_action_reason": null
+    },
+    "llm_calls": 0,
+    "debug_log_writes_B24": []
+   }
+  }
+ ]
+}

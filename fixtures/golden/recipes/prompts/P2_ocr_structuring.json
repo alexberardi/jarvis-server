@@ -1,0 +1,202 @@
+{
+ "inputs": {
+  "one": [
+   [
+    "apple_vision",
+    "Crepe\n/ cup flour\n/ tsp suçau\n1/4 tsp sacr\n/ top Vaneer\n3 eggs\n2 cups er\n2 Has butter melted\nBeat eggs t me togern i blende ou nuxer.\nAdd flowmete te smorte, Stu i netted butter\n+ Varila\nHeat par a wipe with oiled papa, cle.\ni parishes\nUs appux 2= tos por end cupe. Tyr\nrosemarys\nlotate fu to ger en.. Bourn bote see.\nde treme\nSoups • Salads\nAppetizers •\nMain Dishes"
+   ]
+  ],
+  "two": [
+   [
+    "apple_vision",
+    "Crepe\n/ cup flour\n/ tsp suçau\n1/4 tsp sacr\n/ top Vaneer\n3 eggs\n2 cups er\n2 Has butter melted\nBeat eggs t me togern i blende ou nuxer.\nAdd flowmete te smorte, Stu i netted butter\n+ Varila\nHeat par a wipe with oiled papa, cle.\ni parishes\nUs appux 2= tos por end cupe. Tyr\nrosemarys\nlotate fu to ger en.. Bourn bote see.\nde treme\nSoups • Salads\nAppetizers •\nMain Dishes"
+   ],
+   [
+    "rapidocr",
+    "drepe\n56688\n1cupblouR\n1tspsugau\nHhsbuuenmelten\nsds\n1tsp Vaniele\nino\nBeateggsalgrubleoe\nGddflowmyhutulcottr)tneltdbutte\ntvavieia\nHeatpanewyeewutldpaclit\nparsleyp\nUapRia Hhs poou cuuT4\nsage\nBioura brt4u\nLotatepuhureh.\nrosemary\nSerreguingans Ncotarce\n&ethapne"
+   ]
+  ],
+  "unlabelled": [
+   [
+    "",
+    "a"
+   ],
+   [
+    "",
+    "b"
+   ]
+  ]
+ },
+ "requests": {
+  "one_reading": {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 60.0,
+    "write": 60.0,
+    "pool": 60.0
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "Convert OCR text to RecipeDraft JSON. Return ONLY JSON.\n\nSchema: {\"title\":string,\"description\":string|null,\"ingredients\":[{\"name\":string,\"quantity\":string|null,\"unit\":string|null,\"notes\":string|null}],\"steps\":[string],\"prep_time_minutes\":int,\"cook_time_minutes\":int,\"total_time_minutes\":int,\"servings\":string|number|null,\"tags\":[string],\"source\":{\"type\":\"ocr\"}}\n\nRules:\n- Separate ingredients: 'salt and pepper' = 2 entries\n- Extract units from names: '1 cup flour' → quantity:'1', unit:'cup', name:'flour'\n- Put prep notes in 'notes' field\n- Use 0 for unknown time fields, null for missing description\n- If not a valid recipe, return {\"error\":\"garbage_ocr\"}\n"
+     },
+     {
+      "role": "user",
+      "content": "OCR TEXT (verbatim):\n<<<OCR_START>>>\nCrepe\n/ cup flour\n/ tsp suçau\n1/4 tsp sacr\n/ top Vaneer\n3 eggs\n2 cups er\n2 Has butter melted\nBeat eggs t me togern i blende ou nuxer.\nAdd flowmete te smorte, Stu i netted butter\n+ Varila\nHeat par a wipe with oiled papa, cle.\ni parishes\nUs appux 2= tos por end cupe. Tyr\nrosemarys\nlotate fu to ger en.. Bourn bote see.\nde treme\nSoups • Salads\nAppetizers •\nMain Dishes\n<<<OCR_END>>>"
+     }
+    ],
+    "max_tokens": 1100,
+    "stream": false
+   }
+  },
+  "one_reading_empty_model_name": {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 60.0,
+    "write": 60.0,
+    "pool": 60.0
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "Convert OCR text to RecipeDraft JSON. Return ONLY JSON.\n\nSchema: {\"title\":string,\"description\":string|null,\"ingredients\":[{\"name\":string,\"quantity\":string|null,\"unit\":string|null,\"notes\":string|null}],\"steps\":[string],\"prep_time_minutes\":int,\"cook_time_minutes\":int,\"total_time_minutes\":int,\"servings\":string|number|null,\"tags\":[string],\"source\":{\"type\":\"ocr\"}}\n\nRules:\n- Separate ingredients: 'salt and pepper' = 2 entries\n- Extract units from names: '1 cup flour' → quantity:'1', unit:'cup', name:'flour'\n- Put prep notes in 'notes' field\n- Use 0 for unknown time fields, null for missing description\n- If not a valid recipe, return {\"error\":\"garbage_ocr\"}\n"
+     },
+     {
+      "role": "user",
+      "content": "OCR TEXT (verbatim):\n<<<OCR_START>>>\nCrepe\n/ cup flour\n/ tsp suçau\n1/4 tsp sacr\n/ top Vaneer\n3 eggs\n2 cups er\n2 Has butter melted\nBeat eggs t me togern i blende ou nuxer.\nAdd flowmete te smorte, Stu i netted butter\n+ Varila\nHeat par a wipe with oiled papa, cle.\ni parishes\nUs appux 2= tos por end cupe. Tyr\nrosemarys\nlotate fu to ger en.. Bourn bote see.\nde treme\nSoups • Salads\nAppetizers •\nMain Dishes\n<<<OCR_END>>>"
+     }
+    ],
+    "max_tokens": 1100,
+    "stream": false
+   }
+  },
+  "two_readings": {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 60.0,
+    "write": 60.0,
+    "pool": 60.0
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "Convert OCR text to RecipeDraft JSON. Return ONLY JSON.\n\nSchema: {\"title\":string,\"description\":string|null,\"ingredients\":[{\"name\":string,\"quantity\":string|null,\"unit\":string|null,\"notes\":string|null}],\"steps\":[string],\"prep_time_minutes\":int,\"cook_time_minutes\":int,\"total_time_minutes\":int,\"servings\":string|number|null,\"tags\":[string],\"source\":{\"type\":\"ocr\"}}\n\nRules:\n- Separate ingredients: 'salt and pepper' = 2 entries\n- Extract units from names: '1 cup flour' → quantity:'1', unit:'cup', name:'flour'\n- Put prep notes in 'notes' field\n- Use 0 for unknown time fields, null for missing description\n- If not a valid recipe, return {\"error\":\"garbage_ocr\"}\n- You are given SEVERAL independent OCR readings of the SAME image, IN ORDER OF RELIABILITY. READING 1 is from the most accurate engine.\n- Take the LIST of ingredients and steps from READING 1.\n- Use the later readings ONLY to settle something READING 1 left unclear: a smudged quantity, an ambiguous unit, a word that could be two things. Where they agree with READING 1, that is confirmation.\n- NEVER add an ingredient or a step that appears only in a later reading. The weaker engines often read decoration printed on the page -- tab labels, a caption beside an illustration -- more clearly than they read the recipe.\n"
+     },
+     {
+      "role": "user",
+      "content": "OCR READING 1 (apple_vision):\n<<<R1_START>>>\nCrepe\n/ cup flour\n/ tsp suçau\n1/4 tsp sacr\n/ top Vaneer\n3 eggs\n2 cups er\n2 Has butter melted\nBeat eggs t me togern i blende ou nuxer.\nAdd flowmete te smorte, Stu i netted butter\n+ Varila\nHeat par a wipe with oiled papa, cle.\ni parishes\nUs appux 2= tos por end cupe. Tyr\nrosemarys\nlotate fu to ger en.. Bourn bote see.\nde treme\nSoups • Salads\nAppetizers •\nMain Dishes\n<<<R1_END>>>\n\nOCR READING 2 (rapidocr):\n<<<R2_START>>>\ndrepe\n56688\n1cupblouR\n1tspsugau\nHhsbuuenmelten\nsds\n1tsp Vaniele\nino\nBeateggsalgrubleoe\nGddflowmyhutulcottr)tneltdbutte\ntvavieia\nHeatpanewyeewutldpaclit\nparsleyp\nUapRia Hhs poou cuuT4\nsage\nBioura brt4u\nLotatepuhureh.\nrosemary\nSerreguingans Ncotarce\n&ethapne\n<<<R2_END>>>"
+     }
+    ],
+    "max_tokens": 1100,
+    "stream": false
+   }
+  },
+  "two_unlabelled_readings": {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 60.0,
+    "write": 60.0,
+    "pool": 60.0
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.0,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "Convert OCR text to RecipeDraft JSON. Return ONLY JSON.\n\nSchema: {\"title\":string,\"description\":string|null,\"ingredients\":[{\"name\":string,\"quantity\":string|null,\"unit\":string|null,\"notes\":string|null}],\"steps\":[string],\"prep_time_minutes\":int,\"cook_time_minutes\":int,\"total_time_minutes\":int,\"servings\":string|number|null,\"tags\":[string],\"source\":{\"type\":\"ocr\"}}\n\nRules:\n- Separate ingredients: 'salt and pepper' = 2 entries\n- Extract units from names: '1 cup flour' → quantity:'1', unit:'cup', name:'flour'\n- Put prep notes in 'notes' field\n- Use 0 for unknown time fields, null for missing description\n- If not a valid recipe, return {\"error\":\"garbage_ocr\"}\n- You are given SEVERAL independent OCR readings of the SAME image, IN ORDER OF RELIABILITY. READING 1 is from the most accurate engine.\n- Take the LIST of ingredients and steps from READING 1.\n- Use the later readings ONLY to settle something READING 1 left unclear: a smudged quantity, an ambiguous unit, a word that could be two things. Where they agree with READING 1, that is confirmation.\n- NEVER add an ingredient or a step that appears only in a later reading. The weaker engines often read decoration printed on the page -- tab labels, a caption beside an illustration -- more clearly than they read the recipe.\n"
+     },
+     {
+      "role": "user",
+      "content": "OCR READING 1 (engine 1):\n<<<R1_START>>>\na\n<<<R1_END>>>\n\nOCR READING 2 (engine 2):\n<<<R2_START>>>\nb\n<<<R2_END>>>"
+     }
+    ],
+    "max_tokens": 1100,
+    "stream": false
+   }
+  },
+  "draft_from_reply": {
+   "title": "Crepes",
+   "description": "Thin.",
+   "ingredients": [
+    {
+     "name": "flour",
+     "quantity": "1",
+     "unit": "cup",
+     "notes": null
+    },
+    {
+     "name": "eggs",
+     "quantity": "3",
+     "unit": null,
+     "notes": null
+    },
+    {
+     "name": "milk",
+     "quantity": "2",
+     "unit": "cups",
+     "notes": null
+    }
+   ],
+   "steps": [
+    "Beat",
+    "Cook"
+   ],
+   "prep_time_minutes": 0,
+   "cook_time_minutes": 0,
+   "total_time_minutes": 0,
+   "servings": null,
+   "tags": [],
+   "source": {
+    "type": "ocr",
+    "original_filename": null,
+    "ocr_tier_used": null
+   }
+  }
+ }
+}

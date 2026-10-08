@@ -1,0 +1,37 @@
+{
+ "legacy_repo": "jarvis-recipes-server",
+ "legacy_sha": "f8589fbdfd09aa96862d38a04291d2cd914d8774",
+ "generator": "tools/golden/export_recipes.py",
+ "rows": {
+  "quantity.json": 198,
+  "ingredients.json": 51,
+  "normalize_name.json": 606,
+  "cart.json": 51,
+  "ocr.json": 36,
+  "llm_parse.json": 99,
+  "extract.json": 41,
+  "prompts/P1_url_extract.json": 2,
+  "prompts/P1r_json_repair_url.json": 1,
+  "prompts/P1r_json_repair_draft.json": 1,
+  "prompts/P2_ocr_structuring.json": 5,
+  "prompts/P3_draft_cleanup.json": 2,
+  "prompts/P4_meal_plan_select.json": 1,
+  "prompts/P5_grocery_match.json": 1
+ },
+ "sha256": {
+  "cart.json": "b11c5167258c9a01e1c244d7fd05a6331af8db00bc38a89bcd1d74586d94c4b0",
+  "extract.json": "0119ea6eabda7e5d8d2c8d38864b2750510771de95d5ddc6745db0f06bfb07d4",
+  "ingredients.json": "e395bd17c1a7a297acd2fc8292a42494667c0335ee36a0aae49e352cdfda06c7",
+  "llm_parse.json": "66eafadbc70b5b4cbdbb23adf2cd8d360dcd7975451d0e57a0b0d5787f13eb46",
+  "normalize_name.json": "5588cf4320f17b2ba9fa3d1774e1c7e05986734826e1b71cc2a9c2d22f95c028",
+  "ocr.json": "ace990ac6d499ffdf92ab543cfa2de08d9e84385d48a65b9a05696e7cd07a85b",
+  "prompts/P1_url_extract.json": "d8ec42ea9abff7287af745c3c4757990f107bfcd87af27e715017e75555bc0e3",
+  "prompts/P1r_json_repair_draft.json": "cc34d245b4f8fdde6fb44b44faa82e883e9b130299917fbe06b79674821c212a",
+  "prompts/P1r_json_repair_url.json": "8ef7fe980c48aae75427eeb76b58a7eb1206a6bb98d698a6f166261c18653449",
+  "prompts/P2_ocr_structuring.json": "1965fb7700fae67cea931e689dbe09d98b6a0a41f63ae4829dc21c609f7eec10",
+  "prompts/P3_draft_cleanup.json": "4533ed1919f3a5d3878c168a9c0b810c085ee2e8919e92f87db11b7763278b31",
+  "prompts/P4_meal_plan_select.json": "5bbb09b54e49b401425a4e73c4e60ccdb766e901d9537681c9a4a2b7d63ba282",
+  "prompts/P5_grocery_match.json": "b2019f8e6108bea3a8d5b09bba7df45a4009cd2bd97aab1d5287428cfc872d3b",
+  "quantity.json": "e26a7472739f2ccb5469bec91a27c71b999fc0eaaec5179cf3eb1353faa8d22e"
+ }
+}

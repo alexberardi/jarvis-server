@@ -1,0 +1,124 @@
+{
+  "_comment": "Synthetic inputs for tools/golden/export_recipes.py. Harvested inputs (legacy tests, static_data) are added at run time.",
+  "quantity_display": [
+    null, "", "   ", "1", "0.5", "1.5", ".5", "2.", "02", "1/2", "3/4", "1/3", "2/3", "1 1/2", "2 3/4", "1/0", "1 1/0",
+    "0/0", "-1", "+1", "1-2", "1 - 2", "1/2 cup", "½", "1½", "1 ½", "abc", "NaN", "nan", "Infinity", "-Infinity",
+    "1e3", "1E-2", "1_000", " 1 ", "1  1/2", "1 1/2 3", "1/2/3", "a/b", "1 a/b", "0", "0.0", "10000000", "123456.78901",
+    "0.33333", "1/7", "1 1/3", "٣", "1,5"
+  ],
+  "fraction_display": [
+    null, "", "1", "02", "2.0", "1.50", "-0", "1½", "2¼", "½", "1 ½", "1  ½ ", "⅓", "1⅔", "3/4", "1-2", "1 to 2",
+    "10.25", "0.1", "1e3", "¾ cup", "1½½"
+  ],
+  "unit_tokens": [
+    "cup", "cups", "Cups", "CUP.", "tsp", "tsp.", "Tbsp", "tbsps", "glass", "glasses", "lbs", "lb.", "oz", "ozs",
+    "grams", "g", "gs", "kg", "ml", "l", "ls", "liters", "litre", "s", "", ".", "fl", "fl-oz", "pinch", "dash",
+    "cloves", "heads", "ears", "bunches", "pieces", "pkg", "packets", "c", "c.", "stick", "sticks", "slices", "cans",
+    "packages", "gallon", "gals", "quarts", "qt", "pts", "pounds"
+  ],
+  "durations": [
+    null, "", "PT30M", "PT1H", "PT1H30M", "PT90M", "PT0M", "PT0S", "PT29S", "PT30S", "PT1H0M30S", "P1DT2H", "P1D",
+    "PT", "P", "PT1.5H", "pt30m", "30 minutes", "1 hour 20 minutes", "PT2H5M10S", "PT45M ", "P0DT0H20M", "PT100H",
+    "xPT10M"
+  ],
+  "minutes_values": [
+    null, 5, 5.9, "PT15M", "15 min", "about 20 minutes", "1 hour", "45", "ten minutes", "P1DT2H", "PT0M"
+  ],
+  "servings_values": [
+    null, 4, 4.7, "4", "4 servings", "Serves 6-8", "Makes about 24 cookies", "one", "", "0"
+  ],
+  "servings_text": [
+    "", "Serves 4", "serves: 6", "Yield: 12 cookies", "Yields: 2 loaves", "Serves four", "This recipe SERVES 8 people"
+  ],
+  "split_qty_unit": [
+    "", "1", "1 cup", "1 cups", "3/4 teaspoon", "1 pound (85% lean)", "2 large", "pinch", "pinch salt", "a pinch",
+    "1 (14 oz) can", "1 can (14 oz)", "2 sticks, softened", "1 lb.", "1 1/2 cups", "about 2 cups", "2-3 cloves",
+    "12 ounces", "1 G", "200 g", "1 l", "to taste", "3 slices", "4 pieces", "2 Tbsp."
+  ],
+  "ingredient_lines": [
+    "1 cup flour", "1 1/2 cups milk", "1½ cups sugar", "2 tbsp. butter, melted", "3 eggs", "salt",
+    "Salt and pepper to taste", "1 (14 oz) can tomatoes", "2 cloves garlic, minced", "1/4 tsp salt",
+    "Recipe ingredient one", "2 large eggs (beaten)", "1 lb ground beef", "½ teaspoon vanilla extract",
+    "1-2 jalapenos", "1 glass water", "4 heads lettuce", "2 C. flour", "  10   grams   yeast  ",
+    "1/2 stick butter (softened)", "100 ml cream", "3 ears corn", "2 pkg cream cheese", "1 bunch cilantro",
+    "a handful of spinach", "6 slices bacon", "2 + 1 cups water", "0.5 kg potatoes", ""
+  ],
+  "ingredient_dicts": [
+    {"text": "1 cup flour"},
+    {"name": "2 eggs"},
+    {"text": "sugar", "amount": "1/2", "unit": "cup"},
+    {"name": "milk", "quantity": "1 1/2", "unit": ""},
+    {"text": "butter", "quantity": "2 tbsp"},
+    {"amount": "1", "unit": "cup"},
+    {"text": ""},
+    {"text": "salt", "unit": "pinch"}
+  ],
+  "clean_parsed": [
+    {"text": "1 cup flour"},
+    {"text": "flour", "quantity_display": "1 cup"},
+    {"text": "flour", "quantity_display": "1 cup", "unit": "cup"},
+    {"text": "2 tbsp butter", "quantity_display": null, "unit": null},
+    {"text": "sugar", "quantity_display": "½", "unit": "cup"},
+    {"text": "eggs", "quantity_display": "3"},
+    {"text": "3 eggs", "quantity_display": "2"},
+    {"text": "milk", "quantity_display": "1 1/2 cups milk"},
+    {"text": "  salt  ", "quantity_display": "", "unit": ""},
+    {"text": "water", "quantity_display": "2 glasses"},
+    {"text": "beef", "quantity_display": "1 lbs", "unit": "lb"},
+    {"text": "oil", "quantity_display": "2 tablespoons", "unit": "Tbsp"}
+  ],
+  "normalize_name_synthetic": [
+    "", "   ", "Salt", "salt to taste", "Salt and black pepper to taste", "olive oil, divided", "2% milk", "7up",
+    "90/10 ground beef", "1 1/2 lb beef sirloin, sliced thin", "1½ cups sugar", "¼ cup honey (or agave)",
+    "2 Tbsp. butter, melted", "3 cloves garlic, finely chopped", "1 (14 oz) can diced tomatoes",
+    "gochujang (korean chili paste)", "1 lb lean ground beef (93/7 or leaner)", "1-2 jalapenos, seeded",
+    "2 lbs. potatoes, peeled and cubed", "1 g saffron", "1 l water", "lemon (optional)", "lettuce (about 1 head)",
+    "parsley (fresh, chopped)", "pasta (75g)", "pasta (225)", "kg", "2 kg", "Cups of flour", "cupcake liners",
+    "gallon bag", "1 dash hot sauce", "pinch of salt", "a pinch salt", "12 oz. chocolate chips",
+    "1/2 tsp. vanilla extract", "3 large eggs, beaten", "4 Roma tomatoes, quartered", "1 bunch cilantro, rinsed",
+    "1 package cream cheese, softened", "sprig rosemary", "2 sprigs thyme", "1 stick butter", "chopped onion",
+    "onion, chopped", "onion, Chopped", "ONION, DICED", "beans, rinsed and drained", "5 ml vanilla",
+    "1.5 oz gin", "1/3 cup", "1", "(optional) basil", "basil (Optional)", "corn (or 2 cans)", "2 cups (500 ml) stock",
+    "salt & pepper", "Kosher salt, to taste", "ground cinnamon to taste ", "  2   cups  flour  ", "- 1 cup sugar",
+    ". 5 eggs", "100g flour", "100 g flour", "1/2-inch ginger", "12-ounce can beer", "6–8 chicken thighs",
+    "tablespoon butter", "tbsp butter", "tbspbutter", "l'oreal", "lbs", "liters of water", "ml", "g"
+  ],
+  "pack_cases": [
+    {"amounts": [{"unit": "lb", "quantity": "1.4"}], "unit_size": "1 lb"},
+    {"amounts": [{"unit": "lb", "quantity": "1"}], "unit_size": "1 lb"},
+    {"amounts": [{"unit": "lb", "quantity": "0.25"}], "unit_size": "1 lb"},
+    {"amounts": [{"unit": "LB", "quantity": "3"}], "unit_size": "2 lb"},
+    {"amounts": [{"unit": "oz", "quantity": "30"}], "unit_size": "12 oz"},
+    {"amounts": [{"unit": "oz", "quantity": "30"}], "unit_size": "12oz"},
+    {"amounts": [{"unit": "cloves", "quantity": "3"}], "unit_size": "2 lb"},
+    {"amounts": [{"unit": null, "quantity": "3"}], "unit_size": "6"},
+    {"amounts": [{"unit": null, "quantity": "13"}], "unit_size": "12"},
+    {"amounts": [{"unit": null, "quantity": "3"}], "unit_size": "6 ct"},
+    {"amounts": [{"unit": "lb", "quantity": null, "unparsed": ["some"]}], "unit_size": "1 lb"},
+    {"amounts": [{"unit": "lb", "quantity": "2"}], "unit_size": null},
+    {"amounts": [{"unit": "lb", "quantity": "2"}], "unit_size": ""},
+    {"amounts": [{"unit": "lb", "quantity": "2"}], "unit_size": "0 lb"},
+    {"amounts": [{"unit": "lb", "quantity": "2"}], "unit_size": "about 1 lb"},
+    {"amounts": [{"unit": "cup", "quantity": "2"}, {"unit": "lb", "quantity": "5"}], "unit_size": "2 lb"},
+    {"amounts": [{"unit": "lb", "quantity": "0"}], "unit_size": "1 lb"},
+    {"amounts": [{"unit": "kg", "quantity": "2.5"}], "unit_size": "0.5 kg"},
+    {"amounts": [], "unit_size": "1 lb"}
+  ],
+  "cart_url_cases": [
+    [],
+    [{"sku": "123", "quantity": 1}],
+    [{"sku": "123", "quantity": 2}, {"sku": "456", "quantity": 1}],
+    [{"sku": "", "quantity": 2}, {"sku": "789", "quantity": 3}],
+    [{"sku": "a b/c&d", "quantity": 1}, {"sku": "ü", "quantity": 1}],
+    [{"sku": "12,34", "quantity": 1}]
+  ],
+  "amount_display_cases": [
+    [{"unit": "lb", "quantity": "1.5"}],
+    [{"unit": "lb", "quantity": "2.0000"}],
+    [{"unit": null, "quantity": "3"}],
+    [{"unit": "cup", "quantity": "0.25"}, {"unit": null, "quantity": null, "unparsed": ["a pinch", "some"]}],
+    [{"unit": "g", "quantity": "100"}],
+    [{"unit": "g", "quantity": "1E+2"}],
+    []
+  ]
+}

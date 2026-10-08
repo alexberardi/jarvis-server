@@ -1,0 +1,383 @@
+{
+ "inputs": {
+  "slot": {
+   "date": "2026-10-08",
+   "meal_type": "dinner",
+   "servings": 4,
+   "tags": [
+    "chicken"
+   ],
+   "notes": "something easy",
+   "is_meal_prep": false
+  },
+  "preferences": {
+   "diet": null,
+   "excluded_ingredients": [
+    "peanut"
+   ],
+   "max_prep_minutes": null,
+   "max_cook_minutes": 45
+  },
+  "recent_meals": [
+   {
+    "date": "2026-10-07",
+    "meal_type": "dinner",
+    "recipe_id": "3",
+    "title": "Ünïcode",
+    "tags": []
+   }
+  ],
+  "candidates": [
+   {
+    "id": "1",
+    "source": "user",
+    "title": "Recipe 1 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 1",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 5
+   },
+   {
+    "id": "2",
+    "source": "user",
+    "title": "Recipe 2 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 2",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 10
+   },
+   {
+    "id": "3",
+    "source": "user",
+    "title": "Recipe 3 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 15
+   },
+   {
+    "id": "4",
+    "source": "user",
+    "title": "Recipe 4 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 4",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": null
+   },
+   {
+    "id": "5",
+    "source": "user",
+    "title": "Recipe 5 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": null,
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 25
+   },
+   {
+    "id": "6",
+    "source": "user",
+    "title": "Recipe 6 — “quoted” & <b>",
+    "tags": [],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 30
+   },
+   {
+    "id": "core_7",
+    "source": "core",
+    "title": "Recipe 7 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 7",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 35
+   },
+   {
+    "id": "8",
+    "source": "user",
+    "title": "Recipe 8 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 8",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": null
+   },
+   {
+    "id": "9",
+    "source": "user",
+    "title": "Recipe 9 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 45
+   },
+   {
+    "id": "10",
+    "source": "user",
+    "title": "Recipe 10 — “quoted” & <b>",
+    "tags": [],
+    "description": null,
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 50
+   },
+   {
+    "id": "11",
+    "source": "user",
+    "title": "Recipe 11 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 11",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 55
+   },
+   {
+    "id": "12",
+    "source": "user",
+    "title": "Recipe 12 — “quoted” & <b>",
+    "tags": [],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": null
+   },
+   {
+    "id": "13",
+    "source": "user",
+    "title": "Recipe 13 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 13",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 65
+   },
+   {
+    "id": "core_14",
+    "source": "core",
+    "title": "Recipe 14 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 14",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 70
+   },
+   {
+    "id": "15",
+    "source": "user",
+    "title": "Recipe 15 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": null,
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 75
+   },
+   {
+    "id": "16",
+    "source": "user",
+    "title": "Recipe 16 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 16",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": null
+   },
+   {
+    "id": "17",
+    "source": "user",
+    "title": "Recipe 17 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 17",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 85
+   },
+   {
+    "id": "18",
+    "source": "user",
+    "title": "Recipe 18 — “quoted” & <b>",
+    "tags": [],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 90
+   },
+   {
+    "id": "19",
+    "source": "user",
+    "title": "Recipe 19 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 19",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 95
+   },
+   {
+    "id": "20",
+    "source": "user",
+    "title": "Recipe 20 — “quoted” & <b>",
+    "tags": [],
+    "description": null,
+    "prep_time_minutes": 0,
+    "cook_time_minutes": null
+   },
+   {
+    "id": "core_21",
+    "source": "core",
+    "title": "Recipe 21 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 105
+   },
+   {
+    "id": "22",
+    "source": "user",
+    "title": "Recipe 22 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 22",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 110
+   },
+   {
+    "id": "23",
+    "source": "user",
+    "title": "Recipe 23 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 23",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 115
+   },
+   {
+    "id": "24",
+    "source": "user",
+    "title": "Recipe 24 — “quoted” & <b>",
+    "tags": [],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": null
+   },
+   {
+    "id": "25",
+    "source": "user",
+    "title": "Recipe 25 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": null,
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 125
+   },
+   {
+    "id": "26",
+    "source": "user",
+    "title": "Recipe 26 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 26",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 130
+   },
+   {
+    "id": "27",
+    "source": "user",
+    "title": "Recipe 27 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Long description Long description Long description Long description Long description Long description Long description Long description Long description Long description ",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 135
+   },
+   {
+    "id": "core_28",
+    "source": "core",
+    "title": "Recipe 28 — “quoted” & <b>",
+    "tags": [],
+    "description": "Short 28",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": null
+   },
+   {
+    "id": "29",
+    "source": "user",
+    "title": "Recipe 29 — “quoted” & <b>",
+    "tags": [
+     "dinner",
+     "quick"
+    ],
+    "description": "Short 29",
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 145
+   },
+   {
+    "id": "30",
+    "source": "user",
+    "title": "Recipe 30 — “quoted” & <b>",
+    "tags": [],
+    "description": null,
+    "prep_time_minutes": 0,
+    "cook_time_minutes": 150
+   }
+  ]
+ },
+ "requests": [
+  {
+   "url": "http://llm.invalid/v1/chat/completions",
+   "header_names": [
+    "Content-Type",
+    "X-Jarvis-App-Id",
+    "X-Jarvis-App-Key"
+   ],
+   "timeout": {
+    "connect": 10.0,
+    "read": 30,
+    "write": 30,
+    "pool": 30
+   },
+   "body": {
+    "model": "live",
+    "temperature": 0.2,
+    "response_format": {
+     "type": "json_object"
+    },
+    "messages": [
+     {
+      "role": "system",
+      "content": "You are a meal planning assistant that selects and ranks recipes from a provided candidate list. Your job is to interpret user intent (notes, tags, preferences), encourage variety using recent meal history, and return the TOP 3 RANKED recipes that best fit the slot. \n\nRULES:\n- Return your TOP 3 recipe choices in ranked order (best first).\n- You MUST select recipe_ids from the provided candidates list.\n- You MUST NOT invent, create, or select recipes not in the candidates list.\n- Prefer to suggest options over nothing - even if not perfect matches.\n- ONLY return null for the primary selection if candidates are truly incompatible (e.g., user wants vegan but all candidates have meat).\n- Variety is a soft constraint: prefer different recipes/proteins across consecutive days when alternatives exist.\n- Interpret free-text notes (e.g., 'something easy', 'I want chicken') as ranking signals, not hard requirements.\n- Tags and preferences are guidance, not absolute filters - be flexible and helpful.\n- Use confidence scores to indicate match quality: 0.9-1.0 = excellent, 0.7-0.9 = good, 0.5-0.7 = acceptable, <0.5 = poor.\n- For each ranked option, provide a brief reason explaining why it's a good choice.\n- Return ONLY valid JSON matching this schema:\n  { \"ranked_recipes\": [{\"recipe_id\": \"string\", \"confidence\": 0.0-1.0, \"reason\": \"why this fits\"}], \"warnings\": [\"optional warning strings\"] }\n- The ranked_recipes array should contain 1-3 recipes in priority order.\n- If no candidates fit at all, return ranked_recipes as an empty array with warnings explaining why."
+     },
+     {
+      "role": "user",
+      "content": "Select the best recipe for this meal slot:\n{\n  \"slot\": {\n    \"date\": \"2026-10-08\",\n    \"meal_type\": \"dinner\",\n    \"servings\": 4,\n    \"tags\": [\n      \"chicken\"\n    ],\n    \"notes\": \"something easy\",\n    \"is_meal_prep\": false\n  },\n  \"preferences\": {\n    \"diet\": null,\n    \"excluded_ingredients\": [\n      \"peanut\"\n    ],\n    \"max_prep_minutes\": null,\n    \"max_cook_minutes\": 45\n  },\n  \"recent_meals\": [\n    {\n      \"date\": \"2026-10-07\",\n      \"meal_type\": \"dinner\",\n      \"recipe_id\": \"3\",\n      \"title\": \"\\u00dcn\\u00efcode\",\n      \"tags\": []\n    }\n  ],\n  \"candidates\": [\n    {\n      \"recipe_id\": \"1\",\n      \"title\": \"Recipe 1 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 5,\n      \"summary\": \"Short 1\"\n    },\n    {\n      \"recipe_id\": \"2\",\n      \"title\": \"Recipe 2 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": 10,\n      \"summary\": \"Short 2\"\n    },\n    {\n      \"recipe_id\": \"3\",\n      \"title\": \"Recipe 3 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 15,\n      \"summary\": \"Long description Long description Long description Long description Long description Long descriptio\"\n    },\n    {\n      \"recipe_id\": \"4\",\n      \"title\": \"Recipe 4 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": null,\n      \"summary\": \"Short 4\"\n    },\n    {\n      \"recipe_id\": \"5\",\n      \"title\": \"Recipe 5 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 25,\n      \"summary\": null\n    },\n    {\n      \"recipe_id\": \"6\",\n      \"title\": \"Recipe 6 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": 30,\n      \"summary\": \"Long description Long description Long description Long description Long description Long descriptio\"\n    },\n    {\n      \"recipe_id\": \"core_7\",\n      \"title\": \"Recipe 7 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 35,\n      \"summary\": \"Short 7\"\n    },\n    {\n      \"recipe_id\": \"8\",\n      \"title\": \"Recipe 8 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": null,\n      \"summary\": \"Short 8\"\n    },\n    {\n      \"recipe_id\": \"9\",\n      \"title\": \"Recipe 9 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 45,\n      \"summary\": \"Long description Long description Long description Long description Long description Long descriptio\"\n    },\n    {\n      \"recipe_id\": \"10\",\n      \"title\": \"Recipe 10 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": 50,\n      \"summary\": null\n    },\n    {\n      \"recipe_id\": \"11\",\n      \"title\": \"Recipe 11 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 55,\n      \"summary\": \"Short 11\"\n    },\n    {\n      \"recipe_id\": \"12\",\n      \"title\": \"Recipe 12 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": null,\n      \"summary\": \"Long description Long description Long description Long description Long description Long descriptio\"\n    },\n    {\n      \"recipe_id\": \"13\",\n      \"title\": \"Recipe 13 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 65,\n      \"summary\": \"Short 13\"\n    },\n    {\n      \"recipe_id\": \"core_14\",\n      \"title\": \"Recipe 14 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": 70,\n      \"summary\": \"Short 14\"\n    },\n    {\n      \"recipe_id\": \"15\",\n      \"title\": \"Recipe 15 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 75,\n      \"summary\": null\n    },\n    {\n      \"recipe_id\": \"16\",\n      \"title\": \"Recipe 16 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": null,\n      \"summary\": \"Short 16\"\n    },\n    {\n      \"recipe_id\": \"17\",\n      \"title\": \"Recipe 17 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 85,\n      \"summary\": \"Short 17\"\n    },\n    {\n      \"recipe_id\": \"18\",\n      \"title\": \"Recipe 18 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": 90,\n      \"summary\": \"Long description Long description Long description Long description Long description Long descriptio\"\n    },\n    {\n      \"recipe_id\": \"19\",\n      \"title\": \"Recipe 19 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 95,\n      \"summary\": \"Short 19\"\n    },\n    {\n      \"recipe_id\": \"20\",\n      \"title\": \"Recipe 20 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": null,\n      \"summary\": null\n    },\n    {\n      \"recipe_id\": \"core_21\",\n      \"title\": \"Recipe 21 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 105,\n      \"summary\": \"Long description Long description Long description Long description Long description Long descriptio\"\n    },\n    {\n      \"recipe_id\": \"22\",\n      \"title\": \"Recipe 22 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": 110,\n      \"summary\": \"Short 22\"\n    },\n    {\n      \"recipe_id\": \"23\",\n      \"title\": \"Recipe 23 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 115,\n      \"summary\": \"Short 23\"\n    },\n    {\n      \"recipe_id\": \"24\",\n      \"title\": \"Recipe 24 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [],\n      \"prep_time\": 0,\n      \"cook_time\": null,\n      \"summary\": \"Long description Long description Long description Long description Long description Long descriptio\"\n    },\n    {\n      \"recipe_id\": \"25\",\n      \"title\": \"Recipe 25 \\u2014 \\u201cquoted\\u201d & <b>\",\n      \"tags\": [\n        \"dinner\",\n        \"quick\"\n      ],\n      \"prep_time\": 0,\n      \"cook_time\": 125,\n      \"summary\": null\n    }\n  ]\n}\n\nReturn your selection as JSON only. No prose, no markdown."
+     }
+    ],
+    "max_tokens": 300,
+    "stream": false
+   }
+  }
+ ]
+}
