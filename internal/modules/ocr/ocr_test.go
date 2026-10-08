@@ -376,10 +376,19 @@ func TestSubmitJob(t *testing.T) {
 	if len(res["blocks"].([]any)) != 1 {
 		t.Fatalf("return_boxes defaults to true: %v", res)
 	}
-	// The image is gone once the job finished.
-	infos, _ := e.m.deps.Blobs.List(e.ctx, jobPrefix+id+"/")
-	if len(infos) != 1 || !strings.HasSuffix(infos[0].Key, "job.json") {
-		t.Fatalf("blobs left: %v", infos)
+	// The image goes once the job finished. finish saves the result first and deletes after,
+	// so a reader can see "completed" a moment before the image is gone.
+	var infos []blob.Info
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		infos, _ = e.m.deps.Blobs.List(e.ctx, jobPrefix+id+"/")
+		if len(infos) == 1 && strings.HasSuffix(infos[0].Key, "job.json") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("blobs left: %v", infos)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// No tier yields valid text: failed, with the reason.
