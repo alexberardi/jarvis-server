@@ -802,7 +802,7 @@ Code: `internal/update` (minisign, release lookup, stage, swap, rollback, marker
 pre-start helper (`internal/platform/service/render.go`), `scripts/upgrade-e2e.sh`.
 
 **Trust root.** The release workflow signs `SHA256SUMS` with the project minisign key (the node/admin key,
-id `57B308024B7CF265`, jarvisd's own key since 2026-10-07 — the node-setup key's password was lost; secrets `MINISIGN_SECRET_KEY` + `MINISIGN_PASSWORD`) with the trusted comment
+id `C9A24FB502A25B72`; secrets `MINISIGN_SECRET_KEY` + `MINISIGN_PASSWORD`) with the trusted comment
 `jarvisd <tag> SHA256SUMS`, producing `SHA256SUMS.minisig`. jarvisd verifies it in Go with the public key
 compiled into the **running** binary (legacy `Ed` and prehashed `ED` signatures, plus the global signature
 over the trusted comment), requires the comment to name the release being installed, then checks the

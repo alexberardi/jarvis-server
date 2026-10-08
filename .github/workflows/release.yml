@@ -89,7 +89,7 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           VERSION: ${{ steps.v.outputs.version }}
           PUBLISHING: ${{ github.event_name == 'push' || inputs.publish }}
-          PROJECT_KEY: RWRl8nxLAgizV2ZlGLPIfxp71+OvcD6PSbdoRy/evF9EbXxpwsQTB3/F
+          PROJECT_KEY: RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L
         run: |
           set -euo pipefail
           if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
@@ -195,5 +195,5 @@ jobs:
           set -euo pipefail
           pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
           gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
-            --notes "Single-binary Jarvis server. Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRl8nxLAgizV2ZlGLPIfxp71+OvcD6PSbdoRy/evF9EbXxpwsQTB3/F), and run \`jarvisd serve\`. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it." \
+            --notes "Single-binary Jarvis server. Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it." \
             $pre

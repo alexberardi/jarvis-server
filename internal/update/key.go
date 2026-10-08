@@ -1,10 +1,11 @@
 package update
 
-// ProjectPublicKey is jarvisd's release signing key (id 57B308024B7CF265 as minisign prints it).
-// It is jarvisd's own key, separate from the node-setup/admin key (whose password was lost).
+// ProjectPublicKey is the project's minisign key (id C9A24FB502A25B72 as minisign prints it; its
+// bytes in order are 725ba202b54fa2c9, as node-setup's install.sh quotes it): the same key signs the
+// jarvis-node-setup and jarvis-admin releases (jarvis-node-setup/install.sh MINISIGN_PUBKEY).
 // The release workflow signs SHA256SUMS with its secret half (repo secrets
 // MINISIGN_SECRET_KEY + MINISIGN_PASSWORD).
-const ProjectPublicKey = "RWRl8nxLAgizV2ZlGLPIfxp71+OvcD6PSbdoRy/evF9EbXxpwsQTB3/F"
+const ProjectPublicKey = "RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L"
 
 // extraTrustedKey is an additional trusted key, set only by test builds through
 //
