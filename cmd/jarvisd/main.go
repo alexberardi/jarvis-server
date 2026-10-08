@@ -146,6 +146,7 @@ func modules() []module.Module {
 		case *recipesmod.Module:
 			c.Users = auth
 			c.Households = auth
+			c.Clock = cc // "today" for the planner is the household's date
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
 			c.SettingsWrite = superuser
 			// RD4: the household keeps shared rows; private rows, jobs and imports go.

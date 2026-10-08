@@ -91,6 +91,9 @@ type Module struct {
 	// Households resolves the caller's memberships for the RD7 union. Nil trusts the token's
 	// household claim alone (tests).
 	Households HouseholdLister
+	// Clock gives "today" for /planner/current in the household's zone (cc's household clock).
+	// Nil uses the host's zone.
+	Clock HouseholdClock
 	// SettingsRead and SettingsWrite guard /settings; both nil leaves them unmounted.
 	SettingsRead, SettingsWrite settings.Guard
 
@@ -144,6 +147,22 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST /tags", m.user(m.handleCreateTag))
 	mux.HandleFunc("GET /ingredients/stock", m.user(m.handleStockIngredients))
 	mux.HandleFunc("GET /units/stock", m.user(m.handleStockUnits))
+
+	// §3.4 planner and the random quick plan (R4).
+	mux.HandleFunc("POST /planner/commit", m.user(m.handleCommitPlan))
+	mux.HandleFunc("GET /planner/current", m.user(m.handleCurrentPlan))
+	mux.HandleFunc("GET /planner/plans", m.user(m.handleListPlans))
+	mux.HandleFunc("GET /planner/plans/{plan_id}", m.user(m.handleGetPlan))
+	mux.HandleFunc("DELETE /planner/plans/{plan_id}", m.user(m.handleDeletePlan))
+	mux.HandleFunc("PATCH /planner/plans/{plan_id}/items", m.user(m.handleMoveItems))
+	mux.HandleFunc("POST /meal-plans/random", m.user(m.handleRandomPlan))
+	mux.HandleFunc("POST /meal-plans/random/reroll", m.user(m.handleReroll))
+
+	// §3.5 shopping list and staples (R4).
+	mux.HandleFunc("GET /shopping-list", m.user(m.handleShoppingList))
+	mux.HandleFunc("GET /staples", m.user(m.handleListStaples))
+	mux.HandleFunc("POST /staples", m.user(m.handleAddStaple))
+	mux.HandleFunc("DELETE /staples/{staple_id}", m.user(m.handleDeleteStaple))
 
 	// §3.2 editor photos (R3).
 	mux.HandleFunc("POST /recipes/import/image", m.user(m.handleImportImage))

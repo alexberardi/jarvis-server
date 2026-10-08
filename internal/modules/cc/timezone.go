@@ -56,3 +56,9 @@ func (m *Module) recordNodeTimezone(ctx context.Context, nodeID, tz string) {
 		m.deps.Log.Warn("cc: recording node timezone failed", "node", nodeID, "err", err)
 	}
 }
+
+// HouseholdTimezone is the household's IANA zone ("" = unknown) for other modules, e.g. the
+// recipes planner's "today".
+func (m *Module) HouseholdTimezone(ctx context.Context, householdID string) string {
+	return m.householdTimezone(ctx, householdID)
+}
