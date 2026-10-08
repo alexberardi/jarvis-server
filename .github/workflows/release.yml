@@ -290,9 +290,17 @@ jobs:
           "$bin" migrate status
       # The one-line installers ship as release assets (the admin's update check shows an
       # install command only when they are there). They are fetched on their own over TLS, so
-      # they stay out of SHA256SUMS.
+      # they stay out of SHA256SUMS. Each is stamped with the tag (A10b): the copy at a
+      # release's URL installs that release, prereleases included, with no --version.
       - name: Add the install scripts
-        run: cp scripts/install.sh scripts/install.ps1 dist/
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          sed "s/^RELEASE_VERSION=\"\"$/RELEASE_VERSION=\"$VERSION\"/" scripts/install.sh > dist/install.sh
+          sed "s/^\$ReleaseVersion = ''$/\$ReleaseVersion = '$VERSION'/" scripts/install.ps1 > dist/install.ps1
+          grep -qx "RELEASE_VERSION=\"$VERSION\"" dist/install.sh
+          grep -qx "\$ReleaseVersion = '$VERSION'" dist/install.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: jarvisd-${{ needs.build.outputs.version }}

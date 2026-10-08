@@ -59,7 +59,8 @@ function Verdict({ info }: { info: UpdateInfo }) {
           <div>
             <p className="text-sm font-medium text-[var(--color-text)]">jarvisd is up to date</p>
             <p className="text-xs text-[var(--color-text-muted)]">
-              {info.current_version} is the latest release{checkedAt ? ` · checked ${checkedAt}` : ''}
+              {info.current_version} is the latest {info.prerelease ? 'pre-release' : 'release'}
+              {checkedAt ? ` · checked ${checkedAt}` : ''}
             </p>
           </div>
         </div>
@@ -169,9 +170,16 @@ export default function UpdatePage() {
                 className="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
                 checked={data.updates_enabled}
                 disabled={toggle.isPending}
-                onChange={(e) =>
-                  toggle.mutate(e.target.checked, { onError: (err) => toast.error(errorMessage(err, 'Could not change the setting')) })
-                }
+                onChange={(e) => {
+                  const on = e.target.checked
+                  toggle.mutate(on, {
+                    onError: (err) => toast.error(errorMessage(err, 'Could not change the setting')),
+                    // Opting in checks at once (A10b), instead of showing "Couldn't check" until Check now.
+                    onSuccess: () => {
+                      if (on) check.mutate(undefined, { onError: (err) => toast.error(errorMessage(err, 'Check failed')) })
+                    },
+                  })
+                }}
               />
               <span>
                 <span className="block text-sm font-medium text-[var(--color-text)]">Check for updates</span>

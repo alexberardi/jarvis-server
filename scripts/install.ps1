@@ -34,6 +34,11 @@ $Repo = 'alexberardi/jarvis-server'
 # ProjectPublicKey; a unit test keeps them equal). Not overridable.
 $PubKey = 'RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L'
 $BaseUrl = "$BaseUrl".TrimEnd('/')
+# The release this copy was published with: release.yml writes the tag here, so the script
+# from a release's URL installs that release (a prerelease too) and the elevated re-run fetches
+# the same one. Empty in the repository (the latest). -Version and -BaseUrl win.
+$ReleaseVersion = ''
+if (-not $Version -and -not $BaseUrl) { $Version = $ReleaseVersion }
 $Dir = Join-Path $env:ProgramFiles 'jarvisd'
 $Bin = Join-Path $Dir 'jarvisd.exe'
 $Prev = Join-Path $Dir 'jarvisd.prev.exe'

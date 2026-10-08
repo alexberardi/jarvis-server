@@ -105,10 +105,38 @@ describe('updates honesty rule (I1)', () => {
   it('toggles the opt-in through PUT /api/update/settings', async () => {
     current = info({ updates_enabled: false, checked: false })
     put.mockResolvedValue({ data: info({ updates_enabled: true, checked: false, reason: 'not checked yet' }) })
+    post.mockRejectedValue(new Error('GitHub unreachable'))
     renderPage()
     fireEvent.click(await screen.findByRole('switch', { name: 'Check for updates' }))
     await waitFor(() => expect(put).toHaveBeenCalledWith('/api/update/settings', { enabled: true }))
+    // Turning checks on checks at once (A10b): no "Couldn't check … Not checked yet" in between.
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/update/check'))
     expect(await screen.findByText("Couldn't check for updates")).toBeInTheDocument()
+  })
+
+  it('turning checks on shows the verdict without pressing Check now', async () => {
+    current = info({ updates_enabled: false, checked: false })
+    put.mockResolvedValue({ data: info({ updates_enabled: true, checked: false, reason: 'Not checked yet.' }) })
+    post.mockResolvedValue({ data: info({ up_to_date: true }) })
+    renderPage()
+    fireEvent.click(await screen.findByRole('switch', { name: 'Check for updates' }))
+    expect(await screen.findByText('jarvisd is up to date')).toBeInTheDocument()
+  })
+
+  it('turning checks off does not check', async () => {
+    current = info({ up_to_date: true })
+    put.mockResolvedValue({ data: info({ updates_enabled: false, checked: false }) })
+    renderPage()
+    fireEvent.click(await screen.findByRole('switch', { name: 'Check for updates' }))
+    await waitFor(() => expect(put).toHaveBeenCalledWith('/api/update/settings', { enabled: false }))
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('up to date on a pre-release says so (A10b)', async () => {
+    current = info({ up_to_date: true, current_version: 'v0.1.0-rc1', latest_version: 'v0.1.0-rc1', prerelease: true })
+    renderPage()
+    expect(await screen.findByText('jarvisd is up to date')).toBeInTheDocument()
+    expect(screen.getByText(/v0\.1\.0-rc1 is the latest pre-release/)).toBeInTheDocument()
   })
 })
 
