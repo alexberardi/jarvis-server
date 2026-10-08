@@ -131,11 +131,13 @@ func (b *Bus) CommandWithID(nodeID, verb string, details map[string]any, rid str
 // itself when replyKey is ""), which the verb's result sink delivers (§3.5 table). The slot
 // is opened before publishing so a fast reply can't be missed.
 func (b *Bus) CommandAwait(ctx context.Context, nodeID, verb string, details map[string]any, replyKey string) (string, json.RawMessage, error) {
-	rid := uuid4()
-	key := replyKey
-	if key == "" {
-		key = rid
+	// A reply key is also the published request_id (legacy publish_command_with_id(...,
+	// request_id): request_id == reply_request_id == tool_call_id on the wire).
+	rid := replyKey
+	if rid == "" {
+		rid = uuid4()
 	}
+	key := rid
 	b.Expect(key, nodeID)
 	defer b.Drop(key)
 	b.CommandWithID(nodeID, verb, details, rid)

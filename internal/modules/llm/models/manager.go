@@ -980,6 +980,13 @@ func (m *Manager) validateField(ctx context.Context, d labelRef, f string, def s
 			return nil
 		}
 		if filepath.IsAbs(s) {
+			// Kokoro is a directory (KindTTS); every other model is one file.
+			if d.ModelKind == KindTTS {
+				if st, err := os.Stat(s); err != nil || !st.IsDir() {
+					return badRequest("%s.%s: no directory at %s", d.Name, f, s)
+				}
+				return nil
+			}
 			if !fileExists(s) {
 				return badRequest("%s.%s: no file at %s", d.Name, f, s)
 			}

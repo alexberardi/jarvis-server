@@ -55,6 +55,11 @@ func (m *Module) handleTTSSpeak(w http.ResponseWriter, r *http.Request, _ *nodeC
 	if !ok {
 		return
 	}
+	m.speakWAV(w, r, text)
+}
+
+// speakWAV synthesises text (after clean_for_tts) and writes it as one RIFF WAV: M1 and A2.
+func (m *Module) speakWAV(w http.ResponseWriter, r *http.Request, text string) {
 	if m.TTS == nil {
 		detail(w, http.StatusServiceUnavailable, "TTS unavailable")
 		return
