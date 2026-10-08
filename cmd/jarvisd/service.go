@@ -74,6 +74,10 @@ func runService(ctx context.Context, flagHome string, args []string, stdout io.W
 			if opts.Home, err = filepath.Abs(opts.Home); err != nil {
 				return err
 			}
+		} else {
+			// A reinstall (an upgrade refreshing a stale definition) keeps the home the
+			// installed service uses, not the default.
+			opts.Home = m.InstalledHome()
 		}
 		if err := m.Install(ctx, opts); err != nil {
 			return err
@@ -213,6 +217,9 @@ func printStatus(w io.Writer, st serviceStatus) {
 	}
 	if st.UpgradeHelper != "" {
 		fmt.Fprintf(w, "updater:    %s\n", st.UpgradeHelper)
+	}
+	if st.Stale {
+		fmt.Fprintf(w, "definition: outdated: %s\n", st.StaleReason)
 	}
 	if st.HealthURL != "" {
 		h := "ok"

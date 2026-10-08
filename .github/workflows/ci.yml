@@ -291,6 +291,7 @@ jobs:
       run:
         shell: bash
     env:
+      V0: v0.0.0-old-ci
       V: v0.0.0-ci
       V2: v0.0.1-ci
       V3: v0.0.2-ci
@@ -316,10 +317,10 @@ jobs:
           pub=$(go run ./scripts/testsign keygen "$key")
           exe=jarvisd; [ "$RUNNER_OS" = Windows ] && exe=jarvisd.exe
           sum() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
-          release() { # tag dir
+          release() { # tag dir [source tree]
             local name="jarvisd-$1-${{ matrix.target }}"
             mkdir -p "stage/$name" "$2"
-            go build -trimpath -o "stage/$name/$exe" \
+            go build -C "${3:-.}" -trimpath -o "$PWD/stage/$name/$exe" \
               -ldflags "-X main.version=$1 -X github.com/alexberardi/jarvis-server/internal/update.extraTrustedKey=$pub" ./cmd/jarvisd
             if [ "${{ matrix.ext }}" = zip ]; then (cd stage && 7z a -tzip -bd "../$2/$name.zip" "$name" >/dev/null)
             else tar -C stage -czf "$2/$name.tar.gz" "$name"; fi
@@ -329,6 +330,13 @@ jobs:
           }
           release "$V" dist
           release "$V2" dist/next
+          # $V0 in dist/old: v0.1.0-rc4's source, older than the privileged update helper (ID11):
+          # no updater LaunchDaemon or Windows service, a unit whose ExecStartPre has no --owner.
+          # Upgrading from it must end with the new version's service definition.
+          git fetch --depth=1 origin tag v0.1.0-rc4
+          git worktree add "$RUNNER_TEMP/old" v0.1.0-rc4
+          cp -R internal/voice/sherpa/libs "$RUNNER_TEMP/old/internal/voice/sherpa/"
+          release "$V0" dist/old "$RUNNER_TEMP/old"
           mkdir -p dist/unsigned
           echo "$(printf '0%.0s' $(seq 64))  jarvisd-$V3-${{ matrix.target }}.${{ matrix.ext }}" > dist/unsigned/SHA256SUMS
           cp scripts/install.sh scripts/install.ps1 dist/
@@ -433,6 +441,25 @@ jobs:
           test ! -e /usr/local/bin/jarvisd.prev
           sudo test ! -e /var/lib/jarvisd && sudo test ! -e /etc/jarvisd
           if id jarvisd; then exit 1; fi
+          # An upgrade from rc4, whose unit's ExecStartPre has no --owner, ends with the unit this
+          # version writes: install.sh runs rc4's `jarvisd upgrade`, then the new binary's
+          # `service install` because its `service status` says the definition is stale.
+          sh scripts/install.sh --base-url "$BASE/old" --yes
+          test "$(jarvisd version)" = "$V0"
+          if grep -q -- '--owner' /etc/systemd/system/jarvisd.service; then exit 1; fi
+          stage/jarvisd-$V-${{ matrix.target }}/jarvisd service status --json | tee old.json || true
+          grep -q '"definition_stale": true' old.json
+          stage/jarvisd-$V-${{ matrix.target }}/jarvisd service status | grep -q '^definition: outdated'
+          sh scripts/install.sh --base-url "$BASE/next" --yes | tee up-old.log
+          grep -q "jarvisd $V2 is up and healthy" up-old.log
+          grep -q 'Updating the jarvisd service definition' up-old.log
+          test "$(jarvisd version)" = "$V2"
+          grep -q -- 'upgrade --prestart --home /var/lib/jarvisd --owner jarvisd' /etc/systemd/system/jarvisd.service
+          jarvisd service status --json | tee new.json
+          grep -q '"definition_stale": false' new.json
+          grep -q '"upgrade_helper": "root ExecStartPre' new.json
+          curl -fsS http://127.0.0.1:7710/health | python3 -c 'import json,sys,os; assert json.load(sys.stdin)["version"] == os.environ["V2"]'
+          sh scripts/install.sh --uninstall --purge --yes
           sudo ufw --force disable
           # With minisign installed a fresh install requires the project's signature: this
           # release is signed by the throwaway key, so the script refuses it.
@@ -539,6 +566,32 @@ jobs:
           test "$(jarvisd version)" = "$V2"
           sh scripts/install.sh --uninstall --purge --yes
           test ! -e ~/.jarvisd && test ! -e /usr/local/bin/jarvisd.prev
+          # An upgrade from rc4, which had no updater LaunchDaemon (the rc4 -> rc6 Mac: `service
+          # status` said "updater: none"), ends with it installed and loaded: install.sh runs
+          # rc4's `jarvisd upgrade`, then the new binary's `service install` because its `service
+          # status` says the definition is stale.
+          helper=/Library/LaunchDaemons/net.jarvisautomation.jarvisd-updater.plist
+          sh scripts/install.sh --base-url "$BASE/old" --yes
+          test "$(jarvisd version)" = "$V0"
+          test ! -e $helper
+          stage/jarvisd-$V-${{ matrix.target }}/jarvisd service status --json | tee old.json || true
+          grep -q '"definition_stale": true' old.json
+          grep -q 'jarvisd-updater is not installed' old.json
+          sh scripts/install.sh --base-url "$BASE/next" --yes | tee up-old.log
+          grep -q "jarvisd $V2 is up and healthy" up-old.log
+          grep -q 'Updating the jarvisd service definition' up-old.log
+          test "$(jarvisd version)" = "$V2"
+          test -f $helper
+          grep -q "<string>$(id -un)</string>" $helper # the account jarvisd runs as, kept
+          sudo launchctl print system/net.jarvisautomation.jarvisd-updater >/dev/null
+          jarvisd service status | tee st.log
+          grep -q 'updater: *net.jarvisautomation.jarvisd-updater (loaded' st.log
+          if grep -q '^definition:' st.log; then exit 1; fi
+          jarvisd service status --json | grep -q '"definition_stale": false'
+          curl -fsS http://127.0.0.1:7710/health | python3 -c 'import json,sys,os; assert json.load(sys.stdin)["version"] == os.environ["V2"]'
+          test "$(stat -f %Su ~/.jarvisd)" = "$(id -un)"
+          sh scripts/install.sh --uninstall --purge --yes
+          test ! -e $helper && test ! -e ~/.jarvisd
           sudo $fw --setglobalstate off
           # Something else on a jarvisd port: refused, naming it.
           (cd /tmp && exec "$py" -m http.server 7700 >/dev/null 2>&1) & other=$!
@@ -608,6 +661,31 @@ jobs:
           if ((& $exe version) -ne $env:V2) { throw 'the refused upgrade changed the binary' }
           Install @('-Uninstall', '-Purge', '-Yes')
           if (Test-Path C:\ProgramData\jarvisd) { throw 'data not purged' }
+          # An upgrade from rc4, which had no jarvisd-updater service, ends with it registered:
+          # install.ps1 runs rc4's `jarvisd upgrade`, then the new binary's `service install`
+          # because its `service status` says the definition is stale.
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl "$env:BASE/old" -Yes
+          if ($LASTEXITCODE -ne 0) { throw "rc4 install failed ($LASTEXITCODE)" }
+          if ((& $exe version) -ne $env:V0) { throw 'not the old version' }
+          if (Get-Service jarvisd-updater -ErrorAction SilentlyContinue) { throw 'rc4 registered an updater?' }
+          $cur = Join-Path $PWD "stage\jarvisd-$env:V-windows-amd64\jarvisd.exe"
+          $old = (& $cur service status --json | Out-String | ConvertFrom-Json)
+          Write-Host ($old | ConvertTo-Json)
+          if (-not $old.definition_stale) { throw 'the rc4 definition is not reported stale' }
+          $up = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl "$env:BASE/next" -Yes | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "upgrade from rc4 failed: $up" }
+          Write-Host $up
+          if ($up -notmatch "jarvisd $env:V2 is up and healthy") { throw 'no healthy upgrade reported' }
+          if ($up -notmatch 'Updating the jarvisd service definition') { throw 'the definition was not updated' }
+          if ((& $exe version) -ne $env:V2) { throw 'not upgraded from rc4' }
+          if (-not (Get-Service jarvisd-updater -ErrorAction SilentlyContinue)) { throw 'no jarvisd-updater after the upgrade' }
+          $new = (& $exe service status --json | Out-String | ConvertFrom-Json)
+          Write-Host ($new | ConvertTo-Json)
+          if ($new.definition_stale -or $new.upgrade_helper -notmatch 'jarvisd-updater') { throw 'the definition is still stale' }
+          $h = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7710/health | Select-Object -ExpandProperty Content | ConvertFrom-Json
+          if ($h.version -ne $env:V2) { throw "running $($h.version)" }
+          Install @('-Uninstall', '-Purge', '-Yes')
+          if (Get-Service jarvisd-updater -ErrorAction SilentlyContinue) { throw 'updater not removed' }
           $global:LASTEXITCODE = 0
       - name: Windows log
         if: failure() && runner.os == 'Windows'

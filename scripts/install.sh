@@ -237,23 +237,39 @@ VERSION=$REL
 # of the same version fetches only SHA256SUMS.
 CUR="" REUSE=0
 [ -x "$BIN" ] && CUR=$("$BIN" version 2>/dev/null || echo unknown)
+# An upgrade swaps the binary but the service definition is still the one the old version
+# wrote: a Mac upgraded from rc4 had no updater LaunchDaemon, a Linux unit an older
+# ExecStartPre. The new binary says whether its definition is stale (`service status --json`,
+# definition_stale) and `service install` rewrites it, keeping the binary path, home, account,
+# data and firewall rules.
+refresh_service() {
+  # shellcheck disable=SC2086
+  "$BIN" service status $SVC --json 2>/dev/null | grep -q '"definition_stale": true' || return 0
+  say "Updating the jarvisd service definition for $VERSION (an older version wrote it)..."
+  # shellcheck disable=SC2086
+  $RUN "$BIN" service install $SVC || die "updating the service definition failed; run: ${RUN:+sudo }jarvisd service install${SVC:+ $SVC}"
+}
 if [ -n "$CUR" ]; then
   # jarvisd is already here, so stopping the legacy stack can't leave the box with neither.
   if [ $STOP_LEGACY = 1 ]; then docker_init; stop_legacy "$(legacy_containers)" "$(legacy_agents)"; fi
   if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ] && "$BIN" service status $SVC >/dev/null 2>&1; then
     say "jarvisd $VERSION is already installed and running."
+    refresh_service
     # shellcheck disable=SC2086
     $RUN "$BIN" setup-link $HOMEFLAG 2>/dev/null || true
     exit 0
   fi
   # A jarvisd with its own upgrade takes over from here: it checks the signature itself with
   # the key built into the installed binary (mandatory, no minisign needed), checks free disk,
-  # snapshots the database, swaps, waits for the health gate and rolls back on failure.
+  # snapshots the database, swaps, waits for the health gate and rolls back on failure. Then
+  # the new binary's service definition (above).
   if [ "$CUR" != "$VERSION" ] && "$BIN" help 2>/dev/null | grep -q '^  upgrade'; then
     say "Upgrading jarvisd $CUR -> $VERSION with \`jarvisd upgrade\`..."
-    rm -rf "$TMP"; trap - EXIT INT TERM # exec skips the trap
     # shellcheck disable=SC2086 # RUN is sudo or nothing
-    exec $RUN env JARVISD_RELEASE_BASE="$BASE" "$BIN" upgrade --version "$VERSION"
+    $RUN env JARVISD_RELEASE_BASE="$BASE" "$BIN" upgrade --version "$VERSION" || exit 1
+    [ "$("$BIN" version 2>/dev/null)" = "$VERSION" ] || die "jarvisd upgrade finished but $BIN is not $VERSION"
+    refresh_service
+    exit 0
   fi
   # Installed but not running: reinstall the service on the binary already here.
   if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ]; then

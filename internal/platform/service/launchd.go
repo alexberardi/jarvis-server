@@ -69,6 +69,10 @@ func (l *launchd) Install(ctx context.Context, o InstallOptions) error {
 	}
 	runAs := o.RunAs
 	if runAs == "" {
+		// A reinstall (an upgrade refreshing its definition) keeps the account.
+		runAs = l.installed().UserName
+	}
+	if runAs == "" {
 		runAs = l.getenv("SUDO_USER")
 	}
 	if runAs == "" || runAs == "root" {
@@ -256,6 +260,9 @@ func (l *launchd) Status(ctx context.Context) (Status, error) {
 		return st, nil
 	}
 	st.Installed = true
+	st.StaleReason = l.staleness()
+	st.Stale = st.StaleReason != ""
+	st.UpgradeHelper = l.helperStatus(ctx)
 	out, err := l.run(ctx, "launchctl", "print", target)
 	if err != nil {
 		st.State = "not loaded"
@@ -272,7 +279,6 @@ func (l *launchd) Status(ctx context.Context) (Status, error) {
 	if m := launchdExit.FindSubmatch(out); m != nil {
 		st.Detail += ", last exit " + strings.TrimSpace(string(m[1]))
 	}
-	st.UpgradeHelper = l.helperStatus(ctx)
 	return st, nil
 }
 
@@ -287,7 +293,52 @@ func (l *launchd) helperStatus(ctx context.Context) string {
 	return HelperLabel + " (loaded; log " + HelperLog + ")"
 }
 
-var plistString = regexp.MustCompile(`<string>([^<]*)</string>`)
+var (
+	plistString  = regexp.MustCompile(`<string>([^<]*)</string>`)
+	plistProgram = regexp.MustCompile(`<key>ProgramArguments</key>\s*<array>\s*<string>([^<]*)</string>`)
+	plistUser    = regexp.MustCompile(`<key>UserName</key>\s*<string>([^<]*)</string>`)
+	plistHOME    = regexp.MustCompile(`<key>HOME</key>\s*<string>([^<]*)</string>`)
+)
+
+// installed reads what the jarvisd LaunchDaemon's plist says (zero when there is none).
+func (l *launchd) installed() Plist {
+	b, err := os.ReadFile(l.plistPath)
+	if err != nil {
+		return Plist{}
+	}
+	first := func(re *regexp.Regexp) string {
+		if m := re.FindSubmatch(b); m != nil {
+			return html.UnescapeString(string(m[1]))
+		}
+		return ""
+	}
+	return Plist{Binary: first(plistProgram), Home: l.InstalledHome(), UserName: first(plistUser), UserHome: first(plistHOME)}
+}
+
+// staleness compares both installed plists with what this build renders for the same binary,
+// home and account: "" when they match, else why `service install` should run again (an
+// older version wrote them, or the updater LaunchDaemon is missing).
+func (l *launchd) staleness() string {
+	p := l.installed()
+	if p.Binary == "" || p.Home == "" || p.UserName == "" {
+		return "the plist has no ProgramArguments, home or UserName this version can read; " + staleNote
+	}
+	have, err := os.ReadFile(l.plistPath)
+	if err != nil {
+		return ""
+	}
+	if want, err := RenderLaunchd(p); err == nil && string(have) != string(want) {
+		return l.plistPath + " differs from what this version writes (an older version wrote it); " + staleNote
+	}
+	helper, err := os.ReadFile(l.helperPath)
+	if err != nil {
+		return "the upgrade helper " + HelperLabel + " is not installed (an older version wrote the service); " + staleNote
+	}
+	if want, err := RenderLaunchdHelper(HelperPlist{Binary: p.Binary, Home: p.Home, UserName: p.UserName}); err == nil && string(helper) != string(want) {
+		return l.helperPath + " differs from what this version writes; " + staleNote
+	}
+	return ""
+}
 
 func (l *launchd) InstalledHome() string {
 	b, err := os.ReadFile(l.plistPath)

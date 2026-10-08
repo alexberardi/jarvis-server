@@ -43,7 +43,16 @@ type Status struct {
 	// UpgradeHelper describes the privileged self-update helper (ID11): the unit's root
 	// ExecStartPre, the updater LaunchDaemon or the updater Windows service; "" when none.
 	UpgradeHelper string `json:"upgrade_helper,omitempty"`
+	// Stale: the installed service definition (unit, LaunchDaemons, Windows services) is not
+	// what this jarvisd's `service install` writes for it: an older version wrote it, or the
+	// upgrade helper is missing. `service install` again rewrites it, keeping the binary path,
+	// home, account and data. StaleReason says what differs.
+	Stale       bool   `json:"definition_stale"`
+	StaleReason string `json:"stale_reason,omitempty"`
 }
+
+// staleNote is the advice that goes with a stale definition.
+const staleNote = "run `sudo jarvisd service install` again (it keeps the data, home, account and firewall rules)"
 
 // Manager registers and controls the jarvisd service with one service manager.
 type Manager interface {

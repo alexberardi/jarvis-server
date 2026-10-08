@@ -329,6 +329,8 @@ func (s *systemd) Status(ctx context.Context) (Status, error) {
 		return st, nil
 	}
 	st.Installed = true
+	st.StaleReason = s.staleness()
+	st.Stale = st.StaleReason != ""
 	out, err := s.systemctl(ctx, "show", unitName, "-p", "ActiveState", "-p", "SubState", "-p", "MainPID", "-p", "NRestarts")
 	if err != nil {
 		return st, err
@@ -359,16 +361,54 @@ func (s *systemd) Status(ctx context.Context) (Status, error) {
 }
 
 func (s *systemd) InstalledHome() string {
+	_, home, _ := s.installed()
+	return home
+}
+
+// installed reads the binary, home and account (User=) of the installed unit.
+func (s *systemd) installed() (binary, home, account string) {
 	b, err := os.ReadFile(s.unitPath)
+	if err != nil {
+		return "", "", ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "ExecStart="); ok {
+			if args := splitUnitArgs(v); len(args) > 0 {
+				binary, home = args[0], homeFromArgs(args)
+			}
+		}
+		if v, ok := strings.CutPrefix(line, "User="); ok {
+			account = v
+		}
+	}
+	return binary, home, account
+}
+
+// staleness compares the installed unit with the one this build renders for the same binary,
+// home and account: "" when they match, else why `service install` should run again (an
+// older version wrote it: its ExecStartPre lacked --owner, or the unit had no helper at all).
+func (s *systemd) staleness() string {
+	have, err := os.ReadFile(s.unitPath)
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "ExecStart="); ok {
-			return homeFromArgs(splitUnitArgs(v))
-		}
+	binary, home, account := s.installed()
+	if binary == "" || home == "" {
+		return "the unit has no ExecStart this version can read; " + staleNote
 	}
-	return ""
+	want, err := RenderSystemd(Unit{Binary: binary, Home: home, User: s.user, Account: account})
+	if err != nil || string(have) == string(want) {
+		return ""
+	}
+	note := staleNote
+	if s.user {
+		note = "run `jarvisd service install --user` again (it keeps the data and home)"
+	}
+	if !s.user && !strings.Contains(string(have), " upgrade --prestart ") {
+		return "the unit has no upgrade helper (an older version wrote it); " + note
+	}
+	return "the unit differs from what this version writes (an older version wrote it); " + note
 }
 
 func (s *systemd) PurgePlan(home string) PurgePlan {

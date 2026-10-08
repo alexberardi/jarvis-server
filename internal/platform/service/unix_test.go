@@ -486,3 +486,90 @@ func TestLaunchdRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An upgrade swaps the binary but used to leave the definition an older version wrote: rc4's
+// unit had an ExecStartPre without --owner (and before ID11 none at all), and an rc4 Mac had
+// no updater LaunchDaemon. Status reports it, so the upgrade can run `service install` again.
+func TestSystemdStaleDefinition(t *testing.T) {
+	s, _, _, root := testSystemd(t, false, 0)
+	home := filepath.Join(root, "data")
+	ctx := context.Background()
+	if err := s.Install(ctx, InstallOptions{Binary: "/opt/jarvisd/jarvisd", Home: home}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.Status(ctx); st.Stale || st.StaleReason != "" {
+		t.Fatalf("fresh install reported stale: %+v", st)
+	}
+	unit, _ := os.ReadFile(s.unitPath)
+	rc4 := strings.Replace(string(unit), " --owner jarvisd", "", 1)
+	if rc4 == string(unit) {
+		t.Fatal("the unit has no --owner to take out")
+	}
+	os.WriteFile(s.unitPath, []byte(rc4), 0o644)
+	if st, _ := s.Status(ctx); !st.Stale || !strings.Contains(st.StaleReason, "differs") || !strings.Contains(st.StaleReason, "service install") {
+		t.Fatalf("rc4 unit: %+v", st)
+	}
+	var noHelper []string
+	for _, line := range strings.Split(rc4, "\n") {
+		if !strings.HasPrefix(line, "ExecStartPre=") {
+			noHelper = append(noHelper, line)
+		}
+	}
+	os.WriteFile(s.unitPath, []byte(strings.Join(noHelper, "\n")), 0o644)
+	if st, _ := s.Status(ctx); !st.Stale || !strings.Contains(st.StaleReason, "no upgrade helper") {
+		t.Fatalf("unit without the helper: %+v", st)
+	}
+	// The reinstall keeps the binary path and home it reads back, and is current again.
+	if b, h, a := s.installed(); b != "/opt/jarvisd/jarvisd" || h != home || a != Name {
+		t.Fatalf("installed %q %q %q", b, h, a)
+	}
+	if err := s.Install(ctx, InstallOptions{Binary: "/opt/jarvisd/jarvisd", Home: s.InstalledHome()}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.Status(ctx); st.Stale {
+		t.Fatalf("after reinstall: %+v", st)
+	}
+	// A home with a space round-trips through the unit's quoting.
+	if err := s.Install(ctx, InstallOptions{Binary: "/opt/jarvis d/jarvisd", Home: filepath.Join(root, "my data")}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.Status(ctx); st.Stale {
+		t.Fatalf("quoted paths: %+v", st)
+	}
+}
+
+func TestLaunchdStaleDefinition(t *testing.T) {
+	l, f, _, root := testLaunchd(t, 0, "alex")
+	f.fail["launchctl print "+target] = errors.New("Could not find service")
+	ctx := context.Background()
+	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd", NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := l.Status(ctx); st.Stale {
+		t.Fatalf("fresh install reported stale: %+v", st)
+	}
+	// rc4: the jarvisd LaunchDaemon only, no updater.
+	os.Remove(l.helperPath)
+	st, _ := l.Status(ctx)
+	if !st.Stale || !strings.Contains(st.StaleReason, HelperLabel+" is not installed") || !strings.Contains(st.UpgradeHelper, "none") {
+		t.Fatalf("no helper: %+v", st)
+	}
+	// The reinstall keeps the account the daemon runs as, even when sudo's says otherwise (a
+	// root shell), and the home.
+	l.getenv = func(string) string { return "root" }
+	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd", Home: l.InstalledHome(), NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if p := l.installed(); p.UserName != "alex" || p.Home != filepath.Join(root, "Users", "alex", ".jarvisd") {
+		t.Fatalf("reinstall changed the account or home: %+v", p)
+	}
+	if st, _ := l.Status(ctx); st.Stale {
+		t.Fatalf("after reinstall: %+v", st)
+	}
+	// A plist an older version wrote differently.
+	b, _ := os.ReadFile(l.plistPath)
+	os.WriteFile(l.plistPath, []byte(strings.Replace(string(b), "<string>Interactive</string>", "<string>Standard</string>", 1)), 0o644)
+	if st, _ := l.Status(ctx); !st.Stale || !strings.Contains(st.StaleReason, "differs") {
+		t.Fatalf("changed plist: %+v", st)
+	}
+}
