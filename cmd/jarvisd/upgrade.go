@@ -65,7 +65,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	allowOlder := fs.Bool("allow-older", false, "allow --version to name an older (or the same) release")
 	bin := fs.String("bin", "", "the jarvisd binary to replace (default: this one)")
 	user := fs.Bool("user", false, "Linux: the service is a systemd --user unit")
-	rollback := fs.Bool("rollback", false, "roll back the last upgrade (restore jarvisd.prev, and the database snapshot if migrations ran)")
+	rollback := fs.Bool("rollback", false, "roll back the last upgrade (restore jarvisd.prev; also the database snapshot when the upgrade has not passed its health check yet and migrations ran)")
 	prestart := fs.Bool("prestart", false, "internal: the service's privileged pre-start step")
 	verifyDir := fs.String("verify-dir", "", "check a release directory (SHA256SUMS, its signature, the archives) against this build's keys and version, then exit")
 	if err := fs.Parse(args); err != nil {
@@ -150,8 +150,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 			if _, err := update.RestorePrevious(paths, back, current, reason); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "restored %s; the database is unchanged (if the newer version migrated it, "+
-				"jarvisd refuses to start: restore a snapshot from %s)\n", paths.Prev(), paths.BackupsDir())
+			fmt.Fprint(stdout, restoredNote(paths.Prev(), paths.BackupsDir()))
 		} else {
 			res, err := update.Rollback(ctx, paths, reason)
 			if err != nil {
@@ -224,6 +223,17 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		doctorAfter(ctx, exe, stdout)
 	}
 	return endWithAdmin(cfg, err, stdout)
+}
+
+// restoredNote is what a manual rollback after a passed gate says about the database, which it
+// leaves alone. A10d V3: it used to say "if the newer version migrated it, jarvisd refuses to
+// start", but rc3 → rc2 started fine although rc3 had migrated the database: the guard only
+// checks modules the restored version has, so a module it lacks (recipes) keeps its tables
+// and data for the next upgrade.
+func restoredNote(prev, backups string) string {
+	return fmt.Sprintf("restored %s; the database is unchanged. Tables of modules this version doesn't have stay "+
+		"for the next upgrade; if the newer version migrated a module it does have, jarvisd refuses to start "+
+		"and names it: then restore a snapshot from %s\n", prev, backups)
 }
 
 // doctorAfter runs the doctor of the binary now installed at exe and prints its failed

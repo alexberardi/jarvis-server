@@ -74,6 +74,22 @@ func TestDoctorAfterRunsInstalledBinary(t *testing.T) {
 	}
 }
 
+// A10d V3: rc3 → rc2 by hand left a database rc3 had migrated (recipes) and rc2 started fine,
+// although the note said a migrated database makes jarvisd refuse to start.
+func TestRestoredNote(t *testing.T) {
+	got := restoredNote("/b/jarvisd.prev", "/h/backups")
+	for _, want := range []string{
+		"restored /b/jarvisd.prev; the database is unchanged.",
+		"Tables of modules this version doesn't have stay for the next upgrade",
+		"if the newer version migrated a module it does have, jarvisd refuses to start",
+		"restore a snapshot from /h/backups\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)
