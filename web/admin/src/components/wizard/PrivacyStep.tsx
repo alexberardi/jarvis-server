@@ -131,6 +131,7 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
         <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
           <HardDrive size={14} /> Keeps personal data on this machine
         </h3>
+        <p className="text-xs text-[var(--color-text-muted)]">All of this stays on this machine.</p>
         {group(false)}
       </section>
 
