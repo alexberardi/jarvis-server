@@ -20,7 +20,7 @@ scripts/contract.sh -run 'TestAuth|TestConfig'
 ```
 
 The script sources `.contract.env` (or `$JARVIS_CONTRACT_ENV_FILE`) and runs
-`GOTOOLCHAIN=local CGO_ENABLED=0 mise exec go@1.25 -- go test -tags contract -count=1 ./contract/... -v`.
+`GOTOOLCHAIN=local CGO_ENABLED=0 mise exec go@1.27 -- go test -tags contract -count=1 ./contract/... -v`.
 Extra arguments are passed to `go test`. A full run against the MBP takes about 30 s.
 
 Tests skip with a message when the environment they need is missing. With no

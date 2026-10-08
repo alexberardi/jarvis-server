@@ -167,7 +167,9 @@ func TestPassThroughIsAnAllowList(t *testing.T) {
 		{"GET", "/api/cc/api/v0/admin/traces"},     // traces come from the BFF
 		{"GET", "/api/llm/v1/models/catalog/../x"}, // cleaned by the mux, then not listed
 	} {
-		if w := send(mux, c.method, c.path, "", su...); w.Code != 404 && w.Code != 301 {
+		// The mux redirects an unclean path (301 before Go 1.27, 307 since); either way it never
+		// reaches a module, which the targets check below proves.
+		if w := send(mux, c.method, c.path, "", su...); w.Code != 404 && w.Code != 301 && w.Code != 307 && w.Code != 308 {
 			t.Errorf("%s %s: %d %q", c.method, c.path, w.Code, w.Body.String())
 		}
 	}

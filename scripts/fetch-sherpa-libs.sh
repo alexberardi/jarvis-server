@@ -21,7 +21,7 @@ tarball() {
   esac
 }
 
-host="$(go env GOOS 2>/dev/null || mise exec go@1.25 -- go env GOOS)-$(go env GOARCH 2>/dev/null || mise exec go@1.25 -- go env GOARCH)"
+host="$(go env GOOS 2>/dev/null || mise exec go@1.27 -- go env GOOS)-$(go env GOARCH 2>/dev/null || mise exec go@1.27 -- go env GOARCH)"
 if [ $# -eq 0 ]; then set -- "$host"; fi
 
 for p in "$@"; do

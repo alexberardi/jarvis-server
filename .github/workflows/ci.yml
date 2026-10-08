@@ -6,7 +6,7 @@ on:
   pull_request:
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.27"
 
 jobs:
   # Unit tests + vet + CGO_ENABLED=0 cross-compile for every release target.

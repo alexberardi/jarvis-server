@@ -34,7 +34,7 @@ Update it at the end of every working session, and whenever a task finishes or a
 
 ## Environment notes
 
-- **Go:** installed via mise without changing global config. Run `mise exec go@1.25 -- go …`.
+- **Go:** installed via mise without changing global config. Run `mise exec go@1.27 -- go …`.
 - **Spike:** `/home/alex/jarvis/spikes/voice-onnx/` (umbrella repo, untracked). Contents:
   - `main.go` harness with `tts`, `embed` and `eval` subcommands
   - downloaded models under `models/`

@@ -24,4 +24,4 @@ fi
 
 cd "$ROOT"
 # -count=1: results depend on a live stack, never on the test cache.
-GOTOOLCHAIN=local CGO_ENABLED=0 exec mise exec go@1.25 -- go test -tags contract -count=1 ./contract/... -v "$@"
+GOTOOLCHAIN=local CGO_ENABLED=0 exec mise exec go@1.27 -- go test -tags contract -count=1 ./contract/... -v "$@"
