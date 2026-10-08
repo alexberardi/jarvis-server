@@ -191,6 +191,10 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// §3.2 photo import (R8).
 	mux.HandleFunc("POST /recipes/from-image/jobs", m.user(m.handleFromImage))
 
+	// §3.4 AI meal-plan generation (R9).
+	mux.HandleFunc("POST /meal-plans/generate/jobs", m.user(m.handleGenerateMealPlan))
+	mux.HandleFunc("GET /meal-plans/generate/jobs/{job_id}", m.user(m.handleGetMealPlanJob))
+
 	// §3.2 editor photos (R3).
 	mux.HandleFunc("POST /recipes/import/image", m.user(m.handleImportImage))
 	mux.HandleFunc("GET /media/{name...}", m.handleMedia) // #22: no auth
@@ -205,6 +209,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 			Lease: ingestLease})
 		// §6: one job runs OCR in process and structures the draft; failures are recorded, not retried.
 		deps.Queue.Register(imageJobType, queue.Handler{Run: m.runImage, Concurrency: 1, MaxAttempts: 2, Lease: imageLease})
+		// §6: one P4 call per slot; legacy never retried.
+		deps.Queue.Register(mealPlanJobType, queue.Handler{Run: m.runMealPlan, Concurrency: 1, MaxAttempts: 1, Lease: mealPlanLease})
 		deps.Queue.Register(cleanupJobType, queue.Handler{Run: m.runCleanup, MaxAttempts: 1, Lease: 10 * time.Minute})
 	}
 }

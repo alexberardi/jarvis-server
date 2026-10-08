@@ -41,7 +41,7 @@ const (
 const (
 	ingestLease   = 5 * time.Minute  // P1 + P1r with a model still loading
 	imageLease    = 15 * time.Minute // OCR over 8 photos, then P2/P1r/P3
-	mealPlanLease = 10 * time.Minute
+	mealPlanLease = 30 * time.Minute // one P4 call per slot, a week of slots
 )
 
 func jobLease(jobType string) time.Duration {
