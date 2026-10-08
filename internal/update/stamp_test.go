@@ -135,7 +135,12 @@ func TestInstallShUsesItsStamp(t *testing.T) {
 		{"unstamped: latest", plain, nil, rel + "latest/download/SHA256SUMS"},
 	} {
 		_ = os.Remove(log)
-		cmd := exec.Command("sh", append([]string{c.script, "--user"}, c.args...)...)
+		// --user keeps the Linux run from wanting sudo; macOS rejects it (LaunchDaemon only).
+		args := []string{c.script}
+		if runtime.GOOS == "linux" {
+			args = append(args, "--user")
+		}
+		cmd := exec.Command("sh", append(args, c.args...)...)
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "HOME="+dir, "JARVISD_RELEASE_BASE=")
 		out, err := cmd.CombinedOutput()
 		if err == nil {
