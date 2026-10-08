@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-**Cutover gate (user 2026-10-08): one coordinated release — jarvisd with recipes ported in (2026-10-08 decision) + node-setup v0.3.2 (#134/#135) + mobile Twilio section; recipes remapped by email.**
+**Cutover gate (user 2026-10-08) — status 2026-10-08: jarvisd `v0.1.0-rc3` published (recipes inside, R0–R11 done); node-setup v0.3.2 released; mobile Twilio (#83) and recipes-app image fix (#20) merged; all cutover questions Q1–Q11 answered (runbook §Answers). Remaining: Mac rehearsal on rc3 (user sudo on the MBP), kitchen node → 0.3.2 via legacy admin (user go), then schedule the cutover. Original gate: one coordinated release — jarvisd with recipes ported in (2026-10-08 decision) + node-setup v0.3.2 (#134/#135) + mobile Twilio section; recipes remapped by email.**
 
 ## Current phase: 6 (packaging, admin absorb) — feature-complete; `v0.1.0-rc1` and `v0.1.0-rc2` published; fresh install (A10b) and rc1 → rc2 upgrade/rollback (A10c) rehearsed. Phases 0–5 done
 
