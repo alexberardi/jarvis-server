@@ -58,6 +58,8 @@ export interface Hardware {
   ignored?: Device[] | null
   sources: string[] | null
   flavour: string
+  /** Physical RAM in MB (absent when unknown). */
+  ram_mb?: number
   detected_at: string
 }
 
@@ -141,6 +143,8 @@ export interface Fit {
   kv_estimated: boolean
   committed_mb?: number
   alongside?: string[]
+  /** System RAM, set when the model is judged for the CPU. */
+  ram_mb?: number
 }
 
 /** Resident is what already sits on a card: an engine label's load, or "other programs". */

@@ -49,8 +49,22 @@ function SttPlacement() {
   return (
     <p className="text-xs text-[var(--color-text-muted)]">
       {c.stt === 'cpu'
-        ? 'Runs on the CPU, as set in the Hardware step.'
+        ? 'Runs on the CPU, as set in the Hardware step; the recommendation is sized for that.'
         : `Runs on the GPU (${c.flavour}${c.sttDevice ? `, device ${c.sttDevice}` : ''}), as set in the Hardware step.`}
+    </p>
+  )
+}
+
+/** Says the language model runs on the CPU when the Hardware step chose it (or found no GPU). */
+function LlmPlacement() {
+  const { data } = useLabels()
+  const setup = useSetupState()
+  const hw = setup.data?.hardware
+  if (!data || !hw || currentChoices(hw, data.labels).flavour !== 'cpu') return null
+  return (
+    <p className="text-xs text-[var(--color-text-muted)]">
+      Runs on the CPU, as set in the Hardware step, so the recommendation is a small model that answers at a usable
+      speed there.
     </p>
   )
 }
@@ -245,6 +259,7 @@ export default function JobStep({
         </p>
       )}
       {def.id === 'stt' && <SttPlacement />}
+      {def.id === 'llm' && <LlmPlacement />}
       {def.id === 'voice' && (
         <VoicePicker
           value={voice}

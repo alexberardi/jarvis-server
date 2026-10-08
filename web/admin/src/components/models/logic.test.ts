@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CatalogEntry, CatalogResponse, LabelConfig } from '@/api/llm'
-import { defaultAssign, installNeedsToken, labelDraftDiff, normalizeRepo, recommendedInstalls } from './logic'
+import { defaultAssign, fitSummary, installNeedsToken, labelDraftDiff, normalizeRepo, recommendedInstalls } from './logic'
 
 const fit = { verdict: 'fits', needed_mb: 1, context: 1, kv_estimated: false }
 const e = (id: string, kind: string, over: Partial<CatalogEntry> = {}): CatalogEntry => ({
@@ -51,5 +51,17 @@ describe('models logic', () => {
     expect(installNeedsToken({ state: 'failed', error: 'GET …: 401 Unauthorized' })).toBe(true)
     expect(installNeedsToken({ state: 'failed', error: 'sha256 mismatch' })).toBe(false)
     expect(installNeedsToken({ state: 'running', error: '403' })).toBe(false)
+  })
+})
+
+describe('fitSummary', () => {
+  it('judges a model on the CPU against system RAM', () => {
+    const cpu = { verdict: 'cpu', needed_mb: 3200, context: 16384, kv_estimated: false, ram_mb: 16384 }
+    expect(fitSummary(cpu)).toBe('Runs on the CPU (needs about 3.1 GB of 16.0 GB of RAM)')
+    expect(fitSummary({ ...cpu, ram_mb: undefined })).toBe('Runs on the CPU (needs about 3.1 GB of RAM)')
+    expect(fitSummary({ ...cpu, verdict: 'too_big', needed_mb: 20480 })).toBe(
+      'Runs on the CPU, but needs about 20.0 GB of 16.0 GB of RAM: too much for this machine',
+    )
+    expect(fitSummary({ ...cpu, verdict: 'too_big', ram_mb: undefined, device: 'GPU', device_mb: 8192 })).toMatch(/^Needs about/)
   })
 })

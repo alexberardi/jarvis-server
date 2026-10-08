@@ -1031,42 +1031,95 @@ func (m *Manager) log() *slog.Logger {
 	return m.Log
 }
 
-// Recommend suggests a catalog entry per label for the detected hardware: the largest LLM
-// that fits one card (else one that fits tightly), MiniLM for embeddings, and whisper large-v3-turbo on a GPU (small.en on
-// CPU). On a CPU-only box the LLM pick is the smallest model, and a remote endpoint is worth
-// considering.
-func Recommend(hw engine.Hardware) map[string]string {
+// Recommend suggests a catalog entry per label: the largest LLM that fits one card (else one
+// that fits tightly), MiniLM for embeddings, and whisper large-v3-turbo on a GPU when it fits
+// next to the live model (else small.en).
+//
+// flavours is the build each label effectively runs (Manager.labelFlavours; a missing label
+// runs detection's). A label on the CPU gets a model sized for CPU inference whatever cards
+// the box has: the smallest LLM (Qwen3 4B; a remote endpoint is worth considering) and
+// whisper small.en, or base.en with under 8 GB of RAM.
+func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour) map[string]string {
+	on := func(label string) engine.Hardware { return OnFlavour(hw, flavours[label]) }
 	out := map[string]string{engine.LabelEmbeddings: "all-minilm-l6-v2"}
 	for _, v := range VoiceLabels {
 		out[v.Name] = v.DefaultModel
 	}
-	var best Entry
-	for _, verdict := range []string{"fits", "tight"} {
-		for _, e := range Catalog() {
-			if e.Kind == engine.ModelLLM && EntryFit(hw, e).Verdict == verdict && e.Size > best.Size {
-				best = e
+	llms := map[string]Entry{}
+	for _, l := range []string{engine.LabelLive, engine.LabelBackground} {
+		lhw := on(l)
+		var best Entry
+		for _, verdict := range []string{"fits", "tight"} {
+			for _, e := range Catalog() {
+				if e.Kind == engine.ModelLLM && EntryFit(lhw, e).Verdict == verdict && e.Size > best.Size {
+					best = e
+				}
+			}
+			if best.ID != "" {
+				break
 			}
 		}
-		if best.ID != "" {
-			break
+		if best.ID == "" {
+			best, _ = CatalogEntry("qwen3-4b")
 		}
+		llms[l], out[l] = best, best.ID
 	}
-	if best.ID == "" {
-		best, _ = CatalogEntry("qwen3-4b")
-	}
-	out[engine.LabelLive], out[engine.LabelBackground] = best.ID, best.ID
+	shw := on(engine.LabelSTT)
 	out[engine.LabelSTT] = "whisper-small.en"
-	if hw.Flavour != engine.FlavourCPU && hw.Flavour != "" {
-		// STT shares a card with the live model: large-v3-turbo only when it fits next to it.
-		live := []Resident{{Labels: []string{engine.LabelLive}, Model: best.ID, NeededMB: EntryFit(hw, best).NeededMB,
+	if onCPU(shw) {
+		if shw.RAMMB > 0 && shw.RAMMB < 8192 {
+			out[engine.LabelSTT] = "whisper-base.en"
+		}
+		return out
+	}
+	// STT shares a card with the live model: large-v3-turbo only when it fits next to it.
+	var live []Resident
+	if lhw := on(engine.LabelLive); !onCPU(lhw) && lhw.Flavour == shw.Flavour {
+		best := llms[engine.LabelLive]
+		live = []Resident{{Labels: []string{engine.LabelLive}, Model: best.ID, NeededMB: EntryFit(lhw, best).NeededMB,
 			Devices: deviceList(engine.Propose(hw)[engine.LabelLive].Devices)}}
-		if e, ok := CatalogEntry("whisper-large-v3-turbo"); ok {
-			if FitAlongside(hw, e.Kind, e.Size, 0, 0, live).Verdict == "fits" {
-				out[engine.LabelSTT] = e.ID
-			}
+	}
+	if e, ok := CatalogEntry("whisper-large-v3-turbo"); ok {
+		if FitAlongside(shw, e.Kind, e.Size, 0, 0, live).Verdict == "fits" {
+			out[engine.LabelSTT] = e.ID
 		}
 	}
 	return out
+}
+
+// onCPU says a label seeing hw runs on the CPU: the CPU build, or no card of its build.
+func onCPU(hw engine.Hardware) bool {
+	return hw.Flavour == engine.FlavourCPU || hw.Flavour == "" || len(hw.Discrete(hw.Flavour)) == 0
+}
+
+// labelFlavours is the build each engine label effectively runs, from its settings: CPU when
+// gpu_layers is 0 or gpu_backend is cpu (what the setup wizard's Hardware step writes), the
+// named build, or detection's flavour for auto. Without settings, every label runs
+// detection's (nil map).
+func (m *Manager) labelFlavours(ctx context.Context, hw engine.Hardware) map[string]engine.Flavour {
+	if m.Settings == nil {
+		return nil
+	}
+	out := map[string]engine.Flavour{}
+	for _, d := range engine.LabelDefs {
+		f, err := engine.ParseFlavour(m.Settings.String(ctx, d.Prefix+".gpu_backend", settings.Scope{}))
+		switch {
+		case m.Settings.Int(ctx, d.Prefix+".gpu_layers", settings.Scope{}) == 0:
+			f = engine.FlavourCPU
+		case err != nil || f == "":
+			f = hw.Flavour
+		}
+		if f == "" {
+			f = engine.FlavourCPU
+		}
+		out[d.Name] = f
+	}
+	return out
+}
+
+// Recommend is the package Recommend for the labels' effective builds.
+func (m *Manager) Recommend(ctx context.Context, hw engine.Hardware) map[string]string {
+	return Recommend(hw, m.labelFlavours(ctx, hw))
 }
 
 // deviceList parses a gpu_devices setting ("0,1"); empty or invalid is nil (the default card).
@@ -1221,26 +1274,24 @@ func without(rs []Resident, labels ...string) []Resident {
 
 // fitFor judges a model of kind for the labels that take that kind: next to the residents
 // without those labels (the model would replace what they run, so it is not counted against
-// itself or its predecessor), and as "cpu" when every such label runs on the CPU (the
-// embeddings label by default), where VRAM doesn't matter (A10 F8).
+// itself or its predecessor), on the build those labels effectively run, and against system
+// RAM ("cpu", or "too_big" for RAM) when every such label runs on the CPU (the embeddings
+// label by default; any label the Hardware step put on the CPU), where VRAM doesn't matter
+// (A10 F8, AD3b).
 func (m *Manager) fitFor(ctx context.Context, hw engine.Hardware, kind string, weights, kvPerTok int64, n int, residents []Resident) Fit {
+	flavours := m.labelFlavours(ctx, hw)
 	var labels []string
-	cpuOnly := m.Settings != nil
+	on := engine.Flavour("")
 	for _, d := range engine.LabelDefs {
 		if d.ModelKind != kind {
 			continue
 		}
 		labels = append(labels, d.Name)
-		if cpuOnly && m.Settings.Int(ctx, d.Prefix+".gpu_layers", settings.Scope{}) != 0 &&
-			m.Settings.String(ctx, d.Prefix+".gpu_backend", settings.Scope{}) != string(engine.FlavourCPU) {
-			cpuOnly = false
+		if f, ok := flavours[d.Name]; ok && (on == "" || on == engine.FlavourCPU) {
+			on = f
 		}
 	}
-	f := FitAlongside(hw, kind, weights, kvPerTok, n, without(residents, labels...))
-	if cpuOnly && len(labels) > 0 && f.Verdict != "in_binary" {
-		f = Fit{Verdict: "cpu", NeededMB: f.NeededMB, Context: f.Context, KVEstimate: f.KVEstimate}
-	}
-	return f
+	return FitAlongside(OnFlavour(hw, on), kind, weights, kvPerTok, n, without(residents, labels...))
 }
 
 // entryFit is fitFor for a catalog entry (with its projector) at its default context.

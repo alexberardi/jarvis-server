@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from '@/auth/AuthContext'
@@ -366,6 +366,62 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }))
     await waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ stt: { gpu_backend: 'cpu' } }))
     expect(await screen.findByRole('heading', { name: /Language model/ })).toBeInTheDocument()
+  })
+
+  // AD3b browser run: a CUDA box set to CPU in the Hardware step was still offered Qwen 3.5 9B.
+  it('recommends the CPU-sized models after choosing the CPU in the Hardware step', async () => {
+    signIn()
+    sessionStorage.setItem(STEP_STORAGE_KEY, 'hardware')
+    auth.getSetupState.mockResolvedValue(superState)
+    // The server judges the catalog for the labels' builds: once they are on the CPU, the
+    // small model is recommended and every verdict is "runs on the CPU".
+    const cpuFit = { verdict: 'cpu', needed_mb: 3200, context: 16384, kv_estimated: false, ram_mb: 32768 }
+    const onCPU: CatalogResponse = {
+      ...catalog,
+      models: catalog.models.map((m) => ({ ...m, fit: m.kind === 'llm' || m.kind === 'stt' ? cpuFit : m.fit })),
+      recommended: { ...catalog.recommended, live: 'qwen3-4b', background: 'qwen3-4b', stt: 'whisper-small.en' },
+    }
+    api.getCatalog.mockImplementation(async () => (api.putLabels.mock.calls.length > 0 ? onCPU : catalog))
+    const cpuLabel = (name: string): LabelStatus => ({ ...label(name), config: { ...label(name).config, gpu_backend: 'cpu' } })
+    const labelsResponse = () => ({
+      labels: ['live', 'background', 'embeddings', 'stt'].map(api.putLabels.mock.calls.length > 0 ? cpuLabel : label),
+      voice: [],
+      engines: [],
+      proposal: { stt: { gpu_backend: 'cuda', gpu_devices: '0' } },
+      recommend: {},
+      warnings: null,
+    })
+    api.getLabels.mockImplementation(async () => labelsResponse())
+    api.putLabels.mockImplementation(async () => labelsResponse())
+    renderWizard()
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'CPU only' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'On the CPU' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }))
+    await waitFor(() =>
+      expect(api.putLabels).toHaveBeenCalledWith({
+        live: { gpu_backend: 'cpu' },
+        background: { gpu_backend: 'cpu' },
+        embeddings: { gpu_backend: 'cpu' },
+        stt: { gpu_backend: 'cpu' },
+      }),
+    )
+
+    expect(await screen.findByRole('heading', { name: /Language model/ })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Qwen 3 4B' })).toBeChecked())
+    const q4 = screen.getByRole('radio', { name: 'Qwen 3 4B' }).closest('label')!
+    expect(within(q4).getByText('Recommended')).toBeInTheDocument()
+    expect(within(q4).getByText('Runs on CPU')).toBeInTheDocument()
+    expect(within(q4).getByText(/Runs on the CPU \(needs about 3\.1 GB of 32\.0 GB of RAM\)/)).toBeInTheDocument()
+    expect(await screen.findByText(/Runs on the CPU, as set in the Hardware step, so the recommendation is a small model/)).toBeInTheDocument()
+    const q9 = screen.getByRole('radio', { name: 'Qwen 3.5 9B' }).closest('label')!
+    expect(within(q9).queryByText('Recommended')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install and continue' }))
+    await waitFor(() => expect(api.startInstall).toHaveBeenCalledWith({ catalog_id: 'qwen3-4b', assign: ['live', 'background'] }))
+    expect(await screen.findByRole('heading', { name: /Speech-to-text/ })).toBeInTheDocument()
+    expect(await screen.findByRole('radio', { name: 'Whisper small.en' })).toBeChecked()
+    expect(await screen.findByText(/Runs on the CPU, as set in the Hardware step; the recommendation is sized for that/)).toBeInTheDocument()
   })
 
   it('"Install everything recommended" confirms all five jobs and goes on to Privacy', async () => {

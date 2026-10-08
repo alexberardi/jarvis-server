@@ -73,7 +73,11 @@ export function recommendedInstalls(catalog: CatalogResponse): InstallRequest[] 
 /** fitSummary is the one-line explanation behind a verdict (co-residency included). */
 export function fitSummary(fit: Fit): string {
   if (fit.verdict === 'in_binary') return 'Runs inside jarvisd on the CPU'
-  if (fit.verdict === 'cpu') return `Runs on the CPU (needs about ${formatMB(fit.needed_mb)} of RAM)`
+  const ram = fit.ram_mb ? ` of ${formatMB(fit.ram_mb)}` : ''
+  if (fit.verdict === 'cpu') return `Runs on the CPU (needs about ${formatMB(fit.needed_mb)}${ram} of RAM)`
+  if (fit.verdict === 'too_big' && !fit.device && fit.ram_mb) {
+    return `Runs on the CPU, but needs about ${formatMB(fit.needed_mb)}${ram} of RAM: too much for this machine`
+  }
   const parts = [`Needs about ${formatMB(fit.needed_mb)}`]
   if (fit.context) parts[0] += ` at ${fit.context.toLocaleString()} context`
   if (fit.device) {

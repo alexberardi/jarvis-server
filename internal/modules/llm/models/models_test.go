@@ -394,25 +394,99 @@ func TestFitAndRecommend(t *testing.T) {
 	if f := FitFor(two3090, "llm", e27.Size, e27.KVBytesPerTok, 131072); f.Verdict != "split" {
 		t.Errorf("27B @131k: %+v", f)
 	}
-	r := Recommend(two3090)
+	r := Recommend(two3090, nil)
 	if r["live"] != "qwen3.8-27b" || r["stt"] != "whisper-large-v3-turbo" || r["embeddings"] != "all-minilm-l6-v2" {
 		t.Errorf("recommend %v", r)
 	}
 	card := func(mbs int64) engine.Hardware {
 		return engine.Hardware{Flavour: engine.FlavourCUDA, Devices: []engine.Device{{Backend: engine.FlavourCUDA, Name: "GPU", TotalMB: mbs}}}
 	}
-	if r := Recommend(card(12288)); r["live"] != "qwen3.5-9b" {
+	if r := Recommend(card(12288), nil); r["live"] != "qwen3.5-9b" {
 		t.Errorf("12 GB: %v", r)
 	}
-	if r := Recommend(card(8192)); r["live"] != "qwen3-4b" {
+	if r := Recommend(card(8192), nil); r["live"] != "qwen3-4b" {
 		t.Errorf("8 GB: %v", r)
 	}
 	cpu := engine.Hardware{Flavour: engine.FlavourCPU}
-	if r := Recommend(cpu); r["live"] != "qwen3-4b" || r["stt"] != "whisper-small.en" {
+	if r := Recommend(cpu, nil); r["live"] != "qwen3-4b" || r["stt"] != "whisper-small.en" {
 		t.Errorf("cpu: %v", r)
 	}
 	if f := FitFor(cpu, "llm", 1<<30, 0, 0); f.Verdict != "cpu" || !f.KVEstimate {
 		t.Errorf("cpu fit %+v", f)
+	}
+}
+
+// AD3b: on a CUDA box whose Hardware step chose the CPU, the catalog still recommended
+// Qwen3.5-9B and judged it against the card. Recommendations and verdicts follow each label's
+// effective build: on the CPU, the smallest LLM and small whisper, judged against RAM.
+func TestRecommendFollowsTheLabelsCPUChoice(t *testing.T) {
+	e := newEnv(t)
+	cuda := engine.Hardware{Flavour: engine.FlavourCUDA, RAMMB: 32768, Devices: []engine.Device{
+		{Backend: engine.FlavourCUDA, Index: 0, ID: "CUDA0", Name: "RTX 3080 Ti", TotalMB: 12288}}}
+	q9, _ := CatalogEntry("qwen3.5-9b")
+
+	// Untouched (auto): GPU behaviour as before.
+	r := e.mgr.Recommend(e.ctx, cuda)
+	if r["live"] != "qwen3.5-9b" || r["background"] != "qwen3.5-9b" {
+		t.Fatalf("auto on a 12 GB card: %v", r)
+	}
+	if f := e.mgr.entryFit(e.ctx, cuda, q9, nil); f.Verdict != "fits" || f.Device != "RTX 3080 Ti" {
+		t.Fatalf("auto fit: %+v", f)
+	}
+
+	// What the Hardware step writes for "CPU only" + STT "On the CPU".
+	for _, k := range []string{"llm.live", "llm.background", "llm.embeddings", "stt"} {
+		if err := e.set.Set(e.ctx, k+".gpu_backend", "cpu", settings.Scope{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r = e.mgr.Recommend(e.ctx, cuda)
+	if r["live"] != "qwen3-4b" || r["background"] != "qwen3-4b" || r["stt"] != "whisper-small.en" || r["embeddings"] != "all-minilm-l6-v2" {
+		t.Errorf("CPU chosen on a CUDA box: %v", r)
+	}
+	q4, _ := CatalogEntry("qwen3-4b")
+	if f := e.mgr.entryFit(e.ctx, cuda, q4, nil); f.Verdict != "cpu" || f.Device != "" || f.RAMMB != 32768 || f.NeededMB == 0 {
+		t.Errorf("qwen3-4b on the CPU: %+v", f)
+	}
+	turbo, _ := CatalogEntry("whisper-large-v3-turbo")
+	if f := e.mgr.entryFit(e.ctx, cuda, turbo, nil); f.Verdict != "cpu" || f.Device != "" {
+		t.Errorf("whisper on the CPU: %+v", f)
+	}
+	// Judged against RAM: the 27B doesn't fit in 70% of 16 GB.
+	small := cuda
+	small.RAMMB = 16384
+	e27, _ := CatalogEntry("qwen3.8-27b")
+	if f := e.mgr.entryFit(e.ctx, small, e27, nil); f.Verdict != "too_big" || f.RAMMB != 16384 {
+		t.Errorf("27B in 16 GB of RAM: %+v", f)
+	}
+	if f := e.mgr.entryFit(e.ctx, small, q4, nil); f.Verdict != "cpu" {
+		t.Errorf("4B in 16 GB of RAM: %+v", f)
+	}
+
+	// gpu_layers 0 pins STT to the CPU too; the LLMs back on the GPU keep their GPU pick,
+	// and STT on the CPU of a small box gets base.en.
+	for _, k := range []string{"llm.live", "llm.background", "stt"} {
+		e.set.Set(e.ctx, k+".gpu_backend", "auto", settings.Scope{})
+	}
+	e.set.Set(e.ctx, "stt.gpu_layers", int64(0), settings.Scope{})
+	small.RAMMB = 6144
+	r = e.mgr.Recommend(e.ctx, small)
+	if r["live"] != "qwen3.5-9b" || r["stt"] != "whisper-base.en" {
+		t.Errorf("LLM on the GPU, STT on the CPU: %v", r)
+	}
+	if f := e.mgr.entryFit(e.ctx, small, turbo, nil); f.Verdict != "cpu" {
+		t.Errorf("turbo with stt.gpu_layers 0: %+v", f)
+	}
+
+	// No GPU at all: CPU picks with the labels on auto.
+	e.set.Set(e.ctx, "stt.gpu_layers", int64(999), settings.Scope{})
+	none := engine.Hardware{Flavour: engine.FlavourCPU, RAMMB: 16384}
+	r = e.mgr.Recommend(e.ctx, none)
+	if r["live"] != "qwen3-4b" || r["stt"] != "whisper-small.en" {
+		t.Errorf("no GPU: %v", r)
+	}
+	if f := e.mgr.entryFit(e.ctx, none, q4, nil); f.Verdict != "cpu" || f.RAMMB != 16384 {
+		t.Errorf("no GPU fit: %+v", f)
 	}
 }
 
@@ -475,7 +549,7 @@ func TestFitCountsCoResidentEngines(t *testing.T) {
 	if f.Verdict != "too_big" || f.CommittedMB != qwen.NeededMB+desk.NeededMB || !slices.Equal(f.Alongside, []string{"live", "background", OtherPrograms}) {
 		t.Errorf("turbo next to qwen3-8b and the desktop: %+v", f)
 	}
-	if r := Recommend(card); r["stt"] != "whisper-small.en" {
+	if r := Recommend(card, nil); r["stt"] != "whisper-small.en" {
 		t.Errorf("12 GB recommends %v; turbo does not fit next to the live model", r)
 	}
 	// Two cards: the model goes where there is room.
