@@ -42,6 +42,7 @@ Tests skip with a message when the environment they need is missing. With no
 | `JARVIS_CONTRACT_MQTT_USERNAME` / `JARVIS_CONTRACT_MQTT_PASSWORD` | if the broker has auth | The shared broker credential (CC's `MQTT_USERNAME`/`MQTT_PASSWORD`). Empty means anonymous. |
 | `JARVIS_CONTRACT_SLOW_TIMEOUT` | no | Timeout for inference calls (LLM, STT, TTS synthesis). The default is `180s`. |
 | `JARVIS_CONTRACT_CALLBACK_HOST` | for the OCR callback test | An address the target can reach this test process at (jarvisd only; `127.0.0.1` for a local jarvisd). Without it `TestOCRFlowJobs/callback` skips. |
+| `JARVIS_CONTRACT_RELAY_PORT` | for the fake relay test | Local port the fake push relay listens on (`127.0.0.1`). The target must reach it: on the MBP through `ssh -f -N -o ExitOnForwardFailure=yes -R 7735:127.0.0.1:<port> alexanderberardi@10.0.0.103` (legacy `RELAY_URL` is `host.docker.internal:7735`; Docker Desktop reaches the Mac's loopback); on jarvisd the `relay.url` notifications setting. Open the tunnel only around `TestNotificationsRelay`. Without it `TestNotificationsRelay` skips. |
 | `JARVIS_CONTRACT_NOTIFICATIONS_ADMIN_KEY` | for the notifications admin test | jarvis-notifications' `ADMIN_API_KEY` (MBP: `docker exec jarvis-notifications-jarvis-notifications-1 printenv ADMIN_API_KEY`). Without it `TestNotificationsAdmin` skips. |
 
 To get the admin token from the MBP without echoing it:
@@ -132,6 +133,15 @@ then a login as that user and `DELETE /auth/me`.
 | Plugin API | `TestCCNodePlugin` | `/node/inbox-item` `{id, sent, withheld_by}`; household from the node; `metadata.node_id` injected with `setdefault` (caller wins); blank title → 200 `sent:false`. `/node/push-notification` `{sent, inbox_item_id, withheld_by}` and the delivered `confirmation` card (`metadata {command_name:"reminder", node_id, actions:[], draft:null}`). `/node/send-link`: non-http(s) → `sent:false`; the user-scoped `link` card with `metadata {url, type:"open_url"}`. The delivered cards are read back from notifications (`InboxItemResponse`). Validation and auth errors on all four. |
 | | `TestCCNodeLLMChat` | `/node/llm/chat` → `{content: string}` (shape only, real model; skips if llm-proxy is unhealthy); a bad role → 400. |
 | | `TestCCSignals` | `/signals` with node auth `{signal_id:int, mode:"open", proposed:false}`; household mismatch 403; no auth / bad node key 401 `Authentication required (X-Api-Key or X-Jarvis-App-Id/Key)`; app auth (LEGACY-BUG below). |
+| CC media (2026-10-07) | `TestCCMediaTTS`, `TestCCMediaTranscribe` | M1 `/media/tts/speak` (complete WAV matching jarvis-tts `/audio/format`), M2 `/media/tts/speak/stream` (`audio/raw`, chunked, `X-Audio-*` = `/audio/format`, **no `X-Audio-Provider`**, whole frames), M3 `/media/whisper/transcribe` (whisper's body verbatim, with and without `speaker_audio`/`conversation_id`/`language`/`task`); CC's 400 validation body; node-auth 401s. |
+| | `TestCCMobileAudio` | A1 `/mobile/stt` `{text, raw}` with `raw.speaker = {user_id: <jwt>, confidence: 1.0, source: "jwt"}`; A2 `/mobile/tts` WAV; 400 `body -> household_id: Field required`; 403 non-member; 401. |
+| | `TestCCNodeVoiceEnrollment` | V7/V8 → MQTT verbs `enroll_voice`/`verify_voice` (`{request_id, user_id, household_id, prompt_text, duration_secs}`, defaults 8.0/5.0) → M4 enroll / M5 verify through CC → V9 `{status:"ok"}` → V10 202 `{"detail":"pending"}`, then the result once; V1 status; V6 delete; V7/V8 404/403/400. |
+| CC voice (2026-10-07) | `TestCCVoice` | Shape only, real model: `/conversation/start` `{status:"success", conversation_id, home_context}`; `/voice/command/stream` either 200 `audio/raw` + URL-quoted `X-Assistant-Message` or 202 VoiceCommandResponse (full key set); blocking `/voice/command`; `/continue` and `/continue/stream` on the no-LLM path (every tool result carries a message); `/voice/acknowledge` keyword pools; `/wake-response` `{text}`; `/conversation/end`; preconditions (`/voice/command` 422 vs `/stream` 400 `Conversation not initialized for tool-based flow`, `/continue` 422 `Conversation <cid> not found or expired`, `/continue/stream` 202 `{"fallback":"use_blocking_continue"}`). Then admin `/admin/traces?node_id` (exact list keys) and `/admin/traces/{id}` (spans), 404 `Trace not found`. |
+| CC node routes (2026-10-07) | `TestCCProvisioning` | `/provisioning/token` (admin key or JWT; `prov_` token, uuid `node_id`, `expires_in:600`; refresh keeps the id and voids the old token; 400 `Node already registered`; 401 `Authentication required` / `Invalid API key` / `Invalid or expired JWT`) and `/nodes/register` (201 NodeCreateResponse, room body > token > `default`, one-time token, 401 `Invalid or expired provisioning token`). |
+| | `TestCCAdminNodesPatchAndList`, `TestCCReleasesLatest` | PATCH `/admin/nodes/{id}` (admin key, partial update, 404, 401); `GET /admin/nodes` (`household_id`, `include_inactive`, membership scoping, 403); `/releases/latest` `null` or `{tag, version, published_at}`. |
+| | `TestCCNodeUpdateTasks` | `/nodes/{id}/update` with an explicit version (no GitHub egress), 409 `{"detail":{message, task_id, state}}`; heartbeat `pending_update {task_id, target_version}` once; `/tasks/{tid}`; `/nodes/tasks/{tid}/status` (node, `failed` only, 409 `Task is already failed`, 404 for another node); cancel (`Cancelled by user`, 409); history newest first, `limit` clamped. |
+| Fake relay (2026-10-07) | `TestNotificationsRelay` | notifications → relay: `POST /v1/send` with `Authorization: Bearer <jwt>`, `X-Household-Id`, `{tokens, title, body, data, priority}` (`data` `{}`, `priority` `"default"`); `/v1/register {household_id}` → `{jwt}` when no JWT is pinned (jarvisd); `DeviceNotRegistered` deactivates the token. |
+| MQTT rows (2026-10-07) | `TestCCMQTTRows` | Rows 5 config/push (+ pending/ack), 7 device-scan, 8 device-list, 9 device-state (`/device-state-results`), 11 bluetooth-scan, 12 bluetooth-pair, 16–18 package-install/uninstall/revert (verify, `restarting`, 409s), 22 `jarvis/auth/{provider}/ready` (OAuth session, PKCE authorize URL, exchange, one-time credential pull); verbs `invalidate_device_cache`, `device_removed`, `toggle_command`, `report_tools` (`/mobile/node-tool-reports`), `tool_call` (via the `appt.upcoming` leave-by reaction, the only LLM-free trigger). Plus the provisioning-auth errors shared by those routes. |
 | MQTT | `TestCCMQTTCatalogue` | See the MQTT row in the checklist below. Each publish: exact topic, QoS 1, retain=false, payload key set. Plus the round trips around them: settings request → node GET/PUT snapshot → 409 on a second PUT → mobile 202-with-body pending and 200 fulfilled; K2 nudge → node pull (one-time; 403 `Node mismatch`) → ack → 200 `{ok, node_id, kid}`, and a failed ack → 502 with the node's error; callbacks create → node GET payload (404 for another node) → result → mobile status; `/commands/{rid}/verify` (mismatch false and not consumed, owner true, replay false); ambient-noise trigger/clamp/result/poll; `/nodes/{id}/actions` and routine run-now via `/device-control-results`; command-data request/response over MQTT; DELETE → factory-reset → `verify-reset` 200 then 404 `Invalid or expired reset token`. |
 
 Not frozen on purpose:
@@ -184,6 +194,16 @@ Also seen, not frozen: on the stream path `reasoning_budget: 0` did not stop Qwe
    `TestCCMQTTCatalogue/settings_request`, `/ambient_noise_and_verify`.
 10. **Naive timestamps** on CC too (`last_seen`, settings requests, snapshots, callbacks), same
     as 3.
+
+11. **0.6 leftovers (2026-10-07):** empty TTS text on M1/M2 is 200 with the JSON error body
+    labelled `audio/wav` / `audio/raw` (D8: 400); M5 with no profile and a second V6 delete are
+    unhandled 500s (D8: 404; uvicorn then drops the keep-alive connection, so the test closes
+    idle connections); M4 enrolls any user with no pending V7 start and V10 has no ownership
+    check (D4: 403); `/provisioning/token` has no household check (D4/D5: 403); `config/pending`
+    and `config/{id}/ack` are unauthenticated (D6); `/device-state-results` and
+    `/mobile/node-tool-reports` are unauthenticated (D4); `trusted:true` on `report_tools` and
+    `tool_call`; naive timestamps on provisioning tokens, node tasks and traces. Not frozen:
+    `POST /nodes/{id}/config/push` never checks household membership.
 
 Seen while reading but not observable black-box: logs' node routes enrich entries with
 `context.user_id` from validate-node's `user_id`, a field validate-node never returns, so it is
@@ -362,9 +382,9 @@ LEGACY-BUGs (marked `// LEGACY-BUG:`; jarvisd fixes them, the tests branch on `J
     OpenAI-compatible scripted server in `contract/fakes/llm`. Point CC at it via
     `jarvis-llm-proxy-api` in `/services`, or via a CC setting. That requires re-registering the
     service on the target, so do it only on a dev box and restore it afterwards.
-- [~] **Voice PCM stream headers.** jarvis-tts side done (`tts_test.go`); STT `/transcribe` and the
-  voice-profile routes done (`whisper_test.go`). Still open: CC's media proxy
-  (`app/api/media.py`, needs the CC node fixture), which re-emits the headers.
+- [x] **Voice PCM stream headers.** jarvis-tts side (`tts_test.go`); STT `/transcribe` and the
+  voice-profile routes (`whisper_test.go`); CC's media proxy, which re-emits the headers, and
+  the voice-stream routes (`cc_media_test.go`, `cc_voice_test.go`, 2026-10-07).
   Original scope: jarvis-tts `POST /speak/stream`, and CC's media proxy, which re-emits them. Covers `X-Audio-Sample-Rate`, `X-Audio-Channels`,
   `X-Audio-Sample-Width`, `X-Audio-Provider`, the content type, and chunked raw PCM whose
   length is a multiple of `channels × width`.
@@ -372,7 +392,9 @@ LEGACY-BUGs (marked `// LEGACY-BUG:`; jarvisd fixes them, the tests branch on `J
     a CC node row (see the note above).
   - The STT side: whisper `/transcribe` request and response shape with a short WAV fixture
     (`internal/audio` can generate a sine).
-- [x] **MQTT topic catalogue**, partly: `TestCCMQTTCatalogue` with the fake node in
+- [x] **MQTT topic catalogue**: every row but 21 (no LLM-free trigger), 10 (D29) and 19 (cut)
+  since 2026-10-07; the rows below plus `TestCCMQTTRows` (see the coverage table). History:
+  `TestCCMQTTCatalogue` with the fake node in
   `cc_mqtt.go`. Covered rows of docs/cc/05 §2.4: **1** `commands` (verbs `callback`,
   `update_node_config`, `preview_led_pattern`, `measure_ambient_noise`, `action`, `routine`),
   **2** `settings/request` (with and without `include_values`), **3** `k2/provision`, **4**
@@ -418,34 +440,29 @@ LEGACY-BUGs (marked `// LEGACY-BUG:`; jarvisd fixes them, the tests branch on `J
 Fakes from Phase 0 item 2: the **fake MQTT node** exists (`cc_mqtt.go`). The **fake LLM** is
 not needed: jarvisd's CC calls the llm module in process, so there is no CC→LLM wire left to
 freeze (the llm HTTP API is frozen by `llm_test.go`), and aiming legacy CC at a fake would mean
-re-registering services on the target. The **fake relay** is still to build (below).
+re-registering services on the target. The **fake relay** is `notifications_relay_test.go`.
 
-### What is actually left (2026-10-07)
+### 0.6 closed (2026-10-07)
 
-All of these need the legacy CC (and, for the relay, notifications) up on the MBP; on
-2026-10-07 the MBP's CC, logs, loki and notifications containers were down (`restart=no`, not
-restarted after a Docker restart on 2026-10-06 23:21Z), so nothing below has a legacy run yet.
+The five leftovers listed here before are done, each green against the MBP legacy stack (after
+restarting its loki, logs, notifications, CC and recipes containers) and against a throwaway
+jarvisd: CC media proxy and mobile audio (`cc_media_test.go`), the voice hot path and admin
+traces (`cc_voice_test.go`), the uncovered CC node routes (`cc_node_routes_test.go`), the
+uncovered MQTT rows and verbs (`cc_mqtt_rows_test.go`), and the fake relay
+(`notifications_relay_test.go`). See the coverage table above.
 
-1. **CC media proxy** (PCM headers re-emitted by CC): `/api/v0/media/tts/speak`,
-   `/media/tts/speak/stream`, `/media/whisper/transcribe`, the node voice-profile
-   enroll/verify proxies, and mobile `/mobile/stt` and `/mobile/tts` (docs/cc/06 M1–M5, A1–A2).
-2. **CC voice hot path**, shape-only against the real model like `TestCCNodeLLMChat`:
-   `/conversation/start`, `/conversation/end`, `/voice/command` and `/voice/command/stream`,
-   `/voice/command/continue` and `/continue/stream`, `/voice/acknowledge`, `/wake-response`
-   (docs/cc/01).
-3. **CC node routes not yet covered** (docs/cc/05 §2.1): `/provisioning/token` +
-   `/nodes/register`, `PATCH /admin/nodes/{id}`, the `GET /admin/nodes` list, `/releases/latest`,
-   node updates and tasks (`/nodes/{id}/update`, `/nodes/tasks/{tid}/status`, `/tasks/{tid}`,
-   `/nodes/{id}/tasks[/{tid}/cancel]`), admin traces.
-4. **MQTT rows not yet covered** (docs/cc/05 §2.4): 5 config/push, 7 device-scan, 8 device-list,
-   9 device-state, 11 bluetooth-scan, 12 bluetooth-pair, 16–18 package-*, 21 context/query,
-   22 `jarvis/auth/+/ready`; verbs `tool_call`, `report_tools`, `enroll_voice`/`verify_voice`,
-   `toggle_command`, `invalidate_device_cache`, `device_removed`. (10 camera-credentials is
-   deferred by D29; 19 test-install is cut by D5.)
-5. **Fake relay**: freeze the notifications → relay request. Legacy `RELAY_URL` on the MBP is
-   `host.docker.internal:7735`, where nothing listens; a test-side listener reached through
-   `ssh -R 7735:127.0.0.1:<port>` would need no stack change (ask before setting it up). On
-   jarvisd it is the `relay.url` notifications setting.
+What stays uncovered, and why:
+
+- **Row 21 `context/query`.** Its only publisher is the phone-call planning step, which needs an
+  LLM turn with phone calls enabled; no deterministic trigger.
+- **Row 22's live publish on legacy.** The token exchange must reach an endpoint the MBP's CC
+  container can POST to; the subtest needs `JARVIS_CONTRACT_CALLBACK_HOST` and skips without
+  it. It runs on jarvisd, where the SSRF fence (D4) puts the endpoint in the LAN
+  `provider_base_url` mode, so the callback host must then be a **LAN address** of the test
+  host (e.g. `10.0.0.122`), not `127.0.0.1`. (`TestOCRFlowJobs/callback` takes either, but on
+  jarvisd it needs `JARVIS_APP_ID`/`JARVIS_APP_KEY` set on the target, or its callbacks carry no
+  app credentials.)
+- 10 camera-credentials (deferred, D29), 19 test-install (cut, D5).
 
 ## Running against jarvisd (parity)
 
@@ -475,5 +492,6 @@ JARVIS_CONTRACT_ENV_FILE=/tmp/jarvisd.env scripts/contract.sh -run 'TestConfig|T
 | cc (5a: nodes + MQTT) | Against the real `jarvisd` binary (all listeners on 277xx, broker `JARVIS_MQTT_ADDR=127.0.0.1:21884`, `JARVIS_CONTRACT_MQTT_PORT=21884`, `JARVIS_CONTRACT_CC_ADMIN_KEY` = jarvisd's `ADMIN_API_KEY`, 2026-10-06): `TestCCNodeAuth`, `TestCCNodeCreateAndHeartbeat`, `TestCCNodeMQTTCredentials`, `TestCCNodeSettingsRequestsList`, `TestHealth/command-center`, `TestSettings*/command-center`, and the 5a subtests of `TestCCMQTTCatalogue` (settings_request, k2_provision, update_node_config, preview_led_pattern, ambient_noise_and_verify, action, factory_reset, no_stray_publishes) pass. Still failing until their sub-phase: callback (13), routine_sync_and_run_now (08), bluetooth (07), command_data route (12), `TestCCSignals` (10). `Jarvisd()` branches (decided divergences): per-node broker credentials from `/node/mqtt-credentials` (`DialMQTTNode`, D4); no `trusted` in published details (D4/D7); `/device-control-results` needs the node key (D4); no `adapter_hash` in NodeResponse (D9); `include_values`/`user_id` in the node's pending settings list (D40 Q8); 403 for another household on the settings `/result` poll and the ambient-noise trigger (D4/D5). |
 | cc (5c/5d) | Against the real `jarvisd` binary (same 277xx setup, 2026-10-07; `RELAY_URL` set to a dead address so pushes queue): the formerly pending `TestCCMQTTCatalogue` subtests callback, routine_sync_and_run_now, bluetooth_fire_and_forget and command_data_request_response pass, as does all of `TestCCSignals`; the whole non-model suite (auth, config, logs, notifications, ocr, cc, health, settings: 62 top-level tests, `-skip 'TestLLM|TestTTS|TestWhisper|TestCCNodeLLMChat|TestRecipes'`) is green. `Jarvisd()` branch: `/signals` app auth is in process, so a valid app gets 400 "household_id required…" and unknown credentials 401, where legacy 502'd on every app call (its LEGACY-BUG). |
 | cc (5b: voice + plugin API) | `TestCCNodeLLMChat` (real Qwen3-4B on the live label via the model manager), `TestCCDateContext` and `TestCCNodePlugin` pass against the real `jarvisd` binary (same 277xx setup, 2026-10-06), and every 5a CC test still passes. `Jarvisd()` branches (decided divergences): `/generate/date-context` without a timezone fills `user_timezone`/`is_dst` with UTC (D40 03.Q11), and an unknown zone falls back to UTC instead of the legacy 500 (D8). |
+| cc (0.6 leftovers) | Against a throwaway `jarvisd` (all listeners on 477xx, broker 41884, Qwen3-4B on CPU, Kokoro, whisper base.en, `relay.url` at the fake relay, `JARVIS_CONTRACT_CALLBACK_HOST` = the box's LAN address; 2026-10-07): `TestCCMediaTTS`, `TestCCMediaTranscribe`, `TestCCMobileAudio`, `TestCCNodeVoiceEnrollment`, `TestCCVoice`, `TestCCProvisioning`, `TestCCAdminNodesPatchAndList`, `TestCCReleasesLatest`, `TestCCNodeUpdateTasks`, `TestCCMQTTRows` (incl. row 22's live publish) and `TestNotificationsRelay` pass twice; the whole suite is green except `TestOCRFlowJobs/callback`, which needs `JARVIS_APP_ID`/`JARVIS_APP_KEY` on the target (unset there). Parity bugs fixed on the way: A1/A2 `/mobile/stt` and `/mobile/tts` were never ported (404); a `tool_call`'s `request_id` differed from its `reply_request_id`. `Jarvisd()` branches (decided divergences): empty TTS text 400 (D8); M5 without a profile and a repeated V6 delete 404 (D8); M4 without a pending V7 start and V10 by another user 403 (D4); V1 adds `recognition_enabled` (D35/M14); acknowledge keywords are word-bounded (M5); `/conversation/end` evicts the conversation (D40 01.Q2); provisioning for a non-member household 403 (D4/D5); the relay push is queued (`pending`, D31) and registers for a JWT; package-install carries `pantry_url` (D48); an http `exchange_url` is refused (SSRF fence, D4); node auth on the result sinks and no `trusted` (D4/D7). |
 | admin | `TestAdminGate`, `TestAdminBFF` (`admin_test.go`, docs/admin/00-inventory.md §9) pass against a throwaway `jarvisd` binary (all listeners on 377xx, `JARVIS_CONTRACT_PORT_ADMIN=37710`, 2026-10-07). **jarvisd-only**: legacy jarvis-admin (Fastify) is replaced, not ported, so there is no Python oracle; the shapes freeze what the embedded SPA consumes (`web/admin/src/api`). Covered: login through `/api/auth/login`; the gate on BFF, pass-through and unknown `/api` paths (401 `Missing or invalid Authorization header` / `Invalid or expired token`, 403 `Superuser access required`); the bootstrap list (`setup-status`, reduced `/api/setup/state`, login error); `/api/settings` (AggregatedSettingsResponse + `display_name`, `?service=`, 404, a no-op PUT); `/api/admin/users` (= `/superuser/users`); `/api/llm/v1/hardware`; `/api/traces` (list, cc's 400 validation body, 404 `Trace not found`); the superuser `/api/setup/state`; a superuser's JSON 404 `Not Found`. Skips unless `JARVIS_CONTRACT_IMPL=jarvisd`. |
 | tts | All 5 `TestTTS*`, `TestHealth/tts` and `TestSettingsAppAuth/tts` pass against the Go module (2026-10-06) with real Kokoro (`kokoro-multi-lang-v1_0`, bm_george), through `internal/modules/tts/parity_test.go` (build tag `parity`), apps and JWTs checked against the MBP's jarvis-auth via `ssh -L 27701:localhost:7701`. Env: `JARVIS_CONTRACT_HOST=127.0.0.1 JARVIS_CONTRACT_PORT_AUTH=27701 JARVIS_CONTRACT_PORT_TTS=27707`; see the file header. |
