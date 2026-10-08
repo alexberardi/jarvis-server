@@ -41,6 +41,7 @@ Technical choices that need no product call are already made in the inventory:
 | RD7 | 2026-10-08 | RQ7 multi-household users | **(b) union** (user): reads (recipes, search, plans, staples, shopping list inputs, SKU map) cover every household the user belongs to; new rows are written to the token's household; a member may edit/delete rows of any household they belong to (security stance: never restrict members; outsiders and non-members still 404). Port note: the shopping list aggregates the plans it is asked for regardless of household; random/AI plan candidates come from the union. |
 | RD8 | 2026-10-08 | RQ8 r.jina.ai + scraper cookies | **(a) drop both.** |
 | RD9 | 2026-10-08 | RQ9 meal-plan preferences | **(a) port as is**; implementing them is on the STATUS future-TODO list. |
+| RD10 | 2026-10-08 | Job list (#15, the app's Mailbox) | **Only import jobs** (URL/webview and photo); meal-plan jobs stay pollable by id; SKU-match jobs invisible. Legacy listed every type (empty rows). Also: editor uploads must be real images within `image.max_bytes` (legacy stored any file — stored XSS). |
 | RD1 | 2026-10-08 | RQ1 scope | **(a) port everything**, including the LLM SKU-matching job (user). |
 
 ## Queue
