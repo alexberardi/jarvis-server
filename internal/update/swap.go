@@ -112,6 +112,7 @@ func Swap(ctx context.Context, p Paths, o SwapOptions) (*Marker, error) {
 		os.Remove(newBin)
 		return nil, err
 	}
+	_ = os.Remove(p.RolledBack()) // from an earlier rollback; stale now
 	m.State, m.Attempts, m.SwappedAt, m.Reason = StateSwapped, 0, time.Now().UTC(), ""
 	if err := WriteMarker(p, m); err != nil {
 		return nil, err
@@ -221,19 +222,23 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 	if !CanWrite(p.Exe) {
 		return nil, fmt.Errorf("%w (%s)", ErrNeedPrivilege, filepath.Dir(p.Exe))
 	}
-	prev := m.Prev
-	if prev == "" {
-		prev = p.Prev()
-	}
+	// Every path comes from p (the executable, the home), never from the marker: the marker
+	// lives in the data directory, which the service account can write, and this may run as
+	// root (the systemd pre-start helper).
+	prev := p.Prev()
 	tmp := filepath.Join(filepath.Dir(p.Exe), ".jarvisd.rollback")
 	if err := copyFile(prev, tmp); err != nil {
 		return nil, fmt.Errorf("update: restore %s: %w", prev, err)
 	}
+	keepRolledBack(p)
 	if err := installBinary(p, tmp, false); err != nil {
 		os.Remove(tmp)
 		return nil, err
 	}
 	for file, snap := range m.Snapshots {
+		if !snapshotPathsOK(p, file, snap) {
+			continue // not an entry Stage writes: never restore it
+		}
 		changed, err := migrationsChanged(ctx, p.Home, file, m.GooseBefore[file])
 		if err != nil {
 			return nil, err
@@ -252,6 +257,41 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 	return &res, nil
 }
 
+// keepRolledBack copies the executable about to be rolled back to RolledBack, so the newer
+// binary isn't lost (jarvisd.prev stays the older one). Best effort: a rollback never fails
+// for want of this copy. Both paths derive from the executable, whose directory a privileged
+// caller owns.
+func keepRolledBack(p Paths) {
+	tmp := p.RolledBack() + ".tmp"
+	if err := copyFile(p.Exe, tmp); err != nil {
+		os.Remove(tmp)
+		return
+	}
+	if err := os.Rename(tmp, p.RolledBack()); err != nil {
+		os.Remove(tmp)
+	}
+}
+
+// snapshotPathsOK reports whether a marker's snapshot entry names a database directly in the
+// home and a regular file directly in its backups directory, neither a symlink. Stage only
+// writes such entries; anything else was edited in by someone who can write the data
+// directory and must not steer a root rollback into reading or overwriting other files.
+func snapshotPathsOK(p Paths, file, snap string) bool {
+	if !filepath.IsAbs(file) || filepath.Dir(filepath.Clean(file)) != filepath.Clean(p.Home) || filepath.Ext(file) != ".db" {
+		return false
+	}
+	if !filepath.IsAbs(snap) || filepath.Dir(filepath.Clean(snap)) != filepath.Clean(p.BackupsDir()) {
+		return false
+	}
+	for _, f := range []string{file, snap} {
+		st, err := os.Lstat(f)
+		if err != nil || !st.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
+}
+
 // RestorePrevious puts Prev back in place with no upgrade in progress (a manual rollback after
 // an upgrade passed its gate) and records it in last-upgrade.json as rolled back from `to`
 // (the version that was running) to `from` (Prev's; "" when unknown). Databases are left
@@ -268,6 +308,7 @@ func RestorePrevious(p Paths, from, to, reason string) (*Result, error) {
 	if err := copyFile(p.Prev(), tmp); err != nil {
 		return nil, err
 	}
+	keepRolledBack(p)
 	if err := installBinary(p, tmp, false); err != nil {
 		os.Remove(tmp)
 		return nil, err

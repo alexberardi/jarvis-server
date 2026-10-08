@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -390,7 +391,7 @@ func TestCrashLoopRollsBack(t *testing.T) {
 // TestGateFailureRestoresMigratedDB: the new version migrated, then failed its gate: the
 // rollback restores the snapshot.
 func TestGateFailureRestoresMigratedDB(t *testing.T) {
-	in, _, _ := swapped(t)
+	in, o, bin := swapped(t)
 	ctx := context.Background()
 	if _, err := BeginStart(in.paths, "v1.1.0"); err != nil {
 		t.Fatal(err)
@@ -415,6 +416,20 @@ func TestGateFailureRestoresMigratedDB(t *testing.T) {
 	// The previous binary is kept (a second rollback stays possible by hand).
 	if readString(t, in.paths.Prev()) != "old binary" {
 		t.Fatal("prev removed")
+	}
+	// A10c U4: the version rolled back from is kept too, not lost.
+	if readString(t, in.paths.RolledBack()) != string(bin) {
+		t.Fatal("the rolled-back binary was not kept")
+	}
+	// The next swap drops it (stale).
+	if _, err := Stage(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Swap(ctx, in.paths, SwapOptions{Keys: o.Keys}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(in.paths.RolledBack()); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stale rolled-back binary left: %v", err)
 	}
 }
 
@@ -536,6 +551,9 @@ func TestRestorePreviousRecordsResult(t *testing.T) {
 	if readString(t, in.paths.Exe) != "previous binary" {
 		t.Fatal("binary not restored")
 	}
+	if readString(t, in.paths.RolledBack()) != "old binary" || readString(t, in.paths.Prev()) != "previous binary" {
+		t.Fatal("the rolled-back binary was not kept beside jarvisd.prev (A10c U4)")
+	}
 	got, _ := ReadResult(in.paths)
 	if got == nil || !got.At.Equal(res.At) || got.Outcome != ResultRolledBack || got.From != "v1.0.0" ||
 		got.To != "v1.1.0" || got.Reason != "rolled back by hand" || got.DBRestored || got.At.IsZero() {
@@ -552,5 +570,69 @@ func TestRestorePreviousRecordsResult(t *testing.T) {
 	}
 	if got, _ := ReadResult(in.paths); got.Reason != "rolled back by hand" {
 		t.Fatalf("result rewritten: %+v", got)
+	}
+}
+
+// TestRollbackIgnoresMarkerPaths: the marker lives in the data directory, which the service
+// account can write, and the rollback may run as root (the systemd pre-start). A tampered
+// marker must not choose the binary put in place or the files a snapshot is restored over or
+// read from, and a symlink left at a temporary name must not be written through.
+func TestRollbackIgnoresMarkerPaths(t *testing.T) {
+	in, _, _ := swapped(t)
+	ctx := context.Background()
+	outside := t.TempDir()
+	write := func(p, s string) {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evil := filepath.Join(outside, "evil")
+	write(evil, "evil binary")
+	victimDB := filepath.Join(outside, "victim.db")
+	write(victimDB, "victim")
+	fakeSnap := filepath.Join(in.paths.Home, "fake-snapshot.db")
+	write(fakeSnap, "attacker data")
+
+	m, err := ReadMarker(in.paths)
+	if err != nil || m == nil {
+		t.Fatal(m, err)
+	}
+	m.Prev = evil
+	m.Snapshots[victimDB] = fakeSnap
+	m.GooseBefore[victimDB] = map[string][]int64{"goose_x": {1}}
+	if err := WriteMarker(in.paths, m); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "victim")
+	write(victim, "untouched")
+	if runtime.GOOS != "windows" {
+		for _, link := range []string{in.paths.ResultPath() + ".tmp", in.db + ".restore"} {
+			if err := os.Symlink(victim, link); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	in.exec(t, `INSERT INTO goose_auth (version_id, is_applied) VALUES (3, 1)`, `INSERT INTO users VALUES ('after')`)
+	if err := RequestRollback(in.paths, "gate"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Rollback(ctx, in.paths, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readString(t, in.paths.Exe); got != "old binary" {
+		t.Fatalf("binary %q: the marker's prev was used", got)
+	}
+	if !res.DBRestored {
+		t.Fatal("the real snapshot was not restored")
+	}
+	if got := in.users(t); len(got) != 1 || got[0] != "before" {
+		t.Fatalf("users %v", got)
+	}
+	for p, want := range map[string]string{victimDB: "victim", victim: "untouched"} {
+		if got := readString(t, p); got != want {
+			t.Fatalf("%s written: %q", p, got)
+		}
 	}
 }

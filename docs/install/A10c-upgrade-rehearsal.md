@@ -51,15 +51,24 @@ Fixed (each with a test; branch `worktree-agent-a7e847439692f246c`):
 | U2 | `jarvisd upgrade --rollback` | Returned 0.1 s after asking the service manager to restart, without saying whether the restored version came up (an upgrade waits for its gate). | `ad6b185` waits (gate timeout) for the service to run and answer `/health`, then "jarvisd v0.1.0-rc1 is up and healthy", or fails naming the log. Test: `TestReportHealthy`. |
 | U3 | `jarvisd setup-link` (install.sh's last line) | "Setup is done (or jarvisd hasn't started yet)" on every install over a set-up home. | `e82c62e` with no token it asks `/health`: "jarvisd is set up. The admin is at …", or "isn't answering yet; once it is, `jarvisd setup-link` prints the setup link…". Test: `TestPrintSetupLink`. |
 
+Fixed later (branch `worktree-agent-ac3f9d5ad9482bedd`):
+
+| # | Where | Problem | Fix |
+|---|---|---|---|
+| U4 | `jarvisd upgrade --rollback` (and every rollback) | The rollback *copied* `jarvisd.prev` over the binary, so both were rc1 and rc2 was gone. | `44df387` the binary being replaced is first copied to `jarvisd.rolledback` (`.rolledback.exe`; best effort, one copy, the next swap deletes it, `install.sh --uninstall` removes it); `--rollback` says where it is. A re-upgrade still downloads: a swap only installs what it re-verifies against the signed `SHA256SUMS`, and the root helper must not trust a bare binary. Tests: `TestGateFailureRestoresMigratedDB`, `TestRestorePreviousRecordsResult`; `upgrade-e2e.sh` step 5. |
+| U4+ | the root `ExecStartPre` rollback (found while fixing U4) | Rollback copied the **marker's** `prev` path over the binary and restored snapshot entries to/from any path the marker named; the marker is in the data dir the `jarvisd` account writes, so that account could have a binary of its choosing run as root. | `cbf9d17` paths come only from the executable and `--home`: `<exe>.prev`; snapshot entries must be a regular `*.db` in the home and a regular file in `backups/`, no symlinks; data-dir temporaries (`*.tmp`, `*.restore`) are created with `O_EXCL`. Test: `TestRollbackIgnoresMarkerPaths`. |
+| U6 | script upgrade (install.sh → `jarvisd upgrade`) | Ended at "up and healthy", no admin URL. | `45d876e` a successful upgrade or rollback of the installed service ends with `setup-link`'s line (admin URL, or the setup link before setup). install.sh `exec`s the upgrade, so `jarvisd upgrade` prints it. Doctor is still not run after an upgrade. Test: `TestEndWithAdmin`. |
+| U8 | `jarvisd service uninstall --user` | Left linger on although install turned it on. | `aa3928b` install reads `Linger` first and, if it was off and `enable-linger` worked, writes `$XDG_CONFIG_HOME/jarvisd/linger-enabled`; uninstall runs `disable-linger` only when that mark exists (failure explained, mark kept). Test: `TestSystemdUserLinger`. |
+
 Logged:
 
 | # | Severity | Problem | Suggestion |
 |---|---|---|---|
-| U4 | info | A manual rollback *copies* `jarvisd.prev` over the binary, so afterwards both are rc1 and the rc2 binary is gone: a second `--rollback` is a no-op and going forward again re-downloads (20 MB, 1 s here). | Fine as is; or swap the two so `jarvisd.prev` becomes the rolled-back-from version. |
+| U4 | info | A manual rollback *copies* `jarvisd.prev` over the binary, so afterwards both are rc1 and the rc2 binary is gone. | **Fixed** (above). |
 | U5 | info | On rc1 the Update page's `install_command` is still `curl -fsSL …/install.sh \| sh` without `--user` (R1/R3, fixed in rc2; rc2's API was up to date, so not shown). | — |
-| U6 | info | A script upgrade (install.sh handing over to `jarvisd upgrade`) ends at "up and healthy": no doctor and no admin URL, unlike a fresh install. | Print the admin URL after an upgrade too. |
+| U6 | info | A script upgrade ends at "up and healthy": no doctor and no admin URL. | **Fixed** (admin URL; above). |
 | U7 | info (process) | Restarting the dev jarvisd with `setsid nohup run.sh … &` from the agent's shell left that shell as its waiting parent (the harness tracked it as a background task); restarted with `setsid -f nohup …` instead, giving the recorded shape (parent systemd --user, own session). | Use `setsid -f` in the restore notes. |
-| U8 | info | `jarvisd service uninstall --user` leaves linger on although `service install --user` turned it on. | Remember whether install enabled it and turn it off on uninstall, or say so. |
+| U8 | info | `jarvisd service uninstall --user` leaves linger on although install turned it on. | **Fixed** (above). |
 | R10 | info | (from A10b) the admin's update/restart counts as a systemd restart in `service status`. | — |
 
 ## Not covered

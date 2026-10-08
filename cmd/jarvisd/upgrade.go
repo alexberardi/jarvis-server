@@ -159,6 +159,9 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 			back = res.From
 			fmt.Fprintf(stdout, "rolled back %s to %s (database restored: %v)\n", res.To, res.From, res.DBRestored)
 		}
+		if _, err := os.Stat(paths.RolledBack()); err == nil {
+			fmt.Fprintf(stdout, "the binary rolled back from is kept as %s\n", paths.RolledBack())
+		}
 		if mgr == nil || !st.Installed {
 			fmt.Fprintln(stdout, "start jarvisd again to run it")
 			return nil
@@ -169,7 +172,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		if err != nil {
 			return err
 		}
-		return reportHealthy(ctx, mgr, gateTimeout(), back, logHint(st.Kind, paths.Home), stdout)
+		return endWithAdmin(cfg, reportHealthy(ctx, mgr, gateTimeout(), back, logHint(st.Kind, paths.Home), stdout), stdout)
 	}
 
 	if !update.CanWrite(exe) {
@@ -212,7 +215,19 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	}
 	err = restartAfter(ctx, mgr, st, paths, stdout)
 	refirewall(ctx, cfg, fwOK, stdout) // after a rollback too: jarvisd.prev was copied, not renamed
-	return err
+	return endWithAdmin(cfg, err, stdout)
+}
+
+// endWithAdmin closes a successful upgrade or rollback of the installed service the way a
+// fresh install ends (A10c U6): with `jarvisd setup-link`'s line, the admin URL (or the setup
+// link while no admin account exists). install.sh execs `jarvisd upgrade` for an upgrade,
+// so this is that script's last word too. err (the upgrade failed) is returned unchanged.
+func endWithAdmin(cfg config.Config, err error, stdout io.Writer) error {
+	if err != nil {
+		return err
+	}
+	_ = printSetupLink(cfg, stdout) // only an unreadable token file; the upgrade itself is done
+	return nil
 }
 
 // firewallFixes are the doctor's firewall checks that have a fix to run, on macOS only: every

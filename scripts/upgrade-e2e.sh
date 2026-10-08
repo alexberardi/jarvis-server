@@ -14,7 +14,7 @@
 #   4. the admin button: setup → enable updates → POST /api/update/apply {v0.0.4} → v0.0.4
 #      (system mode: the service account can't write /usr/local/bin, so the unit's
 #      ExecStartPre=+ helper swaps it in);
-#   5. `jarvisd upgrade --rollback`               → v0.0.2 again;
+#   5. `jarvisd upgrade --rollback`               → v0.0.2 again, jarvisd.rolledback = v0.0.4;
 # and uninstalls.
 set -euo pipefail
 
@@ -25,7 +25,8 @@ cd "$(dirname "$0")/.."
 
 W=$(mktemp -d)
 SRV_PID=""
-# `service install --user` turns lingering on; put it back as it was.
+# `service install --user` turns lingering on and uninstall turns it back off; this also puts
+# it back as it was when a run dies before uninstalling.
 LINGER=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || echo unknown)
 cleanup() {
   set +e
@@ -186,5 +187,6 @@ say "5. jarvisd upgrade --rollback"
 J "${UP[@]}" --rollback
 wait_version v0.0.2
 [ "$(outcome)" = rolled_back ] || fail "last-upgrade.json doesn't record the manual rollback: $(outcome)"
+[ "$(R "$BIN.rolledback" version)" = v0.0.4 ] || fail "jarvisd.rolledback is not v0.0.4"
 
 say "PASS ($MODE)"

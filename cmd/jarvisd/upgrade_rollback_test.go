@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
 )
 
@@ -22,6 +25,26 @@ type statusManager struct {
 
 func (m statusManager) Status(context.Context) (service.Status, error) {
 	return service.Status{Installed: true, Running: true, Home: m.home}, nil
+}
+
+// A10c U6: an upgrade through install.sh (which execs `jarvisd upgrade`) ended at "up and
+// healthy", without the admin URL a fresh install prints last.
+func TestEndWithAdmin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	_, p, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	port, _ := strconv.Atoi(p)
+	cfg := config.Config{Home: t.TempDir(), Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710, config.ListenerConfig: port}}
+
+	var b strings.Builder
+	if err := endWithAdmin(cfg, nil, &b); err != nil || b.String() != "jarvisd is set up. The admin is at http://127.0.0.1:7710/\n" {
+		t.Fatalf("%v %q", err, b.String())
+	}
+	b.Reset()
+	failed := errors.New("v1.1.0 failed")
+	if err := endWithAdmin(cfg, failed, &b); err != failed || b.Len() != 0 {
+		t.Fatalf("after a failure: %v %q", err, b.String())
+	}
 }
 
 // A10c: `jarvisd upgrade --rollback` returned as soon as the service manager had restarted

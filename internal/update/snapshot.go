@@ -159,7 +159,7 @@ func restoreSnapshot(home, snapshot, file string) error {
 	}
 	defer in.Close()
 	tmp := file + ".restore"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	out, err := createFresh(tmp)
 	if err != nil {
 		return err
 	}

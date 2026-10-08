@@ -43,6 +43,16 @@ func (p Paths) Prev() string {
 	return p.Exe + ".prev"
 }
 
+// RolledBack is the binary a rollback replaced (the newer version), kept next to the
+// executable for inspection or to put back by hand: jarvisd.rolledback (jarvisd.rolledback.exe
+// on Windows). One copy; the next swap removes it.
+func (p Paths) RolledBack() string {
+	if ext := filepath.Ext(p.Exe); strings.EqualFold(ext, ".exe") {
+		return strings.TrimSuffix(p.Exe, ext) + ".rolledback" + ext
+	}
+	return p.Exe + ".rolledback"
+}
+
 // old is where Windows parks the running executable (it can be renamed, not replaced, while it
 // runs); CleanupOld removes it on the next start.
 func (p Paths) old() string { return p.Exe + ".old" }
@@ -169,11 +179,27 @@ func writeJSON(p Paths, path string, v any) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+	f, err := createFresh(tmp)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	if err := errors.Join(err, f.Close()); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	chownLike(p.Home, tmp)
 	return os.Rename(tmp, path)
+}
+
+// createFresh creates path (0600) for writing, replacing whatever was there without following
+// it: a root pre-start writes these temporaries in the data directory, where the service
+// account could have left a symlink to a file it can't write itself.
+func createFresh(path string) (*os.File, error) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 }
 
 // mkdirOwned creates dir (under home) owner-only, owned like home.
