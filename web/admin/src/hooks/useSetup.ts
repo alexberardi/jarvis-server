@@ -14,10 +14,13 @@ export function useSetupState(enabled = true) {
     queryFn: () => getSetupState(),
     staleTime: 5_000,
     enabled,
-    // While the live model loads, follow it closely; otherwise a slow refresh is enough.
+    // While a model job downloads or loads (AD3b checklist), or the live model loads, follow
+    // it closely; otherwise a slow refresh is enough.
     refetchInterval: (q) => {
       const d = q.state.data
-      return d?.superuser && d.models_configured && !d.live_ready ? 3_000 : 30_000
+      if (!d?.superuser) return 30_000
+      if (d.jobs?.some((j) => j.state === 'downloading' || j.state === 'loading')) return 1_500
+      return d.models_configured && !d.live_ready ? 3_000 : 30_000
     },
   })
 }

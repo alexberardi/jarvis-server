@@ -10,10 +10,22 @@ import AccountStep from '@/components/wizard/AccountStep'
 import CheckStep from '@/components/wizard/CheckStep'
 import DoneStep from '@/components/wizard/DoneStep'
 import HardwareStep from '@/components/wizard/HardwareStep'
-import ModelsStep from '@/components/wizard/ModelsStep'
+import JobStep from '@/components/wizard/JobStep'
 import PrivacyStep from '@/components/wizard/PrivacyStep'
 import { buttonClass } from '@/components/models/styles'
-import { STEPS, TITLES, idx, initialStep, saveStep, serverStep, type Initial, type Step } from '@/components/wizard/steps'
+import { jobDef } from '@/components/setup/jobs'
+import {
+  JOB_STEPS,
+  STEPS,
+  TITLES,
+  idx,
+  initialStep,
+  isResumable,
+  saveStep,
+  serverStep,
+  type Initial,
+  type Step,
+} from '@/components/wizard/steps'
 
 function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
   return (
@@ -49,7 +61,7 @@ function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
   )
 }
 
-/** First-run setup on jarvisd (S3, AQ3/AD3, AD3a). */
+/** First-run setup on jarvisd (S3, AQ3/AD3, AD3a, AD3b). */
 export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolean }) {
   const { state } = useAuth()
   const navigate = useNavigate()
@@ -69,6 +81,8 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   const go = (s: Step | null) => {
     saveStep(s)
     setStepState(s)
+    // Any tab or browser resumes here (AD3b: the job steps can't all be derived from the install).
+    if (isResumable(s)) updateSetting('admin', 'setup.step', s).catch(() => {})
     // Reaching Done finishes setup for every tab and browser: sign-ins stop resuming it.
     if (s === 'done') updateSetting('admin', 'setup.completed', true).catch(() => {})
     // Each step reads the install as it is now (labels change as installs finish).
@@ -90,17 +104,19 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   if (idx(step) > idx('account') && !state.isAuthenticated) return <Navigate to="/login" replace />
 
   const next = () => go(STEPS[Math.min(idx(step) + 1, STEPS.length - 1)])
+  const back = () => go(STEPS[Math.max(idx(step) - 1, idx('hardware'))])
 
   function finish() {
     go(null)
     navigate('/dashboard', { replace: true })
   }
 
-  const wide = step === 'models'
+  const wide = JOB_STEPS.includes(step)
+  const job = jobDef(step)
 
   return (
     <div className="flex min-h-screen justify-center bg-[var(--color-background)] p-4 sm:items-center">
-      <div className={cn('w-full', wide ? 'max-w-4xl' : 'max-w-2xl')}>
+      <div className={cn('w-full', wide ? 'max-w-3xl' : 'max-w-2xl')}>
         <div className="mb-2 text-center text-lg font-bold text-[var(--color-primary)]">Jarvis setup</div>
         <Stepper step={step} onPick={go} />
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-lg">
@@ -121,7 +137,16 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
             />
           )}
           {step === 'hardware' && <HardwareStep onDone={next} />}
-          {step === 'models' && <ModelsStep onDone={next} />}
+          {job && (
+            <JobStep
+              key={job.id}
+              def={job}
+              onNext={next}
+              onBack={back}
+              // "Install everything recommended" confirms all five job steps at once.
+              onAllConfirmed={job.id === 'llm' ? () => go('privacy') : undefined}
+            />
+          )}
           {step === 'privacy' && <PrivacyStep onDone={next} />}
           {step === 'done' && <DoneStep onFinish={finish} />}
         </div>

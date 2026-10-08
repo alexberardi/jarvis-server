@@ -1,22 +1,15 @@
 import { CheckCircle2, PartyPopper, RefreshCw, Smartphone } from 'lucide-react'
 import DoctorChecks from '@/components/doctor/DoctorChecks'
-import { Pill } from '@/components/models/ui'
-import { buttonClass, stateTone } from '@/components/models/styles'
-import { LABEL_TITLE, type Label } from '@/api/llm'
+import JobChecklist from '@/components/setup/JobChecklist'
+import { joinTitles, missingRequired } from '@/components/setup/jobs'
+import { buttonClass } from '@/components/models/styles'
 import { useDoctor, useRerunDoctor, useSetupState } from '@/hooks/useSetup'
 import { useSystemInfo } from '@/hooks/useSystem'
 import { cn } from '@/lib/utils'
 
-const SHOWN_LABELS: Label[] = ['live', 'background', 'embeddings', 'stt', 'tts', 'speaker']
-
-const STATE_TEXT: Record<string, string> = {
-  not_configured: 'not configured',
-  fetching_engine: 'fetching engine',
-  no_engine_build: 'no engine build',
-}
-
 /**
- * DoneStep sums up: what each model job runs (and whether it is ready), the prompt provider,
+ * DoneStep sums up: the per-job model checklist (AD3b), with what voice still lacks named and
+ * finishing still allowed, the prompt provider,
  * the doctor's verdict re-run now, and what to do next: the mobile app, then nodes.
  */
 export default function DoneStep({ onFinish }: { onFinish: () => void }) {
@@ -27,6 +20,7 @@ export default function DoneStep({ onFinish }: { onFinish: () => void }) {
   const s = state.data
   const configPort = sys.data?.listeners?.find((l) => l.name === 'config')?.port ?? 7700
   const host = typeof window !== 'undefined' ? window.location.hostname : 'this-machine'
+  const missing = missingRequired(s?.jobs)
 
   return (
     <div className="space-y-5">
@@ -34,32 +28,24 @@ export default function DoneStep({ onFinish }: { onFinish: () => void }) {
         <h2 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
           <PartyPopper size={20} /> Jarvis is set up
         </h2>
-        {s && !s.models_configured && (
-          <p className="mt-1 text-sm text-amber-500">
-            No language model is assigned yet, so voice requests can't be answered. Install one from the Models page; the
-            dashboard will remind you.
+        {missing.length > 0 && (
+          <p className="mt-1 text-sm text-amber-500" role="status">
+            Voice requests won't work until {joinTitles(missing.map((m) => m.title))}{' '}
+            {missing.length === 1 ? 'is' : 'are'} installed. You can finish now and add{' '}
+            {missing.length === 1 ? 'it' : 'them'} from the Models page; the dashboard will remind you.
           </p>
         )}
-        {s?.models_configured && !s.live_ready && (
+        {missing.length === 0 && s?.jobs?.some((j) => j.state === 'downloading' || j.state === 'loading') && (
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            The live model is still loading. It will be ready in a moment; the dashboard shows its progress.
+            Some models are still downloading or starting. They carry on in the background; the dashboard shows their
+            progress.
           </p>
         )}
       </div>
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold text-[var(--color-text)]">Models</h3>
-        <ul className="grid gap-1 sm:grid-cols-2">
-          {SHOWN_LABELS.map((l) => {
-            const st = s?.labels?.[l] ?? 'unknown'
-            return (
-              <li key={l} className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-[var(--color-text)]">{LABEL_TITLE[l]}</span>
-                <Pill tone={stateTone(st)}>{STATE_TEXT[st] ?? st}</Pill>
-              </li>
-            )
-          })}
-        </ul>
+        <JobChecklist jobs={s?.jobs} wizard />
         {s?.prompt_provider && (
           <p className="text-xs text-[var(--color-text-muted)]">
             Prompt provider: <code className="text-[var(--color-text)]">{s.prompt_provider.effective || 'none'}</code>

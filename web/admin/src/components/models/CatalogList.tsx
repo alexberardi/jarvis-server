@@ -152,7 +152,12 @@ export default function CatalogList({
     )
   }
 
-  const pending = recommendedInstalls(data).filter((r) => !installingIds.has(r.catalog_id ?? ''))
+  const pending = recommendedInstalls(data).filter(
+    (r) =>
+      !installingIds.has(r.catalog_id ?? '') &&
+      // Narrowed to some kinds (a job's "Set up"), it installs only those kinds' recommendations.
+      (!kinds || kinds.includes(data.models.find((m) => m.id === r.catalog_id)?.kind ?? '')),
+  )
   const groups = KIND_GROUPS.filter((g) => !kinds || kinds.includes(g.kind))
 
   function installRecommended() {

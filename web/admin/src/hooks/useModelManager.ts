@@ -12,6 +12,7 @@ import type {
   LabelsResponse,
   PromptProvider,
 } from '@/api/llm'
+import { setupKeys } from './useSetup'
 
 /** Query keys, shared so a write can refresh exactly what it changed. */
 export const mmKeys = {
@@ -75,7 +76,7 @@ export function useLabels() {
 
 /** refreshAfterInstall refetches everything an install or a delete can change. */
 function refreshModelViews(qc: ReturnType<typeof useQueryClient>) {
-  for (const key of [mmKeys.installed, mmKeys.catalog, mmKeys.labels, mmKeys.installs, mmKeys.prompt, mmKeys.hardware]) {
+  for (const key of [mmKeys.installed, mmKeys.catalog, mmKeys.labels, mmKeys.installs, mmKeys.prompt, mmKeys.hardware, setupKeys.state]) {
     qc.invalidateQueries({ queryKey: key })
   }
 }
@@ -93,7 +94,7 @@ export function useInstalls() {
       const next = await llm.listInstalls()
       const wasActive = new Set(prev.filter(llm.isActiveInstall).map((i) => i.id))
       if (next.some((i) => wasActive.has(i.id) && !llm.isActiveInstall(i))) {
-        for (const key of [mmKeys.installed, mmKeys.catalog, mmKeys.labels, mmKeys.prompt, mmKeys.hardware]) {
+        for (const key of [mmKeys.installed, mmKeys.catalog, mmKeys.labels, mmKeys.prompt, mmKeys.hardware, setupKeys.state]) {
           qc.invalidateQueries({ queryKey: key })
         }
       }
@@ -114,6 +115,8 @@ export function useStartInstall() {
         ...(old ?? []).filter((i) => i.id !== res.install.id),
       ])
       qc.invalidateQueries({ queryKey: mmKeys.catalog })
+      // The setup checklist counts a downloading install as under way (AD3b).
+      qc.invalidateQueries({ queryKey: setupKeys.state })
     },
   })
 }
@@ -148,7 +151,7 @@ export function usePutLabels() {
     mutationFn: (body) => llm.putLabels(body),
     onSuccess: (data) => {
       qc.setQueryData(mmKeys.labels, data)
-      for (const key of [mmKeys.installed, mmKeys.catalog, mmKeys.prompt]) qc.invalidateQueries({ queryKey: key })
+      for (const key of [mmKeys.installed, mmKeys.catalog, mmKeys.prompt, setupKeys.state]) qc.invalidateQueries({ queryKey: key })
     },
   })
 }
