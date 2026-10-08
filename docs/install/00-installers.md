@@ -877,7 +877,11 @@ one isn't lost (A10c U4). It is for inspection or copying back by hand: a re-upg
 since a swap only installs what it re-verifies against the signed `SHA256SUMS` and the root helper must
 not trust a bare binary. A successful upgrade or rollback of the installed service ends with
 `setup-link`'s line (the admin URL, or the setup link before setup): install.sh `exec`s `jarvisd
-upgrade`, so that is the script's last word too (A10c U6).
+upgrade`, so that is the script's last word too (A10c U6). Before that line it runs the doctor of the
+binary now installed (`<exe> doctor --json`, so the new version's ports, not the CLI's: on a script
+upgrade the CLI is the old version) and prints any failed check with its fix and "`sudo jarvisd doctor
+--fix` applies the firewall fix" (A10d V1: rc3 added 7030 and the firewall didn't admit it). The admin's
+Update button has no such step; its dashboard shows the doctor checks.
 
 **What the root helper trusts.** Only paths derived from the executable and `--home`: the marker is in the
 data dir, which the service account writes. A rollback restores `<exe>.prev` (never the marker's `prev`),

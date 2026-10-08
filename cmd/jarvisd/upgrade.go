@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -64,7 +65,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	allowOlder := fs.Bool("allow-older", false, "allow --version to name an older (or the same) release")
 	bin := fs.String("bin", "", "the jarvisd binary to replace (default: this one)")
 	user := fs.Bool("user", false, "Linux: the service is a systemd --user unit")
-	rollback := fs.Bool("rollback", false, "roll back the last upgrade (restore jarvisd.prev, and the database snapshot if migrations ran)")
+	rollback := fs.Bool("rollback", false, "roll back the last upgrade (restore jarvisd.prev; also the database snapshot when the upgrade has not passed its health check yet and migrations ran)")
 	prestart := fs.Bool("prestart", false, "internal: the service's privileged pre-start step")
 	verifyDir := fs.String("verify-dir", "", "check a release directory (SHA256SUMS, its signature, the archives) against this build's keys and version, then exit")
 	if err := fs.Parse(args); err != nil {
@@ -149,8 +150,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 			if _, err := update.RestorePrevious(paths, back, current, reason); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "restored %s; the database is unchanged (if the newer version migrated it, "+
-				"jarvisd refuses to start: restore a snapshot from %s)\n", paths.Prev(), paths.BackupsDir())
+			fmt.Fprint(stdout, restoredNote(paths.Prev(), paths.BackupsDir()))
 		} else {
 			res, err := update.Rollback(ctx, paths, reason)
 			if err != nil {
@@ -172,7 +172,11 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		if err != nil {
 			return err
 		}
-		return endWithAdmin(cfg, reportHealthy(ctx, mgr, gateTimeout(), back, logHint(st.Kind, paths.Home), stdout), stdout)
+		err = reportHealthy(ctx, mgr, gateTimeout(), back, logHint(st.Kind, paths.Home), stdout)
+		if err == nil {
+			doctorAfter(ctx, exe, stdout)
+		}
+		return endWithAdmin(cfg, err, stdout)
 	}
 
 	if !update.CanWrite(exe) {
@@ -215,7 +219,62 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	}
 	err = restartAfter(ctx, mgr, st, paths, stdout)
 	refirewall(ctx, cfg, fwOK, stdout) // after a rollback too: jarvisd.prev was copied, not renamed
+	if err == nil {
+		doctorAfter(ctx, exe, stdout)
+	}
 	return endWithAdmin(cfg, err, stdout)
+}
+
+// restoredNote is what a manual rollback after a passed gate says about the database, which it
+// leaves alone. A10d V3: it used to say "if the newer version migrated it, jarvisd refuses to
+// start", but rc3 → rc2 started fine although rc3 had migrated the database: the guard only
+// checks modules the restored version has, so a module it lacks (recipes) keeps its tables
+// and data for the next upgrade.
+func restoredNote(prev, backups string) string {
+	return fmt.Sprintf("restored %s; the database is unchanged. Tables of modules this version doesn't have stay "+
+		"for the next upgrade; if the newer version migrated a module it does have, jarvisd refuses to start "+
+		"and names it: then restore a snapshot from %s\n", prev, backups)
+}
+
+// doctorAfter runs the doctor of the binary now installed at exe and prints its failed
+// checks. It runs that binary rather than checking in process because the ports to check are
+// the new version's: on a script upgrade this process is the old one (install.sh execs the
+// installed jarvisd). A10d V1: rc3 added the recipes listener (7030) and the upgrade said "up
+// and healthy" while ufw still dropped 7030 from the LAN. A doctor that can't run or answer
+// prints nothing; the upgrade itself is done.
+func doctorAfter(ctx context.Context, exe string, stdout io.Writer) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, exe, "doctor", "--json").Output() // exits 1 on a failed check
+	reportDoctor(out, stdout)
+}
+
+// reportDoctor prints the failed checks of `jarvisd doctor --json` output, in the doctor's own
+// format, and how to apply a firewall fix.
+func reportDoctor(out []byte, stdout io.Writer) {
+	var checks []doctor.Check
+	if err := json.Unmarshal(out, &checks); err != nil {
+		return
+	}
+	var fixable bool
+	header := false
+	for _, c := range checks {
+		if c.Status != doctor.Fail {
+			continue
+		}
+		if !header {
+			fmt.Fprintln(stdout, "jarvisd doctor found problems:")
+			header = true
+		}
+		fmt.Fprintf(stdout, "FAIL  %s: %s\n", c.Name, c.Detail)
+		if c.Fix != "" {
+			fmt.Fprintf(stdout, "      fix:\n        %s\n", strings.ReplaceAll(c.Fix, "\n", "\n        "))
+		}
+		fixable = fixable || len(c.FixCmds) > 0
+	}
+	if fixable {
+		fmt.Fprintf(stdout, "%s applies the firewall fix\n", elevated("jarvisd doctor --fix"))
+	}
 }
 
 // endWithAdmin closes a successful upgrade or rollback of the installed service the way a
