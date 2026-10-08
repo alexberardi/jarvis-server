@@ -366,6 +366,22 @@ type LLMVision struct {
 	URL, AppID, AppKey string
 	Model              string // default "background"
 	Client             *http.Client
+	// TimeoutFn is the per-image timeout (the module reads ocr.llm_vision_timeout_seconds);
+	// nil: defaultLLMVisionTimeout.
+	TimeoutFn func(context.Context) time.Duration
+}
+
+// defaultLLMVisionTimeout is 180 s: the legacy 60 s timed out on a dense page with a 9B model
+// sharing its one slot with recipes' structuring call (A10e M4).
+const defaultLLMVisionTimeout = 180 * time.Second
+
+func (l *LLMVision) timeout(ctx context.Context) time.Duration {
+	if l.TimeoutFn != nil {
+		if d := l.TimeoutFn(ctx); d > 0 {
+			return d
+		}
+	}
+	return defaultLLMVisionTimeout
 }
 
 func (l *LLMVision) Name() string { return EngineLLMVision }
@@ -399,7 +415,7 @@ func (l *LLMVision) Recognize(ctx context.Context, img Image, o Options) (Result
 	if model == "" {
 		model = "background"
 	}
-	content, err := chatCompletion(ctx, l.Client, l.URL, l.AppID, l.AppKey, 60*time.Second, map[string]any{
+	content, err := chatCompletion(ctx, l.Client, l.URL, l.AppID, l.AppKey, l.timeout(ctx), map[string]any{
 		"model": model,
 		"messages": []any{map[string]any{"role": "user", "content": []any{
 			map[string]any{"type": "text", "text": prompt},
