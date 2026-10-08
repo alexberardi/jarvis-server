@@ -665,3 +665,4 @@ Things the read-only survey could not settle. Each has a recommendation.
   sign up), V14–V16. Unmatched rows are not orphaned in jarvisd: they wait in the bundle for a later run.
   Rehearsed end to end against the MBP legacy stack (docs/recipes/00-inventory.md R11).
 - G3 follow-up (2026-10-08): #134 and #135 merged (user: merge if green) and **node-setup v0.3.2 released** (signed, arm64 tarball + images). Both changes also work against the legacy CC, so the kitchen and demo nodes can be updated to 0.3.2 *before* cutover through the legacy admin's node update (pending_update) — that touches prod, so only with the user's go. Mobile Twilio section: jarvis-node-mobile PR #83 awaiting review (admin-only editing, matching the server's RoleAdmin check).
+- Q3 (user 2026-10-08): **drop jarvis-web (browser chat, 7722) and the settings-server (7708)** at cutover.
