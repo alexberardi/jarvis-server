@@ -323,18 +323,26 @@ func TestCCMQTTRows(t *testing.T) {
 			"command_name": "contract_pkg", "github_repo_url": repo, "git_tag": "v0.0.1",
 		}, u.H()))
 		// Row 16. The URL here is untrusted; the node installs from the verify answer.
-		ExpectMQTT(t, c.NextTopic(t, mqttWait, base+"package-install"), Obj{
+		installMsg := Obj{
 			"request_id": Eq(rid), "command_name": Eq("contract_pkg"), "github_repo_url": Eq(repo), "git_tag": Eq("v0.0.1"),
-		})
+		}
+		verifyAns := Obj{
+			"confirmed": Eq(true), "command_name": Eq("contract_pkg"), "github_repo_url": Eq(repo), "git_tag": Eq("v0.0.1"),
+		}
+		if Jarvisd() {
+			// D48 (additive): the household's Pantry base URL rides along on the publish and
+			// the verify answer, so a node installs from its own household's store.
+			installMsg["pantry_url"] = NonEmptyString
+			verifyAns["pantry_url"] = NonEmptyString
+		}
+		ExpectMQTT(t, c.NextTopic(t, mqttWait, base+"package-install"), installMsg)
 		p := nodePath + "/package-install/" + rid
 		tg.Get(t, CommandCenter, p, u.H()).Expect(http.StatusOK, pollShape("pending", rid, "contract_pkg", Null, Null))
 
 		other := NewCCNode(t, u)
 		tg.Get(t, CommandCenter, "/api/v0/nodes/"+other.ID+"/package-install/"+rid+"/verify", other.APIKeyH()).
 			ExpectError(http.StatusNotFound, "Package install request not found")
-		tg.Get(t, CommandCenter, p+"/verify", n.APIKeyH()).Expect(http.StatusOK, Obj{
-			"confirmed": Eq(true), "command_name": Eq("contract_pkg"), "github_repo_url": Eq(repo), "git_tag": Eq("v0.0.1"),
-		})
+		tg.Get(t, CommandCenter, p+"/verify", n.APIKeyH()).Expect(http.StatusOK, verifyAns)
 
 		// restarting is non-terminal: the node reposts the real result after boot.
 		tg.Post(t, CommandCenter, p+"/results", map[string]any{"success": true, "restarting": true}, n.APIKeyH()).
@@ -454,20 +462,53 @@ func TestCCMQTTRows(t *testing.T) {
 
 	t.Run("auth_ready", func(t *testing.T) {
 		provider := "contract" + randHex(3)
-		session := func(exchangeURL string) map[string]any {
-			return tg.Post(t, CommandCenter, "/api/v0/oauth/sessions", map[string]any{
-				"provider": provider, "node_id": nid,
-				"auth_config": map[string]any{
-					"provider": provider, "client_id": "contract-client", "keys": []string{"access_token"},
-					"authorize_url": "https://auth.contract.invalid/authorize", "exchange_url": exchangeURL,
-					"scopes": []string{"read"}, "supports_pkce": true,
-					// Native redirect: mobile posts the code to /exchange (no relay, no
-					// externally reachable CC needed).
-					"native_redirect_uri": "jarvis://contract-callback",
-				},
-			}, u.H()).Expect(http.StatusCreated, Obj{
+		// sessionBody names the token endpoint either as an absolute exchange_url, or (base !=
+		// "") as provider_base_url + exchange_path, the LAN-provider mode.
+		sessionBody := func(exchange, base string) map[string]any {
+			ac := map[string]any{
+				"provider": provider, "client_id": "contract-client", "keys": []string{"access_token"},
+				"authorize_url": "https://auth.contract.invalid/authorize",
+				"scopes":        []string{"read"}, "supports_pkce": true,
+				// Native redirect: mobile posts the code to /exchange (no relay, no
+				// externally reachable CC needed).
+				"native_redirect_uri": "jarvis://contract-callback",
+			}
+			body := map[string]any{"provider": provider, "node_id": nid, "auth_config": ac}
+			if base != "" {
+				body["provider_base_url"] = base
+				ac["exchange_path"] = exchange
+			} else {
+				ac["exchange_url"] = exchange
+			}
+			return body
+		}
+		sessionAt := func(exchange, base string) map[string]any {
+			return tg.Post(t, CommandCenter, "/api/v0/oauth/sessions", sessionBody(exchange, base), u.H()).Expect(http.StatusCreated, Obj{
 				"session_id": UUID, "authorize_url": Regexp(`^https://auth\.contract\.invalid/authorize\?`), "requires_code_exchange": Eq(true),
 			}).Object()
+		}
+		session := func(exchangeURL string) map[string]any { return sessionAt(exchangeURL, "") }
+		host := os.Getenv(EnvOCRCallbackHost)
+		if Jarvisd() {
+			// SSRF fence (D4): an absolute exchange_url (an external provider) must be https on
+			// a public address; a LAN provider names provider_base_url, which may be private but
+			// never loopback. So the dead endpoint and the live one below go through the LAN
+			// mode, at JARVIS_CONTRACT_CALLBACK_HOST (then a LAN address of the test host).
+			tg.Post(t, CommandCenter, "/api/v0/oauth/sessions", sessionBody("http://127.0.0.1:9/token", ""), u.H()).
+				ExpectError(http.StatusBadRequest, "Invalid exchange URL: an external provider's exchange_url must be https")
+			if host == "" {
+				t.Skipf("%s is not set: jarvisd's exchange paths need a LAN address of the test host", EnvOCRCallbackHost)
+			}
+			session = func(exchangeURL string) map[string]any {
+				eu, err := url.Parse(exchangeURL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if eu.Hostname() == "127.0.0.1" {
+					eu.Host = net.JoinHostPort(host, eu.Port())
+				}
+				return sessionAt(eu.Path, eu.Scheme+"://"+eu.Host)
+			}
 		}
 		statusShape := func(sid, status string) Obj {
 			return Obj{"session_id": Eq(sid), "status": Eq(status), "provider": Eq(provider)}
@@ -496,7 +537,6 @@ func TestCCMQTTRows(t *testing.T) {
 
 		// Row 22 needs a token endpoint the target can reach (it POSTs the code there before
 		// publishing). Same convention as the OCR callback test.
-		host := os.Getenv(EnvOCRCallbackHost)
 		if host == "" {
 			t.Skipf("%s is not set: the auth-ready publish needs a token endpoint the target can reach", EnvOCRCallbackHost)
 		}
@@ -518,6 +558,11 @@ func TestCCMQTTRows(t *testing.T) {
 		defer srv.Close()
 
 		s = session(fmt.Sprintf("http://%s/token", ln.Addr().String()))
+		// base_url is the session's provider_base_url (jarvisd: the LAN mode, above).
+		var credsBase Matcher = Null
+		if Jarvisd() {
+			credsBase = Eq("http://" + ln.Addr().String())
+		}
 		sid = s["session_id"].(string)
 		tg.Post(t, CommandCenter, "/api/v0/oauth/sessions/"+sid+"/exchange", map[string]any{"code": "contract-code"}, u.H()).
 			Expect(http.StatusOK, Obj{"status": Eq("ok"), "session_id": Eq(sid)})
@@ -539,7 +584,7 @@ func TestCCMQTTRows(t *testing.T) {
 		tg.Get(t, CommandCenter, "/api/v0/oauth/provider/"+provider+"/credentials", n.APIKeyH()).Expect(http.StatusOK, Obj{
 			"access_token": Eq("contract-at"), "refresh_token": Eq("contract-rt"),
 			"token_data": Obj{"access_token": Eq("contract-at"), "refresh_token": Eq("contract-rt"), "expires_in": Eq(3600)},
-			"base_url":   Null, "user_id": Eq(u.ID),
+			"base_url":   credsBase, "user_id": Eq(u.ID),
 		})
 		tg.Get(t, CommandCenter, "/api/v0/oauth/provider/"+provider+"/credentials", n.APIKeyH()).
 			ExpectError(http.StatusNotFound, "No active auth session found for this provider/node")
