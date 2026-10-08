@@ -338,6 +338,9 @@ jobs:
         env:
           NAME: jarvisd-${{ needs.build.outputs.version }}-${{ matrix.target }}
           SIGNED: ${{ needs.sign-macos.outputs.signed }}
+          VERSION: ${{ needs.build.outputs.version }}
+          # Referenced so the log masks it in codesign's output (as in sign-macos).
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           bin="dist/$NAME/jarvisd"
@@ -353,13 +356,21 @@ jobs:
           # (-t execute only judges app bundles; -t open on the primary signature is the CLI form.)
           v="$(spctl --assess --type open --context context:primary-signature --verbose=4 "$bin" 2>&1)"; echo "$v"
           echo "$v" | grep -q "source=Notarized Developer ID"
-          # A browser download: quarantined, then run. Gatekeeper assesses it on exec and must
-          # let it start (it then records the verdict in the quarantine flags).
+          # A browser download: quarantined, then run. Gatekeeper assesses it on exec; one it
+          # doesn't accept is held at exec (waiting on a dialog nobody answers here), so a
+          # watchdog turns that hang into a failure.
           q="$RUNNER_TEMP/jarvisd-quarantined"
           cp "$bin" "$q"
           xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" "$q"
-          "$q" version
-          xattr -p com.apple.quarantine "$q"
+          "$q" version > "$RUNNER_TEMP/qversion" 2>&1 &
+          pid=$!
+          for _ in $(seq 90); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" || true
+            echo "::error::Gatekeeper held the quarantined binary at exec"; exit 1
+          fi
+          wait "$pid"
+          test "$(cat "$RUNNER_TEMP/qversion")" = "$VERSION"
       # The binary's own verifier (the one self-update uses) accepts the CI-made signature.
       - name: Check the signature with jarvisd
         env:
