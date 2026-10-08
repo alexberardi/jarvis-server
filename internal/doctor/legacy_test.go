@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -101,6 +102,91 @@ func TestLegacyGPUMemory(t *testing.T) {
 	for _, c := range Run(context.Background(), o) {
 		if c.Name == "gpu memory" {
 			t.Errorf("windows %+v", c)
+		}
+	}
+}
+
+// install.sh --stop-legacy stops exactly the agents the doctor names.
+func TestInstallScriptStopsLegacyAgents(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `LEGACY_AGENTS="` + strings.Join(LegacyAgents, " ") + `"`
+	if !strings.Contains(string(b), "\n"+want+"\n") {
+		t.Errorf("install.sh has no line %s", want)
+	}
+}
+
+// `launchctl print gui/501/com.jarvis.tts` on macOS 15, trimmed.
+const launchctlTTS = `gui/501/com.jarvis.tts = {
+	active count = 1
+	path = /Users/j/Library/LaunchAgents/com.jarvis.tts.plist
+	type = LaunchAgent
+	state = running
+
+	program = /bin/bash
+	arguments = {
+		/bin/bash
+		/Users/j/.jarvis/native/jarvis-tts/run-prod.sh
+	}
+
+	pid = 4242
+	immediate reason = speculative
+	endpoints = {
+	}
+}
+`
+
+// The Mac dev box: the legacy GPU services run natively as LaunchAgents (no containers), next
+// to agents that are not the server's. The doctor names the legacy ones and the commands.
+func TestLegacyAgents(t *testing.T) {
+	o := opts(nil, []*net.IPNet{})
+	o.GOOS, o.LegacyUID = "darwin", "99999" // no such account: "uid 99999"
+	answers := map[string]string{
+		"launchctl print gui/99999/com.jarvis.tts":        launchctlTTS,
+		"launchctl print gui/99999/com.jarvis.llm-proxy":  "gui/99999/com.jarvis.llm-proxy = {\n\tpath = /Users/j/Library/LaunchAgents/com.jarvis.llm-proxy.plist\n\tstate = running\n\tpid = 77\n}\n",
+		"launchctl print gui/99999/com.jarvis.ocr.worker": "gui/99999/com.jarvis.ocr.worker = {\n\tstate = not running\n}\n",
+		"launchctl print gui/99999/com.jarvis.osx-api":    launchctlTTS, // never asked
+		"launchctl print gui/99999/io.jarvis.host-agent":  launchctlTTS,
+	}
+	o.Run = fakeRun(answers)
+	c := find(t, legacy(context.Background(), o, true), "legacy stack")
+	if c.Status != Warn || !strings.Contains(c.Detail, "LaunchAgents of uid 99999 (com.jarvis.llm-proxy (pid 77), com.jarvis.tts (pid 4242), com.jarvis.ocr.worker (not running))") ||
+		strings.Contains(c.Detail, "Docker") || strings.Contains(c.Detail+c.Fix, "osx-api") || strings.Contains(c.Detail+c.Fix, "host-agent") {
+		t.Errorf("legacy %+v", c)
+	}
+	for _, want := range []string{
+		"launchctl disable gui/99999/com.jarvis.tts\nlaunchctl bootout gui/99999/com.jarvis.tts\n",
+		"launchctl enable gui/99999/com.jarvis.tts && launchctl bootstrap gui/99999 /Users/j/Library/LaunchAgents/com.jarvis.tts.plist",
+		"launchctl bootstrap gui/99999 ~/Library/LaunchAgents/com.jarvis.ocr.worker.plist", // no path printed
+	} {
+		if !strings.Contains(c.Fix, want) {
+			t.Errorf("fix lacks %q:\n%s", want, c.Fix)
+		}
+	}
+	// With the Docker stack too, both are named in one check.
+	ps := "docker ps --format " + dockerPS
+	answers[ps] = "0123456789ab;jarvis-config-service;0.0.0.0:7700->7700/tcp;jarvis;/Users/j/.jarvis/compose\n"
+	c = find(t, legacy(context.Background(), o, false), "legacy stack")
+	if !strings.Contains(c.Detail, "Docker stack is running (jarvis-config-service)") || !strings.Contains(c.Detail, "; the legacy Jarvis native services") ||
+		!strings.Contains(c.Fix, "docker stop jarvis-config-service\n") || !strings.Contains(c.Fix, "launchctl bootout gui/99999/com.jarvis.llm-proxy") {
+		t.Errorf("both %+v", c)
+	}
+	// After --stop-legacy nothing is loaded: quiet again.
+	delete(answers, ps)
+	for _, l := range LegacyAgents {
+		delete(answers, "launchctl print gui/99999/"+l)
+	}
+	if c := find(t, legacy(context.Background(), o, false), "legacy stack"); c.Status != OK {
+		t.Errorf("after %+v", c)
+	}
+	// Off macOS, or with no account to look at, launchctl isn't asked.
+	answers["launchctl print gui/99999/com.jarvis.tts"] = launchctlTTS
+	for _, oo := range []Options{{GOOS: "linux", LegacyUID: "99999"}, {GOOS: "darwin"}} {
+		oo.Run, oo.LegacyDirs = o.Run, []string{}
+		if c := find(t, legacy(context.Background(), oo, false), "legacy stack"); c.Status != OK {
+			t.Errorf("%s: %+v", oo.GOOS, c)
 		}
 	}
 }

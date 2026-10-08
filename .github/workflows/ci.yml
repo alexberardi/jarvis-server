@@ -422,7 +422,42 @@ jobs:
           (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
           sleep 1
           sudo $fw --setglobalstate on
-          sh scripts/install.sh --base-url "$BASE" --yes
+          # A fake legacy native service shaped like the Mac dev box: the LaunchAgent
+          # com.jarvis.llm-proxy (what deploy-launchd.sh installs) listening on 7704, next to an
+          # agent that is not the server's (com.jarvis.osx-api on 7723) and must keep running.
+          # Refused without --stop-legacy; with it, under sudo as the box's owner ran it, the
+          # legacy agent is booted out and disabled, and the restore commands are printed.
+          uid=$(id -u) py=$(command -v python3)
+          mkdir -p ~/Library/LaunchAgents
+          agent() { # agent LABEL PORT
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict>' "<key>Label</key><string>$1</string>" \
+              "<key>ProgramArguments</key><array><string>$py</string><string>-m</string><string>http.server</string><string>$2</string></array>" \
+              '<key>WorkingDirectory</key><string>/tmp</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
+              '</dict></plist>' > ~/Library/LaunchAgents/$1.plist
+            launchctl bootstrap gui/$uid ~/Library/LaunchAgents/$1.plist
+            for _ in $(seq 30); do curl -fsS -o /dev/null http://127.0.0.1:$2/ && return 0; sleep 1; done
+            return 1
+          }
+          agent com.jarvis.llm-proxy 7704
+          agent com.jarvis.osx-api 7723
+          # The doctor names the agent and the fix.
+          if stage/jarvisd-$V-${{ matrix.target }}/jarvisd doctor > doc.log 2>&1; then cat doc.log; exit 1; fi
+          cat doc.log
+          grep -q 'LaunchAgents of .*com.jarvis.llm-proxy (pid [0-9]' doc.log
+          grep -q "launchctl bootout gui/$uid/com.jarvis.llm-proxy" doc.log
+          if grep -q osx-api doc.log; then exit 1; fi
+          if sh scripts/install.sh --base-url "$BASE" --yes > refuse.log 2>&1; then cat refuse.log; exit 1; fi
+          cat refuse.log
+          grep -q 'LaunchAgents: com.jarvis.llm-proxy' refuse.log
+          sudo sh scripts/install.sh --base-url "$BASE" --yes --stop-legacy | tee legacy.log
+          grep -q "LaunchAgents of $(id -un)) and turning them off at login: com.jarvis.llm-proxy" legacy.log
+          grep -qF "launchctl enable gui/$uid/com.jarvis.llm-proxy && launchctl bootstrap gui/$uid $HOME/Library/LaunchAgents/com.jarvis.llm-proxy.plist" legacy.log
+          if launchctl print gui/$uid/com.jarvis.llm-proxy; then exit 1; fi
+          launchctl print-disabled gui/$uid | grep -E '"com.jarvis.llm-proxy" => (disabled|true)'
+          launchctl print gui/$uid/com.jarvis.osx-api | grep -q 'state = running'
+          curl -fsS -o /dev/null http://127.0.0.1:7723/
           test "$(jarvisd version)" = "$V"
           curl -fsS http://127.0.0.1:7700/health
           $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
