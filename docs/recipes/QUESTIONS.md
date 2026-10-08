@@ -33,6 +33,7 @@ Technical choices that need no product call are already made in the inventory:
 
 | # | Date | Question | Decision |
 |---|---|---|---|
+| RD2 | 2026-10-08 | RQ2 core recipes | **(a) drop from LLM plan candidates**; routes stay on the wire; real starter recipes possible later. |
 | RD1 | 2026-10-08 | RQ1 scope | **(a) port everything**, including the LLM SKU-matching job (user). |
 
 ## Queue
