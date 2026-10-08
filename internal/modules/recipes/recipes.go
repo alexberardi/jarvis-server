@@ -94,6 +94,9 @@ type Module struct {
 	Households HouseholdLister
 	// LLM runs the background passes (the grocery SKU match) in process. Nil: they learn nothing.
 	LLM LLM
+	// OCR reads the photos of a photo import in process (the ocr module). Nil: photo jobs fail
+	// with ocr_unavailable.
+	OCR Recognizer
 	// Fetch is the SSRF-guarded client for the URL preflight and server_fetch payloads. Nil
 	// uses the default guard (tests allow loopback).
 	Fetch *ssrf.Fetcher
@@ -185,6 +188,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST /recipes/parse-url/async", m.user(m.handleParseURLAsync))
 	mux.HandleFunc("POST /recipes/parse-payload/async", m.user(m.handleParsePayloadAsync))
 
+	// §3.2 photo import (R8).
+	mux.HandleFunc("POST /recipes/from-image/jobs", m.user(m.handleFromImage))
+
 	// §3.2 editor photos (R3).
 	mux.HandleFunc("POST /recipes/import/image", m.user(m.handleImportImage))
 	mux.HandleFunc("GET /media/{name...}", m.handleMedia) // #22: no auth
@@ -197,6 +203,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 		// §6: retries (llm_failed etc.) are decided by the handler against queue.max_retries.
 		deps.Queue.Register(ingestJobType, queue.Handler{Run: m.runIngest, Concurrency: 2, MaxAttempts: maxIngestAttempts,
 			Lease: ingestLease})
+		// §6: one job runs OCR in process and structures the draft; failures are recorded, not retried.
+		deps.Queue.Register(imageJobType, queue.Handler{Run: m.runImage, Concurrency: 1, MaxAttempts: 2, Lease: imageLease})
 		deps.Queue.Register(cleanupJobType, queue.Handler{Run: m.runCleanup, MaxAttempts: 1, Lease: 10 * time.Minute})
 	}
 }

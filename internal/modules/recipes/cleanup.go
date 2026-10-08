@@ -39,8 +39,8 @@ const (
 
 // Queue leases per parse-job type; the reaper gives a RUNNING job twice its lease.
 const (
-	ingestLease   = 5 * time.Minute // P1 + P1r with a model still loading
-	imageLease    = 10 * time.Minute
+	ingestLease   = 5 * time.Minute  // P1 + P1r with a model still loading
+	imageLease    = 15 * time.Minute // OCR over 8 photos, then P2/P1r/P3
 	mealPlanLease = 10 * time.Minute
 )
 

@@ -102,6 +102,7 @@ func modules() []module.Module {
 	var cc *ccmod.Module
 	var logs *logsmod.Module
 	var cfg *configmod.Module
+	var ocrm *ocrmod.Module
 	for _, m := range mods {
 		switch x := m.(type) {
 		case *authmod.Module:
@@ -120,6 +121,8 @@ func modules() []module.Module {
 			logs = x
 		case *configmod.Module:
 			cfg = x
+		case *ocrmod.Module:
+			ocrm = x
 		}
 	}
 	superuser := settings.SuperuserGuard(auth.VerifyUser)
@@ -148,6 +151,7 @@ func modules() []module.Module {
 			c.Households = auth
 			c.Clock = cc // "today" for the planner is the household's date
 			c.LLM = llm.Service()
+			c.OCR = ocrm // photo import runs every available engine in process (§7.3)
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
 			c.SettingsWrite = superuser
 			// RD4: the household keeps shared rows; private rows, jobs and imports go.

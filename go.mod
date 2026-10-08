@@ -14,6 +14,7 @@ require (
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pressly/goose/v3 v3.26.0
 	golang.org/x/crypto v0.40.0
+	golang.org/x/image v0.46.0
 	golang.org/x/net v0.42.0
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.60.1
