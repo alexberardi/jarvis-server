@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AppWindow, Check, Copy, KeyRound, Link2, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
+import { AppWindow, Check, Copy, Globe, KeyRound, Link2, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   addService,
   createApp,
   getConnections,
+  publicURLError,
   removeService,
   revokeApp,
   rotateApp,
+  setPublicURL,
   type AppKey,
   type ConnectionsResponse,
   type HealthStatus,
@@ -78,14 +80,100 @@ export function KeyModal({ appKey, onClose }: { appKey: AppKey; onClose: () => v
   )
 }
 
+/** Shown wherever a public URL is entered. */
+const PUBLIC_URL_HINT =
+  'Only for access from outside your network through a tunnel or reverse proxy, e.g. a Cloudflare tunnel: the public hostname that reaches this service, like https://command-center.example.io, or wss://mqtt.example.io for the MQTT broker. Clients that come in through a public hostname get these URLs; clients on your network keep the local ones.'
+
+/**
+ * PublicURLField shows a row's public base URL and edits it in place. Saving an empty value
+ * clears it.
+ */
+export function PublicURLField({ name, value }: { name: string; value: string | null }) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value ?? '')
+  const problem = publicURLError(draft)
+  const save = useMutation({
+    mutationFn: (v: string | null) => setPublicURL(name, v),
+    onSuccess: (r) => {
+      toast.success(r.public_url ? `${name}: public URL saved` : `${name}: public URL cleared`)
+      void qc.invalidateQueries({ queryKey: ['connections'] })
+      setEditing(false)
+    },
+    onError: (err) => toast.error(errorMessage(err, 'Could not save the public URL')),
+  })
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+        <Globe size={12} aria-hidden />
+        {value ? <span data-testid={`public-url-${name}`}>{value}</span> : <span>no public URL</span>}
+        <button
+          type="button"
+          className={buttonClass.icon}
+          title={`Edit the public URL of ${name}`}
+          aria-label={`Edit the public URL of ${name}`}
+          onClick={() => {
+            setDraft(value ?? '')
+            setEditing(true)
+          }}
+        >
+          <Pencil size={12} />
+        </button>
+      </div>
+    )
+  }
+  return (
+    <form
+      className="mt-1 w-full space-y-1"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!problem) save.mutate(draft.trim() || null)
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          aria-label={`Public URL for ${name}`}
+          aria-invalid={problem ? true : undefined}
+          className={cn(inputClass, 'min-w-0 flex-1')}
+          placeholder="https://jarvis.example.com"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <button type="button" className={buttonClass.secondary} onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+        <button type="submit" className={buttonClass.primary} disabled={!!problem || save.isPending}>
+          {draft.trim() ? 'Save' : 'Clear'}
+        </button>
+      </div>
+      {problem ? (
+        <p className="text-xs text-red-500" role="alert">
+          {problem}
+        </p>
+      ) : (
+        <p className="text-xs text-[var(--color-text-muted)]">{PUBLIC_URL_HINT}</p>
+      )}
+    </form>
+  )
+}
+
 function AddServiceForm({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [healthPath, setHealthPath] = useState('/health')
   const [description, setDescription] = useState('')
+  const [publicURL, setPublicURLDraft] = useState('')
+  const publicProblem = publicURLError(publicURL)
   const add = useMutation({
-    mutationFn: () => addService({ name: name.trim(), url: url.trim(), health_path: healthPath.trim(), description: description.trim() }),
+    mutationFn: () =>
+      addService({
+        name: name.trim(),
+        url: url.trim(),
+        health_path: healthPath.trim(),
+        description: description.trim(),
+        public_url: publicURL.trim() || undefined,
+      }),
     onSuccess: () => {
       toast.success(`Added ${name.trim()}`)
       void qc.invalidateQueries({ queryKey: ['connections'] })
@@ -105,11 +193,24 @@ function AddServiceForm({ onDone }: { onDone: () => void }) {
       <input aria-label="Base URL" className={inputClass} placeholder="http://host:port" value={url} onChange={(e) => setUrl(e.target.value)} />
       <input aria-label="Health path" className={inputClass} placeholder="/health" value={healthPath} onChange={(e) => setHealthPath(e.target.value)} />
       <input aria-label="Description" className={inputClass} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
+      <input
+        aria-label="Public URL"
+        aria-invalid={publicProblem ? true : undefined}
+        className={cn(inputClass, 'sm:col-span-2')}
+        placeholder="Public URL (optional, for a tunnel), e.g. https://recipes.example.io"
+        value={publicURL}
+        onChange={(e) => setPublicURLDraft(e.target.value)}
+      />
+      {publicProblem && (
+        <p className="text-xs text-red-500 sm:col-span-2" role="alert">
+          {publicProblem}
+        </p>
+      )}
       <div className="flex justify-end gap-2 sm:col-span-2">
         <button type="button" className={buttonClass.secondary} onClick={onDone}>
           Cancel
         </button>
-        <button type="submit" className={buttonClass.primary} disabled={!name.trim() || !url.trim() || add.isPending}>
+        <button type="submit" className={buttonClass.primary} disabled={!name.trim() || !url.trim() || !!publicProblem || add.isPending}>
           Add
         </button>
       </div>
@@ -208,14 +309,21 @@ export default function ConnectionsPage() {
         </button>
       </div>
 
-      <Section title="jarvisd listeners" icon={Server} description="Managed by jarvisd; change ports with JARVIS_PORT_* in jarvisd.env.">
+      <Section
+        title="jarvisd listeners"
+        icon={Server}
+        description="Managed by jarvisd; change ports with JARVIS_PORT_* in jarvisd.env. Behind a tunnel (e.g. Cloudflare), set each public hostname as that listener's public URL."
+      >
         <ul className="divide-y divide-[var(--color-border)]">
           {data.listeners.map((l) => (
-            <li key={l.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm">
-              <div className="flex items-center gap-2">
-                <code className="text-[var(--color-text)]">{l.name}</code>
-                <span className="text-xs text-[var(--color-text-muted)]">{l.url}</span>
-                {l.managed === 'broker' && <Pill>MQTT</Pill>}
+            <li key={l.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`listener-${l.name}`}>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <code className="text-[var(--color-text)]">{l.name}</code>
+                  <span className="text-xs text-[var(--color-text-muted)]">{l.url}</span>
+                  {l.managed === 'broker' && <Pill>MQTT</Pill>}
+                </div>
+                <PublicURLField name={l.name} value={l.public_url} />
               </div>
               <HealthPill health={l.health} probing={probing} />
             </li>
@@ -242,7 +350,7 @@ export default function ConnectionsPage() {
           <ul className="divide-y divide-[var(--color-border)]">
             {data.external.map((x) => (
               <li key={x.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`external-${x.name}`}>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <code className="text-[var(--color-text)]">{x.name}</code>
                     {x.managed === 'setting' && <Pill title="Follows a jarvisd setting; change it under Settings">from settings</Pill>}
@@ -251,6 +359,7 @@ export default function ConnectionsPage() {
                     {x.url}
                     {x.description ? ` · ${x.description}` : ''}
                   </p>
+                  <PublicURLField name={x.name} value={x.public_url} />
                 </div>
                 <div className="flex items-center gap-2">
                   <HealthPill health={x.health} probing={probing} />

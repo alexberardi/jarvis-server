@@ -23,6 +23,8 @@ type Registry interface {
 	ProbeAll(ctx context.Context, es []configmod.ServiceEntry) map[string]configmod.HealthStatus
 	AddService(ctx context.Context, n configmod.NewService) (configmod.ServiceEntry, error)
 	RemoveService(ctx context.Context, name string) error
+	// SetPublicURL sets ("" clears) a row's public base URL (config/public.go).
+	SetPublicURL(ctx context.Context, name, publicURL string) (configmod.ServiceEntry, error)
 }
 
 // AppClients manages app-to-app credentials (the auth module).
@@ -34,11 +36,14 @@ type AppClients interface {
 }
 
 type listenerConn struct {
-	Name    string                  `json:"name"`
-	URL     string                  `json:"url"`
-	Port    int                     `json:"port"`
-	Managed string                  `json:"managed"`
-	Health  *configmod.HealthStatus `json:"health"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Port    int    `json:"port"`
+	Managed string `json:"managed"`
+	// PublicURL is what clients reaching jarvisd through a public hostname (a Cloudflare
+	// tunnel) are told to use; null when unset.
+	PublicURL *string                 `json:"public_url"`
+	Health    *configmod.HealthStatus `json:"health"`
 }
 
 type externalConn struct {
@@ -48,7 +53,15 @@ type externalConn struct {
 	Description string                  `json:"description"`
 	Managed     string                  `json:"managed"`
 	Removable   bool                    `json:"removable"`
+	PublicURL   *string                 `json:"public_url"`
 	Health      *configmod.HealthStatus `json:"health"`
+}
+
+func strOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 var appIDRule = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -82,10 +95,12 @@ func (m *Module) handleConnections(w http.ResponseWriter, r *http.Request) {
 	for _, s := range svcs {
 		switch s.Managed {
 		case configmod.ManagedListener, configmod.ManagedBroker:
-			listeners = append(listeners, listenerConn{Name: s.Name, URL: s.URL, Port: s.Port, Managed: s.Managed, Health: healthOf(s.Name)})
+			listeners = append(listeners, listenerConn{Name: s.Name, URL: s.URL, Port: s.Port, Managed: s.Managed,
+				PublicURL: strOrNil(s.PublicURL), Health: healthOf(s.Name)})
 		default:
 			external = append(external, externalConn{Name: s.Name, URL: s.URL, HealthPath: s.HealthPath,
-				Description: s.Description, Managed: s.Managed, Removable: s.Managed == "", Health: healthOf(s.Name)})
+				Description: s.Description, Managed: s.Managed, Removable: s.Managed == "",
+				PublicURL: strOrNil(s.PublicURL), Health: healthOf(s.Name)})
 		}
 	}
 	apps, err := m.Apps.AppClients(ctx)
@@ -97,7 +112,8 @@ func (m *Module) handleConnections(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"listeners": listeners, "external": external, "apps": apps})
 }
 
-// handleAddService is POST /api/connections/services {name, url, health_path?, description?}:
+// handleAddService is POST /api/connections/services {name, url, health_path?, description?,
+// public_url?}:
 // 201 with the entry; 422 invalid; 409 taken or a name jarvisd manages.
 func (m *Module) handleAddService(w http.ResponseWriter, r *http.Request) {
 	if m.Registry == nil {
@@ -109,12 +125,13 @@ func (m *Module) handleAddService(w http.ResponseWriter, r *http.Request) {
 		URL         string `json:"url"`
 		HealthPath  string `json:"health_path"`
 		Description string `json:"description"`
+		PublicURL   string `json:"public_url"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
 	e, err := m.Registry.AddService(r.Context(), configmod.NewService{Name: body.Name, URL: body.URL,
-		HealthPath: body.HealthPath, Description: body.Description})
+		HealthPath: body.HealthPath, Description: body.Description, PublicURL: body.PublicURL})
 	var ve *configmod.ValidationError
 	switch {
 	case errors.As(err, &ve):
@@ -133,7 +150,44 @@ func (m *Module) handleAddService(w http.ResponseWriter, r *http.Request) {
 	}
 	m.deps.Log.Info("admin: registry entry added", "name", e.Name, "url", e.URL)
 	httpx.WriteJSON(w, http.StatusCreated, externalConn{Name: e.Name, URL: e.URL, HealthPath: e.HealthPath,
-		Description: e.Description, Removable: true})
+		Description: e.Description, Removable: true, PublicURL: strOrNil(e.PublicURL)})
+}
+
+// handleSetPublicURL is PUT /api/connections/services/{name}/public_url {public_url}: sets the
+// row's public base URL ("" or null clears it). Any row, jarvisd's own listeners included.
+// 200 {name, url, public_url}; 404 unknown; 422 invalid.
+func (m *Module) handleSetPublicURL(w http.ResponseWriter, r *http.Request) {
+	if m.Registry == nil {
+		unavailable(w, "config")
+		return
+	}
+	var body struct {
+		PublicURL *string `json:"public_url"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	raw := ""
+	if body.PublicURL != nil {
+		raw = *body.PublicURL
+	}
+	name := r.PathValue("name")
+	e, err := m.Registry.SetPublicURL(r.Context(), name, raw)
+	var ve *configmod.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		httpx.ValidationError(w, ve.Fields...)
+		return
+	case errors.Is(err, configmod.ErrServiceNotFound):
+		httpx.Error(w, http.StatusNotFound, "Service '"+name+"' not found")
+		return
+	case err != nil:
+		m.deps.Log.Error("admin: setting a public URL failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	m.deps.Log.Info("admin: public URL set", "name", e.Name, "public_url", e.PublicURL)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"name": e.Name, "url": e.URL, "public_url": strOrNil(e.PublicURL)})
 }
 
 // handleRemoveService is DELETE /api/connections/services/{name}: 204; 404 unknown; 409 for a
