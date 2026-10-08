@@ -490,6 +490,7 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 	log.Info("starting jarvisd", "version", version, "home", deps.Config.Home, "supervisor", restarter.Kind())
 	go func() {
 		<-ctx.Done()
+		logging.SetShuttingDown(true) // work the stop cuts short logs at debug, not error
 		_ = service.Stopping()
 	}()
 	// The post-upgrade health gate: every listener bound and /health answering within the

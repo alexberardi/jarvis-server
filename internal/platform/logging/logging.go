@@ -134,6 +134,54 @@ func (s *Shipper) Close() {
 	<-s.done
 }
 
+// shuttingDown is set once the process has begun to stop (SetShuttingDown).
+var shuttingDown atomic.Bool
+
+// SetShuttingDown records that the process is stopping: from then on an ERROR record whose
+// error is a cancelled context (context.Canceled or context.DeadlineExceeded, also when only
+// its text survived, wrapped by a driver) is logged at DEBUG. Work cut short by the stop
+// (a settings read, a queue poll, a request) otherwise fills the log with errors that say
+// nothing about a fault.
+func SetShuttingDown(v bool) { shuttingDown.Store(v) }
+
+// cancelled reports whether one of the record's attributes (or the logger's) is an error
+// that a cancelled context caused.
+func (h *handler) cancelled(r slog.Record) bool {
+	found := false
+	check := func(a slog.Attr) bool {
+		if isCancellation(a.Value.Resolve().Any()) {
+			found = true
+			return false
+		}
+		return true
+	}
+	for _, a := range h.attrs {
+		if !check(a) {
+			return true
+		}
+	}
+	r.Attrs(check)
+	return found
+}
+
+// isCancellation reports whether v is an error (or an error's text) caused by a cancelled
+// or expired context.
+func isCancellation(v any) bool {
+	var msg string
+	switch e := v.(type) {
+	case error:
+		if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
+			return true
+		}
+		msg = e.Error()
+	case string:
+		msg = e
+	default:
+		return false
+	}
+	return strings.Contains(msg, context.Canceled.Error()) || strings.Contains(msg, context.DeadlineExceeded.Error())
+}
+
 // handler writes to the text handler and, if set, offers each record to the shipper.
 type handler struct {
 	text    slog.Handler
@@ -155,6 +203,13 @@ func New(w io.Writer, level slog.Leveler, shipper *Shipper) *slog.Logger {
 func (h *handler) Enabled(ctx context.Context, l slog.Level) bool { return l >= h.level.Level() }
 
 func (h *handler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelError && shuttingDown.Load() && h.cancelled(r) {
+		// A failure that is only the process stopping under it: not an error worth a page.
+		r.Level = slog.LevelDebug
+		if r.Level < h.level.Level() {
+			return nil
+		}
+	}
 	err := h.text.Handle(ctx, r)
 	if h.shipper != nil {
 		rec := Record{Time: r.Time, Level: r.Level, Message: r.Message, Source: "jarvisd", Attrs: map[string]any{}}
