@@ -4,7 +4,7 @@
 
 Update it at the end of every working session, and whenever a task finishes or a decision is made.
 
-**Cutover gate (user 2026-10-08): one coordinated release — jarvisd + recipes add-on on jarvisd + node-setup v0.3.2 (#134/#135) + mobile Twilio section; recipes remapped by email.**
+**Cutover gate (user 2026-10-08): one coordinated release — jarvisd with recipes ported in (2026-10-08 decision) + node-setup v0.3.2 (#134/#135) + mobile Twilio section; recipes remapped by email.**
 
 ## Current phase: 6 (packaging, admin absorb) — feature-complete; `v0.1.0-rc1` and `v0.1.0-rc2` published; fresh install (A10b) and rc1 → rc2 upgrade/rollback (A10c) rehearsed. Phases 0–5 done
 
@@ -79,6 +79,7 @@ Update it at the end of every working session, and whenever a task finishes or a
 | 2026-10-06 | **Speaker-ID threshold for ERes2Net: 0.43** (D33 calibration). One real speaker (user, 14 clips from the jarvis-dev Seeed mic: 3 enrollment lines, 8 near + 3 far commands) vs 684 impostors (LibriSpeech 40 speakers + 28 Kokoro voices saying commands): genuine min 0.475 (far), median 0.603; impostor max 0.387 (TTS max 0.326). Zero errors anywhere in 0.40–0.45; 0.43 is the midpoint. Caveat: impostors are not same-room household members; the margin gate covers multi-member homes, and the setting stays tunable. Recording kept locally (spikes/, not in the public repo). Re-check once more household voices are enrolled. |
 | 2026-10-06 | **D9: jarvis-admin is absorbed into the monorepo** (SPA embedded in jarvisd, backend to Go endpoints; old repo retired). Client-side changes (node-setup, mobile, recipes) go on branches with PRs for user review. Phone: built against a fake Twilio; first real call at prod cutover unless a dev Twilio number appears. |
 
+| 2026-10-08 | **Recipes moves INTO jarvisd** (user: "remove architectural complexity and just move recipes within the main jarvis server"). Reverses 2026-10-06 "recipes stays out". A `recipes` module on 7030 with wire-compatible routes for the mobile app; SQLite, jarvisd's queue and blob store (no Postgres/Redis/MinIO); OCR/LLM in process. Cutover imports prod's recipes data (48 recipes, 2 meal plans, photos) mapped to new accounts by email. recipes PR #39 (add-on on jarvisd) not merged; jarvisd's own app client from that work is kept. |
 | 2026-10-07 | **Cron DST on the wall clock** (routines port; user: "fine for now"): a time skipped by spring-forward fires once at the first valid instant after it; a time repeated by fall-back fires once, on its first occurrence. Applies to every cron trigger. |
 | 2026-10-07 | **Out-of-order migrations are applied** (goose `WithAllowOutofOrder`): sub-systems land in parallel and a fix may slot below a later release's migration; each module's migrations are independent. |
 | 2026-10-07 | **Household timezone = the zone its most recently seen active node reported** (`cc_nodes.timezone`, migration 00140, recorded at warmup from `node_context.timezone`); `Module.HouseholdClock` overrides. Used by attention quiet hours/journal (D18) and errands. Nothing stored a household zone before. User: works for now; **future: a UI to set the household timezone** (override the node-derived one). |
