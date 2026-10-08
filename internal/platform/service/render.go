@@ -43,11 +43,12 @@ User={{.Account}}
 Group={{.Account}}
 {{- end}}
 {{- if not .User}}
-# Self-update (AD5): the service account can't write the binary, so a privileged pre-start
-# ("+": full privileges, no sandbox; "-": never blocks the start) swaps in a release the
-# service staged and verified, re-verifying it first, or carries out a requested rollback.
+# Self-update (AD5, ID11): the service account can't write the binary, so a privileged
+# pre-start ("+": full privileges, no sandbox; "-": never blocks the start) swaps in a release
+# the service staged, re-verifying it first, or restores the previous binary for a requested
+# rollback. It treats the data directory as untrusted (it must belong to --owner).
 Environment=JARVIS_UPGRADE_HELPER=1
-ExecStartPre=-+{{q .Binary}} upgrade --prestart --home {{q .Home}}
+ExecStartPre=-+{{q .Binary}} upgrade --prestart --home {{q .Home}} --owner {{.Account}}
 {{- end}}
 ExecStart={{q .Binary}} serve --home {{q .Home}}
 Restart=always
@@ -159,6 +160,83 @@ func RenderLaunchd(p Plist) ([]byte, error) {
 		Label, Log string
 	}{p, LaunchdLabel, path.Join(p.Home, "logs", LogFile)})
 	return b.Bytes(), err
+}
+
+// HelperPlist is the input to the updater LaunchDaemon (ID11).
+type HelperPlist struct {
+	Binary   string
+	Home     string
+	UserName string // the account jarvisd runs as: the home must belong to it
+}
+
+// HelperLog is the updater's log: root-owned and outside the home, which the service account
+// can write (launchd would open a path there as root).
+const HelperLog = "/Library/Logs/jarvisd-updater.log"
+
+// launchdHelperTmpl is the root LaunchDaemon that does the privileged step of a self-update
+// (00-installers §8.2): launchd runs it while <home>/updates/requests is non-empty (jarvisd
+// drops a file there) and once at load. No UserName: it runs as root. Its log and working
+// directory are outside the home, and PATH is the system one.
+var launchdHelperTmpl = template.Must(template.New("helper").Funcs(template.FuncMap{"x": xmlEscape}).Parse(
+	`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by "jarvisd service install". -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{{x .Label}}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{x .Binary}}</string>
+		<string>upgrade</string>
+		<string>--helper</string>
+		<string>--home</string>
+		<string>{{x .Home}}</string>
+		<string>--owner</string>
+		<string>{{x .UserName}}</string>
+	</array>
+	<key>QueueDirectories</key>
+	<array>
+		<string>{{x .Requests}}</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/</string>
+	<key>Umask</key>
+	<integer>18</integer>
+	<key>ExitTimeOut</key>
+	<integer>120</integer>
+	<key>StandardOutPath</key>
+	<string>{{x .Log}}</string>
+	<key>StandardErrorPath</key>
+	<string>{{x .Log}}</string>
+</dict>
+</plist>
+`))
+
+// RenderLaunchdHelper renders the updater LaunchDaemon plist.
+func RenderLaunchdHelper(p HelperPlist) ([]byte, error) {
+	var b bytes.Buffer
+	err := launchdHelperTmpl.Execute(&b, struct {
+		HelperPlist
+		Label, Requests, Log string
+	}{p, HelperLabel, path.Join(p.Home, "updates", "requests"), HelperLog})
+	return b.Bytes(), err
+}
+
+// HelperSDDL is the Windows updater service's security descriptor: the SCM's defaults
+// (SYSTEM and Administrators full control, interactive and service logons may query) plus
+// query and start, nothing else, for jarvisd's service SID (NT SERVICE\jarvisd): the
+// unprivileged service can ask for the privileged step but can't stop, change or delete it.
+func HelperSDDL(jarvisdSID string) string {
+	return "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)" +
+		"(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCRP;;;" + jarvisdSID + ")"
 }
 
 func xmlEscape(s string) string {

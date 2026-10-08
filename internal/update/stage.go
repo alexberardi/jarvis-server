@@ -58,6 +58,9 @@ type StageOptions struct {
 	By string
 	// SkipVersionCheck skips running the new binary (tests that stage a foreign platform).
 	SkipVersionCheck bool
+	// ForOtherBinary: the staging process isn't Paths.Exe (`jarvisd upgrade --bin`), so it
+	// can't vouch for what that binary does after a rollback (Marker.FromFinishesRestore).
+	ForOtherBinary bool
 }
 
 // ErrUpToDate means there is nothing newer to install.
@@ -226,6 +229,7 @@ func Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 		Exe: p.Exe, Prev: p.Prev(),
 		Archive: archive, Asset: plan.Archive.Name, Sums: sumsPath, Sig: sigPath,
 		Snapshots: map[string]string{}, StagedAt: time.Now().UTC(), By: o.By,
+		FromFinishesRestore: !o.ForOtherBinary,
 	}
 	if m.GooseBefore, err = gooseVersions(ctx, p.Home, files); err != nil {
 		return fail(err)

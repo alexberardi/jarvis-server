@@ -66,7 +66,9 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	bin := fs.String("bin", "", "the jarvisd binary to replace (default: this one)")
 	user := fs.Bool("user", false, "Linux: the service is a systemd --user unit")
 	rollback := fs.Bool("rollback", false, "roll back the last upgrade (restore jarvisd.prev; also the database snapshot when the upgrade has not passed its health check yet and migrations ran)")
-	prestart := fs.Bool("prestart", false, "internal: the service's privileged pre-start step")
+	prestart := fs.Bool("prestart", false, "internal: the systemd unit's privileged pre-start step")
+	helperMode := fs.Bool("helper", false, "internal: the macOS/Windows privileged upgrade helper")
+	owner := fs.String("owner", "", "internal: with --prestart/--helper, the account the home must belong to")
 	verifyDir := fs.String("verify-dir", "", "check a release directory (SHA256SUMS, its signature, the archives) against this build's keys and version, then exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -82,6 +84,10 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		}
 		fmt.Fprintf(stdout, "%s signature ok (%s); verified %s\n", update.SumsName, version, strings.Join(names, ", "))
 		return nil
+	}
+	if *prestart || *helperMode {
+		// Privileged: before bootstrap, which would read the (service-writable) env file.
+		return runHelper(ctx, flagHome, *owner, *helperMode, os.Stderr)
 	}
 	if err := bootstrap(flagHome, false, os.Stderr); err != nil {
 		return err
@@ -100,22 +106,10 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	}
 	paths := update.Paths{Home: cfg.Home, Exe: exe}
 
-	if *prestart {
-		// Never fails the start: report and let serve run.
-		action, m, err := update.PreStart(ctx, paths, version)
-		switch {
-		case err != nil:
-			fmt.Fprintln(os.Stderr, "jarvisd upgrade --prestart:", err)
-		case action == "swapped":
-			fmt.Fprintf(os.Stderr, "jarvisd upgrade --prestart: installed %s (was %s)\n", m.To, m.From)
-		case action == "rolled_back":
-			fmt.Fprintf(os.Stderr, "jarvisd upgrade --prestart: rolled back %s to %s\n", m.To, m.From)
-		}
-		return nil
-	}
-
 	current := version
-	if self, _ := selfExe(); filepath.Clean(self) != filepath.Clean(exe) {
+	self, _ := selfExe()
+	other := filepath.Clean(self) != filepath.Clean(exe) // --bin names another binary
+	if other {
 		if current, err = binaryVersion(ctx, exe); err != nil {
 			return err
 		}
@@ -179,8 +173,16 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		return endWithAdmin(cfg, err, stdout)
 	}
 
+	// Without write access to the binary, an installed on-demand helper (macOS, Windows) can
+	// do the swap: this process only needs to write the home (macOS: the account jarvisd
+	// runs as).
+	helper := service.DetectHelper()
+	viaHelper := false
 	if !update.CanWrite(exe) {
-		return fmt.Errorf("can't replace %s: no write access to %s; run %s", exe, filepath.Dir(exe), elevated("jarvisd upgrade"))
+		if !helper.OnDemand() || !st.Installed || !st.Running || !canWriteHome(cfg.Home) {
+			return fmt.Errorf("can't replace %s: no write access to %s; run %s", exe, filepath.Dir(exe), elevated("jarvisd upgrade"))
+		}
+		viaHelper = true
 	}
 	if st.Installed && st.Home != "" && filepath.Clean(st.Home) != filepath.Clean(cfg.Home) {
 		return fmt.Errorf("the installed service uses --home %s, not %s; pass --home %s", st.Home, cfg.Home, st.Home)
@@ -194,7 +196,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 
 	m, err := update.Stage(ctx, update.StageOptions{
 		Paths: paths, Current: current, Target: *target, AllowOlder: *allowOlder, Source: src, By: "cli",
-		Progress: progressPrinter(stdout),
+		Progress: progressPrinter(stdout), ForOtherBinary: other,
 	})
 	if err != nil {
 		if errors.Is(err, update.ErrUpToDate) {
@@ -205,6 +207,14 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	}
 	for f, s := range m.Snapshots {
 		fmt.Fprintf(stdout, "snapshot of %s: %s\n", filepath.Base(f), s)
+	}
+	if viaHelper {
+		// The helper re-admits the swapped binary to the macOS firewall itself.
+		err := upgradeViaHelper(ctx, paths, helper, st, stdout)
+		if err == nil {
+			doctorAfter(ctx, exe, stdout)
+		}
+		return endWithAdmin(cfg, err, stdout)
 	}
 	fwOK := runtime.GOOS == "darwin" && len(firewallFixes(ctx, cfg)) == 0
 	fmt.Fprintf(stdout, "installing %s over %s (previous kept as %s)\n", m.To, exe, paths.Prev())
@@ -384,6 +394,38 @@ func reportHealthy(ctx context.Context, mgr service.Manager, wait time.Duration,
 	return nil
 }
 
+// upgradeViaHelper hands a staged upgrade to the on-demand helper (it re-verifies, swaps and
+// restarts jarvisd; the new version's health gate decides) and waits for the outcome.
+func upgradeViaHelper(ctx context.Context, p update.Paths, h service.Helper, st service.Status, stdout io.Writer) error {
+	fmt.Fprintf(stdout, "handing the swap to the privileged helper (%s); waiting for the new version to pass its health check\n", h)
+	if err := triggerHelper(ctx, p, h); err != nil {
+		_ = update.Abort(p, err.Error())
+		return err
+	}
+	wait := helperWait + update.MaxFailedStarts*(gateTimeout()+15*time.Second) + time.Minute
+	err := waitOutcome(ctx, p, wait, st.Kind, stdout)
+	if errors.Is(err, errNoOutcome) {
+		if m, _ := update.ReadMarker(p); m != nil && m.State == update.StateStaged {
+			_ = update.Abort(p, "the privileged helper did not act")
+		}
+		return fmt.Errorf("no result after %s; see %s and %s", wait, helperLogHint(p, h), logHint(st.Kind, p.Home))
+	}
+	return err
+}
+
+// canWriteHome reports whether this process can write the data directory (the home of a
+// macOS LaunchDaemon belongs to the account it runs as).
+func canWriteHome(home string) bool {
+	f, err := os.CreateTemp(home, ".jarvisd-write-test-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	f.Close()
+	os.Remove(name)
+	return true
+}
+
 // waitOutcome waits for the restarted service to clear the upgrade marker and reports the
 // result (succeeded, rolled back); errNoOutcome when the wait runs out.
 func waitOutcome(ctx context.Context, p update.Paths, wait time.Duration, kind service.Kind, stdout io.Writer) error {
@@ -465,9 +507,14 @@ func gateTimeout() time.Duration {
 
 // upgradeStart runs before serve opens the database. restart means this process must exit
 // for the supervisor to start the binary now in place.
-func upgradeStart(ctx context.Context, log *slog.Logger, p update.Paths, supervised bool) (gate *update.Marker, restart bool, err error) {
+func upgradeStart(ctx context.Context, log *slog.Logger, p update.Paths, supervised bool, helper service.Helper) (gate *update.Marker, restart bool, err error) {
 	action, m, perr := update.PreStart(ctx, p, version)
 	switch {
+	case perr != nil && errors.Is(perr, update.ErrNeedPrivilege) && helper.OnDemand() && supervised && m != nil:
+		// The helper swaps (or restores) the binary, then restarts jarvisd.
+		if awaitHelper(ctx, log, p, helper, m.State) {
+			return nil, true, nil
+		}
 	case perr != nil && errors.Is(perr, update.ErrNeedPrivilege):
 		log.Warn("upgrade: a pending step needs administrator rights", "err", perr, "fix", elevated("jarvisd upgrade"))
 	case perr != nil:
@@ -485,6 +532,9 @@ func upgradeStart(ctx context.Context, log *slog.Logger, p update.Paths, supervi
 			return nil, true, nil
 		}
 		return nil, false, fmt.Errorf("%s was rolled back to %s; start jarvisd again", m.To, m.From)
+	case action == "rollback_finished":
+		// The privileged helper restored this binary; the database part is done now.
+		log.Error("upgrade: rolled back", "from", m.To, "to", m.From, "reason", m.Reason)
 	}
 	gm, err := update.BeginStart(p, version)
 	if errors.Is(err, update.ErrRollback) {
@@ -498,8 +548,12 @@ func upgradeStart(ctx context.Context, log *slog.Logger, p update.Paths, supervi
 			}
 			return nil, false, fmt.Errorf("%s was rolled back to %s; start jarvisd again", gm.To, gm.From)
 		}
-		if os.Getenv(service.EnvUpgradeHelper) == "1" && supervised {
+		if helper == service.HelperPrestart && supervised {
 			return nil, true, nil // the privileged pre-start rolls back
+		}
+		if helper.OnDemand() && supervised {
+			awaitHelper(ctx, log, p, helper, update.StateRollbackRequested)
+			return nil, true, nil
 		}
 		log.Error("upgrade: can't roll back without administrator rights", "fix", elevated("jarvisd upgrade --rollback"))
 		return nil, false, nil

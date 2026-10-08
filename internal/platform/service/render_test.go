@@ -50,6 +50,51 @@ func TestRenderLaunchdGolden(t *testing.T) {
 	golden(t, LaunchdLabel+".plist", p)
 }
 
+// The updater LaunchDaemon (ID11): root (no UserName), its log and working directory outside
+// the user-writable home, the system PATH, woken by the request queue.
+func TestRenderLaunchdHelperGolden(t *testing.T) {
+	p, err := RenderLaunchdHelper(HelperPlist{Binary: "/usr/local/bin/jarvisd", Home: "/Users/alex/.jarvisd", UserName: "alex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, HelperLabel+".plist", p)
+	for _, bad := range []string{"<key>UserName</key>", "/Users/alex/.jarvisd/logs", "<key>KeepAlive</key>"} {
+		if strings.Contains(string(p), bad) {
+			t.Errorf("helper plist has %s", bad)
+		}
+	}
+	// Odd characters in the home are escaped, not markup.
+	q, _ := RenderLaunchdHelper(HelperPlist{Binary: "/b", Home: "/Users/a&b/<x>", UserName: "a"})
+	if !strings.Contains(string(q), "<string>/Users/a&amp;b/&lt;x&gt;/updates/requests</string>") {
+		t.Errorf("escaping:\n%s", q)
+	}
+}
+
+// The Windows updater's security descriptor: the SCM defaults plus query+start (only) for
+// jarvisd's service SID.
+func TestHelperSDDL(t *testing.T) {
+	const sid = "S-1-5-80-1-2-3-4-5"
+	got := HelperSDDL(sid)
+	if !strings.HasSuffix(got, "(A;;CCLCRP;;;"+sid+")") {
+		t.Fatal(got)
+	}
+	// Nothing but SYSTEM and Administrators may stop (WP), reconfigure (DC), delete (SD) or
+	// change permissions (WD/WO).
+	for _, ace := range strings.Split(strings.TrimPrefix(got, "D:"), ")(") {
+		ace = strings.Trim(ace, "()")
+		f := strings.Split(ace, ";")
+		trustee, rights := f[5], f[2]
+		if trustee == "SY" || trustee == "BA" {
+			continue
+		}
+		for _, r := range []string{"WP", "DC", "SD", "WD", "WO"} {
+			if strings.Contains(rights, r) {
+				t.Errorf("%s gets %s: %s", trustee, r, ace)
+			}
+		}
+	}
+}
+
 // Odd paths survive the round trip through the definition, which is how the CLI finds the
 // service's home.
 func TestRenderQuotingRoundTrip(t *testing.T) {

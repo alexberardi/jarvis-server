@@ -28,6 +28,19 @@ func RunWindowsService(fn func(ctx context.Context) error) error {
 	return h.err
 }
 
+// RunHelperService answers the SCM for the updater service (ID11): Running at once, then fn
+// (Stop cancels its context); fn's error becomes the exit code.
+func RunHelperService(fn func(ctx context.Context) error) error {
+	h := &handler{fn: func(ctx context.Context) error {
+		_ = Ready(ctx)
+		return fn(ctx)
+	}}
+	if err := svc.Run(HelperName, h); err != nil {
+		return err
+	}
+	return h.err
+}
+
 type handler struct {
 	fn  func(ctx context.Context) error
 	err error
