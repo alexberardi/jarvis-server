@@ -581,6 +581,15 @@ func TestMultiHouseholdMembership(t *testing.T) {
 	if _, ok, _ := e.m.HouseholdRole(context.Background(), outsider.id, owner.household); ok {
 		t.Fatal("outsider has a role")
 	}
+
+	// UserHouseholds (recipes' RD7 union): every membership, oldest first.
+	hhs, err := e.m.UserHouseholds(context.Background(), u.id)
+	if err != nil || len(hhs) != 2 || hhs[0] != u.household || hhs[1] != owner.household {
+		t.Fatal(hhs, err)
+	}
+	if hhs, _ := e.m.UserHouseholds(context.Background(), 999999); len(hhs) != 0 {
+		t.Fatal(hhs)
+	}
 }
 
 func TestMembersAndLeave(t *testing.T) {

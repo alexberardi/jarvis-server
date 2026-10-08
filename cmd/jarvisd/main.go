@@ -27,6 +27,7 @@ import (
 	logsmod "github.com/alexberardi/jarvis-server/internal/modules/logs"
 	notifmod "github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	ocrmod "github.com/alexberardi/jarvis-server/internal/modules/ocr"
+	recipesmod "github.com/alexberardi/jarvis-server/internal/modules/recipes"
 	sttmod "github.com/alexberardi/jarvis-server/internal/modules/stt"
 	ttsmod "github.com/alexberardi/jarvis-server/internal/modules/tts"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
@@ -66,6 +67,8 @@ func modules() []module.Module {
 			// Normally empty: the relay token is registered per household.
 			RelayHouseholdJWT: os.Getenv("RELAY_HOUSEHOLD_JWT"),
 		},
+		// The household recipe box on 7030 (docs/recipes; jarvis-recipes-mobile's server).
+		&recipesmod.Module{},
 		&ccmod.Module{
 			AdminKey: os.Getenv("ADMIN_API_KEY"),
 			MQTT: ccmod.MQTTOptions{
@@ -137,6 +140,15 @@ func modules() []module.Module {
 			c.Users = auth
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
 			c.SettingsWrite = superuser
+			auth.OnUserDeleted(c.PurgeUser)
+			auth.OnMemberRemoved(c.PurgeUserHousehold)
+			auth.OnHouseholdDeleted(c.PurgeHousehold)
+		case *recipesmod.Module:
+			c.Users = auth
+			c.Households = auth
+			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
+			c.SettingsWrite = superuser
+			// RD4: the household keeps shared rows; private rows, jobs and imports go.
 			auth.OnUserDeleted(c.PurgeUser)
 			auth.OnMemberRemoved(c.PurgeUserHousehold)
 			auth.OnHouseholdDeleted(c.PurgeHousehold)

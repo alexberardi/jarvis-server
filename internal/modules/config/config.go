@@ -161,7 +161,17 @@ func (m *Module) syncSelf(ctx context.Context) error {
 		if port == 0 {
 			continue // ephemeral (tests); nothing stable to advertise
 		}
-		_, err := m.deps.DB.Write.ExecContext(ctx, `
+		// A row pointing at another host is an external server (e.g. the legacy recipes add-on
+		// registered as jarvis-recipes-server) that jarvisd now replaces: say so, since clients
+		// move to jarvisd's (possibly empty) copy from here on.
+		var oldHost string
+		var oldPort int
+		err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT host, port FROM config_services WHERE name = ?`, name).Scan(&oldHost, &oldPort)
+		if err == nil && oldHost != "localhost" {
+			m.deps.Log.Warn("config: taking over a registry row that pointed at another server; stop that server",
+				"name", name, "was", fmt.Sprintf("%s:%d", oldHost, oldPort), "now", fmt.Sprintf("localhost:%d", port))
+		}
+		_, err = m.deps.DB.Write.ExecContext(ctx, `
 			INSERT INTO config_services (name, host, port, scheme, health_path, description)
 			VALUES (?, 'localhost', ?, 'http', '/health', 'served by jarvisd')
 			ON CONFLICT (name) DO UPDATE SET host = 'localhost', port = excluded.port, scheme = 'http',

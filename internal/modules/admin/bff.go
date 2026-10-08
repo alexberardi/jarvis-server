@@ -66,6 +66,7 @@ var displayNames = map[string]string{
 	"logs":          "Logs",
 	"notifications": "Notifications",
 	"ocr":           "OCR",
+	"recipes":       "Recipes",
 	"stt":           "Speech to text",
 	"tts":           "Text to speech",
 }

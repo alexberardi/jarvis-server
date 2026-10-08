@@ -1,0 +1,62 @@
+[
+  { "name": "teaspoon", "abbreviation": "tsp" },
+  { "name": "tablespoon", "abbreviation": "tbsp" },
+  { "name": "fluid ounce", "abbreviation": "fl oz" },
+  { "name": "cup", "abbreviation": "c" },
+  { "name": "pint", "abbreviation": "pt" },
+  { "name": "quart", "abbreviation": "qt" },
+  { "name": "gallon", "abbreviation": "gal" },
+
+  { "name": "milliliter", "abbreviation": "ml" },
+  { "name": "liter", "abbreviation": "l" },
+  { "name": "deciliter", "abbreviation": "dl" },
+
+  { "name": "dash", "abbreviation": null },
+  { "name": "pinch", "abbreviation": null },
+  { "name": "drop", "abbreviation": null },
+  { "name": "smidgen", "abbreviation": null },
+  { "name": "splash", "abbreviation": null },
+  { "name": "shot", "abbreviation": null },
+  { "name": "jigger", "abbreviation": null },
+
+  { "name": "milligram", "abbreviation": "mg" },
+  { "name": "gram", "abbreviation": "g" },
+  { "name": "kilogram", "abbreviation": "kg" },
+  { "name": "ounce", "abbreviation": "oz" },
+  { "name": "pound", "abbreviation": "lb" },
+
+  { "name": "millimeter", "abbreviation": "mm" },
+  { "name": "centimeter", "abbreviation": "cm" },
+  { "name": "meter", "abbreviation": "m" },
+  { "name": "inch", "abbreviation": "in" },
+  { "name": "foot", "abbreviation": "ft" },
+
+  { "name": "degree Celsius", "abbreviation": "°C" },
+  { "name": "degree Fahrenheit", "abbreviation": "°F" },
+
+  { "name": "clove", "abbreviation": null },
+  { "name": "bulb", "abbreviation": null },
+  { "name": "head", "abbreviation": null },
+  { "name": "bunch", "abbreviation": null },
+  { "name": "sprig", "abbreviation": null },
+  { "name": "stalk", "abbreviation": null },
+  { "name": "slice", "abbreviation": null },
+  { "name": "wedge", "abbreviation": null },
+  { "name": "piece", "abbreviation": null },
+  { "name": "stick", "abbreviation": null },
+  { "name": "fillet", "abbreviation": null },
+  { "name": "rack", "abbreviation": null },
+
+  { "name": "can", "abbreviation": null },
+  { "name": "jar", "abbreviation": null },
+  { "name": "package", "abbreviation": null },
+  { "name": "bag", "abbreviation": null },
+  { "name": "block", "abbreviation": null },
+  { "name": "sheet", "abbreviation": null },
+
+  { "name": "cup cooked", "abbreviation": null },
+  { "name": "cup uncooked", "abbreviation": null },
+
+  { "name": "leaf", "abbreviation": null },
+  { "name": "handful", "abbreviation": null }
+]

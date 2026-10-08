@@ -60,7 +60,7 @@ func TestAdminWiring(t *testing.T) {
 			names = append(names, s.Name())
 		}
 		slices.Sort(names)
-		if want := []string{"admin", "auth", "cc", "config", "llm", "logs", "notifications", "ocr", "stt", "tts"}; !slices.Equal(names, want) {
+		if want := []string{"admin", "auth", "cc", "config", "llm", "logs", "notifications", "ocr", "recipes", "stt", "tts"}; !slices.Equal(names, want) {
 			t.Errorf("settings sources %v, want %v", names, want)
 		}
 		if a.Traces == nil || a.Prompts == nil || a.Accounts == nil || a.Models == nil || a.Verify == nil ||
