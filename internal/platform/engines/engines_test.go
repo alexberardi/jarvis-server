@@ -247,7 +247,9 @@ func TestRestartsAfterCrash(t *testing.T) {
 	waitHealthy(t, s)
 	eventually(t, "3 starts", func() bool { return f.startCount() >= 3 })
 	st := s.Status()
-	if st.Restarts < 2 || !strings.Contains(st.LastError, "exit status 3") {
+	// The last restart's reason is the crash, or (on a slow runner) the failed health checks
+	// that noticed the dead process first; both are restarts of a crashing engine.
+	if st.Restarts < 2 || !(strings.Contains(st.LastError, "exit status 3") || strings.Contains(st.LastError, "failed health checks")) {
 		t.Fatalf("status = %+v", st)
 	}
 }
