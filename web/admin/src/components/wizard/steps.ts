@@ -1,14 +1,21 @@
 /** The setup wizard's steps and where it resumes (pure, so the page file only exports a component). */
 
-/** AD3 + AD3a: Check → Account → Hardware → Models → Privacy → Done. */
-export const STEPS = ['check', 'account', 'hardware', 'models', 'privacy', 'done'] as const
+/**
+ * AD3 + AD3a + AD3b: Check → Account → Hardware → one step per model job (Language model,
+ * Speech-to-text, Voice, Voice recognition, Memory & search) → Privacy → Done.
+ */
+export const STEPS = ['check', 'account', 'hardware', 'llm', 'stt', 'voice', 'speaker', 'memory', 'privacy', 'done'] as const
 export type Step = (typeof STEPS)[number]
 
 export const TITLES: Record<Step, string> = {
   check: 'Check',
   account: 'Account',
   hardware: 'Hardware',
-  models: 'Models',
+  llm: 'Language model',
+  stt: 'Speech-to-text',
+  voice: 'Voice',
+  speaker: 'Voice recognition',
+  memory: 'Memory & search',
   privacy: 'Privacy',
   done: 'Done',
 }
@@ -35,6 +42,14 @@ export function saveStep(s: Step | null): void {
 }
 
 export const idx = (s: Step) => STEPS.indexOf(s)
+
+/** The model-job steps (AD3b), whose ids are the server's job ids. */
+export const JOB_STEPS: Step[] = ['llm', 'stt', 'voice', 'speaker', 'memory']
+
+/** isResumable: a step the server may record and resume at (Hardware on). */
+export function isResumable(s: Step | null): s is Step {
+  return s !== null && idx(s) >= idx('hardware')
+}
 
 /** 'server': signed in with nothing saved in this tab, so the install decides (A10 F9). */
 export type Initial = Step | 'server' | null

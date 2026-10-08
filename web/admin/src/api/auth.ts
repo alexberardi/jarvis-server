@@ -83,6 +83,30 @@ export interface SetupDoctorSummary {
   ran_at: string
 }
 
+/** A model job's state in the setup checklist (AD3b; Go admin.JobSummary). */
+export type JobState = 'ready' | 'loading' | 'downloading' | 'failed' | 'missing'
+
+export interface SetupJob {
+  /** llm, stt, voice, speaker, memory: also the wizard's step names. */
+  job: string
+  /** The label that decides the state; labels adds any installed with it (live + background). */
+  label: Label
+  labels: Label[]
+  required: boolean
+  state: JobState | string
+  label_state: string
+  /** The install it waits on (downloading) or whose failure it reports (failed). */
+  install?: {
+    id: number
+    model_id: string
+    state: string
+    phase: string
+    bytes_done: number
+    bytes_total: number
+    error?: string
+  }
+}
+
 /**
  * setupState is the always-open GET /api/setup/state. Anonymous callers (or a non-superuser)
  * get the reduced view; a superuser token adds the rest (A3 "As built" #6).
@@ -108,8 +132,10 @@ export interface SetupState {
   nodes?: number
   /** The wizard reached Done (admin setting setup.completed). */
   setup_completed?: boolean
-  /** Where the wizard resumes in any tab or browser; "" once it was finished (A10 F9). */
-  setup_step?: 'hardware' | 'models' | ''
+  /** Where the wizard resumes in any tab or browser; "" once it was finished (A10 F9, AD3b). */
+  setup_step?: string
+  /** The per-job model checklist, in wizard order (AD3b). */
+  jobs?: SetupJob[]
 }
 
 export async function getSetupState(): Promise<SetupState> {

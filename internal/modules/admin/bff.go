@@ -45,6 +45,8 @@ type Accounts interface {
 type Models interface {
 	LabelStates(ctx context.Context) map[string]string
 	HardwareSummary(ctx context.Context) (llmmod.SetupHardware, bool)
+	// RecentInstalls lists the latest installs, newest first (the per-job summary, AD3b).
+	RecentInstalls(ctx context.Context) []llmmod.SetupInstall
 }
 
 // PromptProviders reads and overrides the prompt provider (the cc module, AD4).
@@ -108,6 +110,9 @@ func (m *Module) mountBFF(mux *http.ServeMux, deps module.Deps) {
 	mux.Handle("POST /api/update/apply", gated(m.handleApply))
 	mux.Handle("GET /api/update/apply", gated(m.handleApplyStatus))
 	mux.Handle("POST /api/system/restart", gated(m.handleRestart))
+	// AD3b: the wizard's Voice step.
+	mux.Handle("GET /api/tts/voices", gated(m.handleVoices))
+	mux.Handle("POST /api/tts/sample", gated(m.handleVoiceSample))
 	// Open while no superuser exists (the wizard's Check step runs before Account), gated after.
 	mux.Handle("GET /api/doctor", open(m.handleDoctor))
 	// Always reachable: the reduced view anonymously, the full one with a superuser token.
@@ -528,24 +533,11 @@ func (m *Module) isSuperuser(r *http.Request) bool {
 	return err == nil && u.IsSuperuser
 }
 
-// setupStep is where a signed-in superuser resumes the wizard, from the install itself rather
-// than one tab's storage (A10 F9): "" once it was finished, Models once a live model is
-// assigned (its downloads, then Privacy and Done), else Hardware.
-func setupStep(completed, modelsConfigured bool) string {
-	switch {
-	case completed:
-		return ""
-	case modelsConfigured:
-		return "models"
-	default:
-		return "hardware"
-	}
-}
-
 // handleSetupState is GET /api/setup/state, the SPA's boot gate and the setup wizard's driver
-// (AD3: Check → Account → Hardware → Models → Done). Anonymous callers get the reduced view
+// (AD3/AD3b: Check → Account → Hardware → five model jobs → Privacy → Done). Anonymous callers get the reduced view
 // (needs_superuser, setup_token_required, version); a superuser also gets label states, the
-// hardware summary, the prompt provider, a doctor summary and the household/node counts.
+// hardware summary, the per-job model checklist (jobs), the prompt provider, a doctor summary
+// and the household/node counts.
 func (m *Module) handleSetupState(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	counts, needs := m.needsSuperuser(ctx)
@@ -587,9 +579,19 @@ func (m *Module) handleSetupState(w http.ResponseWriter, r *http.Request) {
 	out["models_configured"] = live != "" && live != llmmod.StateNotConfigured
 	out["hardware"] = hardware
 	out["hardware_url"] = "/api/llm/v1/hardware"
-	completed := m.settings != nil && m.settings.Bool(ctx, SettingSetupCompleted, settings.Scope{})
+	var installs []llmmod.SetupInstall
+	if m.Models != nil {
+		installs = m.Models.RecentInstalls(ctx)
+	}
+	jobs := summarizeJobs(labels, installs)
+	out["jobs"] = jobs
+	completed, saved := false, ""
+	if m.settings != nil {
+		completed = m.settings.Bool(ctx, SettingSetupCompleted, settings.Scope{})
+		saved = m.settings.String(ctx, SettingSetupStep, settings.Scope{})
+	}
 	out["setup_completed"] = completed
-	out["setup_step"] = setupStep(completed, out["models_configured"] == true)
+	out["setup_step"] = setupStep(completed, saved, jobs)
 
 	var prompt any
 	if m.Prompts != nil {

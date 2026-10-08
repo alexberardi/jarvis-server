@@ -151,6 +151,8 @@ func TestSecurityHeaders(t *testing.T) {
 		h := get(t, mux, "GET", p).Header()
 		if !strings.Contains(h.Get("Content-Security-Policy"), "script-src 'self'") ||
 			!strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") ||
+			// AD3b: the voice sample plays from an object URL.
+			!strings.Contains(h.Get("Content-Security-Policy"), "media-src 'self' blob:") ||
 			h.Get("X-Frame-Options") != "DENY" || h.Get("X-Content-Type-Options") != "nosniff" ||
 			h.Get("Referrer-Policy") == "" {
 			t.Errorf("%s: headers %v", p, h)

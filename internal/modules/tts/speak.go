@@ -1,6 +1,7 @@
 package tts
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -208,4 +209,23 @@ func pcm16(samples []float32, gain float64) []byte {
 		binary.LittleEndian.PutUint16(out[2*i:], uint16(audio.FloatToPCM16(s*g)))
 	}
 	return out
+}
+
+// Sample renders text in one voice as a WAV file: the admin's voice preview (AD3b). An unknown
+// voice falls back to the default as Speak does; callers validate the name against Voices.
+func (m *Module) Sample(ctx context.Context, voice, text string) ([]byte, error) {
+	st, err := m.Speak(ctx, text, SpeakOptions{Voice: voice})
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	pcm, err := io.ReadAll(st)
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	if err := audio.WritePCM16WAV(&out, pcm, st.Format.Channels, st.Format.SampleRate); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }

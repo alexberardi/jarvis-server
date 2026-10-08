@@ -156,3 +156,20 @@ func (m *Module) HardwareSummary(ctx context.Context) (SetupHardware, bool) {
 	}
 	return SetupHardware{Hardware: hw, Proposal: engine.Propose(hw), Flavours: fl}, true
 }
+
+// SetupInstall is one model install as the admin setup summary reads it (AD3b).
+type SetupInstall = models.Install
+
+// RecentInstalls lists the latest model installs, newest first, for the admin's per-job setup
+// summary: a label whose model is still downloading has no model yet, so its install is
+// what says the job is under way. Nil without the local engine stack or on a read error.
+func (m *Module) RecentInstalls(ctx context.Context) []SetupInstall {
+	if m.stack == nil || m.stack.Manager == nil || m.stack.Manager.Store == nil {
+		return nil
+	}
+	out, err := m.stack.Manager.Store.ListInstalls(ctx, 50)
+	if err != nil {
+		return nil
+	}
+	return out
+}

@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Box, Brain, Cpu, Loader2, RefreshCw, Server, Stethoscope } from 'lucide-react'
+import { Activity, Box, Cpu, RefreshCw, Server, Stethoscope } from 'lucide-react'
 import { fetchTraces } from '@/api/traces'
 import { LABEL_TITLE, type Label } from '@/api/llm'
 import UpdateBanner from '@/components/dashboard/UpdateBanner'
 import DoctorChecks from '@/components/doctor/DoctorChecks'
+import ModelBanner from '@/components/dashboard/ModelBanner'
 import { buttonClass, stateTone } from '@/components/models/styles'
 import { Pill, Section } from '@/components/models/ui'
 import { useLabels } from '@/hooks/useModelManager'
@@ -31,54 +32,6 @@ function ago(iso: string | null | undefined): string {
   if (s < 3600) return `${Math.round(s / 60)} min ago`
   if (s < 86400) return `${Math.round(s / 3600)} h ago`
   return `${Math.round(s / 86400)} d ago`
-}
-
-/** The banner while the live label has no model, or has one that isn't serving yet. */
-function ModelBanner() {
-  const { data } = useSetupState()
-  if (!data?.superuser) return null
-  if (data.setup_step) {
-    // A10 F9: the wizard was left before Done (another tab, a closed browser).
-    return (
-      <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
-        <p className="text-sm text-[var(--color-text)]">Setup isn't finished: models, privacy choices and next steps.</p>
-        <Link to="/setup" className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90">
-          Finish setup
-        </Link>
-      </div>
-    )
-  }
-  if (data.models_configured === false) {
-    return (
-      <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
-        <div className="flex items-center gap-3">
-          <Brain size={20} className="text-[var(--color-primary)]" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">No language model yet</p>
-            <p className="text-xs text-[var(--color-text-muted)]">Jarvis can't answer voice requests until the live job has a model.</p>
-          </div>
-        </div>
-        <Link to="/models" className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90">
-          Set up models
-        </Link>
-      </div>
-    )
-  }
-  if (data.models_configured && data.live_ready === false) {
-    const st = data.labels?.live ?? 'unknown'
-    return (
-      <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
-        <Loader2 size={18} className="animate-spin text-amber-500" />
-        <p className="text-sm text-[var(--color-text)]">
-          The live model is {STATE_TEXT[st] ?? st}. Voice requests are answered once it is ready.{' '}
-          <Link to="/models" className="text-[var(--color-primary)] hover:underline">
-            Details
-          </Link>
-        </p>
-      </div>
-    )
-  }
-  return null
 }
 
 function SystemCard() {

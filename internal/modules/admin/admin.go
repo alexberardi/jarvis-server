@@ -49,6 +49,7 @@ type Module struct {
 	Logs            LogStore         // logs (A4)
 	Registry        Registry         // config (A4)
 	Apps            AppClients       // auth (A4)
+	TTS             Speech           // tts: the wizard's voice sample (AD3b)
 	// Exposure is what /api/doctor checks (the listeners served, MQTT, mDNS).
 	Exposure doctor.Exposure
 	// RunDoctor runs the checks (tests); nil is doctor.Run.
@@ -137,9 +138,11 @@ func (m *Module) resolveUI() (fs.FS, string) {
 }
 
 // csp matches the Fastify admin's policy (inventory I7). The built SPA is one external module
-// script with no inline scripts; inline styles are allowed for the React runtime.
+// script with no inline scripts; inline styles are allowed for the React runtime. media-src
+// allows blob: for the setup wizard's voice sample (AD3b), fetched with the token and played
+// from an object URL.
 const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
+	"img-src 'self' data:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
 	"base-uri 'self'; form-action 'self'; object-src 'none'"
 
 // secure sets the admin's security headers on every response.
