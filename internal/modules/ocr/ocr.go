@@ -28,7 +28,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -142,7 +145,7 @@ func (m *Module) buildEngines() []Engine {
 	var out []Engine
 	path := m.TesseractPath
 	if path == "" {
-		path, _ = exec.LookPath("tesseract")
+		path = findTesseract(exec.LookPath, tesseractDirs())
 	}
 	if path != "" && path != "-" {
 		out = append(out, &Tesseract{Path: path})
@@ -154,6 +157,32 @@ func (m *Module) buildEngines() []Engine {
 		out = append(out, &LLMVision{URL: m.LLMURL, AppID: m.LLMAppID, AppKey: m.LLMAppKey, Client: m.llmClient()})
 	}
 	return out
+}
+
+// tesseractDirs are where package managers install tesseract, searched after PATH: launchd
+// starts a LaunchDaemon with PATH=/usr/bin:/bin:/usr/sbin:/sbin, so Homebrew's
+// (/opt/homebrew/bin on Apple silicon, /usr/local/bin on Intel) and MacPorts' copies would
+// otherwise never be found by the installed service.
+func tesseractDirs() []string {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return []string{"/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"}
+}
+
+// findTesseract returns tesseract on PATH, else the first executable regular file named
+// tesseract in dirs (symlinks followed), else "".
+func findTesseract(lookPath func(string) (string, error), dirs []string) string {
+	if p, err := lookPath("tesseract"); err == nil {
+		return p
+	}
+	for _, d := range dirs {
+		p := filepath.Join(d, "tesseract")
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	return ""
 }
 
 func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
