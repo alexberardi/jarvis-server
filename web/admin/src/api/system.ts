@@ -40,6 +40,34 @@ export async function requestRestart(): Promise<RestartResult> {
 }
 
 /**
+ * The result of asking jarvisd to stop for good (AD8b, `POST /api/system/stop`):
+ * - stopping: it exits and its supervisor leaves it stopped; `startCommand` starts it again
+ * - refused: 409 `{detail, command}`, e.g. a service definition that would restart it at once
+ * - unsupported: this jarvisd has no stop route (404)
+ */
+export type StopResult =
+  | { kind: 'stopping'; startCommand: string; startNote: string }
+  | { kind: 'refused'; detail: string; command?: string }
+  | { kind: 'unsupported' }
+
+export async function requestStop(): Promise<StopResult> {
+  try {
+    const { data } = await apiClient.post<{ start_command?: string; start_note?: string }>('/api/system/stop')
+    return { kind: 'stopping', startCommand: data?.start_command ?? 'jarvisd serve', startNote: data?.start_note ?? '' }
+  } catch (err) {
+    if (isAxiosError(err)) {
+      const status = err.response?.status
+      const body = (err.response?.data ?? {}) as { detail?: string; command?: string }
+      if (status === 404) return { kind: 'unsupported' }
+      if (status === 409) {
+        return { kind: 'refused', detail: body.detail ?? "jarvisd can't stop itself here", command: body.command || undefined }
+      }
+    }
+    throw err
+  }
+}
+
+/**
  * waitForRestart polls /api/system/info until a process started after `before` answers
  * (or until `timeoutMs`). Returns the new info, or null on timeout.
  */

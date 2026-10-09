@@ -4,7 +4,9 @@
 //
 // It also answers "who supervises this process?" (Detect), which the admin restart button
 // (AD8) and self-update (AD5) need: under a supervisor jarvisd restarts by exiting with
-// RestartExitCode and letting the supervisor start it again; unsupervised, it can't.
+// RestartExitCode and letting the supervisor start it again; unsupervised, it can't. The
+// admin Stop button (AD8b) is the opposite: jarvisd exits in a way its supervisor leaves
+// alone (StopExitCodeFor).
 package service
 
 import (
@@ -28,6 +30,15 @@ const (
 	// it (EX_TEMPFAIL). systemd (Restart=always), launchd (KeepAlive) and the SCM (recovery
 	// actions on non-crash failures) all start it again.
 	RestartExitCode = 75
+	// StopExitCode is the status jarvisd exits with under systemd when the admin asked it to
+	// stay stopped (AD8b). The unit's Restart=always restarts even a clean exit 0, so the unit
+	// names this code in RestartPreventExitStatus= (and SuccessExitStatus=, so the unit ends
+	// inactive rather than failed). 98 is outside sysexits (64–78, where RestartExitCode
+	// lives), is not 1 (any error) or 2 (a Go panic, flag usage), is below the shell's 126–127
+	// and 128+signal, and below the 200–243 systemd uses for its own exec failures; nothing
+	// in jarvisd or its engines exits with it. launchd and the Windows SCM get exit 0 instead
+	// (StopExitCodeFor): both restart on a non-zero exit and leave a clean one alone.
+	StopExitCode = 98
 )
 
 // Kind is the service manager supervising this process.
@@ -101,6 +112,75 @@ func RestartCommand(kind Kind, user bool) string {
 	return "stop jarvisd (Ctrl-C) and start it again: jarvisd serve"
 }
 
+// StartCommand is what an operator runs to start jarvisd again after the admin stopped it
+// (AD8b): the `jarvisd service start` CLI (user: a systemd --user install), which on Windows
+// needs an elevated PowerShell (StartNote). Unsupervised, it is `jarvisd serve`.
+func StartCommand(kind Kind, user bool) string {
+	switch kind {
+	case Systemd:
+		if user {
+			return "jarvisd service start --user"
+		}
+		return "sudo jarvisd service start"
+	case Launchd:
+		return "sudo jarvisd service start"
+	case SCM:
+		return "jarvisd service start"
+	}
+	return "jarvisd serve"
+}
+
+// StartNote is what goes with StartCommand: where to run it, and whether a reboot starts
+// jarvisd too.
+func StartNote(kind Kind) string {
+	switch kind {
+	case SCM:
+		return "Run it in an elevated PowerShell (Run as administrator). Restarting the computer also starts jarvisd."
+	case Systemd, Launchd:
+		return "Run it on the server. Restarting the computer also starts jarvisd."
+	}
+	return "Run it on the server, in the directory and environment jarvisd ran in before."
+}
+
+// InstallCommand is what rewrites the installed service definition (keeping the data, home
+// and account): the fix for a definition an older version wrote.
+func InstallCommand(kind Kind, user bool) string {
+	switch kind {
+	case Systemd:
+		if user {
+			return "jarvisd service install --user"
+		}
+		return "sudo jarvisd service install"
+	case Launchd:
+		return "sudo jarvisd service install"
+	case SCM:
+		return "jarvisd service install"
+	}
+	return ""
+}
+
+// stopCommand is the `jarvisd service stop` an operator runs on the server.
+func stopCommand(kind Kind, user bool) string {
+	switch {
+	case kind == Systemd && user:
+		return "jarvisd service stop --user"
+	case kind == SCM:
+		return "jarvisd service stop"
+	}
+	return "sudo jarvisd service stop"
+}
+
+// StopExitCodeFor is the status jarvisd exits with when the admin stops it under kind: one
+// its supervisor does not restart. systemd: StopExitCode (RestartPreventExitStatus=);
+// launchd (KeepAlive SuccessfulExit=false) and the SCM (recovery actions fire on a non-zero
+// exit only): 0. Unsupervised: 0.
+func StopExitCodeFor(kind Kind) int {
+	if kind == Systemd {
+		return StopExitCode
+	}
+	return 0
+}
+
 // probe is what Detect looks at, injectable for tests.
 type probe struct {
 	getenv     func(string) string
@@ -170,6 +250,19 @@ func inUnitCgroup(cgroup, unit string) bool {
 // RestartExitCode for it.
 var ErrRestart = errors.New("restart requested")
 
+// ErrStop is what `serve` returns (wrapped in a *StopError) when the admin stopped jarvisd.
+var ErrStop = errors.New("stop requested")
+
+// StopError is ErrStop with the exit code that keeps the supervisor from restarting jarvisd.
+type StopError struct{ Code int }
+
+func (e *StopError) Error() string        { return ErrStop.Error() }
+func (e *StopError) Is(target error) bool { return target == ErrStop }
+
+// Requested reports whether err is a requested restart or stop rather than a failure: main
+// exits with its code without printing it.
+func Requested(err error) bool { return errors.Is(err, ErrRestart) || errors.Is(err, ErrStop) }
+
 // ErrUnsupervised means nothing would start jarvisd again if it exited.
 var ErrUnsupervised = errors.New("jarvisd is not running under a service manager; restart it yourself")
 
@@ -180,19 +273,42 @@ func ExitCode(err error) int {
 		return 0
 	case errors.Is(err, ErrRestart):
 		return RestartExitCode
+	}
+	var stop *StopError
+	switch {
+	case errors.As(err, &stop):
+		return stop.Code
 	default:
 		return 1
 	}
 }
 
-// Restarter lets a request handler (the admin restart button, self-update) end serve so the
-// supervisor restarts jarvisd. serve creates it with the cancel of its own context and
-// returns ErrRestart when Requested.
-type Restarter struct {
-	kind      Kind
-	cancel    context.CancelFunc
-	requested atomic.Bool
+// scmExit is what the Windows service handler reports for serve's error: a
+// service-specific exit code (recovery actions restart jarvisd) for anything but a clean
+// exit, which the SCM records as a stop and leaves alone (an admin stop: StopExitCodeFor(SCM)
+// is 0).
+func scmExit(err error) (serviceSpecific bool, code uint32) {
+	if c := ExitCode(err); c != 0 {
+		return true, uint32(c)
+	}
+	return false, 0
 }
+
+// Restarter lets a request handler (the admin restart and stop buttons, self-update) end
+// serve so the supervisor restarts jarvisd, or leaves it stopped. serve creates it with the
+// cancel of its own context and returns ErrRestart or a *StopError for what was requested.
+type Restarter struct {
+	kind   Kind
+	cancel context.CancelFunc
+	// want is what ends serve: wantNone, wantRestart or wantStop (the first request wins).
+	want atomic.Int32
+}
+
+const (
+	wantNone int32 = iota
+	wantRestart
+	wantStop
+)
 
 // NewRestarter returns a Restarter for a process supervised by kind.
 func NewRestarter(kind Kind, cancel context.CancelFunc) *Restarter {
@@ -209,19 +325,35 @@ func (r *Restarter) Request() error {
 	if !r.kind.Supervised() {
 		return ErrUnsupervised
 	}
-	r.requested.Store(true)
+	r.want.CompareAndSwap(wantNone, wantRestart)
 	r.cancel()
 	return nil
 }
 
-// Requested reports whether Request succeeded.
-func (r *Restarter) Requested() bool { return r.requested.Load() }
+// RequestStop begins a graceful shutdown after which jarvisd stays stopped: serve returns a
+// *StopError whose code the supervisor does not restart on (StopExitCodeFor). It works
+// unsupervised too (jarvisd simply exits). Whether the installed service definition honours
+// it is StopBlocker's question, asked before.
+func (r *Restarter) RequestStop() error {
+	r.want.CompareAndSwap(wantNone, wantStop)
+	r.cancel()
+	return nil
+}
+
+// Requested reports whether a restart was requested (and is what ends serve).
+func (r *Restarter) Requested() bool { return r.want.Load() == wantRestart }
+
+// StopRequested reports whether a stop was requested (and is what ends serve).
+func (r *Restarter) StopRequested() bool { return r.want.Load() == wantStop }
 
 // Err is what serve returns after its runner stopped: ErrRestart when a restart was
-// requested, else err.
+// requested, a *StopError when a stop was, else err.
 func (r *Restarter) Err(err error) error {
-	if r.Requested() {
+	switch r.want.Load() {
+	case wantRestart:
 		return ErrRestart
+	case wantStop:
+		return &StopError{Code: StopExitCodeFor(r.kind)}
 	}
 	return err
 }

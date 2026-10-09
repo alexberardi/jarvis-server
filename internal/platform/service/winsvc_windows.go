@@ -17,9 +17,9 @@ func IsWindowsService() bool {
 
 // RunWindowsService answers the SCM and runs fn until it returns. Stop and Shutdown cancel
 // fn's context (the same graceful path as SIGTERM elsewhere), Ready(ctx) inside fn reports
-// Running, and fn's error becomes the service's exit code: 0, RestartExitCode, or 1 as a
-// service-specific code, so the recovery actions restart jarvisd after anything but a clean
-// stop.
+// Running, and fn's error becomes the service's exit code (scmExit): RestartExitCode or 1 as
+// a service-specific code, so the recovery actions restart jarvisd, or 0 (a stop through the
+// SCM, or the admin Stop button), which the SCM records as a clean stop and leaves alone.
 func RunWindowsService(fn func(ctx context.Context) error) error {
 	h := &handler{fn: fn}
 	if err := svc.Run(Name, h); err != nil {
@@ -77,10 +77,7 @@ func (h *handler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- svc.S
 			}
 		case err := <-done:
 			h.err = err
-			if code := ExitCode(err); code != 0 {
-				return true, uint32(code)
-			}
-			return false, 0
+			return scmExit(err)
 		}
 	}
 }

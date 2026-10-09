@@ -219,6 +219,8 @@ sets `umask 077` at process start on Unix, chmods an existing home to 0700 and t
    Group=jarvisd
    ExecStart=/usr/local/bin/jarvisd serve --home /var/lib/jarvisd
    Restart=always
+   RestartPreventExitStatus=98      # the admin Stop button's exit (AD8b, §8.1): stay stopped
+   SuccessExitStatus=98             # ... and end inactive, not failed
    RestartSec=5
    TimeoutStopSec=30                # engines drain (STATUS 2026-10-06: drain on restart)
    KillMode=mixed                   # SIGTERM to jarvisd; it stops its own engine children
@@ -281,7 +283,7 @@ Mac and makes models and logs harder to find.
   <string>/usr/local/bin/jarvisd</string><string>serve</string>
   <string>--home</string><string>/Users/alex/.jarvisd</string></array>
 <key>RunAtLoad</key><true/>
-<key>KeepAlive</key><true/>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>  <!-- restart unless it exits 0 (AD8b) -->
 <key>ProcessType</key><string>Interactive</string>   <!-- no background throttling of a GPU server -->
 <key>Umask</key><integer>63</integer>                <!-- 077 -->
 <key>SoftResourceLimits</key><dict><key>NumberOfFiles</key><integer>65536</integer></dict>
@@ -794,8 +796,37 @@ terminal unit doesn't count), `launchd` (parent pid 1 and a real `XPC_SERVICE_NA
 `windows-service`, or `none`. `serve` builds a `service.Restarter` with its own cancel;
 `Request()` returns `ErrUnsupervised` when nothing would restart jarvisd (the route answers 409),
 else cancels serve, which returns `ErrRestart`, and `main` exits 75 (`RestartExitCode`): systemd
-`Restart=always`, launchd `KeepAlive` and the SCM recovery actions each start it again. Not wired to
-a route yet: `POST /api/system/restart` gets the restarter handed to the admin module.
+`Restart=always`, launchd `KeepAlive` and the SCM recovery actions each start it again. The admin's
+`POST /api/system/restart` (AD8) uses it.
+
+**Stop (AD8b, 2026-10-08).** `RequestStop()` cancels serve too, which then returns a `*StopError`
+whose exit code the supervisor leaves alone (`StopExitCodeFor`); the first request wins, so a
+restart already under way stays a restart. Every supervisor restarts jarvisd when it exits, so each
+needs its own way out:
+
+| Supervisor | Stop exits with | Why it stays stopped | Started again by |
+|---|---|---|---|
+| systemd (system and `--user`) | 98 (`StopExitCode`) | `Restart=always` restarts even exit 0; the unit's `RestartPreventExitStatus=98` stops that and `SuccessExitStatus=98` leaves the unit `inactive`, not `failed` (no `reset-failed` needed) | `sudo jarvisd service start` / `jarvisd service start --user` (`systemctl start`), or a reboot |
+| launchd | 0 | `KeepAlive` is `{SuccessfulExit: false}`: a crash, a `kill -9` or exit 75 still restarts it, a clean exit doesn't; `RunAtLoad` still starts it at boot. The job stays loaded but not running | `sudo jarvisd service start` (bootstraps if unloaded, then `kickstart`), or a reboot |
+| Windows SCM | 0 | Recovery actions (with non-crash failures on) fire when the process dies without reporting `SERVICE_STOPPED`, or reports it with a non-zero exit code; jarvisd reports `SERVICE_STOPPED` with 0, a clean stop | `jarvisd service start` in an elevated PowerShell, or a reboot (automatic start) |
+| none | 0 | nothing restarts it | `jarvisd serve` |
+
+98 sits outside sysexits (64–78, where 75 lives), is not 1 (any error) or 2 (a Go panic), and is below
+the shell's 126+ and systemd's own 200–243. launchd and the SCM can't use a dedicated code: both treat
+any non-zero exit as a failure to restart after, so stopping there means a clean exit 0. One side effect
+on macOS: a plain `kill` (SIGTERM) now also leaves jarvisd stopped (it exits 0), where `KeepAlive` true
+started it again; `kill -9` and crashes still restart it.
+
+A unit or LaunchDaemon written before AD8b has `Restart=always` alone or `KeepAlive` true, so a stop
+would only restart jarvisd. `service.StopBlocker` reads the installed definition (as `service status`
+does; the service account can read it): without `RestartPreventExitStatus=98` / the `KeepAlive` dict,
+the admin reports `capabilities.stop: false` with the reason and `sudo jarvisd service install` (or
+`--user`) as the fix, and `POST /api/system/stop` answers 409 instead of exiting. `service status`
+reports such a definition as stale ("restarts jarvisd after an admin stop"), so `jarvisd upgrade`
+rewrites it (`refreshDefinition`). The one-click admin update does not refresh definitions, so an
+install upgraded only that way keeps Stop unavailable until `service install` runs. Windows needs
+nothing: every version registered the service the same way. Drop-ins (`systemctl edit jarvisd`) are not
+read: an override that resets `RestartPreventExitStatus=` would make the stop a restart.
 
 **Verified.** CI job `service` (ci.yml) installs from `/usr/local/bin` / `%ProgramFiles%\jarvisd`
 on ubuntu-latest (system unit: runs as `jarvisd`, `Type=notify`, home 0700, DB 0600, env file

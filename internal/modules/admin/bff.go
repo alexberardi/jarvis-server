@@ -110,6 +110,8 @@ func (m *Module) mountBFF(mux *http.ServeMux, deps module.Deps) {
 	mux.Handle("POST /api/update/apply", gated(m.handleApply))
 	mux.Handle("GET /api/update/apply", gated(m.handleApplyStatus))
 	mux.Handle("POST /api/system/restart", gated(m.handleRestart))
+	// AD8b: the stop button.
+	mux.Handle("POST /api/system/stop", gated(m.handleStop))
 	// AD3b: the wizard's Voice step.
 	mux.Handle("GET /api/tts/voices", gated(m.handleVoices))
 	mux.Handle("POST /api/tts/sample", gated(m.handleVoiceSample))
@@ -336,6 +338,7 @@ func (m *Module) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	blocked, _ := m.applyBlocker(r.Context())
 	selfUpdate := blocked == ""
+	stop := m.stopInfo()
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"hostname":        host,
 		"platform":        runtime.GOOS,
@@ -354,12 +357,16 @@ func (m *Module) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		// AD8: who restarts jarvisd, and whether the restart button can.
 		"supervisor":        m.supervisor(),
 		"restart_supported": m.supervisor().Supervised(),
-		// What the SPA may offer without probing: restart (supervised) and the one-click
-		// update (POST /api/update/apply would be accepted now).
+		// What the SPA may offer without probing: restart (supervised), stop (the installed
+		// service definition keeps jarvisd stopped) and the one-click update (POST
+		// /api/update/apply would be accepted now).
 		"capabilities": map[string]bool{
 			"restart":     m.supervisor().Supervised(),
+			"stop":        stop.Supported,
 			"self_update": selfUpdate,
 		},
+		// AD8b: why Stop is unavailable and the fix, and how to start jarvisd again.
+		"stop": stop,
 	})
 }
 

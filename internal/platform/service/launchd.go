@@ -327,17 +327,38 @@ func (l *launchd) staleness() string {
 	if err != nil {
 		return ""
 	}
-	if want, err := RenderLaunchd(p); err == nil && string(have) != string(want) {
-		return l.plistPath + " differs from what this version writes (an older version wrote it); " + staleNote
-	}
+	// A missing updater is named first: it is what an rc4-era install lacks most, and the
+	// install CI job looks for it.
 	helper, err := os.ReadFile(l.helperPath)
 	if err != nil {
 		return "the upgrade helper " + HelperLabel + " is not installed (an older version wrote the service); " + staleNote
+	}
+	if want, err := RenderLaunchd(p); err == nil && string(have) != string(want) {
+		if !plistStopReady(have) {
+			return l.plistPath + " restarts jarvisd after an admin stop (an older version wrote it); " + staleNote
+		}
+		return l.plistPath + " differs from what this version writes (an older version wrote it); " + staleNote
 	}
 	if want, err := RenderLaunchdHelper(HelperPlist{Binary: p.Binary, Home: p.Home, UserName: p.UserName}); err == nil && string(helper) != string(want) {
 		return l.helperPath + " differs from what this version writes; " + staleNote
 	}
 	return ""
+}
+
+// stopBlocker says why the admin Stop button can't keep jarvisd stopped under this
+// LaunchDaemon ("" when it can) and the command that fixes it: a plist an older version wrote
+// has KeepAlive true, which starts jarvisd again after any exit.
+func (l *launchd) stopBlocker() (reason, command string) {
+	plist, err := os.ReadFile(l.plistPath)
+	if err != nil {
+		return "jarvisd can't read its LaunchDaemon " + l.plistPath + ", so it can't tell whether launchd would " +
+			"start it again right away. Stop it on the server.", stopCommand(Launchd, false)
+	}
+	if !plistStopReady(plist) {
+		return "The installed LaunchDaemon was written by an older version and would start jarvisd again right away. " +
+			"Update it first (this restarts jarvisd), then Stop works.", InstallCommand(Launchd, false)
+	}
+	return "", ""
 }
 
 func (l *launchd) InstalledHome() string {

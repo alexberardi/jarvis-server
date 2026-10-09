@@ -510,6 +510,14 @@ superuser-gated, a nil interface answers 503):*
   `KeepAlive`, SCM recovery) starts it again. Unsupervised → **409** `{detail, supervisor: "none", command}`
   (`service.RestartCommand`). `GET /api/system/info` gains `supervisor` (`systemd` | `launchd` |
   `windows-service` | `none`) and `restart_supported`.
+- `POST /api/system/stop` (AD8b, 2026-10-08) → **202** `{stopping: true, status: "stopping", supervisor,
+  start_command, start_note}` and, 300 ms later, serve ends with an exit its supervisor doesn't restart
+  (installers doc §8.1: 98 under systemd, 0 elsewhere). `start_command` is `sudo jarvisd service start`
+  (Linux system unit, macOS), `jarvisd service start --user`, `jarvisd service start` (elevated
+  PowerShell) or `jarvisd serve` (unsupervised). **409** `{detail, supervisor, command}` when the
+  installed unit/LaunchDaemon predates AD8b and would restart jarvisd at once (`command`: `sudo jarvisd
+  service install`). `GET /api/system/info` gains `capabilities.stop` and `stop: {supported, reason?,
+  command?, start_command, start_note}`.
 - `POST /api/update/apply [{version}]` → **202** `{job}` and a background run: resolve the release (newest, or
   `version`, which must be newer), fetch and verify `SHA256SUMS.minisig` with the key built into the running
   binary, download + checksum the archive, unpack, run `<new> version`, `VACUUM INTO` snapshot, swap (when

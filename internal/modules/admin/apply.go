@@ -15,12 +15,15 @@ import (
 
 // The restart button (AD8) and the one-click signed update (AD5). Both end with jarvisd
 // exiting for its supervisor to start it again; unsupervised they answer 409 with the
-// command to run instead.
+// command to run instead. The stop button (AD8b) ends it for good: the supervisor leaves it
+// stopped until someone starts it again.
 
-// Restarter ends serve so the supervisor restarts jarvisd (service.Restarter).
+// Restarter ends serve so the supervisor restarts jarvisd, or leaves it stopped
+// (service.Restarter).
 type Restarter interface {
 	Kind() service.Kind
 	Request() error
+	RequestStop() error
 }
 
 // UpgradeConfig is what the one-click update needs from cmd/jarvisd.
@@ -53,6 +56,63 @@ func (m *Module) supervisor() service.Kind {
 		return service.None
 	}
 	return m.Restarter.Kind()
+}
+
+// stopInfo is what the admin knows about stopping jarvisd (AD8b): whether the Stop button
+// works here, why not and the command that fixes it, and how to start jarvisd again.
+type stopInfo struct {
+	Supported    bool   `json:"supported"`
+	Reason       string `json:"reason,omitempty"`
+	Command      string `json:"command,omitempty"`
+	StartCommand string `json:"start_command"`
+	StartNote    string `json:"start_note"`
+}
+
+func (m *Module) stopInfo() stopInfo {
+	kind := m.supervisor()
+	si := stopInfo{
+		Supported:    true,
+		StartCommand: service.StartCommand(kind, m.Upgrade.UserUnit),
+		StartNote:    service.StartNote(kind),
+	}
+	switch {
+	case m.Restarter == nil:
+		si.Supported, si.Reason = false, "This jarvisd can't stop itself from the admin. Stop it on the server."
+	case m.StopBlocker != nil:
+		if reason, command := m.StopBlocker(); reason != "" {
+			si.Supported, si.Reason, si.Command = false, reason, command
+		}
+	}
+	return si
+}
+
+// handleStop is POST /api/system/stop: 202 and an exit the supervisor leaves alone (jarvisd
+// stays stopped until started again, or until the next boot), or 409 with what to run when
+// the installed service definition would just restart it.
+func (m *Module) handleStop(w http.ResponseWriter, r *http.Request) {
+	kind := m.supervisor()
+	si := m.stopInfo()
+	if !si.Supported {
+		httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+			"detail":     si.Reason,
+			"supervisor": kind,
+			"command":    si.Command,
+		})
+		return
+	}
+	m.deps.Log.Info("admin: stop requested; jarvisd stays stopped until started again", "supervisor", kind,
+		"start_command", si.StartCommand)
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"stopping": true, "status": "stopping", "supervisor": kind,
+		"start_command": si.StartCommand, "start_note": si.StartNote,
+	})
+	rs, delay := m.Restarter, restartDelay
+	go func() {
+		time.Sleep(delay)
+		if err := rs.RequestStop(); err != nil {
+			m.deps.Log.Error("admin: stop failed", "err", err)
+		}
+	}()
 }
 
 // handleRestart is POST /api/system/restart: 202 and a supervised restart, or 409 with the
