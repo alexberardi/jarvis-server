@@ -269,7 +269,14 @@ func (s *Store) ActiveInstall(ctx context.Context, modelID string) (Install, boo
 
 // UpdateInstall writes an install's progress fields.
 func (s *Store) UpdateInstall(ctx context.Context, i Install) error {
-	_, err := s.DB.Write.ExecContext(ctx, `
+	return s.updateInstall(ctx, s.DB.Write, i)
+}
+
+// updateInstall is UpdateInstall on ex: the store's writer, or a transaction.
+func (s *Store) updateInstall(ctx context.Context, ex interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, i Install) error {
+	_, err := ex.ExecContext(ctx, `
 		UPDATE llm_installs SET state = ?, phase = ?, bytes_total = ?, bytes_done = ?, error = ?, note = ?, job_id = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 		WHERE id = ?`, i.State, i.Phase, i.BytesTotal, i.BytesDone, nullable(i.Error), nullable(i.Note), i.JobID, i.ID)
