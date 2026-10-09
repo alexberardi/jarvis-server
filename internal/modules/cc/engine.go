@@ -113,7 +113,7 @@ func filterMsgs(msgs []chatMsg, drop func(chatMsg) bool) []chatMsg {
 func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, []chatMsg) {
 	conv := in.conv
 	p := conv.provider
-	msgs := in.msgs
+	msgs := m.visionGuard(ctx, in.msgs)
 	hh := conv.householdID
 
 	// 0. Scrub stale steering nags from earlier turns (never messages[0]).
@@ -174,6 +174,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			m.deps.Log.Error("cc: tool loop LLM call failed", "conversation_id", conv.id, "err", err)
 			return engineResult{Stop: stopError, Err: err.Error()}, msgs
 		}
+		conv.noteUsage(resp.Usage)
 		raw := resp.Content
 		for _, mt := range thinkCaptureRE.FindAllStringSubmatch(raw, -1) {
 			if s := parse.PyStrip(mt[1]); s != "" {

@@ -34,6 +34,8 @@ type turnInput struct {
 	FollowUpIteration *int
 	SelfPlayback      *bool
 	SelfPlaybackKind  string
+	// Images are a mobile chat turn's attached images (chat_images.go).
+	Images []chatImage
 }
 
 // turnState is the per-turn context legacy carried in turn_context.
@@ -48,6 +50,9 @@ type turnState struct {
 type turnOutcome struct {
 	res  engineResult
 	conv *conversation
+	// imageMsgID is the id of the turn's user message when it carried images (the description
+	// job finds it by this), else 0.
+	imageMsgID uint64
 }
 
 // processTurn runs one turn. It returns errPrecondition when the conversation is unknown.
@@ -63,6 +68,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	defer conv.mu.Unlock()
 	endCache(nil)
 	m.flushPendingTranscript(ctx, conv)
+	m.compactBeforeTurn(ctx, conv) // CI6: at the hard threshold, before the turn
 
 	// The turn's speaker: only jarvisd's own identification of this conversation's audio
 	// (D2/D3). A confident id switches the conversation speaker; otherwise it keeps the one an
@@ -76,7 +82,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		endSpeaker(nil)
 	}
 
-	if isSTTNoise(in.VoiceCommand) {
+	if len(in.Images) == 0 && isSTTNoise(in.VoiceCommand) {
 		m.deps.Log.Info("cc: not_for_me_prefilter", "conversation_id", conv.id, "transcript", in.VoiceCommand)
 		return turnOutcome{res: engineResult{Stop: stopNotForMe}, conv: conv}, nil
 	}
@@ -108,7 +114,14 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		profileMatchHint(in.VoiceCommand, speakerBlock),
 		m.agentContextHint(ctx, conv, in.VoiceCommand),
 	}
-	msgs = append(msgs, chatMsg{Role: "user", Content: prompts.UserMessage(in.VoiceCommand, hints, suffix)})
+	user := chatMsg{Role: "user", Content: prompts.UserMessage(in.VoiceCommand, hints, suffix)}
+	var imageMsgID uint64
+	if len(in.Images) > 0 {
+		user.images = in.Images
+		imageMsgID = conv.newMsgID()
+		user.id = imageMsgID
+	}
+	msgs = append(msgs, user)
 
 	maxIter := 3
 	if conv.provider.SupportsNativeTools() {
@@ -141,15 +154,18 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		res = engineResult{Stop: stopNotForMe}
 	}
 	if res.Stop != stopError {
-		conv.messages = out
+		conv.commit(out)
+		if res.Stop != stopToolCalls {
+			m.afterTurn(ctx, conv)
+		}
 	}
 	res = applyExchangeComplete(res)
 	res = rewriteTerminalFiller(res)
 	if res.Stop != stopNotForMe && res.Stop != stopError {
 		conv.answeredRounds++
 	}
-	m.noteTranscript(ctx, conv, in.VoiceCommand, res)
-	return turnOutcome{res: res, conv: conv}, nil
+	m.noteTranscript(ctx, conv, withImageMarkers(in.VoiceCommand, len(in.Images)), res)
+	return turnOutcome{res: res, conv: conv, imageMsgID: imageMsgID}, nil
 }
 
 // speakerNameOrDefault is build_speaker_block's name argument: "default" (unknown) unless a

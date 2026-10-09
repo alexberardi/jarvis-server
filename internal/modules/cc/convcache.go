@@ -36,6 +36,17 @@ type chatMsg struct {
 	ToolCallID string
 	Name       string
 	transient  bool
+
+	// id is the message's identity in its conversation (0 until committed; conversation.commit
+	// assigns it). Background jobs (image descriptions, compaction) find and replace messages by
+	// it, so they never clobber history a newer turn wrote (chat_images.go, compaction.go).
+	id uint64
+	// images are a chat turn's attached images (chat_images.go): sent to the live slot as
+	// image_url parts until the description job replaces them with text. Memory only: never
+	// written to disk, traces or logs.
+	images []chatImage
+	// summary marks the compaction summary message (compaction.go).
+	summary bool
 }
 
 func sysMsg(s string) chatMsg       { return chatMsg{Role: "system", Content: s} }
@@ -46,6 +57,9 @@ func toLLM(msgs []chatMsg) []llm.Message {
 	out := make([]llm.Message, 0, len(msgs))
 	for _, m := range msgs {
 		lm := llm.Message{Role: m.Role, Content: llm.TextContent(m.Content), ToolCallID: m.ToolCallID, Name: m.Name}
+		if len(m.images) > 0 {
+			lm.Content = imageContent(m.images, m.Content)
+		}
 		for _, tc := range m.ToolCalls {
 			lm.ToolCalls = append(lm.ToolCalls, llm.ToolCall{ID: tc.ID, Type: "function",
 				Function: llm.FunctionCall{Name: tc.Function.Name, Arguments: tc.Function.Arguments}})
@@ -114,7 +128,65 @@ type conversation struct {
 
 	pendingTranscript *pendingTranscript
 
+	// nextMsgID numbers committed messages (chatMsg.id).
+	nextMsgID uint64
+	// rev counts background edits of messages (descriptions, compaction): a commit prepared
+	// before one (the continue stream) is rebased onto it (rebaseCommit).
+	rev uint64
+	// promptTokens is the last live call's prompt size (usage.prompt_tokens), 0 when unknown or
+	// since a compaction: the compaction trigger (compaction.go).
+	promptTokens int
+
 	lastUsed time.Time
+}
+
+// commit makes msgs the conversation's history, numbering messages that have no id yet.
+// Callers hold conv.mu.
+func (c *conversation) commit(msgs []chatMsg) {
+	for i := range msgs {
+		if msgs[i].id == 0 {
+			c.nextMsgID++
+			msgs[i].id = c.nextMsgID
+		}
+	}
+	c.messages = msgs
+}
+
+// newMsgID numbers a message before it is committed (a chat turn's image message, so the
+// description job can find it). Callers hold conv.mu.
+func (c *conversation) newMsgID() uint64 {
+	c.nextMsgID++
+	return c.nextMsgID
+}
+
+// rebaseCommit applies background edits made since a commit was prepared: commit is base plus
+// changes (dropped messages, new id-0 messages at the end); current is base after background
+// edits (messages replaced in place by id, older ones swapped for a summary). The result keeps
+// current's version of every message commit still has, current's new messages (a summary), and
+// commit's new messages.
+func rebaseCommit(base, current, commit []chatMsg) []chatMsg {
+	inBase := map[uint64]bool{}
+	for _, m := range base {
+		inBase[m.id] = true
+	}
+	inCommit := map[uint64]bool{}
+	for _, m := range commit {
+		if m.id != 0 {
+			inCommit[m.id] = true
+		}
+	}
+	out := make([]chatMsg, 0, len(commit)+1)
+	for _, m := range current {
+		if inCommit[m.id] || !inBase[m.id] {
+			out = append(out, m)
+		}
+	}
+	for _, m := range commit {
+		if m.id == 0 {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // convCache is the conversation store.
@@ -149,6 +221,18 @@ func (c *convCache) put(conv *conversation) {
 		}
 		delete(c.m, oldest.id)
 	}
+}
+
+// peek returns a live conversation without sliding its idle TTL (background jobs must not
+// keep a conversation alive).
+func (c *convCache) peek(id string) *conversation {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	conv := c.m[id]
+	if conv == nil || c.now().Sub(conv.lastUsed) > c.ttl {
+		return nil
+	}
+	return conv
 }
 
 // get returns a live conversation and slides its idle TTL; expired entries are dropped.

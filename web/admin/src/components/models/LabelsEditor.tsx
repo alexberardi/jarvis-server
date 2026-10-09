@@ -122,6 +122,55 @@ function DevicePicker({ id, value, devices, onChange }: { id: string; value: str
   )
 }
 
+/**
+ * ImageInputToggle shows llm.<slot>.mmproj as an on/off switch (chat-images CI1): on = ""
+ * (the model's own projector), off = "none". An explicit projector id or path keeps the raw
+ * editor under Advanced. `running` is whether the engine running now has vision.
+ */
+export function ImageInputToggle({
+  id,
+  label,
+  mmproj,
+  running,
+  onChange,
+}: {
+  id: string
+  label: 'live' | 'background'
+  mmproj: string
+  running?: boolean
+  onChange: (mmproj: string) => void
+}) {
+  const simple = mmproj === '' || mmproj === 'none'
+  const runningText =
+    running === undefined ? 'Not running' : running ? 'Running engine has image input' : 'Running engine has no image input'
+  return (
+    <div className="space-y-1" data-testid={`image-input-${label}`}>
+      {simple ? (
+        <label htmlFor={id} className="flex items-center gap-2 text-xs text-[var(--color-text)]">
+          <input
+            id={id}
+            type="checkbox"
+            role="switch"
+            checked={mmproj === ''}
+            onChange={(e) => onChange(e.target.checked ? '' : 'none')}
+          />
+          Image input
+        </label>
+      ) : (
+        <p className="text-xs text-[var(--color-text)]">
+          Image input: projector <code>{mmproj}</code> (change it under Advanced)
+        </p>
+      )}
+      <p className="text-[11px] text-[var(--color-text-muted)]">
+        {runningText}.{' '}
+        {simple && "On uses the model's own vision projector when it has one; off frees its memory."}
+        {label === 'live' && ' Chat image upload in the app needs this on.'}
+        {label === 'background' && ' Off also turns off LLM vision in recipe photo import, and chat images are then described by the live model.'}
+      </p>
+    </div>
+  )
+}
+
 function EngineLabelCard({
   status,
   models,
@@ -269,6 +318,16 @@ function EngineLabelCard({
             {isLLM && foldField()}
           </div>
         </div>
+      )}
+
+      {mode === 'local' && isLLM && (label === 'live' || label === 'background') && (
+        <ImageInputToggle
+          id={id('image_input')}
+          label={label}
+          mmproj={v('mmproj')}
+          running={status.endpoint ? status.endpoint.vision : undefined}
+          onChange={(mmproj) => set({ mmproj })}
+        />
       )}
 
       {mode === 'local' && (

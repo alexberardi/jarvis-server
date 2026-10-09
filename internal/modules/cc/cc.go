@@ -13,6 +13,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
@@ -53,7 +54,7 @@ func Definitions() []settings.Definition {
 	return markHouseholdControllable(routineDefinitions(slices.Concat(nodeDefinitions(),
 		voiceDefinitions(prompts.DefaultPersona), packageDefinitions(), smartHomeDefinitions(),
 		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(),
-		householdSettingDefinitions())))
+		householdSettingDefinitions(), compactionDefinitions())))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -125,6 +126,10 @@ type Module struct {
 	// DefaultPromptProvider names the prompt provider when llm.prompt_provider is unset (e.g.
 	// the live model's catalog entry). Nil: an unset setting is an error (D11).
 	DefaultPromptProvider func(ctx context.Context) string
+	// Endpoints resolves an llm slot ("live", "background") for its capabilities: vision for
+	// chat images, the context size for compaction (chat_images.go, compaction.go). Nil: no
+	// images, no compaction.
+	Endpoints func(ctx context.Context, label string) (llm.Endpoint, error)
 	// Phone configures phone calls (5c, docs/cc/11; phone_wire.go).
 	Phone PhoneConfig
 
@@ -163,6 +168,9 @@ type Module struct {
 	cbOnce sync.Once
 	cbMap  map[string]serverCallbackFunc
 	cbWait callbackWaiters
+
+	// convJobHook captures conversation jobs instead of queueing them (tests).
+	convJobHook func(jobType string, j convJob)
 }
 
 func (m *Module) Name() string      { return "cc" }
@@ -337,6 +345,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	if deps.Queue != nil {
 		deps.Queue.Register(cleanupJob, queue.Handler{Run: m.runCleanup})
 		deps.Queue.Register(taskSweepJob, queue.Handler{Run: m.runTaskSweep})
+		m.registerConvJobs(deps.Queue)
 	}
 }
 

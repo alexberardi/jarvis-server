@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
@@ -50,6 +51,7 @@ func (m *Module) registerMobileChat(mux *http.ServeMux) {
 	const v0 = "/api/v0"
 	mux.HandleFunc("POST "+v0+"/mobile/chat", m.user(m.handleMobileChat))
 	mux.HandleFunc("POST "+v0+"/mobile/chat/warmup", m.user(m.handleMobileChatWarmup))
+	mux.HandleFunc("GET "+v0+"/mobile/chat/capabilities", m.user(m.handleChatCapabilities))
 }
 
 // chatRequest is MobileChatRequest / WarmupRequest.
@@ -62,19 +64,41 @@ type chatRequest struct {
 	ClientTools      []*pyjson.Object
 	Commands         []*pyjson.Object
 	IncludeReasoning bool
+	// rawImages is the request's images list, validated after the node gate
+	// (chat_images.go); Images is the result.
+	rawImages []any
+	Images    []chatImage
 }
 
 // parseChatRequest reads the body; warmup has no message / conversation_id /
 // include_reasoning.
 func parseChatRequest(w http.ResponseWriter, r *http.Request, warmup bool) (chatRequest, bool) {
-	b, ordered, ok := readJSONBody(w, r)
+	limit := int64(httpx.MaxBody)
+	if !warmup {
+		limit = chatBodyMax // images (§6)
+	}
+	b, ordered, ok := readJSONBodyLimit(w, r, limit)
 	if !ok {
 		return chatRequest{}, false
 	}
 	var req chatRequest
 	if !warmup {
-		if s, ok := b.str("message", true); ok {
-			b.strLen("message", s, 1, chatMessageMax)
+		// Images, when present, make the message optional and allow it empty (§6). Their content
+		// is checked after the node gate (422 images_invalid / images_unavailable).
+		if v, present := b.m["images"]; present && v != nil {
+			l, isList := v.([]any)
+			if !isList {
+				b.fail("images", "Input should be a valid list")
+			}
+			req.rawImages = l
+		}
+		withImages := len(req.rawImages) > 0
+		if s, ok := b.str("message", !withImages); ok {
+			minLen := 1
+			if withImages {
+				minLen = 0
+			}
+			b.strLen("message", s, minLen, chatMessageMax)
 			req.Message = s
 		}
 	}
@@ -296,6 +320,18 @@ func (m *Module) handleMobileChat(w http.ResponseWriter, r *http.Request, u auth
 		detail(w, http.StatusServiceUnavailable, "Voice pipeline unavailable")
 		return
 	}
+	if len(req.rawImages) > 0 {
+		if !m.slotVision(ctx, llm.LabelLive) {
+			detailCode(w, http.StatusUnprocessableEntity, "Images are not available: the live model has no image input", codeImagesUnavailable)
+			return
+		}
+		imgs, err := parseChatImages(req.rawImages)
+		if err != nil {
+			detailCode(w, http.StatusUnprocessableEntity, err.Error(), codeImagesInvalid)
+			return
+		}
+		req.Images, req.rawImages = imgs, nil
+	}
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache")
@@ -326,7 +362,7 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 		cid = newMobileConversationID()
 	}
 	trace := Trace{ConversationID: cid, RequestType: "mobile_chat", Source: "mobile", NodeID: row.nodeID,
-		HouseholdID: req.HouseholdID, UserID: u.ID, UserCommand: req.Message}
+		HouseholdID: req.HouseholdID, UserID: u.ID, UserCommand: withImageMarkers(req.Message, len(req.Images))}
 	finish := func(answer, errMsg string) {
 		trace.AssistantMessage, trace.TotalDurationMS, trace.Spans = answer, tr.totalMS(), tr.spans()
 		if errMsg != "" {
@@ -366,11 +402,16 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 	sse.send(servertools.Obj("type", "acknowledgment", "text", acknowledgment(req.Message, rand.IntN)))
 
 	end := tr.measure("process_command", "cc", nil)
-	out, err := m.processTurn(llmCtx, nil, turnInput{VoiceCommand: req.Message, ConversationID: cid, Source: "chat"})
+	out, err := m.processTurn(llmCtx, nil, turnInput{VoiceCommand: req.Message, ConversationID: cid, Source: "chat", Images: req.Images})
 	end(err)
 	if err != nil {
 		fatal(chatErrorText(cid, err))
 		return
+	}
+	if out.imageMsgID != 0 {
+		// After the reply (CI5): the images stayed in the message for the whole turn,
+		// tool-loop continues included; now a description replaces them.
+		defer m.scheduleDescribe(cid, out.imageMsgID)
 	}
 	res := out.res
 

@@ -42,6 +42,33 @@ type fakeEngine struct {
 	delay  time.Duration // added to every completion (span-duration tests)
 	// strict makes the endpoint a strict-template one (FoldSystemMessages, ID12).
 	strict atomic.Bool
+	// vision and down are per-slot ("live", "background") capabilities: a slot with vision
+	// accepts images; a down slot doesn't resolve. ctxLen is the context the slots report
+	// (0 = 8192) and promptTokens the usage every completion reports (0 = 1).
+	// respond, when set, answers a request before the script does (ok=false: the script).
+	respond      func(body map[string]any) (engineReply, bool)
+	vision       map[string]bool
+	down         map[string]bool
+	ctxLen       int
+	promptTokens atomic.Int64
+}
+
+func (f *fakeEngine) setVision(label string, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.vision == nil {
+		f.vision = map[string]bool{}
+	}
+	f.vision[label] = on
+}
+
+func (f *fakeEngine) setDown(label string, down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.down == nil {
+		f.down = map[string]bool{}
+	}
+	f.down[label] = down
 }
 
 func newFakeEngine(t *testing.T) *fakeEngine {
@@ -106,7 +133,17 @@ func (f *fakeEngine) serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, completionBody("", nil, "length"))
 		return
 	}
-	rep := f.next()
+	f.mu.Lock()
+	respond := f.respond
+	f.mu.Unlock()
+	var rep engineReply
+	answered := false
+	if respond != nil {
+		rep, answered = respond(body)
+	}
+	if !answered {
+		rep = f.next()
+	}
 	if rep.status != 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(rep.status)
@@ -132,7 +169,11 @@ func (f *fakeEngine) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", b)
 		return
 	}
-	writeJSON(w, completionBody(rep.content, rep.toolCalls, finish))
+	body2 := completionBody(rep.content, rep.toolCalls, finish)
+	if pt := f.promptTokens.Load(); pt > 0 {
+		body2["usage"] = map[string]any{"prompt_tokens": pt, "completion_tokens": 1, "total_tokens": pt + 1}
+	}
+	writeJSON(w, body2)
 }
 
 func completionBody(content string, calls []map[string]any, finish string) map[string]any {
@@ -167,8 +208,21 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 type engineResolver struct{ eng *fakeEngine }
 
-func (r engineResolver) Resolve(context.Context, string) (llm.Endpoint, error) {
-	return llm.Endpoint{BaseURL: r.eng.srv.URL, Model: "fake.gguf", ContextLength: 8192,
+func (r engineResolver) Resolve(_ context.Context, label string) (llm.Endpoint, error) {
+	r.eng.mu.Lock()
+	vision, down, n := r.eng.vision[label], r.eng.down[label], r.eng.ctxLen
+	r.eng.mu.Unlock()
+	if down {
+		return llm.Endpoint{}, &llm.NotReadyError{State: llm.StateFailed, Reason: "test: down"}
+	}
+	if n == 0 {
+		n = 8192
+	}
+	model := "fake.gguf"
+	if label == llm.LabelBackground {
+		model = "fake-background.gguf"
+	}
+	return llm.Endpoint{BaseURL: r.eng.srv.URL, Model: model, ContextLength: n, Vision: vision,
 		FoldSystemMessages: r.eng.strict.Load()}, nil
 }
 
@@ -329,6 +383,7 @@ func newVoiceEnv(t *testing.T, provider string, configure ...func(m *Module)) *v
 	svc := llm.NewService(llm.ServiceConfig{Resolver: engineResolver{eng}})
 	ve.env = newEnv(t, envOpts{noMQTT: true, configure: func(m *Module) {
 		m.LLM, m.STT, m.TTS, m.Notify = svc, ve.stt, ve.tts, ve.notify
+		m.Endpoints = engineResolver{eng}.Resolve
 		m.Names = fakeNames{7: "alex", 8: "sam"}
 		for _, c := range configure {
 			c(m)
