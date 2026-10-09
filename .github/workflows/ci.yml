@@ -360,14 +360,14 @@ jobs:
           # one in another Compose project. Refused without --stop-legacy, stopped with it.
           mkdir -p ~/.jarvis/compose
           printf '%s\n' 'name: jarvis' 'services:' \
-            '  jarvis-config-service:' '    container_name: jarvis-config-service' '    image: nginx:alpine' \
+            '  jarvis-config-service:' '    container_name: jarvis-config-service' '    image: mirror.gcr.io/library/nginx:alpine' \
             '    restart: unless-stopped' '    ports: ["7700:80"]' \
-            '  llama-server:' '    container_name: llama-server' '    image: nginx:alpine' '    restart: unless-stopped' \
+            '  llama-server:' '    container_name: llama-server' '    image: mirror.gcr.io/library/nginx:alpine' '    restart: unless-stopped' \
             > ~/.jarvis/compose/docker-compose.yml
           docker compose -f ~/.jarvis/compose/docker-compose.yml up -d
-          docker run -d --name plex --restart unless-stopped nginx:alpine
+          docker run -d --name plex --restart unless-stopped mirror.gcr.io/library/nginx:alpine
           docker run -d --name go2rtc --restart unless-stopped --label com.docker.compose.project=cameras \
-            --label com.docker.compose.project.working_dir=/srv/cameras nginx:alpine
+            --label com.docker.compose.project.working_dir=/srv/cameras mirror.gcr.io/library/nginx:alpine
           sudo loginctl enable-linger "$(id -un)"
           export XDG_RUNTIME_DIR=/run/user/$(id -u)
           for _ in $(seq 40); do [ -S "$XDG_RUNTIME_DIR/systemd/private" ] && break; sleep 0.5; done
