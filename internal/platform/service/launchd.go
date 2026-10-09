@@ -327,15 +327,17 @@ func (l *launchd) staleness() string {
 	if err != nil {
 		return ""
 	}
+	// A missing updater is named first: it is what an rc4-era install lacks most, and the
+	// install CI job looks for it.
+	helper, err := os.ReadFile(l.helperPath)
+	if err != nil {
+		return "the upgrade helper " + HelperLabel + " is not installed (an older version wrote the service); " + staleNote
+	}
 	if want, err := RenderLaunchd(p); err == nil && string(have) != string(want) {
 		if !plistStopReady(have) {
 			return l.plistPath + " restarts jarvisd after an admin stop (an older version wrote it); " + staleNote
 		}
 		return l.plistPath + " differs from what this version writes (an older version wrote it); " + staleNote
-	}
-	helper, err := os.ReadFile(l.helperPath)
-	if err != nil {
-		return "the upgrade helper " + HelperLabel + " is not installed (an older version wrote the service); " + staleNote
 	}
 	if want, err := RenderLaunchdHelper(HelperPlist{Binary: p.Binary, Home: p.Home, UserName: p.UserName}); err == nil && string(helper) != string(want) {
 		return l.helperPath + " differs from what this version writes; " + staleNote

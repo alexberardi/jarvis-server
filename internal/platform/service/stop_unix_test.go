@@ -89,6 +89,11 @@ func TestLaunchdStopBlocker(t *testing.T) {
 	if st, _ := l.Status(ctx); !st.Stale || !strings.Contains(st.StaleReason, "after an admin stop") {
 		t.Fatalf("KeepAlive true status: %+v", st)
 	}
+	// An older install without the updater as well: the missing updater is named first.
+	os.Remove(l.helperPath)
+	if st, _ := l.Status(ctx); !st.Stale || !strings.Contains(st.StaleReason, HelperLabel+" is not installed") {
+		t.Fatalf("KeepAlive true, no updater: %+v", st)
+	}
 }
 
 // After an admin stop the job is still loaded (launchd only declined to restart it), so
