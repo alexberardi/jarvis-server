@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -119,7 +120,8 @@ func TestImportLegacyCommand(t *testing.T) {
 	if len(logs) != 1 {
 		t.Fatalf("import log: %v", logs)
 	}
-	if fi, err := os.Stat(logs[0]); err != nil || fi.Mode().Perm() != 0o600 {
+	// Windows ignores the mode (the data dir's ACL protects it there).
+	if fi, err := os.Stat(logs[0]); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Fatalf("log mode: %v %v", fi.Mode(), err)
 	}
 
