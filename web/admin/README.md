@@ -27,7 +27,7 @@ Changes made on the copy:
 | Route | What | Backend |
 |---|---|---|
 | `/setup` | First-run wizard: Check → Account → Hardware → Models → Privacy → Done (AD3, AD3a) | `/api/doctor`, `/api/auth/setup` (setup token), `/api/setup/state`, `/api/llm/v1/*`, `PUT /api/settings/{service}/{key}` |
-| `/dashboard` | System, health check, model states, nodes online, recent requests, update banner | `/api/system/info`, `/api/doctor`, `/api/setup/state`, `/api/llm/v1/models/labels`, `/api/cc/api/v0/admin/nodes`, `/api/traces`, `/api/update` |
+| `/dashboard` | System, health check, model states, nodes online, recent requests, update banner; restart and stop jarvisd (AD8, AD8b) | `/api/system/info`, `/api/doctor`, `/api/setup/state`, `/api/llm/v1/models/labels`, `/api/cc/api/v0/admin/nodes`, `/api/traces`, `/api/update`, `POST /api/system/restart`, `POST /api/system/stop` |
 | `/models` | Model manager | `/api/llm/v1/*`, `/api/prompt-provider` |
 | `/settings` | Every module's settings; restart jarvisd (AD8, hidden when the route 404s) | `/api/settings`, `POST /api/system/restart` |
 | `/connections` | Listeners, external services, app clients (key shown once) | `/api/connections*` |

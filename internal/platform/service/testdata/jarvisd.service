@@ -20,6 +20,9 @@ Environment=JARVIS_UPGRADE_HELPER=1
 ExecStartPre=-+/usr/local/bin/jarvisd upgrade --prestart --home /var/lib/jarvisd --owner jarvisd
 ExecStart=/usr/local/bin/jarvisd serve --home /var/lib/jarvisd
 Restart=always
+# The admin Stop button (AD8b) exits with this code: no restart, and not a failure.
+RestartPreventExitStatus=98
+SuccessExitStatus=98
 RestartSec=5
 TimeoutStartSec=300
 TimeoutStopSec=30

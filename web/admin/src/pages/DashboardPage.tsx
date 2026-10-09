@@ -6,6 +6,7 @@ import { LABEL_TITLE, type Label } from '@/api/llm'
 import UpdateBanner from '@/components/dashboard/UpdateBanner'
 import DoctorChecks from '@/components/doctor/DoctorChecks'
 import ModelBanner from '@/components/dashboard/ModelBanner'
+import PowerControls from '@/components/dashboard/PowerControls'
 import { buttonClass, stateTone } from '@/components/models/styles'
 import { Pill, Section } from '@/components/models/ui'
 import { useLabels } from '@/hooks/useModelManager'
@@ -37,7 +38,7 @@ function ago(iso: string | null | undefined): string {
 function SystemCard() {
   const { data, isError, error } = useSystemInfo()
   return (
-    <Section title="System" icon={Server}>
+    <Section title="System" icon={Server} actions={data && <PowerControls info={data} />}>
       {isError && <p className="text-sm text-red-500">{errorMessage(error)}</p>}
       {data && (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">

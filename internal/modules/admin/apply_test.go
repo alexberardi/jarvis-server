@@ -30,6 +30,7 @@ import (
 type fakeRestarter struct {
 	kind      service.Kind
 	requested atomic.Int32
+	stopped   atomic.Int32
 }
 
 func (f *fakeRestarter) Kind() service.Kind { return f.kind }
@@ -38,6 +39,10 @@ func (f *fakeRestarter) Request() error {
 		return service.ErrUnsupervised
 	}
 	f.requested.Add(1)
+	return nil
+}
+func (f *fakeRestarter) RequestStop() error {
+	f.stopped.Add(1)
 	return nil
 }
 
@@ -84,6 +89,97 @@ func TestRestartRoute(t *testing.T) {
 	caps, _ := info["capabilities"].(map[string]any)
 	if info["supervisor"] != "systemd" || info["restart_supported"] != true || caps["restart"] != true || caps["self_update"] != false {
 		t.Fatalf("info %v", info)
+	}
+}
+
+// AD8b: the stop button exits for good, but only where the supervisor won't start jarvisd
+// again at once; otherwise it answers 409 with the fix, and system info says why.
+func TestStopRoute(t *testing.T) {
+	noRestartDelay(t)
+	e := newA4(t, "v1.0.0")
+	// No restarter at all (not serve): nothing can stop it from here.
+	w := send(e.mux, "POST", "/api/system/stop", "", root...)
+	if out := decode(t, w); w.Code != http.StatusConflict || out["detail"] == "" {
+		t.Fatalf("%d %v", w.Code, out)
+	}
+	// Superuser only.
+	if w := send(e.mux, "POST", "/api/system/stop", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous: %d", w.Code)
+	}
+
+	// systemd with a unit an older version wrote: 409 with the reinstall command, and
+	// capabilities.stop is false with the reason; nothing is stopped.
+	r := &fakeRestarter{kind: service.Systemd}
+	e.m.Restarter = r
+	e.m.StopBlocker = func() (string, string) { return "the unit would restart jarvisd", "sudo jarvisd service install" }
+	w = send(e.mux, "POST", "/api/system/stop", "", root...)
+	out := decode(t, w)
+	if w.Code != http.StatusConflict || out["command"] != "sudo jarvisd service install" || out["detail"] != "the unit would restart jarvisd" {
+		t.Fatalf("stale unit: %d %v", w.Code, out)
+	}
+	info := decode(t, send(e.mux, "GET", "/api/system/info", "", root...))
+	caps, _ := info["capabilities"].(map[string]any)
+	stop, _ := info["stop"].(map[string]any)
+	if caps["stop"] != false || caps["restart"] != true || stop["reason"] != "the unit would restart jarvisd" ||
+		stop["command"] != "sudo jarvisd service install" || stop["start_command"] != "sudo jarvisd service start" {
+		t.Fatalf("stale info %v", info)
+	}
+	if r.stopped.Load() != 0 {
+		t.Fatal("stopped despite the blocker")
+	}
+
+	// A current unit: 202 with the start command, then the stop is requested (not a restart).
+	e.m.StopBlocker = func() (string, string) { return "", "" }
+	w = send(e.mux, "POST", "/api/system/stop", "", root...)
+	out = decode(t, w)
+	if w.Code != http.StatusAccepted || out["stopping"] != true || out["start_command"] != "sudo jarvisd service start" ||
+		out["supervisor"] != "systemd" || out["start_note"] == "" {
+		t.Fatalf("%d %v", w.Code, out)
+	}
+	waitFor(t, "stop request", func() bool { return r.stopped.Load() == 1 })
+	if r.requested.Load() != 0 {
+		t.Fatal("a stop requested a restart")
+	}
+	info = decode(t, send(e.mux, "GET", "/api/system/info", "", root...))
+	caps, _ = info["capabilities"].(map[string]any)
+	stop, _ = info["stop"].(map[string]any)
+	if caps["stop"] != true || stop["supported"] != true || stop["reason"] != nil {
+		t.Fatalf("info %v", info)
+	}
+
+	// A --user unit starts with --user; unsupervised, jarvisd simply exits and `serve` starts it.
+	e.m.Upgrade.UserUnit = true
+	if out := decode(t, send(e.mux, "POST", "/api/system/stop", "", root...)); out["start_command"] != "jarvisd service start --user" {
+		t.Fatalf("user unit %v", out)
+	}
+	waitFor(t, "second stop request", func() bool { return r.stopped.Load() == 2 })
+	e.m.Upgrade.UserUnit = false
+	none := &fakeRestarter{kind: service.None}
+	e.m.Restarter = none
+	e.m.StopBlocker = nil
+	w = send(e.mux, "POST", "/api/system/stop", "", root...)
+	if out := decode(t, w); w.Code != http.StatusAccepted || out["start_command"] != "jarvisd serve" {
+		t.Fatalf("unsupervised %d %v", w.Code, out)
+	}
+	waitFor(t, "unsupervised stop request", func() bool { return none.stopped.Load() == 1 })
+}
+
+func TestStartCommands(t *testing.T) {
+	for kind, want := range map[service.Kind]string{
+		service.Systemd: "sudo jarvisd service start",
+		service.Launchd: "sudo jarvisd service start",
+		service.SCM:     "jarvisd service start",
+		service.None:    "jarvisd serve",
+	} {
+		if got := service.StartCommand(kind, false); got != want {
+			t.Errorf("%s: %q", kind, got)
+		}
+	}
+	if got := service.StartCommand(service.Systemd, true); got != "jarvisd service start --user" {
+		t.Error(got)
+	}
+	if !strings.Contains(service.StartNote(service.SCM), "elevated PowerShell") || strings.Contains(service.StartNote(service.None), "Restarting the computer") {
+		t.Error("start notes")
 	}
 }
 

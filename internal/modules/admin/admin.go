@@ -58,8 +58,13 @@ type Module struct {
 	Updates UpdateOptions
 	// LogPoll is the log tail's poll interval (tests); zero is one second.
 	LogPoll time.Duration
-	// Restarter restarts jarvisd through its supervisor (AD8, AD5); nil is unsupervised.
+	// Restarter restarts jarvisd through its supervisor (AD8, AD5), or stops it (AD8b); nil is
+	// unsupervised and can't stop either.
 	Restarter Restarter
+	// StopBlocker says why the Stop button can't keep jarvisd stopped (service.StopBlocker: an
+	// installed unit or LaunchDaemon an older version wrote) and the command that fixes it;
+	// "" when it can. nil: no blocker.
+	StopBlocker func() (reason, command string)
 	// Upgrade configures the one-click signed update (AD5).
 	Upgrade UpgradeConfig
 
