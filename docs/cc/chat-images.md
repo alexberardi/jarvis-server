@@ -118,6 +118,10 @@ compaction mostly matters for long tool outputs or a raised `max_turns`.
 **Continue stream (voice).** The planned commit is rebased onto any description or compaction
 that landed during the stream (`rebaseCommit`), so neither overwrites the other.
 
+**Remote slots.** A remote endpoint's context is unknown unless the operator sets
+`llm.<slot>.context` (now honoured for `engine=remote`, shown as "Context window" in the admin's
+remote section); with 0 there is no compaction for that slot.
+
 **Settings (cc, system scope).** `cc.compaction.threshold` Float 0.75 (0.3–0.95);
 `cc.compaction.hard_threshold` Float 0.90 (0.5–0.98, never below the threshold at runtime).
 
@@ -126,8 +130,20 @@ that landed during the stream (`rebaseCommit`), so neither overwrites the other.
 turns off LLM vision in recipe photo import. An explicit projector id/path keeps the raw select
 under Advanced.
 
+**Manual check (2026-10-09, this box, scratch home, dev build).** The system jarvisd's engine
+needs its API key, so a CPU-only llama-server (`-ngl 0 -dev none`, qwen3.5-9b + mmproj, `-c 8192`)
+served the scratch jarvisd's live and background slots as remotes. Capabilities `images: true`; a
+flyer JPEG ("BAKE SALE / Saturday 10 AM", orange circle) got a correct answer; the background job
+described it (`slot=background`); a text follow-up ("what day, what colour?") was answered from the
+description; an empty message with two images worked; GIF bytes → 422 `images_invalid`. At
+6698/8192 prompt tokens the async compaction ran (`turns_summarized=1`) while a second description
+was pending, and both landed; the next turn still knew the conversation. Traces show `[image]`
+markers, job payloads hold ids only, and the log has no image data. Not exercised live: the
+synchronous path (unit-tested).
+
 **Decided while building (not in §5):** the summary is a `system` message right after
 `messages[0]`; the trigger is the last live call's `prompt_tokens`; the hard threshold is
-validated separately and clamped to ≥ the async one; descriptions are prepended to the user's
+validated separately and clamped to ≥ the async one; remote slots use `llm.<slot>.context` as their
+window; descriptions are prepended to the user's
 own text rather than replacing the whole message.
 

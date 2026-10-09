@@ -316,6 +316,19 @@ function EngineLabelCard({
               </label>
             )}
             {isLLM && foldField()}
+            {isLLM && (
+              <Field label="Context window" htmlFor={id('remote_context')} hint="Tokens; 0 = unknown (conversation compaction stays off)">
+                <input
+                  id={id('remote_context')}
+                  type="number"
+                  min={0}
+                  step={1024}
+                  value={v('context')}
+                  onChange={(e) => set({ context: num(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
+            )}
           </div>
         </div>
       )}

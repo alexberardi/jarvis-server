@@ -185,6 +185,9 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 		}
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
 		ep.Vision, ep.FoldSystemMessages = c.RemoteVision, c.FoldSystemMessages
+		// A remote's window is what the operator says it is (llm.<slot>.context; 0 = unknown):
+		// cc compaction needs it (docs/cc/chat-images.md §7).
+		ep.ContextLength, ep.Parallel = c.Context, 1
 		return ep, nil, nil
 	case c.Problem != "":
 		delete(r.bound, label)
