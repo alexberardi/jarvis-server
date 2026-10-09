@@ -154,6 +154,8 @@ func (s testSigner) sign(msg []byte, trusted string, prehash bool) []byte {
 func TestVersionOrder(t *testing.T) {
 	ordered := []string{"v0.9.9", "v1.0.0-alpha", "v1.0.0-alpha.1", "v1.0.0-alpha.beta", "v1.0.0-beta.2", "v1.0.0-beta.11",
 		"v1.0.0-rc.1", "v1.0.0", "1.0.1", "v1.10.0", "v2.0.0+build.5"}
+	// Our tags: rcN compares N as a number (strict semver would put rc10 before rc9).
+	ordered = append(ordered, "v2.1.0-rc1", "v2.1.0-rc2", "v2.1.0-rc9", "v2.1.0-rc10", "v2.1.0-rc11", "v2.1.0-rc100", "v2.1.0")
 	for i := 0; i+1 < len(ordered); i++ {
 		a, okA := ParseVersion(ordered[i])
 		b, okB := ParseVersion(ordered[i+1])
