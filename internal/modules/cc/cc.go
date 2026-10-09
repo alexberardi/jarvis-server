@@ -146,12 +146,14 @@ type Module struct {
 	tools    *servertools.Registry
 	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
 
-	cmdData *schemaCache     // command-data schema cache (doc 12, packages.go)
-	smart   *smartHome       // 5c smart home (smarthome.go)
-	rt      *routineState    // 5c routines and errand schedules (routines.go)
-	sig     *signalState     // 5c signals, proposals and attention (signals.go)
-	phone   *phone.Service   // 5c phone calls (phone_wire.go)
-	errands *errands.Service // 5c errands and workflows (errands.go)
+	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
+	// pantryHTTP is the Forge share-code check's client (testinstall.go; legacy 10 s timeout).
+	pantryHTTP *http.Client
+	smart      *smartHome       // 5c smart home (smarthome.go)
+	rt         *routineState    // 5c routines and errand schedules (routines.go)
+	sig        *signalState     // 5c signals, proposals and attention (signals.go)
+	phone      *phone.Service   // 5c phone calls (phone_wire.go)
+	errands    *errands.Service // 5c errands and workflows (errands.go)
 
 	// 5d interactive callbacks (callbacks.go): the static server-callback map and result waiters.
 	cbOnce sync.Once
@@ -293,6 +295,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerSmartHome(mux)
 	// Packages, command data and the node tools view (doc 12).
 	m.registerPackages(mux)
+	// Forge test install (doc 12 §3.3, ported after D5 was reversed 2026-10-08).
+	m.pantryHTTP = &http.Client{Timeout: pantryDraftTimeout}
+	m.registerTestInstall(mux)
 	// Memory and knowledge (doc 04).
 	m.registerMemory(mux)
 	// Routines and errand schedules (doc 08).

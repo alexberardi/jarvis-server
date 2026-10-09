@@ -9,7 +9,7 @@ Out of scope here: `/prompt-providers/*` (doc 03, being cut); the generic node `
 ## 0. Decisions applied (2026-10-06)
 
 - **D39:** (Q1) slow installs get a 5-minute **pickup** deadline until the node verifies, then `expires_at = verify + 15 min`, keeping the +120 s restart extension; server-only, node unchanged. (Q8) a setting `pantry.base_url`, defaulting to the public Pantry URL, so a household can point at a private Pantry; it must be reachable from the node.
-- **D5:** **Forge test install is dropped** from Go (future work): the four `test-install` routes, the `test_install_requests` table and the `test-install` MQTT topic are not ported. Install, uninstall and revert are allowed for **any household member, from any URL** (no allowlist; private Pantry instances are coming). Household checks look at the caller's memberships, not just the JWT's active household.
+- **D5:** ~~Forge test install is dropped from Go~~. **Reversed 2026-10-08 (user): Forge test install is ported** (§11 "Test install"): the four `test-install` routes, `cc_test_install_requests` (migration 00160) and the `test-install` MQTT nudge, with the same deliberate fixes as package requests (D39 deadlines, D8 sticky, D4 node binding, household check on the poll). Install, uninstall and revert are allowed for **any household member, from any URL** (no allowlist; private Pantry instances are coming). Household checks look at the caller's memberships, not just the JWT's active household.
 - **D4:** package verify/results are node callbacks: node auth, with the authenticated node bound to `{node_id}` in the path. `node-tool-reports` gets node auth and the request id must belong to that node. `trusted:true` is removed; per-node broker credentials and ACLs make broker-level spoofing (including the §8 op-confusion replay) impossible.
 - **D8:** known bugs fixed: sticky terminal status (Q6), idempotent verify, unguarded node responses.
 - **D27:** the 30-day request-row sweeper is a trigger kind on the one scheduler engine.
@@ -24,7 +24,7 @@ Three related mobile features. In each one, **CC is a broker and record-keeper, 
 | Feature | User story | Who calls CC |
 |---|---|---|
 | **Package install / uninstall / revert** | From the Store screen in the mobile app, install a Pantry package (command, agent, device protocol, bundle) on one or more nodes. Also remove it, or roll it back to the previous version. | Mobile (JWT) creates and polls; the node (X-API-Key) verifies and posts results. |
-| **Test install (Forge)** | A developer in Pantry's AI Forge gets a 6-character share code. They type it into mobile, and the draft is installed on a node as a temporary test command (20-minute node-side TTL). **Dropped by D5** (future work). | Same split; CC also calls Pantry once to validate the code. |
+| **Test install (Forge)** | A developer in Pantry's AI Forge gets a 6-character share code. They type it into mobile, and the draft is installed on a node as a temporary test command (20-minute node-side TTL). **Ported** (D5 reversed 2026-10-08). | Same split; CC also calls Pantry once to validate the code. |
 | **Command-data browser** | Browse, create, edit and delete the records a command stored on a node via `JarvisStorage` (reminders, shopping/todo lists, medications, …) without SSH. | Mobile (JWT); CC does a synchronous MQTT round-trip to the node. |
 | **Node tools view** | Mobile asks which tools and commands a node exposes, which packages are installed (with versions, `previous_version` and health), so the Store can show Install/Update/Revert. | Mobile (JWT); the node posts back via an HTTP callback. |
 
@@ -61,7 +61,7 @@ There is no `/package-uninstall/{id}/verify` or `/package-revert/{id}/verify`. A
 
 ### 2.2 Test install (`api/test_install.py`)
 
-> **Dropped by D5.** Today's routes are listed for reference only; Go does not port them.
+> **Ported** (D5's drop reversed 2026-10-08): `internal/modules/cc/testinstall.go`. Go adds the household check to the poll (§8) and binds verify/results to the authenticated node (D4).
 
 | Method + path | Auth | Line |
 |---|---|---|
@@ -185,7 +185,7 @@ Git refs: Pantry pins installs to the validated **commit SHA** (it passes it as 
 
 ### 3.3 Test install
 
-> **Dropped by D5** (future work). Kept here as a record of today's behaviour.
+> **Ported** (D5's drop reversed 2026-10-08). This is legacy behaviour; Go's differences are listed in §11 "Test install".
 
 1. Mobile POSTs `{share_code}`. CC checks the node and household (`:85-89`), then normalises the code with `strip().upper()`. Length ≠ 6 → 400 `"Invalid share code"` (`:91-93`).
 2. CC `GET {pantry}/v1/forge/drafts/{code}` with a 10 s timeout (`:96-99`). Errors map as follows:
@@ -497,7 +497,7 @@ Node-side: `test_package_install_handler.py`, `test_command_data_handler.py`, `t
 
 **Shape.** One `packages` package in the CC module. It contains:
 
-- a `Requests` store over SQLite: one table, `package_install_requests` (no `test_install_requests`, D5), plus a `verified_at` column (Q1, D39) and, if Q3(b) is taken, an `action` column
+- a `Requests` store over SQLite: `package_install_requests` (and `test_install_requests`, ported 2026-10-08), plus a `verified_at` column (Q1, D39) and, if Q3(b) is taken, an `action` column
 - a pure `transition(row, event, now) (row, httpStatus)` function that implements §3.2. This is the unit-test surface.
 - thin handlers
 
@@ -520,13 +520,15 @@ The same hook mechanism lets `node-tool-reports` complete a channel instead of w
 - Keep the `{name}_display` injection placement (invariant 10).
 - 422 bodies: the revert "name required" error has a string `detail`, and missing-field errors must match FastAPI's validation shape (shared contract-test helper, doc 00).
 
-**Pantry.** With test install dropped (D5), this subsystem makes no outbound Pantry call. The `pantry.base_url` setting (D39) still exists, defaulting to the public Pantry URL, and must be reachable from the node.
+**Pantry.** The only outbound Pantry call is test install's share-code check, `GET {pantry.base_url}/v1/forge/drafts/{code}` (10 s). The `pantry.base_url` setting (D39) defaults to the public Pantry URL and must be reachable from the node, which downloads the draft from the same URL.
+
+**Test install (ported 2026-10-08, reversing D5's drop).** `testinstall.go`, table `cc_test_install_requests` (cc migration 00160). Mirrors `test_install.py` route for route: create `POST …/test-install {share_code}` → 201 `{id, status, package_name, created_at}` (provisioning auth + household; `strip().upper()`, length ≠ 6 → 400 `Invalid share code`; Pantry 404 → 404 `Share code not found or expired`, other non-200 → 502 `Pantry returned an error`, unreachable → 502 `Could not reach Pantry service`; `package_name` defaults to `"unknown"`), MQTT nudge `jarvis/nodes/{id}/test-install {request_id}`, node verify → `{confirmed, package_name, pantry_download_url}`, results `{success, error?, details?}` → `{"status":"ok"}`, poll → `{status, request_id, package_name, error_message, details}` (fixed `Test install request expired — node may be offline` on expiry, details only when completed). Statuses `pending|completed|failed|expired`. The row reuses the package state machine (no `restarting`), so the deliberate differences from legacy are the package ones: D39 pickup/verify deadlines (5 min, then verify + 15 min: a Pi Zero pip install would otherwise expire mid-install), D8 sticky terminal status (a late result is acknowledged and ignored; legacy overwrote), D4 verify/results bound to `{node_id}` (403 `Node mismatch`), the poll's household check (§8 bug), verify on a completed/failed row answers 409 even past its expiry (legacy: 410), the 30-day row sweep, and a finished test install invalidates the node's command-data schema cache. A draft body that isn't JSON is a 502 (legacy: 500). Nodes with no household fail closed for members (D40), as for packages.
 
 **Risks.**
 
 - The frozen node's behaviour is half the contract: restart-and-deferred-flush, the double restart on auto-rollback, and the verify-route sharing. Black-box test against a real node (install-e2e Phase 3) before cutover.
 - Q1 (D39) and Q6 (D8) change edge-case behaviour, so the tests should pin them down explicitly.
-- Mobile's `TestInstallScreen` will hit removed routes (D5); that screen needs hiding or a clear error.
+- No contract test for test install: it needs a live Pantry share code (a Forge draft, 15-minute TTL). Unit tests use a fake Pantry.
 
 **Simplifications.**
 

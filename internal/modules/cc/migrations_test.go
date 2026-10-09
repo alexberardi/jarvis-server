@@ -31,7 +31,7 @@ var expectedTables = []string{
 	// 11 phone
 	"cc_phone_contacts", "cc_phone_call_sessions",
 	// 12 packages
-	"cc_package_install_requests",
+	"cc_package_install_requests", "cc_test_install_requests",
 	// 13 mobile
 	"cc_callback_jobs",
 }
@@ -40,7 +40,7 @@ var expectedTables = []string{
 var cutTables = []string{
 	"cc_active_adapter", "cc_adapter_history", "cc_adapter_proposals", "cc_adapter_training_state",
 	"cc_attention_source_tiers", "cc_attention_consents", "cc_attention_feedback",
-	"cc_routine_executions", "cc_prompt_provider_install_requests", "cc_test_install_requests",
+	"cc_routine_executions", "cc_prompt_provider_install_requests",
 	"cc_service_configs", "cc_settings",
 }
 
@@ -145,6 +145,7 @@ func TestBaselineDecisionColumns(t *testing.T) {
 		{"cc_settings_requests", "user_id"},            // D40 05.Q8
 		{"cc_phone_call_sessions", "in_call_at"},       // D40 11.Q6
 		{"cc_package_install_requests", "verified_at"}, // D39
+		{"cc_test_install_requests", "verified_at"},    // D39, applied to the ported test install
 		{"cc_request_traces", "user_id"},               // D20
 		{"cc_errand_plans", "expires_at"},              // D40 09.Q6 draft TTL
 	} {
