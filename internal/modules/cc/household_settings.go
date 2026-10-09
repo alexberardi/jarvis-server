@@ -23,7 +23,8 @@ import (
 // household admin flips an allowlisted set of household-scoped settings; any member reads them.
 // The allowlist is the security boundary: this route is never a household-admin write to any
 // other CC setting. D40 Q6 keeps all 12 legacy keys; D19 adds memory.enabled and
-// memory.extraction_enabled so a household can turn learning off. AD6 adds the household's own
+// memory.extraction_enabled so a household can turn learning off; household.timezone
+// (2026-10-09) overrides the node-derived household zone. AD6 adds the household's own
 // Twilio account (phone.twilio_*): read back only as the household's own value (never the
 // system default's), and the SID and auth token are write-only ("********" once set).
 
@@ -54,8 +55,9 @@ var householdControllable = []householdSetting{
 	{key: phone.SettingMaxConcurrent, typ: "int"},
 	{key: settingHouseholdLocation, typ: "string"},
 	{key: settingPersona, typ: "string"},
-	{key: settingMemoryEnabled, typ: "bool"},     // D19
-	{key: settingExtractionEnabled, typ: "bool"}, // D19
+	{key: settingMemoryEnabled, typ: "bool"},       // D19
+	{key: settingExtractionEnabled, typ: "bool"},   // D19
+	{key: settingHouseholdTimezone, typ: "string"}, // "" = automatic (timezone.go)
 	// AD6: the household's own Twilio account.
 	{key: phone.SettingTwilioAccountSID, typ: "string", own: true, secret: true},
 	{key: phone.SettingTwilioAuthToken, typ: "string", own: true, secret: true},
@@ -80,6 +82,7 @@ func householdSettingDefinitions() []settings.Definition {
 			Description: "Permit the deep_research scraper to fall back to the third-party r.jina.ai reader proxy when " +
 				"a page can't be fetched directly. This leaks which pages the household reads to a third party. " +
 				"Default OFF; shares the web_search mobile screen."},
+		timezoneDefinition(),
 	}
 }
 
@@ -88,6 +91,7 @@ func (m *Module) registerHouseholdSettings(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/settings", m.user(m.handleGetHouseholdSettings))
 	mux.HandleFunc("PUT "+base+"/settings/{key...}", m.user(m.handlePutHouseholdSetting))
 	mux.HandleFunc("GET "+base+"/persona/presets", m.user(m.handlePersonaPresets))
+	mux.HandleFunc("GET "+base+"/timezone", m.user(m.handleGetHouseholdTimezone))
 }
 
 func (m *Module) handleGetHouseholdSettings(w http.ResponseWriter, r *http.Request, u authn.User) {
@@ -192,6 +196,16 @@ func (m *Module) handlePutHouseholdSetting(w http.ResponseWriter, r *http.Reques
 		if str == "" {
 			coerced = nil
 		}
+	}
+	if key == settingHouseholdTimezone {
+		if str, ok := coerced.(string); ok {
+			coerced = strings.TrimSpace(str)
+		}
+	}
+	// A declared validator (settings.Definition.Validate) runs before the write.
+	if err := m.settings.Validate(key, coerced); err != nil {
+		detail(w, http.StatusBadRequest, fmt.Sprintf("Invalid value for %s: %s", key, settings.InvalidValueMessage(err)))
+		return
 	}
 	if key == settingPersona {
 		if n := utf8.RuneCountInString(pyjson.Str(coerced)); n > prompts.PersonaMaxChars {

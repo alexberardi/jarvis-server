@@ -114,8 +114,9 @@ type Module struct {
 	// Memory and Attention are 5c hooks (nil until those modules exist).
 	Memory    MemoryProfile
 	Attention AttentionGate // nil: Register wires the 5c broker (attention.go)
-	// HouseholdClock overrides the household timezone (default: the zone its most recently seen
-	// node reported, timezone.go). Used by attention (D18) and errands.
+	// HouseholdClock overrides the household timezone (default: the household.timezone setting,
+	// else the zone its most recently seen node reported; timezone.go). Used by attention (D18),
+	// errands, signal reactions and recipes; a turn's own zone ignores it.
 	HouseholdClock HouseholdTimezone
 	// WebSearch replaces DuckDuckGo for quick_search / deep_research (tests).
 	WebSearch servertools.WebSearcher

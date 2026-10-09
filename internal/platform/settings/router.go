@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -170,6 +171,11 @@ func (s *Service) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.Set(r.Context(), key, value, sc); err != nil {
+		if errors.Is(err, ErrInvalidValue) {
+			apiError(w, http.StatusUnprocessableEntity, "validation_error",
+				"Invalid value for "+key+": "+InvalidValueMessage(err), "invalid_value")
+			return
+		}
 		s.log.Error("settings: update failed", "key", key, "err", err)
 		apiError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting: "+key, "update_failed")
 		return

@@ -55,6 +55,7 @@ All routes are under `/api/v0`. Mount points are at `main.py:722,807,812,816,837
 | `GET /mobile/household/{hh}/settings` | user JWT + `member` | mobile `householdSettingsApi.ts:43` | |
 | `PUT /mobile/household/{hh}/settings/{key:path}` | user JWT + `admin` | mobile `householdSettingsApi.ts:55` | body `{"value": ...}` |
 | `GET /mobile/household/{hh}/persona/presets` | user JWT + `member` | mobile `householdSettingsApi.ts:89` | static |
+| `GET /mobile/household/{hh}/timezone` | user JWT + `member` | mobile `householdSettingsApi.ts` | **jarvisd-only (2026-10-09)**: `{household_id, timezone, source, node_timezone}` (§3.7) |
 | `GET /mobile/traces/{conversation_id}` | user JWT (**no household check**) | none | **CUT** (Appendix A) |
 
 **MQTT verbs published** (all go to `jarvis/nodes/{node_id}/commands` as `[{"command": X, "details": {..., "request_id": id}}]`, `services/node_command_service.py:64-68`):
@@ -363,6 +364,10 @@ mobile (stack/popover) ─GET /callbacks/{id}/status (poll)──▶ {id,status,
 | `persona.household_prompt` | string | `DEFAULT_PERSONA` (`:223`) | yes (`:532`) |
 
 > **Changed by D19:** add `memory.enabled` (bool) and `memory.extraction_enabled` (bool, household-scoped, default true) so a household admin can turn learning off.
+
+> **Added 2026-10-09 (jarvisd-only):** `household.timezone` (string, default `""` = automatic). Writes are trimmed and validated through the settings registry's `Definition.Validate` hook: `""`/`null` clear it; anything else must load with `time.LoadLocation` and must not be `Local`, else **400** `{"detail": "Invalid value for household.timezone: '<v>' is not a known IANA time zone"}` (a non-string: `expected a string`). The raw `/settings` router rejects the same values with **422** `{"detail":{"error":{"type":"validation_error","code":"invalid_value",...}}}`. Precedence (`internal/modules/cc/timezone.go`): `Module.HouseholdClock` (tests) > this setting > the most recently seen active node's `cc_nodes.timezone` > `""` (UTC). A turn's own zone (date context, dates tools, `schedule_errand`, ambient bundle) and the node's `/generate/date-context` use the client-reported zone unless this setting is set, in which case the setting wins. Routines keep their own per-schedule zone.
+>
+> `GET /mobile/household/{hh}/timezone` (any member; 403 for a non-member, 401 without a JWT) shows the effective zone and where it came from, so the app can render "Automatic — <zone> (from your nodes)": `{"household_id": "...", "timezone": "<effective or \"\">", "source": "setting"|"node"|"default", "node_timezone": "<node-derived or \"\">"}`. It ignores `HouseholdClock`. The legacy stack has neither the key nor the route; the app hides the row then.
 
 **GET** (`:99-124`):
 

@@ -226,6 +226,8 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	if req.chatUserID != 0 {
 		m.setChatSpeaker(ctx, conv) // mobile chat: the speaker is known from the JWT
 	}
+	// An explicitly set household zone wins over the reported one (timezone.go).
+	conv.timezone = m.turnTimezone(ctx, hh, conv.timezone)
 	conv.ambient = m.ambientBundle(ctx, hh, conv.timezone)
 	gates := prompts.ToolGates{
 		WebSearch:     m.householdBool(ctx, settingWebSearch, hh),
