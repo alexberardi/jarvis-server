@@ -116,7 +116,8 @@ func TestVoiceStreamTraceSpans(t *testing.T) {
 	if llmCall["service"] != "llm_proxy" || llmCall["duration_ms"].(float64) < 20 {
 		t.Fatalf("llm_call_iter_1 %v", llmCall)
 	}
-	if m := llmCall["metadata"].(map[string]any); m["prompt_tokens"] != 1.0 || m["completion_tokens"] != 1.0 || m["finish_reason"] != "stop" {
+	if m := llmCall["metadata"].(map[string]any); m["prompt_tokens"] != 1.0 || m["completion_tokens"] != 1.0 || m["finish_reason"] != "stop" ||
+		!strings.Contains(fmt.Sprint(m["output_preview"]), "three o'clock") {
 		t.Fatalf("llm metadata %v", m)
 	}
 	if tts := by["tts_stream_total"]; tts["service"] != "tts" ||
@@ -214,5 +215,19 @@ func TestVoiceContinueStreamTraceSpans(t *testing.T) {
 	within(t, by, "llm_stream_total", "audio_stream")
 	if m := by["llm_stream_total"]["metadata"].(map[string]any); m["chars"] != 35.0 {
 		t.Fatalf("llm_stream_total metadata %v", m)
+	}
+}
+
+// TestOutputPreviewCaps keeps a trace's view of the model output short: the first
+// outputPreviewRunes runes, marked when cut, so a 442-token tool call is visible without the
+// trace row growing with every long answer.
+func TestOutputPreviewCaps(t *testing.T) {
+	if got := outputPreview("  short  "); got != "short" {
+		t.Fatalf("short %q", got)
+	}
+	long := strings.Repeat("é", outputPreviewRunes+10)
+	got := outputPreview(long)
+	if []rune(got)[outputPreviewRunes] != '…' || len([]rune(got)) != outputPreviewRunes+1 {
+		t.Fatalf("long preview has %d runes", len([]rune(got)))
 	}
 }

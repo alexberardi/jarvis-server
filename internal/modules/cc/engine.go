@@ -200,7 +200,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			finish, calls, message = pr.FinishReason, pr.ToolCalls, pr.Message
 		}
 		tr.span(llmName, "llm_proxy", llmStart, llmEnd, nil, map[string]any{"prompt_tokens": resp.Usage.PromptTokens,
-			"completion_tokens": resp.Usage.CompletionTokens, "finish_reason": finish})
+			"completion_tokens": resp.Usage.CompletionTokens, "finish_reason": finish, "output_preview": outputPreview(raw)})
 
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: raw, ToolCalls: calls})
 		if doubleChecked {
@@ -465,4 +465,20 @@ func (m *Module) findDuplicate(ctx context.Context, conv *conversation, calls []
 		}
 	}
 	return "", "", 0, false
+}
+
+// outputPreviewRunes caps the model output a trace keeps per LLM call: enough to see what a
+// slow or odd turn generated (a long preamble before a tool call, the wrong tool), without
+// storing every long answer in the trace row.
+const outputPreviewRunes = 600
+
+// outputPreview is the trimmed model output for a trace span, cut at outputPreviewRunes runes
+// and marked with "…" when cut. Tool calls the engine parsed natively aren't in it; the span's
+// finish_reason and the next tool_exec span's tools name them.
+func outputPreview(raw string) string {
+	s := strings.TrimSpace(raw)
+	if r := []rune(s); len(r) > outputPreviewRunes {
+		return string(r[:outputPreviewRunes]) + "…"
+	}
+	return s
 }
