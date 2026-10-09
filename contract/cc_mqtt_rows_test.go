@@ -28,7 +28,7 @@ import (
 // (phone_call_service.apply_availability_envelope), reached from the make_phone_call server
 // tool or an errand plan, i.e. only behind an LLM turn with phone calls enabled; there is no
 // deterministic black-box trigger. (10 camera-credentials is deferred by D29; 19 test-install
-// is cut by D5.)
+// was ported 2026-10-08 but needs a live Pantry share code, so it is unit-tested only.)
 //
 // Everything runs in a throwaway user's solo household with exactly one CC node, so the
 // household broadcasts (toggle_command, invalidate_device_cache) and the "pick a node for the

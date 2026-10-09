@@ -20,7 +20,8 @@ import (
 //
 // Package install / uninstall / revert share cc_package_install_requests (no action column,
 // D48) and the one verify route (the frozen node verifies all three through
-// /package-install/{rid}/verify). Forge test install is dropped (D5).
+// /package-install/{rid}/verify). Forge test install (testinstall.go) reuses the same state
+// machine over its own table.
 
 // Request lifetimes (D39): a 5-minute pickup deadline until the node verifies, then
 // verify + 15 min; each `restarting` result adds 120 s to the current expiry.

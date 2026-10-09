@@ -29,7 +29,7 @@ keep shipping.
 | Add `memory.extraction_enabled` (and confirm `memory.enabled`) to the household settings screen | Per-household opt-out of learning from voice | D19 | With the memory port |
 | Run-now: a longer timeout for `runRoutineNow` (today the shared `apiClient` gives up at 10 s, `src/api/apiClient.ts:56`), or switch to `202` + polling | Routine composition regularly exceeds 10 s | D40 (08.Q7), D48 | After the routines port |
 | Voice enrollment screen says when speaker recognition is off for the household | Recognition is off by default; enrolling doesn't turn it on | D35, M14 | With the voice port |
-| Hide the Forge `TestInstallScreen` (share-code test install) | Its four `test-install` routes are not ported | D5 | Before cutover |
+| ~~Hide the Forge `TestInstallScreen` (share-code test install)~~ **No longer needed** | The four `test-install` routes were ported after all (user 2026-10-08); mobile and node clients work unchanged | D5 (reversed) | — |
 | Hide or label "Install to Command Center" for Pantry `prompt_provider` packages | The install route becomes a stub that always fails cleanly | 03.Q2 | Optional |
 | Household settings: a write-only "Twilio account" section for `phone.twilio_account_sid`, `phone.twilio_auth_token`, `phone.twilio_from_number` (GET shows `"********"`/null for the SID and token and the household's own from number or null; PUT `""` clears; from number must be E.164) | Multi-tenant installs give each household its own Twilio account | AD6 | Before phone calls go to friends and family |
 | (Future) a "leave-by" built-in rule in the automations list; per-node voice enrollment | Deferred product work | D46, D36 | Post-port |
