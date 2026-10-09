@@ -32,6 +32,7 @@ keep shipping.
 | ~~Hide the Forge `TestInstallScreen` (share-code test install)~~ **No longer needed** | The four `test-install` routes were ported after all (user 2026-10-08); mobile and node clients work unchanged | D5 (reversed) | — |
 | Hide or label "Install to Command Center" for Pantry `prompt_provider` packages | The install route becomes a stub that always fails cleanly | 03.Q2 | Optional |
 | Household settings: a write-only "Twilio account" section for `phone.twilio_account_sid`, `phone.twilio_auth_token`, `phone.twilio_from_number` (GET shows `"********"`/null for the SID and token and the household's own from number or null; PUT `""` clears; from number must be E.164) | Multi-tenant installs give each household its own Twilio account | AD6 | Before phone calls go to friends and family |
+| Pantry privacy toggle: read `pantry.enabled` from household settings, offer the toggle to household admins, and handle 403 `code: "pantry_disabled"` from package install / Forge test install (don't browse the Pantry while it's off) | The household chooses whether the app, nodes and jarvisd talk to the Pantry; default off, so upgraded installs start with it off | 2026-10-09 | With the jarvisd cutover |
 | (Future) a "leave-by" built-in rule in the automations list; per-node voice enrollment | Deferred product work | D46, D36 | Post-port |
 
 ## jarvis-admin (moved into the monorepo, D9)

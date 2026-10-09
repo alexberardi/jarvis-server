@@ -35,7 +35,14 @@ const (
 const (
 	settingPantryBaseURL = "pantry.base_url"
 	defaultPantryBaseURL = "https://pantry-api.jarvisautomation.io"
+	// settingPantryEnabled is the household's privacy switch for the Pantry (default off).
+	settingPantryEnabled = "pantry.enabled"
 )
+
+// pantryDisabledDetail is the 403 a household with the Pantry off gets from the routes that
+// would cause Pantry traffic (package install, Forge test install).
+const pantryDisabledDetail = "The Pantry package store is turned off for this household. " +
+	"A household admin can turn it on in the household's privacy settings."
 
 // packageDefinitions: D39 (12.Q8). The Pantry a household installs from; it must be reachable
 // from the node, not just from jarvisd.
@@ -45,7 +52,27 @@ func packageDefinitions() []settings.Definition {
 			EnvFallback: "JARVIS_PANTRY_URL",
 			Description: "Base URL of the Pantry package store (the public Pantry by default; point it at a " +
 				"private Pantry to install from there). Nodes must be able to reach it."},
+		{Key: settingPantryEnabled, Category: "pantry", Type: settings.Bool, Default: false,
+			Description: "The household may use the Pantry package store. When on, the app, nodes and jarvisd " +
+				"contact the Pantry (pantry.base_url) to browse, download and verify packages. Default OFF: " +
+				"package installs and Forge test installs are refused (403, code pantry_disabled) until a " +
+				"household admin turns it on; uninstalling what's already installed keeps working."},
 	}
+}
+
+// pantryEnabled reports whether the household has the Pantry on (pantry.enabled).
+func (m *Module) pantryEnabled(ctx context.Context, householdID string) bool {
+	return m.settings != nil && m.settings.Bool(ctx, settingPantryEnabled, settings.Scope{HouseholdID: householdID})
+}
+
+// requirePantry writes the pantry_disabled 403 and returns false when the household has the
+// Pantry off. Callers run it after the auth and household checks, so only a member learns it.
+func (m *Module) requirePantry(w http.ResponseWriter, r *http.Request, householdID string) bool {
+	if m.pantryEnabled(r.Context(), householdID) {
+		return true
+	}
+	detailCode(w, http.StatusForbidden, pantryDisabledDetail, "pantry_disabled")
+	return false
 }
 
 // PantryBaseURL is the household's Pantry (D39, D48: consumed by the jarvis-pantry entry in
@@ -305,7 +332,7 @@ func (m *Module) handleRequestInstall(w http.ResponseWriter, r *http.Request) {
 	if !b.done(w) {
 		return
 	}
-	p, ok := m.createPkg(w, r, auth, name, repo, tag)
+	p, ok := m.createPkg(w, r, auth, name, repo, tag, true)
 	if !ok {
 		return
 	}
@@ -332,7 +359,7 @@ func (m *Module) handleRequestUninstall(w http.ResponseWriter, r *http.Request) 
 	if !b.done(w) {
 		return
 	}
-	p, ok := m.createPkg(w, r, auth, name, "", nil)
+	p, ok := m.createPkg(w, r, auth, name, "", nil, false)
 	if !ok {
 		return
 	}
@@ -368,7 +395,7 @@ func (m *Module) handleRequestRevert(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusUnprocessableEntity, "command_name or package_name is required")
 		return
 	}
-	p, ok := m.createPkg(w, r, auth, name, "", nil)
+	p, ok := m.createPkg(w, r, auth, name, "", nil, false)
 	if !ok {
 		return
 	}
@@ -376,9 +403,10 @@ func (m *Module) handleRequestRevert(w http.ResponseWriter, r *http.Request) {
 	writeCreated(w, p)
 }
 
-// createPkg checks the node and household (from the node row, never the caller) and inserts
-// a pending row with the 5-minute pickup deadline.
-func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth, name, repo string, tag *string) (*pkgRequest, bool) {
+// createPkg checks the node and household (from the node row, never the caller), and for an
+// install (needsPantry) that the household has the Pantry on, then inserts a pending row with
+// the 5-minute pickup deadline.
+func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth, name, repo string, tag *string, needsPantry bool) (*pkgRequest, bool) {
 	ctx := r.Context()
 	nodeID := r.PathValue("node_id")
 	node, err := m.nodeByID(ctx, nodeID)
@@ -396,6 +424,9 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 	}
 	if err := m.requirePkgHousehold(ctx, auth, hh); err != nil {
 		m.writeErr(w, err)
+		return nil, false
+	}
+	if needsPantry && !m.requirePantry(w, r, hh) {
 		return nil, false
 	}
 	now := m.now()

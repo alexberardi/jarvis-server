@@ -66,11 +66,14 @@ func (p *fakePantry) lastAsked() string {
 	return p.asked[len(p.asked)-1]
 }
 
+// setPantry points the household at a Pantry and turns its Pantry on (pantry.enabled
+// defaults to off; pantry_gate_test.go covers the off case).
 func setPantry(t *testing.T, e *env, hh, url string) {
 	t.Helper()
 	if err := e.m.Settings().Set(context.Background(), settingPantryBaseURL, url, settings.Scope{HouseholdID: hh}); err != nil {
 		t.Fatal(err)
 	}
+	enablePantry(t, e, hh, true)
 }
 
 func tiRow(t *testing.T, e *env, id string) *tiRequest {
@@ -365,9 +368,7 @@ func TestTestInstallHouseholdRules(t *testing.T) {
 	if _, err := e.d.Write.Exec(`INSERT INTO cc_nodes (node_id, room) VALUES ('loose', 'attic')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.m.Settings().Set(context.Background(), settingPantryBaseURL, pantry.URL, settings.Scope{}); err != nil {
-		t.Fatal(err)
-	}
+	setPantry(t, e, "", pantry.URL) // the system scope: a household-less node reads it
 	e.do("POST", "/api/v0/nodes/loose/test-install", body, bearer(multi)).detail(403, "Not authorized")
 	e.do("POST", "/api/v0/nodes/loose/test-install", body, bearer(super)).want(201)
 	rid = e.do("POST", "/api/v0/nodes/loose/test-install", body, adminH()).want(201).json()["id"].(string)

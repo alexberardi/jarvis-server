@@ -41,6 +41,13 @@ export const PRIVACY_TOGGLES: PrivacyToggle[] = [
   },
   {
     service: 'cc',
+    key: 'pantry.enabled',
+    title: 'Pantry package store',
+    what: 'The app, your nodes and jarvisd contact the Pantry (pantry-api.jarvisautomation.io unless you point it elsewhere) to browse and download add-on commands, so it sees your IP address and what you install.',
+    offBox: true,
+  },
+  {
+    service: 'cc',
     key: 'memory.enabled',
     title: 'Memories',
     what: 'Facts Jarvis is told to remember about your household, used to answer later.',

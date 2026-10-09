@@ -114,6 +114,7 @@ func pkgRow(t *testing.T, e *env, id string) *pkgRequest {
 
 func TestPackageInstallFlow(t *testing.T) {
 	e := newEnv(t)
+	enablePantry(t, e, "hh1", true)
 	member := e.auth.addUser(1, "hh1", authn.RoleMember)
 	stranger := e.auth.addUser(2, "hh2", authn.RoleOwner)
 	n := e.createNode("n1", "hh1")
@@ -204,6 +205,7 @@ func TestPackageInstallFlow(t *testing.T) {
 
 func TestPackageExpiry(t *testing.T) {
 	e := newEnv(t, envOpts{noMQTT: true})
+	enablePantry(t, e, "hh1", true)
 	member := e.auth.addUser(1, "hh1", authn.RoleMember)
 	n := e.createNode("n1", "hh1")
 	const base = "/api/v0/nodes/n1/package-install"
@@ -290,6 +292,8 @@ func TestPackageUninstallAndRevert(t *testing.T) {
 
 func TestPackageHouseholdRules(t *testing.T) {
 	e := newEnv(t, envOpts{noMQTT: true})
+	enablePantry(t, e, "hh1", true)
+	enablePantry(t, e, "", true) // the system scope: the household-less node below reads it
 	// D5: membership of the target household among all of the caller's memberships.
 	multi := e.auth.addUser(1, "hh2", authn.RoleMember)
 	e.auth.roles["hh1"] = map[int64]authn.Role{1: authn.RoleMember}
@@ -318,6 +322,7 @@ func TestPackageHouseholdRules(t *testing.T) {
 
 func TestPackageSweepAndSchemaInvalidation(t *testing.T) {
 	e := newEnv(t, envOpts{noMQTT: true})
+	enablePantry(t, e, "hh1", true)
 	member := e.auth.addUser(1, "hh1", authn.RoleMember)
 	n := e.createNode("n1", "hh1")
 	body := map[string]any{"command_name": "weather", "github_repo_url": "u"}

@@ -70,6 +70,12 @@ func uuid4() string {
 // detail writes FastAPI's {"detail": ...}.
 func detail(w http.ResponseWriter, status int, d any) { httpx.Error(w, status, d) }
 
+// detailCode writes {"detail": ..., "code": ...}: a FastAPI-shaped error plus a stable,
+// machine-readable code the apps branch on (e.g. "pantry_disabled").
+func detailCode(w http.ResponseWriter, status int, d, code string) {
+	httpx.WriteJSON(w, status, map[string]any{"detail": d, "code": code})
+}
+
 // validationError is CC's custom RequestValidationError handler (doc 00 §3.5): 400, not 422,
 // with flattened "loc -> loc: msg" details.
 func validationError(w http.ResponseWriter, details ...string) {
