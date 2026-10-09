@@ -1363,3 +1363,27 @@ func TestInstallExplicitBackendAppliesToLabels(t *testing.T) {
 	}
 	e.waitInstall(inst.ID, InstallDone)
 }
+
+// A continuation that finds the model already ready still clears its partials: the slice can
+// end after the ready write lands but before the cleanup (CI "partials left").
+func TestInstallReadyModelClearsLeftoverPartials(t *testing.T) {
+	e := newEnv(t)
+	e.testCatalog()
+	e.start()
+	inst, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny", WithMMProj: new(bool)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := e.waitInstall(inst.ID, InstallDone)
+	left := filepath.Join(e.home, "models", ".partial", done.ModelID)
+	if err := os.MkdirAll(left, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(left, "x.gguf.part"), []byte("x"), 0o644)
+	if err := e.mgr.doInstall(e.ctx, &done); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(left); !os.IsNotExist(err) {
+		t.Fatal("partials left")
+	}
+}

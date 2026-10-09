@@ -494,17 +494,7 @@ func (m *Manager) runInstall(ctx context.Context, job queue.Job) ([]byte, error)
 		return nil, ctx.Err()
 	case errors.Is(sctx.Err(), context.DeadlineExceeded):
 		// Slice over: continue in a fresh job (and a fresh lease).
-		payload, _ := json.Marshal(map[string]int64{"install_id": inst.ID})
-		lane := job.Type
-		if lane == "" {
-			lane = InstallJobType
-		}
-		id, qerr := m.Queue.Enqueue(ctx, lane, payload, queue.Options{})
-		if qerr != nil {
-			return nil, qerr
-		}
-		inst.JobID = id
-		return nil, m.Store.UpdateInstall(ctx, inst)
+		return nil, m.handOff(ctx, job, &inst)
 	}
 	permanent := false
 	var he *engine.HTTPError
@@ -518,6 +508,36 @@ func (m *Manager) runInstall(ctx context.Context, job queue.Job) ([]byte, error)
 	inst.Error = fmt.Sprintf("attempt %d: %v (retrying)", job.Attempt, err)
 	_ = m.Store.UpdateInstall(ctx, inst)
 	return nil, err
+}
+
+// handOff enqueues the install's continuation and records it in one transaction. The
+// continuation can't be claimed before the row names it: with a plain Enqueue it could run to
+// done first, and this job's later write of the row put the finished install back to running,
+// where it stayed (TestInstallRepoShardsResumeAndSlices, CI 2026-10-08/09).
+func (m *Manager) handOff(ctx context.Context, job queue.Job, inst *Install) error {
+	payload, _ := json.Marshal(map[string]int64{"install_id": inst.ID})
+	lane := job.Type
+	if lane == "" {
+		lane = InstallJobType
+	}
+	tx, err := m.Store.DB.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	id, err := m.Queue.EnqueueTx(ctx, tx, lane, payload, queue.Options{})
+	if err != nil {
+		return err
+	}
+	inst.JobID = id
+	if err := m.Store.updateInstall(ctx, tx, *inst); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	m.Queue.Notify(lane)
+	return nil
 }
 
 // doInstall fetches the engine, then the projector, then the model, skipping what's done.
@@ -563,6 +583,10 @@ func (m *Manager) doInstall(ctx context.Context, inst *Install) error {
 			return fmt.Errorf("model %s: %w", ph.id, err)
 		}
 		if mod.State == StateReady && pathExists(mod.Path) {
+			// A slice can end between marking the model ready and removing its partials (the
+			// state write lands, then reports the deadline): the continuation lands here, so it
+			// clears them too.
+			os.RemoveAll(filepath.Join(m.ModelsDir, ".partial", mod.ID))
 			continue
 		}
 		setPhase(ph.phase)
