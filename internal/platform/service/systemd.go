@@ -408,7 +408,27 @@ func (s *systemd) staleness() string {
 	if !s.user && !strings.Contains(string(have), " upgrade --prestart ") {
 		return "the unit has no upgrade helper (an older version wrote it); " + note
 	}
+	if !unitStopReady(have) {
+		return "the unit restarts jarvisd after an admin stop (an older version wrote it); " + note
+	}
 	return "the unit differs from what this version writes (an older version wrote it); " + note
+}
+
+// stopBlocker says why the admin Stop button can't keep jarvisd stopped under this unit ("" when
+// it can) and the command that fixes it: a unit an older version wrote has Restart=always
+// without RestartPreventExitStatus=, so exiting would only restart jarvisd. It reads the unit
+// file as `service status` does (the service account can read it).
+func (s *systemd) stopBlocker() (reason, command string) {
+	unit, err := os.ReadFile(s.unitPath)
+	if err != nil {
+		return "jarvisd can't read its unit " + s.unitPath + ", so it can't tell whether systemd would start it " +
+			"again right away. Stop it on the server.", stopCommand(Systemd, s.user)
+	}
+	if !unitStopReady(unit) {
+		return "The installed unit was written by an older version and would start jarvisd again right away. " +
+			"Update it first (this restarts jarvisd), then Stop works.", InstallCommand(Systemd, s.user)
+	}
+	return "", ""
 }
 
 func (s *systemd) PurgePlan(home string) PurgePlan {

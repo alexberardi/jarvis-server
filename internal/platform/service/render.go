@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/xml"
 	"path"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -18,6 +21,9 @@ type Unit struct {
 	// Account is the system unit's User=/Group= (default "jarvisd").
 	Account string
 }
+
+// StopCode is StopExitCode, for the template.
+func (Unit) StopCode() int { return StopExitCode }
 
 // systemdTmpl is 00-installers §2.1's unit. KillMode=mixed sends SIGTERM to jarvisd only; it
 // stops its own engines and the rest of the cgroup is killed after TimeoutStopSec.
@@ -52,6 +58,9 @@ ExecStartPre=-+{{q .Binary}} upgrade --prestart --home {{q .Home}} --owner {{.Ac
 {{- end}}
 ExecStart={{q .Binary}} serve --home {{q .Home}}
 Restart=always
+# The admin Stop button (AD8b) exits with this code: no restart, and not a failure.
+RestartPreventExitStatus={{.StopCode}}
+SuccessExitStatus={{.StopCode}}
 RestartSec=5
 TimeoutStartSec=300
 TimeoutStopSec=30
@@ -104,7 +113,9 @@ type Plist struct {
 }
 
 // launchdTmpl is 00-installers §2.2's plist. ProcessType Interactive keeps launchd from
-// throttling a GPU server; Umask 63 is 077.
+// throttling a GPU server; Umask 63 is 077. KeepAlive SuccessfulExit=false restarts jarvisd
+// after a crash or a non-zero exit (RestartExitCode) but not after a clean exit 0, which is
+// how the admin Stop button (AD8b) keeps it stopped; RunAtLoad still starts it at boot.
 var launchdTmpl = template.Must(template.New("plist").Funcs(template.FuncMap{"x": xmlEscape}).Parse(
 	`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -132,7 +143,10 @@ var launchdTmpl = template.Must(template.New("plist").Funcs(template.FuncMap{"x"
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<true/>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
 	<key>ProcessType</key>
 	<string>Interactive</string>
 	<key>Umask</key>
@@ -275,3 +289,33 @@ func splitUnitArgs(s string) []string {
 	}
 	return args
 }
+
+// unitStopReady reports whether a systemd unit leaves jarvisd stopped after it exits with
+// StopExitCode (the admin Stop button, AD8b): its RestartPreventExitStatus= names the code.
+// The setting accumulates over lines and an empty assignment resets it, as systemd reads it.
+func unitStopReady(unit []byte) bool {
+	code := strconv.Itoa(StopExitCode)
+	ready := false
+	for _, line := range strings.Split(string(unit), "\n") {
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "RestartPreventExitStatus=")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(v) == "" {
+			ready = false
+			continue
+		}
+		if slices.Contains(strings.Fields(v), code) {
+			ready = true
+		}
+	}
+	return ready
+}
+
+// plistKeepAliveStop matches the KeepAlive that restarts jarvisd only after an unsuccessful
+// exit.
+var plistKeepAliveStop = regexp.MustCompile(`<key>KeepAlive</key>\s*<dict>\s*<key>SuccessfulExit</key>\s*<false\s*/>\s*</dict>`)
+
+// plistStopReady reports whether the LaunchDaemon leaves jarvisd stopped after a clean exit
+// (the admin Stop button, AD8b): KeepAlive is {SuccessfulExit: false}, not true.
+func plistStopReady(plist []byte) bool { return plistKeepAliveStop.Match(plist) }

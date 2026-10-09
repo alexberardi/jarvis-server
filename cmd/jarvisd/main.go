@@ -295,7 +295,7 @@ func main() {
 		os.Exit(runWindowsService(args))
 	}
 	err := run(context.Background(), args, os.Stdout)
-	if err != nil && !errors.Is(err, service.ErrRestart) {
+	if err != nil && !service.Requested(err) {
 		fmt.Fprintln(os.Stderr, "jarvisd:", err)
 	}
 	os.Exit(service.ExitCode(err))
@@ -312,7 +312,7 @@ func runWindowsService(args []string) int {
 		_ = service.RedirectStderr(service.LogPath(home))
 	}
 	err := service.RunWindowsService(func(ctx context.Context) error { return run(ctx, args, os.Stderr) })
-	if err != nil && !errors.Is(err, service.ErrRestart) {
+	if err != nil && !service.Requested(err) {
 		fmt.Fprintln(os.Stderr, "jarvisd:", err)
 	}
 	return service.ExitCode(err)
@@ -420,7 +420,8 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// Ending serve with a restart request makes the supervisor start jarvisd again: the admin
-	// restart button (AD8) and self-update (AD5).
+	// restart button (AD8) and self-update (AD5). A stop request (the admin Stop button, AD8b)
+	// exits with a code the supervisor leaves alone.
 	restarter := service.NewRestarter(service.Detect(), cancel)
 	cfg, err := config.Load()
 	if err != nil {
@@ -475,12 +476,16 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		case *adminmod.Module:
 			// AD8 restart button and AD5 one-click update.
 			x.Restarter = restarter
+			userUnit := restarter.Kind() == service.Systemd && service.UserUnit()
 			x.Upgrade = adminmod.UpgradeConfig{
 				Exe:      exe,
 				Helper:   helper,
-				UserUnit: restarter.Kind() == service.Systemd && service.UserUnit(),
+				UserUnit: userUnit,
 				Source:   updateSource(),
 			}
+			// AD8b: the Stop button only when the installed definition keeps jarvisd stopped.
+			kind := restarter.Kind()
+			x.StopBlocker = func() (string, string) { return service.StopBlocker(kind, userUnit) }
 			if helper.OnDemand() {
 				x.Upgrade.Trigger = func(ctx context.Context) error { return triggerHelper(ctx, upaths, helper) }
 			}
@@ -533,13 +538,18 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 	if v := gateFailed.Load(); v != nil {
 		return rollbackAfterGate(ctx, log, upaths, v.(string), restarter.Kind().Supervised(), helper, closeDB)
 	}
-	if gate != nil && err != nil && !errors.Is(err, service.ErrRestart) {
+	if gate != nil && err != nil && !service.Requested(err) {
 		// The new version failed to start: the marker holds the attempt, and the next start
 		// rolls back once MaxFailedStarts is reached.
 		log.Error("upgrade: the new version failed to start", "err", err, "attempt", gate.Attempts)
 	}
 	if errors.Is(err, service.ErrRestart) {
 		log.Info("exiting for the service manager to restart jarvisd", "supervisor", restarter.Kind())
+	}
+	if errors.Is(err, service.ErrStop) {
+		log.Info("stopped from the admin; jarvisd stays stopped until started again",
+			"supervisor", restarter.Kind(), "exit_code", service.ExitCode(err),
+			"start_command", service.StartCommand(restarter.Kind(), restarter.Kind() == service.Systemd && service.UserUnit()))
 	}
 	return err
 }

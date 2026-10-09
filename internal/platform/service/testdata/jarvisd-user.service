@@ -10,6 +10,9 @@ StartLimitBurst=10
 Type=notify
 ExecStart=/home/alex/.local/bin/jarvisd serve --home /home/alex/.jarvisd
 Restart=always
+# The admin Stop button (AD8b) exits with this code: no restart, and not a failure.
+RestartPreventExitStatus=98
+SuccessExitStatus=98
 RestartSec=5
 TimeoutStartSec=300
 TimeoutStopSec=30
