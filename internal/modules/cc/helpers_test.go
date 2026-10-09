@@ -185,6 +185,20 @@ type envOpts struct {
 	configure func(m *Module)
 }
 
+// envExtra is what a test asks of the env it is about to build, through wrappers that don't
+// take envOpts (newVoiceEnv, newChatEnv): register it before building.
+type envExtra struct {
+	log   io.Writer // the module's log (default: discarded)
+	queue bool      // a started job queue in the module's deps
+}
+
+var envExtras sync.Map // *testing.T -> envExtra
+
+func withEnvExtra(t *testing.T, x envExtra) {
+	envExtras.Store(t, x)
+	t.Cleanup(func() { envExtras.Delete(t) })
+}
+
 func newEnv(t *testing.T, o ...envOpts) *env {
 	t.Helper()
 	var opt envOpts
@@ -223,13 +237,30 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 	if opt.configure != nil {
 		opt.configure(m)
 	}
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var extra envExtra
+	if x, ok := envExtras.Load(t); ok {
+		extra = x.(envExtra)
+	}
+	logW := io.Writer(io.Discard)
+	if extra.log != nil {
+		logW = extra.log
+	}
+	log := slog.New(slog.NewTextHandler(logW, nil))
 	mux := http.NewServeMux()
-	m.Register(mux, module.Deps{DB: d, Log: log})
+	deps := module.Deps{DB: d, Log: log}
+	if extra.queue {
+		deps.Queue = queue.New(d, log)
+		deps.Queue.PollInterval = 20 * time.Millisecond
+	}
+	m.Register(mux, deps)
 	sctx, cancel := context.WithCancel(ctx)
 	t.Cleanup(cancel)
 	if err := m.Start(sctx); err != nil {
 		t.Fatal(err)
+	}
+	if deps.Queue != nil {
+		deps.Queue.Start(sctx)
+		t.Cleanup(func() { cancel(); deps.Queue.Wait() })
 	}
 	if m.broker != nil {
 		t.Cleanup(func() { _ = m.broker.Close() })

@@ -38,13 +38,18 @@ type startRequest struct {
 // readJSONBody reads a JSON object body twice over: as a validation map (pydantic-shaped 400s)
 // and as an ordered pyjson object (key order is prompt bytes for tools). ok=false: written.
 func readJSONBody(w http.ResponseWriter, r *http.Request) (*body, *pyjson.Object, bool) {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, httpx.MaxBody))
+	return readJSONBodyLimit(w, r, httpx.MaxBody)
+}
+
+// readJSONBodyLimit is readJSONBody with another body cap (mobile chat images).
+func readJSONBodyLimit(w http.ResponseWriter, r *http.Request, limit int64) (*body, *pyjson.Object, bool) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		detail(w, http.StatusRequestEntityTooLarge, "Request body too large")
 		return nil, nil, false
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(raw)))
-	b, _, ok := readBody(w, r, false)
+	b, _, ok := readBodyLimit(w, r, false, limit)
 	if !ok {
 		return nil, nil, false
 	}
@@ -251,7 +256,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		DateKeys: m.dateVocabulary(), Agents: conv.agents, RoomHierarchy: m.roomHierarchy(ctx, hh),
 	}
 	system, _ := prompts.AssembleSystemPrompt(provider, pctx, conv.tools, commandFlags(conv.commands), prompts.Characterization{})
-	conv.messages = []chatMsg{sysMsg(system)}
+	conv.commit([]chatMsg{sysMsg(system)})
 
 	m.convs.put(conv)
 

@@ -215,6 +215,13 @@ func modules() []module.Module {
 			// With llm.prompt_provider unset, the live model's catalog entry names it, so a
 			// fresh install answers its first voice turn without anyone choosing one.
 			c.DefaultPromptProvider = llm.LivePromptProvider
+			// Slot capabilities: vision for chat images, context size for compaction.
+			c.Endpoints = func(ctx context.Context, label string) (llmmod.Endpoint, error) {
+				if llm.Resolver == nil {
+					return llmmod.Endpoint{}, errors.New("no llm resolver")
+				}
+				return llm.Resolver.Resolve(ctx, label)
+			}
 			auth.OnUserDeleted(c.PurgeUser)
 			auth.OnMemberRemoved(c.PurgeUserHousehold)
 			auth.OnHouseholdDeleted(c.PurgeHousehold)

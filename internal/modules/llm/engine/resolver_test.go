@@ -277,6 +277,14 @@ func TestResolveStates(t *testing.T) {
 	if len(g.starts()) != 0 {
 		t.Fatal("remote started a process")
 	}
+	if ep.ContextLength != 0 {
+		t.Fatalf("remote context without a setting: %d", ep.ContextLength)
+	}
+	g.src.set(LabelConfig{Label: LabelLive, Kind: KindLlama, Engine: ModeRemote, RemoteURL: "https://api.openai.com/v1",
+		RemoteModel: "gpt-4.1-nano", Context: 128000})
+	if ep, err = g.r.Resolve(ctx, LabelLive); err != nil || ep.ContextLength != 128000 {
+		t.Fatalf("remote context %+v %v", ep, err)
+	}
 
 	// A flavour with no binary on disk asks for a fetch.
 	c := g.llm(LabelBackground, g.model("m.gguf"))

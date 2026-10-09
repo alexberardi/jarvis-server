@@ -312,7 +312,7 @@ func (m *Module) handleContinueStream(w http.ResponseWriter, r *http.Request, n 
 	// Inbox actions are a real background job here, so audio isn't delayed (01 §11).
 	go m.pushActionsToInbox(context.WithoutCancel(r.Context()), n, results)
 	endPlan := tr.measure("continue_stream_dispatch", "cc", nil)
-	plan := m.planContinueStream(cid, results)
+	plan := m.planContinueStream(ctx, cid, results)
 	endPlan(nil)
 	if plan == nil {
 		httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"fallback": "use_blocking_continue"})
@@ -364,6 +364,7 @@ func (m *Module) streamContinueLLM(ctx context.Context, plan *continuePlan, say 
 			return ""
 		}
 		if f.Done {
+			plan.usage = f.Usage
 			break
 		}
 		if f.Delta != "" && firstToken {

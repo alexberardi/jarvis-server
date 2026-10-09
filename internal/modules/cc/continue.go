@@ -67,7 +67,7 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 			break
 		}
 	}
-	msgs = withoutRole(msgs, "tool")
+	msgs = withoutRole(m.visionGuard(ctx, msgs), "tool")
 	msgs = append(msgs, chatMsg{Role: "user", Content: tf.TextModeFormatPrompt(question, tctx, tf.IsKnowledgeDelegation(tctx))})
 
 	maxTok := 256
@@ -80,6 +80,7 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 		m.deps.Log.Error("cc: formatting call failed", "conversation_id", conv.id, "err", err)
 		return engineResult{Stop: stopError, Err: err.Error()}, msgs
 	}
+	conv.noteUsage(resp.Usage)
 	raw = resp.Content
 	content, reasoning := tf.FinishFormattedReply(raw, conv.provider.SanitizeText, outputs)
 	if content != "" {
@@ -118,7 +119,10 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 		res, msgs = m.formatTextMode(ctx, conv, msgs, results)
 	}
 	if res.Stop != stopError {
-		conv.messages = msgs
+		conv.commit(msgs)
+		if res.Stop != stopToolCalls {
+			m.afterTurn(ctx, conv)
+		}
 	}
 	res = applyExchangeComplete(res)
 	m.completeTranscript(ctx, conv, res)
@@ -133,11 +137,16 @@ type continuePlan struct {
 	llmMsgs []chatMsg // the LLM copy (with the plain-text override on the text path)
 	commit  []chatMsg // the history the stream's answer is appended to
 	results []toolResult
+	// base and rev are the history and its background-edit count when planned: a description
+	// or compaction during the stream is rebased into the commit, not overwritten.
+	base  []chatMsg
+	rev   uint64
+	usage llm.Usage // the stream's usage (compaction's prompt size)
 }
 
 // planContinueStream is the first half of stream_continue_with_tool_results; nil means
 // "fall back to the blocking continue" (202).
-func (m *Module) planContinueStream(convID string, results []toolResult) *continuePlan {
+func (m *Module) planContinueStream(ctx context.Context, convID string, results []toolResult) *continuePlan {
 	conv := m.convs.get(convID)
 	if conv == nil {
 		return nil
@@ -148,9 +157,9 @@ func (m *Module) planContinueStream(convID string, results []toolResult) *contin
 	if len(conv.messages) == 0 {
 		return nil
 	}
-	msgs := cloneMsgs(conv.messages)
+	msgs := m.visionGuard(ctx, cloneMsgs(conv.messages))
 	native := conv.provider.SupportsNativeTools()
-	plan := &continuePlan{conv: conv, results: results}
+	plan := &continuePlan{conv: conv, results: results, base: cloneMsgs(conv.messages), rev: conv.rev}
 
 	{
 		{
@@ -165,7 +174,7 @@ func (m *Module) planContinueStream(convID string, results []toolResult) *contin
 					committed = withoutRole(msgs, "tool")
 				}
 				committed = append(committed, chatMsg{Role: "assistant", Content: spoken})
-				conv.messages = committed
+				conv.commit(committed)
 				plan.spoken = spoken
 				return plan
 			}
@@ -193,10 +202,17 @@ func (m *Module) commitContinueStream(ctx context.Context, plan *continuePlan, a
 	defer conv.mu.Unlock()
 	if plan.spoken != "" {
 		m.completeTranscript(ctx, conv, engineResult{Stop: stopComplete, Message: plan.spoken})
+		m.afterTurn(ctx, conv)
 		return
 	}
+	conv.noteUsage(plan.usage)
 	if answer != "" {
-		conv.messages = append(cloneMsgs(plan.commit), chatMsg{Role: "assistant", Content: answer})
+		commit := append(cloneMsgs(plan.commit), chatMsg{Role: "assistant", Content: answer})
+		if conv.rev != plan.rev {
+			commit = rebaseCommit(plan.base, conv.messages, commit)
+		}
+		conv.commit(commit)
 	}
 	m.completeTranscript(ctx, conv, engineResult{Stop: stopComplete, Message: answer})
+	m.afterTurn(ctx, conv)
 }

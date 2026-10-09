@@ -44,6 +44,7 @@ All routes are under `/api/v0`. Mount points are at `main.py:722,807,812,816,837
 |---|---|---|---|
 | `POST /mobile/chat` | user JWT + household `member` | mobile `chatApi.ts:138`, web `lib/api.ts:186` | SSE stream (§3.1) |
 | `POST /mobile/chat/warmup` | user JWT + `member` | mobile `chatApi.ts:289`, web `lib/api.ts:223` | returns `{conversation_id, tools_loaded}` |
+| `GET /mobile/chat/capabilities` (jarvisd only, 2026-10-09) | user JWT | mobile (chat images) | `{images, max_images: 4, max_image_bytes: 2097152}`; see [chat-images.md](chat-images.md) §6 |
 | `POST /nodes/{node_id}/actions` | user JWT + `member` of the node's household | mobile `commandCenterApi.ts:39` (chat bubble buttons and inbox confirmation buttons), web `lib/api.ts:628` | blocks for up to 10 s (`node_commands.py:83-135`) |
 | `POST /node/inbox-item` | node `X-API-Key` | node `services/inbox_backend.py:86` (SDK `JarvisInbox`), `export_shopping_list_command.py:624`, `export_todo_list_command.py:363`, community packages | `node_commands.py:629-702` |
 | `POST /node/push-notification` | node `X-API-Key` | node `agents/reminder_agent.py:151`, community packages | `node_commands.py:333-446` |
@@ -93,6 +94,12 @@ conversation_id: str|null     timezone: str = "America/New_York"
 client_tools: [obj]|null      available_commands: [obj]|null
 include_reasoning: bool = false
 ```
+
+> **jarvisd (2026-10-09, [chat-images.md](chat-images.md)):** optional `images: [{mime, data}]`
+> (≤ 4, each ≤ 2 MiB decoded, jpeg/png/webp sniffed); with images `message` may be empty or absent.
+> 422 `{"detail", "code": "images_unavailable" | "images_invalid"}` after the node gate. The images
+> reach the live slot for the whole turn, then a background job swaps them for a description. Every
+> cc conversation (chat and voice) is also compacted near the live context limit (§7 there).
 
 Pre-stream checks are ordinary HTTP errors, not SSE events:
 

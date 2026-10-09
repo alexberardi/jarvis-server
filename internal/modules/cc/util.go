@@ -98,7 +98,12 @@ type body struct {
 // readBody reads a JSON object body. optional allows an absent/empty body (m is then empty
 // and present is false). It writes the 400 and returns ok=false on a malformed body.
 func readBody(w http.ResponseWriter, r *http.Request, optional bool) (b *body, present, ok bool) {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, httpx.MaxBody))
+	return readBodyLimit(w, r, optional, httpx.MaxBody)
+}
+
+// readBodyLimit is readBody with a body cap other than httpx.MaxBody (mobile chat images).
+func readBodyLimit(w http.ResponseWriter, r *http.Request, optional bool, limit int64) (b *body, present, ok bool) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		detail(w, http.StatusRequestEntityTooLarge, "Request body too large")
 		return nil, false, false

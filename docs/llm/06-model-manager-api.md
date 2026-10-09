@@ -107,7 +107,7 @@ and background only):
 | `<p>.engine` | `local` | `local`, `remote` (not stt), `off`; background also `shared` |
 | `<p>.model` | `""` | installed model id or absolute path. Embeddings: empty = `all-minilm-l6-v2` once installed |
 | `<p>.mmproj` (llm) | `""` | empty = the model's own projector if installed; `none`; or an id / path |
-| `<p>.context` | 0 (embeddings 512) | `-c`, shared by the parallel slots; 0 = the model's catalog default, else 8192 |
+| `<p>.context` | 0 (embeddings 512) | `-c`, shared by the parallel slots; 0 = the model's catalog default, else 8192. For `engine=remote` it is the endpoint's window as the operator states it (0 = unknown; cc compaction needs it, cc/chat-images.md §7) |
 | `<p>.parallel` | 1 (embeddings 4) | `-np` |
 | `<p>.gpu_backend` | `auto` | `auto` = detection's flavour |
 | `<p>.gpu_devices` | `""` | `"1"`, `"0,1"`: sets `CUDA_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES` / `GGML_VK_VISIBLE_DEVICES` (an operator-set variable wins) |
