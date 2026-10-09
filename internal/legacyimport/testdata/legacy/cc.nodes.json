@@ -1,0 +1,50 @@
+[
+ {
+  "node_id": "kitchen-node",
+  "room": "kitchen",
+  "user": null,
+  "voice_mode": "brief",
+  "last_seen": "2026-01-02T03:04:05.123456",
+  "room_id": "r-kitchen",
+  "household_id": null,
+  "last_seen_version": "0.3.1",
+  "install_mode": "tarball",
+  "is_busy": true,
+  "git_sha": null,
+  "is_active": true,
+  "protocols": "[\"http\"]",
+  "needs_k2": false
+ },
+ {
+  "node_id": "old-node",
+  "room": "den",
+  "user": null,
+  "voice_mode": null,
+  "last_seen": null,
+  "room_id": "r-ghost",
+  "household_id": "11111111-1111-4111-8111-111111111111",
+  "last_seen_version": "0.1.100",
+  "install_mode": null,
+  "is_busy": false,
+  "git_sha": null,
+  "is_active": false,
+  "protocols": null,
+  "needs_k2": true
+ },
+ {
+  "node_id": "stray-node",
+  "room": "attic",
+  "user": null,
+  "voice_mode": null,
+  "last_seen": null,
+  "room_id": null,
+  "household_id": "11111111-1111-4111-8111-111111111111",
+  "last_seen_version": null,
+  "install_mode": null,
+  "is_busy": false,
+  "git_sha": null,
+  "is_active": true,
+  "protocols": null,
+  "needs_k2": true
+ }
+]
