@@ -80,6 +80,8 @@ fail() {
   R tail -50 "$HELPER_LOG" >&2 || true
   echo "--- jarvisd log" >&2
   tail -80 "$HOME_DIR/logs/jarvisd.log" >&2 || true
+  echo "--- fake release server log" >&2
+  tail -30 "${SRV_LOG:-/dev/null}" >&2 || true
   exit 1
 }
 sum() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
@@ -116,8 +118,27 @@ build v0.0.2
 build v0.0.3 "-X main.crashForTest=1"
 build v0.0.4
 for t in v0.0.1 v0.0.2 v0.0.3 v0.0.4; do publish "$t"; done
-"$PY" -m http.server "$API_PORT" --bind 127.0.0.1 --directory "$WR/srv" >/dev/null 2>&1 &
-SRV_PID=$!
+# The fake GitHub. On windows-latest it once stopped answering between start-up and the first
+# update check (connection refused, run 37859290598 and later), so: its output goes to a log
+# that fail() prints, start-up waits until it answers, and srv_up restarts it before each step
+# that needs it.
+SRV_LOG="$WR/srv.log"
+srv_start() {
+  "$PY" -m http.server "$API_PORT" --bind 127.0.0.1 --directory "$WR/srv" >>"$SRV_LOG" 2>&1 &
+  SRV_PID=$!
+  for _ in $(seq 1 50); do
+    curl -fsS --max-time 2 -o /dev/null "$API/repos/alexberardi/jarvis-server/releases/tags/v0.0.1" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  fail "the fake release server never answered on $API"
+}
+srv_up() {
+  curl -fsS --max-time 2 -o /dev/null "$API/repos/alexberardi/jarvis-server/releases/tags/v0.0.1" 2>/dev/null && return 0
+  echo "fake release server was down (pid $SRV_PID); restarting it" >&2
+  kill "$SRV_PID" 2>/dev/null || true
+  srv_start
+}
+srv_start
 
 say "1. install v0.0.1 (service + upgrade helper)"
 R mkdir -p "$BINDIR"
@@ -175,6 +196,7 @@ curl -fsS "$ADMIN/api/system/info" "${auth[@]}" | json 'd["supervisor"], d["capa
 grep -q "'self_update': True" "$W/caps" || fail "self_update not offered"
 [ "$(curl -fsS "$ADMIN/api/update" "${auth[@]}" | json 'd["can_apply"]')" = True ] || fail "can_apply is false"
 apply() { # tag
+  srv_up
   curl -fsS -X POST "$ADMIN/api/update/apply" "${auth[@]}" -d "{\"version\":\"$1\"}"
   echo
 }
