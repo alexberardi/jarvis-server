@@ -231,12 +231,41 @@ func (a Version) Compare(b Version) int {
 		case yErr == nil:
 			return 1
 		default:
-			if c := strings.Compare(ap[i], bp[i]); c != 0 {
+			if c := compareAlnum(ap[i], bp[i]); c != 0 {
 				return c
 			}
 		}
 	}
 	return sign(len(ap) - len(bp))
+}
+
+// compareAlnum compares two alphanumeric prerelease identifiers. Strict semver compares them
+// as strings, which puts rc10 before rc9; our tags are rcN (v0.1.0-rc10), so when both are the
+// same letters followed by digits the digits compare as numbers. Anything else stays semver.
+func compareAlnum(a, b string) int {
+	pa, na, okA := splitTrailingNumber(a)
+	pb, nb, okB := splitTrailingNumber(b)
+	if okA && okB && pa == pb && na != nb {
+		return sign(na - nb)
+	}
+	return strings.Compare(a, b)
+}
+
+// splitTrailingNumber splits "rc10" into ("rc", 10). ok is false without a non-empty letter
+// prefix, without trailing digits, or with a leading zero in them.
+func splitTrailingNumber(s string) (prefix string, n int, ok bool) {
+	i := len(s)
+	for i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
+		i--
+	}
+	if i == 0 || i == len(s) || (s[i] == '0' && i < len(s)-1) {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(s[i:])
+	if err != nil {
+		return "", 0, false
+	}
+	return s[:i], n, true
 }
 
 func sign(d int) int {
