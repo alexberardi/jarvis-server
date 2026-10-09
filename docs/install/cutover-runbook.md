@@ -457,7 +457,7 @@ keeps its Wi-Fi, room, packages and local secrets; it fetches fresh per-node MQT
 **Kitchen Pi.**
 
 ```sh
-# On prod: provisioning token for the node's own id (10-minute TTL), then register it.
+# On prod: provisioning token for the node's own id (30-minute TTL), then register it.
 HH=<kitchen household id from §4.7>; NODE=<node_id from §3>
 TOK=$(curl -s -X POST localhost:7703/api/v0/provisioning/token -H "authorization: Bearer $J" \
       -H 'content-type: application/json' -d "$(jq -n --arg h "$HH" --arg n "$NODE" '{household_id:$h,node_id:$n,room:"kitchen"}')" | jq -r .token)
