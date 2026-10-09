@@ -158,6 +158,8 @@ mobile (JWT)             CC                          jarvis-auth                
   │──────────────────────▶│ node_id = uuid4 (or reuse if refresh & not registered)
   │                       │ raw = "prov_"+token_urlsafe(32); store sha256(raw), TTL 600s
   │◀── {token, node_id, expires_at, expires_in:600}
+  │    (jarvisd adds node_command_center_url / node_config_service_url: the URLs a LAN node
+  │     should use, never loopback — see internal/modules/cc/nodeurl.go, 2026-10-09)
   │ (phone joins node AP) POST node:/api/v1/provision {wifi, room, command_center_url,
   │   config_service_url, household_id, node_id, provisioning_token}  (node-local API)
   │                                                                           │

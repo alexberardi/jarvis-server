@@ -144,7 +144,8 @@ type Module struct {
 	signals  *convSignals
 	enroll   *enrollments
 	tools    *servertools.Registry
-	dateKeys []string // DT_KEYS override (tests); nil = the shared vocabulary
+	dateKeys []string      // DT_KEYS override (tests); nil = the shared vocabulary
+	lanAddr  func() string // this host's LAN address override (tests); nil = netaddr.LANAddr
 
 	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
 	// pantryHTTP is the Forge share-code check's client (testinstall.go; legacy 10 s timeout).

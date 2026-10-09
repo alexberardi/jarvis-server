@@ -96,9 +96,18 @@ func (m *Module) handleProvisioningToken(w http.ResponseWriter, r *http.Request)
 		m.writeErr(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
+	out := map[string]any{
 		"token": raw, "node_id": nodeID, "expires_at": pyNaive(expires), "expires_in": int(provisioningTTL.Seconds()),
-	})
+	}
+	// The URLs to hand the node, which may differ from the ones the phone used (nodeurl.go).
+	ccURL, cfgURL := nodeURLs(r, m.deps.Config, m.nodeLANAddr)
+	if ccURL != "" {
+		out["node_command_center_url"] = ccURL
+	}
+	if cfgURL != "" {
+		out["node_config_service_url"] = cfgURL
+	}
+	httpx.WriteJSON(w, http.StatusCreated, out)
 }
 
 // handleRegister is POST /nodes/register: the node redeems its provisioning token.
