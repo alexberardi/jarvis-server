@@ -62,6 +62,8 @@ var householdControllable = []householdSetting{
 	{key: phone.SettingTwilioAccountSID, typ: "string", own: true, secret: true},
 	{key: phone.SettingTwilioAuthToken, typ: "string", own: true, secret: true},
 	{key: phone.SettingTwilioFromNumber, typ: "string", own: true},
+	// Privacy (2026-10-09): may the household use the Pantry package store (packages.go).
+	{key: settingPantryEnabled, typ: "bool"},
 }
 
 func householdSettingType(key string) (householdSetting, bool) {

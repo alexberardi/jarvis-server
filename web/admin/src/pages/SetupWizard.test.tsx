@@ -224,6 +224,7 @@ beforeEach(() => {
           setting('memory.enabled', true),
           setting('memory.extraction_enabled', true),
           setting('ambient_context.enabled', false),
+          setting('pantry.enabled', false),
         ],
       },
       { service_name: 'admin', success: true, error: null, latency_ms: 1, settings: [setting('updates.enabled', false)] },
@@ -298,11 +299,13 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     // Privacy: off-box features start off; turning one on writes just that key.
     const search = await screen.findByRole('switch', { name: /Web search/ })
     expect(search).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: /Pantry package store/ })).not.toBeChecked()
     expect(screen.getByRole('switch', { name: /Memories/ })).toBeChecked()
     expect(screen.getByRole('switch', { name: /Speaker recognition/ })).toBeDisabled() // stt not listed here
     fireEvent.click(search)
     fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }))
     await waitFor(() => expect(settings.updateSetting).toHaveBeenCalledWith('cc', 'web_search.enabled', true))
+    expect(settings.updateSetting).not.toHaveBeenCalledWith('cc', 'pantry.enabled', expect.anything())
 
     // Done: recorded on the server, so no tab or browser resumes the wizard again (A10 F9).
     expect(await screen.findByText('Jarvis is set up')).toBeInTheDocument()

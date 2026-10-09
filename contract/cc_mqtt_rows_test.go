@@ -319,6 +319,17 @@ func TestCCMQTTRows(t *testing.T) {
 
 	t.Run("package_install", func(t *testing.T) {
 		const repo = "https://github.com/contract-example/jarvis-cmd-contract"
+		if Jarvisd() {
+			// jarvisd's pantry.enabled privacy switch is off by default; installs 403 until on.
+			settingsPath := "/api/v0/mobile/household/" + hh + "/settings/pantry.enabled"
+			tg.Post(t, CommandCenter, nodePath+"/package-install", map[string]any{"command_name": "contract_pkg", "github_repo_url": repo}, u.H()).
+				Expect(http.StatusForbidden, Obj{"detail": NonEmptyString, "code": Eq("pantry_disabled")})
+			tg.Do(t, CommandCenter, http.MethodPut, settingsPath, map[string]any{"value": true}, u.H()).
+				Expect(http.StatusOK, Obj{"success": Eq(true), "key": Eq("pantry.enabled"), "value": Eq(true)})
+			t.Cleanup(func() {
+				tg.do(CommandCenter, http.MethodPut, settingsPath, map[string]any{"value": false}, u.H())
+			})
+		}
 		rid := rowsID(t, tg.Post(t, CommandCenter, nodePath+"/package-install", map[string]any{
 			"command_name": "contract_pkg", "github_repo_url": repo, "git_tag": "v0.0.1",
 		}, u.H()))

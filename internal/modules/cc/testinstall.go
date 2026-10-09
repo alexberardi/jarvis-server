@@ -166,6 +166,9 @@ func (m *Module) handleRequestTestInstall(w http.ResponseWriter, r *http.Request
 		m.writeErr(w, err)
 		return
 	}
+	if !m.requirePantry(w, r, hh) {
+		return
+	}
 	code := strings.ToUpper(strings.TrimSpace(raw))
 	if len([]rune(code)) != 6 {
 		detail(w, http.StatusBadRequest, "Invalid share code")
