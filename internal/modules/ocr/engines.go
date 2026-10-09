@@ -424,6 +424,10 @@ func (l *LLMVision) Recognize(ctx context.Context, img Image, o Options) (Result
 		}}},
 		"max_tokens":      4096,
 		"response_format": map[string]any{"type": "json_object"},
+		// Thinking off whatever the label's default: transcription needs no reasoning, and
+		// the background label thinks without limit, so a thinking model (Qwen3.5-9B) spent
+		// all 4096 tokens reasoning and answered nothing (an empty transcription).
+		"reasoning_budget": 0,
 	})
 	if err != nil {
 		return Result{}, err

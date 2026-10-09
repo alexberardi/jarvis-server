@@ -649,14 +649,18 @@ func TestAppleVisionEngine(t *testing.T) {
 func TestLLMVisionEngine(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Model    string `json:"model"`
-			Messages []struct {
+			Model           string `json:"model"`
+			ReasoningBudget *int   `json:"reasoning_budget"`
+			Messages        []struct {
 				Content []map[string]any `json:"content"`
 			} `json:"messages"`
 		}
 		json.NewDecoder(r.Body).Decode(&in)
 		url := in.Messages[0].Content[1]["image_url"].(map[string]any)["url"].(string)
-		if r.Header.Get("X-Jarvis-App-Id") != "id" || in.Model != "background" || !strings.HasPrefix(url, "data:image/jpeg;base64,") {
+		if r.Header.Get("X-Jarvis-App-Id") != "id" || in.Model != "background" || !strings.HasPrefix(url, "data:image/jpeg;base64,") ||
+			// Thinking off: a thinking background model spends max_tokens reasoning and
+			// answers nothing (Qwen3.5-9B: 4096 reasoning tokens, empty content).
+			in.ReasoningBudget == nil || *in.ReasoningBudget != 0 {
 			w.WriteHeader(400)
 			return
 		}
