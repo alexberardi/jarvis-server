@@ -3,10 +3,11 @@ import { Pencil, Database, AlertTriangle, Lock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUpdateSetting } from '@/hooks/useSettings'
 import SettingEditor from './SettingEditor'
+import HouseholdValues from './HouseholdValues'
 import type { SettingResponse } from '@/types/settings'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/errors'
-import { restartAction, secretIsSet } from '@/lib/settings'
+import { formatSettingValue, restartAction } from '@/lib/settings'
 
 interface SettingRowProps {
   setting: SettingResponse
@@ -14,14 +15,6 @@ interface SettingRowProps {
 }
 
 const RELOAD_MESSAGE = 'Applies after jarvisd restarts'
-
-function formatValue(setting: SettingResponse): string {
-  // Secrets are write-only (I5): never echo even the mask as if it were a value.
-  if (setting.is_secret) return secretIsSet(setting) ? 'set (hidden)' : 'not set'
-  if (setting.value === null || setting.value === undefined) return '(not set)'
-  if (setting.value_type === 'json') return JSON.stringify(setting.value)
-  return String(setting.value)
-}
 
 const typeBadgeColors: Record<string, string> = {
   string: 'bg-blue-500/10 text-blue-500',
@@ -93,6 +86,12 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{setting.description}</p>
         )}
 
+        {setting.household_scoped && (
+          <p className="mt-1 text-[11px] font-medium text-[var(--color-text-muted)]">
+            Default for all households
+          </p>
+        )}
+
         {editing ? (
           <div className="mt-2">
             <SettingEditor
@@ -104,16 +103,19 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
           </div>
         ) : (
           <p className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
-            {formatValue(setting)}
+            {formatSettingValue(setting)}
           </p>
         )}
+
+        {setting.household_scoped && <HouseholdValues setting={setting} serviceName={serviceName} />}
       </div>
 
       {!editing && (
         <button
           onClick={() => setEditing(true)}
           className="shrink-0 rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-primary)]"
-          title="Edit"
+          title={setting.household_scoped ? 'Edit the default' : 'Edit'}
+          aria-label={setting.household_scoped ? 'Edit the default' : 'Edit'}
         >
           <Pencil size={14} />
         </button>

@@ -68,3 +68,22 @@ func (m *Module) UserNames(ctx context.Context, ids []int64) (map[int64]string, 
 	}
 	return out, rows.Err()
 }
+
+// HouseholdNames maps every household's id to its name (the admin's per-household setting
+// values name the household).
+func (m *Module) HouseholdNames(ctx context.Context) (map[string]string, error) {
+	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT id, name FROM auth_households`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}

@@ -41,6 +41,12 @@ type Accounts interface {
 	SetupCounts(ctx context.Context) (authmod.SetupCounts, error)
 }
 
+// Households names every household (the auth module): the settings page lists each
+// household's own value of a household-scoped setting by name.
+type Households interface {
+	HouseholdNames(ctx context.Context) (map[string]string, error)
+}
+
 // Models reports label states and the hardware detection (the llm module).
 type Models interface {
 	LabelStates(ctx context.Context) map[string]string
@@ -87,6 +93,7 @@ func (m *Module) mountBFF(mux *http.ServeMux, deps module.Deps) {
 	mux.Handle("GET /api/settings", gated(m.handleSettings))
 	mux.Handle("GET /api/settings/{$}", gated(m.handleSettings))
 	mux.Handle("PUT /api/settings/{service}/{key...}", gated(m.handlePutSetting))
+	mux.Handle("DELETE /api/settings/{service}/{key...}", gated(m.handleDeleteSetting))
 	mux.Handle("GET /api/system/info", gated(m.handleSystemInfo))
 	mux.Handle("GET /api/traces", gated(m.handleTraces))
 	mux.Handle("GET /api/traces/{id}", gated(m.handleTrace))
@@ -128,12 +135,30 @@ func unavailable(w http.ResponseWriter, what string) {
 // --- settings aggregator (S6, §6.2 #2) ---
 
 type serviceSettings struct {
-	ServiceName string                     `json:"service_name"`
-	DisplayName string                     `json:"display_name"`
-	Success     bool                       `json:"success"`
-	Settings    []settings.SettingResponse `json:"settings"`
-	Error       *string                    `json:"error"`
-	LatencyMS   float64                    `json:"latency_ms"`
+	ServiceName string         `json:"service_name"`
+	DisplayName string         `json:"display_name"`
+	Success     bool           `json:"success"`
+	Settings    []adminSetting `json:"settings"`
+	Error       *string        `json:"error"`
+	LatencyMS   float64        `json:"latency_ms"`
+}
+
+// adminSetting is one setting as the settings page gets it: the system-scope SettingResponse
+// (its value is the default for every household), plus, for a key households may set
+// (Definition.Household), each household's own value and how many households use the default.
+type adminSetting struct {
+	settings.SettingResponse
+	HouseholdScoped        bool              `json:"household_scoped"`
+	HouseholdValues        *[]householdValue `json:"household_values,omitempty"`
+	HouseholdsUsingDefault *int              `json:"households_using_default,omitempty"`
+}
+
+// householdValue is one household's own value of a setting.
+type householdValue struct {
+	HouseholdID   string `json:"household_id"`
+	HouseholdName string `json:"household_name"`
+	Value         any    `json:"value"`
+	UpdatedAt     string `json:"updated_at,omitempty"`
 }
 
 // settingsSources lists the ready settings services by module name.
@@ -167,17 +192,31 @@ func displayName(module string) string {
 }
 
 // handleSettings is GET /api/settings[?service=]: every module's settings at system scope, in
-// the legacy config-service gateway's AggregatedSettingsResponse shape.
+// the legacy config-service gateway's AggregatedSettingsResponse shape. A setting households
+// may change also carries household_values (each household with its own value, by name) and
+// households_using_default.
 func (m *Module) handleSettings(w http.ResponseWriter, r *http.Request) {
 	want := r.URL.Query().Get("service")
 	results := []serviceSettings{}
 	ok := 0
+	var households map[string]string // nil: no household listing (no auth module, or it failed)
+	if m.Households != nil {
+		h, err := m.Households.HouseholdNames(r.Context())
+		if err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			m.deps.Log.Error("admin: listing households failed", "err", err)
+		} else {
+			households = h
+		}
+	}
 	for _, src := range m.settingsSources() {
 		if want != "" && src.Name() != want {
 			continue
 		}
 		start := time.Now()
-		list, err := src.Settings().List(r.Context(), settings.Scope{}, "")
+		list, err := m.adminSettings(r.Context(), src.Settings(), households)
 		if err != nil && r.Context().Err() != nil {
 			return // the client went away (navigated off the page): nothing failed, nobody reads the reply
 		}
@@ -185,7 +224,7 @@ func (m *Module) handleSettings(w http.ResponseWriter, r *http.Request) {
 			Settings: list, LatencyMS: float64(time.Since(start).Microseconds()) / 1000}
 		if err != nil {
 			msg := err.Error()
-			res.Error, res.Settings = &msg, []settings.SettingResponse{}
+			res.Error, res.Settings = &msg, []adminSetting{}
 			m.deps.Log.Error("admin: listing settings failed", "service", src.Name(), "err", err)
 		} else {
 			ok++
@@ -202,21 +241,107 @@ func (m *Module) handleSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handlePutSetting is PUT /api/settings/{service}/{key...} with {"value": …}: a system-scope
-// write to that module's settings, answering ServiceUpdateResponse. The key is audit-logged,
-// never the value.
-func (m *Module) handlePutSetting(w http.ResponseWriter, r *http.Request) {
+// adminSettings renders svc's settings at system scope, with each household's own value of the
+// household-scoped ones when households (id → name) is known. A row for a household that no
+// longer exists is left out (deleting a household purges its rows).
+func (m *Module) adminSettings(ctx context.Context, svc *settings.Service, households map[string]string) ([]adminSetting, error) {
+	list, err := svc.List(ctx, settings.Scope{}, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]adminSetting, len(list))
+	for i, s := range list {
+		out[i] = adminSetting{SettingResponse: s}
+		def, _ := svc.Definition(s.Key)
+		if !def.Household {
+			continue
+		}
+		out[i].HouseholdScoped = true
+		if households == nil {
+			continue
+		}
+		rows, err := svc.HouseholdValues(ctx, s.Key)
+		if err != nil {
+			return nil, err
+		}
+		values := []householdValue{}
+		for _, hv := range rows {
+			name, ok := households[hv.HouseholdID]
+			if !ok {
+				continue
+			}
+			values = append(values, householdValue{HouseholdID: hv.HouseholdID, HouseholdName: name,
+				Value: hv.Value, UpdatedAt: hv.UpdatedAt})
+		}
+		slices.SortFunc(values, func(a, b householdValue) int {
+			if c := strings.Compare(strings.ToLower(a.HouseholdName), strings.ToLower(b.HouseholdName)); c != 0 {
+				return c
+			}
+			return strings.Compare(a.HouseholdID, b.HouseholdID)
+		})
+		usingDefault := len(households) - len(values)
+		out[i].HouseholdValues, out[i].HouseholdsUsingDefault = &values, &usingDefault
+	}
+	return out, nil
+}
+
+// settingTarget resolves {service}/{key...} and the optional ?household_id= of a settings
+// write, writing the error itself. hh is "" for the system scope; with a household_id the key
+// must be one households may change and the household must exist.
+func (m *Module) settingTarget(w http.ResponseWriter, r *http.Request) (src SettingsSource, def settings.Definition, hh string, ok bool) {
 	service, key := r.PathValue("service"), r.PathValue("key")
-	src := m.settingsSource(service)
+	src = m.settingsSource(service)
 	if src == nil {
 		httpx.Error(w, http.StatusNotFound, "Service '"+service+"' not found")
-		return
+		return nil, def, "", false
 	}
-	def, ok := src.Settings().Definition(key)
+	def, ok = src.Settings().Definition(key)
 	if !ok {
 		httpx.Error(w, http.StatusNotFound, "Setting not found: "+key)
+		return nil, def, "", false
+	}
+	q := r.URL.Query()
+	if !q.Has("household_id") {
+		return src, def, "", true
+	}
+	hh = strings.TrimSpace(q.Get("household_id"))
+	if hh == "" {
+		httpx.ValidationError(w, httpx.FieldError{Type: "missing", Loc: []any{"query", "household_id"},
+			Msg: "household_id must not be empty", Input: q.Get("household_id")})
+		return nil, def, "", false
+	}
+	if !def.Household {
+		httpx.Error(w, http.StatusNotFound, "Setting is not household-controllable: "+key)
+		return nil, def, "", false
+	}
+	if m.Households == nil {
+		unavailable(w, "auth")
+		return nil, def, "", false
+	}
+	names, err := m.Households.HouseholdNames(r.Context())
+	if err != nil {
+		m.deps.Log.Error("admin: listing households failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, "Internal server error")
+		return nil, def, "", false
+	}
+	if _, found := names[hh]; !found {
+		httpx.Error(w, http.StatusNotFound, "Household not found")
+		return nil, def, "", false
+	}
+	return src, def, hh, true
+}
+
+// handlePutSetting is PUT /api/settings/{service}/{key...}[?household_id=] with {"value": …}:
+// a write to that module's settings, answering ServiceUpdateResponse. Without household_id it
+// sets the system value (the default for every household); with one, that household's own
+// value of a household-scoped key, where null removes it (as DELETE does). The key is
+// audit-logged, never the value.
+func (m *Module) handlePutSetting(w http.ResponseWriter, r *http.Request) {
+	src, def, hh, ok := m.settingTarget(w, r)
+	if !ok {
 		return
 	}
+	service, key := src.Name(), def.Key
 	var body map[string]any
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -230,8 +355,21 @@ func (m *Module) handlePutSetting(w http.ResponseWriter, r *http.Request) {
 		httpx.ValidationError(w, httpx.FieldError{Type: "value_error", Loc: []any{"body", "value"}, Msg: msg, Input: value})
 		return
 	}
+	// The setting's own validator (Definition.Validate), with its message.
+	if err := src.Settings().Validate(key, value); err != nil {
+		httpx.ValidationError(w, httpx.FieldError{Type: "value_error", Loc: []any{"body", "value"},
+			Msg: settings.InvalidValueMessage(err), Input: value})
+		return
+	}
 	var err error
-	if service == "cc" && key == "llm.prompt_provider" && m.Prompts != nil {
+	switch {
+	case hh != "" && value == nil:
+		// A NULL household row would hide the system value (the cascade stops at it), so null
+		// means "use the default": remove the household's row.
+		_, err = src.Settings().Delete(r.Context(), key, settings.Scope{HouseholdID: hh})
+	case hh != "":
+		err = src.Settings().Set(r.Context(), key, value, settings.Scope{HouseholdID: hh})
+	case service == "cc" && key == "llm.prompt_provider" && m.Prompts != nil:
 		// The one setting with a closed set of values a voice turn depends on (AD4).
 		name, _ := value.(string)
 		err = m.Prompts.SetPromptProvider(r.Context(), name)
@@ -240,28 +378,68 @@ func (m *Module) handlePutSetting(w http.ResponseWriter, r *http.Request) {
 				Msg: "Unknown prompt provider; one of " + strings.Join(m.Prompts.PromptProvider(r.Context()).Options, ", "), Input: value})
 			return
 		}
-	} else {
+	default:
 		err = src.Settings().Set(r.Context(), key, value, settings.Scope{})
 	}
-	if err != nil {
-		m.deps.Log.Error("admin: setting update failed", "service", service, "key", key, "err", err)
-		msg := "Failed to update setting: " + key
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]any{
-			"service_name": service, "success": false, "key": key, "requires_reload": def.RequiresReload,
-			"message": nil, "error": msg,
-		})
+	if errors.Is(err, settings.ErrInvalidValue) {
+		httpx.ValidationError(w, httpx.FieldError{Type: "value_error", Loc: []any{"body", "value"},
+			Msg: settings.InvalidValueMessage(err), Input: value})
 		return
 	}
-	m.deps.Log.Info("admin: setting changed", "service", service, "key", key)
+	m.settingWritten(w, service, def, hh, err)
+}
+
+// handleDeleteSetting is DELETE /api/settings/{service}/{key...}?household_id=: remove that
+// household's own value so it uses the default again. Removing a value that isn't there
+// succeeds.
+func (m *Module) handleDeleteSetting(w http.ResponseWriter, r *http.Request) {
+	if !r.URL.Query().Has("household_id") {
+		httpx.ValidationError(w, httpx.FieldError{Type: "missing", Loc: []any{"query", "household_id"},
+			Msg: "Field required", Input: nil})
+		return
+	}
+	src, def, hh, ok := m.settingTarget(w, r)
+	if !ok {
+		return
+	}
+	_, err := src.Settings().Delete(r.Context(), def.Key, settings.Scope{HouseholdID: hh})
+	m.settingWritten(w, src.Name(), def, hh, err)
+}
+
+// settingWritten answers a settings write with ServiceUpdateResponse (plus household_id for a
+// household's value) and audit-logs the key, never the value.
+func (m *Module) settingWritten(w http.ResponseWriter, service string, def settings.Definition, hh string, err error) {
+	key := def.Key
+	if err != nil {
+		m.deps.Log.Error("admin: setting update failed", "service", service, "key", key, "household", hh, "err", err)
+		out := map[string]any{
+			"service_name": service, "success": false, "key": key, "requires_reload": def.RequiresReload,
+			"message": nil, "error": "Failed to update setting: " + key,
+		}
+		if hh != "" {
+			out["household_id"] = hh
+		}
+		httpx.WriteJSON(w, http.StatusInternalServerError, out)
+		return
+	}
+	if hh != "" {
+		m.deps.Log.Info("admin: setting changed", "service", service, "key", key, "household", hh)
+	} else {
+		m.deps.Log.Info("admin: setting changed", "service", service, "key", key)
+	}
 	var msg any
 	if def.RequiresReload {
 		// AQ8 (a): there is no container to restart; say so and how.
 		msg = "Applies after jarvisd restarts"
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"service_name": service, "success": true, "key": key, "requires_reload": def.RequiresReload,
 		"message": msg, "error": nil,
-	})
+	}
+	if hh != "" {
+		out["household_id"] = hh
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // checkValue rejects a value its setting's type can't hold (the module router stores anything

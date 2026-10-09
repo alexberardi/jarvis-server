@@ -160,7 +160,8 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
       </section>
 
       <p className="text-xs text-[var(--color-text-muted)]">
-        These are the defaults for the whole install. Each household can change its own from the mobile app.
+        These are the defaults for the whole install. Each household can change its own from the mobile app,
+        and a household that already has its own value keeps it. Settings shows every household's value.
       </p>
 
       <div className="flex justify-end">

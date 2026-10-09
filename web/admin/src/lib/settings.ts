@@ -21,6 +21,14 @@ export function withoutLabelSettings(services: ServiceSettingsResult[]): Service
   }))
 }
 
+/** formatSettingValue renders a setting's value for display (secrets never echo, I5). */
+export function formatSettingValue(setting: SettingResponse): string {
+  if (setting.is_secret) return secretIsSet(setting) ? 'set (hidden)' : 'not set'
+  if (setting.value === null || setting.value === undefined) return '(not set)'
+  if (setting.value_type === 'json') return JSON.stringify(setting.value)
+  return String(setting.value)
+}
+
 /** A secret's value comes back masked ("********") when set and empty when not (I5). */
 export function secretIsSet(s: SettingResponse): boolean {
   return s.is_secret && s.value !== null && s.value !== undefined && s.value !== ''

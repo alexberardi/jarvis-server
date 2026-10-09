@@ -590,6 +590,12 @@ func TestMultiHouseholdMembership(t *testing.T) {
 	if hhs, _ := e.m.UserHouseholds(context.Background(), 999999); len(hhs) != 0 {
 		t.Fatal(hhs)
 	}
+
+	// HouseholdNames (the admin's per-household setting values): every household by id.
+	names, err := e.m.HouseholdNames(context.Background())
+	if err != nil || names[u.household] == "" || names[owner.household] == "" || len(names) < 3 {
+		t.Fatal(names, err)
+	}
 }
 
 func TestMembersAndLeave(t *testing.T) {

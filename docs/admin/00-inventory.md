@@ -423,6 +423,22 @@ The install script (Phase 6) installs the binary and service unit, starts jarvis
   or key, and audit-logs service+key. `requires_reload` answers `message: "Applies after jarvisd
   restarts"` (AQ8 a). `cc/llm.prompt_provider` goes through cc's validated setter. `llm.<label>.*` keys are
   still listed and writable here; hiding them (I4) is SPA work in A5.
+- **#2b household values (2026-10-09).** A setting households may change (`settings.Definition.Household`;
+  cc marks exactly its mobile household-settings allowlist, `household_settings.go`) carries, additively,
+  `household_scoped: true`, `household_values: [{household_id, household_name, value, updated_at}]` (the
+  households with their own household-scope row, by name via auth's `HouseholdNames`; a NULL/empty row,
+  a node/user row and a row of a deleted household are left out; secrets stay `********`) and
+  `households_using_default`. Every other setting has `household_scoped: false` and neither list field.
+  `value` is still the system value, i.e. the default for every household without its own.
+  `PUT /api/settings/{service}/{key...}?household_id=X` sets that household's value (`null` = remove it);
+  `DELETE …?household_id=X` removes it so the household follows the default again (idempotent). Both
+  answer ServiceUpdateResponse + `household_id`; 404 for an unknown household or a key households can't
+  change (`Setting is not household-controllable: <key>`), 422 for an empty/missing `household_id`, a
+  type/options mismatch or the key's own validator (`Definition.Validate`, now also checked on the
+  system-scope PUT instead of failing as 500). cc's mobile-only extra checks (persona length, E.164 from
+  number) are not repeated: the caller is a superuser. The Settings page shows the value as "Default for
+  all households", each household's value under it with an editor and "Use default", "N households use
+  the default", or "Households can change this in the app" when none has its own.
 - **#3** cc exports `TraceFilter`, `ParseTraceFilter(url.Values)`, `ListTraces`, `GetTrace(ctx,id) (map,
   found, err)`; the admin-key routes use them too. A bad query is cc's own 400 `validation_error` shape.
 - **#4** `doctor.Exposure{Listeners,MQTTAddr,MQTTWSAddr,MDNS}.Ports(cfg.Ports)` replaces `doctorPorts`'

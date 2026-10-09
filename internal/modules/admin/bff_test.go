@@ -52,6 +52,11 @@ type fakeAccounts struct{ c authmod.SetupCounts }
 
 func (f *fakeAccounts) SetupCounts(context.Context) (authmod.SetupCounts, error) { return f.c, nil }
 
+// fakeHouseholds names the households (auth's HouseholdNames).
+type fakeHouseholds map[string]string
+
+func (f fakeHouseholds) HouseholdNames(context.Context) (map[string]string, error) { return f, nil }
+
 type fakeModels struct {
 	states   map[string]string
 	installs []llmmod.SetupInstall
@@ -128,13 +133,24 @@ func newBFF(t *testing.T) *bffEnv {
 		{Key: "llm.prompt_provider", Category: "llm", Type: settings.String, Default: ""},
 		{Key: "smarthome.manager", Category: "smarthome", Type: settings.String, Default: "jarvis_direct",
 			Options: []any{"jarvis_direct", "home_assistant"}},
+		// Household-scoped keys (cc marks its mobile allowlist so).
+		{Key: "pantry.enabled", Category: "pantry", Type: settings.Bool, Default: false, Household: true},
+		{Key: "household.timezone", Category: "household", Type: settings.String, Default: "", Household: true,
+			Validate: func(v any) error {
+				if v == "Mars/Olympus" {
+					return errors.New("unknown time zone")
+				}
+				return nil
+			}},
+		{Key: "phone.twilio_auth_token", Category: "phone_calls", Type: settings.String, Default: "", IsSecret: true, Household: true},
 	})
 	e.m = &Module{
 		UI: builtUI(), Verify: fakeVerify, Version: "1.2.3",
 		SettingsSources: []SettingsSource{fakeSettings{"llm", e.llm}, fakeSettings{"cc", e.cc}, fakeSettings{"notready", nil}},
 		Traces:          e.traces, Accounts: e.accounts, Prompts: e.prompts,
-		Models:   fakeModels{states: map[string]string{"live": "ready", "background": "not_configured"}},
-		Exposure: doctor.Exposure{Listeners: []string{pconfig.ListenerAdmin}},
+		Households: fakeHouseholds{"hh-home": "Home", "hh-cabin": "cabin", "hh-flat": "Flat"},
+		Models:     fakeModels{states: map[string]string{"live": "ready", "background": "not_configured"}},
+		Exposure:   doctor.Exposure{Listeners: []string{pconfig.ListenerAdmin}},
 		RunDoctor: func(_ context.Context, o doctor.Options) []doctor.Check {
 			e.doctors.Add(1)
 			return []doctor.Check{
@@ -174,6 +190,8 @@ func TestBFFRoutesAreGated(t *testing.T) {
 	for _, c := range []struct{ method, path, body string }{
 		{"GET", "/api/settings", ""}, {"GET", "/api/settings/", ""},
 		{"PUT", "/api/settings/llm/llm.request_timeout_seconds", `{"value":5}`},
+		{"PUT", "/api/settings/cc/pantry.enabled?household_id=hh-home", `{"value":true}`},
+		{"DELETE", "/api/settings/cc/pantry.enabled?household_id=hh-home", ""},
 		{"GET", "/api/system/info", ""}, {"GET", "/api/traces", ""}, {"GET", "/api/traces/t1", ""},
 		{"GET", "/api/prompt-provider", ""}, {"PUT", "/api/prompt-provider", `{"value":""}`},
 		{"GET", "/api/doctor", ""}, // a superuser exists, so the doctor is gated too
