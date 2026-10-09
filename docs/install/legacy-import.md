@@ -1,6 +1,6 @@
 # Legacy import: carrying prod's nodes, households and users over (draft, 2026-10-09)
 
-**Status: research done, not built.** Revisits ID6 (clean start). Trigger: with a clean start every
+**Status: decided 2026-10-09 (ID6r, scope (c): everything in §1, §4 B and C); building.** Revisits ID6 (clean start). Trigger: with a clean start every
 legacy node is orphaned. It thinks it is provisioned, jarvisd rejects its key, it never reaches the
 broker, so it is invisible in the app and can't be updated or reset remotely; only SSH or a reflash
 recovers it (node-setup `provisioning/startup.py`: AP mode only when the `.provisioned` marker is
