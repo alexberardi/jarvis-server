@@ -278,6 +278,11 @@ commands:
                    import recipes, meal plans, staples and SKU mappings from a legacy export
                    (scripts/legacy/recipes-export.sh), owned by the accounts whose emails match;
                    a dry run unless --apply; re-run after more people sign up
+  import-legacy (--compose DIR | --from postgres://USER:PASS@HOST:PORT) [--apply] [--accept-head DB=HEAD]...
+                   carry a legacy install's users, households, nodes, rooms, devices, settings,
+                   memories, routines, contacts and inbox over, keeping ids; reads the legacy
+                   Postgres read-only (credentials from the compose dir's env files); runs once,
+                   with jarvisd stopped, before the setup wizard; a dry run unless --apply
   doctor [--json] [--fix]
                    check that nodes and phones can reach jarvisd (listeners, ports held by
                    another program, host firewall, data permissions, legacy stack); --fix
@@ -370,6 +375,11 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 			return err
 		}
 		return runImportRecipes(ctx, args[1:], stdout)
+	case "import-legacy":
+		if err := bootstrap(flagHome, false, os.Stderr); err != nil {
+			return err
+		}
+		return runImportLegacy(ctx, args[1:], stdout)
 	case "migrate":
 		if len(args) < 2 || args[1] != "status" {
 			return errors.New("usage: jarvisd migrate status")

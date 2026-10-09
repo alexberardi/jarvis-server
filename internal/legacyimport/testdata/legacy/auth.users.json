@@ -1,0 +1,38 @@
+[
+ {
+  "id": 1,
+  "email": "owner@example.com",
+  "username": "owner",
+  "password_hash": "$2b$12$HjlBY2eA5LveXk1aCzpIT.SXQfQPDuV2SlkcELvIm3CseZGIBPvDC",
+  "is_active": true,
+  "created_at": "2026-01-02T03:04:05.123456+00:00",
+  "updated_at": "2026-03-04T05:06:07.5+00:00",
+  "is_superuser": true,
+  "must_change_password": false,
+  "temp_password_expires_at": null
+ },
+ {
+  "id": 2,
+  "email": "member@example.com",
+  "username": "member",
+  "password_hash": "$2b$12$HjlBY2eA5LveXk1aCzpIT.SXQfQPDuV2SlkcELvIm3CseZGIBPvDC",
+  "is_active": true,
+  "created_at": "2026-01-02T03:04:05.123456+00:00",
+  "updated_at": "2026-03-04T05:06:07.5+00:00",
+  "is_superuser": false,
+  "must_change_password": false,
+  "temp_password_expires_at": null
+ },
+ {
+  "id": 3,
+  "email": "cabin@example.com",
+  "username": "cabin",
+  "password_hash": "$2b$12$HjlBY2eA5LveXk1aCzpIT.SXQfQPDuV2SlkcELvIm3CseZGIBPvDC",
+  "is_active": true,
+  "created_at": "2026-01-02T03:04:05.123456+00:00",
+  "updated_at": "2026-03-04T05:06:07.5+00:00",
+  "is_superuser": false,
+  "must_change_password": false,
+  "temp_password_expires_at": null
+ }
+]

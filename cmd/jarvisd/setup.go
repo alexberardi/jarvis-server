@@ -54,6 +54,13 @@ func printSetupLink(cfg config.Config, w io.Writer) error {
 	}
 	health := "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Ports[config.ListenerConfig])) + "/health"
 	if probeHealth(context.Background(), health) == "" {
+		if wizardUnfinished(cfg.DBPath()) {
+			// An admin account exists (an imported one, or the wizard was left after Account),
+			// but the wizard's later steps never ran.
+			fmt.Fprintf(w, "Finish setup in a browser: sign in at %s with your admin account; the wizard "+
+				"continues with hardware, models and privacy choices.\n", link)
+			return nil
+		}
 		fmt.Fprintf(w, "jarvisd is set up. The admin is at %s\n", link)
 		return nil
 	}

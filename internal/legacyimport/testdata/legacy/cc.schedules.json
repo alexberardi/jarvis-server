@@ -1,0 +1,30 @@
+[
+ {
+  "id": "sch_1",
+  "household_id": "11111111-1111-4111-8111-111111111111",
+  "user_id": 1,
+  "node_id": "kitchen-node",
+  "intent": "remind me",
+  "timezone": "UTC",
+  "next_fire_at": "2099-01-01T00:00:00",
+  "recurrence": null,
+  "state": "active",
+  "last_fired_at": null,
+  "created_at": "2026-01-02T03:04:05.123456",
+  "updated_at": "2026-01-02T03:04:05.123456"
+ },
+ {
+  "id": "sch_2",
+  "household_id": "11111111-1111-4111-8111-111111111111",
+  "user_id": 1,
+  "node_id": null,
+  "intent": "old",
+  "timezone": "UTC",
+  "next_fire_at": "2020-01-01T00:00:00",
+  "recurrence": null,
+  "state": "done",
+  "last_fired_at": "2020-01-01T00:00:00",
+  "created_at": "2026-01-02T03:04:05.123456",
+  "updated_at": "2026-01-02T03:04:05.123456"
+ }
+]
