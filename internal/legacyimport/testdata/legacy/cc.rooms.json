@@ -1,0 +1,35 @@
+[
+ {
+  "id": "r-kitchen",
+  "household_id": "11111111-1111-4111-8111-111111111111",
+  "name": "Kitchen",
+  "normalized_name": "kitchen",
+  "icon": null,
+  "ha_area_id": null,
+  "created_at": "2026-01-02T03:04:05.123456",
+  "updated_at": null,
+  "parent_room_id": "r-floor"
+ },
+ {
+  "id": "r-floor",
+  "household_id": "11111111-1111-4111-8111-111111111111",
+  "name": "Ground floor",
+  "normalized_name": "ground floor",
+  "icon": null,
+  "ha_area_id": null,
+  "created_at": "2026-01-02T03:04:05.123456",
+  "updated_at": null,
+  "parent_room_id": null
+ },
+ {
+  "id": "r-ghost",
+  "household_id": "33333333-3333-4333-8333-333333333333",
+  "name": "Ghost",
+  "normalized_name": "ghost",
+  "icon": null,
+  "ha_area_id": null,
+  "created_at": "2026-01-02T03:04:05.123456",
+  "updated_at": null,
+  "parent_room_id": null
+ }
+]

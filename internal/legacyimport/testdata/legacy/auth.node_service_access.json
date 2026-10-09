@@ -1,0 +1,30 @@
+[
+ {
+  "id": 1,
+  "node_id": "kitchen-node",
+  "service_id": "jarvis-command-center",
+  "granted_at": "2026-01-02T03:04:05.123456+00:00",
+  "granted_by": 1
+ },
+ {
+  "id": 2,
+  "node_id": "orphan-reg",
+  "service_id": "jarvis-command-center",
+  "granted_at": "2026-01-02T03:04:05.123456+00:00",
+  "granted_by": null
+ },
+ {
+  "id": 3,
+  "node_id": "orphan-reg",
+  "service_id": "jarvis-logs",
+  "granted_at": "2026-01-02T03:04:05.123456+00:00",
+  "granted_by": null
+ },
+ {
+  "id": 4,
+  "node_id": "orphan-reg",
+  "service_id": "jarvis-whisper",
+  "granted_at": "2026-01-02T03:04:05.123456+00:00",
+  "granted_by": null
+ }
+]

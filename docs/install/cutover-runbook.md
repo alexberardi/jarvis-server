@@ -7,8 +7,12 @@ user says go. The facts in §1 come from a read-only survey of prod on 2026-10-0
 
 What this runbook does (decisions it rests on):
 
-- **ID6 clean start.** No `import-legacy`. Accounts, households, nodes, memories, routines, phonebook
-  and inbox are not carried over. The legacy Postgres and volumes are kept, stopped and untouched, for
+- **ID6r legacy import** (supersedes ID6's clean start, 2026-10-09). `jarvisd import-legacy` carries
+  users (with their passwords), households, memberships, node registrations (with their keys), rooms,
+  devices, settings, memories, routines, active schedules, contacts, finished calls, signals and inbox
+  over, keeping ids ([legacy-import.md](legacy-import.md) §7). It reads the legacy Postgres read-only,
+  runs after the install and before jarvisd's first real start (§4.3a), and makes the Account step and
+  node re-pointing unnecessary. The legacy Postgres and volumes are kept, stopped and untouched, for
   manual recovery and rollback.
 - **LD5.** Models and LLM settings start clean through the wizard (the 150 GB `~/.jarvis/compose/.models`
   is left alone; §4.5 has a no-download fallback for the 27B file).
@@ -17,7 +21,8 @@ What this runbook does (decisions it rests on):
   and turns off the legacy admin's user unit. Rollback is `jarvisd` off + the legacy containers
   started again with their restart policies put back, and the admin unit on again (§6).
 - **ID8 / AD3a.** The wizard's Privacy step; prod used the push relay, so it goes on.
-- **A10 node technique.** Active nodes are re-pointed without a factory reset (keeps Wi-Fi): register the
+- **A10 node technique** (fallback only since ID6r: imported nodes keep their keys). A node the import
+  didn't bring is re-pointed without a factory reset (keeps Wi-Fi): register the
   node's **existing** `node_id` on jarvisd with a provisioning token, swap `api_key` in its `config.json`,
   restart the node service ([A10-rehearsal.md](A10-rehearsal.md) "Node (jarvis-dev) without physical
   access").
@@ -182,6 +187,19 @@ bash "$BK/recipes-export.sh" --out "$BK/recipes-export-t1.tar.gz"
 docker inspect jarvis-recipes-server --format '{{json .Mounts}}' | jq -r '.[] | select(.Destination=="/app/media")'
 ```
 
+```sh
+# 3.7 Legacy import dry run against today's data (ID6r; strictly read-only on the legacy side, writes
+#     nothing but the report). The release binary runs from $BK; the scratch --home is never created.
+curl -fsSL -o "$BK/jarvisd.tgz" https://github.com/alexberardi/jarvis-server/releases/download/<tag>/jarvisd-<tag>-linux-amd64.tar.gz
+tar -xzf "$BK/jarvisd.tgz" -C "$BK"
+"$BK/jarvisd-<tag>-linux-amd64/jarvisd" import-legacy --home "$BK/import-dryrun" --compose ~/.jarvis/compose \
+  | tee "$BK/import-legacy-t1.txt"
+#   expect: "installer layout, credentials from …/.env", "legacy heads: auth=c5d6e7f8a9b0 cc=sb01signals
+#   notifications=002 …", every table FAILED 0, "dry run passed". REFUSED on a head → stop and get the
+#   mapping checked (never --accept-head blind). Read the skips: "household not imported" rows are
+#   orphans; "inactive nodes" are listed by id (decide: activate after cutover, or let them redo setup).
+```
+
 Re-run the §1 survey commands that matter and stop if anything moved: the two llama-server containers
 still the only big GPU users, the active node list unchanged, nothing new on 7700–7712, 7031, 1884, 9883.
 
@@ -274,15 +292,41 @@ If `install.sh` refuses with "another program holds jarvisd's ports" (it lists t
 the legacy containers and agents are already stopped), stop what it names (`sudo ss -ltnp` for more). If the service is not healthy:
 `journalctl -u jarvisd -n 200`, fix, re-run `install.sh` once; still bad → §6.
 
-If you lost the link: `sudo jarvisd setup-link`.
+Don't open the setup link yet: the import goes first (§4.3a).
 
-### 4.4 Wizard: Check → Account → Hardware (5 min)
+### 4.3a Legacy import (5 min)
 
-From a LAN laptop, open the setup link. (The tunnel also publishes 7710; the token protects `/auth/setup`.)
+jarvisd has started once (its database holds no account yet, which the import requires). Stop it, bring
+back only the legacy Postgres, import, stop Postgres again, start jarvisd. The service account can't
+read `~/.jarvis` (ProtectHome) so the compose `.env` is handed over in a 0700 directory and removed after.
 
-- **Check:** all OK. The legacy check says the stack's files exist but none of its containers run.
-- **Account:** the superuser. Use a real address (a `.local` domain is refused, A10 F6). The wizard
-  creates the household "My Home"; rename it later to the kitchen household's name.
+```sh
+sudo jarvisd service stop
+docker start jarvis-postgres                         # restart policy stays "no" (from --stop-legacy)
+L=/var/lib/jarvisd/legacy-compose
+sudo install -d -m 0700 -o jarvisd -g jarvisd $L
+sudo install -m 0400 -o jarvisd -g jarvisd ~/.jarvis/compose/.env $L/.env
+sudo -u jarvisd jarvisd import-legacy --home /var/lib/jarvisd --compose $L          # dry run: same as §3.7
+sudo -u jarvisd jarvisd import-legacy --home /var/lib/jarvisd --compose $L --apply
+sudo rm -rf $L
+docker stop jarvis-postgres
+sudo jarvisd service start && sudo jarvisd service status --wait 60s
+sudo jarvisd setup-link     # "Finish setup in a browser: sign in at http://10.0.0.107:7710/ …"
+```
+
+Expected from `--apply`: the §3.7 numbers (plus whatever changed since), "superusers: id … (masked)",
+"imported: committed in one transaction", "removed the old setup token", and the log path
+(`/var/lib/jarvisd/import-legacy-<time>.log`, 0600, names users by email). Any REFUSED or FAILED row: nothing
+was written; fix or decide, re-run. To start over clean instead: `sudo jarvisd service stop`, move
+`/var/lib/jarvisd/jarvis.db*` aside, `sudo jarvisd service start`, and follow the old Account path.
+
+### 4.4 Wizard: sign in → Hardware (5 min)
+
+From a LAN laptop, open `http://10.0.0.107:7710/` and sign in with your legacy superuser account and its
+old password. Setup is closed (an imported superuser exists), so there is no Check or Account step: the
+wizard resumes at **Hardware** (`setup.completed` is still false). A legacy superuser flagged
+`must_change_password` sets a new password first.
+
 - **Hardware:** expect CUDA, two RTX 3090, each ~24 GB free. Set, matching prod:
   - live → device **1**, background → device **0** (two engines, one per card, as today);
   - STT on GPU, device **1** (whisper ~1.6 GB next to the live model, as today);
@@ -386,33 +430,27 @@ Take the hostnames from `$BK/legacy-services.txt` (§3.4). Drop the legacy `:443
   should print the public URLs (`https://…:443`, `wss://…:443`). `curl -s localhost:7700/services` should
   still print `http://localhost:<port>`.
 
-### 4.7 Accounts and households (10 min for the superuser, then users at their pace)
+### 4.7 Accounts and households (2 min: check only)
 
-Legacy had 10 users / 8 households / 10 memberships; the two 2-member households are the kitchen node's
-and the dormant living-room node's. jarvisd has one superuser and "My Home" now.
+Imported in §4.3a: every user keeps their email and password, every household and membership its id and
+role. Nobody signs up again and no invites are needed. Check:
 
 ```sh
 read -r EMAIL; stty -echo; read -r PW; stty echo     # the superuser's credentials
 J=$(curl -s localhost:7701/auth/login -H 'content-type: application/json' \
     -d "$(jq -n --arg e "$EMAIL" --arg p "$PW" '{email:$e,password:$p}')" | jq -r .access_token)
-curl -s localhost:7701/households -H "authorization: Bearer $J" | jq     # [{id, name:"My Home", role:"admin"}]
+curl -s localhost:7701/households -H "authorization: Bearer $J" | jq     # the legacy households, legacy names and ids
 ```
 
-1. Rename "My Home" to the kitchen household's name (app, or `PATCH /households/{id}` `{"name": …}`).
-2. Create the demo node's household if it should stay separate (`POST /households {"name": …}`), as in legacy.
-3. Invite the kitchen household's second member: `POST /households/{id}/invites` → an invite code they use
-   at sign-up in the app.
-4. Every other user signs up again in the app (their own household, as before).
-5. Second superuser (legacy had 2): Q9.
-
-Access tokens from legacy fail against jarvisd (new signing key), so apps land on the sign-in screen.
+Access tokens and refresh tokens from legacy are not imported (new signing key), so apps land on the
+sign-in screen once; the old password works. The second legacy superuser stays a superuser (Q9 is moot).
 
 ### 4.7.1 Recipes import (5 min, then again as people sign up)
 
 `jarvisd import-recipes` brings in recipes, meal plans, staples and SKU mappings, owned by the jarvisd
-account with the **same email** as the legacy one (docs/recipes/00-inventory.md §13). Run it once the
-kitchen household is set up (§4.7 steps 1–3) and its members have signed up; run it again whenever
-more people have. It never touches the legacy stack, and a dry run (the default) writes nothing.
+account with the **same email** as the legacy one (docs/recipes/00-inventory.md §13). With the accounts
+and households imported (§4.3a, ids kept) every user and household matches on the first run, so it runs
+once. It never touches the legacy stack, and a dry run (the default) writes nothing.
 
 ```sh
 # The jarvisd service account must be able to read the bundle, and must be the one writing
@@ -448,9 +486,18 @@ If the survey (§3.6) showed `absolute=` URLs pointing at the legacy recipes hos
 are made relative automatically when the bundle has the file; add `--legacy-host <host:port>` for any
 that do not.
 
-### 4.8 Nodes: re-point without a factory reset (5 min each, ~1 min of it waiting)
+### 4.8 Nodes: nothing to do (check only, 2 min)
 
-For each node: register its **existing** `node_id` on jarvisd, give it the new key, restart it. The node
+The import kept every node's registration and key (§4.3a), and jarvisd answers on the legacy host and
+ports, so nodes reconnect unchanged: HTTP with their `node_id:node_key`, MQTT with the same key. Check:
+the app's node list shows each household's nodes; `journalctl -u jarvisd --since -10min | grep -i mqtt`
+shows the kitchen node connecting within a minute or two. Inactive nodes (listed by the import report)
+stay inactive. Nodes older than 0.1.131 need an update first to reach the broker (legacy-import.md §3).
+
+**Fallback only** (a node the import didn't bring, or one whose key no longer matches): re-point it
+without a factory reset (5 min each, ~1 min of it waiting).
+
+For each such node: register its **existing** `node_id` on jarvisd, give it the new key, restart it. The node
 keeps its Wi-Fi, room, packages and local secrets; it fetches fresh per-node MQTT credentials itself
 (A10: 55 s from restart to MQTT on a Pi Zero).
 
@@ -496,17 +543,20 @@ The demo node runs with `JARVIS_CONFIG_URL_STYLE=remote`. If its config URL is a
 through the tunnel and gets the public URLs (§4.6.1). If its config URL is the LAN IP, it gets LAN URLs:
 `remote` keeps its LAN meaning.
 
-**Not migrated now:** the dormant living_room node (last seen 2026-09-02) and four older nodes. When one
-comes back it will retry against jarvisd with its old key (A10 F17: WARN lines, no harm); re-point it
-the same way then (Q4). The test/canary rows are dropped.
+**Dormant nodes:** the living_room node (last seen 2026-09-02) and four older nodes are imported with
+their keys; when one comes back it logs in as before (0.1.x nodes need an update to reach the broker,
+legacy-import.md §3). Household-less test rows are dropped by the import ("no imported auth
+registration" or "household not imported" in the report).
 
 ### 4.9 Phones (each user, 5 min)
 
 On the LAN the app finds jarvisd by mDNS (`_jarvis-config._tcp`) or by the manual config URL
 `http://10.0.0.107:7700`. Off the LAN, use the config service's public hostname. Either way, once §4.6.1
-is done, the app is handed the public URLs, so it keeps working when the phone leaves the house. Each user: sign out, sign up (with the invite code for the kitchen household's
-second member), allow notifications so the app registers its push token, pick their node for chat.
-Optional voice enrollment, then the superuser turns speaker recognition on (admin Settings,
+is done, the app is handed the public URLs, so it keeps working when the phone leaves the house. Each user: sign in again with their legacy email and password (accounts, households and roles were
+imported; legacy tokens were not), allow notifications so the app registers its push token, pick their
+node for chat.
+Voice profiles are not imported: optional re-enrollment, then the superuser turns speaker recognition on
+(it carries over where a household had turned it on) (admin Settings,
 `voice.recognition_enabled`; threshold 0.43 default, not prod's 0.49).
 
 Lost and re-entered by hand: memories (49), routines (2; default routines seed themselves per household,
@@ -659,12 +709,13 @@ Things the read-only survey could not settle. Each has a recommendation.
 | Q8 | **Privacy step** values not read from prod: reader proxy (`web_scraping.allow_external`) and update checks. | Update checks on (needed for `jarvisd upgrade --check` in the admin); reader proxy as prod had it (tell me). |
 | Q9 | Legacy had **2 superusers**. Does the second one need superuser on jarvisd? (Needs `jarvisd admin-token create auth` + `PUT /admin/users/{id}/superuser`, ID4.) | Only if they use the admin. |
 | Q10 | When may the legacy stack be **removed** (containers, 150 GB of models, 16 GB ollama volume)? | Two stable weeks, then ask again. |
-| Q11 | Memories (49) and inbox (100) are lost under ID6 (ID6 counted 2 memories; it is 49 now). Re-confirm clean start, or hand-copy a few memories? | Clean start as decided; the dump keeps them. |
+| Q11 | ~~Memories (49) and inbox (100) are lost under ID6.~~ Superseded by ID6r (2026-10-09): `import-legacy` carries them over (§4.3a). | — |
 
 
 ## Answers (2026-10-07)
 
-- Q11: clean start re-confirmed by the user with the corrected counts.
+- Q11: clean start re-confirmed by the user with the corrected counts. **Superseded 2026-10-09 (ID6r):**
+  a clean start orphans every legacy node; the data is imported instead (§3.7, §4.3a).
 - Q1: the Cloudflare tunnel **stays**. Off-LAN service discovery through it needs jarvisd to hand out public URLs. **Built (2026-10-07):** a public URL per registry row (admin Connections), answered "in kind" by `/services` and `/services/{name}`. Entered at §4.6.1; tunnel ingress changes are in §4.11.
 - Q5 (checked 2026-10-08 against the node-setup repo): **v0.3.1 does NOT have the cutover node changes.** It has per-node MQTT credentials and `NodeLLMClient`, but `chat_text()`/`chat()` still call `/api/v0/chat` (jarvisd drops it, D5) — that's open PR #134 — and inline routine definitions (D24) are open PR #135. Go/no-go G3 needs both merged, a node-setup release (v0.3.2), and the kitchen + demo nodes updated before cutover. Without them: jokes, routine briefings and "what's up" fail, and server-sent routine definitions don't run.
 - Q2 (user 2026-10-08): **recipes must work at cutover** — "we need to get everything working at the same time so we can delay deploying". Cutover waits for one coordinated release: jarvisd + the recipes add-on on jarvisd (OCR over HTTP + callback, auth against jarvisd) + node-setup v0.3.2 (#134, #135) + the mobile Twilio section. Recipe ownership: **remap by email** with a one-time recipes-side script run after users re-register (legacy user id → new jarvisd id; unmatched rows stay orphaned for later cleanup).
@@ -675,7 +726,7 @@ Things the read-only survey could not settle. Each has a recommendation.
   Rehearsed end to end against the MBP legacy stack (docs/recipes/00-inventory.md R11).
 - G3 follow-up (2026-10-08): #134 and #135 merged (user: merge if green) and **node-setup v0.3.2 released** (signed, arm64 tarball + images). Both changes also work against the legacy CC, so the kitchen and demo nodes can be updated to 0.3.2 *before* cutover through the legacy admin's node update (pending_update) — that touches prod, so only with the user's go. Mobile Twilio section: jarvis-node-mobile PR #83 awaiting review (admin-only editing, matching the server's RoleAdmin check).
 - Q3 (user 2026-10-08): **drop jarvis-web (browser chat, 7722) and the settings-server (7708)** at cutover.
-- Q4 (user 2026-10-08, after a read-only ownership check): only the **kitchen** node is in the user's household. living_room (0.3.1, last seen 2026-09-02, a different 2-member household), bedroom (0.1.121, 2026-08-20) and the on-prod demo node `default` (0.2.0) are in other households; six household-less `kitchen` rows (last seen 2026-08-12) are test leftovers. Decision: **owners of other households' nodes redo setup** after cutover (factory reset incl. Wi-Fi) — tell them in advance (G5). Only the kitchen node is re-pointed over SSH (§4.8). The demo node goes with the legacy stack.
+- Q4 (user 2026-10-08, after a read-only ownership check): only the **kitchen** node is in the user's household. living_room (0.3.1, last seen 2026-09-02, a different 2-member household), bedroom (0.1.121, 2026-08-20) and the on-prod demo node `default` (0.2.0) are in other households; six household-less `kitchen` rows (last seen 2026-08-12) are test leftovers. Decision: **owners of other households' nodes redo setup** after cutover (factory reset incl. Wi-Fi) — tell them in advance (G5). **Superseded 2026-10-09 (ID6r):** their nodes, households and accounts are imported, so their nodes reconnect as they are (§4.8). Only the kitchen node is re-pointed over SSH (§4.8). The demo node goes with the legacy stack.
 - Q6 (user 2026-10-08): **phone calls turned on after cutover**, as a follow-up (Twilio settings per household + tunnel route 7713 → 7703 `/phone/media/`); the first real jarvisd call stays out of the cutover window.
 - Q7: **go2rtc left off** (nothing consumes it until cameras land; restart command in §4.2).
 - Q8: privacy step for prod: **update checks off, reader proxy off**; push relay and web search on (as planned — user may still turn them off).
