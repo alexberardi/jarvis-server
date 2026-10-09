@@ -38,6 +38,11 @@ const BundleFormat = "jarvis-recipes-export/1"
 // LegacyAlembicHead is the legacy recipes schema the bundle's tables must come from.
 const LegacyAlembicHead = "e1f2a3b4c5d6"
 
+// LegacyAlembicHeadPreStaples is the migration before it, which only lacks the staples table
+// (e1f2a3b4c5d6 adds it and changes nothing else). Prod never got that migration, so a bundle
+// from it is accepted with no staples.
+const LegacyAlembicHeadPreStaples = "c9d0e1f2a3b4"
+
 // maxBundleFile bounds one file read from a bundle (a photo is at most image.max_bytes on
 // legacy's from-image route, but editor uploads were unbounded there).
 const maxBundleFile = 64 << 20
@@ -320,8 +325,9 @@ func parseBundle(files map[string][]byte) (*Bundle, error) {
 	if m.Format != BundleFormat {
 		return nil, fmt.Errorf("manifest format %q, want %q", m.Format, BundleFormat)
 	}
-	if m.RecipesAlembicHead != LegacyAlembicHead {
-		return nil, fmt.Errorf("the legacy recipes schema is at %q; this import reads %q only", m.RecipesAlembicHead, LegacyAlembicHead)
+	if m.RecipesAlembicHead != LegacyAlembicHead && m.RecipesAlembicHead != LegacyAlembicHeadPreStaples {
+		return nil, fmt.Errorf("the legacy recipes schema is at %q; this import reads %q (or %q, before staples) only",
+			m.RecipesAlembicHead, LegacyAlembicHead, LegacyAlembicHeadPreStaples)
 	}
 	names := make([]string, 0, len(m.Files))
 	for name := range m.Files {
@@ -362,6 +368,9 @@ func parseBundle(files map[string][]byte) (*Bundle, error) {
 		if err := json.Unmarshal(data, targets[name]); err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
+	}
+	if m.RecipesAlembicHead == LegacyAlembicHeadPreStaples && len(b.Staples) > 0 {
+		return nil, fmt.Errorf("staples.json has %d rows, but schema %s has no staples table", len(b.Staples), m.RecipesAlembicHead)
 	}
 	return b, nil
 }

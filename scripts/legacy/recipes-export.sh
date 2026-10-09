@@ -30,7 +30,7 @@
 set -euo pipefail
 
 SSH="" OUT="" PG=jarvis-postgres PGUSER_="" RDB=jarvis_recipes ADB=jarvis_auth RC="" MEDIA=/app/media
-HEAD=e1f2a3b4c5d6
+HEAD=e1f2a3b4c5d6 PRE_STAPLES=c9d0e1f2a3b4
 umask 077
 while [ $# -gt 0 ]; do
   case $1 in
@@ -81,7 +81,10 @@ chmod 700 "$WORK"
 mkdir "$WORK/media"
 
 head_now=$(psql_ro "$RDB" "SELECT version_num FROM alembic_version" | tr -d '\r')
-[ "$head_now" = "$HEAD" ] || die "legacy recipes schema is at '$head_now', not $HEAD: this exporter and jarvisd import-recipes read $HEAD only"
+# $PRE_STAPLES is the migration before $HEAD, which only adds the staples table: prod never got
+# it, so it exports with no staples.
+[ "$head_now" = "$HEAD" ] || [ "$head_now" = "$PRE_STAPLES" ] ||
+  die "legacy recipes schema is at '$head_now', not $HEAD (or $PRE_STAPLES): this exporter and jarvisd import-recipes read those only"
 say "source ${SSH:-local}, $PG ($PGUSER_), recipes schema $head_now"
 
 # table FILE DB SELECT…: the rows as one JSON array, in the SELECT's order.
@@ -99,7 +102,11 @@ table tags.json "$RDB" "SELECT id, name FROM tags ORDER BY id"
 table recipe_tags.json "$RDB" "SELECT recipe_id, tag_id FROM recipe_tags ORDER BY ctid"
 table meal_plans.json "$RDB" "SELECT id, user_id, household_id, name, start_date, created_at FROM meal_plans ORDER BY id"
 table meal_plan_items.json "$RDB" "SELECT id, meal_plan_id, recipe_id, date, meal_type FROM meal_plan_items ORDER BY id"
-table staples.json "$RDB" "SELECT id, user_id, household_id, name, created_at FROM staples ORDER BY id"
+if [ "$head_now" = "$PRE_STAPLES" ]; then
+  echo '[]' > "$WORK/staples.json"
+else
+  table staples.json "$RDB" "SELECT id, user_id, household_id, name, created_at FROM staples ORDER BY id"
+fi
 table grocery_sku_map.json "$RDB" "SELECT id, user_id, household_id, retailer, ingredient_name, sku, product_name, unit_size, source, created_at, updated_at FROM grocery_sku_map ORDER BY id"
 table auth_users.json "$ADB" "SELECT id, email FROM users ORDER BY id"
 table auth_households.json "$ADB" "SELECT id, name FROM households ORDER BY id"

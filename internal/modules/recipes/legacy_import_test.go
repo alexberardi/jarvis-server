@@ -582,6 +582,19 @@ func TestLoadBundleChecks(t *testing.T) {
 			t.Fatalf("err %v", err)
 		}
 	})
+	t.Run("pre-staples head", func(t *testing.T) {
+		// Prod stopped one migration short of staples: no staples table, so the export writes [].
+		f := baseFixture()
+		f.head = LegacyAlembicHeadPreStaples
+		f.tables["staples.json"] = []map[string]any{}
+		if _, err := LoadBundle(f.dir(t)); err != nil {
+			t.Fatalf("pre-staples bundle refused: %v", err)
+		}
+		f.tables["staples.json"] = []map[string]any{{"id": 1, "user_id": "1", "household_id": lh1, "name": "salt", "created_at": "2026-01-02T03:04:05"}}
+		if _, err := LoadBundle(f.dir(t)); err == nil || !strings.Contains(err.Error(), "staples") {
+			t.Fatalf("staples rows under the pre-staples head: err %v", err)
+		}
+	})
 	t.Run("empty tables are json null", func(t *testing.T) {
 		f := baseFixture()
 		for _, k := range []string{"meal_plans.json", "meal_plan_items.json", "grocery_sku_map.json"} {
