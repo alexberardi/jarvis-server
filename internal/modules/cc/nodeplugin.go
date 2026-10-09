@@ -84,8 +84,9 @@ func (m *Module) handleNodeLLMChat(w http.ResponseWriter, r *http.Request, n *no
 
 // handleDateContext returns the node's strict DateContext. D40 03.Q11: user_timezone and
 // is_dst are always filled; an unknown zone falls back to UTC (D8) instead of a 500.
-func (m *Module) handleDateContext(w http.ResponseWriter, r *http.Request, _ *nodeCtx) {
-	tz := r.URL.Query().Get("timezone")
+// The household's explicitly set zone wins over the node's ?timezone= (timezone.go).
+func (m *Module) handleDateContext(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+	tz := m.turnTimezone(r.Context(), n.HouseholdID, r.URL.Query().Get("timezone"))
 	httpx.WriteJSON(w, http.StatusOK, dates.New(m.now(), tz).Object())
 }
 

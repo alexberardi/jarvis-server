@@ -169,9 +169,10 @@ func (s *routineSchedule) target() string {
 	return *s.TargetNodeID
 }
 
-// location is the zone the cron evaluates in. D40 08.Q6 wants the target node's zone, then
-// the household's; jarvisd stores neither yet, so the schedule's own zone (validated at save)
-// is used, as legacy did. An empty zone is UTC.
+// location is the zone the cron evaluates in: the schedule's own zone (validated at save; the
+// mobile editor fills it from the phone), as legacy did. D40 08.Q6 wanted the target node's
+// zone, then the household's; the household.timezone setting (timezone.go) deliberately does
+// not override an explicit routine zone. An empty zone is UTC.
 func (s *routineSchedule) location() *time.Location {
 	if s.Timezone == "" {
 		return time.UTC

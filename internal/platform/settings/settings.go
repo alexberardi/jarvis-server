@@ -54,6 +54,9 @@ type Definition struct {
 	RequiresReload bool
 	IsSecret       bool
 	Options        []any
+	// Validate, when set, checks a value before Set stores it. nil (which clears the scope's
+	// value) is never validated. The error's text is shown to whoever wrote the value.
+	Validate func(v any) error
 }
 
 // Scope selects where a value is read or written. Zero fields are unset; user ids start at 1.
@@ -65,6 +68,9 @@ type Scope struct {
 
 // ErrUnknownKey is returned for a key with no Definition.
 var ErrUnknownKey = errors.New("settings: unknown key")
+
+// ErrInvalidValue wraps a Definition.Validate rejection (errors.Is; the message follows it).
+var ErrInvalidValue = errors.New("settings: invalid value")
 
 // Service reads and writes one module's settings.
 type Service struct {
@@ -372,11 +378,36 @@ func truthy(v any) bool {
 	}
 }
 
-// Set upserts the value at exactly scope.
+// Validate runs key's Definition.Validate on value: nil when it passes (or the key has no
+// validator, or value is nil), else an error wrapping ErrInvalidValue.
+func (s *Service) Validate(key string, value any) error {
+	def, ok := s.defs[key]
+	if !ok {
+		return ErrUnknownKey
+	}
+	if def.Validate == nil || value == nil {
+		return nil
+	}
+	if err := def.Validate(value); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidValue, err.Error())
+	}
+	return nil
+}
+
+// InvalidValueMessage is a validation error's text without the ErrInvalidValue prefix.
+func InvalidValueMessage(err error) string {
+	return strings.TrimPrefix(err.Error(), ErrInvalidValue.Error()+": ")
+}
+
+// Set upserts the value at exactly scope. A value its Definition.Validate rejects is not
+// stored (ErrInvalidValue).
 func (s *Service) Set(ctx context.Context, key string, value any, sc Scope) error {
 	def, ok := s.defs[key]
 	if !ok {
 		return ErrUnknownKey
+	}
+	if err := s.Validate(key, value); err != nil {
+		return err
 	}
 	ser, err := Serialize(value, def.Type)
 	if err != nil {
