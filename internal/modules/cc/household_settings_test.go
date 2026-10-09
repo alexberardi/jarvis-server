@@ -15,6 +15,10 @@ func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
 	defs := map[string]settings.Type{}
 	for _, d := range Definitions() {
 		defs[d.Key] = d.Type
+		// The allowlist is what marks a definition Household (the admin's household values).
+		if _, allowed := householdSettingType(d.Key); d.Household != allowed {
+			t.Errorf("%s: Household=%v, allowlisted=%v", d.Key, d.Household, allowed)
+		}
 	}
 	if len(householdControllable) != 19 {
 		t.Fatal(len(householdControllable))
@@ -51,6 +55,22 @@ func TestHouseholdSettingsGet(t *testing.T) {
 	s := e.do("GET", "/api/v0/mobile/household/hh1/settings", nil, bearer(member)).want(200).json()["settings"].(map[string]any)
 	if s["phone_calls.calls_per_day"] != nil || s["web_search.enabled"] != false {
 		t.Fatal(s)
+	}
+}
+
+// The user's report (2026-10-09): pantry.enabled turned on in the app is a household-scope
+// row, which the settings service lists as that household's own value (what the admin shows).
+func TestHouseholdSettingWriteIsAHouseholdValue(t *testing.T) {
+	e := newEnv(t)
+	admin := e.auth.addUser(5, "hh1", authn.RoleAdmin)
+	e.do("PUT", "/api/v0/mobile/household/hh1/settings/pantry.enabled", map[string]any{"value": true}, bearer(admin)).want(200)
+	ctx := context.Background()
+	got, err := e.m.Settings().HouseholdValues(ctx, settingPantryEnabled)
+	if err != nil || len(got) != 1 || got[0].HouseholdID != "hh1" || got[0].Value != true {
+		t.Fatalf("household values: %+v %v", got, err)
+	}
+	if v, _ := e.m.Settings().Get(ctx, settingPantryEnabled, settings.Scope{}); v.Value != false {
+		t.Fatalf("the install-wide default changed: %v", v.Value)
 	}
 }
 

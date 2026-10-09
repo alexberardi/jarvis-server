@@ -77,6 +77,17 @@ func householdSettingType(key string) (householdSetting, bool) {
 
 const masked = "********"
 
+// markHouseholdControllable sets Household on the allowlisted keys' definitions: the allowlist
+// stays the one source of truth for what a household may change.
+func markHouseholdControllable(defs []settings.Definition) []settings.Definition {
+	for i := range defs {
+		if _, ok := householdSettingType(defs[i].Key); ok {
+			defs[i].Household = true
+		}
+	}
+	return defs
+}
+
 // householdSettingDefinitions declares the allowlisted keys nothing else declares yet.
 func householdSettingDefinitions() []settings.Definition {
 	return []settings.Definition{

@@ -44,6 +44,7 @@ type Module struct {
 	SettingsSources []SettingsSource // every module with a settings service (admin adds its own)
 	Traces          TraceStore       // cc
 	Accounts        Accounts         // auth
+	Households      Households       // auth: household names for per-household setting values
 	Models          Models           // llm
 	Prompts         PromptProviders  // cc
 	Logs            LogStore         // logs (A4)

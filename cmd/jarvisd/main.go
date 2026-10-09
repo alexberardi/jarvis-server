@@ -227,7 +227,7 @@ func modules() []module.Module {
 				}
 			}
 			c.Traces, c.Prompts = cc, cc
-			c.Accounts = auth
+			c.Accounts, c.Households = auth, auth
 			c.Models = llm
 			if ttsm != nil {
 				c.TTS = ttsm // the wizard's voice sample (AD3b)

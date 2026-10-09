@@ -47,11 +47,13 @@ const ServiceName = "jarvis-command-center"
 // Setting keys owned by 5a (D11: only keys something reads are declared).
 const settingUpdatesAllowCheck = "updates.allow_check"
 
-// Definitions are the module's settings declared so far.
+// Definitions are the module's settings declared so far. The household settings allowlist's
+// keys are marked Household, so the admin shows and edits each household's own value.
 func Definitions() []settings.Definition {
-	return routineDefinitions(slices.Concat(nodeDefinitions(), voiceDefinitions(prompts.DefaultPersona),
-		packageDefinitions(), smartHomeDefinitions(), memoryDefinitions(), signalDefinitions(),
-		phone.Definitions(), errands.Definitions(), householdSettingDefinitions()))
+	return markHouseholdControllable(routineDefinitions(slices.Concat(nodeDefinitions(),
+		voiceDefinitions(prompts.DefaultPersona), packageDefinitions(), smartHomeDefinitions(),
+		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(),
+		householdSettingDefinitions())))
 }
 
 func nodeDefinitions() []settings.Definition {

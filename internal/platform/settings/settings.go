@@ -57,6 +57,11 @@ type Definition struct {
 	// Validate, when set, checks a value before Set stores it. nil (which clears the scope's
 	// value) is never validated. The error's text is shown to whoever wrote the value.
 	Validate func(v any) error
+	// Household says a household may set its own value, overriding the system one for that
+	// household only (the household scope of the cascade). The owning module marks the keys
+	// its household-facing routes allow (cc: the mobile household settings allowlist); the
+	// admin lists and edits each household's value of these keys.
+	Household bool
 }
 
 // Scope selects where a value is read or written. Zero fields are unset; user ids start at 1.
@@ -236,14 +241,7 @@ func (s *Service) GetExact(ctx context.Context, key string, sc Scope) (value any
 	if !ok {
 		return nil, false, ErrUnknownKey
 	}
-	where := "household_id IS NULL AND node_id IS NULL AND user_id IS NULL"
-	var args []any
-	for _, l := range cascade {
-		if l.need(sc) {
-			where, args = l.where, l.args(sc)
-			break
-		}
-	}
+	where, args := exactWhere(sc)
 	var raw sql.NullString
 	var vt string
 	err = s.db.Read.QueryRowContext(ctx,
@@ -259,6 +257,74 @@ func (s *Service) GetExact(ctx context.Context, key string, sc Scope) (value any
 		return nil, false, nil
 	}
 	return s.coerce(raw.String, Type(vt), def), true, nil
+}
+
+// exactWhere is the WHERE clause (and its arguments) selecting exactly sc's level: the most
+// specific cascade level sc fills.
+func exactWhere(sc Scope) (string, []any) {
+	for _, l := range cascade {
+		if l.need(sc) {
+			return l.where, l.args(sc)
+		}
+	}
+	return "household_id IS NULL AND node_id IS NULL AND user_id IS NULL", nil
+}
+
+// HouseholdValue is one household's own value of a setting (a household-scope row).
+type HouseholdValue struct {
+	HouseholdID string
+	Value       any // coerced like Get; "********" for a secret that is set
+	UpdatedAt   string
+}
+
+// HouseholdValues lists the households with their own value of key (household scope only: no
+// node or user part), ordered by household id. A row whose value is NULL or empty is left out:
+// it holds nothing of the household's own (GetExact reads it as not found).
+func (s *Service) HouseholdValues(ctx context.Context, key string) ([]HouseholdValue, error) {
+	def, ok := s.defs[key]
+	if !ok {
+		return nil, ErrUnknownKey
+	}
+	rows, err := s.db.Read.QueryContext(ctx, "SELECT household_id, value, value_type, updated_at FROM "+s.table+
+		" WHERE key = ? AND household_id IS NOT NULL AND node_id IS NULL AND user_id IS NULL"+
+		" AND value IS NOT NULL AND value != '' ORDER BY household_id, id", key)
+	if err != nil {
+		return nil, fmt.Errorf("settings: household values of %s: %w", key, err)
+	}
+	defer rows.Close()
+	var out []HouseholdValue
+	for rows.Next() {
+		var hv HouseholdValue
+		var raw, vt string
+		if err := rows.Scan(&hv.HouseholdID, &raw, &vt, &hv.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("settings: household values of %s: %w", key, err)
+		}
+		if n := len(out); n > 0 && out[n-1].HouseholdID == hv.HouseholdID {
+			continue // the unique index allows one row per scope; keep the first, as Get does
+		}
+		hv.Value = s.coerce(raw, Type(vt), def)
+		if def.IsSecret && truthy(hv.Value) {
+			hv.Value = "********"
+		}
+		out = append(out, hv)
+	}
+	return out, rows.Err()
+}
+
+// Delete removes key's row at exactly sc, so that scope falls back through the cascade again.
+// It reports whether a row was removed.
+func (s *Service) Delete(ctx context.Context, key string, sc Scope) (bool, error) {
+	if _, ok := s.defs[key]; !ok {
+		return false, ErrUnknownKey
+	}
+	where, args := exactWhere(sc)
+	res, err := s.db.Write.ExecContext(ctx, "DELETE FROM "+s.table+" WHERE key = ? AND "+where,
+		append([]any{key}, args...)...)
+	if err != nil {
+		return false, fmt.Errorf("settings: delete %s: %w", key, err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 func (s *Service) fallback(def Definition) any {
