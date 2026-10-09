@@ -1,6 +1,6 @@
 # Chat images and context compaction (draft, 2026-10-09)
 
-**Status: design in progress, nothing built.** Questions are asked one at a time; decisions land in §5.
+**Status: designed 2026-10-09 (§5, §6); building.**
 
 ## 1. Goal
 
@@ -51,3 +51,17 @@ totals, "save as recipe" → recipes import); share sheet into Jarvis; camera sn
 | CI2 | 2026-10-09 | App picker | Camera/gallery by the chat input, gated on live vision (user: "makes sense"). |
 | CI3 | 2026-10-09 | Image lifetime in history | Only for the turn sent, then a description (user: "exactly"). |
 | CI4 | 2026-10-09 | Compaction | Yes: summarize older turns near the context limit (user idea). |
+| CI5 | 2026-10-09 | Who writes image descriptions and compaction summaries | The background slot, as a job right after the reply (user). If background has no vision, live writes the description after replying. A turn arriving before the description is ready still sees the image. |
+| CI6 | 2026-10-09 | Compaction thresholds | Async at 75 % of the live slot's context (setting; user found 70 % aggressive), synchronous at 90 %. Applies to every cc conversation (chat and voice share the cache). |
+
+## 6. Wire contract (app ↔ jarvisd)
+
+- `GET /api/v0/mobile/chat/capabilities` → `{"images": bool, "max_images": 4, "max_image_bytes": 2097152}`.
+  `images` is true only when the live endpoint reports vision. 404 (legacy server) = no images.
+- `POST /api/v0/mobile/chat` gains optional `images: [{"mime": "image/jpeg", "data": "<base64>"}]`
+  (at most `max_images`, each at most `max_image_bytes` decoded; jpeg/png/webp). `message` may be
+  empty when images are present. Images while vision is off → 422
+  `{"code": "images_unavailable", "detail": …}`; too many/too big/bad type → 422 with
+  `code` `images_invalid`.
+- The SSE stream is unchanged.
+
