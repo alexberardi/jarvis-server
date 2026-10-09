@@ -20,8 +20,10 @@ const DefaultHomeName = ".jarvisd"
 const EnvFileName = "jarvisd.env"
 
 // SystemEnvFile is the Linux system service's env file (00-installers §2.0). On unix it is
-// read after <home>/jarvisd.env.
-const SystemEnvFile = "/etc/jarvisd/jarvisd.env"
+// read after <home>/jarvisd.env. A variable only so tests can point it away from the real
+// file: on a box with the system service installed it is root:jarvisd 0640, and a test run as
+// the developer fails to read it.
+var SystemEnvFile = "/etc/jarvisd/jarvisd.env"
 
 // ResolveHome picks the data directory, in order: the --home flag, JARVIS_HOME, the home of
 // an installed jarvisd service (serviceHome, "" when none), then ~/.jarvisd. The result is
