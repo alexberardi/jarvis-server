@@ -189,10 +189,12 @@ func (s *Service) runCall(id string, tel Telephony) {
 		fail("calls.create failed: " + err.Error())
 		return
 	}
+	// Bind the stream token first: a media stream claimed before the token carries the call
+	// SID would skip the call-SID check in ValidateStreamStart.
+	s.tokens.BindCallSID(token, callSID)
 	rt.mu.Lock()
 	rt.callSID = callSID
 	rt.mu.Unlock()
-	s.tokens.BindCallSID(token, callSID)
 	s.log().Info("phone: dialing", "session", id, "call_sid", callSID)
 
 	select {
