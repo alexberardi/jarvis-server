@@ -72,6 +72,8 @@ export default function ModelBanner() {
   }
   if (data.models_configured && data.live_ready === false) {
     const st = data.labels?.live ?? 'unknown'
+    // A lost GPU isn't something to wait out: the dashboard's GPU banner says what to do.
+    if (st === 'gpu_unavailable') return null
     return (
       <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
         <Loader2 size={18} className="animate-spin text-amber-500" />

@@ -41,6 +41,8 @@ func notReady(err error) error {
 	var nr *engine.NotReadyError
 	if errors.As(err, &nr) {
 		switch nr.State {
+		case engine.StateGPUUnavailable:
+			return &NotReadyError{State: StateGPUUnavailable, Reason: nr.Reason}
 		case "starting", "restarting", "draining", "fetching_engine":
 			return &NotReadyError{State: StateLoading, Reason: nr.Error()}
 		default: // failed, stopped, no_engine_build, misconfigured

@@ -6,6 +6,7 @@ import { LABEL_TITLE, type Label } from '@/api/llm'
 import UpdateBanner from '@/components/dashboard/UpdateBanner'
 import DoctorChecks from '@/components/doctor/DoctorChecks'
 import ModelBanner from '@/components/dashboard/ModelBanner'
+import GpuFaultBanner from '@/components/models/GpuFaultBanner'
 import PowerControls from '@/components/dashboard/PowerControls'
 import { buttonClass, stateTone } from '@/components/models/styles'
 import { Pill, Section } from '@/components/models/ui'
@@ -23,6 +24,7 @@ const STATE_TEXT: Record<string, string> = {
   not_configured: 'not configured',
   fetching_engine: 'fetching engine',
   no_engine_build: 'no engine build',
+  gpu_unavailable: 'GPU unavailable',
 }
 
 function ago(iso: string | null | undefined): string {
@@ -224,9 +226,11 @@ function TracesCard() {
 
 /** DashboardPage (S5): one look at the install, with no containers to manage. */
 export default function DashboardPage() {
+  const labels = useLabels()
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <h1 className="text-xl font-bold text-[var(--color-text)]">Dashboard</h1>
+      <GpuFaultBanner fault={labels.data?.gpu_fault} />
       <ModelBanner />
       <UpdateBanner />
       <div className="grid gap-4 md:grid-cols-2">

@@ -31,6 +31,7 @@ export function stateTone(state: string): Tone {
     case 'failed':
     case 'misconfigured':
     case 'no_engine_build':
+    case 'gpu_unavailable':
     case 'stopped':
     case 'cancelled':
       return 'bad'

@@ -134,3 +134,37 @@ describe('LabelsEditor image input', () => {
     await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ live: { mmproj: 'none' } }))
   })
 })
+
+describe('GPU fault (prod outage 2026-10-10)', () => {
+  it('warns prominently that the driver update needs a reboot and names the stopped labels', async () => {
+    const live = { ...status('live', ''), state: 'gpu_unavailable', reason: "The GPU driver was updated; reboot the server to finish (Jarvis can't use the GPU until then)." }
+    api.getLabels.mockResolvedValue({
+      labels: [live, status('background', '')],
+      voice: [],
+      engines: [],
+      proposal: {},
+      recommend: {},
+      warnings: null,
+      gpu_fault: {
+        kind: 'driver_mismatch',
+        kernel_version: '580.173.04',
+        library_version: '580.178.04',
+        labels: ['live'],
+        message: 'NVIDIA driver updated (kernel 580.173.04, libraries 580.178.04): reboot the server.',
+        user_message: "The GPU driver was updated; reboot the server to finish (Jarvis can't use the GPU until then).",
+      },
+    })
+    renderEditor()
+    const alert = await screen.findByRole('alert', { name: 'GPU problem' })
+    expect(alert).toHaveTextContent('NVIDIA driver updated (kernel 580.173.04, libraries 580.178.04): reboot the server.')
+    expect(alert).toHaveTextContent('Live (voice replies)')
+    expect(screen.getByText('GPU unavailable')).toBeInTheDocument()
+  })
+
+  it('shows nothing when the GPU is fine', async () => {
+    api.getLabels.mockResolvedValue({ labels: [status('live', '')], voice: [], engines: [], proposal: {}, recommend: {}, warnings: null })
+    renderEditor()
+    await screen.findAllByText('ready')
+    expect(screen.queryByRole('alert', { name: 'GPU problem' })).toBeNull()
+  })
+})

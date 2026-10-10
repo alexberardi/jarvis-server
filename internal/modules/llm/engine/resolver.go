@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -113,11 +114,18 @@ type Resolver struct {
 	// TemplateDir holds the pinned chat templates engines are launched with
 	// (<home>/templates); default <tmp>/jarvisd-chat-templates.
 	TemplateDir string
+	// Memory persists where each label last ran healthy on a GPU, so a GPU that disappears
+	// later is noticed even when the label's settings are all "auto" (nil = in memory only).
+	Memory GPUMemory
 
 	mu        sync.Mutex
 	instances map[string]*instance // by key hash
 	bound     map[string]string    // label -> key hash
 	wake      chan struct{}
+	// lastGood is Memory's content: label -> the GPU placement it last ran healthy on.
+	lastGood map[string]Placement
+	// gpuDown remembers labels refused for a lost GPU, to log each loss once.
+	gpuDown map[string]string
 }
 
 type instance struct {
@@ -140,6 +148,17 @@ func (r *Resolver) init() {
 	}
 	if r.Log == nil {
 		r.Log = slog.Default()
+	}
+	if r.lastGood == nil {
+		r.lastGood = map[string]Placement{}
+		r.gpuDown = map[string]string{}
+		if r.Memory != nil {
+			m, err := r.Memory.Load()
+			if err != nil {
+				r.Log.Warn("reading the last-known GPU placements", "err", err)
+			}
+			maps.Copy(r.lastGood, m)
+		}
 	}
 }
 
@@ -205,6 +224,12 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 		delete(r.bound, label)
 		return ep, nil, &NotReadyError{Label: label, State: "no_engine_build", Reason: err.Error()}
 	}
+	if nr, keep := r.gpuGate(ctx, label, c); nr != nil {
+		delete(r.bound, label)
+		return ep, nil, nr
+	} else if keep != nil {
+		return r.fill(ep, c, keep), keep, nil
+	}
 	bin, ok := r.Binaries.Path(c.Kind, f)
 	if !ok {
 		delete(r.bound, label)
@@ -238,16 +263,21 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 		}
 	}
 	r.bound[label] = h
+	return r.fill(ep, c, inst), inst, nil
+}
+
+// fill completes a local label's endpoint from its instance.
+func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 	ep.Engine, ep.APIKey, ep.Model = inst.name, inst.apiKey, inst.alias
 	ep.FoldSystemMessages = c.FoldSystemMessages
-	ep.ContextLength, ep.Parallel = key.Context, key.Parallel
-	ep.Vision = key.MMProj != ""
+	ep.ContextLength, ep.Parallel = inst.key.Context, inst.key.Parallel
+	ep.Vision = inst.key.MMProj != ""
 	if c.Kind == KindWhisper {
 		ep.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", inst.port)
 	} else {
 		ep.BaseURL = fmt.Sprintf("http://127.0.0.1:%d/v1", inst.port)
 	}
-	return ep, inst, nil
+	return ep
 }
 
 // NormalizeBaseURL turns a pasted endpoint into an OpenAI base URL: trailing slashes and a
@@ -407,6 +437,7 @@ func (r *Resolver) Reconcile(ctx context.Context) {
 		}
 	}
 	r.gc(ctx)
+	r.recordGPU(ctx)
 	base := r.RetryFailed
 	if base <= 0 {
 		base = time.Minute

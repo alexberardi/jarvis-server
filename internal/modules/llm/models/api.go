@@ -33,7 +33,9 @@ func NewStack(deps module.Deps, set *settings.Service) *Stack {
 	bins.BaseURL = func(k engine.Kind) string { return str(engine.BaseURLKey(k)) }
 	bins.Override = func(k engine.Kind) string { return str(engine.PathKey(k)) }
 	det := engine.NewDetector(func() map[engine.Flavour]string { return bins.Installed(engine.KindLlama) })
+	det.Log = log
 	res := &engine.Resolver{
+		Memory:   engine.FileGPUMemory{Path: filepath.Join(deps.Config.Home, "engines", "gpu-placements.json")},
 		Source:   engine.SettingsSource{Settings: set, Models: store},
 		Binaries: bins,
 		Hardware: func(ctx context.Context) engine.Hardware { return det.Hardware(ctx, false) },
@@ -58,8 +60,15 @@ func NewStack(deps module.Deps, set *settings.Service) *Stack {
 	return &Stack{Store: store, Binaries: bins, Detector: det, Resolver: res, Manager: mgr}
 }
 
-// Start runs the resolver loop (engines start for configured labels).
-func (s *Stack) Start(ctx context.Context) error { return s.Resolver.Start(ctx) }
+// Start runs the resolver loop (engines start for configured labels) and the GPU watch, which
+// detects at once (logging a driver fault at startup) and re-checks every few minutes.
+func (s *Stack) Start(ctx context.Context) error {
+	go func() {
+		s.Detector.Hardware(ctx, false)
+		engine.WatchGPU(ctx, s.Detector, s.Resolver, 0)
+	}()
+	return s.Resolver.Start(ctx)
+}
 
 // Mount serves the model-manager API, every route behind guard (main wires
 // settings.SuperuserGuard).
@@ -293,8 +302,10 @@ func (a *API) deleteModel(w http.ResponseWriter, r *http.Request) {
 func (a *API) labels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hw := a.Manager.hardware(ctx)
+	labels := a.Resolver.Status(ctx)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"labels":    a.Resolver.Status(ctx),
+		"labels":    labels,
+		"gpu_fault": engine.FaultFor(hw, labels),
 		"voice":     a.Manager.VoiceStatus(ctx),
 		"engines":   a.Resolver.Instances(),
 		"proposal":  engine.Propose(hw),
@@ -331,6 +342,7 @@ func (a *API) hardware(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"hardware":  hw,
+		"gpu_fault": engine.FaultFor(hw, a.Resolver.Status(ctx)),
 		"proposal":  engine.Propose(hw),
 		"builds":    builds,
 		"installed": a.Manager.Binaries.List(),

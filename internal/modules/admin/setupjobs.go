@@ -63,7 +63,7 @@ type JobSummary struct {
 }
 
 // labelFailed are label states that need the operator, not patience.
-var labelFailed = []string{"failed", "no_engine_build", "misconfigured", "error"}
+var labelFailed = []string{"failed", "no_engine_build", "misconfigured", "error", llmmod.StateGPUUnavailable}
 
 func isActive(state string) bool { return state == "queued" || state == "running" }
 
