@@ -484,3 +484,35 @@ func TestSaveRecipeFromImageRefusals(t *testing.T) {
 }
 
 func fmtAny(v any) string { return pyjson.Dumps(v, true) }
+
+// A photo with no words (CI8): the turn says so and is never forced into a tool call, so a
+// described-and-offered reply stands (a forcing provider used to nag it into saving).
+func TestPhotoOnlyTurnOffers(t *testing.T) {
+	imp := &fakeImporter{}
+	ce, _ := newRecipeChatEnv(t, prompts.Qwen3_5_9B, imp)
+	cid := ce.warm("tok-7")
+	if conv := ce.m.convs.get(cid); !conv.forceTools {
+		t.Fatal("the provider should force tool calls for this test to mean anything")
+	}
+	before := len(ce.eng.requests())
+	ce.eng.say("That's a recipe card for lemon garlic roast chicken. Want me to save it as a recipe?")
+	frames := ce.chat("tok-7", map[string]any{"message": "", "conversation_id": cid, "images": []any{img("image/png", pngBytes)}})
+	if f := lastFrame(t, frames); f["type"] != "done" || !strings.Contains(f["full_text"].(string), "Want me to save it") {
+		t.Fatalf("frames %v", frames)
+	}
+	reqs := ce.eng.requests()[before:]
+	if len(reqs) != 1 || !strings.Contains(fmtMessages(reqs[0]), "[photo only:") { // one call: no must-call retry
+		t.Fatalf("%d requests; last %s", len(reqs), fmtMessages(ce.eng.last()))
+	}
+	if len(imp.got()) != 0 {
+		t.Fatal("saved without being asked")
+	}
+	// Words with the photo: no photo-only hint.
+	ce.eng.push(saveCall(`{}`))
+	ce.eng.say("Saving it now.")
+	ce.chat("tok-7", map[string]any{"message": "save this as a recipe", "conversation_id": cid, "images": []any{img("image/png", pngBytes)}})
+	um := userMessages(ce.m.convs.get(cid))
+	if last := um[len(um)-1]; strings.Contains(last.Content, "photo only") || len(imp.got()) != 1 {
+		t.Fatalf("worded turn %q, imports %d", last.Content, len(imp.got()))
+	}
+}

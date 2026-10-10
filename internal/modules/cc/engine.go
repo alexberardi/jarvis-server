@@ -71,6 +71,9 @@ type engineInput struct {
 	dateKeys    []string // the turn's extracted date keys
 	doubleCheck bool     // sentinel_double_check
 	turn        servertools.Turn
+	// noForce turns off the must-call retry for this turn (a photo-only chat message: with no
+	// words the force guard can't run, and there is no request to force a tool for, CI8).
+	noForce bool
 }
 
 var thinkCaptureRE = regexp.MustCompile(`(?s)<think>(.*?)</think>`)
@@ -237,7 +240,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		case parse.FinishStop:
 			exchange := parse.SentinelExchangeComplete(raw, message)
 			terminal := exchange || parse.SentinelNotForMe(raw, message)
-			force := conv.forceTools
+			force := conv.forceTools && !in.noForce
 			retries := countNags(msgs, nagMustCall)
 			if force && retries < 2 && !doubleChecked && !terminal && in.utterance != "" {
 				force = m.forceGuardArmed(conv, in.utterance, raw, message)

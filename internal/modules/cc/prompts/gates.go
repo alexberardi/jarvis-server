@@ -24,6 +24,12 @@ const PhotoActionsBlock = "PHOTOS: the user's photos in this chat can be handed 
 	"offer the matching action (e.g. \"Want me to save it as a recipe?\") without calling the tool. Never say " +
 	"an action was done unless its tool succeeded in this turn."
 
+// PhotoOnlyHint is the turn hint of a chat message that is only photos, no words (CI8): there
+// is no request to act on, so the model describes and offers.
+const PhotoOnlyHint = "[photo only: the user sent a photo with no message. Describe it in a sentence or two and, " +
+	"if one of your tools fits it, offer that action (e.g. \"Want me to save it as a recipe?\"). Don't call a tool " +
+	"on it until they say so.]"
+
 // PhotoActionsGate reports whether a turn gets PhotoActionsBlock: photos are available to
 // tools (attached now or kept from earlier) and a photo tool is offered.
 func PhotoActionsGate(photosAvailable bool, offered map[string]bool) bool {

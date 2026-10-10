@@ -38,6 +38,12 @@ type turnInput struct {
 	Images []chatImage
 }
 
+// photoOnly: a chat message of photos and no words. Nothing was asked, so the model describes
+// and offers (CI8): it gets PhotoOnlyHint and is never forced to call a tool.
+func (in turnInput) photoOnly() bool {
+	return len(in.Images) > 0 && strings.TrimSpace(in.VoiceCommand) == ""
+}
+
 // turnState is the per-turn context legacy carried in turn_context.
 type turnState struct {
 	wakeVerified            *bool
@@ -117,6 +123,9 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		profileMatchHint(in.VoiceCommand, speakerBlock),
 		m.agentContextHint(ctx, conv, in.VoiceCommand),
 	}
+	if in.photoOnly() {
+		hints = append(hints, prompts.PhotoOnlyHint)
+	}
 	user := chatMsg{Role: "user", Content: prompts.UserMessage(in.VoiceCommand, hints, suffix)}
 	var imageMsgID uint64
 	if len(in.Images) > 0 {
@@ -136,6 +145,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	res, out := m.runEngine(ctx, engineInput{
 		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, dateKeys: keys,
 		doubleCheck: doubleCheckSentinel(in, st), turn: m.toolTurn(conv, in.VoiceCommand),
+		noForce: in.photoOnly(),
 	})
 	if res.Stop == stopError {
 		endLoop(errors.New(res.Err))
