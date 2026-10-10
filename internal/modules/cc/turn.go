@@ -111,7 +111,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	if block := m.recentlyShownBlock(conv); block != "" {
 		msgs = append(msgs, transientSys(block))
 	}
-	if prompts.PhotoActionsGate(conv.hasToolPhotos(len(in.Images)), conv.serverNames) {
+	if prompts.PhotoActionsGate(conv.hasToolPhotos(len(in.Images)), conv.photoToolOffered) {
 		msgs = append(msgs, transientSys(prompts.PhotoActionsBlock)) // CI8: offer, don't act
 	}
 

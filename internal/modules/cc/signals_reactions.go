@@ -16,6 +16,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	lldates "github.com/alexberardi/jarvis-server/internal/modules/llm/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -321,7 +322,8 @@ func (r *toolsReport) clientTools() []prompts.Tool {
 	l, _ := lv.([]any)
 	var tools []prompts.Tool
 	for _, e := range l {
-		if t, ok := e.(*pyjson.Object); ok {
+		// A photo tool can't run from a signal: there is no photo (§9).
+		if t, ok := e.(*pyjson.Object); ok && !servertools.IsPhotoTool(t) {
 			tools = append(tools, t)
 		}
 	}

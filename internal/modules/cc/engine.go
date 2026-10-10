@@ -60,6 +60,11 @@ type engineResult struct {
 	EndOfExchange bool
 	Reasoning     string
 	Err           string
+	// ImageArgs are the photos a client call's image parameters resolved to, by call id
+	// (chat_image_actions.go, §9). ToolCalls keep the model's photo numbers, so history,
+	// traces and transcripts never hold bytes; only the node's tool_call gets them
+	// (wireArguments).
+	ImageArgs map[string]imageArgs
 }
 
 // engineInput is one loop run.
@@ -287,6 +292,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			// 3. Split and run the server tools.
 			var serverResults []chatMsg
 			var clientCalls []parse.ToolCall
+			var callImages map[string]imageArgs
 			validation := false
 			var validationRes *pyjson.Object
 			names := make([]any, len(calls))
@@ -299,14 +305,28 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					validation = true
 				}
 				if !conv.serverNames[c.Function.Name] {
+					if params := conv.imageParams[c.Function.Name]; len(params) > 0 {
+						// A photo tool on the node: swap the model's numbers for the photos, or
+						// refuse here like a server tool would, without calling the node (§9).
+						imgs, refusal := resolveImageArgs(c.Function.Arguments, params, conv.turnImages(msgs))
+						if refusal != nil {
+							serverResults = append(serverResults, chatMsg{Role: "tool", ToolCallID: c.ID, Name: c.Function.Name,
+								Content: pyjson.Dumps(refusal, true)})
+							continue
+						}
+						if len(imgs) > 0 {
+							if callImages == nil {
+								callImages = map[string]imageArgs{}
+							}
+							callImages[c.ID] = imgs
+						}
+					}
 					clientCalls = append(clientCalls, c)
 					continue
 				}
 				endTool := tr.measure("server_tool_"+c.Function.Name, "cc", nil)
 				turn := in.turn
-				if conv.chatUserID != 0 {
-					turn.Images = turnImagesOf(msgs, conv.photos) // the photos the model sees, by number (chat_image_actions.go)
-				}
+				turn.Images = conv.turnImages(msgs)
 				res := m.tools.Execute(ctx, servertools.Call{ID: c.ID, Name: c.Function.Name, Args: argsObject(c.Function.Arguments)}, turn)
 				endTool(nil)
 				if o, ok := res.(*pyjson.Object); ok && c.Function.Name == "request_validation" {
@@ -378,7 +398,8 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					}
 				}
 				msgs[len(msgs)-1].ToolCalls = clientCalls
-				return withReasoning(engineResult{Stop: stopToolCalls, ToolCalls: clientCalls, Message: message}), msgs
+				return withReasoning(engineResult{Stop: stopToolCalls, ToolCalls: clientCalls, Message: message,
+					ImageArgs: callImages}), msgs
 			}
 			if len(serverResults) > 0 && !native {
 				return withReasoning(engineResult{Stop: stopServerToolComplete, ServerResults: serverResults, Message: message}), msgs

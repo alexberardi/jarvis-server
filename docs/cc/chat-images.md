@@ -1,7 +1,8 @@
 # Chat images and context compaction (2026-10-09)
 
 **Status: built 2026-10-09 (branch `feat/chat-images`): §6 wire contract as written, details in §7. No DB migration.**
-**Photo → action (§8): built 2026-10-10 on branch `feat/chat-image-actions`, pending review. No DB migration, no wire change.**
+**Photo → action (§8): built 2026-10-10 on branch `feat/chat-image-actions` (PR #26, merged). No DB migration, no wire change.**
+**Image parameters on any tool (§9, CI7): built 2026-10-10 on branch `feat/image-params`. No DB migration; the node `tool_call` carries photos per the SDK contract.**
 
 ## 1. Goal
 
@@ -213,7 +214,9 @@ photo of a list → the existing `shopping_list` tool, with no change.
   photo, three imports (manual check, first run).
 - **Offered** only in mobile chat, when the live slot reports vision at warmup (the only way a
   photo can arrive) and the recipes module is wired: `prompts.ToolGates.ChatPhotos`, on both the
-  native and the text path. Voice conversations' prompt bytes are unchanged.
+  native and the text path. Voice conversations' prompt bytes are unchanged. Since §9 this is the
+  generic photo-tool gate: the tool's `images` parameter carries the image marker, nothing names
+  the tool.
 - **Refusals** the model relays:
   - `no_speaker` (no known user: voice);
   - `no_image`: ask the user to attach the photo;
@@ -342,3 +345,118 @@ Results:
 3. **Push deep link.** `type: "recipe_saved"` carries `recipe_id`, but the node app opens the
    inbox item; the recipes app is a separate app. **Recommendation:** keep the inbox item; teach
    the recipes app later if wanted.
+
+
+## 9. Image parameters on any tool (2026-10-10, CI7)
+
+Any tool can take the chat's photos: a node command from jarvis-command-sdk
+(`JarvisParameter("photos", "image")`, SDK #12, node #142) or a server tool. Recipes is now just
+the first server tool using it.
+
+### 9.1 Declaration
+
+- A tool schema marks an image parameter with `"x-jarvis-type": "image"` on the property
+  (`servertools.ImageSchemaMarker`, the SDK's `IMAGE_SCHEMA_MARKER`). The SDK's property is
+  `{"type":"array","items":{"type":"integer","minimum":1},"maxItems":4,"description":…,
+  "x-jarvis-type":"image"}`; server tools build the same with `servertools.ImageSchema(desc)`.
+- A tool with any such parameter is a **photo tool** (`servertools.IsPhotoTool`,
+  `ImageParams` lists name + required). Nothing is keyed by tool name any more:
+  `prompts.PhotoTools` is gone; `ToolGates.PhotoTools` is filled from the registry's
+  definitions at each warmup.
+- **The marker never reaches the LLM.** Warmup stores `conv.tools` with the marker stripped
+  (`StripImageMarkers`), so the native `tools` payload, the warmup inference and the text path's
+  `<tools>` block are all clean. llama-server builds a grammar from tool schemas and ignores
+  unknown keys today, but a strict OpenAI-compatible remote may reject one, and the key means
+  nothing to the model. The image parameters are indexed first, per tool name, in
+  `conv.imageParams` (every photo tool seen at warmup, offered or hidden).
+
+### 9.2 Node tools: numbers in, photos out
+
+- The model calls the tool with photo numbers, as for server tools (`{"photos": [2, 1]}`). When
+  the engine splits a turn's calls, a client call to a photo tool resolves its image arguments
+  through the same `TurnImages` the server tools use (`turnImagesOf`: attached, or kept bytes,
+  §8.1). A present argument = those numbers in that order (repeats dropped); absent or `[]` =
+  every photo when the parameter is required, nothing when it is optional.
+- **Refusals** go back to the model as a tool result, exactly like a server tool's, and the
+  node is not called: `no_image` (no photo in the conversation, or a voice conversation),
+  `image_expired`, `invalid_image` ("there is no image 3: only image 1 is attached"),
+  `invalid_arguments` (not numbers, more than 4). Native path: the loop continues and the model
+  relays it; text path: the formatting fast path speaks the refusal's message. A refused call
+  next to other client calls closes those as `not_executed` (the server+client mix rule).
+- **Substitution happens only on the wire.** `engineResult.ToolCalls` (and so the history, the
+  native transcript, request traces, `cc_conversation_transcripts`, the dedupe hash and the
+  invalid-param check) keep the model's numbers; the resolved photos ride beside them in
+  `engineResult.ImageArgs` (by call id). `chatToolCall` builds the MQTT `tool_call` arguments with
+  `wireArguments`: the model's JSON object, each image argument replaced in place by
+  `[{"mime","data"}]` (standard base64, no `data:` prefix, attach order of the numbers given). A
+  call without photos still sends the model's JSON string, as before. Traces therefore show
+  `{"photos": [1]}`, never bytes; no `[image]` placeholder is needed in the arguments.
+- **Results:** the node strips image bytes from its results (`sanitize_tool_output`); jarvisd also
+  replaces any `{"mime":"image/…","data":…}` object or `data:image/…` string in a node result with
+  `"[image]"` before it reaches the model (`redactWireImages`).
+- **Size path:** at most 4 × 2 MiB decoded ≈ 11.2 MB of base64 in one QoS-1 publish. The embedded
+  mochi broker has no packet-size cap (`MaximumPacketSize` 0) and the in-process publish bypasses
+  client buffers; the message is not retained. Only mobile chat dispatches over MQTT; voice
+  `tool_calls` go back in the HTTP response, but a voice conversation has no photos, so a photo
+  tool call there is always refused before any dispatch.
+- **Headless menus:** errand menus (`available_commands` with an `image` parameter type) and signal
+  reaction tool lists drop photo tools: there is never a photo there.
+
+### 9.3 Hiding photo tools and the prefix cache
+
+Choice: **gate per conversation at warmup on "can a photo arrive", keep the list fixed, refuse
+cleanly when no photo is there yet.**
+
+- A photo tool (server or node) is offered only in a mobile chat whose live slot reports vision
+  at warmup (`ToolGates.ChatPhotos`, the same rule recipes had). Voice conversations, and chats
+  whose live model can't see images, never see one: removed from `conv.tools`, from the node's
+  merged commands (examples, keywords, direct-answer flags) and from `serverNames`.
+- In a vision chat they stay offered from the first turn, photo or not. Called with no photo
+  → `no_image` ("ask the user to attach the photo"), which is also the right answer.
+- Why not offer them only once a photo arrives: the tool list is part of the byte-stable prefix
+  (`messages[0]` holds it on the text path; the native `tools` payload is the start of the
+  prompt), fixed at warmup and primed by the warmup inference. Adding tools at the first photo
+  re-renders that prefix and re-prefills the whole system prompt + tools exactly on the turn that
+  is already paying for image encoding (minutes on CPU, a noticeable stall on GPU), and each
+  further change would do it again. Per-turn hiding would do that on every switch. The cost of
+  the chosen rule is a few hundred prompt tokens of photo tools in vision chats that never get a
+  photo, paid once and cached.
+- The offer-don't-act block (`PHOTOS:`, §8.2) keys off "photos available and any photo tool
+  offered" (`conv.photoToolOffered`), so a node photo tool alone triggers it.
+
+### 9.4 Manual check (2026-10-10, this box)
+
+Setup as §8.4: throwaway jarvisd from this branch (scratch home, loopback, ports 57xxx,
+`/etc/jarvisd` hidden by bwrap for that process only), a CPU-only llama-server (Qwen3.5-9B
+Q4_K_M + mmproj F16, `-ngl 0 -dev none`, `-c 12288`) as live/background remote behind a logging
+proxy. The **node was the real jarvis-node-setup** (main, `44f5379`, with jarvis-command-sdk
+0.10.0 from the sibling checkout) running its own MQTT listener (`start_mqtt_listener`) on this
+box in a scratch venv/config/DB, with one custom command `image_size` (`JarvisParameter("photos",
+"image", required=True)`, returns `JarvisImage.width/height/mime/size_bytes`).
+
+- **"what size is this image" + a 640×427 JPEG** → warmup's `report_tools` got the node's schema;
+  the LLM request carried `image_size` with `photos` as an integer array and **no
+  `x-jarvis-type`**; the model called `image_size {"photos":[1]}`; the node's `run()` received
+  `list` of `JarvisImage` = 640×427 `image/jpeg` 10026 bytes; reply "This image is 640 x 427
+  pixels, and it's about 10 kilobytes in size." (127 s cold on CPU).
+- **Two photos (JPEG 640×427, PNG 300×500) + "how many pixels is the second photo?"** →
+  `{"photos":[2]}` → the node got one 300×500 PNG → "The second photo is 300 by 500 pixels."
+- **No photo** (new conversation) + "what size is this image" → the model called
+  `image_size {"photos":[1]}`, jarvisd refused with `no_image`, the node got nothing → "Looks like
+  there's no photo attached yet. Go ahead and attach the image…".
+- **Kept bytes:** after the background description replaced the first photo, "check that photo's
+  size again with the tool please" → `{"photos":[1]}` → the node got the 640×427 JPEG again from
+  the kept bytes. (The final wording was poor: the Qwen must-call retry nagged after the tool had
+  succeeded, the pre-existing forcing behaviour noted in §8.2, not image-specific.)
+- **Leaks:** base64 probes of both photos and `data:image` absent from the jarvisd log, the
+  proxy log, the node log, `jarvis.db` and its WAL; transcripts' `tool_calls_json` hold
+  `{"photos":[1]}`; traces' `user_command` is `[image] …`.
+
+### 9.5 Decided while building
+
+- **Absent image argument:** all photos when required, none when optional (server tools keep
+  their own "absent = all" through `ImageNumbers`).
+- **Where substitution lives:** resolved in the engine (so refusals are tool results on every
+  path), applied only in the MQTT `tool_call`; the model's numbers are the record everywhere else.
+- **Hidden photo tools still have their parameters indexed,** so a hallucinated call to one
+  (voice) is refused with `no_image` instead of reaching the node with bare numbers.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -113,6 +114,15 @@ func turnImagesOf(msgs []chatMsg, kept *keptPhotos) *historyImages {
 	return &historyImages{}
 }
 
+// turnImages is servertools.TurnImages for a tool call over the working history: the chat's
+// photos, or nil outside mobile chat (voice has no photos: every lookup is ErrNoImages).
+func (c *conversation) turnImages(msgs []chatMsg) servertools.TurnImages {
+	if c.chatUserID == 0 {
+		return nil
+	}
+	return turnImagesOf(msgs, c.photos)
+}
+
 func (h *historyImages) Count() int { return len(h.attached) + len(h.kept) }
 
 func (h *historyImages) Image(n int) (servertools.Image, error) {
@@ -158,9 +168,8 @@ func (*saveRecipeTool) Name() string { return saveRecipeToolName }
 func (*saveRecipeTool) Definition() *pyjson.Object {
 	params := servertools.Obj("type", "object",
 		"properties", servertools.Obj(
-			"images", servertools.Obj("type", "array", "items", servertools.Obj("type", "integer"),
-				"description", "Which attached photos hold the recipe, by number (1 = the first photo of the message). "+
-					"Several numbers = several pages of the same recipe, in order. Omit to use every attached photo."),
+			"images", servertools.ImageSchema("Which attached photos hold the recipe. Several numbers = several "+
+				"pages of the same recipe, in order. Omit to use every attached photo."),
 		),
 		"required", []any{})
 	fn := servertools.Obj("name", saveRecipeToolName,
@@ -189,17 +198,14 @@ func (t *saveRecipeTool) Execute(ctx context.Context, call servertools.Call, tur
 		return toolErr("invalid_arguments", err.Error()), nil
 	}
 	imgs, err := servertools.ResolveImages(turn.Images, ns)
-	var idx *servertools.ImageIndexError
-	switch {
-	case errors.Is(err, servertools.ErrImagesExpired):
-		return toolErr("image_expired", "That photo is no longer available: photos are kept only while the chat "+
-			"is active. Ask the user to attach the photo again with their request."), nil
-	case errors.Is(err, servertools.ErrNoImages):
+	if errors.Is(err, servertools.ErrNoImages) {
 		return toolErr("no_image", "No photo is attached. Ask the user to attach a photo of the recipe (camera or "+
 			"gallery) with their message."), nil
-	case errors.As(err, &idx):
-		return toolErr("invalid_image", idx.Error()), nil
-	case err != nil:
+	}
+	if err != nil {
+		if r := imageRefusal(err); r != nil {
+			return r, nil
+		}
 		return nil, err
 	}
 	photos := make([][]byte, len(imgs))
@@ -221,4 +227,205 @@ func (t *saveRecipeTool) Execute(ctx context.Context, call servertools.Call, tur
 		"message", "Reading the recipe from the photo now. It is saved to the household's recipes in a minute or two, "+
 			"and the user gets a notification when it's saved (or if the photo can't be read). Tell the user that in "+
 			"one short sentence; don't list the recipe."), nil
+}
+
+// --- Image parameters on any tool (docs/cc/chat-images.md §9, CI7) ---
+
+// serverPhotoTools are the registered server tools that declare an image parameter, with their
+// image parameters.
+func (m *Module) serverPhotoTools() map[string][]servertools.ImageParam {
+	out := map[string][]servertools.ImageParam{}
+	for _, d := range m.tools.Definitions(m.tools.Names()) {
+		if ps := servertools.ImageParams(d); len(ps) > 0 {
+			out[toolName(d)] = ps
+		}
+	}
+	return out
+}
+
+// imageParamsOf indexes the image parameters of every photo tool a conversation knows: the
+// node's client tools and the registered server photo tools (a server tool wins a name clash,
+// as plane routing does).
+func imageParamsOf(clientTools []*pyjson.Object, server map[string][]servertools.ImageParam) map[string][]servertools.ImageParam {
+	out := map[string][]servertools.ImageParam{}
+	for _, t := range clientTools {
+		if ps := servertools.ImageParams(t); len(ps) > 0 {
+			if n := toolName(t); n != "" {
+				out[n] = ps
+			}
+		}
+	}
+	for n, ps := range server {
+		out[n] = ps
+	}
+	return out
+}
+
+// withoutPhotoTools drops the photo tools from a node's client tools, and their entries from
+// its available commands (examples, keywords and flags reach the prompt and the force guard).
+func withoutPhotoTools(tools, commands []*pyjson.Object) ([]*pyjson.Object, []*pyjson.Object) {
+	hidden := map[string]bool{}
+	var keptTools []*pyjson.Object
+	for _, t := range tools {
+		if servertools.IsPhotoTool(t) {
+			hidden[toolName(t)] = true
+			continue
+		}
+		keptTools = append(keptTools, t)
+	}
+	if len(hidden) == 0 {
+		return tools, commands
+	}
+	var keptCmds []*pyjson.Object
+	for _, c := range commands {
+		if !hidden[toolName2(c)] {
+			keptCmds = append(keptCmds, c)
+		}
+	}
+	return keptTools, keptCmds
+}
+
+// isImageParamType is the SDK's spelling set for an image parameter in available_commands
+// (JarvisParameter normalizes to "image").
+func isImageParamType(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "image", "array<image>", "array[image]", "image[]":
+		return true
+	}
+	return false
+}
+
+// commandTakesImage reports whether an available_commands entry has an image parameter.
+func commandTakesImage(cmd *pyjson.Object) bool {
+	pv, _ := cmd.Get("parameters")
+	params, _ := pv.([]any)
+	for _, p := range params {
+		po, ok := p.(*pyjson.Object)
+		if !ok {
+			continue
+		}
+		for _, k := range []string{"type", "param_type"} {
+			if v, _ := po.Get(k); v != nil {
+				if s, ok := v.(string); ok && isImageParamType(s) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// imageRefusal is the tool result the model relays when a photo can't be resolved: the same
+// codes server tools use (nil for an error that isn't about photos).
+func imageRefusal(err error) *pyjson.Object {
+	var idx *servertools.ImageIndexError
+	switch {
+	case errors.Is(err, servertools.ErrImagesExpired):
+		return toolErr("image_expired", "That photo is no longer available: photos are kept only while the chat "+
+			"is active. Ask the user to attach the photo again with their request.")
+	case errors.Is(err, servertools.ErrNoImages):
+		return toolErr("no_image", "No photo is attached to this conversation. Ask the user to attach the photo "+
+			"(camera or gallery) with their message.")
+	case errors.As(err, &idx):
+		return toolErr("invalid_image", idx.Error())
+	}
+	return nil
+}
+
+// imageArgs are one client call's resolved photos, by parameter name.
+type imageArgs map[string][]servertools.Image
+
+// resolveImageArgs resolves a client call's image arguments from the photos the model sees.
+// A present argument is a list of photo numbers (or one number); an absent or empty one means
+// every photo when the parameter is required and nothing when it is optional. It returns the
+// photos, or the refusal to give the model instead of calling the node.
+func resolveImageArgs(args string, params []servertools.ImageParam, ti servertools.TurnImages) (imageArgs, *pyjson.Object) {
+	call := servertools.Call{Args: argsObject(args)}
+	out := imageArgs{}
+	for _, p := range params {
+		ns, err := servertools.ImageNumbers(call, p.Name)
+		if err != nil {
+			return nil, toolErr("invalid_arguments", err.Error())
+		}
+		if len(ns) == 0 && !p.Required {
+			continue
+		}
+		if len(ns) > servertools.MaxImages {
+			return nil, toolErr("invalid_arguments", fmt.Sprintf("%s takes at most %d photos", p.Name, servertools.MaxImages))
+		}
+		imgs, err := servertools.ResolveImages(ti, ns)
+		if err != nil {
+			if r := imageRefusal(err); r != nil {
+				return nil, r
+			}
+			return nil, toolErr("invalid_image", "the photo could not be read")
+		}
+		out[p.Name] = imgs
+	}
+	return out, nil
+}
+
+// wireArguments are a client call's arguments as the node receives them: the model's JSON
+// with each image argument replaced by [{"mime", "data": <standard base64>}] in order (the
+// jarvis-command-sdk wire contract). Calls without photos keep the model's JSON string.
+func wireArguments(args string, imgs imageArgs) any {
+	if len(imgs) == 0 {
+		if args == "" {
+			return map[string]any{}
+		}
+		return args
+	}
+	o := argsObject(args)
+	for _, k := range o.Keys() { // keep key order; image arguments are replaced in place
+		if list, ok := imgs[k]; ok {
+			o.Set(k, wireImages(list))
+		}
+	}
+	for k, list := range imgs { // a required image argument the model left out
+		if _, ok := o.Get(k); !ok {
+			o.Set(k, wireImages(list))
+		}
+	}
+	return o
+}
+
+func wireImages(list []servertools.Image) []any {
+	out := make([]any, len(list))
+	for i, im := range list {
+		out[i] = servertools.Obj("mime", im.MIME, "data", base64.StdEncoding.EncodeToString(im.Data))
+	}
+	return out
+}
+
+// redactWireImages replaces any wire image ({"mime": "image/…", "data": …}) in a node's tool
+// result with "[image]", so bytes a command echoes back never reach the model, a trace or the
+// transcript (the node strips them too; this is the server's own guard).
+func redactWireImages(v any) any {
+	switch x := v.(type) {
+	case *pyjson.Object:
+		if mime, ok := x.Get("mime"); ok {
+			if s, ok := mime.(string); ok && strings.HasPrefix(s, "image/") {
+				if _, ok := x.Get("data"); ok {
+					return "[image]"
+				}
+			}
+		}
+		o := pyjson.NewObject()
+		for _, k := range x.Keys() {
+			val, _ := x.Get(k)
+			o.Set(k, redactWireImages(val))
+		}
+		return o
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = redactWireImages(e)
+		}
+		return out
+	case string:
+		if strings.HasPrefix(x, "data:image/") {
+			return "[image]"
+		}
+	}
+	return v
 }

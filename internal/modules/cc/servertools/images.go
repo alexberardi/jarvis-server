@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 )
 
 // Turn images (docs/cc/chat-images.md §8). A mobile chat message may carry photos; a server
@@ -138,4 +140,126 @@ func ResolveImages(ti TurnImages, ns []int) ([]Image, error) {
 		out = append(out, im)
 	}
 	return out, nil
+}
+
+// --- Image parameters (docs/cc/chat-images.md §9, CI7) ---
+//
+// Any tool, server or client (node), declares a photo parameter the same way: a JSON-schema
+// property marked "x-jarvis-type": "image" (jarvis-command-sdk's IMAGE_SCHEMA_MARKER). The
+// model fills it with 1-based photo numbers; jarvisd swaps them for the photos before a client
+// call reaches the node, and server tools resolve them through Turn.Images. The marker drives
+// that and the photo-tool gate; it is stripped before the schema reaches the LLM.
+
+const (
+	// ImageSchemaMarker / ImageSchemaMarkerValue mark an image parameter in a tool schema.
+	ImageSchemaMarker      = "x-jarvis-type"
+	ImageSchemaMarkerValue = "image"
+	// MaxImages is how many photos one image argument (and one chat message) holds.
+	MaxImages = 4
+)
+
+// ImageSchema is the property an image parameter declares: an array of photo numbers, marked.
+// It matches jarvis-command-sdk's image_tool_schema, so server and node tools look alike.
+func ImageSchema(description string) *pyjson.Object {
+	hint := fmt.Sprintf("Photo numbers: a list of integers, 1 = the first photo the user attached, 2 = the second, "+
+		"and so on (at most %d).", MaxImages)
+	if description != "" {
+		hint = description + " " + hint
+	}
+	return Obj("type", "array", "items", Obj("type", "integer", "minimum", 1), "maxItems", MaxImages,
+		"description", hint, ImageSchemaMarker, ImageSchemaMarkerValue)
+}
+
+// ImageParam is one image parameter of a tool.
+type ImageParam struct {
+	Name     string
+	Required bool
+}
+
+func toolFunction(tool *pyjson.Object) *pyjson.Object {
+	if tool == nil {
+		return nil
+	}
+	fv, _ := tool.Get("function")
+	fn, _ := fv.(*pyjson.Object)
+	return fn
+}
+
+// ImageParams lists a tool's image parameters in schema order (nil for none). A tool with any
+// is a photo tool.
+func ImageParams(tool *pyjson.Object) []ImageParam {
+	fn := toolFunction(tool)
+	if fn == nil {
+		return nil
+	}
+	pv, _ := fn.Get("parameters")
+	params, _ := pv.(*pyjson.Object)
+	if params == nil {
+		return nil
+	}
+	propsV, _ := params.Get("properties")
+	props, _ := propsV.(*pyjson.Object)
+	if props == nil {
+		return nil
+	}
+	required := map[string]bool{}
+	if rv, ok := params.Get("required"); ok {
+		if l, ok := rv.([]any); ok {
+			for _, r := range l {
+				if s, ok := r.(string); ok {
+					required[s] = true
+				}
+			}
+		}
+	}
+	var out []ImageParam
+	for _, k := range props.Keys() {
+		v, _ := props.Get(k)
+		if p, ok := v.(*pyjson.Object); ok && IsImageProperty(p) {
+			out = append(out, ImageParam{Name: k, Required: required[k]})
+		}
+	}
+	return out
+}
+
+// IsImageProperty reports whether a schema property is marked as an image parameter.
+func IsImageProperty(p *pyjson.Object) bool {
+	v, _ := p.Get(ImageSchemaMarker)
+	return v == ImageSchemaMarkerValue
+}
+
+// IsPhotoTool reports whether a tool definition declares an image parameter.
+func IsPhotoTool(tool *pyjson.Object) bool { return len(ImageParams(tool)) > 0 }
+
+// StripImageMarkers returns tool without its image markers, for the LLM: the marker is ours,
+// and a strict backend (or a grammar built from the schema) has no use for an unknown key.
+// The schema is otherwise unchanged (an array of integers); a tool without markers is
+// returned as is.
+func StripImageMarkers(tool *pyjson.Object) *pyjson.Object {
+	if !IsPhotoTool(tool) {
+		return tool
+	}
+	return stripMarker(tool).(*pyjson.Object)
+}
+
+func stripMarker(v any) any {
+	switch x := v.(type) {
+	case *pyjson.Object:
+		o := pyjson.NewObject()
+		for _, k := range x.Keys() {
+			val, _ := x.Get(k)
+			if k == ImageSchemaMarker && val == ImageSchemaMarkerValue {
+				continue
+			}
+			o.Set(k, stripMarker(val))
+		}
+		return o
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = stripMarker(e)
+		}
+		return out
+	}
+	return v
 }

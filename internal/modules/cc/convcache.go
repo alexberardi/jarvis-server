@@ -7,6 +7,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 )
@@ -139,6 +140,12 @@ type conversation struct {
 	// photos are the latest photo message's bytes, kept for tools after its description lands
 	// (chat_image_actions.go, CI8). Memory only; gone with the conversation.
 	photos *keptPhotos
+	// imageParams are the image parameters of every photo tool the warmup saw, offered or
+	// hidden (chat_image_actions.go, §9): a client call to one gets the photos instead of the
+	// model's numbers, or a refusal and never reaches the node. photoToolOffered: one of them
+	// is in the offered tools.
+	imageParams      map[string][]servertools.ImageParam
+	photoToolOffered bool
 
 	lastUsed time.Time
 }

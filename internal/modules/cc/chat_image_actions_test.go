@@ -204,8 +204,10 @@ func TestSaveRecipeToolOffered(t *testing.T) {
 		}
 	})
 	t.Run("text path", func(t *testing.T) {
-		g := prompts.ToolGates{ChatPhotos: true}
-		if !has(prompts.TextServerTools(g), saveRecipeToolName) || has(prompts.TextServerTools(prompts.ToolGates{}), saveRecipeToolName) {
+		photo := map[string]bool{saveRecipeToolName: true}
+		g := prompts.ToolGates{ChatPhotos: true, PhotoTools: photo}
+		if !has(prompts.TextServerTools(g), saveRecipeToolName) ||
+			has(prompts.TextServerTools(prompts.ToolGates{PhotoTools: photo}), saveRecipeToolName) {
 			t.Fatal("text path gate")
 		}
 	})
@@ -406,8 +408,7 @@ func TestKeptPhotosLatestOnly(t *testing.T) {
 // CI8's prompt rule: a transient block while photos are available to a photo tool, never
 // otherwise; the save guidance's "never claim a save" holds alongside it.
 func TestPhotoActionsBlock(t *testing.T) {
-	if prompts.PhotoActionsGate(true, map[string]bool{"web_search": true}) || prompts.PhotoActionsGate(false,
-		map[string]bool{saveRecipeToolName: true}) || !prompts.PhotoActionsGate(true, map[string]bool{saveRecipeToolName: true}) {
+	if prompts.PhotoActionsGate(true, false) || prompts.PhotoActionsGate(false, true) || !prompts.PhotoActionsGate(true, true) {
 		t.Fatal("gate")
 	}
 	ce, jobs := newRecipeChatEnv(t, prompts.Qwen3_5_9B, &fakeImporter{})

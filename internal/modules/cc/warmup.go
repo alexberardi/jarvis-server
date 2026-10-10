@@ -234,13 +234,21 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	// An explicitly set household zone wins over the reported one (timezone.go).
 	conv.timezone = m.turnTimezone(ctx, hh, conv.timezone)
 	conv.ambient = m.ambientBundle(ctx, hh, conv.timezone)
+	// Photo tools (any tool with an image parameter, server or node, §9): offered only where a
+	// photo can arrive — mobile chat whose live slot sees images. Fixed for the conversation
+	// like every other gate (prefix cache); with no photo yet they refuse with no_image.
+	photosPossible := conv.chatUserID != 0 && m.slotVision(ctx, llm.LabelLive)
+	serverPhoto := m.serverPhotoTools()
 	gates := prompts.ToolGates{
 		WebSearch:     m.householdBool(ctx, settingWebSearch, hh),
 		SpeakerKnown:  recognition || conv.chatUserID != 0,
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
-		// Photo → action tools: chat only, and only when the live slot can see the photos.
-		ChatPhotos: conv.chatUserID != 0 && m.slotVision(ctx, llm.LabelLive),
+		ChatPhotos:    photosPossible,
+		PhotoTools:    make(map[string]bool, len(serverPhoto)),
+	}
+	for n := range serverPhoto {
+		gates.PhotoTools[n] = true
 	}
 	persona := parse.PyStrip(m.settings.String(ctx, settingPersona, settings.Scope{HouseholdID: hh}))
 
@@ -250,8 +258,20 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	for _, d := range serverDefs {
 		conv.serverNames[toolName(d)] = true
 	}
-	conv.tools = append(append([]prompts.Tool(nil), serverDefs...), req.ClientTools...)
-	conv.commands = mergeCommands(req.ClientTools, req.Commands)
+	clientTools, commands := req.ClientTools, req.Commands
+	conv.imageParams = imageParamsOf(clientTools, serverPhoto)
+	if !photosPossible {
+		clientTools, commands = withoutPhotoTools(clientTools, commands)
+	}
+	offered := append(append([]prompts.Tool(nil), serverDefs...), clientTools...)
+	conv.tools = make([]prompts.Tool, len(offered))
+	for i, t := range offered {
+		if servertools.IsPhotoTool(t) {
+			conv.photoToolOffered = true
+		}
+		conv.tools[i] = servertools.StripImageMarkers(t) // the marker is ours; the LLM never sees it
+	}
+	conv.commands = mergeCommands(clientTools, commands)
 
 	pctx := prompts.Context{
 		Room: room, VoiceMode: voiceMode, HouseholdPersona: persona,

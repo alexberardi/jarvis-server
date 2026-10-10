@@ -1,5 +1,7 @@
 package prompts
 
+import "sort"
+
 // ToolGates are the per-household (and per-conversation speaker) inputs that decide which
 // server tools a conversation is offered (conversation_handler.py:311-363).
 type ToolGates struct {
@@ -8,12 +10,13 @@ type ToolGates struct {
 	MemoryEnabled bool // memory.enabled
 	RecallEnabled bool // memory.recall_enabled
 	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
-	// photos come from (docs/cc/chat-images.md §8). Gates the photo → action tools.
+	// photos come from (docs/cc/chat-images.md §8-9). Gates every photo tool.
 	ChatPhotos bool
+	// PhotoTools are the registered server tools that declare an image parameter
+	// (servertools.IsPhotoTool); they are offered only with ChatPhotos. Client (node) tools are
+	// gated by the same rule at warmup.
+	PhotoTools map[string]bool
 }
-
-// PhotoTools are the server tools that act on chat photos (offered only with ChatPhotos).
-var PhotoTools = []string{"save_recipe_from_image"}
 
 // PhotoActionsBlock is the per-turn rule while a chat has photos a photo tool can act on
 // (docs/cc/chat-images.md CI8: offer, don't act). A transient block, so the byte-stable
@@ -31,17 +34,9 @@ const PhotoOnlyHint = "[photo only: the user sent a photo with no message. Descr
 	"on it until they say so.]"
 
 // PhotoActionsGate reports whether a turn gets PhotoActionsBlock: photos are available to
-// tools (attached now or kept from earlier) and a photo tool is offered.
-func PhotoActionsGate(photosAvailable bool, offered map[string]bool) bool {
-	if !photosAvailable {
-		return false
-	}
-	for _, n := range PhotoTools {
-		if offered[n] {
-			return true
-		}
-	}
-	return false
+// tools (attached now or kept from earlier) and a photo tool (server or client) is offered.
+func PhotoActionsGate(photosAvailable, photoToolOffered bool) bool {
+	return photosAvailable && photoToolOffered
 }
 
 // textPathWhitelist is the legacy text-path whitelist, in offer order. answer_question is a
@@ -61,18 +56,25 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.SpeakerKnown && g.MemoryEnabled
 	case "recall":
 		return g.SpeakerKnown && g.MemoryEnabled && g.RecallEnabled
-	case "save_recipe_from_image":
+	}
+	if g.PhotoTools[name] {
 		return g.ChatPhotos
 	}
 	return true
 }
 
 // TextServerTools is the text path's server-tool list, in the legacy order: the whitelist,
-// then deep_research and quick_search, then remember, forget and recall, each behind its gate.
-// Names the caller's registry does not have are skipped by the caller (legacy get_tool).
+// then deep_research and quick_search, then remember, forget and recall, then the photo tools
+// (sorted), each behind its gate. Names the caller's registry does not have are skipped by the
+// caller (legacy get_tool).
 func TextServerTools(g ToolGates) []string {
 	out := append([]string(nil), textPathWhitelist...)
-	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall"}, PhotoTools...) {
+	photo := make([]string, 0, len(g.PhotoTools))
+	for n := range g.PhotoTools {
+		photo = append(photo, n)
+	}
+	sort.Strings(photo)
+	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall"}, photo...) {
 		if ServerToolAllowed(n, g) {
 			out = append(out, n)
 		}
