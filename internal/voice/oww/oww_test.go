@@ -150,3 +150,36 @@ func TestProcessRejectsWrongChunkSize(t *testing.T) {
 		t.Fatal("a short chunk was accepted")
 	}
 }
+
+// Regression: ort passed out-parameter addresses (&vals[i], &outs[0], &info) as uintptr
+// through its own variadic helper, so the compiler could keep them on the goroutine stack,
+// and a stack growth inside the call moved them: C wrote the OrtValue* into the old stack and
+// Run failed with "NULL input supplied" (seen live, intermittently, on Linux and macOS).
+// Fresh goroutines at every stack depth make the growth land inside the call.
+func TestProcessAtAnyStackDepth(t *testing.T) {
+	d := detector(t, ort.Options{})
+	chunk := make([]int16, Chunk)
+	for depth := range 300 {
+		done := make(chan error, 1)
+		go func() {
+			done <- atDepth(depth, func() error { _, err := d.Process(chunk); return err })
+		}()
+		if err := <-done; err != nil {
+			t.Fatalf("stack depth %d: %v", depth, err)
+		}
+	}
+}
+
+//go:noinline
+func atDepth(n int, f func() error) error {
+	var pad [48]byte
+	if n == 0 {
+		return f()
+	}
+	pad[n%len(pad)] = byte(n)
+	err := atDepth(n-1, f)
+	if pad[0] == 255 && err == nil { // keeps pad live across the call
+		return nil
+	}
+	return err
+}

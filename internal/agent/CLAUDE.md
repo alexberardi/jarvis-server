@@ -35,6 +35,11 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent apps steam                      # what a name resolves to (never launches)
 ./jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
 ./jarvis-agent run
+./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
+./jarvis-agent listen --voice-input wav:clip.wav --voice-output wav:reply.wav --once
+                                               # one scripted voice turn, no MQTT (exit 0 = spoken)
+JARVIS_SHERPA_MODELS=$PWD/.models go test ./internal/agent/voice/   # + the real-model wake test
+JARVIS_AUDIO_NATIVE=1 go test -v -run Native ./internal/audio/device/   # real default mic/speaker
 ```
 
 The sidecar test needs a Python that can `import jarvis_command_sdk`
@@ -62,6 +67,10 @@ internal/agent/
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch
   sidecar/            Python package sidecar spike (JSON lines over stdin/stdout)
+  voice/              the voice pipeline: wake -> record -> STT -> stream reply -> listen again
+                      (pipeline.go), Python-node endpointing (endpoint.go), the CC voice client
+                      (client.go), wake-model fetch (models.go), Serve (reopen on failure)
+internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
   deploy/             systemd user unit, LaunchAgent, Scheduled Task, macOS Info.plist (+ guard tests)
 scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, run / install
 ```
@@ -69,11 +78,13 @@ scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, ru
 `internal/agent/node` knows nothing about desktops; a Go Pi node would reuse it unchanged and plug
 in its own `Toolset`.
 
-Voice building blocks, shared with jarvisd and not wired into the agent yet (that is phase 3 of
-docs/agent/go-pi-node.md §7): `internal/voice/ort` (onnxruntime C API over purego, loading the
-same embedded `libonnxruntime` as `internal/voice/sherpa`), `internal/voice/oww` (openWakeWord,
-golden-tested against Python oww 0.6.0) and `audio.Decimator` (48 kHz to 16 kHz). Self-update
-will reuse `internal/update` once it stops assuming the jarvisd binary.
+**Voice** (phase 3 of docs/agent/go-pi-node.md §7; what landed and what's measured: its §3.7)
+is off unless `run --voice`. It uses jarvisd's shared blocks: `internal/voice/ort`
+(onnxruntime over purego, the *same* embedded `libonnxruntime` as `internal/voice/sherpa`, so
+linux/darwin agent binaries embed it: ~44 MB instead of ~12), `internal/voice/oww`
+(openWakeWord, golden-tested against Python) and `audio.Decimator`. `internal/agent/voice`
+knows nothing about desktops: the Pi node will run it with HAT device names. Self-update will
+reuse `internal/update` once it stops assuming the jarvisd binary.
 
 ## How drift between platforms is prevented
 
@@ -132,12 +143,31 @@ will reuse `internal/update` once it stops assuming the jarvisd binary.
     `jarvis-agent status` from a terminal reports the terminal's grants; use
     `scripts/agent-dev-run.sh --status`. Probing really lists windows (`accessProbe`).
 
+15. **Voice behaviour is the Python node's, ported with its numbers** (threshold 0.4, 8 s
+    debounce, RMS endpointing, normaliser, non-speech filter, 48 kHz uploads, speaker_audio =
+    wake clip + command). `endpoint_test.go` holds goldens computed from the Python functions;
+    change them only together with the Python node, or deliberately (log it in go-pi-node.md).
+16. **`/conversation/end` goes out after the turn *and* start have finished**, never on start
+    alone (a test catches the early-end bug that ended conversations before the stream).
+17. **Any helper that forwards `uintptr(unsafe.Pointer(&x))` to C must be
+    `//go:uintptrescapes`** (`ort.Runtime.call`, `host.comCall`). Without it `x` can live on the
+    goroutine stack and move during the call; onnxruntime then saw NULL inputs at random
+    (`TestProcessAtAnyStackDepth`).
+18. **macOS microphone = TCC.** The bundle needs `NSMicrophoneUsageDescription` (guarded in
+    deploy_test.go; without it macOS kills the app on first capture), and a process started over
+    SSH or from a terminal gets silence or the terminal's grant: run the bundle under launchd
+    (`scripts/agent-dev-run.sh -- --voice`) and allow the prompt.
+19. **Only the capture goroutine touches the Capture** until `Pipeline.Run` returns (ALSA's
+    blocking read can't be interrupted from another thread); Run waits for it before the
+    caller closes the device.
+
 ## Dependencies
 
 Beyond jarvisd's own: `github.com/eclipse/paho.mqtt.golang` (jarvisd embeds a broker; the agent is a client), `golang.org/x/sys` (Windows syscalls),
-`golang.org/x/term` (password prompt), `github.com/ebitengine/purego` (macOS AX via dlopen).
-`CGO_ENABLED=0` builds everywhere: Windows volume is WASAPI over raw COM vtables, windows are
-user32, open is ShellExecuteW, macOS AX is dlopen'd ApplicationServices.
+`golang.org/x/term` (password prompt), `github.com/ebitengine/purego` (macOS AX, AudioToolbox,
+libasound and onnxruntime via dlopen). `CGO_ENABLED=0` builds everywhere: Windows volume is
+WASAPI over raw COM vtables, windows are user32, open is ShellExecuteW, macOS AX is dlopen'd
+ApplicationServices. Voice at runtime needs `libasound.so.2` on Linux (present on any desktop).
 
 ## Not in scope (unchanged)
 

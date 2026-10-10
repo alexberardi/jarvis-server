@@ -100,7 +100,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        include:
+          - { os: ubuntu-latest,  target: linux-amd64 }
+          - { os: macos-14,       target: darwin-arm64 }
+          - { os: windows-latest, target: windows-amd64 }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -110,16 +113,27 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      # The voice pipeline (Linux, macOS) embeds onnxruntime; Windows has no voice yet and
+      # doesn't link it, but fetching keeps the job uniform.
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: .models
+          key: voice-models-${{ hashFiles('scripts/fetch-test-models.sh') }}
+      - name: Fetch test models
+        run: scripts/fetch-test-models.sh
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install jarvis-command-sdk (sidecar test)
         run: python -m pip install "git+https://github.com/alexberardi/jarvis-command-sdk@main"
-      - name: Unit, contract and sidecar tests (race)
+      - name: Unit, contract, sidecar and voice tests (race)
         env:
           CGO_ENABLED: "1"
           JARVIS_SIDECAR_PYTHON: python
-        run: go test -race -count=1 ./cmd/jarvis-agent ./internal/agent/...
+          JARVIS_SHERPA_MODELS: ${{ github.workspace }}/.models
+        run: go test -race -count=1 ./cmd/jarvis-agent ./internal/agent/... ./internal/audio/...
       - name: Native tests (this runner's own OS)
         env:
           JARVIS_HOST_NATIVE: "1"

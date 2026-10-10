@@ -5,6 +5,7 @@
 //	jarvis-agent run
 //	jarvis-agent status
 //	jarvis-agent try desktop_set_volume '{"volume": 30}'
+//	jarvis-agent run --voice        # plus the "hey jarvis" voice pipeline (Linux, macOS)
 package main
 
 import (
@@ -32,6 +33,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
 
 var version = "dev"
@@ -55,6 +57,8 @@ func main() {
 		err = status(ctx, os.Args[2:])
 	case "try":
 		err = try(ctx, os.Args[2:])
+	case "listen":
+		err = listen(ctx, os.Args[2:])
 	case "apps":
 		err = appsCmd(os.Args[2:])
 	case "version":
@@ -81,6 +85,10 @@ func usage(w io.Writer) {
            [--name NAME] [--room ROOM] [--creds PATH] [--force | --if-needed]
   run      connect to jarvisd and serve tool calls until interrupted
            [--creds PATH] [--allow-open-any] [--sidecar-python PY --sidecar-commands DIR]
+           [--voice [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4]
+            [--wake-models DIR] [--no-chimes]]   wake word "hey jarvis" (Linux, macOS)
+  listen   the voice pipeline alone (no MQTT, no tools), same voice flags
+           [--once] [--timeout DUR]   e.g. --voice-input wav:hey_jarvis.wav --once
   status   show enrollment, reachability and what this host can do right now
   apps     list launchable apps, or show what a name resolves to (never launches): apps [NAME]
   try      run one tool locally, no jarvisd involved: try TOOL ['{"arg": ...}']
@@ -259,6 +267,8 @@ func run(ctx context.Context, args []string) error {
 	anyOpen := fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)")
 	py := fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)")
 	cmdDir := fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)")
+	voiceOn := fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`)
+	vf := addVoiceFlags(fs)
 	_ = fs.Parse(args)
 	path, err := credsPath(*cp)
 	if err != nil {
@@ -291,6 +301,17 @@ func run(ctx context.Context, args []string) error {
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, Log: log}
+	if *voiceOn {
+		// Voice is an extra: if it can't start, the agent still serves its tools.
+		if vs, err := loadVoice(ctx, vf, log); err != nil {
+			log.Error("voice disabled", "err", err)
+		} else {
+			defer vs.close()
+			r.OnConnected = func(ctx context.Context, cc *node.CC) {
+				_ = voice.Serve(ctx, vs.options(cc, log, nil))
+			}
+		}
+	}
 	return r.Run(ctx)
 }
 
@@ -322,6 +343,7 @@ func status(ctx context.Context, args []string) error {
 `)
 		}
 	}
+	fmt.Printf("voice:        %s\n", voiceStatus())
 	if list, err := appCatalogue(nil)(); err != nil {
 		fmt.Printf("apps:         %v\n", err)
 	} else {

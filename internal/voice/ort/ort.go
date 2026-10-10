@@ -9,8 +9,10 @@
 //
 // Pointer rules (docs/agent/go-pi-node.md §3.5): input tensors wrap Go memory that holds no Go
 // pointers, only for the duration of Run; the C strings and name arrays live in long-lived
-// Session/Runtime fields. Go's GC doesn't move heap objects, and purego.SyscallN is
-// //go:uintptrescapes, so pointers passed as uintptr arguments stay valid for the call.
+// Session/Runtime fields. Go's GC doesn't move heap objects, and purego.SyscallN and this
+// package's call helper are //go:uintptrescapes, so pointers passed as uintptr arguments stay
+// valid for the call. Never add a helper between a uintptr(unsafe.Pointer(&x)) and the C
+// call without that directive.
 package ort
 
 import (
@@ -143,6 +145,14 @@ func (r *Runtime) fn(i int) uintptr {
 }
 
 // call invokes an OrtStatus-returning API function and converts a non-NULL status to an error.
+//
+// uintptrescapes is load-bearing: callers pass out-parameter addresses (&vals[i], &info)
+// converted to uintptr, and without it the compiler may keep those variables on the goroutine
+// stack, which a stack growth inside this call moves, so C writes into the old stack
+// (TestProcessAtAnyStackDepth in internal/voice/oww). With it, every uintptr(unsafe.Pointer(x))
+// argument is heap-allocated and kept alive for the call, exactly as for purego.SyscallN.
+//
+//go:uintptrescapes
 func (r *Runtime) call(i int, args ...uintptr) error {
 	st, _, _ := purego.SyscallN(r.fn(i), args...)
 	if st == 0 {

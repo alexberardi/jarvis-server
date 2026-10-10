@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -20,6 +21,10 @@ type Runner struct {
 	InstallMode string // reported in heartbeats, e.g. "desktop-agent"
 	Log         *slog.Logger
 	Heartbeat   time.Duration
+	// OnConnected, if set, runs in its own goroutine once jarvisd is discovered and the
+	// node is connecting (the voice pipeline starts here). It must return when ctx ends; Run
+	// waits for it.
+	OnConnected func(ctx context.Context, cc *CC)
 }
 
 // brokerURL maps jarvisd's mqtt[s]/ws[s] URL to paho's scheme.
@@ -116,6 +121,16 @@ func (r *Runner) Run(ctx context.Context) error {
 	client := mqtt.NewClient(opts)
 	client.Connect() // with ConnectRetry it keeps trying in the background
 	defer client.Disconnect(250)
+
+	if r.OnConnected != nil {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.OnConnected(ctx, cc)
+		}()
+		defer wg.Wait()
+	}
 
 	every := r.Heartbeat
 	if every <= 0 {

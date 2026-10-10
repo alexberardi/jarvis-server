@@ -31,5 +31,7 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Jarvis Agent asks System Events to list, focus, minimise and close windows when you ask Jarvis to.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Jarvis Agent listens for "hey Jarvis" on this Mac and records what you say next, when voice is turned on.</string>
 </dict>
 </plist>
