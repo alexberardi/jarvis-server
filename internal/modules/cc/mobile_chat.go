@@ -463,7 +463,7 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 			if intermediate := parse.PyStrip(res.Message); intermediate != "" {
 				sse.send(servertools.Obj("type", "delta", "text", intermediate+" "))
 			}
-			results := m.runChatTools(ctx, sse, tr, u, row.nodeID, req.Message, res.ToolCalls, &st)
+			results := m.runChatTools(ctx, sse, tr, u, row.nodeID, req.Message, res.ToolCalls, res.ImageArgs, &st)
 			if ctx.Err() != nil {
 				// The client is gone: nobody will read the answer. The exchange stays pending
 				// and the next turn flushes it (transcripts.go).
@@ -545,7 +545,7 @@ func (m *Module) replayWords(ctx context.Context, sse *sseWriter, answer string)
 // harvesting actions into st. An offline node fails every call fast with a `status` event
 // instead of waiting out each timeout (D40 Q8); the LLM still narrates the failure.
 func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace, u authn.User, nodeID, message string,
-	calls []parse.ToolCall, st *chatState) []toolResult {
+	calls []parse.ToolCall, images map[string]imageArgs, st *chatState) []toolResult {
 	online := false
 	if row, err := m.nodeByID(ctx, nodeID); err == nil {
 		online = row.reachable(m.now())
@@ -566,7 +566,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true)
 		} else {
 			end := tr.measure("mqtt_tool_"+c.Function.Name, "node", map[string]any{"command": c.Function.Name})
-			output = m.chatToolCall(ctx, nodeID, id, c, u.ID, message)
+			output = m.chatToolCall(ctx, nodeID, id, c, images[c.ID], u.ID, message)
 			end(nil)
 		}
 		results = append(results, toolResult{ToolCallID: id, Output: output})
@@ -579,15 +579,16 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 // message as voice_command (commands read it from RequestInformation), and the node's POST
 // to /device-control-results/{rid}, which only that node can fill (D4; no `trusted`). A
 // timeout or a missing broker is a synthetic failure output, never an error.
-func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c parse.ToolCall, userID int64, message string) *pyjson.Object {
+//
+// A photo tool's image arguments carry the resolved photos (imgs, wireArguments): the only
+// place image bytes leave jarvisd for a node. A result echoing them back is redacted.
+func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c parse.ToolCall, imgs imageArgs,
+	userID int64, message string) *pyjson.Object {
 	if !m.bus.Available() {
 		return servertools.Obj("success", false, "error", "could not dispatch to node: "+ErrNoBroker.Error())
 	}
 	rid := uuid4()
-	var args any = c.Function.Arguments // a JSON string; the node decodes it
-	if c.Function.Arguments == "" {
-		args = map[string]any{}
-	}
+	args := wireArguments(c.Function.Arguments, imgs) // a JSON string (the node decodes it), or an object with photos
 	details := map[string]any{"command_name": c.Function.Name, "arguments": args, "tool_call_id": toolCallID,
 		"reply_request_id": rid, "user_id": userID}
 	if message != "" {
@@ -606,6 +607,7 @@ func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c 
 	if err != nil {
 		return servertools.Obj("success", false, "error", "malformed node result")
 	}
+	v = redactWireImages(v)
 	output := v
 	if o, ok := v.(*pyjson.Object); ok {
 		if out, ok := o.Get("output"); ok {

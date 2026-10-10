@@ -3,6 +3,7 @@ package servertools
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -67,3 +68,36 @@ func TestResolveImages(t *testing.T) {
 		t.Fatal("empty source resolved")
 	}
 }
+
+func TestImageParamsAndMarker(t *testing.T) {
+	v, err := pyjson.Loads(`{"type":"function","function":{"name":"x","parameters":{"type":"object","properties":{` +
+		`"a":{"type":"string"},"p":{"type":"array","x-jarvis-type":"image"},"q":{"type":"array","x-jarvis-type":"image"}},` +
+		`"required":["q"]}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := v.(*pyjson.Object)
+	ps := ImageParams(tool)
+	if len(ps) != 2 || ps[0] != (ImageParam{"p", false}) || ps[1] != (ImageParam{"q", true}) || !IsPhotoTool(tool) {
+		t.Fatalf("params %+v", ps)
+	}
+	before := pyjson.Dumps(tool, true)
+	stripped := StripImageMarkers(tool)
+	if s := pyjson.Dumps(stripped, true); strings.Contains(s, ImageSchemaMarker) ||
+		s != strings.ReplaceAll(before, `, "x-jarvis-type": "image"`, "") {
+		t.Fatalf("stripped %s", s)
+	}
+	if pyjson.Dumps(tool, true) != before {
+		t.Fatal("input changed")
+	}
+	plain := Obj("type", "function", "function", Obj("name", "y"))
+	if StripImageMarkers(plain) != plain || IsPhotoTool(plain) || ImageParams(nil) != nil {
+		t.Fatal("plain tool")
+	}
+	s := ImageSchema("Which photos.")
+	if !IsImageProperty(s) || !strings.HasPrefix(pyjson.Str(mustGet(s, "description")), "Which photos. Photo numbers") {
+		t.Fatalf("schema %s", pyjson.Dumps(s, true))
+	}
+}
+
+func mustGet(o *pyjson.Object, k string) any { v, _ := o.Get(k); return v }

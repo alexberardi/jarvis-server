@@ -246,7 +246,8 @@ func (n errandNodes) ReportCommands(ctx context.Context, nodeID string, timeout 
 	list, _ := av.([]any)
 	var out []*pyjson.Object
 	for _, e := range list {
-		if c, ok := e.(*pyjson.Object); ok {
+		// A command that takes a photo can't run in an errand: there is no photo (§9).
+		if c, ok := e.(*pyjson.Object); ok && !commandTakesImage(c) {
 			out = append(out, c)
 		}
 	}
