@@ -97,7 +97,7 @@ description per image (max 200 tokens, thinking off); a failed call falls throug
 slot; with neither, the text is `not described`. It then prepends `[image 1: …]` lines to that
 message's text and drops its images, matching the message by id under the conversation lock.
 Turns arriving earlier send the real image. After a restart the job finds nothing (the cache is
-memory only). The log line has counts and the slot, never the description.
+memory only). Tools keep the bytes after the swap (§8.1, CI8); the model doesn't. The log line has counts and the slot, never the description.
 
 **Vision lost mid-conversation** (Image input switched off while a description is pending): the
 live request gets `[image]` text instead of the parts the engine would refuse (`visionGuard`).
@@ -155,8 +155,9 @@ own text rather than replacing the whole message.
 ## 8. Photo → action (2026-10-10, pending review)
 
 A photo in chat can now drive an action. First: **"save this as a recipe"** runs the recipes photo
-import on the attached photo and saves the result. Also checked: a photo of a list → the existing
-`shopping_list` tool, with no change.
+import on the attached photo and saves the result. A photo with no instruction gets a description
+and an offer ("Want me to save it to your recipes?"); a "yes" then saves it (CI8). Also checked: a
+photo of a list → the existing `shopping_list` tool, with no change.
 
 ### 8.1 Server tools see the turn's photos by number
 
@@ -164,15 +165,26 @@ import on the attached photo and saves the result. Also checked: a photo of a li
   their 1-based number in the message ("image 1", "image 2"). The model passes numbers, never
   data. `ImageNumbers(call, "images")` reads an optional `[1, 2]` argument (absent = all photos).
   `ResolveImages` returns the bytes and sniffed type.
+- **Kept bytes (CI8).** On every commit the conversation keeps the decoded bytes of its newest
+  photo message (`conversation.photos`, `keepPhotos`); a newer photo message replaces them, an
+  older one (a late description) never does. At most 4 × 2 MiB per conversation, memory only;
+  they go with the conversation (10-minute idle TTL, `/conversation/end`, the entry cap, a
+  restart). Kept at commit, so compaction or `max_turns` trimming can't lose them, even before
+  the description lands.
 - The engine fills `Turn.Images` for mobile chat conversations only (`chatUserID != 0`), per tool
-  call, from the working history (`cc/chat_image_actions.go`, `turnImagesOf`). It walks back to
-  the latest user message that ever had photos:
+  call, from the working history and the kept bytes (`cc/chat_image_actions.go`,
+  `turnImagesOf`). "The photos the model sees" = the latest user message that ever had photos,
+  numbered 1-based within that message. Walking back:
   - photos still attached → those (the current turn's, or an earlier turn's whose description
-    hasn't landed yet: exactly what the model sees);
-  - only the description left (`[image N: …]`, or visionGuard's `[image]`) →
-    `ErrImagesExpired`;
-  - none → `ErrNoImages`;
+    hasn't landed yet);
+  - only the description left (`[image N: …]`, or visionGuard's `[image]`) → the kept bytes when
+    they belong to that message, else `ErrImagesExpired`;
+  - no photo message left in history (compacted or trimmed away) → the kept bytes, which are by
+    construction the conversation's latest photos; none → `ErrNoImages`;
   - a number out of range → `*ImageIndexError` ("there is no image 3: only image 1 is attached").
+- An expired conversation comes back empty (a chat on an expired id warms up fresh), so the
+  tool says `no_image` ("attach the photo"). `image_expired` is left for a described photo whose
+  bytes are gone.
 - Bytes stay in memory. Tool results, traces, job payloads and logs never carry them (unit test,
   plus a leak check on the manual run).
 
@@ -185,14 +197,28 @@ import on the attached photo and saves the result. Also checked: a photo of a li
   - call the tool every time the user asks, for a photo attached now or earlier;
   - never claim a save the tool didn't make;
   - don't transcribe the recipe, and don't use a list or note tool for it.
+- **Offer, don't act (CI8).** While photos are available to a photo tool (attached now or kept)
+  and one is offered, each turn gets a transient system block, `prompts.PhotoActionsBlock`
+  (`PHOTOS:`): use a tool on a photo only when the user asked for that action, now or by
+  accepting an offer ("yes", "sure", "do it"); with no instruction, describe it and offer the
+  action without calling the tool; never say an action was done unless its tool succeeded this
+  turn. Transient, so `messages[0]` stays byte-stable and voice prompts are unchanged. The
+  tool's own guidance ("call it every time they ask; never say a recipe is saved … unless the
+  tool succeeded in this turn") is unchanged.
+- **Photo-only turns** (photos, no words): the user message gets `prompts.PhotoOnlyHint` ("photo
+  only: … describe it … offer that action … don't call a tool on it until they say so"), and the
+  engine never forces a tool call on them (`engineInput.noForce`). Before this, the Qwen
+  providers' must-call retry ran unguarded on an empty utterance (the keyword guard needs words)
+  and nagged the model into calling `save_recipe_from_image` after it had already succeeded: one
+  photo, three imports (manual check, first run).
 - **Offered** only in mobile chat, when the live slot reports vision at warmup (the only way a
   photo can arrive) and the recipes module is wired: `prompts.ToolGates.ChatPhotos`, on both the
   native and the text path. Voice conversations' prompt bytes are unchanged.
 - **Refusals** the model relays:
   - `no_speaker` (no known user: voice);
   - `no_image`: ask the user to attach the photo;
-  - `image_expired`: "That photo is no longer available … Ask the user to attach the photo
-    again";
+  - `image_expired`: "That photo is no longer available: photos are kept only while the chat is
+    active. Ask the user to attach the photo again";
   - `invalid_image`: a bad number, or a photo the import refuses (too many, too big, not
     decodable);
   - `invalid_arguments`;
@@ -265,14 +291,31 @@ Results:
     was logged as `skipped` (no devices).
   - P3 timed out on CPU (30 s) and the draft was kept, as the import does.
 - **"add this to my recipes"** → `save_recipe_from_image {"images":[1]}` → recipe 2.
-- **Expired:** "what is this?" → "That's a recipe for Lemon Garlic Roast Chicken… Want me to save
-  it?". After the description landed, "nice, save it as a recipe" → `image_expired` → "Hmm, the
-  photo isn't available anymore. Want to attach it again…?".
+- **Expired (before CI8 retention):** "what is this?" → "That's a recipe for Lemon Garlic Roast
+  Chicken… Want me to save it?". After the description landed, "nice, save it as a recipe" →
+  `image_expired` → "Hmm, the photo isn't available anymore. Want to attach it again…?". With
+  retention this is the "yes" run below.
 - Before the guidance said "call it every time / never claim a save", a follow-up "save that
   recipe photo again" got "I'll save that… right away" with no tool call. The guidance was
   tightened, and the expired run above is from after that change.
 - **Leaks:** no image data in the log (base64 probes, `data:image`), in the traces (`[image] save
   this as a recipe`), or in the job payloads (ids only).
+
+**CI8 re-check (2026-10-10, same setup, fresh scratch home, build `e009d54` + the photo-only fix):**
+- **Photo, no text** → reply "Looks like a nice Lemon Garlic Roast Chicken recipe card. Want me to
+  save it to your recipes?" (34 s), no tool call, one live call. The background slot then
+  described it (`slot=background`).
+- **"yes"** in the same conversation, after the description landed → the live request carried
+  `[image 1: …]` text and no image part; `save_recipe_from_image {"images":[1]}` resolved image 1
+  from the kept bytes → "Got it—your Lemon Garlic Roast Chicken recipe is being saved…" (14 s).
+  The job saved recipe 3 (8 ingredients, 6 steps) and created the inbox item.
+- **Photo + "save this as a recipe"** (new conversation) → one `save_recipe_from_image` call, one
+  import, "Got it, I'm saving that Lemon Garlic Roast Chicken recipe for you…" (42 s).
+- **First run, before the photo-only fix:** with the `PHOTOS:` block alone, the 9B called the
+  tool on a bare photo, then the must-call retry made it call it twice more (three imports).
+  That run is why photo-only turns get their own hint and no forcing.
+- **Leaks:** no base64 probe or `data:image` in the jarvisd log, the proxy log or the database
+  (the recipes import's own blob store holds the imported photo, as it always does).
 
 ### 8.5 Decided while building
 
@@ -283,18 +326,16 @@ Results:
   for the job: OCR + P2 take tens of seconds on a GPU and minutes on CPU.
 - **Photos by number, resolved per call** from the working history, so tool-loop continues see
   the same photos as the model.
-- **Expired = the latest photo message carries only its description.** Per spec, the tool doesn't
-  keep pixels past the description (CI3).
+- **Tools keep the photo, the model doesn't (CI8 over CI3).** The latest photo message's bytes stay
+  in memory for tools until the conversation goes; the model keeps only the description.
+- **"Photos available" = attached now or kept**, and only the newest photo message counts, numbered
+  within itself; an older photo can't be reached once a newer one arrives.
 - **Offered only in vision-capable mobile chats.** No prompt bytes change for voice or for chats
   without image input.
 
 ### 8.6 Open questions
 
-1. **Keep the photo for tools a little longer?** The model itself offers "Want me to save it?"
-   after describing a photo, but by the time the user says yes, the description has replaced
-   the photo. **Recommendation:** keep the last photo message's bytes in memory, for tools only
-   (not sent to the model), until the conversation expires (10-minute idle TTL, at most 4 × 2 MiB
-   per conversation). Today's behaviour is the spec's (CI3: resend).
+1. ~~Keep the photo for tools a little longer?~~ Decided (CI8) and built: §8.1 "Kept bytes".
 2. **Absolute dates for flyer → reminder/calendar** (§8.3). **Recommendation:** let
    `resolved_datetimes` accept an ISO calendar date the user's input (or the photo) states, or add
    date keys like `2026-10-17`, then retest. Out of scope here.
