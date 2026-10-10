@@ -98,6 +98,8 @@ func toolReplies(req map[string]any) []string {
 	return out
 }
 
+func tio(msgs []chatMsg) *historyImages { return turnImagesOf(msgs, nil) }
+
 func TestTurnImagesOf(t *testing.T) {
 	two := []chatImage{
 		{mime: "image/png", dataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)},
@@ -106,7 +108,7 @@ func TestTurnImagesOf(t *testing.T) {
 	sys := chatMsg{Role: "system", Content: "you are jarvis"}
 
 	// The current turn's photos, by 1-based number.
-	ti := turnImagesOf([]chatMsg{sys, {Role: "user", Content: "save this", images: two},
+	ti := tio([]chatMsg{sys, {Role: "user", Content: "save this", images: two},
 		{Role: "assistant", Content: "", ToolCalls: nil}})
 	if ti.Count() != 2 {
 		t.Fatalf("count %d", ti.Count())
@@ -135,7 +137,7 @@ func TestTurnImagesOf(t *testing.T) {
 	}
 
 	// An earlier turn's photos whose description is still pending: the model still sees them.
-	ti = turnImagesOf([]chatMsg{sys, {Role: "user", Content: "what is this?", images: two[:1]},
+	ti = tio([]chatMsg{sys, {Role: "user", Content: "what is this?", images: two[:1]},
 		{Role: "assistant", Content: "A recipe card."}, {Role: "user", Content: "save it"}})
 	if ti.Count() != 1 {
 		t.Fatalf("pending description: count %d", ti.Count())
@@ -143,7 +145,7 @@ func TestTurnImagesOf(t *testing.T) {
 
 	// Described (or vision-guarded): expired, asking for the photo again.
 	for _, c := range []string{"[image 1: A recipe card for pancakes.]\nwhat is this?", "[image] what is this?"} {
-		ti = turnImagesOf([]chatMsg{sys, {Role: "user", Content: c}, {Role: "assistant", Content: "A recipe card."},
+		ti = tio([]chatMsg{sys, {Role: "user", Content: c}, {Role: "assistant", Content: "A recipe card."},
 			{Role: "user", Content: "save it"}})
 		if _, err := servertools.ResolveImages(ti, nil); !errors.Is(err, servertools.ErrImagesExpired) {
 			t.Fatalf("%q: %v", c, err)
@@ -153,7 +155,7 @@ func TestTurnImagesOf(t *testing.T) {
 		}
 	}
 	// Never any photo.
-	ti = turnImagesOf([]chatMsg{sys, {Role: "user", Content: "save my pancake recipe"}})
+	ti = tio([]chatMsg{sys, {Role: "user", Content: "save my pancake recipe"}})
 	if _, err := servertools.ResolveImages(ti, []int{1}); !errors.Is(err, servertools.ErrNoImages) {
 		t.Fatalf("no photos: %v", err)
 	}
@@ -161,7 +163,7 @@ func TestTurnImagesOf(t *testing.T) {
 		t.Fatalf("nil source: %v", err)
 	}
 	// Text that merely mentions a marker mid-message is not a description.
-	ti = turnImagesOf([]chatMsg{sys, {Role: "user", Content: "what does [image 1: x] mean"}})
+	ti = tio([]chatMsg{sys, {Role: "user", Content: "what does [image 1: x] mean"}})
 	if _, err := ti.Image(1); !errors.Is(err, servertools.ErrNoImages) {
 		t.Fatalf("marker mid-text: %v", err)
 	}
@@ -267,13 +269,54 @@ func TestSaveRecipeFromImage(t *testing.T) {
 	}
 }
 
+// CI8: after the description replaced the photo for the model, a follow-up "yes" still saves
+// it from the bytes the conversation keeps, and the model is not re-sent the image (CI3).
+func TestSaveRecipeAfterDescription(t *testing.T) {
+	imp := &fakeImporter{}
+	ce, jobs := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+	cid := ce.warm("tok-7")
+	j := chatWithImage(t, ce, jobs, cid, "", "A pancake recipe card. Want me to save it as a recipe?")
+	ce.eng.say("A recipe card for pancakes.")
+	ce.m.describeImages(context.Background(), j) // live describes (no background vision)
+	if um := userMessages(ce.m.convs.get(cid)); len(um[len(um)-1].images) != 0 {
+		t.Fatal("description did not replace the image")
+	}
+
+	before := len(ce.eng.requests())
+	ce.eng.push(saveCall(`{"images": [1]}`))
+	ce.eng.say("Saving it now.")
+	frames := ce.chat("tok-7", map[string]any{"message": "yes", "conversation_id": cid})
+	if f := lastFrame(t, frames); f["type"] != "done" {
+		t.Fatalf("frames %v", frames)
+	}
+	got := imp.got()
+	if len(got) != 1 || len(got[0].photos) != 1 || string(got[0].photos[0]) != string(pngBytes) {
+		t.Fatalf("import calls %+v", got)
+	}
+	r := toolReplies(ce.eng.last())
+	if len(r) == 0 || !strings.Contains(r[len(r)-1], `"status": "processing"`) {
+		t.Fatalf("tool reply %v", r)
+	}
+	for _, req := range ce.eng.requests()[before:] {
+		if len(imageURLs(req)) != 0 || !strings.Contains(fmtMessages(req), "[image 1: A recipe card for pancakes.]") {
+			t.Fatalf("follow-up request re-sent the image or lost the description: %s", fmtMessages(req))
+		}
+	}
+}
+
+// The bytes truly gone (only the description left) → image_expired; the conversation expired →
+// a fresh conversation with no photo → no_image. Either way the importer is not called.
 func TestSaveRecipeFromImageExpired(t *testing.T) {
 	imp := &fakeImporter{}
 	ce, jobs := newRecipeChatEnv(t, prompts.ChatGPT, imp)
 	cid := ce.warm("tok-7")
 	j := chatWithImage(t, ce, jobs, cid, "what is this?", "A pancake recipe card.")
 	ce.eng.say("A recipe card for pancakes.")
-	ce.m.describeImages(context.Background(), j) // live describes (no background vision)
+	ce.m.describeImages(context.Background(), j)
+	conv := ce.m.convs.get(cid)
+	conv.mu.Lock()
+	conv.photos = nil // as if the bytes were lost
+	conv.mu.Unlock()
 
 	ce.eng.push(saveCall(`{}`))
 	ce.eng.say("Please send the photo again.")
@@ -286,8 +329,123 @@ func TestSaveRecipeFromImageExpired(t *testing.T) {
 		!strings.Contains(r[len(r)-1], "attach the photo again") {
 		t.Fatalf("expired reply %v", r)
 	}
+
+	// A conversation idle past its TTL takes its photos with it.
+	j = chatWithImage(t, ce, jobs, cid, "and this?", "Another recipe card.")
+	ce.eng.say("A recipe card for waffles.")
+	ce.m.describeImages(context.Background(), j)
+	ce.advance(convIdleTTL + time.Minute)
+	ce.eng.push(saveCall(`{}`))
+	ce.eng.say("Please attach the photo.")
+	frames = ce.chat("tok-7", map[string]any{"message": "yes, save it", "conversation_id": cid})
+	if f := lastFrame(t, frames); f["type"] != "done" {
+		t.Fatalf("frames %v", frames)
+	}
+	r = toolReplies(ce.eng.last())
+	if len(r) == 0 || !strings.Contains(r[len(r)-1], `"error": "no_image"`) {
+		t.Fatalf("after expiry reply %v", r)
+	}
 	if len(imp.got()) != 0 {
-		t.Fatal("importer called for an expired photo")
+		t.Fatal("importer called without the photo")
+	}
+}
+
+// Only the latest photo message's bytes are kept, whatever order descriptions land in, and
+// they survive the message being compacted away.
+func TestKeptPhotosLatestOnly(t *testing.T) {
+	imp := &fakeImporter{}
+	ce, jobs := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+	cid := ce.warm("tok-7")
+	j1 := chatWithImage(t, ce, jobs, cid, "what is this?", "A mug.")
+	ce.eng.say("Here.")
+	ce.chat("tok-7", map[string]any{"message": "and this?", "conversation_id": cid,
+		"images": []any{img("image/jpeg", jpegBytes), img("image/png", pngBytes)}})
+	conv := ce.m.convs.get(cid)
+	conv.mu.Lock()
+	kept := conv.photos
+	conv.mu.Unlock()
+	if kept == nil || len(kept.imgs) != 2 || string(kept.imgs[0].Data) != string(jpegBytes) || kept.msgID == j1.MessageID {
+		t.Fatalf("kept %+v", kept)
+	}
+	// The older message's description lands late: the newer photos stay kept.
+	ce.eng.say("A mug.")
+	ce.m.describeImages(context.Background(), j1)
+	conv.mu.Lock()
+	if conv.photos != kept {
+		t.Fatal("an older photo message replaced the kept photos")
+	}
+	conv.mu.Unlock()
+
+	// A follow-up resolves the newer message's photos by their own numbering.
+	ce.eng.push(saveCall(`{"images": [2]}`))
+	ce.eng.say("Saving.")
+	ce.chat("tok-7", map[string]any{"message": "save the second one as a recipe", "conversation_id": cid})
+	if got := imp.got(); len(got) != 1 || string(got[0].photos[0]) != string(pngBytes) {
+		t.Fatalf("import calls %+v", got)
+	}
+
+	// Compacted away (no photo message left in history): the kept bytes still resolve.
+	sys := chatMsg{Role: "system", Content: "you are jarvis"}
+	sum := chatMsg{Role: "system", Content: "Summary of the earlier conversation: the user sent two recipe photos.", summary: true}
+	ti := turnImagesOf([]chatMsg{sys, sum, {Role: "user", Content: "save the first one"}}, kept)
+	if im, err := ti.Image(1); err != nil || string(im.Data) != string(jpegBytes) || ti.Count() != 2 {
+		t.Fatalf("compacted: %v", err)
+	}
+	// A described message the kept bytes don't belong to is honestly expired.
+	ti = turnImagesOf([]chatMsg{sys, {Role: "user", Content: "[image 1: a mug]", id: kept.msgID + 1}}, kept)
+	if _, err := ti.Image(1); !errors.Is(err, servertools.ErrImagesExpired) {
+		t.Fatalf("mismatched kept: %v", err)
+	}
+	// The described message the kept bytes belong to resolves.
+	ti = turnImagesOf([]chatMsg{sys, {Role: "user", Content: "[image 1: a mug]", id: kept.msgID}}, kept)
+	if im, err := ti.Image(2); err != nil || string(im.Data) != string(pngBytes) {
+		t.Fatalf("matching kept: %v", err)
+	}
+}
+
+// CI8's prompt rule: a transient block while photos are available to a photo tool, never
+// otherwise; the save guidance's "never claim a save" holds alongside it.
+func TestPhotoActionsBlock(t *testing.T) {
+	if prompts.PhotoActionsGate(true, map[string]bool{"web_search": true}) || prompts.PhotoActionsGate(false,
+		map[string]bool{saveRecipeToolName: true}) || !prompts.PhotoActionsGate(true, map[string]bool{saveRecipeToolName: true}) {
+		t.Fatal("gate")
+	}
+	ce, jobs := newRecipeChatEnv(t, prompts.Qwen3_5_9B, &fakeImporter{})
+	cid := ce.warm("tok-7")
+	ce.eng.say("Hi.")
+	ce.chat("tok-7", map[string]any{"message": "hello", "conversation_id": cid})
+	if strings.Contains(fmtMessages(ce.eng.last()), "PHOTOS:") {
+		t.Fatal("block without photos")
+	}
+	j := chatWithImage(t, ce, jobs, cid, "", "A recipe card. Want me to save it as a recipe?")
+	msgs := fmtMessages(ce.eng.last())
+	if !strings.Contains(msgs, "PHOTOS:") || !strings.Contains(msgs, "offer the matching action") ||
+		!strings.Contains(msgs, "Never say a recipe is saved or being saved unless the tool succeeded") {
+		t.Fatalf("photo turn prompt %s", msgs)
+	}
+	ce.eng.say("A recipe card.")
+	ce.m.describeImages(context.Background(), j)
+	ce.eng.say("Sure.")
+	ce.chat("tok-7", map[string]any{"message": "what's in it?", "conversation_id": cid})
+	if !strings.Contains(fmtMessages(ce.eng.last()), "PHOTOS:") {
+		t.Fatal("no block while the kept photo is available")
+	}
+	// The block is per turn: messages[0] stays byte-stable.
+	conv := ce.m.convs.get(cid)
+	conv.mu.Lock()
+	first := conv.messages[0].Content
+	conv.mu.Unlock()
+	if strings.Contains(first, "PHOTOS:") {
+		t.Fatal("block in the system prompt")
+	}
+
+	// No photo tool offered (no recipes module): no block, photos or not.
+	ce2, _ := newImageChatEnv(t, prompts.ChatGPT)
+	cid2 := ce2.warm("tok-7")
+	ce2.eng.say("A mug.")
+	ce2.chat("tok-7", map[string]any{"message": "", "conversation_id": cid2, "images": []any{img("image/png", pngBytes)}})
+	if strings.Contains(fmtMessages(ce2.eng.last()), "PHOTOS:") {
+		t.Fatal("block without a photo tool")
 	}
 }
 

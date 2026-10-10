@@ -19,8 +19,8 @@ type Image struct {
 }
 
 // TurnImages resolves the photos the model currently sees: those of the latest user message
-// that still carries them (the current turn's, or an earlier turn's whose description has not
-// replaced them yet).
+// that had photos (the current turn's, or an earlier turn's, whose bytes the conversation keeps
+// for tools after their description replaced them for the model).
 type TurnImages interface {
 	// Count is the number of attached photos (0 when none or when they expired).
 	Count() int
@@ -31,9 +31,9 @@ type TurnImages interface {
 var (
 	// ErrNoImages: the conversation has no attached photo the tool could use.
 	ErrNoImages = errors.New("no photo is attached to this conversation")
-	// ErrImagesExpired: the photo was replaced by its text description (after the reply, or by
-	// compaction), so its pixels are gone; the user has to send it again.
-	ErrImagesExpired = errors.New("the photo is no longer available (only its description is kept after the reply)")
+	// ErrImagesExpired: only the photo's text description is left (the bytes went with an
+	// expired conversation or a restart); the user has to send it again.
+	ErrImagesExpired = errors.New("the photo is no longer available (only its description is kept)")
 )
 
 // ImageIndexError is a photo number outside 1..Count.

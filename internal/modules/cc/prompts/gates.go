@@ -15,6 +15,29 @@ type ToolGates struct {
 // PhotoTools are the server tools that act on chat photos (offered only with ChatPhotos).
 var PhotoTools = []string{"save_recipe_from_image"}
 
+// PhotoActionsBlock is the per-turn rule while a chat has photos a photo tool can act on
+// (docs/cc/chat-images.md CI8: offer, don't act). A transient block, so the byte-stable
+// messages[0] and voice prompts are unchanged.
+const PhotoActionsBlock = "PHOTOS: the user's photos in this chat can be handed to your tools. Use a tool on a " +
+	"photo only when the user asked for that action, in this message or by accepting your offer (\"yes\", " +
+	"\"sure\", \"do it\"). If they sent a photo without saying what to do with it, describe it briefly and " +
+	"offer the matching action (e.g. \"Want me to save it as a recipe?\") without calling the tool. Never say " +
+	"an action was done unless its tool succeeded in this turn."
+
+// PhotoActionsGate reports whether a turn gets PhotoActionsBlock: photos are available to
+// tools (attached now or kept from earlier) and a photo tool is offered.
+func PhotoActionsGate(photosAvailable bool, offered map[string]bool) bool {
+	if !photosAvailable {
+		return false
+	}
+	for _, n := range PhotoTools {
+		if offered[n] {
+			return true
+		}
+	}
+	return false
+}
+
 // textPathWhitelist is the legacy text-path whitelist, in offer order. answer_question is a
 // disabled server tool (it only resolves if a node offers a client tool of that name);
 // make_phone_call is offered even with phone off (its execute() refuses honestly).

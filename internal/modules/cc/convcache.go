@@ -42,8 +42,8 @@ type chatMsg struct {
 	// it, so they never clobber history a newer turn wrote (chat_images.go, compaction.go).
 	id uint64
 	// images are a chat turn's attached images (chat_images.go): sent to the live slot as
-	// image_url parts until the description job replaces them with text. Memory only: never
-	// written to disk, traces or logs.
+	// image_url parts until the description job replaces them with text (tools keep the bytes
+	// through conversation.photos). Memory only: never written to disk, traces or logs.
 	images []chatImage
 	// summary marks the compaction summary message (compaction.go).
 	summary bool
@@ -136,6 +136,9 @@ type conversation struct {
 	// promptTokens is the last live call's prompt size (usage.prompt_tokens), 0 when unknown or
 	// since a compaction: the compaction trigger (compaction.go).
 	promptTokens int
+	// photos are the latest photo message's bytes, kept for tools after its description lands
+	// (chat_image_actions.go, CI8). Memory only; gone with the conversation.
+	photos *keptPhotos
 
 	lastUsed time.Time
 }
@@ -150,6 +153,7 @@ func (c *conversation) commit(msgs []chatMsg) {
 		}
 	}
 	c.messages = msgs
+	c.keepPhotos(msgs)
 }
 
 // newMsgID numbers a message before it is committed (a chat turn's image message, so the

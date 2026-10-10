@@ -26,53 +26,114 @@ type RecipeImporter interface {
 // description ("[image 1: …]", chat_images.go) or by visionGuard's bare "[image]".
 var describedImageRE = regexp.MustCompile(`^\[image(?: \d+:|\])`)
 
-// historyImages is servertools.TurnImages over a working history.
-type historyImages struct {
-	imgs    []chatImage
-	expired bool
+// keptPhotos are the latest photo message's decoded bytes, kept on the conversation for tools
+// after the description replaced them in history (CI8: the follow-up "yes" to "want me to save
+// it?" still has the photo). The model never sees them again (CI3). Memory only, one message
+// per conversation (at most chatMaxImages × chatMaxImageBytes); they die with the conversation
+// (idle TTL, eviction, restart).
+type keptPhotos struct {
+	msgID uint64
+	imgs  []servertools.Image
 }
 
-// turnImagesOf resolves the photos the model currently sees: the latest user message that
-// still carries photos. When the latest user message that ever had photos carries only their
-// description, they expired.
-func turnImagesOf(msgs []chatMsg) *historyImages {
+// keepPhotos records the newest message in msgs that carries photos, unless an equal or newer
+// one is already kept. Called on every commit, so a photo message compacted or trimmed away
+// before its description landed keeps its bytes too. Callers hold c.mu.
+func (c *conversation) keepPhotos(msgs []chatMsg) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		mm := msgs[i]
+		if len(mm.images) == 0 {
+			continue
+		}
+		if c.photos != nil && c.photos.msgID >= mm.id {
+			return
+		}
+		imgs, err := decodeChatImages(mm.images)
+		if err != nil {
+			return // never happens for validated images; tools then report the photo expired
+		}
+		c.photos = &keptPhotos{msgID: mm.id, imgs: imgs}
+		return
+	}
+}
+
+// hasToolPhotos reports whether a tool could get photos this turn: attached now or kept.
+func (c *conversation) hasToolPhotos(attached int) bool {
+	return attached > 0 || c.photos != nil
+}
+
+// decodeChatImages turns data URLs back into bytes.
+func decodeChatImages(in []chatImage) ([]servertools.Image, error) {
+	out := make([]servertools.Image, 0, len(in))
+	for _, im := range in {
+		_, b64, ok := strings.Cut(im.dataURL, ",")
+		if !ok {
+			return nil, errors.New("malformed image")
+		}
+		data, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, errors.New("malformed image")
+		}
+		out = append(out, servertools.Image{MIME: im.mime, Data: data})
+	}
+	return out, nil
+}
+
+// historyImages is servertools.TurnImages over a working history.
+type historyImages struct {
+	attached []chatImage         // photos still on the message (decoded on use)
+	kept     []servertools.Image // the conversation's kept bytes for a described message
+	expired  bool
+}
+
+// turnImagesOf resolves the photos the model currently sees: those of the latest user message
+// that ever had photos, numbered 1-based within it. Still attached → those; replaced by their
+// description → the conversation's kept bytes for that message; kept bytes for an older
+// message, or none → expired. When no photo message is left in history (compacted or trimmed
+// away), the kept bytes are still the latest photos of the conversation.
+func turnImagesOf(msgs []chatMsg, kept *keptPhotos) *historyImages {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		mm := msgs[i]
 		if mm.Role != "user" {
 			continue
 		}
 		if len(mm.images) > 0 {
-			return &historyImages{imgs: mm.images}
+			return &historyImages{attached: mm.images}
 		}
 		if describedImageRE.MatchString(mm.Content) {
+			if kept != nil && kept.msgID == mm.id && mm.id != 0 {
+				return &historyImages{kept: kept.imgs}
+			}
 			return &historyImages{expired: true}
 		}
+	}
+	if kept != nil {
+		return &historyImages{kept: kept.imgs}
 	}
 	return &historyImages{}
 }
 
-func (h *historyImages) Count() int { return len(h.imgs) }
+func (h *historyImages) Count() int { return len(h.attached) + len(h.kept) }
 
 func (h *historyImages) Image(n int) (servertools.Image, error) {
-	if len(h.imgs) == 0 {
+	count := h.Count()
+	if count == 0 {
 		if h.expired {
 			return servertools.Image{}, servertools.ErrImagesExpired
 		}
 		return servertools.Image{}, servertools.ErrNoImages
 	}
-	if n < 1 || n > len(h.imgs) {
-		return servertools.Image{}, &servertools.ImageIndexError{N: n, Count: len(h.imgs)}
+	if n < 1 || n > count {
+		return servertools.Image{}, &servertools.ImageIndexError{N: n, Count: count}
 	}
-	im := h.imgs[n-1]
-	_, b64, ok := strings.Cut(im.dataURL, ",")
-	if !ok {
-		return servertools.Image{}, errors.New("malformed image")
+	if h.kept != nil {
+		return h.kept[n-1], nil
 	}
-	data, err := base64.StdEncoding.DecodeString(b64)
+	imgs, err := decodeChatImages(h.attached[n-1 : n])
 	if err != nil {
-		return servertools.Image{}, errors.New("malformed image")
+		return servertools.Image{}, err
 	}
-	return servertools.Image{MIME: im.mime, Data: data}, nil
+	return imgs[0], nil
 }
 
 // --- save_recipe_from_image ---
@@ -131,8 +192,8 @@ func (t *saveRecipeTool) Execute(ctx context.Context, call servertools.Call, tur
 	var idx *servertools.ImageIndexError
 	switch {
 	case errors.Is(err, servertools.ErrImagesExpired):
-		return toolErr("image_expired", "That photo is no longer available: only a short description of it is kept "+
-			"after the reply. Ask the user to attach the photo again with their request."), nil
+		return toolErr("image_expired", "That photo is no longer available: photos are kept only while the chat "+
+			"is active. Ask the user to attach the photo again with their request."), nil
 	case errors.Is(err, servertools.ErrNoImages):
 		return toolErr("no_image", "No photo is attached. Ask the user to attach a photo of the recipe (camera or "+
 			"gallery) with their message."), nil

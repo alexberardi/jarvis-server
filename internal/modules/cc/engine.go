@@ -302,7 +302,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				endTool := tr.measure("server_tool_"+c.Function.Name, "cc", nil)
 				turn := in.turn
 				if conv.chatUserID != 0 {
-					turn.Images = turnImagesOf(msgs) // the photos the model sees, by number (chat_image_actions.go)
+					turn.Images = turnImagesOf(msgs, conv.photos) // the photos the model sees, by number (chat_image_actions.go)
 				}
 				res := m.tools.Execute(ctx, servertools.Call{ID: c.ID, Name: c.Function.Name, Args: argsObject(c.Function.Arguments)}, turn)
 				endTool(nil)
