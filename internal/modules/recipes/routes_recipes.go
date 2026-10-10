@@ -433,6 +433,37 @@ func replaceTags(ctx context.Context, tx *sql.Tx, recipeID int64, names []string
 	return nil
 }
 
+// insertRecipe writes a new recipe (a validated RecipeCreate) with its ingredients, steps and
+// tags, authored by the caller in their write household. POST /recipes and the chat photo
+// import's save (photo_chat.go) both create recipes through it.
+func insertRecipe(ctx context.Context, tx *sql.Tx, c caller, in recipeIn, now string) (int64, error) {
+	if err := ensureUser(ctx, tx, c.uid()); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO recipes_recipes (user_id, household_id, title, description,
+		image_url, source_type, source_url, servings, prep_time_minutes, cook_time_minutes, total_time_minutes,
+		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.uid(), c.hh(), *in.title, in.description, in.imageURL, *in.sourceType, in.sourceURL, in.servings,
+		in.prep, in.cook, in.foldTotal(), now, now)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := replaceIngredients(ctx, tx, id, in.ingredients); err != nil {
+		return 0, err
+	}
+	if err := replaceSteps(ctx, tx, id, in.steps); err != nil {
+		return 0, err
+	}
+	if err := replaceTags(ctx, tx, id, in.tags); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 // --- handlers ---
 
 // handleListRecipes is GET /recipes (#1): every visible recipe, newest first.
@@ -476,27 +507,8 @@ func (m *Module) handleCreateRecipe(w http.ResponseWriter, r *http.Request, c ca
 				return &httpError{http.StatusConflict, "Parse job not ready"}
 			}
 		}
-		if err := ensureUser(ctx, tx, c.uid()); err != nil {
-			return err
-		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO recipes_recipes (user_id, household_id, title, description,
-			image_url, source_type, source_url, servings, prep_time_minutes, cook_time_minutes, total_time_minutes,
-			created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			c.uid(), c.hh(), *in.title, in.description, in.imageURL, *in.sourceType, in.sourceURL, in.servings,
-			in.prep, in.cook, in.foldTotal(), now, now)
-		if err != nil {
-			return err
-		}
-		if id, err = res.LastInsertId(); err != nil {
-			return err
-		}
-		if err := replaceIngredients(ctx, tx, id, in.ingredients); err != nil {
-			return err
-		}
-		if err := replaceSteps(ctx, tx, id, in.steps); err != nil {
-			return err
-		}
-		if err := replaceTags(ctx, tx, id, in.tags); err != nil {
+		var err error
+		if id, err = insertRecipe(ctx, tx, c, in, now); err != nil {
 			return err
 		}
 		if in.parseJobID != nil && *in.parseJobID != "" {

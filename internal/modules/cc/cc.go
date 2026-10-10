@@ -130,6 +130,9 @@ type Module struct {
 	// chat images, the context size for compaction (chat_images.go, compaction.go). Nil: no
 	// images, no compaction.
 	Endpoints func(ctx context.Context, label string) (llm.Endpoint, error)
+	// Recipes is the recipes module's photo import for save_recipe_from_image (chat photo →
+	// recipe, chat_image_actions.go). Nil: the tool is not offered.
+	Recipes RecipeImporter
 	// Phone configures phone calls (5c, docs/cc/11; phone_wire.go).
 	Phone PhoneConfig
 

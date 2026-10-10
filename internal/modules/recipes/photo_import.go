@@ -151,11 +151,36 @@ func (m *Module) handleFromImage(w http.ResponseWriter, r *http.Request, c calle
 		}
 		prepared = append(prepared, out)
 	}
-	if m.deps.Blobs == nil {
-		m.internalError(w, errors.New("no blob store"))
+	ingestionID, jobID, err := m.queuePhotoImport(ctx, c, prepared, tierMax, titleHint, nil)
+	if err != nil {
+		var ue *uploadError
+		if errors.As(err, &ue) {
+			httpx.Error(w, http.StatusInternalServerError, "Failed to upload images: "+ue.err.Error())
+			return
+		}
+		m.internalError(w, err)
 		return
 	}
-	ingestionID := newUUID()
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"ingestion_id": ingestionID, "job_id": jobID})
+}
+
+// uploadError is a blob store failure while storing the photos (the route's 500 "Failed to
+// upload images: …").
+type uploadError struct{ err error }
+
+func (e *uploadError) Error() string { return "upload images: " + e.err.Error() }
+func (e *uploadError) Unwrap() error { return e.err }
+
+// queuePhotoImport stores prepared photos and creates the ingestion and its recipes.image job
+// for the caller (stamped with their write household), then wakes the queue. extra is merged
+// into the job data (the chat import's "save"). Every photo import goes through here: the
+// route and the chat tool (photo_chat.go).
+func (m *Module) queuePhotoImport(ctx context.Context, c caller, prepared [][]byte, tierMax int64, titleHint *string,
+	extra map[string]any) (ingestionID, jobID string, err error) {
+	if m.deps.Blobs == nil {
+		return "", "", errors.New("no blob store")
+	}
+	ingestionID = newUUID()
 	keys := make([]string, 0, len(prepared))
 	removeBlobs := func() {
 		for _, k := range keys {
@@ -167,14 +192,16 @@ func (m *Module) handleFromImage(w http.ResponseWriter, r *http.Request, c calle
 		if _, err := m.deps.Blobs.Put(ctx, k, bytes.NewReader(data), "image/jpeg"); err != nil {
 			removeBlobs()
 			m.deps.Log.Error("recipes: from-image upload failed", "user_id", c.ID, "ingestion_id", ingestionID, "err", err)
-			httpx.Error(w, http.StatusInternalServerError, "Failed to upload images: "+err.Error())
-			return
+			return "", "", &uploadError{err}
 		}
 		keys = append(keys, k)
 	}
 	rawKeys, _ := json.Marshal(keys)
-	var jobID string
-	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
+	data := map[string]any{"ingestion_id": ingestionID, "tier_max": tierMax, "title_hint": titleHint}
+	for k, v := range extra {
+		data[k] = v
+	}
+	err = m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
 		if err := ensureUser(ctx, tx, c.uid()); err != nil {
 			return err
 		}
@@ -184,19 +211,17 @@ func (m *Module) handleFromImage(w http.ResponseWriter, r *http.Request, c calle
 			return err
 		}
 		var err error
-		jobID, err = m.createJob(ctx, tx, c, jobTypeImage, imageJobType,
-			map[string]any{"ingestion_id": ingestionID, "tier_max": tierMax, "title_hint": titleHint})
+		jobID, err = m.createJob(ctx, tx, c, jobTypeImage, imageJobType, data)
 		return err
 	})
 	if err != nil {
 		removeBlobs()
-		m.internalError(w, err)
-		return
+		return "", "", err
 	}
 	m.deps.Queue.Notify(imageJobType)
 	m.deps.Log.Info("recipes: from-image job queued", "user_id", c.ID, "ingestion_id", ingestionID,
 		"parse_job_id", jobID, "images", len(keys))
-	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"ingestion_id": ingestionID, "job_id": jobID})
+	return ingestionID, jobID, nil
 }
 
 // --- the recipes.image handler ---
@@ -209,9 +234,26 @@ func (m *Module) runImage(ctx context.Context, qj queue.Job) ([]byte, error) {
 	err = m.photoJob(ctx, j)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		m.deps.Log.Error("recipes: image job failed", "parse_job_id", j.ID, "job_type", j.JobType, "err", err)
-		return nil, m.markError(context.WithoutCancel(ctx), j.ID, "ocr_completion_error", err.Error())
+		err = m.markError(context.WithoutCancel(ctx), j.ID, "ocr_completion_error", err.Error())
+	}
+	if err == nil && photoJobData(j).Save {
+		m.notifySavedImport(context.WithoutCancel(ctx), j.ID)
 	}
 	return nil, err
+}
+
+// photoJobInput is a recipes.image job's data.
+type photoJobInput struct {
+	IngestionID string `json:"ingestion_id"`
+	// Save: commit the draft as a recipe when it is ready and tell the user (the chat's
+	// "save this as a recipe", photo_chat.go). The app's import leaves the draft for review.
+	Save bool `json:"save"`
+}
+
+func photoJobData(j parseJob) photoJobInput {
+	var d photoJobInput
+	_ = json.Unmarshal([]byte(j.JobData.String), &d)
+	return d
 }
 
 // setIngestion records the ingestion's status (and pipeline_json / ocr_readings when given).
@@ -238,10 +280,7 @@ func (m *Module) canceled(ctx context.Context, id string) bool {
 }
 
 func (m *Module) photoJob(ctx context.Context, j parseJob) error {
-	var data struct {
-		IngestionID string `json:"ingestion_id"`
-	}
-	_ = json.Unmarshal([]byte(j.JobData.String), &data)
+	data := photoJobData(j)
 	if data.IngestionID == "" {
 		return m.markError(ctx, j.ID, "invalid_job_data", "Missing ingestion_id in job data")
 	}
@@ -363,7 +402,14 @@ func (m *Module) photoJob(ctx context.Context, j parseJob) error {
 	m.deps.Log.Info("recipes: image job done", "parse_job_id", j.ID, "job_type", j.JobType, "outcome", "complete",
 		"providers", providers, "ingredients", len(draft.Ingredients), "steps", len(draft.Steps))
 	// B7 fixed: completed_at is set (markComplete), so photo jobs reach the list and the cleanup.
-	return m.markComplete(ctx, j.ID, map[string]any{"recipe_draft": draft, "pipeline": pipeline})
+	result := map[string]any{"recipe_draft": draft, "pipeline": pipeline}
+	if err := m.markComplete(ctx, j.ID, result); err != nil {
+		return err
+	}
+	if data.Save {
+		return m.saveDraft(ctx, j, draft, result)
+	}
+	return nil
 }
 
 // structure is call_text_structuring + _parse_with_repair: P2 on the readings, the reply

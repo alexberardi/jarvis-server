@@ -7,7 +7,13 @@ type ToolGates struct {
 	SpeakerKnown  bool // a confidently identified speaker for this conversation (D21)
 	MemoryEnabled bool // memory.enabled
 	RecallEnabled bool // memory.recall_enabled
+	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
+	// photos come from (docs/cc/chat-images.md §8). Gates the photo → action tools.
+	ChatPhotos bool
 }
+
+// PhotoTools are the server tools that act on chat photos (offered only with ChatPhotos).
+var PhotoTools = []string{"save_recipe_from_image"}
 
 // textPathWhitelist is the legacy text-path whitelist, in offer order. answer_question is a
 // disabled server tool (it only resolves if a node offers a client tool of that name);
@@ -26,6 +32,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.SpeakerKnown && g.MemoryEnabled
 	case "recall":
 		return g.SpeakerKnown && g.MemoryEnabled && g.RecallEnabled
+	case "save_recipe_from_image":
+		return g.ChatPhotos
 	}
 	return true
 }
@@ -35,7 +43,7 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 // Names the caller's registry does not have are skipped by the caller (legacy get_tool).
 func TextServerTools(g ToolGates) []string {
 	out := append([]string(nil), textPathWhitelist...)
-	for _, n := range []string{"deep_research", "quick_search", "remember", "forget", "recall"} {
+	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall"}, PhotoTools...) {
 		if ServerToolAllowed(n, g) {
 			out = append(out, n)
 		}

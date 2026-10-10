@@ -300,7 +300,11 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					continue
 				}
 				endTool := tr.measure("server_tool_"+c.Function.Name, "cc", nil)
-				res := m.tools.Execute(ctx, servertools.Call{ID: c.ID, Name: c.Function.Name, Args: argsObject(c.Function.Arguments)}, in.turn)
+				turn := in.turn
+				if conv.chatUserID != 0 {
+					turn.Images = turnImagesOf(msgs) // the photos the model sees, by number (chat_image_actions.go)
+				}
+				res := m.tools.Execute(ctx, servertools.Call{ID: c.ID, Name: c.Function.Name, Args: argsObject(c.Function.Arguments)}, turn)
 				endTool(nil)
 				if o, ok := res.(*pyjson.Object); ok && c.Function.Name == "request_validation" {
 					if v, _ := o.Get("_validation_request"); v == true {
