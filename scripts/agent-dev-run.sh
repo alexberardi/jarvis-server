@@ -15,7 +15,8 @@
 #   --uninstall       remove that unit/agent
 #   --status          print the agent's capabilities (on macOS run as Jarvis Agent via launchd:
 #                     from a terminal, macOS would report the terminal's permissions instead)
-#   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any
+#   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any, or -- --voice
+#                     (the "hey jarvis" pipeline; foreground runs only, --install doesn't pass flags)
 #
 # macOS: the build is "~/Applications/Jarvis Agent.app", signed with your Developer ID (or
 # Apple Development) identity when the keychain has one, so the Accessibility grant survives
@@ -134,6 +135,9 @@ gocmd() {
 }
 VERSION="dev-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 mkdir -p "$ROOT/dist"
+# The voice pipeline embeds onnxruntime (internal/voice/sherpa/libs, gitignored): fetch it once.
+plat="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+"$ROOT/scripts/fetch-sherpa-libs.sh" "$plat" >&2 || die "could not fetch the native voice libraries for $plat"
 say "building $VERSION"
 (cd "$ROOT" && CGO_ENABLED=0 gocmd build -trimpath -ldflags "-X main.version=$VERSION" -o dist/jarvis-agent ./cmd/jarvis-agent)
 

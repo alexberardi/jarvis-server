@@ -337,6 +337,75 @@ Trixie arm64, Seeed 2-mic HAT, `dsnoopmic` at 48 kHz, 1 GHz, no throttling (49�
 - Before this run jarvis-dev had a leaked audacy mpd drop-in crash-looping mpd (5,169 restarts, ~4 s CPU each); fixed by jarvis-node-setup #143 (self-heal on boot).
 - Memory quick win (jarvis-node-setup #144, merged): −77 MB on the Pi 4, wake scores bit-identical.
 
+### 3.7 Desktop voice landed (phase 3, 2026-10-10)
+
+`jarvis-agent run --voice` (and `jarvis-agent listen`, the pipeline alone) runs the §1.1 MVS turn
+on Linux and macOS. Code: `internal/audio/device` (ALSA over purego on Linux, AudioQueue over
+purego on macOS, `wav:FILE` on every OS) and `internal/agent/voice` (pipeline, endpointing,
+command-center client, wake-model fetch). Windows reports "not supported yet" and links no
+onnxruntime.
+
+**What it does, in wire order** (rows refer to §1.1):
+
+| Row | Go behaviour | Same as Python? |
+|---|---|---|
+| 3 | Capture 48 kHz S16 mono, 80 ms chunks, from `--voice-input` (`default`) | yes. ALSA/AudioQueue convert from the hardware rate. |
+| 4 | Streaming decimator → oww `hey_jarvis` 0.4, 8 s debounce, reset after a fire | yes (D2: no per-chunk edge artifacts) |
+| 5 | Wake clip: the last 25 raw chunks (2 s), 48 kHz | yes |
+| 6 | Synthesised two-tone chime, then the queue is flushed (`history_secs=0`) | chime instead of a greeting |
+| 7 | `/conversation/start` on a goroutine at wake: `node_context.timezone` (from `$TZ` or `/etc/localtime`), no commands, no client tools | tools later (row 18) |
+| 8 | RMS endpointing: clamp(median pre-wake RMS × 2, 200, 1000) else 300; 0.8 s silence, 2–7 s; then DC removal + gain to −18 dBFS (≤ +18 dB). Golden-tested against `speech_to_text.py`. | yes, including the normaliser |
+| 9 | STT multipart: `file` (48 kHz), `speaker_audio` (wake clip + command), `conversation_id` | yes (48 kHz per §8 Q1) |
+| 10 | `is_non_speech` port, golden-tested against `voice_filters.py` | yes |
+| 11 | Join the warmup ≤ 10 s, then `/voice/command/stream` `{voice_command, conversation_id, turn_source:"wake", wake_confidence, affect}` | yes (no `pre_wake_speech_seconds` yet) |
+| 12 | 200: PCM streamed to the speaker at `X-Audio-*`, 8 s inter-chunk idle timeout | yes |
+| 13 | 202 `not_for_me` silent; `complete` spoken via `/media/tts/speak` (≤ 200 chars) or `/speak/stream`; empty `complete` stays **silent** (§1.4: Python says "Task completed."); `tool_calls`/`validation_required` log + error chime; `error` speaks its message | as §1.1, minus the §1.4 quirk |
+| 14 | `/conversation/end` always, after both the turn and start have finished | Go always sends it |
+| 15 | Error chime | chime only |
+
+**Wake models at runtime:** `<user cache>/jarvis-agent/openwakeword/` (`~/.cache` on Linux,
+`~/Library/Caches` on macOS), downloaded once from openWakeWord's v0.5.1 release (the files
+`fetch-test-models.sh` uses) and **pinned by SHA-256**; `--wake-models DIR` uses a directory
+as-is (verified, never downloaded into). onnxruntime is the embedded copy, extracted under
+`<user cache>/jarvis-agent/native/`. The agent binary grows from ~12 MB to ~44 MB on
+linux/amd64 and darwin/arm64 (Windows unchanged).
+
+**Bug found on the way (fixed): `internal/voice/ort` could hand onnxruntime a dangling
+pointer.** `Runtime.call` took the out-parameter addresses (`&vals[i]`, `&outs[0]`, `&info`) as
+`...uintptr` and passed them on to `purego.SyscallN`; `//go:uintptrescapes` only protects the
+direct callee, so those variables could stay on the goroutine stack, and a stack growth inside
+the call moved them. Live runs failed after 0.2–44 s with "NULL input supplied for input
+input"; the golden tests never hit it because their stacks were already grown.
+`TestProcessAtAnyStackDepth` reproduces it at once; `call` (and the Windows COM helper
+`comCall`, same pattern) are now `//go:uintptrescapes`.
+
+**Measured** (listening, no turn; CPU = process user+sys ÷ wall):
+
+| Host | Path | CPU (one core) | Memory |
+|---|---|---|---|
+| i7-13700KF, Arch/PipeWire | ALSA `pulse` plugin → null-sink monitor, 120 s | 1.7% | RSS 88 MB: anon 29, file 16, and 38 MB of the pulse plugin's shared-memory pool |
+| same | ALSA `default` (pipewire-alsa, real headset mic, threshold 1.0 so nothing can fire), 60 s, while the repo's race suite ran | 2.2% | RSS 90 MB, same split |
+| M2 Max, macOS 26.1 | AudioQueue default mic (TCC-silenced over SSH), 60 s | 12.0% | 56 MB physical footprint (RSS 135 MB counts shared frameworks) |
+
+**Verified live:**
+- Linux, this box: a WAV of "hey jarvis" + Kokoro "What time is it?" through the real ALSA
+  path (played into a PipeWire null sink; the agent captured its monitor through ALSA and
+  played the reply to a second null sink, recorded with `parecord`) and through `wav:` in/out:
+  wake 0.82–0.90, transcript "What time is it?", reply "It's 5:00 PM on Saturday." streamed and
+  played (2.7 s), against the dev jarvisd.
+- macOS, the MBP: the same WAV through `listen --voice-input wav:… --voice-output default`:
+  wake 0.815, reply streamed and played through AudioQueue in real time (4.05 s). AudioQueue
+  playback drains in real time; capture delivers buffers but **all zeros over SSH**: TCC gives
+  sshd-launched processes silence for the microphone. A live mic test needs the bundle run
+  under launchd (`scripts/agent-dev-run.sh -- --voice`) and the user to click "Allow" on the
+  microphone prompt (`NSMicrophoneUsageDescription` is now in Info.plist; without it macOS kills
+  the app on first capture).
+
+**Not yet (phase 5 parity list, unchanged):** follow-up, barge-in, client tools/continue,
+validation, processing ack / wake greeting, `pre_wake_speech_seconds`, AEC (on a desktop with
+speakers the reply can reach the mic; wake is paused while it plays, so it can't wake itself,
+but there is no barge-in), device selection on macOS (default devices only), Windows WASAPI.
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -496,7 +565,7 @@ These are **still needed**; install.sh step lines are cited:
    - the embedded ORT libraries (`internal/voice/sherpa/libs`; add `internal/voice/ort` beside it,
      since the same `libonnxruntime.so` serves both);
    - `internal/audio` (WAV).
-3. **Desktop voice, Linux first.**
+3. **Desktop voice, Linux and macOS** (§8 Q10). **Landed 2026-10-10, see §3.7.**
    - Pipeline: ALSA `default` capture (works through pipewire-alsa/pulse) → decimator → oww → RMS
      endpointing → the MVS turn (§1.1 rows 7–14) → ALSA playback.
    - This exercises the whole voice protocol on hardware we sit at, without touching the Pi.

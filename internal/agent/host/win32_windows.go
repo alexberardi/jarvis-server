@@ -65,7 +65,12 @@ func NewWin32() Win32 { return realWin32{} }
 
 // --- COM / WASAPI ---
 
-// comCall invokes vtable slot idx of a COM object.
+// comCall invokes vtable slot idx of a COM object. Callers pass out-parameter addresses
+// (&dev, &vol, &level) as uintptr; uintptrescapes makes the compiler heap-allocate those and
+// keep them alive for the call, so a stack growth can't move them while Windows writes to
+// them (the same bug internal/voice/ort hit).
+//
+//go:uintptrescapes
 func comCall(obj unsafe.Pointer, idx int, args ...uintptr) uintptr {
 	vtbl := *(*unsafe.Pointer)(obj)
 	fn := *(*uintptr)(unsafe.Add(vtbl, uintptr(idx)*unsafe.Sizeof(uintptr(0))))

@@ -245,6 +245,10 @@ func TestMacBundleInfoPlist(t *testing.T) {
 	if !strings.HasPrefix(p["NSAppleEventsUsageDescription"], "string:") {
 		t.Error("NSAppleEventsUsageDescription is required to drive System Events")
 	}
+	// Without it macOS kills the process the moment the voice pipeline opens the microphone.
+	if !strings.HasPrefix(p["NSMicrophoneUsageDescription"], "string:") {
+		t.Error("NSMicrophoneUsageDescription is required for the voice pipeline")
+	}
 	if l := plistDict(t, read(t, plistPath)); l["AssociatedBundleIdentifiers"] != "string:io.jarvis.agent" {
 		t.Errorf("LaunchAgent AssociatedBundleIdentifiers = %q", l["AssociatedBundleIdentifiers"])
 	}

@@ -233,3 +233,48 @@ func TestHeartbeatIdentity(t *testing.T) {
 		t.Errorf("needs_k2 = %v", got["needs_k2"])
 	}
 }
+
+// OnConnected (the voice pipeline's start) runs once jarvisd is found, gets the node's CC
+// client, and Run waits for it to return after ctx ends.
+func TestRunnerStartsOnConnectedAndWaitsForIt(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/services":
+			_ = json.NewEncoder(w).Encode(map[string]any{"services": []map[string]string{
+				{"name": SvcCommandCenter, "url": srvURL},
+				{"name": SvcMQTT, "url": "mqtt://127.0.0.1:1"}, // nothing listens; paho retries quietly
+			}})
+		case "/api/v0/node/mqtt-credentials":
+			_, _ = w.Write([]byte(`{"username":null,"password":null}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan *CC, 1)
+	returned := make(chan struct{})
+	r := &Runner{Creds: Creds{ConfigURL: srv.URL, NodeID: "n1", NodeKey: "k"}, Tools: Multi{}, Log: quiet,
+		OnConnected: func(ctx context.Context, cc *CC) {
+			got <- cc
+			<-ctx.Done()
+			close(returned)
+		}}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	cc := <-got
+	if cc.BaseURL != srv.URL || cc.Creds.NodeID != "n1" {
+		t.Fatalf("cc %s %s", cc.BaseURL, cc.Creds.NodeID)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-returned:
+	default:
+		t.Fatal("Run returned before OnConnected did")
+	}
+}
