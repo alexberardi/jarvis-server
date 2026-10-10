@@ -221,7 +221,12 @@ packages may assume the sidecar but not audio in/out.
    open: whether `desktop_open` on an app the user has never launched should need a
    confirmation, and whether CC should get the app list up front (it's in `desktop_list_apps`
    now, costing a round trip). *Recommend:* no confirmation for v1; revisit if mishearings
-   launch the wrong thing.
+   launch the wrong thing. **Voice (2026-10-10) keeps the same policy**: voice turns run the
+   very same toolset, with no confirmation step, as the MQTT path and the Python node do.
+   The only risky tool is `desktop_close_window` (`is_risky`, graceful close). A voice
+   confirmation would need the validation/follow-up flow (go-pi-node.md §1.1 rows 16, 19),
+   which isn't ported; if wanted, the cheap version is to not offer `desktop_close_window` to
+   voice turns at all.
 3. **macOS signing.** The dev bundle is signed by `dev-run.sh` with the keychain's Developer ID
    (designated requirement = team + `io.jarvis.agent`), so grants survive rebuilds. It is not
    notarized and has no hardened runtime. Hardened runtime would need the

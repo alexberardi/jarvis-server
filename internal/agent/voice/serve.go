@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
 )
 
@@ -15,6 +16,7 @@ type Options struct {
 	Config        Config
 	Detector      Detector
 	Server        Server
+	Tools         node.Toolset // client tools for voice turns (nil: none)
 	Log           *slog.Logger
 	OnTurn        func(Turn)
 }
@@ -50,7 +52,7 @@ func serveOnce(ctx context.Context, o Options) error {
 	}
 	defer mic.Close()
 	o.Detector.Reset()
-	p := &Pipeline{Cfg: o.Config, Capture: mic, Detector: o.Detector, Server: o.Server, Log: o.Log, OnTurn: o.OnTurn,
+	p := &Pipeline{Cfg: o.Config, Capture: mic, Detector: o.Detector, Server: o.Server, Tools: o.Tools, Log: o.Log, OnTurn: o.OnTurn,
 		Playback: func(rate, ch int) (device.Playback, error) { return device.OpenPlayback(o.Output, rate, ch) }}
 	o.Log.Info("voice: listening", "input", o.Input, "output", o.Output, "backend", device.Backend(),
 		"wake_threshold", o.Config.WakeThreshold)

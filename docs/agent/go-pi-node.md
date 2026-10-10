@@ -85,7 +85,7 @@ Tags:
 | 15 | Error phrases ("I can't reach my server right now." and so on), with a fallback chime | `N:core/wake_transcription.py:185-196` | – | MVS (chime only) |
 | 16 | Follow-up window: 4 s, ≤5 iterations, onset detection, blocking `POST /voice/command` with `turn_source:"follow_up"` | `N:core/follow_up_loop.py:97-428`, `N:scripts/speech_to_text.py:455-691` | `S:voice_routes.go:171-220` | later |
 | 17 | Barge-in: local only. oww score > 0.04 plus an RMS gate, 2 consecutive chunks → cancel playback and close the stream. Nothing is sent to the server. | `N:core/barge_in.py:100-359` | – | later |
-| 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | later (with the sidecar) |
+| 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | **done for the desktop agent (§3.8)**, blocking continue only |
 | 19 | Validation: speak the question, re-listen, `POST /voice/command/continue` | `N:core/wake_transcription.py:204-231` | same | later |
 | 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | later |
 | 21 | Pre-wake speech seconds hint (RMS over a 5 s ring) | `N:core/wake_loop.py:113-116,361-367,523-529` | `S:hints/` | later (cheap) |
@@ -353,13 +353,13 @@ onnxruntime.
 | 4 | Streaming decimator → oww `hey_jarvis` 0.4, 8 s debounce, reset after a fire | yes (D2: no per-chunk edge artifacts) |
 | 5 | Wake clip: the last 25 raw chunks (2 s), 48 kHz | yes |
 | 6 | Synthesised two-tone chime, then the queue is flushed (`history_secs=0`) | chime instead of a greeting |
-| 7 | `/conversation/start` on a goroutine at wake: `node_context.timezone` (from `$TZ` or `/etc/localtime`), no commands, no client tools | tools later (row 18) |
+| 7 | `/conversation/start` on a goroutine at wake: `node_context.timezone` (from `$TZ` or `/etc/localtime`), plus the node's client tools (§3.8) | yes |
 | 8 | RMS endpointing: clamp(median pre-wake RMS × 2, 200, 1000) else 300; 0.8 s silence, 2–7 s; then DC removal + gain to −18 dBFS (≤ +18 dB). Golden-tested against `speech_to_text.py`. | yes, including the normaliser |
 | 9 | STT multipart: `file` (48 kHz), `speaker_audio` (wake clip + command), `conversation_id` | yes (48 kHz per §8 Q1) |
 | 10 | `is_non_speech` port, golden-tested against `voice_filters.py` | yes |
 | 11 | Join the warmup ≤ 10 s, then `/voice/command/stream` `{voice_command, conversation_id, turn_source:"wake", wake_confidence, affect}` | yes (no `pre_wake_speech_seconds` yet) |
 | 12 | 200: PCM streamed to the speaker at `X-Audio-*`, 8 s inter-chunk idle timeout | yes |
-| 13 | 202 `not_for_me` silent; `complete` spoken via `/media/tts/speak` (≤ 200 chars) or `/speak/stream`; empty `complete` stays **silent** (§1.4: Python says "Task completed."); `tool_calls`/`validation_required` log + error chime; `error` speaks its message | as §1.1, minus the §1.4 quirk |
+| 13 | 202 `not_for_me` silent; `complete` spoken via `/media/tts/speak` (≤ 200 chars) or `/speak/stream`; empty `complete` stays **silent** (§1.4: Python says "Task completed."); `tool_calls` run locally (§3.8); `validation_required` log + error chime; `error` speaks its message | as §1.1, minus the §1.4 quirk |
 | 14 | `/conversation/end` always, after both the turn and start have finished | Go always sends it |
 | 15 | Error chime | chime only |
 
@@ -401,10 +401,67 @@ input"; the golden tests never hit it because their stacks were already grown.
   microphone prompt (`NSMicrophoneUsageDescription` is now in Info.plist; without it macOS kills
   the app on first capture).
 
-**Not yet (phase 5 parity list, unchanged):** follow-up, barge-in, client tools/continue,
+**Not yet (phase 5 parity list):** follow-up, barge-in, ~~client tools/continue~~ (§3.8),
 validation, processing ack / wake greeting, `pre_wake_speech_seconds`, AEC (on a desktop with
 speakers the reply can reach the mic; wake is paused while it plays, so it can't wake itself,
 but there is no barge-in), device selection on macOS (default devices only), Windows WASAPI.
+
+### 3.8 Client tools in voice turns (2026-10-10)
+
+"Hey jarvis, set the volume to 30 percent" now runs the desktop tool. Code:
+`internal/agent/voice/tools.go` (the loop), `client.go` (`StartConversation` with tools,
+`ContinueTools`), `cmd/jarvis-agent` (one `toolFlags.build` for `run` and `listen`).
+
+- **One source of truth.** `run` builds one `node.Multi` (desktop tools, then the sidecar's
+  commands) and hands the *same* value to the MQTT dispatcher and to `voice.Serve`. A voice
+  turn offers `Available()` at wake (capabilities computed then, as for `report_tools`) as
+  `client_tools` + `available_commands` on `/conversation/start`, and runs a `tool_calls`
+  reply through `Toolset.Call`. `listen` builds the same set (`--no-tools` for none).
+- **The loop** (ported from `N:_run_conversation_loop` / `_execute_tools`): the calls of a
+  round run in order; their `{tool_call_id, output}` go back in one `POST
+  /voice/command/continue`; a `tool_calls` answer starts another round, anything else is
+  handled like the first 202 (`complete` spoken via TTS, empty stays silent, `not_for_me`
+  silent). At most 10 rounds; a round identical (names + arguments) to the previous one ends
+  the turn with "Sorry, that didn't work: …" (or "Sorry, I wasn't able to complete that
+  request."); when every call of the last round failed, the tool's error (the call's
+  `failure_message` first) is spoken instead of the model's reply, as Python does, because
+  small models report success anyway. No `/commands/{rid}/verify` here: the calls arrive on
+  the node's own authenticated HTTP response, not over MQTT.
+- **Failures are results, never hangs.** Unknown tool → `{"success": false, "error":
+  "Unknown tool: X"}` (Python's text); a call that exceeds `Config.ToolTimeout` (25 s, the
+  dispatcher's) or panics → a failure result, and the turn goes on; the call runs on its own
+  goroutine because the sidecar ignores deadlines today. A continue that fails (HTTP, or the
+  200-with-`stop_reason: null` processing error) → error chime.
+- **Deliberate difference: blocking continue only.** The Python node tries
+  `/voice/command/continue/stream` first and falls back to the blocking route on 202.
+  jarvisd's stream route only *speaks* the post-results answer (no tools in that LLM call), so
+  a chain can never happen there: "minimise Firefox" needs `desktop_list_windows` then
+  `desktop_minimize_window`, and "turn it down 5%" needs get then set. The blocking route
+  re-enters the engine's tool loop on native-tools models; the cost is that the final answer
+  is rendered by `/media/tts/speak` after the LLM finishes instead of streamed sentence by
+  sentence. Forced retries (cc engine, PR #29) don't fire on these continues: the tool
+  results in the history count as "a tool ran this turn".
+- **Confirmation:** none, same as the MQTT path and the Python node.
+  `desktop_close_window` is marked `is_risky` (only errands' planner reads that) and is a
+  graceful close (the app may prompt to save); nothing else the desktop offers is
+  destructive. See DESIGN.md §9 Q2.
+- **Not ported:** `wait_for_input` / `clear_history` / `on_response_complete` from sidecar
+  results (follow-up isn't ported), `act_on_items`, `post_process_tool_call`, music takeover.
+
+**Verified live** (2026-10-10, `listen --voice-input wav:… --no-chimes`, Kokoro-rendered
+"Hey Jarvis." + command, against this box's dev jarvisd, as the MBP's node):
+
+| Box | Said | Tools run | Reply | Turn |
+|---|---|---|---|---|
+| this box (Linux/PipeWire) | "Set the volume to 25 percent." | `desktop_set_volume{"volume":25}`; `wpctl` read 0.25, then restored to 0.30 | "Got it, volume's set to 25%." | 5.3 s |
+| same | "What is the volume on my computer?" | `desktop_get_volume` | "Your computer's volume is at 30%." | 4.7 s |
+| same | "What apps can you open?" | `desktop_list_apps` | "…You have 62 apps installed, including…" (16 s of audio) | 7.0 s |
+| same | "Turn the volume on my computer down by 5 percent." | `desktop_get_volume`, then `desktop_set_volume{"volume":25}` (**two rounds**); restored | "Got it — I've turned your computer volume down by 5%." | 7.1 s |
+| MBP (macOS 26) | "Open the Chess app on my computer." | `desktop_list_apps{"query":"chess"}`, then `desktop_open{"target":"Chess"}` (**two rounds**); Chess came up, quit after | "Got it, the Chess app is opening up now." | 5.7 s |
+
+Not live-tested: window tools by voice (this box is Wayland, so none are offered; the MBP's
+agent binary over SSH has no Accessibility grant), sidecar commands by voice (covered by the
+same `Toolset` in tests), a live mic.
 
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
@@ -581,7 +638,7 @@ These are **still needed**; install.sh step lines are cited:
 5. **Parity**, in order:
    1. Follow-up.
    2. Barge-in (re-use the wake detector at threshold 0.04 plus the RMS gate).
-   3. Client tools / continue.
+   3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the sidecar.
    4. `update_node_config`, `measure_ambient_noise`, LED preview.
    5. K2 + settings snapshot (AES-GCM).
    6. Packages.

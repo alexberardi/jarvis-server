@@ -24,19 +24,52 @@ import (
 // Server is the voice half of command-center as a node sees it (go-pi-node.md §1.1 rows
 // 7-14). HTTPServer is the real one; tests use a fake.
 type Server interface {
-	StartConversation(ctx context.Context, conversationID string, nodeContext map[string]any) error
+	// StartConversation registers the node's client tools for this conversation (row 7).
+	StartConversation(ctx context.Context, conversationID string, nodeContext map[string]any, tools ToolSchemas) error
 	EndConversation(ctx context.Context, conversationID string) error
 	Transcribe(ctx context.Context, command, speaker []byte, conversationID string) (Transcript, error)
 	// VoiceStream posts the transcript. The caller must Close a returned Audio.
 	VoiceStream(ctx context.Context, req StreamRequest) (Reply, error)
 	// Speak renders text (the 202 "complete" path). The caller must Close the Audio.
 	Speak(ctx context.Context, text string) (*Audio, error)
+	// ContinueTools posts client tool results (row 18, the blocking /voice/command/continue)
+	// and returns what command-center wants next: more tool calls, or the final reply.
+	ContinueTools(ctx context.Context, conversationID string, results []ToolResult) (*Control, error)
+}
+
+// ToolSchemas is what a node offers at /conversation/start: OpenAI-style client_tools and
+// their available_commands (CommandDefinition) twins, as node.ToolDef renders them.
+type ToolSchemas struct {
+	ClientTools []any
+	Commands    []any
+}
+
+// ToolCall is one entry of a 202's tool_calls. Arguments is the model's JSON string (or an
+// object); node.DecodeArgs reads either.
+type ToolCall struct {
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments any    `json:"arguments"`
+	} `json:"function"`
+	// FailureMessage is the command's own "what to say if this fails", when it has one.
+	FailureMessage *string `json:"failure_message"`
+}
+
+// ToolResult is one {tool_call_id, output} posted back (ToolResultRequest.tool_results).
+type ToolResult struct {
+	ToolCallID string         `json:"tool_call_id"`
+	Output     map[string]any `json:"output"`
 }
 
 // Transcript is POST /media/whisper/transcribe's answer (the fields the node uses).
 type Transcript struct {
 	Text   string         `json:"text"`
 	Affect map[string]any `json:"affect,omitempty"`
+	// Speaker is who spoke, when speaker recognition knows (tool calls get the user id).
+	Speaker *struct {
+		UserID *int64 `json:"user_id"`
+	} `json:"speaker,omitempty"`
 }
 
 // StreamRequest is the /voice/command/stream body.
@@ -56,10 +89,16 @@ type Reply struct {
 
 // Control is the 202 VoiceCommandResponse, the fields the MVS acts on.
 type Control struct {
-	StopReason       string  `json:"stop_reason"`
-	AssistantMessage *string `json:"assistant_message"`
-	ToolCalls        []any   `json:"tool_calls"`
-	Validation       any     `json:"validation_request"`
+	StopReason       string     `json:"stop_reason"`
+	AssistantMessage *string    `json:"assistant_message"`
+	ToolCalls        []ToolCall `json:"tool_calls"`
+	Validation       any        `json:"validation_request"`
+	// Commands carries a processing error on /voice/command/continue (stop_reason null).
+	Commands []struct {
+		Errors *struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	} `json:"commands"`
 }
 
 // Audio is s16le PCM to play: a streamed audio/raw body, or a WAV's data chunk.
@@ -87,6 +126,7 @@ const (
 	startTimeout      = 130 * time.Second
 	endTimeout        = 10 * time.Second
 	sttTimeout        = 60 * time.Second
+	continueTimeout   = 60 * time.Second // the Python node waits 30 s; an LLM round can be slower
 	speakTimeout      = 60 * time.Second
 	streamHeadTimeout = 60 * time.Second
 	// speakStreamOver: replies longer than this use /media/tts/speak/stream (the Python
@@ -145,9 +185,9 @@ func httpError(path string, status int, raw []byte) error {
 	return he
 }
 
-// StartConversation is POST /conversation/start. The desktop agent registers no client tools
-// with voice yet (tool_calls is a later phase), so both lists are empty.
-func (s *HTTPServer) StartConversation(ctx context.Context, id string, nodeContext map[string]any) error {
+// StartConversation is POST /conversation/start with the node's client tools (empty lists
+// when it offers none).
+func (s *HTTPServer) StartConversation(ctx context.Context, id string, nodeContext map[string]any, tools ToolSchemas) error {
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 	var out struct {
@@ -155,12 +195,46 @@ func (s *HTTPServer) StartConversation(ctx context.Context, id string, nodeConte
 	}
 	err := s.postJSON(ctx, "/api/v0/conversation/start", map[string]any{
 		"conversation_id": id, "node_context": nodeContext,
-		"available_commands": []any{}, "client_tools": []any{},
+		"available_commands": orEmpty(tools.Commands), "client_tools": orEmpty(tools.ClientTools),
 	}, &out)
 	if err == nil && out.Status != "success" {
 		err = fmt.Errorf("conversation/start: status %q", out.Status)
 	}
 	return err
+}
+
+func orEmpty(l []any) []any {
+	if l == nil {
+		return []any{}
+	}
+	return l
+}
+
+// ContinueTools is the blocking POST /voice/command/continue. The streaming twin
+// (/continue/stream, which the Python node tries first) can't chain: it only speaks the
+// post-results answer, so a model that has to list windows before minimising one could never
+// make its second call. The blocking route re-enters the tool loop on native-tools models.
+func (s *HTTPServer) ContinueTools(ctx context.Context, id string, results []ToolResult) (*Control, error) {
+	ctx, cancel := context.WithTimeout(ctx, continueTimeout)
+	defer cancel()
+	if results == nil {
+		results = []ToolResult{}
+	}
+	var c Control
+	if err := s.postJSON(ctx, "/api/v0/voice/command/continue", map[string]any{
+		"conversation_id": id, "tool_results": results,
+	}, &c); err != nil {
+		return nil, err
+	}
+	if c.StopReason == "" {
+		// A processing error is a 200 with stop_reason null and the reason in commands.
+		msg := "no stop_reason"
+		if len(c.Commands) > 0 && c.Commands[0].Errors != nil && c.Commands[0].Errors.Message != "" {
+			msg = c.Commands[0].Errors.Message
+		}
+		return nil, fmt.Errorf("voice/command/continue: %s", msg)
+	}
+	return &c, nil
 }
 
 // EndConversation is POST /conversation/end.

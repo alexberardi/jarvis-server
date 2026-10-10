@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -75,20 +76,23 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	return &voiceStack{flags: f, cfg: cfg, det: det, close: closeDet}, nil
 }
 
-func (v *voiceStack) options(cc *node.CC, log *slog.Logger, onTurn func(voice.Turn)) voice.Options {
+func (v *voiceStack) options(cc *node.CC, tools node.Toolset, log *slog.Logger, onTurn func(voice.Turn)) voice.Options {
 	return voice.Options{Input: v.flags.input, Output: v.flags.output, Config: v.cfg, Detector: v.det,
-		Server: voice.NewHTTPServer(cc.BaseURL, cc.Creds), Log: log, OnTurn: onTurn}
+		Server: voice.NewHTTPServer(cc.BaseURL, cc.Creds), Tools: tools, Log: log, OnTurn: onTurn}
 }
 
 // --- listen ---
 
-// listen runs only the voice pipeline (no MQTT, no tools): for trying a microphone, and for
-// scripted end-to-end checks with --voice-input wav:FILE --once.
+// listen runs only the voice pipeline (no MQTT): for trying a microphone, and for scripted
+// end-to-end checks with --voice-input wav:FILE --once. Voice turns get the same client tools
+// as `run` unless --no-tools.
 func listen(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("listen", flag.ExitOnError)
 	cp := fs.String("creds", "", "credentials file")
 	once := fs.Bool("once", false, "exit after the first voice turn (exit status 1 unless a reply was spoken)")
 	timeout := fs.Duration("timeout", 0, "give up after this long (0: run until interrupted)")
+	noTools := fs.Bool("no-tools", false, "offer voice turns no client tools")
+	tf := addToolFlags(fs)
 	vf := addVoiceFlags(fs)
 	_ = fs.Parse(args)
 	path, err := credsPath(*cp)
@@ -114,6 +118,15 @@ func listen(ctx context.Context, args []string) error {
 		return fmt.Errorf("voice: %w", err)
 	}
 	defer vs.close()
+	var tools node.Toolset
+	if !*noTools {
+		_, ts, closeTools, err := tf.build(ctx, log, false)
+		if err != nil {
+			return err
+		}
+		defer closeTools()
+		tools = ts
+	}
 	if *timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, *timeout)
@@ -129,7 +142,7 @@ func listen(ctx context.Context, args []string) error {
 			stop()
 		}
 	}
-	if err := voice.Serve(ctx, vs.options(node.NewCC(ccURL, c), log, onTurn)); err != nil {
+	if err := voice.Serve(ctx, vs.options(node.NewCC(ccURL, c), tools, log, onTurn)); err != nil {
 		return err
 	}
 	if *once {
@@ -144,8 +157,16 @@ func listen(ctx context.Context, args []string) error {
 }
 
 func printTurn(t voice.Turn) {
-	fmt.Printf("turn %s: wake %.3f, recorded %.2f s (silence threshold %.0f), heard %q -> %s",
-		t.ConversationID, t.WakeScore, t.RecordedSecs, t.Threshold, t.Transcript, t.Outcome)
+	fmt.Printf("turn %s: wake %.3f, recorded %.2f s (silence threshold %.0f), heard %q",
+		t.ConversationID, t.WakeScore, t.RecordedSecs, t.Threshold, t.Transcript)
+	for _, r := range t.Tools {
+		args, _ := json.Marshal(r.Args)
+		fmt.Printf(", ran %s%s", r.Name, args)
+		if !r.Success {
+			fmt.Printf(" (failed: %s)", r.Error)
+		}
+	}
+	fmt.Printf(" -> %s", t.Outcome)
 	if t.Message != "" {
 		fmt.Printf(", said %q (%.2f s of audio)", t.Message, t.ReplySecs)
 	}
