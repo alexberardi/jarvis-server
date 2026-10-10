@@ -225,8 +225,10 @@ packages may assume the sidecar but not audio in/out.
    very same toolset, with no confirmation step, as the MQTT path and the Python node do.
    The only risky tool is `desktop_close_window` (`is_risky`, graceful close). A voice
    confirmation would need the validation/follow-up flow (go-pi-node.md §1.1 rows 16, 19),
-   which isn't ported; if wanted, the cheap version is to not offer `desktop_close_window` to
-   voice turns at all.
+   which isn't ported. **Decided (user, 2026-10-10): voice may close windows with no Jarvis
+   confirmation.** The close is graceful, so an app or page holding unsaved work raises its own
+   "are you sure" prompt; that is the safeguard. Don't add a voice confirmation or drop
+   `desktop_close_window` from voice turns.
 3. **macOS signing.** The dev bundle is signed by `dev-run.sh` with the keychain's Developer ID
    (designated requirement = team + `io.jarvis.agent`), so grants survive rebuilds. It is not
    notarized and has no hardened runtime. Hardened runtime would need the
