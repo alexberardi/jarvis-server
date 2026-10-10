@@ -212,6 +212,13 @@ photo of a list → the existing `shopping_list` tool, with no change.
   providers' must-call retry ran unguarded on an empty utterance (the keyword guard needs words)
   and nagged the model into calling `save_recipe_from_image` after it had already succeeded: one
   photo, three imports (manual check, first run).
+- **The must-call retry no longer fires after a tool ran (2026-10-10, all turns, not just photo
+  ones).** The Qwen providers' `[MUST_CALL_RETRY]` now fires at most once per turn, never once any
+  tool result follows the turn's user message (success, refusal, or an offline/timed-out node),
+  and never on a closing remark ("thanks", "got it", "no thanks"). It used to allow two nags and
+  re-armed on every continue, which nagged a follow-up that had already re-run the node tool
+  into a worse reply, and looped an offline node's tool. Rules and the before/after check are in
+  [02-tool-loop.md §3.2 i](02-tool-loop.md).
 - **Offered** only in mobile chat, when the live slot reports vision at warmup (the only way a
   photo can arrive) and the recipes module is wired: `prompts.ToolGates.ChatPhotos`, on both the
   native and the text path. Voice conversations' prompt bytes are unchanged. Since §9 this is the
@@ -447,7 +454,7 @@ box in a scratch venv/config/DB, with one custom command `image_size` (`JarvisPa
 - **Kept bytes:** after the background description replaced the first photo, "check that photo's
   size again with the tool please" → `{"photos":[1]}` → the node got the 640×427 JPEG again from
   the kept bytes. (The final wording was poor: the Qwen must-call retry nagged after the tool had
-  succeeded, the pre-existing forcing behaviour noted in §8.2, not image-specific.)
+  succeeded, the pre-existing forcing behaviour noted in §8.2, not image-specific; fixed 2026-10-10, see §8.2.)
 - **Leaks:** base64 probes of both photos and `data:image` absent from the jarvisd log, the
   proxy log, the node log, `jarvis.db` and its WAL; transcripts' `tool_calls_json` hold
   `{"photos":[1]}`; traces' `user_command` is `[image] …`.

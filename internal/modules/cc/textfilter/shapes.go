@@ -308,3 +308,46 @@ func (regexp2Words) findAll(s string) []string {
 	}
 	return out
 }
+
+// Acknowledgement shape (Go-only, not in the legacy filter): a closing remark that answers the
+// assistant rather than asking for anything ("thanks", "ok, got it", "no thanks", "never mind").
+// Every word is from ackWords and at least one is from ackClosers, so a bare "ok", "yes" or
+// "sure" (which can accept an offer) is not one.
+var (
+	ackWords = wordSet("ok okay k alright all right thanks thank thx ty you so much very " +
+		"cool nice great perfect awesome good fine got it gotcha sounds no nope nah never mind " +
+		"nevermind that's thats all bye goodbye night cheers appreciate wow lol haha oh hey jarvis")
+	ackClosers = wordSet("thanks thank thx ty cool nice got gotcha no nope nah never nevermind " +
+		"bye goodbye cheers appreciate wow lol haha")
+)
+
+func wordSet(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.Fields(s) {
+		out[w] = true
+	}
+	return out
+}
+
+// IsAcknowledgementShaped reports a closing remark: short, every word an acknowledgement word,
+// at least one a closer. The force-tools guard never fires on one.
+func IsAcknowledgementShaped(text string) bool {
+	s := strings.ReplaceAll(parse.PyLower(parse.PyStrip(text)), "’", "'")
+	if s == "" || strings.Contains(s, "?") {
+		return false
+	}
+	words := strings.FieldsFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r == '\'' || r >= '0' && r <= '9')
+	})
+	if len(words) == 0 || len(words) > 6 {
+		return false
+	}
+	closer := false
+	for _, w := range words {
+		if !ackWords[w] {
+			return false
+		}
+		closer = closer || ackClosers[w]
+	}
+	return closer
+}
