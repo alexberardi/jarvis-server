@@ -1,0 +1,205 @@
+package desktop
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/apps"
+	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+)
+
+type fakeBackend struct {
+	caps     []string
+	volume   int
+	opened   []string
+	launched []string
+	actions  []string
+}
+
+func (f *fakeBackend) Platform() string                           { return "linux" }
+func (f *fakeBackend) Capabilities(context.Context) []string      { return f.caps }
+func (f *fakeBackend) GetVolume(context.Context) (int, error)     { return f.volume, nil }
+func (f *fakeBackend) ApplyVolume(_ context.Context, l int) error { f.volume = l; return nil }
+func (f *fakeBackend) ListWindows(context.Context) ([]host.Window, error) {
+	return []host.Window{{ID: "0x1", Title: "Doc", App: "editor"}}, nil
+}
+func (f *fakeBackend) MinimizeWindow(_ context.Context, id string) error { return f.act("min " + id) }
+func (f *fakeBackend) FocusWindow(_ context.Context, id string) error    { return f.act("focus " + id) }
+func (f *fakeBackend) CloseWindow(_ context.Context, id string) error    { return f.act("close " + id) }
+func (f *fakeBackend) act(s string) error                                { f.actions = append(f.actions, s); return nil }
+func (f *fakeBackend) LaunchApp(_ context.Context, p string) error {
+	f.launched = append(f.launched, p)
+	return nil
+}
+func (f *fakeBackend) Open(_ context.Context, t string) error {
+	f.opened = append(f.opened, t)
+	return nil
+}
+
+var all = []string{"open", "volume.get", "volume.set", "windows.list", "windows.minimize", "windows.focus", "windows.close"}
+
+func names(defs []node.ToolDef) string {
+	var n []string
+	for _, d := range defs {
+		n = append(n, d.Name)
+	}
+	return strings.Join(n, ",")
+}
+
+func TestToolsFollowCapabilitiesPerCall(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	if got := len(ts.Available(context.Background())); got != 8 {
+		t.Fatalf("full host offers %d tools", got)
+	}
+	b.caps = []string{"open", "volume.get", "volume.set"} // Wayland, or AX revoked
+	if got := names(ts.Available(context.Background())); got != "desktop_open,desktop_list_apps,desktop_get_volume,desktop_set_volume" {
+		t.Fatalf("offered %s", got)
+	}
+}
+
+func TestRenderedSchemasSatisfyCC(t *testing.T) {
+	ts := New(host.New(&fakeBackend{caps: all}), OpenPolicy{}, catalogue)
+	for _, d := range ts.Available(context.Background()) {
+		// CommandDefinition requires command_name, description (strings) and parameters (list).
+		if _, ok := d.Command["command_name"].(string); !ok {
+			t.Fatalf("%s: command_name", d.Name)
+		}
+		if _, ok := d.Command["description"].(string); !ok {
+			t.Fatalf("%s: description", d.Name)
+		}
+		if _, ok := d.Command["parameters"].([]any); !ok {
+			t.Fatalf("%s: parameters must be a list", d.Name)
+		}
+		fn := d.ClientTool["function"].(map[string]any)
+		if fn["name"] != d.Name || strings.ContainsAny(d.Name, ". ") {
+			t.Fatalf("bad function name %v", fn["name"])
+		}
+		if _, err := json.Marshal(d.ClientTool); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func call(t *testing.T, ts *Tools, name string, args map[string]any) map[string]any {
+	t.Helper()
+	out, ok := ts.Call(context.Background(), name, args, node.Request{})
+	if !ok {
+		t.Fatalf("%s not handled", name)
+	}
+	return out
+}
+
+func TestSetVolumeClampsAndAcceptsStrings(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	for _, tc := range []struct {
+		in   any
+		want int
+	}{{150.0, 100}, {-3.0, 0}, {"30", 30}, {"45%", 45}, {1e300, 100}} {
+		out := call(t, ts, ToolSetVolume, map[string]any{"volume": tc.in})
+		if out["success"] != true || out["volume"] != tc.want || b.volume != tc.want {
+			t.Fatalf("volume %v -> %v (backend %d)", tc.in, out, b.volume)
+		}
+	}
+	out := call(t, ts, ToolSetVolume, map[string]any{"volume": "loud"})
+	if out["success"] != false || out["error_code"] != "invalid_argument" {
+		t.Fatalf("non-number: %v", out)
+	}
+}
+
+func TestOpenPolicy(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	for _, bad := range []string{"/usr/bin/xterm", `C:\Windows\System32\cmd.exe`, "~/bin/x", "--help",
+		"file:///etc/passwd", "steam://run/570", "https://", "javascript:alert(1)", ""} {
+		out := call(t, ts, ToolOpen, map[string]any{"target": bad})
+		if out["success"] != false || out["error_code"] != "invalid_argument" {
+			t.Fatalf("%q allowed: %v", bad, out)
+		}
+	}
+	if len(b.opened)+len(b.launched) != 0 {
+		t.Fatalf("refused targets reached the OS: %v %v", b.opened, b.launched)
+	}
+	out := call(t, ts, ToolOpen, map[string]any{"target": "https://example.com/x?y=1"})
+	if out["success"] != true || len(b.opened) != 1 {
+		t.Fatalf("https refused: %v", out)
+	}
+	anyTs := New(host.New(b), OpenPolicy{AllowAny: true}, catalogue)
+	if out := call(t, anyTs, ToolOpen, map[string]any{"target": "steam://open/games"}); out["success"] != true {
+		t.Fatalf("AllowAny refused: %v", out)
+	}
+}
+
+func catalogue() ([]apps.App, error) {
+	return []apps.App{
+		{Name: "Steam", Path: "/Applications/Steam.app"},
+		{Name: "Microsoft Word", Path: "/Applications/Microsoft Word.app"},
+		{Name: "Microsoft Excel", Path: "/Applications/Microsoft Excel.app"},
+	}, nil
+}
+
+func TestOpenLaunchesInstalledAppsByName(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	out := call(t, ts, ToolOpen, map[string]any{"target": "steam"})
+	if out["success"] != true || out["launched"] != "Steam" {
+		t.Fatalf("steam: %v", out)
+	}
+	if strings.Join(b.launched, ";") != "/Applications/Steam.app" || len(b.opened) != 0 {
+		t.Fatalf("launched %v opened %v", b.launched, b.opened)
+	}
+	out = call(t, ts, ToolOpen, map[string]any{"target": "microsoft"})
+	if out["error_code"] != "ambiguous" || len(out["candidates"].([]string)) != 2 {
+		t.Fatalf("ambiguous: %v", out)
+	}
+	out = call(t, ts, ToolOpen, map[string]any{"target": "Photoshop"})
+	if out["error_code"] != "app_not_found" {
+		t.Fatalf("not found: %v", out)
+	}
+	if len(b.launched) != 1 {
+		t.Fatalf("a failed resolution launched something: %v", b.launched)
+	}
+	if out := call(t, New(host.New(b), OpenPolicy{}, nil), ToolOpen, map[string]any{"target": "steam"}); out["error_code"] != "app_not_found" {
+		t.Fatalf("no catalogue: %v", out)
+	}
+}
+
+func TestListApps(t *testing.T) {
+	ts := New(host.New(&fakeBackend{caps: all}), OpenPolicy{}, catalogue)
+	out := call(t, ts, ToolListApps, map[string]any{"query": "MICRO"})
+	if out["success"] != true || strings.Join(out["apps"].([]string), ",") != "Microsoft Word,Microsoft Excel" || out["count"] != 2 {
+		t.Fatalf("list: %v", out)
+	}
+	if out := call(t, ts, ToolListApps, nil); len(out["apps"].([]string)) != 3 {
+		t.Fatalf("list all: %v", out)
+	}
+}
+
+func TestUnsupportedIsAnOutputNotACrash(t *testing.T) {
+	ts := New(host.New(&fakeBackend{caps: []string{"open"}}), OpenPolicy{}, catalogue)
+	out := call(t, ts, ToolClose, map[string]any{"window_id": "0x1"})
+	if out["success"] != false || out["error_code"] != "not_supported" {
+		t.Fatalf("got %v", out)
+	}
+}
+
+func TestWindowToolsPassIDsThrough(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	if out := call(t, ts, ToolClose, map[string]any{"window_id": "0x1"}); out["success"] != true {
+		t.Fatal(out)
+	}
+	if out := call(t, ts, ToolFocus, map[string]any{}); out["error_code"] != "invalid_argument" {
+		t.Fatal(out)
+	}
+	if strings.Join(b.actions, ";") != "close 0x1" {
+		t.Fatalf("actions %v", b.actions)
+	}
+	if _, ok := ts.Call(context.Background(), "nope", nil, node.Request{}); ok {
+		t.Fatal("unknown tool handled")
+	}
+}

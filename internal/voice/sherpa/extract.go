@@ -69,3 +69,11 @@ func extract(baseDir string) (string, error) {
 	}
 	return dir, nil
 }
+
+// LibDir extracts the embedded native libraries under baseDir (once per content hash) and
+// returns their directory, for other purego bindings to the same libraries (internal/voice/ort
+// loads OnnxRuntimeLib from it). It returns ErrUnsupported where nothing is embedded.
+func LibDir(baseDir string) (string, error) { return extract(baseDir) }
+
+// OnnxRuntimeLib is the onnxruntime library's file name inside LibDir.
+var OnnxRuntimeLib = libOnnxRuntime

@@ -3,7 +3,7 @@
 
 GO ?= go
 
-.PHONY: admin jarvisd
+.PHONY: admin jarvisd jarvis-agent
 
 # Build the admin SPA into web/admin/dist/ui, which the next jarvisd build embeds.
 admin:
@@ -14,3 +14,8 @@ admin:
 jarvisd: admin
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w" -o jarvisd ./cmd/jarvisd
 	$(GO) test ./web/admin -run TestEmbeddedUI -tags release_ui -count=1
+
+# The desktop node (docs/agent/DESIGN.md). No admin UI; scripts/agent-dev-run.sh builds, enrolls
+# and runs it.
+jarvis-agent:
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w" -o jarvis-agent ./cmd/jarvis-agent

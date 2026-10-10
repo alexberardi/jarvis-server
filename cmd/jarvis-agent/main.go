@@ -1,0 +1,410 @@
+// jarvis-agent is the Jarvis desktop node: it enrolls with jarvisd like a Pi node, connects to
+// jarvisd's MQTT, and offers OS control (open, volume, windows) as client tools.
+//
+//	jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
+//	jarvis-agent run
+//	jarvis-agent status
+//	jarvis-agent try desktop_set_volume '{"volume": 30}'
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"runtime"
+	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/term"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/apps"
+	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
+	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/macax"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+)
+
+var version = "dev"
+
+const installMode = "desktop-agent"
+
+func main() {
+	if len(os.Args) < 2 {
+		usage(os.Stderr)
+		os.Exit(2)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var err error
+	switch os.Args[1] {
+	case "enroll":
+		err = enroll(ctx, os.Args[2:])
+	case "run":
+		err = run(ctx, os.Args[2:])
+	case "status":
+		err = status(ctx, os.Args[2:])
+	case "try":
+		err = try(ctx, os.Args[2:])
+	case "apps":
+		err = appsCmd(os.Args[2:])
+	case "version":
+		fmt.Println(version)
+	case "-h", "--help", "help":
+		usage(os.Stdout)
+	default:
+		usage(os.Stderr)
+		os.Exit(2)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jarvis-agent:", err)
+		os.Exit(1)
+	}
+}
+
+func usage(w io.Writer) {
+	fmt.Fprint(w, `usage: jarvis-agent <command> [flags]
+
+  enroll   register this computer as a node of a jarvisd household
+           --server URL (jarvisd config service, e.g. http://10.0.0.122:7700)
+           then either --email ADDR [--household ID] (prompts for the password)
+           or --token prov_... --node-id ID (a token minted elsewhere)
+           [--name NAME] [--room ROOM] [--creds PATH] [--force | --if-needed]
+  run      connect to jarvisd and serve tool calls until interrupted
+           [--creds PATH] [--allow-open-any] [--sidecar-python PY --sidecar-commands DIR]
+  status   show enrollment, reachability and what this host can do right now
+  apps     list launchable apps, or show what a name resolves to (never launches): apps [NAME]
+  try      run one tool locally, no jarvisd involved: try TOOL ['{"arg": ...}']
+  version
+`)
+}
+
+func credsPath(p string) (string, error) {
+	if p != "" {
+		return p, nil
+	}
+	return node.DefaultCredsPath()
+}
+
+func logger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+}
+
+// appCatalogue is the installed-apps lister: platform defaults plus apps.json, re-read on every
+// call so installs and config edits apply without a restart.
+func appCatalogue(log *slog.Logger) desktop.Lister {
+	return func() ([]apps.App, error) {
+		home, _ := os.UserHomeDir()
+		var cfg apps.Config
+		if p, err := apps.ConfigPath(); err == nil {
+			if cfg, err = apps.LoadConfig(p); err != nil {
+				// A broken config must not silently widen or empty the policy: refuse.
+				return nil, fmt.Errorf("apps config: %w", err)
+			}
+		}
+		return apps.Build(apps.Env{GOOS: runtime.GOOS, Home: home, Getenv: os.Getenv}, cfg).List()
+	}
+}
+
+func nativeHost() (*host.Host, error) {
+	b, err := host.Native()
+	if err != nil {
+		return nil, err
+	}
+	return host.New(b), nil
+}
+
+// --- enroll ---
+
+func enroll(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
+	server := fs.String("server", "", "jarvisd config service URL, e.g. http://10.0.0.122:7700")
+	email := fs.String("email", "", "your Jarvis account email (prompts for the password)")
+	pwStdin := fs.Bool("password-stdin", false, "read the password from stdin instead of prompting")
+	household := fs.String("household", "", "household id (needed only if you belong to several)")
+	token := fs.String("token", "", "a provisioning token minted elsewhere (with --node-id)")
+	nodeID := fs.String("node-id", "", "the node id the token was minted for")
+	hostname, _ := os.Hostname()
+	name := fs.String("name", hostname, "node name shown in the app")
+	room := fs.String("room", "desktop", "room")
+	cp := fs.String("creds", "", "credentials file (default: user config dir)")
+	force := fs.Bool("force", false, "replace existing credentials")
+	ifNeeded := fs.Bool("if-needed", false, "do nothing (exit 0) when already enrolled")
+	_ = fs.Parse(args)
+	path, err := credsPath(*cp)
+	if err != nil {
+		return err
+	}
+	if _, err := node.LoadCreds(path); err == nil && !*force {
+		if *ifNeeded {
+			fmt.Printf("Already enrolled (%s).\n", path)
+			return nil
+		}
+		return fmt.Errorf("already enrolled (%s); pass --force to enroll again", path)
+	}
+	if *server == "" {
+		return errors.New("--server is required (jarvisd's address, e.g. http://10.0.0.122:7700)")
+	}
+	hc := &http.Client{Timeout: 20 * time.Second}
+	svcs, err := node.Discover(ctx, hc, *server)
+	if err != nil {
+		return err
+	}
+	ccURL, err := svcs.Need(node.SvcCommandCenter)
+	if err != nil {
+		return err
+	}
+
+	tok, id := *token, *nodeID
+	nodeCC := ""
+	switch {
+	case tok != "" && id != "":
+	case tok != "" || id != "":
+		return errors.New("--token and --node-id go together")
+	case *email != "":
+		authURL, err := svcs.Need(node.SvcAuth)
+		if err != nil {
+			return err
+		}
+		pw, err := readPassword(*pwStdin)
+		if err != nil {
+			return err
+		}
+		jwt, err := node.Login(ctx, hc, authURL, *email, pw)
+		if err != nil {
+			return fmt.Errorf("login: %w", err)
+		}
+		hh := *household
+		if hh == "" {
+			hs, err := node.Households(ctx, hc, authURL, jwt)
+			if err != nil {
+				return err
+			}
+			switch len(hs) {
+			case 0:
+				return errors.New("your account belongs to no household")
+			case 1:
+				hh = hs[0].ID
+			default:
+				var b strings.Builder
+				for _, h := range hs {
+					fmt.Fprintf(&b, "\n  %s  %s (%s)", h.ID, h.Name, h.Role)
+				}
+				return fmt.Errorf("you belong to several households; pick one with --household:%s", b.String())
+			}
+		}
+		pt, err := node.MintToken(ctx, hc, ccURL, jwt, hh, *name, *room)
+		if err != nil {
+			return fmt.Errorf("provisioning token: %w", err)
+		}
+		tok, id = pt.Token, pt.NodeID
+		nodeCC = pt.NodeCommandCenterURL
+	default:
+		return errors.New("give --email (sign in) or --token and --node-id")
+	}
+
+	// Prefer the URL jarvisd says nodes should use; if this machine can't reach it (a VPN, a
+	// loopback-only dev server), fall back to the one discovery gave us. The token is single
+	// use, so only a connection failure (nothing was redeemed) falls back.
+	var c node.Creds
+	if nodeCC != "" && nodeCC != ccURL {
+		c, err = node.Register(ctx, hc, nodeCC, *server, id, tok, *room)
+		var he *node.HTTPError
+		if err != nil && !errors.As(err, &he) {
+			fmt.Fprintf(os.Stderr, "note: %s unreachable (%v); registering via %s\n", nodeCC, err, ccURL)
+			c, err = node.Register(ctx, hc, ccURL, *server, id, tok, *room)
+		}
+	} else {
+		c, err = node.Register(ctx, hc, ccURL, *server, id, tok, *room)
+	}
+	if err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	c.Name = *name
+	if err := node.SaveCreds(path, c); err != nil {
+		return fmt.Errorf("saving credentials: %w", err)
+	}
+	fmt.Printf("Enrolled as node %s (room %q). Credentials saved to %s.\nNext: jarvis-agent run\n", c.NodeID, c.Room, path)
+	return nil
+}
+
+func readPassword(fromStdin bool) (string, error) {
+	if fromStdin || !term.IsTerminal(int(os.Stdin.Fd())) {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			return "", errors.New("no password on stdin")
+		}
+		return strings.TrimRight(line, "\r\n"), nil
+	}
+	fmt.Fprint(os.Stderr, "Password: ")
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	return string(b), err
+}
+
+// --- run ---
+
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	cp := fs.String("creds", "", "credentials file")
+	anyOpen := fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)")
+	py := fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)")
+	cmdDir := fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)")
+	_ = fs.Parse(args)
+	path, err := credsPath(*cp)
+	if err != nil {
+		return err
+	}
+	c, err := node.LoadCreds(path)
+	if err != nil {
+		return err
+	}
+	h, err := nativeHost()
+	if err != nil {
+		return err
+	}
+	log := logger()
+	if macax.Supported() && !macax.Trusted() {
+		// macOS adds this app to Privacy & Security → Accessibility and shows its prompt. Window
+		// tools appear once the user turns it on (capabilities are computed per call).
+		macax.Prompt()
+		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
+	}
+	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(log))}
+	if *py != "" && *cmdDir != "" {
+		sc, err := sidecar.Start(ctx, *py, *cmdDir, log)
+		if err != nil {
+			return fmt.Errorf("sidecar: %w", err)
+		}
+		defer sc.Close()
+		tools = append(tools, sc)
+	}
+	caps, _ := h.Capabilities(ctx)
+	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
+	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, Log: log}
+	return r.Run(ctx)
+}
+
+// --- status ---
+
+func status(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	cp := fs.String("creds", "", "credentials file")
+	_ = fs.Parse(args)
+	h, err := nativeHost()
+	if err != nil {
+		return err
+	}
+	caps, err := h.Capabilities(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("platform:     %s\ncapabilities: %s\n", h.Platform(), strings.Join(caps, ", "))
+	if macax.Supported() {
+		trusted := macax.Trusted()
+		fmt.Printf("accessibility: %v\n", trusted)
+		if !trusted {
+			fmt.Print(`  -> Window control is OFF: this process has no Accessibility grant.
+     Turn on "Jarvis Agent" in System Settings > Privacy & Security > Accessibility.
+     If it already looks on, it's an old entry from a differently signed build. Run
+       tccutil reset Accessibility io.jarvis.agent && tccutil reset AppleEvents io.jarvis.agent
+     then restart the agent and allow it again. (Run from a terminal, this check reports the
+     terminal's grant; use scripts/agent-dev-run.sh --status for the agent's own.)
+`)
+		}
+	}
+	if list, err := appCatalogue(nil)(); err != nil {
+		fmt.Printf("apps:         %v\n", err)
+	} else {
+		cp, _ := apps.ConfigPath()
+		fmt.Printf("apps:         %d launchable (config: %s)\n", len(list), cp)
+	}
+	path, err := credsPath(*cp)
+	if err != nil {
+		return err
+	}
+	c, err := node.LoadCreds(path)
+	if err != nil {
+		fmt.Printf("enrollment:   %v\n", err)
+		return nil
+	}
+	fmt.Printf("node:         %s (room %q)\nserver:       %s\ncredentials:  %s\n", c.NodeID, c.Room, c.ConfigURL, path)
+	hc := &http.Client{Timeout: 5 * time.Second}
+	svcs, err := node.Discover(ctx, hc, c.ConfigURL)
+	if err != nil {
+		fmt.Printf("jarvisd:      unreachable (%v)\n", err)
+		return nil
+	}
+	ccURL, err := svcs.Need(node.SvcCommandCenter)
+	if err != nil {
+		return err
+	}
+	if err := node.NewCC(ccURL, c).Heartbeat(ctx, version, installMode); err != nil {
+		fmt.Printf("jarvisd:      reachable, but the node key was refused or failed (%v)\n", err)
+		return nil
+	}
+	fmt.Printf("jarvisd:      ok (%s, broker %s)\n", ccURL, svcs[node.SvcMQTT])
+	return nil
+}
+
+// --- try ---
+
+func try(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("try", flag.ExitOnError)
+	anyOpen := fs.Bool("allow-open-any", false, "relax the open policy")
+	_ = fs.Parse(args)
+	h, err := nativeHost()
+	if err != nil {
+		return err
+	}
+	ts := desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil))
+	if fs.NArg() == 0 {
+		for _, d := range ts.Available(ctx) {
+			fmt.Println(d.Name)
+		}
+		return nil
+	}
+	a := map[string]any{}
+	if fs.NArg() > 1 {
+		if err := json.Unmarshal([]byte(fs.Arg(1)), &a); err != nil {
+			return fmt.Errorf("arguments must be a JSON object: %w", err)
+		}
+	}
+	out, ok := ts.Call(ctx, fs.Arg(0), a, node.Request{})
+	if !ok {
+		return fmt.Errorf("unknown tool %q", fs.Arg(0))
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Println(string(b))
+	return nil
+}
+
+// --- apps ---
+
+func appsCmd(args []string) error {
+	list, err := appCatalogue(nil)()
+	if err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		for _, a := range list {
+			fmt.Printf("%-40s %s\n", a.Name, a.Path)
+		}
+		return nil
+	}
+	a, err := apps.Resolve(list, strings.Join(args, " "))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s -> %s\n", a.Name, a.Path)
+	return nil
+}

@@ -8,16 +8,18 @@ ignore ./web/admin/node_modules
 require (
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/ebitengine/purego v0.11.1
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/gorilla/websocket v1.5.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pressly/goose/v3 v3.26.0
-	golang.org/x/crypto v0.40.0
+	golang.org/x/crypto v0.42.0
 	golang.org/x/image v0.46.0
-	golang.org/x/net v0.42.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/net v0.44.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 	modernc.org/sqlite v1.60.1
 )
 
