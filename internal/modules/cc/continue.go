@@ -78,7 +78,7 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 	if err != nil {
 		// Legacy raised here; the turn becomes an error (the route's error shape).
 		m.deps.Log.Error("cc: formatting call failed", "conversation_id", conv.id, "err", err)
-		return engineResult{Stop: stopError, Err: err.Error()}, msgs
+		return engineResult{Stop: stopError, Err: llmErrText(err)}, msgs
 	}
 	conv.noteUsage(resp.Usage)
 	raw = resp.Content

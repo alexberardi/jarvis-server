@@ -16,6 +16,7 @@ import {
 import { useHardware, useInstalled, useLabels, usePutLabels } from '@/hooks/useModelManager'
 import { errorMessage } from '@/lib/errors'
 import { labelDraftDiff } from './logic'
+import GpuFaultBanner from './GpuFaultBanner'
 import { buttonClass, inputClass, stateTone } from './styles'
 import { Pill, Section } from './ui'
 
@@ -38,6 +39,7 @@ const STATE_TEXT: Record<string, string> = {
   not_configured: 'not configured',
   fetching_engine: 'fetching engine',
   no_engine_build: 'no engine build',
+  gpu_unavailable: 'GPU unavailable',
 }
 
 const BUILD_KIND: Record<EngineLabel, string> = {
@@ -544,6 +546,7 @@ export default function LabelsEditor({ labels: only }: { labels?: Label[] }) {
       {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not load the labels')}</p>}
       {data && (
         <div className="space-y-3">
+          <GpuFaultBanner fault={data.gpu_fault} />
           {(data.warnings ?? []).map((w) => (
             <p key={w} className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />

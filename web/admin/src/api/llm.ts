@@ -61,6 +61,25 @@ export interface Hardware {
   /** Physical RAM in MB (absent when unknown). */
   ram_mb?: number
   detected_at: string
+  /** A broken GPU driver detection found (driver_mismatch). */
+  gpu_fault?: GPUFault | null
+}
+
+/**
+ * GPUFault is why a GPU the models expect can't be used: driver_mismatch (an NVIDIA driver
+ * update waiting for a reboot) or gpu_unavailable (no usable GPU detected). Those labels are
+ * refused, never moved to the CPU.
+ */
+export interface GPUFault {
+  kind: 'driver_mismatch' | 'gpu_unavailable' | string
+  kernel_version?: string
+  library_version?: string
+  labels?: string[] | null
+  /** The admin's warning, e.g. "NVIDIA driver updated (kernel …, libraries …): reboot the server." */
+  message: string
+  /** What requests to the affected labels fail with. */
+  user_message: string
+  detected_at?: string
 }
 
 export interface Placement {
@@ -102,6 +121,7 @@ export interface VoiceModel {
 
 export interface HardwareResponse {
   hardware: Hardware
+  gpu_fault?: GPUFault | null
   proposal: Record<string, Placement>
   builds: Record<string, { build: string; flavours: string[] }>
   installed: EngineBuild[] | null
@@ -413,6 +433,7 @@ export interface LabelsResponse {
   recommend: Partial<Record<Label, string>>
   /** One per card whose assigned engines together exceed it (warn, never refuse). */
   warnings: string[] | null
+  gpu_fault?: GPUFault | null
 }
 
 export async function getLabels(): Promise<LabelsResponse> {

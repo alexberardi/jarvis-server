@@ -169,9 +169,29 @@ func notLoaded(label string, err error) *APIError {
 	if nr != nil && nr.Reason != "" {
 		st["error"] = nr.Reason
 	}
+	msg := fmt.Sprintf("%s model is %s: %s", label, state, reason)
+	if state == StateGPUUnavailable {
+		msg = reason // already a sentence for the user
+	}
 	return &APIError{Status: http.StatusServiceUnavailable, Type: "model_not_loaded",
-		Message: fmt.Sprintf("%s model is %s: %s", label, state, reason), Code: "model_not_loaded",
+		Message: msg, Code: "model_not_loaded",
 		Extra: map[string]any{"slot": label, "state": st}}
+}
+
+// UserMessage returns the sentence to show a user for an LLM error that has one (a label
+// refused because its GPU is unusable), and ok; otherwise "", false.
+func UserMessage(err error) (string, bool) {
+	var ae *APIError
+	if errors.As(err, &ae) {
+		if st, _ := ae.Extra["state"].(map[string]any); st != nil && st["status"] == StateGPUUnavailable {
+			return ae.Message, true
+		}
+	}
+	var nr *NotReadyError
+	if errors.As(err, &nr) && nr.State == StateGPUUnavailable && nr.Reason != "" {
+		return nr.Reason, true
+	}
+	return "", false
 }
 
 func (s *Service) endpoint(ctx context.Context, label string) (Endpoint, error) {

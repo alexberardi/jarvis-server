@@ -62,6 +62,10 @@ func TestSummarizeJobs(t *testing.T) {
 			t.Errorf("empty: %+v", j)
 		}
 	}
+	// A model refused for a lost GPU needs the operator (a reboot), not patience.
+	if j := summarizeJobs(map[string]string{"live": llmmod.StateGPUUnavailable}, nil)[0]; j.State != JobFailed {
+		t.Errorf("gpu_unavailable: %+v", j)
+	}
 	// Remote and degraded count as ready.
 	if j := summarizeJobs(map[string]string{"live": "remote"}, nil)[0]; j.State != JobReady {
 		t.Errorf("remote: %+v", j)

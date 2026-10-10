@@ -291,6 +291,43 @@ failed ──retry_failed_loads (cooldown 60s·2^(n-1) ≤ 600s; or force) ─�
 - For remote engines, a periodic `GET /v1/models` with the API key gives readiness. It is cached for 30 s.
 - The `/health` body shape is in 02 §3.7.
 
+### 3.10 GPU loss: never a silent CPU fallback (jarvisd)
+
+**Why:** on 2026-10-10 an unattended upgrade installed NVIDIA 580.178 userspace libraries while the 580.173 kernel module stayed loaded, so NVML failed with "Driver/library version mismatch". The upgrade restarted jarvisd, detection found no GPU, `gpu_backend=auto` resolved to `cpu`, and every engine came up with `-ngl 0`. Every live call then hit the 30 s timeout for six hours, with nothing saying why. The user keeps NVIDIA in unattended-upgrades on purpose, so this recurs on every driver update until the next reboot.
+
+**Expected GPU** (`engine.ExpectedGPU`). A label must run on a GPU when `gpu_layers` ≠ 0 and any of these holds:
+
+1. its `gpu_backend` names a GPU (`cuda`, `rocm`, `vulkan` or `metal`);
+2. it last ran healthy on a GPU that detection could see. The resolver records that per label in `<home>/engines/gpu-placements.json` (`FileGPUMemory`), so an all-`auto` install is covered too;
+3. its `gpu_devices` is set (the setup wizard writes `0`/`1` on a GPU box).
+
+`gpu_backend=cpu` or `gpu_layers=0` never expects one. Embeddings default to `gpu_layers 0`, so they keep running on the CPU. A healthy engine on the CPU forgets the label's recorded GPU. So on a box whose GPU is really gone, setting `gpu_backend=cpu` once is the way out, and `auto` means CPU afterwards. A CPU-only install, with no GPU in its settings and no GPU history, behaves exactly as before.
+
+**Lost** (`engine.GPULost`). Detection sees no device of the expected backend, and either it saw one before (history) or a driver fault explains why. For "any GPU" (case 3 with no history), lost means detection found no usable GPU at all. An explicit backend that detection has never seen, with no fault, is left to the engine as before, since Vulkan without `vulkaninfo` only becomes visible once its build is installed.
+
+**Then** the resolver does not start the engine. `Resolve` returns `NotReadyError{State: "gpu_unavailable", Reason: <sentence for the user>}`, and the error is logged once per loss at ERROR, with the label, the expected backend and devices, and any fault. The llm module maps the error to `StateGPUUnavailable`, which:
+
+- `WithReadyWait` does not wait on, so it fails at once;
+- turns into a 503 `model_not_loaded` whose message is the sentence itself;
+- makes `/health` return 503 `degraded`, with that reason.
+
+cc reports the sentence (`llm.UserMessage`) as the turn's error: voice gets it as `llm_error`, chat as the error text. An engine that was already running on the GPU when the loss was detected keeps serving, because the driver it loaded works until the reboot. If it dies, it is not restarted on the CPU.
+
+**Driver/library mismatch** (`engine.DriverProbe`, files only, no root, nothing loaded in process):
+
+- The kernel module version comes from `/proc/driver/nvidia/version`.
+- The library version comes from the target of `libnvidia-ml.so.1`, else `libcuda.so.1`, in the usual lib directories. If neither symlink exists, a single versioned `.so.<ver>` file is used. Several versioned files with no symlink count as unknown.
+- nvidia-smi's "Driver/library version mismatch" text alone also counts, with unknown versions.
+
+Detection puts the result in `Hardware.gpu_fault` and logs it at ERROR with both versions and "reboot required". User-facing sentences:
+
+- Mismatch: *"The GPU driver was updated; reboot the server to finish (Jarvis can't use the GPU until then)."*
+- Any other loss: *"The server's GPU isn't available, so Jarvis can't run its model. Check the GPU driver or reboot the server."*
+
+**Re-checking.** `engine.WatchGPU` runs from the stack's `Start`: it detects once at startup, then every 3 minutes. When the cheap file probe's answer changes, or labels are refused for a lost GPU, it re-detects and has the resolver reconcile. So the warning appears even when jarvisd was not restarted, and labels come back on their own if the GPU returns.
+
+**Admin.** `GET /v1/models/labels` and `GET /v1/hardware` carry `gpu_fault` (`engine.FaultFor`). That is the driver fault, with the labels it stops, or a generic `gpu_unavailable` fault naming the refused labels, or `null`. Its `message` is the admin's warning, e.g. *"NVIDIA driver updated (kernel 580.173.04, libraries 580.178.04): reboot the server."*, and `user_message` is what requests fail with. The SPA shows it as a red banner on the Dashboard, the Labels editor and the Hardware panel, and label pills read "GPU unavailable". The setup job summary counts `gpu_unavailable` as failed (it needs the operator, not patience).
+
 ## 4. Data
 
 - **No tables.** All state is in memory: slot states, the frozen config, `_active_streams` (02).

@@ -71,6 +71,8 @@ func (m *Module) handleHealth(w http.ResponseWriter, r *http.Request, withVersio
 			m.notReadySince = time.Now()
 		}
 		switch {
+		case live.Status == StateGPUUnavailable:
+			status, body["status"], body["reason"] = http.StatusServiceUnavailable, "degraded", live.Error
 		case live.Status == StateFailed || live.Status == "unavailable":
 			status, body["status"], body["reason"] = http.StatusServiceUnavailable, "degraded", "Live model failed to load"
 		case time.Since(m.notReadySince) < loadingGrace:

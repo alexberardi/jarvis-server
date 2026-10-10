@@ -6,6 +6,7 @@ import { useFetchEngine, useHardware, useRefreshHardware } from '@/hooks/useMode
 import { errorMessage } from '@/lib/errors'
 import { formatMB } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import GpuFaultBanner from './GpuFaultBanner'
 import { buttonClass, stateTone } from './styles'
 import { Pill, Section } from './ui'
 
@@ -121,6 +122,7 @@ export default function HardwarePanel() {
       {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the hardware')}</p>}
       {data && (
         <div className="space-y-4">
+          <GpuFaultBanner fault={data.gpu_fault ?? data.hardware.gpu_fault} />
           <DetectedHardware data={data} />
 
           <div className="space-y-1">

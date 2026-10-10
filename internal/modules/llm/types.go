@@ -45,11 +45,14 @@ const (
 	StateLoading       = "loading"
 	StateFailed        = "failed"
 	StateNotConfigured = "not_configured"
+	// StateGPUUnavailable: the label must run on a GPU that isn't usable (a driver update
+	// waiting for a reboot, …); Reason is a sentence for the user. It fails at once.
+	StateGPUUnavailable = "gpu_unavailable"
 )
 
 // NotReadyError says a label's engine can't serve yet.
 type NotReadyError struct {
-	State  string // StateLoading, StateFailed or StateNotConfigured
+	State  string // StateLoading, StateFailed, StateNotConfigured or StateGPUUnavailable
 	Reason string
 }
 

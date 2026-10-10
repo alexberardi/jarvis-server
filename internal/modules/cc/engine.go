@@ -175,7 +175,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		if err != nil {
 			tr.span(llmName, "llm_proxy", llmStart, llmEnd, err, nil)
 			m.deps.Log.Error("cc: tool loop LLM call failed", "conversation_id", conv.id, "err", err)
-			return engineResult{Stop: stopError, Err: err.Error()}, msgs
+			return engineResult{Stop: stopError, Err: llmErrText(err)}, msgs
 		}
 		conv.noteUsage(resp.Usage)
 		raw := resp.Content
@@ -489,4 +489,13 @@ func outputPreview(raw string) string {
 		return string(r[:outputPreviewRunes]) + "…"
 	}
 	return s
+}
+
+// llmErrText is what a turn that failed on its LLM call reports: the user-facing sentence when
+// the error carries one (a GPU waiting for a reboot), else the error as before.
+func llmErrText(err error) string {
+	if msg, ok := llm.UserMessage(err); ok {
+		return msg
+	}
+	return err.Error()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -46,6 +47,9 @@ type Hardware struct {
 	// unknown).
 	RAMMB      int64     `json:"ram_mb,omitempty"`
 	DetectedAt time.Time `json:"detected_at"`
+	// Fault is set when the GPU driver is known to be broken (driver_mismatch: the NVIDIA
+	// kernel module and userspace libraries differ until a reboot).
+	Fault *GPUFault `json:"gpu_fault,omitempty"`
 }
 
 // Discrete returns the usable devices of one backend, largest first.
@@ -237,14 +241,23 @@ type Detector struct {
 	Timeout time.Duration
 	// Memory reports the host's physical RAM in bytes (nil or 0 = unknown).
 	Memory func() uint64
+	// Driver checks the GPU driver (nil = no check): DriverProbe.Check on linux.
+	Driver func() *GPUFault
+	Log    *slog.Logger
 
 	mu     sync.Mutex
 	cached *Hardware
+	// probed is Driver's last answer, for DriverChanged.
+	probed *GPUFault
 }
 
 // NewDetector returns a detector for this host.
 func NewDetector(binaries func() map[Flavour]string) *Detector {
-	return &Detector{Platform: Host(), Run: execRunner, Binaries: binaries, Memory: sysinfo.TotalMemory}
+	d := &Detector{Platform: Host(), Run: execRunner, Binaries: binaries, Memory: sysinfo.TotalMemory}
+	if d.Platform.OS == "linux" {
+		d.Driver = HostDriverProbe().Check
+	}
+	return d
 }
 
 // Hardware returns the last detection, detecting first if there is none or refresh is set.
@@ -253,9 +266,48 @@ func (d *Detector) Hardware(ctx context.Context, refresh bool) Hardware {
 	defer d.mu.Unlock()
 	if d.cached == nil || refresh {
 		h := d.detect(ctx)
+		var prev *GPUFault
+		if d.cached != nil {
+			prev = d.cached.Fault
+		}
+		d.noteFault(prev, &h)
 		d.cached = &h
 	}
 	return *d.cached
+}
+
+// noteFault logs a fault that appears or clears, and keeps the first detection time of one
+// that persists. d.mu is held.
+func (d *Detector) noteFault(prev *GPUFault, h *Hardware) {
+	log := d.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	switch {
+	case h.Fault.same(prev):
+		if h.Fault != nil && !prev.DetectedAt.IsZero() {
+			h.Fault.DetectedAt = prev.DetectedAt
+		}
+	case h.Fault != nil && h.Fault.Kind == FaultDriverMismatch:
+		log.Error("NVIDIA driver/library version mismatch: reboot required (GPU engines can't start until then)",
+			"kernel_module", h.Fault.KernelVersion, "libraries", h.Fault.LibraryVersion)
+	case h.Fault != nil:
+		log.Error("GPU driver fault", "kind", h.Fault.Kind, "message", h.Fault.Message)
+	default:
+		log.Info("GPU driver fault cleared", "kind", prev.Kind)
+	}
+}
+
+// DriverChanged runs only the cheap driver check and reports whether its answer differs from
+// the previous one (when it does, the caller re-detects). False without a Driver check.
+func (d *Detector) DriverChanged() bool {
+	if d.Driver == nil {
+		return false
+	}
+	f := d.Driver()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return !f.same(d.probed)
 }
 
 func (d *Detector) run(ctx context.Context, name string, args ...string) (string, bool) {
@@ -313,8 +365,20 @@ func (d *Detector) detect(ctx context.Context) Hardware {
 			add("sysctl", d.appleSilicon(ctx))
 		}
 	} else {
+		var fault *GPUFault
+		if d.Driver != nil {
+			fault = d.Driver()
+		}
+		d.probed = fault
 		if out, ok := d.run(ctx, "nvidia-smi", "--query-gpu=index,name,memory.total,memory.free", "--format=csv,noheader,nounits"); ok {
 			add("nvidia-smi", ParseNvidiaSMI(out))
+			if fault == nil && nvmlMismatch(out) {
+				fault = DriverMismatchFault("", "")
+			}
+		}
+		if fault != nil {
+			fault.DetectedAt = h.DetectedAt
+			h.Fault = fault
 		}
 		if out, ok := d.run(ctx, "rocm-smi", "--showproductname", "--showmeminfo", "vram", "--json"); ok {
 			add("rocm-smi", ParseROCmSMI(out))
