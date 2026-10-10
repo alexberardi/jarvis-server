@@ -281,6 +281,23 @@ func (r *rig) turn(t *testing.T) Turn {
 	}
 }
 
+func (r *rig) waitResets(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		r.det.mu.Lock()
+		got := r.det.resets
+		r.det.mu.Unlock()
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("detector reset %d times; want %d", got, n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (r *rig) noTurn(t *testing.T, wait time.Duration) {
 	t.Helper()
 	select {
@@ -314,6 +331,9 @@ func TestTurnStreamsTheReplyToTheSpeaker(t *testing.T) {
 	r := newRig(t, oneWake(), newServer())
 	stop := r.run(t)
 	tr := r.turn(t)
+	// OnTurn fires before the pipeline goes back to listening; cancelling now could beat
+	// the resume reset checked below.
+	r.waitResets(t, 2)
 	if err := stop(); err != nil {
 		t.Fatal(err)
 	}
