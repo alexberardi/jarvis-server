@@ -143,8 +143,12 @@ type fakeServer struct {
 	text     string
 	reply    func(ctx context.Context) (Reply, error)
 	speakPCM []byte
+	// cont answers /voice/command/continue; nil means "complete" with nothing to say.
+	cont func(results []ToolResult) (*Control, error)
 
 	nodeCtx  map[string]any
+	tools    ToolSchemas
+	results  [][]ToolResult // every continue's tool_results, in order
 	cmdWAV   []byte
 	spkWAV   []byte
 	streamIn StreamRequest
@@ -159,10 +163,10 @@ func newServer() *fakeServer {
 
 func (s *fakeServer) log(c string) { s.mu.Lock(); s.calls = append(s.calls, c); s.mu.Unlock() }
 
-func (s *fakeServer) StartConversation(_ context.Context, id string, nc map[string]any) error {
+func (s *fakeServer) StartConversation(_ context.Context, id string, nc map[string]any, tools ToolSchemas) error {
 	s.log("start")
 	s.mu.Lock()
-	s.nodeCtx = nc
+	s.nodeCtx, s.tools = nc, tools
 	s.mu.Unlock()
 	return s.startErr
 }
@@ -191,6 +195,18 @@ func (s *fakeServer) Speak(_ context.Context, text string) (*Audio, error) {
 	s.spoken = text
 	s.mu.Unlock()
 	return &Audio{Rate: 22050, Channels: 1, Message: text, Body: io.NopCloser(bytes.NewReader(s.speakPCM))}, nil
+}
+
+func (s *fakeServer) ContinueTools(_ context.Context, id string, results []ToolResult) (*Control, error) {
+	s.log("continue")
+	s.mu.Lock()
+	s.results = append(s.results, results)
+	cont := s.cont
+	s.mu.Unlock()
+	if cont == nil {
+		return &Control{StopReason: "complete"}, nil
+	}
+	return cont(results)
 }
 
 func (s *fakeServer) callList() []string {
@@ -403,7 +419,7 @@ func TestControlReplies(t *testing.T) {
 		{"not_for_me is silent", control("not_for_me", nil), OutcomeNotForMe, []string{"stream", "end"}, nil, false},
 		{"complete is spoken via TTS", control("complete", &say), OutcomeSpoken, []string{"stream", "speak", "end"}, []int{300}, false},
 		{"complete with nothing to say is silent", control("complete", &empty), OutcomeSilent, []string{"stream", "end"}, nil, false},
-		{"tool_calls are not supported yet", control("tool_calls", nil), OutcomeUnsupported, []string{"stream", "end"}, nil, true},
+		{"validation is not supported yet", control("validation_required", nil), OutcomeUnsupported, []string{"stream", "end"}, nil, true},
 		{"error with a message speaks it", control("error", &say), OutcomeError, []string{"stream", "speak", "end"}, []int{300}, false},
 	}
 	for _, c := range cases {

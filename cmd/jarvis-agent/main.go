@@ -87,8 +87,8 @@ func usage(w io.Writer) {
            [--creds PATH] [--allow-open-any] [--sidecar-python PY --sidecar-commands DIR]
            [--voice [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4]
             [--wake-models DIR] [--no-chimes]]   wake word "hey jarvis" (Linux, macOS)
-  listen   the voice pipeline alone (no MQTT, no tools), same voice flags
-           [--once] [--timeout DUR]   e.g. --voice-input wav:hey_jarvis.wav --once
+  listen   the voice pipeline alone (no MQTT), same voice and tool flags
+           [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   status   show enrollment, reachability and what this host can do right now
   apps     list launchable apps, or show what a name resolves to (never launches): apps [NAME]
   try      run one tool locally, no jarvisd involved: try TOOL ['{"arg": ...}']
@@ -264,9 +264,7 @@ func readPassword(fromStdin bool) (string, error) {
 func run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	cp := fs.String("creds", "", "credentials file")
-	anyOpen := fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)")
-	py := fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)")
-	cmdDir := fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)")
+	tf := addToolFlags(fs)
 	voiceOn := fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`)
 	vf := addVoiceFlags(fs)
 	_ = fs.Parse(args)
@@ -278,26 +276,12 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	h, err := nativeHost()
+	log := logger()
+	h, tools, closeTools, err := tf.build(ctx, log, true)
 	if err != nil {
 		return err
 	}
-	log := logger()
-	if macax.Supported() && !macax.Trusted() {
-		// macOS adds this app to Privacy & Security → Accessibility and shows its prompt. Window
-		// tools appear once the user turns it on (capabilities are computed per call).
-		macax.Prompt()
-		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
-	}
-	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(log))}
-	if *py != "" && *cmdDir != "" {
-		sc, err := sidecar.Start(ctx, *py, *cmdDir, log)
-		if err != nil {
-			return fmt.Errorf("sidecar: %w", err)
-		}
-		defer sc.Close()
-		tools = append(tools, sc)
-	}
+	defer closeTools()
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, Log: log}
@@ -308,11 +292,53 @@ func run(ctx context.Context, args []string) error {
 		} else {
 			defer vs.close()
 			r.OnConnected = func(ctx context.Context, cc *node.CC) {
-				_ = voice.Serve(ctx, vs.options(cc, log, nil))
+				// Voice turns run the same toolset the MQTT dispatcher serves.
+				_ = voice.Serve(ctx, vs.options(cc, tools, log, nil))
 			}
 		}
 	}
 	return r.Run(ctx)
+}
+
+// toolFlags choose the node's client tools; `run` and `listen` share them.
+type toolFlags struct {
+	anyOpen    *bool
+	py, cmdDir *string
+}
+
+func addToolFlags(fs *flag.FlagSet) *toolFlags {
+	return &toolFlags{
+		anyOpen: fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)"),
+		py:      fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)"),
+		cmdDir:  fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)"),
+	}
+}
+
+// build is the one toolset of this node: the desktop tools, then the sidecar's commands. The
+// MQTT dispatcher and voice turns both serve it. promptAX asks macOS for Accessibility (the
+// long-running `run` does; `listen`, a test command often started over SSH, doesn't).
+func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) (*host.Host, node.Multi, func(), error) {
+	h, err := nativeHost()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if promptAX && macax.Supported() && !macax.Trusted() {
+		// macOS adds this app to Privacy & Security → Accessibility and shows its prompt. Window
+		// tools appear once the user turns it on (capabilities are computed per call).
+		macax.Prompt()
+		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
+	}
+	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log))}
+	closeAll := func() {}
+	if *f.py != "" && *f.cmdDir != "" {
+		sc, err := sidecar.Start(ctx, *f.py, *f.cmdDir, log)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("sidecar: %w", err)
+		}
+		closeAll = func() { _ = sc.Close() }
+		tools = append(tools, sc)
+	}
+	return h, tools, closeAll, nil
 }
 
 // --- status ---

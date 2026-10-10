@@ -48,7 +48,7 @@ func TestStartAndEndConversationWire(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	ctx := context.Background()
-	if err := s.StartConversation(ctx, "c1", map[string]any{"timezone": "America/New_York"}); err != nil {
+	if err := s.StartConversation(ctx, "c1", map[string]any{"timezone": "America/New_York"}, ToolSchemas{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.EndConversation(ctx, "c1"); err != nil {
@@ -68,7 +68,7 @@ func TestStartConversationErrorsCarryDetailNotKey(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"detail":"Failed to start conversation: boom"}`))
 	})
-	err := s.StartConversation(context.Background(), "c1", nil)
+	err := s.StartConversation(context.Background(), "c1", nil, ToolSchemas{})
 	var he *node.HTTPError
 	if !errors.As(err, &he) || he.Status != 500 || !strings.Contains(he.Detail, "boom") {
 		t.Fatalf("err = %v", err)
@@ -197,5 +197,57 @@ func TestSpeakUsesWAVForShortTextAndStreamForLong(t *testing.T) {
 	}
 	if paths[0] != "/api/v0/media/tts/speak" || paths[1] != "/api/v0/media/tts/speak/stream" {
 		t.Fatalf("paths %v", paths)
+	}
+}
+
+func TestStartConversationSendsTheToolsAndContinuePostsResults(t *testing.T) {
+	var bodies []map[string]any
+	var paths []string
+	answer := `{"commands":[],"request_information":{},"stop_reason":"tool_calls","tool_calls":[{"id":"call_2","type":"function","function":{"name":"desktop_minimize_window","arguments":"{\"window_id\": \"0x1\"}"},"failure_message":null}],"validation_request":null,"assistant_message":"","reasoning":null,"end_of_exchange":false}`
+	s := cc(t, func(w http.ResponseWriter, r *http.Request, body []byte) {
+		var m map[string]any
+		_ = json.Unmarshal(body, &m)
+		bodies, paths = append(bodies, m), append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v0/conversation/start":
+			_, _ = w.Write([]byte(`{"status":"success"}`))
+		default:
+			_, _ = w.Write([]byte(answer))
+		}
+	})
+	def := node.Spec{Name: "desktop_get_volume", Description: "Get the volume."}.Render()
+	ctx := context.Background()
+	if err := s.StartConversation(ctx, "c1", nil, ToolSchemas{ClientTools: []any{def.ClientTool}, Commands: []any{def.Command}}); err != nil {
+		t.Fatal(err)
+	}
+	ct, _ := bodies[0]["client_tools"].([]any)
+	ac, _ := bodies[0]["available_commands"].([]any)
+	if len(ct) != 1 || len(ac) != 1 || ct[0].(map[string]any)["function"].(map[string]any)["name"] != "desktop_get_volume" ||
+		ac[0].(map[string]any)["command_name"] != "desktop_get_volume" {
+		t.Fatalf("start body %v", bodies[0])
+	}
+
+	c, err := s.ContinueTools(ctx, "c1", []ToolResult{{ToolCallID: "call_1", Output: map[string]any{"success": true, "volume": 30}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths[1] != "/api/v0/voice/command/continue" {
+		t.Fatalf("path %s", paths[1])
+	}
+	if b, _ := json.Marshal(bodies[1]); string(b) != `{"conversation_id":"c1","tool_results":[{"output":{"success":true,"volume":30},"tool_call_id":"call_1"}]}` {
+		t.Fatalf("continue body %s", b)
+	}
+	if c.StopReason != "tool_calls" || len(c.ToolCalls) != 1 || c.ToolCalls[0].ID != "call_2" ||
+		c.ToolCalls[0].Function.Name != "desktop_minimize_window" || node.DecodeArgs(c.ToolCalls[0].Function.Arguments)["window_id"] != "0x1" {
+		t.Fatalf("control %+v", c)
+	}
+
+	// A processing error is a 200 with stop_reason null; it must not read as "complete".
+	answer = `{"commands":[{"success":false,"command_name":null,"parameters":null,"errors":{"type":"processing_error","message":"Failed to continue conversation: llm down"}}],"request_information":{},"stop_reason":null,"tool_calls":null,"validation_request":null,"assistant_message":null,"reasoning":null,"end_of_exchange":null}`
+	if _, err := s.ContinueTools(ctx, "c1", nil); err == nil || !strings.Contains(err.Error(), "llm down") {
+		t.Fatalf("err = %v", err)
+	}
+	if b, _ := json.Marshal(bodies[2]["tool_results"]); string(b) != "[]" {
+		t.Fatalf("nil results must post [] (got %s)", b)
 	}
 }

@@ -36,8 +36,9 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
 ./jarvis-agent run
 ./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
-./jarvis-agent listen --voice-input wav:clip.wav --voice-output wav:reply.wav --once
-                                               # one scripted voice turn, no MQTT (exit 0 = spoken)
+./jarvis-agent listen --voice-input wav:clip.wav --voice-output wav:reply.wav --once --no-chimes
+                                               # one scripted voice turn, no MQTT (exit 0 = spoken);
+                                               # runs the same client tools as `run` (--no-tools: none)
 JARVIS_SHERPA_MODELS=$PWD/.models go test ./internal/agent/voice/   # + the real-model wake test
 JARVIS_AUDIO_NATIVE=1 go test -v -run Native ./internal/audio/device/   # real default mic/speaker
 ```
@@ -68,8 +69,9 @@ internal/agent/
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch
   sidecar/            Python package sidecar spike (JSON lines over stdin/stdout)
   voice/              the voice pipeline: wake -> record -> STT -> stream reply -> listen again
-                      (pipeline.go), Python-node endpointing (endpoint.go), the CC voice client
-                      (client.go), wake-model fetch (models.go), Serve (reopen on failure)
+                      (pipeline.go), client tools + continue rounds (tools.go), Python-node
+                      endpointing (endpoint.go), the CC voice client (client.go), wake-model
+                      fetch (models.go), Serve (reopen on failure)
 internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
   deploy/             systemd user unit, LaunchAgent, Scheduled Task, macOS Info.plist (+ guard tests)
 scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, run / install
@@ -160,6 +162,12 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
 19. **Only the capture goroutine touches the Capture** until `Pipeline.Run` returns (ALSA's
     blocking read can't be interrupted from another thread); Run waits for it before the
     caller closes the device.
+20. **Voice turns and MQTT serve one Toolset.** `run` builds a single `node.Multi` (desktop,
+    then sidecar) and passes the same value to the dispatcher and `voice.Serve`; never give voice
+    its own tool list. Voice continues are the *blocking* `/voice/command/continue` so tools can
+    chain (list windows -> minimise); the stream route can't chain (go-pi-node.md §3.8). Tool
+    calls in a voice turn aren't `/verify`'d: they come on the node's own authenticated HTTP
+    response. Each call is bounded by `Config.ToolTimeout` and a panic is a failure result.
 
 ## Dependencies
 

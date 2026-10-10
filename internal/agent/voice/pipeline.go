@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/audio"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
 )
@@ -53,12 +54,14 @@ type Config struct {
 	StreamIdle    time.Duration // give up on a reply stream silent this long (8 s)
 	Timezone      string        // node_context.timezone (IANA name)
 	Chimes        bool          // wake and error chimes
+	ToolTimeout   time.Duration // bound on one client tool call (25 s, the MQTT dispatcher's)
 }
 
 // DefaultConfig is the Python node's behaviour (go-pi-node.md §1.1).
 func DefaultConfig() Config {
 	return Config{WakeThreshold: 0.4, Debounce: 8 * time.Second, Endpointing: DefaultEndpointing(),
-		JoinWarmup: 10 * time.Second, StreamIdle: 8 * time.Second, Timezone: LocalTimezone(), Chimes: true}
+		JoinWarmup: 10 * time.Second, StreamIdle: 8 * time.Second, Timezone: LocalTimezone(), Chimes: true,
+		ToolTimeout: 25 * time.Second}
 }
 
 // Outcome is how a turn ended.
@@ -69,7 +72,7 @@ const (
 	OutcomeNotForMe    Outcome = "not_for_me"  // CC decided the speech wasn't addressed to Jarvis
 	OutcomeNonSpeech   Outcome = "non_speech"  // STT heard nothing that looks like words
 	OutcomeSilent      Outcome = "silent"      // "complete" with nothing to say
-	OutcomeUnsupported Outcome = "unsupported" // tool_calls / validation: later phases
+	OutcomeUnsupported Outcome = "unsupported" // validation_required: a later phase
 	OutcomeError       Outcome = "error"
 )
 
@@ -82,8 +85,9 @@ type Turn struct {
 	HitMax         bool
 	Transcript     string
 	Outcome        Outcome
-	Message        string  // what was said back
-	ReplySecs      float64 // reply audio played
+	Message        string    // what was said back
+	ReplySecs      float64   // reply audio played
+	Tools          []ToolRun // client tools run for this turn, in order
 	Took           time.Duration
 	Err            error
 }
@@ -95,8 +99,11 @@ type Pipeline struct {
 	Playback PlaybackOpener
 	Detector Detector
 	Server   Server
-	Log      *slog.Logger
-	OnTurn   func(Turn) // optional; called after every turn, on the pipeline goroutine
+	// Tools are the client tools offered at /conversation/start and run on tool_calls: the
+	// same Toolset the node serves over MQTT. Nil offers none.
+	Tools  node.Toolset
+	Log    *slog.Logger
+	OnTurn func(Turn) // optional; called after every turn, on the pipeline goroutine
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -278,7 +285,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	st := &pendingStart{done: make(chan struct{})}
 	go func() {
 		defer close(st.done)
-		st.err = p.Server.StartConversation(ctx, t.ConversationID, map[string]any{"timezone": p.Cfg.Timezone})
+		st.err = p.Server.StartConversation(ctx, t.ConversationID, map[string]any{"timezone": p.Cfg.Timezone}, p.toolSchemas(ctx))
 	}()
 	// Row 14: always end it, once both the turn and start are over, without holding up
 	// listening.
@@ -390,8 +397,30 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		return
 	}
 
-	// Row 13: a control response.
+	// Row 13: a control response. Row 18: tool_calls are run here and continued until the
+	// reply is something to say.
 	c := reply.Control
+	if c.StopReason == "tool_calls" {
+		var userID *int64
+		if tr.Speaker != nil {
+			userID = tr.Speaker.UserID
+		}
+		last, spoken, err := p.toolLoop(ctx, log, &t, c, userID)
+		switch {
+		case err != nil:
+			fail(err)
+			return
+		case spoken != "":
+			t.Message = spoken
+			if t.ReplySecs, err = p.speak(ctx, spoken); err != nil {
+				fail(err)
+				return
+			}
+			t.Outcome = OutcomeSpoken
+			return
+		}
+		c = last
+	}
 	msg := ""
 	if c.AssistantMessage != nil {
 		msg = strings.TrimSpace(*c.AssistantMessage)
@@ -411,9 +440,8 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 			return
 		}
 		t.Outcome = OutcomeSpoken
-	case "tool_calls", "validation_required":
-		log.Warn("reply needs client tools or a follow-up question, which this node doesn't do yet",
-			"stop_reason", c.StopReason, "tool_calls", len(c.ToolCalls))
+	case "validation_required":
+		log.Warn("reply needs a follow-up question, which this node doesn't do yet", "stop_reason", c.StopReason)
 		t.Outcome, t.Message = OutcomeUnsupported, msg
 		p.chime(ctx, errorChime)
 	default: // "error"
