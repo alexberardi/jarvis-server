@@ -54,6 +54,8 @@ totals; "save as recipe" → recipes import and the shopping list are done, §8)
 | CI4 | 2026-10-09 | Compaction | Yes: summarize older turns near the context limit (user idea). |
 | CI5 | 2026-10-09 | Who writes image descriptions and compaction summaries | The background slot, as a job right after the reply (user). If background has no vision, live writes the description after replying. A turn arriving before the description is ready still sees the image. |
 | CI6 | 2026-10-09 | Compaction thresholds | Async at 75 % of the live slot's context (setting; user found 70 % aggressive), synchronous at 90 %. Applies to every cc conversation (chat and voice share the cache). |
+| CI7 | 2026-10-10 | Which tools can take a photo | Any tool: an `image` parameter type in jarvis-command-sdk (and server tools), so third-party/Pantry commands get photos too. The model passes the image number; the runtime swaps in the bytes, including in client `tool_call`s to nodes. Replaces the hard-coded `PhotoTools` gate; recipes becomes the first user (user: "so other 3rd party tools can take advantage"). |
+| CI8 | 2026-10-10 | Photo with no instruction: act or offer | Offer: describe it and suggest the matching action; act only on an explicit request (user: "I don't like letting llm's implicitly make decisions that have repercussions without a confirmation"). Implies photos stay available to tools for the conversation's lifetime, so the follow-up "yes" works. |
 
 ## 6. Wire contract (app ↔ jarvisd)
 
