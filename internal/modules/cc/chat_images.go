@@ -21,7 +21,8 @@ import (
 // sees them as OpenAI-style image_url parts for the whole turn (tool-loop continues included).
 // After the reply, a job has a vision slot (background, else live) describe each image, and
 // the description replaces the image in the cached conversation (CI3/CI5): follow-ups keep
-// the gist without re-paying the image's tokens. Images live only in memory, in the cached
+// the gist without re-paying the image's tokens; tools keep the bytes (conversation.photos,
+// CI8) until the conversation expires. Images live only in memory, in the cached
 // conversation: never in the queue payload, a trace, a transcript or a log.
 
 const (

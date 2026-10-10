@@ -7,6 +7,41 @@ type ToolGates struct {
 	SpeakerKnown  bool // a confidently identified speaker for this conversation (D21)
 	MemoryEnabled bool // memory.enabled
 	RecallEnabled bool // memory.recall_enabled
+	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
+	// photos come from (docs/cc/chat-images.md §8). Gates the photo → action tools.
+	ChatPhotos bool
+}
+
+// PhotoTools are the server tools that act on chat photos (offered only with ChatPhotos).
+var PhotoTools = []string{"save_recipe_from_image"}
+
+// PhotoActionsBlock is the per-turn rule while a chat has photos a photo tool can act on
+// (docs/cc/chat-images.md CI8: offer, don't act). A transient block, so the byte-stable
+// messages[0] and voice prompts are unchanged.
+const PhotoActionsBlock = "PHOTOS: the user's photos in this chat can be handed to your tools. Use a tool on a " +
+	"photo only when the user asked for that action, in this message or by accepting your offer (\"yes\", " +
+	"\"sure\", \"do it\"). If they sent a photo without saying what to do with it, describe it briefly and " +
+	"offer the matching action (e.g. \"Want me to save it as a recipe?\") without calling the tool. Never say " +
+	"an action was done unless its tool succeeded in this turn."
+
+// PhotoOnlyHint is the turn hint of a chat message that is only photos, no words (CI8): there
+// is no request to act on, so the model describes and offers.
+const PhotoOnlyHint = "[photo only: the user sent a photo with no message. Describe it in a sentence or two and, " +
+	"if one of your tools fits it, offer that action (e.g. \"Want me to save it as a recipe?\"). Don't call a tool " +
+	"on it until they say so.]"
+
+// PhotoActionsGate reports whether a turn gets PhotoActionsBlock: photos are available to
+// tools (attached now or kept from earlier) and a photo tool is offered.
+func PhotoActionsGate(photosAvailable bool, offered map[string]bool) bool {
+	if !photosAvailable {
+		return false
+	}
+	for _, n := range PhotoTools {
+		if offered[n] {
+			return true
+		}
+	}
+	return false
 }
 
 // textPathWhitelist is the legacy text-path whitelist, in offer order. answer_question is a
@@ -26,6 +61,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.SpeakerKnown && g.MemoryEnabled
 	case "recall":
 		return g.SpeakerKnown && g.MemoryEnabled && g.RecallEnabled
+	case "save_recipe_from_image":
+		return g.ChatPhotos
 	}
 	return true
 }
@@ -35,7 +72,7 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 // Names the caller's registry does not have are skipped by the caller (legacy get_tool).
 func TextServerTools(g ToolGates) []string {
 	out := append([]string(nil), textPathWhitelist...)
-	for _, n := range []string{"deep_research", "quick_search", "remember", "forget", "recall"} {
+	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall"}, PhotoTools...) {
 		if ServerToolAllowed(n, g) {
 			out = append(out, n)
 		}

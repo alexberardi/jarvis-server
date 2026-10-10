@@ -239,6 +239,8 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		SpeakerKnown:  recognition || conv.chatUserID != 0,
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
+		// Photo → action tools: chat only, and only when the live slot can see the photos.
+		ChatPhotos: conv.chatUserID != 0 && m.slotVision(ctx, llm.LabelLive),
 	}
 	persona := parse.PyStrip(m.settings.String(ctx, settingPersona, settings.Scope{HouseholdID: hh}))
 

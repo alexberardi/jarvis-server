@@ -103,6 +103,9 @@ type Module struct {
 	// Clock gives "today" for /planner/current in the household's zone (cc's household clock).
 	// Nil uses the host's zone.
 	Clock HouseholdClock
+	// Notify delivers a chat photo import's outcome (inbox item + push, photo_chat.go). Nil:
+	// the recipe is still saved, nobody is told.
+	Notify Notifier
 	// SettingsRead and SettingsWrite guard /settings; both nil leaves them unmounted.
 	SettingsRead, SettingsWrite settings.Guard
 

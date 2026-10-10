@@ -52,6 +52,9 @@ type Turn struct {
 	Agents *pyjson.Object
 	// MemberIDs are the household's validated member ids.
 	MemberIDs []int64
+	// Images resolves the chat photos the model currently sees, by number (images.go). Nil
+	// outside mobile chat.
+	Images TurnImages
 }
 
 // Call is one tool call addressed to a server tool.

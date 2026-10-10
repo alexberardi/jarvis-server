@@ -103,6 +103,7 @@ func modules() []module.Module {
 	var logs *logsmod.Module
 	var cfg *configmod.Module
 	var ocrm *ocrmod.Module
+	var recipes *recipesmod.Module
 	for _, m := range mods {
 		switch x := m.(type) {
 		case *authmod.Module:
@@ -123,6 +124,8 @@ func modules() []module.Module {
 			cfg = x
 		case *ocrmod.Module:
 			ocrm = x
+		case *recipesmod.Module:
+			recipes = x
 		}
 	}
 	superuser := settings.SuperuserGuard(auth.VerifyUser)
@@ -151,7 +154,8 @@ func modules() []module.Module {
 			c.Households = auth
 			c.Clock = cc // "today" for the planner is the household's date
 			c.LLM = llm.Service()
-			c.OCR = ocrm // photo import runs every available engine in process (§7.3)
+			c.OCR = ocrm     // photo import runs every available engine in process (§7.3)
+			c.Notify = notif // a chat photo import's outcome: inbox item + push
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
 			c.SettingsWrite = superuser
 			// RD4: the household keeps shared rows; private rows, jobs and imports go.
@@ -212,6 +216,8 @@ func modules() []module.Module {
 			c.TTS = ccmod.TTSFrom(ttsm)
 			c.Notify = notif
 			c.Names = auth
+			// Chat photo → recipe (save_recipe_from_image): the recipes photo import, in process.
+			c.Recipes = recipes
 			// With llm.prompt_provider unset, the live model's catalog entry names it, so a
 			// fresh install answers its first voice turn without anyone choosing one.
 			c.DefaultPromptProvider = llm.LivePromptProvider

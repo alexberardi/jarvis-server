@@ -1,6 +1,7 @@
 # Chat images and context compaction (2026-10-09)
 
 **Status: built 2026-10-09 (branch `feat/chat-images`): §6 wire contract as written, details in §7. No DB migration.**
+**Photo → action (§8): built 2026-10-10 on branch `feat/chat-image-actions`, pending review. No DB migration, no wire change.**
 
 ## 1. Goal
 
@@ -40,7 +41,7 @@ limit: older turns are summarized ("compacted"), the way hosted chat assistants 
 ## 4. Later (deep dives)
 
 Photo → action through existing tools (flyer → calendar/reminder, fridge → shopping list, receipt
-totals, "save as recipe" → recipes import); share sheet into Jarvis; camera snapshots via go2rtc
+totals; "save as recipe" → recipes import and the shopping list are done, §8); share sheet into Jarvis; camera snapshots via go2rtc
 ("who's at the door?", also by voice); memories from images; camera-equipped nodes.
 
 ## 5. Decisions
@@ -53,6 +54,9 @@ totals, "save as recipe" → recipes import); share sheet into Jarvis; camera sn
 | CI4 | 2026-10-09 | Compaction | Yes: summarize older turns near the context limit (user idea). |
 | CI5 | 2026-10-09 | Who writes image descriptions and compaction summaries | The background slot, as a job right after the reply (user). If background has no vision, live writes the description after replying. A turn arriving before the description is ready still sees the image. |
 | CI6 | 2026-10-09 | Compaction thresholds | Async at 75 % of the live slot's context (setting; user found 70 % aggressive), synchronous at 90 %. Applies to every cc conversation (chat and voice share the cache). |
+| CI7 | 2026-10-10 | Which tools can take a photo | Any tool: an `image` parameter type in jarvis-command-sdk (and server tools), so third-party/Pantry commands get photos too. The model passes the image number; the runtime swaps in the bytes, including in client `tool_call`s to nodes. Replaces the hard-coded `PhotoTools` gate; recipes becomes the first user (user: "so other 3rd party tools can take advantage"). |
+| CI8 | 2026-10-10 | Photo with no instruction: act or offer | Offer: describe it and suggest the matching action; act only on an explicit request (user: "I don't like letting llm's implicitly make decisions that have repercussions without a confirmation"). Implies photos stay available to tools for the conversation's lifetime, so the follow-up "yes" works. |
+| CI9 | 2026-10-10 | What a command's `run()` gets for an image parameter | A list of `JarvisImage` objects, always a list (even for one photo, in attach order): `.data` bytes, `.mime`, `.size_bytes`, `.width`/`.height` (read from the header, no Pillow needed), `.save(path)`, `.as_base64()`, `.as_data_url()` (ready for a vision API), `.to_pil()` when Pillow is installed. Bytes travel inline in the `tool_call` (≤ 2 MB each, ≤ 4). (User: "A), as extensive as makes sense for the user. I think list makes most sense".) |
 
 ## 6. Wire contract (app ↔ jarvisd)
 
@@ -93,7 +97,7 @@ description per image (max 200 tokens, thinking off); a failed call falls throug
 slot; with neither, the text is `not described`. It then prepends `[image 1: …]` lines to that
 message's text and drops its images, matching the message by id under the conversation lock.
 Turns arriving earlier send the real image. After a restart the job finds nothing (the cache is
-memory only). The log line has counts and the slot, never the description.
+memory only). Tools keep the bytes after the swap (§8.1, CI8); the model doesn't. The log line has counts and the slot, never the description.
 
 **Vision lost mid-conversation** (Image input switched off while a description is pending): the
 live request gets `[image]` text instead of the parts the engine would refuse (`visionGuard`).
@@ -147,3 +151,194 @@ validated separately and clamped to ≥ the async one; remote slots use `llm.<sl
 window; descriptions are prepended to the user's
 own text rather than replacing the whole message.
 
+
+## 8. Photo → action (2026-10-10, pending review)
+
+A photo in chat can now drive an action. First: **"save this as a recipe"** runs the recipes photo
+import on the attached photo and saves the result. A photo with no instruction gets a description
+and an offer ("Want me to save it to your recipes?"); a "yes" then saves it (CI8). Also checked: a
+photo of a list → the existing `shopping_list` tool, with no change.
+
+### 8.1 Server tools see the turn's photos by number
+
+- `servertools.Turn.Images` (`servertools/images.go`, interface `TurnImages`) resolves photos by
+  their 1-based number in the message ("image 1", "image 2"). The model passes numbers, never
+  data. `ImageNumbers(call, "images")` reads an optional `[1, 2]` argument (absent = all photos).
+  `ResolveImages` returns the bytes and sniffed type.
+- **Kept bytes (CI8).** On every commit the conversation keeps the decoded bytes of its newest
+  photo message (`conversation.photos`, `keepPhotos`); a newer photo message replaces them, an
+  older one (a late description) never does. At most 4 × 2 MiB per conversation, memory only;
+  they go with the conversation (10-minute idle TTL, `/conversation/end`, the entry cap, a
+  restart). Kept at commit, so compaction or `max_turns` trimming can't lose them, even before
+  the description lands.
+- The engine fills `Turn.Images` for mobile chat conversations only (`chatUserID != 0`), per tool
+  call, from the working history and the kept bytes (`cc/chat_image_actions.go`,
+  `turnImagesOf`). "The photos the model sees" = the latest user message that ever had photos,
+  numbered 1-based within that message. Walking back:
+  - photos still attached → those (the current turn's, or an earlier turn's whose description
+    hasn't landed yet);
+  - only the description left (`[image N: …]`, or visionGuard's `[image]`) → the kept bytes when
+    they belong to that message, else `ErrImagesExpired`;
+  - no photo message left in history (compacted or trimmed away) → the kept bytes, which are by
+    construction the conversation's latest photos; none → `ErrNoImages`;
+  - a number out of range → `*ImageIndexError` ("there is no image 3: only image 1 is attached").
+- An expired conversation comes back empty (a chat on an expired id warms up fresh), so the
+  tool says `no_image` ("attach the photo"). `image_expired` is left for a described photo whose
+  bytes are gone.
+- Bytes stay in memory. Tool results, traces, job payloads and logs never carry them (unit test,
+  plus a leak check on the manual run).
+
+### 8.2 `save_recipe_from_image`
+
+- **Tool** (`cc/chat_image_actions.go`): args `{"images": [int]}` (optional). The description
+  covers "save this recipe", "add this to my recipes", "keep this one", "import this recipe". Its
+  `included_system_prompt_text` (tool guidance; native providers print it, ChatGPT's prompt has
+  no guidance section):
+  - call the tool every time the user asks, for a photo attached now or earlier;
+  - never claim a save the tool didn't make;
+  - don't transcribe the recipe, and don't use a list or note tool for it.
+- **Offer, don't act (CI8).** While photos are available to a photo tool (attached now or kept)
+  and one is offered, each turn gets a transient system block, `prompts.PhotoActionsBlock`
+  (`PHOTOS:`): use a tool on a photo only when the user asked for that action, now or by
+  accepting an offer ("yes", "sure", "do it"); with no instruction, describe it and offer the
+  action without calling the tool; never say an action was done unless its tool succeeded this
+  turn. Transient, so `messages[0]` stays byte-stable and voice prompts are unchanged. The
+  tool's own guidance ("call it every time they ask; never say a recipe is saved … unless the
+  tool succeeded in this turn") is unchanged.
+- **Photo-only turns** (photos, no words): the user message gets `prompts.PhotoOnlyHint` ("photo
+  only: … describe it … offer that action … don't call a tool on it until they say so"), and the
+  engine never forces a tool call on them (`engineInput.noForce`). Before this, the Qwen
+  providers' must-call retry ran unguarded on an empty utterance (the keyword guard needs words)
+  and nagged the model into calling `save_recipe_from_image` after it had already succeeded: one
+  photo, three imports (manual check, first run).
+- **Offered** only in mobile chat, when the live slot reports vision at warmup (the only way a
+  photo can arrive) and the recipes module is wired: `prompts.ToolGates.ChatPhotos`, on both the
+  native and the text path. Voice conversations' prompt bytes are unchanged.
+- **Refusals** the model relays:
+  - `no_speaker` (no known user: voice);
+  - `no_image`: ask the user to attach the photo;
+  - `image_expired`: "That photo is no longer available: photos are kept only while the chat is
+    active. Ask the user to attach the photo again";
+  - `invalid_image`: a bad number, or a photo the import refuses (too many, too big, not
+    decodable);
+  - `invalid_arguments`;
+  - `import_failed`: a server error, logged.
+- **Success** returns `{"success": true, "status": "processing", "images": n, "message": …}` and
+  the model says it's being saved.
+- **Recipes side** (`recipes/photo_chat.go`): `Module.ImportRecipePhotos(ctx, userID,
+  householdID, photos)` is the in-process entry point. cc sees it through the `cc.RecipeImporter`
+  interface, wired in `cmd/jarvisd/main.go`. It is `POST /recipes/from-image/jobs` without HTTP:
+  - the same limits (1–8 photos, `image.max_bytes`) and `preparePhoto`;
+  - the same `queuePhotoImport` (factored out of the route) → ingestion row + `recipes.image` job;
+  - the same pipeline: every OCR engine in process, quality gate, P2/P3.
+  - Several photos = the pages of one recipe, in the order the model named them (the import is
+    multi-page already).
+- **Ownership** is the route's: `resolve(authn.User{ID, HouseholdID: chat household})`. The user
+  is the author; the write household is the chat's household while they're a member, else their
+  first membership, else none (private). This is RD7, exactly as a token naming that household
+  would get.
+- **Saving.** The job data carries `"save": true, "origin": "chat"`. After `markComplete`,
+  `saveDraft` turns the draft into a recipe, mapped as the recipes app's review screen does:
+  - ingredient text = name, plus "— notes"; quantity and unit in their columns; a unit repeated
+    at the start of the name is dropped ("cloves garlic" + unit "cloves" → "garlic");
+  - steps numbered from 1; servings = the leading number;
+  - `source_type: "image"`.
+  The insert goes through the same `insertRecipe` as `POST /recipes`, and the job turns COMMITTED
+  in the same transaction, with `recipe_id` in its result. A job canceled meanwhile is left alone.
+  The app's own photo import is unchanged (the draft waits for review; tested).
+- **Telling the user (async).** `notifySavedImport` creates an inbox item, then pushes to the user,
+  the way deep research reports (category `recipe`, source `jarvis-recipes-server`):
+  - saved: "Recipe saved: <title>", summary "N ingredients, M steps…", the recipe as the body;
+    push data `{type: "recipe_saved", recipe_id, parse_job_id, inbox_item_id}`;
+  - failed: "Recipe not saved" with the reason. The quality gate's own advice is used as is;
+    other codes get a generic "try a straight-on photo…". Push type `recipe_import_failed`.
+  - Mobile shows category `recipe` with the default inbox detail screen and colour; no app
+    change.
+
+### 8.3 Other photo → action through existing tools (manual, no code)
+
+- **List photo → shopping list: works as is.** A photo of "Need from store: eggs, oat milk,
+  bananas, coffee beans, dish soap" + "add these to my shopping list" → the model called the
+  node's `shopping_list` `{"action": "add", "items": [all five]}`. No prompt change needed. The
+  node round trip was not exercised: the scratch node was offline. With an offline node, the
+  9B model retries until "Too many tool iterations". That happens for a plain text "add milk"
+  too, so it is not image-specific (logged as a follow-up).
+- **Flyer → reminder: not reliable yet, nothing changed.** "BOOK SWAP, Saturday, October 17,
+  2:00 PM" + "remind me about this" → `reminder` `{action: set, text: "book swap at Maple Street
+  Library", time: "14:00"}`: the right text and time, but `resolved_datetimes` was an ISO date for
+  the next day, not October 17. The DT_KEYS vocabulary is relative ("tomorrow", "next_saturday");
+  an absolute date on a flyer has no key. Fixing that is a date-resolution change, not a prompt
+  tweak; left for a decision.
+
+### 8.4 Manual check (2026-10-10, this box)
+
+Throwaway jarvisd from the branch:
+- scratch home, loopback only, ports 37xxx; the system service's unreadable
+  `/etc/jarvisd/jarvisd.env` hidden by a bwrap tmpfs for that process only;
+- a CPU-only llama-server (`-ngl 0 -dev none`, Qwen3.5-9B Q4_K_M + mmproj F16, `-c 12288`) as the
+  live and background remotes, behind a small logging proxy that recorded tool calls, never
+  image parts;
+- tesseract the only OCR engine; a rendered 1000×1300 recipe card JPEG ("Lemon Garlic Roast
+  Chicken", 8 ingredients, 6 steps).
+
+Results:
+- **"save this as a recipe"** → `save_recipe_from_image {}` → reply "Got it, I'm saving that Lemon
+  Garlic Roast Chicken recipe for you…" (111 s on CPU, cold).
+  - The job ran tesseract → P2 and saved recipe 1 for user 1 in their household: title, servings
+    4, prep 15, cook 70, total 85, 8 ingredients, 6 steps verbatim; job COMMITTED with
+    `recipe_id`.
+  - Inbox item "Recipe saved: Lemon Garlic Roast Chicken" with the recipe as its body; the push
+    was logged as `skipped` (no devices).
+  - P3 timed out on CPU (30 s) and the draft was kept, as the import does.
+- **"add this to my recipes"** → `save_recipe_from_image {"images":[1]}` → recipe 2.
+- **Expired (before CI8 retention):** "what is this?" → "That's a recipe for Lemon Garlic Roast
+  Chicken… Want me to save it?". After the description landed, "nice, save it as a recipe" →
+  `image_expired` → "Hmm, the photo isn't available anymore. Want to attach it again…?". With
+  retention this is the "yes" run below.
+- Before the guidance said "call it every time / never claim a save", a follow-up "save that
+  recipe photo again" got "I'll save that… right away" with no tool call. The guidance was
+  tightened, and the expired run above is from after that change.
+- **Leaks:** no image data in the log (base64 probes, `data:image`), in the traces (`[image] save
+  this as a recipe`), or in the job payloads (ids only).
+
+**CI8 re-check (2026-10-10, same setup, fresh scratch home, build `e009d54` + the photo-only fix):**
+- **Photo, no text** → reply "Looks like a nice Lemon Garlic Roast Chicken recipe card. Want me to
+  save it to your recipes?" (34 s), no tool call, one live call. The background slot then
+  described it (`slot=background`).
+- **"yes"** in the same conversation, after the description landed → the live request carried
+  `[image 1: …]` text and no image part; `save_recipe_from_image {"images":[1]}` resolved image 1
+  from the kept bytes → "Got it—your Lemon Garlic Roast Chicken recipe is being saved…" (14 s).
+  The job saved recipe 3 (8 ingredients, 6 steps) and created the inbox item.
+- **Photo + "save this as a recipe"** (new conversation) → one `save_recipe_from_image` call, one
+  import, "Got it, I'm saving that Lemon Garlic Roast Chicken recipe for you…" (42 s).
+- **First run, before the photo-only fix:** with the `PHOTOS:` block alone, the 9B called the
+  tool on a bare photo, then the must-call retry made it call it twice more (three imports).
+  That run is why photo-only turns get their own hint and no forcing.
+- **Leaks:** no base64 probe or `data:image` in the jarvisd log, the proxy log or the database
+  (the recipes import's own blob store holds the imported photo, as it always does).
+
+### 8.5 Decided while building
+
+- **Chat saves directly, no review step.** The user asked to save, so the job commits the draft
+  instead of leaving it in the recipes app's import list. The app's own import still waits for
+  review.
+- **The outcome goes to the inbox plus a push** (deep research's pattern). The tool doesn't wait
+  for the job: OCR + P2 take tens of seconds on a GPU and minutes on CPU.
+- **Photos by number, resolved per call** from the working history, so tool-loop continues see
+  the same photos as the model.
+- **Tools keep the photo, the model doesn't (CI8 over CI3).** The latest photo message's bytes stay
+  in memory for tools until the conversation goes; the model keeps only the description.
+- **"Photos available" = attached now or kept**, and only the newest photo message counts, numbered
+  within itself; an older photo can't be reached once a newer one arrives.
+- **Offered only in vision-capable mobile chats.** No prompt bytes change for voice or for chats
+  without image input.
+
+### 8.6 Open questions
+
+1. ~~Keep the photo for tools a little longer?~~ Decided (CI8) and built: §8.1 "Kept bytes".
+2. **Absolute dates for flyer → reminder/calendar** (§8.3). **Recommendation:** let
+   `resolved_datetimes` accept an ISO calendar date the user's input (or the photo) states, or add
+   date keys like `2026-10-17`, then retest. Out of scope here.
+3. **Push deep link.** `type: "recipe_saved"` carries `recipe_id`, but the node app opens the
+   inbox item; the recipes app is a separate app. **Recommendation:** keep the inbox item; teach
+   the recipes app later if wanted.

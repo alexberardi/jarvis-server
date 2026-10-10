@@ -54,6 +54,9 @@ func (m *Module) registerServerTools() {
 	m.tools.Register(servertools.NewHAEntities())
 	m.tools.Register(m.phoneService().Tool()) // make_phone_call (5c, phone_wire.go)
 	m.registerErrandTools()
+	if m.Recipes != nil {
+		m.tools.Register(&saveRecipeTool{m: m, imp: m.Recipes}) // chat photo → recipe (chat_image_actions.go)
+	}
 	gate := func(ctx context.Context, hh string) bool {
 		return m.settings.Bool(ctx, settingWebSearch, settings.Scope{HouseholdID: hh})
 	}
