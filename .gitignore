@@ -1,5 +1,7 @@
 /jarvisd
 /jarvisd.exe
+/jarvis-agent
+/jarvis-agent.exe
 /dist/
 *.db
 *.db-wal

@@ -1,0 +1,27 @@
+# A systemd USER unit, deliberately not a system unit.
+#
+# A system unit runs as root outside the graphical session: it would have no
+# DISPLAY/WAYLAND_DISPLAY, so window control and `open` would both be dead on
+# arrival while volume still appeared to work -- the worst kind of half-broken.
+#
+# Install:  ~/.config/systemd/user/jarvis-agent.service
+# Enable:   systemctl --user enable --now jarvis-agent
+#
+# On a headless or auto-login-less box, `loginctl enable-linger $USER` is
+# required or the unit stops when the user logs out.
+
+[Unit]
+Description=Jarvis desktop agent (a Jarvis node offering OS control)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=__AGENT_BIN__ run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# default.target, NOT multi-user.target -- this is a user unit and
+# multi-user.target would never be reached in the user manager.
+WantedBy=default.target

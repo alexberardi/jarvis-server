@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist of "Jarvis Agent.app", the macOS packaging of jarvis-agent.
+
+  A bundle, not a bare binary: macOS 26 won't list a bare binary added with "+" under
+  Privacy & Security → Accessibility, and TCC grants follow the bundle's signed identity
+  (CFBundleIdentifier + signing team), so with a stable identity they survive rebuilds.
+  LSUIElement: a background agent with no Dock icon. It still runs in the user's GUI session
+  (launched by a LaunchAgent in gui/$UID), never as a daemon.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>io.jarvis.agent</string>
+    <key>CFBundleName</key>
+    <string>Jarvis Agent</string>
+    <key>CFBundleDisplayName</key>
+    <string>Jarvis Agent</string>
+    <key>CFBundleExecutable</key>
+    <string>jarvis-agent</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__VERSION__</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Jarvis Agent asks System Events to list, focus, minimise and close windows when you ask Jarvis to.</string>
+</dict>
+</plist>

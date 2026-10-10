@@ -1,0 +1,159 @@
+package node
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+)
+
+// ToolDef is one client tool as CC wants it: the OpenAI-style client_tools entry and the
+// available_commands entry (CommandDefinition: command_name, description, parameters required).
+// Built-in Go tools render both from a Spec; a sidecar's Python commands arrive pre-rendered by
+// jarvis-command-sdk.
+type ToolDef struct {
+	Name       string
+	ClientTool map[string]any
+	Command    map[string]any
+}
+
+// Request is the context CC sends with a tool_call.
+type Request struct {
+	ToolCallID   string
+	UserID       *int64
+	VoiceCommand string
+}
+
+// Toolset is a source of tools. Available is computed per call (capabilities change at
+// runtime); Call returns the output object posted back to CC, which by convention carries
+// "success" and, on failure, "error".
+type Toolset interface {
+	Available(ctx context.Context) []ToolDef
+	Call(ctx context.Context, name string, args map[string]any, req Request) (output map[string]any, handled bool)
+}
+
+// Multi chains toolsets; the first that knows a name handles it.
+type Multi []Toolset
+
+func (m Multi) Available(ctx context.Context) []ToolDef {
+	var out []ToolDef
+	seen := map[string]bool{}
+	for _, t := range m {
+		for _, d := range t.Available(ctx) {
+			if !seen[d.Name] {
+				seen[d.Name] = true
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
+func (m Multi) Call(ctx context.Context, name string, args map[string]any, req Request) (map[string]any, bool) {
+	for _, t := range m {
+		if out, ok := t.Call(ctx, name, args, req); ok {
+			return out, true
+		}
+	}
+	return nil, false
+}
+
+// --- rendering built-in tools ---
+
+// Param is one tool parameter, in jarvis-command-sdk's vocabulary.
+type Param struct {
+	Name        string
+	Type        string // "string", "int", "bool", ...
+	Description string
+	Required    bool
+	Enum        []string
+}
+
+// Example is one prompt example.
+type Example struct {
+	VoiceCommand string
+	Params       map[string]any
+	Primary      bool
+}
+
+// Spec describes a built-in tool.
+type Spec struct {
+	Name        string
+	Description string
+	Params      []Param
+	Keywords    []string
+	Examples    []Example
+	Risky       bool
+}
+
+var jsonType = map[string]string{"string": "string", "int": "integer", "float": "number", "bool": "boolean"}
+
+// Render builds the ToolDef the way jarvis-command-sdk's to_openai_tool_schema and
+// get_command_schema do, so CC can't tell a Go tool from a Python one.
+func (s Spec) Render() ToolDef {
+	props := map[string]any{}
+	required := []string{}
+	params := []any{}
+	for _, p := range s.Params {
+		ps := map[string]any{"type": jsonType[p.Type]}
+		if ps["type"] == "" {
+			ps["type"] = "string"
+		}
+		if p.Description != "" {
+			ps["description"] = p.Description
+		}
+		var enum any
+		if len(p.Enum) > 0 {
+			ps["enum"] = p.Enum
+			enum = p.Enum
+		}
+		props[p.Name] = ps
+		if p.Required {
+			required = append(required, p.Name)
+		}
+		params = append(params, map[string]any{"name": p.Name, "type": p.Type, "description": p.Description,
+			"required": p.Required, "default_value": nil, "enum_values": enum, "options_source": nil})
+	}
+	examples := []any{}
+	for _, e := range s.Examples {
+		examples = append(examples, map[string]any{"voice_command": e.VoiceCommand, "expected_parameters": e.Params, "is_primary": e.Primary})
+	}
+	keywords := s.Keywords
+	if keywords == nil {
+		keywords = []string{}
+	}
+	return ToolDef{
+		Name: s.Name,
+		ClientTool: map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": s.Name, "description": s.Description,
+				"parameters": map[string]any{"type": "object", "properties": props, "required": required},
+			},
+			"allow_direct_answer": false, "is_risky": s.Risky, "keywords": keywords, "examples": examples,
+		},
+		Command: map[string]any{
+			"command_name": s.Name, "description": s.Description, "allow_direct_answer": false,
+			"is_risky": s.Risky, "examples": examples, "keywords": keywords, "parameters": params,
+		},
+	}
+}
+
+// DecodeArgs accepts CC's arguments as an object or a JSON-encoded string (mobile chat sends
+// the model's raw argument string). Anything else is an empty map.
+func DecodeArgs(v any) map[string]any {
+	switch a := v.(type) {
+	case map[string]any:
+		return a
+	case string:
+		var m map[string]any
+		if json.Unmarshal([]byte(a), &m) == nil && m != nil {
+			return m
+		}
+	}
+	return map[string]any{}
+}
+
+// Fail is the conventional failure output.
+func Fail(format string, a ...any) map[string]any {
+	return map[string]any{"success": false, "error": fmt.Sprintf(format, a...)}
+}

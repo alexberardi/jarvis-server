@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  A LaunchAgent, deliberately NOT a LaunchDaemon.
+
+  A daemon runs outside any login session, where it cannot see the window
+  server: window control would fail and `open` would launch nothing the user
+  can see. It also could not hold the Accessibility (TCC) grant, which is
+  bound to a user session (and granted to this binary, by code signature).
+  Install to ~/Library/LaunchAgents only and bootstrap into gui/$(id -u).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.jarvis.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGENT_BIN__</string>
+        <string>run</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/jarvis-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/jarvis-agent.err.log</string>
+
+    <!-- Shows the agent as "Jarvis Agent" in Login Items rather than a bare path. -->
+    <key>AssociatedBundleIdentifiers</key>
+    <string>io.jarvis.agent</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

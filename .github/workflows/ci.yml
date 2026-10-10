@@ -91,7 +91,43 @@ jobs:
       - name: Platform tests (CGO_ENABLED=0)
         env:
           CGO_ENABLED: "0"
-        run: go test ./cmd/... ./internal/platform/... ./internal/audio/... ./internal/update/...
+        run: go test ./cmd/... ./internal/platform/... ./internal/audio/... ./internal/update/... ./internal/agent/...
+
+  # jarvis-agent (the desktop node, docs/agent/DESIGN.md). Its host contract suite runs every
+  # backend on every OS with fakes; each runner then drives its own real host (native tests skip
+  # what a headless runner can't do), and the Python sidecar test runs against the SDK.
+  agent:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install jarvis-command-sdk (sidecar test)
+        run: python -m pip install "git+https://github.com/alexberardi/jarvis-command-sdk@main"
+      - name: Unit, contract and sidecar tests (race)
+        env:
+          CGO_ENABLED: "1"
+          JARVIS_SIDECAR_PYTHON: python
+        run: go test -race -count=1 ./cmd/jarvis-agent ./internal/agent/...
+      - name: Native tests (this runner's own OS)
+        env:
+          JARVIS_HOST_NATIVE: "1"
+        run: go test -count=1 -v -run Native ./internal/agent/host/
+      - name: Static build (CGO_ENABLED=0)
+        env:
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o dist/ ./cmd/jarvis-agent
 
   # I1: register jarvisd with each OS's service manager the way the installers will, check it
   # serves /health under that supervisor and comes back after being killed, then uninstall.
