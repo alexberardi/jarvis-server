@@ -12,6 +12,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	tf "github.com/alexberardi/jarvis-server/internal/modules/cc/textfilter"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -152,6 +153,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	doubleChecked := false
 	nudged := map[[2]string]bool{}
 	dedupePending := false
+	deduped := false // a [TOOL_DEDUPE] nudge this run: answering from earlier results is the point
 	nextMax := iterMaxTokens
 	tr := traceFrom(ctx)
 
@@ -245,12 +247,17 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		case parse.FinishStop:
 			exchange := parse.SentinelExchangeComplete(raw, message)
 			terminal := exchange || parse.SentinelNotForMe(raw, message)
-			force := conv.forceTools && !in.noForce
+			// The must-call retry nudges a model that answered an action request in prose. It is
+			// spent once a tool ran this turn (any result, success or failure: an offline node's
+			// error is the answer, and re-arming on every continue looped the node's tool), and
+			// it fires at most once a turn.
+			// A dedupe nudge counts as using the tool: it asked for an answer from the results above.
+			force := conv.forceTools && !in.noForce && !deduped && !toolRanThisTurn(msgs)
 			retries := countNags(msgs, nagMustCall)
-			if force && retries < 2 && !doubleChecked && !terminal && in.utterance != "" {
+			if force && retries < maxMustCallRetries && !doubleChecked && !terminal && in.utterance != "" {
 				force = m.forceGuardArmed(conv, in.utterance, raw, message)
 			}
-			if force && retries < 2 && !doubleChecked && !terminal {
+			if force && retries < maxMustCallRetries && !doubleChecked && !terminal {
 				if parse.PyStrip(message) != "" {
 					poppedProse, havePopped = message, true
 				}
@@ -370,6 +377,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				if name, key, since, dup := m.findDuplicate(ctx, conv, clientCalls, nudged); dup {
 					nudged[[2]string{name, key}] = true
 					dedupePending = true
+					deduped = true
 					m.deps.Log.Info("cc: tool_dedupe_nudge", "tool", name, "seconds_since", since.Seconds(), "outcome", "nudge_issued")
 					if len(msgs) > 0 && msgs[len(msgs)-1].Role == "assistant" {
 						msgs = msgs[:len(msgs)-1]
@@ -469,8 +477,31 @@ func normalizeNativeCalls(raw []llm.ToolCall) []parse.ToolCall {
 // forceGuardArmed decides whether the force-tools guard stays armed for a prose reply
 // (02 §3.2 i): question-shaped utterances, non-action utterances whose reply claims no
 // action, and utterances matching no command keyword all disarm it.
+// A closing remark ("thanks", "got it", "no thanks") never arms it, whatever the reply says.
 func (m *Module) forceGuardArmed(conv *conversation, utterance, raw, message string) bool {
+	if tf.IsAcknowledgementShaped(utterance) {
+		return false
+	}
 	return forceGate(conv, utterance, []string{parse.OutsideThink(raw), parse.OutsideThink(message)})
+}
+
+// maxMustCallRetries is the must-call retry budget per turn (legacy allowed 2; a second nag
+// after a model declined once only bought a worse reply or a duplicate call).
+const maxMustCallRetries = 1
+
+// toolRanThisTurn reports whether any tool result follows the turn's user message: a server
+// tool run in this loop, or the node's results a continue appended. The double-check pass's
+// user message is not a turn boundary.
+func toolRanThisTurn(msgs []chatMsg) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		switch {
+		case msgs[i].Role == "tool":
+			return true
+		case msgs[i].Role == "user" && msgs[i].Content != doubleCheckMessage:
+			return false
+		}
+	}
+	return false
 }
 
 // findDuplicate is _find_duplicate_issued_call: the first client call identical (name +

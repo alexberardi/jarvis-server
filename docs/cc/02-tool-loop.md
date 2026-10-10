@@ -238,6 +238,38 @@ Every return path attaches "reasoning" (joined think blocks) when any were captu
 
 > **Changed by D9:** the must-call guard (step i) and step 1 are not ported; the router decision no longer exists. **Changed by D40 (Q9):** step 5 speaks a natural fallback instead of "Maximum tool execution iterations reached.", keeping `error:"max_iterations_exceeded"` for traces. **Changed by D8 (Q6):** on the invalid-param retry (j.8) and the server+client drop (j.7), Go no longer leaves an assistant `tool_calls` message without matching tool replies.
 
+> **Changed 2026-10-10 (force-tools guard, Go only).** Legacy re-armed the guard on every engine
+> run, so each node continue could nag again (2 retries each time). On Qwen3.5-9B that (a) nagged
+> a follow-up ("check the weather in Boston again") whose tool had already run into a worse
+> final reply ("Gotcha, I'll check it again."), (b) with PR #26's first run, forced a photo tool
+> twice more after it succeeded (three recipe imports), and (c) with an offline node, turned the
+> relayed failure into another call until "Too many tool iterations". The guard now fires only
+> when all hold:
+> - no tool result follows the turn's user message (`toolRanThisTurn`: any `role=tool` reply,
+>   server or node, success or error; the double-check pass's user message is not a boundary),
+>   and no `[TOOL_DEDUPE]` nudge this run (it asked the model to answer from earlier results);
+> - no `[MUST_CALL_RETRY]` yet this turn (`maxMustCallRetries = 1`; the nag text still says
+>   "attempt 1/2", byte-exact);
+> - the utterance is not a closing remark (`textfilter.IsAcknowledgementShaped`: every word an
+>   acknowledgement word and one a closer, e.g. "thanks", "ok got it", "no thanks", "never
+>   mind"; a bare "ok"/"yes"/"sure"/"great" can accept an offer, so it still counts);
+> - not a photo-only turn (`noForce`, #26), plus legacy's shape and keyword gates unchanged.
+> What it keeps: an action request answered in prose with no tool call ("check the weather in
+> Boston" → "It's sunny") still gets exactly one nudge. Tests: `force_retry_test.go`.
+>
+> Manual check (this box, CPU Qwen3.5-9B behind a logging proxy, a throwaway jarvisd, a fake
+> MQTT node answering `get_weather`; mobile chat):
+> - "what's the weather in Boston?" then "check the weather in Boston again": **before**, the
+>   repeat call was deduped, the model answered from the result, the guard nagged, the model
+>   called again, and so on: 6 node calls, then "Too many tool iterations" (125 s). **After**:
+>   the dedupe nudge, then "Boston's still at 72 degrees and sunny … Nothing's changed!" (10 s,
+>   no nag). Past the 120 s dedupe window the node ran once and the reply stood (no nag).
+> - Offline node, "check the weather in Boston": **before**, every relayed "the node's offline"
+>   was nagged into another call until "Too many tool iterations" (97 s); **after**, one retry the
+>   model chose itself, deduped, then "the node's offline right now … Want me to try again in a
+>   minute?" (16 s).
+> - "thanks" → "No problem, dev. Anything else you need?" on both.
+
 ### 3.3 Client vs server split
 
 `ToolExecutor.execute_tool_calls` (`core/tool_executor.py:96-171`) splits calls by name:
@@ -472,7 +504,7 @@ The decision is `{"tool_name","score","used": score >= JARVIS_TOOL_CLASSIFIER_MI
    - `[NOT_FOR_ME_DOUBLE_CHECK]` and `[TOOL_DEDUPE]` are scrubbed as soon as the model replies.
    - `[INVALID_PARAM_RETRY]` and `[ISO_DATE_RETRY]` are **not** scrubbed, so they persist in history. `[ISO_DATE_RETRY]` is counted by substring (`:312-318`).
 3. **Retry budgets.**
-   - Force-tools allows 2 retries; must-call allows 1. They share one counter.
+   - Force-tools allows 2 retries; must-call allows 1. They share one counter. **Go (2026-10-10):** force-tools allows 1, and none once a tool ran this turn (see the force-tools note after §3.2).
    - ISO-date allows 1, counted conversation-wide because it is never scrubbed.
    - Invalid-param allows 1–2, counted conversation-wide.
    - Double-check allows 1 per turn, and only while `iteration+1 < max_iterations`.
