@@ -350,9 +350,9 @@ func offerBrowserSetup(yes, no bool) {
 			fmt.Println("Browser control (optional): jarvis-agent browser install")
 			return
 		}
-		fmt.Print("\nSet up browser control, so Jarvis can use your Firefox / Chrome tabs (list, open, read, pause video)? [y/N] ")
-		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		fmt.Print("\nSet up browser control, so Jarvis can use your Firefox / Chrome tabs (list, open, read, pause video)? [Y/n] ")
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if !browserAnswerYes(line, err) {
 			fmt.Println("Skipped. Later: jarvis-agent browser install")
 			return
 		}
@@ -360,6 +360,16 @@ func offerBrowserSetup(yes, no bool) {
 	if err := browserInstall(nil, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "browser setup:", err)
 	}
+}
+
+// browserAnswerYes reads the setup prompt's answer: Enter means yes (the default), but input
+// that ends without an answer is no, so nothing installs unless someone was asked.
+func browserAnswerYes(line string, err error) bool {
+	a := strings.ToLower(strings.TrimSpace(line))
+	if a == "" {
+		return err == nil
+	}
+	return a == "y" || a == "yes"
 }
 
 // browserSummary is `status`'s one line: where the host is registered, and what's connected.
