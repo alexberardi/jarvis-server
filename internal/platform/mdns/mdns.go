@@ -19,7 +19,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/netaddr"
 )

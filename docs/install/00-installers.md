@@ -620,7 +620,7 @@ Optional; I3.
 ### 6.3 mDNS
 
 jarvisd advertises `_jarvis-config._tcp` (`internal/platform/mdns`, `cmd/jarvisd/main.go:48`) using
-`grandcat/zeroconf`, which binds UDP 5353 alongside the OS responder.
+`libp2p/zeroconf/v2` (maintained fork of `grandcat/zeroconf`), which binds UDP 5353 alongside the OS responder.
 
 - **Linux:** coexists with avahi-daemon (both use `SO_REUSEPORT` on 5353). Firewall needs 5353/udp, which
   doctor already includes (`cmd/jarvisd/doctor.go:33-35`).
