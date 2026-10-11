@@ -91,7 +91,7 @@ func TestTargetLocations(t *testing.T) {
 func TestFirefoxXDGProfileRegistersUnderDotMozilla(t *testing.T) {
 	e := testEnv(t, "linux")
 	mkdirs(t, filepath.Join(e.Home, ".config", "mozilla", "firefox"))
-	res := Register(e, "/opt/jarvis/jarvis-agent", false, nil)
+	res := Register(e, filepath.Join(e.Home, "bin", "jarvis-agent"), false, nil)
 	for _, r := range res {
 		if r.Target.Name == "firefox" {
 			if !r.Done || r.Path != filepath.Join(e.Home, ".mozilla", "native-messaging-hosts", HostName+".json") {
@@ -106,7 +106,7 @@ func TestFirefoxXDGProfileRegistersUnderDotMozilla(t *testing.T) {
 func TestRegisterPresentOnly(t *testing.T) {
 	e := testEnv(t, "linux")
 	mkdirs(t, filepath.Join(e.Home, ".mozilla"), filepath.Join(e.Home, ".config", "chromium"))
-	exe := "/home/u/.local/bin/jarvis-agent"
+	exe := filepath.Join(e.Home, ".local", "bin", "jarvis-agent") // absolute on every OS
 	done := map[string]bool{}
 	for _, r := range Register(e, exe, false, nil) {
 		if r.Err != nil {
@@ -182,8 +182,10 @@ func TestInspectAndUnregister(t *testing.T) {
 		}
 	}
 	// Someone else's manifest under our name is reported, not trusted.
+	_ = os.WriteFile(exe, []byte("#!"), 0o755)
 	p := targetByName(t, e, "chromium").ManifestPath(e)
-	_ = os.WriteFile(p, []byte(`{"name":"io.jarvis.agent.browser","path":"/bin/sh","allowed_origins":["chrome-extension://evil/"]}`), 0o644)
+	foreign, _ := json.Marshal(map[string]any{"name": HostName, "path": exe, "allowed_origins": []string{"chrome-extension://evil/"}})
+	_ = os.WriteFile(p, foreign, 0o644)
 	for _, s := range Inspect(e, nil) {
 		if s.Target.Name == "chromium" && !strings.Contains(s.Problem, "admit") {
 			t.Fatalf("foreign origin not reported: %+v", s)
