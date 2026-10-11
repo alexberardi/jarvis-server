@@ -539,7 +539,7 @@ costs nothing, so the window is longer and answers may pause.
 
 | Signal | Where | How |
 |---|---|---|
-| Voice | jarvisd, beside whisper in the media proxy (`cc/followup_gate.go`, `stt/voicematch.go`) | The conversation's first transcription (speaker_audio = wake clip + command) is the reference; every later one's `file` is embedded (ERes2Net, the speaker-ID model; VAD speech frames only, ≥ 0.8 s) and its cosine to the reference kept for the next turn. Identifies nobody; no voiceprint read or written; in memory with the conversation. |
+| Voice | jarvisd, beside whisper in the media proxy (`cc/followup_gate.go`, `stt/voicematch.go`) | The conversation's first transcription (speaker_audio = wake clip + command) is the reference; every later one's `file` is embedded (ERes2Net, the speaker-ID model; VAD speech frames only, ≥ 0.8 s) and its cosine to the reference kept for the next turn. Identifies nobody; no voiceprint read or written; runs whether or not speaker recognition is on. In memory only: dropped at `/conversation/end`, or swept once idle 15 min if the end never comes. |
 | Level | node (`internal/agent/voice/level.go`) | Uploads are normalised, so the node reports `level_vs_wake_db`: the follow-up's speech level (75th-percentile RMS of chunks above the silence threshold) minus the woken command's. |
 | Semantics | jarvisd, the turn's own model call | The existing follow-up `<not_for_me/>` posture. No extra call: the acoustics reach the model as one `[voice check: …]` hint line when they doubt the follow-up. |
 
