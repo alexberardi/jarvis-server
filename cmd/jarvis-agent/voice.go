@@ -23,6 +23,7 @@ type voiceFlags struct {
 	models        string
 	threshold     float64
 	noChimes      bool
+	followUp      float64
 }
 
 func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
@@ -32,6 +33,8 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	fs.StringVar(&v.models, "wake-models", "", "openWakeWord models directory (default: <user cache>/jarvis-agent/openwakeword, downloaded on first use)")
 	fs.Float64Var(&v.threshold, "wake-threshold", 0.4, "wake word fires above this score (the Python node's wake_word_threshold)")
 	fs.BoolVar(&v.noChimes, "no-chimes", false, "don't play the wake and error chimes")
+	fs.Float64Var(&v.followUp, "follow-up", voice.DefaultFollowUp().ListenSecs,
+		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; the Python node's follow_up_listen_seconds)")
 	return v
 }
 
@@ -73,6 +76,7 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	cfg := voice.DefaultConfig()
 	cfg.WakeThreshold = f.threshold
 	cfg.Chimes = !f.noChimes
+	cfg.FollowUp.ListenSecs = f.followUp
 	return &voiceStack{flags: f, cfg: cfg, det: det, close: closeDet}, nil
 }
 
@@ -89,7 +93,7 @@ func (v *voiceStack) options(cc *node.CC, tools node.Toolset, log *slog.Logger, 
 func listen(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("listen", flag.ExitOnError)
 	cp := fs.String("creds", "", "credentials file")
-	once := fs.Bool("once", false, "exit after the first voice turn (exit status 1 unless a reply was spoken)")
+	once := fs.Bool("once", false, "exit after the first voice turn, follow-ups included (exit status 1 unless a reply was spoken)")
 	timeout := fs.Duration("timeout", 0, "give up after this long (0: run until interrupted)")
 	noTools := fs.Bool("no-tools", false, "offer voice turns no client tools")
 	tf := addToolFlags(fs)
@@ -157,23 +161,39 @@ func listen(ctx context.Context, args []string) error {
 }
 
 func printTurn(t voice.Turn) {
-	fmt.Printf("turn %s: wake %.3f, recorded %.2f s (silence threshold %.0f), heard %q",
-		t.ConversationID, t.WakeScore, t.RecordedSecs, t.Threshold, t.Transcript)
-	for _, r := range t.Tools {
+	fmt.Printf("turn %s: wake %.3f, recorded %.2f s (silence threshold %.0f), ",
+		t.ConversationID, t.WakeScore, t.RecordedSecs, t.Threshold)
+	printExchange(t.Exchange)
+	for i, f := range t.FollowUps {
+		fmt.Printf("  follow-up %d: recorded %.2f s, ", i+1, f.RecordedSecs)
+		printExchange(f)
+	}
+	if t.FollowUpEnd != "" {
+		fmt.Printf("  follow-up window: %s\n", t.FollowUpEnd)
+	}
+	fmt.Printf("  took %s\n", t.Took.Round(time.Millisecond))
+}
+
+func printExchange(e voice.Exchange) {
+	fmt.Printf("heard %q", e.Transcript)
+	for _, v := range e.Validations {
+		fmt.Printf(", asked %q and heard %q", v.Question, v.Answer)
+	}
+	for _, r := range e.Tools {
 		args, _ := json.Marshal(r.Args)
 		fmt.Printf(", ran %s%s", r.Name, args)
 		if !r.Success {
 			fmt.Printf(" (failed: %s)", r.Error)
 		}
 	}
-	fmt.Printf(" -> %s", t.Outcome)
-	if t.Message != "" {
-		fmt.Printf(", said %q (%.2f s of audio)", t.Message, t.ReplySecs)
+	fmt.Printf(" -> %s", e.Outcome)
+	if e.Message != "" {
+		fmt.Printf(", said %q (%.2f s of audio)", e.Message, e.ReplySecs)
 	}
-	if t.Err != nil {
-		fmt.Printf(", error: %v", t.Err)
+	if e.Err != nil {
+		fmt.Printf(", error: %v", e.Err)
 	}
-	fmt.Printf(", %s\n", t.Took.Round(time.Millisecond))
+	fmt.Println()
 }
 
 // voiceStatus is the `status` line: whether this build/OS can do voice and whether the

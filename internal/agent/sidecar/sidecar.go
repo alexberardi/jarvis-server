@@ -159,13 +159,36 @@ func (s *Sidecar) Call(_ context.Context, name string, args map[string]any, req 
 		r["user_id"] = *req.UserID
 	}
 	var res struct {
-		Output map[string]any `json:"output"`
+		Output  map[string]any `json:"output"`
+		Signals *struct {
+			WaitForInput       bool   `json:"wait_for_input"`
+			ClearHistory       bool   `json:"clear_history"`
+			OnResponseComplete string `json:"on_response_complete"`
+		} `json:"signals"`
 	}
 	if err := s.roundTrip("call", map[string]any{"command_name": name, "arguments": args, "request": r}, &res); err != nil {
 		return node.Fail("sidecar: %v", err), true
 	}
 	if res.Output == nil {
 		return node.Fail("sidecar returned no output"), true
+	}
+	if sg := res.Signals; sg != nil {
+		sig := node.Signals{WaitForInput: sg.WaitForInput, ClearHistory: sg.ClearHistory}
+		if token := sg.OnResponseComplete; token != "" {
+			sig.OnResponseComplete = func() error {
+				var done struct {
+					Ran bool `json:"ran"`
+				}
+				if err := s.roundTrip("complete", map[string]any{"token": token}, &done); err != nil {
+					return err
+				}
+				if !done.Ran {
+					return fmt.Errorf("sidecar no longer holds %s's deferred step", name)
+				}
+				return nil
+			}
+		}
+		res.Output[node.SignalsKey] = sig
 	}
 	return res.Output, true
 }

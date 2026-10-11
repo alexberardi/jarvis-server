@@ -32,9 +32,12 @@ type Server interface {
 	VoiceStream(ctx context.Context, req StreamRequest) (Reply, error)
 	// Speak renders text (the 202 "complete" path). The caller must Close the Audio.
 	Speak(ctx context.Context, text string) (*Audio, error)
-	// ContinueTools posts client tool results (row 18, the blocking /voice/command/continue)
-	// and returns what command-center wants next: more tool calls, or the final reply.
+	// ContinueTools posts client tool results or a validation answer (rows 18-19, the
+	// blocking /voice/command/continue) and returns what command-center wants next: more tool
+	// calls, another question, or the final reply.
 	ContinueTools(ctx context.Context, conversationID string, results []ToolResult) (*Control, error)
+	// VoiceCommand is the blocking POST /voice/command: a follow-up turn (row 16).
+	VoiceCommand(ctx context.Context, req StreamRequest) (*Control, error)
 }
 
 // ToolSchemas is what a node offers at /conversation/start: OpenAI-style client_tools and
@@ -72,13 +75,14 @@ type Transcript struct {
 	} `json:"speaker,omitempty"`
 }
 
-// StreamRequest is the /voice/command/stream body.
+// StreamRequest is the VoiceCommandRequest body of /voice/command/stream and /voice/command.
 type StreamRequest struct {
-	VoiceCommand   string         `json:"voice_command"`
-	ConversationID string         `json:"conversation_id"`
-	TurnSource     string         `json:"turn_source,omitempty"`
-	WakeConfidence *float64       `json:"wake_confidence,omitempty"`
-	Affect         map[string]any `json:"affect,omitempty"`
+	VoiceCommand      string         `json:"voice_command"`
+	ConversationID    string         `json:"conversation_id"`
+	TurnSource        string         `json:"turn_source,omitempty"` // "wake" or "follow_up"
+	WakeConfidence    *float64       `json:"wake_confidence,omitempty"`
+	Affect            map[string]any `json:"affect,omitempty"`
+	FollowUpIteration *int           `json:"follow_up_iteration,omitempty"` // 1-based
 }
 
 // Reply is either streamed speech (200) or a control response (202).
@@ -87,13 +91,18 @@ type Reply struct {
 	Control *Control
 }
 
-// Control is the 202 VoiceCommandResponse, the fields the MVS acts on.
+// Control is a VoiceCommandResponse (the 202 of the stream route, the 200 of the blocking
+// ones), the fields the node acts on.
 type Control struct {
-	StopReason       string     `json:"stop_reason"`
-	AssistantMessage *string    `json:"assistant_message"`
-	ToolCalls        []ToolCall `json:"tool_calls"`
-	Validation       any        `json:"validation_request"`
-	// Commands carries a processing error on /voice/command/continue (stop_reason null).
+	StopReason       string             `json:"stop_reason"`
+	AssistantMessage *string            `json:"assistant_message"`
+	ToolCalls        []ToolCall         `json:"tool_calls"`
+	Validation       *ValidationRequest `json:"validation_request"`
+	// EndOfExchange: the model marked the reply terminal (<exchange_complete/>), so no
+	// follow-up window (null on the wire means false).
+	EndOfExchange bool `json:"end_of_exchange"`
+	// Commands carries a processing error on the blocking routes (stop_reason null on
+	// /continue, "complete" with no message on /voice/command).
 	Commands []struct {
 		Errors *struct {
 			Message string `json:"message"`
@@ -228,11 +237,40 @@ func (s *HTTPServer) ContinueTools(ctx context.Context, id string, results []Too
 	}
 	if c.StopReason == "" {
 		// A processing error is a 200 with stop_reason null and the reason in commands.
-		msg := "no stop_reason"
-		if len(c.Commands) > 0 && c.Commands[0].Errors != nil && c.Commands[0].Errors.Message != "" {
-			msg = c.Commands[0].Errors.Message
+		msg := c.commandError()
+		if msg == "" {
+			msg = "no stop_reason"
 		}
 		return nil, fmt.Errorf("voice/command/continue: %s", msg)
+	}
+	return &c, nil
+}
+
+// commandError is the first error a response's commands carry ("" when none).
+func (c *Control) commandError() string {
+	for _, cmd := range c.Commands {
+		if cmd.Errors != nil && cmd.Errors.Message != "" {
+			return cmd.Errors.Message
+		}
+	}
+	return ""
+}
+
+// VoiceCommand is the blocking POST /voice/command, which the Python node uses for follow-up
+// turns (continue_conversation): the full reply as JSON, spoken afterwards through TTS.
+func (s *HTTPServer) VoiceCommand(ctx context.Context, req StreamRequest) (*Control, error) {
+	ctx, cancel := context.WithTimeout(ctx, continueTimeout)
+	defer cancel()
+	var c Control
+	if err := s.postJSON(ctx, "/api/v0/voice/command", req, &c); err != nil {
+		return nil, err
+	}
+	if msg := c.commandError(); msg != "" && c.StopReason != "error" {
+		// A processing error is a 200 "complete" with the reason in commands.
+		return nil, fmt.Errorf("voice/command: %s", msg)
+	}
+	if c.StopReason == "" {
+		return nil, errors.New("voice/command: no stop_reason")
 	}
 	return &c, nil
 }

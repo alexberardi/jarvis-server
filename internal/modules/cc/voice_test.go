@@ -544,6 +544,25 @@ func TestVoiceValidationRequired(t *testing.T) {
 	if r["stop_reason"] != "validation_required" || vr["question"] != "Which room?" || r["assistant_message"] != nil {
 		t.Fatalf("%v", r)
 	}
+
+	// The node's answer, as the Python node's send_validation_response and the Go agent send
+	// it: tool_call_id "validation-response" (the question had none) on the blocking continue.
+	// A native-tools model re-enters the loop with the answer and can now make the call.
+	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_l", "type": "function",
+		"function": map[string]any{"name": "light_on", "arguments": `{"room":"kitchen"}`}}}})
+	b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "v1",
+		"tool_results": []any{map[string]any{"tool_call_id": "validation-response", "output": map[string]any{
+			"answer": "The kitchen.", "parameter_name": "room", "question": "Which room?", "options": []any{"kitchen", "den"}}}}},
+		ve.node.h()).want(200).json()
+	calls, _ := b["tool_calls"].([]any)
+	if b["stop_reason"] != "tool_calls" || len(calls) != 1 {
+		t.Fatalf("continue after the answer %v", b)
+	}
+	msgs := messagesOf(ve.eng.last())
+	last := msgs[len(msgs)-1]
+	if last["role"] != "tool" || last["tool_call_id"] != "validation-response" || !strings.Contains(last["content"].(string), `"answer": "The kitchen."`) {
+		t.Fatalf("the model did not get the answer: %v", last)
+	}
 }
 
 func TestVoiceMediaTTS(t *testing.T) {

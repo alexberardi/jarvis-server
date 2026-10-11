@@ -1,6 +1,7 @@
 // Package voice is the agent's voice pipeline: microphone → 16 kHz decimation → openWakeWord →
 // RMS-endpointed command recording → one voice turn against jarvisd (go-pi-node.md §1.1 rows
-// 7-14) → reply playback → listening again.
+// 7-14) → reply playback → a follow-up window without the wake word (rows 16, 19) → listening
+// again.
 //
 // It knows nothing about desktops: a Go Pi node runs the same pipeline with HAT devices.
 // Behaviour that the Python node defines (thresholds, endpointing, what is uploaded) is ported
@@ -55,41 +56,59 @@ type Config struct {
 	Timezone      string        // node_context.timezone (IANA name)
 	Chimes        bool          // wake and error chimes
 	ToolTimeout   time.Duration // bound on one client tool call (25 s, the MQTT dispatcher's)
+	FollowUp      FollowUpConfig
 }
 
 // DefaultConfig is the Python node's behaviour (go-pi-node.md §1.1).
 func DefaultConfig() Config {
 	return Config{WakeThreshold: 0.4, Debounce: 8 * time.Second, Endpointing: DefaultEndpointing(),
 		JoinWarmup: 10 * time.Second, StreamIdle: 8 * time.Second, Timezone: LocalTimezone(), Chimes: true,
-		ToolTimeout: 25 * time.Second}
+		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp()}
 }
 
-// Outcome is how a turn ended.
+// Outcome is how one exchange (an utterance and its reply) ended.
 type Outcome string
 
 const (
-	OutcomeSpoken      Outcome = "spoken"      // a reply was played
-	OutcomeNotForMe    Outcome = "not_for_me"  // CC decided the speech wasn't addressed to Jarvis
-	OutcomeNonSpeech   Outcome = "non_speech"  // STT heard nothing that looks like words
-	OutcomeSilent      Outcome = "silent"      // "complete" with nothing to say
-	OutcomeUnsupported Outcome = "unsupported" // validation_required: a later phase
-	OutcomeError       Outcome = "error"
+	OutcomeSpoken    Outcome = "spoken"     // a reply was played
+	OutcomeNotForMe  Outcome = "not_for_me" // CC decided the speech wasn't addressed to Jarvis
+	OutcomeNonSpeech Outcome = "non_speech" // STT heard nothing that looks like words
+	OutcomeSilent    Outcome = "silent"     // "complete" with nothing to say
+	OutcomeNoise     Outcome = "noise"      // follow-up only: a lone word or a repeat, not sent
+	OutcomeEcho      Outcome = "self_echo"  // follow-up only: the mic heard our own reply
+	OutcomeError     Outcome = "error"
 )
 
-// Turn is what happened after one wake (for logs, `jarvis-agent listen --once` and tests).
+// Exchange is one utterance and what came of it: the command after the wake word, or one
+// answer in the follow-up window.
+type Exchange struct {
+	RecordedSecs float64
+	Transcript   string
+	Outcome      Outcome
+	Message      string       // the final thing said back
+	ReplySecs    float64      // reply audio played, validation questions included
+	Tools        []ToolRun    // client tools run, in order
+	Validations  []Validation // questions command-center asked, and the answers heard
+	Err          error
+}
+
+// Validation is one validation_required question and the spoken answer sent back.
+type Validation struct {
+	Question, Answer string
+}
+
+// Turn is what happened after one wake (for logs, `jarvis-agent listen --once` and tests):
+// the woken exchange, then any in the follow-up window. It is reported once the conversation
+// is over.
 type Turn struct {
 	ConversationID string
 	WakeScore      float32
 	Threshold      float64 // silence threshold used for endpointing
-	RecordedSecs   float64
 	HitMax         bool
-	Transcript     string
-	Outcome        Outcome
-	Message        string    // what was said back
-	ReplySecs      float64   // reply audio played
-	Tools          []ToolRun // client tools run for this turn, in order
+	Exchange                  // the command after the wake word
+	FollowUps      []Exchange // answers in the follow-up window, in order
+	FollowUpEnd    FollowUpEnd
 	Took           time.Duration
-	Err            error
 }
 
 // Pipeline is one microphone's always-on loop. Run it once.
@@ -107,6 +126,11 @@ type Pipeline struct {
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
+
+	// listening, when set, is told each time the pipeline starts listening without the wake
+	// word ("validation", "follow_up"), after it has dropped what was captured while it spoke.
+	// Tests use it to script the user's answer.
+	listening func(stage string)
 
 	dropped atomic.Int64
 	ends    sync.WaitGroup
@@ -274,7 +298,7 @@ type pendingStart struct {
 	err  error
 }
 
-// turn runs one voice turn (go-pi-node.md §1.1 rows 6-15) and reports it.
+// turn runs one voice turn (go-pi-node.md §1.1 rows 6-19) and reports it.
 func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float32, wakeClip []int16, preRMS []float64) {
 	start := p.Now()
 	t := Turn{ConversationID: p.NewID(), WakeScore: score}
@@ -287,8 +311,8 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		defer close(st.done)
 		st.err = p.Server.StartConversation(ctx, t.ConversationID, map[string]any{"timezone": p.Cfg.Timezone}, p.toolSchemas(ctx))
 	}()
-	// Row 14: always end it, once both the turn and start are over, without holding up
-	// listening.
+	// Row 14: always end it, once the turn (follow-ups included) and start are both over,
+	// without holding up listening.
 	turnDone := make(chan struct{})
 	defer close(turnDone)
 	p.ends.Add(1)
@@ -301,6 +325,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		}
 	}()
 
+	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: wakeClip}
 	defer func() {
 		t.Took = p.Now().Sub(start)
 		lvl := slog.LevelInfo
@@ -309,17 +334,22 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		}
 		log.Log(ctx, lvl, "voice turn", "outcome", t.Outcome, "transcript", t.Transcript, "reply", t.Message,
 			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
+			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
+		// A command's deferred step (a media command starting playback) runs once everything
+		// has been said, as the Python node runs on_response_complete after its follow-up
+		// loop. Off the pipeline goroutine: listening must not wait for it.
+		for _, f := range s.onComplete {
+			go func() {
+				if err := f(); err != nil {
+					log.Warn("on_response_complete failed", "err", err)
+				}
+			}()
+		}
 		if p.OnTurn != nil {
 			p.OnTurn(t)
 		}
 	}()
-	fail := func(err error) {
-		t.Outcome, t.Err = OutcomeError, err
-		if ctx.Err() == nil {
-			p.chime(ctx, errorChime)
-		}
-	}
 
 	// Row 6: acknowledge, then record from after the chime (history_secs=0).
 	p.chime(ctx, wakeChime)
@@ -327,131 +357,129 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 
 	// Row 8: record with RMS endpointing.
 	t.Threshold = p.Cfg.Endpointing.Threshold(preRMS)
-	rec := p.Cfg.Endpointing.newRecorder(t.Threshold)
-	for {
-		c, err := recv(ctx, chunks, time.Second)
-		if errors.Is(err, errChunkTimeout) {
-			log.Warn("recording stopped: no audio for 1 s")
-			break
-		}
-		if err != nil {
-			t.Outcome, t.Err = OutcomeError, err
-			return
-		}
-		if rec.add(c) {
-			break
-		}
+	s.threshold = t.Threshold
+	pcm, hitMax, err := p.record(ctx, s)
+	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
+	if err != nil {
+		t.Outcome, t.Err = OutcomeError, err
+		return
 	}
-	t.RecordedSecs, t.HitMax = float64(len(rec.pcm))/CaptureRate, rec.hitMax
-	if len(rec.pcm) == 0 {
-		fail(errors.New("nothing was recorded"))
+	if len(pcm) == 0 {
+		p.fail(ctx, &t.Exchange, errors.New("nothing was recorded"))
 		return
 	}
 
-	// Row 9: STT. The command is normalised; speaker_audio is the wake clip + command.
-	cmd := Normalize(rec.pcm)
-	tr, err := p.Server.Transcribe(ctx, wavBytes(cmd), wavBytes(slices.Concat(wakeClip, cmd)), t.ConversationID)
-	if err != nil {
-		fail(fmt.Errorf("transcribe: %w", err))
+	end, ok := p.wakeExchange(ctx, s, &t.Exchange, st, score, pcm)
+	if !ok {
 		return
 	}
-	t.Transcript = strings.TrimSpace(tr.Text)
-	// Row 10.
+	// Rows 16 and 19: keep listening without the wake word, as the Python node does after
+	// every reply the model didn't mark terminal.
+	t.FollowUpEnd = end
+	if end == "" {
+		p.followUp(ctx, s, &t)
+	}
+}
+
+// wakeExchange is the woken command: STT, then the streamed turn and whatever it asks for.
+// It returns why the follow-up window must stay shut ("" opens it), and false when the turn
+// went wrong (no follow-up then either).
+func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, st *pendingStart, score float32, pcm []int16) (FollowUpEnd, bool) {
+	log := s.log
+	// Row 9: STT. The command is normalised; speaker_audio is the wake clip + command.
+	tr, ok := p.transcribe(ctx, s, ex, pcm)
+	if !ok {
+		return "", false
+	}
+	// Row 10. The Python node still opens the follow-up window after a wake that heard
+	// nothing (the user may just have paused after "hey Jarvis").
 	if IsNonSpeech(tr.Text) {
-		t.Outcome = OutcomeNonSpeech
-		return
+		ex.Outcome = OutcomeNonSpeech
+		return "", true
 	}
 
 	// Row 11: join the warmup (bounded), then the streaming turn.
 	select {
 	case <-st.done:
 		if st.err != nil {
-			fail(fmt.Errorf("conversation/start: %w", st.err))
-			return
+			p.fail(ctx, ex, fmt.Errorf("conversation/start: %w", st.err))
+			return "", false
 		}
 	case <-time.After(p.Cfg.JoinWarmup):
 		log.Warn("conversation/start still running; sending the command anyway", "waited", p.Cfg.JoinWarmup)
 	case <-ctx.Done():
-		t.Outcome, t.Err = OutcomeError, ctx.Err()
-		return
+		ex.Outcome, ex.Err = OutcomeError, ctx.Err()
+		return "", false
 	}
 	conf := float64(score)
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	reply, err := p.Server.VoiceStream(sctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: t.ConversationID,
+	reply, err := p.Server.VoiceStream(sctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id,
 		TurnSource: "wake", WakeConfidence: &conf, Affect: tr.Affect})
 	if err != nil {
-		fail(fmt.Errorf("voice/command/stream: %w", err))
-		return
+		p.fail(ctx, ex, fmt.Errorf("voice/command/stream: %w", err))
+		return "", false
 	}
 
-	// Row 12: streamed speech.
+	// Row 12: streamed speech. (A 200 carries no end_of_exchange, for Python either: the
+	// window opens.)
 	if reply.Audio != nil {
-		t.Message = reply.Audio.Message
-		t.ReplySecs, err = p.playAudio(sctx, cancel, reply.Audio)
+		ex.Message = reply.Audio.Message
+		ex.ReplySecs, err = p.playAudio(sctx, cancel, reply.Audio)
 		if err != nil {
-			fail(err)
-			return
+			p.fail(ctx, ex, err)
+			return "", false
 		}
-		t.Outcome = OutcomeSpoken
-		return
+		ex.Outcome = OutcomeSpoken
+		return "", true
 	}
+	// Rows 13, 18, 19: a control response.
+	end := p.resolve(ctx, s, ex, reply.Control)
+	return end, ex.Outcome != OutcomeError
+}
 
-	// Row 13: a control response. Row 18: tool_calls are run here and continued until the
-	// reply is something to say.
-	c := reply.Control
-	if c.StopReason == "tool_calls" {
-		var userID *int64
-		if tr.Speaker != nil {
-			userID = tr.Speaker.UserID
-		}
-		last, spoken, err := p.toolLoop(ctx, log, &t, c, userID)
-		switch {
-		case err != nil:
-			fail(err)
-			return
-		case spoken != "":
-			t.Message = spoken
-			if t.ReplySecs, err = p.speak(ctx, spoken); err != nil {
-				fail(err)
-				return
-			}
-			t.Outcome = OutcomeSpoken
-			return
-		}
-		c = last
+// transcribe sends one recording to STT: the normalised command, and speaker_audio = the wake
+// clip + the command (the same wake clip for every follow-up: they have no wake word of their
+// own). Failures are reported on ex with the error chime.
+func (p *Pipeline) transcribe(ctx context.Context, s *session, ex *Exchange, pcm []int16) (Transcript, bool) {
+	cmd := Normalize(pcm)
+	tr, err := p.Server.Transcribe(ctx, wavBytes(cmd), wavBytes(slices.Concat(s.wakeClip, cmd)), s.id)
+	if err != nil {
+		p.fail(ctx, ex, fmt.Errorf("transcribe: %w", err))
+		return Transcript{}, false
 	}
-	msg := ""
-	if c.AssistantMessage != nil {
-		msg = strings.TrimSpace(*c.AssistantMessage)
+	ex.Transcript = strings.TrimSpace(tr.Text)
+	if tr.Speaker != nil && tr.Speaker.UserID != nil {
+		s.userID = tr.Speaker.UserID
 	}
-	switch c.StopReason {
-	case "not_for_me":
-		t.Outcome = OutcomeNotForMe
-	case "complete", "":
-		if msg == "" {
-			// The Python node says "Task completed." here (go-pi-node.md §1.4); say nothing.
-			t.Outcome = OutcomeSilent
-			return
+	return tr, true
+}
+
+// record is listen(): RMS endpointing from the next chunk on. A microphone that goes quiet
+// for 1 s ends the recording early.
+func (p *Pipeline) record(ctx context.Context, s *session) (pcm []int16, hitMax bool, err error) {
+	rec := p.Cfg.Endpointing.newRecorder(s.threshold)
+	for {
+		c, err := recv(ctx, s.chunks, time.Second)
+		if errors.Is(err, errChunkTimeout) {
+			s.log.Warn("recording stopped: no audio for 1 s")
+			break
 		}
-		t.Message = msg
-		if t.ReplySecs, err = p.speak(ctx, msg); err != nil {
-			fail(err)
-			return
+		if err != nil {
+			return rec.pcm, rec.hitMax, err
 		}
-		t.Outcome = OutcomeSpoken
-	case "validation_required":
-		log.Warn("reply needs a follow-up question, which this node doesn't do yet", "stop_reason", c.StopReason)
-		t.Outcome, t.Message = OutcomeUnsupported, msg
+		if rec.add(c) {
+			break
+		}
+	}
+	return rec.pcm, rec.hitMax, nil
+}
+
+// fail ends an exchange in error, with the error chime unless the pipeline is stopping.
+func (p *Pipeline) fail(ctx context.Context, ex *Exchange, err error) {
+	ex.Outcome, ex.Err = OutcomeError, err
+	if ctx.Err() == nil {
 		p.chime(ctx, errorChime)
-	default: // "error"
-		t.Outcome, t.Err = OutcomeError, fmt.Errorf("command-center stopped with %q", c.StopReason)
-		if msg != "" {
-			t.Message = msg
-			t.ReplySecs, _ = p.speak(ctx, msg)
-		} else {
-			p.chime(ctx, errorChime)
-		}
 	}
 }
 

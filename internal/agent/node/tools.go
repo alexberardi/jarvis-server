@@ -157,3 +157,29 @@ func DecodeArgs(v any) map[string]any {
 func Fail(format string, a ...any) map[string]any {
 	return map[string]any{"success": false, "error": fmt.Sprintf(format, a...)}
 }
+
+// SignalsKey is where a Toolset puts node-local Signals in a call's output. They steer the
+// node itself and are never sent to command-center: every consumer of a Call output (the
+// MQTT dispatcher, the voice pipeline) takes them out with TakeSignals before posting it.
+const SignalsKey = "_jarvis_node_signals"
+
+// Signals are the jarvis-command-sdk CommandResponse fields only the node acts on
+// (N:utils/command_execution_service.py ToolExecutionResult). Go's built-in tools set none.
+type Signals struct {
+	// WaitForInput: the command expects the user to say more. A voice turn sends the results,
+	// then speaks what comes back without running further tool calls, preferring the
+	// command's own "message" (SDK default: true).
+	WaitForInput bool
+	// ClearHistory: the exchange is over; a follow-up window closes after this reply.
+	ClearHistory bool
+	// OnResponseComplete is the command's deferred step (a media command starting playback),
+	// to run once the spoken reply and the follow-up window are over.
+	OnResponseComplete func() error
+}
+
+// TakeSignals removes the Signals from out (if any) and returns them.
+func TakeSignals(out map[string]any) Signals {
+	s, _ := out[SignalsKey].(Signals)
+	delete(out, SignalsKey)
+	return s
+}
