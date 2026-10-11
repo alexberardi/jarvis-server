@@ -62,6 +62,8 @@ type STT interface {
 	// Samples and DeleteProfile back the mobile voice-profile routes (06 V1/V6).
 	Samples(ctx context.Context, householdID string, userID int64) ([]stt.Sample, error)
 	DeleteProfile(ctx context.Context, householdID string, userID int64) error
+	// VoiceOf embeds a clip's speech for the follow-up gate's same-voice comparison.
+	VoiceOf(ctx context.Context, wav []byte) (stt.Voice, error)
 }
 
 // TTS is the tts module in process (TTSFrom adapts *tts.Module).

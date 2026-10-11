@@ -245,6 +245,22 @@ type fakeSTT struct {
 	enrollErr   error
 	enrolled    []string // "household:user"
 	wakeText    string   // what the wake-clip pass hears ("" = "jarvis")
+	// voices are what VoiceOf returns, in order (the follow-up gate's voice check); once they
+	// run out it returns an unusable Voice. voiceClips records the clips it was given.
+	voices     []stt.Voice
+	voiceClips [][]byte
+}
+
+func (f *fakeSTT) VoiceOf(_ context.Context, wav []byte) (stt.Voice, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.voiceClips = append(f.voiceClips, wav)
+	if len(f.voices) == 0 {
+		return stt.Voice{}, nil
+	}
+	v := f.voices[0]
+	f.voices = f.voices[1:]
+	return v, nil
 }
 
 func (f *fakeSTT) Transcribe(_ context.Context, wav []byte, opts stt.TranscribeOptions) (stt.Result, error) {

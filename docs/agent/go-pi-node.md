@@ -83,7 +83,7 @@ Tags:
 | 13 | **202**: JSON. `not_for_me` → stay silent. `complete` → speak `assistant_message` via `POST /media/tts/speak/stream` (over 200 chars) or `/media/tts/speak` (WAV). `tool_calls` / `validation_required` → later. | `N:utils/command_execution_service.py:733-975,1486-1525` | `S:voice_routes.go:150-158`, `S:media.go:53-139` | MVS (complete, not_for_me) |
 | 14 | `POST /api/v0/conversation/end {conversation_id}`. Python skips this after barge-in and boot warmups; Go should always send it. | `N:core/follow_up_loop.py:424-428` | `S:warmup.go:310-323` | MVS |
 | 15 | Error phrases ("I can't reach my server right now." and so on), with a fallback chime | `N:core/wake_transcription.py:185-196` | – | MVS (chime only) |
-| 16 | Follow-up window after **every** reply not marked terminal (`end_of_exchange`) or `not_for_me`: 4 s, −2 s per iteration (floor 3 s), ≤5 iterations, quiet-wait, onset detection, noise and self-echo filters, blocking `POST /voice/command` with `turn_source:"follow_up"`, `follow_up_iteration` | `N:core/follow_up_loop.py:97-428`, `N:scripts/speech_to_text.py:455-691`, `N:core/conversation_filters.py` | `S:voice_routes.go:171-220` | **done for the desktop agent (§3.9)** |
+| 16 | Follow-up window after **every** reply not marked terminal (`end_of_exchange`) or `not_for_me`: 4 s, −2 s per iteration (floor 3 s), ≤5 iterations, quiet-wait, onset detection, noise and self-echo filters, blocking `POST /voice/command` with `turn_source:"follow_up"`, `follow_up_iteration` | `N:core/follow_up_loop.py:97-428`, `N:scripts/speech_to_text.py:455-691`, `N:core/conversation_filters.py` | `S:voice_routes.go:171-220` | **done for the desktop agent (§3.9); widened by the follow-up gate (§3.10)** |
 | 17 | Barge-in: local only. oww score > 0.04 plus an RMS gate, 2 consecutive chunks → cancel playback and close the stream. Nothing is sent to the server. | `N:core/barge_in.py:100-359` | – | later |
 | 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | **done for the desktop agent (§3.8)**, blocking continue only |
 | 19 | Validation: speak the question (+ "Your options are: …"), re-listen with `listen()`, `POST /voice/command/continue` with `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` | `N:core/wake_transcription.py:204-231`, `N:clients/jarvis_command_center_client.py:362-412` | `S:engine.go:339-366`, `S:continue.go` | **done for the desktop agent (§3.9)** |
@@ -527,6 +527,116 @@ handles) or guesses. Covered by the pipeline tests and the server test above. Al
 separate mechanism: it needs the sidecar to keep `ref_id → command` and call commands'
 callbacks), a listening cue on desktops, barge-in during follow-up replies, the not_for_me
 wake cool-down, an `end_of_exchange` header on the stream route (server).
+
+### 3.10 The follow-up gate: "is this speech for me?" (2026-10-10)
+
+With a 4 s window, longer follow-ups were cut off and a longer window meant the room had to stay
+silent: anything said in it (another person, the TV) went to the model, and a misfire ended the
+window. Now command-center decides, cheaply, whether a follow-up is for Jarvis; a rejected one
+costs nothing, so the window is longer and answers may pause.
+
+**What runs where.**
+
+| Signal | Where | How |
+|---|---|---|
+| Voice | jarvisd, beside whisper in the media proxy (`cc/followup_gate.go`, `stt/voicematch.go`) | The conversation's first transcription (speaker_audio = wake clip + command) is the reference; every later one's `file` is embedded (ERes2Net, the speaker-ID model; VAD speech frames only, ≥ 0.8 s) and its cosine to the reference kept for the next turn. Identifies nobody; no voiceprint read or written; in memory with the conversation. |
+| Level | node (`internal/agent/voice/level.go`) | Uploads are normalised, so the node reports `level_vs_wake_db`: the follow-up's speech level (75th-percentile RMS of chunks above the silence threshold) minus the woken command's. |
+| Semantics | jarvisd, the turn's own model call | The existing follow-up `<not_for_me/>` posture. No extra call: the acoustics reach the model as one `[voice check: …]` hint line when they doubt the follow-up. |
+
+**Combining (conservative).** Different voice (< 0.25) **and** quiet (≤ −10 dB) → dropped before
+the model. Different voice alone, or quiet with a voice that isn't the wake's → a hint, and the
+model's `<not_for_me/>` is not double-checked (the /think re-check costs a long pass and exists to
+protect genuine follow-ups). Same voice, or no evidence → unchanged. A `not_for_me` follow-up (with
+`voice.follow_up_gate` on) is **not committed** to history, not counted as an answered round, not
+transcribed, and the response carries `keep_listening: true` until `voice.follow_up_max_ignored`
+(3) rejections in a row. The node then listens again without speaking, flushing or using up an
+iteration (`MaxIgnored` 5 bounds it locally). Older nodes ignore `keep_listening` and close the
+window as before; older servers never send it.
+
+**Node defaults now** (Python's in brackets): window 8 s, then 6, then 5 (4, 3); an answer ends
+after 1.2 s of silence (0.5); answers may run 10 s (7). The wake turn's endpointing is unchanged.
+
+**Evaluation** (`internal/agent/voice/gate_eval_test.go` → `internal/modules/cc/followup_gate_eval_test.go`;
+both env-gated, commands in the files). Kokoro voices and LibriSpeech speakers in simulated rooms
+(near ±3 dB, turned away −6 dB + reverb, another person near/mid/far, a TV: band-limited,
+compressed, music bed, −10 dB), plus real node-mic takes of a household member (`spk/calib`), run
+through the pipeline's own follow-up listening, then `stt.EmbedVoice` as jarvisd computes it.
+
+*Endpointing.* Pauses inside 192 real LibriSpeech utterances (575 gaps): p50 0.16 s, p90 0.56,
+p99 0.96, max 1.36. Utterances whose longest pause would end the recording: **0.5 s: 71 (37%)**,
+0.8 s: 17, 1.0 s: 8, **1.2 s: 3 (1.6%)**. Five Kokoro answers with 0.5–1.1 s pauses: 5/5 cut at
+0.5 s, 0/5 at 1.2 s. (The wake's 0.8 s would cut 9% of these read utterances; wake commands are
+short, so it stays, see decisions.)
+
+*Per signal* (counts of follow-ups flagged):
+
+| Set | n | voice < 0.25 (different) | voice ≥ 0.40 (same) | level ≤ −10 dB | both (dropped) |
+|---|---|---|---|---|---|
+| same speaker, near (LibriSpeech) | 72 | **0** | 72 | 0 | **0** |
+| same speaker, turned away | 72 | **0** | 71 | 0 | **0** |
+| household member, real node mic, near / far | 8 / 3 | **0** / **0** | 8 / 2 | 0 / 0 | 0 / 0 |
+| Kokoro: genuine, turned away, paused answers | 23 | 0 | 23 | 0 | 0 |
+| Kokoro: same voice, unrelated speech | 5 | 0 | 5 | 0 | 0 |
+| other person near / mid / far (LibriSpeech) | 72 each | 64 / 64 / 71 | 1 / 1 / 0 | 0 / 0 / 22 | 0 / 0 / 22 |
+| TV (LibriSpeech voices) | 72 | 69 | 0 | 16 | 16 |
+| real member vs LibriSpeech / Kokoro impostors | 10 / 10 | 10 / 10 | 0 | 0 | 0 |
+| Kokoro other person / TV | 6 / 6 | 6 / 6 | 0 | 1 / 2 | 1 / 2 |
+
+Similarity ranges: same speaker 0.35–0.90 (real far takes 0.35–0.50), other voices −0.18–0.48
+(p90 ≈ 0.25). Level is weak on its own: the real far takes were −4 to +4 dB of the near wake, and
+simulated other people overlap the same speaker; it only ever acts together with the voice.
+ERes2Net on one answer: p50 146 ms, max 272 ms (2 threads), in parallel with whisper.
+
+*Combined, against the real model* (Qwen3.5-9B Q4_K_M, jarvisd's pinned template, CPU llama-server;
+the full turn pipeline with a node's tools; 35 Kokoro follow-ups, each run with the gate off = today
+and on with its measured voice/level):
+
+| Category | n | want | rejected today | rejected with the gate (of which before the model) |
+|---|---|---|---|---|
+| genuine, same voice | 10 | accept | 0 | **0** |
+| genuine, turned away | 3 | accept | 0 | **0** |
+| genuine, long with pauses | 10 | accept | 0 | **0** |
+| another person | 6 | reject | 3 | **6** (0) |
+| TV | 6 | reject | 3 | **6** (3) |
+| same voice, not for Jarvis | 5 | reject | 1 | 1 |
+
+False rejects stayed at zero; room speech went from 6/12 to 12/12 rejected. The miss is the
+same person talking to someone else ("Honey, can you grab my keys", "Sorry, I'm on the phone"):
+only the model can tell, and it answered 4/5 with or without the gate. Latency: genuine follow-ups
+make the same model calls as before and get no hint (no prompt change); the voice check runs beside
+whisper. A rejection took one model call (≈3.7 s on this CPU) instead of today's two (≈56 s on
+CPU: the `<not_for_me/>` double-check thinks); an acoustic drop takes none.
+
+**Verified live** (this box, the agent through PipeWire null sinks, against the dev jarvisd,
+which runs *main*, i.e. without the server half): an answer started 5–6.5 s into the window was
+heard (the 4 s window would have closed); a 6.7 s answer with 1.0 s and 0.9 s pauses arrived whole
+("Can you also tell me what day of the week it will be next Friday?"); `level_vs_wake_db` was
+sent (−1.3/−1.4 dB for near/mid voices); an old server's `not_for_me` (TV, another person) still
+closed the window. **Not verified live:** the server half (voice comparison inside jarvisd,
+`keep_listening`, the acoustic drop): the dev jarvisd needs a restart on this branch; a real room
+with real people and a real TV.
+
+**Python node (jarvis-node-setup): plan, not done.** It already benefits from the server half: a
+rejected follow-up no longer enters history and skips the double-check when a level or voice
+doubts it. To get the rest, one PR:
+1. `core/follow_up_loop.py:164`: pass `conversation_id=conversation_id` to
+   `transcribe_with_speaker` (the client takes it; without it there is no voice comparison: §1.4).
+2. Level: compute the speech level (75th-percentile 80 ms RMS of chunks ≥ the silence threshold,
+   dBFS) on the *raw* frames before `_normalize_frames_to_target_rms`: in `listen()` for the wake
+   command (`scripts/speech_to_text.py`) and in `listen_for_follow_up`; return it beside the path;
+   send `level_vs_wake_db` (follow − wake, 0.1 dB) from `continue_conversation`/
+   `process_voice_command` follow-up calls (`clients/jarvis_command_center_client.py`).
+3. `keep_listening`: add it to the response model
+   (`clients/responses/jarvis_command_center/tool_calling_response.py`) and to
+   `_not_for_me_result` (`utils/command_execution_service.py:733`, skip the LED flash when set); in
+   both `not_for_me` branches of `follow_up_loop` (`:353`, `:381`), when `keep_listening` is set:
+   don't break, don't arm the not_for_me cool-down, don't increment `iteration`, keep
+   `tts_end_ts`/history so nothing is replayed; cap at 5 per window.
+4. Defaults (`Config` and `scripts/speech_to_text.py:637-642`, the settings snapshot):
+   `follow_up_listen_seconds` 8, `follow_up_min_timeout_secs` 5, `follow_up_silence_duration`
+   1.2, follow-up max record 10 s.
+5. Tests in `tests/test_follow_up_loop.py`: keep_listening keeps the window open without speaking
+   or counting an iteration; a plain not_for_me still closes it; the level is sent.
 
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 

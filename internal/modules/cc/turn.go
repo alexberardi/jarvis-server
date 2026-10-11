@@ -34,6 +34,9 @@ type turnInput struct {
 	FollowUpIteration *int
 	SelfPlayback      *bool
 	SelfPlaybackKind  string
+	// LevelVsWake is the node's measure of a follow-up's speech level against the wake
+	// request's, in dB (level_vs_wake_db; the follow-up gate's level signal).
+	LevelVsWake *float64
 	// Images are a mobile chat turn's attached images (chat_images.go).
 	Images []chatImage
 }
@@ -99,6 +102,20 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	}
 	m.resolveFollowupDoubt(ctx, conv, in, &st)
 
+	// The follow-up gate (followup_gate.go): a different voice from across the room is
+	// dropped here; weaker evidence becomes a hint for the model.
+	gate := in.Source == "follow_up" && m.followUpGateOn(ctx, conv.householdID, conv.nodeID)
+	var ev gateEvidence
+	if gate {
+		ev = m.followUpEvidence(ctx, conv, in)
+		if ev.reject() {
+			keep := m.ignoreFollowUp(ctx, conv)
+			m.deps.Log.Info("cc: follow-up gate rejected", append([]any{"conversation_id", conv.id, "node_id", conv.nodeID,
+				"stage", "acoustic", "keep_listening", keep, "transcript", in.VoiceCommand}, ev.fields()...)...)
+			return turnOutcome{res: engineResult{Stop: stopNotForMe, KeepListening: keep}, conv: conv}, nil
+		}
+	}
+
 	msgs := stripTransient(cloneMsgs(conv.messages))
 	maxTurns := int(m.settings.Int(ctx, settingMaxTurns, settings.Scope{HouseholdID: conv.householdID}))
 	msgs = trimHistory(msgs, maxTurns)
@@ -122,6 +139,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		turnHint(in, st, conv.memberNames),
 		profileMatchHint(in.VoiceCommand, speakerBlock),
 		m.agentContextHint(ctx, conv, in.VoiceCommand),
+		ev.hint(),
 	}
 	if in.photoOnly() {
 		hints = append(hints, prompts.PhotoOnlyHint)
@@ -144,7 +162,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	endLoop := tr.measure("tool_execution_loop", "cc", nil)
 	res, out := m.runEngine(ctx, engineInput{
 		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, dateKeys: keys,
-		doubleCheck: doubleCheckSentinel(in, st), turn: m.toolTurn(conv, in.VoiceCommand),
+		doubleCheck: doubleCheckSentinel(in, st) && !ev.doubted(), turn: m.toolTurn(conv, in.VoiceCommand),
 		noForce: in.photoOnly(),
 	})
 	if res.Stop == stopError {
@@ -165,6 +183,17 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 			"speaker_user_id", conv.speakerID, "prompt_provider", conv.provider.Name(), "turn_source", in.Source,
 			"transcript", in.VoiceCommand)
 		res = engineResult{Stop: stopNotForMe}
+	}
+	if gate && res.Stop == stopNotForMe {
+		// A rejected follow-up leaves no trace: not committed, not counted, not transcribed.
+		res.KeepListening = m.ignoreFollowUp(ctx, conv)
+		m.deps.Log.Info("cc: follow-up gate rejected", append([]any{"conversation_id", conv.id, "node_id", conv.nodeID,
+			"stage", "model", "keep_listening", res.KeepListening, "transcript", in.VoiceCommand}, ev.fields()...)...)
+		return turnOutcome{res: res, conv: conv}, nil
+	}
+	if gate {
+		conv.ignoredFollowUps = 0
+		m.deps.Log.Info("cc: follow-up gate passed", append([]any{"conversation_id", conv.id, "stop", res.Stop}, ev.fields()...)...)
 	}
 	if res.Stop != stopError {
 		conv.commit(out)

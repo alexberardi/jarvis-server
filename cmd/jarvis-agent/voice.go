@@ -24,6 +24,7 @@ type voiceFlags struct {
 	threshold     float64
 	noChimes      bool
 	followUp      float64
+	followSilence float64
 }
 
 func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
@@ -35,6 +36,8 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	fs.BoolVar(&v.noChimes, "no-chimes", false, "don't play the wake and error chimes")
 	fs.Float64Var(&v.followUp, "follow-up", voice.DefaultFollowUp().ListenSecs,
 		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; the Python node's follow_up_listen_seconds)")
+	fs.Float64Var(&v.followSilence, "follow-up-silence", voice.DefaultFollowUp().SilenceSecs,
+		"seconds of silence that end a follow-up answer (the Python node's follow_up_silence_duration is 0.5)")
 	return v
 }
 
@@ -77,6 +80,9 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	cfg.WakeThreshold = f.threshold
 	cfg.Chimes = !f.noChimes
 	cfg.FollowUp.ListenSecs = f.followUp
+	if f.followSilence > 0 {
+		cfg.FollowUp.SilenceSecs = f.followSilence
+	}
 	return &voiceStack{flags: f, cfg: cfg, det: det, close: closeDet}, nil
 }
 

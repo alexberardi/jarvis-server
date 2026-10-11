@@ -124,8 +124,10 @@ type conversation struct {
 	recognitionOff bool
 
 	answeredRounds int
-	issued         []issuedCall
-	dateKeys       []string // the last turn's extracted date keys (native continue reuses them)
+	// ignoredFollowUps counts follow-ups the gate rejected since the last answered one.
+	ignoredFollowUps int
+	issued           []issuedCall
+	dateKeys         []string // the last turn's extracted date keys (native continue reuses them)
 
 	pendingTranscript *pendingTranscript
 

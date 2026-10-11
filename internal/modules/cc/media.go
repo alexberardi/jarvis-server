@@ -215,7 +215,16 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 	tr := newReqTrace()
 	// The speaker pass runs inside Transcribe, beside whisper (legacy: one whisper-api call).
 	endSTT := tr.measure("stt_transcribe", "whisper", map[string]any{"audio_bytes": len(file), "speaker_audio_bytes": len(speakerAudio)})
+	// The follow-up gate's voice comparison runs beside whisper (followup_gate.go) and is
+	// recorded before the node can send the turn it belongs to.
+	var voiceDone <-chan struct{}
+	if convID != "" && m.followUpGateOn(ctx, n.HouseholdID, n.ID) {
+		voiceDone = m.voiceCheck(context.WithoutCancel(ctx), convID, file, speakerAudio)
+	}
 	res, err := m.STT.Transcribe(ctx, file, stt.TranscribeOptions{SpeakerAudio: speakerAudio, Speaker: scope})
+	if voiceDone != nil {
+		<-voiceDone
+	}
 	endSTT(err)
 	trace := Trace{ConversationID: convID, RequestType: "stt", Source: "node", NodeID: n.ID, HouseholdID: n.HouseholdID,
 		UserCommand: res.Text, TotalDurationMS: float64(m.now().Sub(start).Microseconds()) / 1000, Spans: tr.spans()}
