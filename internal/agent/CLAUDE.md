@@ -189,7 +189,8 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     then 5 (Python: 4 then 3), ≤ 5, answers end after 1.2 s of silence (Python 0.5) and may run
     10 s; sent as blocking `/voice/command` follow_up turns of the same conversation with
     `level_vs_wake_db`. A `not_for_me` with `keep_listening` is ignored silently and the window
-    listens again (same iteration, no flush: nothing was said), at most `MaxIgnored`; without
+    listens again (same iteration, no flush: nothing was said), at most `MaxIgnored`, for only
+    what is left of the window (≥ `IgnoredGraceSecs`, 2 s): room speech never restarts it; without
     `keep_listening` (an older server) it closes the window as before. `validation_required` is
     asked aloud and answered as `validation-response` on the blocking continue. Before
     wake-free listening *after we spoke* the queue is flushed (our own reply) and a quiet-wait

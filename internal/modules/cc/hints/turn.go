@@ -189,11 +189,23 @@ func followUpHint(t Turn, media bool) string {
 	}
 	return "[turn context: follow-up window, iteration " + it + " — there " +
 		"was no wake word; the mic stayed open after your last reply to " +
-		"catch a continuation. If this clearly continues your exchange, " +
-		"answer it — or run the tool it calls for; don't reply with bare " +
-		"prose when the request needs a tool. If the room's conversation has " +
-		"moved on without you, emit <not_for_me/> — your exchange is over, " +
-		"and going quiet is the designed ending, not a failure." +
+		"catch a continuation, so it hears the whole room, not only the user. " +
+		"If this clearly continues your exchange — answers a question you " +
+		"asked, asks about or changes what you just said or did, or asks for " +
+		"something only you can do — answer it, or run the tool it calls for; " +
+		"don't reply with bare prose when the request needs a tool. Short " +
+		"replies count: a word or two answering your question (\"Both.\", " +
+		"\"Kitchen.\"), \"thanks\", a question about what you just said that " +
+		"names its subject with a pronoun (\"When was she born?\"). Speech to " +
+		"someone else is not for you, even in the user's own voice and even on " +
+		"your topic: a name or pet name (\"babe\", \"honey\", \"kids\"), a " +
+		"question about the listener's own day, plans, wishes or whereabouts " +
+		"(\"are you coming?\", \"do you want anything?\"), a request only a " +
+		"person in the room could carry out (grab, pass, hand, stir, pick up), " +
+		"one side of a phone call, a remark to the room (\"told you\", \"ugh\"). " +
+		"For those, or when the room's conversation has moved on without you, " +
+		"emit <not_for_me/> — your exchange is over, and going quiet is the " +
+		"designed ending, not a failure." +
 		addressing + escalation + "]"
 }
 

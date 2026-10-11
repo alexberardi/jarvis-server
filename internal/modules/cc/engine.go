@@ -79,7 +79,9 @@ type engineInput struct {
 	utterance   string   // user_utterance (guards, refinement)
 	dateKeys    []string // the turn's extracted date keys
 	doubleCheck bool     // sentinel_double_check
-	turn        servertools.Turn
+	// doubleCheckMsg is the double-check pass's message ("": doubleCheckMessage, the wake's).
+	doubleCheckMsg string
+	turn           servertools.Turn
 	// noForce turns off the must-call retry for this turn (a photo-only chat message: with no
 	// words the force guard can't run, and there is no request to force a tool for, CI8).
 	noForce bool
@@ -239,7 +241,11 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			if in.doubleCheck && !doubleChecked && iter+1 < in.maxIter {
 				doubleChecked = true
 				msgs = msgs[:len(msgs)-1]
-				msgs = append(msgs, chatMsg{Role: "user", Content: doubleCheckMessage})
+				dc := in.doubleCheckMsg
+				if dc == "" {
+					dc = doubleCheckMessage
+				}
+				msgs = append(msgs, chatMsg{Role: "user", Content: dc})
 				nextMax = doubleCheckMaxTokens
 				continue
 			}
@@ -500,7 +506,7 @@ func toolRanThisTurn(msgs []chatMsg) bool {
 		switch {
 		case msgs[i].Role == "tool":
 			return true
-		case msgs[i].Role == "user" && msgs[i].Content != doubleCheckMessage:
+		case msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck):
 			return false
 		}
 	}

@@ -110,8 +110,7 @@ func runEvalCase(t *testing.T, base string, c evalCase, gate bool) evalOutcome {
 	ve.start(cid, evalTools)
 	ve.stt.voices = []stt.Voice{{Vec: []float32{1, 0}, SpeechSecs: 3, ModelID: "m"}}
 	ve.transcribe(cid, true)
-	ve.eng.say(ctx[1])
-	ve.turn("/api/v0/voice/command", cid, ctx[0], map[string]any{"turn_source": "wake", "wake_confidence": 0.9}).want(200)
+	scriptWake(t, ve, cid, ctx)
 
 	// The follow-up, live.
 	if c.VoiceSim != nil {

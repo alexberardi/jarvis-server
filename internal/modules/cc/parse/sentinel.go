@@ -14,6 +14,10 @@ var (
 	// not_for_me.py _SENTINEL_RE: case, separators, optional self-close and stray
 	// whitespace tolerated; anchored to angle brackets so prose "not for me" never matches.
 	notForMeRE = regexp.MustCompile(`(?i)<[` + pySpaceClass + `]*not[` + pySpaceClass + `_\-]+for[` + pySpaceClass + `_\-]+me[` + pySpaceClass + `]*/?[` + pySpaceClass + `]*>`)
+	// A reply that is nothing but the words ("Not for me.", "Not for you."): the model's
+	// verdict written as prose. Only the whole reply counts; prose that merely contains the
+	// phrase never does.
+	bareNotForMeRE = regexp.MustCompile(`(?i)^[^\pL\pN]*not[ _\-]+for[ _\-]+(me|you)[^\pL\pN]*$`)
 	// exchange_complete.py _MARKER_RE (the separator is optional here: "*", not "+").
 	exchangeCompleteRE = regexp.MustCompile(`(?i)<[` + pySpaceClass + `]*exchange[` + pySpaceClass + `_\-]*complete[` + pySpaceClass + `]*/?[` + pySpaceClass + `]*>`)
 	// tool_execution_engine._THINK_BLOCK_RE: reasoning never counts as a sentinel; an
@@ -61,7 +65,7 @@ func StripExchangeComplete(text string) string {
 // given texts (raw content, parsed assistant message, …).
 func SentinelNotForMe(texts ...string) bool {
 	for _, t := range texts {
-		if ContainsNotForMe(OutsideThink(t)) {
+		if out := OutsideThink(t); ContainsNotForMe(out) || bareNotForMeRE.MatchString(PyStrip(out)) {
 			return true
 		}
 	}

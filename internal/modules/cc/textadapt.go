@@ -23,6 +23,7 @@ var (
 
 const (
 	doubleCheckMessage     = tf.NotForMeDoubleCheckPrompt
+	followUpDoubleCheck    = tf.NotForMeFollowUpDoubleCheckPrompt
 	isoDateRetry           = tf.ISODateRetryNag
 	maxIterationsFallback  = tf.MaxIterationsFallback
 	fillerReplacement      = tf.FillerClarification
@@ -114,6 +115,15 @@ func hintTurn(in turnInput, st turnState, members []string) hints.Turn {
 
 func turnHint(in turnInput, st turnState, members []string) string {
 	return hints.TurnHint(hintTurn(in, st, members))
+}
+
+// doubleCheckFor is the double-check pass's message for the turn: a follow-up has no wake
+// word to appeal to.
+func doubleCheckFor(in turnInput) string {
+	if in.Source == "follow_up" {
+		return followUpDoubleCheck
+	}
+	return doubleCheckMessage
 }
 
 func doubleCheckSentinel(in turnInput, st turnState) bool {

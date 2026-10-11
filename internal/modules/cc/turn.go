@@ -144,7 +144,13 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	if in.photoOnly() {
 		hints = append(hints, prompts.PhotoOnlyHint)
 	}
-	user := chatMsg{Role: "user", Content: prompts.UserMessage(in.VoiceCommand, hints, suffix)}
+	utterance := in.VoiceCommand
+	if gate && !askedQuestion(msgs) {
+		// A follow-up nobody was asked for is framed as what the open mic heard; an answer
+		// to our own question stays the plain reply it is (followup_gate.go).
+		utterance = prompts.OverheardFollowUp(utterance)
+	}
+	user := chatMsg{Role: "user", Content: prompts.UserMessage(utterance, hints, suffix)}
 	var imageMsgID uint64
 	if len(in.Images) > 0 {
 		user.images = in.Images
@@ -162,7 +168,8 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	endLoop := tr.measure("tool_execution_loop", "cc", nil)
 	res, out := m.runEngine(ctx, engineInput{
 		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, dateKeys: keys,
-		doubleCheck: doubleCheckSentinel(in, st) && !ev.doubted(), turn: m.toolTurn(conv, in.VoiceCommand),
+		doubleCheck: doubleCheckSentinel(in, st) && !ev.doubted(), doubleCheckMsg: doubleCheckFor(in),
+		turn:    m.toolTurn(conv, in.VoiceCommand),
 		noForce: in.photoOnly(),
 	})
 	if res.Stop == stopError {
