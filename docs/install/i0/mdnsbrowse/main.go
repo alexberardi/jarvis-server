@@ -12,17 +12,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 )
 
 func main() {
 	timeout := flag.Duration("t", 5*time.Second, "how long to browse")
 	flag.Parse()
-	r, err := zeroconf.NewResolver(nil)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "resolver:", err)
-		os.Exit(1)
-	}
 	ch := make(chan *zeroconf.ServiceEntry)
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -35,11 +30,11 @@ func main() {
 			fmt.Printf("%q host=%s port=%d v4=%v v6=%v txt=%v\n", e.Instance, e.HostName, e.Port, e.AddrIPv4, e.AddrIPv6, e.Text)
 		}
 	}()
-	if err := r.Browse(ctx, "_jarvis-config._tcp", "local.", ch); err != nil {
+	// Browse blocks until ctx is done, then closes ch.
+	if err := zeroconf.Browse(ctx, "_jarvis-config._tcp", "local.", ch); err != nil {
 		fmt.Fprintln(os.Stderr, "browse:", err)
 		os.Exit(1)
 	}
-	<-ctx.Done()
 	<-done
 	fmt.Printf("%d instance(s)\n", n)
 }

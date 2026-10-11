@@ -3,6 +3,8 @@ package mdns
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"slices"
@@ -10,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/netaddr"
 )
@@ -202,19 +204,40 @@ func TestAdvertiseBrowse(t *testing.T) {
 	}
 	defer stop()
 
-	res, err := zeroconf.NewResolver(zeroconf.SelectIfaces(ifaces))
-	if err != nil {
-		t.Skipf("resolver unavailable: %v", err)
-	}
+	// zeroconf v2's Browse blocks until bctx is done and sends every entry unconditionally,
+	// closing entries when it stops, so run it alongside and keep draining until it returns.
 	entries := make(chan *zeroconf.ServiceEntry)
 	bctx, bcancel := context.WithTimeout(ctx, 5*time.Second)
 	defer bcancel()
-	if err := res.Browse(bctx, ServiceType, Domain, entries); err != nil {
-		t.Skipf("browse unavailable: %v", err)
-	}
+	var browseErr error
+	browsed := make(chan struct{})
+	go func() {
+		defer close(browsed)
+		browseErr = zeroconf.Browse(bctx, ServiceType, Domain, entries, zeroconf.SelectIfaces(ifaces))
+	}()
+	defer func() {
+		bcancel()
+		for {
+			select {
+			case <-entries:
+			case <-browsed:
+				return
+			}
+		}
+	}()
+	recv := (<-chan *zeroconf.ServiceEntry)(entries)
 	for {
 		select {
-		case e := <-entries:
+		case <-browsed:
+			if browseErr != nil {
+				t.Skipf("browse unavailable: %v", browseErr)
+			}
+			t.Skip("advertisement not seen within 5s; multicast likely blocked in this environment")
+		case e, ok := <-recv:
+			if !ok {
+				recv = nil // closed; Browse is returning
+				continue
+			}
 			if e == nil || e.Instance != instance {
 				continue
 			}
@@ -233,8 +256,34 @@ func TestAdvertiseBrowse(t *testing.T) {
 			stop()
 			stop() // idempotent
 			return
-		case <-bctx.Done():
-			t.Skip("advertisement not seen within 5s; multicast likely blocked in this environment")
 		}
+	}
+}
+
+// Stopping straight after Advertise must be clean under -race. grandcat/zeroconf v1.0.0
+// called WaitGroup.Add inside its receive goroutines, so a Shutdown that ran before they
+// were scheduled raced the Add with its Wait (CI flake, run 38101087370; reproduces with
+// -count=200 -cpu=1,2,4). libp2p/zeroconf/v2 Adds before starting them. Several rounds
+// widen the window; skips where multicast isn't available.
+func TestAdvertiseStopImmediately(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multicast test skipped in -short mode")
+	}
+	ifaces := multicastIfaces()
+	if len(ifaces) == 0 {
+		t.Skip("no multicast-capable interface")
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for i := range 5 {
+		stop, err := Advertise(context.Background(), Options{
+			Instance:   fmt.Sprintf("jarvis-stop-test-%d-%s", i, time.Now().Format("150405.000000")),
+			Port:       17701,
+			Interfaces: ifaces,
+			Logger:     log,
+		})
+		if err != nil {
+			t.Skipf("multicast unavailable: %v", err)
+		}
+		stop()
 	}
 }
