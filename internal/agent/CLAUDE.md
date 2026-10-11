@@ -3,13 +3,15 @@
 `jarvis-agent` is a **Jarvis node that runs on a desktop**. It enrolls with jarvisd like a Pi
 node, holds a node id/key, connects to jarvisd's MQTT, shows up in the app's node list, and
 offers OS control as client tools: open a link or launch an installed app by name, list apps,
-get/set volume, list/minimise/focus/close windows. Status: proof of concept, not shipped.
+get/set volume, list/minimise/focus/close windows, and control the user's own browser through
+the Jarvis Browser Control extension (tabs, page text, media). Status: proof of concept, not shipped.
 Moved here from the `jarvis-host-agent` repo on 2026-10-10 so it can share jarvisd's packages
 (`internal/voice`, `internal/audio`, later `internal/update`). Design, decisions and open
 questions: **[docs/agent/DESIGN.md](../../docs/agent/DESIGN.md)**: read it first. The voice/Pi
 roadmap is [docs/agent/go-pi-node.md](../../docs/agent/go-pi-node.md).
 
 Nothing listens on a port: the agent talks to jarvisd only as a node (HTTP client + MQTT client).
+The one local listener is the browser socket (a user-only Unix socket, see `browser/`).
 
 > **Identity rule:** `internal/agent/host` owns *how to do a thing on this OS*. It owns no policy, no
 > routing and no voice logic. Deciding *which* window the user meant, or *whether* they may,
@@ -33,6 +35,11 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent try                             # list the tools this host offers now
 ./jarvis-agent try desktop_set_volume '{"volume": 30}'   # run one tool locally, no jarvisd
 ./jarvis-agent apps steam                      # what a name resolves to (never launches)
+./jarvis-agent browser install [--no-open]     # register the native host, set up the extension
+./jarvis-agent browser status | uninstall      # registrations + connected browsers / remove
+./jarvis-agent try browser_list_tabs           # waits for the extension, runs one browser tool
+scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
+AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
 ./jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
 ./jarvis-agent run
 ./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
@@ -60,7 +67,7 @@ to check a resolution: it never launches.
 ## Layout
 
 ```
-cmd/jarvis-agent/     CLI: enroll, run, status, try, apps, version
+cmd/jarvis-agent/     CLI: enroll, run, status, try, apps, browser, version (+ native host mode)
 internal/agent/
   host/               Backend interface + Host (gate, clamp, validate) + linux/darwin/windows backends
                       -- read host.go first
@@ -69,6 +76,11 @@ internal/agent/
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch
   sidecar/            Python package sidecar spike (JSON lines over stdin/stdout)
+  browser/            browser control: native-messaging host relay (nativehost.go), the agent's
+                      socket + peer check (ipc.go), Hub of connected browsers (hub.go), the 9
+                      browser_* tools (tools.go), host-manifest registration per OS/browser
+                      (install.go), the embedded MV3 extension (extension/, extension.go) and
+                      the Mozilla-signed .xpi when a build has one (signed/)
   voice/              the voice pipeline: wake -> record -> STT -> stream reply -> follow-up
                       window -> listen again (pipeline.go), the conversation loop: tool rounds +
                       validation questions + the final message (converse.go), client tool calls
@@ -188,6 +200,18 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     output; every consumer (the dispatcher, the voice loop) calls `node.TakeSignals` before
     posting. A deferred step runs after the conversation ends (voice) or after the result is
     posted (MQTT).
+23. **Browser control** (DESIGN.md §10). One binary is agent and native host: `main()` checks
+    argv (`chrome-extension://…`, or Firefox's `<manifest> browser@jarvis.agent`) before
+    anything else, and in host mode **stdout is native frames only** (a test re-execs `main`
+    to check). Browser tools are offered only while a browser is connected, from the same
+    `node.Multi`. Page text is untrusted: it goes back between `PageBegin`/`PageEnd` with
+    `<<<`/`>>>` defanged; never extract form fields. The extension takes commands only from
+    its native port, from a closed set: `TestExtensionSurface` + `TestCommandParity` guard
+    that; a new command needs both sides. Tab ids are `KEY:TAB` (stable browser keys).
+    Socket: user-only dir, 0600, peer uid checked; never widen it. Test with headless
+    browsers only (`web-ext run --arg=-headless`, `chromium --headless=new --load-extension`)
+    in a scratch HOME with `JARVIS_AGENT_BROWSER_SOCKET` set: never load the extension into
+    the user's real profiles. Sun_path is ~104 bytes: keep scratch socket/TMPDIR paths short.
 
 ## Dependencies
 

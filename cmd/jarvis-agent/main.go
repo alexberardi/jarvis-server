@@ -28,6 +28,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
+	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
@@ -41,6 +42,11 @@ var version = "dev"
 const installMode = "desktop-agent"
 
 func main() {
+	// A browser starting us as its native-messaging host passes its own argv (the manifest's
+	// "path" can't carry a subcommand).
+	if origin, ok := browser.HostInvocation(os.Args[1:]); ok {
+		os.Exit(browserHost(origin))
+	}
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
 		os.Exit(2)
@@ -61,6 +67,10 @@ func main() {
 		err = listen(ctx, os.Args[2:])
 	case "apps":
 		err = appsCmd(os.Args[2:])
+	case "browser":
+		err = browserCmd(ctx, os.Args[2:])
+	case "browser-host":
+		os.Exit(browserHost(strings.Join(os.Args[2:], " ")))
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -83,15 +93,21 @@ func usage(w io.Writer) {
            then either --email ADDR [--household ID] (prompts for the password)
            or --token prov_... --node-id ID (a token minted elsewhere)
            [--name NAME] [--room ROOM] [--creds PATH] [--force | --if-needed]
+           [--browser | --no-browser]   set up browser control afterwards (default: ask)
   run      connect to jarvisd and serve tool calls until interrupted
-           [--creds PATH] [--allow-open-any] [--sidecar-python PY --sidecar-commands DIR]
+           [--creds PATH] [--allow-open-any] [--no-browser]
+           [--sidecar-python PY --sidecar-commands DIR]
            [--voice [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4]
             [--wake-models DIR] [--no-chimes]]   wake word "hey jarvis" (Linux, macOS)
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   status   show enrollment, reachability and what this host can do right now
   apps     list launchable apps, or show what a name resolves to (never launches): apps [NAME]
-  try      run one tool locally, no jarvisd involved: try TOOL ['{"arg": ...}']
+  try      run one tool locally, no jarvisd involved: try [--wait 10s] TOOL ['{"arg": ...}']
+           (browser_* tools wait for the browser extension to connect)
+  browser  browser control (Firefox, Chrome, Edge, Brave, Arc):
+           install [--all] [--no-open]   register the native host, set up the extension
+           uninstall | status | pack --target firefox|chromium --out DIR
   version
 `)
 }
@@ -147,6 +163,8 @@ func enroll(ctx context.Context, args []string) error {
 	cp := fs.String("creds", "", "credentials file (default: user config dir)")
 	force := fs.Bool("force", false, "replace existing credentials")
 	ifNeeded := fs.Bool("if-needed", false, "do nothing (exit 0) when already enrolled")
+	browserYes := fs.Bool("browser", false, "set up browser control after enrolling, without asking")
+	browserNo := fs.Bool("no-browser", false, "don't offer browser control setup")
 	_ = fs.Parse(args)
 	path, err := credsPath(*cp)
 	if err != nil {
@@ -241,7 +259,9 @@ func enroll(ctx context.Context, args []string) error {
 	if err := node.SaveCreds(path, c); err != nil {
 		return fmt.Errorf("saving credentials: %w", err)
 	}
-	fmt.Printf("Enrolled as node %s (room %q). Credentials saved to %s.\nNext: jarvis-agent run\n", c.NodeID, c.Room, path)
+	fmt.Printf("Enrolled as node %s (room %q). Credentials saved to %s.\n", c.NodeID, c.Room, path)
+	offerBrowserSetup(*browserYes, *browserNo)
+	fmt.Println("Next: jarvis-agent run")
 	return nil
 }
 
@@ -303,19 +323,22 @@ func run(ctx context.Context, args []string) error {
 // toolFlags choose the node's client tools; `run` and `listen` share them.
 type toolFlags struct {
 	anyOpen    *bool
+	noBrowser  *bool
 	py, cmdDir *string
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
 	return &toolFlags{
-		anyOpen: fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)"),
-		py:      fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)"),
-		cmdDir:  fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)"),
+		anyOpen:   fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)"),
+		noBrowser: fs.Bool("no-browser", false, "don't serve the browser extension (no browser_* tools)"),
+		py:        fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)"),
+		cmdDir:    fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)"),
 	}
 }
 
-// build is the one toolset of this node: the desktop tools, then the sidecar's commands. The
-// MQTT dispatcher and voice turns both serve it. promptAX asks macOS for Accessibility (the
+// build is the one toolset of this node: the desktop tools, the browser tools (offered while
+// the extension is connected), then the sidecar's commands. The MQTT dispatcher and voice
+// turns both serve it. promptAX asks macOS for Accessibility (the
 // long-running `run` does; `listen`, a test command often started over SSH, doesn't).
 func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) (*host.Host, node.Multi, func(), error) {
 	h, err := nativeHost()
@@ -330,12 +353,19 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 	}
 	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log))}
 	closeAll := func() {}
+	if !*f.noBrowser {
+		hub, stopBrowser := startBrowser(ctx, log)
+		tools = append(tools, browser.NewTools(hub))
+		closeAll = stopBrowser
+	}
 	if *f.py != "" && *f.cmdDir != "" {
 		sc, err := sidecar.Start(ctx, *f.py, *f.cmdDir, log)
 		if err != nil {
+			closeAll()
 			return nil, nil, nil, fmt.Errorf("sidecar: %w", err)
 		}
-		closeAll = func() { _ = sc.Close() }
+		stopBrowser := closeAll
+		closeAll = func() { _ = sc.Close(); stopBrowser() }
 		tools = append(tools, sc)
 	}
 	return h, tools, closeAll, nil
@@ -370,6 +400,7 @@ func status(ctx context.Context, args []string) error {
 		}
 	}
 	fmt.Printf("voice:        %s\n", voiceStatus())
+	fmt.Printf("browser:      %s\n", browserSummary())
 	if list, err := appCatalogue(nil)(); err != nil {
 		fmt.Printf("apps:         %v\n", err)
 	} else {
@@ -409,12 +440,34 @@ func status(ctx context.Context, args []string) error {
 func try(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("try", flag.ExitOnError)
 	anyOpen := fs.Bool("allow-open-any", false, "relax the open policy")
+	wait := fs.Duration("wait", 10*time.Second, "how long browser_* tools wait for the browser extension to connect")
 	_ = fs.Parse(args)
 	h, err := nativeHost()
 	if err != nil {
 		return err
 	}
-	ts := desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil))
+	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil))}
+	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
+		// Serve the extension for this one call (fails over to "not connected" when a running
+		// agent holds the socket: stop it, or use that agent).
+		hub, stopBrowser := startBrowser(ctx, logger())
+		defer stopBrowser()
+		ts = append(ts, browser.NewTools(hub))
+		w := *wait
+		if fs.NArg() == 0 {
+			w = min(w, 3*time.Second)
+		}
+		wctx, cancel := context.WithTimeout(ctx, w)
+		if hub.WaitConnected(wctx) {
+			// Each browser's host reconnects on its own 2 s retry: give the others a moment so
+			// one-shot calls see (and target) the same browsers a running agent would.
+			select {
+			case <-wctx.Done():
+			case <-time.After(2500 * time.Millisecond):
+			}
+		}
+		cancel()
+	}
 	if fs.NArg() == 0 {
 		for _, d := range ts.Available(ctx) {
 			fmt.Println(d.Name)

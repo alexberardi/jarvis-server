@@ -6,6 +6,7 @@
 #   scripts/agent-dev-run.sh --install             # start at login instead (user session only)
 #   scripts/agent-dev-run.sh --uninstall           # stop starting at login (keeps the enrollment)
 #   scripts/agent-dev-run.sh --status              # what the agent can do right now, as the agent
+#   scripts/agent-dev-run.sh --install --browser   # ... and set up browser control without asking
 #
 # Options:
 #   --server URL      jarvisd's address (only needed to enroll)
@@ -15,6 +16,9 @@
 #   --uninstall       remove that unit/agent
 #   --status          print the agent's capabilities (on macOS run as Jarvis Agent via launchd:
 #                     from a terminal, macOS would report the terminal's permissions instead)
+#   --browser         set up browser control (Firefox / Chrome-family extension + native host)
+#                     without asking; --no-browser: don't offer it. Default: ask when interactive
+#                     (on first enrollment, and on --install for the installed binary).
 #   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any, or -- --voice
 #                     (the "hey jarvis" pipeline; foreground runs only, --install doesn't pass flags)
 #
@@ -27,7 +31,7 @@
 # Set JARVIS_AGENT_SIGN_IDENTITY to pick a signing identity ("-" forces ad-hoc).
 set -euo pipefail
 
-SERVER='' EMAIL='' HOUSEHOLD='' MODE=run
+SERVER='' EMAIL='' HOUSEHOLD='' MODE=run BROWSER=ask
 while [ $# -gt 0 ]; do
   case $1 in
     --server) SERVER=$2; shift 2 ;;
@@ -36,6 +40,8 @@ while [ $# -gt 0 ]; do
     --install) MODE=install; shift ;;
     --uninstall) MODE=uninstall; shift ;;
     --status) MODE=status; shift ;;
+    --browser) BROWSER=yes; shift ;;
+    --no-browser) BROWSER=no; shift ;;
     --) shift; break ;;
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "agent-dev-run: unknown argument $1 (run flags go after --)" >&2; exit 2 ;;
@@ -83,6 +89,7 @@ if [ "$MODE" = uninstall ]; then
     systemctl --user daemon-reload
   fi
   say "uninstalled; the enrollment is kept (re-enroll with: jarvis-agent enroll --force ...)"
+  say "browser control stays registered; to remove it: jarvis-agent browser uninstall"
   exit 0
 fi
 
@@ -168,12 +175,30 @@ else
   BIN="$ROOT/dist/jarvis-agent"
 fi
 
+# offer_browser BIN: set up browser control for the binary at BIN (asks unless --browser/--no-browser).
+offer_browser() {
+  case $BROWSER in
+    no) return 0 ;;
+    ask)
+      if [ ! -t 0 ]; then say "browser control (optional): $1 browser install"; return 0; fi
+      printf 'Set up browser control, so Jarvis can use your Firefox / Chrome tabs (list, open, read, pause video)? [y/N] ' >&2
+      read -r ans || ans=''
+      case $ans in [yY]|[yY][eE][sS]) ;; *) say "skipped; later: $1 browser install"; return 0 ;; esac ;;
+  esac
+  "$1" browser install || say "browser setup failed (see above); retry with: $1 browser install"
+}
+
 # --- enroll, first time only ---
 enroll=(enroll --if-needed)
 [ -n "$SERVER" ] && enroll+=(--server "$SERVER")
 [ -n "$EMAIL" ] && enroll+=(--email "$EMAIL")
 [ -n "$HOUSEHOLD" ] && enroll+=(--household "$HOUSEHOLD")
+# Browser control registers the binary browsers will start: for --install that's the installed
+# copy, so it's offered after installing. A plain run lets a first enrollment ask; an explicit
+# --browser is handled below, enrolled or not.
+if [ "$MODE" = install ] || [ "$BROWSER" != ask ]; then enroll+=(--no-browser); fi
 "$BIN" "${enroll[@]}" || die "not enrolled; pass --server URL --email ADDR"
+if [ "$MODE" = run ] && [ "$BROWSER" = yes ]; then offer_browser "$BIN"; fi
 
 # --- install: start at login, in the user's session ---
 if [ "$MODE" = install ]; then
@@ -186,6 +211,7 @@ if [ "$MODE" = install ]; then
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
     say "installed and started; logs: tail -f $LOG_DIR/jarvis-agent.err.log"
+    offer_browser "$BIN"
   else
     mkdir -p "$HOME/.local/bin" "$(dirname "$UNIT")"
     install -m 0755 "$BIN" "$HOME/.local/bin/jarvis-agent"
@@ -196,6 +222,7 @@ if [ "$MODE" = install ]; then
     systemctl --user restart jarvis-agent
     say "installed and started; logs: journalctl --user -u jarvis-agent -f"
     say "it starts with your graphical session; it stops when you log out unless: loginctl enable-linger $USER"
+    offer_browser "$HOME/.local/bin/jarvis-agent"
   fi
   exit 0
 fi
