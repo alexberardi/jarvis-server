@@ -86,6 +86,33 @@ func TestToolCallVerifiesRunsAndReplies(t *testing.T) {
 	}
 }
 
+// signalTools answers with node-local signals, as the sidecar does for a media command.
+type signalTools struct{ deferred func() error }
+
+func (signalTools) Available(context.Context) []ToolDef { return nil }
+func (s signalTools) Call(context.Context, string, map[string]any, Request) (map[string]any, bool) {
+	return map[string]any{"success": true, SignalsKey: Signals{WaitForInput: true, OnResponseComplete: s.deferred}}, true
+}
+
+func TestToolCallNeverPostsSignalsAndRunsTheDeferredStepAfterPosting(t *testing.T) {
+	cc := newFakeCC()
+	cc.valid["r1"] = true
+	posted := false
+	d := &Dispatcher{CC: cc, Log: quiet, Tools: signalTools{deferred: func() error {
+		cc.mu.Lock()
+		defer cc.mu.Unlock()
+		_, posted = cc.results["r1"]
+		return nil
+	}}}
+	d.Handle(context.Background(), publish(t, "tool_call", map[string]any{"command_name": "play", "reply_request_id": "r1", "request_id": "r1"}))
+	if got := cc.results["r1"]; len(got) != 1 || got["success"] != true {
+		t.Fatalf("posted %v: the signals must stay on the node", got)
+	}
+	if !posted {
+		t.Fatal("the deferred step did not run after the result was posted")
+	}
+}
+
 func TestUnverifiedToolCallIsDroppedUnrun(t *testing.T) {
 	cc := newFakeCC()
 	tools := &echoTools{}

@@ -125,8 +125,16 @@ func (d *Dispatcher) toolCall(ctx context.Context, det map[string]any) {
 		}
 		output = out
 	}
+	sig := TakeSignals(output)
 	d.Log.Info("tool_call", "command", name, "success", output["success"])
 	if err := d.CC.PostToolResult(ctx, rid, output); err != nil {
 		d.Log.Warn("tool_call: post failed", "err", err)
+	}
+	// Nothing is spoken on this path, so a deferred step (a media command's "start playing
+	// now") runs as soon as the result is posted.
+	if sig.OnResponseComplete != nil {
+		if err := sig.OnResponseComplete(); err != nil {
+			d.Log.Warn("tool_call: on_response_complete failed", "command", name, "err", err)
+		}
 	}
 }

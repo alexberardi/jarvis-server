@@ -5,8 +5,16 @@ Loads IJarvisCommand classes from a directory and answers JSON-lines requests on
     -> {"id": 1, "method": "describe"}
     <- {"id": 1, "result": {"tools": [{"name", "client_tool", "command"}, ...]}}
     -> {"id": 2, "method": "call", "params": {"command_name", "arguments", "request": {...}}}
-    <- {"id": 2, "result": {"output": {...}}}
+    <- {"id": 2, "result": {"output": {...}, "signals": {"wait_for_input", "clear_history",
+                                                          "on_response_complete"?}}}
+    -> {"id": 3, "method": "complete", "params": {"token": "1"}}
+    <- {"id": 3, "result": {"ran": true}}
     <- {"id": N, "error": "..."}            on a protocol-level failure
+
+"signals" are the CommandResponse fields only the node acts on; they never reach
+command-center. A command's on_response_complete callable (a media command's deferred "start
+playing now") stays here under a token; the agent runs it with "complete" once the spoken reply
+is over.
 
 stdout carries protocol only: print() inside commands is redirected to stderr, which the Go
 agent forwards to its log. The Go agent owns the node's identity, key and MQTT; this process
@@ -55,6 +63,31 @@ def describe(commands: dict) -> dict:
     return {"tools": tools}
 
 
+# Deferred on_response_complete callables by token. Bounded: a token the agent never completes
+# (a crashed turn) must not pin a command's state forever.
+_PENDING: dict = {}
+_PENDING_MAX = 16
+_next_token = 0
+
+
+def _stash(callback) -> str:
+    global _next_token
+    _next_token += 1
+    token = str(_next_token)
+    _PENDING[token] = callback
+    while len(_PENDING) > _PENDING_MAX:
+        _PENDING.pop(next(iter(_PENDING)))
+    return token
+
+
+def complete(params: dict) -> dict:
+    callback = _PENDING.pop(str(params.get("token", "")), None)
+    if callback is None:
+        return {"ran": False}
+    callback()
+    return {"ran": True}
+
+
 def call(commands: dict, params: dict) -> dict:
     name = params.get("command_name", "")
     cmd = commands.get(name)
@@ -74,7 +107,11 @@ def call(commands: dict, params: dict) -> dict:
     if not resp.success:
         output["error"] = resp.error_details or "Command failed"
     output["success"] = resp.success
-    return {"output": output}
+    signals = {"wait_for_input": bool(resp.wait_for_input), "clear_history": bool(resp.clear_history)}
+    callback = getattr(resp, "on_response_complete", None)
+    if callback is not None:
+        signals["on_response_complete"] = _stash(callback)
+    return {"output": output, "signals": signals}
 
 
 def main() -> None:
@@ -93,6 +130,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": describe(commands)}
             elif method == "call":
                 reply = {"id": msg_id, "result": call(commands, msg.get("params") or {})}
+            elif method == "complete":
+                reply = {"id": msg_id, "result": complete(msg.get("params") or {})}
             else:
                 reply = {"id": msg_id, "error": f"unknown method {method!r}"}
         except Exception as exc:

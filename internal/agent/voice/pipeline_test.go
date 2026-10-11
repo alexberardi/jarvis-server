@@ -47,12 +47,14 @@ type fakeCapture struct {
 	chunks [][]int16
 	pace   time.Duration
 	err    error // returned once the script is used up, if set
+	reads  int
 }
 
 func (c *fakeCapture) Read(buf []int16) error {
 	time.Sleep(c.pace)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.reads++
 	if len(c.chunks) == 0 {
 		if c.err != nil {
 			return c.err
@@ -69,6 +71,15 @@ func (c *fakeCapture) Close() error  { return nil }
 
 func script(parts ...[][]int16) *fakeCapture {
 	return &fakeCapture{chunks: slices.Concat(parts...), pace: 2 * time.Millisecond}
+}
+
+func (c *fakeCapture) readCount() int { c.mu.Lock(); defer c.mu.Unlock(); return c.reads }
+
+// push queues more audio after whatever is left of the script.
+func (c *fakeCapture) push(parts ...[][]int16) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.chunks = append(c.chunks, slices.Concat(parts...)...)
 }
 
 // fakeDetector fires on loud audio.
@@ -145,6 +156,13 @@ type fakeServer struct {
 	speakPCM []byte
 	// cont answers /voice/command/continue; nil means "complete" with nothing to say.
 	cont func(results []ToolResult) (*Control, error)
+	// texts are the transcripts of the recordings after the first, in order (then text).
+	texts []string
+	// followUp answers the blocking /voice/command; nil means "complete" with nothing to say.
+	followUp    func(req StreamRequest) (*Control, error)
+	commands    []StreamRequest // every /voice/command body, in order
+	said        []string        // every Speak text, in order
+	transcribed int
 
 	nodeCtx  map[string]any
 	tools    ToolSchemas
@@ -178,9 +196,16 @@ func (s *fakeServer) EndConversation(_ context.Context, id string) error {
 func (s *fakeServer) Transcribe(_ context.Context, cmd, spk []byte, id string) (Transcript, error) {
 	s.log("transcribe")
 	s.mu.Lock()
-	s.cmdWAV, s.spkWAV = cmd, spk
-	s.mu.Unlock()
-	return Transcript{Text: s.text, Affect: map[string]any{"read": "calm"}}, nil
+	defer s.mu.Unlock()
+	s.transcribed++
+	if s.transcribed == 1 {
+		s.cmdWAV, s.spkWAV = cmd, spk
+	}
+	text := s.text
+	if s.transcribed > 1 && len(s.texts) > 0 {
+		text, s.texts = s.texts[0], s.texts[1:]
+	}
+	return Transcript{Text: text, Affect: map[string]any{"read": "calm"}}, nil
 }
 func (s *fakeServer) VoiceStream(ctx context.Context, req StreamRequest) (Reply, error) {
 	s.log("stream")
@@ -193,6 +218,7 @@ func (s *fakeServer) Speak(_ context.Context, text string) (*Audio, error) {
 	s.log("speak")
 	s.mu.Lock()
 	s.spoken = text
+	s.said = append(s.said, text)
 	s.mu.Unlock()
 	return &Audio{Rate: 22050, Channels: 1, Message: text, Body: io.NopCloser(bytes.NewReader(s.speakPCM))}, nil
 }
@@ -207,6 +233,18 @@ func (s *fakeServer) ContinueTools(_ context.Context, id string, results []ToolR
 		return &Control{StopReason: "complete"}, nil
 	}
 	return cont(results)
+}
+
+func (s *fakeServer) VoiceCommand(_ context.Context, req StreamRequest) (*Control, error) {
+	s.log("command")
+	s.mu.Lock()
+	s.commands = append(s.commands, req)
+	f := s.followUp
+	s.mu.Unlock()
+	if f == nil {
+		return &Control{StopReason: "complete"}, nil
+	}
+	return f(req)
 }
 
 func (s *fakeServer) callList() []string {
@@ -439,7 +477,7 @@ func TestControlReplies(t *testing.T) {
 		{"not_for_me is silent", control("not_for_me", nil), OutcomeNotForMe, []string{"stream", "end"}, nil, false},
 		{"complete is spoken via TTS", control("complete", &say), OutcomeSpoken, []string{"stream", "speak", "end"}, []int{300}, false},
 		{"complete with nothing to say is silent", control("complete", &empty), OutcomeSilent, []string{"stream", "end"}, nil, false},
-		{"validation is not supported yet", control("validation_required", nil), OutcomeUnsupported, []string{"stream", "end"}, nil, true},
+		{"validation without a question is an error", control("validation_required", nil), OutcomeError, []string{"stream", "end"}, nil, true},
 		{"error with a message speaks it", control("error", &say), OutcomeError, []string{"stream", "speak", "end"}, []int{300}, false},
 	}
 	for _, c := range cases {

@@ -38,7 +38,8 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
 ./jarvis-agent listen --voice-input wav:clip.wav --voice-output wav:reply.wav --once --no-chimes
                                                # one scripted voice turn, no MQTT (exit 0 = spoken);
-                                               # runs the same client tools as `run` (--no-tools: none)
+                                               # runs the same client tools as `run` (--no-tools: none);
+                                               # --follow-up 0 turns the follow-up window off
 JARVIS_SHERPA_MODELS=$PWD/.models go test ./internal/agent/voice/   # + the real-model wake test
 JARVIS_AUDIO_NATIVE=1 go test -v -run Native ./internal/audio/device/   # real default mic/speaker
 ```
@@ -68,10 +69,12 @@ internal/agent/
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch
   sidecar/            Python package sidecar spike (JSON lines over stdin/stdout)
-  voice/              the voice pipeline: wake -> record -> STT -> stream reply -> listen again
-                      (pipeline.go), client tools + continue rounds (tools.go), Python-node
-                      endpointing (endpoint.go), the CC voice client (client.go), wake-model
-                      fetch (models.go), Serve (reopen on failure)
+  voice/              the voice pipeline: wake -> record -> STT -> stream reply -> follow-up
+                      window -> listen again (pipeline.go), the conversation loop: tool rounds +
+                      validation questions + the final message (converse.go), client tool calls
+                      (tools.go), the follow-up window and its noise/echo filters (followup.go),
+                      Python-node endpointing (endpoint.go), the CC voice client (client.go),
+                      wake-model fetch (models.go), Serve (reopen on failure)
 internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
   deploy/             systemd user unit, LaunchAgent, Scheduled Task, macOS Info.plist (+ guard tests)
 scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, run / install
@@ -168,6 +171,18 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     chain (list windows -> minimise); the stream route can't chain (go-pi-node.md §3.8). Tool
     calls in a voice turn aren't `/verify`'d: they come on the node's own authenticated HTTP
     response. Each call is bounded by `Config.ToolTimeout` and a panic is a failure result.
+21. **Follow-up is the Python node's** (go-pi-node.md §3.9): a window after every reply not
+    marked `end_of_exchange` / `not_for_me`, 4 s then 3 s, ≤ 5, sent as blocking
+    `/voice/command` follow_up turns of the same conversation; `validation_required` is asked
+    aloud and answered as `validation-response` on the blocking continue. Before any wake-free
+    listening the queue is flushed (our own reply) and a quiet-wait runs; keep both, a desktop
+    has no AEC. Windows are counted in captured chunks, never wall-clock, so tests script the
+    user through `Pipeline.listening` instead of racing timers.
+22. **Command signals never leave the node.** A Toolset may put `node.Signals`
+    (`wait_for_input`, `clear_history`, `on_response_complete`) under `node.SignalsKey` in an
+    output; every consumer (the dispatcher, the voice loop) calls `node.TakeSignals` before
+    posting. A deferred step runs after the conversation ends (voice) or after the result is
+    posted (MQTT).
 
 ## Dependencies
 

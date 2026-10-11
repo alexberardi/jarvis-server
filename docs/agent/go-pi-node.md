@@ -83,10 +83,10 @@ Tags:
 | 13 | **202**: JSON. `not_for_me` → stay silent. `complete` → speak `assistant_message` via `POST /media/tts/speak/stream` (over 200 chars) or `/media/tts/speak` (WAV). `tool_calls` / `validation_required` → later. | `N:utils/command_execution_service.py:733-975,1486-1525` | `S:voice_routes.go:150-158`, `S:media.go:53-139` | MVS (complete, not_for_me) |
 | 14 | `POST /api/v0/conversation/end {conversation_id}`. Python skips this after barge-in and boot warmups; Go should always send it. | `N:core/follow_up_loop.py:424-428` | `S:warmup.go:310-323` | MVS |
 | 15 | Error phrases ("I can't reach my server right now." and so on), with a fallback chime | `N:core/wake_transcription.py:185-196` | – | MVS (chime only) |
-| 16 | Follow-up window: 4 s, ≤5 iterations, onset detection, blocking `POST /voice/command` with `turn_source:"follow_up"` | `N:core/follow_up_loop.py:97-428`, `N:scripts/speech_to_text.py:455-691` | `S:voice_routes.go:171-220` | later |
+| 16 | Follow-up window after **every** reply not marked terminal (`end_of_exchange`) or `not_for_me`: 4 s, −2 s per iteration (floor 3 s), ≤5 iterations, quiet-wait, onset detection, noise and self-echo filters, blocking `POST /voice/command` with `turn_source:"follow_up"`, `follow_up_iteration` | `N:core/follow_up_loop.py:97-428`, `N:scripts/speech_to_text.py:455-691`, `N:core/conversation_filters.py` | `S:voice_routes.go:171-220` | **done for the desktop agent (§3.9)** |
 | 17 | Barge-in: local only. oww score > 0.04 plus an RMS gate, 2 consecutive chunks → cancel playback and close the stream. Nothing is sent to the server. | `N:core/barge_in.py:100-359` | – | later |
 | 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | **done for the desktop agent (§3.8)**, blocking continue only |
-| 19 | Validation: speak the question, re-listen, `POST /voice/command/continue` | `N:core/wake_transcription.py:204-231` | same | later |
+| 19 | Validation: speak the question (+ "Your options are: …"), re-listen with `listen()`, `POST /voice/command/continue` with `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` | `N:core/wake_transcription.py:204-231`, `N:clients/jarvis_command_center_client.py:362-412` | `S:engine.go:339-366`, `S:continue.go` | **done for the desktop agent (§3.9)** |
 | 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | later |
 | 21 | Pre-wake speech seconds hint (RMS over a 5 s ring) | `N:core/wake_loop.py:113-116,361-367,523-529` | `S:hints/` | later (cheap) |
 | 22 | Tentative wake (duck music in [0.2, 0.4)), not_for_me cool-down, auto threshold | `N:core/wake_loop.py:224-456`, `N:core/wake_calibration.py` | – | later |
@@ -160,6 +160,14 @@ These are worth fixing upstream regardless of Go:
 - Doc 01 §7.12 gives the TTS fallback rate as 16000/22050; jarvisd always sends 24000.
 - `is_busy` is dead.
 - A 202 `complete` with an empty message makes the node say "Task completed."
+- Follow-up (found 2026-10-10, §3.9): the window opens after **every** reply, not only when the
+  server expects an answer; `wait_for_input` only changes the spoken message and stops the tool
+  loop. `on_response_complete` runs only for the *wake* exchange's result (a follow-up's
+  "play X" never starts), and the MQTT `tool_call` path drops it. Lone-word follow-ups outside a
+  small allowlist ("Kitchen.") are discarded as noise. Validation answers are transcribed with no
+  `conversation_id` and no speaker audio.
+- jarvisd's streamed 200 reply carries no `end_of_exchange` (Python's neither), so a terminal
+  reply spoken on the stream route can't close the follow-up window; only 202/blocking replies can.
 
 ---
 
@@ -359,7 +367,7 @@ onnxruntime.
 | 10 | `is_non_speech` port, golden-tested against `voice_filters.py` | yes |
 | 11 | Join the warmup ≤ 10 s, then `/voice/command/stream` `{voice_command, conversation_id, turn_source:"wake", wake_confidence, affect}` | yes (no `pre_wake_speech_seconds` yet) |
 | 12 | 200: PCM streamed to the speaker at `X-Audio-*`, 8 s inter-chunk idle timeout | yes |
-| 13 | 202 `not_for_me` silent; `complete` spoken via `/media/tts/speak` (≤ 200 chars) or `/speak/stream`; empty `complete` stays **silent** (§1.4: Python says "Task completed."); `tool_calls` run locally (§3.8); `validation_required` log + error chime; `error` speaks its message | as §1.1, minus the §1.4 quirk |
+| 13 | 202 `not_for_me` silent; `complete` spoken via `/media/tts/speak` (≤ 200 chars) or `/speak/stream`; empty `complete` stays **silent** (§1.4: Python says "Task completed."); `tool_calls` run locally (§3.8); `validation_required` asked aloud (§3.9); `error` speaks its message | as §1.1, minus the §1.4 quirk |
 | 14 | `/conversation/end` always, after both the turn and start have finished | Go always sends it |
 | 15 | Error chime | chime only |
 
@@ -401,8 +409,8 @@ input"; the golden tests never hit it because their stacks were already grown.
   microphone prompt (`NSMicrophoneUsageDescription` is now in Info.plist; without it macOS kills
   the app on first capture).
 
-**Not yet (phase 5 parity list):** follow-up, barge-in, ~~client tools/continue~~ (§3.8),
-validation, processing ack / wake greeting, `pre_wake_speech_seconds`, AEC (on a desktop with
+**Not yet (phase 5 parity list):** ~~follow-up~~ (§3.9), barge-in, ~~client tools/continue~~ (§3.8),
+~~validation~~ (§3.9), processing ack / wake greeting, `pre_wake_speech_seconds`, AEC (on a desktop with
 speakers the reply can reach the mic; wake is paused while it plays, so it can't wake itself,
 but there is no barge-in), device selection on macOS (default devices only), Windows WASAPI.
 
@@ -445,8 +453,8 @@ but there is no barge-in), device selection on macOS (default devices only), Win
   `desktop_close_window` is marked `is_risky` (only errands' planner reads that) and is a
   graceful close (the app may prompt to save); nothing else the desktop offers is
   destructive. See DESIGN.md §9 Q2.
-- **Not ported:** `wait_for_input` / `clear_history` / `on_response_complete` from sidecar
-  results (follow-up isn't ported), `act_on_items`, `post_process_tool_call`, music takeover.
+- **Not ported:** `act_on_items`, `post_process_tool_call`, music takeover. (`wait_for_input`,
+  `clear_history` and `on_response_complete` landed with follow-up, §3.9.)
 
 **Verified live** (2026-10-10, `listen --voice-input wav:… --no-chimes`, Kokoro-rendered
 "Hey Jarvis." + command, against this box's dev jarvisd, as the MBP's node):
@@ -462,6 +470,62 @@ but there is no barge-in), device selection on macOS (default devices only), Win
 Not live-tested: window tools by voice (this box is Wayland, so none are offered; the MBP's
 agent binary over SSH has no Accessibility grant), sidecar commands by voice (covered by the
 same `Toolset` in tests), a live mic.
+
+### 3.9 Follow-up and validation questions (2026-10-10)
+
+After a reply the agent keeps listening without the wake word, and a `validation_required`
+reply is asked aloud and answered by voice. Code: `internal/agent/voice/followup.go` (the window
+and its filters), `converse.go` (the conversation loop: tool rounds + validation questions, the
+final message), `client.go` (`VoiceCommand`, `Control.Validation`/`EndOfExchange`),
+`internal/agent/node` (`Signals`, `TakeSignals`) and the sidecar (`signals`, `complete`).
+
+**What it does** (ported from the Python node, rows 16 and 19 of §1.1, same defaults):
+
+| Step | Go behaviour | Python |
+|---|---|---|
+| When | After every exchange that ended spoken, silent or non-speech; not after `not_for_me`, an error, or a reply with `end_of_exchange` | same (Python also opens it after an error, with a fresh conversation) |
+| Echo | The queue captured while the reply played is flushed, then a quiet-wait drains ≤ 0.5 s until 2 chunks are below threshold × 1.5 | quiet-wait the same; history replay up to 2 s since TTS end |
+| Window | 4 s, then 3 s (4 − 2 per iteration, floor 3); counted in captured 80 ms chunks; ≤ 5 iterations | wall-clock, same numbers |
+| Onset | 3 loud chunks in a row (+1 per iteration, ≤ 8) at the wake's silence threshold; keep ≤ 1.5 s before onset | same |
+| Record | until 0.5 s of silence, at least 0.7 s after onset, ≤ 7 s; < 0.3 s is noise; normalised | same |
+| STT | `file` + `speaker_audio` (the wake clip + answer) + **`conversation_id`** | no `conversation_id` (§1.4) |
+| Filters | non-speech → close; noise (lone word outside the allowlist, or an exact repeat) → listen again, twice in a row → close; self-echo (≥ 85 % of the last reply's words) → close. Golden-tested against `conversation_filters.py`. | same |
+| Send | blocking `POST /voice/command {voice_command, conversation_id, turn_source: "follow_up", follow_up_iteration}`; the reply goes through the same loop as a wake reply (tools, validation), spoken via TTS | same |
+| Close | `end_of_exchange`, `clear_history` (a command's signal), `not_for_me`, an error, nobody speaking, 5 iterations; then `/conversation/end` | same |
+| Cue | none (Python shows a "listening" LED; a desktop has no LED) | LED |
+| Validation | speak the question + "Your options are: a, b"; flush; quiet-wait ≤ 0.8 s; `record()` with the wake's endpointing; answer (non-speech → "I didn't catch that, sorry.") posted as `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` on the blocking continue; up to 10 questions + tool rounds per reply | same, except Python records the answer with its static 1.5 s silence / threshold 300 and only replaces an *empty* transcript |
+| Command signals | sidecar results carry `wait_for_input`, `clear_history`, `on_response_complete` beside the output (never posted). `wait_for_input`: after sending the results, speak the next reply without another tool round, preferring the command's own `message`, else "Go ahead, I'm listening.". `on_response_complete`: run once the conversation (follow-ups included) is over; on MQTT `tool_call`, right after the result is posted | same; Python runs only the wake exchange's callback and none on MQTT (§1.4) |
+
+**Server side checked.** jarvisd's request_validation stop leaves the question's tool result in
+history; the answer arrives as an extra `tool` message with id `validation-response`, and a
+native-tools model re-enters the loop with it (`TestVoiceValidationRequired` now covers the
+continue). Follow-up turns go through `processTurn` with `turn_source: "follow_up"` (strict
+`not_for_me` posture, follow-up doubt on an unverified wake); they are user turns, so the
+must-call retry is armed per turn as usual (PR #29) and the conversation's history and tools
+carry over.
+
+**Verified live** (2026-10-10, this box, dev jarvisd, as the MBP's node; PipeWire null sinks:
+Kokoro clips played into `agent_mic`, the agent captured its monitor through ALSA `pulse` and
+spoke into `agent_spk`; each answer was played when the agent logged that it was listening):
+
+| Said after the wake | Follow-ups | Window |
+|---|---|---|
+| "What time is it?" → "It's 8:15 PM on Saturday…" | "And what is the date today?" → "It's Saturday, October 10…"; "Thank you, that is all for now." → "You're welcome! Have a great evening." | closed after 3 s of silence |
+| "Set the volume on my computer." → set to 50 % | "Thirty percent, please." → `desktop_set_volume{30}` → "Done — volume's down to 30." (follow-up running a tool) | timeout |
+| "Remember something for me." → "…Could you tell me what you'd like me to remember?" (asked in prose) | "That my favorite color is teal." → "Got it — I'll remember that…" | timeout |
+| "What time is it?", reply played **into the agent's own microphone** | none: it did not hear itself | timeout |
+| "Cancel my timer." (a scratch sidecar command with two timers) → cancelled both | "The oven one." → answered in context (sidecar results with signals) | timeout |
+
+**Not verified live:** a `validation_required` question. The dev model (Qwen3.5-9B) never called
+`request_validation` across four ambiguous prompts: it asks in prose (which the follow-up window
+handles) or guesses. Covered by the pipeline tests and the server test above. Also tests only:
+`end_of_exchange` (the model didn't emit `<exchange_complete/>`), `clear_history`,
+`on_response_complete`.
+
+**Deferred:** `act_on_items` (a node-side dispatcher over items earlier commands returned, a
+separate mechanism: it needs the sidecar to keep `ref_id → command` and call commands'
+callbacks), a listening cue on desktops, barge-in during follow-up replies, the not_for_me
+wake cool-down, an `end_of_exchange` header on the stream route (server).
 
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
@@ -636,7 +700,7 @@ These are **still needed**; install.sh step lines are cited:
 
    Ship it to the lab Pi alongside the Python node (`install_mode` decides).
 5. **Parity**, in order:
-   1. Follow-up.
+   1. Follow-up. **Desktop agent done 2026-10-10 (§3.9)**, with validation questions.
    2. Barge-in (re-use the wake detector at threshold 0.04 plus the RMS gate).
    3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the sidecar.
    4. `update_node_config`, `measure_ambient_noise`, LED preview.
