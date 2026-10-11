@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +92,30 @@ func TestBrowserStartsHostMode(t *testing.T) {
 		}
 		for hub.Connected() && time.Now().Before(deadline) {
 			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// TestBrowserAnswerDefaultsToYes: the setup prompt is [Y/n]. Enter installs; "n" or anything
+// else skips; input that ends without an answer (no one there) never installs.
+func TestBrowserAnswerDefaultsToYes(t *testing.T) {
+	for _, c := range []struct {
+		line string
+		err  error
+		want bool
+	}{
+		{"\n", nil, true},
+		{"  \n", nil, true},
+		{"y\n", nil, true},
+		{"YES\n", nil, true},
+		{"yes", io.EOF, true},
+		{"n\n", nil, false},
+		{"no\n", nil, false},
+		{"later\n", nil, false},
+		{"", io.EOF, false},
+	} {
+		if got := browserAnswerYes(c.line, c.err); got != c.want {
+			t.Errorf("browserAnswerYes(%q, %v) = %v, want %v", c.line, c.err, got, c.want)
 		}
 	}
 }

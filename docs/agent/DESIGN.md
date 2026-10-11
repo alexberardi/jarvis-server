@@ -335,7 +335,8 @@ Mute is tab-level (`tabs.update muted`), which covers every player on the page.
 
 ### Install flow (`jarvis-agent browser install|uninstall|status`)
 
-Offered by `jarvis-agent enroll` (asks `[y/N]` on a terminal; `--browser` / `--no-browser`)
+Offered by `jarvis-agent enroll` (always asks on a terminal, `[Y/n]`: Enter installs, input that
+ends unanswered skips; with no terminal it only prints the command; `--browser` / `--no-browser`)
 and `scripts/agent-dev-run.sh` (`--browser`/`--no-browser`; on `--install` it asks after
 installing, so the manifests name the installed binary).
 
@@ -407,8 +408,8 @@ back by id. Click/type/fill would add:
 2. `data_collection_permissions.required: [browsingActivity, websiteContent]`: page content
    and tab URLs leave the browser for the user's own Jarvis server. *Recommend:* keep;
    declaring "none" would be arguably true for a self-hosted stack but invites review trouble.
-3. Enrollment's browser prompt defaults to **No** (`[y/N]`). *Recommend:* switch to Yes once
-   a signed .xpi ships, since the install is then one click.
+3. Enrollment's browser prompt: **decided 2026-10-11 (user): defaults to Yes (`[Y/n]`), but is
+   always asked**; never installed without an answer (no terminal, or input that ends unanswered).
 4. `browser_open` defaults a bare host to https and refuses free text (no implicit search
    engine). *Recommend:* keep; the model builds search URLs from the description's example.
 5. Close tab: no confirmation (same as windows). Unverified: `tabs.remove` may not run a

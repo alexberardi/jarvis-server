@@ -175,15 +175,16 @@ else
   BIN="$ROOT/dist/jarvis-agent"
 fi
 
-# offer_browser BIN: set up browser control for the binary at BIN (asks unless --browser/--no-browser).
+# offer_browser BIN: set up browser control for the binary at BIN (asks, default yes, unless --browser/--no-browser).
 offer_browser() {
   case $BROWSER in
     no) return 0 ;;
     ask)
       if [ ! -t 0 ]; then say "browser control (optional): $1 browser install"; return 0; fi
-      printf 'Set up browser control, so Jarvis can use your Firefox / Chrome tabs (list, open, read, pause video)? [y/N] ' >&2
-      read -r ans || ans=''
-      case $ans in [yY]|[yY][eE][sS]) ;; *) say "skipped; later: $1 browser install"; return 0 ;; esac ;;
+      printf 'Set up browser control, so Jarvis can use your Firefox / Chrome tabs (list, open, read, pause video)? [Y/n] ' >&2
+      # Enter means yes; input that ends without an answer means no.
+      read -r ans || ans=n
+      case $ans in ''|[yY]|[yY][eE][sS]) ;; *) say "skipped; later: $1 browser install"; return 0 ;; esac ;;
   esac
   "$1" browser install || say "browser setup failed (see above); retry with: $1 browser install"
 }
