@@ -286,27 +286,16 @@ func (p *Pipeline) quietWaitWith(ctx context.Context, s *session, maxChunks int,
 	return nil
 }
 
-// validFollowUpWords may stand alone as a follow-up (N:core/conversation_filters.py
-// _VALID_FOLLOW_UP_WORDS): control verbs and bare yes/no answers.
-var validFollowUpWords = map[string]bool{
-	"stop": true, "pause": true, "resume": true, "help": true, "repeat": true,
-	"louder": true, "quieter": true, "cancel": true, "continue": true,
-	"yes": true, "no": true, "yeah": true, "sure": true,
-}
-
-// IsFollowUpNoise is conversation_filters.is_follow_up_noise: in the follow-up window only,
-// an exact repeat of the previous transcription (Whisper hallucinating on similar noise) or a
-// lone word that isn't a valid one-word follow-up.
+// IsFollowUpNoise is conversation_filters.is_follow_up_noise minus its lone-word rule: in the
+// follow-up window, only an exact repeat of the previous transcription (Whisper hallucinating on
+// similar noise) is noise. One-word answers ("Kitchen.") are real answers and are always sent
+// (user decision 2026-10-10; Python dropped words outside a small allowlist).
 func IsFollowUpNoise(text, prev string) bool {
 	if text == "" {
 		return true
 	}
 	lowered := strings.TrimRight(strings.ToLower(strings.TrimSpace(text)), ".!,?")
-	if prev != "" && lowered == strings.TrimRight(strings.ToLower(strings.TrimSpace(prev)), ".!,?") {
-		return true
-	}
-	words := strings.Fields(lowered)
-	return len(words) == 1 && !validFollowUpWords[lowered]
+	return prev != "" && lowered == strings.TrimRight(strings.ToLower(strings.TrimSpace(prev)), ".!,?")
 }
 
 var echoWord = regexp.MustCompile(`[a-z']+`)

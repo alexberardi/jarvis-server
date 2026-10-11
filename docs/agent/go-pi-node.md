@@ -164,7 +164,8 @@ These are worth fixing upstream regardless of Go:
   server expects an answer; `wait_for_input` only changes the spoken message and stops the tool
   loop. `on_response_complete` runs only for the *wake* exchange's result (a follow-up's
   "play X" never starts), and the MQTT `tool_call` path drops it. Lone-word follow-ups outside a
-  small allowlist ("Kitchen.") are discarded as noise. Validation answers are transcribed with no
+  small allowlist ("Kitchen.") are discarded as noise (the Go agent sends them: user decision
+  2026-10-10). Validation answers are transcribed with no
   `conversation_id` and no speaker audio.
 - jarvisd's streamed 200 reply carries no `end_of_exchange` (Python's neither), so a terminal
   reply spoken on the stream route can't close the follow-up window; only 202/blocking replies can.
@@ -489,7 +490,7 @@ final message), `client.go` (`VoiceCommand`, `Control.Validation`/`EndOfExchange
 | Onset | 3 loud chunks in a row (+1 per iteration, ≤ 8) at the wake's silence threshold; keep ≤ 1.5 s before onset | same |
 | Record | until 0.5 s of silence, at least 0.7 s after onset, ≤ 7 s; < 0.3 s is noise; normalised | same |
 | STT | `file` + `speaker_audio` (the wake clip + answer) + **`conversation_id`** | no `conversation_id` (§1.4) |
-| Filters | non-speech → close; noise (lone word outside the allowlist, or an exact repeat) → listen again, twice in a row → close; self-echo (≥ 85 % of the last reply's words) → close. Golden-tested against `conversation_filters.py`. | same |
+| Filters | non-speech → close; noise (an exact repeat; lone words are sent, unlike Python) → listen again, twice in a row → close; self-echo (≥ 85 % of the last reply's words) → close. Golden-tested against `conversation_filters.py`. | same |
 | Send | blocking `POST /voice/command {voice_command, conversation_id, turn_source: "follow_up", follow_up_iteration}`; the reply goes through the same loop as a wake reply (tools, validation), spoken via TTS | same |
 | Close | `end_of_exchange`, `clear_history` (a command's signal), `not_for_me`, an error, nobody speaking, 5 iterations; then `/conversation/end` | same |
 | Cue | none (Python shows a "listening" LED; a desktop has no LED) | LED |
