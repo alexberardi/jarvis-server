@@ -315,8 +315,9 @@ func TestFollowUpNoiseAndSelfEchoAreNotSent(t *testing.T) {
 		end     FollowUpEnd
 		got     []Outcome
 	}{
-		// "Okay" alone is not a follow-up; heard twice in a row the room is just noisy.
-		{"noise twice", "It is three.", []string{"Okay.", "Okay."}, 2, EndNoise, []Outcome{OutcomeNoise, OutcomeNoise}},
+		// Whisper repeating the same phrase on similar noise: the first is sent, the repeats are
+		// noise, and two in a row close the window.
+		{"noise twice", "It is three.", []string{"The weather is nice.", "The weather is nice.", "The weather is nice."}, 3, EndNoise, []Outcome{OutcomeSilent, OutcomeNoise, OutcomeNoise}},
 		// The mic picked up the tail of our own reply.
 		{"self echo", "Here is sad music.", []string{"Sad music."}, 1, EndEcho, []Outcome{OutcomeEcho}},
 		{"non-speech", "It is three.", []string{"(wind blowing)"}, 1, EndNonSpeech, []Outcome{OutcomeNonSpeech}},
@@ -336,7 +337,19 @@ func TestFollowUpNoiseAndSelfEchoAreNotSent(t *testing.T) {
 			for _, f := range tr.FollowUps {
 				got = append(got, f.Outcome)
 			}
-			if tr.FollowUpEnd != c.end || !slices.Equal(got, c.got) || slices.Contains(srv.callList(), "command") {
+			// Only answers that got past the filters reach the server.
+			sent, commands := 0, 0
+			for _, o := range c.got {
+				if o != OutcomeNoise && o != OutcomeEcho && o != OutcomeNonSpeech {
+					sent++
+				}
+			}
+			for _, call := range srv.callList() {
+				if call == "command" {
+					commands++
+				}
+			}
+			if tr.FollowUpEnd != c.end || !slices.Equal(got, c.got) || commands != sent {
 				t.Fatalf("window %s, follow-ups %v, calls %v", tr.FollowUpEnd, got, srv.callList())
 			}
 		})
@@ -412,14 +425,15 @@ func TestFollowUpDisabled(t *testing.T) {
 	}
 }
 
-// Goldens computed with N:core/conversation_filters.py (jarvis-node-setup 0.3.4).
+// Goldens computed with N:core/conversation_filters.py (jarvis-node-setup 0.3.4), except that
+// lone words are no longer noise (Python's allowlist rule was dropped on purpose).
 func TestFollowUpFiltersMatchPython(t *testing.T) {
 	noise := []struct {
 		text, prev string
 		want       bool
 	}{
-		{"", "", true}, {"Okay.", "", true}, {"Yes.", "", false}, {"stop!", "", false}, {"Kitchen", "", true},
-		{"The kitchen one.", "", false}, {"The kitchen one.", "the kitchen one", true}, {"  Thanks  ", "", true},
+		{"", "", true}, {"Okay.", "", false}, {"Yes.", "", false}, {"stop!", "", false}, {"Kitchen", "", false},
+		{"The kitchen one.", "", false}, {"The kitchen one.", "the kitchen one", true}, {"  Thanks  ", "", false}, {"Kitchen.", "kitchen", true},
 		{"Set it to 30.", "Set it to 30", true}, {"Set it to 30.", "set it to 40", false}, {"CANCEL?", "", false},
 		{"yes please", "", false},
 	}

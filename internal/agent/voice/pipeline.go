@@ -74,7 +74,7 @@ const (
 	OutcomeNotForMe  Outcome = "not_for_me" // CC decided the speech wasn't addressed to Jarvis
 	OutcomeNonSpeech Outcome = "non_speech" // STT heard nothing that looks like words
 	OutcomeSilent    Outcome = "silent"     // "complete" with nothing to say
-	OutcomeNoise     Outcome = "noise"      // follow-up only: a lone word or a repeat, not sent
+	OutcomeNoise     Outcome = "noise"      // follow-up only: an exact repeat, not sent
 	OutcomeEcho      Outcome = "self_echo"  // follow-up only: the mic heard our own reply
 	OutcomeError     Outcome = "error"
 )
