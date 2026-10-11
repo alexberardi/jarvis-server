@@ -3,6 +3,7 @@ package cc
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
@@ -273,5 +274,32 @@ func TestFollowUpIsFramedAsOverheardUnlessWeAsked(t *testing.T) {
 				t.Fatalf("framed %v, want %v: %q", framed, c.framed, user)
 			}
 		})
+	}
+}
+
+// TestVoiceReferenceIsForgottenWithoutAnEnd: the anonymous reference voice lives only as long
+// as the interaction. /conversation/end drops it; a conversation that never ends (node crash)
+// is swept once idle past signalTTL, without waiting for another conversation to start.
+func TestVoiceReferenceIsForgottenWithoutAnEnd(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := newConvSignals(func() time.Time { return now })
+	s.claimReference("ended")
+	s.setVoiceReference("ended", voiceAt(1, 0))
+	s.claimReference("crashed")
+	s.setVoiceReference("crashed", voiceAt(1, 0))
+
+	s.drop("ended")
+	if _, ok := s.m["ended"]; ok {
+		t.Fatal("/conversation/end kept the reference voice")
+	}
+	now = now.Add(signalTTL - time.Second)
+	s.sweep()
+	if s.m["crashed"] == nil || s.m["crashed"].voiceRef == nil {
+		t.Fatal("swept a conversation that is still within its TTL")
+	}
+	now = now.Add(2 * time.Second)
+	s.sweep()
+	if _, ok := s.m["crashed"]; ok {
+		t.Fatal("an idle conversation's reference voice outlived signalTTL")
 	}
 }

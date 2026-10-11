@@ -153,6 +153,28 @@ func (s *convSignals) storedWake(convID string) *wakeVerdict {
 	return nil
 }
 
+// sweep drops records idle past signalTTL, so a conversation whose /conversation/end never
+// arrives (node crash, lost network) does not keep its voice in memory until the next one.
+func (s *convSignals) sweep() {
+	s.mu.Lock()
+	s.gcLocked()
+	s.mu.Unlock()
+}
+
+// runSweeper sweeps until ctx ends.
+func (s *convSignals) runSweeper(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.sweep()
+		}
+	}
+}
+
 func (s *convSignals) drop(convID string) {
 	s.mu.Lock()
 	delete(s.m, convID)

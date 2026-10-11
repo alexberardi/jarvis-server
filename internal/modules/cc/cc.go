@@ -362,6 +362,7 @@ func (m *Module) Start(ctx context.Context) error {
 		}
 	}
 	go m.convs.runSweeper(ctx, convSweep)
+	go m.signals.runSweeper(ctx, convSweep)
 	if err := m.startMemory(ctx); err != nil {
 		return err
 	}
