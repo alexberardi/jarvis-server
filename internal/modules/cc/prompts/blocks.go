@@ -195,3 +195,12 @@ func UserMessage(utterance string, hints []string, suffix string) string {
 	}
 	return s
 }
+
+// OverheardFollowUp frames a follow-up window's transcript as what it is: speech the open
+// mic heard in the room, which may or may not be for the assistant. Presented bare, a line
+// like "Are you going to bed now too?" reads as said to the assistant (go-pi-node.md §3.10).
+func OverheardFollowUp(utterance string) string {
+	return "(Heard while the mic stayed open after your reply; no wake word. If it answers your " +
+		"question, follows up on what you just said, or asks you to do something, respond. If it " +
+		"needs no action or response from you, emit <not_for_me/>.)\n\"" + utterance + "\""
+}

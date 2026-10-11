@@ -129,6 +129,11 @@ values index `hint_strings`):
 | `engine.json` | `_canonical_args_key`, keyword pool and match, `normalize_param_type`, `find_invalid_params`, and every engine nag string (evaluated from the real engine's f-string nodes). |
 | `format.json` | `_format_tool_result_text_mode` (sent prompt + result, stub LLM reply) and `stream_continue_with_tool_results` (LLM messages, spoken sentences, committed history; stub LLM deltas and TTS) for 14B (text) and 3.5-9B (native). |
 
+Hand-edited, not re-exported: `hints.json`'s plain follow-up-window turn hint (6 strings) carries
+Go's sharper wording (2026-10-11, [agent/go-pi-node.md §3.10](../../docs/agent/go-pi-node.md)):
+concrete cues for speech meant for someone else, and short replies that are for Jarvis. A
+re-export from Python brings back the old sentence; keep Go's.
+
 Go tests: `internal/modules/cc/textfilter` and `internal/modules/cc/hints`, all rows byte-exact.
 Intended difference: M5 (acknowledgment keywords on word boundaries); 12 corpus rows change pool.
 

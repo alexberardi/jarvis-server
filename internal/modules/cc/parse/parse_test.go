@@ -95,6 +95,18 @@ func TestSentinels(t *testing.T) {
 	if SentinelNotForMe("Answer.<THINK>then <not_for_me/> truncated") {
 		t.Error("sentinel inside unclosed think matched")
 	}
+	// The verdict written as words (seen live on a follow-up) is the verdict; prose that
+	// merely contains them is not.
+	for _, s := range []string{"Not for me.", "not_for_me", " <think>hm</think>Not for me! ", "Not for you."} {
+		if !SentinelNotForMe(s) {
+			t.Errorf("%q is the bare verdict", s)
+		}
+	}
+	for _, s := range []string{"That's not for me to say.", "Not for me, but here's the forecast."} {
+		if SentinelNotForMe(s) {
+			t.Errorf("%q is prose", s)
+		}
+	}
 	if !SentinelNotForMe("", "<think>x</think><not_for_me/>") {
 		t.Error("sentinel outside think missed")
 	}

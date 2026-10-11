@@ -5,7 +5,9 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -96,8 +98,9 @@ func (e gateEvidence) hint() string {
 		if e.Quiet {
 			s += " It was also much quieter than the wake request, as if from across the room."
 		}
-		return s + " Answer it only if it is clearly addressed to you (your name, or an unmistakable " +
-			"continuation of what you just said); otherwise emit <not_for_me/>.]"
+		return s + " Answer it only if it is clearly addressed to you (your name, an answer to a " +
+			"question you just asked, or an unmistakable continuation of what you just said); " +
+			"otherwise emit <not_for_me/>.]"
 	case e.Quiet && e.Voice != voiceSame:
 		return "[voice check: this follow-up was much quieter than the wake request, as if from across " +
 			"the room or a TV. Answer a clear continuation of your exchange; emit <not_for_me/> for speech " +
@@ -253,4 +256,21 @@ func (m *Module) setVoiceRef(convID string, v stt.Voice, ms int64) {
 	m.signals.setVoiceReference(convID, v)
 	m.deps.Log.Info("cc: follow-up voice reference", "conversation_id", convID, "usable", v.Usable(),
 		"speech_s", round3(v.SpeechSecs), "ms", ms)
+}
+
+// askedQuestion reports whether our last spoken reply in msgs ended in a question: the
+// follow-up is then an expected answer ("Which room?" → "Kitchen."), not overheard speech.
+func askedQuestion(msgs []chatMsg) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != "assistant" || len(m.ToolCalls) > 0 {
+			continue
+		}
+		text := strings.TrimSpace(parse.StripExchangeComplete(parse.OutsideThink(m.Content)))
+		if text == "" {
+			continue
+		}
+		return strings.HasSuffix(strings.TrimRight(text, " \"'”’)"), "?")
+	}
+	return false
 }

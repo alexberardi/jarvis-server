@@ -216,3 +216,62 @@ func TestFollowUpGateVoiceReferenceAndComparison(t *testing.T) {
 		t.Fatal("an unusable clip gives no comparison")
 	}
 }
+
+// A follow-up's double-check never claims the wake word fired: in the follow-up window there
+// was none, and that premise talked the model out of correct verdicts on the user speaking to
+// someone else in the room. A wake turn keeps the wake's message.
+func TestFollowUpDoubleCheckIsHonestAboutTheWindow(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	gateConv(t, ve)
+	before := len(ve.eng.requests())
+	ve.stt.voices = []stt.Voice{voiceAt(1, 0)} // the same voice: no acoustic doubt
+	ve.transcribe("c1", true)
+	ve.eng.say("<not_for_me/>")
+	ve.eng.say("<not_for_me/>")
+	if b := followUp(ve, "honey can you grab my keys", nil); b["stop_reason"] != "not_for_me" {
+		t.Fatalf("body %v", b)
+	}
+	reqs := ve.eng.requests()[before:]
+	if len(reqs) != 2 {
+		t.Fatalf("%d model calls, want the double-check", len(reqs))
+	}
+	msgs := messagesOf(reqs[1])
+	check, _ := msgs[len(msgs)-1]["content"].(string)
+	if !strings.HasPrefix(check, "[NOT_FOR_ME_DOUBLE_CHECK]") || strings.Contains(check, "wake word fired") ||
+		!strings.Contains(check, "NO wake word") {
+		t.Fatalf("follow-up double-check %q", check)
+	}
+}
+
+// A follow-up nobody was asked for reaches the model framed as speech the open mic heard;
+// an answer to our own question, and any follow-up with the gate off, stays the bare reply.
+func TestFollowUpIsFramedAsOverheardUnlessWeAsked(t *testing.T) {
+	for _, c := range []struct {
+		name, reply string
+		gate        bool
+		framed      bool
+	}{
+		{"after a statement", "It's 66 and overcast.", true, true},
+		{"after our question", "Which room — the kitchen or the living room?", true, false},
+		{"gate off", "It's 66 and overcast.", false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ve := newVoiceEnv(t, prompts.Qwen3_8B)
+			ve.set(settingFollowUpGate, c.gate, settings.Scope{})
+			ve.start("c1", "[]")
+			ve.stt.voices = []stt.Voice{voiceAt(1, 0)}
+			ve.transcribe("c1", true)
+			ve.eng.say(c.reply)
+			ve.turn("/api/v0/voice/command", "c1", "what's up", map[string]any{"turn_source": "wake", "wake_confidence": 0.9}).want(200)
+			ve.transcribe("c1", true)
+			ve.eng.say("Done.")
+			followUp(ve, "kitchen", nil)
+			msgs := messagesOf(ve.eng.last())
+			user, _ := msgs[len(msgs)-1]["content"].(string)
+			framed := strings.Contains(user, "(Heard while the mic stayed open") && strings.Contains(user, "\"kitchen\"")
+			if framed != c.framed || !strings.Contains(user, "kitchen") {
+				t.Fatalf("framed %v, want %v: %q", framed, c.framed, user)
+			}
+		})
+	}
+}

@@ -44,6 +44,24 @@ const NotForMeDoubleCheckPrompt = "[NOT_FOR_ME_DOUBLE_CHECK] You dismissed that 
 	"<not_for_me/> alone again. Otherwise answer " +
 	"normally or call the right tool. /think"
 
+// NotForMeFollowUpDoubleCheckPrompt is the double-check for a follow-up turn. The wake
+// variant's premise (the wake word fired, the room was quiet) is false in the follow-up
+// window, and it talked the model out of correct verdicts on the user speaking to someone
+// else in the room ("Honey, can you grab my keys?": internal/modules/cc
+// TestFollowUpAmbientEvalLive).
+const NotForMeFollowUpDoubleCheckPrompt = "[NOT_FOR_ME_DOUBLE_CHECK] You dismissed that utterance with " +
+	"<not_for_me/>. This is the follow-up window: there was NO wake word — the mic stayed open " +
+	"after your reply, so it hears the whole room, not only the user. Re-read it once. It is for " +
+	"you if it answers a question you just asked, asks about or changes what you just said or " +
+	"did, or asks for something only you can do (a timer, the list, the lights, a lookup); a " +
+	"word or two answering your question, \"thanks\", or a pronoun for what you just talked " +
+	"about count. It is " +
+	"NOT for you if it speaks to someone else — a name or pet name (\"babe\", \"honey\", " +
+	"\"kids\"), a question about the listener's own day, plans, wishes or whereabouts, a request " +
+	"only a person in the room could carry out (grab, pass, hand, stir, come) — or is one side of " +
+	"a phone call, or a remark or exclamation with no request in it. If it is not for you, reply " +
+	"with <not_for_me/> alone again. Otherwise answer normally or call the right tool. /think"
+
 // MaxIterationsFallback is spoken when the tool loop exhausts its iterations (D40 02.Q9:
 // a natural fallback replaces "Maximum tool execution iterations reached."; the trace keeps
 // error "max_iterations_exceeded").

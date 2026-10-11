@@ -616,6 +616,52 @@ closed the window. **Not verified live:** the server half (voice comparison insi
 `keep_listening`, the acoustic drop): the dev jarvisd needs a restart on this branch; a real room
 with real people and a real TV.
 
+**Ambient room speech (2026-10-11).** The gate above catches *other* voices; the user's own voice
+talking to someone else in the room was answered almost every time, and every rejected answer
+restarted the 8 s window. `internal/modules/cc/testdata/ambient_followups.json` is a 99-line corpus
+of follow-ups over 10 woken exchanges (two of them end in a question): genuine follow-ups and
+short answers ("Kitchen.", "Thanks."), the user speaking to someone else (often on Jarvis's topic:
+"Babe, grab the umbrella, it's going to rain"), phone calls, remarks, kids and pets, other people,
+TV. `TestFollowUpAmbientEvalLive` plays each through the real turn pipeline with the gate on and
+the case's voice evidence; it takes any OpenAI-compatible endpoint, so it is the check to run for
+each model a household may use (wording that works for Qwen3.5-9B may not for another model).
+
+| Qwen3.5-9B Q4_K_M, pinned template, GPU | n | main | now (3 runs) |
+|---|---|---|---|
+| genuine follow-ups and answers, must be answered | 32 | 32 | **32, 32, 32** |
+| the user's voice not talking to Jarvis (to someone else, phone, remarks, kids/pets) | 39 | 6 | **32, 33, 34** |
+| other voices and TV | 23 | 21 | **23, 23, 23** |
+
+What changed, and why (each measured on the corpus):
+- **Framing (`prompts.OverheardFollowUp`).** A follow-up nobody asked for reaches the model as what
+  the open mic heard: `(Heard while the mic stayed open after your reply; no wake word. If it
+  answers your question, follows up on what you just said, or asks you to do something,
+  respond. If it needs no action or response from you, emit <not_for_me/>.)` then the quoted
+  transcript. Presented bare, "Are you going to bed now too?" reads as said to Jarvis. When our
+  last reply asked a question the transcript stays bare: framed, the model rejected "Kitchen." and
+  "Both." after "Which room?". Gate off = bare, as before.
+- **The follow-up turn hint** names concrete cues: a name or pet name, a question about the
+  listener's own day or plans, a request only a person could do (grab, pass, stir), one side of a
+  phone call, a remark to the room, and says short replies to Jarvis count.
+- **An honest double-check.** The not_for_me double-check told the model "the wake word fired;
+  the room was quiet", false in the follow-up window; it talked the model out of correct
+  verdicts ("Honey, can you grab my keys?"). Follow-ups get their own message. It stays: on the
+  corpus it rescued a genuine "Who pitched?" and flipped 3 correct rejections; a double-checked
+  rejection takes ~2.8 s on the GPU (one answer ~0.6 s).
+- **A bare "Not for me." / "Not for you." reply is the sentinel**: the model wrote the verdict as
+  words twice in the runs, which would have been spoken.
+- **Ignored answers don't restart the window** (node, `IgnoredGraceSecs` 2): the window keeps what
+  is left of it, at least 2 s. Before, every rejected answer bought the room a fresh 8 s.
+
+Still answered: questions about the listener's own plans that Jarvis could answer about itself
+("Are you going to bed now too?", "How do you like yours?"), "Ugh, I totally forgot about that"
+after a calendar answer, the near side of a phone call ("Yeah, I'll be there in ten minutes"),
+and anything after Jarvis asked a question. A harness note: until this change the semantic evals
+scripted the woken reply once, and an action-shaped command ("Turn off the lights", "Set a timer")
+drew the must-call retry, which got the fake engine's default "ok"; `scriptWake` now scripts both
+and fails if the history doesn't hold the intended reply. The 2026-10-10 table above was measured
+with that flaw for its action-shaped contexts.
+
 **Python node (jarvis-node-setup): plan, not done.** It already benefits from the server half: a
 rejected follow-up no longer enters history and skips the double-check when a level or voice
 doubts it. To get the rest, one PR:

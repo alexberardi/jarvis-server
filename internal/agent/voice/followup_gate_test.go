@@ -3,6 +3,7 @@ package voice
 import (
 	"math"
 	"slices"
+	"sync"
 	"testing"
 )
 
@@ -151,5 +152,61 @@ func TestFollowUpAnswerSurvivesAPauseMidSentence(t *testing.T) {
 	}
 	if got, min := tr.FollowUps[0].RecordedSecs, float64(24+frames(1.0))*chunkSecs; got < min {
 		t.Fatalf("recorded %.2f s, want at least %.2f s (both halves)", got, min)
+	}
+}
+
+// An ignored answer doesn't buy the room a new window: the window keeps what was left of it,
+// but at least IgnoredGraceSecs.
+func TestIgnoredAnswerDoesNotRestartTheWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		speech int // chunks of the ignored answer
+		want   func(cfg FollowUpConfig, opened []int, end int) (got, want int)
+	}{
+		{"the rest of the window", 30, func(cfg FollowUpConfig, opened []int, end int) (int, int) {
+			// The whole window, the ignored answer included, is ~8 s of audio, not 8 + 8.
+			return end - opened[0], frames(cfg.ListenSecs)
+		}},
+		{"at least the grace", 100, func(cfg FollowUpConfig, opened []int, end int) (int, int) {
+			return end - opened[1], frames(cfg.IgnoredGraceSecs)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newServer()
+			srv.texts = []string{"And the score is three to one."}
+			srv.followUp = func(StreamRequest) (*Control, error) {
+				return &Control{StopReason: "not_for_me", KeepListening: true}, nil
+			}
+			mic := oneWake()
+			r := newRig(t, mic, srv)
+			l := answer(r, mic, rep(speech, tc.speech))
+			var mu sync.Mutex
+			var opened []int
+			inner := r.p.listening
+			r.p.listening = func(stage string) {
+				mu.Lock()
+				opened = append(opened, mic.readCount())
+				mu.Unlock()
+				inner(stage)
+			}
+			var end int
+			r.p.OnTurn = func(tr Turn) { end = mic.readCount(); r.turns <- tr }
+			stop := r.run(t)
+			tr := r.turn(t)
+			_ = stop()
+			if tr.FollowUpEnd != EndTimeout || len(tr.FollowUps) != 1 || tr.FollowUps[0].Outcome != OutcomeIgnored {
+				t.Fatalf("window %s, follow-ups %+v", tr.FollowUpEnd, tr.FollowUps)
+			}
+			if got := l.list(); len(got) != 2 {
+				t.Fatalf("listened %v", got)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			got, want := tc.want(r.p.Cfg.FollowUp, opened, end)
+			// The mic is read ahead of the pipeline by up to its queue.
+			if got < want-chunkQueue-4 || got > want+chunkQueue+4 {
+				t.Fatalf("listened %d chunks, want ~%d", got, want)
+			}
+		})
 	}
 }
