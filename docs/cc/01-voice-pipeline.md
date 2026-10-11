@@ -398,6 +398,10 @@ These are read per household unless noted. Definitions are in `services/settings
 | `voice.wake_verification_mode` | `off` | `off`, `bias` or `enforce`. Unknown values become `off`. Per household and node. |
 | `voice.wake_verification_phrase` | `jarvis` | Fuzzy-match target |
 | `voice.followup_doubt_max_rounds` | 2 | Doubt wrap-up cap; ≤0 uses the default |
+| `voice.follow_up_gate` | true | **jarvisd, new (2026-10-10).** The follow-up gate ([agent/go-pi-node.md §3.10](../agent/go-pi-node.md)): a `not_for_me` follow-up is not committed to history and answers `keep_listening: true`; acoustic evidence (voice vs the wake, `level_vs_wake_db`) drops or hints. Off = legacy behaviour. Per household and node. |
+| `voice.follow_up_voice_mismatch` / `voice.follow_up_voice_match` | 0.25 / 0.40 | **jarvisd.** ERes2Net cosine of a follow-up to the conversation's first transcription: below = a different voice, at/above = the same voice |
+| `voice.follow_up_quiet_db` | -10 | **jarvisd.** `level_vs_wake_db` at or below = far away. Only a different voice that is also this quiet is dropped before the model |
+| `voice.follow_up_max_ignored` | 3 | **jarvisd.** Rejected follow-ups in a row before `keep_listening` stops (the node closes its window) |
 | `tts.url` | (discovery) | TTS base URL override |
 
 Env vars:

@@ -76,6 +76,7 @@ const (
 	OutcomeSilent    Outcome = "silent"     // "complete" with nothing to say
 	OutcomeNoise     Outcome = "noise"      // follow-up only: an exact repeat, not sent
 	OutcomeEcho      Outcome = "self_echo"  // follow-up only: the mic heard our own reply
+	OutcomeIgnored   Outcome = "ignored"    // follow-up only: CC's gate said not for me, keep listening
 	OutcomeError     Outcome = "error"
 )
 
@@ -360,6 +361,9 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	s.threshold = t.Threshold
 	pcm, hitMax, err := p.record(ctx, s)
 	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
+	if db, ok := SpeechLevel(pcm, s.threshold); ok {
+		s.wakeLevel = &db // the follow-up gate's level reference
+	}
 	if err != nil {
 		t.Outcome, t.Err = OutcomeError, err
 		return

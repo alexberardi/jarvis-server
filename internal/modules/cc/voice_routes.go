@@ -58,6 +58,9 @@ func parseTurn(w http.ResponseWriter, r *http.Request) (turnInput, bool) {
 	if s, ok := b.optStrPtr("self_playback_kind"); ok && s != nil {
 		in.SelfPlaybackKind = *s
 	}
+	if v, ok := b.number("level_vs_wake_db"); ok {
+		in.LevelVsWake = &v
+	}
 	if !b.done(w) {
 		return turnInput{}, false
 	}
@@ -157,6 +160,15 @@ func voiceResponse(commands []any, info *pyjson.Object, stop any, calls []any, v
 		"reasoning", reasoning, "end_of_exchange", endOfExchange)
 }
 
+// withKeepListening adds keep_listening: true to a follow-up the gate rejected (the node keeps
+// its window open). The field is absent otherwise, so every other body keeps its legacy shape.
+func withKeepListening(body *pyjson.Object, res engineResult) *pyjson.Object {
+	if res.KeepListening {
+		body.Set("keep_listening", true)
+	}
+	return body
+}
+
 // wireStop maps an engine stop onto the StopReason enum (unknown → complete).
 func wireStop(s string) string {
 	switch s {
@@ -213,6 +225,7 @@ func (m *Module) handleVoiceCommand(w http.ResponseWriter, r *http.Request, n *n
 		}
 		body = voiceResponse(nil, info, wireStop(res.Stop), toolCallsList(res.ToolCalls),
 			validationObject(res.Validation), nullIfBlank(msg), nullIfBlank(res.Reasoning), res.EndOfExchange)
+		withKeepListening(body, res)
 	}
 	endBuild(nil)
 	m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command", in.VoiceCommand, res.Message, start, nil)
@@ -251,8 +264,8 @@ func (m *Module) handleVoiceStream(w http.ResponseWriter, r *http.Request, n *no
 	}
 	m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command_stream", in.VoiceCommand, res.Message, start, nil)
 	msg := resultMessage(res)
-	httpx.WriteJSON(w, http.StatusAccepted, voiceResponse(nil, requestInfo(in.VoiceCommand, in.ConversationID),
-		wireStop(res.Stop), toolCallsList(res.ToolCalls), validationObject(res.Validation), msg, nil, res.EndOfExchange))
+	httpx.WriteJSON(w, http.StatusAccepted, withKeepListening(voiceResponse(nil, requestInfo(in.VoiceCommand, in.ConversationID),
+		wireStop(res.Stop), toolCallsList(res.ToolCalls), validationObject(res.Validation), msg, nil, res.EndOfExchange), res))
 }
 
 // --- /voice/command/continue ---

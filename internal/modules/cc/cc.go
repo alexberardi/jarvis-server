@@ -52,7 +52,7 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 // keys are marked Household, so the admin shows and edits each household's own value.
 func Definitions() []settings.Definition {
 	return markHouseholdControllable(routineDefinitions(slices.Concat(nodeDefinitions(),
-		voiceDefinitions(prompts.DefaultPersona), packageDefinitions(), smartHomeDefinitions(),
+		voiceDefinitions(prompts.DefaultPersona), followUpGateDefinitions(), packageDefinitions(), smartHomeDefinitions(),
 		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(),
 		householdSettingDefinitions(), compactionDefinitions())))
 }

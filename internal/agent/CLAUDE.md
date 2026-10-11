@@ -73,6 +73,7 @@ internal/agent/
                       window -> listen again (pipeline.go), the conversation loop: tool rounds +
                       validation questions + the final message (converse.go), client tool calls
                       (tools.go), the follow-up window and its noise/echo filters (followup.go),
+                      the speech level the follow-up gate weighs (level.go),
                       Python-node endpointing (endpoint.go), the CC voice client (client.go),
                       wake-model fetch (models.go), Serve (reopen on failure)
 internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
@@ -171,13 +172,17 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     chain (list windows -> minimise); the stream route can't chain (go-pi-node.md §3.8). Tool
     calls in a voice turn aren't `/verify`'d: they come on the node's own authenticated HTTP
     response. Each call is bounded by `Config.ToolTimeout` and a panic is a failure result.
-21. **Follow-up is the Python node's** (go-pi-node.md §3.9): a window after every reply not
-    marked `end_of_exchange` / `not_for_me`, 4 s then 3 s, ≤ 5, sent as blocking
-    `/voice/command` follow_up turns of the same conversation; `validation_required` is asked
-    aloud and answered as `validation-response` on the blocking continue. Before any wake-free
-    listening the queue is flushed (our own reply) and a quiet-wait runs; keep both, a desktop
-    has no AEC. Windows are counted in captured chunks, never wall-clock, so tests script the
-    user through `Pipeline.listening` instead of racing timers.
+21. **Follow-up is the Python node's, widened by command-center's gate** (go-pi-node.md §3.9,
+    §3.10): a window after every reply not marked `end_of_exchange` / `not_for_me`, 8 s then 6,
+    then 5 (Python: 4 then 3), ≤ 5, answers end after 1.2 s of silence (Python 0.5) and may run
+    10 s; sent as blocking `/voice/command` follow_up turns of the same conversation with
+    `level_vs_wake_db`. A `not_for_me` with `keep_listening` is ignored silently and the window
+    listens again (same iteration, no flush: nothing was said), at most `MaxIgnored`; without
+    `keep_listening` (an older server) it closes the window as before. `validation_required` is
+    asked aloud and answered as `validation-response` on the blocking continue. Before
+    wake-free listening *after we spoke* the queue is flushed (our own reply) and a quiet-wait
+    runs; keep both, a desktop has no AEC. Windows are counted in captured chunks, never
+    wall-clock, so tests script the user through `Pipeline.listening` instead of racing timers.
 22. **Command signals never leave the node.** A Toolset may put `node.Signals`
     (`wait_for_input`, `clear_history`, `on_response_complete`) under `node.SignalsKey` in an
     output; every consumer (the dispatcher, the voice loop) calls `node.TakeSignals` before

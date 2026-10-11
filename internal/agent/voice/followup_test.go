@@ -147,9 +147,10 @@ func TestFollowUpWindowClosesQuietlyWhenNobodySpeaks(t *testing.T) {
 	if n := len(r.spk.all()); n != 2 {
 		t.Fatalf("%d playbacks: the window must open silently", n)
 	}
-	// The window is 4 s of audio (50 chunks), not an instant.
-	if d := readsAtEnd - readsAtOpen; d < 49 || d > 50+chunkQueue+4 {
-		t.Fatalf("window lasted %d chunks, want ~50", d)
+	// The window is 8 s of audio (100 chunks), not an instant.
+	want := frames(DefaultFollowUp().ListenSecs)
+	if d := readsAtEnd - readsAtOpen; d < want-1 || d > want+chunkQueue+4 {
+		t.Fatalf("window lasted %d chunks, want ~%d", d, want)
 	}
 }
 

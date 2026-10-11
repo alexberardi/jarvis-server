@@ -251,3 +251,35 @@ func TestStartConversationSendsTheToolsAndContinuePostsResults(t *testing.T) {
 		t.Fatalf("nil results must post [] (got %s)", b)
 	}
 }
+
+func TestFollowUpGateWire(t *testing.T) {
+	// The follow-up gate's two fields: level_vs_wake_db out (only when known), keep_listening in.
+	var bodies []map[string]any
+	answer := `{"commands":[],"request_information":{},"stop_reason":"not_for_me","tool_calls":[],"validation_request":null,"assistant_message":null,"reasoning":null,"end_of_exchange":false,"keep_listening":true}`
+	s := cc(t, func(w http.ResponseWriter, r *http.Request, body []byte) {
+		var m map[string]any
+		_ = json.Unmarshal(body, &m)
+		bodies = append(bodies, m)
+		_, _ = w.Write([]byte(answer))
+	})
+	it, level := 2, -12.5
+	c, err := s.VoiceCommand(context.Background(), StreamRequest{VoiceCommand: "and the score is", ConversationID: "c1",
+		TurnSource: "follow_up", FollowUpIteration: &it, LevelVsWake: &level})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bodies[0]["level_vs_wake_db"] != -12.5 || bodies[0]["follow_up_iteration"] != 2.0 {
+		t.Fatalf("body %v", bodies[0])
+	}
+	if c.StopReason != "not_for_me" || !c.KeepListening {
+		t.Fatalf("control %+v", c)
+	}
+	answer = strings.Replace(answer, `,"keep_listening":true`, "", 1) // a server without the gate
+	c, err = s.VoiceCommand(context.Background(), StreamRequest{VoiceCommand: "x", ConversationID: "c1", TurnSource: "follow_up"})
+	if err != nil || c.KeepListening {
+		t.Fatalf("control %+v, err %v", c, err)
+	}
+	if _, has := bodies[1]["level_vs_wake_db"]; has {
+		t.Fatalf("an unknown level is not sent: %v", bodies[1])
+	}
+}

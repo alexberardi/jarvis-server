@@ -29,9 +29,10 @@ type session struct {
 	id         string
 	log        *slog.Logger
 	chunks     <-chan []int16
-	wakeClip   []int16 // prepended to every speaker_audio in this conversation
-	threshold  float64 // the wake's silence threshold, reused by every later recording
-	userID     *int64  // the last speaker STT identified
+	wakeClip   []int16  // prepended to every speaker_audio in this conversation
+	threshold  float64  // the wake's silence threshold, reused by every later recording
+	wakeLevel  *float64 // the woken command's speech level (dBFS); follow-ups report theirs against it
+	userID     *int64   // the last speaker STT identified
 	onComplete []func() error
 }
 

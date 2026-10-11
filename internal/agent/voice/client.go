@@ -83,6 +83,9 @@ type StreamRequest struct {
 	WakeConfidence    *float64       `json:"wake_confidence,omitempty"`
 	Affect            map[string]any `json:"affect,omitempty"`
 	FollowUpIteration *int           `json:"follow_up_iteration,omitempty"` // 1-based
+	// LevelVsWake is a follow-up's speech level against the woken command's, in dB: the
+	// follow-up gate's level signal (uploads are normalised, so only the node knows).
+	LevelVsWake *float64 `json:"level_vs_wake_db,omitempty"`
 }
 
 // Reply is either streamed speech (200) or a control response (202).
@@ -101,6 +104,9 @@ type Control struct {
 	// EndOfExchange: the model marked the reply terminal (<exchange_complete/>), so no
 	// follow-up window (null on the wire means false).
 	EndOfExchange bool `json:"end_of_exchange"`
+	// KeepListening comes with a follow-up command-center's gate rejected (not_for_me): the
+	// window stays open. Absent (false) from servers without the gate: not_for_me closes it.
+	KeepListening bool `json:"keep_listening"`
 	// Commands carries a processing error on the blocking routes (stop_reason null on
 	// /continue, "complete" with no message on /voice/command).
 	Commands []struct {

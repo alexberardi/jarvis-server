@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 )
 
 // Per-conversation signals produced by the media proxy's transcription (docs/cc/06 §11
@@ -27,7 +29,13 @@ type signalEntry struct {
 	identity *turnIdentity // the newest identity not yet consumed by a turn
 	wake     *wakeVerdict
 	wakeDone chan struct{} // non-nil while a verification is pending or done
-	at       time.Time
+	// The follow-up gate's voice comparison (followup_gate.go): the reference voice (the
+	// conversation's first transcription), whether that role is taken, and the newest
+	// comparison not yet consumed by a turn.
+	voiceRef      *stt.Voice
+	voiceRefTaken bool
+	voiceMatch    *float64
+	at            time.Time
 }
 
 type convSignals struct {

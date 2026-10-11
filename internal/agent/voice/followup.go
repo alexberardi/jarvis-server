@@ -23,22 +23,33 @@ import (
 // Time is counted in captured chunks (80 ms each), not wall-clock time: the same thing on a
 // real microphone, and deterministic on a scripted one.
 
-// FollowUpConfig is the follow-up window's tuning. DefaultFollowUp is the Python node's.
+// FollowUpConfig is the follow-up window's tuning. DefaultFollowUp is the Python node's, except
+// where command-center's follow-up gate (go-pi-node.md §3.10) made a longer window affordable.
 type FollowUpConfig struct {
-	ListenSecs        float64 // follow_up_listen_seconds: the first window (4 s; 0 turns follow-up off)
+	ListenSecs        float64 // follow_up_listen_seconds: the first window (0 turns follow-up off)
 	MaxIterations     int     // max_follow_up_iterations (5)
 	DecaySecs         float64 // follow_up_timeout_decay_secs: each window this much shorter (2 s)
-	MinTimeoutSecs    float64 // follow_up_min_timeout_secs: but never under this (3 s)
+	MinTimeoutSecs    float64 // follow_up_min_timeout_secs: but never under this
 	QuietWaitSecs     float64 // follow_up_quiet_wait_secs: at most this long draining the reply's tail (0.5 s)
-	SilenceSecs       float64 // follow_up_silence_duration: silence that ends an answer (0.5 s)
+	SilenceSecs       float64 // follow_up_silence_duration: silence that ends an answer
 	MinAfterOnsetSecs float64 // follow_up_min_record_after_onset_secs (0.7 s)
 	MinSpeechSecs     float64 // follow_up_min_speech_secs: shorter recordings are noise (0.3 s)
+	MaxRecordSecs     float64 // an answer is cut here (0: Endpointing.MaxSecs)
+	// MaxIgnored bounds the answers command-center may reject in one window (keep_listening)
+	// before the node closes it on its own; command-center's own bound
+	// (voice.follow_up_max_ignored, 3) normally closes it first.
+	MaxIgnored int
 }
 
-// DefaultFollowUp is the Python node's configuration out of the box.
+// DefaultFollowUp is the follow-up window out of the box (go-pi-node.md §3.10 has the
+// evidence). Changed from the Python node's: 8 s to start answering instead of 4 (then 6, then
+// 5), because speech that isn't for Jarvis now costs nothing; 1.2 s of silence ends an answer
+// instead of 0.5 (0.5 s cut 37% of real read utterances mid-sentence, 1.2 s 1.6%); answers may
+// run 10 s instead of 7.
 func DefaultFollowUp() FollowUpConfig {
-	return FollowUpConfig{ListenSecs: 4, MaxIterations: 5, DecaySecs: 2, MinTimeoutSecs: 3,
-		QuietWaitSecs: 0.5, SilenceSecs: 0.5, MinAfterOnsetSecs: 0.7, MinSpeechSecs: 0.3}
+	return FollowUpConfig{ListenSecs: 8, MaxIterations: 5, DecaySecs: 2, MinTimeoutSecs: 5,
+		QuietWaitSecs: 0.5, SilenceSecs: 1.2, MinAfterOnsetSecs: 0.7, MinSpeechSecs: 0.3,
+		MaxRecordSecs: 10, MaxIgnored: 5}
 }
 
 // Fixed parts of the Python node's follow-up listening.
@@ -67,12 +78,18 @@ const (
 	EndClearHistory  FollowUpEnd = "clear_history"   // a command finished the exchange
 	EndNotForMe      FollowUpEnd = "not_for_me"      // command-center: not addressed to Jarvis
 	EndMaxIterations FollowUpEnd = "max_iterations"
+	EndIgnored       FollowUpEnd = "ignored"  // FollowUp.MaxIgnored answers rejected in one window
 	EndDisabled      FollowUpEnd = "disabled" // FollowUp.ListenSecs <= 0
 	EndError         FollowUpEnd = "error"
 )
 
 // followUp runs the follow-up window after the woken exchange, recording each answer in
 // t.FollowUps and why it closed in t.FollowUpEnd.
+//
+// An answer command-center rejects with keep_listening (the follow-up gate: another voice, a
+// TV, speech not meant for Jarvis) is ignored: nothing is said, the iteration isn't used up,
+// and the window listens again straight away, without the flush and quiet-wait that follow
+// our own speech.
 func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 	cfg := p.Cfg.FollowUp
 	if cfg.ListenSecs <= 0 {
@@ -82,14 +99,16 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 	lastSaid := t.Message // for the self-echo check
 	prev := ""
 	noise := 0
-	for it := 1; ; it++ {
+	ignored := 0
+	afterReply := true // the last thing that happened was us speaking (or the wake exchange)
+	for it := 1; ; {
 		if it > cfg.MaxIterations {
 			t.FollowUpEnd = EndMaxIterations
 			return
 		}
 		timeout := max(cfg.MinTimeoutSecs, cfg.ListenSecs-float64(it-1)*cfg.DecaySecs)
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
-		pcm, err := p.listenFollowUp(ctx, s, timeout, it)
+		pcm, err := p.listenFollowUp(ctx, s, timeout, it, afterReply)
 		if err != nil {
 			t.FollowUpEnd = EndError
 			if ctx.Err() == nil {
@@ -102,7 +121,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			t.FollowUpEnd = EndTimeout
 			return
 		}
+		afterReply = false
 		ex := Exchange{RecordedSecs: float64(len(pcm)) / CaptureRate}
+		level := levelVsWake(s, pcm)
 		cmd := Normalize(pcm)
 		tr, err := p.Server.Transcribe(ctx, wavBytes(cmd), wavBytes(slices.Concat(s.wakeClip, cmd)), s.id)
 		if err != nil {
@@ -129,6 +150,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 				return
 			}
 			prev = text
+			it++
 			continue
 		}
 		if LooksLikeSelfEcho(text, lastSaid) {
@@ -146,7 +168,19 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		// sends it (continue_conversation → POST /voice/command).
 		iter := it
 		c, err := p.Server.VoiceCommand(ctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id,
-			TurnSource: "follow_up", FollowUpIteration: &iter})
+			TurnSource: "follow_up", FollowUpIteration: &iter, LevelVsWake: level})
+		if err == nil && c.StopReason == "not_for_me" && c.KeepListening {
+			ignored++
+			ex.Outcome = OutcomeIgnored
+			t.FollowUps = append(t.FollowUps, ex)
+			s.log.Info("follow-up: not for me, still listening", "iteration", it, "transcript", text,
+				"level_vs_wake_db", ptrVal(level), "ignored", ignored)
+			if ignored >= cfg.MaxIgnored {
+				t.FollowUpEnd = EndIgnored
+				return
+			}
+			continue
+		}
 		end := EndError
 		if err != nil {
 			p.fail(ctx, &ex, fmt.Errorf("voice/command: %w", err))
@@ -154,7 +188,8 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			end = p.resolve(ctx, s, &ex, c)
 		}
 		t.FollowUps = append(t.FollowUps, ex)
-		s.log.Info("follow-up turn", "iteration", it, "transcript", text, "outcome", ex.Outcome, "reply", ex.Message, "err", ex.Err)
+		s.log.Info("follow-up turn", "iteration", it, "transcript", text, "level_vs_wake_db", ptrVal(level),
+			"outcome", ex.Outcome, "reply", ex.Message, "err", ex.Err)
 		if ex.Message != "" {
 			lastSaid = ex.Message
 		}
@@ -162,15 +197,29 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			t.FollowUpEnd = end
 			return
 		}
+		ignored = 0
+		afterReply = true
+		it++
 	}
+}
+
+func ptrVal(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // listenFollowUp is listen_for_follow_up: it returns the answer's audio, or nil when the
 // window closed without one. timeoutSecs bounds the wait for onset (the quiet-wait included).
-func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs float64, iteration int) ([]int16, error) {
+// afterReply: we just spoke, so what was captured meanwhile is dropped and the reply's tail
+// drained first; after an ignored answer nothing was said, and nothing is dropped.
+func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs float64, iteration int, afterReply bool) ([]int16, error) {
 	cfg := p.Cfg.FollowUp
-	// Echo: whatever was captured while the reply played is dropped, as the wake loop does.
-	flush(s.chunks)
+	if afterReply {
+		// Echo: whatever was captured while the reply played is dropped, as the wake loop does.
+		flush(s.chunks)
+	}
 	if p.listening != nil {
 		p.listening("follow_up")
 	}
@@ -181,8 +230,10 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		seen++
 		return c, err
 	}
-	if err := p.quietWaitWith(ctx, s, frames(cfg.QuietWaitSecs), &seen); err != nil {
-		return nil, mapChunkTimeout(err)
+	if afterReply {
+		if err := p.quietWaitWith(ctx, s, frames(cfg.QuietWaitSecs), &seen); err != nil {
+			return nil, mapChunkTimeout(err)
+		}
 	}
 
 	// Onset: enough loud chunks in a row. Everything heard is kept (a dip mid-word must not
@@ -217,7 +268,11 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 	// Record until SilenceSecs of quiet, but at least MinAfterOnsetSecs after onset.
 	silenceF := max(1, frames(cfg.SilenceSecs))
 	minAfter := max(1, frames(cfg.MinAfterOnsetSecs))
-	maxF := max(1, frames(p.Cfg.Endpointing.MaxSecs))
+	maxSecs := cfg.MaxRecordSecs
+	if maxSecs <= 0 {
+		maxSecs = p.Cfg.Endpointing.MaxSecs
+	}
+	maxF := max(1, frames(maxSecs))
 	silent := 0
 	for post := 1; post <= maxF; post++ {
 		c, err := recv(ctx, s.chunks, time.Second)

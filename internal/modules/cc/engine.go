@@ -59,6 +59,9 @@ type engineResult struct {
 	Validation    *validationRequest
 	ServerResults []chatMsg
 	EndOfExchange bool
+	// KeepListening: a follow-up the gate rejected; the node keeps its window open
+	// (followup_gate.go). Sent as keep_listening only when true.
+	KeepListening bool
 	Reasoning     string
 	Err           string
 	// ImageArgs are the photos a client call's image parameters resolved to, by call id
