@@ -285,6 +285,26 @@ func TestResolveStates(t *testing.T) {
 	if ep, err = g.r.Resolve(ctx, LabelLive); err != nil || ep.ContextLength != 128000 {
 		t.Fatalf("remote context %+v %v", ep, err)
 	}
+	if ep.API != APIOpenAI {
+		t.Fatalf("openai remote speaks %q", ep.API)
+	}
+
+	// Anthropic: picked from the host when remote_api is auto; the pasted /v1/messages is
+	// trimmed; embeddings can't use it.
+	g.src.set(LabelConfig{Label: LabelLive, Kind: KindLlama, Engine: ModeRemote, RemoteURL: "https://api.anthropic.com/v1/messages",
+		RemoteModel: "claude-test", RemoteAPIKey: "sk-ant"})
+	if ep, err = g.r.Resolve(ctx, LabelLive); err != nil || ep.API != APIAnthropic || ep.BaseURL != "https://api.anthropic.com/v1" {
+		t.Fatalf("anthropic remote %+v %v", ep, err)
+	}
+	g.src.set(LabelConfig{Label: LabelLive, Kind: KindLlama, Engine: ModeRemote, RemoteURL: "https://gateway.example/v1",
+		RemoteAPIMode: APIAnthropic})
+	if ep, err = g.r.Resolve(ctx, LabelLive); err != nil || ep.API != APIAnthropic {
+		t.Fatalf("explicit anthropic %+v %v", ep, err)
+	}
+	g.src.set(LabelConfig{Label: LabelEmbeddings, Kind: KindLlama, Engine: ModeRemote, Embedding: true, RemoteURL: "https://api.anthropic.com"})
+	if _, err := g.r.Resolve(ctx, LabelEmbeddings); !errors.As(err, &nr) || nr.State != "misconfigured" || !strings.Contains(nr.Reason, "no embeddings") {
+		t.Fatalf("anthropic embeddings: %v", err)
+	}
 
 	// A flavour with no binary on disk asks for a fetch.
 	c := g.llm(LabelBackground, g.model("m.gguf"))
@@ -420,5 +440,23 @@ func TestEngineCrashAndFailedRetry(t *testing.T) {
 			t.Fatal("engines not stopped on shutdown")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestRemoteAPI(t *testing.T) {
+	for _, tc := range []struct{ mode, url, want string }{
+		{"", "https://api.anthropic.com", APIAnthropic},
+		{"auto", "https://API.Anthropic.com/v1/", APIAnthropic},
+		{"auto", "api.anthropic.com", APIAnthropic},
+		{"auto", "https://api.openai.com/v1", APIOpenAI},
+		{"auto", "https://api.anthropic.com.evil.example/v1", APIOpenAI},
+		{"auto", "", APIOpenAI},
+		{"openai", "https://api.anthropic.com", APIOpenAI},
+		{"Anthropic", "http://localhost:4000", APIAnthropic},
+		{"bogus", "http://localhost:4000", APIOpenAI},
+	} {
+		if got := RemoteAPI(tc.mode, tc.url); got != tc.want {
+			t.Errorf("RemoteAPI(%q, %q) = %s, want %s", tc.mode, tc.url, got, tc.want)
+		}
 	}
 }

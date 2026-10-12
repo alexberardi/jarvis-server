@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,8 +105,11 @@ var fields = []field{
 		desc: "Fold later system messages into the user turn, for chat templates that reject them (Qwen 3.5, 3.8): auto = as the model's catalog entry says (never for remote), on or off",
 		opts: []any{FoldAuto, FoldOn, FoldOff}, only: []string{ModelLLM}},
 	{name: "extra_args", typ: settings.String, def: "", desc: "Extra engine flags (shell-quoted); a --chat-template-file here overrides the model's pinned template"},
-	{name: "remote_url", typ: settings.String, def: "", desc: "Remote OpenAI-compatible base URL, e.g. https://api.openai.com/v1",
+	{name: "remote_url", typ: settings.String, def: "", desc: "Remote base URL, e.g. https://api.openai.com/v1 (OpenAI-compatible) or https://api.anthropic.com",
 		only: []string{ModelLLM, ModelEmbedding}},
+	{name: "remote_api", typ: settings.String, def: APIAuto,
+		desc: "API the remote endpoint speaks: auto (anthropic for api.anthropic.com, else openai), openai (/chat/completions) or anthropic (the Messages API; chat only, no embeddings)",
+		opts: []any{APIAuto, APIOpenAI, APIAnthropic}, only: []string{ModelLLM, ModelEmbedding}},
 	{name: "remote_model", typ: settings.String, def: "", desc: "Model name sent to the remote endpoint", only: []string{ModelLLM, ModelEmbedding}},
 	{name: "remote_api_key", typ: settings.String, def: "", desc: "API key for the remote endpoint", secret: true,
 		only: []string{ModelLLM, ModelEmbedding}},
@@ -133,6 +137,35 @@ const (
 	FoldOn   = "on"
 	FoldOff  = "off"
 )
+
+// Values of llm.<label>.remote_api: the dialect a remote endpoint speaks.
+const (
+	APIAuto      = "auto"
+	APIOpenAI    = "openai"
+	APIAnthropic = "anthropic"
+)
+
+// anthropicHost is the Anthropic API's host; remote_api=auto picks the Messages API for it.
+const anthropicHost = "api.anthropic.com"
+
+// RemoteAPI resolves a remote_api setting against the remote URL: auto (or anything
+// unrecognised) is anthropic when the URL's host is api.anthropic.com, otherwise openai.
+func RemoteAPI(mode, remoteURL string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case APIOpenAI:
+		return APIOpenAI
+	case APIAnthropic:
+		return APIAnthropic
+	}
+	u := strings.TrimSpace(remoteURL)
+	if !strings.Contains(u, "://") {
+		u = "https://" + u
+	}
+	if pu, err := url.Parse(u); err == nil && strings.EqualFold(pu.Hostname(), anthropicHost) {
+		return APIAnthropic
+	}
+	return APIOpenAI
+}
 
 // Global setting keys owned by this package.
 const (
@@ -242,6 +275,10 @@ type LabelConfig struct {
 	RemoteModel  string `json:"remote_model"`
 	RemoteAPIKey string `json:"-"`
 	RemoteVision bool   `json:"remote_vision"`
+	// RemoteAPIMode is the remote_api setting (auto, openai, anthropic) and RemoteAPI its
+	// effect for RemoteURL (openai or anthropic).
+	RemoteAPIMode string `json:"remote_api"`
+	RemoteAPI     string `json:"remote_api_effective"`
 
 	// Problem says why the label can't run as configured (missing model file, …).
 	Problem string `json:"problem,omitempty"`
@@ -319,6 +356,8 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 		ExtraArgs: str("extra_args"), Embedding: d.ModelKind == ModelEmbedding,
 		RemoteURL: str("remote_url"), RemoteModel: str("remote_model"), RemoteAPIKey: str("remote_api_key"),
 	}
+	c.RemoteAPIMode = strings.ToLower(str("remote_api"))
+	c.RemoteAPI = RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
 	if has("remote_vision") {
 		c.RemoteVision = s.Settings.Bool(ctx, p+"remote_vision", settings.Scope{})
 	}

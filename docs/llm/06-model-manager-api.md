@@ -118,6 +118,43 @@ and background only):
 | `<p>.extra_args` | `""` | shell-quoted extra flags (after jarvisd's own, so a `--chat-template-file` here overrides the pinned one) |
 | `<p>.fold_system_messages` (llm) | `auto` | ID12: `auto` = the model's catalog flag (never for remote), `on`, `off`. When on, requests are folded for a strict chat template (04 §3.7) |
 | `<p>.remote_url`, `remote_model`, `remote_api_key` (secret), `remote_vision` (llm) | | LD2 remote endpoint |
+| `<p>.remote_api` (llm, embeddings) | `auto` | The remote's dialect: `openai` (`/chat/completions`, `/embeddings`), `anthropic` (the Messages API, chat only) or `auto` = `anthropic` when `remote_url`'s host is `api.anthropic.com`, else `openai`. See "Anthropic remote" below |
+
+**Anthropic remote** (`remote_api` = `anthropic`, `internal/modules/llm/anthropic.go`; the
+translation rules come from jarvis-llm-proxy-api#75 by @davidalee). Set it through the admin
+Models page ("Runs: Remote endpoint", "API") or `PUT /v1/models/labels`:
+
+```json
+{"live": {"engine": "remote", "remote_url": "https://api.anthropic.com",
+          "remote_model": "<a Claude model id>", "remote_api_key": "<key>", "remote_api": "auto"}}
+```
+
+- `remote_url` may be `https://api.anthropic.com`, `…/v1` or `…/v1/messages`; requests go to
+  `/v1/messages` with `x-api-key` and `anthropic-version: 2023-06-01` (never a bearer token).
+  `remote_api: anthropic` also works for a gateway that speaks the Messages API on another host.
+- Request: system messages are hoisted into `system` (joined with blank lines); assistant
+  `tool_calls` become `tool_use` blocks (bad or empty arguments → `{}`); `tool` messages become
+  `tool_result` blocks, and consecutive same-role messages merge (parallel tool results share one
+  user message); empty messages and a leading assistant turn are dropped; a `tool` message
+  without `tool_call_id` is a 400. Tools map to `{name, description, input_schema}`;
+  `tool_choice` auto/none as is, required → any, a named function → `{type: tool}`.
+  `max_tokens` is the request's, else 4096 (the module has no default setting). Temperature,
+  top_p, seed and the llama.cpp thinking fields are not sent; `thinking: {"type":"disabled"}`
+  is, except for models whose name contains `fable` or `mythos` (always thinking, where
+  `disabled` is a 400). Data-URL images (with `remote_vision` on) become base64 `image` blocks.
+- Response: text blocks concatenate, `tool_use` blocks become tool calls; `stop_reason`
+  tool_use → `tool_calls`, max_tokens / model_context_window_exceeded → `length`, refusal →
+  `content_filter`, else `stop` (refusal and pause_turn are logged). Prompt tokens include the
+  cache reads and writes. Streams fold the typed events into the same frames; an `error` event,
+  or a stream that ends without `message_stop`, ends the stream with an error frame.
+- Errors: Anthropic's error JSON surfaces as `"<type>: <message>"` with the upstream status.
+- Embeddings: the Messages API has none; an embeddings label resolving to `anthropic` is
+  `misconfigured` with that reason.
+- **Limitations:** verified only against canned responses (`anthropic_test.go`);
+  `TestAnthropicLive` runs a real tool round trip when `JARVIS_TEST_ANTHROPIC_KEY` is set
+  (model `JARVIS_TEST_ANTHROPIC_MODEL`). Fable/Mythos tool round trips are not supported: they
+  need thinking blocks replayed verbatim, which the OpenAI-shaped history can't carry. No prompt
+  caching (`cache_control`) is requested.
 
 Global:
 

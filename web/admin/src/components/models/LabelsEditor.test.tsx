@@ -135,6 +135,37 @@ describe('LabelsEditor image input', () => {
   })
 })
 
+describe('LabelsEditor remote API', () => {
+  it('offers the dialect for a remote LLM label and saves remote_api', async () => {
+    const live = status('live', '')
+    live.config = {
+      ...live.config,
+      engine: 'remote',
+      remote_url: 'https://api.anthropic.com',
+      remote_api: 'auto',
+      remote_api_effective: 'anthropic',
+    }
+    const labels: llm.LabelsResponse = {
+      labels: [live, status('background', '')],
+      voice: null,
+      engines: null,
+      proposal: {},
+      recommend: {},
+      warnings: null,
+    }
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    renderEditor()
+    const card = await screen.findByTestId('label-live')
+    const select = within(card).getByLabelText('API')
+    expect(select).toHaveValue('auto')
+    expect(within(card).getByText('Anthropic Messages API now')).toBeInTheDocument()
+    fireEvent.change(select, { target: { value: 'openai' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ live: { remote_api: 'openai' } }))
+  })
+})
+
 describe('GPU fault (prod outage 2026-10-10)', () => {
   it('warns prominently that the driver update needs a reboot and names the stopped labels', async () => {
     const live = { ...status('live', ''), state: 'gpu_unavailable', reason: "The GPU driver was updated; reboot the server to finish (Jarvis can't use the GPU until then)." }

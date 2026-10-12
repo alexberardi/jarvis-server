@@ -399,6 +399,10 @@ export interface LabelConfig {
   remote_url: string
   remote_model: string
   remote_vision: boolean
+  /** API the remote speaks: auto (anthropic for api.anthropic.com, else openai), openai or anthropic. */
+  remote_api?: string
+  /** What remote_api resolves to for remote_url: openai or anthropic. */
+  remote_api_effective?: string
   problem?: string
 }
 
@@ -415,6 +419,8 @@ export interface Endpoint {
   engine?: string
   degraded?: boolean
   fold_system_messages?: boolean
+  /** Remote dialect: openai or anthropic (empty for local engines). */
+  api?: string
 }
 
 export interface LabelStatus {
@@ -461,6 +467,7 @@ export type LabelUpdate = Partial<{
   remote_model: string
   remote_api_key: string
   remote_vision: boolean
+  remote_api: string
 }>
 
 /** putLabels validates the whole body before writing anything (422 otherwise; I4). */

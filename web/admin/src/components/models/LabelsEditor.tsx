@@ -284,7 +284,7 @@ function EngineLabelCard({
             {isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Base URL (OpenAI-compatible)" htmlFor={id('remote_url')}>
+            <Field label="Base URL" htmlFor={id('remote_url')}>
               <input
                 id={id('remote_url')}
                 value={v('remote_url')}
@@ -293,6 +293,24 @@ function EngineLabelCard({
                 className={inputClass}
               />
             </Field>
+            {isLLM && (
+              <Field
+                label="API"
+                htmlFor={id('remote_api')}
+                hint={cfg.remote_api_effective === 'anthropic' ? 'Anthropic Messages API now' : 'OpenAI-compatible now'}
+              >
+                <select
+                  id={id('remote_api')}
+                  value={v('remote_api') || 'auto'}
+                  onChange={(e) => set({ remote_api: e.target.value })}
+                  className={selectClass}
+                >
+                  <option value="auto">auto (Anthropic for api.anthropic.com)</option>
+                  <option value="openai">OpenAI-compatible (/chat/completions)</option>
+                  <option value="anthropic">Anthropic Messages API (/v1/messages)</option>
+                </select>
+              </Field>
+            )}
             <Field label="Model name" htmlFor={id('remote_model')}>
               <input
                 id={id('remote_model')}
