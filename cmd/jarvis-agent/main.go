@@ -31,6 +31,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
@@ -69,6 +70,8 @@ func main() {
 		err = appsCmd(os.Args[2:])
 	case "browser":
 		err = browserCmd(ctx, os.Args[2:])
+	case "island-demo":
+		err = islandDemo(ctx, os.Args[2:])
 	case "browser-host":
 		os.Exit(browserHost(strings.Join(os.Args[2:], " ")))
 	case "version":
@@ -286,6 +289,7 @@ func run(ctx context.Context, args []string) error {
 	cp := fs.String("creds", "", "credentials file")
 	tf := addToolFlags(fs)
 	voiceOn := fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`)
+	noOverlay := fs.Bool("no-overlay", false, "with --voice: don't show the on-screen indicator (the island)")
 	vf := addVoiceFlags(fs)
 	_ = fs.Parse(args)
 	path, err := credsPath(*cp)
@@ -305,10 +309,12 @@ func run(ctx context.Context, args []string) error {
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, Log: log}
+	var vs *voiceStack
 	if *voiceOn {
 		// Voice is an extra: if it can't start, the agent still serves its tools.
-		if vs, err := loadVoice(ctx, vf, log); err != nil {
+		if vs, err = loadVoice(ctx, vf, log); err != nil {
 			log.Error("voice disabled", "err", err)
+			vs = nil
 		} else {
 			defer vs.close()
 			r.OnConnected = func(ctx context.Context, cc *node.CC) {
@@ -317,7 +323,17 @@ func run(ctx context.Context, args []string) error {
 			}
 		}
 	}
-	return r.Run(ctx)
+	if vs == nil || *noOverlay {
+		return r.Run(ctx)
+	}
+	// The island needs the main thread on macOS: island.Run keeps it and runs the agent on
+	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
+	return island.Run(ctx, log, func(i *island.Island) error {
+		if i != nil {
+			vs.indicator = islandCue{i}
+		}
+		return r.Run(ctx)
+	})
 }
 
 // toolFlags choose the node's client tools; `run` and `listen` share them.

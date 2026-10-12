@@ -43,6 +43,8 @@ AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-si
 ./jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
 ./jarvis-agent run
 ./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
+./jarvis-agent run --voice --no-overlay        # ... without the on-screen island (on by default)
+./jarvis-agent island-demo [--hold follow_up --for 20s]   # play the island's states (no mic, no server)
 ./jarvis-agent listen --voice-input wav:clip.wav --voice-output wav:reply.wav --once --no-chimes
                                                # one scripted voice turn, no MQTT (exit 0 = spoken);
                                                # runs the same client tools as `run` (--no-tools: none);
@@ -81,6 +83,9 @@ internal/agent/
                       browser_* tools (tools.go), host-manifest registration per OS/browser
                       (install.go), the embedded MV3 extension (extension/, extension.go) and
                       the Mozilla-signed .xpi when a build has one (signed/)
+  island/             the on-screen voice indicator (DESIGN.md §11): pure-Go renderer (render.go),
+                      animation model + loop (island.go), NSPanel backend (mac_darwin.go, purego),
+                      Wayland layer-shell client (wayland.go); Run keeps the main thread on macOS
   voice/              the voice pipeline: wake -> record -> STT -> stream reply -> follow-up
                       window -> listen again (pipeline.go), the conversation loop: tool rounds +
                       validation questions + the final message (converse.go), client tool calls
@@ -213,6 +218,17 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     browsers only (`web-ext run --arg=-headless`, `chromium --headless=new --load-extension`)
     in a scratch HOME with `JARVIS_AGENT_BROWSER_SOCKET` set: never load the extension into
     the user's real profiles. Sun_path is ~104 bytes: keep scratch socket/TMPDIR paths short.
+
+24. **The island never takes focus, input or the agent down** (DESIGN.md §11). Click-through
+    (`ignoresMouseEvents`; an empty Wayland input region), non-activating, no Dock/taskbar
+    entry; any backend failure logs once and turns it off. On macOS **AppKit runs only on the
+    main thread**: `main_darwin.go` locks the main goroutine, `island.Run` must be called from
+    it (`run` does, directly from `main`), and every AppKit call goes through `onMain`
+    (never call it from the main thread's own callbacks into Go code that waits on the agent).
+    The pipeline only *reports* state (`voice.Indicator`, nil by default); it never waits on
+    the screen. Don't show it on a desktop someone is using in tests: the live checks
+    (`JARVIS_ISLAND_MAC_LIVE`, `JARVIS_ISLAND_WAYLAND_PROBE`) are opt-in, and the Wayland one
+    never attaches a buffer.
 
 ## Dependencies
 

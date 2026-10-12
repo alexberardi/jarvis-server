@@ -111,6 +111,7 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 				p.fail(ctx, ex, err)
 				return EndError
 			}
+			p.cue(CueThinking, 0)
 			next, err := p.Server.ContinueTools(ctx, s.id, []ToolResult{c.Validation.answer(text)})
 			if err != nil {
 				p.fail(ctx, ex, fmt.Errorf("voice/command/continue: %w", err))
@@ -244,6 +245,7 @@ func (p *Pipeline) askValidation(ctx context.Context, s *session, ex *Exchange, 
 	if p.listening != nil {
 		p.listening("validation")
 	}
+	p.cue(CueListening, 0)
 	if err := p.quietWait(ctx, s, frames(validationQuietWaitSecs)); err != nil {
 		return "", err
 	}

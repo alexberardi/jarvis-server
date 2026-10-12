@@ -124,6 +124,8 @@ type Pipeline struct {
 	Tools  node.Toolset
 	Log    *slog.Logger
 	OnTurn func(Turn) // optional; called after every turn, on the pipeline goroutine
+	// Indicator, when set, is shown the pipeline's state (indicator.go). Nil shows nothing.
+	Indicator Indicator
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -327,7 +329,13 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	}()
 
 	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: wakeClip}
+	p.cue(CueListening, 0)
 	defer func() {
+		if t.Err != nil || t.FollowUpEnd == EndError {
+			p.cue(CueError, 0)
+		} else {
+			p.cue(CueIdle, 0)
+		}
 		t.Took = p.Now().Sub(start)
 		lvl := slog.LevelInfo
 		if t.Err != nil {
@@ -372,6 +380,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		p.fail(ctx, &t.Exchange, errors.New("nothing was recorded"))
 		return
 	}
+	p.cue(CueThinking, 0)
 
 	end, ok := p.wakeExchange(ctx, s, &t.Exchange, st, score, pcm)
 	if !ok {
@@ -472,6 +481,7 @@ func (p *Pipeline) record(ctx context.Context, s *session) (pcm []int16, hitMax 
 		if err != nil {
 			return rec.pcm, rec.hitMax, err
 		}
+		p.level(c)
 		if rec.add(c) {
 			break
 		}
@@ -506,6 +516,7 @@ func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *
 		return 0, fmt.Errorf("speaker: %w", err)
 	}
 	defer pb.Close()
+	p.cue(CueSpeaking, 0)
 	var idle atomic.Bool
 	timer := time.AfterFunc(p.Cfg.StreamIdle, func() { idle.Store(true); cancel() })
 	defer timer.Stop()
@@ -523,6 +534,7 @@ func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *
 				for i := range s {
 					s[i] = int16(binary.LittleEndian.Uint16(pending[2*i:]))
 				}
+				p.level(s)
 				if err := pb.Write(s); err != nil {
 					return float64(frames) / float64(a.Rate), fmt.Errorf("speaker: %w", err)
 				}
