@@ -158,6 +158,8 @@ const (
 	settingWebSearch         = "web_search.enabled"
 	settingWakeMode          = "voice.wake_verification_mode"
 	settingWakePhrase        = "voice.wake_verification_phrase"
+	settingSTTPrompt         = "voice.stt_prompt"
+	settingSTTPreprocess     = "voice.stt_preprocess"
 	settingDoubtMaxRounds    = "voice.followup_doubt_max_rounds"
 	settingDedupeWindow      = "voice.tool_dedupe_window_seconds"
 	settingHouseholdLocation = "household.location"
@@ -198,6 +200,12 @@ func voiceDefinitions(defaultPersona string) []settings.Definition {
 				"or 'enforce' (an unverified wake is silently dropped). Unknown values mean 'off'."},
 		{Key: settingWakePhrase, Category: "voice", Type: settings.String, Default: "jarvis",
 			Description: "The word the wake clip must (fuzzily, edit distance 2) contain to count as verified."},
+		{Key: settingSTTPrompt, Category: "voice", Type: settings.String, Default: "",
+			Description: "Whisper initial prompt for node voice commands (e.g. 'Hey Jarvis, turn on the kitchen lights.'): " +
+				"biases spelling and vocabulary towards it. Never applied to wake verification, which must stay an " +
+				"unbiased check. Empty means none."},
+		{Key: settingSTTPreprocess, Category: "voice", Type: settings.Bool, Default: false,
+			Description: "Normalise and trim silence from node voice commands before whisper."},
 		{Key: settingDoubtMaxRounds, Category: "voice", Type: settings.Int, Default: int64(2),
 			Description: "Answered rounds a doubted (unverified-wake) conversation gets before follow-up turns gain a " +
 				"strong wrap-up lean."},

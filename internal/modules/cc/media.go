@@ -221,7 +221,7 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 	if convID != "" && m.followUpGateOn(ctx, n.HouseholdID, n.ID) {
 		voiceDone = m.voiceCheck(context.WithoutCancel(ctx), convID, file, speakerAudio)
 	}
-	res, err := m.STT.Transcribe(ctx, file, stt.TranscribeOptions{SpeakerAudio: speakerAudio, Speaker: scope})
+	res, err := m.STT.Transcribe(ctx, file, m.commandSTTOptions(ctx, n.HouseholdID, n.ID, speakerAudio, scope))
 	if voiceDone != nil {
 		<-voiceDone
 	}
@@ -549,4 +549,20 @@ func (m *Module) handlePollVoiceProfileResult(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(res)
+}
+
+// maxSTTPrompt bounds voice.stt_prompt; whisper only keeps the last ~224 tokens of it anyway.
+const maxSTTPrompt = 1000
+
+// commandSTTOptions are the transcription options of a node voice command: the household /
+// node's voice.stt_prompt and voice.stt_preprocess. The wake-clip pass doesn't use them, so
+// a prompt naming the wake word can't talk wake verification into hearing it.
+func (m *Module) commandSTTOptions(ctx context.Context, hh, node string, speakerAudio []byte, scope *stt.SpeakerScope) stt.TranscribeOptions {
+	sc := scopeHN(hh, node)
+	prompt := strings.TrimSpace(m.settings.String(ctx, settingSTTPrompt, sc))
+	if len(prompt) > maxSTTPrompt {
+		prompt = strings.ToValidUTF8(prompt[len(prompt)-maxSTTPrompt:], "")
+	}
+	return stt.TranscribeOptions{SpeakerAudio: speakerAudio, Speaker: scope, Prompt: prompt,
+		Preprocess: m.settings.Bool(ctx, settingSTTPreprocess, sc)}
 }
