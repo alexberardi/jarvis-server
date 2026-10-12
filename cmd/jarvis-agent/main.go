@@ -394,7 +394,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 		macax.Prompt()
 		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
 	}
-	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), &screen.Tools{C: screen.Native()}}
+	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), &screen.Tools{C: screen.Native(), Log: log}}
 	closeAll := func() {}
 	if !*f.noBrowser {
 		hub, stopBrowser := startBrowser(ctx, log)

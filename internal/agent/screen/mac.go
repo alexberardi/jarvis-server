@@ -8,11 +8,52 @@ import (
 	"strconv"
 )
 
-// FrontWindow is macOS's frontmost normal window (layer 0): its CGWindowID, title and app.
-type FrontWindow struct {
-	ID    uint32
-	Title string
-	App   string
+// MacWindow is one entry of CGWindowListCopyWindowInfo, in its order (front to back).
+type MacWindow struct {
+	ID       uint32
+	Title    string // empty without the Screen Recording grant
+	App      string // owner name
+	Layer    int
+	W, H     float64
+	OnScreen bool
+}
+
+// minSide: smaller windows are status items, tooltips and helpers, never what the user means.
+const minSide = 50
+
+// normal: a layer-0 window big enough to be one the user looks at.
+func (w MacWindow) normal() bool {
+	return w.ID != 0 && w.Layer == 0 && w.W >= minSide && w.H >= minSide
+}
+
+// frontOf is the frontmost normal on-screen window.
+func frontOf(ws []MacWindow) (MacWindow, bool) {
+	for _, w := range ws {
+		if w.normal() && w.OnScreen {
+			return w, true
+		}
+	}
+	return MacWindow{}, false
+}
+
+// namedOf is the window the user named: screencapture -l captures a window even when it is
+// covered, so any on-screen window works; one that isn't on screen (minimised, another Space)
+// is window_not_visible. The list is front to back, so the frontmost match wins.
+func namedOf(ws []MacWindow, query string) (MacWindow, error) {
+	var keep []MacWindow
+	var cands []candidate
+	for _, w := range ws {
+		if !w.normal() {
+			continue
+		}
+		cands = append(cands, candidate{Apps: []string{w.App}, Title: w.Title, Recency: len(keep), Visible: w.OnScreen})
+		keep = append(keep, w)
+	}
+	i, err := pickWindow(cands, query)
+	if err != nil {
+		return MacWindow{}, err
+	}
+	return keep[i], nil
 }
 
 // Mac captures with /usr/sbin/screencapture. The agent runs as Jarvis Agent.app under launchd,
@@ -21,7 +62,7 @@ type FrontWindow struct {
 type Mac struct {
 	X       Exec
 	Trusted func() bool                 // the Screen Recording grant (macax.ScreenTrusted)
-	Front   func() (FrontWindow, error) // the frontmost window (CGWindowListCopyWindowInfo)
+	Windows func() ([]MacWindow, error) // the window list, front to back (CGWindowListCopyWindowInfo)
 }
 
 const screencapture = "/usr/sbin/screencapture"
@@ -34,7 +75,29 @@ func (m *Mac) Available(context.Context) (bool, string) {
 	return true, ""
 }
 
-func (m *Mac) Capture(ctx context.Context, scope string) (Shot, error) {
+func (m *Mac) Capture(ctx context.Context, scope, window string) (Shot, error) {
+	var (
+		win    MacWindow
+		hasWin bool
+	)
+	if named := normalizeQuery(window) != ""; named || scope == ScopeWindow {
+		var ws []MacWindow
+		if m.Windows != nil {
+			var err error
+			if ws, err = m.Windows(); err != nil && named {
+				return Shot{}, err
+			}
+		}
+		if named {
+			w, err := namedOf(ws, window)
+			if err != nil {
+				return Shot{}, err
+			}
+			win, hasWin = w, true
+		} else {
+			win, hasWin = frontOf(ws)
+		}
+	}
 	// screencapture writes only to a file: a private directory, removed before returning.
 	dir, err := os.MkdirTemp("", "jarvis-screen-")
 	if err != nil {
@@ -44,13 +107,10 @@ func (m *Mac) Capture(ctx context.Context, scope string) (Shot, error) {
 	file := filepath.Join(dir, "shot.png")
 	args := []string{"-x", "-t", "png"} // -x: no sound
 	var shot Shot
-	if scope == ScopeWindow && m.Front != nil {
-		if w, err := m.Front(); err == nil && w.ID != 0 {
-			args = append(args, "-o", "-l", strconv.FormatUint(uint64(w.ID), 10)) // -o: no shadow
-			shot.Title, shot.App = w.Title, w.App
-		}
-	}
-	if len(args) == 3 {
+	if hasWin {
+		args = append(args, "-o", "-l", strconv.FormatUint(uint64(win.ID), 10)) // -o: no shadow
+		shot.Title, shot.App = win.Title, win.App
+	} else {
 		args = append(args, "-m") // the main display
 	}
 	if _, err := m.X.Output(ctx, screencapture, append(args, file)...); err != nil {

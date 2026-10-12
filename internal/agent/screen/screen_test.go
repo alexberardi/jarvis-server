@@ -112,7 +112,7 @@ func TestWaylandAvailability(t *testing.T) {
 func TestHyprlandCapturesTheFocusedWindowOrMonitor(t *testing.T) {
 	f := hypr()
 	l := &Wayland{X: f}
-	shot, err := l.Capture(context.Background(), ScopeWindow)
+	shot, err := l.Capture(context.Background(), ScopeWindow, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestHyprlandCapturesTheFocusedWindowOrMonitor(t *testing.T) {
 	if shot.Title != "build.log" || shot.App != "foot" || shot.Image.Bounds().Dx() != 40 {
 		t.Errorf("shot = %q %q %v", shot.Title, shot.App, shot.Image.Bounds())
 	}
-	if _, err := l.Capture(context.Background(), ScopeScreen); err != nil {
+	if _, err := l.Capture(context.Background(), ScopeScreen, ""); err != nil {
 		t.Fatal(err)
 	}
 	if g := lastGrim(t, f); g != "-t png -l 1 -o HDMI-A-1 -" {
@@ -130,7 +130,7 @@ func TestHyprlandCapturesTheFocusedWindowOrMonitor(t *testing.T) {
 	}
 	// An empty workspace has no active window: the focused monitor instead.
 	f.out["hyprctl -j activewindow"] = []byte(`{}`)
-	shot, err = l.Capture(context.Background(), ScopeWindow)
+	shot, err = l.Capture(context.Background(), ScopeWindow, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,14 +151,14 @@ func TestSwayCapturesTheFocusedContainer(t *testing.T) {
 		},
 	}
 	l := &Wayland{X: f}
-	shot, err := l.Capture(context.Background(), ScopeWindow)
+	shot, err := l.Capture(context.Background(), ScopeWindow, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if g := lastGrim(t, f); g != "-t png -l 1 -g 10,20 300x200 -" || shot.Title != "vim" || shot.App != "foot" {
 		t.Errorf("window: grim %q, shot %q %q", g, shot.Title, shot.App)
 	}
-	if _, err := l.Capture(context.Background(), ScopeScreen); err != nil {
+	if _, err := l.Capture(context.Background(), ScopeScreen, ""); err != nil {
 		t.Fatal(err)
 	}
 	if g := lastGrim(t, f); g != "-t png -l 1 -o eDP-1 -" {
@@ -181,8 +181,11 @@ func TestMacCaptureLeavesNoFile(t *testing.T) {
 		return os.WriteFile(file, pngOf(20, 10), 0o600)
 	}}
 	m := &Mac{X: f, Trusted: func() bool { return true },
-		Front: func() (FrontWindow, error) { return FrontWindow{ID: 4242, Title: "Report", App: "Preview"}, nil }}
-	shot, err := m.Capture(context.Background(), ScopeWindow)
+		Windows: func() ([]MacWindow, error) {
+			return []MacWindow{{ID: 7, App: "Window Server", Layer: 25, W: 3000, H: 30, OnScreen: true},
+				{ID: 4242, Title: "Report", App: "Preview", W: 800, H: 600, OnScreen: true}}, nil
+		}}
+	shot, err := m.Capture(context.Background(), ScopeWindow, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +198,7 @@ func TestMacCaptureLeavesNoFile(t *testing.T) {
 	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("capture file left behind: %v", err)
 	}
-	if _, err := m.Capture(context.Background(), ScopeScreen); err != nil {
+	if _, err := m.Capture(context.Background(), ScopeScreen, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(f.calls[1][1:len(f.calls[1])-1], " "); got != "-x -t png -m" {
@@ -228,15 +231,16 @@ func TestEncodeScalesAndCaps(t *testing.T) {
 
 // fakeCap is a Capturer for the tool tests.
 type fakeCap struct {
-	ok    bool
-	shot  Shot
-	err   error
-	scope string
+	ok     bool
+	shot   Shot
+	err    error
+	scope  string
+	window string
 }
 
 func (f *fakeCap) Available(context.Context) (bool, string) { return f.ok, "no capture here" }
-func (f *fakeCap) Capture(_ context.Context, scope string) (Shot, error) {
-	f.scope = scope
+func (f *fakeCap) Capture(_ context.Context, scope, window string) (Shot, error) {
+	f.scope, f.window = scope, window
 	return f.shot, f.err
 }
 

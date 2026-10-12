@@ -100,7 +100,7 @@ CC feeds the output back to the LLM and streams the answer to the app
 - Other verbs (`tts`, `action`, `routine`, ...) are logged and ignored, so CC times out as for
   an offline node. (Open question 1.)
 - Outputs follow the Pi convention: `success`, and on failure `error` plus an `error_code`
-  (`not_supported`, `window_not_found`, `invalid_argument`, `failed`).
+  (`not_supported`, `window_not_found`, `window_not_visible`, `invalid_argument`, `failed`).
 
 ### Evidence (2026-10-09)
 
@@ -485,18 +485,50 @@ screenshot **only when asked** and the live model looks at it. Approved by the u
 ("read the screen sounds incredible"). Code: `internal/agent/screen` (agent),
 `internal/modules/cc/tool_images.go` (command-center).
 
-**The tool.** `desktop_read_screen {scope: "window" (default, the focused window) | "screen"}`,
-offered only while capture works (computed per call, like every desktop tool). The description
-says to call it whenever the user refers to something on their screen, and never unprompted.
-The output carries the image as `image_attachments: [{"mime", "data" (base64), "label"}]`
-plus `window_title` / `app`.
+**The tool.** `desktop_read_screen {scope: "window" (default, the focused window) | "screen",
+window: "<the app or window the user named>"}`, offered only while capture works (computed per
+call, like every desktop tool). The description says to call it whenever the user refers to
+something on their screen, and never unprompted. The output carries the image as
+`image_attachments: [{"mime", "data" (base64), "label"}]` plus `window_title` / `app`.
+
+**Naming a window** (2026-10-12). The user asked for "the Firefox window" while a terminal had
+focus; the tool could only take the focused window, so the model took the whole screen. Now
+`window` ("firefox", "the terminal", "slack", title words) captures that window whatever has
+focus, and wins over `scope`. Examples steer it: "read the firefox window" → `{scope: window,
+window: firefox}`, "what does this error say" → no name (the focused window). Matching
+(`screen/match.go`, one `pickWindow` for every platform): the query is normalised ("the
+Firefox window" → "firefox"; "this window" is no name), then tiers, the first with any hit
+deciding: app class / app id / owner name (case-insensitive, the last part of a reverse-DNS
+id, a substring of 3+ letters), then a kind of app ("terminal", "browser", "editor", "email" →
+known app names), then all query words in the title. Within the tier the most recently focused
+*visible* match wins (Hyprland `focusHistoryID`; sway's per-node `focus` lists; macOS
+front-to-back order). It never falls back to another window or the screen:
+
+- a match that isn't visible → `window_not_visible`, "Firefox is open but not visible — bring
+  it to the front and ask again";
+- no match → `window_not_found`, naming up to 5 visible apps.
+
+Visible, on Linux, means its pixels are on screen, because grim captures a *region*: Hyprland,
+on a workspace some enabled monitor shows (a shown special workspace replaces its monitor's
+regular one), mapped, not a group's hidden tab, not under another window's fullscreen, and
+`visible` when Hyprland reports it; sway, on its output's `current_workspace` (never the
+scratchpad) and the node's `visible` (tabs/stacks). On macOS `screencapture -l` captures a
+covered window, so any on-screen normal window counts (layer 0, at least 50 × 50; menu bar and
+status items skipped); minimised or on another Space is not visible. The list is
+`CGWindowListCopyWindowInfo(all)`, on-screen first.
+
+**Logged:** each call is one Info line (`read screen`: scope, the window asked for, the
+captured app and title cut to 40 characters, or the error code), never anything about the
+image. Every client tool call is also logged at Info with its arguments (`node.LogArgs`:
+sorted keys, each value cut to 80 characters) on both paths: the MQTT dispatcher's `tool_call`
+line and the voice loop's `tool call` line.
 
 **Capture.**
 
 | Platform | How | Window scope |
 |---|---|---|
-| Hyprland, sway (Wayland) | `grim -t png -l 1 … -` to stdout | geometry from `hyprctl -j activewindow` / the focused container in `swaymsg -t get_tree`; screen = the focused output (`-o`) |
-| macOS | `/usr/sbin/screencapture -x -t png` into a 0600 file in a private 0700 temp dir, read and removed before returning | the frontmost layer-0 window's CGWindowID from `CGWindowListCopyWindowInfo` (purego) → `-l ID -o`; screen = the main display (`-m`) |
+| Hyprland, sway (Wayland) | `grim -t png -l 1 … -` to stdout | geometry from `hyprctl -j activewindow` / the focused container in `swaymsg -t get_tree`; a named window from `hyprctl -j clients` + `monitors` / the whole tree; screen = the focused output (`-o`) |
+| macOS | `/usr/sbin/screencapture -x -t png` into a 0600 file in a private 0700 temp dir, read and removed before returning | the frontmost normal window's (or the named one's) CGWindowID from `CGWindowListCopyWindowInfo` (purego) → `-l ID -o`; screen = the main display (`-m`) |
 | GNOME, KDE, X11, Windows | not yet: the tool isn't offered (xdg-desktop-portal Screenshot is the later path) | |
 
 macOS needs the **Screen Recording** grant for Jarvis Agent.app (`macax.ScreenTrusted`;
@@ -555,6 +587,14 @@ the note says the image couldn't be read, so the model tells the user.
   dev jarvisd's GPU should make it a few seconds.
 - Not live: the OCR fallback and the mobile chat path (unit tests), the dev jarvisd itself (it
   runs main from before this change and needs a restart).
+
+- Naming a window (2026-10-12), this box: with a terminal focused, `try desktop_read_screen
+  '{"scope":"window","window":"firefox"}'` captured the Firefox window (looked at, then
+  deleted), "the terminal" the most recent foot window, "slack" → `window_not_found` listing
+  the visible apps. MBP over SSH (`JARVIS_SCREEN_WINDOW=… TestNativeCapture`): the purego list
+  (126 windows) resolved "firefox" to Firefox's window and "terminal" to iTerm while iTerm was
+  in front; "slack" → not found. **Not run on the Mac:** the named capture itself (no Screen
+  Recording grant for an SSH process).
 
 **Compatibility.** An older jarvisd doesn't lift the image: a capture over 1 MiB is a 413 on
 the continue (error chime), a smaller one reaches the model as base64 text. Update jarvisd

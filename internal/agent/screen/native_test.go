@@ -15,10 +15,15 @@ func TestNativeCapture(t *testing.T) {
 		t.Skip("JARVIS_SCREEN_NATIVE not set")
 	}
 	if runtime.GOOS == "darwin" {
-		w, err := frontWindow()
-		t.Logf("front window: id=%d app=%q title set=%v err=%v", w.ID, w.App, w.Title != "", err)
-		if err != nil || w.ID == 0 {
+		ws, err := windowList()
+		w, ok := frontOf(ws)
+		t.Logf("windows: %d, front: id=%d app=%q title set=%v err=%v", len(ws), w.ID, w.App, w.Title != "", err)
+		if err != nil || !ok {
 			t.Errorf("no front window: %v", err)
+		}
+		if q := os.Getenv("JARVIS_SCREEN_WINDOW"); q != "" {
+			nw, err := namedOf(ws, q)
+			t.Logf("named %q: id=%d app=%q err=%v", q, nw.ID, nw.App, err)
 		}
 	}
 	c := Native()
@@ -31,12 +36,20 @@ func TestNativeCapture(t *testing.T) {
 		return
 	}
 	for _, scope := range []string{ScopeWindow, ScopeScreen} {
-		shot, err := c.Capture(context.Background(), scope)
+		shot, err := c.Capture(context.Background(), scope, "")
 		if err != nil {
 			t.Errorf("%s: %v", scope, err)
 			continue
 		}
 		data, w, h, err := Encode(shot.Image)
 		t.Logf("%s: %v -> %dx%d, %d bytes jpeg, app %q, title set %v (err %v)", scope, shot.Image.Bounds().Size(), w, h, len(data), shot.App, shot.Title != "", err)
+	}
+	if q := os.Getenv("JARVIS_SCREEN_WINDOW"); q != "" {
+		shot, err := c.Capture(context.Background(), ScopeWindow, q)
+		if err != nil {
+			t.Logf("named %q: %v", q, err)
+		} else {
+			t.Logf("named %q: %v, app %q", q, shot.Image.Bounds().Size(), shot.App)
+		}
 	}
 }
