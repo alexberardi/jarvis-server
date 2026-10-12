@@ -151,8 +151,11 @@ Models page ("Runs: Remote endpoint", "API") or `PUT /v1/models/labels`:
 - Embeddings: the Messages API has none; an embeddings label resolving to `anthropic` is
   `misconfigured` with that reason.
 - **Limitations:** verified only against canned responses (`anthropic_test.go`);
-  `TestAnthropicLive` runs a real tool round trip when `JARVIS_TEST_ANTHROPIC_KEY` is set
-  (model `JARVIS_TEST_ANTHROPIC_MODEL`). Fable/Mythos tool round trips are not supported: they
+  `TestAnthropicLive` (a plain chat, a tool round trip, a streamed tool call) runs against the
+  real API when `JARVIS_TEST_ANTHROPIC_KEY` is set (model `JARVIS_TEST_ANTHROPIC_MODEL`,
+  default `claude-haiku-4-5-20251001`). CI runs it in `.github/workflows/anthropic-live.yml` on
+  push to main, weekly and on demand, from the repository secret `ANTHROPIC_API_KEY` (never on
+  pull requests; without the secret it warns and passes). Fable/Mythos tool round trips are not supported: they
   need thinking blocks replayed verbatim, which the OpenAI-shaped history can't carry. No prompt
   caching (`cache_control`) is requested.
 

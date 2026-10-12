@@ -516,8 +516,8 @@ func TestOpenAIPathUnchanged(t *testing.T) {
 }
 
 // TestAnthropicLive talks to the real API. It is skipped unless JARVIS_TEST_ANTHROPIC_KEY is
-// set (model: JARVIS_TEST_ANTHROPIC_MODEL, default claude-haiku-4-5). It runs a tool round
-// trip, non-stream then streamed.
+// set (CI: the anthropic-live workflow, from the ANTHROPIC_API_KEY secret). The model is
+// JARVIS_TEST_ANTHROPIC_MODEL, default claude-haiku-4-5-20251001; max_tokens stays small.
 func TestAnthropicLive(t *testing.T) {
 	key := os.Getenv("JARVIS_TEST_ANTHROPIC_KEY")
 	if key == "" {
@@ -525,36 +525,72 @@ func TestAnthropicLive(t *testing.T) {
 	}
 	model := os.Getenv("JARVIS_TEST_ANTHROPIC_MODEL")
 	if model == "" {
-		model = "claude-haiku-4-5"
+		model = "claude-haiku-4-5-20251001"
 	}
 	ep := Endpoint{BaseURL: "https://api.anthropic.com", APIKey: key, Model: model, Remote: true, API: APIAnthropic}
 	s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}}, Log: quietLog()})
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "get_weather", Description: "Current weather for a city",
 		Parameters: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}}}
-	msgs := []Message{msg("system", "Use the tool for weather questions."), msg("user", "What's the weather in Paris and in Rome?")}
-	first, err := s.Chat(ctx, ChatRequest{Messages: msgs, Tools: tools, MaxTokens: ptr(512)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.FinishReason != "tool_calls" || len(first.ToolCalls) == 0 {
-		t.Fatalf("no tool call: %+v", first)
-	}
-	msgs = append(msgs, Message{Role: "assistant", Content: TextContent(first.Content), ToolCalls: first.ToolCalls})
-	for _, tc := range first.ToolCalls {
-		msgs = append(msgs, Message{Role: "tool", ToolCallID: tc.ID, Content: TextContent(`{"weather":"sunny, 21C"}`)})
-	}
-	ch, err := s.Stream(ctx, ChatRequest{Messages: msgs, Tools: tools, MaxTokens: ptr(512)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var last Frame
-	for f := range ch {
-		last = f
-	}
-	if !last.Done || last.Content == "" || last.Usage.PromptTokens == 0 {
-		t.Fatalf("final frame %+v", last)
-	}
-	t.Logf("answer: %s (usage %+v)", last.Content, last.Usage)
+	weatherQ := []Message{msg("system", "Always use the get_weather tool for weather questions."), msg("user", "What's the weather in Paris?")}
+
+	t.Run("chat", func(t *testing.T) {
+		r, err := s.Chat(ctx, ChatRequest{Messages: []Message{msg("system", "Answer in one word."), msg("user", "What colour is the sky on a clear day?")},
+			MaxTokens: ptr(32)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Content == "" || r.FinishReason != "stop" || r.Usage.PromptTokens == 0 || r.Usage.CompletionTokens == 0 {
+			t.Fatalf("%+v", r)
+		}
+		t.Logf("chat: %q %+v", r.Content, r.Usage)
+	})
+
+	t.Run("tool round trip", func(t *testing.T) {
+		first, err := s.Chat(ctx, ChatRequest{Messages: weatherQ, Tools: tools, MaxTokens: ptr(256)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first.FinishReason != "tool_calls" || len(first.ToolCalls) == 0 || first.ToolCalls[0].Function.Name != "get_weather" {
+			t.Fatalf("no tool call: %+v", first)
+		}
+		var args struct {
+			City string `json:"city"`
+		}
+		if err := json.Unmarshal([]byte(first.ToolCalls[0].Function.Arguments), &args); err != nil || args.City == "" {
+			t.Fatalf("arguments %q: %v", first.ToolCalls[0].Function.Arguments, err)
+		}
+		msgs := append(append([]Message{}, weatherQ...), Message{Role: "assistant", Content: TextContent(first.Content), ToolCalls: first.ToolCalls})
+		for _, tc := range first.ToolCalls {
+			msgs = append(msgs, Message{Role: "tool", ToolCallID: tc.ID, Content: TextContent(`{"weather":"sunny, 21C"}`)})
+		}
+		final, err := s.Chat(ctx, ChatRequest{Messages: msgs, Tools: tools, MaxTokens: ptr(256)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if final.FinishReason != "stop" || len(final.ToolCalls) != 0 || final.Content == "" {
+			t.Fatalf("final %+v", final)
+		}
+		t.Logf("round trip: %q", final.Content)
+	})
+
+	t.Run("stream tool call", func(t *testing.T) {
+		ch, err := s.Stream(ctx, ChatRequest{Messages: weatherQ, Tools: tools, MaxTokens: ptr(256)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var last Frame
+		for f := range ch {
+			last = f
+		}
+		if !last.Done || last.FinishReason != "tool_calls" || len(last.ToolCalls) == 0 || last.Usage.PromptTokens == 0 {
+			t.Fatalf("final frame %+v", last)
+		}
+		tc := last.ToolCalls[0]
+		if tc.ID == nil || *tc.ID == "" || tc.Name == nil || *tc.Name != "get_weather" || !json.Valid([]byte(tc.Arguments)) {
+			t.Fatalf("tool call %+v", tc)
+		}
+		t.Logf("streamed tool call: %s %s", *tc.Name, tc.Arguments)
+	})
 }

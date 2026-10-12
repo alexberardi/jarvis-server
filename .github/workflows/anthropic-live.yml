@@ -1,0 +1,50 @@
+name: anthropic-live
+
+# The live Anthropic Messages API check (TestAnthropicLive): a plain chat, a tool round trip
+# and a streamed tool call against api.anthropic.com. Not on pull_request: fork PRs get no
+# secrets, and every push would bill. Without the ANTHROPIC_API_KEY secret it warns and passes.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anthropic-live
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.27"
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check for the secret
+        id: key
+        env:
+          JARVIS_TEST_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$JARVIS_TEST_ANTHROPIC_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY secret is not set; skipping the live Anthropic test"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+      - uses: actions/setup-go@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Live Anthropic test
+        if: steps.key.outputs.present == 'true'
+        env:
+          JARVIS_TEST_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JARVIS_TEST_ANTHROPIC_MODEL: ${{ vars.JARVIS_TEST_ANTHROPIC_MODEL }}
+        run: go test ./internal/modules/llm -run '^TestAnthropicLive$' -count=1 -v
