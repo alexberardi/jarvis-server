@@ -525,7 +525,7 @@ handles) or guesses. Covered by the pipeline tests and the server test above. Al
 
 **Deferred:** `act_on_items` (a node-side dispatcher over items earlier commands returned, a
 separate mechanism: it needs the sidecar to keep `ref_id → command` and call commands'
-callbacks), a listening cue on desktops, barge-in during follow-up replies, the not_for_me
+callbacks), a listening cue on desktops (**done 2026-10-11: the island, DESIGN.md §11**), barge-in during follow-up replies, the not_for_me
 wake cool-down, an `end_of_exchange` header on the stream route (server).
 
 ### 3.10 The follow-up gate: "is this speech for me?" (2026-10-10)

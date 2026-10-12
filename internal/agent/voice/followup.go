@@ -119,6 +119,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
+		p.cue(CueFollowUp, time.Duration(timeout*float64(time.Second)))
 		pcm, err := p.listenFollowUp(ctx, s, timeout, it, afterReply, &used)
 		if err != nil {
 			t.FollowUpEnd = EndError
@@ -133,6 +134,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			return
 		}
 		afterReply = false
+		p.cue(CueThinking, 0)
 		ex := Exchange{RecordedSecs: float64(len(pcm)) / CaptureRate}
 		level := levelVsWake(s, pcm)
 		cmd := Normalize(pcm)
@@ -280,6 +282,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 	if keep := max(1, frames(preOnsetKeepSecs)); len(heard) > keep {
 		heard = heard[len(heard)-keep:]
 	}
+	p.cue(CueListening, 0)
 
 	// Record until SilenceSecs of quiet, but at least MinAfterOnsetSecs after onset.
 	silenceF := max(1, frames(cfg.SilenceSecs))
@@ -301,6 +304,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		}
 		heard = append(heard, c)
 		recorded++
+		p.level(c)
 		if RMS(c) < s.threshold {
 			silent++
 		} else {

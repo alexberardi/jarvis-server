@@ -418,3 +418,58 @@ back by id. Click/type/fill would add:
    form; if it bites, make `close_tab` a validation question.
 6. read_page default 4000 chars (small Qwen context). *Recommend:* raise per model later.
 
+
+## 11. The island: an on-screen voice indicator (2026-10-11)
+
+A small pill at the top centre of the screen (on a Mac, right under the notch: its top edge on
+the menu bar's bottom edge) shows what the voice pipeline is doing, so the user can see when
+the microphone is open without the wake word. Approved by the user 2026-10-11 (macOS and
+Hyprland first, Windows later). Code: `internal/agent/island`; the pipeline's side is
+`voice.Indicator` (`internal/agent/voice/indicator.go`).
+
+| Pipeline | Island |
+|---|---|
+| wake word heard, recording; a follow-up answer started; a validation reply | **listening**: slides in; orb + 5 bars follow the microphone level (dB scale, −50 → −12 dBFS) |
+| transcribing, waiting for command-center, running tools | **thinking**: a slow travelling pulse (violet) |
+| playing a reply | **speaking**: bars follow the reply's PCM as it is written to the speaker (white) |
+| follow-up window open, nobody speaking | **follow-up**: dimmer pill, a ring counting down the time left to start answering. After an ignored answer it shows what is left of the window (≥ 2 s), the same rule the window follows |
+| turn over / not for me | slides away |
+| turn failed | red for 1.2 s, then slides away |
+
+**How.** One pure-Go renderer (`render.go`, `golang.org/x/image/vector`) draws each frame
+into an RGBA buffer, so every platform shows the same pixels (golden PNGs in
+`island/testdata`). ~30 fps only while visible; a hidden island sleeps on a channel. A
+backend only puts the buffer on screen:
+
+- **macOS** (`mac_darwin.go`, purego): a borderless non-activating `NSPanel`, status window
+  level, ignores the mouse, on every Space and over full-screen apps, accessory activation
+  policy (the bundle is already `LSUIElement`), frames as `CGImage` contents of a `CALayer`
+  (pixels copied through `CFData`, never aliased). AppKit needs the main thread:
+  `cmd/jarvis-agent` locks the main goroutine to it (`main_darwin.go`) and `island.Run` keeps
+  it for an event loop (`nextEventMatchingMask:` with an autorelease pool per pass) while the
+  agent runs on other goroutines; every AppKit call goes through `dispatch_sync_f` to the
+  main queue.
+- **Wayland** (`wayland.go`): a ~600-line pure-Go client, no new dependency: `wl_compositor` (v3+
+  for buffer scale, v4 damage_buffer), `wl_shm` (two ARGB8888 buffers in a memfd pool),
+  `wl_output` scale, `zwlr_layer_shell_v1` (overlay layer, anchored top only, so centred and
+  below the bar's exclusive zone; keyboard interactivity none; an empty input region, so
+  clicks pass through). The surface is created on show and destroyed on hide.
+- **Off** (one info log line, the agent carries on): no `WAYLAND_DISPLAY` (X11, a
+  systemd unit without the session's environment), a compositor without layer-shell (GNOME),
+  Windows (next), any backend failure while running.
+
+`run --voice` shows it by default; `--no-overlay` turns it off. `jarvis-agent island-demo`
+(not in the usage) plays the states without a microphone or server;
+`--hold follow_up --for 20s` holds one.
+
+**Verified (2026-10-11).** macOS 26.1 on the MBP (arm64, 2×): the panel at layer 25,
+200×56 pt at x = (1728 − 200)/2, y = 34 (just under the menu bar), and the window server's
+own composite of the island's window (captured in-process, which needs no Screen
+Recording grant; `TestMacLiveSnapshot`, opt-in) matched the renderer in all five states.
+Hyprland 0.56 on this box: the real compositor accepted the whole handshake (globals,
+layer surface, configure/ack, memfd pool with fd passing, buffers) with **no buffer ever
+attached** (`TestWaylandLiveProbe`, opt-in), so nothing was drawn on the user's screen; the
+request sequence, argument encoding, input region and pixel format are tested against a
+scripted compositor. **Not verified:** the pill actually on a Hyprland screen (run
+`island-demo`), multi-monitor placement (macOS: the main screen; Wayland: the compositor's
+choice of output), fractional scaling (the buffer uses the largest integer output scale).
