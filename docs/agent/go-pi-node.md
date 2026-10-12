@@ -684,6 +684,72 @@ doubts it. To get the rest, one PR:
 5. Tests in `tests/test_follow_up_loop.py`: keep_listening keeps the window open without speaking
    or counting an iteration; a plain not_for_me still closes it; the level is sent.
 
+### 3.11 Phase 4.1: the HAT on the Go node (2026-10-12)
+
+The Go agent now drives the ReSpeaker 2-mics HAT: capture from `dsnoopmic`, playback to `output`
+(the device names the Python node's `/etc/asound.conf` defines; the existing purego ALSA backend
+needed no change), the three APA102 LEDs and the GPIO17 button. No Pi-specific binary: the HAT is
+used when `hat.Detected()` (a Raspberry Pi, `/dev/spidev0.0`, and the `seeed2micvoicec` card), or
+with `--hat on`; `--hat off` disables it.
+
+```bash
+jarvis-agent run --voice --voice-input dsnoopmic --voice-output output     # the Pi node
+jarvis-agent listen --voice-input dsnoopmic --voice-output output --once   # one scripted turn
+jarvis-agent hat cycle | hat pattern thinking --for 5s | hat button --for 30s   # by hand
+JARVIS_AGENT_LOG=debug ...                                                 # logs each LED state
+```
+
+**What was ported** (`internal/agent/hat`, `cmd/jarvis-agent/hat.go`):
+- **LEDs** = `respeaker_led_service.py`: the 11 patterns with Python's colours and brightness, the
+  two layers (a stable idle/alert pattern under a transient command-flow overlay), the preview
+  auto-clear (with Python's fix: a real state set during a preview survives its timer),
+  `led_enabled` and `led_brightness_percent` (as `--led-brightness`; the settings snapshot comes
+  with parity item 5.5). Frames are apa102_pi's byte for byte (start frame, `0xE0|ceil(pct*31/100)`,
+  B, G, R, the SK9822 reset frame, the trailing zeros). **Golden-tested against the Python code
+  itself:** `tools/golden/export_hat.py` runs the node's `_PATTERNS` and `apa102_pi`'s own
+  `set_pixel`/`show` on the Pi (528 pattern samples, 6 frames → `internal/agent/hat/testdata`).
+  Deliberate difference: Python redraws at 20 Hz always; Go draws a static pattern once and
+  ticks only for the animated ones (thinking, shutdown_warning). The 20 Hz loop cost ~3% of a
+  Pi 4 core; the Go renderer is now within measurement noise of `--hat off`.
+- **Voice states** come from the island's `voice.Indicator` (one fan-out feeds both): wake →
+  `wake_detected` (purple) for 300 ms, as Python shows it during the wake ack, then `listening`;
+  `thinking`; `speaking`; the follow-up window → `listening` (as Python); idle → the stable pattern;
+  a failed turn → `error` for 1.5 s (Python clears red once the spoken error ends).
+- **Button** = `button_service.py`: active low with pull-up via go-gpiocdev (gpiochip0 line 17),
+  50 ms debounce, `shutdown_warning` after 1 s held, power off after 3 s
+  (`sudo -n systemctl poweroff`; `--button-poweroff=false` turns it off), the overlay cleared on
+  every release. A short press logs only: the Go node has no alert queue yet (Python reads
+  queued alerts). The MQTT `button/*` publishes are not sent (the ACL denies them, §1.4).
+- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`), alert-queue
+  wiring of the `alert` pattern, `preview_led_pattern` over MQTT (parity item 5.4).
+
+**Verified on hardware** (Python node stopped for each test and restarted after; both Pis are back
+as they were):
+
+| | Pi 4 (jarvis-pi4) | Zero 2 W (jarvis-dev) |
+|---|---|---|
+| All 11 LED patterns written over SPI (`hat cycle`) | no errors | no errors |
+| Button line | `input bias=pull-up edges=both consumer="jarvis-agent"` | same |
+| Voice turn, `wav:` input of "hey jarvis, what time is it?", reply to a WAV | wake 0.815, "What time is it?" → "It's just past midnight." | wake 0.815, same transcript, reply spoken |
+| LED states logged in that turn | listening → thinking → speaking → follow_up → idle | same |
+| Idle listening on the HAT mic (`dsnoopmic`), 5 min, CPU of one core | 29.1% (26–28% in later 2-min runs) | **55.0%** |
+| Memory: anonymous (private dirty) / RSS | 22.5 MB / 85 MB | **23.7 MB** / 87 MB |
+| Overruns / pipeline restarts in that window | 0 / 0 | 0 / 0 (54.8 °C, not throttled) |
+| Python node, whole service, idle listening, 5 min | invalid (its config points at a throwaway jarvisd, the listener is parked: §3.1's note) | **87.1%, 129 MB anonymous** (106 MB of swap in use) |
+
+RSS is mostly clean file-backed pages (the 51 MB binary with the embedded onnxruntime, and the
+extracted library), which the kernel can drop under pressure; the private footprint is ~23 MB,
+below the spike's `wakelive` USS (36 MB). The Zero's 55% matches the bare wake loop (54.5%, §3.6):
+the agent around it costs nothing measurable.
+
+**Not verified:** the HAT *speaker* and the mic *acoustically* (it was after midnight: earlier
+spikes kept playback inaudible after 23:00 too; on the Pi 4 the mic doesn't hear its speaker at
+the current mixer levels, RMS unchanged). The capture path itself is verified (`dsnoopmic`, 0
+overruns in 5 min on both), playback via `output` was measured in §3.2. Pressing the button and
+seeing the colours need a person. snd-aloop capture failed with EIO right after start on the Pi 4
+(the `plughw` capture side of the loopback; the spike's `wakelive` worked on subdevice 3), so the
+end-to-end turn used `wav:` input; not chased: it is a test harness, not a node path.
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -849,7 +915,7 @@ These are **still needed**; install.sh step lines are cited:
    - This exercises the whole voice protocol on hardware we sit at, without touching the Pi.
    - macOS (AudioQueue via purego) and Windows (WASAPI over COM) follow.
 4. **Pi node.** In order:
-   1. HAT audio (`dsnoopmic`/`output`), LEDs and button.
+   1. HAT audio (`dsnoopmic`/`output`), LEDs and button. **Done 2026-10-12 (§3.11).**
    2. Heartbeat `pending_update` → updater.
    3. The tarball + install.sh variant (§6).
    4. The provisioning AP + HTTP API port.

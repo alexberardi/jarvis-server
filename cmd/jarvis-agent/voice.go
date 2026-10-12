@@ -107,6 +107,7 @@ func listen(ctx context.Context, args []string) error {
 	noTools := fs.Bool("no-tools", false, "offer voice turns no client tools")
 	tf := addToolFlags(fs)
 	vf := addVoiceFlags(fs)
+	hf := addHatFlags(fs)
 	_ = fs.Parse(args)
 	path, err := credsPath(*cp)
 	if err != nil {
@@ -131,6 +132,10 @@ func listen(ctx context.Context, args []string) error {
 		return fmt.Errorf("voice: %w", err)
 	}
 	defer vs.close()
+	if hd := openHat(hf, log); hd != nil {
+		defer hd.Close()
+		vs.addIndicator(&ledCue{leds: hd.leds, log: log})
+	}
 	var tools node.Toolset
 	if !*noTools {
 		_, ts, closeTools, err := tf.build(ctx, log, false)
