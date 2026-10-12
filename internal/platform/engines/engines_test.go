@@ -73,7 +73,11 @@ func runHelper() {
 		time.Sleep(d)
 		os.Exit(3)
 	}
-	select {}
+	// Run until stopped. Not select{}: with nothing else running, the runtime would call that
+	// a deadlock and exit 2.
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 // hangGuard bounds every wait in these tests. It only turns a hang into a failure; nothing
