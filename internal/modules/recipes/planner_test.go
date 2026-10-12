@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-func day(n int) string { return time.Now().AddDate(0, 0, n).Format("2006-01-02") }
+// testDay is "today" for every day() in the run, so a test spanning midnight stays consistent.
+var testDay = time.Now()
+
+func day(n int) string { return testDay.AddDate(0, 0, n).Format("2006-01-02") }
 
 func planItem(date, meal string, id any) map[string]any {
 	return map[string]any{"date": date, "meal_type": meal, "recipe_id": id}

@@ -6,10 +6,16 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob/blobtest"
+)
+
+var (
+	registerMemtest sync.Once
+	opened          = make(chan string, 1) // URLs the memtest backend was asked to open
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -57,11 +63,18 @@ func TestOpen(t *testing.T) {
 	if _, err := blob.Open("file://nas/share", quiet()); err == nil {
 		t.Fatal("remote file host")
 	}
-	// A registered backend is chosen by scheme.
-	blob.Register("memtest", func(u *url.URL, _ *slog.Logger) (blob.Store, error) {
-		return blob.NewFS(filepath.Join(dir, u.Host), nil)
+	// A registered backend is chosen by scheme. The registry is process-wide and refuses a
+	// second registration, so it is registered once however often the test runs (-count).
+	registerMemtest.Do(func() {
+		blob.Register("memtest", func(u *url.URL, _ *slog.Logger) (blob.Store, error) {
+			opened <- u.String()
+			return blob.NewFS(filepath.Join(u.Query().Get("dir"), u.Host), nil)
+		})
 	})
-	if _, err := blob.Open("memtest://c", quiet()); err != nil {
+	if _, err := blob.Open("memtest://c?dir="+url.QueryEscape(dir), quiet()); err != nil {
 		t.Fatal(err)
+	}
+	if u := <-opened; !strings.HasPrefix(u, "memtest://c") {
+		t.Fatalf("opened %q", u)
 	}
 }

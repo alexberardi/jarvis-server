@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -171,7 +172,7 @@ func TestLLMVisionTimeoutSetting(t *testing.T) {
 	}
 	start := time.Now()
 	_, err := l.Recognize(e.ctx, Image{Data: testPNG("HI")}, Options{})
-	if err == nil || time.Since(start) > 10*time.Second {
+	if err == nil || time.Since(start) > 60*time.Second { // the default would be 180 s
 		t.Fatalf("1 s setting: %v after %v", err, time.Since(start))
 	}
 	if (&LLMVision{}).timeout(context.Background()) != defaultLLMVisionTimeout {
@@ -179,29 +180,67 @@ func TestLLMVisionTimeoutSetting(t *testing.T) {
 	}
 }
 
-// slowEngine blocks until its context ends.
-type slowEngine struct{ name string }
+// slowEngine blocks until its context ends, reporting each call on entered if set.
+type slowEngine struct {
+	name    string
+	entered chan struct{}
+}
 
 func (s slowEngine) Name() string                   { return s.name }
 func (s slowEngine) Available(context.Context) bool { return true }
 func (s slowEngine) Recognize(ctx context.Context, _ Image, _ Options) (Result, error) {
+	if s.entered != nil {
+		s.entered <- struct{}{}
+	}
 	<-ctx.Done()
 	return Result{}, ctx.Err()
+}
+
+// manualDeadline is a context whose deadline passes when the test says so.
+type manualDeadline struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
+}
+
+func newManualDeadline(parent context.Context) *manualDeadline {
+	return &manualDeadline{Context: parent, done: make(chan struct{})}
+}
+
+func (c *manualDeadline) expire() { c.once.Do(func() { close(c.done) }) }
+
+func (c *manualDeadline) Deadline() (time.Time, bool) { return time.Now().Add(time.Hour), true }
+func (c *manualDeadline) Done() <-chan struct{}       { return c.done }
+func (c *manualDeadline) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
 }
 
 // TestRecognizeDeadlineKeepsFastReadings: a slow engine running into the caller's deadline
 // must not throw away what a fast engine read; a cancelled context is still an error.
 func TestRecognizeDeadlineKeepsFastReadings(t *testing.T) {
 	fast := &fakeEngine{name: EngineAppleVision, text: "read"}
-	e := setup(t, &Module{Engines: []Engine{fast, slowEngine{name: EngineLLMVision}}})
+	slow := slowEngine{name: EngineLLMVision, entered: make(chan struct{}, 4)}
+	e := setup(t, &Module{Engines: []Engine{fast, slow}})
 	for _, k := range []string{"ocr.enable_apple_vision", "ocr.enable_llm_proxy_vision"} {
 		if err := e.m.settings.Set(e.ctx, k, true, settings.Scope{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	imgs := []Image{{Data: []byte("a")}, {Data: []byte("b")}}
-	dctx, cancel := context.WithTimeout(e.ctx, 100*time.Millisecond)
-	defer cancel()
+	// The deadline passes once the fast engine has been asked for both images, however slow
+	// the runner, while the slow engine is still at it.
+	dctx := newManualDeadline(e.ctx)
+	go func() {
+		for deadline := time.Now().Add(30 * time.Second); fast.calls.Load() < 2 && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+		dctx.expire()
+	}()
 	rs, err := e.m.Recognize(dctx, imgs, Options{}, nil)
 	if err != nil || len(rs) != 2 {
 		t.Fatalf("deadline: %+v %v", rs, err)
@@ -212,8 +251,11 @@ func TestRecognizeDeadlineKeepsFastReadings(t *testing.T) {
 	if len(rs[1].Results) != 2 || rs[1].Results[0].Error == "" || rs[1].Results[1].Error == "" {
 		t.Fatalf("slow reading carries the deadline: %+v", rs[1])
 	}
+	for len(slow.entered) > 0 {
+		<-slow.entered
+	}
 	cctx, ccancel := context.WithCancel(e.ctx)
-	go func() { time.Sleep(50 * time.Millisecond); ccancel() }()
+	go func() { <-slow.entered; ccancel() }() // cancelled mid-run
 	if _, err := e.m.Recognize(cctx, imgs, Options{}, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled: %v", err)
 	}

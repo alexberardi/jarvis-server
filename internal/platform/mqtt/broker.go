@@ -61,7 +61,11 @@ type Broker struct {
 	pending map[string]struct{} // response topics with a Request waiting
 	subID   int                 // last inline subscription id
 
-	conns []*connSet // each listener's connections (shutdown.go)
+	conns   []*connSet                 // each listener's connections (shutdown.go)
+	serving map[net.Conn]chan struct{} // connections whose handler is running (takeover.go)
+
+	// testTakeoverWait, if set, runs when a reconnect starts waiting for its predecessor.
+	testTakeoverWait func()
 
 	closeOnce sync.Once
 	closeErr  error
@@ -79,14 +83,19 @@ func New(auth Authenticator, opts Options) (*Broker, error) {
 	if err := srv.AddHook(newAuthHook(auth, opts.AllowAnonymous, log), nil); err != nil {
 		return nil, fmt.Errorf("mqtt: add auth hook: %w", err)
 	}
-	return &Broker{
+	b := &Broker{
 		opts:    opts,
 		log:     log,
 		srv:     srv,
 		addrs:   map[string]string{},
 		pending: map[string]struct{}{},
+		serving: map[net.Conn]chan struct{}{},
 		done:    make(chan struct{}),
-	}, nil
+	}
+	if err := srv.AddHook(&takeoverHook{b: b}, nil); err != nil {
+		return nil, fmt.Errorf("mqtt: add takeover hook: %w", err)
+	}
+	return b, nil
 }
 
 // Start binds the listeners and serves in the background until ctx is cancelled or Close

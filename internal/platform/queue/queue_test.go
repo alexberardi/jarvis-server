@@ -59,7 +59,7 @@ func start(t *testing.T, q *Queue) {
 
 func waitState(t *testing.T, q *Queue, id int64, want State) Info {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for time.Now().Before(deadline) {
 		i, err := q.Get(context.Background(), id)
 		if err != nil {

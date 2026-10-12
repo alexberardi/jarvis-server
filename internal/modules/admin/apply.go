@@ -151,8 +151,9 @@ type applyJob struct {
 }
 
 type applyState struct {
-	mu  sync.Mutex
-	job *applyJob
+	mu   sync.Mutex
+	job  *applyJob
+	runs sync.WaitGroup // runApply goroutines (tests wait for a run to finish)
 }
 
 func (m *Module) paths() update.Paths {
@@ -222,7 +223,7 @@ func (m *Module) handleApply(w http.ResponseWriter, r *http.Request) {
 	snapshot := *job
 	m.apply.mu.Unlock()
 	m.deps.Log.Info("admin: update requested", "from", m.version(), "version", body.Version)
-	go m.runApply(body.Version)
+	m.apply.runs.Go(func() { m.runApply(body.Version) })
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"job": snapshot})
 }
 

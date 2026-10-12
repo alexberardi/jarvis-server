@@ -52,6 +52,17 @@ type Options struct {
 	HostName string
 	// Logger; nil uses slog.Default.
 	Logger *slog.Logger
+
+	// Test seams: addrs stands in for net.Interface.Addrs, register for zeroconf.RegisterProxy.
+	addrs    func(net.Interface) ([]net.Addr, error)
+	register func(instance, service, domain string, port int, host string, ips, txt []string, ifaces []net.Interface) (server, error)
+}
+
+// server is the part of *zeroconf.Server Advertise uses.
+type server interface{ Shutdown() }
+
+func registerProxy(instance, service, domain string, port int, host string, ips, txt []string, ifaces []net.Interface) (server, error) {
+	return zeroconf.RegisterProxy(instance, service, domain, port, host, ips, txt, ifaces)
 }
 
 // Advertise registers the service and keeps answering queries until stop is called or ctx
@@ -92,9 +103,13 @@ func Advertise(ctx context.Context, opts Options) (stop func(), err error) {
 	if ifaces == nil {
 		ifaces = pickInterfaces(netaddr.List(), opts.Allow, log)
 	}
+	ifaceAddrs := opts.addrs
+	if ifaceAddrs == nil {
+		ifaceAddrs = func(ifc net.Interface) ([]net.Addr, error) { return ifc.Addrs() }
+	}
 	var ips, names []string
 	for _, ifc := range ifaces {
-		addrs, _ := ifc.Addrs()
+		addrs, _ := ifaceAddrs(ifc)
 		ips = append(ips, advertisedIPs(addrs)...)
 		names = append(names, ifc.Name)
 	}
@@ -104,7 +119,11 @@ func Advertise(ctx context.Context, opts Options) (stop func(), err error) {
 
 	// RegisterProxy rather than Register: Register takes os.Hostname() as is and appends
 	// ".local." even when it already ends in ".local" (macOS), and answers with every address.
-	srv, err := zeroconf.RegisterProxy(opts.Instance, ServiceType, Domain, opts.Port, host, ips, txt, ifaces)
+	register := opts.register
+	if register == nil {
+		register = registerProxy
+	}
+	srv, err := register(opts.Instance, ServiceType, Domain, opts.Port, host, ips, txt, ifaces)
 	if err != nil {
 		return nil, fmt.Errorf("mdns: register %s: %w", ServiceType, err)
 	}

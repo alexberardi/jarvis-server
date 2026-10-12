@@ -220,7 +220,7 @@ func TestFiresThroughQueue(t *testing.T) {
 		if fr.Trigger != "hello" {
 			t.Fatalf("%+v", fr)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second): // hang guard
 		t.Fatal("job never ran")
 	}
 }

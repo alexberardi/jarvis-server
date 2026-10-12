@@ -43,10 +43,12 @@ func (fakeAuth) HouseholdRole(context.Context, int64, string) (authn.Role, bool,
 	return "", false, nil
 }
 
-// fakeSynth renders 100 samples of 0.25 per character, after delay, and records what it did.
+// fakeSynth renders 100 samples of 0.25 per character, after delay (and, with a gate, once
+// it receives from it), and records what it did.
 type fakeSynth struct {
 	key    engineKey
 	delay  time.Duration
+	gate   chan struct{}
 	mu     sync.Mutex
 	texts  []string
 	sids   []int
@@ -69,6 +71,9 @@ func (f *fakeSynth) Generate(text string, sid int, speed float32) ([]float32, er
 		}
 	}
 	time.Sleep(f.delay)
+	if f.gate != nil {
+		<-f.gate
+	}
 	f.mu.Lock()
 	f.texts, f.sids, f.speeds = append(f.texts, text), append(f.sids, sid), append(f.speeds, speed)
 	f.mu.Unlock()
@@ -97,13 +102,14 @@ type loader struct {
 	made  []*fakeSynth
 	fail  atomic.Bool
 	delay time.Duration
+	gate  chan struct{} // each Generate waits for a value (or the close) when set
 }
 
 func (l *loader) load(k engineKey) (synth, error) {
 	if l.fail.Load() {
 		return nil, errors.New("load failed")
 	}
-	s := &fakeSynth{key: k, delay: l.delay}
+	s := &fakeSynth{key: k, delay: l.delay, gate: l.gate}
 	l.mu.Lock()
 	l.made = append(l.made, s)
 	l.mu.Unlock()
@@ -396,8 +402,8 @@ func TestSpeakStreamHTTP(t *testing.T) {
 
 func TestSpeakStreamsPerSentence(t *testing.T) {
 	e := setup(t, &Module{})
-	e.l.delay = 100 * time.Millisecond
-	start := time.Now()
+	gate := make(chan struct{})
+	e.l.gate = gate
 	st, err := e.m.Speak(context.Background(), "Alpha. Beta gamma. Delta!", SpeakOptions{Voice: "af_heart", Speed: 1.0})
 	if err != nil {
 		t.Fatal(err)
@@ -406,8 +412,24 @@ func TestSpeakStreamsPerSentence(t *testing.T) {
 	if st.Format != (Format{24000, 1, 2, "kokoro"}) {
 		t.Fatalf("format %+v", st.Format)
 	}
+	// Only the first sentence may render: it must reach the reader before the rest exist.
+	gate <- struct{}{}
+	first := make(chan []byte, 1)
+	go func() {
+		b, err := st.Next()
+		if err != nil {
+			t.Error(err)
+		}
+		first <- b
+	}()
 	var sizes []int
-	var firstAt time.Duration
+	select {
+	case b := <-first:
+		sizes = append(sizes, len(b))
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("first chunk waited for later sentences: not streamed")
+	}
+	close(gate)
 	for {
 		b, err := st.Next()
 		if err == io.EOF {
@@ -416,17 +438,10 @@ func TestSpeakStreamsPerSentence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sizes == nil {
-			firstAt = time.Since(start)
-		}
 		sizes = append(sizes, len(b))
 	}
-	total := time.Since(start)
 	if !reflect.DeepEqual(sizes, []int{2 * 100 * 6, 2 * 100 * 11, 2 * 100 * 6}) {
 		t.Fatalf("chunks %v", sizes)
-	}
-	if firstAt > total/2 {
-		t.Fatalf("first chunk at %v of %v: not streamed", firstAt, total)
 	}
 	s := e.l.all()[0]
 	if s.sids[0] != 3 || s.speeds[0] != 1.0 || s.key.Lexicon != "lexicon-us-en.txt" || s.key.Lang != "en-us" {
@@ -539,7 +554,7 @@ func TestReloadOnModelChange(t *testing.T) {
 	if _, err := io.ReadAll(st); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for !all[0].closed.Load() && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -584,8 +599,8 @@ func TestConcurrencyCapAndCancel(t *testing.T) {
 	if _, err := e.m.Speak(ctx, "Blocked.", SpeakOptions{}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("second stream: %v", err)
 	}
-	st.Close() // frees the slot after at most the sentence in flight
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	st.Close()                                                                 // frees the slot after at most the sentence in flight
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second) // hang guard
 	defer cancel2()
 	st2, err := e.m.Speak(ctx2, "Now.", SpeakOptions{})
 	if err != nil {

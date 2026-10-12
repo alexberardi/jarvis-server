@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -179,15 +180,114 @@ func multicastIfaces() []net.Interface {
 	return out
 }
 
+// fakeServer records Shutdown calls.
+type fakeServer struct{ shutdowns chan struct{} }
+
+func (f *fakeServer) Shutdown() { f.shutdowns <- struct{}{} }
+
+type registration struct {
+	instance, service, domain, host string
+	port                            int
+	ips, txt                        []string
+	ifaces                          []string
+}
+
+// hermetic returns options that register with a fake instead of the network: the
+// interface en0 carries the given addresses, and every registration is sent on regs.
+func hermetic(o Options, regs chan<- registration, srv *fakeServer, cidrs ...string) Options {
+	o.Interfaces = []net.Interface{{Index: 7, Name: "en0", Flags: net.FlagUp | net.FlagMulticast}}
+	o.addrs = func(ifc net.Interface) ([]net.Addr, error) {
+		var out []net.Addr
+		for _, c := range cidrs {
+			out = append(out, ipnet(c))
+		}
+		return out, nil
+	}
+	o.register = func(instance, service, domain string, port int, host string, ips, txt []string, ifaces []net.Interface) (server, error) {
+		r := registration{instance: instance, service: service, domain: domain, host: host, port: port, ips: ips, txt: txt}
+		for _, ifc := range ifaces {
+			r.ifaces = append(r.ifaces, ifc.Name)
+		}
+		regs <- r
+		return srv, nil
+	}
+	o.Logger = slog.New(slog.DiscardHandler)
+	return o
+}
+
+// What Advertise registers is what mobile browses for: the service type and domain, the
+// config-service port, sorted TXT, the host label without ".local", and the interface's
+// non-loopback addresses.
+func TestAdvertiseRegisters(t *testing.T) {
+	regs := make(chan registration, 1)
+	srv := &fakeServer{shutdowns: make(chan struct{}, 2)}
+	stop, err := Advertise(t.Context(), hermetic(Options{
+		Instance: "Jarvis (box)",
+		TXT:      map[string]string{"version": "test", "api": "v1"},
+		HostName: "box.local.",
+	}, regs, srv, "10.0.0.5/24", "127.0.0.1/8", "fe80::1/64"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := <-regs
+	want := registration{
+		instance: "Jarvis (box)", service: "_jarvis-config._tcp", domain: "local.", host: "box",
+		port: DefaultPort, ips: []string{"10.0.0.5", "fe80::1"}, txt: []string{"api=v1", "version=test"},
+		ifaces: []string{"en0"},
+	}
+	if fmt.Sprint(r) != fmt.Sprint(want) {
+		t.Fatalf("registered %+v\nwant       %+v", r, want)
+	}
+	stop()
+	stop() // idempotent
+	if n := len(srv.shutdowns); n != 1 {
+		t.Fatalf("Shutdown called %d times, want 1", n)
+	}
+}
+
+// Cancelling ctx withdraws the advertisement; stop afterwards is a no-op.
+func TestAdvertiseStopsOnCancel(t *testing.T) {
+	regs := make(chan registration, 1)
+	srv := &fakeServer{shutdowns: make(chan struct{}, 2)}
+	ctx, cancel := context.WithCancel(t.Context())
+	stop, err := Advertise(ctx, hermetic(Options{HostName: "box"}, regs, srv, "10.0.0.5/24"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-regs
+	cancel()
+	<-srv.shutdowns
+	stop()
+	if n := len(srv.shutdowns); n != 0 {
+		t.Fatalf("Shutdown called again by stop")
+	}
+}
+
+func TestAdvertiseNoAddresses(t *testing.T) {
+	regs := make(chan registration, 1)
+	srv := &fakeServer{shutdowns: make(chan struct{}, 1)}
+	if _, err := Advertise(t.Context(), hermetic(Options{HostName: "box"}, regs, srv, "127.0.0.1/8")); err == nil {
+		t.Fatal("want an error with only loopback addresses")
+	}
+	if len(regs) != 0 {
+		t.Fatal("registered with no addresses")
+	}
+}
+
+// multicastTestEnv opts in to the tests that use the host's real multicast network. They
+// exist to prove the advertisement round-trips through a real zeroconf browser, which
+// depends on the host (CI runners may drop multicast loopback), so they don't run by default.
+const multicastTestEnv = "JARVIS_TEST_MULTICAST"
+
 // Advertise, then browse exactly as mobile does (type jarvis-config/tcp, domain local.)
-// and check the port and TXT come through. Skips where multicast isn't available.
+// and check the port and TXT come through. Needs JARVIS_TEST_MULTICAST=1 (real network).
 func TestAdvertiseBrowse(t *testing.T) {
-	if testing.Short() {
-		t.Skip("multicast test skipped in -short mode")
+	if os.Getenv(multicastTestEnv) != "1" {
+		t.Skip("real-multicast round trip; set " + multicastTestEnv + "=1 to run")
 	}
 	ifaces := multicastIfaces()
 	if len(ifaces) == 0 {
-		t.Skip("no multicast-capable interface")
+		t.Fatal("no multicast-capable interface")
 	}
 	instance := "jarvis-test-" + time.Now().Format("150405.000000")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -200,14 +300,14 @@ func TestAdvertiseBrowse(t *testing.T) {
 		Interfaces: ifaces,
 	})
 	if err != nil {
-		t.Skipf("multicast unavailable: %v", err)
+		t.Fatalf("advertise: %v", err)
 	}
 	defer stop()
 
 	// zeroconf v2's Browse blocks until bctx is done and sends every entry unconditionally,
 	// closing entries when it stops, so run it alongside and keep draining until it returns.
 	entries := make(chan *zeroconf.ServiceEntry)
-	bctx, bcancel := context.WithTimeout(ctx, 5*time.Second)
+	bctx, bcancel := context.WithTimeout(ctx, 30*time.Second)
 	defer bcancel()
 	var browseErr error
 	browsed := make(chan struct{})
@@ -230,9 +330,9 @@ func TestAdvertiseBrowse(t *testing.T) {
 		select {
 		case <-browsed:
 			if browseErr != nil {
-				t.Skipf("browse unavailable: %v", browseErr)
+				t.Fatalf("browse: %v", browseErr)
 			}
-			t.Skip("advertisement not seen within 5s; multicast likely blocked in this environment")
+			t.Fatal("advertisement not seen within 30s; is multicast blocked on this host?")
 		case e, ok := <-recv:
 			if !ok {
 				recv = nil // closed; Browse is returning

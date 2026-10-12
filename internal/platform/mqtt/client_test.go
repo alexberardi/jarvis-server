@@ -13,6 +13,10 @@ import (
 	"github.com/mochi-mqtt/server/v2/packets"
 )
 
+// hangGuard bounds every wait in these tests. It only turns a hang into a failure; nothing
+// is expected to take anywhere near it, even on a loaded CI runner under -race.
+const hangGuard = 15 * time.Second
+
 // testClient is a minimal MQTT client speaking mochi's packet codec over a raw connection.
 type testClient struct {
 	t       *testing.T
@@ -158,7 +162,7 @@ func (c *testClient) expect(typ byte) packets.Packet {
 			c.t.Fatalf("got packet type %d, want %d", pk.FixedHeader.Type, typ)
 		}
 		return pk
-	case <-time.After(3 * time.Second):
+	case <-time.After(hangGuard):
 		c.t.Fatalf("timed out waiting for packet type %d", typ)
 	}
 	return packets.Packet{}
@@ -167,7 +171,7 @@ func (c *testClient) expect(typ byte) packets.Packet {
 // expectClosed waits for the broker to drop the connection, skipping a DISCONNECT.
 func (c *testClient) expectClosed() {
 	c.t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(hangGuard)
 	for {
 		select {
 		case pk, ok := <-c.in:
@@ -180,18 +184,6 @@ func (c *testClient) expectClosed() {
 		case <-deadline:
 			c.t.Fatal("connection was not closed")
 		}
-	}
-}
-
-// expectNothing asserts no packet arrives within d.
-func (c *testClient) expectNothing(d time.Duration) {
-	c.t.Helper()
-	select {
-	case pk, ok := <-c.in:
-		if ok {
-			c.t.Fatalf("unexpected packet type %d topic %q", pk.FixedHeader.Type, pk.TopicName)
-		}
-	case <-time.After(d):
 	}
 }
 

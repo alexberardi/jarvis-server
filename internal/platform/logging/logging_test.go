@@ -68,7 +68,7 @@ func TestFullBufferDropsInsteadOfBlocking(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second): // hang guard
 		t.Fatal("logging blocked on a stuck sink")
 	}
 	if sh.Dropped() == 0 {
@@ -108,11 +108,13 @@ func TestLoggingAfterCloseIsSafe(t *testing.T) {
 
 type lateSink struct {
 	memSink
-	ready atomic.Bool
+	ready   atomic.Bool
+	refused atomic.Int32 // flushes turned away while not ready
 }
 
 func (l *lateSink) Write(ctx context.Context, b []Record) error {
 	if !l.ready.Load() {
+		l.refused.Add(1)
 		return ErrNotReady
 	}
 	return l.memSink.Write(ctx, b)
@@ -125,7 +127,12 @@ func TestShipperHoldsRecordsUntilSinkReady(t *testing.T) {
 	sh := NewShipper(sink, 100, 10, time.Millisecond)
 	log := New(io.Discard, slog.LevelInfo, sh)
 	log.Info("starting jarvisd")
-	time.Sleep(20 * time.Millisecond) // several flushes while not ready
+	// Several flushes while not ready.
+	for deadline := time.Now().Add(30 * time.Second); sink.refused.Load() < 3; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the shipper never tried to flush")
+		}
+	}
 	sink.ready.Store(true)
 	log.Info("listening")
 	sh.Close()

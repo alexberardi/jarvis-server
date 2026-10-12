@@ -940,17 +940,19 @@ func TestInstallNoEngineBuild(t *testing.T) {
 func TestCancelInstall(t *testing.T) {
 	e := newEnv(t)
 	e.testCatalog()
-	e.hub.throttle = 20 * time.Millisecond
+	// The model download is held (until the cancel drops the request), so the install is
+	// certainly still running when it is cancelled.
+	e.hub.hold["/acme/Tiny-GGUF/resolve/rev1/Tiny-Q4_K_M.gguf"] = make(chan struct{})
 	e.start()
 	inst, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "tiny", GPUBackend: "cpu"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Wait until bytes are flowing for the model.
-	deadline := time.Now().Add(10 * time.Second)
+	// Wait until it is fetching the model.
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for {
 		i, _ := e.mgr.Store.GetInstall(e.ctx, inst.ID)
-		if i.Phase == "model" || i.Phase == "mmproj" {
+		if i.Phase == "model" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -962,7 +964,7 @@ func TestCancelInstall(t *testing.T) {
 	if err != nil || c.State != InstallCancelled {
 		t.Fatalf("%+v %v", c, err)
 	}
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(30 * time.Second) // hang guard
 	for {
 		_, err1 := e.mgr.Store.Get(e.ctx, "tiny")
 		_, err2 := os.Stat(filepath.Join(e.home, "models", ".partial", "tiny"))
@@ -1167,7 +1169,7 @@ func TestStackEndToEnd(t *testing.T) {
 		id := int64(out["install"].(map[string]any)["id"].(float64))
 		e.waitInstall(id, InstallDone)
 	}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	var live, bg, stt engine.Endpoint
 	for {
 		var err1, err2, err3 error

@@ -320,6 +320,10 @@ func TestMemoryVoiceTurn(t *testing.T) {
 }
 
 func TestMemoryAgentContextHint(t *testing.T) {
+	// The hint below comes from the vector search; a slow embedding would fall back to keywords.
+	old := agentContextEmbedTimeout
+	agentContextEmbedTimeout = time.Minute
+	t.Cleanup(func() { agentContextEmbedTimeout = old })
 	me := newMemEnv(t)
 	ctx := context.Background()
 	exp := me.clock().Add(time.Hour)

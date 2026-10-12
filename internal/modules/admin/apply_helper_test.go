@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/update"
@@ -83,7 +82,7 @@ func TestApplyViaHelper(t *testing.T) {
 			t.Fatalf("job %v", job)
 		}
 		// The helper restarts jarvisd, not the admin.
-		time.Sleep(50 * time.Millisecond)
+		e.m.apply.runs.Wait()
 		if r.requested.Load() != 0 {
 			t.Fatal("the admin restarted jarvisd itself")
 		}

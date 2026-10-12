@@ -176,7 +176,7 @@ func TestCart(t *testing.T) {
 // waitJob polls a parse job until it leaves PENDING/RUNNING.
 func (e *env) waitJob(t *testing.T, id string, h []string) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for {
 		o := e.obj(t, http.StatusOK, http.MethodGet, "/recipes/jobs/"+id, nil, h...)
 		if s := o["status"]; s != statusPending && s != statusRunning {

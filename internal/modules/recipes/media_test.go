@@ -183,7 +183,7 @@ func TestMediaNotFound(t *testing.T) {
 // waitBlob polls until the blob's existence matches want (the purge runs on the queue).
 func (e *env) waitBlob(t *testing.T, key string, want bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for {
 		_, err := e.blobs.Stat(e.ctx, key)
 		if (err == nil) == want {
@@ -208,13 +208,13 @@ func TestMediaReleasedWithLastRecipe(t *testing.T) {
 	r2 := e.create(t, h, recipeBody("two", map[string]any{"image_url": u}))
 
 	e.json(t, http.StatusNoContent, http.MethodDelete, path("/recipes/%d", idOf(r1)), nil, h...)
-	time.Sleep(50 * time.Millisecond)
+	e.settle(t)
 	e.waitBlob(t, key, true) // r2 still shows it
 
 	// PATCH without image_url, or with the same one, keeps it.
 	e.json(t, http.StatusOK, http.MethodPatch, path("/recipes/%d", idOf(r2)), map[string]any{"title": "2b"}, h...)
 	e.json(t, http.StatusOK, http.MethodPatch, path("/recipes/%d", idOf(r2)), map[string]any{"image_url": u}, h...)
-	time.Sleep(50 * time.Millisecond)
+	e.settle(t)
 	e.waitBlob(t, key, true)
 
 	// Re-pointing the last recipe releases it.

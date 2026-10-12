@@ -73,7 +73,7 @@ func (l *wsListener) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer c.Close()
-	logConnEnd(l.log, l.id, l.establish(l.id, &wsConn{Conn: c.UnderlyingConn(), c: c}))
+	logConnEnd(l.log, l.id, l.b.serve(l.establish, l.id, &wsConn{Conn: c.UnderlyingConn(), c: c}))
 }
 
 // Close ignores mochi's closer (see shutdown.go): the listener disconnects its own clients.

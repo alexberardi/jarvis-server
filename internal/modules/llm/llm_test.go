@@ -328,7 +328,8 @@ func TestReadyWait(t *testing.T) {
 	} {
 		e.res.set(LabelLive, good, c.err)
 		start := time.Now()
-		if _, err := svc.Chat(c.ctx, req); err == nil || time.Since(start) > time.Second {
+		// A wrong wait would last the hour; the bound only tells that apart from "at once".
+		if _, err := svc.Chat(c.ctx, req); err == nil || time.Since(start) > 30*time.Second {
 			t.Fatalf("%v: err %v after %v", c.err, err, time.Since(start))
 		}
 	}
@@ -592,7 +593,7 @@ func TestStreamCancel(t *testing.T) {
 			t.Fatal("a cancelled stream must not send a done frame")
 		}
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for {
 		r := e.post("/v1/chat/completions/cancel/cancel-me", nil)
 		if r.status == 404 {
@@ -644,11 +645,16 @@ func TestBackgroundSerialised(t *testing.T) {
 			e.m.Service().Chat(e.ctx, ChatRequest{Label: "background", Messages: []Message{{Role: "user", Content: TextContent("x")}}})
 		}()
 	}
-	time.Sleep(100 * time.Millisecond)
-	if n := e.engine.active.Load(); n != 1 {
-		t.Fatalf("%d background calls at once, want 1", n)
-	}
-	for range 3 {
+	// Release the calls one at a time, each only once it has reached the engine: a second
+	// call reaching it before the first is released shows up in peak.
+	for i := range 3 {
+		deadline := time.Now().Add(30 * time.Second) // hang guard
+		for e.engine.active.Load() == 0 {
+			if time.Now().After(deadline) {
+				t.Fatalf("background call %d never reached the engine", i+1)
+			}
+			time.Sleep(time.Millisecond)
+		}
 		e.engine.gate <- struct{}{}
 	}
 	wg.Wait()

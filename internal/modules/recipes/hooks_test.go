@@ -74,7 +74,7 @@ func (e *env) blobExists(t *testing.T, key string) bool {
 // waitBlobGone waits for the purge job to delete key.
 func (e *env) waitBlobGone(t *testing.T, key string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for e.blobExists(t, key) {
 		if time.Now().After(deadline) {
 			t.Fatalf("blob %s was not purged", key)
@@ -214,7 +214,10 @@ func TestPurgeRollsBackWithTx(t *testing.T) {
 	if n := e.count(t, `SELECT COUNT(*) FROM recipes_recipes WHERE user_id = '2'`); n != 4 {
 		t.Fatalf("rollback: %d of the leaver's recipes", n)
 	}
-	time.Sleep(50 * time.Millisecond)
+	if n := e.count(t, `SELECT COUNT(*) FROM platform_jobs WHERE type = ?`, blobPurgeJobType); n != 0 {
+		t.Fatalf("%d purge jobs survived the rollback", n)
+	}
+	e.settle(t)
 	if !e.blobExists(t, "recipes/media/private.jpg") {
 		t.Fatalf("no purge job may run for a rolled-back deletion")
 	}

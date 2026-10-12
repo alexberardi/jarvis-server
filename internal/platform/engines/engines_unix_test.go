@@ -48,6 +48,7 @@ func TestStopContextForcesKill(t *testing.T) {
 	spec.StopTimeout = time.Hour
 	s := start(t, spec)
 	waitHealthy(t, s)
+	f.awaitStarts(t, 1) // SIGTERM is ignored from here on
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	if err := s.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {

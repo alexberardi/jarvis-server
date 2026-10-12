@@ -517,8 +517,11 @@ func logHint(kind service.Kind, home string) string {
 	return service.LogPath(home)
 }
 
-// installedService opens the installed service manager, if any.
-func installedService(ctx context.Context, user bool) (service.Manager, service.Status) {
+// installedService opens the installed service manager, if any. A variable so tests don't
+// see a jarvisd service installed on the test box.
+var installedService = openInstalledService
+
+func openInstalledService(ctx context.Context, user bool) (service.Manager, service.Status) {
 	mgr, err := service.Open(user, io.Discard)
 	if err != nil {
 		return nil, service.Status{}

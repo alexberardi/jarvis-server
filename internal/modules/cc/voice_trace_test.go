@@ -16,7 +16,7 @@ import (
 // returns their ids, oldest first.
 func (ve *voiceEnv) traceIDs(kind string, n int) []string {
 	ve.t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for {
 		rows, err := ve.d.Read.Query(`SELECT id FROM cc_request_traces WHERE request_type = ? ORDER BY rowid`, kind)
 		if err != nil {

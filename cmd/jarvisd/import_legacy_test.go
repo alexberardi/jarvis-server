@@ -26,6 +26,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
+	"github.com/alexberardi/jarvis-server/internal/platform/service"
 )
 
 // The fixture's legacy secrets (fake): its bcrypt hashes were made with passlib ($2b$12$).
@@ -35,13 +36,25 @@ const (
 	kitchenKey      = "kitchen-node:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-func freePort(t *testing.T) int {
+// quietPort returns a port held for the rest of the test by a listener that hangs up on
+// every connection, so nothing answers a health probe on it. (A port merely found free could
+// be taken, by a parallel test's server, before the probe.)
+func quietPort(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
 	return l.Addr().(*net.TCPAddr).Port
 }
 
@@ -50,14 +63,18 @@ func legacyEnv(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("JARVIS_HOME", home)
-	// Probe a port nothing listens on (a jarvisd on the test box answers on 7700).
-	t.Setenv("JARVIS_PORT_CONFIG", strconv.Itoa(freePort(t)))
+	// Probe a port nothing answers on (a jarvisd on the test box answers on 7700), and ignore
+	// any jarvisd service installed on the test box.
+	t.Setenv("JARVIS_PORT_CONFIG", strconv.Itoa(quietPort(t)))
 	t.Setenv("JARVIS_HOST", "127.0.0.1")
 	old := legacySource
 	legacySource = func(context.Context, legacyimport.PGConfig) (legacyimport.Source, error) {
 		return legacyimport.DirSource{Dir: filepath.Join("..", "..", "internal", "legacyimport", "testdata", "legacy")}, nil
 	}
 	t.Cleanup(func() { legacySource = old })
+	oldSvc := installedService
+	installedService = func(context.Context, bool) (service.Manager, service.Status) { return nil, service.Status{} }
+	t.Cleanup(func() { installedService = oldSvc })
 	return home
 }
 
@@ -104,7 +121,7 @@ func TestImportLegacyCommand(t *testing.T) {
 	if err := run(ctx, []string{"import-legacy", "--from", from}, &out); err != nil {
 		t.Fatalf("dry run next to a running legacy stack: %v", err)
 	}
-	t.Setenv("JARVIS_PORT_CONFIG", strconv.Itoa(freePort(t)))
+	t.Setenv("JARVIS_PORT_CONFIG", strconv.Itoa(quietPort(t)))
 
 	out.Reset()
 	if err := run(ctx, []string{"import-legacy", "--from", from, "--apply"}, &out); err != nil {
@@ -130,7 +147,7 @@ func TestImportLegacyCommand(t *testing.T) {
 	if err := run(ctx, []string{"import-legacy", "--from", from, "--apply"}, &out); err == nil || !strings.Contains(err.Error(), "stop it first") {
 		t.Fatalf("running: %v", err)
 	}
-	t.Setenv("JARVIS_PORT_CONFIG", strconv.Itoa(freePort(t)))
+	t.Setenv("JARVIS_PORT_CONFIG", strconv.Itoa(quietPort(t)))
 
 	// A second run refuses: the database is no longer fresh.
 	out.Reset()
@@ -194,12 +211,11 @@ func verifyMigratedStack(t *testing.T, home string) {
 		d.Close()
 	})
 	var ccURL, authURL string
-	for range 400 {
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if a, c := r.Addr(config.ListenerAuth), r.Addr(config.ListenerCC); a != "" && c != "" && cc.Broker() != nil && cc.Broker().TCPAddr() != "" {
 			authURL, ccURL = "http://"+a, "http://"+c
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if ccURL == "" {
 		t.Fatal("listeners never bound")

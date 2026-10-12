@@ -327,10 +327,11 @@ func newTenv(t *testing.T, start bool) *tenv {
 	return e
 }
 
-// waitFor polls cond until it holds (2 s).
+// waitFor polls cond until it holds; the deadline is only a hang guard (a job retried after
+// an error waits out a 2 s backoff first).
 func (e *tenv) waitFor(what string, cond func() bool) {
 	e.t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -340,21 +341,18 @@ func (e *tenv) waitFor(what string, cond func() bool) {
 	e.t.Fatalf("timed out waiting for %s", what)
 }
 
-// idle waits until no queued or running job is due, and stays so for a few polls: a step that
-// finishes its job before enqueuing the next leaves a brief gap that a single check can land in.
+// idle waits until the run has nothing left to do: no plan, resume or replan job queued or
+// running. Every step enqueues its successor before its own job finishes, so the count never
+// drops to zero mid-run. Deadline and expiry jobs are timers due long after the test, which
+// fires them itself. A job retried after an error stays queued (its run_at in the future)
+// and is waited for, rather than mistaken for idle.
 func (e *tenv) idle() {
 	e.t.Helper()
-	quiet := 0
 	e.waitFor("queue idle", func() bool {
 		var n int
-		_ = e.d.Read.QueryRow(`SELECT COUNT(*) FROM platform_jobs WHERE state IN ('queued','running') AND run_at <= ?`,
-			time.Now().UnixMilli()).Scan(&n)
-		if n != 0 {
-			quiet = 0
-			return false
-		}
-		quiet++
-		return quiet >= 10
+		_ = e.d.Read.QueryRow(`SELECT COUNT(*) FROM platform_jobs WHERE state IN ('queued','running') AND type NOT IN (?, ?)`,
+			JobDeadline, JobExpire).Scan(&n)
+		return n == 0
 	})
 }
 

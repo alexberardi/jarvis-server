@@ -207,9 +207,13 @@ func TestServerPublishReachesNode(t *testing.T) {
 			if pk := c.expect(packets.Publish); pk.TopicName != "jarvis/auth/google/ready" {
 				t.Fatalf("got %s", pk.TopicName)
 			}
-			// Another node's traffic never arrives.
+			// Another node's traffic never arrives: the next packet is the marker sent after it
+			// (one publisher's messages reach a subscriber in order).
 			_ = b.Publish("jarvis/nodes/n2/commands", []byte(`[]`), 1, false)
-			c.expectNothing(100 * time.Millisecond)
+			_ = b.Publish("jarvis/nodes/n1/marker", nil, 1, false)
+			if pk := c.expect(packets.Publish); pk.TopicName != "jarvis/nodes/n1/marker" {
+				t.Fatalf("got %s, want the marker", pk.TopicName)
+			}
 			c.disconnect()
 		})
 	}
@@ -383,7 +387,7 @@ func TestCloseUnblocksRequest(t *testing.T) {
 		if !errors.Is(err, ErrClosed) {
 			t.Fatalf("err = %v, want ErrClosed", err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("Request still blocked after Close")
 	}
 	if err := b.Publish("x", nil, 1, false); !errors.Is(err, ErrClosed) {
@@ -405,7 +409,7 @@ func TestStartPortConflict(t *testing.T) {
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(hangGuard)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatal("condition not met")
