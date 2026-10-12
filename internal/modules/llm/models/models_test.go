@@ -1039,6 +1039,8 @@ func TestUpdateLabelsValidation(t *testing.T) {
 			"flash_attn": "on", "extra_args": `--chat-template-kwargs '{"enable_thinking":false}'`}},
 		{"background": {"engine": "shared"}},
 		{"live": {"engine": "remote", "remote_url": "https://api.openai.com/v1", "remote_model": "gpt-4.1-nano", "remote_api_key": "sk"}},
+		{"live": {"remote_api": "anthropic"}},
+		{"live": {"remote_api": "auto"}},
 		{"stt": {"model": "whisper-tiny", "gpu_layers": float64(0)}},
 		{"live": {"mmproj": "none"}},
 	}
@@ -1062,6 +1064,8 @@ func TestUpdateLabelsValidation(t *testing.T) {
 		{"live": {"extra_args": "'open"}},
 		{"live": {"split_mode": "diagonal"}},
 		{"stt": {"remote_url": "http://x"}},
+		{"live": {"remote_api": "gemini"}},
+		{"stt": {"remote_api": "openai"}},
 	}
 	for _, u := range bad {
 		if err := e.mgr.UpdateLabels(e.ctx, u); err == nil {

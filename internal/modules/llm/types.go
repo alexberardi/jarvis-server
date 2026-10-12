@@ -15,8 +15,9 @@ const (
 	LabelEmbeddings = "embeddings"
 )
 
-// Endpoint is an OpenAI-compatible server for a label: a supervised llama-server or a remote
-// (LD2). BaseURL is the server root; "/v1" on the end is accepted.
+// Endpoint is the server for a label: a supervised llama-server or a remote (LD2). BaseURL is
+// the server root; "/v1" on the end is accepted. It speaks the OpenAI-compatible API unless
+// API says otherwise.
 type Endpoint struct {
 	BaseURL string
 	APIKey  string
@@ -31,7 +32,16 @@ type Endpoint struct {
 	// FoldSystemMessages: the model's chat template accepts a system message only first and
 	// needs a user turn, so requests are reshaped by FoldSystemMessages (ID12).
 	FoldSystemMessages bool
+	// API is the dialect: "" or APIOpenAI for /chat/completions, APIAnthropic for the
+	// Anthropic Messages API (anthropic.go).
+	API string
 }
+
+// Endpoint dialects (engine.APIOpenAI, engine.APIAnthropic).
+const (
+	APIOpenAI    = "openai"
+	APIAnthropic = "anthropic"
+)
 
 // Resolver maps a label to its engine (track A's model manager implements it). Resolve
 // returns a *NotReadyError when the label has no usable engine; the Endpoint may still carry

@@ -615,6 +615,12 @@ func (s *Service) Stream(ctx context.Context, req ChatRequest) (<-chan Frame, er
 		return nil, err
 	}
 	p := s.payload(ctx, ep, label, &req, msgs, true)
+	if ep.API == APIAnthropic {
+		// Refuse untranslatable history (a tool message without its id) with a real status.
+		if _, err := anthropicBody(p); err != nil {
+			return nil, err
+		}
+	}
 	rid := req.RequestID
 	if rid == "" {
 		rid = newHex(32)
@@ -675,6 +681,18 @@ func (s *Service) runStream(ctx context.Context, ep Endpoint, label string, p *c
 		return streamResult{}, err
 	}
 	defer release()
+	if ep.API == APIAnthropic {
+		body, err := anthropicBody(p)
+		if err != nil {
+			return streamResult{}, err
+		}
+		resp, err := s.post(ctx, ep, "/messages", body)
+		if err != nil {
+			return streamResult{}, err
+		}
+		defer resp.Body.Close()
+		return parseAnthropicStream(resp.Body, onDelta, s.log)
+	}
 	resp, err := s.post(ctx, ep, "/chat/completions", p)
 	if err != nil {
 		return streamResult{}, err
@@ -720,6 +738,11 @@ func (s *Service) Embed(ctx context.Context, texts []string) (Embeddings, error)
 	}
 	if !ep.Embeddings {
 		return Embeddings{}, notLoaded(LabelEmbeddings, &NotReadyError{State: StateNotConfigured, Reason: "no embeddings engine"})
+	}
+	if ep.API == APIAnthropic {
+		// The resolver refuses this too (misconfigured); this guards any other Resolver.
+		return Embeddings{}, notLoaded(LabelEmbeddings, &NotReadyError{State: StateFailed,
+			Reason: "the Anthropic API has no embeddings endpoint; use a local engine or an OpenAI-compatible remote (remote_api=openai)"})
 	}
 	if len(texts) == 0 {
 		return Embeddings{Vectors: [][]float64{}, Model: ep.Model}, nil

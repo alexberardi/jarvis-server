@@ -36,7 +36,7 @@ type Endpoint struct {
 	// BaseURL: for LLM and embedding labels, an OpenAI-compatible base including /v1 (append
 	// "/chat/completions" or "/embeddings"); for stt, the whisper-server root (POST /inference).
 	BaseURL string `json:"base_url"`
-	// APIKey goes in "Authorization: Bearer". Local llama-server engines get a random key per
+	// APIKey goes in "Authorization: Bearer" (x-api-key for API=anthropic). Local llama-server engines get a random key per
 	// instance; whisper-server has none (it binds 127.0.0.1 only).
 	APIKey string `json:"-"`
 	// Model is the name to send as the request's "model".
@@ -54,6 +54,9 @@ type Endpoint struct {
 	Degraded bool `json:"degraded,omitempty"`
 	// FoldSystemMessages: requests must be folded for a strict chat template (ID12).
 	FoldSystemMessages bool `json:"fold_system_messages,omitempty"`
+	// API is the dialect a remote endpoint speaks: APIOpenAI or APIAnthropic (remote_api).
+	// Local engines leave it empty (OpenAI-compatible).
+	API string `json:"api,omitempty"`
 }
 
 // ErrNotConfigured is returned for a label with no model (or engine=off): 01 §3.9 "not
@@ -202,8 +205,13 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 		if c.RemoteURL == "" {
 			return ep, nil, ErrNotConfigured
 		}
+		api := RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
+		if c.Embedding && api == APIAnthropic {
+			return ep, nil, &NotReadyError{Label: label, State: "misconfigured",
+				Reason: "the Anthropic API has no embeddings endpoint; use a local engine or an OpenAI-compatible remote (remote_api=openai)"}
+		}
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
-		ep.Vision, ep.FoldSystemMessages = c.RemoteVision, c.FoldSystemMessages
+		ep.Vision, ep.FoldSystemMessages, ep.API = c.RemoteVision, c.FoldSystemMessages, api
 		// A remote's window is what the operator says it is (llm.<slot>.context; 0 = unknown):
 		// cc compaction needs it (docs/cc/chat-images.md §7).
 		ep.ContextLength, ep.Parallel = c.Context, 1
@@ -280,11 +288,12 @@ func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 	return ep
 }
 
-// NormalizeBaseURL turns a pasted endpoint into an OpenAI base URL: trailing slashes and a
-// trailing /chat/completions (CI's legacy JARVIS_REST_MODEL_URL) are dropped.
+// NormalizeBaseURL turns a pasted endpoint into a base URL: trailing slashes and a trailing
+// /chat/completions (CI's legacy JARVIS_REST_MODEL_URL), /embeddings or Anthropic's /messages
+// are dropped.
 func NormalizeBaseURL(u string) string {
 	u = strings.TrimRight(strings.TrimSpace(u), "/")
-	for _, suf := range []string{"/chat/completions", "/embeddings", "/completions"} {
+	for _, suf := range []string{"/chat/completions", "/embeddings", "/completions", "/messages"} {
 		u = strings.TrimSuffix(u, suf)
 	}
 	return strings.TrimRight(u, "/")

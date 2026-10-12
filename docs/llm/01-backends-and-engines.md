@@ -402,7 +402,7 @@ The live slot's thinking flags become redundant once jarvisd sends the kwarg per
    - It posts OpenAI-shaped `messages` (including `system` role entries) without the required `max_tokens` and `anthropic-version` header to `/v1/messages`.
    - The tools path always parses OpenAI `choices`.
    - **`provider=ollama` is broken too.** `/api/chat` without `stream:false` streams NDJSON, so `response.json()` fails.
-   - Neither has a test or a user. PLAN §2 lists "OpenAI, Anthropic, Ollama, LM Studio". **Decided:** jarvisd's remote client speaks the OpenAI-compatible API only. That covers OpenAI, LM Studio, vLLM, MLX, llama-server and Ollama's `/v1`. The Anthropic native API is deferred unless the user wants it (LQ2).
+   - Neither has a test or a user. PLAN §2 lists "OpenAI, Anthropic, Ollama, LM Studio". **Decided:** jarvisd's remote client speaks the OpenAI-compatible API only. That covers OpenAI, LM Studio, vLLM, MLX, llama-server and Ollama's `/v1`. The Anthropic native API is deferred unless the user wants it (LQ2). **Since 2026-10-12** a remote label can speak the Anthropic Messages API natively (`remote_api`, [06 "Anthropic remote"](06-model-manager-api.md)); Ollama still goes through `/v1`.
 7. **Embeddings take GPU memory in the API process** and block the event loop (§3.7).
 8. **The vision job is dead,** and the vision-swap unload/reload pattern exists only for it (§3.8).
 9. **`/internal/model/*` is bound on `0.0.0.0:7705` inside the container.** It is published only on loopback by the repo's compose; prod doesn't publish it. Not ported.

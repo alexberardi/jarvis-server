@@ -29,7 +29,7 @@ func (s stackResolver) Resolve(ctx context.Context, label string) (Endpoint, err
 	return Endpoint{
 		BaseURL: ep.BaseURL, APIKey: ep.APIKey, Model: ep.Model,
 		Vision: ep.Vision, Embeddings: ep.Embeddings, ContextLength: per, Remote: ep.Remote,
-		FoldSystemMessages: ep.FoldSystemMessages,
+		FoldSystemMessages: ep.FoldSystemMessages, API: ep.API,
 	}, nil
 }
 

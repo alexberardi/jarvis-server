@@ -16,7 +16,8 @@ import (
 
 // The OpenAI-compatible engine client: llama-server and remote endpoints speak
 // /v1/chat/completions and /v1/embeddings (01 §3.1, 04 §3). It replaces the legacy
-// RestClient; payloads keep structured content and tool history (D8).
+// RestClient; payloads keep structured content and tool history (D8). A remote with
+// remote_api=anthropic is translated to the Messages API instead (anthropic.go).
 
 // chatPayload is the upstream request body.
 type chatPayload struct {
@@ -129,7 +130,14 @@ func (s *Service) post(ctx context.Context, ep Endpoint, path string, body any) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "jarvisd-llm")
-	if ep.APIKey != "" {
+	switch {
+	case ep.API == APIAnthropic:
+		// The Messages API authenticates with x-api-key, never a bearer token.
+		req.Header.Set("anthropic-version", anthropicVersion)
+		if ep.APIKey != "" {
+			req.Header.Set("x-api-key", ep.APIKey)
+		}
+	case ep.APIKey != "":
 		req.Header.Set("Authorization", "Bearer "+ep.APIKey)
 	}
 	resp, err := s.httpClient().Do(req)
@@ -141,13 +149,20 @@ func (s *Service) post(ctx context.Context, ep Endpoint, path string, body any) 
 		resp.Body.Close()
 		// The engine's own status and body, unwrapped: a context overflow is the caller's
 		// 400 with n_prompt_tokens in the message, not a server fault (02 §3.9).
-		return nil, &APIError{Status: resp.StatusCode, Type: ErrorTypeForStatus(resp.StatusCode), Message: string(body)}
+		msg := string(body)
+		if ep.API == APIAnthropic {
+			msg = anthropicErrorMessage(body)
+		}
+		return nil, &APIError{Status: resp.StatusCode, Type: ErrorTypeForStatus(resp.StatusCode), Message: msg}
 	}
 	return resp, nil
 }
 
 // complete runs one non-stream completion.
 func (s *Service) complete(ctx context.Context, ep Endpoint, p *chatPayload) (completion, error) {
+	if ep.API == APIAnthropic {
+		return s.completeAnthropic(ctx, ep, p)
+	}
 	resp, err := s.post(ctx, ep, "/chat/completions", p)
 	if err != nil {
 		return completion{}, err

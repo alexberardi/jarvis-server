@@ -339,8 +339,12 @@ func (m *Module) handleEngine(w http.ResponseWriter, r *http.Request) {
 		if u, err := url.Parse(ep.BaseURL); err == nil && u.Host != "" {
 			host = u.Host
 		}
+		kind := "OpenAI-compatible"
+		if ep.API == APIAnthropic {
+			kind = "Anthropic Messages API"
+		}
 		out = map[string]any{"inference_engine": "rest", "backend_type": "REST", "allows_caching": true,
-			"description": "Remote OpenAI-compatible endpoint (" + host + ")"}
+			"description": "Remote " + kind + " endpoint (" + host + ")"}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
