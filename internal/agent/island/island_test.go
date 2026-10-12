@@ -280,5 +280,50 @@ func TestNilIslandIsANoOp(t *testing.T) {
 	var i *Island
 	i.Set(Listening, time.Second)
 	i.Level(0.5)
+	i.Suspend()()
 	i.Close()
+}
+
+// TestSuspendHidesAtOnceAndResumes: a screenshot (desktop_read_screen) must not show the
+// island: Suspend returns once it is off the screen, and resume brings the state back.
+func TestSuspendHidesAtOnceAndResumes(t *testing.T) {
+	be := &fakeBackend{}
+	i := newIsland(be, quietLog)
+	defer i.Close()
+	i.Set(Thinking, 0)
+	time.Sleep(150 * time.Millisecond)
+	start := time.Now()
+	resume := i.Suspend()
+	if _, _, h := be.counts(); h != 1 {
+		t.Fatalf("Suspend returned with the island still up (%d hides)", h)
+	}
+	if d := time.Since(start); d >= suspendWait {
+		t.Fatalf("Suspend waited out its timeout (%v) instead of the hide", d)
+	}
+	_, f1, _ := be.counts()
+	time.Sleep(100 * time.Millisecond)
+	if _, f2, _ := be.counts(); f2 != f1 {
+		t.Fatalf("rendered while suspended: %d → %d frames", f1, f2)
+	}
+	// A second capture meanwhile keeps it hidden until both are done.
+	resume2 := i.Suspend()
+	resume()
+	resume() // idempotent
+	time.Sleep(100 * time.Millisecond)
+	if s, _, _ := be.counts(); s != 1 {
+		t.Fatalf("shown again while a capture was still running (%d shows)", s)
+	}
+	resume2()
+	time.Sleep(150 * time.Millisecond)
+	if s, f, _ := be.counts(); s != 2 || f <= f1 {
+		t.Fatalf("not back after resume: %d shows, %d frames", s, f)
+	}
+	// Suspending a hidden island returns at once, too.
+	i.Set(Hidden, 0)
+	time.Sleep(500 * time.Millisecond)
+	start = time.Now()
+	i.Suspend()()
+	if d := time.Since(start); d >= suspendWait {
+		t.Fatalf("suspending a hidden island took %v", d)
+	}
 }

@@ -69,7 +69,7 @@ func parseTurn(w http.ResponseWriter, r *http.Request) (turnInput, bool) {
 
 // parseToolResults reads ToolResultRequest, keeping each output as an ordered value.
 func parseToolResults(w http.ResponseWriter, r *http.Request) (string, []toolResult, bool) {
-	b, ordered, ok := readJSONBody(w, r)
+	b, ordered, ok := readJSONBodyLimit(w, r, toolResultBodyMax) // results may attach images
 	if !ok {
 		return "", nil, false
 	}
@@ -104,7 +104,8 @@ func parseToolResults(w http.ResponseWriter, r *http.Request) (string, []toolRes
 					out, _ = oo.Get("output")
 				}
 			}
-			results = append(results, toolResult{ToolCallID: id, Output: out})
+			out, imgs := liftToolImages(out)
+			results = append(results, toolResult{ToolCallID: id, Output: out, images: imgs})
 		}
 	}
 	if !b.done(w) {

@@ -161,6 +161,7 @@ func (c *conversation) commit(msgs []chatMsg) {
 			msgs[i].id = c.nextMsgID
 		}
 	}
+	dropToolImages(msgs) // a tool result's image is for the turn that asked for it (tool_images.go)
 	c.messages = msgs
 	c.keepPhotos(msgs)
 }

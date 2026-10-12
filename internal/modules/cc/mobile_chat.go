@@ -562,14 +562,15 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 			id = uuid4()
 		}
 		var output *pyjson.Object
+		var imgs []chatImage
 		if !online {
 			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true)
 		} else {
 			end := tr.measure("mqtt_tool_"+c.Function.Name, "node", map[string]any{"command": c.Function.Name})
-			output = m.chatToolCall(ctx, nodeID, id, c, images[c.ID], u.ID, message)
+			output, imgs = m.chatToolCall(ctx, nodeID, id, c, images[c.ID], u.ID, message)
 			end(nil)
 		}
-		results = append(results, toolResult{ToolCallID: id, Output: output})
+		results = append(results, toolResult{ToolCallID: id, Output: output, images: imgs})
 		harvestActions(st, c.Function.Name, output)
 	}
 	return results
@@ -583,9 +584,9 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 // A photo tool's image arguments carry the resolved photos (imgs, wireArguments): the only
 // place image bytes leave jarvisd for a node. A result echoing them back is redacted.
 func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c parse.ToolCall, imgs imageArgs,
-	userID int64, message string) *pyjson.Object {
+	userID int64, message string) (*pyjson.Object, []chatImage) {
 	if !m.bus.Available() {
-		return servertools.Obj("success", false, "error", "could not dispatch to node: "+ErrNoBroker.Error())
+		return servertools.Obj("success", false, "error", "could not dispatch to node: "+ErrNoBroker.Error()), nil
 	}
 	rid := uuid4()
 	args := wireArguments(c.Function.Arguments, imgs) // a JSON string (the node decodes it), or an object with photos
@@ -601,23 +602,26 @@ func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c 
 	defer cancel()
 	raw, err := m.bus.Await(wctx, rid)
 	if err != nil {
-		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true)
+		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true), nil
 	}
 	v, err := pyjson.Loads(string(raw))
 	if err != nil {
-		return servertools.Obj("success", false, "error", "malformed node result")
+		return servertools.Obj("success", false, "error", "malformed node result"), nil
 	}
-	v = redactWireImages(v)
 	output := v
 	if o, ok := v.(*pyjson.Object); ok {
 		if out, ok := o.Get("output"); ok {
 			output = out
 		}
 	}
+	// Images the tool attached go to the model (tool_images.go); anything else image-shaped,
+	// such as our own photos echoed back, is redacted.
+	output, attached := liftToolImages(output)
+	output = redactWireImages(output)
 	if o, ok := output.(*pyjson.Object); ok {
-		return o
+		return o, attached
 	}
-	return servertools.Obj("success", true, "result", output)
+	return servertools.Obj("success", true, "result", output), attached
 }
 
 // harvestActions is the action-button extraction (mobile_chat.py:424-444): actions from the

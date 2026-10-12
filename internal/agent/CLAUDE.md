@@ -38,6 +38,8 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent browser install [--no-open]     # register the native host, set up the extension
 ./jarvis-agent browser status | uninstall      # registrations + connected browsers / remove
 ./jarvis-agent try browser_list_tabs           # waits for the extension, runs one browser tool
+./jarvis-agent try --save-images /tmp/x desktop_read_screen '{"scope":"window"}'   # a real capture (0600 files)
+JARVIS_SCREEN_NATIVE=1 go test -v -run TestNativeCapture ./internal/agent/screen/   # capture this desktop
 scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
 AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
 ./jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
@@ -83,6 +85,8 @@ internal/agent/
                       browser_* tools (tools.go), host-manifest registration per OS/browser
                       (install.go), the embedded MV3 extension (extension/, extension.go) and
                       the Mozilla-signed .xpi when a build has one (signed/)
+  screen/             read the screen: desktop_read_screen, grim/hyprctl/swaymsg (linux.go),
+                      screencapture + the purego front-window lookup (mac.go, frontwin_darwin.go)
   island/             the on-screen voice indicator (DESIGN.md §11): pure-Go renderer (render.go),
                       animation model + loop (island.go), NSPanel backend (mac_darwin.go, purego),
                       Wayland layer-shell client (wayland.go); Run keeps the main thread on macOS
@@ -229,6 +233,14 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     the screen. Don't show it on a desktop someone is using in tests: the live checks
     (`JARVIS_ISLAND_MAC_LIVE`, `JARVIS_ISLAND_WAYLAND_PROBE`) are opt-in, and the Wayland one
     never attaches a buffer.
+
+25. **A screenshot exists only for the turn that asked** (DESIGN.md §12). Captured only by
+    `desktop_read_screen` on request, kept in memory (macOS's `screencapture` file: 0600 in a
+    0700 temp dir, removed before `Capture` returns), never logged, sent as `image_attachments`
+    in the tool output; command-center drops it at commit. Never add a cache, a "last
+    screenshot" or a capture the model didn't ask for. The island is suspended for the
+    capture. Don't capture someone's desktop in tests unless they agreed (`JARVIS_SCREEN_NATIVE`
+    is opt-in) and never commit a capture.
 
 ## Dependencies
 

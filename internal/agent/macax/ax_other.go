@@ -11,3 +11,9 @@ func Trusted() bool { return false }
 
 // Prompt does nothing off macOS.
 func Prompt() bool { return false }
+
+// ScreenTrusted is false off macOS.
+func ScreenTrusted() bool { return false }
+
+// ScreenPrompt does nothing off macOS.
+func ScreenPrompt() bool { return false }
