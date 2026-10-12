@@ -249,6 +249,7 @@ type fakeSTT struct {
 	// run out it returns an unusable Voice. voiceClips records the clips it was given.
 	voices     []stt.Voice
 	voiceClips [][]byte
+	opts       []stt.TranscribeOptions // every Transcribe call's options, in order
 }
 
 func (f *fakeSTT) VoiceOf(_ context.Context, wav []byte) (stt.Voice, error) {
@@ -266,6 +267,7 @@ func (f *fakeSTT) VoiceOf(_ context.Context, wav []byte) (stt.Voice, error) {
 func (f *fakeSTT) Transcribe(_ context.Context, wav []byte, opts stt.TranscribeOptions) (stt.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.opts = append(f.opts, opts)
 	sp := stt.Speaker{Outcome: stt.OutcomeSkipped}
 	if opts.Speaker != nil {
 		switch {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -729,3 +730,48 @@ func TestContinueStreamPushesActions(t *testing.T) {
 }
 
 var _ = context.Background
+
+func TestVoiceSTTPromptOnlyOnTheCommand(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.transcribe("p0", false)
+	if o := ve.stt.opts[0]; o.Prompt != "" || o.Preprocess {
+		t.Fatalf("defaults must leave whisper unprompted: %+v", o)
+	}
+	ve.set(settingSTTPrompt, "  Hey Jarvis, turn on the kitchen lights.  ", settings.Scope{HouseholdID: voiceHH})
+	ve.set(settingSTTPreprocess, true, settings.Scope{HouseholdID: voiceHH, NodeID: ve.node.id})
+	ve.set(settingWakeMode, "enforce", settings.Scope{HouseholdID: voiceHH})
+	ve.start("p1", "[]")
+	ve.transcribe("p1", true)
+	ve.eng.say("Done.")
+	ve.turn("/api/v0/voice/command/stream", "p1", "what time is it", map[string]any{"turn_source": "wake"}).want(200)
+
+	ve.stt.mu.Lock()
+	defer ve.stt.mu.Unlock()
+	var command, wake int
+	for _, o := range ve.stt.opts[1:] {
+		if o.Speaker != nil {
+			command++
+			if o.Prompt != "Hey Jarvis, turn on the kitchen lights." || !o.Preprocess {
+				t.Fatalf("command pass %+v", o)
+			}
+		} else {
+			wake++
+			if o.Prompt != "" || o.Preprocess {
+				t.Fatalf("wake verification must stay unbiased: %+v", o)
+			}
+		}
+	}
+	if command != 1 || wake != 1 {
+		t.Fatalf("passes: command %d wake %d", command, wake)
+	}
+}
+
+func TestCommandSTTPromptIsBounded(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	long := strings.Repeat("é", maxSTTPrompt) + " lights"
+	ve.set(settingSTTPrompt, long, settings.Scope{HouseholdID: voiceHH})
+	p := ve.m.commandSTTOptions(context.Background(), voiceHH, ve.node.id, nil, nil).Prompt
+	if len(p) > maxSTTPrompt || !strings.HasSuffix(p, " lights") || !utf8.ValidString(p) {
+		t.Fatalf("len %d valid %v", len(p), utf8.ValidString(p))
+	}
+}
