@@ -171,3 +171,24 @@ func mustObj(t *testing.T, s string) *pyjson.Object {
 	}
 	return v.(*pyjson.Object)
 }
+
+func TestFixISODatesBareDates(t *testing.T) {
+	// 00:30 on Wed Oct 7 in Berlin is still Oct 6 in UTC: bare dates are local dates.
+	now, _ := time.Parse(time.RFC3339, "2026-10-06T22:30:00Z")
+	c := New(now, "Europe/Berlin")
+	cases := []struct{ args, status, want string }{
+		{`{"resolved_datetimes": ["2026-10-08"]}`, "fixed", `{"resolved_datetimes": ["tomorrow"]}`},
+		{`{"resolved_datetimes": ["2026-10-07", "2026-10-08"]}`, "fixed", `{"resolved_datetimes": ["today", "tomorrow"]}`},
+		// Not in the context (a past ask, or a stale year): left alone, never a nag.
+		{`{"resolved_datetimes": ["2025-01-08"]}`, "clean", `{"resolved_datetimes": ["2025-01-08"]}`},
+		{`{"resolved_datetimes": ["2026-02-30"]}`, "clean", `{"resolved_datetimes": ["2026-02-30"]}`},
+		// An unmapped full instant still is.
+		{`{"resolved_datetimes": ["2025-01-08", "2025-01-08T09:00:00Z"]}`, "bad", `{"resolved_datetimes": ["2025-01-08", "2025-01-08T09:00:00Z"]}`},
+	}
+	for _, cs := range cases {
+		status, out := c.FixISODates([]string{cs.args})
+		if status != cs.status || out[0] != cs.want {
+			t.Errorf("FixISODates(%s) = %s %s, want %s %s", cs.args, status, out[0], cs.status, cs.want)
+		}
+	}
+}
