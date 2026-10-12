@@ -16,20 +16,37 @@ func (nopStrip) Write(b []byte) (int, error) { return len(b), nil }
 func (nopStrip) Close() error                { return nil }
 
 // TestLEDCuesFollowThePythonNode: a turn shows wake_detected, then listening, thinking, speaking,
-// listening for the follow-up window, and the idle pattern after; a failure flashes red.
+// listening for the follow-up window, and the idle pattern after; a failure flashes red. The
+// wake flash's timer fires when the test says so.
 func TestLEDCuesFollowThePythonNode(t *testing.T) {
 	l := hat.NewLEDs(nopStrip{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer l.Close()
-	c := &ledCue{leds: l}
+	var flashEnd []func()
+	c := &ledCue{leds: l, errorFor: time.Hour, after: func(d time.Duration, f func()) *time.Timer {
+		if d != wakeFlash {
+			t.Errorf("timer for %v, want the %v wake flash", d, wakeFlash)
+		}
+		flashEnd = append(flashEnd, f)
+		return time.AfterFunc(time.Hour, func() {}) // never fires; the test runs f
+	}}
 	want := func(p string) {
 		t.Helper()
 		if got := l.Current(); got != p {
 			t.Fatalf("showing %s, want %s", got, p)
 		}
 	}
+	endFlash := func() {
+		t.Helper()
+		if len(flashEnd) == 0 {
+			t.Fatal("no wake flash scheduled")
+		}
+		f := flashEnd[0]
+		flashEnd = flashEnd[1:]
+		f()
+	}
 	c.SetState(voice.CueListening, 0)
 	want(hat.WakeDetected)
-	time.Sleep(wakeFlash + 100*time.Millisecond)
+	endFlash()
 	want(hat.Listening)
 	c.SetState(voice.CueThinking, 0)
 	want(hat.Thinking)
@@ -45,13 +62,24 @@ func TestLEDCuesFollowThePythonNode(t *testing.T) {
 	// A thinking state set during the wake flash wins over the flash's timer.
 	c.SetState(voice.CueListening, 0)
 	c.SetState(voice.CueThinking, 0)
-	time.Sleep(wakeFlash + 100*time.Millisecond)
+	endFlash()
 	want(hat.Thinking)
 
 	c.SetState(voice.CueError, 0)
 	want(hat.Error)
-	time.Sleep(errorFlash + 200*time.Millisecond)
-	want(hat.Normal)
+	// The red clears by itself (the LEDs' preview timer, tested in package hat).
+	c.errorFor = time.Millisecond
+	c.SetState(voice.CueError, 0)
+	deadline := time.Now().Add(10 * time.Second) // a hang guard
+	for l.Current() != hat.Normal {
+		if time.Now().After(deadline) {
+			t.Fatalf("error never cleared: %s", l.Current())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(flashEnd) != 0 {
+		t.Fatalf("%d unexpected wake flashes", len(flashEnd))
+	}
 }
 
 func TestIndicatorsFanOut(t *testing.T) {

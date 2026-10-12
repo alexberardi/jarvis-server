@@ -169,10 +169,12 @@ func TestHostWaitsForAgentAndReplaysHello(t *testing.T) {
 	path := shortSocket(t)
 	var mu sync.Mutex
 	up := false
+	refused := 0
 	dial := func() (net.Conn, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if !up {
+			refused++
 			return nil, errors.New("agent not running")
 		}
 		return Dial(path)
@@ -181,7 +183,11 @@ func TestHostWaitsForAgentAndReplaysHello(t *testing.T) {
 	// The extension says hello while the agent is down.
 	p.extSend(t, Message{Type: "hello", Browser: "Chromium", Protocol: 1})
 	p.extSend(t, Message{Type: "event", Event: "focus", Focused: true}) // dropped: no agent
-	time.Sleep(60 * time.Millisecond)
+	// The host has been turned away again since: it keeps retrying.
+	mu.Lock()
+	since := refused
+	mu.Unlock()
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return refused > since })
 	a := newFakeAgent(t, path)
 	mu.Lock()
 	up = true

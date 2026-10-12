@@ -83,9 +83,10 @@ func TestHubLateResultIgnored(t *testing.T) {
 		t.Fatal("expected a timeout")
 	}
 	// The answer arrives after the caller gave up: dropped, and the next call still works.
+	waitFor(t, func() bool { return len(f.received()) == 1 }) // the command reached the fake
 	f.send(Message{Type: "result", ID: f.received()[0].ID, OK: true, Result: map[string]any{"late": true}})
 	go func() {
-		for len(f.received()) < 2 {
+		for len(f.received()) < 2 { // the test's own Call below bounds this
 			time.Sleep(5 * time.Millisecond)
 		}
 		f.send(Message{Type: "result", ID: f.received()[1].ID, OK: true, Result: map[string]any{"fresh": true}})
@@ -144,7 +145,7 @@ func TestHubIgnoresNonHostsAndUnreadyHosts(t *testing.T) {
 	defer c2.Close()
 	_, _ = c2.Write([]byte("not json\n"))
 	buf := make([]byte, 1)
-	_ = c2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = c2.SetReadDeadline(time.Now().Add(10 * time.Second)) // a hang guard
 	if _, err := c2.Read(buf); err == nil {
 		t.Fatal("garbage connection kept open")
 	}

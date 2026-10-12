@@ -118,6 +118,8 @@ type LEDs struct {
 	strip Strip
 	log   *slog.Logger
 	now   func() time.Time
+	// afterFunc schedules Preview's auto-clear (time.AfterFunc; tests fire it themselves).
+	afterFunc func(time.Duration, func()) *time.Timer
 
 	mu        sync.Mutex
 	stable    string
@@ -138,7 +140,7 @@ var animated = map[string]bool{Thinking: true, ShutdownWarning: true}
 
 // NewLEDs starts rendering to strip: "normal" (dim white) until told otherwise.
 func NewLEDs(strip Strip, log *slog.Logger) *LEDs {
-	l := &LEDs{strip: strip, log: log, now: time.Now, stable: Normal, enabled: true, scale: 100,
+	l := &LEDs{strip: strip, log: log, now: time.Now, afterFunc: time.AfterFunc, stable: Normal, enabled: true, scale: 100,
 		stop: make(chan struct{}), done: make(chan struct{}), changed: make(chan struct{}, 1)}
 	go l.loop()
 	return l
@@ -178,7 +180,7 @@ func (l *LEDs) Preview(name string, d time.Duration) {
 	l.cancelLocked()
 	l.transient = name
 	var t *time.Timer
-	t = time.AfterFunc(d, func() {
+	t = l.afterFunc(d, func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		if l.timer == t { // superseded otherwise

@@ -36,6 +36,8 @@ type Button struct {
 	hold    *time.Timer
 	last    time.Time // last accepted edge, for the debounce
 	now     func() time.Time
+	// after schedules the warning and the hold (time.AfterFunc; tests fire them themselves).
+	after func(time.Duration, func()) *time.Timer
 }
 
 func (b *Button) clock() time.Time {
@@ -43,6 +45,13 @@ func (b *Button) clock() time.Time {
 		return b.now()
 	}
 	return time.Now()
+}
+
+func (b *Button) afterFunc(d time.Duration, f func()) *time.Timer {
+	if b.after != nil {
+		return b.after(d, f)
+	}
+	return time.AfterFunc(d, f)
 }
 
 // Edge feeds one edge: pressed is the new state (line low).
@@ -57,12 +66,12 @@ func (b *Button) Edge(pressed bool) {
 	b.pressed = pressed
 	if pressed {
 		b.at, b.held = now, false
-		b.warn = time.AfterFunc(cmp.Or(b.WarnAfter, ShutdownWarningAt), func() {
+		b.warn = b.afterFunc(cmp.Or(b.WarnAfter, ShutdownWarningAt), func() {
 			if b.LEDs != nil {
 				b.LEDs.SetTransient(ShutdownWarning)
 			}
 		})
-		b.hold = time.AfterFunc(cmp.Or(b.HoldAfter, HoldForPoweroff), b.onHold)
+		b.hold = b.afterFunc(cmp.Or(b.HoldAfter, HoldForPoweroff), b.onHold)
 		b.debug("hat: button pressed")
 		return
 	}

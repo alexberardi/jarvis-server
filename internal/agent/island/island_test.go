@@ -203,12 +203,20 @@ func sum(b [nBars]float64) float64 {
 
 // --- the island's loop over a fake backend ---
 
+// The loop runs on a fake clock and fake frame ticks the test delivers, so nothing here
+// depends on how fast the machine is: wall-clock timeouts are only hang guards.
+
+const hangGuard = 10 * time.Second
+
 type fakeBackend struct {
 	mu                   sync.Mutex
 	shows, frames, hides int
 	closed               bool
 	showErr              error
+	hid                  chan struct{} // one send per hide
 }
+
+func newFakeBackend() *fakeBackend { return &fakeBackend{hid: make(chan struct{}, 16)} }
 
 func (b *fakeBackend) show() (float64, error) {
 	b.mu.Lock()
@@ -217,7 +225,7 @@ func (b *fakeBackend) show() (float64, error) {
 	return 1, b.showErr
 }
 func (b *fakeBackend) present(*image.RGBA) error { b.mu.Lock(); b.frames++; b.mu.Unlock(); return nil }
-func (b *fakeBackend) hide()                     { b.mu.Lock(); b.hides++; b.mu.Unlock() }
+func (b *fakeBackend) hide()                     { b.mu.Lock(); b.hides++; b.mu.Unlock(); b.hid <- struct{}{} }
 func (b *fakeBackend) close()                    { b.mu.Lock(); b.closed = true; b.mu.Unlock() }
 func (b *fakeBackend) counts() (int, int, int) {
 	b.mu.Lock()
@@ -227,32 +235,94 @@ func (b *fakeBackend) counts() (int, int, int) {
 
 var quietLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 
+// frames drives an island: its clock moves only when a frame tick is delivered.
+type frames struct {
+	t    *testing.T
+	mu   sync.Mutex
+	at   time.Time
+	tick chan time.Time
+}
+
+func newDriven(t *testing.T, be backend) (*Island, *frames) {
+	d := &frames{t: t, at: time.Unix(1_700_000_000, 0), tick: make(chan time.Time)}
+	i := (&Island{be: be, log: quietLog, now: d.now, suspendWait: time.Minute,
+		ticker: func(time.Duration) (<-chan time.Time, func()) { return d.tick, func() {} }}).start()
+	return i, d
+}
+
+func (d *frames) now() time.Time { d.mu.Lock(); defer d.mu.Unlock(); return d.at }
+
+// next delivers one frame tick. The loop takes it only once it has presented the frame
+// before, so when next returns that frame is on the backend.
+func (d *frames) next() {
+	d.t.Helper()
+	d.mu.Lock()
+	d.at = d.at.Add(frameEvery)
+	at := d.at
+	d.mu.Unlock()
+	select {
+	case d.tick <- at:
+	case <-time.After(hangGuard):
+		d.t.Fatal("the island stopped taking frames")
+	}
+}
+
+// untilHidden delivers frames until the backend hides.
+func (d *frames) untilHidden(be *fakeBackend) {
+	d.t.Helper()
+	for {
+		d.mu.Lock()
+		d.at = d.at.Add(frameEvery)
+		at := d.at
+		d.mu.Unlock()
+		select {
+		case d.tick <- at:
+		case <-be.hid:
+			return
+		case <-time.After(hangGuard):
+			d.t.Fatal("never hid")
+		}
+	}
+}
+
+// waitFor polls a condition the island reaches without frame ticks.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(hangGuard)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal(what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestIslandRendersOnlyWhileVisible(t *testing.T) {
-	be := &fakeBackend{}
-	i := newIsland(be, quietLog)
-	time.Sleep(100 * time.Millisecond)
+	be := newFakeBackend()
+	i, d := newDriven(t, be)
 	if s, f, _ := be.counts(); s != 0 || f != 0 {
 		t.Fatalf("idle island did work: %d shows, %d frames", s, f)
 	}
 	i.Set(Listening, 0)
-	time.Sleep(300 * time.Millisecond)
+	for range 3 {
+		d.next()
+	}
 	s, f, _ := be.counts()
 	if s != 1 || f < 3 {
 		t.Fatalf("listening: %d shows, %d frames", s, f)
 	}
 	i.Set(Hidden, 0)
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if _, _, h := be.counts(); h == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("never hid")
-		}
-		time.Sleep(20 * time.Millisecond)
+	d.untilHidden(be)
+	_, f1, h := be.counts()
+	if h != 1 {
+		t.Fatalf("%d hides", h)
 	}
-	_, f1, _ := be.counts()
-	time.Sleep(200 * time.Millisecond)
+	// Hidden, the loop waits for a Set: it takes no frame and draws nothing.
+	select {
+	case d.tick <- d.now():
+		t.Fatal("still rendering while hidden")
+	case <-time.After(50 * time.Millisecond):
+	}
 	if _, f2, _ := be.counts(); f2 != f1 {
 		t.Fatalf("still rendering while hidden: %d → %d frames", f1, f2)
 	}
@@ -264,13 +334,13 @@ func TestIslandRendersOnlyWhileVisible(t *testing.T) {
 }
 
 func TestIslandTurnsOffWhenTheBackendFails(t *testing.T) {
-	be := &fakeBackend{showErr: io.ErrUnexpectedEOF}
-	i := newIsland(be, quietLog)
+	be := newFakeBackend()
+	be.showErr = io.ErrUnexpectedEOF
+	i, _ := newDriven(t, be)
 	defer i.Close()
 	i.Set(Listening, 0)
-	time.Sleep(150 * time.Millisecond)
+	waitFor(t, "never tried to show", func() bool { i.mu.Lock(); defer i.mu.Unlock(); return i.off })
 	i.Set(Speaking, 0)
-	time.Sleep(150 * time.Millisecond)
 	if s, f, _ := be.counts(); s != 1 || f != 0 {
 		t.Fatalf("after a failed show: %d shows, %d frames (want one try, then off)", s, f)
 	}
@@ -287,43 +357,43 @@ func TestNilIslandIsANoOp(t *testing.T) {
 // TestSuspendHidesAtOnceAndResumes: a screenshot (desktop_read_screen) must not show the
 // island: Suspend returns once it is off the screen, and resume brings the state back.
 func TestSuspendHidesAtOnceAndResumes(t *testing.T) {
-	be := &fakeBackend{}
-	i := newIsland(be, quietLog)
+	be := newFakeBackend()
+	i, d := newDriven(t, be)
 	defer i.Close()
 	i.Set(Thinking, 0)
-	time.Sleep(150 * time.Millisecond)
-	start := time.Now()
-	resume := i.Suspend()
+	d.next() // shown, one frame up
+
+	// Suspend waits for the loop's next frame, which hides instead of drawing. Its own
+	// timeout is a minute here, so returning at all means the hide was acknowledged.
+	resumed := make(chan func(), 1)
+	go func() { resumed <- i.Suspend() }()
+	d.untilHidden(be)
+	var resume func()
+	select {
+	case resume = <-resumed:
+	case <-time.After(hangGuard):
+		t.Fatal("Suspend did not return once the island was hidden")
+	}
 	if _, _, h := be.counts(); h != 1 {
 		t.Fatalf("Suspend returned with the island still up (%d hides)", h)
 	}
-	if d := time.Since(start); d >= suspendWait {
-		t.Fatalf("Suspend waited out its timeout (%v) instead of the hide", d)
-	}
 	_, f1, _ := be.counts()
-	time.Sleep(100 * time.Millisecond)
-	if _, f2, _ := be.counts(); f2 != f1 {
-		t.Fatalf("rendered while suspended: %d → %d frames", f1, f2)
-	}
-	// A second capture meanwhile keeps it hidden until both are done.
+
+	// A second capture meanwhile keeps it hidden until both are done. The hidden loop needs
+	// no frame to acknowledge, so this Suspend returns by itself.
 	resume2 := i.Suspend()
 	resume()
 	resume() // idempotent
-	time.Sleep(100 * time.Millisecond)
-	if s, _, _ := be.counts(); s != 1 {
-		t.Fatalf("shown again while a capture was still running (%d shows)", s)
+	if s, f, _ := be.counts(); s != 1 || f != f1 {
+		t.Fatalf("shown again while a capture was still running (%d shows, %d frames)", s, f)
 	}
 	resume2()
-	time.Sleep(150 * time.Millisecond)
+	d.next() // back up, one frame drawn
 	if s, f, _ := be.counts(); s != 2 || f <= f1 {
 		t.Fatalf("not back after resume: %d shows, %d frames", s, f)
 	}
-	// Suspending a hidden island returns at once, too.
+	// Suspending a hidden island returns at once, too: no frame is delivered meanwhile.
 	i.Set(Hidden, 0)
-	time.Sleep(500 * time.Millisecond)
-	start = time.Now()
+	d.untilHidden(be)
 	i.Suspend()()
-	if d := time.Since(start); d >= suspendWait {
-		t.Fatalf("suspending a hidden island took %v", d)
-	}
 }

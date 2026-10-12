@@ -56,6 +56,10 @@ type Island struct {
 	be  backend
 	log *slog.Logger
 	now func() time.Time
+	// ticker paces frames; tests deliver the ticks themselves (with a fake now).
+	ticker func(every time.Duration) (c <-chan time.Time, stop func())
+	// suspendWait bounds how long Suspend waits for the island to leave the screen.
+	suspendWait time.Duration
 
 	mu     sync.Mutex
 	m      model
@@ -70,7 +74,17 @@ type Island struct {
 }
 
 func newIsland(be backend, log *slog.Logger) *Island {
-	i := &Island{be: be, log: log, now: time.Now, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	return (&Island{be: be, log: log, now: time.Now, ticker: realTicker, suspendWait: suspendWait}).start()
+}
+
+func realTicker(every time.Duration) (<-chan time.Time, func()) {
+	t := time.NewTicker(every)
+	return t.C, t.Stop
+}
+
+// start runs the island's goroutine.
+func (i *Island) start() *Island {
+	i.wake, i.done = make(chan struct{}, 1), make(chan struct{})
 	go i.loop()
 	return i
 }
@@ -128,7 +142,7 @@ func (i *Island) Suspend() (resume func()) {
 	if ack != nil {
 		select {
 		case <-ack:
-		case <-time.After(suspendWait):
+		case <-time.After(i.suspendWait):
 		}
 	}
 	var once sync.Once
@@ -147,7 +161,7 @@ func (i *Island) Suspend() (resume func()) {
 	}
 }
 
-// suspendWait bounds how long Suspend waits for the island to leave the screen.
+// suspendWait is Island.suspendWait's default.
 const suspendWait = 300 * time.Millisecond
 
 // Close hides the island and stops its goroutine.
@@ -174,7 +188,7 @@ func (i *Island) loop() {
 	var scale float64
 	shown := false
 	for range i.wake {
-		t := time.NewTicker(frameEvery)
+		tick, stopTick := i.ticker(frameEvery)
 		for {
 			i.mu.Lock()
 			f, visible := i.m.step(i.now())
@@ -200,9 +214,9 @@ func (i *Island) loop() {
 				i.disable("present", err)
 				break
 			}
-			<-t.C
+			<-tick
 		}
-		t.Stop()
+		stopTick()
 		if shown {
 			i.be.hide()
 			shown = false
