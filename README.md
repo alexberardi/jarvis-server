@@ -9,6 +9,9 @@ agent.
 > a database backup until you are happy with jarvisd: the installer stops the legacy containers but
 > deletes nothing, so you can go back.
 
+Questions, bug reports and quick help: the project [Discord](https://discord.gg/9SuQFVexxJ), or a
+[GitHub issue](https://github.com/alexberardi/jarvis-server/issues).
+
 ## What is in this repository
 
 **`jarvisd`** replaces the Python microservices with one executable:
