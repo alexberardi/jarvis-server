@@ -245,6 +245,7 @@ type Supervisor struct {
 	spec   Spec
 	log    *slog.Logger
 	client *http.Client
+	after  func(time.Duration) <-chan time.Time // time.After; tests control the drain grace
 
 	mu       sync.Mutex
 	state    State
@@ -280,6 +281,7 @@ func New(spec Spec, log *slog.Logger) (*Supervisor, error) {
 		log:  log.With("engine", spec.Name),
 		// No keep-alives: a pooled connection to a dead engine would fail one check spuriously.
 		client:  &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
+		after:   time.After,
 		state:   Stopped,
 		since:   time.Now(),
 		changed: make(chan struct{}),
@@ -538,7 +540,7 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 				}
 				s.log.Warn("engine draining before restart", "grace", hc.DrainGrace)
 				s.set(Draining, cause.Error())
-				drain, drainCause = time.After(hc.DrainGrace), cause
+				drain, drainCause = s.after(hc.DrainGrace), cause
 				continue
 			}
 			s.set(Unhealthy, err.Error())

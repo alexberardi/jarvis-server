@@ -238,6 +238,25 @@ func (e *env) count(t *testing.T, query string, args ...any) int {
 	return n
 }
 
+// settle waits until the queue has nothing due left to run: every job enqueued so far, and
+// any it enqueued in turn, has finished (or is waiting out a retry backoff). Tests assert
+// that a job did *not* do something after this, instead of sleeping and hoping it ran.
+func (e *env) settle(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		n := e.count(t, `SELECT COUNT(*) FROM platform_jobs WHERE state = 'running' OR (state = 'queued' AND run_at <= ?)`,
+			time.Now().UnixMilli())
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queue did not settle: %d jobs due or running", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (e *env) exec(t *testing.T, query string, args ...any) {
 	t.Helper()
 	if _, err := e.d.Write.ExecContext(e.ctx, query, args...); err != nil {

@@ -139,7 +139,8 @@ func gpuRefused(t *testing.T, r *Resolver, label, reason string) {
 	if !errors.As(err, &nr) || nr.State != StateGPUUnavailable || nr.Reason != reason {
 		t.Fatalf("want gpu_unavailable %q, got %v", reason, err)
 	}
-	if d := time.Since(start); d > time.Second {
+	// Generous: only a wait for an engine (StartTimeout) must fail this, not a slow runner.
+	if d := time.Since(start); d > 10*time.Second {
 		t.Fatalf("refusal took %v: it must be immediate", d)
 	}
 }
@@ -249,8 +250,11 @@ func TestRunningGPUEngineSurvivesLaterFault(t *testing.T) {
 
 	// A driver upgrade lands while jarvisd runs; the periodic check re-detects. The engine
 	// already loaded keeps working until the reboot, so it keeps serving.
-	time.Sleep(5 * time.Millisecond)
-	box.set(hwMismatch)
+	// The fault is detected after the engine started (said outright: two clock reads in a row
+	// can be equal on a coarse clock).
+	late := hwMismatch
+	late.DetectedAt = instanceFor(g.r, ep.Engine).Started.Add(time.Millisecond)
+	box.set(late)
 	g.r.Reconcile(context.Background())
 	got, err := g.r.Resolve(context.Background(), LabelLive)
 	if err != nil || got.Engine != ep.Engine {
@@ -297,7 +301,7 @@ func TestWatchGPUReDetectsOnDriverChange(t *testing.T) {
 	mu.Lock()
 	fault = DriverMismatchFault("580.173.04", "580.178.04")
 	mu.Unlock()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for det.Hardware(context.Background(), false).Fault == nil {
 		if time.Now().After(deadline) {
 			t.Fatal("the watch never re-detected")

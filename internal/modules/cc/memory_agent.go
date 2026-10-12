@@ -15,8 +15,9 @@ import (
 // model.advanced_context (default off) and memory.agent_context_enabled.
 
 // agentContextEmbedTimeout keeps the per-turn embedding off the latency budget; on timeout
-// the search falls back to keywords (04 §11 "Hot path").
-const agentContextEmbedTimeout = 150 * time.Millisecond
+// the search falls back to keywords (04 §11 "Hot path"). A var for tests, which need the
+// embedding to land however loaded the machine is.
+var agentContextEmbedTimeout = 150 * time.Millisecond
 
 const agentContextHeader = "You already know the following — weave relevant facts into your answer:"
 

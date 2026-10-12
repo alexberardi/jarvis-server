@@ -40,7 +40,7 @@ func (f *fakeNotifier) Notify(_ context.Context, _ *sql.Tx, _ string, n notifica
 // wait returns the first n pushes once they arrived.
 func (f *fakeNotifier) wait(t *testing.T, n int) ([]notifications.NewInboxItem, []notifications.Notification) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for {
 		f.mu.Lock()
 		items, pushes := append([]notifications.NewInboxItem(nil), f.items...), append([]notifications.Notification(nil), f.pushes...)
@@ -238,7 +238,7 @@ func TestAppPhotoImportUnchanged(t *testing.T) {
 	if job := e.waitJob(t, o["job_id"].(string), h); job["status"] != statusComplete {
 		t.Fatalf("job %v", job)
 	}
-	time.Sleep(50 * time.Millisecond)
+	e.settle(t) // the job's handler has returned: anything it would save or send is done
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if e.count(t, `SELECT COUNT(*) FROM recipes_recipes`) != 0 || len(n.pushes) != 0 {

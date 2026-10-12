@@ -227,6 +227,10 @@ func TestNoHouseholdInToken(t *testing.T) {
 
 func TestInboxVisibility(t *testing.T) {
 	e := setup(t)
+	// Each item is created a millisecond after the last, so the newest-first order is fixed.
+	var tick atomic.Int64
+	base := time.Now()
+	e.m.now = func() time.Time { return base.Add(time.Duration(tick.Add(1)) * time.Millisecond) }
 	u, other := userH(t, 1, "hh1"), userH(t, 2, "hh2")
 	create := func(body string) map[string]any {
 		return asObj(e.json(t, 200, "POST", "/api/v0/inbox", body, appH...))
@@ -238,7 +242,6 @@ func TestInboxVisibility(t *testing.T) {
 	if _, err := time.Parse("2006-01-02T15:04:05.999999", own["created_at"].(string)); err != nil {
 		t.Fatalf("created_at is naive isoformat: %v", own["created_at"])
 	}
-	time.Sleep(2 * time.Millisecond)
 	hh := create(`{"household_id":"hh1","title":"hh","summary":"s","body":"b","category":"c","source_service":"cc","metadata":{}}`)
 	if hh["user_id"] != nil || hh["metadata"] != nil {
 		t.Fatalf("household item: %v", hh)
@@ -440,7 +443,7 @@ func withRelay(rl *relay) opt { return func(m *Module) { m.RelayURL = rl.srv.URL
 // logRow waits for a notification_log row to leave "pending" and returns it.
 func (e *env) logRow(t *testing.T, id string) Delivery {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for {
 		var d Delivery
 		if err := e.d.Read.QueryRow(`SELECT id, delivery_status, token_count, success_count, failure_count FROM notifications_notification_log WHERE id = ?`, id).
@@ -605,7 +608,7 @@ func TestPushOutcomes(t *testing.T) {
 		e := setup(t, withRelay(rl))
 		e.registerToken(t, 1, "hh1", "tok-a")
 		v := asObj(e.json(t, 200, "POST", "/api/v0/notify", notify("user", "1", "r"), appH...))
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(30 * time.Second) // hang guard
 		for rl.count() < 3 && time.Now().Before(deadline) {
 			time.Sleep(5 * time.Millisecond)
 		}
@@ -629,9 +632,18 @@ func TestPushOutcomes(t *testing.T) {
 		if d := e.logRow(t, v["id"].(string)); d.DeliveryStatus != "failed" || d.FailureCount != 1 {
 			t.Fatalf("4xx: %+v", d)
 		}
-		time.Sleep(50 * time.Millisecond)
+		// A 4xx ends the job (done, not retried); once it has, nothing can send again.
+		deadline := time.Now().Add(30 * time.Second) // hang guard
+		var state queue.State
+		for state != queue.Done && state != queue.Failed {
+			if time.Now().After(deadline) {
+				t.Fatalf("push job still %q", state)
+			}
+			e.d.Read.QueryRow(`SELECT state FROM platform_jobs WHERE type = ?`, pushJobType).Scan(&state)
+			time.Sleep(5 * time.Millisecond)
+		}
 		if rl.count() != 1 {
-			t.Fatalf("4xx retried: %d", rl.count())
+			t.Fatalf("4xx retried: %d (job %s)", rl.count(), state)
 		}
 	})
 	t.Run("401 refreshes the JWT once", func(t *testing.T) {
@@ -670,7 +682,7 @@ func TestPushOutcomes(t *testing.T) {
 		_ = rl
 		e.registerToken(t, 1, "hh1", "tok-a")
 		v := asObj(e.json(t, 200, "POST", "/api/v0/notify", notify("user", "1", "u"), appH...))
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(30 * time.Second) // hang guard
 		var state queue.State
 		for time.Now().Before(deadline) {
 			e.d.Read.QueryRow(`SELECT state FROM platform_jobs WHERE type = ?`, pushJobType).Scan(&state)

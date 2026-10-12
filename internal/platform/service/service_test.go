@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -110,7 +111,7 @@ func TestNotify(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "notify.sock")
 		name := path
 		if abstract {
-			name = "@jarvisd-test-" + time.Now().Format("150405.000000000")
+			name = fmt.Sprintf("@jarvisd-test-%d-%d", os.Getpid(), time.Now().UnixNano())
 		}
 		addr := &net.UnixAddr{Name: path, Net: "unixgram"}
 		if abstract {
@@ -129,7 +130,7 @@ func TestNotify(t *testing.T) {
 			t.Fatal(err)
 		}
 		buf := make([]byte, 64)
-		l.SetReadDeadline(time.Now().Add(2 * time.Second))
+		l.SetReadDeadline(time.Now().Add(30 * time.Second)) // hang guard: both were sent already
 		for _, want := range []string{"READY=1", "STOPPING=1"} {
 			n, err := l.Read(buf)
 			if err != nil || string(buf[:n]) != want {

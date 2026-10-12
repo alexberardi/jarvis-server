@@ -206,7 +206,7 @@ func (l *tcpListener) Serve(establish listeners.EstablishFn) {
 		}
 		go func() {
 			defer l.set.end()
-			logConnEnd(l.log, l.id, establish(l.id, conn))
+			logConnEnd(l.log, l.id, l.b.serve(establish, l.id, conn))
 		}()
 	}
 }

@@ -72,11 +72,10 @@ func get(t *testing.T, addr, path string) (int, string) {
 
 func waitAddr(t *testing.T, r *Runner, listener string) string {
 	t.Helper()
-	for range 200 {
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
 		if a := r.Addr(listener); a != "" {
 			return a
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("listener %s never bound", listener)
 	return ""
@@ -96,13 +95,20 @@ func TestRunnerServesModulesOnTheirListeners(t *testing.T) {
 	ccExtra := &fakeModule{name: "cc_phone", listener: config.ListenerCC, routes: map[string]string{
 		"GET /api/v0/phone/ping": "phone",
 	}}
-	r := &Runner{Deps: deps(t), Modules: []Module{cc, notif, ccExtra}}
+	ready := make(chan struct{})
+	r := &Runner{Deps: deps(t), Modules: []Module{cc, notif, ccExtra}, OnReady: func() { close(ready) }}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
 
-	ccAddr, nAddr := waitAddr(t, r, config.ListenerCC), waitAddr(t, r, config.ListenerNotifications)
+	// Listeners are bound before modules start; wait for both.
+	select {
+	case <-ready:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("OnReady never called")
+	}
+	ccAddr, nAddr := r.Addr(config.ListenerCC), r.Addr(config.ListenerNotifications)
 	if _, b := get(t, ccAddr, "/health"); b != "cc" {
 		t.Errorf("cc /health = %q", b)
 	}
@@ -128,7 +134,7 @@ func TestRunnerServesModulesOnTheirListeners(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second): // hang guard
 		t.Fatal("Run did not return after cancel")
 	}
 }
@@ -265,7 +271,7 @@ func TestRunnerOnReadyAfterListenersBound(t *testing.T) {
 		if !cc.started.Load() || !auth.started.Load() {
 			t.Error("ready before modules started")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second): // hang guard
 		t.Fatal("OnReady never called")
 	}
 	cancel()

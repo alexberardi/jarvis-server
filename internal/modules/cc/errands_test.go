@@ -68,10 +68,9 @@ func (a *autoNode) Publish(topic string, payload []byte, _ byte, _ bool) error {
 	case "report_tools":
 		body = `{"client_tools": [], "available_commands": [{"command_name": "get_weather", "description": "W"}]}`
 	}
-	go func() {
-		time.Sleep(5 * time.Millisecond)
-		a.m.bus.Deliver(reply, node, json.RawMessage(body))
-	}()
+	// The result slot is open before the publish, so the reply may land at once (off the
+	// publisher's goroutine, as a real node's POST would).
+	go a.m.bus.Deliver(reply, node, json.RawMessage(body))
 	return nil
 }
 

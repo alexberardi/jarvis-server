@@ -243,7 +243,8 @@ func TestStreamSendsEachEntryOnce(t *testing.T) {
 	m, h := setup(t)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// The deadline only bounds a hang: every read below waits for an entry that is coming.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/v0/logs/stream?service=cc", nil)
 	req.Header.Set("X-Jarvis-App-Id", "jarvis-cc")
@@ -256,34 +257,28 @@ func TestStreamSendsEachEntryOnce(t *testing.T) {
 	if res.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("content-type %q", res.Header.Get("Content-Type"))
 	}
-	do(t, h, "POST", "/api/v0/logs/batch", `{"logs":[{"service":"cc","level":"INFO","message":"one"},{"service":"tts","level":"INFO","message":"other"},{"service":"cc","level":"INFO","message":"two"}]}`, appH...)
-
 	sc := bufio.NewScanner(res.Body)
-	var got []string
-	deadline := time.Now().Add(3 * time.Second)
-	for len(got) < 2 && time.Now().Before(deadline) && sc.Scan() {
-		if line := sc.Text(); strings.HasPrefix(line, "data: ") {
-			var l map[string]any
-			json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &l)
-			got = append(got, l["message"].(string))
+	next := func(n int) []string {
+		var got []string
+		for len(got) < n && sc.Scan() {
+			if line := sc.Text(); strings.HasPrefix(line, "data: ") {
+				var l map[string]any
+				json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &l)
+				got = append(got, l["message"].(string))
+			}
 		}
+		return got
 	}
-	if len(got) != 2 || got[0] != "one" || got[1] != "two" {
+
+	do(t, h, "POST", "/api/v0/logs/batch", `{"logs":[{"service":"cc","level":"INFO","message":"one"},{"service":"tts","level":"INFO","message":"other"},{"service":"cc","level":"INFO","message":"two"}]}`, appH...)
+	if got := next(2); len(got) != 2 || got[0] != "one" || got[1] != "two" {
 		t.Fatalf("streamed %v", got)
 	}
-	// Nothing new: the next poll must not resend "two" (the legacy bug).
-	done := make(chan string, 1)
-	go func() {
-		if sc.Scan() {
-			done <- sc.Text()
-		}
-	}()
-	select {
-	case line := <-done:
-		if strings.HasPrefix(line, "data: ") {
-			t.Fatalf("re-sent an entry: %s", line)
-		}
-	case <-time.After(1500 * time.Millisecond):
+	// Polls with nothing new must not resend "two" (the legacy bug): the next entry streamed
+	// is the next one logged.
+	do(t, h, "POST", "/api/v0/logs/batch", `{"logs":[{"service":"cc","level":"INFO","message":"three"}]}`, appH...)
+	if got := next(1); len(got) != 1 || got[0] != "three" {
+		t.Fatalf("after two, streamed %v; want three", got)
 	}
 	_ = m
 }

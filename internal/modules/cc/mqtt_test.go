@@ -42,7 +42,10 @@ func TestBrokerAuthAndACL(t *testing.T) {
 	cb.subscribe("jarvis/nodes/b/#")
 	ca.publish("jarvis/nodes/b/commands", []byte(`[{"command":"tool_call","details":{}}]`))
 	ca.publish("jarvis/nodes/a/commands", []byte(`[]`))
-	cb.nothing(300 * time.Millisecond)
+	// A refused QoS-1 publish disconnects a 3.1.1 client: once a is cut off, the broker has
+	// handled what it sent, and b has nothing queued.
+	ca.expectClosed()
+	e.quiet(cb, "b")
 
 	// A deactivated node can no longer connect.
 	e.auth.DeactivateNode(context.Background(), "b")

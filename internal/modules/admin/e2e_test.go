@@ -44,6 +44,8 @@ func gatewayStack(t *testing.T) (string, *authmod.Module, pconfig.Config) {
 				return []doctor.Check{{Name: "listening", Status: doctor.OK}}
 			}}, auth},
 	}
+	ready := make(chan struct{})
+	r.OnReady = func() { close(ready) }
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
 	t.Cleanup(func() {
@@ -53,14 +55,15 @@ func gatewayStack(t *testing.T) (string, *authmod.Module, pconfig.Config) {
 		}
 		d.Close()
 	})
-	for range 400 {
-		if a := r.Addr(pconfig.ListenerAdmin); a != "" {
-			return "http://" + a, auth, cfg
-		}
-		time.Sleep(5 * time.Millisecond)
+	// Every listener bound and every module (auth's setup token included) started.
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("runner stopped: %v", err)
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("the stack never became ready")
 	}
-	t.Fatal("admin listener never bound")
-	return "", nil, cfg
+	return "http://" + r.Addr(pconfig.ListenerAdmin), auth, cfg
 }
 
 func call(t *testing.T, method, url string, body any, hdr ...string) (int, any) {
@@ -104,13 +107,9 @@ func TestGatewayEndToEnd(t *testing.T) {
 	if code, _ := call(t, "POST", base+"/api/auth/setup", setup); code != 401 {
 		t.Fatalf("setup without the token: %d", code)
 	}
-	var tok []byte
-	for range 400 { // auth's Start runs once the listeners are bound
-		if b, err := os.ReadFile(authmod.SetupTokenPath(cfg.Home)); err == nil {
-			tok = b
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	tok, err := os.ReadFile(authmod.SetupTokenPath(cfg.Home)) // written by auth's Start
+	if err != nil {
+		t.Fatal(err)
 	}
 	if code, out := call(t, "POST", base+"/api/auth/setup", setup, authmod.SetupTokenHeader, strings.TrimSpace(string(tok))); code != 201 {
 		t.Fatalf("setup: %d %v", code, out)

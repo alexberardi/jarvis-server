@@ -24,6 +24,27 @@ const weatherTool = `[{"type":"function","function":{"name":"get_weather","descr
 	`"resolved_datetimes":{"type":"array","items":{"type":"string","format":"date-time"},"description":"Dates"}},` +
 	`"required":["resolved_datetimes"]}},"keywords":["weather","forecast"],"allow_direct_answer":false}]`
 
+// awaitWake waits for the wake-clip verification transcribe started on cid to finish, so a
+// turn reads its verdict rather than racing it (a turn waits only wakeVerifyWait, then fails
+// open).
+func (ve *voiceEnv) awaitWake(cid string) {
+	ve.t.Helper()
+	ve.m.signals.mu.Lock()
+	var done chan struct{}
+	if e := ve.m.signals.m[cid]; e != nil {
+		done = e.wakeDone
+	}
+	ve.m.signals.mu.Unlock()
+	if done == nil {
+		ve.t.Fatalf("no wake verification running for %s", cid)
+	}
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		ve.t.Fatalf("wake verification for %s never finished", cid)
+	}
+}
+
 func (ve *voiceEnv) transcribe(cid string, speakerAudio bool) map[string]any {
 	ve.t.Helper()
 	var buf bytes.Buffer
@@ -349,6 +370,7 @@ func TestVoiceWakeVerificationEnforce(t *testing.T) {
 	ve.stt.wakeText = "the weather"
 	ve.start("c8", "[]")
 	ve.transcribe("c8", true)
+	ve.awaitWake("c8")
 	before := len(ve.eng.requests())
 	r := ve.turn("/api/v0/voice/command/stream", "c8", "turn off the lights", map[string]any{"turn_source": "wake"}).want(202).json()
 	if r["stop_reason"] != "not_for_me" || len(ve.eng.requests()) != before {
@@ -358,6 +380,7 @@ func TestVoiceWakeVerificationEnforce(t *testing.T) {
 	ve.stt.wakeText = "hey jervis"
 	ve.start("c9", "[]")
 	ve.transcribe("c9", true)
+	ve.awaitWake("c9")
 	ve.eng.say("Done.")
 	ve.turn("/api/v0/voice/command/stream", "c9", "what time is it", map[string]any{"turn_source": "wake"}).want(200)
 }
@@ -710,7 +733,7 @@ func TestContinueStreamPushesActions(t *testing.T) {
 	ve.do("POST", "/api/v0/voice/command/continue/stream", map[string]any{"conversation_id": "a1",
 		"tool_results": []any{map[string]any{"tool_call_id": id, "output": map[string]any{"message": "Draft ready.",
 			"context": map[string]any{"actions": []any{map[string]any{"name": "send", "label": "Send"}}, "command_name": "email", "preview": "Hi"}}}}}, ve.node.h()).want(200)
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for time.Now().Before(deadline) {
 		ve.notify.mu.Lock()
 		n := len(ve.notify.items)
@@ -742,6 +765,7 @@ func TestVoiceSTTPromptOnlyOnTheCommand(t *testing.T) {
 	ve.set(settingWakeMode, "enforce", settings.Scope{HouseholdID: voiceHH})
 	ve.start("p1", "[]")
 	ve.transcribe("p1", true)
+	ve.awaitWake("p1") // the wake pass runs off the request; count it once it has
 	ve.eng.say("Done.")
 	ve.turn("/api/v0/voice/command/stream", "p1", "what time is it", map[string]any{"turn_source": "wake"}).want(200)
 

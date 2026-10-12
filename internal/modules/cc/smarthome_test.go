@@ -390,7 +390,7 @@ func TestSmartHomeConfig(t *testing.T) {
 		t.Fatal(verb, d)
 	}
 	e.do("PUT", path, map[string]any{"primary_node_id": ""}, bearer(tok)).want(200)
-	c.nothing(100 * time.Millisecond)
+	e.quiet(c, "n1")
 	stranger := e.auth.addUser(9, "hh9", authn.RoleOwner)
 	e.do("GET", path, nil, bearer(stranger)).want(403)
 }

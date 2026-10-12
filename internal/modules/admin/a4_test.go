@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -357,7 +356,7 @@ func TestLogsStreamTails(t *testing.T) {
 		select {
 		case ev := <-events:
 			got = append(got, ev["message"].(string))
-		case <-time.After(5 * time.Second):
+		case <-time.After(30 * time.Second): // hang guard
 			t.Fatalf("tail got %v", got)
 		}
 	}
@@ -374,11 +373,12 @@ func TestLogsStreamTails(t *testing.T) {
 		if ev["message"] != "tail 3" {
 			t.Fatalf("tail 3: %v", ev)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second): // hang guard
 		t.Fatal("no tail 3")
 	}
 	cancel()
-	rctx, rcancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	// Resuming after tail 2's id: the first entry replayed is tail 3.
+	rctx, rcancel := context.WithCancel(context.Background())
 	defer rcancel()
 	req2, _ := http.NewRequestWithContext(rctx, "GET", srv.URL+"/api/logs/stream?after="+lastID, nil)
 	req2.Header.Set("Authorization", "Bearer root")
@@ -386,11 +386,27 @@ func TestLogsStreamTails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(resp2.Body) // ends at the client timeout
-	resp2.Body.Close()
-	if !strings.Contains(string(body), `"message":"tail 3"`) || strings.Contains(string(body), `"tail 2"`) {
-		t.Fatalf("resume: %s", body)
+	defer resp2.Body.Close()
+	first := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(resp2.Body)
+		for sc.Scan() {
+			if data, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+				first <- data
+				return
+			}
+		}
+		close(first)
+	}()
+	select {
+	case data := <-first:
+		if !strings.Contains(data, `"message":"tail 3"`) {
+			t.Fatalf("resume replayed %s first, want tail 3", data)
+		}
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("resume replayed nothing")
 	}
+	rcancel()
 	if w := send(e.mux, "GET", "/api/logs/stream?after=x", "", root...); w.Code != 422 {
 		t.Fatalf("bad after: %d", w.Code)
 	}

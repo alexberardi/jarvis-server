@@ -26,7 +26,7 @@ func TestGPUUnavailableFailsFast(t *testing.T) {
 	req := ChatRequest{Label: LabelLive, Messages: []Message{{Role: "user", Content: TextContent("hi")}}}
 	start := time.Now()
 	_, cerr := e.m.Service().Chat(WithReadyWait(e.ctx, time.Hour), req)
-	if time.Since(start) > time.Second {
+	if time.Since(start) > 30*time.Second { // a wrong wait would last the hour
 		t.Fatalf("took %v: must not wait", time.Since(start))
 	}
 	var ae *APIError

@@ -343,7 +343,7 @@ func TestValidation(t *testing.T) {
 
 func (e *env) waitJob(t *testing.T, id string) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		_, out := e.do(t, "GET", "/v1/ocr/jobs/"+id, nil, appH)
 		if s := out["status"]; s == "completed" || s == "failed" {
@@ -380,7 +380,7 @@ func TestSubmitJob(t *testing.T) {
 	// The image goes once the job finished. finish saves the result first and deletes after,
 	// so a reader can see "completed" a moment before the image is gone.
 	var infos []blob.Info
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		infos, _ = e.m.deps.Blobs.List(e.ctx, jobPrefix+id+"/")
 		if len(infos) == 1 && strings.HasSuffix(infos[0].Key, "job.json") {

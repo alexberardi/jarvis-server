@@ -260,7 +260,7 @@ func TestRoutineNudge(t *testing.T) {
 	c.next()
 	e.do("DELETE", e.path("/"+id), nil, bearer(e.owner)).want(204)
 	c.next()
-	c.nothing(100 * time.Millisecond)
+	e.quiet(c, "na")
 }
 
 // fakeNodeRun answers the next routine command on c with output, returning its details.

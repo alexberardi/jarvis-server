@@ -513,21 +513,33 @@ func (c *mqttClient) next() packets.Packet {
 	}
 }
 
-func (c *mqttClient) nothing(d time.Duration) {
+// expectClosed waits for the broker to drop c's connection.
+func (c *mqttClient) expectClosed() {
 	c.t.Helper()
-	deadline := time.After(d)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
-		case pk, ok := <-c.in:
-			if ok && pk.FixedHeader.Type == packets.Publish {
-				c.t.Fatalf("unexpected publish on %s: %s", pk.TopicName, pk.Payload)
-			}
+		case _, ok := <-c.in:
 			if !ok {
 				return
 			}
 		case <-deadline:
-			return
+			c.t.Fatal("connection not closed within 5 s")
 		}
+	}
+}
+
+// quiet asserts node nodeID's client c has nothing queued: a marker the broker publishes now
+// is the next PUBLISH it gets. Call it once whatever might have published has returned (the
+// HTTP handlers publish before responding); one publisher's messages arrive in order.
+func (e *env) quiet(c *mqttClient, nodeID string) {
+	c.t.Helper()
+	topic := "jarvis/nodes/" + nodeID + "/test-marker"
+	if err := e.m.broker.Publish(topic, []byte("marker"), 1, false); err != nil {
+		c.t.Fatal(err)
+	}
+	if pk := c.next(); pk.TopicName != topic {
+		c.t.Fatalf("unexpected publish on %s: %s", pk.TopicName, pk.Payload)
 	}
 }
 

@@ -54,7 +54,7 @@ func noRestartDelay(t *testing.T) {
 
 func waitFor(t *testing.T, what string, f func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
 	for !f() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)

@@ -82,7 +82,8 @@ func TestNodeToolsNoHouseholdOrBroker(t *testing.T) {
 	e.do("GET", "/api/v0/mobile/nodes/loose/tools", nil, bearer(tok)).detail(403, "Not authorized")
 	start := time.Now()
 	out := e.do("GET", "/api/v0/mobile/nodes/n1/tools", nil, bearer(tok)).want(200).json()
-	if len(out["client_tools"].([]any)) != 0 || time.Since(start) > 2*time.Second {
+	// Waiting for a report would take the whole nodeToolsWait (10 s).
+	if len(out["client_tools"].([]any)) != 0 || time.Since(start) >= nodeToolsWait {
 		t.Fatal(out)
 	}
 }

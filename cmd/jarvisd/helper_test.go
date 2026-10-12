@@ -77,18 +77,28 @@ func lockedInstall(t *testing.T, state string) update.Paths {
 func TestUpgradeStartWaitsForHelper(t *testing.T) {
 	p := lockedInstall(t, update.StateStaged)
 	log := logging.New(&bytes.Buffer{}, logging.ParseLevel(""), nil)
+	// The fake helper acts once it is woken; upgradeStart's own helperWait is the hang guard.
+	stop := make(chan struct{})
+	helperDone := make(chan struct{})
 	go func() {
-		for i := 0; i < 400; i++ {
+		defer close(helperDone)
+		for {
 			if ents, _ := os.ReadDir(p.RequestsDir()); len(ents) > 0 {
 				m, _ := update.ReadMarker(p)
 				m.State = update.StateSwapped
 				_ = update.WriteMarker(p, m)
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-stop:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
 		}
 	}()
 	gate, restart, err := upgradeStart(context.Background(), log, p, true, service.HelperLaunchd)
+	close(stop)
+	<-helperDone
 	if err != nil || !restart || gate != nil {
 		t.Fatalf("%+v %v %v", gate, restart, err)
 	}

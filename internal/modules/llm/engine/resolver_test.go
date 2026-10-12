@@ -92,7 +92,7 @@ func newRig(t *testing.T) *rig {
 		},
 		Log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		HealthInterval: 20 * time.Millisecond, DrainGrace: 50 * time.Millisecond,
-		StartTimeout: 5 * time.Second, StopTimeout: 2 * time.Second,
+		StartTimeout: 30 * time.Second, StopTimeout: 2 * time.Second,
 		Restart:     engines.RestartPolicy{BackoffMin: 20 * time.Millisecond, BackoffMax: 100 * time.Millisecond, MaxRestarts: 2, Window: time.Minute},
 		RetryFailed: 100 * time.Millisecond,
 		Interval:    50 * time.Millisecond,
@@ -117,7 +117,7 @@ func (g *rig) llm(label, model string) LabelConfig {
 // ready resolves until the label is ready.
 func (g *rig) ready(label string) Endpoint {
 	g.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		ep, err := g.r.Resolve(context.Background(), label)
 		if err == nil {
@@ -364,7 +364,7 @@ func TestEngineCrashAndFailedRetry(t *testing.T) {
 	pid := instanceFor(g.r, ep.Engine).PID
 	p, _ := os.FindProcess(pid)
 	p.Kill()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if i := instanceFor(g.r, ep.Engine); i.PID != 0 && i.PID != pid && i.State == engines.Healthy {
 			break
@@ -384,7 +384,7 @@ func TestEngineCrashAndFailedRetry(t *testing.T) {
 	defer cancel()
 	g.r.Start(ctx)
 	var nr *NotReadyError
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(30 * time.Second)
 	for {
 		_, err := g.r.Resolve(context.Background(), LabelBackground)
 		if errors.As(err, &nr) && nr.State == string(engines.Failed) {
@@ -397,7 +397,7 @@ func TestEngineCrashAndFailedRetry(t *testing.T) {
 	}
 	// Put the file back: the retry loop brings it up without any further call.
 	os.WriteFile(bad, []byte("gguf"), 0o644)
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(30 * time.Second)
 	for {
 		ready := false
 		for _, s := range g.r.Instances() {
@@ -414,7 +414,7 @@ func TestEngineCrashAndFailedRetry(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	cancel()
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(30 * time.Second)
 	for len(g.r.Instances()) > 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("engines not stopped on shutdown")

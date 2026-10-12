@@ -46,10 +46,8 @@ func (p *chatNodePub) Publish(topic string, payload []byte, _ byte, _ bool) erro
 		body = reply
 	}
 	if body != "" {
-		go func() {
-			time.Sleep(5 * time.Millisecond)
-			p.m.bus.Deliver(rid, node, json.RawMessage(body))
-		}()
+		// The result slot is open before the publish, so the reply may land at once.
+		go p.m.bus.Deliver(rid, node, json.RawMessage(body))
 	}
 	return nil
 }
@@ -284,7 +282,8 @@ func TestMobileChatNeverConnectedNodeFailsFast(t *testing.T) {
 	ce.eng.say("Hello there.")
 	start := time.Now()
 	r := ce.do("POST", "/api/v0/mobile/chat/warmup", map[string]any{"node_id": ce.node.id, "household_id": voiceHH}, bearer("tok-7")).want(200).json()
-	if took := time.Since(start); took > 2*time.Second {
+	// Waiting for a report would take the whole nodeToolsWait (10 s).
+	if took := time.Since(start); took >= nodeToolsWait {
 		t.Fatalf("warmup waited %v for a node that never connected", took)
 	}
 	if len(ce.pub.commands("report_tools")) != 0 {
@@ -385,7 +384,8 @@ func TestMobileChatOfflineNode(t *testing.T) {
 	ce.eng.say("Your kitchen node is offline right now.")
 	start := time.Now()
 	frames := normalize(ce.chat("tok-7", map[string]any{"message": "weather", "conversation_id": r["conversation_id"]}))
-	if time.Since(start) > 5*time.Second || len(ce.pub.cmds) != 0 {
+	// Waiting on the node would take the whole chatToolWait (10 s).
+	if time.Since(start) >= chatToolWait || len(ce.pub.cmds) != 0 {
 		t.Fatal("offline node was waited on")
 	}
 	if frames[1] != `{"type": "status", "message": "Node is offline"}` {
