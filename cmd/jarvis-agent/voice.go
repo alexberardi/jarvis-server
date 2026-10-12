@@ -25,7 +25,16 @@ type voiceFlags struct {
 	noChimes      bool
 	followUp      float64
 	followSilence float64
+	debounce      time.Duration
+	onsetWait     time.Duration
 }
+
+// minWakeDebounce is the shortest --wake-debounce: below it one utterance of the wake word
+// can fire twice.
+const minWakeDebounce = 500 * time.Millisecond
+
+// wakeDebounce clamps --wake-debounce to minWakeDebounce.
+func wakeDebounce(d time.Duration) time.Duration { return max(d, minWakeDebounce) }
 
 func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	v := &voiceFlags{}
@@ -38,6 +47,10 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; the Python node's follow_up_listen_seconds)")
 	fs.Float64Var(&v.followSilence, "follow-up-silence", voice.DefaultFollowUp().SilenceSecs,
 		"seconds of silence that end a follow-up answer (the Python node's follow_up_silence_duration is 0.5)")
+	fs.DurationVar(&v.debounce, "wake-debounce", voice.DefaultConfig().Debounce,
+		"no second wake this soon after one (at least 500ms)")
+	fs.DurationVar(&v.onsetWait, "listen-onset-wait", 0,
+		"after the wake word, wait up to this long for speech before silence can end the recording (0: silence counts from the start, as the Python node)")
 	return v
 }
 
@@ -81,6 +94,8 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	cfg := voice.DefaultConfig()
 	cfg.WakeThreshold = f.threshold
 	cfg.Chimes = !f.noChimes
+	cfg.Debounce = wakeDebounce(f.debounce)
+	cfg.Endpointing.OnsetWaitSecs = max(0, f.onsetWait.Seconds())
 	cfg.FollowUp.ListenSecs = f.followUp
 	if f.followSilence > 0 {
 		cfg.FollowUp.SilenceSecs = f.followSilence

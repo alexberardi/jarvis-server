@@ -95,6 +95,58 @@ func TestRecorderStopsLikeListen(t *testing.T) {
 	}
 }
 
+// TestRecorderOnsetWait: with an onset wait, silence before the first speech doesn't end
+// the recording until the wait is over; once speech is heard the usual stop applies.
+func TestRecorderOnsetWait(t *testing.T) {
+	e := DefaultEndpointing()
+	e.OnsetWaitSecs = 4 // int(4 / 0.08) = 50 chunks
+	loud, quiet := constChunk(2000), constChunk(10)
+
+	// A 3 s pause after the wake word, then speech, then silence: the pause doesn't stop it
+	// (without the wait it would stop at 26 chunks); the silence after speech does.
+	r := e.newRecorder(300)
+	seq := slices.Concat(rep(quiet, 37), rep(loud, 10), rep(quiet, 10))
+	stopped := -1
+	for i, c := range seq {
+		if r.add(c) {
+			stopped = i
+			break
+		}
+	}
+	if stopped != len(seq)-1 || r.hitMax {
+		t.Fatalf("pause then speech: stopped at %d (hitMax %v), want %d", stopped, r.hitMax, len(seq)-1)
+	}
+
+	// Nobody speaks: stops once the wait is over (frame_count 50), not at the 2 s minimum.
+	r = e.newRecorder(300)
+	for !r.add(quiet) {
+	}
+	if r.n != 51 || r.hitMax {
+		t.Fatalf("all silence: %d chunks (hitMax %v), want 51", r.n, r.hitMax)
+	}
+
+	// A wait longer than the cap: the cap still applies.
+	e.OnsetWaitSecs = 30
+	r = e.newRecorder(300)
+	for !r.add(quiet) {
+	}
+	if r.n != 87 || !r.hitMax {
+		t.Fatalf("wait past the cap: %d chunks (hitMax %v), want 87 and true", r.n, r.hitMax)
+	}
+
+	// Speech right away: the wait doesn't delay the normal stop.
+	e.OnsetWaitSecs = 4
+	r = e.newRecorder(300)
+	for range 5 {
+		r.add(loud)
+	}
+	for !r.add(quiet) {
+	}
+	if r.n != 26 {
+		t.Fatalf("speech first: %d chunks, want 26", r.n)
+	}
+}
+
 func rep(c []int16, n int) [][]int16 {
 	out := make([][]int16, n)
 	for i := range out {

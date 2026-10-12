@@ -33,6 +33,11 @@ type Endpointing struct {
 	AutoMultiplier   float64 // silence_threshold_auto_multiplier, 2 (0 disables adaptive)
 	AutoFloor        float64 // 200
 	AutoCeiling      float64 // 1000
+	// OnsetWaitSecs holds off the silence stop until speech is heard (a chunk at or above the
+	// threshold) or this long has gone by, so a pause after the wake word longer than
+	// SilenceSecs doesn't cut the speaker off. 0 (the default) is the Python node's listen():
+	// silence counts from the first chunk. MaxSecs still applies.
+	OnsetWaitSecs float64
 }
 
 // DefaultEndpointing is the Python node's configuration out of the box.
@@ -75,14 +80,16 @@ func frames(secs float64) int { return int(secs / chunkSecs) }
 
 // recorder is listen()'s main loop: append chunks until there have been SilenceSecs of
 // consecutive chunks below the threshold and at least MinSecs have gone by, or MaxSecs.
+// With an onset wait the silence stop also needs speech heard or the wait over.
 type recorder struct {
 	threshold                float64
 	silenceFrames, minFrames int
-	maxFrames                int
+	maxFrames, onsetFrames   int
 
 	pcm    []int16
 	n      int // chunks so far
 	silent int
+	heard  bool // a chunk at or above the threshold
 	done   bool
 	hitMax bool
 }
@@ -90,7 +97,7 @@ type recorder struct {
 func (e Endpointing) newRecorder(threshold float64) *recorder {
 	minF := max(1, frames(e.MinSecs))
 	return &recorder{threshold: threshold, silenceFrames: max(1, frames(e.SilenceSecs)),
-		minFrames: minF, maxFrames: max(minF, frames(e.MaxSecs))}
+		minFrames: minF, maxFrames: max(minF, frames(e.MaxSecs)), onsetFrames: max(0, frames(e.OnsetWaitSecs))}
 }
 
 // add takes one chunk and reports whether the recording is complete.
@@ -104,9 +111,10 @@ func (r *recorder) add(chunk []int16) bool {
 	if RMS(chunk) < r.threshold {
 		r.silent++
 	} else {
-		r.silent = 0
+		r.silent, r.heard = 0, true
 	}
-	if r.silent >= r.silenceFrames && frameCount >= r.minFrames {
+	onset := r.heard || frameCount >= r.onsetFrames
+	if onset && r.silent >= r.silenceFrames && frameCount >= r.minFrames {
 		r.done = true
 	} else if r.n >= r.maxFrames {
 		r.done, r.hitMax = true, true

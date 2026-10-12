@@ -750,6 +750,34 @@ seeing the colours need a person. snd-aloop capture failed with EIO right after 
 (the `plughw` capture side of the loopback; the spike's `wakelive` worked on subdevice 3), so the
 end-to-end turn used `wav:` input; not chased: it is a test harness, not a node path.
 
+### 3.12 Date answers, listen onset wait, wake debounce (2026-10-12)
+
+Three small ports of ideas from the Python node's jarvis-node-setup #148/#149 (reimplemented,
+not copied).
+
+**`get_current_time` answers date questions** (`internal/agent/clock`). jarvisd speaks a tool's
+`message` as is (FastPathMessage), so "what day is it?" used to answer the time. New optional
+parameters, all backward compatible (no parameters is still "It's 12:55 AM."):
+
+| Param | Values | Message |
+|---|---|---|
+| `query` | `time` (default), `date`, `weekday`, `year`, `month`, `weekend` | "It's Monday, October 12.", "It's Monday.", "It's 2026.", "It's October.", "Yes, it's the weekend." / "No, it's Monday." |
+| `days_offset` | int, tomorrow 1, yesterday −1; clamped to ±366 | "Tomorrow is Tuesday, October 13.", "Yesterday was Sunday.", "In 3 days it'll be Thursday."; the year is added when it differs ("Tomorrow is Friday, January 1, 2027."); with the default `time` query it answers the date |
+| `until_date` | `MM-DD` (a leading year is ignored) | "There are 74 days until December 25." (next occurrence, today = 0; February 29 counts to the next leap year); an unreadable value adds a `note` and answers as without it |
+
+The result always carries `day_of_week`, `year` and `is_weekend` of the asked day (today unless
+`days_offset`), plus `days_offset`/`target_date` and `days_until`/`until_date` when used. A
+`location` applies to all of them (Tokyo's tomorrow, not New York's).
+
+**`--listen-onset-wait DURATION`** (default 0; `Endpointing.OnsetWaitSecs`). The recording after
+the wake word counts trailing silence from its first chunk, so a pause longer than the 0.8 s
+silence window (after the 2 s minimum) cut the speaker off. With a wait set, silence can end the
+recording only once speech has been heard (a chunk at or above the threshold) or the wait is
+over; the 7 s cap still applies. 0 keeps the Python node's behaviour.
+
+**`--wake-debounce DURATION`** (default 8s, the Python node's; at least 500ms): no second wake
+this soon after one.
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
