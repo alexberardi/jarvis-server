@@ -189,7 +189,7 @@ mobile (JWT)             CC                          jarvis-auth                
 
   Every success calls `touch_node_last_seen` (§3.7). `is_active` is **not** checked.
 
-  > **Changed by D40 (05.Q10):** Go drops the legacy bare-key path (after confirming the jarvis-dev and prod nodes send `node_id:node_key`) and never caches "auth unavailable" (auth is in-process).
+  > **Changed by D40 (05.Q10):** Go drops the legacy bare-key path (after confirming the dev and prod nodes send `node_id:node_key`) and never caches "auth unavailable" (auth is in-process).
 - MQTT credential: one **shared** credential for all nodes and CC (`core/mqtt_client.py:39-50`). Nulls mean connect anonymously. When the broker rejects with CONNACK 4 or 5, the node self-heals by re-fetching, at most once per 300 s (`mqtt_tts_listener.py:1440-1470`).
 
   > **Changed by D4:** per-node broker credentials and ACLs; the `/node/mqtt-credentials` response shape is unchanged.
@@ -547,9 +547,9 @@ Env: `MQTT_USERNAME`, `MQTT_PASSWORD`, `JARVIS_MQTT_BROKER_URL`, `NODE_AUTH_CACH
 9. **[scope] Should `/admin/nodes/{id}/commands` be cut?** Its only caller is jarvis-admin's train-adapter, which is LoRA. **My recommendation:** cut it along with the `train_adapter` verb, and also drop `adapter_hash` from `NodeResponse`/`NodeUpdate`. The extra JSON field is harmless if mobile ignores it; I would verify that first.
 
    **Decided (D9):** cut the route and the `train_adapter` verb (LoRA). `adapter_hash` goes with LoRA; verify mobile ignores it before dropping the field.
-10. **[behaviour] Should legacy bare-key node auth and the negative caching of auth outages be kept?** In-process auth makes outages impossible, so the caching question goes away. The real decision is whether the bare-`node_key` header (no `node_id:`) is still needed by any deployed node. **My recommendation:** drop it, and check the jarvis-dev and prod nodes' headers first.
+10. **[behaviour] Should legacy bare-key node auth and the negative caching of auth outages be kept?** In-process auth makes outages impossible, so the caching question goes away. The real decision is whether the bare-`node_key` header (no `node_id:`) is still needed by any deployed node. **My recommendation:** drop it, and check the dev and prod nodes' headers first.
 
-   **Decided (D40 default, verify first):** drop bare-key auth after checking the jarvis-dev and prod nodes' headers; no negative caching.
+   **Decided (D40 default, verify first):** drop bare-key auth after checking the dev and prod nodes' headers; no negative caching.
 11. **[minor] Should settings requests and snapshots be pruned?** Today they grow forever. **My recommendation:** delete after 24 h in the token-cleanup loop.
 
    **Decided (D40 default):** delete after 24 h in the token-cleanup loop.

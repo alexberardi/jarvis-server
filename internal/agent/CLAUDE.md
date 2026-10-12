@@ -4,7 +4,9 @@
 node, holds a node id/key, connects to jarvisd's MQTT, shows up in the app's node list, and
 offers OS control as client tools: open a link or launch an installed app by name, list apps,
 get/set volume, list/minimise/focus/close windows, and control the user's own browser through
-the Jarvis Browser Control extension (tabs, page text, media). Status: proof of concept, not shipped.
+the Jarvis Browser Control extension (tabs, page text, media), read the screen, and answer the
+time and date. With `run --voice` it is a voice node (wake word, the on-screen island, and on a Pi
+the ReSpeaker HAT). Status: pre-release, built from source; not in the jarvisd release archives.
 Moved here from the `jarvis-host-agent` repo on 2026-10-10 so it can share jarvisd's packages
 (`internal/voice`, `internal/audio`, later `internal/update`). Design, decisions and open
 questions: **[docs/agent/DESIGN.md](../../docs/agent/DESIGN.md)**: read it first. The voice/Pi
@@ -21,7 +23,7 @@ The one local listener is the browser socket (a user-only Unix socket, see `brow
 ## Quick reference
 
 ```bash
-scripts/agent-dev-run.sh --server http://10.0.0.122:7700 --email you@example.com   # build+enroll+run
+scripts/agent-dev-run.sh --server http://<jarvisd-host>:7700 --email you@example.com   # build+enroll+run
 scripts/agent-dev-run.sh                             # later runs; --install / --uninstall / --status
 
 export GOTOOLCHAIN=local                       # this box: mise exec go@1.27 -- go ...
@@ -42,7 +44,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 JARVIS_SCREEN_NATIVE=1 go test -v -run TestNativeCapture ./internal/agent/screen/   # capture this desktop
 scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
 AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
-./jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
+./jarvis-agent enroll --server http://<jarvisd-host>:7700 --email you@example.com
 ./jarvis-agent run
 ./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
 ./jarvis-agent run --voice --no-overlay        # ... without the on-screen island (on by default)

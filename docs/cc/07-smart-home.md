@@ -709,6 +709,9 @@ Golden fixtures:
 
 **Package shape:** `internal/modules/cc/smarthome/`.
 
+> **As built:** no `smarthome/` package. Smart home is flat in `internal/modules/cc` (`smarthome.go`, `smarthome_rooms.go`, `smarthome_devices.go`, `smarthome_control.go`, `smarthome_jobs.go`, `smarthome_oauth.go`); `get_ha_entities` is `servertools/haentities.go`.
+
+
 | File | Contents |
 |---|---|
 | `rooms.go`, `devices.go` | sqlc CRUD; `ListRoomsWithCounts` as one GROUP BY query instead of N+1 |

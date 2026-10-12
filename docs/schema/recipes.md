@@ -82,7 +82,7 @@ All FKs and ON DELETE actions kept. `grocery_sku_map`, `recipe_parse_jobs` never
 
 ## Setting keys
 
-From `jarvis-recipes-server/jarvis_recipes/app/services/settings_service.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-recipes-server/jarvis_recipes/app/services/settings_service.py` (the input for the module's settings `Definitions`; the built set is in `internal/modules/recipes/recipes.go`). `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|

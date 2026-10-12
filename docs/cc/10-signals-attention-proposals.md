@@ -1,6 +1,6 @@
 # 10 — Signals, attention, proposals
 
-Source: `/home/alex/jarvis/jarvis-command-center/app` (paths below are relative to it unless prefixed). About 3.9k LOC across 20 files, plus about 3.2k LOC of tests. This is an **R&D area that is still changing**. It has three PRDs: `prds/signal-bus-situation-matcher.md` ("Draft for build", 2026-08-08), `prds/attention-broker.md` ("Scoped, not yet built", which is stale because phase 1 *is* built), and the precision harness in `evals/signal_precision/`. Several of its planes are off by default, and one module (`autorun_gate.py`) has no caller at all.
+Source: `jarvis-command-center/app` (paths below are relative to it unless prefixed). About 3.9k LOC across 20 files, plus about 3.2k LOC of tests. This is an **R&D area that is still changing**. It has three PRDs: `prds/signal-bus-situation-matcher.md` ("Draft for build", 2026-08-08), `prds/attention-broker.md` ("Scoped, not yet built", which is stale because phase 1 *is* built), and the precision harness in `evals/signal_precision/`. Several of its planes are off by default, and one module (`autorun_gate.py`) has no caller at all.
 
 ## 0. Decisions applied (2026-10-06)
 
@@ -539,6 +539,9 @@ All are in `tests/`:
 ## 11. Go port notes
 
 **Shape.** Use one package, `internal/modules/cc/signals`, containing:
+
+> **As built:** no `signals` package. These are flat in `internal/modules/cc` (`signals.go`, `signals_reactions.go`, `proposals.go`, `attention.go`).
+
 
 - **`Store`** (sqlc): `INSERT … ON CONFLICT(household_id, source_key) DO UPDATE`, which removes the `is_active` filter and the insert race. Keep `is_active` as a column only for schema parity.
 - **`Bus`**: `Ingest(ctx, Signal) (id, error)` followed by `Dispatch(evt)`. `Dispatch` sends to a buffered channel drained by a goroutine pool. Reactions are an `map[kind][]Reaction` registered at module init. This replaces `call_soon_threadsafe` and both captured `_main_loop`s.

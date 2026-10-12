@@ -1,6 +1,6 @@
 # 08 — Routines and schedules
 
-Source: `/home/alex/jarvis/jarvis-command-center` at `3b32b73`. All `file:line` cites are in that repo unless prefixed with another repo name (`node-setup/`, `node-mobile/`, `pantry/`). CC's CLAUDE.md is stale here: it describes `/api/v0/mobile/routines` and a `routine_builder.py`. Neither exists. The real router is `app/api/routines.py`, mounted at `/api/v0` (`app/main.py:824`).
+Source: `jarvis-command-center` at `3b32b73`. All `file:line` cites are in that repo unless prefixed with another repo name (`node-setup/`, `node-mobile/`, `pantry/`). CC's CLAUDE.md is stale here: it describes `/api/v0/mobile/routines` and a `routine_builder.py`. Neither exists. The real router is `app/api/routines.py`, mounted at `/api/v0` (`app/main.py:824`).
 
 Two of the files assigned to this chapter belong somewhere else:
 

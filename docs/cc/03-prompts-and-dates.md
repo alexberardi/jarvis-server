@@ -326,6 +326,8 @@ Order after `messages[0]` and the trimmed history (`conversation_handler.py:858-
    - First a multi-value match on the sorted tuple (e.g. `this_weekend`).
    - Then per-value matching.
    - If it cannot map them, CC pops the assistant message and adds one `[ISO_DATE_RETRY]` system nag (at most one per turn).
+
+   > **Changed 2026-10-12 (Go only):** `FixISODates` (`internal/modules/cc/dates/iso.go`) also maps a bare `YYYY-MM-DD` that names a one-day key's local date to that key. A bare date the context doesn't hold is left as-is and never nags. Bare dates count only when the whole list is understood, so the G4 `clean_not_iso` case is unchanged.
 6. **Injection** (`_inject_date_keys`, `:430-613`). This applies only to parameters whose schema has `format: date-time`, or array items with that format (`date_resolution.py:232-267`). The schemas are looked up in `tools + cached full tool list` (`:1286-1297`).
    - **MCP path.** `jarvis_mcp_client.resolve_date_keys` is tried first (`:72-76,446-458`). The package is not in any requirements file or repo, so `_HAS_MCP_CLIENT` is always False. **The MCP path is dead code today, so nothing needs replacing.**
    - **Local resolution.** `resolve_date_keys(date_keys, generate_date_context_object(tz))` returns `(resolved, unresolved)`.

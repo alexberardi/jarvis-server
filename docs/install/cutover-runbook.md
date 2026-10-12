@@ -1,7 +1,9 @@
 # Prod cutover runbook: legacy Docker stack → jarvisd (I9)
 
-**Status: draft, 2026-10-07. Nothing in it has been run on prod.** Prod stays read-only until the
-user says go. The facts in §1 come from a read-only survey of prod on 2026-10-07 (23:30Z):
+**Status: drafted 2026-10-07; run on prod 2026-10-09 with `v0.1.0-rc12`** (STATUS session log, "PROD CUT
+OVER"). Lessons from that run are folded in below (§4.3a readiness wait and recovery, the recipes row in
+§4.6.1). Kept as the procedure for anyone moving a legacy Docker stack to jarvisd. Prod stays read-only
+unless the user says go. The facts in §1 come from a read-only survey of prod on 2026-10-07 (23:30Z):
 `docker ps`/`inspect` without environment values, `nvidia-smi`, `df`, `ss`, `systemctl`, and
 `SELECT count(*)` queries. Re-check them at T-1 (§3), because prod changes.
 
@@ -31,7 +33,7 @@ What this runbook does (decisions it rests on):
 
 Placeholders: `<tag>` the release to install, `<kitchen-node>` the kitchen Pi's mDNS name (root
 `CLAUDE.md`), `<you>` the superuser's email. Every command runs on prod as the `jarvis` login user
-(`ssh jarvis@10.0.0.107`) unless it says "on the node" or "from a LAN laptop".
+(`ssh jarvis@<server-ip>`) unless it says "on the node" or "from a LAN laptop".
 
 ---
 
@@ -130,7 +132,7 @@ All must be **yes** before the window starts. Record the answers in STATUS.
 | G2 | The same `<tag>` passed a fresh install + voice turn on the dev box (A10 again, system unit if anyone can sudo there) | STATUS entry |
 | G3 | Kitchen node software has the "before cutover" node changes: `chat_text()` → `/api/v0/node/llm/chat` (EXTERNAL-CHANGES D5) and per-node MQTT credentials (D4/D7). jarvis-dev passed A10 with them; confirm 0.3.1 includes them (Q5) | node-setup release notes / `git tag --contains` |
 | G4 | Mobile app build in users' hands hides the Forge test-install screen (EXTERNAL-CHANGES, "before cutover") or that screen is accepted as broken | app release |
-| G5 | Users told: accounts, memories, routines, contacts and voice enrollment start over; the app needs a fresh sign-up **with the same email as before** (recipes, plans and staples follow the email, §4.7.1); browser chat (jarvis-web) goes away (Q2, Q3) | message sent |
+| G5 | Users told: they sign in again once with their old email and password (accounts, memories, routines and contacts are imported since ID6r, §4.3a); voice enrollment starts over; browser chat (jarvis-web) goes away (Q2, Q3) | message sent |
 | G6 | Off-LAN access decision made (Q1) | answer recorded |
 | G7 | Pre-flight §3 done within 24 h: backups written and readable, ≥ 40 GB free on `/`, `sudo` works | §3 checklist |
 | G8 | A 2-hour window when nobody needs voice, chat, push or phone | — |
@@ -254,7 +256,7 @@ If something on that list must keep running (go2rtc, Q7), start it again after �
 ```sh
 cd /tmp
 curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/<tag>/install.sh
-less install.sh                                     # read it; it is ~300 lines
+less install.sh                                     # read it; it is ~420 lines
 sh install.sh --version <tag> --stop-legacy         # prompts for sudo
 ```
 
@@ -272,7 +274,7 @@ Expected, in order (no firewall prompt: ufw is disabled, so doctor has nothing t
    (groups `video`, `render`), `/var/lib/jarvisd` 0700, `/etc/jarvisd/jarvisd.env` 0640 root:jarvisd,
    `/etc/systemd/system/jarvisd.service`, enabled and started; waits for `/health` (A10: 4 s in total).
 5. `jarvisd doctor` with every check OK, `jarvisd <tag> is running.`, and the setup link
-   `http://10.0.0.107:7710/setup#token=…`.
+   `http://<server-ip>:7710/setup#token=…`.
 
 Check:
 
@@ -303,6 +305,7 @@ read `~/.jarvis` (ProtectHome) so the compose `.env` is handed over in a 0700 di
 ```sh
 sudo jarvisd service stop
 docker start jarvis-postgres                         # restart policy stays "no" (from --stop-legacy)
+until docker exec jarvis-postgres pg_isready -q; do sleep 1; done   # wait until it accepts connections
 L=/var/lib/jarvisd/legacy-compose
 sudo install -d -m 0700 -o jarvisd -g jarvisd $L
 sudo install -m 0400 -o jarvisd -g jarvisd ~/.jarvis/compose/.env $L/.env
@@ -311,18 +314,23 @@ sudo -u jarvisd jarvisd import-legacy --home /var/lib/jarvisd --compose $L --app
 sudo rm -rf $L
 docker stop jarvis-postgres
 sudo jarvisd service start && sudo jarvisd service status --wait 60s
-sudo jarvisd setup-link     # "Finish setup in a browser: sign in at http://10.0.0.107:7710/ …"
+sudo jarvisd setup-link     # "Finish setup in a browser: sign in at http://<server-ip>:7710/ …"
 ```
 
 Expected from `--apply`: the §3.7 numbers (plus whatever changed since), "superusers: id … (masked)",
 "imported: committed in one transaction", "removed the old setup token", and the log path
 (`/var/lib/jarvisd/import-legacy-<time>.log`, 0600, names users by email). Any REFUSED or FAILED row: nothing
 was written; fix or decide, re-run. To start over clean instead: `sudo jarvisd service stop`, move
-`/var/lib/jarvisd/jarvis.db*` aside, `sudo jarvisd service start`, and follow the old Account path.
+the database aside (`sudo sh -c 'for f in /var/lib/jarvisd/jarvis.db*; do mv "$f" "$f.aside"; done'`: the
+glob must expand as root, the home is 0700), `sudo jarvisd service start`, and follow the old Account path.
+
+**If someone opened the setup link before the import** (an account now exists, so the import refuses a
+non-fresh database; this happened on prod): stop jarvisd, move the database aside as above, start jarvisd
+once so it recreates an empty one, then run this section from the top.
 
 ### 4.4 Wizard: sign in → Hardware (5 min)
 
-From a LAN laptop, open `http://10.0.0.107:7710/` and sign in with your legacy superuser account and its
+From a LAN laptop, open `http://<server-ip>:7710/` and sign in with your legacy superuser account and its
 old password. Setup is closed (an imported superuser exists), so there is no Check or Account step: the
 wizard resumes at **Hardware** (`setup.completed` is still false). A legacy superuser flagged
 `must_change_password` sets a new password first.
@@ -416,6 +424,7 @@ Take the hostnames from `$BK/legacy-services.txt` (§3.4). Drop the legacy `:443
 | jarvis-command-center | `https://<command-center hostname>` | `localhost:7703` |
 | jarvis-notifications | `https://<notifications hostname>` | `localhost:7712` |
 | jarvis-ocr-service | `https://<ocr hostname>` | `localhost:7031` |
+| jarvis-recipes-server | `https://<recipes hostname>` | `localhost:7030` (recipes is a jarvisd module now) |
 | jarvis-mqtt-broker | `wss://<mqtt hostname>` (legacy `wss …:443`) | `localhost:9883`, jarvisd's MQTT WebSocket port |
 
 - The config-service row is required: the public host a client connects to is how jarvisd knows the
@@ -551,7 +560,7 @@ registration" or "household not imported" in the report).
 ### 4.9 Phones (each user, 5 min)
 
 On the LAN the app finds jarvisd by mDNS (`_jarvis-config._tcp`) or by the manual config URL
-`http://10.0.0.107:7700`. Off the LAN, use the config service's public hostname. Either way, once §4.6.1
+`http://<server-ip>:7700`. Off the LAN, use the config service's public hostname. Either way, once §4.6.1
 is done, the app is handed the public URLs, so it keeps working when the phone leaves the house. Each user: sign in again with their legacy email and password (accounts, households and roles were
 imported; legacy tokens were not), allow notifications so the app registers its push token, pick their
 node for chat.
@@ -559,8 +568,8 @@ Voice profiles are not imported: optional re-enrollment, then the superuser turn
 (it carries over where a household had turned it on) (admin Settings,
 `voice.recognition_enabled`; threshold 0.43 default, not prod's 0.49).
 
-Lost and re-entered by hand: memories (49), routines (2; default routines seed themselves per household,
-D44), phone contacts (2) and per-user call context, devices/rooms (7/8), household location.
+Not carried over by the import (ID6r): voice profiles (re-enroll). Memories, routines, contacts, devices,
+rooms and changed household settings come over (§4.3a; [legacy-import.md](legacy-import.md) §4).
 
 ### 4.10 Phone calls (Twilio, AD6) (10 min; only if phone stays, Q6)
 
@@ -599,8 +608,8 @@ Ingress changes, in `~/.cloudflared/jarvis-services.yml` (backup in §3.4), then
 - **Phone media:** jarvisd serves Twilio Media Streams on the CC listener at `/phone/media/`. The legacy
   gateway used 7713. Point the phone hostname at `http://localhost:7703` (§4.10 step 2), or use the CC
   hostname in `JARVIS_PHONE_PUBLIC_URL`. Either way 7713 has nothing behind it.
-- **Dead targets:** hostnames for 7708 (settings-server), 7713 (unless re-pointed), 7722 (jarvis-web) and
-  7030 (recipes) now return errors. Remove them, or leave them until the rollback window closes.
+- **Dead targets:** hostnames for 7708 (settings-server), 7713 (unless re-pointed) and 7722 (jarvis-web)
+  now return errors (7030 is jarvisd's recipes module now: keep it). Remove them, or leave them until the rollback window closes.
 - **Exposure:** the tunnel still publishes 7702 logs, 7704 LLM, 7710 admin and SSH, as Q1 noted. Nothing
   in this runbook needs them from off the LAN. Dropping them is a separate tidy-up.
 
@@ -672,7 +681,7 @@ voice turn ok; `nvidia-smi` steady (no engine restarts: `sudo jarvisd service st
 
 **Day 1:**
 
-- Every user signed up again; kitchen household has both members; push tokens ≥ the number of phones.
+- Every user signed in again (accounts are imported); kitchen household has both members; push tokens ≥ the number of phones.
 - Voice turns per day in the same range as legacy (13 transcripts in the 7 days before).
 - No WARN storm from a forgotten node (F17); if one appears, re-point that node or tell its owner.
 - Memory extraction running on background (Logs, cc module).
@@ -707,7 +716,7 @@ Things the read-only survey could not settle. Each has a recommendation.
 | Q6 | **Phone calls**: keep at cutover (needs Twilio settings + tunnel change, §4.10) or turn on later? | Later, as a follow-up, unless someone relies on it. |
 | Q7 | **go2rtc** (cameras, deferred D29) is in the legacy compose project `jarvis`, so `--stop-legacy` now stops it with the rest (nothing on jarvisd uses it; the legacy CC that did is stopped too). Start it again after the install (§4.2), or leave it off? | Leave it off; nothing consumes it until cameras land. |
 | Q8 | **Privacy step** values not read from prod: reader proxy (`web_scraping.allow_external`) and update checks. | Update checks on (needed for `jarvisd upgrade --check` in the admin); reader proxy as prod had it (tell me). |
-| Q9 | Legacy had **2 superusers**. Does the second one need superuser on jarvisd? (Needs `jarvisd admin-token create auth` + `PUT /admin/users/{id}/superuser`, ID4.) | Only if they use the admin. |
+| Q9 | Legacy had **2 superusers**. Does the second one need superuser on jarvisd? (Needs `jarvisd admin-token create auth` + `PUT /admin/users/{id}/superuser`, ID4; that command was never built, and ID6r imports the second superuser as one.) | Only if they use the admin. |
 | Q10 | When may the legacy stack be **removed** (containers, 150 GB of models, 16 GB ollama volume)? | Two stable weeks, then ask again. |
 | Q11 | ~~Memories (49) and inbox (100) are lost under ID6.~~ Superseded by ID6r (2026-10-09): `import-legacy` carries them over (§4.3a). | — |
 

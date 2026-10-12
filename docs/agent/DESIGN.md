@@ -1,6 +1,8 @@
 # jarvis-agent: the desktop node (POC)
 
-Status: proof of concept, 2026-10-09. Not for the next release. **Moved into jarvis-server on
+Status: written as a proof of concept on 2026-10-09. Since then the agent has grown desktop voice,
+browser control (§10), the island (§11) and read-the-screen (§12); it is still pre-release and is
+not in the jarvisd release archives (build it from source, see the README). **Moved into jarvis-server on
 2026-10-10** (from `jarvis-host-agent`, PR #1 there). Paths in this doc are relative to the old
 repo: `internal/X` is now `internal/agent/X`, `deploy/` is `internal/agent/deploy/`, and
 `scripts/dev-run.sh` is `scripts/agent-dev-run.sh`. The binary is still `cmd/jarvis-agent`.
@@ -23,7 +25,8 @@ appears in the household's node list, and offers the host-agent capabilities as 
 | `desktop_close_window` | `windows.close` | wmctrl -c | AXCloseButton | WM_CLOSE |
 
 Plus the `browser_*` tools (§10), offered while the Jarvis Browser Control extension is
-connected. Function names can't contain dots, so tool names don't spell the capability names; each maps
+connected, `desktop_read_screen` (§12; Hyprland/sway and macOS), and `get_current_time`, served
+on every Go node ([go-pi-node.md §3.12](go-pi-node.md)). Function names can't contain dots, so tool names don't spell the capability names; each maps
 to exactly one. A tool is offered only while its capability is available, computed per
 `report_tools`.
 
@@ -248,7 +251,8 @@ packages may assume the sidecar but not audio in/out.
 7. **Windows on real hardware.** The WASAPI float argument relies on the amd64 runtime mirroring
    integer registers into XMM; arm64 Windows is unverified, as is the foreground lock in
    focus. *Recommend:* one manual pass on a Windows box before anything ships.
-8. **Repo and naming.** *Recommend:* rename the repo to `jarvis-agent` when it graduates. Move
+8. **Repo and naming.** (Superseded 2026-10-10: the agent moved into jarvis-server as
+   `cmd/jarvis-agent`, with `internal/node` as `internal/agent/node`.) *Was:* rename the repo to `jarvis-agent` when it graduates. Move
    `internal/node` to an importable package only when the Go Pi node actually starts.
 9. **Supervisor installers.** Templates exist; installers don't. *Recommend:* a
    `jarvis-agent service install|uninstall` subcommand that writes the user-scoped unit,

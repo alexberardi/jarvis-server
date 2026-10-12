@@ -24,7 +24,7 @@ The legacy `settings` table here was `timestamptz` (other services used naive `t
 
 ## Setting keys
 
-From `jarvis-ocr-service/app/services/settings_definitions.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-ocr-service/app/services/settings_definitions.py` (the input for the module's settings `Definitions`; the built set is in `internal/modules/ocr/ocr.go`). `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|

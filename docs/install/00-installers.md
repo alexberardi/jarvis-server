@@ -1,13 +1,19 @@
 # install 00 — installers, service registration, upgrades (Phase 6)
 
-Sources (read-only):
+> **Design doc, written before implementation (2026-10-07).** Most of it is now built: §8.1–§8.4 say
+> what was actually built and win wherever they differ from §0–§7. The installers are
+> `scripts/install.sh` and `scripts/install.ps1` (their headers list the flags); `jarvisd --help`
+> lists the subcommands. Short "(built: …)" notes below mark design statements that are now done or
+> were dropped.
 
-- `/home/alex/jarvis/jarvis-installer` (the browser wizard that generates compose bundles)
-- `/home/alex/jarvis/jarvis-admin/install.sh` and `install.ps1` (the admin binary's installers)
-- `/home/alex/jarvis/jarvis` (the `./jarvis` dev/ops CLI, a 3564-line bash script)
-- `/home/alex/jarvis/jarvis-node-setup/install.sh` (the Pi node's release-tarball installer)
+Sources (read-only), in the legacy umbrella checkout (`<umbrella>/`):
 
-Legacy paths are relative to `/home/alex/jarvis/`. Paths starting with `cmd/`, `internal/`, `docs/` or
+- `<umbrella>/jarvis-installer` (the browser wizard that generates compose bundles)
+- `<umbrella>/jarvis-admin/install.sh` and `install.ps1` (the admin binary's installers)
+- `<umbrella>/jarvis` (the `./jarvis` dev/ops CLI, a 3564-line bash script)
+- `<umbrella>/jarvis-node-setup/install.sh` (the Pi node's release-tarball installer)
+
+Legacy paths are relative to `<umbrella>/`. Paths starting with `cmd/`, `internal/`, `docs/` or
 `.github/` are in this repo.
 
 Decisions being implemented: PLAN §3.4 (one file per OS; "install scripts: `install.sh` for
@@ -36,7 +42,7 @@ Everything the legacy tooling does falls into four buckets, and three of them di
 
 **Recommendation in one paragraph.** The install scripts stay tiny (~150 lines each): detect OS/arch,
 download the archive and `SHA256SUMS` from the GitHub release, verify, place the binary, and hand off to
-**`jarvisd service install`**, a new subcommand that writes the systemd unit, the launchd plist or the
+**`jarvisd service install`** (built, §8.1), a subcommand that writes the systemd unit, the launchd plist or the
 Windows SCM registration in Go, tested on all four CI runners. The scripts then run `jarvisd doctor`,
 offer `jarvisd doctor --fix` for the firewall, and print the admin URL with the setup token (AQ2).
 jarvisd itself generates every secret on first start; the installer writes **no secrets**. Service data
@@ -89,7 +95,7 @@ autostart → success (`install.sh:318-330`).
 | macOS: **LaunchAgent** `~/Library/LaunchAgents/com.jarvis.admin.plist`, legacy `launchctl unload/load` | `:208-266` | **CHANGE.** LaunchDaemon with `UserName` (§2.2), `launchctl bootstrap/bootout`. |
 | TrueNAS / fallback: `nohup`; fallback writes into `~/.jarvis/logs` without creating it (fails under `set -e`) | `:144-173,268-274` | **CUT.** No unsupervised mode in the installer; `jarvisd serve` in a terminal is the manual path. |
 | End message: `http://localhost:7711` | `:278-288` | **CHANGE.** Print `http://<lan-ip>:7710/setup#token=…` (AQ2) and the doctor result. |
-| Not present: checksum, firewall, port-conflict check, uninstall, Gatekeeper, elevation | (agent survey) | **NEW** for all of them (§2, §4, §6). |
+| Not present: checksum, firewall, port-conflict check, uninstall, Gatekeeper, elevation | (agent survey) | **NEW** for all of them (§2, §4, §6). (Built: §8.3, §8.4.) |
 
 ### 1.3 jarvis-admin `install.ps1` (137 lines)
 
@@ -118,10 +124,10 @@ The CLI assumes sibling repo checkouts (`jarvis:26,656`) and keeps state in `~/.
 | `start --all`: tiered `docker compose up`, 60 s health waits, then `_auto_register` writing `JARVIS_APP_KEY` into each `.env`, then force-recreate | `:2479-2626,2284-2477` | **CUT.** jarvisd self-registers its listeners (`cmd/jarvisd/main.go:79-85,111-118`). |
 | `stop`, `restart`, `rebuild` | `:2709,3515,3520` | **CHANGE.** `jarvisd service stop/start/restart` wrapping systemctl/launchctl/SCM. |
 | `status`, `health` (curl each `/health`) | `:2750,2782` | **CHANGE.** `jarvisd service status` (supervisor state + `GET :7700/health`) and `jarvisd doctor`. |
-| `logs <svc>` (`docker compose logs -f`, or `tail -f` local logs) | `:2808-2843` | **CHANGE.** `jarvisd logs [-f] [--module X]` reading the logs module's store (also the admin Logs page, AQ9); the supervisor log (journald / launchd file / Windows file) for crashes before the store opens. |
+| `logs <svc>` (`docker compose logs -f`, or `tail -f` local logs) | `:2808-2843` | **CHANGE.** `jarvisd logs [-f] [--module X]` reading the logs module's store (also the admin Logs page, AQ9); the supervisor log (journald / launchd file / Windows file) for crashes before the store opens. (Not built: no `jarvisd logs`; use the admin Logs page and the supervisor log, which `install.sh` names at the end.) |
 | `llm-setup` wizard: hardware probe, `huggingface_hub` download, settings PUT, restart | `:1204-1957` | **CUT.** Model manager + admin Models step (LD3, AQ3). |
-| `doctor`: tool versions, postgres/redis/minio pings, `.env` presence, admin-token and JWT-secret consistency across `.env` files, `ss -tlnp` port conflicts, health | `:2861-3040` | **CHANGE.** `jarvisd doctor` (exists, `internal/doctor`) keeps the two checks that still mean something: listeners and port conflicts, plus the host firewall it already reads. A "legacy stack still running" check is NEW (§5.2). |
-| `add-service` (register in config + create an app client + write `.env`) | `:3329-3418` | **CHANGE.** Admin Connections page (AQ7); optionally `jarvisd app-client create` for scripts. |
+| `doctor`: tool versions, postgres/redis/minio pings, `.env` presence, admin-token and JWT-secret consistency across `.env` files, `ss -tlnp` port conflicts, health | `:2861-3040` | **CHANGE.** `jarvisd doctor` (exists, `internal/doctor`) keeps the two checks that still mean something: listeners and port conflicts, plus the host firewall it already reads. A "legacy stack still running" check is NEW (§5.2; built, §8.3). |
+| `add-service` (register in config + create an app client + write `.env`) | `:3329-3418` | **CHANGE.** Admin Connections page (AQ7); optionally `jarvisd app-client create` for scripts (not built). |
 | `test`, `pantry` | `:3210`, `:3552` | **CUT** from the server CLI (dev tooling). |
 | Absent: upgrade, uninstall, reset, firewall | (survey) | **NEW** (§4, §6). |
 
@@ -156,7 +162,7 @@ This is the best installer in the tree, and most of its upgrade discipline carri
 `tokens.env`, `admin.json`, `.models/` holding 150 GB on prod, `docs/llm/05-models-and-downloads.md:63`),
 `/var/lib/jarvis` (compose-export default, `jarvis-installer/src/context/WizardContext.tsx:20`), the
 service names `jarvis-admin`/`com.jarvis.admin`, and on prod a login user called `jarvis`. jarvisd's
-default `JARVIS_HOME` is `~/.jarvis` (`internal/platform/config/config.go:76-82`), which shares a directory
+default `JARVIS_HOME` was `~/.jarvis` when this was written (now `~/.jarvisd`, I1), which shared a directory
 with all of that. Sharing is not a file clash today (jarvisd writes `jarvis.db`, `blobs/`, `engines/`,
 `models/`, `lib/`), but a legacy `rm -rf ~/.jarvis` "reset" would take jarvisd's DB with it, and an
 uninstall `--purge` of jarvisd would take the legacy stack's models. The dev box already runs from
@@ -174,7 +180,7 @@ uninstall `--purge` of jarvisd would take the legacy stack's models. The dev box
 
 IQ1 asks whether this is the right account and directory model; the table is the recommendation.
 
-**The env file is read by jarvisd itself (NEW, I1).** Today jarvisd reads only the process environment
+**The env file is read by jarvisd itself (NEW, I1; built, §8.1).** Before I1 jarvisd read only the process environment
 (`cmd/jarvisd/main.go:47-77`, `config.go:70-72`), so the dev box needs `run.sh` to `source` an env file. A
 service unit could use `EnvironmentFile=`, but then `jarvisd doctor` run from a shell would not see the
 same ports, and launchd/SCM have no equivalent. Rule: resolve the home (`--home` flag, else
@@ -183,10 +189,10 @@ same ports, and launchd/SCM have no equivalent. Rule: resolve the home (`--home`
 in the process environment**. The service definitions then carry only `--home`. A fresh install writes an
 env file containing comments only: it needs no variables at all (§3).
 
-**Changing the code default** from `~/.jarvis` to `~/.jarvisd` (I1) keeps a bare `jarvisd serve` off the
+**Changing the code default** from `~/.jarvis` to `~/.jarvisd` (I1, built) keeps a bare `jarvisd serve` off the
 legacy directory too. Docs that say `~/.jarvis` (decision log, `docs/llm/06` paths) mean "the data dir".
 
-**File permissions (gap found).** The decision log says the DB is "0600 under `~/.jarvis`", but nothing
+**File permissions (gap found; fixed in I1, §8.1).** The decision log says the DB is "0600 under `~/.jarvis`", but nothing
 enforces it: `db.Open` creates only the directory 0700 and only if missing (`internal/platform/db/db.go:31`),
 and on this box `~/.jarvisd/jarvis.db`, `-wal` and `-shm` are `-rw-r--r--`. The DB holds the RS256
 private key (`internal/modules/auth/keys.go:58-60`), password hashes and, after AQ6, Twilio secrets. I1
@@ -249,7 +255,8 @@ says so when it fails, unlike the admin installer which swallowed the error at `
 firewall fix still needs sudo once.
 
 **Upgrades** replace `/usr/local/bin/jarvisd` while the service is stopped (§4). **Uninstall**:
-`jarvisd service uninstall` disables and removes the unit, removes the binary and `jarvisd.prev`, removes
+`jarvisd service uninstall` disables and removes the unit, removes the binary and `jarvisd.prev` (built: the
+scripts' `--uninstall` removes the binaries, §8.3), removes
 the firewall rules it added (§6.1, identified by the `jarvisd` comment), and keeps `/var/lib/jarvisd` and
 `/etc/jarvisd` unless `--purge` (§4.4).
 
@@ -269,7 +276,7 @@ own supervisor", printing the one-line command.
 | Runs without anyone logged in | No (a Mac mini server after a power cut sits dead until someone logs in) | Yes |
 | Needs admin at install | No | Yes (one `sudo`) |
 | **Local Network privacy** (macOS 15+; mDNS advertisement and outbound LAN connections such as Home Assistant or a remote GPU satellite) | Subject to it: a prompt that a background agent may never surface, so mDNS silently fails | Exempt: Apple TN3179 lists launchd daemons among the processes local network privacy doesn't apply to (**verify in I0**) |
-| Metal | Works (the MBP runs it today from a terminal) | Expected to work for compute; **verify in I0** on the MBP |
+| Metal | Works (a dev Mac runs it today from a terminal) | Expected to work for compute; **verify in I0** on a Mac (done: [I0-results.md](I0-results.md), A10e) |
 | Application firewall | Prompts per binary; a background agent can't answer | Same; the installer adds the binary with `socketfilterfw --add` (§6.1) |
 
 **Recommendation: a LaunchDaemon running as the installing user** (`UserName` = `$SUDO_USER`), data in
@@ -278,16 +285,16 @@ Mac and makes models and logs harder to find.
 
 ```xml
 <key>Label</key><string>net.jarvisautomation.jarvisd</string>
-<key>UserName</key><string>alex</string>
+<key>UserName</key><string>USER</string>
 <key>ProgramArguments</key><array>
   <string>/usr/local/bin/jarvisd</string><string>serve</string>
-  <string>--home</string><string>/Users/alex/.jarvisd</string></array>
+  <string>--home</string><string>/Users/USER/.jarvisd</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>  <!-- restart unless it exits 0 (AD8b) -->
 <key>ProcessType</key><string>Interactive</string>   <!-- no background throttling of a GPU server -->
 <key>Umask</key><integer>63</integer>                <!-- 077 -->
 <key>SoftResourceLimits</key><dict><key>NumberOfFiles</key><integer>65536</integer></dict>
-<key>StandardErrorPath</key><string>/Users/alex/.jarvisd/logs/jarvisd.log</string>
+<key>StandardErrorPath</key><string>/Users/USER/.jarvisd/logs/jarvisd.log</string>
 ```
 
 Loaded with `launchctl bootstrap system <plist>` and `launchctl enable system/net.jarvisautomation.jarvisd`
@@ -399,7 +406,7 @@ From every `os.Getenv` in `cmd/jarvisd/main.go` and `phone.go`, plus the legacy 
 | `JARVIS_MDNS` | `main.go:48` | advertise | — | Bootstrap env. |
 | `JARVIS_HOME`, `JARVIS_HOST`, `JARVIS_PORT_*` | `config.go:65-97` | defaults | — | Bootstrap env; `--home` flag added (I1). |
 | `JARVIS_BLOB_STORE`, `JARVIS_LOG_LEVEL`, `JARVIS_ADMIN_UI_DIR` | `main.go:253,267,77` | defaults | — | Bootstrap/dev env. |
-| Setup token (AQ2) | NEW | — | — | jarvisd writes `<home>/setup-token` (0600) on first start while no superuser exists; the installer reads and prints it. |
+| Setup token (AQ2) | NEW (built) | — | — | jarvisd writes `<home>/setup-token` (0600) on first start while no superuser exists; the installer prints it through `jarvisd setup-link` (§8.3). |
 | Postgres/Redis/MinIO/Grafana/MQTT passwords, `MODEL_SERVICE_TOKEN`, `LLM_PROXY_INTERNAL_TOKEN`, `JARVIS_ADAPTER_CALLBACK_TOKEN`, `RELAY_JWT_SECRET`, `DEFAULT_HOUSEHOLD_ID` | — | — | `./jarvis:578-599`, `secret-generator.ts:11-42` | **CUT.** No such components (in-process calls; per-node MQTT creds, D4; "My Home" household created at setup, `internal/modules/auth/tokens.go:338`). |
 
 ### 3.2 Rule: the installer generates nothing
@@ -407,7 +414,7 @@ From every `os.Getenv` in `cmd/jarvisd/main.go` and `phone.go`, plus the legacy 
 Everything that must exist is generated by jarvisd on first start, inside the DB or its home, at 0600:
 
 - the RS256 key (done),
-- the setup token (AQ2),
+- the setup token (AQ2; built, `jarvisd setup-link` prints it),
 - ~~jarvisd's own app client (I3)~~ done 2026-10-08 (`auth.SelfAppCreds`, key in `<home>/app-key`),
 - the install ID used by the update check's `User-Agent` (if AQ5 wants one; optional).
 
@@ -420,7 +427,7 @@ rotates a key by accident.
 
 | Secret | Store | Permissions |
 |---|---|---|
-| Signing key, password hashes, app-client hashes, setup token hash, Twilio (AQ6), HF token (`llm.hf_token`) | `<home>/jarvis.db` | 0600, home 0700 (I0 enforces) |
+| Signing key, password hashes, app-client hashes, setup token hash, Twilio (AQ6), HF token (`llm.hf_token`) | `<home>/jarvis.db` | 0600, home 0700 (I1 enforces) |
 | Setup token plaintext (until the superuser exists, then deleted) | `<home>/setup-token` | 0600 |
 | Optional env overrides (admin tokens if IQ4 (a), legacy `AUTH_SECRET_KEY` before I7) | `jarvisd.env` | Linux system 0640 root:jarvisd; others 0600 / ACL |
 
@@ -438,7 +445,8 @@ helper does it for the system unit, and the health gate runs inside the new jarv
 
 - **Default channel: latest non-prerelease** via `https://github.com/alexberardi/jarvis-server/releases/latest/download/<asset>`
   (a redirect; no API call, no rate limit). `--version vX.Y.Z` pins; `--channel pre` picks the newest
-  prerelease through the API (prereleases are marked by `release.yml:145`).
+  prerelease through the API (prereleases are marked by `release.yml:145`). *(Built without `--channel`:
+  a script fetched from a release's own URL installs that release, prerelease or not; §8.3.)*
   *A10b R1:* the documented command is `curl -fsSLo install.sh …/releases/latest/download/install.sh && sh install.sh`
   (download, then run: piped, a 404 ran an empty script and exited 0). While only release candidates
   exist, `releases/latest` 404s; an rc is installed from its own URL (`releases/download/<tag>/install.sh`,
@@ -447,7 +455,7 @@ helper does it for the system unit, and the health gate runs inside the new jarv
 - **Verify `SHA256SUMS`** (`release.yml:78`): `sha256sum -c --ignore-missing` / `shasum -a 256` on macOS /
   `Get-FileHash` on Windows. Missing or mismatched is fatal. Both files come over TLS from the same
   origin, so this guards against truncation and mirror corruption, not a compromised release.
-- **Signature (admin AQ5 b).** Add `SHA256SUMS.minisig` to the release, signed with the existing project
+- **Signature (admin AQ5 b; built, §8.2).** Add `SHA256SUMS.minisig` to the release, signed with the existing project
   key (`jarvis-node-setup/install.sh:480-491`). Verify it **in Go** inside `jarvisd upgrade`: the
   *running* binary carries the public key and checks the new one before swapping, which is a real chain
   of trust; a freshly downloaded binary checking itself is not. The shell installers verify the
@@ -461,7 +469,8 @@ helper does it for the system unit, and the health gate runs inside the new jarv
 
 1. Preflight: new version > installed (else exit 0 unless `--force`); free disk ≥ 2 × DB size + 200 MB.
 2. **Snapshot the DB**: `jarvisd backup --to <home>/backups/jarvis-<oldver>-<ts>.db` using SQLite
-   `VACUUM INTO` (online and consistent, works with jarvisd running). Keep the last 3. Models, engines
+   `VACUUM INTO` *(built inside `jarvisd upgrade` instead, `<home>/backups/<db>-<fromver>-<UTC>.db`;
+   there is no `jarvisd backup` command, §8.2)* (online and consistent, works with jarvisd running). Keep the last 3. Models, engines
    and blobs are not copied (immutable or re-downloadable; blobs are append-mostly).
 3. Stop the service (`systemctl stop` / `launchctl bootout` / `Stop-Service`; wait for exit so Windows
    releases the exe lock and engines are drained).
@@ -484,7 +493,7 @@ one-shot `launchctl submit`; on Windows a one-shot scheduled task. That is why A
 - goose runs every module's migrations at start (`internal/platform/module/runner.go:69`), with
   out-of-order allowed (`internal/platform/db/migrate.go:30`, decision log 2026-10-07). So an upgrade
   needs no separate migrate step, and `jarvisd migrate status` shows the state.
-- **Downgrade guard (NEW, I5).** An older binary started on a DB that a newer one migrated has unknown
+- **Downgrade guard (NEW, I5; built, §8.2: `serve` refuses, `serve --allow-downgrade` overrides).** An older binary started on a DB that a newer one migrated has unknown
   versions in `goose_<module>`. What goose's provider does then is unverified; jarvisd should refuse to
   start with "this database was upgraded by vX; restore `<home>/backups/…` or install vX" rather than run
   against a schema it doesn't know. Hence the snapshot in step 2.
@@ -522,6 +531,13 @@ no cgo) and the transforms in `docs/schema`.
 
 Recommended scope (IQ6): **import identity and user data, not models or engine settings.**
 
+*Built 2026-10-09 (ID6r, PR #21) and used for the prod cutover; [legacy-import.md](legacy-import.md) §7
+is the reference and differs from the sketch below: the command is `jarvisd import-legacy (--compose DIR
+| --from postgres://…) [--apply]` (a dry run unless `--apply`), it refuses unless every table it writes
+is empty (a jarvisd that started once is fine) and while jarvisd answers on the home, legacy JWT keys
+are **not** imported (apps sign in once again; passwords and node keys still verify), and blobs are not
+copied (recipe photos come over with `jarvisd import-recipes`).*
+
 - `jarvisd import-legacy --from postgres://… [--dry-run]` runs **before the first `serve`** on an empty
   home (it refuses a DB with a superuser), reads each legacy DB at alembic head and writes the module
   tables. Auth includes node rows and keys and both legacy JWT keys (sessions survive, decision log
@@ -531,7 +547,7 @@ Recommended scope (IQ6): **import identity and user data, not models or engine s
 - Blobs: copied from MinIO/SeaweedFS via S3 GET (PLAN §5).
 - The admin wizard then sees a superuser and skips Account (admin §3.3 `/api/setup/state`), and Models
   runs exactly as on a fresh install, which is the pain LD5 wants to see.
-- The installer does not run it: it prints the command when it detects a legacy stack (§5.2).
+- The installer does not run it. (Built: it does not print the command either; the runbook does.)
 
 ### 5.2 Coexistence on one box
 
@@ -543,22 +559,22 @@ jarvisd uses the same ports as the legacy stack by design (`config.go:29-42`): 7
 serving, any one clash stops jarvisd from starting at all (`runner.go:105-108`), which is good: it never
 half-runs next to legacy.
 
-Installer preflight (I6):
+Installer preflight (I6; built into `install.sh`/`install.ps1` and doctor, §8.3):
 
 1. **Detect legacy**: running containers named `jarvis-*` (`docker ps --format '{{.Names}}'` when docker
    exists), `~/.jarvis/compose` or `~/.jarvis/tokens.env`, and any jarvisd port held by a process that is
    not jarvisd (`ss -ltnp` / `lsof -iTCP -sTCP:LISTEN` / `Get-NetTCPConnection`).
 2. If found, stop and explain, offering:
-   - `--stop-legacy`: `docker compose stop` in the detected project directory (**stop, never `down -v`**;
+   - `--stop-legacy`: stop the legacy containers (built as `docker update --restart=no` + `docker stop`; **stop, never `down -v`**;
      data stays for `import-legacy` and for rolling back to legacy), and disable its restart policy so a
      reboot doesn't bring it back;
    - or exit, printing the import command and how to stop legacy by hand.
 3. Side-by-side on alternate ports is a developer case only (`JARVIS_PORT_*`, `JARVIS_MQTT_*`, as the
-   MBP contract runs did); the installer does not offer it, since nodes and phones only ever find one
+   contract runs on a dev Mac did); the installer does not offer it, since nodes and phones only ever find one
    config service per host.
 
-`jarvisd doctor` gains the same "another program holds port N" check (today it only reports "nothing
-answers", `internal/doctor/doctor.go:92-96`, which is wrong when *legacy* answers).
+`jarvisd doctor` gains the same "another program holds port N" check (built: the `ports` check, §8.3;
+before it only reported "nothing answers", which is wrong when *legacy* answers).
 
 Rollback to legacy after a cutover: stop jarvisd (`jarvisd service stop`), `docker compose start`. The
 legacy data was never modified by the import.
@@ -578,16 +594,16 @@ Install flow:
 
 1. After the service starts, the installer runs `jarvisd doctor --json` (as the invoking user; ufw files
    are world-readable, `firewall.go:42`).
-2. If a firewall check fails or warns, **ask** "Allow nodes and phones on 10.0.0.0/24 to reach jarvisd?
+2. If a firewall check fails or warns, **ask** "Allow nodes and phones on <your LAN, e.g. 192.168.1.0/24> to reach jarvisd?
    [Y/n]" and run `sudo jarvisd doctor --fix` (Windows: already elevated). Non-interactive (`curl | sh`
    without a TTY, CI): apply only with `--yes`; otherwise print the fix. IQ5.
-3. `--fix` is NEW (I2): doctor applies its own `FixFor` instead of printing it. The fix becomes a list of
+3. `--fix` is NEW (I2; built, §8.3): doctor applies its own `FixFor` instead of printing it. The fix becomes a list of
    argv commands in the `Check` (`fix_cmds` in JSON) so neither the scripts nor the admin parse
    human text. It refuses to run without privileges and only ever admits **private LAN subnets**
    (`LocalLANs`, `doctor.go:163-188`), never `0.0.0.0/0`.
 4. Rules are tagged (`comment jarvisd` in ufw, rule name `jarvisd` in netsh) so uninstall can remove them.
 
-New doctor checks for install (I2): port held by another program (§5.2), Windows network profile is
+New doctor checks for install (I2; built except "unsupervised", §8.3): port held by another program (§5.2), Windows network profile is
 Public (§2.3), DB/home permissions (§2.0), macOS sleep on AC (§2.2), legacy stack running (§5.2), "running
 unsupervised" (info only).
 
@@ -613,7 +629,7 @@ Offline/air-gapped install (copy engines and models from another box) is out of 
 "register an existing file" path (`docs/llm/05-models-and-downloads.md:156`) covers models.
 
 The installer **does** print what it detected cheaply (`jarvisd` itself can expose `jarvisd hardware`
-reusing the llm module's detection) so the user knows before opening the browser whether the GPU was seen
+reusing the llm module's detection; not built, and `install.sh` prints no GPU line) so the user knows before opening the browser whether the GPU was seen
 (e.g. "NVIDIA RTX 3090 ×2 (CUDA)", "Apple M2 Max (Metal)", "no GPU: CPU only, expect slow replies").
 Optional; I3.
 
@@ -710,16 +726,16 @@ parallel worktrees. I7 is independent and large.
 
 | Step | Scope | Done when |
 |---|---|---|
-| **I0** | Spike, no product code. On the MBP: jarvisd from a LaunchDaemon with `UserName` serves a Metal chat and advertises mDNS that the Android app sees (no Local Network prompt). On Windows (runner or a real box): jarvisd as a service under `NT SERVICE\jarvisd` runs llama-server on CUDA and Vulkan in session 0; engines bind loopback only; a long HF path works; mDNS seen from the app next to the DNS Client service. Record results in STATUS. | Each row has a yes/no with evidence; IQ1/IQ2 confirmed or reopened. |
+| **I0** (done, [I0-results.md](I0-results.md)) | Spike, no product code. On a Mac: jarvisd from a LaunchDaemon with `UserName` serves a Metal chat and advertises mDNS that the Android app sees (no Local Network prompt). On Windows (runner or a real box): jarvisd as a service under `NT SERVICE\jarvisd` runs llama-server on CUDA and Vulkan in session 0; engines bind loopback only; a long HF path works; mDNS seen from the app next to the DNS Client service. Record results in STATUS. | Each row has a yes/no with evidence; IQ1/IQ2 confirmed or reopened. |
 | **I1** (done, §8.1) | Bootstrap: `--home` flag; per-OS service-default home; `<home>/jarvisd.env` (and `/etc/jarvisd/jarvisd.env`) loaded for unset variables; code default `~/.jarvisd`; Unix `umask 077`, home 0700, DB files 0600 at start (the §2.0 permissions gap); `sd_notify` READY; Windows `svc.IsWindowsService` run path with stop → context cancel and file logging; `jarvisd service install|uninstall|start|stop|restart|status` for systemd (system + `--user`), launchd (daemon), SCM (`mgr`, virtual account, recovery actions, ACLs). | Unit tests for env precedence and unit/plist rendering; CI installs and starts the service on ubuntu (system unit), macos-14 (LaunchDaemon) and windows-latest (SCM), then `GET :7700/health`, then uninstalls. |
 | **I2** (done, §8.3) | Doctor for installs: `fix_cmds` in `Check`, `--fix` (privilege check, LAN-only, tagged rules), new checks (port held by another program, Windows Public profile, home/DB permissions, macOS sleep, legacy running, unsupervised). Move `doctorPorts` out of `cmd/` (shared with admin A3). | Table tests per firewall backend for generated commands; `--fix` applied on this box's ufw and removed by `service uninstall`. |
 | **I3** (done, §8.3) | `install.sh` (Linux + macOS, POSIX sh): flags `--version`, `--channel`, `--user`, `--yes`, `--stop-legacy`, `--uninstall [--purge]`, `--rollback`; arch map; download to disk + size + `SHA256SUMS` (+ minisign if present); `jarvisd service install`; doctor + offer `--fix`; print `http://<lan-ip>:7710/setup#token=…`, the detected GPU line, the doctor result, and how to see logs. jarvisd side: first-start setup token file (with admin AQ2) and jarvisd's own app client (§3.1). | CI job runs the script against the workflow's own built archive (a `--from-dir` test hook) on ubuntu and macos-14; idempotent re-run is a no-op; `--uninstall` leaves no unit/binary. |
 | **I4** (done, §8.3) | `install.ps1` (Windows PowerShell 5.1): self-elevation, TLS 1.2, `Get-FileHash`, `Unblock-File`, `%ProgramFiles%` placement + machine PATH, `jarvisd service install`, `jarvisd doctor --fix`, same printout, `-Uninstall`, `-Purge`. | CI on windows-latest under `powershell.exe` (5.1), not `pwsh`; re-run idempotent. |
 | **I5** (jarvisd side done, §8.2; script re-run path left for I3/I4) | Upgrades: `jarvisd backup` (`VACUUM INTO`, keep 3), downgrade guard at start, upgrade sequence in both scripts (stop, swap, start, health-gate, rollback incl. snapshot restore when migrations ran), `jarvisd upgrade` with in-Go minisign verify (key embedded); release workflow signs `SHA256SUMS` with the existing key (secret in repo settings). | CI: install vN-1 archive, upgrade to the built one, check data survives; a deliberately broken "release" rolls back; an old binary refuses a newer DB. |
-| **I6** | Legacy detection and coexistence in both scripts and doctor; `--stop-legacy` (compose stop + restart policy off). | Tested on this box with the legacy containers stopped/started; never runs `down`. |
-| **I7** | `jarvisd import-legacy` per `docs/schema/*.md` (pgx, dry-run, refuses a non-empty DB, blobs via S3 GET, legacy JWT keys into `auth_signing_keys` as verify-only incl. HS256 so the env var goes away). Likely split per module (auth+config, cc, notifications, blobs). | Dry run and real run against a prod snapshot restored on this box; a node and a phone from the snapshot work against the imported jarvisd without re-provisioning. |
-| **I8** | Release and docs: publish `install.sh`/`install.ps1` as release assets and at a stable URL; landing page in jarvis-installer switches to them (EXTERNAL-CHANGES row); release notes template with the one-liners; minimal container image (PLAN §3.4) for NAS users; `./jarvis init` prints a jarvisd pointer. | A fresh VM per OS installs from the published one-liner. |
-| **I9** | Fresh-install rehearsal with admin A10 (LD5): this box (CUDA), the MBP (Metal), a Windows box; then the prod cutover runbook (import, stop legacy, install, wizard Models step, re-check nodes). Log friction in STATUS. | Friction list recorded; blockers fixed or filed. **This box done 2026-10-07** ([A10-rehearsal.md](A10-rehearsal.md)). **Prod cutover runbook drafted 2026-10-07** ([cutover-runbook.md](cutover-runbook.md)): clean start (ID6), not yet run; 11 open questions for the user. |
+| **I6** (done with I2/I3, §8.3) | Legacy detection and coexistence in both scripts and doctor; `--stop-legacy` (compose stop + restart policy off). | Tested on this box with the legacy containers stopped/started; never runs `down`. |
+| **I7** (done 2026-10-09, PR #21; [legacy-import.md](legacy-import.md) §7: no blob copy, no legacy JWT keys) | `jarvisd import-legacy` per `docs/schema/*.md` (pgx, dry-run, refuses a non-empty DB, blobs via S3 GET, legacy JWT keys into `auth_signing_keys` as verify-only incl. HS256 so the env var goes away). Likely split per module (auth+config, cc, notifications, blobs). | Dry run and real run against a prod snapshot restored on this box; a node and a phone from the snapshot work against the imported jarvisd without re-provisioning. |
+| **I8** (partly: `install.sh`/`install.ps1` are release assets since rc1; only `v0.1.0-rcN` prereleases so far, so `releases/latest` 404s) | Release and docs: publish `install.sh`/`install.ps1` as release assets and at a stable URL; landing page in jarvis-installer switches to them (EXTERNAL-CHANGES row); release notes template with the one-liners; minimal container image (PLAN §3.4) for NAS users; `./jarvis init` prints a jarvisd pointer. | A fresh VM per OS installs from the published one-liner. |
+| **I9** | Fresh-install rehearsal with admin A10 (LD5): the Linux dev box (CUDA), a dev Mac (Metal), a Windows box; then the prod cutover runbook (import, stop legacy, install, wizard Models step, re-check nodes). Log friction in STATUS. | Friction list recorded; blockers fixed or filed. **This box done 2026-10-07** ([A10-rehearsal.md](A10-rehearsal.md)). **Prod cutover runbook drafted 2026-10-07** ([cutover-runbook.md](cutover-runbook.md)), switched to the legacy import (ID6r) 2026-10-09, **run on prod 2026-10-09 with `v0.1.0-rc12`** (STATUS session log). Further rehearsals: [A10b](A10b-rc1-rehearsal.md), [A10c](A10c-upgrade-rehearsal.md), [A10d](A10d-rc3-rehearsal.md), [A10e (macOS)](A10e-macos-rehearsal.md); Windows not rehearsed. |
 
 ### 8.1 I1 as built (2026-10-07)
 
@@ -1195,14 +1211,14 @@ the scripts' to remove (a running `jarvisd.exe` can't delete itself).
 it with sudo for a system home), else the admin URL. **`jarvisd help`** prints the usage and
 exits 0; the scripts grep it for an `upgrade` command.
 
-**`install.sh` (I3)** — POSIX sh, ~200 lines, shellcheck clean. Flags: `--version`, `--user`,
+**`install.sh` (I3)** — POSIX sh, ~200 lines at the time (~420 now), shellcheck clean. Flags: `--version`, `--user`,
 `--yes`, `--stop-legacy`, `--force`, `--uninstall [--purge]`, `--base-url` (or
 `JARVISD_RELEASE_BASE`: a flat directory holding `SHA256SUMS` and the archives). Flow:
 OS/arch map (Intel Mac and non-systemd Linux refused) → `SHA256SUMS` from
 `releases/latest/download/` (no API) or the tag; the archive name in it gives the version →
 if installed: same version + healthy = no-op (prints the setup link); different version and
 the installed binary lists `upgrade` = `exec [sudo] env JARVISD_RELEASE_BASE=<base or empty>
-jarvisd upgrade --version vX` **before anything else is downloaded** (the installed binary checks
+jarvisd upgrade --version vX` (run, no longer `exec`, since 2026-10-08: §8.2 "An upgrade ends with…") **before anything else is downloaded** (the installed binary checks
 the signature with its own key, free disk, snapshot, health gate, rollback; §8.2) → signature
 (fresh install, or a jarvisd too old to upgrade itself): the key is exactly
 `internal/update/key.go` `ProjectPublicKey` (no override; `TestScriptsTrustTheProjectKey` keeps
@@ -1354,7 +1370,7 @@ and onnxruntime dylibs jarvisd extracts to `<home>/lib/sherpa-<hash>/` and dlope
 upstream **ad-hoc** signatures, so without it Kokoro and speaker ID would fail to load. Not needed
 and not granted: `allow-jit` / `allow-unsigned-executable-memory` (onnxruntime's CPU kernels are
 precompiled; purego's callback trampolines are in the binary's text), `allow-dyld-environment-variables`.
-Verified: the notarized binary renders Kokoro TTS on the MBP (below). The alternative — signing the
+Verified: the notarized binary renders Kokoro TTS on a dev Mac (below). The alternative — signing the
 two dylibs with the Developer ID before embedding, which would make the entitlement unnecessary —
 needs the darwin build on a Mac; not worth it while the libraries live in the user's own data dir.
 
@@ -1382,13 +1398,13 @@ unsigned (ID9).
 **Firewall.** With a Developer ID signature the application firewall's allow entry is keyed on a
 designated requirement that is the same for every release (identifier + team), so it survives
 upgrades; the §8.2 re-admit guard stays for ad-hoc builds. (Not exercised on a real upgrade yet:
-the MBP has no passwordless sudo.)
+the dev Mac has no passwordless sudo.)
 
 **Verified (2026-10-08).** Dry run `v0.0.0-notarize1` (run 37723014237): signed, notarization
 `Accepted` in ~30 s with no issues in the log, then failed on `spctl -t execute` (the bare-binary
 rejection above). `v0.0.0-notarize2` (run 37723548277): every job green; `spctl` "accepted,
 source=Notarized Developer ID"; `SHA256SUMS.minisig` made with the shared project key and checked by
-each OS's own binary; publish skipped. On the MBP (macOS 26.1, M2 Max) from that artifact: codesign
+each OS's own binary; publish skipped. On a dev Mac (macOS 26.1, M2 Max) from that artifact: codesign
 strict valid, runtime flag, only the one entitlement; `spctl -t open` accepted as Notarized Developer
 ID; a quarantined copy runs `jarvisd version` at once, while a quarantined **ad-hoc** jarvisd
 (control) hung at exec until killed. `jarvisd serve` from the quarantined copy (throwaway home,

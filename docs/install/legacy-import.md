@@ -1,7 +1,8 @@
 # Legacy import: carrying prod's nodes, households and users over (2026-10-09)
 
 **Status: decided 2026-10-09 (ID6r, scope (c): everything in §1, §4 B and C); built 2026-10-09 as
-`jarvisd import-legacy` (§7), CLI only. The admin-wizard screen is not built; its constraints are §8.** Revisits ID6 (clean start). Trigger: with a clean start every
+`jarvisd import-legacy` (§7), CLI only, shipped in `v0.1.0-rc12` and used for the prod cutover the same
+day ([cutover-runbook.md](cutover-runbook.md) §3.7, §4.3a). The admin-wizard screen is not built; its constraints are §8.** Revisits ID6 (clean start). Trigger: with a clean start every
 legacy node is orphaned. It thinks it is provisioned, jarvisd rejects its key, it never reaches the
 broker, so it is invisible in the app and can't be updated or reset remotely; only SSH or a reflash
 recovers it (node-setup `provisioning/startup.py`: AP mode only when the `.provisioned` marker is
@@ -94,6 +95,10 @@ jarvisd import-legacy --compose ~/.jarvis/compose [--home DIR]            # dry 
 jarvisd import-legacy --compose ~/.jarvis/compose [--home DIR] --apply    # import
 jarvisd import-legacy --from postgres://USER@HOST:PORT ...                # password from PGPASSWORD
 ```
+
+On a Linux system install the home belongs to the `jarvisd` account, and root on it is refused: run
+`sudo -u jarvisd jarvisd import-legacy --home /var/lib/jarvisd …` with the service stopped (`sudo jarvisd
+service stop`), and hand the compose `.env` over in a directory that account can read (runbook §4.3a).
 
 Other flags: `--pg-addr HOST:PORT` (reach the Postgres that `--compose` found at another address: a
 container IP, an ssh tunnel), `--db KEY=NAME` (a renamed database), `--accept-head DB=HEAD`, `--log FILE`,
@@ -230,15 +235,17 @@ tells you to sign in and finish setup whenever a superuser exists but `setup.com
   - a legacy password logs in;
   - a member's `GET /api/v0/admin/nodes?household_id=` lists the node.
 
-**Dev data (this box's `jarvis-postgres`, 2026-10-09).** `--compose /home/alex/jarvis` found the source
+**Dev data (the dev box's `jarvis-postgres`, 2026-10-09).** `--compose <source checkout>` found the source
 layout. Every row of the identity graph and the user data imported with no rejections. The only skips
 were settings: seeded defaults, cut keys, `auth.algorithm` and the llm-proxy table. A jarvisd started on
 the imported scratch home came up with no errors, with setup closed and the backfilled grants in place.
 
 **Prod discovery (read-only, 2026-10-09).** `~/.jarvis/compose/.env` uses the installer layout:
 `POSTGRES_PASSWORD`, `DB_USER` and `POSTGRES_PORT`, with no `DB_NAME_*` overrides. `jarvis-postgres`
-publishes `127.0.0.1:5432`. Nothing has connected to it yet (heads, dry run). That needs an ssh tunnel
-to prod's loopback, then `--compose <copy> --pg-addr 127.0.0.1:<tunnel port>`.
+publishes `127.0.0.1:5432`. Nothing had connected to it yet (heads, dry run); that needs an ssh tunnel
+to prod's loopback, then `--compose <copy> --pg-addr 127.0.0.1:<tunnel port>`. *(Later the same day the
+dry run and the `--apply` were run on prod itself with `--compose`, as in the runbook: heads as pinned,
+0 FAILED rows.)*
 
 ## 8. The wizard screen (not built): constraints and a recommendation
 

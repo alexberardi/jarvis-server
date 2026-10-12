@@ -2,7 +2,9 @@
 
 This directory is the working spec for porting jarvis-command-center ("CC") to Go. Python is **frozen**: nothing lands in the Python repos during the migration. These docs plus the user's answers are the source of truth for Phase 5 and for CC's contract tests.
 
-Source: `/home/alex/jarvis/jarvis-command-center` (about 62k LOC, `app/`).
+**Status:** Phase 5 is done; the Go port is `internal/modules/cc/`. Behaviour sections describe the legacy Python code and stay as reference. Where jarvisd differs, the docs say so in "Changed by Dn", "jarvisd" or "As built" notes; later decisions are in [../STATUS.md](../STATUS.md)'s decision log. The Go port notes (§11) were written before the build, and file layouts there may differ from the code.
+
+Source: `jarvis-command-center` (about 62k LOC, `app/`).
 
 ## Subsystems
 

@@ -14,8 +14,8 @@ This is the Phase 3 spec for porting **jarvis-llm-proxy-api** into jarvisd's `ll
 Open questions live in [QUESTIONS.md](QUESTIONS.md).
 
 **Sources:**
-- `/home/alex/jarvis/jarvis-llm-proxy-api` at `e04d0b1`, about 25.5k lines of Python excluding tests. Prod runs this build (image revision `e04d0b13cc95`).
-- Prod (`jarvis@10.0.0.107`) and the MBP (`10.0.0.103`), both read on 2026-10-06, read-only.
+- `jarvis-llm-proxy-api` at `e04d0b1`, about 25.5k lines of Python excluding tests. Prod runs this build (image revision `e04d0b13cc95`).
+- Prod and the MBP, both read on 2026-10-06, read-only.
 
 **Decisions that apply:**
 - **PLAN §3.3:** llama-server per slot; macOS on Metal; GPUs auto-detected, always configurable, multi-GPU.
@@ -128,6 +128,9 @@ Cites are `file:line` in each caller's repo.
   - `get_conversation_status` (`llm_proxy_client.py:256`): no callers.
 
 **jarvis-recipes-server** (external add-on; stays on HTTP).
+
+> Superseded 2026-10-08: recipes is a jarvisd module and calls `llm.Service` in process (see [../recipes/00-inventory.md](../recipes/00-inventory.md)).
+
 - `jarvis_recipes/app/services/llm_client.py:366,485,611,725,862` and `url_parsing/extractors/llm.py:166`.
 - Every call is `json_object`, non-stream, mostly live. The grocery matcher uses background.
 

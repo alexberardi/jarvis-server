@@ -386,6 +386,7 @@ These are read per household unless noted. Definitions are in `services/settings
 | Key | Default | Effect |
 |---|---|---|
 | `conversation.max_turns` | 10 | Sliding history window; ≤0 disables it |
+| `cc.compaction.threshold` / `cc.compaction.hard_threshold` | 0.75 / 0.90 | **jarvisd, new (2026-10-09).** Fraction of the live endpoint's context at which a conversation (voice or chat) is compacted in the background / synchronously before the turn; see [chat-images.md](chat-images.md) §7 |
 | `model.include_thinking` | false | Sets the provider suffix to `/think` or `/no_think`. Synced onto the **shared provider object** every turn (`3047-3068`). |
 | `model.advanced_context` | false | Enables agent-context vector retrieval on the blocking path only |
 | `memory.enabled` / `memory.recall_enabled` | true / true | Gate the memory tools and memory loading. Fail **open**. |
@@ -398,6 +399,8 @@ These are read per household unless noted. Definitions are in `services/settings
 | `voice.wake_verification_mode` | `off` | `off`, `bias` or `enforce`. Unknown values become `off`. Per household and node. |
 | `voice.wake_verification_phrase` | `jarvis` | Fuzzy-match target |
 | `voice.followup_doubt_max_rounds` | 2 | Doubt wrap-up cap; ≤0 uses the default |
+| `voice.stt_prompt` | `""` | **jarvisd, new (2026-10-12).** Whisper initial prompt for node voice commands (M3, doc 06); biases spelling and vocabulary. Never applied to the wake-verification pass. Trimmed, last 1000 bytes kept. Per household and node (`media.go` `commandSTTOptions`). |
+| `voice.stt_preprocess` | false | **jarvisd, new (2026-10-12).** Normalise and trim silence from node voice commands before whisper. Per household and node. |
 | `voice.follow_up_gate` | true | **jarvisd, new (2026-10-10).** The follow-up gate ([agent/go-pi-node.md §3.10](../agent/go-pi-node.md)): a `not_for_me` follow-up is not committed to history and answers `keep_listening: true`; acoustic evidence (voice vs the wake, `level_vs_wake_db`) drops or hints. Off = legacy behaviour. Per household and node. |
 | `voice.follow_up_voice_mismatch` / `voice.follow_up_voice_match` | 0.25 / 0.40 | **jarvisd.** ERes2Net cosine of a follow-up to the conversation's first transcription: below = a different voice, at/above = the same voice |
 | `voice.follow_up_quiet_db` | -10 | **jarvisd.** `level_vs_wake_db` at or below = far away. Only a different voice that is also this quiet is dropped before the model |
@@ -577,7 +580,7 @@ Shadow replay (PLAN §4 layer 4) must ignore `X-Audio-*` values if Go emits the 
    - **Decided (D38):** the affect pass is cut (no producer). `affect` stays in the request as `null`; the hint code is kept as a no-op.
 8. **[behaviour] Audio format headers.** Kokoro in Go emits its native rate (probably 24 kHz). CC's fallback today is 16000; the node's is 22050.
    - Can every node (aplay on a Pi Zero) take 24 kHz mono s16?
-   - **My recommendation:** emit the real engine format from in-process knowledge, with no `/audio/format` round trip. Verify on jarvis-dev.
+   - **My recommendation:** emit the real engine format from in-process knowledge, with no `/audio/format` round trip. Verify on the dev node.
    - **Decided (D40 default):** emit the real engine sample rate; verify on a Pi.
 9. **[behaviour] `X-Assistant-Message` is empty on paths A and B and on continue-stream.** The node then can't run its follow-up self-echo detection (`follow_up_loop.py:306`), or show text, for those turns.
    - Headers must precede the body and Python `requests` can't read trailers, so a fix would need a node change.
@@ -597,6 +600,9 @@ Shadow replay (PLAN §4 layer 4) must ignore `X-Audio-*` values if Go emits the 
 ## 11. Go port notes
 
 **Package shape.** `internal/modules/cc/voice`:
+
+> **As built:** there is no `cc/voice` package. The voice routes and turn live flat in `internal/modules/cc` (`voice_routes.go`, `voice.go`, `turn.go`, `continue.go`, `convcache.go`); hints, text filters and parsing are the `hints/`, `textfilter/` and `parse/` sub-packages. Kokoro runs through `internal/modules/tts` over `internal/voice/sherpa`.
+
 - `routes.go`: the 8 handlers, strict `httpx` DTOs mirroring the Pydantic models, including null-vs-missing.
 - `handler.go`: `Process` (path C) and `Continue` / `ContinueStream`, sharing **one** `assembleTurn(ctx, conv, utterance, turnCtx) []Message` function. Golden-test the shared function. There is no `StreamFast`: paths A and B, the router hint and the router decision are cut (D9). `/voice/command/stream` runs `Process` and streams the result via the `stream_text_as_audio` grouping.
 - `convcache.go`: the conversation cache.

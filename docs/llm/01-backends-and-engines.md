@@ -2,9 +2,9 @@
 
 This doc covers how a request reaches weights today, and how it will in jarvisd. Sources:
 
-- Python: `/home/alex/jarvis/jarvis-llm-proxy-api`, HEAD `e04d0b1`, which prod runs.
+- Python: `jarvis-llm-proxy-api`, HEAD `e04d0b1`, which prod runs.
 - Go: `internal/platform/engines`.
-- Prod facts were read on 2026-10-06 from `jarvis@10.0.0.107`.
+- Prod facts were read on 2026-10-06 from the prod host.
 
 ## 1. Purpose
 

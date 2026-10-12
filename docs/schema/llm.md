@@ -21,13 +21,14 @@ The llm-proxy job queue (Redis/RQ, `llmproxy:dedupe`) becomes the platform queue
 
 ## Legacy-import notes
 
-- Nothing to import except settings.
+- Nothing to import except settings. (As built, `jarvisd import-legacy` skips llm-proxy settings too,
+  2026-10-09: labels come from the model manager and the setup wizard.)
 - The `llm.interface` → `llm.prompt_provider` rename (D11, EXTERNAL-CHANGES.md) is a
   **command-center** setting, not one of llm-proxy's; the CC baseline handles it.
 
 ## Setting keys
 
-From `jarvis-llm-proxy-api/services/settings_service.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-llm-proxy-api/services/settings_service.py` (the input for the module's settings `Definitions`; the built set is in `internal/modules/llm/llm.go` and `internal/modules/llm/engine/config.go`). `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|
@@ -148,7 +149,7 @@ From `jarvis-llm-proxy-api/services/settings_service.py` (input for the module's
 | `debug.dump_gbnf_path` | string | `''` | JARVIS_DUMP_GBNF_PATH | Path to dump GBNF grammar |
 
 - **Cut keys** (LoRA/adapters and the in-process TRANSFORMERS/vLLM/MLX backends, PLAN §7): every `training.*`, `adapter.*`, `adapter_cache.*`, `storage.adapter_bucket`, `storage.adapter_prefix`, `inference.vllm.*`, `inference.transformers.*`.
-- **Probably cut, decide in Phase 3** (kept in the list): `cache.*` (legacy `cache/` is cut), `model_service.*` (the separate model-service process disappears), `date_keys.device_map` (torch), `debug.*` (debugpy), `storage.s3_*` (only adapter storage used them), `inference.gguf.*` and `model.main.*` (llama-cpp-python in-process; `llama-server` flags may map onto some), `queue.name`.
+- **Probably cut, decide in Phase 3** (kept in the list; decided in [../llm/05-models-and-downloads.md](../llm/05-models-and-downloads.md) §5.1: all dropped, with a few `inference.gguf.*` values becoming per-label engine settings): `cache.*` (legacy `cache/` is cut), `model_service.*` (the separate model-service process disappears), `date_keys.device_map` (torch), `debug.*` (debugpy), `storage.s3_*` (only adapter storage used them), `inference.gguf.*` and `model.main.*` (llama-cpp-python in-process; `llama-server` flags may map onto some), `queue.name`.
 - Dev DB seeds only 39 of the 115 keys.
 
 ## Settings import (all modules with a settings table)

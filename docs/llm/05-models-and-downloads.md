@@ -3,9 +3,9 @@
 This doc covers which model files exist, how they reach the disk, who configures what, and which settings keys survive. Engine binaries (llama-server builds) are in [01](01-backends-and-engines.md) §3.6.
 
 Sources:
-- `/home/alex/jarvis/jarvis-llm-proxy-api`
-- `/home/alex/jarvis/jarvis-admin` (`src/…` is the React app, `server/…` the Fastify backend)
-- `/home/alex/jarvis/jarvis-installer`
+- `jarvis-llm-proxy-api`
+- `jarvis-admin` (`src/…` is the React app, `server/…` the Fastify backend)
+- `jarvis-installer`
 - the umbrella `jarvis` CLI
 - prod `~/.jarvis/compose`, read on 2026-10-06
 
@@ -138,10 +138,12 @@ The `.env.bak.*` files record a swap history: 14b → devstral → coder30b → 
 
 No tables today: settings plus files on disk.
 
-**Proposed jarvisd layout** under the data dir (`~/.jarvis/`, `internal/platform/config`):
+> Superseded: the data dir is `~/.jarvisd`, and the built layout (`<owner>--<repo>/<file>`, `.partial/<id>`) is in [06-model-manager-api.md](06-model-manager-api.md) (`POST /v1/models/install`).
+
+**Proposed jarvisd layout** under the data dir (`~/.jarvisd/`, `internal/platform/config`):
 
 ```
-~/.jarvis/
+~/.jarvisd/
   models/
     <catalog-id>/<file>.gguf          # e.g. qwen3.8-27b/Qwen3.8-27B-UD-Q4_K_M.gguf
     <catalog-id>/mmproj-F16.gguf
@@ -188,6 +190,8 @@ Keys come from `services/settings_service.py`. A key not listed here is cut: its
 | all `training.*`, `adapter*`, `storage.*`, `inference.vllm.*`, `inference.transformers.*`, `inference.gguf.{enable_context_cache,max_cache_size,rope_scaling_type,seed,verbose,mirostat_*}`, `cache.*`, `date_keys.*`, `debug.*` | cut code only, or nothing (`storage.s3_force_path_style`, `training.output_dir/dataset_path/params_path/base_model_id`, `debug.dump_gbnf_path` have **no reader at all**) | – | **Drop** (D11) |
 
 ### 5.2 New jarvisd keys (`llm` module definitions)
+
+> Superseded by the built key set in [06-model-manager-api.md](06-model-manager-api.md) (`internal/modules/llm/engine/config.go`). Differences from this proposal: there is no `remote_provider` and no `llm.engine_build`; `engine` also takes `off`; added `remote_vision`, `fold_system_messages`, `llm.hf_endpoint`, `llm.engine_base_url` and `llm.engine_path`.
 
 **Per slot** (`<slot>` = `live` or `background`):
 

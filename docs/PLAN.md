@@ -1,6 +1,6 @@
 # Jarvis server → Go: rewrite plan (`jarvis-server`)
 
-Status: **decisions settled, ready for Phase 0** (updated 2026-10-06). Nothing is implemented yet.
+Status: written 2026-10-06, before any code. Phases 0–5 are done and Phase 6 is shipping pre-releases (`v0.1.0-rcN`); the user's own install runs jarvisd. Progress, and decisions taken since, are in [STATUS.md](STATUS.md); where the two disagree, STATUS.md wins.
 
 Supporting work:
 
@@ -60,7 +60,7 @@ The route audit (Appendix A) found **about 180 live command-center routes**. Tho
 | ocr-service + worker | **Port the orchestration.** Engines: LLM vision, `tesseract` as an optional engine, and the macOS Vision helper. Fix the broken `POST /v1/ocr` job path. |
 | llm-proxy (API, model service, worker) | **Port the orchestration**, which is about 60% of the code. Inference runs in `llama-server` subprocesses, as prod already does. The REST backend is ported (OpenAI, Anthropic, Ollama, LM Studio). |
 | whisper-api | **Rebuild, greenfield.** STT on whisper.cpp as an engine (see D7). Speaker ID is in-binary via sherpa-onnx. |
-| tts | **Rebuild, greenfield.** Kokoro is in-binary via sherpa-onnx (`bm_george`; validated by ear on jarvis-dev). |
+| tts | **Rebuild, greenfield.** Kokoro is in-binary via sherpa-onnx (`bm_george`; validated by ear on the dev Pi node). |
 | command-center | **Port** the roughly 180 live routes and the voice loop. Cut lists are in §7. |
 | settings-server | **Drop.** Nothing calls it. |
 | mcp | **Drop.** It's a deprecated dev tool. |
@@ -121,7 +121,7 @@ SQLite driver: `modernc.org/sqlite` (pure Go; keeps the build cgo-free, see §3.
 | ~~Intent classifier (fastText)~~ | **Cut** (D9: off in prod, F1). | — |
 | OCR | LLM vision via `llama-server` (`--mmproj`), `tesseract` (optional), and a macOS Swift Vision helper. | Engine |
 
-**macOS must run on Metal (user requirement, 2026-10-06).** On darwin/arm64 the engines are Metal builds: llama-server (`GGML_METAL`, the default in upstream macOS releases) and whisper.cpp with Metal. CPU fallback is allowed only when the user picks it. Verified on the MacBook Pro (M2 Max, `alexanderberardi@10.0.0.103`), which also runs the legacy stack natively for Metal today.
+**macOS must run on Metal (user requirement, 2026-10-06).** On darwin/arm64 the engines are Metal builds: llama-server (`GGML_METAL`, the default in upstream macOS releases) and whisper.cpp with Metal. CPU fallback is allowed only when the user picks it. Verified on the MacBook Pro (M2 Max), which also runs the legacy stack natively for Metal today.
 
 **GPU selection (user decision, 2026-10-06): auto-detect, always overridable, multi-GPU.**
 
@@ -153,10 +153,7 @@ Platforms: linux/amd64, linux/arm64, darwin/arm64 and **windows/amd64**, all nat
   - one code path everywhere
 - **One-time cost:** mirror the sherpa C-API config structs in Go, exactly matching their layout. This is guarded by a test that round-trips every config struct, and it is **Phase 0 task #1**.
 - **Fallback if purego proves fragile on a platform:** static cgo on linux/darwin (already proven: a 41 MB binary) and DLLs-beside-exe on Windows.
-- **Release outputs:**
-  - `jarvisd-<os>-<arch>` binaries
-  - a minimal container image
-  - install scripts: `install.sh` for systemd/launchd, `install.ps1` for a Windows service or scheduled task
+- **Release outputs** (as built): one archive per target, `jarvisd-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows), plus `SHA256SUMS`, its minisign signature, and the install scripts `install.sh` (systemd/launchd) and `install.ps1` (a Windows service). No container image is published.
 - **Windows notes:**
   - extracted DLLs may need code-signing to avoid antivirus friction; plan an Authenticode step in Phase 6
   - GPU engines (`llama-server`, whisper) have official Windows CUDA and Vulkan builds
@@ -164,15 +161,18 @@ Platforms: linux/amd64, linux/arm64, darwin/arm64 and **windows/amd64**, all nat
 ### 3.5 Repository layout (`jarvis-server`)
 
 ```
-cmd/jarvisd/            serve | migrate | doctor | engines
+cmd/jarvisd/            serve | upgrade | service | setup-link | migrate | import-legacy | import-recipes | doctor | version
+cmd/jarvis-agent/       the desktop/Pi node (docs/agent/DESIGN.md); not part of the jarvisd release
 internal/platform/      httpx (router, errors, SSE, chunked), authn (JWT HS256+RS256, node, app, admin),
                         settings (definitions, cascade, cache, /settings router), db (sqlite, sqlc, goose),
                         queue, blob, mqtt (broker + req/resp), logging (slog → logs module), mdns, engines
 internal/voice/         sherpa-onnx wrappers: kokoro, speaker
-internal/modules/       config auth logs notifications ocr llm stt tts
-                        cc/{voice,toolloop,prompts,memory,smarthome,nodes,routines,errands,signals,phone,mobile,...}
-third_party/sherpa/     pinned static libs per platform (fetched by script, not committed)
-contract/               black-box pytest suite + fakes (§4)
+internal/modules/       config auth logs notifications ocr llm stt tts recipes admin cc (one package per module)
+internal/agent/         jarvis-agent's packages (host, desktop, node, voice, browser, island, screen, hat, ...)
+internal/{audio,update,doctor,legacyimport}/
+internal/voice/sherpa/libs/   sherpa-onnx + onnxruntime shared libs per platform (fetched by script, not committed)
+web/admin/              the admin SPA embedded into jarvisd
+contract/               black-box Go suite (build tag `contract`) + fakes (§4)
 fixtures/golden/        JSON fixtures exported from the Python implementation
 ```
 
@@ -180,11 +180,11 @@ fixtures/golden/        JSON fixtures exported from the Python implementation
 
 | Layer | What | Notes |
 |---|---|---|
-| 1. Contract suite (`contract/`, pytest, black-box HTTP) | Route tests ported from in-process TestClient to real HTTP. Includes a fake LLM (OpenAI-compatible, scripted), a fake relay and a fake MQTT node. | **Each test must pass against today's Python stack first.** Then it is the oracle for Go. |
+| 1. Contract suite (`contract/`, Go with build tag `contract`, black-box HTTP) | Route tests ported from in-process TestClient to real HTTP. Includes a fake LLM (OpenAI-compatible, scripted), a fake relay and a fake MQTT node. | **Each test must pass against today's Python stack first.** Then it is the oracle for Go. |
 | 2. Golden fixtures | Python dumps input→output JSON. Covers: the date-key matcher (4,987 examples), date detection and resolution, the tool-call parser and malformed-JSON extractor, JSON repair, think-strip, transcript filter, param validation, recipe quantity parsing and extractors, SSRF guards, queue envelopes, SDK wire formats, and fastText predictions. | **Prompts are byte-exact:** every kept Qwen provider (Appendix B) × representative contexts. |
 | 3. Existing black-box suites | install-e2e Phase 2 (behaviour corpus, using the kept ChatGPTOpenAI provider), Phase 3 (real node and MQTT K2 provisioning), the HTTP parts of Phases 1 and 1.7, and the node-setup integration suite. The GPU lane does a real chat and a TTS→STT round trip. | Docker/alembic/RQ checks get `jarvisd` equivalents. |
 | 4. Shadow replay (CC voice path) | Record dev traffic and CC's LLM calls against Python CC. Replay against Go CC with the LLM fake returning the recorded completions. Diff, ignoring volatile fields. | |
-| 5. Real hardware | jarvis-dev (`pi@jarvis-dev.local`) re-provisioned against `jarvisd`, with soak time per phase. | |
+| 5. Real hardware | the dev Pi node re-provisioned against `jarvisd`, with soak time per phase. | |
 
 Go code follows TDD per RULES.md, plus `go test -race`. Coverage target: 80%.
 
@@ -197,7 +197,7 @@ Go code follows TDD per RULES.md, plus `go test -race`. Coverage target: 80%.
 
 **Strangler caveat:** while modules are split between Go (SQLite) and Python (Postgres), each side owns its own data. Modules move with their data.
 
-**Legacy data import: dropped (ID6, 2026-10-07; clean-start cutover).** Was: `jarvisd import-legacy --from postgres://…` reads each legacy DB at alembic head and writes the module's SQLite tables.
+**Legacy data import: dropped (ID6, 2026-10-07; clean-start cutover), then reinstated as ID6r (2026-10-09):** `jarvisd import-legacy` reads the legacy Postgres directly; see [`docs/install/legacy-import.md`](install/legacy-import.md). The original plan was: `jarvisd import-legacy --from postgres://…` reads each legacy DB at alembic head and writes the module's SQLite tables.
 
 - **Covered:** users, households, nodes and keys, app clients, settings, routines, memories (re-embedded), inbox, rooms and devices.
 - **Blob files** are copied from S3/SeaweedFS.
@@ -251,7 +251,7 @@ config, auth (with RS256), logs, notifications.
 - Kokoro and speaker ID in-binary.
 - STT engine (D7).
 - Enrollment and verification flows behind the existing node and mobile routes.
-- Threshold calibration on real enrollments from jarvis-dev.
+- Threshold calibration on real enrollments from the dev Pi node.
 - Affect features ported to pure Go, if still wanted.
 
 ### Phase 5: command-center
@@ -267,11 +267,11 @@ config, auth (with RS256), logs, notifications.
 
 - Release binaries and image, plus the install script.
   - Installer spec: [`docs/install/00-installers.md`](install/00-installers.md) covers the legacy installers' fates, per-OS service registration, secrets, upgrades/rollback, legacy coexistence and import, doctor integration, and the port plan I0–I9. Open questions are in [`docs/install/QUESTIONS.md`](install/QUESTIONS.md).
-- ~~`import-legacy`~~ dropped (ID6: clean-start cutover).
-- Re-provision jarvis-dev and then the prod nodes.
+- ~~`import-legacy`~~ dropped (ID6: clean-start cutover). **Superseded by ID6r:** `jarvisd import-legacy` exists ([`docs/install/legacy-import.md`](install/legacy-import.md)).
+- Re-provision the dev Pi node and then the prod nodes.
 - Shrink or absorb jarvis-admin. Update the `./jarvis` CLI and jarvis-installer.
   - Admin absorb spec (D9): [`docs/admin/00-inventory.md`](admin/00-inventory.md) covers the page and route fates, the same-origin gateway on 7710, the first-run wizard, the build/embed plan and the agent-sized port plan A0–A10. Open questions are in [`docs/admin/QUESTIONS.md`](admin/QUESTIONS.md).
-- Remote-GPU-satellite mode: a `jarvisd` instance with only `llm,stt` enabled.
+- Remote-GPU-satellite mode: a `jarvisd` instance with only `llm,stt` enabled. (Not built.)
 
 ### Phase 7: retire
 
@@ -375,7 +375,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
 
 ## Appendix B: prompt providers (decided 2026-10-06)
 
-Prod state, read on 2026-10-06 from `jarvis@10.0.0.107`:
+Prod state, read on 2026-10-06 from the prod server:
 
 - `llm.interface = Qwen3_14B_Compressed`.
 - Both the live and the background slot run `Qwen3.8-27B-UD-Q4_K_M.gguf` through llm-proxy's **REST backend**, pointing at `llama-server` sidecars (`llama-server:8080` and `llama-server-bg:8080`).
@@ -408,10 +408,10 @@ Full write-up: `spikes/voice-onnx/RESULTS.md`.
   | TitaNet-small from Go | 1.88% | 1.70% |
   | Today's SpeechBrain ECAPA | 1.45% | 1.66% |
 
-  On jarvis-dev's mic, the user's clips scored 0.46–0.72 against each other and at most 0.27 against impostors.
+  On the dev Pi node's mic, the user's clips scored 0.46–0.72 against each other and at most 0.27 against impostors.
 - **Kokoro** (`bm_george`, speed 1.25):
   - Whisper transcripts match the Python output on 10 of 10 test sentences.
   - Voice similarity to the Python output is 0.89–0.95.
   - RTF is 0.17 on CPU.
-  - The user listened on jarvis-dev and said it was "basically exactly the same".
+  - The user listened on the dev Pi node and said it was "basically exactly the same".
 - **Static build:** sherpa-onnx v1.13.8 static libraries link into a 41 MB Go binary that needs only libc and libstdc++. Results are identical.

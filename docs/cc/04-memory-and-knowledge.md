@@ -656,6 +656,9 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
 ## 11. Go port notes
 
 **Package shape.** `internal/cc/memory` contains:
+
+> **As built:** no `memory` package. Memory is flat in `internal/modules/cc` (`memory_store.go`, `memory_routes.go`, `memory_jobs.go`, `memory_tools.go`, `memory_agent.go`, `memory_prompt.go`); quick search and deep research are in `internal/modules/cc/servertools`.
+
 - `Store`, using sqlc over `cc_user_memories`, `cc_conversation_transcripts` and `cc_person_characterizations`;
 - `Embedder`, an interface with one implementation;
 - `Search`;

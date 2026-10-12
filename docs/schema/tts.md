@@ -16,7 +16,7 @@ The only legacy table was `settings`. The baseline is an intentional no-op (`SEL
 
 ## Setting keys
 
-From `jarvis-tts/app/services/settings_definitions.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-tts/app/services/settings_definitions.py` (the input for the module's settings `Definitions`; the built set is in `internal/modules/tts/tts.go`). `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|

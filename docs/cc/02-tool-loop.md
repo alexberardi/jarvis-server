@@ -236,6 +236,8 @@ execute(conversation_id, messages, tools, max_iterations=10, user_utterance, age
 Every return path attaches "reasoning" (joined think blocks) when any were captured.
 ```
 
+> **Changed 2026-10-12 (Go only):** the j.1 ISO guard also maps bare `YYYY-MM-DD` dates (doc 03 §3.5 step 5).
+
 > **Changed by D9:** the must-call guard (step i) and step 1 are not ported; the router decision no longer exists. **Changed by D40 (Q9):** step 5 speaks a natural fallback instead of "Maximum tool execution iterations reached.", keeping `error:"max_iterations_exceeded"` for traces. **Changed by D8 (Q6):** on the invalid-param retry (j.8) and the server+client drop (j.7), Go no longer leaves an assistant `tool_calls` message without matching tool replies.
 
 > **Changed 2026-10-10 (force-tools guard, Go only).** Legacy re-armed the guard on every engine
@@ -686,6 +688,9 @@ The decision is `{"tool_name","score","used": score >= JARVIS_TOOL_CLASSIFIER_MI
 ## 11. Go port notes
 
 - **Package shape.** `internal/cc/toolloop`:
+
+> **As built:** no `toolloop` package. The engine is `internal/modules/cc/engine.go`; server tools are `internal/modules/cc/servertools`; parsing is `internal/modules/cc/parse`.
+
   - `Engine.Execute(ctx, conv *Conversation, in TurnInput) (Result, error)`, where `Result` has a typed `StopReason` (complete | tool_calls | validation_required | server_tool_complete | not_for_me | error).
   - A `Registry` of `ServerTool` interfaces: `Name`, `Description`, `Params`, `Enabled(ctx, hh)`, `PromptText`, `Risky`, `Execute(ctx, Call) (map[string]any, error)`. Tools are registered explicitly at init. No reflection discovery.
   - `Call` carries the speaker identity, or an explicit "unknown" (D21). Each tool decides what to refuse; the framework imposes no policy. Per-user tools refuse an unknown or ambiguous speaker, with the M14 wording when recognition is off.

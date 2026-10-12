@@ -20,6 +20,10 @@ rows on dev), Python services reached over HTTP during the strangler phase (PLAN
 GPU satellites (PLAN Phase 6). Phase 1 decides whether jarvisd synthesises its own modules' rows
 and keeps this table for the rest.
 
+As built: jarvisd upserts a row per served listener at start (`syncSelf` in
+`internal/modules/config/config.go`) and keeps this table for the rest; operator-entered public
+URLs live in `external_scheme`/`external_host`/`external_port` (migration `00002_public_url.sql`).
+
 (The `service_configs` table mentioned in planning is **not** config-service's: it is
 jarvis-config-client's local discovery cache, found in llm-proxy's DB. Dropped there — see llm.md.)
 
@@ -41,7 +45,7 @@ jarvis-config-client's local discovery cache, found in llm-proxy's DB. Dropped t
 
 ## Setting keys
 
-From `jarvis-config-service/app/services/settings_service.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-config-service/app/services/settings_service.py` (the input for the module's settings `Definitions`; the built set is in `internal/modules/config/config.go`). `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|
