@@ -473,3 +473,85 @@ request sequence, argument encoding, input region and pixel format are tested ag
 scripted compositor. **Not verified:** the pill actually on a Hyprland screen (run
 `island-demo`), multi-monitor placement (macOS: the main screen; Wayland: the compositor's
 choice of output), fractional scaling (the buffer uses the largest integer output scale).
+
+## 12. Read the screen (2026-10-12)
+
+"What does this error say?", "summarise this window", "what's on my screen": the agent takes a
+screenshot **only when asked** and the live model looks at it. Approved by the user 2026-10-11
+("read the screen sounds incredible"). Code: `internal/agent/screen` (agent),
+`internal/modules/cc/tool_images.go` (command-center).
+
+**The tool.** `desktop_read_screen {scope: "window" (default, the focused window) | "screen"}`,
+offered only while capture works (computed per call, like every desktop tool). The description
+says to call it whenever the user refers to something on their screen, and never unprompted.
+The output carries the image as `image_attachments: [{"mime", "data" (base64), "label"}]`
+plus `window_title` / `app`.
+
+**Capture.**
+
+| Platform | How | Window scope |
+|---|---|---|
+| Hyprland, sway (Wayland) | `grim -t png -l 1 … -` to stdout | geometry from `hyprctl -j activewindow` / the focused container in `swaymsg -t get_tree`; screen = the focused output (`-o`) |
+| macOS | `/usr/sbin/screencapture -x -t png` into a 0600 file in a private 0700 temp dir, read and removed before returning | the frontmost layer-0 window's CGWindowID from `CGWindowListCopyWindowInfo` (purego) → `-l ID -o`; screen = the main display (`-m`) |
+| GNOME, KDE, X11, Windows | not yet: the tool isn't offered (xdg-desktop-portal Screenshot is the later path) | |
+
+macOS needs the **Screen Recording** grant for Jarvis Agent.app (`macax.ScreenTrusted`;
+`jarvis-agent status` shows it and asks macOS for the prompt when it's missing). The child
+`screencapture` inherits the app's grant because the agent runs as the app under launchd.
+
+The capture is scaled to a longest side of **1568 px** (CatmullRom) and sent as **JPEG q85**
+(lower qualities if it would exceed 2 MiB): about 1.4k image tokens on Qwen3.5. A window reads
+well at that size; a whole ultrawide screen (4800 × 1350 logical here) becomes 1568 × 441 and
+only large text survives, which is why window is the default.
+
+**The island stays out of the picture**: `Island.Suspend` takes it off the screen at once (no
+slide) and returns once it's gone (≤ 300 ms); the capture runs; it comes back. Overlapping
+captures keep it hidden until the last one is done.
+
+**Getting the image to the model** (decision: *in the tool result*, not a separate upload).
+The image rides in the tool output on the routes that already carry tool results: the
+blocking voice continue, the stream continue, and the MQTT `tool_call` result for mobile chat.
+command-center lifts it out where results arrive (`liftToolImages`), validates it like a chat
+image (jpeg/png/webp by its bytes, ≤ 2 MiB, ≤ 4), and shows it to the live model as
+`image_url` parts **on that tool message** (the Qwen3.5 template renders images in any role;
+llama-server accepts them there: verified, below). The output the model reads keeps
+`"image_attachments": ["screenshot of the window \"…\" (shown to you with this result; not
+kept after this turn)"]`. Why not an upload: a second endpoint, an id to expire and a race
+between upload and continue, for nothing the result route can't carry. Those routes now take
+bodies up to ~12 MB (the chat-image cap).
+
+**Never stored.** The image exists only in the request and the in-memory working history of
+the turn. `conversation.commit` drops tool-message images (the label stays), so the next turn,
+traces, transcripts, compaction and job payloads never see it; it is never kept as a chat
+photo (`keepPhotos` takes user messages only). Nothing is logged about it. The agent writes
+nothing to disk (macOS's temp file aside, removed at once).
+
+**No vision.** When the live slot has no vision, command-center runs the local OCR engines
+(apple_vision, rapidocr, tesseract, paddleocr, easyocr: the LLM-vision engines are left out)
+and the output gets `image_text` + an `image_note` saying what was lost; with no OCR either,
+the note says the image couldn't be read, so the model tells the user.
+
+**Evidence (2026-10-12).**
+
+- This box (Hyprland, 7680 × 2160 at scale 1.6): `JARVIS_SCREEN_NATIVE=1 go test -run
+  TestNativeCapture ./internal/agent/screen/` window 1713 × 2092 → 1283 × 1568, 342 KB, 0.3 s;
+  screen 7680 × 2160 → 1568 × 441, 137 KB. `jarvis-agent try --save-images DIR
+  desktop_read_screen` gives the same.
+- MBP (macOS 26): the purego `CGWindowListCopyWindowInfo` lookup found the front window
+  (Firefox; title empty from an SSH process, as expected without the grant), and
+  availability correctly said Screen Recording is missing for that process. **Not run on the
+  Mac:** the capture as Jarvis Agent.app (rebuilding the signed app needs a local Terminal).
+- End to end against a real model (`TestReadScreenLive`: the agent's own tool over a rendered
+  terminal-error image → voice turn → continue through command-center → CPU llama-server,
+  Qwen3.5-9B Q4_K_M + its F16 projector, jarvisd's pinned template): "what does the error on
+  my screen say", "summarise this window for me", "which file has the error" each called
+  `desktop_read_screen`, and the answers quoted the errors ("parseConfig is undefined… the resp
+  variable type… fetch.go, lines 42:9 and 57:14"). "Tell me a joke", "what's two plus two",
+  "what's the capital of France" took no screenshot. On CPU the image turn took 14–17 s; the
+  dev jarvisd's GPU should make it a few seconds.
+- Not live: the OCR fallback and the mobile chat path (unit tests), the dev jarvisd itself (it
+  runs main from before this change and needs a restart).
+
+**Compatibility.** An older jarvisd doesn't lift the image: a capture over 1 MiB is a 413 on
+the continue (error chime), a smaller one reaches the model as base64 text. Update jarvisd
+with the agent.

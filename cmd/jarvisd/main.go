@@ -218,6 +218,8 @@ func modules() []module.Module {
 			c.Names = auth
 			// Chat photo → recipe (save_recipe_from_image): the recipes photo import, in process.
 			c.Recipes = recipes
+			// Tool-result images (desktop_read_screen) as text when live has no vision.
+			c.OCR = ocrm
 			// With llm.prompt_provider unset, the live model's catalog entry names it, so a
 			// fresh install answers its first voice turn without anyone choosing one.
 			c.DefaultPromptProvider = llm.LivePromptProvider

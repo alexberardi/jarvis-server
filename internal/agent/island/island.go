@@ -63,6 +63,10 @@ type Island struct {
 	done   chan struct{}
 	closed bool
 	off    bool // the backend failed: stay hidden for good
+	// suspended hides the island at once, without the slide, while a screenshot is taken
+	// (Suspend); hiddenAck is closed once it is off the screen.
+	suspended int // captures in progress
+	hiddenAck chan struct{}
 }
 
 func newIsland(be backend, log *slog.Logger) *Island {
@@ -99,6 +103,53 @@ func (i *Island) Level(v float32) {
 	i.mu.Unlock()
 }
 
+// Suspend takes the island off the screen at once (no slide) so a screenshot doesn't show it,
+// waits up to a short while for that, and returns the function that brings it back.
+func (i *Island) Suspend() (resume func()) {
+	if i == nil {
+		return func() {}
+	}
+	i.mu.Lock()
+	if i.off || i.closed {
+		i.mu.Unlock()
+		return func() {}
+	}
+	i.suspended++
+	ack := i.hiddenAck
+	if i.suspended == 1 {
+		ack = make(chan struct{})
+		i.hiddenAck = ack
+		select {
+		case i.wake <- struct{}{}:
+		default:
+		}
+	}
+	i.mu.Unlock()
+	if ack != nil {
+		select {
+		case <-ack:
+		case <-time.After(suspendWait):
+		}
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			i.mu.Lock()
+			defer i.mu.Unlock()
+			i.suspended--
+			if i.suspended == 0 && !i.closed {
+				select {
+				case i.wake <- struct{}{}:
+				default:
+				}
+			}
+		})
+	}
+}
+
+// suspendWait bounds how long Suspend waits for the island to leave the screen.
+const suspendWait = 300 * time.Millisecond
+
 // Close hides the island and stops its goroutine.
 func (i *Island) Close() {
 	if i == nil {
@@ -127,7 +178,7 @@ func (i *Island) loop() {
 		for {
 			i.mu.Lock()
 			f, visible := i.m.step(i.now())
-			stop := i.closed || i.off
+			stop := i.closed || i.off || i.suspended > 0
 			i.mu.Unlock()
 			if stop || !visible {
 				break
@@ -156,6 +207,12 @@ func (i *Island) loop() {
 			i.be.hide()
 			shown = false
 		}
+		i.mu.Lock()
+		if i.hiddenAck != nil {
+			close(i.hiddenAck)
+			i.hiddenAck = nil
+		}
+		i.mu.Unlock()
 	}
 }
 

@@ -18,6 +18,9 @@ import (
 type toolResult struct {
 	ToolCallID string
 	Output     any
+	// images were attached to the output (tool_images.go): lifted out on arrival, shown to the
+	// live model with this result only.
+	images []chatImage
 }
 
 // outputString is the role=tool content: strings as is, anything else json.dumps.
@@ -68,7 +71,8 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 		}
 	}
 	msgs = withoutRole(m.visionGuard(ctx, msgs), "tool")
-	msgs = append(msgs, chatMsg{Role: "user", Content: tf.TextModeFormatPrompt(question, tctx, tf.IsKnowledgeDelegation(tctx))})
+	msgs = append(msgs, chatMsg{Role: "user", Content: tf.TextModeFormatPrompt(question, tctx, tf.IsKnowledgeDelegation(tctx)),
+		images: resultImages(results)})
 
 	maxTok := 256
 	temp := 0.7
@@ -106,9 +110,10 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	conv.mu.Lock()
 	defer conv.mu.Unlock()
 	stashReferenced(conv, results)
+	results = m.prepareToolImages(ctx, results)
 	msgs := cloneMsgs(conv.messages)
 	for _, tr := range results {
-		msgs = append(msgs, chatMsg{Role: "tool", ToolCallID: tr.ToolCallID, Content: outputString(tr.Output)})
+		msgs = append(msgs, toolMsg(tr))
 	}
 	var res engineResult
 	if conv.provider.SupportsNativeTools() {
@@ -157,6 +162,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 	if len(conv.messages) == 0 {
 		return nil
 	}
+	results = m.prepareToolImages(ctx, results)
 	msgs := m.visionGuard(ctx, cloneMsgs(conv.messages))
 	native := conv.provider.SupportsNativeTools()
 	plan := &continuePlan{conv: conv, results: results, base: cloneMsgs(conv.messages), rev: conv.rev}
@@ -168,7 +174,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 				if native {
 					committed = cloneMsgs(msgs)
 					for _, tr := range results {
-						committed = append(committed, chatMsg{Role: "tool", ToolCallID: tr.ToolCallID, Content: outputString(tr.Output)})
+						committed = append(committed, toolMsg(tr))
 					}
 				} else {
 					committed = withoutRole(msgs, "tool")
@@ -182,13 +188,14 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 	}
 	if native {
 		for _, tr := range results {
-			msgs = append(msgs, chatMsg{Role: "tool", ToolCallID: tr.ToolCallID, Content: outputString(tr.Output)})
+			msgs = append(msgs, toolMsg(tr))
 		}
 		plan.llmMsgs = cloneMsgs(msgs)
 	} else {
 		tctx := tf.ToolResultsContext(resultOutputs(results))
 		msgs = withoutRole(msgs, "tool")
-		msgs = append(msgs, chatMsg{Role: "user", Content: tf.ContinueToolResultsMessage(tctx, tf.IsKnowledgeDelegation(tctx))})
+		msgs = append(msgs, chatMsg{Role: "user", Content: tf.ContinueToolResultsMessage(tctx, tf.IsKnowledgeDelegation(tctx)),
+			images: resultImages(results)})
 		plan.llmMsgs = append(cloneMsgs(msgs), sysMsg(continueStreamOverride))
 	}
 	plan.commit = msgs

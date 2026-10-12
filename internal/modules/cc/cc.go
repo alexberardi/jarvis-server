@@ -133,6 +133,9 @@ type Module struct {
 	// Recipes is the recipes module's photo import for save_recipe_from_image (chat photo →
 	// recipe, chat_image_actions.go). Nil: the tool is not offered.
 	Recipes RecipeImporter
+	// OCR reads images attached to tool results when the live model has no vision
+	// (tool_images.go). Nil: the model is told it can't see them.
+	OCR ImageOCR
 	// Phone configures phone calls (5c, docs/cc/11; phone_wire.go).
 	Phone PhoneConfig
 

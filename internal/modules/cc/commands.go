@@ -119,7 +119,12 @@ func (m *Module) handleVerifyCommand(w http.ResponseWriter, r *http.Request, n *
 
 // readRawObject reads a JSON object body (dict) as raw bytes.
 func readRawObject(w http.ResponseWriter, r *http.Request) (json.RawMessage, bool) {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, httpx.MaxBody))
+	return readRawObjectLimit(w, r, httpx.MaxBody)
+}
+
+// readRawObjectLimit is readRawObject with another body cap (tool results attaching images).
+func readRawObjectLimit(w http.ResponseWriter, r *http.Request, limit int64) (json.RawMessage, bool) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		detail(w, http.StatusRequestEntityTooLarge, "Request body too large")
 		return nil, false
@@ -159,7 +164,7 @@ func (m *Module) deliver(rid, nodeID string, raw json.RawMessage) DeliverResult 
 // issued to this node; a result for a rid issued to another node is a 403. A late or unknown
 // rid is acknowledged and dropped, as legacy acknowledged every post.
 func (m *Module) handleResult(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
-	raw, ok := readRawObject(w, r)
+	raw, ok := readRawObjectLimit(w, r, toolResultBodyMax) // a tool_call result may attach images
 	if !ok {
 		return
 	}

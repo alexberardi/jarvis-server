@@ -467,3 +467,23 @@ box in a scratch venv/config/DB, with one custom command `image_size` (`JarvisPa
   path), applied only in the MQTT `tool_call`; the model's numbers are the record everywhere else.
 - **Hidden photo tools still have their parameters indexed,** so a hallucinated call to one
   (voice) is refused with `no_image` instead of reaching the node with bare numbers.
+
+## 10. Images in client tool results (2026-10-12)
+
+A node's tool output may attach images: `"image_attachments": [{"mime", "data" (base64 or a
+data URL), "label"}]` (first user: the desktop agent's `desktop_read_screen`, see
+[agent/DESIGN.md §12](../agent/DESIGN.md)). Any client tool, including Pantry/SDK commands, can
+use it. Code: `tool_images.go`.
+
+- **Where:** lifted on arrival, before anything records or forwards the output: the voice
+  continue routes (`parseToolResults`) and the mobile chat `tool_call` result
+  (`chatToolCall`, before `redactWireImages`). Same validation as chat images (jpeg/png/webp by
+  bytes, ≤ 2 MiB decoded, ≤ 4); a bad one is replaced by `[image dropped: <why>]`. The continue
+  routes and the result sink take bodies up to `chatBodyMax`.
+- **To the model:** `image_url` parts on that tool message (the text path, which drops tool
+  messages, puts them on its formatting prompt). The output text keeps each label +
+  "(shown to you with this result; not kept after this turn)".
+- **Lifetime:** that turn only. `conversation.commit` drops images from tool messages; they are
+  never kept as photos for tools (CI8 is for user photos). No description job: the answer the
+  model gave is the record.
+- **No vision on live:** local OCR text (`image_text`, `image_note`) instead; no OCR → a note.

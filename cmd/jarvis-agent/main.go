@@ -11,6 +11,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -34,6 +36,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
@@ -331,9 +334,19 @@ func run(ctx context.Context, args []string) error {
 	return island.Run(ctx, log, func(i *island.Island) error {
 		if i != nil {
 			vs.indicator = islandCue{i}
+			hideIslandForScreenshots(tools, i)
 		}
 		return r.Run(ctx)
 	})
+}
+
+// hideIslandForScreenshots keeps the island out of desktop_read_screen's pictures.
+func hideIslandForScreenshots(tools node.Multi, i *island.Island) {
+	for _, t := range tools {
+		if st, ok := t.(*screen.Tools); ok {
+			st.Hide = i.Suspend
+		}
+	}
 }
 
 // toolFlags choose the node's client tools; `run` and `listen` share them.
@@ -352,7 +365,7 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 	}
 }
 
-// build is the one toolset of this node: the desktop tools, the browser tools (offered while
+// build is the one toolset of this node: the desktop tools, read-the-screen, the browser tools (offered while
 // the extension is connected), then the sidecar's commands. The MQTT dispatcher and voice
 // turns both serve it. promptAX asks macOS for Accessibility (the
 // long-running `run` does; `listen`, a test command often started over SSH, doesn't).
@@ -367,7 +380,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 		macax.Prompt()
 		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
 	}
-	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log))}
+	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), &screen.Tools{C: screen.Native()}}
 	closeAll := func() {}
 	if !*f.noBrowser {
 		hub, stopBrowser := startBrowser(ctx, log)
@@ -415,6 +428,16 @@ func status(ctx context.Context, args []string) error {
 `)
 		}
 	}
+	if macax.Supported() {
+		screen := macax.ScreenTrusted()
+		fmt.Printf("screen recording: %v\n", screen)
+		if !screen {
+			// Puts Jarvis Agent in the list and shows macOS's prompt (read-the-screen needs it).
+			macax.ScreenPrompt()
+			fmt.Print("  -> Reading the screen is OFF: allow \"Jarvis Agent\" in System Settings > Privacy & Security >\n" +
+				"     Screen & System Audio Recording, then restart the agent.\n")
+		}
+	}
 	fmt.Printf("voice:        %s\n", voiceStatus())
 	fmt.Printf("browser:      %s\n", browserSummary())
 	if list, err := appCatalogue(nil)(); err != nil {
@@ -457,12 +480,13 @@ func try(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("try", flag.ExitOnError)
 	anyOpen := fs.Bool("allow-open-any", false, "relax the open policy")
 	wait := fs.Duration("wait", 10*time.Second, "how long browser_* tools wait for the browser extension to connect")
+	saveImages := fs.String("save-images", "", "write a result's attached images (desktop_read_screen) into this directory instead of printing their data")
 	_ = fs.Parse(args)
 	h, err := nativeHost()
 	if err != nil {
 		return err
 	}
-	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil))}
+	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), &screen.Tools{C: screen.Native()}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).
@@ -500,8 +524,37 @@ func try(ctx context.Context, args []string) error {
 	if !ok {
 		return fmt.Errorf("unknown tool %q", fs.Arg(0))
 	}
+	if err := elideAttachments(out, *saveImages); err != nil {
+		return err
+	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	fmt.Println(string(b))
+	return nil
+}
+
+// elideAttachments replaces attached images' base64 with their size for printing, writing them
+// (0600) into dir first when one is given.
+func elideAttachments(out map[string]any, dir string) error {
+	atts, _ := out[screen.AttachmentsKey].([]any)
+	for i, a := range atts {
+		m, _ := a.(map[string]any)
+		data, _ := m["data"].(string)
+		if data == "" {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			return err
+		}
+		m["data"] = fmt.Sprintf("<%d bytes>", len(raw))
+		if dir != "" {
+			p := filepath.Join(dir, fmt.Sprintf("attachment-%d.jpg", i+1))
+			if err := os.WriteFile(p, raw, 0o600); err != nil {
+				return err
+			}
+			m["saved_to"] = p
+		}
+	}
 	return nil
 }
 
