@@ -63,7 +63,7 @@ func TestRealWakeWordStartsATurn(t *testing.T) {
 				}
 				t.Logf("fired at score %.3f", tr.WakeScore)
 			} else {
-				r.noTurn(t, time.Duration(n+20)*mic.pace+time.Second)
+				r.noTurnBy(t, mic, n)
 			}
 			if err := stop(); err != nil {
 				t.Fatal(err)

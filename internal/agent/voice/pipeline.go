@@ -134,6 +134,11 @@ type Pipeline struct {
 	// word ("validation", "follow_up"), after it has dropped what was captured while it spoke.
 	// Tests use it to script the user's answer.
 	listening func(stage string)
+	// lockstep makes the capture goroutine hand each chunk over before it reads the next (an
+	// unbuffered queue, a blocking send): a scripted microphone is then heard in full and in
+	// order however the scheduler runs the two goroutines. A real microphone does not wait,
+	// so production keeps the bounded, dropping queue. Tests only.
+	lockstep bool
 
 	dropped atomic.Int64
 	ends    sync.WaitGroup
@@ -158,7 +163,11 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		p.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	chunks := make(chan []int16, chunkQueue)
+	queue := chunkQueue
+	if p.lockstep {
+		queue = 0
+	}
+	chunks := make(chan []int16, queue)
 	var capErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -185,6 +194,13 @@ func (p *Pipeline) capture(ctx context.Context, chunks chan []int16) error {
 		buf := make([]int16, ChunkSamples)
 		if err := p.Capture.Read(buf); err != nil {
 			return fmt.Errorf("microphone: %w", err)
+		}
+		if p.lockstep {
+			select {
+			case chunks <- buf:
+			case <-ctx.Done():
+			}
+			continue
 		}
 		select {
 		case chunks <- buf:

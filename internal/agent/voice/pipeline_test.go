@@ -40,8 +40,9 @@ var (
 	wake   = square(5000) // what the fake detector calls "hey jarvis"
 )
 
-// script is the microphone's audio: the given chunks, then noise forever, at pace per chunk
-// (fast, but slow enough that the pipeline keeps up and nothing is dropped while listening).
+// script is the microphone's audio: the given chunks, then noise forever. The rig runs the
+// pipeline in lockstep with it, so nothing is dropped however slowly the pipeline runs; pace
+// only keeps the endless noise from spinning a CPU.
 type fakeCapture struct {
 	mu     sync.Mutex
 	chunks [][]int16
@@ -286,7 +287,7 @@ func newRig(t *testing.T, mic device.Capture, srv *fakeServer) *rig {
 	cfg.Timezone = "America/New_York"
 	r.p = &Pipeline{Cfg: cfg, Capture: mic, Playback: r.spk.open, Detector: r.det, Server: srv,
 		Log:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-		OnTurn: func(tr Turn) { r.turns <- tr }, NewID: func() string { return "conv-1" }}
+		OnTurn: func(tr Turn) { r.turns <- tr }, NewID: func() string { return "conv-1" }, lockstep: true}
 	return r
 }
 
@@ -336,12 +337,22 @@ func (r *rig) waitResets(t *testing.T, n int) {
 	}
 }
 
-func (r *rig) noTurn(t *testing.T, wait time.Duration) {
+// noTurnBy fails if a turn has been reported once the pipeline has taken mic chunk n. In
+// lockstep the mic's read n+2 starts only after the pipeline took chunk n+1, i.e. finished
+// with chunk n and any turn it fired (OnTurn runs on the pipeline goroutine).
+func (r *rig) noTurnBy(t *testing.T, mic *fakeCapture, n int) {
 	t.Helper()
+	deadline := time.Now().Add(10 * time.Second) // a hang guard, not what is measured
+	for mic.readCount() < n+2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the pipeline stalled at mic read %d", mic.readCount())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	select {
 	case tr := <-r.turns:
 		t.Fatalf("unexpected turn %+v", tr)
-	case <-time.After(wait):
+	default:
 	}
 }
 
@@ -585,7 +596,7 @@ func TestDebounceAndResumeListening(t *testing.T) {
 	r.p.Now = func() time.Time { return fixed }
 	stop := r.run(t)
 	r.turn(t)
-	r.noTurn(t, 1500*time.Millisecond)
+	r.noTurnBy(t, mic, 40+3+20+300+3+20)
 	_ = stop()
 
 	// The clock moves 10 s per reading: both fire.

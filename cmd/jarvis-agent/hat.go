@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -101,6 +102,10 @@ const errorFlash = 1500 * time.Millisecond
 type ledCue struct {
 	leds *hat.LEDs
 	log  *slog.Logger // debug: each state shown; nil: quiet
+	// after schedules the end of the wake flash (time.AfterFunc; tests fire it themselves);
+	// errorFor is how long an error stays red (errorFlash).
+	after    func(time.Duration, func()) *time.Timer
+	errorFor time.Duration
 
 	mu   sync.Mutex
 	last voice.Cue
@@ -121,7 +126,11 @@ func (c *ledCue) SetState(cue voice.Cue, _ time.Duration) {
 		if prev == voice.CueIdle || prev == voice.CueError {
 			seq := c.seq
 			c.leds.SetTransient(hat.WakeDetected)
-			time.AfterFunc(wakeFlash, func() {
+			after := c.after
+			if after == nil {
+				after = time.AfterFunc
+			}
+			after(wakeFlash, func() {
 				c.mu.Lock()
 				defer c.mu.Unlock()
 				if c.seq == seq {
@@ -138,7 +147,7 @@ func (c *ledCue) SetState(cue voice.Cue, _ time.Duration) {
 	case voice.CueSpeaking:
 		c.leds.SetTransient(hat.Speaking)
 	case voice.CueError:
-		c.leds.Preview(hat.Error, errorFlash)
+		c.leds.Preview(hat.Error, cmp.Or(c.errorFor, errorFlash))
 	default:
 		c.leds.SetTransient("")
 	}

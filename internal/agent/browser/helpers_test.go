@@ -96,10 +96,10 @@ func connectExt(t *testing.T, h *Hub, path string, browser string, focused bool,
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(10 * time.Second) // a hang guard
 	for !cond() {
 		if time.Now().After(deadline) {
-			t.Fatal("condition not met in 5s")
+			t.Fatal("condition not met in 10s")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

@@ -165,7 +165,7 @@ func (f *fakeCompositor) id(k string) uint32 { f.mu.Lock(); defer f.mu.Unlock();
 
 func TestWaylandClientSpeaksLayerShell(t *testing.T) {
 	fc, conn := newFakeCompositor(t)
-	b := &wayland{w: newWlConn(conn), scales: map[uint32]int32{}, memFD: -1}
+	b := &wayland{w: newWlConn(conn), scales: map[uint32]int32{}, memFD: -1, patience: hangGuard}
 	if err := b.bind(); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestWaylandClientSpeaksLayerShell(t *testing.T) {
 	if err := b.present(img); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.w.roundtrip(time.Second); err != nil {
+	if err := b.w.roundtrip(hangGuard); err != nil {
 		t.Fatal(err)
 	}
 
@@ -301,7 +301,7 @@ func TestWaylandRefusesACompositorWithoutLayerShell(t *testing.T) {
 			}
 		}
 	}()
-	b := &wayland{w: newWlConn(client), scales: map[uint32]int32{}, memFD: -1}
+	b := &wayland{w: newWlConn(client), scales: map[uint32]int32{}, memFD: -1, patience: hangGuard}
 	defer b.w.close()
 	if err := b.bind(); err == nil {
 		t.Fatal("bound without layer-shell")

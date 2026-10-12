@@ -51,44 +51,53 @@ func TestBrowserStartsHostMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdinR, stdinW, _ := os.Pipe()
-		var stdout bytes.Buffer
+		stdoutR, stdoutW, _ := os.Pipe()
 		cmd := exec.Command(os.Args[0], argv...)
 		cmd.Env = append(os.Environ(), "JARVIS_AGENT_TEST_MAIN=1", browser.SocketEnv+"="+sock)
 		cmd.Stdin = stdinR
-		cmd.Stdout = &stdout
+		cmd.Stdout = stdoutW
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
+		_ = stdoutW.Close() // the child has its own copy
 		_, _ = stdinW.Write(in.Bytes())
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(10 * time.Second) // a hang guard
 		for !hub.Connected() && time.Now().Before(deadline) {
 			time.Sleep(10 * time.Millisecond)
 		}
 		if bs := hub.Browsers(); len(bs) != 1 || bs[0].Browser != "TestBrowser" {
 			t.Fatalf("%v: hub sees %+v", argv, bs)
 		}
-		callCtx, callCancel := context.WithTimeout(ctx, 300*time.Millisecond)
-		_, _, err := hub.Call(callCtx, 0, "list_tabs", nil)
+		// A command nobody answers: it reaches stdout as one native frame; the caller gives up
+		// only once it has (not after a deadline the host may not have met).
+		callCtx, callCancel := context.WithCancel(ctx)
+		callErr := make(chan error, 1)
+		go func() { _, _, err := hub.Call(callCtx, 0, "list_tabs", nil); callErr <- err }()
+		frame := make(chan []byte, 1)
+		go func() { msg, _ := browser.ReadNative(stdoutR, 1<<20); frame <- msg }()
+		var msg []byte
+		select {
+		case msg = <-frame:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%v: the command never reached stdout", argv)
+		}
 		callCancel()
-		if err == nil {
+		if err := <-callErr; err == nil {
 			t.Fatal("no extension answered, yet the call succeeded")
-		}
-		// The command reached stdout as one native frame.
-		_ = stdinW.Close() // the browser closes the port: the host exits 0
-		if err := cmd.Wait(); err != nil {
-			t.Fatalf("%v: host exit: %v", argv, err)
-		}
-		_ = stdinR.Close()
-		msg, err := browser.ReadNative(&stdout, 1<<20)
-		if err != nil {
-			t.Fatalf("%v: stdout is not native frames: %v (%q)", argv, err, stdout.String())
 		}
 		var m browser.Message
 		if json.Unmarshal(msg, &m) != nil || m.Type != "command" || m.Cmd != "list_tabs" {
 			t.Fatalf("%v: frame %q", argv, msg)
 		}
-		if stdout.Len() != 0 {
-			t.Fatalf("%v: extra bytes on stdout: %q", argv, stdout.String())
+		_ = stdinW.Close()             // the browser closes the port: the host exits 0
+		rest, _ := io.ReadAll(stdoutR) // to EOF: the host has exited
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("%v: host exit: %v", argv, err)
+		}
+		_ = stdinR.Close()
+		_ = stdoutR.Close()
+		if len(rest) != 0 {
+			t.Fatalf("%v: extra bytes on stdout: %q", argv, rest)
 		}
 		for hub.Connected() && time.Now().Before(deadline) {
 			time.Sleep(10 * time.Millisecond)

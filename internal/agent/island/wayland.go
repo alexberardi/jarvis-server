@@ -3,6 +3,7 @@
 package island
 
 import (
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -296,6 +297,9 @@ type wayland struct {
 	compositor, shm, layerShell uint32
 	compVersion                 uint32
 
+	// patience is how long to wait for the compositor's answers (compositorWait if zero).
+	patience time.Duration
+
 	mu     sync.Mutex
 	scales map[uint32]int32 // wl_output id → scale
 
@@ -325,6 +329,11 @@ func newWayland() (*wayland, error) {
 	return b, nil
 }
 
+// compositorWait is how long the island waits for the compositor before giving up on it.
+const compositorWait = 2 * time.Second
+
+func (b *wayland) wait() time.Duration { return cmp.Or(b.patience, compositorWait) }
+
 // bind collects the globals and binds what the island needs.
 func (b *wayland) bind() error {
 	type global struct {
@@ -347,13 +356,19 @@ func (b *wayland) bind() error {
 	if err := b.w.send(displayID, opDisplayGetRegistry, args().u32(reg).b, -1); err != nil {
 		return err
 	}
-	if err := b.w.roundtrip(2 * time.Second); err != nil {
+	if err := b.w.roundtrip(b.wait()); err != nil {
 		return err
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	bindTo := func(g global, version uint32) uint32 {
+	// on, when set, handles the new object's events. It is registered before the bind is
+	// sent: the compositor may answer at once (wl_output sends its scale straight away), and
+	// the reader drops events for ids it has no handler for.
+	bindTo := func(g global, version uint32, on func(id uint32) func(op uint16, args []byte)) uint32 {
 		id := b.w.newID()
+		if on != nil {
+			b.w.handle(id, on(id))
+		}
 		_ = b.w.send(reg, opRegistryBind, args().u32(g.name).str(g.iface).u32(version).u32(id).b, -1)
 		return id
 	}
@@ -364,24 +379,27 @@ func (b *wayland) bind() error {
 				continue // set_buffer_scale is version 3
 			}
 			b.compVersion = min(g.version, 4)
-			b.compositor = bindTo(g, b.compVersion)
+			b.compositor = bindTo(g, b.compVersion, nil)
 		case "wl_shm":
-			b.shm = bindTo(g, 1)
+			b.shm = bindTo(g, 1, nil)
 		case "zwlr_layer_shell_v1":
-			b.layerShell = bindTo(g, 1)
+			b.layerShell = bindTo(g, 1, nil)
 		case "wl_output":
 			if g.version < 2 {
 				continue // scale is version 2
 			}
-			id := bindTo(g, 2)
-			b.scales[id] = 1
-			b.w.handle(id, func(op uint16, a []byte) {
-				if op == evOutputScale {
-					r := argReader{b: a}
-					s := r.i32()
-					b.mu.Lock()
-					b.scales[id] = s
-					b.mu.Unlock()
+			bindTo(g, 2, func(id uint32) func(uint16, []byte) {
+				b.mu.Lock()
+				b.scales[id] = 1
+				b.mu.Unlock()
+				return func(op uint16, a []byte) {
+					if op == evOutputScale {
+						r := argReader{b: a}
+						s := r.i32()
+						b.mu.Lock()
+						b.scales[id] = s
+						b.mu.Unlock()
+					}
 				}
 			})
 		}
@@ -394,7 +412,7 @@ func (b *wayland) bind() error {
 	case b.shm == 0:
 		return errors.New("the compositor has no wl_shm")
 	}
-	return b.w.roundtrip(2 * time.Second) // the outputs' scale events
+	return b.w.roundtrip(b.wait()) // the outputs' scale events
 }
 
 // outputScale is the largest output scale: the buffer is sharp on every screen.
@@ -456,7 +474,7 @@ func (b *wayland) show() (float64, error) {
 		return 0, errors.New("the compositor closed the overlay")
 	case <-w.dead:
 		return 0, w.broken()
-	case <-time.After(2 * time.Second):
+	case <-time.After(b.wait()):
 		b.hide()
 		return 0, errors.New("the compositor never configured the overlay")
 	}
@@ -577,7 +595,7 @@ func (b *wayland) hide() {
 		_ = unix.Close(b.memFD)
 		b.memFD = -1
 	}
-	_ = w.roundtrip(time.Second)
+	_ = w.roundtrip(b.wait() / 2)
 }
 
 func (b *wayland) close() {
