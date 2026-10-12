@@ -63,8 +63,8 @@ func TestDefaultInstance(t *testing.T) {
 
 func TestHostLabel(t *testing.T) {
 	for _, c := range []struct{ in, label, instance string }{
-		{"Alexanders-MacBook-Pro.local", "Alexanders-MacBook-Pro", "Jarvis (Alexanders-MacBook-Pro)"},
-		{"Alexanders-MacBook-Pro.local.", "Alexanders-MacBook-Pro", "Jarvis (Alexanders-MacBook-Pro)"},
+		{"Example-MacBook-Pro.local", "Example-MacBook-Pro", "Jarvis (Example-MacBook-Pro)"},
+		{"Example-MacBook-Pro.local.", "Example-MacBook-Pro", "Jarvis (Example-MacBook-Pro)"},
 		{"Mini.LOCAL", "Mini", "Jarvis (Mini)"},
 		{"box.Local..", "box", "Jarvis (box)"},
 		{"box.local.local", "box", "Jarvis (box)"},
@@ -101,8 +101,8 @@ func TestAdvertisedIPs(t *testing.T) {
 		addrs []string
 		want  []string
 	}{
-		{"v4 and link-local", []string{"10.0.0.122/24", "fe80::1/64"}, []string{"10.0.0.122", "fe80::1"}},
-		{"global v6 hides link-local", []string{"fe80::1/64", "2001:db8::5/64", "10.0.0.122/24"}, []string{"10.0.0.122", "2001:db8::5"}},
+		{"v4 and link-local", []string{"10.0.0.20/24", "fe80::1/64"}, []string{"10.0.0.20", "fe80::1"}},
+		{"global v6 hides link-local", []string{"fe80::1/64", "2001:db8::5/64", "10.0.0.20/24"}, []string{"10.0.0.20", "2001:db8::5"}},
 		{"loopback dropped", []string{"127.0.0.1/8", "::1/128"}, nil},
 		{"none", nil, nil},
 	} {
@@ -127,7 +127,7 @@ func TestPickInterfaces(t *testing.T) {
 	up := net.FlagUp | net.FlagMulticast
 	host := []netaddr.Iface{
 		mk("lo", net.FlagUp|net.FlagLoopback|net.FlagMulticast, "127.0.0.1/8"),
-		mk("en0", up, "10.0.0.103/24"),
+		mk("en0", up, "10.0.0.30/24"),
 		mk("bridge100", up, "192.168.64.1/24"),
 		mk("docker0", up, "172.17.0.1/16"),
 		mk("eth9", net.FlagUp, "10.9.9.9/24"), // no multicast

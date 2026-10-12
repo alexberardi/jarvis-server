@@ -24,7 +24,7 @@ var jarvisPorts = []Port{
 	{"mqtt", 1884, "tcp"}, {"mqtt-ws", 9883, "tcp"}, {"mdns", 5353, "udp"},
 }
 
-// jarvis-dev's real user.rules after the fix (comments are hex, as ufw writes them).
+// the dev node's real user.rules after the fix (comments are hex, as ufw writes them).
 const devRules = `
 ### tuple ### allow udp 53317 0.0.0.0/0 any 0.0.0.0/0 in
 ### tuple ### allow tcp 22 0.0.0.0/0 any 10.0.0.0/24 in comment=7373682066726f6d204c414e
@@ -113,7 +113,7 @@ func find(t *testing.T, checks []Check, name string) Check {
 	return Check{}
 }
 
-// The jarvis-dev incident: ufw on, default DROP, no jarvisd rules. jarvisd answered on
+// The the dev node incident: ufw on, default DROP, no jarvisd rules. jarvisd answered on
 // localhost while the Pi's registration timed out.
 func TestDoctorFlagsUFWBlockingTheLAN(t *testing.T) {
 	home := lan(t, "10.0.0.0/24")

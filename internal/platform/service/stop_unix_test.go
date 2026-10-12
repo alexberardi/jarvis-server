@@ -63,7 +63,7 @@ func TestSystemdStopBlocker(t *testing.T) {
 }
 
 func TestLaunchdStopBlocker(t *testing.T) {
-	l, f, _, _ := testLaunchd(t, 0, "alex")
+	l, f, _, _ := testLaunchd(t, 0, "user")
 	f.fail["launchctl print "+target] = errors.New("Could not find service")
 	ctx := context.Background()
 	if reason, _ := l.stopBlocker(); !strings.Contains(reason, "can't read") {
@@ -99,7 +99,7 @@ func TestLaunchdStopBlocker(t *testing.T) {
 // After an admin stop the job is still loaded (launchd only declined to restart it), so
 // `jarvisd service start` must kickstart it rather than rely on bootstrap.
 func TestLaunchdStartAfterAdminStop(t *testing.T) {
-	l, f, _, _ := testLaunchd(t, 0, "alex")
+	l, f, _, _ := testLaunchd(t, 0, "user")
 	f.fail["launchctl print "+target] = errors.New("Could not find service")
 	ctx := context.Background()
 	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd", NoStart: true}); err != nil {

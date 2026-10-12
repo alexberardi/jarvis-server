@@ -28,7 +28,7 @@ import (
 //
 //   - Legacy (MBP): RELAY_URL is http://host.docker.internal:7735, so a reverse tunnel needs no
 //     stack change: `ssh -f -N -o ExitOnForwardFailure=yes -R 7735:127.0.0.1:<port>
-//     alexanderberardi@10.0.0.103`. Docker Desktop's host.docker.internal reaches the Mac's
+//     <user>@<mbp-host>`. Docker Desktop's host.docker.internal reaches the Mac's
 //     loopback, where sshd binds the forward (verified 2026-10-07). The MBP pins
 //     RELAY_HOUSEHOLD_JWT, so it never calls /v1/register.
 //   - jarvisd: the `relay.url` notifications setting (env fallback RELAY_URL) =

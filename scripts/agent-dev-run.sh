@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build, enroll (first time only) and run the Jarvis desktop agent, on Linux or macOS.
 #
-#   scripts/agent-dev-run.sh --server http://10.0.0.122:7700 --email you@example.com   # first time
+#   scripts/agent-dev-run.sh --server http://192.0.2.10:7700 --email you@example.com   # first time
 #   scripts/agent-dev-run.sh                       # afterwards: build and run in the foreground
 #   scripts/agent-dev-run.sh --install             # start at login instead (user session only)
 #   scripts/agent-dev-run.sh --uninstall           # stop starting at login (keeps the enrollment)

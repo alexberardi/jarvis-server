@@ -403,7 +403,7 @@ func atoiHeader(r *Resp, name string) (int, bool) {
 	return n, err == nil && strconv.Itoa(n) == v
 }
 
-// EnvSSHCleanup, when set to an ssh destination (e.g. user@10.0.0.103) and a whisper repo path
+// EnvSSHCleanup, when set to an ssh destination (e.g. user@192.0.2.10) and a whisper repo path
 // separated by a colon ("user@host:~/jarvis/jarvis-whisper-api"), lets the suite remove the
 // empty voice_profiles/<household>/ directory the legacy purge leaves behind.
 const EnvSSHCleanup = "JARVIS_CONTRACT_WHISPER_SSH_CLEANUP"

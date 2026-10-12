@@ -245,7 +245,7 @@ func itoa(i int) string { return strconv.Itoa(i) }
 // taken over, with a warning naming the old address.
 func TestSelfRegistrationTakesOverExternalRow(t *testing.T) {
 	m, h := setup(t)
-	if c, _ := do(t, h, "POST", "/services", `{"name":"jarvis-recipes-server","host":"10.0.0.103","port":7030}`, "X-Admin-Token", token); c != 201 {
+	if c, _ := do(t, h, "POST", "/services", `{"name":"jarvis-recipes-server","host":"10.0.0.30","port":7030}`, "X-Admin-Token", token); c != 201 {
 		t.Fatal(c)
 	}
 	var logs strings.Builder
@@ -258,7 +258,7 @@ func TestSelfRegistrationTakesOverExternalRow(t *testing.T) {
 	if body["host"] != "localhost" || body["port"] != float64(7030) {
 		t.Fatalf("row %v", body)
 	}
-	if !strings.Contains(logs.String(), "was=10.0.0.103:7030") {
+	if !strings.Contains(logs.String(), "was=10.0.0.30:7030") {
 		t.Fatalf("no takeover warning: %s", logs.String())
 	}
 	logs.Reset()

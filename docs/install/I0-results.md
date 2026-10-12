@@ -20,7 +20,7 @@ a second run with the long-path workarounds is
 | macOS: jarvisd from a LaunchDaemon (`UserName` = login user) serves `/health` | **blocked** | `sudo` on the MBP needs a password (`sudo -n true` → "a password is required"); not worked around. Commands for the user below. |
 | macOS: same as a **LaunchAgent** (`gui/501`), as a proxy | yes | Parent `/sbin/launchd`, `domain = gui/501`; `/health` `{"status":"ok"}` 2 s after start. Bootstrapped over SSH the job sat in `pended nondemand spawn = speculative` with `runs = 0` and did not start until `launchctl kickstart` (I1: kickstart after bootstrap). |
 | macOS: Metal compute from the launchd job | yes (agent); daemon blocked | `/v1/hardware`: flavour `metal`, `MTL0 Apple M2 Max`, source `llama-server --list-devices (metal)`. Model manager installed `Qwen/Qwen2.5-0.5B-Instruct-GGUF` q4_k_m (503 MB) with engine `b11457-metal`; label `live` ready; chat through jarvisd's `/v1/chat/completions` (app client) answered `OK`, prompt 237 tok/s. The engine process (child of jarvisd, `-ngl 999`) has `AGXMetalG14X.bundle` and `libggml-metal` mapped and the per-user `com.apple.metal` shader cache open. |
-| macOS: mDNS `_jarvis-config._tcp` visible on the LAN, no Local Network prompt | yes (agent); daemon blocked | `dns-sd -B` on the Mac and `avahi-browse -rt` on 10.0.0.122 both list `Jarvis (Alexanders-MacBook-Pro)` port 17700; `mdnsbrowse` from 10.0.0.122 gets v4 `[10.0.0.103 192.168.64.1]`. Unicast probe: jarvisd (agent) fetched `http://10.0.0.122:7700/...` and got that host's 404 (a dead IP gave `i/o timeout`), so neither multicast nor unicast LAN traffic was blocked. No LNP/nehelper/tccd log lines for the process. I cannot see the Mac's screen, so "no prompt shown" is inferred from traffic not being held. |
+| macOS: mDNS `_jarvis-config._tcp` visible on the LAN, no Local Network prompt | yes (agent); daemon blocked | `dns-sd -B` on the Mac and `avahi-browse -rt` on <dev-box> both list `Jarvis (<mbp-hostname>)` port 17700; `mdnsbrowse` from <dev-box> gets v4 `[<mbp-host> 192.168.64.1]`. Unicast probe: jarvisd (agent) fetched `http://<dev-box>:7700/...` and got that host's 404 (a dead IP gave `i/o timeout`), so neither multicast nor unicast LAN traffic was blocked. No LNP/nehelper/tccd log lines for the process. I cannot see the Mac's screen, so "no prompt shown" is inferred from traffic not being held. |
 | Windows: raw `jarvisd.exe` as an SCM service under `NT SERVICE\jarvisd-raw` | no (expected; I1 work) | `sc start` → `FAILED 1053` after 142 s, state STOPPED, process gone (SCM killed it). Before dying it created its home at `C:\Windows\ServiceProfiles\jarvisd-raw\.jarvis`, confirming the service **must** pass `--home`. |
 | Windows: jarvisd as an SCM service under `NT SERVICE\jarvisd` (via `svcwrap`) | yes | `sc.exe create … obj= "NT SERVICE\jarvisd"`, `sidtype unrestricted`, ACL on `C:\ProgramData\jarvisd` granting `NT SERVICE\jarvisd:(OI)(CI)M` worked. `jarvisd.exe` owner `NT SERVICE\jarvisd`, session 0, `/health` ok, home `C:\ProgramData\jarvisd`, all listeners bound. Binaries in `C:\Program Files\jarvisd` were readable by the virtual account. |
 | Windows: llama-server under the virtual account in session 0 (CPU) | yes | Model manager installed the same 0.5B model with `b11457-cpu` in 9 s; `live` ready; chat `OK`; `llama-server.exe` owner `NT SERVICE\jarvisd`, session 0. |
@@ -31,11 +31,11 @@ a second run with the long-path workarounds is
 
 ## Other findings
 
-1. **mDNS hostname is doubled on macOS**: the SRV target is `Alexanders-MacBook-Pro.local.local.`
+1. **mDNS hostname is doubled on macOS**: the SRV target is `<mbp-hostname>.local.local.`
    (`os.Hostname()` already ends in `.local`; zeroconf appends `.local.`). avahi resolves it only
    via jarvisd's own answer. Fix in `internal/platform/mdns` (strip a trailing `.local`).
 2. **mDNS advertises bridge addresses**: the MBP announced `192.168.64.1` (bridge100) besides
-   10.0.0.103, and `avahi-resolve` picked the bridge one; this box announces 10 docker bridges. A
+   <mbp-host>, and `avahi-resolve` picked the bridge one; this box announces 10 docker bridges. A
    client that takes the first address can fail. Worth restricting to interfaces with a default
    route / private LAN (I2 or a small fix).
 3. **Windows stop**: jarvisd has no graceful stop on Windows today (no SIGTERM); the wrapper kills
@@ -64,13 +64,13 @@ a second run with the long-path workarounds is
 `~/jarvisd-i0/` on the MBP still holds the spike binary and script (the throwaway home was removed).
 
 ```sh
-ssh alexanderberardi@10.0.0.103
+ssh <user>@<mbp-host>
 cd ~/jarvisd-i0
 ./macos-launchd.sh up daemon        # sudo install plist to /Library/LaunchDaemons, bootstrap system, kickstart
 ./macos-launchd.sh check            # /health, launchd domain/user, dns-sd browse + lookup
 ./macos-launchd.sh metal            # superuser + app client, install 0.5B GGUF, chat, engine sockets
-./macos-launchd.sh lnp http://10.0.0.122:7700   # jarvisd -> LAN unicast
-# from 10.0.0.122: avahi-browse -rt _jarvis-config._tcp
+./macos-launchd.sh lnp http://<dev-box>:7700   # jarvisd -> LAN unicast
+# from <dev-box>: avahi-browse -rt _jarvis-config._tcp
 ./macos-launchd.sh down daemon      # bootout + remove plist
 ./macos-launchd.sh purge && rm -rf ~/jarvisd-i0
 ```

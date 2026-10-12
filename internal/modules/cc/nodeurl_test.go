@@ -10,7 +10,7 @@ import (
 
 func TestNodeURLs(t *testing.T) {
 	cfg := config.Config{Ports: map[string]int{config.ListenerCC: 17703, config.ListenerConfig: 17700}}
-	lan := func() string { return "10.0.0.122" }
+	lan := func() string { return "10.0.0.20" }
 	none := func() string { return "" }
 	cases := []struct {
 		name, host, remote, proto string
@@ -21,25 +21,25 @@ func TestNodeURLs(t *testing.T) {
 	}{
 		// The 2026-10-09 bug: a phone on USB `adb reverse` reaches the server as localhost.
 		{name: "localhost", host: "localhost:7703", lan: lan, cfg: cfg,
-			wantCC: "http://10.0.0.122:17703", wantConfig: "http://10.0.0.122:17700"},
+			wantCC: "http://10.0.0.20:17703", wantConfig: "http://10.0.0.20:17700"},
 		{name: "localhost no port", host: "localhost", lan: lan, cfg: cfg,
-			wantCC: "http://10.0.0.122:17703", wantConfig: "http://10.0.0.122:17700"},
+			wantCC: "http://10.0.0.20:17703", wantConfig: "http://10.0.0.20:17700"},
 		{name: "ipv4 loopback", host: "127.0.0.1:7703", lan: lan, cfg: cfg,
-			wantCC: "http://10.0.0.122:17703", wantConfig: "http://10.0.0.122:17700"},
+			wantCC: "http://10.0.0.20:17703", wantConfig: "http://10.0.0.20:17700"},
 		{name: "ipv6 loopback", host: "[::1]:7703", lan: lan, cfg: cfg,
-			wantCC: "http://10.0.0.122:17703", wantConfig: "http://10.0.0.122:17700"},
+			wantCC: "http://10.0.0.20:17703", wantConfig: "http://10.0.0.20:17700"},
 		{name: "upper-case localhost", host: "LocalHost.:7703", lan: lan, cfg: cfg,
-			wantCC: "http://10.0.0.122:17703", wantConfig: "http://10.0.0.122:17700"},
+			wantCC: "http://10.0.0.20:17703", wantConfig: "http://10.0.0.20:17700"},
 		{name: "unspecified", host: "0.0.0.0:7703", lan: lan, cfg: cfg,
-			wantCC: "http://10.0.0.122:17703", wantConfig: "http://10.0.0.122:17700"},
+			wantCC: "http://10.0.0.20:17703", wantConfig: "http://10.0.0.20:17700"},
 		{name: "default ports", host: "localhost:7703", lan: lan,
-			wantCC: "http://10.0.0.122:7703", wantConfig: "http://10.0.0.122:7700"},
+			wantCC: "http://10.0.0.20:7703", wantConfig: "http://10.0.0.20:7700"},
 		// No LAN address: nothing useful to say, so the fields are omitted.
 		{name: "loopback without LAN", host: "localhost:7703", lan: none, cfg: cfg},
 		{name: "loopback nil lan", host: "localhost:7703", cfg: cfg},
 		// A LAN host is reachable from the node as the phone used it.
-		{name: "lan ip", host: "10.0.0.122:7703", lan: lan, cfg: cfg,
-			wantCC: "http://10.0.0.122:7703", wantConfig: "http://10.0.0.122:17700"},
+		{name: "lan ip", host: "10.0.0.20:7703", lan: lan, cfg: cfg,
+			wantCC: "http://10.0.0.20:7703", wantConfig: "http://10.0.0.20:17700"},
 		{name: "mdns name", host: "jarvis.local:7703", lan: lan,
 			wantCC: "http://jarvis.local:7703", wantConfig: "http://jarvis.local:7700"},
 		{name: "ipv6 lan", host: "[fd00::5]:7703", lan: lan,

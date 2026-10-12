@@ -306,7 +306,7 @@ var ErrPlan = errors.New("errands: no usable plan")
 
 // defaultPlannerMaxTokens is errands.planner_max_tokens' default. Legacy used 6000, measured on
 // Qwen3.5-9B (~1900 think tokens); Qwen3-8B thought past 6000 on "check the weather, then set a
-// timer if it's sunny" and never planned (jarvis-dev, 2026-10-07).
+// timer if it's sunny" and never planned (the dev node, 2026-10-07).
 const defaultPlannerMaxTokens = 12000
 
 func (s *Service) plannerMaxTokens(ctx context.Context) int {

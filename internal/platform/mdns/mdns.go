@@ -200,7 +200,7 @@ func DefaultInstance() string {
 }
 
 // instanceFor is the instance name for hostname h: its first label, so a macOS
-// "Alexanders-MacBook-Pro.local" reads "Jarvis (Alexanders-MacBook-Pro)".
+// "Example-MacBook-Pro.local" reads "Jarvis (Example-MacBook-Pro)".
 func instanceFor(h string) string {
 	h = HostLabel(h)
 	if i := strings.IndexByte(h, '.'); i > 0 {

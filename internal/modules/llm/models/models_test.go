@@ -532,7 +532,7 @@ func TestCatalogFitExcludesTheLabelsItWouldReplace(t *testing.T) {
 	}
 }
 
-// The jarvis-dev incident: whisper large-v3-turbo "fit" a 12 GB card on its own, was
+// The the dev node incident: whisper large-v3-turbo "fit" a 12 GB card on its own, was
 // recommended and assigned next to Qwen3-8B, and crash-looped on cudaMalloc.
 func TestFitCountsCoResidentEngines(t *testing.T) {
 	card := engine.Hardware{Flavour: engine.FlavourCUDA, Devices: []engine.Device{

@@ -6,7 +6,7 @@ re-running rc2's (stamped) `install.sh`, rolled back by hand, upgraded again wit
 whose blocker R6 (no dated tool call possible) rc2 fixes; this run checks that fix live through the
 upgrade.
 
-**Box:** 10.0.0.122 (Arch/Omarchy, systemd, RTX 3080 Ti, ufw admitting 10.0.0.0/24, no passwordless
+**Box:** <dev-box> (Arch/Omarchy, systemd, RTX 3080 Ti, ufw admitting <lan-subnet>, no passwordless
 sudo), so `--user`. Prod and the MBP untouched.
 
 **Reused, not re-downloaded:** the A10b home (`~/.jarvisd.rehearsal-rc1-2026-10-08`: rc1's database with
@@ -19,8 +19,8 @@ it. Every label came up `ready` straight away.
 --user) was stopped with SIGTERM (it and its three engines gone in 0.34 s) and its home renamed
 `~/.jarvisd.pre-upgrade`; afterwards renamed back and restarted with the same command, cwd, stdio, session
 leader, parent and `JARVIS_*`/`ADMIN_API_KEY` environment (sha256 of the sorted vars equal to the
-recorded `/proc/<pid>/environ`), engines healthy 5 s later, jarvis-dev back on it. Linger `no` →
-`yes` (`service install --user`) → `no`. jarvis-dev's `config.json` sha256 `68e496ae…` before and
+recorded `/proc/<pid>/environ`), engines healthy 5 s later, <dev-node> back on it. Linger `no` →
+`yes` (`service install --user`) → `no`. <dev-node>'s `config.json` sha256 `68e496ae…` before and
 after. `~/.local/bin/jarvisd*` and `~/.local/lib/jarvisd` did not exist before and don't now (the
 binaries are in the rehearsal home's `rehearsal-bin/`: `jarvisd` = rc2, `jarvisd.prev` = rc1).
 
@@ -31,7 +31,7 @@ binaries are in the rehearsal home's `rehearsal-bin/`: `jarvisd` = rc2, `jarvisd
 | Stop dev jarvisd, swap homes | 0.34 s | SIGTERM via `ps` + `awk` on argv. |
 | rc1: `curl -fsSLo install.sh …/v0.1.0-rc1/install.sh && sh install.sh --version v0.1.0-rc1 --user` | ~2 s | The mise minisign shim → checksum only (as in A10b). Unit written, healthy, doctor all OK. Closing line "Setup is done (or jarvisd hasn't started yet)" (U3). All six labels `ready`, prompt provider `Qwen3_5_9B_Compressed`, superuser login works. |
 | rc1 chat | 1.6 s | "Paris is the capital of France." |
-| jarvis-dev pointed at the rehearsal | ~70 s to tools | Only the node's `api_key` swapped to the one A10b registered for the same `node_id` (backup on the Pi and in the scratchpad); the node fetched its MQTT credentials after one broker refusal, warmup 21 client tools. |
+| <dev-node> pointed at the rehearsal | ~70 s to tools | Only the node's `api_key` swapped to the one A10b registered for the same `node_id` (backup on the Pi and in the scratchpad); the node fetched its MQTT credentials after one broker refusal, warmup 21 client tools. |
 | rc1 weather (baseline) | 13.8 s | "What's the weather like?" through the real node: five `get_weather_meteo` runs, **"Too many tool iterations"**: R6 reproduced on the published rc1. |
 | **Script upgrade:** `curl -fsSLo install.sh …/v0.1.0-rc2/install.sh && sh install.sh --user` | **~10 s** | "Upgrading jarvisd v0.1.0-rc1 -> v0.1.0-rc2 with `jarvisd upgrade`" (the stamp picked rc2 with no `--version`), rc1's binary verified rc2's `SHA256SUMS.minisig` with its built-in key, 20 MB download, snapshot `backups/jarvis-v0.1.0_rc1-20261008T051736…db`, swap, restart, **health gate passed 18 ms after the new process logged its start**, "jarvisd v0.1.0-rc2 is up and healthy". |
 | rc2 checks | — | `jarvisd version` v0.1.0-rc2, `jarvisd.prev` v0.1.0-rc1, `last-upgrade.json` `succeeded rc1 → rc2`, `updates/` holds nothing else, labels all `ready`, doctor all OK, `service status` restarts 0, `upgrade --check` up to date. |
@@ -39,7 +39,7 @@ binaries are in the rehearsal home's `rehearsal-bin/`: `jarvisd` = rc2, `jarvisd
 | **Rollback:** `jarvisd upgrade --rollback` | CLI 0.1 s; healthy ≤ 4.5 s | "restored …/jarvisd.prev; the database is unchanged…", "restarting the service", exit 0, **without waiting** for the restart (U2); rc1 started 80 ms later, `/health` answering by +4.5 s; rc1 chat 2.7 s. `last-upgrade.json` still said `succeeded rc1 → rc2` (U1). DB untouched (rc2 adds no migrations; the downgrade guard passed). |
 | **Admin Update now** (rc1) | **6.9 s** POST → rc2 healthy | Update checks were already on from A10b. `GET /api/update`: rc2 offered (`prerelease: true`, `can_apply: true`). `POST /api/update/apply {"version":"v0.1.0-rc2"}` → 202; polled job: checking → verifying (+0.25 s) → downloading → unpacking (+0.75 s) → installing, marker `staged` (+1.0 s) → restarting, marker `swapped` (+1.25 s) → connection refused for ~5 s → `/api/system/info` version v0.1.0-rc2 with a new `started_at`, marker gone, `last` `succeeded` (+6.9 s). Second snapshot in `backups/`, `jarvisd.prev` rc1, `service status` restarts 1 (R10). Weather turn on rc2 again 5.0 s, correct. |
 | Voice turn | skipped | Optional this time; the weather turns already ran the real node's tool over MQTT. |
-| Restore | ~2 min | `jarvisd service uninstall --user --keep-firewall`, binaries into `rehearsal-bin/`, empty `~/.local/lib/jarvisd` removed, homes swapped back, dev jarvisd restarted (see U7), node `config.json` copied back from its backup and the node restarted (Restart=always), linger off. jarvis-dev's warmup on the dev jarvisd 01:21:15. |
+| Restore | ~2 min | `jarvisd service uninstall --user --keep-firewall`, binaries into `rehearsal-bin/`, empty `~/.local/lib/jarvisd` removed, homes swapped back, dev jarvisd restarted (see U7), node `config.json` copied back from its backup and the node restarted (Restart=always), linger off. <dev-node>'s warmup on the dev jarvisd 01:21:15. |
 
 ## Friction
 

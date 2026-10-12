@@ -89,7 +89,7 @@ func TestPublicURLByHost(t *testing.T) {
 		}
 	}
 	// On the LAN: the LAN URLs.
-	check("lan ip", getURLs(t, h, "/services", "10.0.0.107:7700", lanPeer), lan)
+	check("lan ip", getURLs(t, h, "/services", "10.0.0.40:7700", lanPeer), lan)
 	check("lan mdns", getURLs(t, h, "/services", "jarvis.local:7700", lanPeer), lan)
 	// Through the tunnel: Cloudflare preserves Host. Case, port and a trailing dot don't matter;
 	// any configured public host counts, not only config's own.
@@ -104,7 +104,7 @@ func TestPublicURLByHost(t *testing.T) {
 	// /services/{name} answers in kind too.
 	check("one, tunnel", getURLs(t, h, "/services/jarvis-command-center", "config.example.io", loopPeer),
 		map[string]string{"jarvis-command-center": "https://command-center.example.io:443"})
-	check("one, lan", getURLs(t, h, "/services/jarvis-command-center", "10.0.0.107:7700", lanPeer),
+	check("one, lan", getURLs(t, h, "/services/jarvis-command-center", "10.0.0.40:7700", lanPeer),
 		map[string]string{"jarvis-command-center": "http://localhost:7703"})
 
 	// A tunnel that rewrites Host: forwarded headers count from a loopback peer (cloudflared on
@@ -112,25 +112,25 @@ func TestPublicURLByHost(t *testing.T) {
 	check("xfh loopback", getURLs(t, h, "/services", "localhost:7700", loopPeer, "X-Forwarded-Host", "config.example.io"), public)
 	check("xfh ipv6 loopback", getURLs(t, h, "/services", "localhost:7700", "[::1]:5000", "X-Forwarded-Host", "config.example.io, x"), public)
 	check("cf loopback", getURLs(t, h, "/services", "localhost:7700", loopPeer, "Cf-Connecting-Ip", "203.0.113.7"), public)
-	check("xfh lan", getURLs(t, h, "/services", "10.0.0.107:7700", lanPeer, "X-Forwarded-Host", "config.example.io"), lan)
-	check("cf lan", getURLs(t, h, "/services", "10.0.0.107:7700", lanPeer, "Cf-Connecting-Ip", "203.0.113.7"), lan)
+	check("xfh lan", getURLs(t, h, "/services", "10.0.0.40:7700", lanPeer, "X-Forwarded-Host", "config.example.io"), lan)
+	check("cf lan", getURLs(t, h, "/services", "10.0.0.40:7700", lanPeer, "Cf-Connecting-Ip", "203.0.113.7"), lan)
 	check("xfh loopback unknown", getURLs(t, h, "/services", "localhost:7700", loopPeer, "X-Forwarded-Host", "evil.example"), lan)
 }
 
 func TestPublicURLStyleExternal(t *testing.T) {
 	_, h := publicSetup(t)
-	got := getURLs(t, h, "/services?style=external&remote_host=10.0.0.107", "10.0.0.107:7700", lanPeer)
+	got := getURLs(t, h, "/services?style=external&remote_host=10.0.0.40", "10.0.0.40:7700", lanPeer)
 	for k, v := range map[string]string{
 		"jarvis-command-center": "https://command-center.example.io:443",
 		"jarvis-mqtt-broker":    "wss://mqtt.example.io:443",
-		"jarvis-auth":           "http://10.0.0.107:7701", // legacy rewrite where no public URL is set
+		"jarvis-auth":           "http://10.0.0.40:7701", // legacy rewrite where no public URL is set
 	} {
 		if got[k] != v {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
 		}
 	}
 	// remote keeps its legacy meaning (published coordinates, not the public URL).
-	if got := getURLs(t, h, "/services?style=remote&remote_host=10.0.0.107", "10.0.0.107:7700", lanPeer); got["jarvis-command-center"] != "http://10.0.0.107:7703" {
+	if got := getURLs(t, h, "/services?style=remote&remote_host=10.0.0.40", "10.0.0.40:7700", lanPeer); got["jarvis-command-center"] != "http://10.0.0.40:7703" {
 		t.Errorf("remote: %v", got)
 	}
 }
@@ -144,7 +144,7 @@ func TestPublicURLSurvivesSyncSelf(t *testing.T) {
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := getURLs(t, h, "/services", "10.0.0.107:7700", lanPeer)["jarvis-command-center"]; got != "http://localhost:17703" {
+	if got := getURLs(t, h, "/services", "10.0.0.40:7700", lanPeer)["jarvis-command-center"]; got != "http://localhost:17703" {
 		t.Fatalf("port change not synced: %s", got)
 	}
 	if got := getURLs(t, h, "/services", "config.example.io", loopPeer)["jarvis-command-center"]; got != "https://command-center.example.io:443" {

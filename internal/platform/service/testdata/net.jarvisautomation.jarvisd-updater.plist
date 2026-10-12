@@ -11,13 +11,13 @@
 		<string>upgrade</string>
 		<string>--helper</string>
 		<string>--home</string>
-		<string>/Users/alex/.jarvisd</string>
+		<string>/Users/user/.jarvisd</string>
 		<string>--owner</string>
-		<string>alex</string>
+		<string>user</string>
 	</array>
 	<key>QueueDirectories</key>
 	<array>
-		<string>/Users/alex/.jarvisd/updates/requests</string>
+		<string>/Users/user/.jarvisd/updates/requests</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

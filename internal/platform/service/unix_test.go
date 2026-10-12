@@ -75,7 +75,7 @@ func testSystemd(t *testing.T, userMode bool, euid int) (*systemd, *fakeRun, *[]
 			chowns = append(chowns, chownCall{p, uid, gid})
 			return nil
 		},
-		current: func() (*user.User, error) { return &user.User{Username: "alex"}, nil },
+		current: func() (*user.User, error) { return &user.User{Username: "user"}, nil },
 		getenv:  func(string) string { return "" },
 	}
 	return s, f, &chowns, root
@@ -213,7 +213,7 @@ func TestSystemdInstallRefusals(t *testing.T) {
 		t.Errorf("non-root: %v", err)
 	}
 	s, f, _, root := testSystemd(t, false, 0)
-	for _, bin := range []string{"/home/alex/Downloads/jarvisd", "/tmp/jarvisd", "/root/jarvisd"} {
+	for _, bin := range []string{"/home/user/Downloads/jarvisd", "/tmp/jarvisd", "/root/jarvisd"} {
 		if err := s.Install(ctx, InstallOptions{Binary: bin, Home: filepath.Join(root, "h")}); err == nil {
 			t.Errorf("%s: want refusal", bin)
 		}
@@ -230,16 +230,16 @@ func TestSystemdInstallRefusals(t *testing.T) {
 func TestSystemdInstallUser(t *testing.T) {
 	s, f, chowns, root := testSystemd(t, true, 1000)
 	home := filepath.Join(root, "dot-jarvisd")
-	f.fail["loginctl enable-linger alex"] = errors.New("polkit says no")
-	if err := s.Install(context.Background(), InstallOptions{Binary: "/home/alex/.local/bin/jarvisd", Home: home}); err != nil {
+	f.fail["loginctl enable-linger user"] = errors.New("polkit says no")
+	if err := s.Install(context.Background(), InstallOptions{Binary: "/home/user/.local/bin/jarvisd", Home: home}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
 		"systemctl --user daemon-reload",
 		"systemctl --user enable jarvisd.service",
 		"systemctl --user restart jarvisd.service",
-		"loginctl show-user alex -p Linger --value",
-		"loginctl enable-linger alex",
+		"loginctl show-user user -p Linger --value",
+		"loginctl enable-linger user",
 	}
 	if !slices.Equal(f.calls, want) {
 		t.Fatalf("calls %q", f.calls)
@@ -253,7 +253,7 @@ func TestSystemdInstallUser(t *testing.T) {
 	if st, err := os.Stat(filepath.Join(home, "jarvisd.env")); err != nil || st.Mode().Perm() != 0o600 {
 		t.Fatalf("env %v %v", st, err)
 	}
-	if !strings.Contains(s.out.(*bytes.Buffer).String(), "sudo loginctl enable-linger alex") {
+	if !strings.Contains(s.out.(*bytes.Buffer).String(), "sudo loginctl enable-linger user") {
 		t.Errorf("linger failure not explained: %s", s.out)
 	}
 	b, _ := os.ReadFile(s.unitPath)
@@ -266,7 +266,7 @@ func TestSystemdInstallUser(t *testing.T) {
 // now turns it off again, but only when install was what turned it on.
 func TestSystemdUserLinger(t *testing.T) {
 	ctx := context.Background()
-	const show = "loginctl show-user alex -p Linger --value"
+	const show = "loginctl show-user user -p Linger --value"
 	for _, tc := range []struct {
 		before      string // Linger before install
 		wantDisable bool
@@ -281,13 +281,13 @@ func TestSystemdUserLinger(t *testing.T) {
 			f.fail[show] = errors.New("no logind")
 		}
 		home := filepath.Join(root, "h")
-		if err := s.Install(ctx, InstallOptions{Binary: "/home/alex/.local/bin/jarvisd", Home: home}); err != nil {
+		if err := s.Install(ctx, InstallOptions{Binary: "/home/user/.local/bin/jarvisd", Home: home}); err != nil {
 			t.Fatal(err)
 		}
 		// A reinstall sees lingering on (we turned it on) and must keep the mark.
 		f.out[show] = "yes\n"
 		delete(f.fail, show)
-		if err := s.Install(ctx, InstallOptions{Binary: "/home/alex/.local/bin/jarvisd", Home: home}); err != nil {
+		if err := s.Install(ctx, InstallOptions{Binary: "/home/user/.local/bin/jarvisd", Home: home}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(s.lingerMark); (err == nil) != tc.wantDisable {
@@ -297,7 +297,7 @@ func TestSystemdUserLinger(t *testing.T) {
 		if err := s.Uninstall(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if got := slices.Contains(f.calls, "loginctl disable-linger alex"); got != tc.wantDisable {
+		if got := slices.Contains(f.calls, "loginctl disable-linger user"); got != tc.wantDisable {
 			t.Errorf("before %q: disable-linger %v, calls %q", tc.before, got, f.calls)
 		}
 		if _, err := os.Stat(s.lingerMark); err == nil {
@@ -309,15 +309,15 @@ func TestSystemdUserLinger(t *testing.T) {
 
 	// disable-linger failing: explained, and the mark kept for a retry.
 	s, f, _, root := testSystemd(t, true, 1000)
-	f.out["loginctl show-user alex -p Linger --value"] = "no\n"
+	f.out["loginctl show-user user -p Linger --value"] = "no\n"
 	if err := s.Install(ctx, InstallOptions{Binary: "/x/jarvisd", Home: filepath.Join(root, "h")}); err != nil {
 		t.Fatal(err)
 	}
-	f.fail["loginctl disable-linger alex"] = errors.New("polkit says no")
+	f.fail["loginctl disable-linger user"] = errors.New("polkit says no")
 	if err := s.Uninstall(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s.out.(*bytes.Buffer).String(), "loginctl disable-linger alex") {
+	if !strings.Contains(s.out.(*bytes.Buffer).String(), "loginctl disable-linger user") {
 		t.Errorf("failure not explained: %s", s.out)
 	}
 	if _, err := os.Stat(s.lingerMark); err != nil {
@@ -346,8 +346,8 @@ func testLaunchd(t *testing.T, euid int, sudoUser string) (*launchd, *fakeRun, *
 		euid:       func() int { return euid },
 		getenv:     func(k string) string { return map[string]string{"SUDO_USER": sudoUser}[k] },
 		lookupUser: func(n string) (*user.User, error) {
-			if n == "alex" {
-				return &user.User{Username: n, Uid: "501", Gid: "20", HomeDir: filepath.Join(root, "Users", "alex")}, nil
+			if n == "user" {
+				return &user.User{Username: n, Uid: "501", Gid: "20", HomeDir: filepath.Join(root, "Users", "user")}, nil
 			}
 			return nil, user.UnknownUserError(n)
 		},
@@ -362,7 +362,7 @@ func testLaunchd(t *testing.T, euid int, sudoUser string) (*launchd, *fakeRun, *
 }
 
 func TestLaunchdInstall(t *testing.T) {
-	l, f, chowns, root := testLaunchd(t, 0, "alex")
+	l, f, chowns, root := testLaunchd(t, 0, "user")
 	ctx := context.Background()
 	loaded, helperLoaded := false, false
 	f.hook = func(line string) {
@@ -394,7 +394,7 @@ func TestLaunchdInstall(t *testing.T) {
 	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd"}); err != nil {
 		t.Fatal(err)
 	}
-	home := filepath.Join(root, "Users", "alex", ".jarvisd")
+	home := filepath.Join(root, "Users", "user", ".jarvisd")
 	want := []string{
 		"launchctl print " + target,
 		"launchctl print " + helperTarget,
@@ -415,11 +415,11 @@ func TestLaunchdInstall(t *testing.T) {
 	// The updater LaunchDaemon: root (no UserName), woken by the request queue in the home.
 	hb, _ := os.ReadFile(l.helperPath)
 	if strings.Contains(string(hb), "UserName") || !strings.Contains(string(hb), "<string>"+filepath.Join(home, "updates", "requests")+"</string>") ||
-		!strings.Contains(string(hb), "<string>--owner</string>\n\t\t<string>alex</string>") || !helperLoaded {
+		!strings.Contains(string(hb), "<string>--owner</string>\n\t\t<string>user</string>") || !helperLoaded {
 		t.Errorf("helper plist (loaded %v):\n%s", helperLoaded, hb)
 	}
 	b, _ := os.ReadFile(l.plistPath)
-	if !strings.Contains(string(b), "<string>alex</string>") || l.InstalledHome() != home {
+	if !strings.Contains(string(b), "<string>user</string>") || l.InstalledHome() != home {
 		t.Errorf("plist:\n%s", b)
 	}
 	st, err := l.Status(ctx)
@@ -465,10 +465,10 @@ func TestLaunchdRefusals(t *testing.T) {
 		sudo string
 		opts InstallOptions
 	}{
-		{501, "alex", InstallOptions{Binary: "/b"}},
+		{501, "user", InstallOptions{Binary: "/b"}},
 		{0, "", InstallOptions{Binary: "/b"}},
 		{0, "root", InstallOptions{Binary: "/b"}},
-		{0, "alex", InstallOptions{Binary: "/b", User: true}},
+		{0, "user", InstallOptions{Binary: "/b", User: true}},
 		{0, "nobody-here", InstallOptions{Binary: "/b"}},
 	} {
 		l, f, _, _ := testLaunchd(t, tc.euid, tc.sudo)
@@ -482,7 +482,7 @@ func TestLaunchdRefusals(t *testing.T) {
 	// --run-as names the account without sudo's help.
 	l, _, _, _ := testLaunchd(t, 0, "")
 	l.run = (&fakeRun{fail: map[string]error{"launchctl print " + target: errors.New("no"), "launchctl print " + helperTarget: errors.New("no")}}).run
-	if err := l.Install(ctx, InstallOptions{Binary: "/b", RunAs: "alex", NoStart: true}); err != nil {
+	if err := l.Install(ctx, InstallOptions{Binary: "/b", RunAs: "user", NoStart: true}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -539,7 +539,7 @@ func TestSystemdStaleDefinition(t *testing.T) {
 }
 
 func TestLaunchdStaleDefinition(t *testing.T) {
-	l, f, _, root := testLaunchd(t, 0, "alex")
+	l, f, _, root := testLaunchd(t, 0, "user")
 	f.fail["launchctl print "+target] = errors.New("Could not find service")
 	ctx := context.Background()
 	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd", NoStart: true}); err != nil {
@@ -560,7 +560,7 @@ func TestLaunchdStaleDefinition(t *testing.T) {
 	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd", Home: l.InstalledHome(), NoStart: true}); err != nil {
 		t.Fatal(err)
 	}
-	if p := l.installed(); p.UserName != "alex" || p.Home != filepath.Join(root, "Users", "alex", ".jarvisd") {
+	if p := l.installed(); p.UserName != "user" || p.Home != filepath.Join(root, "Users", "user", ".jarvisd") {
 		t.Fatalf("reinstall changed the account or home: %+v", p)
 	}
 	if st, _ := l.Status(ctx); st.Stale {

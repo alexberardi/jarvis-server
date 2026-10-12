@@ -175,7 +175,7 @@ func TestMigrateRejectsBadModuleName(t *testing.T) {
 }
 
 // Sub-systems land in parallel: a DB that already applied 00090 must still apply a 00080
-// that arrives later (jarvis-dev hit "missing (out-of-order) migration" and wouldn't start).
+// that arrives later (the dev node hit "missing (out-of-order) migration" and wouldn't start).
 func TestMigrateAppliesOutOfOrder(t *testing.T) {
 	d := open(t)
 	ctx := context.Background()
