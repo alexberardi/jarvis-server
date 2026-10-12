@@ -1,7 +1,7 @@
 // jarvis-agent is the Jarvis desktop node: it enrolls with jarvisd like a Pi node, connects to
 // jarvisd's MQTT, and offers OS control (open, volume, windows) as client tools.
 //
-//	jarvis-agent enroll --server http://10.0.0.122:7700 --email you@example.com
+//	jarvis-agent enroll --server http://192.0.2.10:7700 --email you@example.com
 //	jarvis-agent run
 //	jarvis-agent status
 //	jarvis-agent try desktop_set_volume '{"volume": 30}'
@@ -98,7 +98,7 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: jarvis-agent <command> [flags]
 
   enroll   register this computer as a node of a jarvisd household
-           --server URL (jarvisd config service, e.g. http://10.0.0.122:7700)
+           --server URL (jarvisd config service, e.g. http://192.0.2.10:7700)
            then either --email ADDR [--household ID] (prompts for the password)
            or --token prov_... --node-id ID (a token minted elsewhere)
            [--name NAME] [--room ROOM] [--creds PATH] [--force | --if-needed]
@@ -165,7 +165,7 @@ func nativeHost() (*host.Host, error) {
 
 func enroll(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-	server := fs.String("server", "", "jarvisd config service URL, e.g. http://10.0.0.122:7700")
+	server := fs.String("server", "", "jarvisd config service URL, e.g. http://192.0.2.10:7700")
 	email := fs.String("email", "", "your Jarvis account email (prompts for the password)")
 	pwStdin := fs.Bool("password-stdin", false, "read the password from stdin instead of prompting")
 	household := fs.String("household", "", "household id (needed only if you belong to several)")
@@ -192,7 +192,7 @@ func enroll(ctx context.Context, args []string) error {
 		return fmt.Errorf("already enrolled (%s); pass --force to enroll again", path)
 	}
 	if *server == "" {
-		return errors.New("--server is required (jarvisd's address, e.g. http://10.0.0.122:7700)")
+		return errors.New("--server is required (jarvisd's address, e.g. http://192.0.2.10:7700)")
 	}
 	hc := &http.Client{Timeout: 20 * time.Second}
 	svcs, err := node.Discover(ctx, hc, *server)

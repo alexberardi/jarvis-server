@@ -256,7 +256,7 @@ is weights + KV (`kv_bytes_per_token` × context, f16) + ~3% + 600 MB for LLMs, 
 500 MB for whisper.
 
 **Co-residency.** A verdict is for the model *next to what is already on the card*, not on an
-empty one (the jarvis-dev incident: large-v3-turbo "fit" a 12 GB card alone and crash-looped
+empty one (the <dev-node> incident: large-v3-turbo "fit" a 12 GB card alone and crash-looped
 next to Qwen3-8B and the desktop). `residents` lists that load: each local engine label's
 estimate (labels sharing one engine, same model + context + devices, count once; CPU, remote,
 shared and off labels count nothing), plus `"other programs"`: card memory in use at detection

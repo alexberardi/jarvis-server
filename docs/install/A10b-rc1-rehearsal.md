@@ -3,10 +3,10 @@
 The second A10 rehearsal ([A10-rehearsal.md](A10-rehearsal.md) was the first), this time from the
 **real GitHub prerelease** `v0.1.0-rc1` (assets `install.sh`, `install.ps1`, four archives,
 `SHA256SUMS`, `SHA256SUMS.minisig` signed with the project key; darwin binary notarized). Wiped home,
-the one-liner, the browser wizard with real downloads, chat, a voice turn through the real jarvis-dev
+the one-liner, the browser wizard with real downloads, chat, a voice turn through the real <dev-node>
 node, doctor, the Update page, the admin's restart button, `upgrade --check`, then a full restore.
 
-**Box:** 10.0.0.122 (Arch/Omarchy, systemd, RTX 3080 Ti 12 GB, ufw already admitting 10.0.0.0/24, no
+**Box:** <dev-box> (Arch/Omarchy, systemd, RTX 3080 Ti 12 GB, ufw already admitting <lan-subnet>, no
 passwordless sudo), so `--user`. **MBP:** checked, not installed (see "MBP" below).
 
 **What was preserved:** the dev jarvisd (`dev-433f208`, started by hand from `~/.jarvisd/run.sh`, cwd
@@ -14,10 +14,10 @@ passwordless sudo), so `--user`. **MBP:** checked, not installed (see "MBP" belo
 its three engines gone in 0.5 s), `~/.jarvisd` renamed to `~/.jarvisd.pre-rc1`, and afterwards renamed
 back and restarted with the same command, cwd, stdio and `JARVIS_*`/`ADMIN_API_KEY` environment (byte
 compare against `/proc/<pid>/environ`), parent systemd --user as before. Engines healthy 7 s later,
-jarvis-dev back on MQTT on the first try. The rehearsal home is kept as
+<dev-node> back on MQTT on the first try. The rehearsal home is kept as
 `~/.jarvisd.rehearsal-rc1-2026-10-08` (9.2 GB; the rc1 binary and `jarvisd.prev` from `~/.local` moved
 into its `rehearsal-bin/`, since neither existed before). Linger `no` → `yes` (by `service install
---user`) → `no`. jarvis-dev's `config.json` restored byte for byte (sha256 `68e496ae…` before and after).
+--user`) → `no`. <dev-node>'s `config.json` restored byte for byte (sha256 `68e496ae…` before and after).
 
 ## Timeline
 
@@ -34,7 +34,7 @@ into its `rehearsal-bin/`, since neither existed before). Linger `no` → `yes` 
 | Models: "Install recommended (5)" | **2 min 3 s** | 9.80 GB, ~80 MB/s, **two lanes** (F7 fix): big lane Qwen3.5-9B + mmproj + llama-server CUDA 7.37 GB done +104 s; small lane all-MiniLM 812 MB +18 s → whisper small.en + whisper-server CUDA 1.24 GB +65 s → Kokoro 350 MB +121 s → ERes2Net 26 MB +122 s. TTS ready at 2:01 (first rehearsal 2:32; R8). |
 | Privacy | 1.8 s | Defaults unchanged from the first rehearsal (web search, reader proxy, update checks, push, ambient context, speaker recognition off; memories, learning on). |
 | Done → Dashboard | 3.0 s | Six labels ready, prompt provider `Qwen3_5_9B_Compressed` (from the live model), every check passed. **Wizard total 2 min 13 s.** |
-| Node re-pair (jarvis-dev) | 44 s to MQTT, 47 s warmup | Same procedure as the first rehearsal; one broker refusal, credentials fetched and persisted, connected. **The node's LLM warmup on Qwen3.5-9B completed** (the F10 "No user query found" error is gone). |
+| Node re-pair (<dev-node>) | 44 s to MQTT, 47 s warmup | Same procedure as the first rehearsal; one broker refusal, credentials fetched and persisted, connected. **The node's LLM warmup on Qwen3.5-9B completed** (the F10 "No user query found" error is gone). |
 | Voice turn (wake word + question through the Pi's speaker) | wake cycle 8.0 s | STT "is the capital of France." (start cut by the wake window, as before), **Qwen3.5-9B answered "Paris."**: LLM 146 ms (9 195 prompt tokens, cached), first audio byte 290 ms, reply played. |
 | Mobile chat (`POST /api/v0/mobile/chat`, the real node) | 3.8 s cold, 2.2 s warm | "Paris is the capital of France."; a joke 2.2 s. **"What's the weather like?" → "Too many tool iterations" (R6, blocker, fixed).** |
 | TTS / STT | 0.83 s / 0.27 s | 171 KB WAV; exact transcript. |

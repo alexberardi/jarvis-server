@@ -6,21 +6,21 @@
 	<key>Label</key>
 	<string>net.jarvisautomation.jarvisd</string>
 	<key>UserName</key>
-	<string>alex</string>
+	<string>user</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/local/bin/jarvisd</string>
 		<string>serve</string>
 		<string>--home</string>
-		<string>/Users/alex/.jarvisd</string>
+		<string>/Users/user/.jarvisd</string>
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>HOME</key>
-		<string>/Users/alex</string>
+		<string>/Users/user</string>
 	</dict>
 	<key>WorkingDirectory</key>
-	<string>/Users/alex/.jarvisd</string>
+	<string>/Users/user/.jarvisd</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
@@ -40,8 +40,8 @@
 		<integer>65536</integer>
 	</dict>
 	<key>StandardOutPath</key>
-	<string>/Users/alex/.jarvisd/logs/jarvisd.log</string>
+	<string>/Users/user/.jarvisd/logs/jarvisd.log</string>
 	<key>StandardErrorPath</key>
-	<string>/Users/alex/.jarvisd/logs/jarvisd.log</string>
+	<string>/Users/user/.jarvisd/logs/jarvisd.log</string>
 </dict>
 </plist>

@@ -26,7 +26,7 @@ What this runbook does (decisions it rests on):
 - **A10 node technique** (fallback only since ID6r: imported nodes keep their keys). A node the import
   didn't bring is re-pointed without a factory reset (keeps Wi-Fi): register the
   node's **existing** `node_id` on jarvisd with a provisioning token, swap `api_key` in its `config.json`,
-  restart the node service ([A10-rehearsal.md](A10-rehearsal.md) "Node (jarvis-dev) without physical
+  restart the node service ([A10-rehearsal.md](A10-rehearsal.md) "Node (<dev-node>) without physical
   access").
 - **ID12.** Prod's model, Qwen3.8-27B, has a strict chat template; the catalog flags it
   `fold_system_messages`, so it works on jarvisd (this is also the likely cause of prod's 2026-10-04 500s).
@@ -130,7 +130,7 @@ All must be **yes** before the window starts. Record the answers in STATUS.
 |---|---|---|
 | G1 | A **signed** release `<tag>` exists (needs repo secrets `MINISIGN_SECRET_KEY` + `MINISIGN_PASSWORD`, STATUS "Next" (1)) and its `verify` job is green | GitHub release page lists `SHA256SUMS.minisig` |
 | G2 | The same `<tag>` passed a fresh install + voice turn on the dev box (A10 again, system unit if anyone can sudo there) | STATUS entry |
-| G3 | Kitchen node software has the "before cutover" node changes: `chat_text()` → `/api/v0/node/llm/chat` (EXTERNAL-CHANGES D5) and per-node MQTT credentials (D4/D7). jarvis-dev passed A10 with them; confirm 0.3.1 includes them (Q5) | node-setup release notes / `git tag --contains` |
+| G3 | Kitchen node software has the "before cutover" node changes: `chat_text()` → `/api/v0/node/llm/chat` (EXTERNAL-CHANGES D5) and per-node MQTT credentials (D4/D7). <dev-node> passed A10 with them; confirm 0.3.1 includes them (Q5) | node-setup release notes / `git tag --contains` |
 | G4 | Mobile app build in users' hands hides the Forge test-install screen (EXTERNAL-CHANGES, "before cutover") or that screen is accepted as broken | app release |
 | G5 | Users told: they sign in again once with their old email and password (accounts, memories, routines and contacts are imported since ID6r, §4.3a); voice enrollment starts over; browser chat (jarvis-web) goes away (Q2, Q3) | message sent |
 | G6 | Off-LAN access decision made (Q1) | answer recorded |

@@ -4,8 +4,8 @@ Admin inventory row A10 and installer row I9 (LD5): a wiped home, `install.sh`, 
 with real downloads, a chat turn, a voice turn, an upgrade and a rollback, done as a user would. The
 MBP (Metal) and Windows rows are still to do.
 
-**Box:** 10.0.0.122, Linux (Omarchy/Arch, systemd), 24 CPU threads, 31 GB, RTX 3080 Ti 12 GB,
-ufw active (rules for 10.0.0.0/24 already there from earlier dev work). No passwordless sudo, so
+**Box:** <dev-box>, Linux (Omarchy/Arch, systemd), 24 CPU threads, 31 GB, RTX 3080 Ti 12 GB,
+ufw active (rules for <lan-subnet> already there from earlier dev work). No passwordless sudo, so
 `install.sh --user` (systemd --user unit, `~/.local/bin`, `~/.jarvisd`).
 
 **Builds:** `v0.0.0-rehearsal` = `main` at `b7279a6` with the admin UI embedded (`npm run build`,
@@ -38,7 +38,7 @@ Screenshots (not committed) are named `a10-*.png` below.
 | First chat turn (`POST /api/v0/mobile/chat`) | 10 s | **Failed**: llama-server 500, Qwen3.5 chat template (F10). TTS and STT fine. |
 | Workaround: install Qwen3-8B, assign live+background | < 2 min | 5.03 GB. |
 | Chat turn | **1.06 s** | "The capital of France is Paris." |
-| Voice turn from the real jarvis-dev node | 5.7 s wake → reply played | CC turn 462 ms; see "Node" below. |
+| Voice turn from the real <dev-node> node | 5.7 s wake → reply played | CC turn 462 ms; see "Node" below. |
 | `jarvisd upgrade` v0.0.0 → v0.0.1 | 2 s (+6 s models) | Via `JARVIS_UPDATE_API` (F5 blocks the install.sh path from v0.0.0). Snapshot taken, `jarvisd.prev` kept, gate passed. |
 | `install.sh` re-run v0.0.1 → v0.0.2 (hand-off) | **2 s** | The fixed hand-off: `jarvisd upgrade` from the flat `--base-url` directory. |
 | `install.sh` re-run, same version | 1 s | "already installed and running" (still downloads the 20 MB archive first; F21). |
@@ -48,7 +48,7 @@ Screenshots (not committed) are named `a10-*.png` below.
 ## Exercise results
 
 - **Chat** (the app's API, superuser JWT, a node registered with a provisioning token): 1.0–2.7 s per
-  turn on Qwen3-8B. Through the real jarvis-dev node (21 client tools reported over MQTT): weather ran the
+  turn on Qwen3-8B. Through the real <dev-node> node (21 client tools reported over MQTT): weather ran the
   node's tool headlessly and answered from it (2.74 s). "What time is it?" answered a made-up "3:15 PM"
   without a tool, and asked for date and time the node's `get_current_time` returned `success: False`
   (F20, node side).
@@ -61,7 +61,7 @@ Screenshots (not committed) are named `a10-*.png` below.
   conversations listed with source, node, what was said and duration; the failing mobile turn red. The Logs
   page showed the turn's lines plus noise fixed below (F12, F14).
 
-### Node (jarvis-dev) without physical access
+### Node (<dev-node>) without physical access
 
 Done headlessly and reverted; Wi-Fi untouched. The node only enters provisioning (AP) mode at boot with no
 `.provisioned` marker or no LAN (`jarvis-node-setup/provisioning/startup.py`), never on server errors, so

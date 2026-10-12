@@ -39,7 +39,7 @@ func TestLAN(t *testing.T) {
 	// The interfaces seen on the dev boxes in the I0 spike, plus the other virtual kinds.
 	linux := []Iface{
 		iface("lo", loop, "127.0.0.1/8", "::1/128"),
-		iface("enp5s0", up, "10.0.0.122/24", "fe80::1/64"),
+		iface("enp5s0", up, "10.0.0.20/24", "fe80::1/64"),
 		iface("docker0", up, "172.17.0.1/16"),
 		iface("br-3f2a9c", up, "172.18.0.1/16"),
 		iface("veth12ab", up, "fe80::2/64"),
@@ -58,7 +58,7 @@ func TestLAN(t *testing.T) {
 	}
 	mac := []Iface{
 		iface("lo0", loop, "127.0.0.1/8"),
-		iface("en0", up, "10.0.0.103/24", "fe80::3/64"),
+		iface("en0", up, "10.0.0.30/24", "fe80::3/64"),
 		iface("bridge100", up, "192.168.64.1/24"),
 		iface("utun3", p2p, "fe80::4/64"),
 		iface("awdl0", up, "fe80::5/64"),
@@ -118,10 +118,10 @@ func TestVirtual(t *testing.T) {
 
 func TestPrivateIPv4AndSubnets(t *testing.T) {
 	ifs := []Iface{
-		iface("eth0", up, "fe80::1/64", "203.0.113.4/24", "10.0.0.122/24"),
+		iface("eth0", up, "fe80::1/64", "203.0.113.4/24", "10.0.0.20/24"),
 		iface("eth1", up, "10.0.0.123/24", "192.168.1.5/24"),
 	}
-	if n := PrivateIPv4(ifs[0]); n == nil || n.IP.String() != "10.0.0.122" {
+	if n := PrivateIPv4(ifs[0]); n == nil || n.IP.String() != "10.0.0.20" {
 		t.Fatalf("PrivateIPv4 = %v", n)
 	}
 	if n := PrivateIPv4(iface("x", up, "fe80::1/64")); n != nil {

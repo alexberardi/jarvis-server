@@ -329,7 +329,7 @@ This is not needed for MVS.
 
 ---
 
-### 3.6 Measured on a real Pi Zero 2 W (jarvis-dev, 2026-10-10)
+### 3.6 Measured on a real Pi Zero 2 W (<dev-node>, 2026-10-10)
 
 Trixie arm64, Seeed 2-mic HAT, `dsnoopmic` at 48 kHz, 1 GHz, no throttling (49–58 °C). 15-minute windows; the HAT speaker played the TTS "hey jarvis" clip every 60 s (15 plays) into the HAT mic.
 
@@ -344,7 +344,7 @@ Trixie arm64, Seeed 2-mic HAT, `dsnoopmic` at 48 kHz, 1 GHz, no throttling (49�
 - The `pywakelive.py` miss counts are a **harness artifact**: it reads and predicts in one loop with `exception_on_overflow=False`, so when predict falls behind, PyAudio overflows and the audio (and the wake word) is silently dropped. That is also why its CPU looks lower than Go's. The real node reads on a separate thread and caught every wake. Use the harness for memory only.
 - Go had 140 ALSA xruns in 15 min (0 chunks late over 80 ms) and still fired on every play; worth a larger period/buffer on the Zero.
 - The whole Python service idles at ~93% of a core on the Zero (wake loop plus everything else), against 54.5% for the Go wake loop alone.
-- Before this run jarvis-dev had a leaked audacy mpd drop-in crash-looping mpd (5,169 restarts, ~4 s CPU each); fixed by jarvis-node-setup #143 (self-heal on boot).
+- Before this run <dev-node> had a leaked audacy mpd drop-in crash-looping mpd (5,169 restarts, ~4 s CPU each); fixed by jarvis-node-setup #143 (self-heal on boot).
 - Memory quick win (jarvis-node-setup #144, merged): −77 MB on the Pi 4, wake scores bit-identical.
 
 ### 3.7 Desktop voice landed (phase 3, 2026-10-10)
@@ -727,7 +727,7 @@ JARVIS_AGENT_LOG=debug ...                                                 # log
 **Verified on hardware** (Python node stopped for each test and restarted after; both Pis are back
 as they were):
 
-| | Pi 4 (jarvis-pi4) | Zero 2 W (jarvis-dev) |
+| | Pi 4 (<pi4-node>) | Zero 2 W (<dev-node>) |
 |---|---|---|
 | All 11 LED patterns written over SPI (`hat cycle`) | no errors | no errors |
 | Button line | `input bias=pull-up edges=both consumer="jarvis-agent"` | same |

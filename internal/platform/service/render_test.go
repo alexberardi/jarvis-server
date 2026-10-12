@@ -35,7 +35,7 @@ func TestRenderSystemdGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "jarvisd.service", sys)
-	usr, err := RenderSystemd(Unit{Binary: "/home/alex/.local/bin/jarvisd", Home: "/home/alex/.jarvisd", User: true})
+	usr, err := RenderSystemd(Unit{Binary: "/home/user/.local/bin/jarvisd", Home: "/home/user/.jarvisd", User: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestRenderSystemdGolden(t *testing.T) {
 }
 
 func TestRenderLaunchdGolden(t *testing.T) {
-	p, err := RenderLaunchd(Plist{Binary: "/usr/local/bin/jarvisd", Home: "/Users/alex/.jarvisd", UserName: "alex", UserHome: "/Users/alex"})
+	p, err := RenderLaunchd(Plist{Binary: "/usr/local/bin/jarvisd", Home: "/Users/user/.jarvisd", UserName: "user", UserHome: "/Users/user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,12 +53,12 @@ func TestRenderLaunchdGolden(t *testing.T) {
 // The updater LaunchDaemon (ID11): root (no UserName), its log and working directory outside
 // the user-writable home, the system PATH, woken by the request queue.
 func TestRenderLaunchdHelperGolden(t *testing.T) {
-	p, err := RenderLaunchdHelper(HelperPlist{Binary: "/usr/local/bin/jarvisd", Home: "/Users/alex/.jarvisd", UserName: "alex"})
+	p, err := RenderLaunchdHelper(HelperPlist{Binary: "/usr/local/bin/jarvisd", Home: "/Users/user/.jarvisd", UserName: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	golden(t, HelperLabel+".plist", p)
-	for _, bad := range []string{"<key>UserName</key>", "/Users/alex/.jarvisd/logs", "<key>KeepAlive</key>"} {
+	for _, bad := range []string{"<key>UserName</key>", "/Users/user/.jarvisd/logs", "<key>KeepAlive</key>"} {
 		if strings.Contains(string(p), bad) {
 			t.Errorf("helper plist has %s", bad)
 		}

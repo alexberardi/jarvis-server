@@ -10,3 +10,6 @@
 /.models/
 /.contract.env
 /.helper-e2e/
+__pycache__/
+*.pyc
+HOSTS.local.md

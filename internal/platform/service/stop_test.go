@@ -112,7 +112,7 @@ func TestUnitStopReady(t *testing.T) {
 }
 
 func TestPlistStopReady(t *testing.T) {
-	p, err := RenderLaunchd(Plist{Binary: "/usr/local/bin/jarvisd", Home: "/Users/alex/.jarvisd", UserName: "alex", UserHome: "/Users/alex"})
+	p, err := RenderLaunchd(Plist{Binary: "/usr/local/bin/jarvisd", Home: "/Users/user/.jarvisd", UserName: "user", UserHome: "/Users/user"})
 	if err != nil {
 		t.Fatal(err)
 	}

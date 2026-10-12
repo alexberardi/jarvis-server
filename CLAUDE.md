@@ -13,4 +13,5 @@ Single-binary Go rewrite of the Jarvis server stack.
 - **Native libs:** run `scripts/fetch-sherpa-libs.sh` once, and `scripts/fetch-test-models.sh` for the voice integration tests (`JARVIS_SHERPA_MODELS=$PWD/.models`).
 - **Behaviour parity is proven by the contract suite (`contract/`) and golden fixtures (`fixtures/golden/`), not by reading code.** A contract test is only valid once it passes against the legacy Python stack.
 - **Don't port what's on the cut lists** (PLAN §7, Appendices A and B).
-- **Prod** (`jarvis@10.0.0.107`) is **read-only** unless the user explicitly says otherwise.
+- **Prod** (`<user>@<prod-host>`) is **read-only** unless the user explicitly says otherwise.
+- **Host placeholders** (`<prod-host>`, `<mbp-host>`, `<dev-box>`, `<dev-node>.local`, `<pi4-node>`, `<pi5-node>.local`, `<lan-subnet>`, `<user>@…`) appear throughout CLAUDE.md and `docs/`. Real values are in HOSTS.local.md (gitignored, local only).

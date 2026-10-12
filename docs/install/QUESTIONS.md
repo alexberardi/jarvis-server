@@ -167,7 +167,7 @@ firewall configuration.
 **Options.**
 
 - **(a) Ask, default yes.**
-  - Interactive: "Allow nodes and phones on 10.0.0.0/24 to reach jarvisd? [Y/n]", then
+  - Interactive: "Allow nodes and phones on 192.168.1.0/24 to reach jarvisd? [Y/n]", then
     `sudo jarvisd doctor --fix`.
   - Non-interactive: apply only with `--yes`, otherwise print the command.
   - Only private LAN subnets, never `0.0.0.0/0`; rules tagged `jarvisd` so uninstall removes them.

@@ -210,7 +210,7 @@ cmd_metal() {
 # (the HF-endpoint setting pointed at another box), then put the setting back. A blocked process
 # gets "no route to host" / EHOSTUNREACH; an allowed one gets that host's HTTP answer.
 cmd_lnp() {
-  local target=${1:?LAN URL, e.g. http://10.0.0.122:7700}
+  local target=${1:?LAN URL, e.g. http://192.0.2.10:7700}
   local tmp=$JHOME/i0-tmp.json pw access
   pw=$(cat "$JHOME/i0-pw")
   curl -sS -o "$tmp" -H 'Content-Type: application/json' -d "{\"email\":\"i0@example.com\",\"password\":\"$pw\"}" "http://127.0.0.1:$AUTH/auth/login"

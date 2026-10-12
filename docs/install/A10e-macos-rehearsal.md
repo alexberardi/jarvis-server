@@ -4,10 +4,10 @@ The Mac checks left open by A10b–A10d and R8/R10: the installed LaunchDaemon's
 notarization of the published binary, the 5 legacy `image_based` photo sets with **Apple Vision**,
 and recipes basics on Metal.
 
-**Box:** MacBook Pro `alexanderberardi@10.0.0.103`, M2 Max, 32 GB, macOS 26.1 (25B78). jarvisd
+**Box:** MacBook Pro `<user>@<mbp-host>`, M2 Max, 32 GB, macOS 26.1 (25B78). jarvisd
 **v0.1.0-rc4** installed by the user through the wizard as the LaunchDaemon
 `net.jarvisautomation.jarvisd` (home `~/.jarvisd`, live + background = Qwen3.5-9B + mmproj on Metal,
-MiniLM embeddings, whisper small.en, Kokoro, ERes2Net; jarvis-dev node registered to it and in use
+MiniLM embeddings, whisper small.en, Kokoro, ERes2Net; <dev-node> node registered to it and in use
 during the run). Prod untouched. No sudo was available or used.
 
 **Rule for the installed daemon: read only.** `jarvisd doctor`, `jarvisd service status`,
@@ -27,7 +27,7 @@ background `shared`, embeddings off.
 | `jarvisd version` | `v0.1.0-rc4` |
 | `jarvisd doctor` (as the user) | all OK, rc 0: listening on all **13** TCP ports; firewall "no active host firewall found"; sleep "this Mac does not go to sleep"; data dir + DB owner-only; legacy stack's files in `~/.jarvis` but none of its containers run. |
 | `jarvisd service status` | `supervisor: launchd`, `running, pid 88315`, `/Library/LaunchDaemons/net.jarvisautomation.jarvisd.plist, last exit (never exited)`, home `~/.jarvisd`, `health: ok`. |
-| `launchctl print system/net.jarvisautomation.jarvisd` | `type = LaunchDaemon`, `username = alexanderberardi`, `umask = 77`, program `/usr/local/bin/jarvisd serve --home …/.jarvisd`, stdout/stderr `~/.jarvisd/logs/jarvisd.log`, **PATH = `/usr/bin:/bin:/usr/sbin:/sbin`** (see M1). |
+| `launchctl print system/net.jarvisautomation.jarvisd` | `type = LaunchDaemon`, `username = <mbp-user>`, `umask = 77`, program `/usr/local/bin/jarvisd serve --home …/.jarvisd`, stdout/stderr `~/.jarvisd/logs/jarvisd.log`, **PATH = `/usr/bin:/bin:/usr/sbin:/sbin`** (see M1). |
 | Updater helper | **None exists for launchd** (ID11 is not built; §8.2 "Not done"). Only the one plist in `/Library/LaunchDaemons`. `/usr/local/bin/jarvisd` is `root:wheel 0755`, so the admin's Update button answers 409 "jarvisd can't replace its own binary … needs administrator rights" with `sudo jarvisd upgrade` (`applyBlocker`); not exercised (no JWT on the installed daemon, no sudo). |
 | Metal engines (process list) | children of pid 88315: `whisper-server/b5454-metal` (small.en), `llama-server/b11457-metal` MiniLM `--embedding -ngl 0 -dev none`, `llama-server/b11457-metal` **Qwen3.5-9B `-c 32768 -ngl 999 --jinja --chat-template-file …/7f0e529032c25183.jinja --mmproj …/mmproj-F16.gguf`** (RSS 7.3 GB). The Qwen engine had been restarted at 17:08 by the user's model change (log: start → healthy in 5 s). |
 | Notarization | `spctl -a -t open --context context:primary-signature -v /usr/local/bin/jarvisd` → **accepted, source=Notarized Developer ID**. |
