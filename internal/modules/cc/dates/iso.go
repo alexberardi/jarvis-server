@@ -1,6 +1,7 @@
 package dates
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -280,6 +281,11 @@ func parseHMS(t string, p, end int) (h, m, s int, rest, ok bool) {
 // JSON argument strings; out has the rewritten ones (json.dumps bytes) and the others as
 // given. status is "clean" (no ISO values), "fixed" (all mapped) or "bad" (some could not
 // be; the engine then pops the reply and nags once with [ISO_DATE_RETRY]).
+//
+// A bare YYYY-MM-DD (no time) naming the local date of a one-day key ("2026-10-13" for
+// tomorrow) is mapped the same way, to the first such key in context order. One the context
+// doesn't hold is left as written and never makes the call "bad": a past date can be a real
+// ask ("my calendar on January 8").
 func (c *Context) FixISODates(args []string) (status string, out []string) {
 	out = append([]string(nil), args...)
 	type entry struct {
@@ -309,11 +315,19 @@ func (c *Context) FixISODates(args []string) (status string, out []string) {
 		default:
 			continue
 		}
-		var isos []string
+		var isos, withBare []string
 		for _, d := range list {
 			if s, ok := d.(string); ok && IsISODatetime(s) {
 				isos = append(isos, s)
+				withBare = append(withBare, s)
+			} else if ok && isBareDate(s) {
+				withBare = append(withBare, s)
 			}
+		}
+		// Bare dates count only when they and the instants are the whole list: a rewrite
+		// replaces the list, and must not drop a value it doesn't understand.
+		if len(withBare) == len(list) {
+			isos = withBare
 		}
 		if len(isos) > 0 {
 			entries = append(entries, entry{i, isos})
@@ -325,8 +339,15 @@ func (c *Context) FixISODates(args []string) (status string, out []string) {
 
 	single := map[string]string{}
 	multi := map[string]string{}
+	day := map[string]string{} // bare local date → the first one-day key on it
 	for _, e := range c.flat.entries {
 		vals := c.render(e.values)
+		if !e.list {
+			d := fmt.Sprintf("%04d-%02d-%02d", e.values[0].y, e.values[0].m, e.values[0].d)
+			if _, ok := day[d]; !ok {
+				day[d] = e.key
+			}
+		}
 		if e.list {
 			multi[sortedKey(vals)] = e.key
 			for _, v := range vals {
@@ -341,32 +362,51 @@ func (c *Context) FixISODates(args []string) (status string, out []string) {
 		}
 	}
 
-	allFixed := true
+	allFixed, fixedAny := true, false
 	for _, e := range entries {
 		if k, ok := multi[sortedKey(e.isos)]; ok {
 			out[e.idx] = replaceDatetimes(out[e.idx], []string{k})
+			fixedAny = true
 			continue
 		}
 		var keys []string
-		matched := true
+		matched, bareOnly := true, true
+		for _, iso := range e.isos {
+			bareOnly = bareOnly && isBareDate(iso)
+		}
 		for _, iso := range e.isos {
 			k, ok := single[iso]
+			if !ok && isBareDate(iso) {
+				k, ok = day[iso]
+			}
 			if !ok {
 				matched = false
 				break
 			}
 			keys = append(keys, k)
 		}
-		if matched && len(keys) > 0 {
+		switch {
+		case matched && len(keys) > 0:
 			out[e.idx] = replaceDatetimes(out[e.idx], keys)
-		} else {
+			fixedAny = true
+		case bareOnly:
+			// An unknown bare date stays as the model wrote it.
+		default:
 			allFixed = false
 		}
 	}
-	if allFixed {
+	switch {
+	case !allFixed:
+		return "bad", out
+	case fixedAny:
 		return "fixed", out
 	}
-	return "bad", out
+	return "clean", out
+}
+
+// isBareDate reports a plain YYYY-MM-DD calendar date.
+func isBareDate(s string) bool {
+	return len(s) == 10 && s[4] == '-' && s[7] == '-' && parseISODate(s)
 }
 
 func sortedKey(vals []string) string {
