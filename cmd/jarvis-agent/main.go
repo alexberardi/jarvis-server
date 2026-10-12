@@ -73,6 +73,8 @@ func main() {
 		err = appsCmd(os.Args[2:])
 	case "browser":
 		err = browserCmd(ctx, os.Args[2:])
+	case "hat":
+		err = hatCmd(ctx, os.Args[2:])
 	case "island-demo":
 		err = islandDemo(ctx, os.Args[2:])
 	case "browser-host":
@@ -125,8 +127,13 @@ func credsPath(p string) (string, error) {
 	return node.DefaultCredsPath()
 }
 
+// logger logs at info, or at debug with JARVIS_AGENT_LOG=debug.
 func logger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	lvl := slog.LevelInfo
+	if strings.EqualFold(os.Getenv("JARVIS_AGENT_LOG"), "debug") {
+		lvl = slog.LevelDebug
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
 }
 
 // appCatalogue is the installed-apps lister: platform defaults plus apps.json, re-read on every
@@ -294,6 +301,7 @@ func run(ctx context.Context, args []string) error {
 	voiceOn := fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`)
 	noOverlay := fs.Bool("no-overlay", false, "with --voice: don't show the on-screen indicator (the island)")
 	vf := addVoiceFlags(fs)
+	hf := addHatFlags(fs)
 	_ = fs.Parse(args)
 	path, err := credsPath(*cp)
 	if err != nil {
@@ -312,6 +320,8 @@ func run(ctx context.Context, args []string) error {
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, Log: log}
+	hd := openHat(hf, log)
+	defer hd.Close()
 	var vs *voiceStack
 	if *voiceOn {
 		// Voice is an extra: if it can't start, the agent still serves its tools.
@@ -320,6 +330,9 @@ func run(ctx context.Context, args []string) error {
 			vs = nil
 		} else {
 			defer vs.close()
+			if hd != nil {
+				vs.addIndicator(&ledCue{leds: hd.leds, log: log})
+			}
 			r.OnConnected = func(ctx context.Context, cc *node.CC) {
 				// Voice turns run the same toolset the MQTT dispatcher serves.
 				_ = voice.Serve(ctx, vs.options(cc, tools, log, nil))
@@ -333,7 +346,7 @@ func run(ctx context.Context, args []string) error {
 	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
 	return island.Run(ctx, log, func(i *island.Island) error {
 		if i != nil {
-			vs.indicator = islandCue{i}
+			vs.addIndicator(islandCue{i})
 			hideIslandForScreenshots(tools, i)
 		}
 		return r.Run(ctx)

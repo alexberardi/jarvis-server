@@ -46,6 +46,8 @@ AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-si
 ./jarvis-agent run
 ./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
 ./jarvis-agent run --voice --no-overlay        # ... without the on-screen island (on by default)
+./jarvis-agent run --voice --voice-input dsnoopmic --voice-output output   # a Pi with the HAT (--hat auto)
+./jarvis-agent hat cycle | hat pattern thinking --for 5s | hat button   # the HAT by hand (no poweroff)
 ./jarvis-agent island-demo [--hold follow_up --for 20s]   # play the island's states (no mic, no server)
 ./jarvis-agent listen --voice-input wav:clip.wav --voice-output wav:reply.wav --once --no-chimes
                                                # one scripted voice turn, no MQTT (exit 0 = spoken);
@@ -87,6 +89,9 @@ internal/agent/
                       the Mozilla-signed .xpi when a build has one (signed/)
   screen/             read the screen: desktop_read_screen, grim/hyprctl/swaymsg (linux.go),
                       screencapture + the purego front-window lookup (mac.go, frontwin_darwin.go)
+  hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's
+                      patterns (leds.go, golden-tested), the GPIO17 button (button.go), spidev +
+                      gpiocdev (device_linux.go); voice states reach it through voice.Indicator
   island/             the on-screen voice indicator (DESIGN.md §11): pure-Go renderer (render.go),
                       animation model + loop (island.go), NSPanel backend (mac_darwin.go, purego),
                       Wayland layer-shell client (wayland.go); Run keeps the main thread on macOS
@@ -242,10 +247,20 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     capture. Don't capture someone's desktop in tests unless they agreed (`JARVIS_SCREEN_NATIVE`
     is opt-in) and never commit a capture.
 
+25. **The HAT is the Python node's, ported with its numbers** (go-pi-node.md §3.11): patterns,
+    colours and brightness are golden-tested against `respeaker_led_service.py` and `apa102_pi`
+    (`tools/golden/export_hat.py`, run on a Pi); button 50 ms debounce, warning at 1 s, poweroff
+    at 3 s. Change them only together with the Python node, or deliberately (log it in
+    go-pi-node.md). The HAT is optional at every step: not detected, an SPI or GPIO error (the
+    Python node holding the button line), or `--hat off` leaves the agent running without it.
+    Never press "power off" in a test: `hat button` never powers off, and `Button.OnHold` is a
+    function so tests use a fake.
+
 ## Dependencies
 
 Beyond jarvisd's own: `github.com/eclipse/paho.mqtt.golang` (jarvisd embeds a broker; the agent is a client), `golang.org/x/sys` (Windows syscalls),
-`golang.org/x/term` (password prompt), `github.com/ebitengine/purego` (macOS AX, AudioToolbox,
+`golang.org/x/term` (password prompt), `github.com/warthog618/go-gpiocdev` (the HAT button, pure
+Go), `github.com/ebitengine/purego` (macOS AX, AudioToolbox,
 libasound and onnxruntime via dlopen). `CGO_ENABLED=0` builds everywhere: Windows volume is
 WASAPI over raw COM vtables, windows are user32, open is ShellExecuteW, macOS AX is dlopen'd
 ApplicationServices. Voice at runtime needs `libasound.so.2` on Linux (present on any desktop).

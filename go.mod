@@ -15,6 +15,7 @@ require (
 	github.com/libp2p/zeroconf/v2 v2.2.0
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pressly/goose/v3 v3.26.0
+	github.com/warthog618/go-gpiocdev v0.9.2
 	golang.org/x/crypto v0.42.0
 	golang.org/x/image v0.46.0
 	golang.org/x/net v0.44.0
