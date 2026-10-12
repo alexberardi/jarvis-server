@@ -31,6 +31,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/clock"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
@@ -410,6 +411,8 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 		closeAll = func() { _ = sc.Close(); stopBrowser() }
 		tools = append(tools, sc)
 	}
+	// Last, so a sidecar's own get_current_time (Python's, with its city table) wins when present.
+	tools = append(tools, &clock.Tool{})
 	return h, tools, closeAll, nil
 }
 
@@ -499,7 +502,7 @@ func try(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), &screen.Tools{C: screen.Native()}}
+	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), &screen.Tools{C: screen.Native()}, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).
