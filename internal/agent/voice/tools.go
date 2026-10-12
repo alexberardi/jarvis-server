@@ -95,7 +95,7 @@ func (p *Pipeline) runRound(ctx context.Context, s *session, ex *Exchange, calls
 			}
 		}
 		ex.Tools = append(ex.Tools, run)
-		s.log.Info("tool call", "tool", run.Name, "success", run.Success, "error", run.Error, "took", run.Took.Round(time.Millisecond))
+		s.log.Info("tool call", "tool", run.Name, "args", node.LogArgs(args), "success", run.Success, "error", run.Error, "took", run.Took.Round(time.Millisecond))
 		r.results = append(r.results, ToolResult{ToolCallID: c.ID, Output: out})
 	}
 	return r

@@ -104,6 +104,7 @@ func (d *Dispatcher) toolCall(ctx context.Context, det map[string]any) {
 		return
 	}
 	name := str(det, "command_name")
+	args := DecodeArgs(det["arguments"])
 	var output map[string]any
 	if name == "" {
 		output = Fail("missing command_name")
@@ -118,7 +119,7 @@ func (d *Dispatcher) toolCall(ctx context.Context, det map[string]any) {
 			timeout = 25 * time.Second
 		}
 		cctx, cancel := context.WithTimeout(ctx, timeout)
-		out, handled := d.Tools.Call(cctx, name, DecodeArgs(det["arguments"]), req)
+		out, handled := d.Tools.Call(cctx, name, args, req)
 		cancel()
 		if !handled {
 			out = Fail("Unknown command: %s", name)
@@ -126,7 +127,7 @@ func (d *Dispatcher) toolCall(ctx context.Context, det map[string]any) {
 		output = out
 	}
 	sig := TakeSignals(output)
-	d.Log.Info("tool_call", "command", name, "success", output["success"])
+	d.Log.Info("tool_call", "command", name, "args", LogArgs(args), "success", output["success"])
 	if err := d.CC.PostToolResult(ctx, rid, output); err != nil {
 		d.Log.Warn("tool_call: post failed", "err", err)
 	}

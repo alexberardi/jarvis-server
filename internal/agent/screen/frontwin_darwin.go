@@ -4,23 +4,25 @@ package screen
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
 )
 
-// frontWindow reads CGWindowListCopyWindowInfo (front to back) and returns the first normal
-// (layer 0) on-screen window: the frontmost window. Titles need the Screen Recording grant;
-// without it they are empty, which only affects the label. purego, no cgo.
+// windowList reads CGWindowListCopyWindowInfo: every window, on-screen ones front to back
+// first. Titles need the Screen Recording grant; without it they are empty, which only affects
+// the label and title matching. purego, no cgo.
 
 const (
 	cgPath = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
 	cfPath = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 
-	optOnScreenOnly          = 1 << 0
+	optAll                   = 0
 	optExcludeDesktopElement = 1 << 4
 	cfNumberSInt64Type       = 4
+	cfNumberDoubleType       = 13
 	cfStringEncodingUTF8     = 0x08000100
 )
 
@@ -39,9 +41,12 @@ var (
 	cfGetTypeID                func(ref uintptr) uint
 	cfStringGetTypeID          func() uint
 	cfNumberGetTypeID          func() uint
+	cfBooleanGetTypeID         func() uint
+	cfBooleanGetValue          func(b uintptr) bool
+	cfDictionaryGetTypeID      func() uint
 	cfRelease                  func(ref uintptr)
 
-	keyLayer, keyNumber, keyOwner, keyName uintptr
+	keyLayer, keyNumber, keyOwner, keyName, keyBounds, keyOnscreen, keyWidth, keyHeight uintptr
 )
 
 func loadFW() error {
@@ -67,42 +72,74 @@ func loadFW() error {
 		purego.RegisterLibFunc(&cfGetTypeID, cf, "CFGetTypeID")
 		purego.RegisterLibFunc(&cfStringGetTypeID, cf, "CFStringGetTypeID")
 		purego.RegisterLibFunc(&cfNumberGetTypeID, cf, "CFNumberGetTypeID")
+		purego.RegisterLibFunc(&cfBooleanGetTypeID, cf, "CFBooleanGetTypeID")
+		purego.RegisterLibFunc(&cfBooleanGetValue, cf, "CFBooleanGetValue")
+		purego.RegisterLibFunc(&cfDictionaryGetTypeID, cf, "CFDictionaryGetTypeID")
 		purego.RegisterLibFunc(&cfRelease, cf, "CFRelease")
 		// The kCGWindow* key constants are CFStrings whose values are their own names.
 		keyLayer = cfStringCreateWithCString(0, "kCGWindowLayer", cfStringEncodingUTF8)
 		keyNumber = cfStringCreateWithCString(0, "kCGWindowNumber", cfStringEncodingUTF8)
 		keyOwner = cfStringCreateWithCString(0, "kCGWindowOwnerName", cfStringEncodingUTF8)
 		keyName = cfStringCreateWithCString(0, "kCGWindowName", cfStringEncodingUTF8)
-		if keyLayer == 0 || keyNumber == 0 || keyOwner == 0 || keyName == 0 {
+		keyBounds = cfStringCreateWithCString(0, "kCGWindowBounds", cfStringEncodingUTF8)
+		keyOnscreen = cfStringCreateWithCString(0, "kCGWindowIsOnscreen", cfStringEncodingUTF8)
+		keyWidth = cfStringCreateWithCString(0, "Width", cfStringEncodingUTF8) // the bounds dictionary's keys
+		keyHeight = cfStringCreateWithCString(0, "Height", cfStringEncodingUTF8)
+		if keyLayer == 0 || keyNumber == 0 || keyOwner == 0 || keyName == 0 || keyBounds == 0 || keyOnscreen == 0 ||
+			keyWidth == 0 || keyHeight == 0 {
 			fwErr = errors.New("CoreFoundation: could not create window-info keys")
 		}
 	})
 	return fwErr
 }
 
-func frontWindow() (FrontWindow, error) {
+func windowList() ([]MacWindow, error) {
 	if err := loadFW(); err != nil {
-		return FrontWindow{}, err
+		return nil, err
 	}
-	arr := cgWindowListCopyWindowInfo(optOnScreenOnly|optExcludeDesktopElement, 0)
+	arr := cgWindowListCopyWindowInfo(optAll|optExcludeDesktopElement, 0)
 	if arr == 0 {
-		return FrontWindow{}, errors.New("no window list")
+		return nil, errors.New("no window list")
 	}
 	defer cfRelease(arr)
-	for i, n := 0, cfArrayGetCount(arr); i < n; i++ {
+	n := cfArrayGetCount(arr)
+	out := make([]MacWindow, 0, n)
+	for i := 0; i < n; i++ {
 		d := cfArrayGetValueAtIndex(arr, i)
-		layer, ok := cfInt(cfDictionaryGetValue(d, keyLayer))
-		if !ok || layer != 0 {
-			continue
-		}
 		id, ok := cfInt(cfDictionaryGetValue(d, keyNumber))
 		if !ok || id <= 0 {
 			continue
 		}
-		return FrontWindow{ID: uint32(id), Title: cfString(cfDictionaryGetValue(d, keyName)),
-			App: cfString(cfDictionaryGetValue(d, keyOwner))}, nil
+		layer, ok := cfInt(cfDictionaryGetValue(d, keyLayer))
+		if !ok {
+			layer = -1 // not a normal window
+		}
+		w := MacWindow{ID: uint32(id), Layer: int(layer), Title: cfString(cfDictionaryGetValue(d, keyName)),
+			App: cfString(cfDictionaryGetValue(d, keyOwner)), OnScreen: cfBool(cfDictionaryGetValue(d, keyOnscreen))}
+		if b := cfDictionaryGetValue(d, keyBounds); b != 0 && cfGetTypeID(b) == cfDictionaryGetTypeID() {
+			w.W, _ = cfFloat(cfDictionaryGetValue(b, keyWidth))
+			w.H, _ = cfFloat(cfDictionaryGetValue(b, keyHeight))
+		}
+		out = append(out, w)
 	}
-	return FrontWindow{}, errors.New("no window in front")
+	// On-screen windows come front to back; keep them first whatever the list did.
+	sort.SliceStable(out, func(a, b int) bool { return out[a].OnScreen && !out[b].OnScreen })
+	return out, nil
+}
+
+func cfBool(ref uintptr) bool {
+	return ref != 0 && cfGetTypeID(ref) == cfBooleanGetTypeID() && cfBooleanGetValue(ref)
+}
+
+func cfFloat(ref uintptr) (float64, bool) {
+	if ref == 0 || cfGetTypeID(ref) != cfNumberGetTypeID() {
+		return 0, false
+	}
+	var v float64
+	if !cfNumberGetValue(ref, cfNumberDoubleType, unsafe.Pointer(&v)) {
+		return 0, false
+	}
+	return v, true
 }
 
 func cfInt(ref uintptr) (int64, bool) {

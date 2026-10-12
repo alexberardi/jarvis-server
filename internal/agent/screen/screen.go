@@ -15,6 +15,7 @@ import (
 	"image"
 	"image/jpeg"
 	_ "image/png" // grim and screencapture output
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -61,7 +62,10 @@ type Capturer interface {
 	// Available says whether Capture can work now, and why not when it can't. Computed per call
 	// (a macOS grant can change; a session can come and go).
 	Available(ctx context.Context) (bool, string)
-	Capture(ctx context.Context, scope string) (Shot, error)
+	// Capture takes the focused window (scope window), the screen (scope screen), or the
+	// window the user named when window is set (whatever scope says). A named window that
+	// can't be captured is a *WindowError, never a fallback to another window or the screen.
+	Capture(ctx context.Context, scope, window string) (Shot, error)
 }
 
 // Exec is the slice of the OS the shell-out capturers use, injected for tests.
@@ -105,20 +109,31 @@ type Tools struct {
 	// Hide, when set, takes our own overlay (the island) off the screen for a capture and
 	// returns what brings it back.
 	Hide func() (restore func())
+	// Log gets one Info line per call: scope, the window asked for, what was captured (app and
+	// a shortened title). Never anything about the image. Nil: no log.
+	Log *slog.Logger
 }
 
 func spec() node.Spec {
 	return node.Spec{Name: ToolRead,
-		Description: "Look at the user's computer screen: takes a screenshot of the focused window (or the whole screen) " +
-			"and shows it to you with this result. Call it whenever the user refers to something on their screen and you " +
-			"need to see it: \"what does this error say\", \"summarise this window\", \"what's on my screen\", \"read this to me\", " +
-			"\"what does this chart show\". Answer from what you see; quote short text exactly. Only when asked: never call it " +
-			"unprompted. The screenshot is not kept after this turn.",
-		Params: []node.Param{{Name: "scope", Type: "string", Enum: []string{ScopeWindow, ScopeScreen},
-			Description: "window (default): the focused window. screen: the whole screen, when the user says screen or the window isn't enough"}},
+		Description: "Look at the user's computer screen: takes a screenshot of a window (or the whole screen) and shows it " +
+			"to you with this result. Call it whenever the user refers to something on their screen and you need to see it: " +
+			"\"what does this error say\", \"summarise this window\", \"read the firefox window\", \"what's in my terminal\", " +
+			"\"what's on my screen\". When the user names an app or window (\"the firefox window\", \"the terminal\", \"slack\"), " +
+			"put that name in window: it may not be the focused one. Without a name you get the focused window. Answer from " +
+			"what you see; quote short text exactly. If it fails, tell the user what the error says. Only when asked: never " +
+			"call it unprompted. The screenshot is not kept after this turn.",
+		Params: []node.Param{
+			{Name: "scope", Type: "string", Enum: []string{ScopeWindow, ScopeScreen},
+				Description: "window (default): one window. screen: the whole screen, only when the user says screen or names no window and one window isn't enough"},
+			{Name: "window", Type: "string",
+				Description: "the app or window the user named, in their words: \"firefox\", \"terminal\", \"slack\", or words from its title. Leave it out when they mean whatever is in front (\"this error\", \"this window\")"},
+		},
 		Keywords: []string{"screen", "screenshot", "window", "error", "read", "see", "look", "summarise", "computer"},
 		Examples: []node.Example{
 			{VoiceCommand: "what does this error say", Params: map[string]any{"scope": ScopeWindow}, Primary: true},
+			{VoiceCommand: "read the firefox window", Params: map[string]any{"scope": ScopeWindow, "window": "firefox"}},
+			{VoiceCommand: "what does it say in my terminal", Params: map[string]any{"scope": ScopeWindow, "window": "terminal"}},
 			{VoiceCommand: "summarise this window", Params: map[string]any{"scope": ScopeWindow}},
 			{VoiceCommand: "what's on my screen", Params: map[string]any{"scope": ScopeScreen}},
 		},
@@ -152,15 +167,33 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 	if scope != ScopeScreen {
 		scope = ScopeWindow
 	}
+	window, _ := args["window"].(string)
+	window = strings.TrimSpace(window)
+	if normalizeQuery(window) == "" {
+		window = ""
+	} else {
+		scope = ScopeWindow // a named window is the more specific ask
+	}
+	log := t.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	restore := func() {}
 	if t.Hide != nil {
 		restore = t.Hide()
 	}
-	shot, err := t.C.Capture(ctx, scope)
+	shot, err := t.C.Capture(ctx, scope, window)
 	restore()
 	if err != nil {
+		var we *WindowError
+		if errors.As(err, &we) {
+			log.Info("read screen", "scope", scope, "window", window, "error_code", we.Code)
+			return failure(we.Msg, we.Code), true
+		}
+		log.Info("read screen", "scope", scope, "window", window, "error_code", "capture_failed", "err", err)
 		return failure(err.Error(), "capture_failed"), true
 	}
+	log.Info("read screen", "scope", scope, "window", window, "app", shot.App, "title", node.Truncate(shot.Title, 40))
 	data, w, h, err := Encode(shot.Image)
 	if err != nil {
 		return failure(err.Error(), "capture_failed"), true

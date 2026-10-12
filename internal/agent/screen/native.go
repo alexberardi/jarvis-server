@@ -13,7 +13,7 @@ func Native() Capturer {
 	case "linux":
 		return &Wayland{X: OSExec{}}
 	case "darwin":
-		return &Mac{X: OSExec{}, Trusted: macax.ScreenTrusted, Front: frontWindow}
+		return &Mac{X: OSExec{}, Trusted: macax.ScreenTrusted, Windows: windowList}
 	}
 	return nil
 }

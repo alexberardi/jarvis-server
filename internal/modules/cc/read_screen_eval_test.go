@@ -93,6 +93,6 @@ func TestReadScreenLive(t *testing.T) {
 type fixedCapture struct{ img image.Image }
 
 func (f fixedCapture) Available(context.Context) (bool, string) { return true, "" }
-func (f fixedCapture) Capture(context.Context, string) (screen.Shot, error) {
+func (f fixedCapture) Capture(context.Context, string, string) (screen.Shot, error) {
 	return screen.Shot{Image: f.img, Title: "weatherd — foot", App: "foot"}, nil
 }
