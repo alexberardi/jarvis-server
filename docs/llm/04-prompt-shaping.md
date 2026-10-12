@@ -2,7 +2,7 @@
 
 Everything the proxy does to a request on its way to the model, or to a response on its way back. Here "proxy" means the API on 7704 plus the model service on 7705. The OpenAI-compatible translation to llama-server itself is in [01](01-backends-and-engines.md), and the wire envelope is in [02](02-api-and-streaming.md).
 
-Source: `/home/alex/jarvis/jarvis-llm-proxy-api`, at HEAD `e04d0b1`, which is what prod runs.
+Source: `jarvis-llm-proxy-api`, at HEAD `e04d0b1`, which is what prod runs.
 
 **Decisions that apply here:**
 

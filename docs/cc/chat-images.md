@@ -1,8 +1,8 @@
 # Chat images and context compaction (2026-10-09)
 
-**Status: built 2026-10-09 (branch `feat/chat-images`): §6 wire contract as written, details in §7. No DB migration.**
+**Status: built 2026-10-09 (branch `feat/chat-images`, PR #24, merged): §6 wire contract as written, details in §7. No DB migration.**
 **Photo → action (§8): built 2026-10-10 on branch `feat/chat-image-actions` (PR #26, merged). No DB migration, no wire change.**
-**Image parameters on any tool (§9, CI7): built 2026-10-10 on branch `feat/image-params`. No DB migration; the node `tool_call` carries photos per the SDK contract.**
+**Image parameters on any tool (§9, CI7): built 2026-10-10 on branch `feat/image-params` (PR #28, merged). No DB migration; the node `tool_call` carries photos per the SDK contract.**
 
 ## 1. Goal
 
@@ -153,7 +153,7 @@ window; descriptions are prepended to the user's
 own text rather than replacing the whole message.
 
 
-## 8. Photo → action (2026-10-10, pending review)
+## 8. Photo → action (2026-10-10)
 
 A photo in chat can now drive an action. First: **"save this as a recipe"** runs the recipes photo
 import on the attached photo and saves the result. A photo with no instruction gets a description
@@ -348,7 +348,9 @@ Results:
 1. ~~Keep the photo for tools a little longer?~~ Decided (CI8) and built: §8.1 "Kept bytes".
 2. **Absolute dates for flyer → reminder/calendar** (§8.3). **Recommendation:** let
    `resolved_datetimes` accept an ISO calendar date the user's input (or the photo) states, or add
-   date keys like `2026-10-17`, then retest. Out of scope here.
+   date keys like `2026-10-17`, then retest. Out of scope here. *Partly addressed 2026-10-12:*
+   the ISO guard now maps a bare `YYYY-MM-DD` that names a one-day key's local date to that key
+   (doc 03 §3.5); the guard leaves a date outside the date context as the model wrote it.
 3. **Push deep link.** `type: "recipe_saved"` carries `recipe_id`, but the node app opens the
    inbox item; the recipes app is a separate app. **Recommendation:** keep the inbox item; teach
    the recipes app later if wanted.

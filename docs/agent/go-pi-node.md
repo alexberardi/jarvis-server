@@ -1,6 +1,7 @@
 # Go Pi voice node: research and spikes
 
-Status: research, 2026-10-09 (overnight). Copied here from `jarvis-host-agent/docs/node/` on
+Status: research, 2026-10-09 (overnight); since then a build log. Phases 2, 3 and 4.1 of §7 have
+landed (§3.7–§3.12); the Python node is still the supported Pi node. Copied here from `jarvis-host-agent/docs/node/` on
 2026-10-10, when the agent moved into jarvis-server (phase 2 of §7). The spike code stays in that
 repo under `spikes/pinode/` (a separate Go module); `ort/`, `oww/` and `dsp/` were ported here as
 `internal/voice/ort`, `internal/voice/oww` and `internal/audio` (the decimator).
@@ -931,8 +932,8 @@ These are **still needed**; install.sh step lines are cited:
 
 ## 7. Phased plan
 
-1. **Python quick win (§5.3).** One PR to jarvis-node-setup: −84 MB on every node now.
-2. **Move the agent into jarvis-server** as `cmd/jarvis-agent`, as already planned, so it can share:
+1. **Python quick win (§5.3).** One PR to jarvis-node-setup: −84 MB on every node now. **Done** (§8 Q8).
+2. **Move the agent into jarvis-server** as `cmd/jarvis-agent`, as already planned. **Done 2026-10-10.** It shares:
    - `internal/update` (signed self-update);
    - the embedded ORT libraries (`internal/voice/sherpa/libs`; add `internal/voice/ort` beside it,
      since the same `libonnxruntime.so` serves both);

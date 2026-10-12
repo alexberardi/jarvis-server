@@ -52,13 +52,13 @@ frozen for the legacy stack.
 | Change | Why | Decision |
 |---|---|---|
 | `LLM_INTERFACE_SEED` → seeds `llm.prompt_provider`; the `llm-interface-select` dropdown lists only kept providers | Setting rename and catalog cleanup | D11, D12 |
-| Long term: replaced by the jarvisd install scripts | Single binary | PLAN Phase 6 |
+| Replaced by the jarvisd install scripts (`scripts/install.sh`, `scripts/install.ps1`) | Single binary | PLAN Phase 6 |
 
 ## jarvis-recipes-server (optional add-on, stays Python)
 
-> **Superseded 2026-10-08:** recipes is ported into jarvisd (`docs/recipes/00-inventory.md`, R0–R11); the rows below and PR #39 will not ship. **PR #39 is to be closed unmerged** (still open on 2026-10-08; left for the user). Its `scripts/remap_users.py` refusal rules live on in `jarvisd import-recipes`. Remaining external changes for recipes:
+> **Superseded 2026-10-08:** recipes is ported into jarvisd (`docs/recipes/00-inventory.md`, R0–R11); the rows below and PR #39 will not ship. PR #39 was closed unmerged. Its `scripts/remap_users.py` refusal rules live on in `jarvisd import-recipes`. Remaining external changes for recipes:
 >
-> - **install-e2e** (umbrella repo): `test_recipes.py` probes `/planner/plans`, `/shopping-list`, `/grocery/cart` and `/meal-plans/random` for 401 instead of reading `/openapi.json`, which jarvisd does not serve (inventory §11.6). PR [alexberardi/jarvis#37](https://github.com/alexberardi/jarvis/pull/37), open for review.
+> - **install-e2e** (umbrella repo): `test_recipes.py` probes `/planner/plans`, `/shopping-list`, `/grocery/cart` and `/meal-plans/random` for 401 instead of reading `/openapi.json`, which jarvisd does not serve (inventory §11.6). PR [alexberardi/jarvis#37](https://github.com/alexberardi/jarvis/pull/37), merged 2026-10-08.
 > - **jarvis-recipes-mobile** (RD3, **before cutover**): resolve a relative `image_url` (`/media/<name>`) against the discovered recipes base URL. PR [#20](https://github.com/alexberardi/jarvis-recipes-mobile/pull/20), merged 2026-10-08; it must be in the release users have at cutover.
 
 | Change | Why | When |

@@ -26,7 +26,7 @@ Changes made on the copy:
 
 | Route | What | Backend |
 |---|---|---|
-| `/setup` | First-run wizard: Check → Account → Hardware → Models → Privacy → Done (AD3, AD3a) | `/api/doctor`, `/api/auth/setup` (setup token), `/api/setup/state`, `/api/llm/v1/*`, `PUT /api/settings/{service}/{key}` |
+| `/setup` | First-run wizard: Check → Account → Hardware → one step per model job (Language model, Speech-to-text, Voice, Voice recognition, Memory & search) → Privacy → Done (AD3, AD3a, AD3b) | `/api/doctor`, `/api/auth/setup` (setup token), `/api/setup/state`, `/api/llm/v1/*`, `PUT /api/settings/{service}/{key}` |
 | `/dashboard` | System, health check, model states, nodes online, recent requests, update banner; restart and stop jarvisd (AD8, AD8b) | `/api/system/info`, `/api/doctor`, `/api/setup/state`, `/api/llm/v1/models/labels`, `/api/cc/api/v0/admin/nodes`, `/api/traces`, `/api/update`, `POST /api/system/restart`, `POST /api/system/stop` |
 | `/models` | Model manager | `/api/llm/v1/*`, `/api/prompt-provider` |
 | `/settings` | Every module's settings; restart jarvisd (AD8, hidden when the route 404s) | `/api/settings`, `POST /api/system/restart` |
@@ -35,7 +35,7 @@ Changes made on the copy:
 | `/traces`, `/nodes`, `/users` | Request traces, households and nodes, users | `/api/traces*`, `/api/admin/*` |
 | `/update` | Update opt-in and verdict (never "up to date" without a real check); self-update when the route exists | `/api/update*` |
 
-Server routes that may not exist yet (`POST /api/system/restart`, `POST /api/update/apply`) are
+Server routes an older jarvisd may lack (`POST /api/system/restart`, `POST /api/update/apply`) are
 feature-detected: the button shows until the route answers 404 once (`src/lib/features.ts`).
 
 ## Build and embed

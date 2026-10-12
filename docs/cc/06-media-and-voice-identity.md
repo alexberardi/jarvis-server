@@ -24,7 +24,7 @@ Source: `QUESTIONS.md`. Sections below still describe today's Python behaviour; 
 - **D19 (owned by 01/04):** a voice turn writes a transcript only when the speaker is confidently identified.
 - **D20:** account deletion hard-deletes voiceprints in every household and clears in-memory speaker/name caches, in the same in-process transaction as the rest of the user's data.
 - **D21:** an unknown **or ambiguous** speaker means per-user things refuse ("I'm not sure who's speaking"); household-level things still work. No fallback to the node owner, no per-household knob. The server passes the speaker identity (or its absence) to every command, and each command decides what to refuse.
-- **D33:** one `voice.similarity_threshold` plus `voice.min_speaker_margin`; verify uses the same threshold. Short/long knobs and the fixed 0.45 verify threshold go. Recalibrated for ERes2Net on jarvis-dev enrollments.
+- **D33:** one `voice.similarity_threshold` plus `voice.min_speaker_margin`; verify uses the same threshold. Short/long knobs and the fixed 0.45 verify threshold go. Recalibrated for ERes2Net on dev-node enrollments.
 - **D34:** voiceprints only. No raw enrollment audio kept; WAVs are discarded once embedded. Each embedding is tagged with its model id; a model change (including ECAPA → ERes2Net at cutover) requires re-enrollment. Legacy voiceprints are not imported.
 - **D35:** speaker recognition stays **off by default**; enrolling does not turn it on. **M14:** when it is off, refusals and the enrollment screen say "speaker recognition is off", not "I'm not sure who's speaking".
 - **D36:** voiceprints stay per (household, user), no node id. Per-node profiles are future work (PLAN §9).
@@ -386,6 +386,7 @@ CC itself has **no voice-related tables**.
 | `voice.stickiness_ttl_seconds` | 30.0 | **Dropped (D3)** |
 | `tts.url`, `whisper.url` | none | Read per household/node (`tts_client.py:66`, `whisper_client.py:58`) but **not declared** in the definitions. They disappear in Go, which is in-process. |
 | `voice.wake_verification_mode` / `_phrase` | — | Gate the M3 side effect; owned by doc 01 |
+| `voice.stt_prompt` / `voice.stt_preprocess` | `""` / false | **jarvisd, new (2026-10-12).** Whisper initial prompt and normalise/trim for the M3 command transcription only (not the wake-clip pass); see doc 01 §5 |
 
 **whisper** (moves into the Go STT/speaker module):
 
@@ -555,7 +556,7 @@ CC itself has **no voice-related tables**.
    - Today there are 5 knobs: short, normal and long thresholds plus two cutoffs. There is also a margin gate and a separate fixed verify threshold of 0.45, all ECAPA-calibrated.
    - Options:
      - (a) Port the structure and recalibrate every number.
-     - (b) Simplify: one threshold plus the margin gate, with verify using the same threshold, recalibrated on jarvis-dev enrollments (the spike showed flatter EER across 1.5 s and 3 s for ERes2Net).
+     - (b) Simplify: one threshold plus the margin gate, with verify using the same threshold, recalibrated on dev-node enrollments (the spike showed flatter EER across 1.5 s and 3 s for ERes2Net).
    - **Recommendation: (b).** Keep the setting key names `voice.similarity_threshold` and `voice.min_speaker_margin`, and drop the short/long ones.
 
    **Decided (D33):** (b).
@@ -600,6 +601,8 @@ CC itself has **no voice-related tables**.
 ## 11. Go port notes
 
 **Shape.**
+
+> **As built:** there is no `internal/voice/speaker` or `internal/voice/kokoro`. Speaker embedding and profiles are in `internal/modules/stt` (`speaker.go`, `voicematch.go`) over `internal/voice/sherpa`; Kokoro is `internal/modules/tts`; the CC routes are `internal/modules/cc/media.go` and `voice_profiles.go`.
 
 - `internal/modules/stt` has the engine (whisper.cpp or sherpa ASR per D7) behind a mutex or single worker, which preserves invariant 5.
 - `internal/voice/speaker` wraps the sherpa embedding extractor plus a `ProfileStore`.

@@ -3,9 +3,8 @@
 The black-box wire-contract suite: PLAN §4 layer 1, Phase 0 items 2 (harness) and 4 (freeze
 the wire contracts).
 
-- It is written in **Go** and speaks only HTTP (and later MQTT) to a target. It never imports
-  `internal/`. The same tests run against the legacy Python stack now and against `jarvisd`
-  later.
+- It is written in **Go** and speaks only HTTP and MQTT to a target. It never imports
+  `internal/`. The same tests run against the legacy Python stack and against `jarvisd`.
 - **A test only counts once it passes against Python.** After that it is the oracle for Go.
 - It freezes **shapes, not data**: status codes, JSON key sets and types, and the exact error
   `detail` strings that clients branch on. Ids, tokens and timestamps are matched by type.
@@ -30,7 +29,8 @@ Tests skip with a message when the environment they need is missing. With no
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `JARVIS_CONTRACT_HOST` | yes | Host or IP of the stack under test, e.g. the MBP `10.0.0.103`. **Never prod.** |
+| `JARVIS_CONTRACT_HOST` | yes | Host or IP of the stack under test, e.g. the MBP's LAN address. **Never prod.** |
+| `JARVIS_CONTRACT_IMPL` | for jarvisd | `python` (default) or `jarvisd`. Tests for behaviour jarvisd deliberately changes (`// LEGACY-BUG:`) branch on it. |
 | `JARVIS_CONTRACT_AUTH_ADMIN_TOKEN` | for fixtures | jarvis-auth's master admin token (`JARVIS_AUTH_ADMIN_TOKEN` on the target). Without it, every test that needs a user, app or node skips. |
 | `JARVIS_CONTRACT_APP_ID` / `JARVIS_CONTRACT_APP_KEY` | no | Reuse an existing app client instead of minting a throwaway one. |
 | `JARVIS_CONTRACT_SKIP` | no | Comma list of listeners the target doesn't run (`config,auth,logs,command-center,llm,whisper,tts,notifications,recipes,ocr,admin`). |
@@ -42,16 +42,17 @@ Tests skip with a message when the environment they need is missing. With no
 | `JARVIS_CONTRACT_MQTT_USERNAME` / `JARVIS_CONTRACT_MQTT_PASSWORD` | if the broker has auth | The shared broker credential (CC's `MQTT_USERNAME`/`MQTT_PASSWORD`). Empty means anonymous. |
 | `JARVIS_CONTRACT_SLOW_TIMEOUT` | no | Timeout for inference calls (LLM, STT, TTS synthesis). The default is `180s`. |
 | `JARVIS_CONTRACT_CALLBACK_HOST` | for the OCR callback test | An address the target can reach this test process at (jarvisd only; `127.0.0.1` for a local jarvisd). Without it `TestOCRFlowJobs/callback` skips. |
-| `JARVIS_CONTRACT_RELAY_PORT` | for the fake relay test | Local port the fake push relay listens on (`127.0.0.1`). The target must reach it: on the MBP through `ssh -f -N -o ExitOnForwardFailure=yes -R 7735:127.0.0.1:<port> alexanderberardi@10.0.0.103` (legacy `RELAY_URL` is `host.docker.internal:7735`; Docker Desktop reaches the Mac's loopback); on jarvisd the `relay.url` notifications setting. Open the tunnel only around `TestNotificationsRelay`. Without it `TestNotificationsRelay` skips. |
+| `JARVIS_CONTRACT_RELAY_PORT` | for the fake relay test | Local port the fake push relay listens on (`127.0.0.1`). The target must reach it: on the MBP through `ssh -f -N -o ExitOnForwardFailure=yes -R 7735:127.0.0.1:<port> <user>@<mbp-host>` (legacy `RELAY_URL` is `host.docker.internal:7735`; Docker Desktop reaches the Mac's loopback); on jarvisd the `relay.url` notifications setting. Open the tunnel only around `TestNotificationsRelay`. Without it `TestNotificationsRelay` skips. |
 | `JARVIS_CONTRACT_RECIPES_SLOW` | for the slow recipes tier | `1` runs LLM meal-plan generation, the grocery SKU-match job and photo import against the target's real model (`TestRecipesMealPlanGenerate`, `TestRecipesGroceryMatchJob`, `TestRecipesFromImageJob`). Uses `JARVIS_CONTRACT_SLOW_TIMEOUT` for polling. |
 | `JARVIS_CONTRACT_RECIPES_PHOTO` | for the photo-import test | Path to a JPEG of a printed recipe (e.g. one of jarvis-recipes-server's `recipe_parsing_tests/image_based/*/1.jpeg`). |
 | `JARVIS_CONTRACT_RECIPES_ADMIN_SECRET` | legacy, once | recipes' `ADMIN_SECRET`. `TestRecipesStock` seeds the stock reference data through `/admin/static-data/seed` when it is empty (reference data, never cleaned up). The MBP container sets none, so it is the code default `admin-secret`. |
 | `JARVIS_CONTRACT_NOTIFICATIONS_ADMIN_KEY` | for the notifications admin test | jarvis-notifications' `ADMIN_API_KEY` (MBP: `docker exec jarvis-notifications-jarvis-notifications-1 printenv ADMIN_API_KEY`). Without it `TestNotificationsAdmin` skips. |
+| `JARVIS_CONTRACT_WHISPER_SSH_CLEANUP` | no | `user@host:<whisper repo path>` (legacy only). Lets `TestWhisperVoiceProfiles` remove the empty `voice_profiles/<household>/` directory the legacy purge leaves behind. |
 
 To get the admin token from the MBP without echoing it:
 
 ```sh
-ssh alexanderberardi@10.0.0.103 'PATH=/opt/homebrew/bin:$PATH docker exec jarvis-auth-api printenv JARVIS_AUTH_ADMIN_TOKEN'
+ssh <user>@<mbp-host> 'PATH=/opt/homebrew/bin:$PATH docker exec jarvis-auth-api printenv JARVIS_AUTH_ADMIN_TOKEN'
 ```
 
 The CC admin key and the broker credential come from the CC container the same way
@@ -453,7 +454,7 @@ the 410 `Stage recipe expired` (72 h), staples delete-by-name (needs duplicate r
     a CC node row (see the note above).
   - The STT side: whisper `/transcribe` request and response shape with a short WAV fixture
     (`internal/audio` can generate a sine).
-- [x] **MQTT topic catalogue**: every row but 21 (no LLM-free trigger), 10 (D29) and 19 (cut)
+- [x] **MQTT topic catalogue**: every row but 21 (no LLM-free trigger), 10 (D29) and 19 (cut, D5; since ported, untested)
   since 2026-10-07; the rows below plus `TestCCMQTTRows` (see the coverage table). History:
   `TestCCMQTTCatalogue` with the fake node in
   `cc_mqtt.go`. Covered rows of docs/cc/05 §2.4: **1** `commands` (verbs `callback`,
@@ -464,7 +465,7 @@ the 410 `Stage recipe expired` (72 h), staples delete-by-name (needs duplicate r
   `commands`) with the node's `…/response/{correlation_id}`. It also asserts nothing else was
   published to the node. **Not covered:** 5 config/push, 7 device-scan, 8 device-list,
   9 device-state, 10 camera-credentials (D29 defers), 11 bluetooth-scan, 12 bluetooth-pair,
-  16–18 package-*, 19 test-install (cut, D5), 21 context/query, 22 `jarvis/auth/+/ready`, and
+  16–18 package-*, 19 test-install (cut, D5; ported 2026-10-08), 21 context/query, 22 `jarvis/auth/+/ready`, and
   the verbs `tool_call`, `report_tools`, `enroll_voice`/`verify_voice`, `toggle_command`,
   `invalidate_device_cache`, `device_removed`. The client connects with `clean_session=true`
   (not the node's `false`) so nothing lingers on the broker. **Target gotcha:** CC must hold the
@@ -520,16 +521,19 @@ What stays uncovered, and why:
   container can POST to; the subtest needs `JARVIS_CONTRACT_CALLBACK_HOST` and skips without
   it. It runs on jarvisd, where the SSRF fence (D4) puts the endpoint in the LAN
   `provider_base_url` mode, so the callback host must then be a **LAN address** of the test
-  host (e.g. `10.0.0.122`), not `127.0.0.1`. (`TestOCRFlowJobs/callback` takes either, but on
-  jarvisd it needs `JARVIS_APP_ID`/`JARVIS_APP_KEY` set on the target, or its callbacks carry no
-  app credentials.)
-- 10 camera-credentials (deferred, D29), 19 test-install (cut, D5).
+  host (e.g. `<lan-ip>`), not `127.0.0.1`. (`TestOCRFlowJobs/callback` takes either; jarvisd signs its callbacks with its own app client,
+  `<home>/app-key`.)
+- 10 camera-credentials (deferred, D29), 19 test-install (cut, D5; superseded 2026-10-08: ported, with no
+  contract test because it needs a live Forge share code, see docs/STATUS.md).
 
 ## Running against jarvisd (parity)
 
 A contract test proves parity once the same test passes against jarvisd. During the strangler
 phase jarvisd serves only some listeners, so point the suite at it with a separate env file and
 skip the rest:
+
+> Superseded: jarvisd now serves every listener. Run the whole suite against a throwaway `jarvisd serve`
+> with its own `--home`, shifted ports and `JARVIS_CONTRACT_IMPL=jarvisd` (the recipes and admin rows below).
 
 ```bash
 JARVIS_HOME=$(mktemp -d) JARVIS_PORT_CONFIG=17700 JARVIS_CONFIG_ADMIN_TOKEN=tok JARVIS_MDNS=0 jarvisd serve &

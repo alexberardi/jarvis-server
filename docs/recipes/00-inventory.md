@@ -1,6 +1,6 @@
 # recipes 00 — porting jarvis-recipes-server into jarvisd
 
-Source: `/home/alex/jarvis/jarvis-recipes-server` (main, read-only). Paths below are relative to
+Source: `jarvis-recipes-server` (main, read-only). Paths below are relative to
 `jarvis_recipes/app/` in that repo unless they start with `internal/`, `cmd/`, `contract/`, `docs/` or
 `fixtures/` (this repo), or name another repo.
 
@@ -80,7 +80,7 @@ Recipes is the household's recipe box and meal planner:
 
 ## 2. Clients
 
-Found by grepping every repo under `/home/alex/jarvis` (2026-10-08).
+Found by grepping every Jarvis repo (2026-10-08).
 
 | Client | Calls | Notes |
 |---|---|---|

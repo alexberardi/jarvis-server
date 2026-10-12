@@ -2,7 +2,7 @@
 
 Scope: AI outbound phone calls to businesses, the household phonebook, per-user "call context" (PII the agent may use), the web-search number lookup, the gateway-facing `/internal/phone/*` contract, the `make_phone_call` tool, and the 30 s phone reaper.
 
-CC source files (all under `/home/alex/jarvis/jarvis-command-center/app/`):
+CC source files (all under `jarvis-command-center/app/`):
 `services/phone_call_service.py` (1364 lines), `api/phone_sessions.py` (348), `services/call_context.py` (374), `api/mobile_call_context.py` (112), `services/phone_number_search.py` (275), `api/mobile_phone_contacts.py` (277), `core/tools/make_phone_call_tool.py` (155). Tables: `phone_call_sessions` and `phone_contacts` (`models.py:965-1045`; migrations `c3d4phone001`, `d4e5phone002`).
 
 Gateway (external, Python, frozen): `jarvis-phone-gateway`, port 7713. I read a snapshot of it at `scratchpad/pkgs/jarvis-phone-gateway` (`main.py`, `services/dial_worker.py`, `services/session_client.py`, `queues/dial_queue.py`, `services/turn_pipeline.py`, `services/prompt.py`).
@@ -803,6 +803,9 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
 ## 11. Go port notes
 
 **Package shape.** `internal/cc/phone`:
+
+> **As built:** the package is `internal/modules/cc/phone`; its files differ from the table below (e.g. `api.go`, `callbacks.go`, `callctx.go`, `telephony.go`, `tool.go`; no `machine.go`/`confirm.go`).
+
 
 | File | Contents |
 |---|---|

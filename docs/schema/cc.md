@@ -2,7 +2,7 @@
 
 Migration: `internal/modules/cc/migrations/00001_baseline.sql` (goose, version table `goose_cc`), embedded by `internal/modules/cc/embed.go`. Test: `internal/modules/cc/migrations_test.go`.
 
-**Source.** `pg_dump --schema-only` of `jarvis_command_center` on the MBP dev stack (10.0.0.103), 2026-10-06. `alembic_version` = `sb01signals`, which is the single head of `jarvis-command-center/alembic/versions` (57 revisions, repo at `3b32b73`). Nothing was derived from models alone. The dev DB matched `app/models.py` (42 tables + `alembic_version` + the config-client's `service_configs`).
+**Source.** `pg_dump --schema-only` of `jarvis_command_center` on the MBP dev stack, 2026-10-06. `alembic_version` = `sb01signals`, which is the single head of `jarvis-command-center/alembic/versions` (57 revisions, repo at `3b32b73`). Nothing was derived from models alone. The dev DB matched `app/models.py` (42 tables + `alembic_version` + the config-client's `service_configs`).
 
 **Result.** 31 tables (29 ported + 2 new). Legacy had 43 domain tables, of which 14 are dropped.
 
@@ -92,6 +92,8 @@ Scheduler triggers (D27) and durable jobs live in the platform tables `platform_
 - A source/origin column on routines for D44 Pantry-reported routines: not decided; the slug identifies them.
 
 ## Legacy import (`jarvisd import-legacy`)
+
+> Superseded in part (ID6r, 2026-10-09): the built import differs on purpose; `config_pushes`, `person_characterizations`, attention events/deliveries and transcripts are not imported, and memories are not re-embedded at import (the embedding sweep fills them). See [../install/legacy-import.md](../install/legacy-import.md) §7.
 
 General transforms:
 

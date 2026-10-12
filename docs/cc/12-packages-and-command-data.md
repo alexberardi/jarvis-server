@@ -476,7 +476,7 @@ Node-side: `test_package_install_handler.py`, `test_command_data_handler.py`, `t
    - *Options:* (a) a setting `pantry.base_url` defaulting to the public Fly URL; (b) env-only; (c) cut test install.
    - The verify response hands the node `{pantry}/v1/forge/drafts/{code}`, so the URL must be reachable *from the node*, not just from `jarvisd`.
    - **Recommendation: (a), and keep test install.**
-   - **Decided (D39, D5):** (a) `pantry.base_url`, defaulting to the public Pantry URL, reachable from the node. Test install is **dropped** (D5), future work.
+   - **Decided (D39, D5):** (a) `pantry.base_url`, defaulting to the public Pantry URL, reachable from the node. Test install is **dropped** (D5), future work. *Reversed 2026-10-08: test install is ported (§11).*
 9. **[behaviour] Node tools timeout semantics.** A node that doesn't answer within 10 s yields 200 with empty lists, so the Store shows "not installed" for everything.
    - *Options:* (a) keep (frozen); (b) 504 on timeout (mobile shows an error, which is a client-visible change).
    - **Recommendation: (a)** for Phase 5, plus a log line. Revisit with a mobile change.

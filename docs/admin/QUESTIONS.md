@@ -10,7 +10,8 @@ path handling (§11.3), and error-shape handling (§3.2).
 - **D9.** The SPA is embedded in jarvisd on 7710, the Fastify compose/installer machinery is dropped, and
   the jarvis-admin repo is retired.
 - **LD3.** No automatic model download; the model manager is the UI's backend.
-- **LD5.** Prod cutover starts clean, through the same first-run path.
+- **LD5.** Prod cutover starts clean, through the same first-run path. (For accounts and data, superseded
+  2026-10-09 by ID6r: `jarvisd import-legacy` carries them over; see [../install/legacy-import.md](../install/legacy-import.md).)
 - **LD2.** Remote LLMs are OpenAI-compatible only and off by default.
 - **D11 / D12.** `llm.prompt_provider` replaces `llm.interface`; the catalog keeps only shipped providers.
 - **PLAN §7.** LoRA is cut, which removes Train Adapter.
@@ -224,6 +225,8 @@ jarvisd registers its own listeners in the config registry at startup, so the ol
 and "probe" flows have nothing to do. Two things are still external:
 
 - The **recipes add-on** (stays Python, PLAN §2) and a **remote GPU satellite** need registry rows.
+
+> Superseded for recipes (2026-10-08): recipes is a jarvisd module on 7030 and needs no registry row or app client ([../recipes/00-inventory.md](../recipes/00-inventory.md)). The remote GPU satellite case stands.
 - Both need **app credentials** to call jarvisd (PLAN §3.1).
 
 Today, outside the old Services page, that means curl with `X-Admin-Token` (config) or

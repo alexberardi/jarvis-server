@@ -4,7 +4,7 @@ This doc covers async LLM work today: enqueue → Redis/RQ → worker → callba
 
 Sources:
 
-- `/home/alex/jarvis/jarvis-llm-proxy-api`:
+- `jarvis-llm-proxy-api`:
   - `api/queue_routes.py`
   - `models/queue_models.py`
   - `queues/redis_queue.py`

@@ -12,8 +12,8 @@ The only legacy table was `settings`, which the platform settings package owns. 
 in Loki, not Postgres. The baseline is an intentional no-op (`SELECT 1`) so the module's goose
 version table exists and the first real migration is `00002`.
 
-The jarvisd log table with retention and the SSE tail (PLAN §3.2) is new design and lands with the
-logs module in Phase 1. It needs no legacy import: Loki history is not migrated.
+The jarvisd log table with retention and the SSE tail (PLAN §3.2) is new design: `logs_entries`,
+migration `00002_entries.sql`. It needs no legacy import: Loki history is not migrated.
 
 ## Dropped
 
@@ -21,7 +21,7 @@ logs module in Phase 1. It needs no legacy import: Loki history is not migrated.
 
 ## Setting keys
 
-From `jarvis-logs/app/services/settings_definitions.py` (input for the module's settings `Definitions`; not implemented yet). `(reload)` = `requires_reload`.
+From `jarvis-logs/app/services/settings_definitions.py` (the input for the module's settings `Definitions`; the built set is in `internal/modules/logs/logs.go`). `(reload)` = `requires_reload`.
 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|

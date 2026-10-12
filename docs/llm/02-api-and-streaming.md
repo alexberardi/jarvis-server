@@ -2,7 +2,7 @@
 
 This doc defines the kept external surface on port 7704, the frozen wire shapes and how errors are reported. It is cross-checked against `contract/llm_test.go` and `docs/contract/README.md` (the LLM rows and LEGACY-BUGs).
 
-Source: `/home/alex/jarvis/jarvis-llm-proxy-api`, HEAD `e04d0b1`.
+Source: `jarvis-llm-proxy-api`, HEAD `e04d0b1`.
 
 ## 1. Purpose
 

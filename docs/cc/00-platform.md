@@ -1,6 +1,6 @@
 # 00 — Platform and cross-cutting
 
-Source root: `/home/alex/jarvis/jarvis-command-center`. All `file:line` below are relative to it. The CC `CLAUDE.md` is stale; where it disagrees with code, this doc follows the code and lists the difference in §8.
+Source root: `jarvis-command-center`. All `file:line` below are relative to it. The CC `CLAUDE.md` is stale; where it disagrees with code, this doc follows the code and lists the difference in §8.
 
 ## 0. Decisions applied (2026-10-06)
 
@@ -464,7 +464,7 @@ Golden and contract candidates:
    - *Why it matters:* `nodes.api_key` holds every node key in plaintext, and the no-colon path skips auth and `is_active` (§8.2). In Go, auth and CC share a process and a DB, so node validation becomes a function call against auth's hashed key table.
    - *Options:* (a) port it as is; (b) drop the legacy path, and stop importing `nodes.api_key`; (c) keep it but check `is_active`.
    - **My recommendation:** (b). Every current node sends `node_id:node_key`. I can confirm that with a log grep before the cut.
-   - **Decided (D40 default, via 05.Q10):** (b). Drop the bare-key path and don't import `nodes.api_key`; verify the jarvis-dev and prod node headers first.
+   - **Decided (D40 default, via 05.Q10):** (b). Drop the bare-key path and don't import `nodes.api_key`; verify the dev and prod node headers first.
 2. **[behaviour] How should CC verify user JWTs during the HS256 → RS256 window?**
    - *Why it matters:* CC is a third local verifier the RS256 plan doesn't list. It verifies HS256 only with `JARVIS_AUTH_SECRET_KEY` (§8.1).
    - *Options:* (a) CC calls the Go auth module's verifier in-process: both algorithms, keys chosen by algorithm family, with the forged-HS256-with-public-key test; (b) keep a CC-local HS256 verifier.
