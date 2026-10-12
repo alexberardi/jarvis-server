@@ -10,6 +10,8 @@ import (
 	"image/jpeg"
 	"image/png"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -170,9 +172,11 @@ func TestMacCaptureLeavesNoFile(t *testing.T) {
 	var file string
 	f := &fakeExec{out: map[string][]byte{screencapture: nil}, onRun: func(name string, args []string) error {
 		file = args[len(args)-1]
-		st, err := os.Stat(file[:strings.LastIndex(file, "/")])
-		if err != nil || st.Mode().Perm() != 0o700 {
-			t.Errorf("capture dir not private: %v %v", st.Mode(), err)
+		st, err := os.Stat(filepath.Dir(file))
+		if err != nil {
+			t.Errorf("capture dir: %v", err)
+		} else if runtime.GOOS != "windows" && st.Mode().Perm() != 0o700 { // Windows has no Unix modes
+			t.Errorf("capture dir not private: %v", st.Mode())
 		}
 		return os.WriteFile(file, pngOf(20, 10), 0o600)
 	}}
