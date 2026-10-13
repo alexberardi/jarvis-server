@@ -1,6 +1,6 @@
 # webapp 01: the admin opened to household members (jarvis-web's replacement)
 
-Status: **P1 built** (gateway tiers, 2026-10-13, PR #TBD); P2–P7 not started. Code: `internal/modules/admin` (gateway + BFF) and
+Status: **P1 built** (gateway tiers, 2026-10-13, PR #98); P2–P7 not started. Code: `internal/modules/admin` (gateway + BFF) and
 `web/admin` (React SPA). Legacy client: `jarvis-web` (Next.js, read-only here). Related:
 [admin/00-inventory.md](../admin/00-inventory.md) (how the admin gateway was built, AD1 / I8),
 [install/01-no-cli-plan.md](../install/01-no-cli-plan.md) §3.2 (the Add-ons page, owned there),
@@ -334,7 +334,7 @@ the image picker opens the camera on phones, and nothing scrolls sideways (one v
 
 | # | Phase | Size | Depends on | Tests |
 |---|---|---|---|---|
-| P1 | **Done** (PR #TBD; as built below the table). **Gateway tiers.** `open/user/superuser` on every BFF route and `passRoute`, superuser by default. Open `auth/me`, `change-password`, `PATCH me`, `households`, `switch-household`, cc `admin/nodes`. Add the §2.2 cc member pass routes. | M | — | Go table test: walk every `/api` pattern on the admin mux × {anonymous, member of H1, power_user, household admin, superuser, member of H2}, asserting 401/403/2xx. An unclassified pattern fails. Cross-household: a member of H1 chatting to an H2 node through the gateway → 404 |
+| P1 | **Done** (PR #98; as built below the table). **Gateway tiers.** `open/user/superuser` on every BFF route and `passRoute`, superuser by default. Open `auth/me`, `change-password`, `PATCH me`, `households`, `switch-household`, cc `admin/nodes`. Add the §2.2 cc member pass routes. | M | — | Go table test: walk every `/api` pattern on the admin mux × {anonymous, member of H1, power_user, household admin, superuser, member of H2}, asserting 401/403/2xx. An unclassified pattern fails. Cross-household: a member of H1 chatting to an H2 node through the gateway → 404 |
 | P2 | **SPA auth and shell.** Drop the superuser refusal, role-aware routes, `/admin/*` move with redirects, nav split, Account page, household switcher, the name | M | P1, Q1 | vitest: a member sees no Admin nav, a direct admin URL shows the notice, redirects work, must-change goes first, the switcher appears only for 2+ households |
 | P3 | **Chat page.** SSE through `SSEParser`, warmup, tools cache, picker and default chain, offline banner, actions/validation, markdown/think, images, `sessionStorage` | L | P1, P2. Step 1 of the chain lights up when 01's `this-device` ships | vitest: the default-chain table (agent / primary online / first online / none online), event reducer, offline banner, image gating. Go e2e chat smoke: the `gatewayStack` (`e2e_test.go`) plus cc with a fake LLM and a fake MQTT node. Member logs in → nodes → warmup → chat → a `done` event through the admin port |
 | P4 | **Add-ons page:** nav slot and `user` tier only. Content per 01-no-cli-plan §3.2, its item 3.2 | — | P1, P2 | there |
