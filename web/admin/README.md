@@ -60,5 +60,9 @@ make admin                      # = npm --prefix web/admin ci && npm --prefix we
 - `npm run lint`, `npx tsc -b`, `npm test` (Vitest + jsdom). With Node 25+ the tests use an
   in-memory Storage (`tests/setup.ts`). TanStack Query v5 passes a context argument to
   `mutationFn`, so wrap API functions in arrows instead of passing them by reference.
+- Small screens: the sidebar is a drawer below `md` (the header's menu button), the traces table and
+  the log rows stack below `lg`, dialogs use `dialogClass` (a bottom sheet on phones), and
+  `index.css` raises buttons and fields to 40px on phones and touch screens. Check a layout
+  change at 360px wide: no page may scroll sideways.
 - `JARVIS_ADMIN_UI_DIR=web/admin/dist/ui jarvisd serve` serves a fresh build from disk without
   rebuilding jarvisd.

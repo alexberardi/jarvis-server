@@ -15,7 +15,7 @@ import {
   type ConnectionsResponse,
   type HealthStatus,
 } from '@/api/connections'
-import { buttonClass, inputClass } from '@/components/models/styles'
+import { buttonClass, dialogClass, inputClass } from '@/components/models/styles'
 import { Pill, Section } from '@/components/models/ui'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
@@ -44,9 +44,9 @@ function HealthPill({ health, probing }: { health: HealthStatus | null | undefin
 export function KeyModal({ appKey, onClose }: { appKey: AppKey; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="key-title">
-      <div className="w-full max-w-lg space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl">
-        <h2 id="key-title" className="flex items-center gap-2 text-lg font-semibold text-[var(--color-text)]">
+    <div className={dialogClass.backdrop} role="dialog" aria-modal="true" aria-labelledby="key-title">
+      <div className={cn(dialogClass.panel, 'space-y-4')}>
+        <h2 id="key-title" className="flex items-center gap-2 break-all text-lg font-semibold text-[var(--color-text)]">
           <KeyRound size={18} /> Key for {appKey.app_id}
         </h2>
         <p className="text-sm text-[var(--color-text-muted)]">
@@ -299,8 +299,8 @@ export default function ConnectionsPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-[var(--color-text)]">Connections</h1>
           <p className="text-sm text-[var(--color-text-muted)]">jarvisd's ports, the services it knows about, and the apps allowed to call it.</p>
         </div>
@@ -318,9 +318,9 @@ export default function ConnectionsPage() {
           {data.listeners.map((l) => (
             <li key={l.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`listener-${l.name}`}>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <code className="text-[var(--color-text)]">{l.name}</code>
-                  <span className="text-xs text-[var(--color-text-muted)]">{l.url}</span>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <code className="break-all text-[var(--color-text)]">{l.name}</code>
+                  <span className="break-all text-xs text-[var(--color-text-muted)]">{l.url}</span>
                   {l.managed === 'broker' && <Pill>MQTT</Pill>}
                 </div>
                 <PublicURLField name={l.name} value={l.public_url} />
@@ -351,11 +351,11 @@ export default function ConnectionsPage() {
             {data.external.map((x) => (
               <li key={x.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`external-${x.name}`}>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <code className="text-[var(--color-text)]">{x.name}</code>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <code className="break-all text-[var(--color-text)]">{x.name}</code>
                     {x.managed === 'setting' && <Pill title="Follows a jarvisd setting; change it under Settings">from settings</Pill>}
                   </div>
-                  <p className="truncate text-xs text-[var(--color-text-muted)]">
+                  <p className="truncate text-xs text-[var(--color-text-muted)]" title={`${x.url}${x.description ? ` · ${x.description}` : ''}`}>
                     {x.url}
                     {x.description ? ` · ${x.description}` : ''}
                   </p>
@@ -411,9 +411,9 @@ export default function ConnectionsPage() {
           <ul className="divide-y divide-[var(--color-border)]">
             {data.apps.map((a) => (
               <li key={a.app_id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`app-${a.app_id}`}>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <code className="text-[var(--color-text)]">{a.app_id}</code>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <code className="break-all text-[var(--color-text)]">{a.app_id}</code>
                     <span className="text-[var(--color-text-muted)]">{a.name}</span>
                     {a.is_active ? <Pill tone="ok">active</Pill> : <Pill tone="bad">revoked</Pill>}
                   </div>

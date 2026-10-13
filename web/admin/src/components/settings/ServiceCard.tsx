@@ -24,7 +24,7 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
     <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
       <button
         onClick={() => setExpanded((prev) => !prev)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-alt)]"
+        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-[var(--color-surface-alt)]"
       >
         {expanded ? (
           <ChevronDown size={18} className="text-[var(--color-text-muted)]" />
@@ -32,7 +32,7 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
           <ChevronRight size={18} className="text-[var(--color-text-muted)]" />
         )}
 
-        <span className="font-medium text-[var(--color-text)]">
+        <span className="min-w-0 font-medium text-[var(--color-text)]">
           {result.display_name || result.service_name}
         </span>
         {result.display_name && (
@@ -45,7 +45,7 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
           <XCircle size={16} className="text-red-500" />
         )}
 
-        <span className="text-xs text-[var(--color-text-muted)]">
+        <span className="whitespace-nowrap text-xs text-[var(--color-text-muted)]">
           {result.success
             ? `${result.settings.length} settings`
             : result.error ?? 'Error'}
@@ -54,7 +54,7 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
         {result.latency_ms != null && (
           <span
             className={cn(
-              'ml-auto text-xs',
+              'ml-auto hidden text-xs sm:inline',
               result.latency_ms > 500 ? 'text-amber-500' : 'text-[var(--color-text-muted)]',
             )}
           >

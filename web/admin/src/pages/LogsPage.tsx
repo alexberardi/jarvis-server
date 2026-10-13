@@ -26,7 +26,7 @@ const levelTone: Record<string, string> = {
 }
 
 const selectClass =
-  'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1.5 text-sm text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]'
+  'min-w-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1.5 text-sm text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]'
 
 function formatTime(ts: string): string {
   const d = new Date(ts)
@@ -40,16 +40,16 @@ function LogRow({ e }: { e: LogEntry }) {
     <li className="border-b border-[var(--color-border)] px-2 py-1 font-mono text-xs last:border-0">
       <button
         type="button"
-        className="flex w-full items-start gap-2 text-left"
+        className="flex w-full flex-wrap items-start gap-x-2 text-left lg:flex-nowrap"
         onClick={() => hasContext && setOpen(!open)}
         aria-expanded={hasContext ? open : undefined}
       >
         <span className="shrink-0 text-[var(--color-text-muted)]">{formatTime(e.timestamp)}</span>
-        <span className={cn('w-16 shrink-0', levelTone[e.level] ?? '')}>{e.level}</span>
-        <span className="w-28 shrink-0 truncate text-[var(--color-text-muted)]" title={e.node_id ? `node ${e.node_id}` : e.service}>
+        <span className={cn('shrink-0 lg:w-16', levelTone[e.level] ?? '')}>{e.level}</span>
+        <span className="min-w-0 truncate text-[var(--color-text-muted)] max-lg:flex-1 lg:w-28 lg:shrink-0" title={e.node_id ? `node ${e.node_id}` : e.service}>
           {e.node_id ? `${e.service}@${e.node_id}` : e.service}
         </span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--color-text)]">{e.message}</span>
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--color-text)] max-lg:basis-full">{e.message}</span>
       </button>
       {open && hasContext && (
         <pre className="mt-1 overflow-x-auto rounded bg-[var(--color-surface-alt)] p-2 text-[11px] text-[var(--color-text-muted)]">
@@ -174,7 +174,7 @@ export default function LogsPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <label className="sr-only" htmlFor="log-service">Module</label>
         <select id="log-service" className={selectClass} value={service} onChange={(e) => setService(e.target.value)}>
           <option value="">All modules</option>
@@ -213,7 +213,7 @@ export default function LogsPage() {
         </select>
         <input
           aria-label="Search logs"
-          className={cn(inputClass, 'w-56')}
+          className={cn(inputClass, 'col-span-2 sm:w-56')}
           placeholder="Search text"
           value={text}
           onChange={(e) => setText(e.target.value)}

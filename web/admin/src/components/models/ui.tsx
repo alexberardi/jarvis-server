@@ -21,7 +21,7 @@ export function Section({
 }) {
   return (
     <section
-      className={cn('rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4', className)}
+      className={cn('min-w-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4', className)}
       aria-label={title}
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">

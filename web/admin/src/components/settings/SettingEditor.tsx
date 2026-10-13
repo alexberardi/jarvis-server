@@ -112,6 +112,8 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
       ) : setting.value_type === 'bool' ? (
         <button
           type="button"
+          role="switch"
+          aria-checked={boolValue}
           onClick={() => setBoolValue((prev) => !prev)}
           className={cn(
             'relative h-6 w-11 rounded-full transition-colors',
