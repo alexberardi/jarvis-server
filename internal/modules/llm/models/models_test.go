@@ -1441,7 +1441,9 @@ func TestFitQwen35On3080TiAsRun(t *testing.T) {
 	// own CUDA context, nvidia-smi 9454 from outside.
 	linux := engine.Platform{OS: "linux", Arch: "amd64"}
 	e.mgr.Detector = &engine.Detector{Platform: linux,
-		Binaries: func() map[engine.Flavour]string { return map[engine.Flavour]string{engine.FlavourCUDA: "/e/llama-server"} },
+		Binaries: func() map[engine.Flavour]string {
+			return map[engine.Flavour]string{engine.FlavourCUDA: "/e/llama-server"}
+		},
 		Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
 			switch name {
 			case "/e/llama-server":
