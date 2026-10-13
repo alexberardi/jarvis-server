@@ -210,7 +210,7 @@ do. Each item lands green on `main` on its own (the §8 style).
 
 | # | Item | Size | Depends on | CI | Tests |
 |---|---|---|---|---|---|
-| 1.1 | **Done (PR #PAIRPR, 2026-10-13; DESIGN §5 item 3).** **Device-code pairing:** jarvisd `POST /nodes/pairings` (start, returns code + poll id, 10 min expiry), poll, member-scoped approve (choose household + room; DESIGN §13 Q2); `jarvis-agent enroll --code`; rate limit + single use | M | — | `build`, `agent` | Unit: expiry, reuse, cross-household approve refused, a non-member refused; contract test for the routes |
+| 1.1 | **Done (PR #101, 2026-10-13; DESIGN §5 item 3).** **Device-code pairing:** jarvisd `POST /nodes/pairings` (start, returns code + poll id, 10 min expiry), poll, member-scoped approve (choose household + room; DESIGN §13 Q2); `jarvis-agent enroll --code`; rate limit + single use | M | — | `build`, `agent` | Unit: expiry, reuse, cross-household approve refused, a non-member refused; contract test for the routes |
 | 1.2 | `jarvisd setup-link --url` (machine output) and `--qr` (decided, §9.3 Q4; Unicode half-blocks); `install.sh`/`.ps1` print the QR | S | — | `install` | Golden QR, decodes back to the link |
 | 1.3 | Stale definition refresh from the macOS/Windows helpers after an admin-button upgrade (closes §8.2 "Not covered"), behind Q7 for Linux | M | — | `upgrade` (3 OS) | Upgrade e2e asserts `definition_stale: false` after the admin button |
 | 1.4 | `jarvis-agent install / uninstall` (§2 shared rules): login item per OS (SMAppService on macOS), menu entry + shortcut, native host by default, start; idempotent | M | Q1 | `agent` (3 OS) | Golden files from `internal/agent/deploy/`; scratch HOME/HKCU fake registry; install twice, uninstall leaves nothing |
