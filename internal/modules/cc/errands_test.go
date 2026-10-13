@@ -126,3 +126,71 @@ func TestErrandPurgeUser(t *testing.T) {
 		t.Fatal("plan survived account deletion")
 	}
 }
+
+// ackTool stands in for run_errand: work queued for after the reply, or a refusal.
+type ackTool struct{ result *pyjson.Object }
+
+func (ackTool) Name() string { return "run_errand" }
+func (ackTool) Definition() *pyjson.Object {
+	return servertools.LegacyDefinition("run_errand")
+}
+func (a ackTool) Execute(context.Context, servertools.Call, servertools.Turn) (any, error) {
+	return a.result, nil
+}
+
+// The demo dry run: a native model called run_errand for "set a timer", got the "I'm planning
+// it" ack, and then composed "I've got the timer set for 10 minutes" (after waiting 106 s for
+// the shared slot) while the plan later failed. An accepted ack ends the turn as said, with no
+// second LLM call; anything else still goes back to the model.
+func TestNativeAcceptedAckIsTheReply(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ack := "On it. I'll send the plan to your phone."
+	ve.m.tools.Register(ackTool{servertools.Obj("status", "accepted", "message", ack)})
+	ve.start("ack1", "[]")
+	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_e1", "type": "function",
+		"function": map[string]any{"name": "run_errand", "arguments": `{"goal": "set a timer for 10 minutes"}`}}}})
+	before := len(ve.eng.requests())
+	b := ve.turn("/api/v0/voice/command", "ack1", "set a timer for 10 minutes", nil).want(200).json()
+	if b["assistant_message"] != ack {
+		t.Fatalf("reply = %v", b["assistant_message"])
+	}
+	if got := len(ve.eng.requests()) - before; got != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (no composing call after the ack)", got)
+	}
+	msgs := ve.m.convs.get("ack1").messages
+	if last := msgs[len(msgs)-1]; last.Role != "assistant" || last.Content != ack || msgs[len(msgs)-2].Role != "tool" {
+		t.Fatalf("history tail %+v", msgs[len(msgs)-2:])
+	}
+
+	// An error result is not an ack: the model answers from it.
+	ve.m.tools.Register(ackTool{servertools.Obj("error", "task_failed", "message", "couldn't start")})
+	ve.start("ack2", "[]")
+	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_e2", "type": "function",
+		"function": map[string]any{"name": "run_errand", "arguments": `{"goal": "x"}`}}}})
+	ve.eng.say("Sorry, I couldn't start that errand.")
+	b = ve.turn("/api/v0/voice/command", "ack2", "run an errand", nil).want(200).json()
+	if b["assistant_message"] != "Sorry, I couldn't start that errand." {
+		t.Fatalf("error reply = %v", b["assistant_message"])
+	}
+}
+
+func TestAcceptedAck(t *testing.T) {
+	tool := func(s string) chatMsg { return chatMsg{Role: "tool", Content: s} }
+	for _, c := range []struct {
+		in   []chatMsg
+		want string
+		ok   bool
+	}{
+		{nil, "", false},
+		{[]chatMsg{tool(`{"status": "accepted", "message": " A. "}`), tool(`{"status": "accepted", "message": "B."}`)}, "A. B.", true},
+		{[]chatMsg{tool(`{"status": "accepted", "message": "A."}`), tool(`{"temp": 70}`)}, "", false},
+		{[]chatMsg{tool(`{"status": "accepted", "message": ""}`)}, "", false},
+		{[]chatMsg{tool(`{"status": "accepted"}`)}, "", false},
+		{[]chatMsg{tool(`"accepted"`)}, "", false},
+		{[]chatMsg{tool(`not json`)}, "", false},
+	} {
+		if got, ok := acceptedAck(c.in); got != c.want || ok != c.ok {
+			t.Errorf("%v: got %q %v", c.in, got, c.ok)
+		}
+	}
+}

@@ -100,6 +100,8 @@ type Service struct {
 	DraftTTL         time.Duration // 24 h (D40 Q6)
 	ApprovalDeadline time.Duration // 24 h (D14)
 	PhoneDeadline    time.Duration // 60 min from confirm (D40 Q6)
+	// PlannerThinkTimeout overrides errands.planner_think_seconds (0 = the setting; <0 = none).
+	PlannerThinkTimeout time.Duration
 
 	driving sync.Map // workflow id → struct{}: runs this process is driving right now
 }
@@ -152,6 +154,8 @@ const (
 	SettingAutonomous = "errands.autonomous_enabled"
 	// SettingPlannerMaxTokens caps one planning call's output, thinking included.
 	SettingPlannerMaxTokens = "errands.planner_max_tokens"
+	// SettingPlannerThinkSeconds caps one thinking planning call's wall-clock time.
+	SettingPlannerThinkSeconds = "errands.planner_think_seconds"
 )
 
 // Definitions are the errand settings (D40 Q12, D9).
@@ -174,6 +178,10 @@ func Definitions() []settings.Definition {
 				"thinking to split multi-step and conditional goals; if the model thinks past this it retries " +
 				"once without thinking (a rougher plan). Must fit the background model's context with the " +
 				"prompt. Higher = better plans on chatty models, slower to arrive."},
+		{Key: SettingPlannerThinkSeconds, Category: "errands", Type: settings.Int, Default: int64(defaultPlannerThinkSeconds),
+			Description: "Most seconds one errand planning call may spend thinking before it is stopped and retried " +
+				"without thinking (a rougher plan). When the background model shares the live model's engine, " +
+				"voice and chat replies wait while a plan is thinking, so keep this short. -1 = no limit."},
 	}
 }
 

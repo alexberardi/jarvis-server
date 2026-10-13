@@ -318,6 +318,28 @@ func (s *Service) plannerMaxTokens(ctx context.Context) int {
 	return defaultPlannerMaxTokens
 }
 
+// defaultPlannerThinkSeconds is errands.planner_think_seconds' default: about 3,000 think
+// tokens on a mid-range GPU, well past the ~1,900 a Qwen3.5-9B plan needs.
+const defaultPlannerThinkSeconds = 30
+
+// plannerThinkTimeout is how long a thinking planner call may run before it is cancelled and
+// retried without thinking (0 = no limit).
+func (s *Service) plannerThinkTimeout(ctx context.Context) time.Duration {
+	if s.PlannerThinkTimeout != 0 {
+		return max(s.PlannerThinkTimeout, 0)
+	}
+	n := int64(defaultPlannerThinkSeconds)
+	if s.Settings != nil {
+		if v := s.Settings.Int(ctx, SettingPlannerThinkSeconds, settings.Scope{}); v != 0 {
+			n = v
+		}
+	}
+	if n < 0 {
+		return 0
+	}
+	return time.Duration(n) * time.Second
+}
+
 // stripThink keeps only what follows the last </think>.
 func stripThink(text string) string {
 	if i := strings.LastIndex(text, "</think>"); i >= 0 {
@@ -359,18 +381,36 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 		Label: "background", Temperature: &temp, MaxTokens: &maxTok,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
 	}
-	resp, err := s.LLM.Chat(ctx, req)
-	if err != nil {
+	// The thinking attempt gets a wall-clock cap as well as max_tokens: the background label
+	// often shares the live label's engine (one llama slot), so every second spent thinking
+	// here is a second a voice or chat turn waits (the demo dry run: 105 s of thinking on an
+	// unplannable "set a timer" held the next reply hostage).
+	tctx, cancel := ctx, context.CancelFunc(func() {})
+	if d := s.plannerThinkTimeout(ctx); d > 0 {
+		tctx, cancel = context.WithTimeout(ctx, d)
+	}
+	resp, err := s.LLM.Chat(tctx, req)
+	capped := err != nil && errors.Is(tctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+	cancel()
+	if err != nil && !capped {
 		return nil, err
 	}
-	s.log().Info("errands: planner call", "completion_tokens", resp.Usage.CompletionTokens,
-		"prompt_tokens", resp.Usage.PromptTokens, "max_tokens", maxTok, "finish", resp.FinishReason,
-		"elapsed", time.Since(start).Round(100*time.Millisecond))
+	if capped {
+		s.log().Warn("errands: planner thought past its time budget; retrying without thinking",
+			"budget", s.plannerThinkTimeout(ctx), "elapsed", time.Since(start).Round(100*time.Millisecond))
+		resp = &llm.ChatResponse{FinishReason: "length"}
+	} else {
+		s.log().Info("errands: planner call", "completion_tokens", resp.Usage.CompletionTokens,
+			"prompt_tokens", resp.Usage.PromptTokens, "max_tokens", maxTok, "finish", resp.FinishReason,
+			"elapsed", time.Since(start).Round(100*time.Millisecond))
+	}
 	if resp.Content == "" && resp.FinishReason == "length" {
-		// The model thought through the whole budget without answering (Qwen3-8B does on
-		// simple two-step goals; legacy measured ~1900 think tokens on Qwen3.5-9B). Retry
-		// once without thinking: a plan that may merge steps beats no plan.
-		s.log().Warn("errands: planner thought past max_tokens; retrying without thinking")
+		// The model thought through the whole budget (tokens or time) without answering
+		// (Qwen3-8B does on simple two-step goals; legacy measured ~1900 think tokens on
+		// Qwen3.5-9B). Retry once without thinking: a plan that may merge steps beats no plan.
+		if !capped {
+			s.log().Warn("errands: planner thought past max_tokens; retrying without thinking")
+		}
 		off := 0
 		req.ReasoningBudget = &off
 		if resp, err = s.LLM.Chat(ctx, req); err != nil {
