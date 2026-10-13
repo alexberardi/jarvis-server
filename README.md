@@ -200,6 +200,20 @@ CGO_ENABLED=0 go build -o jarvisd ./cmd/jarvisd   # without it (a placeholder pa
 
 Builds never use cgo. Tests: `CGO_ENABLED=1 go test -race ./...` (the race detector needs cgo).
 
+### Demo data for a dev server
+
+`scripts/seed-dev.py` (Python 3, standard library only) fills a fresh jarvisd with pseudonymous
+demo data for screenshots and dev work: three logins, a named household, two nodes that really
+authenticate, rooms, devices, routines, a phonebook, memories, recent voice history and signals.
+It finishes first-run setup itself with the setup token from `<home>/setup-token`, and reruns are
+idempotent. On a Linux system install it runs as the service account:
+
+```sh
+sudo -u jarvisd python3 scripts/seed-dev.py --home /var/lib/jarvisd    # --profile minimal | --reset
+```
+
+See the script's header for prerequisites and options.
+
 ## License
 
 AGPL-3.0. See [LICENSE](LICENSE).
