@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/vkbd"
 )
 
 // ForOS builds the keyboard and window backends for goos. Nothing is probed here: availability
@@ -14,7 +15,7 @@ func ForOS(goos string, h *host.Host, x Exec, macTrusted func() bool) (Keyboard,
 	switch goos {
 	case "linux":
 		x11 := &HostWindows{H: h, SameFn: SameX11, ActiveFn: X11Active(x)}
-		return &LinuxKeyboard{X: x}, &LinuxWindows{X: x, X11: x11}, nil
+		return &LinuxKeyboard{X: x, Wayland: &vkbd.Keyboard{}}, &LinuxWindows{X: x, X11: x11}, nil
 	case "darwin":
 		return &MacKeyboard{Trusted: macTrusted, Post: nativeMacPoster()},
 			&HostWindows{H: h, SameFn: SameMacPid, ActiveFn: MacFrontPid(x)}, nil

@@ -98,17 +98,24 @@ internal/agent/
   winmatch/           naming a window ("firefox", "the terminal", title words): Pick (screen),
                       PickUnique (dictation: one match or ambiguous_window)
   dictate/            dictation (DESIGN.md §14): desktop_type_text, desktop_press_key and
-                      desktop_confirm (tools.go, confirm.go); keyboards: wtype/ydotool/xdotool
-                      (linux.go), CGEvent (mac.go, cgevent_darwin.go), SendInput (win.go,
+                      desktop_confirm (tools.go, confirm.go); keyboards: the built-in Wayland
+                      virtual keyboard, else wtype/ydotool/xdotool (linux.go), CGEvent (mac.go, cgevent_darwin.go), SendInput (win.go,
                       sendinput_windows.go); focus: hyprctl/swaymsg (linuxwin.go), the host
                       backend + an active-window check (hostwin.go)
+  vkbd/               the Wayland virtual keyboard (zwp_virtual_keyboard_manager_v1), pure Go:
+                      what wtype does, without wtype (DESIGN.md §14)
+  xkb/                keysyms for text and dictation's keys, and the minimal XKB keymap a
+                      virtual keyboard uploads (pure, every OS)
+  wlwire/             the Wayland client wire (connection, ids, args, registry), shared by the
+                      island and vkbd
   hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's
                       patterns (leds.go, golden-tested), the GPIO17 button (button.go), spidev +
                       gpiocdev (device_linux.go); voice states reach it through voice.Indicator
   island/             the on-screen voice indicator (DESIGN.md §11) and dictation's note (Note):
                       pure-Go renderer (render.go),
                       animation model + loop (island.go), NSPanel backend (mac_darwin.go, purego),
-                      Wayland layer-shell client (wayland.go); Run keeps the main thread on macOS
+                      Wayland layer-shell client (wayland.go, over wlwire); Run keeps the main
+                      thread on macOS
   voice/              the voice pipeline: wake -> record -> STT -> stream reply -> follow-up
                       window -> listen again (pipeline.go), the conversation loop: tool rounds +
                       validation questions + the final message (converse.go), client tool calls
@@ -281,6 +288,14 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     tests). **Never type or press keys in a desktop someone is using in tests:** use fakes, or a
     nested headless compositor (`WLR_BACKENDS=headless sway` with its own `WAYLAND_DISPLAY`,
     `env -i` so no `HYPRLAND_INSTANCE_SIGNATURE` leaks in) and `jarvis-agent try`.
+
+28. **Built-in typing first, helpers as fallback** (installers §9.3 item 6: the agent binary is
+    the whole install). On Wayland the virtual keyboard (`vkbd`) is used whenever the compositor
+    advertises it; wtype/ydotool only when it doesn't. Availability is probed per call (one
+    connection, nothing created). A built-in backend's failure is returned, never retried through a
+    helper: keys may have half-arrived. `vkbd`'s settle and clock are injected; its tests use a
+    scripted compositor on a socketpair. `JARVIS_VKBD_TYPE=… go test -run TestNativeType
+    ./internal/agent/vkbd/` types for real, **in a nested compositor only**.
 
 ## Dependencies
 

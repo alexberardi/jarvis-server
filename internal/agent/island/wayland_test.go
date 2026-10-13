@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/wlwire"
 )
 
 // The Wayland client against a scripted compositor on a socketpair: the requests it sends
@@ -57,10 +59,10 @@ func newFakeCompositor(t *testing.T) (*fakeCompositor, *net.UnixConn) {
 	return f, conn(fds[1])
 }
 
-func (f *fakeCompositor) event(id uint32, op uint16, a *argBuf) {
+func (f *fakeCompositor) event(id uint32, op uint16, a *wlwire.Args) {
 	var body []byte
 	if a != nil {
-		body = a.b
+		body = a.Bytes()
 	}
 	m := binary.LittleEndian.AppendUint32(nil, id)
 	m = binary.LittleEndian.AppendUint32(m, uint32(8+len(body))<<16|uint32(op))
@@ -110,41 +112,41 @@ func (f *fakeCompositor) isPool(r req) bool {
 }
 
 func (f *fakeCompositor) answer(r req) {
-	a := argReader{b: r.args}
+	a := wlwire.NewReader(r.args)
 	f.mu.Lock()
 	ids := f.ids
 	f.mu.Unlock()
 	set := func(k string, v uint32) { f.mu.Lock(); f.ids[k] = v; f.mu.Unlock() }
 	switch {
 	case r.id == displayID && r.op == opDisplayGetRegistry:
-		reg := a.u32()
+		reg := a.U32()
 		set("registry", reg)
 		for i, g := range []struct {
 			iface string
 			v     uint32
 		}{{"wl_compositor", 6}, {"wl_shm", 1}, {"wl_seat", 9}, {"zwlr_layer_shell_v1", 4}, {"wl_output", 4}} {
-			f.event(reg, evGlobal, args().u32(uint32(i+1)).str(g.iface).u32(g.v))
+			f.event(reg, evGlobal, wlwire.NewArgs().U32(uint32(i+1)).Str(g.iface).U32(g.v))
 		}
 	case r.id == displayID && r.op == opDisplaySync:
-		f.event(a.u32(), evCallbackDone, args().u32(0))
+		f.event(a.U32(), evCallbackDone, wlwire.NewArgs().U32(0))
 	case r.id == ids["registry"] && r.op == opRegistryBind:
-		_, iface, v, id := a.u32(), a.str(), a.u32(), a.u32()
+		_, iface, v, id := a.U32(), a.Str(), a.U32(), a.U32()
 		set(iface, id)
 		set(iface+".version", v)
 		if iface == "wl_output" {
-			f.event(id, evOutputScale, args().i32(2))
+			f.event(id, evOutputScale, wlwire.NewArgs().I32(2))
 		}
 	case r.id == ids["wl_compositor"] && r.op == opCreateSurface:
-		set("surface", a.u32())
+		set("surface", a.U32())
 	case r.id == ids["wl_compositor"] && r.op == opCreateRegion:
-		set("region", a.u32())
+		set("region", a.U32())
 	case r.id == ids["zwlr_layer_shell_v1"] && r.op == opGetLayerSurface:
-		set("layer", a.u32())
+		set("layer", a.U32())
 	case r.id == ids["surface"] && r.op == opSurfaceCommit && ids["configured"] == 0:
 		set("configured", 1)
-		f.event(ids["layer"], evLayerConfigure, args().u32(77).u32(CanvasW).u32(CanvasH))
+		f.event(ids["layer"], evLayerConfigure, wlwire.NewArgs().U32(77).U32(CanvasW).U32(CanvasH))
 	case r.id == ids["wl_shm"] && r.op == opShmCreatePool:
-		pool, size := a.u32(), a.i32()
+		pool, size := a.U32(), a.I32()
 		set("pool", pool)
 		mem, err := unix.Mmap(r.fd, 0, int(size), unix.PROT_READ, unix.MAP_SHARED)
 		if err == nil {
@@ -165,7 +167,7 @@ func (f *fakeCompositor) id(k string) uint32 { f.mu.Lock(); defer f.mu.Unlock();
 
 func TestWaylandClientSpeaksLayerShell(t *testing.T) {
 	fc, conn := newFakeCompositor(t)
-	b := &wayland{w: newWlConn(conn), scales: map[uint32]int32{}, memFD: -1, patience: hangGuard}
+	b := &wayland{w: wlwire.NewConn(conn), scales: map[uint32]int32{}, memFD: -1, patience: hangGuard}
 	if err := b.bind(); err != nil {
 		t.Fatal(err)
 	}
@@ -187,17 +189,17 @@ func TestWaylandClientSpeaksLayerShell(t *testing.T) {
 	if err := b.present(img); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.w.roundtrip(hangGuard); err != nil {
+	if err := b.w.Roundtrip(hangGuard); err != nil {
 		t.Fatal(err)
 	}
 
 	surface, layer, region := fc.id("surface"), fc.id("layer"), fc.id("region")
 	var seq []string
 	for _, r := range fc.requests() {
-		a := argReader{b: r.args}
+		a := wlwire.NewReader(r.args)
 		switch {
 		case r.id == surface && r.op == opSurfaceSetInputRegion:
-			if got := a.u32(); got != region {
+			if got := a.U32(); got != region {
 				t.Fatalf("input region %d, want the empty region %d", got, region)
 			}
 			seq = append(seq, "input_region")
@@ -206,29 +208,29 @@ func TestWaylandClientSpeaksLayerShell(t *testing.T) {
 				t.Fatalf("region op %d: the input region must stay empty", r.op)
 			}
 		case r.id == fc.id("zwlr_layer_shell_v1"):
-			_, s, out, lay, ns := a.u32(), a.u32(), a.u32(), a.u32(), a.str()
+			_, s, out, lay, ns := a.U32(), a.U32(), a.U32(), a.U32(), a.Str()
 			if s != surface || out != 0 || lay != layerOverlay || ns != "jarvis-island" {
 				t.Fatalf("get_layer_surface(surface %d, output %d, layer %d, %q)", s, out, lay, ns)
 			}
 		case r.id == layer && r.op == opLayerSetSize:
-			if w, h := a.u32(), a.u32(); w != CanvasW || h != CanvasH {
+			if w, h := a.U32(), a.U32(); w != CanvasW || h != CanvasH {
 				t.Fatalf("size %dx%d", w, h)
 			}
 		case r.id == layer && r.op == opLayerSetAnchor:
-			if a.u32() != anchorTop {
+			if a.U32() != anchorTop {
 				t.Fatal("not anchored to the top edge alone (centred)")
 			}
 		case r.id == layer && r.op == opLayerSetKeyboardInteractivity:
-			if a.u32() != 0 {
+			if a.U32() != 0 {
 				t.Fatal("keyboard interactivity must be none")
 			}
 		case r.id == layer && r.op == opLayerAckConfigure:
-			if a.u32() != 77 {
+			if a.U32() != 77 {
 				t.Fatal("acked the wrong serial")
 			}
 			seq = append(seq, "ack")
 		case r.id == surface && r.op == opSurfaceSetBufferScale:
-			if a.i32() != 2 {
+			if a.I32() != 2 {
 				t.Fatal("buffer scale")
 			}
 		case r.id == surface && r.op == opSurfaceAttach:
@@ -240,7 +242,7 @@ func TestWaylandClientSpeaksLayerShell(t *testing.T) {
 				t.Fatal("create_pool without a file descriptor")
 			}
 		case r.id == fc.id("pool") && r.op == opPoolCreateBuffer:
-			_, off, w, h, stride, format := a.u32(), a.i32(), a.i32(), a.i32(), a.i32(), a.u32()
+			_, off, w, h, stride, format := a.U32(), a.I32(), a.I32(), a.I32(), a.I32(), a.U32()
 			if w != CanvasW*2 || h != CanvasH*2 || stride != w*4 || format != shmFormatARGB8888 || (off != 0 && off != stride*h) {
 				t.Fatalf("buffer off %d %dx%d stride %d format %d", off, w, h, stride, format)
 			}
@@ -288,34 +290,34 @@ func TestWaylandRefusesACompositorWithoutLayerShell(t *testing.T) {
 			for b := buf[:n]; len(b) >= 8; {
 				size := int(binary.LittleEndian.Uint32(b[4:]) >> 16)
 				id, op := binary.LittleEndian.Uint32(b), uint16(binary.LittleEndian.Uint32(b[4:]))
-				a := argReader{b: b[8:size]}
+				a := wlwire.NewReader(b[8:size])
 				switch {
 				case id == displayID && op == opDisplayGetRegistry:
-					reg := a.u32()
-					fc.event(reg, evGlobal, args().u32(1).str("wl_compositor").u32(6))
-					fc.event(reg, evGlobal, args().u32(2).str("wl_shm").u32(1))
+					reg := a.U32()
+					fc.event(reg, evGlobal, wlwire.NewArgs().U32(1).Str("wl_compositor").U32(6))
+					fc.event(reg, evGlobal, wlwire.NewArgs().U32(2).Str("wl_shm").U32(1))
 				case id == displayID && op == opDisplaySync:
-					fc.event(a.u32(), evCallbackDone, args().u32(0))
+					fc.event(a.U32(), evCallbackDone, wlwire.NewArgs().U32(0))
 				}
 				b = b[size:]
 			}
 		}
 	}()
-	b := &wayland{w: newWlConn(client), scales: map[uint32]int32{}, memFD: -1, patience: hangGuard}
-	defer b.w.close()
+	b := &wayland{w: wlwire.NewConn(client), scales: map[uint32]int32{}, memFD: -1, patience: hangGuard}
+	defer b.w.Close()
 	if err := b.bind(); err == nil {
 		t.Fatal("bound without layer-shell")
 	}
 }
 
 func TestWaylandArgEncoding(t *testing.T) {
-	got := args().u32(7).str("wl_shm").i32(-1).b
+	got := wlwire.NewArgs().U32(7).Str("wl_shm").I32(-1).Bytes()
 	want := []byte{7, 0, 0, 0, 7, 0, 0, 0, 'w', 'l', '_', 's', 'h', 'm', 0, 0, 0xff, 0xff, 0xff, 0xff}
 	if string(got) != string(want) {
 		t.Fatalf("% x", got)
 	}
-	r := argReader{b: got}
-	if r.u32() != 7 || r.str() != "wl_shm" || r.i32() != -1 {
+	r := wlwire.NewReader(got)
+	if r.U32() != 7 || r.Str() != "wl_shm" || r.I32() != -1 {
 		t.Fatal("round trip")
 	}
 }
@@ -330,34 +332,34 @@ func TestWaylandLiveProbe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b.w.close()
+	defer b.w.Close()
 	b.scale = b.outputScale()
 	t.Logf("compositor v%d, output scale %d", b.compVersion, b.scale)
 	w := b.w
-	b.surface = w.newID()
-	_ = w.send(b.compositor, opCreateSurface, args().u32(b.surface).b, -1)
-	region := w.newID()
-	_ = w.send(b.compositor, opCreateRegion, args().u32(region).b, -1)
-	_ = w.send(b.surface, opSurfaceSetInputRegion, args().u32(region).b, -1)
-	_ = w.send(region, opRegionDestroy, nil, -1)
-	_ = w.send(b.surface, opSurfaceSetBufferScale, args().i32(int32(b.scale)).b, -1)
-	b.layer = w.newID()
+	b.surface = w.NewID()
+	_ = w.Send(b.compositor, opCreateSurface, wlwire.NewArgs().U32(b.surface).Bytes(), -1)
+	region := w.NewID()
+	_ = w.Send(b.compositor, opCreateRegion, wlwire.NewArgs().U32(region).Bytes(), -1)
+	_ = w.Send(b.surface, opSurfaceSetInputRegion, wlwire.NewArgs().U32(region).Bytes(), -1)
+	_ = w.Send(region, opRegionDestroy, nil, -1)
+	_ = w.Send(b.surface, opSurfaceSetBufferScale, wlwire.NewArgs().I32(int32(b.scale)).Bytes(), -1)
+	b.layer = w.NewID()
 	cfg := make(chan [3]uint32, 1)
-	w.handle(b.layer, func(op uint16, a []byte) {
+	w.Handle(b.layer, func(op uint16, a []byte) {
 		if op == evLayerConfigure {
-			r := argReader{b: a}
-			cfg <- [3]uint32{r.u32(), r.u32(), r.u32()}
+			r := wlwire.NewReader(a)
+			cfg <- [3]uint32{r.U32(), r.U32(), r.U32()}
 		}
 	})
-	_ = w.send(b.layerShell, opGetLayerSurface, args().u32(b.layer).u32(b.surface).u32(0).u32(layerOverlay).str("jarvis-island-probe").b, -1)
-	_ = w.send(b.layer, opLayerSetSize, args().u32(CanvasW).u32(CanvasH).b, -1)
-	_ = w.send(b.layer, opLayerSetAnchor, args().u32(anchorTop).b, -1)
-	_ = w.send(b.layer, opLayerSetKeyboardInteractivity, args().u32(0).b, -1)
-	_ = w.send(b.surface, opSurfaceCommit, nil, -1)
+	_ = w.Send(b.layerShell, opGetLayerSurface, wlwire.NewArgs().U32(b.layer).U32(b.surface).U32(0).U32(layerOverlay).Str("jarvis-island-probe").Bytes(), -1)
+	_ = w.Send(b.layer, opLayerSetSize, wlwire.NewArgs().U32(CanvasW).U32(CanvasH).Bytes(), -1)
+	_ = w.Send(b.layer, opLayerSetAnchor, wlwire.NewArgs().U32(anchorTop).Bytes(), -1)
+	_ = w.Send(b.layer, opLayerSetKeyboardInteractivity, wlwire.NewArgs().U32(0).Bytes(), -1)
+	_ = w.Send(b.surface, opSurfaceCommit, nil, -1)
 	select {
 	case c := <-cfg:
 		t.Logf("configure serial %d size %dx%d", c[0], c[1], c[2])
-		_ = w.send(b.layer, opLayerAckConfigure, args().u32(c[0]).b, -1)
+		_ = w.Send(b.layer, opLayerAckConfigure, wlwire.NewArgs().U32(c[0]).Bytes(), -1)
 	case <-time.After(2 * time.Second):
 		t.Fatal("no configure")
 	}
@@ -365,11 +367,11 @@ func TestWaylandLiveProbe(t *testing.T) {
 	if err := b.alloc(); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.roundtrip(2 * time.Second); err != nil {
+	if err := w.Roundtrip(2 * time.Second); err != nil {
 		t.Fatal(err)
 	}
 	b.hide()
-	if err := w.broken(); err != nil {
+	if err := w.Err(); err != nil {
 		t.Fatal(err)
 	}
 }
