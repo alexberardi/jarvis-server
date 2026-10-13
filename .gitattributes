@@ -2,3 +2,7 @@
 internal/update/testdata/** -text
 # Pinned chat templates are checked against the sha256 in the model catalog.
 internal/modules/llm/models/templates/** -text
+# The agent's templates are rendered into Linux/macOS files and compared with golden plans:
+# keep LF on Windows checkouts too.
+internal/agent/deploy/** -text
+internal/agent/install/testdata/** -text
