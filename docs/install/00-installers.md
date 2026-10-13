@@ -1412,3 +1412,58 @@ ports 27xxx on loopback, mDNS off) installed Kokoro + ERes2Net through the model
 `/speak` (HTTP 200, 108 KB WAV, 24 kHz) — `tts: engine loaded` in 1.5 s, both dylibs mapped. The
 extracted dylibs carry no quarantine attribute (none propagates from a quarantined parent) and keep
 their ad-hoc signatures. `v0.0.0-notarize3` (run 37725013988) checked the exec watchdog.
+
+## 9. No-terminal install (plan, 2026-10-12)
+
+**Goal (user, 2026-10-12):** "absolutely 0 cli involvement … we need to make it as easy and
+approachable as humanly possible. that was a major point for switching to Go." A user downloads a
+file from the landing page or the release page, double-clicks it, and finishes in the browser. The
+`install.sh`/`install.ps1` one-liners stay, but only as the "Advanced" path.
+
+### 9.1 Target flow
+
+1. **Download.** The landing page has one button per OS (it detects the visitor's OS), pointing at
+   release assets:
+   - **macOS:** a notarized `.dmg` holding a small "Jarvis Server" app around `jarvisd`. A bare Unix
+     binary would open Terminal when double-clicked.
+   - **Windows:** an `.exe` installer. It is unsigned (open question 3 of `docs/agent/DESIGN.md` §13),
+     so the page explains the SmartScreen click-through.
+   - **Linux:** a `.deb`, so Ubuntu and Debian get the Software-center "Install" button. The
+     one-liner remains for other distributions.
+2. **Install.** The OS's own permission prompt appears: the macOS admin password dialog, Windows
+   UAC, or polkit / the package manager on Linux. The installer then runs the same service
+   registration as `install.sh`/`install.ps1` (§2), so there is one code path, and opens the
+   browser at the setup link, token included.
+3. **Setup wizard, in the browser.** Check → Account → Hardware → Models → Privacy, plus one new
+   option: **"Also use Jarvis on this computer"** (the desktop agent).
+   - **Ticked:** the wizard adds the agent's steps before Done:
+     - **Get the agent:** one click downloads the agent installer for this OS. jarvisd fetches the
+       release asset and verifies it against `SHA256SUMS` and its minisign signature (the upgrade
+       path's check, §4.1), then serves it to the browser. The user double-clicks it.
+     - **Pair:** the new agent finds the server over mDNS and asks to pair. The wizard is already
+       waiting on this step, so it shows the request and the user clicks **Approve** with no code
+       to read out.
+     - **Browser control:** the store buttons, as in the "Desktop & browser" checklist.
+     - **macOS permissions:** buttons that open Accessibility and Screen Recording, with live ticks.
+   - **Not ticked:** nothing changes. The agent can be added later from the admin or app.
+4. **The agent on its own.** The same agent installer is on the landing page and the release page,
+   for adding other computers. Pairing uses the code approved in the admin or app (DESIGN §13).
+
+### 9.2 Why the wizard doesn't install the agent itself
+
+jarvisd runs as a service account (`jarvisd` on Linux and macOS, a service on Windows). It can't
+install software into the signed-in user's session, can't add their login item or browser
+native-messaging host, and can't answer macOS permission prompts on their behalf. So the
+browser, which runs as the user, downloads the agent installer, and the user runs it. That costs
+one extra double-click and stays on the right side of every OS's security model.
+
+### 9.3 Open questions (asked one at a time)
+
+1. **Package formats.** *Recommend:* macOS `.dmg` (notarized app), Windows `.exe`, Linux `.deb`
+   (the one-liner for everything else). `.rpm` and AppImage can wait until someone asks.
+2. **Landing page.** *Recommend:* OS-detected download buttons as the main path, with the
+   one-liners under "Advanced (terminal)". Update the draft landing page (jarvis-installer #69) to
+   match.
+3. **Upgrades without a terminal.** Already covered: the admin's Updates page upgrades jarvisd
+   (§8.2). *Recommend:* the agent self-updates the same way (planned for the Go node, phase 4.2),
+   so neither ever needs re-downloading by hand.

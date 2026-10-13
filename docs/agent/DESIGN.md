@@ -607,6 +607,8 @@ with the agent.
 
 ## 13. Install and pairing without a terminal (plan, 2026-10-12)
 
+**See also** `docs/install/00-installers.md` §9: the server's own no-terminal install, whose setup wizard can add this agent ("Also use Jarvis on this computer").
+
 **Why.** Today the desktop agent is CLI-only. A user types a password into
 `jarvis-agent enroll`, the browser extension is only offered by that prompt (§10, install
 flow), and "Jarvis Agent.app" only exists when `scripts/agent-dev-run.sh` builds it. The setup
