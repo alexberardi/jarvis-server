@@ -3,7 +3,7 @@ package dictate
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 )
@@ -43,12 +43,13 @@ func (l *LinuxKeyboard) wtypeWorks() bool {
 	return !strings.Contains(d, "gnome") && !strings.Contains(d, "kde")
 }
 
-// ydotoolSocket is where ydotoold listens ($YDOTOOL_SOCKET, else its defaults).
+// ydotoolWorks: ydotoold is listening ($YDOTOOL_SOCKET, else its defaults). path.Join, not
+// filepath: these are Linux paths whatever OS runs the code (the tests run on Windows too).
 func (l *LinuxKeyboard) ydotoolWorks() bool {
 	if !l.X.LookPath("ydotool") {
 		return false
 	}
-	for _, p := range []string{l.X.Getenv("YDOTOOL_SOCKET"), filepath.Join(l.X.Getenv("XDG_RUNTIME_DIR"), ".ydotool_socket"), "/tmp/.ydotool_socket"} {
+	for _, p := range []string{l.X.Getenv("YDOTOOL_SOCKET"), path.Join(l.X.Getenv("XDG_RUNTIME_DIR"), ".ydotool_socket"), "/tmp/.ydotool_socket"} {
 		if p != "" && p != ".ydotool_socket" && l.X.Exists(p) {
 			return true
 		}
