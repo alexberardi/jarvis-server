@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -122,6 +123,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 
 	speakerBlock := prompts.SpeakerBlock(conv.speakerNameOrDefault(), conv.memories)
 	msgs = append(msgs, transientSys(speakerBlock))
+	msgs = append(msgs, transientSys(prompts.CalendarBlock(dates.New(m.now(), conv.timezone).Calendar())))
 	if block := prompts.AmbientBlock(conv.ambient); block != "" {
 		msgs = append(msgs, transientSys(block))
 	}

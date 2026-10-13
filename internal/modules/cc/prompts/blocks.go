@@ -111,6 +111,17 @@ func SpeakerBlock(speakerName, memories string) string {
 	return block
 }
 
+// CalendarBlock wraps the turn's date table (dates.Context.Calendar) as a trailing per-turn
+// message, so a question about a date is a lookup, not arithmetic ("" for empty input).
+func CalendarBlock(calendar string) string {
+	calendar = parse.PyStrip(calendar)
+	if calendar == "" {
+		return ""
+	}
+	return "<calendar>\nFor any date or weekday the user asks about, read it from this table; " +
+		"never work a date out yourself:\n" + calendar + "\n</calendar>"
+}
+
 // AmbientBlock is core_rules.build_ambient_context_block: the frozen situational bundle as a
 // trailing per-turn message ("" for empty input: append nothing).
 func AmbientBlock(ambient string) string {

@@ -42,9 +42,10 @@ func TestAmbientBundleVoice(t *testing.T) {
 	ve.turn("/api/v0/voice/command", "a1", "anything on today", nil).want(200)
 	msgs := messagesOf(ve.eng.last())
 	n := len(msgs)
-	if msgs[n-3]["content"] != prompts.SpeakerBlock("default", "") || msgs[n-2]["content"] != prompts.AmbientBlock(want) ||
-		!strings.HasPrefix(msgs[n-1]["content"].(string), "anything on today") {
-		t.Fatalf("per-turn tail %v", msgs[n-3:])
+	if msgs[n-4]["content"] != prompts.SpeakerBlock("default", "") || !strings.HasPrefix(msgs[n-3]["content"].(string), "<calendar>\n") ||
+		!strings.Contains(msgs[n-3]["content"].(string), "\nToday is Tuesday, October 6, 2026. Tomorrow is Wednesday, October 7.\n") ||
+		msgs[n-2]["content"] != prompts.AmbientBlock(want) || !strings.HasPrefix(msgs[n-1]["content"].(string), "anything on today") {
+		t.Fatalf("per-turn tail %v", msgs[n-4:])
 	}
 	// Memory off turns the bundle off too.
 	ve.set(settingMemoryEnabled, false, settings.Scope{HouseholdID: voiceHH})

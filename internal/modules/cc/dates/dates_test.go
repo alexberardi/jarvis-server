@@ -192,3 +192,38 @@ func TestFixISODatesBareDates(t *testing.T) {
 		}
 	}
 }
+
+func TestCalendar(t *testing.T) {
+	ny := "America/New_York"
+	// Monday 2026-10-12, 23:30 local (03:30Z the next day: the local date must win).
+	got := New(time.Date(2026, 10, 13, 3, 30, 0, 0, time.UTC), ny).Calendar()
+	want := "Today is Monday, October 12, 2026. Tomorrow is Tuesday, October 13.\n" +
+		"This week: Sun Oct 11, Mon Oct 12 (today), Tue Oct 13, Wed Oct 14, Thu Oct 15, Fri Oct 16, Sat Oct 17.\n" +
+		"Next week: Sun Oct 18, Mon Oct 19, Tue Oct 20, Wed Oct 21, Thu Oct 22, Fri Oct 23, Sat Oct 24.\n" +
+		"The week after: Sun Oct 25, Mon Oct 26, Tue Oct 27, Wed Oct 28, Thu Oct 29, Fri Oct 30, Sat Oct 31.\n" +
+		`Weeks run Sunday to Saturday. "Next <weekday>" is that day in next week (next Friday is Fri Oct 23); "this <weekday>" or a bare weekday is the coming one.`
+	if got != want {
+		t.Fatalf("calendar:\n%s\nwant:\n%s", got, want)
+	}
+	// It agrees with the resolver tool arguments use.
+	c := New(time.Date(2026, 10, 13, 3, 30, 0, 0, time.UTC), ny)
+	if nf := c.Object(); !strings.Contains(pyjson.Dumps(nf, false), `"next_friday": {"date": "2026-10-23"`) {
+		t.Fatal("next_friday disagrees with the calendar")
+	}
+	// A Sunday starts its own week; a year and a DST change inside the window.
+	got = New(time.Date(2026, 12, 27, 15, 0, 0, 0, time.UTC), ny).Calendar()
+	for _, s := range []string{
+		"Today is Sunday, December 27, 2026.",
+		"This week: Sun Dec 27 (today), Mon Dec 28,",
+		"Next week: Sun Jan 3, ",
+		"next Friday is Fri Jan 8)",
+	} {
+		if !strings.Contains(got, s) {
+			t.Fatalf("missing %q in\n%s", s, got)
+		}
+	}
+	got = New(time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC), ny).Calendar() // DST ends Nov 1
+	if !strings.Contains(got, "Next week: Sun Nov 1, Mon Nov 2,") || !strings.Contains(got, "Sat Oct 31 (today).") {
+		t.Fatal(got)
+	}
+}
