@@ -31,6 +31,11 @@ when the match is ambiguous. "Can't tell" makes chat skip step 1. There is no se
 
 ### Decided in review (user, 2026-10-13)
 
+- **Name and URLs (Q1): as recommended.** It's titled "Jarvis Automation" (the product; "Jarvis" is
+  the assistant persona, see STATUS 2026-10-13 naming row). Chat, Add-ons and Inbox are at the root,
+  admin pages are under `/admin/*` with redirects from the old paths, it stays on 7710, and there's
+  no 7722 listener.
+
 - **Purpose:** jarvis-web fell behind jarvisd; this project brings browser chat back, inside the
   admin, rather than reviving the Next.js app.
 - **Inbox: ported** (Q2). Long-running jobs (deep research, confirmations) report back through
