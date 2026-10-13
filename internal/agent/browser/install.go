@@ -134,7 +134,7 @@ func HostManifest(family, exe string) ([]byte, error) {
 	case TargetFirefox:
 		m["allowed_extensions"] = []string{FirefoxExtensionID}
 	case TargetChromium:
-		m["allowed_origins"] = AllowedOrigins
+		m["allowed_origins"] = AllowedOrigins // the unpacked build and the Web Store listing
 	default:
 		return nil, fmt.Errorf("unknown browser family %q", family)
 	}
@@ -262,7 +262,7 @@ func Inspect(e Env, reg Registry) []TargetStatus {
 			case !s.HostOK:
 				s.Problem = "the binary it starts is gone (re-run: jarvis-agent browser install)"
 			case t.Family == TargetFirefox && !contains(m.AllowedExtensions, FirefoxExtensionID),
-				t.Family == TargetChromium && !contains(m.AllowedOrigins, AllowedOrigins[0]):
+				t.Family == TargetChromium && !containsAll(m.AllowedOrigins, AllowedOrigins):
 				s.Problem = "manifest doesn't admit the Jarvis extension (re-run: jarvis-agent browser install)"
 			}
 		}
@@ -278,6 +278,15 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func containsAll(list, want []string) bool {
+	for _, s := range want {
+		if !contains(list, s) {
+			return false
+		}
+	}
+	return true
 }
 
 func writeFileAtomic(path string, b []byte, mode os.FileMode) error {
@@ -314,6 +323,6 @@ func ChromiumSteps(dir string) string {
 		"  1. Open the extensions page (chrome://extensions, edge://extensions, brave://extensions).",
 		"  2. Turn on \"Developer mode\".",
 		"  3. Click \"Load unpacked\" and choose: " + dir,
-		"  4. \"Jarvis Browser Control\" appears (id " + ChromeExtensionID + "). Keep that folder: the browser loads it from there.",
+		"  4. \"Jarvis Browser Control\" appears (id " + ChromeDevExtensionID + "). Keep that folder: the browser loads it from there.",
 	}, "\n")
 }

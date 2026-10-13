@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
@@ -52,8 +53,8 @@ func TestChromeExtensionIDMatchesKey(t *testing.T) {
 		v, _ := strconv.ParseUint(string(c), 16, 8)
 		id.WriteByte(byte('a' + v))
 	}
-	if id.String() != ChromeExtensionID {
-		t.Fatalf("key gives id %s, code says %s", id.String(), ChromeExtensionID)
+	if id.String() != ChromeDevExtensionID {
+		t.Fatalf("key gives id %s, code says %s", id.String(), ChromeDevExtensionID)
 	}
 }
 
@@ -81,6 +82,18 @@ func TestManifestPerTarget(t *testing.T) {
 	}
 	if ExtensionVersion() == "" || ff["version"] != ExtensionVersion() {
 		t.Errorf("version %q vs %v", ExtensionVersion(), ff["version"])
+	}
+}
+
+// The stores' limits on what the manifest shows: the Chrome Web Store takes the listing's
+// summary from "description" and refuses more than 132 characters; AMO caps names at 50.
+func TestManifestStoreLimits(t *testing.T) {
+	m := manifestOf(t, TargetChromium)
+	if d, _ := m["description"].(string); d == "" || utf8.RuneCountInString(d) > 132 {
+		t.Errorf("description is %d characters (Chrome Web Store: 1-132): %q", utf8.RuneCountInString(d), d)
+	}
+	if n, _ := m["name"].(string); n == "" || utf8.RuneCountInString(n) > 50 {
+		t.Errorf("name %q (AMO: at most 50 characters)", n)
 	}
 }
 

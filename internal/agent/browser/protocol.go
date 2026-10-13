@@ -29,13 +29,38 @@ const Protocol = 1
 // FirefoxExtensionID is the Gecko id in the extension's manifest (permanent once AMO signs it).
 const FirefoxExtensionID = "browser@jarvis.agent"
 
-// ChromeExtensionID is the id Chromium browsers give the unpacked extension: derived from the
-// public "key" in its manifest, so it is the same on every machine. A Web Store listing would
-// get its own id, which then joins this one in AllowedOrigins.
-const ChromeExtensionID = "hdjdhmmlggbjjdokpofkghjnjnmjfhmk"
+// ChromeDevExtensionID is the id Chromium browsers give the unpacked extension: derived from the
+// public "key" in its manifest, so it is the same on every machine.
+const ChromeDevExtensionID = "hdjdhmmlggbjjdokpofkghjnjnmjfhmk"
 
-// AllowedOrigins are the Chromium extension origins the host manifest admits.
-var AllowedOrigins = []string{"chrome-extension://" + ChromeExtensionID + "/"}
+// ChromeStoreExtensionID is the Chrome Web Store listing's id ("Jarvis Browser Control"),
+// assigned by the store at the first upload (the store package carries no "key";
+// scripts/browser-ext-store-zip.sh drops it). It is fixed for the life of the listing: every
+// update to that item keeps it. A new listing (another account, a deleted item, an Edge
+// Add-ons listing) would get a different id, to be added beside this one.
+const ChromeStoreExtensionID = "abkbjmelelgelkhneobebgoilejlgbob"
+
+// ChromeExtensionIDs are every Chromium extension id the host manifest admits: the unpacked
+// development build and the Chrome Web Store listing (also what Edge, Brave, Arc and Vivaldi
+// install from the store). Keep both; never remove one while builds with that id exist
+// (docs/agent/store-listing.md). Hosts registered before an id was added are reported by
+// `jarvis-agent browser status` until `jarvis-agent browser install` rewrites them.
+var ChromeExtensionIDs = []string{
+	ChromeDevExtensionID,
+	ChromeStoreExtensionID,
+}
+
+// AllowedOrigins are the Chromium extension origins the host manifest admits, one per
+// ChromeExtensionIDs entry.
+var AllowedOrigins = chromeOrigins(ChromeExtensionIDs)
+
+func chromeOrigins(ids []string) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = "chrome-extension://" + id + "/"
+	}
+	return out
+}
 
 // Limits. Chrome refuses host→extension messages over 1 MiB; the agent's commands are tiny.
 // Extension→host messages are bounded by what the extension sends (page text is capped there

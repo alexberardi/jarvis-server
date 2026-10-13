@@ -56,7 +56,8 @@ func TestHostInvocation(t *testing.T) {
 		origin string
 		ok     bool
 	}{
-		{[]string{"chrome-extension://" + ChromeExtensionID + "/"}, "chrome-extension://" + ChromeExtensionID + "/", true},
+		{[]string{"chrome-extension://" + ChromeDevExtensionID + "/"}, "chrome-extension://" + ChromeDevExtensionID + "/", true},
+		{[]string{"chrome-extension://" + ChromeStoreExtensionID + "/"}, "chrome-extension://" + ChromeStoreExtensionID + "/", true},
 		{[]string{"chrome-extension://abc/", "--parent-window=0"}, "chrome-extension://abc/", true}, // Windows
 		{[]string{"/home/u/.mozilla/native-messaging-hosts/io.jarvis.agent.browser.json", FirefoxExtensionID}, FirefoxExtensionID, true},
 		{[]string{"run"}, "", false},

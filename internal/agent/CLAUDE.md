@@ -44,6 +44,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 JARVIS_SCREEN_NATIVE=1 go test -v -run TestNativeCapture ./internal/agent/screen/   # capture this desktop
 scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
 AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
+scripts/browser-ext-store-zip.sh chrome|firefox   # store upload zips -> dist/ (docs/agent/store-listing.md)
 ./jarvis-agent enroll --server http://<jarvisd-host>:7700 --email you@example.com
 ./jarvis-agent run
 ./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
