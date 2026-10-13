@@ -51,7 +51,11 @@ type Conn struct {
 	handlers map[uint32]func(op uint16, args []byte)
 	err      error // the connection broke or the compositor reported a protocol error
 	dead     chan struct{}
+	fds      []int // received with events, oldest first, until a handler takes them
 }
+
+// maxFDs bounds the descriptors waiting for a handler; older ones are closed.
+const maxFDs = 8
 
 // ProtocolError is a wl_display.error event: the compositor killed the connection.
 type ProtocolError struct {
@@ -149,10 +153,48 @@ func (w *Conn) Err() error {
 // Dead is closed once the connection is unusable.
 func (w *Conn) Dead() <-chan struct{} { return w.dead }
 
-// Close closes the connection.
+// Close closes the connection (and any received descriptor no handler took).
 func (w *Conn) Close() {
 	w.fail(errors.New("closed"))
 	_ = w.c.Close()
+	w.mu.Lock()
+	for _, fd := range w.fds {
+		_ = unix.Close(fd)
+	}
+	w.fds = nil
+	w.mu.Unlock()
+}
+
+// TakeFD hands over the oldest received file descriptor, or -1. An event that carries one
+// (wl_keyboard.keymap) calls it from its handler: descriptors arrive no later than the bytes
+// of the message they belong to. The caller closes it.
+func (w *Conn) TakeFD() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.fds) == 0 {
+		return -1
+	}
+	fd := w.fds[0]
+	w.fds = w.fds[1:]
+	return fd
+}
+
+// keepFDs queues descriptors for TakeFD, closing them when the connection is gone and the
+// oldest ones beyond maxFDs (nothing takes them: they would only leak).
+func (w *Conn) keepFDs(fds []int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, fd := range fds {
+		if w.err != nil {
+			_ = unix.Close(fd)
+			continue
+		}
+		w.fds = append(w.fds, fd)
+		if len(w.fds) > maxFDs {
+			_ = unix.Close(w.fds[0])
+			w.fds = w.fds[1:]
+		}
+	}
 }
 
 // Send writes one request; fd >= 0 rides along.
@@ -187,15 +229,12 @@ func (w *Conn) read() {
 			w.fail(err)
 			return
 		}
-		// Nothing here asks for an event that carries a file descriptor (wl_keyboard.keymap
-		// would; no client binds a keyboard). Close any that arrive.
+		// Descriptors (wl_keyboard.keymap's) wait for the handler of their event: TakeFD.
 		if oobn > 0 {
 			if msgs, err := unix.ParseSocketControlMessage(oob[:oobn]); err == nil {
 				for _, m := range msgs {
 					if fds, err := unix.ParseUnixRights(&m); err == nil {
-						for _, fd := range fds {
-							_ = unix.Close(fd)
-						}
+						w.keepFDs(fds)
 					}
 				}
 			}

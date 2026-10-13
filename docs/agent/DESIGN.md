@@ -797,7 +797,7 @@ with its arguments (§12, `node.LogArgs`); `text` is now always logged as `<N ch
 
 | Platform | Typing and keys | Needs | Named app (focus, then confirm focus) |
 |---|---|---|---|
-| Linux Wayland: Hyprland, sway, other wlroots | **built in:** the virtual-keyboard protocol (`zwp_virtual_keyboard_manager_v1`) spoken directly, pure Go (`internal/agent/vkbd`); fallback `wtype -s 40 -`, text on stdin, `LC_ALL=C.UTF-8` | nothing (the compositor advertises the protocol); `wtype` only if it doesn't | Hyprland: `hyprctl -j clients` / `dispatch focuswindow address:…` / `-j activewindow`; sway: `swaymsg get_tree` / `[con_id=N] focus` |
+| Linux Wayland: Hyprland, sway, other wlroots | **built in:** the virtual-keyboard protocol (`zwp_virtual_keyboard_manager_v1`) spoken directly, pure Go (`internal/agent/vkbd`); fallback `wtype -s 40 -`, text on stdin, `LC_ALL=C.UTF-8` | nothing (the compositor advertises the protocol); `wtype` only if it doesn't | Hyprland: `hyprctl -j clients` / `dispatch focuswindow address:…` (a Lua-configured Hyprland: `dispatch hl.dsp.focus({ window = "address:…" })`) / `-j activewindow`; sway: `swaymsg get_tree` / `[con_id=N] focus` |
 | Linux Wayland: GNOME, KDE | **built in:** the desktop portal's RemoteDesktop over D-Bus (`internal/agent/portal`), one short session per call, `NotifyKeyboardKeysym`; fallback `ydotool type --file -` (uinput) | a one-time permission: `jarvis-agent dictation allow` shows the desktop's dialog, the restore token is kept 0600; ydotool needs `ydotoold` and types US-layout ASCII only | not available (no cross-client window control): type into what's in front |
 | Linux X11 | **built in:** XTEST spoken directly (`internal/agent/x11`); fallback `xdotool type --clearmodifiers --file -`, `xdotool key` | nothing (an X server with XTEST, i.e. every desktop one); `xdotool` only without it | the host backend's window control (built-in EWMH, else wmctrl) + the active window from `_NET_ACTIVE_WINDOW` (else `xdotool getactivewindow`) |
 | macOS | CGEvent keyboard events with Unicode strings (≤ 20 UTF-16 units per event, surrogate pairs never split), purego | Accessibility for Jarvis Agent.app (the grant window control already needs) | System Events (host backend) + the frontmost process's pid |
@@ -809,16 +809,46 @@ what the user had copied; it is open question 3.
 **The built-in virtual keyboard** (2026-10-13; installers §9.3 item 6: "anything the agent needs
 must come with its installer"). It does what wtype does, with no helper program: connect to the
 compositor (`internal/agent/wlwire`, the Wayland wire shared with the island), bind `wl_seat` and
-`zwp_virtual_keyboard_manager_v1`, create a virtual keyboard, build an XKB keymap holding exactly
-the keysyms of this text (`internal/agent/xkb`: one key per distinct character, `Uxxxx` keysym
-names, the standard "complete" types so Shift works, Tab with ISO_Left_Tab on its shifted level),
-pass it in a sealed memfd, then press and release each key (Shift+Tab: the modifiers request
-around the Tab key). Text with more than 247 distinct characters is typed in batches with a new
-keymap each, so every keycode stays ≤ 255 (XWayland clients can't see higher ones). Preferred
-whenever the compositor advertises the protocol (probed per call: one connection, one round trip,
-nothing created); otherwise wtype, then the portal, then ydotool. Not tried on GNOME (no
-protocol) or KDE (input methods only); those get the portal (below). A failure is reported, never retried
-through a helper (keys may have half-arrived).
+`zwp_virtual_keyboard_manager_v1`, create a virtual keyboard, upload an XKB keymap for this text
+in a sealed memfd, make the keyboard the seat's active one (an all-zero modifiers request), wait
+40 ms, then press and release each key (Shift around level-2 characters and Shift+Tab), with a
+round trip every 64 keys, after each batch and after destroying the keyboard (a protocol error
+surfaces as an error, never as success). Preferred whenever the compositor advertises the
+protocol (probed per call: one connection, one round trip, nothing created); otherwise wtype,
+then the portal, then ydotool. Not tried on GNOME (no protocol) or KDE (input methods only);
+those get the portal (below). A failure is reported, never retried through a helper (keys may
+have half-arrived).
+
+**The keymap follows the desktop's layout** (2026-10-13, after dictation typed nothing on the
+user's Hyprland, below). Before typing, the backend asks the seat for a keyboard
+(`wl_seat.get_keyboard`) and reads the keymap the compositor hands it (`wl_keyboard.keymap`, the
+active keyboard's: Hyprland writes keysyms in hex). Every character that layout has is pressed
+**on the keycode the layout has it on** (level 2 with Shift; among several places: a keycode X11
+can see, then the main block, then level 1, then the lowest), and the uploaded keymap gives those
+keycodes the layout's own symbols. Characters the layout lacks (é on a US layout, 日, ✓) go on
+keycodes the layout leaves **empty** (no symbol: the ≤ 255 ones first), in batches with a new
+keymap each when there are more of them than empty keycodes (14 below 256 on the user's US
+layout, ~200 more above). So a client that ignores the virtual keyboard's keymap reads the right
+character, and Hyprland's key bindings, which it resolves with its own layout whatever keyboard
+the key came from, only ever see ordinary keys or no symbol. (The first version put the text's
+distinct characters on keycodes 9, 10, 11… in order: Escape, 1, 2… to anything reading the real
+layout, and a text with ~100 distinct characters would have reached keycode 107, Print, which
+omarchy binds to a screenshot.) A keymap read back that isn't a whole layout (letters, digits,
+space, Return, Tab, Escape), such as an input method's virtual keyboard echoing the agent's own
+(its sections are named `jarvis-agent`), is ignored: the last whole layout read in this process
+is used, else a built-in US main block (whose free keycodes start above every keycode an evdev
+keymap uses, 710+).
+
+**XWayland windows on Hyprland read the layout, not the keymap.** Confirmed in a nested Hyprland
+0.56.2 (Evidence): a GTK dialog under XWayland read the virtual keyboard's keycodes with the
+compositor's layout however long the keymap had been active (wtype too, even with `-s 1000`):
+"press enter" on the old keymap's keycode 9 arrived as Escape and cancelled the dialog. With the
+keymap above everything on the layout types correctly there. For the rest the backend asks
+Hyprland whether the focused window is XWayland (`hyprctl -j activewindow` → `xwayland`) and, if
+so, refuses text with characters off the layout before typing anything:
+`unsupported_characters`, "the window in front is an X11 app, which only takes characters on the
+keyboard layout, and 'é', '日' aren't on it". (XTEST through XWayland isn't an alternative: the
+nested XWayland offers no XTEST.)
 
 **The built-in X11 keyboard** (2026-10-13). XTEST fake key events over a pure-Go X11
 connection (`github.com/jezek/xgb`), the way xdotool types: a character already on a key is typed
@@ -871,8 +901,10 @@ between calls: GNOME shows a "remotely controlled" indicator for as long as one 
 
 **The first character.** A fresh virtual keyboard's keymap must reach the client before the
 first key: wtype without `-s 40` dropped the first character on sway in 1 of 3 runs, with it 0
-of 8. The built-in backend waits for a round trip after the keymap (the compositor has it) and
-then a 40 ms settle (`vkbd.DefaultSettle`, injectable). On the nested sway, 80 of 80 runs kept
+of 8. The built-in backend waits for a round trip after the keymap (the compositor has it), activates
+the keyboard (Hyprland only switches the seat, and so sends the client the keymap, on a key or
+modifiers event: without it the keymap arrived *with* the first key and the settle waited for
+nothing) and then a 40 ms settle (`vkbd.DefaultSettle`, injectable). On the nested sway, 80 of 80 runs kept
 their first character *without* the settle (the round trip alone was enough there); it stays as
 cheap insurance for other compositors. wtype's text goes on stdin so a dictated "-k Return" stays
 text, and so it never shows in a process list; the built-in backend has no command line at all.
@@ -891,7 +923,10 @@ brings a window forward, switching workspace on Hyprland and sway).
 The agent asks the compositor/OS to focus the window, then polls the active window (20 × 50 ms)
 until it **is** that window. Only then does it type. If focus can't be confirmed the result is
 `focus_failed` and nothing is typed. Without `app`, text goes to whatever is in front, on every
-platform. GNOME/KDE Wayland: naming an app is `not_supported` ("click into it and ask again
+platform; where the window backend can say which window that is, the result names it (`into:
+"Emulator (the window in front)"`, `front_app`), so the model can tell the user where the text
+went, and when it can see that no window has the keyboard focus nothing is typed
+(`no_focused_window`). GNOME/KDE Wayland: naming an app is `not_supported` ("click into it and ask again
 without naming it").
 
 ### Misheard app names (2026-10-13)
@@ -961,7 +996,11 @@ Traces: the continue spans (`continue_conversation`, `continue_stream_dispatch`)
 - The extension went to **0.2.0** (new commands, new description). Both stores need the new
   version uploaded, and the embedded Mozilla-signed `.xpi` (still 0.1.0) needs re-signing: an
   agent with this change talking to a 0.1.0 extension gets `unknown_command` for fill and click,
-  and everything else keeps working.
+  and everything else keeps working. The agent turns that answer into `success: false`,
+  `error_code: extension_outdated`, "the Jarvis extension in Firefox is version 0.1.0, which
+  can't fill; that needs version 0.2.0 or newer. Nothing was done: tell the user to update the
+  Jarvis browser extension (jarvis-agent browser install, then reload the extension) and try
+  again" (seen on the user's Firefox, 2026-10-13: extension 0.1.0 installed).
 
 ### Native dialogs: OK and Cancel by voice
 
@@ -1110,6 +1149,34 @@ never in logs or results; password fields only when named.
   closed; a named app → `not_supported`, nothing typed; an unknown token → refused, forgotten.
   **Not run against GNOME's or KDE's own backend** (no GNOME/KDE here): their dialog, their
   keysym injection, and whether they return a restore token are unverified.
+
+- **Hyprland: dictation typed nothing (2026-10-13).** On the user's Hyprland 0.56.2 (omarchy,
+  `hyprland.lua`) two dictations reported success and nothing appeared; the agent was the
+  5396b38 build. Reproduced without touching the session: Hyprland 0.56.2 nested in a headless
+  `cage` (wlroots 0.20; an `LD_PRELOAD` shim raising its `xdg_wm_base` to the v6 aquamarine
+  requires), its own runtime dir and instance signature, `HYPRLAND_NO_SD_VARS`, a private D-Bus;
+  loaded with the user's own Lua config (every `exec` replaced by a log line, the same 231 binds
+  as the live session), fcitx5 running (as on the user's desktop, with its keyboard grab) and a
+  non-virtual keyboard (cage's, forwarded). Findings, old build → fixed build:
+  - into Wayland windows (`foot`) typing worked, with and without `app` and `submit`;
+  - into an XWayland window (`zenity --entry`, GTK under XWayland): every character was read
+    with the layout, so "how to walk your dog" became Escape, 1, 2…; the dialog closed, nothing
+    typed, `success: true`. The active window on the user's desktop is the Android Emulator, an
+    XWayland window. Fixed: "How to walk your dog? (1+2=3) ~!@#$<>|" (and a backtick) and Enter arrived
+    exactly; `enter` / `escape` presses OK / Cancel; "café 日本" → `unsupported_characters`,
+    nothing typed;
+  - `app` with the user's Lua config: `hyprctl dispatch focuswindow address:…` failed (exit 7,
+    Lua syntax error), so every named-app call was `focus_failed` (and a model can still say
+    "Done"). Fixed: the `hl.dsp.focus` form; switching between two windows by name typed into
+    the right one;
+  - `ecosystem:enforce_permissions` is off on the user's Hyprland: its permission system plays
+    no part (no `hyprland.conf` change needed).
+  Unit tests: the parser on Hyprland's serialisation, the US fallback, positions and Shift,
+  free keycodes, batching; the scripted compositor serving `wl_keyboard.keymap` with a memfd
+  (layout taken, a fragment or the agent's own keymap ignored and the last layout kept, the
+  activation before the first key, the XWayland refusal creating no keyboard); the Lua
+  dispatch fallback; the front window named; no focused window refused; an old extension's
+  `unknown_command` for fill and click.
 
 ### Open questions (defaults chosen; the user reviews)
 

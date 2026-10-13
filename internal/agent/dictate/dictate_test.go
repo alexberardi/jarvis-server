@@ -308,6 +308,65 @@ func TestHyprlandWindows(t *testing.T) {
 	}
 }
 
+// A Hyprland configured in Lua reads `hyprctl dispatch` as Lua: the classic focuswindow is a
+// syntax error there (exit 7), hl.dsp.focus works.
+func TestHyprlandFocusWithALuaConfig(t *testing.T) {
+	ctx := context.Background()
+	active := "0x55aa02"
+	f := hyprExec(&active)
+	classic := f.out
+	f.out = func(c Cmd) (string, error) {
+		if strings.HasPrefix(c.line(), "hyprctl dispatch focuswindow") {
+			return "", errors.New(`hyprctl: Error: [string "return hl.dispatch(focuswindow address:0x55..."]:1: ')' expected near 'address'`)
+		}
+		if c.line() == `hyprctl dispatch hl.dsp.focus({ window = "address:0x55aa03" })` {
+			active = "0x55aa03"
+			return "ok", nil
+		}
+		return classic(c)
+	}
+	w := &LinuxWindows{X: f}
+	if err := w.Focus(ctx, "0x55aa03"); err != nil || active != "0x55aa03" {
+		t.Fatalf("focus %v %q (ran %v)", err, active, f.ran)
+	}
+	// Both refused: the classic error is the one reported.
+	f.out = func(c Cmd) (string, error) {
+		if strings.HasPrefix(c.line(), "hyprctl dispatch") {
+			return "", errors.New("hyprctl: exit status 7")
+		}
+		return classic(c)
+	}
+	if err := w.Focus(ctx, "0x55aa01"); err == nil || !strings.Contains(err.Error(), "exit status 7") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestHyprX11Focused(t *testing.T) {
+	ctx := context.Background()
+	win := `{"address":"0x1","xwayland":true}`
+	f := &fakeExec{env: map[string]string{"WAYLAND_DISPLAY": "w", "HYPRLAND_INSTANCE_SIGNATURE": "sig"}, bins: bins("hyprctl"),
+		out: func(c Cmd) (string, error) {
+			if c.line() == "hyprctl -j activewindow" {
+				return win, nil
+			}
+			return "", errors.New("unexpected")
+		}}
+	if !HyprX11Focused(f)(ctx) {
+		t.Error("xwayland window not seen")
+	}
+	win = `{"address":"0x1","xwayland":false}`
+	if HyprX11Focused(f)(ctx) {
+		t.Error("wayland window taken for X11")
+	}
+	win = "{}"
+	if HyprX11Focused(f)(ctx) {
+		t.Error("no window taken for X11")
+	}
+	if HyprX11Focused(&fakeExec{env: map[string]string{"WAYLAND_DISPLAY": "w", "SWAYSOCK": "/s"}, bins: bins("hyprctl")})(ctx) {
+		t.Error("not Hyprland")
+	}
+}
+
 const swayTree = `{"id":1,"type":"root","nodes":[
  {"id":2,"type":"output","name":"HEADLESS-1","current_workspace":"1","focus":[3,9],"nodes":[
   {"id":3,"type":"workspace","name":"1","focus":[5,4],"nodes":[
@@ -603,6 +662,25 @@ func TestTypeTargetErrors(t *testing.T) {
 	out = call(t, ts, ToolType, map[string]any{"text": "hello world", "app": "this window", "submit": "false"})
 	if out["success"] != true || out["submitted"] != false || !slices.Equal(kb.typed, []string{"hello world"}) || len(kb.keys) != 0 {
 		t.Errorf("plain type: %v %q %v", out, kb.typed, kb.keys)
+	}
+}
+
+// Without an app the result names the window in front, and nothing is typed when the window
+// backend can see that no window has the keyboard focus.
+func TestTypeIntoTheWindowInFront(t *testing.T) {
+	kb, win := &fakeKB{ok: true}, newWin()
+	ts := &Tools{KB: kb, Win: win, Sleep: noSleep}
+	out := call(t, ts, ToolType, map[string]any{"text": "hello"})
+	if out["success"] != true || out["into"] != "Foot (the window in front)" || out["front_app"] != "foot" {
+		t.Fatalf("out %v", out)
+	}
+	win.active = ""
+	out = call(t, ts, ToolType, map[string]any{"text": "lost"})
+	if out["success"] != false || out["error_code"] != "no_focused_window" || slices.Contains(kb.typed, "lost") {
+		t.Fatalf("no focus: %v typed %q", out, kb.typed)
+	}
+	if out := call(t, ts, ToolPress, map[string]any{"key": "enter"}); out["error_code"] != "no_focused_window" || len(kb.keys) != 0 {
+		t.Fatalf("press with no focus: %v keys %v", out, kb.keys)
 	}
 }
 

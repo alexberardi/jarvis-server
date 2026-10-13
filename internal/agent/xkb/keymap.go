@@ -2,79 +2,113 @@ package xkb
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
-// MinKeycode is the first XKB keycode a generated keymap uses (evdev code 1: XKB keycodes are
-// evdev codes + 8).
+// MinKeycode is the first XKB keycode (evdev code 1: XKB keycodes are evdev codes + 8).
 const MinKeycode = 9
 
-// MaxKeysPerMap keeps every keycode ≤ 255: X11 (XWayland clients) can't see keycodes above
-// that, so text with more distinct characters is typed in several batches, each with its own
-// keymap.
-const MaxKeysPerMap = 255 - MinKeycode + 1
+// KeymapName names every section of a generated keymap, so a keymap read back from the
+// compositor (it hands the active keyboard's keymap to new clients) can be told apart from a
+// real layout.
+const KeymapName = "jarvis-agent"
 
-// Batch is a run of strokes typed with one keymap: Syms[i] is on XKB keycode MinKeycode+i.
+// Key is one key of a generated keymap: its keycode and level 1 and 2 keysyms (0: none).
+type Key struct {
+	Code uint32
+	Syms [2]uint32
+}
+
+// Press is one key press and release on a generated keymap, optionally with Shift held.
+type Press struct {
+	Code  uint32
+	Shift bool
+}
+
+// Batch is a run of presses typed with one keymap.
 type Batch struct {
-	Syms    []uint32
-	Strokes []Stroke
+	Keys    []Key
+	Presses []Press
+	// Extra are the keysyms the layout doesn't have, put on keycodes it leaves empty: only a
+	// client that reads the virtual keyboard's own keymap types them.
+	Extra []uint32
 }
 
-// Keycode is the XKB keycode producing sym in this batch, or 0.
-func (b Batch) Keycode(sym uint32) uint32 {
-	for i, s := range b.Syms {
-		if s == sym {
-			return uint32(MinKeycode + i)
-		}
+// Plan maps strokes onto the layout: a keysym the layout has is pressed where the layout has
+// it (with Shift for level 2), a keysym it lacks gets one of the layout's empty keycodes.
+// When there are more of those than empty keycodes, the strokes go in several batches, each
+// with its own keymap, keeping their order. nil layout: US.
+func Plan(strokes []Stroke, l *Layout) ([]Batch, error) {
+	if l == nil {
+		l = US()
 	}
-	return 0
-}
-
-// Plan splits strokes into batches of at most maxKeys distinct keysyms, keeping their order.
-func Plan(strokes []Stroke, maxKeys int) []Batch {
-	if maxKeys <= 0 || maxKeys > MaxKeysPerMap {
-		maxKeys = MaxKeysPerMap
-	}
+	free := l.free()
 	var out []Batch
 	var cur Batch
-	seen := map[uint32]bool{}
-	for _, s := range strokes {
-		if !seen[s.Sym] {
-			if len(cur.Syms) == maxKeys {
-				out = append(out, cur)
-				cur, seen = Batch{}, map[uint32]bool{}
-			}
-			seen[s.Sym] = true
-			cur.Syms = append(cur.Syms, s.Sym)
+	used := map[uint32]bool{}    // keycodes in cur
+	extra := map[uint32]uint32{} // keysym → keycode, for cur's extra keysyms
+	flush := func() {
+		if len(cur.Presses) > 0 {
+			slices.SortFunc(cur.Keys, func(a, b Key) int { return int(a.Code) - int(b.Code) })
+			out = append(out, cur)
 		}
-		cur.Strokes = append(cur.Strokes, s)
+		cur, used, extra = Batch{}, map[uint32]bool{}, map[uint32]uint32{}
 	}
-	if len(cur.Strokes) > 0 {
-		out = append(out, cur)
+	for _, s := range strokes {
+		if p, ok := l.pos[s.Sym]; ok {
+			if !used[p.code] {
+				used[p.code] = true
+				cur.Keys = append(cur.Keys, Key{Code: p.code, Syms: l.levels[p.code]})
+			}
+			cur.Presses = append(cur.Presses, Press{Code: p.code, Shift: p.shift || s.Shift})
+			continue
+		}
+		code, ok := extra[s.Sym]
+		if !ok {
+			if len(free) == 0 {
+				return nil, fmt.Errorf("xkb: the keyboard layout has no free key for %s", Name(s.Sym))
+			}
+			if len(extra) == len(free) {
+				flush()
+			}
+			code = free[len(extra)]
+			extra[s.Sym] = code
+			used[code] = true
+			cur.Keys = append(cur.Keys, Key{Code: code, Syms: [2]uint32{s.Sym}})
+			cur.Extra = append(cur.Extra, s.Sym)
+		}
+		cur.Presses = append(cur.Presses, Press{Code: code, Shift: s.Shift})
 	}
-	return out
+	flush()
+	return out, nil
 }
 
-// Keymap is the XKB keymap (text v1) for this batch: one key per keysym, the standard
-// "complete" types and compatibility so Shift works, the way wtype builds its own. Tab gets
-// ISO_Left_Tab on its shifted level, like a real keyboard, so Shift+Tab reads as a back-tab to
-// toolkits that look at the keysym.
+// Keymap is the XKB keymap (text v1) for this batch: its keys, with the standard "complete"
+// types and compatibility so Shift works, the way wtype builds its own.
 func (b Batch) Keymap() string {
 	var s strings.Builder
-	s.WriteString("xkb_keymap {\nxkb_keycodes \"(unnamed)\" {\n")
-	fmt.Fprintf(&s, "minimum = %d;\nmaximum = %d;\n", MinKeycode-1, max(MinKeycode+len(b.Syms), MinKeycode+1))
-	for i := range b.Syms {
-		fmt.Fprintf(&s, "<K%d> = %d;\n", i+1, MinKeycode+i)
+	maxCode := uint32(MinKeycode + 1)
+	for _, k := range b.Keys {
+		maxCode = max(maxCode, k.Code)
 	}
-	s.WriteString("};\nxkb_types \"(unnamed)\" { include \"complete\" };\n")
-	s.WriteString("xkb_compatibility \"(unnamed)\" { include \"complete\" };\n")
-	s.WriteString("xkb_symbols \"(unnamed)\" {\n")
-	for i, sym := range b.Syms {
-		levels := Name(sym)
-		if sym == KeyTab {
-			levels += ", " + Name(KeyISOLeftTab)
+	fmt.Fprintf(&s, "xkb_keymap {\nxkb_keycodes %q {\n", KeymapName)
+	fmt.Fprintf(&s, "minimum = %d;\nmaximum = %d;\n", MinKeycode-1, maxCode)
+	for _, k := range b.Keys {
+		fmt.Fprintf(&s, "<K%d> = %d;\n", k.Code, k.Code)
+	}
+	fmt.Fprintf(&s, "};\nxkb_types %q { include \"complete\" };\n", KeymapName)
+	fmt.Fprintf(&s, "xkb_compatibility %q { include \"complete\" };\n", KeymapName)
+	fmt.Fprintf(&s, "xkb_symbols %q {\n", KeymapName)
+	for _, k := range b.Keys {
+		levels := Name(k.Syms[0])
+		if k.Syms[0] == 0 {
+			levels = "NoSymbol"
 		}
-		fmt.Fprintf(&s, "key <K%d> {[ %s ]};\n", i+1, levels)
+		if k.Syms[1] != 0 {
+			levels += ", " + Name(k.Syms[1])
+		}
+		fmt.Fprintf(&s, "key <K%d> {[ %s ]};\n", k.Code, levels)
 	}
 	s.WriteString("};\n};\n")
 	return s.String()

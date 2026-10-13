@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -18,6 +19,9 @@ import (
 )
 
 const (
+	// wl_seat.get_keyboard; wl_keyboard.keymap
+	opSeatGetKeyboard = 1
+	evKeyboardKeymap  = 0
 	// zwp_virtual_keyboard_manager_v1
 	opCreateVirtualKeyboard = 0
 	// zwp_virtual_keyboard_v1
@@ -40,6 +44,13 @@ type Keyboard struct {
 	Sleep   func(context.Context, time.Duration) error // a real timer when nil
 	Timeout time.Duration                              // per round trip; 2 s when zero
 	Now     func() time.Time                           // key timestamps; time.Now when nil
+	// X11Focused, when set, says whether the focused window is an X11 (XWayland) one. Those
+	// read keys with the desktop's layout, not the virtual keyboard's keymap, so text with a
+	// character the layout lacks is refused rather than typed as something else.
+	X11Focused func(context.Context) bool
+
+	mu     sync.Mutex
+	layout *xkb.Layout // the desktop's layout, last read from the compositor
 }
 
 func (k *Keyboard) Name() string { return Name }
@@ -139,6 +150,20 @@ func (k *Keyboard) Send(ctx context.Context, strokes []xkb.Stroke) error {
 		return errors.New("the compositor doesn't offer the virtual-keyboard protocol")
 	}
 	seat := c.Bind(reg, sg, 1, nil)
+	layout := k.desktopLayout(ctx, c, seat)
+	batches, err := xkb.Plan(strokes, layout)
+	if err != nil {
+		return err
+	}
+	if k.X11Focused != nil {
+		var missing []uint32
+		for _, b := range batches {
+			missing = append(missing, b.Extra...)
+		}
+		if len(missing) > 0 && k.X11Focused(ctx) {
+			return &NotOnLayoutError{Syms: missing}
+		}
+	}
 	mgr := c.Bind(reg, mg, 1, nil)
 	kb := c.NewID()
 	if err := c.Send(mgr, opCreateVirtualKeyboard, wlwire.NewArgs().U32(seat).U32(kb).Bytes(), -1); err != nil {
@@ -158,8 +183,11 @@ func (k *Keyboard) Send(ctx context.Context, strokes []xkb.Stroke) error {
 	}
 	settle := cmp.Or(k.Settle, DefaultSettle)
 
-	for _, b := range xkb.Plan(strokes, 0) {
+	for _, b := range batches {
 		if err := k.uploadKeymap(ctx, c, kb, b.Keymap()); err != nil {
+			return err
+		}
+		if err := k.activate(ctx, c, kb); err != nil {
 			return err
 		}
 		if settle > 0 {
@@ -167,17 +195,17 @@ func (k *Keyboard) Send(ctx context.Context, strokes []xkb.Stroke) error {
 				return err
 			}
 		}
-		for i, s := range b.Strokes {
+		for i, p := range b.Presses {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			code := b.Keycode(s.Sym) - 8 // the protocol takes evdev codes
-			if s.Shift {
+			code := p.Code - 8 // the protocol takes evdev codes
+			if p.Shift {
 				_ = c.Send(kb, opModifiers, wlwire.NewArgs().U32(xkb.ShiftMask).U32(0).U32(0).U32(0).Bytes(), -1)
 			}
 			_ = c.Send(kb, opKey, wlwire.NewArgs().U32(stamp()).U32(code).U32(keyPressed).Bytes(), -1)
 			_ = c.Send(kb, opKey, wlwire.NewArgs().U32(stamp()).U32(code).U32(keyReleased).Bytes(), -1)
-			if s.Shift {
+			if p.Shift {
 				_ = c.Send(kb, opModifiers, wlwire.NewArgs().U32(0).U32(0).U32(0).U32(0).Bytes(), -1)
 			}
 			if (i+1)%syncEvery == 0 {
@@ -191,6 +219,91 @@ func (k *Keyboard) Send(ctx context.Context, strokes []xkb.Stroke) error {
 		}
 	}
 	_ = c.Send(kb, opDestroy, nil, -1)
+	return k.rt(ctx, c)
+}
+
+// NotOnLayoutError: the focused window is an X11 app and the text has characters the
+// keyboard layout lacks; nothing was typed.
+type NotOnLayoutError struct{ Syms []uint32 }
+
+func (e *NotOnLayoutError) Error() string {
+	var chars []string
+	seen := map[uint32]bool{}
+	for _, s := range e.Syms {
+		if !seen[s] && len(chars) < 5 {
+			seen[s] = true
+			chars = append(chars, fmt.Sprintf("%q", xkb.Rune(s)))
+		}
+	}
+	return "the window in front is an X11 app, which only takes characters on the keyboard layout, and " +
+		strings.Join(chars, ", ") + " aren't on it"
+}
+
+// ErrorCode is the tool result's error_code.
+func (e *NotOnLayoutError) ErrorCode() string { return "unsupported_characters" }
+
+// desktopLayout is the keyboard layout to type with: the keymap the compositor hands a new
+// keyboard (the active keyboard's) when it is a whole layout, else the last one read, else US.
+// The active keyboard can be another virtual keyboard (an input method's, wtype's) holding a
+// fragment; that is never taken for the layout.
+func (k *Keyboard) desktopLayout(ctx context.Context, c *wlwire.Conn, seat uint32) *xkb.Layout {
+	got := make(chan string, 1)
+	wk := c.NewID()
+	c.Handle(wk, func(op uint16, a []byte) {
+		if op != evKeyboardKeymap {
+			return
+		}
+		r := wlwire.NewReader(a)
+		format, size := r.U32(), r.U32()
+		fd := c.TakeFD()
+		if fd < 0 {
+			return
+		}
+		defer unix.Close(fd)
+		if format != keymapFormatXKBV1 || size == 0 || size > 1<<24 {
+			return
+		}
+		mem, err := unix.Mmap(fd, 0, int(size), unix.PROT_READ, unix.MAP_PRIVATE)
+		if err != nil {
+			return
+		}
+		text := strings.TrimRight(string(mem), "\x00")
+		_ = unix.Munmap(mem)
+		select {
+		case got <- text:
+		default:
+		}
+	})
+	if c.Send(seat, opSeatGetKeyboard, wlwire.NewArgs().U32(wk).Bytes(), -1) == nil {
+		_ = k.rt(ctx, c)
+	}
+	var l *xkb.Layout
+	select {
+	case text := <-got:
+		if !strings.Contains(text, xkb.KeymapName) {
+			l, _ = xkb.ParseKeymap(text)
+		}
+	default:
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if l.Complete() {
+		k.layout = l
+	}
+	if k.layout != nil {
+		return k.layout
+	}
+	return xkb.US()
+}
+
+// activate makes this keyboard the seat's active one before its first key, so the compositor
+// hands its keymap to the focused client before that key and the settle has something to
+// wait for. Hyprland switches the seat (or the input method's grab) to a keyboard only on a
+// key or modifiers event; an all-zero modifiers event is the harmless one.
+func (k *Keyboard) activate(ctx context.Context, c *wlwire.Conn, kb uint32) error {
+	if err := c.Send(kb, opModifiers, wlwire.NewArgs().U32(0).U32(0).U32(0).U32(0).Bytes(), -1); err != nil {
+		return err
+	}
 	return k.rt(ctx, c)
 }
 
