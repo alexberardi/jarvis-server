@@ -114,6 +114,20 @@ func (a *fakeAuth) HouseholdRole(_ context.Context, uid int64, hh string) (authn
 	return r, ok, nil
 }
 
+// Memberships is authn.MembershipLister: the user's households in id order, named after their id.
+func (a *fakeAuth) Memberships(_ context.Context, uid int64) ([]authn.Membership, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []authn.Membership
+	for hh, users := range a.roles {
+		if r, ok := users[uid]; ok {
+			out = append(out, authn.Membership{HouseholdID: hh, Name: "Household " + hh, Role: r})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].HouseholdID < out[j].HouseholdID })
+	return out, nil
+}
+
 type statusError struct {
 	status int
 	msg    string

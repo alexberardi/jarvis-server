@@ -144,6 +144,9 @@ func TestPassThroughRewritesPaths(t *testing.T) {
 		{"GET", "/api/config/services", pconfig.ListenerConfig, "GET /services"},
 		{"GET", "/api/config/services/health", pconfig.ListenerConfig, "GET /services/health"},
 		{"GET", "/api/cc/api/v0/admin/nodes", pconfig.ListenerCC, "GET /api/v0/admin/nodes"},
+		{"GET", "/api/cc/api/v0/nodes/pairings", pconfig.ListenerCC, "GET /api/v0/nodes/pairings"},
+		{"POST", "/api/cc/api/v0/nodes/pairings/approve", pconfig.ListenerCC, "POST /api/v0/nodes/pairings/approve"},
+		{"POST", "/api/cc/api/v0/nodes/pairings/deny", pconfig.ListenerCC, "POST /api/v0/nodes/pairings/deny"},
 	}
 	for _, c := range cases {
 		e := targets[c.listener]
@@ -165,6 +168,7 @@ func TestPassThroughIsAnAllowList(t *testing.T) {
 		{"GET", "/api/admin/users/1"},              // only the listed superuser views
 		{"POST", "/api/llm/v1/chat/completions"},   // not the inference surface
 		{"GET", "/api/cc/api/v0/admin/traces"},     // traces come from the BFF
+		{"POST", "/api/cc/api/v0/nodes/pairings"},  // starting a pairing is the computer's, on cc
 		{"GET", "/api/llm/v1/models/catalog/../x"}, // cleaned by the mux, then not listed
 	} {
 		// The mux redirects an unclean path (301 before Go 1.27, 307 since); either way it never

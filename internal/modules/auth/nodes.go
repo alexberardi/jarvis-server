@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
@@ -475,6 +476,27 @@ func (m *Module) ValidateApp(ctx context.Context, appID, key string) (authn.App,
 func (m *Module) HouseholdRole(ctx context.Context, userID int64, householdID string) (authn.Role, bool, error) {
 	r, ok, err := membershipRole(ctx, m.deps.DB.Read, householdID, userID)
 	return authn.Role(r), ok, err
+}
+
+// Memberships lists the user's households, oldest membership first (authn.MembershipLister).
+func (m *Module) Memberships(ctx context.Context, userID int64) ([]authn.Membership, error) {
+	rows, err := m.deps.DB.Read.QueryContext(ctx, `
+		SELECT h.id, h.name, m.role
+		FROM auth_household_memberships m JOIN auth_households h ON h.id = m.household_id
+		WHERE m.user_id = ? ORDER BY m.id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []authn.Membership
+	for rows.Next() {
+		var id, name, role string
+		if err := rows.Scan(&id, &name, &role); err != nil {
+			return nil, err
+		}
+		out = append(out, authn.Membership{HouseholdID: id, Name: name, Role: authn.Role(strings.ToLower(role))})
+	}
+	return out, rows.Err()
 }
 
 // VerifyUser verifies an access token in-process and returns its principal. The user must
