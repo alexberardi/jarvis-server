@@ -26,6 +26,9 @@ var subjects = []subject{
 	{"linux", "linux", linuxWinID,
 		func() (Backend, recorder) { s := linuxFull(); return NewLinux(s), s },
 		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s }},
+	{"linux-ewmh", "linux", linuxWinID,
+		func() (Backend, recorder) { s, x := linuxEWMH(); return &Linux{Sys: s, X: x}, s },
+		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }},
 	{"darwin", "darwin", macWinID,
 		func() (Backend, recorder) { s := macFull(); return NewDarwin(s), s },
 		func() (Backend, recorder) { s := macEmpty(); return NewDarwin(s), s }},
@@ -210,7 +213,8 @@ func TestCloseIsGraceful(t *testing.T) {
 				t.Fatalf("close used %q:\n%s", banned, cmds)
 			}
 		}
-		graceful := map[string]string{"linux": "wmctrl -i -c " + s.winID, "darwin": "AXCloseButton", "windows": "postclose 1311"}[s.platform]
+		graceful := map[string]string{"linux": "wmctrl -i -c " + s.winID, "linux-ewmh": "x11 close 0x03a00007",
+			"darwin": "AXCloseButton", "windows": "postclose 1311"}[s.name]
 		if !strings.Contains(rec.allCommands(), graceful) {
 			t.Fatalf("close did not issue %q:\n%s", graceful, rec.allCommands())
 		}

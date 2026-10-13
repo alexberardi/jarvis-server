@@ -10,13 +10,18 @@ import (
 	"strings"
 )
 
-// LinuxWindows focuses windows on Hyprland (hyprctl) and sway (swaymsg); on X11 it uses X11
-// (the host backend's wmctrl, plus xdotool for the active window). Other Wayland compositors
-// (GNOME, KDE) have no cross-client window control: naming an app is unavailable there, and
-// typing goes to whatever has focus.
+// LinuxWindows focuses windows on Hyprland (hyprctl) and sway (swaymsg); on X11 it uses the
+// host backend's window control (built-in EWMH, else wmctrl) and asks which window is active
+// (EWMH's _NET_ACTIVE_WINDOW, else xdotool). Other Wayland compositors (GNOME, KDE) have no
+// cross-client window control: naming an app is unavailable there, and typing goes to whatever
+// has focus.
 type LinuxWindows struct {
 	X   Exec
-	X11 Windows // the X11 fallback (HostWindows over the host backend); nil for none
+	X11 Windows // X11 (HostWindows over the host backend); nil for none
+	// XWM is the built-in EWMH client, which can say which window is active; nil: xdotool only.
+	XWM interface {
+		WMAvailable(ctx context.Context) (bool, string)
+	}
 }
 
 func (l *LinuxWindows) compositor() string {
@@ -37,12 +42,16 @@ func (l *LinuxWindows) Available(ctx context.Context) (bool, string) {
 		return true, ""
 	}
 	if l.X.Getenv("WAYLAND_DISPLAY") == "" && l.X.Getenv("DISPLAY") != "" && l.X11 != nil {
-		if !l.X.LookPath("xdotool") {
-			return false, "switching to a named app on X11 needs xdotool (and wmctrl) installed"
+		native := false
+		if l.XWM != nil {
+			native, _ = l.XWM.WMAvailable(ctx)
+		}
+		if !native && !l.X.LookPath("xdotool") {
+			return false, "switching to a named app on X11 needs an EWMH window manager (or xdotool and wmctrl)"
 		}
 		return l.X11.Available(ctx)
 	}
-	return false, "switching to a named app needs Hyprland, sway or X11 (wmctrl + xdotool); on this desktop click into the app and ask to type without naming it"
+	return false, "switching to a named app needs Hyprland, sway or X11; on this desktop click into the app and ask to type without naming it"
 }
 
 func (l *LinuxWindows) List(ctx context.Context) ([]Window, error) {

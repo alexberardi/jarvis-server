@@ -99,11 +99,15 @@ internal/agent/
                       PickUnique (dictation: one match or ambiguous_window)
   dictate/            dictation (DESIGN.md §14): desktop_type_text, desktop_press_key and
                       desktop_confirm (tools.go, confirm.go); keyboards: the built-in Wayland
-                      virtual keyboard, else wtype/ydotool/xdotool (linux.go), CGEvent (mac.go, cgevent_darwin.go), SendInput (win.go,
+                      virtual keyboard and X11 XTEST, else wtype/ydotool/xdotool (linux.go), CGEvent (mac.go, cgevent_darwin.go), SendInput (win.go,
                       sendinput_windows.go); focus: hyprctl/swaymsg (linuxwin.go), the host
                       backend + an active-window check (hostwin.go)
   vkbd/               the Wayland virtual keyboard (zwp_virtual_keyboard_manager_v1), pure Go:
                       what wtype does, without wtype (DESIGN.md §14)
+  x11/                X11 without helpers: XTEST typing (spare-keycode remap, settle, restore)
+                      and EWMH windows (list, activate, close, iconify, active) over a narrow
+                      Conn (x11.go, unit-tested with a fake everywhere); the real Conn is
+                      github.com/jezek/xgb (dial_linux.go)
   xkb/                keysyms for text and dictation's keys, and the minimal XKB keymap a
                       virtual keyboard uploads (pure, every OS)
   wlwire/             the Wayland client wire (connection, ids, args, registry), shared by the
@@ -289,9 +293,14 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     nested headless compositor (`WLR_BACKENDS=headless sway` with its own `WAYLAND_DISPLAY`,
     `env -i` so no `HYPRLAND_INSTANCE_SIGNATURE` leaks in) and `jarvis-agent try`.
 
-28. **Built-in typing first, helpers as fallback** (installers §9.3 item 6: the agent binary is
-    the whole install). On Wayland the virtual keyboard (`vkbd`) is used whenever the compositor
-    advertises it; wtype/ydotool only when it doesn't. Availability is probed per call (one
+28. **Built-in typing and window control first, helpers as fallback** (installers §9.3 item 6:
+    the agent binary is the whole install). On Wayland the virtual keyboard (`vkbd`) is used
+    whenever the compositor advertises it; wtype/ydotool only when it doesn't. On X11, XTEST
+    (`x11`) types and EWMH drives windows (`host.Linux.X`, set only by `host.Native`, so tests never
+    reach a real X server; the dictate backends read the session through `Exec.Getenv` for the
+    same reason); xdotool/wmctrl only without XTEST or an EWMH window manager. An XTEST remap is
+    always restored (a deferred blank of every spare keycode used). `JARVIS_X11_TYPE=…` /
+    `JARVIS_X11_LIST=1 go test -run Native ./internal/agent/x11/` are for a throwaway Xvfb only. Availability is probed per call (one
     connection, nothing created). A built-in backend's failure is returned, never retried through a
     helper: keys may have half-arrived. `vkbd`'s settle and clock are injected; its tests use a
     scripted compositor on a socketpair. `JARVIS_VKBD_TYPE=… go test -run TestNativeType
@@ -300,7 +309,8 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
 ## Dependencies
 
 Beyond jarvisd's own: `github.com/eclipse/paho.mqtt.golang` (jarvisd embeds a broker; the agent is a client), `golang.org/x/sys` (Windows syscalls),
-`golang.org/x/term` (password prompt), `github.com/warthog618/go-gpiocdev` (the HAT button, pure
+`golang.org/x/term` (password prompt), `github.com/jezek/xgb` (X11 protocol for XTEST typing and
+EWMH window control; pure Go, no dependencies, Linux builds only, +0.5 MB), `github.com/warthog618/go-gpiocdev` (the HAT button, pure
 Go), `github.com/ebitengine/purego` (macOS AX, AudioToolbox,
 libasound and onnxruntime via dlopen). `CGO_ENABLED=0` builds everywhere: Windows volume is
 WASAPI over raw COM vtables, windows are user32, open is ShellExecuteW, macOS AX is dlopen'd

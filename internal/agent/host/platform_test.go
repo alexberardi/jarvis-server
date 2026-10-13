@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -151,5 +152,71 @@ func TestAbsoluteByBackendPlatformNotRunner(t *testing.T) {
 		if got := absFor(tc.platform, tc.path); got != tc.want {
 			t.Errorf("absFor(%s, %q) = %v", tc.platform, tc.path, got)
 		}
+	}
+}
+
+// The built-in EWMH client is preferred over wmctrl/xdotool whenever the window manager
+// supports it, needs neither, and is never used outside an X11 session.
+func TestLinuxPrefersBuiltInEWMH(t *testing.T) {
+	s, x := linuxEWMH()
+	s.bins["wmctrl"], s.bins["xdotool"] = true, true // installed, and still not used
+	h := New(&Linux{Sys: s, X: x})
+	caps, _ := h.Capabilities(ctx)
+	for _, c := range AllWindowCaps {
+		if !slices.Contains(caps, c) {
+			t.Fatalf("caps %v lack %s", caps, c)
+		}
+	}
+	ws, err := h.ListWindows(ctx)
+	if err != nil || len(ws) != 2 || ws[0] != (Window{ID: "0x03a00007", Title: "Mozilla Firefox — a  title", App: "firefox.Firefox"}) || !ws[1].Minimized {
+		t.Fatalf("%+v %v", ws, err)
+	}
+	for _, a := range []WindowAction{ActionFocus, ActionMinimize, ActionClose} {
+		if err := h.WindowDo(ctx, a, "0x3a00007"); err != nil { // unpadded, as wmctrl-era callers may pass
+			t.Fatalf("%s: %v", a, err)
+		}
+	}
+	cmds := s.allCommands()
+	for _, want := range []string{"x11 activate 0x03a00007", "x11 iconify 0x03a00007", "x11 close 0x03a00007"} {
+		if !strings.Contains(cmds, want) {
+			t.Fatalf("no %q in\n%s", want, cmds)
+		}
+	}
+	if strings.Contains(cmds, "wmctrl") || strings.Contains(cmds, "xdotool") {
+		t.Fatalf("ran a helper:\n%s", cmds)
+	}
+
+	// A failure is an operation failure, not a silent fallback to a helper.
+	x.err = errors.New("BadWindow")
+	if err := h.WindowDo(ctx, ActionFocus, linuxWinID); !errors.Is(err, ErrOperationFailed) {
+		t.Fatalf("err %v, want ErrOperationFailed", err)
+	}
+}
+
+func TestLinuxEWMHFallsBackToTheHelpers(t *testing.T) {
+	// No EWMH window manager: wmctrl as before.
+	s := linuxFull()
+	x := &fakeX{sys: s, why: "no EWMH window manager is running"}
+	h := New(&Linux{Sys: s, X: x})
+	if err := h.WindowDo(ctx, ActionClose, linuxWinID); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.allCommands(), "wmctrl -i -c "+linuxWinID) {
+		t.Fatalf("no wmctrl:\n%s", s.allCommands())
+	}
+	// Neither: no window control.
+	s2, x2 := linuxEWMH()
+	x2.wm = false
+	if caps, _ := New(&Linux{Sys: s2, X: x2}).Capabilities(ctx); slices.Contains(caps, CapWindowsList) {
+		t.Fatalf("caps %v", caps)
+	}
+	// Wayland (XWayland's DISPLAY too): the X server is never asked.
+	s3, x3 := linuxEWMH()
+	s3.env["WAYLAND_DISPLAY"] = "wayland-1"
+	if caps, _ := New(&Linux{Sys: s3, X: x3}).Capabilities(ctx); slices.Contains(caps, CapWindowsList) {
+		t.Fatalf("caps %v", caps)
+	}
+	if strings.Contains(s3.allCommands(), "x11 ") {
+		t.Fatalf("probed X on Wayland:\n%s", s3.allCommands())
 	}
 }

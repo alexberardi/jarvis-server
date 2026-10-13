@@ -341,6 +341,59 @@ func TestSwayWindows(t *testing.T) {
 	}
 }
 
+// fakeWM is the built-in EWMH client as dictation sees it.
+type fakeWM struct {
+	ok     bool
+	active uint32
+}
+
+func (f *fakeWM) WMAvailable(context.Context) (bool, string) { return f.ok, "no EWMH window manager" }
+func (f *fakeWM) Active(context.Context) (uint32, error)     { return f.active, nil }
+
+// On X11 the built-in XTEST keyboard wins over xdotool, and is never asked on Wayland.
+func TestLinuxKeyboardPrefersXTEST(t *testing.T) {
+	ctx := context.Background()
+	nat := &fakeInjector{ok: true}
+	f := &fakeExec{env: map[string]string{"DISPLAY": ":0"}, bins: bins("xdotool", "ydotool")}
+	k := &LinuxKeyboard{X: f, X11: nat, Wayland: &fakeInjector{ok: true}}
+	if b, _ := k.backend(ctx); b != beX11 || k.Name() != "fake-native" {
+		t.Fatalf("backend %q", b)
+	}
+	_ = k.Type(ctx, "ñ")
+	_ = k.Press(ctx, KeyShiftTab)
+	if len(f.ran) != 0 || len(nat.sent) != 2 || nat.sent[0][0].Sym != 0xf1 || nat.sent[1][0] != (xkb.Stroke{Sym: xkb.KeyTab, Shift: true}) {
+		t.Fatalf("ran %v sent %v", f.ran, nat.sent)
+	}
+	k.X11 = &fakeInjector{why: "no XTEST"}
+	if b, _ := k.backend(ctx); b != beXdotool {
+		t.Fatalf("fallback %q", b)
+	}
+	w := &LinuxKeyboard{X: &fakeExec{env: map[string]string{"WAYLAND_DISPLAY": "w", "DISPLAY": ":0"}, bins: bins("ydotool")},
+		X11: &fakeInjector{ok: true}, Wayland: &fakeInjector{why: "no"}}
+	if b, _ := w.backend(ctx); b == beX11 {
+		t.Fatal("XTEST on Wayland (it would only reach XWayland apps)")
+	}
+}
+
+func TestX11ActiveAsksTheWindowManagerFirst(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeExec{bins: bins("xdotool"), out: func(Cmd) (string, error) { return "999", nil }}
+	got, err := X11Active(f, &fakeWM{ok: true, active: 0x04000007})(ctx)
+	if err != nil || got != "67108871" || len(f.ran) != 0 || !SameX11("0x04000007", got) {
+		t.Fatalf("%q %v ran %v", got, err, f.ran)
+	}
+	got, _ = X11Active(f, &fakeWM{})(ctx)
+	if got != "999" || len(f.ran) != 1 || f.ran[0].line() != "xdotool getactivewindow" {
+		t.Fatalf("xdotool fallback: %q", got)
+	}
+	// With the built-in client, naming an app on X11 needs no xdotool.
+	lw := &LinuxWindows{X: &fakeExec{env: map[string]string{"DISPLAY": ":0"}}, XWM: &fakeWM{ok: true},
+		X11: &HostWindows{H: host.New(&fakeBackend{}), ActiveFn: func(context.Context) (string, error) { return "", nil }}}
+	if _, why := lw.Available(ctx); strings.Contains(why, "xdotool") {
+		t.Fatalf("still asks for xdotool: %q", why)
+	}
+}
+
 func TestLinuxWindowsUnavailable(t *testing.T) {
 	ctx := context.Background()
 	gnome := &LinuxWindows{X: &fakeExec{env: map[string]string{"WAYLAND_DISPLAY": "w"}, bins: bins("hyprctl", "swaymsg", "wmctrl", "xdotool")}}

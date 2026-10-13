@@ -149,8 +149,9 @@ it later. Firefox gets a Mozilla-signed extension; Chrome, Edge, Brave and Arc a
 Dictation types into the window in front or into an app you name, and presses Enter, Escape, Tab
 or the arrows to answer dialogs ([docs/agent/DESIGN.md](docs/agent/DESIGN.md) §14). On Hyprland,
 sway and other wlroots desktops it needs nothing extra (the agent speaks the Wayland
-virtual-keyboard protocol itself). It needs `xdotool` on X11, `ydotool` with its daemon on GNOME/KDE
-(typing only, plain ASCII), and the Accessibility grant on macOS. Typing into a *named* app works on Hyprland, sway, X11, macOS and
+virtual-keyboard protocol itself), and on X11 neither (XTEST and EWMH are built in, so window
+control needs no `wmctrl`/`xdotool` either). It needs `ydotool` with its daemon on GNOME/KDE (typing
+only, plain ASCII), and the Accessibility grant on macOS. Typing into a *named* app works on Hyprland, sway, X11, macOS and
 Windows. `jarvis-agent status` says what works; `run --confirm-dictation submit` makes Jarvis ask
 "Send … to Claude?" before anything is sent.
 

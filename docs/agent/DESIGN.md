@@ -19,10 +19,10 @@ appears in the household's node list, and offers the host-agent capabilities as 
 | `desktop_list_apps` | `open` | XDG .desktop entries | .app bundles | Start Menu .lnk |
 | `desktop_get_volume` | `volume.get` | pactl / wpctl / amixer | osascript | WASAPI (COM) |
 | `desktop_set_volume` | `volume.set` | same | same | same |
-| `desktop_list_windows` | `windows.list` | wmctrl (X11 only) | System Events (AX grant) | EnumWindows |
-| `desktop_minimize_window` | `windows.minimize` | xdotool | AXMinimized | ShowWindow |
-| `desktop_focus_window` | `windows.focus` | wmctrl -a | AXRaise | SetForegroundWindow |
-| `desktop_close_window` | `windows.close` | wmctrl -c | AXCloseButton | WM_CLOSE |
+| `desktop_list_windows` | `windows.list` | EWMH `_NET_CLIENT_LIST` (X11 only; wmctrl fallback) | System Events (AX grant) | EnumWindows |
+| `desktop_minimize_window` | `windows.minimize` | ICCCM `WM_CHANGE_STATE` (xdotool fallback) | AXMinimized | ShowWindow |
+| `desktop_focus_window` | `windows.focus` | EWMH `_NET_ACTIVE_WINDOW` (wmctrl -a fallback) | AXRaise | SetForegroundWindow |
+| `desktop_close_window` | `windows.close` | EWMH `_NET_CLOSE_WINDOW` (wmctrl -c fallback) | AXCloseButton | WM_CLOSE |
 
 Plus the `browser_*` tools (§10), offered while the Jarvis Browser Control extension is
 connected, `desktop_read_screen` (§12; Hyprland/sway and macOS), dictation (`desktop_type_text`,
@@ -69,8 +69,10 @@ to exactly one. A tool is offered only while its capability is available, comput
   agent spliced ids into AppleScript verbatim (an injection path), and used `id of w`, which
   System Events windows don't reliably have.
 - **macOS close clicks the AXCloseButton**, not `button 1` (which isn't always close).
-- **Linux:** wpctl is supported (PipeWire without pactl). Minimise is advertised only with
-  xdotool. Wayland never qualifies for window control, even with XWayland's `DISPLAY`.
+- **Linux:** wpctl is supported (PipeWire without pactl). X11 window control is built in
+  (EWMH over a pure-Go X11 connection, `internal/agent/x11`, 2026-10-13) whenever an EWMH window
+  manager runs; wmctrl, and xdotool for minimise, are the fallback. Wayland never qualifies for
+  window control, even with XWayland's `DISPLAY`.
 - **Windows:** no pywin32/pycaw. Pure syscalls (`CGO_ENABLED=0`). Without an interactive
   desktop (Session 0), `open` and window control are absent, not broken.
 - **Close on Windows reports a refused SetForegroundWindow** instead of claiming success.
@@ -149,7 +151,8 @@ provisioning, registration, broker, report_tools and mobile chat:
     available to the SSH session). Signing must run in the user's local Terminal, so the SSH
     tests used ad-hoc.
 - Not exercised on real hardware: any Windows path (CI's windows runner only); X11 window
-  control (no X11 box); macOS window control (awaiting the on-screen grant).
+  control on a real desktop (2026-10-13: the built-in EWMH client ran against Xvfb + openbox,
+  see §14 Evidence); macOS window control (awaiting the on-screen grant).
 
 ## 5. Enrollment UX
 
@@ -794,7 +797,7 @@ with its arguments (§12, `node.LogArgs`); `text` is now always logged as `<N ch
 |---|---|---|---|
 | Linux Wayland: Hyprland, sway, other wlroots | **built in:** the virtual-keyboard protocol (`zwp_virtual_keyboard_manager_v1`) spoken directly, pure Go (`internal/agent/vkbd`); fallback `wtype -s 40 -`, text on stdin, `LC_ALL=C.UTF-8` | nothing (the compositor advertises the protocol); `wtype` only if it doesn't | Hyprland: `hyprctl -j clients` / `dispatch focuswindow address:…` / `-j activewindow`; sway: `swaymsg get_tree` / `[con_id=N] focus` |
 | Linux Wayland: GNOME, KDE | `ydotool type --file -` (uinput) | `ydotool` + `ydotoold` running (its socket); US-layout ASCII only | not available (no cross-client window control): type into what's in front |
-| Linux X11 | `xdotool type --clearmodifiers --file -`, `xdotool key` | `xdotool` | wmctrl (the host backend's window control) + `xdotool getactivewindow` |
+| Linux X11 | **built in:** XTEST spoken directly (`internal/agent/x11`); fallback `xdotool type --clearmodifiers --file -`, `xdotool key` | nothing (an X server with XTEST, i.e. every desktop one); `xdotool` only without it | the host backend's window control (built-in EWMH, else wmctrl) + the active window from `_NET_ACTIVE_WINDOW` (else `xdotool getactivewindow`) |
 | macOS | CGEvent keyboard events with Unicode strings (≤ 20 UTF-16 units per event, surrogate pairs never split), purego | Accessibility for Jarvis Agent.app (the grant window control already needs) | System Events (host backend) + the frontmost process's pid |
 | Windows | `SendInput` with `KEYEVENTF_UNICODE` (layout-independent), raw syscalls | an interactive desktop; can't type into an elevated (admin) window (UIPI): reported as an error | user32 (host backend) + `GetForegroundWindow` |
 
@@ -814,6 +817,18 @@ whenever the compositor advertises the protocol (probed per call: one connection
 nothing created); otherwise wtype, then ydotool. Not tried on GNOME (no protocol) or KDE (input
 methods only); those get the portal (open question 7). A failure is reported, never retried
 through a helper (keys may have half-arrived).
+
+**The built-in X11 keyboard** (2026-10-13). XTEST fake key events over a pure-Go X11
+connection (`github.com/jezek/xgb`), the way xdotool types: a character already on a key is typed
+on that key (Shift for its second level, inverted for letters while Caps Lock is on); one that
+isn't is put on a *spare* keycode (one with no keysyms) for the duration, as `[sym, sym]` so
+neither Shift nor Caps Lock changes it, several spare keycodes at a time. X clients read a changed
+mapping lazily (MappingNotify drops their cache; the next key translation asks again), so the
+mapping must arrive before the keys that use it and stay until they are read: a sync and a 50 ms
+settle (`x11.DefaultSettle`, injectable) after each remap and before the spare keycodes are
+blanked again. The mapping is always put back, even on an error or a cancel. Not handled: an
+active XKB group other than the first (core keyboard mapping columns 1–2 only); a character on a
+key in another group is typed through a spare keycode, which still works.
 
 **The first character.** A fresh virtual keyboard's keymap must reach the client before the
 first key: wtype without `-s 40` dropped the first character on sway in 1 of 3 runs, with it 0
@@ -971,9 +986,25 @@ never in logs or results; password fields only when named.
 - **Built and vetted only:** macOS (CGEvent, System Events focus) and Windows (SendInput,
   GetForegroundWindow); `GOOS=darwin/windows go vet`, `CGO_ENABLED=0` builds, and the pure parts
   (UTF-16 chunking, INPUT records, key codes, focus logic) are unit-tested on Linux. The 40-byte
-  `INPUT` size is a compile-time check on 64-bit Windows. Not run: ydotool, X11/xdotool, a voice
+  `INPUT` size is a compile-time check on 64-bit Windows. Not run: ydotool, xdotool, a voice
   turn answering a confirmation aloud (the voice validation path itself is unchanged), the island
   note on a real screen.
+
+- **The built-in X11 backends (Xvfb 21.1 + openbox 3.6, headless, 2026-10-13):** a scratch
+  `DISPLAY=:77`, `env -i`, no xdotool or wmctrl installed, two `xterm -u8` windows (one
+  `cat > fileA`, one raw-mode recorder). `status`: "capabilities: … windows.close, windows.focus,
+  windows.list, windows.minimize" and "dictation: on (x11 XTEST); typing into a named app: on".
+  `desktop_type_text {app: "alpha notes", submit: true}` with the same text as the sway test while
+  the recorder had focus: fileA got exactly it and a newline, the recorder nothing (non-ASCII and
+  CJK went through spare keycodes). Each of the nine keys into the recorder: `\r`, ESC, `\t`,
+  `ESC [ Z`, space, `ESC [ A/B/D/C`. 30 of 30 runs of "é<n>✓日ж" intact with the keyboard
+  mapping byte-identical before and after each. `desktop_list_windows` (ids, `xterm.Alpha`-style
+  apps, titles), minimise (listed `minimized: true`), focus (un-minimised and active), close (the
+  xterm exited; closing it again → `window_not_found`). Unit tests: a fake X connection checks
+  levels, Shift, Caps Lock, spare remapping in runs, the restore, the settle points, the EWMH
+  messages (desktop switch, source indication 2, `WM_CHANGE_STATE` iconic, `_NET_CLOSE_WINDOW`,
+  ICCCM `WM_DELETE_WINDOW` when the WM lacks it, refusing otherwise). **Not run on a real X11
+  desktop** (no X11 box here).
 
 ### Open questions (defaults chosen; the user reviews)
 

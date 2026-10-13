@@ -1503,13 +1503,18 @@ one extra double-click and stays on the right side of every OS's security model.
      and other immutable distros can't take a package without layering and a reboot, and Arch
      users get the one-liner, not a package. So a `.deb` `Depends:` line covers only part of
      the Linux users.
+   - **Status (2026-10-13):** **done for Hyprland/sway/wlroots** (the virtual keyboard is built in,
+     PR #85) **and X11** (XTEST typing and EWMH window control are built in, PR #86). The agent
+     binary is the whole install there; wtype, xdotool and wmctrl are only a fallback. Still open:
+     GNOME/KDE on Wayland (below), and volume (`pactl`/`wpctl`/`amixer`, present on nearly every
+     desktop).
    - *Recommend:* **do it in Go, without the helpers.** Typing on wlroots compositors uses the
      Wayland virtual-keyboard protocol, which is what `wtype` itself does; a pure-Go Wayland
      client (no cgo, the agent builds with `CGO_ENABLED=0`) can speak it directly. X11 typing
      and window control go through the XTEST and EWMH protocols the same way (a pure-Go X11
      client), replacing `xdotool` and `wmctrl`. Then the agent binary is the whole install on
      Hyprland, sway and X11. The helpers stay as a fallback the backend uses only when present.
-   - *Until then:* the `.deb` lists `wtype`, `xdotool` and `wmctrl` under `Recommends:` (apt
+   - *Until then* (now only for what is still open): the `.deb` lists `wtype`, `xdotool` and `wmctrl` under `Recommends:` (apt
      installs those by default), the first-run page and `jarvis-agent status` name any missing
      helper with the one command that installs it, and the admin's Desktop & browser checklist
      (DESIGN §13) shows it as an amber item rather than a silent missing feature.

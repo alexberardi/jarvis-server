@@ -7,10 +7,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/x11"
 )
 
-// Linux shells out: pactl / wpctl / amixer for volume, wmctrl (+ xdotool for minimise) for
-// windows, xdg-open for open. Two realities it has to survive:
+// Linux shells out: pactl / wpctl / amixer for volume and xdg-open for open. Windows on X11 go
+// through EWMH spoken directly (X, internal/agent/x11: no helper program), falling back to
+// wmctrl (+ xdotool for minimise) when that can't run. Two realities it has to survive:
 //
 //   - Headless boxes have no session: window capabilities are absent and open is refused
 //     (xdg-open on a headless box exits 0 having done nothing, which fire-and-forget can't
@@ -23,6 +26,18 @@ import (
 // can run it everywhere.
 type Linux struct {
 	Sys Sys
+	// X is the built-in X11 window control (EWMH); nil: wmctrl and xdotool only. Native sets
+	// it; tests leave it nil or pass a fake.
+	X X11
+}
+
+// X11 is the built-in X11 window control (*x11.Display).
+type X11 interface {
+	WMAvailable(ctx context.Context) (bool, string)
+	Windows(ctx context.Context) ([]x11.Window, error)
+	Activate(ctx context.Context, id uint32) error
+	CloseWindow(ctx context.Context, id uint32) error
+	Iconify(ctx context.Context, id uint32) error
 }
 
 // NewLinux builds the Linux backend. It touches nothing.
@@ -30,7 +45,7 @@ func NewLinux(s Sys) *Linux { return &Linux{Sys: s} }
 
 func (*Linux) Platform() string { return "linux" }
 
-func (l *Linux) Capabilities(context.Context) []string {
+func (l *Linux) Capabilities(ctx context.Context) []string {
 	var caps []string
 	if l.Sys.LookPath("xdg-open") && l.sessionAvailable() {
 		caps = append(caps, CapOpen)
@@ -38,7 +53,10 @@ func (l *Linux) Capabilities(context.Context) []string {
 	if l.mixer() != "" {
 		caps = append(caps, CapVolumeGet, CapVolumeSet)
 	}
-	if l.x11Available() {
+	switch {
+	case l.nativeX(ctx):
+		caps = append(caps, AllWindowCaps...)
+	case l.x11Available():
 		caps = append(caps, CapWindowsList, CapWindowsFocus, CapWindowsClose)
 		// wmctrl cannot iconify; minimise needs xdotool. Advertise only what works.
 		if l.Sys.LookPath("xdotool") {
@@ -46,6 +64,16 @@ func (l *Linux) Capabilities(context.Context) []string {
 		}
 	}
 	return caps
+}
+
+// nativeX: an X11 session with an EWMH window manager the built-in client can drive. Probed
+// per call (one connection).
+func (l *Linux) nativeX(ctx context.Context) bool {
+	if l.X == nil || !l.x11Session() {
+		return false
+	}
+	ok, _ := l.X.WMAvailable(ctx)
+	return ok
 }
 
 func (l *Linux) mixer() string {
@@ -65,10 +93,14 @@ func (l *Linux) sessionAvailable() bool {
 // with XWayland's DISPLAY set, because wmctrl would only see XWayland clients and lie about the
 // rest. (A per-compositor backend, e.g. hyprctl, is an open question in docs/agent/DESIGN.md.)
 func (l *Linux) x11Available() bool {
+	return l.x11Session() && l.Sys.LookPath("wmctrl")
+}
+
+func (l *Linux) x11Session() bool {
 	if l.Sys.Getenv("WAYLAND_DISPLAY") != "" || l.Sys.Getenv("XDG_SESSION_TYPE") == "wayland" {
 		return false
 	}
-	return l.Sys.Getenv("DISPLAY") != "" && l.Sys.LookPath("wmctrl")
+	return l.Sys.Getenv("DISPLAY") != ""
 }
 
 var (
@@ -144,7 +176,7 @@ func (l *Linux) ApplyVolume(ctx context.Context, level int) error {
 
 func (l *Linux) requireX11() error {
 	if !l.x11Available() {
-		return Errorf(ErrNotSupported, "window control needs X11 plus wmctrl (headless, or Wayland, which forbids cross-app window control)")
+		return Errorf(ErrNotSupported, "window control needs X11 with an EWMH window manager (or wmctrl); this is headless, or Wayland, which forbids cross-app window control")
 	}
 	return nil
 }
@@ -157,6 +189,17 @@ var (
 )
 
 func (l *Linux) ListWindows(ctx context.Context) ([]Window, error) {
+	if l.nativeX(ctx) {
+		ws, err := l.X.Windows(ctx)
+		if err != nil {
+			return nil, Errorf(ErrOperationFailed, "%v", err)
+		}
+		out := make([]Window, len(ws))
+		for i, w := range ws {
+			out[i] = Window{ID: x11.FormatID(w.ID), Title: w.Title, App: w.Class, Minimized: w.Minimized}
+		}
+		return out, nil
+	}
 	if err := l.requireX11(); err != nil {
 		return nil, err
 	}
@@ -184,17 +227,37 @@ func (l *Linux) requireWindow(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	want, _ := x11.ParseID(id) // wmctrl and the built-in client pad ids differently
 	for _, w := range ws {
-		if strings.EqualFold(w.ID, id) {
+		if got, _ := x11.ParseID(w.ID); strings.EqualFold(w.ID, id) || (got != 0 && got == want) {
 			return nil
 		}
 	}
 	return Errorf(ErrWindowNotFound, "window %s no longer exists", id)
 }
 
+// xwin: the built-in client's id for a window that requireWindow found, or false to use the
+// helpers.
+func (l *Linux) xwin(ctx context.Context, id string) (uint32, bool) {
+	if !l.nativeX(ctx) {
+		return 0, false
+	}
+	return x11.ParseID(id)
+}
+
+func (l *Linux) xdo(err error) error {
+	if err != nil {
+		return Errorf(ErrOperationFailed, "%v", err)
+	}
+	return nil
+}
+
 func (l *Linux) MinimizeWindow(ctx context.Context, id string) error {
 	if err := l.requireWindow(ctx, id); err != nil {
 		return err
+	}
+	if w, ok := l.xwin(ctx, id); ok {
+		return l.xdo(l.X.Iconify(ctx, w))
 	}
 	if !l.Sys.LookPath("xdotool") {
 		return Errorf(ErrNotSupported, "minimise needs xdotool (wmctrl cannot iconify)")
@@ -207,14 +270,20 @@ func (l *Linux) FocusWindow(ctx context.Context, id string) error {
 	if err := l.requireWindow(ctx, id); err != nil {
 		return err
 	}
+	if w, ok := l.xwin(ctx, id); ok {
+		return l.xdo(l.X.Activate(ctx, w))
+	}
 	_, err := l.run(ctx, "wmctrl", "-i", "-a", id)
 	return err
 }
 
-// CloseWindow: wmctrl -c is a graceful close request, never a kill.
+// CloseWindow: _NET_CLOSE_WINDOW (or wmctrl -c) is a graceful close request, never a kill.
 func (l *Linux) CloseWindow(ctx context.Context, id string) error {
 	if err := l.requireWindow(ctx, id); err != nil {
 		return err
+	}
+	if w, ok := l.xwin(ctx, id); ok {
+		return l.xdo(l.X.CloseWindow(ctx, w))
 	}
 	_, err := l.run(ctx, "wmctrl", "-i", "-c", id)
 	return err
