@@ -107,9 +107,9 @@ func linuxUninstall(e Env, o UninstallOptions) []Op {
 		{Kind: BrowserHostsGone},
 		{Kind: Remove, Path: p.bin, Target: e.join(e.Home, ".local", "lib")},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Args: []string{"systemctl", "--user", "daemon-reload"}},
-		// The cache install's update-desktop-database made, when it is all that is left there.
-		{Kind: Remove, Path: e.join(p.apps, "mimeinfo.cache"), Key: IfAlone},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Path: p.apps, Args: []string{"update-desktop-database", p.apps}},
+		// Then the cache install's update-desktop-database made, when it is all that is left there.
+		{Kind: Remove, Path: e.join(p.apps, "mimeinfo.cache"), Key: IfAlone},
 	}
 	if o.Purge {
 		ops = append(ops, Op{Kind: RemoveAll, Path: p.config}, Op{Kind: RemoveAll, Path: p.cache})

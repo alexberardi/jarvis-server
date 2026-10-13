@@ -10,7 +10,7 @@ mime-unset path="~/.config/mimeapps.list" name="x-scheme-handler/jarvis-agent" v
 browser-hosts-gone
 remove path="~/.local/lib/jarvis-agent/jarvis-agent" target="~/.local/lib"
 exec [activate] [ignore-errors] args="systemctl --user daemon-reload"
-remove path="~/.local/share/applications/mimeinfo.cache" key="if-alone"
 exec [activate] [ignore-errors] path="~/.local/share/applications" args="update-desktop-database ~/.local/share/applications"
+remove path="~/.local/share/applications/mimeinfo.cache" key="if-alone"
 remove-all path="~/.config/jarvis-agent"
 remove-all path="~/.cache/jarvis-agent"
