@@ -12,6 +12,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/xkb"
 )
 
 func TestSanitize(t *testing.T) {
@@ -113,7 +114,7 @@ func TestLinuxKeyboardBackends(t *testing.T) {
 		files map[string]bool
 		want  string
 	}{
-		{"hyprland wtype", hypr, bins("wtype", "ydotool"), ysock, beWtype},
+		{"hyprland wtype (no virtual keyboard)", hypr, bins("wtype", "ydotool"), ysock, beWtype},
 		{"hyprland no wtype, ydotool", hypr, bins("ydotool"), ysock, beYdotool},
 		{"ydotool without its daemon", hypr, bins("ydotool"), nil, ""},
 		{"gnome ignores wtype", gnome, bins("wtype"), nil, ""},
@@ -122,8 +123,8 @@ func TestLinuxKeyboardBackends(t *testing.T) {
 		{"x11 nothing", x11, bins("wtype"), nil, ""},
 		{"headless", map[string]string{}, bins("wtype", "xdotool"), nil, ""},
 	} {
-		k := &LinuxKeyboard{X: &fakeExec{env: c.env, bins: c.bins, files: c.files}}
-		got, why := k.backend()
+		k := &LinuxKeyboard{X: &fakeExec{env: c.env, bins: c.bins, files: c.files}, Wayland: &fakeInjector{why: "no protocol"}}
+		got, why := k.backend(context.Background())
 		if got != c.want || (got == "" && why == "") {
 			t.Errorf("%s: backend %q (%q), want %q", c.name, got, why, c.want)
 		}
@@ -133,10 +134,84 @@ func TestLinuxKeyboardBackends(t *testing.T) {
 	}
 }
 
+// fakeInjector is a built-in backend (the Wayland virtual keyboard) that records strokes.
+type fakeInjector struct {
+	ok   bool
+	why  string
+	err  error
+	sent [][]xkb.Stroke
+}
+
+func (f *fakeInjector) Name() string { return "fake-native" }
+func (f *fakeInjector) Available(context.Context) (bool, string) {
+	return f.ok, f.why
+}
+func (f *fakeInjector) Send(_ context.Context, s []xkb.Stroke) error {
+	f.sent = append(f.sent, s)
+	return f.err
+}
+
+// The built-in virtual keyboard wins over every helper whenever the compositor offers it, and
+// only on Wayland.
+func TestLinuxKeyboardPrefersTheBuiltInVirtualKeyboard(t *testing.T) {
+	ctx := context.Background()
+	hypr := map[string]string{"WAYLAND_DISPLAY": "wayland-1", "XDG_CURRENT_DESKTOP": "Hyprland"}
+	nat := &fakeInjector{ok: true}
+	f := &fakeExec{env: hypr, bins: bins("wtype", "ydotool")}
+	k := &LinuxKeyboard{X: f, Wayland: nat}
+	if b, _ := k.backend(ctx); b != beWayland || k.Name() != "fake-native" {
+		t.Fatalf("backend %q name %q", b, k.Name())
+	}
+	if err := k.Type(ctx, "hé 日"); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []Key{KeyEnter, KeyEscape, KeyTab, KeyShiftTab, KeySpace, KeyUp, KeyDown, KeyLeft, KeyRight} {
+		if err := k.Press(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(f.ran) != 0 {
+		t.Fatalf("ran helpers: %v", f.ran)
+	}
+	if got := nat.sent[0]; len(got) != 4 || got[0].Sym != 'h' || got[1].Sym != 0xe9 || got[2].Sym != xkb.KeySpace || got[3].Sym != 0x10065e5 {
+		t.Fatalf("text strokes %v", got)
+	}
+	want := []xkb.Stroke{{Sym: xkb.KeyReturn}, {Sym: xkb.KeyEscape}, {Sym: xkb.KeyTab}, {Sym: xkb.KeyTab, Shift: true},
+		{Sym: xkb.KeySpace}, {Sym: xkb.KeyUp}, {Sym: xkb.KeyDown}, {Sym: xkb.KeyLeft}, {Sym: xkb.KeyRight}}
+	for i, w := range want {
+		if got := nat.sent[i+1]; len(got) != 1 || got[0] != w {
+			t.Errorf("key %d: %v, want %v", i, got, w)
+		}
+	}
+	if err := k.Press(ctx, Key("ctrl+c")); !errors.Is(err, errBadArgs) {
+		t.Fatalf("unknown key: %v", err)
+	}
+
+	// A failure is reported, not retried through a helper (the keys may have half-arrived).
+	nat.err = errors.New("compositor said no")
+	if err := k.Type(ctx, "x"); err == nil || len(f.ran) != 0 {
+		t.Fatalf("err %v, helpers %v", err, f.ran)
+	}
+
+	// Not offered: the helpers as before. Not Wayland: never asked.
+	k.Wayland = &fakeInjector{why: "no protocol"}
+	if b, _ := k.backend(ctx); b != beWtype {
+		t.Fatalf("fallback %q", b)
+	}
+	x := &LinuxKeyboard{X: &fakeExec{env: map[string]string{"DISPLAY": ":0"}, bins: bins("xdotool")}, Wayland: &fakeInjector{ok: true}}
+	if b, _ := x.backend(ctx); b != beXdotool {
+		t.Fatalf("x11 picked %q", b)
+	}
+	none := &LinuxKeyboard{X: &fakeExec{env: hypr}, Wayland: &fakeInjector{why: "no protocol"}}
+	if ok, why := none.Available(ctx); ok || !strings.Contains(why, "virtual-keyboard") {
+		t.Fatalf("%v %q", ok, why)
+	}
+}
+
 func TestLinuxKeyboardCommands(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeExec{env: map[string]string{"WAYLAND_DISPLAY": "w"}, bins: bins("wtype")}
-	k := &LinuxKeyboard{X: f}
+	k := &LinuxKeyboard{X: f, Wayland: &fakeInjector{why: "no protocol"}}
 	if err := k.Type(ctx, "héllo -k Return"); err != nil {
 		t.Fatal(err)
 	}

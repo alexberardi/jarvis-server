@@ -792,7 +792,7 @@ with its arguments (§12, `node.LogArgs`); `text` is now always logged as `<N ch
 
 | Platform | Typing and keys | Needs | Named app (focus, then confirm focus) |
 |---|---|---|---|
-| Linux Wayland: Hyprland, sway, other wlroots | `wtype -s 40 -` (virtual-keyboard protocol), text on stdin, `LC_ALL=C.UTF-8` | `wtype` installed | Hyprland: `hyprctl -j clients` / `dispatch focuswindow address:…` / `-j activewindow`; sway: `swaymsg get_tree` / `[con_id=N] focus` |
+| Linux Wayland: Hyprland, sway, other wlroots | **built in:** the virtual-keyboard protocol (`zwp_virtual_keyboard_manager_v1`) spoken directly, pure Go (`internal/agent/vkbd`); fallback `wtype -s 40 -`, text on stdin, `LC_ALL=C.UTF-8` | nothing (the compositor advertises the protocol); `wtype` only if it doesn't | Hyprland: `hyprctl -j clients` / `dispatch focuswindow address:…` / `-j activewindow`; sway: `swaymsg get_tree` / `[con_id=N] focus` |
 | Linux Wayland: GNOME, KDE | `ydotool type --file -` (uinput) | `ydotool` + `ydotoold` running (its socket); US-layout ASCII only | not available (no cross-client window control): type into what's in front |
 | Linux X11 | `xdotool type --clearmodifiers --file -`, `xdotool key` | `xdotool` | wmctrl (the host backend's window control) + `xdotool getactivewindow` |
 | macOS | CGEvent keyboard events with Unicode strings (≤ 20 UTF-16 units per event, surrogate pairs never split), purego | Accessibility for Jarvis Agent.app (the grant window control already needs) | System Events (host backend) + the frontmost process's pid |
@@ -801,9 +801,27 @@ with its arguments (§12, `node.LogArgs`); `text` is now always logged as `<N ch
 **Not the clipboard.** Pasting would be faster and more robust for long text, but it overwrites
 what the user had copied; it is open question 3.
 
-**wtype's first character.** A fresh virtual keyboard's keymap must reach the client before the
-first key: without `-s 40` sway dropped the first character in 1 of 3 runs, with it 0 of 8. Text
-goes on stdin so a dictated "-k Return" stays text, and so it never shows in a process list.
+**The built-in virtual keyboard** (2026-10-13; installers §9.3 item 6: "anything the agent needs
+must come with its installer"). It does what wtype does, with no helper program: connect to the
+compositor (`internal/agent/wlwire`, the Wayland wire shared with the island), bind `wl_seat` and
+`zwp_virtual_keyboard_manager_v1`, create a virtual keyboard, build an XKB keymap holding exactly
+the keysyms of this text (`internal/agent/xkb`: one key per distinct character, `Uxxxx` keysym
+names, the standard "complete" types so Shift works, Tab with ISO_Left_Tab on its shifted level),
+pass it in a sealed memfd, then press and release each key (Shift+Tab: the modifiers request
+around the Tab key). Text with more than 247 distinct characters is typed in batches with a new
+keymap each, so every keycode stays ≤ 255 (XWayland clients can't see higher ones). Preferred
+whenever the compositor advertises the protocol (probed per call: one connection, one round trip,
+nothing created); otherwise wtype, then ydotool. Not tried on GNOME (no protocol) or KDE (input
+methods only); those get the portal (open question 7). A failure is reported, never retried
+through a helper (keys may have half-arrived).
+
+**The first character.** A fresh virtual keyboard's keymap must reach the client before the
+first key: wtype without `-s 40` dropped the first character on sway in 1 of 3 runs, with it 0
+of 8. The built-in backend waits for a round trip after the keymap (the compositor has it) and
+then a 40 ms settle (`vkbd.DefaultSettle`, injectable). On the nested sway, 80 of 80 runs kept
+their first character *without* the settle (the round trip alone was enough there); it stays as
+cheap insurance for other compositors. wtype's text goes on stdin so a dictated "-k Return" stays
+text, and so it never shows in a process list; the built-in backend has no command line at all.
 
 ### Naming the app: focus, then confirm, never guess
 
@@ -922,6 +940,18 @@ never in logs or results; password fields only when named.
   `\t`, `ESC [ Z`, space, `ESC [ A/B/D/C`. `app: "footA"` with two footA windows →
   `ambiguous_window` with both; `app: "slack"` → `window_not_found` naming the visible apps.
   `status`: "dictation: on (wtype); typing into a named app: on".
+- **The built-in virtual keyboard (sway 1.12 headless, 2026-10-13):** the same setup with
+  `jarvis-agent status` → "dictation: on (wayland virtual-keyboard); typing into a named app: on"
+  (wtype was installed and not used). `desktop_type_text {app: "alpha notes", submit: true}` with
+  "hello from jarvis: héllo wörld ✓ 日本 -k Return⏎line2" while the other window had focus: the
+  named window got exactly "hello from jarvis: héllo wörld ✓ 日本 -k Return line2" and a newline,
+  the other window nothing; each of the nine keys into the raw-mode window: `\r`, ESC, `\t`,
+  `ESC [ Z`, space, `ESC [ A/B/D/C`. The first-character race: 80 of 80 runs intact with and
+  without the settle. The island's layer-shell probe (`JARVIS_ISLAND_WAYLAND_PROBE`, never draws)
+  passed on the shared wire. Unit tests: a scripted compositor on a socketpair checks the binds,
+  the keymap read back out of the memfd, the key/modifier sequence, batching, a protocol error
+  (`unauthorized`) and cancellation. **Not run on Hyprland** (the user's session is never typed
+  into): Hyprland implements the same protocol wtype already used there.
 - **Hyprland (this box, read-only):** `JARVIS_DICTATE_NATIVE_LIST=1 go test -run
   TestNativeWindowsReadOnly ./internal/agent/dictate/` listed the session's windows and found the
   active one exactly once. Nothing was focused or typed in the user's session: the Hyprland
@@ -967,7 +997,8 @@ never in logs or results; password fields only when named.
    the grant exists already), then UI Automation; AT-SPI last (Wayland apps vary).
 7. **GNOME/KDE Wayland.** Typing needs ydotool (root-ish uinput setup, ASCII only) and naming an
    app is impossible. *Recommend:* the RemoteDesktop portal (libei) for typing later; until then
-   `status` says why it's off.
+   `status` says why it's off. (Hyprland, sway and other wlroots compositors no longer need any
+   helper: the virtual keyboard is built in.)
 8. **Typing into the agent's own terminal.** Nothing stops "type …" from landing in the
    terminal running `jarvis-agent try`. *Recommend:* fine (that is what was asked).
 9. **The extension update.** 0.2.0 must be uploaded to both stores and re-signed for the

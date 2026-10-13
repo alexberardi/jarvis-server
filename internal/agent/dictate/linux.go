@@ -6,21 +6,36 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/xkb"
 )
 
-// LinuxKeyboard types with the first tool that works in this session:
+// LinuxKeyboard types with the first backend that works in this session:
 //
-//   - Wayland: wtype (the virtual-keyboard protocol: Hyprland, sway and other wlroots
-//     compositors; not GNOME, and KDE only for input methods), else ydotool (uinput: any
-//     compositor, but it needs the ydotoold daemon and types US-layout ASCII only);
+//   - Wayland: the virtual-keyboard protocol spoken directly (Wayland, built in: Hyprland, sway
+//     and other wlroots compositors; not GNOME, and KDE only for input methods), else wtype
+//     (the same protocol, if installed), else ydotool (uinput: any compositor, but it needs the
+//     ydotoold daemon and types US-layout ASCII only);
 //   - X11: xdotool, else ydotool.
 //
-// Text goes on stdin, never the command line (other processes can read argv).
+// The helpers are fallbacks for when the built-in backend can't run. Their text goes on stdin,
+// never the command line (other processes can read argv).
 type LinuxKeyboard struct {
 	X Exec
+	// Wayland is the built-in virtual keyboard (vkbd.Keyboard); nil for none.
+	Wayland Injector
+}
+
+// Injector is a built-in typing backend: it sends keysym strokes to whatever has focus.
+type Injector interface {
+	Name() string
+	// Available says whether it works in this session now, and why not.
+	Available(ctx context.Context) (bool, string)
+	Send(ctx context.Context, strokes []xkb.Stroke) error
 }
 
 const (
+	beWayland = "wayland"
 	beWtype   = "wtype"
 	beYdotool = "ydotool"
 	beXdotool = "xdotool"
@@ -59,9 +74,20 @@ func (l *LinuxKeyboard) ydotoolWorks() bool {
 
 func (l *LinuxKeyboard) x11() bool { return !l.wayland() && l.X.Getenv("DISPLAY") != "" }
 
+// native: the built-in Wayland keyboard works now.
+func (l *LinuxKeyboard) native(ctx context.Context) bool {
+	if l.Wayland == nil || !l.wayland() {
+		return false
+	}
+	ok, _ := l.Wayland.Available(ctx)
+	return ok
+}
+
 // backend is the tool to use now, or "" with the reason.
-func (l *LinuxKeyboard) backend() (string, string) {
+func (l *LinuxKeyboard) backend(ctx context.Context) (string, string) {
 	switch {
+	case l.native(ctx):
+		return beWayland, ""
 	case l.wtypeWorks():
 		return beWtype, ""
 	case l.x11() && l.X.LookPath("xdotool"):
@@ -69,7 +95,7 @@ func (l *LinuxKeyboard) backend() (string, string) {
 	case (l.wayland() || l.x11()) && l.ydotoolWorks():
 		return beYdotool, ""
 	case l.wayland():
-		return "", "typing on this Wayland desktop needs wtype (Hyprland, sway and other wlroots compositors) or ydotool with ydotoold running (GNOME, KDE)"
+		return "", "this Wayland desktop offers no way to type into other apps (the virtual-keyboard protocol of Hyprland, sway and other wlroots compositors); ydotool with ydotoold running would work"
 	case l.x11():
 		return "", "typing on X11 needs xdotool installed"
 	}
@@ -77,14 +103,18 @@ func (l *LinuxKeyboard) backend() (string, string) {
 }
 
 func (l *LinuxKeyboard) Name() string {
-	if b, _ := l.backend(); b != "" {
+	switch b, _ := l.backend(context.Background()); b {
+	case "":
+		return "none"
+	case beWayland:
+		return l.Wayland.Name()
+	default:
 		return b
 	}
-	return "none"
 }
 
-func (l *LinuxKeyboard) Available(context.Context) (bool, string) {
-	b, why := l.backend()
+func (l *LinuxKeyboard) Available(ctx context.Context) (bool, string) {
+	b, why := l.backend(ctx)
 	return b != "", why
 }
 
@@ -99,7 +129,13 @@ func typeTimeout(text string) time.Duration {
 
 func (l *LinuxKeyboard) Type(ctx context.Context, text string) error {
 	var c Cmd
-	switch b, why := l.backend(); b {
+	switch b, why := l.backend(ctx); b {
+	case beWayland:
+		strokes, ok := xkb.Strokes(text)
+		if !ok {
+			return fmt.Errorf("%w: text holds a character that can't be typed", errBadArgs)
+		}
+		return l.Wayland.Send(ctx, strokes)
 	case beWtype:
 		c = Cmd{Name: "wtype", Args: []string{"-s", wtypeSettle, "-"}, Env: utf8Env}
 	case beXdotool:
@@ -129,6 +165,11 @@ var (
 
 const evdevLeftShift = 42
 
+// keyStrokes are the keys as keysyms, for the built-in backends.
+var keyStrokes = map[Key]xkb.Stroke{KeyEnter: {Sym: xkb.KeyReturn}, KeyEscape: {Sym: xkb.KeyEscape},
+	KeyTab: {Sym: xkb.KeyTab}, KeyShiftTab: {Sym: xkb.KeyTab, Shift: true}, KeySpace: {Sym: xkb.KeySpace},
+	KeyUp: {Sym: xkb.KeyUp}, KeyDown: {Sym: xkb.KeyDown}, KeyLeft: {Sym: xkb.KeyLeft}, KeyRight: {Sym: xkb.KeyRight}}
+
 func (l *LinuxKeyboard) Press(ctx context.Context, k Key) error {
 	name, ok := xkbKeys[k]
 	if !ok {
@@ -136,7 +177,9 @@ func (l *LinuxKeyboard) Press(ctx context.Context, k Key) error {
 	}
 	shift := k == KeyShiftTab
 	var c Cmd
-	switch b, why := l.backend(); b {
+	switch b, why := l.backend(ctx); b {
+	case beWayland:
+		return l.Wayland.Send(ctx, []xkb.Stroke{keyStrokes[k]})
 	case beWtype:
 		args := []string{"-s", wtypeSettle}
 		if shift {
