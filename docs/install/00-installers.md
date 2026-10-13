@@ -1494,3 +1494,27 @@ one extra double-click and stays on the right side of every OS's security model.
    Fedora) may block the service binary. The user wants a friend's Bazzite machine to run the
    desktop agent (2026-10-12), without browser control. Add Bazzite to the clean-install
    sign-off matrix as the immutable-Linux case.
+6. **The agent's helper programs on Linux.** **Decided (user, 2026-10-13):** anything the agent
+   needs to work must come with its installer, not be a separate install the user has to know
+   about. Today the Linux agent shells out to helpers that a stock desktop may not have:
+   `wtype` (typing on Hyprland/sway, DESIGN §14), `xdotool` and `wmctrl` (typing and window control
+   on X11), and `pactl`/`wpctl`/`amixer` (volume; one of these is on nearly every desktop).
+   - **Where packages can't help.** `install.sh` calls no package manager (question 5), Bazzite
+     and other immutable distros can't take a package without layering and a reboot, and Arch
+     users get the one-liner, not a package. So a `.deb` `Depends:` line covers only part of
+     the Linux users.
+   - *Recommend:* **do it in Go, without the helpers.** Typing on wlroots compositors uses the
+     Wayland virtual-keyboard protocol, which is what `wtype` itself does; a pure-Go Wayland
+     client (no cgo, the agent builds with `CGO_ENABLED=0`) can speak it directly. X11 typing
+     and window control go through the XTEST and EWMH protocols the same way (a pure-Go X11
+     client), replacing `xdotool` and `wmctrl`. Then the agent binary is the whole install on
+     Hyprland, sway and X11. The helpers stay as a fallback the backend uses only when present.
+   - *Until then:* the `.deb` lists `wtype`, `xdotool` and `wmctrl` under `Recommends:` (apt
+     installs those by default), the first-run page and `jarvis-agent status` name any missing
+     helper with the one command that installs it, and the admin's Desktop & browser checklist
+     (DESIGN §13) shows it as an amber item rather than a silent missing feature.
+   - **GNOME and KDE on Wayland** (Bazzite's default) have no protocol an ordinary program may use
+     to type into other windows. `ydotool` needs a root daemon, which is not something an
+     installer should set up silently; the long-term path is the desktop portal's RemoteDesktop
+     interface (`libei`), which asks the user once in a system dialog. Until then dictation there
+     is off, and `status` says why.
