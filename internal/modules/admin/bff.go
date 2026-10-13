@@ -79,53 +79,47 @@ var displayNames = map[string]string{
 	"tts":           "Text to speech",
 }
 
-// mountBFF registers the BFF routes; mountGateway calls it after setting the gate.
-func (m *Module) mountBFF(mux *http.ServeMux, deps module.Deps) {
-	gated := func(h http.HandlerFunc) http.Handler {
-		return secure(emptyJSONBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if m.gate(w, r) {
-				h(w, r)
-			}
-		})))
-	}
-	open := func(h http.HandlerFunc) http.Handler { return secure(emptyJSONBody(h)) }
+// mountBFF registers the BFF routes; mountGateway calls it after setting the gate. Every one
+// of them is superuser except the two setup routes: they are install-wide (G2-G5).
+func (m *Module) mountBFF(mux *http.ServeMux, _ module.Deps) {
+	su := func(pattern string, h http.HandlerFunc) { m.handle(mux, pattern, tierSuperuser, h) }
 
-	mux.Handle("GET /api/settings", gated(m.handleSettings))
-	mux.Handle("GET /api/settings/{$}", gated(m.handleSettings))
-	mux.Handle("PUT /api/settings/{service}/{key...}", gated(m.handlePutSetting))
-	mux.Handle("DELETE /api/settings/{service}/{key...}", gated(m.handleDeleteSetting))
-	mux.Handle("GET /api/system/info", gated(m.handleSystemInfo))
-	mux.Handle("GET /api/traces", gated(m.handleTraces))
-	mux.Handle("GET /api/traces/{id}", gated(m.handleTrace))
-	mux.Handle("GET /api/prompt-provider", gated(m.handlePromptProvider))
-	mux.Handle("PUT /api/prompt-provider", gated(m.handlePutPromptProvider))
-	// A4: logs (AD9), connections (AD7), the update check (AD5).
-	mux.Handle("GET /api/logs", gated(m.handleLogs))
-	mux.Handle("GET /api/logs/sources", gated(m.handleLogSources))
-	mux.Handle("GET /api/logs/stream", gated(m.handleLogStream))
-	mux.Handle("GET /api/connections", gated(m.handleConnections))
-	mux.Handle("POST /api/connections/services", gated(m.handleAddService))
-	mux.Handle("DELETE /api/connections/services/{name}", gated(m.handleRemoveService))
-	mux.Handle("PUT /api/connections/services/{name}/public_url", gated(m.handleSetPublicURL))
-	mux.Handle("POST /api/connections/apps", gated(m.handleCreateApp))
-	mux.Handle("POST /api/connections/apps/{app_id}/rotate", gated(m.handleRotateApp))
-	mux.Handle("POST /api/connections/apps/{app_id}/revoke", gated(m.handleRevokeApp))
-	mux.Handle("GET /api/update", gated(m.handleUpdate))
-	mux.Handle("POST /api/update/check", gated(m.handleUpdateCheck))
-	mux.Handle("PUT /api/update/settings", gated(m.handleUpdateSettings))
-	// AD5 one-click signed update, AD8 restart button.
-	mux.Handle("POST /api/update/apply", gated(m.handleApply))
-	mux.Handle("GET /api/update/apply", gated(m.handleApplyStatus))
-	mux.Handle("POST /api/system/restart", gated(m.handleRestart))
-	// AD8b: the stop button.
-	mux.Handle("POST /api/system/stop", gated(m.handleStop))
+	su("GET /api/settings", m.handleSettings) // G2: every household's values
+	su("GET /api/settings/{$}", m.handleSettings)
+	su("PUT /api/settings/{service}/{key...}", m.handlePutSetting) // G2: any household's value
+	su("DELETE /api/settings/{service}/{key...}", m.handleDeleteSetting)
+	su("GET /api/system/info", m.handleSystemInfo)
+	su("GET /api/traces", m.handleTraces) // G3: every household's turns
+	su("GET /api/traces/{id}", m.handleTrace)
+	su("GET /api/prompt-provider", m.handlePromptProvider)
+	su("PUT /api/prompt-provider", m.handlePutPromptProvider)
+	// A4: logs (AD9, G4), connections (AD7, G5), the update check (AD5).
+	su("GET /api/logs", m.handleLogs)
+	su("GET /api/logs/sources", m.handleLogSources)
+	su("GET /api/logs/stream", m.handleLogStream)
+	su("GET /api/connections", m.handleConnections)
+	su("POST /api/connections/services", m.handleAddService)
+	su("DELETE /api/connections/services/{name}", m.handleRemoveService)
+	su("PUT /api/connections/services/{name}/public_url", m.handleSetPublicURL)
+	su("POST /api/connections/apps", m.handleCreateApp)
+	su("POST /api/connections/apps/{app_id}/rotate", m.handleRotateApp)
+	su("POST /api/connections/apps/{app_id}/revoke", m.handleRevokeApp)
+	su("GET /api/update", m.handleUpdate)
+	su("POST /api/update/check", m.handleUpdateCheck)
+	su("PUT /api/update/settings", m.handleUpdateSettings)
+	// AD5 one-click signed update, AD8 restart button, AD8b the stop button (G5).
+	su("POST /api/update/apply", m.handleApply)
+	su("GET /api/update/apply", m.handleApplyStatus)
+	su("POST /api/system/restart", m.handleRestart)
+	su("POST /api/system/stop", m.handleStop)
 	// AD3b: the wizard's Voice step.
-	mux.Handle("GET /api/tts/voices", gated(m.handleVoices))
-	mux.Handle("POST /api/tts/sample", gated(m.handleVoiceSample))
-	// Open while no superuser exists (the wizard's Check step runs before Account), gated after.
-	mux.Handle("GET /api/doctor", open(m.handleDoctor))
+	su("GET /api/tts/voices", m.handleVoices)
+	su("POST /api/tts/sample", m.handleVoiceSample)
+	// Open while no superuser exists (the wizard's Check step runs before Account); the
+	// handler applies the superuser gate after that.
+	m.handle(mux, "GET /api/doctor", tierOpen, http.HandlerFunc(m.handleDoctor))
 	// Always reachable: the reduced view anonymously, the full one with a superuser token.
-	mux.Handle("GET /api/setup/state", open(m.handleSetupState))
+	m.handle(mux, "GET /api/setup/state", tierOpen, http.HandlerFunc(m.handleSetupState))
 }
 
 func unavailable(w http.ResponseWriter, what string) {

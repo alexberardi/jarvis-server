@@ -216,7 +216,7 @@ llm 7704. Two of them are unusable from a browser:
 - **(C, recommended) A same-origin in-process gateway on the admin listener:**
   - **Static.** `GET /` and every non-`/api` path serve the embedded SPA, with an `index.html` fallback
     for client routes (today: `app.ts:172-183`).
-  - **One gate.** Every `/api/*` request passes `settings.SuperuserGuard(auth.VerifyUser)`
+  - **One gate** (superseded 2026-10-13 by per-route tiers, [webapp/01](../webapp/01-member-web-app-plan.md) P1: `open | user | superuser`, superuser by default). Every `/api/*` request passes `settings.SuperuserGuard(auth.VerifyUser)`
     (`internal/platform/settings/guards.go:19-28`). The token is verified in process, with no `/auth/me`
     round trip. The exceptions are `POST /api/auth/login`, `POST /api/auth/refresh`,
     `GET /api/auth/setup-status`, `POST /api/auth/setup` (AQ2) and a reduced `GET /api/setup/state`.
