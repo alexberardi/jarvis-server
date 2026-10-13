@@ -60,11 +60,15 @@ func (ce *cbEnv) items() []string {
 	return out
 }
 
-// onlineNode creates a node in hh and makes it live (an authenticated request stamps last_seen).
+// onlineNode creates a node in hh and makes it live: an authenticated request stamps
+// last_seen, and an MQTT connection is what makes it reachable.
 func (ce *cbEnv) onlineNode(id, hh string) testNode {
 	ce.t.Helper()
 	n := ce.createNode(id, hh)
 	ce.do("POST", "/api/v0/admin/nodes/heartbeat", nil, n.h()).want(200)
+	if ce.m.broker != nil {
+		ce.dialNode(n)
+	}
 	return n
 }
 

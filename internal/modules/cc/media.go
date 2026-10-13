@@ -474,7 +474,7 @@ func (m *Module) handleStartNodeVoice(kind string, defaultSecs float64) userHand
 			detail(w, http.StatusNotFound, "Node not found")
 			return
 		}
-		if !row.reachable(m.now()) {
+		if !m.nodeReachable(row) {
 			detail(w, http.StatusConflict, "Node is offline")
 			return
 		}

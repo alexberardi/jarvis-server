@@ -417,3 +417,29 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func TestNodeConnected(t *testing.T) {
+	b := startBroker(t, false)
+	if b.NodeConnected("n1") {
+		t.Fatal("never connected")
+	}
+	o := node("n1")
+	o.clean = false
+	c, _ := dial(t, b, o)
+	if !b.NodeConnected("n1") || b.NodeConnected("n2") {
+		t.Fatal("connected node not reported, or another node reported")
+	}
+	c.disconnect()
+	waitFor(t, func() bool { return !b.NodeConnected("n1") }) // the session persists; the connection is gone
+	if cl, ok := b.srv.Clients.Get("jarvis-node-n1"); !ok || !cl.Closed() {
+		t.Fatal("persistent session should remain, closed")
+	}
+	dial(t, b, o)
+	if !b.NodeConnected("n1") {
+		t.Fatal("reconnected node not reported")
+	}
+	_ = b.Close()
+	if b.NodeConnected("n1") {
+		t.Fatal("closed broker reports a connection")
+	}
+}
