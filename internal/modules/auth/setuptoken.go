@@ -55,28 +55,32 @@ func (m *Module) prepareSetupToken(ctx context.Context) error {
 			tok = strings.TrimSpace(string(b))
 		}
 	}
-	if tok == "" {
+	fresh := tok == ""
+	if fresh {
 		raw := make([]byte, 32)
 		if _, err := rand.Read(raw); err != nil {
 			return err
 		}
 		tok = base64.RawURLEncoding.EncodeToString(raw)
-		if path != "" {
-			if err := writeSetupToken(path, tok); err != nil {
-				return err
-			}
-		}
 	}
-	// Re-assert the mode in case an existing file was loosened.
-	if path != "" {
-		if err := os.Chmod(path, 0o600); err != nil {
-			return err
-		}
-	}
+	// Accept the token before the file appears: whoever reads the file (the installer, the
+	// seeder, the e2e scripts) can use it at once. The file is the readiness signal, since
+	// the listeners may answer /health before this module has started.
 	sum := sha256.Sum256([]byte(tok))
 	m.setupMu.Lock()
 	m.setupHash = sum[:]
 	m.setupMu.Unlock()
+	if path != "" {
+		if fresh {
+			if err := writeSetupToken(path, tok); err != nil {
+				return err
+			}
+		}
+		// Re-assert the mode in case an existing file was loosened.
+		if err := os.Chmod(path, 0o600); err != nil {
+			return err
+		}
+	}
 	m.deps.Log.Info("auth: no superuser yet; first-run setup needs the setup token", "file", path)
 	if m.OnSetupToken != nil {
 		m.OnSetupToken(tok, path)
