@@ -49,7 +49,10 @@ login and both demo nodes. The logins all use the password `DevPass123!`:
 | `sam@jarvisautomation.io` | Sam | member |
 
 Then sign in to the admin UI (port 7710) as Jordan and finish the remaining wizard steps:
-hardware, models and privacy.
+hardware, models and privacy. **The models step is required.** Model assignments live in the
+database, so a fresh one has no live model, and every voice turn fails until you pick one (the
+already downloaded models are listed, so nothing downloads again). For the "knows who's talking"
+demo, also turn on speaker recognition (`voice.recognition_enabled`), which is off by default.
 
 ## 4. Reconnect the desktop agent
 
@@ -90,4 +93,6 @@ window titles in a shot.
 | `jarvis-agent enroll`: `401 Invalid email or password` with the right password | The seeder hasn't run on this database yet, so the account doesn't exist. Run step 3. |
 | The seeder says setup is already finished with another password | Someone completed the browser wizard first. Start again from step 1. |
 | `python3: can't open file …: Permission denied` | The script is in your home directory. Copy it to `/tmp` (step 3). |
+| jarvisd log: `cc: start conversation failed … unknown prompt provider ""` | No live model is assigned yet (the prompt provider comes from it). Finish the wizard's models step, or pick one in admin → Models. |
+| jarvisd log: `stt: speaker_recognition_disabled` | Speaker recognition is off by default. Turn on `voice.recognition_enabled` if the demo needs it. |
 | The agent starts but nothing works / 401s in its log | It's still enrolled with the old database. Run the `enroll --force` in step 4. |
