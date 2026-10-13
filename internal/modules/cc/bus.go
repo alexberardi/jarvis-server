@@ -73,6 +73,26 @@ func newBus(pub Publisher, log *slog.Logger, now func() time.Time) *Bus {
 // Available reports whether MQTT publishing is possible.
 func (b *Bus) Available() bool { return b != nil && b.pub != nil }
 
+// sessionReporter is a Publisher that knows which nodes hold a live MQTT connection (the
+// embedded broker does; test publishers may not).
+type sessionReporter interface {
+	NodeConnected(nodeID string) bool
+}
+
+// NodeSession reports whether nodeID holds a live MQTT connection (up), and whether the
+// broker can tell at all (known). Every node round trip (report_tools, tool_call, callbacks)
+// is MQTT, so a node with no connection can't answer one however recently it spoke HTTP.
+func (b *Bus) NodeSession(nodeID string) (up, known bool) {
+	if !b.Available() {
+		return false, false
+	}
+	sr, ok := b.pub.(sessionReporter)
+	if !ok {
+		return false, false
+	}
+	return sr.NodeConnected(nodeID), true
+}
+
 // NodeTopic is jarvis/nodes/{nodeID}/{sub}.
 func NodeTopic(nodeID, sub string) string { return "jarvis/nodes/" + nodeID + "/" + sub }
 
