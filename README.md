@@ -212,7 +212,9 @@ idempotent. On a Linux system install it runs as the service account:
 sudo -u jarvisd python3 scripts/seed-dev.py --home /var/lib/jarvisd    # --profile minimal | --reset
 ```
 
-See the script's header for prerequisites and options.
+See the script's header for prerequisites and options, and
+[docs/dev/demo-reset.md](docs/dev/demo-reset.md) for the whole reset: clearing the database, seeding,
+and reconnecting the desktop agent and nodes.
 
 ## License
 
