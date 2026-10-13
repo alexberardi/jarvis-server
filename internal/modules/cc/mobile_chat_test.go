@@ -311,7 +311,23 @@ func TestMobileChatNeverConnectedNodeFailsFast(t *testing.T) {
 // TestMobileChatNodeToolRoundTrip: tool_calls run headlessly on the selected node, actions
 // are harvested, the intermediate message is a vanishing delta, and the continue's answer is
 // replayed (text path, D23 fast path).
+// stepTraceClock makes every trace clock reading 1 ms later than the last, so each span has
+// a non-zero duration however fast the machine is.
+func stepTraceClock(t *testing.T) {
+	var mu sync.Mutex
+	at := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	f := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		at = at.Add(time.Millisecond)
+		return at
+	}
+	traceNow.Store(&f)
+	t.Cleanup(func() { traceNow.Store(nil) })
+}
+
 func TestMobileChatNodeToolRoundTrip(t *testing.T) {
+	stepTraceClock(t) // the node hop must not round to 0 ms and drop out of the summary
 	ce := newChatEnv(t, prompts.Qwen3_5_9B)
 	ce.pub.toolReply = `{"output": {"success": true, "message": "Draft ready: hi mom.", "actions": [{"button_text": "Send", ` +
 		`"button_action": "send", "button_type": "primary"}], "context": {"draft": "hi mom", "preview": "To Mom: hi mom"}}}`

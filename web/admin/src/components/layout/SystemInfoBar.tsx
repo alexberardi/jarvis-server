@@ -1,6 +1,6 @@
 import { useSystemInfo } from '@/hooks/useSystem'
 import { Cpu, Database, HardDrive, MemoryStick } from 'lucide-react'
-import { formatBytes, formatUptime } from '@/lib/format'
+import { formatBytes, formatUptime, formatVersion } from '@/lib/format'
 
 export default function SystemInfoBar() {
   const { data } = useSystemInfo()
@@ -33,7 +33,7 @@ export default function SystemInfoBar() {
         {data.hostname} &middot; {platform}
       </div>
       <div title={listenerTitle || undefined}>
-        jarvisd {/^\d/.test(data.version) ? `v${data.version}` : data.version} &middot; up {formatUptime(data.uptime)}
+        jarvisd {formatVersion(data.version)} &middot; up {formatUptime(data.uptime)}
         {served.length > 0 && <> &middot; {served.length} listeners</>}
       </div>
     </div>

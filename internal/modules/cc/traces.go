@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -306,7 +307,18 @@ func (t *reqTrace) failure() (string, bool) {
 	return t.errMsg, t.status == "error"
 }
 
-func newReqTrace() *reqTrace { return &reqTrace{t0: time.Now(), status: "ok"} }
+func newReqTrace() *reqTrace { return &reqTrace{t0: traceClock(), status: "ok"} }
+
+// traceNow replaces the trace clock (tests step it, so span durations don't depend on how
+// fast the machine is: a sub-50 µs span rounds to 0 ms and drops out of the summary).
+var traceNow atomic.Pointer[func() time.Time]
+
+func traceClock() time.Time {
+	if f := traceNow.Load(); f != nil {
+		return (*f)()
+	}
+	return time.Now()
+}
 
 type traceCtxKey struct{}
 
@@ -325,7 +337,7 @@ func (t *reqTrace) since() time.Duration {
 	if t == nil {
 		return 0
 	}
-	return time.Since(t.t0)
+	return traceClock().Sub(t.t0)
 }
 
 // span records a finished span between two offsets (record_span); a non-nil error marks it
@@ -360,7 +372,7 @@ func (t *reqTrace) checkpoint(name string) {
 
 func ms(d time.Duration) float64 { return math.Round(float64(d.Microseconds())/100) / 10 }
 
-func (t *reqTrace) totalMS() float64 { return ms(time.Since(t.t0)) }
+func (t *reqTrace) totalMS() float64 { return ms(traceClock().Sub(t.t0)) }
 
 func (t *reqTrace) sorted() []traceSpan {
 	t.mu.Lock()

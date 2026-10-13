@@ -551,7 +551,8 @@ func (m *Module) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 // --- traces (S12, §6.2 #3) ---
 
 // handleTraces is GET /api/traces: cc's trace list, unchanged in shape ({traces, total}), for a
-// superuser instead of the cc admin key.
+// superuser instead of the cc admin key. Unlike the legacy route its created_at carries a zone
+// (zoneUTC).
 func (m *Module) handleTraces(w http.ResponseWriter, r *http.Request) {
 	if m.Traces == nil {
 		unavailable(w, "cc")
@@ -573,7 +574,30 @@ func (m *Module) handleTraces(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	for _, t := range traces {
+		zoneUTC(t, "created_at")
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"traces": traces, "total": total})
+}
+
+// zoneUTC rewrites the named timestamps of a cc object as RFC 3339 UTC with a Z. cc keeps the
+// legacy naive UTC strings on its own routes (contract LEGACY-BUG 10: the legacy admin key and
+// mobile read them), which a browser parses as local time, so a trace from 10:55 PM in New York
+// showed as 02:55 AM. This route is jarvisd's own, so it says which zone it means. A value
+// that isn't a timestamp is left as it is.
+func zoneUTC(obj map[string]any, keys ...string) {
+	for _, k := range keys {
+		s, ok := obj[k].(string)
+		if !ok {
+			continue
+		}
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999"} {
+			if t, err := time.Parse(layout, s); err == nil {
+				obj[k] = t.UTC().Format("2006-01-02T15:04:05.000000Z07:00")
+				break
+			}
+		}
+	}
 }
 
 // handleTrace is GET /api/traces/{id}: one trace with its spans.
@@ -592,6 +616,7 @@ func (m *Module) handleTrace(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "Trace not found")
 		return
 	}
+	zoneUTC(t, "created_at")
 	httpx.WriteJSON(w, http.StatusOK, t)
 }
 

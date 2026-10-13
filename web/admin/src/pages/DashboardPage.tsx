@@ -15,7 +15,8 @@ import { useNodeLiveness } from '@/hooks/useNodes'
 import { useDoctor, useRerunDoctor, useSetupState } from '@/hooks/useSetup'
 import { useSystemInfo } from '@/hooks/useSystem'
 import { errorMessage } from '@/lib/errors'
-import { formatBytes, formatUptime } from '@/lib/format'
+import { formatBytes, formatUptime, formatVersion } from '@/lib/format'
+import { timeAgo } from '@/lib/time'
 import { cn } from '@/lib/utils'
 
 const LABELS: Label[] = ['live', 'background', 'embeddings', 'stt', 'tts', 'speaker']
@@ -25,16 +26,6 @@ const STATE_TEXT: Record<string, string> = {
   fetching_engine: 'fetching engine',
   no_engine_build: 'no engine build',
   gpu_unavailable: 'GPU unavailable',
-}
-
-function ago(iso: string | null | undefined): string {
-  if (!iso) return 'never'
-  const s = (Date.now() - new Date(iso).getTime()) / 1000
-  if (!Number.isFinite(s)) return iso
-  if (s < 60) return 'just now'
-  if (s < 3600) return `${Math.round(s / 60)} min ago`
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`
-  return `${Math.round(s / 86400)} d ago`
 }
 
 function SystemCard() {
@@ -53,7 +44,7 @@ function SystemCard() {
           </dd>
           <dt className="text-[var(--color-text-muted)]">jarvisd</dt>
           <dd className="text-[var(--color-text)]">
-            {data.version} · up {formatUptime(data.uptime)}
+            {formatVersion(data.version)} · up {formatUptime(data.uptime)}
           </dd>
           <dt className="text-[var(--color-text-muted)]">Data</dt>
           <dd className="text-[var(--color-text)]" title={data.home}>
@@ -175,7 +166,7 @@ function NodesCard() {
                     <span className={cn('h-2 w-2 shrink-0 rounded-full', n.online ? 'bg-green-500' : 'bg-[var(--color-border)]')} />
                     <span className="truncate text-[var(--color-text)]">{n.room || n.node_id}</span>
                   </span>
-                  <span className="text-[var(--color-text-muted)]">{n.online ? 'online' : ago(n.last_seen)}</span>
+                  <span className="text-[var(--color-text-muted)]">{n.online ? 'online' : timeAgo(n.last_seen)}</span>
                 </li>
               ))}
             </ul>
@@ -213,7 +204,7 @@ function TracesCard() {
                 <span className="min-w-0 truncate text-[var(--color-text)]" title={t.user_command || t.request_type}>{t.user_command || t.request_type}</span>
                 <span className="flex shrink-0 items-center gap-2 text-[var(--color-text-muted)]">
                   <Pill tone={t.status === 'success' || t.status === 'ok' ? 'ok' : t.status === 'error' ? 'bad' : 'muted'}>{t.status}</Pill>
-                  {Math.round(t.total_duration_ms)} ms · {ago(t.created_at)}
+                  {Math.round(t.total_duration_ms)} ms · {timeAgo(t.created_at)}
                 </span>
               </Link>
             </li>

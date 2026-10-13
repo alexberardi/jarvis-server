@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { fetchTrace, type TraceSpan } from '@/api/traces'
+import { formatServerTime } from '@/lib/time'
 
 function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
@@ -129,7 +130,7 @@ export default function TraceDetailPage() {
               {' · '}
               {trace.request_type}
               {' · '}
-              {trace.created_at ? new Date(trace.created_at).toLocaleString() : ''}
+              {formatServerTime(trace.created_at)}
             </p>
           </div>
           <div className="text-right">
