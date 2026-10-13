@@ -412,10 +412,13 @@ func TestMobileChatOfflineNode(t *testing.T) {
 	if done["full_text"] != "Your kitchen node is offline right now." {
 		t.Fatalf("done %v", done)
 	}
-	// The LLM saw the failure.
+	// The LLM saw the failure, and (every call failed) the note that nothing was done.
 	msgs := messagesOf(ce.eng.last())
-	if c := msgs[len(msgs)-1]["content"].(string); !strings.Contains(c, "the node is offline") {
+	if c := msgs[len(msgs)-2]["content"].(string); !strings.Contains(c, "the node is offline") {
 		t.Fatalf("formatting prompt %q", c)
+	}
+	if last := msgs[len(msgs)-1]; last["role"] != "system" || last["content"] != toolsFailedNote {
+		t.Fatalf("no failure note: %v", last)
 	}
 }
 

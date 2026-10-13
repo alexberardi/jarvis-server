@@ -470,7 +470,7 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 				finish("", "client disconnected")
 				return
 			}
-			end := tr.measure("continue_conversation", "cc", nil)
+			end := tr.measure("continue_conversation", "cc", m.continueMeta(cid, results))
 			res, _, err = m.continueBlocking(llmCtx, cid, results)
 			end(err)
 			if err != nil {
@@ -566,8 +566,10 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 		if !online {
 			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true)
 		} else {
-			end := tr.measure("mqtt_tool_"+c.Function.Name, "node", map[string]any{"command": c.Function.Name})
+			meta := map[string]any{"command": c.Function.Name}
+			end := tr.measure("mqtt_tool_"+c.Function.Name, "node", meta)
 			output, imgs = m.chatToolCall(ctx, nodeID, id, c, images[c.ID], u.ID, message)
+			addResultMeta(meta, output) // success and error_code only, never the output
 			end(nil)
 		}
 		results = append(results, toolResult{ToolCallID: id, Output: output, images: imgs})

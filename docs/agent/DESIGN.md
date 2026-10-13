@@ -524,13 +524,15 @@ window: firefox}`, "what does this error say" → no name (the focused window). 
 Firefox window" → "firefox"; "this window" is no name), then tiers, the first with any hit
 deciding: app class / app id / owner name (case-insensitive, the last part of a reverse-DNS
 id, a substring of 3+ letters), then a kind of app ("terminal", "browser", "editor", "email" →
-known app names), then all query words in the title. Within the tier the most recently focused
+known app names), then all query words in the title, then a near spelling of one app's name
+(a misheard name, §14 "Misheard app names"). Within the tier the most recently focused
 *visible* match wins (Hyprland `focusHistoryID`; sway's per-node `focus` lists; macOS
 front-to-back order). It never falls back to another window or the screen:
 
 - a match that isn't visible → `window_not_visible`, "Firefox is open but not visible — bring
   it to the front and ask again";
-- no match → `window_not_found`, naming up to 5 visible apps.
+- no match → `window_not_found`, naming up to 5 visible apps;
+- near spellings of two different apps → `ambiguous_window` (never a guess).
 
 Visible, on Linux, means its pixels are on screen, because grim captures a *region*: Hyprland,
 on a workspace some enabled monitor shows (a shown special workspace replaces its monitor's
@@ -892,6 +894,47 @@ until it **is** that window. Only then does it type. If focus can't be confirmed
 platform. GNOME/KDE Wayland: naming an app is `not_supported` ("click into it and ask again
 without naming it").
 
+### Misheard app names (2026-10-13)
+
+The user said "type into omawrite that I need to take the dogs for a walk"; speech-to-text heard
+"Omerite", nothing matched (`window_not_found`), and a local Qwen 9B told the user "Done. I've
+typed that into Omerite." So winmatch has a last tier, after title words, for every user
+(dictation, read the screen): the compacted query (and each of its words) against every app's
+compacted names (whole and the reverse-DNS id's last part) by Damerau-Levenshtein distance.
+A name is **near** when the distance is ≤ 2, ≤ 30 % of the longer one's length (rounded down)
+and the longer one has ≥ 5 letters: "omerite"→omawrite (2 of 8), "slak"→slack (1 of 5),
+"fierfox"→firefox; not "food"→foot (too short), "kitten"→kitty (2 of 6), "chrome"→chromium.
+Exactly **one app** may be near (several windows of it follow the usual rules); two different
+near apps are `ambiguous_window`. A fuzzy pick is reported: the result carries
+`matched_app: "omawrite"`, `fuzzy_match: true`, `heard_as: "Omerite"`, the island says
+"Typing into Omawrite: …", and the agent logs "near spelling" with the app.
+
+### Failures the model can't misread
+
+A failed dictation call's `error` is a sentence that starts with the outcome, says why, and says
+what to tell the user, e.g. `Nothing was typed: no open window matches "Omerite". Open apps:
+Alacritty, Firefox. Tell the user nothing was typed and ask which app they meant.` Plus
+`success: false`, `error_code`, `open_apps` (not found; every open app, up to 5) or `candidates`
+(ambiguous; titles stay there, out of the sentence, because errors are logged). Three backstops
+that don't depend on the model:
+
+- the island shows the outcome for 5 s whatever the model says: "Couldn't find Omerite —
+  nothing typed", "Which kitty? — nothing typed", "Couldn't switch windows — nothing typed",
+  "Typed, but couldn't press Enter" (`submit_failed`: the text *was* typed);
+- the agent logs every failed call's `error_code` (dictation, the MQTT dispatcher and voice
+  turns);
+- jarvisd adds a transient `[TOOLS_FAILED]` system note after the results when **every** result
+  of a round has `success: false` ("nothing was done … do not say it worked", cc
+  `continue.go`), on all four continue paths (blocking/stream × native/text) and so mobile chat
+  too. A round with any success gets none (the model has something real to say). It is stripped
+  with the other per-turn blocks on the next turn. The results themselves reach the model
+  unchanged (`role=tool` = the output's JSON; the text path quotes the same JSON); the agent's
+  own voice turns also still replace an all-failed reply with "Sorry, that didn't work: <error>".
+
+Traces: the continue spans (`continue_conversation`, `continue_stream_dispatch`) carry
+`tool_results: [{tool, success, error_code}]`, and mobile chat's `mqtt_tool_<name>` spans carry
+`success` and `error_code`; never arguments or outputs (they hold what was dictated or seen).
+
 ### Browser: fill a field, click a button
 
 - **fill** probes every frame (`allFrames`) with a dry run, picks the frame holding the single
@@ -961,8 +1004,8 @@ question 2).
 `Island.Note(text, d)` shows a wider pill (up to 344 pt, canvas now 360 × 56) with a green dot
 and one line of text (Go Regular, 13 pt, cut with "…") for `d`, over whatever the voice pipeline
 shows, then returns to it. Dictation shows "Typing into Claude: test def", "Pressing Enter",
-"Filling the username field: abcde", "Clicking OK" for 2.5 s, and a pending question for as long
-as it waits. Only while the island runs (`run --voice` without `--no-overlay`); a turn from the
+"Filling the username field: abcde", "Clicking OK" for 2.5 s, a failure ("Couldn't find
+Omerite — nothing typed") for 5 s, and a pending question for as long as it waits. Only while the island runs (`run --voice` without `--no-overlay`); a turn from the
 mobile app on a desktop without voice shows nothing. Goldens: `island/testdata/note*.png`.
 
 ### Who can drive it
@@ -991,6 +1034,14 @@ never in logs or results; password fields only when named.
   fileB nothing. `desktop_press_key` with each of the nine keys into the other window: `\r`, ESC,
   `\t`, `ESC [ Z`, space, `ESC [ A/B/D/C`. `app: "footA"` with two footA windows →
   `ambiguous_window` with both; `app: "slack"` → `window_not_found` naming the visible apps.
+- **Misheard names (nested headless sway, 2026-10-13):** `foot --app-id omawrite` (`cat >
+  fileA`) behind a focused `foot --app-id other`; `desktop_type_text {app: "Omerite", text: "I
+  need to take the dogs for a walk", submit: true}` through the real backends (built-in virtual
+  keyboard, swaymsg focus) → `matched_app: omawrite, fuzzy_match: true`, fileA got exactly the
+  text and a newline, the other window nothing, island "Typing into Omawrite: …". With omawrite
+  closed → `window_not_found`, the sentence above with "Open apps: Other", island "Couldn't find
+  Omerite — nothing typed", nothing typed. Windows `slack` + `slark` and `app: "slak"` →
+  `ambiguous_window`, nothing typed.
   `status`: "dictation: on (wtype); typing into a named app: on".
 - **The built-in virtual keyboard (sway 1.12 headless, 2026-10-13):** the same setup with
   `jarvis-agent status` → "dictation: on (wayland virtual-keyboard); typing into a named app: on"

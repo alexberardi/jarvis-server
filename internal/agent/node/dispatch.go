@@ -127,7 +127,7 @@ func (d *Dispatcher) toolCall(ctx context.Context, det map[string]any) {
 		output = out
 	}
 	sig := TakeSignals(output)
-	d.Log.Info("tool_call", "command", name, "args", LogArgs(args), "success", output["success"])
+	d.Log.Info("tool_call", "command", name, "args", LogArgs(args), "success", output["success"], "error_code", output["error_code"])
 	if err := d.CC.PostToolResult(ctx, rid, output); err != nil {
 		d.Log.Warn("tool_call: post failed", "err", err)
 	}
