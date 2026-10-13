@@ -175,8 +175,9 @@ func (m *Module) handleDeleteHousehold(w http.ResponseWriter, r *http.Request, u
 
 // --- members ---
 
-func memberResponse(userID int64, username, email string, r role, created string) map[string]any {
-	return map[string]any{"user_id": userID, "username": username, "email": email, "role": string(r), "created_at": pyTime(created)}
+func memberResponse(userID int64, username string, displayName sql.NullString, email string, r role, created string) map[string]any {
+	return map[string]any{"user_id": userID, "username": username, "display_name": nullStr(displayName), "email": email,
+		"role": string(r), "created_at": pyTime(created)}
 }
 
 func (m *Module) handleListMembers(w http.ResponseWriter, r *http.Request, u *user) {
@@ -187,7 +188,7 @@ func (m *Module) handleListMembers(w http.ResponseWriter, r *http.Request, u *us
 		return
 	}
 	rows, err := m.deps.DB.Read.QueryContext(ctx, `
-		SELECT u.id, u.username, u.email, m.role, m.created_at
+		SELECT u.id, u.username, u.display_name, u.email, m.role, m.created_at
 		FROM auth_household_memberships m JOIN auth_users u ON u.id = m.user_id
 		WHERE m.household_id = ? ORDER BY m.id`, id)
 	if err != nil {
@@ -199,11 +200,12 @@ func (m *Module) handleListMembers(w http.ResponseWriter, r *http.Request, u *us
 	for rows.Next() {
 		var uid int64
 		var username, email, rl, created string
-		if err := rows.Scan(&uid, &username, &email, &rl, &created); err != nil {
+		var display sql.NullString
+		if err := rows.Scan(&uid, &username, &display, &email, &rl, &created); err != nil {
 			m.internalError(w, err)
 			return
 		}
-		out = append(out, memberResponse(uid, username, email, role(strings.ToLower(rl)), created))
+		out = append(out, memberResponse(uid, username, display, email, role(strings.ToLower(rl)), created))
 	}
 	if err := rows.Err(); err != nil {
 		m.internalError(w, err)
@@ -254,7 +256,7 @@ func (m *Module) handleAddMember(w http.ResponseWriter, r *http.Request, u *user
 			hh, uid).Scan(&created); err != nil {
 			return err
 		}
-		resp = memberResponse(target.id, target.username, target.email, rl, created)
+		resp = memberResponse(target.id, target.username, target.displayName, target.email, rl, created)
 		return nil
 	})
 	if err != nil {
@@ -264,6 +266,9 @@ func (m *Module) handleAddMember(w http.ResponseWriter, r *http.Request, u *user
 	httpx.WriteJSON(w, http.StatusCreated, resp)
 }
 
+// handleUpdateMember is PATCH /households/{id}/members/{user_id}: an admin changes a member's
+// role and/or display name. The legacy body was `{"role"}` only; role is now optional when
+// display_name is given, and one of the two is required.
 func (m *Module) handleUpdateMember(w http.ResponseWriter, r *http.Request, u *user) {
 	uid, ok := pathInt(w, r, "user_id")
 	if !ok {
@@ -273,7 +278,9 @@ func (m *Module) handleUpdateMember(w http.ResponseWriter, r *http.Request, u *u
 	if !ok {
 		return
 	}
-	rl := b.role("role", "", true)
+	display, setDisplay := b.displayName("display_name", false)
+	_, hasRole := b.m["role"]
+	rl := b.role("role", "", !setDisplay)
 	if !b.done(w) {
 		return
 	}
@@ -284,13 +291,22 @@ func (m *Module) handleUpdateMember(w http.ResponseWriter, r *http.Request, u *u
 		if _, err := m.requireMembership(ctx, tx, hh, u.id, roleAdmin); err != nil {
 			return err
 		}
-		if uid == u.id && rl != roleAdmin {
+		if hasRole && uid == u.id && rl != roleAdmin {
 			return fail(http.StatusBadRequest, "Cannot demote yourself")
 		}
-		if _, member, err := membershipRole(ctx, tx, hh, uid); err != nil {
+		cur, member, err := membershipRole(ctx, tx, hh, uid)
+		if err != nil {
 			return err
 		} else if !member {
 			return fail(http.StatusNotFound, "Member not found")
+		}
+		if !hasRole {
+			rl = cur
+		}
+		if setDisplay {
+			if err := setDisplayName(ctx, tx, uid, display); err != nil {
+				return err
+			}
 		}
 		target, err := scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM auth_users WHERE id = ?`, uid))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -299,16 +315,18 @@ func (m *Module) handleUpdateMember(w http.ResponseWriter, r *http.Request, u *u
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE auth_household_memberships SET role = ?, updated_at = ?
-			WHERE household_id = ? AND user_id = ?`, string(rl), dbTime(now()), hh, uid); err != nil {
-			return err
+		if hasRole {
+			if _, err := tx.ExecContext(ctx, `UPDATE auth_household_memberships SET role = ?, updated_at = ?
+				WHERE household_id = ? AND user_id = ?`, string(rl), dbTime(now()), hh, uid); err != nil {
+				return err
+			}
 		}
 		var created string
 		if err := tx.QueryRowContext(ctx, `SELECT created_at FROM auth_household_memberships WHERE household_id = ? AND user_id = ?`,
 			hh, uid).Scan(&created); err != nil {
 			return err
 		}
-		resp = memberResponse(target.id, target.username, target.email, rl, created)
+		resp = memberResponse(target.id, target.username, target.displayName, target.email, rl, created)
 		return nil
 	})
 	if err != nil {

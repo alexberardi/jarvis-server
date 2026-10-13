@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -375,6 +377,49 @@ func (b *body) boolean(name string, def bool, required bool) bool {
 	}
 	b.fail(name, "bool_type", "Input should be a valid boolean", v)
 	return def
+}
+
+// maxDisplayName is a display name's limit in characters, after trimming.
+const maxDisplayName = 64
+
+// displayName reads a user's display name: a string or null, trimmed, at most maxDisplayName
+// characters and free of control characters. "" (after trimming) or null means unset, returned
+// as an invalid NullString. set reports whether the field was present and valid.
+func (b *body) displayName(name string, required bool) (v sql.NullString, set bool) {
+	raw, ok := b.m[name]
+	if !ok {
+		if required {
+			b.missing(name)
+		}
+		return v, false
+	}
+	if raw == nil {
+		return v, true
+	}
+	s, isStr := raw.(string)
+	if !isStr {
+		b.fail(name, "string_type", "Input should be a valid string", raw)
+		return v, false
+	}
+	s = strings.TrimSpace(s)
+	if n := len([]rune(s)); n > maxDisplayName {
+		b.fail(name, "string_too_long", fmt.Sprintf("String should have at most %d characters", maxDisplayName), s)
+		return v, false
+	}
+	if strings.IndexFunc(s, unicode.IsControl) >= 0 {
+		b.fail(name, "value_error", "Value error, display_name must not contain control characters", s)
+		return v, false
+	}
+	if s == "" {
+		return v, true
+	}
+	return sql.NullString{String: s, Valid: true}, true
+}
+
+// setDisplayName stores a user's display name (invalid = unset).
+func setDisplayName(ctx context.Context, q queryer, userID int64, v sql.NullString) error {
+	_, err := q.ExecContext(ctx, `UPDATE auth_users SET display_name = ?, updated_at = ? WHERE id = ?`, v, dbTime(now()), userID)
+	return err
 }
 
 // role reads a HouseholdRole enum field.

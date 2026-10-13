@@ -217,7 +217,8 @@ func TestAuthAdminNodes(t *testing.T) {
 	})
 }
 
-var userAdminShape = Obj{"id": Int, "email": NonEmptyString, "username": String, "is_active": Bool, "is_superuser": Bool}
+var userAdminShape = Obj{"id": Int, "email": NonEmptyString, "username": String,
+	"display_name": Optional(NullOr(String)), "is_active": Bool, "is_superuser": Bool}
 
 func TestAuthAdminUsers(t *testing.T) {
 	tg := T(t)

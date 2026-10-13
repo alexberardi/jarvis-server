@@ -180,7 +180,10 @@ function UserRow({ user }: { user: AdminUser }) {
           </div>
           <div className="mt-1 space-y-0.5 text-xs text-[var(--color-text-muted)]">
             <p>
-              <span className="font-medium">Username:</span> {user.username}
+              <span className="font-medium">Name:</span> {user.display_name || user.username}
+              {user.display_name && user.display_name !== user.username && (
+                <span> ({user.username})</span>
+              )}
             </p>
             {user.households.length > 0 && (
               <p>

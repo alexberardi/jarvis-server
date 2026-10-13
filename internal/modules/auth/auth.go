@@ -170,6 +170,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST /auth/change-password", m.user(m.handleChangePassword))
 	mux.HandleFunc("POST /auth/logout", m.handleLogout)
 	mux.HandleFunc("GET /auth/me", m.user(m.handleMe))
+	mux.HandleFunc("PATCH /auth/me", m.user(m.handleUpdateMe))
 	mux.HandleFunc("DELETE /auth/me", m.user(m.handleDeleteMe))
 	mux.HandleFunc("GET /auth/public-key", m.handlePublicKey)
 	mux.HandleFunc("GET /auth/setup-status", m.handleSetupStatus)

@@ -48,6 +48,7 @@ var superuserUserItem = Obj{
 	"id":                   Int,
 	"email":                NonEmptyString,
 	"username":             String,
+	"display_name":         Optional(NullOr(String)), // jarvisd addition; legacy omits it
 	"is_active":            Bool,
 	"is_superuser":         Bool,
 	"must_change_password": Bool,

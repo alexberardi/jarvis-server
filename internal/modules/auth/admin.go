@@ -83,7 +83,8 @@ func (m *Module) handleAppPing(w http.ResponseWriter, _ *http.Request, a *appCli
 // --- admin_users.py ---
 
 func adminUser(u *user) map[string]any {
-	return map[string]any{"id": u.id, "email": u.email, "username": u.username, "is_active": u.isActive, "is_superuser": u.isSuperuser}
+	return map[string]any{"id": u.id, "email": u.email, "username": u.username, "display_name": nullStr(u.displayName),
+		"is_active": u.isActive, "is_superuser": u.isSuperuser}
 }
 
 func (m *Module) handleSetSuperuser(w http.ResponseWriter, r *http.Request) {
@@ -350,8 +351,8 @@ func (m *Module) handleSuperUsers(w http.ResponseWriter, r *http.Request, _ *use
 			hhs = []map[string]any{}
 		}
 		out = append(out, map[string]any{
-			"id": u.id, "email": u.email, "username": u.username, "is_active": u.isActive,
-			"is_superuser": u.isSuperuser, "must_change_password": u.mustChange,
+			"id": u.id, "email": u.email, "username": u.username, "display_name": nullStr(u.displayName),
+			"is_active": u.isActive, "is_superuser": u.isSuperuser, "must_change_password": u.mustChange,
 			"created_at": pyTime(u.createdAt), "updated_at": pyTime(u.updatedAt), "households": hhs,
 		})
 	}

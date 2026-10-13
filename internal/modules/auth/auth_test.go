@@ -240,7 +240,7 @@ func TestRegisterLoginMe(t *testing.T) {
 	}
 	user := m["user"].(map[string]any)
 	// EmailStr lowercases the domain; the username defaults to the local part.
-	if user["email"] != "Alice@example.com" || user["username"] != "Alice" || keysOf(user) != "email,id,is_superuser,must_change_password,username" {
+	if user["email"] != "Alice@example.com" || user["username"] != "Alice" || keysOf(user) != "display_name,email,id,is_superuser,must_change_password,username" {
 		t.Fatalf("user %v", user)
 	}
 	hdr, c := claimsOf(t, m["access_token"].(string))
@@ -605,7 +605,7 @@ func TestMembersAndLeave(t *testing.T) {
 	oh := bearerH(owner.access)
 	base := "/households/" + owner.household
 	m := e.expect(201, "", "POST", base+"/members", map[string]any{"user_id": u.id}, oh)
-	if keysOf(m) != "created_at,email,role,user_id,username" || m["role"] != "member" {
+	if keysOf(m) != "created_at,display_name,email,role,user_id,username" || m["role"] != "member" {
 		t.Fatal(m)
 	}
 	e.expect(400, "User is already a member of this household", "POST", base+"/members", map[string]any{"user_id": u.id}, oh)
@@ -926,7 +926,7 @@ func TestAdminUsers(t *testing.T) {
 	}
 	e.expect(404, "User with ID 999 not found", "PUT", "/admin/users/999/superuser", map[string]any{"is_superuser": true}, hAdmin)
 	m = e.expect(200, "", "GET", "/admin/users/by-email/"+u.email, nil, hAdmin)
-	if m["is_superuser"] != true || keysOf(m) != "email,id,is_active,is_superuser,username" {
+	if m["is_superuser"] != true || keysOf(m) != "display_name,email,id,is_active,is_superuser,username" {
 		t.Fatal(m)
 	}
 	e.expect(404, "User with email x@y.z not found", "GET", "/admin/users/by-email/x@y.z", nil, hAdmin)
@@ -1352,5 +1352,115 @@ func TestHouseholdLifecycleHooks(t *testing.T) {
 	e.expect(204, "", "DELETE", "/auth/me", map[string]any{"password": solo.password}, bearerH(solo.access))
 	if deleted[len(deleted)-1] != solo.household {
 		t.Fatalf("solo account deletion: %v", deleted)
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	e := newEnv(t)
+	owner := e.register()
+	u := e.register()
+	oh, uh := bearerH(owner.access), bearerH(u.access)
+
+	// Unset by default, and every user payload carries the key as null.
+	me := e.expect(200, "", "GET", "/auth/me", nil, uh)
+	if v, ok := me["display_name"]; !ok || v != nil {
+		t.Fatalf("me %v", me)
+	}
+	lm := e.expect(200, "", "POST", "/auth/login", map[string]any{"email": u.email, "password": u.password}, nil)
+	if v, ok := lm["user"].(map[string]any)["display_name"]; !ok || v != nil {
+		t.Fatalf("login %v", lm)
+	}
+
+	// Set your own: trimmed.
+	me = e.expect(200, "", "PATCH", "/auth/me", map[string]any{"display_name": "  Sam  "}, uh)
+	if me["display_name"] != "Sam" || me["email"] != u.email {
+		t.Fatalf("patch %v", me)
+	}
+	if me = e.expect(200, "", "GET", "/auth/me", nil, uh); me["display_name"] != "Sam" {
+		t.Fatalf("me %v", me)
+	}
+	rm := e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
+	if rm["user"].(map[string]any)["display_name"] != "Sam" {
+		t.Fatalf("refresh %v", rm)
+	}
+
+	// Validation: too long, control chars, wrong type, missing.
+	for _, bad := range []any{
+		map[string]any{"display_name": strings.Repeat("é", 65)},
+		map[string]any{"display_name": "Sam\nSmith"},
+		map[string]any{"display_name": "a\x00b"},
+		map[string]any{"display_name": 7},
+		map[string]any{},
+	} {
+		if code, body := e.do("PATCH", "/auth/me", bad, uh); code != 422 {
+			t.Fatalf("%v: %d %v", bad, code, body)
+		}
+	}
+	// 64 characters (not bytes) is the limit.
+	e.expect(200, "", "PATCH", "/auth/me", map[string]any{"display_name": strings.Repeat("é", 64)}, uh)
+	e.expect(401, "", "PATCH", "/auth/me", map[string]any{"display_name": "x"}, nil)
+
+	// Clearing: empty string, whitespace-only and null all unset it.
+	for _, clear := range []any{"", "   ", nil} {
+		e.expect(200, "", "PATCH", "/auth/me", map[string]any{"display_name": "Sam"}, uh)
+		me = e.expect(200, "", "PATCH", "/auth/me", map[string]any{"display_name": clear}, uh)
+		if v, ok := me["display_name"]; !ok || v != nil {
+			t.Fatalf("clear %q: %v", clear, me)
+		}
+	}
+
+	// Members carry it; an admin can set a member's, with or without a role change.
+	base := "/households/" + owner.household
+	m := e.expect(201, "", "POST", base+"/members", map[string]any{"user_id": u.id}, oh)
+	if v, ok := m["display_name"]; !ok || v != nil {
+		t.Fatalf("add %v", m)
+	}
+	mp := fmt.Sprintf("%s/members/%d", base, u.id)
+	m = e.expect(200, "", "PATCH", mp, map[string]any{"display_name": " Kiddo "}, oh)
+	if m["display_name"] != "Kiddo" || m["role"] != "member" {
+		t.Fatalf("admin set %v", m)
+	}
+	m = e.expect(200, "", "PATCH", mp, map[string]any{"role": "power_user"}, oh)
+	if m["display_name"] != "Kiddo" || m["role"] != "power_user" {
+		t.Fatalf("role only %v", m)
+	}
+	m = e.expect(200, "", "PATCH", mp, map[string]any{"role": "member", "display_name": ""}, oh)
+	if v, ok := m["display_name"]; !ok || v != nil || m["role"] != "member" {
+		t.Fatalf("both %v", m)
+	}
+	e.expect(200, "", "PATCH", mp, map[string]any{"display_name": "Kiddo"}, oh)
+	if code, body := e.do("PATCH", mp, map[string]any{}, oh); code != 422 {
+		t.Fatalf("empty member patch: %d %v", code, body)
+	}
+	if code, body := e.do("PATCH", mp, map[string]any{"display_name": "a\tb"}, oh); code != 422 {
+		t.Fatalf("bad member name: %d %v", code, body)
+	}
+	// An admin can name themselves through the member route too (no role → no demotion check).
+	e.expect(200, "", "PATCH", fmt.Sprintf("%s/members/%d", base, owner.id), map[string]any{"display_name": "Parent"}, oh)
+	// A plain member cannot rename others.
+	e.expect(403, "", "PATCH", fmt.Sprintf("%s/members/%d", base, owner.id), map[string]any{"display_name": "x"}, uh)
+
+	byID := map[float64]any{}
+	for _, mm := range e.list("GET", base+"/members", oh) {
+		byID[mm["user_id"].(float64)] = mm["display_name"]
+	}
+	if byID[float64(u.id)] != "Kiddo" || byID[float64(owner.id)] != "Parent" {
+		t.Fatalf("members %v", byID)
+	}
+
+	// Admin views.
+	m = e.expect(200, "", "GET", fmt.Sprintf("/admin/users/%d", u.id), nil, hAdmin)
+	if m["display_name"] != "Kiddo" {
+		t.Fatalf("admin user %v", m)
+	}
+	su := e.superuser()
+	found := false
+	for _, x := range e.list("GET", "/superuser/users", bearerH(su.access)) {
+		if x["id"].(float64) == float64(u.id) {
+			found = x["display_name"] == "Kiddo"
+		}
+	}
+	if !found {
+		t.Fatal("superuser list lacks display_name")
 	}
 }
