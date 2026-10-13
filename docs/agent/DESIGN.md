@@ -258,7 +258,7 @@ packages may assume the sidecar but not audio in/out.
    "are you sure" prompt; that is the safeguard. Don't add a voice confirmation or drop
    `desktop_close_window` from voice turns.
 3. **macOS signing.** The dev bundle is signed by `dev-run.sh` with the keychain's Developer ID
-   (designated requirement = team + `io.jarvis.agent`), so grants survive rebuilds. It is not
+   (designated requirement = team + `net.jarvisautomation.agent`; `io.jarvis.agent` until the 2026-10-13 rename), so grants survive rebuilds. It is not
    notarized and has no hardened runtime. Hardened runtime would need the
    `com.apple.security.automation.apple-events` entitlement, plus a check that purego's
    dlopen of system frameworks passes library validation. *Recommend:* notarize release
@@ -783,6 +783,20 @@ checklist).
      Chrome store id and how to publish updates, are in [store-listing.md](store-listing.md).
 
 
+**The app identifier (renamed 2026-10-13, installers plan §6 Q1).** `net.jarvisautomation.agent`
+(`internal/agent/appid`) is the bundle id and codesign identifier, the LaunchAgent label, the
+portal app id and its `.desktop` file name, and the optional Windows logon task
+`\Jarvis Automation\net.jarvisautomation.agent`. It was `io.jarvis.agent`; only dev installs
+existed. The display name is "Jarvis Automation Agent" (the naming rule). Unchanged on purpose:
+the native-messaging host name `io.jarvis.agent.browser` (the extension's `connectNative`
+argument, baked into the signed `.xpi` and the store uploads: renaming it means a new extension
+release, and the name is never shown to anyone), the Firefox id `browser@jarvis.agent`, the
+systemd unit `jarvis-agent.service` and the config dir `jarvis-agent/`. Migration: the agent
+forgets a GNOME/KDE typing grant made under the old id (removing `io.jarvis.agent.desktop` and
+the token, so `status` asks for `dictation allow` again rather than a typing call surprising
+anyone), and `scripts/agent-dev-run.sh` boots out and removes the old LaunchAgent and
+"Jarvis Agent.app". macOS TCC grants key on the bundle id, so they are asked for again.
+
 ## 14. Dictation: type, press keys, fill and click (2026-10-13)
 
 "Fill in username abcde on browser", "tell claude to test def", "type hello world", "click OK",
@@ -906,9 +920,9 @@ between calls: GNOME shows a "remotely controlled" indicator for as long as one 
 - **One app id, whoever asks.** The portal keys a grant on the caller's app id, which it
   otherwise derives from the process's systemd scope: a terminal's (KDE's Konsole runs children
   as `org.kde.konsole`) differs from the agent's user service, and a token granted to one is
-  refused to the other. So every portal connection first registers as `io.jarvis.agent`
+  refused to the other. So every portal connection first registers as `net.jarvisautomation.agent`
   (`org.freedesktop.host.portal.Registry`, xdg-desktop-portal 1.19+), which the portal accepts
-  only if `io.jarvis.agent.desktop` exists with a runnable `Exec`: `dictation allow` writes it
+  only if `net.jarvisautomation.agent.desktop` exists with a runnable `Exec`: `dictation allow` writes it
   (`$XDG_DATA_HOME/applications`, `NoDisplay=true`, Exec = the agent's own path) and `revoke`
   removes it. On a portal older than 1.19 the scope decides: run `allow` from a terminal whose
   children aren't in an app scope (GNOME Terminal's normally aren't), or expect `status` to ask

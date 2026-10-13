@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 )
 
 func read(t *testing.T, path string) string {
@@ -24,8 +26,8 @@ func read(t *testing.T, path string) string {
 
 const (
 	unitPath  = "systemd/jarvis-agent.service"
-	plistPath = "launchd/io.jarvis.agent.plist"
-	taskPath  = "windows/JarvisAgent.xml"
+	plistPath = "launchd/" + appid.ID + ".plist"
+	taskPath  = "windows/" + appid.ID + ".xml"
 )
 
 // --- systemd user unit ---
@@ -209,6 +211,24 @@ func TestScheduledTaskNeverRunsAsASystemAccount(t *testing.T) {
 	}
 }
 
+func TestScheduledTaskName(t *testing.T) {
+	var tk struct {
+		URI string `xml:"RegistrationInfo>URI"`
+	}
+	if err := xml.Unmarshal([]byte(read(t, taskPath)), &tk); err != nil {
+		t.Fatal(err)
+	}
+	if tk.URI != appid.WindowsTaskName {
+		t.Fatalf("URI = %q, want %q", tk.URI, appid.WindowsTaskName)
+	}
+}
+
+func TestLaunchAgentLabel(t *testing.T) {
+	if l := plistDict(t, read(t, plistPath)); l["Label"] != "string:"+appid.ID {
+		t.Fatalf("Label = %q", l["Label"])
+	}
+}
+
 func TestXMLDeclarationMatchesEncoding(t *testing.T) {
 	first := strings.SplitN(read(t, taskPath), "\n", 2)[0]
 	if !strings.Contains(first, `encoding="UTF-8"`) {
@@ -233,7 +253,8 @@ func TestEveryTemplateExplainsTheSessionRule(t *testing.T) {
 func TestMacBundleInfoPlist(t *testing.T) {
 	p := plistDict(t, read(t, "macos/Info.plist"))
 	for k, want := range map[string]string{
-		"CFBundleIdentifier":  "string:io.jarvis.agent", // TCC grants key on this: keep it stable
+		"CFBundleIdentifier":  "string:" + appid.ID, // TCC grants key on this: keep it stable
+		"CFBundleDisplayName": "string:" + appid.DisplayName,
 		"CFBundleExecutable":  "string:jarvis-agent",
 		"CFBundlePackageType": "string:APPL",
 		"LSUIElement":         "true:",
@@ -249,7 +270,7 @@ func TestMacBundleInfoPlist(t *testing.T) {
 	if !strings.HasPrefix(p["NSMicrophoneUsageDescription"], "string:") {
 		t.Error("NSMicrophoneUsageDescription is required for the voice pipeline")
 	}
-	if l := plistDict(t, read(t, plistPath)); l["AssociatedBundleIdentifiers"] != "string:io.jarvis.agent" {
+	if l := plistDict(t, read(t, plistPath)); l["AssociatedBundleIdentifiers"] != "string:"+appid.ID {
 		t.Errorf("LaunchAgent AssociatedBundleIdentifiers = %q", l["AssociatedBundleIdentifiers"])
 	}
 }

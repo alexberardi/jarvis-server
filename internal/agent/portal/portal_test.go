@@ -268,14 +268,14 @@ func TestTokenStore(t *testing.T) {
 func TestDesktopFile(t *testing.T) {
 	dir := t.TempDir()
 	p, err := DesktopFilePath(func(k string) string { return map[string]string{"XDG_DATA_HOME": dir}[k] })
-	if err != nil || p != filepath.Join(dir, "applications", "io.jarvis.agent.desktop") {
+	if err != nil || p != filepath.Join(dir, "applications", "net.jarvisautomation.agent.desktop") {
 		t.Fatal(p, err)
 	}
 	if err := WriteDesktopFile(p, "/opt/jarvis/jarvis-agent"); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(p)
-	for _, want := range []string{"[Desktop Entry]", "Exec=/opt/jarvis/jarvis-agent run", "NoDisplay=true", "Name=Jarvis Agent"} {
+	for _, want := range []string{"[Desktop Entry]", "Exec=/opt/jarvis/jarvis-agent run", "NoDisplay=true", "Name=Jarvis Automation Agent"} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("lacks %q:\n%s", want, b)
 		}
@@ -285,5 +285,37 @@ func TestDesktopFile(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(p); !strings.Contains(string(b), "Exec=/usr/bin/jarvis-agent run") {
 		t.Fatal("not refreshed for a moved binary")
+	}
+}
+
+func TestMigrateLegacy(t *testing.T) {
+	dir := t.TempDir()
+	env := func(k string) string { return map[string]string{"XDG_DATA_HOME": dir}[k] }
+	ts := &TokenStore{Path: filepath.Join(dir, "cfg", "portal-remote-desktop.token")}
+	if err := ts.Save("tok"); err != nil {
+		t.Fatal(err)
+	}
+	// No old .desktop file: the token was granted under some other id; keep it.
+	if did, err := MigrateLegacy(env, ts); did || err != nil {
+		t.Fatal(did, err)
+	}
+	if tok, _ := ts.Load(); tok != "tok" {
+		t.Fatal("token dropped without a legacy grant")
+	}
+	old := filepath.Join(dir, "applications", "io.jarvis.agent.desktop")
+	if err := WriteDesktopFile(old, "/opt/jarvis/jarvis-agent"); err != nil {
+		t.Fatal(err)
+	}
+	if did, err := MigrateLegacy(env, ts); !did || err != nil {
+		t.Fatal(did, err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatal("old .desktop file kept")
+	}
+	if tok, _ := ts.Load(); tok != "" {
+		t.Fatal("a token granted to the old app id was kept")
+	}
+	if did, err := MigrateLegacy(env, ts); did || err != nil {
+		t.Fatal("not idempotent", did, err)
 	}
 }

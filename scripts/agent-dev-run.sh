@@ -14,7 +14,7 @@
 #   --household ID    only if your account belongs to several households
 #   --install         install as a systemd user unit (Linux) or LaunchAgent (macOS) and start it
 #   --uninstall       remove that unit/agent
-#   --status          print the agent's capabilities (on macOS run as Jarvis Agent via launchd:
+#   --status          print the agent's capabilities (on macOS run as Jarvis Automation Agent via launchd:
 #                     from a terminal, macOS would report the terminal's permissions instead)
 #   --browser         set up browser control (Firefox / Chrome-family extension + native host)
 #                     without asking; --no-browser: don't offer it. Default: ask when interactive
@@ -22,10 +22,10 @@
 #   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any, or -- --voice
 #                     (the "hey jarvis" pipeline; foreground runs only, --install doesn't pass flags)
 #
-# macOS: the build is "~/Applications/Jarvis Agent.app", signed with your Developer ID (or
+# macOS: the build is "~/Applications/Jarvis Automation Agent.app", signed with your Developer ID (or
 # Apple Development) identity when the keychain has one, so the Accessibility grant survives
 # rebuilds; with no identity it is ad-hoc signed and every rebuild needs re-granting. The agent
-# runs under launchd even in the foreground, so macOS attributes permissions to Jarvis Agent,
+# runs under launchd even in the foreground, so macOS attributes permissions to Jarvis Automation Agent,
 # not to your terminal. Ctrl-C stops it.
 #
 # Set JARVIS_AGENT_SIGN_IDENTITY to pick a signing identity ("-" forces ad-hoc).
@@ -53,9 +53,12 @@ die() { say "$*"; exit 1; }
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OS=$(uname -s)
-LABEL=io.jarvis.agent
-DEV_LABEL=io.jarvis.agent.dev
-APP="$HOME/Applications/Jarvis Agent.app"
+LABEL=net.jarvisautomation.agent   # internal/agent/appid.ID
+DEV_LABEL=$LABEL.dev
+APP="$HOME/Applications/Jarvis Automation Agent.app"
+# Before the rename (internal/agent/appid.LegacyID): what earlier runs of this script left behind.
+OLD_LABEL=io.jarvis.agent
+OLD_APP="$HOME/Applications/Jarvis Agent.app"
 UNIT="$HOME/.config/systemd/user/jarvis-agent.service"
 AGENT_PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs"
@@ -66,17 +69,45 @@ case $OS in Linux|Darwin) ;; *) die "Linux and macOS only (Windows: see docs/age
 # made for an earlier (differently signed) build stays switched on in Settings but doesn't
 # apply to this one. It only prints; resetting TCC is the user's call.
 ax_help() {
-  cat >&2 <<'EOF'
+  cat >&2 <<EOF
 
-agent-dev-run: Accessibility is NOT granted to Jarvis Agent, so window control (list/focus/minimise/close) is off.
-  1. System Settings → Privacy & Security → Accessibility: turn on "Jarvis Agent".
+agent-dev-run: Accessibility is NOT granted to Jarvis Automation Agent, so window control (list/focus/minimise/close) is off.
+  1. System Settings → Privacy & Security → Accessibility: turn on "Jarvis Automation Agent".
   2. If it already looks on, the switch belongs to an earlier, differently signed build. Reset it:
-       tccutil reset Accessibility io.jarvis.agent
-       tccutil reset AppleEvents io.jarvis.agent
-     then rerun scripts/agent-dev-run.sh and turn "Jarvis Agent" on when macOS asks.
+       tccutil reset Accessibility $LABEL
+       tccutil reset AppleEvents $LABEL
+     then rerun scripts/agent-dev-run.sh and turn "Jarvis Automation Agent" on when macOS asks.
   3. Check: scripts/agent-dev-run.sh --status   (expect "accessibility: true" and windows.* capabilities)
 EOF
 }
+
+# migrate_legacy removes what this script made under the agent's old app id (io.jarvis.agent):
+# the LaunchAgent and its dev/status jobs, and "Jarvis Agent.app". TCC grants key on the bundle
+# id, so the renamed app asks for its permissions again. Linux needs nothing here: the systemd
+# unit's name didn't change, and the agent itself forgets a GNOME/KDE typing grant made under
+# the old id. Idempotent.
+migrate_legacy() {
+  [ "$OS" = Darwin ] || return 0
+  local uid old_plist was='' installed=''
+  uid=$(id -u)
+  old_plist="$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
+  for l in "$OLD_LABEL" "$OLD_LABEL.dev" "$OLD_LABEL.status"; do
+    if launchctl print "gui/$uid/$l" >/dev/null 2>&1; then
+      launchctl bootout "gui/$uid/$l" 2>/dev/null || true
+      was=1
+    fi
+  done
+  [ -e "$old_plist" ] && { rm -f "$old_plist"; was=1; installed=1; }
+  [ -d "$OLD_APP" ] && { rm -rf "$OLD_APP"; was=1; }
+  [ -n "$was" ] || return 0
+  say "the agent's app id is now $LABEL (was $OLD_LABEL): removed the old LaunchAgent and \"Jarvis Agent.app\""
+  say "macOS will ask again for Accessibility, Automation, Microphone and Screen Recording (grants follow the app id)"
+  say "the old, now inert entries can be cleared with: tccutil reset All $OLD_LABEL"
+  if [ -n "$installed" ] && [ "$MODE" != install ] && [ "$MODE" != uninstall ]; then
+    say "it started at login before; to keep that, run: scripts/agent-dev-run.sh --install"
+  fi
+}
+migrate_legacy
 
 # --- uninstall needs no build ---
 if [ "$MODE" = uninstall ]; then
@@ -205,7 +236,7 @@ if [ "$MODE" = run ] && [ "$BROWSER" = yes ]; then offer_browser "$BIN"; fi
 if [ "$MODE" = install ]; then
   if [ "$OS" = Darwin ]; then
     mkdir -p "$(dirname "$AGENT_PLIST")" "$LOG_DIR"
-    t=$(<"$ROOT/internal/agent/deploy/launchd/io.jarvis.agent.plist")
+    t=$(<"$ROOT/internal/agent/deploy/launchd/$LABEL.plist")
     t=${t//__AGENT_BIN__/$BIN}
     printf '%s\n' "${t//__LOG_DIR__/$LOG_DIR}" > "$AGENT_PLIST"
     launchctl bootout "gui/$(id -u)/$DEV_LABEL" 2>/dev/null || true
@@ -236,7 +267,7 @@ if [ "$OS" = Linux ]; then
   exec "$BIN" run "$@"
 fi
 
-# macOS: run under launchd so TCC attributes Accessibility to Jarvis Agent, not to this terminal.
+# macOS: run under launchd so TCC attributes Accessibility to Jarvis Automation Agent, not to this terminal.
 if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
   die "the installed agent is running; run --uninstall first: two copies would fight over the node's session"
 fi

@@ -13,7 +13,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>io.jarvis.agent</string>
+    <string>net.jarvisautomation.agent</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -31,9 +31,9 @@
     <key>StandardErrorPath</key>
     <string>__LOG_DIR__/jarvis-agent.err.log</string>
 
-    <!-- Shows the agent as "Jarvis Agent" in Login Items rather than a bare path. -->
+    <!-- Shows the agent as "Jarvis Automation Agent" in Login Items rather than a bare path. -->
     <key>AssociatedBundleIdentifiers</key>
-    <string>io.jarvis.agent</string>
+    <string>net.jarvisautomation.agent</string>
 
     <key>ProcessType</key>
     <string>Interactive</string>

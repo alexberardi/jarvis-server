@@ -15,7 +15,7 @@
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Jarvis desktop agent - a Jarvis node offering OS control</Description>
-    <URI>\Jarvis\JarvisAgent</URI>
+    <URI>\Jarvis Automation\net.jarvisautomation.agent</URI>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>

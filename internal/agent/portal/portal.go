@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 	"github.com/alexberardi/jarvis-server/internal/agent/xkb"
 )
 
@@ -392,19 +393,18 @@ func (k *Keyboard) Send(ctx context.Context, s []xkb.Stroke) error { return k.R.
 // made from a terminal and the agent's own service share it. Otherwise the portal derives the
 // app id from the process's systemd scope: KDE's Konsole runs children as org.kde.konsole, the
 // service has none, and a restore token granted to one is refused to the other.
-const AppID = "io.jarvis.agent"
+const AppID = appid.ID
 
 // The portal registers an app id only if a .desktop file of that name exists and its Exec
 // program does. desktopEntry is that file: hidden from menus, it only names the app (the
-// dialog may show "Jarvis Agent").
+// dialog may show its Name).
 func desktopEntry(exe string) string {
-	return "[Desktop Entry]\nType=Application\nName=Jarvis Agent\nComment=Jarvis desktop agent\nExec=" + exe +
+	return "[Desktop Entry]\nType=Application\nName=" + appid.DisplayName + "\nComment=Jarvis desktop agent\nExec=" + exe +
 		" run\nNoDisplay=true\nTerminal=false\n"
 }
 
-// DesktopFilePath is $XDG_DATA_HOME/applications/io.jarvis.agent.desktop
-// (~/.local/share/applications by default).
-func DesktopFilePath(getenv func(string) string) (string, error) {
+// applicationsDir is $XDG_DATA_HOME/applications (~/.local/share/applications by default).
+func applicationsDir(getenv func(string) string) (string, error) {
 	base := getenv("XDG_DATA_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -413,7 +413,43 @@ func DesktopFilePath(getenv func(string) string) (string, error) {
 		}
 		base = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(base, "applications", AppID+".desktop"), nil
+	return filepath.Join(base, "applications"), nil
+}
+
+// DesktopFilePath is $XDG_DATA_HOME/applications/net.jarvisautomation.agent.desktop
+// (~/.local/share/applications by default).
+func DesktopFilePath(getenv func(string) string) (string, error) {
+	dir, err := applicationsDir(getenv)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, appid.DesktopFile), nil
+}
+
+// MigrateLegacy cleans up after the app id rename (io.jarvis.agent → net.jarvisautomation.agent).
+// A grant made under the old id lives in the portal's permission store under that id, so its
+// restore token can't work for the new one: rather than let a typing call find that out (a
+// portal may show its dialog then, which only `dictation allow` may do), the old .desktop file
+// and the token are removed together. It reports whether it did, so the caller can say
+// "run dictation allow again". Without the old file there is nothing to do: the token, if any,
+// was granted under the terminal's or the service's own app id, which the rename didn't change.
+func MigrateLegacy(getenv func(string) string, ts *TokenStore) (bool, error) {
+	dir, err := applicationsDir(getenv)
+	if err != nil {
+		return false, err
+	}
+	old := filepath.Join(dir, appid.LegacyDesktopFile)
+	if err := os.Remove(old); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if ts == nil {
+		if ts, err = DefaultTokenStore(); err != nil {
+			return true, err
+		}
+	}
+	return true, ts.Clear()
 }
 
 // WriteDesktopFile writes (or refreshes) the .desktop file for exe, the agent's own path.

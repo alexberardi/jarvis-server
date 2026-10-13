@@ -56,7 +56,7 @@ func namedOf(ws []MacWindow, query string) (MacWindow, error) {
 	return keep[i], nil
 }
 
-// Mac captures with /usr/sbin/screencapture. The agent runs as Jarvis Agent.app under launchd,
+// Mac captures with /usr/sbin/screencapture. The agent runs as Jarvis Automation Agent.app under launchd,
 // so the child inherits the app's Screen Recording grant (TCC attributes to the responsible
 // app); started from a terminal it would use the terminal's.
 type Mac struct {
@@ -69,7 +69,7 @@ const screencapture = "/usr/sbin/screencapture"
 
 func (m *Mac) Available(context.Context) (bool, string) {
 	if m.Trusted == nil || !m.Trusted() {
-		return false, "Jarvis Agent isn't allowed to record the screen: turn it on in System Settings > Privacy & Security > " +
+		return false, "Jarvis Automation Agent isn't allowed to record the screen: turn it on in System Settings > Privacy & Security > " +
 			"Screen & System Audio Recording, then restart the agent"
 	}
 	return true, ""
@@ -120,7 +120,7 @@ func (m *Mac) Capture(ctx context.Context, scope, window string) (Shot, error) {
 	_ = os.Remove(file)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Shot{}, errors.New("screencapture produced no image (is Screen Recording allowed for Jarvis Agent?)")
+			return Shot{}, errors.New("screencapture produced no image (is Screen Recording allowed for Jarvis Automation Agent?)")
 		}
 		return Shot{}, err
 	}

@@ -356,6 +356,7 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	log := logger()
+	migrateLegacyID(log)
 	h, tools, closeTools, err := tf.build(ctx, log, true)
 	if err != nil {
 		return err
@@ -447,7 +448,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 		// macOS adds this app to Privacy & Security → Accessibility and shows its prompt. Window
 		// tools appear once the user turns it on (capabilities are computed per call).
 		macax.Prompt()
-		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
+		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Automation Agent in System Settings → Privacy & Security → Accessibility")
 	}
 	mode, err := dictate.ParseConfirmMode(*f.confirm)
 	if err != nil {
@@ -530,9 +531,9 @@ func status(ctx context.Context, args []string) error {
 		fmt.Printf("accessibility: %v\n", trusted)
 		if !trusted {
 			fmt.Print(`  -> Window control is OFF: this process has no Accessibility grant.
-     Turn on "Jarvis Agent" in System Settings > Privacy & Security > Accessibility.
+     Turn on "Jarvis Automation Agent" in System Settings > Privacy & Security > Accessibility.
      If it already looks on, it's an old entry from a differently signed build. Run
-       tccutil reset Accessibility io.jarvis.agent && tccutil reset AppleEvents io.jarvis.agent
+       tccutil reset Accessibility net.jarvisautomation.agent && tccutil reset AppleEvents net.jarvisautomation.agent
      then restart the agent and allow it again. (Run from a terminal, this check reports the
      terminal's grant; use scripts/agent-dev-run.sh --status for the agent's own.)
 `)
@@ -542,9 +543,9 @@ func status(ctx context.Context, args []string) error {
 		screen := macax.ScreenTrusted()
 		fmt.Printf("screen recording: %v\n", screen)
 		if !screen {
-			// Puts Jarvis Agent in the list and shows macOS's prompt (read-the-screen needs it).
+			// Puts Jarvis Automation Agent in the list and shows macOS's prompt (read-the-screen needs it).
 			macax.ScreenPrompt()
-			fmt.Print("  -> Reading the screen is OFF: allow \"Jarvis Agent\" in System Settings > Privacy & Security >\n" +
+			fmt.Print("  -> Reading the screen is OFF: allow \"Jarvis Automation Agent\" in System Settings > Privacy & Security >\n" +
 				"     Screen & System Audio Recording, then restart the agent.\n")
 		}
 	}
