@@ -13,6 +13,12 @@ Update it at the end of every working session, and whenever a task finishes or a
 Done together with the `v0.1.0` release, not before, because the legacy Python stack stays the supported install until then:
 
 - [ ] **jarvis-installer:** merge the jarvisd landing page (branch `feat/jarvisd-landing`, draft PR). It replaces the compose wizard at installer.jarvisautomation.io with the `install.sh`/`install.ps1` one-liners and a legacy-import pointer (`docs/install/00-installers.md` §1.1). Its one-liners use the stable release URLs, which 404 until a non-prerelease exists.
+- [ ] **Server install without a terminal** (user 2026-10-12: "absolutely 0 cli involvement"):
+  - Per-OS download installers: macOS `.dmg`, Windows `.exe`, Linux `.deb`.
+  - The OS permission prompt, then the browser opens the setup wizard.
+  - An "Also use Jarvis on this computer" option adds the agent's steps to the wizard.
+  - The one-liners stay as "Advanced".
+  - Plan: `docs/install/00-installers.md` §9.
 - [ ] **Desktop agent without a terminal:** device-code pairing, a first-run window (pairing, browser
   control, macOS permissions), per-OS installers, and "Add a computer" in admin and app.
   An admin setup checklist ("install the agent" → "add the browser extension", ticks turning
