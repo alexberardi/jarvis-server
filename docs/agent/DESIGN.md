@@ -639,6 +639,37 @@ checklist).
 4. **Chrome-family browsers.** "Load unpacked" is a developer flow. Non-technical users need a
    Chrome Web Store listing. Until it exists, the first-run window offers browser control
    for Firefox only and says Chrome is coming.
+5. **The setup checklist in the admin** (user, 2026-10-12: "install the agent -> install the
+   browser extension with checks next to each and then green checks when they succeed"). It is a
+   "Desktop & browser" page, linked from the wizard's Done step and from each computer's node
+   page:
+
+   ```
+   Use Jarvis on your computer
+   ✓ 1. Install the Jarvis agent        Office-PC paired · online
+   ○ 2. Add the browser extension       [Add to Firefox]  [Add to Chrome]
+        Waiting for the extension…      (turns ✓ when it connects)
+   ```
+
+   - **Step 1 is checked** when a desktop node is paired and online. Until then it shows the
+     download buttons and the pairing-code approval (§13 target flow, steps 1–3).
+   - **Step 2 is checked** when that agent reports the extension connected. The agent already
+     knows this (§10, `Available`); it adds it to its heartbeat capabilities. Each button links to
+     the store listing (open question 4).
+   - **Live:** the page polls the node status, so ticks turn green within seconds of the install
+     finishing. Nobody has to reload the page.
+   - **Several computers:** one row of checks per paired computer.
+   - **The extension's own popup** links back here when it can't reach an agent ("Install the
+     Jarvis desktop agent").
+
+**Decided (user, 2026-10-12).**
+
+- **Native host by default:** the agent registers the native-messaging host for the browsers it
+  finds when it is paired, without asking. The registration is a per-user file that grants
+  nothing on its own. The browser's own "Add extension?" prompt is the consent. This replaces
+  the enrollment `[Y/n]` browser prompt of 2026-10-11 (§10, decision 3) for the no-terminal
+  flow. `jarvis-agent enroll --no-browser` still skips it.
+- **Setup checklist:** the admin page in target-flow step 5.
 
 **Order of work.**
 
@@ -647,7 +678,8 @@ checklist).
 2. The first-run window. Its toolkit is open question 1 below.
 3. The macOS `.dmg` (notarized), then the Windows installer, then the Linux `.deb`.
 4. "Add a computer" in admin and app, and the wizard link.
-5. The Chrome Web Store listing (can trail the release).
+5. Store listings (AMO listed + Chrome Web Store): submit early, review runs in parallel.
+6. The admin setup checklist (target-flow step 5) and the extension popup's link back.
 
 **Open questions** (asked one at a time; answers recorded here):
 
@@ -660,5 +692,8 @@ checklist).
    the household and room.
 3. **Windows signing.** *Recommend:* ship unsigned for v0.1.0 with a note about the SmartScreen
    prompt, and revisit Authenticode (ID9) once there are Windows users.
-4. **Chrome Web Store.** *Recommend:* list it after the release. The developer account fee and
-   the review timeline make it a poor fit for the release's critical path.
+4. **Store listings.** *Recommend:* submit **before** the release. List the extension
+   publicly on addons.mozilla.org (free, reviewed; today it is signed unlisted) and on the
+   Chrome Web Store (a one-time $5 developer registration). Review takes days to a couple of
+   weeks, which is a reason to start early, not to defer. The checklist's buttons need both
+   listings.
