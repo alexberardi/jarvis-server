@@ -1459,11 +1459,27 @@ one extra double-click and stays on the right side of every OS's security model.
 
 ### 9.3 Open questions (asked one at a time)
 
-1. **Package formats.** *Recommend:* macOS `.dmg` (notarized app), Windows `.exe`, Linux `.deb`
-   (the one-liner for everything else). `.rpm` and AppImage can wait until someone asks.
+1. **Package formats.** **Decided (user, 2026-10-12):** macOS `.dmg` (notarized app), Windows
+   `.exe`, and Linux `.deb`, with the one-liner for everything else. `.rpm` and AppImage wait until
+   someone asks.
+   - **How a `.deb` installs:** on Ubuntu, Debian, Mint or Pop!_OS, double-clicking the `.deb`
+     opens the Software app with an Install button and a password prompt. Updates then come from
+     jarvisd's own updater (§8.2), not apt.
+   - **What the Linux download button says:** which file is for which distributions, with the
+     one-liner right under it. Arch users, for example, use the one-liner (an AUR package
+     later, maybe).
+   - **Open:** a headless Linux server has no desktop to double-click on and no local browser. The
+     `.deb` there is installed over SSH, which is already a terminal, so the one-liner fits. How
+     that user reaches the setup wizard without reading the token off the server is a separate
+     question (§9.3 question 4).
 2. **Landing page.** *Recommend:* OS-detected download buttons as the main path, with the
    one-liners under "Advanced (terminal)". Update the draft landing page (jarvis-installer #69) to
    match.
 3. **Upgrades without a terminal.** Already covered: the admin's Updates page upgrades jarvisd
    (§8.2). *Recommend:* the agent self-updates the same way (planned for the Go node, phase 4.2),
    so neither ever needs re-downloading by hand.
+4. **Headless servers and the setup link.** The setup token lives on the server
+   (`<home>/setup-token`). On a desktop the installer opens the browser with it. On a headless box,
+   the user has to get the link onto another device. *Options:* print it in the install output (as
+   today), show a QR code in the terminal for the phone, or let the mobile app discover the
+   unconfigured server over mDNS and prove physical access some other way. To be discussed.
