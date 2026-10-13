@@ -63,6 +63,20 @@ func (n *nodeRow) reachable(now time.Time) bool {
 	return n.contacted && n.online(now)
 }
 
+// nodeReachable gates round trips to the node: a live MQTT connection when the broker can
+// tell (the embedded one always can), else reachable's last_seen heuristic. last_seen alone
+// was wrong: any authenticated HTTP request refreshes it (the dev seeder's key check did), so
+// a node with no MQTT session counted as online for 15 minutes and every new chat waited out
+// a 10 s report_tools that nothing would answer (the demo dry run).
+func (m *Module) nodeReachable(row *nodeRow) bool { return m.nodeReachableAt(row, m.now()) }
+
+func (m *Module) nodeReachableAt(row *nodeRow, now time.Time) bool {
+	if up, known := m.bus.NodeSession(row.nodeID); known {
+		return up
+	}
+	return row.reachable(now)
+}
+
 func nullable(ns sql.NullString) any {
 	if !ns.Valid {
 		return nil

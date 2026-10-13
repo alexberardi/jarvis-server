@@ -192,6 +192,10 @@ func (n errandNodes) RunTool(ctx context.Context, nodeID, command string, args *
 	if n.m.bus == nil || !n.m.bus.Available() {
 		return servertools.Obj("success", false, "error", "could not dispatch to node: MQTT is unavailable")
 	}
+	if up, known := n.m.bus.NodeSession(nodeID); known && !up {
+		// Nothing would answer: fail the step now rather than after the 30 s wait.
+		return servertools.Obj("success", false, "error", "the node is offline")
+	}
 	if args == nil {
 		args = pyjson.NewObject()
 	}
