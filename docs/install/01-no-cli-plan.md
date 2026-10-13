@@ -275,6 +275,35 @@ Sign-off matrix:
   Option (b) (content script) and (c) are dropped. "This computer's agent" still uses (a), the
   server-side address correlation, because chat's default node needs it (webapp plan §0). The
   "Your devices" list still shows each agent's extension state from its heartbeat.
+- **Q3: the tab is "Add-ons"** (the user deferred to Claude). The two existing admin strings that
+  use "add-on" for something else change: ConnectionsPage.tsx:337 → "External services", wizard
+  `privacy.ts:46` → "Pantry packages".
+- **Q4: the `.deb` opens the firewall for the LAN by default.** Only when a host firewall is active,
+  only for the local subnets, never the internet, and the rule is tagged so uninstall removes it.
+  The macOS/Windows installers keep the ticked checkbox. (The user: you'd have to open it by hand
+  to reach the page anyway.)
+- **Q5: the Linux agent is per user, set up on first launch.** The `.deb` installs nothing per
+  user. It adds "Jarvis Agent" to the app menu, plus the system-wide pieces (the `.desktop` file,
+  the URL handler below). The first time a person opens it, it creates their self-updating copy
+  under `~/.local`, opens the first-run page to sign in or pair, and registers their own login
+  autostart. Nobody gets an agent they didn't set up, and accounts created later work. A single
+  machine-wide agent was considered and rejected: typing, windows, mic, island, the browser host
+  and the portal grant all live in one user's session, and a global account would make
+  permissions unworkable (user and Claude agree). People who share one desktop account share
+  one agent; voice ID tells them apart.
+- **New: "Start agent" from the web app.** Every agent installer (dmg, exe, deb, install-agent.sh)
+  registers a `jarvis-agent:` URL handler: CFBundleURLTypes on macOS, HKCU\Software\Classes on
+  Windows, an `x-scheme-handler/jarvis-agent` `.desktop` MimeType on Linux. The Add-ons tab shows a
+  **Start** button when this computer's agent is known but offline, linking to
+  `jarvis-agent://start`. The browser asks "Open Jarvis Agent?" once, and the agent starts with
+  the island pill, the same as the start-only shortcut. The handler only accepts `start` and opens
+  the first-run page if the agent isn't set up. It never takes parameters from the URL.
+- **New: sign out of an agent.** On the agent's own first-run/settings page, and in the web app's
+  "Your devices" list (owner or household admin): **Sign out** revokes that agent's node
+  credentials on the server. At its next connection, the agent finds it's been signed out, stops
+  its tools and shows the sign-in page, so another person can sign in on that desktop account.
+  The user isn't sure many people will use it. It's cheap because unpairing already exists, so
+  it's in Phase 3 as S.
 - **Members can't open the admin yet.** That is known and intended: member access is the
   web-app project ([webapp/01](../webapp/01-member-web-app-plan.md)), not this plan.
 
