@@ -271,6 +271,13 @@ func (h *Hub) Browsers() []BrowserInfo {
 	return out
 }
 
+// Changed returns a channel that is closed the next time a browser connects or disconnects.
+func (h *Hub) Changed() <-chan struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.changed
+}
+
 // Connected reports whether any browser is connected.
 func (h *Hub) Connected() bool { return len(h.Browsers()) > 0 }
 

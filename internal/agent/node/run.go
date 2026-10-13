@@ -19,8 +19,15 @@ type Runner struct {
 	Tools       Toolset
 	Version     string
 	InstallMode string // reported in heartbeats, e.g. "desktop-agent"
-	Log         *slog.Logger
-	Heartbeat   time.Duration
+	NodeKind    string // reported in heartbeats: "desktop" for the desktop agent
+	// Capabilities, if set, is asked for the heartbeat's capabilities on every beat.
+	Capabilities func() map[string]any
+	// Changed, if set, returns a channel that is closed when a capability changes: the next
+	// heartbeat goes out at once instead of at the next tick (the admin's ticks turn green
+	// within seconds of the browser extension connecting).
+	Changed   func() <-chan struct{}
+	Log       *slog.Logger
+	Heartbeat time.Duration
 	// OnConnected, if set, runs in its own goroutine once jarvisd is discovered and the
 	// node is connecting (the voice pipeline starts here). It must return when ctx ends; Run
 	// waits for it.
@@ -75,8 +82,17 @@ func (r *Runner) Run(ctx context.Context) error {
 	mqURL, _ := svcs.Need(SvcMQTT)
 	cc := NewCC(ccURL, r.Creds)
 
+	// The channel is taken before each beat is built, so a change during a beat wakes the next.
+	watch := func() <-chan struct{} {
+		if r.Changed == nil {
+			return nil // blocks forever
+		}
+		return r.Changed()
+	}
+	changed := watch()
+
 	// An early heartbeat proves the key works (and marks the node contacted) before MQTT.
-	if err := cc.Heartbeat(ctx, r.Version, r.InstallMode); err != nil {
+	if err := cc.Heartbeat(ctx, r.beat()); err != nil {
 		if he, ok := err.(*HTTPError); ok && (he.Status == 401 || he.Status == 403) {
 			return fmt.Errorf("jarvisd rejected this node's key (%v); re-enroll", err)
 		}
@@ -143,9 +159,19 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			if err := cc.Heartbeat(ctx, r.Version, r.InstallMode); err != nil && ctx.Err() == nil {
-				r.Log.Warn("heartbeat failed", "err", err)
-			}
+		case <-changed:
+		}
+		changed = watch()
+		if err := cc.Heartbeat(ctx, r.beat()); err != nil && ctx.Err() == nil {
+			r.Log.Warn("heartbeat failed", "err", err)
 		}
 	}
+}
+
+func (r *Runner) beat() Beat {
+	b := Beat{Version: r.Version, InstallMode: r.InstallMode, NodeKind: r.NodeKind}
+	if r.Capabilities != nil {
+		b.Capabilities = r.Capabilities()
+	}
+	return b
 }

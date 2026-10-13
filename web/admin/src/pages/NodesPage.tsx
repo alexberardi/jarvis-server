@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { RefreshCw, Cpu, Zap, ZapOff, Wifi, WifiOff } from 'lucide-react'
+import { RefreshCw, Cpu, Laptop, Zap, ZapOff, Wifi, WifiOff } from 'lucide-react'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
 import { errorMessage } from '@/lib/errors'
@@ -7,14 +7,20 @@ import { formatVersion } from '@/lib/format'
 import { timeAgo } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import type { AdminNode } from '@/api/admin'
+import { extensionState } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
 
+const extensionText = { connected: 'connected', disconnected: 'not connected', disabled: 'off' } as const
+
 function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
+  const desktop = live?.node_kind === 'desktop'
+  const ext = extensionState(live)
+  const Icon = desktop ? Laptop : Cpu
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Cpu size={16} className="shrink-0 text-[var(--color-text-muted)]" />
+          <Icon size={16} className="shrink-0 text-[var(--color-text-muted)]" aria-label={desktop ? 'Computer' : 'Node'} />
           <span className="truncate font-medium text-[var(--color-text)]">{node.name}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -54,6 +60,11 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
           <p>
             <span className="font-medium">Last seen:</span> {timeAgo(live.last_seen)}
             {live.last_seen_version && <> &middot; {formatVersion(live.last_seen_version)}</>}
+          </p>
+        )}
+        {ext && (
+          <p>
+            <span className="font-medium">Browser extension:</span> {extensionText[ext]}
           </p>
         )}
         {node.services.length > 0 && (

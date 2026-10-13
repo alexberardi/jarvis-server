@@ -100,6 +100,11 @@ func nodeResponseShape() Obj {
 	shape := legacyNodeResponseShape()
 	if Jarvisd() {
 		delete(shape, "adapter_hash")
+		// Install plan 1.8, additive: what the node said it is in its heartbeat ("desktop" for
+		// the desktop agent, null for a node that never said) and its reported capabilities
+		// (e.g. browser_extension: connected | disconnected | disabled; {} when none).
+		shape["node_kind"] = NullOr(String)
+		shape["capabilities"] = MapOf(Any)
 	}
 	return shape
 }
