@@ -183,8 +183,9 @@ func (t *Tools) log() *slog.Logger {
 }
 
 var (
-	errFocus  = errors.New("focus not confirmed")
-	errSubmit = errors.New("enter not pressed")
+	errFocus   = errors.New("focus not confirmed")
+	errSubmit  = errors.New("enter not pressed")
+	errNoFront = errors.New("no window in front")
 )
 
 // Code maps an error to the output's error_code.
@@ -204,6 +205,8 @@ func Code(err error) string {
 		return "focus_failed"
 	case errors.Is(err, errSubmit):
 		return "submit_failed"
+	case errors.Is(err, errNoFront):
+		return "no_focused_window"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	}
@@ -308,6 +311,49 @@ func (t *Tools) focus(ctx context.Context, tg *target) error {
 	return fmt.Errorf("%w: asked %s to come to the front, but it didn't get the keyboard focus", errFocus, tg.name)
 }
 
+// front names the window in front, when the window backend can tell, so the result says
+// where the keys went; and when it can tell that no window has the keyboard focus, typing
+// would go nowhere, so that is an error.
+func (t *Tools) front(ctx context.Context) (name, app string, err error) {
+	if t.Win == nil {
+		return "", "", nil
+	}
+	if ok, _ := t.Win.Available(ctx); !ok {
+		return "", "", nil
+	}
+	active, aerr := t.Win.Active(ctx)
+	if aerr != nil {
+		return "", "", nil // can't tell: the keys go to whatever has focus, as before
+	}
+	if active == "" {
+		return "", "", fmt.Errorf("%w: no window has the keyboard focus; ask the user to click into the app, or to name it", errNoFront)
+	}
+	ws, lerr := t.Win.List(ctx)
+	if lerr != nil {
+		return "", "", nil
+	}
+	for _, w := range ws {
+		if t.Win.Same(w.ID, active) {
+			c := winmatch.Candidate{Apps: w.Apps, Title: w.Title, Recency: w.Recency, Visible: w.Visible}
+			return winmatch.DisplayName(c), c.App(), nil
+		}
+	}
+	return "", "", nil
+}
+
+// inFront fills where and the result for typing into the window in front.
+func (t *Tools) inFront(ctx context.Context, where *string, out map[string]any) error {
+	name, app, err := t.front(ctx)
+	if err != nil {
+		return err
+	}
+	if name != "" {
+		*where = name + " (the window in front)"
+		out["front_app"] = app
+	}
+	return nil
+}
+
 func (t *Tools) show(text string) {
 	if t.Show != nil {
 		t.Show(text, ShowFor)
@@ -345,6 +391,13 @@ func (t *Tools) typeText(ctx context.Context, args map[string]any) (map[string]a
 		if err := t.focus(ctx, tg); err != nil {
 			return nil, err
 		}
+		out := map[string]any{"submitted": false}
+		where := where
+		if tg == nil {
+			if err := t.inFront(ctx, &where, out); err != nil {
+				return nil, err
+			}
+		}
 		label := "Typing"
 		if tg != nil {
 			label = "Typing into " + tg.name
@@ -353,7 +406,7 @@ func (t *Tools) typeText(ctx context.Context, args map[string]any) (map[string]a
 		if err := t.KB.Type(ctx, text); err != nil {
 			return nil, err
 		}
-		out := map[string]any{"typed_chars": len([]rune(text)), "into": where, "submitted": false}
+		out["typed_chars"], out["into"] = len([]rune(text)), where
 		tg.report(out)
 		if submit {
 			if err := t.KB.Press(ctx, KeyEnter); err != nil {
@@ -403,12 +456,19 @@ func (t *Tools) pressKey(ctx context.Context, args map[string]any) (map[string]a
 		if err := t.focus(ctx, tg); err != nil {
 			return nil, err
 		}
+		out := map[string]any{}
+		where := where
+		if tg == nil {
+			if err := t.inFront(ctx, &where, out); err != nil {
+				return nil, err
+			}
+		}
 		t.show("Pressing " + keyLabel(k))
 		if err := t.KB.Press(ctx, k); err != nil {
 			return nil, err
 		}
 		t.log().Info("dictation", "tool", ToolPress, "into", where, "key", string(k), "backend", t.KB.Name())
-		out := map[string]any{"pressed": string(k), "into": where}
+		out["pressed"], out["into"] = string(k), where
 		tg.report(out)
 		return out, nil
 	}

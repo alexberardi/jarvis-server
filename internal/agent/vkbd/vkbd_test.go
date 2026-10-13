@@ -5,8 +5,11 @@ package vkbd
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +37,8 @@ type fake struct {
 	globals []string
 	// errOnCreate raises virtual_keyboard_manager.error unauthorized on create.
 	errOnCreate bool
+	// keymap is what wl_keyboard.keymap hands a new keyboard ("": no event).
+	keymap string
 
 	mu   sync.Mutex
 	reqs []req
@@ -127,6 +132,20 @@ func (f *fake) serve() {
 	}
 }
 
+// eventFD sends an event with a file descriptor holding data.
+func (f *fake) eventFD(id uint32, op uint16, a *wlwire.Args, data string) {
+	fd, err := unix.MemfdCreate("keymap", unix.MFD_CLOEXEC)
+	if err != nil {
+		return
+	}
+	defer unix.Close(fd)
+	_, _ = unix.Write(fd, []byte(data))
+	body := a.Bytes()
+	m := binary.LittleEndian.AppendUint32(nil, id)
+	m = binary.LittleEndian.AppendUint32(m, uint32(8+len(body))<<16|uint32(op))
+	_, _, _ = f.c.WriteMsgUnix(append(m, body...), unix.UnixRights(fd), nil)
+}
+
 func (f *fake) answer(r req) {
 	a := wlwire.NewReader(r.args)
 	f.mu.Lock()
@@ -146,6 +165,15 @@ func (f *fake) answer(r req) {
 		_, iface, v, id := a.U32(), a.Str(), a.U32(), a.U32()
 		set(iface, id)
 		set(iface+".v", v)
+	case r.id == ids[IfaceSeat] && r.op == opSeatGetKeyboard:
+		wk := a.U32()
+		set("wl_keyboard", wk)
+		f.mu.Lock()
+		km := f.keymap
+		f.mu.Unlock()
+		if km != "" {
+			f.eventFD(wk, evKeyboardKeymap, wlwire.NewArgs().U32(keymapFormatXKBV1).U32(uint32(len(km)+1)), km+"\x00")
+		}
 	case r.id == ids[IfaceManager] && r.op == opCreateVirtualKeyboard:
 		seat, kb := a.U32(), a.U32()
 		set("kb", kb)
@@ -155,6 +183,8 @@ func (f *fake) answer(r req) {
 		}
 	}
 }
+
+func (f *fake) setKeymap(km string) { f.mu.Lock(); f.keymap = km; f.mu.Unlock() }
 
 func (f *fake) requests() []req {
 	f.mu.Lock()
@@ -236,42 +266,130 @@ func keyEvents(t *testing.T, f *fake) (out []string, keymaps []string) {
 
 func itoa(v uint32) string { return strconv.FormatUint(uint64(v), 10) }
 
-func TestSendTypesWithItsOwnKeymap(t *testing.T) {
+// deskKeymap is a desktop layout as Hyprland serialises it (keysyms in hex).
+const deskKeymap = `xkb_keymap {
+xkb_keycodes "evdev_aliases(qwerty)" {
+	<ESC> = 9; 
+	<TAB> = 23;
+	<RTRN> = 36;
+	<AC06> = 43;
+	<SPCE> = 65;
+};
+xkb_symbols "pc_us" {
+	key <ESC> {	[ 0xff1b ] };
+	key <TAB> {	[ 0xff09, 0xfe20 ] };
+	key <RTRN> {	[ 0xff0d ] };
+	key <AC06> {	[ 0x68, 0x48 ] };
+	key <SPCE> {	[ 0x20 ] };
+};
+};`
+
+// fullDesk is deskKeymap made a whole layout (letters and digits on other keys).
+func fullDesk() string {
+	var codes, syms strings.Builder
+	for i, c := range "abcdefgijklmnopqrstuvwxyz0123456789" {
+		code := 150 + i
+		fmt.Fprintf(&codes, "<X%d> = %d;\n", code, code)
+		fmt.Fprintf(&syms, "key <X%d> { [ 0x%x ] };\n", code, c)
+	}
+	km := strings.Replace(deskKeymap, "<ESC> = 9;", "<ESC> = 9;\n"+codes.String(), 1)
+	return strings.Replace(km, "key <ESC> {", syms.String()+"key <ESC> {", 1)
+}
+
+func TestSendTypesOnTheDesktopLayout(t *testing.T) {
 	f, dial := newFake(t, "wl_compositor", IfaceSeat, IfaceManager, IfaceSeat)
+	f.setKeymap(fullDesk())
 	sl := &sleeps{}
 	k := &Keyboard{Getenv: wlEnv, Dial: dial, Timeout: guard, Sleep: sl.sleep}
-	strokes := []xkb.Stroke{{Sym: 'h'}, {Sym: 0x10065e5}, {Sym: 'h'}, {Sym: xkb.KeyTab, Shift: true}}
+	strokes := []xkb.Stroke{{Sym: 'h'}, {Sym: 'H'}, {Sym: 0x10065e5}, {Sym: 'h'}, {Sym: xkb.KeyTab, Shift: true}}
 	if err := k.Send(context.Background(), strokes); err != nil {
 		t.Fatal(err)
 	}
-	if f.id("wl_seat.v") != 1 || f.id(IfaceManager+".v") != 1 || f.id("kb.seat") != f.id("wl_seat") || f.id("kb") == 0 {
+	if f.id("wl_seat.v") != 1 || f.id(IfaceManager+".v") != 1 || f.id("kb.seat") != f.id("wl_seat") || f.id("kb") == 0 || f.id("wl_keyboard") == 0 {
 		t.Fatalf("binds: %v", f.ids)
 	}
 	got, keymaps := keyEvents(t, f)
-	want := []string{"keymap",
-		"down 1", "up 1", // h: keycode 9 = evdev 1
-		"down 2", "up 2", // 日
-		"down 1", "up 1",
-		"mods 1 0 0 0", "down 3", "up 3", "mods 0 0 0 0", // Shift+Tab
+	want := []string{"keymap", "mods 0 0 0 0", // the keyboard takes over before its first key
+		"down 35", "up 35", // h: the layout's keycode 43 = evdev 35
+		"mods 1 0 0 0", "down 35", "up 35", "mods 0 0 0 0", // H: the same key, shifted
+		"down 2", "up 2", // 日: not on the layout, on its first empty keycode (10 = evdev 2)
+		"down 35", "up 35",
+		"mods 1 0 0 0", "down 15", "up 15", "mods 0 0 0 0", // Shift+Tab
 		"destroy"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("got  %v\nwant %v", got, want)
 	}
-	wantMap := xkb.Plan(strokes, 0)[0].Keymap() + "\x00"
-	if len(keymaps) != 1 || keymaps[0] != wantMap {
-		t.Fatalf("keymap:\n%q\nwant\n%q", keymaps, wantMap)
+	l, _ := xkb.ParseKeymap(fullDesk())
+	bs, _ := xkb.Plan(strokes, l)
+	if len(keymaps) != 1 || keymaps[0] != bs[0].Keymap()+"\x00" {
+		t.Fatalf("keymap:\n%q", keymaps)
 	}
 	if len(sl.d) != 1 || sl.d[0] != DefaultSettle {
 		t.Fatalf("settles %v, want one of %v before the first key", sl.d, DefaultSettle)
 	}
 }
 
+func TestSendKeepsTheLastWholeLayout(t *testing.T) {
+	k := &Keyboard{Getenv: wlEnv, Timeout: guard, Sleep: (&sleeps{}).sleep}
+	typeH := func(keymap string) []string {
+		f, dial := newFake(t, IfaceSeat, IfaceManager)
+		f.setKeymap(keymap)
+		k.Dial = dial
+		if err := k.Send(context.Background(), []xkb.Stroke{{Sym: 'h'}}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := keyEvents(t, f)
+		return got
+	}
+	// No keymap from the compositor and none read before: US (h on keycode 43).
+	if got := typeH(""); !slices.Contains(got, "down 35") {
+		t.Fatalf("US fallback: %v", got)
+	}
+	// A whole layout with h elsewhere is taken...
+	moved := strings.ReplaceAll(fullDesk(), "<AC06> = 43;", "<AC06> = 44;")
+	if got := typeH(moved); !slices.Contains(got, "down 36") {
+		t.Fatalf("desktop layout: %v", got)
+	}
+	// ...and kept while the active keyboard holds a fragment (another virtual keyboard's
+	// keymap, or ours echoed by an input method).
+	if got := typeH(deskKeymap); !slices.Contains(got, "down 36") {
+		t.Fatalf("fragment: %v", got)
+	}
+	ours, _ := xkb.Plan([]xkb.Stroke{{Sym: 'q'}}, nil)
+	if got := typeH(ours[0].Keymap()); !slices.Contains(got, "down 36") {
+		t.Fatalf("our own keymap: %v", got)
+	}
+}
+
+func TestSendRefusesCharactersAnX11WindowCantRead(t *testing.T) {
+	f, dial := newFake(t, IfaceSeat, IfaceManager)
+	f.setKeymap(fullDesk())
+	k := &Keyboard{Getenv: wlEnv, Dial: dial, Timeout: guard, Sleep: (&sleeps{}).sleep,
+		X11Focused: func(context.Context) bool { return true }}
+	err := k.Send(context.Background(), []xkb.Stroke{{Sym: 'h'}, {Sym: 0x10065e5}, {Sym: 0xe9}})
+	var nl *NotOnLayoutError
+	if !errors.As(err, &nl) || nl.ErrorCode() != "unsupported_characters" || !strings.Contains(err.Error(), `'日', 'é'`) {
+		t.Fatalf("err %v", err)
+	}
+	if f.id("kb") != 0 {
+		t.Fatal("created a keyboard for text it refused")
+	}
+	// Text on the layout goes to an X11 window as usual.
+	f, dial = newFake(t, IfaceSeat, IfaceManager)
+	f.setKeymap(fullDesk())
+	k.Dial = dial
+	if err := k.Send(context.Background(), []xkb.Stroke{{Sym: 'h'}, {Sym: 'H'}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSendManyDistinctCharactersUsesSeveralKeymaps(t *testing.T) {
 	f, dial := newFake(t, IfaceSeat, IfaceManager)
+	f.setKeymap(fullDesk())
 	sl := &sleeps{}
 	k := &Keyboard{Getenv: wlEnv, Dial: dial, Timeout: guard, Sleep: sl.sleep, Settle: -1}
 	var strokes []xkb.Stroke
-	for i := range 300 {
+	for i := range 1000 {
 		strokes = append(strokes, xkb.Stroke{Sym: uint32(0x1004e00 + i)})
 	}
 	if err := k.Send(context.Background(), strokes); err != nil {
@@ -284,7 +402,7 @@ func TestSendManyDistinctCharactersUsesSeveralKeymaps(t *testing.T) {
 			downs++
 		}
 	}
-	if len(keymaps) != 2 || downs != 300 || got[len(got)-1] != "destroy" {
+	if len(keymaps) < 2 || downs != 1000 || got[len(got)-1] != "destroy" {
 		t.Fatalf("%d keymaps, %d keys, last %q", len(keymaps), downs, got[len(got)-1])
 	}
 	if len(sl.d) != 0 {

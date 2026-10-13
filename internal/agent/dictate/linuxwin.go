@@ -78,14 +78,7 @@ func (l *LinuxWindows) Focus(ctx context.Context, id string) error {
 		if !reHyprAddr.MatchString(id) {
 			return fmt.Errorf("not a Hyprland window address: %q", id)
 		}
-		out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"dispatch", "focuswindow", "address:" + id}})
-		if err != nil {
-			return err
-		}
-		if out != "" && !strings.EqualFold(out, "ok") {
-			return fmt.Errorf("hyprctl: %s", out)
-		}
-		return nil
+		return l.hyprFocus(ctx, id)
 	case "sway":
 		if !reConID.MatchString(id) {
 			return fmt.Errorf("not a sway container id: %q", id)
@@ -135,6 +128,49 @@ func (l *LinuxWindows) Same(id, active string) bool {
 }
 
 // --- Hyprland ---
+
+// hyprFocus focuses a window by address. A Hyprland configured in Lua (hyprland.lua, 0.55+)
+// reads `hyprctl dispatch` as Lua (`hl.dispatch(...)`), where the classic `focuswindow
+// address:…` is a syntax error (exit status 7); its dispatcher is hl.dsp.focus. The classic form
+// is tried first, the Lua one when that fails.
+func (l *LinuxWindows) hyprFocus(ctx context.Context, addr string) error {
+	run := func(arg ...string) error {
+		out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: append([]string{"dispatch"}, arg...)})
+		if err != nil {
+			return err
+		}
+		if out != "" && !strings.EqualFold(out, "ok") {
+			return fmt.Errorf("hyprctl: %s", out)
+		}
+		return nil
+	}
+	err := run("focuswindow", "address:"+addr)
+	if err == nil {
+		return nil
+	}
+	if lerr := run(fmt.Sprintf(`hl.dsp.focus({ window = "address:%s" })`, addr)); lerr != nil {
+		return err
+	}
+	return nil
+}
+
+// HyprX11Focused says, on Hyprland, whether the focused window is an XWayland one (false
+// anywhere else, or when it can't tell).
+func HyprX11Focused(x Exec) func(context.Context) bool {
+	return func(ctx context.Context) bool {
+		if x.Getenv("WAYLAND_DISPLAY") == "" || x.Getenv("HYPRLAND_INSTANCE_SIGNATURE") == "" || !x.LookPath("hyprctl") {
+			return false
+		}
+		out, err := x.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"-j", "activewindow"}})
+		if err != nil {
+			return false
+		}
+		var w struct {
+			XWayland bool `json:"xwayland"`
+		}
+		return json.Unmarshal([]byte(out), &w) == nil && w.XWayland
+	}
+}
 
 type hyprClient struct {
 	Address        string           `json:"address"`

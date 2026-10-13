@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -319,6 +320,20 @@ func rewriteTabs(v any, key string) {
 	}
 }
 
+// outdated is the failure for a command the browser's extension doesn't know: it is older than
+// this agent (browser_fill and browser_click came with 0.2.0). Said so the user can act on it.
+func outdated(info BrowserInfo, cmd string) *CommandError {
+	have := "an older version"
+	if info.ExtensionVersion != "" {
+		have = "version " + info.ExtensionVersion
+	}
+	browser := cmp.Or(info.Browser, "the browser")
+	return &CommandError{Code: "extension_outdated", Message: fmt.Sprintf(
+		"the Jarvis extension in %s is %s, which can't %s; that needs version %s or newer. Nothing was done: "+
+			"tell the user to update the Jarvis browser extension (jarvis-agent browser install, then reload the extension) and try again",
+		browser, have, cmd, cmp.Or(ExtensionVersion(), "the current one"))}
+}
+
 // call runs cmd with args, routing a "KEY:T" tab_id to that browser.
 func (t *Tools) call(ctx context.Context, cmd string, args map[string]any, extra map[string]any) (map[string]any, error) {
 	key, tab, err := tabArg(args)
@@ -337,6 +352,10 @@ func (t *Tools) call(ctx context.Context, cmd string, args map[string]any, extra
 		a["tab_id"] = tab
 	}
 	res, info, err := t.Hub.Call(ctx, b.ID, cmd, a)
+	var ce *CommandError
+	if errors.As(err, &ce) && ce.Code == "unknown_command" {
+		return nil, outdated(info, cmd)
+	}
 	if err != nil {
 		return nil, err
 	}

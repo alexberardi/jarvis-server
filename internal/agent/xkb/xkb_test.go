@@ -1,6 +1,7 @@
 package xkb
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -45,65 +46,209 @@ func TestStrokes(t *testing.T) {
 	}
 }
 
-func TestPlanBatchesDistinctKeysyms(t *testing.T) {
-	var strokes []Stroke
-	for i := range 300 {
-		strokes = append(strokes, Stroke{Sym: uint32(0x1000100 + i)}, Stroke{Sym: 0x61})
+// hyprKeymap is the shape of the keymap Hyprland hands a new wl_keyboard (keysyms in hex, a
+// multi-line key with an explicit type, a keypad key that isn't Shift-levelled), plus a key
+// written with names as other compositors serialise.
+const hyprKeymap = `xkb_keymap {
+xkb_keycodes "evdev_aliases(qwerty)" {
+	minimum = 8;
+	maximum = 709;
+	<ESC> = 9;
+	<AE01> = 10;
+	<TAB> = 23;
+	<AD01> = 24;
+	<RTRN> = 36;
+	<AC06> = 43;
+	<LFSH> = 50;
+	<AB08> = 59;
+	<SPCE> = 65;
+	<KPMU> = 63;
+	<I120> = 120;
+	alias <MENU> = <COMP>;
+	indicator 1 = "Caps Lock";
+};
+xkb_types "complete" {
+	type "ONE_LEVEL" {
+		modifiers= none;
+		level_name[1]= "Any";
+	};
+};
+xkb_compatibility "complete" {
+	interpret Shift_L+AnyOf(all) {
+		action= SetMods(modifiers=Shift);
+	};
+};
+xkb_symbols "pc_us_inet(evdev)" {
+	name[1]="English (US)";
+
+	key <ESC> {	[ 0xff1b ] };
+	key <AE01> {	[ 0x31, 0x21 ] };
+	key <TAB> {	[ 0xff09, 0xfe20 ] };
+	key <AD01> {	[ 0x71, 0x51 ] };
+	key <RTRN> {	[ 0xff0d ] };
+	key <AC06> {	[ h, H ] };
+	key <LFSH> {
+		type= "ALPHABETIC",
+		symbols[1]= [ 0xffe1, 0xffe5 ]
+	};
+	key <AB08> {	[ comma, less ], [ U00E9, U00C9 ] };
+	key <SPCE> {	[ 0x20 ] };
+	key <KPMU> {
+		type= "CTRL+ALT",
+		symbols[1]= [ 0xffaa, 0xffaa, 0xffaa, 0xffaa, 0x1008fe21 ]
+	};
+	modifier_map Shift { <LFSH> };
+};
+};
+`
+
+func TestParseKeymap(t *testing.T) {
+	l, err := ParseKeymap(hyprKeymap)
+	if err != nil {
+		t.Fatal(err)
 	}
-	bs := Plan(strokes, 0)
-	if len(bs) != 2 {
-		t.Fatalf("%d batches", len(bs))
-	}
-	total := 0
-	for _, b := range bs {
-		if len(b.Syms) > MaxKeysPerMap {
-			t.Fatalf("%d keys in one map", len(b.Syms))
+	for _, c := range []struct {
+		sym   uint32
+		code  uint32
+		shift bool
+	}{
+		{'1', 10, false}, {'!', 10, true}, {KeyTab, 23, false}, {KeyISOLeftTab, 23, true}, {'q', 24, false},
+		{'Q', 24, true}, {KeyReturn, 36, false}, {'h', 43, false}, {'H', 43, true}, {',', 59, false},
+		{'<', 59, true}, {' ', 65, false}, {KeyEscape, 9, false},
+	} {
+		if p, ok := l.pos[c.sym]; !ok || p.code != c.code || p.shift != c.shift {
+			t.Errorf("%#x at %+v (%v), want %d shift %v", c.sym, p, ok, c.code, c.shift)
 		}
-		if MinKeycode+len(b.Syms)-1 > 255 {
-			t.Fatal("keycode above 255")
-		}
-		seen := map[uint32]bool{}
-		for _, s := range b.Syms {
-			if seen[s] {
-				t.Fatal("duplicate keysym")
-			}
-			seen[s] = true
-		}
-		for _, s := range b.Strokes {
-			if b.Keycode(s.Sym) == 0 {
-				t.Fatalf("stroke %#x has no key in its batch", s.Sym)
-			}
-		}
-		total += len(b.Strokes)
 	}
-	if total != 600 || bs[0].Strokes[0].Sym != 0x1000100 || bs[1].Strokes[len(bs[1].Strokes)-1].Sym != 0x61 {
-		t.Fatal("order or count lost")
+	if l.Has(0xe9) {
+		t.Error("took a keysym from group 2")
 	}
-	if got := Plan(strokes[:4], 1); len(got) != 4 {
-		t.Fatalf("maxKeys 1: %d batches", len(got))
+	if l.Has(0xffaa) {
+		t.Error("took a level from a CTRL+ALT key")
 	}
-	if Plan(nil, 0) != nil {
-		t.Fatal("empty plan")
+	free := l.free()
+	for _, used := range []uint32{9, 10, 23, 43, 50, 63} {
+		if slices.Contains(free, used) {
+			t.Errorf("keycode %d is in use but free", used)
+		}
+	}
+	if !slices.Contains(free, 120) || free[0] != 11 || slices.Contains(free, 7) {
+		t.Errorf("free %v", free[:5])
+	}
+	// X11-visible keycodes first.
+	if i := slices.Index(free, 256); i < 0 || slices.ContainsFunc(free[:i], func(c uint32) bool { return c > MaxX11Keycode }) {
+		t.Error("free keycodes not low first")
+	}
+	if l.Complete() {
+		t.Error("a fragment counted as a whole layout")
+	}
+	if _, err := ParseKeymap("xkb_keymap { };"); err == nil {
+		t.Error("parsed an empty keymap")
 	}
 }
 
-func TestKeymap(t *testing.T) {
-	b := Plan([]Stroke{{Sym: 'h'}, {Sym: 0x10065e5}, {Sym: KeyTab, Shift: true}, {Sym: 'h'}}, 0)[0]
+func TestUS(t *testing.T) {
+	l := US()
+	if !l.Complete() {
+		t.Fatal("US incomplete")
+	}
+	for sym, want := range map[uint32]pos{'a': {38, false}, 'A': {38, true}, '~': {49, true}, '\\': {51, false},
+		'|': {51, true}, '/': {61, false}, '?': {61, true}, KeyUp: {111, false}, KeyISOLeftTab: {23, true}} {
+		if got := l.pos[sym]; got != want {
+			t.Errorf("%q at %+v, want %+v", rune(sym), got, want)
+		}
+	}
+	// It knows only the main block, so it keeps off every keycode a real keymap may use.
+	if f := l.free(); len(f) == 0 || f[0] != usFirstFree {
+		t.Errorf("US free from %v", f[:1])
+	}
+}
+
+func TestParseSym(t *testing.T) {
+	for in, want := range map[string]uint32{"0x68": 'h', "h": 'h', "U65E5": 0x10065e5, "U00E9": 0xe9,
+		"exclam": '!', "Return": KeyReturn, "ISO_Left_Tab": KeyISOLeftTab, "NoSymbol": 0, "": 0,
+		"XF86AudioMute": 0, "0xzz": 0} {
+		if got := ParseSym(in); got != want {
+			t.Errorf("ParseSym(%q) = %#x, want %#x", in, got, want)
+		}
+	}
+}
+
+func TestPlanUsesTheLayout(t *testing.T) {
+	l, _ := ParseKeymap(hyprKeymap)
+	bs, err := Plan([]Stroke{{Sym: 'h'}, {Sym: 'H'}, {Sym: 0x10065e5}, {Sym: '!'}, {Sym: KeyTab, Shift: true}, {Sym: 'h'}}, l)
+	if err != nil || len(bs) != 1 {
+		t.Fatalf("%d batches, %v", len(bs), err)
+	}
+	b := bs[0]
+	want := []Press{{43, false}, {43, true}, {11, false}, {10, true}, {23, true}, {43, false}}
+	if !slices.Equal(b.Presses, want) {
+		t.Fatalf("presses %v\nwant    %v", b.Presses, want)
+	}
+	if !slices.Equal(b.Extra, []uint32{0x10065e5}) {
+		t.Errorf("extra %v", b.Extra)
+	}
+	wantKeys := []Key{{10, [2]uint32{'1', '!'}}, {11, [2]uint32{0x10065e5}}, {23, [2]uint32{KeyTab, KeyISOLeftTab}}, {43, [2]uint32{'h', 'H'}}}
+	if !slices.Equal(b.Keys, wantKeys) {
+		t.Errorf("keys %v", b.Keys)
+	}
 	km := b.Keymap()
-	for _, want := range []string{
-		"minimum = 8;", "maximum = 12;", "<K1> = 9;", "<K3> = 11;",
-		`xkb_types "(unnamed)" { include "complete" };`,
-		`xkb_compatibility "(unnamed)" { include "complete" };`,
-		"key <K1> {[ U0068 ]};", "key <K2> {[ U65E5 ]};", "key <K3> {[ Tab, ISO_Left_Tab ]};",
+	for _, w := range []string{
+		`xkb_keycodes "jarvis-agent" {`, "minimum = 8;", "maximum = 43;", "<K43> = 43;", "<K11> = 11;",
+		`xkb_types "jarvis-agent" { include "complete" };`,
+		`xkb_compatibility "jarvis-agent" { include "complete" };`,
+		"key <K43> {[ U0068, U0048 ]};", "key <K11> {[ U65E5 ]};", "key <K23> {[ Tab, ISO_Left_Tab ]};",
+		"key <K10> {[ U0031, U0021 ]};",
 	} {
-		if !strings.Contains(km, want) {
-			t.Errorf("keymap lacks %q:\n%s", want, km)
+		if !strings.Contains(km, w) {
+			t.Errorf("keymap lacks %q:\n%s", w, km)
 		}
 	}
 	if strings.Count(km, "{") != strings.Count(km, "}") {
 		t.Fatal("unbalanced braces")
 	}
-	if b.Keycode('h') != 9 || b.Keycode(KeyTab) != 11 || b.Keycode('z') != 0 {
-		t.Fatal("keycodes")
+	if bs, _ := Plan(nil, l); bs != nil {
+		t.Fatal("empty plan")
+	}
+}
+
+func TestPlanBatchesWhenFreeKeysRunOut(t *testing.T) {
+	l := US()
+	nFree := len(l.free())
+	var strokes []Stroke
+	for i := range 300 {
+		strokes = append(strokes, Stroke{Sym: uint32(0x1000100 + i)}, Stroke{Sym: 'a'})
+	}
+	bs, err := Plan(strokes, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bs) != (300+nFree-1)/nFree {
+		t.Fatalf("%d batches for %d free keys", len(bs), nFree)
+	}
+	total := 0
+	for _, b := range bs {
+		if len(b.Extra) > nFree {
+			t.Fatalf("%d extra keys in one map", len(b.Extra))
+		}
+		codes := map[uint32]bool{}
+		for _, k := range b.Keys {
+			if codes[k.Code] {
+				t.Fatal("duplicate keycode")
+			}
+			codes[k.Code] = true
+		}
+		for _, p := range b.Presses {
+			if !codes[p.Code] {
+				t.Fatalf("press %d has no key in its batch", p.Code)
+			}
+		}
+		total += len(b.Presses)
+	}
+	if total != 600 || bs[0].Presses[1].Code != 38 {
+		t.Fatal("order or count lost")
+	}
+	if _, err := Plan([]Stroke{{Sym: 0x10065e5}}, &Layout{levels: map[uint32][2]uint32{}, pos: map[uint32]pos{}, firstFree: MaxKeycode + 1}); err == nil {
+		t.Fatal("no free key, no error")
 	}
 }

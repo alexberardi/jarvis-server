@@ -12,9 +12,10 @@ import (
 
 // Keyboard is unavailable off Linux.
 type Keyboard struct {
-	Getenv func(string) string
-	Settle time.Duration
-	Sleep  func(context.Context, time.Duration) error
+	Getenv     func(string) string
+	Settle     time.Duration
+	Sleep      func(context.Context, time.Duration) error
+	X11Focused func(context.Context) bool
 }
 
 func (*Keyboard) Name() string { return Name }

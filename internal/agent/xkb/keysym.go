@@ -1,6 +1,6 @@
 // Package xkb is the keyboard vocabulary the native typing backends share: X keysyms for text
-// and the few named keys dictation presses, and the minimal XKB keymap a Wayland virtual
-// keyboard uploads. Pure Go and OS-independent, so it is unit-tested everywhere.
+// and the few named keys dictation presses, the desktop's keyboard layout read from a keymap, and
+// the XKB keymap a Wayland virtual keyboard uploads. Pure Go and OS-independent, so it is unit-tested everywhere.
 //
 // A keysym names what a key produces, independent of any layout. Typing a character means
 // finding (or, for a virtual keyboard, inventing) a key that produces its keysym.

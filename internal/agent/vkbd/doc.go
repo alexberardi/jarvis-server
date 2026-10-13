@@ -1,8 +1,11 @@
 // Package vkbd types through the Wayland virtual-keyboard protocol
 // (zwp_virtual_keyboard_manager_v1), which Hyprland, sway and other wlroots compositors offer
 // to ordinary clients. It is what wtype does, spoken directly so the agent needs no helper
-// program: build an XKB keymap holding exactly the keysyms to type (internal/agent/xkb), hand it
-// to the compositor in a memfd, then press and release those keys.
+// program: read the desktop's keyboard layout from the compositor, build an XKB keymap that keeps
+// every character on the keycode that layout has it on and puts the rest on keycodes it leaves
+// empty (internal/agent/xkb), hand it to the compositor in a memfd, then press and release those
+// keys. Clients that read keys with the layout rather than the keymap (XWayland on Hyprland)
+// still get the right characters.
 //
 // GNOME doesn't offer the protocol and KDE reserves it for input methods; there typing goes
 // through the desktop portal instead (DESIGN.md §14).

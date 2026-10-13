@@ -90,3 +90,28 @@ func TestFillAndClick(t *testing.T) {
 		t.Errorf("plain fill gated in submit mode: %v", out)
 	}
 }
+
+// An extension older than fill and click answers unknown_command: the user is told to update
+// it, in a sentence a small model can't turn into "done".
+func TestFillAndClickOnAnOldExtension(t *testing.T) {
+	h, path := startHub(t)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		return Message{OK: false, Code: "unknown_command", Error: "unknown command: " + m.Cmd}
+	})
+	ts := NewTools(h)
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{ToolFill, map[string]any{"text": "how to walk your dog", "submit": true}},
+		{ToolClick, map[string]any{"text": "Search"}},
+	} {
+		out, _ := ts.Call(context.Background(), c.tool, c.args, node.Request{})
+		msg, _ := out["error"].(string)
+		if out["success"] != false || out["error_code"] != "extension_outdated" ||
+			!strings.Contains(msg, "Nothing was done") || !strings.Contains(msg, "Firefox is version 0.1.0") ||
+			!strings.Contains(msg, "update the Jarvis browser extension") || !strings.Contains(msg, ExtensionVersion()) {
+			t.Errorf("%s: %v", c.tool, out)
+		}
+	}
+}
