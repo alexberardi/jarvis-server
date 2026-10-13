@@ -452,10 +452,18 @@ func MigrateLegacy(getenv func(string) string, ts *TokenStore) (bool, error) {
 	return true, ts.Clear()
 }
 
-// WriteDesktopFile writes (or refreshes) the .desktop file for exe, the agent's own path.
+// isMenuEntry reports whether the .desktop file at path is the app-menu entry `jarvis-agent
+// install` writes (the same file name: the portal needs that one), not our hidden one.
+func isMenuEntry(b []byte) bool {
+	return len(b) > 0 && !strings.Contains(string(b), "\nNoDisplay=true\n")
+}
+
+// WriteDesktopFile writes (or refreshes) the .desktop file for exe, the agent's own path. An
+// installed app-menu entry already is that file (`jarvis-agent install`): it is left alone.
 func WriteDesktopFile(path, exe string) error {
 	want := desktopEntry(exe)
-	if b, err := os.ReadFile(path); err == nil && string(b) == want {
+	b, err := os.ReadFile(path)
+	if err == nil && (string(b) == want || isMenuEntry(b)) {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -478,4 +486,17 @@ func WriteDesktopFile(path, exe string) error {
 		return err
 	}
 	return os.Rename(f.Name(), path)
+}
+
+// RemoveDesktopFile removes the hidden .desktop file WriteDesktopFile wrote; an installed
+// app-menu entry stays (uninstall removes it).
+func RemoveDesktopFile(path string) error {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) || isMenuEntry(b) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return os.Remove(path)
 }

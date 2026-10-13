@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The LaunchAgent inside "Jarvis Automation Agent.app", at
+  Contents/Library/LaunchAgents/net.jarvisautomation.agent.plist. `jarvis-agent install`
+  registers it with SMAppService (macOS 13+), so the login item is the app's own: System
+  Settings shows "Jarvis Automation Agent", and trashing the app removes it.
+
+  A LaunchAgent, deliberately NOT a LaunchDaemon: a daemon runs outside any login session,
+  where it cannot see the window server or hold the user's TCC grants. BundleProgram is
+  relative to the bundle, so the app can live anywhere.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.jarvisautomation.agent</string>
+
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/jarvis-agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>Contents/MacOS/jarvis-agent</string>
+        <string>run</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>AssociatedBundleIdentifiers</key>
+    <string>net.jarvisautomation.agent</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

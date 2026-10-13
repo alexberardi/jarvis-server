@@ -12,8 +12,9 @@
 #   --server URL      jarvisd's address (only needed to enroll)
 #   --email ADDR      your Jarvis account; the password is prompted for, never echoed
 #   --household ID    only if your account belongs to several households
-#   --install         install as a systemd user unit (Linux) or LaunchAgent (macOS) and start it
-#   --uninstall       remove that unit/agent
+#   --install         jarvis-agent install: start at login (systemd user unit + autostart entry on
+#                     Linux, a LaunchAgent on macOS), app menu entry, jarvis-agent:// link; start it
+#   --uninstall       jarvis-agent uninstall (keeps the enrollment)
 #   --status          print the agent's capabilities (on macOS run as Jarvis Automation Agent via launchd:
 #                     from a terminal, macOS would report the terminal's permissions instead)
 #   --browser         set up browser control (Firefox / Chrome-family extension + native host)
@@ -109,18 +110,22 @@ migrate_legacy() {
 }
 migrate_legacy
 
-# --- uninstall needs no build ---
+# --- uninstall needs no build: the installed agent undoes its own install ---
 if [ "$MODE" = uninstall ]; then
-  if [ "$OS" = Darwin ]; then
+  if [ "$OS" = Darwin ]; then INSTALLED="$APP/Contents/MacOS/jarvis-agent"; else INSTALLED="$HOME/.local/lib/jarvis-agent/jarvis-agent"; fi
+  if [ -x "$INSTALLED" ]; then
+    "$INSTALLED" uninstall
+  elif [ "$OS" = Darwin ]; then
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     rm -f "$AGENT_PLIST"
-  else
+  fi
+  if [ "$OS" = Linux ] && [ -e "$UNIT" ]; then
+    # Installed by an older version of this script (binary in ~/.local/bin).
     systemctl --user disable --now jarvis-agent 2>/dev/null || true
     rm -f "$UNIT"
     systemctl --user daemon-reload
   fi
   say "uninstalled; the enrollment is kept (re-enroll with: jarvis-agent enroll --force ...)"
-  say "browser control stays registered; to remove it: jarvis-agent browser uninstall"
   exit 0
 fi
 
@@ -182,6 +187,9 @@ say "building $VERSION"
 if [ "$OS" = Darwin ]; then
   mkdir -p "$APP/Contents/MacOS"
   cp "$ROOT/dist/jarvis-agent" "$APP/Contents/MacOS/jarvis-agent"
+  # The LaunchAgent SMAppService registers when the app runs `jarvis-agent install` itself.
+  mkdir -p "$APP/Contents/Library/LaunchAgents"
+  cp "$ROOT/internal/agent/deploy/macos/LaunchAgent.plist" "$APP/Contents/Library/LaunchAgents/$LABEL.plist"
   plist=$(<"$ROOT/internal/agent/deploy/macos/Info.plist")
   printf '%s\n' "${plist//__VERSION__/${VERSION#dev-}}" > "$APP/Contents/Info.plist"
   ID=${JARVIS_AGENT_SIGN_IDENTITY:-}
@@ -232,29 +240,23 @@ if [ "$MODE" = install ] || [ "$BROWSER" != ask ]; then enroll+=(--no-browser); 
 "$BIN" "${enroll[@]}" || die "not enrolled; pass --server URL --email ADDR"
 if [ "$MODE" = run ] && [ "$BROWSER" = yes ]; then offer_browser "$BIN"; fi
 
-# --- install: start at login, in the user's session ---
+# --- install: start at login, in the user's session (jarvis-agent install) ---
 if [ "$MODE" = install ]; then
   if [ "$OS" = Darwin ]; then
-    mkdir -p "$(dirname "$AGENT_PLIST")" "$LOG_DIR"
-    t=$(<"$ROOT/internal/agent/deploy/launchd/$LABEL.plist")
-    t=${t//__AGENT_BIN__/$BIN}
-    printf '%s\n' "${t//__LOG_DIR__/$LOG_DIR}" > "$AGENT_PLIST"
     launchctl bootout "gui/$(id -u)/$DEV_LABEL" 2>/dev/null || true
-    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
-    say "installed and started; logs: tail -f $LOG_DIR/jarvis-agent.err.log"
+    # A plain LaunchAgent, not SMAppService: it keeps the logs in ~/Library/Logs.
+    "$BIN" install --login-item launchagent
+    say "logs: tail -f $LOG_DIR/jarvis-agent.err.log"
     offer_browser "$BIN"
   else
-    mkdir -p "$HOME/.local/bin" "$(dirname "$UNIT")"
-    install -m 0755 "$BIN" "$HOME/.local/bin/jarvis-agent"
-    t=$(<"$ROOT/internal/agent/deploy/systemd/jarvis-agent.service")
-    printf '%s\n' "${t//__AGENT_BIN__/$HOME/.local/bin/jarvis-agent}" > "$UNIT"
-    systemctl --user daemon-reload
-    systemctl --user enable jarvis-agent >/dev/null
-    systemctl --user restart jarvis-agent
-    say "installed and started; logs: journalctl --user -u jarvis-agent -f"
-    say "it starts with your graphical session; it stops when you log out unless: loginctl enable-linger $USER"
-    offer_browser "$HOME/.local/bin/jarvis-agent"
+    # An older version of this script installed the binary here; the agent now lives in
+    # ~/.local/lib/jarvis-agent (jarvis-agent install). Remove the stale copy if it is ours.
+    if [ -f "$HOME/.local/bin/jarvis-agent" ] && "$HOME/.local/bin/jarvis-agent" version 2>/dev/null | grep -q '^dev-'; then
+      rm -f "$HOME/.local/bin/jarvis-agent"
+    fi
+    "$BIN" install
+    say "logs: journalctl --user -u jarvis-agent -f (or ~/.cache/jarvis-agent/agent.log without a systemd graphical session)"
+    offer_browser "$HOME/.local/lib/jarvis-agent/jarvis-agent"
   fi
   exit 0
 fi

@@ -4,11 +4,18 @@
 # DISPLAY/WAYLAND_DISPLAY, so window control and `open` would both be dead on
 # arrival while volume still appeared to work -- the worst kind of half-broken.
 #
-# Install:  ~/.config/systemd/user/jarvis-agent.service
-# Enable:   systemctl --user enable --now jarvis-agent
+# Installed by `jarvis-agent install` as ~/.config/systemd/user/jarvis-agent.service,
+# enabled by a link in graphical-session.target.wants/.
 #
-# On a headless or auto-login-less box, `loginctl enable-linger $USER` is
-# required or the unit stops when the user logs out.
+# WantedBy=graphical-session.target, not default.target: the user manager reaches
+# default.target at login, before the compositor has imported WAYLAND_DISPLAY/DISPLAY,
+# so the agent would start without a display. Desktops that never start
+# graphical-session.target (a compositor launched without uwsm, XFCE) get the XDG
+# autostart entry `jarvis-agent install` writes next to this unit instead.
+#
+# A headless box (a Pi with the HAT) has no graphical session: enable it with
+# `systemctl --user add-wants default.target jarvis-agent.service` and
+# `loginctl enable-linger $USER`.
 
 [Unit]
 Description=Jarvis desktop agent (a Jarvis node offering OS control)
@@ -22,6 +29,5 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-# default.target, NOT multi-user.target -- this is a user unit and
-# multi-user.target would never be reached in the user manager.
-WantedBy=default.target
+# A user unit: multi-user.target would never be reached in the user manager.
+WantedBy=graphical-session.target

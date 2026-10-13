@@ -49,10 +49,7 @@ func (d desktopFile) Remove() error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return portal.RemoveDesktopFile(p)
 }
 
 // appEntry is desktopFile (a fake in tests).
