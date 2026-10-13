@@ -421,6 +421,15 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			if len(serverResults) > 0 && !native {
 				return withReasoning(engineResult{Stop: stopServerToolComplete, ServerResults: serverResults, Message: message}), msgs
 			}
+			if ack, ok := acceptedAck(serverResults); ok {
+				// Work that runs after the reply (an errand plan, a call plan, research): its
+				// ack is the only true thing to say yet. A composed reply turned "I'm planning
+				// that errand" into "I've got the timer set" while the plan later failed, and it
+				// cost a second live call (the demo dry run). Say the ack as is.
+				ack = cleanForTTS(p.SanitizeText(ack))
+				msgs = append(msgs, chatMsg{Role: "assistant", Content: ack})
+				return withReasoning(engineResult{Stop: stopComplete, Message: ack}), msgs
+			}
 			// Native server-only results (or nothing callable): loop again.
 		default:
 			return withReasoning(engineResult{Stop: stopComplete, Message: message}), msgs
@@ -428,6 +437,35 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	}
 	m.deps.Log.Warn("cc: tool loop iteration limit reached", "conversation_id", conv.id, "max", in.maxIter)
 	return withReasoning(engineResult{Stop: stopComplete, Message: maxIterationsFallback, Err: "max_iterations_exceeded"}), msgs
+}
+
+// acceptedAck reports whether every server result is an accepted-for-later ack
+// ({"status": "accepted", "message": …}: run_errand, schedule_errand, make_phone_call,
+// deep_research) and returns their messages joined, the reply the text path's fast path
+// already speaks.
+func acceptedAck(results []chatMsg) (string, bool) {
+	if len(results) == 0 {
+		return "", false
+	}
+	parts := make([]string, 0, len(results))
+	for _, r := range results {
+		v, err := pyjson.Loads(r.Content)
+		if err != nil {
+			return "", false
+		}
+		o, _ := v.(*pyjson.Object)
+		if o == nil {
+			return "", false
+		}
+		st, _ := o.Get("status")
+		msg, _ := o.Get("message")
+		ms, _ := msg.(string)
+		if st != "accepted" || parse.PyStrip(ms) == "" {
+			return "", false
+		}
+		parts = append(parts, parse.PyStrip(ms))
+	}
+	return strings.Join(parts, " "), true
 }
 
 // closeDanglingCalls answers client calls the loop dropped with a not-executed tool reply, so

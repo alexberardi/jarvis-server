@@ -66,7 +66,18 @@ func (f *fakeLLM) fail(kind string, err error) {
 	f.errs[kind] = err
 }
 
-func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	resp, err := f.chat(req)
+	if err == nil && resp.Content == hangs {
+		// Generation that never ends on its own: only the caller's context stops it (the llm
+		// module reports a cancelled request as an opaque internal error).
+		<-ctx.Done()
+		return nil, errors.New("Internal error: " + ctx.Err().Error())
+	}
+	return resp, err
+}
+
+func (f *fakeLLM) chat(req llm.ChatRequest) (*llm.ChatResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reqs = append(f.reqs, req)
@@ -100,6 +111,9 @@ func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespons
 // thoughtOut scripts a reply where thinking used the whole max_tokens: no content, finish
 // "length".
 const thoughtOut = "\x00thought-out"
+
+// hangs scripts a reply that never arrives until the request's context ends.
+const hangs = "\x00hangs"
 
 func (f *fakeLLM) requests(kind string) []llm.ChatRequest {
 	f.mu.Lock()

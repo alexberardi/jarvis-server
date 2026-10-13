@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 func mustObj(t *testing.T, s string) *pyjson.Object {
@@ -151,6 +152,32 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
 		t.Fatalf("retry requests: %+v", reqs)
 	}
+	// Thinking ran past its wall-clock budget (the demo dry run: 105 s of thinking on a shared
+	// single-slot engine held the next reply hostage): cancelled, one retry without thinking.
+	n = len(e.llm.requests("plan"))
+	e.s.PlannerThinkTimeout = time.Nanosecond
+	e.llm.say("plan", hangs, planJSON("Timer", step("get_weather", "Weather", "")))
+	if plan, err := e.s.PlanErrand(context.Background(), "goal", nil); err != nil || plan.Summary != "Timer" {
+		t.Fatalf("time-capped retry: %+v %v", plan, err)
+	}
+	reqs = e.llm.requests("plan")[n:]
+	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
+		t.Fatalf("time-capped requests: %+v", reqs)
+	}
+	// A job that is itself cancelled (shutdown) is not a budget overrun: no retry.
+	n = len(e.llm.requests("plan"))
+	e.s.PlannerThinkTimeout = -1
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	e.llm.say("plan", hangs)
+	if _, err := e.s.PlanErrand(cctx, "goal", nil); err == nil || errors.Is(err, ErrPlan) {
+		t.Fatalf("cancelled job: %v", err)
+	}
+	if got := len(e.llm.requests("plan")) - n; got != 1 {
+		t.Fatalf("cancelled job retried: %d calls", got)
+	}
+	e.s.PlannerThinkTimeout = 0
+
 	e.llm.say("plan", thoughtOut, thoughtOut)
 	if _, err := e.s.PlanErrand(context.Background(), "goal", nil); !errors.Is(err, ErrPlan) {
 		t.Fatalf("both thought out: %v", err)
@@ -251,3 +278,23 @@ func TestResolveStepArgs(t *testing.T) {
 		t.Fatalf("skip = %q", skip)
 	}
 }
+
+func TestPlannerThinkTimeoutSetting(t *testing.T) {
+	s := &Service{}
+	if got := s.plannerThinkTimeout(context.Background()); got != defaultPlannerThinkSeconds*time.Second {
+		t.Fatalf("default = %v", got)
+	}
+	s.Settings = intSettings{SettingPlannerThinkSeconds: 5}
+	if got := s.plannerThinkTimeout(context.Background()); got != 5*time.Second {
+		t.Fatalf("setting = %v", got)
+	}
+	s.Settings = intSettings{SettingPlannerThinkSeconds: -1}
+	if got := s.plannerThinkTimeout(context.Background()); got != 0 {
+		t.Fatalf("no limit = %v", got)
+	}
+}
+
+type intSettings map[string]int64
+
+func (f intSettings) Int(_ context.Context, key string, _ settings.Scope) int64 { return f[key] }
+func (intSettings) Bool(context.Context, string, settings.Scope) bool           { return true }
