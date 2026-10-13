@@ -29,6 +29,28 @@ DESIGN §10 forbids it (`TestExtensionSurface`). Chat reuses the Add-ons detecto
 request's address with each of the member's agents' last heartbeat address, and answers "can't tell"
 when the match is ambiguous. "Can't tell" makes chat skip step 1. There is no second detector.
 
+### Decided in review (user, 2026-10-13)
+
+- **Purpose:** jarvis-web fell behind jarvisd; this project brings browser chat back, inside the
+  admin, rather than reviving the Next.js app.
+- **Inbox: ported** (Q2). Long-running jobs (deep research, confirmations) report back through
+  the inbox, so web chat needs it. Phase P5 is in scope.
+- **Household management, invites and registration stay in the mobile app for v1** (Q3). They
+  are planned for **v2** of the web app. The smart-home Devices page is not in v1 either.
+- **Password change page: after v1.** v1 doesn't add one. Note for v2: G10 (`auth/me` and
+  `change-password` are superuser-gated on the gateway) and G8 (`must_change_password` is enforced
+  only client-side; the server still issues working tokens) need fixing then. G8 should be fixed
+  server-side whenever it's convenient, independent of the web app.
+- **Same-device dictation** (Q4): the agent refuses to type into the Jarvis chat page, and
+  **instead of only refusing, it switches to another window first and types there.** With no
+  `app` named while the Jarvis page is in front, the agent focuses the window that was in front
+  before it (focus history, where the backend has one: Hyprland, sway, X11, Windows, macOS),
+  confirms focus as §14 requires, and types. The result names that app ("Typed into Omawrite").
+  Where there's no focus history (GNOME/KDE portal), it refuses with a sentence asking which app.
+  `browser_fill`/`browser_click` on the Jarvis tab are still refused. The cc prompt hint (b) stays.
+- **No extension detection** (installer plan Q2): the Add-ons extension row is a store link.
+  "This computer's agent" still uses the server-side address match.
+
 ## 1. jarvis-web inventory
 
 jarvis-web is a thin Next.js client on **7722**. `next.config.ts` rewrites `/api/{auth,households,invites}`
