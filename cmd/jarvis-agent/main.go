@@ -48,6 +48,36 @@ var version = "dev"
 
 const installMode = "desktop-agent"
 
+// nodeKind tells jarvisd this is a computer, not a Pi (DESIGN §9 Q1; reported in heartbeats).
+const nodeKind = "desktop"
+
+// Values of the heartbeat's browser_extension capability.
+const (
+	extConnected    = "connected"    // a browser's extension is talking to this agent
+	extDisconnected = "disconnected" // browser control is on, no extension connected
+	extDisabled     = "disabled"     // run --no-browser
+)
+
+// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes.
+func heartbeatCaps(tools node.Multi) (caps func() map[string]any, changed func() <-chan struct{}) {
+	var hub *browser.Hub
+	for _, t := range tools {
+		if bt, ok := t.(*browser.Tools); ok {
+			hub = bt.Hub
+		}
+	}
+	if hub == nil {
+		return func() map[string]any { return map[string]any{"browser_extension": extDisabled} }, nil
+	}
+	return func() map[string]any {
+		state := extDisconnected
+		if hub.Connected() {
+			state = extConnected
+		}
+		return map[string]any{"browser_extension": state}
+	}, hub.Changed
+}
+
 func main() {
 	// A browser starting us as its native-messaging host passes its own argv (the manifest's
 	// "path" can't carry a subcommand).
@@ -364,7 +394,8 @@ func run(ctx context.Context, args []string) error {
 	defer closeTools()
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
-	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, Log: log}
+	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, NodeKind: nodeKind, Log: log}
+	r.Capabilities, r.Changed = heartbeatCaps(tools)
 	hd := openHat(hf, log)
 	defer hd.Close()
 	var vs *voiceStack
@@ -578,7 +609,9 @@ func status(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := node.NewCC(ccURL, c).Heartbeat(ctx, version, installMode); err != nil {
+	// No capabilities: this process doesn't hold the browser connection, so it must not report
+	// the extension's state over the running agent's.
+	if err := node.NewCC(ccURL, c).Heartbeat(ctx, node.Beat{Version: version, InstallMode: installMode, NodeKind: nodeKind}); err != nil {
 		fmt.Printf("jarvisd:      reachable, but the node key was refused or failed (%v)\n", err)
 		return nil
 	}

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -30,17 +32,20 @@ type nodeRow struct {
 	protocols       sql.NullString
 	needsK2         bool
 	contacted       bool // false from registration until the node first reaches us (F19)
+	nodeKind        sql.NullString
+	capabilities    sql.NullString // JSON object, from the heartbeat
 }
 
 const nodeCols = `node_id, room, "user", voice_mode, last_seen, household_id, last_seen_version,
-	install_mode, is_busy, git_sha, is_active, protocols, needs_k2, contacted`
+	install_mode, is_busy, git_sha, is_active, protocols, needs_k2, contacted, node_kind, capabilities`
 
 type scanner interface{ Scan(...any) error }
 
 func scanNode(s scanner) (*nodeRow, error) {
 	var n nodeRow
 	err := s.Scan(&n.nodeID, &n.room, &n.user, &n.voiceMode, &n.lastSeen, &n.householdID, &n.lastSeenVersion,
-		&n.installMode, &n.isBusy, &n.gitSHA, &n.isActive, &n.protocols, &n.needsK2, &n.contacted)
+		&n.installMode, &n.isBusy, &n.gitSHA, &n.isActive, &n.protocols, &n.needsK2, &n.contacted,
+		&n.nodeKind, &n.capabilities)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +89,18 @@ func nullable(ns sql.NullString) any {
 	return ns.String
 }
 
+// caps is the node's reported capabilities, {} when it reported none.
+func (n *nodeRow) caps() map[string]any {
+	out := map[string]any{}
+	if n.capabilities.Valid {
+		_ = json.Unmarshal([]byte(n.capabilities.String), &out)
+	}
+	return out
+}
+
 // response is NodeResponse. adapter_hash is gone with LoRA (D9; mobile's node type never
-// read it).
+// read it). node_kind and capabilities are jarvisd additions (install plan 1.8): null and {}
+// for a node that never reported them.
 func (n *nodeRow) response(now time.Time) map[string]any {
 	user := "default"
 	if n.user.Valid {
@@ -100,6 +115,7 @@ func (n *nodeRow) response(now time.Time) map[string]any {
 		"household_id": nullable(n.householdID), "online": n.online(now), "last_seen": lastSeen,
 		"last_seen_version": nullable(n.lastSeenVersion), "install_mode": nullable(n.installMode),
 		"git_sha": nullable(n.gitSHA), "is_busy": n.isBusy, "needs_k2": n.needsK2,
+		"node_kind": nullable(n.nodeKind), "capabilities": n.caps(),
 	}
 }
 
@@ -194,6 +210,8 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	busy, hasBusy := b.boolean("is_busy")
 	protocols, hasProtocols := b.strList("protocols")
 	needsK2, hasK2 := b.boolean("needs_k2")
+	kind, hasKind := b.str("node_kind", false)
+	caps, hasCaps := b.object("capabilities", false)
 	b.object("thread_status", false)
 	if !b.done(w) {
 		return
@@ -229,6 +247,15 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 		if hasK2 {
 			sets = append(sets, "needs_k2 = ?")
 			args = append(args, needsK2)
+		}
+		if hasKind {
+			sets = append(sets, "node_kind = ?")
+			args = append(args, nullStr(nodeKindValue(kind)))
+		}
+		if hasCaps {
+			c, _ := json.Marshal(cleanCaps(caps))
+			sets = append(sets, "capabilities = ?")
+			args = append(args, string(c))
 		}
 	}
 	q := `UPDATE cc_nodes SET `
@@ -266,6 +293,46 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 		resp["pending_update"] = pending
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// Heartbeat capability bounds: a node reports a handful of flags, not a document.
+const (
+	maxCaps   = 32
+	maxCapLen = 64
+)
+
+// cleanCaps keeps up to maxCaps scalar capabilities (string, bool, number) with short keys and
+// strings; anything else is dropped, so the stored object stays small and flat.
+func cleanCaps(in map[string]any) map[string]any {
+	out := map[string]any{}
+	keys := make([]string, 0, len(in))
+	for k := range in {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if len(out) >= maxCaps || k == "" || len(k) > maxCapLen {
+			continue
+		}
+		switch v := in[k].(type) {
+		case string:
+			if len(v) <= maxCapLen {
+				out[k] = v
+			}
+		case bool, json.Number:
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// nodeKindValue is a reported node_kind, trimmed; empty or overlong clears it.
+func nodeKindValue(s string) *string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > maxCapLen {
+		return nil
+	}
+	return &s
 }
 
 // --- POST /admin/nodes (admin key) ---

@@ -243,7 +243,14 @@ packages may assume the sidecar but not audio in/out.
 1. **Node kind in jarvisd.** jarvisd treats this as a Pi: it would send `tts`/`action`/`routine`
    (each times out), the app offers Pi settings, and voice on a Pi can't reach desktop tools.
    *Recommend:* have the heartbeat declare `node_kind: "desktop"` and the verbs it speaks;
-   jarvisd skips unsupported verbs. Later, let CC offer a household's desktop tools in a Pi's
+   jarvisd skips unsupported verbs. **Half built (2026-10-13, install plan 1.8):** the heartbeat
+   carries `node_kind: "desktop"` and `capabilities: {"browser_extension": "connected" |
+   "disconnected" | "disabled"}` (`disabled` with `run --no-browser`), and cc's node list and
+   node view (`GET /api/v0/admin/nodes[/{id}]`, the admin and mobile node APIs) return both
+   (`null` and `{}` for a node that never reported them). The agent sends a beat at once when
+   the extension connects or disconnects. `jarvis-agent status` reports the kind but no
+   capabilities, since it doesn't hold the browser connection. jarvisd doesn't yet skip
+   verbs a desktop node can't serve. Later, let CC offer a household's desktop tools in a Pi's
    turn with node-qualified dispatch ("turn down my computer").
 2. **Open policy.** Done as wildcards ("anything in your apps folder") + `apps.json`. Left
    open: whether `desktop_open` on an app the user has never launched should need a

@@ -162,17 +162,35 @@ func (c *CC) MQTTCredentials(ctx context.Context) (MQTTCreds, error) {
 	return out, nil
 }
 
+// Beat is what a heartbeat reports about this node.
+type Beat struct {
+	Version     string
+	InstallMode string // version_info.install_mode, e.g. "desktop-agent"
+	// NodeKind is "desktop" for the desktop agent (DESIGN §9 Q1); empty leaves it out, as a Pi
+	// reports nothing.
+	NodeKind string
+	// Capabilities is reported as is, e.g. {"browser_extension": "connected"}. Nil leaves it out.
+	Capabilities map[string]any
+}
+
 // Heartbeat stamps last_seen and reports what this node is. version_info.install_mode is how
 // the app can tell a desktop agent from a Pi, and jarvisd only offers remote updates to
 // "tarball" installs (cc/updates.go), so the desktop agent must not claim it.
-// version_info.runtime tells a Go node from the Python one (go-pi-node.md §8 Q6).
-func (c *CC) Heartbeat(ctx context.Context, version, installMode string) error {
+// version_info.runtime tells a Go node from the Python one (go-pi-node.md §8 Q6). node_kind and
+// capabilities are newer: a jarvisd that predates them ignores them.
+func (c *CC) Heartbeat(ctx context.Context, b Beat) error {
 	body := map[string]any{
-		"version_info": map[string]any{"version": version, "install_mode": installMode, "runtime": Runtime},
+		"version_info": map[string]any{"version": b.Version, "install_mode": b.InstallMode, "runtime": Runtime},
 		"is_busy":      false,
 		// K2 encrypts command secrets on a Pi; nothing on this node uses it yet, so don't ask
 		// the app to provision one.
 		"needs_k2": false,
+	}
+	if b.NodeKind != "" {
+		body["node_kind"] = b.NodeKind
+	}
+	if b.Capabilities != nil {
+		body["capabilities"] = b.Capabilities
 	}
 	return c.do(ctx, http.MethodPost, "/api/v0/admin/nodes/heartbeat", body, nil)
 }

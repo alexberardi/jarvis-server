@@ -11,6 +11,16 @@ export interface NodeLiveness {
   last_seen: string | null
   last_seen_version: string | null
   is_busy: boolean
+  /** What the node said it is: "desktop" for the desktop agent, null when it never said (a Pi). */
+  node_kind?: string | null
+  /** What the node reported, e.g. browser_extension: "connected" | "disconnected" | "disabled". */
+  capabilities?: Record<string, string | boolean | number>
+}
+
+/** extensionState is a desktop agent's browser-extension row, or null when it reported none. */
+export function extensionState(n: NodeLiveness | undefined): 'connected' | 'disconnected' | 'disabled' | null {
+  const v = n?.capabilities?.browser_extension
+  return v === 'connected' || v === 'disconnected' || v === 'disabled' ? v : null
 }
 
 /** getNodeLiveness lists every active node cc knows (a superuser sees all households). */

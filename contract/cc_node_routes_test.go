@@ -313,3 +313,31 @@ func TestCCNodeUpdateTasks(t *testing.T) {
 	tg.Get(t, CommandCenter, "/api/v0/nodes/"+n.ID+"/tasks", stranger.H()).ExpectStatus(http.StatusForbidden)
 	tg.Get(t, CommandCenter, "/api/v0/nodes/contract-nosuch-"+randHex(3)+"/tasks", u.H()).ExpectError(http.StatusNotFound, "Node not found")
 }
+
+// Install plan 1.8: a desktop agent's heartbeat says node_kind "desktop" and reports the
+// browser extension's state; both reach the node list and the node view (jarvisd only).
+func TestCCNodeKindAndCapabilities(t *testing.T) {
+	tg := T(t)
+	if !Jarvisd() {
+		t.Skip("contract: node_kind/capabilities are jarvisd additions; set " + EnvImpl + "=jarvisd")
+	}
+	u := NewUser(t)
+	n := NewCCNode(t, u)
+	tg.Post(t, CommandCenter, "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"version_info": map[string]any{"version": "contract", "install_mode": "desktop-agent"},
+		"node_kind":    "desktop",
+		"capabilities": map[string]any{"browser_extension": "connected"},
+	}, n.APIKeyH()).Expect(http.StatusOK, Open{"status": Eq("ok")})
+	want := Open{"node_id": Eq(n.ID), "node_kind": Eq("desktop"), "capabilities": Obj{"browser_extension": Eq("connected")}}
+	tg.Get(t, CommandCenter, "/api/v0/admin/nodes/"+n.ID, u.H()).Expect(http.StatusOK, All(nodeResponseShape(), want))
+	r := tg.Get(t, CommandCenter, "/api/v0/admin/nodes", u.H()).Expect(http.StatusOK, ArrayOf(nodeResponseShape()))
+	for _, v := range r.JSON().([]any) {
+		if row := v.(map[string]any); row["node_id"] == n.ID {
+			if errs := want.Match("list", row); len(errs) > 0 {
+				r.Fatalf("%v", errs)
+			}
+			return
+		}
+	}
+	r.Fatalf("node %s not listed", n.ID)
+}

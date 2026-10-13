@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -248,7 +249,7 @@ func TestHeartbeatIdentity(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k1", ConfigURL: srv.URL})
-	if err := c.Heartbeat(context.Background(), "1.2.3", "desktop-agent"); err != nil {
+	if err := c.Heartbeat(context.Background(), Beat{Version: "1.2.3", InstallMode: "desktop-agent"}); err != nil {
 		t.Fatal(err)
 	}
 	if key != "n1:k1" {
@@ -260,6 +261,83 @@ func TestHeartbeatIdentity(t *testing.T) {
 	}
 	if got["needs_k2"] != false {
 		t.Errorf("needs_k2 = %v", got["needs_k2"])
+	}
+	// A Pi-style beat says nothing about its kind or capabilities.
+	if _, ok := got["node_kind"]; ok {
+		t.Errorf("node_kind sent: %v", got)
+	}
+	if _, ok := got["capabilities"]; ok {
+		t.Errorf("capabilities sent: %v", got)
+	}
+	err := c.Heartbeat(context.Background(), Beat{Version: "1.2.3", InstallMode: "desktop-agent", NodeKind: "desktop",
+		Capabilities: map[string]any{"browser_extension": "connected"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["node_kind"] != "desktop" || got["capabilities"].(map[string]any)["browser_extension"] != "connected" {
+		t.Errorf("desktop beat = %v", got)
+	}
+}
+
+// A capability change sends a heartbeat at once, not at the next tick.
+func TestRunnerHeartbeatsOnChange(t *testing.T) {
+	var srvURL string
+	beats := make(chan map[string]any, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/services":
+			_ = json.NewEncoder(w).Encode(map[string]any{"services": []map[string]string{
+				{"name": SvcCommandCenter, "url": srvURL},
+				{"name": SvcMQTT, "url": "mqtt://127.0.0.1:1"},
+			}})
+		case "/api/v0/node/mqtt-credentials":
+			_, _ = w.Write([]byte(`{"username":null,"password":null}`))
+		case "/api/v0/admin/nodes/heartbeat":
+			var b map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			beats <- b
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+	var mu sync.Mutex
+	state := "disconnected"
+	ch := make(chan struct{})
+	r := &Runner{Creds: Creds{ConfigURL: srv.URL, NodeID: "n1", NodeKey: "k"}, Tools: Multi{}, Log: quiet,
+		NodeKind: "desktop", Heartbeat: time.Hour,
+		Capabilities: func() map[string]any {
+			mu.Lock()
+			defer mu.Unlock()
+			return map[string]any{"browser_extension": state}
+		},
+		Changed: func() <-chan struct{} {
+			mu.Lock()
+			defer mu.Unlock()
+			return ch
+		}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	first := <-beats
+	if first["node_kind"] != "desktop" || first["capabilities"].(map[string]any)["browser_extension"] != "disconnected" {
+		t.Fatalf("first beat %v", first)
+	}
+	mu.Lock()
+	state = "connected"
+	old := ch
+	ch = make(chan struct{})
+	mu.Unlock()
+	close(old)
+	second := <-beats
+	if second["capabilities"].(map[string]any)["browser_extension"] != "connected" {
+		t.Fatalf("second beat %v", second)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
