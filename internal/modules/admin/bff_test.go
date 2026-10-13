@@ -38,14 +38,15 @@ type fakeTraces struct{ last ccmod.TraceFilter }
 
 func (f *fakeTraces) ListTraces(_ context.Context, flt ccmod.TraceFilter) ([]map[string]any, int, error) {
 	f.last = flt
-	return []map[string]any{{"id": "t1", "span_count": 2}}, 7, nil
+	return []map[string]any{{"id": "t1", "span_count": 2, "created_at": "2026-10-13T02:55:12.5"}}, 7, nil
 }
 
 func (f *fakeTraces) GetTrace(_ context.Context, id string) (map[string]any, bool, error) {
 	if id != "t1" {
 		return nil, false, nil
 	}
-	return map[string]any{"id": "t1", "spans": []any{map[string]any{"name": "stt"}}, "error_message": nil}, true, nil
+	return map[string]any{"id": "t1", "spans": []any{map[string]any{"name": "stt"}}, "error_message": nil,
+		"created_at": "2026-10-13T02:55:12"}, true, nil
 }
 
 type fakeAccounts struct{ c authmod.SetupCounts }
@@ -349,7 +350,12 @@ func TestTracesBFF(t *testing.T) {
 	if w := send(e.mux, "GET", "/api/traces?limit=500", "", root...); w.Code != 400 || decode(t, w)["error"] != "validation_error" {
 		t.Fatalf("bad limit: %d %s", w.Code, w.Body.String())
 	}
-	if d := decode(t, send(e.mux, "GET", "/api/traces/t1", "", root...)); d["id"] != "t1" || len(d["spans"].([]any)) != 1 {
+	// cc's naive UTC comes out zoned, so a browser doesn't read it as local time.
+	if got := out["traces"].([]any)[0].(map[string]any)["created_at"]; got != "2026-10-13T02:55:12.500000Z" {
+		t.Errorf("list created_at %v", got)
+	}
+	d := decode(t, send(e.mux, "GET", "/api/traces/t1", "", root...))
+	if d["id"] != "t1" || len(d["spans"].([]any)) != 1 || d["created_at"] != "2026-10-13T02:55:12.000000Z" {
 		t.Fatalf("detail: %v", d)
 	}
 	if w := send(e.mux, "GET", "/api/traces/nope", "", root...); w.Code != 404 || detailOf(w) != "Trace not found" {
@@ -507,4 +513,20 @@ type errAccounts struct{}
 
 func (errAccounts) SetupCounts(context.Context) (authmod.SetupCounts, error) {
 	return authmod.SetupCounts{}, errors.New("db down")
+}
+
+func TestZoneUTC(t *testing.T) {
+	o := map[string]any{"a": "2026-10-13T02:55:12.123456", "b": "2026-10-12T22:55:12-04:00", "c": "2026-10-13 02:55:12",
+		"d": "soon", "e": nil}
+	zoneUTC(o, "a", "b", "c", "d", "e", "missing")
+	want := map[string]any{"a": "2026-10-13T02:55:12.123456Z", "b": "2026-10-13T02:55:12.000000Z", "c": "2026-10-13T02:55:12.000000Z",
+		"d": "soon", "e": nil}
+	for k, v := range want {
+		if o[k] != v {
+			t.Errorf("%s: %v, want %v", k, o[k], v)
+		}
+	}
+	if _, ok := o["missing"]; ok {
+		t.Error("added a key")
+	}
 }

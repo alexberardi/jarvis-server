@@ -160,7 +160,7 @@ round-trips to auth `/auth/me`) unless noted. "Bootstrap-open" means `requireSup
 | `POST /api/native-services/:id/stop` | `routes/native-services.ts:277` | superuser | CUT | launchd |
 | `POST /api/native-services/:id/uninstall` | `routes/native-services.ts:294` | superuser | CUT | launchd |
 | `GET /api/native-services/:id/logs` | `routes/native-services.ts:319` | superuser | CUT | `/api/logs` |
-| `GET /api/traces` | `routes/traces.ts:20` | superuser + CC admin key | KEEP | NEW Go BFF `GET /api/traces`, same shape |
+| `GET /api/traces` | `routes/traces.ts:20` | superuser + CC admin key | KEEP | NEW Go BFF `GET /api/traces`, same shape except `created_at` carries a zone (RFC 3339 UTC; cc's own route keeps the legacy naive string) |
 | `GET /api/traces/:id` | `routes/traces.ts:37` | superuser + CC admin key | KEEP | NEW Go BFF `GET /api/traces/{id}` |
 | `GET /api/admin/households` | `routes/admin.ts:13` | superuser | KEEP | pass-through → auth `GET /superuser/households` |
 | `GET /api/admin/nodes` | `routes/admin.ts:23` | superuser | KEEP | pass-through → auth `GET /superuser/nodes` |

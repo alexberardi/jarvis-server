@@ -3,14 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { fetchTraces, type TraceListItem } from '@/api/traces'
 import { fetchAllHouseholds, fetchAllNodes, type AdminNode } from '@/api/admin'
+import { formatServerTime } from '@/lib/time'
 
 function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
 function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleString(undefined, {
+  return formatServerTime(iso, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

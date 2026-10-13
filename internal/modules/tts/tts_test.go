@@ -464,6 +464,30 @@ func TestSpeakReader(t *testing.T) {
 	}
 }
 
+// A stream read to its end has given back its engine reference and its synthesis slot: the
+// HTTP handler returns right after EOF, and TestSettingsDriveVoice's next voice change expects
+// the old engine closed at once. It flaked in CI while the release came after the EOF; that
+// window was too narrow to hit reliably here, so this checks the invariant every time.
+func TestStreamReleasesBeforeEOF(t *testing.T) {
+	e := setup(t, &Module{})
+	for i := 0; i < 50; i++ {
+		st, err := e.m.Speak(context.Background(), "Hi. Bye.", SpeakOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.ReadAll(st); err != nil {
+			t.Fatal(err)
+		}
+		e.m.eng.mu.Lock()
+		refs := e.m.eng.cur.refs
+		e.m.eng.mu.Unlock()
+		if refs != 0 || len(e.m.sem) != 0 {
+			t.Fatalf("after EOF: %d engine refs, %d slots held", refs, len(e.m.sem))
+		}
+		st.Close()
+	}
+}
+
 func TestSettingsDriveVoice(t *testing.T) {
 	e := setup(t, &Module{})
 	ctx := context.Background()
