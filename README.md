@@ -31,7 +31,9 @@ Questions, bug reports and quick help: the project [Discord](https://discord.gg/
 
 - **On a desktop** (Linux, macOS; Windows untested on real hardware) it offers OS control as tools:
   open links and apps, volume, window list/focus/minimise/close, the user's own browser through the
-  Jarvis Browser Control extension, and reading the screen (Hyprland/sway and macOS). With `--voice`
+  Jarvis Browser Control extension, reading the screen (Hyprland/sway and macOS), and dictation
+  ("tell claude to run the tests", "fill in username abcde on browser", "click OK", "press
+  enter"). With `--voice`
   (Linux, macOS) it listens for "hey jarvis" and shows a small on-screen indicator, the island.
 - **On a Raspberry Pi** with the ReSpeaker 2-mics HAT it runs the voice pipeline, LEDs and button.
   This is the newest part and is still experimental: there is no Pi installer, provisioning
@@ -143,6 +145,14 @@ scripts/agent-dev-run.sh --install            # start at login instead (systemd 
 Enrolling asks whether to set up browser control (default yes); `jarvis-agent browser install` does
 it later. Firefox gets a Mozilla-signed extension; Chrome, Edge, Brave and Arc are also supported
 (see [docs/agent/DESIGN.md](docs/agent/DESIGN.md) §10).
+
+Dictation types into the window in front or into an app you name, and presses Enter, Escape, Tab
+or the arrows to answer dialogs ([docs/agent/DESIGN.md](docs/agent/DESIGN.md) §14). It needs
+`wtype` on Hyprland/sway and other wlroots desktops (`sudo pacman -S wtype`, `sudo apt install
+wtype`), `xdotool` on X11, `ydotool` with its daemon on GNOME/KDE (typing only, plain ASCII), and the
+Accessibility grant on macOS. Typing into a *named* app works on Hyprland, sway, X11, macOS and
+Windows. `jarvis-agent status` says what works; `run --confirm-dictation submit` makes Jarvis ask
+"Send … to Claude?" before anything is sent.
 
 Or by hand:
 

@@ -32,6 +32,9 @@ type CommandError struct {
 
 func (e *CommandError) Error() string { return e.Message }
 
+// ErrorCode is the extension's code (dictate.Code reads it when a confirmed fill or click fails).
+func (e *CommandError) ErrorCode() string { return e.Code }
+
 // BrowserInfo describes one connected browser.
 type BrowserInfo struct {
 	ID               int       `json:"id"`

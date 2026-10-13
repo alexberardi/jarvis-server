@@ -316,7 +316,7 @@ func (l *Wayland) sway(ctx context.Context, scope, window string) (target, error
 			return target{}, err
 		}
 		n := vs[i].n
-		return target{region: &geometry{n.Rect.X, n.Rect.Y, n.Rect.Width, n.Rect.Height}, title: n.Name, app: cands[i].app()}, nil
+		return target{region: &geometry{n.Rect.X, n.Rect.Y, n.Rect.Width, n.Rect.Height}, title: n.Name, app: cands[i].App()}, nil
 	}
 	f, output := root.focused("")
 	if f == nil {

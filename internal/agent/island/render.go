@@ -5,7 +5,12 @@ import (
 	"image/color"
 	"image/draw"
 	"math"
+	"sync"
 
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/math/fixed"
 	"golang.org/x/image/vector"
 )
 
@@ -13,8 +18,9 @@ import (
 // logical pixels (points); Render scales them to the backing buffer.
 
 const (
-	// CanvasW × CanvasH is the surface the platform shows: the pill plus room to slide in.
-	CanvasW = 200
+	// CanvasW × CanvasH is the surface the platform shows: the widest pill (a note) plus room
+	// to slide in. Everything outside the pill is transparent and click-through.
+	CanvasW = 360
 	CanvasH = 56
 
 	pillW   = 136
@@ -31,6 +37,12 @@ const (
 	barMinH = 4
 	barMaxH = 24
 	barsEnd = 18 // the last bar's right edge, from the pill's right edge
+
+	// A note (what is being typed, a question waiting for a yes): a wider pill with text.
+	noteMaxW  = 344
+	noteTextX = orbX + orbR + 11 // text start, from the pill's left edge
+	notePadR  = 18
+	noteSize  = 13 // points
 )
 
 var (
@@ -40,6 +52,8 @@ var (
 	thinkCol   = color.NRGBA{157, 140, 255, 255} // thinking
 	speakCol   = color.NRGBA{235, 245, 255, 255} // speaking
 	errorCol   = color.NRGBA{255, 69, 58, 255}
+	noteCol    = color.NRGBA{48, 209, 88, 255} // typing, a question
+	textCol    = color.NRGBA{242, 242, 247, 255}
 	ringTrackA = 0.18
 )
 
@@ -50,6 +64,7 @@ type Frame struct {
 	Bars   [nBars]float64 // 0..1 bar heights
 	Ring   float64        // follow-up: the fraction of the window left (1 → 0)
 	Glow   float64        // 0..1 halo around the orb (loudness)
+	Text   string         // Note: the text shown
 }
 
 // Render draws f into dst (CanvasW·scale × CanvasH·scale), clearing it first.
@@ -62,17 +77,29 @@ func Render(dst *image.RGBA, f Frame, scale float64) {
 	alpha := math.Min(1, f.Appear*1.6)
 	c := &canvas{dst: dst, s: scale, alpha: alpha}
 
-	x0 := (CanvasW - pillW) / 2.0
+	w := float64(pillW)
+	var face font.Face
+	var text string
+	if f.State == Note {
+		face = noteFace(scale)
+		text, w = fitNote(face, f.Text, scale)
+	}
+	x0 := (CanvasW - w) / 2
 	y0 := pillTop - (1-e)*(pillTop+pillH+2) // slides down from above the canvas
 	bg := pillColor
 	if f.State == FollowUp {
 		bg.A = 200 // dimmer while only waiting
 	}
-	c.fill(func(z *rast) { z.roundRect(x0, y0, pillW, pillH, pillH/2) }, edgeColor, 1)
-	c.fill(func(z *rast) { z.roundRect(x0+0.75, y0+0.75, pillW-1.5, pillH-1.5, pillH/2-0.75) }, bg, 1)
+	c.fill(func(z *rast) { z.roundRect(x0, y0, w, pillH, pillH/2) }, edgeColor, 1)
+	c.fill(func(z *rast) { z.roundRect(x0+0.75, y0+0.75, w-1.5, pillH-1.5, pillH/2-0.75) }, bg, 1)
 
 	accent := accentFor(f.State)
 	cx, cy := x0+orbX, y0+pillH/2
+	if f.State == Note {
+		c.fill(func(z *rast) { z.circle(cx, cy, orbR) }, accent, 1)
+		c.text(face, text, x0+noteTextX, cy, textCol)
+		return
+	}
 	switch f.State {
 	case FollowUp:
 		c.fill(func(z *rast) { z.ring(cx, cy, ringR, ringW, 0, 1) }, accent, ringTrackA)
@@ -108,8 +135,69 @@ func accentFor(s State) color.NRGBA {
 		return speakCol
 	case Error:
 		return errorCol
+	case Note:
+		return noteCol
 	}
 	return listenCol
+}
+
+var (
+	fontOnce sync.Once
+	fontErr  error
+	goFont   *opentype.Font
+	facesMu  sync.Mutex
+	faces    = map[float64]font.Face{}
+)
+
+// noteFace is the Go font at noteSize for a buffer scale (nil if it can't be parsed, which
+// leaves the note without text rather than failing the island).
+func noteFace(scale float64) font.Face {
+	fontOnce.Do(func() { goFont, fontErr = opentype.Parse(goregular.TTF) })
+	if fontErr != nil {
+		return nil
+	}
+	facesMu.Lock()
+	defer facesMu.Unlock()
+	if f, ok := faces[scale]; ok {
+		return f
+	}
+	f, err := opentype.NewFace(goFont, &opentype.FaceOptions{Size: noteSize * scale, DPI: 72, Hinting: font.HintingNone})
+	if err != nil {
+		return nil
+	}
+	faces[scale] = f
+	return f
+}
+
+// fitNote cuts text to fit the widest note (with "…") and returns it with the pill's width
+// in logical pixels: as wide as the text needs, never narrower than the voice pill.
+func fitNote(face font.Face, text string, scale float64) (string, float64) {
+	if face == nil {
+		return "", pillW
+	}
+	room := fixed.Int26_6((noteMaxW - noteTextX - notePadR) * scale * 64)
+	r, ell := []rune(text), ""
+	for len(r) > 0 && font.MeasureString(face, string(r)+ell) > room {
+		r, ell = r[:len(r)-1], "…"
+	}
+	if ell != "" {
+		text = string(r) + ell
+	}
+	tw := float64(font.MeasureString(face, text)) / 64 / scale
+	return text, math.Max(pillW, math.Min(noteMaxW, noteTextX+tw+notePadR))
+}
+
+// text draws one line with its vertical centre at cy (logical pixels).
+func (c *canvas) text(face font.Face, s string, x, cy float64, col color.NRGBA) {
+	if face == nil || s == "" {
+		return
+	}
+	col.A = uint8(math.Round(float64(col.A) * clamp01(c.alpha)))
+	m := face.Metrics()
+	base := cy*c.s + float64(m.Ascent-m.Descent)/64/2
+	d := font.Drawer{Dst: c.dst, Src: image.NewUniform(col), Face: face,
+		Dot: fixed.Point26_6{X: fixed.Int26_6(x * c.s * 64), Y: fixed.Int26_6(base * 64)}}
+	d.DrawString(s)
 }
 
 // canvas draws anti-aliased shapes given in logical pixels.
