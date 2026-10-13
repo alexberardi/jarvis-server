@@ -13,6 +13,16 @@ Update it at the end of every working session, and whenever a task finishes or a
 Done together with the `v0.1.0` release, not before, because the legacy Python stack stays the supported install until then:
 
 - [ ] **jarvis-installer:** merge the jarvisd landing page (branch `feat/jarvisd-landing`, draft PR). It replaces the compose wizard at installer.jarvisautomation.io with the `install.sh`/`install.ps1` one-liners and a legacy-import pointer (`docs/install/00-installers.md` §1.1). Its one-liners use the stable release URLs, which 404 until a non-prerelease exists.
+- [ ] **Desktop agent without a terminal:** device-code pairing, a first-run window (pairing, browser
+  control, macOS permissions), per-OS installers, and "Add a computer" in admin and app.
+  An admin setup checklist ("install the agent" → "add the browser extension", ticks turning
+  green live) and public extension listings on AMO and the Chrome Web Store (submit early: review
+  takes days). Plan, decisions and open questions are in `docs/agent/DESIGN.md` §13.
+- [ ] **Admin UI usable on phones and tablets** (user 2026-10-12: "on smaller screens it's basically
+  unusable"). In progress.
+- [ ] **Marketing material for the landing page:** reset the dev server to demo data
+  (`docs/dev/demo-reset.md`), then take the admin screenshots (scripted, light and dark), mobile
+  captures, the hero clip of the desktop agent (user), and a photo of the Pi node with the HAT.
 - [ ] **Docs:** update jarvis-docs, which still describes the multi-service Python stack, for jarvisd: install, upgrade, `import-legacy`, and the Go node. Also re-check this repo's README and `docs/install/` against the released version.
 
 ### Phase 0 checklist
