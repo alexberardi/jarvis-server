@@ -187,7 +187,9 @@ bin_version() { R "$1" version; }
 wait_version v0.0.1
 
 say "admin setup"
-token=$(R cat "$HOME_DIR/setup-token")
+# /health can answer before the auth module has written the token; the file is the signal.
+for _ in $(seq 1 60); do R test -s "$HOME_DIR/setup-token" && break; sleep 1; done
+token=$(R cat "$HOME_DIR/setup-token") || fail "no setup token after 60s"
 access=$(curl -fsS -X POST "$ADMIN/api/auth/setup" -H 'Content-Type: application/json' -H "X-Jarvis-Setup-Token: $token" \
   -d '{"email":"root@example.com","password":"password1"}' | json 'd["access_token"]')
 auth=(-H "Authorization: Bearer $access" -H 'Content-Type: application/json')

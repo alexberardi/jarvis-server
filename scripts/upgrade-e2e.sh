@@ -153,7 +153,9 @@ wait_version v0.0.2
 if [ "$MODE" = system ]; then sudo systemctl reset-failed jarvisd; else systemctl --user reset-failed jarvisd; fi
 
 say "4. the admin button: POST /api/update/apply v0.0.4"
-token=$(R cat "$HOME_DIR/setup-token")
+# /health can answer before the auth module has written the token; the file is the signal.
+for _ in $(seq 1 60); do R test -s "$HOME_DIR/setup-token" && break; sleep 1; done
+token=$(R cat "$HOME_DIR/setup-token") || fail "no setup token after 60s"
 access=$(curl -fsS -X POST "$ADMIN/api/auth/setup" -H 'Content-Type: application/json' -H "X-Jarvis-Setup-Token: $token" \
   -d '{"email":"root@example.com","password":"password1"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
 auth=(-H "Authorization: Bearer $access" -H 'Content-Type: application/json')
