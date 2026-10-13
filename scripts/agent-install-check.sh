@@ -24,9 +24,9 @@ case $(uname -s) in
     before=$(snap)
     R() { env -i HOME="$H" PATH=/usr/bin:/bin:/usr/sbin:/sbin "$@"; }
     R "$H/Downloads/jarvis-agent" install --files-only --desktop-shortcut
-    once=$(cd "$H" && find . -type f -o -type l | LC_ALL=C sort | xargs cat 2>/dev/null | cksum)
+    once=$(cd "$H" && find . \( -type f -o -type l \) -exec cksum {} + | LC_ALL=C sort | cksum)
     R "$H/Downloads/jarvis-agent" install --files-only --desktop-shortcut
-    twice=$(cd "$H" && find . -type f -o -type l | LC_ALL=C sort | xargs cat 2>/dev/null | cksum)
+    twice=$(cd "$H" && find . \( -type f -o -type l \) -exec cksum {} + | LC_ALL=C sort | cksum)
     [ "$once" = "$twice" ] || fail "a second install changed files"
     if [ "$(uname -s)" = Linux ]; then
       ID=net.jarvisautomation.agent.desktop
