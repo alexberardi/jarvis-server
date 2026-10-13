@@ -1415,6 +1415,9 @@ their ad-hoc signatures. `v0.0.0-notarize3` (run 37725013988) checked the exec w
 
 ## 9. No-terminal install (plan, 2026-10-12)
 
+**Buildable plan:** [01-no-cli-plan.md](01-no-cli-plan.md) (2026-10-13) turns this section and agent
+DESIGN §13–§14 into per-OS artifacts, phases, CI jobs, the sign-off matrix and the remaining questions.
+
 **Goal (user, 2026-10-12):** "absolutely 0 cli involvement … we need to make it as easy and
 approachable as humanly possible. that was a major point for switching to Go." A user downloads a
 file from the landing page or the release page, double-clicks it, and finishes in the browser. The
