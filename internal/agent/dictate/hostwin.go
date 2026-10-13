@@ -74,11 +74,27 @@ func SameMacPid(id, active string) bool {
 	return ok && active != "" && pid == strings.TrimSpace(active)
 }
 
-// X11Active is the focused X11 window via xdotool (decimal id).
-func X11Active(x Exec) func(ctx context.Context) (string, error) {
+// X11Active is the focused X11 window as a decimal id: from the window manager
+// (_NET_ACTIVE_WINDOW) when the built-in client can ask it, else from xdotool.
+func X11Active(x Exec, wm X11ActiveWM) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
+		if wm != nil {
+			if ok, _ := wm.WMAvailable(ctx); ok {
+				id, err := wm.Active(ctx)
+				if err != nil {
+					return "", err
+				}
+				return strconv.FormatUint(uint64(id), 10), nil
+			}
+		}
 		return x.Run(ctx, Cmd{Name: "xdotool", Args: []string{"getactivewindow"}})
 	}
+}
+
+// X11ActiveWM is the built-in EWMH client's part X11Active uses (*x11.Display).
+type X11ActiveWM interface {
+	WMAvailable(ctx context.Context) (bool, string)
+	Active(ctx context.Context) (uint32, error)
 }
 
 // MacFrontPid is the frontmost app's pid via System Events (the Automation grant window control

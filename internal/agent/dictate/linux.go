@@ -16,7 +16,7 @@ import (
 //     and other wlroots compositors; not GNOME, and KDE only for input methods), else wtype
 //     (the same protocol, if installed), else ydotool (uinput: any compositor, but it needs the
 //     ydotoold daemon and types US-layout ASCII only);
-//   - X11: xdotool, else ydotool.
+//   - X11: XTEST spoken directly (X11, built in), else xdotool, else ydotool.
 //
 // The helpers are fallbacks for when the built-in backend can't run. Their text goes on stdin,
 // never the command line (other processes can read argv).
@@ -24,6 +24,8 @@ type LinuxKeyboard struct {
 	X Exec
 	// Wayland is the built-in virtual keyboard (vkbd.Keyboard); nil for none.
 	Wayland Injector
+	// X11 is the built-in XTEST keyboard (x11.Keyboard); nil for none.
+	X11 Injector
 }
 
 // Injector is a built-in typing backend: it sends keysym strokes to whatever has focus.
@@ -36,6 +38,7 @@ type Injector interface {
 
 const (
 	beWayland = "wayland"
+	beX11     = "x11"
 	beWtype   = "wtype"
 	beYdotool = "ydotool"
 	beXdotool = "xdotool"
@@ -83,6 +86,15 @@ func (l *LinuxKeyboard) native(ctx context.Context) bool {
 	return ok
 }
 
+// nativeX: the built-in XTEST keyboard works now.
+func (l *LinuxKeyboard) nativeX(ctx context.Context) bool {
+	if l.X11 == nil || !l.x11() {
+		return false
+	}
+	ok, _ := l.X11.Available(ctx)
+	return ok
+}
+
 // backend is the tool to use now, or "" with the reason.
 func (l *LinuxKeyboard) backend(ctx context.Context) (string, string) {
 	switch {
@@ -90,6 +102,8 @@ func (l *LinuxKeyboard) backend(ctx context.Context) (string, string) {
 		return beWayland, ""
 	case l.wtypeWorks():
 		return beWtype, ""
+	case l.nativeX(ctx):
+		return beX11, ""
 	case l.x11() && l.X.LookPath("xdotool"):
 		return beXdotool, ""
 	case (l.wayland() || l.x11()) && l.ydotoolWorks():
@@ -97,7 +111,7 @@ func (l *LinuxKeyboard) backend(ctx context.Context) (string, string) {
 	case l.wayland():
 		return "", "this Wayland desktop offers no way to type into other apps (the virtual-keyboard protocol of Hyprland, sway and other wlroots compositors); ydotool with ydotoold running would work"
 	case l.x11():
-		return "", "typing on X11 needs xdotool installed"
+		return "", "this X server can't take typed keys (no XTEST extension) and xdotool isn't installed"
 	}
 	return "", "typing needs a graphical session (no WAYLAND_DISPLAY or DISPLAY)"
 }
@@ -108,6 +122,8 @@ func (l *LinuxKeyboard) Name() string {
 		return "none"
 	case beWayland:
 		return l.Wayland.Name()
+	case beX11:
+		return l.X11.Name()
 	default:
 		return b
 	}
@@ -130,12 +146,12 @@ func typeTimeout(text string) time.Duration {
 func (l *LinuxKeyboard) Type(ctx context.Context, text string) error {
 	var c Cmd
 	switch b, why := l.backend(ctx); b {
-	case beWayland:
+	case beWayland, beX11:
 		strokes, ok := xkb.Strokes(text)
 		if !ok {
 			return fmt.Errorf("%w: text holds a character that can't be typed", errBadArgs)
 		}
-		return l.Wayland.Send(ctx, strokes)
+		return l.injector(b).Send(ctx, strokes)
 	case beWtype:
 		c = Cmd{Name: "wtype", Args: []string{"-s", wtypeSettle, "-"}, Env: utf8Env}
 	case beXdotool:
@@ -153,6 +169,13 @@ func (l *LinuxKeyboard) Type(ctx context.Context, text string) error {
 	c.Stdin, c.Timeout = text, typeTimeout(text)
 	_, err := l.X.Run(ctx, c)
 	return err
+}
+
+func (l *LinuxKeyboard) injector(b string) Injector {
+	if b == beX11 {
+		return l.X11
+	}
+	return l.Wayland
 }
 
 // Key names per tool. ydotool takes evdev keycodes (linux/input-event-codes.h) as code:1/code:0.
@@ -178,8 +201,8 @@ func (l *LinuxKeyboard) Press(ctx context.Context, k Key) error {
 	shift := k == KeyShiftTab
 	var c Cmd
 	switch b, why := l.backend(ctx); b {
-	case beWayland:
-		return l.Wayland.Send(ctx, []xkb.Stroke{keyStrokes[k]})
+	case beWayland, beX11:
+		return l.injector(b).Send(ctx, []xkb.Stroke{keyStrokes[k]})
 	case beWtype:
 		args := []string{"-s", wtypeSettle}
 		if shift {

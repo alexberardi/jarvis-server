@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/x11"
 )
 
 // fakeSys is a scriptable Sys: which binaries exist, the environment, and canned command output.
@@ -145,6 +147,53 @@ func linuxFull() *fakeSys {
 		},
 	}
 }
+
+// linuxEWMH is an X11 desktop with an EWMH window manager and none of the window helpers:
+// windows go through the built-in client (a fake X11 recording into the same Sys).
+func linuxEWMH() (*fakeSys, *fakeX) {
+	s := linuxFull()
+	delete(s.bins, "wmctrl")
+	delete(s.bins, "xdotool")
+	return s, &fakeX{sys: s, wm: true, windows: []x11.Window{
+		{ID: 0x03a00007, Title: "Mozilla Firefox — a  title", Class: "firefox.Firefox"},
+		{ID: 0x01200003, Title: "xfce4-panel", Class: "xfce4-panel.Xfce4-panel", Minimized: true}}}
+}
+
+// fakeX is the built-in X11 window control, recording "x11 <op> <id>" among the fakeSys's
+// commands.
+type fakeX struct {
+	sys     *fakeSys
+	wm      bool
+	why     string
+	windows []x11.Window
+	err     error
+}
+
+func (f *fakeX) rec(line string) {
+	f.sys.record("x11", line)
+	f.sys.mu.Lock()
+	f.sys.runs = append(f.sys.runs, "x11 "+line)
+	f.sys.mu.Unlock()
+}
+
+func (f *fakeX) WMAvailable(context.Context) (bool, string) {
+	f.rec("probe")
+	return f.wm, f.why
+}
+
+func (f *fakeX) Windows(context.Context) ([]x11.Window, error) {
+	f.rec("list")
+	return f.windows, f.err
+}
+
+func (f *fakeX) op(name string, id uint32) error {
+	f.rec(name + " " + x11.FormatID(id))
+	return f.err
+}
+
+func (f *fakeX) Activate(_ context.Context, id uint32) error    { return f.op("activate", id) }
+func (f *fakeX) CloseWindow(_ context.Context, id uint32) error { return f.op("close", id) }
+func (f *fakeX) Iconify(_ context.Context, id uint32) error     { return f.op("iconify", id) }
 
 func linuxEmpty() *fakeSys { return &fakeSys{bins: map[string]bool{}, env: map[string]string{}} }
 
