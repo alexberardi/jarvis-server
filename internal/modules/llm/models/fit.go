@@ -54,7 +54,13 @@ func OnFlavour(hw engine.Hardware, f engine.Flavour) engine.Hardware {
 	return hw
 }
 
-// estimateNeed returns the bytes a model needs at ctx tokens of f16 KV cache.
+// estimateNeed returns the bytes a model needs at ctx tokens of f16 KV cache, all of it: in
+// system RAM on the CPU. On a GPU, an LLM's card holds that less its host bytes (gpuNeed).
+//
+// The 600 MB covers the engine's CUDA context and its compute buffers, and ~3% the rest of
+// llama.cpp's own allocations. Checked against a running engine: Qwen3.5-9B Q4_K_M with its
+// F16 projector at 32768 context, f16 KV, one slot, measured 7506 MB in nvidia-smi on a
+// 3080 Ti; gpuNeed says 7560 MB.
 func estimateNeed(kind string, weights, kvPerTok int64, ctx int) (int64, bool) {
 	guessed := false
 	switch kind {
@@ -74,6 +80,16 @@ func estimateNeed(kind string, weights, kvPerTok int64, ctx int) (int64, bool) {
 	return weights + kvPerTok*int64(ctx) + weights*3/100 + 600*mb, guessed
 }
 
+// gpuNeed is estimateNeed for a card: an LLM's host bytes (its input token embeddings, which
+// llama.cpp keeps in system RAM) don't count.
+func gpuNeed(kind string, weights, host, kvPerTok int64, ctx int) (int64, bool) {
+	need, guessed := estimateNeed(kind, weights, kvPerTok, ctx)
+	if kind == engine.ModelLLM && host > 0 && host < weights {
+		need -= host
+	}
+	return need, guessed
+}
+
 // FitFor estimates a model of weights bytes (plus projector) at ctx on an otherwise empty hw.
 func FitFor(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx int) Fit {
 	return FitAlongside(hw, kind, weights, kvPerTok, ctx, nil)
@@ -83,6 +99,12 @@ func FitFor(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx int) F
 // by what the residents placed on it need, and the model is judged on the card with the most
 // left.
 func FitAlongside(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx int, residents []Resident) Fit {
+	return fitAlongside(hw, kind, weights, 0, kvPerTok, ctx, residents)
+}
+
+// fitAlongside is FitAlongside for a model that keeps host bytes of its weights in system
+// RAM on a GPU (Entry.HostBytes).
+func fitAlongside(hw engine.Hardware, kind string, weights, host, kvPerTok int64, ctx int, residents []Resident) Fit {
 	if ctx <= 0 {
 		ctx = 8192
 	}
@@ -94,13 +116,15 @@ func FitAlongside(hw engine.Hardware, kind string, weights, kvPerTok int64, ctx 
 	f := Fit{NeededMB: need / mb, Context: ctx, KVEstimate: guessed}
 	devs := hw.Discrete(hw.Flavour)
 	if hw.Flavour == engine.FlavourCPU || len(devs) == 0 {
-		// On the CPU the model lives in system RAM.
+		// On the CPU the whole model lives in system RAM.
 		f.Verdict, f.RAMMB = "cpu", hw.RAMMB
 		if hw.RAMMB > 0 && f.NeededMB > hw.RAMMB*cpuRAMShare/100 {
 			f.Verdict = "too_big"
 		}
 		return f
 	}
+	need, _ = gpuNeed(kind, weights, host, kvPerTok, ctx)
+	f.NeededMB = need / mb
 	committed := map[int]int64{}
 	labels := map[int][]string{}
 	for _, r := range residents {
@@ -150,7 +174,7 @@ func entryFitAlongside(hw engine.Hardware, e Entry, residents []Resident) Fit {
 			w += p.Size
 		}
 	}
-	return FitAlongside(hw, e.Kind, w, e.KVBytesPerTok, e.ContextDefault, residents)
+	return fitAlongside(hw, e.Kind, w, e.HostBytes, e.KVBytesPerTok, e.ContextDefault, residents)
 }
 
 // Overcommitted warns, per card, when the assigned engines together need more than it has

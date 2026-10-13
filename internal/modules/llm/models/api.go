@@ -181,7 +181,7 @@ func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
 	residents := a.Manager.Residents(ctx)
 	choices := []hfChoice{}
 	for _, c := range Choices(repo) {
-		choices = append(choices, hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, ctxLen, residents)})
+		choices = append(choices, hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, 0, ctxLen, residents)})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices})
 }
