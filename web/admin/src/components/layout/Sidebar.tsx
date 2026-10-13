@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Settings, Link2, Cpu, Box, Activity, ScrollText, Users, ArrowUpCircle } from 'lucide-react'
+import { LayoutDashboard, Settings, Link2, Cpu, Box, Activity, ScrollText, Users, ArrowUpCircle, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import SystemInfoBar from './SystemInfoBar'
 import type { LucideIcon } from 'lucide-react'
@@ -28,34 +28,76 @@ const navItems: NavItem[] = [
   { label: 'Updates', icon: ArrowUpCircle, path: '/update' },
 ]
 
-export default function Sidebar() {
+interface SidebarProps {
+  /** Below the md breakpoint the sidebar is an off-canvas drawer; this opens it. */
+  open?: boolean
+  onClose?: () => void
+}
+
+export const SIDEBAR_ID = 'admin-sidebar'
+
+/**
+ * Sidebar is a static column from md up. Below md it is a drawer the header's menu button opens;
+ * picking a destination, the backdrop or Escape closes it.
+ */
+export default function Sidebar({ open = false, onClose }: SidebarProps) {
+  const close = () => onClose?.()
   return (
-    <aside className="flex w-56 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex h-14 items-center border-b border-[var(--color-border)] px-4">
-        <span className="text-lg font-bold text-[var(--color-primary)]">Jarvis</span>
-      </div>
-
-      <nav className="flex-1 space-y-1 p-2">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                  : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)]',
-              )
-            }
+    <>
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          aria-hidden="true"
+          data-testid="sidebar-backdrop"
+          onClick={close}
+        />
+      )}
+      <aside
+        id={SIDEBAR_ID}
+        aria-label="Main navigation"
+        data-open={open ? 'true' : 'false'}
+        className={cn(
+          'flex w-64 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] md:w-56',
+          // Drawer below md: fixed, off-canvas unless open. Static column from md.
+          'fixed inset-y-0 left-0 z-50 max-w-[85vw] transition-transform duration-200 md:static md:z-auto md:max-w-none md:translate-x-0',
+          open ? 'translate-x-0 shadow-xl' : '-translate-x-full max-md:invisible',
+        )}
+      >
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] px-4">
+          <span className="text-lg font-bold text-[var(--color-primary)]">Jarvis</span>
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close navigation"
+            className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] md:hidden"
           >
-            <item.icon size={18} />
-            {item.label}
-          </NavLink>
-        ))}
-      </nav>
+            <X size={20} />
+          </button>
+        </div>
 
-      <SystemInfoBar />
-    </aside>
+        <nav className="flex-1 space-y-1 overflow-y-auto p-2">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              onClick={close}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 max-md:min-h-10 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                    : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)]',
+                )
+              }
+            >
+              <item.icon size={18} />
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <SystemInfoBar />
+      </aside>
+    </>
   )
 }

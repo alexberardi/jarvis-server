@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Copy, Power, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { requestStop, type StopResult } from '@/api/system'
-import { buttonClass } from '@/components/models/styles'
+import { buttonClass, dialogClass } from '@/components/models/styles'
+import { cn } from '@/lib/utils'
 import { useFeatureAvailable } from '@/hooks/useFeature'
 import { errorMessage } from '@/lib/errors'
 import { restartJarvisd } from '@/lib/restart'
@@ -44,8 +45,8 @@ function StopDialog({ startCommand, startNote, onClose }: { startCommand: string
   const result = phase.step === 'done' ? phase.result : null
   const stopping = result?.kind === 'stopping'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="stop-title">
-      <div className="w-full max-w-lg space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl">
+    <div className={dialogClass.backdrop} role="dialog" aria-modal="true" aria-labelledby="stop-title">
+      <div className={cn(dialogClass.panel, 'space-y-3')}>
         <h2 id="stop-title" className="flex items-center gap-2 text-lg font-semibold text-[var(--color-text)]">
           <Square size={16} /> {stopping ? 'jarvisd is stopping' : 'Stop jarvisd?'}
         </h2>

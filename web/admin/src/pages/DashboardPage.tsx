@@ -43,7 +43,7 @@ function SystemCard() {
     <Section title="System" icon={Server} actions={data && <PowerControls info={data} />}>
       {isError && <p className="text-sm text-red-500">{errorMessage(error)}</p>}
       {data && (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm [&_dd]:break-words">
           <dt className="text-[var(--color-text-muted)]">Host</dt>
           <dd className="text-[var(--color-text)]">{data.hostname}</dd>
           <dt className="text-[var(--color-text-muted)]">Platform</dt>
@@ -111,7 +111,7 @@ function ModelsCard() {
       title="Models"
       icon={Box}
       actions={
-        <Link to="/models" className="text-xs text-[var(--color-primary)] hover:underline">
+        <Link to="/models" className={buttonClass.link}>
           Manage
         </Link>
       }
@@ -122,7 +122,7 @@ function ModelsCard() {
           const model = models[l] || voice[l]
           return (
             <li key={l} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-[var(--color-text)]">
+              <span className="min-w-0 truncate text-[var(--color-text)]" title={model ? `${LABEL_TITLE[l]}: ${model}` : undefined}>
                 {LABEL_TITLE[l]}
                 {model && <span className="ml-2 text-xs text-[var(--color-text-muted)]">{model}</span>}
               </span>
@@ -150,7 +150,7 @@ function NodesCard() {
       title="Nodes"
       icon={Cpu}
       actions={
-        <Link to="/nodes" className="text-xs text-[var(--color-primary)] hover:underline">
+        <Link to="/nodes" className={buttonClass.link}>
           All nodes
         </Link>
       }
@@ -198,7 +198,7 @@ function TracesCard() {
       title="Recent requests"
       icon={Activity}
       actions={
-        <Link to="/traces" className="text-xs text-[var(--color-primary)] hover:underline">
+        <Link to="/traces" className={buttonClass.link}>
           All traces
         </Link>
       }
@@ -209,8 +209,8 @@ function TracesCard() {
         <ul className="space-y-1 text-xs">
           {data.traces.map((t) => (
             <li key={t.id}>
-              <Link to={`/traces/${t.id}`} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--color-surface-alt)]">
-                <span className="min-w-0 truncate text-[var(--color-text)]">{t.user_command || t.request_type}</span>
+              <Link to={`/traces/${t.id}`} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--color-surface-alt)] max-md:min-h-10 max-md:py-2">
+                <span className="min-w-0 truncate text-[var(--color-text)]" title={t.user_command || t.request_type}>{t.user_command || t.request_type}</span>
                 <span className="flex shrink-0 items-center gap-2 text-[var(--color-text-muted)]">
                   <Pill tone={t.status === 'success' || t.status === 'ok' ? 'ok' : t.status === 'error' ? 'bad' : 'muted'}>{t.status}</Pill>
                   {Math.round(t.total_duration_ms)} ms · {ago(t.created_at)}
@@ -233,7 +233,7 @@ export default function DashboardPage() {
       <GpuFaultBanner fault={labels.data?.gpu_fault} />
       <ModelBanner />
       <UpdateBanner />
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SystemCard />
         <HealthCard />
         <ModelsCard />

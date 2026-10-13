@@ -118,12 +118,12 @@ export default function TraceDetailPage() {
 
       {/* Header */}
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-[var(--color-text)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 basis-60">
+            <h1 className="break-words text-lg font-bold text-[var(--color-text)]">
               {trace.user_command ?? 'Request Trace'}
             </h1>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+            <p className="mt-1 break-words text-sm text-[var(--color-text-muted)]">
               {trace.source === 'mobile' ? '📱 Mobile' : '🔊 Node'}
               {trace.node_id && ` (${trace.node_id})`}
               {' · '}
@@ -151,7 +151,7 @@ export default function TraceDetailPage() {
             {trace.error_message}
           </div>
         )}
-        <p className="mt-2 text-xs text-[var(--color-text-muted)] font-mono">
+        <p className="mt-2 break-all text-xs text-[var(--color-text-muted)] font-mono">
           {trace.conversation_id}
         </p>
       </div>
@@ -163,7 +163,7 @@ export default function TraceDetailPage() {
         </h2>
 
         {/* Flow arrow */}
-        <p className="mb-4 text-xs text-[var(--color-text-muted)] opacity-60">
+        <p className="mb-4 break-words text-xs text-[var(--color-text-muted)] opacity-60">
           {serviceHops.map((h) => SERVICE_LABELS[h.service] ?? h.service).join(' → ')}
         </p>
 
@@ -174,15 +174,15 @@ export default function TraceDetailPage() {
             const label = SERVICE_LABELS[hop.service] ?? hop.service
 
             return (
-              <div key={`${hop.service}-${i}`} className="flex items-center gap-3">
+              <div key={`${hop.service}-${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
                 <span
                   className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
                   style={{ backgroundColor: color }}
                 />
-                <span className="w-32 text-sm text-[var(--color-text)] shrink-0">
+                <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)] sm:w-32 sm:flex-none sm:shrink-0">
                   {label}
                 </span>
-                <div className="flex-1 h-6 rounded bg-[var(--color-surface-alt)] relative">
+                <div className="relative order-last h-6 min-w-0 basis-full overflow-hidden rounded bg-[var(--color-surface-alt)] sm:order-none sm:flex-1 sm:basis-auto">
                   <div
                     className="absolute top-0 left-0 h-full rounded"
                     style={{
@@ -191,7 +191,7 @@ export default function TraceDetailPage() {
                       opacity: 0.7,
                     }}
                   />
-                  <span className="absolute inset-0 flex items-center px-2 text-xs text-[var(--color-text)] opacity-70">
+                  <span className="absolute inset-0 flex items-center truncate px-2 text-xs text-[var(--color-text)] opacity-70" title={hop.steps.join(', ')}>
                     {hop.steps.join(', ')}
                   </span>
                 </div>
@@ -224,13 +224,13 @@ export default function TraceDetailPage() {
               return (
                 <div
                   key={`${span.name}-${i}`}
-                  className={`flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 ${isSelected ? 'bg-[var(--color-surface-alt)]' : ''}`}
+                  className={`flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 max-md:min-h-10 ${isSelected ? 'bg-[var(--color-surface-alt)]' : ''}`}
                   onClick={() => setSelectedSpan(isSelected ? null : span)}
                 >
-                  <span className="w-36 truncate text-xs text-[var(--color-text-muted)] text-right shrink-0">
+                  <span className="w-24 truncate text-xs text-[var(--color-text-muted)] text-right shrink-0 sm:w-36" title={span.name}>
                     {span.name}
                   </span>
-                  <div className="flex-1 relative h-4 rounded bg-[var(--color-surface-alt)]">
+                  <div className="min-w-0 flex-1 relative h-4 overflow-hidden rounded bg-[var(--color-surface-alt)]">
                     <div
                       className="absolute top-0 h-full rounded"
                       style={{
@@ -244,7 +244,7 @@ export default function TraceDetailPage() {
                   <span className="w-14 text-xs text-[var(--color-text-muted)] text-right shrink-0 tabular-nums">
                     {formatDuration(span.duration_ms)}
                   </span>
-                  <span className="w-16 text-xs text-[var(--color-text-muted)] opacity-60 shrink-0">
+                  <span className="hidden w-16 truncate text-xs text-[var(--color-text-muted)] opacity-60 shrink-0 sm:inline">
                     {span.service}
                   </span>
                 </div>
@@ -256,7 +256,7 @@ export default function TraceDetailPage() {
         {/* Span detail */}
         {selectedSpan && showRawSpans && (
           <div className="mt-3 border-t border-[var(--color-border)] pt-3">
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm max-w-md">
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm max-w-md [&_dd]:break-words">
               <dt className="text-[var(--color-text-muted)]">Service</dt>
               <dd className="text-[var(--color-text)]">{selectedSpan.service}</dd>
               <dt className="text-[var(--color-text-muted)]">Duration</dt>

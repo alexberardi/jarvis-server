@@ -19,7 +19,7 @@ function formatTime(iso: string): string {
   })
 }
 
-interface ConversationGroup {
+export interface ConversationGroup {
   conversation_id: string
   traces: TraceListItem[]
   newest_at: string
@@ -66,6 +66,102 @@ function groupByConversation(traces: TraceListItem[]): ConversationGroup[] {
 
 function sourceBadge(source: string): string {
   return source === 'mobile' ? '📱' : '🔊'
+}
+
+function StatusDot({ status }: { status: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={status === 'ok' ? 'ok' : status}
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${status === 'ok' ? 'bg-green-500' : 'bg-red-500'}`}
+    />
+  )
+}
+
+/** TraceCards is the phone layout of the traces table: a card per conversation. */
+export function TraceCards({
+  groups,
+  expanded,
+  onToggle,
+  onOpen,
+  nodeLabel,
+  householdName,
+}: {
+  groups: ConversationGroup[]
+  expanded: Set<string>
+  onToggle: (conversationId: string) => void
+  onOpen: (traceId: string) => void
+  nodeLabel: (nodeId: string | null) => string
+  householdName: (householdId: string) => string
+}) {
+  if (groups.length === 0) {
+    return (
+      <p className="rounded-lg border border-[var(--color-border)] px-3 py-8 text-center text-sm text-[var(--color-text-muted)] lg:hidden">
+        No traces yet
+      </p>
+    )
+  }
+  return (
+    <ul className="space-y-2 lg:hidden" aria-label="Conversations" data-testid="trace-cards">
+      {groups.map((g) => {
+        const isExpanded = expanded.has(g.conversation_id)
+        const household = g.household_id ? householdName(g.household_id) : ''
+        return (
+          <li key={g.conversation_id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <button
+              type="button"
+              className="block w-full space-y-1 p-3 text-left text-sm"
+              aria-expanded={isExpanded}
+              onClick={() => onToggle(g.conversation_id)}
+            >
+              <span className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-muted)]">
+                <span className="min-w-0 truncate">
+                  {sourceBadge(g.source)} {formatTime(g.newest_at)} · {nodeLabel(g.node_id)}
+                  {household && ` · ${household}`}
+                </span>
+                <span className="flex shrink-0 items-center gap-2 tabular-nums">
+                  {formatDuration(g.total_duration_ms)}
+                  <StatusDot status={g.status} />
+                  <span>
+                    {g.traces.length} {isExpanded ? '▼' : '▶'}
+                  </span>
+                </span>
+              </span>
+              <span className="line-clamp-2 block break-words text-[var(--color-text)]">{g.user_command ?? '-'}</span>
+              {g.assistant_message && (
+                <span className="line-clamp-2 block break-words text-[var(--color-text-muted)]">{g.assistant_message}</span>
+              )}
+            </button>
+            {isExpanded && (
+              <ul className="border-t border-[var(--color-border)]">
+                {g.traces
+                  .slice()
+                  .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
+                  .map((t) => (
+                    <li key={t.id} className="border-b border-[var(--color-border)] last:border-0">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between gap-2 bg-[var(--color-surface-alt)]/40 px-3 py-2 text-left text-xs"
+                        onClick={() => onOpen(t.id)}
+                      >
+                        <span className="min-w-0 truncate text-[var(--color-text)]">
+                          {formatTime(t.created_at)} · {t.request_type}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2 tabular-nums text-[var(--color-text-muted)]">
+                          {formatDuration(t.total_duration_ms)}
+                          <StatusDot status={t.status} />
+                          {t.span_count} spans
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 export default function TracesPage() {
@@ -144,14 +240,15 @@ export default function TracesPage() {
   }
 
   const selectClass =
-    'rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-text)]'
+    'min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-text)]'
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold text-[var(--color-text)]">Request Traces</h1>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
           <select
+            aria-label="Household"
             className={selectClass}
             value={householdFilter}
             onChange={(e) => onHouseholdChange(e.target.value)}
@@ -165,6 +262,7 @@ export default function TracesPage() {
             ))}
           </select>
           <select
+            aria-label="Node"
             className={selectClass}
             value={nodeFilter}
             onChange={(e) => setNodeFilter(e.target.value)}
@@ -178,6 +276,7 @@ export default function TracesPage() {
             ))}
           </select>
           <select
+            aria-label="Status"
             className={selectClass}
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -187,6 +286,7 @@ export default function TracesPage() {
             <option value="error">Error</option>
           </select>
           <select
+            aria-label="Source"
             className={selectClass}
             value={sourceFilter}
             onChange={(e) => setSourceFilter(e.target.value)}
@@ -215,7 +315,16 @@ export default function TracesPage() {
           <p className="text-sm text-[var(--color-text-muted)]">
             {data.total} traces in {groups.length} conversation{groups.length === 1 ? '' : 's'}
           </p>
-          <div className="overflow-x-auto rounded-lg border border-[var(--color-border)]">
+          {/* Below lg (a phone, or a tablet next to the sidebar) the table becomes one card per conversation. */}
+          <TraceCards
+            groups={groups}
+            expanded={expanded}
+            onToggle={toggleExpanded}
+            onOpen={(id) => navigate(`/traces/${id}`)}
+            nodeLabel={(id) => (id ? nodeNameById.get(id) ?? id.slice(0, 8) : '-')}
+            householdName={(id) => householdNameById.get(id) ?? ''}
+          />
+          <div className="hidden overflow-x-auto rounded-lg border border-[var(--color-border)] lg:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface-alt)]">

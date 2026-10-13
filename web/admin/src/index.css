@@ -31,3 +31,25 @@ body {
   background-color: var(--color-background);
   color: var(--color-text);
 }
+
+/*
+ * Touch targets on phones and touch screens. The desktop layout uses compact controls
+ * (px-3 py-1.5 text-xs) that are under 40px tall and hard to hit with a thumb. Raising the floor
+ * here, in the base layer, covers every page's buttons and fields at once and leaves any utility
+ * that sets a min-height in charge. A mouse on a wide screen keeps the compact layout. Toggle
+ * switches (role="switch") keep their own size.
+ */
+@layer base {
+  @media (max-width: 47.999rem), (pointer: coarse) {
+    button:not([role='switch']),
+    select,
+    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    [role='button'] {
+      min-height: 2.5rem;
+    }
+    /* An icon-only button is square, so it needs the width too. */
+    button:not([role='switch']):has(> svg:only-child) {
+      min-width: 2.5rem;
+    }
+  }
+}

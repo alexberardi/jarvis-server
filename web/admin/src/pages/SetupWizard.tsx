@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
@@ -28,15 +28,29 @@ import {
 } from '@/components/wizard/steps'
 
 function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
+  const list = useRef<HTMLOListElement>(null)
+  // On a phone the steps are one row that scrolls sideways; keep the current one in view.
+  // This moves only the row, never the page.
+  useEffect(() => {
+    const ol = list.current
+    const cur = ol?.querySelector<HTMLElement>('[aria-current="step"]')
+    if (ol && cur && ol.scrollWidth > ol.clientWidth) {
+      ol.scrollLeft = cur.offsetLeft - (ol.clientWidth - cur.offsetWidth) / 2
+    }
+  }, [step])
   return (
-    <ol className="mb-4 flex flex-wrap items-center gap-1 text-xs" aria-label="Setup steps">
+    <ol
+      ref={list}
+      className="relative -mx-4 mb-4 flex items-center gap-1 overflow-x-auto px-4 text-xs sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+      aria-label="Setup steps"
+    >
       {STEPS.map((s, i) => {
         const done = i < idx(step)
         const current = s === step
         // Steps from Hardware on can be revisited; Check and Account are behind us for good.
         const canPick = done && idx(s) >= idx('hardware')
         return (
-          <li key={s} className="flex items-center gap-1">
+          <li key={s} className="flex shrink-0 items-center gap-1">
             {i > 0 && <span className="mx-1 h-px w-4 bg-[var(--color-border)]" aria-hidden />}
             <button
               type="button"
@@ -44,7 +58,7 @@ function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
               onClick={() => onPick(s)}
               aria-current={current ? 'step' : undefined}
               className={cn(
-                'flex items-center gap-1 rounded-full px-2.5 py-1',
+                'flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1',
                 current && 'bg-[var(--color-primary)] text-white',
                 done && 'text-[var(--color-text)]',
                 !done && !current && 'text-[var(--color-text-muted)]',
@@ -119,7 +133,7 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
       <div className={cn('w-full', wide ? 'max-w-3xl' : 'max-w-2xl')}>
         <div className="mb-2 text-center text-lg font-bold text-[var(--color-primary)]">Jarvis setup</div>
         <Stepper step={step} onPick={go} />
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-lg">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-lg sm:p-6">
           {step === 'check' && (
             <>
               <CheckStep />

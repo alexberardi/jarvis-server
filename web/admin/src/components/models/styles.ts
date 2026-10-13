@@ -42,14 +42,26 @@ export function stateTone(state: string): Tone {
 
 export const buttonClass = {
   primary:
-    'inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50',
+    'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50',
   secondary:
-    'inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50',
+    'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50',
   danger:
-    'inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-500 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50',
+    'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-500 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50',
   dangerSolid:
-    'inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50',
-  icon: 'rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)] disabled:opacity-50',
+    'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50',
+  /** A text link used as a card action ("Manage", "All nodes"); tall enough to tap below md. */
+  link: 'inline-flex items-center text-xs text-[var(--color-primary)] hover:underline max-md:min-h-10',
+  icon: 'inline-flex items-center justify-center rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)] disabled:opacity-50',
+}
+
+/**
+ * Modal dialogs: a bottom sheet on phones (full width, up to the full viewport height, scrolls
+ * inside), a centred card from sm up. Panel takes extra spacing classes (space-y-*).
+ */
+export const dialogClass = {
+  backdrop: 'fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center sm:p-4',
+  panel:
+    'max-h-dvh w-full overflow-y-auto rounded-t-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-lg sm:rounded-xl sm:pb-5',
 }
 
 export const inputClass =
