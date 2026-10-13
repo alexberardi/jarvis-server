@@ -18,6 +18,7 @@ var userOut = Obj{
 	"id":                   Int,
 	"email":                NonEmptyString,
 	"username":             NullOr(String),
+	"display_name":         Optional(NullOr(String)), // jarvisd addition; legacy omits it
 	"is_superuser":         Bool,
 	"must_change_password": Bool,
 }

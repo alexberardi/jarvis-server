@@ -29,6 +29,8 @@ export interface AdminUser {
   id: number
   email: string
   username: string
+  /** Optional friendly name; null when unset (show the username instead). */
+  display_name?: string | null
   is_active: boolean
   is_superuser: boolean
   must_change_password: boolean

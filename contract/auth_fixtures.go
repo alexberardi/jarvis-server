@@ -33,11 +33,12 @@ var householdListItem = Obj{"id": UUID, "name": String, "role": householdRole, "
 
 // memberShape is MemberResponse / MemberListItem.
 var memberShape = Obj{
-	"user_id":    Int,
-	"username":   String,
-	"email":      NonEmptyString,
-	"role":       householdRole,
-	"created_at": TimestampUTC,
+	"user_id":      Int,
+	"username":     String,
+	"display_name": Optional(NullOr(String)), // jarvisd addition; legacy omits it
+	"email":        NonEmptyString,
+	"role":         householdRole,
+	"created_at":   TimestampUTC,
 }
 
 // nodeCreated is NodeCreateResponse (admin and household node registration).

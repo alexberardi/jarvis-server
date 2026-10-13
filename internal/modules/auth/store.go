@@ -54,15 +54,16 @@ type user struct {
 	tempExpires  sql.NullString
 	createdAt    string
 	updatedAt    string
+	displayName  sql.NullString
 }
 
 const userCols = `id, email, username, password_hash, is_active, is_superuser, must_change_password,
-	temp_password_expires_at, created_at, updated_at`
+	temp_password_expires_at, created_at, updated_at, display_name`
 
 func scanUser(sc interface{ Scan(...any) error }) (*user, error) {
 	var u user
 	if err := sc.Scan(&u.id, &u.email, &u.username, &u.passwordHash, &u.isActive, &u.isSuperuser,
-		&u.mustChange, &u.tempExpires, &u.createdAt, &u.updatedAt); err != nil {
+		&u.mustChange, &u.tempExpires, &u.createdAt, &u.updatedAt, &u.displayName); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -80,9 +81,17 @@ func (u *user) tempExpired() bool {
 // out is UserOut.
 func (u *user) out() map[string]any {
 	return map[string]any{
-		"id": u.id, "email": u.email, "username": u.username,
+		"id": u.id, "email": u.email, "username": u.username, "display_name": nullStr(u.displayName),
 		"is_superuser": u.isSuperuser, "must_change_password": u.mustChange,
 	}
+}
+
+// nullStr is a nullable column as JSON: null when unset.
+func nullStr(s sql.NullString) any {
+	if !s.Valid {
+		return nil
+	}
+	return s.String
 }
 
 // userByID returns (nil, sql.ErrNoRows) when absent.

@@ -681,6 +681,34 @@ func (m *Module) handleMe(w http.ResponseWriter, _ *http.Request, u *user) {
 	httpx.WriteJSON(w, http.StatusOK, u.out())
 }
 
+// handleUpdateMe is PATCH /auth/me: the caller sets their own display name
+// (`{"display_name": "..."}`; "" or null clears it). It answers the updated UserOut.
+func (m *Module) handleUpdateMe(w http.ResponseWriter, r *http.Request, u *user) {
+	b, ok := readBody(w, r, false)
+	if !ok {
+		return
+	}
+	display, _ := b.displayName("display_name", true)
+	if !b.done(w) {
+		return
+	}
+	ctx := r.Context()
+	var out *user
+	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
+		if err := setDisplayName(ctx, tx, u.id, display); err != nil {
+			return err
+		}
+		var err error
+		out, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM auth_users WHERE id = ?`, u.id))
+		return err
+	})
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out.out())
+}
+
 // handleSwitchHousehold is POST /auth/switch-household: a new access token for another of the
 // caller's households.
 func (m *Module) handleSwitchHousehold(w http.ResponseWriter, r *http.Request, u *user) {
