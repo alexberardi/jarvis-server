@@ -175,9 +175,12 @@ func (m *Module) Speak(ctx context.Context, text string, opts SpeakOptions) (*St
 	}
 	go func() {
 		defer func() {
-			close(ch)
+			// Release before the reader sees the end: a caller that read the stream to EOF
+			// has its engine reference and synthesis slot back, so a voice change right after
+			// closes the old engine at once instead of whenever this goroutine got there.
 			m.eng.release(ref)
 			<-m.sem
+			close(ch)
 		}()
 		for i, sentence := range sentences {
 			if sctx.Err() != nil {
