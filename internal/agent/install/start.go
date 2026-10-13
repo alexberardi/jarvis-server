@@ -42,7 +42,8 @@ func Installed(e Env, s Sys) bool {
 func SetsUpOnFirstLaunch(e Env) bool {
 	switch e.GOOS {
 	case "linux":
-		return !strings.HasPrefix(e.Exe, e.Home+"/")
+		// Either separator: tests compute a Linux plan on every host.
+		return !strings.HasPrefix(e.Exe, e.Home+"/") && !strings.HasPrefix(e.Exe, e.Home+`\`)
 	case "darwin":
 		return BundleOf(e.Exe) != ""
 	}
