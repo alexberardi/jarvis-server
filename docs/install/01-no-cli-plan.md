@@ -156,7 +156,7 @@ Layout:
 Add-ons
 This computer                                   (detected; see "Installed" below)
   ✓ Jarvis desktop agent      Office-PC · online           [Download for macOS ▾]
-  ○ Browser extension         [Add to Firefox] [Add to Chrome]   waiting…
+  Browser extension           [Add to Firefox] [Add to Chrome]   (link only, no check; Q2)
 Your devices                                    (every desktop agent in your households)
   Office-PC     online · extension ✓            Laptop   offline 3 d · extension –
   [+ Add a computer]  → download + pairing approval
@@ -263,6 +263,21 @@ Sign-off matrix:
 | Hyprland (dev box) | — | deb or one-liner | Firefox | `graphical-session.target` risk |
 
 ## 6. Open questions (one at a time, most blocking first)
+
+**Answered (user, 2026-10-13):**
+
+- **Q1: `net.jarvisautomation.agent`** for the agent's app identifier: the bundle id, the launchd
+  label, the portal app id and `.desktop` name, and the Windows task name. The user was fine with
+  either `io.jarvisautomation.agent` or `net.` and chose to match jarvisd's `net.jarvisautomation.*`.
+  Rename it before the first release. The Firefox id `browser@jarvis.agent` stays.
+- **Q2: no extension detection.** The Add-ons tab's browser-extension row is just a link to the
+  store for the page's browser (Firefox Add-ons, Chrome Web Store), with no installed check.
+  Option (b) (content script) and (c) are dropped. "This computer's agent" still uses (a), the
+  server-side address correlation, because chat's default node needs it (webapp plan §0). The
+  "Your devices" list still shows each agent's extension state from its heartbeat.
+- **Members can't open the admin yet.** That is known and intended: member access is the
+  web-app project ([webapp/01](../webapp/01-member-web-app-plan.md)), not this plan.
+
 
 1. **The agent's app identifier.** The agent uses `io.jarvis.agent` (bundle id, launchd label, the
    portal's app id and `.desktop` name in §14, Windows task `\Jarvis\JarvisAgent`). jarvisd uses
