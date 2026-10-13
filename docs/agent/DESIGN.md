@@ -701,13 +701,20 @@ checklist).
      the release, PLAN.md layout). They are linked from the landing page and from the "Desktop &
      browser" page, which every member sees, not just admins. A regular user downloads, installs
      and pairs without an admin's help.
-3. **Windows signing.** *Recommend:* ship unsigned for v0.1.0 with a note about the SmartScreen
-   prompt, and revisit Authenticode (ID9) once there are Windows users.
-4. **Store listings.** *Recommend:* submit **before** the release. List the extension
-   publicly on addons.mozilla.org (free, reviewed; today it is signed unlisted) and on the
-   Chrome Web Store (a one-time $5 developer registration). Review takes days to a couple of
-   weeks, which is a reason to start early, not to defer. The checklist's buttons need both
-   listings.
-   **Kit ready (2026-10-12):** listing text, privacy answers, privacy policy, images, upload zips
-   (`scripts/browser-ext-store-zip.sh`) and the step-by-step guide, including the store-id step
-   and how to publish updates, are in [store-listing.md](store-listing.md). The user submits.
+3. **Windows signing.** **Decided (user, 2026-10-12): unsigned, no paid Microsoft signing**
+   until there are actual Windows users. The download page says plainly that SmartScreen
+   will warn ("Windows protected your PC"), how to get past it (More info → Run anyway), and
+   how to verify the download against `SHA256SUMS` and its minisign signature. Keep that note
+   factual. If signing is ever wanted, the SignPath Foundation's free signing for
+   open-source projects is the first thing to look at.
+4. **Store listings.** **Decided (user, 2026-10-12): list on both.** The Chrome Web Store's
+   one-time $5 developer registration is fine, and addons.mozilla.org is free. There's no rush:
+   review runs in parallel with the rest of the release work.
+   - **The user's part:** the Chrome developer registration (their Google account), and
+     both submissions (AMO under their existing account; the AMO keys stay with the user).
+   - **What to prepare:** store text, a justification for each permission, a privacy policy
+     URL (page content and tab URLs go only to the user's own Jarvis server), screenshots and
+     promo images at each store's sizes from the demo household, and a Chrome upload zip.
+   - **Kit ready (2026-10-12):** listing text, privacy answers, the privacy policy, images,
+     upload zips (`scripts/browser-ext-store-zip.sh`) and the step-by-step guide, including the
+     Chrome store id and how to publish updates, are in [store-listing.md](store-listing.md).
