@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -259,6 +260,37 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	code, out = call(t, "GET", base+"/api/setup/state", nil, bearer(m1)...)
 	if st := obj(t, out); code != 200 || st["households"] != nil || st["superuser"] == true {
 		t.Fatalf("member setup state: %d %v", code, out)
+	}
+
+	// G8: a temp-password reset. Only me and change-password work until the change.
+	_, p1ID := login(t, base, "p1@example.com")
+	code, out = call(t, "POST", base+fmt.Sprintf("/api/admin/users/%d/temp-password", p1ID), map[string]any{"temp_password": "temp-pass-1"}, bearer(root)...)
+	if code != 200 {
+		t.Fatalf("temp-password: %d %v", code, out)
+	}
+	code, out = call(t, "POST", base+"/api/auth/login", map[string]any{"email": "p1@example.com", "password": "temp-pass-1"})
+	if code != 200 || obj(t, out)["must_change_password"] != true {
+		t.Fatalf("temp login: %d %v", code, out)
+	}
+	pending := obj(t, out)["access_token"].(string)
+	if code, out := call(t, "GET", base+"/api/auth/me", nil, bearer(pending)...); code != 200 || obj(t, out)["must_change_password"] != true {
+		t.Fatalf("pending me: %d %v", code, out)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/api/households"}, {"PATCH", "/api/auth/me"}, {"GET", "/api/cc/api/v0/admin/nodes"},
+		{"POST", "/api/cc/api/v0/mobile/chat"}, {"GET", "/api/notifications/api/v0/inbox"}, {"GET", "/api/settings"},
+	} {
+		code, out := call(t, c.method, base+c.path, map[string]any{"message": "hi", "node_id": "node-h1", "household_id": h1}, bearer(pending)...)
+		if code != 403 || obj(t, out)["code"] != "password_change_required" {
+			t.Errorf("pending %s %s: %d %v", c.method, c.path, code, out)
+		}
+	}
+	code, out = call(t, "POST", base+"/api/auth/change-password", map[string]any{"current_password": "temp-pass-1", "new_password": "password3"}, bearer(pending)...)
+	if code != 200 {
+		t.Fatalf("pending change-password: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/households", nil, bearer(obj(t, out)["access_token"].(string))...); code != 200 {
+		t.Fatalf("households after the change: %d %v", code, out)
 	}
 
 	// change-password, last: it revokes the member's sessions.

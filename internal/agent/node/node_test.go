@@ -3,6 +3,8 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -303,5 +305,22 @@ func TestRunnerStartsOnConnectedAndWaitsForIt(t *testing.T) {
 	case <-returned:
 	default:
 		t.Fatal("Run returned before OnConnected did")
+	}
+}
+
+// G8: jarvisd accepts a temp-password session's token only for changing the password, so
+// enrolment stops at login with a sentence that says what to do.
+func TestLoginRefusesATemporaryPassword(t *testing.T) {
+	must := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"access_token":"tok","must_change_password":%v}`, must)
+	}))
+	defer srv.Close()
+	if _, err := Login(context.Background(), srv.Client(), srv.URL, "a@example.com", "pw"); !errors.Is(err, ErrPasswordChangeRequired) {
+		t.Fatalf("err = %v", err)
+	}
+	must = false
+	if tok, err := Login(context.Background(), srv.Client(), srv.URL, "a@example.com", "pw"); err != nil || tok != "tok" {
+		t.Fatalf("%q %v", tok, err)
 	}
 }

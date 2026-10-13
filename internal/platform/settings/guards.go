@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -30,6 +31,10 @@ func SuperuserGuard(verify UserVerifier) Guard {
 
 func superuser(w http.ResponseWriter, r *http.Request, verify UserVerifier, tok string) bool {
 	u, err := verify(r.Context(), tok)
+	if errors.Is(err, authn.ErrPasswordChangeRequired) {
+		authn.WritePasswordChangeRequired(w)
+		return false
+	}
 	if err != nil {
 		httpx.Error(w, http.StatusUnauthorized, "Invalid or expired token")
 		return false

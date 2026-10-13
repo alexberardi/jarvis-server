@@ -36,8 +36,20 @@ func unauthenticated(w http.ResponseWriter, msg string) {
 	detail(w, http.StatusUnauthorized, msg)
 }
 
-// currentUser is get_current_user: a valid JWT whose sub is an active user.
+// currentUser is get_current_user: a valid JWT whose sub is an active user who doesn't have to
+// change their password first (G8: 403 password_change_required otherwise).
 func (m *Module) currentUser(w http.ResponseWriter, r *http.Request) (*user, bool) {
+	u, ok := m.currentUserPending(w, r)
+	if ok && u.mustChange {
+		authn.WritePasswordChangeRequired(w)
+		return nil, false
+	}
+	return u, ok
+}
+
+// currentUserPending is currentUser that also admits an account that must change its
+// password: only for what that change needs (GET /auth/me, POST /auth/change-password).
+func (m *Module) currentUserPending(w http.ResponseWriter, r *http.Request) (*user, bool) {
 	tok, ok := bearer(r)
 	if !ok {
 		unauthenticated(w, "Not authenticated")
@@ -69,6 +81,15 @@ func (m *Module) currentUser(w http.ResponseWriter, r *http.Request) (*user, boo
 func (m *Module) user(h userHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if u, ok := m.currentUser(w, r); ok {
+			h(w, r, u)
+		}
+	}
+}
+
+// userPending guards the routes a must-change-password session may use (G8).
+func (m *Module) userPending(h userHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if u, ok := m.currentUserPending(w, r); ok {
 			h(w, r, u)
 		}
 	}
@@ -186,6 +207,10 @@ func (m *Module) superuserJWT(w http.ResponseWriter, r *http.Request, tok string
 	}
 	if u == nil || !u.isActive {
 		detail(w, http.StatusUnauthorized, "User not found or inactive")
+		return false
+	}
+	if u.mustChange {
+		authn.WritePasswordChangeRequired(w)
 		return false
 	}
 	if !u.isSuperuser {

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -23,10 +24,17 @@ type Household struct {
 	Role string `json:"role"`
 }
 
+// ErrPasswordChangeRequired: the account signed in with a temporary password. jarvisd accepts
+// that session's token only for changing the password (403 password_change_required on
+// everything else), so enrolment can't continue until the user changes it.
+var ErrPasswordChangeRequired = errors.New("this account has a temporary password: change it first " +
+	"(sign in to the Jarvis Automation app or web page and set a new password), then enroll again")
+
 // Login signs in and returns an access token (kept in memory only).
 func Login(ctx context.Context, hc *http.Client, authURL, email, password string) (string, error) {
 	var resp struct {
-		AccessToken string `json:"access_token"`
+		AccessToken        string `json:"access_token"`
+		MustChangePassword bool   `json:"must_change_password"`
 	}
 	err := doJSON(ctx, hc, http.MethodPost, joinURL(authURL, "/auth/login"), nil,
 		map[string]string{"email": email, "password": password}, &resp)
@@ -35,6 +43,9 @@ func Login(ctx context.Context, hc *http.Client, authURL, email, password string
 	}
 	if resp.AccessToken == "" {
 		return "", fmt.Errorf("login: no access token in the answer")
+	}
+	if resp.MustChangePassword {
+		return "", ErrPasswordChangeRequired
 	}
 	return resp.AccessToken, nil
 }

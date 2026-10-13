@@ -9,7 +9,7 @@ import {
 } from 'react'
 
 import * as authApi from '@/api/auth'
-import { setAuthToken, setLogoutFunction, setRefreshFunction } from '@/api/client'
+import { setAuthToken, setLogoutFunction, setMustChangePasswordFunction, setRefreshFunction } from '@/api/client'
 import type { AuthUser, TokenResponse } from '@/api/auth'
 import { clearSetupToken, getSetupToken } from '@/auth/setupToken'
 import { errorMessage, errorStatus } from '@/lib/errors'
@@ -151,11 +151,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [logout])
 
-  // Register refresh/logout functions with the axios interceptor
+  /** markMustChange flags the session after the server answered password_change_required. */
+  const markMustChange = useCallback(() => {
+    setState((prev) => {
+      if (!prev.user || prev.user.must_change_password) return prev
+      const user = { ...prev.user, must_change_password: true }
+      localStorage.setItem(USER_KEY, JSON.stringify(user))
+      return { ...prev, user }
+    })
+  }, [])
+
+  // Register refresh/logout/must-change functions with the axios interceptor
   useEffect(() => {
     setRefreshFunction(refreshAccessToken)
     setLogoutFunction(logout)
-  }, [refreshAccessToken, logout])
+    setMustChangePasswordFunction(markMustChange)
+  }, [refreshAccessToken, logout, markMustChange])
 
   // Periodic token refresh
   useEffect(() => {

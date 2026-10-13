@@ -32,6 +32,9 @@ func (fakeUsers) VerifyUser(_ context.Context, tok string) (authn.User, error) {
 	if tok == "boom" {
 		return authn.User{}, errors.New("db down")
 	}
+	if tok == "must-change" {
+		return authn.User{}, authn.ErrPasswordChangeRequired
+	}
 	parts := strings.Split(tok, ":")
 	if len(parts) < 2 || parts[0] != "user" {
 		return authn.User{}, authn.ErrInvalid

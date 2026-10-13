@@ -139,6 +139,18 @@ func TestAuthSuperuserTempPassword(t *testing.T) {
 		Expect(http.StatusOK, All(tokenResponse, Open{"must_change_password": Eq(true), "user": Open{"must_change_password": Eq(true)}}))
 	u.Password, u.AccessToken = temp, r.Object()["access_token"].(string)
 	tg.Get(t, Auth, "/auth/me", u.H()).Expect(http.StatusOK, Open{"must_change_password": Eq(true)})
+	// LEGACY-BUG (security, low): legacy enforces must_change_password only in its clients; the
+	// temp-password token works everywhere. jarvisd (G8, docs/webapp/01) accepts it only for
+	// /auth/me and /auth/change-password: everything else is 403 password_change_required, and
+	// that includes the access token issued before the reset.
+	if Jarvisd() {
+		for _, h := range []H{u.H(), Bearer(oldAccess)} {
+			tg.Get(t, Auth, "/households", h).Expect(http.StatusForbidden, Open{"code": Eq("password_change_required")})
+		}
+		tg.Get(t, Auth, "/auth/me", Bearer(oldAccess)).ExpectStatus(http.StatusOK)
+	} else {
+		tg.Get(t, Auth, "/households", u.H()).ExpectStatus(http.StatusOK)
+	}
 
 	// Changing it clears the flag.
 	final := "contract-" + randHex(8)
@@ -146,6 +158,7 @@ func TestAuthSuperuserTempPassword(t *testing.T) {
 		Expect(http.StatusOK, All(tokenResponse, Open{"must_change_password": Eq(false), "user": Open{"must_change_password": Eq(false)}}))
 	u.Password, u.AccessToken = final, r.Object()["access_token"].(string)
 	tg.Get(t, Auth, "/auth/me", u.H()).Expect(http.StatusOK, Open{"must_change_password": Eq(false)})
+	tg.Get(t, Auth, "/households", u.H()).ExpectStatus(http.StatusOK)
 }
 
 func TestAuthSettingsWrite(t *testing.T) {
