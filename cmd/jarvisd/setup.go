@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,9 +15,12 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/alexberardi/jarvis-server/internal/doctor"
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/qrterm"
 )
 
 // setupLink is the admin wizard URL carrying the first-run setup token (AD2). The token is
@@ -32,18 +36,78 @@ func setupLink(cfg config.Config, token string) string {
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Ports[config.ListenerAdmin])) + "/setup#token=" + token
 }
 
+// setupLinkOptions are `jarvisd setup-link`'s flags.
+type setupLinkOptions struct {
+	urlOnly bool         // --url: print only the URL, for installers (machine output)
+	qr      bool         // --qr: also draw the URL as a QR code
+	qrStyle qrterm.Style // how to draw it (qrStyleFor's choice)
+}
+
+// parseSetupLinkArgs reads `jarvisd setup-link [--url] [--qr]`.
+func parseSetupLinkArgs(args []string, stderr io.Writer) (setupLinkOptions, error) {
+	fs := flag.NewFlagSet("setup-link", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	urlOnly := fs.Bool("url", false, "print only the URL (the setup link, or the admin URL once set up)")
+	qr := fs.Bool("qr", false, "also print the URL as a QR code, to open it on a phone")
+	if err := fs.Parse(args); err != nil {
+		return setupLinkOptions{}, err
+	}
+	if fs.NArg() > 0 {
+		return setupLinkOptions{}, fmt.Errorf("setup-link: unexpected argument %q", fs.Arg(0))
+	}
+	return setupLinkOptions{urlOnly: *urlOnly, qr: *qr}, nil
+}
+
 // printSetupLink is `jarvisd setup-link`: the install scripts' last word. While no admin
 // account exists it prints the setup link and token from <home>/setup-token (written by the
 // running service, 0600, so the scripts run it with sudo for a system service); afterwards
-// the admin URL.
-func printSetupLink(cfg config.Config, w io.Writer) error {
+// the admin URL. --url prints the URL alone (installers open it); --qr adds a QR code of it.
+func printSetupLink(cfg config.Config, w io.Writer, opt setupLinkOptions) error {
+	url, msg, err := setupLinkMessage(cfg)
+	if err != nil {
+		return err
+	}
+	if opt.urlOnly {
+		fmt.Fprintln(w, url)
+	} else {
+		fmt.Fprint(w, msg)
+	}
+	if opt.qr {
+		if !opt.urlOnly {
+			fmt.Fprintln(w, "\nOr scan this with a phone on the same network:")
+		}
+		fmt.Fprintln(w)
+		if err := qrterm.Write(w, url, opt.qrStyle); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// qrStyleFor picks how to draw the QR code on w: black on white with escape codes on a
+// terminal (it scans on light and dark themes alike), else plain dark-on-light blocks (a log
+// or a file). NO_COLOR, or a Windows console that can't take escape codes, gets light-on-dark
+// blocks, since terminals are mostly dark.
+func qrStyleFor(w io.Writer) qrterm.Style {
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(int(f.Fd())) {
+		return qrterm.DarkOnLight
+	}
+	if os.Getenv("NO_COLOR") != "" || !enableANSI(f) {
+		return qrterm.LightOnDark
+	}
+	return qrterm.ANSI
+}
+
+// setupLinkMessage is the URL to open and the text explaining it.
+func setupLinkMessage(cfg config.Config) (url, msg string, err error) {
 	b, err := os.ReadFile(authmod.SetupTokenPath(cfg.Home))
 	if tok := strings.TrimSpace(string(b)); err == nil && tok != "" {
-		fmt.Fprintf(w, "Finish setup in a browser:\n\n    %s\n\nSetup token: %s\n", setupLink(cfg, tok), tok)
-		return nil
+		link := setupLink(cfg, tok)
+		return link, fmt.Sprintf("Finish setup in a browser:\n\n    %s\n\nSetup token: %s\n", link, tok), nil
 	}
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		return "", "", err
 	}
 	link := strings.TrimSuffix(setupLink(cfg, ""), "setup#token=")
 	// No token: setup is done, or jarvisd hasn't started (it writes the token when it starts
@@ -57,16 +121,13 @@ func printSetupLink(cfg config.Config, w io.Writer) error {
 		if wizardUnfinished(cfg.DBPath()) {
 			// An admin account exists (an imported one, or the wizard was left after Account),
 			// but the wizard's later steps never ran.
-			fmt.Fprintf(w, "Finish setup in a browser: sign in at %s with your admin account; the wizard "+
-				"continues with hardware, models and privacy choices.\n", link)
-			return nil
+			return link, fmt.Sprintf("Finish setup in a browser: sign in at %s with your admin account; the wizard "+
+				"continues with hardware, models and privacy choices.\n", link), nil
 		}
-		fmt.Fprintf(w, "jarvisd is set up. The admin is at %s\n", link)
-		return nil
+		return link, fmt.Sprintf("jarvisd is set up. The admin is at %s\n", link), nil
 	}
-	fmt.Fprintf(w, "jarvisd isn't answering yet; once it is, `jarvisd setup-link` prints the setup link if setup "+
-		"is still to do. The admin is at %s\n", link)
-	return nil
+	return link, fmt.Sprintf("jarvisd isn't answering yet; once it is, `jarvisd setup-link` prints the setup link if setup "+
+		"is still to do. The admin is at %s\n", link), nil
 }
 
 // announceSetup shows the operator the setup token and link: plainly on w (stderr), since

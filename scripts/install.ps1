@@ -84,6 +84,13 @@ function Get-NativeOutput([string]$exe) {
     & $exe @args 2>$null | Out-String
 }
 
+function Show-SetupLink {
+    # The install's last word: the setup link (or the admin URL) and a QR code of it, so a
+    # phone can open it (install plan 1.2). A release older than 'setup-link --qr' prints the
+    # link alone.
+    if ((Get-NativeOutput $Bin help) -match '--qr') { & $Bin setup-link --qr } else { & $Bin setup-link }
+}
+
 function Update-ServiceDefinition {
     # An upgrade swaps the binary, but the services are still the ones the old version
     # registered (one upgraded from before ID11 has no jarvisd-updater service). The new binary
@@ -180,7 +187,7 @@ try {
         if ($cur -eq $Version -and -not $Force -and $LASTEXITCODE -eq 0) {
             Write-Host "jarvisd $Version is already installed and running."
             Update-ServiceDefinition
-            & $Bin setup-link
+            Show-SetupLink
             $global:LASTEXITCODE = 0
             return
         }
@@ -205,7 +212,7 @@ try {
             if ($LASTEXITCODE -eq 0) { Get-NativeOutput $Bin service status --wait 90s | Out-Null }
             if ($LASTEXITCODE -ne 0) { throw "the jarvisd service is not healthy; see 'jarvisd service status' and $env:ProgramData\jarvisd\logs\jarvisd.log" }
             Write-Host "jarvisd $Version is running."
-            & $Bin setup-link
+            Show-SetupLink
             $global:LASTEXITCODE = 0
             return
         }
@@ -289,7 +296,7 @@ try {
     Write-Host ''
     Write-Host (Get-NativeOutput $Bin doctor)
     Write-Host "jarvisd $Version is running."
-    & $Bin setup-link
+    Show-SetupLink
     Write-Host "Logs: $env:ProgramData\jarvisd\logs\jarvisd.log"
     Write-Host 'Manage: jarvisd service status | jarvisd service restart (as Administrator) | install.ps1 -Uninstall'
     $global:LASTEXITCODE = 0

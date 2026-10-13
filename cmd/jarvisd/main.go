@@ -288,6 +288,7 @@ commands:
   service status [--user] [--json] [--wait DURATION]
                    register and control jarvisd with systemd, launchd or the Windows SCM
   setup-link       print the first-run setup link and token (or the admin URL once set up)
+                   [--url] the URL alone (for installers); [--qr] also as a QR code
   migrate status   show each module's migration state
   import-recipes [--apply] [--household OLD=NEW]... [--park-unmatched] [--legacy-host HOST]... BUNDLE
                    import recipes, meal plans, staples and SKU mappings from a legacy export
@@ -377,6 +378,11 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 		return runDoctor(ctx, envErr, args[1:], stdout, os.Stderr)
 	case "setup-link":
+		opt, err := parseSetupLinkArgs(args[1:], os.Stderr)
+		if err != nil {
+			return err
+		}
+		opt.qrStyle = qrStyleFor(stdout)
 		if err := bootstrap(flagHome, false, os.Stderr); err != nil {
 			return err
 		}
@@ -384,7 +390,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return printSetupLink(cfg, stdout)
+		return printSetupLink(cfg, stdout, opt)
 	case "import-recipes":
 		if err := bootstrap(flagHome, false, os.Stderr); err != nil {
 			return err

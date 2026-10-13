@@ -242,6 +242,15 @@ CUR="" REUSE=0
 # ExecStartPre. The new binary says whether its definition is stale (`service status --json`,
 # definition_stale) and `service install` rewrites it, keeping the binary path, home, account,
 # data and firewall rules.
+# The install's last word: the setup link (or the admin URL), and a QR code of it so a phone
+# can open it from a headless server (install plan 1.2). A release older than `setup-link --qr`
+# prints the link alone.
+setup_link() {
+  qr=
+  "$BIN" help 2>/dev/null | grep -q -- '--qr' && qr=--qr
+  # shellcheck disable=SC2086 # RUN is sudo or nothing; qr and HOMEFLAG are one word or none
+  $RUN "$BIN" setup-link $qr $HOMEFLAG
+}
 refresh_service() {
   # shellcheck disable=SC2086
   "$BIN" service status $SVC --json 2>/dev/null | grep -q '"definition_stale": true' || return 0
@@ -256,7 +265,7 @@ if [ -n "$CUR" ]; then
     say "jarvisd $VERSION is already installed and running."
     refresh_service
     # shellcheck disable=SC2086
-    $RUN "$BIN" setup-link $HOMEFLAG 2>/dev/null || true
+    setup_link 2>/dev/null || true
     exit 0
   fi
   # A jarvisd with its own upgrade takes over from here: it checks the signature itself with
@@ -404,8 +413,7 @@ say ""
 $RUN "$BIN" doctor $HOMEFLAG || true
 say ""
 say "jarvisd $VERSION is running."
-# shellcheck disable=SC2086
-$RUN "$BIN" setup-link $HOMEFLAG || true
+setup_link || true
 case "$OS$SVC" in
   linux--user) say "Logs: journalctl --user -u jarvisd -f" ;;
   linux) say "Logs: journalctl -u jarvisd -f" ;;

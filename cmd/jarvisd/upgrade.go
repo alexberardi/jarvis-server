@@ -347,7 +347,7 @@ func endWithAdmin(cfg config.Config, err error, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_ = printSetupLink(cfg, stdout) // only an unreadable token file; the upgrade itself is done
+	_ = printSetupLink(cfg, stdout, setupLinkOptions{}) // only an unreadable token file; the upgrade itself is done
 	return nil
 }
 

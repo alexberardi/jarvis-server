@@ -1208,8 +1208,12 @@ anything changes). `CheckPurgeHome` refuses a relative path, a root, a user's ho
 the scripts' to remove (a running `jarvisd.exe` can't delete itself).
 
 **`jarvisd setup-link`** prints the link + token from `<home>/setup-token` (the scripts run
-it with sudo for a system home), else the admin URL. **`jarvisd help`** prints the usage and
-exits 0; the scripts grep it for an `upgrade` command.
+it with sudo for a system home), else the admin URL. `--url` prints the URL alone (machine
+output for the GUI installers, 01-no-cli-plan item 1.2); `--qr` adds a QR code of it in Unicode
+half blocks (`internal/platform/qrterm`: black on white with ANSI colours on a terminal, plain
+blocks otherwise; light-on-dark under `NO_COLOR` or a Windows console without VT). The scripts
+pass `--qr` when `jarvisd help` mentions it, so an older pinned release still prints its link.
+**`jarvisd help`** prints the usage and exits 0; the scripts grep it for an `upgrade` command.
 
 **`install.sh` (I3)** — POSIX sh, ~200 lines at the time (~420 now), shellcheck clean. Flags: `--version`, `--user`,
 `--yes`, `--stop-legacy`, `--force`, `--uninstall [--purge]`, `--base-url` (or
@@ -1489,7 +1493,7 @@ one extra double-click and stays on the right side of every OS's security model.
    2026-10-12): the QR code** ("qr code would be cool"). The install output and `jarvisd
    setup-link` print the setup link as a terminal QR code (Unicode half-blocks, no extra
    dependency) next to the plain URL. Scanning it with the phone opens the wizard with the token.
-   The token never leaves the server any other way.
+   The token never leaves the server any other way. *Built (2026-10-13, `setup-link --qr`, §8.3).*
 5. **Immutable Linux (Bazzite, Fedora Atomic).** `.deb` doesn't apply, and `.rpm` would mean
    rpm-ostree layering plus a reboot, so the one-liner is the path. `install.sh` calls no
    package manager and writes only `/usr/local` (which lives under `/var` on Atomic), `/etc` and
