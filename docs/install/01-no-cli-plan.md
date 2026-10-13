@@ -270,7 +270,7 @@ Sign-off matrix:
   label, the portal app id and `.desktop` name, and the Windows task name. The user was fine with
   either `io.jarvisautomation.agent` or `net.` and chose to match jarvisd's `net.jarvisautomation.*`.
   Rename it before the first release. The Firefox id `browser@jarvis.agent` stays. **Done**
-  (PR #PR1, `internal/agent/appid`); the native-messaging host name `io.jarvis.agent.browser`
+  (#97, `internal/agent/appid`); the native-messaging host name `io.jarvis.agent.browser`
   stays too (DESIGN §13 "The app identifier").
 - **Q2: no extension detection.** The Add-ons tab's browser-extension row is just a link to the
   store for the page's browser (Firefox Add-ons, Chrome Web Store), with no installed check.
