@@ -135,6 +135,14 @@ func TestAdminGate(t *testing.T) {
 		})
 	}
 
+	// The member tier (docs/webapp/01 P1): any user token reaches its own account and
+	// households; the module behind scopes it.
+	t.Run("member_tier", func(t *testing.T) {
+		tg.Get(t, Admin, "/api/auth/me", Bearer(userTok)).Expect(http.StatusOK, All(userOut, Open{"id": Eq(user.ID)}))
+		tg.Get(t, Admin, "/api/households", Bearer(userTok)).ExpectStatus(http.StatusOK)
+		tg.Get(t, Admin, "/api/auth/me").ExpectError(http.StatusUnauthorized, "Missing or invalid Authorization header")
+	})
+
 	t.Run("bootstrap_allow_list", func(t *testing.T) {
 		tg.Get(t, Admin, "/api/auth/setup-status").Expect(http.StatusOK, Obj{"needs_setup": Eq(false)})
 		tg.Get(t, Admin, "/api/setup/state").Expect(http.StatusOK, All(setupStateAnon, Open{"needs_superuser": Eq(false)}))

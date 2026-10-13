@@ -137,6 +137,9 @@ var principals = []struct {
 }
 
 func tierVerify(_ context.Context, tok string) (authn.User, error) {
+	if tok == "must-change" {
+		return authn.User{}, authn.ErrPasswordChangeRequired
+	}
 	for _, p := range principals {
 		if p.token != "" && p.token == tok {
 			return p.user, nil
@@ -348,6 +351,31 @@ func TestPassRoutesTargetKnownListeners(t *testing.T) {
 		}
 		if _, path, _ := strings.Cut(rt.pattern, " "); !strings.HasPrefix(path, rt.strip+"/") {
 			t.Errorf("%q does not start with its strip prefix %q", rt.pattern, rt.strip)
+		}
+	}
+}
+
+// TestMustChangePasswordAtTheGateway is G8: a must-change-password token reaches only the
+// password-change routes; every other gated route answers 403 password_change_required,
+// whatever its tier.
+func TestMustChangePasswordAtTheGateway(t *testing.T) {
+	mux, m := tierMux(t)
+	for _, rt := range m.routes {
+		method, path := requestFor(rt.pattern)
+		w := send(mux, method, path, "", "Authorization", "Bearer must-change")
+		reached := w.Header().Get("X-Reached") == "1"
+		switch {
+		case rt.tier == tierOpen || passwordChangeRoutes[rt.pattern]:
+			if !reached {
+				t.Errorf("%s %s: %d, want it reached", method, path, w.Code)
+			}
+		case reached || w.Code != 403 || !strings.Contains(w.Body.String(), `"code":"password_change_required"`):
+			t.Errorf("%s %s: %d %s (reached=%v)", method, path, w.Code, w.Body.String(), reached)
+		}
+	}
+	for p := range passwordChangeRoutes {
+		if wantTiers[p] != tierUser {
+			t.Errorf("%s is a password-change route but not tierUser", p)
 		}
 	}
 }

@@ -39,6 +39,23 @@ export function setLogoutFunction(fn: () => void): void {
   logoutFn = fn
 }
 
+let mustChangeFn: (() => void) | null = null
+
+/** setMustChangePasswordFunction registers what to do when the server says the password must change. */
+export function setMustChangePasswordFunction(fn: () => void): void {
+  mustChangeFn = fn
+}
+
+/**
+ * isPasswordChangeRequired is jarvisd's answer to a token whose account must change its
+ * password first (a temp-password reset, G8): 403 with code password_change_required. Only
+ * GET /api/auth/me and POST /api/auth/change-password accept such a token.
+ */
+export function isPasswordChangeRequired(error: unknown): boolean {
+  const res = (error as { response?: { status?: number; data?: { code?: unknown } } })?.response
+  return res?.status === 403 && res.data?.code === 'password_change_required'
+}
+
 // Ensure Authorization header is set from localStorage (survives page refresh).
 // AuthContext is the only writer, under the namespaced key (O5).
 apiClient.interceptors.request.use((config) => {
@@ -55,6 +72,13 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config
+
+    // A temp-password session (or one whose password a superuser reset meanwhile): show the
+    // change-password screen instead of an error on every page.
+    if (isPasswordChangeRequired(error)) {
+      mustChangeFn?.()
+      return Promise.reject(error)
+    }
 
     // Don't intercept auth endpoints — let login/refresh errors pass through
     if (!original || original.url?.startsWith('/api/auth/')) {

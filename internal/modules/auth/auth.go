@@ -167,9 +167,12 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST /auth/register", m.limited(m.handleRegister))
 	mux.HandleFunc("POST /auth/login", m.limited(m.handleLogin))
 	mux.HandleFunc("POST /auth/refresh", m.limited(m.handleRefresh))
-	mux.HandleFunc("POST /auth/change-password", m.user(m.handleChangePassword))
+	// G8: a must-change-password session may only read itself and change the password
+	// (login, refresh and logout need no access token). Every other user route is 403
+	// password_change_required.
+	mux.HandleFunc("POST /auth/change-password", m.userPending(m.handleChangePassword))
 	mux.HandleFunc("POST /auth/logout", m.handleLogout)
-	mux.HandleFunc("GET /auth/me", m.user(m.handleMe))
+	mux.HandleFunc("GET /auth/me", m.userPending(m.handleMe))
 	mux.HandleFunc("PATCH /auth/me", m.user(m.handleUpdateMe))
 	mux.HandleFunc("DELETE /auth/me", m.user(m.handleDeleteMe))
 	mux.HandleFunc("GET /auth/public-key", m.handlePublicKey)

@@ -68,6 +68,9 @@ func (a *fakeAuth) VerifyUser(_ context.Context, token string) (authn.User, erro
 	if token == "expired" {
 		return authn.User{}, authn.ErrExpired
 	}
+	if token == "must-change" {
+		return authn.User{}, authn.ErrPasswordChangeRequired
+	}
 	u, ok := a.users[token]
 	if !ok {
 		return authn.User{}, authn.ErrInvalid

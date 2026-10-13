@@ -120,6 +120,8 @@ func (m *Module) authUser(w http.ResponseWriter, r *http.Request) (authn.User, b
 	switch {
 	case err == nil:
 		return u, true
+	case errors.Is(err, authn.ErrPasswordChangeRequired):
+		authn.WritePasswordChangeRequired(w)
 	case errors.Is(err, authn.ErrExpired):
 		detail(w, http.StatusUnauthorized, "Token has expired")
 	case errors.Is(err, authn.ErrNoSub):
@@ -174,6 +176,10 @@ func (m *Module) authProvisioning(w http.ResponseWriter, r *http.Request) (provA
 		u, err := m.Users.VerifyUser(r.Context(), h[len("Bearer "):])
 		if err == nil {
 			return provAuth{user: u}, true
+		}
+		if errors.Is(err, authn.ErrPasswordChangeRequired) {
+			authn.WritePasswordChangeRequired(w)
+			return provAuth{}, false
 		}
 		if !errors.Is(err, authn.ErrInvalid) && !errors.Is(err, authn.ErrExpired) && !errors.Is(err, authn.ErrNoSub) {
 			m.internalError(w, err)

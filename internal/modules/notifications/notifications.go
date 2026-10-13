@@ -265,6 +265,10 @@ func (m *Module) user(h func(http.ResponseWriter, *http.Request, authn.User)) ht
 		}
 		u, err := m.Users.VerifyUser(r.Context(), tok)
 		if err != nil {
+			if errors.Is(err, authn.ErrPasswordChangeRequired) {
+				authn.WritePasswordChangeRequired(w)
+				return
+			}
 			if errors.Is(err, authn.ErrInvalid) || errors.Is(err, authn.ErrExpired) || errors.Is(err, authn.ErrNoSub) {
 				httpx.Error(w, http.StatusUnauthorized, "Invalid or expired token")
 				return

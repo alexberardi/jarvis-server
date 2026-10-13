@@ -196,6 +196,14 @@ are what the opening could introduce, plus two client-only checks. They are orde
   admin pages afterwards; the SPA's role-based routing is cosmetic. `must_change_password` is enforced
   only in the client: the server issues working tokens to a temp-password session. Low risk (the user
   knows that password), but the web app must route to Change password before anything else.
+  **Server side fixed 2026-10-13 (PR #100):** `VerifyUser` refuses a must-change account with
+  `authn.ErrPasswordChangeRequired`; every module (auth, cc, notifications, recipes, the settings
+  guards, the admin gateway) answers it with 403 `{"detail", "code": "password_change_required"}`
+  (403, not 401: clients must not refresh-and-retry or sign out). Only `GET /auth/me` and
+  `POST /auth/change-password` accept such a token (login, refresh and logout take none). The
+  flag is read per request, so it also cuts off access tokens issued before a temp-password reset.
+  The admin SPA flips to its change-password screen on that 403; `jarvis-agent enroll --email`
+  refuses a temp-password login with a sentence.
 - **G9. Superuser in the chat picker (low).** cc returns **all** nodes to a superuser
   (`nodes.go:121,154`). The chat picker must filter to the active household. Otherwise a superuser
   sees nodes from other households, and `chatNode` answers 404 for them anyway (`mobile_chat.go:132-150`).

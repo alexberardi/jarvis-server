@@ -478,7 +478,8 @@ func (m *Module) HouseholdRole(ctx context.Context, userID int64, householdID st
 }
 
 // VerifyUser verifies an access token in-process and returns its principal. The user must
-// still exist and be active; HouseholdID is the token's claim.
+// still exist and be active, and must not have to change their password
+// (authn.ErrPasswordChangeRequired); HouseholdID is the token's claim.
 func (m *Module) VerifyUser(ctx context.Context, token string) (authn.User, error) {
 	c, err := m.verify(ctx, token)
 	if err != nil {
@@ -503,6 +504,10 @@ func (m *Module) VerifyUser(ctx context.Context, token string) (authn.User, erro
 	}
 	if err != nil {
 		return authn.User{}, err
+	}
+	if u.mustChange {
+		// G8: enforced for every module, not only in the clients.
+		return authn.User{}, authn.ErrPasswordChangeRequired
 	}
 	return authn.User{ID: u.id, Email: u.email, IsSuperuser: u.isSuperuser, HouseholdID: c.HouseholdID}, nil
 }
