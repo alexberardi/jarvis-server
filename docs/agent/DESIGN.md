@@ -244,7 +244,8 @@ packages may assume the sidecar but not audio in/out.
    at install.
 5. **Enrollment UX.** CLI login works but types a password into a terminal. *Recommend:* a
    device-code flow (`jarvis-agent enroll` prints a code, the app approves it), which needs a
-   small jarvisd endpoint. Meanwhile, call logout after enrolling.
+   small jarvisd endpoint. Meanwhile, call logout after enrolling. **Planned for the official
+   release, §13.**
 6. **Wayland window control.** *Recommend:* add a `hyprctl` backend behind the same Backend
    (list/focus/close work; minimise maps to a special workspace) only if desktop use on
    Hyprland matters. Otherwise keep "absent".
@@ -256,7 +257,8 @@ packages may assume the sidecar but not audio in/out.
    `internal/node` to an importable package only when the Go Pi node actually starts.
 9. **Supervisor installers.** Templates exist; installers don't. *Recommend:* a
    `jarvis-agent service install|uninstall` subcommand that writes the user-scoped unit,
-   agent or task, rather than shell scripts per OS.
+   agent or task, rather than shell scripts per OS. **Folded into §13** (installers per OS
+   that register the login item themselves).
 
 ## 10. Browser control (2026-10-10)
 
@@ -599,3 +601,64 @@ the note says the image couldn't be read, so the model tells the user.
 **Compatibility.** An older jarvisd doesn't lift the image: a capture over 1 MiB is a 413 on
 the continue (error chime), a smaller one reaches the model as base64 text. Update jarvisd
 with the agent.
+
+
+## 13. Install and pairing without a terminal (plan, 2026-10-12)
+
+**Why.** Today the desktop agent is CLI-only. A user types a password into
+`jarvis-agent enroll`, the browser extension is only offered by that prompt (§10, install
+flow), and "Jarvis Agent.app" only exists when `scripts/agent-dev-run.sh` builds it. The setup
+wizard (Check → Account → Hardware → Models → Privacy → Done) has no agent or browser step.
+The user, 2026-10-12: "cli isn't so approachable for non-savvy users". The landing page sends
+exactly those users to jarvisd, so this ships with the official release (STATUS, release
+checklist).
+
+**Target flow.**
+
+1. **Admin and mobile app: "Add a computer".** It shows a download button per OS (from the
+   jarvisd release assets) and how to pair. A Done-step link in the setup wizard leads there.
+2. **Installers per OS.** They install the agent and register it to start at login. They need
+   no terminal and no admin rights wherever the OS allows:
+   - **macOS:** a signed, notarized `.dmg` with Jarvis Agent.app (hardened runtime, §9.3). The
+     Developer ID and notarization pipeline already exists for jarvisd (`sign-macos`).
+   - **Windows:** a per-user installer (`.exe` or `.msi`) and a Startup entry or scheduled
+     task. It is unsigned until ID9 changes, so expect a SmartScreen click-through.
+   - **Linux:** the one-liner plus a `.deb`, both writing the systemd user unit.
+3. **First run: a small window, not a terminal.**
+   - **Pairing:** a device code (§9.5). The agent shows a short code and the server name it
+     discovered over mDNS. The user approves it in the admin or the app, and the agent
+     receives its node credentials. This needs a small jarvisd endpoint pair (start and
+     poll) and an approve screen in admin and app. No password is typed into the agent.
+   - **Browser control:** a "Set up browser control" checkbox, ticked by default (matching the
+     2026-10-11 `[Y/n]` decision). It registers the native host and opens Firefox's own
+     add-on install prompt for the signed `.xpi`, the same as `jarvis-agent browser install`
+     does today.
+   - **Permissions (macOS):** buttons that open the Accessibility and Screen Recording panes
+     of System Settings, with live status that turns green once granted.
+   - **Voice:** a microphone check and the wake word on or off.
+4. **Chrome-family browsers.** "Load unpacked" is a developer flow. Non-technical users need a
+   Chrome Web Store listing. Until it exists, the first-run window offers browser control
+   for Firefox only and says Chrome is coming.
+
+**Order of work.**
+
+1. Device-code pairing: the jarvisd endpoints plus the approve UI in admin and app, with
+   `jarvis-agent enroll --code` first. Everything else builds on it.
+2. The first-run window. Its toolkit is open question 1 below.
+3. The macOS `.dmg` (notarized), then the Windows installer, then the Linux `.deb`.
+4. "Add a computer" in admin and app, and the wizard link.
+5. The Chrome Web Store listing (can trail the release).
+
+**Open questions** (asked one at a time; answers recorded here):
+
+1. **First-run window toolkit.** *Recommend:* a local web page served by the agent on
+   127.0.0.1 and opened in the default browser. That needs no GUI toolkit in a
+   `CGO_ENABLED=0` binary and works the same on every OS. The alternative is a native window
+   (Cocoa via purego on macOS, Win32 on Windows), which means more code per OS.
+2. **Where pairing is approved.** *Recommend:* both the admin and the mobile app, and the
+   code expires after 10 minutes. Any household admin may approve, and the approver picks
+   the household and room.
+3. **Windows signing.** *Recommend:* ship unsigned for v0.1.0 with a note about the SmartScreen
+   prompt, and revisit Authenticode (ID9) once there are Windows users.
+4. **Chrome Web Store.** *Recommend:* list it after the release. The developer account fee and
+   the review timeline make it a poor fit for the release's critical path.
