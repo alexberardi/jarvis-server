@@ -2,21 +2,11 @@ import { useMemo } from 'react'
 import { RefreshCw, Cpu, Zap, ZapOff, Wifi, WifiOff } from 'lucide-react'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
 import { errorMessage } from '@/lib/errors'
+import { formatVersion } from '@/lib/format'
+import { timeAgo } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import type { AdminNode } from '@/api/admin'
 import type { NodeLiveness } from '@/api/nodes'
-
-function formatSeen(iso: string | null): string {
-  if (!iso) return 'never'
-  // cc reports naive UTC timestamps (legacy shape).
-  const t = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`)
-  if (Number.isNaN(t.getTime())) return iso
-  const secs = Math.max(0, Math.round((Date.now() - t.getTime()) / 1000))
-  if (secs < 60) return `${secs}s ago`
-  if (secs < 3600) return `${Math.round(secs / 60)}m ago`
-  if (secs < 86400) return `${Math.round(secs / 3600)}h ago`
-  return t.toLocaleString()
-}
 
 function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   return (
@@ -61,8 +51,8 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
         )}
         {live && (
           <p>
-            <span className="font-medium">Last seen:</span> {formatSeen(live.last_seen)}
-            {live.last_seen_version && <> &middot; v{live.last_seen_version}</>}
+            <span className="font-medium">Last seen:</span> {timeAgo(live.last_seen)}
+            {live.last_seen_version && <> &middot; {formatVersion(live.last_seen_version)}</>}
           </p>
         )}
         {node.services.length > 0 && (

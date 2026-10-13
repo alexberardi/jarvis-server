@@ -27,3 +27,11 @@ export function formatUptime(seconds: number): string {
   if (hours > 0) return `${hours}h ${minutes}m`
   return `${minutes}m`
 }
+
+/**
+ * formatVersion puts a "v" before a semver-looking version ("0.3.2" → "v0.3.2") and leaves
+ * anything else as it is: a dev build ("dev-5b3667a"), a bare commit, or "v0.3.2" already.
+ */
+export function formatVersion(v: string): string {
+  return /^\d+\.\d+(\.\d+)?([-+][0-9A-Za-z.+-]+)?$/.test(v) ? `v${v}` : v
+}
