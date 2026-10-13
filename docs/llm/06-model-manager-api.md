@@ -293,7 +293,13 @@ fails on a mismatch).
 Fit verdicts: `fits`, `tight` (within 10% of the card), `split` (only with tensor
 split across cards), `too_big`, `cpu` (no usable GPU), `in_binary` (tts/speaker). The estimate
 is weights + KV (`kv_bytes_per_token` × context, f16) + ~3% + 600 MB for LLMs, weights × 1.25 +
-500 MB for whisper.
+500 MB for whisper. `kv_bytes_per_token` counts full-attention layers only, so hybrid models
+(Qwen 3.5/3.8: one in four) need a quarter of what a dense model would. On a GPU an LLM's
+`host_bytes` don't count: llama.cpp keeps the input token embeddings in system RAM (unless the
+output is tied to them). Checked against Qwen 3.5 9B + F16 projector at 32768 context on a
+3080 Ti: estimated 7560 MB, measured 7506 MB. Free memory per CUDA card comes from nvidia-smi
+when it answers, since `llama-server --list-devices` reports it from inside its own CUDA
+context (~256 MB short, which would otherwise read as other programs).
 
 **Co-residency.** A verdict is for the model *next to what is already on the card*, not on an
 empty one (the <dev-node> incident: large-v3-turbo "fit" a 12 GB card alone and crash-looped
@@ -303,7 +309,7 @@ shared and off labels count nothing), plus `"other programs"`: card memory in us
 that our engines running then don't explain (desktop, streamer, emulator; not on Metal). A
 model is judged on the card with the most left; `fit.committed_mb` and `fit.alongside` say
 what it shares with. A catalog entry already assigned is judged next to the others, not itself.
-`recommended.stt` is large-v3-turbo only when it fits next to the recommended live model.
+`recommended` is judged next to other programs' memory: `recommended.stt` is large-v3-turbo only when it fits next to the recommended live model and them.
 
 ```json
 "residents": [{"labels": ["live", "background"], "model": "qwen3-8b", "needed_mb": 7842},
