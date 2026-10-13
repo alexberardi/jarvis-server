@@ -72,10 +72,14 @@ type Module struct {
 	deps     module.Deps
 	settings *settings.Service
 	verify   settings.UserVerifier
-	gate     settings.Guard
-	doc      doctorCache
-	upd      updateCache
-	apply    applyState
+	gate     settings.Guard // tierSuperuser
+	// routes is every /api pattern with its tier, in registration order (tiers.go).
+	routes []apiRoute
+	// innerHook replaces each /api handler behind its gate (the tier test). Nil in production.
+	innerHook func(pattern string, h http.Handler) http.Handler
+	doc       doctorCache
+	upd       updateCache
+	apply     applyState
 }
 
 func (m *Module) Name() string      { return "admin" }

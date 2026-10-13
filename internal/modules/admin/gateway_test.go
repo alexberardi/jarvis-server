@@ -82,9 +82,9 @@ func detailOf(w *httptest.ResponseRecorder) string {
 func TestGateRejectsAnonymousAndNonSuperusers(t *testing.T) {
 	mux, targets := gatewayMux(t)
 	for _, c := range []struct{ method, path string }{
-		{"GET", "/api/admin/users"}, {"GET", "/api/auth/me"}, {"GET", "/api/llm/v1/hardware"},
-		{"GET", "/api/config/services"}, {"GET", "/api/cc/api/v0/admin/nodes"}, {"GET", "/api/nope"},
-		{"POST", "/api/auth/change-password"},
+		{"GET", "/api/admin/users"}, {"GET", "/api/llm/v1/hardware"},
+		{"GET", "/api/config/services"}, {"GET", "/api/nope"},
+		{"POST", "/api/admin/users/1/temp-password"},
 	} {
 		if w := send(mux, c.method, c.path, ""); w.Code != 401 || detailOf(w) != "Missing or invalid Authorization header" {
 			t.Errorf("anonymous %s %s: %d %q", c.method, c.path, w.Code, w.Body.String())
