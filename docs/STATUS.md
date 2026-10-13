@@ -21,6 +21,12 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   Store submissions: follow `docs/agent/store-listing.md` (kit in `internal/agent/browser/store/`);
   the Chrome store id (`abkbjmelelgelkhneobebgoilejlgbob`) is in `ChromeExtensionIDs`; release the
   agent and re-run `jarvis-agent browser install` so existing hosts admit it.
+- [ ] **Clean-install sign-off by the user** (user 2026-10-12: "i'm going to need to do like a clean
+  install for what users would see in order to okay everything"). Once pairing, the agent installers
+  and the store listings exist: a fresh machine or user account per OS, starting from the landing
+  page with no dev tools. The flow is install jarvisd → setup wizard → add a computer (download,
+  install, shortcut, pair) → add the browser extension from the store → first voice command. The
+  user approves each step or files what to change.
 - [ ] **Admin UI usable on phones and tablets** (user 2026-10-12: "on smaller screens it's basically
   unusable"). In progress.
 - [ ] **Marketing material for the landing page:** reset the dev server to demo data
