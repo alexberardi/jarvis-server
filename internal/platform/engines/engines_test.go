@@ -306,10 +306,14 @@ func TestRestartsOnFailingHealthChecks(t *testing.T) {
 	f := newFake(t)
 	s := start(t, f.spec(nil))
 	waitHealthy(t, s)
+	// Healthy only means the test's own health endpoint answered; the helper may not have
+	// counted its start yet. Failing health now would kill it first, and only the restart
+	// would ever be counted.
+	f.awaitStarts(t, 1)
 	f.health.set(false)
 	f.awaitStarts(t, 2)
-	// The restarted engine is still loading (failing checks) with an hour-long StartTimeout,
-	// so nothing replaces the restart's cause.
+	// The restarted engine is still loading (failing checks) and only StartTimeout, a hang
+	// guard, would end that, so nothing replaces the restart's cause.
 	if st := s.Status(); !strings.Contains(st.LastError, "consecutive failed health checks") {
 		t.Fatalf("status = %+v", st)
 	}
