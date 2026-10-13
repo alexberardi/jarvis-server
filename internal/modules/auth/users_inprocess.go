@@ -40,9 +40,13 @@ func (m *Module) UserHouseholds(ctx context.Context, userID int64) ([]string, er
 	return userHouseholds(ctx, m.deps.DB.Read, userID)
 }
 
-// UserNames is GET /internal/users/batch in process (command-center's speaker and household
-// member name resolution, docs/cc/06 §3.7): id → username for the ids that exist. Unknown ids
-// are simply absent.
+// promptName is the SQL for the name a member goes by in the assistant's prompts: the
+// display name when set (a blank one counts as unset), otherwise the username.
+const promptName = `COALESCE(NULLIF(TRIM(display_name), ''), username)`
+
+// UserNames is command-center's speaker and household member name resolution (docs/cc/06
+// §3.7; legacy GET /internal/users/batch): id → the name the member goes by (promptName) for
+// the ids that exist. Unknown ids are simply absent.
 func (m *Module) UserNames(ctx context.Context, ids []int64) (map[int64]string, error) {
 	out := map[int64]string{}
 	if len(ids) == 0 {
@@ -53,7 +57,7 @@ func (m *Module) UserNames(ctx context.Context, ids []int64) (map[int64]string, 
 		args[i] = id
 	}
 	rows, err := m.deps.DB.Read.QueryContext(ctx,
-		`SELECT id, username FROM auth_users WHERE id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
+		`SELECT id, `+promptName+` FROM auth_users WHERE id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
 	if err != nil {
 		return nil, err
 	}

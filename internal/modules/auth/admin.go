@@ -231,7 +231,10 @@ func (m *Module) handleValidateNodeHousehold(w http.ResponseWriter, r *http.Requ
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"valid": true, "node_id": n.nodeID, "household_id": n.householdID, "reason": nil})
 }
 
-// handleUsersBatch is GET /internal/users/batch?user_ids=1&user_ids=2: {"users": {"1": username}}.
+// handleUsersBatch is GET /internal/users/batch?user_ids=1&user_ids=2:
+// {"users": {"1": username}, "display_names": {"1": display name or null}}. "users" keeps the
+// legacy meaning (usernames); "display_names" is a jarvisd addition, and a caller wanting the
+// name to show prefers it over the username.
 func (m *Module) handleUsersBatch(w http.ResponseWriter, r *http.Request, _ *appClient) {
 	raw := r.URL.Query()["user_ids"]
 	if len(raw) == 0 {
@@ -260,27 +263,29 @@ func (m *Module) handleUsersBatch(w http.ResponseWriter, r *http.Request, _ *app
 		return
 	}
 	rows, err := m.deps.DB.Read.QueryContext(r.Context(),
-		`SELECT id, username FROM auth_users WHERE id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, ids...)
+		`SELECT id, username, NULLIF(TRIM(display_name), '') FROM auth_users WHERE id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, ids...)
 	if err != nil {
 		m.internalError(w, err)
 		return
 	}
 	defer rows.Close()
-	users := map[string]string{}
+	users, display := map[string]string{}, map[string]any{}
 	for rows.Next() {
 		var id int64
 		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var dn sql.NullString
+		if err := rows.Scan(&id, &name, &dn); err != nil {
 			m.internalError(w, err)
 			return
 		}
-		users[strconv.FormatInt(id, 10)] = name
+		k := strconv.FormatInt(id, 10)
+		users[k], display[k] = name, nullStr(dn)
 	}
 	if err := rows.Err(); err != nil {
 		m.internalError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"users": users})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"users": users, "display_names": display})
 }
 
 // --- superuser_views.py ---
