@@ -12,13 +12,12 @@ Everything lives in `internal/agent/browser/store/`:
 | File | What |
 |---|---|
 | [`listing.md`](../../internal/agent/browser/store/listing.md) | Text to paste: descriptions, categories, URLs, Chrome privacy answers, AMO reviewer notes |
-| [`PRIVACY.md`](../../internal/agent/browser/store/PRIVACY.md) | The privacy policy |
 | `images/` | Store images (table below) |
 | `src/render.mjs` | Regenerates the images and the extension's icons (headless Chromium via Playwright; instructions in its header) |
 
-**Privacy policy URL** (both stores):
-`https://github.com/alexberardi/jarvis-server/blob/main/internal/agent/browser/store/PRIVACY.md`.
-It can move to the landing page later; if it does, update both listings.
+**Privacy policy URL** (both stores): `https://docs.jarvisautomation.dev/security/privacy-policy/`.
+It is the project-wide policy (alexberardi/jarvis-docs, `docs/security/privacy-policy.md`); its
+"Browser extension and desktop agent" section covers the extension.
 
 **Upload packages:** `scripts/browser-ext-store-zip.sh chrome` or `… firefox` writes
 `dist/jarvis-browser-<store>-<version>.zip`, with `manifest.json` at the root. It is built from
@@ -130,7 +129,8 @@ means submitting a **listed** version of the same add-on.
    - Categories: Tabs; Photos, Music & Videos.
    - Support email: leave empty. Support site: the issues URL. Homepage: the repo.
    - License: AGPL-3.0.
-   - Privacy policy: AMO takes the policy as **text**, so paste the body of `PRIVACY.md`.
+   - Privacy policy: AMO takes the policy as **text**, so paste the "Browser extension and
+     desktop agent" section of the policy page (with a line linking the full page).
    - Leave "requires payment, non-free services or additional hardware" unticked.
    - Icon: `store-icon-128.png`. Screenshots: the three 1280×800 frames.
 7. Submit. The listing shows the manifest's `data_collection_permissions` (browsing activity,
@@ -167,6 +167,6 @@ Once the listed version is approved:
 4. **Firefox:** `scripts/browser-ext-store-zip.sh firefox` → Developer Hub → **Upload New
    Version** → "On this site" → source: No → reviewer notes → submit. After approval, commit the
    signed `.xpi` as above.
-5. If a permission or the data read changes, update `listing.md`, `PRIVACY.md` (with its date),
+5. If a permission or the data read changes, update `listing.md`, the privacy policy's extension section (jarvis-docs),
    both stores' privacy answers, and `data_collection_permissions`.
 6. Release the agent so new installs embed the new `.xpi`.

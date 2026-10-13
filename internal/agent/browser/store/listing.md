@@ -2,11 +2,13 @@
 
 Copy-paste text for the Chrome Web Store and addons.mozilla.org (AMO). The step-by-step
 submission guide is [docs/agent/store-listing.md](../../../../docs/agent/store-listing.md); the
-privacy policy is [PRIVACY.md](PRIVACY.md); the images are in [images/](images/).
+privacy policy is the project's, at https://docs.jarvisautomation.dev/security/privacy-policy/ (source: alexberardi/jarvis-docs,
+`docs/security/privacy-policy.md`, section "Browser extension and desktop agent"); the images are
+in [images/](images/).
 
 Everything here was checked against the extension's code (`../extension/`) at version 0.1.0.
 If the extension gains a permission or reads something new, update the privacy answers below
-and PRIVACY.md in the same change.
+and the privacy policy's "Browser extension and desktop agent" section (jarvis-docs) to match.
 
 ## Both stores
 
@@ -16,12 +18,12 @@ and PRIVACY.md in the same change.
 | Homepage | `https://github.com/alexberardi/jarvis-server` |
 | Support URL | `https://github.com/alexberardi/jarvis-server/issues` |
 | Support community | Discord: `https://discord.gg/9SuQFVexxJ` |
-| Privacy policy URL | `https://github.com/alexberardi/jarvis-server/blob/main/internal/agent/browser/store/PRIVACY.md` |
+| Privacy policy URL | `https://docs.jarvisautomation.dev/security/privacy-policy/` |
 | License (AMO asks) | GNU Affero General Public License v3.0 (AGPL-3.0) |
 | Language | English |
 
-The privacy policy URL is the GitHub page on `main`. It can move to the project's landing page
-later; if it does, update both store listings.
+The privacy policy is the project-wide one in jarvis-docs; its "Browser extension and desktop
+agent" section covers this extension.
 
 ## Short description
 
@@ -65,7 +67,7 @@ PRIVATE BY DESIGN
 • No analytics, no ads, no tracking, no accounts with us. It stores nothing in the browser.
 • Web pages and other extensions can't send it commands.
 
-The full privacy policy: https://github.com/alexberardi/jarvis-server/blob/main/internal/agent/browser/store/PRIVACY.md
+The full privacy policy: https://docs.jarvisautomation.dev/security/privacy-policy/
 
 Jarvis is in early beta. Questions and bug reports are welcome on GitHub (https://github.com/alexberardi/jarvis-server/issues) or Discord (https://discord.gg/9SuQFVexxJ).
 ```
