@@ -796,7 +796,7 @@ with its arguments (§12, `node.LogArgs`); `text` is now always logged as `<N ch
 | Platform | Typing and keys | Needs | Named app (focus, then confirm focus) |
 |---|---|---|---|
 | Linux Wayland: Hyprland, sway, other wlroots | **built in:** the virtual-keyboard protocol (`zwp_virtual_keyboard_manager_v1`) spoken directly, pure Go (`internal/agent/vkbd`); fallback `wtype -s 40 -`, text on stdin, `LC_ALL=C.UTF-8` | nothing (the compositor advertises the protocol); `wtype` only if it doesn't | Hyprland: `hyprctl -j clients` / `dispatch focuswindow address:…` / `-j activewindow`; sway: `swaymsg get_tree` / `[con_id=N] focus` |
-| Linux Wayland: GNOME, KDE | `ydotool type --file -` (uinput) | `ydotool` + `ydotoold` running (its socket); US-layout ASCII only | not available (no cross-client window control): type into what's in front |
+| Linux Wayland: GNOME, KDE | **built in:** the desktop portal's RemoteDesktop over D-Bus (`internal/agent/portal`), one short session per call, `NotifyKeyboardKeysym`; fallback `ydotool type --file -` (uinput) | a one-time permission: `jarvis-agent dictation allow` shows the desktop's dialog, the restore token is kept 0600; ydotool needs `ydotoold` and types US-layout ASCII only | not available (no cross-client window control): type into what's in front |
 | Linux X11 | **built in:** XTEST spoken directly (`internal/agent/x11`); fallback `xdotool type --clearmodifiers --file -`, `xdotool key` | nothing (an X server with XTEST, i.e. every desktop one); `xdotool` only without it | the host backend's window control (built-in EWMH, else wmctrl) + the active window from `_NET_ACTIVE_WINDOW` (else `xdotool getactivewindow`) |
 | macOS | CGEvent keyboard events with Unicode strings (≤ 20 UTF-16 units per event, surrogate pairs never split), purego | Accessibility for Jarvis Agent.app (the grant window control already needs) | System Events (host backend) + the frontmost process's pid |
 | Windows | `SendInput` with `KEYEVENTF_UNICODE` (layout-independent), raw syscalls | an interactive desktop; can't type into an elevated (admin) window (UIPI): reported as an error | user32 (host backend) + `GetForegroundWindow` |
@@ -814,8 +814,8 @@ pass it in a sealed memfd, then press and release each key (Shift+Tab: the modif
 around the Tab key). Text with more than 247 distinct characters is typed in batches with a new
 keymap each, so every keycode stays ≤ 255 (XWayland clients can't see higher ones). Preferred
 whenever the compositor advertises the protocol (probed per call: one connection, one round trip,
-nothing created); otherwise wtype, then ydotool. Not tried on GNOME (no protocol) or KDE (input
-methods only); those get the portal (open question 7). A failure is reported, never retried
+nothing created); otherwise wtype, then the portal, then ydotool. Not tried on GNOME (no
+protocol) or KDE (input methods only); those get the portal (below). A failure is reported, never retried
 through a helper (keys may have half-arrived).
 
 **The built-in X11 keyboard** (2026-10-13). XTEST fake key events over a pure-Go X11
@@ -829,6 +829,43 @@ settle (`x11.DefaultSettle`, injectable) after each remap and before the spare k
 blanked again. The mapping is always put back, even on an error or a cancel. Not handled: an
 active XKB group other than the first (core keyboard mapping columns 1–2 only); a character on a
 key in another group is typed through a spare keycode, which still works.
+
+**The RemoteDesktop portal (GNOME and KDE on Wayland, 2026-10-13).** The way an ordinary program
+may send keys there: `org.freedesktop.portal.RemoteDesktop` over the session bus
+(`github.com/godbus/dbus/v5`, pure Go). Each typing call is one short session: CreateSession,
+SelectDevices (keyboard, `persist_mode` 2 "until revoked", the stored `restore_token`), Start,
+`NotifyKeyboardKeysym` per key (Shift_L around Shift+Tab), Session.Close. No session is kept open
+between calls: GNOME shows a "remotely controlled" indicator for as long as one is.
+
+- **Asked once, never by surprise.** `jarvis-agent dictation allow` is the only thing meant to
+  show the desktop's dialog. It stores the restore token Start returns, 0600 in the agent's 0700
+  config dir (`portal-remote-desktop.token`, next to `node.json`; a group/world-readable one is
+  refused). Until then dictation is off and `status` says to run that command; `dictation
+  status` and `revoke` (forget the token) round it off. `status` only reads the portal's
+  properties: it never opens a session.
+- **Tokens.** The spec calls a restore token single use; xdg-desktop-portal 1.22 hands the same
+  one back for `persist_mode` 2. The agent stores whatever Start returns. A token the portal no
+  longer accepts (revoked, or another install's) is refused by 1.22 in SelectDevices ("Restore
+  token is not valid") rather than asking again; the agent then forgets it and says to run `allow`
+  again. If a desktop shows its dialog instead and the user cancels, the same happens. A portal
+  without version 2 (no persistence), without a keyboard, or one that returns no token keeps
+  dictation off, saying why (it would ask every time).
+- **One app id, whoever asks.** The portal keys a grant on the caller's app id, which it
+  otherwise derives from the process's systemd scope: a terminal's (KDE's Konsole runs children
+  as `org.kde.konsole`) differs from the agent's user service, and a token granted to one is
+  refused to the other. So every portal connection first registers as `io.jarvis.agent`
+  (`org.freedesktop.host.portal.Registry`, xdg-desktop-portal 1.19+), which the portal accepts
+  only if `io.jarvis.agent.desktop` exists with a runnable `Exec`: `dictation allow` writes it
+  (`$XDG_DATA_HOME/applications`, `NoDisplay=true`, Exec = the agent's own path) and `revoke`
+  removes it. On a portal older than 1.19 the scope decides: run `allow` from a terminal whose
+  children aren't in an app scope (GNOME Terminal's normally aren't), or expect `status` to ask
+  again.
+- **Named apps** stay `not_supported` there (no cross-client window focus): text goes to what is
+  in front. Preferred after the virtual keyboard and wtype (which GNOME/KDE don't have), before
+  ydotool.
+- **Not known yet (needs a real GNOME/KDE):** whether their backends type characters that aren't
+  on the user's keyboard layout (mutter and KWin turn a keysym into a key of the current layout;
+  CJK and symbols may be dropped), and how each backend's dialog reads.
 
 **The first character.** A fresh virtual keyboard's keymap must reach the client before the
 first key: wtype without `-s 40` dropped the first character on sway in 1 of 3 runs, with it 0
@@ -1006,6 +1043,23 @@ never in logs or results; password fields only when named.
   ICCCM `WM_DELETE_WINDOW` when the WM lacks it, refusing otherwise). **Not run on a real X11
   desktop** (no X11 box here).
 
+- **The RemoteDesktop portal (2026-10-13; the real frontend, a fake backend):** the real
+  `xdg-desktop-portal` 1.22 and `xdg-permission-store` on a private `dbus-daemon`, with a
+  RemoteDesktop *backend* faked by the test (`JARVIS_PORTAL_FRONTEND=… JARVIS_PORTAL_STORE=…
+  JARVIS_PORTAL_AGENT=<agent binary> go test -run TestFrontend ./internal/agent/portal/`). The
+  frontend validated every call (request/session handle tokens, argument types), stored the grant
+  in its permission store and issued a restore token. Registration: without the `.desktop` file
+  the frontend refused `Register` ("App info not found") and the backend saw app id `""`; with it
+  (and an `Exec` that exists) every session, the agent's included, arrived as `io.jarvis.agent`. `jarvis-agent` run as on GNOME Wayland:
+  `status` → "dictation: off: typing on this desktop needs a one-time permission: run
+  `jarvis-agent dictation allow` …"; `dictation allow` → one dialog, token file 0600; `status` →
+  "dictation: on (desktop portal (RemoteDesktop)); typing into a named app: off (…)";
+  `desktop_type_text "hé 日"` and `desktop_press_key shift+tab` reached the backend as exactly
+  `h é space 日` and `Shift_L↓ Tab↓ Tab↑ Shift_L↑`, restored without a dialog, every session
+  closed; a named app → `not_supported`, nothing typed; an unknown token → refused, forgotten.
+  **Not run against GNOME's or KDE's own backend** (no GNOME/KDE here): their dialog, their
+  keysym injection, and whether they return a restore token are unverified.
+
 ### Open questions (defaults chosen; the user reviews)
 
 1. **Confirmation default.** *Chosen:* `off`; the island shows what happens. *Alternative:*
@@ -1026,10 +1080,12 @@ never in logs or results; password fields only when named.
    *Recommend:* macOS first if wanted (System Events `click button "OK" of window 1 of the
    frontmost process`, including sheets, with the label passed as an argument, never spliced;
    the grant exists already), then UI Automation; AT-SPI last (Wayland apps vary).
-7. **GNOME/KDE Wayland.** Typing needs ydotool (root-ish uinput setup, ASCII only) and naming an
-   app is impossible. *Recommend:* the RemoteDesktop portal (libei) for typing later; until then
-   `status` says why it's off. (Hyprland, sway and other wlroots compositors no longer need any
-   helper: the virtual keyboard is built in.)
+7. **GNOME/KDE Wayland.** *Built (2026-10-13):* typing through the RemoteDesktop portal after a
+   one-time `jarvis-agent dictation allow` (above); naming an app stays impossible there. Open:
+   should first run (enroll, or the first-run page of §13) offer the permission, so nobody has to
+   know the command? *Recommend:* yes, as a step of the GUI first-run flow on GNOME/KDE only.
+   libei (`ConnectToEIS`) would be the faster path for long text; `NotifyKeyboardKeysym` is enough
+   for dictation.
 8. **Typing into the agent's own terminal.** Nothing stops "type …" from landing in the
    terminal running `jarvis-agent try`. *Recommend:* fine (that is what was asked).
 9. **The extension update.** 0.2.0 must be uploaded to both stores and re-signed for the

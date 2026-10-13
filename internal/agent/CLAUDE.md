@@ -35,6 +35,7 @@ for os in linux darwin windows; do GOOS=$os go vet ./internal/agent/... || echo 
 CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 
 ./jarvis-agent status                          # capabilities now + enrollment + reachability
+./jarvis-agent dictation allow                 # GNOME/KDE Wayland: the portal's one-time typing dialog
 ./jarvis-agent try                             # list the tools this host offers now
 ./jarvis-agent try desktop_set_volume '{"volume": 30}'   # run one tool locally, no jarvisd
 ./jarvis-agent apps steam                      # what a name resolves to (never launches)
@@ -99,9 +100,15 @@ internal/agent/
                       PickUnique (dictation: one match or ambiguous_window)
   dictate/            dictation (DESIGN.md §14): desktop_type_text, desktop_press_key and
                       desktop_confirm (tools.go, confirm.go); keyboards: the built-in Wayland
-                      virtual keyboard and X11 XTEST, else wtype/ydotool/xdotool (linux.go), CGEvent (mac.go, cgevent_darwin.go), SendInput (win.go,
-                      sendinput_windows.go); focus: hyprctl/swaymsg (linuxwin.go), the host
+                      virtual keyboard, X11 XTEST and the RemoteDesktop portal, else
+                      wtype/ydotool/xdotool (linux.go), CGEvent (mac.go, cgevent_darwin.go),
+                      SendInput (win.go, sendinput_windows.go); focus: hyprctl/swaymsg (linuxwin.go), the host
                       backend + an active-window check (hostwin.go)
+  portal/             typing on GNOME/KDE Wayland through xdg-desktop-portal RemoteDesktop over
+                      D-Bus (godbus): one session per call, restore token 0600 (TokenStore),
+                      every connection registered as io.jarvis.agent (needs the .desktop file
+                      `dictation allow` writes);
+                      `jarvis-agent dictation allow|revoke|status` (cmd/jarvis-agent/dictation.go)
   vkbd/               the Wayland virtual keyboard (zwp_virtual_keyboard_manager_v1), pure Go:
                       what wtype does, without wtype (DESIGN.md §14)
   x11/                X11 without helpers: XTEST typing (spare-keycode remap, settle, restore)
@@ -300,8 +307,13 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     reach a real X server; the dictate backends read the session through `Exec.Getenv` for the
     same reason); xdotool/wmctrl only without XTEST or an EWMH window manager. An XTEST remap is
     always restored (a deferred blank of every spare keycode used). `JARVIS_X11_TYPE=…` /
-    `JARVIS_X11_LIST=1 go test -run Native ./internal/agent/x11/` are for a throwaway Xvfb only. Availability is probed per call (one
-    connection, nothing created). A built-in backend's failure is returned, never retried through a
+    `JARVIS_X11_LIST=1 go test -run Native ./internal/agent/x11/` are for a throwaway Xvfb only.
+    GNOME/KDE Wayland type through the RemoteDesktop portal (`portal`), after the virtual keyboard
+    and wtype, before ydotool. **Only `jarvis-agent dictation allow` may show the portal's
+    dialog**: probing reads properties only, typing restores from the stored token, and a token
+    the portal rejects is forgotten (status then names `allow` again) rather than retried. Test
+    the portal on a private `dbus-daemon` only (`TestFrontend`), never the user's session bus.
+    Availability is probed per call (one connection, nothing created). A built-in backend's failure is returned, never retried through a
     helper: keys may have half-arrived. `vkbd`'s settle and clock are injected; its tests use a
     scripted compositor on a socketpair. `JARVIS_VKBD_TYPE=… go test -run TestNativeType
     ./internal/agent/vkbd/` types for real, **in a nested compositor only**.
@@ -310,7 +322,9 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
 
 Beyond jarvisd's own: `github.com/eclipse/paho.mqtt.golang` (jarvisd embeds a broker; the agent is a client), `golang.org/x/sys` (Windows syscalls),
 `golang.org/x/term` (password prompt), `github.com/jezek/xgb` (X11 protocol for XTEST typing and
-EWMH window control; pure Go, no dependencies, Linux builds only, +0.5 MB), `github.com/warthog618/go-gpiocdev` (the HAT button, pure
+EWMH window control; pure Go, no dependencies, Linux builds only, +0.5 MB),
+`github.com/godbus/dbus/v5` (D-Bus for the RemoteDesktop portal; pure Go, needs only x/sys, Linux
+builds only), `github.com/warthog618/go-gpiocdev` (the HAT button, pure
 Go), `github.com/ebitengine/purego` (macOS AX, AudioToolbox,
 libasound and onnxruntime via dlopen). `CGO_ENABLED=0` builds everywhere: Windows volume is
 WASAPI over raw COM vtables, windows are user32, open is ShellExecuteW, macOS AX is dlopen'd
