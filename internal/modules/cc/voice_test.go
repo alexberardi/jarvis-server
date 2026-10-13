@@ -126,16 +126,17 @@ func TestVoiceStreamProseTurn(t *testing.T) {
 		t.Fatalf("loop request %v %v", req["temperature"], req["max_tokens"])
 	}
 	msgs := messagesOf(req)
-	if len(msgs) != 3 || msgs[1]["content"] != prompts.UnknownSpeakerBlock {
+	if len(msgs) != 4 || msgs[1]["content"] != prompts.UnknownSpeakerBlock ||
+		!strings.HasPrefix(msgs[2]["content"].(string), "<calendar>\n") {
 		t.Fatalf("messages: %v", msgs)
 	}
-	user := msgs[2]["content"].(string)
+	user := msgs[3]["content"].(string)
 	if !strings.HasPrefix(user, "what time is it") || !strings.HasSuffix(user, "\n/no_think") {
 		t.Fatalf("user message %q", user)
 	}
 	// History committed: system, user, assistant.
 	conv := ve.m.convs.get("c1")
-	if n := len(conv.messages); n != 4 { // system + speaker block + user + assistant
+	if n := len(conv.messages); n != 5 { // system + speaker and calendar blocks + user + assistant
 		t.Fatalf("history len %d", n)
 	}
 

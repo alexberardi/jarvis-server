@@ -272,6 +272,7 @@ Order after `messages[0]` and the trimmed history (`conversation_handler.py:858-
    - `You are speaking with {name}.`
    - plus `\n\nUser Profile — these facts… :\n{memories}`
    - or `UNKNOWN_SPEAKER_BLOCK` when neither name nor memories is known. It is **never empty**.
+   - **Go addition (2026-10-12):** a `<calendar>` block follows it on every turn (`prompts.CalendarBlock` over `dates.Context.Calendar`): today and tomorrow, then this week, next week and the week after (Sunday to Saturday, as `weeks.*`), and what "next <weekday>" means, from the same resolver as `next_<day>` (D8). The date pipeline only resolves tool arguments, so a plain "what's the date next Friday?" was model arithmetic: a 9B answered Oct 17 (a Saturday) on one run and Nov 7 on another. About 150 tokens; transient, so the cached prefix is untouched.
 2. `<ambient_context>` block (`core_rules.py:360-392`), only when `ambient_context.enabled`. Its text is frozen at warmup (`:3192-3268`):
    - the clock, quantized to 15 minutes;
    - the latest household weather, calendar and reminder memories;

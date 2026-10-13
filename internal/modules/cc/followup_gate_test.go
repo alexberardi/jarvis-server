@@ -62,7 +62,7 @@ func TestFollowUpGateModelRejectionIsSilentAndUncommitted(t *testing.T) {
 	if b["stop_reason"] != "not_for_me" || b["keep_listening"] != true || b["assistant_message"] != nil {
 		t.Fatalf("body %v", b)
 	}
-	if historyHas(ve, "pass me the remote") || len(ve.m.convs.get("c1").messages) != 4 {
+	if historyHas(ve, "pass me the remote") || len(ve.m.convs.get("c1").messages) != 5 { // system, speaker + calendar blocks, user, assistant
 		t.Fatal("a rejected follow-up must not enter the history")
 	}
 	if got := ve.m.convs.get("c1").answeredRounds; got != rounds {
