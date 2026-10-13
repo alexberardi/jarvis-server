@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { RefreshCw, Cpu, Zap, ZapOff, Wifi, WifiOff } from 'lucide-react'
+import PendingPairings from '@/components/nodes/PendingPairings'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
 import { errorMessage } from '@/lib/errors'
 import { formatVersion } from '@/lib/format'
@@ -145,10 +146,12 @@ export default function NodesPage() {
         </button>
       </div>
 
+      <PendingPairings />
+
       {households.length === 0 && grouped.orphans.length === 0 && (
         <div className="py-12 text-center">
           <p className="text-sm text-[var(--color-text-muted)]">
-            No households or nodes yet. Add a node by QR provisioning in the mobile app.
+            No households or nodes yet. Add a node by QR provisioning in the mobile app, or pair a computer: its code shows up here.
           </p>
         </div>
       )}

@@ -49,6 +49,9 @@ var wantTiers = map[string]tier{
 	"GET /api/cc/api/v0/mobile/nodes/{node_id}/tools":                tierUser,
 	"POST /api/cc/api/v0/nodes/{node_id}/actions":                    tierUser,
 	"GET /api/cc/api/v0/households/{household_id}/smart-home/config": tierUser,
+	"GET /api/cc/api/v0/nodes/pairings":                              tierUser,
+	"POST /api/cc/api/v0/nodes/pairings/approve":                     tierUser,
+	"POST /api/cc/api/v0/nodes/pairings/deny":                        tierUser,
 
 	// The inbox: per-user rows.
 	"GET /api/notifications/api/v0/inbox":                  tierUser,

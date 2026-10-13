@@ -32,3 +32,45 @@ export async function getNodesView(): Promise<NodesView> {
   const [households, nodes] = await Promise.all([fetchAllHouseholds(), fetchAllNodes()])
   return { households, nodes }
 }
+
+/** PendingPairing is a computer waiting for approval (device-code pairing, DESIGN §13). */
+export interface PendingPairing {
+  code: string
+  name: string
+  platform: string
+  requested_from: string
+  created_at: string
+  expires_in: number
+}
+
+/** PairingHousehold is one of the caller's own households, the only ones they can approve into. */
+export interface PairingHousehold {
+  id: string
+  name: string
+  role: string
+}
+
+export interface PairingsView {
+  pairings: PendingPairing[]
+  households: PairingHousehold[]
+}
+
+/** getPairings lists the computers waiting for approval, and the caller's households. */
+export async function getPairings(): Promise<PairingsView> {
+  const { data } = await apiClient.get<PairingsView>('/api/cc/api/v0/nodes/pairings')
+  return data
+}
+
+export interface ApprovePairing {
+  code: string
+  household_id: string
+  room?: string
+}
+
+export async function approvePairing(body: ApprovePairing): Promise<void> {
+  await apiClient.post('/api/cc/api/v0/nodes/pairings/approve', body)
+}
+
+export async function denyPairing(code: string): Promise<void> {
+  await apiClient.post('/api/cc/api/v0/nodes/pairings/deny', { code })
+}

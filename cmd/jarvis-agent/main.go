@@ -1,6 +1,7 @@
 // jarvis-agent is the Jarvis desktop node: it enrolls with jarvisd like a Pi node, connects to
 // jarvisd's MQTT, and offers OS control (open, volume, windows) as client tools.
 //
+//	jarvis-agent enroll --server http://192.0.2.10:7700   # shows a code to approve
 //	jarvis-agent enroll --server http://192.0.2.10:7700 --email you@example.com
 //	jarvis-agent run
 //	jarvis-agent status
@@ -102,7 +103,8 @@ func usage(w io.Writer) {
 
   enroll   register this computer as a node of a jarvisd household
            --server URL (jarvisd config service, e.g. http://192.0.2.10:7700)
-           then either --email ADDR [--household ID] (prompts for the password)
+           then either nothing: shows a code for a household member to approve (or --code)
+           or --email ADDR [--household ID] (prompts for the password)
            or --token prov_... --node-id ID (a token minted elsewhere)
            [--name NAME] [--room ROOM] [--creds PATH] [--force | --if-needed]
            [--browser | --no-browser]   set up browser control afterwards (default: ask)
@@ -185,7 +187,10 @@ func enroll(ctx context.Context, args []string) error {
 	ifNeeded := fs.Bool("if-needed", false, "do nothing (exit 0) when already enrolled")
 	browserYes := fs.Bool("browser", false, "set up browser control after enrolling, without asking")
 	browserNo := fs.Bool("no-browser", false, "don't offer browser control setup")
+	useCode := fs.Bool("code", false, "pair with a code a household member approves (the default without --email or --token)")
 	_ = fs.Parse(args)
+	roomSet := false
+	fs.Visit(func(f *flag.Flag) { roomSet = roomSet || f.Name == "room" })
 	path, err := credsPath(*cp)
 	if err != nil {
 		return err
@@ -212,7 +217,10 @@ func enroll(ctx context.Context, args []string) error {
 
 	tok, id := *token, *nodeID
 	nodeCC := ""
+	regRoom := *room
 	switch {
+	case *useCode && (tok != "" || id != "" || *email != ""):
+		return errors.New("--code doesn't go with --email or --token")
 	case tok != "" && id != "":
 	case tok != "" || id != "":
 		return errors.New("--token and --node-id go together")
@@ -255,7 +263,18 @@ func enroll(ctx context.Context, args []string) error {
 		tok, id = pt.Token, pt.NodeID
 		nodeCC = pt.NodeCommandCenterURL
 	default:
-		return errors.New("give --email (sign in) or --token and --node-id")
+		res, err := pairWithCode(ctx, hc, ccURL, *name)
+		if err != nil {
+			return err
+		}
+		tok, id, nodeCC = res.Token, res.NodeID, res.NodeCommandCenterURL
+		// The approver chose the room; --room given here still wins, as with a token.
+		if !roomSet {
+			regRoom = ""
+		}
+		if res.Name != "" {
+			*name = res.Name
+		}
 	}
 
 	// Prefer the URL jarvisd says nodes should use; if this machine can't reach it (a VPN, a
@@ -263,14 +282,14 @@ func enroll(ctx context.Context, args []string) error {
 	// use, so only a connection failure (nothing was redeemed) falls back.
 	var c node.Creds
 	if nodeCC != "" && nodeCC != ccURL {
-		c, err = node.Register(ctx, hc, nodeCC, *server, id, tok, *room)
+		c, err = node.Register(ctx, hc, nodeCC, *server, id, tok, regRoom)
 		var he *node.HTTPError
 		if err != nil && !errors.As(err, &he) {
 			fmt.Fprintf(os.Stderr, "note: %s unreachable (%v); registering via %s\n", nodeCC, err, ccURL)
-			c, err = node.Register(ctx, hc, ccURL, *server, id, tok, *room)
+			c, err = node.Register(ctx, hc, ccURL, *server, id, tok, regRoom)
 		}
 	} else {
-		c, err = node.Register(ctx, hc, ccURL, *server, id, tok, *room)
+		c, err = node.Register(ctx, hc, ccURL, *server, id, tok, regRoom)
 	}
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
@@ -283,6 +302,24 @@ func enroll(ctx context.Context, args []string) error {
 	offerBrowserSetup(*browserYes, *browserNo)
 	fmt.Println("Next: jarvis-agent run")
 	return nil
+}
+
+// pairWithCode starts a device-code pairing, shows the code and waits for a household member
+// to approve it (DESIGN §13). No password is typed here.
+func pairWithCode(ctx context.Context, hc *http.Client, ccURL, name string) (node.PairingResult, error) {
+	p, err := node.StartPairing(ctx, hc, ccURL, name, runtime.GOOS)
+	if err != nil {
+		return node.PairingResult{}, fmt.Errorf("starting pairing: %w", err)
+	}
+	mins := max(1, (p.ExpiresIn+59)/60)
+	fmt.Printf("To add this computer (%s), approve this code in Jarvis Automation\n"+
+		"(the admin's Nodes page, or the app):\n\n    %s\n\nWaiting for approval (the code expires in %d minutes)...\n", name, p.Code, mins)
+	res, err := node.WaitPairing(ctx, hc, ccURL, p, node.SleepCtx)
+	if err != nil {
+		return node.PairingResult{}, err
+	}
+	fmt.Printf("Approved: room %q.\n", res.Room)
+	return res, nil
 }
 
 func readPassword(fromStdin bool) (string, error) {

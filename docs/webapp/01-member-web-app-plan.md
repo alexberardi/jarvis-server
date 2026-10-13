@@ -157,7 +157,7 @@ gated, then answer 404 (`gateway.go:111-116`).
 | `/api/tts/{voices,sample}` (`bff.go:123-124`) | superuser | **superuser** | wizard only |
 | **New member pass routes** to cc: `POST /mobile/chat`, `POST /mobile/chat/warmup`, `GET /mobile/chat/capabilities` (`mobile_chat.go:52-54`), `GET /mobile/nodes/{id}/tools` (`packages.go:119`), `POST /nodes/{id}/actions` (`cc.go:297`), `GET /households/{hh}/smart-home/config` (`smarthome.go:73`, for `primary_node_id`) | not routed | **user** | cc checks the member role and that the node belongs to the household (`mobile_chat.go:132-150`, `commands.go:35`, `smarthome.go:141-150`) |
 | Inbox: notifications `/api/v0/inbox*` (`notifications.go:193-199`) | not routed | **user**, if Q2 = port | per-user rows |
-| Add-ons: `GET /api/addons/{devices,this-device}`, pairing approval | n/a | **user** | specified in 01-no-cli-plan §3.2. Scoped to the caller's households |
+| Add-ons: `GET /api/addons/{devices,this-device}`, pairing approval | n/a | **user** | specified in 01-no-cli-plan §3.2. Scoped to the caller's households. Pairing approval is built (PR #101): `GET /api/cc/api/v0/nodes/pairings`, `POST …/pairings/{approve,deny}` pass through as **user**; cc approves only into the caller's own households |
 
 Household roles add nothing at the gateway. A household `admin` who isn't a superuser gets the member
 web app. Household administration stays in mobile (Q3).

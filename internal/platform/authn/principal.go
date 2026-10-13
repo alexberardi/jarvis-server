@@ -111,3 +111,16 @@ type Authority interface {
 	// HouseholdRole returns the user's role in a household, or ok=false if not a member.
 	HouseholdRole(ctx context.Context, userID int64, householdID string) (Role, bool, error)
 }
+
+// Membership is one of a user's households.
+type Membership struct {
+	HouseholdID string
+	Name        string
+	Role        Role
+}
+
+// MembershipLister lists a user's households. It is optional, beside Authority: the auth
+// module implements it, and a module that needs it (CC's pairing approval) type-asserts.
+type MembershipLister interface {
+	Memberships(ctx context.Context, userID int64) ([]Membership, error)
+}

@@ -157,6 +157,7 @@ type Module struct {
 	convs    *convCache
 	signals  *convSignals
 	enroll   *enrollments
+	pairings *pairingStore // device-code pairing (pairing.go)
 	tools    *servertools.Registry
 	dateKeys []string      // DT_KEYS override (tests); nil = the shared vocabulary
 	lanAddr  func() string // this host's LAN address override (tests); nil = netaddr.LANAddr
@@ -222,6 +223,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.convs = newConvCache(m.now)
 	m.signals = newConvSignals(m.now)
 	m.enroll = newEnrollments()
+	m.pairings = newPairingStore()
 	if m.tools == nil {
 		m.tools = servertools.NewRegistry()
 		m.registerServerTools()
@@ -276,6 +278,12 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST "+v0+"/nodes/verify-reset", m.handleVerifyReset)
 	mux.HandleFunc("POST "+v0+"/provisioning/token", m.handleProvisioningToken)
 	mux.HandleFunc("POST "+v0+"/nodes/register", m.handleRegister)
+	// Device-code pairing (pairing.go): start and poll are the computer's, the rest a member's.
+	mux.HandleFunc("POST "+v0+"/nodes/pairings", m.handleStartPairing)
+	mux.HandleFunc("POST "+v0+"/nodes/pairings/{pairing_id}/poll", m.handlePollPairing)
+	mux.HandleFunc("GET "+v0+"/nodes/pairings", m.user(m.handleListPairings))
+	mux.HandleFunc("POST "+v0+"/nodes/pairings/approve", m.user(m.handleApprovePairing))
+	mux.HandleFunc("POST "+v0+"/nodes/pairings/deny", m.user(m.handleDenyPairing))
 	mux.HandleFunc("GET "+v0+"/node/mqtt-credentials", m.node(m.handleMQTTCredentials))
 
 	// Settings snapshots and K2 (node_settings.py).

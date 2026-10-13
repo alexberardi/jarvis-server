@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -57,18 +58,57 @@ func (m *Module) handleProvisioningToken(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	now := m.now()
-	raw := "prov_" + tokenURLSafe(32)
-	expires := now.Add(provisioningTTL)
-	var createdBy any
+	var createdBy *int64
 	if !auth.admin {
-		createdBy = auth.user.ID
+		createdBy = &auth.user.ID
 	}
-	opt := func(s string, has bool) any {
+	opt := func(s string, has bool) *string {
 		if !has {
 			return nil
 		}
-		return s
+		return &s
+	}
+	raw, nodeID, expires, err := m.mintProvisioningToken(ctx, hh, opt(room, hasRoom), opt(name, hasName), nodeID, createdBy)
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	out := map[string]any{
+		"token": raw, "node_id": nodeID, "expires_at": pyNaive(expires), "expires_in": int(provisioningTTL.Seconds()),
+	}
+	m.addNodeURLs(r, out)
+	httpx.WriteJSON(w, http.StatusCreated, out)
+}
+
+// addNodeURLs adds the URLs to hand a node, which may differ from the ones the caller used
+// (nodeurl.go).
+func (m *Module) addNodeURLs(r *http.Request, out map[string]any) {
+	ccURL, cfgURL := nodeURLs(r, m.deps.Config, m.nodeLANAddr)
+	if ccURL != "" {
+		out["node_command_center_url"] = ccURL
+	}
+	if cfgURL != "" {
+		out["node_config_service_url"] = cfgURL
+	}
+}
+
+// mintProvisioningToken stores a single-use provisioning token for one household and returns
+// it with its node id and expiry. A non-empty nodeID refreshes that id's token (any unconsumed one is
+// replaced) unless the node already registered; empty mints a new id. room and name are nil
+// when unset. createdBy is the minting user, nil for the admin key.
+func (m *Module) mintProvisioningToken(ctx context.Context, hh string, room, name *string, nodeID string, createdBy *int64) (string, string, time.Time, error) {
+	now := m.now()
+	raw := "prov_" + tokenURLSafe(32)
+	expires := now.Add(provisioningTTL)
+	var by any
+	if createdBy != nil {
+		by = *createdBy
+	}
+	str := func(p *string) any {
+		if p == nil {
+			return nil
+		}
+		return *p
 	}
 	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
 		if nodeID != "" {
@@ -89,25 +129,13 @@ func (m *Module) handleProvisioningToken(w http.ResponseWriter, r *http.Request)
 		_, err := tx.ExecContext(ctx, `INSERT INTO cc_provisioning_tokens
 			(id, token_hash, node_id, household_id, room, name, created_by_user_id, expires_at, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			uuid4(), hashToken(raw), nodeID, hh, opt(room, hasRoom), opt(name, hasName), createdBy, dbTime(expires), dbTime(now))
+			uuid4(), hashToken(raw), nodeID, hh, str(room), str(name), by, dbTime(expires), dbTime(now))
 		return err
 	})
 	if err != nil {
-		m.writeErr(w, err)
-		return
+		return "", "", time.Time{}, err
 	}
-	out := map[string]any{
-		"token": raw, "node_id": nodeID, "expires_at": pyNaive(expires), "expires_in": int(provisioningTTL.Seconds()),
-	}
-	// The URLs to hand the node, which may differ from the ones the phone used (nodeurl.go).
-	ccURL, cfgURL := nodeURLs(r, m.deps.Config, m.nodeLANAddr)
-	if ccURL != "" {
-		out["node_command_center_url"] = ccURL
-	}
-	if cfgURL != "" {
-		out["node_config_service_url"] = cfgURL
-	}
-	httpx.WriteJSON(w, http.StatusCreated, out)
+	return raw, nodeID, expires, nil
 }
 
 // handleRegister is POST /nodes/register: the node redeems its provisioning token.

@@ -156,7 +156,7 @@ provisioning, registration, broker, report_tools and mobile chat:
 
 ## 5. Enrollment UX
 
-Implemented, both ending at `POST /nodes/register`:
+Implemented, all three ending at `POST /nodes/register`:
 
 1. **Sign in:** `jarvis-agent enroll --server URL --email you@x` prompts for the password
    (no echo; `--password-stdin` for scripts). The CLI logs in, lists households (picks the
@@ -164,13 +164,33 @@ Implemented, both ending at `POST /nodes/register`:
    stays in memory.
 2. **Paste a token:** `--token prov_… --node-id …`, for a token minted elsewhere (admin key,
    app).
+3. **Device code** (the default, 2026-10-13; `--code` names it): `jarvis-agent enroll --server URL`
+   with no `--email`/`--token` calls `POST /api/v0/nodes/pairings`, prints the code (`ABCD-EFGH`)
+   and polls `POST /api/v0/nodes/pairings/{id}/poll` with the poll secret that only the start
+   answer carries. Any member of a household approves it (`POST /api/v0/nodes/pairings/approve`
+   `{code, household_id, room}`) into one of **their own** households; another household is a
+   403, superuser or not. The poll then hands out an ordinary provisioning token for that
+   household (minted by the approver), which the agent redeems, so the node is exactly one
+   enrolled with a token. `GET /api/v0/nodes/pairings` lists what waits plus the caller's
+   households; `…/deny` refuses one. The admin's Nodes page shows "Pending pairings" (today
+   superuser-only through the gateway; members get it with the web app). Details:
+   `internal/modules/cc/pairing.go`.
+   - **Codes and limits:** 8 symbols from 32 (40 bits), single use, 10-minute life, in memory (a
+     restart only means pairing again). 10 starts per address per 10 minutes; at most 100 live
+     pairings; 10 failed approvals or denials (unknown code, foreign household) per user per 10
+     minutes, after which even the right code is refused until the window passes.
+   - **The secret:** an unknown id and a wrong secret answer the same 404; neither the list nor
+     the approval carries a token. A repeated poll (a lost answer) replaces the token, so only
+     the latest works; once the node registers, the pairing is gone (410, then 404).
+   - **Room:** the approver's (default `desktop`); `enroll --room` still overrides it, as with a
+     token.
 
 The token's `node_command_center_url` is preferred; on a connection failure (nothing
 redeemed), the CLI falls back to the discovered CC URL. The node gets `name` = hostname and
 `room` = `desktop` unless overridden.
 
-Gaps: the login leaves a refresh token on the server (no logout call yet); there is no
-device-code flow; the creds file on Windows relies on the profile ACL.
+Gaps: the login leaves a refresh token on the server (no logout call yet); the creds file on
+Windows relies on the profile ACL.
 
 ## 6. Sidecar protocol draft
 
@@ -718,7 +738,8 @@ checklist).
 **Order of work.**
 
 1. Device-code pairing: the jarvisd endpoints plus the approve UI in admin and app, with
-   `jarvis-agent enroll --code` first. Everything else builds on it.
+   `jarvis-agent enroll --code` first. Everything else builds on it. **Built 2026-10-13** (jarvisd routes, the agent's
+   `enroll`, the admin's Pending pairings; §5 item 3). The app's approval is plan item 3.4.
 2. The first-run window. Its toolkit is open question 1 below.
 3. The macOS `.dmg` (notarized), then the Windows installer, then the Linux `.deb`.
 4. "Add a computer" in admin and app, and the wizard link.

@@ -232,6 +232,7 @@ llm 7704. Two of them are unusable from a browser:
     | `/api/llm/v1/hardware[/engines]`, `/api/llm/v1/models/{catalog,hf/…,install,installs[/…],installed[/…],labels}` | llm `/v1/…` | S3, S5, S8 |
     | `/api/config/services`, `/api/config/services/health` (GET only) | config `/services…` | S5, S11 |
     | `/api/cc/api/v0/admin/nodes` (GET only; optional) | cc `/api/v0/admin/nodes` (user JWT) | S13 liveness |
+    | `/api/cc/api/v0/nodes/pairings` (GET), `…/pairings/{approve,deny}` (POST) | cc `/api/v0/nodes/pairings…` (user JWT, member-scoped) | S13 pending pairings (device-code pairing, DESIGN §13) |
 
   - **BFF endpoints** in Go, where no module exposes what the operator needs to a user JWT. These call
     modules through **Go interfaces**, not HTTP: settings, traces, logs, doctor, system, setup state,

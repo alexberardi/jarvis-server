@@ -121,6 +121,7 @@ type Module struct {
 }
 
 var _ authn.Authority = (*Module)(nil)
+var _ authn.MembershipLister = (*Module)(nil)
 
 func (m *Module) Name() string      { return "auth" }
 func (m *Module) Listener() string  { return pconfig.ListenerAuth }
