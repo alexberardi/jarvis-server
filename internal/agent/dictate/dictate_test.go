@@ -375,6 +375,63 @@ func TestLinuxKeyboardPrefersXTEST(t *testing.T) {
 	}
 }
 
+// probeCounter is an Injector that counts how often it was asked.
+type probeCounter struct {
+	fakeInjector
+	probes int
+}
+
+func (p *probeCounter) Available(ctx context.Context) (bool, string) {
+	p.probes++
+	return p.fakeInjector.Available(ctx)
+}
+
+// GNOME and KDE type through the RemoteDesktop portal once the user allowed it; until then
+// status carries the portal's reason (the one command to run). It's never asked where a
+// virtual keyboard or wtype works.
+func TestLinuxKeyboardPortal(t *testing.T) {
+	ctx := context.Background()
+	gnome := map[string]string{"WAYLAND_DISPLAY": "wayland-0", "XDG_CURRENT_DESKTOP": "ubuntu:GNOME"}
+	por := &probeCounter{fakeInjector: fakeInjector{ok: true}}
+	f := &fakeExec{env: gnome, bins: bins("ydotool"), files: map[string]bool{"/tmp/.ydotool_socket": true}}
+	k := &LinuxKeyboard{X: f, Wayland: &fakeInjector{why: "GNOME has no virtual-keyboard protocol"}, X11: &fakeInjector{ok: true}, Portal: por}
+	if b, _ := k.backend(ctx); b != bePortal || k.Name() != "fake-native" {
+		t.Fatalf("backend %q", b)
+	}
+	_ = k.Type(ctx, "日本")
+	_ = k.Press(ctx, KeyEnter)
+	if len(f.ran) != 0 || len(por.sent) != 2 || por.sent[1][0].Sym != xkb.KeyReturn {
+		t.Fatalf("ran %v sent %v", f.ran, por.sent)
+	}
+
+	// Not allowed yet: off, with the portal's reason (ydotool absent).
+	k = &LinuxKeyboard{X: &fakeExec{env: gnome}, Wayland: &fakeInjector{why: "no"},
+		Portal: &fakeInjector{why: "typing on this desktop needs a one-time permission: run `jarvis-agent dictation allow`"}}
+	if ok, why := k.Available(ctx); ok || !strings.Contains(why, "dictation allow") {
+		t.Fatalf("%v %q", ok, why)
+	}
+	// ...but ydotool with its daemon still works meanwhile.
+	k.X = &fakeExec{env: gnome, bins: bins("ydotool"), files: map[string]bool{"/tmp/.ydotool_socket": true}}
+	if b, _ := k.backend(ctx); b != beYdotool {
+		t.Fatalf("got %q", b)
+	}
+
+	// The virtual keyboard or wtype wins, and the portal (a D-Bus round trip) isn't even asked.
+	hypr := map[string]string{"WAYLAND_DISPLAY": "wayland-1", "XDG_CURRENT_DESKTOP": "Hyprland"}
+	por = &probeCounter{fakeInjector: fakeInjector{ok: true}}
+	k = &LinuxKeyboard{X: &fakeExec{env: hypr, bins: bins("wtype")}, Wayland: &fakeInjector{ok: true}, Portal: por}
+	_, _ = k.backend(ctx)
+	k.Wayland = &fakeInjector{why: "no"}
+	if b, _ := k.backend(ctx); b != beWtype || por.probes != 0 {
+		t.Fatalf("backend %q, portal probed %d times", b, por.probes)
+	}
+	// X11 never uses it.
+	x := &LinuxKeyboard{X: &fakeExec{env: map[string]string{"DISPLAY": ":0"}}, Portal: &fakeInjector{ok: true}}
+	if b, _ := x.backend(ctx); b == bePortal {
+		t.Fatal("portal on X11")
+	}
+}
+
 func TestX11ActiveAsksTheWindowManagerFirst(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeExec{bins: bins("xdotool"), out: func(Cmd) (string, error) { return "999", nil }}

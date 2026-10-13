@@ -77,6 +77,8 @@ func main() {
 		err = browserCmd(ctx, os.Args[2:])
 	case "hat":
 		err = hatCmd(ctx, os.Args[2:])
+	case "dictation":
+		err = dictationCmd(ctx, os.Args[2:])
 	case "island-demo":
 		err = islandDemo(ctx, os.Args[2:])
 	case "browser-host":
@@ -113,6 +115,8 @@ func usage(w io.Writer) {
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   status   show enrollment, reachability and what this host can do right now
+  dictation allow | revoke | status   the one-time typing permission GNOME and KDE on Wayland
+           need (allow shows the desktop's dialog once; nothing else ever does)
   apps     list launchable apps, or show what a name resolves to (never launches): apps [NAME]
   try      run one tool locally, no jarvisd involved: try [--wait 10s] TOOL ['{"arg": ...}']
            (browser_* tools wait for the browser extension to connect)

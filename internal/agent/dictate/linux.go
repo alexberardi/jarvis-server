@@ -14,8 +14,9 @@ import (
 //
 //   - Wayland: the virtual-keyboard protocol spoken directly (Wayland, built in: Hyprland, sway
 //     and other wlroots compositors; not GNOME, and KDE only for input methods), else wtype
-//     (the same protocol, if installed), else ydotool (uinput: any compositor, but it needs the
-//     ydotoold daemon and types US-layout ASCII only);
+//     (the same protocol, if installed), else the desktop portal's RemoteDesktop (Portal, built
+//     in: GNOME and KDE, once the user has allowed it), else ydotool (uinput: any compositor,
+//     but it needs the ydotoold daemon and types US-layout ASCII only);
 //   - X11: XTEST spoken directly (X11, built in), else xdotool, else ydotool.
 //
 // The helpers are fallbacks for when the built-in backend can't run. Their text goes on stdin,
@@ -26,6 +27,8 @@ type LinuxKeyboard struct {
 	Wayland Injector
 	// X11 is the built-in XTEST keyboard (x11.Keyboard); nil for none.
 	X11 Injector
+	// Portal is the RemoteDesktop portal (portal.Keyboard); nil for none.
+	Portal Injector
 }
 
 // Injector is a built-in typing backend: it sends keysym strokes to whatever has focus.
@@ -39,6 +42,7 @@ type Injector interface {
 const (
 	beWayland = "wayland"
 	beX11     = "x11"
+	bePortal  = "portal"
 	beWtype   = "wtype"
 	beYdotool = "ydotool"
 	beXdotool = "xdotool"
@@ -95,19 +99,42 @@ func (l *LinuxKeyboard) nativeX(ctx context.Context) bool {
 	return ok
 }
 
+// portal: the RemoteDesktop portal works now (and has been allowed), or why not.
+func (l *LinuxKeyboard) portal(ctx context.Context) (bool, string) {
+	if l.Portal == nil || !l.wayland() {
+		return false, ""
+	}
+	return l.Portal.Available(ctx)
+}
+
+// gnomeOrKDE: the desktops whose only sanctioned way to type is the portal.
+func (l *LinuxKeyboard) gnomeOrKDE() bool {
+	d := strings.ToLower(l.X.Getenv("XDG_CURRENT_DESKTOP"))
+	return strings.Contains(d, "gnome") || strings.Contains(d, "kde")
+}
+
 // backend is the tool to use now, or "" with the reason.
 func (l *LinuxKeyboard) backend(ctx context.Context) (string, string) {
-	switch {
-	case l.native(ctx):
+	// In order of preference; each backend is probed only if the ones before it can't type.
+	if l.native(ctx) {
 		return beWayland, ""
-	case l.wtypeWorks():
+	}
+	if l.wtypeWorks() {
 		return beWtype, ""
-	case l.nativeX(ctx):
+	}
+	if l.nativeX(ctx) {
 		return beX11, ""
+	}
+	portalOK, portalWhy := l.portal(ctx)
+	switch {
+	case portalOK:
+		return bePortal, ""
 	case l.x11() && l.X.LookPath("xdotool"):
 		return beXdotool, ""
 	case (l.wayland() || l.x11()) && l.ydotoolWorks():
 		return beYdotool, ""
+	case l.wayland() && l.gnomeOrKDE() && portalWhy != "":
+		return "", portalWhy
 	case l.wayland():
 		return "", "this Wayland desktop offers no way to type into other apps (the virtual-keyboard protocol of Hyprland, sway and other wlroots compositors); ydotool with ydotoold running would work"
 	case l.x11():
@@ -124,6 +151,8 @@ func (l *LinuxKeyboard) Name() string {
 		return l.Wayland.Name()
 	case beX11:
 		return l.X11.Name()
+	case bePortal:
+		return l.Portal.Name()
 	default:
 		return b
 	}
@@ -146,7 +175,7 @@ func typeTimeout(text string) time.Duration {
 func (l *LinuxKeyboard) Type(ctx context.Context, text string) error {
 	var c Cmd
 	switch b, why := l.backend(ctx); b {
-	case beWayland, beX11:
+	case beWayland, beX11, bePortal:
 		strokes, ok := xkb.Strokes(text)
 		if !ok {
 			return fmt.Errorf("%w: text holds a character that can't be typed", errBadArgs)
@@ -172,8 +201,11 @@ func (l *LinuxKeyboard) Type(ctx context.Context, text string) error {
 }
 
 func (l *LinuxKeyboard) injector(b string) Injector {
-	if b == beX11 {
+	switch b {
+	case beX11:
 		return l.X11
+	case bePortal:
+		return l.Portal
 	}
 	return l.Wayland
 }
@@ -201,7 +233,7 @@ func (l *LinuxKeyboard) Press(ctx context.Context, k Key) error {
 	shift := k == KeyShiftTab
 	var c Cmd
 	switch b, why := l.backend(ctx); b {
-	case beWayland, beX11:
+	case beWayland, beX11, bePortal:
 		return l.injector(b).Send(ctx, []xkb.Stroke{keyStrokes[k]})
 	case beWtype:
 		args := []string{"-s", wtypeSettle}

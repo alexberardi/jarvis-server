@@ -1504,10 +1504,12 @@ one extra double-click and stays on the right side of every OS's security model.
      users get the one-liner, not a package. So a `.deb` `Depends:` line covers only part of
      the Linux users.
    - **Status (2026-10-13):** **done for Hyprland/sway/wlroots** (the virtual keyboard is built in,
-     PR #85) **and X11** (XTEST typing and EWMH window control are built in, PR #86). The agent
-     binary is the whole install there; wtype, xdotool and wmctrl are only a fallback. Still open:
-     GNOME/KDE on Wayland (below), and volume (`pactl`/`wpctl`/`amixer`, present on nearly every
-     desktop).
+     PR #85), **X11** (XTEST typing and EWMH window control are built in, PR #86) **and GNOME/KDE
+     on Wayland** (the RemoteDesktop portal, PR #87: one `jarvis-agent dictation allow`, then no
+     dialog; verified against the real portal frontend with a fake backend, not yet on a real
+     GNOME/KDE desktop). The agent binary is the whole install; wtype, xdotool, wmctrl and ydotool
+     are only fallbacks. Still open: volume (`pactl`/`wpctl`/`amixer`, present on nearly every
+     desktop), and offering the portal permission during first run (DESIGN §14 open question 7).
    - *Recommend:* **do it in Go, without the helpers.** Typing on wlroots compositors uses the
      Wayland virtual-keyboard protocol, which is what `wtype` itself does; a pure-Go Wayland
      client (no cgo, the agent builds with `CGO_ENABLED=0`) can speak it directly. X11 typing
@@ -1520,6 +1522,6 @@ one extra double-click and stays on the right side of every OS's security model.
      (DESIGN §13) shows it as an amber item rather than a silent missing feature.
    - **GNOME and KDE on Wayland** (Bazzite's default) have no protocol an ordinary program may use
      to type into other windows. `ydotool` needs a root daemon, which is not something an
-     installer should set up silently; the long-term path is the desktop portal's RemoteDesktop
-     interface (`libei`), which asks the user once in a system dialog. Until then dictation there
-     is off, and `status` says why.
+     installer should set up silently; the path is the desktop portal's RemoteDesktop interface,
+     which asks the user once in a system dialog. **Built (PR #87):** `jarvis-agent dictation
+     allow` asks once; until then dictation there is off and `status` names that command.

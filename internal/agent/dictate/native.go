@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/portal"
 	"github.com/alexberardi/jarvis-server/internal/agent/vkbd"
 	"github.com/alexberardi/jarvis-server/internal/agent/x11"
 )
@@ -17,7 +18,8 @@ func ForOS(goos string, h *host.Host, x Exec, macTrusted func() bool) (Keyboard,
 	case "linux":
 		disp := &x11.Display{Getenv: x.Getenv} // the session as Exec sees it (tests: a fake)
 		xw := &HostWindows{H: h, SameFn: SameX11, ActiveFn: X11Active(x, disp)}
-		return &LinuxKeyboard{X: x, Wayland: &vkbd.Keyboard{Getenv: x.Getenv}, X11: &x11.Keyboard{D: disp}},
+		return &LinuxKeyboard{X: x, Wayland: &vkbd.Keyboard{Getenv: x.Getenv}, X11: &x11.Keyboard{D: disp},
+				Portal: &portal.Keyboard{R: &portal.RemoteDesktop{}}},
 			&LinuxWindows{X: x, X11: xw, XWM: disp}, nil
 	case "darwin":
 		return &MacKeyboard{Trusted: macTrusted, Post: nativeMacPoster()},
