@@ -808,7 +808,7 @@ anyone), and `scripts/agent-dev-run.sh` boots out and removes the old LaunchAgen
 setup every agent installer ends in (`internal/agent/install`). `Plan` turns the machine (home,
 environment, the running binary) into a list of steps as data, golden-tested for all three OSes
 on every runner (`internal/agent/install/testdata`); `Apply` carries them out. Installing twice
-changes nothing; uninstall removes what install made, and the directories that leaves empty,
+changes nothing; uninstall removes every file and link install made (and the agent's own directories),
 keeping the agent's data unless `--purge`. `--files-only` writes files but touches no service
 manager, LaunchServices or process; `--dry-run` prints the steps.
 

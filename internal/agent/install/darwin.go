@@ -62,7 +62,7 @@ func darwinPlan(e Env, o Options) ([]Op, error) {
 	ops := []Op{
 		// What scripts/agent-dev-run.sh --install made under the old app id.
 		{Kind: Exec, Activate: true, IgnoreErr: true, Path: p.oldPlist, Args: []string{"launchctl", "bootout", p.domain + "/" + appid.LegacyID}},
-		{Kind: Remove, Path: p.oldPlist, Target: e.Home},
+		{Kind: Remove, Path: p.oldPlist},
 	}
 	switch mode {
 	case LoginSMAppService:
@@ -75,7 +75,7 @@ func darwinPlan(e Env, o Options) ([]Op, error) {
 		ops = append(ops,
 			// A plain LaunchAgent from an earlier install would run a second copy.
 			Op{Kind: Exec, Activate: true, IgnoreErr: true, Path: p.plist, Args: []string{"launchctl", "bootout", p.domain + "/" + appid.ID}},
-			Op{Kind: Remove, Path: p.plist, Target: e.Home},
+			Op{Kind: Remove, Path: p.plist},
 			Op{Kind: LoginItem, Activate: true, Path: p.bundle, Name: BundlePlistName},
 		)
 	case LoginLaunchAgent:
@@ -119,9 +119,9 @@ func darwinUninstall(e Env, o UninstallOptions) []Op {
 	}
 	ops = append(ops, []Op{
 		{Kind: Exec, Activate: true, IgnoreErr: true, Args: []string{"launchctl", "bootout", p.domain + "/" + appid.ID}},
-		{Kind: Remove, Path: p.plist, Target: e.Home},
+		{Kind: Remove, Path: p.plist},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Path: p.oldPlist, Args: []string{"launchctl", "bootout", p.domain + "/" + appid.LegacyID}},
-		{Kind: Remove, Path: p.oldPlist, Target: e.Home},
+		{Kind: Remove, Path: p.oldPlist},
 		{Kind: BrowserHostsGone},
 	}...)
 	if p.bundle != "" {

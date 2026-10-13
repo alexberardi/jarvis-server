@@ -18,7 +18,9 @@ case $(uname -s) in
     H=$(mktemp -d)
     mkdir -p "$H/.mozilla" "$H/Desktop" "$H/Downloads"
     cp "$BIN" "$H/Downloads/jarvis-agent"
-    snap() { (cd "$H" && find . | LC_ALL=C sort); }
+    # Files and links (directories are compared separately: shared ones may stay, empty).
+    snap() { (cd "$H" && find . ! -type d | LC_ALL=C sort); }
+    dirs_before=$(cd "$H" && find . -type d | LC_ALL=C sort)
     before=$(snap)
     R() { env -i HOME="$H" PATH=/usr/bin:/bin:/usr/sbin:/sbin "$@"; }
     R "$H/Downloads/jarvis-agent" install --files-only --desktop-shortcut
@@ -45,8 +47,10 @@ case $(uname -s) in
     after=$(snap)
     if [ "$before" != "$after" ]; then
       diff <(echo "$before") <(echo "$after") >&2 || true
-      fail "uninstall left something"
+      fail "uninstall left (or removed) files"
     fi
+    while IFS= read -r d; do [ -d "$H/$d" ] || fail "uninstall removed the user's directory $d"; done <<<"$dirs_before"
+    [ ! -e "$H/.local/lib/jarvis-agent" ] || fail "left ~/.local/lib/jarvis-agent"
     rm -rf "$H"
     ;;
   MINGW*|MSYS*|CYGWIN*)

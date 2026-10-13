@@ -1,5 +1,5 @@
 exec [activate] [ignore-errors] path="~/Library/LaunchAgents/io.jarvis.agent.plist" args="launchctl bootout gui/501/io.jarvis.agent"
-remove path="~/Library/LaunchAgents/io.jarvis.agent.plist" target="~"
+remove path="~/Library/LaunchAgents/io.jarvis.agent.plist"
 write path="~/Library/LaunchAgents/net.jarvisautomation.agent.plist" mode=0644
   | <?xml version="1.0" encoding="UTF-8"?>
   | <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

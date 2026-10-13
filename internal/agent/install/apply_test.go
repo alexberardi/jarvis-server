@@ -213,10 +213,11 @@ func TestLinuxInstallTwiceUninstallLeavesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := tree(t, home)
-	// Only the native-messaging dir is left (the browser package's; cmd/jarvis-agent prunes it).
+	// Nothing of ours is left: no file or link that wasn't there before. Shared directories
+	// (applications/, autostart/, systemd/user/) may stay behind, empty.
 	var extra []string
 	for _, l := range after {
-		if !slices.Contains(before, l) && l != ".mozilla/native-messaging-hosts/" {
+		if !slices.Contains(before, l) && !strings.HasSuffix(l, "/") {
 			extra = append(extra, l)
 		}
 	}
@@ -224,12 +225,19 @@ func TestLinuxInstallTwiceUninstallLeavesNothing(t *testing.T) {
 		t.Fatalf("uninstall left:\n%s", strings.Join(extra, "\n"))
 	}
 	for _, l := range before {
-		if !slices.Contains(after, l) && l != ".mozilla/" {
+		if strings.HasSuffix(l, "/") {
+			if _, err := os.Stat(filepath.Join(home, l)); err != nil {
+				t.Errorf("uninstall removed the user's %q", l)
+			}
+		} else if !slices.Contains(after, l) {
 			t.Errorf("uninstall removed the user's %q", l)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(home, ".mozilla")); err != nil {
-		t.Error("uninstall removed the Firefox dir")
+	// The agent's own directories do go.
+	for _, gone := range []string{".local/lib/jarvis-agent", ".config/systemd/user/graphical-session.target.wants"} {
+		if _, err := os.Stat(filepath.Join(home, gone)); !os.IsNotExist(err) {
+			t.Errorf("left %s", gone)
+		}
 	}
 }
 

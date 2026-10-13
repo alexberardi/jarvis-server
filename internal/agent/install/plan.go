@@ -10,7 +10,7 @@
 // hosts), which tests replace with fakes.
 //
 // Both are idempotent: installing twice gives the same result as once, and uninstall removes
-// what install made (and empty directories it leaves), keeping the agent's data unless purging.
+// every file install made (and the agent's own directories), keeping the agent's data unless purging.
 package install
 
 import (

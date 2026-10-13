@@ -93,16 +93,18 @@ func linuxUninstall(e Env, o UninstallOptions) []Op {
 	p := e.linux()
 	ops := []Op{
 		{Kind: StopAgent, Activate: true, IgnoreErr: true, Name: "systemd", Key: deploy.SystemdUnitName},
-		// Each removal also removes the directories it leaves empty, up to home.
-		{Kind: Remove, Path: p.wants, Target: e.Home},
-		{Kind: Remove, Path: p.oldWants, Target: e.Home},
-		{Kind: Remove, Path: p.unit, Target: e.Home},
-		{Kind: Remove, Path: p.autostart, Target: e.Home},
-		{Kind: Remove, Path: p.menu, Target: e.Home},
+		// Only the agent's own directories go with their last file (the .wants link dir, as
+		// systemctl disable does, and ~/.local/lib/jarvis-agent); shared ones like
+		// ~/.config/autostart stay, empty or not.
+		{Kind: Remove, Path: p.wants, Target: p.units},
+		{Kind: Remove, Path: p.oldWants, Target: p.units},
+		{Kind: Remove, Path: p.unit},
+		{Kind: Remove, Path: p.autostart},
+		{Kind: Remove, Path: p.menu},
 		{Kind: Remove, Path: p.icon}, // never the Desktop folder itself
-		{Kind: MimeUnset, Path: p.mimeapps, Name: mimeURLHandler, Value: appid.DesktopFile, Target: e.Home},
+		{Kind: MimeUnset, Path: p.mimeapps, Name: mimeURLHandler, Value: appid.DesktopFile},
 		{Kind: BrowserHostsGone},
-		{Kind: Remove, Path: p.bin, Target: e.Home},
+		{Kind: Remove, Path: p.bin, Target: e.join(e.Home, ".local", "lib")},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Args: []string{"systemctl", "--user", "daemon-reload"}},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Args: []string{"update-desktop-database", p.apps}},
 	}

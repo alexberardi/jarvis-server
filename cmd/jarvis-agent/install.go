@@ -90,20 +90,10 @@ func (b browserHosts) Unregister() error {
 		if r.Err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", r.Target.Label, r.Err))
 		} else if r.Done {
-			pruneEmpty(filepath.Dir(r.Path), b.env.Home) // the NativeMessagingHosts dir, if that left it empty
+			_ = os.Remove(filepath.Dir(r.Path)) // the NativeMessagingHosts dir, if that left it empty
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// pruneEmpty removes dir and its parents while they are empty, stopping below home.
-func pruneEmpty(dir, home string) {
-	home = filepath.Clean(home)
-	for ; dir != home && strings.HasPrefix(dir, home+string(filepath.Separator)); dir = filepath.Dir(dir) {
-		if os.Remove(dir) != nil {
-			return
-		}
-	}
 }
 
 // installSys is install.Sys on this machine.
