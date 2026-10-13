@@ -10,6 +10,8 @@ Update it at the end of every working session, and whenever a task finishes or a
 
 ### Before the official release (user 2026-10-12): next step
 
+**Installer plan:** [install/01-no-cli-plan.md](install/01-no-cli-plan.md) ties the three "without a terminal" items below into one build order (artifacts per OS, CI jobs, sign-off matrix, open questions Q1–Q8).
+
 Done together with the `v0.1.0` release, not before, because the legacy Python stack stays the supported install until then:
 
 - [ ] **jarvis-installer:** merge the jarvisd landing page (branch `feat/jarvisd-landing`, draft PR). It replaces the compose wizard at installer.jarvisautomation.io with the `install.sh`/`install.ps1` one-liners and a legacy-import pointer (`docs/install/00-installers.md` §1.1). Its one-liners use the stable release URLs, which 404 until a non-prerelease exists.
