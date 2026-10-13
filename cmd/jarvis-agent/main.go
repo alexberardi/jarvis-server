@@ -98,6 +98,12 @@ func main() {
 		err = run(ctx, os.Args[2:])
 	case "status":
 		err = status(ctx, os.Args[2:])
+	case "install":
+		err = installCmd(ctx, os.Args[2:], os.Stdout)
+	case "uninstall":
+		err = uninstallCmd(ctx, os.Args[2:], os.Stdout)
+	case "start":
+		err = startCmd(ctx, os.Args[2:])
 	case "try":
 		err = try(ctx, os.Args[2:])
 	case "listen":
@@ -146,6 +152,12 @@ func usage(w io.Writer) {
             [--wake-models DIR] [--no-chimes]]   wake word "hey jarvis" (Linux, macOS)
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
+  install  set the agent up for this user: start at login, the app menu entry (and desktop
+           shortcut), the jarvis-agent:// link, browser control's native host; then start it
+           [--no-start] [--no-browser] [--desktop-shortcut] [--login-item auto|smappservice|launchagent]
+           [--files-only] [--dry-run]
+  uninstall  undo install [--purge: also delete the sign-in, settings and caches] [--dry-run]
+  start    start the agent (what the menu entry, the shortcut and jarvis-agent://start run)
   status   show enrollment, reachability and what this host can do right now
   dictation allow | revoke | status   the one-time typing permission GNOME and KDE on Wayland
            need (allow shows the desktop's dialog once; nothing else ever does)

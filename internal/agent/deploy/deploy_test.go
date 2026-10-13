@@ -28,6 +28,8 @@ const (
 	unitPath  = "systemd/jarvis-agent.service"
 	plistPath = "launchd/" + appid.ID + ".plist"
 	taskPath  = "windows/" + appid.ID + ".xml"
+	// bundlePlistPath is the LaunchAgent inside the app, registered with SMAppService.
+	bundlePlistPath = "macos/LaunchAgent.plist"
 )
 
 // --- systemd user unit ---
@@ -54,8 +56,9 @@ func unitValues(text string) map[string]map[string]string {
 
 func TestSystemdIsAUserUnit(t *testing.T) {
 	u := unitValues(read(t, unitPath))
-	// multi-user.target is never reached in a user manager: such a unit installs and never starts.
-	if u["Install"]["WantedBy"] != "default.target" {
+	// multi-user.target is never reached in a user manager: such a unit installs and never
+	// starts. default.target is reached before the compositor imports the display variables.
+	if u["Install"]["WantedBy"] != "graphical-session.target" {
 		t.Fatalf("WantedBy = %q", u["Install"]["WantedBy"])
 	}
 	for _, k := range []string{"User", "Group", "DynamicUser"} {
@@ -239,12 +242,12 @@ func TestXMLDeclarationMatchesEncoding(t *testing.T) {
 // --- all three ---
 
 func TestEveryTemplateExplainsTheSessionRule(t *testing.T) {
-	for _, p := range []string{unitPath, plistPath, taskPath} {
+	for _, p := range []string{unitPath, plistPath, taskPath, bundlePlistPath} {
 		text := strings.ToLower(read(t, p))
 		if !regexp.MustCompile(`session|window server|graphical`).MatchString(text) {
 			t.Fatalf("%s does not say why it must be user-scoped", p)
 		}
-		if !strings.Contains(text, "__agent_bin__") {
+		if p != bundlePlistPath && !strings.Contains(text, "__agent_bin__") {
 			t.Fatalf("%s: binary path must be a placeholder", p)
 		}
 	}
@@ -272,5 +275,43 @@ func TestMacBundleInfoPlist(t *testing.T) {
 	}
 	if l := plistDict(t, read(t, plistPath)); l["AssociatedBundleIdentifiers"] != "string:"+appid.ID {
 		t.Errorf("LaunchAgent AssociatedBundleIdentifiers = %q", l["AssociatedBundleIdentifiers"])
+	}
+}
+
+func TestBundleLaunchAgent(t *testing.T) {
+	p := plistDict(t, read(t, bundlePlistPath))
+	for k, want := range map[string]string{
+		"Label":                       "string:" + appid.ID,
+		"BundleProgram":               "string:Contents/MacOS/jarvis-agent",
+		"ProgramArguments":            "array:<string>Contents/MacOS/jarvis-agent</string> <string>run</string>",
+		"RunAtLoad":                   "true:",
+		"ProcessType":                 "string:Interactive",
+		"AssociatedBundleIdentifiers": "string:" + appid.ID,
+	} {
+		if p[k] != want {
+			t.Errorf("%s = %q, want %q", k, p[k], want)
+		}
+	}
+	for _, k := range []string{"UserName", "GroupName", "InitGroups"} {
+		if _, ok := p[k]; ok {
+			t.Fatalf("%s makes this a daemon", k)
+		}
+	}
+}
+
+func TestInfoPlistRegistersTheURLScheme(t *testing.T) {
+	p := plistDict(t, read(t, "macos/Info.plist"))
+	if !strings.Contains(p["CFBundleURLTypes"], "<string>jarvis-agent</string>") {
+		t.Fatalf("CFBundleURLTypes = %q", p["CFBundleURLTypes"])
+	}
+}
+
+// The embedded copies are what install renders: they must be these files.
+func TestEmbeddedTemplates(t *testing.T) {
+	for p, got := range map[string]string{unitPath: SystemdUnit, plistPath: LaunchAgent, bundlePlistPath: BundleLaunchAgent,
+		"macos/Info.plist": InfoPlist, taskPath: WindowsTask} {
+		if got != read(t, p) {
+			t.Errorf("%s: embedded copy differs", p)
+		}
 	}
 }

@@ -319,3 +319,36 @@ func TestMigrateLegacy(t *testing.T) {
 		t.Fatal("not idempotent", did, err)
 	}
 }
+
+func TestDesktopFileKeepsTheMenuEntry(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "applications", "net.jarvisautomation.agent.desktop")
+	menu := "[Desktop Entry]\nType=Application\nName=Jarvis Automation Agent\nExec=/home/u/.local/lib/jarvis-agent/jarvis-agent start %u\n"
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(menu), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDesktopFile(p, "/elsewhere/jarvis-agent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveDesktopFile(p); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != menu {
+		t.Fatalf("the installed menu entry was replaced or removed: %q", b)
+	}
+	_ = os.Remove(p)
+	if err := WriteDesktopFile(p, "/opt/jarvis-agent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveDesktopFile(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatal("hidden entry kept")
+	}
+	if err := RemoveDesktopFile(p); err != nil {
+		t.Fatal("missing file:", err)
+	}
+}

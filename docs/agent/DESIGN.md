@@ -804,6 +804,34 @@ the token, so `status` asks for `dictation allow` again rather than a typing cal
 anyone), and `scripts/agent-dev-run.sh` boots out and removes the old LaunchAgent and
 "Jarvis Agent.app". macOS TCC grants key on the bundle id, so they are asked for again.
 
+**`jarvis-agent install` / `uninstall` (installers plan item 1.4, 2026-10-13).** The per-user
+setup every agent installer ends in (`internal/agent/install`). `Plan` turns the machine (home,
+environment, the running binary) into a list of steps as data, golden-tested for all three OSes
+on every runner (`internal/agent/install/testdata`); `Apply` carries them out. Installing twice
+changes nothing; uninstall removes what install made, and the directories that leaves empty,
+keeping the agent's data unless `--purge`. `--files-only` writes files but touches no service
+manager, LaunchServices or process; `--dry-run` prints the steps.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Binary | copied to `~/.local/lib/jarvis-agent/jarvis-agent`, the user's own self-updatable copy (Q5) | stays in the app | stays where the installer put it |
+| Login item | systemd user unit, enabled by a link in `graphical-session.target.wants` (not `default.target`: that is reached before the compositor exports the display), **plus** an XDG autostart entry (`start --login`, `X-systemd-skip=true`) for sessions that never start `graphical-session.target` | SMAppService for the LaunchAgent inside the app (`Contents/Library/LaunchAgents`, `BundleProgram`) when run from the app on macOS 13+; otherwise (a bare dev binary, `--login-item launchagent`) a LaunchAgent in `~/Library/LaunchAgents` | HKCU `Run` value "Jarvis Automation Agent" = `"<exe>" run` |
+| Menu entry, shortcut | `~/.local/share/applications/net.jarvisautomation.agent.desktop` (the same file the portal needs; `dictation allow`/`revoke` leave it alone); `--desktop-shortcut` puts a copy on an existing Desktop folder | the app itself | Start menu + desktop `.lnk` (on by default), made by PowerShell's WScript.Shell so a redirected Desktop works |
+| `jarvis-agent://` | `MimeType=x-scheme-handler/jarvis-agent` in that entry, the default in `mimeapps.list`, `update-desktop-database` | `CFBundleURLTypes` in Info.plist, `lsregister -f` | `HKCU\Software\Classes\jarvis-agent`, `shell\open\command` = `"<exe>" start "%1"` |
+| Native host | registered for the browsers found (§13 decided: by default; `--no-browser` skips) | same | same |
+| Start | `systemctl --user restart` when `graphical-session.target` is active, else a detached `run` from this session (log: `~/.cache/jarvis-agent/agent.log`) | `launchctl kickstart -k` / `bootstrap` | a detached `run` |
+| Migrates | `default.target.wants` link from `agent-dev-run.sh --install`; the old portal grant | the `io.jarvis.agent` LaunchAgent | the `\Jarvis\JarvisAgent` task |
+
+The menu entry, the shortcuts, the autostart entry and the URL all run `jarvis-agent start`. A URL
+argument must be exactly `jarvis-agent://start` (`jarvis-agent:start` and a trailing slash are
+accepted); anything with a query, fragment, path, user, port or another action is refused before
+anything happens, so a page can do nothing through the link but start the agent.
+`scripts/agent-dev-run.sh --install/--uninstall` now call these. CI (`agent` job, 3 OSes) runs
+`scripts/agent-install-check.sh`: install twice and uninstall in a scratch HOME on Linux
+(`desktop-file-validate`, `systemd-analyze verify`) and macOS, and in the runner's own HKCU on
+Windows. **Known gaps:** no icon yet; a Windows console window flashes when the Run key or a
+shortcut starts the (console) binary; on macOS the in-bundle LaunchAgent has no log file.
+
 ## 14. Dictation: type, press keys, fill and click (2026-10-13)
 
 "Fill in username abcde on browser", "tell claude to test def", "type hello world", "click OK",

@@ -128,6 +128,10 @@ jobs:
           python-version: "3.12"
       - name: Install jarvis-command-sdk (sidecar test)
         run: python -m pip install "git+https://github.com/alexberardi/jarvis-command-sdk@main"
+      # desktop-file-validate checks the menu, autostart and URL-handler entries `install` writes.
+      - name: Install desktop-file-utils
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y --no-install-recommends desktop-file-utils
       - name: Unit, contract, sidecar and voice tests (race)
         env:
           CGO_ENABLED: "1"
@@ -142,6 +146,10 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: go build -trimpath -o dist/ ./cmd/jarvis-agent
+      # jarvis-agent install/uninstall (installers plan 1.4): twice, then nothing left. A scratch
+      # HOME on Linux/macOS; the runner's own HKCU and shortcuts on Windows.
+      - name: Install / uninstall check
+        run: scripts/agent-install-check.sh dist/jarvis-agent$([ "$RUNNER_OS" = Windows ] && echo .exe || true)
       # The browser-control extension, as Firefox gets it, through AMO's linter (warnings fail).
       - uses: actions/setup-node@v4
         if: matrix.os == 'ubuntu-latest'

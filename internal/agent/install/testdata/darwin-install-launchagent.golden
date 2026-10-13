@@ -1,0 +1,47 @@
+exec [activate] [ignore-errors] path="~/Library/LaunchAgents/io.jarvis.agent.plist" args="launchctl bootout gui/501/io.jarvis.agent"
+remove path="~/Library/LaunchAgents/io.jarvis.agent.plist" target="~"
+write path="~/Library/LaunchAgents/net.jarvisautomation.agent.plist" mode=0644
+  | <?xml version="1.0" encoding="UTF-8"?>
+  | <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  |   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+  | <!--
+  |   A LaunchAgent, deliberately NOT a LaunchDaemon.
+  | 
+  |   A daemon runs outside any login session, where it cannot see the window
+  |   server: window control would fail and `open` would launch nothing the user
+  |   can see. It also could not hold the Accessibility (TCC) grant, which is
+  |   bound to a user session (and granted to this binary, by code signature).
+  |   Install to ~/Library/LaunchAgents only and bootstrap into gui/$(id -u).
+  | -->
+  | <plist version="1.0">
+  | <dict>
+  |     <key>Label</key>
+  |     <string>net.jarvisautomation.agent</string>
+  | 
+  |     <key>ProgramArguments</key>
+  |     <array>
+  |         <string>~/src/jarvis-server/dist/jarvis-agent</string>
+  |         <string>run</string>
+  |     </array>
+  | 
+  |     <key>RunAtLoad</key>
+  |     <true/>
+  |     <key>KeepAlive</key>
+  |     <true/>
+  | 
+  |     <key>StandardOutPath</key>
+  |     <string>~/Library/Logs/jarvis-agent.log</string>
+  |     <key>StandardErrorPath</key>
+  |     <string>~/Library/Logs/jarvis-agent.err.log</string>
+  | 
+  |     <!-- Shows the agent as "Jarvis Automation Agent" in Login Items rather than a bare path. -->
+  |     <key>AssociatedBundleIdentifiers</key>
+  |     <string>net.jarvisautomation.agent</string>
+  | 
+  |     <key>ProcessType</key>
+  |     <string>Interactive</string>
+  | </dict>
+  | </plist>
+browser-hosts target="~/src/jarvis-server/dist/jarvis-agent"
+exec [activate] [ignore-errors] args="launchctl bootout gui/501/net.jarvisautomation.agent"
+start [activate] name="launchd" args="launchctl bootstrap gui/501 ~/Library/LaunchAgents/net.jarvisautomation.agent.plist"

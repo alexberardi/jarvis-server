@@ -1,0 +1,9 @@
+reg-delete-value key="Software\\Microsoft\\Windows\\CurrentVersion\\Run" name="Jarvis Automation Agent"
+reg-delete-tree key="Software\\Classes\\jarvis-agent"
+shortcut-remove key="Programs" name="Jarvis Automation Agent"
+shortcut-remove key="Desktop" name="Jarvis Automation Agent"
+exec [activate] [ignore-errors] args="schtasks /Delete /TN \\Jarvis\\JarvisAgent /F"
+exec [activate] [ignore-errors] args="schtasks /Delete /TN \\Jarvis Automation\\net.jarvisautomation.agent /F"
+browser-hosts-gone
+remove-all path="~\\AppData\\Roaming\\jarvis-agent"
+remove-all path="~\\AppData\\Local\\jarvis-agent"

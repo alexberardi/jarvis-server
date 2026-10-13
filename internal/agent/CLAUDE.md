@@ -35,6 +35,9 @@ for os in linux darwin windows; do GOOS=$os go vet ./internal/agent/... || echo 
 CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 
 ./jarvis-agent status                          # capabilities now + enrollment + reachability
+./jarvis-agent install --dry-run               # the per-user setup it would do (login item, menu, URL, native host)
+./jarvis-agent install | uninstall [--purge]   # do / undo it (--files-only: no systemd/launchd/processes)
+./jarvis-agent start                           # what the menu entry, shortcut and jarvis-agent://start run
 ./jarvis-agent dictation allow                 # GNOME/KDE Wayland: the portal's one-time typing dialog
 ./jarvis-agent try                             # list the tools this host offers now
 ./jarvis-agent try desktop_set_volume '{"volume": 30}'   # run one tool locally, no jarvisd
@@ -136,6 +139,8 @@ internal/agent/
                       Python-node endpointing (endpoint.go), the CC voice client (client.go),
                       wake-model fetch (models.go), Serve (reopen on failure)
 internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
+  install/            `jarvis-agent install|uninstall|start`: Plan (steps as data, golden per OS) +
+                      Apply (files, HKCU, SMAppService, commands; fakes in tests)
   appid/              the app identifier (bundle id, launchd label, portal app id, task name)
   deploy/             systemd user unit, LaunchAgent, Scheduled Task, macOS Info.plist (+ guard tests)
 scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, run / install

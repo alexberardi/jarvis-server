@@ -1,0 +1,81 @@
+portal-migrate
+remove path="~/.config/systemd/user/default.target.wants/jarvis-agent.service" target="~/.config/systemd/user"
+copy-exe path="~/.local/lib/jarvis-agent/jarvis-agent" target="~/Downloads/jarvis-agent" mode=0755
+write path="~/.config/systemd/user/jarvis-agent.service" mode=0644
+  | # A systemd USER unit, deliberately not a system unit.
+  | #
+  | # A system unit runs as root outside the graphical session: it would have no
+  | # DISPLAY/WAYLAND_DISPLAY, so window control and `open` would both be dead on
+  | # arrival while volume still appeared to work -- the worst kind of half-broken.
+  | #
+  | # Installed by `jarvis-agent install` as ~/.config/systemd/user/jarvis-agent.service,
+  | # enabled by a link in graphical-session.target.wants/.
+  | #
+  | # WantedBy=graphical-session.target, not default.target: the user manager reaches
+  | # default.target at login, before the compositor has imported WAYLAND_DISPLAY/DISPLAY,
+  | # so the agent would start without a display. Desktops that never start
+  | # graphical-session.target (a compositor launched without uwsm, XFCE) get the XDG
+  | # autostart entry `jarvis-agent install` writes next to this unit instead.
+  | #
+  | # A headless box (a Pi with the HAT) has no graphical session: enable it with
+  | # `systemctl --user add-wants default.target jarvis-agent.service` and
+  | # `loginctl enable-linger $USER`.
+  | 
+  | [Unit]
+  | Description=Jarvis desktop agent (a Jarvis node offering OS control)
+  | After=graphical-session.target
+  | PartOf=graphical-session.target
+  | 
+  | [Service]
+  | Type=simple
+  | ExecStart=~/.local/lib/jarvis-agent/jarvis-agent run
+  | Restart=on-failure
+  | RestartSec=5
+  | 
+  | [Install]
+  | # A user unit: multi-user.target would never be reached in the user manager.
+  | WantedBy=graphical-session.target
+symlink path="~/.config/systemd/user/graphical-session.target.wants/jarvis-agent.service" target="~/.config/systemd/user/jarvis-agent.service"
+write path="~/.local/share/applications/net.jarvisautomation.agent.desktop" mode=0644
+  | [Desktop Entry]
+  | Type=Application
+  | Version=1.5
+  | Name=Jarvis Automation Agent
+  | GenericName=Desktop agent
+  | Comment=Use Jarvis on this computer: voice, browser control, dictation
+  | Exec=~/.local/lib/jarvis-agent/jarvis-agent start %u
+  | TryExec=~/.local/lib/jarvis-agent/jarvis-agent
+  | Terminal=false
+  | StartupNotify=false
+  | Categories=Utility;
+  | MimeType=x-scheme-handler/jarvis-agent;
+write path="~/.config/autostart/net.jarvisautomation.agent.desktop" mode=0644
+  | [Desktop Entry]
+  | Type=Application
+  | Version=1.5
+  | Name=Jarvis Automation Agent
+  | Comment=Starts the Jarvis desktop agent at login
+  | Exec=~/.local/lib/jarvis-agent/jarvis-agent start --login
+  | TryExec=~/.local/lib/jarvis-agent/jarvis-agent
+  | Terminal=false
+  | NoDisplay=true
+  | X-systemd-skip=true
+  | X-GNOME-Autostart-enabled=true
+write path="~/Desktop/net.jarvisautomation.agent.desktop" key="if-dir-exists" mode=0755
+  | [Desktop Entry]
+  | Type=Application
+  | Version=1.5
+  | Name=Jarvis Automation Agent
+  | GenericName=Desktop agent
+  | Comment=Use Jarvis on this computer: voice, browser control, dictation
+  | Exec=~/.local/lib/jarvis-agent/jarvis-agent start %u
+  | TryExec=~/.local/lib/jarvis-agent/jarvis-agent
+  | Terminal=false
+  | StartupNotify=false
+  | Categories=Utility;
+  | MimeType=x-scheme-handler/jarvis-agent;
+mime-default path="~/.config/mimeapps.list" name="x-scheme-handler/jarvis-agent" value="net.jarvisautomation.agent.desktop"
+browser-hosts target="~/.local/lib/jarvis-agent/jarvis-agent"
+exec [activate] [ignore-errors] args="update-desktop-database ~/.local/share/applications"
+exec [activate] [ignore-errors] args="systemctl --user daemon-reload"
+start [activate] key="jarvis-agent.service" name="systemd-or-spawn" args="~/.local/lib/jarvis-agent/jarvis-agent run"
