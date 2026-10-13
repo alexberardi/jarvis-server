@@ -304,6 +304,17 @@ Sign-off matrix:
   its tools and shows the sign-in page, so another person can sign in on that desktop account.
   The user isn't sure many people will use it. It's cheap because unpairing already exists, so
   it's in Phase 3 as S.
+- **Q6: uninstall follows each platform's standard.** The macOS app and Windows uninstaller ask
+  "Also delete Jarvis's data?", default **No**. The `.deb` keeps data on remove, and `apt purge`
+  deletes it.
+- **Q7: the narrow exception is allowed.** The root update helper may re-render the Linux systemd
+  unit only for a binary whose signature has just verified, and only when the rendered unit
+  differs. The change takes effect at the next start. This overrides §8.2's earlier "no" for
+  this case only. The user's reason: users must never have to edit a service file by hand.
+- **Q8: Fedora, Bazzite and Arch get the one-liner** (`install-agent.sh`) for the agent, with the
+  same per-user setup as the `.deb`. AppImage is not planned. The user: those users are
+  comfortable with a terminal.
+- **All installer questions are answered.** Next: the web-app plan's remaining questions.
 - **Members can't open the admin yet.** That is known and intended: member access is the
   web-app project ([webapp/01](../webapp/01-member-web-app-plan.md)), not this plan.
 
