@@ -8,6 +8,13 @@ Update it at the end of every working session, and whenever a task finishes or a
 
 ## Current phase: 6 (packaging) — pre-releases through `v0.1.0-rc14`, no full release yet; prod cut over to jarvisd (rc12, 2026-10-09). Phases 0–5 done. In parallel: the Go node, `jarvis-agent` (desktop voice, browser control, island, read the screen; Pi phase 4.1 HAT done, 4.2 next)
 
+### Before the official release (user 2026-10-12): next step
+
+Done together with the `v0.1.0` release, not before, because the legacy Python stack stays the supported install until then:
+
+- [ ] **jarvis-installer:** merge the jarvisd landing page (branch `feat/jarvisd-landing`, draft PR). It replaces the compose wizard at installer.jarvisautomation.io with the `install.sh`/`install.ps1` one-liners and a legacy-import pointer (`docs/install/00-installers.md` §1.1). Its one-liners use the stable release URLs, which 404 until a non-prerelease exists.
+- [ ] **Docs:** update jarvis-docs, which still describes the multi-service Python stack, for jarvisd: install, upgrade, `import-legacy`, and the Go node. Also re-check this repo's README and `docs/install/` against the released version.
+
 ### Phase 0 checklist
 
 - [x] Repo created: public, AGPL-3.0, `github.com/alexberardi/jarvis-server`
