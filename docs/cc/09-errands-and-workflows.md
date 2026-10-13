@@ -152,6 +152,8 @@ plan card ── Revise ─▶ refine (LLM) → rev+1, card updated IN PLACE
 **2. Make one LLM call: `_run_planner` (`:388-437`).**
 
 - Settings: `model="background"`, `temperature=0`, `max_tokens=6000`, **thinking on**. `<think>` is stripped (`:378-385`), then fences and prose are stripped to the outer `{…}` (`:338-349`).
+  - **Go:** `errands.planner_max_tokens` (default 12000) and `errands.planner_think_seconds` (default 30, -1 = none). A thinking call that runs out of either is retried once without thinking. The time cap exists because the background label often shares the live label's engine (one llama slot): in the demo dry run a 9B thought for 105 s over an unplannable goal ("set a timer" with no timer tool) and the reply waited behind it.
+  - **Go:** an accepted ack (`{"status": "accepted", "message": …}` from run_errand, schedule_errand, make_phone_call, deep_research) is the turn's reply as is on the native path too, with no composing call. The text path already did this (its fast path). Composing turned "I'm putting together a plan" into "I've got the timer set" while the plan later failed, and that second live call was the one stuck behind the planner.
 - The prompt (`:306-324`) has these parts:
   - the decomposition rule (`:264-270`)
   - the rare `request_replan` checkpoint rule (`:287-298`)
