@@ -196,7 +196,7 @@ are what the opening could introduce, plus two client-only checks. They are orde
   admin pages afterwards; the SPA's role-based routing is cosmetic. `must_change_password` is enforced
   only in the client: the server issues working tokens to a temp-password session. Low risk (the user
   knows that password), but the web app must route to Change password before anything else.
-  **Server side fixed 2026-10-13 (PR #TBDB):** `VerifyUser` refuses a must-change account with
+  **Server side fixed 2026-10-13 (PR #100):** `VerifyUser` refuses a must-change account with
   `authn.ErrPasswordChangeRequired`; every module (auth, cc, notifications, recipes, the settings
   guards, the admin gateway) answers it with 403 `{"detail", "code": "password_change_required"}`
   (403, not 401: clients must not refresh-and-retry or sign out). Only `GET /auth/me` and
