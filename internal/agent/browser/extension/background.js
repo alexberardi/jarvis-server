@@ -6,9 +6,12 @@
 // externally_connectable, so neither web pages nor other extensions can send this extension
 // anything. Commands are a closed set (COMMANDS); anything else is refused.
 //
-// Page content is read, never written: no command types, clicks or fills a page, and no
-// command reads form fields (inputs, textareas, selects, contenteditable regions, passwords).
-// Clicking/typing is planned behind a confirmation step (docs/agent/DESIGN.md, browser section).
+// Page content is read without form fields: no command reads inputs, textareas, selects,
+// contenteditable regions or passwords. Two commands act on a page, both on the user's spoken
+// request (docs/agent/DESIGN.md §14): fill types into one field the user named (a password
+// field only when they named it as one; values are written, never read back), and click
+// presses one button by its visible label. Each refuses unless exactly one visible element
+// matches.
 "use strict";
 
 const api = globalThis.browser ?? globalThis.chrome;
@@ -312,7 +315,53 @@ const COMMANDS = {
     const [r] = await inject(t, { func: findText, args: [clip(text, 200)] });
     return { tab: describe(t), text, ...(r?.result ?? {}) };
   },
+
+  async fill(args) {
+    const t = await tabFor(args);
+    const text = String(args.text ?? "");
+    if (!text.trim()) throw fail("invalid_argument", "text is required");
+    if (text.length > FILL_MAX) throw fail("invalid_argument", `text is longer than ${FILL_MAX} characters`);
+    const field = clip(String(args.field ?? "").trim(), 100);
+    const frame = await uniqueFrame(t, fieldAct, [field, "", false, false], "field");
+    const [r] = await inject(t, { func: fieldAct, args: [field, text, !!args.submit, true], frameIds: [frame] });
+    const res = r?.result;
+    if (!res) throw fail("failed", "the page returned nothing");
+    if (res.error) throw fail(res.code ?? "failed", res.error);
+    return { tab: describe(t), ...res };
+  },
+
+  async click(args) {
+    const t = await tabFor(args);
+    const label = clip(String(args.text ?? "").trim(), 100);
+    if (!label) throw fail("invalid_argument", "text (the button's label) is required");
+    const frame = await uniqueFrame(t, buttonAct, [label, false], "button");
+    const [r] = await inject(t, { func: buttonAct, args: [label, true], frameIds: [frame] });
+    const res = r?.result;
+    if (!res) throw fail("failed", "the page returned nothing");
+    if (res.error) throw fail(res.code ?? "failed", res.error);
+    return { tab: describe(t), ...res };
+  },
 };
+
+const FILL_MAX = 2000;
+
+// uniqueFrame probes every frame of the tab with func (a dry run) and returns the frame holding
+// the one element that matches best. Several equally good matches, anywhere, are refused.
+async function uniqueFrame(t, func, args, what) {
+  const probes = (await inject(t, { func, args, allFrames: true })).filter((p) => p?.result);
+  const best = Math.max(0, ...probes.map((p) => p.result.tier));
+  const hits = best > 0 ? probes.filter((p) => p.result.tier === best) : [];
+  const count = hits.reduce((n, p) => n + p.result.count, 0);
+  if (count === 1) return hits[0].frameId;
+  if (count > 1) {
+    const labels = hits.flatMap((p) => p.result.labels).slice(0, 8);
+    throw fail("ambiguous", `${count} ${what}s match: ${labels.join("; ")}. Ask the user which one they mean`);
+  }
+  const avail = [...new Set(probes.flatMap((p) => p.result.available))].slice(0, 12);
+  const err = probes.find((p) => p.result.error);
+  if (err) throw fail(err.result.code ?? "failed", err.result.error);
+  throw fail(`${what}_not_found`, `no visible ${what} matches` + (avail.length ? `; the page has: ${avail.join("; ")}` : ""));
+}
 
 // Media tabs in order of preference: the given tab; else tabs playing sound (focused window
 // first), the active tab, then the tab media was last controlled in.
@@ -484,6 +533,195 @@ function findText(text) {
   }
   const context = first < 0 ? "" : hay.slice(Math.max(0, first - 150), first + needle.length + 150).replace(/\s+/g, " ").trim();
   return { found: found || matches > 0, matches, context };
+}
+
+// fieldAct finds the one editable field `query` names (its label, placeholder, name or
+// autocomplete purpose; empty: the focused field) and, with act, types `text` into it,
+// replacing what was there, then submits its form if asked. Values are written, never read. A
+// password field counts only when the query says password (or pin, passcode).
+function fieldAct(query, text, submit, act) {
+  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  let q = norm(query);
+  for (let prev = ""; prev !== q; ) {
+    prev = q;
+    q = q.replace(/^(the|my|a|an) /, "").replace(/ (field|box|input|text ?box|area|textarea|bar)$/, "").trim();
+  }
+  const wantPw = /\b(password|passcode|passphrase|pin|pwd)\b/.test(q);
+  const SYN = {
+    username: ["user", "user name", "login", "login name", "user id", "userid", "email", "e mail", "email address", "account", "username or email", "email or username", "sign in"],
+    email: ["e mail", "email address", "mail", "username or email", "email or username"],
+    password: ["passcode", "pwd", "pass", "current password", "your password"],
+    search: ["q", "query", "find", "search for", "keywords"],
+    phone: ["telephone", "tel", "mobile", "phone number", "cell"],
+    name: ["full name", "your name"],
+    message: ["comment", "comments", "body", "text"],
+  };
+  const AUTO = { username: ["username", "email"], email: ["email"], password: ["current password", "new password"], phone: ["tel"], name: ["name"], search: [] };
+  const TEXTY = new Set(["", "text", "email", "search", "tel", "url", "password", "number"]);
+  const typeOf = (el) => (el.getAttribute("type") || "").toLowerCase();
+  const isPw = (el) => el.localName === "input" && typeOf(el) === "password";
+  const visible = (el) => (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : true) && el.getClientRects().length > 0;
+  const editable = (el) => {
+    if (el.disabled || el.readOnly || el.getAttribute("aria-disabled") === "true") return false;
+    if (el.localName === "textarea") return true;
+    if (el.localName === "input") return TEXTY.has(typeOf(el));
+    return el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable);
+  };
+  const textOf = (id) => {
+    const e = document.getElementById(id);
+    return e ? e.textContent : "";
+  };
+  const labelsOf = (el) => {
+    // What a person reads first (the first one names the field in results), then the markup's names.
+    const out = [el.getAttribute("aria-label")];
+    for (const id of (el.getAttribute("aria-labelledby") || "").split(/\s+/)) if (id) out.push(textOf(id));
+    if (el.labels) for (const l of el.labels) out.push(l.textContent);
+    const wrap = el.closest("label");
+    if (wrap) out.push(wrap.textContent);
+    out.push(el.getAttribute("placeholder"), el.getAttribute("title"), el.getAttribute("name"), el.id);
+    return out.map(norm).filter(Boolean);
+  };
+  const describeEl = (el) => {
+    const l = labelsOf(el)[0] || el.localName;
+    return (isPw(el) ? "password: " : "") + (l.length > 60 ? l.slice(0, 59) + "…" : l);
+  };
+  const score = (el) => {
+    const ls = labelsOf(el);
+    const auto = norm(el.getAttribute("autocomplete"));
+    if (ls.includes(q)) return 3;
+    const syn = SYN[q] || [];
+    if (ls.some((l) => syn.includes(l)) || (AUTO[q] || []).some((a) => auto === a) || (isPw(el) && q === "password")) return 2;
+    const words = q.split(" ");
+    if (ls.some((l) => words.every((w) => (" " + l + " ").includes(" " + w + " ") || (w.length >= 4 && l.includes(w))))) return 1;
+    return 0;
+  };
+  const all = [...document.querySelectorAll("input, textarea, [contenteditable]")].filter((el) => editable(el) && visible(el));
+  let pick = [];
+  let tier = 0;
+  if (!q) {
+    const a = document.activeElement;
+    if (a && all.includes(a)) {
+      if (isPw(a)) return { tier: 0, count: 0, labels: [], available: [], error: "the focused field is a password field: say it is the password field to type into it", code: "password_field" };
+      pick = [a];
+      tier = 4;
+    }
+  } else {
+    for (const el of all) {
+      if (isPw(el) && !wantPw) continue; // a password field only when named as one
+      const s = score(el);
+      if (s > tier) {
+        tier = s;
+        pick = [el];
+      } else if (s === tier && s > 0) {
+        pick.push(el);
+      }
+    }
+  }
+  if (!act) {
+    return {
+      tier,
+      count: pick.length,
+      labels: pick.slice(0, 6).map(describeEl),
+      available: tier ? [] : all.filter((el) => !isPw(el) || wantPw).slice(0, 12).map(describeEl),
+    };
+  }
+  if (pick.length !== 1) return { error: "the field changed on the page; try again", code: "field_not_found" };
+  const el = pick[0];
+  el.focus();
+  if (el.isContentEditable) {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  } else {
+    el.select();
+  }
+  let ok = false;
+  try {
+    ok = document.execCommand("insertText", false, text); // fires the input events frameworks listen to
+  } catch {}
+  if (!ok) {
+    if (el.isContentEditable) {
+      el.textContent = text;
+    } else {
+      const proto = el.localName === "textarea" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, text);
+    }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  let submitted = false;
+  if (submit) {
+    const form = el.form || el.closest("form");
+    if (form && typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+      submitted = "form";
+    } else {
+      for (const type of ["keydown", "keypress", "keyup"]) {
+        el.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      }
+      submitted = "enter_key";
+    }
+  }
+  return { field: describeEl(el), password: isPw(el), chars: text.length, submitted };
+}
+
+// buttonAct finds the one visible button (or link) whose label is `query` and, with act, clicks
+// it. Buttons in an open dialog win over the rest of the page ("click OK" means the dialog's).
+function buttonAct(query, act) {
+  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  let q = norm(query);
+  for (let prev = ""; prev !== q; ) {
+    prev = q;
+    q = q.replace(/^(the|a|an) /, "").replace(/ (button|link|tab)$/, "").trim();
+  }
+  if (q === "okay") q = "ok";
+  const SEL = "button, input[type=button], input[type=submit], input[type=reset], input[type=image], [role=button], [role=menuitem], [role=tab], [role=link], a[href], summary";
+  const visible = (el) => (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : true) && el.getClientRects().length > 0;
+  const enabled = (el) => !el.disabled && el.getAttribute("aria-disabled") !== "true";
+  const labelOf = (el) => {
+    let l = norm(el.getAttribute("aria-label") || el.textContent || el.getAttribute("value") || el.getAttribute("title") || el.getAttribute("alt"));
+    if (l === "okay") l = "ok";
+    return l;
+  };
+  const DIALOG = "dialog[open], [role=dialog], [role=alertdialog], [aria-modal=true]";
+  const all = [...document.querySelectorAll(SEL)].filter((el) => visible(el) && enabled(el));
+  const score = (l) => {
+    if (!l || !q) return 0;
+    if (l === q) return 3;
+    if (l.startsWith(q + " ") || l.endsWith(" " + q)) return 2;
+    const words = q.split(" ");
+    return words.every((w) => (" " + l + " ").includes(" " + w + " ")) ? 1 : 0;
+  };
+  let pick = [];
+  let tier = 0;
+  for (const el of all) {
+    const s = score(labelOf(el));
+    if (s > tier) {
+      tier = s;
+      pick = [el];
+    } else if (s === tier && s > 0) {
+      pick.push(el);
+    }
+  }
+  const inDialog = pick.filter((el) => el.closest(DIALOG));
+  if (inDialog.length && inDialog.length < pick.length) pick = inDialog;
+  const short = (l) => (l.length > 50 ? l.slice(0, 49) + "…" : l);
+  if (!act) {
+    return {
+      tier,
+      count: pick.length,
+      labels: pick.slice(0, 6).map((el) => short(labelOf(el))),
+      available: tier ? [] : [...new Set(all.map(labelOf).filter(Boolean))].slice(0, 12).map(short),
+    };
+  }
+  if (pick.length !== 1) return { error: "the button changed on the page; try again", code: "button_not_found" };
+  const el = pick[0];
+  const label = labelOf(el);
+  el.scrollIntoView({ block: "center", behavior: "instant" });
+  el.click();
+  return { clicked: short(label), in_dialog: !!el.closest(DIALOG) };
 }
 
 // --- start ---

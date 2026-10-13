@@ -4,8 +4,9 @@
 node, holds a node id/key, connects to jarvisd's MQTT, shows up in the app's node list, and
 offers OS control as client tools: open a link or launch an installed app by name, list apps,
 get/set volume, list/minimise/focus/close windows, and control the user's own browser through
-the Jarvis Browser Control extension (tabs, page text, media), read the screen, and answer the
-time and date. With `run --voice` it is a voice node (wake word, the on-screen island, and on a Pi
+the Jarvis Browser Control extension (tabs, page text, media, fill a field, click a button),
+read the screen, type dictated text into a window or a named app and press dialog keys, and
+answer the time and date. With `run --voice` it is a voice node (wake word, the on-screen island, and on a Pi
 the ReSpeaker HAT). Status: pre-release, built from source; not in the jarvisd release archives.
 Moved here from the `jarvis-host-agent` repo on 2026-10-10 so it can share jarvisd's packages
 (`internal/voice`, `internal/audio`, later `internal/update`). Design, decisions and open
@@ -42,6 +43,8 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent try browser_list_tabs           # waits for the extension, runs one browser tool
 ./jarvis-agent try --save-images /tmp/x desktop_read_screen '{"scope":"window"}'   # a real capture (0600 files)
 JARVIS_SCREEN_NATIVE=1 go test -v -run TestNativeCapture ./internal/agent/screen/   # capture this desktop
+JARVIS_DICTATE_NATIVE_LIST=1 go test -v -run TestNativeWindowsReadOnly ./internal/agent/dictate/  # list windows, read-only
+./jarvis-agent run --confirm-dictation submit  # ask before dictation sends anything (off|submit|all)
 scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
 AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
 scripts/browser-ext-store-zip.sh chrome|firefox   # store upload zips -> dist/ (docs/agent/store-listing.md)
@@ -92,10 +95,18 @@ internal/agent/
                       the Mozilla-signed .xpi when a build has one (signed/)
   screen/             read the screen: desktop_read_screen, grim/hyprctl/swaymsg (linux.go),
                       screencapture + the purego front-window lookup (mac.go, frontwin_darwin.go)
+  winmatch/           naming a window ("firefox", "the terminal", title words): Pick (screen),
+                      PickUnique (dictation: one match or ambiguous_window)
+  dictate/            dictation (DESIGN.md §14): desktop_type_text, desktop_press_key and
+                      desktop_confirm (tools.go, confirm.go); keyboards: wtype/ydotool/xdotool
+                      (linux.go), CGEvent (mac.go, cgevent_darwin.go), SendInput (win.go,
+                      sendinput_windows.go); focus: hyprctl/swaymsg (linuxwin.go), the host
+                      backend + an active-window check (hostwin.go)
   hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's
                       patterns (leds.go, golden-tested), the GPIO17 button (button.go), spidev +
                       gpiocdev (device_linux.go); voice states reach it through voice.Indicator
-  island/             the on-screen voice indicator (DESIGN.md §11): pure-Go renderer (render.go),
+  island/             the on-screen voice indicator (DESIGN.md §11) and dictation's note (Note):
+                      pure-Go renderer (render.go),
                       animation model + loop (island.go), NSPanel backend (mac_darwin.go, purego),
                       Wayland layer-shell client (wayland.go); Run keeps the main thread on macOS
   voice/              the voice pipeline: wake -> record -> STT -> stream reply -> follow-up
@@ -250,7 +261,7 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     capture. Don't capture someone's desktop in tests unless they agreed (`JARVIS_SCREEN_NATIVE`
     is opt-in) and never commit a capture.
 
-25. **The HAT is the Python node's, ported with its numbers** (go-pi-node.md §3.11): patterns,
+26. **The HAT is the Python node's, ported with its numbers** (go-pi-node.md §3.11): patterns,
     colours and brightness are golden-tested against `respeaker_led_service.py` and `apa102_pi`
     (`tools/golden/export_hat.py`, run on a Pi); button 50 ms debounce, warning at 1 s, poweroff
     at 3 s. Change them only together with the Python node, or deliberately (log it in
@@ -258,6 +269,18 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     Python node holding the button line), or `--hat off` leaves the agent running without it.
     Never press "power off" in a test: `hat button` never powers off, and `Button.OnHold` is a
     function so tests use a fake.
+
+27. **Dictation never types into a window it couldn't confirm has focus** (DESIGN.md §14). A
+    named app is resolved by `winmatch.PickUnique` (one match, or the focused/only visible one,
+    else `ambiguous_window`), focused, then the active window is polled until it is that window;
+    otherwise `focus_failed` and nothing is typed. Text: `dictate.Sanitize` (≤ 2000 characters,
+    line breaks → spaces, control/format characters dropped), on stdin never argv, never in a
+    log (`node.RedactedArgs`) or a result. Enter only as the `submit` step; keys from the closed
+    `dictate.Keys` set. A confirmation (`--confirm-dictation`) is single use, replaced by a newer
+    one, and cancels on no, unclear or timeout (`Confirmer.Now`/`Timeout` are injected in
+    tests). **Never type or press keys in a desktop someone is using in tests:** use fakes, or a
+    nested headless compositor (`WLR_BACKENDS=headless sway` with its own `WAYLAND_DISPLAY`,
+    `env -i` so no `HYPRLAND_INSTANCE_SIGNATURE` leaks in) and `jarvis-agent try`.
 
 ## Dependencies
 

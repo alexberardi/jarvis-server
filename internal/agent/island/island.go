@@ -29,10 +29,11 @@ const (
 	Speaking        // Jarvis is talking: bars follow the reply
 	FollowUp        // the follow-up window is open: a countdown ring
 	Error           // a short red flash, then hidden
+	Note            // a line of text (what is being typed, a question waiting for a yes) over any state
 )
 
 func (s State) String() string {
-	return [...]string{"hidden", "listening", "thinking", "speaking", "follow_up", "error"}[s]
+	return [...]string{"hidden", "listening", "thinking", "speaking", "follow_up", "error", "note"}[s]
 }
 
 const (
@@ -101,6 +102,25 @@ func (i *Island) Set(s State, window time.Duration) {
 	}
 	i.m.set(s, window, i.now())
 	select { // under mu: Close can't close wake meanwhile
+	case i.wake <- struct{}{}:
+	default:
+	}
+	i.mu.Unlock()
+}
+
+// Note shows a line of text for d over whatever the island shows (dictation: what is being
+// typed, or a question waiting for the user's yes), then goes back to it. "" clears it.
+func (i *Island) Note(text string, d time.Duration) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	if i.off || i.closed {
+		i.mu.Unlock()
+		return
+	}
+	i.m.setNote(text, d, i.now())
+	select {
 	case i.wake <- struct{}{}:
 	default:
 	}
@@ -253,8 +273,12 @@ type model struct {
 
 	appear float64 // 0..1, linear; Render eases it
 	seen   State   // the last state shown, for the colours while sliding out
-	loud   float64 // the newest level, decaying
-	bars   [nBars]float64
+
+	note      string // Note's text, shown until noteUntil
+	noteUntil time.Time
+	seenNote  string  // the last note shown, for sliding out
+	loud      float64 // the newest level, decaying
+	bars      [nBars]float64
 }
 
 func (m *model) set(s State, window time.Duration, now time.Time) {
@@ -266,8 +290,19 @@ func (m *model) set(s State, window time.Duration, now time.Time) {
 
 func (m *model) level(v float64) { m.loud = math.Max(m.loud*0.5, v) }
 
-// shown is the state on screen once an error flash has run its course.
+func (m *model) setNote(text string, d time.Duration, now time.Time) {
+	m.note, m.noteUntil = text, now.Add(d)
+	if text == "" || d <= 0 {
+		m.note, m.noteUntil = "", time.Time{}
+	}
+}
+
+// shown is the state on screen: a note while it lasts, else the voice state once an error
+// flash has run its course.
 func (m *model) shown(now time.Time) State {
+	if m.note != "" && now.Before(m.noteUntil) {
+		return Note
+	}
 	if m.state == Error && now.Sub(m.since) > errorHold {
 		return Hidden
 	}
@@ -321,7 +356,13 @@ func (m *model) step(now time.Time) (Frame, bool) {
 	if s != Hidden {
 		m.seen = s
 	}
+	if s == Note {
+		m.seenNote = m.note
+	}
 	f := Frame{State: m.seen, Appear: m.appear, Bars: m.bars}
+	if f.State == Note {
+		f.Text = m.seenNote
+	}
 	switch s {
 	case Listening, Speaking:
 		f.Glow = n

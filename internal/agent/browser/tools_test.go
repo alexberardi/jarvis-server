@@ -26,7 +26,7 @@ func TestToolsOfferedOnlyWhileConnected(t *testing.T) {
 	}
 	f := connectExt(t, h, path, "Firefox", true, nil)
 	got := names(ts.Available(context.Background()))
-	want := []string{ToolListTabs, ToolOpen, ToolSwitchTab, ToolCloseTab, ToolNavigate, ToolReadPage, ToolMedia, ToolScroll, ToolFind}
+	want := []string{ToolListTabs, ToolOpen, ToolSwitchTab, ToolCloseTab, ToolNavigate, ToolReadPage, ToolMedia, ToolScroll, ToolFind, ToolFill, ToolClick}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("offered %v, want %v", got, want)
 	}
@@ -59,8 +59,8 @@ func TestToolSpecs(t *testing.T) {
 		if fn["name"] != s.Name {
 			t.Errorf("%s: rendered as %v", s.Name, fn["name"])
 		}
-		// Risky = consequential: closing a tab is, nothing else in the basic set is.
-		if s.Risky != (s.Name == ToolCloseTab) {
+		// Risky = consequential: closing a tab, filling a field and clicking are; reading isn't.
+		if s.Risky != (s.Name == ToolCloseTab || s.Name == ToolFill || s.Name == ToolClick) {
 			t.Errorf("%s: risky=%v", s.Name, s.Risky)
 		}
 	}

@@ -1,0 +1,294 @@
+package dictate
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// LinuxWindows focuses windows on Hyprland (hyprctl) and sway (swaymsg); on X11 it uses X11
+// (the host backend's wmctrl, plus xdotool for the active window). Other Wayland compositors
+// (GNOME, KDE) have no cross-client window control: naming an app is unavailable there, and
+// typing goes to whatever has focus.
+type LinuxWindows struct {
+	X   Exec
+	X11 Windows // the X11 fallback (HostWindows over the host backend); nil for none
+}
+
+func (l *LinuxWindows) compositor() string {
+	if l.X.Getenv("WAYLAND_DISPLAY") == "" {
+		return ""
+	}
+	switch {
+	case l.X.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != "" && l.X.LookPath("hyprctl"):
+		return "hyprland"
+	case l.X.Getenv("SWAYSOCK") != "" && l.X.LookPath("swaymsg"):
+		return "sway"
+	}
+	return ""
+}
+
+func (l *LinuxWindows) Available(ctx context.Context) (bool, string) {
+	if l.compositor() != "" {
+		return true, ""
+	}
+	if l.X.Getenv("WAYLAND_DISPLAY") == "" && l.X.Getenv("DISPLAY") != "" && l.X11 != nil {
+		if !l.X.LookPath("xdotool") {
+			return false, "switching to a named app on X11 needs xdotool (and wmctrl) installed"
+		}
+		return l.X11.Available(ctx)
+	}
+	return false, "switching to a named app needs Hyprland, sway or X11 (wmctrl + xdotool); on this desktop click into the app and ask to type without naming it"
+}
+
+func (l *LinuxWindows) List(ctx context.Context) ([]Window, error) {
+	switch l.compositor() {
+	case "hyprland":
+		return l.hyprList(ctx)
+	case "sway":
+		return l.swayList(ctx)
+	}
+	if l.X11 != nil && l.X.Getenv("WAYLAND_DISPLAY") == "" {
+		return l.X11.List(ctx)
+	}
+	return nil, ErrUnavailable
+}
+
+var (
+	reHyprAddr = regexp.MustCompile(`^0x[0-9a-fA-F]{1,16}$`)
+	reConID    = regexp.MustCompile(`^[0-9]{1,12}$`)
+)
+
+func (l *LinuxWindows) Focus(ctx context.Context, id string) error {
+	switch l.compositor() {
+	case "hyprland":
+		if !reHyprAddr.MatchString(id) {
+			return fmt.Errorf("not a Hyprland window address: %q", id)
+		}
+		out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"dispatch", "focuswindow", "address:" + id}})
+		if err != nil {
+			return err
+		}
+		if out != "" && !strings.EqualFold(out, "ok") {
+			return fmt.Errorf("hyprctl: %s", out)
+		}
+		return nil
+	case "sway":
+		if !reConID.MatchString(id) {
+			return fmt.Errorf("not a sway container id: %q", id)
+		}
+		_, err := l.X.Run(ctx, Cmd{Name: "swaymsg", Args: []string{fmt.Sprintf("[con_id=%s]", id), "focus"}})
+		return err
+	}
+	if l.X11 != nil && l.X.Getenv("WAYLAND_DISPLAY") == "" {
+		return l.X11.Focus(ctx, id)
+	}
+	return ErrUnavailable
+}
+
+func (l *LinuxWindows) Active(ctx context.Context) (string, error) {
+	switch l.compositor() {
+	case "hyprland":
+		out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"-j", "activewindow"}})
+		if err != nil {
+			return "", err
+		}
+		var w struct {
+			Address string `json:"address"`
+		}
+		_ = json.Unmarshal([]byte(out), &w) // "{}" when nothing has focus
+		return w.Address, nil
+	case "sway":
+		root, err := l.swayTree(ctx)
+		if err != nil {
+			return "", err
+		}
+		if f := root.focusedLeaf(); f != nil {
+			return strconv.FormatInt(f.ID, 10), nil
+		}
+		return "", nil
+	}
+	if l.X11 != nil && l.X.Getenv("WAYLAND_DISPLAY") == "" {
+		return l.X11.Active(ctx)
+	}
+	return "", ErrUnavailable
+}
+
+func (l *LinuxWindows) Same(id, active string) bool {
+	if l.compositor() == "" && l.X11 != nil {
+		return l.X11.Same(id, active)
+	}
+	return id != "" && strings.EqualFold(id, active)
+}
+
+// --- Hyprland ---
+
+type hyprClient struct {
+	Address        string           `json:"address"`
+	Title          string           `json:"title"`
+	Class          string           `json:"class"`
+	InitialClass   string           `json:"initialClass"`
+	Workspace      struct{ ID int } `json:"workspace"`
+	Mapped         *bool            `json:"mapped"`
+	Hidden         bool             `json:"hidden"`
+	FocusHistoryID int              `json:"focusHistoryID"`
+}
+
+func (l *LinuxWindows) hyprList(ctx context.Context) ([]Window, error) {
+	out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"-j", "clients"}})
+	if err != nil {
+		return nil, err
+	}
+	var clients []hyprClient
+	if err := json.Unmarshal([]byte(out), &clients); err != nil {
+		return nil, fmt.Errorf("hyprctl clients: %w", err)
+	}
+	shown := map[int]bool{}
+	if out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"-j", "monitors"}}); err == nil {
+		var mons []struct {
+			ActiveWorkspace  struct{ ID int } `json:"activeWorkspace"`
+			SpecialWorkspace struct{ ID int } `json:"specialWorkspace"`
+		}
+		if json.Unmarshal([]byte(out), &mons) == nil {
+			for _, m := range mons {
+				shown[m.ActiveWorkspace.ID] = true
+				if m.SpecialWorkspace.ID != 0 {
+					shown[m.SpecialWorkspace.ID] = true
+				}
+			}
+		}
+	}
+	ws := make([]Window, 0, len(clients))
+	for _, c := range clients {
+		if !reHyprAddr.MatchString(c.Address) || (c.Mapped != nil && !*c.Mapped) {
+			continue
+		}
+		ws = append(ws, Window{ID: c.Address, Apps: []string{c.Class, c.InitialClass}, Title: c.Title,
+			Recency: c.FocusHistoryID, Visible: shown[c.Workspace.ID] && !c.Hidden})
+	}
+	return ws, nil
+}
+
+// --- sway ---
+
+type swayNode struct {
+	ID               int64   `json:"id"`
+	Type             string  `json:"type"`
+	Name             string  `json:"name"`
+	AppID            string  `json:"app_id"`
+	Pid              int     `json:"pid"`
+	Focused          bool    `json:"focused"`
+	Focus            []int64 `json:"focus"`
+	Visible          *bool   `json:"visible"`
+	CurrentWorkspace string  `json:"current_workspace"`
+	WindowProperties *struct {
+		Class    string `json:"class"`
+		Instance string `json:"instance"`
+	} `json:"window_properties"`
+	Nodes         []swayNode `json:"nodes"`
+	FloatingNodes []swayNode `json:"floating_nodes"`
+}
+
+func (n *swayNode) window() bool {
+	return (n.Type == "con" || n.Type == "floating_con") && len(n.Nodes) == 0 && len(n.FloatingNodes) == 0 &&
+		(n.AppID != "" || n.WindowProperties != nil || n.Pid > 0)
+}
+
+func (n *swayNode) focusedLeaf() *swayNode {
+	if n.Focused {
+		if n.window() {
+			return n
+		}
+		return nil
+	}
+	for _, list := range [][]swayNode{n.Nodes, n.FloatingNodes} {
+		for i := range list {
+			if f := list[i].focusedLeaf(); f != nil {
+				return f
+			}
+		}
+	}
+	return nil
+}
+
+type swayView struct {
+	n       *swayNode
+	visible bool
+	path    []int
+}
+
+// views lists the windows with their focus path (positions in each ancestor's focus list: a
+// smaller path was focused more recently) and whether they are on a shown workspace.
+func (n *swayNode) views(path []int, shownWS bool, out *[]swayView) {
+	kids := make([]*swayNode, 0, len(n.Nodes)+len(n.FloatingNodes))
+	for i := range n.Nodes {
+		kids = append(kids, &n.Nodes[i])
+	}
+	for i := range n.FloatingNodes {
+		kids = append(kids, &n.FloatingNodes[i])
+	}
+	if len(kids) == 0 {
+		if n.window() {
+			*out = append(*out, swayView{n: n, path: path, visible: shownWS && (n.Visible == nil || *n.Visible)})
+		}
+		return
+	}
+	for i, k := range kids {
+		pos := len(n.Focus) + i
+		for j, id := range n.Focus {
+			if id == k.ID {
+				pos = j
+				break
+			}
+		}
+		shown := shownWS
+		if k.Type == "workspace" {
+			shown = n.Type == "output" && !strings.HasPrefix(n.Name, "__") && k.Name == n.CurrentWorkspace
+		}
+		k.views(append(append([]int(nil), path...), pos), shown, out)
+	}
+}
+
+func lessPath(a, b []int) bool {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return len(a) < len(b)
+}
+
+func (l *LinuxWindows) swayTree(ctx context.Context) (*swayNode, error) {
+	out, err := l.X.Run(ctx, Cmd{Name: "swaymsg", Args: []string{"-t", "get_tree"}})
+	if err != nil {
+		return nil, err
+	}
+	var root swayNode
+	if err := json.Unmarshal([]byte(out), &root); err != nil {
+		return nil, fmt.Errorf("swaymsg get_tree: %w", err)
+	}
+	return &root, nil
+}
+
+func (l *LinuxWindows) swayList(ctx context.Context) ([]Window, error) {
+	root, err := l.swayTree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var vs []swayView
+	root.views(nil, false, &vs)
+	sort.SliceStable(vs, func(a, b int) bool { return lessPath(vs[a].path, vs[b].path) })
+	ws := make([]Window, len(vs))
+	for i, v := range vs {
+		apps := []string{v.n.AppID}
+		if v.n.WindowProperties != nil {
+			apps = append(apps, v.n.WindowProperties.Class, v.n.WindowProperties.Instance)
+		}
+		ws[i] = Window{ID: strconv.FormatInt(v.n.ID, 10), Apps: apps, Title: v.n.Name, Recency: i, Visible: v.visible}
+	}
+	return ws, nil
+}

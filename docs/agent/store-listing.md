@@ -113,9 +113,9 @@ way.
 The add-on already exists on AMO (`browser@jarvis.agent`, signed **unlisted**). Going public
 means submitting a **listed** version of the same add-on.
 
-1. **Bump the version** in `internal/agent/browser/extension/manifest.json` (for example
-   `0.1.0` → `0.1.1`). AMO refuses any version it has already signed, on either channel, and
-   `0.1.0` was signed unlisted. The Chrome store will also need a version above the one it has
+1. **The version is already above the signed one:** `0.2.0` (2026-10-13, dictation's `fill`
+   and `click`). AMO refuses any version it has already signed, on either channel, and `0.1.0`
+   was signed unlisted. Submit 0.2.0 (not an older checkout) to both stores. The Chrome store will also need a version above the one it has
    for the next Chrome update, so this bump serves both.
 2. Build: `scripts/browser-ext-store-zip.sh firefox` → `dist/jarvis-browser-firefox-<version>.zip`.
 3. Developer Hub → My Add-ons → Jarvis Browser Control → **Upload New Version** → "On this
@@ -139,7 +139,8 @@ means submitting a **listed** version of the same add-on.
 ## The Firefox package inside the agent
 
 `jarvis-agent browser install` opens the Mozilla-signed `.xpi` embedded in the binary
-(`internal/agent/browser/signed/jarvis-browser.xpi`). That file is version 0.1.0 and still has
+(`internal/agent/browser/signed/jarvis-browser.xpi`). That file is version 0.1.0 (no `fill` or
+`click`: an agent with dictation gets `unknown_command` from it for those two) and still has
 the **old manifest description and placeholder icons**: the source changed after it was signed.
 It changes only when it is signed again, and signing is the user's step, because the AMO
 credentials stay with them.

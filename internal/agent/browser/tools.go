@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
@@ -24,6 +25,8 @@ const (
 	ToolMedia     = "browser_media"
 	ToolScroll    = "browser_scroll"
 	ToolFind      = "browser_find"
+	ToolFill      = "browser_fill"
+	ToolClick     = "browser_click"
 )
 
 // Page text limits (characters). The default keeps a small model's context usable.
@@ -48,7 +51,12 @@ const (
 
 // Tools is the browser toolset: offered only while a browser with the extension is connected.
 type Tools struct {
-	Hub   *Hub
+	Hub *Hub
+	// Confirm, when on, asks before a fill or click acts (shared with the desktop dictation
+	// tools, whose desktop_confirm answers it). Nil: never asks.
+	Confirm *dictate.Confirmer
+	// Show, when set, shows what is being filled or clicked on the island.
+	Show  func(text string, d time.Duration)
 	tools []tool
 }
 
@@ -139,6 +147,41 @@ func NewTools(h *Hub) *Tools {
 			Keywords: []string{"browser", "find", "search", "page", "where"},
 			Examples: []node.Example{{VoiceCommand: "find shipping on this page", Params: map[string]any{"text": "shipping"}, Primary: true}}},
 			0, t.find},
+		{node.Spec{Name: ToolFill, Description: "Type text into a field of the web page open in the user's browser, replacing what " +
+			"is in it: \"fill in username abcde on the browser\" → {field: \"username\", text: \"abcde\"}; \"search for cheap flights " +
+			"on this page\" → {field: \"search\", text: \"cheap flights\", submit: true}. field is the field's label in the user's " +
+			"words (username, email, search, comment); leave it out to type into the field that has the cursor. A password " +
+			"field is used only when the user says password. submit presses the form's submit (true for \"… and submit\", " +
+			"\"search for …\", \"log in with …\"). If several fields match, ask the user which one. For a desktop app use " +
+			"desktop_type_text instead.",
+			Params: []node.Param{
+				{Name: "field", Type: "string", Description: "The field's label or purpose: username, email, password, search, …; empty: the focused field"},
+				{Name: "text", Type: "string", Required: true, Description: "Exactly the text to put in the field"},
+				{Name: "submit", Type: "bool", Description: "Submit the form afterwards (default false)"},
+				optionalTab("the current tab"),
+			},
+			Keywords: []string{"browser", "fill", "field", "type", "username", "email", "form", "search", "enter", "page"},
+			Examples: []node.Example{
+				{VoiceCommand: "fill in username abcde on browser", Params: map[string]any{"field": "username", "text": "abcde"}, Primary: true},
+				{VoiceCommand: "put hello@example.com in the email field", Params: map[string]any{"field": "email", "text": "hello@example.com"}},
+				{VoiceCommand: "type pizza near me in the search box and search", Params: map[string]any{"field": "search", "text": "pizza near me", "submit": true}},
+			}, Risky: true}, 0, t.fill},
+		{node.Spec{Name: ToolClick, Description: "Click a button or link on the web page open in the user's browser by its visible " +
+			"label: \"click OK on the browser\" → {text: \"OK\"}; \"hit cancel\" → {text: \"Cancel\"}; \"press sign in\" → " +
+			"{text: \"Sign in\"}; \"accept the cookies\" → {text: \"Accept\"}. A button in an open dialog wins over the rest of " +
+			"the page. It refuses unless exactly one visible button matches; then ask the user which one (the result lists " +
+			"them). The browser's own pop-ups (alerts, \"leave this page?\") and desktop dialogs aren't page buttons: use " +
+			"desktop_press_key (enter for OK, escape for cancel).",
+			Params: []node.Param{
+				{Name: "text", Type: "string", Required: true, Description: "The button's label as shown, e.g. OK, Cancel, Sign in"},
+				optionalTab("the current tab"),
+			},
+			Keywords: []string{"browser", "click", "button", "ok", "cancel", "press", "accept", "submit", "link", "dialog"},
+			Examples: []node.Example{
+				{VoiceCommand: "click OK on the browser", Params: map[string]any{"text": "OK"}, Primary: true},
+				{VoiceCommand: "hit cancel", Params: map[string]any{"text": "Cancel"}},
+				{VoiceCommand: "click sign in", Params: map[string]any{"text": "Sign in"}},
+			}, Risky: true}, 0, t.click},
 	}
 	return t
 }
@@ -188,6 +231,8 @@ func code(err error) string {
 		return ce.Code
 	case errors.Is(err, errBadArgs):
 		return "invalid_argument"
+	case errors.Is(err, errDictate):
+		return dictate.Code(err)
 	case errors.Is(err, ErrNotConnected):
 		return "not_connected"
 	case errors.Is(err, ErrNoSuchBrowser):
@@ -525,4 +570,87 @@ func (t *Tools) find(ctx context.Context, args map[string]any) (map[string]any, 
 		}
 	}
 	return res, nil
+}
+
+// errDictate marks an error from the dictate package (its own codes).
+var errDictate = errors.New("dictation")
+
+// isPasswordField: the user named a password field (the extension applies the same rule).
+func isPasswordField(field string) bool {
+	f := " " + strings.ToLower(field) + " "
+	for _, w := range []string{"password", "passcode", "passphrase", " pin ", "pwd"} {
+		if strings.Contains(f, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Tools) show(text string) {
+	if t.Show != nil {
+		t.Show(text, dictate.ShowFor)
+	}
+}
+
+// gate runs act now, or parks it behind a question when confirmation asks for it.
+func (t *Tools) gate(ctx context.Context, g dictate.Gate, question string, act func(ctx context.Context) (map[string]any, error)) (map[string]any, error) {
+	if t.Confirm.Needs(g) {
+		return t.Confirm.Ask(question, act), nil
+	}
+	return act(ctx)
+}
+
+func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, error) {
+	raw, _ := args["text"].(string)
+	text, err := dictate.Sanitize(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errDictate, err)
+	}
+	field, _ := args["field"].(string)
+	field = strings.TrimSpace(field)
+	submit := dictate.BoolArg(args, "submit")
+	if _, _, err := tabArg(args); err != nil {
+		return nil, err
+	}
+	shown := dictate.Preview(text, 80)
+	if isPasswordField(field) {
+		shown = strings.Repeat("•", min(len([]rune(text)), 12)) // never on screen, in a question or spoken
+	}
+	where := "the focused field"
+	if field != "" {
+		where = "the " + field + " field"
+	}
+	act := func(ctx context.Context) (map[string]any, error) {
+		t.show("Filling " + where + ": " + shown)
+		extra := map[string]any{"text": text, "field": field, "submit": submit}
+		res, err := t.call(ctx, "fill", args, extra)
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+	g, q := dictate.GateType, fmt.Sprintf("Fill %s with %q?", where, shown)
+	if submit {
+		g, q = dictate.GateSubmit, fmt.Sprintf("Fill %s with %q and submit?", where, shown)
+	}
+	return t.gate(ctx, g, q, act)
+}
+
+func (t *Tools) click(ctx context.Context, args map[string]any) (map[string]any, error) {
+	label, _ := args["text"].(string)
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return nil, fmt.Errorf("%w: text (the button's label) is required", errBadArgs)
+	}
+	if len([]rune(label)) > 100 {
+		return nil, fmt.Errorf("%w: a button label is at most 100 characters", errBadArgs)
+	}
+	if _, _, err := tabArg(args); err != nil {
+		return nil, err
+	}
+	act := func(ctx context.Context) (map[string]any, error) {
+		t.show("Clicking " + dictate.Preview(label, 60))
+		return t.call(ctx, "click", args, map[string]any{"text": label})
+	}
+	return t.gate(ctx, dictate.GateSubmit, fmt.Sprintf("Click %q in the browser?", dictate.Preview(label, 60)), act)
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/clock"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
@@ -105,6 +106,7 @@ func usage(w io.Writer) {
            [--browser | --no-browser]   set up browser control afterwards (default: ask)
   run      connect to jarvisd and serve tool calls until interrupted
            [--creds PATH] [--allow-open-any] [--no-browser]
+           [--confirm-dictation off|submit|all]   ask before typing/clicking sends anything
            [--sidecar-python PY --sidecar-commands DIR]
            [--voice [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4]
             [--wake-models DIR] [--no-chimes]]   wake word "hey jarvis" (Linux, macOS)
@@ -348,17 +350,26 @@ func run(ctx context.Context, args []string) error {
 	return island.Run(ctx, log, func(i *island.Island) error {
 		if i != nil {
 			vs.addIndicator(islandCue{i})
-			hideIslandForScreenshots(tools, i)
+			attachIsland(tools, i)
 		}
 		return r.Run(ctx)
 	})
 }
 
-// hideIslandForScreenshots keeps the island out of desktop_read_screen's pictures.
-func hideIslandForScreenshots(tools node.Multi, i *island.Island) {
+// attachIsland keeps the island out of desktop_read_screen's pictures and shows on it what
+// dictation types, fills, clicks or asks.
+func attachIsland(tools node.Multi, i *island.Island) {
 	for _, t := range tools {
-		if st, ok := t.(*screen.Tools); ok {
-			st.Hide = i.Suspend
+		switch x := t.(type) {
+		case *screen.Tools:
+			x.Hide = i.Suspend
+		case *dictate.Tools:
+			x.Show = i.Note
+			if x.Confirm != nil {
+				x.Confirm.Show = i.Note
+			}
+		case *browser.Tools:
+			x.Show = i.Note
 		}
 	}
 }
@@ -367,6 +378,7 @@ func hideIslandForScreenshots(tools node.Multi, i *island.Island) {
 type toolFlags struct {
 	anyOpen    *bool
 	noBrowser  *bool
+	confirm    *string
 	py, cmdDir *string
 }
 
@@ -374,8 +386,10 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 	return &toolFlags{
 		anyOpen:   fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)"),
 		noBrowser: fs.Bool("no-browser", false, "don't serve the browser extension (no browser_* tools)"),
-		py:        fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)"),
-		cmdDir:    fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)"),
+		confirm: fs.String("confirm-dictation", dictate.ConfirmOff,
+			"ask the user before dictation acts: off, submit (before Enter, a click, a submitting fill) or all"),
+		py:     fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)"),
+		cmdDir: fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)"),
 	}
 }
 
@@ -394,11 +408,21 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 		macax.Prompt()
 		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
 	}
-	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), &screen.Tools{C: screen.Native(), Log: log}}
+	mode, err := dictate.ParseConfirmMode(*f.confirm)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dt, err := dictationTools(h, mode, log)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), &screen.Tools{C: screen.Native(), Log: log}, dt}
 	closeAll := func() {}
 	if !*f.noBrowser {
 		hub, stopBrowser := startBrowser(ctx, log)
-		tools = append(tools, browser.NewTools(hub))
+		bt := browser.NewTools(hub)
+		bt.Confirm = dt.Confirm
+		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
 	if *f.py != "" && *f.cmdDir != "" {
@@ -414,6 +438,35 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 	// Last, so a sidecar's own get_current_time (Python's, with its city table) wins when present.
 	tools = append(tools, &clock.Tool{})
 	return h, tools, closeAll, nil
+}
+
+// dictationTools types and presses keys on this desktop (DESIGN.md §14). One Confirmer serves
+// them and the browser's fill and click.
+func dictationTools(h *host.Host, mode string, log *slog.Logger) (*dictate.Tools, error) {
+	kb, win, err := dictate.Native(h, macax.Trusted)
+	if err != nil {
+		return nil, err
+	}
+	return &dictate.Tools{KB: kb, Win: win, Confirm: &dictate.Confirmer{Mode: mode}, Log: log}, nil
+}
+
+// dictationStatus is status's line: the typing backend and whether named apps work.
+func dictationStatus(ctx context.Context, h *host.Host) string {
+	kb, win, err := dictate.Native(h, macax.Trusted)
+	if err != nil {
+		return err.Error()
+	}
+	ok, why := kb.Available(ctx)
+	if !ok {
+		return "off: " + why
+	}
+	line := "on (" + kb.Name() + ")"
+	if wok, wwhy := win.Available(ctx); wok {
+		line += "; typing into a named app: on"
+	} else {
+		line += "; typing into a named app: off (" + wwhy + ")"
+	}
+	return line
 }
 
 // --- status ---
@@ -455,6 +508,7 @@ func status(ctx context.Context, args []string) error {
 		}
 	}
 	fmt.Printf("voice:        %s\n", voiceStatus())
+	fmt.Printf("dictation:    %s\n", dictationStatus(ctx, h))
 	fmt.Printf("browser:      %s\n", browserSummary())
 	if list, err := appCatalogue(nil)(); err != nil {
 		fmt.Printf("apps:         %v\n", err)
@@ -502,7 +556,11 @@ func try(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), &screen.Tools{C: screen.Native()}, &clock.Tool{}}
+	dt, err := dictationTools(h, dictate.ConfirmOff, nil)
+	if err != nil {
+		return err
+	}
+	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).

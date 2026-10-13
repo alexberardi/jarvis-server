@@ -6,7 +6,8 @@ privacy policy is the project's, at https://docs.jarvisautomation.dev/security/p
 `docs/security/privacy-policy.md`, section "Browser extension and desktop agent"); the images are
 in [images/](images/).
 
-Everything here was checked against the extension's code (`../extension/`) at version 0.1.0.
+Everything here was checked against the extension's code (`../extension/`) at version 0.2.0 (0.2.0 added
+`fill` and `click`: dictation, docs/agent/DESIGN.md §14).
 If the extension gains a permission or reads something new, update the privacy answers below
 and the privacy policy's "Browser extension and desktop agent" section (jarvis-docs) to match.
 
@@ -31,13 +32,13 @@ agent" section covers this extension.
 test keeps within the limit):
 
 ```
-Lets your Jarvis desktop agent manage tabs, read pages and control media by voice or chat. Talks only to the agent on this computer.
+Lets your Jarvis desktop agent manage tabs, read pages, fill fields, click buttons and control media. Talks only to the local agent.
 ```
 
 **AMO summary** (≤250 characters; edited on AMO):
 
 ```
-Control your own browser with Jarvis, the private, self-hosted voice assistant: open, switch and close tabs, read a page aloud, pause or skip a video. Needs the Jarvis desktop agent and your own Jarvis server. Nothing goes to any third party.
+Control your own browser with Jarvis, the private, self-hosted voice assistant: open, switch and close tabs, read a page aloud, fill in a field, click OK, pause or skip a video. Needs the Jarvis desktop agent and your own Jarvis server. Nothing goes to any third party.
 ```
 
 ## Full description (both stores)
@@ -51,6 +52,7 @@ Say or type things like:
 • "Read me this page." / "What does this article say about pricing?"
 • "Pause the video." / "Skip forward 30 seconds." / "Mute this tab."
 • "Go back." / "Scroll down." / "Find 'opening hours' on this page."
+• "Fill in username alex on the browser." / "Click OK." / "Click Cancel."
 
 WHAT YOU NEED
 This extension is one part of Jarvis and does nothing on its own:
@@ -63,7 +65,7 @@ Without the agent, the extension stays idle: it has no buttons or pages of its o
 PRIVATE BY DESIGN
 • The extension talks only to the Jarvis agent on this computer, through the browser's native-messaging channel. It has no network code of its own.
 • It reads a page, or the list of your open tabs, only when you ask Jarvis to do something in the browser. The result goes to your own Jarvis server and nowhere else.
-• It never reads what you type into forms: no passwords, no text boxes, no form fields. It doesn't click, type or fill anything.
+• It never reads what you type into forms: no passwords, no text boxes, no form fields. It fills a field or clicks a button only when you ask Jarvis to, and only when exactly one field or button on the page matches what you said; it writes the text you dictated and never reads a field back. A password field is filled only when you say it is the password field.
 • No analytics, no ads, no tracking, no accounts with us. It stores nothing in the browser.
 • Web pages and other extensions can't send it commands.
 
@@ -83,7 +85,7 @@ Jarvis is in early beta. Questions and bug reports are welcome on GitHub (https:
 ### Single purpose
 
 ```
-Lets the user's own Jarvis voice assistant control their browser on request: list, open, switch and close tabs, navigate back/forward/reload, read the visible text of a page, scroll, find text, and play, pause, skip or mute video and audio. Commands come only from the Jarvis desktop agent on the same computer via native messaging.
+Lets the user's own Jarvis voice assistant control their browser on request: list, open, switch and close tabs, navigate back/forward/reload, read the visible text of a page, scroll, find text, fill in a field the user names, click a button by its label, and play, pause, skip or mute video and audio. Commands come only from the Jarvis desktop agent on the same computer via native messaging.
 ```
 
 ### Permission justifications
@@ -103,7 +105,7 @@ To carry out tab commands the user gives Jarvis: list open tabs with their title
 
 **scripting**
 ```
-To run the extension's own bundled functions in a tab when the user asks: read the page's visible text (never form fields or passwords), scroll, find text on the page, and play/pause/skip a video or audio element. No code is fetched from anywhere; nothing runs unless the user asked Jarvis for it.
+To run the extension's own bundled functions in a tab when the user asks: read the page's visible text (never form fields or passwords), scroll, find text on the page, type the user's dictated text into the one field they named, click the one button whose label they said, and play/pause/skip a video or audio element. No code is fetched from anywhere; nothing runs unless the user asked Jarvis for it.
 ```
 
 **alarms**
@@ -113,7 +115,7 @@ A once-a-minute alarm wakes the background service worker so it can reconnect to
 
 **Host permission `<all_urls>`**
 ```
-The user can ask Jarvis to read, scroll, search or control media on whatever page they are on, so the extension needs to run its bundled functions on any http/https page. It acts only on a user's request, and only on the tab the request is about. There are no content scripts that run automatically.
+The user can ask Jarvis to read, scroll, search, fill a field, click a button or control media on whatever page they are on, so the extension needs to run its bundled functions on any http/https page. It acts only on a user's request, and only on the tab the request is about. There are no content scripts that run automatically.
 ```
 
 ### Remote code
@@ -136,7 +138,7 @@ Leave the rest unticked:
 | Category | Why not |
 |---|---|
 | User activity | Chrome's examples are network monitoring, clicks, mouse position, scroll and keystroke logging. The extension monitors none of these. The only event it sends unprompted is "this browser window gained or lost focus" (a yes/no, no page or URL), which the agent uses to pick which browser a command goes to. It scrolls only on command and reports the new scroll position of that command. |
-| Personally identifiable information, Health, Financial and payment, Authentication, Personal communications, Location | The extension doesn't look for or collect these. Form fields, passwords and editable text are never read. A page the user asks Jarvis to read could show anything (an email, a bank statement); that is covered by "Website content". |
+| Personally identifiable information, Health, Financial and payment, Authentication, Personal communications, Location | The extension doesn't look for or collect these. Form fields, passwords and editable text are never read. `fill` writes text the user dictated into a field (a password field only when named as one); the value comes from the agent, is never read back, and nothing about it leaves the browser except the field's label. A page the user asks Jarvis to read could show anything (an email, a bank statement); that is covered by "Website content". |
 
 Why tick anything when the data only goes to the user's own server: Chrome counts data that
 leaves the browser as collected, and page text and tab URLs do leave it (to the local agent,
@@ -205,10 +207,12 @@ TO SEE IT WORK (Linux or macOS, no Jarvis server needed; about 10 minutes):
    ./jarvis-agent try browser_read_page
    ./jarvis-agent try browser_find '{"text":"domain"}'
    ./jarvis-agent try browser_media '{"action":"status"}'
+   ./jarvis-agent try browser_fill '{"field":"search","text":"hello"}'   (on a page with a search box)
+   ./jarvis-agent try browser_click '{"text":"Sign in"}'   (any button label on the open page)
    ./jarvis-agent try   (no arguments: lists the tools available once the browser connects)
 A full voice or chat round trip additionally needs a self-hosted Jarvis server and "jarvis-agent enroll"; don't run "jarvis-agent run" at the same time as "try" (they share one local socket).
 
-COMMANDS (closed set, background.js "COMMANDS"): list_tabs, open (http/https only), switch_tab, close_tab, navigate (back/forward/reload), read_page (visible text only; skips input, textarea, select, contenteditable, hidden and aria-hidden content), media (play/pause/mute/unmute/skip/restart/status on <video>/<audio>), scroll, find. Anything else is refused.
+COMMANDS (closed set, background.js "COMMANDS"): list_tabs, open (http/https only), switch_tab, close_tab, navigate (back/forward/reload), read_page (visible text only; skips input, textarea, select, contenteditable, hidden and aria-hidden content), media (play/pause/mute/unmute/skip/restart/status on <video>/<audio>), scroll, find, fill (types the user's dictated text into the one field they named; never reads field values; a password field only when named as one), click (clicks the one visible button with the label the user said). Anything else is refused.
 
 FILES: background.js is hand-written and unminified; it is internal/agent/browser/extension/background.js in the repository. manifest.json is generated from internal/agent/browser/extension/manifest.json (shared with the Chrome build) by "jarvis-agent browser pack --target firefox", which only removes the Chrome-only keys "key", "minimum_chrome_version" and "background.service_worker". No build tools, bundlers or minifiers are involved.
 ```

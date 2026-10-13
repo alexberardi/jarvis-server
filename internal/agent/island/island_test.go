@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +30,8 @@ func TestRenderGolden(t *testing.T) {
 		{"follow_up", Frame{State: FollowUp, Appear: 1, Bars: [nBars]float64{0.1, 0.1, 0.1, 0.1, 0.1}, Ring: 0.62}},
 		{"error", Frame{State: Error, Appear: 1, Bars: [nBars]float64{0.08, 0.08, 0.08, 0.08, 0.08}}},
 		{"sliding_in", Frame{State: Listening, Appear: 0.45, Bars: bars}},
+		{"note", Frame{State: Note, Appear: 1, Text: "Typing into Claude: test def"}},
+		{"note_long", Frame{State: Note, Appear: 1, Text: "Send \"please run the whole test suite again and tell me which ones fail\" to Claude? Say yes or cancel."}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			img := image.NewRGBA(image.Rect(0, 0, CanvasW*2, CanvasH*2))
@@ -396,4 +399,51 @@ func TestSuspendHidesAtOnceAndResumes(t *testing.T) {
 	i.Set(Hidden, 0)
 	d.untilHidden(be)
 	i.Suspend()()
+}
+
+func TestNoteOverStates(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	var m model
+	m.set(Thinking, 0, t0)
+	m.setNote("Typing: hello", 2*time.Second, t0)
+	if f, _ := m.step(t0.Add(100 * time.Millisecond)); f.State != Note || f.Text != "Typing: hello" {
+		t.Fatalf("note: %+v", f)
+	}
+	if f, _ := m.step(t0.Add(2100 * time.Millisecond)); f.State != Thinking || f.Text != "" {
+		t.Fatalf("after the note: %+v", f)
+	}
+	// Over a hidden island: it slides in with the text, and out with it.
+	var h model
+	h.setNote("Pressing Enter", time.Second, t0)
+	var f Frame
+	for d := time.Duration(0); d <= 500*time.Millisecond; d += 50 * time.Millisecond {
+		f, _ = h.step(t0.Add(d))
+	}
+	if f.State != Note || f.Appear != 1 {
+		t.Fatalf("note over hidden: %+v", f)
+	}
+	f, visible := h.step(t0.Add(1100 * time.Millisecond))
+	if !visible || f.State != Note || f.Text != "Pressing Enter" || f.Appear >= 1 {
+		t.Fatalf("sliding out: %+v %v", f, visible)
+	}
+	h.setNote("x", time.Minute, t0)
+	h.setNote("", 0, t0)
+	if h.shown(t0) != Hidden {
+		t.Fatal("an empty note doesn't clear")
+	}
+}
+
+func TestFitNote(t *testing.T) {
+	face := noteFace(2)
+	if face == nil {
+		t.Fatal("no font")
+	}
+	short, w := fitNote(face, "hi", 2)
+	if short != "hi" || w != pillW {
+		t.Errorf("short note %q %v", short, w)
+	}
+	long, w := fitNote(face, strings.Repeat("dictation ", 40), 2)
+	if !strings.HasSuffix(long, "…") || w < noteMaxW-8 || w > noteMaxW || len(long) > 200 {
+		t.Errorf("long note %q %v", long, w)
+	}
 }

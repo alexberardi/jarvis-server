@@ -164,6 +164,7 @@ func TestCommandParity(t *testing.T) {
 	args := map[string]map[string]any{
 		ToolOpen: {"url": "https://example.com"}, ToolSwitchTab: {"tab_id": "firefox:1"}, ToolCloseTab: {"tab_id": "1"},
 		ToolNavigate: {"action": "back"}, ToolMedia: {"action": "pause"}, ToolScroll: {"direction": "down"}, ToolFind: {"text": "x"},
+		ToolFill: {"field": "username", "text": "abcde"}, ToolClick: {"text": "OK"},
 	}
 	for _, d := range ts.Available(context.Background()) {
 		a := args[d.Name]

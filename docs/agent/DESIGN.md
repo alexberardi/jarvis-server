@@ -25,7 +25,8 @@ appears in the household's node list, and offers the host-agent capabilities as 
 | `desktop_close_window` | `windows.close` | wmctrl -c | AXCloseButton | WM_CLOSE |
 
 Plus the `browser_*` tools (§10), offered while the Jarvis Browser Control extension is
-connected, `desktop_read_screen` (§12; Hyprland/sway and macOS), and `get_current_time`, served
+connected, `desktop_read_screen` (§12; Hyprland/sway and macOS), dictation (`desktop_type_text`,
+`desktop_press_key`, `desktop_confirm`, `browser_fill`, `browser_click`: §14), and `get_current_time`, served
 on every Go node ([go-pi-node.md §3.12](go-pi-node.md)). Function names can't contain dots, so tool names don't spell the capability names; each maps
 to exactly one. A tool is offered only while its capability is available, computed per
 `report_tools`.
@@ -307,6 +308,8 @@ extension (background) ⇄ native messaging (stdin/stdout, 4-byte length + JSON)
 | `browser_media` (action, seconds?, tab_id?) | `media` | play, pause, mute, unmute, skip_forward, skip_back, restart, status |
 | `browser_scroll` (direction, tab_id?) | `scroll` | up/down a screen, top, bottom (inner scroll panes too) |
 | `browser_find` (text, tab_id?) | `find` | highlights + scrolls to the first match; count and context |
+| `browser_fill` (field?, text, submit?, tab_id?) | `fill` | dictation (§14): types into the one field the user named; `is_risky` |
+| `browser_click` (text, tab_id?) | `click` | dictation (§14): clicks the one visible button with that label; `is_risky` |
 
 Media without a tab_id goes to the tab playing sound (preferring the focused window), else the
 active tab, else the tab media was last controlled in (so "pause" then "resume" works across
@@ -322,7 +325,9 @@ Mute is tab-level (`tabs.update muted`), which covers every player on the page.
   (rune-safe).
 - **Never form data:** extraction skips input, textarea, select/option, contenteditable,
   hidden and aria-hidden subtrees, scripts and media (a test pins this in background.js).
-  Nothing types, clicks or fills.
+  Since 2026-10-13 (§14) two commands act on a page at the user's request: `fill` writes one
+  field (values are written, never read back: `TestExtensionSurface` still bans `.value`) and
+  `click` presses one button; each refuses unless exactly one visible element matches.
 - **The extension takes commands only from its native port:** no content scripts, no
   `runtime.onMessage`/`onMessageExternal`/`onConnectExternal`, no `externally_connectable`, no
   web-accessible resources; permissions are exactly tabs, scripting, nativeMessaging, alarms (+
@@ -750,3 +755,221 @@ checklist).
    - **Kit ready (2026-10-12):** listing text, privacy answers, the privacy policy, images,
      upload zips (`scripts/browser-ext-store-zip.sh`) and the step-by-step guide, including the
      Chrome store id and how to publish updates, are in [store-listing.md](store-listing.md).
+
+
+## 14. Dictation: type, press keys, fill and click (2026-10-13)
+
+"Fill in username abcde on browser", "tell claude to test def", "type hello world", "click OK",
+"hit cancel", "press enter". Asked for by the user on 2026-10-13 (with "if there are
+confirmations, I need to be able to dictate OK/Cancel too"); built with the defaults below, which
+are open for review (the list at the end). Code: `internal/agent/dictate` (desktop),
+`internal/agent/browser` (`browser_fill`, `browser_click`), `internal/agent/winmatch` (naming a
+window, shared with §12), `internal/agent/island` (the note).
+
+### The tools
+
+| Tool | Arguments | Offered when | Does |
+|---|---|---|---|
+| `desktop_type_text` | `text`, `app?`, `submit?` | a keyboard backend works now | types `text` into the window in front, or brings the app named in `app` to the front first; `submit` presses Enter afterwards. `is_risky` |
+| `desktop_press_key` | `key` (enum), `app?` | same | one key of a closed set: `enter`, `escape`, `tab`, `shift+tab`, `space`, `up`, `down`, `left`, `right`. Never shortcuts (no ctrl/alt/super) |
+| `desktop_confirm` | `confirmation_id`, `answer` | `--confirm-dictation` isn't `off` | answers a pending question with the user's own words |
+| `browser_fill` | `field?`, `text`, `submit?`, `tab_id?` | a browser is connected (§10) | types into the one field `field` names (empty: the focused field), replacing its content; `submit` submits its form. `is_risky` |
+| `browser_click` | `text`, `tab_id?` | same | clicks the one visible button or link labelled `text`. `is_risky` |
+
+**Mapping phrasings** is done by the descriptions and examples, which small models follow:
+"tell X to …", "send …", "ask X …", "… and press enter" → `submit: true`; "type …", "write …",
+"put … in" → `submit: false`; "fill in username abcde on browser" → `browser_fill {field:
+username, text: abcde}`; "click OK", "press enter", "say yes to that", "accept it" →
+`desktop_press_key enter` on the desktop or `browser_click {text: OK}` on a page; "cancel", "hit
+cancel", "close that dialog", "no" → `escape` / `browser_click {text: Cancel}`. `text` is only
+the words to type, never the instruction around them.
+
+**Results** never echo the text (`typed_chars`, `into`, `submitted`; the browser: `field`,
+`password`, `chars`, `submitted`: `form` | `enter_key` | false). Every client tool call is logged
+with its arguments (§12, `node.LogArgs`); `text` is now always logged as `<N chars>`.
+
+### Typing backends
+
+| Platform | Typing and keys | Needs | Named app (focus, then confirm focus) |
+|---|---|---|---|
+| Linux Wayland: Hyprland, sway, other wlroots | `wtype -s 40 -` (virtual-keyboard protocol), text on stdin, `LC_ALL=C.UTF-8` | `wtype` installed | Hyprland: `hyprctl -j clients` / `dispatch focuswindow address:…` / `-j activewindow`; sway: `swaymsg get_tree` / `[con_id=N] focus` |
+| Linux Wayland: GNOME, KDE | `ydotool type --file -` (uinput) | `ydotool` + `ydotoold` running (its socket); US-layout ASCII only | not available (no cross-client window control): type into what's in front |
+| Linux X11 | `xdotool type --clearmodifiers --file -`, `xdotool key` | `xdotool` | wmctrl (the host backend's window control) + `xdotool getactivewindow` |
+| macOS | CGEvent keyboard events with Unicode strings (≤ 20 UTF-16 units per event, surrogate pairs never split), purego | Accessibility for Jarvis Agent.app (the grant window control already needs) | System Events (host backend) + the frontmost process's pid |
+| Windows | `SendInput` with `KEYEVENTF_UNICODE` (layout-independent), raw syscalls | an interactive desktop; can't type into an elevated (admin) window (UIPI): reported as an error | user32 (host backend) + `GetForegroundWindow` |
+
+**Not the clipboard.** Pasting would be faster and more robust for long text, but it overwrites
+what the user had copied; it is open question 3.
+
+**wtype's first character.** A fresh virtual keyboard's keymap must reach the client before the
+first key: without `-s 40` sway dropped the first character in 1 of 3 runs, with it 0 of 8. Text
+goes on stdin so a dictated "-k Return" stays text, and so it never shows in a process list.
+
+### Naming the app: focus, then confirm, never guess
+
+`app` is matched by `winmatch.PickUnique`: the same normalising and tiers as read-the-screen
+(app class/id, then a kind such as "terminal" or "browser", then title words), but the window
+must be the **only** match in the deciding tier. Several matches: the one that has focus now
+wins, else the only visible one; otherwise `ambiguous_window` with the candidates ("App — title",
+the model asks the user). "claude" picks an app called Claude (the desktop app); a terminal running Claude Code is found by
+words in its title when no app is called that (if the terminal's title doesn't say "claude",
+name the terminal instead). Visibility doesn't disqualify (focusing
+brings a window forward, switching workspace on Hyprland and sway).
+
+The agent asks the compositor/OS to focus the window, then polls the active window (20 × 50 ms)
+until it **is** that window. Only then does it type. If focus can't be confirmed the result is
+`focus_failed` and nothing is typed. Without `app`, text goes to whatever is in front, on every
+platform. GNOME/KDE Wayland: naming an app is `not_supported` ("click into it and ask again
+without naming it").
+
+### Browser: fill a field, click a button
+
+- **fill** probes every frame (`allFrames`) with a dry run, picks the frame holding the single
+  best match, then writes in that frame only. A field matches by, best first: its label exactly
+  (aria-label, `<label>`, aria-labelledby, placeholder, title, name, id), a synonym or
+  `autocomplete` purpose ("username" ↔ user/login/email, "search" ↔ q/query), all query words
+  in a label. Several equally good matches → `ambiguous` listing them; none → `field_not_found`
+  listing the page's fields. Writing: focus, select the old content, `execCommand("insertText")`
+  (fires the input events React/Vue listen to), falling back to the native value setter plus
+  `input`/`change` events. `submit`: `form.requestSubmit()`, else an Enter key event.
+- **Passwords:** a password field is a candidate only when the user said "password" (or
+  passcode, PIN); typing into a *focused* password field without naming it is refused
+  (`password_field`). What goes into a password field is shown as dots on the island and in a
+  confirmation question, and is never logged.
+- **click** matches visible, enabled buttons and links (`button`, input buttons,
+  `role=button|menuitem|tab|link`, `a[href]`, `summary`) by label: exact, then as a whole word at
+  the start or end, then all words. Buttons inside an open dialog (`dialog[open]`,
+  `role=dialog|alertdialog`, `aria-modal`) win over the rest of the page, so "click OK" means the
+  dialog's OK. Exactly one match or it refuses (`ambiguous` / `button_not_found` listing the
+  buttons it saw).
+- **Not reachable from a page:** the browser's own pop-ups (`alert`/`confirm`, "leave this
+  page?") and native dialogs. The descriptions send those to `desktop_press_key` (Enter = OK,
+  Escape = Cancel).
+- The extension went to **0.2.0** (new commands, new description). Both stores need the new
+  version uploaded, and the embedded Mozilla-signed `.xpi` (still 0.1.0) needs re-signing: an
+  agent with this change talking to a 0.1.0 extension gets `unknown_command` for fill and click,
+  and everything else keeps working.
+
+### Native dialogs: OK and Cancel by voice
+
+The floor is `desktop_press_key`: Enter presses a dialog's default button and Escape cancels on
+all three platforms, Tab / Shift+Tab move between buttons and Space presses the highlighted one.
+Clicking a native button by its label needs accessibility APIs (open question 6).
+
+### Confirmation (`--confirm-dictation off|submit|all`, default off)
+
+- **off:** nothing is asked; the island shows what is being typed, filled or clicked as it
+  happens (same stance as closing windows by voice, §9.2).
+- **submit:** asks before anything is *sent*: `desktop_type_text` with `submit`, `browser_click`,
+  `browser_fill` with `submit`. Typing without Enter isn't asked (it can be deleted).
+- **all:** asks before every type, key, fill and click.
+
+A gated call does nothing and returns `status: awaiting_confirmation` with a `confirmation_id`
+and a `question` ("Send "test def" to Claude?"). The description tells the model to ask it with
+`request_validation` (options Yes / Cancel) and then call `desktop_confirm` with the user's own
+words. That reuses what exists for every way of answering:
+
+- **Voice:** a voice node asks a `validation_required` question aloud and records the answer
+  *without the wake word* (go-pi-node.md §1.1 row 19), then the model calls `desktop_confirm`.
+  If the model asks in plain text instead, the follow-up window (§3.9 there) catches the answer.
+- **Tap or keyboard:** the mobile app and web chat show the question; the user taps an option or
+  types an answer.
+- **Words:** "OK", "yes", "send it", "confirm", "go ahead" confirm; "cancel", "no", "stop",
+  "don't", "never mind" cancel; a "no" word wins ("yes… no wait"); anything else, including
+  nothing heard ("I didn't catch that"), cancels (`dictate.ClassifyAnswer`).
+- **Timeout:** a question not answered within 60 s is cancelled; a late "yes" does nothing
+  (`Confirmer.Timeout` and `Now` are injectable; the tests advance a fake clock).
+- **One at a time, single use:** a new question cancels the previous one; an id works once.
+- **The island** shows the question while it waits, then what is typed.
+
+The agent can't tell a model that calls `desktop_confirm` without asking from one that asked:
+the guarantee is "a tool call naming the user's answer", not proof the user spoke (open
+question 2).
+
+### The island note
+
+`Island.Note(text, d)` shows a wider pill (up to 344 pt, canvas now 360 × 56) with a green dot
+and one line of text (Go Regular, 13 pt, cut with "…") for `d`, over whatever the voice pipeline
+shows, then returns to it. Dictation shows "Typing into Claude: test def", "Pressing Enter",
+"Filling the username field: abcde", "Clicking OK" for 2.5 s, and a pending question for as long
+as it waits. Only while the island runs (`run --voice` without `--no-overlay`); a turn from the
+mobile app on a desktop without voice shows nothing. Goldens: `island/testdata/note*.png`.
+
+### Who can drive it
+
+The same as every node tool: a chat turn reaches a node only for members of that node's
+household (`chatNode`: 403 outside the household, 404 for a node of another one), every MQTT
+`tool_call` is verified with `/commands/{id}/verify` before it runs, and voice turns come from
+the node's own microphone. No new route.
+
+### Safety summary
+
+At most 2000 characters a call (refused, never cut); tabs and line breaks become spaces (a line
+break would press Enter); control and format characters are dropped (escape sequences, bidi
+overrides, zero-width); Enter only as the separate `submit` step; keys from a closed set without
+modifiers other than Shift+Tab; nothing typed into a window whose focus wasn't confirmed; text
+never in logs or results; password fields only when named.
+
+### Evidence (2026-10-13)
+
+- **Typing, keys, focus (sway, headless):** a nested `sway` 1.12 (`WLR_BACKENDS=headless`, its
+  own `WAYLAND_DISPLAY` and IPC socket in a scratch runtime dir) with two `foot` windows, one
+  running `cat > fileA`, one recording raw tty bytes to fileB, driven by `jarvis-agent try` with
+  `env -i` (no locale, no Hyprland variables). `desktop_type_text {app: "alpha notes", submit:
+  true}` while the other window had focus: fileA got exactly "hello from jarvis: héllo wörld ✓
+  日本 -k Return line2" (UTF-8 intact, the newline a space, "-k Return" as text) and a newline;
+  fileB nothing. `desktop_press_key` with each of the nine keys into the other window: `\r`, ESC,
+  `\t`, `ESC [ Z`, space, `ESC [ A/B/D/C`. `app: "footA"` with two footA windows →
+  `ambiguous_window` with both; `app: "slack"` → `window_not_found` naming the visible apps.
+  `status`: "dictation: on (wtype); typing into a named app: on".
+- **Hyprland (this box, read-only):** `JARVIS_DICTATE_NATIVE_LIST=1 go test -run
+  TestNativeWindowsReadOnly ./internal/agent/dictate/` listed the session's windows and found the
+  active one exactly once. Nothing was focused or typed in the user's session: the Hyprland
+  focus dispatch is covered by unit tests only.
+- **Browser (headless Chromium 152 and headless Firefox via web-ext, scratch HOME, scratch socket,
+  a local test page):** fill username / email / password (only when named) / search / a
+  contenteditable comment, submit (`form` for the login form, `enter_key` for a search box
+  outside any form), replace a field's content, fill the focused field, refuse the focused password field,
+  `field_not_found` listing the fields; click OK (the dialog's, not the page's), Cancel, Sign in,
+  `ambiguous` for two Delete buttons, a hidden button not found. The page's own `input` listeners
+  saw every value (framework-safe).
+- **End to end through jarvisd:** a throwaway jarvisd (scratch home, shifted ports, mDNS off, a
+  scripted OpenAI-compatible fake LLM) and the agent enrolled to it in the sway session with
+  `--confirm-dictation submit`: mobile chat → `desktop_type_text {submit: true}` →
+  `awaiting_confirmation`; `desktop_confirm "cancel"` → nothing typed; a new question + `"OK send
+  it"` → typed into the right window and sent. The agent's log showed `text=<21 chars>`.
+- **Built and vetted only:** macOS (CGEvent, System Events focus) and Windows (SendInput,
+  GetForegroundWindow); `GOOS=darwin/windows go vet`, `CGO_ENABLED=0` builds, and the pure parts
+  (UTF-16 chunking, INPUT records, key codes, focus logic) are unit-tested on Linux. The 40-byte
+  `INPUT` size is a compile-time check on 64-bit Windows. Not run: ydotool, X11/xdotool, a voice
+  turn answering a confirmation aloud (the voice validation path itself is unchanged), the island
+  note on a real screen.
+
+### Open questions (defaults chosen; the user reviews)
+
+1. **Confirmation default.** *Chosen:* `off`; the island shows what happens. *Alternative:*
+   `submit` by default, so "tell claude to …" asks "Send … to Claude?" every time. Recommend
+   keeping `off` and revisiting if a mishearing ever sends something.
+2. **Enforcing that the user really answered.** `desktop_confirm` trusts the model to pass the
+   user's words. *Recommend:* if confirmation becomes the default, let command-center mint the
+   confirmation (a `validation-response` carries the answer to the agent directly, so the model
+   can't fabricate it).
+3. **Clipboard paste** for long text (faster, exact even where a keyboard layout mangles
+   characters) at the cost of overwriting the clipboard. *Chosen:* never; *recommend:* an opt-in
+   per call only if typing proves too slow or lossy somewhere.
+4. **Text cap.** *Chosen:* 2000 characters, refused beyond. *Recommend:* keep.
+5. **Password fields.** *Chosen:* only when named, dots on the island, never logged. Saying a
+   password aloud is the user's call. *Alternative:* refuse password fields entirely.
+6. **Clicking native buttons by label** (AT-SPI on Linux, AX on macOS, UI Automation on
+   Windows). *Not built:* Enter/Escape/Tab answer nearly every OK/Cancel dialog.
+   *Recommend:* macOS first if wanted (System Events `click button "OK" of window 1 of the
+   frontmost process`, including sheets, with the label passed as an argument, never spliced;
+   the grant exists already), then UI Automation; AT-SPI last (Wayland apps vary).
+7. **GNOME/KDE Wayland.** Typing needs ydotool (root-ish uinput setup, ASCII only) and naming an
+   app is impossible. *Recommend:* the RemoteDesktop portal (libei) for typing later; until then
+   `status` says why it's off.
+8. **Typing into the agent's own terminal.** Nothing stops "type …" from landing in the
+   terminal running `jarvis-agent try`. *Recommend:* fine (that is what was asked).
+9. **The extension update.** 0.2.0 must be uploaded to both stores and re-signed for the
+   embedded `.xpi` (the user's step: AMO keys). Until then installed copies answer fill and click
+   with `unknown_command`.

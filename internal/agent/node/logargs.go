@@ -18,9 +18,13 @@ func Truncate(s string, n int) string {
 // logArgValue is the longest a single argument value gets in a log line.
 const logArgValue = 80
 
+// RedactedArgs are argument names whose string values never reach a log: what the user dictated.
+var RedactedArgs = map[string]bool{"text": true}
+
 // LogArgs renders a tool call's arguments for an Info log line: sorted keys, each value
 // shortened, so a long page text or base64 blob never fills the log. Arguments can hold what the
-// user said; the local log may keep that, shortened.
+// user said; the local log may keep that, shortened. Text to type (dictation, a browser field:
+// possibly a password) is the exception: keys in RedactedArgs show only their length.
 func LogArgs(args map[string]any) string {
 	if len(args) == 0 {
 		return "{}"
@@ -35,6 +39,10 @@ func LogArgs(args map[string]any) string {
 		var v string
 		switch x := args[k].(type) {
 		case string:
+			if RedactedArgs[k] {
+				v = fmt.Sprintf("<%d chars>", len([]rune(x)))
+				break
+			}
 			v = fmt.Sprintf("%q", Truncate(x, logArgValue))
 		default:
 			b, err := json.Marshal(x)
