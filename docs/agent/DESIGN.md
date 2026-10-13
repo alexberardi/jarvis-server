@@ -683,7 +683,8 @@ checklist).
 
 **Open questions** (asked one at a time; answers recorded here):
 
-1. **First-run window toolkit.** *Recommend:* a local web page served by the agent on
+1. **First-run window toolkit.** **Decided (user, 2026-10-12): the browser page** ("browser is
+   fine i think. probably easier that way"). *Was the recommendation:* a local web page served by the agent on
    127.0.0.1 and opened in the default browser. That needs no GUI toolkit in a
    `CGO_ENABLED=0` binary and works the same on every OS. The alternative is a native window
    (Cocoa via purego on macOS, Win32 on Windows), which means more code per OS.
