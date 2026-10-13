@@ -341,6 +341,18 @@ Mute is tab-level (`tabs.update muted`), which covers every player on the page.
 - **No admin rights, no policies:** registration writes per-user files (Linux/macOS) or HKCU
   keys (Windows). Browser profiles are never touched.
 
+### Known gap: sandboxed browsers (Flatpak, Snap)
+
+A browser installed as a Flatpak (Firefox on Bazzite and Fedora Atomic) or a Snap (Firefox on
+Ubuntu) is sandboxed. It doesn't read the host's native-messaging manifests and can't launch
+the agent's host, so the extension installs but never connects. The possible fixes, all
+untested: register the host inside the Flatpak's own folder
+(`~/.var/app/org.mozilla.firefox/.mozilla/native-messaging-hosts`) and allow it to run a host
+binary, or use the WebExtensions portal (xdg-desktop-portal) where the browser supports it.
+Until then, `jarvis-agent browser install` should detect a Flatpak or Snap browser and say
+browser control isn't supported there yet. **Bazzite (user, 2026-10-12): no browser control is
+fine.** Fix this before advertising browser control on Ubuntu, whose default Firefox is a Snap.
+
 ### Install flow (`jarvis-agent browser install|uninstall|status`)
 
 Offered by `jarvis-agent enroll` (always asks on a terminal, `[Y/n]`: Enter installs, input that

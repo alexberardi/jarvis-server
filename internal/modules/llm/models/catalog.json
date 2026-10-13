@@ -33,6 +33,7 @@
     "context_default": 16384,
     "context_max": 40960,
     "kv_bytes_per_token": 147456,
+    "host_bytes": 350060544,
     "prompt_provider": "Qwen3_8B_Compressed",
     "thinking": true,
     "chat_template": "qwen3.jinja",
@@ -55,6 +56,7 @@
     "context_default": 32768,
     "context_max": 262144,
     "kv_bytes_per_token": 32768,
+    "host_bytes": 572129280,
     "prompt_provider": "Qwen3_5_9B_Compressed",
     "thinking": true,
     "chat_template": "qwen3.5.jinja",
@@ -88,6 +90,7 @@
     "context_default": 16384,
     "context_max": 40960,
     "kv_bytes_per_token": 163840,
+    "host_bytes": 437575680,
     "prompt_provider": "Qwen3_14B_Compressed",
     "thinking": true,
     "chat_template": "qwen3.jinja",
@@ -110,6 +113,7 @@
     "context_default": 16384,
     "context_max": 262144,
     "kv_bytes_per_token": 65536,
+    "host_bytes": 715161600,
     "prompt_provider": "Qwen3_14B_Compressed",
     "thinking": true,
     "chat_template": "qwen3.8.jinja",
@@ -121,7 +125,7 @@
       "vision",
       "large"
     ],
-    "notes": "Prod's model (live 13312 ctx \u00d7 4 slots with vision; background 131072 ctx, q8_0 KV, flash attention on a second card)."
+    "notes": "Needs a 24 GB card. For long contexts, such as 131072 tokens for the background label, give it a second card or use a q8_0 KV cache."
   },
   {
     "id": "qwen3.8-27b-mmproj",
@@ -216,7 +220,7 @@
     "tags": [
       "tts"
     ],
-    "notes": "Extracted to a directory: model.onnx, voices.bin, tokens.txt, lexicons, espeak-ng-data. Default voice bm_george, speed 1.25."
+    "notes": "Unpacked into its own folder after download. The default voice is bm_george (British English) at 1.25x speed."
   },
   {
     "id": "eres2net-voxceleb-16k",

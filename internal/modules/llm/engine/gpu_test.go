@@ -137,6 +137,30 @@ func TestDetector(t *testing.T) {
 			t.Fatalf("one GPU: both labels on it: %+v", p)
 		}
 	})
+	t.Run("free memory from outside the probe's own CUDA context", func(t *testing.T) {
+		// Measured on a 3080 Ti: the probe saw 866 MiB free and nvidia-smi 1122 at the same
+		// moment; the 256 MiB difference is the probe's CUDA context, not another program.
+		d := &Detector{Platform: Platform{"linux", "amd64"},
+			Binaries: func() map[Flavour]string { return map[Flavour]string{FlavourCUDA: "/e/llama-server"} },
+			Run: fakeRunner(map[string]string{
+				"/e/llama-server --list-devices": "Available devices:\n  CUDA0: NVIDIA GeForce RTX 3080 Ti (11892 MiB, 9198 MiB free)\n",
+				"nvidia-smi":                     "0, NVIDIA GeForce RTX 3080 Ti, 12288, 9454\n",
+			})}
+		h := d.Hardware(context.Background(), false)
+		if len(h.Devices) != 1 || h.Devices[0].TotalMB != 11892 || h.Devices[0].FreeMB != 9454 {
+			t.Fatalf("%+v", h.Devices)
+		}
+		// Never more free than CUDA can allocate; another card at that index is left alone.
+		devs := []Device{
+			{Backend: FlavourCUDA, Index: 0, Name: "A", TotalMB: 11892, FreeMB: 9000},
+			{Backend: FlavourCUDA, Index: 1, Name: "B", TotalMB: 24135, FreeMB: 20000},
+			{Backend: FlavourVulkan, Index: 0, Name: "A", TotalMB: 11892, FreeMB: 9000},
+		}
+		freeFromOutside(devs, []Device{{Index: 0, Name: "A", TotalMB: 12288, FreeMB: 12000}, {Index: 1, Name: "C", FreeMB: 24000}})
+		if devs[0].FreeMB != 11892 || devs[1].FreeMB != 20000 || devs[2].FreeMB != 9000 {
+			t.Fatalf("%+v", devs)
+		}
+	})
 	t.Run("amd igpu + discrete on linux x64 proposes rocm", func(t *testing.T) {
 		d := &Detector{Platform: Platform{"linux", "amd64"}, Run: fakeRunner(map[string]string{
 			"rocm-smi": `{"card0": {"Card Series": "iGPU", "GFX Version": "gfx1036", "VRAM Total Memory (B)": "536870912", "VRAM Total Used Memory (B)": "0"},

@@ -1063,7 +1063,10 @@ func (m *Manager) log() *slog.Logger {
 // runs detection's). A label on the CPU gets a model sized for CPU inference whatever cards
 // the box has: the smallest LLM (Qwen3 4B; a remote endpoint is worth considering) and
 // whisper small.en, or base.en with under 8 GB of RAM.
-func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour) map[string]string {
+//
+// others is the memory other programs hold on each card (Manager.otherPrograms): models are
+// judged next to it, so a desktop's share isn't promised to whisper as well.
+func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour, others []Resident) map[string]string {
 	on := func(label string) engine.Hardware { return OnFlavour(hw, flavours[label]) }
 	out := map[string]string{engine.LabelEmbeddings: "all-minilm-l6-v2"}
 	for _, v := range VoiceLabels {
@@ -1075,7 +1078,7 @@ func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour) map[strin
 		var best Entry
 		for _, verdict := range []string{"fits", "tight"} {
 			for _, e := range Catalog() {
-				if e.Kind == engine.ModelLLM && EntryFit(lhw, e).Verdict == verdict && e.Size > best.Size {
+				if e.Kind == engine.ModelLLM && entryFitAlongside(lhw, e, others).Verdict == verdict && e.Size > best.Size {
 					best = e
 				}
 			}
@@ -1097,11 +1100,11 @@ func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour) map[strin
 		return out
 	}
 	// STT shares a card with the live model: large-v3-turbo only when it fits next to it.
-	var live []Resident
+	live := slices.Clone(others)
 	if lhw := on(engine.LabelLive); !onCPU(lhw) && lhw.Flavour == shw.Flavour {
 		best := llms[engine.LabelLive]
-		live = []Resident{{Labels: []string{engine.LabelLive}, Model: best.ID, NeededMB: EntryFit(lhw, best).NeededMB,
-			Devices: deviceList(engine.Propose(hw)[engine.LabelLive].Devices)}}
+		live = append(live, Resident{Labels: []string{engine.LabelLive}, Model: best.ID, NeededMB: EntryFit(lhw, best).NeededMB,
+			Devices: deviceList(engine.Propose(hw)[engine.LabelLive].Devices)})
 	}
 	if e, ok := CatalogEntry("whisper-large-v3-turbo"); ok {
 		if FitAlongside(shw, e.Kind, e.Size, 0, 0, live).Verdict == "fits" {
@@ -1143,7 +1146,13 @@ func (m *Manager) labelFlavours(ctx context.Context, hw engine.Hardware) map[str
 
 // Recommend is the package Recommend for the labels' effective builds.
 func (m *Manager) Recommend(ctx context.Context, hw engine.Hardware) map[string]string {
-	return Recommend(hw, m.labelFlavours(ctx, hw))
+	var others []Resident
+	for _, r := range m.Residents(ctx) {
+		if slices.Contains(r.Labels, OtherPrograms) {
+			others = append(others, r)
+		}
+	}
+	return Recommend(hw, m.labelFlavours(ctx, hw), others)
 }
 
 // deviceList parses a gpu_devices setting ("0,1"); empty or invalid is nil (the default card).
@@ -1249,7 +1258,7 @@ func (m *Manager) otherPrograms(ctx context.Context, residents []Resident) []Res
 // residentNeed estimates a label's engine in MB: its installed model (plus projector) at the
 // label's context, or an external file by its size.
 func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64, bool) {
-	var weights, kv int64
+	var weights, host, kv int64
 	n := c.Context
 	if mod, err := m.Store.Get(ctx, c.Model); err == nil {
 		weights = mod.Size
@@ -1263,7 +1272,7 @@ func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64
 			}
 		}
 		if e, ok := CatalogEntry(mod.CatalogID); ok {
-			kv = e.KVBytesPerTok
+			kv, host = e.KVBytesPerTok, e.HostBytes
 			if n <= 0 {
 				n = e.ContextDefault
 			}
@@ -1276,9 +1285,9 @@ func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64
 	} else {
 		return 0, false
 	}
-	need, _ := estimateNeed(c.ModelKind, weights, kv, max(n, 0))
+	need, _ := gpuNeed(c.ModelKind, weights, host, kv, max(n, 0))
 	if n <= 0 && c.ModelKind == engine.ModelLLM {
-		need, _ = estimateNeed(c.ModelKind, weights, kv, 8192)
+		need, _ = gpuNeed(c.ModelKind, weights, host, kv, 8192)
 	}
 	return need / mb, true
 }
@@ -1302,7 +1311,7 @@ func without(rs []Resident, labels ...string) []Resident {
 // RAM ("cpu", or "too_big" for RAM) when every such label runs on the CPU (the embeddings
 // label by default; any label the Hardware step put on the CPU), where VRAM doesn't matter
 // (A10 F8, AD3b).
-func (m *Manager) fitFor(ctx context.Context, hw engine.Hardware, kind string, weights, kvPerTok int64, n int, residents []Resident) Fit {
+func (m *Manager) fitFor(ctx context.Context, hw engine.Hardware, kind string, weights, host, kvPerTok int64, n int, residents []Resident) Fit {
 	flavours := m.labelFlavours(ctx, hw)
 	var labels []string
 	on := engine.Flavour("")
@@ -1315,7 +1324,7 @@ func (m *Manager) fitFor(ctx context.Context, hw engine.Hardware, kind string, w
 			on = f
 		}
 	}
-	return FitAlongside(OnFlavour(hw, on), kind, weights, kvPerTok, n, without(residents, labels...))
+	return fitAlongside(OnFlavour(hw, on), kind, weights, host, kvPerTok, n, without(residents, labels...))
 }
 
 // entryFit is fitFor for a catalog entry (with its projector) at its default context.
@@ -1326,7 +1335,7 @@ func (m *Manager) entryFit(ctx context.Context, hw engine.Hardware, e Entry, res
 			w += p.Size
 		}
 	}
-	return m.fitFor(ctx, hw, e.Kind, w, e.KVBytesPerTok, e.ContextDefault, residents)
+	return m.fitFor(ctx, hw, e.Kind, w, e.HostBytes, e.KVBytesPerTok, e.ContextDefault, residents)
 }
 
 // FitWarning says when a model being installed for engine labels won't fit on its card next
@@ -1346,10 +1355,10 @@ func (m *Manager) FitWarning(ctx context.Context, modelID string, assign []strin
 	if err != nil {
 		return ""
 	}
-	var kv int64
+	var kv, host int64
 	n := mod.ContextDefault
 	if e, ok := CatalogEntry(mod.CatalogID); ok {
-		kv = e.KVBytesPerTok
+		kv, host = e.KVBytesPerTok, e.HostBytes
 	}
 	w := mod.Size
 	if mod.MMProjID != "" {
@@ -1358,7 +1367,7 @@ func (m *Manager) FitWarning(ctx context.Context, modelID string, assign []strin
 		}
 	}
 	hw := m.hardware(ctx)
-	f := FitAlongside(hw, mod.Kind, w, kv, n, without(m.Residents(ctx), engineLabels...))
+	f := fitAlongside(hw, mod.Kind, w, host, kv, n, without(m.Residents(ctx), engineLabels...))
 	if f.Verdict != "too_big" || len(f.Alongside) == 0 {
 		return ""
 	}

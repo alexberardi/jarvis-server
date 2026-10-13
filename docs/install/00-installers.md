@@ -1482,4 +1482,15 @@ one extra double-click and stays on the right side of every OS's security model.
    (`<home>/setup-token`). On a desktop the installer opens the browser with it. On a headless box,
    the user has to get the link onto another device. *Options:* print it in the install output (as
    today), show a QR code in the terminal for the phone, or let the mobile app discover the
-   unconfigured server over mDNS and prove physical access some other way. To be discussed.
+   unconfigured server over mDNS and prove physical access some other way. **Decided (user,
+   2026-10-12): the QR code** ("qr code would be cool"). The install output and `jarvisd
+   setup-link` print the setup link as a terminal QR code (Unicode half-blocks, no extra
+   dependency) next to the plain URL. Scanning it with the phone opens the wizard with the token.
+   The token never leaves the server any other way.
+5. **Immutable Linux (Bazzite, Fedora Atomic).** `.deb` doesn't apply, and `.rpm` would mean
+   rpm-ostree layering plus a reboot, so the one-liner is the path. `install.sh` calls no
+   package manager and writes only `/usr/local` (which lives under `/var` on Atomic), `/etc` and
+   `/var`, or `~/.local` in user mode, so it should work. **Untested: SELinux** (enforcing on
+   Fedora) may block the service binary. The user wants a friend's Bazzite machine to run the
+   desktop agent (2026-10-12), without browser control. Add Bazzite to the clean-install
+   sign-off matrix as the immutable-Linux case.

@@ -394,21 +394,21 @@ func TestFitAndRecommend(t *testing.T) {
 	if f := FitFor(two3090, "llm", e27.Size, e27.KVBytesPerTok, 131072); f.Verdict != "split" {
 		t.Errorf("27B @131k: %+v", f)
 	}
-	r := Recommend(two3090, nil)
+	r := Recommend(two3090, nil, nil)
 	if r["live"] != "qwen3.8-27b" || r["stt"] != "whisper-large-v3-turbo" || r["embeddings"] != "all-minilm-l6-v2" {
 		t.Errorf("recommend %v", r)
 	}
 	card := func(mbs int64) engine.Hardware {
 		return engine.Hardware{Flavour: engine.FlavourCUDA, Devices: []engine.Device{{Backend: engine.FlavourCUDA, Name: "GPU", TotalMB: mbs}}}
 	}
-	if r := Recommend(card(12288), nil); r["live"] != "qwen3.5-9b" {
+	if r := Recommend(card(12288), nil, nil); r["live"] != "qwen3.5-9b" {
 		t.Errorf("12 GB: %v", r)
 	}
-	if r := Recommend(card(8192), nil); r["live"] != "qwen3-4b" {
+	if r := Recommend(card(8192), nil, nil); r["live"] != "qwen3-4b" {
 		t.Errorf("8 GB: %v", r)
 	}
 	cpu := engine.Hardware{Flavour: engine.FlavourCPU}
-	if r := Recommend(cpu, nil); r["live"] != "qwen3-4b" || r["stt"] != "whisper-small.en" {
+	if r := Recommend(cpu, nil, nil); r["live"] != "qwen3-4b" || r["stt"] != "whisper-small.en" {
 		t.Errorf("cpu: %v", r)
 	}
 	if f := FitFor(cpu, "llm", 1<<30, 0, 0); f.Verdict != "cpu" || !f.KVEstimate {
@@ -549,8 +549,12 @@ func TestFitCountsCoResidentEngines(t *testing.T) {
 	if f.Verdict != "too_big" || f.CommittedMB != qwen.NeededMB+desk.NeededMB || !slices.Equal(f.Alongside, []string{"live", "background", OtherPrograms}) {
 		t.Errorf("turbo next to qwen3-8b and the desktop: %+v", f)
 	}
-	if r := Recommend(card, nil); r["stt"] != "whisper-small.en" {
-		t.Errorf("12 GB recommends %v; turbo does not fit next to the live model", r)
+	if r := Recommend(card, nil, []Resident{desk}); r["live"] != "qwen3.5-9b" || r["stt"] != "whisper-small.en" {
+		t.Errorf("12 GB with a desktop recommends %v; turbo does not fit next to the live model and the desktop", r)
+	}
+	// A headless 12 GB card has room for both (about 7.6 GB and 2.4 GB).
+	if r := Recommend(card, nil, nil); r["live"] != "qwen3.5-9b" || r["stt"] != "whisper-large-v3-turbo" {
+		t.Errorf("12 GB headless recommends %v", r)
 	}
 	// Two cards: the model goes where there is room.
 	two := card
@@ -1391,5 +1395,136 @@ func TestInstallReadyModelClearsLeftoverPartials(t *testing.T) {
 	}
 	if _, err := os.Stat(left); !os.IsNotExist(err) {
 		t.Fatal("partials left")
+	}
+}
+
+// Qwen3.5-9B on a 12 GB RTX 3080 Ti, as the wizard showed it: live and background share one
+// engine (Q4_K_M plus its F16 projector, 32768 context, f16 KV, one slot) next to whisper
+// small.en and the desktop. nvidia-smi measured the engine at 7506 MB and whisper at 1056 MB,
+// with 1.1 GB of the card still free, yet the wizard called the model "Too big" and the
+// dashboard warned the card was overcommitted (11880 MB against 11297). Two causes: the
+// estimate counted the token embeddings llama.cpp keeps in system RAM (546 MB), and other
+// programs included the detection probe's own CUDA context (256 MB).
+func TestFitQwen35On3080TiAsRun(t *testing.T) {
+	e := newEnv(t)
+	q9, _ := CatalogEntry("qwen3.5-9b")
+	proj, _ := CatalogEntry(q9.MMProj)
+	small, _ := CatalogEntry("whisper-small.en")
+	for _, c := range []Entry{q9, proj, small} {
+		mm := ""
+		if c.ID == q9.ID {
+			mm = proj.ID
+		}
+		if err := e.mgr.Store.Upsert(e.ctx, Model{ID: c.ID, Kind: c.Kind, CatalogID: c.ID, Path: "/m/" + c.File, Size: c.Size,
+			MMProjID: mm, ContextDefault: c.ContextDefault, State: StateReady, Files: []File{{Name: c.File}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := func(label, model string, n int, mod func(*engine.LabelConfig)) engine.LabelStatus {
+		d, _ := engine.LabelDefFor(label)
+		c := engine.LabelConfig{Label: label, Kind: d.Kind, ModelKind: d.ModelKind, Engine: engine.ModeLocal, Model: model,
+			Context: n, Parallel: 1, GPULayers: 999, KVCacheType: "f16", GPUBackend: "auto"}
+		if mod != nil {
+			mod(&c)
+		}
+		return engine.LabelStatus{Label: label, Config: c}
+	}
+	llm := func(c *engine.LabelConfig) { c.MMProj, c.GPUDevices = proj.ID, "0" }
+	e.labels.status = []engine.LabelStatus{
+		cfg("live", q9.ID, 32768, llm),
+		cfg("background", q9.ID, 32768, llm),
+		cfg("embeddings", "all-minilm-l6-v2", 512, func(c *engine.LabelConfig) { c.GPULayers = 0 }),
+		cfg("stt", small.ID, 0, nil),
+	}
+
+	// Detection at startup, before the engines: the probe saw 9198 MB free from inside its
+	// own CUDA context, nvidia-smi 9454 from outside.
+	linux := engine.Platform{OS: "linux", Arch: "amd64"}
+	e.mgr.Detector = &engine.Detector{Platform: linux,
+		Binaries: func() map[engine.Flavour]string {
+			return map[engine.Flavour]string{engine.FlavourCUDA: "/e/llama-server"}
+		},
+		Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+			switch name {
+			case "/e/llama-server":
+				return []byte("Available devices:\n  CUDA0: NVIDIA GeForce RTX 3080 Ti (11892 MiB, 9198 MiB free)\n"), nil
+			case "nvidia-smi":
+				return []byte("0, NVIDIA GeForce RTX 3080 Ti, 12288, 9454\n"), nil
+			}
+			return nil, io.EOF
+		}}
+	rel := engine.Releases[engine.KindLlama]
+	saved := rel.Assets
+	rel.Assets = map[engine.Platform]map[engine.Flavour][]engine.Asset{linux: {engine.FlavourCUDA: {{Name: "x"}}}}
+	engine.Releases[engine.KindLlama] = rel
+	t.Cleanup(func() { rel.Assets = saved; engine.Releases[engine.KindLlama] = rel })
+	hw := e.mgr.Detector.Hardware(e.ctx, true)
+	later := hw.DetectedAt.Add(time.Second)
+	e.labels.instances = []engine.InstanceStatus{
+		{State: engines.Healthy, Started: later, Since: later, Labels: []string{"background", "live"}},
+		{State: engines.Healthy, Started: later, Since: later, Labels: []string{"stt"}},
+	}
+
+	rs := e.mgr.Residents(e.ctx)
+	if len(rs) != 3 {
+		t.Fatalf("one shared LLM engine, stt, other programs: %+v", rs)
+	}
+	// The shared engine once, its projector once, the embeddings in host RAM not counted:
+	// close to the 7506 MB measured, and not under it.
+	if !slices.Equal(rs[0].Labels, []string{"live", "background"}) || rs[0].NeededMB < 7506 || rs[0].NeededMB > 7700 {
+		t.Errorf("qwen3.5-9b engine: %+v (measured 7506 MB)", rs[0])
+	}
+	if rs[1].Labels[0] != "stt" || rs[1].NeededMB < 1056 || rs[1].NeededMB > 1150 {
+		t.Errorf("whisper small.en: %+v (measured 1056 MB)", rs[1])
+	}
+	if rs[2].Labels[0] != OtherPrograms || rs[2].NeededMB != 11892-9454 {
+		t.Errorf("other programs, without the probe's CUDA context: %+v", rs[2])
+	}
+	var total int64
+	for _, r := range rs {
+		total += r.NeededMB
+	}
+	// It ran with 1.1 GB free (10786 MB in use): the estimate stays above that, and under the
+	// 95% of the card the warning allows.
+	if total < 10786 || total > 11892*95/100 {
+		t.Errorf("total %d MB", total)
+	}
+	if w := Overcommitted(hw, rs); len(w) != 0 {
+		t.Errorf("warned about a card that runs fine: %q", w)
+	}
+
+	// The wizard's verdict for the model it runs: close to the card's limit, not too big.
+	f := e.mgr.entryFit(e.ctx, hw, q9, rs)
+	if f.Verdict != "tight" || f.NeededMB != rs[0].NeededMB || f.CommittedMB != rs[1].NeededMB+rs[2].NeededMB {
+		t.Errorf("wizard fit: %+v", f)
+	}
+	// On the CPU the embeddings are in RAM like everything else: counted.
+	cpu := engine.Hardware{Flavour: engine.FlavourCPU, RAMMB: 32768}
+	if c := EntryFit(cpu, q9); c.NeededMB <= f.NeededMB {
+		t.Errorf("CPU need %d should include the token embeddings (GPU %d)", c.NeededMB, f.NeededMB)
+	}
+}
+
+// The catalog's KV and host sizes against the GGUFs' metadata (layers, full-attention
+// interval, KV heads, head size; token_embd.weight and whether output.weight exists).
+func TestCatalogKVAndHostBytes(t *testing.T) {
+	type arch struct{ layers, fullEvery, kvHeads, headDim int64 }
+	for id, a := range map[string]arch{
+		"qwen3-4b":    {36, 1, 8, 128},
+		"qwen3-8b":    {36, 1, 8, 128},
+		"qwen3-14b":   {40, 1, 8, 128},
+		"qwen3.5-9b":  {32, 4, 4, 256}, // hybrid: 8 full-attention layers of 32
+		"qwen3.8-27b": {64, 4, 4, 256}, // hybrid: 16 of 64 (plus a next-token layer)
+	} {
+		e, _ := CatalogEntry(id)
+		if want := a.layers / a.fullEvery * a.kvHeads * a.headDim * 2 * 2; e.KVBytesPerTok != want {
+			t.Errorf("%s kv_bytes_per_token %d, want %d", id, e.KVBytesPerTok, want)
+		}
+	}
+	// Qwen3-4B ties its output to the token embeddings, which must then be on the card.
+	for id, want := range map[string]int64{"qwen3-4b": 0, "qwen3-8b": 350060544, "qwen3.5-9b": 572129280, "qwen3-14b": 437575680, "qwen3.8-27b": 715161600} {
+		if e, _ := CatalogEntry(id); e.HostBytes != want {
+			t.Errorf("%s host_bytes %d, want %d", id, e.HostBytes, want)
+		}
 	}
 }

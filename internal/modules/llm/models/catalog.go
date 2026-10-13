@@ -46,7 +46,15 @@ type Entry struct {
 	MMProj         string `json:"mmproj,omitempty"`
 	ContextDefault int    `json:"context_default,omitempty"`
 	ContextMax     int    `json:"context_max,omitempty"`
-	KVBytesPerTok  int64  `json:"kv_bytes_per_token,omitempty"`
+	// KVBytesPerTok is the f16 KV cache per token of context. Hybrid models (Qwen3.5/3.8:
+	// one full-attention layer in four, the rest linear attention with a small fixed state)
+	// count only their full-attention layers.
+	KVBytesPerTok int64 `json:"kv_bytes_per_token,omitempty"`
+	// HostBytes is what llama.cpp keeps in system RAM even with every layer on the GPU: the
+	// input token-embedding table, when the model has a separate output matrix (a model with
+	// tied embeddings needs that table on the card for its output, so it has none). From the
+	// GGUF's token_embd.weight.
+	HostBytes      int64  `json:"host_bytes,omitempty"`
 	PromptProvider string `json:"prompt_provider,omitempty"`
 	Thinking       bool   `json:"thinking,omitempty"`
 	Dims           int    `json:"dims,omitempty"`

@@ -371,7 +371,9 @@ func (d *Detector) detect(ctx context.Context) Hardware {
 		}
 		d.probed = fault
 		if out, ok := d.run(ctx, "nvidia-smi", "--query-gpu=index,name,memory.total,memory.free", "--format=csv,noheader,nounits"); ok {
-			add("nvidia-smi", ParseNvidiaSMI(out))
+			smi := ParseNvidiaSMI(out)
+			freeFromOutside(h.Devices, smi)
+			add("nvidia-smi", smi)
 			if fault == nil && nvmlMismatch(out) {
 				fault = DriverMismatchFault("", "")
 			}
@@ -389,6 +391,25 @@ func (d *Detector) detect(ctx context.Context) Hardware {
 	}
 	h.Flavour = proposeFlavour(d.Platform, h)
 	return h
+}
+
+// freeFromOutside corrects the free memory llama-server --list-devices reported for CUDA cards
+// with nvidia-smi's. The probe measures from inside its own CUDA context, so its figure is
+// short by that context (256 MB on a 3080 Ti), which then reads as memory other programs hold
+// on top of the context every engine is already estimated to need. nvidia-smi looks from
+// outside. The total stays llama-server's (what CUDA can allocate; nvidia-smi's includes the
+// driver's reserve). Cards are matched by index and name, as CUDA may order them differently.
+func freeFromOutside(devs, smi []Device) {
+	for i, d := range devs {
+		if d.Backend != FlavourCUDA {
+			continue
+		}
+		for _, s := range smi {
+			if s.Index == d.Index && s.Name == d.Name && s.FreeMB > d.FreeMB {
+				devs[i].FreeMB = min(s.FreeMB, d.TotalMB)
+			}
+		}
+	}
 }
 
 // appleSilicon reports the Metal device from sysctl: unified memory, ~70% usable for a model.
