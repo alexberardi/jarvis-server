@@ -217,7 +217,7 @@ do. Each item lands green on `main` on its own (the §8 style).
 | 1.5 | **First-run page** (§2.2): loopback server with a per-launch secret, server discovery (loopback first), pairing, store buttons, macOS TCC panes with live status, GNOME/KDE portal step, mic meter, wake toggle, Remove | L | 1.1, 1.4, 1.6 | `agent` | Handler tests; headless browser test of the pairing happy path against a test jarvisd; TCC probes are already native-tested |
 | 1.6 | Agent config file (voice, island, confirm-dictation) read by `run`; flags still win | S | — | `agent` | Unit |
 | 1.7 | **Agent self-update** via `internal/update`: agent archives in `SHA256SUMS`, check on heartbeat `pending_update` or daily, in-process swap; macOS `.app` replacement | M | 2.1 | `agent`, a new `agent-upgrade` e2e (throwaway key, as `scripts/testsign`) | Swap, refusal of unsigned/older, rollback on failed start |
-| 1.8 | **Done (PR #NKPR, 2026-10-13).** Agent heartbeat: `node_kind: desktop` (DESIGN §9 Q1) + `browser_extension: connected` capability | S | — | `agent`, `build` | Contract: node list carries both |
+| 1.8 | **Done (PR #104, 2026-10-13).** Agent heartbeat: `node_kind: desktop` (DESIGN §9 Q1) + `browser_extension: connected` capability | S | — | `agent`, `build` | Contract: node list carries both |
 | 1.9 | Start-only shortcut: second launch → IPC to the running agent → island "Jarvis is running" pill (DESIGN §13 item 6) | S | 1.4 | `agent` | Single-instance test; island golden for the new pill |
 | 1.10 | `jarvisd install-from-app` (the macOS app's privileged entry point) and the Windows/`.deb` hooks: thin wrappers over `service install` + `doctor --fix` + `setup-link --url` | S | 1.2 | `install` | Run under sudo on the macOS and Ubuntu runners |
 
