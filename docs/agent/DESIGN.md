@@ -664,6 +664,18 @@ checklist).
    - **The extension's own popup** links back here when it can't reach an agent ("Install the
      Jarvis desktop agent").
 
+6. **A shortcut that opens the agent's home page** (user, 2026-10-12: "include an option to
+   create a desktop shortcut for it if you're installing the agent"). After pairing, the
+   first-run browser page (open question 1) stays as the agent's home: connection status with
+   live green ticks, re-pair, browser-control setup, the macOS permission buttons, voice on/off,
+   and quit. The shortcut opens that page, and starts the agent first if it isn't running.
+   - **Windows:** the installer offers "Create a desktop shortcut" (ticked by default), plus a
+     Start menu entry.
+   - **macOS:** Jarvis Agent.app goes in Applications (Launchpad, Spotlight), with a "Keep in Dock"
+     option. Mac users rarely expect desktop icons.
+   - **Linux:** an app-menu entry (`~/.local/share/applications/*.desktop`), and an optional
+     desktop icon.
+
 **Decided (user, 2026-10-12).**
 
 - **Native host by default:** the agent registers the native-messaging host for the browsers it
