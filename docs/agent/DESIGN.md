@@ -615,8 +615,8 @@ checklist).
 
 **Target flow.**
 
-1. **Admin and mobile app: "Add a computer".** It shows a download button per OS (from the
-   jarvisd release assets) and how to pair. A Done-step link in the setup wizard leads there.
+1. **Admin and mobile app: "Add a computer".** Available to every household member. It shows
+   a download button per OS (public release assets, open question 2) and how to pair. A Done-step link in the setup wizard leads there.
 2. **Installers per OS.** They install the agent and register it to start at login. They need
    no terminal and no admin rights wherever the OS allows:
    - **macOS:** a signed, notarized `.dmg` with Jarvis Agent.app (hardened runtime, §9.3). The
@@ -688,9 +688,17 @@ checklist).
    127.0.0.1 and opened in the default browser. That needs no GUI toolkit in a
    `CGO_ENABLED=0` binary and works the same on every OS. The alternative is a native window
    (Cocoa via purego on macOS, Win32 on Windows), which means more code per OS.
-2. **Where pairing is approved.** *Recommend:* both the admin and the mobile app, and the
-   code expires after 10 minutes. Any household admin may approve, and the approver picks
-   the household and room.
+2. **Where pairing is approved.** **Decided (user, 2026-10-12): any household member**, not
+   only admins ("for the agent, any user i think"). This matches the self-hosted stance:
+   outsiders are blocked, members are not restricted on their own install. Approval works
+   from both the admin and the mobile app, the code expires after 10 minutes, and the approver
+   picks one of *their own* households and a room. The pairing code adds a computer to a running
+   server. It is unrelated to the server's first-run setup token.
+   - **Public download (same decision):** the agent installers are public release assets on
+     jarvis-server releases, next to the jarvisd archives (today `jarvis-agent` is not part of
+     the release, PLAN.md layout). They are linked from the landing page and from the "Desktop &
+     browser" page, which every member sees, not just admins. A regular user downloads, installs
+     and pairs without an admin's help.
 3. **Windows signing.** *Recommend:* ship unsigned for v0.1.0 with a note about the SmartScreen
    prompt, and revisit Authenticode (ID9) once there are Windows users.
 4. **Store listings.** *Recommend:* submit **before** the release. List the extension
