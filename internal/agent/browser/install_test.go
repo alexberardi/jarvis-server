@@ -131,8 +131,16 @@ func TestRegisterPresentOnly(t *testing.T) {
 	if exts := ff["allowed_extensions"].([]any); len(exts) != 1 || exts[0] != FirefoxExtensionID {
 		t.Fatalf("firefox admits %v", exts)
 	}
-	if origins := cr["allowed_origins"].([]any); len(origins) != 1 || origins[0] != "chrome-extension://"+ChromeExtensionID+"/" {
-		t.Fatalf("chromium admits %v", origins)
+	// Both Chromium builds: the unpacked one (key-derived id) and the Chrome Web Store listing.
+	wantOrigins := []string{"chrome-extension://hdjdhmmlggbjjdokpofkghjnjnmjfhmk/", "chrome-extension://abkbjmelelgelkhneobebgoilejlgbob/"}
+	if origins := cr["allowed_origins"].([]any); len(origins) != len(wantOrigins) {
+		t.Fatalf("chromium admits %v, want %v", origins, wantOrigins)
+	} else {
+		for i, o := range origins {
+			if o != wantOrigins[i] {
+				t.Fatalf("chromium admits %v, want %v", origins, wantOrigins)
+			}
+		}
 	}
 	if cr["allowed_extensions"] != nil {
 		t.Fatal("chromium manifest has firefox keys")
@@ -231,8 +239,8 @@ func TestWindowsRegistry(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), FirefoxExtensionID) {
 		t.Fatalf("firefox manifest at %s: %v", reg[ffKey], err)
 	}
-	if b, _ := os.ReadFile(reg[edgeKey]); !strings.Contains(string(b), ChromeExtensionID) {
-		t.Fatal("edge manifest doesn't admit the extension")
+	if b, _ := os.ReadFile(reg[edgeKey]); !strings.Contains(string(b), ChromeDevExtensionID) || !strings.Contains(string(b), ChromeStoreExtensionID) {
+		t.Fatal("edge manifest doesn't admit both builds of the extension")
 	}
 	for _, s := range Inspect(e, reg) {
 		if (s.Target.Name == "firefox" || s.Target.Name == "edge") && !s.Registered {
@@ -247,6 +255,101 @@ func TestWindowsRegistry(t *testing.T) {
 	for _, r := range Register(e, exe, false, nil) {
 		if r.Present && r.Err == nil {
 			t.Fatalf("%s registered without a registry", r.Target.Name)
+		}
+	}
+}
+
+// Every admitted Chromium id is a real extension id (32 letters a-p), the unpacked build's
+// comes first, and none repeats: a typo'd store id would silently lock the listing out.
+func TestChromeExtensionIDs(t *testing.T) {
+	if len(ChromeExtensionIDs) == 0 || ChromeExtensionIDs[0] != ChromeDevExtensionID {
+		t.Fatalf("ChromeExtensionIDs %v must start with the unpacked id %s", ChromeExtensionIDs, ChromeDevExtensionID)
+	}
+	if !contains(ChromeExtensionIDs, ChromeStoreExtensionID) || ChromeStoreExtensionID == ChromeDevExtensionID {
+		t.Fatalf("ChromeExtensionIDs %v must admit the Web Store listing %s", ChromeExtensionIDs, ChromeStoreExtensionID)
+	}
+	seen := map[string]bool{}
+	for _, id := range ChromeExtensionIDs {
+		if len(id) != 32 || strings.Trim(id, "abcdefghijklmnop") != "" {
+			t.Errorf("%q is not a Chromium extension id", id)
+		}
+		if seen[id] {
+			t.Errorf("%q listed twice", id)
+		}
+		seen[id] = true
+	}
+	if len(AllowedOrigins) != len(ChromeExtensionIDs) {
+		t.Fatalf("AllowedOrigins %v vs ids %v", AllowedOrigins, ChromeExtensionIDs)
+	}
+	for i, id := range ChromeExtensionIDs {
+		if AllowedOrigins[i] != "chrome-extension://"+id+"/" {
+			t.Errorf("origin %d = %q for id %q", i, AllowedOrigins[i], id)
+		}
+	}
+}
+
+// Adding an id (as the Web Store id once was) makes a host registered before it stale: status must say so (the
+// store build would be refused), and a fresh install admits both builds.
+func TestInspectFlagsHostMissingAnAddedID(t *testing.T) {
+	e := testEnv(t, "linux")
+	mkdirs(t, filepath.Join(e.Home, ".config", "chromium"))
+	exe := filepath.Join(e.Home, "bin", "jarvis-agent")
+	mkdirs(t, filepath.Dir(exe))
+	if err := os.WriteFile(exe, []byte("#!"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	Register(e, exe, false, nil) // admits the current ids only
+
+	saved := AllowedOrigins
+	t.Cleanup(func() { AllowedOrigins = saved })
+	AllowedOrigins = chromeOrigins(append(append([]string{}, ChromeExtensionIDs...), "abcdefghijklmnopabcdefghijklmnop"))
+
+	chromium := func() TargetStatus {
+		for _, s := range Inspect(e, nil) {
+			if s.Target.Name == "chromium" {
+				return s
+			}
+		}
+		t.Fatal("no chromium status")
+		return TargetStatus{}
+	}
+	if s := chromium(); !strings.Contains(s.Problem, "admit") {
+		t.Fatalf("host without the added id not reported: %+v", s)
+	}
+	Register(e, exe, false, nil)
+	if s := chromium(); s.Problem != "" {
+		t.Fatalf("after re-install: %+v", s)
+	}
+	var m struct {
+		AllowedOrigins []string `json:"allowed_origins"`
+	}
+	b, _ := os.ReadFile(targetByName(t, e, "chromium").ManifestPath(e))
+	if err := json.Unmarshal(b, &m); err != nil || len(m.AllowedOrigins) != len(ChromeExtensionIDs)+1 ||
+		m.AllowedOrigins[0] != "chrome-extension://"+ChromeDevExtensionID+"/" {
+		t.Fatalf("re-installed host admits %v (%v)", m.AllowedOrigins, err)
+	}
+}
+
+// A host registered by an agent from before the Web Store listing admits only the unpacked
+// build, so Chrome would refuse the store-installed extension: status must say so.
+func TestInspectFlagsPreStoreHost(t *testing.T) {
+	e := testEnv(t, "linux")
+	mkdirs(t, filepath.Join(e.Home, ".config", "google-chrome"))
+	exe := filepath.Join(e.Home, "bin", "jarvis-agent")
+	mkdirs(t, filepath.Dir(exe))
+	if err := os.WriteFile(exe, []byte("#!"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := targetByName(t, e, "chrome").ManifestPath(e)
+	mkdirs(t, filepath.Dir(p))
+	old, _ := json.Marshal(map[string]any{"name": HostName, "path": exe, "type": "stdio",
+		"allowed_origins": []string{"chrome-extension://" + ChromeDevExtensionID + "/"}})
+	if err := os.WriteFile(p, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range Inspect(e, nil) {
+		if s.Target.Name == "chrome" && !strings.Contains(s.Problem, "admit") {
+			t.Fatalf("pre-store host not reported: %+v", s)
 		}
 	}
 }

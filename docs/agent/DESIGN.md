@@ -330,9 +330,11 @@ Mute is tab-level (`tabs.update muted`), which covers every player on the page.
   `TestExtensionSurface` and `TestCommandParity` (JS commands = commands the Go tools send) keep
   it that way.
 - **Host manifests admit only our extension** (`allowed_extensions: [browser@jarvis.agent]`,
-  `allowed_origins: [chrome-extension://hdjdhmmlggbjjdokpofkghjnjnmjfhmk/]`). The Chromium id
-  is fixed by the manifest's public `key` (test-checked); its private key was discarded (not
-  needed for unpacked; the Web Store assigns its own id, which then joins `AllowedOrigins`).
+  `allowed_origins`: the unpacked build `chrome-extension://hdjdhmmlggbjjdokpofkghjnjnmjfhmk/` and
+  the Chrome Web Store listing `chrome-extension://abkbjmelelgelkhneobebgoilejlgbob/`). The unpacked
+  id is fixed by the manifest's public `key` (test-checked; its private key was discarded). The
+  store assigned its own id, which is fixed for the life of the listing: `ChromeDevExtensionID`,
+  `ChromeStoreExtensionID` and [store-listing.md](store-listing.md), "After the first Chrome upload".
 - **IPC rejects other local users:** a 0700 directory, a 0600 socket, and a peer-uid check on
   every accept (Linux SO_PEERCRED, macOS LOCAL_PEERCRED). Windows relies on the profile ACL of
   %LocalAppData% (no peer check). Same-user processes are trusted, as everywhere on the desktop.
@@ -361,7 +363,7 @@ Firefox copy and prints the about:debugging temporary-install steps.
 **Signing** (`scripts/browser-ext-sign.sh`): `AMO_JWT_ISSUER`/`AMO_JWT_SECRET` from the user's
 AMO account → `web-ext sign --channel=unlisted` → `internal/agent/browser/signed/jarvis-browser.xpi`
 (commit it; the binary embeds it). Bump the manifest version per signing. `scripts/browser-ext-lint.sh`
-(CI, ubuntu) runs `web-ext lint --warnings-as-errors` on the Firefox build.
+(CI, ubuntu) runs `web-ext lint --warnings-as-errors` on the Firefox build. Store listings (Chrome Web Store, AMO listed): [store-listing.md](store-listing.md).
 
 Load-unpacked caveat: after an agent update rewrites the unpacked folder, Chromium keeps
 running the old service worker until the extension is reloaded on its extensions page (seen in
@@ -713,3 +715,6 @@ checklist).
    - **What to prepare:** store text, a justification for each permission, a privacy policy
      URL (page content and tab URLs go only to the user's own Jarvis server), screenshots and
      promo images at each store's sizes from the demo household, and a Chrome upload zip.
+   - **Kit ready (2026-10-12):** listing text, privacy answers, the privacy policy, images,
+     upload zips (`scripts/browser-ext-store-zip.sh`) and the step-by-step guide, including the
+     Chrome store id and how to publish updates, are in [store-listing.md](store-listing.md).

@@ -29,7 +29,7 @@ func TestHubCallRoundTrip(t *testing.T) {
 	if got := f.received(); len(got) != 1 || got[0].Type != "command" || got[0].Args["query"] != "x" {
 		t.Fatalf("extension got %+v", got)
 	}
-	if bs := h.Browsers(); len(bs) != 1 || bs[0].Origin != "chrome-extension://"+ChromeExtensionID+"/" {
+	if bs := h.Browsers(); len(bs) != 1 || bs[0].Origin != "chrome-extension://"+ChromeDevExtensionID+"/" {
 		t.Fatalf("browsers %+v", bs)
 	}
 }

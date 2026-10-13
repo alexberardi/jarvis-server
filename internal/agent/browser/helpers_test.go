@@ -71,7 +71,7 @@ func connectExt(t *testing.T, h *Hub, path string, browser string, focused bool,
 	}
 	f := &fakeExt{c: c, handle: handle}
 	t.Cleanup(func() { _ = c.Close() })
-	f.send(Message{Type: "host", Origin: "chrome-extension://" + ChromeExtensionID + "/"})
+	f.send(Message{Type: "host", Origin: "chrome-extension://" + ChromeDevExtensionID + "/"})
 	f.send(Message{Type: "hello", Protocol: Protocol, Browser: browser, BrowserVersion: "1", ExtensionVersion: "0.1.0", Focused: focused})
 	go func() {
 		sc := bufio.NewScanner(c)

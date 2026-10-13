@@ -18,6 +18,9 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   An admin setup checklist ("install the agent" → "add the browser extension", ticks turning
   green live) and public extension listings on AMO and the Chrome Web Store (submit early: review
   takes days). Plan, decisions and open questions are in `docs/agent/DESIGN.md` §13.
+  Store submissions: follow `docs/agent/store-listing.md` (kit in `internal/agent/browser/store/`);
+  the Chrome store id (`abkbjmelelgelkhneobebgoilejlgbob`) is in `ChromeExtensionIDs`; release the
+  agent and re-run `jarvis-agent browser install` so existing hosts admit it.
 - [ ] **Admin UI usable on phones and tablets** (user 2026-10-12: "on smaller screens it's basically
   unusable"). In progress.
 - [ ] **Marketing material for the landing page:** reset the dev server to demo data

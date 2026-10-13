@@ -42,7 +42,8 @@ func TestBrowserStartsHostMode(t *testing.T) {
 	go func() { _ = hub.Serve(ctx, ln) }()
 
 	for _, argv := range [][]string{
-		{"chrome-extension://" + browser.ChromeExtensionID + "/"},
+		{"chrome-extension://" + browser.ChromeDevExtensionID + "/"},
+		{"chrome-extension://" + browser.ChromeStoreExtensionID + "/", "--parent-window=0"},
 		{filepath.Join(dir, "io.jarvis.agent.browser.json"), browser.FirefoxExtensionID},
 	} {
 		var in bytes.Buffer
