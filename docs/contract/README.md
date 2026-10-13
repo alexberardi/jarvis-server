@@ -254,7 +254,7 @@ nodes, active app clients, memberless households, or orphaned user-scoped settin
 | `GET /internal/app-ping`, `POST /internal/validate-node` | `TestAuthAppPing`, `TestAuthValidateNode` |
 | `POST /internal/nodes/register`, `POST/DELETE /internal/nodes/{id}/services[/{sid}]`, `DELETE /internal/nodes/{id}`, `POST /internal/validate-node-household` | `TestAuthInternalNodes` (the calling app is auto-granted) |
 | `POST /internal/validate-household-access` | `TestAuthInternalHouseholdAccess` (`User has member role, requires power_user or higher`; checked against the requested household, per D5) |
-| `GET /internal/users/batch` | `TestAuthInternalUsersBatch` (`{"users":{"<id>": username}}`, 400 `Maximum 100 user IDs per request`, 422 `[query, user_ids]`) |
+| `GET /internal/users/batch` | `TestAuthInternalUsersBatch` (`{"users":{"<id>": username}}`, plus jarvisd's optional `display_names` `{"<id>": name or null}`, 400 `Maximum 100 user IDs per request`, 422 `[query, user_ids]`) |
 | every `/internal/*` route | `TestAuthInternalAppAuth`: 401 `Missing app credentials` (a user JWT counts as missing), `Invalid app credentials` |
 | `GET /superuser/households`, `/superuser/users`, `/superuser/nodes` | `TestAuthSuperuserViews`, `TestAuthSuperuserAuth` |
 | `POST /superuser/users/{id}/temp-password` | `TestAuthSuperuserTempPassword`: server-generated or chosen, revokes sessions, login carries `must_change_password: true`; 422 bounds, 404 `User not found` |

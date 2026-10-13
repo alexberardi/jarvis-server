@@ -144,8 +144,10 @@ func TestAuthInternalUsersBatch(t *testing.T) {
 	username := strings.SplitN(u.Email, "@", 2)[0]
 
 	tg.Get(t, Auth, fmt.Sprintf("/internal/users/batch?user_ids=%d&user_ids=2147483000", u.ID), app.H()).
-		Expect(http.StatusOK, Obj{"users": Obj{fmt.Sprint(u.ID): Eq(username)}})
-	tg.Get(t, Auth, "/internal/users/batch?user_ids=2147483000", app.H()).Expect(http.StatusOK, Obj{"users": Obj{}})
+		Expect(http.StatusOK, Obj{"users": Obj{fmt.Sprint(u.ID): Eq(username)},
+			"display_names": Optional(Obj{fmt.Sprint(u.ID): NullOr(String)})}) // jarvisd addition; legacy omits it
+	tg.Get(t, Auth, "/internal/users/batch?user_ids=2147483000", app.H()).
+		Expect(http.StatusOK, Obj{"users": Obj{}, "display_names": Optional(Obj{})})
 	tg.Get(t, Auth, "/internal/users/batch", app.H()).
 		ExpectStatus(http.StatusUnprocessableEntity).ExpectShape(ValidationError("query", "user_ids"))
 	tg.Get(t, Auth, "/internal/users/batch?user_ids=abc", app.H()).
