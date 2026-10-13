@@ -51,6 +51,13 @@ when the match is ambiguous. "Can't tell" makes chat skip step 1. There is no se
 - **No extension detection** (installer plan Q2): the Add-ons extension row is a store link.
   "This computer's agent" still uses the server-side address match.
 
+- **Chat history (Q5): v1 as recommended.** The open conversation is kept per tab (`sessionStorage`),
+  with no server-side list. A history sidebar can come in v2 if wanted. The user expects people to
+  send commands rather than hold long conversations, so the chat page stays minimal with the
+  input front and centre.
+- **Browser voice (Q6): out of scope.** The desktop agent covers voice. Add-ons points people to it.
+- **All web-app plan questions are answered.**
+
 ## 1. jarvis-web inventory
 
 jarvis-web is a thin Next.js client on **7722**. `next.config.ts` rewrites `/api/{auth,households,invites}`
