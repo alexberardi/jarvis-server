@@ -282,7 +282,7 @@ func (m *Module) handleContinue(w http.ResponseWriter, r *http.Request, n *nodeC
 	start := m.now()
 	tr, ctx := startVoiceTrace(r.Context())
 	info := requestInfo("[continuation with tool results]", cid)
-	endCont := tr.measure("continue_conversation", "cc", nil)
+	endCont := tr.measure("continue_conversation", "cc", m.continueMeta(cid, results))
 	res, _, err := m.continueBlocking(ctx, cid, results)
 	endCont(err)
 	if errors.Is(err, errPrecondition) {
@@ -325,7 +325,7 @@ func (m *Module) handleContinueStream(w http.ResponseWriter, r *http.Request, n 
 	tr, ctx := startVoiceTrace(r.Context())
 	// Inbox actions are a real background job here, so audio isn't delayed (01 §11).
 	go m.pushActionsToInbox(context.WithoutCancel(r.Context()), n, results)
-	endPlan := tr.measure("continue_stream_dispatch", "cc", nil)
+	endPlan := tr.measure("continue_stream_dispatch", "cc", m.continueMeta(cid, results))
 	plan := m.planContinueStream(ctx, cid, results)
 	endPlan(nil)
 	if plan == nil {

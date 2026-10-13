@@ -76,8 +76,8 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 
 	maxTok := 256
 	temp := 0.7
-	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(msgs), MaxTokens: &maxTok,
-		Temperature: &temp, ReasoningBudget: m.thinkingBudget(ctx, conv.householdID)})
+	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(append(cloneMsgs(msgs), failedNote(results)...)),
+		MaxTokens: &maxTok, Temperature: &temp, ReasoningBudget: m.thinkingBudget(ctx, conv.householdID)})
 	raw := ""
 	if err != nil {
 		// Legacy raised here; the turn becomes an error (the route's error shape).
@@ -91,6 +91,89 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: content})
 	}
 	return engineResult{Stop: stopComplete, Message: content, Reasoning: reasoning}, msgs
+}
+
+// toolsFailedNote is added (transient, after the results) when every tool call of a round
+// failed. Small models have answered "Done, I've typed that" over a success:false result; this
+// says in so many words that nothing happened. A round with any success gets no note: the
+// model has something real to report and must say which part failed itself.
+const toolsFailedNote = "[TOOLS_FAILED] Every tool call just now failed (success: false), so nothing was done. " +
+	"Do not say it worked or that anything was done. Tell the user it failed, using each result's error, " +
+	"and ask what they want to do."
+
+// allToolsFailed reports whether every result is an object with success: false.
+func allToolsFailed(results []toolResult) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, r := range results {
+		o := outputObject(r.Output)
+		if o == nil {
+			return false
+		}
+		v, _ := o.Get("success")
+		if ok, isBool := v.(bool); !isBool || ok {
+			return false
+		}
+	}
+	return true
+}
+
+// failedNote is the note to append for these results, or nil.
+func failedNote(results []toolResult) []chatMsg {
+	if allToolsFailed(results) {
+		return []chatMsg{transientSys(toolsFailedNote)}
+	}
+	return nil
+}
+
+// toolResultsMeta is a trace's view of the results: per result its tool (from the call in the
+// history), success and error_code. Never the output itself: it can hold what the user
+// dictated or what was on their screen.
+func toolResultsMeta(msgs []chatMsg, results []toolResult) []any {
+	names := map[string]string{}
+	for _, m := range msgs {
+		for _, c := range m.ToolCalls {
+			names[c.ID] = c.Function.Name
+		}
+	}
+	out := make([]any, 0, len(results))
+	for _, r := range results {
+		e := map[string]any{"tool": names[r.ToolCallID]}
+		addResultMeta(e, r.Output)
+		out = append(out, e)
+	}
+	return out
+}
+
+// addResultMeta copies a result's success and error_code (when present) into a span's metadata.
+func addResultMeta(meta map[string]any, output any) {
+	o := outputObject(output)
+	if o == nil {
+		return
+	}
+	if v, ok := o.Get("success"); ok {
+		if b, isBool := v.(bool); isBool {
+			meta["success"] = b
+		}
+	}
+	if v, ok := o.Get("error_code"); ok {
+		if c, isStr := v.(string); isStr && c != "" {
+			meta["error_code"] = c
+		}
+	}
+}
+
+// continueMeta is the continue span's metadata: the results' summary, when the conversation
+// is known.
+func (m *Module) continueMeta(convID string, results []toolResult) map[string]any {
+	conv := m.convs.get(convID)
+	if conv == nil || len(results) == 0 {
+		return nil
+	}
+	conv.mu.Lock()
+	defer conv.mu.Unlock()
+	return map[string]any{"tool_results": toolResultsMeta(conv.messages, results)}
 }
 
 func resultOutputs(results []toolResult) []any {
@@ -117,6 +200,7 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	}
 	var res engineResult
 	if conv.provider.SupportsNativeTools() {
+		msgs = append(msgs, failedNote(results)...)
 		utterance := lastUserContent(msgs)
 		res, msgs = m.runEngine(ctx, engineInput{conv: conv, msgs: msgs, maxIter: 10, utterance: utterance,
 			dateKeys: conv.dateKeys, turn: m.toolTurn(conv, utterance)})
@@ -190,13 +274,13 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 		for _, tr := range results {
 			msgs = append(msgs, toolMsg(tr))
 		}
-		plan.llmMsgs = cloneMsgs(msgs)
+		plan.llmMsgs = append(cloneMsgs(msgs), failedNote(results)...)
 	} else {
 		tctx := tf.ToolResultsContext(resultOutputs(results))
 		msgs = withoutRole(msgs, "tool")
 		msgs = append(msgs, chatMsg{Role: "user", Content: tf.ContinueToolResultsMessage(tctx, tf.IsKnowledgeDelegation(tctx)),
 			images: resultImages(results)})
-		plan.llmMsgs = append(cloneMsgs(msgs), sysMsg(continueStreamOverride))
+		plan.llmMsgs = append(append(cloneMsgs(msgs), sysMsg(continueStreamOverride)), failedNote(results)...)
 	}
 	plan.commit = msgs
 	return plan

@@ -28,6 +28,19 @@ type Error struct {
 	// Candidates (CodeAmbiguous): the matching windows as "App — title", most recent first,
 	// so the model can ask the user which one they meant.
 	Candidates []string
+	// Query is what the user called the window, as given ("Omerite").
+	Query string
+	// Apps (CodeNotFound): the open apps' display names, most recent first, so the model can
+	// ask which one the user meant.
+	Apps []string
+}
+
+// Match is the window a query picked and how.
+type Match struct {
+	Index int
+	// Fuzzy: no app name matched as said and the window was taken from the one app whose
+	// name is a near spelling of the query ("omerite" for omawrite: a misheard name).
+	Fuzzy bool
 }
 
 func (e *Error) Error() string { return e.Msg }
@@ -182,33 +195,43 @@ func DisplayName(c Candidate) string {
 }
 
 // Pick chooses the window the query names: the first tier with any hit decides (app name,
-// then a generic kind like "terminal", then title words), and within it the most recently
-// focused visible window wins. A hit that isn't visible is window_not_visible; no hit at all is
-// window_not_found naming a few visible apps. It never falls back to another window.
+// then a generic kind like "terminal", then title words, then a near spelling of one app's
+// name), and within it the most recently focused visible window wins. A hit that isn't
+// visible is window_not_visible; no hit at all is window_not_found naming a few visible apps.
+// It never falls back to another window.
 func Pick(cands []Candidate, query string) (int, error) {
+	m, err := PickMatch(cands, query)
+	return m.Index, err
+}
+
+// PickMatch is Pick, saying whether the match was a fuzzy one.
+func PickMatch(cands []Candidate, query string) (Match, error) {
 	q := Normalize(query)
 	order := byRecency(cands)
 	if q != "" {
-		for _, match := range tiers(q) {
+		for t, match := range tiers(cands, q) {
+			if match == nil {
+				return Match{Index: -1}, fuzzyAmbiguous(cands, order, query)
+			}
 			first := -1
 			for _, i := range order {
-				if !match(cands[i]) {
+				if !match(i) {
 					continue
 				}
 				if cands[i].Visible {
-					return i, nil
+					return Match{Index: i, Fuzzy: t == fuzzyTier}, nil
 				}
 				if first < 0 {
 					first = i
 				}
 			}
 			if first >= 0 {
-				return -1, &Error{Code: CodeNotVisible,
+				return Match{Index: -1}, &Error{Code: CodeNotVisible, Query: query,
 					Msg: DisplayName(cands[first]) + " is open but not visible — bring it to the front and ask again"}
 			}
 		}
 	}
-	return -1, notFound(cands, order, query)
+	return Match{Index: -1}, notFound(cands, order, query, true)
 }
 
 // byRecency is the candidates' indexes, most recently focused first.
@@ -221,29 +244,61 @@ func byRecency(cands []Candidate) []int {
 	return order
 }
 
-func tiers(q string) []func(c Candidate) bool {
-	return []func(c Candidate) bool{
-		func(c Candidate) bool { return appMatches(c.Apps, q) },
-		func(c Candidate) bool { return aliasMatches(c.Apps, q) },
-		func(c Candidate) bool { return titleMatches(c.Title, q) },
+// fuzzyTier is the index of the near-spelling tier in tiers.
+const fuzzyTier = 3
+
+// tiers are the ways a query can name a window, strongest first. The fuzzy tier is nil when
+// near spellings of several different apps are within reach: that is ambiguous, never a
+// guess.
+func tiers(cands []Candidate, q string) []func(i int) bool {
+	ts := []func(i int) bool{
+		func(i int) bool { return appMatches(cands[i].Apps, q) },
+		func(i int) bool { return aliasMatches(cands[i].Apps, q) },
+		func(i int) bool { return titleMatches(cands[i].Title, q) },
 	}
+	hits, apps := fuzzyHits(cands, q)
+	if apps > 1 {
+		return append(ts, nil)
+	}
+	return append(ts, func(i int) bool { return hits[i] })
 }
 
-// notFound is window_not_found naming up to 5 visible apps.
-func notFound(cands []Candidate, order []int, query string) error {
+// notFound is window_not_found naming up to 5 apps: the visible ones (onlyVisible: what a
+// capture could show), or every open one (acting on a window brings it forward).
+func notFound(cands []Candidate, order []int, query string, onlyVisible bool) error {
 	var names []string
 	seen := map[string]bool{}
 	for _, i := range order {
-		if n := DisplayName(cands[i]); cands[i].Visible && !seen[n] && len(names) < 5 {
+		if n := DisplayName(cands[i]); (cands[i].Visible || !onlyVisible) && !seen[n] && len(names) < 5 {
 			seen[n] = true
 			names = append(names, n)
 		}
 	}
 	msg := fmt.Sprintf("no open window matches %q", query)
 	if len(names) > 0 {
-		msg += "; visible windows: " + strings.Join(names, ", ")
+		if onlyVisible {
+			msg += "; visible windows: " + strings.Join(names, ", ")
+		} else {
+			msg += "; open apps: " + strings.Join(names, ", ")
+		}
 	}
-	return &Error{Code: CodeNotFound, Msg: msg}
+	return &Error{Code: CodeNotFound, Msg: msg, Query: query, Apps: names}
+}
+
+// fuzzyAmbiguous: near spellings of several apps, so asking beats guessing.
+func fuzzyAmbiguous(cands []Candidate, order []int, query string) error {
+	hits, _ := fuzzyHits(cands, Normalize(query))
+	var names []string
+	seen := map[string]bool{}
+	for _, i := range order {
+		if n := DisplayName(cands[i]); hits[i] && !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	return &Error{Code: CodeAmbiguous, Query: query, Candidates: names,
+		Msg: fmt.Sprintf("no app is called %q, and it sounds like several (%s); ask the user which one they mean",
+			query, strings.Join(names, ", "))}
 }
 
 // PickUnique is Pick for acting on a window (typing into it), where a wrong guess is costly: the
@@ -252,34 +307,44 @@ func notFound(cands []Candidate, order []int, query string) error {
 // has focus now wins (focused is its index, -1 for none), else the only visible one; otherwise
 // it is CodeAmbiguous with the candidates, never a guess.
 func PickUnique(cands []Candidate, query string, focused int) (int, error) {
+	m, err := PickUniqueMatch(cands, query, focused)
+	return m.Index, err
+}
+
+// PickUniqueMatch is PickUnique, saying whether the match was a fuzzy one.
+func PickUniqueMatch(cands []Candidate, query string, focused int) (Match, error) {
 	q := Normalize(query)
 	order := byRecency(cands)
 	if q != "" {
-		for _, match := range tiers(q) {
+		for t, match := range tiers(cands, q) {
+			if match == nil {
+				return Match{Index: -1}, fuzzyAmbiguous(cands, order, query)
+			}
 			var hits []int
 			for _, i := range order {
-				if match(cands[i]) {
+				if match(i) {
 					hits = append(hits, i)
 				}
 			}
 			if len(hits) == 0 {
 				continue
 			}
+			fuzzy := t == fuzzyTier
 			if len(hits) == 1 {
-				return hits[0], nil
+				return Match{Index: hits[0], Fuzzy: fuzzy}, nil
 			}
 			visible := -1
 			nVisible := 0
 			for _, i := range hits {
 				if i == focused {
-					return i, nil
+					return Match{Index: i, Fuzzy: fuzzy}, nil
 				}
 				if cands[i].Visible {
 					visible, nVisible = i, nVisible+1
 				}
 			}
 			if nVisible == 1 {
-				return visible, nil
+				return Match{Index: visible, Fuzzy: fuzzy}, nil
 			}
 			var names []string
 			for _, i := range hits {
@@ -295,9 +360,9 @@ func PickUnique(cands []Candidate, query string, focused int) (int, error) {
 				}
 				names = append(names, n)
 			}
-			return -1, &Error{Code: CodeAmbiguous, Candidates: names,
+			return Match{Index: -1}, &Error{Code: CodeAmbiguous, Candidates: names, Query: query,
 				Msg: fmt.Sprintf("%d windows match %q; ask the user which one they mean (use words from its title)", len(hits), query)}
 		}
 	}
-	return -1, notFound(cands, order, query)
+	return Match{Index: -1}, notFound(cands, order, query, false)
 }

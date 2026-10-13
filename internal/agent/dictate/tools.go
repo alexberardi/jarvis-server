@@ -25,8 +25,11 @@ const (
 	focusPoll  = 50 * time.Millisecond
 )
 
-// ShowFor is how long the island shows what was typed.
-const ShowFor = 2500 * time.Millisecond
+// ShowFor is how long the island shows what was typed; ShowFailFor, why nothing was.
+const (
+	ShowFor     = 2500 * time.Millisecond
+	ShowFailFor = 5 * time.Second
+)
 
 // Tools is dictation: desktop_type_text and desktop_press_key (offered while typing works),
 // and desktop_confirm (offered while confirmation is on; the browser's fill and click use the
@@ -146,13 +149,24 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 		return nil, false
 	}
 	if err != nil {
-		o := node.Fail("%v", err)
-		o["error_code"] = Code(err)
+		// A failure is spelled out for the model (small models have told the user "done"
+		// over a bare error), shown on the island whatever the model says, and logged by code.
+		code := Code(err)
+		o := node.Fail("%s", FailureText(name, err))
+		o["error_code"] = code
 		var we *winmatch.Error
-		if errors.As(err, &we) && len(we.Candidates) > 0 {
-			o["candidates"] = we.Candidates
+		if errors.As(err, &we) {
+			if len(we.Candidates) > 0 {
+				o["candidates"] = we.Candidates
+			}
+			if len(we.Apps) > 0 {
+				o["open_apps"] = we.Apps
+			}
 		}
-		t.log().Info("dictation", "tool", name, "error_code", o["error_code"])
+		if t.Show != nil {
+			t.Show(FailureNote(name, err), ShowFailFor)
+		}
+		t.log().Info("dictation failed", "tool", name, "error_code", code)
 		return o, true
 	}
 	if _, ok := out["success"]; !ok {
@@ -168,7 +182,10 @@ func (t *Tools) log() *slog.Logger {
 	return t.Log
 }
 
-var errFocus = errors.New("focus not confirmed")
+var (
+	errFocus  = errors.New("focus not confirmed")
+	errSubmit = errors.New("enter not pressed")
+)
 
 // Code maps an error to the output's error_code.
 func Code(err error) string {
@@ -185,6 +202,8 @@ func Code(err error) string {
 		return "not_supported"
 	case errors.Is(err, errFocus):
 		return "focus_failed"
+	case errors.Is(err, errSubmit):
+		return "submit_failed"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	}
@@ -209,8 +228,11 @@ func BoolArg(args map[string]any, k string) bool {
 
 // target is the app the user named, resolved before anything is asked or typed.
 type target struct {
-	id   string
-	name string // the app's display name, for the island and the result
+	id    string
+	name  string // the app's display name, for the island and the result
+	app   string // the app's own name ("omawrite"), for the result
+	fuzzy bool   // picked by a near spelling of what the user said (a misheard name)
+	asked string // what the user called it
 }
 
 // resolve finds the one window the user named. No name: the window in front (nothing to do).
@@ -237,11 +259,19 @@ func (t *Tools) resolve(ctx context.Context, app string) (*target, error) {
 			focused = i
 		}
 	}
-	i, err := winmatch.PickUnique(cands, app, focused)
+	m, err := winmatch.PickUniqueMatch(cands, app, focused)
 	if err != nil {
 		return nil, err
 	}
-	return &target{id: ws[i].ID, name: winmatch.DisplayName(cands[i])}, nil
+	c := cands[m.Index]
+	tg := &target{id: ws[m.Index].ID, name: winmatch.DisplayName(c), app: c.App(), fuzzy: m.Fuzzy, asked: strings.TrimSpace(app)}
+	if i := strings.LastIndex(tg.app, "."); i >= 0 && i < len(tg.app)-1 {
+		tg.app = tg.app[i+1:]
+	}
+	if m.Fuzzy {
+		t.log().Info("dictation: near spelling", "app", tg.app)
+	}
+	return tg, nil
 }
 
 // focus brings the target to the front and waits until it really is: typing into whatever
@@ -254,7 +284,7 @@ func (t *Tools) focus(ctx context.Context, tg *target) error {
 		return nil
 	}
 	if err := t.Win.Focus(ctx, tg.id); err != nil {
-		return fmt.Errorf("%w: couldn't bring %s to the front (%v); nothing was typed", errFocus, tg.name, err)
+		return fmt.Errorf("%w: couldn't bring %s to the front (%v)", errFocus, tg.name, err)
 	}
 	sleep := t.Sleep
 	if sleep == nil {
@@ -275,7 +305,7 @@ func (t *Tools) focus(ctx context.Context, tg *target) error {
 			return err
 		}
 	}
-	return fmt.Errorf("%w: asked %s to come to the front, but it didn't get the keyboard focus; nothing was typed", errFocus, tg.name)
+	return fmt.Errorf("%w: asked %s to come to the front, but it didn't get the keyboard focus", errFocus, tg.name)
 }
 
 func (t *Tools) show(text string) {
@@ -324,9 +354,10 @@ func (t *Tools) typeText(ctx context.Context, args map[string]any) (map[string]a
 			return nil, err
 		}
 		out := map[string]any{"typed_chars": len([]rune(text)), "into": where, "submitted": false}
+		tg.report(out)
 		if submit {
 			if err := t.KB.Press(ctx, KeyEnter); err != nil {
-				return nil, fmt.Errorf("typed the text but couldn't press Enter: %w", err)
+				return nil, fmt.Errorf("%w: %v", errSubmit, err)
 			}
 			out["submitted"] = true
 		}
@@ -377,7 +408,9 @@ func (t *Tools) pressKey(ctx context.Context, args map[string]any) (map[string]a
 			return nil, err
 		}
 		t.log().Info("dictation", "tool", ToolPress, "into", where, "key", string(k), "backend", t.KB.Name())
-		return map[string]any{"pressed": string(k), "into": where}, nil
+		out := map[string]any{"pressed": string(k), "into": where}
+		tg.report(out)
+		return out, nil
 	}
 	// A key press answers a dialog: it is the user's answer, so only "all" asks again.
 	if t.Confirm.Needs(GateType) {

@@ -97,7 +97,8 @@ internal/agent/
   screen/             read the screen: desktop_read_screen, grim/hyprctl/swaymsg (linux.go),
                       screencapture + the purego front-window lookup (mac.go, frontwin_darwin.go)
   winmatch/           naming a window ("firefox", "the terminal", title words): Pick (screen),
-                      PickUnique (dictation: one match or ambiguous_window)
+                      PickUnique (dictation: one match or ambiguous_window); last tier fuzzy.go
+                      (a misheard name: exactly one app within Damerau-Levenshtein ≤ 2 / 30 %)
   dictate/            dictation (DESIGN.md §14): desktop_type_text, desktop_press_key and
                       desktop_confirm (tools.go, confirm.go); keyboards: the built-in Wayland
                       virtual keyboard, X11 XTEST and the RemoteDesktop portal, else
@@ -290,8 +291,11 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
 
 27. **Dictation never types into a window it couldn't confirm has focus** (DESIGN.md §14). A
     named app is resolved by `winmatch.PickUnique` (one match, or the focused/only visible one,
-    else `ambiguous_window`), focused, then the active window is polled until it is that window;
-    otherwise `focus_failed` and nothing is typed. Text: `dictate.Sanitize` (≤ 2000 characters,
+    else `ambiguous_window`; a near spelling only when exactly one app is near), focused, then
+    the active window is polled until it is that window; otherwise `focus_failed` and nothing is
+    typed. A failure's `error` says "Nothing was typed: …" and what to tell the user
+    (`dictate.FailureText`), and the island shows it (`FailureNote`): small models have
+    claimed success over a bare error. Text: `dictate.Sanitize` (≤ 2000 characters,
     line breaks → spaces, control/format characters dropped), on stdin never argv, never in a
     log (`node.RedactedArgs`) or a result. Enter only as the `submit` step; keys from the closed
     `dictate.Keys` set. A confirmation (`--confirm-dictation`) is single use, replaced by a newer

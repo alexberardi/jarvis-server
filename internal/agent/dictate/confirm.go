@@ -124,7 +124,7 @@ func (c *Confirmer) Answer(ctx context.Context, id, answer string) (map[string]a
 	p := c.pending
 	if p == nil || p.id != strings.TrimSpace(id) {
 		c.mu.Unlock()
-		return nil, fmt.Errorf("%w: no question %q is waiting (it was answered, replaced or never asked); nothing was done", errBadArgs, id)
+		return nil, fmt.Errorf("%w: no question %q is waiting (it was answered, replaced or never asked)", errBadArgs, id)
 	}
 	c.pending = nil // single use, whatever the answer
 	expired := c.now().After(p.deadline)
