@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Info.plist of "Jarvis Agent.app", the macOS packaging of jarvis-agent.
+  Info.plist of "Jarvis Automation Agent.app", the macOS packaging of jarvis-agent.
 
   A bundle, not a bare binary: macOS 26 won't list a bare binary added with "+" under
   Privacy & Security → Accessibility, and TCC grants follow the bundle's signed identity
@@ -12,11 +12,12 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>io.jarvis.agent</string>
+    <string>net.jarvisautomation.agent</string>
     <key>CFBundleName</key>
+    <!-- Apple asks for at most 15 characters here; the display name below is the full one. -->
     <string>Jarvis Agent</string>
     <key>CFBundleDisplayName</key>
-    <string>Jarvis Agent</string>
+    <string>Jarvis Automation Agent</string>
     <key>CFBundleExecutable</key>
     <string>jarvis-agent</string>
     <key>CFBundlePackageType</key>
@@ -30,8 +31,8 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Jarvis Agent asks System Events to list, focus, minimise and close windows when you ask Jarvis to.</string>
+    <string>Jarvis Automation Agent asks System Events to list, focus, minimise and close windows when you ask Jarvis to.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Jarvis Agent listens for "hey Jarvis" on this Mac and records what you say next, when voice is turned on.</string>
+    <string>Jarvis Automation Agent listens for "hey Jarvis" on this Mac and records what you say next, when voice is turned on.</string>
 </dict>
 </plist>

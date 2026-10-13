@@ -16,10 +16,14 @@ import (
 // `revoke` forgets it, `status` says where things stand. Nothing else ever asks for it.
 func dictationCmd(ctx context.Context, args []string) error {
 	rd := &portal.RemoteDesktop{}
+	if runtime.GOOS == "linux" {
+		// A grant made under the old app id can't be restored: forget it, so status says so.
+		_, _ = portal.MigrateLegacy(os.Getenv, nil)
+	}
 	return dictationRun(ctx, args, rd, os.Stdout, runtime.GOOS, desktopFile{})
 }
 
-// desktopFile is the io.jarvis.agent.desktop file the portal needs to know the agent by its app
+// desktopFile is the net.jarvisautomation.agent.desktop file the portal needs to know the agent by its app
 // id (portal.AppID), whoever started it.
 type desktopFile struct{}
 
@@ -88,7 +92,7 @@ func dictationRun(ctx context.Context, args []string, rd dictationPortal, w io.W
 		if err := app.Write(); err != nil {
 			fmt.Fprintln(w, "note: couldn't write the agent's .desktop file, so the permission may be tied to this terminal:", err)
 		}
-		fmt.Fprint(w, "Your desktop will now ask whether Jarvis Agent may control the keyboard.\n"+
+		fmt.Fprint(w, "Your desktop will now ask whether Jarvis Automation Agent may control the keyboard.\n"+
 			"Allow it (the button may say Share or Allow), and if the dialog offers to remember the\n"+
 			"choice, leave that on. It asks only this once.\n")
 		if err := rd.Allow(ctx); err != nil {

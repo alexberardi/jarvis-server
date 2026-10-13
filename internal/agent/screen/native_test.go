@@ -8,7 +8,7 @@ import (
 )
 
 // TestNativeCapture drives this desktop's real capture (it takes a screenshot; nothing is
-// saved). Opt-in: JARVIS_SCREEN_NATIVE=1. On macOS the capture only works as Jarvis Agent.app
+// saved). Opt-in: JARVIS_SCREEN_NATIVE=1. On macOS the capture only works as Jarvis Automation Agent.app
 // with the Screen Recording grant; the front-window lookup works from any process.
 func TestNativeCapture(t *testing.T) {
 	if os.Getenv("JARVIS_SCREEN_NATIVE") == "" {

@@ -32,7 +32,7 @@ func (m *MacKeyboard) Available(context.Context) (bool, string) {
 		return false, "typing isn't supported in this build"
 	}
 	if m.Trusted == nil || !m.Trusted() {
-		return false, "typing needs Accessibility for Jarvis Agent: turn it on in System Settings > Privacy & Security > Accessibility"
+		return false, "typing needs Accessibility for Jarvis Automation Agent: turn it on in System Settings > Privacy & Security > Accessibility"
 	}
 	return true, ""
 }

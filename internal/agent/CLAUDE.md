@@ -107,7 +107,7 @@ internal/agent/
                       backend + an active-window check (hostwin.go)
   portal/             typing on GNOME/KDE Wayland through xdg-desktop-portal RemoteDesktop over
                       D-Bus (godbus): one session per call, restore token 0600 (TokenStore),
-                      every connection registered as io.jarvis.agent (needs the .desktop file
+                      every connection registered as net.jarvisautomation.agent (needs the .desktop file
                       `dictation allow` writes);
                       `jarvis-agent dictation allow|revoke|status` (cmd/jarvis-agent/dictation.go)
   vkbd/               the Wayland virtual keyboard (zwp_virtual_keyboard_manager_v1), pure Go:
@@ -136,6 +136,7 @@ internal/agent/
                       Python-node endpointing (endpoint.go), the CC voice client (client.go),
                       wake-model fetch (models.go), Serve (reopen on failure)
 internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
+  appid/              the app identifier (bundle id, launchd label, portal app id, task name)
   deploy/             systemd user unit, LaunchAgent, Scheduled Task, macOS Info.plist (+ guard tests)
 scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, run / install
 ```
@@ -198,7 +199,7 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     that can open things.
 13. **Wayland has no window control** (no cross-client API). XWayland's `DISPLAY` does not
     count. Per-compositor backends are an open question.
-14. **macOS window control needs Accessibility for "Jarvis Agent.app"** (`io.jarvis.agent`) plus
+14. **macOS window control needs Accessibility for "Jarvis Automation Agent.app"** (`net.jarvisautomation.agent`, `internal/agent/appid`; was `io.jarvis.agent`) plus
     an Automation grant for System Events. A bare binary added with "+" never shows in the list
     on macOS 26, so the agent ships as a bundle and calls `AXIsProcessTrustedWithOptions`
     (prompt) at startup, which makes macOS add the entry. Grants key on the signed identity:
