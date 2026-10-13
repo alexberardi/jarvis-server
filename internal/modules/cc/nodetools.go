@@ -82,6 +82,9 @@ func (m *Module) requestNodeTools(ctx context.Context, nodeID string) (map[strin
 // errNodeNeverSeen: the node was registered but has never connected.
 var errNodeNeverSeen = errors.New("cc: the node has never connected")
 
+// errNodeNotConnected: the node has no MQTT connection, so report_tools can't be answered.
+var errNodeNotConnected = errors.New("cc: the node is not connected to MQTT")
+
 // reportTools is the one report_tools round trip every caller shares (node tools view, mobile
 // chat warmup, errand menus, signal reactions): publish with reply_request_id = the command's
 // request id (no `trusted`, D4) and wait up to timeout for the node's POST to
@@ -90,9 +93,13 @@ func (m *Module) reportTools(ctx context.Context, nodeID string, timeout time.Du
 	if m.bus == nil || !m.bus.Available() {
 		return nil, ErrNoBroker
 	}
-	// Registered but never connected: nothing will answer, so don't wait (A10 F19).
+	// Registered but never connected: nothing will answer, so don't wait (A10 F19). Likewise
+	// a node with no MQTT connection now, however recently it spoke HTTP.
 	if row, err := m.nodeByID(ctx, nodeID); err == nil && !row.contacted {
 		return nil, errNodeNeverSeen
+	}
+	if up, known := m.bus.NodeSession(nodeID); known && !up {
+		return nil, errNodeNotConnected
 	}
 	rid := uuid4()
 	m.bus.Expect(rid, nodeID)

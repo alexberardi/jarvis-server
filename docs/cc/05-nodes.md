@@ -315,6 +315,8 @@ The command-data and context verbs use real MQTT request/response instead (`core
 
 Liveness writes never raise.
 
+**Go: reachability is the MQTT connection (2026-10-12).** `last_seen` still drives `online` in the node APIs, but every gate before a round trip to the node (report_tools at chat warmup and for errand menus, chat tool calls, callbacks, media, routine targets, errand steps) asks the embedded broker whether `jarvis-node-{id}` holds a live connection (`Broker.NodeConnected`; a persistent session whose connection dropped does not count). `last_seen` alone was wrong: any authenticated HTTP request refreshes it (the dev seeder's key check did), so a node with no MQTT session counted as online for 15 minutes and every new chat waited out a 10 s report_tools nothing would answer. A publisher that can't tell (tests) falls back to `contacted && online`.
+
 ### 3.8 Heartbeat and updates
 
 The heartbeat (`admin.py:296-342`) sends `{version_info:{version,install_mode,git_sha}, is_busy, protocols[], needs_k2, thread_status?, memory?}`. Unknown fields are ignored. All fields are optional; `protocols` is stored as JSON text. The handler then:

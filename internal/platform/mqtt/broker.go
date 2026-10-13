@@ -197,6 +197,17 @@ func (b *Broker) closed() bool {
 	}
 }
 
+// NodeConnected reports whether node nodeID holds a live MQTT connection right now. A
+// persistent session whose connection dropped does not count: messages queue for it, but
+// nothing answers a request until it reconnects.
+func (b *Broker) NodeConnected(nodeID string) bool {
+	if b.closed() {
+		return false
+	}
+	cl, ok := b.srv.Clients.Get(NodeClientIDPrefix + nodeID)
+	return ok && !cl.Closed()
+}
+
 // Publish delivers a message from the in-process server client, bypassing ACLs. CC
 // publishes with qos 1, retain false (doc 05 §2.4).
 func (b *Broker) Publish(topic string, payload []byte, qos byte, retain bool) error {

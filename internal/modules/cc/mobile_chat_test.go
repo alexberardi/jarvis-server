@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -650,5 +651,65 @@ func TestChatTraceSummaryLeafHops(t *testing.T) {
 	}
 	if n, _ := tr.summary().Get("span_count"); n != 6 {
 		t.Fatalf("span_count %v", n)
+	}
+}
+
+// sessionPub is a chatNodePub behind a broker that knows whether the node is connected.
+type sessionPub struct {
+	*chatNodePub
+	up atomic.Bool
+}
+
+func (p *sessionPub) NodeConnected(string) bool { return p.up.Load() }
+
+// The demo dry run: the seeder's key check authenticated each node over HTTP, which stamps
+// last_seen and contacted, so for 15 minutes every new chat waited out a 10 s report_tools
+// that no MQTT session would ever answer. Reachability is the MQTT connection.
+func TestMobileChatWarmupNeedsMQTTSession(t *testing.T) {
+	pub := &sessionPub{chatNodePub: &chatNodePub{}} // tools "": a fetch would wait the full 10 s
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.Publisher = pub; pub.m = m })
+	ce := &chatEnv{voiceEnv: ve, pub: pub.chatNodePub}
+	ce.setOnline(true) // heard from over HTTP just now
+	warm := func() map[string]any {
+		return ce.do("POST", "/api/v0/mobile/chat/warmup", map[string]any{"node_id": ce.node.id, "household_id": voiceHH,
+			"client_tools": json.RawMessage(weatherTool)}, bearer("tok-7")).want(200).json()
+	}
+	if r := warm(); r["tools_loaded"] != 1.0 || len(pub.commands("report_tools")) != 0 {
+		t.Fatalf("no session: warmup %v, report_tools sent %d times", r, len(pub.commands("report_tools")))
+	}
+	// A tool call fails fast too.
+	ce.eng.say(`<tool_call>{"name": "get_weather", "arguments": {}}</tool_call>`)
+	ce.eng.say("Your kitchen node is offline right now.")
+	cid := warm()["conversation_id"]
+	frames := normalize(ce.chat("tok-7", map[string]any{"message": "weather", "conversation_id": cid}))
+	if frames[1] != `{"type": "status", "message": "Node is offline"}` || len(pub.commands("tool_call")) != 0 {
+		t.Fatalf("frames %v", frames)
+	}
+
+	// Connected: the node's own report wins.
+	pub.up.Store(true)
+	pub.mu.Lock()
+	pub.tools = `{"client_tools": ` + weatherTool + `, "available_commands": [], "installed_packages": []}`
+	pub.mu.Unlock()
+	if r := warm(); r["tools_loaded"] != 1.0 || len(pub.commands("report_tools")) != 1 {
+		t.Fatalf("session: warmup %v, report_tools sent %d times", r, len(pub.commands("report_tools")))
+	}
+}
+
+func TestReportToolsNeedsMQTTSession(t *testing.T) {
+	pub := &sessionPub{chatNodePub: &chatNodePub{}}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.Publisher = pub; pub.m = m })
+	ce := &chatEnv{voiceEnv: ve, pub: pub.chatNodePub}
+	ce.setOnline(true)
+	if _, err := ve.m.reportTools(context.Background(), ce.node.id, time.Hour); !errors.Is(err, errNodeNotConnected) {
+		t.Fatalf("err = %v", err)
+	}
+	// The errand runner's node calls fail fast as well.
+	if out := (errandNodes{ve.m}).RunTool(context.Background(), ce.node.id, "x", nil, nil, "", time.Hour); pyjson.Dumps(out, false) !=
+		`{"success": false, "error": "the node is offline"}` {
+		t.Fatal(pyjson.Dumps(out, false))
+	}
+	if len(pub.commands("report_tools"))+len(pub.commands("tool_call")) != 0 {
+		t.Fatal("published to a node with no session")
 	}
 }

@@ -195,7 +195,7 @@ func (m *Module) chatWarmup(ctx context.Context, u authn.User, row *nodeRow, req
 		nc.Set("agents", agents)
 	}
 	clientTools, commands := req.ClientTools, req.Commands
-	if row.reachable(m.now()) {
+	if m.nodeReachable(row) {
 		if ct, ac, ok := m.fetchNodeTools(ctx, row.nodeID); ok {
 			clientTools, commands = ct, ac
 		}
@@ -548,7 +548,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 	calls []parse.ToolCall, images map[string]imageArgs, st *chatState) []toolResult {
 	online := false
 	if row, err := m.nodeByID(ctx, nodeID); err == nil {
-		online = row.reachable(m.now())
+		online = m.nodeReachable(row)
 	}
 	if online {
 		sse.send(servertools.Obj("type", "status", "message", "Running command on node..."))
