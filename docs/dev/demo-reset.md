@@ -86,6 +86,10 @@ as they are.
 Only demo data goes in marketing material: no real names, emails, Wi-Fi names, notifications or
 window titles in a shot.
 
+For the admin-UI screenshots, use [`scripts/marketing/capture-admin.mjs`](../../scripts/marketing/README.md).
+It signs in as Jordan, captures each page at desktop and phone sizes in both themes, masks the host
+name, uptime and disk numbers, and can't change the server.
+
 ## Troubleshooting
 
 | Symptom | Cause |
