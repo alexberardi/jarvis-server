@@ -27,6 +27,10 @@ Type=simple
 ExecStart=__AGENT_BIN__ run
 Restart=on-failure
 RestartSec=5
+# 78: not set up yet (no enrollment). Nothing to restart for until someone sets it up, and
+# that ends with `jarvis-agent start`.
+RestartPreventExitStatus=78
+SuccessExitStatus=78
 
 [Install]
 # A user unit: multi-user.target would never be reached in the user manager.

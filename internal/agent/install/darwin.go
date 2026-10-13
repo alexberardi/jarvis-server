@@ -118,6 +118,7 @@ func darwinUninstall(e Env, o UninstallOptions) []Op {
 		ops = append(ops, Op{Kind: LoginItemGone, Activate: true, IgnoreErr: true, Path: p.bundle, Name: BundlePlistName})
 	}
 	ops = append(ops, []Op{
+		{Kind: StopAgent, Activate: true, IgnoreErr: true, Name: "control"},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Args: []string{"launchctl", "bootout", p.domain + "/" + appid.ID}},
 		{Kind: Remove, Path: p.plist},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Path: p.oldPlist, Args: []string{"launchctl", "bootout", p.domain + "/" + appid.LegacyID}},

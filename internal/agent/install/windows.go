@@ -65,6 +65,7 @@ func windowsPlan(e Env, o Options) []Op {
 func windowsUninstall(e Env, o UninstallOptions) []Op {
 	p := e.windows()
 	ops := []Op{
+		{Kind: StopAgent, Activate: true, IgnoreErr: true, Name: "control"},
 		{Kind: RegDeleteValue, Key: RunKey, Name: displayName},
 		{Kind: RegDeleteTree, Key: URLKey},
 		{Kind: ShortcutRemove, Key: FolderPrograms, Name: displayName},

@@ -139,6 +139,8 @@ internal/agent/
                       Python-node endpointing (endpoint.go), the CC voice client (client.go),
                       wake-model fetch (models.go), Serve (reopen on failure)
 internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
+  control/            the running agent's control socket: single-instance lock, show-running (the
+                      "Jarvis is running" pill), ping, quit
   install/            `jarvis-agent install|uninstall|start`: Plan (steps as data, golden per OS) +
                       Apply (files, HKCU, SMAppService, commands; fakes in tests)
   appid/              the app identifier (bundle id, launchd label, portal app id, task name)

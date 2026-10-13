@@ -26,8 +26,13 @@ write path="~/Library/LaunchAgents/net.jarvisautomation.agent.plist" mode=0644
   | 
   |     <key>RunAtLoad</key>
   |     <true/>
+  |     <!-- Restart after a crash or a failure, not after a clean exit: a second copy that found
+  |          one running, or an agent that isn't set up yet, exits 0 and stays down. -->
   |     <key>KeepAlive</key>
-  |     <true/>
+  |     <dict>
+  |         <key>SuccessfulExit</key>
+  |         <false/>
+  |     </dict>
   | 
   |     <key>StandardOutPath</key>
   |     <string>~/Library/Logs/jarvis-agent.log</string>

@@ -31,6 +31,10 @@ write path="~/.config/systemd/user/jarvis-agent.service" mode=0644
   | ExecStart=~/.local/lib/jarvis-agent/jarvis-agent run
   | Restart=on-failure
   | RestartSec=5
+  | # 78: not set up yet (no enrollment). Nothing to restart for until someone sets it up, and
+  | # that ends with `jarvis-agent start`.
+  | RestartPreventExitStatus=78
+  | SuccessExitStatus=78
   | 
   | [Install]
   | # A user unit: multi-user.target would never be reached in the user manager.

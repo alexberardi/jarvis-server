@@ -69,6 +69,10 @@ func TestSystemdIsAUserUnit(t *testing.T) {
 	if u["Service"]["Restart"] != "on-failure" {
 		t.Fatalf("Restart = %q", u["Service"]["Restart"])
 	}
+	// run exits 78 when the computer isn't set up: no restart loop for it.
+	if u["Service"]["RestartPreventExitStatus"] != "78" {
+		t.Fatalf("RestartPreventExitStatus = %q", u["Service"]["RestartPreventExitStatus"])
+	}
 	if u["Service"]["ExecStart"] != "__AGENT_BIN__ run" {
 		t.Fatalf("ExecStart = %q", u["Service"]["ExecStart"])
 	}
@@ -120,7 +124,7 @@ func plistDict(t *testing.T, text string) map[string]string {
 
 func TestLaunchAgentRunsInTheGUISession(t *testing.T) {
 	p := plistDict(t, read(t, plistPath))
-	if p["RunAtLoad"] != "true:" || p["KeepAlive"] != "true:" {
+	if p["RunAtLoad"] != "true:" || p["KeepAlive"] != keepAlive {
 		t.Fatalf("RunAtLoad/KeepAlive = %q/%q", p["RunAtLoad"], p["KeepAlive"])
 	}
 	if p["ProcessType"] != "string:Interactive" {
@@ -136,6 +140,9 @@ func TestLaunchAgentRunsInTheGUISession(t *testing.T) {
 		}
 	}
 }
+
+// keepAlive restarts after a failure only (a clean exit: a second copy, or not set up yet).
+const keepAlive = "dict:<key>SuccessfulExit</key> <false/>"
 
 // --- Windows Scheduled Task ---
 
@@ -285,6 +292,7 @@ func TestBundleLaunchAgent(t *testing.T) {
 		"BundleProgram":               "string:Contents/MacOS/jarvis-agent",
 		"ProgramArguments":            "array:<string>Contents/MacOS/jarvis-agent</string> <string>run</string>",
 		"RunAtLoad":                   "true:",
+		"KeepAlive":                   keepAlive,
 		"ProcessType":                 "string:Interactive",
 		"AssociatedBundleIdentifiers": "string:" + appid.ID,
 	} {

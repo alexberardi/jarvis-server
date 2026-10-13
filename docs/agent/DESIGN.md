@@ -832,6 +832,38 @@ anything happens, so a page can do nothing through the link but start the agent.
 Windows. **Known gaps:** no icon yet; a Windows console window flashes when the Run key or a
 shortcut starts the (console) binary; on macOS the in-bundle LaunchAgent has no log file.
 
+**The start-only shortcut (installers plan item 1.9, 2026-10-13).** Every way of opening the
+agent (the menu entry, the shortcuts, opening the macOS app with no command, the login autostart
+entry and `jarvis-agent://start`) runs `jarvis-agent start`:
+
+1. **Already running:** it tells the running agent `show-running` over its control socket and
+   exits; the agent flashes the island's "Jarvis is running" pill (2.5 s, `island.RunningNote`,
+   golden `running.png`). At login (`--login`) it only pings: no pill.
+2. **A packaged copy's first launch** (the `.deb`'s `/usr/lib/jarvis-agent`, the macOS app): if
+   this user isn't installed yet, it runs `install` first (Q5).
+3. **Not set up** (no enrollment): the first-run page. **TODO (item 1.5):** that page doesn't
+   exist yet; the hook (`firstRun`) says how to enroll from a terminal.
+4. Otherwise it starts the agent the way the login item would (systemd when
+   `graphical-session.target` is up, launchd, else a detached `run`) and waits for it to answer,
+   then shows the pill.
+
+**The control socket** (`internal/agent/control`) is `control.sock` next to the browser socket
+(same user-only directory, 0600, peer uid checked): one JSON line, one answer, a closed set of
+commands without arguments (`show-running`, `ping`, `quit`). It is also the **single-instance
+lock**: a second `run` finds it live, says so and exits 0. `uninstall` and a reinstall send
+`quit` and wait for the agent to go. `run` with no enrollment exits 78, which the systemd unit
+names in `RestartPreventExitStatus=` (under its LaunchAgent it exits 0, and `KeepAlive` is now
+`SuccessfulExit: false`), so a login item doesn't restart an agent with nothing to do. The island
+now runs whenever `--no-overlay` isn't given, voice or not, so the pill can show; voice states
+and dictation's notes still appear only with voice on.
+
+Checked for real in a nested headless sway (scratch HOME): install (agent spawned, pill), `start`
+while running (pill, still one agent), a second `run` (refused), `start jarvis-agent://start/`
+after a kill (started, pill), uninstall (agent quit over the socket; nothing left), and a packaged
+copy's first `start` setting the user up. **macOS gap:** LaunchServices may hand a second open of
+the app, or the link, to the running agent as an Apple Event instead of starting a process; the
+agent doesn't handle that event yet, so there it may show no pill.
+
 ## 14. Dictation: type, press keys, fill and click (2026-10-13)
 
 "Fill in username abcde on browser", "tell claude to test def", "type hello world", "click OK",

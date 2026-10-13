@@ -1,3 +1,4 @@
+stop [activate] [ignore-errors] name="control"
 reg-delete-value key="Software\\Microsoft\\Windows\\CurrentVersion\\Run" name="Jarvis Automation Agent"
 reg-delete-tree key="Software\\Classes\\jarvis-agent"
 shortcut-remove key="Programs" name="Jarvis Automation Agent"

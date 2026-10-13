@@ -80,7 +80,8 @@ func (l *fakeLogin) Register(n string) error {
 	l.registered[n] = true
 	return nil
 }
-func (l *fakeLogin) Unregister(n string) error { delete(l.registered, n); return nil }
+func (l *fakeLogin) Unregister(n string) error         { delete(l.registered, n); return nil }
+func (l *fakeLogin) Registered(n string) (bool, error) { return l.registered[n], nil }
 
 // fakeWeb writes a manifest where browser.Register would, so uninstall has something to remove.
 type fakeWeb struct{ path string }
