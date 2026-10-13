@@ -109,6 +109,9 @@ func browserCmd(ctx context.Context, args []string) error {
 		target := fs.String("target", browser.TargetFirefox, "firefox or chromium")
 		out := fs.String("out", "", "directory to write the extension into")
 		_ = fs.Parse(args[1:])
+		if err := noStrayArgs(fs); err != nil {
+			return err
+		}
 		if *out == "" {
 			return errors.New("--out DIR is required")
 		}
@@ -144,6 +147,9 @@ func browserInstall(args []string, w io.Writer) error {
 	noOpen := fs.Bool("no-open", false, "don't open the Firefox extension in Firefox (just print where it is)")
 	exeFlag := fs.String("exe", "", "the jarvis-agent binary browsers should start (default: this one)")
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	env, err := browserEnv()
 	if err != nil {
 		return err

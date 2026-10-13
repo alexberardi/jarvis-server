@@ -241,6 +241,9 @@ func enroll(ctx context.Context, args []string) error {
 	browserNo := fs.Bool("no-browser", false, "don't offer browser control setup")
 	useCode := fs.Bool("code", false, "pair with a code a household member approves (the default without --email or --token)")
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	roomSet := false
 	fs.Visit(func(f *flag.Flag) { roomSet = roomSet || f.Name == "room" })
 	path, err := credsPath(*cp)
@@ -415,6 +418,9 @@ func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 func run(ctx context.Context, args []string) error {
 	fs, f := newRunFlags(flag.ExitOnError)
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	log := logger()
 	if err := applySettings(fs, *f.config, log); err != nil {
 		return err
@@ -624,6 +630,9 @@ func status(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	cp := fs.String("creds", "", "credentials file")
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	h, err := nativeHost()
 	if err != nil {
 		return err

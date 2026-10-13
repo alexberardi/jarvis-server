@@ -145,6 +145,9 @@ func installCmd(ctx context.Context, args []string, w io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	e, err := installEnv()
 	if err != nil {
 		return err
@@ -187,6 +190,9 @@ func uninstallCmd(ctx context.Context, args []string, w io.Writer) error {
 	filesOnly := fs.Bool("files-only", false, "remove the files only: leave the service manager and processes alone")
 	dryRun := fs.Bool("dry-run", false, "print what would be done, and do nothing")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := noStrayArgs(fs); err != nil {
 		return err
 	}
 	e, err := installEnv()

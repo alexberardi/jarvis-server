@@ -124,6 +124,9 @@ func listen(ctx context.Context, args []string) error {
 	vf := addVoiceFlags(fs)
 	hf := addHatFlags(fs)
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	path, err := credsPath(*cp)
 	if err != nil {
 		return err
