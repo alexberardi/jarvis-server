@@ -2,10 +2,12 @@
 // STT, against a sandbox (scripts/sandbox) running on a real model. It is how an agent checks
 // what Jarvis does with an utterance without anyone speaking.
 //
-//	pipeline say [--sandbox NAME] [--tools SET] [--results JSON] [--json] [-v] UTTERANCE...
+//	pipeline say [--sandbox NAME] [--tools SET] [--speaker WHO] [--results JSON] [--json] [-v] UTTERANCE...
 //	    one conversation, one turn per argument; prints the node and server tool calls, the
 //	    node's answers and the reply. Every node tool answers {"success": true} unless
-//	    --results gives {"tool": output, ...}.
+//	    --results gives {"tool": output, ...}. The speaker defaults to the seeded superuser
+//	    (the sandbox trusts node speaker hints, JARVIS_DEV_SPEAKER_HINTS); --speaker "" plays
+//	    an unidentified voice.
 //	pipeline run [--sandbox NAME] [--repeat N] [--filter RE] [--out DIR] [--json] [-v] [PATH...]
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
 //	    exits 1 when any fails. --out writes each run's full log (model calls included).
@@ -29,6 +31,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,10 +119,12 @@ func sandboxDriver(name string) (*Driver, error) {
 	if env["SBX_CC"] == "" || env["SBX_NODE_ID"] == "" || env["SBX_NODE_KEY"] == "" {
 		return nil, fmt.Errorf("sandbox %s: sandbox.env lacks SBX_CC / SBX_NODE_ID / SBX_NODE_KEY", name)
 	}
+	primary, _ := strconv.ParseInt(env["SBX_USER_ID"], 10, 64)
 	return &Driver{
-		Node:   &Node{BaseURL: env["SBX_CC"], ID: env["SBX_NODE_ID"], Key: env["SBX_NODE_KEY"]},
-		TapLog: filepath.Join(dir, "llm.jsonl"),
-		Root:   root,
+		Node:    &Node{BaseURL: env["SBX_CC"], ID: env["SBX_NODE_ID"], Key: env["SBX_NODE_KEY"]},
+		TapLog:  filepath.Join(dir, "llm.jsonl"),
+		Root:    root,
+		Primary: primary,
 	}, nil
 }
 
@@ -162,6 +167,8 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("say", flag.ContinueOnError)
 	sandbox := fs.String("sandbox", "", "sandbox name")
 	tools := fs.String("tools", "node", "tool set: node, client, none or a JSON file")
+	home := fs.String("home", "", `device payload: a tools/pipeline/homes name (default avery), "none", or a JSON file`)
+	speaker := fs.String("speaker", "primary", `who is speaking: "primary" (the seeded superuser), a user id, or "" (unidentified)`)
 	results := fs.String("results", "", `node outputs per tool, e.g. {"get_weather": {"success": true, "message": "Sunny, 21°"}}`)
 	asJSON := fs.Bool("json", false, "print the full log as JSON")
 	verbose := fs.Bool("v", false, "also print each model call's reasoning and reply")
@@ -175,7 +182,7 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	sc := Scenario{Name: "say", Tools: *tools}
+	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Home: *home}
 	if *results != "" {
 		if err := json.Unmarshal([]byte(*results), &sc.Results); err != nil {
 			return fmt.Errorf("--results: %w", err)
@@ -233,11 +240,19 @@ func runScenarios(ctx context.Context, args []string, stdout io.Writer) error {
 		Passed   int      `json:"passed"`
 		Runs     int      `json:"runs"`
 		Failures []string `json:"failures,omitempty"`
+		Skipped  string   `json:"skipped,omitempty"`
 	}
 	var sums []summary
 	failed := 0
 	for _, sc := range scs {
 		if re != nil && !re.MatchString(sc.Name) {
+			continue
+		}
+		if sc.Skip != "" {
+			if !*asJSON {
+				fmt.Fprintf(stdout, "SKIP      %s (%s)\n", sc.Name, sc.Skip)
+			}
+			sums = append(sums, summary{Name: sc.Name, Skipped: sc.Skip})
 			continue
 		}
 		s := summary{Name: sc.Name, Runs: *repeat}

@@ -2,33 +2,35 @@
   {
     "name": "devices: lights off in a room",
     "turns": [
-      {
-        "say": "turn off the kitchen lights",
-        "expect": {
-          "any_tool": [
-            "control_device",
-            "get_ha_entities"
-          ],
-          "not_reply": "(?i)can't|cannot|unable"
-        }
-      }
-    ],
-    "tags": [
-      "needs-ha"
+      {"say": "turn off the kitchen lights",
+       "expect": {"tool": "control_device", "args": {"action": "turn_off"}, "args_match": {"entity_id": "^light\\.kitchen$"}, "not_reply": "(?i)can't|cannot|unable"}}
+    ]
+  },
+  {
+    "name": "devices: lock the front door",
+    "turns": [
+      {"say": "lock the front door",
+       "expect": {"tool": "control_device", "args": {"action": "lock"}, "args_match": {"entity_id": "^lock\\.front_door$"}}}
+    ]
+  },
+  {
+    "name": "devices: is the garage door closed",
+    "turns": [
+      {"say": "is the garage door closed",
+       "expect": {"no_tool": true, "reply": "(?i)closed", "not_reply": "(?i)open(ed)? "}}
+    ]
+  },
+  {
+    "name": "devices: every light on a floor",
+    "turns": [
+      {"say": "turn off all the lights upstairs",
+       "expect": {"tool": "control_device", "args": {"action": "turn_off"}, "args_match": {"entity_id": "light\\.(office|bedroom_lamp)"}}}
     ]
   },
   {
     "name": "node: volume up",
     "turns": [
-      {
-        "say": "turn the volume up",
-        "expect": {
-          "tool": "control_node",
-          "args": {
-            "action": "volume_up"
-          }
-        }
-      }
+      {"say": "turn the volume up", "expect": {"tool": "control_node", "args": {"action": "volume_up"}}}
     ]
   }
 ]

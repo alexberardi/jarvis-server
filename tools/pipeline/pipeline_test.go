@@ -201,6 +201,7 @@ func TestLoadToolSet(t *testing.T) {
 // completes with a reply; anything else completes with no tools.
 type fakeCC struct {
 	onCommand func()
+	speakers  []any
 	mu        sync.Mutex
 	started   map[string]any
 	results   []any
@@ -222,6 +223,7 @@ func (f *fakeCC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.started = body
 		io.WriteString(w, `{"status":"success"}`)
 	case "/api/v0/voice/command":
+		f.speakers = append(f.speakers, body["speaker_user_id"])
 		if f.onCommand != nil {
 			f.onCommand()
 			f.onCommand = nil
@@ -256,9 +258,10 @@ func TestDriverRunsScenario(t *testing.T) {
 		f.WriteString(`{"seq":1,"reply":{"tool_calls":[{"id":"r","type":"function","function":{"name":"recall","arguments":"{\"query\":\"x\"}"}},{"id":"t1","type":"function","function":{"name":"set_timer","arguments":"{}"}}]}}` + "\n")
 		f.Close()
 	}
-	d := &Driver{Node: &Node{BaseURL: srv.URL, ID: "node", Key: "key"}, TapLog: tapLog, Root: root}
+	d := &Driver{Node: &Node{BaseURL: srv.URL, ID: "node", Key: "key"}, TapLog: tapLog, Root: root, Primary: 7}
 	sc := Scenario{
 		Name:    "timer",
+		Speaker: "primary",
 		Results: map[string]any{"set_timer": map[string]any{"success": true, "message": "Timer set."}},
 		Turns: []Turn{
 			{Say: "set a timer for 3 minutes", Expect: Expect{Tool: "set_timer", Args: map[string]any{"minutes": 3}, Reply: "three"}},
@@ -269,11 +272,18 @@ func TestDriverRunsScenario(t *testing.T) {
 	if !l.Pass || len(l.Turns) != 2 {
 		t.Fatalf("%+v", l)
 	}
+	if jsonText(cc.speakers) != "[7,7]" {
+		t.Fatalf("speaker hints %v", cc.speakers)
+	}
 	if t0 := l.Turns[0]; len(t0.LLM) != 1 || len(t0.ServerCalls) != 1 || t0.ServerCalls[0].Name != "recall" || t0.Seconds <= 0 {
 		t.Fatalf("turn 0 capture: %+v", t0)
 	}
 	if got := jsonText(cc.results); got != `[[{"output":{"message":"Timer set.","success":true},"tool_call_id":"t1"}]]` {
 		t.Fatalf("results sent %s", got)
+	}
+	nc, _ := cc.started["node_context"].(map[string]any)
+	if agents, _ := nc["agents"].(map[string]any); agents["home_assistant"] == nil {
+		t.Fatalf("default home not sent: %v", nc)
 	}
 	if tools, _ := cc.started["client_tools"].([]any); len(tools) == 0 || !cc.ended {
 		t.Fatalf("start %v ended %v", cc.started, cc.ended)
@@ -294,5 +304,38 @@ func TestReadTapFromOffset(t *testing.T) {
 	f.Close()
 	if es := readTap(p, mark); len(es) != 1 || es[0].Seq != 2 {
 		t.Fatalf("%+v", es)
+	}
+}
+
+func TestDriverSpeaker(t *testing.T) {
+	d := &Driver{}
+	if id, err := d.speakerID(""); id != 0 || err != nil {
+		t.Fatal("none")
+	}
+	if _, err := d.speakerID("primary"); err == nil {
+		t.Fatal("primary without SBX_USER_ID")
+	}
+	d.Primary = 3
+	if id, _ := d.speakerID("primary"); id != 3 {
+		t.Fatal("primary")
+	}
+	if id, _ := d.speakerID("12"); id != 12 {
+		t.Fatal("numeric")
+	}
+	if _, err := d.speakerID("jordan"); err == nil {
+		t.Fatal("name")
+	}
+}
+
+func TestLoadHome(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	if b, err := LoadHome(root, ""); err != nil || !bytes.Contains(b, []byte("light.kitchen")) {
+		t.Fatalf("default home: %v", err)
+	}
+	if b, err := LoadHome(root, "none"); b != nil || err != nil {
+		t.Fatal("none")
+	}
+	if _, err := LoadHome(root, "nowhere"); err == nil {
+		t.Fatal("missing home")
 	}
 }

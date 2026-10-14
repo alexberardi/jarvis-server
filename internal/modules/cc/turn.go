@@ -12,6 +12,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	lldates "github.com/alexberardi/jarvis-server/internal/modules/llm/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
+	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -24,10 +25,12 @@ var errPrecondition = errors.New("conversation not found or expired")
 // wakeVerifyWait is the longest a wake turn waits for the wake-clip verdict (fails open).
 const wakeVerifyWait = 1200 * time.Millisecond
 
-// turnInput is VoiceCommandRequest (speaker_user_id is accepted and ignored, D2).
+// turnInput is VoiceCommandRequest (speaker_user_id is accepted and ignored, D2, unless
+// Module.DevSpeakerHints).
 type turnInput struct {
 	VoiceCommand      string
 	ConversationID    string
+	SpeakerHint       int64 // speaker_user_id
 	PreWakeSeconds    *float64
 	Affect            map[string]any
 	Source            string // turn_source ("" = not sent)
@@ -79,6 +82,10 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	endCache(nil)
 	m.flushPendingTranscript(ctx, conv)
 	m.compactBeforeTurn(ctx, conv) // CI6: at the hard threshold, before the turn
+	if m.DevSpeakerHints && in.SpeakerHint != 0 && conv.chatUserID == 0 {
+		// Dev sandboxes: the node's hint stands in for the speaker pass a text turn lacks.
+		m.signals.recordIdentity(conv.id, turnIdentity{UserID: in.SpeakerHint, Outcome: stt.OutcomeMatched, Confidence: 1})
+	}
 
 	// The turn's speaker: only jarvisd's own identification of this conversation's audio
 	// (D2/D3). A confident id switches the conversation speaker; otherwise it keeps the one an

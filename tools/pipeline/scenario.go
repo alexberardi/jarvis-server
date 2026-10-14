@@ -22,6 +22,15 @@ type Scenario struct {
 	// "none", or a path to a JSON array of OpenAI tool definitions (relative to the file).
 	Tools    string `json:"tools,omitempty"`
 	Timezone string `json:"timezone,omitempty"`
+	// Speaker is who the voice match says is talking: "" nobody (an unidentified voice),
+	// "primary" the sandbox's seeded superuser, or a user id. Memory tools need one (D21).
+	Speaker string `json:"speaker,omitempty"`
+	// Home is the device payload the node reports at /conversation/start (node_context.agents,
+	// what a Pi with Home Assistant sends): a name under tools/pipeline/homes ("avery", the
+	// default, matches the seeded rooms), "none", or a JSON file path.
+	Home string `json:"home,omitempty"`
+	// Skip, when set, is why the scenario cannot run yet; it is reported, not played.
+	Skip string `json:"skip,omitempty"`
 	// Results is the node's output per tool name for every call in the scenario; a turn's own
 	// results win. A tool with no result answers {"success": true}.
 	Results map[string]any `json:"results,omitempty"`

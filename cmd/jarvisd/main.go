@@ -70,7 +70,8 @@ func modules() []module.Module {
 		// The household recipe box on 7030 (docs/recipes; jarvis-recipes-mobile's server).
 		&recipesmod.Module{},
 		&ccmod.Module{
-			AdminKey: os.Getenv("ADMIN_API_KEY"),
+			AdminKey:        os.Getenv("ADMIN_API_KEY"),
+			DevSpeakerHints: os.Getenv("JARVIS_DEV_SPEAKER_HINTS") == "1",
 			MQTT: ccmod.MQTTOptions{
 				TCPAddr:        mqttTCPAddr(),
 				WSAddr:         mqttWSAddr(),
@@ -517,6 +518,9 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 			deps.Queue = queue.New(deps.DB, deps.Log)
 			deps.Scheduler = scheduler.New(deps.DB, deps.Queue, deps.Log)
 		}
+	}
+	if os.Getenv("JARVIS_DEV_SPEAKER_HINTS") == "1" {
+		deps.Log.Warn("JARVIS_DEV_SPEAKER_HINTS=1: nodes can claim who is speaking; for dev sandboxes only")
 	}
 	for _, m := range mods {
 		switch x := m.(type) {

@@ -29,6 +29,7 @@
 #   --ui             build the admin SPA first (npm) and serve it; otherwise web/admin/dist/ui
 #                    is served when it exists, else the built-in placeholder page
 #
+# Nodes may claim who is speaking (JARVIS_DEV_SPEAKER_HINTS=1), standing in for voice ID.
 # STT is off and TTS has no voice models in a sandbox: pipeline tests start from text
 # (go run ./tools/pipeline say "turn on the kitchen lights"; ... run for the scenarios).
 set -euo pipefail
@@ -171,6 +172,7 @@ write_env() {
     echo "export SBX_EMAIL=test@jarvisautomation.io"
     echo "export SBX_PASSWORD='DevPass123!'"
     echo "export SBX_TOKEN=$TOKEN"
+    echo "export SBX_USER_ID=$(curl -sf "http://127.0.0.1:$(port 7701)/auth/me" -H "Authorization: Bearer $TOKEN" | json 'd["id"]')"
     echo "export SBX_NODE_ID=$node_id"
     echo "export SBX_NODE_KEY=$node_key"
     echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
@@ -197,7 +199,7 @@ cmd_up() {
   local ui=
   [ -d "$ROOT/web/admin/dist/ui" ] && ui=$ROOT/web/admin/dist/ui
   say "starting on offset $(cat "$OFFSETF") (cc :$(port 7703), admin :$(port 7710))"
-  JARVIS_HOST=127.0.0.1 JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui \
+  JARVIS_HOST=127.0.0.1 JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
     setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"

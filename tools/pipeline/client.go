@@ -93,23 +93,33 @@ func (n *Node) post(ctx context.Context, path string, body, out any) error {
 	return nil
 }
 
-// Start opens a conversation with the node's tool set.
-func (n *Node) Start(ctx context.Context, cid, timezone string, tools []json.RawMessage) error {
+// Start opens a conversation with the node's tool set and, when agents is not nil, its
+// device payload (node_context.agents).
+func (n *Node) Start(ctx context.Context, cid, timezone string, tools []json.RawMessage, agents json.RawMessage) error {
 	if tools == nil {
 		tools = []json.RawMessage{}
 	}
+	nc := map[string]any{"timezone": timezone}
+	if agents != nil {
+		nc["agents"] = agents
+	}
 	return n.post(ctx, "/api/v0/conversation/start", map[string]any{
 		"conversation_id":    cid,
-		"node_context":       map[string]any{"timezone": timezone},
+		"node_context":       nc,
 		"available_commands": []any{},
 		"client_tools":       tools,
 	}, nil)
 }
 
-// Command sends one utterance (what STT would have produced).
-func (n *Node) Command(ctx context.Context, cid, text string) (TurnResponse, error) {
+// Command sends one utterance (what STT would have produced). speaker, when not 0, is sent as
+// speaker_user_id: a sandbox with JARVIS_DEV_SPEAKER_HINTS=1 takes it as the voice match.
+func (n *Node) Command(ctx context.Context, cid, text string, speaker int64) (TurnResponse, error) {
 	var r TurnResponse
-	err := n.post(ctx, "/api/v0/voice/command", map[string]any{"voice_command": text, "conversation_id": cid}, &r)
+	body := map[string]any{"voice_command": text, "conversation_id": cid}
+	if speaker != 0 {
+		body["speaker_user_id"] = speaker
+	}
+	err := n.post(ctx, "/api/v0/voice/command", body, &r)
 	return r, err
 }
 

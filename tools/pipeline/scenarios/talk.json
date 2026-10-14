@@ -59,8 +59,23 @@
         }
       }
     ],
+    "speaker": "primary"
+  },
+  {
+    "name": "memory: an unidentified voice is not told it was remembered",
     "tags": [
-      "needs-embeddings"
+      "known-bug"
+    ],
+    "turns": [
+      {
+        "say": "remember that my favorite color is green",
+        "expect": {
+          "not_tool": [
+            "remember"
+          ],
+          "not_reply": "(?i)got it|noted|I'll remember|saved"
+        }
+      }
     ]
   }
 ]

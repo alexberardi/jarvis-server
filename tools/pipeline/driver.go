@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -49,6 +51,26 @@ type Driver struct {
 	Node   *Node
 	TapLog string // the sandbox's llm.jsonl; "" = no model-call capture
 	Root   string // repo root, for the golden tool sets
+	// Primary is the seeded superuser's id, what a scenario's "speaker": "primary" means.
+	Primary int64
+}
+
+// speakerID resolves a scenario's speaker.
+func (d *Driver) speakerID(spec string) (int64, error) {
+	switch spec {
+	case "":
+		return 0, nil
+	case "primary":
+		if d.Primary == 0 {
+			return 0, fmt.Errorf(`speaker "primary": the sandbox exports no SBX_USER_ID (scripts/sandbox up again)`)
+		}
+		return d.Primary, nil
+	}
+	id, err := strconv.ParseInt(spec, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("speaker %q: want \"primary\" or a user id", spec)
+	}
+	return id, nil
 }
 
 // Run plays a scenario and checks every turn.
@@ -59,12 +81,24 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 		spec = filepath.Join(filepath.Dir(sc.File), spec)
 	}
 	tools, err := LoadToolSet(d.Root, spec)
+	speaker, serr := d.speakerID(sc.Speaker)
+	if err == nil {
+		err = serr
+	}
+	home := sc.Home
+	if home != "" && home != "none" && sc.File != "" && (strings.ContainsRune(home, '/') || strings.HasSuffix(home, ".json")) && !filepath.IsAbs(home) {
+		home = filepath.Join(filepath.Dir(sc.File), home)
+	}
+	agents, herr := LoadHome(d.Root, home)
+	if err == nil {
+		err = herr
+	}
 	if err == nil {
 		tz := sc.Timezone
 		if tz == "" {
 			tz = "America/New_York"
 		}
-		err = d.Node.Start(ctx, out.ConversationID, tz, tools)
+		err = d.Node.Start(ctx, out.ConversationID, tz, tools, agents)
 	}
 	if err != nil {
 		out.Pass = false
@@ -74,7 +108,7 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 	nodeNames := toolNames(tools)
 	defer d.Node.End(context.WithoutCancel(ctx), out.ConversationID)
 	for _, turn := range sc.Turns {
-		tl := d.turn(ctx, out.ConversationID, nodeNames, turn.Say, func(name string) any { return sc.resultFor(turn, name) })
+		tl := d.turn(ctx, out.ConversationID, nodeNames, turn.Say, speaker, func(name string) any { return sc.resultFor(turn, name) })
 		tl.Failures = turn.Expect.Check(tl)
 		if len(tl.Failures) > 0 {
 			out.Pass = false
@@ -88,7 +122,7 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 }
 
 // turn sends one utterance and answers tool calls until command-center is done.
-func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, result func(string) any) (tl TurnLog) {
+func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, speaker int64, result func(string) any) (tl TurnLog) {
 	tl.Say = say
 	mark := tapSize(d.TapLog)
 	start := time.Now()
@@ -103,7 +137,7 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 			}
 		}
 	}()
-	resp, err := d.Node.Command(ctx, cid, say)
+	resp, err := d.Node.Command(ctx, cid, say, speaker)
 	for i := 0; err == nil && resp.StopReason == "tool_calls" && len(resp.ToolCalls) > 0; i++ {
 		if i == maxContinues {
 			err = fmt.Errorf("still calling tools after %d round-trips", maxContinues)

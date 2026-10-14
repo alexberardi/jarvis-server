@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // goldenInputs holds the named tool sets the G1 prompt fixtures were exported with
@@ -56,4 +57,28 @@ func LoadToolSet(root, spec string) ([]json.RawMessage, error) {
 		}
 		return out, nil
 	}
+}
+
+// LoadHome returns a node's agents payload (node_context.agents): "" or a name is
+// tools/pipeline/homes/<name>.json ("" = avery), "none" is no payload, anything with a slash
+// or a .json suffix is a file.
+func LoadHome(root, spec string) (json.RawMessage, error) {
+	switch {
+	case spec == "none":
+		return nil, nil
+	case spec == "":
+		spec = "avery"
+	}
+	path := spec
+	if !strings.ContainsRune(spec, '/') && !strings.HasSuffix(spec, ".json") {
+		path = filepath.Join(root, "tools/pipeline/homes", spec+".json")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !json.Valid(b) {
+		return nil, fmt.Errorf("%s: not JSON", path)
+	}
+	return b, nil
 }
