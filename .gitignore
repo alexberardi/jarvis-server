@@ -16,3 +16,4 @@ HOSTS.local.md
 /.sandbox/
 /.claude/worktrees/
 /.claude/settings.local.json
+/tools/screenshots/node_modules/
