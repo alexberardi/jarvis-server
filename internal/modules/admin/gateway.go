@@ -115,6 +115,13 @@ var passRoutes = []passRoute{
 	ccUserRoute("GET /api/cc/api/v0/nodes/pairings"),
 	ccUserRoute("POST /api/cc/api/v0/nodes/pairings/approve"),
 	ccUserRoute("POST /api/cc/api/v0/nodes/pairings/deny"),
+	// Add-ons: sign a device out (decision 2026-10-14). cc lets only the member who paired it,
+	// or an admin of its household, do it; a desktop agent gets no factory reset.
+	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/sign-out"),
+	// Add-ons and chat: which of the caller's own agents runs on the computer asking (install
+	// plan §3.2 Q2 (a)). A hint that grants nothing; cc matches the TCP peer address, which pass
+	// keeps (G11), never a forwarded header.
+	{pattern: "GET /api/addons/this-device", listener: pconfig.ListenerCC, strip: "/api/addons", prefix: "/api/v0/nodes", tier: tierUser},
 
 	// Inbox (webapp 01 P5): the caller's own rows. Creating and updating items is app-to-app
 	// only and not exposed.

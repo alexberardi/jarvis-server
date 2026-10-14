@@ -29,6 +29,8 @@ type trayIcon struct {
 	quit      func()
 	// setup opens the setup page (`jarvis-agent setup`, a process of its own).
 	setup func()
+	// signOut signs this computer out (node.Runner.SignOut); nil hides the item.
+	signOut func()
 	// mainLoop: macOS's AppKit loop runs (the status item lives in it).
 	mainLoop bool
 
@@ -42,7 +44,7 @@ func (ic *trayIcon) show(ctx context.Context) func() {
 		return func() {}
 	}
 	t, err := tray.Start(tray.Options{Log: ic.log, State: ic.state(), MainLoop: ic.mainLoop,
-		Actions: tray.Actions{SetVoice: ic.sw.Set, Open: ic.open, Setup: ic.setup, Quit: ic.quitFromMenu}})
+		Actions: tray.Actions{SetVoice: ic.sw.Set, Open: ic.open, Setup: ic.setup, Quit: ic.quitFromMenu, SignOut: ic.signOutFromMenu}})
 	if err != nil {
 		ic.log.Info("tray: no status icon", "reason", err)
 		return func() {}
@@ -64,7 +66,8 @@ func (ic *trayIcon) withWebUI(s tray.State, u string) tray.State { s.OpenURL = u
 
 // state is what the menu shows, the web UI aside.
 func (ic *trayIcon) state() tray.State {
-	s := tray.State{Status: "Running", VoiceAvailable: voice.Supported, Voice: ic.sw.On(), Setup: ic.setup != nil}
+	s := tray.State{Status: "Running", VoiceAvailable: voice.Supported, Voice: ic.sw.On(), Setup: ic.setup != nil,
+		SignOut: ic.signOut != nil}
 	if !s.Voice && ic.sw.lastErr() != "" {
 		s.Status = "Running, couldn't start listening"
 	}
@@ -81,6 +84,13 @@ func (ic *trayIcon) voiceChanged(bool) {
 func (ic *trayIcon) quitFromMenu() {
 	ic.log.Info("Quit chosen in the menu: stopping until the next login or start")
 	ic.quit()
+}
+
+func (ic *trayIcon) signOutFromMenu() {
+	ic.log.Info("Sign out chosen in the menu: removing this computer from Jarvis Automation")
+	if ic.signOut != nil {
+		ic.signOut()
+	}
 }
 
 func (ic *trayIcon) open(u string) {

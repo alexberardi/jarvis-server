@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
+	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -166,6 +167,8 @@ type Module struct {
 	tools    *servertools.Registry
 	dateKeys []string      // DT_KEYS override (tests); nil = the shared vocabulary
 	lanAddr  func() string // this host's LAN address override (tests); nil = netaddr.LANAddr
+	// localIPs overrides this server's own addresses for "this computer" (tests; thisdevice.go).
+	localIPs func() []net.IP
 
 	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
 	// pantryHTTP is the Forge share-code check's client (testinstall.go; legacy 10 s timeout).
@@ -279,6 +282,10 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("PATCH "+v0+"/admin/nodes/{node_id}", m.admin(m.handlePatchNode))
 	mux.HandleFunc("DELETE "+v0+"/admin/nodes/{node_id}", m.user(m.handleDeleteNode))
 	mux.HandleFunc("POST "+v0+"/admin/nodes/{node_id}/factory-reset", m.user(m.handleFactoryReset))
+	// Device sign-out and "this computer" (signout.go, thisdevice.go).
+	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/sign-out", m.user(m.handleSignOutNode))
+	mux.HandleFunc("POST "+v0+"/node/sign-out", m.node(m.handleSelfSignOut))
+	mux.HandleFunc("GET "+v0+"/nodes/this-device", m.user(m.handleThisDevice))
 	mux.HandleFunc("POST "+v0+"/nodes/factory-reset/{task_id}/status", m.handleFactoryResetStatus)
 	mux.HandleFunc("POST "+v0+"/nodes/verify-reset", m.handleVerifyReset)
 	mux.HandleFunc("POST "+v0+"/provisioning/token", m.handleProvisioningToken)

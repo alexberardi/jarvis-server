@@ -52,6 +52,9 @@ var wantTiers = map[string]tier{
 	"GET /api/cc/api/v0/nodes/pairings":                              tierUser,
 	"POST /api/cc/api/v0/nodes/pairings/approve":                     tierUser,
 	"POST /api/cc/api/v0/nodes/pairings/deny":                        tierUser,
+	// Add-ons: device sign-out (cc: the pairer or a household admin) and "this computer" (a hint).
+	"POST /api/cc/api/v0/nodes/{node_id}/sign-out": tierUser,
+	"GET /api/addons/this-device":                  tierUser,
 
 	// The inbox: per-user rows.
 	"GET /api/notifications/api/v0/inbox":                  tierUser,

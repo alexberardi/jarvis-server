@@ -35,6 +35,9 @@ func TestItems(t *testing.T) {
 		{State{Status: "Running", VoiceAvailable: true, Voice: true, OpenURL: "http://x/", Setup: true},
 			`(Jarvis Automation Agent — Running) | -- | [x] Listen for "Hey Jarvis" | Open Jarvis Automation | Set up / Settings… | -- | Quit Jarvis Automation Agent`},
 		{State{Status: "Running", Setup: true}, `(Jarvis Automation Agent — Running) | -- | Set up / Settings… | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", Setup: true, SignOut: true},
+			`(Jarvis Automation Agent — Running) | -- | Set up / Settings… | Sign out of Jarvis Automation | -- | Quit Jarvis Automation Agent`},
+		{State{SignOut: true}, `(Jarvis Automation Agent — Running) | -- | Sign out of Jarvis Automation | -- | Quit Jarvis Automation Agent`},
 		{State{VoiceAvailable: true},
 			`(Jarvis Automation Agent — Running) | -- | [ ] Listen for "Hey Jarvis" | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
@@ -74,9 +77,10 @@ func TestClicksRunActions(t *testing.T) {
 				rec("voice off")
 			}
 		},
-		Open:  func(u string) { rec("open " + u) },
-		Setup: func() { rec("setup") },
-		Quit:  func() { rec("quit") },
+		Open:    func(u string) { rec("open " + u) },
+		Setup:   func() { rec("setup") },
+		Quit:    func() { rec("quit") },
+		SignOut: func() { rec("sign out") },
 	}, State{VoiceAvailable: true})
 	be := &fakeBackend{}
 	if err := tr.attach(be); err != nil {
@@ -97,20 +101,26 @@ func TestClicksRunActions(t *testing.T) {
 	tr.Update(func(s *State) { s.Setup = true })
 	tr.clicked(IDSetup)
 	tr.wait()
+	tr.clicked(IDSignOut) // not shown: nothing
+	tr.wait()
+	tr.Update(func(s *State) { s.SignOut = true })
+	tr.clicked(IDSignOut)
+	tr.wait()
 	tr.clicked(IDHeader) // the header does nothing
 	tr.clicked(IDQuit)
 	tr.wait()
-	if strings.Join(got, ", ") != "voice on, voice off, open http://jarvis.example/, setup, quit" {
+	if strings.Join(got, ", ") != "voice on, voice off, open http://jarvis.example/, setup, sign out, quit" {
 		t.Fatalf("actions %q", got)
 	}
-	if len(be.shown) != 4 || !strings.Contains(be.shown[1], "[x] Listen") || !strings.Contains(be.shown[3], "Set up / Settings…") {
+	if len(be.shown) != 5 || !strings.Contains(be.shown[1], "[x] Listen") || !strings.Contains(be.shown[3], "Set up / Settings…") ||
+		!strings.Contains(be.shown[4], "Sign out of Jarvis Automation") {
 		t.Fatalf("shown %q", be.shown)
 	}
 	tr.Close()
 	tr.Close()
 	tr.clicked(IDQuit) // after Close: ignored
 	tr.wait()
-	if !be.closed || len(got) != 5 {
+	if !be.closed || len(got) != 6 {
 		t.Fatalf("closed %v, actions %q", be.closed, got)
 	}
 }

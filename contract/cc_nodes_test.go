@@ -105,6 +105,9 @@ func nodeResponseShape() Obj {
 		// (e.g. browser_extension: connected | disconnected | disabled; {} when none).
 		shape["node_kind"] = NullOr(String)
 		shape["capabilities"] = MapOf(Any)
+		// Device sign-out (docs/decisions/2026-10-14-device-sign-out.md), additive: who paired
+		// the node (the provisioning token's minter), null for the admin key or when unknown.
+		shape["owner_user_id"] = NullOr(Int)
 	}
 	return shape
 }

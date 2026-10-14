@@ -140,7 +140,7 @@ export default function ChatPage() {
             {chat.nodes.map((n) => (
               <option key={n.node_id} value={n.node_id}>
                 {nodeLabel(n)}
-                {n.node_kind === 'desktop' ? ' (computer)' : ''}
+                {n.node_id === chat.thisDeviceId ? ' (this computer)' : n.node_kind === 'desktop' ? ' (computer)' : ''}
                 {n.online ? '' : ' - offline'}
               </option>
             ))}

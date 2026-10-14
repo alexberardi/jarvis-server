@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -214,4 +215,26 @@ func (c *CC) PostToolReport(ctx context.Context, rid string, report any) error {
 // PostToolResult answers tool_call: {"output": {...}} on the device-control result sink.
 func (c *CC) PostToolResult(ctx context.Context, rid string, output map[string]any) error {
 	return c.do(ctx, http.MethodPost, "/api/v0/device-control-results/"+url.PathEscape(rid), map[string]any{"output": output}, nil)
+}
+
+// ErrSignedOut: jarvisd no longer accepts this node's key. The node was signed out (from the web
+// app's Add-ons, the status icon, or removed by an admin), so its credentials are worthless
+// (decision 2026-10-14).
+var ErrSignedOut = errors.New("this computer was signed out of Jarvis Automation")
+
+// Revoked reports whether err is jarvisd refusing this node's key: 401 (an unknown, deactivated
+// or deleted node) or 403. Not a network error and not a 5xx: those are retried, never a reason
+// to drop credentials.
+func Revoked(err error) bool {
+	var he *HTTPError
+	return errors.As(err, &he) && (he.Status == http.StatusUnauthorized || he.Status == http.StatusForbidden)
+}
+
+// SignOut asks jarvisd to remove this node, with its own key. A key jarvisd already refuses
+// counts as done.
+func (c *CC) SignOut(ctx context.Context) error {
+	if err := c.do(ctx, http.MethodPost, "/api/v0/node/sign-out", map[string]any{}, nil); err != nil && !Revoked(err) {
+		return err
+	}
+	return nil
 }

@@ -22,6 +22,26 @@ export async function getPrimaryNodeId(householdId: string): Promise<string> {
   return data.primary_node_id ?? ''
 }
 
+/**
+ * ThisDevice is which of the caller's desktop agents runs on the computer this page is open on
+ * (GET /api/addons/this-device, install plan §3.2 Q2 (a)): the server compares the page's TCP
+ * peer address with each agent's last heartbeat address. node_id is null when it can't tell.
+ * A hint only: it picks a default, it grants nothing.
+ */
+export interface ThisDevice {
+  node_id: string | null
+  household_id?: string
+  room?: string
+  online?: boolean
+  reason?: 'no_agents' | 'no_match' | 'ambiguous' | 'proxied'
+}
+
+export async function getThisDevice(householdId?: string): Promise<ThisDevice> {
+  const q = householdId ? `?household_id=${encodeURIComponent(householdId)}` : ''
+  const { data } = await apiClient.get<ThisDevice>(`/api/addons/this-device${q}`)
+  return data
+}
+
 export interface ChatCapabilities {
   /** The live model accepts images (cc/chat-images.md §6). */
   images: boolean

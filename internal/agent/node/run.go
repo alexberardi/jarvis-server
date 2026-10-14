@@ -32,6 +32,42 @@ type Runner struct {
 	// node is connecting (the voice pipeline starts here). It must return when ctx ends; Run
 	// waits for it.
 	OnConnected func(ctx context.Context, cc *CC)
+
+	reqOnce   sync.Once
+	signOut   chan struct{} // SignOut asks Run to sign this node out
+	recheckCh chan struct{} // a "signed-out" message asks Run to check the key at once
+}
+
+// SignedOutTopic is where jarvisd tells a desktop agent it was signed out (cc signout.go). The
+// message is only a nudge: Run checks its key with a heartbeat and signs out only if jarvisd
+// refuses it, so a spoofed message can't sign a working node out.
+func SignedOutTopic(nodeID string) string { return "jarvis/nodes/" + nodeID + "/signed-out" }
+
+func (r *Runner) chans() {
+	r.reqOnce.Do(func() {
+		r.signOut = make(chan struct{}, 1)
+		r.recheckCh = make(chan struct{}, 1)
+	})
+}
+
+// SignOut asks a running Run to sign this node out of jarvisd (the status icon's "Sign out of
+// Jarvis Automation"): it removes the node with its own key and returns ErrSignedOut. Before
+// jarvisd is reached, Run returns ErrSignedOut without the server call.
+func (r *Runner) SignOut() {
+	r.chans()
+	select {
+	case r.signOut <- struct{}{}:
+	default:
+	}
+}
+
+// recheck asks Run for a heartbeat now (the "signed-out" nudge).
+func (r *Runner) recheck() {
+	r.chans()
+	select {
+	case r.recheckCh <- struct{}{}:
+	default:
+	}
 }
 
 // brokerURL maps jarvisd's mqtt[s]/ws[s] URL to paho's scheme.
@@ -53,7 +89,11 @@ func brokerURL(raw string) (string, error) {
 
 // Run blocks until ctx is cancelled. Transient failures (jarvisd restarting, network) retry
 // with backoff rather than exiting, so a supervisor isn't needed for blips.
+//
+// Run returns ErrSignedOut when jarvisd refuses this node's key (the node was signed out or
+// removed) or after SignOut; the caller drops the credentials and shows the setup page.
 func (r *Runner) Run(ctx context.Context) error {
+	r.chans()
 	hc := &http.Client{Timeout: 15 * time.Second}
 	var svcs Services
 	backoff := time.Second
@@ -74,6 +114,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-r.signOut:
+			r.Log.Warn("signing out without reaching jarvisd: the computer stays listed until it is removed in Add-ons")
+			return ErrSignedOut
 		case <-time.After(backoff):
 		}
 		backoff = min(backoff*2, time.Minute)
@@ -93,12 +136,17 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// An early heartbeat proves the key works (and marks the node contacted) before MQTT.
 	if err := cc.Heartbeat(ctx, r.beat()); err != nil {
-		if he, ok := err.(*HTTPError); ok && (he.Status == 401 || he.Status == 403) {
-			return fmt.Errorf("jarvisd rejected this node's key (%v); re-enroll", err)
+		if Revoked(err) {
+			r.Log.Warn("jarvisd refuses this node's key: signed out", "err", err)
+			return ErrSignedOut
 		}
 		r.Log.Warn("first heartbeat failed", "err", err)
 	}
 	mc, err := cc.MQTTCredentials(ctx)
+	if Revoked(err) {
+		r.Log.Warn("jarvisd refuses this node's key: signed out", "err", err)
+		return ErrSignedOut
+	}
 	if err != nil {
 		return fmt.Errorf("mqtt credentials: %w", err)
 	}
@@ -130,6 +178,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		if tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
 			r.Log.Error("mqtt subscribe failed", "err", tok.Error())
 		}
+		so := c.Subscribe(SignedOutTopic(r.Creds.NodeID), 1, func(mqtt.Client, mqtt.Message) {
+			r.Log.Info("jarvisd says this computer was signed out; checking the key")
+			r.recheck()
+		})
+		if so.WaitTimeout(10*time.Second) && so.Error() != nil {
+			r.Log.Error("mqtt subscribe failed", "topic", "signed-out", "err", so.Error())
+		}
 	})
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 		r.Log.Warn("mqtt connection lost; reconnecting", "err", err)
@@ -139,13 +194,19 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer client.Disconnect(250)
 
 	if r.OnConnected != nil {
+		// OnConnected returns when its ctx ends, so Run ending on its own (a sign-out) must end
+		// that ctx before waiting for it.
+		octx, stop := context.WithCancel(ctx)
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.OnConnected(ctx, cc)
+			r.OnConnected(octx, cc)
 		}()
-		defer wg.Wait()
+		defer func() {
+			stop()
+			wg.Wait()
+		}()
 	}
 
 	every := r.Heartbeat
@@ -158,11 +219,26 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-r.signOut:
+			sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			err := cc.SignOut(sctx)
+			cancel()
+			if err != nil {
+				r.Log.Warn("couldn't tell jarvisd; signing out here anyway (the computer stays listed until it is removed in Add-ons)", "err", err)
+			} else {
+				r.Log.Info("signed out of jarvisd")
+			}
+			return ErrSignedOut
 		case <-t.C:
 		case <-changed:
+		case <-r.recheckCh:
 		}
 		changed = watch()
 		if err := cc.Heartbeat(ctx, r.beat()); err != nil && ctx.Err() == nil {
+			if Revoked(err) {
+				r.Log.Warn("jarvisd refuses this node's key: signed out", "err", err)
+				return ErrSignedOut
+			}
 			r.Log.Warn("heartbeat failed", "err", err)
 		}
 	}

@@ -9,6 +9,7 @@ import ChatPage from './ChatPage'
 const api = vi.hoisted(() => ({
   listChatNodes: vi.fn(),
   getPrimaryNodeId: vi.fn(),
+  getThisDevice: vi.fn(),
   getChatCapabilities: vi.fn(),
   getNodeTools: vi.fn(),
   warmupChat: vi.fn(),
@@ -63,6 +64,7 @@ beforeEach(() => {
   localStorage.setItem('jarvis-admin:user', JSON.stringify({ id: 7, email: 'm@example.com', username: 'emm', display_name: 'Emma', is_superuser: false }))
   api.listChatNodes.mockResolvedValue([node('kitchen-pi', true, 'kitchen'), node('primary', true, 'office')])
   api.getPrimaryNodeId.mockResolvedValue('primary')
+  api.getThisDevice.mockResolvedValue({ node_id: null, reason: 'no_match' })
   api.getChatCapabilities.mockResolvedValue({ images: false, max_images: 4, max_image_bytes: 2 << 20 })
   api.getNodeTools.mockResolvedValue({ client_tools: [{ type: 'function', function: { name: 'get_weather' } }], available_commands: [] })
   api.warmupChat.mockResolvedValue({ conversation_id: 'warm-1' })
@@ -82,6 +84,21 @@ describe('ChatPage', () => {
       client_tools: [{ type: 'function', function: { name: 'get_weather' } }],
     })
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it("picks this computer's agent first and labels it", async () => {
+    api.listChatNodes.mockResolvedValue([node('kitchen-pi', true, 'kitchen'), node('primary', true, 'office'), { ...node('laptop', true, 'desk'), node_kind: 'desktop' }])
+    api.getThisDevice.mockResolvedValue({ node_id: 'laptop', household_id: 'h1', online: true })
+    renderPage()
+    await waitFor(() => expect(picker().value).toBe('laptop'))
+    expect(api.getThisDevice).toHaveBeenCalledWith('h1')
+    expect(screen.getByRole('option', { name: 'desk (this computer)' })).toBeInTheDocument()
+  })
+
+  it("falls back to the primary when the server can't tell or fails", async () => {
+    api.getThisDevice.mockRejectedValue(new Error('boom'))
+    renderPage()
+    await waitFor(() => expect(picker().value).toBe('primary'))
   })
 
   it('shows the offline banner and keeps the input enabled', async () => {

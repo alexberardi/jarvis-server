@@ -157,7 +157,7 @@ gated, then answer 404 (`gateway.go:111-116`).
 | `/api/tts/{voices,sample}` (`bff.go:123-124`) | superuser | **superuser** | wizard only |
 | **New member pass routes** to cc: `POST /mobile/chat`, `POST /mobile/chat/warmup`, `GET /mobile/chat/capabilities` (`mobile_chat.go:52-54`), `GET /mobile/nodes/{id}/tools` (`packages.go:119`), `POST /nodes/{id}/actions` (`cc.go:297`), `GET /households/{hh}/smart-home/config` (`smarthome.go:73`, for `primary_node_id`) | not routed | **user** | cc checks the member role and that the node belongs to the household (`mobile_chat.go:132-150`, `commands.go:35`, `smarthome.go:141-150`) |
 | Inbox: notifications `/api/v0/inbox*` (`notifications.go:193-199`) | not routed | **user**, if Q2 = port | per-user rows |
-| Add-ons: `GET /api/addons/{devices,this-device}`, pairing approval | n/a | **user** | specified in 01-no-cli-plan §3.2. Scoped to the caller's households. Pairing approval is built (PR #101): `GET /api/cc/api/v0/nodes/pairings`, `POST …/pairings/{approve,deny}` pass through as **user**; cc approves only into the caller's own households |
+| Add-ons: `GET /api/addons/{devices,this-device}`, pairing approval, device sign-out | n/a | **user** | specified in 01-no-cli-plan §3.2. Scoped to the caller's households. Pairing approval is built (PR #101): `GET /api/cc/api/v0/nodes/pairings`, `POST …/pairings/{approve,deny}` pass through as **user**; cc approves only into the caller's own households |
 
 Household roles add nothing at the gateway. A household `admin` who isn't a superuser gets the member
 web app. Household administration stays in mobile (Q3).
@@ -412,7 +412,9 @@ closed. An offline node shows the banner and keeps the input enabled. Go:
 behind the gateway with a fake OpenAI-compatible LLM and a fake node publisher that answers
 `report_tools` and `tool_call` over HTTP with its node key. As a member, it lists the nodes, fetches
 the tools, warms up and chats through the admin port, and a `done` arrives after the node ran
-`get_weather`.
+`get_weather`. **Step 1 lit (2026-10-14):** `useChat.ts` asks `GET /api/addons/this-device`
+for the active household; a match is the default after a remembered online pick, and the picker
+labels it "(this computer)". "Can't tell" or an error skips the step.
 
 **P4 as built (minimal).** `/addons` (`pages/AddonsPage.tsx`, `lib/addons.ts`), in every user's
 nav. No new BFF route and no tier change. "Your devices" reads cc's node list (already the caller's
@@ -424,11 +426,13 @@ seen), the extension state from the #104 heartbeat (`capabilities.browser_extens
 member. Download: the release page and the install guide (no agent assets in the release yet,
 install plan 2.1), labelled with the browser's OS. Extension and phone app are link cards whose
 store URLs (`LINKS` in `lib/addons.ts`) are null until the listings are public, with a guide link
-meanwhile. **Not built:** "This computer" (needs `GET /api/addons/this-device`, install plan 3.1),
-the verified agent download (`/api/addons/agent/{os}/{arch}`), and **Sign out** on a device: it
-needs cc's `DELETE /admin/nodes/{id}` as a new member pass route (a tier change, for review), and
-cc sends the node a factory-reset whose meaning for the agent isn't decided (TODO in
-`AddonsPage.tsx`).
+meanwhile. **Added 2026-10-14:** "This computer" (`GET /api/addons/this-device`, a user-tier pass route
+to cc's `/api/v0/nodes/this-device`; DESIGN §13 "This computer"), and **Sign out** on a device
+for the member who paired it or a household admin (`POST /api/cc/api/v0/nodes/{id}/sign-out`,
+user tier; cc checks the rule; decision 2026-10-14, no factory reset for a desktop agent). Each
+device says its settings are managed in the mobile app (admins): node settings are end-to-end
+encrypted with K2, which the browser doesn't hold. **Not built:** the verified agent download
+(`/api/addons/agent/{os}/{arch}`).
 
 **P5 as built.** `/inbox` and `/inbox/:id` (`pages/InboxPage.tsx`, `InboxItemPage.tsx`, `api/inbox.ts`)
 over the P1 user-tier routes `/api/notifications/api/v0/inbox*`, so a user sees only their own rows

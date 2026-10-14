@@ -958,7 +958,7 @@ step 3, as a page in the user's own browser (open question 1). Code: `internal/a
 - **Done and Remove.** Done closes the page ("You're all set"). Remove asks first, then runs
   `uninstall --purge` (login item, menu entries, link handler, native host, the running agent,
   sign-in and settings); on macOS the page then says to drag the app to the Trash. The node
-  stays on the server (sign-out is a later item).
+  stays on the server (sign it out from Add-ons, or with the status icon's "Sign out" before Remove).
 - **Verified (2026-10-14).** Handler tests for every route and check. Headless Chromium against a
   throwaway jarvisd (own home, ports 461xx, no mDNS) in scratch HOMEs with fake `systemctl` and
   `xdg-open`: sign-in (wrong password, then right), pairing approved through the API by a seeded
@@ -968,6 +968,35 @@ step 3, as a page in the user's own browser (open question 1). Code: `internal/a
   the page served with the four probes answering; no grant clicked through, and not from the
   app bundle. Windows: built and vetted. Not checked: the tray item clicked on a real desktop,
   the GNOME/KDE step on a real GNOME/KDE.
+
+**Signing out (decision 2026-10-14, [decisions/2026-10-14-device-sign-out.md](../decisions/2026-10-14-device-sign-out.md)).**
+A computer is signed out from the web app's Add-ons (by the member who paired it or a household
+admin), by an admin removing the node, or from the status icon (§15). On the server
+(`internal/modules/cc/signout.go`) the node is deactivated in auth (its key stops working for HTTP
+and the broker) and its rows are deleted; a desktop agent is **never sent a factory reset** (cc
+refuses one with 400 and `DELETE /admin/nodes/{id}` skips it; a Pi still gets it). cc then
+publishes `jarvis/nodes/{id}/signed-out` `{node_id}`. The agent treats that message only as a
+nudge: it heartbeats at once, and only jarvisd refusing the key (401/403, `node.Revoked`) signs it
+out, so a spoofed message can't sign out a working agent. An agent that was offline finds out at
+its next start or heartbeat. Signed out, `run` stops serving tools, deletes **only** `node.json`
+(`agent.json` and `apps.json` stay), opens the setup page (`jarvis-agent setup`) and exits with
+"not set up" (78; 0 under its LaunchAgent), which no supervisor restarts. A 5xx or a network
+error is never a sign-out. The owner is recorded at registration (`cc_nodes.owner_user_id`, cc
+migration 00180): whoever minted the provisioning token, i.e. the pairing approver or the member
+who signed in on the page; admin-key nodes and nodes paired before 00180 (beyond the one-day token
+history) have none, so only a household admin can sign those out.
+
+**"This computer" (installers plan §3.2 Q2 (a), 2026-10-14).** Each heartbeat stores its TCP peer
+address (`cc_nodes.last_addr`). `GET /api/v0/nodes/this-device` (gateway: `GET
+/api/addons/this-device`, user tier) compares the page request's peer address with the caller's
+own desktop agents': exactly one match names it, otherwise `{node_id: null, reason}` (`no_agents`,
+`no_match`, `ambiguous`, `proxied`). Loopback and the server's own interface addresses count as
+one place, so an agent on the server's machine (heartbeating from 127.0.0.1) matches a browser on
+that machine opening the page by its LAN address. Forwarded headers are never used (G11); a
+loopback peer carrying one (a reverse proxy, the tunnel) is `proxied`. It is a hint for the
+default chat node and the Add-ons label, and grants nothing. Known limits: NAT and VMs share an
+address (ambiguous), and a stale address from an agent that moved can match another computer
+behind the same address until that agent heartbeats again.
 
 **The settings file (installers plan item 1.6, 2026-10-13).** The choices a user makes once are
 no longer only `run` flags: `<user config dir>/jarvis-agent/agent.json` (0600, next to
@@ -1589,6 +1618,7 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
 ✓ Listen for "Hey Jarvis"                   (Linux, macOS)
   Open Jarvis Automation                    (once discovery names the web UI)
   Set up / Settings…                        (the setup page, §13)
+  Sign out of Jarvis Automation             (§13 "Signing out")
 ─────────────
   Quit Jarvis Automation Agent
 ```
@@ -1605,6 +1635,10 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
   info) in the default browser; it appears once jarvisd answers discovery.
 - **Set up / Settings…** starts `jarvis-agent setup` as a process of its own (§13 "The setup
   page"); a second one only reopens the first's page.
+- **Sign out of Jarvis Automation** removes this computer from the server with its own key
+  (`POST /api/v0/node/sign-out`) and then does what a sign-out from the web app does (§13
+  "Signing out"). Unreachable server: it signs out here anyway, and the computer stays listed
+  until someone removes it in Add-ons.
 - **Quit** is `jarvis-agent stop` from inside (§13): exit 0, so no supervisor restarts it, until
   the next login or `start`.
 - **Hide the icon:** `--no-tray`, or agent.json `tray: false`. `status` prints a `menu icon:` line.

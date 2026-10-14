@@ -1,9 +1,15 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
 // The bug behind "no pill on start": install and start ask for the pill the moment the control
@@ -58,5 +64,48 @@ func TestAppEventsShowThePill(t *testing.T) {
 			t.Fatalf("%s: showed the pill", u)
 		default:
 		}
+	}
+}
+
+// Signed out: only node.json goes; agent.json and apps.json stay; the setup page opens; and the
+// exit status is "not set up", which no supervisor restarts (decision 2026-10-14).
+func TestSignedOutKeepsSettingsAndOpensSetup(t *testing.T) {
+	t.Setenv("XPC_SERVICE_NAME", "")
+	dir := t.TempDir()
+	for _, f := range []string{"node.json", "agent.json", "apps.json"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opened := 0
+	err := signedOutToSetup(fmt.Errorf("run: %w", node.ErrSignedOut), filepath.Join(dir, "node.json"), slog.New(slog.DiscardHandler), func() { opened++ })
+	if code := exitCode(err); code != exitNotSetUp {
+		t.Fatalf("exit %d (%v), want %d", code, err, exitNotSetUp)
+	}
+	if opened != 1 {
+		t.Fatalf("setup page opened %d times", opened)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "node.json")); !os.IsNotExist(err) {
+		t.Fatalf("node.json still there: %v", err)
+	}
+	for _, f := range []string{"agent.json", "apps.json"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Fatalf("%s gone: %v", f, err)
+		}
+	}
+	// Already gone: still fine.
+	if err := signedOutToSetup(node.ErrSignedOut, filepath.Join(dir, "node.json"), slog.New(slog.DiscardHandler), nil); exitCode(err) != exitNotSetUp {
+		t.Fatalf("second sign-out: %v", err)
+	}
+	// Anything else passes through untouched.
+	other := errors.New("boom")
+	if err := signedOutToSetup(other, filepath.Join(dir, "agent.json"), slog.New(slog.DiscardHandler), func() { opened++ }); err != other || opened != 1 {
+		t.Fatalf("other error: %v, opened %d", err, opened)
+	}
+	if err := signedOutToSetup(nil, filepath.Join(dir, "agent.json"), slog.New(slog.DiscardHandler), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent.json")); err != nil {
+		t.Fatal("agent.json removed on a clean exit")
 	}
 }

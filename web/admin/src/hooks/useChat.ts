@@ -4,6 +4,7 @@ import {
   getChatCapabilities,
   getNodeTools,
   getPrimaryNodeId,
+  getThisDevice,
   isPasswordChange,
   listChatNodes,
   sendNodeAction,
@@ -53,21 +54,13 @@ function cachedTools(node: string): NodeTools | null {
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 const timezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
-/**
- * thisDeviceNodeId is step 1 of the default chain: this computer's agent.
- * TODO(webapp 01 §3.3 step 1): read GET /api/addons/this-device once the Add-ons BFF ships it
- * (install plan 3.1, Q2: the server matches the page's TCP peer address against each agent's
- * last heartbeat address). Until then the chain starts at the primary node.
- */
-function thisDeviceNodeId(): string {
-  return ''
-}
-
 export interface UseChat {
   nodes: NodeLiveness[]
   nodesLoading: boolean
   nodesError: string | null
   node: NodeLiveness | null
+  /** This computer's agent (GET /api/addons/this-device), "" when the server can't tell. */
+  thisDeviceId: string
   pickNode: (id: string) => void
   messages: ChatMessage[]
   busy: boolean
@@ -123,10 +116,20 @@ export function useChat(userId: number | string, householdId: string): UseChat {
     enabled: !!householdId,
     staleTime: 5 * 60_000,
   })
+  // Step 1 of the default chain: this computer's agent. The server matches the page's TCP peer
+  // address with each agent's last heartbeat address (never a forwarded header); it is a hint
+  // for the default only. "Can't tell" or a failure skips the step.
+  const hereQ = useQuery({
+    queryKey: ['this-device', householdId],
+    queryFn: () => getThisDevice(householdId).catch(() => null),
+    enabled: !!householdId,
+    staleTime: 60_000,
+  })
   const capsQ = useQuery({ queryKey: ['chat-capabilities'], queryFn: getChatCapabilities, staleTime: 60_000, retry: false })
 
   const nodes = useMemo(() => nodesQ.data ?? [], [nodesQ.data])
-  const chainReady = nodesQ.isSuccess && !primaryQ.isLoading
+  const chainReady = nodesQ.isSuccess && !primaryQ.isLoading && !hereQ.isLoading
+  const thisDeviceId = hereQ.data?.node_id ?? ''
   const node = nodes.find((n) => n.node_id === chat.nodeId) ?? null
 
   // The default chain, when the conversation has no node, or its node left the household.
@@ -135,7 +138,7 @@ export function useChat(userId: number | string, householdId: string): UseChat {
     const { node: pick } = pickDefaultNode({
       nodes,
       primaryId: primaryQ.data ?? '',
-      thisDeviceId: thisDeviceNodeId(),
+      thisDeviceId,
       rememberedId: readLocal(rememberedKey(householdId)),
     })
     const id = pick?.node_id ?? ''
@@ -283,6 +286,7 @@ export function useChat(userId: number | string, householdId: string): UseChat {
     nodesLoading: nodesQ.isLoading,
     nodesError: nodesQ.isError ? errorMessage(nodesQ.error, 'Could not load your devices') : null,
     node,
+    thisDeviceId,
     pickNode,
     messages: chat.messages,
     busy,

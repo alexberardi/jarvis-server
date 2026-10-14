@@ -153,9 +153,10 @@ func (m *Module) handleRegister(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var tokenID, hh string
 	var tokRoom, tokName sql.NullString
-	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT id, household_id, room, name FROM cc_provisioning_tokens
+	var tokBy sql.NullInt64
+	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT id, household_id, room, name, created_by_user_id FROM cc_provisioning_tokens
 		WHERE node_id = ? AND token_hash = ? AND consumed_at IS NULL AND expires_at > ?`,
-		nodeID, hashToken(tok), dbTime(m.now())).Scan(&tokenID, &hh, &tokRoom, &tokName)
+		nodeID, hashToken(tok), dbTime(m.now())).Scan(&tokenID, &hh, &tokRoom, &tokName, &tokBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		detail(w, http.StatusUnauthorized, "Invalid or expired provisioning token")
 		return
@@ -188,7 +189,12 @@ func (m *Module) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	err = m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
-		if err := m.insertNode(ctx, tx, nodeID, room, "default", "brief", hh); err != nil {
+		// The token's minter paired it: the pairing approver, or the member who signed in.
+		var owner *int64
+		if tokBy.Valid {
+			owner = &tokBy.Int64
+		}
+		if err := m.insertNode(ctx, tx, nodeID, room, "default", "brief", hh, owner); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE cc_provisioning_tokens SET consumed_at = ? WHERE id = ?`, dbTime(m.now()), tokenID)

@@ -34,10 +34,13 @@ type nodeRow struct {
 	contacted       bool // false from registration until the node first reaches us (F19)
 	nodeKind        sql.NullString
 	capabilities    sql.NullString // JSON object, from the heartbeat
+	ownerUserID     sql.NullInt64  // who paired it (migration 00180); NULL: the admin key, or unknown
+	lastAddr        sql.NullString // the latest heartbeat's TCP peer address (thisdevice.go)
 }
 
 const nodeCols = `node_id, room, "user", voice_mode, last_seen, household_id, last_seen_version,
-	install_mode, is_busy, git_sha, is_active, protocols, needs_k2, contacted, node_kind, capabilities`
+	install_mode, is_busy, git_sha, is_active, protocols, needs_k2, contacted, node_kind, capabilities,
+	owner_user_id, last_addr`
 
 type scanner interface{ Scan(...any) error }
 
@@ -45,7 +48,7 @@ func scanNode(s scanner) (*nodeRow, error) {
 	var n nodeRow
 	err := s.Scan(&n.nodeID, &n.room, &n.user, &n.voiceMode, &n.lastSeen, &n.householdID, &n.lastSeenVersion,
 		&n.installMode, &n.isBusy, &n.gitSHA, &n.isActive, &n.protocols, &n.needsK2, &n.contacted,
-		&n.nodeKind, &n.capabilities)
+		&n.nodeKind, &n.capabilities, &n.ownerUserID, &n.lastAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +85,13 @@ func (m *Module) nodeReachableAt(row *nodeRow, now time.Time) bool {
 	return row.reachable(now)
 }
 
+func nullableInt(n sql.NullInt64) any {
+	if !n.Valid {
+		return nil
+	}
+	return n.Int64
+}
+
 func nullable(ns sql.NullString) any {
 	if !ns.Valid {
 		return nil
@@ -100,7 +110,8 @@ func (n *nodeRow) caps() map[string]any {
 
 // response is NodeResponse. adapter_hash is gone with LoRA (D9; mobile's node type never
 // read it). node_kind and capabilities are jarvisd additions (install plan 1.8): null and {}
-// for a node that never reported them.
+// for a node that never reported them. owner_user_id (who paired it, null when unknown) lets the
+// web app offer Sign out to its owner; last_addr is never returned.
 func (n *nodeRow) response(now time.Time) map[string]any {
 	user := "default"
 	if n.user.Valid {
@@ -115,7 +126,7 @@ func (n *nodeRow) response(now time.Time) map[string]any {
 		"household_id": nullable(n.householdID), "online": n.online(now), "last_seen": lastSeen,
 		"last_seen_version": nullable(n.lastSeenVersion), "install_mode": nullable(n.installMode),
 		"git_sha": nullable(n.gitSHA), "is_busy": n.isBusy, "needs_k2": n.needsK2,
-		"node_kind": nullable(n.nodeKind), "capabilities": n.caps(),
+		"node_kind": nullable(n.nodeKind), "capabilities": n.caps(), "owner_user_id": nullableInt(n.ownerUserID),
 	}
 }
 
@@ -218,8 +229,8 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	}
 	ctx := r.Context()
 	now := m.now()
-	sets := []string{"last_seen = ?"}
-	args := []any{dbTime(now)}
+	sets := []string{"last_seen = ?", "last_addr = ?"}
+	args := []any{dbTime(now), peerAddr(r)}
 	var reported *string
 	if present {
 		if hasVersion {
@@ -360,9 +371,14 @@ func createdNode(id, room, user, voiceMode, key string) map[string]any {
 
 // insertNode writes the local row; on failure the auth registration is rolled back (legacy
 // left it orphaned, §3.1).
-func (m *Module) insertNode(ctx context.Context, tx *sql.Tx, id, room, user, voiceMode, householdID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO cc_nodes (node_id, room, "user", voice_mode, household_id, last_seen, contacted)
-		VALUES (?, ?, ?, ?, ?, ?, 0)`, id, room, user, voiceMode, householdID, dbTime(m.now()))
+// owner is who paired it (the provisioning token's minter), nil for the admin key.
+func (m *Module) insertNode(ctx context.Context, tx *sql.Tx, id, room, user, voiceMode, householdID string, owner *int64) error {
+	var by any
+	if owner != nil {
+		by = *owner
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO cc_nodes (node_id, room, "user", voice_mode, household_id, last_seen, contacted, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?)`, id, room, user, voiceMode, householdID, dbTime(m.now()), by)
 	return err
 }
 
@@ -402,7 +418,7 @@ func (m *Module) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		m.writeErr(w, err)
 		return
 	}
-	if err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error { return m.insertNode(ctx, tx, id, room, user, voice, hh) }); err != nil {
+	if err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error { return m.insertNode(ctx, tx, id, room, user, voice, hh, nil) }); err != nil {
 		_ = m.Nodes.DeactivateNode(context.WithoutCancel(ctx), id)
 		m.internalError(w, err)
 		return

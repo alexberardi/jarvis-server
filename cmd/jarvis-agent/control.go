@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -151,4 +152,23 @@ func exitCode(err error) int {
 		return exitNotSetUp
 	}
 	return 1
+}
+
+// signedOutToSetup turns a run that ended in node.ErrSignedOut into "not set up": it deletes
+// only the credentials file (decision 2026-10-14: agent.json and apps.json stay), opens the
+// setup page so someone can sign in again, and returns errNotSetUp, whose exit status no
+// supervisor restarts. Any other result passes through.
+func signedOutToSetup(err error, credsFile string, log *slog.Logger, openSetup func()) error {
+	if !errors.Is(err, node.ErrSignedOut) {
+		return err
+	}
+	if rmErr := os.Remove(credsFile); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+		log.Error("signed out, but couldn't delete the credentials", "path", credsFile, "err", rmErr)
+		return rmErr
+	}
+	log.Info("signed out of Jarvis Automation: credentials deleted, settings kept; opening the setup page")
+	if openSetup != nil {
+		openSetup()
+	}
+	return errNotSetUp{err}
 }

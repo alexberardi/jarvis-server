@@ -1,11 +1,13 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Download, ExternalLink, Laptop, Play, Puzzle, Smartphone } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
-import { extensionState, getNodeLiveness } from '@/api/nodes'
+import { Download, ExternalLink, Laptop, LogOut, Monitor, Play, Puzzle, Smartphone } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { getThisDevice } from '@/api/chat'
+import { extensionState, getNodeLiveness, signOutDevice } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { useAuth } from '@/hooks/useAuth'
-import { AGENT_START_URL, detectOS, extensionLabel, LINKS, OS_NAME, yourDevices } from '@/lib/addons'
+import { AGENT_START_URL, canSignOut, detectOS, extensionLabel, LINKS, OS_NAME, yourDevices } from '@/lib/addons'
 import { nodeLabel } from '@/lib/chatNode'
 import { errorMessage } from '@/lib/errors'
 import { timeAgo } from '@/lib/time'
@@ -17,6 +19,8 @@ export const DEVICE_POLL_MS = 10_000
 const card = 'rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5'
 const linkButton =
   'inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]'
+const dangerButton =
+  'inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60'
 const primaryButton =
   'inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90'
 
@@ -41,34 +45,105 @@ function External({ href, children, primary }: { href: string; children: ReactNo
   )
 }
 
-function DeviceRow({ n }: { n: NodeLiveness }) {
+/** SETTINGS_NOTE: node settings are end-to-end encrypted with a key only the phone app and the node hold. */
+export const SETTINGS_NOTE = 'Settings for this computer are managed in the Jarvis Automation mobile app (admins).'
+
+function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; maySignOut: boolean }) {
   const ext = extensionState(n)
+  const qc = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+  const signOut = useMutation({
+    mutationFn: () => signOutDevice(n.node_id),
+    onSuccess: () => {
+      setConfirming(false)
+      void qc.invalidateQueries({ queryKey: ['addons-nodes'] })
+      void qc.invalidateQueries({ queryKey: ['this-device'] })
+    },
+  })
+  const label = nodeLabel(n)
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 py-3">
-      <div className="min-w-0">
-        <p className="flex items-center gap-2 font-medium text-[var(--color-text)]">
-          <span
-            aria-hidden="true"
-            className={cn('h-2 w-2 shrink-0 rounded-full', n.online ? 'bg-green-500' : 'bg-[var(--color-text-muted)]')}
-          />
-          <span className="truncate">{nodeLabel(n)}</span>
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          {n.online ? 'Online' : `Offline${n.last_seen ? ` · last seen ${timeAgo(n.last_seen)}` : ''}`}
-          {' · '}
-          <span data-testid="extension-state">{extensionLabel(ext)}</span>
-        </p>
+    <li className="py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 font-medium text-[var(--color-text)]">
+            <span
+              aria-hidden="true"
+              className={cn('h-2 w-2 shrink-0 rounded-full', n.online ? 'bg-green-500' : 'bg-[var(--color-text-muted)]')}
+            />
+            <span className="truncate">{label}</span>
+            {here && (
+              <span className="shrink-0 rounded-full bg-[var(--color-surface-alt)] px-2 py-0.5 text-xs font-normal text-[var(--color-text-muted)]">
+                This computer
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            {n.online ? 'Online' : `Offline${n.last_seen ? ` · last seen ${timeAgo(n.last_seen)}` : ''}`}
+            {' · '}
+            <span data-testid="extension-state">{extensionLabel(ext)}</span>
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)]">{SETTINGS_NOTE}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {!n.online && (
+            <a href={AGENT_START_URL} className={linkButton} title="Works on the computer where the agent is installed">
+              <Play size={14} aria-hidden="true" />
+              Start
+            </a>
+          )}
+          {maySignOut && !confirming && (
+            <button type="button" className={linkButton} onClick={() => setConfirming(true)}>
+              <LogOut size={14} aria-hidden="true" />
+              Sign out
+            </button>
+          )}
+        </div>
       </div>
-      {/* TODO(webapp 01 P4): "Sign out" on a device needs cc's DELETE /admin/nodes/{id} on the
-          gateway (a new member route, so a tier change for review) and a decision on what the
-          agent does with the factory-reset it is sent. */}
-      {!n.online && (
-        <a href={AGENT_START_URL} className={linkButton} title="Works on the computer where the agent is installed">
-          <Play size={14} aria-hidden="true" />
-          Start
-        </a>
+      {confirming && (
+        <div role="group" aria-label={`Sign out ${label}`} className="mt-2 rounded-lg border border-[var(--color-border)] p-3 text-sm">
+          <p className="text-[var(--color-text)]">
+            Sign {label} out of Jarvis Automation? It stops working with Jarvis until someone signs in on it again. Its
+            settings on that computer are kept.
+          </p>
+          {signOut.isError && (
+            <p role="alert" className="mt-2 text-red-500">
+              {errorMessage(signOut.error, 'Could not sign it out')}
+            </p>
+          )}
+          <div className="mt-2 flex gap-2">
+            <button type="button" className={dangerButton} disabled={signOut.isPending} onClick={() => signOut.mutate()}>
+              {signOut.isPending ? 'Signing out...' : 'Sign out'}
+            </button>
+            <button type="button" className={linkButton} onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </li>
+  )
+}
+
+/**
+ * ThisComputer says which of the member's agents runs here (GET /api/addons/this-device). The
+ * server matches the page's TCP peer address with each agent's last heartbeat address; it is a
+ * hint for display and chat's default, and grants nothing.
+ */
+function ThisComputer({ device, cantTell, os }: { device: NodeLiveness | null; cantTell: boolean; os: keyof typeof OS_NAME }) {
+  if (device) {
+    return (
+      <p className="text-sm text-[var(--color-text)]" data-testid="this-computer">
+        This computer is <strong>{nodeLabel(device)}</strong>
+        {device.online ? ': the agent is running.' : ': the agent is installed but not running.'}
+      </p>
+    )
+  }
+  return (
+    <p className="text-sm text-[var(--color-text-muted)]" data-testid="this-computer">
+      {cantTell
+        ? `We can't tell which of your computers this is. If the agent isn't on it yet, download it for ${OS_NAME[os]}.`
+        : `No Jarvis agent on this computer yet. Download it for ${OS_NAME[os]}.`}
+    </p>
   )
 }
 
@@ -79,6 +154,12 @@ function DeviceRow({ n }: { n: NodeLiveness }) {
  */
 export default function AddonsPage() {
   const { state, households } = useAuth()
+  const hereQ = useQuery({
+    queryKey: ['this-device'],
+    queryFn: () => getThisDevice(),
+    refetchInterval: DEVICE_POLL_MS,
+    retry: false,
+  })
   const os = detectOS(navigator.userAgent, navigator.platform)
   const nodesQ = useQuery({
     queryKey: ['addons-nodes'],
@@ -90,6 +171,9 @@ export default function AddonsPage() {
     nodesQ.data ?? [],
     households.map((h) => h.id),
   )
+  const hereId = hereQ.data?.node_id ?? ''
+  const here = devices.find((n) => n.node_id === hereId) ?? null
+  const cantTell = hereQ.isError || (hereQ.data?.node_id == null && hereQ.data?.reason !== 'no_agents')
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -99,6 +183,22 @@ export default function AddonsPage() {
           Use Jarvis on your computers, in your browser and on your phone.
         </p>
       </div>
+
+      <Section title="This computer" icon={<Monitor size={18} aria-hidden="true" />}>
+        {hereQ.isLoading || nodesQ.isLoading ? (
+          <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
+        ) : (
+          <ThisComputer device={here} cantTell={cantTell} os={os} />
+        )}
+        {here && !here.online && (
+          <div className="mt-3">
+            <a href={AGENT_START_URL} className={linkButton}>
+              <Play size={14} aria-hidden="true" />
+              Start the agent
+            </a>
+          </div>
+        )}
+      </Section>
 
       <Section title="Desktop agent" icon={<Laptop size={18} aria-hidden="true" />}>
         <p className="mb-3 text-sm text-[var(--color-text-muted)]">
@@ -128,7 +228,7 @@ export default function AddonsPage() {
         ) : (
           <ul className="divide-y divide-[var(--color-border)]" aria-label="Your devices">
             {devices.map((n) => (
-              <DeviceRow key={n.node_id} n={n} />
+              <DeviceRow key={n.node_id} n={n} here={n.node_id === hereId} maySignOut={canSignOut(n, state.user?.id, households)} />
             ))}
           </ul>
         )}

@@ -502,18 +502,22 @@ func run(ctx context.Context, args []string) error {
 	} else if *voiceOn {
 		log.Info("voice: not supported on " + runtime.GOOS + " yet")
 	}
-	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: openSetupPage(log)}
+	setup := openSetupPage(log)
+	// Signed out (from Add-ons, an admin, or the menu's Sign out): drop node.json only, keep
+	// agent.json and apps.json, and open the setup page so someone can sign in again.
+	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, log, setup) }
+	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut}
 	sw.changed = ic.voiceChanged
 	if *noOverlay {
 		pill.Attach(nil)
 		if ic.off {
-			return r.Run(ctx)
+			return runNode(ctx)
 		}
 		// No island, but macOS's menu-bar icon still needs AppKit's loop on the main thread.
 		return island.RunLoop(ctx, log, appEvents(pill, log), func(loop bool) error {
 			ic.mainLoop = loop
 			defer ic.show(ctx)()
-			return r.Run(ctx)
+			return runNode(ctx)
 		})
 	}
 	// The island needs the main thread on macOS: island.Run keeps it and runs the agent on
@@ -533,7 +537,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		ic.mainLoop = i != nil // macOS: the island means AppKit's loop runs
 		defer ic.show(ctx)()
-		return r.Run(ctx)
+		return runNode(ctx)
 	})
 }
 
