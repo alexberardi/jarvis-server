@@ -1445,6 +1445,33 @@ which the watchdog turns into a failure.
 too); a publishing run (tag push or `publish: true`) fails, like the minisign step. Windows stays
 unsigned (ID9).
 
+**The desktop agent in the release (2026-10-13, [01-no-cli-plan](01-no-cli-plan.md) items 2.1 and
+2.6).** `build` also cross-compiles `jarvis-agent` (CGO_ENABLED=0, `-X main.version`) for the same
+four targets; `package` archives each as `jarvis-agent-<tag>-<os>-<arch>.tar.gz|.zip` (the binary,
+LICENSE, NOTICE) beside jarvisd's and lists all eight in the one `SHA256SUMS`, so the one minisign
+signature (trusted comment `jarvisd <tag> SHA256SUMS`, unchanged) covers them. jarvisd ignores the
+agent's lines (`archiveTag`, `verifySums` match jarvisd's archive names); `install.sh` now picks the
+line starting `jarvisd-` (the agent's archive ends in the same platform suffix and sorts first;
+`install.ps1` already filtered on the prefix), and CI's `install` job puts an agent line first in
+its lists to keep it so. `verify` starts each OS's agent with `version`, and `upgrade --verify-dir`
+must have checked an agent archive. The darwin agent is a bare ad-hoc binary until item 2.2 (app
+bundle, notarization). **`install-agent.sh`** (decided Q8; stamped with the tag like
+`install.sh`, a release asset outside `SHA256SUMS`) is the agent's one-liner for Fedora, Bazzite and
+Arch: Linux only, refuses root, reads `SHA256SUMS` for the `jarvis-agent-…-linux-<arch>` archive,
+requires the project signature when `minisign` runs (`JARVIS_REQUIRE_SIGNATURE=1` refuses without
+it), checks the SHA-256, runs the extracted agent's `version`, then `jarvis-agent install` (the
+per-user copy in `~/.local/lib/jarvis-agent`, login item, menu entry, native host, start), the
+same as the `.deb`'s first launch. A re-run of the installed version only re-runs `install`;
+`--uninstall [--purge]`; `--from-dir`/`--base-url` for a local release directory. Job
+`install-agent` (`scripts/install-agent-check.sh`, scratch HOME, `--files-only`) on Ubuntu amd64 and
+arm64 and in a `fedora:latest` container as a non-root user: install, no-download re-run, a
+tampered archive refused, uninstall; then with minisign the signature must verify (a release) or a
+foreign one be refused (a dry run). **Dry runs on pull requests** that touch the release workflow
+or the scripts: version `v0.0.0-pr<N>`, no Apple signing, `SHA256SUMS` signed by
+`scripts/testsign` with a throwaway key that only that run's binaries trust (`extraTrustedKey`), so
+the whole package → verify → install-agent chain runs without the project's keys; `publish` never
+runs for them.
+
 **Firewall.** With a Developer ID signature the application firewall's allow entry is keyed on a
 designated requirement that is the same for every release (identifier + team), so it survives
 upgrades; the §8.2 re-admit guard stays for ad-hoc builds. (Not exercised on a real upgrade yet:
