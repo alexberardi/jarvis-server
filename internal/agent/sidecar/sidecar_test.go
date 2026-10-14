@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -131,7 +132,7 @@ func TestSidecarStorageReachesTheAgentsSettings(t *testing.T) {
 	if !ok || out["api_key"] != "abc123" || out["nickname"] != "Ace" || out["last"] != "hello" {
 		t.Fatalf("user 7: %v", out)
 	}
-	if d := st.Data("secretive", "last", time.Now()); d["note"] != "hello" {
+	if d, _ := st.Data("secretive", "last", time.Now()); d.Value("note") != "hello" {
 		t.Fatalf("command data = %v", d)
 	}
 	// Another user has no nickname; the user is reset after each call.
@@ -142,5 +143,43 @@ func TestSidecarStorageReachesTheAgentsSettings(t *testing.T) {
 	out, _ = sc.Call(ctx, "secretive", nil, node.Request{})
 	if out["nickname"] != nil {
 		t.Fatalf("no user: %v", out)
+	}
+}
+
+// describe carries each command's data-browser settings (a command whose settings fail stays
+// out), and get_all hands a command each record's key and expiry, as the Pi's repository does.
+func TestSidecarDataBrowserSettingsAndGetAll(t *testing.T) {
+	py := python(t)
+	ctx := context.Background()
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp := time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC)
+	var rec nodesettings.Object
+	_ = json.Unmarshal([]byte(`{"zeta":"z","alpha":"a"}`), &rec)
+	_ = st.SaveData("journal", "j1", rec, &exp)
+	_ = st.SaveData("journal", "j0", rec, nil)
+	sc, err := Start(ctx, py, "testdata/browser", slog.New(slog.NewTextHandler(io.Discard, nil)), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	got := map[string]nodesettings.DataCommand{}
+	for _, c := range sc.DataCommands() {
+		got[c.Name] = c
+	}
+	if a := got["alarm"]; len(got) != 5 || a.Mode != "readonly" || a.StorageName != "alarm_store" || a.SupportsCreate ||
+		string(a.Fields) != `[{"name": "at", "type": "datetime"}]` || got["vault"].Mode != "disabled" || !got["notes"].SupportsCreate {
+		t.Fatalf("data commands = %+v", got)
+	}
+	out, _ := sc.Call(ctx, "journal", nil, node.Request{})
+	b, _ := json.Marshal(out["rows"])
+	if string(b) != `[["j1","2099-01-02T03:04:05+00:00",["zeta","alpha","_data_key","_expires_at"]],["j0",null,["zeta","alpha","_data_key","_expires_at"]]]` {
+		t.Fatalf("get_all = %s", b)
+	}
+	// The store's copy is untouched by what get_all added.
+	if d, _ := st.Data("journal", "j1", time.Now()); d.Len() != 2 {
+		t.Fatalf("stored record = %v", d.Keys())
 	}
 }

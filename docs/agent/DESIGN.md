@@ -1773,10 +1773,62 @@ a headless Pi. An admin opens the computer in the app's Nodes tab and taps Gener
   the app shows node settings to household admins; pushing and K2 provisioning need a member
   (cc's existing checks, unchanged).
 
-**Not built here.** The command-data browser over MQTT (`command-data/*`, the app's "Stored
-data" tab: the agent stores the data but doesn't answer the browser yet), package
-install/uninstall from the app, OAuth `auth:*` for sidecar packages, the Pi's voice and
-maintenance settings (`update_node_config`: a desktop's voice settings stay in `agent.json`).
+**Stored data (the app's command-data browser).** The app's "Stored data" tab lists, shows,
+edits, creates and deletes the records a command keeps through `JarvisStorage`. Command-center
+relays each call as one MQTT request on `jarvis/nodes/{id}/command-data/{op}` and waits 10 s for
+the answer on `…/response/{correlation_id}` ([cc/12](../cc/12-packages-and-command-data.md)
+§3.4). These requests are plain JSON on the Pi too, not K2-sealed. The agent subscribes to
+`command-data/+` and answers as `command_data_handler.py` does
+(`nodesettings.CommandData`): the same ops, payloads, error messages, visibility rules (rows
+with a `user_id` are that user's; the `requesting_user_id` comes from command-center), the
+200-row cap with `truncated`, `editable`/`create_only` filtering, and the "handler error" answer
+instead of a timeout. The commands are the sidecar's packages. `describe` carries each one's
+`data_browser_mode`, `data_browser_storage_name`, `data_browser_supports_create` and
+`editable_fields()` (FieldSpec dicts passed through untouched), read once at start. The sidecar
+runs `display_summary` (one round trip per list) and `data_browser_create`, which stamps the
+owner and saves through `JarvisStorage` back into the agent's store mid-request. A
+`ValueError` goes back as the command's message. The agent's built-in Go tools keep no
+`JarvisStorage` records, so they aren't listed. A Pi lists every command, including ones with
+nothing stored. A command the household turned off is left out of the list, as Pi discovery
+does.
+
+To give the same rows, the store keeps each record as an **ordered JSON object**
+(`nodesettings.Object`). Key order and number bytes survive, so integers past 2^53 stay exact.
+Records come back in first-save order, as the Pi's table returns them. Key order is visible
+because the SDK's default `display_summary` titles a row with its first string field.
+`get_all` now adds `_data_key` and `_expires_at` to each record, as the Pi's repository does.
+
+Two deliberate differences from the Pi:
+
+- **An edit from the app keeps the record's expiry.** The Pi's generic update re-saves without
+  `expires_at`, so an edited timer-like record never expires.
+- **A secrets push without `__user_id__` keeps each key's integration scope.** It does this even
+  when the same key also exists as some user's secret. The Pi's `get_secret_scope` looks for a
+  user row first and then calls `set_secret(scope="user")` with no user. That raises, and the
+  push stays pending for good. This happens after a "Sync to other nodes" of a mixed service
+  (below).
+
+**Secret Sync ("Sync to other nodes").** Sync is the app's own flow: the agent needs no new
+endpoint for it.
+
+- **Source:** the app asks the node for a snapshot with `include_values`. Command-center adds
+  the requesting user. The app reads the selected secrets' values from it.
+- **Target:** the app sends each selected node one `settings:secrets` config push. It adds
+  `__user_id__` when any selected secret is user-scoped.
+
+The agent does both through §16's snapshot and push code. `associated_service` and
+`setup_guide` now go into the snapshot, so a package's commands group into one service in the
+app as on a Pi. The service is the unit Sync copies. `tools/golden/export_sync.py` pins both ends
+against the Python node's `_build_secrets_list` and `_dispatch_secrets`.
+
+One app behaviour, the same on a Pi: when the selected secrets mix integration and user scope,
+`__user_id__` files **every** value under that user on the target. That includes the shared
+API key, which other members and integration reads then don't see.
+
+**Not built here.** Package install/uninstall from the app, OAuth `auth:*` for sidecar
+packages, the Pi's voice and maintenance settings (`update_node_config`: a desktop's voice
+settings stay in `agent.json`). There are also no command-specific update or delete paths:
+the Pi special-cases its reminder service (`set_reminder`), which a desktop doesn't have.
 
 **Verified (2026-10-14).** Unit: the goldens (Go seals byte-identical to the Python node; the
 mobile-format pushes the Python node decrypted open identically here), the relay (spoofed
@@ -1789,4 +1841,25 @@ decrypted with the app's AAD and format → two encrypted `settings:secrets` pus
 applied and acked → a mobile chat turn to that computer ran the package, which answered with
 both values → a `command_registry` push removed it from the node's tools. Not run: the mobile
 app's screens themselves against an agent.
+
+**Verified for Stored data and Sync (2026-10-14).**
+
+*Unit.* `testdata/command_data_golden.json` is the Python node's own `command_data_handler.py`,
+with its real repository and storage backend on SQLite (`tools/golden/export_command_data.py`).
+It answers 45 app requests over fixture packages: every op, every error message, ownership,
+expiry, the cap, read-only and disabled modes, default and custom creates, and a crashing create.
+The agent, with the same packages in a real sidecar, must give the same answers and key orders.
+`testdata/sync_golden.json` covers Sync. Live, on a sandbox jarvisd:
+
+- **Setup.** A real `jarvis-agent run` (scratch HOME, no display, no session bus) ran beside a
+  fake Pi. The fake Pi is the seeded kitchen node, running the Python node's own
+  `command_data_handler`, `handle_snapshot_request` and `process_pending_configs` behind a real
+  MQTT session. A test client made the app's exact HTTP calls (`commandDataApi.ts`,
+  `nodeSettingsApi.ts`, `configPushService.ts`, `handleSyncExecute`).
+- **Stored data.** K2 relayed to both nodes. 25 Stored-data calls returned identical status and
+  body from both nodes.
+- **Sync.** Pi to agent and agent to Pi, both with the integration key alone and with the whole
+  service. Each side ended up holding what the other sends.
+
+Not run: the mobile app's screens themselves against an agent.
 

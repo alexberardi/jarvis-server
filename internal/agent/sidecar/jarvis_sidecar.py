@@ -9,6 +9,10 @@ Loads IJarvisCommand classes from a directory and answers JSON-lines requests on
                                                           "on_response_complete"?}}}
     -> {"id": 3, "method": "complete", "params": {"token": "1"}}
     <- {"id": 3, "result": {"ran": true}}
+    -> {"id": 4, "method": "data_summaries", "params": {"command_name", "records": [{...}, ...]}}
+    <- {"id": 4, "result": {"summaries": [{"title", "subtitle", "icon"} | null, ...]}}
+    -> {"id": 5, "method": "data_create", "params": {"command_name", "fields", "requesting_user_id"}}
+    <- {"id": 5, "result": {"key", "record"} | {"rejected": "..."} | {"failed": "..."}}
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
 Storage (JarvisStorage: command secrets and command data) is the agent's, not this process's
@@ -134,15 +138,66 @@ def _secrets(cmd) -> list:
     return out
 
 
+def _browser(cmd):
+    """The command's mobile data-browser settings (command_data_handler.py reads the same), or
+    None when they can't be read: the command then stays out of the browser."""
+    try:
+        return {"mode": str(cmd.data_browser_mode), "storage_name": cmd.data_browser_storage_name,
+                "supports_create": bool(cmd.data_browser_supports_create),
+                "fields": [f.to_dict() for f in cmd.editable_fields()]}
+    except Exception as exc:
+        print(f"sidecar: {cmd.command_name}: data browser settings failed: {exc}", file=sys.stderr)
+        return None
+
+
+def _optional(cmd, attr):
+    """A snapshot extra (associated_service, setup_guide) that a command may not have."""
+    try:
+        return getattr(cmd, attr, None) or None
+    except Exception as exc:
+        print(f"sidecar: {cmd.command_name}: {attr} failed: {exc}", file=sys.stderr)
+        return None
+
+
 def describe(commands: dict) -> dict:
     tools = []
     for name, cmd in commands.items():
         try:
             tools.append({"name": name, "client_tool": cmd.to_openai_tool_schema(), "command": cmd.get_command_schema(),
-                          "secrets": _secrets(cmd)})
+                          "secrets": _secrets(cmd), "data_browser": _browser(cmd),
+                          "associated_service": _optional(cmd, "associated_service"),
+                          "setup_guide": _optional(cmd, "setup_guide")})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
     return {"tools": tools}
+
+
+def data_summaries(commands: dict, params: dict) -> dict:
+    """display_summary for each record of a browser list; None where it raised (the agent then
+    shows the Pi's fallback row)."""
+    cmd = commands.get(params.get("command_name", ""))
+    out = []
+    for record in params.get("records") or []:
+        try:
+            out.append(cmd.display_summary(record).to_dict())
+        except Exception as exc:
+            print(f"sidecar: display_summary failed: {exc}", file=sys.stderr)
+            out.append(None)
+    return {"summaries": out}
+
+
+def data_create(commands: dict, params: dict) -> dict:
+    """data_browser_create; the command stamps the owner and persists through JarvisStorage."""
+    cmd = commands.get(params.get("command_name", ""))
+    if cmd is None:
+        return {"rejected": "command not found"}
+    try:
+        key, record = cmd.data_browser_create(params.get("fields") or {}, params.get("requesting_user_id"))
+    except ValueError as exc:
+        return {"rejected": str(exc)}
+    except Exception as exc:
+        return {"failed": str(exc)}
+    return {"key": key, "record": record}
 
 
 # Deferred on_response_complete callables by token. Bounded: a token the agent never completes
@@ -226,6 +281,10 @@ def main() -> None:
                 reply = {"id": msg_id, "result": call(commands, msg.get("params") or {})}
             elif method == "complete":
                 reply = {"id": msg_id, "result": complete(msg.get("params") or {})}
+            elif method == "data_summaries":
+                reply = {"id": msg_id, "result": data_summaries(commands, msg.get("params") or {})}
+            elif method == "data_create":
+                reply = {"id": msg_id, "result": data_create(commands, msg.get("params") or {})}
             else:
                 reply = {"id": msg_id, "error": f"unknown method {method!r}"}
         except Exception as exc:
