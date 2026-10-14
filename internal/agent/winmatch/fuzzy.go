@@ -47,7 +47,7 @@ func fuzzyHits(cands []Candidate, q string) ([]bool, int) {
 }
 
 // nearApp: one of the app's names (whole, or a reverse-DNS id's last part) is near one of the
-// query's forms.
+// query's forms, by spelling or by sound (sound.go: "oh my right" for omawrite).
 func nearApp(apps []string, forms []string) bool {
 	for _, a := range apps {
 		for _, name := range []string{compact(a), compact(lastSeg(a))} {
@@ -55,7 +55,7 @@ func nearApp(apps []string, forms []string) bool {
 				continue
 			}
 			for _, f := range forms {
-				if Near(f, name) {
+				if Near(f, name) || SoundsLike(f, name) {
 					return true
 				}
 			}

@@ -1101,6 +1101,57 @@ near apps are `ambiguous_window`. A fuzzy pick is reported: the result carries
 `matched_app: "omawrite"`, `fuzzy_match: true`, `heard_as: "Omerite"`, the island says
 "Typing into Omawrite: …", and the agent logs "near spelling" with the app.
 
+**Sound-alikes (2026-10-14).** Speech-to-text also splits and respells a name it doesn't know:
+the user said "omawrite" again and it heard "Oh my right" (5 edits). `winmatch.SoundKey` reduces
+a name to roughly how it sounds (silent letters dropped, `wr`/`kn`/`ght` simplified, voiced and
+unvoiced pairs and m/n merged, each vowel run one vowel, a final vowel dropped): "omawrite",
+"Omerite" and "oh my right" are all `anarat`. An **equal key** (≥ 4 letters, a name ≥ 5) counts
+like a near spelling, in the same last tier and with the same one-app rule. A key **one edit
+away** (`SoundsNear`) is only ever a suggestion: "the oven" (`afan`) is one away from neovim
+(`nafan`), and an oven is a real thing to ask for, so it is never acted on.
+
+**Launching by a misheard name (2026-10-14).** "Can you open Omerite and drop down a note to
+update Steam?": the model called `desktop_list_apps`, got 62 names, didn't see Omawrite among
+them and asked the user. Matching was already the agent's job for windows; now it is for
+launching too, and the tool descriptions say so:
+
+- `desktop_open` resolves the name itself (`apps.Find`): exact, prefix, all words, a small
+  spelling distance, then an equal sound key; one app or `ambiguous`, never a guess. Its result
+  says `matched_app`, and for a near name `fuzzy_match: true` and `heard_as`. Not found carries
+  `suggestions` (spelling or sound, best first: "the oven" → Neovim) for the model to offer.
+  Its description says to pass the name as heard, even if it looks misspelled.
+- `desktop_list_apps {query}` is the lookup when the model wants one: `closest` (top 3 with a
+  0..1 score, spelling or sound) and `best_match` (+ `heard_as`) when the name resolves.
+- `jarvis-agent apps NAME` prints how a name resolves ("a near or sound-alike name for …").
+
+**App names stay out of the LLM prompt (user, 2026-10-14).** The prompt is already long. The
+model gets names on demand through the tools (the lookup above, or a failed open's
+suggestions), and the open and typing tools resolve misheard names themselves, so it rarely
+needs the lookup. Tool descriptions stay short for the same reason. Biasing speech-to-text with
+this computer's app names (whisper's initial prompt) is a separate input, not the LLM prompt,
+and is allowed, bounded.
+
+### Open, then type (2026-10-14)
+
+"Open omawrite and jot down a note …": `desktop_open` is fire-and-forget, so the
+`desktop_type_text {app}` that follows usually runs before the window exists. The agent keeps
+the last launch (`internal/agent/launches`: the app, when, and the window ids open just before
+it, from dictation's window lister). Typing into an app that has no window:
+
+- launched within the last minute, and the name is that app (as said, or misheard the way
+  `desktop_open` resolves it): wait up to 10 s, looking every 250 ms (`Tools.WindowWait`,
+  `Sleep` injected), for a window the name matches, or else the **one window that appeared
+  since the launch** (a terminal app such as Neovim runs in the terminal's window, which no
+  name matches). Several new windows and no name match keep waiting; none in time is
+  `app_not_ready` ("Omawrite was opened, but its window hasn't appeared yet"), nothing typed;
+- not launched, but installed (the catalogue resolves the name): `app_not_open`, "Nothing was
+  typed: Omawrite is installed but not open. Open it with desktop_open, then type." so the model
+  can open it first;
+- otherwise `window_not_found` as before.
+
+`jarvis-agent try TOOL ARGS TOOL ARGS …` runs several calls in one process, as a model's chain
+would (`try desktop_open '{"target":"Oh my right"}' desktop_type_text '{"app":"Omerite",…}'`).
+
 ### Failures the model can't misread
 
 A failed dictation call's `error` is a sentence that starts with the outcome, says why, and says
@@ -1334,6 +1385,19 @@ never in logs or results; password fields only when named.
   activation before the first key, the XWayland refusal creating no keyboard); the Lua
   dispatch fallback; the front window named; no focused window refused; an old extension's
   `unknown_command` for fill and click.
+
+- **Open, then type by a misheard name (nested headless sway, 2026-10-14):** fake catalogue in a
+  scratch HOME (Omawrite = `foot --app-id omawrite` running `cat > fileA`; Neovim = a plain
+  `foot` running `cat > fileB`, a terminal app's window), a focused `foot --app-id other`.
+  `try desktop_open '{"target":"Oh my right"}' desktop_type_text '{"app":"Omerite","text":"update
+  Steam","submit":true}'` → launched Omawrite (`fuzzy_match`, `heard_as: "Oh my right"`), typed
+  into the new window (`matched_app: omawrite`), fileA "update Steam⏎", the other window nothing.
+  `desktop_open NeoVim` then `desktop_type_text {app: NeoVim}` → typed into the one new window
+  (`into: Neovim`). `desktop_open "the oven"` → `app_not_found`, `suggestions: [Neovim]`, nothing
+  launched; typing into Steam (installed, not open) → `app_not_open`. Found on the way: a headless
+  sway with no input devices answers the virtual keyboard's `wl_seat.get_keyboard` (reading the
+  desktop's layout) with a protocol error; `vkbd` now asks only a seat whose capabilities include a
+  keyboard (and allocates no id otherwise: Wayland new ids must stay consecutive).
 
 ### Open questions (defaults chosen; the user reviews)
 

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/apps"
+	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/winmatch"
 )
@@ -41,9 +43,25 @@ type Tools struct {
 	// Show, when set, shows text on the island for d ("" clears it).
 	Show func(text string, d time.Duration)
 	Log  *slog.Logger
-	// Sleep waits between focus checks; nil: a real timer (tests pass one that returns at once).
+	// Sleep waits between focus and window checks; nil: a real timer (tests pass one that
+	// returns at once).
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Launched is desktop_open's launch record: typing into an app launched moments ago waits
+	// for its window (nil: never waits).
+	Launched *launches.Tracker
+	// Apps is the installed-app catalogue, to tell "not open" from "no such app" (nil: not told).
+	Apps func() ([]apps.App, error)
+	// WindowWait bounds the wait for a just-launched app's window (0: DefaultWindowWait).
+	WindowWait time.Duration
 }
+
+// Open, then type (DESIGN.md §14): a launch is fire-and-forget, so typing into an app launched
+// within LaunchRecent waits up to WindowWait for its window, checking every windowPoll.
+const (
+	LaunchRecent      = time.Minute
+	DefaultWindowWait = 10 * time.Second
+	windowPoll        = 250 * time.Millisecond
+)
 
 var appParam = node.Param{Name: "app", Type: "string",
 	Description: "The app or window to switch to first, in the user's words: \"claude\", \"slack\", \"the terminal\", " +
@@ -263,19 +281,119 @@ func (t *Tools) resolve(ctx context.Context, app string) (*target, error) {
 		}
 	}
 	m, err := winmatch.PickUniqueMatch(cands, app, focused)
+	var we *winmatch.Error
+	if err != nil && errors.As(err, &we) && we.Code == winmatch.CodeNotFound {
+		if l, ok := t.Launched.Recent(LaunchRecent); ok && launchedIs(l, app) {
+			return t.awaitWindow(ctx, app, l)
+		}
+		return nil, t.notOpen(app, err)
+	}
 	if err != nil {
 		return nil, err
 	}
-	c := cands[m.Index]
-	tg := &target{id: ws[m.Index].ID, name: winmatch.DisplayName(c), app: c.App(), fuzzy: m.Fuzzy, asked: strings.TrimSpace(app)}
+	return t.targetOf(ws[m.Index], app, m.Fuzzy), nil
+}
+
+func (t *Tools) targetOf(w Window, asked string, fuzzy bool) *target {
+	c := winmatch.Candidate{Apps: w.Apps, Title: w.Title, Recency: w.Recency, Visible: w.Visible}
+	tg := &target{id: w.ID, name: winmatch.DisplayName(c), app: c.App(), fuzzy: fuzzy, asked: strings.TrimSpace(asked)}
 	if i := strings.LastIndex(tg.app, "."); i >= 0 && i < len(tg.app)-1 {
 		tg.app = tg.app[i+1:]
 	}
-	if m.Fuzzy {
+	if fuzzy {
 		t.log().Info("dictation: near spelling", "app", tg.app)
 	}
-	return tg, nil
+	return tg
 }
+
+// launchedIs: the name the user gave is the app launched (as said, or misheard the way
+// desktop_open would resolve it).
+func launchedIs(l launches.Launch, asked string) bool {
+	_, err := apps.Find([]apps.App{{Name: l.Name, ID: l.ID}}, asked)
+	return err == nil
+}
+
+// awaitWindow waits for a just-launched app's window: one the name matches (as said, or the
+// launched app's own name), or else the one window that appeared since the launch (a
+// terminal app's window is the terminal's). Several new windows and no name match are
+// ambiguous; none within the wait is app_not_ready. Nothing is typed in either case.
+func (t *Tools) awaitWindow(ctx context.Context, asked string, l launches.Launch) (*target, error) {
+	wait := t.WindowWait
+	if wait <= 0 {
+		wait = DefaultWindowWait
+	}
+	tries := max(1, int(wait/windowPoll))
+	for i := 0; ; i++ {
+		ws, err := t.Win.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cands := make([]winmatch.Candidate, len(ws))
+		for j, w := range ws {
+			cands[j] = winmatch.Candidate{Apps: w.Apps, Title: w.Title, Recency: w.Recency, Visible: w.Visible}
+		}
+		for _, q := range []string{asked, l.Name} {
+			if m, err := winmatch.PickUniqueMatch(cands, q, -1); err == nil {
+				t.log().Info("dictation: waited for the launched app's window", "app", l.Name, "polls", i)
+				return t.targetOf(ws[m.Index], asked, m.Fuzzy || q != asked), nil
+			}
+		}
+		if l.Before != nil {
+			var fresh []Window
+			for _, w := range ws {
+				if !l.Before[w.ID] {
+					fresh = append(fresh, w)
+				}
+			}
+			if len(fresh) == 1 {
+				t.log().Info("dictation: the launched app's new window", "app", l.Name, "polls", i)
+				tg := t.targetOf(fresh[0], asked, false)
+				tg.name, tg.app = l.Name, l.Name
+				return tg, nil
+			}
+		}
+		if i+1 >= tries {
+			break
+		}
+		if err := t.sleep(ctx, windowPoll); err != nil {
+			return nil, err
+		}
+	}
+	return nil, &appError{code: CodeNotReady, app: l.Name,
+		msg: fmt.Sprintf("%s was opened, but its window hasn't appeared yet", l.Name)}
+}
+
+// notOpen turns "no window matches" into "that app is installed but not open" when the
+// catalogue knows the name, so the model can open it first.
+func (t *Tools) notOpen(asked string, notFound error) error {
+	if t.Apps == nil {
+		return notFound
+	}
+	list, err := t.Apps()
+	if err != nil {
+		return notFound
+	}
+	p, err := apps.Find(list, asked)
+	if err != nil {
+		return notFound
+	}
+	return &appError{code: CodeNotOpen, app: p.App.Name,
+		msg: fmt.Sprintf("%s is installed but not open", p.App.Name)}
+}
+
+// Error codes of a named app that has no window (yet).
+const (
+	CodeNotOpen  = "app_not_open"  // installed, no window: open it with desktop_open first
+	CodeNotReady = "app_not_ready" // launched moments ago, its window didn't appear in time
+)
+
+// appError is a named app with no window to type into.
+type appError struct {
+	code, app, msg string
+}
+
+func (e *appError) Error() string     { return e.msg }
+func (e *appError) ErrorCode() string { return e.code }
 
 // focus brings the target to the front and waits until it really is: typing into whatever
 // happened to be in front instead is the one thing this must never do.
@@ -289,26 +407,27 @@ func (t *Tools) focus(ctx context.Context, tg *target) error {
 	if err := t.Win.Focus(ctx, tg.id); err != nil {
 		return fmt.Errorf("%w: couldn't bring %s to the front (%v)", errFocus, tg.name, err)
 	}
-	sleep := t.Sleep
-	if sleep == nil {
-		sleep = func(ctx context.Context, d time.Duration) error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(d):
-				return nil
-			}
-		}
-	}
 	for range focusTries {
 		if active, err := t.Win.Active(ctx); err == nil && t.Win.Same(tg.id, active) {
 			return nil
 		}
-		if err := sleep(ctx, focusPoll); err != nil {
+		if err := t.sleep(ctx, focusPoll); err != nil {
 			return err
 		}
 	}
 	return fmt.Errorf("%w: asked %s to come to the front, but it didn't get the keyboard focus", errFocus, tg.name)
+}
+
+func (t *Tools) sleep(ctx context.Context, d time.Duration) error {
+	if t.Sleep != nil {
+		return t.Sleep(ctx, d)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 // front names the window in front, when the window backend can tell, so the result says

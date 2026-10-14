@@ -37,6 +37,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
+	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
@@ -608,7 +609,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), &screen.Tools{C: screen.Native(), Log: log}, dt}
+	tools := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), dt), &screen.Tools{C: screen.Native(), Log: log}, dt}
 	closeAll := func() {}
 	if !*f.noBrowser {
 		hub, stopBrowser := startBrowser(ctx, log)
@@ -639,7 +640,29 @@ func dictationTools(h *host.Host, mode string, log *slog.Logger) (*dictate.Tools
 	if err != nil {
 		return nil, err
 	}
-	return &dictate.Tools{KB: kb, Win: win, Confirm: &dictate.Confirmer{Mode: mode}, Log: log}, nil
+	return &dictate.Tools{KB: kb, Win: win, Confirm: &dictate.Confirmer{Mode: mode}, Log: log, Apps: appCatalogue(log)}, nil
+}
+
+// openThenType shares one launch record between desktop_open and dictation, so "open X and
+// type Y" waits for X's window (DESIGN.md §14).
+func openThenType(d *desktop.Tools, dt *dictate.Tools) *desktop.Tools {
+	tr := &launches.Tracker{}
+	if dt.Win != nil {
+		win := dt.Win
+		tr.Windows = func(ctx context.Context) ([]string, error) {
+			if ok, why := win.Available(ctx); !ok {
+				return nil, errors.New(why)
+			}
+			ws, err := win.List(ctx)
+			ids := make([]string, len(ws))
+			for i, w := range ws {
+				ids[i] = w.ID
+			}
+			return ids, err
+		}
+	}
+	d.Launched, dt.Launched = tr, tr
+	return d
 }
 
 // dictationStatus is status's line: the typing backend and whether named apps work.
@@ -761,7 +784,7 @@ func try(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ts := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
+	ts := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).
@@ -789,21 +812,29 @@ func try(ctx context.Context, args []string) error {
 		}
 		return nil
 	}
-	a := map[string]any{}
-	if fs.NArg() > 1 {
-		if err := json.Unmarshal([]byte(fs.Arg(1)), &a); err != nil {
-			return fmt.Errorf("arguments must be a JSON object: %w", err)
+	// TOOL [ARGS] [TOOL [ARGS] ...]: several calls run in order in this one process, as a
+	// model's chain would ("open X" then "type into X").
+	rest := fs.Args()
+	for len(rest) > 0 {
+		name := rest[0]
+		rest = rest[1:]
+		a := map[string]any{}
+		if len(rest) > 0 && strings.HasPrefix(strings.TrimSpace(rest[0]), "{") {
+			if err := json.Unmarshal([]byte(rest[0]), &a); err != nil {
+				return fmt.Errorf("arguments must be a JSON object: %w", err)
+			}
+			rest = rest[1:]
 		}
+		out, ok := ts.Call(ctx, name, a, node.Request{})
+		if !ok {
+			return fmt.Errorf("unknown tool %q", name)
+		}
+		if err := elideAttachments(out, *saveImages); err != nil {
+			return err
+		}
+		b, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(b))
 	}
-	out, ok := ts.Call(ctx, fs.Arg(0), a, node.Request{})
-	if !ok {
-		return fmt.Errorf("unknown tool %q", fs.Arg(0))
-	}
-	if err := elideAttachments(out, *saveImages); err != nil {
-		return err
-	}
-	b, _ := json.MarshalIndent(out, "", "  ")
-	fmt.Println(string(b))
 	return nil
 }
 
@@ -846,10 +877,14 @@ func appsCmd(args []string) error {
 		}
 		return nil
 	}
-	a, err := apps.Resolve(list, strings.Join(args, " "))
+	p, err := apps.Find(list, strings.Join(args, " "))
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s -> %s\n", a.Name, a.Path)
+	how := ""
+	if p.Fuzzy {
+		how = fmt.Sprintf(" (a near or sound-alike name for %q)", p.HeardAs)
+	}
+	fmt.Printf("%s -> %s%s\n", p.App.Name, p.App.Path, how)
 	return nil
 }

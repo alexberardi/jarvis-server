@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -19,9 +20,11 @@ import (
 )
 
 const (
-	// wl_seat.get_keyboard; wl_keyboard.keymap
-	opSeatGetKeyboard = 1
-	evKeyboardKeymap  = 0
+	// wl_seat.get_keyboard, wl_seat.capabilities (keyboard bit); wl_keyboard.keymap
+	opSeatGetKeyboard  = 1
+	evSeatCapabilities = 0
+	seatCapKeyboard    = 2
+	evKeyboardKeymap   = 0
 	// zwp_virtual_keyboard_manager_v1
 	opCreateVirtualKeyboard = 0
 	// zwp_virtual_keyboard_v1
@@ -149,8 +152,22 @@ func (k *Keyboard) Send(ctx context.Context, strokes []xkb.Stroke) error {
 	if !ok1 || !ok2 {
 		return errors.New("the compositor doesn't offer the virtual-keyboard protocol")
 	}
-	seat := c.Bind(reg, sg, 1, nil)
-	layout := k.desktopLayout(ctx, c, seat)
+	// A seat that has never had a keyboard (a headless compositor with no input devices)
+	// treats wl_seat.get_keyboard as a protocol error, so the layout is read only from a seat
+	// that says it has one; the capabilities event comes with the bind.
+	var caps atomic.Uint32
+	caps.Store(seatCapKeyboard) // a compositor that never says keeps the old behaviour
+	seat := c.Bind(reg, sg, 1, func(uint32) func(uint16, []byte) {
+		return func(op uint16, a []byte) {
+			if op == evSeatCapabilities {
+				caps.Store(wlwire.NewReader(a).U32())
+			}
+		}
+	})
+	if err := k.rt(ctx, c); err != nil {
+		return err
+	}
+	layout := k.desktopLayout(ctx, c, seat, caps.Load()&seatCapKeyboard != 0)
 	batches, err := xkb.Plan(strokes, layout)
 	if err != nil {
 		return err
@@ -246,7 +263,12 @@ func (e *NotOnLayoutError) ErrorCode() string { return "unsupported_characters" 
 // keyboard (the active keyboard's) when it is a whole layout, else the last one read, else US.
 // The active keyboard can be another virtual keyboard (an input method's, wtype's) holding a
 // fragment; that is never taken for the layout.
-func (k *Keyboard) desktopLayout(ctx context.Context, c *wlwire.Conn, seat uint32) *xkb.Layout {
+func (k *Keyboard) desktopLayout(ctx context.Context, c *wlwire.Conn, seat uint32, hasKeyboard bool) *xkb.Layout {
+	if !hasKeyboard {
+		// No id is allocated: new ids must stay consecutive, or the next bind is a protocol
+		// error.
+		return k.lastLayout(nil)
+	}
 	got := make(chan string, 1)
 	wk := c.NewID()
 	c.Handle(wk, func(op uint16, a []byte) {
@@ -285,6 +307,11 @@ func (k *Keyboard) desktopLayout(ctx context.Context, c *wlwire.Conn, seat uint3
 		}
 	default:
 	}
+	return k.lastLayout(l)
+}
+
+// lastLayout keeps l when it is a whole layout, and returns the last whole one read, else US.
+func (k *Keyboard) lastLayout(l *xkb.Layout) *xkb.Layout {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if l.Complete() {
