@@ -69,6 +69,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	prestart := fs.Bool("prestart", false, "internal: the systemd unit's privileged pre-start step")
 	helperMode := fs.Bool("helper", false, "internal: the macOS/Windows privileged upgrade helper")
 	owner := fs.String("owner", "", "internal: with --prestart/--helper, the account the home must belong to")
+	refresh := fs.Bool("refresh-definition", false, "internal: the privileged helper's refresh of the service definition after it installed this binary")
 	verifyDir := fs.String("verify-dir", "", "check a release directory (SHA256SUMS, its signature, the archives) against this build's keys and version, then exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -88,6 +89,10 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 	if *prestart || *helperMode {
 		// Privileged: before bootstrap, which would read the (service-writable) env file.
 		return runHelper(ctx, flagHome, *owner, *helperMode, os.Stderr)
+	}
+	if *refresh {
+		// Privileged too (the helper runs it), so also before bootstrap.
+		return runRefreshDefinition(ctx, flagHome, stdout)
 	}
 	if err := bootstrap(flagHome, false, os.Stderr); err != nil {
 		return err

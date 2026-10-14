@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -573,3 +574,144 @@ func TestLaunchdStaleDefinition(t *testing.T) {
 		t.Fatalf("changed plist: %+v", st)
 	}
 }
+
+// The privileged helper's refresh after an admin-button upgrade (01-no-cli-plan 1.3, Q7):
+// the unit is rewritten only when this build renders it differently, for the binary, home and
+// account it already names, and systemd reloads it only after the current start job.
+func TestSystemdRefreshDefinition(t *testing.T) {
+	s, f, _, root := testSystemd(t, false, 0)
+	home := filepath.Join(root, "data")
+	ctx := context.Background()
+	const bin = "/usr/local/bin/jarvisd"
+	if err := s.Install(ctx, InstallOptions{Binary: bin, Home: home}); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := os.ReadFile(s.unitPath)
+
+	// Current: nothing written, nothing reloaded.
+	f.calls = nil
+	res, err := s.refresh(ctx, bin, home)
+	if err != nil || len(res.Changed) != 0 || res.Reload || len(f.calls) != 0 {
+		t.Fatalf("current unit: %+v %v calls %q", res, err, f.calls)
+	}
+
+	// An older version's unit: rewritten as this build renders it, reload queued after jarvisd.
+	old := strings.Replace(string(current), "LockPersonality=yes\n", "", 1)
+	os.WriteFile(s.unitPath, []byte(old), 0o644)
+	res, err = s.refresh(ctx, bin, home)
+	if err != nil || len(res.Changed) != 1 || res.Changed[0] != s.unitPath {
+		t.Fatalf("old unit: %+v %v", res, err)
+	}
+	if got, _ := os.ReadFile(s.unitPath); string(got) != string(current) {
+		t.Fatalf("unit not rewritten:\n%s", got)
+	}
+	if st, err := os.Stat(s.unitPath); err != nil || st.Mode().Perm() != 0o644 {
+		t.Fatalf("unit mode %v %v", st, err)
+	}
+	if len(f.calls) != 1 || !strings.Contains(f.calls[0], "systemd-run --no-block") ||
+		!strings.Contains(f.calls[0], "--property=After="+unitName) || !strings.HasSuffix(f.calls[0], "systemctl daemon-reload") {
+		t.Fatalf("reload calls %q", f.calls)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "systemctl ") {
+			t.Fatalf("reloaded or restarted inside the start job: %q", c)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(s.unitPath)); len(entries) != 1 {
+		t.Fatalf("temp file left: %v", entries)
+	}
+
+	// The reload can't be queued: the unit is still written, and the note says what to run.
+	os.WriteFile(s.unitPath, []byte(old), 0o644)
+	f.calls = nil
+	f.hook = func(line string) {
+		if strings.Contains(line, "systemd-run") {
+			f.fail[line] = errors.New("no bus")
+		}
+	}
+	res, err = s.refresh(ctx, bin, home)
+	if err != nil || len(res.Changed) != 1 || !strings.Contains(res.Note, "daemon-reload") {
+		t.Fatalf("reload failure: %+v %v", res, err)
+	}
+	f.hook = nil
+
+	// Refusals: another binary, another home, a --user unit. Nothing is written.
+	os.WriteFile(s.unitPath, []byte(old), 0o644)
+	for _, c := range []struct{ bin, home string }{{"/opt/other/jarvisd", home}, {bin, "/elsewhere"}} {
+		if _, err := s.refresh(ctx, c.bin, c.home); err == nil {
+			t.Errorf("refresh(%q, %q) accepted", c.bin, c.home)
+		}
+	}
+	if got, _ := os.ReadFile(s.unitPath); string(got) != old {
+		t.Fatal("a refused refresh wrote the unit")
+	}
+	u, _, _, _ := testSystemd(t, true, 1000)
+	if _, err := u.refresh(ctx, bin, home); err == nil {
+		t.Error("refreshed a --user unit")
+	}
+}
+
+func TestLaunchdRefreshDefinition(t *testing.T) {
+	l, f, _, root := testLaunchd(t, 0, "user")
+	f.fail["launchctl print "+target] = errors.New("Could not find service")
+	ctx := context.Background()
+	const bin = "/usr/local/bin/jarvisd"
+	if err := l.Install(ctx, InstallOptions{Binary: bin, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "Users", "user", ".jarvisd")
+	plist, _ := os.ReadFile(l.plistPath)
+	helper, _ := os.ReadFile(l.helperPath)
+
+	res, err := l.refresh(bin, home)
+	if err != nil || len(res.Changed) != 0 || res.Reload {
+		t.Fatalf("current plists: %+v %v", res, err)
+	}
+
+	// The jarvisd plist an older version wrote: rewritten, and jarvisd must be reloaded.
+	os.WriteFile(l.plistPath, []byte(strings.Replace(string(plist), "<string>Interactive</string>", "<string>Standard</string>", 1)), 0o644)
+	res, err = l.refresh(bin, home)
+	if err != nil || !res.Reload || !slices.Equal(res.Changed, []string{l.plistPath}) {
+		t.Fatalf("old plist: %+v %v", res, err)
+	}
+	if got, _ := os.ReadFile(l.plistPath); string(got) != string(plist) {
+		t.Fatal("plist not rewritten")
+	}
+
+	// Only the updater's plist differs: rewritten, no reload of jarvisd.
+	os.WriteFile(l.helperPath, []byte(strings.Replace(string(helper), "<integer>120</integer>", "<integer>60</integer>", 1)), 0o644)
+	res, err = l.refresh(bin, home)
+	if err != nil || res.Reload || !slices.Equal(res.Changed, []string{l.helperPath}) || res.Note == "" {
+		t.Fatalf("old helper plist: %+v %v", res, err)
+	}
+	if got, _ := os.ReadFile(l.helperPath); string(got) != string(helper) {
+		t.Fatal("helper plist not rewritten")
+	}
+	if st, _ := l.Status(ctx); st.Stale {
+		t.Fatalf("stale after the refresh: %+v", st)
+	}
+
+	// A plist without HOME (an early version) gets the account's home from the user database.
+	os.WriteFile(l.plistPath, []byte(regexpHOME.ReplaceAllString(string(plist), "")), 0o644)
+	if res, err = l.refresh(bin, home); err != nil || !res.Reload {
+		t.Fatalf("plist without HOME: %+v %v", res, err)
+	}
+	if got, _ := os.ReadFile(l.plistPath); string(got) != string(plist) {
+		t.Fatalf("plist without HOME rewritten as:\n%s", got)
+	}
+
+	// Refusals: another binary or home. Nothing is written.
+	old := strings.Replace(string(plist), "<string>Interactive</string>", "<string>Standard</string>", 1)
+	os.WriteFile(l.plistPath, []byte(old), 0o644)
+	for _, c := range []struct{ bin, home string }{{"/opt/other/jarvisd", home}, {bin, "/elsewhere"}} {
+		if _, err := l.refresh(c.bin, c.home); err == nil {
+			t.Errorf("refresh(%q, %q) accepted", c.bin, c.home)
+		}
+	}
+	if got, _ := os.ReadFile(l.plistPath); string(got) != old {
+		t.Fatal("a refused refresh wrote the plist")
+	}
+}
+
+// regexpHOME matches the plist's EnvironmentVariables dict (HOME only).
+var regexpHOME = regexp.MustCompile(`\s*<key>EnvironmentVariables</key>\s*<dict>\s*<key>HOME</key>\s*<string>[^<]*</string>\s*</dict>`)

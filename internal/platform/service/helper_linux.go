@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -23,3 +24,15 @@ func StartHelper(context.Context) error {
 func RestartFromHelper(context.Context) error {
 	return errors.New("the systemd helper runs as part of the start")
 }
+
+// RefreshDefinition rewrites the system unit as this build renders it, when it differs (see
+// systemd.refresh). For the root pre-start helper, right after it installed this binary.
+func RefreshDefinition(ctx context.Context, exe, home string) (RefreshResult, error) {
+	if _, err := os.Stat(systemUnit); err != nil {
+		return RefreshResult{}, fmt.Errorf("no system unit to refresh: %w", err)
+	}
+	return newSystemd(false, nil).refresh(ctx, exe, home)
+}
+
+// ReloadFromHelper is for the on-demand helpers (macOS, Windows).
+func ReloadFromHelper(ctx context.Context) error { return RestartFromHelper(ctx) }

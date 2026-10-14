@@ -3,6 +3,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -419,6 +420,55 @@ func (s *systemd) staleness() string {
 		return "the unit restarts jarvisd after an admin stop (an older version wrote it); " + note
 	}
 	return "the unit differs from what this version writes (an older version wrote it); " + note
+}
+
+// refresh is RefreshDefinition for the system unit (01-no-cli-plan 1.3, decided Q7): run by
+// the binary the root pre-start helper has just installed and verified, it rewrites the unit
+// only when this build renders it differently, for the binary, home and account the unit
+// already names (it refuses a unit that runs another binary or home). It doesn't reload
+// systemd from inside jarvisd's own start job, which would re-read the command lines of a job
+// in progress: it queues a `systemctl daemon-reload` ordered after jarvisd.service, which
+// runs once this start is over, so the new unit applies from the next start.
+func (s *systemd) refresh(ctx context.Context, exe, home string) (RefreshResult, error) {
+	var res RefreshResult
+	if s.user {
+		return res, errors.New("a --user unit has no privileged helper to refresh it")
+	}
+	have, err := os.ReadFile(s.unitPath)
+	if err != nil {
+		return res, err
+	}
+	binary, installedHome, account := s.installed()
+	if binary != exe || installedHome != home {
+		return res, fmt.Errorf("%s runs %s with --home %s, not %s with %s; leaving it alone", s.unitPath, binary, installedHome, exe, home)
+	}
+	want, err := RenderSystemd(Unit{Binary: binary, Home: installedHome, Account: account})
+	if err != nil || bytes.Equal(have, want) {
+		return res, err
+	}
+	if err := replaceFile(s.unitPath, want, 0o644); err != nil {
+		return res, err
+	}
+	res.Changed = []string{s.unitPath}
+	if _, err := s.run(ctx, absBin("systemd-run"), "--no-block", "--quiet", "--collect",
+		"--unit=jarvisd-daemon-reload", "--property=After="+unitName,
+		"--description=Reload systemd units after a jarvisd upgrade", absBin("systemctl"), "daemon-reload"); err != nil {
+		res.Note = fmt.Sprintf("could not queue a reload (%v); it applies after `sudo systemctl daemon-reload` or a reboot", err)
+		return res, nil
+	}
+	res.Note = "systemd reloads it once this start is over; it applies from the next start"
+	return res, nil
+}
+
+// absBin is a system tool by absolute path (the privileged helper trusts no PATH): /usr/bin,
+// else /bin.
+func absBin(name string) string {
+	for _, d := range []string{"/usr/bin/", "/bin/"} {
+		if st, err := os.Stat(d + name); err == nil && st.Mode().IsRegular() {
+			return d + name
+		}
+	}
+	return "/usr/bin/" + name
 }
 
 // stopBlocker says why the admin Stop button can't keep jarvisd stopped under this unit ("" when

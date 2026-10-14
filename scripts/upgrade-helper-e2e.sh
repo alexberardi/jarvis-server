@@ -10,8 +10,10 @@
 # scripts/testsign. Steps:
 #   1. install v0.0.1 as a service from the protected directory (/usr/local/bin,
 #      %ProgramFiles%\jarvisd); `service status` names the helper;
-#   2. the admin button → v0.0.2: jarvisd stages it, wakes the helper, which re-verifies,
-#      swaps and restarts jarvisd; the new version passes its gate;
+#   2. the admin button → v0.0.2 over definitions an older version wrote: jarvisd stages it,
+#      wakes the helper, which re-verifies, swaps, has v0.0.2 rewrite the definitions
+#      (01-no-cli-plan 1.3; macOS reloads jarvisd's plist) and restarts jarvisd; the new
+#      version passes its gate and `service status` says definition_stale: false;
 #   3. the service account plants hostile staged upgrades; the helper refuses each one and the
 #      binary stays v0.0.2: an older release (genuinely signed), a newer release's signed
 #      checksum list over another archive, and (macOS) an archive symlinked out of the home;
@@ -203,6 +205,46 @@ apply() { # tag
   echo
 }
 
+say "1b. definitions an older version wrote (01-no-cli-plan 1.3)"
+# The helper rewrites them after the admin button's upgrade; stand in for older ones.
+JPLIST=/Library/LaunchDaemons/net.jarvisautomation.jarvisd.plist
+HPLIST=/Library/LaunchDaemons/net.jarvisautomation.jarvisd-updater.plist
+if [ "$OS" = darwin ]; then
+  # jarvisd's plist with an extra environment variable, loaded (so launchctl shows it), and
+  # the updater's with another ExitTimeOut (on disk only: the updater is running from it).
+  J service stop
+  sudo "$PY" - "$JPLIST" "$HPLIST" <<'PY'
+import sys
+j, h = sys.argv[1], sys.argv[2]
+s = open(j).read()
+s = s.replace("<key>HOME</key>", "<key>JARVIS_E2E_OLD_PLIST</key>\n\t\t<string>1</string>\n\t\t<key>HOME</key>", 1)
+open(j, "w").write(s)
+s = open(h).read()
+s = s.replace("<integer>120</integer>", "<integer>60</integer>", 1)
+open(h, "w").write(s)
+PY
+  J service start
+  J service status --wait 120s
+  sudo launchctl print system/net.jarvisautomation.jarvisd | grep -q JARVIS_E2E_OLD_PLIST || fail "the tampered plist isn't loaded"
+else
+  # Both services' command lines in another (working) order: --home first.
+  cat >"$WR/old-definitions.ps1" <<'PS'
+param([string]$Bin)
+$ErrorActionPreference = 'Stop'
+foreach ($c in @(@('jarvisd', 'serve'), @('jarvisd-updater', 'upgrade --helper'))) {
+  $path = '"' + $Bin + '" --home C:\ProgramData\jarvisd ' + $c[1]
+  $r = Get-CimInstance Win32_Service -Filter "Name='$($c[0])'" | Invoke-CimMethod -MethodName Change -Arguments @{PathName = $path}
+  if ($r.ReturnValue -ne 0) { throw "$($c[0]): Change returned $($r.ReturnValue)" }
+}
+PS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WR/old-definitions.ps1" -Bin "$NATIVE_BIN"
+  sc.exe qc jarvisd
+  sc.exe qc jarvisd-updater
+  sc.exe qc jarvisd | grep -q -- '--home C:\\ProgramData\\jarvisd serve' || fail "jarvisd's command line not changed"
+fi
+J service status --json | tee "$W/stale.json"
+[ "$(json 'd["definition_stale"]' <"$W/stale.json")" = True ] || fail "the older definitions aren't reported stale"
+
 say "2. the admin button: v0.0.2 through the helper"
 apply v0.0.2
 wait_version v0.0.2
@@ -213,6 +255,22 @@ ROLLEDBACK="$BINDIR/jarvisd.rolledback"
 [ "$OS" = windows ] && PREV="$BINDIR/jarvisd.prev.exe" && ROLLEDBACK="$BINDIR/jarvisd.rolledback.exe"
 [ "$(bin_version "$PREV")" = v0.0.1 ] || fail "jarvisd.prev is not v0.0.1"
 R grep -q "installed v0.0.2 (was v0.0.1)" "$HELPER_LOG" || fail "the helper didn't do the swap"
+say "2a. the helper rewrote the definitions as v0.0.2 writes them"
+R grep -q "rewrote the service definition" "$HELPER_LOG" || fail "the helper didn't refresh the definitions"
+J service status --json | tee "$W/fresh.json"
+[ "$(json 'd["definition_stale"]' <"$W/fresh.json")" = False ] || fail "definition_stale after the admin button"
+if [ "$OS" = darwin ]; then
+  if sudo launchctl print system/net.jarvisautomation.jarvisd | grep -q JARVIS_E2E_OLD_PLIST; then
+    fail "launchd still has the old jarvisd plist loaded"
+  fi
+  sudo grep -q JARVIS_E2E_OLD_PLIST "$JPLIST" && fail "jarvisd plist not rewritten"
+  sudo grep -q '<integer>120</integer>' "$HPLIST" || fail "updater plist not rewritten"
+else
+  sc.exe qc jarvisd
+  sc.exe qc jarvisd-updater
+  sc.exe qc jarvisd | grep -q -- 'serve --home C:\\ProgramData\\jarvisd' || fail "jarvisd's command line not rewritten"
+  sc.exe qc jarvisd-updater | grep -q -- 'upgrade --helper --home C:\\ProgramData\\jarvisd' || fail "the updater's command line not rewritten"
+fi
 if [ "$OS" = darwin ]; then
   [ "$(stat -f %Su "$BIN")" = root ] || fail "binary not root-owned"
   [ "$(stat -f %Su "$HOME_DIR/updates/last-upgrade.json")" = "$(id -un)" ] || fail "result not owned by the service account"
