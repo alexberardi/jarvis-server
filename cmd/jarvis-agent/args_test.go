@@ -8,16 +8,16 @@ import (
 
 func TestStrayArgsAreRefused(t *testing.T) {
 	fs, f := newRunFlags(flag.ContinueOnError)
-	// The user's case: everything after "--" was silently dropped, voice stayed off.
-	if err := fs.Parse([]string{"--", "--voice"}); err != nil {
+	// The user's case: everything after "--" was silently dropped (then: voice stayed off).
+	if err := fs.Parse([]string{"--", "--no-overlay"}); err != nil {
 		t.Fatal(err)
 	}
 	err := noStrayArgs(fs)
-	if err == nil || !strings.Contains(err.Error(), `jarvis-agent run --voice`) {
+	if err == nil || !strings.Contains(err.Error(), `jarvis-agent run --no-overlay`) {
 		t.Fatalf("got %v", err)
 	}
-	if *f.voiceOn {
-		t.Fatal("voice on")
+	if *f.noOverlay {
+		t.Fatal("--no-overlay applied")
 	}
 	fs, _ = newRunFlags(flag.ContinueOnError)
 	_ = fs.Parse([]string{"stray"})

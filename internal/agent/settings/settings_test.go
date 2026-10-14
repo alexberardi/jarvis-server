@@ -19,6 +19,7 @@ func runFlags() (*flag.FlagSet, map[string]any) {
 		"confirm-dictation": fs.String("confirm-dictation", "off", ""),
 		"no-browser":        fs.Bool("no-browser", false, ""),
 		"no-chimes":         fs.Bool("no-chimes", false, ""),
+		"no-tray":           fs.Bool("no-tray", false, ""),
 		"voice-input":       fs.String("voice-input", "default", ""),
 		"voice-output":      fs.String("voice-output", "default", ""),
 		"wake-threshold":    fs.Float64("wake-threshold", 0.4, ""),

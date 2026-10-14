@@ -33,8 +33,8 @@ Questions, bug reports and quick help: the project [Discord](https://discord.gg/
   open links and apps, volume, window list/focus/minimise/close, the user's own browser through the
   Jarvis Browser Control extension, reading the screen (Hyprland/sway and macOS), and dictation
   ("tell claude to run the tests", "fill in username abcde on browser", "click OK", "press
-  enter"). With `--voice`
-  (Linux, macOS) it listens for "hey jarvis" and shows a small on-screen indicator, the island.
+  enter"). On Linux and macOS it also listens for "Hey Jarvis" and shows a small on-screen
+  indicator, the island. Its status icon (menu bar, tray) turns listening on and off and quits it.
 - **On a Raspberry Pi** with the ReSpeaker 2-mics HAT it runs the voice pipeline, LEDs and button.
   This is the newest part and is still experimental: there is no Pi installer, provisioning
   hotspot, self-update or Pantry/Home Assistant package support yet. **The Python
@@ -138,7 +138,7 @@ permission grants (Accessibility, Microphone, Screen Recording) stick.
 
 ```sh
 scripts/agent-dev-run.sh --server http://<server>:7700 --email you@example.com   # first time; prompts for the password
-scripts/agent-dev-run.sh -- --voice           # later runs, with "hey jarvis" and the island
+scripts/agent-dev-run.sh                      # later runs ("Hey Jarvis", the island, the status icon)
 scripts/agent-dev-run.sh --install            # start at login instead (systemd user unit / LaunchAgent)
 ```
 
@@ -162,7 +162,8 @@ Or by hand:
 scripts/fetch-sherpa-libs.sh                  # once; embeds onnxruntime for the wake word
 CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent enroll --server http://<server>:7700 --email you@example.com
-./jarvis-agent run --voice                    # --no-overlay hides the island; --no-browser
+./jarvis-agent run                           # --no-overlay hides the island, --no-tray the icon; --no-browser
+./jarvis-agent stop                          # quit until the next login (the icon's menu: Quit)
 ./jarvis-agent status                         # what this host can do right now
 ```
 

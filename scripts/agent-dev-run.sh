@@ -20,8 +20,9 @@
 #   --browser         set up browser control (Firefox / Chrome-family extension + native host)
 #                     without asking; --no-browser: don't offer it. Default: ask when interactive
 #                     (on first enrollment, and on --install for the installed binary).
-#   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any, or -- --voice
-#                     (the "hey jarvis" pipeline; foreground runs only, --install doesn't pass flags)
+#   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any (foreground runs
+#                     only; --install doesn't pass flags). Listening for "Hey Jarvis" is on by
+#                     default: the status icon's menu turns it off.
 #
 # macOS: the build is "~/Applications/Jarvis Automation Agent.app", signed with your Developer ID (or
 # Apple Development) identity when the keychain has one, so the Accessibility grant survives

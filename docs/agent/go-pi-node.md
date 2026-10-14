@@ -407,7 +407,7 @@ input"; the golden tests never hit it because their stacks were already grown.
   wake 0.815, reply streamed and played through AudioQueue in real time (4.05 s). AudioQueue
   playback drains in real time; capture delivers buffers but **all zeros over SSH**: TCC gives
   sshd-launched processes silence for the microphone. A live mic test needs the bundle run
-  under launchd (`scripts/agent-dev-run.sh -- --voice`) and the user to click "Allow" on the
+  under launchd (`scripts/agent-dev-run.sh`) and the user to click "Allow" on the
   microphone prompt (`NSMicrophoneUsageDescription` is now in Info.plist; without it macOS kills
   the app on first capture).
 

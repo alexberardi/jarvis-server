@@ -33,6 +33,7 @@ const FileName = "agent.json"
 type Settings struct {
 	Voice            *bool    `json:"voice,omitempty"`
 	Island           *bool    `json:"island,omitempty"`
+	Tray             *bool    `json:"tray,omitempty"`
 	ConfirmDictation *string  `json:"confirm_dictation,omitempty"`
 	Browser          *bool    `json:"browser,omitempty"`
 	Chimes           *bool    `json:"chimes,omitempty"`
@@ -53,8 +54,9 @@ type Key struct {
 
 // Keys are every setting, in the order `config show` lists them.
 var Keys = []Key{
-	{"voice", "voice", false, `listen for "hey jarvis" (Linux, macOS)`, func(s *Settings) any { return &s.Voice }},
+	{"voice", "voice", false, `listen for "Hey Jarvis" (Linux, macOS; the menu's toggle sets it)`, func(s *Settings) any { return &s.Voice }},
 	{"island", "no-overlay", true, "show the on-screen indicator (voice states, the \"Jarvis is running\" pill)", func(s *Settings) any { return &s.Island }},
+	{"tray", "no-tray", true, "show the status icon and its menu (menu bar, tray, notification area)", func(s *Settings) any { return &s.Tray }},
 	{"confirm_dictation", "confirm-dictation", false, "ask before dictation acts: off, submit or all", func(s *Settings) any { return &s.ConfirmDictation }},
 	{"browser", "no-browser", true, "serve the browser extension (browser_* tools)", func(s *Settings) any { return &s.Browser }},
 	{"chimes", "no-chimes", true, "play the wake and error chimes", func(s *Settings) any { return &s.Chimes }},

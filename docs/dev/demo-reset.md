@@ -60,7 +60,7 @@ The agent's enrollment belongs to the old database, so enroll again with `--forc
 
 ```sh
 dist/jarvis-agent enroll --force --server http://localhost:7700 --email test@jarvisautomation.io
-scripts/agent-dev-run.sh -- --voice
+scripts/agent-dev-run.sh
 ```
 
 If `dist/jarvis-agent` doesn't exist yet, run `scripts/agent-dev-run.sh` once to build it. It

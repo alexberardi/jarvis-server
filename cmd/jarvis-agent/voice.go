@@ -13,11 +13,12 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
 )
 
-// voiceFlags are shared by `run --voice` and `listen`.
+// voiceFlags are shared by `run` and `listen`.
 type voiceFlags struct {
 	input, output string
 	models        string
@@ -228,8 +229,8 @@ func printExchange(e voice.Exchange) {
 	fmt.Println()
 }
 
-// voiceStatus is the `status` line: whether this build/OS can do voice and whether the
-// models are in place.
+// voiceStatus is the `status` line: whether this build/OS can do voice, whether listening is
+// on (agent.json's voice, set by the status icon's toggle), and whether the models are in place.
 func voiceStatus() string {
 	if !voice.Supported {
 		return fmt.Sprintf("not supported on %s yet", runtime.GOOS)
@@ -242,10 +243,28 @@ func voiceStatus() string {
 	models := "wake models ready"
 	if err := voice.CheckWakeModels(dir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			models = "wake models not downloaded yet (fetched on first `run --voice`)"
+			models = "wake models not downloaded yet (fetched when listening first starts)"
 		} else {
 			models = err.Error()
 		}
 	}
-	return fmt.Sprintf("available (%s audio; %s in %s); off unless run with --voice", device.Backend(), models, dir)
+	return fmt.Sprintf("%s (%s audio; %s in %s)", listeningState(voiceSetting()), device.Backend(), models, dir)
+}
+
+// voiceSetting is whether run listens: agent.json's voice, else the default.
+func voiceSetting() bool {
+	on := voiceByDefault
+	if p, err := settings.DefaultPath(); err == nil {
+		if s, _, err := settings.Load(p); err == nil && s.Voice != nil {
+			on = *s.Voice
+		}
+	}
+	return on
+}
+
+func listeningState(on bool) string {
+	if on {
+		return `listening for "Hey Jarvis"`
+	}
+	return `not listening: turn on "Listen for \"Hey Jarvis\"" in the Jarvis Automation menu`
 }
