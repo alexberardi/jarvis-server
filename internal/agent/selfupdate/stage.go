@@ -60,10 +60,14 @@ func (u *Updater) Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 		return nil, err
 	}
 	u.progress("testing", 0)
-	if err := u.unpackAndCheck(f, filepath.Join(dir, "check")); err != nil {
+	check := filepath.Join(dir, "check")
+	if u.Target.GOOS == "windows" {
+		check += ".exe" // Windows runs only what is named as a program
+	}
+	if err := u.unpackAndCheck(f, check); err != nil {
 		return fail(err)
 	}
-	_ = os.RemoveAll(filepath.Join(dir, "check")) // Swap unpacks again, from the re-verified archive
+	_ = os.RemoveAll(check) // Swap unpacks again, from the re-verified archive
 	m := &Marker{State: StateStaged, From: u.Current, To: o.Target, Exe: u.Target.Exe, Bundle: u.Target.Bundle,
 		Asset: name, TaskID: o.TaskID, By: o.By, Force: o.Force, At: u.now().UTC()}
 	if err := writeMarker(u.Paths, m); err != nil {
