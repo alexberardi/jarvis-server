@@ -3,6 +3,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -344,6 +345,70 @@ func (l *launchd) staleness() string {
 		return l.helperPath + " differs from what this version writes; " + staleNote
 	}
 	return ""
+}
+
+// refresh is RefreshDefinition for the two LaunchDaemons (01-no-cli-plan 1.3): run by the
+// binary the root helper has just installed and verified, it rewrites each plist this build
+// renders differently, for the binary, home and account the jarvisd plist already names (it
+// refuses one that runs another binary or home). launchd keeps a job's loaded plist until it
+// is booted out, so a rewritten jarvisd plist sets Reload for the helper's restart. The
+// updater's own plist can't be reloaded by the updater (booting itself out ends it), so a
+// change there applies when launchd next loads it: at boot, or the next `service install`.
+func (l *launchd) refresh(exe, home string) (RefreshResult, error) {
+	var res RefreshResult
+	p := l.installed()
+	if p.Binary != exe || p.Home != home {
+		return res, fmt.Errorf("%s runs %s with --home %s, not %s with %s; leaving it alone", l.plistPath, p.Binary, p.Home, exe, home)
+	}
+	if p.UserName == "" {
+		return res, fmt.Errorf("%s has no UserName this version can read; leaving it alone", l.plistPath)
+	}
+	if p.UserHome == "" {
+		// An early plist without HOME: the account's home, as `service install` sets it.
+		u, err := l.lookupUser(p.UserName)
+		if err != nil {
+			return res, fmt.Errorf("account %s: %w", p.UserName, err)
+		}
+		p.UserHome = u.HomeDir
+	}
+	have, err := os.ReadFile(l.plistPath)
+	if err != nil {
+		return res, err
+	}
+	want, err := RenderLaunchd(p)
+	if err != nil {
+		return res, err
+	}
+	if !bytes.Equal(have, want) {
+		if err := replaceFile(l.plistPath, want, 0o644); err != nil {
+			return res, err
+		}
+		res.Changed = append(res.Changed, l.plistPath)
+		res.Reload = true
+	}
+	helperWant, err := RenderLaunchdHelper(HelperPlist{Binary: p.Binary, Home: p.Home, UserName: p.UserName})
+	if err != nil {
+		return res, err
+	}
+	if helperHave, err := os.ReadFile(l.helperPath); err != nil || !bytes.Equal(helperHave, helperWant) {
+		if err := replaceFile(l.helperPath, helperWant, 0o644); err != nil {
+			return res, err
+		}
+		res.Changed = append(res.Changed, l.helperPath)
+		res.Note = HelperLabel + "'s new plist applies when launchd next loads it (at boot)"
+	}
+	return res, nil
+}
+
+// reloadFromHelper restarts jarvisd on a rewritten plist: bootout, then Start (bootstrap,
+// enable, kickstart).
+func (l *launchd) reloadFromHelper(ctx context.Context) error {
+	if l.loaded(ctx) {
+		if err := l.bootout(ctx); err != nil {
+			return err
+		}
+	}
+	return l.Start(ctx)
 }
 
 // stopBlocker says why the admin Stop button can't keep jarvisd stopped under this

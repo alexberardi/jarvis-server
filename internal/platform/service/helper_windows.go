@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -157,3 +158,63 @@ func RestartFromHelper(ctx context.Context) error {
 	}
 	return nil
 }
+
+// RefreshDefinition re-registers the jarvisd and jarvisd-updater services where this build
+// registers them differently (the comparison `service status` makes), for the binary and home
+// the jarvisd service already runs (01-no-cli-plan 1.3). For the LocalSystem helper, right
+// after it installed this binary. The SCM applies a changed configuration at the service's
+// next start: the helper restarts jarvisd next, and its own change applies when it is next
+// started. Nothing in the home is touched (no ACLs, no env file): the helper treats it as
+// untrusted.
+func RefreshDefinition(_ context.Context, exe, home string) (RefreshResult, error) {
+	var res RefreshResult
+	m, err := connect()
+	if err != nil {
+		return res, err
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(Name)
+	if err != nil {
+		return res, ErrNotInstalled
+	}
+	defer s.Close()
+	cur, err := s.Config()
+	if err != nil {
+		return res, err
+	}
+	args := splitCommandLine(cur.BinaryPathName)
+	installedHome := homeFromArgs(args)
+	if len(args) == 0 || !strings.EqualFold(args[0], exe) || !strings.EqualFold(installedHome, home) {
+		return res, fmt.Errorf("the %s service runs %q, not %s with --home %s; leaving it alone", Name, cur.BinaryPathName, exe, home)
+	}
+	binary := args[0]
+	if commandLine(binary, args[1:]...) != commandLine(binary, serviceArgs(installedHome)...) || !strings.EqualFold(cur.ServiceStartName, WindowsAccount) {
+		cfg := serviceConfig(installedHome)
+		cfg.ServiceType = cur.ServiceType
+		cfg.BinaryPathName = commandLine(binary, serviceArgs(installedHome)...)
+		if err := s.UpdateConfig(cfg); err != nil {
+			return res, fmt.Errorf("update %s: %w", Name, err)
+		}
+		res.Changed = append(res.Changed, Name)
+		res.Reload = true
+	}
+	h, err := m.OpenService(HelperName)
+	stale := err != nil
+	if err == nil {
+		c, err := h.Config()
+		stale = err != nil || !strings.EqualFold(c.BinaryPathName, commandLine(binary, helperArgs(installedHome)...)) ||
+			!strings.EqualFold(c.ServiceStartName, "LocalSystem")
+		h.Close()
+	}
+	if stale {
+		if err := installHelper(m, binary, installedHome, nil); err != nil {
+			return res, err
+		}
+		res.Changed = append(res.Changed, HelperName)
+		res.Note = HelperName + "'s new configuration applies from its next start"
+	}
+	return res, nil
+}
+
+// ReloadFromHelper is RestartFromHelper: the SCM reads the new configuration at the start.
+func ReloadFromHelper(ctx context.Context) error { return RestartFromHelper(ctx) }

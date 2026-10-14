@@ -839,8 +839,9 @@ does; the service account can read it): without `RestartPreventExitStatus=98` / 
 the admin reports `capabilities.stop: false` with the reason and `sudo jarvisd service install` (or
 `--user`) as the fix, and `POST /api/system/stop` answers 409 instead of exiting. `service status`
 reports such a definition as stale ("restarts jarvisd after an admin stop"), so `jarvisd upgrade`
-rewrites it (`refreshDefinition`). The one-click admin update does not refresh definitions, so an
-install upgraded only that way keeps Stop unavailable until `service install` runs. Windows needs
+rewrites it (`refreshDefinition`). Since 2026-10-13 the one-click admin update refreshes it too,
+through the privileged helper (§8.2 "An upgrade started from the admin page"); an install upgraded
+that way by an older helper keeps Stop unavailable until `service install` runs. Windows needs
 nothing: every version registered the service the same way. Drop-ins (`systemctl edit jarvisd`) are not
 read: an override that resets `RestartPreventExitStatus=` would make the stop a restart.
 
@@ -1130,10 +1131,32 @@ can't know what the new one writes):
   after a successful upgrade (`refreshDefinition`): with root (or `--user`) it runs the new binary's
   `service install`; without (the admin's or a helper-driven upgrade) it prints the stale reason. The
   definition refresh restarts jarvisd a second time; it only happens when something differs.
-- Not covered: an upgrade started from the admin page leaves a stale definition until someone runs the
-  script or `sudo jarvisd service install` (the unprivileged service can't write it; `service status`
-  says so). The Linux pre-start runs as root and could re-render the unit itself, but rewriting the unit
-  from inside its own start job was judged not worth the risk.
+- An upgrade started from the admin page (2026-10-13, [01-no-cli-plan](01-no-cli-plan.md) item 1.3):
+  the unprivileged service can't write its definition, so the **privileged helper** refreshes it.
+  Right after a verified swap (never after a rollback) it runs the binary it just installed:
+  `<exe> upgrade --refresh-definition --home <home>` (internal; handled before bootstrap, so no env
+  file is read; refuses without root/Administrator). That binary compares each definition with what
+  it renders for the binary path, home and account the installed one already names (it refuses a
+  definition that runs another binary or home), rewrites only what differs (temp file + rename) and
+  prints what it changed as JSON for the helper's log. Per OS:
+  - *Linux* (decided Q7: the earlier "not worth the risk" is overridden for this case only): the root
+    `ExecStartPre` writes the unit but doesn't reload systemd inside jarvisd's own start job (a reload
+    there re-reads the command lines of the job in progress). It queues `systemd-run --no-block
+    --unit=jarvisd-daemon-reload --property=After=jarvisd.service systemctl daemon-reload`, which runs
+    once the start is over; the new unit applies from the next start. If the queueing fails the unit is
+    still written and the log says to run `sudo systemctl daemon-reload`.
+  - *macOS*: a rewritten jarvisd plist makes the helper restart jarvisd with `bootout` + `bootstrap`
+    instead of `kickstart -k` (which keeps the loaded plist), so it applies at once. The updater's own
+    plist is written but applies when launchd next loads it (at boot, or the next `service install`):
+    the updater can't boot itself out and back in.
+  - *Windows*: `UpdateConfig` on the jarvisd service (applied by the helper's restart) and, through
+    `installHelper`, on `jarvisd-updater` (applied at its next start). Nothing in the home is touched
+    (no `icacls`, no env file).
+  A refresh that fails is logged and the upgrade stands; `service status` still says outdated. After a
+  rollback the definition stays the newer version's (the restored binary's `service status` may say
+  outdated; the next upgrade refreshes it). Not covered: a jarvisd that swaps itself in process
+  (unsupervised, `--user`, or a Mac whose `/usr/local/bin` the login user owns) has no root to write
+  a system definition.
 - CI `install` job (all three OSes): builds `v0.0.0-old-ci` from the `v0.1.0-rc4` tag (no updater, unit
   without `--owner`), installs it, checks this build's `service status --json` says stale, re-runs the
   script with `…/next` and asserts the healthy upgrade, the "Updating the jarvisd service definition"

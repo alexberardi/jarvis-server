@@ -26,3 +26,25 @@ func RestartFromHelper(ctx context.Context) error {
 	_, err := execRun(ctx, "/bin/launchctl", "kickstart", "-k", target)
 	return err
 }
+
+// helperLaunchd is the launchd manager as the root helper uses it: launchctl by absolute path.
+func helperLaunchd() *launchd {
+	l := newLaunchd(nil)
+	l.run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "launchctl" {
+			name = "/bin/launchctl"
+		}
+		return execRun(ctx, name, args...)
+	}
+	return l
+}
+
+// RefreshDefinition rewrites the LaunchDaemon plists this build renders differently (see
+// launchd.refresh). For the root helper, right after it installed this binary.
+func RefreshDefinition(_ context.Context, exe, home string) (RefreshResult, error) {
+	return helperLaunchd().refresh(exe, home)
+}
+
+// ReloadFromHelper restarts jarvisd on its rewritten plist (bootout, bootstrap, kickstart):
+// RestartFromHelper's kickstart -k would keep the plist launchd has loaded.
+func ReloadFromHelper(ctx context.Context) error { return helperLaunchd().reloadFromHelper(ctx) }

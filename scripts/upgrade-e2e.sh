@@ -13,7 +13,8 @@
 #                                                 → exits non-zero, rolled back to v0.0.2;
 #   4. the admin button: setup → enable updates → POST /api/update/apply {v0.0.4} → v0.0.4
 #      (system mode: the service account can't write /usr/local/bin, so the unit's
-#      ExecStartPre=+ helper swaps it in);
+#      ExecStartPre=+ helper swaps it in; it also rewrites a unit an older version wrote,
+#      and systemd loads it once that start is over: definition_stale is false after);
 #   5. `jarvisd upgrade --rollback`               → v0.0.2 again, jarvisd.rolledback = v0.0.4;
 # and uninstalls.
 set -euo pipefail
@@ -152,6 +153,16 @@ wait_version v0.0.2
 # The crash loop used several of the unit's StartLimitBurst starts; start the count afresh.
 if [ "$MODE" = system ]; then sudo systemctl reset-failed jarvisd; else systemctl --user reset-failed jarvisd; fi
 
+if [ "$MODE" = system ]; then
+  # 01-no-cli-plan 1.3: a unit an older version wrote is refreshed by the root helper after the
+  # admin button's upgrade. Stand in for one: drop a line this version writes.
+  say "an older version's unit (no LockPersonality=)"
+  sudo sed -i '/^LockPersonality=yes$/d' /etc/systemd/system/jarvisd.service
+  sudo systemctl daemon-reload
+  [ "$(systemctl show jarvisd -p LockPersonality --value)" = no ] || fail "the tampered unit isn't loaded"
+  J service status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["definition_stale"], d'
+fi
+
 say "4. the admin button: POST /api/update/apply v0.0.4"
 # /health can answer before the auth module has written the token; the file is the signal.
 for _ in $(seq 1 60); do R test -s "$HOME_DIR/setup-token" && break; sleep 1; done
@@ -171,6 +182,18 @@ echo
 [ "$(R "$BIN.prev" version)" = v0.0.2 ] || fail "jarvisd.prev is not v0.0.2"
 if [ "$MODE" = system ]; then
   sudo journalctl -u jarvisd --no-pager | grep -q 'prestart: installed v0.0.4' || fail "the ExecStartPre helper didn't swap"
+  say "4a. the helper rewrote the unit (v0.0.4's), and systemd loaded it after the start"
+  sudo journalctl -u jarvisd --no-pager | grep -q 'rewrote the service definition' || fail "the helper didn't refresh the unit"
+  J service status --json | tee "$W/status.json"
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert not d["definition_stale"], d' "$W/status.json" ||
+    fail "definition_stale after the admin button"
+  grep -qx 'LockPersonality=yes' /etc/systemd/system/jarvisd.service || fail "unit not rewritten"
+  for _ in $(seq 1 60); do
+    [ "$(systemctl show jarvisd -p NeedDaemonReload --value)" = no ] && [ "$(systemctl show jarvisd -p LockPersonality --value)" = yes ] && break
+    sleep 1
+  done
+  [ "$(systemctl show jarvisd -p NeedDaemonReload --value)" = no ] || fail "systemd never reloaded the rewritten unit"
+  [ "$(systemctl show jarvisd -p LockPersonality --value)" = yes ] || fail "the loaded unit is still the old one"
 fi
 
 say "4b. the restart button"
