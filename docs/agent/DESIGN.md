@@ -1398,7 +1398,7 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
   the next login or `start`.
 - **Hide the icon:** `--no-tray`, or agent.json `tray: false`. `status` prints a `menu icon:` line.
 
-**Backends.** Linux and macOS are built; the Windows backend lands next.
+**Backends.** All three are built.
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
@@ -1438,3 +1438,13 @@ with `--no-overlay` showed the icon; a `kill -9` was restarted by launchd; `jarv
 left the job `not running`, `last exit code = 0`, past launchd's 10 s throttle, and the icon
 gone. Not seen with eyes: no Screen Recording grant for a screenshot. A test copy runs with
 `JARVIS_AGENT_NO_AX_PROMPT=1` so it doesn't ask for Accessibility.
+
+**Windows (2026-10-13).** `internal/agent/tray/win_windows.go` (syscalls): a hidden top-level
+window on a locked thread of its own owns the icon (`Shell_NotifyIconW`, the shield as an HICON
+at the small-icon size from a 32-bit DIB) and runs its message loop; a left or right click builds
+the menu from the current items (`TrackPopupMenu` with `TPM_RETURNCMD`, after
+`SetForegroundWindow` so it closes on a click away) and hands the command to a goroutine;
+`TaskbarCreated` (Explorer restarted) adds the icon again. No voice toggle (voice isn't on Windows
+yet). **Built and vetted only**, plus CI on the Windows runner (struct layouts, a real HICON);
+`JARVIS_TRAY_WIN_LIVE=1` adds the icon on a real desktop and is opt-in. Not run on a Windows
+desktop.

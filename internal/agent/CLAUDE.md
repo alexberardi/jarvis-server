@@ -135,7 +135,8 @@ internal/agent/
   tray/               the status icon and its menu (DESIGN.md §15): the menu as data (tray.go),
                       the shield icon + macOS template (icon.go), StatusNotifierItem + dbusmenu
                       over godbus (sni_linux.go), NSStatusItem over purego in the island's AppKit
-                      loop (mac_darwin.go); `cmd/jarvis-agent/voiceswitch.go` is the live
+                      loop (mac_darwin.go), Shell_NotifyIconW on its own window thread
+                      (win_windows.go); `cmd/jarvis-agent/voiceswitch.go` is the live
                       voice toggle
   island/             the on-screen voice indicator (DESIGN.md §11) and dictation's note (Note):
                       pure-Go renderer (render.go),
