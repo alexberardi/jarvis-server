@@ -47,6 +47,7 @@ login and both demo nodes. The logins all use the password `DevPass123!`:
 | `test@jarvisautomation.io` | Jordan | admin (first user) |
 | `carl@jarvisautomation.io` | Carl | admin |
 | `sam@jarvisautomation.io` | Sam | member |
+| `robin@jarvisautomation.io` | Robin | power user |
 
 Then sign in to the admin UI (port 7710) as Jordan and finish the remaining wizard steps:
 hardware, models and privacy. **The models step is required.** Model assignments live in the

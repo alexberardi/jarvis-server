@@ -5,8 +5,10 @@
 //                        [--pages a,b,/raw/path] [--viewports phone,tablet,desktop]
 //                        [--themes light,dark] [--settle-ms N] [--tiles PX]
 //
-// Logs in through the real login form once, then for every viewport x theme opens a context
-// with that session and visits each page. Per shot it records console errors, page errors,
+// Logs in through the real login form once, as whoever --email is, then for every viewport x
+// theme opens a context with that session and visits each page. A superuser gets every page; a
+// member (anyone else) gets their own pages, and an admin page they ask for shows the
+// "administrator" notice, recorded as adminOnly rather than as an error. Per shot it records console errors, page errors,
 // failed requests and HTTP errors, and measures horizontal overflow in the page's natural
 // layout (before the shot is expanded to full height). Writes DIR/<page>__<viewport>__<theme>.png
 // and DIR/index.json, and prints a summary.
@@ -22,9 +24,20 @@ const VIEWPORTS = {
 const THEMES = ['light', 'dark']
 const THEME_KEY = 'jarvis-admin-theme' // src/theme/ThemeProvider.tsx
 
+// The Admin pages (web/admin/src/routes.tsx), superusers only. Known by name so a member can
+// ask for one and see what they get: the notice (RequireSuperuser).
+const ADMIN_PAGES = ['dashboard', 'models', 'settings', 'connections', 'logs', 'traces', 'nodes', 'users', 'update']
+  .map((n) => ({ name: n, path: `/admin/${n}` }))
+// A member's default pages: the sidebar's, plus Account (the header's link).
+const MEMBER_PAGES = ['chat', 'addons', 'inbox', 'account']
+// The heading of the notice an admin page shows a member (auth/RequireSuperuser.tsx).
+const ADMIN_ONLY = /administrator/i
+
 // Pages that are not in the sidebar. Sidebar links are discovered after login.
 //   public: visited without a session.  prepare: runs on the loaded page before the shot.
+//   home: the path is the signed-in user's home (the dashboard, or Chat for a member).
 const EXTRA_PAGES = [
+  { name: 'account', path: '/account' },
   { name: 'login', path: '/login', public: true },
   { name: 'change-password', path: '/change-password' },
   // First-run setup as a signed-in user sees it: the wizard where the install left off, or a
@@ -34,7 +47,7 @@ const EXTRA_PAGES = [
   // The phone/tablet navigation drawer, opened from the header's menu button.
   {
     name: 'nav-drawer',
-    path: '/dashboard',
+    home: true,
     onlyIf: async (page) => page.getByRole('button', { name: 'Open navigation' }).isVisible(),
     prepare: async (page) => {
       await page.getByRole('button', { name: 'Open navigation' }).click()
@@ -76,6 +89,8 @@ function parseArgs(argv) {
 }
 
 const slug = (p) => p.replace(/^\/+|\/+$/g, '').replace(/[^a-zA-Z0-9]+/g, '-') || 'root'
+// A sidebar link's page name: /admin/models is "models", /chat is "chat".
+const pageName = (p) => slug(p.replace(/^\/admin\//, '/'))
 
 async function login(browser, a) {
   const ctx = await browser.newContext({ viewport: VIEWPORTS.desktop })
@@ -93,13 +108,23 @@ async function login(browser, a) {
     const alert = await page.getByRole('alert').textContent({ timeout: 1000 }).catch(() => null)
     throw new Error(`login failed at ${page.url()}${alert ? `: ${alert}` : ''}`)
   }
-  await page.goto(`${a.admin}/dashboard`)
+  // The user the SPA stored at sign-in (auth/AuthContext.tsx): who the shots are of.
+  const user = await page.evaluate(() => {
+    try {
+      return JSON.parse(localStorage.getItem('jarvis-admin:user') ?? 'null')
+    } catch {
+      return null
+    }
+  })
+  const superuser = Boolean(user?.is_superuser)
+  const home = superuser ? '/admin/dashboard' : '/chat'
+  await page.goto(`${a.admin}${home}`)
   await page.locator('#admin-sidebar nav a[href]').first().waitFor({ state: 'attached', timeout: 15000 }) // Sidebar.tsx
   const nav = await page.$$eval('#admin-sidebar nav a[href]', (els) =>
     els.map((e) => new URL(e.href).pathname),
   )
-  // A trace to show the detail page with, if the sandbox has any.
-  const traceId = await page.evaluate(async () => {
+  // A trace to show the detail page with, if the sandbox has any (superusers only).
+  const traceId = !superuser ? null : await page.evaluate(async () => {
     const t = localStorage.getItem('jarvis-admin:access_token')
     const r = await fetch('/api/traces?limit=1', { headers: { Authorization: `Bearer ${t}` } })
     if (!r.ok) return null
@@ -108,20 +133,27 @@ async function login(browser, a) {
   })
   const state = await ctx.storageState()
   await ctx.close()
-  return { state, nav: [...new Set(nav)], traceId }
+  return { state, nav: [...new Set(nav)], traceId, superuser, home, email: user?.email ?? a.email }
 }
 
-function choosePages(a, nav, traceId) {
-  const all = nav.map((p) => ({ name: slug(p), path: p }))
-  if (traceId) all.push({ name: 'trace-detail', path: `/traces/${traceId}` })
-  all.push(...EXTRA_PAGES)
-  if (a.pages.length === 0) return all
-  return a.pages.map((want) => {
-    if (want.startsWith('/')) return { name: slug(want), path: want }
-    const p = all.find((x) => x.name === want)
-    if (!p) throw new Error(`unknown page ${want}; known: ${all.map((x) => x.name).join(', ')} (or a /path)`)
+// choosePages: --pages, else everything this user has (a superuser: the sidebar, a trace, the
+// extras; a member: MEMBER_PAGES). Admin pages are known by name for everyone, so a member
+// asking for one gets its notice.
+function choosePages(a, s) {
+  const known = s.nav.map((p) => ({ name: pageName(p), path: p }))
+  if (s.traceId) known.push({ name: 'trace-detail', path: `/admin/traces/${s.traceId}` })
+  known.push(...EXTRA_PAGES.map((p) => (p.home ? { ...p, path: s.home } : p)))
+  for (const p of ADMIN_PAGES) if (!known.some((k) => k.name === p.name)) known.push(p)
+  const find = (want) => {
+    const p = known.find((x) => x.name === want)
+    if (!p) throw new Error(`unknown page ${want}; known: ${known.map((x) => x.name).join(', ')} (or a /path)`)
     return p
-  })
+  }
+  if (a.pages.length === 0) {
+    if (!s.superuser) return MEMBER_PAGES.map(find)
+    return known.filter((p) => s.nav.includes(p.path) || !ADMIN_PAGES.some((x) => x.name === p.name))
+  }
+  return a.pages.map((want) => (want.startsWith('/') ? { name: slug(want), path: want } : find(want)))
 }
 
 async function settle(page, ms) {
@@ -232,6 +264,8 @@ async function shoot(ctx, pg, vpName, theme, a) {
     rec.finalPath = new URL(page.url()).pathname
     rec.title = await page.title()
     rec.heading = await page.locator('main h1, h1').first().textContent({ timeout: 1000 }).catch(() => null)
+    // A member on an admin page: the notice is the expected page, not a failure.
+    if (!a.superuser && rec.finalPath.startsWith('/admin') && ADMIN_ONLY.test(rec.heading ?? '')) rec.adminOnly = true
     rec.overflow = await page.evaluate(measureOverflow, VIEWPORTS[vpName].width)
     if (!pg.noExpand) await page.evaluate(expandShell)
     await page.waitForTimeout(100)
@@ -266,9 +300,14 @@ async function main() {
   await mkdir(a.out, { recursive: true })
   const browser = await chromium.launch()
   const shots = []
+  let who = null
   try {
-    const { state, nav, traceId } = await login(browser, a)
-    const pages = choosePages(a, nav, traceId)
+    const s = await login(browser, a)
+    const { state } = s
+    a.superuser = s.superuser
+    who = { email: s.email, superuser: s.superuser }
+    console.log(`signed in as ${s.email} (${s.superuser ? 'superuser' : 'not a superuser: member pages'})`)
+    const pages = choosePages(a, s)
     for (const vpName of a.viewports) {
       for (const theme of a.themes) {
         const { width, height, isMobile, hasTouch } = VIEWPORTS[vpName]
@@ -289,6 +328,7 @@ async function main() {
           const o = rec.overflow
           const flags = [
             rec.error && `ERROR ${rec.error}`,
+            rec.adminOnly && 'administrator only (notice)',
             o && o.overflowPx > 0 && `overflow +${o.overflowPx}px`,
             rec.consoleErrors.length + rec.pageErrors.length && `${rec.consoleErrors.length + rec.pageErrors.length} console`,
             rec.failedRequests.length + rec.httpErrors.length && `${rec.failedRequests.length + rec.httpErrors.length} http`,
@@ -302,7 +342,7 @@ async function main() {
   } finally {
     await browser.close()
   }
-  const index = { admin: a.admin, created: new Date().toISOString(), viewports: a.viewports, themes: a.themes, shots }
+  const index = { admin: a.admin, user: who, created: new Date().toISOString(), viewports: a.viewports, themes: a.themes, shots }
   await writeFile(path.join(a.out, 'index.json'), JSON.stringify(index, null, 2) + '\n')
 
   const problems = shots.filter((s) => s.error || s.overflow?.overflowPx > 0 || s.consoleErrors.length || s.pageErrors.length || s.failedRequests.length || s.httpErrors.length)
