@@ -46,9 +46,19 @@ var actionCommandVerbs = append(append([]string(nil), deviceCommandVerbs...),
 	"play", "log", "add", "remind", "cancel", "mark", "record", "create",
 	"delete", "remove", "schedule", "send", "text", "call", "snooze",
 	"skip", "mute", "unmute", "check", "save", "note", "clear",
+	// Beyond legacy: corrections to what was just done ("make it 15", "move it to 5pm") and
+	// memory requests. Without them a prose "I'll adjust it" skipped the tool (pipeline
+	// scenarios, 2026-10-13).
+	"make", "change", "adjust", "move", "extend", "reset", "switch", "increase", "decrease",
+	"raise", "lower", "rename", "update", "remember", "forget",
 )
 
-var actionCommandRE = mustPyI(verbPrefix + `(?:` + strings.Join(actionCommandVerbs, "|") + `)\b\s+\S+`)
+// actionPrefix is verbPrefix plus the openers of a spoken correction ("actually make it 15",
+// "no wait, extend it"). Only command detection takes them.
+const actionPrefix = `^\s*(?:hey\s+)?(?:\w+[,.!]\s+)?` +
+	`(?:(?:actually|ok(?:ay)?|no|wait|oh|and|also|so|then|um|uh|sorry)[,.!]?\s+)*(?:please,?\s+)?`
+
+var actionCommandRE = mustPyI(actionPrefix + `(?:` + strings.Join(actionCommandVerbs, "|") + `)\b\s+\S+`)
 
 var questionLeadWords = []string{
 	"what", "how", "why", "when", "where", "who", "whose", "which",
@@ -73,6 +83,9 @@ var (
 		"schedule", "cancel", "delete", "remove", "turn", "play", "pause",
 		"start", "send", "update", "save", "note", "create", "put", "track",
 		"book", "order", "text", "message",
+		// Beyond legacy (see actionCommandVerbs).
+		"adjust", "change", "reset", "remember", "move", "extend", "switch", "lock", "unlock",
+		"increase", "decrease", "lower", "raise",
 	}
 	claimPastVerbs = []string{
 		"checked", "looked", "marked", "logged", "recorded", "added", "set",
@@ -80,6 +93,8 @@ var (
 		"turned", "played", "paused", "started", "sent", "updated", "saved",
 		"noted", "created", "put", "tracked", "booked", "ordered", "texted",
 		"messaged",
+		"adjusted", "changed", "reset", "remembered", "moved", "extended", "switched", "locked",
+		"unlocked", "increased", "decreased", "lowered", "raised",
 	}
 	claimIngVerbs = []string{
 		"checking", "looking", "marking", "logging", "recording", "adding",
@@ -87,6 +102,8 @@ var (
 		"deleting", "removing", "turning", "playing", "pausing", "starting",
 		"sending", "updating", "saving", "noting", "creating", "putting",
 		"tracking", "booking", "ordering", "texting", "messaging",
+		"adjusting", "changing", "resetting", "remembering", "moving", "extending", "switching",
+		"locking", "unlocking", "increasing", "decreasing", "lowering", "raising",
 	}
 	claimIntentRE = mustPyI(`\b(?:i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|let\s+me|i\s+can)\s+` +
 		`(?:go\s+ahead\s+and\s+)?(?:just\s+|now\s+)?` +
@@ -97,6 +114,9 @@ var (
 	claimPassiveRE = mustPyI(`\b(?:is|are|was|were|'s|'re|has|have|had)\s+(?:been\s+)?` +
 		`(?:now\s+|already\s+)?` +
 		`(?:` + strings.Join(claimPastVerbs, "|") + `)\b`)
+	// Beyond legacy: "I've got that noted / saved / down".
+	claimGotRE = mustPyI(`\b(?:i'?ve|i\s+have)\s+got\s+(?:that|it|this|those|them)\s+` +
+		`(?:noted|saved|down|set|written\s+down|remembered|added|scheduled)\b`)
 	claimProgressRE = mustPyI(`(?:\bi'?m\s+(?:just\s+|now\s+)?|^\s*)` +
 		`(?:` + strings.Join(claimIngVerbs, "|") + `)\b`)
 )
@@ -174,7 +194,8 @@ func ResponseClaimsAction(text string) bool {
 	if s == "" {
 		return false
 	}
-	return claimIntentRE.search(s) || claimDoneRE.search(s) || claimPassiveRE.search(s) || claimProgressRE.search(s)
+	return claimIntentRE.search(s) || claimDoneRE.search(s) || claimPassiveRE.search(s) || claimProgressRE.search(s) ||
+		claimGotRE.search(s)
 }
 
 // IsMusicControlShaped is is_music_control_shaped: a music-control verb opening the utterance

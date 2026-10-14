@@ -95,7 +95,13 @@ const (
 	nagInvalid     = "[INVALID_PARAM_RETRY]"
 	nagISO         = "[ISO_DATE_RETRY]"
 	nagDoubleCheck = "[NOT_FOR_ME_DOUBLE_CHECK]"
+	nagFailedClaim = "[TOOL_FAILED_CLAIM]"
 )
+
+// failedClaimRetry is the one nudge for a reply that claims an action a tool just failed to do.
+const failedClaimRetry = nagFailedClaim + " A tool call above did not succeed (see its error). Your reply " +
+	"said it was done. Answer again: tell the user plainly what did not happen and why, in one or two " +
+	"short sentences, and what they can do about it if anything. Do not say it was done."
 
 // isNag is _is_retry_nag: a standalone system message whose content starts with tag
 // (messages[0] merely mentions the tags).
@@ -133,7 +139,9 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	// 0. Scrub stale steering nags from earlier turns (never messages[0]).
 	if len(msgs) > 1 {
 		head, rest := msgs[:1], msgs[1:]
-		rest = filterMsgs(rest, func(x chatMsg) bool { return isNag(x, nagMustCall) || isNag(x, nagDedupe) })
+		rest = filterMsgs(rest, func(x chatMsg) bool {
+			return isNag(x, nagMustCall) || isNag(x, nagDedupe) || isNag(x, nagFailedClaim)
+		})
 		msgs = append(append([]chatMsg(nil), head...), rest...)
 	}
 
@@ -272,6 +280,14 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				}
 				msgs = msgs[:len(msgs)-1]
 				msgs = append(msgs, sysMsg(mustCallRetry(retries+1)))
+				continue
+			}
+			// A tool failed this turn but the reply claims it worked (beyond legacy; the pipeline
+			// scenarios caught "Got it, I'll remember that" after remember refused): one nudge.
+			if !terminal && !doubleChecked && countNags(msgs, nagFailedClaim) < 1 &&
+				tf.ResponseClaimsAction(parse.OutsideThink(message)) && toolFailedThisTurn(msgs) {
+				msgs = msgs[:len(msgs)-1]
+				msgs = append(msgs, sysMsg(failedClaimRetry))
 				continue
 			}
 			cleaned := message
@@ -544,6 +560,29 @@ func toolRanThisTurn(msgs []chatMsg) bool {
 		switch {
 		case msgs[i].Role == "tool":
 			return true
+		case msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck):
+			return false
+		}
+	}
+	return false
+}
+
+// toolFailedThisTurn reports whether a tool result since the turn's user message is a failure:
+// a JSON object with a non-empty "error" or with "success": false.
+func toolFailedThisTurn(msgs []chatMsg) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		switch {
+		case msgs[i].Role == "tool":
+			var o map[string]any
+			if json.Unmarshal([]byte(msgs[i].Content), &o) != nil {
+				continue
+			}
+			if e, ok := o["error"]; ok && e != nil && e != "" && e != false {
+				return true
+			}
+			if s, ok := o["success"].(bool); ok && !s {
+				return true
+			}
 		case msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck):
 			return false
 		}

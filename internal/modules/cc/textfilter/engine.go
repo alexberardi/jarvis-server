@@ -238,17 +238,16 @@ func ForceToolsGate(utterance string, replies []string, keywordPool []string) bo
 	if !actionable && !claims {
 		return false
 	}
-	text := utterance
-	if claims && !actionable {
-		parts := []string{utterance}
-		for _, r := range replies {
-			if r != "" {
-				parts = append(parts, r)
-			}
+	// The reply names what the command is about, so it counts toward the keywords: a correction
+	// ("actually make it 15") says only "it", and "timer adjusted to 15" names the timer
+	// (beyond legacy, which checked the utterance alone once it looked like a command).
+	parts := []string{utterance}
+	for _, r := range replies {
+		if r != "" {
+			parts = append(parts, r)
 		}
-		text = strings.Join(parts, " ")
 	}
-	if len(keywordPool) > 0 && !UtteranceMatchesKeywords(text, keywordPool) {
+	if len(keywordPool) > 0 && !UtteranceMatchesKeywords(strings.Join(parts, " "), keywordPool) {
 		return false
 	}
 	return true
