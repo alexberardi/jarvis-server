@@ -860,9 +860,15 @@ and dictation's notes still appear only with voice on.
 Checked for real in a nested headless sway (scratch HOME): install (agent spawned, pill), `start`
 while running (pill, still one agent), a second `run` (refused), `start jarvis-agent://start/`
 after a kill (started, pill), uninstall (agent quit over the socket; nothing left), and a packaged
-copy's first `start` setting the user up. **macOS gap:** LaunchServices may hand a second open of
-the app, or the link, to the running agent as an Apple Event instead of starting a process; the
-agent doesn't handle that event yet, so there it may show no pill.
+copy's first `start` setting the user up.
+
+**Fixed on the Mac (2026-10-13, found testing #102/#103 on macOS 26.1).**
+
+- **No pill on start.** `install` and `start` ask for the pill the moment the control socket answers. `run` opens the socket first, but the island only comes up after the tools (and voice) are ready. The request was answered "ok" and dropped. Seen on the Mac: the socket answered about 5 s before the island existed. `run` now keeps a request made before the island exists and shows it when the island attaches (`runningPill`).
+- **Opening the app did nothing.** Once `run` has called NSApplication's `finishLaunching`, LaunchServices treats the agent as "Jarvis Automation Agent.app" running, even when launchd started it. Opening the app again starts no process. LaunchServices sends the running agent a reopen Apple event (`aevt/rapp`) instead, and the link sends a get-URL event (`GURL/GURL`). Confirmed with `AEDebugReceives` on a test bundle: no new process, `rapp` delivered, no pill. The agent ignored both.
+- **The fix.** The island's event loop now registers its own handlers with `NSAppleEventManager` (`island.RunWith` and `AppEvents`, purego, an Objective-C class made at run time). A reopen shows the pill. A get-URL event shows the pill only for the exact start link (`install.CheckStartURL`); anything else is logged and ignored.
+- **Not running.** When no agent is running, opening the app still launches `jarvis-agent` with no command, which is `start`.
+- **`--no-overlay`.** With `--no-overlay` there is no AppKit loop, so the app is not "running" for LaunchServices. A second open then runs `start` as on the other OSes.
 **The settings file (installers plan item 1.6, 2026-10-13).** The choices a user makes once are
 no longer only `run` flags: `<user config dir>/jarvis-agent/agent.json` (0600, next to
 `node.json`), e.g. `{"voice": true, "island": true, "confirm_dictation": "submit"}`. Keys:
