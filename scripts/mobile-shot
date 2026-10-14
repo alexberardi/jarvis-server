@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+# Screenshots of the mobile app (jarvis-node-mobile, Android) running in a disposable emulator
+# against a scripts/sandbox jarvisd. Gives an agent eyes on the app: Read the PNGs, or read the
+# UI dumps (uiautomator XML) for the text without vision. See docs/dev/mobile-shots.md.
+#
+#   scripts/mobile-shot [--sandbox NAME] [--screens LIST] [--themes light,dark]
+#                       [--font-scale 1.0,1.3] [--chat TEXT | --no-chat] [--chat-expect RE]
+#                       [--pages N] [--keep] [--out DIR] [--ref REF] [--rebuild]
+#   scripts/mobile-shot deps          check the SDK, create the harness AVD, build the APK
+#   scripts/mobile-shot build [--ref REF] [--rebuild]    build (or find) the APK, print its path
+#   scripts/mobile-shot stop [--sandbox NAME]            kill a --keep emulator
+#
+#   --sandbox NAME  the scripts/sandbox to log in to (default: mob); it must be up
+#   --screens LIST  comma-separated (default: all): landing, login, home, devices, pantry,
+#                   routines, nodes, settings, inbox, chat. landing and login are shot logged
+#                   out; chat sends one message and waits for the reply.
+#   --themes LIST   light, dark (default: both); the emulator's night mode, which the app follows
+#   --font-scale L  Android font scales, e.g. 1.0,1.3 (default: 1.0); > 1 catches truncation
+#   --chat TEXT     the chat screen's message (default "what is 12 times 7")
+#   --chat-expect RE  a regexp the reply must match (default 84 for the default message)
+#   --no-chat       skip the chat screen (e.g. a sandbox with --llm none)
+#   --pages N       screenfuls per scrolling screen (default 3): scroll and shoot while it moves
+#   --keep          leave the emulator running and reuse it next time (boot is the slow part);
+#                   scripts/mobile-shot stop kills it
+#   --out DIR       default .sandbox/NAME/mobile/<timestamp>/
+#   --ref REF       the jarvis-node-mobile commit to build (default: origin/main)
+#   --rebuild       ignore the cached APK
+#
+# Writes <screen>__<theme>[__f<scale>].png, a .xml UI dump beside each, and index.json (per shot:
+# visible texts, elements sticking out past the screen, mean luminance and whether it matches
+# the theme). Exits 1 if the login or any screen failed, so it doubles as a smoke test.
+#
+# Isolation: its own AVD (jarvis-harness, under ~/.cache/jarvis-harness/mobile/avd, so it is
+# never in the user's AVD list), started -read-only -no-window on a port of its own (5580+); every
+# adb call names that emulator's serial, and the EXIT trap kills only that emulator. The APK is
+# built from a `git archive` of the mobile repo in ~/.cache, so the user's checkout (and its
+# android/ dir) is never touched.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/jarvis-harness/mobile
+# The main checkout's parent, also from a worktree under .claude/worktrees/.
+MAIN_CHECKOUT=$(cd "$ROOT" && cd "$(git rev-parse --git-common-dir)/.." && pwd)
+MOBILE_REPO=${JARVIS_MOBILE_REPO:-$(dirname "$MAIN_CHECKOUT")/jarvis-node-mobile}
+SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}
+export ANDROID_HOME=$SDK ANDROID_SDK_ROOT=$SDK
+export ANDROID_AVD_HOME=$CACHE/avd # never the user's ~/.android/avd
+AVD=jarvis-harness
+PKG=com.jarvis.nodemobile
+# The config URL baked into the APK. The emulator's localhost:7700 is adb-reversed to the
+# sandbox's config port, so one APK serves every sandbox.
+BAKED_CONFIG=http://localhost:7700
+RECIPE=1 # bump when the build recipe changes, to invalidate cached APKs
+USER_SERIAL=emulator-5554 # the user's dev emulator: never touched
+say() { echo "mobile-shot: $*" >&2; }
+die() { say "$*"; exit 1; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
+
+ADB=$SDK/platform-tools/adb
+EMULATOR=$SDK/emulator/emulator
+AVDMANAGER=$SDK/cmdline-tools/latest/bin/avdmanager
+
+# --- the AVD: the user's jarvis-pixel8 system image, a pixel_8 profile ------------------------
+system_image() {
+  local cfg=$HOME/.android/avd/jarvis-pixel8.avd/config.ini dir
+  dir=$(sed -n 's/^image.sysdir.1=//p' "$cfg" 2>/dev/null || true)
+  [ -n "$dir" ] || dir=$(cd "$SDK" && ls -d system-images/android-*/google_apis/x86_64/ 2>/dev/null | sort -V | tail -1)
+  [ -n "$dir" ] && [ -d "$SDK/$dir" ] || die "no x86_64 system image under $SDK/system-images (sdkmanager 'system-images;android-36;google_apis;x86_64')"
+  dir=${dir%/}
+  echo "${dir//\//;}"
+}
+
+ensure_avd() {
+  [ -x "$EMULATOR" ] || die "no emulator at $EMULATOR (sdkmanager emulator)"
+  [ -x "$AVDMANAGER" ] || die "no avdmanager at $AVDMANAGER (sdkmanager 'cmdline-tools;latest')"
+  [ -r /dev/kvm ] && [ -w /dev/kvm ] || die "/dev/kvm is not usable (add yourself to the kvm group)"
+  if [ -f "$ANDROID_AVD_HOME/$AVD.ini" ]; then return; fi
+  local img
+  img=$(system_image)
+  mkdir -p "$ANDROID_AVD_HOME"
+  say "creating AVD $AVD ($img) in $ANDROID_AVD_HOME"
+  echo no | "$AVDMANAGER" -s create avd -n "$AVD" -k "$img" -d pixel_8 -p "$ANDROID_AVD_HOME/$AVD.avd" >/dev/null
+  # Headless and lean: no camera/audio, 3 GB of RAM (the host also runs gradle and jarvisd), a
+  # hardware keyboard so the soft keyboard never covers the screen.
+  local cfg=$ANDROID_AVD_HOME/$AVD.avd/config.ini
+  sed -i -E '/^(hw\.ramSize|hw\.camera\.(back|front)|hw\.audio(Input|Output)|hw\.keyboard|showDeviceFrame)=/d' "$cfg"
+  cat >>"$cfg" <<CFG
+hw.ramSize=3072
+hw.camera.back=none
+hw.camera.front=none
+hw.audioInput=no
+hw.audioOutput=no
+hw.keyboard=yes
+showDeviceFrame=no
+CFG
+  [ -f "$ANDROID_AVD_HOME/$AVD.ini" ] || die "avdmanager did not create $ANDROID_AVD_HOME/$AVD.ini"
+}
+
+# --- the APK: a release build (JS bundled in, no Metro) from a git archive of the mobile repo --
+apk_path() { echo "$CACHE/apk/jarvis-mobile-$1-r$RECIPE.apk"; }
+
+build_apk() { # REF REBUILD → prints the APK path
+  local ref=$1 rebuild=$2 sha apk src lockhash
+  [ -d "$MOBILE_REPO/.git" ] || die "no jarvis-node-mobile checkout at $MOBILE_REPO (set JARVIS_MOBILE_REPO)"
+  # fetch updates remote-tracking refs only; the user's branch and working tree stay as they are.
+  [ "$ref" = origin/main ] && git -C "$MOBILE_REPO" fetch -q origin main 2>/dev/null || true
+  sha=$(git -C "$MOBILE_REPO" rev-parse --verify -q "$ref^{commit}") || die "--ref $ref: no such commit in $MOBILE_REPO"
+  sha=${sha:0:12}
+  apk=$(apk_path "$sha")
+  if [ "$rebuild" = 0 ] && [ -f "$apk" ]; then say "APK (cached): $apk"; echo "$apk"; return; fi
+
+  command -v mise >/dev/null || die "mise not found (it provides node 22 and java 17)"
+  src=$CACHE/build
+  mkdir -p "$CACHE/apk" "$src"
+  say "building the APK for jarvis-node-mobile $sha ($ref) in $src (log: $CACHE/build.log)"
+  local t0=$SECONDS
+  (
+    # Fresh sources each time, but keep node_modules while package-lock.json is unchanged.
+    lockhash=$(git -C "$MOBILE_REPO" show "$sha:package-lock.json" | sha256sum | cut -c1-16)
+    if [ "$(cat "$src/.lockhash" 2>/dev/null)" != "$lockhash" ]; then rm -rf "$src/node_modules"; fi
+    find "$src" -mindepth 1 -maxdepth 1 ! -name node_modules ! -name .lockhash -exec rm -rf {} +
+    git -C "$MOBILE_REPO" archive --format=tar "$sha" | tar -x -C "$src"
+    cd "$src"
+    if [ ! -d node_modules ]; then
+      mise exec node@22 -- npm ci --no-audit --no-fund
+      echo "$lockhash" >.lockhash
+    fi
+    export EXPO_PUBLIC_DEV_MODE=true EXPO_PUBLIC_MANUAL_CONFIG_URL=$BAKED_CONFIG
+    export NODE_ENV=production EXPO_NO_TELEMETRY=1 CI=1
+    mise exec node@22 -- npx expo prebuild --platform android --clean --no-install
+    cd android
+    # x86_64 only (the emulator's ABI), no daemon left behind; release = debug-signed in
+    # Expo's template, JS bundle embedded.
+    mise exec node@22 java@temurin-17 -- ./gradlew --no-daemon -q assembleRelease \
+      -PreactNativeArchitectures=x86_64 -Dorg.gradle.jvmargs=-Xmx3g
+  ) >"$CACHE/build.log" 2>&1 || { tail -40 "$CACHE/build.log" >&2; die "APK build failed; see $CACHE/build.log"; }
+  cp "$src/android/app/build/outputs/apk/release/app-release.apk" "$apk"
+  say "APK built in $((SECONDS - t0))s: $apk"
+  echo "$apk"
+}
+
+# --- the emulator -------------------------------------------------------------------------------
+STATEF= SERIAL= PORT= STARTED=0 KEEP=0
+
+port_free() { ! ss -Hltn "sport = :$1" 2>/dev/null | grep -q . && ! ss -Hltn "sport = :$(($1 + 1))" 2>/dev/null | grep -q .; }
+
+is_ours() { # SERIAL: a harness emulator (by its AVD name), never the user's
+  [ "$1" != "$USER_SERIAL" ] || return 1
+  [ "$("$ADB" -s "$1" emu avd name 2>/dev/null | head -1 | tr -d '\r')" = "$AVD" ]
+}
+
+boot_emulator() {
+  if [ -f "$STATEF" ]; then
+    PORT=$(cat "$STATEF") SERIAL=emulator-$PORT
+    if is_ours "$SERIAL" && [ "$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
+      say "reusing emulator $SERIAL (--keep)"
+      return
+    fi
+    rm -f "$STATEF"
+  fi
+  PORT=
+  for p in $(seq 5580 2 5680); do port_free "$p" && { PORT=$p; break; }; done
+  [ -n "$PORT" ] || die "no free emulator port in 5580-5680"
+  SERIAL=emulator-$PORT
+  [ "$SERIAL" != "$USER_SERIAL" ] || die "refusing to use $USER_SERIAL"
+  say "booting $AVD on $SERIAL (log: $WORK/emulator.log)"
+  local t0=$SECONDS
+  # -read-only: several harness runs can share the AVD, and nothing is written back to it.
+  setsid "$EMULATOR" -avd "$AVD" -port "$PORT" -read-only -no-window -no-audio -no-boot-anim \
+    -no-snapshot -gpu swiftshader_indirect -no-metrics -camera-back none -camera-front none \
+    >"$WORK/emulator.log" 2>&1 </dev/null &
+  echo $! >"$WORK/emulator.pid"
+  STARTED=1
+  [ "$KEEP" = 1 ] && echo "$PORT" >"$STATEF"
+  local up=0
+  for _ in $(seq 240); do
+    kill -0 "$(cat "$WORK/emulator.pid")" 2>/dev/null || { tail -20 "$WORK/emulator.log" >&2; die "the emulator exited"; }
+    if [ "$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then up=1; break; fi
+    sleep 1
+  done
+  [ "$up" = 1 ] || die "the emulator did not boot in 240s (see $WORK/emulator.log)"
+  is_ours "$SERIAL" || die "$SERIAL is not the harness AVD"
+  say "booted in $((SECONDS - t0))s"
+}
+
+prep_emulator() {
+  # Deterministic screenshots: no animations, no keyboard popping over the screen (a hardware
+  # keyboard is configured), status bar time frozen by demo mode.
+  local s
+  for s in window_animation_scale transition_animation_scale animator_duration_scale; do
+    "$ADB" -s "$SERIAL" shell settings put global "$s" 0
+  done
+  "$ADB" -s "$SERIAL" shell settings put secure show_ime_with_hard_keyboard 0
+  "$ADB" -s "$SERIAL" shell settings put global sysui_demo_allowed 1
+  "$ADB" -s "$SERIAL" shell am broadcast -a com.android.systemui.demo -e command enter >/dev/null
+  "$ADB" -s "$SERIAL" shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 0941 >/dev/null
+  "$ADB" -s "$SERIAL" shell am broadcast -a com.android.systemui.demo -e command notifications -e visible false >/dev/null
+}
+
+kill_emulator() {
+  [ -n "$SERIAL" ] || return 0
+  if [ "$SERIAL" = "$USER_SERIAL" ]; then return 0; fi
+  if [ "$KEEP" = 1 ]; then say "leaving $SERIAL running (--keep; scripts/mobile-shot stop --sandbox $NAME)"; return 0; fi
+  is_ours "$SERIAL" && "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+  if [ -f "$WORK/emulator.pid" ]; then
+    local pid
+    pid=$(cat "$WORK/emulator.pid")
+    for _ in $(seq 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+    kill -TERM -- "-$pid" 2>/dev/null || true
+    rm -f "$WORK/emulator.pid"
+  fi
+  rm -f "$STATEF"
+}
+
+# --- arguments ----------------------------------------------------------------------------------
+CMD=run
+case ${1:-} in deps|build|stop) CMD=$1; shift ;; esac
+NAME=mob SCREENS= THEMES=light,dark FONTS=1.0 CHAT="what is 12 times 7" EXPECT= NOCHAT=0
+OUT= REF=origin/main REBUILD=0 PAGES=3
+while [ $# -gt 0 ]; do
+  case $1 in
+    --sandbox) NAME=$2; shift 2 ;;
+    --screens) SCREENS=$2; shift 2 ;;
+    --themes) THEMES=$2; shift 2 ;;
+    --font-scale) FONTS=$2; shift 2 ;;
+    --chat) CHAT=$2; shift 2 ;;
+    --pages) PAGES=$2; shift 2 ;;
+    --chat-expect) EXPECT=$2; shift 2 ;;
+    --no-chat) NOCHAT=1; shift ;;
+    --keep) KEEP=1; shift ;;
+    --out) OUT=$2; shift 2 ;;
+    --ref) REF=$2; shift 2 ;;
+    --rebuild) REBUILD=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument $1" ;;
+  esac
+done
+case $NAME in *[!a-zA-Z0-9_-]*|'') die "--sandbox: letters, digits, - and _ only" ;; esac
+[ "$(uname -s)" = Linux ] || die "Linux only (Android emulator + KVM); macOS/iOS: docs/dev/mobile-shots.md"
+[ -x "$ADB" ] || die "no adb at $ADB (Android SDK platform-tools; set ANDROID_HOME)"
+WORK=$ROOT/.sandbox/$NAME/mobile
+STATEF=$WORK/emulator.port
+mkdir -p "$WORK"
+
+case $CMD in
+  deps)
+    ensure_avd
+    say "AVD: $ANDROID_AVD_HOME/$AVD.avd"
+    build_apk "$REF" "$REBUILD" >/dev/null
+    exit 0 ;;
+  build) build_apk "$REF" "$REBUILD"; exit 0 ;;
+  stop)
+    [ -f "$STATEF" ] || { say "no kept emulator for '$NAME'"; exit 0; }
+    PORT=$(cat "$STATEF") SERIAL=emulator-$PORT
+    is_ours "$SERIAL" && "$ADB" -s "$SERIAL" emu kill >/dev/null && say "killed $SERIAL"
+    [ -f "$WORK/emulator.pid" ] && kill -TERM -- "-$(cat "$WORK/emulator.pid")" 2>/dev/null || true
+    rm -f "$STATEF" "$WORK/emulator.pid"
+    exit 0 ;;
+esac
+
+# --- run ----------------------------------------------------------------------------------------
+ENVF=$ROOT/.sandbox/$NAME/sandbox.env
+[ -f "$ENVF" ] || die "no sandbox '$NAME'; start one: scripts/sandbox up --name $NAME"
+# shellcheck disable=SC1090
+source "$ENVF"
+curl -sf -o /dev/null "$SBX_CONFIG/services" || die "sandbox '$NAME' isn't answering at $SBX_CONFIG (scripts/sandbox status --name $NAME)"
+command -v go >/dev/null || die "go not on PATH"
+
+ensure_avd
+T_ALL=$SECONDS
+APK=$(build_apk "$REF" "$REBUILD")
+[ -n "$OUT" ] || OUT=$WORK/$(date +%Y%m%d-%H%M%S)
+mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
+
+(cd "$ROOT" && CGO_ENABLED=0 go build -o "$WORK/mobileshot" ./tools/mobileshot)
+
+trap kill_emulator EXIT
+trap 'exit 130' INT TERM
+boot_emulator
+prep_emulator
+
+# Every sandbox listener at the same port inside the emulator (config-service hands out absolute
+# 127.0.0.1:<port> URLs), plus the baked localhost:7700 → the sandbox's config port.
+"$ADB" -s "$SERIAL" reverse --remove-all
+for v in SBX_CONFIG SBX_AUTH SBX_LOGS SBX_CC SBX_LLM SBX_WHISPER SBX_TTS SBX_NOTIFICATIONS SBX_RECIPES SBX_OCR SBX_ADMIN; do
+  p=${!v##*:}
+  "$ADB" -s "$SERIAL" reverse "tcp:$p" "tcp:$p" >/dev/null
+done
+for p in 1884 9883; do "$ADB" -s "$SERIAL" reverse "tcp:$((p + JARVIS_PORT_OFFSET))" "tcp:$((p + JARVIS_PORT_OFFSET))" >/dev/null; done
+"$ADB" -s "$SERIAL" reverse "tcp:${BAKED_CONFIG##*:}" "tcp:${SBX_CONFIG##*:}" >/dev/null
+# Prove the tunnel from inside the emulator before blaming the app.
+# (toybox nc drops the connection at stdin's EOF, hence the sleep.)
+"$ADB" -s "$SERIAL" shell "(printf 'GET /health HTTP/1.0\r\n\r\n'; sleep 2) | nc 127.0.0.1 ${BAKED_CONFIG##*:}" 2>/dev/null | grep -q ' 200 ' ||
+  die "the emulator can't reach the sandbox through adb reverse (localhost:${BAKED_CONFIG##*:} → $SBX_CONFIG)"
+say "adb reverse: localhost:${BAKED_CONFIG##*:} → $SBX_CONFIG, and every sandbox port 1:1"
+
+say "installing $(basename "$APK")"
+"$ADB" -s "$SERIAL" install -r -g "$APK" >/dev/null || die "adb install failed"
+"$ADB" -s "$SERIAL" shell pm clear "$PKG" >/dev/null # a fresh, logged-out app each run
+
+# The seeded node counts as online (chat needs one) once it has made a request within 15 min.
+curl -sf -o /dev/null "$SBX_CC/api/v0/generate/date-context" -H "X-API-Key: $SBX_NODE_ID:$SBX_NODE_KEY" || true
+
+args=(--adb "$ADB" --serial "$SERIAL" --package "$PKG" --out "$OUT" --email "$SBX_EMAIL" --password "$SBX_PASSWORD"
+  --themes "$THEMES" --font-scales "$FONTS" --chat "$CHAT" --pages "$PAGES")
+[ -n "$SCREENS" ] && args+=(--screens "$SCREENS")
+[ -n "$EXPECT" ] && args+=(--chat-expect "$EXPECT")
+[ "$NOCHAT" = 1 ] && args+=(--no-chat)
+rc=0
+T_RUN=$SECONDS
+"$WORK/mobileshot" run "${args[@]}" || rc=1
+say "run: $((SECONDS - T_RUN))s, total $((SECONDS - T_ALL))s"
+say "screenshots in $OUT (index.json):"
+ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' >&2 || true
+exit $rc
