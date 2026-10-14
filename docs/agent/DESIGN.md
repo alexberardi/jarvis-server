@@ -907,7 +907,7 @@ copy's first `start` setting the user up.
 - **The fix.** The island's event loop now registers its own handlers with `NSAppleEventManager` (`island.RunWith` and `AppEvents`, purego, an Objective-C class made at run time). A reopen shows the pill. A get-URL event shows the pill only for the exact start link (`install.CheckStartURL`); anything else is logged and ignored.
 - **Not running.** When no agent is running, opening the app still launches `jarvis-agent` with no command, which is `start`.
 - **`--no-overlay`.** With `--no-overlay` and the status icon hidden there is no AppKit loop, so the app is not "running" for LaunchServices, and a second open runs `start` as on the other OSes. With the icon shown (the default) `run` keeps the loop without the island (`island.RunLoop`), so the reopen event arrives as with the island.
-**The setup page (installers plan item 1.5, 2026-10-14).** The first-run "window" of target-flow
+**The setup page (installers plan item 1.5, PR #122, 2026-10-14).** The first-run "window" of target-flow
 step 3, as a page in the user's own browser (open question 1). Code: `internal/agent/firstrun`,
 `cmd/jarvis-agent/setup.go`.
 
