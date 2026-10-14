@@ -8,8 +8,11 @@ f=$(jq -r '.tool_input.file_path // empty')
 case $f in *.go) ;; *) exit 0 ;; esac
 [ -f "$f" ] || exit 0
 
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-case $f in "$ROOT"/*) ;; *) exit 0 ;; esac
+# The checkout the edited file belongs to, not the one this hook lives in: agents edit inside
+# worktrees under .claude/worktrees/, each its own module root. Files outside a jarvis-server
+# checkout are left alone.
+ROOT=$(git -C "$(dirname "$f")" rev-parse --show-toplevel 2>/dev/null) || exit 0
+grep -q '^module github.com/alexberardi/jarvis-server$' "$ROOT/go.mod" 2>/dev/null || exit 0
 
 fail=0
 if ! out=$(gofmt -w "$f" 2>&1); then
