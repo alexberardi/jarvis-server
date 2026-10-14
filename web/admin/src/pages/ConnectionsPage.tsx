@@ -355,8 +355,8 @@ export default function ConnectionsPage() {
                     <code className="break-all text-[var(--color-text)]">{x.name}</code>
                     {x.managed === 'setting' && <Pill title="Follows a jarvisd setting; change it under Settings">from settings</Pill>}
                   </div>
-                  <p className="truncate text-xs text-[var(--color-text-muted)]" title={`${x.url}${x.description ? ` · ${x.description}` : ''}`}>
-                    {x.url}
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    <span className="break-all">{x.url}</span>
                     {x.description ? ` · ${x.description}` : ''}
                   </p>
                   <PublicURLField name={x.name} value={x.public_url} />

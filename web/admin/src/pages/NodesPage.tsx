@@ -18,10 +18,11 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const Icon = desktop ? Laptop : Cpu
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="flex items-start justify-between gap-2">
+      {/* The badges drop below the name when both don't fit, rather than squeezing the name. */}
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon size={16} className="shrink-0 text-[var(--color-text-muted)]" aria-label={desktop ? 'Computer' : 'Node'} />
-          <span className="truncate font-medium text-[var(--color-text)]">{node.name}</span>
+          <span className="min-w-0 break-words font-medium text-[var(--color-text)]">{node.name}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {live && (

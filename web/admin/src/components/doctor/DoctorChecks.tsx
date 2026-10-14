@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Copy, XCircle } from 'lucide-react'
 import type { DoctorCheck } from '@/api/doctor'
 import { cn } from '@/lib/utils'
@@ -13,18 +13,32 @@ function statusIcon(status: string) {
   return ICON[status as keyof typeof ICON] ?? ICON.warn
 }
 
+/**
+ * The fix as a command to copy: it wraps only at spaces, and after the commas of a list such
+ * as `port 17700,17702,…` (a <wbr>, so nothing extra is copied), never inside a port, an
+ * address or a flag. A token still too long for the box scrolls inside it.
+ */
 function CopyFix({ fix }: { fix: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="mt-1 flex items-start gap-2">
-      <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all rounded bg-[var(--color-surface-alt)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)]">
-        {fix}
+      <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-normal rounded bg-[var(--color-surface-alt)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)]">
+        {fix.split(',').map((part, i) => (
+          <Fragment key={i}>
+            {i > 0 && (
+              <>
+                ,<wbr />
+              </>
+            )}
+            {part}
+          </Fragment>
+        ))}
       </pre>
       <button
         type="button"
         title="Copy"
         aria-label="Copy fix"
-        className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)]"
+        className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)]"
         onClick={() => {
           void navigator.clipboard?.writeText(fix).then(
             () => {

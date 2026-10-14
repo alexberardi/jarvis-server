@@ -546,6 +546,21 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     expect(screen.getByRole('button', { name: /Speech-to-text/ })).toBeEnabled()
   })
 
+  // On a phone the step list is numbered markers (labels screen-reader only), so each marker
+  // keeps its step's name, and the current step is spelled out once under them.
+  it('names every step marker and says where the wizard is', async () => {
+    signIn()
+    auth.getSetupState.mockResolvedValue({ ...superState, models_configured: true, setup_completed: false, setup_step: 'voice' })
+    renderWizard(false)
+    await screen.findByRole('heading', { name: /^Voice Required/ })
+    const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('button')
+    const names = ['Check', 'Account', 'Hardware', 'Language model', 'Speech-to-text', 'Voice', 'Voice recognition', 'Memory & search', 'Privacy', 'Done']
+    expect(steps).toHaveLength(names.length)
+    steps.forEach((b, i) => expect(b).toHaveAccessibleName(names[i]))
+    expect(steps[5]).toHaveAttribute('aria-current', 'step')
+    expect(screen.getByTestId('setup-step-position')).toHaveTextContent('Step 6 of 10: Voice')
+  })
+
   it('forwards to the dashboard once setup was finished', async () => {
     signIn()
     auth.getSetupState.mockResolvedValue({ ...superState, setup_completed: true, setup_step: '' })
