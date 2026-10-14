@@ -7,19 +7,9 @@ import { ThemeProvider } from '@/theme/ThemeProvider'
 import { AuthProvider, useAuth } from '@/auth/AuthContext'
 import AppShell from '@/components/layout/AppShell'
 import LoginPage from '@/pages/LoginPage'
-import SettingsPage from '@/pages/SettingsPage'
-import ConnectionsPage from '@/pages/ConnectionsPage'
-import LogsPage from '@/pages/LogsPage'
-import DashboardPage from '@/pages/DashboardPage'
-import NodesPage from '@/pages/NodesPage'
-import UsersPage from '@/pages/UsersPage'
-import ModelsPage from '@/pages/ModelsPage'
-import UpdatePage from '@/pages/UpdatePage'
-import TracesPage from '@/pages/TracesPage'
-import TraceDetailPage from '@/pages/TraceDetailPage'
-import NotFoundPage from '@/pages/NotFoundPage'
 import SetupWizard from '@/pages/SetupWizard'
 import ChangePasswordPage from '@/pages/ChangePasswordPage'
+import { shellRoutes } from '@/routes'
 import { getSetupState } from '@/api/auth'
 
 const queryClient = new QueryClient()
@@ -56,24 +46,7 @@ function AppRoutes() {
       <Route path="/setup" element={<SetupWizard needsSuperuser={needsSuperuser} />} />
       <Route path="/change-password" element={<ChangePasswordPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route element={<AppShell />}>
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/connections" element={<ConnectionsPage />} />
-        <Route path="/services" element={<Navigate to="/connections" replace />} />
-        <Route path="/logs" element={<LogsPage />} />
-        <Route path="/models" element={<ModelsPage />} />
-        <Route path="/traces" element={<TracesPage />} />
-        <Route path="/traces/:id" element={<TraceDetailPage />} />
-        <Route path="/update" element={<UpdatePage />} />
-        <Route path="/nodes" element={<NodesPage />} />
-        <Route path="/users" element={<UsersPage />} />
-        <Route
-          path="/"
-          element={<Navigate to="/dashboard" replace />}
-        />
-        <Route path="*" element={<NotFoundPage />} />
-      </Route>
+      <Route element={<AppShell />}>{shellRoutes()}</Route>
     </Routes>
   )
 }

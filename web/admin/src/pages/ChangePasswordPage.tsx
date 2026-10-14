@@ -5,8 +5,8 @@ import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 
 /**
- * ChangePasswordPage is where a superuser holding a temporary password lands after login (O4):
- * the admin is closed to them until they pick their own. Also reachable voluntarily.
+ * ChangePasswordPage is where a user holding a temporary password lands after login (O4):
+ * the app is closed to them until they pick their own. Also reachable voluntarily.
  */
 export default function ChangePasswordPage() {
   const { state, mustChangePassword, changePassword, logout } = useAuth()
@@ -37,7 +37,7 @@ export default function ChangePasswordPage() {
     setSaving(true)
     try {
       await changePassword(current, next)
-      navigate('/settings', { replace: true })
+      navigate('/', { replace: true })
     } catch (err) {
       setError(errorMessage(err, 'Could not change the password'))
     } finally {

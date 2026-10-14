@@ -48,7 +48,7 @@ export default function ModelBanner() {
           </div>
         </div>
         <Link
-          to={`/models?job=${missing[0]?.id ?? 'llm'}`}
+          to={`/admin/models?job=${missing[0]?.id ?? 'llm'}`}
           className="shrink-0 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90"
         >
           Set up models
@@ -63,7 +63,7 @@ export default function ModelBanner() {
         <Loader2 size={18} className="animate-spin text-amber-500" />
         <p className="text-sm text-[var(--color-text)]">
           {downloading.map(({ d, j }) => `${d.title}: ${jobStateText(j).toLowerCase()}`).join(' · ')}.{' '}
-          <Link to="/models" className="text-[var(--color-primary)] hover:underline">
+          <Link to="/admin/models" className="text-[var(--color-primary)] hover:underline">
             Details
           </Link>
         </p>
@@ -79,7 +79,7 @@ export default function ModelBanner() {
         <Loader2 size={18} className="animate-spin text-amber-500" />
         <p className="text-sm text-[var(--color-text)]">
           The live model is {STATE_TEXT[st] ?? st}. Voice requests are answered once it is ready.{' '}
-          <Link to="/models" className="text-[var(--color-primary)] hover:underline">
+          <Link to="/admin/models" className="text-[var(--color-primary)] hover:underline">
             Details
           </Link>
         </p>

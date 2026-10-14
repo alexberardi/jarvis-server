@@ -97,7 +97,7 @@ export default function TraceDetailPage() {
       <div className="space-y-4">
         <button
           className="text-sm text-[var(--color-primary)] hover:underline"
-          onClick={() => navigate('/traces')}
+          onClick={() => navigate('/admin/traces')}
         >
           Back to traces
         </button>
@@ -112,7 +112,7 @@ export default function TraceDetailPage() {
     <div className="space-y-6">
       <button
         className="text-sm text-[var(--color-primary)] hover:underline"
-        onClick={() => navigate('/traces')}
+        onClick={() => navigate('/admin/traces')}
       >
         Back to traces
       </button>

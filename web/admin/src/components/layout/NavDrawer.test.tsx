@@ -19,11 +19,11 @@ function renderShell() {
   render(
     <ThemeProvider>
       <AuthProvider>
-        <MemoryRouter initialEntries={['/dashboard']}>
+        <MemoryRouter initialEntries={['/admin/dashboard']}>
           <Routes>
             <Route element={<AppShell />}>
-              <Route path="/dashboard" element={<p>dashboard page</p>} />
-              <Route path="/logs" element={<p>logs page</p>} />
+              <Route path="/admin/dashboard" element={<p>dashboard page</p>} />
+              <Route path="/admin/logs" element={<p>logs page</p>} />
             </Route>
           </Routes>
         </MemoryRouter>

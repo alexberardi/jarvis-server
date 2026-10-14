@@ -1,6 +1,6 @@
 # webapp 01: the admin opened to household members (jarvis-web's replacement)
 
-Status: **P1 built** (gateway tiers, 2026-10-13, PR #98); P2–P7 not started. Code: `internal/modules/admin` (gateway + BFF) and
+Status: **P1 built** (gateway tiers, 2026-10-13, PR #98); **P2 built** (SPA auth and shell, 2026-10-13); P3–P7 not started. Code: `internal/modules/admin` (gateway + BFF) and
 `web/admin` (React SPA). Legacy client: `jarvis-web` (Next.js, read-only here). Related:
 [admin/00-inventory.md](../admin/00-inventory.md) (how the admin gateway was built, AD1 / I8),
 [install/01-no-cli-plan.md](../install/01-no-cli-plan.md) §3.2 (the Add-ons page, owned there),
@@ -343,7 +343,7 @@ the image picker opens the camera on phones, and nothing scrolls sideways (one v
 | # | Phase | Size | Depends on | Tests |
 |---|---|---|---|---|
 | P1 | **Done** (PR #98; as built below the table). **Gateway tiers.** `open/user/superuser` on every BFF route and `passRoute`, superuser by default. Open `auth/me`, `change-password`, `PATCH me`, `households`, `switch-household`, cc `admin/nodes`. Add the §2.2 cc member pass routes. | M | — | Go table test: walk every `/api` pattern on the admin mux × {anonymous, member of H1, power_user, household admin, superuser, member of H2}, asserting 401/403/2xx. An unclassified pattern fails. Cross-household: a member of H1 chatting to an H2 node through the gateway → 404 |
-| P2 | **SPA auth and shell.** Drop the superuser refusal, role-aware routes, `/admin/*` move with redirects, nav split, Account page, household switcher, the name | M | P1, Q1 | vitest: a member sees no Admin nav, a direct admin URL shows the notice, redirects work, must-change goes first, the switcher appears only for 2+ households |
+| P2 | **Done** (as built below the table). **SPA auth and shell.** Drop the superuser refusal, role-aware routes, `/admin/*` move with redirects, nav split, Account page, household switcher, the name | M | P1, Q1 | vitest: a member sees no Admin nav, a direct admin URL shows the notice, redirects work, must-change goes first, the switcher appears only for 2+ households |
 | P3 | **Chat page.** SSE through `SSEParser`, warmup, tools cache, picker and default chain, offline banner, actions/validation, markdown/think, images, `sessionStorage` | L | P1, P2. Step 1 of the chain lights up when 01's `this-device` ships | vitest: the default-chain table (agent / primary online / first online / none online), event reducer, offline banner, image gating. Go e2e chat smoke: the `gatewayStack` (`e2e_test.go`) plus cc with a fake LLM and a fake MQTT node. Member logs in → nodes → warmup → chat → a `done` event through the admin port |
 | P4 | **Add-ons page:** nav slot and `user` tier only. Content per 01-no-cli-plan §3.2, its item 3.2 | — | P1, P2 | there |
 | P5 | **Inbox page** (if Q2) | S | P1, P2 | vitest list/detail. Go tier test covers the routes |
@@ -366,6 +366,25 @@ sees only the bearer principal the tier checked (cc's provisioning guard prefers
 G9: cc already lists a non-superuser only their households' nodes; the chat picker passes
 `?household_id=` (cc checks membership, and the filter scopes a superuser too). G11: `pass()` keeps
 `r.RemoteAddr` (`TestPassKeepsThePeerAddress`). The SPA still refuses non-superusers (P2).
+
+**P2 as built.** The login no longer refuses non-superusers. Routes (`web/admin/src/routes.tsx`):
+`/` (`HomeRedirect`: members → `/chat`; a superuser → `/admin/dashboard` while `setup_completed` or
+`live_ready` is false, else `/chat`), `/chat` (placeholder until P3), `/account`, and the Admin pages
+under `/admin/*` inside `RequireSuperuser`, which shows a member "This page is for the install's
+administrator" (the server answers 403 regardless). Every old path (`/dashboard`, `/traces/:id`,
+`/services`, …) redirects under `/admin`, keeping query and hash. The nav is Chat, then an "Admin"
+group (and the system footer) for superusers only. Name: "Jarvis Automation" (title, login, nav,
+setup), per the naming decision, overriding §4.2's "Jarvis". The header names the user
+(`display_name` → username → email) and links to `/account` (name + display-name edit over
+`PATCH /auth/me`). The household switcher (`GET /api/households`, `POST /api/auth/switch-household`)
+shows only with 2+ households: in the header from `sm`, in the nav drawer on phones. The active
+household is the access token's `household_id` claim; the pick is kept in `jarvis-admin:household`,
+and a refreshed token (which auth scopes to the first household) is switched back. Must-change
+goes first: no household call is made, and any `password_change_required` 403 flips to the change
+screen (#100). Logout, and a different user signing in, clear every `jarvis-admin:` sessionStorage
+key, `jarvis-admin:household` and the `jarvis-admin:u:*` localStorage keys (G13), where P3 keeps
+the chat. The voluntary Change password link stays (the full account/password page is after v1).
+Kept: port 7710, the `jarvis-admin:*` keys.
 
 **The user verifies:** log in as a non-superuser member on a desktop and a phone. Chat picks this
 computer's agent, then (with it stopped) the primary node. Admin URLs give the notice, and the server

@@ -31,7 +31,10 @@ export default function LoginPage() {
   if (state.isAuthenticated) {
     // /setup resumes an unfinished wizard from the server's state (A10 F9) and otherwise
     // forwards to the dashboard.
-    return <Navigate to={mustChangePassword ? '/change-password' : '/setup'} replace />
+    // A superuser goes through /setup, which resumes an unfinished wizard (A10 F9) and
+    // otherwise forwards home; a member has no setup to resume.
+    const next = mustChangePassword ? '/change-password' : state.user?.is_superuser ? '/setup' : '/'
+    return <Navigate to={next} replace />
   }
 
   const handleLogin = (e: FormEvent) => {
@@ -60,7 +63,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
       <div className="w-full max-w-sm rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-lg">
-        <h1 className="mb-6 text-center text-2xl font-bold text-[var(--color-text)]">Jarvis Admin</h1>
+        <h1 className="mb-6 text-center text-2xl font-bold text-[var(--color-text)]">Jarvis Automation</h1>
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
@@ -75,7 +78,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className={inputClass}
-              placeholder="admin@example.com"
+              placeholder="you@example.com"
             />
           </div>
 

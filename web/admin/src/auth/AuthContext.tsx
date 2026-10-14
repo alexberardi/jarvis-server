@@ -10,9 +10,10 @@ import {
 
 import * as authApi from '@/api/auth'
 import { setAuthToken, setLogoutFunction, setMustChangePasswordFunction, setRefreshFunction } from '@/api/client'
-import type { AuthUser, TokenResponse } from '@/api/auth'
+import type { AuthUser, Household, TokenResponse } from '@/api/auth'
 import { clearSetupToken, getSetupToken } from '@/auth/setupToken'
 import { errorMessage, errorStatus } from '@/lib/errors'
+import { clearSessionState, HOUSEHOLD_KEY, householdOf } from '@/lib/session'
 
 interface AuthState {
   user: AuthUser | null
@@ -36,6 +37,14 @@ interface AuthContextValue {
   state: AuthState
   /** True when the signed-in user holds a temporary password and must change it (O4). */
   mustChangePassword: boolean
+  /** The caller's households (empty until loaded, or when the call failed). */
+  households: Household[]
+  /** The household the access token is scoped to: chat, nodes and the inbox follow it. */
+  activeHouseholdId: string
+  /** switchHousehold re-scopes the session to another of the caller's households (§4.4). */
+  switchHousehold: (householdId: string) => Promise<void>
+  /** updateDisplayName saves the caller's display name (PATCH /auth/me). */
+  updateDisplayName: (displayName: string) => Promise<void>
   login: (email: string, password: string) => Promise<void>
   setup: (email: string, password: string, username?: string) => Promise<SetupResult>
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -57,6 +66,25 @@ const signedOut: AuthState = {
   isAuthenticated: false,
   isLoading: false,
   error: null,
+}
+
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+/** storedUserId is the id of the user this browser last held a session for. */
+function storedUserId(): unknown {
+  const raw = readStored(USER_KEY)
+  if (!raw) return null
+  try {
+    return (JSON.parse(raw) as AuthUser).id
+  } catch {
+    return null
+  }
 }
 
 /** userFrom folds the top-level must_change_password into the stored user. */
@@ -91,10 +119,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return signedOut
   })
+  const [households, setHouseholds] = useState<Household[]>([])
 
   /** adopt stores a token pair and its user: the one place a session starts (O5). */
   const adopt = useCallback((res: TokenResponse) => {
     const user = userFrom(res)
+    // A different person at this browser: drop the last one's chat and choices (G13).
+    if (storedUserId() !== user.id) clearSessionState()
     localStorage.setItem(ACCESS_KEY, res.access_token)
     localStorage.setItem(REFRESH_KEY, res.refresh_token)
     localStorage.setItem(USER_KEY, JSON.stringify(user))
@@ -121,7 +152,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Leftovers from the old setup wizard, which wrote un-namespaced keys.
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
+    // The chat conversation, the remembered node and household, cached tools (G13).
+    clearSessionState()
     setAuthToken(null)
+    setHouseholds([])
     setState(signedOut)
   }, [])
 
@@ -131,8 +165,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const res = await authApi.refresh(storedRefresh)
-      const newAccess = res.access_token
+      let newAccess = res.access_token
       const newRefresh = res.refresh_token ?? storedRefresh
+      // A refreshed token is scoped to the first household again; keep the one picked.
+      const picked = readStored(HOUSEHOLD_KEY)
+      if (picked && householdOf(newAccess) !== picked) {
+        try {
+          newAccess = (await authApi.switchHousehold(picked, newAccess)).access_token
+        } catch {
+          localStorage.removeItem(HOUSEHOLD_KEY) // no longer a member: stay on the default
+        }
+      }
 
       localStorage.setItem(ACCESS_KEY, newAccess)
       localStorage.setItem(REFRESH_KEY, newRefresh)
@@ -181,16 +224,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       setState((prev) => ({ ...prev, error: null, isLoading: true }))
       try {
+        // Any user signs in (webapp 01): the server tiers decide what each one reaches, and
+        // the routes only hide what a member can't open (RequireSuperuser).
         const res = await authApi.login(email, password)
-        // UX gate only — the real security boundary is server-side
-        if (!res.user.is_superuser) {
-          setState((prev) => ({
-            ...prev,
-            isLoading: false,
-            error: 'Admin access required. This account is not a superuser.',
-          }))
-          return
-        }
         adopt(res)
       } catch (err: unknown) {
         setState((prev) => ({ ...prev, isLoading: false, error: errorMessage(err, 'Login failed') }))
@@ -228,10 +264,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const mustChangePassword = Boolean(state.user?.must_change_password)
+  const activeHouseholdId = householdOf(state.accessToken)
+  const userId = state.user?.id
+
+  // The household list, for the switcher. Not while the password must change: every other
+  // route answers 403 password_change_required until it does.
+  useEffect(() => {
+    if (!state.isAuthenticated || mustChangePassword) return
+    let cancelled = false
+    authApi
+      .listHouseholds()
+      .then((list) => {
+        if (!cancelled) setHouseholds(list)
+      })
+      .catch(() => {
+        if (!cancelled) setHouseholds([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [state.isAuthenticated, mustChangePassword, userId])
+
+  const switchHousehold = useCallback(async (householdId: string) => {
+    const res = await authApi.switchHousehold(householdId)
+    localStorage.setItem(ACCESS_KEY, res.access_token)
+    localStorage.setItem(HOUSEHOLD_KEY, householdId)
+    setAuthToken(res.access_token)
+    setState((prev) => ({ ...prev, accessToken: res.access_token }))
+  }, [])
+
+  const updateDisplayName = useCallback(async (displayName: string) => {
+    const updated = await authApi.updateMe(displayName)
+    setState((prev) => {
+      if (!prev.user) return prev
+      const user = { ...prev.user, display_name: updated.display_name ?? null }
+      localStorage.setItem(USER_KEY, JSON.stringify(user))
+      return { ...prev, user }
+    })
+  }, [])
 
   const value = useMemo(
-    () => ({ state, mustChangePassword, login, setup, changePassword, logout }),
-    [state, mustChangePassword, login, setup, changePassword, logout],
+    () => ({
+      state,
+      mustChangePassword,
+      households,
+      activeHouseholdId,
+      switchHousehold,
+      updateDisplayName,
+      login,
+      setup,
+      changePassword,
+      logout,
+    }),
+    [state, mustChangePassword, households, activeHouseholdId, switchHousehold, updateDisplayName, login, setup, changePassword, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

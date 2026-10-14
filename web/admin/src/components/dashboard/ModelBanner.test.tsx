@@ -56,7 +56,7 @@ describe('dashboard model banner (AD3b)', () => {
     auth.getSetupState.mockResolvedValue(state({ jobs: jobs({ llm: 'ready', stt: 'failed', voice: 'missing', speaker: 'missing' }) }))
     renderBanner()
     expect(await screen.findByText("Voice isn't ready: Speech-to-text and Voice are missing")).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Set up models' })).toHaveAttribute('href', '/models?job=stt')
+    expect(screen.getByRole('link', { name: 'Set up models' })).toHaveAttribute('href', '/admin/models?job=stt')
   })
 
   it('names a single missing piece', async () => {

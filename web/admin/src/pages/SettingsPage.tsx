@@ -126,7 +126,7 @@ export default function SettingsPage() {
 
       <p className="text-xs text-[var(--color-text-muted)]">
         Model choices (which model each label runs, GPUs, context, remote endpoints) are set on the{' '}
-        <Link to="/models" className="text-[var(--color-primary)] hover:underline">
+        <Link to="/admin/models" className="text-[var(--color-primary)] hover:underline">
           Models
         </Link>{' '}
         page.
