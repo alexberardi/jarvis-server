@@ -17,3 +17,8 @@ func RunWith(ctx context.Context, log *slog.Logger, _ AppEvents, fn func(*Island
 	logOff(log, "not supported on this platform yet")
 	return fn(nil)
 }
+
+// RunLoop runs fn; the AppKit loop it stands for is macOS's only.
+func RunLoop(ctx context.Context, log *slog.Logger, _ AppEvents, fn func(loop bool) error) error {
+	return fn(false)
+}
