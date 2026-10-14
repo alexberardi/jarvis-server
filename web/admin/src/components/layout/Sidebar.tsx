@@ -11,6 +11,7 @@ import {
   ArrowUpCircle,
   X,
   MessageSquare,
+  Puzzle,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
@@ -25,7 +26,10 @@ interface NavItem {
 }
 
 /** Every user's pages (webapp 01 §4.1). */
-const memberNav: NavItem[] = [{ label: 'Chat', icon: MessageSquare, path: '/chat' }]
+const memberNav: NavItem[] = [
+  { label: 'Chat', icon: MessageSquare, path: '/chat' },
+  { label: 'Add-ons', icon: Puzzle, path: '/addons' },
+]
 
 /** The Admin group: superusers only, and the server refuses these routes to anyone else (G1). */
 const adminNav: NavItem[] = [

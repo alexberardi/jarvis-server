@@ -80,6 +80,7 @@ describe('member shell (webapp 01 P2)', () => {
     signIn({ is_superuser: false })
     renderAt('/chat')
     expect(within(nav()).getByRole('link', { name: 'Chat' })).toBeInTheDocument()
+    expect(within(nav()).getByRole('link', { name: 'Add-ons' })).toHaveAttribute('href', '/addons')
     expect(within(nav()).queryByText('Admin')).toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'Dashboard' })).toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'Settings' })).toBeNull()
