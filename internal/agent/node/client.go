@@ -135,6 +135,12 @@ func (c *CC) do(ctx context.Context, method, path string, body, out any) error {
 	return doJSON(ctx, c.HTTP, method, joinURL(c.BaseURL, path), map[string]string{"X-API-Key": c.Creds.APIKey()}, body, out)
 }
 
+// Do is one node-authenticated call to command-center: body (nil for none) as JSON, the JSON
+// answer into out (nil to discard), a non-2xx as *HTTPError.
+func (c *CC) Do(ctx context.Context, method, path string, body, out any) error {
+	return c.do(ctx, method, path, body, out)
+}
+
 // Runtime is version_info.runtime in every heartbeat from this node core.
 const Runtime = "go"
 
@@ -172,6 +178,9 @@ type Beat struct {
 	NodeKind string
 	// Capabilities is reported as is, e.g. {"browser_extension": "connected"}. Nil leaves it out.
 	Capabilities map[string]any
+	// NeedsK2 asks the app to provision the settings key (K2, DESIGN §16): the mobile app then
+	// offers "Generate Encryption Key" and relays it through command-center.
+	NeedsK2 bool
 }
 
 // Heartbeat stamps last_seen and reports what this node is. version_info.install_mode is how
@@ -183,9 +192,7 @@ func (c *CC) Heartbeat(ctx context.Context, b Beat) error {
 	body := map[string]any{
 		"version_info": map[string]any{"version": b.Version, "install_mode": b.InstallMode, "runtime": Runtime},
 		"is_busy":      false,
-		// K2 encrypts command secrets on a Pi; nothing on this node uses it yet, so don't ask
-		// the app to provision one.
-		"needs_k2": false,
+		"needs_k2":     b.NeedsK2,
 	}
 	if b.NodeKind != "" {
 		body["node_kind"] = b.NodeKind

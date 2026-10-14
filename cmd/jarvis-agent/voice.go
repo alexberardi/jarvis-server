@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
@@ -170,12 +172,16 @@ func listen(ctx context.Context, args []string) error {
 	}
 	var tools node.Toolset
 	if !*noTools {
-		_, ts, closeTools, err := tf.build(ctx, log, false)
+		st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
+		if err != nil {
+			return fmt.Errorf("node settings: %w", err)
+		}
+		_, ts, closeTools, err := tf.build(ctx, log, false, st)
 		if err != nil {
 			return err
 		}
 		defer closeTools()
-		tools = ts
+		tools = nodesettings.Gate{Tools: ts, Store: st}
 	}
 	if *timeout > 0 {
 		var cancel context.CancelFunc
