@@ -43,6 +43,9 @@ func islandDemo(ctx context.Context, args []string) error {
 	hold := fs.String("hold", "", "show only this state: listening, thinking, speaking, follow_up, error")
 	dur := fs.Duration("for", 10*time.Second, "with --hold: for how long")
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	log := logger()
 	return island.Run(ctx, log, func(i *island.Island) error {
 		if i == nil {

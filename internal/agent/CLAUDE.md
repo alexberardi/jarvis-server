@@ -49,6 +49,8 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 JARVIS_SCREEN_NATIVE=1 go test -v -run TestNativeCapture ./internal/agent/screen/   # capture this desktop
 JARVIS_DICTATE_NATIVE_LIST=1 go test -v -run TestNativeWindowsReadOnly ./internal/agent/dictate/  # list windows, read-only
 ./jarvis-agent run --confirm-dictation submit  # ask before dictation sends anything (off|submit|all)
+./jarvis-agent config set voice true          # the settings file run reads (agent.json); flags win
+./jarvis-agent config                          # show it: every key, set or not
 scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
 AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
 scripts/browser-ext-store-zip.sh chrome|firefox   # store upload zips -> dist/ (docs/agent/store-listing.md)
@@ -123,6 +125,8 @@ internal/agent/
                       virtual keyboard uploads (pure, every OS)
   wlwire/             the Wayland client wire (connection, ids, args, registry), shared by the
                       island and vkbd
+  settings/           the settings file (agent.json): keys that stand for run flags, applied unless
+                      the command line set the flag (DESIGN.md §13 "The settings file")
   hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's
                       patterns (leds.go, golden-tested), the GPIO17 button (button.go), spidev +
                       gpiocdev (device_linux.go); voice states reach it through voice.Indicator

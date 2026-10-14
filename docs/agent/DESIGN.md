@@ -863,6 +863,17 @@ after a kill (started, pill), uninstall (agent quit over the socket; nothing lef
 copy's first `start` setting the user up. **macOS gap:** LaunchServices may hand a second open of
 the app, or the link, to the running agent as an Apple Event instead of starting a process; the
 agent doesn't handle that event yet, so there it may show no pill.
+**The settings file (installers plan item 1.6, 2026-10-13).** The choices a user makes once are
+no longer only `run` flags: `<user config dir>/jarvis-agent/agent.json` (0600, next to
+`node.json`), e.g. `{"voice": true, "island": true, "confirm_dictation": "submit"}`. Keys:
+`voice`, `island` (= not `--no-overlay`), `confirm_dictation`, `browser` (= not `--no-browser`),
+`chimes`, `voice_input`, `voice_output`, `wake_threshold`; each stands for a `run` flag and is
+applied by setting that flag, so it is validated the same way. A flag given on the command line
+wins. A missing key keeps the flag's default; an unknown key is logged and ignored (a newer
+agent's file); a bad value stops `run` with the file's path (silently dropping a choice like
+`confirm_dictation` would be worse). Written by `jarvis-agent config set KEY VALUE` / `unset`
+(and by the first-run page, item 1.5); `config show` lists the keys. A running agent reads it at
+start.
 
 ## 14. Dictation: type, press keys, fill and click (2026-10-13)
 

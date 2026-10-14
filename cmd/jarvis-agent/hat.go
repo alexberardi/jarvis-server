@@ -199,6 +199,9 @@ func hatCmd(ctx context.Context, args []string) error {
 		name, rest = rest[0], rest[1:]
 	}
 	_ = fs.Parse(rest)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	log := logger()
 	strip, err := hat.OpenStrip(hat.SPIDevice)
 	if err != nil {

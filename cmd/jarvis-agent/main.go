@@ -110,6 +110,8 @@ func main() {
 		err = uninstallCmd(ctx, os.Args[2:], os.Stdout)
 	case "start":
 		err = startCmd(ctx, os.Args[2:])
+	case "config":
+		err = configCmd(os.Args[2:], os.Stdout)
 	case "try":
 		err = try(ctx, os.Args[2:])
 	case "listen":
@@ -151,7 +153,8 @@ func usage(w io.Writer) {
            [--name NAME] [--room ROOM] [--creds PATH] [--force | --if-needed]
            [--browser | --no-browser]   set up browser control afterwards (default: ask)
   run      connect to jarvisd and serve tool calls until interrupted
-           [--creds PATH] [--allow-open-any] [--no-browser]
+           (settings come from the config file, see config below; flags given here win)
+           [--creds PATH] [--config PATH] [--allow-open-any] [--no-browser]
            [--confirm-dictation off|submit|all]   ask before typing/clicking sends anything
            [--sidecar-python PY --sidecar-commands DIR]
            [--voice [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4]
@@ -164,6 +167,7 @@ func usage(w io.Writer) {
            [--files-only] [--dry-run]
   uninstall  undo install [--purge: also delete the sign-in, settings and caches] [--dry-run]
   start    start the agent (what the menu entry, the shortcut and jarvis-agent://start run)
+  config   the settings file run reads: config [show | path | set KEY VALUE | unset KEY]
   status   show enrollment, reachability and what this host can do right now
   dictation allow | revoke | status   the one-time typing permission GNOME and KDE on Wayland
            need (allow shows the desktop's dialog once; nothing else ever does)
@@ -237,6 +241,9 @@ func enroll(ctx context.Context, args []string) error {
 	browserNo := fs.Bool("no-browser", false, "don't offer browser control setup")
 	useCode := fs.Bool("code", false, "pair with a code a household member approves (the default without --email or --token)")
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	roomSet := false
 	fs.Visit(func(f *flag.Flag) { roomSet = roomSet || f.Name == "room" })
 	path, err := credsPath(*cp)
@@ -386,16 +393,39 @@ func readPassword(fromStdin bool) (string, error) {
 
 // --- run ---
 
+// runFlags are `run`'s flags; the config file (settings.Keys) stands for some of them.
+type runFlags struct {
+	cp, config         *string
+	tf                 *toolFlags
+	voiceOn, noOverlay *bool
+	vf                 *voiceFlags
+	hf                 *hatFlags
+}
+
+func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
+	fs := flag.NewFlagSet("run", errs)
+	return fs, &runFlags{
+		cp:        fs.String("creds", "", "credentials file"),
+		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
+		tf:        addToolFlags(fs),
+		voiceOn:   fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`),
+		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
+		vf:        addVoiceFlags(fs),
+		hf:        addHatFlags(fs),
+	}
+}
+
 func run(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	cp := fs.String("creds", "", "credentials file")
-	tf := addToolFlags(fs)
-	voiceOn := fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`)
-	noOverlay := fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)")
-	vf := addVoiceFlags(fs)
-	hf := addHatFlags(fs)
+	fs, f := newRunFlags(flag.ExitOnError)
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	log := logger()
+	if err := applySettings(fs, *f.config, log); err != nil {
+		return err
+	}
+	cp, tf, voiceOn, noOverlay, vf, hf := f.cp, f.tf, f.voiceOn, f.noOverlay, f.vf, f.hf
 	// One agent per user: the control socket is the lock, and how a second launch, the
 	// start-only shortcut and uninstall reach this one (installers plan item 1.9).
 	ctl, err := listenControl()
@@ -600,6 +630,9 @@ func status(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	cp := fs.String("creds", "", "credentials file")
 	_ = fs.Parse(args)
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
 	h, err := nativeHost()
 	if err != nil {
 		return err
