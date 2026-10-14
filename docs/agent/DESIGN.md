@@ -513,7 +513,7 @@ backend only puts the buffer on screen:
   systemd unit without the session's environment), a compositor without layer-shell (GNOME),
   Windows (next), any backend failure while running.
 
-`run --voice` shows it by default; `--no-overlay` turns it off. `jarvis-agent island-demo`
+`run` shows it by default; `--no-overlay` (agent.json `island: false`) turns it off. `jarvis-agent island-demo`
 (not in the usage) plays the states without a microphone or server;
 `--hold follow_up --for 20s` holds one.
 
@@ -913,9 +913,11 @@ wins. A missing key keeps the flag's default; an unknown key is logged and ignor
 agent's file); a bad value stops `run` with the file's path (silently dropping a choice like
 `confirm_dictation` would be worse). Written by `jarvis-agent config set KEY VALUE` / `unset`
 (and by the first-run page, item 1.5); `config show` lists the keys. A running agent reads it at
-start; `jarvis-agent restart` applies a change. `voice` defaults to off
-(`voiceByDefault` in `cmd/jarvis-agent`); whether desktop installs listen by default is
-pending the user's decision.
+start; `jarvis-agent restart` applies a change. **`voice` defaults to on** (user, 2026-10-13:
+`voiceByDefault`): a desktop install listens for "Hey Jarvis" out of the box, and the status
+icon's toggle (§15) is how a user turns it off; it writes `voice`, so `config set voice` and
+`--voice` are for scripts and development only. `tray` (= not `--no-tray`) hides the status
+icon.
 
 ## 14. Dictation: type, press keys, fill and click (2026-10-13)
 
@@ -1199,7 +1201,7 @@ question 2).
 and one line of text (Go Regular, 13 pt, cut with "…") for `d`, over whatever the voice pipeline
 shows, then returns to it. Dictation shows "Typing into Claude: test def", "Pressing Enter",
 "Filling the username field: abcde", "Clicking OK" for 2.5 s, a failure ("Couldn't find
-Omerite — nothing typed") for 5 s, and a pending question for as long as it waits. Only while the island runs (`run --voice` without `--no-overlay`); a turn from the
+Omerite — nothing typed") for 5 s, and a pending question for as long as it waits. Only while the island runs (not `--no-overlay`) and listening is on; a turn from the
 mobile app on a desktop without voice shows nothing. Goldens: `island/testdata/note*.png`.
 
 ### Who can drive it
@@ -1364,3 +1366,56 @@ never in logs or results; password fields only when named.
 9. **The extension update.** 0.2.0 must be uploaded to both stores and re-signed for the
    embedded `.xpi` (the user's step: AMO keys). Until then installed copies answer fill and click
    with `unknown_command`.
+
+## 15. The status icon and its menu (2026-10-13)
+
+**Why.** The user, 2026-10-13: "there needs to be an easy way to kill the app as well." The agent
+has no window and no Dock or taskbar entry (an accessory app on macOS, a login item elsewhere),
+so a user couldn't see that it runs, let alone stop it. A status icon with a menu is the standard
+for background apps. Code: `internal/agent/tray` (the menu as data, `Items`; a backend per OS
+only shows it), `cmd/jarvis-agent/tray.go`, `voiceswitch.go`.
+
+```
+Jarvis Automation Agent — Running          (disabled: the agent's state)
+─────────────
+✓ Listen for "Hey Jarvis"                   (Linux, macOS)
+  Open Jarvis Automation                    (once discovery names the web UI)
+─────────────
+  Quit Jarvis Automation Agent
+```
+
+- **Listen for "Hey Jarvis"** turns the voice pipeline on and off in the running agent: off
+  cancels it (the microphone closes when `voice.Serve` returns) and hides the island; on starts it
+  again, no restart. The wake model loads on the first on and stays loaded. Each choice is saved
+  as agent.json `voice`. There is no separate "pause listening": the toggle is it. If listening
+  can't start (no microphone, models unreachable), the checkmark goes off for this run, the header
+  says "couldn't start listening", and the saved choice is kept. A `--voice` given on `run`'s
+  command line still wins at the next start (flags beat the file, §13). Dictation's island notes
+  show only while listening is on, as before.
+- **Open Jarvis Automation** opens discovery's `jarvis-admin` URL (http/https only, no user
+  info) in the default browser; it appears once jarvisd answers discovery.
+- **Quit** is `jarvis-agent stop` from inside (§13): exit 0, so no supervisor restarts it, until
+  the next login or `start`.
+- **Hide the icon:** `--no-tray`, or agent.json `tray: false`. `status` prints a `menu icon:` line.
+
+**Backends.** Linux is built; the macOS and Windows backends land in the next PRs.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| What | StatusNotifierItem + `com.canonical.dbusmenu` on the session bus (godbus) | `NSStatusItem` in the menu bar, purego, in the island's AppKit loop | `Shell_NotifyIconW` in the notification area, syscalls |
+| Shown by | waybar's tray module, KDE Plasma, GNOME with the AppIndicator extension, XFCE/LXQt panels | always | always |
+| Icon | the shield in colour (`icon.png`, the extension's icon), ARGB pixmaps 16–64 px | a template image derived from the shield: black where it is dark, clear where the figure is light, so macOS tints it | the shield in colour |
+| No host | stays exported; registers when a `StatusNotifierWatcher` appears (a bar started after the agent, or restarted); one info log line; `status` says "off: no status icon host" | n/a | n/a |
+
+The agent never fails because of the icon: a backend that can't start logs once and the agent
+runs without it.
+
+**Verified (Linux, 2026-10-13).** Unit tests run the real objects on a private `dbus-daemon`
+with the test as watcher and host (late watcher, restarted watcher, properties, layout, clicks,
+LayoutUpdated, the name dropped on close). Then the real binary on a private bus: (1) a minimal
+watcher/host program read the item and menu, clicked the toggle twice (agent.json `voice`
+false, then true) and Quit (exit 0, item gone); (2) **waybar 0.15** in a nested headless sway on
+a private bus showed the shield in its tray; right-clicking it (a virtual pointer) opened the real
+GTK menu, the toggle unticked and saved, "Open Jarvis Automation" appeared once a fake config
+service answered, and Quit stopped the agent and removed the icon. Nothing ran on the user's
+session bus or desktop.

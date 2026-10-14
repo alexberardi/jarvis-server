@@ -6,7 +6,7 @@
 //	jarvis-agent run
 //	jarvis-agent status
 //	jarvis-agent try desktop_set_volume '{"volume": 30}'
-//	jarvis-agent run --voice        # plus the "hey jarvis" voice pipeline (Linux, macOS)
+//	jarvis-agent stop               # until the next login (the status icon's Quit)
 package main
 
 import (
@@ -161,8 +161,10 @@ func usage(w io.Writer) {
            [--creds PATH] [--config PATH] [--allow-open-any] [--no-browser]
            [--confirm-dictation off|submit|all]   ask before typing/clicking sends anything
            [--sidecar-python PY --sidecar-commands DIR]
-           [--voice [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4]
-            [--wake-models DIR] [--no-chimes]]   wake word "hey jarvis" (Linux, macOS)
+           [--no-overlay] [--no-tray]   no on-screen island / no status icon
+           [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4] [--wake-models DIR]
+           [--no-chimes]   listening for "Hey Jarvis" (Linux, macOS): on and off from the
+           status icon's menu
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   install  set the agent up for this user: start at login, the app menu entry (and desktop
@@ -405,14 +407,15 @@ type runFlags struct {
 	cp, config         *string
 	tf                 *toolFlags
 	voiceOn, noOverlay *bool
+	noTray             *bool
 	vf                 *voiceFlags
 	hf                 *hatFlags
 }
 
-// voiceByDefault is run's --voice default (the `voice` setting overrides it). Off for now;
-// whether desktop installs listen by default is the user's decision, pending (likely "on":
-// then this becomes true, and DESIGN §13's settings file and the usage say so).
-const voiceByDefault = false
+// voiceByDefault is run's --voice default: a desktop install listens for "Hey Jarvis" out of
+// the box (user, 2026-10-13). The status icon's toggle is how a user turns it off (it saves
+// agent.json's `voice`, which overrides this); --voice=false is for scripts and development.
+const voiceByDefault = true
 
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
@@ -422,6 +425,7 @@ func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 		tf:        addToolFlags(fs),
 		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
+		noTray:    fs.Bool("no-tray", false, "don't show the status icon and its menu (menu bar, tray, notification area)"),
 		vf:        addVoiceFlags(fs),
 		hf:        addHatFlags(fs),
 	}
@@ -477,42 +481,46 @@ func run(ctx context.Context, args []string) error {
 	r.Capabilities, r.Changed = heartbeatCaps(tools)
 	hd := openHat(hf, log)
 	defer hd.Close()
-	var vs *voiceStack
-	if *voiceOn {
-		// Voice is an extra: if it can't start, the agent still serves its tools.
-		if vs, err = loadVoice(ctx, vf, log); err != nil {
-			log.Error("voice disabled", "err", err)
-			vs = nil
-		} else {
-			defer vs.close()
-			if hd != nil {
-				vs.addIndicator(&ledCue{leds: hd.leds, log: log})
-			}
-			r.OnConnected = func(ctx context.Context, cc *node.CC) {
-				// Voice turns run the same toolset the MQTT dispatcher serves.
-				_ = voice.Serve(ctx, vs.options(cc, tools, log, nil))
-			}
-		}
+	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
+	// toggle turns it on and off while the agent runs (voiceSwitch).
+	sw := newVoiceSwitch(*voiceOn && voice.Supported, log)
+	sw.load = func(ctx context.Context) (*voiceStack, error) { return loadVoice(ctx, vf, log) }
+	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
+		// Voice turns run the same toolset the MQTT dispatcher serves.
+		_ = voice.Serve(ctx, vs.options(cc, tools, log, nil))
 	}
+	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }
+	if voice.Supported {
+		if hd != nil {
+			sw.addIndicator(&ledCue{leds: hd.leds, log: log})
+		}
+		r.OnConnected = sw.Serve
+	} else if *voiceOn {
+		log.Info("voice: not supported on " + runtime.GOOS + " yet")
+	}
+	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit}
+	sw.changed = ic.voiceChanged
 	if *noOverlay {
 		pill.Attach(nil)
+		defer ic.show(ctx)()
 		return r.Run(ctx)
 	}
 	// The island needs the main thread on macOS: island.Run keeps it and runs the agent on
 	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
 	// It runs with voice off too, for the "Jarvis is running" pill; it shows voice states and
-	// dictation's notes only with voice on, as before.
+	// dictation's notes only while listening is on.
 	return island.RunWith(ctx, log, appEvents(pill, log), func(i *island.Island) error {
 		if i == nil {
 			pill.Attach(nil)
 		} else {
 			hideFromScreenshots(tools, i)
-			if vs != nil {
-				vs.addIndicator(islandCue{i})
-				attachIsland(tools, i)
+			if voice.Supported {
+				sw.addIndicator(islandCue{i})
+				attachIsland(tools, i, sw.On)
 			}
 			pill.Attach(i.ShowRunning)
 		}
+		defer ic.show(ctx)()
 		return r.Run(ctx)
 	})
 }
@@ -527,19 +535,24 @@ func hideFromScreenshots(tools node.Multi, i *island.Island) {
 }
 
 // attachIsland keeps the island out of desktop_read_screen's pictures and shows on it what
-// dictation types, fills, clicks or asks.
-func attachIsland(tools node.Multi, i *island.Island) {
+// dictation types, fills, clicks or asks, while listening is on.
+func attachIsland(tools node.Multi, i *island.Island, listening func() bool) {
+	note := func(text string, d time.Duration) {
+		if listening() {
+			i.Note(text, d)
+		}
+	}
 	for _, t := range tools {
 		switch x := t.(type) {
 		case *screen.Tools:
 			x.Hide = i.Suspend
 		case *dictate.Tools:
-			x.Show = i.Note
+			x.Show = note
 			if x.Confirm != nil {
-				x.Confirm.Show = i.Note
+				x.Confirm.Show = note
 			}
 		case *browser.Tools:
-			x.Show = i.Note
+			x.Show = note
 		}
 	}
 }
@@ -684,6 +697,7 @@ func status(ctx context.Context, args []string) error {
 		}
 	}
 	fmt.Printf("voice:        %s\n", voiceStatus())
+	fmt.Printf("menu icon:    %s\n", trayStatus())
 	fmt.Printf("dictation:    %s\n", dictationStatus(ctx, h))
 	fmt.Printf("browser:      %s\n", browserSummary())
 	if list, err := appCatalogue(nil)(); err != nil {

@@ -6,8 +6,8 @@ offers OS control as client tools: open a link or launch an installed app by nam
 get/set volume, list/minimise/focus/close windows, and control the user's own browser through
 the Jarvis Browser Control extension (tabs, page text, media, fill a field, click a button),
 read the screen, type dictated text into a window or a named app and press dialog keys, and
-answer the time and date. With `run --voice` it is a voice node (wake word, the on-screen island, and on a Pi
-the ReSpeaker HAT). Status: pre-release, built from source; not in the jarvisd release archives.
+answer the time and date. On Linux and macOS it is a voice node by default (wake word, the on-screen island, and on a Pi
+the ReSpeaker HAT), with a status icon whose menu turns listening on/off and quits (`tray/`). Status: pre-release, built from source; not in the jarvisd release archives.
 Moved here from the `jarvis-host-agent` repo on 2026-10-10 so it can share jarvisd's packages
 (`internal/voice`, `internal/audio`, later `internal/update`). Design, decisions and open
 questions: **[docs/agent/DESIGN.md](../../docs/agent/DESIGN.md)**: read it first. The voice/Pi
@@ -51,15 +51,15 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 JARVIS_SCREEN_NATIVE=1 go test -v -run TestNativeCapture ./internal/agent/screen/   # capture this desktop
 JARVIS_DICTATE_NATIVE_LIST=1 go test -v -run TestNativeWindowsReadOnly ./internal/agent/dictate/  # list windows, read-only
 ./jarvis-agent run --confirm-dictation submit  # ask before dictation sends anything (off|submit|all)
-./jarvis-agent config set voice true          # the settings file run reads (agent.json); flags win
+./jarvis-agent config set tray false          # the settings file run reads (agent.json); flags win
 ./jarvis-agent config                          # show it: every key, set or not
 scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
 AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
 scripts/browser-ext-store-zip.sh chrome|firefox   # store upload zips -> dist/ (docs/agent/store-listing.md)
 ./jarvis-agent enroll --server http://<jarvisd-host>:7700 --email you@example.com
 ./jarvis-agent run
-./jarvis-agent run --voice                     # + "hey jarvis" (Linux, macOS; off by default)
-./jarvis-agent run --voice --no-overlay        # ... without the on-screen island (on by default)
+./jarvis-agent run --voice=false               # no "Hey Jarvis" (on by default on Linux, macOS; the menu toggles it)
+./jarvis-agent run --no-overlay --no-tray      # without the on-screen island / the status icon
 ./jarvis-agent run --voice --voice-input dsnoopmic --voice-output output   # a Pi with the HAT (--hat auto)
 ./jarvis-agent hat cycle | hat pattern thinking --for 5s | hat button   # the HAT by hand (no poweroff)
 ./jarvis-agent island-demo [--hold follow_up --for 20s]   # play the island's states (no mic, no server)
@@ -132,6 +132,10 @@ internal/agent/
   hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's
                       patterns (leds.go, golden-tested), the GPIO17 button (button.go), spidev +
                       gpiocdev (device_linux.go); voice states reach it through voice.Indicator
+  tray/               the status icon and its menu (DESIGN.md §15): the menu as data (tray.go),
+                      the shield icon + macOS template (icon.go), StatusNotifierItem + dbusmenu
+                      over godbus (sni_linux.go); `cmd/jarvis-agent/voiceswitch.go` is the live
+                      voice toggle
   island/             the on-screen voice indicator (DESIGN.md §11) and dictation's note (Note):
                       pure-Go renderer (render.go),
                       animation model + loop (island.go), NSPanel backend (mac_darwin.go, purego),
@@ -158,7 +162,7 @@ scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, ru
 in its own `Toolset`.
 
 **Voice** (phase 3 of docs/agent/go-pi-node.md §7; what landed and what's measured: its §3.7)
-is off unless `run --voice`. It uses jarvisd's shared blocks: `internal/voice/ort`
+is on by default (`voiceByDefault`; the status icon toggles it live, saved as agent.json `voice`). It uses jarvisd's shared blocks: `internal/voice/ort`
 (onnxruntime over purego, the *same* embedded `libonnxruntime` as `internal/voice/sherpa`, so
 linux/darwin agent binaries embed it: ~44 MB instead of ~12), `internal/voice/oww`
 (openWakeWord, golden-tested against Python) and `audio.Decimator`. `internal/agent/voice`
@@ -235,7 +239,7 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
 18. **macOS microphone = TCC.** The bundle needs `NSMicrophoneUsageDescription` (guarded in
     deploy_test.go; without it macOS kills the app on first capture), and a process started over
     SSH or from a terminal gets silence or the terminal's grant: run the bundle under launchd
-    (`scripts/agent-dev-run.sh -- --voice`) and allow the prompt.
+    (`scripts/agent-dev-run.sh`) and allow the prompt.
 19. **Only the capture goroutine touches the Capture** until `Pipeline.Run` returns (ALSA's
     blocking read can't be interrupted from another thread); Run waits for it before the
     caller closes the device.
@@ -338,6 +342,11 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     helper: keys may have half-arrived. `vkbd`'s settle and clock are injected; its tests use a
     scripted compositor on a socketpair. `JARVIS_VKBD_TYPE=… go test -run TestNativeType
     ./internal/agent/vkbd/` types for real, **in a nested compositor only**.
+
+29. **The status icon never fails the agent and never touches a live desktop in tests**
+    (DESIGN.md §15). Quit is the control socket's quit (exit 0); the voice toggle goes through
+    `voiceSwitch` (one pipeline at a time, saved as agent.json `voice`). Test the SNI backend on a
+    private `dbus-daemon` only (`TestStatusNotifierItemOnAPrivateBus`), never the session bus.
 
 ## Dependencies
 
