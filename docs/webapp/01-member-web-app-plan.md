@@ -1,6 +1,6 @@
 # webapp 01: the admin opened to household members (jarvis-web's replacement)
 
-Status: **P1 built** (gateway tiers, 2026-10-13, PR #98); **P2 built** (SPA auth and shell, 2026-10-13); **P3 built** (Chat page, 2026-10-13); **P4 built** (Add-ons, minimal, 2026-10-13); P5–P7 not started. Code: `internal/modules/admin` (gateway + BFF) and
+Status: **P1 built** (gateway tiers, 2026-10-13, PR #98); **P2 built** (SPA auth and shell, 2026-10-13); **P3 built** (Chat page, 2026-10-13); **P4 built** (Add-ons, minimal, 2026-10-13); **P5 built** (Inbox, 2026-10-13); P6–P7 not started. Code: `internal/modules/admin` (gateway + BFF) and
 `web/admin` (React SPA). Legacy client: `jarvis-web` (Next.js, read-only here). Related:
 [admin/00-inventory.md](../admin/00-inventory.md) (how the admin gateway was built, AD1 / I8),
 [install/01-no-cli-plan.md](../install/01-no-cli-plan.md) §3.2 (the Add-ons page, owned there),
@@ -346,7 +346,7 @@ the image picker opens the camera on phones, and nothing scrolls sideways (one v
 | P2 | **Done** (as built below the table). **SPA auth and shell.** Drop the superuser refusal, role-aware routes, `/admin/*` move with redirects, nav split, Account page, household switcher, the name | M | P1, Q1 | vitest: a member sees no Admin nav, a direct admin URL shows the notice, redirects work, must-change goes first, the switcher appears only for 2+ households |
 | P3 | **Done** (as built below the table). **Chat page.** SSE through `SSEParser`, warmup, tools cache, picker and default chain, offline banner, actions/validation, markdown/think, images, `sessionStorage` | L | P1, P2. Step 1 of the chain lights up when 01's `this-device` ships | vitest: the default-chain table (agent / primary online / first online / none online), event reducer, offline banner, image gating. Go e2e chat smoke: the `gatewayStack` (`e2e_test.go`) plus cc with a fake LLM and a fake MQTT node. Member logs in → nodes → warmup → chat → a `done` event through the admin port |
 | P4 | **Done, minimal** (as built below the table). **Add-ons page:** nav slot and `user` tier only. Content per 01-no-cli-plan §3.2, its item 3.2 | — | P1, P2 | there |
-| P5 | **Inbox page** (if Q2) | S | P1, P2 | vitest list/detail. Go tier test covers the routes |
+| P5 | **Done** (as built below the table). **Inbox page** (if Q2) | S | P1, P2 | vitest list/detail. Go tier test covers the routes |
 | P6 | **Same-device dictation guard** (§3.6, Q4) in `internal/agent` + cc hint | S–M | P3. Coordinate with the dictation owners | agent unit tests for the refusals. cc test that the hint appears only with `same_device` |
 | P7 | **Retire jarvis-web** (§1 list) | S | P3 shipped in a release | the docs freshness check; `install-e2e` without the module |
 
@@ -429,6 +429,19 @@ the verified agent download (`/api/addons/agent/{os}/{arch}`), and **Sign out** 
 needs cc's `DELETE /admin/nodes/{id}` as a new member pass route (a tier change, for review), and
 cc sends the node a factory-reset whose meaning for the agent isn't decided (TODO in
 `AddonsPage.tsx`).
+
+**P5 as built.** `/inbox` and `/inbox/:id` (`pages/InboxPage.tsx`, `InboxItemPage.tsx`, `api/inbox.ts`)
+over the P1 user-tier routes `/api/notifications/api/v0/inbox*`, so a user sees only their own rows
+in the token's household. The list has unread dots, the category, select mode with bulk mark-read
+and bulk delete, and an empty state. The nav's Inbox item carries the unread count (30 s poll,
+`unread-count`), which is paused while the password must change. Opening an item marks it read. The
+body is markdown through the same `Markdown` component as chat (no raw HTML), followed by `metadata.sources`
+(http(s) only, opened without an opener) and the research stats. A confirmation
+(`metadata.actions` + `node_id` + `command_name`) shows its buttons, which run `POST /nodes/{id}/actions`
+with `metadata.context` (else `{draft}`, as jarvis-web did). Delete asks first. Query keys include
+the household, and `SessionCacheGuard` clears the whole react-query cache when the user changes
+or signs out (G13: the last person's inbox never flashes up). Not ported: mobile's richer
+interactive inbox elements (editable fields, server callbacks, audio); they stay in the app.
 
 **The user verifies:** log in as a non-superuser member on a desktop and a phone. Chat picks this
 computer's agent, then (with it stopped) the primary node. Admin URLs give the notice, and the server

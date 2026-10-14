@@ -17,6 +17,7 @@ const auth = vi.hoisted(() => ({
 }))
 vi.mock('@/api/auth', async (orig) => ({ ...(await orig<typeof import('@/api/auth')>()), ...auth }))
 vi.mock('@/hooks/useSystem', () => ({ useSystemInfo: () => ({ data: undefined }) }))
+vi.mock('@/hooks/useInbox', () => ({ useUnreadCount: () => ({ data: 3 }) }))
 // The admin pages themselves are covered elsewhere; here only where they mount matters.
 vi.mock('@/pages/DashboardPage', () => ({ default: () => <p>dashboard page</p> }))
 vi.mock('@/pages/SettingsPage', () => ({ default: () => <p>settings page</p> }))
@@ -81,6 +82,8 @@ describe('member shell (webapp 01 P2)', () => {
     renderAt('/chat')
     expect(within(nav()).getByRole('link', { name: 'Chat' })).toBeInTheDocument()
     expect(within(nav()).getByRole('link', { name: 'Add-ons' })).toHaveAttribute('href', '/addons')
+    expect(within(nav()).getByRole('link', { name: /Inbox/ })).toHaveAttribute('href', '/inbox')
+    expect(within(nav()).getByLabelText('3 unread')).toBeInTheDocument()
     expect(within(nav()).queryByText('Admin')).toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'Dashboard' })).toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'Settings' })).toBeNull()

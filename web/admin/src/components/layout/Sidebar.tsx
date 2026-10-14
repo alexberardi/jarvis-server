@@ -12,8 +12,10 @@ import {
   X,
   MessageSquare,
   Puzzle,
+  Inbox,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { useUnreadCount } from '@/hooks/useInbox'
 import { cn } from '@/lib/utils'
 import SystemInfoBar from './SystemInfoBar'
 import HouseholdSwitcher from './HouseholdSwitcher'
@@ -23,12 +25,15 @@ interface NavItem {
   label: string
   icon: LucideIcon
   path: string
+  /** A count shown after the label (the inbox's unread items). */
+  badge?: number
 }
 
 /** Every user's pages (webapp 01 §4.1). */
 const memberNav: NavItem[] = [
   { label: 'Chat', icon: MessageSquare, path: '/chat' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
+  { label: 'Inbox', icon: Inbox, path: '/inbox' },
 ]
 
 /** The Admin group: superusers only, and the server refuses these routes to anyone else (G1). */
@@ -67,6 +72,14 @@ function NavItems({ items, onPick }: { items: NavItem[]; onPick: () => void }) {
     >
       <item.icon size={18} />
       {item.label}
+      {!!item.badge && (
+        <span
+          aria-label={`${item.badge} unread`}
+          className="ml-auto rounded-full bg-[var(--color-primary)] px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white"
+        >
+          {item.badge > 99 ? '99+' : item.badge}
+        </span>
+      )}
     </NavLink>
   ))
 }
@@ -87,6 +100,9 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
   const close = () => onClose?.()
   const { state } = useAuth()
   const superuser = Boolean(state.user?.is_superuser)
+  // The unread badge polls only for a usable session (not while the password must change).
+  const unread = useUnreadCount(state.isAuthenticated && !state.user?.must_change_password)
+  const member = memberNav.map((i) => (i.path === '/inbox' ? { ...i, badge: unread.data ?? 0 } : i))
   return (
     <>
       {open && (
@@ -122,7 +138,7 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-2">
           <HouseholdSwitcher className="mb-2 w-full sm:hidden" />
-          <NavItems items={memberNav} onPick={close} />
+          <NavItems items={member} onPick={close} />
           {superuser && (
             <>
               <p className="px-3 pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">

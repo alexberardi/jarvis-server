@@ -9,6 +9,8 @@ import ChatPage from '@/pages/ChatPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
+import InboxItemPage from '@/pages/InboxItemPage'
+import InboxPage from '@/pages/InboxPage'
 import LogsPage from '@/pages/LogsPage'
 import ModelsPage from '@/pages/ModelsPage'
 import NodesPage from '@/pages/NodesPage'
@@ -43,6 +45,8 @@ export function shellRoutes() {
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/chat" element={<ChatPage />} />
       <Route path="/addons" element={<AddonsPage />} />
+      <Route path="/inbox" element={<InboxPage />} />
+      <Route path="/inbox/:id" element={<InboxItemPage />} />
       <Route path="/account" element={<AccountPage />} />
       <Route path="/admin" element={<RequireSuperuser />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
