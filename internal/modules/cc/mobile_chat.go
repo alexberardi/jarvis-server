@@ -210,13 +210,7 @@ func (m *Module) chatWarmup(ctx context.Context, u authn.User, row *nodeRow, req
 // setChatSpeaker makes the chat owner the conversation's speaker: name, User Profile memories
 // (when memory is on) and no "recognition is off" refusals — the JWT identifies them.
 func (m *Module) setChatSpeaker(ctx context.Context, conv *conversation) {
-	conv.speakerID = conv.chatUserID
-	conv.speakerName = m.userName(ctx, conv.chatUserID)
-	conv.recognitionOff = false
-	conv.memories = ""
-	if m.Memory != nil && m.householdBool(ctx, settingMemoryEnabled, conv.householdID) {
-		conv.memories = m.Memory.ProfileText(ctx, conv.chatUserID, conv.householdID)
-	}
+	m.setKnownSpeaker(ctx, conv, conv.chatUserID)
 }
 
 // fetchNodeTools is _resolve_tools' MQTT step: report_tools to the node, kept in key order

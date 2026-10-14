@@ -63,6 +63,10 @@ type Driver struct {
 	Voices *AdminVoice
 	// VoiceReady: the sandbox has TTS and STT (up --voice). run skips voice scenarios without.
 	VoiceReady bool
+	// Desktop makes the primary's desktop agent for "node": "desktop" scenarios (desktop.go);
+	// desktop caches it once made.
+	Desktop *DesktopSetup
+	desktop *Node
 }
 
 // speakerID resolves a scenario's speaker.
@@ -83,8 +87,25 @@ func (d *Driver) speakerID(spec string) (int64, error) {
 	return id, nil
 }
 
-// Run plays a scenario and checks every turn.
+// Run plays a scenario and checks every turn, as the scenario's node.
 func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
+	n, err := d.nodeFor(ctx, sc.Node)
+	if err != nil {
+		say := ""
+		if len(sc.Turns) > 0 {
+			say = sc.Turns[0].Say
+		}
+		return ScenarioLog{Name: sc.Name, File: sc.File, Turns: []TurnLog{{Say: say, Error: "start: " + err.Error()}}}
+	}
+	if n == d.Node {
+		return d.run(ctx, sc)
+	}
+	as := *d
+	as.Node = n
+	return as.run(ctx, sc)
+}
+
+func (d *Driver) run(ctx context.Context, sc Scenario) ScenarioLog {
 	out := ScenarioLog{Name: sc.Name, File: sc.File, ConversationID: newUUID(), Pass: true}
 	spec := sc.Tools
 	if spec != "" && spec != "node" && spec != "client" && spec != "none" && sc.File != "" && !filepath.IsAbs(spec) {

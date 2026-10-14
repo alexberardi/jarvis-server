@@ -113,11 +113,15 @@ type conversation struct {
 	// chatUserID is the mobile chat owner (13 §3.1): the JWT user, who is the speaker of every
 	// turn. 0 for a node voice conversation.
 	chatUserID int64
+	// ownerUserID is a desktop agent's signed-in member (device_owner.go): the speaker of
+	// every turn of the agent's own voice conversations, with no voice match. 0 otherwise.
+	ownerUserID int64
 	// ambient is the household's situational bundle, frozen at warmup (03 §3.3 item 2); ""
 	// when ambient_context.enabled or memory.enabled is off.
 	ambient string
 
-	// Speaker (D3): set by identified turns of this conversation only (chat: the owner).
+	// Speaker (D3): set by identified turns of this conversation only (chat: the JWT user; a
+	// desktop agent: its owner).
 	speakerID      int64
 	speakerName    string
 	memories       string
@@ -302,6 +306,9 @@ func (c *convCache) purgeUser(userID int64) {
 		conv.mu.Lock()
 		if conv.speakerID == userID {
 			conv.speakerID, conv.speakerName, conv.memories = 0, "", ""
+		}
+		if conv.ownerUserID == userID {
+			conv.ownerUserID = 0
 		}
 		conv.mu.Unlock()
 	}

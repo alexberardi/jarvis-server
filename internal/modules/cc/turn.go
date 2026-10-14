@@ -82,7 +82,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	endCache(nil)
 	m.flushPendingTranscript(ctx, conv)
 	m.compactBeforeTurn(ctx, conv) // CI6: at the hard threshold, before the turn
-	if m.DevSpeakerHints && in.SpeakerHint != 0 && conv.chatUserID == 0 {
+	if m.DevSpeakerHints && in.SpeakerHint != 0 && conv.chatUserID == 0 && conv.ownerUserID == 0 {
 		// Dev sandboxes: the node's hint stands in for the speaker pass a text turn lacks.
 		m.signals.recordIdentity(conv.id, turnIdentity{UserID: in.SpeakerHint, Outcome: stt.OutcomeMatched, Confidence: 1})
 	}
@@ -91,9 +91,12 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	// (D2/D3). A confident id switches the conversation speaker; otherwise it keeps the one an
 	// earlier turn of this conversation established.
 	var turnSpeaker int64
-	if conv.chatUserID != 0 {
+	switch {
+	case conv.chatUserID != 0:
 		turnSpeaker = conv.chatUserID // mobile chat: the JWT user, never a voice match (D2)
-	} else {
+	case conv.ownerUserID != 0:
+		turnSpeaker = m.ownerTurnSpeaker(ctx, conv, n) // a desktop agent: its owner, no voice match
+	default:
 		endSpeaker := tr.measure("speaker_resolve", "cc", nil)
 		turnSpeaker = m.applyTurnIdentity(ctx, conv)
 		endSpeaker(nil)
