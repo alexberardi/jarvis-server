@@ -245,6 +245,11 @@ func (s *Service) supervise(ctx context.Context, rt *callRuntime) {
 	for {
 		select {
 		case <-rt.done:
+			// A cancel closes the stream itself, so this branch can win the race with ctx.Done:
+			// hang up here too, or "End the call" leaves the provider's call up.
+			if ctx.Err() != nil {
+				s.endCallQuietly(rt.tel.Provider, rt.sid())
+			}
 			return
 		case <-ctx.Done():
 			s.endCallQuietly(rt.tel.Provider, rt.sid())
