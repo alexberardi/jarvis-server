@@ -303,7 +303,8 @@ func TestDriverRunsScenario(t *testing.T) {
 		t.Fatalf("start %v ended %v", cc.started, cc.ended)
 	}
 	// A desktop scenario's app names go to command-center as the agent sends them, for whisper.
-	vocab := Scenario{Name: "v", STTVocabulary: "Alacritty, Firefox, Omawrite", Turns: []Turn{{Say: "hello"}}}
+	apps := "Alacritty, Firefox, Omawrite"
+	vocab := Scenario{Name: "v", STTVocabulary: &apps, Turns: []Turn{{Say: "hello"}}}
 	if l := d.Run(context.Background(), vocab); !l.Pass {
 		t.Fatalf("%+v", l)
 	}

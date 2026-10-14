@@ -107,10 +107,7 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 
 func (d *Driver) run(ctx context.Context, sc Scenario) ScenarioLog {
 	out := ScenarioLog{Name: sc.Name, File: sc.File, ConversationID: newUUID(), Pass: true}
-	spec := sc.Tools
-	if spec != "" && spec != "node" && spec != "client" && spec != "none" && sc.File != "" && !filepath.IsAbs(spec) {
-		spec = filepath.Join(filepath.Dir(sc.File), spec)
-	}
+	spec := resolveToolSpec(sc)
 	tools, err := LoadToolSet(d.Root, spec)
 	speaker, serr := d.speakerID(sc.Speaker)
 	if err == nil {
@@ -124,12 +121,16 @@ func (d *Driver) run(ctx context.Context, sc Scenario) ScenarioLog {
 	if err == nil {
 		err = herr
 	}
+	vocab, verr := scenarioVocabulary(d.Root, sc, spec)
+	if err == nil {
+		err = verr
+	}
 	if err == nil {
 		tz := sc.Timezone
 		if tz == "" {
 			tz = "America/New_York"
 		}
-		err = d.Node.Start(ctx, out.ConversationID, tz, tools, agents, sc.STTVocabulary)
+		err = d.Node.Start(ctx, out.ConversationID, tz, tools, agents, vocab)
 	}
 	if err != nil {
 		out.Pass = false

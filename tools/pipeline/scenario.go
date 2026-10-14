@@ -40,8 +40,10 @@ type Scenario struct {
 	Home string `json:"home,omitempty"`
 	// STTVocabulary is node_context.stt_vocabulary: the app names a desktop agent sends at
 	// /conversation/start (open windows first, then its catalogue; apps.Vocabulary) for
-	// whisper's prompt on its voice commands. Copy it from a real agent; "" sends none.
-	STTVocabulary string `json:"stt_vocabulary,omitempty"`
+	// whisper's prompt on its voice commands. Unset, a desktop scenario (the desktop toolset
+	// or "node": "desktop") sends a typical agent's (toolsets/desktop.apps.json, vocabulary.go)
+	// and any other sends none; "" sends none.
+	STTVocabulary *string `json:"stt_vocabulary,omitempty"`
 	// Voice plays every turn through the sandbox's TTS and STT (a sandbox up with --voice):
 	// the transcript is what command-center gets. VoiceName is a Kokoro voice to say it in
 	// ("" = the house voice). say/run --voice turns it on for every scenario.

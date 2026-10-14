@@ -4,7 +4,6 @@
   "voice": true,
   "tools": "../toolsets/desktop.json",
   "home": "none",
-  "stt_vocabulary": "Alacritty, Firefox, Omawrite, Aether, Basecamp, btop++, Chromium, cliamp, Deskflow, Discord, Disks, Docker, Files, Foot, HEY, Kdenlive, LibreOffice, LocalSend, Moonlight, Neovim, Obsidian, Omacalc, Omacut, Pinta, Steam, Sunshine, Tensaku, uuctl, WhatsApp, Xournal++, YouTube, Zoom, Cyberpunk 2077, Disk Usage, Document Viewer, Foot Client, Foot Server, Google Contacts, Google Maps, Google Messages",
   "turns": [
    {
     "say": "open neovim",
@@ -35,15 +34,13 @@
      }
     }
    }
-  ],
-  "stt_vocabulary": "Alacritty, Firefox, Omawrite, Aether, Basecamp, btop++, Chromium, cliamp, Deskflow, Discord, Disks, Docker, Files, Foot, HEY, Kdenlive, LibreOffice, LocalSend, Moonlight, Neovim, Obsidian, Omacalc, Omacut, Pinta, Steam, Sunshine, Tensaku, uuctl, WhatsApp, Xournal++, YouTube, Zoom, Cyberpunk 2077, Disk Usage, Document Viewer, Foot Client, Foot Server, Google Contacts, Google Maps, Google Messages"
+  ]
  },
  {
   "name": "desktop: open omawrite and jot down a note (voice)",
   "voice": true,
   "tools": "../toolsets/desktop.json",
   "home": "none",
-  "stt_vocabulary": "Alacritty, Firefox, Omawrite, Aether, Basecamp, btop++, Chromium, cliamp, Deskflow, Discord, Disks, Docker, Files, Foot, HEY, Kdenlive, LibreOffice, LocalSend, Moonlight, Neovim, Obsidian, Omacalc, Omacut, Pinta, Steam, Sunshine, Tensaku, uuctl, WhatsApp, Xournal++, YouTube, Zoom, Cyberpunk 2077, Disk Usage, Document Viewer, Foot Client, Foot Server, Google Contacts, Google Maps, Google Messages",
   "turns": [
    {
     "say": "open omawrite and jot down a note to update Steam",
