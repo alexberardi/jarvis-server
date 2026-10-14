@@ -82,6 +82,13 @@ each run's full log, model calls included. A file holds one scenario or an array
   `max_seconds`: an upper bound on the turn's time.
 
 `tags` are labels only (e.g. `known-bug`). `"skip": "why"` reports a scenario without playing it.
+`"stt_vocabulary"` is the app names a desktop agent sends for whisper (§5). A desktop scenario
+(`"tools": "../toolsets/desktop.json"` or `"node": "desktop"`) without one sends a typical
+agent's, built from `tools/pipeline/toolsets/desktop.apps.json` by the agent's own
+`apps.Vocabulary`, because a real agent always sends its app names and command-center uses them
+(the "NeoVim as a follow-up" scenario is 0/3 without them, 3/3 with). Set your own string to
+override it, or `"stt_vocabulary": ""` to send none. `say` does the same: `--stt-vocabulary`
+overrides, `--stt-vocabulary ""` sends none.
 `"speaker"` (`primary`, a user id, or none) and `"home"` (a `tools/pipeline/homes` name, `none`, or a file) set who speaks and the device payload. `"node": "desktop"` (or `say --node desktop`) plays the turns as a desktop agent the primary signed in on (made once per sandbox, key in `.sandbox/<name>/desktop-node.json`), whose turns act as that owner with no voice match: leave `"speaker"` empty to test that. Add `"owner": "removed"` (or `say --owner removed`) for one whose owner left the household: a throwaway member pairs it and the primary removes them (key in `desktop-removed-owner-node.json`). `run` does not filter on
 them; `--filter` matches the name.
 
@@ -131,8 +138,10 @@ go run ./tools/pipeline run --sandbox voice --out /tmp/runs tools/pipeline/scena
   (`internal/agent/desktop`, `internal/agent/dictate`) for `"tools": "../toolsets/desktop.json"`.
 - A real desktop agent also sends its app names as `node_context.stt_vocabulary`, and
   command-center puts them in whisper's prompt (DESIGN §14): without them "omawrite" is heard
-  as "Omerite". Give a desktop voice scenario `"stt_vocabulary"` (or `say --stt-vocabulary`)
-  with a real agent's string (`apps.Vocabulary`: open windows' apps, then the catalogue).
+  as "Omerite". Desktop scenarios send a typical agent's by default (§3); give one its own
+  `"stt_vocabulary"` (or `say --stt-vocabulary`) to test a particular agent's string
+  (`apps.Vocabulary`: open windows' apps, then the catalogue). To change the default, edit
+  the app list in `tools/pipeline/toolsets/desktop.apps.json`.
 
 ## Why a turn fails in the sandbox but not at home
 

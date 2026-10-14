@@ -1,0 +1,13 @@
+{
+  "_comment": "A typical desktop agent's app list, the default node_context.stt_vocabulary of a desktop scenario (tools/pipeline/vocabulary.go builds it with the agent's own apps.Vocabulary). open: the open windows' apps, most recently focused first, then the app launched last. apps: the app catalogue, as the agent's scan finds it (an Omarchy desktop).",
+  "open": ["Alacritty", "Firefox", "Omawrite"],
+  "apps": [
+    "Aether", "Alacritty", "Avahi Zeroconf Browser", "Basecamp", "btop++", "Chromium", "cliamp",
+    "Cyberpunk 2077", "Deskflow", "Discord", "Disk Usage", "Disks", "Docker", "Document Viewer",
+    "Files", "Firefox", "Foot", "Foot Client", "Foot Server", "Google Contacts", "Google Maps",
+    "Google Messages", "Google Photos", "HEY", "Image Viewer", "Kdenlive", "LibreOffice",
+    "LibreOffice Calc", "LibreOffice Writer", "LocalSend", "Moonlight", "Neovim", "Obsidian",
+    "Omacalc", "Omacut", "Omawrite", "Pinta", "Signal", "Spotify", "Steam", "Sunshine",
+    "System Monitor", "Tensaku", "Typora", "uuctl", "WhatsApp", "Xournal++", "YouTube", "Zoom"
+  ]
+}
