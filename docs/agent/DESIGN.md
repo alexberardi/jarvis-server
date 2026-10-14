@@ -846,6 +846,19 @@ the unit runs it, `launchctl kickstart -k gui/$UID/net.jarvisautomation.agent` u
 supervises nothing). It then waits for the new agent and shows the pill. `config set` says to
 run it.
 
+**`jarvis-agent stop` (2026-10-13).** Stops the agent until the next login or `start` (the
+menu entry, opening the app, `jarvis-agent://start`), for a user who wants it gone without a
+terminal-only kill (the tray menu's Quit does the same from inside the agent). The running agent
+is asked to `quit` over its control socket and exits 0, which no supervisor restarts: the systemd
+unit has `Restart=on-failure`, both LaunchAgents `KeepAlive {SuccessfulExit: false}`, and the
+XDG autostart entry and Windows' Run key restart nothing. Where the unit is installed, `stop`
+also runs `systemctl --user stop jarvis-agent.service`, which cancels a restart systemd
+scheduled after a crash and stops an agent that wouldn't quit. On macOS an agent that doesn't
+quit gets a SIGTERM through `launchctl kill` (its handler exits 0), never a SIGKILL: launchd
+counts a killed job as failed and starts it again (`install.Stop`). Checked on this box with a
+scratch transient unit (`Restart=on-failure`, `RestartSec=1`): a `kill -9` was restarted, a
+`stop` left it `inactive (dead)`, `Result=success`, `NRestarts=0`.
+
 **Stale dev builds (2026-10-13).** `scripts/agent-dev-run.sh` builds `version=dev-<commit>` and
 now also embeds the checkout's path (`main.sourceDir`). `status` reads that checkout's HEAD from
 its `.git` files (no git process when they match) and, if the build's commit differs, prints

@@ -110,6 +110,8 @@ func main() {
 		err = uninstallCmd(ctx, os.Args[2:], os.Stdout)
 	case "start":
 		err = startCmd(ctx, os.Args[2:])
+	case "stop":
+		err = stopCmd(ctx, os.Args[2:], os.Stdout)
 	case "restart":
 		err = restartCmd(ctx, os.Args[2:], os.Stdout)
 	case "config":
@@ -169,6 +171,7 @@ func usage(w io.Writer) {
            [--files-only] [--dry-run]
   uninstall  undo install [--purge: also delete the sign-in, settings and caches] [--dry-run]
   start    start the agent (what the menu entry, the shortcut and jarvis-agent://start run)
+  stop     stop the running agent until the next login or start (the menu's Quit does the same)
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   config   the settings file run reads: config [show | path | set KEY VALUE | unset KEY]

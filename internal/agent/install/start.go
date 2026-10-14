@@ -109,3 +109,29 @@ func Restart(ctx context.Context, e Env, s Sys) error {
 	}
 	return Start(ctx, e, s, false)
 }
+
+// Stop stops the agent until the next login or `start` (`jarvis-agent stop`; the tray menu's
+// Quit does the same from inside). The running agent is asked to quit over its control socket
+// and exits 0, which neither supervisor restarts: the systemd unit has Restart=on-failure, the
+// LaunchAgents KeepAlive {SuccessfulExit: false}; the XDG autostart entry and Windows' Run key
+// never restart anything. Where the unit is installed it is also stopped, which cancels a
+// restart systemd scheduled after a crash and stops an agent that wouldn't quit. On macOS an
+// agent that wouldn't quit gets a SIGTERM through launchd (its handler exits 0), never a kill:
+// launchd counts a killed job as failed and starts it again.
+func Stop(ctx context.Context, e Env, s Sys) error {
+	var quitErr error
+	if s.Quit != nil {
+		quitErr = s.Quit()
+	}
+	switch e.GOOS {
+	case "linux":
+		if _, err := os.Stat(e.linux().unit); err == nil {
+			_ = s.Run(ctx, "systemctl", "--user", "stop", deploy.SystemdUnitName)
+		}
+	case "darwin":
+		if quitErr != nil && s.Run(ctx, "launchctl", "kill", "SIGTERM", "gui/"+strconv.Itoa(e.UID)+"/"+appid.ID) == nil {
+			return nil
+		}
+	}
+	return quitErr
+}

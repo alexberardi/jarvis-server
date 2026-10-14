@@ -80,6 +80,44 @@ func restartCmd(ctx context.Context, args []string, w io.Writer) error {
 	return nil
 }
 
+// stopCmd stops the running agent until the next login or `start` (install.Stop): what the
+// tray menu's Quit does from inside the agent.
+func stopCmd(ctx context.Context, args []string, w io.Writer) error {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
+	e, err := installEnv()
+	if err != nil {
+		return err
+	}
+	s, err := installSys(io.Discard)
+	if err != nil {
+		return err
+	}
+	running := func() bool { return control.Send(controlDial, control.Ping) == nil }
+	return stopAgent(w, running, func() error { return install.Stop(ctx, e, s) })
+}
+
+// stopAgent stops the agent, even when none answers (systemd may have a restart scheduled after
+// a crash), and says what happened.
+func stopAgent(w io.Writer, running func() bool, stop func() error) error {
+	was := running()
+	if err := stop(); err != nil {
+		return err
+	}
+	if !was {
+		fmt.Fprintf(w, "%s isn't running.\n", appid.DisplayName)
+		return nil
+	}
+	fmt.Fprintf(w, "Stopped %s. It starts again at your next login, or when you open it (jarvis-agent start).\n", appid.DisplayName)
+	return nil
+}
+
 // starter is start's decisions, with what it touches swappable for tests.
 type starter struct {
 	env      install.Env
