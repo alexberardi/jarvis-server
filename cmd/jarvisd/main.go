@@ -72,8 +72,8 @@ func modules() []module.Module {
 		&ccmod.Module{
 			AdminKey: os.Getenv("ADMIN_API_KEY"),
 			MQTT: ccmod.MQTTOptions{
-				TCPAddr:        envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr),
-				WSAddr:         envOr("JARVIS_MQTT_WS_ADDR", mqtt.DefaultWSAddr),
+				TCPAddr:        mqttTCPAddr(),
+				WSAddr:         mqttWSAddr(),
 				AllowAnonymous: os.Getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
 			},
 			Phone: phoneConfig(), // cmd/jarvisd/phone.go
@@ -134,7 +134,7 @@ func modules() []module.Module {
 		case *configmod.Module:
 			c.Served = served
 			c.SettingsGuard = superuser
-			c.MQTTPort = doctor.PortOf(envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr))
+			c.MQTTPort = doctor.PortOf(mqttTCPAddr())
 			c.External = func(ctx context.Context) map[string]string {
 				// The system-level Pantry; households can override it for their own installs.
 				return map[string]string{"jarvis-pantry": cc.PantryBaseURL(ctx, "")}
@@ -268,13 +268,25 @@ func envOr(key, def string) string {
 	return def
 }
 
+// mqttTCPAddr and mqttWSAddr are the broker's addresses: JARVIS_MQTT_ADDR / JARVIS_MQTT_WS_ADDR
+// when set, else the defaults moved by JARVIS_PORT_OFFSET like the listeners.
+func mqttTCPAddr() string {
+	return envOr("JARVIS_MQTT_ADDR", config.ShiftAddr(mqtt.DefaultTCPAddr, config.PortOffset()))
+}
+
+func mqttWSAddr() string {
+	return envOr("JARVIS_MQTT_WS_ADDR", config.ShiftAddr(mqtt.DefaultWSAddr, config.PortOffset()))
+}
+
 const usage = `usage: jarvisd <command> [--home DIR]
 
 commands:
-  serve [--no-browser] [--allow-downgrade]
+  serve [--no-browser] [--allow-downgrade] [--port-offset N]
                    run the server; on first start it prints the admin setup link and, at a
                    desktop, opens it (--no-browser or JARVIS_NO_BROWSER=1 to not).
                    --allow-downgrade runs on a database a newer jarvisd migrated (experts)
+                   --port-offset N adds N to every default port (JARVIS_PORT_OFFSET), to run
+                   a second instance beside the installed one: 10000 puts CC on 17703
   upgrade [--version vX.Y.Z [--allow-older]] [--check] [--rollback] [--bin PATH] [--user]
                    install a signed release: verify, snapshot the database, swap the binary
                    (previous kept as jarvisd.prev), restart the service, roll back if the new
@@ -358,8 +370,15 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		fs.SetOutput(stdout)
 		noBrowser := fs.Bool("no-browser", false, "don't open the setup link in a browser")
 		allowDowngrade := fs.Bool("allow-downgrade", false, "start even though a newer jarvisd migrated the database")
+		portOffset := fs.String("port-offset", "", "add this to every default port (JARVIS_PORT_OFFSET)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
+		}
+		if *portOffset != "" {
+			// Through the environment, so the listeners, the broker and the env file agree.
+			if err := os.Setenv("JARVIS_PORT_OFFSET", *portOffset); err != nil {
+				return err
+			}
 		}
 		// serve refuses to start on an env file it can't read; the CLI commands only warn.
 		if err := bootstrap(flagHome, true, os.Stderr); err != nil {

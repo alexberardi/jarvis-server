@@ -13,7 +13,6 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/doctor"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
-	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 )
 
 // exposure is what the LAN must reach: the listeners the given modules serve, the MQTT
@@ -22,8 +21,8 @@ import (
 func exposure(listeners []string) doctor.Exposure {
 	return doctor.Exposure{
 		Listeners:  listeners,
-		MQTTAddr:   envOr("JARVIS_MQTT_ADDR", mqtt.DefaultTCPAddr),
-		MQTTWSAddr: envOr("JARVIS_MQTT_WS_ADDR", mqtt.DefaultWSAddr),
+		MQTTAddr:   mqttTCPAddr(),
+		MQTTWSAddr: mqttWSAddr(),
 		MDNS:       os.Getenv("JARVIS_MDNS") != "0",
 	}
 }

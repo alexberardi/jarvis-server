@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -69,7 +70,10 @@ func (c Config) Addr(listener string) (string, error) {
 //
 //	JARVIS_HOME              data directory (default ~/.jarvisd; cmd/jarvisd resolves it with ResolveHome)
 //	JARVIS_HOST              bind address (default 0.0.0.0)
-//	JARVIS_PORT_<LISTENER>   per-listener port override, e.g. JARVIS_PORT_COMMAND_CENTER=17703
+//	JARVIS_PORT_OFFSET       added to every default port (the listeners and the MQTT broker), so a
+//	                         second instance can run beside an installed one: 10000 puts CC on 17703
+//	JARVIS_PORT_<LISTENER>   per-listener port override, e.g. JARVIS_PORT_COMMAND_CENTER=17703;
+//	                         taken as is, without the offset
 //	JARVIS_MDNS_INTERFACES   comma-separated LAN interface names, e.g. "en0" or "eth0,wlan0"
 func Load() (Config, error) {
 	return load(os.Getenv)
@@ -92,8 +96,12 @@ func load(getenv func(string) string) (Config, error) {
 			c.MDNSInterfaces = append(c.MDNSInterfaces, n)
 		}
 	}
+	offset, err := portOffset(getenv)
+	if err != nil {
+		return Config{}, err
+	}
 	for name, def := range DefaultPorts {
-		c.Ports[name] = def
+		c.Ports[name] = def + offset
 		key := "JARVIS_PORT_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 		if v := getenv(key); v != "" {
 			p, err := strconv.Atoi(v)
@@ -104,4 +112,39 @@ func load(getenv func(string) string) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// maxPortOffset keeps every shifted default port, the MQTT broker's 9883 the highest, valid.
+const maxPortOffset = 65535 - 9883
+
+func portOffset(getenv func(string) string) (int, error) {
+	v := getenv("JARVIS_PORT_OFFSET")
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > maxPortOffset {
+		return 0, fmt.Errorf("config: JARVIS_PORT_OFFSET=%q is not an offset in 0..%d", v, maxPortOffset)
+	}
+	return n, nil
+}
+
+// PortOffset is JARVIS_PORT_OFFSET, or 0 when it is unset or invalid (Load reports an invalid one).
+func PortOffset() int {
+	n, _ := portOffset(os.Getenv)
+	return n
+}
+
+// ShiftAddr adds offset to the port of a host:port address. An empty or unparsable address is
+// returned unchanged.
+func ShiftAddr(addr string, offset int) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || offset == 0 {
+		return addr
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return addr
+	}
+	return net.JoinHostPort(host, strconv.Itoa(p+offset))
 }

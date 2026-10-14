@@ -74,3 +74,16 @@ func TestAdminWiring(t *testing.T) {
 	}
 	t.Fatal("no admin module")
 }
+
+func TestMQTTAddrsFollowPortOffset(t *testing.T) {
+	t.Setenv("JARVIS_PORT_OFFSET", "10000")
+	if tcp, ws := mqttTCPAddr(), mqttWSAddr(); tcp != ":11884" || ws != ":19883" {
+		t.Fatalf("offset: tcp %q ws %q", tcp, ws)
+	}
+	// An explicit address wins over the offset, and "" still disables the listener.
+	t.Setenv("JARVIS_MQTT_ADDR", "127.0.0.1:2000")
+	t.Setenv("JARVIS_MQTT_WS_ADDR", "")
+	if tcp, ws := mqttTCPAddr(), mqttWSAddr(); tcp != "127.0.0.1:2000" || ws != "" {
+		t.Fatalf("explicit: tcp %q ws %q", tcp, ws)
+	}
+}
