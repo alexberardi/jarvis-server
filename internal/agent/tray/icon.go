@@ -53,7 +53,11 @@ func crop(img image.Image) image.Image {
 }
 
 // Color is the shield in colour, centred in a size × size square (Linux and Windows icons).
+// Up to glyphMax it is the glyph drawn for small sizes; larger, the artwork scaled down.
 func Color(size int) *image.NRGBA {
+	if size <= glyphMax {
+		return glyph(size)
+	}
 	src := source()
 	sb := src.Bounds()
 	h := size
@@ -69,8 +73,12 @@ func Color(size int) *image.NRGBA {
 
 // Template is the shield as a macOS menu-bar template image, height px tall: black where the
 // shield is dark, transparent where the figure is light, so the robot butler shows as a cut-out
-// and macOS tints it for light and dark menu bars.
+// and macOS tints it for light and dark menu bars. A menu bar's 18 pt (36 px on Retina) is a
+// small size, so up to 2·glyphMax it is the drawn glyph; taller, the artwork thresholded.
 func Template(height int) *image.NRGBA {
+	if height <= 2*glyphMax {
+		return templateGlyph(height)
+	}
 	src := source()
 	sb := src.Bounds()
 	w := max(1, sb.Dx()*height/sb.Dy())

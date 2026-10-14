@@ -86,12 +86,11 @@ func Render(dst *image.RGBA, f Frame, scale float64) {
 	}
 	x0 := (CanvasW - w) / 2
 	y0 := pillTop - (1-e)*(pillTop+pillH+2) // slides down from above the canvas
-	bg := pillColor
-	if f.State == FollowUp {
-		bg.A = 200 // dimmer while only waiting
-	}
+	// The pill is the same in every state: a translucent pill (follow-up's used to be) turns
+	// grey and low-contrast on a light desktop. Follow-up's "only waiting" is in its indicator:
+	// a ring around a dimmed orb, and dimmed bars.
 	c.fill(func(z *rast) { z.roundRect(x0, y0, w, pillH, pillH/2) }, edgeColor, 1)
-	c.fill(func(z *rast) { z.roundRect(x0+0.75, y0+0.75, w-1.5, pillH-1.5, pillH/2-0.75) }, bg, 1)
+	c.fill(func(z *rast) { z.roundRect(x0+0.75, y0+0.75, w-1.5, pillH-1.5, pillH/2-0.75) }, pillColor, 1)
 
 	accent := accentFor(f.State)
 	cx, cy := x0+orbX, y0+pillH/2
