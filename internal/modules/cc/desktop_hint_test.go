@@ -64,3 +64,40 @@ func lastUserOf(ve *voiceEnv) string {
 	}
 	return ""
 }
+
+// Web app plan §3.6: a web chat from the computer whose agent is the chosen node carries
+// client {surface: web, same_device: true}; the turn then says the page is in front and to name
+// the app. Only then, and only with the typing tool; mobile (no client) is unaffected.
+func TestSameDeviceHint(t *testing.T) {
+	typeTool := `[{"type":"function","function":{"name":"desktop_type_text","description":"Type text.","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}}]`
+	for _, c := range []struct {
+		name   string
+		tools  string
+		client any
+		want   bool
+	}{
+		{"web, same device", typeTool, map[string]any{"surface": "web", "same_device": true}, true},
+		{"web, another device", typeTool, map[string]any{"surface": "web", "same_device": false}, false},
+		{"no client (mobile)", typeTool, nil, false},
+		{"same device but not web", typeTool, map[string]any{"surface": "mobile", "same_device": true}, false},
+		{"same device, no typing tool", weatherTool, map[string]any{"surface": "web", "same_device": true}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ce := newChatEnv(t, prompts.Qwen3_5_9B)
+			ce.pub.tools = `{"client_tools": ` + c.tools + `, "available_commands": [], "installed_packages": []}` // the node's own report
+			ce.eng.say("Done.")
+			body := map[string]any{"message": "type hello"}
+			if c.client != nil {
+				body["client"] = c.client
+			}
+			ce.chat("tok-7", body)
+			u := lastUserOf(ce.voiceEnv)
+			if got := strings.Contains(u, SameDeviceHint); got != c.want {
+				t.Fatalf("hint %v, want %v: %q", got, c.want, u)
+			}
+		})
+	}
+	ce := newChatEnv(t, prompts.Qwen3_5_9B)
+	ce.do("POST", "/api/v0/mobile/chat", map[string]any{"node_id": ce.node.id, "household_id": voiceHH, "message": "hi",
+		"client": "web"}, bearer("tok-7")).want(400)
+}

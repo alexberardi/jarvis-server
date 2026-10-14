@@ -59,6 +59,9 @@ func FailureText(tool string, err error) string {
 				what, ae.app, tell, ae.app)
 		}
 	}
+	if s, ok := pageFailure(what, tell, err); ok {
+		return s
+	}
 	if errors.Is(err, errSubmit) {
 		return fmt.Sprintf("The text was typed, but Enter wasn't pressed (%s). Tell the user it was typed but not sent.", unwrapMsg(err))
 	}
@@ -81,7 +84,10 @@ func FailureNote(tool string, err error) string {
 	}
 	var we *winmatch.Error
 	var ae *appError
+	var pe *pageError
 	switch {
+	case errors.As(err, &pe):
+		return "The Jarvis page is in front — " + nothing
 	case errors.As(err, &ae) && ae.code == CodeNotOpen:
 		return Preview(ae.app, 40) + " isn't open — " + nothing
 	case errors.As(err, &ae):
@@ -109,6 +115,11 @@ func (tg *target) report(out map[string]any) {
 		return
 	}
 	out["matched_app"] = tg.app
+	if tg.insteadOfPage {
+		// Said so the model can tell the user where the text went ("Typed into Omawrite").
+		out["instead_of_jarvis_page"] = true
+		out["note"] = "The Jarvis page was in front, so this went to the window used before it: " + tg.name + "."
+	}
 	if tg.fuzzy {
 		out["fuzzy_match"] = true
 		out["heard_as"] = tg.asked

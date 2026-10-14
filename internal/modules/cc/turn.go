@@ -43,6 +43,8 @@ type turnInput struct {
 	LevelVsWake *float64
 	// Images are a mobile chat turn's attached images (chat_images.go).
 	Images []chatImage
+	// SameDevice: a web chat typed on the computer whose agent is this node (sameDeviceHint).
+	SameDevice bool
 }
 
 // photoOnly: a chat message of photos and no words. Nothing was asked, so the model describes
@@ -158,6 +160,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		m.agentContextHint(ctx, conv, in.VoiceCommand),
 		ev.hint(),
 		m.desktopAppHint(conv, in.VoiceCommand),
+		sameDeviceHint(conv, in),
 	}
 	if in.photoOnly() {
 		hints = append(hints, prompts.PhotoOnlyHint)

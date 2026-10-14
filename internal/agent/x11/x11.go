@@ -426,7 +426,7 @@ func supported(c Conn) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	want := []string{"_NET_CLIENT_LIST", "_NET_ACTIVE_WINDOW", "_NET_CLOSE_WINDOW", "_NET_CURRENT_DESKTOP", "_NET_WM_DESKTOP"}
+	want := []string{"_NET_CLIENT_LIST", "_NET_ACTIVE_WINDOW", "_NET_CLOSE_WINDOW", "_NET_CURRENT_DESKTOP", "_NET_WM_DESKTOP", "_NET_CLIENT_LIST_STACKING"}
 	byAtom := map[uint32]string{}
 	for _, n := range want {
 		a, err := c.Atom(n)
@@ -609,6 +609,33 @@ func (d *Display) Active(context.Context) (uint32, error) {
 		return 0, nil
 	}
 	return v[0], nil
+}
+
+// Stacking is the window manager's clients top first (_NET_CLIENT_LIST_STACKING, which EWMH
+// gives bottom to top). A window manager raises the window it focuses, so this is the order
+// they were last used in: what dictation reads as focus history (DESIGN.md §14).
+func (d *Display) Stacking(context.Context) ([]uint32, error) {
+	c, err := d.open()
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	if ok, why := wmCheck(c); !ok {
+		return nil, errors.New(why)
+	}
+	sup, err := supported(c)
+	if err != nil {
+		return nil, err
+	}
+	if !sup["_NET_CLIENT_LIST_STACKING"] {
+		return nil, errors.New("the window manager doesn't report its stacking order")
+	}
+	ids, err := prop32(c, c.Root(), "_NET_CLIENT_LIST_STACKING")
+	if err != nil {
+		return nil, err
+	}
+	slices.Reverse(ids)
+	return ids, nil
 }
 
 // --- the typing backend for dictation ---

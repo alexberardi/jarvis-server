@@ -321,3 +321,20 @@ func TestIDs(t *testing.T) {
 		}
 	}
 }
+
+// Stacking is top first: the order windows were last raised, which dictation reads as focus
+// history. A window manager that doesn't report it says so.
+func TestEWMHStacking(t *testing.T) {
+	ctx := context.Background()
+	f := ewmhFake()
+	d, _ := display(f)
+	if _, err := d.Stacking(ctx); err == nil {
+		t.Fatal("stacking without _NET_CLIENT_LIST_STACKING")
+	}
+	f.setAtoms(root, "_NET_SUPPORTED", "_NET_CLIENT_LIST", "_NET_CLIENT_LIST_STACKING", "_NET_ACTIVE_WINDOW")
+	f.setProp32(root, "_NET_CLIENT_LIST_STACKING", 0x400002, 0x400001, 0x400003)
+	got, err := d.Stacking(ctx)
+	if err != nil || !slices.Equal(got, []uint32{0x400003, 0x400001, 0x400002}) {
+		t.Fatalf("%#x %v", got, err)
+	}
+}

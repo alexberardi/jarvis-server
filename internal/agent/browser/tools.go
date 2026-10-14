@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
+	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
@@ -57,8 +58,11 @@ type Tools struct {
 	// tools, whose desktop_confirm answers it). Nil: never asks.
 	Confirm *dictate.Confirmer
 	// Show, when set, shows what is being filled or clicked on the island.
-	Show  func(text string, d time.Duration)
-	tools []tool
+	Show func(text string, d time.Duration)
+	// Origins is this agent's server: fill and click refuse its tabs (the Jarvis page, where
+	// the user may be chatting; jarvispage.go). Nil or empty: no check.
+	Origins *jarvispage.Origins
+	tools   []tool
 }
 
 type tool struct {
@@ -639,7 +643,13 @@ func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, 
 	if field != "" {
 		where = "the " + field + " field"
 	}
+	if err := t.notJarvisPage(ctx, args, "Nothing was filled"); err != nil {
+		return nil, err
+	}
 	act := func(ctx context.Context) (map[string]any, error) {
+		if err := t.notJarvisPage(ctx, args, "Nothing was filled"); err != nil {
+			return nil, err // the tab changed while the user was asked
+		}
 		t.show("Filling " + where + ": " + shown)
 		extra := map[string]any{"text": text, "field": field, "submit": submit}
 		res, err := t.call(ctx, "fill", args, extra)
@@ -667,7 +677,13 @@ func (t *Tools) click(ctx context.Context, args map[string]any) (map[string]any,
 	if _, _, err := tabArg(args); err != nil {
 		return nil, err
 	}
+	if err := t.notJarvisPage(ctx, args, "Nothing was clicked"); err != nil {
+		return nil, err
+	}
 	act := func(ctx context.Context) (map[string]any, error) {
+		if err := t.notJarvisPage(ctx, args, "Nothing was clicked"); err != nil {
+			return nil, err
+		}
 		t.show("Clicking " + dictate.Preview(label, 60))
 		return t.call(ctx, "click", args, map[string]any{"text": label})
 	}

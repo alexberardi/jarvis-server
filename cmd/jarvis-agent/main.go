@@ -38,6 +38,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
+	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -483,6 +484,7 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	defer closeTools()
+	go learnServer(ctx, c.ConfigURL, tf.origins, log)
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	// Commands the household turned off in the app's node settings are neither offered nor run.
@@ -588,6 +590,9 @@ type toolFlags struct {
 	noBrowser  *bool
 	confirm    *string
 	py, cmdDir *string
+	// origins is this agent's server, for the Jarvis page guard (jarvispage.go): build makes
+	// it, the caller fills it once it knows the server.
+	origins *jarvispage.Origins
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -628,12 +633,17 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	f.origins = &jarvispage.Origins{}
+	guard := &jarvispage.Guard{Origins: f.origins}
+	dt.JarvisPage = guard.InFront
 	tools := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), dt), &screen.Tools{C: screen.Native(), Log: log}, dt}
 	closeAll := func() {}
 	if !*f.noBrowser {
 		hub, stopBrowser := startBrowser(ctx, log)
 		bt := browser.NewTools(hub)
 		bt.Confirm = dt.Confirm
+		bt.Origins = f.origins
+		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
@@ -798,6 +808,7 @@ func try(ctx context.Context, args []string) error {
 	anyOpen := fs.Bool("allow-open-any", false, "relax the open policy")
 	wait := fs.Duration("wait", 10*time.Second, "how long browser_* tools wait for the browser extension to connect")
 	saveImages := fs.String("save-images", "", "write a result's attached images (desktop_read_screen) into this directory instead of printing their data")
+	server := fs.String("server", "", "the Jarvis server whose web page dictation and browser_fill/click won't act on (default: the enrolled one's)")
 	_ = fs.Parse(args)
 	h, err := nativeHost()
 	if err != nil {
@@ -807,13 +818,19 @@ func try(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	origins := tryOrigins(ctx, *server)
+	guard := &jarvispage.Guard{Origins: origins}
+	dt.JarvisPage = guard.InFront
 	ts := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).
 		hub, stopBrowser := startBrowser(ctx, logger())
 		defer stopBrowser()
-		ts = append(ts, browser.NewTools(hub))
+		bt := browser.NewTools(hub)
+		bt.Origins = origins
+		guard.Tab = hub.FocusedTab
+		ts = append(ts, bt)
 		w := *wait
 		if fs.NArg() == 0 {
 			w = min(w, 3*time.Second)

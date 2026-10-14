@@ -93,6 +93,16 @@ describe('ChatPage', () => {
     await waitFor(() => expect(picker().value).toBe('laptop'))
     expect(api.getThisDevice).toHaveBeenCalledWith('h1')
     expect(screen.getByRole('option', { name: 'desk (this computer)' })).toBeInTheDocument()
+
+    // Chatting to this computer's own agent: the turn says so, for the same-device hint.
+    plays([{ type: 'done', full_text: 'Typed.', conversation_id: 'c-9' }])
+    await waitFor(() => expect(api.warmupChat).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'type hello' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    })
+    expect(await screen.findByText('Typed.')).toBeInTheDocument()
+    expect((api.streamChat.mock.calls[0][0] as ChatTurnRequest).client).toEqual({ surface: 'web', same_device: true })
   })
 
   it("falls back to the primary when the server can't tell or fails", async () => {
@@ -140,6 +150,7 @@ describe('ChatPage', () => {
     expect(screen.getByText('Emma')).toBeInTheDocument()
     const first = api.streamChat.mock.calls[0][0] as ChatTurnRequest
     expect(first).toMatchObject({ message: 'weather?', node_id: 'primary', household_id: 'h1', conversation_id: 'warm-1', include_reasoning: true })
+    expect(first.client).toEqual({ surface: 'web', same_device: false })
     // The tools went with the warmup; a warm conversation doesn't resend them.
     expect(first.client_tools).toBeUndefined()
 
