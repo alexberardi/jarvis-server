@@ -46,6 +46,11 @@ export function setMustChangePasswordFunction(fn: () => void): void {
   mustChangeFn = fn
 }
 
+/** notifyPasswordChangeRequired flips the session to the change-password screen (fetch callers). */
+export function notifyPasswordChangeRequired(): void {
+  mustChangeFn?.()
+}
+
 /**
  * isPasswordChangeRequired is jarvisd's answer to a token whose account must change its
  * password first (a temp-password reset, G8): 403 with code password_change_required. Only

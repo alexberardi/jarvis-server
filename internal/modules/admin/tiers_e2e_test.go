@@ -25,6 +25,12 @@ const tierCCAdminKey = "cc-admin-key"
 // way cmd/jarvisd wires them (webapp 01 §5 P1). It returns the admin and auth base URLs.
 func memberStack(t *testing.T) (admin, auth, cc string, notif *notifmod.Module, home string) {
 	t.Helper()
+	return memberStackWith(t, nil)
+}
+
+// memberStackWith is memberStack with cc configured further (a fake LLM and node publisher).
+func memberStackWith(t *testing.T, configure func(c *ccmod.Module)) (admin, auth, cc string, notif *notifmod.Module, home string) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
 	if err != nil {
@@ -37,6 +43,9 @@ func memberStack(t *testing.T) (admin, auth, cc string, notif *notifmod.Module, 
 	cfg := pconfig.Config{Home: t.TempDir(), Host: "127.0.0.1", Ports: ports}
 	a := &authmod.Module{RateLimit: authmod.RateLimit{Disabled: true}}
 	c := &ccmod.Module{Auth: a, Users: a, Nodes: a, AdminKey: tierCCAdminKey, MQTT: ccmod.MQTTOptions{Disabled: true}}
+	if configure != nil {
+		configure(c)
+	}
 	n := &notifmod.Module{Auth: a, Users: a, CleanupInterval: -1}
 	c.Notify = n
 	r := &module.Runner{

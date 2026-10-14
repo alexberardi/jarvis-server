@@ -150,9 +150,9 @@ func (m *Module) resolveUI() (fs.FS, string) {
 // csp matches the Fastify admin's policy (inventory I7). The built SPA is one external module
 // script with no inline scripts; inline styles are allowed for the React runtime. media-src
 // allows blob: for the setup wizard's voice sample (AD3b), fetched with the token and played
-// from an object URL.
+// from an object URL, and img-src allows blob: for chat photo previews (webapp 01 G14).
 const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
+	"img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
 	"base-uri 'self'; form-action 'self'; object-src 'none'"
 
 // secure sets the admin's security headers on every response.

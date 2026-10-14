@@ -153,6 +153,8 @@ func TestSecurityHeaders(t *testing.T) {
 			!strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") ||
 			// AD3b: the voice sample plays from an object URL.
 			!strings.Contains(h.Get("Content-Security-Policy"), "media-src 'self' blob:") ||
+			// webapp 01 G14: chat photo previews are object URLs.
+			!strings.Contains(h.Get("Content-Security-Policy"), "img-src 'self' data: blob:") ||
 			h.Get("X-Frame-Options") != "DENY" || h.Get("X-Content-Type-Options") != "nosniff" ||
 			h.Get("Referrer-Policy") == "" {
 			t.Errorf("%s: headers %v", p, h)

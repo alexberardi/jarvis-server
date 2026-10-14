@@ -22,6 +22,7 @@ vi.mock('@/pages/DashboardPage', () => ({ default: () => <p>dashboard page</p> }
 vi.mock('@/pages/SettingsPage', () => ({ default: () => <p>settings page</p> }))
 vi.mock('@/pages/TraceDetailPage', () => ({ default: () => <p>trace detail page</p> }))
 vi.mock('@/pages/ConnectionsPage', () => ({ default: () => <p>connections page</p> }))
+vi.mock('@/pages/ChatPage', () => ({ default: () => <h1>Chat</h1> }))
 vi.mock('@/pages/UsersPage', () => ({ default: () => <p>users page</p> }))
 
 /** A fake JWT whose payload carries the household claim, as auth mints them. */
