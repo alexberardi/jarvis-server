@@ -177,6 +177,7 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	sandbox := fs.String("sandbox", "", "sandbox name")
 	tools := fs.String("tools", "node", "tool set: node, client, none or a JSON file")
 	home := fs.String("home", "", `device payload: a tools/pipeline/homes name (default avery), "none", or a JSON file`)
+	vocab := fs.String("stt-vocabulary", "", `app names for whisper's prompt, as a desktop agent sends them ("Alacritty, Firefox, Omawrite")`)
 	speaker := fs.String("speaker", "primary", `who is speaking: "primary" (the seeded superuser), a user id, or "" (unidentified)`)
 	results := fs.String("results", "", `node outputs per tool, e.g. {"get_weather": {"success": true, "message": "Sunny, 21°"}}`)
 	asJSON := fs.Bool("json", false, "print the full log as JSON")
@@ -197,7 +198,7 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	if (d.Voice || d.VoiceName != "") && !d.VoiceReady {
 		return errors.New("--voice: this sandbox has no TTS/STT (scripts/sandbox up --voice)")
 	}
-	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Home: *home}
+	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Home: *home, STTVocabulary: *vocab}
 	if *results != "" {
 		if err := json.Unmarshal([]byte(*results), &sc.Results); err != nil {
 			return fmt.Errorf("--results: %w", err)

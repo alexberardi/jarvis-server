@@ -129,6 +129,10 @@ go run ./tools/pipeline run --sandbox voice --out /tmp/runs tools/pipeline/scena
   a clean transcript here does not prove a human voice is heard right.
 - `tools/pipeline/toolsets/desktop.json` is a copy of the desktop agent's open/type tools
   (`internal/agent/desktop`, `internal/agent/dictate`) for `"tools": "../toolsets/desktop.json"`.
+- A real desktop agent also sends its app names as `node_context.stt_vocabulary`, and
+  command-center puts them in whisper's prompt (DESIGN §14): without them "omawrite" is heard
+  as "Omerite". Give a desktop voice scenario `"stt_vocabulary"` (or `say --stt-vocabulary`)
+  with a real agent's string (`apps.Vocabulary`: open windows' apps, then the catalogue).
 
 ## Why a turn fails in the sandbox but not at home
 

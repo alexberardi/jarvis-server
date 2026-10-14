@@ -296,8 +296,19 @@ func TestDriverRunsScenario(t *testing.T) {
 	if agents, _ := nc["agents"].(map[string]any); agents["home_assistant"] == nil {
 		t.Fatalf("default home not sent: %v", nc)
 	}
+	if _, ok := nc["stt_vocabulary"]; ok {
+		t.Fatalf("no vocabulary in the scenario, but sent: %v", nc)
+	}
 	if tools, _ := cc.started["client_tools"].([]any); len(tools) == 0 || !cc.ended {
 		t.Fatalf("start %v ended %v", cc.started, cc.ended)
+	}
+	// A desktop scenario's app names go to command-center as the agent sends them, for whisper.
+	vocab := Scenario{Name: "v", STTVocabulary: "Alacritty, Firefox, Omawrite", Turns: []Turn{{Say: "hello"}}}
+	if l := d.Run(context.Background(), vocab); !l.Pass {
+		t.Fatalf("%+v", l)
+	}
+	if nc, _ := cc.started["node_context"].(map[string]any); nc["stt_vocabulary"] != "Alacritty, Firefox, Omawrite" {
+		t.Fatalf("vocabulary not sent: %v", nc)
 	}
 	// A command-center error is the turn's error, with its message.
 	if l := d.Run(context.Background(), Scenario{Name: "e", Turns: []Turn{{Say: "broken"}}}); l.Pass || l.Turns[0].Error != "command-center: model not loaded" {

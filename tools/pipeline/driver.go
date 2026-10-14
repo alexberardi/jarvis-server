@@ -108,7 +108,7 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 		if tz == "" {
 			tz = "America/New_York"
 		}
-		err = d.Node.Start(ctx, out.ConversationID, tz, tools, agents)
+		err = d.Node.Start(ctx, out.ConversationID, tz, tools, agents, sc.STTVocabulary)
 	}
 	if err != nil {
 		out.Pass = false
