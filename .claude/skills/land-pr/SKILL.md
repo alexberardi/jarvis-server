@@ -19,6 +19,9 @@ scripts/check                       # gofmt on changed files, go vet ×3 OS (con
 CGO_ENABLED=1 go test -race ./...   # CLAUDE.md: required before committing (cgo is test-only)
 ```
 
+- `scripts/check`, `scripts/sandbox` and `scripts/desktop-shot` use the `go` on PATH, else the
+  repo's toolchain through mise (`GOTOOLCHAIN=local mise exec go@1.27 -- go`,
+  `scripts/lib/go.sh`), so they run from a shell where mise isn't activated.
 - "Changed" in `scripts/check` means against the merge base with `origin/main`. Use
   `--base REF` for a stacked branch and `--all` to race-test everything.
 - If Windows vet fails with `pattern libs/windows-amd64: no matching files found`, run
