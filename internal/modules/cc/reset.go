@@ -74,32 +74,12 @@ func (m *Module) deactivate(ctx context.Context, nodeID string) {
 func (m *Module) handleDeleteNode(w http.ResponseWriter, r *http.Request, u authn.User) {
 	ctx := r.Context()
 	id := r.PathValue("node_id")
-	if _, err := m.requireNodeAccess(ctx, u, id, authn.RolePowerUser, "Only superusers can delete nodes without a household"); err != nil {
+	n, err := m.requireNodeAccess(ctx, u, id, authn.RolePowerUser, "Only superusers can delete nodes without a household")
+	if err != nil {
 		m.writeErr(w, err)
 		return
 	}
-	// Publish before revoking auth (§7.6).
-	tok := randHex(16)
-	m.resets.add(tok, m.now().Add(deleteResetTTL))
-	if err := m.bus.Publish(id, "factory-reset", map[string]any{"request_id": tok, "node_id": id}); err != nil {
-		m.deps.Log.Warn("cc: factory-reset not published; the node will not auto-reset", "node", id, "err", err)
-	}
-	m.deactivate(ctx, id)
-	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
-		for _, q := range []string{
-			`DELETE FROM cc_auth_sessions WHERE node_id = ?`,
-			`DELETE FROM cc_config_pushes WHERE node_id = ?`,
-			`DELETE FROM cc_settings_snapshots WHERE node_id = ?`,
-			`DELETE FROM cc_settings_requests WHERE node_id = ?`,
-			`DELETE FROM cc_nodes WHERE node_id = ?`,
-		} {
-			if _, err := tx.ExecContext(ctx, q, id); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
+	if err := m.removeNode(ctx, n); err != nil {
 		m.internalError(w, err)
 		return
 	}
@@ -158,14 +138,21 @@ func terminal(state string) bool { return state == "success" || state == "failed
 func (m *Module) handleFactoryReset(w http.ResponseWriter, r *http.Request, u authn.User) {
 	ctx := r.Context()
 	id := r.PathValue("node_id")
-	if _, err := m.requireNodeAccess(ctx, u, id, authn.RolePowerUser, "Only superusers can factory-reset nodes without a household"); err != nil {
+	n, err := m.requireNodeAccess(ctx, u, id, authn.RolePowerUser, "Only superusers can factory-reset nodes without a household")
+	if err != nil {
 		m.writeErr(w, err)
+		return
+	}
+	// A desktop agent has no factory reset (decision 2026-10-14): it would never answer, and
+	// the task would wait out its 7-day ceiling. Signing it out is the removal.
+	if n.desktop() {
+		detail(w, http.StatusBadRequest, errDesktopNoReset)
 		return
 	}
 	tok := randHex(16)
 	taskID := uuid4()
 	now := dbTime(m.now())
-	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
+	err = m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
 		existing, err := scanTask(tx.QueryRowContext(ctx, `SELECT `+taskCols+` FROM cc_node_tasks
 			WHERE node_id = ? AND kind = 'factory_reset' AND state IN ('pending', 'dispatched', 'in_progress')
 			ORDER BY created_at DESC LIMIT 1`, id))

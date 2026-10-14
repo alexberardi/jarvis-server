@@ -41,7 +41,7 @@ Migration: `internal/modules/cc/migrations/00001_baseline.sql` (goose, version t
 | 00 platform | none of its own. `cc_settings` comes from the platform. Legacy `service_configs` is dropped (discovery is in-process). |
 | 01 voice / 02 tool loop / 03 prompts | none. Conversation state is in memory. |
 | 04 memory | `cc_user_memories`, `cc_conversation_transcripts`, `cc_person_characterizations` (dormant, D30) |
-| 05 nodes | `cc_nodes`, `cc_node_tasks`, `cc_provisioning_tokens`, `cc_settings_requests`, `cc_settings_snapshots`, `cc_request_traces` |
+| 05 nodes | `cc_nodes` (00170: `node_kind`, `capabilities`; 00180: `owner_user_id`, who paired it, and `last_addr`, the latest heartbeat's TCP peer address, for device sign-out and "this computer"), `cc_node_tasks`, `cc_provisioning_tokens`, `cc_settings_requests`, `cc_settings_snapshots`, `cc_request_traces` |
 | 06 media / voice identity | none. Voiceprints belong to the stt module (D34/D36). |
 | 07 smart home | `cc_rooms`, `cc_devices`, `cc_device_scan_requests`, `cc_device_list_requests`, `cc_config_pushes`, `cc_auth_sessions`, `cc_bluetooth_scan_requests`, `cc_bluetooth_pair_requests` |
 | 08 routines | `cc_routines`, `cc_schedules`, `cc_routine_seeds` (00080: households whose D44 defaults were seeded, so a deleted default stays deleted) |

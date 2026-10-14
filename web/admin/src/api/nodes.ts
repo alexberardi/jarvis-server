@@ -15,12 +15,23 @@ export interface NodeLiveness {
   node_kind?: string | null
   /** What the node reported, e.g. browser_extension: "connected" | "disconnected" | "disabled". */
   capabilities?: Record<string, string | boolean | number>
+  /** Who paired it (the approver of its code, or who signed in on it); null when unknown. */
+  owner_user_id?: number | null
 }
 
 /** extensionState is a desktop agent's browser-extension row, or null when it reported none. */
 export function extensionState(n: NodeLiveness | undefined): 'connected' | 'disconnected' | 'disabled' | null {
   const v = n?.capabilities?.browser_extension
   return v === 'connected' || v === 'disconnected' || v === 'disabled' ? v : null
+}
+
+/**
+ * signOutDevice signs a device out (decision 2026-10-14): cc removes the node and revokes its
+ * credentials. Only the member who paired it, or a household admin, may; cc checks. A desktop
+ * agent gets no factory reset: it goes back to its setup page with its settings kept.
+ */
+export async function signOutDevice(nodeId: string): Promise<void> {
+  await apiClient.post(`/api/cc/api/v0/nodes/${encodeURIComponent(nodeId)}/sign-out`)
 }
 
 /** getNodeLiveness lists every active node cc knows (a superuser sees all households). */

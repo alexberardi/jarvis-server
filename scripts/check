@@ -53,7 +53,9 @@ step "race tests"
 if [ "$ALL" = 1 ]; then
   PKGS=(./...)
 else
-  mapfile -t PKGS < <(for f in "${GOFILES[@]}"; do echo "./$(dirname "$f")"; done | sort -u)
+  # contract/ is black-box tests behind the contract tag, run against a live target
+  # (scripts/contract.sh); vet above compiles it. Without a target it has nothing to run.
+  mapfile -t PKGS < <(for f in "${GOFILES[@]}"; do echo "./$(dirname "$f")"; done | grep -v '^\./contract$' | sort -u)
 fi
 if [ ${#PKGS[@]} -eq 0 ]; then
   echo "no Go packages changed"

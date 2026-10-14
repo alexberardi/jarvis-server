@@ -308,3 +308,114 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 		t.Fatalf("member change-password: %d %v", code, out)
 	}
 }
+
+// TestAddonsDeviceRoutesEndToEnd: device sign-out and "this computer" through the gateway, for
+// every principal (decision 2026-10-14; install plan §3.2 Q2 (a)).
+func TestAddonsDeviceRoutesEndToEnd(t *testing.T) {
+	base, authURL, ccURL, _, home := memberStack(t)
+	tok, err := os.ReadFile(authmod.SetupTokenPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out := call(t, "POST", base+"/api/auth/setup", map[string]any{"email": "root@example.com", "password": "password1"},
+		authmod.SetupTokenHeader, strings.TrimSpace(string(tok))); code != 201 {
+		t.Fatalf("setup: %d %v", code, out)
+	}
+	root, _ := login(t, base, "root@example.com")
+	mkHousehold := func(name string) string {
+		code, out := call(t, "POST", authURL+"/households", map[string]any{"name": name}, bearer(root)...)
+		if code != 201 {
+			t.Fatalf("household %s: %d %v", name, code, out)
+		}
+		return obj(t, out)["id"].(string)
+	}
+	h1, h2 := mkHousehold("H1"), mkHousehold("H2")
+	users := map[string]string{}
+	for _, u := range []struct{ email, hh, role string }{
+		{"m1@example.com", h1, "member"}, {"o1@example.com", h1, "member"}, {"p1@example.com", h1, "power_user"},
+		{"a1@example.com", h1, "admin"}, {"m2@example.com", h2, "member"},
+	} {
+		code, out := call(t, "POST", authURL+"/auth/register", map[string]any{"email": u.email, "password": "password1"})
+		if code != 201 && code != 200 {
+			t.Fatalf("register %s: %d %v", u.email, code, out)
+		}
+		id := obj(t, obj(t, out)["user"])["id"]
+		if code, out := call(t, "POST", authURL+"/households/"+u.hh+"/members", map[string]any{"user_id": id, "role": u.role}, bearer(root)...); code != 201 && code != 200 {
+			t.Fatalf("add %s: %d %v", u.email, code, out)
+		}
+		users[u.email], _ = login(t, base, u.email)
+	}
+	m1, o1, p1, a1, m2 := users["m1@example.com"], users["o1@example.com"], users["p1@example.com"], users["a1@example.com"], users["m2@example.com"]
+
+	// A desktop agent paired by m1, as the setup page's sign-in does: a token, then register.
+	pair := func(tok string) string {
+		code, out := call(t, "POST", ccURL+"/api/v0/provisioning/token", map[string]any{"household_id": h1, "room": "desktop"}, bearer(tok)...)
+		if code != 201 {
+			t.Fatalf("token: %d %v", code, out)
+		}
+		pt := obj(t, out)
+		code, out = call(t, "POST", ccURL+"/api/v0/nodes/register", map[string]any{"node_id": pt["node_id"], "provisioning_token": pt["token"]})
+		if code != 201 {
+			t.Fatalf("register: %d %v", code, out)
+		}
+		reg := obj(t, out)
+		id := reg["node_id"].(string)
+		if code, out := call(t, "POST", ccURL+"/api/v0/admin/nodes/heartbeat", map[string]any{
+			"version_info": map[string]any{"install_mode": "desktop-agent"}, "node_kind": "desktop",
+		}, "X-API-Key", id+":"+reg["node_key"].(string)); code != 200 {
+			t.Fatalf("heartbeat: %d %v", code, out)
+		}
+		return id
+	}
+	agent := pair(m1)
+
+	// This computer: the agent heartbeats from loopback, as this page asks from loopback.
+	if code, _ := call(t, "GET", base+"/api/addons/this-device", nil); code != 401 {
+		t.Errorf("this-device anonymous: %d", code)
+	}
+	for who, tok := range map[string]string{"member": m1, "other member": o1, "power user": p1, "household admin": a1, "superuser": root} {
+		code, out := call(t, "GET", base+"/api/addons/this-device?household_id="+h1, nil, bearer(tok)...)
+		if code != 200 || obj(t, out)["node_id"] != agent {
+			t.Errorf("this-device as %s: %d %v", who, code, out)
+		}
+	}
+	code, out := call(t, "GET", base+"/api/addons/this-device", nil, bearer(m2)...)
+	if code != 200 || obj(t, out)["node_id"] != nil {
+		t.Errorf("this-device as another household's member: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/addons/this-device?household_id="+h1, nil, bearer(m2)...); code != 403 {
+		t.Errorf("this-device for a foreign household: %d %v", code, out)
+	}
+	// G11: X-Forwarded-For never makes a match.
+	code, out = call(t, "GET", base+"/api/addons/this-device", nil, append(bearer(m1), "X-Forwarded-For", "10.0.0.9")...)
+	if code != 200 || obj(t, out)["node_id"] != nil || obj(t, out)["reason"] != "proxied" {
+		t.Errorf("this-device behind a forwarded header: %d %v", code, out)
+	}
+
+	// Sign-out: the pairer or a household admin; nobody else.
+	signOut := func(id, tok string) int {
+		h := []string{}
+		if tok != "" {
+			h = bearer(tok)
+		}
+		code, _ := call(t, "POST", base+"/api/cc/api/v0/nodes/"+id+"/sign-out", nil, h...)
+		return code
+	}
+	for who, c := range map[string]struct {
+		tok  string
+		want int
+	}{"anonymous": {"", 401}, "another member": {o1, 403}, "power user": {p1, 403}, "another household's member": {m2, 403}} {
+		if got := signOut(agent, c.tok); got != c.want {
+			t.Errorf("sign-out as %s: %d, want %d", who, got, c.want)
+		}
+	}
+	if got := signOut(agent, m1); got != 200 {
+		t.Fatalf("sign-out by the pairer: %d", got)
+	}
+	if got := signOut(pair(m1), a1); got != 200 {
+		t.Errorf("sign-out by a household admin: %d", got)
+	}
+	if got := signOut(pair(m1), root); got != 200 {
+		t.Errorf("sign-out by the superuser (an admin of H1, its creator): %d", got)
+	}
+}

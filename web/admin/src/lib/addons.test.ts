@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NodeLiveness } from '@/api/nodes'
-import { detectOS, extensionLabel, yourDevices } from './addons'
+import { canSignOut, detectOS, extensionLabel, yourDevices } from './addons'
 
 const n = (node_id: string, hh: string | null, online: boolean, node_kind: string | null = 'desktop', room = node_id): NodeLiveness => ({
   node_id,
@@ -45,5 +45,18 @@ describe('extensionLabel', () => {
     expect(extensionLabel('disconnected')).toBe('Browser extension not connected')
     expect(extensionLabel('disabled')).toBe('Browser control turned off')
     expect(extensionLabel(null)).toBe('Browser extension: not reported')
+  })
+})
+
+describe('canSignOut (decision 2026-10-14)', () => {
+  const n = (owner: number | null, hh = 'h1') => ({ ...base, household_id: hh, owner_user_id: owner })
+  const base = { node_id: 'a', room: 'office', online: true, last_seen: null, last_seen_version: null, is_busy: false }
+  it('is the pairer or a household admin, never another household', () => {
+    expect(canSignOut(n(7), 7, [{ id: 'h1', role: 'member' }])).toBe(true)
+    expect(canSignOut(n(8), 7, [{ id: 'h1', role: 'member' }])).toBe(false)
+    expect(canSignOut(n(8), 7, [{ id: 'h1', role: 'power_user' }])).toBe(false)
+    expect(canSignOut(n(null), 7, [{ id: 'h1', role: 'admin' }])).toBe(true)
+    expect(canSignOut(n(null), 7, [{ id: 'h1', role: 'owner' }])).toBe(true)
+    expect(canSignOut(n(7, 'h2'), 7, [{ id: 'h1', role: 'admin' }])).toBe(false)
   })
 })

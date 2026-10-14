@@ -62,3 +62,22 @@ export function extensionLabel(state: 'connected' | 'disconnected' | 'disabled' 
   }
   return 'Browser extension: not reported'
 }
+
+/** The household roles that may sign out anyone's device (cc: admin or higher). */
+const SIGN_OUT_ROLES = new Set(['admin', 'owner'])
+
+/**
+ * canSignOut mirrors cc's rule, to show the button only where it would work: the member who
+ * paired the device, or an admin of its household. The server decides (signout.go); this only
+ * hides a button that would answer 403.
+ */
+export function canSignOut(
+  n: NodeLiveness,
+  userId: number | undefined,
+  households: { id: string; role: string }[],
+): boolean {
+  const h = households.find((x) => x.id === n.household_id)
+  if (!h) return false
+  if (userId !== undefined && n.owner_user_id === userId) return true
+  return SIGN_OUT_ROLES.has(h.role)
+}

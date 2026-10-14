@@ -251,7 +251,7 @@ do. Each item lands green on `main` on its own (the §8 style).
 
 | # | Item | Size | Depends on | CI | Tests |
 |---|---|---|---|---|---|
-| 3.1 | BFF: `/api/addons/agent/{os}/{arch}` (fetch, verify, cache, stream), `/api/addons/devices`, `/api/addons/this-device`, pairing list/approve; member-gated **server-side** | M | 1.1, 1.8, 2.1 | `build`, `admin` | Unit with fake GitHub (as §8.2); a member sees only their households; an unsigned asset is refused |
+| 3.1 | **Partly built (2026-10-14):** `/api/addons/this-device` and device sign-out (pass routes to cc, user tier; DESIGN §13 "Signing out", "This computer"); the device list and pairing go through cc's existing member routes. **Open:** BFF: `/api/addons/agent/{os}/{arch}` (fetch, verify, cache, stream), `/api/addons/devices`, `/api/addons/this-device`, pairing list/approve; member-gated **server-side** | M | 1.1, 1.8, 2.1 | `build`, `admin` | Unit with fake GitHub (as §8.2); a member sees only their households; an unsigned asset is refused |
 | 3.2 | **Add-ons tab** (§3.2). **Minimal page built (webapp 01 P4, 2026-10-13):** nav slot, Your devices from cc's node list with extension state and a Start link, pending pairings, download/store link cards; "This computer" and the verified download wait on 3.1 | M | 3.1, Q2, Q3 | `admin` (vitest) | Live ticks with a mocked poll; "can't tell" state |
 | 3.3 | **Wizard step** (§3.1) | M | 3.1 | `admin` | Wizard test: skip, agent-only, agent + extension |
 | 3.4 | Mobile: "Add a computer" + pairing approval (jarvis-node-mobile) | M | 1.1 | mobile CI | Jest; physical-device pass |

@@ -9,6 +9,7 @@
 //	✓ Listen for "Hey Jarvis"                   (voice on/off, live; saved in agent.json)
 //	  Open Jarvis Automation                    (the server's web UI, when it is known)
 //	  Set up / Settings…                        (the agent's setup page in the browser)
+//	  Sign out of Jarvis Automation             (removes this computer; back to the setup page)
 //	─────────────
 //	  Quit Jarvis Automation Agent              (the same as `jarvis-agent stop`)
 //
@@ -37,6 +38,8 @@ type State struct {
 	OpenURL string
 	// Setup shows "Set up / Settings…" (the agent's own setup page).
 	Setup bool
+	// SignOut shows "Sign out of Jarvis Automation" (the computer is signed in).
+	SignOut bool
 }
 
 // Actions are what the menu's items do. Each runs on its own goroutine, never on the OS's UI
@@ -50,6 +53,9 @@ type Actions struct {
 	Setup func()
 	// Quit stops the agent (exit 0: no supervisor restarts it).
 	Quit func()
+	// SignOut signs this computer out of the server and returns to the setup page
+	// (decision 2026-10-14: the node is removed, its credentials deleted, settings kept).
+	SignOut func()
 }
 
 // The menu items' ids (D-Bus menu ids, NSMenuItem tags, Win32 command ids). 0 is the root.
@@ -61,14 +67,16 @@ const (
 	idSep1
 	idSep2
 	IDSetup
+	IDSignOut
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
 const (
-	VoiceLabel = `Listen for "Hey Jarvis"`
-	OpenLabel  = "Open Jarvis Automation"
-	SetupLabel = "Set up / Settings…"
-	QuitLabel  = "Quit " + appid.DisplayName
+	VoiceLabel   = `Listen for "Hey Jarvis"`
+	OpenLabel    = "Open Jarvis Automation"
+	SetupLabel   = "Set up / Settings…"
+	SignOutLabel = "Sign out of Jarvis Automation"
+	QuitLabel    = "Quit " + appid.DisplayName
 )
 
 // Item is one menu entry.
@@ -102,7 +110,10 @@ func Items(s State) []Item {
 	if s.Setup {
 		items = append(items, Item{ID: IDSetup, Label: SetupLabel, Enabled: true})
 	}
-	if s.VoiceAvailable || s.OpenURL != "" || s.Setup {
+	if s.SignOut {
+		items = append(items, Item{ID: IDSignOut, Label: SignOutLabel, Enabled: true})
+	}
+	if s.VoiceAvailable || s.OpenURL != "" || s.Setup || s.SignOut {
 		items = append(items, Item{ID: idSep2, Separator: true})
 	}
 	return append(items, Item{ID: IDQuit, Label: QuitLabel, Enabled: true})
@@ -198,6 +209,11 @@ func (t *Tray) clicked(id int32) {
 		case IDSetup:
 			if s.Setup && t.act.Setup != nil {
 				t.act.Setup()
+			}
+		case IDSignOut:
+			if s.SignOut && t.act.SignOut != nil {
+				t.log.Info("tray: Sign out chosen")
+				t.act.SignOut()
 			}
 		case IDQuit:
 			if t.act.Quit != nil {
