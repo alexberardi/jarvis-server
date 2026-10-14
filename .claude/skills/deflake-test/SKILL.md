@@ -68,5 +68,5 @@ They are never waited on when the code works.
   use `fix(<pkg>): …` instead (#72, #115). In the body, give the CI symptom (quoted), the cause
   in a sentence or two, how you reproduced it, and why the fix closes the window.
 - Re-run the stress command from step 1 with the fix in place and say so in the PR.
-- If STATUS.md lists the flake as a follow-up, strike it through with `~~…~~ **Fixed <date> (#N):** <cause>`
-  (see the `TestInstallRepoShardsResumeAndSlices` entry), then follow `land-pr`.
+- If STATUS.md's checklist lists the flake as an open item, tick or remove it, then follow
+  `land-pr`.

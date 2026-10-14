@@ -1,6 +1,6 @@
 ---
 name: land-pr
-description: Finish a change in jarvis-server and open its PR. Covers the pre-commit gate (scripts/check plus the full race suite), the docs/STATUS.md update (session log, Next line, decision log), the commit and PR conventions, and getting the PR number into STATUS on the same branch before the squash merge. Use it whenever a code or docs change is done and is about to be committed, pushed or turned into a PR, or at the end of a session.
+description: Finish a change in jarvis-server and open its PR. Covers the pre-commit gate (scripts/check plus the full race suite), the STATUS.md and docs/decisions/ updates, the commit and PR conventions. Use it whenever a code or docs change is done and is about to be committed, pushed or turned into a PR, or at the end of a session.
 ---
 
 # Landing a change
@@ -28,18 +28,17 @@ CGO_ENABLED=1 go test -race ./...   # CLAUDE.md: required before committing (cgo
 - Behaviour visible to a voice user: also run the `pipeline-test` skill. Wire changes: the
   `wire-change` skill.
 
-## 3. STATUS.md (same branch, same PR)
+## 3. STATUS.md and decisions (same branch, same PR)
 
-CLAUDE.md: update `docs/STATUS.md` before ending a session. Three places:
+There is **no session log**: the commit message and the PR description are the record, so put
+what was verified and what was **not** there (for example "not run on a Windows desktop").
 
-- **Session log** (end of `## Session log`): one bullet, bold title, the date, then the PR number
-  or branch, then a doc link:
-  `- **Cancelled phone calls always hang up (2026-10-13; #115):** found as a CI flake (…). <cause>. <fix>. Unit tests only.`
-  Say what was verified and what was **not** (for example "not run on a Windows desktop").
-- **Next line** when the plan changed: `- **Next (2026-10-13, after <thing>):** …`.
-- **Decision log** table, for any user decision or design choice:
-  `| 2026-10-14 | **App names never go into the LLM prompt** (user). <why, where> |`.
-- Tick checklist items under "Before the official release" if this closes one.
+- **`docs/STATUS.md`** only when the state changed: tick a checklist item under "Before the
+  official release" this closes, add one it opens, or update the **Next** line when the plan
+  changed. Most PRs don't touch it.
+- **A decision** (a user answer or a design choice a later reader would have to rediscover):
+  a new file `docs/decisions/YYYY-MM-DD-<slug>.md`, format in `docs/decisions/README.md`.
+  A new file never conflicts with another branch.
 
 ## 4. Commit
 
@@ -60,10 +59,7 @@ Body layout (#115): the trigger (the CI run, user report or plan item), then `##
 "race tests, vet for three OSes, and the agent build". End with the PR attribution line the
 session specifies.
 
-**Then put the PR number into STATUS on the branch.** PRs are squash-merged, so main's
-subjects end in `(#N)`. Swap the branch name in your session-log entry for `#N`, commit
-(`docs(status): #N`), and push. It then lands in the same squash. Without this step, a
-separate `docs(status)` commit on main is needed later.
+PRs are squash-merged, so main's subjects end in `(#N)` on their own: nothing to write back.
 
 ## 6. After pushing
 

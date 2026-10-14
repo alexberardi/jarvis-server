@@ -79,12 +79,15 @@ has no version set, hence `mise exec`.
 
 ## 5. Record it
 
-Add a nested session-log entry in `docs/STATUS.md`, next to the other rc entries, and bump the
-"pre-releases through" line under "Current phase":
+Bump the "pre-releases through" line under "Current phase" in `docs/STATUS.md`. The rc's
+details go in its GitHub release notes (`gh release edit vX --notes-file …`), not in STATUS:
 
 ```
-  - **2026-10-10 (rc14, `v0.1.0-rc14` at `9c3ac2f`, user OK to cut):** <changes with (#N)>. No migrations since rc12. Release workflow green, 8 assets, minisign verified. Not yet applied to prod.
+v0.1.0-rc14 at 9c3ac2f (user OK to cut): <changes with (#N)>. No migrations since rc12.
+Release workflow green, 8 assets, minisign verified. Not yet applied to prod.
 ```
+
+Older rc entries are in `docs/status/archive-2026-10.md`.
 
 Commit it as `docs(status): v0.1.0-rcN released` (79adeca, f3b3288).
 

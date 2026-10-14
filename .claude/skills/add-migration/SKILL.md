@@ -9,8 +9,7 @@ Each module has its own goose migrations, embedded in the binary
 (`//go:embed migrations/*.sql`, e.g. `internal/modules/cc/embed.go`) and tracked in their own
 version table, `goose_<module>`. `internal/platform/module/runner.go` applies every module's
 pending migrations at `serve` start, so there is no separate migrate step.
-`jarvisd migrate status` shows the state. Out-of-order versions are allowed (decision log
-2026-10-07, `WithAllowOutofOrder` in `internal/platform/db/migrate.go`).
+`jarvisd migrate status` shows the state. Out-of-order versions are allowed (`docs/decisions/2026-10-07-out-of-order-migrations-are-applied.md`, `WithAllowOutofOrder` in `internal/platform/db/migrate.go`).
 
 ## 1. Write the file
 
@@ -61,7 +60,7 @@ ALTER TABLE cc_nodes DROP COLUMN node_kind;
 
 `cut-rc` lists the migrations since the last tag with
 `git diff --stat <prev-tag> origin/main -- ':(glob)internal/**/migrations/**'`. Mention the
-migration in your PR and in the STATUS session-log entry ("auth migration 00002").
+migration in the commit message and the PR ("auth migration 00002").
 
 ## Gotchas
 
