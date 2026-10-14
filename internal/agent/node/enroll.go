@@ -102,3 +102,22 @@ func Register(ctx context.Context, hc *http.Client, ccURL, configURL, nodeID, to
 	}
 	return Creds{ConfigURL: configURL, NodeID: resp.NodeID, NodeKey: resp.NodeKey, Room: resp.Room, EnrolledAt: time.Now().UTC()}, nil
 }
+
+// RegisterPreferring redeems a token at nodeCC, the command-center URL jarvisd wants nodes to
+// use, and falls back to ccURL (the one discovery gave) only when nodeCC can't be reached: a
+// VPN, or a loopback-only dev server. The token is single use, so an answer from nodeCC (any
+// HTTP error) never falls back. note, when set, hears about the fallback.
+func RegisterPreferring(ctx context.Context, hc *http.Client, nodeCC, ccURL, configURL, nodeID, token, room string, note func(error)) (Creds, error) {
+	if nodeCC == "" || nodeCC == ccURL {
+		return Register(ctx, hc, ccURL, configURL, nodeID, token, room)
+	}
+	c, err := Register(ctx, hc, nodeCC, configURL, nodeID, token, room)
+	var he *HTTPError
+	if err != nil && !errors.As(err, &he) {
+		if note != nil {
+			note(err)
+		}
+		return Register(ctx, hc, ccURL, configURL, nodeID, token, room)
+	}
+	return c, err
+}

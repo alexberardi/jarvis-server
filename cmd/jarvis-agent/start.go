@@ -59,7 +59,7 @@ func restartCmd(ctx context.Context, args []string, w io.Writer) error {
 		return err
 	}
 	if !enrolled() {
-		return firstRun() // run would exit at once: nothing to restart
+		return firstRun(ctx) // run would exit at once: nothing to restart
 	}
 	e, err := installEnv()
 	if err != nil {
@@ -125,8 +125,8 @@ type starter struct {
 	send     func(cmd string) error // to the running agent
 	waitSend func(cmd string) error // to an agent that is starting
 	enrolled func() bool
-	install  func() error // this user's first launch of a packaged copy
-	firstRun func() error // nothing set up yet
+	install  func() error                    // this user's first launch of a packaged copy
+	firstRun func(ctx context.Context) error // nothing set up yet: the setup page
 }
 
 func newStarter(e install.Env, s install.Sys) starter {
@@ -169,7 +169,7 @@ func (st starter) start(ctx context.Context, login bool) error {
 		if login {
 			return nil
 		}
-		return st.firstRun()
+		return st.firstRun(ctx)
 	}
 	if err := install.Start(ctx, st.env, st.sys, login); err != nil {
 		return err

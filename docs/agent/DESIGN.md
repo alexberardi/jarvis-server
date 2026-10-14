@@ -156,7 +156,8 @@ provisioning, registration, broker, report_tools and mobile chat:
 
 ## 5. Enrollment UX
 
-Implemented, all three ending at `POST /nodes/register`:
+Implemented, all ending at `POST /nodes/register`. The setup page (§13 "The setup page") offers
+1 and 3 without a terminal:
 
 1. **Sign in:** `jarvis-agent enroll --server URL --email you@x` prompts for the password
    (no echo; `--password-stdin` for scripts). The CLI logs in, lists households (picks the
@@ -878,8 +879,8 @@ entry and `jarvis-agent://start`) runs `jarvis-agent start`:
    golden `running.png`). At login (`--login`) it only pings: no pill.
 2. **A packaged copy's first launch** (the `.deb`'s `/usr/lib/jarvis-agent`, the macOS app): if
    this user isn't installed yet, it runs `install` first (Q5).
-3. **Not set up** (no enrollment): the first-run page. **TODO (item 1.5):** that page doesn't
-   exist yet; the hook (`firstRun`) says how to enroll from a terminal.
+3. **Not set up** (no enrollment): the setup page ("The setup page" below), served by this
+   `start` until it is closed.
 4. Otherwise it starts the agent the way the login item would (systemd when
    `graphical-session.target` is up, launchd, else a detached `run`) and waits for it to answer,
    then shows the pill.
@@ -906,6 +907,68 @@ copy's first `start` setting the user up.
 - **The fix.** The island's event loop now registers its own handlers with `NSAppleEventManager` (`island.RunWith` and `AppEvents`, purego, an Objective-C class made at run time). A reopen shows the pill. A get-URL event shows the pill only for the exact start link (`install.CheckStartURL`); anything else is logged and ignored.
 - **Not running.** When no agent is running, opening the app still launches `jarvis-agent` with no command, which is `start`.
 - **`--no-overlay`.** With `--no-overlay` and the status icon hidden there is no AppKit loop, so the app is not "running" for LaunchServices, and a second open runs `start` as on the other OSes. With the icon shown (the default) `run` keeps the loop without the island (`island.RunLoop`), so the reopen event arrives as with the island.
+**The setup page (installers plan item 1.5, 2026-10-14).** The first-run "window" of target-flow
+step 3, as a page in the user's own browser (open question 1). Code: `internal/agent/firstrun`,
+`cmd/jarvis-agent/setup.go`.
+
+- **Who opens it.** `jarvis-agent start` on a computer that isn't set up (the app, the menu entry,
+  the shortcut, `jarvis-agent://start`; never the login autostart), the status icon's "Set up /
+  Settings…" (§15), and `jarvis-agent setup`. One page per user: `setup.sock` (next to the control
+  socket) is the lock, and a second launch asks the first to open its page again. The server
+  stops on Done, after Remove, or after 15 minutes without a request from the page.
+- **Server.** `127.0.0.1:<random port>`, every path under `/s/<secret>/` (32 random bytes per
+  launch; anything else, a wrong secret included, is a 404, compared in constant time). The Host
+  must be exactly `127.0.0.1:<port>` (DNS rebinding). A POST must carry the page's `Origin`, be
+  `application/json` (another site can't send that without a preflight, which nothing answers)
+  and not be `Sec-Fetch-Site: cross-site/same-site`; a cross-site GET of `api/` is refused too.
+  No CORS headers, ever. CSP `default-src 'none'` with `'self'` scripts and styles and no inline
+  script; `Referrer-Policy: no-referrer` (the secret is in the URL; store links are also
+  `noreferrer`). Assets are embedded; no CDN. The page's URL is printed only with `--no-open`
+  or when no browser could be opened, never logged. **Known limit:** the opener's argv (`xdg-open
+  URL`, `open URL`) is briefly visible to other local users of the same machine.
+- **1. Server.** This computer's config service (`127.0.0.1:7700`) first, then `_jarvis-config._tcp`
+  over mDNS (4 s, each address probed with `/info`, one entry per server name, this computer's own
+  addresses skipped), and a typed address (`192.168.1.10` → `http://192.168.1.10:7700`). The user
+  picks; choosing checks `/info` and that discovery lists command-center and auth.
+- **2. Add this computer.** *Show a pairing code*: §5 item 3 in the page; the code shows big with
+  the computer's name and a countdown, and the page turns green on approval (the approver's room
+  and name are kept). *Sign in*: §5 item 1 in the page: login, households (the only one, or a
+  choice), a provisioning token for room `desktop`, register. A temporary password gets "change
+  your password first" (`node.ErrPasswordChangeRequired`). The password is in the POST and the
+  login call only; the JWT stays in memory until the computer is added or the page closes.
+  Registering prefers the token's command-center URL and falls back to discovery's on a
+  connection failure (`node.RegisterPreferring`, shared with the CLI). Then the browsers' native
+  host is registered (decided above) and the agent starts as `start` would, with its pill.
+- **3. Browser.** A store button for the browser showing the page (Firefox: AMO; Chrome, Edge,
+  Brave: the Chrome Web Store id `abkbjmelelgelkhneobebgoilejlgbob`), the other under "Other
+  browsers". Links only (installers plan Q2: no detection). Neither listing is public yet, so
+  both open the docs (`firstrun.DefaultStores`: flip `Published` when they are).
+- **4. Permissions.** macOS: Accessibility (`AXIsProcessTrusted`), Microphone
+  (`AVCaptureDevice authorizationStatusForMediaType:`), Automation of System Events
+  (`AEDeterminePermissionToAutomateTarget`, never asking; unknown while System Events isn't
+  running) and Screen Recording (`CGPreflightScreenCaptureAccess` in a fresh `jarvis-agent
+  permission screen` process, since a process keeps its first answer). Each ticks live; Allow
+  shows macOS's own prompt (or opens the mic, or sends System Events the window tools' Apple
+  event) and opens the pane; once refused, the button opens the pane. GNOME/KDE on Wayland:
+  "Allow typing" is `dictation allow` (the portal dialog), with its status.
+- **5. Voice.** "Listen for Hey Jarvis" is the tray's setting: agent.json `voice`, and the running
+  agent switches at once over the control socket (`voice-on`/`voice-off`, closed set, no
+  arguments). "Test my microphone" opens the listening microphone (agent.json `voice_input`) for
+  up to 30 s, and it closes 3 s after the page stops asking.
+- **Done and Remove.** Done closes the page ("You're all set"). Remove asks first, then runs
+  `uninstall --purge` (login item, menu entries, link handler, native host, the running agent,
+  sign-in and settings); on macOS the page then says to drag the app to the Trash. The node
+  stays on the server (sign-out is a later item).
+- **Verified (2026-10-14).** Handler tests for every route and check. Headless Chromium against a
+  throwaway jarvisd (own home, ports 461xx, no mDNS) in scratch HOMEs with fake `systemctl` and
+  `xdg-open`: sign-in (wrong password, then right), pairing approved through the API by a seeded
+  member, the meter on a WAV microphone and the voice switch saving `voice: false`, Remove, Done,
+  and `start` on an unenrolled HOME → the page → sign in → the agent spawned and connected to
+  MQTT. A second `setup` reopened the first. macOS (MBP, scratch dir over SSH): unit tests, and
+  the page served with the four probes answering; no grant clicked through, and not from the
+  app bundle. Windows: built and vetted. Not checked: the tray item clicked on a real desktop,
+  the GNOME/KDE step on a real GNOME/KDE.
+
 **The settings file (installers plan item 1.6, 2026-10-13).** The choices a user makes once are
 no longer only `run` flags: `<user config dir>/jarvis-agent/agent.json` (0600, next to
 `node.json`), e.g. `{"voice": true, "island": true, "confirm_dictation": "submit"}`. Keys:
@@ -1525,6 +1588,7 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
 ─────────────
 ✓ Listen for "Hey Jarvis"                   (Linux, macOS)
   Open Jarvis Automation                    (once discovery names the web UI)
+  Set up / Settings…                        (the setup page, §13)
 ─────────────
   Quit Jarvis Automation Agent
 ```
@@ -1539,6 +1603,8 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
   show only while listening is on, as before.
 - **Open Jarvis Automation** opens discovery's `jarvis-admin` URL (http/https only, no user
   info) in the default browser; it appears once jarvisd answers discovery.
+- **Set up / Settings…** starts `jarvis-agent setup` as a process of its own (§13 "The setup
+  page"); a second one only reopens the first's page.
 - **Quit** is `jarvis-agent stop` from inside (§13): exit 0, so no supervisor restarts it, until
   the next login or `start`.
 - **Hide the icon:** `--no-tray`, or agent.json `tray: false`. `status` prints a `menu icon:` line.

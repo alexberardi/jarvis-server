@@ -49,7 +49,7 @@ func (f *fakeStart) starter(e install.Env) starter {
 		},
 		enrolled: func() bool { return f.setUp },
 		install:  func() error { f.log = append(f.log, "install"); f.installed = true; return nil },
-		firstRun: func() error { f.log = append(f.log, "first-run"); return nil },
+		firstRun: func(context.Context) error { f.log = append(f.log, "first-run"); return nil },
 	}
 }
 
