@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Full-page screenshots of the admin SPA on a scripts/sandbox instance, at phone, tablet and
+# desktop widths in light and dark, with console errors, failed requests and horizontal
+# overflow reported per page. Gives an agent eyes on the UI: Read the PNGs, read index.json.
+#
+#   scripts/screenshots [--sandbox NAME] [--pages a,b,/raw/path] [--viewports phone,tablet,desktop]
+#                       [--themes light,dark] [--out DIR] [--settle-ms N] [--tiles PX]
+#
+#   --sandbox    the scripts/sandbox name (default: default). It must be up with the SPA built:
+#                scripts/sandbox up --name NAME --ui
+#   --pages      page names (the sidebar's, as slugs: dashboard, models, settings, connections,
+#                logs, traces, nodes, users, update; plus trace-detail, login, change-password, setup,
+#                not-found, nav-drawer) or raw paths starting with /. Default: all of them.
+#   --viewports  phone 390x844, tablet 820x1180, desktop 1440x900 (default: all three)
+#   --themes     light, dark (default: both)
+#   --out        default .sandbox/NAME/shots/<timestamp>/
+#   --tiles PX   also cut pages taller than PX into PX-high pieces (<file>.t01.png, ...); a
+#                6000px phone page is unreadable once an image viewer shrinks it to fit
+#
+# Writes <page>__<viewport>__<theme>.png and index.json (per shot: final path, heading, console
+# and page errors, failed requests, HTTP >= 400, and overflow: how far the page scrolls sideways
+# and the outermost elements sticking out past the viewport). Exits 1 if any page failed to load.
+# The first run installs Playwright into tools/screenshots/node_modules (and Chromium if missing).
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+TOOL=$ROOT/tools/screenshots
+say() { echo "screenshots: $*" >&2; }
+die() { say "$*"; exit 1; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; }
+
+NAME=default OUT= ARGS=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --sandbox) NAME=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    --pages|--viewports|--themes|--settle-ms|--tiles) ARGS+=("$1" "$2"); shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument $1" ;;
+  esac
+done
+
+ENVF=$ROOT/.sandbox/$NAME/sandbox.env
+[ -f "$ENVF" ] || die "no sandbox '$NAME' ($ENVF); start one: scripts/sandbox up --name $NAME --ui"
+# shellcheck disable=SC1090
+source "$ENVF"
+curl -sf -o /dev/null "$SBX_ADMIN/" || die "sandbox '$NAME' admin $SBX_ADMIN is not answering (scripts/sandbox status --name $NAME)"
+curl -sf "$SBX_ADMIN/" | grep -q 'id="root"' ||
+  die "$SBX_ADMIN serves no SPA; rebuild with: scripts/sandbox up --name $NAME --ui"
+
+command -v node >/dev/null || die "node not on PATH"
+if [ ! -d "$TOOL/node_modules/playwright" ]; then
+  say "installing Playwright (tools/screenshots)"
+  npm --prefix "$TOOL" ci --silent
+fi
+# Chromium for this Playwright version; a no-op when it is already in the cache.
+(cd "$TOOL" && npx --no-install playwright install chromium >/dev/null) || die "playwright install chromium failed"
+
+[ -n "$OUT" ] || OUT=$ROOT/.sandbox/$NAME/shots/$(date +%Y%m%d-%H%M%S)
+node "$TOOL/screenshots.mjs" --admin "$SBX_ADMIN" --email "$SBX_EMAIL" --password "$SBX_PASSWORD" \
+  --out "$OUT" ${ARGS[@]+"${ARGS[@]}"}
