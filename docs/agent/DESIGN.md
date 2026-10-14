@@ -99,7 +99,7 @@ CC feeds the output back to the LLM and streams the answer to the app
   jarvisd's `localhost` rows rewritten to the host the agent reached config on.
 - Heartbeat: `POST /admin/nodes/heartbeat` every 60 s with
   `version_info.install_mode = "desktop-agent"` (how the app can tell it from a Pi) and
-  `needs_k2: false`.
+  `needs_k2`: true until the node has its settings key (§16).
 - Other verbs (`tts`, `action`, `routine`, ...) are logged and ignored, so CC times out as for
   an offline node. (Open question 1.)
 - Outputs follow the Pi convention: `success`, and on failure `error` plus an `error_code`
@@ -1702,3 +1702,91 @@ the menu from the current items (`TrackPopupMenu` with `TPM_RETURNCMD`, after
 yet). **Built and vetted only**, plus CI on the Windows runner (struct layouts, a real HICON);
 `JARVIS_TRAY_WIN_LIVE=1` adds the icon on a real desktop and is opt-in. Not run on a Windows
 desktop.
+
+## 16. Node settings and K2 (2026-10-14)
+
+**Why.** Web chat defaults to the member's own desktop agent, so the agent needs the per-node
+settings a Pi has: command secrets (API keys, URLs, per-user values), which commands are on, and
+command data. On a Pi these are edited only by a household admin in the mobile app, and they are
+**end-to-end encrypted** with the node's K2 key: the phone and the node hold K2; command-center
+relays ciphertext ([cc/05](../cc/05-nodes.md) §3.2–3.3). The agent now speaks that protocol
+unchanged, so the mobile app's existing node-settings screens work for it. The web app gets no
+settings view: the browser has no K2, and command-center must never see the plaintext. Code:
+`internal/agent/nodesettings`, wired in `cmd/jarvis-agent/nodesettings.go`.
+
+**How a headless node gets K2 today, and what the agent does.** A Pi gets K2 from the phone over
+its provisioning access point. A Docker or headless Pi node, which has no access point, uses the
+relay: the node's heartbeat says `needs_k2: true`; the app's node screen shows "Generate
+Encryption Key"; the app makes a random 32-byte key, keeps it, and sends it in
+`POST /api/v0/nodes/{id}/k2` (household member). Command-center holds it **in memory only**,
+for that one call (at most 15 s, never stored), and publishes a nudge with a request id on
+`jarvis/nodes/{id}/k2/provision`. The node fetches the key once, over its own authenticated
+channel (`GET …/k2/provision/{rid}`, X-API-Key), stores it and acks (`POST …/k2/ack/{rid}`),
+which completes the app's call. **The desktop agent uses exactly this relay.** Its heartbeat
+says `needs_k2: true` until it holds a key (then a beat goes out at once with `false`). There is
+no K2 at pairing or sign-in: the browser that approves a code or signs in has no K2, and the
+phone must hold the key to read the settings anyway, so **K2 delivery needs the phone**, as for
+a headless Pi. An admin opens the computer in the app's Nodes tab and taps Generate.
+
+**What the agent does with it** (byte-compatible with the Python node; pinned by
+`testdata/k2_golden.json`, written by the Python node's own `encrypt_snapshot` and
+`_decrypt_config`, `tools/golden/export_k2.py`):
+
+- **Settings requests** (`settings/request` nudge, and on every MQTT connect the pending list,
+  keeping `include_values` and the user, which the Python node drops): confirm the request,
+  build the snapshot, seal it with AES-256-GCM (12-byte random nonce, AAD
+  `{node}:settings:snapshot`, raw JSON plaintext, unpadded base64url ciphertext/nonce/tag) and
+  `PUT` it with `aad_schema_version` 1, `aad_commands_schema_version` 2, `aad_revision` 1. The
+  snapshot lists every tool the agent has, enabled or not, with the sidecar packages' declared
+  secrets (`is_set`; a value only when not sensitive, or with `include_values`; a user secret for
+  the requesting user), no agents, families or managers, and `node_config.hardware` all false.
+- **Config pushes** (`config/push` nudge, and pending ones on every connect): fetch, decrypt
+  (AAD `{node}:{config_type}`), apply, ack. `settings:secrets` and any untyped push store
+  secrets (with `__user_id__`, as that user's; `""` clears), `command_registry` turns a command
+  off or on (a disabled command is neither offered nor run). `node_config` (the Pi's update
+  consent), `agent_registry`, `fast_path_registry` and `auth:*` have nothing to apply on a
+  desktop and are acked as no-ops with a log line. A push that fails to decrypt stays pending.
+- **Delivery to tools.** Sidecar packages read settings exactly as on a Pi:
+  `JarvisStorage(...).get_secret(...)`, `save`/`get`/… for command data. The sidecar registers a
+  `StorageBackend` whose calls go to the agent over the sidecar's JSON-lines pipes (child →
+  agent requests between a request and its reply, §6's draft), and the requesting user is set
+  around each call for user-scoped secrets.
+- **Storage.** `k2.json` and `node-settings.json` (secrets, disabled commands, command data),
+  0600 next to `node.json`, each tagged with the node id. A new sign-in (another node id) drops
+  them at start, so the next person never inherits a key, secrets or data. The Pi encrypts its
+  K2 file with a local Fernet key kept beside it; the agent relies on the file mode, the same
+  protection in practice.
+
+**Threat model.**
+
+- Command-center sees only ciphertext for snapshots and pushes. The one exception is the K2
+  bytes during the relay call: a command-center compromised **at that moment** could keep the
+  key. That is today's headless-Pi trade-off. A stronger option for later: the agent makes K2
+  itself and shows it as a QR on its local setup page for the app's existing "Import key" scan
+  (`{v, mode: "plain", node_id, kid, k2, cc_url}`), so K2 never leaves the two devices.
+- A spoofed nudge can't plant a key: the key only comes from command-center over the node's
+  authenticated channel, and an unknown request id is a 404 (the agent acks a failure).
+- Replay: command-center keeps consumed pushes, so it could re-serve an old secrets push. The
+  Pi guards only `node_config` with `__issued_at`; the agent applies no `node_config` at all.
+  Secrets replay is as on the Pi (it restores an older value; nothing is disclosed).
+- Who: reading a snapshot needs **power_user** in the node's household at command-center, and
+  the app shows node settings to household admins; pushing and K2 provisioning need a member
+  (cc's existing checks, unchanged).
+
+**Not built here.** The command-data browser over MQTT (`command-data/*`, the app's "Stored
+data" tab: the agent stores the data but doesn't answer the browser yet), package
+install/uninstall from the app, OAuth `auth:*` for sidecar packages, the Pi's voice and
+maintenance settings (`update_node_config`: a desktop's voice settings stay in `agent.json`).
+
+**Verified (2026-10-14).** Unit: the goldens (Go seals byte-identical to the Python node; the
+mobile-format pushes the Python node decrypted open identically here), the relay (spoofed
+nudge, short key), snapshots (sensitive values hidden, `include_values`, per-user), every push
+type, the backstop, wiping another node's files, the sidecar's storage round trips with a real
+Python and the SDK, and the runner's extra topics against the embedded broker. Live, on a
+sandbox jarvisd with a real `jarvis-agent run` in a scratch HOME and a sidecar package that reads
+two secrets through `JarvisStorage`: `needs_k2: true` → `POST /nodes/{id}/k2` 200 → a snapshot
+decrypted with the app's AAD and format → two encrypted `settings:secrets` pushes (one per-user)
+applied and acked → a mobile chat turn to that computer ran the package, which answered with
+both values → a `command_registry` push removed it from the node's tools. Not run: the mobile
+app's screens themselves against an agent.
+

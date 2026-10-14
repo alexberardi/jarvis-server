@@ -11,6 +11,16 @@ Loads IJarvisCommand classes from a directory and answers JSON-lines requests on
     <- {"id": 3, "result": {"ran": true}}
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
+Storage (JarvisStorage: command secrets and command data) is the agent's, not this process's
+(DESIGN §16). A registered StorageBackend asks the Go agent over the same pipes, between a
+request and its reply:
+
+    <- {"from": "child", "id": K, "method": "storage.get_secret", "params": {...}}
+    -> {"to": "child", "id": K, "result": ...}         or {"to": "child", "id": K, "error": "..."}
+
+so a package reads the settings the household set from the mobile app exactly as on a Pi
+(storage.get_secret(...)), with the requesting user set for user-scoped secrets.
+
 "signals" are the CommandResponse fields only the node acts on; they never reach
 command-center. A command's on_response_complete callable (a media command's deferred "start
 playing now") stays here under a token; the agent runs it with "complete" once the spoken reply
@@ -32,6 +42,57 @@ PROTO = sys.stdout
 sys.stdout = sys.stderr  # a stray print() must not corrupt the protocol
 
 from jarvis_command_sdk import IJarvisCommand, RequestInformation  # noqa: E402
+from jarvis_command_sdk.context import set_current_user_id  # noqa: E402
+from jarvis_command_sdk.storage import StorageBackend, set_backend  # noqa: E402
+
+_next_ask = 0
+
+
+def _ask(method: str, params: dict):
+    """One reverse request to the Go agent; blocks for its answer (requests are serial)."""
+    global _next_ask
+    _next_ask += 1
+    PROTO.write(json.dumps({"from": "child", "id": _next_ask, "method": method, "params": params}, default=str) + "\n")
+    PROTO.flush()
+    line = sys.stdin.readline()
+    if not line:
+        raise RuntimeError("agent closed the sidecar's input")
+    msg = json.loads(line)
+    if msg.get("to") != "child" or msg.get("id") != _next_ask:
+        raise RuntimeError(f"unexpected answer to {method}: {line[:200]}")
+    if msg.get("error"):
+        raise RuntimeError(msg["error"])
+    return msg.get("result")
+
+
+class AgentStorage(StorageBackend):
+    """JarvisStorage's backend: every call goes to the Go agent's settings store."""
+
+    def save(self, command_name, data_key, data, expires_at=None):
+        _ask("storage.save", {"command": command_name, "key": data_key, "data": data,
+                              "expires_at": expires_at.isoformat() if expires_at else None})
+
+    def get(self, command_name, data_key):
+        return _ask("storage.get", {"command": command_name, "key": data_key})
+
+    def get_all(self, command_name):
+        return _ask("storage.get_all", {"command": command_name}) or []
+
+    def delete(self, command_name, data_key):
+        return bool(_ask("storage.delete", {"command": command_name, "key": data_key}))
+
+    def delete_all(self, command_name):
+        return int(_ask("storage.delete_all", {"command": command_name}) or 0)
+
+    def get_secret(self, key, scope, user_id=None):
+        return _ask("storage.get_secret", {"key": key, "scope": scope, "user_id": user_id})
+
+    def set_secret(self, key, value, scope, value_type="string", user_id=None):
+        _ask("storage.set_secret", {"key": key, "value": value, "scope": scope, "value_type": value_type,
+                                    "user_id": user_id})
+
+    def delete_secret(self, key, scope, user_id=None):
+        _ask("storage.delete_secret", {"key": key, "scope": scope, "user_id": user_id})
 
 
 def load_commands(directory: str) -> dict:
@@ -53,11 +114,32 @@ def load_commands(directory: str) -> dict:
     return found
 
 
+_SECRET_FIELDS = ("key", "scope", "description", "value_type", "required", "is_sensitive", "friendly_name",
+                  "enum_values", "presets")
+
+
+def _secrets(cmd) -> list:
+    """The command's required_secrets for the settings snapshot; a bad one is skipped alone."""
+    out = []
+    try:
+        declared = cmd.required_secrets or []
+    except Exception as exc:
+        print(f"sidecar: {cmd.command_name}: required_secrets failed: {exc}", file=sys.stderr)
+        return out
+    for secret in declared:
+        try:
+            out.append({f: getattr(secret, f, None) for f in _SECRET_FIELDS})
+        except Exception as exc:
+            print(f"sidecar: {cmd.command_name}: skipping a secret: {exc}", file=sys.stderr)
+    return out
+
+
 def describe(commands: dict) -> dict:
     tools = []
     for name, cmd in commands.items():
         try:
-            tools.append({"name": name, "client_tool": cmd.to_openai_tool_schema(), "command": cmd.get_command_schema()})
+            tools.append({"name": name, "client_tool": cmd.to_openai_tool_schema(), "command": cmd.get_command_schema(),
+                          "secrets": _secrets(cmd)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
     return {"tools": tools}
@@ -99,10 +181,14 @@ def call(commands: dict, params: dict) -> dict:
         conversation_id=req.get("tool_call_id") or "desktop",
         user_id=req.get("user_id"),
     )
+    # User-scoped secrets resolve to the requesting user, as on a Pi.
+    set_current_user_id(req.get("user_id"))
     try:
         resp = cmd.execute(ri, **(params.get("arguments") or {}))
     except Exception as exc:
         return {"output": {"success": False, "error": str(exc)}}
+    finally:
+        set_current_user_id(None)
     output = dict(resp.context_data or {})
     if not resp.success:
         output["error"] = resp.error_details or "Command failed"
@@ -115,12 +201,20 @@ def call(commands: dict, params: dict) -> dict:
 
 
 def main() -> None:
-    commands = load_commands(sys.argv[1])
-    print(f"sidecar: loaded {sorted(commands)}", file=sys.stderr)
-    for line in sys.stdin:
+    set_backend(AgentStorage())
+    commands = None
+    while True:
+        line = sys.stdin.readline()  # not `for line in sys.stdin`: _ask reads replies from it too
+        if not line:
+            break
         line = line.strip()
         if not line:
             continue
+        if commands is None:
+            # Loaded once the first request is read, so a command that touches storage while it
+            # is constructed gets the agent's answer, not the next request, from stdin.
+            commands = load_commands(sys.argv[1])
+            print(f"sidecar: loaded {sorted(commands)}", file=sys.stderr)
         msg_id = None
         try:
             msg = json.loads(line)

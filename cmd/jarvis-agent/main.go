@@ -41,6 +41,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
@@ -472,15 +473,23 @@ func run(ctx context.Context, args []string) error {
 	if ctl != nil {
 		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load)()
 	}
-	h, tools, closeTools, err := tf.build(ctx, log, true)
+	// K2, command secrets and data live next to node.json; another node's are dropped here.
+	st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
+	if err != nil {
+		return fmt.Errorf("node settings: %w", err)
+	}
+	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
 	}
 	defer closeTools()
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
-	r := &node.Runner{Creds: c, Tools: tools, Version: version, InstallMode: installMode, NodeKind: nodeKind, Log: log}
+	// Commands the household turned off in the app's node settings are neither offered nor run.
+	served := nodesettings.Gate{Tools: tools, Store: st}
+	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: installMode, NodeKind: nodeKind, Log: log}
 	r.Capabilities, r.Changed = heartbeatCaps(tools)
+	wireNodeSettings(r, st, tools, log)
 	hd := openHat(hf, log)
 	defer hd.Close()
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
@@ -489,7 +498,7 @@ func run(ctx context.Context, args []string) error {
 	sw.load = func(ctx context.Context) (*voiceStack, error) { return loadVoice(ctx, vf, log) }
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
-		_ = voice.Serve(ctx, vs.options(cc, tools, log, nil))
+		_ = voice.Serve(ctx, vs.options(cc, served, log, nil))
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }
 	sw.available = voice.Supported
@@ -596,7 +605,10 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 // the extension is connected), then the sidecar's commands. The MQTT dispatcher and voice
 // turns both serve it. promptAX asks macOS for Accessibility (the
 // long-running `run` does; `listen`, a test command often started over SSH, doesn't).
-func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) (*host.Host, node.Multi, func(), error) {
+//
+// st, when set, is the node's settings store: the sidecar's packages read their secrets and
+// keep their data there (DESIGN §16).
+func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, st *nodesettings.Store) (*host.Host, node.Multi, func(), error) {
 	h, err := nativeHost()
 	if err != nil {
 		return nil, nil, nil, err
@@ -626,7 +638,11 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 		closeAll = stopBrowser
 	}
 	if *f.py != "" && *f.cmdDir != "" {
-		sc, err := sidecar.Start(ctx, *f.py, *f.cmdDir, log)
+		var storage sidecar.Storage
+		if st != nil {
+			storage = st
+		}
+		sc, err := sidecar.Start(ctx, *f.py, *f.cmdDir, log, storage)
 		if err != nil {
 			closeAll()
 			return nil, nil, nil, fmt.Errorf("sidecar: %w", err)
