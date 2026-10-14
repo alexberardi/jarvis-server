@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# A throwaway jarvisd beside the installed one: this checkout's build, its own data directory,
+# its own ports, seeded with the dev household, and talking to the installed instance's model
+# so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
+#
+#   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich] [--llm shared|none] [--ui]
+#   scripts/sandbox down [--name N] [--purge]
+#   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
+#   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
+#   scripts/sandbox logs [--name N] [-f]
+#   scripts/sandbox llm [--name N]         re-point the sandbox at the installed model (after
+#                                          the installed jarvisd restarted its engine)
+#   scripts/sandbox list
+#
+# up builds ./cmd/jarvisd, starts `jarvisd serve --port-offset N` on .sandbox/<name>/home bound
+# to 127.0.0.1 (no mDNS, no browser), runs scripts/seed-dev.py, and writes
+# .sandbox/<name>/sandbox.env: every listener URL, the dev users' password, a superuser JWT, the
+# seeded kitchen node's id and key, and the admin keys. Running it again on a sandbox that is up
+# rebuilds and restarts it on the same data.
+#
+#   --offset N       port offset (default: the first free of 10000, 11000, ...; kept per name)
+#   --profile        seed-dev.py profile (default minimal)
+#   --llm shared     (default) llm.live = the installed jarvisd's running llama-server, as a
+#                    remote endpoint: no second model on the GPU. Requests queue behind the
+#                    installed instance's own (it runs one slot).
+#   --llm none       no model: everything but the LLM works
+#   --ui             build the admin SPA first (npm) and serve it; otherwise web/admin/dist/ui
+#                    is served when it exists, else the built-in placeholder page
+#
+# STT is off and TTS has no voice models in a sandbox: pipeline tests start from text.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+SBX_ROOT=$ROOT/.sandbox
+say() { echo "sandbox: $*" >&2; }
+die() { say "$*"; exit 1; }
+
+CMD=${1:-}
+[ -n "$CMD" ] || { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+shift
+NAME=default OFFSET= PROFILE=minimal LLM=shared UI=0 PURGE=0 FOLLOW=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --name) NAME=$2; shift 2 ;;
+    --offset) OFFSET=$2; shift 2 ;;
+    --profile) PROFILE=$2; shift 2 ;;
+    --llm) LLM=$2; shift 2 ;;
+    --ui) UI=1; shift ;;
+    --purge) PURGE=1; shift ;;
+    -f) FOLLOW=1; shift ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument $1" ;;
+  esac
+done
+case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
+
+DIR=$SBX_ROOT/$NAME
+HOME_DIR=$DIR/home
+PIDFILE=$DIR/jarvisd.pid
+LOG=$DIR/jarvisd.log
+ENVF=$DIR/sandbox.env
+OFFSETF=$DIR/offset
+
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
+port() { echo $(($1 + $(cat "$OFFSETF"))); }
+json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
+
+# The installed jarvisd's live llama-server: its port and model alias from the process list.
+installed_llm() {
+  local args
+  args=$(pgrep -a -f 'llama-server .*--alias' | grep -v -- "$SBX_ROOT" | head -1) || return 1
+  local p a
+  p=$(sed -n 's/.*--port \([0-9]*\).*/\1/p' <<<"$args")
+  a=$(sed -n 's/.*--alias \([^ ]*\).*/\1/p' <<<"$args")
+  [ -n "$p" ] && [ -n "$a" ] || return 1
+  echo "$p $a"
+}
+
+pick_offset() {
+  if [ -n "$OFFSET" ]; then echo "$OFFSET"; return; fi
+  if [ -f "$OFFSETF" ]; then cat "$OFFSETF"; return; fi
+  local taken=" " o
+  for f in "$SBX_ROOT"/*/offset; do [ -f "$f" ] && taken+="$(cat "$f") "; done
+  for o in $(seq 10000 1000 40000); do
+    case $taken in *" $o "*) continue ;; esac
+    port_busy $((7700 + o)) || port_busy $((7703 + o)) || port_busy $((7710 + o)) || { echo "$o"; return; }
+  done
+  die "no free port offset"
+}
+
+set_setting() { # listener-port key json-value
+  local code
+  code=$(curl -s -o "$DIR/.put" -w '%{http_code}' -X PUT "http://127.0.0.1:$1/settings/$2" \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"value\": $3}")
+  [ "$code" = 200 ] || die "PUT $2 → $code: $(cat "$DIR/.put")"
+}
+
+login() {
+  curl -sf -X POST "http://127.0.0.1:$(port 7701)/auth/login" -H 'Content-Type: application/json' \
+    -d '{"email":"test@jarvisautomation.io","password":"DevPass123!"}' | json 'd["access_token"]'
+}
+
+point_llm() {
+  TOKEN=$(login) || die "login failed"
+  local llm=$(port 7704) cc=$(port 7703)
+  if [ "$LLM" = none ]; then
+    set_setting "$llm" llm.live.engine '"off"'
+    say "llm: off"
+    return
+  fi
+  local found
+  found=$(installed_llm) || { say "llm: the installed jarvisd runs no llama-server; leaving the model off (re-run 'scripts/sandbox llm' once it does)"; set_setting "$llm" llm.live.engine '"off"'; return; }
+  read -r lport alias <<<"$found"
+  set_setting "$llm" llm.live.engine '"remote"'
+  set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$lport/v1\""
+  set_setting "$llm" llm.live.remote_api '"openai"'
+  set_setting "$llm" llm.live.remote_model "\"$alias\""
+  set_setting "$llm" llm.background.engine '"shared"'
+  set_setting "$llm" llm.embeddings.engine '"off"'
+  set_setting "$llm" stt.engine '"off"'
+  # What the catalog entry would have said for a local install: the provider, the window,
+  # vision, and folding (Qwen 3.5's template rejects later system messages).
+  local entry
+  entry=$(python3 - "$ROOT/internal/modules/llm/models/catalog.json" "$alias" <<'EOF'
+import json, sys
+for e in json.load(open(sys.argv[1])):
+    if e["id"] == sys.argv[2]:
+        print(e.get("prompt_provider", ""), e.get("context_default", 0),
+              "true" if e.get("mmproj") else "false", "on" if e.get("fold_system_messages") else "off")
+        break
+EOF
+)
+  if [ -n "$entry" ]; then
+    read -r provider ctx vision fold <<<"$entry"
+    set_setting "$llm" llm.live.context "$ctx"
+    set_setting "$llm" llm.live.remote_vision "$vision"
+    set_setting "$llm" llm.live.fold_system_messages "\"$fold\""
+    [ -n "$provider" ] && set_setting "$cc" llm.prompt_provider "\"$provider\""
+  else
+    say "llm: $alias is not in the catalog; set llm.prompt_provider by hand"
+  fi
+  say "llm: remote → installed llama-server :$lport ($alias)"
+}
+
+write_env() {
+  local node_id node_key
+  node_id=5eed0000-0000-4000-8000-00000000a0de
+  node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json" 2>/dev/null || true)
+  TOKEN=$(login)
+  umask 077
+  {
+    echo "# scripts/sandbox $NAME ($(date -Iseconds)); source this file"
+    echo "export JARVIS_SANDBOX=$NAME"
+    echo "export JARVIS_HOME=$HOME_DIR"
+    echo "export JARVIS_PORT_OFFSET=$(cat "$OFFSETF")"
+    for l in config:7700 auth:7701 logs:7702 cc:7703 llm:7704 whisper:7706 tts:7707 notifications:7712 recipes:7030 ocr:7031 admin:7710; do
+      n=$(tr '[:lower:]' '[:upper:]' <<<"${l%%:*}")
+      echo "export SBX_$n=http://127.0.0.1:$(port "${l#*:}")"
+    done
+    echo "export SBX_MQTT=127.0.0.1:$(port 1884)"
+    echo "export SBX_EMAIL=test@jarvisautomation.io"
+    echo "export SBX_PASSWORD='DevPass123!'"
+    echo "export SBX_TOKEN=$TOKEN"
+    echo "export SBX_NODE_ID=$node_id"
+    echo "export SBX_NODE_KEY=$node_key"
+    echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
+    echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
+  } >"$ENVF"
+}
+
+cmd_up() {
+  command -v go >/dev/null || die "go not on PATH"
+  mkdir -p "$HOME_DIR"
+  pick_offset >"$OFFSETF.new" && mv "$OFFSETF.new" "$OFFSETF"
+  [ -f "$DIR/admin-api-key" ] || head -c 24 /dev/urandom | base64 | tr -d '/+=' >"$DIR/admin-api-key"
+  [ -f "$DIR/auth-admin-token" ] || head -c 24 /dev/urandom | base64 | tr -d '/+=' >"$DIR/auth-admin-token"
+
+  if [ "$UI" = 1 ]; then
+    say "building the admin UI"
+    npm --prefix "$ROOT/web/admin" ci --silent && npm --prefix "$ROOT/web/admin" run build --silent
+  fi
+  say "building jarvisd"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -ldflags "-X main.version=dev-sandbox" -o "$DIR/jarvisd" ./cmd/jarvisd)
+
+  cmd_stop
+  local ui=
+  [ -d "$ROOT/web/admin/dist/ui" ] && ui=$ROOT/web/admin/dist/ui
+  say "starting on offset $(cat "$OFFSETF") (cc :$(port 7703), admin :$(port 7710))"
+  JARVIS_HOST=127.0.0.1 JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui \
+    ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
+    setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
+  echo $! >"$PIDFILE"
+  for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null && break
+    running || { tail -20 "$LOG" >&2; die "jarvisd exited (log: $LOG)"; }
+    sleep 0.5
+  done
+  curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null || die "not healthy after 30s (log: $LOG)"
+
+  say "seeding ($PROFILE)"
+  python3 "$ROOT/scripts/seed-dev.py" --home "$HOME_DIR" --base-url http://127.0.0.1 \
+    --auth-port "$(port 7701)" --cc-port "$(port 7703)" --admin-port "$(port 7710)" \
+    --profile "$PROFILE" >"$DIR/seed.log" 2>&1 || { tail -20 "$DIR/seed.log" >&2; die "seeding failed (log: $DIR/seed.log)"; }
+  point_llm
+  write_env
+  say "up: source $ENVF"
+}
+
+cmd_stop() {
+  if running; then
+    local pid
+    pid=$(cat "$PIDFILE")
+    kill "$pid"
+    for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid"
+  fi
+  rm -f "$PIDFILE"
+}
+
+cmd_down() {
+  cmd_stop
+  if [ "$PURGE" = 1 ]; then rm -rf "$DIR"; say "$NAME stopped and deleted"; else say "$NAME stopped (data kept; --purge deletes it)"; fi
+}
+
+gpu_report() {
+  command -v nvidia-smi >/dev/null || return 0
+  echo "GPU:"
+  nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader | sed 's/^/  used, total: /'
+  nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader | while IFS=, read -r pid mem; do
+    local args owner=other
+    args=$(ps -o args= -p "$pid" 2>/dev/null | cut -c1-80)
+    case $args in *"$SBX_ROOT"*) owner=sandbox ;; */var/lib/jarvisd/*|*.jarvisd/*) owner=installed ;; esac
+    echo "  $owner $mem  $args"
+  done
+}
+
+cmd_status() {
+  if [ -f "$OFFSETF" ]; then
+    if running; then echo "$NAME: up (pid $(cat "$PIDFILE"), offset $(cat "$OFFSETF"), cc http://127.0.0.1:$(port 7703), admin http://127.0.0.1:$(port 7710))"
+    else echo "$NAME: down (offset $(cat "$OFFSETF"))"; fi
+  else
+    echo "$NAME: not created"
+  fi
+  if found=$(installed_llm); then echo "installed llama-server: :${found% *} (${found#* })"; else echo "installed llama-server: none running"; fi
+  gpu_report
+}
+
+case $CMD in
+  up) cmd_up ;;
+  down) cmd_down ;;
+  status) cmd_status ;;
+  env) [ -f "$ENVF" ] || die "no $ENVF (scripts/sandbox up)"; cat "$ENVF" ;;
+  logs) if [ "$FOLLOW" = 1 ]; then tail -f "$LOG"; else tail -100 "$LOG"; fi ;;
+  llm) running || die "$NAME is not up"; point_llm ;;
+  list) for d in "$SBX_ROOT"/*/; do [ -d "$d" ] && NAME=$(basename "$d") DIR=$d PIDFILE=$d/jarvisd.pid OFFSETF=$d/offset && \
+          if running; then echo "$NAME up offset $(cat "$OFFSETF")"; else echo "$NAME down"; fi; done ;;
+  *) die "unknown command $CMD (up, down, status, env, logs, llm, list)" ;;
+esac
