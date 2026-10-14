@@ -22,12 +22,15 @@
 #   --profile        seed-dev.py profile (default minimal)
 #   --llm shared     (default) llm.live = the installed jarvisd's running llama-server, as a
 #                    remote endpoint: no second model on the GPU. Requests queue behind the
-#                    installed instance's own (it runs one slot).
+#                    installed instance's own (it runs one slot). They go through the tap
+#                    (tools/pipeline tap, port 7799 + offset), which logs every model call to
+#                    .sandbox/<name>/llm.jsonl and follows the engine across restarts.
 #   --llm none       no model: everything but the LLM works
 #   --ui             build the admin SPA first (npm) and serve it; otherwise web/admin/dist/ui
 #                    is served when it exists, else the built-in placeholder page
 #
-# STT is off and TTS has no voice models in a sandbox: pipeline tests start from text.
+# STT is off and TTS has no voice models in a sandbox: pipeline tests start from text
+# (go run ./tools/pipeline say "turn on the kitchen lights"; ... run for the scenarios).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -60,8 +63,10 @@ PIDFILE=$DIR/jarvisd.pid
 LOG=$DIR/jarvisd.log
 ENVF=$DIR/sandbox.env
 OFFSETF=$DIR/offset
+TAPPID=$DIR/tap.pid
 
 running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+tap_running() { [ -f "$TAPPID" ] && kill -0 "$(cat "$TAPPID")" 2>/dev/null; }
 port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
 port() { echo $(($1 + $(cat "$OFFSETF"))); }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
@@ -112,8 +117,10 @@ point_llm() {
   local found
   found=$(installed_llm) || { say "llm: the installed jarvisd runs no llama-server; leaving the model off (re-run 'scripts/sandbox llm' once it does)"; set_setting "$llm" llm.live.engine '"off"'; return; }
   read -r lport alias <<<"$found"
+  # Through the tap (tools/pipeline): it logs every model call to llm.jsonl and follows the
+  # installed engine to a new port when it restarts.
   set_setting "$llm" llm.live.engine '"remote"'
-  set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$lport/v1\""
+  set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$(port 7799)/v1\""
   set_setting "$llm" llm.live.remote_api '"openai"'
   set_setting "$llm" llm.live.remote_model "\"$alias\""
   set_setting "$llm" llm.background.engine '"shared"'
@@ -140,7 +147,7 @@ EOF
   else
     say "llm: $alias is not in the catalog; set llm.prompt_provider by hand"
   fi
-  say "llm: remote → installed llama-server :$lport ($alias)"
+  say "llm: remote → tap :$(port 7799) → installed llama-server :$lport ($alias); calls logged to $DIR/llm.jsonl"
 }
 
 write_env() {
@@ -159,6 +166,8 @@ write_env() {
       echo "export SBX_$n=http://127.0.0.1:$(port "${l#*:}")"
     done
     echo "export SBX_MQTT=127.0.0.1:$(port 1884)"
+    echo "export SBX_LLM_TAP=http://127.0.0.1:$(port 7799)"
+    echo "export SBX_LLM_LOG=$DIR/llm.jsonl"
     echo "export SBX_EMAIL=test@jarvisautomation.io"
     echo "export SBX_PASSWORD='DevPass123!'"
     echo "export SBX_TOKEN=$TOKEN"
@@ -182,6 +191,7 @@ cmd_up() {
   fi
   say "building jarvisd"
   (cd "$ROOT" && CGO_ENABLED=0 go build -ldflags "-X main.version=dev-sandbox" -o "$DIR/jarvisd" ./cmd/jarvisd)
+  (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/pipeline" ./tools/pipeline)
 
   cmd_stop
   local ui=
@@ -191,6 +201,9 @@ cmd_up() {
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
     setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"
+  setsid "$DIR/pipeline" tap --listen "127.0.0.1:$(port 7799)" --exclude "$SBX_ROOT" --log "$DIR/llm.jsonl" \
+    >>"$DIR/tap.log" 2>&1 </dev/null &
+  echo $! >"$TAPPID"
   for _ in $(seq 1 60); do
     curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null && break
     running || { tail -20 "$LOG" >&2; die "jarvisd exited (log: $LOG)"; }
@@ -216,6 +229,8 @@ cmd_stop() {
     kill -0 "$pid" 2>/dev/null && kill -9 "$pid"
   fi
   rm -f "$PIDFILE"
+  if tap_running; then kill "$(cat "$TAPPID")"; fi
+  rm -f "$TAPPID"
 }
 
 cmd_down() {

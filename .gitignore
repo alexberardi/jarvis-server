@@ -14,3 +14,5 @@ __pycache__/
 *.pyc
 HOSTS.local.md
 /.sandbox/
+/.claude/worktrees/
+/.claude/settings.local.json

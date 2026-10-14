@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# The pre-commit gate CI would apply, run locally and incrementally:
+#
+#   scripts/check [--all] [--base REF] [--no-race]
+#
+#   1. gofmt on the changed Go files
+#   2. go vet ./... for linux, darwin and windows with CGO_ENABLED=0 (Windows/macOS-only build
+#      breaks show up here instead of in CI), contract files included
+#   3. race tests of the changed packages (--all: ./...); --no-race skips the race detector
+#   4. the admin SPA's typecheck + vitest when web/admin changed
+#
+# "Changed" is everything differing from the merge base with REF (default origin/main, else
+# main), committed or not, plus untracked files.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+ALL=0 BASE= RACE=1
+while [ $# -gt 0 ]; do
+  case $1 in
+    --all) ALL=1; shift ;;
+    --base) BASE=$2; shift 2 ;;
+    --no-race) RACE=0; shift ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "check: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
+if [ -z "$BASE" ]; then
+  if git rev-parse -q --verify origin/main >/dev/null; then BASE=origin/main; else BASE=main; fi
+fi
+MB=$(git merge-base HEAD "$BASE")
+mapfile -t CHANGED < <({ git diff --name-only "$MB"; git ls-files --others --exclude-standard; } | sort -u)
+
+fail=0
+step() { printf '\n== %s\n' "$*"; }
+
+step "gofmt"
+GOFILES=()
+for f in "${CHANGED[@]}"; do [[ $f == *.go && -f $f ]] && GOFILES+=("$f"); done
+if [ ${#GOFILES[@]} -gt 0 ]; then
+  bad=$(gofmt -l "${GOFILES[@]}")
+  if [ -n "$bad" ]; then echo "$bad"; echo "(gofmt -w the files above)"; fail=1; else echo "ok (${#GOFILES[@]} files)"; fi
+else
+  echo "no Go changes"
+fi
+
+step "go vet (linux, darwin, windows)"
+for os in linux darwin windows; do
+  if GOOS=$os CGO_ENABLED=0 go vet -tags contract ./...; then echo "$os ok"; else echo "$os FAILED"; fail=1; fi
+done
+
+step "race tests"
+if [ "$ALL" = 1 ]; then
+  PKGS=(./...)
+else
+  mapfile -t PKGS < <(for f in "${GOFILES[@]}"; do echo "./$(dirname "$f")"; done | sort -u)
+fi
+if [ ${#PKGS[@]} -eq 0 ]; then
+  echo "no Go packages changed"
+elif [ "$RACE" = 1 ]; then
+  CGO_ENABLED=1 go test -race "${PKGS[@]}" || fail=1
+else
+  CGO_ENABLED=0 go test "${PKGS[@]}" || fail=1
+fi
+
+if printf '%s\n' "${CHANGED[@]}" | grep -q '^web/admin/'; then
+  step "admin SPA (tsc, vitest)"
+  [ -d web/admin/node_modules ] || npm --prefix web/admin ci --silent
+  (cd web/admin && npx tsc -b && npx vitest run) || fail=1
+fi
+
+echo
+if [ "$fail" = 0 ]; then echo "check: all green"; else echo "check: FAILED"; fi
+exit "$fail"

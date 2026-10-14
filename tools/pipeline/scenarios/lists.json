@@ -1,0 +1,23 @@
+[
+  {
+    "name": "shopping list: add two items",
+    "turns": [
+      {"say": "add milk and eggs to the shopping list",
+       "expect": {"tool": "shopping_list", "args": {"action": "add"}, "args_match": {"items": "(?i)(milk.*eggs|eggs.*milk)"}}}
+    ]
+  },
+  {
+    "name": "todo list: add a task",
+    "turns": [
+      {"say": "put clean the gutters on my to do list",
+       "expect": {"tool": "todo_list", "args": {"action": "add"}, "args_match": {"tasks": "(?i)gutter"}}}
+    ]
+  },
+  {
+    "name": "reminder: tomorrow morning",
+    "turns": [
+      {"say": "remind me to call the dentist tomorrow at 9am",
+       "expect": {"tool": "reminder", "args": {"action": "set"}, "args_match": {"text": "(?i)dentist"}}}
+    ]
+  }
+]

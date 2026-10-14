@@ -1,0 +1,243 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+)
+
+// A scenario is a scripted conversation: what the user says each turn, what the node answers
+// for each tool call, and what must hold afterwards. Files are JSON (scenarios/*.json); a file
+// holds one scenario object or an array of them.
+type Scenario struct {
+	Name string   `json:"name"`
+	Tags []string `json:"tags,omitempty"`
+	// Tools is the node's tool set: "node" (default, a real Pi node's commands), "client",
+	// "none", or a path to a JSON array of OpenAI tool definitions (relative to the file).
+	Tools    string `json:"tools,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
+	// Results is the node's output per tool name for every call in the scenario; a turn's own
+	// results win. A tool with no result answers {"success": true}.
+	Results map[string]any `json:"results,omitempty"`
+	Turns   []Turn         `json:"turns"`
+
+	File string `json:"-"`
+}
+
+type Turn struct {
+	Say     string         `json:"say"`
+	Results map[string]any `json:"results,omitempty"`
+	Expect  Expect         `json:"expect"`
+}
+
+// Expect is checked against one turn. Every set field must hold.
+type Expect struct {
+	Tool       string            `json:"tool,omitempty"`        // this node tool is called
+	AnyTool    []string          `json:"any_tool,omitempty"`    // one of these tools (node or server) is called
+	NoTool     bool              `json:"no_tool,omitempty"`     // no node tool is called
+	NotTool    []string          `json:"not_tool,omitempty"`    // none of these (node or server) is called
+	ServerTool string            `json:"server_tool,omitempty"` // this server tool is called
+	Args       map[string]any    `json:"args,omitempty"`        // on the Tool/ServerTool call: these keys equal these values
+	ArgsMatch  map[string]string `json:"args_match,omitempty"`  // on that call: each value's text matches the regexp
+	Reply      string            `json:"reply,omitempty"`       // the spoken reply matches this regexp
+	NotReply   string            `json:"not_reply,omitempty"`   // and does not match this one
+	Stop       string            `json:"stop,omitempty"`        // final stop_reason
+	MaxSeconds float64           `json:"max_seconds,omitempty"` // the turn finished within this
+}
+
+// LoadScenarios reads every *.json under the paths (files or directories), sorted by path.
+func LoadScenarios(paths []string) ([]Scenario, error) {
+	var files []string
+	for _, p := range paths {
+		st, err := os.Stat(p)
+		if err != nil {
+			return nil, err
+		}
+		if !st.IsDir() {
+			files = append(files, p)
+			continue
+		}
+		err = filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.HasSuffix(path, ".json") {
+				files = append(files, path)
+			}
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.Strings(files)
+	var out []Scenario
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		var list []Scenario
+		if t := strings.TrimSpace(string(b)); strings.HasPrefix(t, "[") {
+			err = json.Unmarshal(b, &list)
+		} else {
+			var one Scenario
+			err = json.Unmarshal(b, &one)
+			list = []Scenario{one}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		for i := range list {
+			list[i].File = f
+			if err := list[i].validate(); err != nil {
+				return nil, fmt.Errorf("%s: %s: %w", f, list[i].Name, err)
+			}
+		}
+		out = append(out, list...)
+	}
+	return out, nil
+}
+
+func (s Scenario) validate() error {
+	if s.Name == "" {
+		return fmt.Errorf("scenario without a name")
+	}
+	if len(s.Turns) == 0 {
+		return fmt.Errorf("no turns")
+	}
+	for i, t := range s.Turns {
+		if t.Say == "" {
+			return fmt.Errorf("turn %d: empty say", i+1)
+		}
+		for _, re := range []string{t.Expect.Reply, t.Expect.NotReply} {
+			if _, err := regexp.Compile(re); err != nil {
+				return fmt.Errorf("turn %d: %w", i+1, err)
+			}
+		}
+		for k, re := range t.Expect.ArgsMatch {
+			if _, err := regexp.Compile(re); err != nil {
+				return fmt.Errorf("turn %d: args_match %s: %w", i+1, k, err)
+			}
+		}
+		if (len(t.Expect.Args) > 0 || len(t.Expect.ArgsMatch) > 0) && t.Expect.Tool == "" && t.Expect.ServerTool == "" {
+			return fmt.Errorf("turn %d: args need tool or server_tool", i+1)
+		}
+	}
+	return nil
+}
+
+// resultFor is the node's output for a call: the turn's, else the scenario's, else success.
+func (s Scenario) resultFor(turn Turn, tool string) any {
+	if r, ok := turn.Results[tool]; ok {
+		return r
+	}
+	if r, ok := s.Results[tool]; ok {
+		return r
+	}
+	return map[string]any{"success": true}
+}
+
+// Check returns what failed in a turn, empty when the expectation holds.
+func (e Expect) Check(t TurnLog) []string {
+	var fails []string
+	if t.Error != "" {
+		return []string{"error: " + t.Error}
+	}
+	all := append(slices.Clone(t.NodeCalls), t.ServerCalls...)
+	names := func(cs []CallLog) []string {
+		var n []string
+		for _, c := range cs {
+			n = append(n, c.Name)
+		}
+		return n
+	}
+	checkArgs := func(c CallLog) {
+		for k, want := range e.Args {
+			if got, ok := c.Args[k]; !ok || !reflect.DeepEqual(normalize(got), normalize(want)) {
+				fails = append(fails, fmt.Sprintf("%s.%s = %s, want %s", c.Name, k, jsonText(c.Args[k]), jsonText(want)))
+			}
+		}
+		for k, re := range e.ArgsMatch {
+			v, ok := c.Args[k]
+			if !ok || !regexp.MustCompile(re).MatchString(valueText(v)) {
+				fails = append(fails, fmt.Sprintf("%s.%s = %s, want /%s/", c.Name, k, jsonText(v), re))
+			}
+		}
+	}
+	find := func(cs []CallLog, name string) (CallLog, bool) {
+		for _, c := range cs {
+			if c.Name == name {
+				return c, true
+			}
+		}
+		return CallLog{}, false
+	}
+	if e.Tool != "" {
+		if c, ok := find(t.NodeCalls, e.Tool); ok {
+			checkArgs(c)
+		} else {
+			fails = append(fails, fmt.Sprintf("node tool %s not called (node: %v, server: %v)", e.Tool, names(t.NodeCalls), names(t.ServerCalls)))
+		}
+	}
+	if e.ServerTool != "" {
+		if c, ok := find(t.ServerCalls, e.ServerTool); ok {
+			if e.Tool == "" {
+				checkArgs(c)
+			}
+		} else {
+			fails = append(fails, fmt.Sprintf("server tool %s not called (server: %v)", e.ServerTool, names(t.ServerCalls)))
+		}
+	}
+	if len(e.AnyTool) > 0 && !slices.ContainsFunc(all, func(c CallLog) bool { return slices.Contains(e.AnyTool, c.Name) }) {
+		fails = append(fails, fmt.Sprintf("none of %v called (called: %v)", e.AnyTool, names(all)))
+	}
+	if e.NoTool && len(t.NodeCalls) > 0 {
+		fails = append(fails, fmt.Sprintf("no node tool wanted, called %v", names(t.NodeCalls)))
+	}
+	for _, c := range all {
+		if slices.Contains(e.NotTool, c.Name) {
+			fails = append(fails, "called "+c.Name)
+		}
+	}
+	if e.Reply != "" && !regexp.MustCompile(e.Reply).MatchString(t.Reply) {
+		fails = append(fails, fmt.Sprintf("reply %q does not match /%s/", t.Reply, e.Reply))
+	}
+	if e.NotReply != "" && regexp.MustCompile(e.NotReply).MatchString(t.Reply) {
+		fails = append(fails, fmt.Sprintf("reply %q matches /%s/", t.Reply, e.NotReply))
+	}
+	if e.Stop != "" && t.Stop != e.Stop {
+		fails = append(fails, fmt.Sprintf("stop_reason %s, want %s", t.Stop, e.Stop))
+	}
+	if e.MaxSeconds > 0 && t.Seconds > e.MaxSeconds {
+		fails = append(fails, fmt.Sprintf("took %.1fs, want ≤ %.1fs", t.Seconds, e.MaxSeconds))
+	}
+	return fails
+}
+
+// normalize round-trips a value through JSON so 12 and 12.0, int and float64, compare equal.
+func normalize(v any) any {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out any
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+func jsonText(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+// valueText is a value as a regexp sees it: strings bare, everything else as JSON.
+func valueText(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return jsonText(v)
+}

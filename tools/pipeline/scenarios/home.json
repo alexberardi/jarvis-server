@@ -1,0 +1,34 @@
+[
+  {
+    "name": "devices: lights off in a room",
+    "turns": [
+      {
+        "say": "turn off the kitchen lights",
+        "expect": {
+          "any_tool": [
+            "control_device",
+            "get_ha_entities"
+          ],
+          "not_reply": "(?i)can't|cannot|unable"
+        }
+      }
+    ],
+    "tags": [
+      "needs-ha"
+    ]
+  },
+  {
+    "name": "node: volume up",
+    "turns": [
+      {
+        "say": "turn the volume up",
+        "expect": {
+          "tool": "control_node",
+          "args": {
+            "action": "volume_up"
+          }
+        }
+      }
+    ]
+  }
+]
