@@ -44,21 +44,28 @@ func (s *syncBuf) wait(t *testing.T, n int) []byte {
 
 func TestTapPassesThroughAndLogsJSON(t *testing.T) {
 	const reply = `{"choices":[{"message":{"content":null,"reasoning_content":"think","tool_calls":[{"id":"c1","type":"function","function":{"name":"set_timer","arguments":"{\"minutes\":5}"}}]},"finish_reason":"tool_calls"}]}`
-	var gotPath, gotBody string
+	var gotPath, gotBody, gotApp, gotAuth string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		gotPath, gotBody = r.URL.Path, string(b)
+		gotApp, gotAuth = r.Header.Get("X-Jarvis-App-Key"), r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, reply)
 	}))
 	defer up.Close()
 	log := &syncBuf{}
-	tap := httptest.NewServer(&Tap{Upstream: func() (string, error) { return up.URL, nil }, Log: log})
+	tap := httptest.NewServer(&Tap{Upstream: func() (string, error) { return up.URL, nil }, Log: log,
+		Header: http.Header{"X-Jarvis-App-Key": {"k"}}})
 	defer tap.Close()
 
-	resp, err := http.Post(tap.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","messages":[]}`))
+	req, _ := http.NewRequest(http.MethodPost, tap.URL+"/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[]}`))
+	req.Header.Set("Authorization", "Bearer sandbox-remote-key")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if gotApp != "k" || gotAuth != "" {
+		t.Fatalf("upstream headers: app key %q, authorization %q (the sandbox's must not leak)", gotApp, gotAuth)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -232,6 +239,10 @@ func (f *fakeCC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			io.WriteString(w, `{"stop_reason":"tool_calls","tool_calls":[{"id":"t1","type":"function","function":{"name":"set_timer","arguments":"{\"minutes\":3}"}}],"assistant_message":null}`)
 			return
 		}
+		if strings.Contains(body["voice_command"].(string), "broken") {
+			io.WriteString(w, `{"stop_reason":"error","tool_calls":[],"assistant_message":null,"commands":[{"success":false,"errors":{"type":"llm_error","message":"model not loaded"}}]}`)
+			return
+		}
 		io.WriteString(w, `{"stop_reason":"complete","tool_calls":[],"assistant_message":"Hi there."}`)
 	case "/api/v0/voice/command/continue":
 		f.results = append(f.results, body["tool_results"])
@@ -287,6 +298,10 @@ func TestDriverRunsScenario(t *testing.T) {
 	}
 	if tools, _ := cc.started["client_tools"].([]any); len(tools) == 0 || !cc.ended {
 		t.Fatalf("start %v ended %v", cc.started, cc.ended)
+	}
+	// A command-center error is the turn's error, with its message.
+	if l := d.Run(context.Background(), Scenario{Name: "e", Turns: []Turn{{Say: "broken"}}}); l.Pass || l.Turns[0].Error != "command-center: model not loaded" {
+		t.Fatalf("error turn %+v", l.Turns[0])
 	}
 	// A failing expectation fails the run and says why.
 	sc.Turns[0].Expect.Args = map[string]any{"minutes": 4}

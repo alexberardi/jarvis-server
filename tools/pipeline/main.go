@@ -11,8 +11,9 @@
 //	pipeline run [--sandbox NAME] [--repeat N] [--filter RE] [--out DIR] [--json] [-v] [PATH...]
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
 //	    exits 1 when any fails. --out writes each run's full log (model calls included).
-//	pipeline tap [--listen ADDR] [--upstream auto|URL] [--log FILE] [--exclude DIR]
-//	    the LLM recording proxy scripts/sandbox starts in front of the installed model.
+//	pipeline tap [--listen ADDR] [--upstream URL] [--log FILE]
+//	    the LLM recording proxy scripts/sandbox starts in front of the installed jarvisd's LLM
+//	    API (:7704); JARVIS_TAP_APP_ID / JARVIS_TAP_APP_KEY are sent as its app credentials.
 //
 // --sandbox defaults to $JARVIS_SANDBOX, else "default"; the sandbox's sandbox.env supplies
 // command-center's URL and the seeded node's credentials, and its llm.jsonl the model calls.
@@ -131,9 +132,8 @@ func sandboxDriver(name string) (*Driver, error) {
 func runTap(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("tap", flag.ContinueOnError)
 	listen := fs.String("listen", "127.0.0.1:17799", "address to serve on")
-	upstream := fs.String("upstream", "auto", "engine base URL, or auto: the installed jarvisd's llama-server, looked up per request")
+	upstream := fs.String("upstream", "http://127.0.0.1:7704", "where model calls go: the installed jarvisd's LLM API (default) or any OpenAI-compatible base URL")
 	logPath := fs.String("log", "llm.jsonl", "JSONL log to append to")
-	exclude := fs.String("exclude", "", "with auto: ignore engines whose command line contains this")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -142,21 +142,21 @@ func runTap(ctx context.Context, args []string) error {
 		return err
 	}
 	defer f.Close()
-	up := func() (string, error) { return *upstream, nil }
-	if *upstream == "auto" {
-		up = func() (string, error) {
-			u, _, err := InstalledLlama(*exclude)
-			return u, err
-		}
+	// Credentials come from the environment, never argv (ps shows argv to every user).
+	h := http.Header{}
+	if id, key := os.Getenv("JARVIS_TAP_APP_ID"), os.Getenv("JARVIS_TAP_APP_KEY"); id != "" && key != "" {
+		h.Set("X-Jarvis-App-Id", id)
+		h.Set("X-Jarvis-App-Key", key)
 	}
-	srv := &http.Server{Addr: *listen, Handler: &Tap{Upstream: up, Log: f, Client: &http.Client{}}}
+	up := *upstream
+	srv := &http.Server{Addr: *listen, Handler: &Tap{Upstream: func() (string, error) { return up, nil }, Header: h, Log: f, Client: &http.Client{}}}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		srv.Shutdown(sctx)
 	}()
-	fmt.Fprintf(os.Stderr, "pipeline tap: %s → %s, logging to %s\n", *listen, *upstream, *logPath)
+	fmt.Fprintf(os.Stderr, "pipeline tap: %s → %s (app credentials: %v), logging to %s\n", *listen, up, len(h) > 0, *logPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

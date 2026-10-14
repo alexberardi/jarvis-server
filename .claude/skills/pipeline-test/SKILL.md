@@ -16,7 +16,7 @@ a sandbox, so a turn starts from text, as if STT had already run.
 scripts/fetch-sherpa-libs.sh             # once per checkout/worktree, or the build fails:
                                          # "pattern libs/linux-amd64: no matching files found"
 scripts/sandbox up [--name N]            # build, start on a free port offset (10000, 11000, …), seed
-scripts/sandbox status [--name N]        # up?, URLs, which llama-server it uses, who holds the GPU
+scripts/sandbox status [--name N]        # up?, URLs, the installed jarvisd's live model, the GPU
 scripts/installed status                 # the installed jarvisd: system/user unit, dev-run, none
 ```
 
@@ -26,12 +26,18 @@ scripts/installed status                 # the installed jarvisd: system/user un
 - `scripts/sandbox env` prints `sandbox.env`: `SBX_CC`, `SBX_TOKEN` (superuser JWT),
   `SBX_NODE_ID/KEY`, `SBX_ADMIN_API_KEY`, every listener URL. `source` it to curl the sandbox.
 - `scripts/sandbox logs [-f]` shows jarvisd's log. Look here for `cc: tool loop LLM call failed`.
-- `scripts/sandbox llm` re-points the sandbox at the installed engine after that engine restarted.
+- `scripts/sandbox llm` re-points the sandbox at the installed model (after writing the app client).
 - Finish with `scripts/sandbox down [--purge]`.
 
 `--llm shared` (the default) adds no second model to the GPU. The sandbox's `llm.live` becomes a
 remote endpoint, the tap (`pipeline tap`, port 7799 + offset), which forwards to the installed
-jarvisd's running `llama-server`. Requests wait behind the installed instance's own: it has one slot.
+jarvisd's own LLM API (`:7704/v1/chat/completions`, model `live`) with an app client's
+credentials from `~/.config/jarvis-harness/installed.env` (`INSTALLED_APP_ID`,
+`INSTALLED_APP_KEY`; the user creates the client once in the installed admin, Connections). The
+installed jarvisd applies its own template and folding. Without that file the sandbox's model is
+off and `up` says how to fix it. Requests wait behind the house's: the engine has one slot.
+Never point a sandbox at a llama-server directly: jarvisd's engines want a per-start key, and a
+stray test server on the box is someone else's.
 
 ## 2. Say something
 
@@ -74,7 +80,8 @@ each run's full log, model calls included. A file holds one scenario or an array
 - `reply` / `not_reply`: regexps on the spoken reply. `stop`: the final stop_reason.
   `max_seconds`: an upper bound on the turn's time.
 
-`tags` are labels only (`needs-ha`, `needs-embeddings`, `known-bug`). `run` does not filter on
+`tags` are labels only (e.g. `known-bug`). `"skip": "why"` reports a scenario without playing it.
+`"speaker"` (`primary`, a user id, or none) and `"home"` (a `tools/pipeline/homes` name, `none`, or a file) set who speaks and the device payload. `run` does not filter on
 them; `--filter` matches the name.
 
 ## 4. Read the tap log
@@ -91,20 +98,16 @@ jq -r 'select(.seq==2) | .request.messages[] | "\(.role): \(.content|tostring|.[
 
 ## Why a turn fails in the sandbox but not at home
 
-- **Tools the sandbox doesn't offer:** memory tools need embeddings, and the sandbox sets
-  `llm.embeddings.engine` off. Device control needs Home Assistant (`needs-ha`). Check the
-  "tools offered" jq before you blame the prompt.
-- **Wrong engine.** `scripts/sandbox` and the tap pick the *first* process whose command line
-  has `llama-server … --alias`. A stray llama-server, such as a CPU test model left running by
-  another session, wins over the installed CUDA one. Calls then take minutes and time out
-  (status 502, `context canceled`). Check that the `installed llama-server: :PORT` in
-  `scripts/sandbox status` belongs to a process under `/var/lib/jarvisd/` or `~/.jarvisd/`
-  (`ss -ltnp | grep PORT`). To pin it, restart the tap by hand:
-  `kill $(cat .sandbox/N/tap.pid); setsid .sandbox/N/pipeline tap --listen 127.0.0.1:<7799+offset> --upstream http://127.0.0.1:<port> --log .sandbox/N/llm.jsonl &`
-- **401 "Invalid API Key"** in `llm.jsonl`: jarvisd starts its llama-server with a random
-  `LLAMA_API_KEY` in the environment (`internal/modules/llm/engine/resolver.go`). The tap sends
-  no key, so an engine that jarvisd started rejects every call. (Seen on 2026-10-13. Until the
-  harness handles the key, `shared` works only against a keyless llama-server.)
+- **Tools the sandbox doesn't offer:** memory tools (`remember`, `recall`, `forget`) need a known
+  speaker (D21): scenarios default to none, so set `"speaker": "primary"` (`say` defaults to it;
+  the sandbox runs with `JARVIS_DEV_SPEAKER_HINTS=1`). Web search tools need `web_search.enabled`.
+  Devices come from the node's payload (`"home"`). Check the "tools offered" jq before you blame
+  the prompt.
+- **`503 model_not_loaded … not_configured`:** the sandbox has no model. Write the app client file
+  and run `scripts/sandbox llm`. `{"detail":"Missing app credentials"}` or `Invalid app
+  credentials` in `llm.jsonl` means the same file is missing or wrong.
+- **Slow or 502 `context canceled`:** the installed engine is busy with the house (one slot), or
+  the installed jarvisd restarted. `scripts/sandbox status` shows whether it answers.
 - **GPU busy:** `scripts/installed stop|start|restart` frees or reclaims the GPU. This needs the
   narrow sudoers rule from `scripts/installed sudoers`. A `dev-run` mode is someone's terminal,
   so never stop it from here.

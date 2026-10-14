@@ -15,3 +15,11 @@ Single-binary Go rewrite of the Jarvis server stack.
 - **Don't port what's on the cut lists** (PLAN §7, Appendices A and B).
 - **Prod** (`<user>@<prod-host>`) is **read-only** unless the user explicitly says otherwise.
 - **Host placeholders** (`<prod-host>`, `<mbp-host>`, `<dev-box>`, `<dev-node>.local`, `<pi4-node>`, `<pi5-node>.local`, `<lan-subnet>`, `<user>@…`) appear throughout CLAUDE.md and `docs/`. Real values are in HOSTS.local.md (gitignored, local only).
+
+## Harness (verify without the user)
+
+- `scripts/sandbox up [--name N]`: a seeded jarvisd for this checkout on its own ports and data. Its model is the installed jarvisd's live one, through that instance's LLM API (no extra VRAM); that needs an app client in `~/.config/jarvis-harness/installed.env` (`INSTALLED_APP_ID`, `INSTALLED_APP_KEY`, created once by the user in the installed admin). `source .sandbox/<name>/sandbox.env` for URLs and credentials. Use a unique `--name` per agent; `down --purge` when done. A fresh worktree needs `scripts/fetch-sherpa-libs.sh` first.
+- `go run ./tools/pipeline say -v "…" "…"`: a text conversation as the seeded node (speaker = the seeded superuser, devices from `tools/pipeline/homes/avery.json`). `… run [--filter RE] [--repeat N]` plays `tools/pipeline/scenarios/`. Every model call (prompt, tools, reply) is in `.sandbox/<name>/llm.jsonl`.
+- `scripts/screenshots --sandbox N [--tiles 1600]`: admin SPA at phone/tablet/desktop × light/dark, with overflow and console reports (`docs/dev/screenshots.md`).
+- `scripts/check` before committing; `scripts/installed status` shows who holds the GPU. The installed model has one slot: sandbox calls wait behind the house's.
+- Branches: harness work uses `harness/*`; subagent worktrees live in `.claude/worktrees/`.

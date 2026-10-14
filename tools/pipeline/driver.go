@@ -157,6 +157,17 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 	}
 	tl.Stop = resp.StopReason
 	switch {
+	case resp.StopReason == "error":
+		var cmds []struct {
+			Errors *struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		_ = json.Unmarshal(resp.Commands, &cmds)
+		tl.Error = "command-center: stop_reason error"
+		if len(cmds) > 0 && cmds[0].Errors != nil {
+			tl.Error = "command-center: " + cmds[0].Errors.Message
+		}
 	case resp.AssistantMessage != nil:
 		tl.Reply = *resp.AssistantMessage
 	case resp.ValidationRequest != nil:

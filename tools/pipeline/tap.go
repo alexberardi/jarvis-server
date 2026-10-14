@@ -4,12 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -42,10 +38,11 @@ type TapReply struct {
 	Raw       string     `json:"raw,omitempty"` // only when the body could not be parsed
 }
 
-// Tap is the proxy. Upstream returns the engine's base URL (scheme://host:port) per request,
-// so an engine that restarts on a new port is followed.
+// Tap is the proxy. Upstream returns the base URL (scheme://host:port) per request. Header is
+// set on every forwarded request (the installed jarvisd's app-to-app credentials).
 type Tap struct {
 	Upstream func() (string, error)
+	Header   http.Header
 	Log      io.Writer
 	Client   *http.Client
 
@@ -77,9 +74,12 @@ func (t *Tap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for k, vs := range r.Header {
-		if k != "Content-Length" {
+		if k != "Content-Length" && k != "Authorization" {
 			req.Header[k] = vs
 		}
+	}
+	for k, vs := range t.Header {
+		req.Header[k] = vs
 	}
 	client := t.Client
 	if client == nil {
@@ -259,33 +259,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
-}
-
-// llamaArgs matches an engine command line's port and model alias.
-var (
-	llamaPort  = regexp.MustCompile(`(?:^|\s)--port\s+(\d+)`)
-	llamaAlias = regexp.MustCompile(`(?:^|\s)--alias\s+(\S+)`)
-)
-
-// InstalledLlama finds the installed jarvisd's live llama-server in /proc (Linux): the first
-// llama-server with an --alias whose command line is not under exclude (a sandbox directory).
-// It returns its base URL and model alias.
-func InstalledLlama(exclude string) (baseURL, alias string, err error) {
-	dirs, _ := filepath.Glob("/proc/[0-9]*/cmdline")
-	for _, p := range dirs {
-		b, err := os.ReadFile(p)
-		if err != nil || len(b) == 0 {
-			continue
-		}
-		cmd := strings.ReplaceAll(string(bytes.TrimRight(b, "\x00")), "\x00", " ")
-		if !strings.Contains(cmd, "llama-server") || (exclude != "" && strings.Contains(cmd, exclude)) {
-			continue
-		}
-		pm, am := llamaPort.FindStringSubmatch(cmd), llamaAlias.FindStringSubmatch(cmd)
-		if pm == nil || am == nil {
-			continue
-		}
-		return "http://127.0.0.1:" + pm[1], am[1], nil
-	}
-	return "", "", fmt.Errorf("no running llama-server with --alias found (is the installed jarvisd up with a local model?)")
 }
