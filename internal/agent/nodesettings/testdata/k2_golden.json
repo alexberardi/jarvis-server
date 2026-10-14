@@ -1,0 +1,75 @@
+{
+  "k2": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "node_id": "golden-node-1",
+  "snapshots": [
+    {
+      "plaintext": "{\"schema_version\":1,\"commands_schema_version\":2,\"commands\":[],\"agents\":[],\"device_families\":[],\"device_managers\":[],\"node_config\":{\"hardware\":{\"hat_detected\":false}}}",
+      "ciphertext": "DOGWVgDgBQeLIgJqaw49tulUvvez4HmxnrppiO5WjVLEsw8uueA_QStLmLEQn7xcqYYnYCOe732OVB5lmg6pvm0KLsz2B_M2uBFiMk2dTNWZ_ubxCqYxTIgz-YOif3y_9a9J-c3HzsWalpWnKH5GMQwL1tX2PAAWhyODvR5zWjOg1ucIS3Ip044Zk_MJlAWy7eT2x_W-3MrtL1gg-kDHcC1z9njOvA",
+      "nonce": "AQEBAQEBAQEBAQEB",
+      "tag": "f5ShF3j0knL-zejWuTqDHg",
+      "aad_schema_version": 1,
+      "aad_commands_schema_version": 2,
+      "aad_revision": 1
+    },
+    {
+      "plaintext": "{\"schema_version\":1,\"commands_schema_version\":2,\"commands\":[{\"command_name\":\"get_weather\",\"description\":\"Weather \\u2013 \\u00ab\\u00fcn\\u00efcode\\u00bb \\u5929\\u6c17\",\"enabled\":true,\"secrets\":[{\"key\":\"WEATHER_API_KEY\",\"scope\":\"integration\",\"description\":\"API key\",\"value_type\":\"string\",\"required\":true,\"is_sensitive\":true,\"is_set\":true}]}]}",
+      "ciphertext": "4Apq2NG8XDqU88eKQBC1fT7TnkC2NxecLz-_ZwQ0OqG4nbUDQECWqqoD7d_Iwny0ULpj8CvItgB_8HDpZjsNO7GuMgNbdTHwh9gv_W5Zb5KiwerW1q3blRWRg8vG-kvbKO94uEdWVzuA_DTuiBE2kC0mtLAiG2zMxc3QEWacXtRTNhq_gOZkiG0BhIsvKNX9didpQ11YkQ29r_PtVCVXpTMybZYdE-waUH0hg0HJQixzlaTOfB_SS5PGn9uDznQODFcEpnCoulN8M2gs6K7HR72Y3DkQq2fUA0RdB-cSX8K1Y81o0O6EgOqyWeakFXRIz_uumVzC3FHuSByjrRiQbksFdwoHzIJTyPUmF0yvmruzSoubDBLmr4EdyjPoOc9GtSA9_2GAzGDDJ-gXPpyhpGSwhQJUKlUCXzFmhwEcDE4VJTwoLYEtypeibAZwEbtSSg",
+      "nonce": "AgICAgICAgICAgIC",
+      "tag": "hKpsRCUk1N6_VtWpau2xxQ",
+      "aad_schema_version": 1,
+      "aad_commands_schema_version": 2,
+      "aad_revision": 1
+    }
+  ],
+  "pushes": [
+    {
+      "config_type": "settings:secrets",
+      "ciphertext": "S3QRWjPjaw1q9o8I6kDEkFuTPz2RumhzjlEFH0GZ-wOWOHlRvIGRH48j1kB1lJTm",
+      "nonce": "QEBAQEBAQEBAQEBA",
+      "tag": "dTgMcu8_7eF5W0Vun1SkEw",
+      "json": {
+        "WEATHER_API_KEY": "abc123",
+        "UNITS": "metric"
+      }
+    },
+    {
+      "config_type": "settings:secrets",
+      "ciphertext": "_FkVup2YpPavuWkG_c6CG5_0G9r91-l8PenpTonOQuKVhG26yMAx6qcBhn84xM9tniWLHYpfoapycvPFxA",
+      "nonce": "QUFBQUFBQUFBQUFB",
+      "tag": "609tKfbpTtTU8G5WAc1Dvg",
+      "json": {
+        "EMAIL_PASSWORD": "pä55 wörd",
+        "__user_id__": "7"
+      }
+    },
+    {
+      "config_type": "settings:secrets",
+      "ciphertext": "Yb4ug8zR7alKLW9jNMNEGGto2ObEvlw",
+      "nonce": "QkJCQkJCQkJCQkJC",
+      "tag": "7eFyYfxa-dOEhntIse8UsA",
+      "json": {
+        "WEATHER_API_KEY": ""
+      }
+    },
+    {
+      "config_type": "command_registry",
+      "ciphertext": "hc8yvhGOs5woVAR6Bgm2MC7bvPMh4pBTtyKSZEdH-DybdwUsVRlOlYTHi1Xjrr_TE49i",
+      "nonce": "Q0NDQ0NDQ0NDQ0ND",
+      "tag": "oCu7gWPEGUzjyDMwrkEDBw",
+      "json": {
+        "command_name": "get_weather",
+        "enabled": "false"
+      }
+    },
+    {
+      "config_type": "node_config",
+      "ciphertext": "nw23KNhC4Psqn4UZa9TWU7P9oKxBbC0vvtZvJQOgaV4g6Z-OS3PeKWoWUJpzd1U8jQQ",
+      "nonce": "RERERERERERERERE",
+      "tag": "fIl3ouC44pYjidcALoa1fA",
+      "json": {
+        "allow_updates": true,
+        "__issued_at": 1760400000
+      }
+    }
+  ]
+}

@@ -277,6 +277,13 @@ func TestHeartbeatIdentity(t *testing.T) {
 	if got["node_kind"] != "desktop" || got["capabilities"].(map[string]any)["browser_extension"] != "connected" {
 		t.Errorf("desktop beat = %v", got)
 	}
+	// Without K2 the node asks the app for one (DESIGN §16).
+	if err := c.Heartbeat(context.Background(), Beat{Version: "1.2.3", NeedsK2: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got["needs_k2"] != true {
+		t.Errorf("needs_k2 = %v", got["needs_k2"])
+	}
 }
 
 // A capability change sends a heartbeat at once, not at the next tick.

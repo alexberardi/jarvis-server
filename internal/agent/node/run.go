@@ -32,6 +32,31 @@ type Runner struct {
 	// node is connecting (the voice pipeline starts here). It must return when ctx ends; Run
 	// waits for it.
 	OnConnected func(ctx context.Context, cc *CC)
+	// Topics are extra sub-topics of jarvis/nodes/{id}/ to subscribe to (e.g. "k2/provision"),
+	// each with its handler. Handlers run on their own goroutine.
+	Topics map[string]func(ctx context.Context, cc *CC, payload []byte)
+	// OnMQTTConnect, if set, runs on its own goroutine after every MQTT (re)connect: the
+	// backstop for nudges sent while the node had no session.
+	OnMQTTConnect func(ctx context.Context, cc *CC)
+	// NeedsK2, if set, is asked for each heartbeat's needs_k2.
+	NeedsK2 func() bool
+
+	kickOnce sync.Once
+	kick     chan struct{}
+}
+
+func (r *Runner) kicks() chan struct{} {
+	r.kickOnce.Do(func() { r.kick = make(chan struct{}, 1) })
+	return r.kick
+}
+
+// BeatNow sends the next heartbeat at once rather than at the next tick (e.g. needs_k2 just
+// changed). Safe to call from any goroutine, before or during Run.
+func (r *Runner) BeatNow() {
+	select {
+	case r.kicks() <- struct{}{}:
+	default: // one is already due
+	}
 }
 
 // brokerURL maps jarvisd's mqtt[s]/ws[s] URL to paho's scheme.
@@ -130,6 +155,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		if tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
 			r.Log.Error("mqtt subscribe failed", "err", tok.Error())
 		}
+		for sub, h := range r.Topics {
+			tok := c.Subscribe("jarvis/nodes/"+r.Creds.NodeID+"/"+sub, 1, func(_ mqtt.Client, m mqtt.Message) {
+				go h(ctx, cc, m.Payload())
+			})
+			if tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
+				r.Log.Error("mqtt subscribe failed", "topic", sub, "err", tok.Error())
+			}
+		}
+		if r.OnMQTTConnect != nil {
+			go r.OnMQTTConnect(ctx, cc)
+		}
 	})
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 		r.Log.Warn("mqtt connection lost; reconnecting", "err", err)
@@ -160,6 +196,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 		case <-changed:
+		case <-r.kicks():
 		}
 		changed = watch()
 		if err := cc.Heartbeat(ctx, r.beat()); err != nil && ctx.Err() == nil {
@@ -170,6 +207,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 func (r *Runner) beat() Beat {
 	b := Beat{Version: r.Version, InstallMode: r.InstallMode, NodeKind: r.NodeKind}
+	if r.NeedsK2 != nil {
+		b.NeedsK2 = r.NeedsK2()
+	}
 	if r.Capabilities != nil {
 		b.Capabilities = r.Capabilities()
 	}

@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 )
 
 // The spike runs against a real Python with jarvis-command-sdk importable. CI installs it;
@@ -28,7 +30,7 @@ func python(t *testing.T) string {
 func TestSidecarLoadsACommandAndAnswersACall(t *testing.T) {
 	py := python(t)
 	ctx := context.Background()
-	sc, err := Start(ctx, py, "testdata/commands", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sc, err := Start(ctx, py, "testdata/commands", slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,7 @@ func TestSidecarLoadsACommandAndAnswersACall(t *testing.T) {
 func TestSidecarSignalsAndDeferredStep(t *testing.T) {
 	py := python(t)
 	ctx := context.Background()
-	sc, err := Start(ctx, py, "testdata/commands", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sc, err := Start(ctx, py, "testdata/commands", slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,5 +97,50 @@ func TestSidecarSignalsAndDeferredStep(t *testing.T) {
 	// One run per call.
 	if err := sig.OnResponseComplete(); err == nil {
 		t.Fatal("a deferred step ran twice")
+	}
+}
+
+// A package reads the settings the household set from the mobile app through JarvisStorage, as
+// on a Pi: the integration secret for everyone, a user secret for the requesting user, and its
+// command data, all from the agent's store (DESIGN §16).
+func TestSidecarStorageReachesTheAgentsSettings(t *testing.T) {
+	py := python(t)
+	ctx := context.Background()
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seven, eight := int64(7), int64(8)
+	_ = st.SetSecret("TEST_API_KEY", "abc123", "integration", "", nil)
+	_ = st.SetSecret("NICKNAME", "Ace", "user", "", &seven)
+	sc, err := Start(ctx, py, "testdata/storage", slog.New(slog.NewTextHandler(io.Discard, nil)), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+
+	cmds := sc.Commands()
+	if len(cmds) != 1 || cmds[0].Name != "secretive" || len(cmds[0].Secrets) != 2 {
+		t.Fatalf("commands = %+v", cmds)
+	}
+	if s := cmds[0].Secrets[1]; s.Key != "NICKNAME" || s.Scope != "user" || s.IsSensitive || s.FriendlyName != "Nickname" {
+		t.Fatalf("secret spec = %+v", s)
+	}
+	out, ok := sc.Call(ctx, "secretive", map[string]any{"note": "hello"}, node.Request{UserID: &seven})
+	node.TakeSignals(out)
+	if !ok || out["api_key"] != "abc123" || out["nickname"] != "Ace" || out["last"] != "hello" {
+		t.Fatalf("user 7: %v", out)
+	}
+	if d := st.Data("secretive", "last", time.Now()); d["note"] != "hello" {
+		t.Fatalf("command data = %v", d)
+	}
+	// Another user has no nickname; the user is reset after each call.
+	out, _ = sc.Call(ctx, "secretive", nil, node.Request{UserID: &eight})
+	if out["api_key"] != "abc123" || out["nickname"] != nil {
+		t.Fatalf("user 8: %v", out)
+	}
+	out, _ = sc.Call(ctx, "secretive", nil, node.Request{})
+	if out["nickname"] != nil {
+		t.Fatalf("no user: %v", out)
 	}
 }
