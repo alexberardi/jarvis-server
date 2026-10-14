@@ -3,6 +3,7 @@ package cc
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
@@ -81,13 +82,23 @@ func TestTurnTimezoneUsesHouseholdSetting(t *testing.T) {
 
 	// Unset: exactly the reported zone (12:00 UTC is 8:00 in New York).
 	ve.start("t0", weatherTool)
-	if c := ve.m.convs.get("t0"); c.timezone != "America/New_York" || c.ambient != "As of 8:00 AM, Tuesday, Oct 6." {
-		t.Fatalf("%q %q", c.timezone, c.ambient)
+	if c := ve.m.convs.get("t0"); c.timezone != "America/New_York" {
+		t.Fatalf("%q", c.timezone)
+	}
+	ve.eng.say("Okay.")
+	ve.turn("/api/v0/voice/command", "t0", "what time is it", nil).want(200)
+	if all := allContent(ve.eng.last()); !strings.Contains(all, "The current local time is 8:00 AM.") {
+		t.Fatalf("New York time missing:\n%s", all)
 	}
 	ve.set(settingHouseholdTimezone, "Asia/Tokyo", hh)
 	ve.start("t1", weatherTool)
-	if c := ve.m.convs.get("t1"); c.timezone != "Asia/Tokyo" || c.ambient != "As of 9:00 PM, Tuesday, Oct 6." {
-		t.Fatalf("%q %q", c.timezone, c.ambient)
+	if c := ve.m.convs.get("t1"); c.timezone != "Asia/Tokyo" {
+		t.Fatalf("%q", c.timezone)
+	}
+	ve.eng.say("Okay.")
+	ve.turn("/api/v0/voice/command", "t1", "what time is it", nil).want(200)
+	if all := allContent(ve.eng.last()); !strings.Contains(all, "The current local time is 9:00 PM.") {
+		t.Fatalf("Tokyo time missing:\n%s", all)
 	}
 	if node := ve.m.nodeTimezone(ctx, voiceHH); node != "America/New_York" {
 		t.Fatalf("node zone not recorded: %q", node)

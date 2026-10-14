@@ -33,8 +33,8 @@ func TestAmbientBundleVoice(t *testing.T) {
 	ve.set(settingAmbientContext, true, settings.Scope{HouseholdID: voiceHH})
 	ve.start("a1", weatherTool)
 	conv := ve.m.convs.get("a1")
-	// 12:00 UTC is 8:00 in New York (the node's zone); the clock is quantised to 15 min.
-	want := "As of 8:00 AM, Tuesday, Oct 6.\nReminders: refill the meds"
+	// No clock or date: those go stale while the bundle stays frozen (time_answers_test.go).
+	want := "Reminders: refill the meds"
 	if conv.ambient != want || conv.messages[0].Content != base {
 		t.Fatalf("ambient %q (system prompt changed: %v)", conv.ambient, conv.messages[0].Content != base)
 	}

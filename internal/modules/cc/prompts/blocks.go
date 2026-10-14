@@ -111,14 +111,25 @@ func SpeakerBlock(speakerName, memories string) string {
 	return block
 }
 
-// CalendarBlock wraps the turn's date table (dates.Context.Calendar) as a trailing per-turn
-// message, so a question about a date is a lookup, not arithmetic ("" for empty input).
-func CalendarBlock(calendar string) string {
+// CalendarBlock wraps the turn's exact local time (dates.Context.Clock) and date table
+// (dates.Context.Calendar) as a trailing per-turn message, so "what time is it" and a question
+// about a date are lookups, not guesses or arithmetic ("" for an empty table; no time line for
+// an empty clock). It is built fresh every turn and sits after the history, outside the cached
+// prefix, so an exact clock costs no cache: unlike the frozen ambient bundle, which must not
+// carry a clock at all. The time rule is spelled out because a 9B model follows a stated rule
+// better than an implied one.
+func CalendarBlock(clock, calendar string) string {
 	calendar = parse.PyStrip(calendar)
 	if calendar == "" {
 		return ""
 	}
-	return "<calendar>\nFor any date or weekday the user asks about, read it from this table; " +
+	var now string
+	if clock = parse.PyStrip(clock); clock != "" {
+		now = "The current local time is " + clock + ". When the user asks what time it is, say exactly " +
+			"this time: never round it, and never repeat a time from earlier in the conversation. For the time " +
+			"in another city or time zone, call get_current_time when it is offered.\n"
+	}
+	return "<calendar>\n" + now + "For any date or weekday the user asks about, read it from this table; " +
 		"never work a date out yourself:\n" + calendar + "\n</calendar>"
 }
 

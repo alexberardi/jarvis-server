@@ -154,6 +154,11 @@ func (c *Context) Location() *time.Location { return c.loc }
 // Now is the context's clock (local, whole seconds).
 func (c *Context) Now() time.Time { return c.now }
 
+// Clock is the exact local time to the minute ("9:07 PM"), for the per-turn <calendar> block.
+// Never quantised: a model reads a clock out as given (a quarter-hour floor became "It's 9:00
+// PM" at 21:07).
+func (c *Context) Clock() string { return c.now.Format("3:04 PM") }
+
 // today is the local calendar date.
 func (c *Context) today() civil {
 	y, m, d := c.now.Date()

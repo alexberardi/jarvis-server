@@ -233,7 +233,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	}
 	// An explicitly set household zone wins over the reported one (timezone.go).
 	conv.timezone = m.turnTimezone(ctx, hh, conv.timezone)
-	conv.ambient = m.ambientBundle(ctx, hh, conv.timezone)
+	conv.ambient = m.ambientBundle(ctx, hh)
 	// Photo tools (any tool with an image parameter, server or node, §9): offered only where a
 	// photo can arrive — mobile chat whose live slot sees images. Fixed for the conversation
 	// like every other gate (prefix cache); with no photo yet they refuse with no_image.
