@@ -34,10 +34,12 @@ write path="~/Library/LaunchAgents/net.jarvisautomation.agent.plist" mode=0644
   |         <false/>
   |     </dict>
   | 
+  |     <!-- One file for both, the same one the app's SMAppService LaunchAgent logs to (that plist
+  |          can't name a path in the user's home, so the agent opens it itself). -->
   |     <key>StandardOutPath</key>
   |     <string>~/Library/Logs/jarvis-agent.log</string>
   |     <key>StandardErrorPath</key>
-  |     <string>~/Library/Logs/jarvis-agent.err.log</string>
+  |     <string>~/Library/Logs/jarvis-agent.log</string>
   | 
   |     <!-- Shows the agent as "Jarvis Automation Agent" in Login Items rather than a bare path. -->
   |     <key>AssociatedBundleIdentifiers</key>

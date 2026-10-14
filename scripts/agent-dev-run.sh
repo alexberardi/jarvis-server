@@ -182,7 +182,8 @@ mkdir -p "$ROOT/dist"
 plat="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
 "$ROOT/scripts/fetch-sherpa-libs.sh" "$plat" >&2 || die "could not fetch the native voice libraries for $plat"
 say "building $VERSION"
-(cd "$ROOT" && CGO_ENABLED=0 gocmd build -trimpath -ldflags "-X main.version=$VERSION" -o dist/jarvis-agent ./cmd/jarvis-agent)
+# sourceDir lets `jarvis-agent status` say when this build is older than the checkout.
+(cd "$ROOT" && CGO_ENABLED=0 gocmd build -trimpath -ldflags "-X main.version=$VERSION -X 'main.sourceDir=$ROOT'" -o dist/jarvis-agent ./cmd/jarvis-agent)
 
 if [ "$OS" = Darwin ]; then
   mkdir -p "$APP/Contents/MacOS"
@@ -246,7 +247,7 @@ if [ "$MODE" = install ]; then
     launchctl bootout "gui/$(id -u)/$DEV_LABEL" 2>/dev/null || true
     # A plain LaunchAgent, not SMAppService: it keeps the logs in ~/Library/Logs.
     "$BIN" install --login-item launchagent
-    say "logs: tail -f $LOG_DIR/jarvis-agent.err.log"
+    say "logs: tail -f $LOG_DIR/jarvis-agent.log"
     offer_browser "$BIN"
   else
     # An older version of this script installed the binary here; the agent now lives in

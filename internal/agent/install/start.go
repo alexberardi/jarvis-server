@@ -79,3 +79,33 @@ func Start(ctx context.Context, e Env, s Sys, login bool) error {
 	}
 	return s.Spawn(e.Exe, "run")
 }
+
+// Restart restarts the agent so it reads its settings again (`jarvis-agent restart`). The
+// running agent is first asked to quit over its control socket: a clean exit, which no
+// supervisor restarts by itself. Then the supervisor starts it the way the login item does:
+// `systemctl --user restart` where the unit runs it, `launchctl kickstart -k` under launchd
+// (the plain LaunchAgent and the app's SMAppService one share the label). The kill in those
+// covers an agent that didn't quit. Otherwise (no unit or graphical session, no LaunchAgent,
+// Windows' Run key, which supervises nothing) it is a detached run, as `start` does.
+func Restart(ctx context.Context, e Env, s Sys) error {
+	var quitErr error
+	if s.Quit != nil {
+		quitErr = s.Quit()
+	}
+	switch e.GOOS {
+	case "linux":
+		if _, err := os.Stat(e.linux().unit); err == nil &&
+			s.Run(ctx, "systemctl", "--user", "is-active", "--quiet", "graphical-session.target") == nil {
+			return s.Run(ctx, "systemctl", "--user", "restart", deploy.SystemdUnitName)
+		}
+	case "darwin":
+		if s.Run(ctx, "launchctl", "kickstart", "-k", "gui/"+strconv.Itoa(e.UID)+"/"+appid.ID) == nil {
+			return nil
+		}
+	}
+	if quitErr != nil {
+		// Nothing would stop it, and a second copy would find it running and leave.
+		return quitErr
+	}
+	return Start(ctx, e, s, false)
+}
