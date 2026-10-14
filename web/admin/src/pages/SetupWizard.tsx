@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
@@ -27,51 +27,56 @@ import {
   type Step,
 } from '@/components/wizard/steps'
 
+/**
+ * The step list. From `sm` up it is a row of labelled pills that wraps. Ten labels can't fit a
+ * phone, so there each step is a numbered marker (a check once done) spread across the width,
+ * and the current step's name is spelled out under them. The name stays in every marker
+ * (screen-reader only on a phone), so each one is announced by its step either way.
+ */
 function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
-  const list = useRef<HTMLOListElement>(null)
-  // On a phone the steps are one row that scrolls sideways; keep the current one in view.
-  // This moves only the row, never the page.
-  useEffect(() => {
-    const ol = list.current
-    const cur = ol?.querySelector<HTMLElement>('[aria-current="step"]')
-    if (ol && cur && ol.scrollWidth > ol.clientWidth) {
-      ol.scrollLeft = cur.offsetLeft - (ol.clientWidth - cur.offsetWidth) / 2
-    }
-  }, [step])
+  const at = idx(step)
   return (
-    <ol
-      ref={list}
-      className="relative -mx-4 mb-4 flex items-center gap-1 overflow-x-auto px-4 text-xs sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
-      aria-label="Setup steps"
-    >
-      {STEPS.map((s, i) => {
-        const done = i < idx(step)
-        const current = s === step
-        // Steps from Hardware on can be revisited; Check and Account are behind us for good.
-        const canPick = done && idx(s) >= idx('hardware')
-        return (
-          <li key={s} className="flex shrink-0 items-center gap-1">
-            {i > 0 && <span className="mx-1 h-px w-4 bg-[var(--color-border)]" aria-hidden />}
-            <button
-              type="button"
-              disabled={!canPick}
-              onClick={() => onPick(s)}
-              aria-current={current ? 'step' : undefined}
-              className={cn(
-                'flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1',
-                current && 'bg-[var(--color-primary)] text-white',
-                done && 'text-[var(--color-text)]',
-                !done && !current && 'text-[var(--color-text-muted)]',
-                canPick && 'hover:bg-[var(--color-surface-alt)]',
-              )}
-            >
-              {done && <Check size={12} className="text-green-500" />}
-              {TITLES[s]}
-            </button>
-          </li>
-        )
-      })}
-    </ol>
+    <div className="mb-4">
+      <ol className="flex items-center justify-between gap-1 text-xs sm:flex-wrap sm:justify-start" aria-label="Setup steps">
+        {STEPS.map((s, i) => {
+          const done = i < at
+          const current = s === step
+          // Steps from Hardware on can be revisited; Check and Account are behind us for good.
+          const canPick = done && idx(s) >= idx('hardware')
+          return (
+            <li key={s} className="flex shrink-0 items-center gap-1">
+              {i > 0 && <span className="mx-1 hidden h-px w-4 bg-[var(--color-border)] sm:block" aria-hidden />}
+              <button
+                type="button"
+                disabled={!canPick}
+                onClick={() => onPick(s)}
+                aria-current={current ? 'step' : undefined}
+                className={cn(
+                  // 32px circles: ten of the 40px touch-floor size (index.css) don't fit a 390px phone.
+                  'flex items-center justify-center gap-1 whitespace-nowrap rounded-full max-sm:h-8 max-sm:min-h-8 max-sm:w-8 sm:px-2.5 sm:py-1',
+                  current && 'bg-[var(--color-primary)] text-white',
+                  done && 'text-[var(--color-text)]',
+                  !done && !current && 'text-[var(--color-text-muted)]',
+                  !current && 'max-sm:border max-sm:border-[var(--color-border)]',
+                  canPick && 'hover:bg-[var(--color-surface-alt)]',
+                )}
+              >
+                {done && <Check size={12} className="text-green-500" />}
+                {!done && (
+                  <span className="sm:hidden" aria-hidden>
+                    {i + 1}
+                  </span>
+                )}
+                <span className="sr-only sm:not-sr-only">{TITLES[s]}</span>
+              </button>
+            </li>
+          )
+        })}
+      </ol>
+      <p className="mt-2 text-center text-xs text-[var(--color-text-muted)] sm:hidden" data-testid="setup-step-position">
+        Step {at + 1} of {STEPS.length}: <span className="font-medium text-[var(--color-text)]">{TITLES[step]}</span>
+      </p>
+    </div>
   )
 }
 
