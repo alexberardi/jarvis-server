@@ -40,6 +40,7 @@ type Settings struct {
 	VoiceInput       *string  `json:"voice_input,omitempty"`
 	VoiceOutput      *string  `json:"voice_output,omitempty"`
 	WakeThreshold    *float64 `json:"wake_threshold,omitempty"`
+	AutoUpdate       *bool    `json:"auto_update,omitempty"`
 }
 
 // Key describes one setting: its name in the file, the `run` flag it stands for, and whether
@@ -63,6 +64,7 @@ var Keys = []Key{
 	{"voice_input", "voice-input", false, `microphone: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceInput }},
 	{"voice_output", "voice-output", false, `speaker: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceOutput }},
 	{"wake_threshold", "wake-threshold", false, "wake word fires above this score (0 to 1)", func(s *Settings) any { return &s.WakeThreshold }},
+	{"auto_update", "no-auto-update", true, "update to the server's version by itself, and accept updates sent from Jarvis Automation", func(s *Settings) any { return &s.AutoUpdate }},
 }
 
 // Lookup finds a key by its name in the file.

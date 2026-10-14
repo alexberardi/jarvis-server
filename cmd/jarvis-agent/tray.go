@@ -34,7 +34,17 @@ type trayIcon struct {
 	// mainLoop: macOS's AppKit loop runs (the status item lives in it).
 	mainLoop bool
 
-	t atomic.Pointer[tray.Tray]
+	t      atomic.Pointer[tray.Tray]
+	update atomic.Pointer[string] // the self-update's status line
+}
+
+// setUpdate shows the self-update's status line in the menu.
+func (ic *trayIcon) setUpdate(text string) {
+	ic.update.Store(&text)
+	ic.log.Info("update: " + text)
+	if t := ic.t.Load(); t != nil {
+		t.Update(func(s *tray.State) { s.Update = text })
+	}
 }
 
 // show puts the icon up (where this desktop can show one) and returns what takes it down.
@@ -70,6 +80,9 @@ func (ic *trayIcon) state() tray.State {
 		SignOut: ic.signOut != nil}
 	if !s.Voice && ic.sw.lastErr() != "" {
 		s.Status = "Running, couldn't start listening"
+	}
+	if u := ic.update.Load(); u != nil {
+		s.Update = *u
 	}
 	return s
 }

@@ -23,6 +23,7 @@ func runFlags() (*flag.FlagSet, map[string]any) {
 		"voice-input":       fs.String("voice-input", "default", ""),
 		"voice-output":      fs.String("voice-output", "default", ""),
 		"wake-threshold":    fs.Float64("wake-threshold", 0.4, ""),
+		"no-auto-update":    fs.Bool("no-auto-update", false, ""),
 	}
 	return fs, v
 }

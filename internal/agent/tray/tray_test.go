@@ -40,6 +40,9 @@ func TestItems(t *testing.T) {
 		{State{SignOut: true}, `(Jarvis Automation Agent — Running) | -- | Sign out of Jarvis Automation | -- | Quit Jarvis Automation Agent`},
 		{State{VoiceAvailable: true},
 			`(Jarvis Automation Agent — Running) | -- | [ ] Listen for "Hey Jarvis" | -- | Quit Jarvis Automation Agent`},
+		// The self-update's line sits under the header.
+		{State{Status: "Running", Update: "Updated to v0.2.0"},
+			`(Jarvis Automation Agent — Running) | (Updated to v0.2.0) | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
 		{State{Status: "Running"}, `(Jarvis Automation Agent — Running) | -- | Quit Jarvis Automation Agent`},
 	} {

@@ -102,3 +102,47 @@ func TestWaitSendSucceedsOnceUp(t *testing.T) {
 		t.Fatal(err, tries)
 	}
 }
+
+// Every answer names the agent's version, and health fails until the handler says it is
+// connected (the self-update's check that a new version came up).
+func TestHealthNamesTheVersion(t *testing.T) {
+	dir, err := shortDir(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "c.sock")
+	ln, err := browser.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var up bool
+	var mu sync.Mutex
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = ServeVersion(ctx, ln, func(cmd string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if cmd == Health && !up {
+				return errors.New("not connected to jarvisd yet")
+			}
+			return nil
+		}, "v1.2.3")
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	dial := func() (net.Conn, error) { return browser.Dial(path) }
+	r, err := Ask(dial, Health)
+	if err == nil || r.Version != "v1.2.3" {
+		t.Fatalf("health before connecting: %+v %v", r, err)
+	}
+	mu.Lock()
+	up = true
+	mu.Unlock()
+	if r, err := Ask(dial, Health); err != nil || r.Version != "v1.2.3" {
+		t.Fatalf("health: %+v %v", r, err)
+	}
+	if r, err := Ask(dial, Ping); err != nil || r.Version != "v1.2.3" {
+		t.Fatalf("ping: %+v %v", r, err)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -44,6 +45,11 @@ type Runner struct {
 	OnMQTTConnect func(ctx context.Context, cc *CC)
 	// NeedsK2, if set, is asked for each heartbeat's needs_k2.
 	NeedsK2 func() bool
+	// OnBeat, if set, gets jarvisd's answer to every heartbeat that went through (a pending
+	// update, the server's version). It runs on Run's goroutine: it must not block.
+	OnBeat func(cc *CC, reply BeatReply)
+
+	mqttUp atomic.Bool
 
 	kickOnce sync.Once
 	kick     chan struct{}
@@ -164,7 +170,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	changed := watch()
 
 	// An early heartbeat proves the key works (and marks the node contacted) before MQTT.
-	if err := cc.Heartbeat(ctx, r.beat()); err != nil {
+	if err := r.heartbeat(ctx, cc); err != nil {
 		if Revoked(err) {
 			r.Log.Warn("jarvisd refuses this node's key: signed out", "err", err)
 			return ErrSignedOut
@@ -201,6 +207,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
 		r.Log.Info("mqtt connected", "broker", broker, "topic", topic)
+		r.mqttUp.Store(true)
 		tok := c.Subscribe(topic, 1, func(_ mqtt.Client, m mqtt.Message) {
 			d.Handle(ctx, m.Payload())
 		})
@@ -243,11 +250,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	})
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+		r.mqttUp.Store(false)
 		r.Log.Warn("mqtt connection lost; reconnecting", "err", err)
 	})
 	client := mqtt.NewClient(opts)
 	client.Connect() // with ConnectRetry it keeps trying in the background
 	defer client.Disconnect(250)
+	defer r.mqttUp.Store(false)
 
 	if r.OnConnected != nil {
 		// OnConnected returns when its ctx ends, so Run ending on its own (a sign-out) must end
@@ -291,7 +300,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-r.recheckCh:
 		}
 		changed = watch()
-		if err := cc.Heartbeat(ctx, r.beat()); err != nil && ctx.Err() == nil {
+		if err := r.heartbeat(ctx, cc); err != nil && ctx.Err() == nil {
 			if Revoked(err) {
 				r.Log.Warn("jarvisd refuses this node's key: signed out", "err", err)
 				return ErrSignedOut
@@ -299,6 +308,19 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.Log.Warn("heartbeat failed", "err", err)
 		}
 	}
+}
+
+// MQTTConnected reports whether the node holds a session with jarvisd's broker right now (the
+// self-update's health check: a new version must get this far).
+func (r *Runner) MQTTConnected() bool { return r.mqttUp.Load() }
+
+// heartbeat sends one beat and hands the answer to OnBeat.
+func (r *Runner) heartbeat(ctx context.Context, cc *CC) error {
+	reply, err := cc.Beat(ctx, r.beat())
+	if err == nil && r.OnBeat != nil {
+		r.OnBeat(cc, reply)
+	}
+	return err
 }
 
 func (r *Runner) beat() Beat {

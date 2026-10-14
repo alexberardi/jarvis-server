@@ -35,6 +35,9 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   **Device sign-out** (user 2026-10-14, [decision](decisions/2026-10-14-device-sign-out.md)): the
   pairer or a household admin signs a device out from Add-ons; desktop agents get no factory reset
   and return to their first-run page with their settings kept.
+  **Self-update** (install plan 1.7, PR #PRNUM, held for review): agents follow their jarvisd's
+  version ([decision](decisions/2026-10-14-desktop-agents-follow-their-server.md)); a Mac needs
+  item 2.2's signed app in the darwin archive before it can update.
   **Desktop voice speaks as the signed-in member** (user 2026-10-14,
   [decision](decisions/2026-10-14-desktop-voice-speaks-as-its-owner.md)): no voice enrollment on a
   computer; anyone talking to it is treated as its owner, and signing out is the remedy.

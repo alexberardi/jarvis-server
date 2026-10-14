@@ -16,6 +16,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/update"
 )
 
 // Node updates (doc 05 §3.8): a task row; the heartbeat response is the dispatch channel and
@@ -150,6 +151,10 @@ func (m *Module) handleRequestUpdate(w http.ResponseWriter, r *http.Request, u a
 	if requested == "" {
 		requested = "latest"
 	}
+	if node.desktop() {
+		m.requestDesktopUpdate(w, r, node, requested)
+		return
+	}
 	var target string
 	if strings.EqualFold(requested, "latest") {
 		if info := m.latestRelease(ctx, node.householdID.String); info != nil {
@@ -176,6 +181,12 @@ func (m *Module) handleRequestUpdate(w http.ResponseWriter, r *http.Request, u a
 			return
 		}
 	}
+	m.queueUpdate(w, r, id, target)
+}
+
+// queueUpdate inserts a pending update task for node id and answers with it.
+func (m *Module) queueUpdate(w http.ResponseWriter, r *http.Request, id, target string) {
+	ctx := r.Context()
 	tid, now := uuid4(), dbTime(m.now())
 	if _, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_node_tasks (id, node_id, kind, target_version, state, created_at, updated_at)
 		VALUES (?, ?, 'update', ?, 'pending', ?, ?)`, tid, id, target, now, now); err != nil {
@@ -188,6 +199,38 @@ func (m *Module) handleRequestUpdate(w http.ResponseWriter, r *http.Request, u a
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, t.response())
+}
+
+// requestDesktopUpdate queues an update for a desktop agent (01-no-cli-plan 1.7). Agents follow
+// this server: "latest" means this jarvisd's own version, never the Pi node's release, and the
+// agent fetches its archive from that jarvis-server release. The target keeps its v (agent
+// versions are release tags). The agent itself refuses anything not newer than it runs and
+// anything not signed with the project key; refusing here only saves a stranded task.
+func (m *Module) requestDesktopUpdate(w http.ResponseWriter, r *http.Request, node *nodeRow, requested string) {
+	target := requested
+	if strings.EqualFold(requested, "latest") {
+		target = m.Version
+	}
+	if !strings.HasPrefix(target, "v") {
+		target = "v" + target
+	}
+	tv, ok := update.ParseVersion(target)
+	if !ok {
+		if strings.EqualFold(requested, "latest") {
+			detail(w, http.StatusServiceUnavailable, fmt.Sprintf(
+				"This server is a development build (%s): there is no release for its desktop agents to follow.", m.Version))
+			return
+		}
+		detail(w, http.StatusBadRequest, fmt.Sprintf("%s is not a release version.", requested))
+		return
+	}
+	if node.lastSeenVersion.Valid {
+		if cv, ok := update.ParseVersion(node.lastSeenVersion.String); ok && tv.Compare(cv) <= 0 {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("Node is already on version %s; target %s is not newer.", node.lastSeenVersion.String, target))
+			return
+		}
+	}
+	m.queueUpdate(w, r, node.nodeID, target)
 }
 
 func (m *Module) openTask(ctx context.Context, nodeID, kind string) (*taskRow, error) {
@@ -371,7 +414,9 @@ func (m *Module) reconcileOpenTask(ctx context.Context, nodeID string, reported 
 		return err
 	}
 	now := m.now()
-	if t.targetVersion.Valid && t.targetVersion.String != "" && *reported == t.targetVersion.String {
+	// A desktop agent's versions are tags ("v0.2.0"), a Pi's are not ("0.3.0"): compare without the v.
+	if t.targetVersion.Valid && t.targetVersion.String != "" &&
+		strings.TrimPrefix(*reported, "v") == strings.TrimPrefix(t.targetVersion.String, "v") {
 		_, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_node_tasks SET state = 'success', finished_at = ?, updated_at = ?
 			WHERE id = ?`, dbTime(now), dbTime(now), t.id)
 		return err

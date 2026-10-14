@@ -61,13 +61,7 @@ func Platform() string { return runtime.GOOS + "-" + runtime.GOARCH }
 
 // ArchiveName is the release archive for a platform ("linux-amd64"):
 // jarvisd-<tag>-<platform>.tar.gz, or .zip on Windows.
-func ArchiveName(tag, platform string) string {
-	ext := ".tar.gz"
-	if strings.HasPrefix(platform, "windows-") {
-		ext = ".zip"
-	}
-	return "jarvisd-" + tag + "-" + platform + ext
-}
+func ArchiveName(tag, platform string) string { return ProgramArchiveName("jarvisd", tag, platform) }
 
 // Source reads releases from GitHub, or from a flat release directory (Base).
 type Source struct {
