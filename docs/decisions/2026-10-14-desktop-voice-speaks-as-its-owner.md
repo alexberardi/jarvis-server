@@ -13,6 +13,13 @@ matching.
   mid-conversation included. No owner (an admin-key node, or one paired before migration 00180)
   or an owner who left means today's behaviour: the speaker is unknown until a voice match, and
   per-user things refuse (D21). Never a guess.
+- **Wording without an owner (2026-10-14, user):** on a desktop agent with no usable owner the
+  fix is signing in again, not a voice profile. Per-user refusals, `identify_speaker` and the
+  speaker block say "I don't know who's signed in on this computer. Sign in again from the
+  Jarvis Automation menu (Set up / Settings…)." (`servertools.SignInAgain`,
+  `prompts.SignedOutComputerBlock`), ahead of the "recognition is off" wording, and the memory
+  tools are offered there so that they can say it. Pi nodes keep their wording. Scenarios:
+  `tools/pipeline/scenarios/desktop_owner_removed.json` (`"owner": "removed"`).
 - **What it changes:** the prompt names the owner (display name, else username), and memory,
   personal reminders, personal secrets and transcripts use the owner, as chat does. The memory
   tools are offered even with speaker recognition off. The transcription runs no speaker pass

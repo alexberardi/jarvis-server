@@ -462,4 +462,87 @@ func TestDriverDesktopNode(t *testing.T) {
 	if l := newDriver().Run(context.Background(), Scenario{Name: "x", Node: "garage", Turns: []Turn{{Say: "hi"}}}); l.Pass {
 		t.Fatal("unknown node kind")
 	}
+	if l := newDriver().Run(context.Background(), Scenario{Name: "x", Owner: "removed", Turns: []Turn{{Say: "hi"}}}); l.Pass {
+		t.Fatal("an owner on the seeded node")
+	}
+}
+
+// "owner": "removed" pairs the desktop agent as a new member the primary invited, then has the
+// primary remove that member: an agent whose owner left the household.
+func TestDriverDesktopRemovedOwner(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		auth := r.Header.Get("Authorization")
+		switch r.Method + " " + r.URL.Path {
+		case "POST /auth/login":
+			io.WriteString(w, `{"access_token":"jwt"}`)
+		case "GET /households":
+			io.WriteString(w, `[{"id":"hh-1","role":"admin"}]`)
+		case "POST /households/hh-1/invites":
+			if auth != "Bearer jwt" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"code":"INV12345"}`)
+		case "POST /auth/register":
+			if body["invite_code"] != "INV12345" || !strings.HasSuffix(body["email"].(string), "@example.com") {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"access_token":"jwt-owner","user":{"id":42}}`)
+		case "POST /api/v0/provisioning/token":
+			if auth != "Bearer jwt-owner" { // the new member pairs it, so they are its owner
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"token":"prov","node_id":"desk-2"}`)
+		case "POST /api/v0/nodes/register":
+			io.WriteString(w, `{"node_key":"k2"}`)
+		case "POST /api/v0/admin/nodes/heartbeat", "POST /api/v0/conversation/start", "POST /api/v0/conversation/end":
+			io.WriteString(w, `{"status":"ok"}`)
+		case "DELETE /households/hh-1/members/42":
+			if auth != "Bearer jwt" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "POST /api/v0/voice/command":
+			io.WriteString(w, `{"stop_reason":"complete","tool_calls":[],"assistant_message":"Sign in again."}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	root, _ := filepath.Abs("../..")
+	dir := t.TempDir()
+	d := &Driver{Node: &Node{BaseURL: srv.URL, ID: "node", Key: "key"}, Root: root,
+		Desktop: &DesktopSetup{AuthURL: srv.URL, Email: "p@example.com", Password: "pw", StateFile: filepath.Join(dir, "desktop-node.json")}}
+	sc := Scenario{Name: "who", Node: "desktop", Owner: "removed", Tools: "none", Home: "none",
+		Turns: []Turn{{Say: "who am I?", Expect: Expect{Reply: "Sign in"}}}}
+	if l := d.Run(context.Background(), sc); !l.Pass {
+		t.Fatalf("%+v", l)
+	}
+	removed := slices.Index(calls, "DELETE /households/hh-1/members/42")
+	if removed < 0 || removed < slices.Index(calls, "POST /api/v0/nodes/register") {
+		t.Fatalf("owner not removed after pairing: %v", calls)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "desktop-removed-owner-node.json")); !strings.Contains(string(b), `"node_id":"desk-2"`) {
+		t.Fatalf("state %s", b)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "desktop-node.json")); err == nil {
+		t.Fatal("wrote the primary's desktop state")
+	}
+	if l := d.Run(context.Background(), Scenario{Name: "x", Node: "desktop", Owner: "someone", Turns: []Turn{{Say: "hi"}}}); l.Pass {
+		t.Fatal("unknown owner")
+	}
 }

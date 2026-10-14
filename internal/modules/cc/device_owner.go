@@ -29,6 +29,13 @@ func deviceOwner(n *nodeCtx) int64 {
 	return id
 }
 
+// signedOutComputer reports a desktop agent's voice conversation with nobody usable signed in
+// (no owner, or one who left the household) and no speaker identified otherwise: per-user
+// things refuse with "sign in again" (servertools.SignInAgain), not a voice-profile hint.
+func (c *conversation) signedOutComputer() bool {
+	return c.desktopVoice && c.ownerUserID == 0 && c.speakerID == 0
+}
+
 // setKnownSpeaker makes a user the conversation's speaker without a voice match (mobile chat's
 // JWT user, a desktop agent's owner): name (display name, else username), User Profile
 // memories when memory is on, and no "recognition is off" refusals.

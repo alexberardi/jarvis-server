@@ -54,7 +54,11 @@ func (t *Tool) Execute(ctx context.Context, call servertools.Call, turn serverto
 		// speaker recognition is off.
 		msg := "I couldn't tell who's asking, so I can't send the call " +
 			"plan to your phone. Try again from the Jarvis app."
-		if turn.Speaker.RecognitionOff {
+		switch {
+		case turn.Speaker.SignedOutComputer:
+			msg = "I don't know who's signed in on this computer, so I can't send the call plan to your " +
+				"phone. Sign in again from the Jarvis Automation menu (Set up / Settings…)."
+		case turn.Speaker.RecognitionOff:
 			msg = "Speaker recognition is off, so I can't tell who's asking and can't send the call " +
 				"plan to your phone. Try again from the Jarvis app."
 		}

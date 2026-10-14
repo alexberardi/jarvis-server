@@ -132,6 +132,9 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	msgs = trimHistory(msgs, maxTurns)
 
 	speakerBlock := prompts.SpeakerBlock(conv.speakerNameOrDefault(), conv.memories)
+	if conv.signedOutComputer() {
+		speakerBlock = prompts.SignedOutComputerBlock
+	}
 	msgs = append(msgs, transientSys(speakerBlock))
 	// The exact time and the dates, fresh every turn (never from the frozen ambient bundle).
 	turnDates := dates.New(m.now(), conv.timezone)
@@ -280,7 +283,8 @@ func (m *Module) toolTurn(conv *conversation, utterance string) servertools.Turn
 	return servertools.Turn{
 		ConversationID: conv.id, HouseholdID: conv.householdID, NodeID: conv.nodeID, Timezone: conv.timezone,
 		Utterance: utterance, Agents: conv.agents, MemberIDs: conv.memberIDs,
-		Speaker: servertools.Speaker{UserID: conv.speakerID, Name: conv.speakerName, RecognitionOff: conv.recognitionOff},
+		Speaker: servertools.Speaker{UserID: conv.speakerID, Name: conv.speakerName, RecognitionOff: conv.recognitionOff,
+			SignedOutComputer: conv.signedOutComputer()},
 	}
 }
 

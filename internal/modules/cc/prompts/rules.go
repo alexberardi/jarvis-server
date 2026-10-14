@@ -167,6 +167,15 @@ const (
 	UnknownSpeakerBlock = "You do not know who is speaking. Do not address them by name and do not guess which household " +
 		"member it is — answer without using a name. Don't mention that you don't know; just leave " +
 		"the name out."
+
+	// SignedOutComputerBlock replaces UnknownSpeakerBlock on a desktop agent nobody usable is
+	// signed in to (decision 2026-10-14, desktop voice speaks as its owner): there the fix is
+	// signing in again, never a voice profile.
+	SignedOutComputerBlock = "You do not know who is signed in on this computer. Do not address them by name and do " +
+		"not guess which household member it is. Answer ordinary requests normally without mentioning it. Only " +
+		"when they ask who they are, or for something personal (their memories, reminders or details), say: " +
+		"\"I don't know who's signed in on this computer. Sign in again from the Jarvis Automation menu " +
+		"(Set up / Settings…).\" Never suggest enrolling a voice profile."
 )
 
 // Persona presets (services/persona_presets.py).

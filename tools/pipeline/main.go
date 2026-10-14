@@ -183,6 +183,7 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	vocab := fs.String("stt-vocabulary", "", `app names for whisper's prompt, as a desktop agent sends them ("Alacritty, Firefox, Omawrite")`)
 	speaker := fs.String("speaker", "primary", `who is speaking: "primary" (the seeded superuser), a user id, or "" (unidentified)`)
 	node := fs.String("node", "", `who plays the turns: "" the seeded node, or "desktop" (a desktop agent the primary signed in on; pair with --speaker "")`)
+	owner := fs.String("owner", "", `with --node desktop: "" the primary owns it, "removed" its owner left the household`)
 	results := fs.String("results", "", `node outputs per tool, e.g. {"get_weather": {"success": true, "message": "Sunny, 21°"}}`)
 	asJSON := fs.Bool("json", false, "print the full log as JSON")
 	verbose := fs.Bool("v", false, "also print each model call's reasoning and reply")
@@ -202,7 +203,7 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	if (d.Voice || d.VoiceName != "") && !d.VoiceReady {
 		return errors.New("--voice: this sandbox has no TTS/STT (scripts/sandbox up --voice)")
 	}
-	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Node: *node, Home: *home, STTVocabulary: *vocab}
+	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Node: *node, Owner: *owner, Home: *home, STTVocabulary: *vocab}
 	if *results != "" {
 		if err := json.Unmarshal([]byte(*results), &sc.Results); err != nil {
 			return fmt.Errorf("--results: %w", err)

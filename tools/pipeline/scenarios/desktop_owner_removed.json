@@ -1,0 +1,35 @@
+[
+  {
+    "name": "desktop owner removed: who am I says to sign in again",
+    "node": "desktop",
+    "owner": "removed",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {"say": "who am I?",
+       "expect": {"reply": "(?i)sign in again", "not_reply": "(?i)enrol|voice profile"}}
+    ]
+  },
+  {
+    "name": "desktop owner removed: remember refuses with sign in again",
+    "node": "desktop",
+    "owner": "removed",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {"say": "remember that my parking spot is B12",
+       "expect": {"reply": "(?i)sign in again", "not_reply": "(?i)enrol|voice profile|got it|I'll remember"}}
+    ]
+  },
+  {
+    "name": "desktop owner removed: an ordinary request still works without the sign-in line",
+    "node": "desktop",
+    "owner": "removed",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {"say": "what's seven times eight?",
+       "expect": {"reply": "56|fifty-six", "not_reply": "(?i)sign in"}}
+    ]
+  }
+]
