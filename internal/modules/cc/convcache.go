@@ -116,6 +116,9 @@ type conversation struct {
 	// ownerUserID is a desktop agent's signed-in member (device_owner.go): the speaker of
 	// every turn of the agent's own voice conversations, with no voice match. 0 otherwise.
 	ownerUserID int64
+	// desktopVoice: a desktop agent's own voice conversation (not a chat aimed at it). With
+	// no usable owner its unknown speaker is told to sign in again (signedOutComputer).
+	desktopVoice bool
 	// ambient is the household's situational bundle, frozen at warmup (03 §3.3 item 2); ""
 	// when ambient_context.enabled or memory.enabled is off.
 	ambient string

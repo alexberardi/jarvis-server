@@ -54,7 +54,11 @@ func (*IdentifySpeaker) Execute(_ context.Context, _ Call, turn Turn) (any, erro
 	name := strings.TrimSpace(turn.Speaker.Name)
 	if !turn.Speaker.Known() || unknownSpeakerNames[strings.ToLower(name)] {
 		msg := "I don't recognize your voice yet. Enroll a voice profile and I'll know you next time."
-		if turn.Speaker.RecognitionOff {
+		switch {
+		case turn.Speaker.SignedOutComputer:
+			// A desktop agent with no usable owner: signing in fixes it, not a voice profile.
+			msg = SignInAgain
+		case turn.Speaker.RecognitionOff:
 			// M14: say why, rather than suggesting an enrollment that can't help.
 			msg = "Speaker recognition is off, so I can't tell who's speaking. A household admin can turn it on in settings."
 		}

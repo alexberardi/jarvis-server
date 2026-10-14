@@ -30,6 +30,10 @@ type Scenario struct {
 	// primary user signed in on, whose voice turns act as that owner with no voice match
 	// (desktop.go). Leave Speaker empty to test the owner rather than a speaker hint.
 	Node string `json:"node,omitempty"`
+	// Owner, for "node": "desktop": "" the primary is its owner; "removed" its owner is a
+	// member the primary then removed from the household, so the agent has no usable owner
+	// and per-user things say to sign in again (desktop.go).
+	Owner string `json:"owner,omitempty"`
 	// Home is the device payload the node reports at /conversation/start (node_context.agents,
 	// what a Pi with Home Assistant sends): a name under tools/pipeline/homes ("avery", the
 	// default, matches the seeded rooms), "none", or a JSON file path.

@@ -66,7 +66,7 @@ type Driver struct {
 	// Desktop makes the primary's desktop agent for "node": "desktop" scenarios (desktop.go);
 	// desktop caches it once made.
 	Desktop *DesktopSetup
-	desktop *Node
+	desktop map[string]*Node // by owner ("" the primary, "removed")
 }
 
 // speakerID resolves a scenario's speaker.
@@ -89,7 +89,7 @@ func (d *Driver) speakerID(spec string) (int64, error) {
 
 // Run plays a scenario and checks every turn, as the scenario's node.
 func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
-	n, err := d.nodeFor(ctx, sc.Node)
+	n, err := d.nodeFor(ctx, sc.Node, sc.Owner)
 	if err != nil {
 		say := ""
 		if len(sc.Turns) > 0 {
