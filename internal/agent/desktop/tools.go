@@ -14,6 +14,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
@@ -86,7 +87,10 @@ type Tools struct {
 	Host   *host.Host
 	Policy OpenPolicy
 	Apps   Lister // nil: no apps are launchable
-	tools  []tool
+	// Launched records each app launch, so typing into it can wait for its window (nil: not
+	// recorded).
+	Launched *launches.Tracker
+	tools    []tool
 }
 
 // New builds the toolset over a host and an apps catalogue (nil for none).
@@ -95,16 +99,16 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	winID := node.Param{Name: "window_id", Type: "string", Required: true,
 		Description: "Opaque window id exactly as returned by desktop_list_windows"}
 	t.tools = []tool{
-		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed app by name. Use desktop_list_apps first if you're unsure an app is installed or of its exact name. If the result is ambiguous, ask the user which of the candidates they meant. Returns as soon as the computer accepted the request; it does not confirm the app or page came up.",
-			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "A full http(s) URL, e.g. https://example.com, or an installed app's name, e.g. Steam"}},
+		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed app by name: \"open X\" or \"launch X\" on the computer. Pass the name as heard, even if it looks misspelled or unfamiliar: the computer matches near and sound-alike names itself (matched_app says which). If the result is ambiguous or not found, ask the user which of the candidates or suggestions they meant. The launch is not confirmed.",
+			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "A full http(s) URL, e.g. https://example.com, or an app's name as the user said it, e.g. Steam"}},
 			Keywords: []string{"open", "launch", "start", "app", "browser", "website", "computer", "desktop"},
 			Examples: []node.Example{
 				{VoiceCommand: "open youtube on my computer", Params: map[string]any{"target": "https://www.youtube.com"}, Primary: true},
 				{VoiceCommand: "launch steam on my computer", Params: map[string]any{"target": "Steam"}},
 			}},
 			host.CapOpen, t.open},
-		{node.Spec{Name: ToolListApps, Description: "List the apps installed on the user's computer, i.e. the apps desktop_open can open. ALWAYS call this to answer any question about what is installed, available or openable on the computer (\"what apps can you open?\", \"do I have Steam?\", \"which games are installed?\"). Never answer those from general knowledge: only this list is accurate for this computer. Optionally filter by a word.",
-			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional word to filter by, e.g. studio"}},
+		{node.Spec{Name: ToolListApps, Description: "List the apps installed on the user's computer, i.e. the apps desktop_open can open. ALWAYS call this to answer any question about what is installed, available or openable on the computer (\"what apps can you open?\", \"do I have Steam?\", \"which games are installed?\"). Never answer those from general knowledge: only this list is accurate for this computer. With query, it looks a name up (as heard; it may be misheard) and returns the closest apps and best_match.",
+			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional: a name or word to look up, e.g. steam"}},
 			Keywords: []string{"apps", "applications", "programs", "games", "installed", "available", "open", "computer", "desktop"},
 			Examples: []node.Example{
 				{VoiceCommand: "what apps can you open", Params: map[string]any{}, Primary: true},
@@ -217,15 +221,21 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	app, err := apps.Resolve(list, target)
+	p, err := apps.Find(list, target)
 	if err != nil {
 		return nil, err
 	}
+	app := p.App
+	t.Launched.Record(ctx, app.Name, app.ID)
 	// The path launched is the catalogue's, never the model's.
 	if err := t.Host.LaunchApp(ctx, app.Path); err != nil {
 		return nil, err
 	}
-	return map[string]any{"launched": app.Name, "note": "requested; launch is not confirmed"}, nil
+	out := map[string]any{"launched": app.Name, "matched_app": app.Name, "note": "requested; launch is not confirmed"}
+	if p.Fuzzy {
+		out["fuzzy_match"], out["heard_as"] = true, p.HeardAs
+	}
+	return out, nil
 }
 
 func (t *Tools) catalogue() ([]apps.App, error) {
@@ -235,6 +245,9 @@ func (t *Tools) catalogue() ([]apps.App, error) {
 	return t.Apps()
 }
 
+// maxClosest is how many near names a lookup returns.
+const maxClosest = 3
+
 // maxListed caps desktop_list_apps so a big Start Menu can't flood the model's context.
 const maxListed = 300
 
@@ -243,8 +256,9 @@ func (t *Tools) listApps(_ context.Context, args map[string]any) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	q, _ := args["query"].(string)
-	q = strings.ToLower(strings.TrimSpace(q))
+	raw, _ := args["query"].(string)
+	raw = strings.TrimSpace(raw)
+	q := strings.ToLower(raw)
 	names := []string{}
 	for _, a := range list {
 		if q == "" || strings.Contains(strings.ToLower(a.Name), q) {
@@ -257,6 +271,16 @@ func (t *Tools) listApps(_ context.Context, args map[string]any) (map[string]any
 		out["truncated"] = true
 	}
 	out["apps"] = names
+	if q != "" {
+		// A lookup: the closest names by spelling or sound, and the one app it resolves to.
+		out["closest"] = apps.Closest(list, raw, maxClosest)
+		if p, err := apps.Find(list, raw); err == nil {
+			out["best_match"] = p.App.Name
+			if p.Fuzzy {
+				out["heard_as"] = p.HeardAs
+			}
+		}
+	}
 	return out, nil
 }
 

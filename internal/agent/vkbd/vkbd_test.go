@@ -39,6 +39,8 @@ type fake struct {
 	errOnCreate bool
 	// keymap is what wl_keyboard.keymap hands a new keyboard ("": no event).
 	keymap string
+	// noKeyboard: the seat has never had a keyboard (get_keyboard is then a protocol error).
+	noKeyboard bool
 
 	mu   sync.Mutex
 	reqs []req
@@ -165,8 +167,24 @@ func (f *fake) answer(r req) {
 		_, iface, v, id := a.U32(), a.Str(), a.U32(), a.U32()
 		set(iface, id)
 		set(iface+".v", v)
+		if iface == IfaceSeat {
+			f.mu.Lock()
+			caps := uint32(1 | seatCapKeyboard)
+			if f.noKeyboard {
+				caps = 1
+			}
+			f.mu.Unlock()
+			f.event(id, evSeatCapabilities, wlwire.NewArgs().U32(caps))
+		}
 	case r.id == ids[IfaceSeat] && r.op == opSeatGetKeyboard:
 		wk := a.U32()
+		f.mu.Lock()
+		no := f.noKeyboard
+		f.mu.Unlock()
+		if no {
+			f.event(wlwire.DisplayID, wlwire.EvDisplayError, wlwire.NewArgs().U32(r.id).U32(0).Str("wl_seat.get_keyboard called when no keyboard capability has existed"))
+			return
+		}
 		set("wl_keyboard", wk)
 		f.mu.Lock()
 		km := f.keymap
@@ -436,5 +454,25 @@ func TestSendStopsWhenCancelled(t *testing.T) {
 		if r.id == f.id("kb") && r.op == opKey {
 			t.Fatal("typed after cancel")
 		}
+	}
+}
+
+// A headless compositor with no input devices: its seat has never had a keyboard, and
+// get_keyboard would be a protocol error. Typing still works, on the default layout.
+func TestSendOnASeatWithoutAKeyboard(t *testing.T) {
+	f, dial := newFake(t, IfaceSeat, IfaceManager)
+	f.mu.Lock()
+	f.noKeyboard = true
+	f.mu.Unlock()
+	k := &Keyboard{Getenv: wlEnv, Dial: dial, Timeout: guard, Sleep: (&sleeps{}).sleep}
+	if err := k.Send(context.Background(), []xkb.Stroke{{Sym: 'h'}}); err != nil {
+		t.Fatal(err)
+	}
+	if f.id("wl_keyboard") != 0 {
+		t.Fatal("asked a keyboard-less seat for its keyboard")
+	}
+	got, _ := keyEvents(t, f)
+	if !slices.Contains(got, "destroy") || !slices.Contains(got, "down 35") {
+		t.Fatalf("events %v", got)
 	}
 }
