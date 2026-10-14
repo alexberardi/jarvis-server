@@ -57,7 +57,12 @@ type Tools struct {
 
 // Open, then type (DESIGN.md §14): a launch is fire-and-forget, so typing into an app launched
 // within LaunchRecent waits up to WindowWait for its window, checking every windowPoll.
+//
+// LaunchImplicit: a typing call that names no app within this long of a launch is for the app
+// launched (the model's "open X" then "type Y" leaves app out; the window in front is still
+// the old one).
 const (
+	LaunchImplicit    = 15 * time.Second
 	LaunchRecent      = time.Minute
 	DefaultWindowWait = 10 * time.Second
 	windowPoll        = 250 * time.Millisecond
@@ -73,7 +78,7 @@ func typeSpec() node.Spec {
 			"the user names (it is brought to the front first). Use it for dictation: \"type hello world\" → {text: \"hello world\"}; " +
 			"\"tell claude to run the tests\" → {app: \"claude\", text: \"run the tests\", submit: true}; \"write thanks in slack\" → " +
 			"{app: \"slack\", text: \"thanks\"}. Put only the words to type in text, never the instruction around them, and " +
-			"keep the user's wording. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" " +
+			"keep the user's wording. After opening an app with desktop_open, pass the same name in app. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" " +
 			"or \"… and press enter\"; false for \"type …\", \"write …\", \"put … in\". For a field on a web page use " +
 			"browser_fill instead. If the result says awaiting_confirmation, nothing was typed yet: ask the user the question.",
 		Params: []node.Param{
@@ -259,6 +264,14 @@ type target struct {
 // resolve finds the one window the user named. No name: the window in front (nothing to do).
 func (t *Tools) resolve(ctx context.Context, app string) (*target, error) {
 	if winmatch.Normalize(app) == "" {
+		// "Open X and type Y": a model often leaves app out of the typing call. Right after a
+		// launch, the window in front is still the old one; the text is for the new app.
+		if l, ok := t.Launched.Recent(LaunchImplicit); ok && t.Win != nil {
+			if ok, _ := t.Win.Available(ctx); ok {
+				t.log().Info("dictation: no app named; typing into the app just launched", "app", l.Name)
+				return t.awaitWindow(ctx, l.Name, l)
+			}
+		}
 		return nil, nil
 	}
 	if t.Win == nil {

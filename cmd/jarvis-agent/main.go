@@ -871,6 +871,11 @@ func appsCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(args) == 1 && args[0] == "--vocabulary" {
+		// What a voice turn sends for speech-to-text (without the open windows' apps).
+		fmt.Println(apps.Vocabulary(nil, list, dictate.MaxVocabulary))
+		return nil
+	}
 	if len(args) == 0 {
 		for _, a := range list {
 			fmt.Printf("%-40s %s\n", a.Name, a.Path)
