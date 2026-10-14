@@ -94,8 +94,8 @@ function PairingRow({ pairing, households }: { pairing: PendingPairing; househol
 }
 
 /** useConfigURL is this server's enroll address, or undefined when the page can't tell. */
-function useConfigURL(): string | undefined {
-  const sys = useSystemInfo()
+function useConfigURL(systemInfo: boolean): string | undefined {
+  const sys = useSystemInfo(systemInfo)
   const port = sys.data?.listeners?.find((l) => l.name === 'config')?.port ?? 7700
   return configURLFor(typeof window === 'undefined' ? '' : window.location.hostname, port)
 }
@@ -107,9 +107,10 @@ function useConfigURL(): string | undefined {
  * polls, so a new code shows up without a reload. Nothing renders when the caller belongs
  * to no household.
  */
-export default function PendingPairings() {
+export default function PendingPairings({ systemInfo = true }: { systemInfo?: boolean }) {
   const { data } = usePairings()
-  const configURL = useConfigURL()
+  // /api/system/info is the operator's: Add-ons passes false for a member and assumes the default port.
+  const configURL = useConfigURL(systemInfo)
   const pairings = data?.pairings ?? []
   const households = data?.households ?? []
   if (households.length === 0) return null

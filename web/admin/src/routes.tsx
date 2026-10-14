@@ -4,6 +4,7 @@ import { Navigate, Route } from 'react-router-dom'
 import RequireSuperuser from '@/auth/RequireSuperuser'
 import ToAdmin from '@/components/layout/ToAdmin'
 import AccountPage from '@/pages/AccountPage'
+import AddonsPage from '@/pages/AddonsPage'
 import ChatPage from '@/pages/ChatPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import DashboardPage from '@/pages/DashboardPage'
@@ -41,6 +42,7 @@ export function shellRoutes() {
     <>
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/chat" element={<ChatPage />} />
+      <Route path="/addons" element={<AddonsPage />} />
       <Route path="/account" element={<AccountPage />} />
       <Route path="/admin" element={<RequireSuperuser />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
