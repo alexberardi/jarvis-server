@@ -302,6 +302,10 @@ commands:
                    register and control jarvisd with systemd, launchd or the Windows SCM
   setup-link       print the first-run setup link and token (or the admin URL once set up)
                    [--url] the URL alone (for installers); [--qr] also as a QR code
+  install-from-app [--run-as USER] [--bin PATH] [--no-firewall] [--url-file FILE] [--qr] [--allow-no-service]
+                   the GUI installers' privileged step: put this binary where the service runs it,
+                   then service install, doctor --fix (unless --no-firewall) and print the URL to
+                   open (needs root / an Administrator prompt)
   migrate status   show each module's migration state
   import-recipes [--apply] [--household OLD=NEW]... [--park-unmatched] [--legacy-host HOST]... BUNDLE
                    import recipes, meal plans, staples and SKU mappings from a legacy export
@@ -397,6 +401,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 			return err
 		}
 		return runDoctor(ctx, envErr, args[1:], stdout, os.Stderr)
+	case "install-from-app":
+		return runInstallFromApp(ctx, flagHome, args[1:], stdout, os.Stderr)
 	case "setup-link":
 		opt, err := parseSetupLinkArgs(args[1:], os.Stderr)
 		if err != nil {

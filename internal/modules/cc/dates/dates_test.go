@@ -227,3 +227,19 @@ func TestCalendar(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Clock is the exact local minute (no quantising), in the context's zone.
+func TestClock(t *testing.T) {
+	for _, c := range []struct {
+		at   time.Time
+		want string
+	}{
+		{time.Date(2026, 10, 14, 1, 7, 59, 0, time.UTC), "9:07 PM"},
+		{time.Date(2026, 10, 14, 0, 11, 0, 0, time.UTC), "8:11 PM"},
+		{time.Date(2026, 10, 14, 4, 3, 0, 0, time.UTC), "12:03 AM"},
+	} {
+		if got := New(c.at, "America/New_York").Clock(); got != c.want {
+			t.Errorf("Clock at %v = %q, want %q", c.at, got, c.want)
+		}
+	}
+}

@@ -49,6 +49,16 @@ func FailureText(tool string, err error) string {
 			return s + ". Tell the user " + tell + " and ask which one they meant."
 		}
 	}
+	var ae *appError
+	if errors.As(err, &ae) {
+		switch ae.code {
+		case CodeNotOpen:
+			return fmt.Sprintf("%s: %s is installed but not open. Open it with desktop_open, then type.", what, ae.app)
+		case CodeNotReady:
+			return fmt.Sprintf("%s: %s was opened, but its window hasn't appeared yet. Tell the user %s and to ask again once %s is open.",
+				what, ae.app, tell, ae.app)
+		}
+	}
 	if errors.Is(err, errSubmit) {
 		return fmt.Sprintf("The text was typed, but Enter wasn't pressed (%s). Tell the user it was typed but not sent.", unwrapMsg(err))
 	}
@@ -70,7 +80,12 @@ func FailureNote(tool string, err error) string {
 		nothing = "no key pressed"
 	}
 	var we *winmatch.Error
+	var ae *appError
 	switch {
+	case errors.As(err, &ae) && ae.code == CodeNotOpen:
+		return Preview(ae.app, 40) + " isn't open — " + nothing
+	case errors.As(err, &ae):
+		return Preview(ae.app, 40) + " didn't open in time — " + nothing
 	case errors.As(err, &we) && we.Code == winmatch.CodeNotFound:
 		return "Couldn't find " + Preview(strings.TrimSpace(we.Query), 40) + " — " + nothing
 	case errors.As(err, &we) && we.Code == winmatch.CodeAmbiguous:

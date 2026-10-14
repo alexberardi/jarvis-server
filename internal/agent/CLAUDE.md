@@ -44,6 +44,9 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent try                             # list the tools this host offers now
 ./jarvis-agent try desktop_set_volume '{"volume": 30}'   # run one tool locally, no jarvisd
 ./jarvis-agent apps steam                      # what a name resolves to (never launches)
+./jarvis-agent apps --vocabulary               # the app names a voice turn sends for whisper (stt_vocabulary)
+./jarvis-agent try desktop_open '{"target":"X"}' desktop_type_text '{"app":"X","text":"hi"}'  # a chain, one process
+                                               # (nested compositor only: it launches and types)
 ./jarvis-agent browser install [--no-open]     # register the native host, set up the extension
 ./jarvis-agent browser status | uninstall      # registrations + connected browsers / remove
 ./jarvis-agent try browser_list_tabs           # waits for the extension, runs one browser tool
@@ -105,7 +108,10 @@ internal/agent/
                       screencapture + the purego front-window lookup (mac.go, frontwin_darwin.go)
   winmatch/           naming a window ("firefox", "the terminal", title words): Pick (screen),
                       PickUnique (dictation: one match or ambiguous_window); last tier fuzzy.go
-                      (a misheard name: exactly one app within Damerau-Levenshtein ≤ 2 / 30 %)
+                      (a misheard name: exactly one app within Damerau-Levenshtein ≤ 2 / 30 %,
+                      or the same sound key, sound.go: "oh my right" → omawrite)
+  launches/           the last app desktop_open launched (+ the windows before it), so typing
+                      into it waits for its window (DESIGN.md §14 "Open, then type")
   dictate/            dictation (DESIGN.md §14): desktop_type_text, desktop_press_key and
                       desktop_confirm (tools.go, confirm.go); keyboards: the built-in Wayland
                       virtual keyboard, X11 XTEST and the RemoteDesktop portal, else

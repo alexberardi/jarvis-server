@@ -331,6 +331,11 @@ func (s *systemd) Status(ctx context.Context) (Status, error) {
 		return st, nil
 	}
 	st.Installed = true
+	if !s.user {
+		if _, _, st.Account = s.installed(); st.Account == "" {
+			st.Account = Name
+		}
+	}
 	st.StaleReason = s.staleness()
 	st.Stale = st.StaleReason != ""
 	out, err := s.systemctl(ctx, "show", unitName, "-p", "ActiveState", "-p", "SubState", "-p", "MainPID", "-p", "NRestarts")

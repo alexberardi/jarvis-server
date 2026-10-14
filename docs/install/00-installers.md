@@ -1213,6 +1213,29 @@ output for the GUI installers, 01-no-cli-plan item 1.2); `--qr` adds a QR code o
 half blocks (`internal/platform/qrterm`: black on white with ANSI colours on a terminal, plain
 blocks otherwise; light-on-dark under `NO_COLOR` or a Windows console without VT). The scripts
 pass `--qr` when `jarvisd help` mentions it, so an older pinned release still prints its link.
+**`jarvisd install-from-app`** (2026-10-13, [01-no-cli-plan](01-no-cli-plan.md) item 1.10) is the
+one privileged call every GUI installer makes: the macOS app (`do shell script "<bundle>/jarvisd
+install-from-app --run-as <user>" with administrator privileges`), the Windows installer (`[Run]
+"{app}\jarvisd.exe" install-from-app --url-file <tmp> [--no-firewall]`, Finish opens the URL from the
+file) and the `.deb` (`scripts/packaging/deb/postinst`: `/usr/lib/jarvisd/jarvisd install-from-app
+--qr --allow-no-service`). It needs root / an elevated token. Run from anywhere but the service's
+binary path (`/usr/local/bin/jarvisd`, `%ProgramFiles%\jarvisd\jarvisd.exe`, or `--bin`), it puts
+itself there unless that path already holds this version or a newer one (a self-updated install, or
+a `.deb` whose package copy went stale: kept); replacing an older one snapshots the databases and
+keeps it as `jarvisd.prev`, as an upgrade does. Then it hands over to the binary at that path, so
+the definition is written by the version that runs. That one refuses a fresh install whose ports
+another program holds (the doctor's message, for the installer to show), runs `service install`
+(skipped on a re-run when this version already runs healthy from a current definition, as the same
+account, so a re-run restarts nothing), applies `doctor --fix` unless `--no-firewall` (a failure is
+a warning), waits up to a minute for the setup token, and prints only the URL to open on stdout
+(the setup link, or the admin URL once an admin exists); progress goes to stderr, `--qr` adds the
+setup message and a QR code there, `--allow-no-service` stops after placing the binary when no
+service manager runs (a container). `service status --json` now also reports the service's
+`account`. CI job `install-from-app` (3 OS, `scripts/install-from-app-e2e.sh`): fresh install
+(setup link, ufw rule on Ubuntu, LaunchDaemon as the runner user, the updater service on Windows),
+a no-op re-run with the same link, a newer installer (replaced, `.prev`, snapshot, restarted on
+it), an older one (newer kept), uninstall. The `.deb`'s uninstall hooks come with item 2.4.
+
 **`jarvisd help`** prints the usage and exits 0; the scripts grep it for an `upgrade` command.
 
 **`install.sh` (I3)** — POSIX sh, ~200 lines at the time (~420 now), shellcheck clean. Flags: `--version`, `--user`,

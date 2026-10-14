@@ -130,7 +130,9 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 
 	speakerBlock := prompts.SpeakerBlock(conv.speakerNameOrDefault(), conv.memories)
 	msgs = append(msgs, transientSys(speakerBlock))
-	msgs = append(msgs, transientSys(prompts.CalendarBlock(dates.New(m.now(), conv.timezone).Calendar())))
+	// The exact time and the dates, fresh every turn (never from the frozen ambient bundle).
+	turnDates := dates.New(m.now(), conv.timezone)
+	msgs = append(msgs, transientSys(prompts.CalendarBlock(turnDates.Clock(), turnDates.Calendar())))
 	if block := prompts.AmbientBlock(conv.ambient); block != "" {
 		msgs = append(msgs, transientSys(block))
 	}
@@ -149,6 +151,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		profileMatchHint(in.VoiceCommand, speakerBlock),
 		m.agentContextHint(ctx, conv, in.VoiceCommand),
 		ev.hint(),
+		m.desktopAppHint(conv, in.VoiceCommand),
 	}
 	if in.photoOnly() {
 		hints = append(hints, prompts.PhotoOnlyHint)

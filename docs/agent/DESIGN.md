@@ -173,7 +173,10 @@ Implemented, all three ending at `POST /nodes/register`:
    household (minted by the approver), which the agent redeems, so the node is exactly one
    enrolled with a token. `GET /api/v0/nodes/pairings` lists what waits plus the caller's
    households; `…/deny` refuses one. The admin's Nodes page shows "Pending pairings" (today
-   superuser-only through the gateway; members get it with the web app). Details:
+   superuser-only through the gateway; members get it with the web app). It is shown whenever
+   the caller belongs to a household, polls every 3 s while the tab is visible, and while nothing
+   waits it says how to start: open the agent, or run `jarvis-agent enroll --server <URL>`, with
+   the URL taken from the page's host and jarvisd's config port (a placeholder on loopback). Details:
    `internal/modules/cc/pairing.go`.
    - **Codes and limits:** 8 symbols from 32 (40 bits), single use, 10-minute life, in memory (a
      restart only means pairing again). 10 starts per address per 10 minutes; at most 100 live
@@ -1101,6 +1104,135 @@ near apps are `ambiguous_window`. A fuzzy pick is reported: the result carries
 `matched_app: "omawrite"`, `fuzzy_match: true`, `heard_as: "Omerite"`, the island says
 "Typing into Omawrite: …", and the agent logs "near spelling" with the app.
 
+**Sound-alikes (2026-10-14).** Speech-to-text also splits and respells a name it doesn't know:
+the user said "omawrite" again and it heard "Oh my right" (5 edits). `winmatch.SoundKey` reduces
+a name to roughly how it sounds (silent letters dropped, `wr`/`kn`/`ght` simplified, voiced and
+unvoiced pairs and m/n merged, each vowel run one vowel, a final vowel dropped): "omawrite",
+"Omerite" and "oh my right" are all `anarat`. An **equal key** (≥ 4 letters, a name ≥ 5) counts
+like a near spelling, in the same last tier and with the same one-app rule. A key **one edit
+away** (`SoundsNear`) is only ever a suggestion: "the oven" (`afan`) is one away from neovim
+(`nafan`), and an oven is a real thing to ask for, so it is never acted on.
+
+**Launching by a misheard name (2026-10-14).** "Can you open Omerite and drop down a note to
+update Steam?": the model called `desktop_list_apps`, got 62 names, didn't see Omawrite among
+them and asked the user. Matching was already the agent's job for windows; now it is for
+launching too, and the tool descriptions say so:
+
+- `desktop_open` resolves the name itself (`apps.Find`): exact, prefix, all words, a small
+  spelling distance, then an equal sound key; one app or `ambiguous`, never a guess. Its result
+  says `matched_app`, and for a near name `fuzzy_match: true` and `heard_as`. Not found carries
+  `suggestions` (spelling or sound, best first: "the oven" → Neovim) for the model to offer.
+  Its description says to pass the name as heard, even if it looks misspelled.
+- `desktop_list_apps {query}` is the lookup when the model wants one: `closest` (top 3 with a
+  0..1 score, spelling or sound) and `best_match` (+ `heard_as`) when the name resolves.
+- `jarvis-agent apps NAME` prints how a name resolves ("a near or sound-alike name for …").
+
+**App names stay out of the LLM prompt (user, 2026-10-14).** The prompt is already long. The
+model gets names on demand through the tools (the lookup above, or a failed open's
+suggestions), and the open and typing tools resolve misheard names themselves, so it rarely
+needs the lookup. Tool descriptions stay short for the same reason. Biasing speech-to-text with
+this computer's app names (whisper's initial prompt) is a separate input, not the LLM prompt,
+and is allowed, bounded.
+
+### Open, then type (2026-10-14)
+
+"Open omawrite and jot down a note …": `desktop_open` is fire-and-forget, so the
+`desktop_type_text {app}` that follows usually runs before the window exists. The agent keeps
+the last launch (`internal/agent/launches`: the app, when, and the window ids open just before
+it, from dictation's window lister). Typing into an app that has no window:
+
+- launched within the last minute, and the name is that app (as said, or misheard the way
+  `desktop_open` resolves it): wait up to 10 s, looking every 250 ms (`Tools.WindowWait`,
+  `Sleep` injected), for a window the name matches, or else the **one window that appeared
+  since the launch** (a terminal app such as Neovim runs in the terminal's window, which no
+  name matches). Several new windows and no name match keep waiting; none in time is
+  `app_not_ready` ("Omawrite was opened, but its window hasn't appeared yet"), nothing typed;
+- not launched, but installed (the catalogue resolves the name): `app_not_open`, "Nothing was
+  typed: Omawrite is installed but not open. Open it with desktop_open, then type." so the model
+  can open it first;
+- otherwise `window_not_found` as before.
+
+**No app named, right after a launch.** With the real model (`TestDesktopAppsLive`), both
+"open X and type Y" chains called `desktop_type_text` *without* `app`, and the text went to the
+terminal in front. So a typing call that names no app within 15 s of a launch
+(`LaunchImplicit`) is for the launched app: it waits for that window the same way. Later, no
+app means the window in front again. The description also says to pass the opened app's name.
+
+`jarvis-agent try TOOL ARGS TOOL ARGS …` runs several calls in one process, as a model's chain
+would (`try desktop_open '{"target":"Oh my right"}' desktop_type_text '{"app":"Omerite",…}'`).
+
+### Biasing speech-to-text with this computer's app names (2026-10-14)
+
+"omawrite" was heard "Omerite" and "Oh my right"; "open neovim" was heard "Can you open the
+oven?", which no matching can undo (the model asked Home Assistant about an oven). So a desktop
+node tells jarvisd which names to expect, and they go into **whisper's initial prompt**, never
+the LLM's:
+
+- **How the names reach jarvisd: `node_context.stt_vocabulary` at `/conversation/start`.** The
+  agent already sends a start at every wake (its tools, the timezone), so the names cost nothing
+  extra and are as fresh as the turn: no heartbeat field, no cache to invalidate. cc keeps each
+  node's latest list in memory (a start without one forgets it; mobile chat's starts never set
+  it) and `commandSTTOptions` puts it before `voice.stt_prompt` ("Omawrite, Neovim, …. Hey
+  Jarvis, turn on …": whisper weighs the end of a prompt most, and that stays the household's
+  sentence). The wake-clip check stays unbiased, as before.
+- **What the list is** (`dictate.Tools.Vocabulary`, `apps.Vocabulary`): the open windows' apps,
+  most recently focused first; the app launched last; then the catalogue's one-word names
+  (the ones a transcriber respells), then its two-word names. Longer descriptive names
+  ("Avahi Zeroconf Browser") are plain words whisper knows. ≤ 400 characters (agent and
+  jarvisd both cut there). `jarvis-agent apps --vocabulary` prints the catalogue part.
+
+**Measured (2026-10-14)** on the dev stack's engine (whisper.cpp b5454 `whisper-server`,
+`ggml-small.en`, jarvisd's decode parameters and resampling), never the dev jarvisd itself: 10
+phrases × 3 piper voices × 3 variants (clean 16 kHz, 48 kHz as the agent uploads, 1.08× speed +
+pink noise). Targets: "open omawrite", "open omawrite and jot down a note to update Steam",
+"open neovim", "neovim, can you open it?", "type hello world into neovim" (45 clips); controls:
+kitchen lights, weather, timer, "open the oven", "play some jazz" (45 clips).
+
+| whisper prompt | app spelled right | omawrite | neovim | controls changed (words) |
+|---|---|---|---|---|
+| none | 16/45 | 0/18 | 16/27 | — |
+| this desktop's list as sent (388 chars, `apps --vocabulary` + ".") | 40/45 | 18/18 | 22/27 | 0/45 |
+| the same kind of list, 400 chars | 43/45 | 18/18 | 25/27 | 0/45 |
+| the same, 600 chars | 40/45 | 18/18 | 22/27 | 0/45 |
+| 5 names only ("Omawrite, Neovim, Steam, Firefox, Alacritty.") | 44/45 | 17/18 | 27/27 | 5/45 |
+
+Without a prompt "omawrite" was never right ("Omarite", "El Marite", "Hope and home all right")
+and "open neovim" came out "Open the oven!" twice; with the list, never. The remaining neovim
+misses are "NeoVin" and "Neo vim", which the agent's own matching resolves (one edit; the words
+joined). A short list rewords ordinary speech ("Play some jazz!" → "Let's play some jazz!",
+"lights" → "light") and glues words ("OpenOmawrite."); the long lists change controls only in
+case and punctuation. Hence a long list with a 400-character cap, not just the open apps.
+Synthetic voices, not the user's: the user's retry is the real test.
+
+### A name before a request: the silent follow-up (2026-10-14)
+
+"NeoVim, can you open it?" (transcribed right, 01:31 on the dev jarvisd) got no tool call and no
+reply. Not a crash: it was a follow-up turn after "Can you open the oven?" → "… Would you like me
+to look that up?", and the model answered `<not_for_me/>` twice (the turn and its
+double-check, trace `llm_call_iter_1/2`), reading "NeoVim, …" as speech to someone called
+NeoVim (the overheard-speech rule "names a different addressee"). The node then stayed silent
+by design (`keep_listening`). Reproduced with the real model (`TestDesktopAppsLive`
+`neovim_followup`: `not_for_me`; the same words on a fresh wake: `desktop_open NeoVim`).
+
+Fix: on a conversation with the desktop tools, when the utterance **starts with** one of the
+node's app names followed by a comma, or **asks to open** one ("open|launch|start|run (up)
+(the) X"), the turn's user message gets one line: `[desktop: "NeoVim" is an app on this
+computer, not a person; "NeoVim, …" or "open NeoVim" asks you to act on that app with the desktop
+tools.]` (`cc/desktop_hint.go`). Only the user's own word is repeated (≥ 4 letters, so "Hey"
+and "X" never trigger it); the catalogue never reaches the LLM. With it the same follow-up opens
+Neovim. A prompt rule ("an app's name before a request is not an addressee") would have been the
+alternative; it would cost every turn on every node, while this line appears only when the user
+said an app's name on a desktop node.
+
+**Live check (Qwen3.5-9B Q4_K_M, jarvisd's template, the real turn pipeline, the agent's real
+tools over fakes, 62-app catalogue, a competing smart-home tool; one run each):** "Can you open
+Omerite and drop down a note to update Steam?" → `desktop_open Omerite` → `desktop_type_text
+"update Steam"` (no app: the launched-app rule) → typed into Omawrite; "NeoVim, can you open
+it?" as a wake and as the follow-up above → `desktop_open NeoVim`; "Open neovim and type hello
+world." → open, then typed into Neovim's new window; "Can you open the oven?" → no launch (an
+oven answer). Before the fixes: both typing chains typed into the terminal, and the follow-up was
+`not_for_me`.
+
 ### Failures the model can't misread
 
 A failed dictation call's `error` is a sentence that starts with the outcome, says why, and says
@@ -1334,6 +1466,19 @@ never in logs or results; password fields only when named.
   activation before the first key, the XWayland refusal creating no keyboard); the Lua
   dispatch fallback; the front window named; no focused window refused; an old extension's
   `unknown_command` for fill and click.
+
+- **Open, then type by a misheard name (nested headless sway, 2026-10-14):** fake catalogue in a
+  scratch HOME (Omawrite = `foot --app-id omawrite` running `cat > fileA`; Neovim = a plain
+  `foot` running `cat > fileB`, a terminal app's window), a focused `foot --app-id other`.
+  `try desktop_open '{"target":"Oh my right"}' desktop_type_text '{"app":"Omerite","text":"update
+  Steam","submit":true}'` → launched Omawrite (`fuzzy_match`, `heard_as: "Oh my right"`), typed
+  into the new window (`matched_app: omawrite`), fileA "update Steam⏎", the other window nothing.
+  `desktop_open NeoVim` then `desktop_type_text {app: NeoVim}` → typed into the one new window
+  (`into: Neovim`). `desktop_open "the oven"` → `app_not_found`, `suggestions: [Neovim]`, nothing
+  launched; typing into Steam (installed, not open) → `app_not_open`. Found on the way: a headless
+  sway with no input devices answers the virtual keyboard's `wl_seat.get_keyboard` (reading the
+  desktop's layout) with a protocol error; `vkbd` now asks only a seat whose capabilities include a
+  keyboard (and allocates no id otherwise: Wayland new ids must stay consecutive).
 
 ### Open questions (defaults chosen; the user reviews)
 

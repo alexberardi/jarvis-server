@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
@@ -107,7 +108,19 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 func (v *voiceStack) options(cc *node.CC, tools node.Toolset, log *slog.Logger, onTurn func(voice.Turn)) voice.Options {
 	return voice.Options{Input: v.flags.input, Output: v.flags.output, Config: v.cfg, Detector: v.det,
 		Server: voice.NewHTTPServer(cc.BaseURL, cc.Creds), Tools: tools, Log: log, OnTurn: onTurn,
-		Indicator: v.indicator}
+		Indicator: v.indicator, Vocabulary: vocabularyOf(tools)}
+}
+
+// vocabularyOf is the app names for speech-to-text from the toolset's dictation tools (their
+// windows, launches and catalogue), or nil.
+func vocabularyOf(tools node.Toolset) func(ctx context.Context) string {
+	m, _ := tools.(node.Multi)
+	for _, ts := range m {
+		if dt, ok := ts.(*dictate.Tools); ok {
+			return dt.Vocabulary
+		}
+	}
+	return nil
 }
 
 // --- listen ---

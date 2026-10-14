@@ -89,8 +89,22 @@ agent on loopback with a per-launch secret in the URL:
 
 1. **Server:** found over mDNS, or `127.0.0.1:7700` first when jarvisd runs on this machine. A manual
    URL field is the escape hatch.
-2. **Pairing:** a device code and this computer's name. The page says "Approve it in Jarvis →
-   Add-ons, or in the app", then turns green when the code is approved.
+2. **Pairing** (user, 2026-10-13: the page offers **both** ways):
+   - **Show a pairing code:** a device code and this computer's name. The page says "Approve it in
+     Jarvis Automation → Add-ons, or in the app", then turns green when the code is approved. Any
+     member of a household approves it, in the mobile app or the web app.
+   - **Sign in with your Jarvis Automation account:** an email + password form in the page that
+     does what `jarvis-agent enroll --email` does today (log in, pick the household, mint a
+     provisioning token, register). A member enrolls their own computer with no one approving it
+     and no terminal. The form refuses a temporary password with the CLI's message (change your
+     password first, `node.ErrPasswordChangeRequired`). The password goes only to the agent's
+     loopback server (per-launch secret) and on to jarvisd's login; it is never stored, and the
+     JWT stays in memory as with the CLI.
+
+   The CLI's `--email` and `--token` paths stay. **Until 1.5 ships, `jarvis-agent enroll --email`
+   is the fallback**, especially for members who can't approve a code yet: the admin web app is
+   superuser-only until the member web app ships ([webapp/01](../webapp/01-member-web-app-plan.md)),
+   and approval in the mobile app is Phase 3 (item 3.4).
 3. **Browser control:** the native host is already registered (decided). Buttons go to the store
    listing for each installed browser: AMO, Chrome Web Store. Each turns green when the
    extension connects.
@@ -214,12 +228,12 @@ do. Each item lands green on `main` on its own (the §8 style).
 | 1.2 | **Done (PR #105, 2026-10-13).** `jarvisd setup-link --url` (machine output) and `--qr` (decided, §9.3 Q4; Unicode half-blocks); `install.sh`/`.ps1` print the QR | S | — | `install` | Golden QR, decodes back to the link |
 | 1.3 | Stale definition refresh from the macOS/Windows helpers after an admin-button upgrade (closes §8.2 "Not covered"), behind Q7 for Linux | M | — | `upgrade` (3 OS) | Upgrade e2e asserts `definition_stale: false` after the admin button |
 | 1.4 | `jarvis-agent install / uninstall` (§2 shared rules): login item per OS (SMAppService on macOS), menu entry + shortcut, native host by default, start; idempotent. **Done (#102):** plus the `jarvis-agent://` handler and the Linux per-user copy; DESIGN §13 "`jarvis-agent install`" | M | Q1 | `agent` (3 OS) | Golden files from `internal/agent/deploy/`; scratch HOME/HKCU fake registry; install twice, uninstall leaves nothing |
-| 1.5 | **First-run page** (§2.2): loopback server with a per-launch secret, server discovery (loopback first), pairing, store buttons, macOS TCC panes with live status, GNOME/KDE portal step, mic meter, wake toggle, Remove | L | 1.1, 1.4, 1.6 | `agent` | Handler tests; headless browser test of the pairing happy path against a test jarvisd; TCC probes are already native-tested |
+| 1.5 | **First-run page** (§2.2): loopback server with a per-launch secret, server discovery (loopback first), pairing (a code to approve **or** sign in with email + password, which refuses temp passwords; user 2026-10-13), store buttons, macOS TCC panes with live status, GNOME/KDE portal step, mic meter, wake toggle, Remove | L | 1.1, 1.4, 1.6 | `agent` | Handler tests; headless browser test of the pairing happy path against a test jarvisd; TCC probes are already native-tested |
 | 1.6 | Agent config file (voice, island, confirm-dictation) read by `run`; flags still win. **Done (#99):** `agent.json` in the agent's config dir, `internal/agent/settings`, `jarvis-agent config` (DESIGN §13 "The settings file"); `jarvis-agent restart` applies a change (DESIGN §13) | S | — | `agent` | Unit |
 | 1.7 | **Agent self-update** via `internal/update`: agent archives in `SHA256SUMS`, check on heartbeat `pending_update` or daily, in-process swap; macOS `.app` replacement | M | 2.1 | `agent`, a new `agent-upgrade` e2e (throwaway key, as `scripts/testsign`) | Swap, refusal of unsigned/older, rollback on failed start |
 | 1.8 | **Done (PR #104, 2026-10-13).** Agent heartbeat: `node_kind: desktop` (DESIGN §9 Q1) + `browser_extension: connected` capability | S | — | `agent`, `build` | Contract: node list carries both |
 | 1.9 | Start-only shortcut: second launch → IPC to the running agent → island "Jarvis is running" pill (DESIGN §13 item 6). **Done (#103):** control socket + single instance, `start` (also the URL handler), first-run hook stubbed for 1.5; DESIGN §13 "The start-only shortcut". **Mac fixes (#106):** the pill asked for before the island exists, and opening the app or link while the agent runs (Apple events); DESIGN §13 "Fixed on the Mac" | S | 1.4 | `agent` | Single-instance test; island golden for the new pill |
-| 1.10 | `jarvisd install-from-app` (the macOS app's privileged entry point) and the Windows/`.deb` hooks: thin wrappers over `service install` + `doctor --fix` + `setup-link --url` | S | 1.2 | `install` | Run under sudo on the macOS and Ubuntu runners |
+| 1.10 | **Done (PR #121, 2026-10-13; [00 §8.3](00-installers.md) "`jarvisd install-from-app`").** `jarvisd install-from-app` (the macOS app's privileged entry point) and the Windows/`.deb` hooks: thin wrappers over `service install` + `doctor --fix` + `setup-link --url` | S | 1.2 | `install` | Run under sudo on the macOS and Ubuntu runners |
 | 1.11 | **Quit without a terminal** (user, 2026-10-13: "there needs to be an easy way to kill the app as well"): `jarvis-agent stop` (exit 0, so no supervisor restarts it), then a status icon with a menu (state, Listen for "Hey Jarvis", Open Jarvis Automation, Quit) per OS. **Done.** `stop` (#109); DESIGN §13 "`jarvis-agent stop`". Status icon on Linux + the live voice toggle + voice on by default: #110; macOS menu bar: #111; Windows notification area: #114 (DESIGN §15).** | S | 1.9 | `agent` | Unit (install.Stop per OS); a scratch systemd unit not respawned after `stop` |
 
 ### Phase 2: release artifacts

@@ -273,8 +273,9 @@ Order after `messages[0]` and the trimmed history (`conversation_handler.py:858-
    - plus `\n\nUser Profile — these facts… :\n{memories}`
    - or `UNKNOWN_SPEAKER_BLOCK` when neither name nor memories is known. It is **never empty**.
    - **Go addition (2026-10-12):** a `<calendar>` block follows it on every turn (`prompts.CalendarBlock` over `dates.Context.Calendar`): today and tomorrow, then this week, next week and the week after (Sunday to Saturday, as `weeks.*`), and what "next <weekday>" means, from the same resolver as `next_<day>` (D8). The date pipeline only resolves tool arguments, so a plain "what's the date next Friday?" was model arithmetic: a 9B answered Oct 17 (a Saturday) on one run and Nov 7 on another. About 150 tokens; transient, so the cached prefix is untouched.
+   - **Go addition (2026-10-13):** the block leads with the exact local time, recomputed every turn (`dates.Context.Clock`): "The current local time is 9:07 PM. When the user asks what time it is, say exactly this time: never round it, and never repeat a time from earlier in the conversation. For the time in another city or time zone, call get_current_time when it is offered." The rule is explicit because the local 9B follows stated rules better than implied ones.
 2. `<ambient_context>` block (`core_rules.py:360-392`), only when `ambient_context.enabled`. Its text is frozen at warmup (`:3192-3268`):
-   - the clock, quantized to 15 minutes;
+   - ~~the clock, quantized to 15 minutes~~ **Go drops it (2026-10-13).** Python led with "As of 9:00 PM, Tuesday, Oct 13." (floored so the bundle stayed byte-stable). Models read it out instead of calling `get_current_time`, so 21:07 was answered "It's 9:00 PM". A frozen clock is stale by design, and a frozen date goes stale at midnight. Item 1's per-turn block carries both, exact;
    - the latest household weather, calendar and reminder memories;
    - live Signals.
 3. `RECENTLY SHOWN …` block (`core_rules.py:487-524`, at most 8 items).

@@ -130,6 +130,9 @@ end of cycle → POST /conversation/end
    - `timezone`, into `node_context` too, so tools resolve in local time (`1000-1006`)
    - `agents`, read-only node-agent data (`1008-1010`)
    - `recently_shown_items` (`1016-1017`)
+   - **jarvisd, new (2026-10-14):** `stt_vocabulary`, a desktop node's app names for whisper's
+     prompt only (kept per node in memory; never in the LLM's messages). See
+     [agent/DESIGN.md §14](../agent/DESIGN.md) "Biasing speech-to-text".
 7. **Speaker.**
    - `validated_speaker_user_id` drops IDs that aren't household members (`1023-1028`).
    - If there's no ID, the speaker is inherited from per-node stickiness. A confident ID is recorded (`1032-1054`; doc 06).
@@ -156,7 +159,7 @@ end of cycle → POST /conversation/end
 - **Loaded into `node_context`:**
   - memories (`399-431`)
   - characterization, if `characterization.injection_enabled` (`439-462`)
-  - the ambient bundle, if `ambient_context.enabled` and memory are on (`471-475`). This is a 15-minute-quantised clock plus the latest weather, calendar and reminder household memories plus live Signals (`3192-3268`).
+  - the ambient bundle, if `ambient_context.enabled` and memory are on (`471-475`). This is a 15-minute-quantised clock plus the latest weather, calendar and reminder household memories plus live Signals (`3192-3268`). Go leaves the clock out: the exact time is in the per-turn `<calendar>` block instead (03 §3.3).
   - `date_keys` from llm-proxy (`483-489`)
 - **System prompt.** `_get_system_prompt` (`3270-3330`). It is the provider prompt plus `NOT_FOR_ME_INSTRUCTION`, `EXCHANGE_COMPLETE_INSTRUCTION`, an optional personality reminder and an optional `<person_view>` tail. When characterization injection is on, it stashes `_system_prompt_base`.
 - **Cache entry.**
@@ -399,7 +402,7 @@ These are read per household unless noted. Definitions are in `services/settings
 | `voice.wake_verification_mode` | `off` | `off`, `bias` or `enforce`. Unknown values become `off`. Per household and node. |
 | `voice.wake_verification_phrase` | `jarvis` | Fuzzy-match target |
 | `voice.followup_doubt_max_rounds` | 2 | Doubt wrap-up cap; ≤0 uses the default |
-| `voice.stt_prompt` | `""` | **jarvisd, new (2026-10-12).** Whisper initial prompt for node voice commands (M3, doc 06); biases spelling and vocabulary. Never applied to the wake-verification pass. Trimmed, last 1000 bytes kept. Per household and node (`media.go` `commandSTTOptions`). |
+| `voice.stt_prompt` | `""` | **jarvisd, new (2026-10-12).** Whisper initial prompt for node voice commands (M3, doc 06); biases spelling and vocabulary. Never applied to the wake-verification pass. Trimmed, last 1000 bytes kept. Per household and node (`media.go` `commandSTTOptions`). A desktop node's `stt_vocabulary` (≤ 400 bytes) goes before it. |
 | `voice.stt_preprocess` | false | **jarvisd, new (2026-10-12).** Normalise and trim silence from node voice commands before whisper. Per household and node. |
 | `voice.follow_up_gate` | true | **jarvisd, new (2026-10-10).** The follow-up gate ([agent/go-pi-node.md §3.10](../agent/go-pi-node.md)): a `not_for_me` follow-up is not committed to history and answers `keep_listening: true`; acoustic evidence (voice vs the wake, `level_vs_wake_db`) drops or hints. Off = legacy behaviour. Per household and node. |
 | `voice.follow_up_voice_mismatch` / `voice.follow_up_voice_match` | 0.25 / 0.40 | **jarvisd.** ERes2Net cosine of a follow-up to the conversation's first transcription: below = a different voice, at/above = the same voice |

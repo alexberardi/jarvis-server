@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { Check, Laptop, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { useApprovePairing, useDenyPairing, usePairings } from '@/hooks/useNodes'
+import { useSystemInfo } from '@/hooks/useSystem'
 import { errorMessage } from '@/lib/errors'
+import { configURLFor } from './configUrl'
 import type { PairingHousehold, PendingPairing } from '@/api/nodes'
 
 const inputClass =
@@ -91,26 +93,46 @@ function PairingRow({ pairing, households }: { pairing: PendingPairing; househol
   )
 }
 
+/** useConfigURL is this server's enroll address, or undefined when the page can't tell. */
+function useConfigURL(): string | undefined {
+  const sys = useSystemInfo()
+  const port = sys.data?.listeners?.find((l) => l.name === 'config')?.port ?? 7700
+  return configURLFor(typeof window === 'undefined' ? '' : window.location.hostname, port)
+}
+
 /**
  * PendingPairings lists computers asking to join (device-code pairing, DESIGN §13). The
- * approver puts each into one of their own households; cc refuses any other. Nothing renders
- * while nothing waits, or when the caller belongs to no household.
+ * approver puts each into one of their own households; cc refuses any other. While nothing
+ * waits it says how to start a pairing, so the page shows where codes appear. usePairings
+ * polls, so a new code shows up without a reload. Nothing renders when the caller belongs
+ * to no household.
  */
 export default function PendingPairings() {
   const { data } = usePairings()
+  const configURL = useConfigURL()
   const pairings = data?.pairings ?? []
   const households = data?.households ?? []
-  if (pairings.length === 0 || households.length === 0) return null
+  if (households.length === 0) return null
   return (
     <section className="space-y-2">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
         Pending pairings
       </h2>
-      <ul className="space-y-2">
-        {pairings.map((p) => (
-          <PairingRow key={p.code} pairing={p} households={households} />
-        ))}
-      </ul>
+      {pairings.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
+          No computers waiting. On the computer, open Jarvis Automation Agent or run{' '}
+          <code className="rounded bg-[var(--color-surface-alt)] px-1 font-mono text-[var(--color-text)]">
+            jarvis-agent enroll --server {configURL ?? "<this server's address>"}
+          </code>
+          ; its code appears here.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {pairings.map((p) => (
+            <PairingRow key={p.code} pairing={p} households={households} />
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

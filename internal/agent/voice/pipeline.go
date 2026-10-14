@@ -126,6 +126,10 @@ type Pipeline struct {
 	OnTurn func(Turn) // optional; called after every turn, on the pipeline goroutine
 	// Indicator, when set, is shown the pipeline's state (indicator.go). Nil shows nothing.
 	Indicator Indicator
+	// Vocabulary, when set, is the names speech-to-text should expect (a desktop's apps), sent
+	// as node_context.stt_vocabulary at each conversation start for whisper's prompt. Never
+	// the LLM's (DESIGN.md §14).
+	Vocabulary func(ctx context.Context) string
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -311,6 +315,17 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 	}
 }
 
+// nodeContext is /conversation/start's node_context: the timezone, and the vocabulary.
+func (p *Pipeline) nodeContext(ctx context.Context) map[string]any {
+	nc := map[string]any{"timezone": p.Cfg.Timezone}
+	if p.Vocabulary != nil {
+		if v := p.Vocabulary(ctx); v != "" {
+			nc["stt_vocabulary"] = v
+		}
+	}
+	return nc
+}
+
 // pendingStart is /conversation/start running in the background from the moment of wake.
 type pendingStart struct {
 	done chan struct{}
@@ -328,7 +343,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	st := &pendingStart{done: make(chan struct{})}
 	go func() {
 		defer close(st.done)
-		st.err = p.Server.StartConversation(ctx, t.ConversationID, map[string]any{"timezone": p.Cfg.Timezone}, p.toolSchemas(ctx))
+		st.err = p.Server.StartConversation(ctx, t.ConversationID, p.nodeContext(ctx), p.toolSchemas(ctx))
 	}()
 	// Row 14: always end it, once the turn (follow-ups included) and start are both over,
 	// without holding up listening.

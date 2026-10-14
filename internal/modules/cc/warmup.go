@@ -28,7 +28,7 @@ const warmupTimeout = 120 * time.Second
 // gone (D47/M4); old nodes that still send them are fine (unknown fields are ignored).
 type startRequest struct {
 	ConversationID string
-	NodeContext    *pyjson.Object // client-supplied; only timezone, agents, recently_shown_items are read
+	NodeContext    *pyjson.Object // client-supplied; only timezone, agents, recently_shown_items, stt_vocabulary are read
 	Commands       []*pyjson.Object
 	ClientTools    []*pyjson.Object
 	// chatUserID marks a mobile chat warmup (mobile_chat.go): the JWT user is the speaker.
@@ -205,6 +205,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 
 	// Client-supplied context: timezone, agents (read-only), recently shown items. The node's
 	// speaker_user_id / speaker_confidence are ignored (D2): a conversation starts unknown.
+	vocab := ""
 	if nc := req.NodeContext; nc != nil {
 		if tz, ok := nc.Get("timezone"); ok {
 			conv.timezone, _ = tz.(string)
@@ -215,11 +216,18 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		if a, ok := nc.Get("agents"); ok {
 			conv.agents, _ = a.(*pyjson.Object)
 		}
+		if v, ok := nc.Get("stt_vocabulary"); ok {
+			vocab, _ = v.(string)
+		}
 		if items, ok := nc.Get("recently_shown_items"); ok {
 			if l, ok := items.([]any); ok && len(l) > 0 {
 				conv.referenced = l
 			}
 		}
+	}
+
+	if req.chatUserID == 0 { // a node's own speech; a phone's chat has none
+		m.vocab.set(n.ID, cleanVocabulary(vocab))
 	}
 
 	// Per-household gates: memory fails open, web search closed (01 §7.10). The tool list is
@@ -233,7 +241,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	}
 	// An explicitly set household zone wins over the reported one (timezone.go).
 	conv.timezone = m.turnTimezone(ctx, hh, conv.timezone)
-	conv.ambient = m.ambientBundle(ctx, hh, conv.timezone)
+	conv.ambient = m.ambientBundle(ctx, hh)
 	// Photo tools (any tool with an image parameter, server or node, §9): offered only where a
 	// photo can arrive — mobile chat whose live slot sees images. Fixed for the conversation
 	// like every other gate (prefix cache); with no photo yet they refuse with no_image.

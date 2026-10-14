@@ -160,6 +160,7 @@ type Module struct {
 
 	convs    *convCache
 	signals  *convSignals
+	vocab    sttVocab // desktop nodes' app names for whisper (stt_vocabulary.go)
 	enroll   *enrollments
 	pairings *pairingStore // device-code pairing (pairing.go)
 	tools    *servertools.Registry

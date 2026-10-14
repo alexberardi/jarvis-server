@@ -3,9 +3,12 @@ package apps
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/winmatch"
 )
 
 // ErrNotFound: no installed app matches the name.
@@ -86,15 +89,33 @@ func levenshtein(a, b string) int {
 	return prev[len(rb)]
 }
 
-// Resolve picks exactly one app for a spoken name, in tiers, stopping at the first tier with
+// Pick is the app a spoken name resolved to, and how.
+type Pick struct {
+	App App
+	// Fuzzy: nothing is called that, and the app was taken from a near spelling or a
+	// sound-alike of what was heard ("Omerite", "oh my right" → Omawrite).
+	Fuzzy bool
+	// HeardAs is the name as given, when Fuzzy.
+	HeardAs string
+}
+
+// Resolve picks exactly one app for a spoken name (Find without the how).
+func Resolve(list []App, query string) (App, error) {
+	p, err := Find(list, query)
+	return p.App, err
+}
+
+// Find picks exactly one app for a spoken name, in tiers, stopping at the first tier with
 // any match: exact (name or desktop id, ignoring case and punctuation), then the name starts
 // with the query, then every query word appears in the name, then a small edit distance (typos,
-// mishearings). A tier with several matches is ambiguous rather than a guess.
-func Resolve(list []App, query string) (App, error) {
+// mishearings), then the same sound (winmatch.SoundsLike: "oh my right" for Omawrite). A tier
+// with several matches is ambiguous rather than a guess. Names that only sound close
+// (winmatch.SoundsNear: "the oven" for Neovim) are never picked; they come back as suggestions.
+func Find(list []App, query string) (Pick, error) {
 	q := cleanQuery(query)
 	nq := norm(q)
 	if nq == "" {
-		return App{}, &NotFoundError{Query: query}
+		return Pick{}, &NotFoundError{Query: query}
 	}
 	tiers := []func(a App) bool{
 		func(a App) bool { return norm(a.Name) == nq || (a.ID != "" && norm(a.ID) == nq) },
@@ -117,13 +138,14 @@ func Resolve(list []App, query string) (App, error) {
 			}
 		}
 		if len(hits) == 1 {
-			return hits[0], nil
+			return Pick{App: hits[0]}, nil
 		}
 		if len(hits) > 1 {
-			return App{}, &AmbiguousError{Query: query, Candidates: names(hits, 8)}
+			return Pick{}, &AmbiguousError{Query: query, Candidates: names(hits, 8)}
 		}
 	}
-	// Fuzzy: allow 1 edit for short names, 2 for longer; the best distance must be unique.
+	fuzzy := func(a App) Pick { return Pick{App: a, Fuzzy: true, HeardAs: strings.TrimSpace(query)} }
+	// Spelling: allow 1 edit for short names, 2 for longer; the best distance must be unique.
 	limit := 1
 	if len(nq) >= 6 {
 		limit = 2
@@ -139,11 +161,58 @@ func Resolve(list []App, query string) (App, error) {
 	}
 	if bestD <= limit {
 		if len(best) == 1 {
-			return best[0], nil
+			return fuzzy(best[0]), nil
 		}
-		return App{}, &AmbiguousError{Query: query, Candidates: names(best, 8)}
+		return Pick{}, &AmbiguousError{Query: query, Candidates: names(best, 8)}
 	}
-	return App{}, &NotFoundError{Query: query, Suggestions: suggest(list, nq, 5)}
+	// Sound: the same sound-alike key as exactly one app.
+	var alike []App
+	for _, a := range list {
+		if winmatch.SoundsLike(q, a.Name) || (a.ID != "" && winmatch.SoundsLike(q, a.ID)) {
+			alike = append(alike, a)
+		}
+	}
+	if len(alike) == 1 {
+		return fuzzy(alike[0]), nil
+	}
+	if len(alike) > 1 {
+		return Pick{}, &AmbiguousError{Query: query, Candidates: names(alike, 8)}
+	}
+	return Pick{}, &NotFoundError{Query: query, Suggestions: suggest(list, q, 5)}
+}
+
+// Scored is one app and how alike its name is to what was heard (0..1).
+type Scored struct {
+	Name  string  `json:"name"`
+	Score float64 `json:"score"`
+}
+
+// minScore: names less alike than this are not worth offering.
+const minScore = 0.5
+
+// Closest is the n apps whose names are most alike what was heard, by spelling or sound
+// (winmatch.Similarity), best first; an exact, prefix or all-words match scores 1.
+func Closest(list []App, query string, n int) []Scored {
+	q := cleanQuery(query)
+	nq := norm(q)
+	if nq == "" {
+		return nil
+	}
+	var all []Scored
+	for _, a := range list {
+		s := winmatch.Similarity(q, a.Name)
+		if na := norm(a.Name); na == nq || strings.HasPrefix(na, nq) || (a.ID != "" && norm(a.ID) == nq) {
+			s = 1
+		}
+		if s >= minScore {
+			all = append(all, Scored{Name: a.Name, Score: math.Round(s*100) / 100})
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
+	if len(all) > n {
+		all = all[:n]
+	}
+	return all
 }
 
 func names(as []App, n int) []string {
@@ -158,22 +227,16 @@ func names(as []App, n int) []string {
 	return out
 }
 
-// suggest returns the n names closest to the query by edit distance.
-func suggest(list []App, nq string, n int) []string {
-	type sc struct {
-		name string
-		d    int
-	}
-	var all []sc
-	for _, a := range list {
-		all = append(all, sc{a.Name, levenshtein(nq, norm(a.Name))})
-	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].d < all[j].d })
+// suggest returns up to n names close to the query, by spelling or sound, best first.
+func suggest(list []App, q string, n int) []string {
 	var out []string
-	for i := 0; i < len(all) && i < n; i++ {
-		if all[i].d <= max(2, len(nq)/2) { // only names that are actually close
-			out = append(out, all[i].name)
+	for _, c := range Closest(list, q, n) {
+		if c.Score >= suggestScore {
+			out = append(out, c.Name)
 		}
 	}
 	return out
 }
+
+// suggestScore: only names that are actually close are suggested.
+const suggestScore = 0.6
