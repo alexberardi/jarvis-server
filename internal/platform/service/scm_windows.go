@@ -106,17 +106,8 @@ func (w *scm) Install(ctx context.Context, o InstallOptions) error {
 	if err := os.MkdirAll(filepath.Join(o.Home, "logs"), 0o700); err != nil {
 		return err
 	}
-	args := []string{"serve", "--home", o.Home}
-	cfg := mgr.Config{
-		DisplayName:      "Jarvis server (jarvisd)",
-		Description:      "Jarvis voice assistant server. Data in " + o.Home + ".",
-		StartType:        mgr.StartAutomatic,
-		DelayedAutoStart: true, // after the network is up
-		ErrorControl:     mgr.ErrorNormal,
-		ServiceStartName: WindowsAccount,
-		// An unrestricted service SID lets ACLs and firewall rules name NT SERVICE\jarvisd.
-		SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED,
-	}
+	args := serviceArgs(o.Home)
+	cfg := serviceConfig(o.Home)
 	s, err := m.OpenService(Name)
 	if err == nil {
 		// Reinstall: stop the old one (it holds the exe), then point it at the new command line.
@@ -173,6 +164,23 @@ func (w *scm) Install(ctx context.Context, o InstallOptions) error {
 		return nil
 	}
 	return startService(ctx, s, o.Home)
+}
+
+// serviceArgs is the jarvisd service's command line after the binary.
+func serviceArgs(home string) []string { return []string{"serve", "--home", home} }
+
+// serviceConfig is the jarvisd service's configuration (without the binary path).
+func serviceConfig(home string) mgr.Config {
+	return mgr.Config{
+		DisplayName:      "Jarvis server (jarvisd)",
+		Description:      "Jarvis voice assistant server. Data in " + home + ".",
+		StartType:        mgr.StartAutomatic,
+		DelayedAutoStart: true, // after the network is up
+		ErrorControl:     mgr.ErrorNormal,
+		ServiceStartName: WindowsAccount,
+		// An unrestricted service SID lets ACLs and firewall rules name NT SERVICE\jarvisd.
+		SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED,
+	}
 }
 
 func startService(ctx context.Context, s *mgr.Service, home string) error {
@@ -345,7 +353,7 @@ func staleness(args []string, home, account string) string {
 		return "the service's command line has no binary or --home this version can read; " + winStaleNote
 	}
 	binary := args[0]
-	if commandLine(binary, args[1:]...) != commandLine(binary, "serve", "--home", home) || !strings.EqualFold(account, WindowsAccount) {
+	if commandLine(binary, args[1:]...) != commandLine(binary, serviceArgs(home)...) || !strings.EqualFold(account, WindowsAccount) {
 		return "the jarvisd service differs from what this version registers (an older version registered it); " + winStaleNote
 	}
 	h, done, err := openQueryName(HelperName)

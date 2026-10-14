@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/doctor"
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/update"
 )
@@ -58,6 +60,10 @@ func runHelper(ctx context.Context, home, owner string, onDemand bool, w io.Writ
 		// The systemd pre-start never fails the start: report and let serve run.
 		action, m, err := update.PrivilegedStep(ctx, paths, o)
 		reportStep(say, action, m, err)
+		if action == update.ActionSwapped {
+			// The unit applies from the next start; this one carries on (decided Q7).
+			refreshAfterSwap(ctx, exe, home, w, say)
+		}
 		return nil
 	}
 	// On demand: a request that arrives while this runs is picked up by another round.
@@ -80,8 +86,12 @@ func runHelper(ctx context.Context, home, owner string, onDemand bool, w io.Writ
 				say("firewall: %v; run `sudo jarvisd doctor --fix`", err)
 			}
 		}
+		restart := service.RestartFromHelper
+		if action == update.ActionSwapped && refreshAfterSwap(ctx, exe, home, w, say).Reload {
+			restart = service.ReloadFromHelper
+		}
 		say("restarting jarvisd")
-		if err := service.RestartFromHelper(ctx); err != nil {
+		if err := restart(ctx); err != nil {
 			say("restart failed: %v", err)
 			return nil
 		}
@@ -90,6 +100,37 @@ func runHelper(ctx context.Context, home, owner string, onDemand bool, w io.Writ
 		}
 	}
 	return nil
+}
+
+// refreshAfterSwap closes the gap an admin-button upgrade used to leave (01-no-cli-plan 1.3,
+// 00-installers §8.2): the release just installed may write its service definition
+// differently (a new ExecStartPre, a plist key, the updater's command line), and the
+// unprivileged service can't rewrite it. So the helper, which has just verified that release's
+// signature and put it at exe, has it compare and rewrite its own definition
+// (`upgrade --refresh-definition`): the decision is the new version's, since this (older)
+// helper can't know what it writes. Only after a verified swap: never for a rollback, and
+// never a binary from anywhere but exe. A failure is reported and the upgrade stands; the
+// definition then stays stale as before (`service status` says so).
+func refreshAfterSwap(ctx context.Context, exe, home string, w io.Writer, say func(string, ...any)) service.RefreshResult {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "upgrade", "--refresh-definition", "--home", home)
+	cmd.Stderr = w
+	out, err := cmd.Output()
+	var res service.RefreshResult
+	if err == nil {
+		err = json.Unmarshal(out, &res)
+	}
+	switch {
+	case err != nil:
+		say("could not refresh the service definition (%v); `jarvisd service status` says whether it is outdated", err)
+	case len(res.Changed) > 0:
+		say("rewrote the service definition for the new version: %s", strings.Join(res.Changed, ", "))
+		if res.Note != "" {
+			say("%s", res.Note)
+		}
+	}
+	return res
 }
 
 func reportStep(say func(string, ...any), action string, m *update.Marker, err error) {
@@ -219,4 +260,27 @@ func runWindowsHelper(flagHome string, args []string) int {
 		fmt.Fprintln(os.Stderr, "jarvisd:", err)
 	}
 	return service.ExitCode(err)
+}
+
+// runRefreshDefinition is `jarvisd upgrade --refresh-definition --home H` (internal): the
+// privileged helper runs it on the binary it has just installed. It rewrites the service
+// definitions this build renders differently, for the binary (this one) and home they already
+// name, and prints a service.RefreshResult as JSON. Like the helper it reads nothing from the
+// home: not jarvisd.env, not the marker.
+func runRefreshDefinition(ctx context.Context, home string, stdout io.Writer) error {
+	if home == "" || !filepath.IsAbs(home) {
+		return errors.New("--refresh-definition needs an absolute --home")
+	}
+	if !doctor.Elevated() {
+		return errors.New("--refresh-definition is for the privileged upgrade helper (root or an administrator)")
+	}
+	exe, err := selfExe()
+	if err != nil {
+		return err
+	}
+	res, err := service.RefreshDefinition(ctx, exe, filepath.Clean(home))
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(stdout).Encode(res)
 }

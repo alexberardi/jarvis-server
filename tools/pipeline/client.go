@@ -120,14 +120,17 @@ func do(ctx context.Context, client *http.Client, url, contentType string, body 
 }
 
 // Start opens a conversation with the node's tool set and, when agents is not nil, its
-// device payload (node_context.agents).
-func (n *Node) Start(ctx context.Context, cid, timezone string, tools []json.RawMessage, agents json.RawMessage) error {
+// device payload (node_context.agents); a vocab that is not "" is node_context.stt_vocabulary.
+func (n *Node) Start(ctx context.Context, cid, timezone string, tools []json.RawMessage, agents json.RawMessage, vocab string) error {
 	if tools == nil {
 		tools = []json.RawMessage{}
 	}
 	nc := map[string]any{"timezone": timezone}
 	if agents != nil {
 		nc["agents"] = agents
+	}
+	if vocab != "" {
+		nc["stt_vocabulary"] = vocab
 	}
 	return n.post(ctx, "/api/v0/conversation/start", map[string]any{
 		"conversation_id":    cid,

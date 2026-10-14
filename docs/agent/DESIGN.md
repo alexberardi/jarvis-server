@@ -490,7 +490,7 @@ Hyprland first, Windows later). Code: `internal/agent/island`; the pipeline's si
 | wake word heard, recording; a follow-up answer started; a validation reply | **listening**: slides in; orb + 5 bars follow the microphone level (dB scale, −50 → −12 dBFS) |
 | transcribing, waiting for command-center, running tools | **thinking**: a slow travelling pulse (violet) |
 | playing a reply | **speaking**: bars follow the reply's PCM as it is written to the speaker (white) |
-| follow-up window open, nobody speaking | **follow-up**: dimmer pill, a ring counting down the time left to start answering. After an ignored answer it shows what is left of the window (≥ 2 s), the same rule the window follows |
+| follow-up window open, nobody speaking | **follow-up**: a dimmed orb and bars (the pill stays as opaque as in every state, so it stays legible on a light desktop), a ring counting down the time left to start answering. After an ignored answer it shows what is left of the window (≥ 2 s), the same rule the window follows |
 | turn over / not for me | slides away |
 | turn failed | red for 1.2 s, then slides away |
 
@@ -1549,8 +1549,17 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
 |---|---|---|---|
 | What | StatusNotifierItem + `com.canonical.dbusmenu` on the session bus (godbus) | `NSStatusItem` in the menu bar, purego, in the island's AppKit loop | `Shell_NotifyIconW` in the notification area, syscalls |
 | Shown by | waybar's tray module, KDE Plasma, GNOME with the AppIndicator extension, XFCE/LXQt panels | always (macOS 26 hosts the item's window in Control Center) | always |
-| Icon | the shield in colour (`icon.png`, the extension's icon), ARGB pixmaps 16–64 px | a template image derived from the shield: black where it is dark, clear where the figure is light, so macOS tints it | the shield in colour |
+| Icon | the shield in colour, ARGB pixmaps 16–64 px | a template image: the shield's silhouette in black with the butler cut out (clear), so macOS tints it | the shield in colour, at the system's small-icon size |
 | No host | stays exported; registers when a `StatusNotifierWatcher` appears (a bar started after the agent, or restarted); one info log line; `status` says "off: no status icon host" | n/a | n/a |
+
+**Small sizes are drawn, not scaled (2026-10-14).** A tray shows the icon at 16–32 px, and a
+downscale of the 128 px artwork (`icon.png`, the extension's icon) lost the shield's light
+outline and its pointed bottom: in `scripts/desktop-shot` it read as a purple rectangle with a
+white blob. Up to 32 px (and the 36 px macOS template) `tray/glyph.go` draws the shield as
+vectors on the pixel grid: a light rim of 1–2 px (the shape on a dark bar), the brand purple
+inside (the shape on a light bar), the robot's head (a visor from 22 px) and the shoulders on a
+16-unit grid with purple between them and around them, so the point stays visible. 48 and
+64 px still scale the artwork. Goldens: `tray/testdata/*.png`.
 
 The agent never fails because of the icon: a backend that can't start logs once and the agent
 runs without it.

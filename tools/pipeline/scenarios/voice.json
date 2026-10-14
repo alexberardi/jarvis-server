@@ -123,23 +123,18 @@
     ]
   },
   {
-    "name": "voice: type into omawrite (heard as Omerite)",
-    "tags": [
-      "known-bug"
-    ],
+    "name": "voice: type into omawrite (the desktop's app names bias whisper)",
     "voice": true,
     "tools": "../toolsets/desktop.json",
     "home": "none",
+    "stt_vocabulary": "Alacritty, Firefox, Omawrite, Aether, Basecamp, btop++, Chromium, cliamp, Deskflow, Discord, Disks, Docker, Files, Foot, HEY, Kdenlive, LibreOffice, LocalSend, Moonlight, Neovim, Obsidian, Omacalc, Omacut, Pinta, Steam, Sunshine, Tensaku, uuctl, WhatsApp, Xournal++, YouTube, Zoom, Cyberpunk 2077, Disk Usage, Document Viewer, Foot Client, Foot Server, Google Contacts, Google Maps, Google Messages",
     "results": {
       "desktop_type_text": {
-        "success": false,
-        "error": "no window matches the app",
-        "error_code": "no_match",
-        "open_apps": [
-          "Alacritty",
-          "firefox",
-          "omawrite"
-        ]
+        "success": true,
+        "submitted": false,
+        "typed_chars": 34,
+        "into": "Omawrite",
+        "matched_app": "omawrite"
       }
     },
     "turns": [
@@ -147,11 +142,42 @@
         "say": "type into omawrite that I need to take the dogs for a walk",
         "expect": {
           "heard": "(?i)oma ?write",
+          "not_heard": "(?i)omerite",
+          "tool": "desktop_type_text",
+          "args_match": {
+            "app": "(?i)^oma ?write$",
+            "text": "(?i)take the dogs for a walk"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: type into omawrite, no app names (heard Omerite, the agent resolves it)",
+    "voice": true,
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "results": {
+      "desktop_type_text": {
+        "success": true,
+        "submitted": false,
+        "typed_chars": 34,
+        "into": "Omawrite",
+        "matched_app": "omawrite",
+        "fuzzy_match": true,
+        "heard_as": "Omerite"
+      }
+    },
+    "turns": [
+      {
+        "say": "type into omawrite that I need to take the dogs for a walk",
+        "expect": {
           "tool": "desktop_type_text",
           "args_match": {
             "text": "(?i)take the dogs for a walk"
           },
-          "not_reply": "(?i)(typed|done)"
+          "reply": "(?i)oma ?write",
+          "not_reply": "(?i)(in|into|to) omerite"
         }
       }
     ]

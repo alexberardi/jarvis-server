@@ -12,3 +12,11 @@ func StartHelper(context.Context) error { return errUnsupported }
 
 // RestartFromHelper fails like New.
 func RestartFromHelper(context.Context) error { return errUnsupported }
+
+// RefreshDefinition fails like New.
+func RefreshDefinition(context.Context, string, string) (RefreshResult, error) {
+	return RefreshResult{}, errUnsupported
+}
+
+// ReloadFromHelper fails like New.
+func ReloadFromHelper(context.Context) error { return errUnsupported }
