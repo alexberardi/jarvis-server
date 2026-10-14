@@ -1426,6 +1426,50 @@ The agent can't tell a model that calls `desktop_confirm` without asking from on
 the guarantee is "a tool call naming the user's answer", not proof the user spoke (open
 question 2).
 
+### The Jarvis page in front (2026-10-14)
+
+Someone chatting with Jarvis in the web page on the computer whose agent they picked asks it to
+type something ([web app plan §3.6](../webapp/01-member-web-app-plan.md), P6). With no `app`
+named the text would go into the window in front, which is the chat itself. The rules above
+stand; this adds one case before them (`internal/agent/jarvispage`, `dictate/jarvispage.go`,
+`dictate/focushistory.go`, `browser/jarvispage.go`).
+
+- **The server's page.** The agent knows its server: the config URL it enrolled with, plus the
+  web UI's and command-center's addresses from discovery. A page is the Jarvis page when its
+  host and port are one of those (any loopback name matches any other). A window shows it when
+  the window is a browser (winmatch's browser kind, or a Chromium app window) and its title
+  carries the web app's title ("Jarvis Automation") or one of those `host:port`s, or a Chromium
+  app id (`chrome-<host>__…`) carries the server's host; or, with the browser extension, when the
+  focused browser's current tab is on the server and its title is in the window's title. A
+  terminal whose title mentions the address is never the page.
+- **Typing or a key with no `app` while the page is in front:** the agent picks the window that
+  had focus just before it from the backend's focus history, then focuses it and confirms the
+  focus as for a named app; nothing is typed if focus isn't confirmed (`focus_failed`). The result
+  names it (`into: "Omawrite"`, `matched_app`, `instead_of_jarvis_page: true`, and a `note`
+  "The Jarvis page was in front, so this went to the window used before it: Omawrite."), and the
+  island says "Typing into Omawrite: …". Focus history: Hyprland's `focusHistoryID`, sway's focus
+  lists, X11's `_NET_CLIENT_LIST_STACKING` (top first; the window manager raises what it
+  focuses), Windows' Z order (`EnumWindows`), macOS's on-screen windows front to back
+  (`CGWindowListCopyWindowInfo` through JavaScript for Automation, owner pids only).
+- **No focus history, or no other window:** `jarvis_page_in_front`, nothing typed: "Nothing was
+  typed: the Jarvis page is in front, and this desktop can't tell which window was used before
+  it, and typing there would only go into the chat. Tell the user nothing was typed and ask
+  which app to type into, then call again with that app." GNOME and KDE on Wayland can't list
+  windows at all, so only the browser extension can tell that the page has focus there; then the
+  sentence asks which app and says the user must click into it first. Island: "The Jarvis page
+  is in front — nothing typed".
+- **`browser_fill` / `browser_click` on a tab of the server** (the given `tab_id`, else the
+  current tab), checked before a confirmation question and again when it is answered:
+  `jarvis_page`, "Nothing was filled: that tab is the Jarvis page itself (the chat the user is
+  typing in), so this would only act on the chat. Tell the user nothing was filled and ask which
+  page they meant: they can open it in the browser, then ask again." A tab whose address can't be
+  told is let through.
+- **The prompt hint.** The web app sends `client: {surface: "web", same_device: true}` on a chat
+  turn when the chosen node is this computer's agent (`/api/addons/this-device`); command-center
+  then adds one line to the turn ("the user is writing this in the Jarvis web page on this
+  computer, which is the window in front; … put the app they name in app …"), only with
+  `desktop_type_text` offered. Mobile sends no `client` and is unaffected.
+
 ### The island note
 
 `Island.Note(text, d)` shows a wider pill (up to 344 pt, canvas now 360 × 56) with a green dot
@@ -1578,6 +1622,20 @@ never in logs or results; password fields only when named.
   sway with no input devices answers the virtual keyboard's `wl_seat.get_keyboard` (reading the
   desktop's layout) with a protocol error; `vkbd` now asks only a seat whose capabilities include a
   keyboard (and allocates no id otherwise: Wayland new ids must stay consecutive).
+
+- **The Jarvis page in front (nested headless sway 1.12, 2026-10-14):** `foot --app-id omawrite`
+  (`cat > fileA`), then a focused browser-like window (`foot --app-id firefox --title "Jarvis
+  Automation — Mozilla Firefox"`, `cat > fileB`); `jarvis-agent try --server
+  http://localhost:17700 desktop_type_text {text: "walk the dogs", submit: true}` → `into:
+  Omawrite`, `instead_of_jarvis_page: true`; fileA got exactly the text and a newline, fileB
+  nothing. The same with the title `localhost:17710/chat — Mozilla Firefox` (server given as
+  `127.0.0.1:17710`) and with a Chromium app window `chrome-localhost__chat-Default`. Controls,
+  typed into the window in front as before: a `foot` titled "curl localhost:17710", Firefox on
+  "Docs", Firefox on `localhost:3000`. Focus history, not creation order: omawrite, then notes,
+  then omawrite focused, then the page → typed into Omawrite (and `desktop_press_key enter`
+  after it went to Omawrite, now in front); page, notes, page again → typed into Notes. Not run
+  for real: Hyprland, X11, Windows, macOS (unit tests with fake backends), GNOME/KDE, and the
+  browser extension's side.
 
 ### Open questions (defaults chosen; the user reviews)
 

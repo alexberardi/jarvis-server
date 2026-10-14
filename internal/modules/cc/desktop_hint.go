@@ -105,3 +105,24 @@ func (c *conversation) hasTool(name string) bool {
 	}
 	return false
 }
+
+// The same-device hint (web app plan §3.6, DESIGN.md §14 "The Jarvis page in front"): someone
+// chatting in the Jarvis web page on the computer whose agent they are talking to. The window
+// in front is that page, so the turn says to name the app for typing and keys; the agent
+// itself never types into the page.
+
+// desktopTypeTool is the desktop agent's typing tool.
+const desktopTypeTool = "desktop_type_text"
+
+// SameDeviceHint is the line added to such a turn.
+const SameDeviceHint = "[web: the user is writing this in the Jarvis web page on this computer, which is the window in front. " +
+	"For desktop_type_text and desktop_press_key, an app the user names goes in app (\"type hi into slack\" → app: \"slack\"); " +
+	"with none named, leave app out and the text goes to the window they used before this page.]"
+
+// sameDeviceHint is SameDeviceHint for a same-device web chat with the typing tool, or "".
+func sameDeviceHint(conv *conversation, in turnInput) string {
+	if !in.SameDevice || conv.chatUserID == 0 || !conv.hasTool(desktopTypeTool) {
+		return ""
+	}
+	return SameDeviceHint
+}

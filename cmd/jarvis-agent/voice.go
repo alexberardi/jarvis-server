@@ -181,6 +181,8 @@ func listen(ctx context.Context, args []string) error {
 			return err
 		}
 		defer closeTools()
+		tf.origins.Add(c.ConfigURL)
+		addServerOrigins(tf.origins, svcs)
 		tools = nodesettings.Gate{Tools: ts, Store: st}
 	}
 	if *timeout > 0 {

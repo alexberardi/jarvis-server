@@ -153,6 +153,10 @@ func appMatches(apps []string, q string) bool {
 	return false
 }
 
+// IsBrowser: one of a window's app names is a web browser's ("firefox", "google-chrome",
+// a Chromium app window's "chrome-host__path-Default").
+func IsBrowser(apps []string) bool { return aliasMatches(apps, "browser") }
+
 func aliasMatches(apps []string, q string) bool {
 	kinds := aliases[q]
 	for _, a := range apps {
