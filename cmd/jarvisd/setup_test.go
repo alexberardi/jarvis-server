@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/qrterm"
 )
 
 func TestSetupLink(t *testing.T) {
@@ -41,19 +42,19 @@ func TestPrintSetupLink(t *testing.T) {
 	port, _ := strconv.Atoi(p)
 	cfg := config.Config{Home: home, Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710, config.ListenerConfig: port}}
 	var out bytes.Buffer
-	if err := printSetupLink(cfg, &out); err != nil || out.String() != "jarvisd is set up. The admin is at http://127.0.0.1:7710/\n" {
+	if err := printSetupLink(cfg, &out, setupLinkOptions{}); err != nil || out.String() != "jarvisd is set up. The admin is at http://127.0.0.1:7710/\n" {
 		t.Fatalf("no token, running: %v %q", err, out.String())
 	}
 	// No token and nothing answering: not started yet.
 	srv.Close()
 	out.Reset()
-	if err := printSetupLink(cfg, &out); err != nil || !strings.Contains(out.String(), "isn't answering yet") ||
+	if err := printSetupLink(cfg, &out, setupLinkOptions{}); err != nil || !strings.Contains(out.String(), "isn't answering yet") ||
 		!strings.Contains(out.String(), "jarvisd setup-link") || !strings.Contains(out.String(), "http://127.0.0.1:7710/\n") {
 		t.Fatalf("no token, not running: %v %q", err, out.String())
 	}
 	os.WriteFile(filepath.Join(home, "setup-token"), []byte("abc123\n"), 0o600)
 	out.Reset()
-	if err := printSetupLink(cfg, &out); err != nil || !strings.Contains(out.String(), "http://127.0.0.1:7710/setup#token=abc123") ||
+	if err := printSetupLink(cfg, &out, setupLinkOptions{}); err != nil || !strings.Contains(out.String(), "http://127.0.0.1:7710/setup#token=abc123") ||
 		!strings.Contains(out.String(), "Setup token: abc123") {
 		t.Fatalf("token: %v %q", err, out.String())
 	}
@@ -96,5 +97,61 @@ func TestInteractiveDesktop(t *testing.T) {
 	}
 	if interactiveDesktop(env("SSH_CONNECTION", "1 2 3 4", "DISPLAY", ":0"), os.Stderr) {
 		t.Error("ssh session")
+	}
+}
+
+// install plan 1.2: --url is the URL alone (installers open it), --qr adds a QR code of it.
+func TestSetupLinkURLAndQR(t *testing.T) {
+	home := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	_, p, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	port, _ := strconv.Atoi(p)
+	cfg := config.Config{Home: home, Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710, config.ListenerConfig: port}}
+
+	opt, err := parseSetupLinkArgs([]string{"--url"}, io.Discard)
+	if err != nil || !opt.urlOnly || opt.qr {
+		t.Fatalf("parse: %+v %v", opt, err)
+	}
+	var out bytes.Buffer
+	if err := printSetupLink(cfg, &out, opt); err != nil || out.String() != "http://127.0.0.1:7710/\n" {
+		t.Fatalf("set up, --url: %v %q", err, out.String())
+	}
+	os.WriteFile(filepath.Join(home, "setup-token"), []byte("abc123\n"), 0o600)
+	out.Reset()
+	if err := printSetupLink(cfg, &out, opt); err != nil || out.String() != "http://127.0.0.1:7710/setup#token=abc123\n" {
+		t.Fatalf("token, --url: %v %q", err, out.String())
+	}
+
+	// --qr: the usual text, then the code, drawn with the style chosen for the terminal.
+	opt, _ = parseSetupLinkArgs([]string{"--qr"}, io.Discard)
+	out.Reset()
+	if err := printSetupLink(cfg, &out, opt); err != nil {
+		t.Fatal(err)
+	}
+	var want bytes.Buffer
+	if err := qrterm.Write(&want, "http://127.0.0.1:7710/setup#token=abc123", qrterm.DarkOnLight); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.HasPrefix(s, "Finish setup in a browser:") || !strings.Contains(s, "scan this with a phone") || !strings.HasSuffix(s, want.String()) {
+		t.Fatalf("--qr:\n%s", s)
+	}
+	// --url --qr: the URL line, a blank line, the code.
+	opt, _ = parseSetupLinkArgs([]string{"--url", "--qr"}, io.Discard)
+	out.Reset()
+	if err := printSetupLink(cfg, &out, opt); err != nil || out.String() != "http://127.0.0.1:7710/setup#token=abc123\n\n"+want.String() {
+		t.Fatalf("--url --qr: %v\n%s", err, out.String())
+	}
+
+	if _, err := parseSetupLinkArgs([]string{"extra"}, io.Discard); err == nil {
+		t.Fatal("a stray argument should fail")
+	}
+	if _, err := parseSetupLinkArgs([]string{"--nope"}, io.Discard); err == nil {
+		t.Fatal("an unknown flag should fail")
+	}
+	// Not a terminal: plain blocks.
+	if s := qrStyleFor(&bytes.Buffer{}); s != qrterm.DarkOnLight {
+		t.Fatalf("style for a buffer: %v", s)
 	}
 }

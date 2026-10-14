@@ -15,6 +15,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jezek/xgb v1.3.1
 	github.com/libp2p/zeroconf/v2 v2.2.0
+	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/warthog618/go-gpiocdev v0.9.2
@@ -24,6 +25,7 @@ require (
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 	modernc.org/sqlite v1.60.1
+	rsc.io/qr v0.2.0
 )
 
 require (
@@ -41,6 +43,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
