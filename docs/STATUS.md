@@ -32,6 +32,9 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   **The extension is now 0.2.0** (dictation's `fill` and `click`, 2026-10-13): upload 0.2.0, not
   0.1.x, to both stores, and re-sign the embedded `.xpi` (it is 0.1.0, which answers fill/click
   with `unknown_command`).
+  **Device sign-out** (user 2026-10-14, [decision](decisions/2026-10-14-device-sign-out.md)): the
+  pairer or a household admin signs a device out from Add-ons; desktop agents get no factory reset
+  and return to their first-run page with their settings kept.
 - [ ] **Try dictation on a GNOME or KDE Wayland desktop (e.g. Bazzite)**: `jarvis-agent dictation allow`, then type text with accents/CJK and press keys; report whether the dialog remembered the grant and which characters arrived ([agent/DESIGN.md §14](agent/DESIGN.md), the RemoteDesktop portal). Also Hyprland (built-in virtual keyboard) and any X11 desktop (XTEST/EWMH).
 - [ ] **Review dictation's defaults** (`docs/agent/DESIGN.md` §14, open questions 1–9; built
   2026-10-13 with confirmation off, 2000-character cap, no clipboard, password fields only when
