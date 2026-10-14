@@ -8,6 +8,7 @@
 //	─────────────
 //	✓ Listen for "Hey Jarvis"                   (voice on/off, live; saved in agent.json)
 //	  Open Jarvis Automation                    (the server's web UI, when it is known)
+//	  Set up / Settings…                        (the agent's setup page in the browser)
 //	─────────────
 //	  Quit Jarvis Automation Agent              (the same as `jarvis-agent stop`)
 //
@@ -34,6 +35,8 @@ type State struct {
 	Voice          bool
 	// OpenURL, when set, shows "Open Jarvis Automation" (the server's web UI).
 	OpenURL string
+	// Setup shows "Set up / Settings…" (the agent's own setup page).
+	Setup bool
 }
 
 // Actions are what the menu's items do. Each runs on its own goroutine, never on the OS's UI
@@ -43,6 +46,8 @@ type Actions struct {
 	SetVoice func(on bool)
 	// Open opens url (State.OpenURL) in the browser.
 	Open func(url string)
+	// Setup opens the agent's setup page.
+	Setup func()
 	// Quit stops the agent (exit 0: no supervisor restarts it).
 	Quit func()
 }
@@ -55,12 +60,14 @@ const (
 	IDQuit
 	idSep1
 	idSep2
+	IDSetup
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
 const (
 	VoiceLabel = `Listen for "Hey Jarvis"`
 	OpenLabel  = "Open Jarvis Automation"
+	SetupLabel = "Set up / Settings…"
 	QuitLabel  = "Quit " + appid.DisplayName
 )
 
@@ -92,7 +99,10 @@ func Items(s State) []Item {
 	if s.OpenURL != "" {
 		items = append(items, Item{ID: IDOpen, Label: OpenLabel, Enabled: true})
 	}
-	if s.VoiceAvailable || s.OpenURL != "" {
+	if s.Setup {
+		items = append(items, Item{ID: IDSetup, Label: SetupLabel, Enabled: true})
+	}
+	if s.VoiceAvailable || s.OpenURL != "" || s.Setup {
 		items = append(items, Item{ID: idSep2, Separator: true})
 	}
 	return append(items, Item{ID: IDQuit, Label: QuitLabel, Enabled: true})
@@ -184,6 +194,10 @@ func (t *Tray) clicked(id int32) {
 		case IDOpen:
 			if s.OpenURL != "" && t.act.Open != nil {
 				t.act.Open(s.OpenURL)
+			}
+		case IDSetup:
+			if s.Setup && t.act.Setup != nil {
+				t.act.Setup()
 			}
 		case IDQuit:
 			if t.act.Quit != nil {

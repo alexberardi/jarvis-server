@@ -32,6 +32,9 @@ func TestItems(t *testing.T) {
 	}{
 		{State{Status: "Running", VoiceAvailable: true, Voice: true, OpenURL: "http://x/"},
 			`(Jarvis Automation Agent — Running) | -- | [x] Listen for "Hey Jarvis" | Open Jarvis Automation | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", VoiceAvailable: true, Voice: true, OpenURL: "http://x/", Setup: true},
+			`(Jarvis Automation Agent — Running) | -- | [x] Listen for "Hey Jarvis" | Open Jarvis Automation | Set up / Settings… | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", Setup: true}, `(Jarvis Automation Agent — Running) | -- | Set up / Settings… | -- | Quit Jarvis Automation Agent`},
 		{State{VoiceAvailable: true},
 			`(Jarvis Automation Agent — Running) | -- | [ ] Listen for "Hey Jarvis" | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
@@ -71,8 +74,9 @@ func TestClicksRunActions(t *testing.T) {
 				rec("voice off")
 			}
 		},
-		Open: func(u string) { rec("open " + u) },
-		Quit: func() { rec("quit") },
+		Open:  func(u string) { rec("open " + u) },
+		Setup: func() { rec("setup") },
+		Quit:  func() { rec("quit") },
 	}, State{VoiceAvailable: true})
 	be := &fakeBackend{}
 	if err := tr.attach(be); err != nil {
@@ -88,20 +92,25 @@ func TestClicksRunActions(t *testing.T) {
 	tr.Update(func(s *State) { s.OpenURL = "http://jarvis.example/" })
 	tr.clicked(IDOpen)
 	tr.wait()
+	tr.clicked(IDSetup) // not shown: nothing
+	tr.wait()
+	tr.Update(func(s *State) { s.Setup = true })
+	tr.clicked(IDSetup)
+	tr.wait()
 	tr.clicked(IDHeader) // the header does nothing
 	tr.clicked(IDQuit)
 	tr.wait()
-	if strings.Join(got, ", ") != "voice on, voice off, open http://jarvis.example/, quit" {
+	if strings.Join(got, ", ") != "voice on, voice off, open http://jarvis.example/, setup, quit" {
 		t.Fatalf("actions %q", got)
 	}
-	if len(be.shown) != 3 || !strings.Contains(be.shown[1], "[x] Listen") {
+	if len(be.shown) != 4 || !strings.Contains(be.shown[1], "[x] Listen") || !strings.Contains(be.shown[3], "Set up / Settings…") {
 		t.Fatalf("shown %q", be.shown)
 	}
 	tr.Close()
 	tr.Close()
 	tr.clicked(IDQuit) // after Close: ignored
 	tr.wait()
-	if !be.closed || len(got) != 4 {
+	if !be.closed || len(got) != 5 {
 		t.Fatalf("closed %v, actions %q", be.closed, got)
 	}
 }

@@ -13,8 +13,10 @@ Moved here from the `jarvis-host-agent` repo on 2026-10-10 so it can share jarvi
 questions: **[docs/agent/DESIGN.md](../../docs/agent/DESIGN.md)**: read it first. The voice/Pi
 roadmap is [docs/agent/go-pi-node.md](../../docs/agent/go-pi-node.md).
 
-Nothing listens on a port: the agent talks to jarvisd only as a node (HTTP client + MQTT client).
-The one local listener is the browser socket (a user-only Unix socket, see `browser/`).
+The agent talks to jarvisd only as a node (HTTP client + MQTT client). Its local listeners are
+user-only Unix sockets (browser, control, `setup.sock`; see `browser/`, `control/`) and, only
+while `jarvis-agent setup` runs, the setup page on 127.0.0.1 behind a per-launch secret
+(`firstrun/`). Nothing listens on the LAN.
 
 > **Identity rule:** `internal/agent/host` owns *how to do a thing on this OS*. It owns no policy, no
 > routing and no voice logic. Deciding *which* window the user meant, or *whether* they may,
@@ -38,6 +40,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent install --dry-run               # the per-user setup it would do (login item, menu, URL, native host)
 ./jarvis-agent install | uninstall [--purge]   # do / undo it (--files-only: no systemd/launchd/processes)
 ./jarvis-agent start                           # what the menu entry, shortcut and jarvis-agent://start run
+./jarvis-agent setup [--no-open] [--no-start]  # the setup page (start opens it when not set up; the menu's "Set up / Settings…")
 ./jarvis-agent restart                         # via systemd/launchd when they run it; applies config changes
 ./jarvis-agent stop                            # quit until the next login or start (exit 0: no supervisor restarts it)
 ./jarvis-agent dictation allow                 # GNOME/KDE Wayland: the portal's one-time typing dialog
@@ -158,7 +161,11 @@ internal/agent/
                       wake-model fetch (models.go), Serve (reopen on failure)
 internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego, macOS), wav:FILE
   control/            the running agent's control socket: single-instance lock, show-running (the
-                      "Jarvis is running" pill), ping, quit
+                      "Jarvis is running" pill), ping, quit, voice-on/voice-off
+  firstrun/           the setup page (install plan 1.5, DESIGN.md §13 "The setup page"): loopback
+                      server + security checks (firstrun.go), state and handlers (app.go), server
+                      search (discover.go, mdns.go), mic meter, embedded assets/ (no CDN);
+                      cmd/jarvis-agent/setup.go wires it to this computer
   install/            `jarvis-agent install|uninstall|start`: Plan (steps as data, golden per OS) +
                       Apply (files, HKCU, SMAppService, commands; fakes in tests)
   appid/              the app identifier (bundle id, launchd label, portal app id, task name)
@@ -359,6 +366,15 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     island; a menu click goes straight to a goroutine (the main thread never takes the tray's
     lock). The live check (`JARVIS_TRAY_MAC_LIVE`) is opt-in; a test copy of the app runs with
     `JARVIS_AGENT_NO_AX_PROMPT=1`.
+
+30. **The setup page is the agent's only TCP listener** (DESIGN.md §13 "The setup page"). It binds
+    127.0.0.1 only, every path sits under `/s/<per-launch secret>/`, the Host must be exactly
+    `127.0.0.1:<port>`, a POST needs the page's Origin, `application/json` and no cross-site
+    `Sec-Fetch-Site`, and no answer carries a CORS header (`firstrun_test.go` covers each; keep it
+    so). The password exists only in the sign-in POST and the call to jarvisd's login; the JWT is
+    in memory until the computer is added. Never log the page's URL (it carries the secret). Test
+    with headless browsers against a throwaway jarvisd in a scratch HOME with fake `systemctl`/
+    `xdg-open` (Remove and Start reach the service manager), never against the user's agent.
 
 ## Dependencies
 

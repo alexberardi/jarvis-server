@@ -13,3 +13,16 @@ func TestSupportedOnlyOnMacAndTrustedIsCallable(t *testing.T) {
 	}
 	t.Logf("Trusted() = %v", Trusted())
 }
+
+// The privacy probes must be callable (and never prompt) everywhere.
+func TestPrivacyProbesAreCallable(t *testing.T) {
+	valid := map[string]bool{StatusGranted: true, StatusDenied: true, StatusNotAsked: true, StatusUnknown: true}
+	mic, auto := MicStatus(), AutomationStatus("com.apple.systemevents")
+	if !valid[mic] || !valid[auto] {
+		t.Fatalf("mic=%q automation=%q", mic, auto)
+	}
+	if runtime.GOOS != "darwin" && (mic != StatusUnknown || auto != StatusUnknown) {
+		t.Fatalf("off macOS: %q %q", mic, auto)
+	}
+	t.Logf("microphone: %s, automation (System Events): %s", mic, auto)
+}

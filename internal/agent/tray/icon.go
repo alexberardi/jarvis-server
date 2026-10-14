@@ -103,3 +103,6 @@ func PNG(img image.Image) []byte {
 	_ = png.Encode(&b, img) // in-memory: can't fail for an NRGBA
 	return b.Bytes()
 }
+
+// IconPNG is the shield in colour (the setup page's icon).
+func IconPNG() []byte { return iconPNG }

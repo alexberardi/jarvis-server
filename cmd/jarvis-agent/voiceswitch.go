@@ -22,6 +22,8 @@ type voiceSwitch struct {
 	serve   func(ctx context.Context, vs *voiceStack, cc *node.CC)
 	persist func(on bool) error
 	changed func(on bool)
+	// available: voice works on this OS (the control socket's voice-on/off refuses otherwise).
+	available bool
 	// connected is closed once Serve has the agent's connection (tests wait on it).
 	connected chan struct{}
 
