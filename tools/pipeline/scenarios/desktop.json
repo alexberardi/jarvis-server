@@ -1,0 +1,76 @@
+[
+ {
+  "name": "desktop: open neovim (voice, app names)",
+  "voice": true,
+  "tools": "../toolsets/desktop.json",
+  "home": "none",
+  "stt_vocabulary": "Alacritty, Firefox, Omawrite, Aether, Basecamp, btop++, Chromium, cliamp, Deskflow, Discord, Disks, Docker, Files, Foot, HEY, Kdenlive, LibreOffice, LocalSend, Moonlight, Neovim, Obsidian, Omacalc, Omacut, Pinta, Steam, Sunshine, Tensaku, uuctl, WhatsApp, Xournal++, YouTube, Zoom, Cyberpunk 2077, Disk Usage, Document Viewer, Foot Client, Foot Server, Google Contacts, Google Maps, Google Messages",
+  "turns": [
+   {
+    "say": "open neovim",
+    "expect": {
+     "not_heard": "(?i)oven",
+     "tool": "desktop_open",
+     "args_match": {
+      "target": "(?i)neo ?vim"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop: NeoVim as a follow-up after another question",
+  "tools": "../toolsets/desktop.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "can you open the oven?"
+   },
+   {
+    "say": "NeoVim, can you open it?",
+    "expect": {
+     "tool": "desktop_open",
+     "args_match": {
+      "target": "(?i)neo ?vim"
+     }
+    }
+   }
+  ],
+  "stt_vocabulary": "Alacritty, Firefox, Omawrite, Aether, Basecamp, btop++, Chromium, cliamp, Deskflow, Discord, Disks, Docker, Files, Foot, HEY, Kdenlive, LibreOffice, LocalSend, Moonlight, Neovim, Obsidian, Omacalc, Omacut, Pinta, Steam, Sunshine, Tensaku, uuctl, WhatsApp, Xournal++, YouTube, Zoom, Cyberpunk 2077, Disk Usage, Document Viewer, Foot Client, Foot Server, Google Contacts, Google Maps, Google Messages"
+ },
+ {
+  "name": "desktop: open omawrite and jot down a note (voice)",
+  "voice": true,
+  "tools": "../toolsets/desktop.json",
+  "home": "none",
+  "stt_vocabulary": "Alacritty, Firefox, Omawrite, Aether, Basecamp, btop++, Chromium, cliamp, Deskflow, Discord, Disks, Docker, Files, Foot, HEY, Kdenlive, LibreOffice, LocalSend, Moonlight, Neovim, Obsidian, Omacalc, Omacut, Pinta, Steam, Sunshine, Tensaku, uuctl, WhatsApp, Xournal++, YouTube, Zoom, Cyberpunk 2077, Disk Usage, Document Viewer, Foot Client, Foot Server, Google Contacts, Google Maps, Google Messages",
+  "turns": [
+   {
+    "say": "open omawrite and jot down a note to update Steam",
+    "expect": {
+     "heard": "(?i)oma ?write",
+     "tool": "desktop_type_text",
+     "args_match": {
+      "text": "(?i)update steam"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop: open neovim and type hello world",
+  "tools": "../toolsets/desktop.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "open neovim and type hello world",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {
+      "text": "(?i)hello world"
+     }
+    }
+   }
+  ]
+ }
+]
