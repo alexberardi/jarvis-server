@@ -5,6 +5,7 @@
 // One menu on every OS, built here as data (Items):
 //
 //	Jarvis Automation Agent — Running          (a disabled header: the agent's state)
+//	Updated to v0.2.0                           (a disabled line, only after/during a self-update)
 //	─────────────
 //	✓ Listen for "Hey Jarvis"                   (voice on/off, live; saved in agent.json)
 //	  Open Jarvis Automation                    (the server's web UI, when it is known)
@@ -40,6 +41,9 @@ type State struct {
 	Setup bool
 	// SignOut shows "Sign out of Jarvis Automation" (the computer is signed in).
 	SignOut bool
+	// Update, when set, is a disabled line under the header about the self-update
+	// ("Update available (v0.2.0), restarting…", "Updated to v0.2.0").
+	Update string
 }
 
 // Actions are what the menu's items do. Each runs on its own goroutine, never on the OS's UI
@@ -68,6 +72,7 @@ const (
 	idSep2
 	IDSetup
 	IDSignOut
+	IDUpdate
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
@@ -100,7 +105,11 @@ func Header(s State) string {
 
 // Items is the menu for s.
 func Items(s State) []Item {
-	items := []Item{{ID: IDHeader, Label: Header(s)}, {ID: idSep1, Separator: true}}
+	items := []Item{{ID: IDHeader, Label: Header(s)}}
+	if s.Update != "" {
+		items = append(items, Item{ID: IDUpdate, Label: s.Update})
+	}
+	items = append(items, Item{ID: idSep1, Separator: true})
 	if s.VoiceAvailable {
 		items = append(items, Item{ID: IDVoice, Label: VoiceLabel, Enabled: true, Toggle: true, Checked: s.Voice})
 	}

@@ -347,7 +347,7 @@ the image picker opens the camera on phones, and nothing scrolls sideways (one v
 | P3 | **Done** (as built below the table). **Chat page.** SSE through `SSEParser`, warmup, tools cache, picker and default chain, offline banner, actions/validation, markdown/think, images, `sessionStorage` | L | P1, P2. Step 1 of the chain lights up when 01's `this-device` ships | vitest: the default-chain table (agent / primary online / first online / none online), event reducer, offline banner, image gating. Go e2e chat smoke: the `gatewayStack` (`e2e_test.go`) plus cc with a fake LLM and a fake MQTT node. Member logs in → nodes → warmup → chat → a `done` event through the admin port |
 | P4 | **Done, minimal** (as built below the table). **Add-ons page:** nav slot and `user` tier only. Content per 01-no-cli-plan §3.2, its item 3.2 | — | P1, P2 | there |
 | P5 | **Done** (as built below the table). **Inbox page** (if Q2) | S | P1, P2 | vitest list/detail. Go tier test covers the routes |
-| P6 | **Same-device dictation guard** (§3.6, Q4) in `internal/agent` + cc hint | S–M | P3. Coordinate with the dictation owners | agent unit tests for the refusals. cc test that the hint appears only with `same_device` |
+| P6 | **Done** (as built below the table). **Same-device dictation guard** (§3.6, Q4) in `internal/agent` + cc hint | S–M | P3. Coordinate with the dictation owners | agent unit tests for the refusals. cc test that the hint appears only with `same_device` |
 | P7 | **Retire jarvis-web** (§1 list) | S | P3 shipped in a release | the docs freshness check; `install-e2e` without the module |
 
 **P1 as built.** `internal/modules/admin/tiers.go`: a `tier` (`open | user | superuser`, zero value
@@ -446,6 +446,19 @@ with `metadata.context` (else `{draft}`, as jarvis-web did). Delete asks first. 
 the household, and `SessionCacheGuard` clears the whole react-query cache when the user changes
 or signs out (G13: the last person's inbox never flashes up). Not ported: mobile's richer
 interactive inbox elements (editable fields, server callbacks, audio); they stay in the app.
+
+**P6 as built.** Both halves of Q4, as specified in [DESIGN §14 "The Jarvis page in
+front"](../agent/DESIGN.md). (a) The agent knows its server (config URL plus the discovered web UI
+and command-center addresses). `desktop_type_text` / `desktop_press_key` with no `app`, while a
+browser window showing that server is in front, go to the window that had focus before it, from
+the backend's focus history (Hyprland, sway, X11 stacking, Windows Z order, macOS front to back),
+with focus confirmed. The result names the app. Without a focus history (GNOME/KDE, or a backend
+that can't order windows) nothing is typed and the sentence asks which app. `browser_fill` /
+`browser_click` refuse a tab at the server's origin (`jarvis_page`). (b) The chat request's new
+optional `client: {surface: "web", same_device}` (`chatClient` in `lib/chatNode.ts`, true when the
+chosen node is `/api/addons/this-device`). cc adds `SameDeviceHint` to such a turn when
+`desktop_type_text` is offered. Tests: dictate (fake Hyprland/sway/history backends), jarvispage,
+browser, cc `TestSameDeviceHint`, vitest. A nested headless sway check is recorded in DESIGN §14 Evidence.
 
 **The user verifies:** log in as a non-superuser member on a desktop and a phone. Chat picks this
 computer's agent, then (with it stopped) the primary node. Admin URLs give the notice, and the server

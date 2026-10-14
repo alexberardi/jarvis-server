@@ -38,6 +38,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
+	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -121,6 +122,8 @@ func main() {
 		err = permissionCmd(os.Args[2:], os.Stdout)
 	case "restart":
 		err = restartCmd(ctx, os.Args[2:], os.Stdout)
+	case "update":
+		err = updateCmd(ctx, os.Args[2:], os.Stdout)
 	case "config":
 		err = configCmd(os.Args[2:], os.Stdout)
 	case "try":
@@ -187,6 +190,9 @@ func usage(w io.Writer) {
   stop     stop the running agent until the next login or start (the menu's Quit does the same)
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
+  update   update to the version of the jarvisd this computer is signed in to (the agent also
+           does it by itself: daily, and when Jarvis Automation sends an update; agent.json
+           auto_update false turns that off) [--check] [--version vX] [--force: a dev build]
   config   the settings file run reads: config [show | path | set KEY VALUE | unset KEY]
   status   show enrollment, reachability and what this host can do right now
   dictation allow | revoke | status   the one-time typing permission GNOME and KDE on Wayland
@@ -410,6 +416,7 @@ type runFlags struct {
 	tf                 *toolFlags
 	voiceOn, noOverlay *bool
 	noTray             *bool
+	noAutoUpdate       *bool
 	vf                 *voiceFlags
 	hf                 *hatFlags
 }
@@ -428,8 +435,10 @@ func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
 		noTray:    fs.Bool("no-tray", false, "don't show the status icon and its menu (menu bar, tray, notification area)"),
-		vf:        addVoiceFlags(fs),
-		hf:        addHatFlags(fs),
+		noAutoUpdate: fs.Bool("no-auto-update", false, "don't update to the server's version by itself, and refuse updates sent from Jarvis Automation "+
+			"(jarvis-agent update still works)"),
+		vf: addVoiceFlags(fs),
+		hf: addHatFlags(fs),
 	}
 }
 
@@ -440,6 +449,9 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	log := logger()
+	if crashForTest != "" {
+		return errors.New("crashForTest: this build fails on purpose (the agent-upgrade e2e's broken release)")
+	}
 	if err := applySettings(fs, *f.config, log); err != nil {
 		return err
 	}
@@ -470,8 +482,16 @@ func run(ctx context.Context, args []string) error {
 	defer quit()
 	pill := &runningPill{}
 	var swReady atomic.Pointer[voiceSwitch]
+	var runner atomic.Pointer[node.Runner]
 	if ctl != nil {
-		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load)()
+		// Healthy (the self-update's check) once connected to jarvisd's broker.
+		health := func() error {
+			if r := runner.Load(); r != nil && r.MQTTConnected() {
+				return nil
+			}
+			return errors.New("not connected to jarvisd yet")
+		}
+		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health)()
 	}
 	// K2, command secrets and data live next to node.json; another node's are dropped here.
 	st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
@@ -483,11 +503,13 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	defer closeTools()
+	go learnServer(ctx, c.ConfigURL, tf.origins, log)
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	// Commands the household turned off in the app's node settings are neither offered nor run.
 	served := nodesettings.Gate{Tools: tools, Store: st}
 	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: installMode, NodeKind: nodeKind, Log: log}
+	runner.Store(r)
 	r.Capabilities, r.Changed = heartbeatCaps(tools)
 	wireNodeSettings(r, st, tools, log)
 	hd := openHat(hf, log)
@@ -517,6 +539,13 @@ func run(ctx context.Context, args []string) error {
 	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, log, setup) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut}
 	sw.changed = ic.voiceChanged
+	var note atomic.Pointer[func(string)] // the island's note, once it is up
+	followServer(ctx, r, !*f.noAutoUpdate, func(text string) {
+		ic.setUpdate(text)
+		if n := note.Load(); n != nil {
+			(*n)(text)
+		}
+	}, log)
 	if *noOverlay {
 		pill.Attach(nil)
 		if ic.off {
@@ -538,6 +567,8 @@ func run(ctx context.Context, args []string) error {
 			pill.Attach(nil)
 		} else {
 			hideFromScreenshots(tools, i)
+			n := func(text string) { i.Note(text, 8*time.Second) }
+			note.Store(&n)
 			if voice.Supported {
 				sw.addIndicator(islandCue{i})
 				attachIsland(tools, i, sw.On)
@@ -588,6 +619,9 @@ type toolFlags struct {
 	noBrowser  *bool
 	confirm    *string
 	py, cmdDir *string
+	// origins is this agent's server, for the Jarvis page guard (jarvispage.go): build makes
+	// it, the caller fills it once it knows the server.
+	origins *jarvispage.Origins
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -628,12 +662,17 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	f.origins = &jarvispage.Origins{}
+	guard := &jarvispage.Guard{Origins: f.origins}
+	dt.JarvisPage = guard.InFront
 	tools := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), dt), &screen.Tools{C: screen.Native(), Log: log}, dt}
 	closeAll := func() {}
 	if !*f.noBrowser {
 		hub, stopBrowser := startBrowser(ctx, log)
 		bt := browser.NewTools(hub)
 		bt.Confirm = dt.Confirm
+		bt.Origins = f.origins
+		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
@@ -783,7 +822,7 @@ func status(ctx context.Context, args []string) error {
 	}
 	// No capabilities: this process doesn't hold the browser connection, so it must not report
 	// the extension's state over the running agent's.
-	if err := node.NewCC(ccURL, c).Heartbeat(ctx, node.Beat{Version: version, InstallMode: installMode, NodeKind: nodeKind}); err != nil {
+	if err := node.NewCC(ccURL, c).Heartbeat(ctx, node.Beat{Version: version, InstallMode: installMode, NodeKind: nodeKind, Busy: true}); err != nil {
 		fmt.Printf("jarvisd:      reachable, but the node key was refused or failed (%v)\n", err)
 		return nil
 	}
@@ -798,6 +837,7 @@ func try(ctx context.Context, args []string) error {
 	anyOpen := fs.Bool("allow-open-any", false, "relax the open policy")
 	wait := fs.Duration("wait", 10*time.Second, "how long browser_* tools wait for the browser extension to connect")
 	saveImages := fs.String("save-images", "", "write a result's attached images (desktop_read_screen) into this directory instead of printing their data")
+	server := fs.String("server", "", "the Jarvis server whose web page dictation and browser_fill/click won't act on (default: the enrolled one's)")
 	_ = fs.Parse(args)
 	h, err := nativeHost()
 	if err != nil {
@@ -807,13 +847,19 @@ func try(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	origins := tryOrigins(ctx, *server)
+	guard := &jarvispage.Guard{Origins: origins}
+	dt.JarvisPage = guard.InFront
 	ts := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).
 		hub, stopBrowser := startBrowser(ctx, logger())
 		defer stopBrowser()
-		ts = append(ts, browser.NewTools(hub))
+		bt := browser.NewTools(hub)
+		bt.Origins = origins
+		guard.Tab = hub.FocusedTab
+		ts = append(ts, bt)
 		w := *wait
 		if fs.NArg() == 0 {
 			w = min(w, 3*time.Second)

@@ -53,6 +53,10 @@ type Tools struct {
 	Apps func() ([]apps.App, error)
 	// WindowWait bounds the wait for a just-launched app's window (0: DefaultWindowWait).
 	WindowWait time.Duration
+	// JarvisPage says whether front (nil: the backend can't tell which window is in front)
+	// shows the Jarvis web page of this agent's server. Typing with no app named then goes to
+	// the window used before it, never into the chat (jarvispage.go). Nil: no guard.
+	JarvisPage func(ctx context.Context, front *Window) bool
 }
 
 // Open, then type (DESIGN.md §14): a launch is fire-and-forget, so typing into an app launched
@@ -259,6 +263,9 @@ type target struct {
 	app   string // the app's own name ("omawrite"), for the result
 	fuzzy bool   // picked by a near spelling of what the user said (a misheard name)
 	asked string // what the user called it
+	// insteadOfPage: no app was named and the Jarvis page was in front, so this is the window
+	// used before it (jarvispage.go).
+	insteadOfPage bool
 }
 
 // resolve finds the one window the user named. No name: the window in front (nothing to do).
@@ -272,7 +279,8 @@ func (t *Tools) resolve(ctx context.Context, app string) (*target, error) {
 				return t.awaitWindow(ctx, l.Name, l)
 			}
 		}
-		return nil, nil
+		// The Jarvis web page in front is the chat the user is typing in: not a target.
+		return t.awayFromJarvisPage(ctx)
 	}
 	if t.Win == nil {
 		return nil, fmt.Errorf("%w: switching to a named app isn't supported on this computer; ask the user to click into it and try again without naming it", ErrUnavailable)

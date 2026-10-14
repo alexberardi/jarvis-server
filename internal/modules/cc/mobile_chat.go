@@ -68,6 +68,9 @@ type chatRequest struct {
 	// (chat_images.go); Images is the result.
 	rawImages []any
 	Images    []chatImage
+	// SameDevice: the optional client {surface, same_device} says the chat comes from the
+	// web page on the computer whose agent is the chosen node (web app plan §3.6).
+	SameDevice bool
 }
 
 // parseChatRequest reads the body; warmup has no message / conversation_id /
@@ -119,6 +122,10 @@ func parseChatRequest(w http.ResponseWriter, r *http.Request, warmup bool) (chat
 			req.ConversationID = *p
 		}
 		req.IncludeReasoning, _ = b.boolean("include_reasoning")
+		if c, ok := b.object("client", false); ok && c != nil {
+			same, _ := laxBool(c["same_device"])
+			req.SameDevice = same && c["surface"] == "web"
+		}
 	}
 	if !b.done(w) {
 		return chatRequest{}, false
@@ -396,7 +403,8 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 	sse.send(servertools.Obj("type", "acknowledgment", "text", acknowledgment(req.Message, rand.IntN)))
 
 	end := tr.measure("process_command", "cc", nil)
-	out, err := m.processTurn(llmCtx, nil, turnInput{VoiceCommand: req.Message, ConversationID: cid, Source: "chat", Images: req.Images})
+	out, err := m.processTurn(llmCtx, nil, turnInput{VoiceCommand: req.Message, ConversationID: cid, Source: "chat", Images: req.Images,
+		SameDevice: req.SameDevice})
 	end(err)
 	if err != nil {
 		fatal(chatErrorText(cid, err))

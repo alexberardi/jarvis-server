@@ -127,6 +127,14 @@ export interface ChatTurnRequest {
   client_tools?: Record<string, unknown>[]
   available_commands?: Record<string, unknown>[]
   images?: ChatImagePayload[]
+  /** Where the chat comes from (webapp 01 §3.6); cc adds a hint when same_device is true. */
+  client?: ChatClient
+}
+
+/** ChatClient: the web app, and whether the chosen node is this computer's own agent. */
+export interface ChatClient {
+  surface: 'web'
+  same_device: boolean
 }
 
 /** ChatHTTPError is a turn refused before the stream started (status, and cc's detail). */

@@ -30,7 +30,8 @@ Transcripts span 14 days; jarvisd prunes those past memory.transcript_ttl_days (
 
 Personas are PSEUDONYMOUS on purpose: dev data flows into prompts and can leave the machine.
 The shape mirrors a real household (two adults, a child, two dogs on medication, kitchen +
-living room nodes); the names do not.
+living room nodes), plus a relative with power-user rights so every household role has a login;
+the names do not.
 
 PREREQUISITES
 
@@ -93,6 +94,8 @@ PEOPLE = [
     (PRIMARY_EMAIL, "jordan", "Jordan", "admin", True),
     (PARTNER_EMAIL, "carl", "Carl", "admin", False),
     ("sam@jarvisautomation.io", "sam", "Sam", "member", False),
+    # A relative who helps run the house: a power user, the role between member and admin.
+    ("robin@jarvisautomation.io", "robin", "Robin", "power_user", False),
 ]
 
 ROOMS = [

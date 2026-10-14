@@ -1,3 +1,4 @@
+import type { ChatClient } from '@/api/chat'
 import type { NodeLiveness } from '@/api/nodes'
 
 export interface DefaultNodeInput {
@@ -38,6 +39,15 @@ export function pickDefaultNode({ nodes, primaryId, thisDeviceId, rememberedId }
   if (primary) return { node: primary, reason: 'offline-primary' }
   if (nodes[0]) return { node: nodes[0], reason: 'offline-first' }
   return { node: null, reason: 'none' }
+}
+
+/**
+ * chatClient is a chat turn's `client` (webapp 01 §3.6): same_device when the chosen node is
+ * this computer's agent (GET /api/addons/this-device), so cc tells the model the chat page is the
+ * window in front and to name the app it types into.
+ */
+export function chatClient(nodeId: string, thisDeviceId: string): ChatClient {
+  return { surface: 'web', same_device: !!nodeId && nodeId === thisDeviceId }
 }
 
 /** nodeLabel names a node in the picker and the banner: its room, else a short id. */

@@ -3,17 +3,24 @@
 # desktop widths in light and dark, with console errors, failed requests and horizontal
 # overflow reported per page. Gives an agent eyes on the UI: Read the PNGs, read index.json.
 #
-#   scripts/screenshots [--sandbox NAME] [--pages a,b,/raw/path] [--viewports phone,tablet,desktop]
-#                       [--themes light,dark] [--out DIR] [--settle-ms N] [--tiles PX]
+#   scripts/screenshots [--sandbox NAME] [--user WHO] [--pages a,b,/raw/path]
+#                       [--viewports phone,tablet,desktop] [--themes light,dark] [--out DIR]
+#                       [--settle-ms N] [--tiles PX]
 #
 #   --sandbox    the scripts/sandbox name (default: default). It must be up with the SPA built:
 #                scripts/sandbox up --name NAME --ui
-#   --pages      page names (the sidebar's, as slugs: dashboard, models, settings, connections,
-#                logs, traces, nodes, users, update; plus trace-detail, login, change-password, setup,
-#                not-found, nav-drawer) or raw paths starting with /. Default: all of them.
+#   --user       who signs in: superuser (default, Jordan), admin (Carl, a household admin),
+#                power (Robin, a power user), member (Sam), or a seeded user's email. Anyone
+#                but the superuser is refused the admin pages (they show a notice instead).
+#   --pages      page names (the sidebar's, as slugs: chat, addons, inbox, dashboard, models,
+#                settings, connections, logs, traces, nodes, users, update; plus trace-detail,
+#                account, login, change-password, setup, not-found, nav-drawer) or raw paths
+#                starting with /. Default: all of them; for anyone but the superuser, chat,
+#                addons, inbox and account. An admin page asked for by a non-superuser records
+#                the "administrator" notice (adminOnly in index.json), not an error.
 #   --viewports  phone 390x844, tablet 820x1180, desktop 1440x900 (default: all three)
 #   --themes     light, dark (default: both)
-#   --out        default .sandbox/NAME/shots/<timestamp>/
+#   --out        default .sandbox/NAME/shots/<timestamp>/ (<timestamp>-<user> for --user)
 #   --tiles PX   also cut pages taller than PX into PX-high pieces (<file>.t01.png, ...); a
 #                6000px phone page is unreadable once an image viewer shrinks it to fit
 #
@@ -27,13 +34,14 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TOOL=$ROOT/tools/screenshots
 say() { echo "screenshots: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; }
 
-NAME=default OUT= ARGS=()
+NAME=default OUT= USER_SPEC=superuser ARGS=()
 while [ $# -gt 0 ]; do
   case $1 in
     --sandbox) NAME=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
+    --user) USER_SPEC=$2; shift 2 ;;
     --pages|--viewports|--themes|--settle-ms|--tiles) ARGS+=("$1" "$2"); shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument $1" ;;
@@ -48,6 +56,17 @@ curl -sf -o /dev/null "$SBX_ADMIN/" || die "sandbox '$NAME' admin $SBX_ADMIN is 
 curl -sf "$SBX_ADMIN/" | grep -q 'id="root"' ||
   die "$SBX_ADMIN serves no SPA; rebuild with: scripts/sandbox up --name $NAME --ui"
 
+# --user: a role's seeded login, as scripts/sandbox exported it, or an email as given.
+case $USER_SPEC in
+  superuser) EMAIL=$SBX_EMAIL ;;
+  admin|power|member)
+    v=SBX_EMAIL_$(tr '[:lower:]' '[:upper:]' <<<"$USER_SPEC")
+    EMAIL=${!v:-}
+    [ -n "$EMAIL" ] || die "sandbox '$NAME' exports no $v; re-seed it: scripts/sandbox up --name $NAME --ui" ;;
+  *@*) EMAIL=$USER_SPEC ;;
+  *) die "--user: superuser, admin, power, member or an email (got '$USER_SPEC')" ;;
+esac
+
 command -v node >/dev/null || die "node not on PATH"
 if [ ! -d "$TOOL/node_modules/playwright" ]; then
   say "installing Playwright (tools/screenshots)"
@@ -56,6 +75,9 @@ fi
 # Chromium for this Playwright version; a no-op when it is already in the cache.
 (cd "$TOOL" && npx --no-install playwright install chromium >/dev/null) || die "playwright install chromium failed"
 
-[ -n "$OUT" ] || OUT=$ROOT/.sandbox/$NAME/shots/$(date +%Y%m%d-%H%M%S)
-node "$TOOL/screenshots.mjs" --admin "$SBX_ADMIN" --email "$SBX_EMAIL" --password "$SBX_PASSWORD" \
+if [ -z "$OUT" ]; then
+  OUT=$ROOT/.sandbox/$NAME/shots/$(date +%Y%m%d-%H%M%S)
+  [ "$USER_SPEC" = superuser ] || OUT+=-${USER_SPEC%%@*}
+fi
+node "$TOOL/screenshots.mjs" --admin "$SBX_ADMIN" --email "$EMAIL" --password "$SBX_PASSWORD" \
   --out "$OUT" ${ARGS[@]+"${ARGS[@]}"}

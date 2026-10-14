@@ -31,10 +31,13 @@ const (
 	// toggle does (the setup page's switch).
 	VoiceOn  = "voice-on"
 	VoiceOff = "voice-off"
+	// Health answers ok only once the agent is connected to jarvisd (MQTT): the self-update's
+	// check that a new version came up (01-no-cli-plan 1.7). The answer names the version.
+	Health = "health"
 )
 
 // Commands is every command the agent accepts.
-var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff}
+var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second
@@ -46,6 +49,13 @@ type request struct {
 type response struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Version is the answering agent's version (every answer, from agents that know it).
+	Version string `json:"version,omitempty"`
+}
+
+// Reply is an agent's answer.
+type Reply struct {
+	Version string // "" from an agent that predates it
 }
 
 // Handler runs a command (one of Commands).
@@ -53,6 +63,11 @@ type Handler func(cmd string) error
 
 // Serve answers connections on ln until ctx ends or ln is closed.
 func Serve(ctx context.Context, ln net.Listener, h Handler) error {
+	return ServeVersion(ctx, ln, h, "")
+}
+
+// ServeVersion is Serve, naming version in every answer.
+func ServeVersion(ctx context.Context, ln net.Listener, h Handler, version string) error {
 	go func() {
 		<-ctx.Done()
 		_ = ln.Close()
@@ -65,11 +80,11 @@ func Serve(ctx context.Context, ln net.Listener, h Handler) error {
 			}
 			return err
 		}
-		go handle(c, h)
+		go handle(c, h, version)
 	}
 }
 
-func handle(c net.Conn, h Handler) {
+func handle(c net.Conn, h Handler, version string) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(IOTimeout))
 	line, err := bufio.NewReader(c).ReadBytes('\n')
@@ -87,6 +102,7 @@ func handle(c net.Conn, h Handler) {
 			resp = response{Error: err.Error()}
 		}
 	}
+	resp.Version = version
 	b, _ := json.Marshal(resp)
 	_, _ = c.Write(append(b, '\n'))
 }
@@ -99,28 +115,35 @@ var ErrNotRunning = errors.New("the agent isn't running")
 
 // Send asks the running agent to do cmd. ErrNotRunning when no agent answers.
 func Send(dial Dialer, cmd string) error {
+	_, err := Ask(dial, cmd)
+	return err
+}
+
+// Ask is Send, returning the answer.
+func Ask(dial Dialer, cmd string) (Reply, error) {
 	c, err := dial()
 	if err != nil {
-		return ErrNotRunning
+		return Reply{}, ErrNotRunning
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(IOTimeout))
 	b, _ := json.Marshal(request{Cmd: cmd})
 	if _, err := c.Write(append(b, '\n')); err != nil {
-		return err
+		return Reply{}, err
 	}
 	line, err := bufio.NewReader(c).ReadBytes('\n')
 	if err != nil {
-		return fmt.Errorf("the agent didn't answer: %w", err)
+		return Reply{}, fmt.Errorf("the agent didn't answer: %w", err)
 	}
 	var resp response
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return err
+		return Reply{}, err
 	}
+	r := Reply{Version: resp.Version}
 	if !resp.OK {
-		return errors.New(resp.Error)
+		return r, errors.New(resp.Error)
 	}
-	return nil
+	return r, nil
 }
 
 // WaitGone waits until no agent answers (after Quit), checking up to attempts times.

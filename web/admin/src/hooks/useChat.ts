@@ -14,7 +14,7 @@ import {
 import type { ChatAction, ChatImagePayload, NodeTools } from '@/api/chat'
 import { notifyPasswordChangeRequired } from '@/api/client'
 import type { NodeLiveness } from '@/api/nodes'
-import { pickDefaultNode } from '@/lib/chatNode'
+import { chatClient, pickDefaultNode } from '@/lib/chatNode'
 import { applyEvent, chatKey, emptyChat, endTurn, loadChat, saveChat } from '@/lib/chatState'
 import type { ChatMessage, ChatState } from '@/lib/chatState'
 import { errorMessage } from '@/lib/errors'
@@ -221,6 +221,7 @@ export function useChat(userId: number | string, householdId: string): UseChat {
           include_reasoning: true,
           ...(withTools ? { client_tools: tools.client_tools, available_commands: tools.available_commands } : {}),
           ...(images?.length ? { images } : {}),
+          client: chatClient(chat.nodeId, thisDeviceId),
         },
         (ev) => setChat((c) => applyEvent(c, ev)),
         ctrl.signal,
@@ -239,7 +240,7 @@ export function useChat(userId: number | string, householdId: string): UseChat {
           setBusy(false)
         })
     },
-    [chat.nodeId, chat.conversationId, householdId, busy],
+    [chat.nodeId, chat.conversationId, householdId, busy, thisDeviceId],
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])

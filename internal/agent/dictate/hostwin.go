@@ -20,6 +20,9 @@ type HostWindows struct {
 	SameFn   func(id, active string) bool
 	// Why is the message when ActiveFn is missing.
 	Why string
+	// HistoryFn sets the listed windows' Recency from the platform's focus history and says
+	// whether it could (focushistory.go); nil: none.
+	HistoryFn func(ctx context.Context, ws []Window) bool
 }
 
 func (w *HostWindows) Available(ctx context.Context) (bool, string) {

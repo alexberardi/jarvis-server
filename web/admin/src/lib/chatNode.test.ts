@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NodeLiveness } from '@/api/nodes'
-import { nodeLabel, pickDefaultNode } from './chatNode'
+import { chatClient, nodeLabel, pickDefaultNode } from './chatNode'
 
 const n = (node_id: string, online: boolean, room = node_id): NodeLiveness => ({
   node_id,
@@ -43,5 +43,16 @@ describe('nodeLabel', () => {
     expect(nodeLabel({ node_id: 'abcdef123456', room: 'kitchen', name: 'Office-PC' })).toBe('Office-PC')
     expect(nodeLabel({ node_id: 'abcdef123456', room: 'living_room' })).toBe('living room')
     expect(nodeLabel({ node_id: 'abcdef123456', room: 'default' })).toBe('abcdef12')
+  })
+})
+
+describe('chatClient: the same-device flag (webapp 01 §3.6)', () => {
+  it.each([
+    ['the chosen node is this computer', 'laptop', 'laptop', true],
+    ['another node', 'kitchen-pi', 'laptop', false],
+    ["the server couldn't tell", 'laptop', '', false],
+    ['no node chosen', '', '', false],
+  ])('%s', (_, nodeId, thisDeviceId, same) => {
+    expect(chatClient(nodeId, thisDeviceId)).toEqual({ surface: 'web', same_device: same })
   })
 })

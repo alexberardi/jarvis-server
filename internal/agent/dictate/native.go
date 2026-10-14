@@ -17,17 +17,17 @@ func ForOS(goos string, h *host.Host, x Exec, macTrusted func() bool) (Keyboard,
 	switch goos {
 	case "linux":
 		disp := &x11.Display{Getenv: x.Getenv} // the session as Exec sees it (tests: a fake)
-		xw := &HostWindows{H: h, SameFn: SameX11, ActiveFn: X11Active(x, disp)}
+		xw := &HostWindows{H: h, SameFn: SameX11, ActiveFn: X11Active(x, disp), HistoryFn: X11Stacking(disp)}
 		return &LinuxKeyboard{X: x, Wayland: &vkbd.Keyboard{Getenv: x.Getenv, X11Focused: HyprX11Focused(x)}, X11: &x11.Keyboard{D: disp},
 				Portal: &portal.Keyboard{R: &portal.RemoteDesktop{}}},
 			&LinuxWindows{X: x, X11: xw, XWM: disp}, nil
 	case "darwin":
 		return &MacKeyboard{Trusted: macTrusted, Post: nativeMacPoster()},
-			&HostWindows{H: h, SameFn: SameMacPid, ActiveFn: MacFrontPid(x)}, nil
+			&HostWindows{H: h, SameFn: SameMacPid, ActiveFn: MacFrontPid(x), HistoryFn: MacFrontToBack(x)}, nil
 	case "windows":
 		desktop := func() bool { return h != nil && h.Has(context.Background(), host.CapOpen) }
 		return &WinKeyboard{Desktop: desktop, Send: nativeSendInput()},
-			&HostWindows{H: h, ActiveFn: nativeForeground(), Why: "switching to a named app isn't supported in this build"}, nil
+			&HostWindows{H: h, ActiveFn: nativeForeground(), Why: "switching to a named app isn't supported in this build", HistoryFn: ZOrder}, nil
 	}
 	return nil, nil, fmt.Errorf("dictate: no backend for platform %q", goos)
 }

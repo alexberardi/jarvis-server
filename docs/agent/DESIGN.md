@@ -1009,7 +1009,8 @@ behind the same address until that agent heartbeats again.
 no longer only `run` flags: `<user config dir>/jarvis-agent/agent.json` (0600, next to
 `node.json`), e.g. `{"voice": true, "island": true, "confirm_dictation": "submit"}`. Keys:
 `voice`, `island` (= not `--no-overlay`), `confirm_dictation`, `browser` (= not `--no-browser`),
-`chimes`, `voice_input`, `voice_output`, `wake_threshold`; each stands for a `run` flag and is
+`chimes`, `voice_input`, `voice_output`, `wake_threshold`, `auto_update` (= not
+`--no-auto-update`, "Self-update" below); each stands for a `run` flag and is
 applied by setting that flag, so it is validated the same way. A flag given on the command line
 wins. A missing key keeps the flag's default; an unknown key is logged and ignored (a newer
 agent's file); a bad value stops `run` with the file's path (silently dropping a choice like
@@ -1020,6 +1021,96 @@ start; `jarvis-agent restart` applies a change. **`voice` defaults to on** (user
 icon's toggle (§15) is how a user turns it off; it writes `voice`, so `config set voice` and
 `--voice` are for scripts and development only. `tray` (= not `--no-tray`) hides the status
 icon.
+
+**Self-update (installers plan item 1.7, 2026-10-14; `internal/agent/selfupdate`,
+`cmd/jarvis-agent/update.go`).** The agent updates itself from the jarvis-server releases,
+checked exactly as jarvisd checks its own (installers 00 §8.2), and never needs a terminal.
+
+- **Which version: the server's** (decision 2026-10-14,
+  [decisions/2026-10-14-desktop-agents-follow-their-server.md](../decisions/2026-10-14-desktop-agents-follow-their-server.md)).
+  cc's heartbeat answer to a desktop node carries `server_version` (jarvisd's own version), and
+  the agent installs the release with that tag. It never looks at GitHub's "latest": a household's
+  agents match its server, which is what they were tested with, and an admin who holds jarvisd
+  back holds the agents back too. A development jarvisd (`dev…`) has no release to follow.
+- **When.** At start (the first heartbeat answer), when the server's version changes, and daily
+  (an hourly tick; a version is tried at most once a day, so a failed one waits a day). And at
+  once when the heartbeat answer has `pending_update`: a household member asked for it (the Pi's
+  update dispatch, `POST /api/v0/nodes/{id}/update`; for a desktop node cc resolves "latest" to
+  its own version and keeps the tag's `v`, and refuses a target not newer than the node's last
+  version). A refusal or failure is reported on the task (`POST /api/v0/nodes/tasks/{id}/status`
+  `failed`); success is the next heartbeat's version, as for a Pi (now compared without the `v`).
+  `jarvis-agent status` and `update --check` send `is_busy: true` beats so they never take a
+  dispatch meant for the running agent.
+- **The trust chain** (unchanged from jarvisd's): the release's `SHA256SUMS` must carry a minisign
+  signature by a key compiled into the **running** agent (the project key; test builds may add
+  one with `-X …/internal/update.extraTrustedKey`, never an environment variable); its trusted
+  comment must name the release being installed (`jarvisd <tag> SHA256SUMS`: one list covers
+  both programs' archives); the agent archive (`jarvis-agent-<tag>-<os>-<arch>.tar.gz|.zip`) must
+  match its line. `SHA256SUMS` and the signature are fetched first, so nothing big is downloaded
+  for an unsigned release. The new binary must run here and print the tag (`version`). Refused,
+  forced or not: an unsigned or foreign-signed list, a comment naming another release, a bad
+  checksum, a version not strictly newer than the running one. A development build (`dev…`)
+  never updates itself; `jarvis-agent update --force --version vX` moves one to a release.
+  `JARVIS_UPDATE_API` / `JARVIS_AGENT_RELEASE_BASE` (tests) only change where the files come from.
+- **Stage, hand over, swap.** The running agent stages: downloads and verifies into
+  `<user cache dir>/jarvis-agent/updates/staged`, unpacks and tests the new version, and writes
+  `update.json`. It then starts `jarvis-agent update --finish` in a process its supervisor
+  won't stop with it: a transient `systemd-run --user` unit when systemd runs the agent (a child
+  in the agent's own unit is killed when the unit restarts), otherwise a detached process (its
+  own session; launchd stops only the job's process group; Windows `DETACHED_PROCESS`). That
+  process verifies the staged files again, unpacks the new version next to the running one and
+  swaps it in, keeping the old one:
+  - Linux (and a bare binary on macOS): `jarvis-agent` → `jarvis-agent.prev` (a copy), the new one
+    renamed over it (one rename: the path always holds a whole binary). This is the per-user
+    copy `install` made in `~/.local/lib/jarvis-agent`; the `.deb`'s `/usr/lib` copy isn't
+    writable and says to run `jarvis-agent install`.
+  - Windows: the running exe is renamed to `jarvis-agent.prev.exe` (a running exe can be renamed,
+    not replaced) and the new one takes its name, wherever the agent runs from. A file still
+    running when it should be deleted is renamed aside (`*.stale-*`) and removed later.
+  - macOS: the **whole app** is replaced. The darwin archive must carry
+    `<top>/Jarvis Automation Agent.app` (item 2.2 adds the Developer ID-signed, notarized app);
+    an archive with only the bare binary is refused while the agent runs from the app, because
+    replacing the executable inside it would break the bundle's seal. The new app must pass
+    `codesign --verify --deep --strict`, be signed as `net.jarvisautomation.agent`, and by the
+    same team as the installed one when that has one. It is exchanged with the installed app in
+    one `renamex_np(RENAME_SWAP)` (the bundle id and path stay), the old one kept as a hidden
+    `.jarvis-agent-previous.app` beside it; then `lsregister -f`. **Permissions:** TCC keys
+    Accessibility, Microphone, Screen Recording and Automation grants on the code identity
+    (identifier + team), so a Developer ID update keeps them; an ad-hoc signed app (a dev build,
+    a PR dry run) is keyed on its exact build, so after its update macOS asks again. The
+    login item (SMAppService) points into the bundle and needs nothing.
+- **Restart and health gate.** `--finish` restarts the agent the way `jarvis-agent restart`
+  does (quit over the control socket, then `systemctl --user restart` / `launchctl kickstart -k`
+  / a detached start) and asks its control socket for `health` every second: healthy means
+  connected to jarvisd's MQTT broker, and the answer names the version. The new version must
+  answer healthy within 2 minutes (`JARVIS_AGENT_UPDATE_GATE`), else the previous version is
+  restored and restarted. The result is `last-update.json` (`succeeded`, `rolled_back` with the
+  reason, or `failed` when nothing was changed), written before the rollback's restart so the
+  restored agent reports the failed task at its first heartbeat. A marker nobody finished (a
+  machine that slept) is dropped after 30 minutes. `update --finish` logs to `update.log`.
+- **What the user sees.** A line under the status icon's header (§15): "Downloading v0.2.0…",
+  "Update available (v0.2.0), restarting…" (also as the island's note), then "Updated to v0.2.0"
+  from the new version, or "Update to v0.2.0 failed; still on v0.1.0". A restart interrupts a
+  voice turn in progress; acceptable for v1.
+- **Settings and CLI.** `agent.json` `auto_update` (default on; `run --no-auto-update`): off, the
+  agent neither follows the server nor accepts `pending_update` (it reports "automatic updates
+  are off on this computer"). `jarvis-agent update [--check] [--version vX] [--force]` does it
+  by hand: the server's version unless `--version`; stages, swaps, restarts the running agent
+  through its supervisor and waits for it, or with the agent stopped just swaps.
+- **Not covered.** The Windows uninstall key's `DisplayVersion` (the installer, item 2.3, will
+  have to read the version from the exe); a macOS app the user can't write (a standard user's
+  `/Applications`): refused with the reason, the update then needs the dmg.
+- **Verified.** Unit tests: `internal/update` (agent archives in the flat source, `FetchSigned`
+  refusals, re-verification, `ExtractTree` refusing links out of the tree, hard links, devices,
+  existing destinations); `internal/agent/selfupdate` for Linux, Windows and macOS bundle layouts
+  on every OS (swap, rollback on a failed start, refusals of older/unsigned/foreign/replayed/
+  wrong-version, tampered staged archive, foreign marker, dev build, abandoned marker; bundle
+  team/identifier/signature refusals; the checker's daily and request rules); cc (server_version,
+  desktop update requests). `scripts/agent-upgrade-e2e` (CI `agent-upgrade`, three OSes): real
+  agent builds and a fake jarvisd + GitHub with a throwaway key. Live on Linux in a scratch HOME
+  against a sandbox jarvisd: two update requests from the real cc API, one swapped in and the task
+  marked success by the next heartbeat, one crashing release rolled back with the task failed
+  ("didn't come up").
 
 ## 14. Dictation: type, press keys, fill and click (2026-10-13)
 
@@ -1426,6 +1517,50 @@ The agent can't tell a model that calls `desktop_confirm` without asking from on
 the guarantee is "a tool call naming the user's answer", not proof the user spoke (open
 question 2).
 
+### The Jarvis page in front (2026-10-14)
+
+Someone chatting with Jarvis in the web page on the computer whose agent they picked asks it to
+type something ([web app plan §3.6](../webapp/01-member-web-app-plan.md), P6). With no `app`
+named the text would go into the window in front, which is the chat itself. The rules above
+stand; this adds one case before them (`internal/agent/jarvispage`, `dictate/jarvispage.go`,
+`dictate/focushistory.go`, `browser/jarvispage.go`).
+
+- **The server's page.** The agent knows its server: the config URL it enrolled with, plus the
+  web UI's and command-center's addresses from discovery. A page is the Jarvis page when its
+  host and port are one of those (any loopback name matches any other). A window shows it when
+  the window is a browser (winmatch's browser kind, or a Chromium app window) and its title
+  carries the web app's title ("Jarvis Automation") or one of those `host:port`s, or a Chromium
+  app id (`chrome-<host>__…`) carries the server's host; or, with the browser extension, when the
+  focused browser's current tab is on the server and its title is in the window's title. A
+  terminal whose title mentions the address is never the page.
+- **Typing or a key with no `app` while the page is in front:** the agent picks the window that
+  had focus just before it from the backend's focus history, then focuses it and confirms the
+  focus as for a named app; nothing is typed if focus isn't confirmed (`focus_failed`). The result
+  names it (`into: "Omawrite"`, `matched_app`, `instead_of_jarvis_page: true`, and a `note`
+  "The Jarvis page was in front, so this went to the window used before it: Omawrite."), and the
+  island says "Typing into Omawrite: …". Focus history: Hyprland's `focusHistoryID`, sway's focus
+  lists, X11's `_NET_CLIENT_LIST_STACKING` (top first; the window manager raises what it
+  focuses), Windows' Z order (`EnumWindows`), macOS's on-screen windows front to back
+  (`CGWindowListCopyWindowInfo` through JavaScript for Automation, owner pids only).
+- **No focus history, or no other window:** `jarvis_page_in_front`, nothing typed: "Nothing was
+  typed: the Jarvis page is in front, and this desktop can't tell which window was used before
+  it, and typing there would only go into the chat. Tell the user nothing was typed and ask
+  which app to type into, then call again with that app." GNOME and KDE on Wayland can't list
+  windows at all, so only the browser extension can tell that the page has focus there; then the
+  sentence asks which app and says the user must click into it first. Island: "The Jarvis page
+  is in front — nothing typed".
+- **`browser_fill` / `browser_click` on a tab of the server** (the given `tab_id`, else the
+  current tab), checked before a confirmation question and again when it is answered:
+  `jarvis_page`, "Nothing was filled: that tab is the Jarvis page itself (the chat the user is
+  typing in), so this would only act on the chat. Tell the user nothing was filled and ask which
+  page they meant: they can open it in the browser, then ask again." A tab whose address can't be
+  told is let through.
+- **The prompt hint.** The web app sends `client: {surface: "web", same_device: true}` on a chat
+  turn when the chosen node is this computer's agent (`/api/addons/this-device`); command-center
+  then adds one line to the turn ("the user is writing this in the Jarvis web page on this
+  computer, which is the window in front; … put the app they name in app …"), only with
+  `desktop_type_text` offered. Mobile sends no `client` and is unaffected.
+
 ### The island note
 
 `Island.Note(text, d)` shows a wider pill (up to 344 pt, canvas now 360 × 56) with a green dot
@@ -1579,6 +1714,20 @@ never in logs or results; password fields only when named.
   desktop's layout) with a protocol error; `vkbd` now asks only a seat whose capabilities include a
   keyboard (and allocates no id otherwise: Wayland new ids must stay consecutive).
 
+- **The Jarvis page in front (nested headless sway 1.12, 2026-10-14):** `foot --app-id omawrite`
+  (`cat > fileA`), then a focused browser-like window (`foot --app-id firefox --title "Jarvis
+  Automation — Mozilla Firefox"`, `cat > fileB`); `jarvis-agent try --server
+  http://localhost:17700 desktop_type_text {text: "walk the dogs", submit: true}` → `into:
+  Omawrite`, `instead_of_jarvis_page: true`; fileA got exactly the text and a newline, fileB
+  nothing. The same with the title `localhost:17710/chat — Mozilla Firefox` (server given as
+  `127.0.0.1:17710`) and with a Chromium app window `chrome-localhost__chat-Default`. Controls,
+  typed into the window in front as before: a `foot` titled "curl localhost:17710", Firefox on
+  "Docs", Firefox on `localhost:3000`. Focus history, not creation order: omawrite, then notes,
+  then omawrite focused, then the page → typed into Omawrite (and `desktop_press_key enter`
+  after it went to Omawrite, now in front); page, notes, page again → typed into Notes. Not run
+  for real: Hyprland, X11, Windows, macOS (unit tests with fake backends), GNOME/KDE, and the
+  browser extension's side.
+
 ### Open questions (defaults chosen; the user reviews)
 
 1. **Confirmation default.** *Chosen:* `off`; the island shows what happens. *Alternative:*
@@ -1621,6 +1770,7 @@ only shows it), `cmd/jarvis-agent/tray.go`, `voiceswitch.go`.
 
 ```
 Jarvis Automation Agent — Running          (disabled: the agent's state)
+Updated to v0.2.0                           (disabled, only around a self-update, §13)
 ─────────────
 ✓ Listen for "Hey Jarvis"                   (Linux, macOS)
   Open Jarvis Automation                    (once discovery names the web UI)
@@ -1648,6 +1798,8 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
   until someone removes it in Add-ons.
 - **Quit** is `jarvis-agent stop` from inside (§13): exit 0, so no supervisor restarts it, until
   the next login or `start`.
+- **The update line** (§13 "Self-update", 2026-10-14) shows the self-update's state: downloading,
+  "Update available (vX), restarting…", "Updated to vX", or a failed update. Nothing to click.
 - **Hide the icon:** `--no-tray`, or agent.json `tray: false`. `status` prints a `menu icon:` line.
 
 **Backends.** All three are built.
