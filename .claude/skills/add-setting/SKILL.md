@@ -84,7 +84,7 @@ Use the owning module's listener (`$SBX_LLM` for `llm.*` and `stt.engine`, etc.)
 ## 5. Document
 
 Add the key to the subsystem doc (`docs/cc/NN-*.md` or `docs/<module>/…`). A setting that a user
-or the wizard must decide on also goes in STATUS's decision log. If the wizard shows it, update
+or the wizard must decide on also gets a file in `docs/decisions/`. If the wizard shows it, update
 `web/admin/src/components/wizard/` and its tests (#19 privacy step).
 
 ## Gotchas

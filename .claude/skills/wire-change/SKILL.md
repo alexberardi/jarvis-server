@@ -18,7 +18,7 @@ CLAUDE.md: "A contract test is only valid once it passes against the legacy Pyth
 | New key in an existing response | Add it as `Optional(…)` so the legacy shape still passes: `"display_name": Optional(NullOr(String)), // jarvisd addition; legacy omits it` (#81). `Obj` is an exact key set, so an unlisted key fails. |
 | jarvisd deliberately differs from legacy (a bug fix, D8) | Mark it `// LEGACY-BUG: <what legacy does>` and branch with `if Jarvisd() { … } else { … }`. Add it to "LEGACY-BUGs" in the README. |
 | New route with no legacy equivalent | Skip unless jarvisd: `if !Jarvisd() { t.Skip("contract: <x> is jarvisd-only (no legacy equivalent); set " + EnvImpl + "=jarvisd") }` (`cc_pairing_test.go`, `admin_test.go`). Note it as **jarvisd-only** in the README. |
-| Removed or renamed key, route or status | It breaks deployed nodes and phones. Check `docs/EXTERNAL-CHANGES.md` and ask the user first. Record the decision in STATUS's decision log, and the client change in EXTERNAL-CHANGES. |
+| Removed or renamed key, route or status | It breaks deployed nodes and phones. Check `docs/EXTERNAL-CHANGES.md` and ask the user first. Record the decision as a file in `docs/decisions/`, and the client change in EXTERNAL-CHANGES. |
 | MQTT topic or payload | `contract/cc_mqtt*.go` with the fake node (`DialMQTT`, `ExpectMQTT`: QoS 1, retain=false, exact key set). |
 
 Matchers live in `contract/shape.go` (`Obj`, `Open`, `Optional`, `NullOr`, `ArrayOf`, `UUID`,
