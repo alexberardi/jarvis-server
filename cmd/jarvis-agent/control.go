@@ -7,11 +7,12 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"sync/atomic"
+	"sync"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
+	"github.com/alexberardi/jarvis-server/internal/agent/install"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
@@ -35,9 +36,61 @@ func controlDial() (net.Conn, error) {
 	return browser.Dial(p)
 }
 
+// runningPill is the "Jarvis is running" pill, asked for by whoever opens the agent (the control
+// socket's show-running, and on macOS the app's reopen and link events). The socket answers
+// from the agent's first moment, while the island comes up only after the tools (and voice) are
+// ready, and install and start ask the moment the socket answers. So a request before the
+// island exists is kept and shown when it attaches, not dropped (what hid the pill on start).
+type runningPill struct {
+	mu       sync.Mutex
+	show     func() // the island's ShowRunning, once attached
+	attached bool
+	pending  bool
+}
+
+// Show flashes the pill now, or once the island is attached.
+func (p *runningPill) Show() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.attached {
+		p.pending = true
+		return
+	}
+	if p.show != nil {
+		p.show()
+	}
+}
+
+// Attach connects the island (nil: there is none, so nothing will show) and shows a pill asked
+// for meanwhile.
+func (p *runningPill) Attach(show func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.show, p.attached = show, true
+	if p.pending && show != nil {
+		show()
+	}
+	p.pending = false
+}
+
+// appEvents is what opening the macOS app, or its jarvis-agent:// link, does while this agent
+// runs: LaunchServices sends the running agent an Apple event instead of starting `start`.
+func appEvents(pill *runningPill, log *slog.Logger) island.AppEvents {
+	return island.AppEvents{
+		Reopen: pill.Show,
+		OpenURL: func(u string) {
+			if err := install.CheckStartURL(u); err != nil {
+				log.Warn("ignored a link that isn't jarvis-agent://start", "err", err)
+				return
+			}
+			pill.Show()
+		},
+	}
+}
+
 // serveControl answers the control socket until ctx ends: show-running flashes the island's
 // pill (when there is an island), quit stops the agent. It returns a func that waits for it.
-func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, shown *atomic.Pointer[island.Island], quit func()) func() {
+func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func()) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -45,7 +98,7 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, shown 
 			switch cmd {
 			case control.ShowRunning:
 				// No island (--no-overlay, no display): nothing to show, but it is running.
-				shown.Load().ShowRunning()
+				pill.Show()
 			case control.Quit:
 				log.Info("asked to quit (uninstall, or a reinstall replacing this agent)")
 				quit()

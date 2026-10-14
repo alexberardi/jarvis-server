@@ -110,3 +110,34 @@ func TestMacLiveSnapshot(t *testing.T) {
 	liveIsland.Set(Hidden, 0)
 	time.Sleep(400 * time.Millisecond)
 }
+
+// The Objective-C side of AppEvents: real NSAppleEventDescriptors through the class
+// listenAppEvents registers (no window server needed).
+func TestMacAppEventsHandler(t *testing.T) {
+	if err := loadMac(); err != nil {
+		t.Fatal(err)
+	}
+	h, err := appEventsObject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 1)
+	appEvents.Store(&AppEvents{Reopen: func() { got <- "reopen" }, OpenURL: func(u string) { got <- "url " + u }})
+	t.Cleanup(func() { appEvents.Store(nil) })
+	desc := class("NSAppleEventDescriptor")
+	event := func(cls, id uint32) objc.ID {
+		return objc.Send[objc.ID](desc, objc.RegisterName("appleEventWithEventClass:eventID:targetDescriptor:returnID:transactionID:"),
+			cls, id, objc.ID(0), int16(-1), int32(0))
+	}
+	h.Send(selHandleAE, event(aeCoreClass, aeReopen), objc.ID(0))
+	if g := <-got; g != "reopen" {
+		t.Fatalf("reopen: got %q", g)
+	}
+	e := event(aeInternetClass, aeGetURL)
+	str := objc.ID(objc.GetClass("NSString")).Send(objc.RegisterName("stringWithUTF8String:"), "jarvis-agent://start")
+	e.Send(objc.RegisterName("setParamDescriptor:forKeyword:"), objc.Send[objc.ID](desc, objc.RegisterName("descriptorWithString:"), str), keyDirectObject)
+	h.Send(selHandleAE, e, objc.ID(0))
+	if g := <-got; g != "url jarvis-agent://start" {
+		t.Fatalf("get-URL: got %q", g)
+	}
+}

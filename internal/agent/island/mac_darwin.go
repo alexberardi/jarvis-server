@@ -157,6 +157,12 @@ func send(id objc.ID, sel string, args ...any) objc.ID {
 // called on the main goroutine of a program that locked it to the main thread
 // (runtime.LockOSThread in an init).
 func Run(ctx context.Context, log *slog.Logger, fn func(*Island) error) error {
+	return RunWith(ctx, log, AppEvents{}, fn)
+}
+
+// RunWith is Run, and also hands the app's reopen and get-URL Apple events to ev while the
+// event loop runs (opening the app or its link while the agent runs: see AppEvents).
+func RunWith(ctx context.Context, log *slog.Logger, ev AppEvents, fn func(*Island) error) error {
 	if err := loadMac(); err != nil {
 		logOff(log, err)
 		return fn(nil)
@@ -168,6 +174,11 @@ func Run(ctx context.Context, log *slog.Logger, fn func(*Island) error) error {
 	app := send(class("NSApplication"), "sharedApplication")
 	send(app, "setActivationPolicy:", activationPolicyAccessory)
 	send(app, "finishLaunching")
+	// After finishLaunching, so ours replace AppKit's default handlers; before the loop below
+	// delivers anything that arrived meanwhile.
+	if err := listenAppEvents(ev); err != nil {
+		log.Warn("opening the app again won't reach this agent", "err", err)
+	}
 
 	i := newIsland(&macPanel{}, log)
 	var done atomic.Bool
@@ -303,4 +314,62 @@ func (p *macPanel) close() {
 			p.colorSpace = 0
 		}
 	})
+}
+
+// --- Apple events: the app opened again, or its link, while the agent runs ---
+
+var (
+	appEvents    atomic.Pointer[AppEvents] // the handlers listenAppEvents installed
+	aeClassOnce  sync.Once
+	aeClass      objc.Class
+	aeClassErr   error
+	selHandleAE  = objc.RegisterName("handleEvent:withReplyEvent:")
+	selSetHandle = objc.RegisterName("setEventHandler:andSelector:forEventClass:andEventID:")
+)
+
+// appEventsObject is an instance of a small Objective-C class whose handleEvent:withReplyEvent:
+// reads an Apple event's class, id and direct-object string, and dispatches it to appEvents.
+func appEventsObject() (objc.ID, error) {
+	aeClassOnce.Do(func() {
+		aeClass, aeClassErr = objc.RegisterClass("JarvisAgentAppEvents", objc.GetClass("NSObject"), nil, nil,
+			[]objc.MethodDef{{Cmd: selHandleAE, Fn: handleAppEvent}})
+	})
+	if aeClassErr != nil {
+		return 0, aeClassErr
+	}
+	return objc.ID(aeClass).Send(selAlloc).Send(selInit), nil
+}
+
+func handleAppEvent(_ objc.ID, _ objc.SEL, event, _ objc.ID) {
+	if event == 0 {
+		return
+	}
+	class := objc.Send[uint32](event, objc.RegisterName("eventClass"))
+	id := objc.Send[uint32](event, objc.RegisterName("eventID"))
+	url := ""
+	if d := objc.Send[objc.ID](event, objc.RegisterName("paramDescriptorForKeyword:"), keyDirectObject); d != 0 {
+		if s := send(d, "stringValue"); s != 0 {
+			url = objc.Send[string](s, objc.RegisterName("UTF8String"))
+		}
+	}
+	if ev := appEvents.Load(); ev != nil {
+		ev.dispatch(class, id, url)
+	}
+}
+
+// listenAppEvents makes NSAppleEventManager hand reopen and get-URL events to ev. Main thread.
+func listenAppEvents(ev AppEvents) error {
+	h, err := appEventsObject()
+	if err != nil {
+		return err
+	}
+	appEvents.Store(&ev)
+	mgr := send(class("NSAppleEventManager"), "sharedAppleEventManager")
+	if mgr == 0 {
+		return errors.New("no NSAppleEventManager")
+	}
+	for _, e := range [][2]uint32{{aeCoreClass, aeReopen}, {aeInternetClass, aeGetURL}} {
+		mgr.Send(selSetHandle, h, selHandleAE, e[0], e[1])
+	}
+	return nil
 }

@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -450,9 +449,9 @@ func run(ctx context.Context, args []string) error {
 	migrateLegacyID(log)
 	ctx, quit := context.WithCancel(ctx)
 	defer quit()
-	var shown atomic.Pointer[island.Island]
+	pill := &runningPill{}
 	if ctl != nil {
-		defer serveControl(ctx, ctl, log, &shown, quit)()
+		defer serveControl(ctx, ctl, log, pill, quit)()
 	}
 	h, tools, closeTools, err := tf.build(ctx, log, true)
 	if err != nil {
@@ -483,20 +482,23 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 	if *noOverlay {
+		pill.Attach(nil)
 		return r.Run(ctx)
 	}
 	// The island needs the main thread on macOS: island.Run keeps it and runs the agent on
 	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
 	// It runs with voice off too, for the "Jarvis is running" pill; it shows voice states and
 	// dictation's notes only with voice on, as before.
-	return island.Run(ctx, log, func(i *island.Island) error {
-		if i != nil {
+	return island.RunWith(ctx, log, appEvents(pill, log), func(i *island.Island) error {
+		if i == nil {
+			pill.Attach(nil)
+		} else {
 			hideFromScreenshots(tools, i)
 			if vs != nil {
 				vs.addIndicator(islandCue{i})
 				attachIsland(tools, i)
 			}
-			shown.Store(i)
+			pill.Attach(i.ShowRunning)
 		}
 		return r.Run(ctx)
 	})

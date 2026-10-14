@@ -280,7 +280,10 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     it (`run` does, directly from `main`), and every AppKit call goes through `onMain`
     (never call it from the main thread's own callbacks into Go code that waits on the agent).
     The pipeline only *reports* state (`voice.Indicator`, nil by default); it never waits on
-    the screen. Don't show it on a desktop someone is using in tests: the live checks
+    the screen. That loop also makes LaunchServices see the agent as the app running, so opening
+    the app or `jarvis-agent://start` sends it an Apple event, not a new `start`:
+    `island.RunWith`'s `AppEvents` (reopen, get-URL) handle them, on goroutines, never blocking
+    the main thread. Control requests before the island exists wait for it (`runningPill`). Don't show it on a desktop someone is using in tests: the live checks
     (`JARVIS_ISLAND_MAC_LIVE`, `JARVIS_ISLAND_WAYLAND_PROBE`) are opt-in, and the Wayland one
     never attaches a buffer.
 
