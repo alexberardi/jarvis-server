@@ -13,7 +13,8 @@ import (
 )
 
 // A scenario's "node": "desktop" plays its turns as a desktop agent the sandbox's primary user
-// signed in on (owner_user_id), instead of the seeded kitchen Pi. Its voice turns act as that
+// signed in on (owner_user_id), instead of the seeded kitchen Pi ("owner": "removed": one whose
+// owner has left the household). Its voice turns act as that
 // owner with no voice match (decision 2026-10-14, desktop voice speaks as its owner). The node
 // is made once per sandbox through the app's own flow (login, provisioning token, register,
 // a heartbeat saying node_kind desktop) and its key kept in <sandbox>/desktop-node.json.
@@ -31,44 +32,67 @@ type desktopState struct {
 	Key    string `json:"node_key"`
 }
 
-// nodeFor returns the node a scenario plays as: "" the seeded node, "desktop" the primary's
-// desktop agent.
-func (d *Driver) nodeFor(ctx context.Context, kind string) (*Node, error) {
+// nodeFor returns the node a scenario plays as: "" the seeded node, "desktop" a desktop
+// agent. owner "" makes the primary its owner; "removed" pairs it as a throwaway member the
+// primary then removes from the household, so it has no usable owner.
+func (d *Driver) nodeFor(ctx context.Context, kind, owner string) (*Node, error) {
 	switch kind {
 	case "", "kitchen":
+		if owner != "" {
+			return nil, fmt.Errorf(`owner %q: only a "desktop" node has an owner`, owner)
+		}
 		return d.Node, nil
 	case "desktop":
 	default:
 		return nil, fmt.Errorf(`node %q: want "" (the seeded node) or "desktop"`, kind)
 	}
-	if d.desktop != nil {
-		return d.desktop, nil
+	state := ""
+	switch owner {
+	case "":
+		state = "desktop-node.json"
+	case "removed":
+		state = "desktop-removed-owner-node.json"
+	default:
+		return nil, fmt.Errorf(`owner %q: want "" (the primary) or "removed"`, owner)
+	}
+	if n := d.desktop[owner]; n != nil {
+		return n, nil
 	}
 	if d.Desktop == nil || d.Desktop.AuthURL == "" || d.Desktop.Email == "" {
 		return nil, errors.New(`node "desktop": the sandbox exports no SBX_AUTH / SBX_EMAIL (scripts/sandbox up again)`)
 	}
+	statePath := filepath.Join(filepath.Dir(d.Desktop.StateFile), state)
 	n := &Node{BaseURL: d.Node.BaseURL, HTTP: d.Node.HTTP}
-	if b, err := os.ReadFile(d.Desktop.StateFile); err == nil {
+	if b, err := os.ReadFile(statePath); err == nil {
 		var st desktopState
 		if json.Unmarshal(b, &st) == nil && st.NodeID != "" {
 			n.ID, n.Key = st.NodeID, st.Key
 			// A heartbeat both proves the key and (re)states the kind.
 			if desktopHeartbeat(ctx, n) == nil {
-				d.desktop = n
+				d.remember(owner, n)
 				return n, nil
 			}
 		}
 	}
-	if err := d.pairDesktop(ctx, n); err != nil {
+	if err := d.pairDesktop(ctx, n, owner == "removed", statePath); err != nil {
 		return nil, fmt.Errorf(`node "desktop": %w`, err)
 	}
-	d.desktop = n
+	d.remember(owner, n)
 	return n, nil
 }
 
-// pairDesktop does what the agent's first-run sign-in does: the member mints a provisioning
-// token for their household and the agent redeems it, so the member is its owner.
-func (d *Driver) pairDesktop(ctx context.Context, n *Node) error {
+func (d *Driver) remember(owner string, n *Node) {
+	if d.desktop == nil {
+		d.desktop = map[string]*Node{}
+	}
+	d.desktop[owner] = n
+}
+
+// pairDesktop does what the agent's first-run sign-in does: a member mints a provisioning
+// token for their household and the agent redeems it, so that member is its owner. With
+// removeOwner the member is a new one the primary invites, and removes once the agent is
+// paired (decision 2026-10-14: an owner who left the household no longer counts).
+func (d *Driver) pairDesktop(ctx context.Context, n *Node, removeOwner bool, statePath string) error {
 	var login struct {
 		AccessToken string `json:"access_token"`
 	}
@@ -76,12 +100,12 @@ func (d *Driver) pairDesktop(ctx context.Context, n *Node) error {
 		map[string]string{"email": d.Desktop.Email, "password": d.Desktop.Password}, &login); err != nil {
 		return err
 	}
-	bearer := map[string]string{"Authorization": "Bearer " + login.AccessToken}
+	primary := map[string]string{"Authorization": "Bearer " + login.AccessToken}
 	var households []struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`
 	}
-	if err := getJSON(ctx, d.Desktop.AuthURL+"/households", bearer, &households); err != nil {
+	if err := getJSON(ctx, d.Desktop.AuthURL+"/households", primary, &households); err != nil {
 		return err
 	}
 	hh := ""
@@ -96,6 +120,13 @@ func (d *Driver) pairDesktop(ctx context.Context, n *Node) error {
 	if hh == "" {
 		return errors.New("the primary user is in no household")
 	}
+	pairer, ownerID := primary, int64(0)
+	if removeOwner {
+		var err error
+		if pairer, ownerID, err = d.newMember(ctx, hh, primary); err != nil {
+			return err
+		}
+	}
 	var tok struct {
 		Token  string `json:"token"`
 		NodeID string `json:"node_id"`
@@ -104,7 +135,7 @@ func (d *Driver) pairDesktop(ctx context.Context, n *Node) error {
 	if err != nil {
 		return err
 	}
-	rb, err := doWant(ctx, nil, n.BaseURL+"/api/v0/provisioning/token", "application/json", b, bearer, http.StatusOK, http.StatusCreated)
+	rb, err := doWant(ctx, nil, n.BaseURL+"/api/v0/provisioning/token", "application/json", b, pairer, http.StatusOK, http.StatusCreated)
 	if err != nil {
 		return err
 	}
@@ -128,11 +159,71 @@ func (d *Driver) pairDesktop(ctx context.Context, n *Node) error {
 	if err := desktopHeartbeat(ctx, n); err != nil {
 		return err
 	}
+	if removeOwner {
+		url := fmt.Sprintf("%s/households/%s/members/%d", d.Desktop.AuthURL, hh, ownerID)
+		if err := doDelete(ctx, url, primary); err != nil {
+			return fmt.Errorf("removing the owner: %w", err)
+		}
+	}
 	b, _ = json.Marshal(desktopState{NodeID: n.ID, Key: n.Key})
-	if err := os.MkdirAll(filepath.Dir(d.Desktop.StateFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(d.Desktop.StateFile, b, 0o600)
+	return os.WriteFile(statePath, b, 0o600)
+}
+
+// newMember invites and registers a throwaway member of hh, returning its bearer header and id.
+func (d *Driver) newMember(ctx context.Context, hh string, primary map[string]string) (map[string]string, int64, error) {
+	var inv struct {
+		Code string `json:"code"`
+	}
+	b, _ := json.Marshal(map[string]any{"max_uses": 1})
+	rb, err := doWant(ctx, nil, d.Desktop.AuthURL+"/households/"+hh+"/invites", "application/json", b, primary, http.StatusOK, http.StatusCreated)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invite: %w", err)
+	}
+	if err := json.Unmarshal(rb, &inv); err != nil {
+		return nil, 0, err
+	}
+	var reg struct {
+		AccessToken string `json:"access_token"`
+		User        struct {
+			ID int64 `json:"id"`
+		} `json:"user"`
+	}
+	b, _ = json.Marshal(map[string]string{"email": "pipeline-owner-" + newUUID()[:8] + "@example.com",
+		"password": "pipeline-" + newUUID(), "invite_code": inv.Code})
+	if rb, err = doWant(ctx, nil, d.Desktop.AuthURL+"/auth/register", "application/json", b, nil, http.StatusOK, http.StatusCreated); err != nil {
+		return nil, 0, fmt.Errorf("register: %w", err)
+	}
+	if err := json.Unmarshal(rb, &reg); err != nil {
+		return nil, 0, err
+	}
+	if reg.User.ID == 0 {
+		return nil, 0, errors.New("register: no user id")
+	}
+	return map[string]string{"Authorization": "Bearer " + reg.AccessToken}, reg.User.ID, nil
+}
+
+// doDelete sends a DELETE and wants a 2xx.
+func doDelete(ctx context.Context, url string, header map[string]string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	resp, err := (&http.Client{Timeout: time.Minute}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("DELETE %s: %d %s", req.URL.Path, resp.StatusCode, truncate(string(b), 500))
+	}
+	return nil
 }
 
 // desktopHeartbeat reports node_kind desktop, as jarvis-agent's heartbeat does.

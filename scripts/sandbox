@@ -47,6 +47,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SBX_ROOT=$ROOT/.sandbox
 say() { echo "sandbox: $*" >&2; }
+# shellcheck source=lib/go.sh
+. "$ROOT/scripts/lib/go.sh"
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
@@ -307,7 +309,6 @@ write_env() {
 }
 
 cmd_up() {
-  command -v go >/dev/null || die "go not on PATH"
   mkdir -p "$HOME_DIR"
   pick_offset >"$OFFSETF.new" && mv "$OFFSETF.new" "$OFFSETF"
   [ -f "$DIR/admin-api-key" ] || head -c 24 /dev/urandom | base64 | tr -d '/+=' >"$DIR/admin-api-key"

@@ -25,13 +25,25 @@ type Speaker struct {
 	// RecognitionOff: the household has voice.recognition_enabled off (D35), so every speaker
 	// is unknown; refusals say "speaker recognition is off" (M14).
 	RecognitionOff bool
+	// SignedOutComputer: the turn comes from a desktop agent with no usable owner (none, or
+	// one who left the household; decision 2026-10-14 "desktop voice speaks as its owner").
+	// On a computer the fix is signing in again, not a voice profile, so refusals say that
+	// instead, ahead of RecognitionOff.
+	SignedOutComputer bool
 }
+
+// SignInAgain is what a per-user tool says on a desktop agent nobody usable is signed in to.
+const SignInAgain = "I don't know who's signed in on this computer. " +
+	"Sign in again from the Jarvis Automation menu (Set up / Settings…)."
 
 // Known reports whether the speaker was confidently identified.
 func (s Speaker) Known() bool { return s.UserID != 0 }
 
-// Refusal is the D21 / M14 wording a per-user tool speaks when the speaker is unknown.
+// Refusal is the D21 / M14 wording (or, on a signed-out computer, SignInAgain) a per-user tool speaks when the speaker is unknown.
 func (s Speaker) Refusal() string {
+	if s.SignedOutComputer {
+		return SignInAgain
+	}
 	if s.RecognitionOff {
 		return "Speaker recognition is off, so I can't tell who's speaking."
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 )
 
 // Decision 2026-10-14 (desktop voice speaks as its owner): a desktop agent's voice turns act as
@@ -154,8 +155,8 @@ func TestDesktopOwnerIgnoresVoiceMatch(t *testing.T) {
 	}
 }
 
-// No owner, or an owner who left the household: today's behaviour, an unknown speaker until
-// a voice match (here recognition is off, so the refusal says so).
+// No owner, or an owner who left the household: an unknown speaker until a voice match, and
+// per-user things say to sign in again on this computer.
 func TestDesktopOwnerFallsBackToUnknown(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -177,12 +178,19 @@ func TestDesktopOwnerFallsBackToUnknown(t *testing.T) {
 			if sp, _ := out["speaker"].(map[string]any); sp["user_id"] != nil {
 				t.Fatalf("transcription speaker %v", sp)
 			}
+			// On a computer the fix is signing in again, not a voice profile (and not the
+			// recognition setting either).
 			tool := ve.askWhoAmI("d3")
-			if tool["speaker_name"] != nil || !strings.Contains(tool["message"].(string), "Speaker recognition is off") {
+			if tool["speaker_name"] != nil || tool["message"] != servertools.SignInAgain {
 				t.Fatalf("identify_speaker %v", tool)
 			}
-			if msgs := messagesOf(ve.eng.last()); msgs[1]["content"] != prompts.UnknownSpeakerBlock {
+			req := ve.eng.last()
+			if msgs := messagesOf(req); msgs[1]["content"] != prompts.SignedOutComputerBlock {
 				t.Fatalf("speaker block %v", msgs[1])
+			}
+			// The memory tools are offered (recognition is off) so that they can say so.
+			if names := strings.Join(offeredTools(req), ","); !strings.Contains(names, "remember") {
+				t.Fatalf("memory tools not offered on a signed-out computer: %s", names)
 			}
 		})
 	}
@@ -206,6 +214,49 @@ func TestDesktopOwnerRemovedMidConversation(t *testing.T) {
 	}
 	if conv := ve.m.convs.get("d4"); conv.speakerID != 0 || conv.ownerUserID != 0 || conv.memories != "" {
 		t.Fatalf("conversation kept the owner: %+v", conv.speakerID)
+	}
+	if tool := ve.askWhoAmI("d4"); tool["message"] != servertools.SignInAgain {
+		t.Fatalf("after removal the refusal says %v", tool["message"])
+	}
+}
+
+// remember on a signed-out computer refuses with the sign-in sentence and stores nothing; on a
+// Pi the same unknown speaker keeps the D21 / M14 wording.
+func TestSignedOutComputerRefusals(t *testing.T) {
+	remember := func(me *memEnv, cid string) map[string]any {
+		t.Helper()
+		me.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_r", "type": "function",
+			"function": map[string]any{"name": "remember", "arguments": `{"content": "parking spot is B12"}`}}}})
+		me.eng.say("ok")
+		me.turn("/api/v0/voice/command", cid, "remember that my parking spot is B12", nil).want(200)
+		var tool map[string]any
+		for _, m := range messagesOf(me.eng.last()) {
+			if m["role"] == "tool" {
+				_ = json.Unmarshal([]byte(m["content"].(string)), &tool)
+			}
+		}
+		return tool
+	}
+
+	me := newMemEnv(t)
+	me.stt.recognition = true // a Pi offers memory only when the household can recognise voices
+	me.start("pi", "[]")
+	me.transcribe("pi", false)
+	if tool := remember(me, "pi"); tool["message"] != "I'm not sure who's speaking." {
+		t.Fatalf("pi: %v", tool)
+	}
+	if msgs := messagesOf(me.eng.last()); msgs[1]["content"] != prompts.UnknownSpeakerBlock {
+		t.Fatalf("pi speaker block %v", msgs[1])
+	}
+
+	me.makeDesktop(0)
+	me.start("desk", "[]")
+	me.transcribe("desk", false)
+	if tool := remember(me, "desk"); tool["error"] != "no_speaker" || tool["message"] != servertools.SignInAgain {
+		t.Fatalf("desktop: %v", tool)
+	}
+	if me.count(`SELECT count(*) FROM cc_user_memories WHERE household_id = ?`, voiceHH) != 0 {
+		t.Fatal("a refused remember stored something")
 	}
 }
 

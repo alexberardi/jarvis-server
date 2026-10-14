@@ -40,6 +40,8 @@ SWAY_VER=1.12 WLROOTS_VER=0.20.2
 say() { echo "desktop-shot: $*" >&2; }
 die() { say "$*"; exit 1; }
 usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; }
+# shellcheck source=lib/go.sh
+. "$ROOT/scripts/lib/go.sh"
 
 # --- deps: sway + swaybar (tray) from source, when the system has none ---------------------------
 # Arch: `sudo pacman -S sway` makes this unnecessary. The build needs only what Hyprland already
@@ -271,7 +273,7 @@ case $NAME in *[!a-zA-Z0-9_-]*|'') die "--sandbox: letters, digits, - and _ only
 
 [ "$(uname -s)" = Linux ] || die "Linux only; macOS: docs/dev/desktop-shots.md"
 find_sway || die "no sway: scripts/desktop-shot deps (builds it into $CACHE, no sudo), or: sudo pacman -S sway"
-for c in grim foot dbus-run-session setsid go; do
+for c in grim foot dbus-run-session setsid; do
   command -v "$c" >/dev/null || die "$c not found (Arch: sudo pacman -S grim foot dbus util-linux)"
 done
 [ -x /usr/bin/python3 ] || die "/usr/bin/python3 not found"

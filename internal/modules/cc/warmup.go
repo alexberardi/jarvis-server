@@ -241,6 +241,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	} else if conv.ownerUserID = deviceOwner(n); conv.ownerUserID != 0 {
 		m.setKnownSpeaker(ctx, conv, conv.ownerUserID) // a desktop agent: its signed-in member
 	}
+	conv.desktopVoice = req.chatUserID == 0 && n != nil && n.row != nil && n.row.desktop()
 	// An explicitly set household zone wins over the reported one (timezone.go).
 	conv.timezone = m.turnTimezone(ctx, hh, conv.timezone)
 	conv.ambient = m.ambientBundle(ctx, hh)
@@ -250,8 +251,10 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	photosPossible := conv.chatUserID != 0 && m.slotVision(ctx, llm.LabelLive)
 	serverPhoto := m.serverPhotoTools()
 	gates := prompts.ToolGates{
-		WebSearch:     m.householdBool(ctx, settingWebSearch, hh),
-		SpeakerKnown:  recognition || conv.chatUserID != 0 || conv.ownerUserID != 0,
+		WebSearch: m.householdBool(ctx, settingWebSearch, hh),
+		// A desktop agent always gets them: its owner is the speaker, and with none they
+		// refuse with "sign in again", which is the fix there (device_owner.go).
+		SpeakerKnown:  recognition || conv.chatUserID != 0 || conv.ownerUserID != 0 || conv.desktopVoice,
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
 		ChatPhotos:    photosPossible,

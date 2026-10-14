@@ -60,6 +60,12 @@ func TestToolRefusalsAndAccept(t *testing.T) {
 	if r := exec(t, tool, args, unknown); !strings.HasPrefix(get(r, "message").(string), "Speaker recognition is off") {
 		t.Fatalf("recognition off: %v", r)
 	}
+	unknown.Speaker.SignedOutComputer = true // a desktop agent with no usable owner
+	if r := exec(t, tool, args, unknown); get(r, "error") != "no_identified_speaker" ||
+		!strings.HasPrefix(get(r, "message").(string), "I don't know who's signed in on this computer") ||
+		!strings.Contains(get(r, "message").(string), "Sign in again from the Jarvis Automation menu") {
+		t.Fatalf("signed-out computer: %v", r)
+	}
 	if len(e.notify.all()) != 0 {
 		t.Fatal("a refusal created a plan")
 	}
