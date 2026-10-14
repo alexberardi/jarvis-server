@@ -181,6 +181,25 @@ type Beat struct {
 	// NeedsK2 asks the app to provision the settings key (K2, DESIGN §16): the mobile app then
 	// offers "Generate Encryption Key" and relays it through command-center.
 	NeedsK2 bool
+	// Busy reports is_busy: true, so jarvisd hands this heartbeat no work (pending_update).
+	// `jarvis-agent status` sends one: it isn't the running agent and couldn't act on it.
+	Busy bool
+}
+
+// PendingUpdate is an update a household member asked jarvisd to send this node (the heartbeat
+// answer is the dispatch channel). TargetVersion is "" when jarvisd named none.
+type PendingUpdate struct {
+	TaskID        string
+	TargetVersion string
+}
+
+// BeatReply is jarvisd's answer to a heartbeat.
+type BeatReply struct {
+	// PendingUpdate is set once per queued update task.
+	PendingUpdate *PendingUpdate
+	// ServerVersion is jarvisd's own version, sent to desktop agents (01-no-cli-plan 1.7):
+	// they update themselves to it. "" from a jarvisd that predates it.
+	ServerVersion string
 }
 
 // Heartbeat stamps last_seen and reports what this node is. version_info.install_mode is how
@@ -189,9 +208,15 @@ type Beat struct {
 // version_info.runtime tells a Go node from the Python one (go-pi-node.md §8 Q6). node_kind and
 // capabilities are newer: a jarvisd that predates them ignores them.
 func (c *CC) Heartbeat(ctx context.Context, b Beat) error {
+	_, err := c.Beat(ctx, b)
+	return err
+}
+
+// Beat is Heartbeat, returning jarvisd's answer.
+func (c *CC) Beat(ctx context.Context, b Beat) (BeatReply, error) {
 	body := map[string]any{
 		"version_info": map[string]any{"version": b.Version, "install_mode": b.InstallMode, "runtime": Runtime},
-		"is_busy":      false,
+		"is_busy":      b.Busy,
 		"needs_k2":     b.NeedsK2,
 	}
 	if b.NodeKind != "" {
@@ -200,7 +225,31 @@ func (c *CC) Heartbeat(ctx context.Context, b Beat) error {
 	if b.Capabilities != nil {
 		body["capabilities"] = b.Capabilities
 	}
-	return c.do(ctx, http.MethodPost, "/api/v0/admin/nodes/heartbeat", body, nil)
+	var resp struct {
+		PendingUpdate *struct {
+			TaskID        string  `json:"task_id"`
+			TargetVersion *string `json:"target_version"`
+		} `json:"pending_update"`
+		ServerVersion string `json:"server_version"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v0/admin/nodes/heartbeat", body, &resp); err != nil {
+		return BeatReply{}, err
+	}
+	out := BeatReply{ServerVersion: resp.ServerVersion}
+	if p := resp.PendingUpdate; p != nil && p.TaskID != "" {
+		out.PendingUpdate = &PendingUpdate{TaskID: p.TaskID}
+		if p.TargetVersion != nil {
+			out.PendingUpdate.TargetVersion = *p.TargetVersion
+		}
+	}
+	return out, nil
+}
+
+// ReportUpdateFailed tells jarvisd this node's update task failed (success is confirmed by the
+// next heartbeat's version, never reported).
+func (c *CC) ReportUpdateFailed(ctx context.Context, taskID, msg string) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/nodes/tasks/"+url.PathEscape(taskID)+"/status",
+		map[string]any{"state": "failed", "error_message": msg}, nil)
 }
 
 // Verify asks CC whether it really issued request id rid to this node (single use).

@@ -59,6 +59,9 @@ JARVIS_DICTATE_NATIVE_LIST=1 go test -v -run TestNativeWindowsReadOnly ./interna
 ./jarvis-agent run --confirm-dictation submit  # ask before dictation sends anything (off|submit|all)
 ./jarvis-agent config set tray false          # the settings file run reads (agent.json); flags win
 ./jarvis-agent config                          # show it: every key, set or not
+./jarvis-agent update [--check] [--version vX] # self-update to the server's version (agent.json auto_update
+                                               # does it by itself); a dev build only with --force
+CI=1 go run ./scripts/agent-upgrade-e2e        # self-update end to end (CI agent-upgrade; never on a used machine)
 scripts/browser-ext-lint.sh                    # web-ext lint of the Firefox build (CI runs it)
 AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh   # Mozilla-sign (unlisted) -> signed/
 scripts/browser-ext-store-zip.sh chrome|firefox   # store upload zips -> dist/ (docs/agent/store-listing.md)
@@ -168,6 +171,9 @@ internal/audio/device/  mic + speaker: ALSA (purego, Linux), AudioQueue (purego,
                       cmd/jarvis-agent/setup.go wires it to this computer
   install/            `jarvis-agent install|uninstall|start`: Plan (steps as data, golden per OS) +
                       Apply (files, HKCU, SMAppService, commands; fakes in tests)
+  selfupdate/         self-update (install plan 1.7, DESIGN.md §13 "Self-update"): Stage (fetch +
+                      verify through internal/update), Swap/Rollback per OS (macOS: the whole
+                      app), Finish (`update --finish`: swap, restart, health gate), Checker (when)
   appid/              the app identifier (bundle id, launchd label, portal app id, task name)
   deploy/             systemd user unit, LaunchAgent, Scheduled Task, macOS Info.plist (+ guard tests)
 scripts/agent-dev-run.sh  build (+ sign the .app on macOS), enroll if needed, run / install
@@ -181,8 +187,9 @@ is on by default (`voiceByDefault`; the status icon toggles it live, saved as ag
 (onnxruntime over purego, the *same* embedded `libonnxruntime` as `internal/voice/sherpa`, so
 linux/darwin agent binaries embed it: ~44 MB instead of ~12), `internal/voice/oww`
 (openWakeWord, golden-tested against Python) and `audio.Decimator`. `internal/agent/voice`
-knows nothing about desktops: the Pi node will run it with HAT device names. Self-update will
-reuse `internal/update` once it stops assuming the jarvisd binary.
+knows nothing about desktops: the Pi node will run it with HAT device names. Self-update reuses
+`internal/update`'s trust root and checks (`selfupdate/`); that pulls jarvisd's SQLite driver into
+the agent (+~4.5 MB), the price of one verification path.
 
 ## How drift between platforms is prevented
 
@@ -375,6 +382,14 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     in memory until the computer is added. Never log the page's URL (it carries the secret). Test
     with headless browsers against a throwaway jarvisd in a scratch HOME with fake `systemctl`/
     `xdg-open` (Remove and Start reach the service manager), never against the user's agent.
+
+31. **Self-update installs only what the running binary's keys verified** (DESIGN.md §13
+    "Self-update"). Never add an environment variable or flag that changes the keys, skips the
+    signature, or accepts an older/equal version (`--force` only lets a dev build move to a
+    release). What gets installed is always unpacked from the re-verified archive, never from a
+    file staged earlier. Tests use fakes (`selfupdate` fixtures, a fake codesign); the e2e
+    (`scripts/agent-upgrade-e2e`) refuses to run outside CI because on macOS it would restart a
+    loaded `net.jarvisautomation.agent`.
 
 ## Dependencies
 

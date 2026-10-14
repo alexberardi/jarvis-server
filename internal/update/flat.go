@@ -52,7 +52,7 @@ func (s Source) flatReleases(ctx context.Context) ([]Release, error) {
 		r.Assets = append(r.Assets, Asset{Name: name, URL: u, Size: s.size(ctx, u)})
 	}
 	if len(tags) == 0 {
-		return nil, fmt.Errorf("release directory %s: %s lists no jarvisd archive", s.Base, SumsName)
+		return nil, fmt.Errorf("release directory %s: %s lists no release archive", s.Base, SumsName)
 	}
 	out := make([]Release, 0, len(tags))
 	for _, t := range tags {
@@ -81,12 +81,18 @@ func (s Source) flatByTag(ctx context.Context, tag string) (*Release, error) {
 	return nil, fmt.Errorf("release %s: %w (the release directory %s holds %s)", tag, ErrNoRelease, s.Base, strings.Join(have, ", "))
 }
 
-// archiveTag is the tag in a release archive's name (jarvisd-<tag>-<os>-<arch>.tar.gz|.zip).
+// archiveTag is the tag in a release archive's name (<program>-<tag>-<os>-<arch>.tar.gz|.zip,
+// the program jarvisd or jarvis-agent).
 func archiveTag(name string) (string, bool) {
-	rest, ok := strings.CutPrefix(name, "jarvisd-")
-	if !ok {
-		return "", false
+	for _, prog := range programs {
+		if rest, ok := strings.CutPrefix(name, prog+"-"); ok {
+			return programArchiveTag(prog, name, rest)
+		}
 	}
+	return "", false
+}
+
+func programArchiveTag(prog, name, rest string) (string, bool) {
 	switch {
 	case strings.HasSuffix(rest, ".tar.gz"):
 		rest = strings.TrimSuffix(rest, ".tar.gz")
@@ -104,7 +110,7 @@ func archiveTag(name string) (string, bool) {
 		return "", false
 	}
 	tag, platform := rest[:j], rest[j+1:]
-	if _, ok := ParseVersion(tag); !ok || ArchiveName(tag, platform) != name {
+	if _, ok := ParseVersion(tag); !ok || ProgramArchiveName(prog, tag, platform) != name {
 		return "", false
 	}
 	return tag, true

@@ -91,12 +91,14 @@ func appEvents(pill *runningPill, log *slog.Logger) island.AppEvents {
 // serveControl answers the control socket until ctx ends: show-running flashes the island's
 // pill (when there is an island), quit stops the agent, voice-on/off is the status icon's
 // toggle (voice is nil until the switch exists). It returns a func that waits for it.
-func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch) func() {
+func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch, health func() error) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		err := control.Serve(ctx, ln, func(cmd string) error {
+		err := control.ServeVersion(ctx, ln, func(cmd string) error {
 			switch cmd {
+			case control.Health:
+				return health()
 			case control.ShowRunning:
 				// No island (--no-overlay, no display): nothing to show, but it is running.
 				pill.Show()
@@ -114,7 +116,7 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 				sw.Set(cmd == control.VoiceOn)
 			}
 			return nil
-		})
+		}, version)
 		if err != nil {
 			log.Warn("control socket stopped", "err", err)
 		}

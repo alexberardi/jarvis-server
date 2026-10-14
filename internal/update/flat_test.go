@@ -126,7 +126,12 @@ func TestArchiveTag(t *testing.T) {
 		"jarvisd-v1.2.3-linux-amd64.zip":          "",
 		"jarvisd-linux-amd64.tar.gz":              "",
 		"jarvis-node-v1.2.3-linux-amd64.tar.gz":   "",
-		"install.sh":                              "",
+		// The desktop agent's archives are in the same list (01-no-cli-plan 1.7).
+		"jarvis-agent-v1.2.3-darwin-arm64.tar.gz":  "v1.2.3",
+		"jarvis-agent-v1.2.3-windows-amd64.zip":    "v1.2.3",
+		"jarvis-agent-v1.2.3-windows-amd64.tar.gz": "",
+		"jarvis-agent-linux-amd64.tar.gz":          "",
+		"install.sh":                               "",
 	} {
 		got, ok := archiveTag(name)
 		if got != want || ok != (want != "") {

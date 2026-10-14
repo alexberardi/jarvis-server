@@ -1094,6 +1094,11 @@ macOS images Homebrew makes `/usr/local/bin` writable by the runner user, so a L
 in process without the helper (as on any Mac where the login user owns it); the e2e installs into a
 root-only `/opt/jarvisd-e2e/bin` and asserts the service account can't write it.
 
+**The desktop agent (2026-10-14, 01-no-cli-plan item 1.7).** `jarvis-agent` updates itself with
+this package's trust root and checks (`FetchSigned`, `ExtractProgram`/`ExtractTree`, the same
+`SHA256SUMS` and signature), to the version of the jarvisd it is signed in to; no privileged
+helper, since the agent's copy is the user's own. See [agent/DESIGN.md §13 "Self-update"](../agent/DESIGN.md).
+
 **Not done / follow-ups.** `jarvisd backup` as its own command; a binary that passes `version` but dies
 before serve counts its start relies on the waiting CLI (or, from the admin, the operator) to roll back; a
 helper rollback to v0.1.0-rc5 or older needs the operator's `sudo jarvisd upgrade --rollback` (above).

@@ -303,6 +303,11 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	if pending != nil {
 		resp["pending_update"] = pending
 	}
+	if row.desktop() {
+		// A desktop agent follows this server's release (01-no-cli-plan 1.7): it updates itself
+		// to the same version, so a household's agents match its jarvisd.
+		resp["server_version"] = m.Version
+	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 

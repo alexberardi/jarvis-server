@@ -450,7 +450,11 @@ const maxBinary = 1 << 30
 // extractBinary copies <dir>/jarvisd(.exe) out of the release archive (one top-level
 // directory, as release.yml packs it) to dst, executable.
 func extractBinary(archive, dst string) error {
-	want := binaryName(archive)
+	return extractNamed(archive, dst, binaryName(archive))
+}
+
+// extractNamed copies <dir>/<want> out of a release archive to dst, executable.
+func extractNamed(archive, dst, want string) error {
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o700)
 	if err != nil {
 		return err
