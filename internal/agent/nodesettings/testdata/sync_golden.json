@@ -1,0 +1,660 @@
+{
+ "specs": [
+  {
+   "key": "SVC_API_KEY",
+   "scope": "integration",
+   "description": "The service's API key",
+   "value_type": "string",
+   "required": true,
+   "is_sensitive": true,
+   "friendly_name": null,
+   "enum_values": null,
+   "presets": null
+  },
+  {
+   "key": "SVC_URL",
+   "scope": "integration",
+   "description": "Where it lives",
+   "value_type": "string",
+   "required": true,
+   "is_sensitive": false,
+   "friendly_name": "URL",
+   "enum_values": null,
+   "presets": null
+  },
+  {
+   "key": "SVC_UNITS",
+   "scope": "integration",
+   "description": "Units",
+   "value_type": "string",
+   "required": false,
+   "is_sensitive": false,
+   "friendly_name": null,
+   "enum_values": [
+    "metric",
+    "imperial"
+   ],
+   "presets": {
+    "metric": {
+     "SVC_URL": "http://metric"
+    }
+   }
+  },
+  {
+   "key": "SVC_TOKEN",
+   "scope": "user",
+   "description": "Your personal token",
+   "value_type": "string",
+   "required": true,
+   "is_sensitive": true,
+   "friendly_name": null,
+   "enum_values": null,
+   "presets": null
+  },
+  {
+   "key": "SVC_NICK",
+   "scope": "user",
+   "description": "What to call you",
+   "value_type": "string",
+   "required": false,
+   "is_sensitive": false,
+   "friendly_name": null,
+   "enum_values": null,
+   "presets": null
+  },
+  {
+   "key": "SVC_UNSET",
+   "scope": "integration",
+   "description": "Never set",
+   "value_type": "string",
+   "required": true,
+   "is_sensitive": true,
+   "friendly_name": null,
+   "enum_values": null,
+   "presets": null
+  }
+ ],
+ "source_store": [
+  {
+   "key": "SVC_API_KEY",
+   "scope": "integration",
+   "user_id": null,
+   "value": "k-123"
+  },
+  {
+   "key": "SVC_URL",
+   "scope": "integration",
+   "user_id": null,
+   "value": "http://svc.local:8123"
+  },
+  {
+   "key": "SVC_TOKEN",
+   "scope": "user",
+   "user_id": 7,
+   "value": "tok-7"
+  },
+  {
+   "key": "SVC_TOKEN",
+   "scope": "user",
+   "user_id": 8,
+   "value": "tok-8"
+  },
+  {
+   "key": "SVC_NICK",
+   "scope": "user",
+   "user_id": 7,
+   "value": "Ace"
+  }
+ ],
+ "sources": [
+  {
+   "include_values": false,
+   "user_id": null,
+   "secrets": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "description": "The service's API key",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true
+    },
+    {
+     "key": "SVC_URL",
+     "scope": "integration",
+     "description": "Where it lives",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": false,
+     "is_set": true,
+     "friendly_name": "URL",
+     "value": "http://svc.local:8123"
+    },
+    {
+     "key": "SVC_UNITS",
+     "scope": "integration",
+     "description": "Units",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false,
+     "enum_values": [
+      "metric",
+      "imperial"
+     ],
+     "presets": {
+      "metric": {
+       "SVC_URL": "http://metric"
+      }
+     }
+    },
+    {
+     "key": "SVC_TOKEN",
+     "scope": "user",
+     "description": "Your personal token",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    },
+    {
+     "key": "SVC_NICK",
+     "scope": "user",
+     "description": "What to call you",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false
+    },
+    {
+     "key": "SVC_UNSET",
+     "scope": "integration",
+     "description": "Never set",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    }
+   ]
+  },
+  {
+   "include_values": false,
+   "user_id": 7,
+   "secrets": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "description": "The service's API key",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true
+    },
+    {
+     "key": "SVC_URL",
+     "scope": "integration",
+     "description": "Where it lives",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": false,
+     "is_set": true,
+     "friendly_name": "URL",
+     "value": "http://svc.local:8123"
+    },
+    {
+     "key": "SVC_UNITS",
+     "scope": "integration",
+     "description": "Units",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false,
+     "enum_values": [
+      "metric",
+      "imperial"
+     ],
+     "presets": {
+      "metric": {
+       "SVC_URL": "http://metric"
+      }
+     }
+    },
+    {
+     "key": "SVC_TOKEN",
+     "scope": "user",
+     "description": "Your personal token",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true
+    },
+    {
+     "key": "SVC_NICK",
+     "scope": "user",
+     "description": "What to call you",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": true,
+     "value": "Ace"
+    },
+    {
+     "key": "SVC_UNSET",
+     "scope": "integration",
+     "description": "Never set",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    }
+   ]
+  },
+  {
+   "include_values": false,
+   "user_id": 8,
+   "secrets": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "description": "The service's API key",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true
+    },
+    {
+     "key": "SVC_URL",
+     "scope": "integration",
+     "description": "Where it lives",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": false,
+     "is_set": true,
+     "friendly_name": "URL",
+     "value": "http://svc.local:8123"
+    },
+    {
+     "key": "SVC_UNITS",
+     "scope": "integration",
+     "description": "Units",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false,
+     "enum_values": [
+      "metric",
+      "imperial"
+     ],
+     "presets": {
+      "metric": {
+       "SVC_URL": "http://metric"
+      }
+     }
+    },
+    {
+     "key": "SVC_TOKEN",
+     "scope": "user",
+     "description": "Your personal token",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true
+    },
+    {
+     "key": "SVC_NICK",
+     "scope": "user",
+     "description": "What to call you",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false
+    },
+    {
+     "key": "SVC_UNSET",
+     "scope": "integration",
+     "description": "Never set",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    }
+   ]
+  },
+  {
+   "include_values": true,
+   "user_id": null,
+   "secrets": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "description": "The service's API key",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true,
+     "value": "k-123"
+    },
+    {
+     "key": "SVC_URL",
+     "scope": "integration",
+     "description": "Where it lives",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": false,
+     "is_set": true,
+     "friendly_name": "URL",
+     "value": "http://svc.local:8123"
+    },
+    {
+     "key": "SVC_UNITS",
+     "scope": "integration",
+     "description": "Units",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false,
+     "enum_values": [
+      "metric",
+      "imperial"
+     ],
+     "presets": {
+      "metric": {
+       "SVC_URL": "http://metric"
+      }
+     }
+    },
+    {
+     "key": "SVC_TOKEN",
+     "scope": "user",
+     "description": "Your personal token",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    },
+    {
+     "key": "SVC_NICK",
+     "scope": "user",
+     "description": "What to call you",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false
+    },
+    {
+     "key": "SVC_UNSET",
+     "scope": "integration",
+     "description": "Never set",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    }
+   ]
+  },
+  {
+   "include_values": true,
+   "user_id": 7,
+   "secrets": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "description": "The service's API key",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true,
+     "value": "k-123"
+    },
+    {
+     "key": "SVC_URL",
+     "scope": "integration",
+     "description": "Where it lives",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": false,
+     "is_set": true,
+     "friendly_name": "URL",
+     "value": "http://svc.local:8123"
+    },
+    {
+     "key": "SVC_UNITS",
+     "scope": "integration",
+     "description": "Units",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false,
+     "enum_values": [
+      "metric",
+      "imperial"
+     ],
+     "presets": {
+      "metric": {
+       "SVC_URL": "http://metric"
+      }
+     }
+    },
+    {
+     "key": "SVC_TOKEN",
+     "scope": "user",
+     "description": "Your personal token",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true,
+     "value": "tok-7"
+    },
+    {
+     "key": "SVC_NICK",
+     "scope": "user",
+     "description": "What to call you",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": true,
+     "value": "Ace"
+    },
+    {
+     "key": "SVC_UNSET",
+     "scope": "integration",
+     "description": "Never set",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    }
+   ]
+  },
+  {
+   "include_values": true,
+   "user_id": 8,
+   "secrets": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "description": "The service's API key",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true,
+     "value": "k-123"
+    },
+    {
+     "key": "SVC_URL",
+     "scope": "integration",
+     "description": "Where it lives",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": false,
+     "is_set": true,
+     "friendly_name": "URL",
+     "value": "http://svc.local:8123"
+    },
+    {
+     "key": "SVC_UNITS",
+     "scope": "integration",
+     "description": "Units",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false,
+     "enum_values": [
+      "metric",
+      "imperial"
+     ],
+     "presets": {
+      "metric": {
+       "SVC_URL": "http://metric"
+      }
+     }
+    },
+    {
+     "key": "SVC_TOKEN",
+     "scope": "user",
+     "description": "Your personal token",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": true,
+     "value": "tok-8"
+    },
+    {
+     "key": "SVC_NICK",
+     "scope": "user",
+     "description": "What to call you",
+     "value_type": "string",
+     "required": false,
+     "is_sensitive": false,
+     "is_set": false
+    },
+    {
+     "key": "SVC_UNSET",
+     "scope": "integration",
+     "description": "Never set",
+     "value_type": "string",
+     "required": true,
+     "is_sensitive": true,
+     "is_set": false
+    }
+   ]
+  }
+ ],
+ "targets": [
+  {
+   "before": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "user_id": null,
+     "value": "old"
+    }
+   ],
+   "push": {
+    "SVC_API_KEY": "k-123",
+    "SVC_URL": "http://svc.local:8123"
+   },
+   "set_secret_calls": [
+    {
+     "key": "SVC_API_KEY",
+     "value": "k-123",
+     "scope": "integration",
+     "user_id": null
+    },
+    {
+     "key": "SVC_URL",
+     "value": "http://svc.local:8123",
+     "scope": "integration",
+     "user_id": null
+    }
+   ]
+  },
+  {
+   "before": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "user_id": null,
+     "value": "old"
+    }
+   ],
+   "push": {
+    "SVC_API_KEY": "k-123",
+    "SVC_TOKEN": "tok-7",
+    "__user_id__": "7"
+   },
+   "set_secret_calls": [
+    {
+     "key": "SVC_API_KEY",
+     "value": "k-123",
+     "scope": "user",
+     "user_id": 7
+    },
+    {
+     "key": "SVC_TOKEN",
+     "value": "tok-7",
+     "scope": "user",
+     "user_id": 7
+    }
+   ]
+  },
+  {
+   "before": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "user_id": null,
+     "value": "old"
+    }
+   ],
+   "push": {
+    "SVC_PORT": 8123,
+    "SVC_ON": true,
+    "SVC_URL": ""
+   },
+   "set_secret_calls": [
+    {
+     "key": "SVC_PORT",
+     "value": "8123",
+     "scope": "integration",
+     "user_id": null
+    },
+    {
+     "key": "SVC_ON",
+     "value": "True",
+     "scope": "integration",
+     "user_id": null
+    },
+    {
+     "key": "SVC_URL",
+     "value": "",
+     "scope": "integration",
+     "user_id": null
+    }
+   ]
+  },
+  {
+   "before": [
+    {
+     "key": "SVC_API_KEY",
+     "scope": "integration",
+     "user_id": null,
+     "value": "old"
+    }
+   ],
+   "push": {
+    "SVC_NICK": "Ace",
+    "__user_id__": ""
+   },
+   "set_secret_calls": [
+    {
+     "key": "SVC_NICK",
+     "value": "Ace",
+     "scope": "integration",
+     "user_id": null
+    }
+   ]
+  }
+ ]
+}

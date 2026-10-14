@@ -309,7 +309,7 @@ func TestOpenWipesAnotherNodesFiles(t *testing.T) {
 	old, _ := OpenStore(dir, "old")
 	_ = old.SaveK2(testKey, "kid", "")
 	_ = old.SetSecret("K", "v", "integration", "", nil)
-	_ = old.SaveData("notes", "a", map[string]any{"x": 1.0}, nil)
+	_ = old.SaveData("notes", "a", obj(t, `{"x":1}`), nil)
 	if again, _ := OpenStore(dir, "old"); !again.HasK2() || again.Secret("K", "integration", nil) != "v" {
 		t.Fatal("same node lost its settings")
 	}
@@ -317,7 +317,7 @@ func TestOpenWipesAnotherNodesFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.HasK2() || st.Secret("K", "integration", nil) != "" || len(st.AllData("notes", time.Now())) != 0 {
+	if st.HasK2() || st.Secret("K", "integration", nil) != "" || len(st.Records("notes", time.Now())) != 0 {
 		t.Fatal("new node inherited the old node's settings")
 	}
 	for _, f := range []string{K2File, SettingsFile} {
@@ -327,18 +327,40 @@ func TestOpenWipesAnotherNodesFiles(t *testing.T) {
 	}
 }
 
-func TestCommandData(t *testing.T) {
-	st, _ := OpenStore(t.TempDir(), "n1")
+// Records keep their keys' order and their place (first save) through the file, as the Pi's
+// command_data rows do; an update keeps the expiry; expired rows are gone.
+func TestCommandDataStore(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := OpenStore(dir, "n1")
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	past, future := now.Add(-time.Minute), now.Add(time.Hour)
-	_ = st.SaveData("notes", "b", map[string]any{"v": "B"}, &future)
-	_ = st.SaveData("notes", "a", map[string]any{"v": "A"}, nil)
-	_ = st.SaveData("notes", "old", map[string]any{"v": "gone"}, &past)
-	if st.Data("notes", "old", now) != nil || st.Data("notes", "a", now)["v"] != "A" {
-		t.Fatal("get")
+	_ = st.SaveData("notes", "b", obj(t, `{"z":"B","a":1}`), &future)
+	_ = st.SaveData("notes", "a", obj(t, `{"v":"A","big":12345678901234567890}`), nil)
+	_ = st.SaveData("notes", "old", obj(t, `{"v":"gone"}`), &past)
+	_ = st.SaveData("notes", "b", obj(t, `{"z":"B2","a":2}`), &future) // upsert: keeps its place
+	st, _ = OpenStore(dir, "n1")
+	if _, ok := st.Data("notes", "old", now); ok {
+		t.Fatal("expired record returned")
 	}
-	if all := st.AllData("notes", now); len(all) != 2 || all[0]["v"] != "A" {
-		t.Fatalf("all = %v", all)
+	if d, _ := st.Data("notes", "a", now); string(must(d.MarshalJSON())) != `{"v":"A","big":12345678901234567890}` {
+		t.Fatalf("get = %s", must(d.MarshalJSON()))
+	}
+	all := st.Records("notes", now)
+	if len(all) != 2 || all[0].Key != "b" || all[1].Key != "a" || string(must(all[0].Data.MarshalJSON())) != `{"z":"B2","a":2}` {
+		t.Fatalf("records = %+v", all)
+	}
+	merged, found, err := st.UpdateData("notes", "b", obj(t, `{"a":3,"n":"new"}`), now, func(Object) bool { return true })
+	if err != nil || !found || string(must(merged.MarshalJSON())) != `{"z":"B2","a":3,"n":"new"}` {
+		t.Fatalf("update = %s, %v, %v", must(merged.MarshalJSON()), found, err)
+	}
+	if r := st.Records("notes", now); r[0].ExpiresAt == nil || !r[0].ExpiresAt.Equal(future) {
+		t.Fatalf("update dropped the expiry: %+v", r[0])
+	}
+	if _, found, _ := st.UpdateData("notes", "b", obj(t, `{"a":4}`), now, func(Object) bool { return false }); found {
+		t.Fatal("refused update applied")
+	}
+	if _, found, _ := st.UpdateData("notes", "old", obj(t, `{"a":4}`), now, func(Object) bool { return true }); found {
+		t.Fatal("expired record updated")
 	}
 	if ok, _ := st.DeleteData("notes", "a"); !ok {
 		t.Fatal("delete")
@@ -346,6 +368,22 @@ func TestCommandData(t *testing.T) {
 	if n, _ := st.DeleteAllData("notes"); n != 2 {
 		t.Fatalf("delete all = %d", n)
 	}
+}
+
+func obj(t *testing.T, s string) Object {
+	t.Helper()
+	var o Object
+	if err := json.Unmarshal([]byte(s), &o); err != nil {
+		t.Fatal(err)
+	}
+	return o
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 type fakeTools []string

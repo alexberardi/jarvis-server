@@ -34,9 +34,9 @@ type Storage interface {
 	Secret(key, scope string, uid *int64) string
 	SetSecret(key, value, scope, valueType string, uid *int64) error
 	DeleteSecret(key, scope string, uid *int64) error
-	SaveData(command, key string, data map[string]any, expires *time.Time) error
-	Data(command, key string, now time.Time) map[string]any
-	AllData(command string, now time.Time) []map[string]any
+	SaveData(command, key string, data nodesettings.Object, expires *time.Time) error
+	Data(command, key string, now time.Time) (nodesettings.Object, bool)
+	Records(command string, now time.Time) []nodesettings.Record
 	DeleteData(command, key string) (bool, error)
 	DeleteAllData(command string) (int, error)
 }
@@ -57,8 +57,16 @@ type Sidecar struct {
 	nextID  int
 	tools   []node.ToolDef
 	secrets map[string][]nodesettings.SecretSpec
+	extras  map[string]extras
+	browser []nodesettings.DataCommand
 	store   Storage
 	now     func() time.Time
+}
+
+// extras are the snapshot fields a package may declare beyond its secrets.
+type extras struct {
+	AssociatedService string          `json:"associated_service"`
+	SetupGuide        json.RawMessage `json:"setup_guide"`
 }
 
 type request struct {
@@ -120,13 +128,15 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 	out := bufio.NewScanner(stdout)
 	out.Buffer(make([]byte, 64<<10), 16<<20)
 	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, dir: dir, store: st, now: time.Now,
-		secrets: map[string][]nodesettings.SecretSpec{}}
+		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}}
 	var desc struct {
 		Tools []struct {
-			Name       string                    `json:"name"`
-			ClientTool map[string]any            `json:"client_tool"`
-			Command    map[string]any            `json:"command"`
-			Secrets    []nodesettings.SecretSpec `json:"secrets"`
+			Name        string                    `json:"name"`
+			ClientTool  map[string]any            `json:"client_tool"`
+			Command     map[string]any            `json:"command"`
+			Secrets     []nodesettings.SecretSpec `json:"secrets"`
+			DataBrowser *nodesettings.DataCommand `json:"data_browser"`
+			extras
 		} `json:"tools"`
 	}
 	if err := s.roundTrip("describe", nil, &desc); err != nil {
@@ -136,6 +146,11 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 	for _, t := range desc.Tools {
 		s.tools = append(s.tools, node.ToolDef{Name: t.Name, ClientTool: t.ClientTool, Command: t.Command})
 		s.secrets[t.Name] = t.Secrets
+		s.extras[t.Name] = t.extras
+		if b := t.DataBrowser; b != nil { // nil: its settings couldn't be read, so it stays out
+			b.Name = t.Name
+			s.browser = append(s.browser, *b)
+		}
 	}
 	return s, nil
 }
@@ -145,9 +160,50 @@ func (s *Sidecar) Commands() []nodesettings.Command {
 	out := make([]nodesettings.Command, 0, len(s.tools))
 	for _, t := range s.tools {
 		desc, _ := t.Command["description"].(string)
-		out = append(out, nodesettings.Command{Name: t.Name, Description: desc, Secrets: s.secrets[t.Name]})
+		x := s.extras[t.Name]
+		out = append(out, nodesettings.Command{Name: t.Name, Description: desc, Secrets: s.secrets[t.Name],
+			AssociatedService: x.AssociatedService, SetupGuide: x.SetupGuide})
 	}
 	return out
+}
+
+// DataCommands are the commands' mobile data-browser settings, read once at start.
+func (s *Sidecar) DataCommands() []nodesettings.DataCommand { return s.browser }
+
+// Summaries runs each record through its command's display_summary in one round trip.
+func (s *Sidecar) Summaries(_ context.Context, command string, records []nodesettings.Object) ([]map[string]any, error) {
+	var res struct {
+		Summaries []map[string]any `json:"summaries"`
+	}
+	if err := s.roundTrip("data_summaries", map[string]any{"command_name": command, "records": records}, &res); err != nil {
+		return nil, err
+	}
+	return res.Summaries, nil
+}
+
+// Create runs the command's data_browser_create, which stamps uid as the owner and saves the
+// record through JarvisStorage (back into the agent's store, mid-request).
+func (s *Sidecar) Create(_ context.Context, command string, values nodesettings.Object, uid json.Number) (string, json.RawMessage, error) {
+	var who any // JSON null for no user: the command refuses it
+	if uid != "" {
+		who = uid
+	}
+	var res struct {
+		Key      string          `json:"key"`
+		Record   json.RawMessage `json:"record"`
+		Rejected *string         `json:"rejected"`
+		Failed   *string         `json:"failed"`
+	}
+	err := s.roundTrip("data_create", map[string]any{"command_name": command, "fields": values, "requesting_user_id": who}, &res)
+	switch {
+	case err != nil:
+		return "", nil, err
+	case res.Rejected != nil:
+		return "", nil, &nodesettings.ErrRejected{Message: *res.Rejected}
+	case res.Failed != nil:
+		return "", nil, errors.New(*res.Failed)
+	}
+	return res.Key, res.Record, nil
 }
 
 func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error {
@@ -252,14 +308,14 @@ func (s *Sidecar) Close() error {
 
 // storageParams are the fields of a child's storage request.
 type storageParams struct {
-	Command   string         `json:"command"`
-	Key       string         `json:"key"`
-	Data      map[string]any `json:"data"`
-	ExpiresAt *string        `json:"expires_at"`
-	Scope     string         `json:"scope"`
-	Value     *string        `json:"value"`
-	ValueType string         `json:"value_type"`
-	UserID    *int64         `json:"user_id"`
+	Command   string              `json:"command"`
+	Key       string              `json:"key"`
+	Data      nodesettings.Object `json:"data"`
+	ExpiresAt *string             `json:"expires_at"`
+	Scope     string              `json:"scope"`
+	Value     *string             `json:"value"`
+	ValueType string              `json:"value_type"`
+	UserID    *int64              `json:"user_id"`
 }
 
 // answer serves one reverse request from the child.
@@ -289,6 +345,15 @@ func expiry(p *string) (*time.Time, error) {
 		}
 	}
 	return nil, fmt.Errorf("bad expires_at %q", *p)
+}
+
+// isoformat is Python's datetime.isoformat() of t in UTC (microseconds only when non-zero).
+func isoformat(t time.Time) string {
+	t = t.UTC()
+	if t.Nanosecond()/1000 != 0 {
+		return t.Format("2006-01-02T15:04:05.000000+00:00")
+	}
+	return t.Format("2006-01-02T15:04:05+00:00")
 }
 
 func (s *Sidecar) storage(method string, raw json.RawMessage) (any, error) {
@@ -321,12 +386,25 @@ func (s *Sidecar) storage(method string, raw json.RawMessage) (any, error) {
 		}
 		return nil, s.store.SaveData(p.Command, p.Key, p.Data, exp)
 	case "storage.get":
-		if d := s.store.Data(p.Command, p.Key, s.now()); d != nil {
+		if d, ok := s.store.Data(p.Command, p.Key, s.now()); ok {
 			return d, nil
 		}
 		return nil, nil
 	case "storage.get_all":
-		return s.store.AllData(p.Command, s.now()), nil
+		// As the Pi's CommandDataRepository.get_all: each record with its key and expiry.
+		out := []nodesettings.Object{}
+		for _, r := range s.store.Records(p.Command, s.now()) {
+			d := r.Data
+			key, _ := json.Marshal(r.Key)
+			d.Set("_data_key", key)
+			exp := json.RawMessage("null")
+			if r.ExpiresAt != nil {
+				exp, _ = json.Marshal(isoformat(*r.ExpiresAt))
+			}
+			d.Set("_expires_at", exp)
+			out = append(out, d)
+		}
+		return out, nil
 	case "storage.delete":
 		return s.store.DeleteData(p.Command, p.Key)
 	case "storage.delete_all":

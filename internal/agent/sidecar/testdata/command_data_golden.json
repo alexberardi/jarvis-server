@@ -1,0 +1,5567 @@
+{
+ "node_id": "golden-node-1",
+ "seed": [
+  {
+   "storage": "notes",
+   "key": "n3",
+   "record": {
+    "title": "Groceries",
+    "body": "milk",
+    "done": false,
+    "user_id": 7,
+    "items": [
+     {
+      "name": "egg",
+      "qty": 12
+     }
+    ],
+    "big": 12345678901234567890
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "notes",
+   "key": "n1",
+   "record": {
+    "title": "Shared",
+    "body": null,
+    "done": true
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "notes",
+   "key": "n2",
+   "record": {
+    "title": "Private 8",
+    "user_id": 8
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "notes",
+   "key": "n4",
+   "record": {
+    "title": "boom",
+    "user_id": 7
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "notes",
+   "key": "n5",
+   "record": {
+    "title": "old",
+    "user_id": 7
+   },
+   "expires_at": "2020-01-01T00:00:00+00:00"
+  },
+  {
+   "storage": "notes",
+   "key": "n6",
+   "record": {
+    "title": "later",
+    "user_id": 7,
+    "_meta": "x",
+    "f": 1.5
+   },
+   "expires_at": "2099-01-01T00:00:00+00:00"
+  },
+  {
+   "storage": "journal",
+   "key": "j000",
+   "record": {
+    "zeta": "First string",
+    "alpha": "Second",
+    "n": 0
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j001",
+   "record": {
+    "n": 1,
+    "entry": "entry 1"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j002",
+   "record": {
+    "n": 2,
+    "entry": "entry 2"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j003",
+   "record": {
+    "n": 3,
+    "entry": "entry 3"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j004",
+   "record": {
+    "n": 4,
+    "entry": "entry 4"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j005",
+   "record": {
+    "n": 5,
+    "entry": "entry 5"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j006",
+   "record": {
+    "n": 6,
+    "entry": "entry 6"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j007",
+   "record": {
+    "n": 7,
+    "entry": "entry 7"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j008",
+   "record": {
+    "n": 8,
+    "entry": "entry 8"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j009",
+   "record": {
+    "n": 9,
+    "entry": "entry 9"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j010",
+   "record": {
+    "n": 10,
+    "entry": "entry 10"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j011",
+   "record": {
+    "n": 11,
+    "entry": "entry 11"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j012",
+   "record": {
+    "n": 12,
+    "entry": "entry 12"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j013",
+   "record": {
+    "n": 13,
+    "entry": "entry 13"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j014",
+   "record": {
+    "n": 14,
+    "entry": "entry 14"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j015",
+   "record": {
+    "n": 15,
+    "entry": "entry 15"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j016",
+   "record": {
+    "n": 16,
+    "entry": "entry 16"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j017",
+   "record": {
+    "n": 17,
+    "entry": "entry 17"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j018",
+   "record": {
+    "n": 18,
+    "entry": "entry 18"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j019",
+   "record": {
+    "n": 19,
+    "entry": "entry 19"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j020",
+   "record": {
+    "n": 20,
+    "entry": "entry 20"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j021",
+   "record": {
+    "n": 21,
+    "entry": "entry 21"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j022",
+   "record": {
+    "n": 22,
+    "entry": "entry 22"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j023",
+   "record": {
+    "n": 23,
+    "entry": "entry 23"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j024",
+   "record": {
+    "n": 24,
+    "entry": "entry 24"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j025",
+   "record": {
+    "n": 25,
+    "entry": "entry 25"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j026",
+   "record": {
+    "n": 26,
+    "entry": "entry 26"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j027",
+   "record": {
+    "n": 27,
+    "entry": "entry 27"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j028",
+   "record": {
+    "n": 28,
+    "entry": "entry 28"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j029",
+   "record": {
+    "n": 29,
+    "entry": "entry 29"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j030",
+   "record": {
+    "n": 30,
+    "entry": "entry 30"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j031",
+   "record": {
+    "n": 31,
+    "entry": "entry 31"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j032",
+   "record": {
+    "n": 32,
+    "entry": "entry 32"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j033",
+   "record": {
+    "n": 33,
+    "entry": "entry 33"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j034",
+   "record": {
+    "n": 34,
+    "entry": "entry 34"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j035",
+   "record": {
+    "n": 35,
+    "entry": "entry 35"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j036",
+   "record": {
+    "n": 36,
+    "entry": "entry 36"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j037",
+   "record": {
+    "n": 37,
+    "entry": "entry 37"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j038",
+   "record": {
+    "n": 38,
+    "entry": "entry 38"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j039",
+   "record": {
+    "n": 39,
+    "entry": "entry 39"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j040",
+   "record": {
+    "n": 40,
+    "entry": "entry 40"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j041",
+   "record": {
+    "n": 41,
+    "entry": "entry 41"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j042",
+   "record": {
+    "n": 42,
+    "entry": "entry 42"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j043",
+   "record": {
+    "n": 43,
+    "entry": "entry 43"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j044",
+   "record": {
+    "n": 44,
+    "entry": "entry 44"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j045",
+   "record": {
+    "n": 45,
+    "entry": "entry 45"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j046",
+   "record": {
+    "n": 46,
+    "entry": "entry 46"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j047",
+   "record": {
+    "n": 47,
+    "entry": "entry 47"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j048",
+   "record": {
+    "n": 48,
+    "entry": "entry 48"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j049",
+   "record": {
+    "n": 49,
+    "entry": "entry 49"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j050",
+   "record": {
+    "n": 50,
+    "entry": "entry 50"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j051",
+   "record": {
+    "n": 51,
+    "entry": "entry 51"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j052",
+   "record": {
+    "n": 52,
+    "entry": "entry 52"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j053",
+   "record": {
+    "n": 53,
+    "entry": "entry 53"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j054",
+   "record": {
+    "n": 54,
+    "entry": "entry 54"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j055",
+   "record": {
+    "n": 55,
+    "entry": "entry 55"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j056",
+   "record": {
+    "n": 56,
+    "entry": "entry 56"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j057",
+   "record": {
+    "n": 57,
+    "entry": "entry 57"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j058",
+   "record": {
+    "n": 58,
+    "entry": "entry 58"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j059",
+   "record": {
+    "n": 59,
+    "entry": "entry 59"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j060",
+   "record": {
+    "n": 60,
+    "entry": "entry 60"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j061",
+   "record": {
+    "n": 61,
+    "entry": "entry 61"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j062",
+   "record": {
+    "n": 62,
+    "entry": "entry 62"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j063",
+   "record": {
+    "n": 63,
+    "entry": "entry 63"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j064",
+   "record": {
+    "n": 64,
+    "entry": "entry 64"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j065",
+   "record": {
+    "n": 65,
+    "entry": "entry 65"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j066",
+   "record": {
+    "n": 66,
+    "entry": "entry 66"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j067",
+   "record": {
+    "n": 67,
+    "entry": "entry 67"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j068",
+   "record": {
+    "n": 68,
+    "entry": "entry 68"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j069",
+   "record": {
+    "n": 69,
+    "entry": "entry 69"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j070",
+   "record": {
+    "n": 70,
+    "entry": "entry 70"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j071",
+   "record": {
+    "n": 71,
+    "entry": "entry 71"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j072",
+   "record": {
+    "n": 72,
+    "entry": "entry 72"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j073",
+   "record": {
+    "n": 73,
+    "entry": "entry 73"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j074",
+   "record": {
+    "n": 74,
+    "entry": "entry 74"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j075",
+   "record": {
+    "n": 75,
+    "entry": "entry 75"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j076",
+   "record": {
+    "n": 76,
+    "entry": "entry 76"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j077",
+   "record": {
+    "n": 77,
+    "entry": "entry 77"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j078",
+   "record": {
+    "n": 78,
+    "entry": "entry 78"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j079",
+   "record": {
+    "n": 79,
+    "entry": "entry 79"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j080",
+   "record": {
+    "n": 80,
+    "entry": "entry 80"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j081",
+   "record": {
+    "n": 81,
+    "entry": "entry 81"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j082",
+   "record": {
+    "n": 82,
+    "entry": "entry 82"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j083",
+   "record": {
+    "n": 83,
+    "entry": "entry 83"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j084",
+   "record": {
+    "n": 84,
+    "entry": "entry 84"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j085",
+   "record": {
+    "n": 85,
+    "entry": "entry 85"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j086",
+   "record": {
+    "n": 86,
+    "entry": "entry 86"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j087",
+   "record": {
+    "n": 87,
+    "entry": "entry 87"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j088",
+   "record": {
+    "n": 88,
+    "entry": "entry 88"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j089",
+   "record": {
+    "n": 89,
+    "entry": "entry 89"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j090",
+   "record": {
+    "n": 90,
+    "entry": "entry 90"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j091",
+   "record": {
+    "n": 91,
+    "entry": "entry 91"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j092",
+   "record": {
+    "n": 92,
+    "entry": "entry 92"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j093",
+   "record": {
+    "n": 93,
+    "entry": "entry 93"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j094",
+   "record": {
+    "n": 94,
+    "entry": "entry 94"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j095",
+   "record": {
+    "n": 95,
+    "entry": "entry 95"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j096",
+   "record": {
+    "n": 96,
+    "entry": "entry 96"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j097",
+   "record": {
+    "n": 97,
+    "entry": "entry 97"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j098",
+   "record": {
+    "n": 98,
+    "entry": "entry 98"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j099",
+   "record": {
+    "n": 99,
+    "entry": "entry 99"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j100",
+   "record": {
+    "n": 100,
+    "entry": "entry 100"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j101",
+   "record": {
+    "n": 101,
+    "entry": "entry 101"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j102",
+   "record": {
+    "n": 102,
+    "entry": "entry 102"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j103",
+   "record": {
+    "n": 103,
+    "entry": "entry 103"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j104",
+   "record": {
+    "n": 104,
+    "entry": "entry 104"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j105",
+   "record": {
+    "n": 105,
+    "entry": "entry 105"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j106",
+   "record": {
+    "n": 106,
+    "entry": "entry 106"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j107",
+   "record": {
+    "n": 107,
+    "entry": "entry 107"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j108",
+   "record": {
+    "n": 108,
+    "entry": "entry 108"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j109",
+   "record": {
+    "n": 109,
+    "entry": "entry 109"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j110",
+   "record": {
+    "n": 110,
+    "entry": "entry 110"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j111",
+   "record": {
+    "n": 111,
+    "entry": "entry 111"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j112",
+   "record": {
+    "n": 112,
+    "entry": "entry 112"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j113",
+   "record": {
+    "n": 113,
+    "entry": "entry 113"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j114",
+   "record": {
+    "n": 114,
+    "entry": "entry 114"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j115",
+   "record": {
+    "n": 115,
+    "entry": "entry 115"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j116",
+   "record": {
+    "n": 116,
+    "entry": "entry 116"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j117",
+   "record": {
+    "n": 117,
+    "entry": "entry 117"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j118",
+   "record": {
+    "n": 118,
+    "entry": "entry 118"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j119",
+   "record": {
+    "n": 119,
+    "entry": "entry 119"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j120",
+   "record": {
+    "n": 120,
+    "entry": "entry 120"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j121",
+   "record": {
+    "n": 121,
+    "entry": "entry 121"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j122",
+   "record": {
+    "n": 122,
+    "entry": "entry 122"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j123",
+   "record": {
+    "n": 123,
+    "entry": "entry 123"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j124",
+   "record": {
+    "n": 124,
+    "entry": "entry 124"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j125",
+   "record": {
+    "n": 125,
+    "entry": "entry 125"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j126",
+   "record": {
+    "n": 126,
+    "entry": "entry 126"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j127",
+   "record": {
+    "n": 127,
+    "entry": "entry 127"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j128",
+   "record": {
+    "n": 128,
+    "entry": "entry 128"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j129",
+   "record": {
+    "n": 129,
+    "entry": "entry 129"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j130",
+   "record": {
+    "n": 130,
+    "entry": "entry 130"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j131",
+   "record": {
+    "n": 131,
+    "entry": "entry 131"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j132",
+   "record": {
+    "n": 132,
+    "entry": "entry 132"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j133",
+   "record": {
+    "n": 133,
+    "entry": "entry 133"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j134",
+   "record": {
+    "n": 134,
+    "entry": "entry 134"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j135",
+   "record": {
+    "n": 135,
+    "entry": "entry 135"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j136",
+   "record": {
+    "n": 136,
+    "entry": "entry 136"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j137",
+   "record": {
+    "n": 137,
+    "entry": "entry 137"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j138",
+   "record": {
+    "n": 138,
+    "entry": "entry 138"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j139",
+   "record": {
+    "n": 139,
+    "entry": "entry 139"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j140",
+   "record": {
+    "n": 140,
+    "entry": "entry 140"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j141",
+   "record": {
+    "n": 141,
+    "entry": "entry 141"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j142",
+   "record": {
+    "n": 142,
+    "entry": "entry 142"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j143",
+   "record": {
+    "n": 143,
+    "entry": "entry 143"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j144",
+   "record": {
+    "n": 144,
+    "entry": "entry 144"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j145",
+   "record": {
+    "n": 145,
+    "entry": "entry 145"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j146",
+   "record": {
+    "n": 146,
+    "entry": "entry 146"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j147",
+   "record": {
+    "n": 147,
+    "entry": "entry 147"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j148",
+   "record": {
+    "n": 148,
+    "entry": "entry 148"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j149",
+   "record": {
+    "n": 149,
+    "entry": "entry 149"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j150",
+   "record": {
+    "n": 150,
+    "entry": "entry 150"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j151",
+   "record": {
+    "n": 151,
+    "entry": "entry 151"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j152",
+   "record": {
+    "n": 152,
+    "entry": "entry 152"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j153",
+   "record": {
+    "n": 153,
+    "entry": "entry 153"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j154",
+   "record": {
+    "n": 154,
+    "entry": "entry 154"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j155",
+   "record": {
+    "n": 155,
+    "entry": "entry 155"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j156",
+   "record": {
+    "n": 156,
+    "entry": "entry 156"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j157",
+   "record": {
+    "n": 157,
+    "entry": "entry 157"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j158",
+   "record": {
+    "n": 158,
+    "entry": "entry 158"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j159",
+   "record": {
+    "n": 159,
+    "entry": "entry 159"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j160",
+   "record": {
+    "n": 160,
+    "entry": "entry 160"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j161",
+   "record": {
+    "n": 161,
+    "entry": "entry 161"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j162",
+   "record": {
+    "n": 162,
+    "entry": "entry 162"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j163",
+   "record": {
+    "n": 163,
+    "entry": "entry 163"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j164",
+   "record": {
+    "n": 164,
+    "entry": "entry 164"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j165",
+   "record": {
+    "n": 165,
+    "entry": "entry 165"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j166",
+   "record": {
+    "n": 166,
+    "entry": "entry 166"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j167",
+   "record": {
+    "n": 167,
+    "entry": "entry 167"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j168",
+   "record": {
+    "n": 168,
+    "entry": "entry 168"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j169",
+   "record": {
+    "n": 169,
+    "entry": "entry 169"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j170",
+   "record": {
+    "n": 170,
+    "entry": "entry 170"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j171",
+   "record": {
+    "n": 171,
+    "entry": "entry 171"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j172",
+   "record": {
+    "n": 172,
+    "entry": "entry 172"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j173",
+   "record": {
+    "n": 173,
+    "entry": "entry 173"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j174",
+   "record": {
+    "n": 174,
+    "entry": "entry 174"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j175",
+   "record": {
+    "n": 175,
+    "entry": "entry 175"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j176",
+   "record": {
+    "n": 176,
+    "entry": "entry 176"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j177",
+   "record": {
+    "n": 177,
+    "entry": "entry 177"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j178",
+   "record": {
+    "n": 178,
+    "entry": "entry 178"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j179",
+   "record": {
+    "n": 179,
+    "entry": "entry 179"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j180",
+   "record": {
+    "n": 180,
+    "entry": "entry 180"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j181",
+   "record": {
+    "n": 181,
+    "entry": "entry 181"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j182",
+   "record": {
+    "n": 182,
+    "entry": "entry 182"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j183",
+   "record": {
+    "n": 183,
+    "entry": "entry 183"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j184",
+   "record": {
+    "n": 184,
+    "entry": "entry 184"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j185",
+   "record": {
+    "n": 185,
+    "entry": "entry 185"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j186",
+   "record": {
+    "n": 186,
+    "entry": "entry 186"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j187",
+   "record": {
+    "n": 187,
+    "entry": "entry 187"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j188",
+   "record": {
+    "n": 188,
+    "entry": "entry 188"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j189",
+   "record": {
+    "n": 189,
+    "entry": "entry 189"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j190",
+   "record": {
+    "n": 190,
+    "entry": "entry 190"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j191",
+   "record": {
+    "n": 191,
+    "entry": "entry 191"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j192",
+   "record": {
+    "n": 192,
+    "entry": "entry 192"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j193",
+   "record": {
+    "n": 193,
+    "entry": "entry 193"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j194",
+   "record": {
+    "n": 194,
+    "entry": "entry 194"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j195",
+   "record": {
+    "n": 195,
+    "entry": "entry 195"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j196",
+   "record": {
+    "n": 196,
+    "entry": "entry 196"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j197",
+   "record": {
+    "n": 197,
+    "entry": "entry 197"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j198",
+   "record": {
+    "n": 198,
+    "entry": "entry 198"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j199",
+   "record": {
+    "n": 199,
+    "entry": "entry 199"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "journal",
+   "key": "j200",
+   "record": {
+    "n": 200,
+    "entry": "entry 200"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "alarm_store",
+   "key": "a1",
+   "record": {
+    "at": "2026-10-15T07:00:00"
+   },
+   "expires_at": null
+  },
+  {
+   "storage": "vault",
+   "key": "v1",
+   "record": {
+    "secret": 1
+   },
+   "expires_at": null
+  }
+ ],
+ "steps": [
+  {
+   "op": "commands",
+   "request": {
+    "correlation_id": "c1"
+   },
+   "response": {
+    "commands": [
+     {
+      "command_name": "alarm",
+      "mode": "readonly",
+      "storage_name": "alarm_store"
+     },
+     {
+      "command_name": "dose",
+      "mode": "enabled",
+      "storage_name": "dose"
+     },
+     {
+      "command_name": "journal",
+      "mode": "enabled",
+      "storage_name": "journal"
+     },
+     {
+      "command_name": "notes",
+      "mode": "enabled",
+      "storage_name": "notes"
+     }
+    ]
+   }
+  },
+  {
+   "op": "schema",
+   "request": {
+    "correlation_id": "c2",
+    "command_name": "notes"
+   },
+   "response": {
+    "ok": true,
+    "mode": "enabled",
+    "supports_create": true,
+    "fields": [
+     {
+      "name": "title",
+      "type": "string",
+      "label": "Title",
+      "required": true
+     },
+     {
+      "name": "body",
+      "type": "text",
+      "placeholder": "Write something"
+     },
+     {
+      "name": "done",
+      "type": "bool"
+     },
+     {
+      "name": "scope",
+      "type": "enum",
+      "editable": false,
+      "create_only": true,
+      "enum_values": [
+       "personal",
+       "household"
+      ]
+     },
+     {
+      "name": "owner",
+      "type": "user_ref",
+      "editable": false
+     },
+     {
+      "name": "items",
+      "type": "array",
+      "item_type": "object",
+      "fields": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "qty",
+        "type": "int"
+       }
+      ]
+     },
+     {
+      "name": "data_key",
+      "type": "id"
+     }
+    ]
+   }
+  },
+  {
+   "op": "schema",
+   "request": {
+    "correlation_id": "c3"
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command_name required"
+    }
+   }
+  },
+  {
+   "op": "schema",
+   "request": {
+    "correlation_id": "c4",
+    "command_name": "vault"
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command not found"
+    }
+   }
+  },
+  {
+   "op": "schema",
+   "request": {
+    "correlation_id": "c5",
+    "command_name": "nope"
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command not found"
+    }
+   }
+  },
+  {
+   "op": "schema",
+   "request": {
+    "correlation_id": "c6",
+    "command_name": "journal"
+   },
+   "response": {
+    "ok": true,
+    "mode": "enabled",
+    "supports_create": false,
+    "fields": []
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c7",
+    "command_name": "notes",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "n3",
+      "summary": {
+       "title": "Groceries",
+       "subtitle": "milk",
+       "icon": "note"
+      },
+      "data": {
+       "title": "Groceries",
+       "body": "milk",
+       "done": false,
+       "user_id": 7,
+       "items": [
+        {
+         "name": "egg",
+         "qty": 12
+        }
+       ],
+       "big": 12345678901234567890
+      }
+     },
+     {
+      "key": "n1",
+      "summary": {
+       "title": "Shared",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "Shared",
+       "body": null,
+       "done": true
+      }
+     },
+     {
+      "key": "n4",
+      "summary": {
+       "title": "n4",
+       "subtitle": null,
+       "icon": "alert-circle-outline"
+      },
+      "data": {
+       "title": "boom",
+       "user_id": 7
+      }
+     },
+     {
+      "key": "n6",
+      "summary": {
+       "title": "later",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "later",
+       "user_id": 7,
+       "f": 1.5
+      }
+     }
+    ],
+    "truncated": false,
+    "count": 4
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c8",
+    "command_name": "notes",
+    "requesting_user_id": 8
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "n1",
+      "summary": {
+       "title": "Shared",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "Shared",
+       "body": null,
+       "done": true
+      }
+     },
+     {
+      "key": "n2",
+      "summary": {
+       "title": "Private 8",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "Private 8",
+       "user_id": 8
+      }
+     }
+    ],
+    "truncated": false,
+    "count": 2
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c9",
+    "command_name": "notes",
+    "requesting_user_id": null
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "n3",
+      "summary": {
+       "title": "Groceries",
+       "subtitle": "milk",
+       "icon": "note"
+      },
+      "data": {
+       "title": "Groceries",
+       "body": "milk",
+       "done": false,
+       "user_id": 7,
+       "items": [
+        {
+         "name": "egg",
+         "qty": 12
+        }
+       ],
+       "big": 12345678901234567890
+      }
+     },
+     {
+      "key": "n1",
+      "summary": {
+       "title": "Shared",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "Shared",
+       "body": null,
+       "done": true
+      }
+     },
+     {
+      "key": "n2",
+      "summary": {
+       "title": "Private 8",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "Private 8",
+       "user_id": 8
+      }
+     },
+     {
+      "key": "n4",
+      "summary": {
+       "title": "n4",
+       "subtitle": null,
+       "icon": "alert-circle-outline"
+      },
+      "data": {
+       "title": "boom",
+       "user_id": 7
+      }
+     },
+     {
+      "key": "n6",
+      "summary": {
+       "title": "later",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "later",
+       "user_id": 7,
+       "f": 1.5
+      }
+     }
+    ],
+    "truncated": false,
+    "count": 5
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c10",
+    "command_name": "journal",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "j000",
+      "summary": {
+       "title": "First string",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "zeta": "First string",
+       "alpha": "Second",
+       "n": 0
+      }
+     },
+     {
+      "key": "j001",
+      "summary": {
+       "title": "entry 1",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 1,
+       "entry": "entry 1"
+      }
+     },
+     {
+      "key": "j002",
+      "summary": {
+       "title": "entry 2",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 2,
+       "entry": "entry 2"
+      }
+     },
+     {
+      "key": "j003",
+      "summary": {
+       "title": "entry 3",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 3,
+       "entry": "entry 3"
+      }
+     },
+     {
+      "key": "j004",
+      "summary": {
+       "title": "entry 4",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 4,
+       "entry": "entry 4"
+      }
+     },
+     {
+      "key": "j005",
+      "summary": {
+       "title": "entry 5",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 5,
+       "entry": "entry 5"
+      }
+     },
+     {
+      "key": "j006",
+      "summary": {
+       "title": "entry 6",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 6,
+       "entry": "entry 6"
+      }
+     },
+     {
+      "key": "j007",
+      "summary": {
+       "title": "entry 7",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 7,
+       "entry": "entry 7"
+      }
+     },
+     {
+      "key": "j008",
+      "summary": {
+       "title": "entry 8",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 8,
+       "entry": "entry 8"
+      }
+     },
+     {
+      "key": "j009",
+      "summary": {
+       "title": "entry 9",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 9,
+       "entry": "entry 9"
+      }
+     },
+     {
+      "key": "j010",
+      "summary": {
+       "title": "entry 10",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 10,
+       "entry": "entry 10"
+      }
+     },
+     {
+      "key": "j011",
+      "summary": {
+       "title": "entry 11",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 11,
+       "entry": "entry 11"
+      }
+     },
+     {
+      "key": "j012",
+      "summary": {
+       "title": "entry 12",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 12,
+       "entry": "entry 12"
+      }
+     },
+     {
+      "key": "j013",
+      "summary": {
+       "title": "entry 13",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 13,
+       "entry": "entry 13"
+      }
+     },
+     {
+      "key": "j014",
+      "summary": {
+       "title": "entry 14",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 14,
+       "entry": "entry 14"
+      }
+     },
+     {
+      "key": "j015",
+      "summary": {
+       "title": "entry 15",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 15,
+       "entry": "entry 15"
+      }
+     },
+     {
+      "key": "j016",
+      "summary": {
+       "title": "entry 16",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 16,
+       "entry": "entry 16"
+      }
+     },
+     {
+      "key": "j017",
+      "summary": {
+       "title": "entry 17",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 17,
+       "entry": "entry 17"
+      }
+     },
+     {
+      "key": "j018",
+      "summary": {
+       "title": "entry 18",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 18,
+       "entry": "entry 18"
+      }
+     },
+     {
+      "key": "j019",
+      "summary": {
+       "title": "entry 19",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 19,
+       "entry": "entry 19"
+      }
+     },
+     {
+      "key": "j020",
+      "summary": {
+       "title": "entry 20",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 20,
+       "entry": "entry 20"
+      }
+     },
+     {
+      "key": "j021",
+      "summary": {
+       "title": "entry 21",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 21,
+       "entry": "entry 21"
+      }
+     },
+     {
+      "key": "j022",
+      "summary": {
+       "title": "entry 22",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 22,
+       "entry": "entry 22"
+      }
+     },
+     {
+      "key": "j023",
+      "summary": {
+       "title": "entry 23",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 23,
+       "entry": "entry 23"
+      }
+     },
+     {
+      "key": "j024",
+      "summary": {
+       "title": "entry 24",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 24,
+       "entry": "entry 24"
+      }
+     },
+     {
+      "key": "j025",
+      "summary": {
+       "title": "entry 25",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 25,
+       "entry": "entry 25"
+      }
+     },
+     {
+      "key": "j026",
+      "summary": {
+       "title": "entry 26",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 26,
+       "entry": "entry 26"
+      }
+     },
+     {
+      "key": "j027",
+      "summary": {
+       "title": "entry 27",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 27,
+       "entry": "entry 27"
+      }
+     },
+     {
+      "key": "j028",
+      "summary": {
+       "title": "entry 28",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 28,
+       "entry": "entry 28"
+      }
+     },
+     {
+      "key": "j029",
+      "summary": {
+       "title": "entry 29",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 29,
+       "entry": "entry 29"
+      }
+     },
+     {
+      "key": "j030",
+      "summary": {
+       "title": "entry 30",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 30,
+       "entry": "entry 30"
+      }
+     },
+     {
+      "key": "j031",
+      "summary": {
+       "title": "entry 31",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 31,
+       "entry": "entry 31"
+      }
+     },
+     {
+      "key": "j032",
+      "summary": {
+       "title": "entry 32",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 32,
+       "entry": "entry 32"
+      }
+     },
+     {
+      "key": "j033",
+      "summary": {
+       "title": "entry 33",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 33,
+       "entry": "entry 33"
+      }
+     },
+     {
+      "key": "j034",
+      "summary": {
+       "title": "entry 34",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 34,
+       "entry": "entry 34"
+      }
+     },
+     {
+      "key": "j035",
+      "summary": {
+       "title": "entry 35",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 35,
+       "entry": "entry 35"
+      }
+     },
+     {
+      "key": "j036",
+      "summary": {
+       "title": "entry 36",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 36,
+       "entry": "entry 36"
+      }
+     },
+     {
+      "key": "j037",
+      "summary": {
+       "title": "entry 37",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 37,
+       "entry": "entry 37"
+      }
+     },
+     {
+      "key": "j038",
+      "summary": {
+       "title": "entry 38",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 38,
+       "entry": "entry 38"
+      }
+     },
+     {
+      "key": "j039",
+      "summary": {
+       "title": "entry 39",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 39,
+       "entry": "entry 39"
+      }
+     },
+     {
+      "key": "j040",
+      "summary": {
+       "title": "entry 40",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 40,
+       "entry": "entry 40"
+      }
+     },
+     {
+      "key": "j041",
+      "summary": {
+       "title": "entry 41",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 41,
+       "entry": "entry 41"
+      }
+     },
+     {
+      "key": "j042",
+      "summary": {
+       "title": "entry 42",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 42,
+       "entry": "entry 42"
+      }
+     },
+     {
+      "key": "j043",
+      "summary": {
+       "title": "entry 43",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 43,
+       "entry": "entry 43"
+      }
+     },
+     {
+      "key": "j044",
+      "summary": {
+       "title": "entry 44",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 44,
+       "entry": "entry 44"
+      }
+     },
+     {
+      "key": "j045",
+      "summary": {
+       "title": "entry 45",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 45,
+       "entry": "entry 45"
+      }
+     },
+     {
+      "key": "j046",
+      "summary": {
+       "title": "entry 46",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 46,
+       "entry": "entry 46"
+      }
+     },
+     {
+      "key": "j047",
+      "summary": {
+       "title": "entry 47",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 47,
+       "entry": "entry 47"
+      }
+     },
+     {
+      "key": "j048",
+      "summary": {
+       "title": "entry 48",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 48,
+       "entry": "entry 48"
+      }
+     },
+     {
+      "key": "j049",
+      "summary": {
+       "title": "entry 49",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 49,
+       "entry": "entry 49"
+      }
+     },
+     {
+      "key": "j050",
+      "summary": {
+       "title": "entry 50",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 50,
+       "entry": "entry 50"
+      }
+     },
+     {
+      "key": "j051",
+      "summary": {
+       "title": "entry 51",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 51,
+       "entry": "entry 51"
+      }
+     },
+     {
+      "key": "j052",
+      "summary": {
+       "title": "entry 52",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 52,
+       "entry": "entry 52"
+      }
+     },
+     {
+      "key": "j053",
+      "summary": {
+       "title": "entry 53",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 53,
+       "entry": "entry 53"
+      }
+     },
+     {
+      "key": "j054",
+      "summary": {
+       "title": "entry 54",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 54,
+       "entry": "entry 54"
+      }
+     },
+     {
+      "key": "j055",
+      "summary": {
+       "title": "entry 55",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 55,
+       "entry": "entry 55"
+      }
+     },
+     {
+      "key": "j056",
+      "summary": {
+       "title": "entry 56",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 56,
+       "entry": "entry 56"
+      }
+     },
+     {
+      "key": "j057",
+      "summary": {
+       "title": "entry 57",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 57,
+       "entry": "entry 57"
+      }
+     },
+     {
+      "key": "j058",
+      "summary": {
+       "title": "entry 58",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 58,
+       "entry": "entry 58"
+      }
+     },
+     {
+      "key": "j059",
+      "summary": {
+       "title": "entry 59",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 59,
+       "entry": "entry 59"
+      }
+     },
+     {
+      "key": "j060",
+      "summary": {
+       "title": "entry 60",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 60,
+       "entry": "entry 60"
+      }
+     },
+     {
+      "key": "j061",
+      "summary": {
+       "title": "entry 61",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 61,
+       "entry": "entry 61"
+      }
+     },
+     {
+      "key": "j062",
+      "summary": {
+       "title": "entry 62",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 62,
+       "entry": "entry 62"
+      }
+     },
+     {
+      "key": "j063",
+      "summary": {
+       "title": "entry 63",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 63,
+       "entry": "entry 63"
+      }
+     },
+     {
+      "key": "j064",
+      "summary": {
+       "title": "entry 64",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 64,
+       "entry": "entry 64"
+      }
+     },
+     {
+      "key": "j065",
+      "summary": {
+       "title": "entry 65",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 65,
+       "entry": "entry 65"
+      }
+     },
+     {
+      "key": "j066",
+      "summary": {
+       "title": "entry 66",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 66,
+       "entry": "entry 66"
+      }
+     },
+     {
+      "key": "j067",
+      "summary": {
+       "title": "entry 67",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 67,
+       "entry": "entry 67"
+      }
+     },
+     {
+      "key": "j068",
+      "summary": {
+       "title": "entry 68",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 68,
+       "entry": "entry 68"
+      }
+     },
+     {
+      "key": "j069",
+      "summary": {
+       "title": "entry 69",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 69,
+       "entry": "entry 69"
+      }
+     },
+     {
+      "key": "j070",
+      "summary": {
+       "title": "entry 70",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 70,
+       "entry": "entry 70"
+      }
+     },
+     {
+      "key": "j071",
+      "summary": {
+       "title": "entry 71",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 71,
+       "entry": "entry 71"
+      }
+     },
+     {
+      "key": "j072",
+      "summary": {
+       "title": "entry 72",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 72,
+       "entry": "entry 72"
+      }
+     },
+     {
+      "key": "j073",
+      "summary": {
+       "title": "entry 73",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 73,
+       "entry": "entry 73"
+      }
+     },
+     {
+      "key": "j074",
+      "summary": {
+       "title": "entry 74",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 74,
+       "entry": "entry 74"
+      }
+     },
+     {
+      "key": "j075",
+      "summary": {
+       "title": "entry 75",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 75,
+       "entry": "entry 75"
+      }
+     },
+     {
+      "key": "j076",
+      "summary": {
+       "title": "entry 76",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 76,
+       "entry": "entry 76"
+      }
+     },
+     {
+      "key": "j077",
+      "summary": {
+       "title": "entry 77",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 77,
+       "entry": "entry 77"
+      }
+     },
+     {
+      "key": "j078",
+      "summary": {
+       "title": "entry 78",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 78,
+       "entry": "entry 78"
+      }
+     },
+     {
+      "key": "j079",
+      "summary": {
+       "title": "entry 79",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 79,
+       "entry": "entry 79"
+      }
+     },
+     {
+      "key": "j080",
+      "summary": {
+       "title": "entry 80",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 80,
+       "entry": "entry 80"
+      }
+     },
+     {
+      "key": "j081",
+      "summary": {
+       "title": "entry 81",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 81,
+       "entry": "entry 81"
+      }
+     },
+     {
+      "key": "j082",
+      "summary": {
+       "title": "entry 82",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 82,
+       "entry": "entry 82"
+      }
+     },
+     {
+      "key": "j083",
+      "summary": {
+       "title": "entry 83",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 83,
+       "entry": "entry 83"
+      }
+     },
+     {
+      "key": "j084",
+      "summary": {
+       "title": "entry 84",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 84,
+       "entry": "entry 84"
+      }
+     },
+     {
+      "key": "j085",
+      "summary": {
+       "title": "entry 85",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 85,
+       "entry": "entry 85"
+      }
+     },
+     {
+      "key": "j086",
+      "summary": {
+       "title": "entry 86",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 86,
+       "entry": "entry 86"
+      }
+     },
+     {
+      "key": "j087",
+      "summary": {
+       "title": "entry 87",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 87,
+       "entry": "entry 87"
+      }
+     },
+     {
+      "key": "j088",
+      "summary": {
+       "title": "entry 88",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 88,
+       "entry": "entry 88"
+      }
+     },
+     {
+      "key": "j089",
+      "summary": {
+       "title": "entry 89",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 89,
+       "entry": "entry 89"
+      }
+     },
+     {
+      "key": "j090",
+      "summary": {
+       "title": "entry 90",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 90,
+       "entry": "entry 90"
+      }
+     },
+     {
+      "key": "j091",
+      "summary": {
+       "title": "entry 91",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 91,
+       "entry": "entry 91"
+      }
+     },
+     {
+      "key": "j092",
+      "summary": {
+       "title": "entry 92",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 92,
+       "entry": "entry 92"
+      }
+     },
+     {
+      "key": "j093",
+      "summary": {
+       "title": "entry 93",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 93,
+       "entry": "entry 93"
+      }
+     },
+     {
+      "key": "j094",
+      "summary": {
+       "title": "entry 94",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 94,
+       "entry": "entry 94"
+      }
+     },
+     {
+      "key": "j095",
+      "summary": {
+       "title": "entry 95",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 95,
+       "entry": "entry 95"
+      }
+     },
+     {
+      "key": "j096",
+      "summary": {
+       "title": "entry 96",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 96,
+       "entry": "entry 96"
+      }
+     },
+     {
+      "key": "j097",
+      "summary": {
+       "title": "entry 97",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 97,
+       "entry": "entry 97"
+      }
+     },
+     {
+      "key": "j098",
+      "summary": {
+       "title": "entry 98",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 98,
+       "entry": "entry 98"
+      }
+     },
+     {
+      "key": "j099",
+      "summary": {
+       "title": "entry 99",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 99,
+       "entry": "entry 99"
+      }
+     },
+     {
+      "key": "j100",
+      "summary": {
+       "title": "entry 100",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 100,
+       "entry": "entry 100"
+      }
+     },
+     {
+      "key": "j101",
+      "summary": {
+       "title": "entry 101",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 101,
+       "entry": "entry 101"
+      }
+     },
+     {
+      "key": "j102",
+      "summary": {
+       "title": "entry 102",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 102,
+       "entry": "entry 102"
+      }
+     },
+     {
+      "key": "j103",
+      "summary": {
+       "title": "entry 103",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 103,
+       "entry": "entry 103"
+      }
+     },
+     {
+      "key": "j104",
+      "summary": {
+       "title": "entry 104",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 104,
+       "entry": "entry 104"
+      }
+     },
+     {
+      "key": "j105",
+      "summary": {
+       "title": "entry 105",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 105,
+       "entry": "entry 105"
+      }
+     },
+     {
+      "key": "j106",
+      "summary": {
+       "title": "entry 106",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 106,
+       "entry": "entry 106"
+      }
+     },
+     {
+      "key": "j107",
+      "summary": {
+       "title": "entry 107",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 107,
+       "entry": "entry 107"
+      }
+     },
+     {
+      "key": "j108",
+      "summary": {
+       "title": "entry 108",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 108,
+       "entry": "entry 108"
+      }
+     },
+     {
+      "key": "j109",
+      "summary": {
+       "title": "entry 109",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 109,
+       "entry": "entry 109"
+      }
+     },
+     {
+      "key": "j110",
+      "summary": {
+       "title": "entry 110",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 110,
+       "entry": "entry 110"
+      }
+     },
+     {
+      "key": "j111",
+      "summary": {
+       "title": "entry 111",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 111,
+       "entry": "entry 111"
+      }
+     },
+     {
+      "key": "j112",
+      "summary": {
+       "title": "entry 112",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 112,
+       "entry": "entry 112"
+      }
+     },
+     {
+      "key": "j113",
+      "summary": {
+       "title": "entry 113",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 113,
+       "entry": "entry 113"
+      }
+     },
+     {
+      "key": "j114",
+      "summary": {
+       "title": "entry 114",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 114,
+       "entry": "entry 114"
+      }
+     },
+     {
+      "key": "j115",
+      "summary": {
+       "title": "entry 115",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 115,
+       "entry": "entry 115"
+      }
+     },
+     {
+      "key": "j116",
+      "summary": {
+       "title": "entry 116",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 116,
+       "entry": "entry 116"
+      }
+     },
+     {
+      "key": "j117",
+      "summary": {
+       "title": "entry 117",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 117,
+       "entry": "entry 117"
+      }
+     },
+     {
+      "key": "j118",
+      "summary": {
+       "title": "entry 118",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 118,
+       "entry": "entry 118"
+      }
+     },
+     {
+      "key": "j119",
+      "summary": {
+       "title": "entry 119",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 119,
+       "entry": "entry 119"
+      }
+     },
+     {
+      "key": "j120",
+      "summary": {
+       "title": "entry 120",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 120,
+       "entry": "entry 120"
+      }
+     },
+     {
+      "key": "j121",
+      "summary": {
+       "title": "entry 121",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 121,
+       "entry": "entry 121"
+      }
+     },
+     {
+      "key": "j122",
+      "summary": {
+       "title": "entry 122",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 122,
+       "entry": "entry 122"
+      }
+     },
+     {
+      "key": "j123",
+      "summary": {
+       "title": "entry 123",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 123,
+       "entry": "entry 123"
+      }
+     },
+     {
+      "key": "j124",
+      "summary": {
+       "title": "entry 124",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 124,
+       "entry": "entry 124"
+      }
+     },
+     {
+      "key": "j125",
+      "summary": {
+       "title": "entry 125",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 125,
+       "entry": "entry 125"
+      }
+     },
+     {
+      "key": "j126",
+      "summary": {
+       "title": "entry 126",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 126,
+       "entry": "entry 126"
+      }
+     },
+     {
+      "key": "j127",
+      "summary": {
+       "title": "entry 127",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 127,
+       "entry": "entry 127"
+      }
+     },
+     {
+      "key": "j128",
+      "summary": {
+       "title": "entry 128",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 128,
+       "entry": "entry 128"
+      }
+     },
+     {
+      "key": "j129",
+      "summary": {
+       "title": "entry 129",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 129,
+       "entry": "entry 129"
+      }
+     },
+     {
+      "key": "j130",
+      "summary": {
+       "title": "entry 130",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 130,
+       "entry": "entry 130"
+      }
+     },
+     {
+      "key": "j131",
+      "summary": {
+       "title": "entry 131",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 131,
+       "entry": "entry 131"
+      }
+     },
+     {
+      "key": "j132",
+      "summary": {
+       "title": "entry 132",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 132,
+       "entry": "entry 132"
+      }
+     },
+     {
+      "key": "j133",
+      "summary": {
+       "title": "entry 133",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 133,
+       "entry": "entry 133"
+      }
+     },
+     {
+      "key": "j134",
+      "summary": {
+       "title": "entry 134",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 134,
+       "entry": "entry 134"
+      }
+     },
+     {
+      "key": "j135",
+      "summary": {
+       "title": "entry 135",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 135,
+       "entry": "entry 135"
+      }
+     },
+     {
+      "key": "j136",
+      "summary": {
+       "title": "entry 136",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 136,
+       "entry": "entry 136"
+      }
+     },
+     {
+      "key": "j137",
+      "summary": {
+       "title": "entry 137",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 137,
+       "entry": "entry 137"
+      }
+     },
+     {
+      "key": "j138",
+      "summary": {
+       "title": "entry 138",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 138,
+       "entry": "entry 138"
+      }
+     },
+     {
+      "key": "j139",
+      "summary": {
+       "title": "entry 139",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 139,
+       "entry": "entry 139"
+      }
+     },
+     {
+      "key": "j140",
+      "summary": {
+       "title": "entry 140",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 140,
+       "entry": "entry 140"
+      }
+     },
+     {
+      "key": "j141",
+      "summary": {
+       "title": "entry 141",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 141,
+       "entry": "entry 141"
+      }
+     },
+     {
+      "key": "j142",
+      "summary": {
+       "title": "entry 142",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 142,
+       "entry": "entry 142"
+      }
+     },
+     {
+      "key": "j143",
+      "summary": {
+       "title": "entry 143",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 143,
+       "entry": "entry 143"
+      }
+     },
+     {
+      "key": "j144",
+      "summary": {
+       "title": "entry 144",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 144,
+       "entry": "entry 144"
+      }
+     },
+     {
+      "key": "j145",
+      "summary": {
+       "title": "entry 145",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 145,
+       "entry": "entry 145"
+      }
+     },
+     {
+      "key": "j146",
+      "summary": {
+       "title": "entry 146",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 146,
+       "entry": "entry 146"
+      }
+     },
+     {
+      "key": "j147",
+      "summary": {
+       "title": "entry 147",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 147,
+       "entry": "entry 147"
+      }
+     },
+     {
+      "key": "j148",
+      "summary": {
+       "title": "entry 148",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 148,
+       "entry": "entry 148"
+      }
+     },
+     {
+      "key": "j149",
+      "summary": {
+       "title": "entry 149",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 149,
+       "entry": "entry 149"
+      }
+     },
+     {
+      "key": "j150",
+      "summary": {
+       "title": "entry 150",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 150,
+       "entry": "entry 150"
+      }
+     },
+     {
+      "key": "j151",
+      "summary": {
+       "title": "entry 151",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 151,
+       "entry": "entry 151"
+      }
+     },
+     {
+      "key": "j152",
+      "summary": {
+       "title": "entry 152",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 152,
+       "entry": "entry 152"
+      }
+     },
+     {
+      "key": "j153",
+      "summary": {
+       "title": "entry 153",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 153,
+       "entry": "entry 153"
+      }
+     },
+     {
+      "key": "j154",
+      "summary": {
+       "title": "entry 154",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 154,
+       "entry": "entry 154"
+      }
+     },
+     {
+      "key": "j155",
+      "summary": {
+       "title": "entry 155",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 155,
+       "entry": "entry 155"
+      }
+     },
+     {
+      "key": "j156",
+      "summary": {
+       "title": "entry 156",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 156,
+       "entry": "entry 156"
+      }
+     },
+     {
+      "key": "j157",
+      "summary": {
+       "title": "entry 157",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 157,
+       "entry": "entry 157"
+      }
+     },
+     {
+      "key": "j158",
+      "summary": {
+       "title": "entry 158",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 158,
+       "entry": "entry 158"
+      }
+     },
+     {
+      "key": "j159",
+      "summary": {
+       "title": "entry 159",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 159,
+       "entry": "entry 159"
+      }
+     },
+     {
+      "key": "j160",
+      "summary": {
+       "title": "entry 160",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 160,
+       "entry": "entry 160"
+      }
+     },
+     {
+      "key": "j161",
+      "summary": {
+       "title": "entry 161",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 161,
+       "entry": "entry 161"
+      }
+     },
+     {
+      "key": "j162",
+      "summary": {
+       "title": "entry 162",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 162,
+       "entry": "entry 162"
+      }
+     },
+     {
+      "key": "j163",
+      "summary": {
+       "title": "entry 163",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 163,
+       "entry": "entry 163"
+      }
+     },
+     {
+      "key": "j164",
+      "summary": {
+       "title": "entry 164",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 164,
+       "entry": "entry 164"
+      }
+     },
+     {
+      "key": "j165",
+      "summary": {
+       "title": "entry 165",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 165,
+       "entry": "entry 165"
+      }
+     },
+     {
+      "key": "j166",
+      "summary": {
+       "title": "entry 166",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 166,
+       "entry": "entry 166"
+      }
+     },
+     {
+      "key": "j167",
+      "summary": {
+       "title": "entry 167",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 167,
+       "entry": "entry 167"
+      }
+     },
+     {
+      "key": "j168",
+      "summary": {
+       "title": "entry 168",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 168,
+       "entry": "entry 168"
+      }
+     },
+     {
+      "key": "j169",
+      "summary": {
+       "title": "entry 169",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 169,
+       "entry": "entry 169"
+      }
+     },
+     {
+      "key": "j170",
+      "summary": {
+       "title": "entry 170",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 170,
+       "entry": "entry 170"
+      }
+     },
+     {
+      "key": "j171",
+      "summary": {
+       "title": "entry 171",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 171,
+       "entry": "entry 171"
+      }
+     },
+     {
+      "key": "j172",
+      "summary": {
+       "title": "entry 172",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 172,
+       "entry": "entry 172"
+      }
+     },
+     {
+      "key": "j173",
+      "summary": {
+       "title": "entry 173",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 173,
+       "entry": "entry 173"
+      }
+     },
+     {
+      "key": "j174",
+      "summary": {
+       "title": "entry 174",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 174,
+       "entry": "entry 174"
+      }
+     },
+     {
+      "key": "j175",
+      "summary": {
+       "title": "entry 175",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 175,
+       "entry": "entry 175"
+      }
+     },
+     {
+      "key": "j176",
+      "summary": {
+       "title": "entry 176",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 176,
+       "entry": "entry 176"
+      }
+     },
+     {
+      "key": "j177",
+      "summary": {
+       "title": "entry 177",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 177,
+       "entry": "entry 177"
+      }
+     },
+     {
+      "key": "j178",
+      "summary": {
+       "title": "entry 178",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 178,
+       "entry": "entry 178"
+      }
+     },
+     {
+      "key": "j179",
+      "summary": {
+       "title": "entry 179",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 179,
+       "entry": "entry 179"
+      }
+     },
+     {
+      "key": "j180",
+      "summary": {
+       "title": "entry 180",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 180,
+       "entry": "entry 180"
+      }
+     },
+     {
+      "key": "j181",
+      "summary": {
+       "title": "entry 181",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 181,
+       "entry": "entry 181"
+      }
+     },
+     {
+      "key": "j182",
+      "summary": {
+       "title": "entry 182",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 182,
+       "entry": "entry 182"
+      }
+     },
+     {
+      "key": "j183",
+      "summary": {
+       "title": "entry 183",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 183,
+       "entry": "entry 183"
+      }
+     },
+     {
+      "key": "j184",
+      "summary": {
+       "title": "entry 184",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 184,
+       "entry": "entry 184"
+      }
+     },
+     {
+      "key": "j185",
+      "summary": {
+       "title": "entry 185",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 185,
+       "entry": "entry 185"
+      }
+     },
+     {
+      "key": "j186",
+      "summary": {
+       "title": "entry 186",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 186,
+       "entry": "entry 186"
+      }
+     },
+     {
+      "key": "j187",
+      "summary": {
+       "title": "entry 187",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 187,
+       "entry": "entry 187"
+      }
+     },
+     {
+      "key": "j188",
+      "summary": {
+       "title": "entry 188",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 188,
+       "entry": "entry 188"
+      }
+     },
+     {
+      "key": "j189",
+      "summary": {
+       "title": "entry 189",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 189,
+       "entry": "entry 189"
+      }
+     },
+     {
+      "key": "j190",
+      "summary": {
+       "title": "entry 190",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 190,
+       "entry": "entry 190"
+      }
+     },
+     {
+      "key": "j191",
+      "summary": {
+       "title": "entry 191",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 191,
+       "entry": "entry 191"
+      }
+     },
+     {
+      "key": "j192",
+      "summary": {
+       "title": "entry 192",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 192,
+       "entry": "entry 192"
+      }
+     },
+     {
+      "key": "j193",
+      "summary": {
+       "title": "entry 193",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 193,
+       "entry": "entry 193"
+      }
+     },
+     {
+      "key": "j194",
+      "summary": {
+       "title": "entry 194",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 194,
+       "entry": "entry 194"
+      }
+     },
+     {
+      "key": "j195",
+      "summary": {
+       "title": "entry 195",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 195,
+       "entry": "entry 195"
+      }
+     },
+     {
+      "key": "j196",
+      "summary": {
+       "title": "entry 196",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 196,
+       "entry": "entry 196"
+      }
+     },
+     {
+      "key": "j197",
+      "summary": {
+       "title": "entry 197",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 197,
+       "entry": "entry 197"
+      }
+     },
+     {
+      "key": "j198",
+      "summary": {
+       "title": "entry 198",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 198,
+       "entry": "entry 198"
+      }
+     },
+     {
+      "key": "j199",
+      "summary": {
+       "title": "entry 199",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "n": 199,
+       "entry": "entry 199"
+      }
+     }
+    ],
+    "truncated": true,
+    "count": 200
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c11",
+    "command_name": "alarm",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "a1",
+      "summary": {
+       "title": "2026-10-15T07:00:00",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "at": "2026-10-15T07:00:00"
+      }
+     }
+    ],
+    "truncated": false,
+    "count": 1
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c12",
+    "command_name": "vault",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command not found"
+    }
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c13",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command not found"
+    }
+   }
+  },
+  {
+   "op": "get",
+   "request": {
+    "correlation_id": "c14",
+    "command_name": "notes",
+    "key": "n3",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "record": {
+     "title": "Groceries",
+     "body": "milk",
+     "done": false,
+     "user_id": 7,
+     "items": [
+      {
+       "name": "egg",
+       "qty": 12
+      }
+     ],
+     "big": 12345678901234567890
+    },
+    "schema": {
+     "mode": "enabled",
+     "supports_create": true,
+     "fields": [
+      {
+       "name": "title",
+       "type": "string",
+       "label": "Title",
+       "required": true
+      },
+      {
+       "name": "body",
+       "type": "text",
+       "placeholder": "Write something"
+      },
+      {
+       "name": "done",
+       "type": "bool"
+      },
+      {
+       "name": "scope",
+       "type": "enum",
+       "editable": false,
+       "create_only": true,
+       "enum_values": [
+        "personal",
+        "household"
+       ]
+      },
+      {
+       "name": "owner",
+       "type": "user_ref",
+       "editable": false
+      },
+      {
+       "name": "items",
+       "type": "array",
+       "item_type": "object",
+       "fields": [
+        {
+         "name": "name",
+         "type": "string"
+        },
+        {
+         "name": "qty",
+         "type": "int"
+        }
+       ]
+      },
+      {
+       "name": "data_key",
+       "type": "id"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "op": "get",
+   "request": {
+    "correlation_id": "c15",
+    "command_name": "notes",
+    "key": "n6",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "record": {
+     "title": "later",
+     "user_id": 7,
+     "_meta": "x",
+     "f": 1.5
+    },
+    "schema": {
+     "mode": "enabled",
+     "supports_create": true,
+     "fields": [
+      {
+       "name": "title",
+       "type": "string",
+       "label": "Title",
+       "required": true
+      },
+      {
+       "name": "body",
+       "type": "text",
+       "placeholder": "Write something"
+      },
+      {
+       "name": "done",
+       "type": "bool"
+      },
+      {
+       "name": "scope",
+       "type": "enum",
+       "editable": false,
+       "create_only": true,
+       "enum_values": [
+        "personal",
+        "household"
+       ]
+      },
+      {
+       "name": "owner",
+       "type": "user_ref",
+       "editable": false
+      },
+      {
+       "name": "items",
+       "type": "array",
+       "item_type": "object",
+       "fields": [
+        {
+         "name": "name",
+         "type": "string"
+        },
+        {
+         "name": "qty",
+         "type": "int"
+        }
+       ]
+      },
+      {
+       "name": "data_key",
+       "type": "id"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "op": "get",
+   "request": {
+    "correlation_id": "c16",
+    "command_name": "notes",
+    "key": "n2",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "record not found"
+    }
+   }
+  },
+  {
+   "op": "get",
+   "request": {
+    "correlation_id": "c17",
+    "command_name": "notes",
+    "key": "n5",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "record not found"
+    }
+   }
+  },
+  {
+   "op": "get",
+   "request": {
+    "correlation_id": "c18",
+    "command_name": "notes",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command or key not found"
+    }
+   }
+  },
+  {
+   "op": "get",
+   "request": {
+    "correlation_id": "c19",
+    "command_name": "alarm",
+    "key": "a1",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "record": {
+     "at": "2026-10-15T07:00:00"
+    },
+    "schema": {
+     "mode": "readonly",
+     "supports_create": false,
+     "fields": [
+      {
+       "name": "at",
+       "type": "datetime"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "op": "update",
+   "request": {
+    "correlation_id": "c20",
+    "command_name": "notes",
+    "key": "n3",
+    "patch": {
+     "title": "Groceries!",
+     "owner": 99,
+     "data_key": "x",
+     "scope": "household",
+     "unknown": 1,
+     "items": [
+      {
+       "name": "egg",
+       "qty": 6
+      }
+     ]
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "record": {
+     "title": "Groceries!",
+     "body": "milk",
+     "done": false,
+     "user_id": 7,
+     "items": [
+      {
+       "name": "egg",
+       "qty": 6
+      }
+     ],
+     "big": 12345678901234567890
+    }
+   }
+  },
+  {
+   "op": "update",
+   "request": {
+    "correlation_id": "c21",
+    "command_name": "notes",
+    "key": "n3",
+    "patch": {
+     "owner": 1
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "patch has no editable fields"
+    }
+   }
+  },
+  {
+   "op": "update",
+   "request": {
+    "correlation_id": "c22",
+    "command_name": "notes",
+    "key": "n2",
+    "patch": {
+     "title": "mine"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "record not found"
+    }
+   }
+  },
+  {
+   "op": "update",
+   "request": {
+    "correlation_id": "c23",
+    "command_name": "notes",
+    "key": "n5",
+    "patch": {
+     "title": "revive"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "record not found"
+    }
+   }
+  },
+  {
+   "op": "update",
+   "request": {
+    "correlation_id": "c24",
+    "command_name": "alarm",
+    "key": "a1",
+    "patch": {
+     "at": "x"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command is read-only"
+    }
+   }
+  },
+  {
+   "op": "update",
+   "request": {
+    "correlation_id": "c25",
+    "command_name": "notes",
+    "key": "n3",
+    "patch": "nope",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command, key, or patch missing"
+    }
+   }
+  },
+  {
+   "op": "update",
+   "request": {
+    "correlation_id": "c26",
+    "command_name": "journal",
+    "key": "j000",
+    "patch": {
+     "zeta": "x"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "patch has no editable fields"
+    }
+   }
+  },
+  {
+   "op": "get",
+   "request": {
+    "correlation_id": "c27",
+    "command_name": "notes",
+    "key": "n3",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "record": {
+     "title": "Groceries!",
+     "body": "milk",
+     "done": false,
+     "user_id": 7,
+     "items": [
+      {
+       "name": "egg",
+       "qty": 6
+      }
+     ],
+     "big": 12345678901234567890
+    },
+    "schema": {
+     "mode": "enabled",
+     "supports_create": true,
+     "fields": [
+      {
+       "name": "title",
+       "type": "string",
+       "label": "Title",
+       "required": true
+      },
+      {
+       "name": "body",
+       "type": "text",
+       "placeholder": "Write something"
+      },
+      {
+       "name": "done",
+       "type": "bool"
+      },
+      {
+       "name": "scope",
+       "type": "enum",
+       "editable": false,
+       "create_only": true,
+       "enum_values": [
+        "personal",
+        "household"
+       ]
+      },
+      {
+       "name": "owner",
+       "type": "user_ref",
+       "editable": false
+      },
+      {
+       "name": "items",
+       "type": "array",
+       "item_type": "object",
+       "fields": [
+        {
+         "name": "name",
+         "type": "string"
+        },
+        {
+         "name": "qty",
+         "type": "int"
+        }
+       ]
+      },
+      {
+       "name": "data_key",
+       "type": "id"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c28",
+    "command_name": "notes",
+    "data": {
+     "title": "New",
+     "scope": "household",
+     "owner": 3,
+     "user_id": 99,
+     "id": "x",
+     "data_key": "k"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "record": {
+     "title": "New",
+     "scope": "household",
+     "id": "<created:1>",
+     "user_id": 7
+    },
+    "key": "<created:1>"
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c29",
+    "command_name": "notes",
+    "data": {
+     "title": "Nobody"
+    },
+    "requesting_user_id": null
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "cannot create a record without a known user"
+    }
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c30",
+    "command_name": "journal",
+    "data": {
+     "x": 1
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command does not support adding records"
+    }
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c31",
+    "command_name": "alarm",
+    "data": {
+     "at": "x"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command is read-only"
+    }
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c32",
+    "command_name": "notes",
+    "data": "nope",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command or values missing"
+    }
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c33",
+    "command_name": "dose",
+    "data": {
+     "med": "ibuprofen"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "dose time required"
+    }
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c34",
+    "command_name": "dose",
+    "data": {
+     "med": "ibuprofen",
+     "at": "08:00",
+     "extra": 1
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "record": {
+     "med": "ibuprofen",
+     "at": "08:00",
+     "user_id": 7
+    },
+    "key": "ibuprofen@08:00"
+   }
+  },
+  {
+   "op": "create",
+   "request": {
+    "correlation_id": "c35",
+    "command_name": "dose",
+    "data": {
+     "med": "crash",
+     "at": "09:00"
+    },
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "handler error: 'med'"
+    }
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c36",
+    "command_name": "notes",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "n3",
+      "summary": {
+       "title": "Groceries!",
+       "subtitle": "milk",
+       "icon": "note"
+      },
+      "data": {
+       "title": "Groceries!",
+       "body": "milk",
+       "done": false,
+       "user_id": 7,
+       "items": [
+        {
+         "name": "egg",
+         "qty": 6
+        }
+       ],
+       "big": 12345678901234567890
+      }
+     },
+     {
+      "key": "n1",
+      "summary": {
+       "title": "Shared",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "Shared",
+       "body": null,
+       "done": true
+      }
+     },
+     {
+      "key": "n4",
+      "summary": {
+       "title": "n4",
+       "subtitle": null,
+       "icon": "alert-circle-outline"
+      },
+      "data": {
+       "title": "boom",
+       "user_id": 7
+      }
+     },
+     {
+      "key": "n6",
+      "summary": {
+       "title": "later",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "later",
+       "user_id": 7,
+       "f": 1.5
+      }
+     },
+     {
+      "key": "<created:1>",
+      "summary": {
+       "title": "New",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "New",
+       "scope": "household",
+       "id": "<created:1>",
+       "user_id": 7
+      }
+     }
+    ],
+    "truncated": false,
+    "count": 5
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c37",
+    "command_name": "dose",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "ibuprofen@08:00",
+      "summary": {
+       "title": "ibuprofen",
+       "subtitle": null,
+       "icon": "information-outline"
+      },
+      "data": {
+       "med": "ibuprofen",
+       "at": "08:00",
+       "user_id": 7
+      }
+     }
+    ],
+    "truncated": false,
+    "count": 1
+   }
+  },
+  {
+   "op": "delete",
+   "request": {
+    "correlation_id": "c38",
+    "command_name": "notes",
+    "key": "n2",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "record not found"
+    }
+   }
+  },
+  {
+   "op": "delete",
+   "request": {
+    "correlation_id": "c39",
+    "command_name": "alarm",
+    "key": "a1",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command is read-only"
+    }
+   }
+  },
+  {
+   "op": "delete",
+   "request": {
+    "correlation_id": "c40",
+    "command_name": "notes",
+    "key": "zz",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "record not found"
+    }
+   }
+  },
+  {
+   "op": "delete",
+   "request": {
+    "correlation_id": "c41",
+    "command_name": "notes",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": false,
+    "error": {
+     "message": "command or key not found"
+    }
+   }
+  },
+  {
+   "op": "delete",
+   "request": {
+    "correlation_id": "c42",
+    "command_name": "notes",
+    "key": "n3",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true
+   }
+  },
+  {
+   "op": "delete",
+   "request": {
+    "correlation_id": "c43",
+    "command_name": "notes",
+    "key": "<created:1>",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "correlation_id": "c44",
+    "command_name": "notes",
+    "requesting_user_id": 7
+   },
+   "response": {
+    "ok": true,
+    "records": [
+     {
+      "key": "n1",
+      "summary": {
+       "title": "Shared",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "Shared",
+       "body": null,
+       "done": true
+      }
+     },
+     {
+      "key": "n4",
+      "summary": {
+       "title": "n4",
+       "subtitle": null,
+       "icon": "alert-circle-outline"
+      },
+      "data": {
+       "title": "boom",
+       "user_id": 7
+      }
+     },
+     {
+      "key": "n6",
+      "summary": {
+       "title": "later",
+       "subtitle": null,
+       "icon": "note"
+      },
+      "data": {
+       "title": "later",
+       "user_id": 7,
+       "f": 1.5
+      }
+     }
+    ],
+    "truncated": false,
+    "count": 3
+   }
+  },
+  {
+   "op": "list",
+   "request": {
+    "command_name": "notes",
+    "requesting_user_id": 7
+   },
+   "response": null
+  }
+ ]
+}
