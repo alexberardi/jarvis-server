@@ -1,4 +1,5 @@
 login-item-gone [activate] [ignore-errors] path="/Applications/Jarvis Automation Agent.app" name="net.jarvisautomation.agent.plist"
+stop [activate] [ignore-errors] name="control"
 exec [activate] [ignore-errors] args="launchctl bootout gui/501/net.jarvisautomation.agent"
 remove path="~/Library/LaunchAgents/net.jarvisautomation.agent.plist"
 exec [activate] [ignore-errors] path="~/Library/LaunchAgents/io.jarvis.agent.plist" args="launchctl bootout gui/501/io.jarvis.agent"

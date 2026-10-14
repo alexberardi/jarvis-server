@@ -93,6 +93,7 @@ func linuxUninstall(e Env, o UninstallOptions) []Op {
 	p := e.linux()
 	ops := []Op{
 		{Kind: StopAgent, Activate: true, IgnoreErr: true, Name: "systemd", Key: deploy.SystemdUnitName},
+		{Kind: StopAgent, Activate: true, IgnoreErr: true, Name: "control"}, // one started outside systemd
 		// Only the agent's own directories go with their last file (the .wants link dir, as
 		// systemctl disable does, and ~/.local/lib/jarvis-agent); shared ones like
 		// ~/.config/autostart stay, empty or not.
@@ -106,7 +107,9 @@ func linuxUninstall(e Env, o UninstallOptions) []Op {
 		{Kind: BrowserHostsGone},
 		{Kind: Remove, Path: p.bin, Target: e.join(e.Home, ".local", "lib")},
 		{Kind: Exec, Activate: true, IgnoreErr: true, Args: []string{"systemctl", "--user", "daemon-reload"}},
-		{Kind: Exec, Activate: true, IgnoreErr: true, Args: []string{"update-desktop-database", p.apps}},
+		{Kind: Exec, Activate: true, IgnoreErr: true, Path: p.apps, Args: []string{"update-desktop-database", p.apps}},
+		// Then the cache install's update-desktop-database made, when it is all that is left there.
+		{Kind: Remove, Path: e.join(p.apps, "mimeinfo.cache"), Key: IfAlone},
 	}
 	if o.Purge {
 		ops = append(ops, Op{Kind: RemoveAll, Path: p.config}, Op{Kind: RemoveAll, Path: p.cache})

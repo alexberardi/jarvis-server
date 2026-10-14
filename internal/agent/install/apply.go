@@ -24,6 +24,7 @@ type Registry interface {
 type LoginItems interface {
 	Register(plistName string) error
 	Unregister(plistName string) error
+	Registered(plistName string) (bool, error)
 }
 
 // Browsers registers the native-messaging host (internal/agent/browser).
@@ -43,6 +44,12 @@ type Sys struct {
 	Web   Browsers
 	// Portal forgets a GNOME/KDE typing grant made under the old app id (portal.MigrateLegacy).
 	Portal func() (bool, error)
+	// Quit stops a running agent of this user and waits until it is gone (the control socket);
+	// nil when none can be reached.
+	Quit func() error
+	// Announce asks the running agent to flash its "Jarvis is running" pill, waiting for it to
+	// come up (nil: skip).
+	Announce func() error
 	// Out gets a line per notable step (nil: quiet).
 	Out io.Writer
 }
@@ -104,9 +111,17 @@ func (s Sys) apply(ctx context.Context, op Op) error {
 	case Symlink:
 		return symlink(op.Path, op.Target)
 	case Remove:
+		if op.Key == IfAlone {
+			if ents, err := os.ReadDir(filepath.Dir(op.Path)); err != nil || len(ents) != 1 || ents[0].Name() != filepath.Base(op.Path) {
+				return nil
+			}
+		}
 		return remove(op.Path, op.Target)
 	case RemoveAll:
-		return os.RemoveAll(op.Path)
+		if err := os.RemoveAll(op.Path); err != nil {
+			return err
+		}
+		return remove(op.Path, op.Target) // gone already: only prunes the parents
 	case MimeDefault:
 		return setMimeDefault(op.Path, op.Name, op.Value)
 	case MimeUnset:
@@ -175,7 +190,17 @@ func (s Sys) apply(ctx context.Context, op Op) error {
 		}
 		return s.Run(ctx, op.Args...)
 	case StartAgent:
-		return s.start(ctx, op)
+		// One agent per user: a running one (perhaps the old binary) makes way first.
+		if s.Quit != nil {
+			_ = s.Quit()
+		}
+		if err := s.start(ctx, op); err != nil {
+			return err
+		}
+		if s.Announce != nil {
+			_ = s.Announce() // the pill; an agent not set up yet exits instead (first run)
+		}
+		return nil
 	case StopAgent:
 		return s.stop(ctx, op)
 	}
@@ -203,6 +228,11 @@ func (s Sys) start(ctx context.Context, op Op) error {
 
 func (s Sys) stop(ctx context.Context, op Op) error {
 	switch op.Name {
+	case "control":
+		if s.Quit == nil {
+			return nil
+		}
+		return s.Quit()
 	case "systemd":
 		return s.Run(ctx, "systemctl", "--user", "stop", op.Key)
 	}

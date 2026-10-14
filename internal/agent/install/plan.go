@@ -30,7 +30,7 @@ const (
 	Write            Kind = "write"              // write Data to Path with Mode, atomically
 	Symlink          Kind = "symlink"            // Path -> Target
 	Remove           Kind = "remove"             // remove the file or link at Path (missing is fine), then its empty parent dirs below Target (if set)
-	RemoveAll        Kind = "remove-all"         // remove the directory Path and everything in it (purge)
+	RemoveAll        Kind = "remove-all"         // remove the directory Path and everything in it (purge), then empty parents below Target
 	MimeDefault      Kind = "mime-default"       // in mimeapps.list at Path: Name=Value under [Default Applications]
 	MimeUnset        Kind = "mime-unset"         // remove Name from Path's [Default Applications] if it is Value
 	RegSet           Kind = "reg-set"            // HKCU\Key, value Name ("" = default) = Value
@@ -50,6 +50,10 @@ const (
 
 // IfDirExists, as a Write's Key, skips the write when the file's directory doesn't exist.
 const IfDirExists = "if-dir-exists"
+
+// IfAlone, as a Remove's Key, removes the file only when nothing else is in its directory
+// (update-desktop-database's mimeinfo.cache in an applications dir install created).
+const IfAlone = "if-alone"
 
 // Op is one step. Activate marks steps that touch the running session (the service manager,
 // LaunchServices, processes); Options.FilesOnly skips them.

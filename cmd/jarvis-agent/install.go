@@ -12,9 +12,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/install"
 	"github.com/alexberardi/jarvis-server/internal/agent/portal"
 )
@@ -109,6 +111,25 @@ func installSys(w io.Writer) (install.Sys, error) {
 	s := install.NativeSys(w, logFile)
 	s.Web = browserHosts{benv}
 	s.Portal = func() (bool, error) { return portal.MigrateLegacy(os.Getenv, nil) }
+	pause := func() { time.Sleep(100 * time.Millisecond) }
+	s.Quit = func() error {
+		if err := control.Send(controlDial, control.Quit); err != nil {
+			if errors.Is(err, control.ErrNotRunning) {
+				return nil
+			}
+			return err
+		}
+		if !control.WaitGone(context.Background(), controlDial, 100, pause) {
+			return errors.New("the running agent didn't stop")
+		}
+		return nil
+	}
+	if enrolled() {
+		// Not set up, the agent exits at once: nothing would answer.
+		s.Announce = func() error {
+			return control.WaitSend(context.Background(), controlDial, control.ShowRunning, 100, pause)
+		}
+	}
 	return s, nil
 }
 

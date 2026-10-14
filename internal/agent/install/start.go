@@ -4,10 +4,51 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 	"github.com/alexberardi/jarvis-server/internal/agent/deploy"
 )
+
+// Installed reports whether `install` has set this user up: the per-user copy (Linux), a login
+// item (macOS), the Run value (Windows).
+func Installed(e Env, s Sys) bool {
+	switch e.GOOS {
+	case "linux":
+		_, err := os.Stat(e.linux().bin)
+		return err == nil
+	case "darwin":
+		p := e.darwin()
+		if _, err := os.Stat(p.plist); err == nil {
+			return true
+		}
+		if s.Login != nil && p.bundle != "" {
+			ok, _ := s.Login.Registered(BundlePlistName)
+			return ok
+		}
+	case "windows":
+		if s.Reg != nil {
+			_, ok, _ := s.Reg.GetString(RunKey, displayName)
+			return ok
+		}
+	}
+	return false
+}
+
+// SetsUpOnFirstLaunch reports whether `start` installs first when this user isn't set up: a
+// packaged copy (the .deb's /usr/lib/jarvis-agent, Q5; the app on macOS, whose dmg runs no
+// installer). A copy in the user's home (a dev build) just starts; Windows' installer runs
+// `install` itself.
+func SetsUpOnFirstLaunch(e Env) bool {
+	switch e.GOOS {
+	case "linux":
+		// Either separator: tests compute a Linux plan on every host.
+		return !strings.HasPrefix(e.Exe, e.Home+"/") && !strings.HasPrefix(e.Exe, e.Home+`\`)
+	case "darwin":
+		return BundleOf(e.Exe) != ""
+	}
+	return false
+}
 
 // Start starts the agent the way the installed login item would: through systemd when its unit
 // is installed and the graphical session's target is up (then systemd has the display and

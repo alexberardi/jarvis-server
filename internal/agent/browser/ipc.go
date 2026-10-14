@@ -30,6 +30,22 @@ func SocketPath() (string, error) {
 	return socketPathFor(runtime.GOOS, os.Getenv, os.UserConfigDir, os.UserCacheDir)
 }
 
+// ControlSocketEnv overrides the agent's control socket path (tests).
+const ControlSocketEnv = "JARVIS_AGENT_CONTROL_SOCKET"
+
+// ControlSocketPath is the running agent's control socket (internal/agent/control): next to
+// the browser socket, in the same user-only directory, so it gets the same protections.
+func ControlSocketPath() (string, error) {
+	if p := os.Getenv(ControlSocketEnv); p != "" {
+		return p, nil
+	}
+	p, err := socketPathFor(runtime.GOOS, os.Getenv, os.UserConfigDir, os.UserCacheDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), "control.sock"), nil
+}
+
 func socketPathFor(goos string, getenv func(string) string, configDir, cacheDir func() (string, error)) (string, error) {
 	var base string
 	switch goos {

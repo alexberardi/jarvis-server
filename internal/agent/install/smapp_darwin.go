@@ -92,6 +92,16 @@ func (s smAppService) Register(plist string) error {
 	return nil
 }
 
+// Registered reports whether the login item is registered (enabled or awaiting approval).
+func (s smAppService) Registered(plist string) (bool, error) {
+	svc, err := s.service(plist)
+	if err != nil {
+		return false, err
+	}
+	st := objc.Send[int](svc, objc.RegisterName("status"))
+	return st == smEnabled || st == smRequiresApproval, nil
+}
+
 // Unregister removes the login item; one that isn't registered is fine.
 func (s smAppService) Unregister(plist string) error {
 	svc, err := s.service(plist)

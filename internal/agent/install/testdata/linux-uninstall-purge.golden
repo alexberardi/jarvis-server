@@ -1,4 +1,5 @@
 stop [activate] [ignore-errors] key="jarvis-agent.service" name="systemd"
+stop [activate] [ignore-errors] name="control"
 remove path="~/.config/systemd/user/graphical-session.target.wants/jarvis-agent.service" target="~/.config/systemd/user"
 remove path="~/.config/systemd/user/default.target.wants/jarvis-agent.service" target="~/.config/systemd/user"
 remove path="~/.config/systemd/user/jarvis-agent.service"
@@ -9,6 +10,7 @@ mime-unset path="~/.config/mimeapps.list" name="x-scheme-handler/jarvis-agent" v
 browser-hosts-gone
 remove path="~/.local/lib/jarvis-agent/jarvis-agent" target="~/.local/lib"
 exec [activate] [ignore-errors] args="systemctl --user daemon-reload"
-exec [activate] [ignore-errors] args="update-desktop-database ~/.local/share/applications"
+exec [activate] [ignore-errors] path="~/.local/share/applications" args="update-desktop-database ~/.local/share/applications"
+remove path="~/.local/share/applications/mimeinfo.cache" key="if-alone"
 remove-all path="~/.config/jarvis-agent"
 remove-all path="~/.cache/jarvis-agent"

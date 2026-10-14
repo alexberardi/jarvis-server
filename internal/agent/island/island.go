@@ -127,6 +127,16 @@ func (i *Island) Note(text string, d time.Duration) {
 	i.mu.Unlock()
 }
 
+// RunningNote is the pill a start-only launch flashes: the shortcut, the app, or the
+// jarvis-agent://start link (DESIGN §13 item 6), so a click always shows something.
+const RunningNote = "Jarvis is running"
+
+// RunningFor is how long it shows.
+const RunningFor = 2500 * time.Millisecond
+
+// ShowRunning flashes the "Jarvis is running" pill, then the island goes back to what it showed.
+func (i *Island) ShowRunning() { i.Note(RunningNote, RunningFor) }
+
 // Level reports the loudness of what is heard or said: RMS amplitude, 0..1.
 func (i *Island) Level(v float32) {
 	if i == nil {

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -84,6 +85,11 @@ func main() {
 	if origin, ok := browser.HostInvocation(os.Args[1:]); ok {
 		os.Exit(browserHost(origin))
 	}
+	if openedAsApp() {
+		// Opening "Jarvis Automation Agent.app" (Finder, Dock, Launchpad) runs it with no
+		// command: that is the start-only shortcut.
+		os.Args = []string{os.Args[0], "start"}
+	}
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
 		os.Exit(2)
@@ -130,7 +136,7 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "jarvis-agent:", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 
@@ -385,20 +391,39 @@ func run(ctx context.Context, args []string) error {
 	cp := fs.String("creds", "", "credentials file")
 	tf := addToolFlags(fs)
 	voiceOn := fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`)
-	noOverlay := fs.Bool("no-overlay", false, "with --voice: don't show the on-screen indicator (the island)")
+	noOverlay := fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)")
 	vf := addVoiceFlags(fs)
 	hf := addHatFlags(fs)
 	_ = fs.Parse(args)
+	log := logger()
+	// One agent per user: the control socket is the lock, and how a second launch, the
+	// start-only shortcut and uninstall reach this one (installers plan item 1.9).
+	ctl, err := listenControl()
+	if errors.Is(err, browser.ErrInUse) {
+		fmt.Fprintln(os.Stderr, "jarvis-agent is already running for this user; not starting a second one")
+		return nil
+	}
+	if err != nil {
+		log.Warn("control socket off: a second launch can't reach this agent", "err", err)
+	}
 	path, err := credsPath(*cp)
 	if err != nil {
 		return err
 	}
 	c, err := node.LoadCreds(path)
 	if err != nil {
-		return err
+		if ctl != nil {
+			_ = ctl.Close()
+		}
+		return notSetUp(err)
 	}
-	log := logger()
 	migrateLegacyID(log)
+	ctx, quit := context.WithCancel(ctx)
+	defer quit()
+	var shown atomic.Pointer[island.Island]
+	if ctl != nil {
+		defer serveControl(ctx, ctl, log, &shown, quit)()
+	}
 	h, tools, closeTools, err := tf.build(ctx, log, true)
 	if err != nil {
 		return err
@@ -427,18 +452,33 @@ func run(ctx context.Context, args []string) error {
 			}
 		}
 	}
-	if vs == nil || *noOverlay {
+	if *noOverlay {
 		return r.Run(ctx)
 	}
 	// The island needs the main thread on macOS: island.Run keeps it and runs the agent on
 	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
+	// It runs with voice off too, for the "Jarvis is running" pill; it shows voice states and
+	// dictation's notes only with voice on, as before.
 	return island.Run(ctx, log, func(i *island.Island) error {
 		if i != nil {
-			vs.addIndicator(islandCue{i})
-			attachIsland(tools, i)
+			hideFromScreenshots(tools, i)
+			if vs != nil {
+				vs.addIndicator(islandCue{i})
+				attachIsland(tools, i)
+			}
+			shown.Store(i)
 		}
 		return r.Run(ctx)
 	})
+}
+
+// hideFromScreenshots keeps the island out of desktop_read_screen's pictures.
+func hideFromScreenshots(tools node.Multi, i *island.Island) {
+	for _, t := range tools {
+		if x, ok := t.(*screen.Tools); ok {
+			x.Hide = i.Suspend
+		}
+	}
 }
 
 // attachIsland keeps the island out of desktop_read_screen's pictures and shows on it what

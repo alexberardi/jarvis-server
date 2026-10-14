@@ -31,6 +31,7 @@ func TestRenderGolden(t *testing.T) {
 		{"error", Frame{State: Error, Appear: 1, Bars: [nBars]float64{0.08, 0.08, 0.08, 0.08, 0.08}}},
 		{"sliding_in", Frame{State: Listening, Appear: 0.45, Bars: bars}},
 		{"note", Frame{State: Note, Appear: 1, Text: "Typing into Claude: test def"}},
+		{"running", Frame{State: Note, Appear: 1, Text: RunningNote}},
 		{"note_long", Frame{State: Note, Appear: 1, Text: "Send \"please run the whole test suite again and tell me which ones fail\" to Claude? Say yes or cancel."}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -430,6 +431,17 @@ func TestNoteOverStates(t *testing.T) {
 	h.setNote("", 0, t0)
 	if h.shown(t0) != Hidden {
 		t.Fatal("an empty note doesn't clear")
+	}
+}
+
+func TestShowRunning(t *testing.T) {
+	var i *Island
+	i.ShowRunning() // nil: no island, no panic
+	var m model
+	now := time.Unix(1000, 0)
+	m.setNote(RunningNote, RunningFor, now)
+	if m.shown(now) != Note || m.shown(now.Add(RunningFor+time.Millisecond)) != Hidden {
+		t.Fatal("the running pill should show, then hide")
 	}
 }
 
