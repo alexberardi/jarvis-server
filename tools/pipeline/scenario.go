@@ -26,6 +26,10 @@ type Scenario struct {
 	// Speaker is who the voice match says is talking: "" nobody (an unidentified voice),
 	// "primary" the sandbox's seeded superuser, or a user id. Memory tools need one (D21).
 	Speaker string `json:"speaker,omitempty"`
+	// Node is who plays the turns: "" the seeded kitchen Pi, "desktop" a desktop agent the
+	// primary user signed in on, whose voice turns act as that owner with no voice match
+	// (desktop.go). Leave Speaker empty to test the owner rather than a speaker hint.
+	Node string `json:"node,omitempty"`
 	// Home is the device payload the node reports at /conversation/start (node_context.agents,
 	// what a Pi with Home Assistant sends): a name under tools/pipeline/homes ("avery", the
 	// default, matches the seeded rooms), "none", or a JSON file path.

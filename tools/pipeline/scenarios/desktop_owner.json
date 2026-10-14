@@ -1,0 +1,21 @@
+[
+  {
+    "name": "desktop owner: remember stores as the signed-in member",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {"say": "remember that my parking spot is B12",
+       "expect": {"server_tool": "remember", "args_match": {"content": "(?i)B12"}, "not_reply": "(?i)not sure who"}}
+    ]
+  },
+  {
+    "name": "desktop owner: who am I answers with the owner's display name",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {"say": "who am I?", "expect": {"reply": "Jordan", "not_reply": "(?i)not sure who"}}
+    ]
+  }
+]

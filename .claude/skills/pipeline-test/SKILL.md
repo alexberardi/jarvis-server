@@ -82,7 +82,7 @@ each run's full log, model calls included. A file holds one scenario or an array
   `max_seconds`: an upper bound on the turn's time.
 
 `tags` are labels only (e.g. `known-bug`). `"skip": "why"` reports a scenario without playing it.
-`"speaker"` (`primary`, a user id, or none) and `"home"` (a `tools/pipeline/homes` name, `none`, or a file) set who speaks and the device payload. `run` does not filter on
+`"speaker"` (`primary`, a user id, or none) and `"home"` (a `tools/pipeline/homes` name, `none`, or a file) set who speaks and the device payload. `"node": "desktop"` (or `say --node desktop`) plays the turns as a desktop agent the primary signed in on (made once per sandbox, key in `.sandbox/<name>/desktop-node.json`), whose turns act as that owner with no voice match: leave `"speaker"` empty to test that. `run` does not filter on
 them; `--filter` matches the name.
 
 ## 4. Read the tap log

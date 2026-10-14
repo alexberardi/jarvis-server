@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -93,6 +94,11 @@ func postJSON(ctx context.Context, url string, header map[string]string, body, o
 
 // do POSTs a body and returns a 200's body; any other status is an error with the body.
 func do(ctx context.Context, client *http.Client, url, contentType string, body []byte, header map[string]string) ([]byte, error) {
+	return doWant(ctx, client, url, contentType, body, header, http.StatusOK)
+}
+
+// doWant is do accepting any of the given statuses (a create's 201).
+func doWant(ctx context.Context, client *http.Client, url, contentType string, body []byte, header map[string]string, ok ...int) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -113,7 +119,7 @@ func do(ctx context.Context, client *http.Client, url, contentType string, body 
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
+	if !slices.Contains(ok, resp.StatusCode) {
 		return nil, fmt.Errorf("POST %s: %d %s", req.URL.Path, resp.StatusCode, truncate(strings.TrimSpace(string(rb)), 500))
 	}
 	return rb, nil

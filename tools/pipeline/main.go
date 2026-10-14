@@ -2,12 +2,13 @@
 // STT, against a sandbox (scripts/sandbox) running on a real model. It is how an agent checks
 // what Jarvis does with an utterance without anyone speaking.
 //
-//	pipeline say [--sandbox NAME] [--tools SET] [--speaker WHO] [--results JSON] [--voice] [--voice-name V] [--json] [-v] UTTERANCE...
+//	pipeline say [--sandbox NAME] [--tools SET] [--speaker WHO] [--node desktop] [--results JSON] [--voice] [--voice-name V] [--json] [-v] UTTERANCE...
 //	    one conversation, one turn per argument; prints the node and server tool calls, the
 //	    node's answers and the reply. Every node tool answers {"success": true} unless
 //	    --results gives {"tool": output, ...}. The speaker defaults to the seeded superuser
 //	    (the sandbox trusts node speaker hints, JARVIS_DEV_SPEAKER_HINTS); --speaker "" plays
-//	    an unidentified voice.
+//	    an unidentified voice. --node desktop plays the turns as a desktop agent the primary
+//	    signed in on, whose turns act as that owner (use it with --speaker "").
 //	pipeline run [--sandbox NAME] [--repeat N] [--filter RE] [--out DIR] [--voice] [--voice-name V] [--json] [-v] [PATH...]
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
 //	    exits 1 when any fails. --out writes each run's full log (model calls included) and,
@@ -135,6 +136,8 @@ func sandboxDriver(name string) (*Driver, error) {
 		Voices:  &AdminVoice{AdminURL: env["SBX_ADMIN"], AuthURL: env["SBX_AUTH"], Email: env["SBX_EMAIL"], Password: env["SBX_PASSWORD"]},
 		// scripts/sandbox up --voice exports the stt model it set up.
 		VoiceReady: env["SBX_VOICE"] != "",
+		Desktop: &DesktopSetup{AuthURL: env["SBX_AUTH"], Email: env["SBX_EMAIL"], Password: env["SBX_PASSWORD"],
+			StateFile: filepath.Join(dir, "desktop-node.json")},
 	}, nil
 }
 
@@ -179,6 +182,7 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	home := fs.String("home", "", `device payload: a tools/pipeline/homes name (default avery), "none", or a JSON file`)
 	vocab := fs.String("stt-vocabulary", "", `app names for whisper's prompt, as a desktop agent sends them ("Alacritty, Firefox, Omawrite")`)
 	speaker := fs.String("speaker", "primary", `who is speaking: "primary" (the seeded superuser), a user id, or "" (unidentified)`)
+	node := fs.String("node", "", `who plays the turns: "" the seeded node, or "desktop" (a desktop agent the primary signed in on; pair with --speaker "")`)
 	results := fs.String("results", "", `node outputs per tool, e.g. {"get_weather": {"success": true, "message": "Sunny, 21°"}}`)
 	asJSON := fs.Bool("json", false, "print the full log as JSON")
 	verbose := fs.Bool("v", false, "also print each model call's reasoning and reply")
@@ -198,7 +202,7 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	if (d.Voice || d.VoiceName != "") && !d.VoiceReady {
 		return errors.New("--voice: this sandbox has no TTS/STT (scripts/sandbox up --voice)")
 	}
-	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Home: *home, STTVocabulary: *vocab}
+	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Node: *node, Home: *home, STTVocabulary: *vocab}
 	if *results != "" {
 		if err := json.Unmarshal([]byte(*results), &sc.Results); err != nil {
 			return fmt.Errorf("--results: %w", err)
