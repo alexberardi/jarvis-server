@@ -1,6 +1,8 @@
 // Package clock is the node's get_current_time tool, built in so every Go node answers "what
-// time is it?" from its own clock. Without it the model falls back to the prompt's ambient
-// block, which is rounded down to the quarter hour ("12:45" at 00:55).
+// time is it?" from its own clock. jarvisd's per-turn <calendar> block also carries the exact
+// local time, which the model usually answers from directly; the tool covers other places'
+// times and the date questions below. (The ambient block's quarter-hour clock, which the model
+// read out as "12:45" at 00:55, is gone.)
 //
 // The name, parameter and output follow the Python node's commands/timezone_command.py, so
 // command-center can't tell them apart. Differences: a location is an IANA zone name or

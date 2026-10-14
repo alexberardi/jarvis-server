@@ -156,7 +156,7 @@ end of cycle → POST /conversation/end
 - **Loaded into `node_context`:**
   - memories (`399-431`)
   - characterization, if `characterization.injection_enabled` (`439-462`)
-  - the ambient bundle, if `ambient_context.enabled` and memory are on (`471-475`). This is a 15-minute-quantised clock plus the latest weather, calendar and reminder household memories plus live Signals (`3192-3268`).
+  - the ambient bundle, if `ambient_context.enabled` and memory are on (`471-475`). This is a 15-minute-quantised clock plus the latest weather, calendar and reminder household memories plus live Signals (`3192-3268`). Go leaves the clock out: the exact time is in the per-turn `<calendar>` block instead (03 §3.3).
   - `date_keys` from llm-proxy (`483-489`)
 - **System prompt.** `_get_system_prompt` (`3270-3330`). It is the provider prompt plus `NOT_FOR_ME_INSTRUCTION`, `EXCHANGE_COMPLETE_INSTRUCTION`, an optional personality reminder and an optional `<person_view>` tail. When characterization injection is on, it stashes `_system_prompt_base`.
 - **Cache entry.**

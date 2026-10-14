@@ -593,7 +593,7 @@ func TestMobileChatContext(t *testing.T) {
 	ce.set(settingAmbientContext, true, settings.Scope{HouseholdID: voiceHH})
 	cid = ce.warm("tok-7")
 	conv = ce.m.convs.get(cid)
-	want := "As of 8:00 AM, Tuesday, Oct 6.\nWeather: Current weather: 61F, cloudy\nToday: Dentist at 3pm\nAlex is home."
+	want := "Weather: Current weather: 61F, cloudy\nToday: Dentist at 3pm\nAlex is home."
 	if conv.ambient != want {
 		t.Fatalf("ambient %q", conv.ambient)
 	}
