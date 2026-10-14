@@ -830,7 +830,28 @@ anything happens, so a page can do nothing through the link but start the agent.
 `scripts/agent-install-check.sh`: install twice and uninstall in a scratch HOME on Linux
 (`desktop-file-validate`, `systemd-analyze verify`) and macOS, and in the runner's own HKCU on
 Windows. **Known gaps:** no icon yet; a Windows console window flashes when the Run key or a
-shortcut starts the (console) binary; on macOS the in-bundle LaunchAgent has no log file.
+shortcut starts the (console) binary.
+
+**Logs on macOS (2026-10-13).** Both login items log to `~/Library/Logs/jarvis-agent.log`
+(stdout and stderr in one file; it was `.log` + `.err.log`). The plain LaunchAgent names it.
+The app's SMAppService LaunchAgent can't name a path in the user's home (no `~` in a launchd
+plist), so `run`, started by launchd as the agent's own job (`XPC_SERVICE_NAME` is the label)
+with stderr on `/dev/null`, opens that file itself and points stdout and stderr at it.
+
+**`jarvis-agent restart` (2026-10-13).** Restarts the agent so it rereads the settings file: the
+running one quits over the control socket (a clean exit, which no supervisor restarts by
+itself), then its supervisor starts it: `systemctl --user restart jarvis-agent.service` where
+the unit runs it, `launchctl kickstart -k gui/$UID/net.jarvisautomation.agent` under launchd
+(both macOS login items share the label), otherwise a detached `run` (Windows' Run key
+supervises nothing). It then waits for the new agent and shows the pill. `config set` says to
+run it.
+
+**Stale dev builds (2026-10-13).** `scripts/agent-dev-run.sh` builds `version=dev-<commit>` and
+now also embeds the checkout's path (`main.sourceDir`). `status` reads that checkout's HEAD from
+its `.git` files (no git process when they match) and, if the build's commit differs, prints
+"build: … is older than your checkout: rebuild" (git `merge-base --is-ancestor`, 2 s bound;
+skipped on a Mac without the developer tools, whose `/usr/bin/git` would offer to install them)
+or "isn't your checkout's commit". Release builds carry no checkout and skip it; no network.
 
 **The start-only shortcut (installers plan item 1.9, 2026-10-13).** Every way of opening the
 agent (the menu entry, the shortcuts, opening the macOS app with no command, the login autostart
@@ -879,7 +900,9 @@ wins. A missing key keeps the flag's default; an unknown key is logged and ignor
 agent's file); a bad value stops `run` with the file's path (silently dropping a choice like
 `confirm_dictation` would be worse). Written by `jarvis-agent config set KEY VALUE` / `unset`
 (and by the first-run page, item 1.5); `config show` lists the keys. A running agent reads it at
-start.
+start; `jarvis-agent restart` applies a change. `voice` defaults to off
+(`voiceByDefault` in `cmd/jarvis-agent`); whether desktop installs listen by default is
+pending the user's decision.
 
 ## 14. Dictation: type, press keys, fill and click (2026-10-13)
 

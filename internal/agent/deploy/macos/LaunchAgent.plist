@@ -34,6 +34,10 @@
         <false/>
     </dict>
 
+    <!-- No StandardOutPath/StandardErrorPath: they can't name a path in the user's home (no ~
+         here). Started with /dev/null for both, `run` opens ~/Library/Logs/jarvis-agent.log
+         itself, the file the plain LaunchAgent names. -->
+
     <key>AssociatedBundleIdentifiers</key>
     <string>net.jarvisautomation.agent</string>
 

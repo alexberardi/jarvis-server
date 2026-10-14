@@ -100,6 +100,7 @@ func main() {
 	case "enroll":
 		err = enroll(ctx, os.Args[2:])
 	case "run":
+		redirectLaunchdOutput()
 		err = run(ctx, os.Args[2:])
 	case "status":
 		err = status(ctx, os.Args[2:])
@@ -109,6 +110,8 @@ func main() {
 		err = uninstallCmd(ctx, os.Args[2:], os.Stdout)
 	case "start":
 		err = startCmd(ctx, os.Args[2:])
+	case "restart":
+		err = restartCmd(ctx, os.Args[2:], os.Stdout)
 	case "config":
 		err = configCmd(os.Args[2:], os.Stdout)
 	case "try":
@@ -166,6 +169,8 @@ func usage(w io.Writer) {
            [--files-only] [--dry-run]
   uninstall  undo install [--purge: also delete the sign-in, settings and caches] [--dry-run]
   start    start the agent (what the menu entry, the shortcut and jarvis-agent://start run)
+  restart  restart the running agent (through systemd or launchd when they run it), so it
+           reads the settings file again
   config   the settings file run reads: config [show | path | set KEY VALUE | unset KEY]
   status   show enrollment, reachability and what this host can do right now
   dictation allow | revoke | status   the one-time typing permission GNOME and KDE on Wayland
@@ -401,13 +406,18 @@ type runFlags struct {
 	hf                 *hatFlags
 }
 
+// voiceByDefault is run's --voice default (the `voice` setting overrides it). Off for now;
+// whether desktop installs listen by default is the user's decision, pending (likely "on":
+// then this becomes true, and DESIGN §13's settings file and the usage say so).
+const voiceByDefault = false
+
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
 	return fs, &runFlags{
 		cp:        fs.String("creds", "", "credentials file"),
 		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
 		tf:        addToolFlags(fs),
-		voiceOn:   fs.Bool("voice", false, `listen for "hey jarvis" and run voice turns`),
+		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
 		vf:        addVoiceFlags(fs),
 		hf:        addHatFlags(fs),
@@ -642,6 +652,9 @@ func status(ctx context.Context, args []string) error {
 	caps, err := h.Capabilities(ctx)
 	if err != nil {
 		return err
+	}
+	if line := staleBuildLine(version, sourceDir, gitHead, gitIsAncestor); line != "" {
+		fmt.Println(line)
 	}
 	fmt.Printf("platform:     %s\ncapabilities: %s\n", h.Platform(), strings.Join(caps, ", "))
 	if macax.Supported() {

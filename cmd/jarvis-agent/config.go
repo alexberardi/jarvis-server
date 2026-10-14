@@ -96,7 +96,7 @@ func configCmd(args []string, w io.Writer) error {
 		if err := settings.Save(path, s); err != nil {
 			return err
 		}
-		fmt.Fprintln(w, "Saved. A running agent picks it up when it restarts.")
+		fmt.Fprintln(w, "Saved. Run `jarvis-agent restart` to apply it to the running agent.")
 		return nil
 	}
 	return usage
