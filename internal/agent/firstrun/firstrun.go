@@ -287,13 +287,18 @@ func (s *Server) static(name string) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		ct := mime.TypeByExtension(path.Ext(name))
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", ct)
+		// Fixed types: mime.TypeByExtension reads the OS's table (Windows' registry may say
+		// text/plain for .js, which nosniff would then refuse to run).
+		w.Header().Set("Content-Type", assetTypes[path.Ext(name)])
 		_, _ = w.Write(b)
 	}
+}
+
+// assetTypes are the embedded assets' content types.
+var assetTypes = map[string]string{
+	".html": "text/html; charset=utf-8",
+	".js":   "text/javascript; charset=utf-8",
+	".css":  "text/css; charset=utf-8",
 }
 
 // writeJSON answers v with status.
