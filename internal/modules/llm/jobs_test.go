@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -184,14 +185,23 @@ func TestExpiredJobCallsBack(t *testing.T) {
 	e := setup(t)
 	sink := newSink(t)
 	svc := e.m.Service()
-	clock := newClock(e)
-	if _, _, err := svc.Enqueue(e.ctx, Job{JobID: "x1", JobType: "chat", TTL: time.Minute, CreatedAt: clock.now(),
+	// It can't be expired at enqueue, so the worker must see it late. Advancing a clock after
+	// Enqueue raced the worker, which can run the job first (it then succeeded, a CI flake).
+	// Enqueue reads the clock exactly once, before the job exists, so every later read (the
+	// worker's) gets the time two minutes on.
+	t0 := time.Now()
+	var reads atomic.Int32
+	svc.setNow(func() time.Time {
+		if reads.Add(1) == 1 {
+			return t0
+		}
+		return t0.Add(2 * time.Minute)
+	})
+	if _, _, err := svc.Enqueue(e.ctx, Job{JobID: "x1", JobType: "chat", TTL: time.Minute, CreatedAt: t0,
 		Request:  ChatRequest{Messages: []Message{{Role: "user", Content: TextContent("hi")}}},
 		Callback: &Callback{URL: sink.srv.URL}}); err != nil {
 		t.Fatal(err)
 	}
-	// It can't be expired at enqueue; make the worker see it late.
-	clock.add(2 * time.Minute)
 	env := sink.wait(t, 1)[0]
 	if env["status"] != "failed" || env["error"].(map[string]any)["code"] != "expired" || env["result"] != nil {
 		t.Fatalf("envelope %v", env)
