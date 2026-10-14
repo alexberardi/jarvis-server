@@ -1,0 +1,343 @@
+#!/usr/bin/env bash
+# Screenshots of jarvis-agent's island and status icon, taken inside a disposable, headless
+# Wayland desktop that never touches the user's own session. Gives an agent eyes on the desktop
+# UI: Read the PNGs it prints. See docs/dev/desktop-shots.md.
+#
+#   scripts/desktop-shot [--sandbox NAME | --offline] [--states LIST] [--bars dark,light]
+#                        [--size 1920x1080] [--out DIR]
+#   scripts/desktop-shot deps        build sway + swaybar into ~/.cache if not installed
+#
+#   --sandbox NAME  enroll the agent against this scripts/sandbox jarvisd (default: desk); it
+#                   must be up (scripts/sandbox up --name desk --llm none). A fresh node each
+#                   run; its credentials live in .sandbox/NAME/desktop/agent-home/, never in
+#                   ~/.config.
+#   --offline       no server: the agent runs with placeholder credentials (it keeps retrying
+#                   jarvisd; the icon and island still show, the menu lacks "Open Jarvis …")
+#   --states LIST   island states to capture, comma-separated (default: all of them):
+#                   running (the "Jarvis is running" pill), listening, thinking, speaking,
+#                   follow_up, error
+#   --bars LIST     themes, one session each (default: dark,light): the bar's colours and the
+#                   full-screen window behind the island
+#   --size WxH      the headless output (default 1920x1080)
+#   --out DIR       default .sandbox/NAME/desktop/<timestamp>/ (offline: .sandbox/offline/…)
+#
+# Writes, per theme T: desktop__T.png (the whole output, icon in the bar), tray__T.png (the
+# status icon, cropped and enlarged 4x), island__<state>__T.png (the island, cropped),
+# desktop-island__T.png (the whole output with the last state up), agent-T.log, sway-T.log;
+# and once: menu.txt (the icon's properties and menu as a tray host reads them over D-Bus),
+# icon-pixmap.png (the largest pixmap offered). Exits 1 if the icon or a state never showed.
+#
+# Isolation: its own XDG_RUNTIME_DIR (a /tmp dir, so a fresh WAYLAND_DISPLAY), its own session
+# bus (dbus-run-session), its own HOME and XDG_CONFIG_HOME for the agent, `env -i` so nothing of
+# the user's session (HYPRLAND_INSTANCE_SIGNATURE, DBUS_SESSION_BUS_ADDRESS, PipeWire) leaks in;
+# sway's headless backend opens no display, GPU master or input device. Voice is off (no mic).
+# Every process it starts is in its own process group and killed on exit.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/jarvis-harness/desktop
+SWAY_VER=1.12 WLROOTS_VER=0.20.2
+say() { echo "desktop-shot: $*" >&2; }
+die() { say "$*"; exit 1; }
+usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; }
+
+# --- deps: sway + swaybar (tray) from source, when the system has none ---------------------------
+# Arch: `sudo pacman -S sway` makes this unnecessary. The build needs only what Hyprland already
+# pulled in (wayland, wlroots' deps, pango, cairo, json-c, libsystemd), plus meson/ninja from a
+# private venv. Nothing is installed outside $CACHE.
+find_sway() {
+  if command -v sway >/dev/null && command -v swaybar >/dev/null; then
+    SWAY=$(command -v sway); SWAYBAR=$(command -v swaybar)
+  elif [ -x "$CACHE/sway-$SWAY_VER/bin/sway" ]; then
+    SWAY=$CACHE/sway-$SWAY_VER/bin/sway; SWAYBAR=$CACHE/sway-$SWAY_VER/bin/swaybar
+  else
+    return 1
+  fi
+}
+
+build_sway() {
+  local src=$CACHE/src prefix=$CACHE/sway-$SWAY_VER venv=$CACHE/venv
+  mkdir -p "$src"
+  command -v cc >/dev/null || die "no C compiler (sudo pacman -S base-devel), or install sway: sudo pacman -S sway"
+  if [ ! -x "$venv/bin/meson" ]; then
+    say "meson + ninja into $venv"
+    python3 -m venv "$venv"
+    "$venv/bin/pip" install -q meson ninja
+  fi
+  if [ ! -d "$src/sway-$SWAY_VER" ]; then
+    say "fetching sway $SWAY_VER and wlroots $WLROOTS_VER"
+    curl -fsSL -o "$src/sway.tar.gz" "https://github.com/swaywm/sway/archive/refs/tags/$SWAY_VER.tar.gz"
+    curl -fsSL -o "$src/wlroots.tar.gz" "https://gitlab.freedesktop.org/wlroots/wlroots/-/archive/$WLROOTS_VER/wlroots-$WLROOTS_VER.tar.gz"
+    tar -C "$src" -xzf "$src/sway.tar.gz"
+    tar -C "$src" -xzf "$src/wlroots.tar.gz"
+    mkdir -p "$src/sway-$SWAY_VER/subprojects"
+    mv "$src/wlroots-$WLROOTS_VER" "$src/sway-$SWAY_VER/subprojects/wlroots"
+  fi
+  say "building sway (wlroots as a static subproject) into $prefix"
+  (
+    cd "$src/sway-$SWAY_VER"
+    export PATH=$venv/bin:$PATH
+    [ -f build/build.ninja ] || { rm -rf build; meson setup build --prefix="$prefix" --buildtype=release \
+      -Ddefault_library=static -Dwlroots:xwayland=disabled -Dwlroots:examples=false \
+      -Dman-pages=disabled -Dtray=enabled -Dgdk-pixbuf=enabled \
+      -Dswaybar=true -Dswaynag=false -Ddefault-wallpaper=false \
+      -Dbash-completions=false -Dzsh-completions=false -Dfish-completions=false; }
+    ninja -C build
+    ninja -C build install
+  ) >"$CACHE/build.log" 2>&1 || die "sway build failed; see $CACHE/build.log (or: sudo pacman -S sway)"
+  find_sway || die "built, but $prefix/bin/sway is missing; see $CACHE/build.log"
+  say "sway: $SWAY"
+}
+
+if [ "${1:-}" = deps ]; then
+  if find_sway; then say "sway: $SWAY, swaybar: $SWAYBAR"; else build_sway; fi
+  exit 0
+fi
+
+# --- the session: runs inside `env -i … dbus-run-session`, one per theme -------------------------
+# Everything it needs comes in the environment the outer part sets (DS_*). It starts sway, a
+# full-screen foot window as the "desktop" under the island, the agent, then captures.
+if [ "${1:-}" = __session ]; then
+  THEME=$2
+  out=$DS_OUT
+  log() { echo "desktop-shot[$THEME]: $*" >&2; }
+  pids=()
+  cleanup() {
+    for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
+    wait 2>/dev/null || true
+  }
+  trap cleanup EXIT
+
+  if [ "$THEME" = light ]; then
+    BAR_BG='#eceff4' BAR_FG='#2e3440' BAR_SEP='#d8dee9' WIN_BG='e5e9f0'
+  else
+    BAR_BG='#1e1e2e' BAR_FG='#cdd6f4' BAR_SEP='#45475a' WIN_BG='313244'
+  fi
+  cfg=$XDG_RUNTIME_DIR/sway.conf
+  # Omarchy-like: a bar of 26px with the tray at its right end, no gaps or borders. The bar is at
+  # the bottom so the island (anchored to the top) never overlaps it.
+  cat >"$cfg" <<CFG
+output HEADLESS-1 mode $DS_SIZE position 0 0
+default_border none
+default_floating_border none
+focus_follows_mouse no
+seat * hide_cursor 1
+bar {
+  id main
+  position bottom
+  height 26
+  font pango:sans 10
+  tray_output *
+  tray_padding 3
+  workspace_buttons no
+  colors {
+    background $BAR_BG
+    statusline $BAR_FG
+    separator $BAR_SEP
+  }
+}
+CFG
+  WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+    "$DS_SWAY" -c "$cfg" >"$out/sway-$THEME.log" 2>&1 &
+  pids+=($!)
+  sock= ipc=
+  for _ in $(seq 100); do
+    sock=$(cd "$XDG_RUNTIME_DIR" && ls wayland-[0-9] 2>/dev/null | head -1 || true)
+    ipc=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1 || true)
+    [ -n "$sock" ] && [ -n "$ipc" ] && break
+    sleep 0.1
+  done
+  [ -n "$sock" ] || { log "sway never opened a Wayland socket; see $out/sway-$THEME.log"; exit 1; }
+  export WAYLAND_DISPLAY=$sock SWAYSOCK=$ipc
+
+  # The "desktop" behind the island: one full-screen window in the theme's colour.
+  foot --config=/dev/null -o "colors-dark.background=$WIN_BG" -o "colors-dark.foreground=$WIN_BG" \
+    -o "colors-dark.cursor=$WIN_BG $WIN_BG" -o "cursor.blink=no" -o "cursor.unfocused-style=none" \
+    sh -c 'sleep 600' >"$out/foot-$THEME.log" 2>&1 &
+  pids+=($!)
+  sleep 1.5
+
+  shot() { grim -t png "$1"; }
+  W=${DS_SIZE%x*} H=${DS_SIZE#*x}
+  BAR="0,$((H - 40)),$W,40" TOP="0,0,$W,$((H / 3))"
+  base=$XDG_RUNTIME_DIR/base.png
+  cur=$XDG_RUNTIME_DIR/cur.png
+  shot "$base"
+
+  # wait_change REGION OUT SECONDS [diff args]: grab until REGION differs from the baseline,
+  # then once more after a short settle (animations), writing the crop to OUT.
+  wait_change() {
+    local region=$1 dst=$2 secs=$3
+    shift 3
+    for _ in $(seq $((secs * 4))); do
+      shot "$cur"
+      if "$DS_HELPER" diff --base "$base" --img "$cur" --region "$region" >/dev/null 2>&1; then
+        sleep "${SETTLE:-0.6}"
+        shot "$cur"
+        "$DS_HELPER" diff --base "$base" --img "$cur" --region "$region" --out "$dst" "$@" >/dev/null && return 0
+      fi
+      sleep 0.15
+    done
+    return 1
+  }
+  # wait_gone REGION: until REGION looks like the baseline again.
+  wait_gone() {
+    for _ in $(seq 50); do
+      shot "$cur"
+      "$DS_HELPER" diff --base "$base" --img "$cur" --region "$1" >/dev/null 2>&1 || return 0
+      sleep 0.2
+    done
+    return 1
+  }
+  # ctl CMD: one control-socket request, as `jarvis-agent stop` and `start` send them.
+  ctl() {
+    python3 - "$XDG_RUNTIME_DIR/jarvis-agent/control.sock" "$1" <<'PY'
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(sys.argv[1])
+s.sendall((json.dumps({"cmd": sys.argv[2]}) + "\n").encode())
+r = json.loads(s.recv(4096).decode())
+sys.exit(0 if r.get("ok") else 1)
+PY
+  }
+
+  rc=0
+  "$DS_AGENT" run --creds "$DS_CREDS" --voice=false --no-browser >>"$out/agent-$THEME.log" 2>&1 &
+  agent=$!
+  pids+=("$agent")
+  if wait_change "$BAR" "$out/tray__$THEME.png" 20 --pad 6 --scale 4; then
+    log "status icon: $out/tray__$THEME.png"
+  else
+    log "the status icon never appeared in the bar (agent-$THEME.log, sway-$THEME.log)"
+    rc=1
+  fi
+  shot "$out/desktop__$THEME.png"
+  if [ "$THEME" = "$DS_FIRST_THEME" ]; then
+    sleep 1 # the menu gains "Open Jarvis Automation" once discovery answers
+    "$DS_HELPER" menu --icon "$out/icon-pixmap.png" >"$out/menu.txt" 2>&1 || log "menu dump failed (menu.txt)"
+  fi
+  shot "$base" # the new baseline: the bar with its icon, no island
+
+  last=${DS_STATES##*,}
+  for st in ${DS_STATES//,/ }; do
+    dst=$out/island__${st}__$THEME.png
+    if [ "$st" = running ]; then
+      if ! ctl show-running; then
+        log "control socket: show-running failed"; rc=1; continue
+      fi
+      SETTLE=0.25 wait_change "$TOP" "$dst" 6 --pad 16 || { log "no pill after show-running"; rc=1; }
+    else
+      "$DS_AGENT" island-demo --hold "$st" --for 60s >>"$out/agent-$THEME.log" 2>&1 &
+      demo=$!
+      pids+=("$demo")
+      wait_change "$TOP" "$dst" 10 --pad 16 || { log "island state $st never showed"; rc=1; }
+      [ "$st" = "$last" ] && shot "$out/desktop-island__$THEME.png"
+      kill "$demo" 2>/dev/null || true
+      wait "$demo" 2>/dev/null || true
+    fi
+    [ -f "$dst" ] && log "island $st: $dst"
+    wait_gone "$TOP" || log "the island stayed up after $st"
+  done
+
+  ctl quit 2>/dev/null || kill "$agent" 2>/dev/null || true
+  wait "$agent" 2>/dev/null || true
+  swaymsg exit >/dev/null 2>&1 || true
+  exit $rc
+fi
+
+# --- the outer part: build, enroll, one isolated session per theme ------------------------------
+NAME=desk OFFLINE=0 STATES=running,listening,thinking,speaking,follow_up,error THEMES=dark,light
+SIZE=1920x1080 OUT=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --sandbox) NAME=$2; shift 2 ;;
+    --offline) OFFLINE=1; shift ;;
+    --states) STATES=$2; shift 2 ;;
+    --bars|--themes) THEMES=$2; shift 2 ;;
+    --size) SIZE=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument $1" ;;
+  esac
+done
+for s in ${STATES//,/ }; do
+  case $s in running|listening|thinking|speaking|follow_up|error) ;; *) die "--states: unknown state $s" ;; esac
+done
+for t in ${THEMES//,/ }; do case $t in dark|light) ;; *) die "--bars: dark or light, not $t" ;; esac; done
+[[ $SIZE =~ ^[0-9]{3,4}x[0-9]{3,4}$ ]] || die "--size: WxH, e.g. 1920x1080"
+case $NAME in *[!a-zA-Z0-9_-]*|'') die "--sandbox: letters, digits, - and _ only" ;; esac
+
+[ "$(uname -s)" = Linux ] || die "Linux only; macOS: docs/dev/desktop-shots.md"
+find_sway || die "no sway: scripts/desktop-shot deps (builds it into $CACHE, no sudo), or: sudo pacman -S sway"
+for c in grim foot dbus-run-session setsid go; do
+  command -v "$c" >/dev/null || die "$c not found (Arch: sudo pacman -S grim foot dbus util-linux)"
+done
+[ -x /usr/bin/python3 ] || die "/usr/bin/python3 not found"
+
+[ "$OFFLINE" = 1 ] && NAME=offline
+WORK=$ROOT/.sandbox/$NAME/desktop
+AGENT_HOME=$WORK/agent-home
+BIN=$WORK/bin
+[ -n "$OUT" ] || OUT=$WORK/$(date +%Y%m%d-%H%M%S)
+mkdir -p "$OUT" "$BIN" "$AGENT_HOME/.config" "$AGENT_HOME/.cache" "$AGENT_HOME/.local/share" "$AGENT_HOME/.local/state"
+OUT=$(cd "$OUT" && pwd)
+
+say "building jarvis-agent and the helper"
+(cd "$ROOT" && CGO_ENABLED=0 go build -ldflags "-X main.version=desktop-shot" -o "$BIN/jarvis-agent" ./cmd/jarvis-agent)
+(cd "$ROOT" && CGO_ENABLED=0 go build -o "$BIN/desktopshot" ./tools/desktopshot)
+
+# The agent's whole world: no variable of the user's session gets through.
+agent_env=(env -i "PATH=$(dirname "$SWAY"):/usr/local/bin:/usr/bin:/bin" "HOME=$AGENT_HOME"
+  "XDG_CONFIG_HOME=$AGENT_HOME/.config" "XDG_CACHE_HOME=$AGENT_HOME/.cache"
+  "XDG_DATA_HOME=$AGENT_HOME/.local/share" "XDG_STATE_HOME=$AGENT_HOME/.local/state"
+  "LANG=C.UTF-8" "TZ=${TZ:-UTC}")
+
+CREDS=$AGENT_HOME/creds.json
+if [ "$OFFLINE" = 1 ]; then
+  umask 077
+  printf '{"config_url":"http://127.0.0.1:9","node_id":"desktop-shot-offline","node_key":"none","room":"desktop","name":"desktop-shot","enrolled_at":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$CREDS"
+  umask 022
+  say "offline: placeholder credentials (the agent retries a server that isn't there)"
+else
+  ENVF=$ROOT/.sandbox/$NAME/sandbox.env
+  [ -f "$ENVF" ] || die "no sandbox '$NAME'; start one (scripts/sandbox up --name $NAME --llm none) or pass --offline"
+  # shellcheck disable=SC1090
+  source "$ENVF"
+  curl -sf -o /dev/null "$SBX_CONFIG/services" || die "sandbox '$NAME' isn't answering at $SBX_CONFIG (scripts/sandbox status --name $NAME)"
+  # A fresh node every run: a sandbox may have been purged and recreated since the last one.
+  printf '%s' "$SBX_PASSWORD" | "${agent_env[@]}" "$BIN/jarvis-agent" enroll --server "$SBX_CONFIG" \
+    --email "$SBX_EMAIL" --password-stdin --name desktop-shot --room desktop --no-browser \
+    --creds "$CREDS" --force >"$OUT/enroll.log" 2>&1 || { cat "$OUT/enroll.log" >&2; die "enroll failed"; }
+  say "enrolled against sandbox '$NAME' ($SBX_CONFIG)"
+fi
+
+SESSIONS=() RTS=()
+cleanup() {
+  for p in "${SESSIONS[@]}"; do kill -TERM -- "-$p" 2>/dev/null || true; done
+  sleep 0.3
+  for p in "${SESSIONS[@]}"; do kill -KILL -- "-$p" 2>/dev/null || true; done
+  for d in "${RTS[@]}"; do rm -rf "$d"; done
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+rc=0
+first=${THEMES%%,*}
+for theme in ${THEMES//,/ }; do
+  # A short path: a Unix socket's path is limited to 108 bytes.
+  RT=$(mktemp -d /tmp/jds.XXXXXX)
+  RTS+=("$RT")
+  say "session $theme: XDG_RUNTIME_DIR=$RT"
+  # setsid: the session and everything in it is one process group, killed as one on exit.
+  setsid "${agent_env[@]}" "XDG_RUNTIME_DIR=$RT" XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland \
+    "DS_OUT=$OUT" "DS_SIZE=$SIZE" "DS_SWAY=$SWAY" "DS_AGENT=$BIN/jarvis-agent" "DS_HELPER=$BIN/desktopshot" \
+    "DS_CREDS=$CREDS" "DS_STATES=$STATES" "DS_FIRST_THEME=$first" \
+    dbus-run-session -- bash "$0" __session "$theme" &
+  SESSIONS+=($!)
+  wait $! || rc=1
+done
+
+say "screenshots in $OUT:"
+ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' >&2
+[ -f "$OUT/menu.txt" ] && say "menu: $OUT/menu.txt"
+exit $rc
