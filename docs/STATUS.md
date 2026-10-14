@@ -49,6 +49,20 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   captures, the hero clip of the desktop agent (user), and a photo of the Pi node with the HAT.
 - [ ] **Docs:** update jarvis-docs, which still describes the multi-service Python stack, for jarvisd: install, upgrade, `import-legacy`, and the Go node. Also re-check this repo's README and `docs/install/` against the released version.
 
+### Autonomy (in parallel, worktrees): Custom Rules, watches, goals
+
+Plan: [autonomy/PLAN.md](autonomy/PLAN.md). Merges into `main` as each phase is ready, off by default. **Next: P0a.**
+
+- [ ] **P0a** Live-first LLM admission; the LLM API takes a `priority`, and the harness tap sends `background`
+- [ ] **P0b** `notifyGated`, `cc_autonomy_events`, the `policy` package (everything resolves to ask)
+- [ ] **P1** Custom Rules: `cc_tool_rules`, checks in errands and signal automations, autorun via rules, SDK `run_without_confirmation`
+- [ ] **P2** Watches v1: `web` and `signal` sources, deterministic conditions, voice tools
+- [ ] **P3** Admin Autonomy page: rules, watches, activity log
+- [ ] **P4** Watches v2: calendar/inbox, fuzzy conditions, home state via node `device.state` signals
+- [ ] **P5** Goals: wake loop, child errands, budget, weekly card
+- [ ] **P6** Auto-review: a yes/no check before an action runs
+- [ ] **P7** Mobile screens (node-mobile)
+
 ### Phase 0 checklist
 
 - [x] Repo created: public, AGPL-3.0, `github.com/alexberardi/jarvis-server`
