@@ -152,6 +152,9 @@ point_llm() {
   set_setting "$llm" llm.background.engine '"shared"'
   set_setting "$llm" llm.embeddings.engine '"off"'
   set_setting "$llm" stt.engine '"off"'
+  # A household with voice ID: the memory tools are offered (D3/D21) and refuse an unknown
+  # speaker when called; pipeline turns name the speaker through dev speaker hints.
+  set_setting "$(port 7706)" voice.recognition_enabled true
   # The prompt provider a local install takes from the model's catalog entry.
   local provider
   provider=$(python3 -c '
