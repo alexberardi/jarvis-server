@@ -40,3 +40,18 @@ func wizardUnfinished(dbPath string) bool {
 	}
 	return true
 }
+
+// adminExists reports whether the database has a superuser (setup got past its Account step,
+// or an import brought one). Any error reports false.
+func adminExists(dbPath string) bool {
+	if _, err := os.Stat(dbPath); err != nil {
+		return false
+	}
+	c, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro&_pragma=busy_timeout(2000)")
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	var supers int
+	return c.QueryRow(`SELECT COUNT(*) FROM auth_users WHERE is_superuser = 1`).Scan(&supers) == nil && supers > 0
+}

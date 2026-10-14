@@ -497,8 +497,8 @@ func TestSystemdStaleDefinition(t *testing.T) {
 	if err := s.Install(ctx, InstallOptions{Binary: "/opt/jarvisd/jarvisd", Home: home}); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := s.Status(ctx); st.Stale || st.StaleReason != "" {
-		t.Fatalf("fresh install reported stale: %+v", st)
+	if st, _ := s.Status(ctx); st.Stale || st.StaleReason != "" || st.Account != Name {
+		t.Fatalf("fresh install reported stale, or not its account: %+v", st)
 	}
 	unit, _ := os.ReadFile(s.unitPath)
 	rc4 := strings.Replace(string(unit), " --owner jarvisd", "", 1)
@@ -545,8 +545,8 @@ func TestLaunchdStaleDefinition(t *testing.T) {
 	if err := l.Install(ctx, InstallOptions{Binary: "/usr/local/bin/jarvisd", NoStart: true}); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := l.Status(ctx); st.Stale {
-		t.Fatalf("fresh install reported stale: %+v", st)
+	if st, _ := l.Status(ctx); st.Stale || st.Account != "user" {
+		t.Fatalf("fresh install reported stale, or not its account: %+v", st)
 	}
 	// rc4: the jarvisd LaunchDaemon only, no updater.
 	os.Remove(l.helperPath)

@@ -302,6 +302,7 @@ func (w *scm) Status(ctx context.Context) (Status, error) {
 		args := splitCommandLine(c.BinaryPathName)
 		st.Home = homeFromArgs(args)
 		st.Detail = "account " + c.ServiceStartName
+		st.Account = c.ServiceStartName
 		st.StaleReason = staleness(args, st.Home, c.ServiceStartName)
 		st.Stale = st.StaleReason != ""
 	}
