@@ -37,7 +37,7 @@ func parseTurn(w http.ResponseWriter, r *http.Request) (turnInput, bool) {
 	var in turnInput
 	in.VoiceCommand, _ = b.str("voice_command", true)
 	in.ConversationID, _ = b.str("conversation_id", true)
-	b.integer("speaker_user_id", false) // validated and ignored (D2)
+	in.SpeakerHint, _ = b.integer("speaker_user_id", false) // ignored (D2) unless DevSpeakerHints
 	if v, ok := b.number("pre_wake_speech_seconds"); ok {
 		in.PreWakeSeconds = &v
 	}

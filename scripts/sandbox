@@ -1,0 +1,385 @@
+#!/usr/bin/env bash
+# A throwaway jarvisd beside the installed one: this checkout's build, its own data directory,
+# its own ports, seeded with the dev household, and talking to the installed instance's model
+# so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
+#
+#   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich] [--llm shared|none] [--ui]
+#                      [--voice [--stt-model ID]]
+#   scripts/sandbox down [--name N] [--purge]
+#   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
+#   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
+#   scripts/sandbox logs [--name N] [-f]
+#   scripts/sandbox llm [--name N]         re-point the sandbox at the installed model (after
+#                                          writing the app client, or a model change)
+#   scripts/sandbox list
+#
+# up builds ./cmd/jarvisd, starts `jarvisd serve --port-offset N` on .sandbox/<name>/home bound
+# to 127.0.0.1 (no mDNS, no browser), runs scripts/seed-dev.py, and writes
+# .sandbox/<name>/sandbox.env: every listener URL, the dev users' password, a superuser JWT, the
+# seeded kitchen node's id and key, and the admin keys. Running it again on a sandbox that is up
+# rebuilds and restarts it on the same data.
+#
+#   --offset N       port offset (default: the first free of 10000, 11000, ...; kept per name)
+#   --profile        seed-dev.py profile (default minimal)
+#   --llm shared     (default) llm.live = the installed jarvisd's live model through its own LLM
+#                    API (:7704), so no second model on the GPU; requests queue behind the
+#                    house's (one slot). Needs an app client of the installed jarvisd in
+#                    ~/.config/jarvis-harness/installed.env (INSTALLED_APP_ID, INSTALLED_APP_KEY).
+#                    Calls go through the tap (tools/pipeline tap, port 7799 + offset), which
+#                    logs every model call to .sandbox/<name>/llm.jsonl.
+#   --llm none       no model: everything but the LLM works
+#   --ui             build the admin SPA first (npm) and serve it; otherwise web/admin/dist/ui
+#                    is served when it exists, else the built-in placeholder page
+#   --voice          real TTS and STT, for voice pipeline runs (pipeline say --voice): Kokoro,
+#                    the speaker model and a whisper model, downloaded once into
+#                    ~/.cache/jarvis-harness/models ($JARVIS_HARNESS_CACHE) and used in place;
+#                    whisper-server runs on the CPU (stt.gpu_backend cpu, gpu_layers 0), never
+#                    the GPU the installed jarvisd uses. The CPU build is fetched on first use.
+#   --stt-model ID   the catalog's stt model for --voice (default whisper-small.en; base.en is
+#                    faster and mishears more; whisper-large-v3-turbo-q5_0 is better and slower)
+#
+# Nodes may claim who is speaking (JARVIS_DEV_SPEAKER_HINTS=1), standing in for voice ID.
+# Without --voice, STT is off and TTS has no voice models: pipeline tests start from text
+# (go run ./tools/pipeline say "turn on the kitchen lights"; ... run for the scenarios).
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+SBX_ROOT=$ROOT/.sandbox
+say() { echo "sandbox: $*" >&2; }
+die() { say "$*"; exit 1; }
+
+CMD=${1:-}
+[ -n "$CMD" ] || { sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+shift
+NAME=default OFFSET= PROFILE=minimal LLM=shared UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
+while [ $# -gt 0 ]; do
+  case $1 in
+    --name) NAME=$2; shift 2 ;;
+    --offset) OFFSET=$2; shift 2 ;;
+    --profile) PROFILE=$2; shift 2 ;;
+    --llm) LLM=$2; shift 2 ;;
+    --ui) UI=1; shift ;;
+    --voice) VOICE=1; shift ;;
+    --stt-model) STT_MODEL=$2; shift 2 ;;
+    --purge) PURGE=1; shift ;;
+    -f) FOLLOW=1; shift ;;
+    -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument $1" ;;
+  esac
+done
+case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
+
+DIR=$SBX_ROOT/$NAME
+HOME_DIR=$DIR/home
+PIDFILE=$DIR/jarvisd.pid
+LOG=$DIR/jarvisd.log
+ENVF=$DIR/sandbox.env
+OFFSETF=$DIR/offset
+TAPPID=$DIR/tap.pid
+
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+tap_running() { [ -f "$TAPPID" ] && kill -0 "$(cat "$TAPPID")" 2>/dev/null; }
+port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
+port() { echo $(($1 + $(cat "$OFFSETF"))); }
+json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
+
+# The installed jarvisd's LLM API, reached with an app client of its own (created once in its
+# admin, Connections → App clients). Kept outside the repo so every worktree shares it:
+#   INSTALLED_LLM_URL=http://127.0.0.1:7704     (optional; the default)
+#   INSTALLED_APP_ID=claude-harness
+#   INSTALLED_APP_KEY=...
+CREDS=${JARVIS_HARNESS_ENV:-$HOME/.config/jarvis-harness/installed.env}
+load_creds() {
+  INSTALLED_LLM_URL=http://127.0.0.1:7704 INSTALLED_APP_ID= INSTALLED_APP_KEY=
+  # shellcheck disable=SC1090
+  [ -f "$CREDS" ] && . "$CREDS"
+  [ -n "$INSTALLED_APP_ID" ] && [ -n "$INSTALLED_APP_KEY" ]
+}
+
+# installed_model prints the installed live model's id, window and vision flag, from its
+# unauthenticated /v1/models.
+installed_model() {
+  curl -sf -m 5 "$INSTALLED_LLM_URL/v1/models" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)["data"]
+if d:
+    m = d[0]
+    print(m["id"], m.get("context_length") or 0, "true" if m.get("supports_images") else "false")'
+}
+
+pick_offset() {
+  if [ -n "$OFFSET" ]; then echo "$OFFSET"; return; fi
+  if [ -f "$OFFSETF" ]; then cat "$OFFSETF"; return; fi
+  local taken=" " o
+  for f in "$SBX_ROOT"/*/offset; do [ -f "$f" ] && taken+="$(cat "$f") "; done
+  for o in $(seq 10000 1000 40000); do
+    case $taken in *" $o "*) continue ;; esac
+    port_busy $((7700 + o)) || port_busy $((7703 + o)) || port_busy $((7710 + o)) || { echo "$o"; return; }
+  done
+  die "no free port offset"
+}
+
+set_setting() { # listener-port key json-value
+  local code
+  code=$(curl -s -o "$DIR/.put" -w '%{http_code}' -X PUT "http://127.0.0.1:$1/settings/$2" \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"value\": $3}")
+  [ "$code" = 200 ] || die "PUT $2 → $code: $(cat "$DIR/.put")"
+}
+
+login() {
+  curl -sf -X POST "http://127.0.0.1:$(port 7701)/auth/login" -H 'Content-Type: application/json' \
+    -d '{"email":"test@jarvisautomation.io","password":"DevPass123!"}' | json 'd["access_token"]'
+}
+
+point_llm() {
+  TOKEN=$(login) || die "login failed"
+  local llm=$(port 7704) cc=$(port 7703)
+  if [ "$LLM" = none ]; then
+    set_setting "$llm" llm.live.engine '"off"'
+    say "llm: off"
+    return
+  fi
+  if ! load_creds; then
+    set_setting "$llm" llm.live.engine '"off"'
+    say "llm: off. No app client for the installed jarvisd in $CREDS."
+    say "     Create one in its admin (Connections → App clients, e.g. claude-harness) and write"
+    say "     INSTALLED_APP_ID=... and INSTALLED_APP_KEY=... there (chmod 600), then: scripts/sandbox llm"
+    return
+  fi
+  local model
+  model=$(installed_model) || { set_setting "$llm" llm.live.engine '"off"'; say "llm: off. $INSTALLED_LLM_URL/v1/models lists no live model (is the installed jarvisd up?)"; return; }
+  read -r alias ctx vision <<<"$model"
+  # Through the tap (tools/pipeline), which logs every call to llm.jsonl and adds the app
+  # credentials, to the installed jarvisd's own LLM API: its live label, its GPU engine, its
+  # chat template and system-message folding (so folding is off here).
+  set_setting "$llm" llm.live.engine '"remote"'
+  set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$(port 7799)/v1\""
+  set_setting "$llm" llm.live.remote_api '"openai"'
+  set_setting "$llm" llm.live.remote_model '"live"'
+  set_setting "$llm" llm.live.context "$ctx"
+  set_setting "$llm" llm.live.remote_vision "$vision"
+  set_setting "$llm" llm.live.fold_system_messages '"off"'
+  set_setting "$llm" llm.background.engine '"shared"'
+  set_setting "$llm" llm.embeddings.engine '"off"'
+  # A household with voice ID: the memory tools are offered (D3/D21) and refuse an unknown
+  # speaker when called; pipeline turns name the speaker through dev speaker hints.
+  set_setting "$(port 7706)" voice.recognition_enabled true
+  # The prompt provider a local install takes from the model's catalog entry.
+  local provider
+  provider=$(python3 -c '
+import json, sys
+for e in json.load(open(sys.argv[1])):
+    if e["id"] == sys.argv[2]:
+        print(e.get("prompt_provider", ""))
+        break' "$ROOT/internal/modules/llm/models/catalog.json" "$alias")
+  if [ -n "$provider" ]; then
+    set_setting "$cc" llm.prompt_provider "\"$provider\""
+  else
+    say "llm: $alias is not in the catalog; set llm.prompt_provider by hand"
+  fi
+  say "llm: tap :$(port 7799) → installed jarvisd $INSTALLED_LLM_URL (live = $alias); calls logged to $DIR/llm.jsonl"
+}
+
+# Voice models live in one cache shared by every worktree and sandbox; the sandbox's settings
+# point at them by absolute path, so nothing is copied and down --purge keeps them.
+CACHE=${JARVIS_HARNESS_CACHE:-$HOME/.cache/jarvis-harness}/models
+fetch_voice_models() {
+  local r=https://github.com/k2-fsa/sherpa-onnx/releases/download
+  mkdir -p "$CACHE"
+  if [ ! -d "$CACHE/kokoro-multi-lang-v1_0" ]; then
+    say "voice: downloading Kokoro (350 MB, once)"
+    rm -rf "$CACHE.tmp" && mkdir -p "$CACHE.tmp"
+    curl -fsSL "$r/tts-models/kokoro-multi-lang-v1_0.tar.bz2" | tar xj -C "$CACHE.tmp" || die "voice: Kokoro download failed"
+    mv "$CACHE.tmp/kokoro-multi-lang-v1_0" "$CACHE/" && rm -rf "$CACHE.tmp"
+  fi
+  local spk=3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
+  if [ ! -f "$CACHE/$spk" ]; then
+    curl -fsSL -o "$CACHE/$spk.part" "$r/speaker-recongition-models/$spk" || die "voice: speaker model download failed"
+    mv "$CACHE/$spk.part" "$CACHE/$spk"
+  fi
+  # The whisper model, as the catalog pins it (repo, revision, file, sha256).
+  local entry url sum file
+  entry=$(python3 -c '
+import json, sys
+for e in json.load(open(sys.argv[1])):
+    if e["id"] == sys.argv[2] and e.get("kind") == "stt":
+        print("https://huggingface.co/%s/resolve/%s/%s" % (e["repo"], e["revision"], e["file"]), e["sha256"], e["file"])
+        break' "$ROOT/internal/modules/llm/models/catalog.json" "$STT_MODEL")
+  [ -n "$entry" ] || die "--stt-model $STT_MODEL: not an stt model in the catalog"
+  read -r url sum file <<<"$entry"
+  if [ ! -f "$CACHE/$file" ]; then
+    say "voice: downloading $file (once)"
+    curl -fsSL -o "$CACHE/$file.part" "$url" || die "voice: download of $url failed"
+    echo "$sum  $CACHE/$file.part" | sha256sum -c --quiet - || { rm -f "$CACHE/$file.part"; die "voice: $file: sha256 mismatch"; }
+    mv "$CACHE/$file.part" "$CACHE/$file"
+  fi
+  STT_FILE=$CACHE/$file
+}
+
+# setup_voice turns on TTS, the speaker model and STT (whisper on the CPU), then waits until a
+# synthesized phrase comes back as text through command-center, as a node would see it.
+setup_voice() {
+  local llm=$(port 7704) cc=$(port 7703)
+  if [ "$VOICE" != 1 ]; then
+    set_setting "$llm" stt.engine '"off"'
+    return
+  fi
+  fetch_voice_models
+  set_setting "$llm" tts.model "\"$CACHE/kokoro-multi-lang-v1_0\""
+  set_setting "$llm" speaker.model "\"$CACHE/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx\""
+  set_setting "$llm" stt.model "\"$STT_FILE\""
+  set_setting "$llm" stt.gpu_backend '"cpu"'
+  set_setting "$llm" stt.gpu_layers 0
+  # whisper-server's default is 4 threads: half the cores, at most 8, is ~1.5x faster on a
+  # short command without taking the whole box.
+  local threads=$(( $(nproc) / 2 ))
+  [ "$threads" -gt 8 ] && threads=8
+  [ "$threads" -lt 1 ] && threads=1
+  set_setting "$llm" stt.extra_args "\"-t $threads\""
+  set_setting "$llm" stt.engine '"local"'
+  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code
+  node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json")
+  say "voice: warming TTS and STT ($STT_MODEL on the CPU; the first start fetches whisper-server)"
+  for _ in $(seq 1 120); do
+    code=$(curl -s -o "$DIR/.warm.wav" -w '%{http_code}' -X POST "http://127.0.0.1:$cc/api/v0/media/tts/speak" \
+      -H "X-API-Key: $node_id:$node_key" -H 'Content-Type: application/json' -d '{"text": "Testing one two three."}')
+    if [ "$code" = 200 ]; then
+      code=$(curl -s -o "$DIR/.warm.json" -w '%{http_code}' -X POST "http://127.0.0.1:$cc/api/v0/media/whisper/transcribe" \
+        -H "X-API-Key: $node_id:$node_key" -F "file=@$DIR/.warm.wav;type=audio/wav")
+      [ "$code" = 200 ] && break
+    fi
+    sleep 1
+  done
+  [ "$code" = 200 ] || die "voice: not ready after 2 minutes ($code: $(head -c 300 "$DIR/.warm.json" "$DIR/.warm.wav" 2>/dev/null | tr -d '\0'))"
+  say "voice: up; heard \"$(json 'd["text"].strip()' <"$DIR/.warm.json")\" for \"Testing one two three.\""
+  rm -f "$DIR/.warm.wav" "$DIR/.warm.json"
+}
+
+write_env() {
+  local node_id node_key
+  node_id=5eed0000-0000-4000-8000-00000000a0de
+  node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json" 2>/dev/null || true)
+  TOKEN=$(login)
+  umask 077
+  {
+    echo "# scripts/sandbox $NAME ($(date -Iseconds)); source this file"
+    echo "export JARVIS_SANDBOX=$NAME"
+    echo "export JARVIS_HOME=$HOME_DIR"
+    echo "export JARVIS_PORT_OFFSET=$(cat "$OFFSETF")"
+    for l in config:7700 auth:7701 logs:7702 cc:7703 llm:7704 whisper:7706 tts:7707 notifications:7712 recipes:7030 ocr:7031 admin:7710; do
+      n=$(tr '[:lower:]' '[:upper:]' <<<"${l%%:*}")
+      echo "export SBX_$n=http://127.0.0.1:$(port "${l#*:}")"
+    done
+    echo "export SBX_MQTT=127.0.0.1:$(port 1884)"
+    echo "export SBX_LLM_TAP=http://127.0.0.1:$(port 7799)"
+    echo "export SBX_LLM_LOG=$DIR/llm.jsonl"
+    echo "export SBX_EMAIL=test@jarvisautomation.io"
+    echo "export SBX_PASSWORD='DevPass123!'"
+    echo "export SBX_TOKEN=$TOKEN"
+    echo "export SBX_USER_ID=$(curl -sf "http://127.0.0.1:$(port 7701)/auth/me" -H "Authorization: Bearer $TOKEN" | json 'd["id"]')"
+    echo "export SBX_NODE_ID=$node_id"
+    echo "export SBX_NODE_KEY=$node_key"
+    echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
+    echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
+    if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
+  } >"$ENVF"
+}
+
+cmd_up() {
+  command -v go >/dev/null || die "go not on PATH"
+  mkdir -p "$HOME_DIR"
+  pick_offset >"$OFFSETF.new" && mv "$OFFSETF.new" "$OFFSETF"
+  [ -f "$DIR/admin-api-key" ] || head -c 24 /dev/urandom | base64 | tr -d '/+=' >"$DIR/admin-api-key"
+  [ -f "$DIR/auth-admin-token" ] || head -c 24 /dev/urandom | base64 | tr -d '/+=' >"$DIR/auth-admin-token"
+
+  if [ "$UI" = 1 ]; then
+    say "building the admin UI"
+    npm --prefix "$ROOT/web/admin" ci --silent && npm --prefix "$ROOT/web/admin" run build --silent
+  fi
+  say "building jarvisd"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -ldflags "-X main.version=dev-sandbox" -o "$DIR/jarvisd" ./cmd/jarvisd)
+  (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/pipeline" ./tools/pipeline)
+
+  cmd_stop
+  local ui=
+  [ -d "$ROOT/web/admin/dist/ui" ] && ui=$ROOT/web/admin/dist/ui
+  say "starting on offset $(cat "$OFFSETF") (cc :$(port 7703), admin :$(port 7710))"
+  JARVIS_HOST=127.0.0.1 JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
+    ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
+    setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
+  echo $! >"$PIDFILE"
+  load_creds || true
+  JARVIS_TAP_APP_ID=$INSTALLED_APP_ID JARVIS_TAP_APP_KEY=$INSTALLED_APP_KEY \
+    setsid "$DIR/pipeline" tap --listen "127.0.0.1:$(port 7799)" --upstream "$INSTALLED_LLM_URL" --log "$DIR/llm.jsonl" \
+    >>"$DIR/tap.log" 2>&1 </dev/null &
+  echo $! >"$TAPPID"
+  for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null && break
+    running || { tail -20 "$LOG" >&2; die "jarvisd exited (log: $LOG)"; }
+    sleep 0.5
+  done
+  curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null || die "not healthy after 30s (log: $LOG)"
+
+  say "seeding ($PROFILE)"
+  python3 "$ROOT/scripts/seed-dev.py" --home "$HOME_DIR" --base-url http://127.0.0.1 \
+    --auth-port "$(port 7701)" --cc-port "$(port 7703)" --admin-port "$(port 7710)" \
+    --profile "$PROFILE" >"$DIR/seed.log" 2>&1 || { tail -20 "$DIR/seed.log" >&2; die "seeding failed (log: $DIR/seed.log)"; }
+  point_llm
+  setup_voice
+  write_env
+  say "up: source $ENVF"
+}
+
+cmd_stop() {
+  if running; then
+    local pid
+    pid=$(cat "$PIDFILE")
+    kill "$pid"
+    for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid"
+  fi
+  rm -f "$PIDFILE"
+  if tap_running; then kill "$(cat "$TAPPID")"; fi
+  rm -f "$TAPPID"
+}
+
+cmd_down() {
+  cmd_stop
+  if [ "$PURGE" = 1 ]; then rm -rf "$DIR"; say "$NAME stopped and deleted"; else say "$NAME stopped (data kept; --purge deletes it)"; fi
+}
+
+gpu_report() {
+  command -v nvidia-smi >/dev/null || return 0
+  echo "GPU:"
+  nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader | sed 's/^/  used, total: /'
+  nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader | while IFS=, read -r pid mem; do
+    local args owner=other
+    args=$(ps -o args= -p "$pid" 2>/dev/null | cut -c1-80)
+    case $args in *"$SBX_ROOT"*) owner=sandbox ;; */var/lib/jarvisd/*|*.jarvisd/*) owner=installed ;; esac
+    echo "  $owner $mem  $args"
+  done
+}
+
+cmd_status() {
+  if [ -f "$OFFSETF" ]; then
+    if running; then echo "$NAME: up (pid $(cat "$PIDFILE"), offset $(cat "$OFFSETF"), cc http://127.0.0.1:$(port 7703), admin http://127.0.0.1:$(port 7710))"
+    else echo "$NAME: down (offset $(cat "$OFFSETF"))"; fi
+  else
+    echo "$NAME: not created"
+  fi
+  if load_creds; then c="app client $INSTALLED_APP_ID"; else c="no app client in $CREDS"; fi
+  if m=$(installed_model); then echo "installed jarvisd LLM: $INSTALLED_LLM_URL, live = ${m%% *} ($c)"; else echo "installed jarvisd LLM: $INSTALLED_LLM_URL not answering ($c)"; fi
+  gpu_report
+}
+
+case $CMD in
+  up) cmd_up ;;
+  down) cmd_down ;;
+  status) cmd_status ;;
+  env) [ -f "$ENVF" ] || die "no $ENVF (scripts/sandbox up)"; cat "$ENVF" ;;
+  logs) if [ "$FOLLOW" = 1 ]; then tail -f "$LOG"; else tail -100 "$LOG"; fi ;;
+  llm) running || die "$NAME is not up"; point_llm ;;
+  list) for d in "$SBX_ROOT"/*/; do [ -d "$d" ] && NAME=$(basename "$d") DIR=$d PIDFILE=$d/jarvisd.pid OFFSETF=$d/offset && \
+          if running; then echo "$NAME up offset $(cat "$OFFSETF")"; else echo "$NAME down"; fi; done ;;
+  *) die "unknown command $CMD (up, down, status, env, logs, llm, list)" ;;
+esac

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -108,5 +109,19 @@ func TestEnvFilesOrder(t *testing.T) {
 	f := EnvFiles("/h")
 	if f[0] != filepath.Join("/h", EnvFileName) {
 		t.Fatalf("%v", f)
+	}
+}
+
+// The system env file belongs to the Linux system service, so only its home reads it: a second
+// instance on another home (a dev sandbox) must not pick up the installed one's variables.
+func TestEnvFilesSystemFileOnlyForSystemHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no system env file on Windows")
+	}
+	if f := EnvFiles(SystemHome); !slices.Equal(f, []string{filepath.Join(SystemHome, EnvFileName), SystemEnvFile}) {
+		t.Errorf("system home: %v", f)
+	}
+	if f := EnvFiles("/tmp/sandbox"); !slices.Equal(f, []string{filepath.Join("/tmp/sandbox", EnvFileName)}) {
+		t.Errorf("other home: %v", f)
 	}
 }

@@ -52,6 +52,57 @@ func TestLoadRejectsBadPort(t *testing.T) {
 	}
 }
 
+func TestLoadPortOffset(t *testing.T) {
+	c, err := load(env(map[string]string{
+		"JARVIS_HOME":                "/d",
+		"JARVIS_PORT_OFFSET":         "10000",
+		"JARVIS_PORT_COMMAND_CENTER": "20000", // an explicit port is taken as is
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Ports[ListenerAuth] != 17701 || c.Ports[ListenerRecipes] != 17030 || c.Ports[ListenerCC] != 20000 {
+		t.Fatalf("ports %v", c.Ports)
+	}
+}
+
+func TestLoadRejectsBadPortOffset(t *testing.T) {
+	for _, v := range []string{"x", "-1", "60000"} {
+		if _, err := load(env(map[string]string{"JARVIS_HOME": "/d", "JARVIS_PORT_OFFSET": v})); err == nil {
+			t.Errorf("JARVIS_PORT_OFFSET=%s: want error", v)
+		}
+	}
+}
+
+func TestShiftAddr(t *testing.T) {
+	for _, tc := range []struct {
+		addr   string
+		offset int
+		want   string
+	}{
+		{":1884", 0, ":1884"},
+		{":1884", 10000, ":11884"},
+		{"127.0.0.1:9883", 1, "127.0.0.1:9884"},
+		{"", 10000, ""},             // a disabled listener stays disabled
+		{"nonsense", 5, "nonsense"}, // not host:port: left for the listener to reject
+	} {
+		if got := ShiftAddr(tc.addr, tc.offset); got != tc.want {
+			t.Errorf("ShiftAddr(%q, %d) = %q, want %q", tc.addr, tc.offset, got, tc.want)
+		}
+	}
+}
+
+func TestPortOffset(t *testing.T) {
+	t.Setenv("JARVIS_PORT_OFFSET", "500")
+	if got := PortOffset(); got != 500 {
+		t.Fatalf("PortOffset() = %d", got)
+	}
+	t.Setenv("JARVIS_PORT_OFFSET", "junk")
+	if got := PortOffset(); got != 0 {
+		t.Fatalf("PortOffset() on junk = %d", got)
+	}
+}
+
 func TestLoadMDNSInterfaces(t *testing.T) {
 	for in, want := range map[string][]string{
 		"":                 nil,

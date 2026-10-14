@@ -13,11 +13,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
 // Linux system-service layout (00-installers §2.0).
 const (
-	SystemHome    = "/var/lib/jarvisd"
+	SystemHome    = config.SystemHome
 	systemUnit    = "/etc/systemd/system/jarvisd.service"
 	systemEnvDir  = "/etc/jarvisd"
 	unitName      = Name + ".service"

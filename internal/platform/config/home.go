@@ -19,10 +19,13 @@ const DefaultHomeName = ".jarvisd"
 // EnvFileName is the optional bootstrap env file jarvisd reads from its home (ID3).
 const EnvFileName = "jarvisd.env"
 
+// SystemHome is the Linux system service's data directory (00-installers §2.0).
+const SystemHome = "/var/lib/jarvisd"
+
 // SystemEnvFile is the Linux system service's env file (00-installers §2.0). On unix it is
-// read after <home>/jarvisd.env. A variable only so tests can point it away from the real
-// file: on a box with the system service installed it is root:jarvisd 0640, and a test run as
-// the developer fails to read it.
+// read after <home>/jarvisd.env when the home is SystemHome. A variable only so tests can
+// point it away from the real file: on a box with the system service installed it is
+// root:jarvisd 0640, and a test run as the developer fails to read it.
 var SystemEnvFile = "/etc/jarvisd/jarvisd.env"
 
 // ResolveHome picks the data directory, in order: the --home flag, JARVIS_HOME, the home of
@@ -46,10 +49,12 @@ func ResolveHome(flag, serviceHome string, getenv func(string) string) (string, 
 	return filepath.Abs(h)
 }
 
-// EnvFiles lists the env files for a home, highest precedence first.
+// EnvFiles lists the env files for a home, highest precedence first. The system env file
+// belongs to the system service, so only its home reads it: another instance (a dev sandbox
+// beside the installed service) must not take on the installed one's variables.
 func EnvFiles(home string) []string {
 	files := []string{filepath.Join(home, EnvFileName)}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && filepath.Clean(home) == SystemHome {
 		files = append(files, SystemEnvFile)
 	}
 	return files

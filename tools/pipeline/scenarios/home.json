@@ -1,0 +1,81 @@
+[
+  {
+    "name": "devices: lights off in a room",
+    "turns": [
+      {
+        "say": "turn off the kitchen lights",
+        "expect": {
+          "tool": "control_device",
+          "args": {
+            "action": "turn_off"
+          },
+          "args_match": {
+            "device_name": "(?i)kitchen"
+          },
+          "not_reply": "(?i)can't|cannot|unable"
+        }
+      }
+    ]
+  },
+  {
+    "name": "devices: lock the front door",
+    "turns": [
+      {
+        "say": "lock the front door",
+        "expect": {
+          "tool": "control_device",
+          "args": {
+            "action": "lock"
+          },
+          "args_match": {
+            "device_name": "(?i)front door"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "devices: is the garage door closed",
+    "turns": [
+      {
+        "say": "is the garage door closed",
+        "expect": {
+          "no_tool": true,
+          "reply": "(?i)closed",
+          "not_reply": "(?i)open(ed)? "
+        }
+      }
+    ]
+  },
+  {
+    "name": "devices: every light on a floor",
+    "turns": [
+      {
+        "say": "turn off all the lights upstairs",
+        "expect": {
+          "tool": "control_device",
+          "args": {
+            "action": "turn_off"
+          },
+          "args_match": {
+            "device_name": "(?i)office|bedroom"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "node: volume up",
+    "turns": [
+      {
+        "say": "turn the volume up",
+        "expect": {
+          "tool": "control_node",
+          "args": {
+            "action": "volume_up"
+          }
+        }
+      }
+    ]
+  }
+]

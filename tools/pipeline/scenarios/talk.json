@@ -1,0 +1,76 @@
+[
+  {
+    "name": "math: multiplication is answered",
+    "turns": [
+      {
+        "say": "what is 12 times 7",
+        "expect": {
+          "reply": "84",
+          "not_tool": [
+            "deep_research",
+            "quick_search"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "units: ounces to grams",
+    "turns": [
+      {
+        "say": "how many grams are in 3 ounces",
+        "expect": {
+          "reply": "8[45]"
+        }
+      }
+    ]
+  },
+  {
+    "name": "small talk: thanks needs no tool",
+    "turns": [
+      {
+        "say": "thanks jarvis",
+        "expect": {
+          "no_tool": true,
+          "not_tool": [
+            "remember"
+          ],
+          "not_reply": "(?i)sorry|error"
+        }
+      }
+    ]
+  },
+  {
+    "name": "memory: remember then recall",
+    "turns": [
+      {
+        "say": "remember that my favorite color is green",
+        "expect": {
+          "server_tool": "remember",
+          "args_match": {
+            "content": "(?i)green"
+          }
+        }
+      },
+      {
+        "say": "what's my favorite color",
+        "expect": {
+          "reply": "(?i)green"
+        }
+      }
+    ],
+    "speaker": "primary"
+  },
+  {
+    "name": "memory: an unidentified voice is not told it was remembered",
+    "turns": [
+      {
+        "say": "remember that my favorite color is green",
+        "expect": {
+          "reply": "(?i)who('s| is) (speaking|talking)|who you are|who I'm (speaking|talking)|identify",
+          "not_reply": "(?i)^\\W*(got it|gotcha|noted|done|saved)\\b|I've (saved|remembered|got (that|it) noted)"
+        }
+      }
+    ]
+  }
+]

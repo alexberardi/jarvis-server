@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Control the jarvisd installed on this machine (Linux), so an agent can free or reclaim the GPU:
+#
+#   scripts/installed status            what runs it (system unit, --user unit, a dev-run.sh
+#                                       session, nothing) and what holds the GPU
+#   scripts/installed stop|start|restart
+#
+# The system unit needs root. Without a password prompt, sudo must allow exactly these
+# commands; install the rule once (it allows nothing else):
+#
+#   scripts/installed sudoers | sudo tee /etc/sudoers.d/jarvisd-dev && sudo chmod 0440 /etc/sudoers.d/jarvisd-dev
+#
+# A dev-run.sh session is the user's terminal: it is reported, never stopped from here (it
+# restarts the service when it exits, which would prompt in that terminal).
+set -euo pipefail
+
+say() { echo "installed: $*" >&2; }
+SYSTEMCTL=$(command -v systemctl || echo /usr/bin/systemctl)
+UNIT=jarvisd.service
+
+mode() {
+  if pgrep -f 'jarvisd-dev-.* serve' >/dev/null; then echo dev-run
+  elif systemctl is-active --quiet "$UNIT" 2>/dev/null; then echo system
+  elif systemctl --user is-active --quiet "$UNIT" 2>/dev/null; then echo user
+  elif systemctl cat "$UNIT" >/dev/null 2>&1; then echo system-stopped
+  elif systemctl --user cat "$UNIT" >/dev/null 2>&1; then echo user-stopped
+  else echo none
+  fi
+}
+
+gpu() {
+  command -v nvidia-smi >/dev/null || return 0
+  echo "GPU: $(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader)"
+  nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader | while IFS=, read -r pid mem; do
+    echo " $mem  $(ps -o user=,args= -p "$pid" 2>/dev/null | cut -c1-110)"
+  done
+}
+
+control() { # verb
+  local m
+  m=$(mode)
+  case $m in
+    dev-run)
+      say "the installed jarvisd is running under scripts/dev-run.sh (pid $(pgrep -f 'jarvisd-dev-.* serve' | head -1))."
+      say "that is someone's terminal session: stop it there (Ctrl-C), then run this again."
+      exit 1 ;;
+    user|user-stopped) systemctl --user "$1" "$UNIT" ;;
+    system|system-stopped)
+      if ! sudo -n "$SYSTEMCTL" "$1" "$UNIT" 2>/dev/null; then
+        say "sudo needs a password for '$SYSTEMCTL $1 $UNIT'. Install the narrow rule once:"
+        say "  scripts/installed sudoers | sudo tee /etc/sudoers.d/jarvisd-dev && sudo chmod 0440 /etc/sudoers.d/jarvisd-dev"
+        exit 1
+      fi ;;
+    none) say "no installed jarvisd service"; exit 1 ;;
+  esac
+  say "$1: $(mode)"
+}
+
+case ${1:-status} in
+  status)
+    echo "installed jarvisd: $(mode)"
+    gpu ;;
+  stop|start|restart) control "$1" ;;
+  sudoers)
+    u=$(id -un)
+    echo "# scripts/installed: let $u start, stop and restart the jarvisd system service without a password."
+    for v in start stop restart; do echo "$u ALL=(root) NOPASSWD: $SYSTEMCTL $v $UNIT"; done ;;
+  -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) say "unknown command $1 (status, stop, start, restart, sudoers)"; exit 2 ;;
+esac

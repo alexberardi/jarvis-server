@@ -1,0 +1,10 @@
+{
+  "name": "jarvis-admin-screenshots",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "module",
+  "description": "Playwright screenshots of the admin SPA on a scripts/sandbox instance (scripts/screenshots)",
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}

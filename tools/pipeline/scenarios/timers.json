@@ -1,0 +1,80 @@
+[
+  {
+    "name": "timer: set with a label",
+    "turns": [
+      {
+        "say": "set a timer for 12 minutes for the pasta",
+        "expect": {
+          "tool": "set_timer",
+          "args": {
+            "duration_seconds": 720
+          },
+          "args_match": {
+            "label": "(?i)pasta"
+          },
+          "stop": "complete"
+        }
+      }
+    ]
+  },
+  {
+    "name": "timer: change the duration of the one just set",
+    "turns": [
+      {
+        "say": "set a timer for 12 minutes for the pasta",
+        "expect": {
+          "tool": "set_timer"
+        }
+      },
+      {
+        "say": "actually make it 15",
+        "expect": {
+          "any_tool": [
+            "set_timer",
+            "cancel_timer"
+          ],
+          "not_reply": "(?i)I'll (adjust|reset|change)"
+        }
+      }
+    ]
+  },
+  {
+    "name": "timer: cancel by label",
+    "turns": [
+      {
+        "say": "cancel the pasta timer",
+        "expect": {
+          "tool": "cancel_timer",
+          "args_match": {
+            "label": "(?i)pasta"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "timer: how much time is left",
+    "results": {
+      "check_timers": {
+        "success": true,
+        "context_data": {
+          "timers": [
+            {
+              "label": "pasta",
+              "remaining_seconds": 263
+            }
+          ]
+        }
+      }
+    },
+    "turns": [
+      {
+        "say": "how long is left on the pasta timer",
+        "expect": {
+          "tool": "check_timers",
+          "reply": "(?i)4 minutes|four minutes|4:23|263"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,34 @@
+{
+  "home_assistant": {
+    "floors": {
+      "Downstairs": ["Kitchen", "Living Room"],
+      "Upstairs": ["Bedroom", "Office"]
+    },
+    "light_controls": {
+      "Kitchen Lights": {"entity_id": "light.kitchen", "state": "on", "area": "Kitchen"},
+      "Living Room Lights": {"entity_id": "light.living_room", "state": "off", "area": "Living Room"},
+      "Bedroom Lamp": {"entity_id": "light.bedroom_lamp", "state": "off", "area": "Bedroom"},
+      "Office Lights": {"entity_id": "light.office", "state": "on", "area": "Office"}
+    },
+    "device_controls": {
+      "light": [
+        {"entity_id": "light.under_cabinet", "name": "Under Cabinet", "state": "off", "area": "Kitchen"}
+      ],
+      "switch": [
+        {"entity_id": "switch.coffee_maker", "name": "Coffee Maker", "state": "off", "area": "Kitchen"}
+      ],
+      "lock": [
+        {"entity_id": "lock.front_door", "name": "Front Door", "state": "locked", "area": "Living Room"}
+      ],
+      "climate": [
+        {"entity_id": "climate.thermostat", "name": "Thermostat", "state": "heat", "area": "Living Room"}
+      ],
+      "media_player": [
+        {"entity_id": "media_player.living_room_tv", "name": "Living Room TV", "state": "off", "area": "Living Room"}
+      ],
+      "cover": [
+        {"entity_id": "cover.garage_door", "name": "Garage Door", "state": "closed", "area": "Office"}
+      ]
+    }
+  }
+}

@@ -95,6 +95,10 @@ type Module struct {
 	Nodes NodeRegistry
 	// AdminKey is the legacy ADMIN_API_KEY (X-API-Key on admin routes). Empty rejects all.
 	AdminKey string
+	// DevSpeakerHints (JARVIS_DEV_SPEAKER_HINTS=1, dev sandboxes only) trusts a node turn's
+	// speaker_user_id as a voice match, so text-only pipeline tests can play a known speaker.
+	// Off, the field is ignored as D2 says: only jarvisd's own identification counts.
+	DevSpeakerHints bool
 	// ServiceID overrides the service grant nodes need (default ServiceName).
 	ServiceID string
 	MQTT      MQTTOptions

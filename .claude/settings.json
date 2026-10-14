@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/sandbox:*)",
+      "Bash(scripts/check:*)",
+      "Bash(scripts/installed:*)",
+      "Bash(go run ./tools/pipeline:*)",
+      "Bash(.sandbox/*/pipeline:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/go-edit.sh",
+            "timeout": 90,
+            "statusMessage": "gofmt + go vet"
+          }
+        ]
+      }
+    ]
+  }
+}

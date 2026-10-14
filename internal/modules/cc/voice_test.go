@@ -801,6 +801,27 @@ func TestCommandSTTPromptIsBounded(t *testing.T) {
 	}
 }
 
+// JARVIS_DEV_SPEAKER_HINTS (dev sandboxes only): a node's speaker_user_id stands in for the
+// voice match a text-only pipeline test cannot produce. Off, it stays ignored (D2), and a hint
+// naming someone outside the household is ignored either way.
+func TestVoiceDevSpeakerHint(t *testing.T) {
+	for _, tc := range []struct {
+		on      bool
+		speaker int64
+		known   bool
+	}{{false, 7, false}, {true, 7, true}, {true, 999, false}} {
+		ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.DevSpeakerHints = tc.on })
+		ve.start("h1", "[]")
+		ve.eng.say("Hi.")
+		ve.turn("/api/v0/voice/command", "h1", "hello", map[string]any{"speaker_user_id": tc.speaker}).want(200)
+		msgs := messagesOf(ve.eng.last())
+		known := len(msgs) > 1 && msgs[1]["content"] == "You are speaking with alex."
+		if known != tc.known {
+			t.Errorf("hints %v, speaker %d: known %v, want %v (messages %v)", tc.on, tc.speaker, known, tc.known, msgs)
+		}
+	}
+}
+
 // A tool failed this turn but the prose reply claims it worked: one nudge, and the honest
 // second answer is what the node speaks (pipeline scenarios, 2026-10-13: "remember that…" from
 // an unidentified voice got "Got it, I'll remember that" after remember refused).
