@@ -220,6 +220,7 @@ do. Each item lands green on `main` on its own (the §8 style).
 | 1.8 | **Done (PR #104, 2026-10-13).** Agent heartbeat: `node_kind: desktop` (DESIGN §9 Q1) + `browser_extension: connected` capability | S | — | `agent`, `build` | Contract: node list carries both |
 | 1.9 | Start-only shortcut: second launch → IPC to the running agent → island "Jarvis is running" pill (DESIGN §13 item 6). **Done (#103):** control socket + single instance, `start` (also the URL handler), first-run hook stubbed for 1.5; DESIGN §13 "The start-only shortcut". **Mac fixes (#106):** the pill asked for before the island exists, and opening the app or link while the agent runs (Apple events); DESIGN §13 "Fixed on the Mac" | S | 1.4 | `agent` | Single-instance test; island golden for the new pill |
 | 1.10 | `jarvisd install-from-app` (the macOS app's privileged entry point) and the Windows/`.deb` hooks: thin wrappers over `service install` + `doctor --fix` + `setup-link --url` | S | 1.2 | `install` | Run under sudo on the macOS and Ubuntu runners |
+| 1.11 | **Quit without a terminal** (user, 2026-10-13: "there needs to be an easy way to kill the app as well"): `jarvis-agent stop` (exit 0, so no supervisor restarts it), then a status icon with a menu (state, Listen for "Hey Jarvis", Open Jarvis Automation, Quit) per OS. **`stop` done (#109); DESIGN §13 "`jarvis-agent stop`"** | S | 1.9 | `agent` | Unit (install.Stop per OS); a scratch systemd unit not respawned after `stop` |
 
 ### Phase 2: release artifacts
 

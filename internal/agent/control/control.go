@@ -23,7 +23,7 @@ import (
 const (
 	// ShowRunning flashes the island's "Jarvis is running" pill.
 	ShowRunning = "show-running"
-	// Quit stops the agent (uninstall, a reinstall replacing it).
+	// Quit stops the agent (stop, the tray menu, uninstall, a reinstall replacing it).
 	Quit = "quit"
 	// Ping only checks the agent is there (start at login: no pill).
 	Ping = "ping"

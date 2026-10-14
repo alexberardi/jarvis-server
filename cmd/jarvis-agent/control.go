@@ -100,7 +100,7 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 				// No island (--no-overlay, no display): nothing to show, but it is running.
 				pill.Show()
 			case control.Quit:
-				log.Info("asked to quit (uninstall, or a reinstall replacing this agent)")
+				log.Info("asked to quit (stop, uninstall, or a reinstall replacing this agent)")
 				quit()
 			}
 			return nil

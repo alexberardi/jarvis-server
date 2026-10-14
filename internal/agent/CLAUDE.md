@@ -39,6 +39,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent install | uninstall [--purge]   # do / undo it (--files-only: no systemd/launchd/processes)
 ./jarvis-agent start                           # what the menu entry, shortcut and jarvis-agent://start run
 ./jarvis-agent restart                         # via systemd/launchd when they run it; applies config changes
+./jarvis-agent stop                            # quit until the next login or start (exit 0: no supervisor restarts it)
 ./jarvis-agent dictation allow                 # GNOME/KDE Wayland: the portal's one-time typing dialog
 ./jarvis-agent try                             # list the tools this host offers now
 ./jarvis-agent try desktop_set_volume '{"volume": 30}'   # run one tool locally, no jarvisd

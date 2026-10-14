@@ -141,3 +141,28 @@ func TestExitCodes(t *testing.T) {
 		t.Fatal("other errors pass through")
 	}
 }
+
+func TestStopSaysWhatHappened(t *testing.T) {
+	var out strings.Builder
+	stopped := 0
+	stop := func() error { stopped++; return nil }
+	if err := stopAgent(&out, func() bool { return true }, stop); err != nil {
+		t.Fatal(err)
+	}
+	if stopped != 1 || !strings.Contains(out.String(), "Stopped Jarvis Automation Agent") ||
+		!strings.Contains(out.String(), "next login") {
+		t.Fatalf("stopped %d, said %q", stopped, out.String())
+	}
+	// Not running: still stops (a restart systemd scheduled after a crash), and says so.
+	out.Reset()
+	if err := stopAgent(&out, func() bool { return false }, stop); err != nil {
+		t.Fatal(err)
+	}
+	if stopped != 2 || !strings.Contains(out.String(), "isn't running") {
+		t.Fatalf("stopped %d, said %q", stopped, out.String())
+	}
+	stuck := errors.New("the running agent didn't stop")
+	if err := stopAgent(&out, func() bool { return true }, func() error { return stuck }); !errors.Is(err, stuck) {
+		t.Fatal(err)
+	}
+}

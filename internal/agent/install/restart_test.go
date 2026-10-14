@@ -94,3 +94,75 @@ func TestRestartWindowsQuitsThenRuns(t *testing.T) {
 		t.Fatalf("err %v spawned %q", err, f.spawned)
 	}
 }
+
+// Stop: the agent quits over its socket (a clean exit no supervisor restarts); on Linux the
+// unit is stopped too, which also cancels a restart systemd scheduled after a crash.
+func TestStopLinuxQuitsThenStopsTheUnit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix paths")
+	}
+	home := t.TempDir()
+	e := Env{GOOS: "linux", Home: home, Exe: filepath.Join(home, "jarvis-agent")}
+	var f fakeSys
+	var log []string
+	// No unit installed: only the quit.
+	if err := Stop(context.Background(), e, restartSys(&f, true, nil, &log)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(log, []string{"quit"}) || len(f.cmds) != 0 {
+		t.Fatalf("log %q cmds %q", log, f.cmds)
+	}
+	if err := writeFile(e.linux().unit, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log = nil
+	if err := Stop(context.Background(), e, restartSys(&f, true, nil, &log)); err != nil {
+		t.Fatal(err)
+	}
+	if log[0] != "quit" || !slices.Equal(f.cmds, []string{"systemctl --user stop jarvis-agent.service"}) || len(f.spawned) != 0 {
+		t.Fatalf("log %q cmds %q spawned %q", log, f.cmds, f.spawned)
+	}
+	// An agent that won't quit: the unit stop still runs, and the failure is reported.
+	f = fakeSys{}
+	log = nil
+	stuck := errors.New("the running agent didn't stop")
+	if err := Stop(context.Background(), e, restartSys(&f, true, stuck, &log)); !errors.Is(err, stuck) ||
+		!slices.Equal(f.cmds, []string{"systemctl --user stop jarvis-agent.service"}) {
+		t.Fatalf("err %v cmds %q", err, f.cmds)
+	}
+}
+
+func TestStopDarwinNeverRespawns(t *testing.T) {
+	e := Env{GOOS: "darwin", Home: t.TempDir(), UID: 501, Exe: "/Applications/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent"}
+	var f fakeSys
+	var log []string
+	// A clean quit is enough: launchd's KeepAlive {SuccessfulExit: false} leaves an exit 0 down.
+	if err := Stop(context.Background(), e, restartSys(&f, true, nil, &log)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(log, []string{"quit"}) || len(f.cmds) != 0 || len(f.spawned) != 0 {
+		t.Fatalf("log %q cmds %q spawned %q", log, f.cmds, f.spawned)
+	}
+	// Stuck: a SIGTERM through launchd (the agent's handler exits 0), never a kill -9, which
+	// launchd would count as a failure and restart.
+	log = nil
+	stuck := errors.New("the running agent didn't stop")
+	if err := Stop(context.Background(), e, restartSys(&f, true, stuck, &log)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.cmds, []string{"launchctl kill SIGTERM gui/501/net.jarvisautomation.agent"}) {
+		t.Fatalf("cmds %q", f.cmds)
+	}
+}
+
+func TestStopWindowsOnlyQuits(t *testing.T) {
+	e := Env{GOOS: "windows", Home: t.TempDir(), Exe: `C:\Program Files\Jarvis Automation Agent\jarvis-agent.exe`}
+	var f fakeSys
+	var log []string
+	if err := Stop(context.Background(), e, restartSys(&f, false, nil, &log)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(log, []string{"quit"}) || len(f.cmds) != 0 || len(f.spawned) != 0 {
+		t.Fatalf("log %q cmds %q spawned %q", log, f.cmds, f.spawned)
+	}
+}
