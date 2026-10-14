@@ -10,6 +10,7 @@ import LoginPage from '@/pages/LoginPage'
 import SetupWizard from '@/pages/SetupWizard'
 import ChangePasswordPage from '@/pages/ChangePasswordPage'
 import { shellRoutes } from '@/routes'
+import SessionCacheGuard from '@/auth/SessionCacheGuard'
 import { getSetupState } from '@/api/auth'
 
 const queryClient = new QueryClient()
@@ -56,6 +57,7 @@ export default function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <SessionCacheGuard />
           <BrowserRouter>
             <AppRoutes />
           </BrowserRouter>

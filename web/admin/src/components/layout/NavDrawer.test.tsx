@@ -7,6 +7,7 @@ import AppShell from './AppShell'
 
 // The footer's system info needs the API; the drawer doesn't.
 vi.mock('@/hooks/useSystem', () => ({ useSystemInfo: () => ({ data: undefined }) }))
+vi.mock('@/hooks/useInbox', () => ({ useUnreadCount: () => ({ data: 0 }) }))
 
 function renderShell() {
   localStorage.setItem('jarvis-admin-theme', 'light')
