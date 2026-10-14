@@ -320,7 +320,7 @@ export default function TracesPage() {
             groups={groups}
             expanded={expanded}
             onToggle={toggleExpanded}
-            onOpen={(id) => navigate(`/traces/${id}`)}
+            onOpen={(id) => navigate(`/admin/traces/${id}`)}
             nodeLabel={(id) => (id ? nodeNameById.get(id) ?? id.slice(0, 8) : '-')}
             householdName={(id) => householdNameById.get(id) ?? ''}
           />
@@ -398,7 +398,7 @@ export default function TracesPage() {
                             <tr
                               key={trace.id}
                               className="border-b border-[var(--color-border)] cursor-pointer bg-[var(--color-surface-alt)]/40 transition-colors hover:bg-[var(--color-surface-alt)]"
-                              onClick={() => navigate(`/traces/${trace.id}`)}
+                              onClick={() => navigate(`/admin/traces/${trace.id}`)}
                             >
                               <td className="px-2 py-2"></td>
                               <td className="px-3 py-2 text-[var(--color-text-muted)] whitespace-nowrap">

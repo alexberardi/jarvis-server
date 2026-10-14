@@ -53,7 +53,7 @@ function SystemCard() {
           <dt className="text-[var(--color-text-muted)]">Listeners</dt>
           <dd className="text-[var(--color-text)]">
             {(data.listeners ?? []).filter((l) => l.served).length} serving ·{' '}
-            <Link to="/connections" className="text-[var(--color-primary)] hover:underline">
+            <Link to="/admin/connections" className="text-[var(--color-primary)] hover:underline">
               connections
             </Link>
           </dd>
@@ -102,7 +102,7 @@ function ModelsCard() {
       title="Models"
       icon={Box}
       actions={
-        <Link to="/models" className={buttonClass.link}>
+        <Link to="/admin/models" className={buttonClass.link}>
           Manage
         </Link>
       }
@@ -141,7 +141,7 @@ function NodesCard() {
       title="Nodes"
       icon={Cpu}
       actions={
-        <Link to="/nodes" className={buttonClass.link}>
+        <Link to="/admin/nodes" className={buttonClass.link}>
           All nodes
         </Link>
       }
@@ -189,7 +189,7 @@ function TracesCard() {
       title="Recent requests"
       icon={Activity}
       actions={
-        <Link to="/traces" className={buttonClass.link}>
+        <Link to="/admin/traces" className={buttonClass.link}>
           All traces
         </Link>
       }
@@ -200,7 +200,7 @@ function TracesCard() {
         <ul className="space-y-1 text-xs">
           {data.traces.map((t) => (
             <li key={t.id}>
-              <Link to={`/traces/${t.id}`} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--color-surface-alt)] max-md:min-h-10 max-md:py-2">
+              <Link to={`/admin/traces/${t.id}`} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--color-surface-alt)] max-md:min-h-10 max-md:py-2">
                 <span className="min-w-0 truncate text-[var(--color-text)]" title={t.user_command || t.request_type}>{t.user_command || t.request_type}</span>
                 <span className="flex shrink-0 items-center gap-2 text-[var(--color-text-muted)]">
                   <Pill tone={t.status === 'success' || t.status === 'ok' ? 'ok' : t.status === 'error' ? 'bad' : 'muted'}>{t.status}</Pill>

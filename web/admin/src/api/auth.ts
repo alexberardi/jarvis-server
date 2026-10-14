@@ -6,8 +6,17 @@ export interface AuthUser {
   id: number
   email: string
   username?: string
+  /** What Jarvis calls the user (PATCH /auth/me); null or absent falls back to the username. */
+  display_name?: string | null
   is_superuser: boolean
   must_change_password?: boolean
+}
+
+/** One of the caller's households (GET /households). */
+export interface Household {
+  id: string
+  name: string
+  role: string
 }
 
 export interface TokenResponse {
@@ -66,6 +75,36 @@ export async function changePassword(
     current_password: currentPassword,
     new_password: newPassword,
   })
+  return data
+}
+
+/** updateMe sets the caller's display name ("" clears it) and answers the updated user. */
+export async function updateMe(displayName: string): Promise<AuthUser> {
+  const { data } = await apiClient.patch<AuthUser>('/api/auth/me', { display_name: displayName })
+  return data
+}
+
+/** listHouseholds is the caller's own memberships, never anyone else's. */
+export async function listHouseholds(): Promise<Household[]> {
+  const { data } = await apiClient.get<Household[]>('/api/households')
+  return data
+}
+
+/**
+ * switchHousehold mints an access token scoped to another of the caller's households. The
+ * refresh token is unchanged. `token` overrides the bearer (used right after a refresh).
+ */
+export async function switchHousehold(
+  householdId: string,
+  token?: string,
+): Promise<{ access_token: string; household_id: string }> {
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const { data } = await apiClient.post<{ access_token: string; household_id: string }>(
+    '/api/auth/switch-household',
+    { household_id: householdId },
+    { headers },
+  )
   return data
 }
 

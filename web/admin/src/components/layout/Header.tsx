@@ -1,6 +1,8 @@
-import { KeyRound, LogOut, Menu, Moon, Sun } from 'lucide-react'
+import { KeyRound, LogOut, Menu, Moon, Sun, UserRound } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { nameOf } from '@/lib/session'
+import HouseholdSwitcher from './HouseholdSwitcher'
 import { useTheme } from '@/theme/ThemeProvider'
 import { SIDEBAR_ID } from './Sidebar'
 
@@ -30,15 +32,26 @@ export default function Header({ onOpenNav, navOpen = false }: HeaderProps) {
         >
           <Menu size={20} />
         </button>
-        <span className="text-lg font-bold text-[var(--color-primary)] md:hidden">Jarvis</span>
-        <h2 className="hidden text-sm font-medium text-[var(--color-text-muted)] md:block">Admin Dashboard</h2>
+        <span className="truncate text-lg font-bold text-[var(--color-primary)] md:hidden">Jarvis Automation</span>
       </div>
 
       <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+        <HouseholdSwitcher className="max-sm:hidden" />
+
         {state.user && (
-          <span className="hidden min-w-0 truncate text-sm text-[var(--color-text-muted)] sm:block" title={state.user.email}>
-            {state.user.email}
-          </span>
+          <Link
+            to="/account"
+            className="hidden min-w-0 items-center gap-1.5 truncate rounded-lg px-2 py-1 text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] sm:flex"
+            title={state.user.email}
+          >
+            <UserRound size={16} className="shrink-0" />
+            <span className="truncate">{nameOf(state.user)}</span>
+          </Link>
+        )}
+        {state.user && (
+          <Link to="/account" className={`${iconButton} sm:hidden`} title="Account" aria-label="Account">
+            <UserRound size={18} />
+          </Link>
         )}
 
         <button
@@ -51,7 +64,7 @@ export default function Header({ onOpenNav, navOpen = false }: HeaderProps) {
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
-        <Link to="/change-password" className={iconButton} title="Change password" aria-label="Change password">
+        <Link to="/change-password" className={`${iconButton} max-sm:hidden`} title="Change password" aria-label="Change password">
           <KeyRound size={18} />
         </Link>
 
@@ -59,8 +72,8 @@ export default function Header({ onOpenNav, navOpen = false }: HeaderProps) {
           type="button"
           onClick={logout}
           className={`${iconButton} hover:text-red-500`}
-          title="Logout"
-          aria-label="Logout"
+          title="Log out"
+          aria-label="Log out"
         >
           <LogOut size={18} />
         </button>

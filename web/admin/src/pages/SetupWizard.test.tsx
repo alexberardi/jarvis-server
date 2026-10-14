@@ -145,7 +145,8 @@ function renderWizard(needsSuperuser = true) {
         <MemoryRouter initialEntries={['/setup']}>
           <Routes>
             <Route path="/setup" element={<SetupWizard needsSuperuser={needsSuperuser} />} />
-            <Route path="/dashboard" element={<p>dashboard page</p>} />
+            <Route path="/admin/dashboard" element={<p>dashboard page</p>} />
+            <Route path="/" element={<p>home page</p>} />
             <Route path="/login" element={<p>login page</p>} />
           </Routes>
         </MemoryRouter>
@@ -561,10 +562,11 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     expect(screen.getByTestId('setup-step-position')).toHaveTextContent('Step 6 of 10: Voice')
   })
 
-  it('forwards to the dashboard once setup was finished', async () => {
+  // Home then picks Chat or, while something needs the operator, the dashboard (HomeRedirect).
+  it('forwards home once setup was finished', async () => {
     signIn()
     auth.getSetupState.mockResolvedValue({ ...superState, setup_completed: true, setup_step: '' })
     renderWizard(false)
-    expect(await screen.findByText('dashboard page')).toBeInTheDocument()
+    expect(await screen.findByText('home page')).toBeInTheDocument()
   })
 })

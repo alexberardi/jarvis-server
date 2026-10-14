@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -83,9 +83,10 @@ function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
 /** First-run setup on jarvisd (S3, AQ3/AD3, AD3a, AD3b). */
 export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolean }) {
   const { state } = useAuth()
-  const navigate = useNavigate()
   const qc = useQueryClient()
   const [initial, setStepState] = useState<Initial>(() => initialStep(needsSuperuser, state.isAuthenticated))
+  // Done's button goes to the dashboard; any other way out of the wizard goes home.
+  const [finished, setFinished] = useState(false)
   // A new tab or browser: where the install is, from the server (A10 F9).
   const server = useSetupState(initial === 'server')
   const d = server.data
@@ -118,7 +119,7 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   // No `state.isLoading` gate: the session is restored synchronously, so isLoading is only
   // ever true during the setup call itself, and unmounting then wiped the Account form and
   // the reason a refused setup gives (A10). AccountStep shows its own "Creating...".
-  if (!step) return <Navigate to={state.isAuthenticated ? '/dashboard' : '/login'} replace />
+  if (!step) return <Navigate to={finished ? '/admin/dashboard' : state.isAuthenticated ? '/' : '/login'} replace />
   // Past Account without a session (it expired, or was signed out): sign in first.
   if (idx(step) > idx('account') && !state.isAuthenticated) return <Navigate to="/login" replace />
 
@@ -126,8 +127,8 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   const back = () => go(STEPS[Math.max(idx(step) - 1, idx('hardware'))])
 
   function finish() {
+    setFinished(true)
     go(null)
-    navigate('/dashboard', { replace: true })
   }
 
   const wide = JOB_STEPS.includes(step)
@@ -136,7 +137,7 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   return (
     <div className="flex min-h-screen justify-center bg-[var(--color-background)] p-4 sm:items-center">
       <div className={cn('w-full', wide ? 'max-w-3xl' : 'max-w-2xl')}>
-        <div className="mb-2 text-center text-lg font-bold text-[var(--color-primary)]">Jarvis setup</div>
+        <div className="mb-2 text-center text-lg font-bold text-[var(--color-primary)]">Jarvis Automation setup</div>
         <Stepper step={step} onPick={go} />
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-lg sm:p-6">
           {step === 'check' && (
