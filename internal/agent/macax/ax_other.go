@@ -17,3 +17,9 @@ func ScreenTrusted() bool { return false }
 
 // ScreenPrompt does nothing off macOS.
 func ScreenPrompt() bool { return false }
+
+// MicStatus is "unknown" off macOS.
+func MicStatus() string { return StatusUnknown }
+
+// AutomationStatus is "unknown" off macOS.
+func AutomationStatus(string) string { return StatusUnknown }

@@ -27,10 +27,14 @@ const (
 	Quit = "quit"
 	// Ping only checks the agent is there (start at login: no pill).
 	Ping = "ping"
+	// VoiceOn and VoiceOff turn listening for the wake word on or off, as the status icon's
+	// toggle does (the setup page's switch).
+	VoiceOn  = "voice-on"
+	VoiceOff = "voice-off"
 )
 
 // Commands is every command the agent accepts.
-var Commands = []string{ShowRunning, Quit, Ping}
+var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second

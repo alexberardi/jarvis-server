@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -89,8 +88,9 @@ func appEvents(pill *runningPill, log *slog.Logger) island.AppEvents {
 }
 
 // serveControl answers the control socket until ctx ends: show-running flashes the island's
-// pill (when there is an island), quit stops the agent. It returns a func that waits for it.
-func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func()) func() {
+// pill (when there is an island), quit stops the agent, voice-on/off is the status icon's
+// toggle (voice is nil until the switch exists). It returns a func that waits for it.
+func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -102,6 +102,15 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 			case control.Quit:
 				log.Info("asked to quit (stop, uninstall, or a reinstall replacing this agent)")
 				quit()
+			case control.VoiceOn, control.VoiceOff:
+				sw := voice()
+				if sw == nil {
+					return errors.New("the agent is still starting")
+				}
+				if !sw.available {
+					return errors.New("listening isn't supported on this computer")
+				}
+				sw.Set(cmd == control.VoiceOn)
 			}
 			return nil
 		})
@@ -142,12 +151,4 @@ func exitCode(err error) int {
 		return exitNotSetUp
 	}
 	return 1
-}
-
-// firstRun is where a start with nothing set up goes. TODO(installers 1.5): open the agent's
-// first-run page (server, pairing, browser, permissions, voice) once it exists. Until then it
-// says how to set up from a terminal.
-var firstRun = func() error {
-	return fmt.Errorf("this computer isn't set up yet. The setup page is coming; for now run: " +
-		"jarvis-agent enroll --server http://<jarvisd-host>:7700 --email you@example.com")
 }

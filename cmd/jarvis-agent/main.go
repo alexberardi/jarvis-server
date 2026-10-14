@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -113,6 +114,10 @@ func main() {
 		err = startCmd(ctx, os.Args[2:])
 	case "stop":
 		err = stopCmd(ctx, os.Args[2:], os.Stdout)
+	case "setup":
+		err = setupCmd(ctx, os.Args[2:])
+	case "permission":
+		err = permissionCmd(os.Args[2:], os.Stdout)
 	case "restart":
 		err = restartCmd(ctx, os.Args[2:], os.Stdout)
 	case "config":
@@ -173,7 +178,11 @@ func usage(w io.Writer) {
            [--no-start] [--no-browser] [--desktop-shortcut] [--login-item auto|smappservice|launchagent]
            [--files-only] [--dry-run]
   uninstall  undo install [--purge: also delete the sign-in, settings and caches] [--dry-run]
-  start    start the agent (what the menu entry, the shortcut and jarvis-agent://start run)
+  start    start the agent (what the menu entry, the shortcut and jarvis-agent://start run);
+           on a computer that isn't set up, it opens the setup page
+  setup    the setup page in your browser: find the server, add this computer (a pairing
+           code or your Jarvis Automation sign-in), browser extension, permissions, voice,
+           remove (the status icon's "Set up / Settings…") [--no-open] [--no-start]
   stop     stop the running agent until the next login or start (the menu's Quit does the same)
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
@@ -343,19 +352,10 @@ func enroll(ctx context.Context, args []string) error {
 	}
 
 	// Prefer the URL jarvisd says nodes should use; if this machine can't reach it (a VPN, a
-	// loopback-only dev server), fall back to the one discovery gave us. The token is single
-	// use, so only a connection failure (nothing was redeemed) falls back.
-	var c node.Creds
-	if nodeCC != "" && nodeCC != ccURL {
-		c, err = node.Register(ctx, hc, nodeCC, *server, id, tok, regRoom)
-		var he *node.HTTPError
-		if err != nil && !errors.As(err, &he) {
-			fmt.Fprintf(os.Stderr, "note: %s unreachable (%v); registering via %s\n", nodeCC, err, ccURL)
-			c, err = node.Register(ctx, hc, ccURL, *server, id, tok, regRoom)
-		}
-	} else {
-		c, err = node.Register(ctx, hc, ccURL, *server, id, tok, regRoom)
-	}
+	// loopback-only dev server), fall back to the one discovery gave us.
+	c, err := node.RegisterPreferring(ctx, hc, nodeCC, ccURL, *server, id, tok, regRoom, func(err error) {
+		fmt.Fprintf(os.Stderr, "note: %s unreachable (%v); registering via %s\n", nodeCC, err, ccURL)
+	})
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
 	}
@@ -468,8 +468,9 @@ func run(ctx context.Context, args []string) error {
 	ctx, quit := context.WithCancel(ctx)
 	defer quit()
 	pill := &runningPill{}
+	var swReady atomic.Pointer[voiceSwitch]
 	if ctl != nil {
-		defer serveControl(ctx, ctl, log, pill, quit)()
+		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load)()
 	}
 	h, tools, closeTools, err := tf.build(ctx, log, true)
 	if err != nil {
@@ -491,6 +492,8 @@ func run(ctx context.Context, args []string) error {
 		_ = voice.Serve(ctx, vs.options(cc, tools, log, nil))
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }
+	sw.available = voice.Supported
+	swReady.Store(sw)
 	if voice.Supported {
 		if hd != nil {
 			sw.addIndicator(&ledCue{leds: hd.leds, log: log})
@@ -499,7 +502,7 @@ func run(ctx context.Context, args []string) error {
 	} else if *voiceOn {
 		log.Info("voice: not supported on " + runtime.GOOS + " yet")
 	}
-	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit}
+	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: openSetupPage(log)}
 	sw.changed = ic.voiceChanged
 	if *noOverlay {
 		pill.Attach(nil)

@@ -402,3 +402,36 @@ func TestLoginRefusesATemporaryPassword(t *testing.T) {
 		t.Fatalf("%q %v", tok, err)
 	}
 }
+
+func TestRegisterPreferringFallsBackOnlyWhenUnreachable(t *testing.T) {
+	var hits []string
+	cc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, "cc")
+		fmt.Fprint(w, `{"node_id":"n1","room":"desktop","node_key":"k"}`)
+	}))
+	defer cc.Close()
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, "node-cc")
+		http.Error(w, `{"detail":"used"}`, http.StatusConflict)
+	}))
+	defer refusing.Close()
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	goneURL := gone.URL
+	gone.Close()
+	ctx := context.Background()
+
+	var noted error
+	c, err := RegisterPreferring(ctx, cc.Client(), goneURL, cc.URL, "http://cfg", "n1", "t", "", func(e error) { noted = e })
+	if err != nil || c.NodeKey != "k" || noted == nil || len(hits) != 1 {
+		t.Fatalf("unreachable node URL: %+v %v noted=%v hits=%v", c, err, noted, hits)
+	}
+	hits = nil
+	// An answer (even an error) from the preferred URL means the token may be spent: no retry.
+	if _, err := RegisterPreferring(ctx, cc.Client(), refusing.URL, cc.URL, "http://cfg", "n1", "t", "", nil); err == nil || len(hits) != 1 || hits[0] != "node-cc" {
+		t.Fatalf("refused: err=%v hits=%v", err, hits)
+	}
+	hits = nil
+	if _, err := RegisterPreferring(ctx, cc.Client(), "", cc.URL, "http://cfg", "n1", "t", "", nil); err != nil || len(hits) != 1 {
+		t.Fatalf("no node URL: err=%v hits=%v", err, hits)
+	}
+}

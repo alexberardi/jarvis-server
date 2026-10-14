@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Set up Jarvis Automation</title>
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<main id="app" aria-live="polite">
+  <header class="top">
+    <img src="icon.png" alt="" width="40" height="40">
+    <div>
+      <h1>Set up Jarvis Automation</h1>
+      <p class="sub" id="computer">on this computer</p>
+    </div>
+  </header>
+
+  <noscript><p class="card">This page needs JavaScript turned on.</p></noscript>
+
+  <div id="steps" hidden>
+    <section class="card" id="server-step">
+      <h2><span class="num">1</span> Find your Jarvis Automation server</h2>
+      <div id="server-chosen" hidden>
+        <p class="ok-line"><span class="tick" aria-hidden="true">✓</span> <span id="server-name"></span></p>
+        <button class="link" id="server-change" type="button">Use a different server</button>
+      </div>
+      <div id="server-pick">
+        <p id="server-searching" class="muted"><span class="spinner" aria-hidden="true"></span> Looking for your server…</p>
+        <ul id="server-list" class="choices"></ul>
+        <p id="server-none" class="muted" hidden>No server found yet. Make sure it's on and on the same network, or type its address below.</p>
+        <button class="link" id="server-search" type="button">Search again</button>
+        <form id="server-form" class="row">
+          <label for="server-address">Or type its address</label>
+          <div class="inline">
+            <input id="server-address" name="address" placeholder="192.168.1.10" autocomplete="off" spellcheck="false">
+            <button type="submit">Connect</button>
+          </div>
+        </form>
+        <p class="error" id="server-error" hidden></p>
+      </div>
+    </section>
+
+    <section class="card" id="join-step" hidden>
+      <h2><span class="num">2</span> Add this computer</h2>
+      <div id="join-joined" hidden>
+        <p class="ok-line"><span class="tick" aria-hidden="true">✓</span> This computer is part of Jarvis Automation.</p>
+        <p class="warn" id="join-warning" hidden></p>
+      </div>
+      <div id="join-choose">
+        <p>Choose how to add it:</p>
+        <div class="two">
+          <button class="big" id="join-pair" type="button"><strong>Show a pairing code</strong><span>Someone in your household approves it in Jarvis Automation.</span></button>
+          <button class="big" id="join-signin" type="button"><strong>Sign in</strong><span>Use your Jarvis Automation email and password.</span></button>
+        </div>
+      </div>
+      <div id="join-code" hidden>
+        <p>Ask someone in your household to approve this code in Jarvis Automation, on its <strong>Nodes</strong> page:</p>
+        <p class="code" id="code"></p>
+        <p class="muted">This computer shows up as <strong id="code-name"></strong>.</p>
+        <p class="muted"><span class="spinner" aria-hidden="true"></span> Waiting for approval… <span id="code-left"></span></p>
+        <button class="link" id="code-cancel" type="button">Cancel</button>
+      </div>
+      <form id="signin-form" hidden>
+        <div class="row"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required></div>
+        <div class="row"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required></div>
+        <div class="inline">
+          <button type="submit" id="signin-go">Sign in</button>
+          <button class="link" type="button" id="signin-back">Back</button>
+        </div>
+      </form>
+      <form id="household-form" hidden>
+        <p>You're in more than one household. Which one is this computer for?</p>
+        <ul class="choices" id="household-list"></ul>
+        <button type="submit">Add this computer</button>
+      </form>
+      <p class="error" id="join-error" hidden></p>
+    </section>
+
+    <section class="card" id="browser-step" hidden>
+      <h2><span class="num">3</span> Let Jarvis use your browser</h2>
+      <p>Add the Jarvis Browser Control extension, so Jarvis can open tabs, read pages for you and pause videos.</p>
+      <div id="browser-buttons" class="inline"></div>
+      <p class="muted" id="browser-note" hidden></p>
+      <details><summary>Other browsers</summary><div id="browser-others" class="inline"></div></details>
+    </section>
+
+    <section class="card" id="perm-step" hidden>
+      <h2><span class="num">4</span> Let Jarvis Automation Agent work on this Mac</h2>
+      <p class="muted">macOS asks you to allow each of these once. The ticks turn green as you do.</p>
+      <ul id="perm-list" class="perms"></ul>
+    </section>
+
+    <section class="card" id="portal-step" hidden>
+      <h2><span class="num">4</span> Allow typing</h2>
+      <p>So Jarvis can type what you dictate, your desktop needs to allow it once.</p>
+      <p class="ok-line" id="portal-ok" hidden><span class="tick" aria-hidden="true">✓</span> Typing is allowed.</p>
+      <div id="portal-ask">
+        <button type="button" id="portal-allow">Allow typing</button>
+        <p class="muted" id="portal-wait" hidden><span class="spinner" aria-hidden="true"></span> Your desktop is asking now. Choose Allow (it may say Share), and keep "remember" on.</p>
+      </div>
+      <p class="muted" id="portal-why" hidden></p>
+    </section>
+
+    <section class="card" id="voice-step" hidden>
+      <h2><span class="num">5</span> Voice</h2>
+      <label class="switch-row"><input type="checkbox" id="voice-on" role="switch"> <span>Listen for "Hey Jarvis"</span></label>
+      <div id="mic-block" hidden>
+        <p class="muted">Check your microphone: press the button and say something.</p>
+        <div class="inline">
+          <button type="button" id="mic-test">Test my microphone</button>
+          <div class="meter" aria-label="Microphone level"><div id="mic-bar"></div></div>
+        </div>
+        <p class="error" id="mic-error" hidden></p>
+      </div>
+    </section>
+
+    <div class="actions" id="done-row" hidden>
+      <button type="button" class="primary" id="done">Done</button>
+    </div>
+
+    <section class="remove">
+      <button class="link danger" id="remove-open" type="button" hidden>Remove Jarvis Automation Agent from this computer</button>
+      <div id="remove-confirm" class="card" hidden>
+        <p><strong>Remove Jarvis Automation Agent?</strong> It stops, and its sign-in and settings are deleted from this computer. You can install it again any time.</p>
+        <div class="inline">
+          <button type="button" class="danger-btn" id="remove-yes">Remove</button>
+          <button type="button" class="link" id="remove-no">Keep it</button>
+        </div>
+        <p class="error" id="remove-error" hidden></p>
+      </div>
+    </section>
+  </div>
+
+  <section class="card finish" id="finished" hidden>
+    <h2 id="finished-title"></h2>
+    <p id="finished-text"></p>
+  </section>
+  <p class="error" id="fatal" hidden></p>
+</main>
+</body>
+</html>
