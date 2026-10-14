@@ -800,3 +800,59 @@ func TestCommandSTTPromptIsBounded(t *testing.T) {
 		t.Fatalf("len %d valid %v", len(p), utf8.ValidString(p))
 	}
 }
+
+// A tool failed this turn but the prose reply claims it worked: one nudge, and the honest
+// second answer is what the node speaks (pipeline scenarios, 2026-10-13: "remember that…" from
+// an unidentified voice got "Got it, I'll remember that" after remember refused).
+func TestVoiceFailedToolClaimNudge(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.stt.recognition = true // memory tools offered; nobody identified this turn
+	ve.start("f1", "[]")
+	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_r1", "type": "function",
+		"function": map[string]any{"name": "remember", "arguments": `{"content": "favorite color is green"}`}}}})
+	ve.eng.say("Got it, I'll remember that your favorite color is green.")
+	ve.eng.say("I couldn't save that, because I'm not sure who's speaking.")
+	b := ve.turn("/api/v0/voice/command", "f1", "remember that my favorite color is green", nil).want(200).json()
+	if b["assistant_message"] != "I couldn't save that, because I'm not sure who's speaking." {
+		t.Fatalf("reply %v", b["assistant_message"])
+	}
+	msgs := messagesOf(ve.eng.last())
+	if last := msgs[len(msgs)-1]; last["role"] != "system" || !strings.HasPrefix(last["content"].(string), nagFailedClaim) {
+		t.Fatalf("no failed-claim nudge before the retry: %v", last)
+	}
+
+	// An honest first answer is spoken as is, and a claim after a successful tool is no nudge.
+	ve.start("f2", "[]")
+	before := len(ve.eng.requests())
+	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_r2", "type": "function",
+		"function": map[string]any{"name": "remember", "arguments": `{"content": "x"}`}}}})
+	ve.eng.say("I'm not sure who's speaking, so I can't save that.")
+	ve.turn("/api/v0/voice/command", "f2", "remember that my favorite color is green", nil).want(200)
+	if n := len(ve.eng.requests()) - before; n != 2 {
+		t.Fatalf("honest reply: %d model calls, want 2", n)
+	}
+}
+
+func TestToolFailedThisTurn(t *testing.T) {
+	user := chatMsg{Role: "user", Content: "do it"}
+	for _, c := range []struct {
+		tool string
+		want bool
+	}{
+		{`{"error": "no_speaker", "message": "I'm not sure who's speaking."}`, true},
+		{`{"success": false, "message": "Device offline"}`, true},
+		{`{"success": true}`, false},
+		{`{"error": null, "status": "ok"}`, false},
+		{`not json`, false},
+	} {
+		msgs := []chatMsg{user, {Role: "assistant"}, {Role: "tool", Content: c.tool}}
+		if got := toolFailedThisTurn(msgs); got != c.want {
+			t.Errorf("%s: %v", c.tool, got)
+		}
+	}
+	// A failure from an earlier turn doesn't count.
+	old := []chatMsg{user, {Role: "tool", Content: `{"error": "x"}`}, {Role: "assistant", Content: "sorry"}, user}
+	if toolFailedThisTurn(old) {
+		t.Error("earlier turn's failure counted")
+	}
+}

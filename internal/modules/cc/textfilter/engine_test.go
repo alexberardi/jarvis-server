@@ -27,3 +27,54 @@ func TestForceToolsGate(t *testing.T) {
 		}
 	}
 }
+
+// Phrasings the legacy lists missed, found by the pipeline scenarios (tools/pipeline): a
+// correction ("actually make it 15") and a memory request are commands, and "I'll adjust…",
+// "I'll remember…" claim an action. Each let a prose reply skip its tool.
+func TestShapesBeyondLegacy(t *testing.T) {
+	for _, s := range []string{
+		"actually make it 15",
+		"make it 20 minutes",
+		"change it to 10 minutes",
+		"remember that my favorite color is green",
+		"ok, move it to 5pm",
+		"no wait, extend it by five minutes",
+	} {
+		if !IsActionCommandShaped(s) {
+			t.Errorf("IsActionCommandShaped(%q) = false", s)
+		}
+	}
+	for _, s := range []string{
+		"Got it, I'll adjust the timer to 15 minutes for the pasta.",
+		"Got it, I'll reset the timer to 15 minutes.",
+		"Got it, Jordan. I'll remember that green is your favorite color.",
+		"I'll remember that for you.",
+		"I've changed it to 10 minutes.",
+		"Your timer has been moved to 5pm.",
+		"Changing it to 15 now.",
+		"I've got that noted - green is your favorite color.",
+		"Got it, that's saved.",
+	} {
+		if !ResponseClaimsAction(s) {
+			t.Errorf("ResponseClaimsAction(%q) = false", s)
+		}
+	}
+	for _, s := range []string{"I've got a question for you.", "Got it."} {
+		if ResponseClaimsAction(s) {
+			t.Errorf("ResponseClaimsAction(%q) = true", s)
+		}
+	}
+	for _, s := range []string{"what can you make", "make sense?", "I can't remember", "Sure, anything else?"} {
+		if IsActionCommandShaped(s) && ResponseClaimsAction(s) {
+			t.Errorf("%q: command and claim", s)
+		}
+	}
+	// Both together arm the guard when the keyword pool knows the subject.
+	if !ForceToolsGate("actually make it 15", []string{"Got it, I'll adjust the timer to 15 minutes."}, []string{"timer"}) {
+		t.Error("correction + claimed adjustment did not arm the guard")
+	}
+	// An elliptical claim ("timer adjusted") is no claim, but its words still name the subject.
+	if !ForceToolsGate("actually make it 15", []string{"Got it, timer adjusted to 15 minutes for the pasta."}, []string{"timer"}) {
+		t.Error("correction + elliptical reply did not arm the guard")
+	}
+}
