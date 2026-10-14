@@ -34,6 +34,7 @@ type TurnLog struct {
 	Reply       string     `json:"reply"`
 	Stop        string     `json:"stop"`
 	Seconds     float64    `json:"seconds"`
+	End         time.Time  `json:"end"` // when the turn finished ({now} in reply expectations)
 	LLM         []TapEntry `json:"llm,omitempty"`
 	Error       string     `json:"error,omitempty"`
 	Failures    []string   `json:"failures,omitempty"`
@@ -142,7 +143,8 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 	mark := tapSize(d.TapLog)
 	start := time.Now()
 	defer func() {
-		tl.Seconds = time.Since(start).Seconds()
+		tl.End = time.Now()
+		tl.Seconds = tl.End.Sub(start).Seconds()
 		tl.LLM = readTap(d.TapLog, mark)
 		for _, e := range tl.LLM {
 			for _, c := range e.Reply.ToolCalls {

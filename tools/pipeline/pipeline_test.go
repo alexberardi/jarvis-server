@@ -354,3 +354,16 @@ func TestLoadHome(t *testing.T) {
 		t.Fatal("missing home")
 	}
 }
+
+func TestExpandNow(t *testing.T) {
+	at := time.Date(2026, 10, 14, 0, 6, 30, 0, time.Local)
+	if got := expandNow(`It's {now}`, at); got != `It's (?:12:06|12:05|12:07)` {
+		t.Fatalf("%s", got)
+	}
+	if f := (Expect{Reply: "{now}"}).Check(TurnLog{Reply: "It's 12:07 AM.", End: at}); len(f) != 0 {
+		t.Fatal(f)
+	}
+	if f := (Expect{Reply: "{now}"}).Check(TurnLog{Reply: "It's 2:47 PM.", End: at}); len(f) != 1 {
+		t.Fatal("a made-up time passed")
+	}
+}

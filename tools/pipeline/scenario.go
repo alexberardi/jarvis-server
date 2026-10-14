@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // A scenario is a scripted conversation: what the user says each turn, what the node answers
@@ -239,8 +240,8 @@ func (e Expect) Check(t TurnLog) []string {
 			fails = append(fails, "called "+c.Name)
 		}
 	}
-	if e.Reply != "" && !regexp.MustCompile(e.Reply).MatchString(t.Reply) {
-		fails = append(fails, fmt.Sprintf("reply %q does not match /%s/", t.Reply, e.Reply))
+	if re := expandNow(e.Reply, t.End); re != "" && !regexp.MustCompile(re).MatchString(t.Reply) {
+		fails = append(fails, fmt.Sprintf("reply %q does not match /%s/", t.Reply, re))
 	}
 	if e.NotReply != "" && regexp.MustCompile(e.NotReply).MatchString(t.Reply) {
 		fails = append(fails, fmt.Sprintf("reply %q matches /%s/", t.Reply, e.NotReply))
@@ -276,4 +277,21 @@ func valueText(v any) string {
 		return s
 	}
 	return jsonText(v)
+}
+
+// expandNow replaces {now} in a reply regexp with the local 12-hour clock time at the end of
+// the turn, a minute either way ("12:06|12:05|12:07"), so a scenario can check that a time
+// answer is the real one.
+func expandNow(re string, at time.Time) string {
+	if !strings.Contains(re, "{now}") {
+		return re
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	var alts []string
+	for _, d := range []time.Duration{0, -time.Minute, time.Minute} {
+		alts = append(alts, at.Add(d).Format("3:04"))
+	}
+	return strings.ReplaceAll(re, "{now}", "(?:"+strings.Join(alts, "|")+")")
 }
