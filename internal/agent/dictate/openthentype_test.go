@@ -111,3 +111,28 @@ func TestNoWaitForAnAppThatWasntLaunched(t *testing.T) {
 		t.Fatalf("error %q", out["error"])
 	}
 }
+
+// The model's chain for "open omawrite and jot down a note to update Steam" with a real
+// model (TestDesktopAppsLive): desktop_open "Omerite", then desktop_type_text with no app.
+// The terminal in front must not get the note.
+func TestTypeWithNoAppRightAfterALaunchGoesToTheLaunchedApp(t *testing.T) {
+	win := omawriteDesktop(false)
+	now := time.Unix(100, 0)
+	tr := launched(win, "Omawrite", "omawrite")
+	tr.Now = func() time.Time { return now }
+	tr.Record(context.Background(), "Omawrite", "omawrite")
+	sleep, _ := appearAfter(win, 2, Window{ID: "ow", Apps: []string{"omawrite"}, Title: "untitled", Visible: true})
+	kb := &fakeKB{ok: true}
+	ts := &Tools{KB: kb, Win: win, Sleep: sleep, Launched: tr, Apps: installed}
+	out := call(t, ts, ToolType, map[string]any{"text": "update Steam"})
+	if out["success"] != true || out["into"] != "Omawrite" || !slices.Equal(win.focused, []string{"ow"}) {
+		t.Fatalf("result %v focused %v", out, win.focused)
+	}
+	// Later, no app named means the window in front again.
+	now = now.Add(LaunchImplicit + time.Second)
+	win.focused = nil
+	out = call(t, ts, ToolType, map[string]any{"text": "ls"})
+	if out["success"] != true || len(win.focused) != 0 {
+		t.Fatalf("later: %v focused %v", out, win.focused)
+	}
+}

@@ -555,11 +555,16 @@ func (m *Module) handlePollVoiceProfileResult(w http.ResponseWriter, r *http.Req
 const maxSTTPrompt = 1000
 
 // commandSTTOptions are the transcription options of a node voice command: the household /
-// node's voice.stt_prompt and voice.stt_preprocess. The wake-clip pass doesn't use them, so
+// node's voice.stt_prompt (after a desktop node's app names) and voice.stt_preprocess. The wake-clip pass doesn't use them, so
 // a prompt naming the wake word can't talk wake verification into hearing it.
 func (m *Module) commandSTTOptions(ctx context.Context, hh, node string, speakerAudio []byte, scope *stt.SpeakerScope) stt.TranscribeOptions {
 	sc := scopeHN(hh, node)
 	prompt := strings.TrimSpace(m.settings.String(ctx, settingSTTPrompt, sc))
+	if words := m.vocab.get(node); words != "" {
+		// The node's app names first: whisper weighs the end of its prompt most, and that is
+		// the household's own sentence (stt_vocabulary.go).
+		prompt = strings.TrimSpace(words + ". " + prompt)
+	}
 	if len(prompt) > maxSTTPrompt {
 		prompt = strings.ToValidUTF8(prompt[len(prompt)-maxSTTPrompt:], "")
 	}

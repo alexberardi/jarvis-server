@@ -44,6 +44,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent try                             # list the tools this host offers now
 ./jarvis-agent try desktop_set_volume '{"volume": 30}'   # run one tool locally, no jarvisd
 ./jarvis-agent apps steam                      # what a name resolves to (never launches)
+./jarvis-agent apps --vocabulary               # the app names a voice turn sends for whisper (stt_vocabulary)
 ./jarvis-agent try desktop_open '{"target":"X"}' desktop_type_text '{"app":"X","text":"hi"}'  # a chain, one process
                                                # (nested compositor only: it launches and types)
 ./jarvis-agent browser install [--no-open]     # register the native host, set up the extension

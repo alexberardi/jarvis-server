@@ -144,6 +144,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		profileMatchHint(in.VoiceCommand, speakerBlock),
 		m.agentContextHint(ctx, conv, in.VoiceCommand),
 		ev.hint(),
+		m.desktopAppHint(conv, in.VoiceCommand),
 	}
 	if in.photoOnly() {
 		hints = append(hints, prompts.PhotoOnlyHint)
