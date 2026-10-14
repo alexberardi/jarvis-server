@@ -173,7 +173,10 @@ Implemented, all three ending at `POST /nodes/register`:
    household (minted by the approver), which the agent redeems, so the node is exactly one
    enrolled with a token. `GET /api/v0/nodes/pairings` lists what waits plus the caller's
    households; `…/deny` refuses one. The admin's Nodes page shows "Pending pairings" (today
-   superuser-only through the gateway; members get it with the web app). Details:
+   superuser-only through the gateway; members get it with the web app). It is shown whenever
+   the caller belongs to a household, polls every 3 s while the tab is visible, and while nothing
+   waits it says how to start: open the agent, or run `jarvis-agent enroll --server <URL>`, with
+   the URL taken from the page's host and jarvisd's config port (a placeholder on loopback). Details:
    `internal/modules/cc/pairing.go`.
    - **Codes and limits:** 8 symbols from 32 (40 bits), single use, 10-minute life, in memory (a
      restart only means pairing again). 10 starts per address per 10 minutes; at most 100 live
