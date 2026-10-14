@@ -39,7 +39,10 @@ type Status struct {
 	Running   bool   `json:"running"`
 	PID       int    `json:"pid,omitempty"`
 	Home      string `json:"home,omitempty"`
-	Detail    string `json:"detail,omitempty"` // e.g. the definition's path, restart count
+	// Account is the account jarvisd runs as (User=, UserName, the service's logon account);
+	// "" for a --user unit.
+	Account string `json:"account,omitempty"`
+	Detail  string `json:"detail,omitempty"` // e.g. the definition's path, restart count
 	// UpgradeHelper describes the privileged self-update helper (ID11): the unit's root
 	// ExecStartPre, the updater LaunchDaemon or the updater Windows service; "" when none.
 	UpgradeHelper string `json:"upgrade_helper,omitempty"`

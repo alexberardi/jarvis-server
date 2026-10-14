@@ -260,6 +260,7 @@ func (l *launchd) Status(ctx context.Context) (Status, error) {
 		return st, nil
 	}
 	st.Installed = true
+	st.Account = l.installed().UserName
 	st.StaleReason = l.staleness()
 	st.Stale = st.StaleReason != ""
 	st.UpgradeHelper = l.helperStatus(ctx)
