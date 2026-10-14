@@ -17,11 +17,13 @@ Single-binary Go rewrite of the Jarvis server stack.
 - **Prod** (`<user>@<prod-host>`) is **read-only** unless the user explicitly says otherwise.
 - **Host placeholders** (`<prod-host>`, `<mbp-host>`, `<dev-box>`, `<dev-node>.local`, `<pi4-node>`, `<pi5-node>.local`, `<lan-subnet>`, `<user>@…`) appear throughout CLAUDE.md and `docs/`. Real values are in HOSTS.local.md (gitignored, local only).
 - **Merging (user, 2026-10-14).** An agent may squash-merge **its own** PR into `main` once every required CI check has passed, then must check main's CI after the merge. **Hold for the user's review** instead, with a note saying why, when the PR:
-  - changes authentication, authorization or access tiers (`internal/modules/auth`, `internal/platform/authn`, the admin gateway tiers, node/app credentials, pairing), or anything else that decides who may do what;
+  - changes **the access rules themselves**: the admin gateway's tier table (`internal/modules/admin/tiers.go`, `m.handle` registrations) or its expectations in `tiers_test.go` / `tiers_e2e_test.go`, authentication or authorization code (`internal/modules/auth`, `internal/platform/authn`, a module's membership/role checks), node/app credentials, or pairing approval;
   - changes release signing, update verification or the root update helper (minisign, `internal/update`, the prestart helper, `.github/workflows/release.yml`);
   - touches prod or anything that runs there outside a release;
   - weakens or removes a test or CI check to get green;
   - is marked "needs review" by its author.
+
+  **Access tests are the gate for everything else (user, 2026-10-14).** CI's race suite includes `TestEveryAPIRouteHasATier` (every `/api` route × anonymous, member, power user, household admin, superuser, another household's member; an unclassified route fails), `TestNoMemberReachesInstallWideRoutes` and `TestMemberTiersEndToEnd`. A PR that only *uses* the access rules (UI that hides or shows pages by role, a new page behind an existing tier, client-side auth handling) may merge on green as long as it doesn't edit those tests' expectations. Any edit that loosens an expectation, or adds a route at a lower tier than `superuser`, is a change to the access rules and waits for review. A new `/api` route must be added to the expectations in the same PR (the test fails otherwise), so adding one always gets a review.
 
   Never merge someone else's PR (contributors, Dependabot outside the dependency rules, other agents' open PRs), and never force-push to `main`. Doc-only and test-only PRs follow the normal rule. When unsure which side a PR falls on, hold it.
 
