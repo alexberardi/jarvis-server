@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestPlaceBinary(t *testing.T) {
 	if err := placeBinary(ctx, src, dst, "v0.2.0", readVersion, snap, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if st, err := os.Stat(dst); err != nil || st.Mode().Perm()&0o111 == 0 || content(dst) != "v0.2.0" {
+	if st, err := os.Stat(dst); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm()&0o111 == 0) || content(dst) != "v0.2.0" {
 		t.Fatalf("fresh copy: %v %v %q", st, err, content(dst))
 	}
 	if len(snaps) != 0 {

@@ -144,7 +144,7 @@ installer v0.0.2-app
 [ "$(bin_version "$PREV")" = v0.0.1-app ] || fail "jarvisd.prev is not v0.0.1-app"
 for _ in $(seq 1 60); do [ "$(running_version 2>/dev/null)" = v0.0.2-app ] && break; sleep 1; done
 [ "$(running_version)" = v0.0.2-app ] || fail "jarvisd v0.0.2-app isn't answering"
-R sh -c "ls '$HOME_DIR'/backups/jarvis-v0.0.1-app-*.db" || fail "no database snapshot"
+R sh -c "ls '$HOME_DIR'/backups/jarvis-v0.0.1_app-*.db" || fail "no database snapshot"
 [ "$(cat "$W/url")" = "$first_url" ] || fail "the upgrade printed another link"
 
 say "4. an older installer keeps the newer binary"
