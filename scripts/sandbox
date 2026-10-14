@@ -16,7 +16,8 @@
 # up builds ./cmd/jarvisd, starts `jarvisd serve --port-offset N` on .sandbox/<name>/home bound
 # to 127.0.0.1 (no mDNS, no browser), runs scripts/seed-dev.py, and writes
 # .sandbox/<name>/sandbox.env: every listener URL, the dev users' password, a superuser JWT, the
-# seeded kitchen node's id and key, and the admin keys. Running it again on a sandbox that is up
+# seeded kitchen node's id and key, the admin keys, and a login per household role
+# (SBX_EMAIL_ADMIN, _POWER, _MEMBER). Running it again on a sandbox that is up
 # rebuilds and restarts it on the same data.
 #
 #   --offset N       port offset (default: the first free of 10000, 11000, ...; kept per name)
@@ -255,6 +256,23 @@ setup_voice() {
   rm -f "$DIR/.warm.wav" "$DIR/.warm.json"
 }
 
+# role_emails prints SBX_EMAIL_ADMIN, _POWER and _MEMBER: the first member of the superuser's
+# household with that role (admin: other than the superuser), as the household lists them.
+role_emails() {
+  local auth hh
+  auth=http://127.0.0.1:$(port 7701)
+  hh=$(curl -sf "$auth/households" -H "Authorization: Bearer $TOKEN" |
+    json 'next((h["id"] for h in d if h.get("role") == "admin"), "")') || return 0
+  [ -n "$hh" ] || return 0
+  curl -sf "$auth/households/$hh/members" -H "Authorization: Bearer $TOKEN" | SBX_EMAIL=test@jarvisautomation.io python3 -c '
+import json, os, sys
+members = json.load(sys.stdin)
+for role, var in (("admin", "ADMIN"), ("power_user", "POWER"), ("member", "MEMBER")):
+    m = next((m for m in members if m.get("role") == role and m.get("email") != os.environ["SBX_EMAIL"]), None)
+    if m:
+        print("export SBX_EMAIL_" + var + "=" + m["email"])' || true
+}
+
 write_env() {
   local node_id node_key
   node_id=5eed0000-0000-4000-8000-00000000a0de
@@ -277,6 +295,9 @@ write_env() {
     echo "export SBX_PASSWORD='DevPass123!'"
     echo "export SBX_TOKEN=$TOKEN"
     echo "export SBX_USER_ID=$(curl -sf "http://127.0.0.1:$(port 7701)/auth/me" -H "Authorization: Bearer $TOKEN" | json 'd["id"]')"
+    # A seeded login per household role besides the superuser (scripts/seed-dev.py PEOPLE),
+    # for scripts/screenshots --user; same password.
+    role_emails
     echo "export SBX_NODE_ID=$node_id"
     echo "export SBX_NODE_KEY=$node_key"
     echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
