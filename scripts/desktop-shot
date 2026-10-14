@@ -129,6 +129,9 @@ bar {
   font pango:sans 10
   tray_output *
   tray_padding 3
+  # A blank status line that never exits; without one swaybar prints "[error reading from
+  # status command]" right beside the tray icon.
+  status_command while :; do echo; sleep 3600; done
   workspace_buttons no
   colors {
     background $BAR_BG
