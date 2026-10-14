@@ -378,3 +378,88 @@ func TestExpandNow(t *testing.T) {
 		t.Fatal("a made-up time passed")
 	}
 }
+
+// "node": "desktop" pairs a desktop agent as the primary once (login, provisioning token,
+// register, heartbeat with node_kind desktop), keeps its key, and plays the scenario as it.
+func TestDriverDesktopNode(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	beats := map[string]any{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/login":
+			if body["email"] != "p@example.com" || body["password"] != "pw" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			io.WriteString(w, `{"access_token":"jwt"}`)
+		case "/households":
+			io.WriteString(w, `[{"id":"hh-other","role":"member"},{"id":"hh-1","role":"admin"}]`)
+		case "/api/v0/provisioning/token":
+			if r.Header.Get("Authorization") != "Bearer jwt" || body["household_id"] != "hh-1" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusCreated) // as jarvisd answers
+			io.WriteString(w, `{"token":"prov","node_id":"desk-1"}`)
+		case "/api/v0/nodes/register":
+			io.WriteString(w, `{"node_key":"dkey"}`)
+		case "/api/v0/admin/nodes/heartbeat":
+			if r.Header.Get("X-API-Key") != "desk-1:dkey" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			beats[r.Header.Get("X-API-Key")] = body["node_kind"]
+			io.WriteString(w, `{"status":"ok"}`)
+		case "/api/v0/conversation/start", "/api/v0/conversation/end":
+			if r.Header.Get("X-API-Key") != "desk-1:dkey" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			io.WriteString(w, `{"status":"success"}`)
+		case "/api/v0/voice/command":
+			if r.Header.Get("X-API-Key") != "desk-1:dkey" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			io.WriteString(w, `{"stop_reason":"complete","tool_calls":[],"assistant_message":"You're Jordan."}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	root, _ := filepath.Abs("../..")
+	state := filepath.Join(t.TempDir(), "desktop-node.json")
+	newDriver := func() *Driver {
+		return &Driver{Node: &Node{BaseURL: srv.URL, ID: "node", Key: "key"}, Root: root,
+			Desktop: &DesktopSetup{AuthURL: srv.URL, Email: "p@example.com", Password: "pw", StateFile: state}}
+	}
+	sc := Scenario{Name: "who", Node: "desktop", Tools: "none", Home: "none",
+		Turns: []Turn{{Say: "who am I?", Expect: Expect{Reply: "Jordan"}}}}
+	if l := newDriver().Run(context.Background(), sc); !l.Pass {
+		t.Fatalf("%+v", l)
+	}
+	if beats["desk-1:dkey"] != "desktop" {
+		t.Fatalf("no desktop heartbeat: %v", beats)
+	}
+	if b, _ := os.ReadFile(state); !strings.Contains(string(b), `"node_key":"dkey"`) {
+		t.Fatalf("state %s", b)
+	}
+	// A later run reuses the saved key: a heartbeat, no second pairing.
+	calls = nil
+	if l := newDriver().Run(context.Background(), sc); !l.Pass {
+		t.Fatalf("%+v", l)
+	}
+	if slices.Contains(calls, "POST /auth/login") || !slices.Contains(calls, "POST /api/v0/admin/nodes/heartbeat") {
+		t.Fatalf("second run %v", calls)
+	}
+	if l := newDriver().Run(context.Background(), Scenario{Name: "x", Node: "garage", Turns: []Turn{{Say: "hi"}}}); l.Pass {
+		t.Fatal("unknown node kind")
+	}
+}

@@ -211,7 +211,13 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 	}
 	ctx := r.Context()
 	start := m.now()
-	scope := &stt.SpeakerScope{HouseholdID: n.HouseholdID, MemberIDs: n.HouseholdMemberIDs}
+	// A desktop agent's turns act as its owner (device_owner.go): no speaker pass, so no
+	// embedding on the hot path. Everyone else is matched among the household's members.
+	owner := deviceOwner(n)
+	var scope *stt.SpeakerScope
+	if owner == 0 {
+		scope = &stt.SpeakerScope{HouseholdID: n.HouseholdID, MemberIDs: n.HouseholdMemberIDs}
+	}
 	tr := newReqTrace()
 	// The speaker pass runs inside Transcribe, beside whisper (legacy: one whisper-api call).
 	endSTT := tr.measure("stt_transcribe", "whisper", map[string]any{"audio_bytes": len(file), "speaker_audio_bytes": len(speakerAudio)})
@@ -235,6 +241,9 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 		return
 	}
 	m.recordTraceAsync(trace)
+	if owner != 0 {
+		res.Speaker = stt.Speaker{UserID: &owner, Confidence: 1, Outcome: outcomeDeviceOwner}
+	}
 	if convID != "" {
 		id := turnIdentity{Outcome: res.Speaker.Outcome, Confidence: res.Speaker.Confidence,
 			RecognitionOff: res.Speaker.Outcome == stt.OutcomeOff}

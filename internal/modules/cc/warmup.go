@@ -238,6 +238,8 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	conv.recognitionOff = !recognition
 	if req.chatUserID != 0 {
 		m.setChatSpeaker(ctx, conv) // mobile chat: the speaker is known from the JWT
+	} else if conv.ownerUserID = deviceOwner(n); conv.ownerUserID != 0 {
+		m.setKnownSpeaker(ctx, conv, conv.ownerUserID) // a desktop agent: its signed-in member
 	}
 	// An explicitly set household zone wins over the reported one (timezone.go).
 	conv.timezone = m.turnTimezone(ctx, hh, conv.timezone)
@@ -249,7 +251,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	serverPhoto := m.serverPhotoTools()
 	gates := prompts.ToolGates{
 		WebSearch:     m.householdBool(ctx, settingWebSearch, hh),
-		SpeakerKnown:  recognition || conv.chatUserID != 0,
+		SpeakerKnown:  recognition || conv.chatUserID != 0 || conv.ownerUserID != 0,
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
 		ChatPhotos:    photosPossible,

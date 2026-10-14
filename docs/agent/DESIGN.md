@@ -986,6 +986,13 @@ migration 00180): whoever minted the provisioning token, i.e. the pairing approv
 who signed in on the page; admin-key nodes and nodes paired before 00180 (beyond the one-day token
 history) have none, so only a household admin can sign those out.
 
+**Who is speaking (decision 2026-10-14, [decisions/2026-10-14-desktop-voice-speaks-as-its-owner.md](../decisions/2026-10-14-desktop-voice-speaks-as-its-owner.md)).**
+The agent's voice turns act as its owner, as chat acts as the JWT user: the prompt names them,
+and memory, reminders and secrets are theirs. There is no voice enrollment or voiceprint match on
+a desktop agent, and cc skips the speaker pass for its commands (`internal/modules/cc/device_owner.go`).
+An agent with no owner, or whose owner left the household, has an unknown speaker. Anyone talking
+to the computer is treated as its signed-in user; signing it out is the remedy.
+
 **"This computer" (installers plan §3.2 Q2 (a), 2026-10-14).** Each heartbeat stores its TCP peer
 address (`cc_nodes.last_addr`). `GET /api/v0/nodes/this-device` (gateway: `GET
 /api/addons/this-device`, user tier) compares the page request's peer address with the caller's
