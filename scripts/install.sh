@@ -227,7 +227,8 @@ sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum 
 
 # SHA256SUMS names the archive, which carries the version: no API call for "latest".
 fetch SHA256SUMS "$TMP/SHA256SUMS" || die "could not download $(url SHA256SUMS)"
-ASSET=$(awk -v s="-$OS-$ARCH.tar.gz" '{f=$2; sub(/^\*/, "", f)} substr(f, length(f)-length(s)+1) == s {print f; exit}' "$TMP/SHA256SUMS")
+# It lists the desktop agent's archives too (jarvis-agent-…): only jarvisd's count here.
+ASSET=$(awk -v s="-$OS-$ARCH.tar.gz" '{f=$2; sub(/^\*/, "", f)} substr(f, 1, 8) == "jarvisd-" && substr(f, length(f)-length(s)+1) == s {print f; exit}' "$TMP/SHA256SUMS")
 [ -n "$ASSET" ] || die "the release has no jarvisd for $OS-$ARCH"
 REL=${ASSET#jarvisd-}; REL=${REL%"-$OS-$ARCH.tar.gz"}
 [ -z "$VERSION" ] || [ "$VERSION" = "$REL" ] || die "asked for $VERSION but the release files are for $REL"

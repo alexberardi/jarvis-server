@@ -1,19 +1,34 @@
 name: release
 
-# Builds the one-file jarvisd download for every target and publishes it as a GitHub release.
-# A tag v* publishes; a manual run builds and checks only unless publish is set (a dry run).
+# Builds the one-file jarvisd download and the desktop agent (jarvis-agent) for every target
+# and publishes them as a GitHub release. A tag v* publishes; a manual run builds and checks
+# only unless publish is set (a dry run). A pull request that touches the release machinery
+# runs the same jobs as a dry run (v0.0.0-pr<N>) that can't publish and never uses the real
+# keys: Apple signing is skipped, and SHA256SUMS is signed with a throwaway minisign key that
+# only that run's binaries trust (-X …extraTrustedKey, as the CI e2e jobs do).
 #
-# Each archive holds the single jarvisd binary (sherpa-onnx libraries embedded, CGO_ENABLED=0)
-# plus LICENSE and NOTICE. GPU engines (llama-server, whisper-server) are not bundled: the
-# model manager fetches the pinned build for the machine on first use.
+# Each jarvisd archive holds the single jarvisd binary (sherpa-onnx libraries embedded,
+# CGO_ENABLED=0) plus LICENSE and NOTICE. GPU engines (llama-server, whisper-server) are not
+# bundled: the model manager fetches the pinned build for the machine on first use. Each
+# jarvis-agent archive (01-no-cli-plan item 2.1: linux amd64/arm64, darwin arm64, windows
+# amd64; onnxruntime embedded where the agent has voice) holds jarvis-agent plus LICENSE and
+# NOTICE. Both are listed in the one SHA256SUMS, so the one minisign signature covers them.
 #
-# Jobs: build (all 4 binaries) → sign-macos (Developer ID + notarization of the darwin binary)
-# → package (archives, SHA256SUMS, minisign) → verify (each OS) → publish. Signing happens
-# before packaging so SHA256SUMS and its signature cover the notarized binary.
+# Jobs: build (all 8 binaries) → sign-macos (Developer ID + notarization of the darwin
+# jarvisd) → package (archives, SHA256SUMS, minisign) → verify (each OS) → publish. Signing
+# happens before packaging so SHA256SUMS and its signature cover the notarized binary. The
+# darwin agent is not notarized yet: its signed app bundle and dmg are item 2.2.
 
 on:
   push:
     tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/install.sh
+      - scripts/install.ps1
+      - scripts/install-agent.sh
+      - scripts/install-agent-check.sh
   workflow_dispatch:
     inputs:
       version:
@@ -42,7 +57,11 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - id: v
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then v="${GITHUB_REF_NAME}"; else v="${{ inputs.version }}"; fi
+          case "${{ github.event_name }}" in
+            push) v="${GITHUB_REF_NAME}" ;;
+            pull_request) v="v0.0.0-pr${{ github.event.pull_request.number }}" ;;
+            *) v="${{ inputs.version }}" ;;
+          esac
           case "$v" in v[0-9]*) ;; *) echo "version must look like v1.2.3, got '$v'"; exit 1;; esac
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Fetch native libs (all targets)
@@ -59,19 +78,34 @@ jobs:
           npm --prefix web/admin run build
       - name: Check the admin UI is embedded (not the placeholder)
         run: go test ./web/admin -run TestEmbeddedUI -tags release_ui -count=1 -v
+      # A pull request's dry run: a throwaway signing key, trusted only by this run's binaries.
+      - name: Throwaway signing key (pull request dry run)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          mkdir -p testkey
+          go run ./scripts/testsign keygen testkey/test.key > testkey/test.pub
       - name: Build
         env:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           set -euo pipefail
+          extra=""
+          if [ -f testkey/test.pub ]; then
+            extra="-X github.com/alexberardi/jarvis-server/internal/update.extraTrustedKey=$(cat testkey/test.pub)"
+          fi
           for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
-            os=${p%/*}; arch=${p#*/}; name="jarvisd-${VERSION}-${os}-${arch}"
-            exe=jarvisd; [ "$os" = windows ] && exe=jarvisd.exe
-            mkdir -p "stage/$name"
-            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
-              -ldflags "-s -w -X main.version=${VERSION}" -o "stage/$name/$exe" ./cmd/jarvisd
-            cp LICENSE "stage/$name/"
-            [ -f NOTICE ] && cp NOTICE "stage/$name/"
+            os=${p%/*}; arch=${p#*/}
+            for prog in jarvisd jarvis-agent; do
+              name="${prog}-${VERSION}-${os}-${arch}"
+              exe=$prog; [ "$os" = windows ] && exe=$prog.exe
+              mkdir -p "stage/$name"
+              # shellcheck disable=SC2086 # extra is words
+              GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+                -ldflags "-s -w -X main.version=${VERSION} $extra" -o "stage/$name/$exe" "./cmd/$prog"
+              cp LICENSE "stage/$name/"
+              if [ -f NOTICE ]; then cp NOTICE "stage/$name/"; fi
+            done
           done
           # A tar keeps the executable bits (artifacts don't).
           tar -cf stage.tar stage
@@ -79,6 +113,13 @@ jobs:
         with:
           name: stage-${{ steps.v.outputs.version }}
           path: stage.tar
+          retention-days: 1
+          if-no-files-found: error
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: testkey-${{ steps.v.outputs.version }}
+          path: testkey/
           retention-days: 1
           if-no-files-found: error
 
@@ -121,8 +162,14 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
           PUBLISHING: ${{ github.event_name == 'push' || inputs.publish }}
           IDENTIFIER: net.jarvisautomation.jarvisd
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            echo "::warning::pull request dry run: the macOS binary is ad-hoc signed and NOT notarized"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -z "${P12:-}" ] || [ -z "${API_KEY_P8:-}" ] || [ -z "${API_KEY_ID:-}" ] || [ -z "${API_ISSUER_ID:-}" ] || [ -z "${TEAM_ID:-}" ]; then
             if [ "$PUBLISHING" = true ]; then
               echo "::error::Apple signing secrets are not set: refusing to publish an unsigned, unnotarized macOS binary (ID9)"
@@ -237,14 +284,19 @@ jobs:
           fi
           mkdir -p dist
           for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
-            os=${p%/*}; arch=${p#*/}; name="jarvisd-${VERSION}-${os}-${arch}"
-            if [ "$os" = windows ]; then
-              (cd stage && zip -qr "../dist/$name.zip" "$name")
-            else
-              tar -C stage -czf "dist/$name.tar.gz" "$name"
-            fi
+            os=${p%/*}; arch=${p#*/}
+            for prog in jarvisd jarvis-agent; do
+              name="${prog}-${VERSION}-${os}-${arch}"
+              if [ "$os" = windows ]; then
+                (cd stage && zip -qr "../dist/$name.zip" "$name")
+              else
+                tar -C stage -czf "dist/$name.tar.gz" "$name"
+              fi
+            done
           done
-          (cd dist && sha256sum * > SHA256SUMS)
+          # One list for both programs, so one signature covers every archive.
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          [ "$(grep -c ' jarvisd-' dist/SHA256SUMS)" = 4 ] && [ "$(grep -c ' jarvis-agent-' dist/SHA256SUMS)" = 4 ]
           ls -l dist && cat dist/SHA256SUMS
       # SHA256SUMS.minisig is the self-update trust root (AD5, ID9): jarvisd verifies it with
       # the project key built into the running binary before it installs anything. Signed with
@@ -252,7 +304,22 @@ jobs:
       # the whole .key file, and MINISIGN_PASSWORD). The trusted comment names the version, so
       # a signed list can't be replayed under another tag. Without the secret a dry run warns
       # and ships unsigned; a publishing run fails (jarvisd refuses unsigned releases).
+      - if: github.event_name == 'pull_request'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: testkey-${{ needs.build.outputs.version }}
+          path: testkey
+      - name: Sign SHA256SUMS (throwaway key, pull request dry run)
+        if: github.event_name == 'pull_request'
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: go run ./scripts/testsign sign testkey/test.key dist/SHA256SUMS "jarvisd ${VERSION} SHA256SUMS"
       - name: Sign SHA256SUMS (minisign)
+        if: github.event_name != 'pull_request'
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
@@ -288,7 +355,8 @@ jobs:
           test "$("$bin" version)" = "$VERSION"
           export JARVIS_HOME="$RUNNER_TEMP/jarvis"
           "$bin" migrate status
-      # The one-line installers ship as release assets (the admin's update check shows an
+      # The one-line installers (install-agent.sh: the desktop agent on Fedora, Bazzite, Arch;
+      # decided Q8) ship as release assets (the admin's update check shows an
       # install command only when they are there). They are fetched on their own over TLS, so
       # they stay out of SHA256SUMS. Each is stamped with the tag (A10b): the copy at a
       # release's URL installs that release, prereleases included, with no --version.
@@ -299,8 +367,10 @@ jobs:
           set -euo pipefail
           sed "s/^RELEASE_VERSION=\"\"$/RELEASE_VERSION=\"$VERSION\"/" scripts/install.sh > dist/install.sh
           sed "s/^\$ReleaseVersion = ''$/\$ReleaseVersion = '$VERSION'/" scripts/install.ps1 > dist/install.ps1
+          sed "s/^RELEASE_VERSION=\"\"$/RELEASE_VERSION=\"$VERSION\"/" scripts/install-agent.sh > dist/install-agent.sh
           grep -qx "RELEASE_VERSION=\"$VERSION\"" dist/install.sh
           grep -qx "\$ReleaseVersion = '$VERSION'" dist/install.ps1
+          grep -qx "RELEASE_VERSION=\"$VERSION\"" dist/install-agent.sh
       - uses: actions/upload-artifact@v4
         with:
           name: jarvisd-${{ needs.build.outputs.version }}
@@ -339,6 +409,10 @@ jobs:
           test "$("$bin" version | tr -d '\r')" = "$VERSION"
           export JARVIS_HOME="$RUNNER_TEMP/jarvis"
           "$bin" migrate status
+          # The desktop agent's archive for this target starts too.
+          agent="jarvis-agent-${VERSION}-${{ matrix.target }}"
+          if [ "${{ matrix.ext }}" = zip ]; then unzip -q "$agent.zip"; aexe=jarvis-agent.exe; else tar -xzf "$agent.tar.gz"; aexe=jarvis-agent; fi
+          test "$("$PWD/$agent/$aexe" version | tr -d '\r')" = "$VERSION"
       # The archived binary is the notarized one: Developer ID, hardened runtime, and Gatekeeper
       # accepts it as a quarantined download would be assessed.
       - name: Check the macOS signature and Gatekeeper
@@ -388,13 +462,60 @@ jobs:
           cd dist
           exe=jarvisd; [ "${{ matrix.ext }}" = zip ] && exe=jarvisd.exe
           if [ -f SHA256SUMS.minisig ]; then
-            JARVIS_HOME="$RUNNER_TEMP/jarvis" "$PWD/$NAME/$exe" upgrade --verify-dir "$PWD"
+            # Every archive present (jarvisd's and the agent's) must match the signed list.
+            JARVIS_HOME="$RUNNER_TEMP/jarvis" "$PWD/$NAME/$exe" upgrade --verify-dir "$PWD" | tee verified
+            grep -q "jarvis-agent-" verified
           else
             echo "::warning::no SHA256SUMS.minisig (unsigned dry run); signature not checked"
           fi
 
+  # install-agent.sh (decided Q8) against this run's own archives (--from-dir), on Ubuntu and
+  # in a Fedora container (the distributions it is for), with a scratch HOME. Without minisign
+  # it installs on the checksum; with minisign the real release's signature must verify and a
+  # dry run's throwaway one must be refused.
+  install-agent:
+    needs: [build, package]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, arch: amd64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvisd-${{ needs.build.outputs.version }}
+          path: dist
+      - name: shellcheck
+        run: shellcheck -s sh scripts/install-agent.sh && shellcheck scripts/install-agent-check.sh
+      - name: Checksum only (no minisign)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: CI=1 scripts/install-agent-check.sh dist "$VERSION"
+      - name: Fedora (container, a non-root user)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -e VERSION fedora:latest sh -euc '
+            dnf -q -y install tar gzip findutils diffutils util-linux shadow-utils >/dev/null
+            useradd -m tester
+            runuser -u tester -- env CI=1 bash /src/scripts/install-agent-check.sh /src/dist "$VERSION"'
+      - name: With minisign
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          if [ "$EVENT" = pull_request ]; then
+            CI=1 scripts/install-agent-check.sh dist "$VERSION" invalid
+          else
+            CI=1 scripts/install-agent-check.sh dist "$VERSION" valid
+          fi
+
   publish:
-    needs: [build, verify]
+    needs: [build, verify, install-agent]
     if: ${{ github.event_name == 'push' || inputs.publish }}
     runs-on: ubuntu-latest
     permissions:
@@ -412,5 +533,5 @@ jobs:
           set -euo pipefail
           pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
           gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
-            --notes "Single-binary Jarvis server. Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS binary is signed with a Developer ID and notarized. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it." \
+            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Desktop agent on Linux: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`." \
             $pre

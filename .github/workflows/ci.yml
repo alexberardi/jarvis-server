@@ -420,7 +420,9 @@ jobs:
               -ldflags "-X main.version=$1 -X github.com/alexberardi/jarvis-server/internal/update.extraTrustedKey=$pub" ./cmd/jarvisd
             if [ "${{ matrix.ext }}" = zip ]; then (cd stage && 7z a -tzip -bd "../$2/$name.zip" "$name" >/dev/null)
             else tar -C stage -czf "$2/$name.tar.gz" "$name"; fi
-            (cd "$2" && sum "$name.${{ matrix.ext }}" > SHA256SUMS)
+            # A real release's list also names the desktop agent's archives, which sort first and
+            # end in the same platform suffix: the scripts and jarvisd must pick jarvisd's.
+            (cd "$2" && { echo "$(printf '0%.0s' $(seq 64))  jarvis-agent-$1-${{ matrix.target }}.${{ matrix.ext }}"; sum "$name.${{ matrix.ext }}"; } > SHA256SUMS)
             go run ./scripts/testsign sign "$key" "$2/SHA256SUMS" "jarvisd $1 SHA256SUMS"
             cat "$2/SHA256SUMS"
           }
@@ -439,7 +441,7 @@ jobs:
 
       - name: shellcheck
         if: runner.os == 'Linux'
-        run: shellcheck -s sh scripts/install.sh
+        run: shellcheck -s sh scripts/install.sh scripts/install-agent.sh && shellcheck scripts/install-agent-check.sh
 
       - name: Linux install.sh
         if: runner.os == 'Linux'
