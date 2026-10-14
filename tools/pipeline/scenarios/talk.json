@@ -59,21 +59,16 @@
         }
       }
     ],
-    "speaker": "primary",
-    "tags": [
-      "known-bug"
-    ]
+    "speaker": "primary"
   },
   {
     "name": "memory: an unidentified voice is not told it was remembered",
-    "tags": [
-      "known-bug"
-    ],
     "turns": [
       {
         "say": "remember that my favorite color is green",
         "expect": {
-          "not_reply": "(?i)got it|noted|I'll remember|I've (saved|remembered)|saved (it|that)"
+          "reply": "(?i)who('s| is) (speaking|talking)|who you are|who I'm (speaking|talking)|identify",
+          "not_reply": "(?i)^\\W*(got it|gotcha|noted|done|saved)\\b|I've (saved|remembered|got (that|it) noted)"
         }
       }
     ]
