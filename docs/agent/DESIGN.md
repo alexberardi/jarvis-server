@@ -902,7 +902,7 @@ copy's first `start` setting the user up.
 - **Opening the app did nothing.** Once `run` has called NSApplication's `finishLaunching`, LaunchServices treats the agent as "Jarvis Automation Agent.app" running, even when launchd started it. Opening the app again starts no process. LaunchServices sends the running agent a reopen Apple event (`aevt/rapp`) instead, and the link sends a get-URL event (`GURL/GURL`). Confirmed with `AEDebugReceives` on a test bundle: no new process, `rapp` delivered, no pill. The agent ignored both.
 - **The fix.** The island's event loop now registers its own handlers with `NSAppleEventManager` (`island.RunWith` and `AppEvents`, purego, an Objective-C class made at run time). A reopen shows the pill. A get-URL event shows the pill only for the exact start link (`install.CheckStartURL`); anything else is logged and ignored.
 - **Not running.** When no agent is running, opening the app still launches `jarvis-agent` with no command, which is `start`.
-- **`--no-overlay`.** With `--no-overlay` there is no AppKit loop, so the app is not "running" for LaunchServices. A second open then runs `start` as on the other OSes.
+- **`--no-overlay`.** With `--no-overlay` and the status icon hidden there is no AppKit loop, so the app is not "running" for LaunchServices, and a second open runs `start` as on the other OSes. With the icon shown (the default) `run` keeps the loop without the island (`island.RunLoop`), so the reopen event arrives as with the island.
 **The settings file (installers plan item 1.6, 2026-10-13).** The choices a user makes once are
 no longer only `run` flags: `<user config dir>/jarvis-agent/agent.json` (0600, next to
 `node.json`), e.g. `{"voice": true, "island": true, "confirm_dictation": "submit"}`. Keys:
@@ -1398,12 +1398,12 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
   the next login or `start`.
 - **Hide the icon:** `--no-tray`, or agent.json `tray: false`. `status` prints a `menu icon:` line.
 
-**Backends.** Linux is built; the macOS and Windows backends land in the next PRs.
+**Backends.** Linux and macOS are built; the Windows backend lands next.
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | What | StatusNotifierItem + `com.canonical.dbusmenu` on the session bus (godbus) | `NSStatusItem` in the menu bar, purego, in the island's AppKit loop | `Shell_NotifyIconW` in the notification area, syscalls |
-| Shown by | waybar's tray module, KDE Plasma, GNOME with the AppIndicator extension, XFCE/LXQt panels | always | always |
+| Shown by | waybar's tray module, KDE Plasma, GNOME with the AppIndicator extension, XFCE/LXQt panels | always (macOS 26 hosts the item's window in Control Center) | always |
 | Icon | the shield in colour (`icon.png`, the extension's icon), ARGB pixmaps 16–64 px | a template image derived from the shield: black where it is dark, clear where the figure is light, so macOS tints it | the shield in colour |
 | No host | stays exported; registers when a `StatusNotifierWatcher` appears (a bar started after the agent, or restarted); one info log line; `status` says "off: no status icon host" | n/a | n/a |
 
@@ -1419,3 +1419,22 @@ a private bus showed the shield in its tray; right-clicking it (a virtual pointe
 GTK menu, the toggle unticked and saved, "Open Jarvis Automation" appeared once a fake config
 service answered, and Quit stopped the agent and removed the icon. Nothing ran on the user's
 session bus or desktop.
+
+**macOS (2026-10-13).** `internal/agent/tray/mac_darwin.go` (purego): an `NSStatusItem` with
+the template image (18 pt tall, 2× pixels, `setTemplate:`), an `NSMenu` with
+`autoenablesItems` off, and one target object of a class made at run time whose `menuAction:`
+reads the item's tag and hands it to a goroutine (the main thread never waits on the agent;
+`Tray.Update` calls into AppKit through `onMain`, so the main thread must never take the tray's
+lock). It lives in the island's AppKit loop on the main thread; with `--no-overlay`,
+`island.RunLoop` runs that loop without the island. **Verified on the MBP (macOS 26.1)** with a
+test copy (`net.jarvisautomation.agent.traytest`, ad-hoc signed, in /tmp, a temporary
+LaunchAgent in `gui/$UID` with the real `KeepAlive {SuccessfulExit: false}`, a scratch HOME and
+control socket; the installed app, its LaunchAgent and process untouched): the opt-in
+`TestMacStatusItemLive` (menu titles, enabled state, checkmark; the toggle and Quit clicked
+through `performActionForItemAtIndex:`); `CGWindowListCopyWindowInfo` showed a new menu-bar
+window (layer 25, 30 pt wide, at the item's own x) while the item existed and none after, owned
+by Control Center, which hosts status item windows on macOS 26; the agent with the island and
+with `--no-overlay` showed the icon; a `kill -9` was restarted by launchd; `jarvis-agent stop`
+left the job `not running`, `last exit code = 0`, past launchd's 10 s throttle, and the icon
+gone. Not seen with eyes: no Screen Recording grant for a screenshot. A test copy runs with
+`JARVIS_AGENT_NO_AX_PROMPT=1` so it doesn't ask for Accessibility.

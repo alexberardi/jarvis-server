@@ -163,6 +163,19 @@ func Run(ctx context.Context, log *slog.Logger, fn func(*Island) error) error {
 // RunWith is Run, and also hands the app's reopen and get-URL Apple events to ev while the
 // event loop runs (opening the app or its link while the agent runs: see AppEvents).
 func RunWith(ctx context.Context, log *slog.Logger, ev AppEvents, fn func(*Island) error) error {
+	return runApp(log, ev, true, fn)
+}
+
+// RunLoop runs AppKit's event loop on the main thread, with no island (--no-overlay), while fn
+// runs on another goroutine: what the menu-bar status item needs. loop says whether it runs.
+func RunLoop(ctx context.Context, log *slog.Logger, ev AppEvents, fn func(loop bool) error) error {
+	return runApp(log, ev, false, func(i *Island) error { return fn(i != nil) })
+}
+
+// runApp starts NSApplication (an accessory: no Dock icon) and runs its event loop on the main
+// thread until fn returns. With withIsland fn gets the island; without, a non-nil placeholder
+// that shows nothing tells fn the loop runs. nil: no loop (logged once).
+func runApp(log *slog.Logger, ev AppEvents, withIsland bool, fn func(*Island) error) error {
 	if err := loadMac(); err != nil {
 		logOff(log, err)
 		return fn(nil)
@@ -180,12 +193,19 @@ func RunWith(ctx context.Context, log *slog.Logger, ev AppEvents, fn func(*Islan
 		log.Warn("opening the app again won't reach this agent", "err", err)
 	}
 
-	i := newIsland(&macPanel{}, log)
+	var i *Island
+	if withIsland {
+		i = newIsland(&macPanel{}, log)
+	} else {
+		i = &Island{off: true, closed: true} // shows nothing; only says the loop runs
+	}
 	var done atomic.Bool
 	res := make(chan error, 1)
 	go func() {
 		err := fn(i)
-		i.Close() // its last AppKit calls need the loop below still running
+		if withIsland {
+			i.Close() // its last AppKit calls need the loop below still running
+		}
 		done.Store(true)
 		res <- err
 	}()

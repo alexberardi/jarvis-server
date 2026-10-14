@@ -502,8 +502,15 @@ func run(ctx context.Context, args []string) error {
 	sw.changed = ic.voiceChanged
 	if *noOverlay {
 		pill.Attach(nil)
-		defer ic.show(ctx)()
-		return r.Run(ctx)
+		if ic.off {
+			return r.Run(ctx)
+		}
+		// No island, but macOS's menu-bar icon still needs AppKit's loop on the main thread.
+		return island.RunLoop(ctx, log, appEvents(pill, log), func(loop bool) error {
+			ic.mainLoop = loop
+			defer ic.show(ctx)()
+			return r.Run(ctx)
+		})
 	}
 	// The island needs the main thread on macOS: island.Run keeps it and runs the agent on
 	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
@@ -520,6 +527,7 @@ func run(ctx context.Context, args []string) error {
 			}
 			pill.Attach(i.ShowRunning)
 		}
+		ic.mainLoop = i != nil // macOS: the island means AppKit's loop runs
 		defer ic.show(ctx)()
 		return r.Run(ctx)
 	})
@@ -585,7 +593,8 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool) 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if promptAX && macax.Supported() && !macax.Trusted() {
+	// JARVIS_AGENT_NO_AX_PROMPT=1: a throwaway test copy (its own bundle id) mustn't ask.
+	if promptAX && macax.Supported() && !macax.Trusted() && os.Getenv("JARVIS_AGENT_NO_AX_PROMPT") == "" {
 		// macOS adds this app to Privacy & Security → Accessibility and shows its prompt. Window
 		// tools appear once the user turns it on (capabilities are computed per call).
 		macax.Prompt()

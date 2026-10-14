@@ -134,7 +134,8 @@ internal/agent/
                       gpiocdev (device_linux.go); voice states reach it through voice.Indicator
   tray/               the status icon and its menu (DESIGN.md §15): the menu as data (tray.go),
                       the shield icon + macOS template (icon.go), StatusNotifierItem + dbusmenu
-                      over godbus (sni_linux.go); `cmd/jarvis-agent/voiceswitch.go` is the live
+                      over godbus (sni_linux.go), NSStatusItem over purego in the island's AppKit
+                      loop (mac_darwin.go); `cmd/jarvis-agent/voiceswitch.go` is the live
                       voice toggle
   island/             the on-screen voice indicator (DESIGN.md §11) and dictation's note (Note):
                       pure-Go renderer (render.go),
@@ -347,6 +348,10 @@ reuse `internal/update` once it stops assuming the jarvisd binary.
     (DESIGN.md §15). Quit is the control socket's quit (exit 0); the voice toggle goes through
     `voiceSwitch` (one pipeline at a time, saved as agent.json `voice`). Test the SNI backend on a
     private `dbus-daemon` only (`TestStatusNotifierItemOnAPrivateBus`), never the session bus.
+    On macOS the status item needs the AppKit loop: `run` uses `island.RunLoop` when there is no
+    island; a menu click goes straight to a goroutine (the main thread never takes the tray's
+    lock). The live check (`JARVIS_TRAY_MAC_LIVE`) is opt-in; a test copy of the app runs with
+    `JARVIS_AGENT_NO_AX_PROMPT=1`.
 
 ## Dependencies
 
