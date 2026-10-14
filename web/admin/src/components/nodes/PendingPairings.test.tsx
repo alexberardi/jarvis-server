@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError, AxiosHeaders } from 'axios'
 import { apiClient } from '@/api/client'
@@ -44,9 +44,14 @@ beforeEach(() => {
   }
   get.mockImplementation(async (url: string) => {
     if (url === '/api/cc/api/v0/nodes/pairings') return { data: view }
+    if (url === '/api/system/info') return { data: { listeners: [{ name: 'config', port: 7700 }] } }
     throw new Error(`unexpected GET ${url}`)
   })
   post.mockResolvedValue({ data: {} })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('PendingPairings', () => {
@@ -72,11 +77,29 @@ describe('PendingPairings', () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/cc/api/v0/nodes/pairings/deny', { code: 'ABCD-EFGH' }))
   })
 
-  it('renders nothing when nothing waits', async () => {
+  it('says how to start a pairing when nothing waits', async () => {
     view = { pairings: [], households: view.households }
     renderIt()
-    await waitFor(() => expect(get).toHaveBeenCalled())
-    expect(screen.queryByText('Pending pairings')).toBeNull()
+    expect(await screen.findByText('Pending pairings')).toBeInTheDocument()
+    expect(screen.getByText(/No computers waiting/)).toHaveTextContent(
+      "No computers waiting. On the computer, open Jarvis Automation Agent or run jarvis-agent enroll --server <this server's address>; its code appears here.",
+    )
+    expect(screen.queryByRole('button', { name: /approve/i })).toBeNull()
+  })
+
+  it('shows a new code on the next poll, without a reload', async () => {
+    vi.useFakeTimers()
+    const pending = view.pairings
+    view = { pairings: [], households: view.households }
+    renderIt()
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(screen.getByText(/No computers waiting/)).toBeInTheDocument()
+
+    view = { pairings: pending, households: view.households }
+    // usePairings' 3 s refetchInterval fires; the rest flushes react-query's and React's zero timeouts.
+    await act(() => vi.advanceTimersByTimeAsync(3_100))
+    expect(screen.getByText('ABCD-EFGH')).toBeInTheDocument()
+    expect(screen.queryByText(/No computers waiting/)).toBeNull()
   })
 
   it('renders nothing for someone in no household (cc answers 403)', async () => {
