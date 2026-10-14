@@ -128,14 +128,15 @@ func Swap(ctx context.Context, p Paths, o SwapOptions) (*Marker, error) {
 // installBinary moves src (in the executable's directory) into place, first copying the current
 // executable to Prev when keepPrev. Unix: rename over the executable (atomic; the running
 // process keeps its inode). Windows: the running executable is renamed aside, then src renamed
-// in; CleanupOld deletes the parked copy on the next start.
+// in; CleanupOld deletes the parked copy on the next start. Each rename retries a transient
+// lock (renameRetry): antivirus briefly holds a just-written or just-started executable.
 func installBinary(p Paths, src string, keepPrev bool) error {
 	if keepPrev {
 		tmp := p.Prev() + ".tmp"
 		if err := copyFile(p.Exe, tmp); err != nil {
 			return fmt.Errorf("update: keep the previous binary: %w", err)
 		}
-		if err := os.Rename(tmp, p.Prev()); err != nil {
+		if err := renameRetry(tmp, p.Prev()); err != nil {
 			os.Remove(tmp)
 			return err
 		}
@@ -152,17 +153,17 @@ func installBinary(p Paths, src string, keepPrev bool) error {
 				}
 				aside = fmt.Sprintf("%s.%d", p.old(), i)
 			}
-			if err := os.Rename(p.Exe, aside); err != nil {
+			if err := renameRetry(p.Exe, aside); err != nil {
 				return fmt.Errorf("update: move the running binary aside: %w", err)
 			}
-			if err := os.Rename(src, p.Exe); err != nil {
-				_ = os.Rename(aside, p.Exe)
+			if err := renameRetry(src, p.Exe); err != nil {
+				_ = renameRetry(aside, p.Exe) // never leave the service without its binary
 				return err
 			}
 			return nil
 		}
 	}
-	return os.Rename(src, p.Exe)
+	return renameRetry(src, p.Exe)
 }
 
 // copyFile copies src to dst with src's permissions (dst is replaced).
