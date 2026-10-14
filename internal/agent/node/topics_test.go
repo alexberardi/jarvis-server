@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 )
@@ -62,6 +63,16 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 				got <- string(p)
 			},
 		},
+		// A request/response topic (the command-data browser): the answer goes where the
+		// handler says, and "" means no answer.
+		Requests: map[string]func(context.Context, string, []byte) (string, []byte){
+			"command-data/+": func(_ context.Context, topic string, p []byte) (string, []byte) {
+				if string(p) == "skip" {
+					return "", nil
+				}
+				return topic + "/response/c1", append([]byte("re:"), p...)
+			},
+		},
 		OnMQTTConnect: func(_ context.Context, cc *CC) { connected <- cc },
 		NeedsK2:       func() bool { return needs.Load() },
 	}
@@ -79,6 +90,11 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 	}
 	if p := <-got; p != `{"request_id":"r1"}` {
 		t.Fatalf("payload = %s", p)
+	}
+	rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer rcancel()
+	if got, err := b.Request(rctx, "jarvis/nodes/n1/command-data/list", []byte("q"), "c1"); err != nil || string(got) != "re:q" {
+		t.Fatalf("request reply = %q, %v", got, err)
 	}
 	// BeatNow sends a heartbeat without waiting for the (never reached) tick.
 	needs.Store(false)

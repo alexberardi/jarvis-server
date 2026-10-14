@@ -35,6 +35,10 @@ type Runner struct {
 	// Topics are extra sub-topics of jarvis/nodes/{id}/ to subscribe to (e.g. "k2/provision"),
 	// each with its handler. Handlers run on their own goroutine.
 	Topics map[string]func(ctx context.Context, cc *CC, payload []byte)
+	// Requests are request/response sub-topic filters (e.g. "command-data/+"): each message's
+	// full topic and payload go to the handler on its own goroutine, and the answer is
+	// published at QoS 1 on the topic it returns ("" for no answer).
+	Requests map[string]func(ctx context.Context, topic string, payload []byte) (string, []byte)
 	// OnMQTTConnect, if set, runs on its own goroutine after every MQTT (re)connect: the
 	// backstop for nudges sent while the node had no session.
 	OnMQTTConnect func(ctx context.Context, cc *CC)
@@ -206,6 +210,22 @@ func (r *Runner) Run(ctx context.Context) error {
 		for sub, h := range r.Topics {
 			tok := c.Subscribe("jarvis/nodes/"+r.Creds.NodeID+"/"+sub, 1, func(_ mqtt.Client, m mqtt.Message) {
 				go h(ctx, cc, m.Payload())
+			})
+			if tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
+				r.Log.Error("mqtt subscribe failed", "topic", sub, "err", tok.Error())
+			}
+		}
+		for sub, h := range r.Requests {
+			tok := c.Subscribe("jarvis/nodes/"+r.Creds.NodeID+"/"+sub, 1, func(c mqtt.Client, m mqtt.Message) {
+				go func() {
+					reply, body := h(ctx, m.Topic(), m.Payload())
+					if reply == "" {
+						return
+					}
+					if tok := c.Publish(reply, 1, false, body); tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
+						r.Log.Warn("mqtt reply failed", "topic", reply, "err", tok.Error())
+					}
+				}()
 			})
 			if tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
 				r.Log.Error("mqtt subscribe failed", "topic", sub, "err", tok.Error())

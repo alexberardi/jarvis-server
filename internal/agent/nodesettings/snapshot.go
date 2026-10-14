@@ -1,5 +1,7 @@
 package nodesettings
 
+import "encoding/json"
+
 // The snapshot's schema versions (settings_snapshot_service.py SCHEMA_VERSION,
 // COMMANDS_SCHEMA_VERSION); they also go out as the upload's aad_* fields, with revision 1.
 const (
@@ -27,6 +29,10 @@ type Command struct {
 	Name        string
 	Description string
 	Secrets     []SecretSpec
+	// AssociatedService groups a package's commands under one service in the app (its
+	// Services tab, and the unit "Sync to other nodes" copies); SetupGuide is shown there.
+	AssociatedService string
+	SetupGuide        json.RawMessage
 }
 
 // secretsList is _build_secrets_list (honor_include_values=True): every declared secret with
@@ -64,10 +70,17 @@ func (st *Store) secretsList(specs []SecretSpec, includeValues bool, uid *int64)
 func (st *Store) Snapshot(cmds []Command, includeValues bool, uid *int64) map[string]any {
 	entries := []map[string]any{}
 	for _, c := range cmds {
-		entries = append(entries, map[string]any{
+		e := map[string]any{
 			"command_name": c.Name, "description": c.Description,
 			"secrets": st.secretsList(c.Secrets, includeValues, uid), "enabled": st.Enabled(c.Name),
-		})
+		}
+		if c.AssociatedService != "" {
+			e["associated_service"] = c.AssociatedService
+		}
+		if g := c.SetupGuide; len(g) > 0 && string(g) != "null" {
+			e["setup_guide"] = g
+		}
+		entries = append(entries, e)
 	}
 	return map[string]any{
 		"schema_version":          SchemaVersion,

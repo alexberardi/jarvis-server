@@ -1,6 +1,7 @@
 package nodesettings
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -49,8 +51,11 @@ type secret struct {
 }
 
 type record struct {
-	Data      map[string]any `json:"data"`
-	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
+	Data      Object     `json:"data"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Seq orders a command's records by first save, as the Pi's command_data rows come back
+	// in insertion order (an upsert keeps its place).
+	Seq int64 `json:"seq,omitempty"`
 }
 
 type settingsFile struct {
@@ -58,6 +63,7 @@ type settingsFile struct {
 	Secrets  []secret                     `json:"secrets"`
 	Disabled []string                     `json:"disabled_commands"`
 	Data     map[string]map[string]record `json:"command_data"`
+	NextSeq  int64                        `json:"next_seq,omitempty"`
 }
 
 // OpenStore loads the store for nodeID from dir. Files written for another node (an earlier sign-in)
@@ -100,7 +106,10 @@ func readJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(b, v); err != nil {
+	// Numbers stay exact (a command's record may hold integers past 2^53).
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	return nil
@@ -271,46 +280,91 @@ func (st *Store) SetEnabled(command string, on bool) error {
 
 func live(r record, now time.Time) bool { return r.ExpiresAt == nil || r.ExpiresAt.After(now) }
 
-// SaveData upserts a record.
-func (st *Store) SaveData(command, key string, data map[string]any, expires *time.Time) error {
+// Record is one stored command-data row.
+type Record struct {
+	Key       string
+	Data      Object // a copy: changing it doesn't change the store
+	ExpiresAt *time.Time
+}
+
+// SaveData upserts a record (an update keeps the record's place in the order).
+func (st *Store) SaveData(command, key string, data Object, expires *time.Time) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	st.putLocked(command, key, data, expires)
+	return st.saveLocked()
+}
+
+func (st *Store) putLocked(command, key string, data Object, expires *time.Time) {
 	if st.s.Data == nil {
 		st.s.Data = map[string]map[string]record{}
 	}
 	if st.s.Data[command] == nil {
 		st.s.Data[command] = map[string]record{}
 	}
-	st.s.Data[command][key] = record{Data: data, ExpiresAt: expires}
-	return st.saveLocked()
+	r, ok := st.s.Data[command][key]
+	if !ok {
+		st.s.NextSeq++
+		r.Seq = st.s.NextSeq
+	}
+	r.Data, r.ExpiresAt = data.Clone(), expires
+	st.s.Data[command][key] = r
 }
 
-// Data is a live record, or nil.
-func (st *Store) Data(command, key string, now time.Time) map[string]any {
+// Data is a copy of a live record; false when there is none.
+func (st *Store) Data(command, key string, now time.Time) (Object, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if r, ok := st.s.Data[command][key]; ok && live(r, now) {
-		return r.Data
+		return r.Data.Clone(), true
 	}
-	return nil
+	return Object{}, false
 }
 
-// AllData is every live record of a command, ordered by key.
-func (st *Store) AllData(command string, now time.Time) []map[string]any {
+// Records is every live record of a command, in the order they were first saved.
+func (st *Store) Records(command string, now time.Time) []Record {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	keys := make([]string, 0, len(st.s.Data[command]))
-	for k := range st.s.Data[command] {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	out := []map[string]any{}
-	for _, k := range keys {
-		if r := st.s.Data[command][k]; live(r, now) {
-			out = append(out, r.Data)
+	rows := st.s.Data[command]
+	keys := make([]string, 0, len(rows))
+	for k, r := range rows {
+		if live(r, now) {
+			keys = append(keys, k)
 		}
 	}
+	slices.SortFunc(keys, func(a, b string) int {
+		if c := rows[a].Seq - rows[b].Seq; c != 0 {
+			if c < 0 {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+	out := make([]Record, 0, len(keys))
+	for _, k := range keys {
+		r := rows[k]
+		out = append(out, Record{Key: k, Data: r.Data.Clone(), ExpiresAt: r.ExpiresAt})
+	}
 	return out
+}
+
+// UpdateData overlays patch on a live record that ok accepts, atomically ({**existing,
+// **patch}), and returns the merged record. The record keeps its expiry. found is false for a
+// missing, expired or refused record.
+func (st *Store) UpdateData(command, key string, patch Object, now time.Time, ok func(Object) bool) (merged Object, found bool, err error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	r, exists := st.s.Data[command][key]
+	if !exists || !live(r, now) || !ok(r.Data) {
+		return Object{}, false, nil
+	}
+	merged = r.Data.Clone()
+	for _, k := range patch.keys {
+		merged.Set(k, patch.vals[k])
+	}
+	st.putLocked(command, key, merged, r.ExpiresAt)
+	return merged.Clone(), true, st.saveLocked()
 }
 
 // DeleteData removes one record and says whether it existed.
