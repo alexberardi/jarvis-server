@@ -40,19 +40,18 @@ PREREQUISITES
      from <home>/setup-token (what `jarvisd setup-link` prints), or take --setup-token.
      Do this INSTEAD of the browser wizard's account step; the rest of the wizard (hardware,
      models, privacy) still runs when you sign in to the admin afterwards.
-  2. It runs as an account that can write <home>. On a Linux system install that is the
-     jarvisd user:
-
-        sudo -u jarvisd python3 scripts/seed-dev.py --home /var/lib/jarvisd
-
-     (the script must be readable by that user: copy it to /tmp first if your checkout
-     isn't). For a per-user install the home is ~/.jarvisd and no sudo is needed.
+  2. Nothing else. With no --home it uses $JARVIS_HOME, else the system install's
+     /var/lib/jarvisd when it exists, else ~/.jarvisd. When this account can't write that
+     home (a system install belongs to the jarvisd user), the script re-runs itself as the
+     home's owner through sudo, from a temporary copy that account can read, so a plain
+     `python3 scripts/seed-dev.py` works from your checkout (sudo asks for your password).
 
 USAGE
 
-    scripts/seed-dev.py --home ~/.jarvisd                    # rich profile (default)
-    scripts/seed-dev.py --home ~/.jarvisd --profile minimal  # identity + topology only
-    scripts/seed-dev.py --home ~/.jarvisd --reset            # delete the seeded content, stop
+    scripts/seed-dev.py                                      # rich profile, the detected home
+    scripts/seed-dev.py --profile minimal                    # identity + topology only
+    scripts/seed-dev.py --reset                              # delete the seeded content, stop
+    scripts/seed-dev.py --home ~/.jarvisd                    # a specific home
     scripts/seed-dev.py --home DIR --base-url http://127.0.0.1 --auth-port 27701 --cc-port 27703
 
 Ports default to JARVIS_PORT_AUTH / JARVIS_PORT_COMMAND_CENTER / JARVIS_PORT_ADMIN when set,
@@ -67,6 +66,10 @@ new keys (their rows are deleted directly, then provisioned again through the AP
 from __future__ import annotations
 
 import argparse
+import pwd
+import shutil
+import subprocess
+import tempfile
 import json
 import os
 import random
@@ -666,9 +669,59 @@ def env_port(name: str, default: int) -> int:
     return int(v) if v.isdigit() else default
 
 
+SYSTEM_HOME = "/var/lib/jarvisd"
+_REEXEC_ENV = "JARVIS_SEED_REEXEC"
+
+
+def default_home() -> str:
+    """$JARVIS_HOME, else the Linux system install's home when it exists, else ~/.jarvisd."""
+    if os.getenv("JARVIS_HOME"):
+        return os.environ["JARVIS_HOME"]
+    if os.path.isdir(SYSTEM_HOME):
+        return SYSTEM_HOME
+    return os.path.expanduser("~/.jarvisd")
+
+
+def run_as_home_owner(home: str, argv: list[str]) -> int | None:
+    """Re-run this script as the owner of home when this account can't write it.
+
+    A system install's home belongs to the jarvisd user, which can't read the developer's
+    checkout, so the script copies itself to a temporary file that account can read and runs
+    that through sudo with the same arguments (plus an explicit --home). Returns the child's
+    exit status, or None when no re-run is needed.
+    """
+    if os.access(home, os.W_OK) or os.getenv(_REEXEC_ENV):
+        return None
+    try:
+        owner = pwd.getpwuid(os.stat(home).st_uid).pw_name
+    except (OSError, KeyError) as e:
+        raise SeedError(f"can't tell who owns {home}: {e}")
+    if owner == pwd.getpwuid(os.getuid()).pw_name:
+        raise SeedError(f"{home} is yours but not writable; check its permissions")
+    if not shutil.which("sudo"):
+        raise SeedError(f"{home} belongs to {owner}; run this script as that user")
+    fd, copy = tempfile.mkstemp(prefix="seed-dev-", suffix=".py", dir="/tmp")  # not $TMPDIR: it may be private to you
+    try:
+        with os.fdopen(fd, "w") as out, open(os.path.abspath(__file__)) as src:
+            out.write(src.read())
+        os.chmod(copy, 0o644)
+        args = [a for a in argv if not a.startswith("--home")]
+        if "--home" in argv:  # "--home DIR" form: drop its value too
+            i = argv.index("--home")
+            args = argv[:i] + argv[i + 2:]
+        log(f"{home} belongs to {owner}: re-running as {owner} through sudo")
+        cmd = ["sudo", "-u", owner, f"{_REEXEC_ENV}=1", sys.executable or "python3", copy, "--home", home, *args]
+        return subprocess.call(cmd, cwd="/")
+    finally:
+        try:
+            os.unlink(copy)
+        except OSError:
+            pass
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--home", required=True, help="the running jarvisd's data directory (holds jarvis.db)")
+    p.add_argument("--home", default="", help="the running jarvisd's data directory (holds jarvis.db); default: $JARVIS_HOME, else /var/lib/jarvisd if it exists, else ~/.jarvisd")
     p.add_argument("--base-url", default="http://localhost", help="scheme and host of jarvisd (default %(default)s)")
     p.add_argument("--auth-port", type=int, default=env_port("JARVIS_PORT_AUTH", 7701))
     p.add_argument("--cc-port", type=int, default=env_port("JARVIS_PORT_COMMAND_CENTER", 7703))
@@ -685,7 +738,14 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=1337, help="RNG seed (determinism)")
     args = p.parse_args()
 
-    home = os.path.abspath(os.path.expanduser(args.home))
+    home = os.path.abspath(os.path.expanduser(args.home or default_home()))
+    try:
+        rc = run_as_home_owner(home, sys.argv[1:])
+    except SeedError as e:
+        log(f"error: {e}")
+        return 1
+    if rc is not None:
+        return rc
     db_path = os.path.join(home, "jarvis.db")
     base = args.base_url.rstrip("/")
     auth_url = f"{base}:{args.auth_port}"

@@ -35,8 +35,7 @@ with the setup token. If you create one first, the seeder stops and asks you to 
 ## 3. Seed
 
 ```sh
-cp scripts/seed-dev.py /tmp/seed-dev.py         # the jarvisd account can't read your home directory
-sudo -u jarvisd python3 /tmp/seed-dev.py --home /var/lib/jarvisd
+python3 scripts/seed-dev.py   # finds /var/lib/jarvisd and re-runs itself as jarvisd through sudo
 ```
 
 It reads the setup token from `/var/lib/jarvisd/setup-token` and finishes by checking every
@@ -77,7 +76,7 @@ provision it again from the mobile app, signed in as Jordan, into the demo house
 Rerun the seeder right before you capture anything:
 
 ```sh
-sudo -u jarvisd python3 /tmp/seed-dev.py --home /var/lib/jarvisd
+python3 scripts/seed-dev.py
 ```
 
 Each run replaces the demo content with fresh timestamps. jarvisd deletes voice transcripts
