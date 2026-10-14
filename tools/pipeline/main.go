@@ -2,18 +2,24 @@
 // STT, against a sandbox (scripts/sandbox) running on a real model. It is how an agent checks
 // what Jarvis does with an utterance without anyone speaking.
 //
-//	pipeline say [--sandbox NAME] [--tools SET] [--speaker WHO] [--results JSON] [--json] [-v] UTTERANCE...
+//	pipeline say [--sandbox NAME] [--tools SET] [--speaker WHO] [--results JSON] [--voice] [--voice-name V] [--json] [-v] UTTERANCE...
 //	    one conversation, one turn per argument; prints the node and server tool calls, the
 //	    node's answers and the reply. Every node tool answers {"success": true} unless
 //	    --results gives {"tool": output, ...}. The speaker defaults to the seeded superuser
 //	    (the sandbox trusts node speaker hints, JARVIS_DEV_SPEAKER_HINTS); --speaker "" plays
 //	    an unidentified voice.
-//	pipeline run [--sandbox NAME] [--repeat N] [--filter RE] [--out DIR] [--json] [-v] [PATH...]
+//	pipeline run [--sandbox NAME] [--repeat N] [--filter RE] [--out DIR] [--voice] [--voice-name V] [--json] [-v] [PATH...]
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
-//	    exits 1 when any fails. --out writes each run's full log (model calls included).
+//	    exits 1 when any fails. --out writes each run's full log (model calls included) and,
+//	    for voiced turns, the audio.
 //	pipeline tap [--listen ADDR] [--upstream URL] [--log FILE]
 //	    the LLM recording proxy scripts/sandbox starts in front of the installed jarvisd's LLM
 //	    API (:7704); JARVIS_TAP_APP_ID / JARVIS_TAP_APP_KEY are sent as its app credentials.
+//
+// --voice speaks each turn instead of typing it (the sandbox must be up with --voice): the
+// sandbox's TTS says it, its STT transcribes it through command-center's node media proxy as
+// a Pi would, and the transcript is the voice command; the transcript prints as "heard".
+// --voice-name picks a Kokoro voice (e.g. af_heart; default the house voice) and implies --voice.
 //
 // --sandbox defaults to $JARVIS_SANDBOX, else "default"; the sandbox's sandbox.env supplies
 // command-center's URL and the seeded node's credentials, and its llm.jsonl the model calls.
@@ -126,6 +132,9 @@ func sandboxDriver(name string) (*Driver, error) {
 		TapLog:  filepath.Join(dir, "llm.jsonl"),
 		Root:    root,
 		Primary: primary,
+		Voices:  &AdminVoice{AdminURL: env["SBX_ADMIN"], AuthURL: env["SBX_AUTH"], Email: env["SBX_EMAIL"], Password: env["SBX_PASSWORD"]},
+		// scripts/sandbox up --voice exports the stt model it set up.
+		VoiceReady: env["SBX_VOICE"] != "",
 	}, nil
 }
 
@@ -172,6 +181,8 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	results := fs.String("results", "", `node outputs per tool, e.g. {"get_weather": {"success": true, "message": "Sunny, 21°"}}`)
 	asJSON := fs.Bool("json", false, "print the full log as JSON")
 	verbose := fs.Bool("v", false, "also print each model call's reasoning and reply")
+	voice := fs.Bool("voice", false, "speak each turn: TTS, then STT as the node, and send what was heard (sandbox up --voice)")
+	voiceName := fs.String("voice-name", "", "Kokoro voice to speak in (implies --voice; default the house voice)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -181,6 +192,10 @@ func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	d, err := sandboxDriver(*sandbox)
 	if err != nil {
 		return err
+	}
+	d.Voice, d.VoiceName = *voice, *voiceName
+	if (d.Voice || d.VoiceName != "") && !d.VoiceReady {
+		return errors.New("--voice: this sandbox has no TTS/STT (scripts/sandbox up --voice)")
 	}
 	sc := Scenario{Name: "say", Tools: *tools, Speaker: *speaker, Home: *home}
 	if *results != "" {
@@ -209,12 +224,18 @@ func runScenarios(ctx context.Context, args []string, stdout io.Writer) error {
 	outDir := fs.String("out", "", "write each run's full log here")
 	asJSON := fs.Bool("json", false, "print a JSON summary instead of text")
 	verbose := fs.Bool("v", false, "print every turn, not only failures")
+	voice := fs.Bool("voice", false, `voice every scenario (sandbox up --voice); scenarios with "voice": true always are`)
+	voiceName := fs.String("voice-name", "", "Kokoro voice for every voiced turn (implies --voice)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	d, err := sandboxDriver(*sandbox)
 	if err != nil {
 		return err
+	}
+	d.Voice, d.VoiceName = *voice, *voiceName
+	if (d.Voice || d.VoiceName != "") && !d.VoiceReady {
+		return errors.New("--voice: this sandbox has no TTS/STT (scripts/sandbox up --voice)")
 	}
 	paths := fs.Args()
 	if len(paths) == 0 {
@@ -248,6 +269,9 @@ func runScenarios(ctx context.Context, args []string, stdout io.Writer) error {
 		if re != nil && !re.MatchString(sc.Name) {
 			continue
 		}
+		if sc.Voice && !d.VoiceReady && sc.Skip == "" {
+			sc.Skip = "a voice scenario; the sandbox is not up with --voice"
+		}
 		if sc.Skip != "" {
 			if !*asJSON {
 				fmt.Fprintf(stdout, "SKIP      %s (%s)\n", sc.Name, sc.Skip)
@@ -274,8 +298,13 @@ func runScenarios(ctx context.Context, args []string, stdout io.Writer) error {
 			}
 			if *outDir != "" {
 				b, _ := json.MarshalIndent(log, "", "  ")
-				name := fmt.Sprintf("%s.%d.json", slug(sc.Name), i+1)
-				_ = os.WriteFile(filepath.Join(*outDir, name), b, 0o644)
+				name := fmt.Sprintf("%s.%d", slug(sc.Name), i+1)
+				_ = os.WriteFile(filepath.Join(*outDir, name+".json"), b, 0o644)
+				for ti, t := range log.Turns {
+					if t.Voice != nil && len(t.Voice.WAV) > 0 {
+						_ = os.WriteFile(filepath.Join(*outDir, fmt.Sprintf("%s.t%d.wav", name, ti+1)), t.Voice.WAV, 0o644)
+					}
+				}
 			}
 			if !*asJSON && (*verbose || !log.Pass) {
 				printLog(stdout, log, false)
@@ -319,6 +348,15 @@ func printLog(w io.Writer, l ScenarioLog, verbose bool) {
 	fmt.Fprintf(w, "── %s (%s)\n", l.Name, l.ConversationID)
 	for _, t := range l.Turns {
 		fmt.Fprintf(w, "» %s\n", t.Say)
+		if v := t.Voice; v != nil {
+			heard := "heard = said"
+			if v.WER > 0 || v.Heard == "" {
+				heard = fmt.Sprintf("heard: %q (WER %.2f)", v.Heard, v.WER)
+			} else if v.Heard != t.Say {
+				heard = fmt.Sprintf("heard: %q", v.Heard)
+			}
+			fmt.Fprintf(w, "  %s  [%.1fs audio, tts %.1fs, stt %.1fs]\n", heard, v.AudioSeconds, v.TTSSeconds, v.STTSeconds)
+		}
 		for _, c := range t.ServerCalls {
 			fmt.Fprintf(w, "  server %s %s\n", c.Name, jsonText(c.Args))
 		}

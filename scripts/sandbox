@@ -4,6 +4,7 @@
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
 #   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich] [--llm shared|none] [--ui]
+#                      [--voice [--stt-model ID]]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
 #   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
@@ -29,9 +30,16 @@
 #   --llm none       no model: everything but the LLM works
 #   --ui             build the admin SPA first (npm) and serve it; otherwise web/admin/dist/ui
 #                    is served when it exists, else the built-in placeholder page
+#   --voice          real TTS and STT, for voice pipeline runs (pipeline say --voice): Kokoro,
+#                    the speaker model and a whisper model, downloaded once into
+#                    ~/.cache/jarvis-harness/models ($JARVIS_HARNESS_CACHE) and used in place;
+#                    whisper-server runs on the CPU (stt.gpu_backend cpu, gpu_layers 0), never
+#                    the GPU the installed jarvisd uses. The CPU build is fetched on first use.
+#   --stt-model ID   the catalog's stt model for --voice (default whisper-small.en; base.en is
+#                    faster and mishears more; whisper-large-v3-turbo-q5_0 is better and slower)
 #
 # Nodes may claim who is speaking (JARVIS_DEV_SPEAKER_HINTS=1), standing in for voice ID.
-# STT is off and TTS has no voice models in a sandbox: pipeline tests start from text
+# Without --voice, STT is off and TTS has no voice models: pipeline tests start from text
 # (go run ./tools/pipeline say "turn on the kitchen lights"; ... run for the scenarios).
 set -euo pipefail
 
@@ -41,9 +49,9 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
-NAME=default OFFSET= PROFILE=minimal LLM=shared UI=0 PURGE=0 FOLLOW=0
+NAME=default OFFSET= PROFILE=minimal LLM=shared UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -51,9 +59,11 @@ while [ $# -gt 0 ]; do
     --profile) PROFILE=$2; shift 2 ;;
     --llm) LLM=$2; shift 2 ;;
     --ui) UI=1; shift ;;
+    --voice) VOICE=1; shift ;;
+    --stt-model) STT_MODEL=$2; shift 2 ;;
     --purge) PURGE=1; shift ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -151,7 +161,6 @@ point_llm() {
   set_setting "$llm" llm.live.fold_system_messages '"off"'
   set_setting "$llm" llm.background.engine '"shared"'
   set_setting "$llm" llm.embeddings.engine '"off"'
-  set_setting "$llm" stt.engine '"off"'
   # A household with voice ID: the memory tools are offered (D3/D21) and refuse an unknown
   # speaker when called; pipeline turns name the speaker through dev speaker hints.
   set_setting "$(port 7706)" voice.recognition_enabled true
@@ -169,6 +178,81 @@ for e in json.load(open(sys.argv[1])):
     say "llm: $alias is not in the catalog; set llm.prompt_provider by hand"
   fi
   say "llm: tap :$(port 7799) → installed jarvisd $INSTALLED_LLM_URL (live = $alias); calls logged to $DIR/llm.jsonl"
+}
+
+# Voice models live in one cache shared by every worktree and sandbox; the sandbox's settings
+# point at them by absolute path, so nothing is copied and down --purge keeps them.
+CACHE=${JARVIS_HARNESS_CACHE:-$HOME/.cache/jarvis-harness}/models
+fetch_voice_models() {
+  local r=https://github.com/k2-fsa/sherpa-onnx/releases/download
+  mkdir -p "$CACHE"
+  if [ ! -d "$CACHE/kokoro-multi-lang-v1_0" ]; then
+    say "voice: downloading Kokoro (350 MB, once)"
+    rm -rf "$CACHE.tmp" && mkdir -p "$CACHE.tmp"
+    curl -fsSL "$r/tts-models/kokoro-multi-lang-v1_0.tar.bz2" | tar xj -C "$CACHE.tmp" || die "voice: Kokoro download failed"
+    mv "$CACHE.tmp/kokoro-multi-lang-v1_0" "$CACHE/" && rm -rf "$CACHE.tmp"
+  fi
+  local spk=3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
+  if [ ! -f "$CACHE/$spk" ]; then
+    curl -fsSL -o "$CACHE/$spk.part" "$r/speaker-recongition-models/$spk" || die "voice: speaker model download failed"
+    mv "$CACHE/$spk.part" "$CACHE/$spk"
+  fi
+  # The whisper model, as the catalog pins it (repo, revision, file, sha256).
+  local entry url sum file
+  entry=$(python3 -c '
+import json, sys
+for e in json.load(open(sys.argv[1])):
+    if e["id"] == sys.argv[2] and e.get("kind") == "stt":
+        print("https://huggingface.co/%s/resolve/%s/%s" % (e["repo"], e["revision"], e["file"]), e["sha256"], e["file"])
+        break' "$ROOT/internal/modules/llm/models/catalog.json" "$STT_MODEL")
+  [ -n "$entry" ] || die "--stt-model $STT_MODEL: not an stt model in the catalog"
+  read -r url sum file <<<"$entry"
+  if [ ! -f "$CACHE/$file" ]; then
+    say "voice: downloading $file (once)"
+    curl -fsSL -o "$CACHE/$file.part" "$url" || die "voice: download of $url failed"
+    echo "$sum  $CACHE/$file.part" | sha256sum -c --quiet - || { rm -f "$CACHE/$file.part"; die "voice: $file: sha256 mismatch"; }
+    mv "$CACHE/$file.part" "$CACHE/$file"
+  fi
+  STT_FILE=$CACHE/$file
+}
+
+# setup_voice turns on TTS, the speaker model and STT (whisper on the CPU), then waits until a
+# synthesized phrase comes back as text through command-center, as a node would see it.
+setup_voice() {
+  local llm=$(port 7704) cc=$(port 7703)
+  if [ "$VOICE" != 1 ]; then
+    set_setting "$llm" stt.engine '"off"'
+    return
+  fi
+  fetch_voice_models
+  set_setting "$llm" tts.model "\"$CACHE/kokoro-multi-lang-v1_0\""
+  set_setting "$llm" speaker.model "\"$CACHE/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx\""
+  set_setting "$llm" stt.model "\"$STT_FILE\""
+  set_setting "$llm" stt.gpu_backend '"cpu"'
+  set_setting "$llm" stt.gpu_layers 0
+  # whisper-server's default is 4 threads: half the cores, at most 8, is ~1.5x faster on a
+  # short command without taking the whole box.
+  local threads=$(( $(nproc) / 2 ))
+  [ "$threads" -gt 8 ] && threads=8
+  [ "$threads" -lt 1 ] && threads=1
+  set_setting "$llm" stt.extra_args "\"-t $threads\""
+  set_setting "$llm" stt.engine '"local"'
+  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code
+  node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json")
+  say "voice: warming TTS and STT ($STT_MODEL on the CPU; the first start fetches whisper-server)"
+  for _ in $(seq 1 120); do
+    code=$(curl -s -o "$DIR/.warm.wav" -w '%{http_code}' -X POST "http://127.0.0.1:$cc/api/v0/media/tts/speak" \
+      -H "X-API-Key: $node_id:$node_key" -H 'Content-Type: application/json' -d '{"text": "Testing one two three."}')
+    if [ "$code" = 200 ]; then
+      code=$(curl -s -o "$DIR/.warm.json" -w '%{http_code}' -X POST "http://127.0.0.1:$cc/api/v0/media/whisper/transcribe" \
+        -H "X-API-Key: $node_id:$node_key" -F "file=@$DIR/.warm.wav;type=audio/wav")
+      [ "$code" = 200 ] && break
+    fi
+    sleep 1
+  done
+  [ "$code" = 200 ] || die "voice: not ready after 2 minutes ($code: $(head -c 300 "$DIR/.warm.json" "$DIR/.warm.wav" 2>/dev/null | tr -d '\0'))"
+  say "voice: up; heard \"$(json 'd["text"].strip()' <"$DIR/.warm.json")\" for \"Testing one two three.\""
+  rm -f "$DIR/.warm.wav" "$DIR/.warm.json"
 }
 
 write_env() {
@@ -197,6 +281,7 @@ write_env() {
     echo "export SBX_NODE_KEY=$node_key"
     echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
     echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
+    if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
   } >"$ENVF"
 }
 
@@ -240,6 +325,7 @@ cmd_up() {
     --auth-port "$(port 7701)" --cc-port "$(port 7703)" --admin-port "$(port 7710)" \
     --profile "$PROFILE" >"$DIR/seed.log" 2>&1 || { tail -20 "$DIR/seed.log" >&2; die "seeding failed (log: $DIR/seed.log)"; }
   point_llm
+  setup_voice
   write_env
   say "up: source $ENVF"
 }

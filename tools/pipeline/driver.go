@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ type CallLog struct {
 // TurnLog is everything one turn did.
 type TurnLog struct {
 	Say         string     `json:"say"`
+	Voice       *VoiceLog  `json:"voice,omitempty"` // a voiced turn: what STT heard (sent instead of Say)
 	NodeCalls   []CallLog  `json:"node_calls"`
 	ServerCalls []CallLog  `json:"server_calls"` // model calls command-center ran itself (from the tap)
 	Reply       string     `json:"reply"`
@@ -53,6 +55,13 @@ type Driver struct {
 	Root   string // repo root, for the golden tool sets
 	// Primary is the seeded superuser's id, what a scenario's "speaker": "primary" means.
 	Primary int64
+	// Voice voices every scenario (say/run --voice); VoiceName overrides a scenario's voice.
+	Voice     bool
+	VoiceName string
+	// Voices renders named voices (the admin's preview); nil = the house voice only.
+	Voices *AdminVoice
+	// VoiceReady: the sandbox has TTS and STT (up --voice). run skips voice scenarios without.
+	VoiceReady bool
 }
 
 // speakerID resolves a scenario's speaker.
@@ -107,8 +116,13 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 	}
 	nodeNames := toolNames(tools)
 	defer d.Node.End(context.WithoutCancel(ctx), out.ConversationID)
+	voice := sc.VoiceName
+	if d.VoiceName != "" {
+		voice = d.VoiceName
+	}
+	voiced := sc.Voice || d.Voice || d.VoiceName != ""
 	for _, turn := range sc.Turns {
-		tl := d.turn(ctx, out.ConversationID, nodeNames, turn.Say, speaker, func(name string) any { return sc.resultFor(turn, name) })
+		tl := d.turn(ctx, out.ConversationID, nodeNames, turn.Say, voiced, voice, speaker, func(name string) any { return sc.resultFor(turn, name) })
 		tl.Failures = turn.Expect.Check(tl)
 		if len(tl.Failures) > 0 {
 			out.Pass = false
@@ -121,8 +135,9 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 	return out
 }
 
-// turn sends one utterance and answers tool calls until command-center is done.
-func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, speaker int64, result func(string) any) (tl TurnLog) {
+// turn sends one utterance and answers tool calls until command-center is done. A voiced turn
+// sends what STT heard of it instead.
+func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, voiced bool, voice string, speaker int64, result func(string) any) (tl TurnLog) {
 	tl.Say = say
 	mark := tapSize(d.TapLog)
 	start := time.Now()
@@ -137,7 +152,20 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 			}
 		}
 	}()
-	resp, err := d.Node.Command(ctx, cid, say, speaker)
+	text := say
+	if voiced {
+		v, err := d.hear(ctx, cid, say, voice)
+		tl.Voice = v
+		if err == nil && v.Heard == "" {
+			err = errors.New("stt: heard nothing")
+		}
+		if err != nil {
+			tl.Error = err.Error()
+			return tl
+		}
+		text = v.Heard
+	}
+	resp, err := d.Node.Command(ctx, cid, text, speaker)
 	for i := 0; err == nil && resp.StopReason == "tool_calls" && len(resp.ToolCalls) > 0; i++ {
 		if i == maxContinues {
 			err = fmt.Errorf("still calling tools after %d round-trips", maxContinues)

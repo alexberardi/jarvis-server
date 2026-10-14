@@ -1,0 +1,19 @@
+[
+  {"type": "function", "function": {"name": "desktop_open",
+    "description": "On the user's computer, open a web link in the default browser, or launch an installed app by name. Use desktop_list_apps first if you're unsure an app is installed or of its exact name. If the result is ambiguous, ask the user which of the candidates they meant. Returns as soon as the computer accepted the request; it does not confirm the app or page came up.",
+    "parameters": {"type": "object", "properties": {
+      "target": {"type": "string", "description": "A full http(s) URL, e.g. https://example.com, or an installed app's name, e.g. Steam"}},
+      "required": ["target"]}}},
+  {"type": "function", "function": {"name": "desktop_list_apps",
+    "description": "List the apps installed on the user's computer, i.e. the apps desktop_open can open. ALWAYS call this to answer any question about what is installed, available or openable on the computer (\"what apps can you open?\", \"do I have Steam?\", \"which games are installed?\"). Never answer those from general knowledge: only this list is accurate for this computer. Optionally filter by a word.",
+    "parameters": {"type": "object", "properties": {
+      "query": {"type": "string", "description": "Optional word to filter by, e.g. studio"}},
+      "required": []}}},
+  {"type": "function", "function": {"name": "desktop_type_text",
+    "description": "Type text on the user's computer, as if typed on the keyboard: into the window in front, or into the app the user names (it is brought to the front first). Use it for dictation: \"type hello world\" → {text: \"hello world\"}; \"tell claude to run the tests\" → {app: \"claude\", text: \"run the tests\", submit: true}; \"write thanks in slack\" → {app: \"slack\", text: \"thanks\"}. Put only the words to type in text, never the instruction around them, and keep the user's wording. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" or \"… and press enter\"; false for \"type …\", \"write …\", \"put … in\". For a field on a web page use browser_fill instead. If the result says awaiting_confirmation, nothing was typed yet: ask the user the question.",
+    "parameters": {"type": "object", "properties": {
+      "text": {"type": "string", "description": "Exactly the words to type"},
+      "app": {"type": "string", "description": "The app or window to switch to first, in the user's words: \"claude\", \"slack\", \"the terminal\", or words from its title. Leave it out to use whatever window is in front."},
+      "submit": {"type": "boolean", "description": "Press Enter after typing, to send it (default false)"}},
+      "required": ["text"]}}}
+]

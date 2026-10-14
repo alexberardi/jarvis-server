@@ -29,6 +29,11 @@ type Scenario struct {
 	// what a Pi with Home Assistant sends): a name under tools/pipeline/homes ("avery", the
 	// default, matches the seeded rooms), "none", or a JSON file path.
 	Home string `json:"home,omitempty"`
+	// Voice plays every turn through the sandbox's TTS and STT (a sandbox up with --voice):
+	// the transcript is what command-center gets. VoiceName is a Kokoro voice to say it in
+	// ("" = the house voice). say/run --voice turns it on for every scenario.
+	Voice     bool   `json:"voice,omitempty"`
+	VoiceName string `json:"voice_name,omitempty"`
 	// Skip, when set, is why the scenario cannot run yet; it is reported, not played.
 	Skip string `json:"skip,omitempty"`
 	// Results is the node's output per tool name for every call in the scenario; a turn's own
@@ -58,7 +63,14 @@ type Expect struct {
 	NotReply   string            `json:"not_reply,omitempty"`   // and does not match this one
 	Stop       string            `json:"stop,omitempty"`        // final stop_reason
 	MaxSeconds float64           `json:"max_seconds,omitempty"` // the turn finished within this
+	// Voice turns only: what STT made of the said text.
+	Heard    string   `json:"heard,omitempty"`     // the transcript matches this regexp
+	NotHeard string   `json:"not_heard,omitempty"` // and does not match this one
+	MaxWER   *float64 `json:"max_wer,omitempty"`   // word error rate against the said text ≤ this (0 = word for word)
 }
+
+// hearing reports whether the expectation is about the transcript.
+func (e Expect) hearing() bool { return e.Heard != "" || e.NotHeard != "" || e.MaxWER != nil }
 
 // LoadScenarios reads every *.json under the paths (files or directories), sorted by path.
 func LoadScenarios(paths []string) ([]Scenario, error) {
@@ -122,7 +134,7 @@ func (s Scenario) validate() error {
 		if t.Say == "" {
 			return fmt.Errorf("turn %d: empty say", i+1)
 		}
-		for _, re := range []string{t.Expect.Reply, t.Expect.NotReply} {
+		for _, re := range []string{t.Expect.Reply, t.Expect.NotReply, t.Expect.Heard, t.Expect.NotHeard} {
 			if _, err := regexp.Compile(re); err != nil {
 				return fmt.Errorf("turn %d: %w", i+1, err)
 			}
@@ -153,8 +165,23 @@ func (s Scenario) resultFor(turn Turn, tool string) any {
 // Check returns what failed in a turn, empty when the expectation holds.
 func (e Expect) Check(t TurnLog) []string {
 	var fails []string
+	if e.hearing() {
+		if v := t.Voice; v == nil {
+			fails = append(fails, `heard: not a voice turn ("voice": true, or --voice, on a sandbox up with --voice)`)
+		} else {
+			if e.Heard != "" && !regexp.MustCompile(e.Heard).MatchString(v.Heard) {
+				fails = append(fails, fmt.Sprintf("heard %q, want /%s/", v.Heard, e.Heard))
+			}
+			if e.NotHeard != "" && regexp.MustCompile(e.NotHeard).MatchString(v.Heard) {
+				fails = append(fails, fmt.Sprintf("heard %q, matches /%s/", v.Heard, e.NotHeard))
+			}
+			if e.MaxWER != nil && v.WER > *e.MaxWER {
+				fails = append(fails, fmt.Sprintf("heard %q, word error rate %.2f > %.2f", v.Heard, v.WER, *e.MaxWER))
+			}
+		}
+	}
 	if t.Error != "" {
-		return []string{"error: " + t.Error}
+		return append(fails, "error: "+t.Error)
 	}
 	all := append(slices.Clone(t.NodeCalls), t.ServerCalls...)
 	names := func(cs []CallLog) []string {
