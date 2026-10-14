@@ -1,0 +1,82 @@
+[
+  {
+    "name": "voice: set a timer for 12 minutes",
+    "voice": true,
+    "turns": [
+      {"say": "set a timer for 12 minutes",
+       "expect": {"heard": "(?i)\\b(12|twelve)\\b", "max_wer": 0, "tool": "set_timer", "args": {"duration_seconds": 720}}}
+    ]
+  },
+  {
+    "name": "voice: set a timer, in an American voice",
+    "voice": true,
+    "voice_name": "af_heart",
+    "turns": [
+      {"say": "set a timer for 12 minutes",
+       "expect": {"heard": "(?i)\\b(12|twelve)\\b", "tool": "set_timer", "args": {"duration_seconds": 720}}}
+    ]
+  },
+  {
+    "name": "voice: what time is it, known speaker (answers without the tool)",
+    "tags": ["known-bug"],
+    "voice": true,
+    "speaker": "primary",
+    "results": {"get_current_time": {"success": true, "message": "It's 11:54 PM on Tuesday, October 13."}},
+    "turns": [
+      {"say": "turn off the kitchen lights", "expect": {"tool": "control_device"}},
+      {"say": "what time is it",
+       "expect": {"max_wer": 0, "tool": "get_current_time", "reply": "11:54|11 54|eleven fifty"}}
+    ]
+  },
+  {
+    "name": "voice: what time is it",
+    "voice": true,
+    "results": {"get_current_time": {"success": true, "message": "It's 11:54 PM on Tuesday, October 13."}},
+    "turns": [
+      {"say": "what time is it",
+       "expect": {"max_wer": 0, "tool": "get_current_time", "reply": "11:54|11 54|eleven fifty"}}
+    ]
+  },
+  {
+    "name": "voice: turn off the kitchen lights",
+    "voice": true,
+    "turns": [
+      {"say": "turn off the kitchen lights",
+       "expect": {"heard": "(?i)kitchen lights", "tool": "control_device", "args": {"action": "turn_off"},
+                  "args_match": {"device_name": "(?i)kitchen"}}}
+    ]
+  },
+  {
+    "name": "voice: turn off the oven (no such device)",
+    "voice": true,
+    "results": {"control_device": {"success": false, "error": "No device matches \"oven\""}},
+    "turns": [
+      {"say": "turn off the oven",
+       "expect": {"heard": "(?i)\\boven\\b", "not_reply": "(?i)(turned|switched) (it |the oven )?off|oven('s| is) (now )?off"}}
+    ]
+  },
+  {
+    "name": "voice: open Obsidian on the computer",
+    "voice": true,
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {"say": "open Obsidian on my computer",
+       "expect": {"heard": "(?i)obsidian", "tool": "desktop_open", "args_match": {"target": "(?i)obsidian"}}}
+    ]
+  },
+  {
+    "name": "voice: type into omawrite (heard as Omerite)",
+    "tags": ["known-bug"],
+    "voice": true,
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "results": {"desktop_type_text": {"success": false, "error": "no window matches the app", "error_code": "no_match",
+                                      "open_apps": ["Alacritty", "firefox", "omawrite"]}},
+    "turns": [
+      {"say": "type into omawrite that I need to take the dogs for a walk",
+       "expect": {"heard": "(?i)oma ?write", "tool": "desktop_type_text",
+                  "args_match": {"text": "(?i)take the dogs for a walk"}, "not_reply": "(?i)(typed|done)"}}
+    ]
+  }
+]

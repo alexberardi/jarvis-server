@@ -7,8 +7,9 @@ description: Check what Jarvis actually does with an utterance (which tool the m
 
 Three pieces (commit a61efa8): `scripts/sandbox` runs a seeded throwaway jarvisd built from this
 checkout, `tools/pipeline` plays text turns as the seeded kitchen node, and a tap in front of the
-model logs every model call to `.sandbox/<name>/llm.jsonl`. STT is off and TTS has no voices in
-a sandbox, so a turn starts from text, as if STT had already run.
+model logs every model call to `.sandbox/<name>/llm.jsonl`. By default STT is off and TTS has
+no voices, so a turn starts from text, as if STT had already run; `up --voice` adds the real
+voice loop (§5).
 
 ## 1. Start a sandbox
 
@@ -95,6 +96,39 @@ jq -r 'select(.seq==2) | .request.messages[] | "\(.role): \(.content|tostring|.[
 ```
 
 `.reply.raw` is set only when the body could not be parsed. Read it for upstream error bodies.
+
+## 5. The voice loop: what Jarvis hears
+
+Text turns can't catch mishearings ("Omerite" for omawrite, a misheard number). With a voice
+sandbox, each turn is spoken by the sandbox's Kokoro, transcribed by its whisper through
+command-center's node media proxy (`POST /api/v0/media/whisper/transcribe`, as a Pi does), and
+the transcript, not the script, is sent as the voice command.
+
+```bash
+scripts/sandbox up --name voice --voice [--stt-model whisper-base.en]   # ~10s once models are cached
+go run ./tools/pipeline say --sandbox voice --voice "type into omawrite that I need to walk the dogs"
+go run ./tools/pipeline say --sandbox voice --voice-name af_heart "set a timer for 12 minutes"
+go run ./tools/pipeline run --sandbox voice --out /tmp/runs tools/pipeline/scenarios/voice.json
+```
+
+- Models download once into `~/.cache/jarvis-harness/models` (Kokoro 350 MB, speaker 26 MB,
+  whisper small.en 488 MB) and are used in place by absolute-path settings. whisper-server runs
+  on the CPU (`stt.gpu_backend cpu`, `gpu_layers 0`, `-t` half the cores up to 8): ~2.4s per
+  short command here, about 10x the house GPU. Never put the sandbox's STT on the GPU.
+- Output adds `heard: "…" (WER x)  [audio, tts, stt seconds]` under each said line (just the
+  transcript when only case/punctuation differ). `--out` also writes each turn's WAV.
+- `--voice-name` (any Kokoro voice, default the house's bm_george) goes through the admin's
+  voice preview, so ≤ 200 characters.
+- Scenarios: `"voice": true` (and `"voice_name"`) per scenario; `run --voice` voices every
+  scenario. `run` skips voice scenarios on a sandbox without `--voice`. Expect fields for voice
+  turns: `heard` / `not_heard` (regexps on the transcript), `max_wer` (word error rate against
+  the said text; case and punctuation ignored, "12" vs "twelve" counts as an error).
+- An empty transcript is the turn's error (`stt: heard nothing`); a restarting whisper (503 not
+  ready) is waited for up to 2 minutes.
+- TTS-to-STT is a clean signal: one synthetic voice, no room, no mic. A mishearing here is real;
+  a clean transcript here does not prove a human voice is heard right.
+- `tools/pipeline/toolsets/desktop.json` is a copy of the desktop agent's open/type tools
+  (`internal/agent/desktop`, `internal/agent/dictate`) for `"tools": "../toolsets/desktop.json"`.
 
 ## Why a turn fails in the sandbox but not at home
 

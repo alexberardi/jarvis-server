@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -62,35 +63,60 @@ func (n *Node) post(ctx context.Context, path string, body, out any) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.BaseURL+path, bytes.NewReader(b))
-	if err != nil {
+	rb, err := n.send(ctx, path, "application/json", b)
+	if err != nil || out == nil {
 		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", n.ID+":"+n.Key)
-	client := n.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Minute}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	rb, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("POST %s: %d %s", path, resp.StatusCode, truncate(string(rb), 500))
-	}
-	if out == nil {
-		return nil
 	}
 	if err := json.Unmarshal(rb, out); err != nil {
 		return fmt.Errorf("POST %s: decode: %w", path, err)
 	}
 	return nil
+}
+
+// send POSTs a body with the node's credentials and returns a 200's body.
+func (n *Node) send(ctx context.Context, path, contentType string, body []byte) ([]byte, error) {
+	return do(ctx, n.HTTP, n.BaseURL+path, contentType, body, map[string]string{"X-API-Key": n.ID + ":" + n.Key})
+}
+
+// postJSON POSTs JSON to a URL and decodes a 200's body into out.
+func postJSON(ctx context.Context, url string, header map[string]string, body, out any) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	rb, err := do(ctx, nil, url, "application/json", b, header)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(rb, out)
+}
+
+// do POSTs a body and returns a 200's body; any other status is an error with the body.
+func do(ctx context.Context, client *http.Client, url, contentType string, body []byte, header map[string]string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Minute}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	rb, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("POST %s: %d %s", req.URL.Path, resp.StatusCode, truncate(strings.TrimSpace(string(rb)), 500))
+	}
+	return rb, nil
 }
 
 // Start opens a conversation with the node's tool set and, when agents is not nil, its
