@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jarvis Browser Control",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Lets your Jarvis desktop agent manage tabs, read pages, fill fields, click buttons and control media. Talks only to the local agent.",
   "permissions": ["tabs", "scripting", "nativeMessaging", "alarms"],
   "host_permissions": ["<all_urls>"],
@@ -10,6 +10,11 @@
     "scripts": ["background.js"]
   },
   "icons": {"48": "icon-48.png", "128": "icon-128.png"},
+  "action": {
+    "default_title": "Jarvis Browser Control",
+    "default_icon": {"48": "icon-48.png", "128": "icon-128.png"},
+    "default_popup": "popup.html"
+  },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2Xi52dlwyq4rt8DhyX9V5V3X72tXmJzkIhv6siWgTHxoHPbrb5QaO3245WUgPocEwYp7TgVm03vHfP5cLB4Ns4EtOyDwh0r+Mehmk4TQY1v9yN+bJ6Xzv3VKESPxxx2dW47iaFTx2WDexib+/SkFHo4ZrvIpjBHUzVD/7Fi7DYiboGE/d0yAAyF7iAFUIybfEZl4024VEIl3mCpWfSpYm/4y4Tv+/yJ9JI2FXVWYAWGbZxhpnErc/e0mvx27p8pOaXHUBWrx7PFB3X/61ijaY1PNLfEM+ajbo6nb9bUXsWd3KmKXwZfSEUqtqEn6/S/ugWtAKV892bau12wmMGVv0QIDAQAB",
   "minimum_chrome_version": "116",
   "browser_specific_settings": {

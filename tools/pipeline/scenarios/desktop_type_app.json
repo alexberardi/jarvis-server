@@ -1,0 +1,44 @@
+[
+ {
+  "name": "desktop: type into an app named once, no vocabulary (as web chat sends)",
+  "node": "desktop",
+  "stt_vocabulary": "",
+  "turns": [
+   {
+    "say": "type into omawrite that I need to walk the dogs",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {"app": "(?i)^omawrite$", "text": "(?i)walk the dogs"}
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop: type text then an unfamiliar app, no vocabulary",
+  "node": "desktop",
+  "stt_vocabulary": "",
+  "turns": [
+   {
+    "say": "type buy more coffee filters into omawrite",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {"app": "(?i)^omawrite$", "text": "(?i)coffee filters"}
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop: write in a familiar app keeps it, no vocabulary",
+  "node": "desktop",
+  "stt_vocabulary": "",
+  "turns": [
+   {
+    "say": "write running ten minutes late in slack",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {"app": "(?i)^slack$"}
+    }
+   }
+  ]
+ }
+]

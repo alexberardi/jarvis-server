@@ -29,9 +29,10 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   Store submissions: follow `docs/agent/store-listing.md` (kit in `internal/agent/browser/store/`);
   the Chrome store id (`abkbjmelelgelkhneobebgoilejlgbob`) is in `ChromeExtensionIDs`; release the
   agent and re-run `jarvis-agent browser install` so existing hosts admit it.
-  **The extension is now 0.2.0** (dictation's `fill` and `click`, 2026-10-13): upload 0.2.0, not
-  0.1.x, to both stores, and re-sign the embedded `.xpi` (it is 0.1.0, which answers fill/click
-  with `unknown_command`).
+  **The extension is now 0.2.1** (0.2.0: dictation's `fill` and `click`, 2026-10-13; 0.2.1: the
+  toolbar popup linking to the agent download, install plan 3.5): upload 0.2.1, not an older
+  version, to both stores, and re-sign the embedded `.xpi` (it is 0.1.0, which answers fill/click
+  with `unknown_command` and has no popup).
   **Device sign-out** (user 2026-10-14, [decision](decisions/2026-10-14-device-sign-out.md)): the
   pairer or a household admin signs a device out from Add-ons; desktop agents get no factory reset
   and return to their first-run page with their settings kept.

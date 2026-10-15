@@ -193,3 +193,58 @@ func TestNoSignedXPIUnlessEmbedded(t *testing.T) {
 		t.Fatal("signed/ holds something that isn't a zip")
 	}
 }
+
+// The toolbar popup (install plan 3.5) adds no input to the extension: it is a static page that
+// shows the state background.js put in its URL and links to the public download page. It sends
+// the background nothing (so background.js still needs no runtime.onMessage), runs no remote
+// code and reads no page.
+func TestPopupSurface(t *testing.T) {
+	for _, target := range []string{TargetFirefox, TargetChromium} {
+		m := manifestOf(t, target)
+		action, _ := m["action"].(map[string]any)
+		if action["default_popup"] != "popup.html" {
+			t.Errorf("%s action.default_popup = %v", target, action["default_popup"])
+		}
+		files, err := ExtensionFiles(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"popup.html", "popup.js"} {
+			if len(files[f]) == 0 {
+				t.Errorf("%s has no %s", target, f)
+			}
+		}
+	}
+	b, err := extensionFS.ReadFile("extension/popup.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(string(b), "")
+	for _, banned := range []string{"sendMessage", "runtime.connect", "connectNative", "onMessage", "eval(", "new Function",
+		"innerHTML", "fetch(", "XMLHttpRequest", "WebSocket", "scripting.", "storage."} {
+		if strings.Contains(js, banned) {
+			t.Errorf("popup.js contains %q", banned)
+		}
+	}
+	html, err := extensionFS.ReadFile("extension/popup.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One local script and no inline handlers: MV3's default CSP, which the manifest keeps.
+	if s := regexp.MustCompile(`<script[^>]*>`).FindAllString(string(html), -1); len(s) != 1 || s[0] != `<script src="popup.js">` {
+		t.Errorf("popup.html scripts: %q", s)
+	}
+	if regexp.MustCompile(`(?i)\son[a-z]+=`).Match(html) {
+		t.Error("popup.html has an inline event handler")
+	}
+	const download = "https://github.com/alexberardi/jarvis-server/releases"
+	if !strings.Contains(string(b), `"`+download+`"`) || !strings.Contains(string(html), `"`+download+`"`) {
+		t.Errorf("popup doesn't link to %s", download)
+	}
+	// The background sets the popup's state; it must stay one of the states popup.js knows.
+	for _, st := range regexp.MustCompile(`setState\("(\w+)"\)`).FindAllStringSubmatch(backgroundJS(t), -1) {
+		if !strings.Contains(js, st[1]+":") {
+			t.Errorf("popup.js has no text for state %q", st[1])
+		}
+	}
+}

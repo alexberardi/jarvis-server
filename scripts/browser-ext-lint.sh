@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Lint the Jarvis Browser Control extension (internal/agent/browser/extension) as each browser
 # gets it: `jarvis-agent browser pack` writes the per-browser copy, then web-ext lint checks the
-# Firefox one (AMO's own linter; warnings fail) and node checks the script parses.
+# Firefox one (AMO's own linter; warnings fail) and node checks the scripts parse.
 #
 #   scripts/browser-ext-lint.sh            # needs Go and Node (npx); CI runs it
 set -euo pipefail
@@ -21,5 +21,6 @@ node_() {
   if command -v node >/dev/null 2>&1; then node "$@"; else mise exec node@lts -- node "$@"; fi
 }
 node_ --check "$OUT/firefox/background.js"
+node_ --check "$OUT/firefox/popup.js"
 npx_ -y web-ext@8 lint --source-dir "$OUT/firefox" --warnings-as-errors --no-config-discovery
 echo "browser-ext-lint: ok"

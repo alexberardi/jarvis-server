@@ -6,8 +6,8 @@ privacy policy is the project's, at https://docs.jarvisautomation.dev/security/p
 `docs/security/privacy-policy.md`, section "Browser extension and desktop agent"); the images are
 in [images/](images/).
 
-Everything here was checked against the extension's code (`../extension/`) at version 0.2.0 (0.2.0 added
-`fill` and `click`: dictation, docs/agent/DESIGN.md §14).
+Everything here was checked against the extension's code (`../extension/`) at version 0.2.1 (0.2.0 added
+`fill` and `click`: dictation, docs/agent/DESIGN.md §14; 0.2.1 added the toolbar popup, install plan 3.5).
 If the extension gains a permission or reads something new, update the privacy answers below
 and the privacy policy's "Browser extension and desktop agent" section (jarvis-docs) to match.
 
@@ -194,9 +194,9 @@ it.
 ### Notes to reviewer (also Chrome's test instructions)
 
 ```
-This extension is the browser half of Jarvis, an open-source, self-hosted voice assistant (https://github.com/alexberardi/jarvis-server, AGPL-3.0). It does nothing by itself: it only acts on commands from the Jarvis desktop agent ("jarvis-agent") on the same computer, over native messaging (host name "io.jarvis.agent.browser"). The agent in turn talks only to the user's own self-hosted Jarvis server. The extension has no UI, no content scripts, no network code, no storage, no remote code and no externally_connectable; web pages and other extensions can't message it.
+This extension is the browser half of Jarvis, an open-source, self-hosted voice assistant (https://github.com/alexberardi/jarvis-server, AGPL-3.0). It does nothing by itself: it only acts on commands from the Jarvis desktop agent ("jarvis-agent") on the same computer, over native messaging (host name "io.jarvis.agent.browser"). The agent in turn talks only to the user's own self-hosted Jarvis server. Its only UI is a toolbar popup that says whether the agent is set up and, if not, links to the agent's public download page (https://github.com/alexberardi/jarvis-server/releases); the popup sends the extension nothing. It has no content scripts, no network code, no storage, no remote code and no externally_connectable; web pages and other extensions can't message it.
 
-WITHOUT THE AGENT (what you will see): the extension installs and stays idle. connectNative fails with "host not found" (or "Specified native messaging host not found"), and the background script retries with backoff up to once a minute (an alarm named "jarvis-reconnect" wakes it). Nothing else happens; there is nothing to click.
+WITHOUT THE AGENT (what you will see): the extension installs and stays idle; its toolbar button shows a "!" badge and the popup says the desktop agent isn't installed, with a download link. connectNative fails with "host not found" (or "Specified native messaging host not found"), and the background script retries with backoff up to once a minute (an alarm named "jarvis-reconnect" wakes it). Nothing else happens; there is nothing to click.
 
 TO SEE IT WORK (Linux or macOS, no Jarvis server needed; about 10 minutes):
 1. Build the agent: git clone https://github.com/alexberardi/jarvis-server && cd jarvis-server && scripts/fetch-sherpa-libs.sh && CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent   (needs Go 1.27; README, "Install the agent (from source)").
