@@ -245,7 +245,7 @@ beforeEach(() => {
 })
 
 describe('setup wizard (AD3, AD3a, AD3b)', () => {
-  it('walks Check → Account → Hardware → the five model jobs → Privacy → Done', async () => {
+  it('walks Check → Account → Hardware → the five model jobs → Privacy → This computer → Done', async () => {
     setSetupToken('tok')
     renderWizard()
 
@@ -307,6 +307,11 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }))
     await waitFor(() => expect(settings.updateSetting).toHaveBeenCalledWith('cc', 'web_search.enabled', true))
     expect(settings.updateSetting).not.toHaveBeenCalledWith('cc', 'pantry.enabled', expect.anything())
+
+    // This computer (install plan 3.3): optional, skipped here.
+    expect(await screen.findByRole('heading', { name: /Also use Jarvis Automation on this computer/ })).toBeInTheDocument()
+    expect(settings.updateSetting).toHaveBeenCalledWith('admin', 'setup.step', 'computer')
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
 
     // Done: recorded on the server, so no tab or browser resumes the wizard again (A10 F9).
     expect(await screen.findByText('Jarvis is set up')).toBeInTheDocument()
@@ -555,11 +560,11 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     renderWizard(false)
     await screen.findByRole('heading', { name: /^Voice Required/ })
     const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('button')
-    const names = ['Check', 'Account', 'Hardware', 'Language model', 'Speech-to-text', 'Voice', 'Voice recognition', 'Memory & search', 'Privacy', 'Done']
+    const names = ['Check', 'Account', 'Hardware', 'Language model', 'Speech-to-text', 'Voice', 'Voice recognition', 'Memory & search', 'Privacy', 'This computer', 'Done']
     expect(steps).toHaveLength(names.length)
     steps.forEach((b, i) => expect(b).toHaveAccessibleName(names[i]))
     expect(steps[5]).toHaveAttribute('aria-current', 'step')
-    expect(screen.getByTestId('setup-step-position')).toHaveTextContent('Step 6 of 10: Voice')
+    expect(screen.getByTestId('setup-step-position')).toHaveTextContent('Step 6 of 11: Voice')
   })
 
   // Home then picks Chat or, while something needs the operator, the dashboard (HomeRedirect).

@@ -84,10 +84,13 @@ describe('AddonsPage', () => {
     expect(within(offline).getByRole('link', { name: 'Start' })).toHaveAttribute('href', 'jarvis-agent://start')
   })
 
-  it('links downloads and the extension without detecting anything, and never asks for system info as a member', async () => {
+  it('offers the verified download and links the extension without detecting anything, and never asks for system info as a member', async () => {
     renderPage()
     await screen.findByRole('list', { name: 'Your devices' })
-    expect(screen.getByRole('link', { name: /Download for/ })).toHaveAttribute('href', expect.stringContaining('/releases'))
+    // The agent comes through jarvisd (install plan 3.1), with a picker for other computers.
+    expect(screen.getByRole('button', { name: /^Download/ })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: /Another computer|Choose your computer/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Install guide/ })).toHaveAttribute('href', expect.stringContaining('github.com'))
     expect(screen.getByRole('link', { name: /How browser control works/ })).toBeInTheDocument()
     expect(screen.getByText('Phone app')).toBeInTheDocument()
     expect(await screen.findByText(/No computers waiting/)).toBeInTheDocument()

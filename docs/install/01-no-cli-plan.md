@@ -159,6 +159,18 @@ install into the user's session):
 
 Each tick goes green live by polling. Leaving the step at any point is fine.
 
+**As built (item 3.3, 2026-10-14).** Step `computer` ("This computer" in the step list) between
+Privacy and Done, titled "Also use Jarvis Automation on this computer"; resumable like the others
+(`setup.step`). Ticking the agent shows three live ticks: the download (`AgentDownload`: OS and
+arch from the User-Agent and Chromium's architecture hint, a picker for the other builds; it
+fetches through the BFF with the session token and saves the blob, so a refusal shows its reason
+and the release page), the pending pairings with their codes (`PendingPairings`), and "connected"
+once `this-device` names an online agent, or, when the server can't tell, any online desktop agent
+of the operator's households. The extension box is enabled only with the agent ticked; it shows the
+store link for the page's browser (the guide while the listings are null) and turns green from the
+agent's heartbeat (`browser_extension: connected`). macOS shows the permissions note. "Skip for
+now" until something is ticked. The Add-ons page's download button is the same component.
+
 ### 3.2 The Add-ons tab (user, 2026-10-13)
 
 It replaces DESIGN §13 item 5's "Desktop & browser" checklist name, and keeps its two-step
@@ -255,8 +267,8 @@ do. Each item lands green on `main` on its own (the §8 style).
 | # | Item | Size | Depends on | CI | Tests |
 |---|---|---|---|---|---|
 | 3.1 | **Partly built (2026-10-14):** `/api/addons/this-device` and device sign-out (pass routes to cc, user tier; DESIGN §13 "Signing out", "This computer"); the device list and pairing go through cc's existing member routes. **Open:** BFF: `/api/addons/agent/{os}/{arch}` (fetch, verify, cache, stream), `/api/addons/devices`, `/api/addons/this-device`, pairing list/approve; member-gated **server-side** | M | 1.1, 1.8, 2.1 | `build`, `admin` | Unit with fake GitHub (as §8.2); a member sees only their households; an unsigned asset is refused |
-| 3.2 | **Add-ons tab** (§3.2). **Minimal page built (webapp 01 P4, 2026-10-13):** nav slot, Your devices from cc's node list with extension state and a Start link, pending pairings, download/store link cards; "This computer" and the verified download wait on 3.1 | M | 3.1, Q2, Q3 | `admin` (vitest) | Live ticks with a mocked poll; "can't tell" state |
-| 3.3 | **Wizard step** (§3.1) | M | 3.1 | `admin` | Wizard test: skip, agent-only, agent + extension |
+| 3.2 | **Add-ons tab** (§3.2). **Minimal page built (webapp 01 P4, 2026-10-13):** nav slot, Your devices from cc's node list with extension state and a Start link, pending pairings, download/store link cards. "This computer" since 2026-10-14; the download button uses the verified download (3.1) since PR #PRWEB, with the release page as the fallback | M | 3.1, Q2, Q3 | `admin` (vitest) | Live ticks with a mocked poll; "can't tell" state |
+| 3.3 | **Built (PR #PRWEB, 2026-10-14; §3.1 "As built").** **Wizard step** (§3.1) | M | 3.1 | `admin` | Wizard test: skip, agent-only, agent + extension |
 | 3.4 | Mobile: "Add a computer" + pairing approval (jarvis-node-mobile) | M | 1.1 | mobile CI | Jest; physical-device pass |
 | 3.5 | **Done (PR #166, 2026-10-14; 0.2.1, store resubmission pending: 4.2).** The toolbar popup says whether the agent's native host answered and, when it didn't, links to the agent download on the public release page (the extension never learns the server's address, so it can't link to Add-ons). Extension popup → Add-ons link; ship as 0.2.x | S | — | `browser-ext-lint` | `TestExtensionSurface` unchanged |
 | 3.6 | Landing page (jarvis-installer `feat/jarvisd-landing`): OS-detected buttons for server and agent, "Advanced (terminal)", the SmartScreen note | S | 2.2–2.4 | that repo | Manual |
