@@ -6,9 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
@@ -28,52 +26,17 @@ type Found struct {
 }
 
 // DefaultPort is the config service's port, assumed when a typed address has none.
-const DefaultPort = "7700"
+const DefaultPort = node.DefaultConfigPort
 
-// NormalizeAddress turns what someone typed ("192.168.1.10", "jarvis.local:7700",
-// "http://host:7700/") into a config service URL, or says what's wrong in plain words.
-func NormalizeAddress(s string) (string, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", errors.New("Type the server's address, like 192.168.1.10.")
-	}
-	if !strings.Contains(s, "://") {
-		s = "http://" + s
-	}
-	u, err := url.Parse(s)
-	bad := errors.New("That doesn't look like an address. Try something like 192.168.1.10 or jarvis.local.")
-	if err != nil || u.Host == "" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
-		(u.Path != "" && u.Path != "/") || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", bad
-	}
-	host := u.Host
-	if u.Port() == "" {
-		if u.Scheme == "https" {
-			host = u.Host
-		} else {
-			host = net.JoinHostPort(u.Hostname(), DefaultPort)
-		}
-	}
-	return u.Scheme + "://" + host, nil
-}
+// NormalizeAddress turns what someone typed ("192.168.1.10", "jarvis.local:7700", the web
+// app's "http://host:7710/addons") into a URL to try first, or says what's wrong in plain words
+// (node.NormalizeAddress).
+func NormalizeAddress(s string) (string, error) { return node.NormalizeAddress(s) }
 
 // isConfigService asks base/info whether it is Jarvis Automation's config service.
 func isConfigService(ctx context.Context, hc *http.Client, base string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/info", nil)
-	if err != nil {
-		return false
-	}
-	resp, err := hc.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	var info struct {
-		Service string `json:"service"`
-	}
-	return resp.StatusCode == http.StatusOK && decodeSmall(resp, &info) == nil && info.Service == "jarvis-config-service"
+	ok, _ := node.IsConfigService(ctx, hc, base)
+	return ok
 }
 
 // finder is the server search: this computer first, then the network.
@@ -204,10 +167,13 @@ type chosen struct {
 
 // choose checks a server can be joined: it is a config service, and lists command-center and
 // auth.
-func choose(ctx context.Context, hc *http.Client, s Found) (chosen, error) {
-	if !isConfigService(ctx, hc, s.URL) {
-		return chosen{}, errors.New("No Jarvis Automation server answered at " + s.URL + ". Check the address, and that the server is on.")
+func choose(ctx context.Context, hc *http.Client, configPort string, s Found) (chosen, error) {
+	// Any of the server's addresses (the web app's port, a path) leads to its config service.
+	u, err := node.ResolveConfigURLOn(ctx, hc, s.URL, configPort)
+	if err != nil {
+		return chosen{}, err
 	}
+	s.URL = u
 	svcs, err := node.Discover(ctx, hc, s.URL)
 	if err != nil {
 		return chosen{}, errors.New("That server answered, but couldn't say how to join it. Try again in a minute.")

@@ -160,7 +160,7 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: jarvis-agent <command> [flags]
 
   enroll   register this computer as a node of a jarvisd household
-           --server URL (jarvisd config service, e.g. http://192.0.2.10:7700)
+           --server ADDRESS (the server: 192.0.2.10, host:7700, or any of its URLs, the web app's too)
            then either nothing: shows a code for a household member to approve (or --code)
            or --email ADDR [--household ID] (prompts for the password)
            or --token prov_... --node-id ID (a token minted elsewhere)
@@ -251,7 +251,7 @@ func nativeHost() (*host.Host, error) {
 
 func enroll(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-	server := fs.String("server", "", "jarvisd config service URL, e.g. http://192.0.2.10:7700")
+	server := fs.String("server", "", "the Jarvis Automation server's address: its host (192.0.2.10), host:port, or any of its URLs, the web app's included")
 	email := fs.String("email", "", "your Jarvis account email (prompts for the password)")
 	pwStdin := fs.Bool("password-stdin", false, "read the password from stdin instead of prompting")
 	household := fs.String("household", "", "household id (needed only if you belong to several)")
@@ -284,9 +284,18 @@ func enroll(ctx context.Context, args []string) error {
 		return fmt.Errorf("already enrolled (%s); pass --force to enroll again", path)
 	}
 	if *server == "" {
-		return errors.New("--server is required (jarvisd's address, e.g. http://192.0.2.10:7700)")
+		return errors.New("--server is required (the Jarvis Automation server's address, e.g. 192.0.2.10)")
 	}
 	hc := &http.Client{Timeout: 20 * time.Second}
+	// Whatever was pasted (a bare host, the web app's URL on 7710, any path): the config service.
+	typed := *server
+	if *server, err = node.ResolveConfigURL(ctx, hc, typed); err != nil {
+		return err
+	}
+	if n, _ := node.NormalizeAddress(typed); n != *server {
+		// Not the address given: say where the server was found.
+		fmt.Printf("Found the Jarvis Automation server at %s.\n", *server)
+	}
 	svcs, err := node.Discover(ctx, hc, *server)
 	if err != nil {
 		return err
