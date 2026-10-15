@@ -45,7 +45,9 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   **Pantry packages install on a computer** (2026-10-15,
   [decision](decisions/2026-10-15-pantry-packages-on-desktop-agents.md), [agent/DESIGN.md §6](agent/DESIGN.md)):
   the app's Install/Update/Revert/Uninstall work on a desktop agent (uv-managed Python, no
-  restart); agents and other Pi-only components are skipped.
+  restart); agents and other Pi-only components are skipped. Pi-only packages (`targets`
+  without `desktop`, or `apt_packages`) aren't offered to a computer and jarvisd refuses them
+  ([decision](decisions/2026-10-15-store-hides-pi-only-packages.md)).
 - [ ] **Try dictation on a GNOME or KDE Wayland desktop (e.g. Bazzite)**: `jarvis-agent dictation allow`, then type text with accents/CJK and press keys; report whether the dialog remembered the grant and which characters arrived ([agent/DESIGN.md §14](agent/DESIGN.md), the RemoteDesktop portal). Also Hyprland (built-in virtual keyboard) and any X11 desktop (XTEST/EWMH).
 - [ ] **Review dictation's defaults** (`docs/agent/DESIGN.md` §14, open questions 1–9; built
   2026-10-13 with confirmation off, 2000-character cap, no clipboard, password fields only when

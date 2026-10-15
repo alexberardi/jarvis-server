@@ -296,8 +296,12 @@ packages may assume the sidecar but not audio in/out.
 
 **As built (2026-10-15, [decision](../decisions/2026-10-15-pantry-packages-on-desktop-agents.md)):**
 no package declares `targets` yet, so the agent installs one without the field when its
-`platforms` match, and refuses one whose `targets` leave out `desktop`. Pantry doesn't filter
-by node kind.
+`platforms` match, and refuses one whose `targets` leave out `desktop`.
+**Since 2026-10-15 ([decision](../decisions/2026-10-15-store-hides-pi-only-packages.md)):** the
+mobile Store leaves computers out of the node picker for a package whose `targets` leave out
+`desktop` or that needs `apt_packages`, and jarvisd's `package-install` refuses such a package
+for a desktop node (422, `code: "not_for_computers"`) from the Pantry detail's `targets` and
+`apt_packages`. The agent's own check stays the backstop when Pantry can't be asked.
 
 ## 9. Open questions, by priority, with recommendations
 

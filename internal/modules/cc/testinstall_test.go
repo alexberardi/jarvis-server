@@ -14,28 +14,36 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
-// fakePantry serves GET /v1/forge/drafts/{code} (jarvis-pantry forge_drafts.py) and records
-// the codes asked for.
+// fakePantry serves GET /v1/forge/drafts/{code} (jarvis-pantry forge_drafts.py) and
+// GET /v1/commands/{name} (command_detail.py), and records the codes and names asked for.
 type fakePantry struct {
 	*httptest.Server
-	mu     sync.Mutex
-	asked  []string
-	drafts map[string]string // code -> raw JSON body
-	status int               // when non-zero, every request answers this
+	mu       sync.Mutex
+	asked    []string
+	drafts   map[string]string // code -> raw JSON body
+	commands map[string]string // command name -> raw JSON body
+	status   int               // when non-zero, every request answers this
 }
 
 func newFakePantry(t *testing.T) *fakePantry {
 	t.Helper()
 	p := &fakePantry{drafts: map[string]string{
 		"ABC123": `{"package_name":"weather_test","files":[{"filename":"command.py","content":"x","language":"python"}]}`,
-	}}
+	}, commands: map[string]string{}}
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		code, ok := strings.CutPrefix(r.URL.Path, "/v1/forge/drafts/")
 		p.mu.Lock()
-		p.asked = append(p.asked, code)
+		var key, body string
+		var found bool
+		if code, ok := strings.CutPrefix(r.URL.Path, "/v1/forge/drafts/"); ok {
+			key = code
+			body, found = p.drafts[code]
+		} else if name, ok := strings.CutPrefix(r.URL.Path, "/v1/commands/"); ok {
+			key = name
+			body, found = p.commands[name]
+		}
+		p.asked = append(p.asked, key)
 		status := p.status
-		body, found := p.drafts[code]
-		found = found && ok && r.Method == http.MethodGet
+		found = found && r.Method == http.MethodGet
 		p.mu.Unlock()
 		switch {
 		case status != 0:

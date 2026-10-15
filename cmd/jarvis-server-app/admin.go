@@ -5,10 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 )
+
+// beaconPoll is how often fileBeacon looks for its file: the progress window's delay after the
+// password dialog closes.
+const beaconPoll = 100 * time.Millisecond
 
 // shellJoin quotes each word for /bin/sh.
 func shellJoin(words ...string) string {
@@ -84,4 +92,39 @@ func runUser(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return out.Bytes(), fmt.Errorf("%w: %s", err, strings.TrimSpace(errb.String()))
 	}
 	return out.Bytes(), nil
+}
+
+// fileBeacon is the app's beacon: a file in a new private directory under dir (the user's
+// temporary directory when empty), looked for every poll; root can create it there. stop ends
+// the watch and removes the directory, whatever root left in it.
+func fileBeacon(dir string, poll time.Duration) (string, <-chan struct{}, func(), error) {
+	d, err := os.MkdirTemp(dir, "jarvis-server-app-")
+	if err != nil {
+		return "", nil, nil, err
+	}
+	path := filepath.Join(d, "started")
+	started, quit := make(chan struct{}), make(chan struct{})
+	go func() {
+		t := time.NewTicker(poll)
+		defer t.Stop()
+		for {
+			select {
+			case <-quit:
+				return
+			case <-t.C:
+				if _, err := os.Stat(path); err == nil {
+					close(started)
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			close(quit)
+			_ = os.RemoveAll(d)
+		})
+	}
+	return path, started, stop, nil
 }

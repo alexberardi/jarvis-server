@@ -34,10 +34,19 @@ var errCanceled = errors.New("canceled")
 
 // dialogs is what the app shows. choose returns the index of the button pressed (the first is
 // the default, Return); confirmInstall is the first-open dialog with its firewall checkbox.
+// busy shows a progress window (title, text, a spinner) from when started closes until done
+// closes, keeping the app responsive meanwhile, and returns once done is closed. Nothing shows
+// when done closes first (the password dialog was canceled).
 type dialogs interface {
 	confirmInstall(title, text, checkbox string) (install, firewall bool)
 	choose(title, text string, buttons ...string) int
+	busy(title, text string, started, done <-chan struct{})
 }
+
+// beacon makes a path for the root script to touch as its first step, a channel closed once it
+// has (the password was accepted and the work began), and a stop that ends the watch and
+// removes the path.
+type beacon func() (path string, started <-chan struct{}, stop func(), err error)
 
 // serviceState is what `jarvisd service status --json` says (the fields the app reads).
 type serviceState struct {
@@ -65,6 +74,7 @@ type app struct {
 	admin    func(ctx context.Context, prompt, script string) (string, error)
 	open     func(url string) error
 	dataSize func(home string) int64
+	beacon   beacon
 	log      io.Writer
 }
 
@@ -132,10 +142,16 @@ func (a *app) install(ctx context.Context) error {
 }
 
 // installFromApp runs the bundled jarvisd's install-from-app as root and opens the URL it prints
-// (the setup link on a fresh install, the admin once set up).
+// (the setup link on a fresh install, the admin once set up). It takes 10–30 s: a progress
+// window shows from when the password is accepted until it ends.
 func (a *app) installFromApp(ctx context.Context, what string, extra ...string) error {
 	argv := append([]string{a.bundled, "install-from-app", "--run-as", a.user}, extra...)
-	out, err := a.admin(ctx, productName+" wants to "+what+" its background service.", shellJoin(argv...))
+	title := "Installing " + productName + "…"
+	if what == "update" {
+		title = "Updating " + productName + "…"
+	}
+	out, err := a.adminBusy(ctx, productName+" wants to "+what+" its background service.", shellJoin(argv...),
+		title, "This takes up to a minute. Your browser opens when it's done.")
 	if errors.Is(err, errCanceled) {
 		return nil
 	}
@@ -147,6 +163,38 @@ func (a *app) installFromApp(ctx context.Context, what string, extra ...string) 
 		return a.report("wasn't installed", fmt.Errorf("the installer printed no address to open (%q)", out))
 	}
 	return a.open(url)
+}
+
+// adminBusy runs script as root (a.admin) with the progress window up while it runs. The
+// script first touches the beacon's path, so the window waits for the password dialog to be
+// answered rather than sitting behind it.
+func (a *app) adminBusy(ctx context.Context, prompt, script, title, text string) (string, error) {
+	path, started, stop, err := a.beacon()
+	if err != nil {
+		// No beacon: show the window at once rather than not at all.
+		fmt.Fprintf(a.log, "progress beacon: %v\n", err)
+		ch := make(chan struct{})
+		close(ch)
+		started, stop = ch, func() {}
+	} else {
+		// ";" not "&&": the beacon only drives the window, and the work's exit status is the script's.
+		script = "touch " + shellJoin(path) + " 2>/dev/null; " + script
+	}
+	defer stop()
+	type result struct {
+		out string
+		err error
+	}
+	res := make(chan result, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, err := a.admin(ctx, prompt, script)
+		res <- result{out, err}
+	}()
+	a.ui.busy(title, text, started, done)
+	r := <-res
+	return r.out, r.err
 }
 
 // uninstall stops and removes the service and the binary, asking whether to delete the data
