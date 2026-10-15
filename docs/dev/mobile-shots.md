@@ -19,7 +19,33 @@ scripts/sandbox down --name mob --purge
 ```
 
 `--help` lists every flag. `--ref REF` builds another commit of the mobile repo (default
-`origin/main`, fetched first), and `--rebuild` ignores the cached APK.
+`origin/main`, fetched first), `--no-fetch` never fetches into it, and `--rebuild` ignores the
+cached APK.
+
+### Which mobile repo
+
+`JARVIS_MOBILE_REPO` (default: `jarvis-node-mobile` next to the main jarvis-server checkout)
+can be any git repo: a normal checkout, a worktree or a bare repo. The script only reads it
+(`rev-parse`, `show`, `archive`). The one write is the `git fetch origin main` before an
+`--ref origin/main` build; pass `--no-fetch` when someone else keeps the repo current, as the
+agent loop does with its mirror:
+
+```sh
+JARVIS_MOBILE_REPO=~/path/to/jarvis-node-mobile.git \
+  scripts/mobile-shot --sandbox loop-42 --ref "$LOOP_HEAD" --no-fetch
+```
+
+A bare mirror has `refs/heads/main` but no `origin/main`, so give it a sha or `main`.
+
+### Concurrent runs
+
+Every run shares one build dir (`~/.cache/jarvis-harness/mobile/build`, with its
+`node_modules` and `build.log`). A build takes `flock` on
+`~/.cache/jarvis-harness/mobile/build.lock`, so a second run that needs a build waits
+("another mobile-shot is building …") instead of clobbering the first. Once it has the lock it
+checks the APK cache again, so two runs of the same commit build it once. A cached APK needs no
+lock, and the APK is written to a temp name and renamed into place, so a reader never sees half
+of one. Emulators don't collide either: each run takes its own port (see Isolation).
 
 The output goes to `.sandbox/<name>/mobile/<timestamp>/`:
 
@@ -52,8 +78,9 @@ node is offline.
    signs the release build with the debug key. Node 22 (from the repo's `mise.toml`) and Java
    17 come from mise. The result is cached as
    `~/.cache/jarvis-harness/mobile/apk/jarvis-mobile-<sha>-r<recipe>.apk`. The user's checkout
-   is only read (`git archive`, `git fetch`), and its `android/` directory is never
-   regenerated. No git worktree is registered in their repo.
+   is only read (`git archive`, and `git fetch` unless `--no-fetch`), and its `android/`
+   directory is never regenerated. No git worktree is registered in their repo. One build runs
+   at a time (a `flock` on `build.lock`, see Concurrent runs).
 2. **Server URL.** The build bakes in `EXPO_PUBLIC_DEV_MODE=true` and
    `EXPO_PUBLIC_MANUAL_CONFIG_URL=http://localhost:7700`, the same pair the repo's
    `development-e2e` EAS profile uses (see `src/config/env.ts` and
