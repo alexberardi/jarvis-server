@@ -38,7 +38,7 @@ read -r -a nfpm <<<"${NFPM:-go run github.com/goreleaser/nfpm/v2/cmd/nfpm@$NFPM_
 DEB_VERSION=${VERSION#v}
 DEB_VERSION=${DEB_VERSION/-/\~}
 export DEB_VERSION DEB_ARCH=$ARCH JARVISD_BIN AGENT_BIN
-export DEB_MAINTAINER=${DEB_MAINTAINER:-Jarvis Automation <noreply@jarvisautomation.io>}
+export DEB_MAINTAINER=${DEB_MAINTAINER:-Jarvis Automation <help@jarvisautomation.io>}
 DEB_GEN=$(mktemp -d)
 export DEB_GEN
 trap 'rm -rf "$DEB_GEN"' EXIT

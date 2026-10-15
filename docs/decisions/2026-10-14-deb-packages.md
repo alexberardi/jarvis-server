@@ -26,7 +26,7 @@ minisign signature as the archives.
   for the per-user copy too, so a person's own entry, which replaces the package's after their
   first launch, looks the same. Only the `.deb` installs the icon; the one-liner's entry falls back
   to the theme's generic one.
-- **Maintainer:** `Jarvis Automation <noreply@jarvisautomation.io>`, a no-reply placeholder
+- **Maintainer:** `Jarvis Automation <help@jarvisautomation.io>` (user, 2026-10-15: the support address). `DEB_MAINTAINER` overrides it.
   (`DEB_MAINTAINER` overrides it). Change it if the project gets a packaging address.
 
 Built as described in [00-installers §8.3](../install/00-installers.md) ("The Debian/Ubuntu
