@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Jarvis Automation Server
+GenericName=Home assistant server
+Comment=Set up Jarvis Automation, or open its admin page
+Exec=/usr/lib/jarvisd/open-setup
+TryExec=/usr/local/bin/jarvisd
+Icon=net.jarvisautomation.server
+Terminal=false
+StartupNotify=false
+Categories=Network;Settings;
+Keywords=Jarvis;voice;assistant;home;automation;

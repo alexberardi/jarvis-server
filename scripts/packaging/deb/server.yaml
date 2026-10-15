@@ -1,0 +1,54 @@
+# nfpm config of jarvis-automation-server, the jarvisd .deb (01-no-cli-plan item 2.4). Built by
+# scripts/build-debs.sh, which fills in the variables and runs the pinned nfpm from the repo root.
+#
+# Bootstrap layout (plan §2.1): dpkg owns /usr/lib/jarvisd/jarvisd, never the binary that runs.
+# postinst (`jarvisd install-from-app`) copies it to /usr/local/bin/jarvisd, where jarvisd's own
+# updater swaps it, and registers the systemd unit; prerm unregisters it; postrm purge deletes the
+# data and the jarvisd account (decided Q6).
+name: jarvis-automation-server
+arch: ${DEB_ARCH}
+platform: linux
+version: ${DEB_VERSION}
+version_schema: none
+section: net
+priority: optional
+maintainer: ${DEB_MAINTAINER}
+homepage: https://github.com/alexberardi/jarvis-server
+license: AGPL-3.0
+description: |-
+  Jarvis Automation server (jarvisd)
+  Jarvis Automation is a private, self-hosted voice assistant and home
+  automation hub. This package installs its server, jarvisd, as a system
+  service that starts at boot, keeps its data in /var/lib/jarvisd and updates
+  itself from the admin page. Installing it opens the setup page in your
+  browser; on a computer without a screen it prints the link and a QR code.
+depends:
+  - libc6
+  - libstdc++6
+  - libgcc-s1
+contents:
+  - src: ${JARVISD_BIN}
+    dst: /usr/lib/jarvisd/jarvisd
+    file_info: { mode: 0755 }
+  - src: scripts/packaging/deb/server/open-setup
+    dst: /usr/lib/jarvisd/open-setup
+    file_info: { mode: 0755 }
+  - src: scripts/packaging/deb/server/net.jarvisautomation.server.desktop
+    dst: /usr/share/applications/net.jarvisautomation.server.desktop
+    file_info: { mode: 0644 }
+  - src: internal/agent/tray/icon.png
+    dst: /usr/share/icons/hicolor/128x128/apps/net.jarvisautomation.server.png
+    file_info: { mode: 0644 }
+  - src: scripts/packaging/deb/copyright
+    dst: /usr/share/doc/jarvis-automation-server/copyright
+    file_info: { mode: 0644 }
+  - src: ${DEB_GEN}/jarvis-automation-server/changelog.gz
+    dst: /usr/share/doc/jarvis-automation-server/changelog.gz
+    file_info: { mode: 0644 }
+  - src: scripts/packaging/deb/server/lintian-overrides
+    dst: /usr/share/lintian/overrides/jarvis-automation-server
+    file_info: { mode: 0644 }
+scripts:
+  postinstall: scripts/packaging/deb/server/postinst
+  preremove: scripts/packaging/deb/server/prerm
+  postremove: scripts/packaging/deb/server/postrm

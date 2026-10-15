@@ -397,9 +397,57 @@ jobs:
         run: scripts/fetch-sherpa-libs.sh ${{ matrix.target }}
       - name: shellcheck
         if: runner.os == 'Linux'
-        run: shellcheck scripts/install-from-app-e2e.sh && shellcheck -s sh scripts/packaging/deb/postinst
+        run: shellcheck scripts/install-from-app-e2e.sh && shellcheck -s sh scripts/packaging/deb/server/postinst
       - name: install-from-app end to end
         run: scripts/install-from-app-e2e.sh
+
+  # The Debian/Ubuntu packages (01-no-cli-plan 2.4): jarvis-automation-server (jarvisd) and
+  # jarvis-automation-agent, built with the pinned nfpm (scripts/build-debs.sh) for amd64 and
+  # arm64, lintian-clean, then installed for real on the runner (systemd, ufw on): install →
+  # service active and /health, reinstall, upgrade, a self-updated binary never downgraded,
+  # remove (data kept), purge (all gone); the agent's menu entry and URL handler, a test user's
+  # first launch with a scratch HOME and a private D-Bus, remove. See scripts/deb-check.sh.
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64
+      - name: shellcheck
+        run: |
+          shellcheck scripts/build-debs.sh scripts/deb-check.sh
+          shellcheck -s sh scripts/packaging/deb/server/postinst scripts/packaging/deb/server/prerm \
+            scripts/packaging/deb/server/postrm scripts/packaging/deb/server/open-setup scripts/packaging/deb/agent/postrm
+      # v0.0.1 and v0.0.2 packages (an upgrade), and a v0.0.3 jarvisd standing in for one the
+      # self-updater installed.
+      - name: Build the packages
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          build() { # version arch
+            for prog in jarvisd jarvis-agent; do
+              GOARCH=$2 go build -trimpath -ldflags "-s -w -X main.version=$1" -o "bin/$1-$2/$prog" "./cmd/$prog"
+            done
+          }
+          build v0.0.1-deb amd64
+          build v0.0.2-deb amd64
+          build v0.0.2-deb arm64
+          build v0.0.3-deb amd64
+          scripts/build-debs.sh v0.0.1-deb amd64 bin/v0.0.1-deb-amd64/jarvisd bin/v0.0.1-deb-amd64/jarvis-agent dist
+          scripts/build-debs.sh v0.0.2-deb amd64 bin/v0.0.2-deb-amd64/jarvisd bin/v0.0.2-deb-amd64/jarvis-agent dist
+          scripts/build-debs.sh v0.0.2-deb arm64 bin/v0.0.2-deb-arm64/jarvisd bin/v0.0.2-deb-arm64/jarvis-agent dist
+          for d in dist/*.deb; do echo "== $d"; dpkg-deb --info "$d"; dpkg-deb --contents "$d"; done
+      # What an Ubuntu desktop has: the menu/MIME cache trigger, xdg-mime, a session bus.
+      - name: Tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lintian desktop-file-utils xdg-utils dbus
+      - name: lintian
+        run: lintian --fail-on error,warning --info dist/*_0.0.2-deb_*.deb
+      - name: Install, upgrade, remove, purge
+        run: sudo CI=1 scripts/deb-check.sh dist v0.0.1-deb v0.0.2-deb bin/v0.0.3-deb-amd64/jarvisd
 
   # The install scripts (I3, I4) end to end against a release-shaped archive of this commit,
   # served from a local HTTP server (--base-url): verify, install, firewall fix, health,

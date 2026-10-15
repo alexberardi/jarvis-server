@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -160,5 +162,23 @@ func TestCheckStartURL(t *testing.T) {
 		if err := CheckStartURL(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+// The .deb's system-wide menu entry (scripts/packaging/deb/agent, decided Q5) is the one
+// install writes for a per-user copy, for the package's /usr/lib copy: the same Exec (`start`,
+// which sets the user up on first launch), URL handler, icon and file name, so a person's own
+// entry, once written, replaces it without changing anything they see.
+func TestDebMenuEntryIsInstalls(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", "packaging", "deb", "agent", appid.DesktopFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := MenuEntry("/usr/lib/jarvis-agent/jarvis-agent"); string(b) != want {
+		t.Fatalf("scripts/packaging/deb/agent/%s:\n%s\nwant (install.MenuEntry):\n%s", appid.DesktopFile, b, want)
+	}
+	e := Env{GOOS: "linux", Home: "/home/u", Exe: "/usr/lib/jarvis-agent/jarvis-agent"}
+	if !SetsUpOnFirstLaunch(e) {
+		t.Fatal("the package's copy doesn't set a user up on its first launch")
 	}
 }

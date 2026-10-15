@@ -8,3 +8,5 @@ internal/agent/deploy/** -text
 internal/agent/install/testdata/** -text
 # The QR golden is compared byte for byte (no CRLF conversion on Windows checkouts).
 internal/platform/qrterm/testdata/** -text
+# The .deb's agent menu entry is compared with install.MenuEntry; its maintainer scripts run on Linux.
+scripts/packaging/deb/** -text

@@ -121,6 +121,8 @@ func linuxUninstall(e Env, o UninstallOptions) []Op {
 // jarvis-agent:// URL handler, and the file the RemoteDesktop portal knows the agent's app id by
 // (it must be named <app id>.desktop and its Exec program must exist). Opening it, or the URL,
 // runs `start`, which never reads anything from the URL but checks it is jarvis-agent://start.
+// The icon is the theme's net.jarvisautomation.agent, which the .deb installs system-wide
+// (scripts/packaging/deb/agent); the .deb's own entry is this one for its /usr/lib copy.
 func MenuEntry(bin string) string {
 	return "[Desktop Entry]\n" +
 		"Type=Application\n" +
@@ -130,9 +132,11 @@ func MenuEntry(bin string) string {
 		"Comment=Use Jarvis on this computer: voice, browser control, dictation\n" +
 		"Exec=" + desktopExecArg(bin) + " start %u\n" +
 		"TryExec=" + desktopString(bin) + "\n" +
+		"Icon=" + appid.ID + "\n" +
 		"Terminal=false\n" +
 		"StartupNotify=false\n" +
 		"Categories=Utility;\n" +
+		"Keywords=Jarvis;voice;assistant;dictation;\n" +
 		"MimeType=" + mimeURLHandler + ";\n"
 }
 

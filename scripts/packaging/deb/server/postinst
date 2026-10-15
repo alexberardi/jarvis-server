@@ -1,0 +1,22 @@
+#!/bin/sh
+# postinst of jarvis-automation-server, the jarvisd .deb (01-no-cli-plan items 1.10 and 2.4).
+#
+# The package ships the binary at /usr/lib/jarvisd/jarvisd. `install-from-app` copies it to
+# /usr/local/bin/jarvisd, which dpkg doesn't own, so jarvisd's own updater can swap it; a newer
+# self-updated copy is kept, so an upgrade or a reinstall of an older package never downgrades
+# it. Then it registers and starts the systemd unit (a no-op when this version already runs
+# healthy), opens the firewall for the local network only when ufw or firewalld is active
+# (decided Q4: LAN subnets only, rules tagged `jarvisd` so removing the package removes them),
+# prints the setup link with a QR code (a headless install over SSH), and opens the link in the
+# browser of whoever is at the screen until setup is done (--open; nothing on a headless box).
+# Without systemd (a container) it installs the binary and says how to run it. stdout is the
+# URL alone.
+set -e
+
+case "$1" in
+configure | abort-remove)
+  /usr/lib/jarvisd/jarvisd install-from-app --qr --open --allow-no-service
+  ;;
+esac
+
+exit 0

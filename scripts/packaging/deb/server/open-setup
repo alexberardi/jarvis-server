@@ -1,0 +1,9 @@
+#!/bin/sh
+# "Jarvis Automation Server" in the app menu (01-no-cli-plan §2.1 "First run"): opens the setup
+# link, or the admin once setup is done, in this user's browser. The link carries the setup
+# token, which only root can read, so polkit asks for an administrator's password first. The
+# fallback when the install couldn't open the browser itself (a different user at the screen,
+# or no browser yet).
+set -e
+url=$(pkexec /usr/local/bin/jarvisd setup-link --url)
+exec xdg-open "$url"

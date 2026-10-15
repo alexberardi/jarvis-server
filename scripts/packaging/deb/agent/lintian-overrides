@@ -1,0 +1,6 @@
+# jarvis-agent is a static Go binary (CGO_ENABLED=0, release.yml): the C toolchain's hardening
+# flags don't apply, and the strings lintian spell-checks are in Go dependencies.
+jarvis-automation-agent: hardening-no-pie [usr/lib/jarvis-agent/jarvis-agent]
+jarvis-automation-agent: hardening-no-relro [usr/lib/jarvis-agent/jarvis-agent]
+jarvis-automation-agent: hardening-no-bindnow [usr/lib/jarvis-agent/jarvis-agent]
+jarvis-automation-agent: spelling-error-in-binary * [usr/lib/jarvis-agent/jarvis-agent]

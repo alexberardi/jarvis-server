@@ -1,0 +1,18 @@
+#!/bin/sh
+# postrm of jarvis-automation-agent (01-no-cli-plan item 2.4, decided Q5).
+#
+# The package installs nothing per user: dpkg removes its files (the /usr/lib copy, the menu
+# entry and URL handler, the icon) and that's all. Each person who opened the agent has their
+# own self-updating copy under ~/.local/lib/jarvis-agent, with their own menu entry and login
+# item; a package script can't reach every home, so those stay until their owner removes them.
+set -e
+
+case "$1" in
+remove)
+  echo "Jarvis Automation Agent: each person who set it up keeps their own copy. To remove it, use"
+  echo "\"Remove Jarvis Automation Agent\" on its setup page, or run, as that person:"
+  echo "  ~/.local/lib/jarvis-agent/jarvis-agent uninstall --purge"
+  ;;
+esac
+
+exit 0
