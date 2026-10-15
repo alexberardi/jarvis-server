@@ -55,6 +55,8 @@ var wantTiers = map[string]tier{
 	// Add-ons: device sign-out (cc: the pairer or a household admin) and "this computer" (a hint).
 	"POST /api/cc/api/v0/nodes/{node_id}/sign-out": tierUser,
 	"GET /api/addons/this-device":                  tierUser,
+	// The desktop agent download (install plan 3.1): a public release asset, verified here.
+	"GET /api/addons/agent/{os}/{arch}": tierUser,
 
 	// The inbox: per-user rows.
 	"GET /api/notifications/api/v0/inbox":                  tierUser,

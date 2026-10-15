@@ -38,6 +38,11 @@
 #                    the GPU the installed jarvisd uses. The CPU build is fetched on first use.
 #   --stt-model ID   the catalog's stt model for --voice (default whisper-small.en; base.en is
 #                    faster and mishears more; whisper-large-v3-turbo-q5_0 is better and slower)
+#   --version V      the version jarvisd reports (default dev-sandbox); a release tag such as
+#                    v1.2.0 makes the release-matching paths (the agent download) testable
+#   --trust-key K    also trust this minisign public key (a test build, as scripts/upgrade-e2e.sh
+#                    does; never the project's). With JARVIS_UPDATE_API (or JARVISD_RELEASE_BASE)
+#                    in the environment of `up`, jarvisd reads a fake release signed with it
 #
 # Nodes may claim who is speaking (JARVIS_DEV_SPEAKER_HINTS=1), standing in for voice ID.
 # Without --voice, STT is off and TTS has no voice models: pipeline tests start from text
@@ -52,9 +57,10 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM=shared UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
+VERSION=dev-sandbox TRUST_KEY=
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -64,9 +70,11 @@ while [ $# -gt 0 ]; do
     --ui) UI=1; shift ;;
     --voice) VOICE=1; shift ;;
     --stt-model) STT_MODEL=$2; shift 2 ;;
+    --version) VERSION=$2; shift 2 ;;
+    --trust-key) TRUST_KEY=$2; shift 2 ;;
     --purge) PURGE=1; shift ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -319,7 +327,9 @@ cmd_up() {
     npm --prefix "$ROOT/web/admin" ci --silent && npm --prefix "$ROOT/web/admin" run build --silent
   fi
   say "building jarvisd"
-  (cd "$ROOT" && CGO_ENABLED=0 go build -ldflags "-X main.version=dev-sandbox" -o "$DIR/jarvisd" ./cmd/jarvisd)
+  local ldflags="-X main.version=$VERSION"
+  [ -z "$TRUST_KEY" ] || ldflags="$ldflags -X github.com/alexberardi/jarvis-server/internal/update.extraTrustedKey=$TRUST_KEY"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -ldflags "$ldflags" -o "$DIR/jarvisd" ./cmd/jarvisd)
   (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/pipeline" ./tools/pipeline)
 
   cmd_stop

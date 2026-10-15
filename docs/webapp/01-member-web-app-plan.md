@@ -431,8 +431,8 @@ to cc's `/api/v0/nodes/this-device`; DESIGN §13 "This computer"), and **Sign ou
 for the member who paired it or a household admin (`POST /api/cc/api/v0/nodes/{id}/sign-out`,
 user tier; cc checks the rule; decision 2026-10-14, no factory reset for a desktop agent). Each
 device says its settings are managed in the mobile app (admins): node settings are end-to-end
-encrypted with K2, which the browser doesn't hold. **Not built:** the verified agent download
-(`/api/addons/agent/{os}/{arch}`).
+encrypted with K2, which the browser doesn't hold. **The verified agent download**
+(`/api/addons/agent/{os}/{arch}`, user tier, install plan 3.1): PR #PRDL.
 
 **P5 as built.** `/inbox` and `/inbox/:id` (`pages/InboxPage.tsx`, `InboxItemPage.tsx`, `api/inbox.ts`)
 over the P1 user-tier routes `/api/notifications/api/v0/inbox*`, so a user sees only their own rows

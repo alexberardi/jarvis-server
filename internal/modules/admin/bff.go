@@ -115,6 +115,11 @@ func (m *Module) mountBFF(mux *http.ServeMux, _ module.Deps) {
 	// AD3b: the wizard's Voice step.
 	su("GET /api/tts/voices", m.handleVoices)
 	su("POST /api/tts/sample", m.handleVoiceSample)
+	// Add-ons and the wizard's agent step (install plan 3.1): the desktop agent for this
+	// server's version, verified against the signed SHA256SUMS before a byte is sent. Any
+	// signed-in user: the file is a public release asset; what the tier guards is that only
+	// someone with an account makes jarvisd fetch it.
+	m.handle(mux, "GET /api/addons/agent/{os}/{arch}", tierUser, http.HandlerFunc(m.handleAgentDownload))
 	// Open while no superuser exists (the wizard's Check step runs before Account); the
 	// handler applies the superuser gate after that.
 	m.handle(mux, "GET /api/doctor", tierOpen, http.HandlerFunc(m.handleDoctor))
