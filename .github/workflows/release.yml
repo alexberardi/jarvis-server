@@ -513,7 +513,7 @@ jobs:
           set -euo pipefail
           nc() { MSYS2_ARG_CONV_EXCL='*' "$@"; }
           gone_within() { for _ in $(seq 240); do [ ! -e "$1" ] && return 0; sleep 0.5; done; echo "still there: $1"; return 1; }
-          pf=$(cygpath -u "$PROGRAMFILES"); pd=$(cygpath -u "$PROGRAMDATA"); lad=$(cygpath -u "$LOCALAPPDATA")
+          pf=$(cygpath -u "$PROGRAMFILES"); pd=$(cygpath -u "${PROGRAMDATA:-${ProgramData:-C:/ProgramData}}"); lad=$(cygpath -u "$LOCALAPPDATA")
           nc "dist/Jarvis-Automation-Server-Setup-${VERSION#v}.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- "/LOG=$(cygpath -w "$RUNNER_TEMP/server.log")"
           test "$("$pf/jarvisd/jarvisd.exe" version | tr -d '\r')" = "$VERSION"
           curl -fsS --retry 60 --retry-delay 1 --retry-all-errors http://127.0.0.1:7710/health
