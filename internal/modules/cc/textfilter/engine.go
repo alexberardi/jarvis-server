@@ -224,10 +224,13 @@ func ForceToolsGate(utterance string, replies []string, keywordPool []string) bo
 	if utterance == "" {
 		return true
 	}
-	if IsQuestionShaped(utterance) {
+	// A polite memory request ("can you remember that…") is a question in form only (beyond
+	// legacy, like the rest of IsRememberRequest).
+	remember := IsRememberRequest(utterance)
+	if IsQuestionShaped(utterance) && !remember {
 		return false
 	}
-	actionable := IsActionCommandShaped(utterance) || IsReportShaped(utterance)
+	actionable := IsActionCommandShaped(utterance) || IsReportShaped(utterance) || remember
 	claims := false
 	for _, r := range replies {
 		if ResponseClaimsAction(r) {

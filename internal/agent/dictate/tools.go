@@ -82,7 +82,7 @@ func typeSpec() node.Spec {
 			"the user names (it is brought to the front first). Use it for dictation: \"type hello world\" → {text: \"hello world\"}; " +
 			"\"tell claude to run the tests\" → {app: \"claude\", text: \"run the tests\", submit: true}; \"write thanks in slack\" → " +
 			"{app: \"slack\", text: \"thanks\"}. Put only the words to type in text, never the instruction around them, and " +
-			"keep the user's wording. After opening an app with desktop_open, pass the same name in app. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" " +
+			"keep the user's wording; if speech ran \"type\" into the first word (\"typehello there\"), leave \"type\" out. After opening an app with desktop_open, pass the same name in app. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" " +
 			"or \"… and press enter\"; false for \"type …\", \"write …\", \"put … in\". For a field on a web page use " +
 			"browser_fill instead. If the result says awaiting_confirmation, nothing was typed yet: ask the user the question.",
 		Params: []node.Param{

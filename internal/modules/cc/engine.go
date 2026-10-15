@@ -140,7 +140,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	if len(msgs) > 1 {
 		head, rest := msgs[:1], msgs[1:]
 		rest = filterMsgs(rest, func(x chatMsg) bool {
-			return isNag(x, nagMustCall) || isNag(x, nagDedupe) || isNag(x, nagFailedClaim)
+			return isNag(x, nagMustCall) || isNag(x, nagDedupe) || isNag(x, nagFailedClaim) || isFollowThroughNag(x)
 		})
 		msgs = append(append([]chatMsg(nil), head...), rest...)
 	}
@@ -289,6 +289,16 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				msgs = msgs[:len(msgs)-1]
 				msgs = append(msgs, sysMsg(failedClaimRetry))
 				continue
+			}
+			// The request was left half done: a memory request answered "noted" with no tool to
+			// store it, "not in my memory" without a search, "open X and type Y" without the
+			// typing (followthrough.go).
+			if !terminal && !doubleChecked {
+				if nag := followThroughNag(conv, in.utterance, parse.OutsideThink(message), msgs); nag != "" {
+					msgs = msgs[:len(msgs)-1]
+					msgs = append(msgs, sysMsg(nag))
+					continue
+				}
 			}
 			cleaned := message
 			if message != "" {

@@ -329,7 +329,7 @@ func renderForSummary(older []chatMsg) string {
 			lines = append(lines, fmt.Sprintf("Tool result (%s): %s", name, text))
 		case o.Role == "system":
 			if isNag(o, nagMustCall) || isNag(o, nagDedupe) || isNag(o, nagInvalid) || isNag(o, nagISO) || isNag(o, nagFailedClaim) ||
-				strings.Contains(o.Content, nagDoubleCheck) {
+				isFollowThroughNag(o) || strings.Contains(o.Content, nagDoubleCheck) {
 				continue
 			}
 			lines = append(lines, "Note: "+text)

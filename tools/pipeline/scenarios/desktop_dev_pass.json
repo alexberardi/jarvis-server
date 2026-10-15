@@ -188,7 +188,7 @@
     "expect": {
      "tool": "desktop_type_text",
      "args_match": {
-      "text": "(?i)ello world"
+      "text": "(?i)^h?ello world"
      },
      "not_call": {
       "tool": "desktop_open",
@@ -196,7 +196,7 @@
        "target": "(?i)ello"
       }
      },
-     "not_reply": "(?i)\\b(open|opening|launch|fire up)\\b[^.]*typeello"
+     "not_reply": "(?i)\\b(open|opening|launch|launching|fire up|start)\\s+(up\\s+)?\"?typeello"
     }
    }
   ],
