@@ -27,7 +27,9 @@ JARVISD_BIN=$(abs "$3")
 AGENT_BIN=$(abs "$4")
 mkdir -p "$5"
 OUT=$(cd "$5" && pwd)
-[ -x "$JARVISD_BIN" ] && [ -x "$AGENT_BIN" ] || { echo "not executable: $JARVISD_BIN / $AGENT_BIN" >&2; exit 2; }
+for b in "$JARVISD_BIN" "$AGENT_BIN"; do
+  [ -x "$b" ] || { echo "not executable: $b" >&2; exit 2; }
+done
 
 cd "$(dirname "$0")/.."
 read -r -a nfpm <<<"${NFPM:-go run github.com/goreleaser/nfpm/v2/cmd/nfpm@$NFPM_VERSION}"

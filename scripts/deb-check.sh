@@ -54,6 +54,8 @@ running_version() {
   done
   echo "$v"
 }
+gone() { for p in "$@"; do [ ! -e "$p" ] || fail "still there: $p"; done; }
+present() { for p in "$@"; do [ -e "$p" ] || fail "missing: $p"; done; }
 fw_active() { command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; }
 fw_tagged() { ufw status | grep -q '# jarvisd'; }
 main_pid() { systemctl show -p MainPID --value jarvisd; }
@@ -108,8 +110,8 @@ apt_get remove jarvis-automation-server
 cat "$W/apt.log"
 if systemctl is-active --quiet jarvisd; then fail "jarvisd still runs"; fi
 [ ! -e /etc/systemd/system/jarvisd.service ] || fail "the unit is still there"
-[ ! -e "$BIN" ] && [ ! -e "$BIN.prev" ] && [ ! -e /usr/lib/jarvisd ] || fail "binaries left behind"
-[ -f /var/lib/jarvisd/jarvis.db ] && [ -d /etc/jarvisd ] || fail "remove deleted the data"
+gone "$BIN" "$BIN.prev" /usr/lib/jarvisd
+present /var/lib/jarvisd/jarvis.db /etc/jarvisd
 getent passwd jarvisd >/dev/null || fail "remove deleted the jarvisd account"
 if fw_active && fw_tagged; then fail "remove left the jarvisd firewall rules"; fi
 grep -q 'apt purge jarvis-automation-server' "$W/apt.log" || fail "remove didn't say how to delete the data"
@@ -127,11 +129,11 @@ if fw_active; then
   ufw allow from 10.0.0.0/8 to any port 7700 proto tcp comment jarvisd >/dev/null
 fi
 apt_get purge jarvis-automation-server
-[ ! -e /var/lib/jarvisd ] && [ ! -e /etc/jarvisd ] || fail "purge left the data"
+gone /var/lib/jarvisd /etc/jarvisd
 if getent passwd jarvisd >/dev/null || getent group jarvisd >/dev/null; then fail "purge left the jarvisd account"; fi
 if fw_active && fw_tagged; then ufw status; fail "purge left a jarvisd firewall rule"; fi
 if dpkg -s jarvis-automation-server >/dev/null 2>&1; then fail "dpkg still lists the package"; fi
-[ ! -e "$BIN" ] && [ ! -e /usr/lib/jarvisd ] && [ ! -e /usr/share/applications/net.jarvisautomation.server.desktop ] || fail "purge left files"
+gone "$BIN" /usr/lib/jarvisd /usr/share/applications/net.jarvisautomation.server.desktop
 
 say "agent: install"
 apt_get install "$AGENT"
@@ -175,19 +177,19 @@ COPY="$H/.local/lib/jarvis-agent/jarvis-agent"
 [ "$(stat -c %U "$COPY")" = "$U" ] || fail "the per-user copy isn't the user's (it couldn't update itself)"
 grep -qx "Exec=$COPY start %u" "$H/.local/share/applications/$ID.desktop" || fail "the user's menu entry doesn't run their copy"
 grep -Eqx "x-scheme-handler/jarvis-agent=$ID\.desktop;?" "$H/.config/mimeapps.list" || fail "the user's URL handler isn't set"
-[ -f "$H/.config/autostart/$ID.desktop" ] && [ -f "$H/.config/systemd/user/jarvis-agent.service" ] || fail "no login item"
+present "$H/.config/autostart/$ID.desktop" "$H/.config/systemd/user/jarvis-agent.service"
 
 say "agent: remove keeps the person's copy"
 apt_get remove jarvis-automation-agent
 cat "$W/apt.log"
-[ ! -e /usr/lib/jarvis-agent ] && [ ! -e "/usr/share/applications/$ID.desktop" ] && [ ! -e "/usr/share/icons/hicolor/128x128/apps/$ID.png" ] || fail "remove left system files"
+gone /usr/lib/jarvis-agent "/usr/share/applications/$ID.desktop" "/usr/share/icons/hicolor/128x128/apps/$ID.png"
 if grep -q "jarvis-agent" /usr/share/applications/mimeinfo.cache 2>/dev/null; then fail "the MIME cache still names the agent"; fi
 [ -x "$COPY" ] || fail "remove deleted the person's copy"
 grep -q 'uninstall --purge' "$W/apt.log" || fail "remove didn't say how to remove a person's copy"
 
 say "agent: the person's own uninstall --purge"
 as_user "$COPY" uninstall --purge
-[ ! -e "$COPY" ] && [ ! -e "$H/.local/share/applications/$ID.desktop" ] && [ ! -e "$H/.config/autostart/$ID.desktop" ] || fail "uninstall --purge left the copy or its entries"
+gone "$COPY" "$H/.local/share/applications/$ID.desktop" "$H/.config/autostart/$ID.desktop"
 userdel -r "$U" 2>/dev/null || true
 rm -rf "$H" "$W"
 echo
