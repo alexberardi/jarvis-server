@@ -289,7 +289,14 @@ func (m *Module) handleGetSmartHomeConfig(w http.ResponseWriter, r *http.Request
 	now := m.now()
 	opts := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
-		opts = append(opts, map[string]any{"node_id": n.nodeID, "room": n.room, "online": n.online(now), "last_seen": naiveTS(n.lastSeen.String)})
+		// node_kind (jarvisd addition): "desktop" for a computer, so the primary-node picker can
+		// sort Pis first and say what a computer can't do (decision 2026-10-15).
+		kind := nullable(n.nodeKind)
+		if n.desktop() {
+			kind = "desktop"
+		}
+		opts = append(opts, map[string]any{"node_id": n.nodeID, "room": n.room, "online": n.online(now),
+			"last_seen": naiveTS(n.lastSeen.String), "node_kind": kind})
 	}
 	out := m.smartHomeConfig(ctx, hh)
 	out["nodes"] = opts

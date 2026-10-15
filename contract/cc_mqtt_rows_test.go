@@ -258,6 +258,14 @@ func TestCCMQTTRows(t *testing.T) {
 		tg.Do(t, CommandCenter, http.MethodPut, cfg, map[string]any{"primary_node_id": nid}, u.H()).Expect(http.StatusOK, Obj{
 			"device_manager": String, "primary_node_id": Eq(nid), "use_external_devices": Eq(false),
 		})
+		// GET adds the picker's node options.
+		tg.Get(t, CommandCenter, cfg, u.H()).Expect(http.StatusOK, Obj{
+			"device_manager": String, "primary_node_id": Eq(nid), "use_external_devices": Eq(false),
+			"nodes": NonEmptyArrayOf(Obj{
+				"node_id": String, "room": String, "online": Bool, "last_seen": NullOr(TimestampNaive),
+				"node_kind": Optional(NullOr(String)), // jarvisd addition; legacy omits it
+			}),
+		})
 		tg.Do(t, CommandCenter, http.MethodPut, cfg, map[string]any{"primary_node_id": "contract-nosuch"}, u.H()).
 			ExpectError(http.StatusBadRequest, "Node not in this household")
 	})
