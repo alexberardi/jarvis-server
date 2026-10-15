@@ -213,7 +213,7 @@ func (a *app) postServer(w http.ResponseWriter, r *http.Request) {
 	if i := slices.IndexFunc(list, func(x Found) bool { return x.URL == u }); i >= 0 {
 		f = list[i]
 	}
-	c, err := choose(r.Context(), a.d.HTTP, f)
+	c, err := choose(r.Context(), a.d.HTTP, a.d.ConfigPort, f)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return

@@ -159,6 +159,18 @@ provisioning, registration, broker, report_tools and mobile chat:
 Implemented, all ending at `POST /nodes/register`. The setup page (§13 "The setup page") offers
 1 and 3 without a terminal:
 
+**The server's address** (`--server`, and the setup page's "type an address") may be whatever a
+user pastes (2026-10-14, after `enroll --server http://<server>:7710` failed with a JSON parse
+error): a bare host (`192.168.1.10`, `jarvis.local`: port 7700), `host:port`, or any URL of the
+server, the web app's on 7710 and any page of it (the path, query and fragment are dropped).
+`node.ResolveConfigURL` asks `GET /info` on that address and, if it isn't the config service,
+on the same host's port 7700, and keeps the first that says `jarvis-config-service`. The web
+app's port can't say where the config service is to someone not signed in (`/api/system/info`
+is superuser-only), so a server whose config service isn't on 7700 must be given by that port.
+Errors are plain words: "That address doesn't look like a Jarvis Automation server" when
+something else answered, "No Jarvis Automation server answered at …" when nothing did; never a
+JSON parse error (discovery says the same if it ever gets a page instead of JSON).
+
 1. **Sign in:** `jarvis-agent enroll --server URL --email you@x` prompts for the password
    (no echo; `--password-stdin` for scripts). The CLI logs in, lists households (picks the
    only one, or asks for `--household`), mints a token with the JWT, and registers. The JWT
@@ -1585,6 +1597,16 @@ overrides, zero-width); Enter only as the separate `submit` step; keys from a cl
 modifiers other than Shift+Tab; nothing typed into a window whose focus wasn't confirmed; text
 never in logs or results; password fields only when named.
 
+**Typing is keystrokes: a terminal app in a modal mode runs them as commands** (noted
+2026-10-14 from a user's test, behaviour unchanged). Dictation presses keys in whatever has
+focus, exactly as a person would. The agent can't see an app's mode, so in Neovim or Vim in
+normal mode, `less`, `htop` or any TUI with single-key bindings, "type hello there" doesn't
+insert text: `h`, `e`, `l`… run as commands (move, edit, delete), and the result can be
+destructive. A shell prompt or an editor in insert mode is fine. Put the app in a mode that
+takes text first (in Vim, press `i`; "press escape" leaves it again), or type into a GUI field
+instead. Dictation never presses `i` by itself: guessing an app's mode from its window would be
+wrong as often as right, and a wrong guess types into the wrong place.
+
 ### Evidence (2026-10-13)
 
 - **Typing, keys, focus (sway, headless):** a nested `sway` 1.12 (`WLR_BACKENDS=headless`, its
@@ -1886,6 +1908,11 @@ says `needs_k2: true` until it holds a key (then a beat goes out at once with `f
 no K2 at pairing or sign-in: the browser that approves a code or signs in has no K2, and the
 phone must hold the key to read the settings anyway, so **K2 delivery needs the phone**, as for
 a headless Pi. An admin opens the computer in the app's Nodes tab and taps Generate.
+Each sign-in gives the computer a new node id, so it is back to no key after every sign-out
+and sign-in. Until a key arrives the agent drops snapshot requests (it has nothing to seal them
+with; the Python node does the same). Every app screen that reads a snapshot must therefore
+check `needs_k2` first. The routine editor's command list didn't: it waited 30 s and said "Node
+did not respond in time" (jarvis-node-mobile #105 fixes it: it says the key is missing and offers to set one up).
 
 **What the agent does with it** (byte-compatible with the Python node; pinned by
 `testdata/k2_golden.json`, written by the Python node's own `encrypt_snapshot` and
