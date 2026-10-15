@@ -161,7 +161,7 @@ Or by hand:
 ```sh
 scripts/fetch-sherpa-libs.sh                  # once; embeds onnxruntime for the wake word
 CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
-./jarvis-agent enroll --server http://<server>:7700 --email you@example.com
+./jarvis-agent enroll --server <server> --email you@example.com   # the host, or any URL of it (the web app's too)
 ./jarvis-agent run                           # --no-overlay hides the island, --no-tray the icon; --no-browser
 ./jarvis-agent stop                          # quit until the next login (the icon's menu: Quit)
 ./jarvis-agent status                         # what this host can do right now

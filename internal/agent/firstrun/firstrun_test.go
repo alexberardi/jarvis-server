@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -24,12 +25,27 @@ func testServer(t *testing.T, d Deps) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if d.ConfigPort == "" {
+		d.ConfigPort = deadPort(t) // never this computer's real config service
+	}
 	s, err := newServer(d.withDefaults(), ln)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// deadPort is a port of 127.0.0.1 nothing listens on.
+func deadPort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, p, _ := net.SplitHostPort(ln.Addr().String())
+	_ = ln.Close()
+	return p
 }
 
 // req builds a request the way the page's own fetch would send it.
@@ -331,13 +347,15 @@ func TestNormalizeAddress(t *testing.T) {
 		"https://jarvis.example":  "https://jarvis.example",
 		"http://[fe80::1]:7700":   "http://[fe80::1]:7700",
 		"https://j.example:8443/": "https://j.example:8443",
+		// A page of the web app: the path goes, and the server is found from its host.
+		"http://host:7710/addons?x=1": "http://host:7710",
 	}
 	for in, want := range ok {
 		if got, err := NormalizeAddress(in); err != nil || got != want {
 			t.Errorf("%q: %q %v", in, got, err)
 		}
 	}
-	for _, in := range []string{"", "   ", "ftp://x", "http://u:p@host", "http://host/path", "http://host?q=1", "file:///etc/passwd", "javascript:alert(1)", "http://"} {
+	for _, in := range []string{"", "   ", "ftp://x", "http://u:p@host", "file:///etc/passwd", "javascript:alert(1)", "http://"} {
 		if got, err := NormalizeAddress(in); err == nil {
 			t.Errorf("%q accepted as %q", in, got)
 		}
@@ -655,8 +673,18 @@ func TestChooseServerChecksIt(t *testing.T) {
 	notJarvis := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{"service":"other"}`) }))
 	defer notJarvis.Close()
 	w := send(s, req(s, "POST", "api/server", map[string]string{"url": notJarvis.URL}))
-	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "No Jarvis Automation server answered") {
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "doesn't look like a Jarvis Automation server") {
 		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	// The web app's address (any page of it) finds the config service on the same host.
+	f := newFakeJarvisd(t)
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "<!doctype html>") }))
+	defer web.Close()
+	fu, _ := url.Parse(f.URL)
+	s2 := testServer(t, Deps{HTTP: &http.Client{Timeout: time.Second}, ConfigPort: fu.Port()})
+	w = send(s2, req(s2, "POST", "api/server", map[string]string{"url": web.URL + "/addons"}))
+	if st := decode[stateView](t, w); st.Server == nil || st.Server.URL != f.URL {
+		t.Fatalf("web app address: %d %+v", w.Code, st.Server)
 	}
 	if w := send(s, req(s, "POST", "api/server", map[string]string{"url": "http://u:p@x"})); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad address: %d", w.Code)

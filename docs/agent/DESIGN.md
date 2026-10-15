@@ -159,6 +159,18 @@ provisioning, registration, broker, report_tools and mobile chat:
 Implemented, all ending at `POST /nodes/register`. The setup page (§13 "The setup page") offers
 1 and 3 without a terminal:
 
+**The server's address** (`--server`, and the setup page's "type an address") may be whatever a
+user pastes (2026-10-14, after `enroll --server http://<server>:7710` failed with a JSON parse
+error): a bare host (`192.168.1.10`, `jarvis.local`: port 7700), `host:port`, or any URL of the
+server, the web app's on 7710 and any page of it (the path, query and fragment are dropped).
+`node.ResolveConfigURL` asks `GET /info` on that address and, if it isn't the config service,
+on the same host's port 7700, and keeps the first that says `jarvis-config-service`. The web
+app's port can't say where the config service is to someone not signed in (`/api/system/info`
+is superuser-only), so a server whose config service isn't on 7700 must be given by that port.
+Errors are plain words: "That address doesn't look like a Jarvis Automation server" when
+something else answered, "No Jarvis Automation server answered at …" when nothing did; never a
+JSON parse error (discovery says the same if it ever gets a page instead of JSON).
+
 1. **Sign in:** `jarvis-agent enroll --server URL --email you@x` prompts for the password
    (no echo; `--password-stdin` for scripts). The CLI logs in, lists households (picks the
    only one, or asks for `--household`), mints a token with the JWT, and registers. The JWT
