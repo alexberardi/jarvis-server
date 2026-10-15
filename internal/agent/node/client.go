@@ -99,6 +99,12 @@ func Discover(ctx context.Context, hc *http.Client, configURL string) (Services,
 		} `json:"services"`
 	}
 	if err := doJSON(ctx, hc, http.MethodGet, joinURL(configURL, "/services?"+q.Encode()), nil, nil, &resp); err != nil {
+		var syn *json.SyntaxError
+		var typ *json.UnmarshalTypeError
+		if errors.As(err, &syn) || errors.As(err, &typ) {
+			// A web page (the web app's port) or some other server: say so, not the parse error.
+			return nil, fmt.Errorf("discovery: %w", &NotJarvisError{Host: u.Host})
+		}
 		return nil, fmt.Errorf("discovery: %w", err)
 	}
 	out := Services{}

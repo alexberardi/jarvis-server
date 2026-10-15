@@ -43,6 +43,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
@@ -160,7 +161,7 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: jarvis-agent <command> [flags]
 
   enroll   register this computer as a node of a jarvisd household
-           --server URL (jarvisd config service, e.g. http://192.0.2.10:7700)
+           --server ADDRESS (the server: 192.0.2.10, host:7700, or any of its URLs, the web app's too)
            then either nothing: shows a code for a household member to approve (or --code)
            or --email ADDR [--household ID] (prompts for the password)
            or --token prov_... --node-id ID (a token minted elsewhere)
@@ -251,7 +252,7 @@ func nativeHost() (*host.Host, error) {
 
 func enroll(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-	server := fs.String("server", "", "jarvisd config service URL, e.g. http://192.0.2.10:7700")
+	server := fs.String("server", "", "the Jarvis Automation server's address: its host (192.0.2.10), host:port, or any of its URLs, the web app's included")
 	email := fs.String("email", "", "your Jarvis account email (prompts for the password)")
 	pwStdin := fs.Bool("password-stdin", false, "read the password from stdin instead of prompting")
 	household := fs.String("household", "", "household id (needed only if you belong to several)")
@@ -284,9 +285,18 @@ func enroll(ctx context.Context, args []string) error {
 		return fmt.Errorf("already enrolled (%s); pass --force to enroll again", path)
 	}
 	if *server == "" {
-		return errors.New("--server is required (jarvisd's address, e.g. http://192.0.2.10:7700)")
+		return errors.New("--server is required (the Jarvis Automation server's address, e.g. 192.0.2.10)")
 	}
 	hc := &http.Client{Timeout: 20 * time.Second}
+	// Whatever was pasted (a bare host, the web app's URL on 7710, any path): the config service.
+	typed := *server
+	if *server, err = node.ResolveConfigURL(ctx, hc, typed); err != nil {
+		return err
+	}
+	if n, _ := node.NormalizeAddress(typed); n != *server {
+		// Not the address given: say where the server was found.
+		fmt.Printf("Found the Jarvis Automation server at %s.\n", *server)
+	}
 	svcs, err := node.Discover(ctx, hc, *server)
 	if err != nil {
 		return err
@@ -498,6 +508,7 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("node settings: %w", err)
 	}
+	tf.pkgRoot = filepath.Join(filepath.Dir(path), "packages")
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -512,6 +523,7 @@ func run(ctx context.Context, args []string) error {
 	runner.Store(r)
 	r.Capabilities, r.Changed = heartbeatCaps(tools)
 	wireNodeSettings(r, st, tools, log)
+	wirePackages(r, tf.pkgs, log)
 	hd := openHat(hf, log)
 	defer hd.Close()
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
@@ -622,6 +634,10 @@ type toolFlags struct {
 	// origins is this agent's server, for the Jarvis page guard (jarvispage.go): build makes
 	// it, the caller fills it once it knows the server.
 	origins *jarvispage.Origins
+	// pkgRoot, when the caller sets it, is where Pantry packages are installed: build starts
+	// the sidecar on them and leaves pkgs to answer the app's install requests.
+	pkgRoot string
+	pkgs    *packages.Manager
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -676,20 +692,30 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
-	if *f.py != "" && *f.cmdDir != "" {
-		var storage sidecar.Storage
-		if st != nil {
-			storage = st
-		}
+	// The package sidecar: the installed Pantry packages, or the spike's directory of modules.
+	live := &sidecar.Live{}
+	var storage sidecar.Storage
+	if st != nil {
+		storage = st
+	}
+	switch {
+	case *f.py != "" && *f.cmdDir != "":
 		sc, err := sidecar.Start(ctx, *f.py, *f.cmdDir, log, storage)
 		if err != nil {
 			closeAll()
 			return nil, nil, nil, fmt.Errorf("sidecar: %w", err)
 		}
-		stopBrowser := closeAll
-		closeAll = func() { _ = sc.Close(); stopBrowser() }
-		tools = append(tools, sc)
+		live.Swap(sc)
+	case f.pkgRoot != "":
+		f.pkgs = newPackages(f.pkgRoot, live, storage, log)
+		if err := f.pkgs.Boot(ctx); err != nil {
+			// The agent still serves its own tools; the app shows the packages as not loaded.
+			log.Warn("packages: not loaded", "err", err)
+		}
 	}
+	stopBrowser := closeAll
+	closeAll = func() { _ = live.Close(); stopBrowser() }
+	tools = append(tools, live)
 	// Last, so a sidecar's own get_current_time (Python's, with its city table) wins when present.
 	tools = append(tools, &clock.Tool{})
 	return h, tools, closeAll, nil

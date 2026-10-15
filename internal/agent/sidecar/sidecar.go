@@ -1,12 +1,13 @@
-// Package sidecar is a spike of the Python package sidecar: the Go agent starts one Python
-// child, kept warm, that loads IJarvisCommand packages and answers JSON-lines requests over
-// stdin/stdout. Go keeps the node identity, key and MQTT; the child only ever sees tool calls.
+// Package sidecar is the Python package sidecar: the Go agent starts one Python child, kept
+// warm, that loads IJarvisCommand packages and answers JSON-lines requests over stdin/stdout.
+// Go keeps the node identity, key and MQTT; the child only ever sees tool calls. The packages
+// are the ones internal/agent/packages installed (a commands .json file), or for the spike's
+// --sidecar-commands, the modules in a directory. Live is the one in service.
 //
 // Storage (JarvisStorage's secrets and command data) is answered from the agent's settings
 // store over the same pipes (DESIGN §16): the child asks between a request and its reply.
 //
-// Not built yet (see docs/agent/DESIGN.md): uv-managed interpreter and venv, package install,
-// restart-on-crash, per-call cancellation, manifest tags.
+// Not built yet (see docs/agent/DESIGN.md): restart-on-crash, per-call cancellation.
 package sidecar
 
 import (
@@ -59,6 +60,8 @@ type Sidecar struct {
 	secrets map[string][]nodesettings.SecretSpec
 	extras  map[string]extras
 	browser []nodesettings.DataCommand
+	pkgOf   map[string]string // command -> the installed package it came from
+	failed  map[string]string // package -> why its commands didn't load
 	store   Storage
 	now     func() time.Time
 }
@@ -85,7 +88,8 @@ type reply struct {
 	Params json.RawMessage `json:"params"`
 }
 
-// Start launches python with the embedded host script over commandsDir and loads the tool list.
+// Start launches python with the embedded host script over commandsDir (a directory of modules,
+// or an installed-packages .json file) and loads the tool list.
 // st answers the commands' storage calls; nil leaves them unanswered (a secret reads as unset).
 func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st Storage) (*Sidecar, error) {
 	dir, err := os.MkdirTemp("", "jarvis-sidecar-")
@@ -128,7 +132,7 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 	out := bufio.NewScanner(stdout)
 	out.Buffer(make([]byte, 64<<10), 16<<20)
 	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, dir: dir, store: st, now: time.Now,
-		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}}
+		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{}}
 	var desc struct {
 		Tools []struct {
 			Name        string                    `json:"name"`
@@ -136,8 +140,10 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 			Command     map[string]any            `json:"command"`
 			Secrets     []nodesettings.SecretSpec `json:"secrets"`
 			DataBrowser *nodesettings.DataCommand `json:"data_browser"`
+			Package     string                    `json:"package"`
 			extras
 		} `json:"tools"`
+		Failed map[string]string `json:"failed"`
 	}
 	if err := s.roundTrip("describe", nil, &desc); err != nil {
 		s.Close()
@@ -147,13 +153,23 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 		s.tools = append(s.tools, node.ToolDef{Name: t.Name, ClientTool: t.ClientTool, Command: t.Command})
 		s.secrets[t.Name] = t.Secrets
 		s.extras[t.Name] = t.extras
+		if t.Package != "" {
+			s.pkgOf[t.Name] = t.Package
+		}
 		if b := t.DataBrowser; b != nil { // nil: its settings couldn't be read, so it stays out
 			b.Name = t.Name
 			s.browser = append(s.browser, *b)
 		}
 	}
+	s.failed = desc.Failed
 	return s, nil
 }
+
+// Failed are the installed packages whose commands didn't load, with why.
+func (s *Sidecar) Failed() map[string]string { return s.failed }
+
+// Package is the installed package a command came from ("" for none).
+func (s *Sidecar) Package(command string) string { return s.pkgOf[command] }
 
 // Commands are the sidecar's commands with their declared secrets, for the settings snapshot.
 func (s *Sidecar) Commands() []nodesettings.Command {

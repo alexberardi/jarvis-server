@@ -36,6 +36,9 @@ type Deps struct {
 	// Loopback is the config service URL to try on this computer first. Default
 	// http://127.0.0.1:7700.
 	Loopback string
+	// ConfigPort is the config service's port, tried on a typed address's host when that address
+	// isn't the config service (the web app's). Default node.DefaultConfigPort.
+	ConfigPort string
 	// BrowseFor bounds one network search. Default 4 s.
 	BrowseFor time.Duration
 	// WaitPairing sleeps between pairing polls (node.SleepCtx).
@@ -108,6 +111,9 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.Loopback == "" {
 		d.Loopback = "http://127.0.0.1:7700"
+	}
+	if d.ConfigPort == "" {
+		d.ConfigPort = node.DefaultConfigPort
 	}
 	if d.BrowseFor <= 0 {
 		d.BrowseFor = 4 * time.Second

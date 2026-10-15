@@ -153,6 +153,24 @@ func TestReportTools(t *testing.T) {
 	}
 }
 
+// The installed packages go out with the tools, as a Pi reports them (the app's Update, Revert
+// and red health dot on a package card).
+func TestReportToolsListsInstalledPackages(t *testing.T) {
+	cc := newFakeCC()
+	pkgs := []map[string]any{{"name": "get_weather_meteo", "version": "1.0.0", "previous_version": "0.9.0", "health": "ok"}}
+	d := &Dispatcher{CC: cc, Tools: &echoTools{}, Log: quiet, Packages: func() []map[string]any { return pkgs }}
+	d.Handle(context.Background(), publish(t, "report_tools", map[string]any{"reply_request_id": "r4"}))
+	got, _ := json.Marshal(cc.reports["r4"].(map[string]any)["installed_packages"])
+	if string(got) != `[{"health":"ok","name":"get_weather_meteo","previous_version":"0.9.0","version":"1.0.0"}]` {
+		t.Fatalf("installed_packages = %s", got)
+	}
+	d.Packages = func() []map[string]any { return nil }
+	d.Handle(context.Background(), publish(t, "report_tools", map[string]any{"reply_request_id": "r5"}))
+	if got, _ := json.Marshal(cc.reports["r5"].(map[string]any)["installed_packages"]); string(got) != `[]` {
+		t.Fatalf("none = %s", got)
+	}
+}
+
 func TestOtherVerbsAndJunkAreIgnored(t *testing.T) {
 	cc := newFakeCC()
 	d := &Dispatcher{CC: cc, Tools: &echoTools{}, Log: quiet}

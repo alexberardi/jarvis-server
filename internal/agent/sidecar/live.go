@@ -1,0 +1,99 @@
+package sidecar
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"sync"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+)
+
+// Live is the sidecar in service, as one toolset that never changes identity: installing,
+// removing or reverting a package starts a new sidecar and swaps it in, so the tool list, the
+// settings snapshot and the Stored data tab follow without restarting the agent. Empty (no
+// packages) it offers nothing.
+type Live struct {
+	mu sync.RWMutex
+	sc *Sidecar
+}
+
+// ErrNoPackages is the Stored data tab asking about a command while no sidecar runs.
+var ErrNoPackages = errors.New("no packages are installed on this computer")
+
+// Current is the sidecar in service, or nil.
+func (l *Live) Current() *Sidecar {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.sc
+}
+
+// Swap puts sc (nil for none) in service and closes the one before. A call still running on
+// the old one fails with "sidecar exited", as a crash would.
+func (l *Live) Swap(sc *Sidecar) {
+	l.mu.Lock()
+	old := l.sc
+	l.sc = sc
+	l.mu.Unlock()
+	if old != nil && old != sc {
+		_ = old.Close()
+	}
+}
+
+// Close ends the sidecar in service.
+func (l *Live) Close() error {
+	l.Swap(nil)
+	return nil
+}
+
+func (l *Live) Available(ctx context.Context) []node.ToolDef {
+	if sc := l.Current(); sc != nil {
+		return sc.Available(ctx)
+	}
+	return nil
+}
+
+func (l *Live) Call(ctx context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
+	if sc := l.Current(); sc != nil {
+		return sc.Call(ctx, name, args, req)
+	}
+	return nil, false
+}
+
+// Commands are the packages' commands with their secrets, for the settings snapshot.
+func (l *Live) Commands() []nodesettings.Command {
+	if sc := l.Current(); sc != nil {
+		return sc.Commands()
+	}
+	return nil
+}
+
+func (l *Live) DataCommands() []nodesettings.DataCommand {
+	if sc := l.Current(); sc != nil {
+		return sc.DataCommands()
+	}
+	return nil
+}
+
+func (l *Live) Summaries(ctx context.Context, command string, records []nodesettings.Object) ([]map[string]any, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.Summaries(ctx, command, records)
+	}
+	return nil, ErrNoPackages
+}
+
+func (l *Live) Create(ctx context.Context, command string, values nodesettings.Object, uid json.Number) (string, json.RawMessage, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.Create(ctx, command, values, uid)
+	}
+	return "", nil, ErrNoPackages
+}
+
+// Failed are the installed packages whose commands didn't load.
+func (l *Live) Failed() map[string]string {
+	if sc := l.Current(); sc != nil {
+		return sc.Failed()
+	}
+	return nil
+}

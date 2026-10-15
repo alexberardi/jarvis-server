@@ -1,9 +1,12 @@
-"""Jarvis package sidecar (spike).
+"""Jarvis package sidecar.
 
-Loads IJarvisCommand classes from a directory and answers JSON-lines requests on stdin:
+Loads IJarvisCommand classes, from the agent's installed-packages file (a .json argument: see
+load_packages) or, for the spike's --sidecar-commands, every module in a directory, and answers
+JSON-lines requests on stdin:
 
     -> {"id": 1, "method": "describe"}
-    <- {"id": 1, "result": {"tools": [{"name", "client_tool", "command"}, ...]}}
+    <- {"id": 1, "result": {"tools": [{"name", "client_tool", "command", "package"}, ...],
+                            "failed": {"package": "why its commands didn't load"}}}
     -> {"id": 2, "method": "call", "params": {"command_name", "arguments", "request": {...}}}
     <- {"id": 2, "result": {"output": {...}, "signals": {"wait_for_input", "clear_history",
                                                           "on_response_complete"?}}}
@@ -35,10 +38,13 @@ agent forwards to its log. The Go agent owns the node's identity, key and MQTT; 
 never sees them.
 """
 
+import importlib
+import importlib.machinery
 import importlib.util
 import inspect
 import json
 import pathlib
+import re
 import sys
 import traceback
 
@@ -99,7 +105,13 @@ class AgentStorage(StorageBackend):
         _ask("storage.delete_secret", {"key": key, "scope": scope, "user_id": user_id})
 
 
+def _commands_in(module) -> list:
+    return [cls() for _, cls in inspect.getmembers(module, inspect.isclass)
+            if issubclass(cls, IJarvisCommand) and cls.__module__ == module.__name__ and not inspect.isabstract(cls)]
+
+
 def load_commands(directory: str) -> dict:
+    """The spike's layout: every *.py in one directory is a module of commands."""
     found = {}
     for path in sorted(pathlib.Path(directory).glob("*.py")):
         spec = importlib.util.spec_from_file_location(f"jarvis_pkg_{path.stem}", path)
@@ -111,11 +123,66 @@ def load_commands(directory: str) -> dict:
         except Exception:
             print(f"sidecar: failed to load {path.name}:\n{traceback.format_exc()}", file=sys.stderr)
             continue
-        for _, cls in inspect.getmembers(module, inspect.isclass):
-            if issubclass(cls, IJarvisCommand) and cls.__module__ == module.__name__ and not inspect.isabstract(cls):
-                cmd = cls()
-                found[cmd.command_name] = cmd
+        for cmd in _commands_in(module):
+            found[cmd.command_name] = cmd
     return found
+
+
+# Installed packages whose commands didn't load, by package name: the agent refuses an install
+# that lands here and reports the rest as unhealthy.
+FAILED: dict = {}
+# The package each command came from.
+PACKAGE_OF: dict = {}
+
+
+def load_packages(listing: str) -> dict:
+    """Installed Pantry packages, from the agent's commands file:
+
+        {"packages": [{"name": "pkg", "root": "/abs/dir", "commands": ["commands/x/command.py"]}]}
+
+    Each package is imported as its own top-level package (jarvis_pkgs_<name>), so two packages
+    may both have a commands/get_weather/ and a command's relative imports work. Its root also
+    goes on sys.path for the shared code a bundle imports by absolute name, as on a Pi.
+    """
+    with open(listing, encoding="utf-8") as f:
+        packages = json.load(f).get("packages") or []
+    found = {}
+    for pkg in packages:
+        name, root = pkg["name"], pkg["root"]
+        top = "jarvis_pkgs_" + re.sub(r"\W", "_", name)
+        spec = importlib.machinery.ModuleSpec(top, None, is_package=True)
+        spec.submodule_search_locations = [root]
+        sys.modules[top] = importlib.util.module_from_spec(spec)
+        if root not in sys.path:
+            sys.path.append(root)
+        for rel in pkg.get("commands") or []:
+            dotted = top + "." + rel[: -len(".py")].replace("/", ".")
+            try:
+                module = importlib.import_module(dotted)
+                commands = _commands_in(module)
+            except BaseException as exc:  # a SystemExit at import time is a broken package too
+                print(f"sidecar: {name}: failed to load {rel}:\n{traceback.format_exc()}", file=sys.stderr)
+                FAILED[name] = f"{rel}: {type(exc).__name__}: {exc}"
+                continue
+            if not commands:
+                FAILED[name] = f"{rel}: no IJarvisCommand in it"
+                continue
+            for cmd in commands:
+                try:
+                    cname = cmd.command_name
+                except Exception as exc:
+                    FAILED[name] = f"{rel}: command_name: {exc}"
+                    continue
+                if cname in found and PACKAGE_OF.get(cname) != name:
+                    FAILED[name] = f"{rel}: command {cname} is already provided by {PACKAGE_OF.get(cname)}"
+                    continue
+                found[cname] = cmd
+                PACKAGE_OF[cname] = name
+    return found
+
+
+def load(target: str) -> dict:
+    return load_packages(target) if target.endswith(".json") else load_commands(target)
 
 
 _SECRET_FIELDS = ("key", "scope", "description", "value_type", "required", "is_sensitive", "friendly_name",
@@ -166,10 +233,12 @@ def describe(commands: dict) -> dict:
             tools.append({"name": name, "client_tool": cmd.to_openai_tool_schema(), "command": cmd.get_command_schema(),
                           "secrets": _secrets(cmd), "data_browser": _browser(cmd),
                           "associated_service": _optional(cmd, "associated_service"),
-                          "setup_guide": _optional(cmd, "setup_guide")})
+                          "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
-    return {"tools": tools}
+            if name in PACKAGE_OF:
+                FAILED[PACKAGE_OF[name]] = f"{name}: {type(exc).__name__}: {exc}"
+    return {"tools": tools, "failed": FAILED}
 
 
 def data_summaries(commands: dict, params: dict) -> dict:
@@ -268,7 +337,7 @@ def main() -> None:
         if commands is None:
             # Loaded once the first request is read, so a command that touches storage while it
             # is constructed gets the agent's answer, not the next request, from stdin.
-            commands = load_commands(sys.argv[1])
+            commands = load(sys.argv[1])
             print(f"sidecar: loaded {sorted(commands)}", file=sys.stderr)
         msg_id = None
         try:
