@@ -39,8 +39,10 @@ describe('pickDefaultNode: the default chain (webapp 01 §3.3)', () => {
 })
 
 describe('nodeLabel', () => {
-  it('prefers a name, then the room, then a short id', () => {
-    expect(nodeLabel({ node_id: 'abcdef123456', room: 'kitchen', name: 'Office-PC' })).toBe('Office-PC')
+  it("names a computer by its name, then the room, then a short id; a Pi keeps its room", () => {
+    expect(nodeLabel({ node_id: 'abcdef123456', room: 'desktop', name: 'Office-PC', node_kind: 'desktop' })).toBe('Office-PC')
+    expect(nodeLabel({ node_id: 'abcdef123456', room: 'desktop', name: ' ', node_kind: 'desktop' })).toBe('desktop')
+    expect(nodeLabel({ node_id: 'abcdef123456', room: 'kitchen', name: 'pi-zero', node_kind: null })).toBe('kitchen')
     expect(nodeLabel({ node_id: 'abcdef123456', room: 'living_room' })).toBe('living room')
     expect(nodeLabel({ node_id: 'abcdef123456', room: 'default' })).toBe('abcdef12')
   })

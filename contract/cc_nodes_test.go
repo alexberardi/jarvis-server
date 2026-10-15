@@ -108,6 +108,9 @@ func nodeResponseShape() Obj {
 		// Device sign-out (docs/decisions/2026-10-14-device-sign-out.md), additive: who paired
 		// the node (the provisioning token's minter), null for the admin key or when unknown.
 		shape["owner_user_id"] = NullOr(Int)
+		// Additive: the registered name (a desktop agent's computer name, so the apps can tell
+		// several computers in the "desktop" room apart); null when registered without one.
+		shape["name"] = NullOr(String)
 	}
 	return shape
 }

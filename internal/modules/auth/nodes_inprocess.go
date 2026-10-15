@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"strings"
 )
 
 // StatusCode lets in-process callers map an auth failure onto the legacy HTTP status (e.g.
@@ -27,4 +28,32 @@ func (m *Module) DeactivateNode(ctx context.Context, nodeID string) error {
 	}
 	m.verified.invalidate("node", nodeID)
 	return nil
+}
+
+// NodeNames is each registered node's name, by node id, for command-center's node list. Ids
+// auth doesn't know are absent; deactivated registrations still answer (the list can include
+// inactive nodes).
+func (m *Module) NodeNames(ctx context.Context, nodeIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(nodeIDs))
+	if len(nodeIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(nodeIDs))
+	for i, id := range nodeIDs {
+		args[i] = id
+	}
+	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT node_id, name FROM auth_node_registrations
+		WHERE node_id IN (?`+strings.Repeat(", ?", len(nodeIDs)-1)+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
 }

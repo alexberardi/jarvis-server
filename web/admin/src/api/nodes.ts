@@ -17,6 +17,8 @@ export interface NodeLiveness {
   capabilities?: Record<string, string | boolean | number>
   /** Who paired it (the approver of its code, or who signed in on it); null when unknown. */
   owner_user_id?: number | null
+  /** Its registered name (a desktop agent's computer name); null when it was registered without one. */
+  name?: string | null
 }
 
 /** extensionState is a desktop agent's browser-extension row, or null when it reported none. */

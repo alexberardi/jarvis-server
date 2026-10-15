@@ -393,7 +393,7 @@ scoped, G9), re-polled every 30 s. The default chain is §3.3 with a remembered 
 (`jarvis-admin:u:chat-node:<hh>`) first when it is still online. **Step 1 (this computer's agent) is
 skipped**: `GET /api/addons/this-device` doesn't exist yet (install plan 3.1), and `useChat.ts`
 `thisDeviceNodeId` is the TODO that lights it up. The picker labels a node by room (`node_kind`
-desktop adds "(computer)") with an online dot. Tools come from `GET /mobile/nodes/{id}/tools`, cached
+desktop adds "(computer)", and a computer shows its registered `name` instead of its room, 2026-10-15) with an online dot. Tools come from `GET /mobile/nodes/{id}/tools`, cached
 per node (`jarvis-admin:u:tools:<node>`). The warmup runs when a node is picked and on New
 conversation, and the tools go with the warmup (and with a first turn that has no conversation id).
 Turns are `fetch` + `SSEParser` (one 401 refresh; a `password_change_required` 403 flips to the
