@@ -9,8 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/buildinfo"
 )
 
 // sourceDir is the checkout a dev build was made from: scripts/agent-dev-run.sh sets it with
@@ -32,11 +36,100 @@ func staleBuildLine(version, dir string, headOf func(dir string) (string, error)
 	if err != nil || strings.HasPrefix(head, built) {
 		return ""
 	}
-	short := head[:min(len(head), len(built))]
-	if older, err := isAncestor(dir, built, head); err == nil && older {
-		return fmt.Sprintf("build:        %s is older than your checkout (%s at %s): rebuild (scripts/agent-dev-run.sh)", version, dir, short)
+	older, err := isAncestor(dir, built, head)
+	return staleMessage(version, dir, head[:min(len(head), len(built))], err == nil && older)
+}
+
+func staleMessage(build, dir, head string, older bool) string {
+	if older {
+		return fmt.Sprintf("build:        %s is older than your checkout (%s at %s): rebuild (scripts/agent-dev-run.sh, or your go build)", build, dir, head)
 	}
-	return fmt.Sprintf("build:        %s isn't your checkout's commit (%s at %s): rebuild if you meant to run that one", version, dir, short)
+	return fmt.Sprintf("build:        %s isn't your checkout's commit (%s at %s): rebuild if you meant to run that one", build, dir, head)
+}
+
+// vcsStaleLine is staleBuildLine for a plain `go build`, which stamps neither the version nor
+// the checkout but embeds the commit (vcs): dir is the checkout found for it (findCheckout),
+// "" when none. When git can't place the build's commit relative to HEAD (no git, or a commit
+// the checkout doesn't have), the commit times decide whether it is older. A release build,
+// a build with no VCS details (go run) or no checkout found: "".
+func vcsStaleLine(version string, vcs buildinfo.VCS, ok bool, dir string, headOf func(dir string) (string, error),
+	isAncestor func(dir, a, b string) (bool, error), commitTime func(dir, commit string) (time.Time, error)) string {
+	if !buildinfo.IsDev(version) || !ok || dir == "" {
+		return ""
+	}
+	head, err := headOf(dir)
+	if err != nil || head == vcs.Revision {
+		return ""
+	}
+	label := buildinfo.Describe(version, vcs, ok)
+	short := head[:min(len(head), 7)]
+	older, err := isAncestor(dir, vcs.Revision, head)
+	if err != nil {
+		t, terr := commitTime(dir, head)
+		older = terr == nil && !vcs.Time.IsZero() && t.After(vcs.Time)
+	}
+	return staleMessage(label, dir, short, older)
+}
+
+// sourceFile is this file's path as compiled: absolute for a plain go build, so the checkout
+// it sits in can be found; module-relative under -trimpath (then unused).
+var _, sourceFile, _, _ = runtime.Caller(0)
+
+// checkoutCandidates are where to look for the checkout of a plain go build: the binary's own
+// directory (`go build -o jarvis-agent` in the repo), then the source it was compiled from.
+func checkoutCandidates() []string {
+	var dirs []string
+	if exe, err := os.Executable(); err == nil {
+		if exe, err := filepath.EvalSymlinks(exe); err == nil {
+			dirs = append(dirs, filepath.Dir(exe))
+		}
+	}
+	if p := filepath.FromSlash(sourceFile); filepath.IsAbs(p) {
+		dirs = append(dirs, filepath.Dir(p))
+	}
+	return dirs
+}
+
+// findCheckout returns the first git checkout at or above one of dirs whose go.mod declares
+// module (so a binary copied into some other repository isn't compared with it); "" if none.
+func findCheckout(dirs []string, module string) string {
+	for _, d := range dirs {
+		for d := filepath.Clean(d); ; {
+			if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+				if goModule(filepath.Join(d, "go.mod")) == module {
+					return d
+				}
+				break
+			}
+			up := filepath.Dir(d)
+			if up == d {
+				break
+			}
+			d = up
+		}
+	}
+	return ""
+}
+
+func goModule(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for line := range strings.Lines(string(b)) {
+		if m, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
+			return strings.Trim(strings.TrimSpace(m), `"`)
+		}
+	}
+	return ""
+}
+
+// mainModule is the module this binary was built from (github.com/…/jarvis-server).
+func mainModule() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		return bi.Main.Path
+	}
+	return ""
 }
 
 // gitHead reads a checkout's HEAD commit from its files, without running git: HEAD, the ref it
@@ -90,20 +183,9 @@ func gitHead(dir string) (string, error) {
 	return "", fmt.Errorf("%s not found", ref)
 }
 
-// gitIsAncestor asks git whether commit a is an ancestor of b. Only when they differ, and
-// bounded: status stays quick. On macOS, /usr/bin/git without the developer tools would show
-// their install dialog, so it is skipped then.
+// gitIsAncestor asks git whether commit a is an ancestor of b (only asked when they differ).
 func gitIsAncestor(dir, a, b string) (bool, error) {
-	git, err := exec.LookPath("git")
-	if err != nil {
-		return false, err
-	}
-	if runtime.GOOS == "darwin" && git == "/usr/bin/git" && exec.Command("/usr/bin/xcode-select", "-p").Run() != nil {
-		return false, errors.New("no developer tools")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	err = exec.CommandContext(ctx, git, "-C", dir, "merge-base", "--is-ancestor", a, b).Run()
+	_, err := runGit(dir, "merge-base", "--is-ancestor", a, b)
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
@@ -112,4 +194,32 @@ func gitIsAncestor(dir, a, b string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// gitCommitTime asks git for a commit's committer time.
+func gitCommitTime(dir, commit string) (time.Time, error) {
+	out, err := runGit(dir, "log", "-1", "--format=%ct", commit)
+	if err != nil {
+		return time.Time{}, err
+	}
+	sec, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(sec, 0), nil
+}
+
+// runGit runs git in dir, bounded so status stays quick. On macOS, /usr/bin/git without the
+// developer tools would show their install dialog, so it is skipped then.
+func runGit(dir string, args ...string) ([]byte, error) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		return nil, err
+	}
+	if runtime.GOOS == "darwin" && git == "/usr/bin/git" && exec.Command("/usr/bin/xcode-select", "-p").Run() != nil {
+		return nil, errors.New("no developer tools")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, git, append([]string{"-C", dir}, args...)...).Output()
 }
