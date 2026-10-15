@@ -88,6 +88,7 @@ func run(args []string) error {
 		admin:     osascriptAdmin,
 		open:      func(url string) error { return exec.Command("/usr/bin/open", url).Run() },
 		dataSize:  dirSize,
+		beacon:    func() (string, <-chan struct{}, func(), error) { return fileBeacon("", beaconPoll) },
 		log:       os.Stderr,
 	}
 	if *nonInteractive {
@@ -137,6 +138,17 @@ func (d autoDialogs) choose(title, _ string, buttons ...string) int {
 	}
 	fmt.Fprintf(os.Stderr, "[%s] %s\n", title, buttons[len(buttons)-1])
 	return len(buttons) - 1
+}
+
+// busy prints the progress window's title once the work starts and waits for it to end.
+func (d autoDialogs) busy(title, _ string, started, done <-chan struct{}) {
+	select {
+	case <-started:
+		fmt.Fprintf(os.Stderr, "[%s]\n", title)
+	case <-done:
+		return
+	}
+	<-done
 }
 
 // dirSize is the total size of the files under dir (what a purge deletes).

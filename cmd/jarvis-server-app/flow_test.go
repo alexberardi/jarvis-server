@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // fakeUI answers the dialogs from a script and records them.
@@ -13,6 +17,18 @@ type fakeUI struct {
 	install, firewall bool
 	answers           []string // button labels, in order
 	seen              []string // titles
+	busyShown         []string // progress windows that showed (started closed before done)
+}
+
+// busy waits for done like the real one, then records whether the window had shown.
+func (f *fakeUI) busy(title, _ string, started, done <-chan struct{}) {
+	<-done
+	select {
+	case <-started:
+		f.busyShown = append(f.busyShown, title)
+		f.seen = append(f.seen, title)
+	default:
+	}
 }
 
 func (f *fakeUI) confirmInstall(title, _, _ string) (bool, bool) {
@@ -46,7 +62,16 @@ type world struct {
 	scripts []string
 	runs    []string
 	opened  []string
+
+	noBeacon bool          // the beacon can't be made
+	started  chan struct{} // the current beacon's; the fake root script closes it
+	stopped  int           // beacons stopped
 }
+
+// beaconPath is the fake beacon's file; touchBeacon what the root script starts with.
+const beaconPath = "/tmp/jarvis-server-app-1/started"
+
+var touchBeacon = "touch " + beaconPath + " 2>/dev/null; "
 
 func newApp(w *world, ui *fakeUI) *app {
 	return &app{
@@ -70,8 +95,23 @@ func newApp(w *world, ui *fakeUI) *app {
 			return nil, nil
 		},
 		admin: func(_ context.Context, _, script string) (string, error) {
+			// The password was accepted unless the dialog was canceled: the script runs, and
+			// its first step fires the beacon.
+			if rest, ok := strings.CutPrefix(script, touchBeacon); ok && !errors.Is(w.adminErr, errCanceled) {
+				close(w.started)
+				script = rest
+			} else if ok {
+				script = rest
+			}
 			w.scripts = append(w.scripts, script)
 			return w.adminOut, w.adminErr
+		},
+		beacon: func() (string, <-chan struct{}, func(), error) {
+			if w.noBeacon {
+				return "", nil, nil, errors.New("no temporary directory")
+			}
+			w.started = make(chan struct{})
+			return beaconPath, w.started, func() { w.stopped++ }, nil
 		},
 		open:     func(url string) error { w.opened = append(w.opened, url); return nil },
 		dataSize: func(string) int64 { return 3_200_000_000 },
@@ -129,9 +169,93 @@ func TestInstallFailureIsShown(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "port 7700") {
 		t.Fatalf("err = %v", err)
 	}
-	if len(ui.seen) != 2 || ui.seen[1] != productName+" wasn't installed" {
+	// The progress window, gone before the error dialog.
+	if len(ui.seen) != 3 || ui.seen[1] != "Installing "+productName+"…" || ui.seen[2] != productName+" wasn't installed" {
 		t.Fatalf("dialogs %q", ui.seen)
 	}
+}
+
+func TestInstallShowsProgressOnceThePasswordIsAccepted(t *testing.T) {
+	w := &world{adminOut: "http://192.168.1.5:7710/setup#token=abc\n"}
+	ui := &fakeUI{install: true, firewall: true}
+	if err := newApp(w, ui).main(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ui.busyShown) != 1 || ui.busyShown[0] != "Installing "+productName+"…" {
+		t.Fatalf("progress %q", ui.busyShown)
+	}
+	if w.stopped != 1 || len(w.opened) != 1 {
+		t.Fatalf("beacons stopped %d, opened %q", w.stopped, w.opened)
+	}
+
+	// Canceling the password dialog: no progress window.
+	w = &world{adminErr: errCanceled}
+	ui = &fakeUI{install: true, firewall: true}
+	if err := newApp(w, ui).main(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ui.busyShown) != 0 || w.stopped != 1 {
+		t.Fatalf("progress %q, beacons stopped %d", ui.busyShown, w.stopped)
+	}
+
+	// No beacon: the window shows from the start, and the script runs without the touch.
+	w = &world{noBeacon: true, adminOut: "http://192.168.1.5:7710/\n"}
+	ui = &fakeUI{install: true, firewall: true}
+	if err := newApp(w, ui).main(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ui.busyShown) != 1 || w.scripts[0] != bundled+" install-from-app --run-as alice" {
+		t.Fatalf("progress %q, root ran %q", ui.busyShown, w.scripts)
+	}
+}
+
+func TestFileBeacon(t *testing.T) {
+	dir := t.TempDir()
+	path, started, stop, err := fileBeacon(dir, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(filepath.Dir(path)) != dir {
+		t.Fatalf("beacon at %s, not under %s", path, dir)
+	}
+	select {
+	case <-started:
+		t.Fatal("started before the file exists")
+	default:
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	<-started // the test's own timeout catches a beacon that never fires
+	stop()
+	stop() // twice is fine
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("the beacon's directory is still there: %v", err)
+	}
+
+	// Stopped before it fires: the watcher ends, the directory goes.
+	path, _, stop, err = fileBeacon(dir, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("the beacon's directory is still there: %v", err)
+	}
+}
+
+func TestAutoDialogsBusy(t *testing.T) {
+	started, done := make(chan struct{}), make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); autoDialogs{}.busy("Installing", "", started, done) }()
+	close(started)
+	close(done)
+	wg.Wait()
+	// Done without ever starting returns too.
+	done2 := make(chan struct{})
+	close(done2)
+	autoDialogs{}.busy("Installing", "", make(chan struct{}), done2)
 }
 
 func TestLaterOpenOpensTheAdmin(t *testing.T) {
@@ -174,6 +298,9 @@ func TestNewerAppOffersAnUpdate(t *testing.T) {
 	}
 	if len(w.opened) != 1 {
 		t.Fatalf("opened %q", w.opened)
+	}
+	if len(ui.busyShown) != 1 || ui.busyShown[0] != "Updating "+productName+"…" {
+		t.Fatalf("progress %q", ui.busyShown)
 	}
 }
 

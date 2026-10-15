@@ -1644,7 +1644,11 @@ hashes; background with an arrow, the Applications link, lzfse).
   release's notarized jarvisd, used as given. On first open the launcher shows an NSAlert ("runs
   in the background", ☑ "Let devices on my network reach it"), then `do shell script "<bundle>/jarvisd
   install-from-app --run-as <user> [--no-firewall]" with administrator privileges` (the standard
-  password dialog). It opens the URL that prints. Later opens run `jarvisd service status --json`
+  password dialog). While that runs (10–30 s) a progress window shows ("Installing Jarvis
+  Automation Server…", a spinner; "Updating…" for an update): the root script first touches a
+  file in a private temporary directory, so the window appears once the password is accepted,
+  not behind its dialog, and goes before the URL opens or the error dialog ("… wasn't
+  installed", with the installer's last lines) shows. It opens the URL that prints. Later opens run `jarvisd service status --json`
   and `setup-link --url` as the user (the home is theirs) and open the setup link or the admin.
   After an admin Stop it offers Start (`service start` as root). When the app carries a newer
   jarvisd than `/usr/local/bin`, it offers Update (`install-from-app --no-firewall`). Holding
