@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -160,9 +161,18 @@ func exitCode(err error) int {
 // only the credentials file (decision 2026-10-14: agent.json and apps.json stay), opens the
 // setup page so someone can sign in again, and returns errNotSetUp, whose exit status no
 // supervisor restarts. Any other result passes through.
-func signedOutToSetup(err error, credsFile string, log *slog.Logger, openSetup func()) error {
+//
+// When the file already holds another node, this computer was enrolled again while this run
+// was going, and jarvisd retired this run's node in favour of the new one (decision
+// 2026-10-15-reenroll-replaces-node): the new sign-in stays, no setup page opens, and the error
+// is an ordinary failure, so a supervisor restarts the agent on the new credentials.
+func signedOutToSetup(err error, credsFile, nodeID string, log *slog.Logger, openSetup func()) error {
 	if !errors.Is(err, node.ErrSignedOut) {
 		return err
+	}
+	if c, lerr := node.LoadCreds(credsFile); lerr == nil && c.NodeID != nodeID {
+		log.Info("this node was replaced by a newer sign-in of this computer; keeping the new credentials", "node", nodeID, "new_node", c.NodeID)
+		return fmt.Errorf("replaced by node %s: %w", c.NodeID, err)
 	}
 	if rmErr := os.Remove(credsFile); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
 		log.Error("signed out, but couldn't delete the credentials", "path", credsFile, "err", rmErr)

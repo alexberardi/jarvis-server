@@ -257,6 +257,7 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	needsK2, hasK2 := b.boolean("needs_k2")
 	kind, hasKind := b.str("node_kind", false)
 	caps, hasCaps := b.object("capabilities", false)
+	devID, hasDevID := b.str("device_id", false)
 	b.object("thread_status", false)
 	if !b.done(w) {
 		return
@@ -296,6 +297,12 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 		if hasKind {
 			sets = append(sets, "node_kind = ?")
 			args = append(args, nullStr(nodeKindValue(kind)))
+		}
+		// An agent enrolled before registration carried device_id gets it on file here, so its
+		// next re-enrolment replaces it. A malformed one is ignored, never stored or cleared.
+		if d := deviceIDValue(devID); hasDevID && d != nil {
+			sets = append(sets, "device_id = ?")
+			args = append(args, *d)
 		}
 		if hasCaps {
 			c, _ := json.Marshal(cleanCaps(caps))

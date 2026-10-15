@@ -21,6 +21,7 @@ type Runner struct {
 	Version     string
 	InstallMode string // reported in heartbeats, e.g. "desktop-agent"
 	NodeKind    string // reported in heartbeats: "desktop" for the desktop agent
+	DeviceID    string // reported in heartbeats: this computer's identity (internal/agent/deviceid)
 	// Capabilities, if set, is asked for the heartbeat's capabilities on every beat.
 	Capabilities func() map[string]any
 	// Changed, if set, returns a channel that is closed when a capability changes: the next
@@ -326,7 +327,7 @@ func (r *Runner) heartbeat(ctx context.Context, cc *CC) error {
 }
 
 func (r *Runner) beat() Beat {
-	b := Beat{Version: r.Version, InstallMode: r.InstallMode, NodeKind: r.NodeKind}
+	b := Beat{Version: r.Version, InstallMode: r.InstallMode, NodeKind: r.NodeKind, DeviceID: r.DeviceID}
 	if r.NeedsK2 != nil {
 		b.NeedsK2 = r.NeedsK2()
 	}

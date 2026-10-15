@@ -468,6 +468,7 @@ type joinDeps struct {
 func (j *joinDeps) deps(f *fakeJarvisd) Deps {
 	return Deps{
 		ComputerName: "test-pc", GOOS: "linux", HTTP: f.Client(), Loopback: f.URL,
+		Identity: node.Registration{DeviceID: "dev-1", NodeKind: "desktop", Room: "ignored"},
 		Creds: func() (node.Creds, bool) {
 			j.mu.Lock()
 			defer j.mu.Unlock()
@@ -523,6 +524,10 @@ func TestPairingHappyPath(t *testing.T) {
 	}
 	if _, hasRoom := f.registered[0]["room"]; hasRoom {
 		t.Fatalf("registered with a room over the approver's: %v", f.registered[0])
+	}
+	// The computer's identity goes with it, so jarvisd can retire its previous node.
+	if f.registered[0]["device_id"] != "dev-1" || f.registered[0]["node_kind"] != "desktop" {
+		t.Fatalf("registered without the identity: %v", f.registered[0])
 	}
 	if st.Computer != "Office PC" {
 		t.Fatalf("computer shown as %q", st.Computer)
@@ -595,6 +600,9 @@ func TestSignInOneHousehold(t *testing.T) {
 	}
 	if f.minted[0]["household_id"] != "h1" || f.minted[0]["room"] != signInRoom || f.minted[0]["name"] != "test-pc" {
 		t.Fatalf("minted %v", f.minted)
+	}
+	if r := f.registered[0]; r["device_id"] != "dev-1" || r["node_kind"] != "desktop" || r["room"] != signInRoom {
+		t.Fatalf("registered %v", r)
 	}
 	// The password went to jarvisd's login only, and is nowhere in what the page keeps or shows.
 	b, _ := json.Marshal(j.saved)

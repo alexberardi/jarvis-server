@@ -438,7 +438,9 @@ func (a *app) finishJoin(ctx context.Context, mode string, srv chosen, tok node.
 		a.busy = false
 		a.mu.Unlock()
 	}()
-	c, err := node.RegisterPreferring(ctx, a.d.HTTP, tok.NodeCommandCenterURL, srv.cc, srv.URL, tok.NodeID, tok.Token, room,
+	reg := a.d.Identity
+	reg.Room = room
+	c, err := node.RegisterPreferring(ctx, a.d.HTTP, tok.NodeCommandCenterURL, srv.cc, srv.URL, tok.NodeID, tok.Token, reg,
 		func(err error) { a.d.Log.Info("setup page: registering through discovery's URL", "unreachable", err) })
 	if err == nil {
 		c.Name = name

@@ -147,9 +147,14 @@ func (m *Module) handleRegister(w http.ResponseWriter, r *http.Request) {
 	nodeID, _ := b.str("node_id", true)
 	tok, _ := b.str("provisioning_token", true)
 	room, _ := b.str("room", false)
+	// jarvisd additions (decision 2026-10-15-reenroll-replaces-node); the legacy stack ignored
+	// unknown keys, and so does this when they are malformed.
+	devRaw, _ := b.str("device_id", false)
+	kindRaw, _ := b.str("node_kind", false)
 	if !b.done(w) {
 		return
 	}
+	deviceID, kind := deviceIDValue(devRaw), nodeKindValue(kindRaw)
 	ctx := r.Context()
 	var tokenID, hh string
 	var tokRoom, tokName sql.NullString
@@ -197,6 +202,9 @@ func (m *Module) handleRegister(w http.ResponseWriter, r *http.Request) {
 		if err := m.insertNode(ctx, tx, nodeID, room, "default", "brief", hh, owner); err != nil {
 			return err
 		}
+		if err := setNodeIdentity(ctx, tx, nodeID, deviceID, kind); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE cc_provisioning_tokens SET consumed_at = ? WHERE id = ?`, dbTime(m.now()), tokenID)
 		return err
 	})
@@ -206,5 +214,9 @@ func (m *Module) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.deps.Log.Info("cc: node registered via provisioning", "node", nodeID, "room", room)
+	// The same computer enrolled again by the same member: its previous node goes.
+	if tokBy.Valid && deviceID != nil && kind != nil && *kind == "desktop" {
+		m.retirePreviousNodes(ctx, nodeID, hh, tokBy.Int64, *deviceID)
+	}
 	httpx.WriteJSON(w, http.StatusCreated, createdNode(nodeID, room, "default", "brief", key))
 }
