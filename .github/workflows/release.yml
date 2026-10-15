@@ -19,8 +19,17 @@ name: release
 # jarvis-automation-agent, each for amd64 and arm64. They are listed in SHA256SUMS too, and the
 # verify job installs, checks and purges the server package on each Linux architecture.
 #
+# The Windows installers (01-no-cli-plan item 2.3) are built by the windows-installers job with
+# Inno Setup (pinned) from the same windows binaries, plus the windowless launcher
+# jarvis-agentw.exe: Jarvis-Automation-Server-Setup-<v>.exe (per machine) and
+# Jarvis-Automation-Agent-Setup-<v>.exe (per user). They are unsigned (decided; the release notes
+# carry the SmartScreen text), listed in SHA256SUMS, and the verify job installs and uninstalls
+# both silently on Windows. (Hyphens, not the spaces of the local build: GitHub turns spaces in
+# asset names into dots.)
+#
 # Jobs: build (all 8 binaries) → sign-macos (Developer ID + notarization of the darwin
-# jarvisd) → package (archives, SHA256SUMS, minisign) → verify (each OS) → publish. Signing
+# jarvisd) and windows-installers (Inno Setup) → package (archives, .debs, SHA256SUMS,
+# minisign) → verify (each OS) → publish. Signing
 # happens before packaging so SHA256SUMS and its signature cover the notarized binary. The
 # darwin agent is not notarized yet: its signed app bundle and dmg are item 2.2.
 
@@ -36,6 +45,9 @@ on:
       - scripts/install-agent-check.sh
       - scripts/build-debs.sh
       - scripts/packaging/deb/**
+      - scripts/build-windows-installers.sh
+      - scripts/packaging/windows/**
+      - cmd/jarvis-agentw/**
   workflow_dispatch:
     inputs:
       version:
@@ -114,6 +126,10 @@ jobs:
               if [ -f NOTICE ]; then cp NOTICE "stage/$name/"; fi
             done
           done
+          # The Windows installers' launcher: a GUI program, so it starts the agent without a
+          # console window (it goes into the agent installer only, not the archive).
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H=windowsgui" \
+            -o "stage/windows-launcher/jarvis-agentw.exe" ./cmd/jarvis-agentw
           # A tar keeps the executable bits (artifacts don't).
           tar -cf stage.tar stage
       - uses: actions/upload-artifact@v4
@@ -266,8 +282,41 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # The Windows installers (01-no-cli-plan 2.3), unsigned, from this run's windows binaries.
+  windows-installers:
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: stage-${{ needs.build.outputs.version }}
+      - name: Install Inno Setup (pinned)
+        shell: pwsh
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+      - name: Build the installers
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          tar -xf stage.tar
+          mkdir -p inno-bin
+          cp "stage/jarvisd-${VERSION}-windows-amd64/jarvisd.exe" "stage/jarvis-agent-${VERSION}-windows-amd64/jarvis-agent.exe" \
+            stage/windows-launcher/jarvis-agentw.exe inno-bin/
+          SERVER_NAME="Jarvis-Automation-Server-Setup-${VERSION#v}" AGENT_NAME="Jarvis-Automation-Agent-Setup-${VERSION#v}" \
+            scripts/build-windows-installers.sh "$VERSION" inno-bin installers
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-${{ needs.build.outputs.version }}
+          path: installers/*.exe
+          retention-days: 1
+          if-no-files-found: error
+
   package:
-    needs: [build, sign-macos]
+    needs: [build, sign-macos, windows-installers]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -279,6 +328,10 @@ jobs:
         with:
           name: darwin-signed-${{ needs.build.outputs.version }}
           path: signed
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installers-${{ needs.build.outputs.version }}
+          path: dist
       # Go runs the pinned nfpm (scripts/build-debs.sh) and, in a pull request, scripts/testsign.
       - uses: actions/setup-go@v5
         with:
@@ -314,6 +367,8 @@ jobs:
           (cd dist && sha256sum -- * > SHA256SUMS)
           [ "$(grep -c ' jarvisd-' dist/SHA256SUMS)" = 4 ] && [ "$(grep -c ' jarvis-agent-' dist/SHA256SUMS)" = 4 ]
           [ "$(grep -c ' jarvis-automation-server_.*\.deb$' dist/SHA256SUMS)" = 2 ] && [ "$(grep -c ' jarvis-automation-agent_.*\.deb$' dist/SHA256SUMS)" = 2 ]
+          grep -qx "[0-9a-f]*  Jarvis-Automation-Server-Setup-${VERSION#v}\.exe" dist/SHA256SUMS
+          grep -qx "[0-9a-f]*  Jarvis-Automation-Agent-Setup-${VERSION#v}\.exe" dist/SHA256SUMS
           ls -l dist && cat dist/SHA256SUMS
       # SHA256SUMS.minisig is the self-update trust root (AD5, ID9): jarvisd verifies it with
       # the project key built into the running binary before it installs anything. Signed with
@@ -447,6 +502,31 @@ jobs:
           curl -fsS --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:7700/health
           sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y jarvis-automation-server
           test ! -e /var/lib/jarvisd && test ! -e /usr/local/bin/jarvisd && ! getent passwd jarvisd
+      # The Windows installers, silently, as ci.yml's inno job runs them in full: the server's
+      # service answers /health at this version, the agent is registered; then both uninstall
+      # with /PURGE and leave nothing.
+      - name: Install the Windows installers
+        if: matrix.target == 'windows-amd64'
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          nc() { MSYS2_ARG_CONV_EXCL='*' "$@"; }
+          gone_within() { for _ in $(seq 240); do [ ! -e "$1" ] && return 0; sleep 0.5; done; echo "still there: $1"; return 1; }
+          pf=$(cygpath -u "$PROGRAMFILES"); pd=$(cygpath -u "${PROGRAMDATA:-${ProgramData:-C:/ProgramData}}"); lad=$(cygpath -u "$LOCALAPPDATA")
+          nc "dist/Jarvis-Automation-Server-Setup-${VERSION#v}.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- "/LOG=$(cygpath -w "$RUNNER_TEMP/server.log")"
+          test "$("$pf/jarvisd/jarvisd.exe" version | tr -d '\r')" = "$VERSION"
+          curl -fsS --retry 60 --retry-delay 1 --retry-all-errors http://127.0.0.1:7710/health
+          grep -q 'Setup link: http://.*/setup#token=' "$RUNNER_TEMP/server.log"
+          nc "$pf/jarvisd/unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PURGE
+          gone_within "$pf/jarvisd" && gone_within "$pd/jarvisd"
+          if sc.exe query jarvisd >/dev/null 2>&1; then echo "the jarvisd service is still there"; exit 1; fi
+          agent="$lad/Programs/Jarvis Automation Agent"
+          nc "dist/Jarvis-Automation-Agent-Setup-${VERSION#v}.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+          test "$("$agent/jarvis-agent.exe" version | tr -d '\r')" = "$VERSION"
+          nc reg query 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v 'Jarvis Automation Agent' | grep -q 'jarvis-agentw.exe'
+          nc "$agent/unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PURGE
+          gone_within "$agent"
       # The archived binary is the notarized one: Developer ID, hardened runtime, and Gatekeeper
       # accepts it as a quarantined download would be assessed.
       - name: Check the macOS signature and Gatekeeper
@@ -496,10 +576,11 @@ jobs:
           cd dist
           exe=jarvisd; [ "${{ matrix.ext }}" = zip ] && exe=jarvisd.exe
           if [ -f SHA256SUMS.minisig ]; then
-            # Every asset present (jarvisd's and the agent's archives, the .debs) must match the signed list.
+            # Every asset present (jarvisd's and the agent's archives, the .debs, the Windows installers) must match the signed list.
             JARVIS_HOME="$RUNNER_TEMP/jarvis" "$PWD/$NAME/$exe" upgrade --verify-dir "$PWD" | tee verified
             grep -q "jarvis-agent-" verified
             grep -q "jarvis-automation-server_" verified && grep -q "jarvis-automation-agent_" verified
+            grep -q "Jarvis-Automation-Server-Setup-" verified && grep -q "Jarvis-Automation-Agent-Setup-" verified
           else
             echo "::warning::no SHA256SUMS.minisig (unsigned dry run); signature not checked"
           fi
@@ -568,5 +649,5 @@ jobs:
           set -euo pipefail
           pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
           gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
-            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Debian/Ubuntu: open \`jarvis-automation-server_<version>_<arch>.deb\` (the server) or \`jarvis-automation-agent_<version>_<arch>.deb\` (the desktop agent) to install it with App Center or Software. Other Linux desktop agents: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`." \
+            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Debian/Ubuntu: open \`jarvis-automation-server_<version>_<arch>.deb\` (the server) or \`jarvis-automation-agent_<version>_<arch>.deb\` (the desktop agent) to install it with App Center or Software. Windows: \`Jarvis-Automation-Server-Setup-<version>.exe\` installs the server, \`Jarvis-Automation-Agent-Setup-<version>.exe\` the desktop agent (for you only, no administrator needed). Windows may say *Windows protected your PC*: Jarvis Automation is safe and open source, and Windows shows this for any installer that isn't signed with a paid code-signing certificate, which we don't buy. Click **More info**, then **Run anyway**. To check the file first, compare its SHA-256 with SHA256SUMS. Other Linux desktop agents: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`." \
             $pre

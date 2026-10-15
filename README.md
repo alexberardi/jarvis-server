@@ -82,7 +82,18 @@ person who opens it gets their own self-updating copy and the setup page. Removi
 leaves those copies; each person removes theirs from its setup page ("Remove Jarvis Automation
 Agent") or with `~/.local/lib/jarvis-agent/jarvis-agent uninstall --purge`.
 
-**Windows** (PowerShell, as Administrator or it asks for elevation):
+**Windows, without a terminal:** download `Jarvis-Automation-Server-Setup-<version>.exe` from the
+release and open it. Windows may say *Windows protected your PC*: Jarvis Automation is safe and open
+source, and Windows shows this for any installer that isn't signed with a paid code-signing
+certificate, which we don't buy. Click **More info**, then **Run anyway** (to check the file first,
+compare its SHA-256 with `SHA256SUMS`). Setup asks for administrator rights, installs the service,
+opens the firewall for your local network (a ticked box), and opens the setup page in your browser.
+jarvisd updates itself from the admin page afterwards. Uninstalling it (Settings → Apps) asks
+whether to delete the data too; the default keeps it in `%ProgramData%\jarvisd`.
+`Jarvis-Automation-Agent-Setup-<version>.exe` installs the desktop agent for you only, with no
+administrator rights: it starts when you sign in, and opens its setup page the first time.
+
+**Windows from a terminal** (PowerShell, as Administrator or it asks for elevation):
 
 ```powershell
 irm https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc14/install.ps1 | iex
