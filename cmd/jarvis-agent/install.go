@@ -152,7 +152,8 @@ func installCmd(ctx context.Context, args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	ops, err := install.Plan(e, install.Options{Browser: !*noBrowser, DesktopShortcut: *shortcut, Start: !*noStart,
+	start, setup := installStarts(*noStart, *filesOnly, enrolled())
+	ops, err := install.Plan(e, install.Options{Browser: !*noBrowser, DesktopShortcut: *shortcut, Start: start,
 		FilesOnly: *filesOnly, LoginItem: *loginItem})
 	if err != nil {
 		return err
@@ -172,7 +173,7 @@ func installCmd(ctx context.Context, args []string, w io.Writer) error {
 	switch {
 	case *filesOnly:
 		fmt.Fprintln(w, " (files only: nothing was started or registered with the system).")
-	case *noStart:
+	case setup || *noStart:
 		fmt.Fprintln(w, ".")
 	default:
 		fmt.Fprintln(w, ", and is starting now.")
@@ -180,7 +181,25 @@ func installCmd(ctx context.Context, args []string, w io.Writer) error {
 	if runtime.GOOS == "linux" {
 		fmt.Fprintf(w, "The agent runs from %s; the app menu has %q.\n", install.LinuxBin(e), appid.DisplayName)
 	}
+	if setup {
+		// The agent would only exit (not set up): the setup page instead, as `start` does. It
+		// starts the agent under its login item once this computer is added.
+		fmt.Fprintln(w, "This computer isn't set up yet: opening the setup page in your browser (Ctrl-C closes it).")
+		return firstRun(ctx)
+	}
 	return nil
+}
+
+// installStarts decides install's last step: start the agent (start), or, on a computer that
+// isn't set up, open the setup page instead (setup), which starts the agent once it is.
+func installStarts(noStart, filesOnly, enrolled bool) (start, setup bool) {
+	if noStart || filesOnly {
+		return !noStart, false
+	}
+	if !enrolled {
+		return false, true
+	}
+	return true, false
 }
 
 func uninstallCmd(ctx context.Context, args []string, w io.Writer) error {

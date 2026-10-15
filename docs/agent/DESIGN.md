@@ -901,9 +901,30 @@ entry and `jarvis-agent://start`) runs `jarvis-agent start`:
 (same user-only directory, 0600, peer uid checked): one JSON line, one answer, a closed set of
 commands without arguments (`show-running`, `ping`, `quit`). It is also the **single-instance
 lock**: a second `run` finds it live, says so and exits 0. `uninstall` and a reinstall send
-`quit` and wait for the agent to go. `run` with no enrollment exits 78, which the systemd unit
-names in `RestartPreventExitStatus=` (under its LaunchAgent it exits 0, and `KeepAlive` is now
-`SuccessfulExit: false`), so a login item doesn't restart an agent with nothing to do. The island
+`quit` and wait for the agent to go. `run` with no enrollment, typed in a terminal, exits 78,
+which the systemd unit names in `RestartPreventExitStatus=` (under its LaunchAgent it exits 0,
+and `KeepAlive` is now `SuccessfulExit: false`), so a login item doesn't restart an agent with
+nothing to do. Started by a login item it waits for setup instead (below).
+
+**Not set up: install and login (2026-10-14, after a user's install did nothing visible).**
+
+- **`install` on a computer that isn't set up** writes everything but doesn't start the agent
+  (it would only exit 78). It opens the setup page instead, in the foreground, as `start` does.
+  When the computer is added, the page starts the agent under its login item: `systemctl --user
+  start` where the unit runs it, launchd, or a detached `run`.
+- **At login on a computer that isn't set up**, no browser window opens: a page on every login
+  would be wrong. `run` started by a login item (stdin not a terminal: systemd, launchd, the Run
+  key, or the autostart entry's `start --login`, which now spawns `run` where systemd doesn't
+  start it) shows the status icon, "Jarvis Automation Agent — Not set up yet", with
+  "Set up / Settings…" and Quit, and keeps the control socket free. Where the desktop shows no
+  status icon, it opens the setup page, **once**: a marker (`setup-offered-at-login` next to
+  `node.json`) keeps later logins quiet. The menu entry, the app and `jarvis-agent://start` still
+  open the page.
+- **Then the agent.** The waiting `run` checks every second for the credentials the page saves,
+  and once they're there it becomes the agent in place (`exec` of the same binary and arguments,
+  so the PID and its supervisor stay; Windows spawns a new `run`). The page's own start finds
+  the unit already active, and waits for that agent's control socket. Quit in the waiting menu
+  exits 0, which no supervisor restarts. Code: `cmd/jarvis-agent/setupwait.go`. The island
 now runs whenever `--no-overlay` isn't given, voice or not, so the pill can show; voice states
 and dictation's notes still appear only with voice on.
 
@@ -924,7 +945,8 @@ step 3, as a page in the user's own browser (open question 1). Code: `internal/a
 `cmd/jarvis-agent/setup.go`.
 
 - **Who opens it.** `jarvis-agent start` on a computer that isn't set up (the app, the menu entry,
-  the shortcut, `jarvis-agent://start`; never the login autostart), the status icon's "Set up /
+  the shortcut, `jarvis-agent://start`; never the login autostart, which waits in the status
+  icon, but once if there's no icon), `install` on a computer that isn't set up, the status icon's "Set up /
   Settings…" (§15), and `jarvis-agent setup`. One page per user: `setup.sock` (next to the control
   socket) is the lock, and a second launch asks the first to open its page again. The server
   stops on Done, after Remove, or after 15 minutes without a request from the page.

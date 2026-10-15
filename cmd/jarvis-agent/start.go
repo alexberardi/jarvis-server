@@ -23,7 +23,7 @@ import (
 func startCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	login := fs.Bool("login", false, "called at login by the autostart entry: no pill, no setup page")
+	login := fs.Bool("login", false, "called at login by the autostart entry: no pill, and no setup page (the agent waits for setup in its status icon)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -167,7 +167,9 @@ func (st starter) start(ctx context.Context, login bool) error {
 	}
 	if !st.enrolled() {
 		if login {
-			return nil
+			// The login item's own `run` waits for setup with a status icon (setupwait.go);
+			// where systemd starts it with the session, there is nothing to do here.
+			return install.Start(ctx, st.env, st.sys, true)
 		}
 		return st.firstRun(ctx)
 	}
