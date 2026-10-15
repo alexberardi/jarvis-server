@@ -235,8 +235,48 @@ Draft for the real thing:
 - **Host services the child needs from Go** (reverse requests, child → Go): secrets
   (`get_secret`), storage, inbox, `chat_text` (LLM via CC with the node key held by Go). Same
   framing with a `"from":"child"` flag.
-- **Install/update:** Go downloads a package from Pantry, verifies it, `uv pip install`s into the
-  venv, then `{"method":"reload"}`.
+
+**Package install (built 2026-10-15, `internal/agent/packages`;
+[decision](../decisions/2026-10-15-pantry-packages-on-desktop-agents.md)).** The app's
+Install, Update, Revert and Uninstall work on a computer as on a Pi:
+
+- **Requests.** jarvisd nudges `jarvis/nodes/{id}/package-install` (`-uninstall`, `-revert`)
+  with a request id only. The agent verifies it at
+  `GET /api/v0/nodes/{id}/package-install/{rid}/verify` and takes the repository, ref and
+  package name from that answer, never from the nudge. It posts
+  `{success, error?, details?}` to `.../package-{op}/{rid}/results`. A repeated nudge is ignored.
+  There is no `restarting` step.
+- **Download.** The repository's `/archive/{ref}.tar.gz` (`HEAD` without a ref), as the Pi's
+  first try; no git. Only https owner/repo URLs. Extraction writes plain files and directories
+  only, refuses paths outside the package, and caps the size.
+- **Manifest.** `jarvis_package.yaml` or `jarvis_command.yaml`. Undeclared components are found
+  by the Pi's conventions (`command.py`, `commands/*/command.py`, `agents/*/agent.py`, ...).
+  Refused: another OS in `platforms`, `targets` without `desktop`, any `apt_packages`,
+  `apt_sources` or `post_install`, no command, or a pip requirement that isn't a plain name and
+  version specifier. Non-command components are skipped and reported in `skipped_components`.
+- **Python.** `uv` 0.12.24, downloaded on first install and checked against pinned SHA-256s
+  (`JARVIS_AGENT_UV` names another), makes `venv/` on uv's own CPython 3.12 (`python/`), and
+  `uv pip install`s the pinned jarvis-command-sdk commit plus the manifest's `packages`
+  (`JARVIS_AGENT_SDK` overrides the SDK requirement).
+- **Layout** under `<config dir>/jarvis-agent/packages/` (removed by `uninstall --purge`):
+  `pkgs/<name>/` as downloaded, `pkgs/<name>.previous/` (the version before the last update,
+  what Revert restores), `commands.json` (the sidecar's list, rebuilt from `pkgs/`), `venv/`,
+  `python/`, `bin/uv`.
+- **Loading.** The sidecar imports each package as its own top-level package
+  (`jarvis_pkgs_<name>`), so two packages may both have `commands/get_weather/` and relative
+  imports work; the package root also goes on `sys.path` for shared code. `describe` names
+  each command's package and the packages whose commands didn't load (`failed`).
+- **No restart.** Every change starts a fresh sidecar on the new list and swaps it in
+  (`sidecar.Live`), so tools, the settings snapshot and Stored data follow at once. An install
+  or revert whose commands don't load is undone: the files go back, and the old sidecar keeps
+  serving. At start the agent serves what is installed; a package that doesn't load is reported
+  with `health: "failed"`.
+- **report_tools** lists `installed_packages` (`name`, `version`, `previous_version`, `health`)
+  as a Pi does, for the app's Update, Revert and health badge.
+
+Not built: removing an uninstalled package's secrets and stored data (the Pi does), agents and
+the other Pi component types, `min_sdk_version`/`min_jarvis_version` checks, Forge test
+installs (`test-install`), restart-on-crash.
 
 ## 7. macOS TCC and the sidecar child
 
@@ -253,6 +293,11 @@ A manifest field, e.g. `targets: ["node"] | ["node", "desktop"] | ["desktop"]`, 
 `["node"]` so existing packages never land on a desktop by accident. Pantry filters installs
 by the node's kind; the desktop agent refuses to load a package without `desktop`. Desktop
 packages may assume the sidecar but not audio in/out.
+
+**As built (2026-10-15, [decision](../decisions/2026-10-15-pantry-packages-on-desktop-agents.md)):**
+no package declares `targets` yet, so the agent installs one without the field when its
+`platforms` match, and refuses one whose `targets` leave out `desktop`. Pantry doesn't filter
+by node kind.
 
 ## 9. Open questions, by priority, with recommendations
 
@@ -2001,7 +2046,8 @@ One app behaviour, the same on a Pi: when the selected secrets mix integration a
 `__user_id__` files **every** value under that user on the target. That includes the shared
 API key, which other members and integration reads then don't see.
 
-**Not built here.** Package install/uninstall from the app, OAuth `auth:*` for sidecar
+**Not built here.** (Package install/uninstall from the app is built since 2026-10-15: §6.)
+OAuth `auth:*` for sidecar
 packages, the Pi's voice and maintenance settings (`update_node_config`: a desktop's voice
 settings stay in `agent.json`). There are also no command-specific update or delete paths:
 the Pi special-cases its reminder service (`set_reminder`), which a desktop doesn't have.
