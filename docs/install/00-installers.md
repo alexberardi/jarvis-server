@@ -1669,6 +1669,26 @@ hashes; background with an arrow, the Applications link, lzfse).
   link). It then uninstalls with the data. For the agent it runs `install`/`uninstall` from the
   app in a scratch HOME (files only, the plan uses SMAppService), then for real through
   SMAppService (the job loads in `gui/<uid>` and uninstall takes it away).
+- **In the release** (`release.yml`, held for review: release signing). `build` also compiles the
+  launcher, and `sign-macos` builds both apps from this run's binaries:
+  - **Signed with the Developer ID:** both apps get the Developer ID (secure timestamp,
+    `TeamIdentifier` checked), the nested jarvisd being the binary the step before notarized.
+    They are notarized in one submission (`scripts/macos/notarize.sh`; the log is always
+    printed) and each is stapled; `spctl -t execute` must say Notarized Developer ID. Then both
+    dmgs are built, signed, notarized, stapled and assessed (`spctl -t open --context
+    context:primary-signature`).
+  - **Dry run:** a pull request's dry run, or a manual one without the secrets, builds the same
+    things ad-hoc and leaves the dmgs unsigned.
+  - **The darwin agent archive:** `package` unpacks the agent app (tarred with no AppleDouble
+    files or xattrs, which would break the seal) into it at `<top>/Jarvis Automation
+    Agent.app`, so a Mac's self-update (01 item 1.7) has its signed app. The dmgs join
+    `SHA256SUMS` and its minisign signature.
+  - **Checks:** on macos-14, `verify` checks the archive's app (signature, identifier, team,
+    staple, `version`) and runs `scripts/macos-dmg-check.sh` on the release's dmgs, `notarized`
+    when signed. `upgrade --verify-dir` must have checked both dmgs.
+  - **Secrets:** the same as jarvisd's. A Developer ID Application certificate and an App Store
+    Connect API key belong to the team, not to a bundle id, and none of the entitlements is
+    restricted, so there is no provisioning profile.
 
 ## 9. No-terminal install (plan, 2026-10-12)
 
