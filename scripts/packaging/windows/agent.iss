@@ -76,6 +76,8 @@ Filename: "{app}\jarvis-agentw.exe"; Parameters: "start --login"; Flags: nowait;
 Type: filesandordirs; Name: "{app}"
 
 [Code]
+#include "common-code.iss"
+
 // PrepareToInstall runs `jarvis-agent install --bin` before Setup installs anything, so a
 // failure stops Setup with its message. The launcher goes into place first: install points the
 // login item, shortcuts and link handler at it when it is there.

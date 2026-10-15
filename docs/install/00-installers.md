@@ -1330,7 +1330,7 @@ spelling tags a static Go binary can't satisfy, and prerm's fallback `systemctl`
 without v>.exe` (jarvisd, per machine, UAC) and `Jarvis Automation Agent Setup <tag without v>.exe`
 (the desktop agent, per user, no UAC), unsigned, built with Inno Setup (pinned at 6.7.1, installed
 with choco on the windows runner) by `scripts/build-windows-installers.sh` from
-`scripts/packaging/windows/{server,agent}.iss` (shared `common.iss`). Both stay thin: each runs its
+`scripts/packaging/windows/{server,agent}.iss` (shared `common.iss` and `common-code.iss`). Both stay thin: each runs its
 program's own command from the payload in `{tmp}` in `PrepareToInstall`, before Setup installs any
 file, so a failure stops Setup with the command's message and leaves nothing behind.
 

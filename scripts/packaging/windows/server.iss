@@ -75,6 +75,8 @@ Type: files; Name: "{autoprograms}\{#AppName}.url"
 Type: files; Name: "{autodesktop}\{#AppName}.url"
 
 [Code]
+#include "common-code.iss"
+
 var
   SetupURL: String; // what install-from-app printed: the setup link, or the admin once set up
 
