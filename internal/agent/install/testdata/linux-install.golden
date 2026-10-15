@@ -49,9 +49,11 @@ write path="~/.local/share/applications/net.jarvisautomation.agent.desktop" mode
   | Comment=Use Jarvis on this computer: voice, browser control, dictation
   | Exec=~/.local/lib/jarvis-agent/jarvis-agent start %u
   | TryExec=~/.local/lib/jarvis-agent/jarvis-agent
+  | Icon=net.jarvisautomation.agent
   | Terminal=false
   | StartupNotify=false
   | Categories=Utility;
+  | Keywords=Jarvis;voice;assistant;dictation;
   | MimeType=x-scheme-handler/jarvis-agent;
 write path="~/.config/autostart/net.jarvisautomation.agent.desktop" mode=0644
   | [Desktop Entry]
@@ -74,9 +76,11 @@ write path="~/Desktop/net.jarvisautomation.agent.desktop" key="if-dir-exists" mo
   | Comment=Use Jarvis on this computer: voice, browser control, dictation
   | Exec=~/.local/lib/jarvis-agent/jarvis-agent start %u
   | TryExec=~/.local/lib/jarvis-agent/jarvis-agent
+  | Icon=net.jarvisautomation.agent
   | Terminal=false
   | StartupNotify=false
   | Categories=Utility;
+  | Keywords=Jarvis;voice;assistant;dictation;
   | MimeType=x-scheme-handler/jarvis-agent;
 mime-default path="~/.config/mimeapps.list" name="x-scheme-handler/jarvis-agent" value="net.jarvisautomation.agent.desktop"
 browser-hosts target="~/.local/lib/jarvis-agent/jarvis-agent"

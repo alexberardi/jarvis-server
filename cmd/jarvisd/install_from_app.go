@@ -34,7 +34,8 @@ import (
 //	            with administrator privileges; the app opens the URL it prints
 //	Windows     Inno Setup [Run] "{app}\jarvisd.exe" install-from-app --url-file <tmp file>
 //	            [--no-firewall]; the Finish page opens the URL from the file
-//	.deb        postinst: /usr/lib/jarvisd/jarvisd install-from-app --qr --allow-no-service
+//	.deb        postinst: /usr/lib/jarvisd/jarvisd install-from-app --qr --open --allow-no-service
+//	            (scripts/packaging/deb/server/postinst)
 //
 // It puts this binary where the updater expects it (/usr/local/bin, %ProgramFiles%\jarvisd),
 // then has *that* binary run `service install` + `doctor --fix` + `setup-link --url`. It is
@@ -48,6 +49,7 @@ type appInstallOptions struct {
 	urlFile        string // also write the URL to this file (Inno Setup can't read stdout)
 	qr             bool   // print the setup message and a QR code on stderr (the .deb over SSH)
 	allowNoService bool   // no service manager (a container): place the binary and stop there
+	open           bool   // Linux: open the setup link in the browser of the active desktop session (the .deb)
 	linkWait       time.Duration
 }
 
@@ -61,6 +63,7 @@ func parseInstallFromAppArgs(args []string, stderr io.Writer) (appInstallOptions
 	fs.StringVar(&o.urlFile, "url-file", "", "also write the URL to this file")
 	fs.BoolVar(&o.qr, "qr", false, "print the setup message and a QR code of the link on stderr")
 	fs.BoolVar(&o.allowNoService, "allow-no-service", false, "without a service manager, install the binary and stop there")
+	fs.BoolVar(&o.open, "open", false, "Linux: open the setup link in the browser of whoever is at the screen (until setup is done)")
 	fs.DurationVar(&o.linkWait, "link-wait", time.Minute, "how long to wait for jarvisd to write its setup link")
 	if err := fs.Parse(args); err != nil {
 		return o, err
@@ -305,6 +308,9 @@ func finishAppInstall(ctx context.Context, flagHome, bin string, o appInstallOpt
 	if o.qr {
 		fmt.Fprint(stderr, "\n"+msg+"\nOr scan this with a phone on the same network:\n\n")
 		_ = qrterm.Write(stderr, url, qrStyleFor(os.Stderr))
+	}
+	if o.open && runtime.GOOS == "linux" && isSetupLink(url) {
+		newDesktopOpener().open(ctx, url, stderr)
 	}
 	fmt.Fprintln(stdout, url)
 	return nil

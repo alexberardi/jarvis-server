@@ -3,7 +3,7 @@
 # it, on a CI runner (passwordless sudo / an elevated Windows runner). Never run it on a dev box:
 # it installs, replaces and uninstalls the real system service.
 #
-#   Linux    the .deb's postinst (scripts/packaging/deb/postinst) with the binary where the
+#   Linux    the .deb's postinst (scripts/packaging/deb/server/postinst) with the binary where the
 #            package puts it, /usr/lib/jarvisd/jarvisd; ufw on, so the firewall fix has work
 #   macOS    sudo "<…>/Jarvis Server.app/Contents/MacOS/jarvisd" install-from-app --run-as <user>
 #   Windows  the binary already in %ProgramFiles%\jarvisd (Inno's [Files]), run with --url-file
@@ -73,7 +73,7 @@ installer() {
   linux)
     sudo install -D -m 755 "$W/$v/jarvisd" /usr/lib/jarvisd/jarvisd
     # shellcheck disable=SC2024 # the output is ours to read, not root's
-    sudo sh scripts/packaging/deb/postinst configure >"$W/url" 2>"$W/log" || { cat "$W/log"; fail "postinst ($v)"; }
+    sudo sh scripts/packaging/deb/server/postinst configure >"$W/url" 2>"$W/log" || { cat "$W/log"; fail "postinst ($v)"; }
     ;;
   darwin)
     local app="$W/apps/$v/Jarvis Server.app/Contents/MacOS"

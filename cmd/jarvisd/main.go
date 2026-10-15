@@ -302,10 +302,11 @@ commands:
                    register and control jarvisd with systemd, launchd or the Windows SCM
   setup-link       print the first-run setup link and token (or the admin URL once set up)
                    [--url] the URL alone (for installers); [--qr] also as a QR code
-  install-from-app [--run-as USER] [--bin PATH] [--no-firewall] [--url-file FILE] [--qr] [--allow-no-service]
+  install-from-app [--run-as USER] [--bin PATH] [--no-firewall] [--url-file FILE] [--qr] [--open] [--allow-no-service]
                    the GUI installers' privileged step: put this binary where the service runs it,
                    then service install, doctor --fix (unless --no-firewall) and print the URL to
-                   open (needs root / an Administrator prompt)
+                   open (needs root / an Administrator prompt); --open (Linux) opens the setup
+                   link in the browser of whoever is at the screen
   migrate status   show each module's migration state
   import-recipes [--apply] [--household OLD=NEW]... [--park-unmatched] [--legacy-host HOST]... BUNDLE
                    import recipes, meal plans, staples and SKU mappings from a legacy export

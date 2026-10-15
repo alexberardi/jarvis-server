@@ -1245,8 +1245,8 @@ pass `--qr` when `jarvisd help` mentions it, so an older pinned release still pr
 one privileged call every GUI installer makes: the macOS app (`do shell script "<bundle>/jarvisd
 install-from-app --run-as <user>" with administrator privileges`), the Windows installer (`[Run]
 "{app}\jarvisd.exe" install-from-app --url-file <tmp> [--no-firewall]`, Finish opens the URL from the
-file) and the `.deb` (`scripts/packaging/deb/postinst`: `/usr/lib/jarvisd/jarvisd install-from-app
---qr --allow-no-service`). It needs root / an elevated token. Run from anywhere but the service's
+file) and the `.deb` (`scripts/packaging/deb/server/postinst`: `/usr/lib/jarvisd/jarvisd install-from-app
+--qr --open --allow-no-service`). It needs root / an elevated token. Run from anywhere but the service's
 binary path (`/usr/local/bin/jarvisd`, `%ProgramFiles%\jarvisd\jarvisd.exe`, or `--bin`), it puts
 itself there unless that path already holds this version or a newer one (a self-updated install, or
 a `.deb` whose package copy went stale: kept); replacing an older one snapshots the databases and
@@ -1262,7 +1262,61 @@ service manager runs (a container). `service status --json` now also reports the
 `account`. CI job `install-from-app` (3 OS, `scripts/install-from-app-e2e.sh`): fresh install
 (setup link, ufw rule on Ubuntu, LaunchDaemon as the runner user, the updater service on Windows),
 a no-op re-run with the same link, a newer installer (replaced, `.prev`, snapshot, restarted on
-it), an older one (newer kept), uninstall. The `.deb`'s uninstall hooks come with item 2.4.
+it), an older one (newer kept), uninstall. The `.deb`'s uninstall hooks came with item 2.4 (below).
+
+**The Debian/Ubuntu packages** (2026-10-14, [01-no-cli-plan](01-no-cli-plan.md) item 2.4; names
+decided by the user, [decision](../decisions/2026-10-14-deb-packages.md)):
+`jarvis-automation-server_<tag without v>_<arch>.deb` (jarvisd) and
+`jarvis-automation-agent_<tag without v>_<arch>.deb`, amd64 and arm64, built by
+`scripts/build-debs.sh` with nfpm pinned at v2.48.0 (`go run`, nothing to install) from
+`scripts/packaging/deb/{server,agent}.yaml`. The package version is the tag with its first `-` as
+`~` (`v0.1.0-rc1` → `0.1.0~rc1`, so a prerelease sorts before its release); the file names keep the
+tag's spelling. Both are lintian-clean at `--fail-on error,warning` (overrides: the hardening and
+spelling tags a static Go binary can't satisfy, and prerm's fallback `systemctl`).
+
+- **Server, bootstrap layout:** dpkg owns `/usr/lib/jarvisd/jarvisd`, the menu entry "Jarvis
+  Automation Server" and its icon, never the binary that runs. `postinst configure` runs
+  `install-from-app --qr --open --allow-no-service`, so the binary in `/usr/local/bin` is the
+  updater's (a newer self-updated one is kept through reinstalls, upgrades and downgrades of the
+  package), the unit is registered, the firewall opened for the LAN only when ufw or firewalld is
+  active (Q4, tagged `jarvisd`), and the setup link and QR code printed. `--open` (Linux) opens
+  the setup link, never the admin URL, in the browser of the active local graphical logind
+  session: `runuser` to that user, then `systemd-run --user` on their session bus (KillMode=process,
+  so the browser outlives xdg-open and lives in the user's manager, not in packagekitd's cgroup);
+  without a user manager, `setsid xdg-open` as the user. No such session (headless, SSH): nothing.
+  The menu entry runs `/usr/lib/jarvisd/open-setup`: `pkexec jarvisd setup-link --url` (polkit asks
+  for an admin password, since the link holds the root-only token), then `xdg-open` as the user;
+  it is the fallback when the install couldn't open the browser.
+- **`prerm remove`** runs `jarvisd service uninstall` (the unit and the tagged firewall rules go,
+  the data, `/etc/jarvisd` and the `jarvisd` account stay; if it fails, the unit is taken down by
+  hand so the package can always be removed), then deletes `/usr/local/bin/jarvisd{,.prev,
+  .rolledback,.new}` and `/usr/local/lib/jarvisd` and says how to purge. An upgrade or reinstall
+  does nothing in prerm. **`postrm purge`** deletes `/var/lib/jarvisd`, `/etc/jarvisd`, the `jarvisd`
+  user and group, and any ufw or firewalld rule still tagged `jarvisd` (in case the removal couldn't
+  run jarvisd). Decided Q6: remove keeps data, purge deletes it. The firewall rules go on remove,
+  as `install.sh --uninstall` does: no hole stays open with nothing listening, and a reinstall adds
+  them back.
+- **Agent (Q5):** the package installs nothing per user: `/usr/lib/jarvis-agent/jarvis-agent`,
+  the menu entry `net.jarvisautomation.agent.desktop` (also the `x-scheme-handler/jarvis-agent`
+  handler; byte-equal to `install.MenuEntry` for that path, a unit test keeps them so) and the
+  hicolor icon; dpkg's triggers refresh the menu and MIME caches. A person's first launch from the
+  menu runs `start`, which sets them up (`SetsUpOnFirstLaunch`: the per-user copy in
+  `~/.local/lib/jarvis-agent`, their own menu entry, which shadows the system one, login item, URL
+  handler) and opens the setup page. Removing the package removes the system pieces; per-user
+  copies stay, and `postrm` says how each person removes theirs ("Remove Jarvis Automation Agent"
+  on its setup page, or `~/.local/lib/jarvis-agent/jarvis-agent uninstall --purge`). The menu entry
+  `install` writes now names the icon (`Icon=net.jarvisautomation.agent`) and has `Keywords`.
+- **CI job `deb`** (`scripts/deb-check.sh`, as root on ubuntu-latest with ufw on): install (setup
+  link printed, service active, `/health`, binary in `/usr/local/bin` and not dpkg's, tagged ufw
+  rules), the menu entry's link under a clean environment, a reinstall that restarts nothing, an
+  upgrade (`.prev` kept), a stand-in self-updated binary kept through a reinstall and a downgrade,
+  remove (unit, binaries and rules gone; data and account kept), reinstall onto kept data (same
+  link), purge (data, account, a stray tagged rule, all gone); the agent's menu entry and MIME
+  cache, a test user's first launch with a scratch HOME and a private D-Bus (`dbus-run-session`;
+  a fake `xdg-open` records the setup page, which answers 200), remove (the user's copy stays), and
+  that user's `uninstall --purge`. The same script passes in an `ubuntu:24.04` container booting
+  systemd (`--privileged`, its own network namespace). Not covered by CI: App Center/GNOME
+  Software, the polkit dialog and a real browser opening (user sign-off, plan §5 phase 4).
 
 **`jarvisd help`** prints the usage and exits 0; the scripts grep it for an `upgrade` command.
 

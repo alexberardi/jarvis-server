@@ -1,0 +1,55 @@
+# nfpm config of jarvis-automation-agent, the desktop agent's .deb (01-no-cli-plan item 2.4,
+# decided Q5). Built by scripts/build-debs.sh, which fills in the variables and runs the pinned
+# nfpm from the repo root.
+#
+# The package installs nothing per user: the binary under /usr/lib, the app-menu entry (also
+# the jarvis-agent:// URL handler) and the icon. Each person's first launch (`jarvis-agent
+# start` from the menu) copies the binary to their own ~/.local/lib/jarvis-agent, where it
+# updates itself, registers their login item and opens the setup page (`jarvis-agent install`,
+# internal/agent/install). dpkg's triggers refresh the menu and MIME caches.
+name: jarvis-automation-agent
+arch: ${DEB_ARCH}
+platform: linux
+version: ${DEB_VERSION}
+version_schema: none
+section: utils
+priority: optional
+maintainer: ${DEB_MAINTAINER}
+homepage: https://github.com/alexberardi/jarvis-server
+license: AGPL-3.0
+description: |-
+  Jarvis Automation desktop agent
+  The desktop agent lets Jarvis Automation, a private, self-hosted voice
+  assistant, work on this computer: voice with a wake word, browser control,
+  reading the screen and dictation. It joins a Jarvis Automation server on
+  your network. Open "Jarvis Automation Agent" from the app menu to set it up
+  for your account; each person who opens it gets their own copy, which
+  updates itself.
+depends:
+  - libc6
+  - libstdc++6
+  - libgcc-s1
+recommends:
+  - libasound2t64 | libasound2
+  - xdg-utils
+contents:
+  - src: ${AGENT_BIN}
+    dst: /usr/lib/jarvis-agent/jarvis-agent
+    file_info: { mode: 0755 }
+  - src: scripts/packaging/deb/agent/net.jarvisautomation.agent.desktop
+    dst: /usr/share/applications/net.jarvisautomation.agent.desktop
+    file_info: { mode: 0644 }
+  - src: internal/agent/tray/icon.png
+    dst: /usr/share/icons/hicolor/128x128/apps/net.jarvisautomation.agent.png
+    file_info: { mode: 0644 }
+  - src: scripts/packaging/deb/copyright
+    dst: /usr/share/doc/jarvis-automation-agent/copyright
+    file_info: { mode: 0644 }
+  - src: ${DEB_GEN}/jarvis-automation-agent/changelog.gz
+    dst: /usr/share/doc/jarvis-automation-agent/changelog.gz
+    file_info: { mode: 0644 }
+  - src: scripts/packaging/deb/agent/lintian-overrides
+    dst: /usr/share/lintian/overrides/jarvis-automation-agent
+    file_info: { mode: 0644 }
+scripts:
+  postremove: scripts/packaging/deb/agent/postrm

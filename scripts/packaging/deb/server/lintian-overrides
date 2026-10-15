@@ -1,0 +1,9 @@
+# jarvisd is a static Go binary (CGO_ENABLED=0, release.yml): the C toolchain's hardening
+# flags don't apply, and the strings lintian spell-checks are in Go dependencies.
+jarvis-automation-server: hardening-no-pie [usr/lib/jarvisd/jarvisd]
+jarvis-automation-server: hardening-no-relro [usr/lib/jarvisd/jarvisd]
+jarvis-automation-server: hardening-no-bindnow [usr/lib/jarvisd/jarvisd]
+jarvis-automation-server: spelling-error-in-binary * [usr/lib/jarvisd/jarvisd]
+# jarvisd's own `service install`/`uninstall` owns jarvisd.service (not shipped by the package,
+# so deb-systemd-helper doesn't apply); prerm only takes the unit down by hand when that failed.
+jarvis-automation-server: maintainer-script-calls-systemctl [prerm:*]

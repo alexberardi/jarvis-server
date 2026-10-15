@@ -1,0 +1,38 @@
+#!/bin/sh
+# postrm of jarvis-automation-server (01-no-cli-plan item 2.4, decided Q6).
+#
+# purge: delete what removing kept: the data (/var/lib/jarvisd: the database with every account,
+# node and memory, plus models and logs), the env file's directory /etc/jarvisd, and the jarvisd
+# account `jarvisd service install` created. Removing the package already removed the firewall
+# rules tagged `jarvisd`; any left (the removal couldn't run jarvisd) are deleted here, by their
+# tag only.
+set -e
+
+case "$1" in
+purge)
+  rm -rf /var/lib/jarvisd /etc/jarvisd
+  if getent passwd jarvisd >/dev/null 2>&1; then userdel jarvisd || true; fi
+  if getent group jarvisd >/dev/null 2>&1; then groupdel jarvisd || true; fi
+
+  # ufw: rules commented "jarvisd", deleted by number from the last up.
+  if command -v ufw >/dev/null 2>&1; then
+    for n in $(ufw status numbered 2>/dev/null | sed -n 's/^\[ *\([0-9][0-9]*\)\].*# jarvisd *$/\1/p' | sort -rn); do
+      ufw --force delete "$n" >/dev/null || true
+    done
+  fi
+  # firewalld: the rich rules naming the jarvisd service, then the service.
+  if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    rules=$(firewall-cmd --permanent --list-rich-rules 2>/dev/null | grep 'service name="jarvisd"' || true)
+    svc=$(firewall-cmd --permanent --get-services 2>/dev/null | tr ' ' '\n' | grep -x jarvisd || true)
+    if [ -n "$rules$svc" ]; then
+      printf '%s\n' "$rules" | while IFS= read -r rule; do
+        if [ -n "$rule" ]; then firewall-cmd --permanent --remove-rich-rule="$rule" >/dev/null || true; fi
+      done
+      if [ -n "$svc" ]; then firewall-cmd --permanent --delete-service=jarvisd >/dev/null || true; fi
+      firewall-cmd --reload >/dev/null || true
+    fi
+  fi
+  ;;
+esac
+
+exit 0

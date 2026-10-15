@@ -1,0 +1,32 @@
+#!/bin/sh
+# prerm of jarvis-automation-server (01-no-cli-plan item 2.4, decided Q6).
+#
+# remove: stop and unregister the service (`jarvisd service uninstall`: the unit goes, and so do
+# the firewall rules tagged `jarvisd`), then delete the binaries install-from-app and the updater
+# put outside dpkg's files. The data stays in /var/lib/jarvisd and /etc/jarvisd, and so does the
+# jarvisd account; `apt purge` deletes them (postrm). An upgrade or reinstall does nothing here:
+# the new postinst hands over to the binary that runs.
+set -e
+
+case "$1" in
+remove)
+  bin=/usr/local/bin/jarvisd
+  [ -x "$bin" ] || bin=/usr/lib/jarvisd/jarvisd
+  if ! "$bin" service uninstall; then
+    # Never leave the package unremovable: take the unit down by hand.
+    echo "jarvis-automation-server: \`jarvisd service uninstall\` failed; removing the unit directly" >&2
+    if [ -f /etc/systemd/system/jarvisd.service ]; then
+      systemctl disable --now jarvisd.service >/dev/null 2>&1 || true
+      rm -f /etc/systemd/system/jarvisd.service
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -f /usr/local/bin/jarvisd /usr/local/bin/jarvisd.prev /usr/local/bin/jarvisd.rolledback /usr/local/bin/jarvisd.new
+  rm -rf /usr/local/lib/jarvisd
+  if [ -d /var/lib/jarvisd ]; then
+    echo "Jarvis Automation's data is kept in /var/lib/jarvisd. To delete it too: sudo apt purge jarvis-automation-server"
+  fi
+  ;;
+esac
+
+exit 0

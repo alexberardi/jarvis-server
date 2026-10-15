@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Jarvis Automation Agent
+GenericName=Desktop agent
+Comment=Use Jarvis on this computer: voice, browser control, dictation
+Exec=/usr/lib/jarvis-agent/jarvis-agent start %u
+TryExec=/usr/lib/jarvis-agent/jarvis-agent
+Icon=net.jarvisautomation.agent
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=Jarvis;voice;assistant;dictation;
+MimeType=x-scheme-handler/jarvis-agent;
