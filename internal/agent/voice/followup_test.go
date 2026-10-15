@@ -321,6 +321,8 @@ func TestFollowUpNoiseAndSelfEchoAreNotSent(t *testing.T) {
 		{"noise twice", "It is three.", []string{"The weather is nice.", "The weather is nice.", "The weather is nice."}, 3, EndNoise, []Outcome{OutcomeSilent, OutcomeNoise, OutcomeNoise}},
 		// The mic picked up the tail of our own reply.
 		{"self echo", "Here is sad music.", []string{"Sad music."}, 1, EndEcho, []Outcome{OutcomeEcho}},
+		// The user's report: quoting the reply in a request of your own is sent.
+		{"quotes the reply", typeReply, []string{"Can you type hello there?", "(wind blowing)"}, 2, EndNonSpeech, []Outcome{OutcomeSilent, OutcomeNonSpeech}},
 		{"non-speech", "It is three.", []string{"(wind blowing)"}, 1, EndNonSpeech, []Outcome{OutcomeNonSpeech}},
 	}
 	for _, c := range cases {
@@ -426,8 +428,10 @@ func TestFollowUpDisabled(t *testing.T) {
 	}
 }
 
-// Goldens computed with N:core/conversation_filters.py (jarvis-node-setup 0.3.4), except that
-// lone words are no longer noise (Python's allowlist rule was dropped on purpose).
+// Noise goldens computed with N:core/conversation_filters.py (jarvis-node-setup 0.3.4), except
+// that lone words are no longer noise (Python's allowlist rule was dropped on purpose). The echo
+// cases Python also decided agree with it; the self-echo check is stricter since 2026-10-14
+// (TestSelfEchoKeepsRequestsThatQuoteTheReply).
 func TestFollowUpFiltersMatchPython(t *testing.T) {
 	noise := []struct {
 		text, prev string
@@ -455,6 +459,42 @@ func TestFollowUpFiltersMatchPython(t *testing.T) {
 		{"Volume set to thirty percent", "Volume's set to thirty percent", false},
 	}
 	for _, c := range echo {
+		if got := LooksLikeSelfEcho(c.text, c.said); got != c.want {
+			t.Errorf("LooksLikeSelfEcho(%q, %q) = %v, want %v", c.text, c.said, got, c.want)
+		}
+	}
+}
+
+// The user's report (2026-10-14): a request that quotes a few words of the reply is the user
+// speaking, not the mic hearing the reply.
+const typeReply = `Got it, Jordan. I've opened Omawrite for you. Now, type "hello there" to get started.`
+
+func TestSelfEchoKeepsRequestsThatQuoteTheReply(t *testing.T) {
+	cases := []struct {
+		text, said string
+		want       bool
+	}{
+		// The report's exact pair, and requests like it.
+		{"Can you type hello there?", typeReply, false},
+		{"type hello there", typeReply, false},
+		{"Okay, type hello there for me.", typeReply, false},
+		{"Type hello there to get started.", typeReply, false},
+		{"type hello there", "Do you want me to type hello there?", false},
+		{"Yes, open Omawrite.", "Should I open Omawrite?", false},
+		{"Open the kitchen timer", "The kitchen timer is set.", false},
+		// One word is an answer, even the reply's own.
+		{"Kitchen.", "Kitchen?", false},
+		// True echoes: the reply, or most of it, heard back.
+		{typeReply, typeReply, true},
+		{"Got it Jordan, I've opened Omawrite for you. Now type hello there to get started.", typeReply, true},
+		{"I've opened Omawrite for you. Now, type hello there to get started.", typeReply, true},
+		{"opened Omawrite for you now type hello there to get started", typeReply, true},
+		{"Here is sad music.", "Here is sad music.", true},
+		{"It is three", "It is three.", true},
+		// Whisper dropping a word of the echo still counts.
+		{"The timer is set for ten minutes", "The kitchen timer is set for ten minutes.", true},
+	}
+	for _, c := range cases {
 		if got := LooksLikeSelfEcho(c.text, c.said); got != c.want {
 			t.Errorf("LooksLikeSelfEcho(%q, %q) = %v, want %v", c.text, c.said, got, c.want)
 		}
