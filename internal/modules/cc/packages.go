@@ -1,12 +1,17 @@
 package cc
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -85,6 +90,55 @@ func (m *Module) PantryBaseURL(ctx context.Context, householdID string) string {
 		return v
 	}
 	return defaultPantryBaseURL
+}
+
+// notForComputersCode marks an install a computer can't run; the app leaves computers out of
+// the Store's node picker for such a package, so it sees this only from an old app.
+const notForComputersCode = "not_for_computers"
+
+// piOnlyReason says why a desktop agent can't run Pantry's package name, or "" when it can or
+// Pantry can't say (decision 2026-10-15-store-hides-pi-only-packages). It reads the package's
+// detail: targets that leave out "desktop", or apt packages, which only a Pi installs. A
+// package without targets is allowed (decision 2026-10-15-pantry-packages-on-desktop-agents).
+// Pantry being down or not knowing the package isn't a refusal: the agent checks the manifest
+// it downloads (packages.Manifest.CheckDesktop) with the same rules and more.
+func (m *Module) piOnlyReason(ctx context.Context, householdID, name string) string {
+	ctx, cancel := context.WithTimeout(ctx, pantryDraftTimeout)
+	defer cancel()
+	u := strings.TrimRight(m.PantryBaseURL(ctx, householdID), "/") + "/v1/commands/" + url.PathEscape(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		m.deps.Log.Warn("cc: Pantry URL unusable for a desktop install check", "url", u, "err", err)
+		return ""
+	}
+	resp, err := m.pantryHTTP.Do(req)
+	if err != nil {
+		m.deps.Log.Warn("cc: Pantry unreachable for a desktop install check", "url", u, "err", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		m.deps.Log.Warn("cc: Pantry has no detail for a desktop install check", "url", u, "status", resp.StatusCode)
+		return ""
+	}
+	var d struct {
+		CommandName string   `json:"command_name"`
+		DisplayName string   `json:"display_name"`
+		Targets     []string `json:"targets"`
+		AptPackages []any    `json:"apt_packages"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&d); err != nil {
+		m.deps.Log.Warn("cc: Pantry detail is not a package", "url", u, "err", err)
+		return ""
+	}
+	label := cmp.Or(d.DisplayName, d.CommandName, name)
+	switch {
+	case len(d.Targets) > 0 && !slices.Contains(d.Targets, "desktop"):
+		return label + " is made for Pi nodes, not computers"
+	case len(d.AptPackages) > 0:
+		return label + " needs system packages that only a Pi node installs"
+	}
+	return ""
 }
 
 func (m *Module) registerPackages(mux *http.ServeMux) {
@@ -428,6 +482,12 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 	}
 	if needsPantry && !m.requirePantry(w, r, hh) {
 		return nil, false
+	}
+	if needsPantry && node.desktop() {
+		if reason := m.piOnlyReason(ctx, hh, name); reason != "" {
+			detailCode(w, http.StatusUnprocessableEntity, reason, notForComputersCode)
+			return nil, false
+		}
 	}
 	now := m.now()
 	p := &pkgRequest{id: uuid4(), nodeID: nodeID, householdID: hh, commandName: name, repoURL: repo,

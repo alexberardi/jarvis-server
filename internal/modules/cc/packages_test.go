@@ -373,3 +373,85 @@ func TestPantryBaseURL(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// A computer (desktop agent) is never sent a package that Pantry says is Pi-only: targets that
+// leave out "desktop", or apt packages. Decision 2026-10-15-store-hides-pi-only-packages.
+func TestPackageInstallPiOnlyOnDesktop(t *testing.T) {
+	e := newEnv(t, envOpts{noMQTT: true})
+	pantry := newFakePantry(t)
+	setPantry(t, e, "hh1", pantry.URL)
+	member := e.auth.addUser(1, "hh1", authn.RoleMember)
+	e.createNode("pi", "hh1")
+	e.createNode("desk", "hh1")
+	if _, err := e.d.Write.Exec(`UPDATE cc_nodes SET node_kind = 'desktop' WHERE node_id = 'desk'`); err != nil {
+		t.Fatal(err)
+	}
+	e.createNode("old-agent", "hh1") // an agent that hasn't sent node_kind yet
+	if _, err := e.d.Write.Exec(`UPDATE cc_nodes SET install_mode = 'desktop-agent' WHERE node_id = 'old-agent'`); err != nil {
+		t.Fatal(err)
+	}
+	pantry.set(func() {
+		pantry.commands["pi_only"] = `{"command_name":"pi_only","display_name":"Doorbell","targets":["node"],"apt_packages":[]}`
+		pantry.commands["apt"] = `{"command_name":"apt","display_name":"","apt_packages":["ffmpeg"]}`
+		pantry.commands["both"] = `{"command_name":"both","targets":["node","desktop"],"apt_packages":[]}`
+		pantry.commands["untagged"] = `{"command_name":"untagged","apt_packages":[]}`
+		pantry.commands["garbled"] = `<html>`
+	})
+	count := func() int {
+		var n int
+		if err := e.d.Read.QueryRow(`SELECT COUNT(*) FROM cc_package_install_requests`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	install := func(node, name string, h hdr) *resp {
+		return e.do("POST", "/api/v0/nodes/"+node+"/package-install",
+			map[string]any{"command_name": name, "github_repo_url": "https://example.com/r.git"}, h)
+	}
+	refused := func(r *resp, want string) {
+		t.Helper()
+		b := r.want(422).json()
+		if b["detail"] != want || b["code"] != "not_for_computers" {
+			t.Fatal(b)
+		}
+	}
+
+	refused(install("desk", "pi_only", bearer(member)), "Doorbell is made for Pi nodes, not computers")
+	refused(install("old-agent", "pi_only", bearer(member)), "Doorbell is made for Pi nodes, not computers")
+	refused(install("desk", "apt", bearer(member)), "apt needs system packages that only a Pi node installs")
+	refused(install("desk", "pi_only", adminH()), "Doorbell is made for Pi nodes, not computers")
+	if pantry.lastAsked() != "pi_only" {
+		t.Fatal(pantry.lastAsked())
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("%d rows; a refused install must not create one", n)
+	}
+
+	// A package that names the desktop, or names no targets (decision
+	// 2026-10-15-pantry-packages-on-desktop-agents), goes ahead.
+	install("desk", "both", bearer(member)).want(201)
+	install("desk", "untagged", bearer(member)).want(201)
+
+	// A Pi gets every package, and cc doesn't ask Pantry for it.
+	pantry.set(func() { pantry.asked = nil })
+	install("pi", "pi_only", bearer(member)).want(201)
+	install("pi", "apt", bearer(member)).want(201)
+	if pantry.lastAsked() != "" {
+		t.Fatal("asked Pantry about a Pi install:", pantry.lastAsked())
+	}
+
+	// When Pantry can't say, the request goes ahead: the agent checks the manifest it downloads
+	// (packages.Manifest.CheckDesktop) and refuses there.
+	install("desk", "unknown", bearer(member)).want(201)
+	install("desk", "garbled", bearer(member)).want(201)
+	pantry.set(func() { pantry.status = http.StatusInternalServerError })
+	install("desk", "pi_only", bearer(member)).want(201)
+	if n := count(); n != 7 {
+		t.Fatalf("%d rows, want 7", n)
+	}
+
+	// An outsider still learns nothing about the package.
+	stranger := e.auth.addUser(2, "hh2", authn.RoleOwner)
+	pantry.set(func() { pantry.status = 0 })
+	install("desk", "pi_only", bearer(stranger)).detail(403, "User is not a member of this household")
+}
