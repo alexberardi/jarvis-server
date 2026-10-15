@@ -26,6 +26,10 @@
     <string>__VERSION__</string>
     <key>CFBundleVersion</key>
     <string>__VERSION__</string>
+    <!-- Contents/Resources/AppIcon.icns, made from internal/agent/tray/icon.png by
+         scripts/build-macos-apps.sh. -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSUIElement</key>
@@ -47,5 +51,12 @@
     <string>Jarvis Automation Agent asks System Events to list, focus, minimise and close windows when you ask Jarvis to.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Jarvis Automation Agent listens for "hey Jarvis" on this Mac and records what you say next, when voice is turned on.</string>
+    <!-- Accessibility and Screen Recording have no usage string macOS shows: their grants are
+         switches in System Settings, which the setup page opens. These say what they're for to
+         anyone reading the bundle (and to a future macOS that shows them). -->
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Jarvis Automation Agent types dictated text and moves, focuses and closes windows when you ask Jarvis to.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Jarvis Automation Agent reads the screen when you ask Jarvis what's on it.</string>
 </dict>
 </plist>

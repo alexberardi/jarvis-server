@@ -733,8 +733,9 @@ checklist).
    a download button per OS (public release assets, open question 2) and how to pair. A Done-step link in the setup wizard leads there.
 2. **Installers per OS.** They install the agent and register it to start at login. They need
    no terminal and no admin rights wherever the OS allows:
-   - **macOS:** a signed, notarized `.dmg` with Jarvis Agent.app (hardened runtime, §9.3). The
-     Developer ID and notarization pipeline already exists for jarvisd (`sign-macos`).
+   - **macOS:** a signed, notarized `.dmg` with Jarvis Automation Agent.app (hardened runtime,
+     §9.3). Built: `Jarvis-Automation-Agent-<v>.dmg` (install plan 2.2,
+     [00-installers §8.4](../install/00-installers.md) "The macOS apps and disk images").
    - **Windows:** a per-user installer (`.exe` or `.msi`) and a Startup entry or scheduled
      task. It is unsigned until ID9 changes, so expect a SmartScreen click-through.
    - **Linux:** the one-liner plus a `.deb`, both writing the systemd user unit.

@@ -1633,6 +1633,43 @@ ports 27xxx on loopback, mDNS off) installed Kokoro + ERes2Net through the model
 extracted dylibs carry no quarantine attribute (none propagates from a quarantined parent) and keep
 their ad-hoc signatures. `v0.0.0-notarize3` (run 37725013988) checked the exec watchdog.
 
+**The macOS apps and disk images** (2026-10-15, [01-no-cli-plan](01-no-cli-plan.md) items 2.2
+and 2.5; names and choices: [decision](../decisions/2026-10-15-macos-apps-and-dmgs.md)).
+`scripts/build-macos-apps.sh` assembles and signs both apps on a Mac, and
+`scripts/build-macos-dmgs.sh` puts each in a drag-to-Applications dmg with dmgbuild (pinned with
+hashes; background with an arrow, the Applications link, lzfse).
+
+- **`Jarvis Automation Server.app`** (`net.jarvisautomation.server`) is the installer. Its
+  executable is `cmd/jarvis-server-app`, a launcher. Beside it, `Contents/MacOS/jarvisd` is the
+  release's notarized jarvisd, used as given. On first open the launcher shows an NSAlert ("runs
+  in the background", ☑ "Let devices on my network reach it"), then `do shell script "<bundle>/jarvisd
+  install-from-app --run-as <user> [--no-firewall]" with administrator privileges` (the standard
+  password dialog). It opens the URL that prints. Later opens run `jarvisd service status --json`
+  and `setup-link --url` as the user (the home is theirs) and open the setup link or the admin.
+  After an admin Stop it offers Start (`service start` as root). When the app carries a newer
+  jarvisd than `/usr/local/bin`, it offers Update (`install-from-app --no-firewall`). Holding
+  Option while opening offers Uninstall…: `service uninstall [--purge --yes]`, then the binary and
+  what upgrades leave beside it, with "Also delete … data?" defaulting to Keep (Q6).
+  `--non-interactive` runs the same flow with `sudo -n` for the password dialog and prints the URL
+  (CI, MDM). The LaunchDaemons name the app in `AssociatedBundleIdentifiers`.
+- **`Jarvis Automation Agent.app`** (`net.jarvisautomation.agent`) is the agent with
+  `internal/agent/deploy/macos/Info.plist` (LSUIElement, the `jarvis-agent:` scheme, the
+  Microphone, Apple Events, Accessibility and Screen Recording usage strings, the icon) and its
+  in-bundle LaunchAgent for SMAppService. Opening it the first time runs `install` (SMAppService
+  login item, native hosts), then the setup page (DESIGN §13, already built).
+- **Signing:** the hardened runtime on all three pieces of code. The agent's entitlements
+  (`scripts/packaging/macos/agent.entitlements`) are `automation.apple-events`,
+  `device.audio-input` and `cs.disable-library-validation`; the launcher has none. Ad-hoc in CI
+  and dry runs, with the same flags and entitlements. CI job `macos-dmg` (macos-14,
+  `scripts/macos-dmg-check.sh`) builds both dmgs, mounts them, checks layout, signatures,
+  identifiers, entitlements and Info.plist keys. It builds the launcher's dialogs without showing
+  them (`--check-ui`) and installs the server from the app copied out of the dmg
+  (`--non-interactive`: setup link, `/health`, `/usr/local/bin/jarvisd` identical to the app's,
+  the LaunchDaemon as the runner user and associated with the app; a second open gives the same
+  link). It then uninstalls with the data. For the agent it runs `install`/`uninstall` from the
+  app in a scratch HOME (files only, the plan uses SMAppService), then for real through
+  SMAppService (the job loads in `gui/<uid>` and uninstall takes it away).
+
 ## 9. No-terminal install (plan, 2026-10-12)
 
 **Buildable plan:** [01-no-cli-plan.md](01-no-cli-plan.md) (2026-10-13) turns this section and agent

@@ -24,6 +24,10 @@ const (
 	// LaunchdLabel is the LaunchDaemon label (a domain the project controls, not com.jarvis.*,
 	// which the legacy admin uses).
 	LaunchdLabel = "net.jarvisautomation.jarvisd"
+	// ServerAppID is the bundle id of "Jarvis Automation Server.app" (01-no-cli-plan 2.2). The
+	// LaunchDaemons name it in AssociatedBundleIdentifiers, so System Settings → Login Items →
+	// "Allow in the Background" lists them under the app's name and icon, not a bare label.
+	ServerAppID = "net.jarvisautomation.server"
 	// WindowsAccount is the virtual service account the Windows service runs as (ID1).
 	WindowsAccount = `NT SERVICE\jarvisd`
 	// RestartExitCode is the status jarvisd exits with when it asks its supervisor to restart

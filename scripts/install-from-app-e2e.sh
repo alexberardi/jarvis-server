@@ -5,7 +5,7 @@
 #
 #   Linux    the .deb's postinst (scripts/packaging/deb/server/postinst) with the binary where the
 #            package puts it, /usr/lib/jarvisd/jarvisd; ufw on, so the firewall fix has work
-#   macOS    sudo "<…>/Jarvis Server.app/Contents/MacOS/jarvisd" install-from-app --run-as <user>
+#   macOS    sudo "<…>/Jarvis Automation Server.app/Contents/MacOS/jarvisd" install-from-app --run-as <user>
 #   Windows  the binary already in %ProgramFiles%\jarvisd (Inno's [Files]), run with --url-file
 #
 # Steps on each: a fresh install prints the setup link (token) and leaves the service healthy;
@@ -76,7 +76,7 @@ installer() {
     sudo sh scripts/packaging/deb/server/postinst configure >"$W/url" 2>"$W/log" || { cat "$W/log"; fail "postinst ($v)"; }
     ;;
   darwin)
-    local app="$W/apps/$v/Jarvis Server.app/Contents/MacOS"
+    local app="$W/apps/$v/Jarvis Automation Server.app/Contents/MacOS"
     mkdir -p "$app"
     cp "$W/$v/jarvisd" "$app/jarvisd"
     # shellcheck disable=SC2024

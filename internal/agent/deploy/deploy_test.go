@@ -280,6 +280,15 @@ func TestMacBundleInfoPlist(t *testing.T) {
 	if !strings.HasPrefix(p["NSMicrophoneUsageDescription"], "string:") {
 		t.Error("NSMicrophoneUsageDescription is required for the voice pipeline")
 	}
+	// The usage strings the dmg's app carries (01-no-cli-plan 2.2), and its icon.
+	for _, k := range []string{"NSAccessibilityUsageDescription", "NSScreenCaptureUsageDescription"} {
+		if !strings.HasPrefix(p[k], "string:Jarvis Automation Agent ") {
+			t.Errorf("%s = %q", k, p[k])
+		}
+	}
+	if p["CFBundleIconFile"] != "string:AppIcon" {
+		t.Errorf("CFBundleIconFile = %q", p["CFBundleIconFile"])
+	}
 	if l := plistDict(t, read(t, plistPath)); l["AssociatedBundleIdentifiers"] != "string:"+appid.ID {
 		t.Errorf("LaunchAgent AssociatedBundleIdentifiers = %q", l["AssociatedBundleIdentifiers"])
 	}

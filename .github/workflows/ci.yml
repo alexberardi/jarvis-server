@@ -397,7 +397,9 @@ jobs:
         run: scripts/fetch-sherpa-libs.sh ${{ matrix.target }}
       - name: shellcheck
         if: runner.os == 'Linux'
-        run: shellcheck scripts/install-from-app-e2e.sh && shellcheck -s sh scripts/packaging/deb/server/postinst
+        run: |
+          shellcheck scripts/install-from-app-e2e.sh && shellcheck -s sh scripts/packaging/deb/server/postinst
+          shellcheck scripts/build-macos-apps.sh scripts/build-macos-dmgs.sh scripts/macos-dmg-check.sh
       - name: install-from-app end to end
         run: scripts/install-from-app-e2e.sh
 
@@ -492,6 +494,40 @@ jobs:
           name: windows-installers
           path: dist/*.exe
           retention-days: 7
+
+  # The macOS apps and disk images (01-no-cli-plan 2.2 and 2.5): both apps built and signed
+  # ad-hoc with the release's hardened runtime and entitlements (scripts/build-macos-apps.sh),
+  # the dmgs made with the pinned dmgbuild (scripts/build-macos-dmgs.sh), then mounted, checked
+  # and installed for real on the runner (scripts/macos-dmg-check.sh): the server app's flow with
+  # sudo for the password dialog → setup link, /health, uninstall; the agent's install/uninstall
+  # in a scratch HOME and through SMAppService. Developer ID signing, notarization and stapling
+  # are release.yml's sign-macos.
+  macos-dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh darwin-arm64
+      - name: Build the programs
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for prog in jarvisd jarvis-agent jarvis-server-app; do
+            go build -trimpath -ldflags "-s -w -X main.version=v0.0.0-ci" -o "bin/$prog" "./cmd/$prog"
+          done
+      - name: Build the apps and the dmgs
+        run: |
+          scripts/build-macos-apps.sh v0.0.0-ci bin/jarvisd bin/jarvis-agent bin/jarvis-server-app apps
+          scripts/build-macos-dmgs.sh v0.0.0-ci apps dist
+          ls -l dist
+      - name: Mount, verify, install, uninstall
+        run: CI=1 scripts/macos-dmg-check.sh dist/Jarvis-Automation-Server-0.0.0-ci.dmg dist/Jarvis-Automation-Agent-0.0.0-ci.dmg
 
   # The install scripts (I3, I4) end to end against a release-shaped archive of this commit,
   # served from a local HTTP server (--base-url): verify, install, firewall fix, health,

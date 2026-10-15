@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements of "Jarvis Automation Agent.app" (01-no-cli-plan §2.2):
+  - automation.apple-events: it asks System Events to list, focus and close windows;
+  - device.audio-input: the microphone (voice), which the hardened runtime otherwise refuses;
+  - disable-library-validation: it dlopens the onnxruntime/sherpa dylibs it extracts from
+    itself, which carry upstream ad-hoc signatures (as jarvisd, scripts/macos/jarvisd.entitlements).
+  Nothing else: no JIT, no unsigned executable memory, no DYLD_* variables.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>
