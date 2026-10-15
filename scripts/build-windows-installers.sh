@@ -46,6 +46,9 @@ NUMERIC=$CORE.0
 case "$NUMERIC" in [0-9]*.[0-9]*.[0-9]*.0) ;; *) echo "can't make a file version of $VERSION" >&2; exit 2 ;; esac
 
 mkdir -p "$OUT_DIR"
+# Absolute: ISCC resolves relative paths against the .iss file's directory.
+BIN_DIR=$(cd "$BIN_DIR" && pwd)
+OUT_DIR=$(cd "$OUT_DIR" && pwd)
 win() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
 here=$(cd "$(dirname "$0")" && pwd)
 for p in server agent; do
