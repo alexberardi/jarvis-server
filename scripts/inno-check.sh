@@ -36,8 +36,9 @@ SRV_OLD="$DIST/Jarvis Automation Server Setup ${OLD#v}.exe"
 SRV_NEW="$DIST/Jarvis Automation Server Setup ${NEW#v}.exe"
 AGT_OLD="$DIST/Jarvis Automation Agent Setup ${OLD#v}.exe"
 AGT_NEW="$DIST/Jarvis Automation Agent Setup ${NEW#v}.exe"
-PF=$(cygpath -u "$PROGRAMFILES")
-PD=$(cygpath -u "$PROGRAMDATA")
+# Git Bash keeps some variables in their Windows spelling (ProgramData).
+PF=$(cygpath -u "${PROGRAMFILES:-${ProgramFiles:-C:/Program Files}}")
+PD=$(cygpath -u "${PROGRAMDATA:-${ProgramData:-C:/ProgramData}}")
 LAD=$(cygpath -u "$LOCALAPPDATA")
 RAD=$(cygpath -u "$APPDATA")
 SRV_DIR="$PF/jarvisd"
@@ -124,7 +125,7 @@ grep -qi 'RemoteIP: *LocalSubnet' "$W/fw.txt" || fail "the firewall rule isn't l
 grep -qi 'Profiles: *Private' "$W/fw.txt" || fail "the firewall rule isn't for private networks"
 grep -qx 'URL=http://localhost:7710/' <(tr -d '\r' <"$START_MENU_ALL/Jarvis Automation Server.url") ||
   fail "the Start menu entry doesn't open the admin"
-gone "$(cygpath -u "$PUBLIC")/Desktop/Jarvis Automation Server.url" # the desktop link is unticked by default
+gone "$(cygpath -u "${PUBLIC:-C:/Users/Public}")/Desktop/Jarvis Automation Server.url" # the desktop link is unticked by default
 [ "$(reg_value "$SRV_KEY" DisplayVersion)" = "${OLD#v}" ] || fail "DisplayVersion is '$(reg_value "$SRV_KEY" DisplayVersion)'"
 [ "$(reg_value "$SRV_KEY" DisplayName)" = "Jarvis Automation Server" ] || fail "DisplayName"
 
