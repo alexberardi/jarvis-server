@@ -36,7 +36,9 @@ func (f *fakeOS) GetVolume(context.Context) (int, error) {
 	defer f.mu.Unlock()
 	return f.volume, nil
 }
-func (f *fakeOS) ApplyVolume(_ context.Context, l int) error { return f.act(fmt.Sprintf("volume %d", l)) }
+func (f *fakeOS) ApplyVolume(_ context.Context, l int) error {
+	return f.act(fmt.Sprintf("volume %d", l))
+}
 func (f *fakeOS) ListWindows(context.Context) ([]host.Window, error) {
 	return []host.Window{{ID: "0x1", Title: "Inbox", App: "firefox"}, {ID: "0x2", Title: "notes", App: "kitty"}}, nil
 }

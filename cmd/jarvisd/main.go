@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/buildinfo"
 	"github.com/alexberardi/jarvis-server/internal/doctor"
 	adminmod "github.com/alexberardi/jarvis-server/internal/modules/admin"
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
@@ -365,7 +366,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	switch args[0] {
 	case "version":
-		fmt.Fprintln(stdout, version)
+		fmt.Fprintln(stdout, buildinfo.Version(version))
 		return nil
 	case "help", "-h", "--help":
 		// The install scripts read the command list to see what this binary supports.
