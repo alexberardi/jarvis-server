@@ -137,3 +137,43 @@ func TestAlreadySetUpReturnsAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A waiting login item answers its control socket, so stop, uninstall and an installer
+// replacing it can make it quit, and opening the agent again shows the setup page.
+func TestWaitingControl(t *testing.T) {
+	var quits, pages int
+	var enrolled atomic.Bool
+	h := waitingControl(enrolled.Load, func() { pages++ }, func() { quits++ })
+	for _, cmd := range []string{"ping", "show-running", "quit"} {
+		if err := h(cmd); err != nil {
+			t.Fatalf("%s: %v", cmd, err)
+		}
+	}
+	if quits != 1 || pages != 1 {
+		t.Fatalf("quits %d, pages %d", quits, pages)
+	}
+	for _, cmd := range []string{"health", "voice-on", "voice-off"} {
+		if err := h(cmd); err == nil {
+			t.Fatalf("%s answered ok while not set up", cmd)
+		}
+	} // The page just saved the credentials and its start asks: no second page.
+	enrolled.Store(true)
+	if err := h("show-running"); err != nil || pages != 1 {
+		t.Fatalf("show-running once set up: %v, pages %d", err, pages)
+	}
+}
+
+// Quit over the control socket ends the wait like the menu's Quit.
+func TestSetupWaitQuitFromControl(t *testing.T) {
+	var f fakeWait
+	w := f.wait("")
+	quit := make(chan struct{})
+	w.quit = quit
+	done := make(chan error, 1)
+	go func() { done <- w.wait(context.Background()) }()
+	<-f.trayUp
+	close(quit)
+	if err := <-done; !errors.Is(err, errQuitWhileWaiting) {
+		t.Fatalf("wait = %v, want errQuitWhileWaiting", err)
+	}
+}

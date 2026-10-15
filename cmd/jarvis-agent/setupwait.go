@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/control"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -45,6 +49,8 @@ type setupWait struct {
 	openSetup func()
 	// marker is setupOfferedMarker's path ("" never opens the page by itself).
 	marker string
+	// quit closes when the control socket asks this agent to quit (nil: never).
+	quit <-chan struct{}
 }
 
 // waitingState is the waiting icon's menu.
@@ -82,6 +88,9 @@ func (w setupWait) wait(ctx context.Context) error {
 		case <-quit:
 			w.log.Info("Quit chosen in the menu before setup")
 			return errQuitWhileWaiting
+		case <-w.quit:
+			w.log.Info("asked to quit before setup (stop, uninstall, or a reinstall replacing this agent)")
+			return errQuitWhileWaiting
 		case <-w.tick:
 		}
 	}
@@ -105,18 +114,56 @@ func (w setupWait) offerPageOnce() {
 // interactive: run was started from a terminal (someone typed it), not by a login item.
 func interactive() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
+// waitingControl answers the control socket while the login item waits for setup: quit ends the
+// wait (stop, uninstall, an installer replacing this binary), show-running (opening the agent
+// again: its shortcut, the link) opens the setup page, ping answers; the rest need an agent
+// that is set up. Once the page has saved the credentials, show-running opens nothing: this
+// process is about to become the agent (the page's own start asks it).
+func waitingControl(enrolled func() bool, openSetup, quit func()) control.Handler {
+	return func(cmd string) error {
+		switch cmd {
+		case control.Quit:
+			quit()
+		case control.ShowRunning:
+			if !enrolled() {
+				openSetup()
+			}
+		case control.Health, control.VoiceOn, control.VoiceOff:
+			return errors.New("this computer isn't set up yet")
+		}
+		return nil
+	}
+}
+
 // waitForSetup is run on a computer that isn't set up, started by a login item: it waits as
 // setupWait says, then becomes the agent (reexecRun). credsFile is where the page saves the
-// credentials.
-func waitForSetup(ctx context.Context, log *slog.Logger, credsFile string, noTray bool) error {
+// credentials. ctl is the control socket run holds (nil when it couldn't): served meanwhile, so
+// the waiting agent can be stopped, and closed before the agent starts in its place.
+func waitForSetup(ctx context.Context, log *slog.Logger, credsFile string, noTray bool, ctl net.Listener) error {
 	t := time.NewTicker(setupPollEvery)
 	defer t.Stop()
+	quit := make(chan struct{})
+	var quitOnce sync.Once
 	w := setupWait{
 		log:       log,
 		enrolled:  func() bool { _, err := node.LoadCreds(credsFile); return err == nil },
 		tick:      t.C,
 		openSetup: openSetupPage(log),
 		marker:    filepath.Join(filepath.Dir(credsFile), setupOfferedMarker),
+		quit:      quit,
+	}
+	stopControl := func() {}
+	if ctl != nil {
+		cctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			h := waitingControl(w.enrolled, w.openSetup, func() { quitOnce.Do(func() { close(quit) }) })
+			if err := control.ServeVersion(cctx, ctl, h, version); err != nil {
+				log.Warn("control socket stopped", "err", err)
+			}
+		}()
+		stopControl = func() { cancel(); <-done }
 	}
 	var err error
 	// macOS: the menu-bar icon needs AppKit's loop on the main thread.
@@ -139,6 +186,7 @@ func waitForSetup(ctx context.Context, log *slog.Logger, credsFile string, noTra
 		err = w.wait(ctx)
 		return err
 	})
+	stopControl() // the agent that starts next takes the socket
 	switch {
 	case errors.Is(err, errQuitWhileWaiting):
 		return nil

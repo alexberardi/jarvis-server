@@ -483,13 +483,13 @@ func run(ctx context.Context, args []string) error {
 	}
 	c, err := node.LoadCreds(path)
 	if err != nil {
-		if ctl != nil {
-			_ = ctl.Close()
-		}
 		if errors.Is(err, node.ErrNotEnrolled) && !interactive() {
 			// A login item on a computer that isn't set up: the status icon's "Set up", then
 			// the agent once it is (setupwait.go). Typed in a terminal, it says what to do.
-			return waitForSetup(ctx, log, path, *f.noTray)
+			return waitForSetup(ctx, log, path, *f.noTray, ctl)
+		}
+		if ctl != nil {
+			_ = ctl.Close()
 		}
 		return notSetUp(err)
 	}

@@ -967,7 +967,11 @@ nothing to do. Started by a login item it waits for setup instead (below).
   would be wrong. `run` started by a login item (stdin not a terminal: systemd, launchd, the Run
   key, or the autostart entry's `start --login`, which now spawns `run` where systemd doesn't
   start it) shows the status icon, "Jarvis Automation Agent — Not set up yet", with
-  "Set up / Settings…" and Quit, and keeps the control socket free. Where the desktop shows no
+  "Set up / Settings…" and Quit. It answers the control socket (since 2026-10-14, found by the
+  Windows installer's CI: `stop`, `uninstall` and an installer replacing the binary couldn't
+  reach it, so it kept running): quit ends the wait, show-running (the shortcut, the link)
+  opens the setup page, or nothing once the page has saved the credentials, ping answers; it
+  closes the socket before becoming the agent. Where the desktop shows no
   status icon, it opens the setup page, **once**: a marker (`setup-offered-at-login` next to
   `node.json`) keeps later logins quiet. The menu entry, the app and `jarvis-agent://start` still
   open the page.
