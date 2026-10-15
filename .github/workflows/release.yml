@@ -14,6 +14,11 @@ name: release
 # amd64; onnxruntime embedded where the agent has voice) holds jarvis-agent plus LICENSE and
 # NOTICE. Both are listed in the one SHA256SUMS, so the one minisign signature covers them.
 #
+# The Debian/Ubuntu packages (01-no-cli-plan item 2.4) are built from the same linux binaries by
+# scripts/build-debs.sh (nfpm, pinned): jarvis-automation-server (jarvisd) and
+# jarvis-automation-agent, each for amd64 and arm64. They are listed in SHA256SUMS too, and the
+# verify job installs, checks and purges the server package on each Linux architecture.
+#
 # Jobs: build (all 8 binaries) → sign-macos (Developer ID + notarization of the darwin
 # jarvisd) → package (archives, SHA256SUMS, minisign) → verify (each OS) → publish. Signing
 # happens before packaging so SHA256SUMS and its signature cover the notarized binary. The
@@ -29,6 +34,8 @@ on:
       - scripts/install.ps1
       - scripts/install-agent.sh
       - scripts/install-agent-check.sh
+      - scripts/build-debs.sh
+      - scripts/packaging/deb/**
   workflow_dispatch:
     inputs:
       version:
@@ -272,6 +279,10 @@ jobs:
         with:
           name: darwin-signed-${{ needs.build.outputs.version }}
           path: signed
+      # Go runs the pinned nfpm (scripts/build-debs.sh) and, in a pull request, scripts/testsign.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
       - name: Package
         env:
           VERSION: ${{ needs.build.outputs.version }}
@@ -294,9 +305,15 @@ jobs:
               fi
             done
           done
-          # One list for both programs, so one signature covers every archive.
+          # The .debs, from the same linux binaries (01-no-cli-plan 2.4).
+          for arch in amd64 arm64; do
+            scripts/build-debs.sh "$VERSION" "$arch" "stage/jarvisd-${VERSION}-linux-${arch}/jarvisd" \
+              "stage/jarvis-agent-${VERSION}-linux-${arch}/jarvis-agent" dist
+          done
+          # One list for both programs and the packages, so one signature covers every asset.
           (cd dist && sha256sum -- * > SHA256SUMS)
           [ "$(grep -c ' jarvisd-' dist/SHA256SUMS)" = 4 ] && [ "$(grep -c ' jarvis-agent-' dist/SHA256SUMS)" = 4 ]
+          [ "$(grep -c ' jarvis-automation-server_.*\.deb$' dist/SHA256SUMS)" = 2 ] && [ "$(grep -c ' jarvis-automation-agent_.*\.deb$' dist/SHA256SUMS)" = 2 ]
           ls -l dist && cat dist/SHA256SUMS
       # SHA256SUMS.minisig is the self-update trust root (AD5, ID9): jarvisd verifies it with
       # the project key built into the running binary before it installs anything. Signed with
@@ -304,10 +321,6 @@ jobs:
       # the whole .key file, and MINISIGN_PASSWORD). The trusted comment names the version, so
       # a signed list can't be replayed under another tag. Without the secret a dry run warns
       # and ships unsigned; a publishing run fails (jarvisd refuses unsigned releases).
-      - if: github.event_name == 'pull_request'
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
       - if: github.event_name == 'pull_request'
         uses: actions/download-artifact@v4
         with:
@@ -413,6 +426,27 @@ jobs:
           agent="jarvis-agent-${VERSION}-${{ matrix.target }}"
           if [ "${{ matrix.ext }}" = zip ]; then unzip -q "$agent.zip"; aexe=jarvis-agent.exe; else tar -xzf "$agent.tar.gz"; aexe=jarvis-agent; fi
           test "$("$PWD/$agent/$aexe" version | tr -d '\r')" = "$VERSION"
+      # The server package installs as a user's double-click would (apt runs the same postinst):
+      # the service comes up healthy on this architecture, then purge leaves nothing. lintian
+      # checks both packages. The full install/upgrade/remove matrix is ci.yml's deb job.
+      - name: Install the server .deb
+        if: startsWith(matrix.target, 'linux-')
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          arch=${TARGET#linux-}
+          deb="$PWD/dist/jarvis-automation-server_${VERSION#v}_${arch}.deb"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lintian
+          lintian --fail-on error,warning "$deb" "dist/jarvis-automation-agent_${VERSION#v}_${arch}.deb"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb" | tee install.log
+          grep -q '/setup#token=' install.log
+          systemctl is-active --quiet jarvisd
+          test "$(/usr/local/bin/jarvisd version)" = "$VERSION"
+          curl -fsS --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:7700/health
+          sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y jarvis-automation-server
+          test ! -e /var/lib/jarvisd && test ! -e /usr/local/bin/jarvisd && ! getent passwd jarvisd
       # The archived binary is the notarized one: Developer ID, hardened runtime, and Gatekeeper
       # accepts it as a quarantined download would be assessed.
       - name: Check the macOS signature and Gatekeeper
@@ -462,9 +496,10 @@ jobs:
           cd dist
           exe=jarvisd; [ "${{ matrix.ext }}" = zip ] && exe=jarvisd.exe
           if [ -f SHA256SUMS.minisig ]; then
-            # Every archive present (jarvisd's and the agent's) must match the signed list.
+            # Every asset present (jarvisd's and the agent's archives, the .debs) must match the signed list.
             JARVIS_HOME="$RUNNER_TEMP/jarvis" "$PWD/$NAME/$exe" upgrade --verify-dir "$PWD" | tee verified
             grep -q "jarvis-agent-" verified
+            grep -q "jarvis-automation-server_" verified && grep -q "jarvis-automation-agent_" verified
           else
             echo "::warning::no SHA256SUMS.minisig (unsigned dry run); signature not checked"
           fi
@@ -533,5 +568,5 @@ jobs:
           set -euo pipefail
           pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
           gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
-            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Desktop agent on Linux: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`." \
+            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Debian/Ubuntu: open \`jarvis-automation-server_<version>_<arch>.deb\` (the server) or \`jarvis-automation-agent_<version>_<arch>.deb\` (the desktop agent) to install it with App Center or Software. Other Linux desktop agents: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`." \
             $pre

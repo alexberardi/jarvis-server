@@ -41,7 +41,7 @@ Questions, bug reports and quick help: the project [Discord](https://discord.gg/
   [jarvis-node-setup](https://github.com/alexberardi/jarvis-node-setup) node remains the supported
   Pi node for now**, and it works against jarvisd.
 
-`jarvis-agent` is not in the release archives yet: build it from source (below).
+`jarvis-agent` ships in the release archives (and, for Debian and Ubuntu, as a `.deb`, below); building it from source is described further down.
 
 ## Supported platforms (jarvisd)
 
@@ -69,6 +69,18 @@ Useful options (`sh install.sh --help`): `--stop-legacy` stops a legacy Python s
 host (Docker containers and macOS LaunchAgents; no data is removed), `--user` (Linux: a per-user
 service without root, data in `~/.jarvisd`), `--yes` (apply the firewall fix without asking),
 `--uninstall [--purge]`.
+
+**Debian and Ubuntu, without a terminal:** download `jarvis-automation-server_<version>_<arch>.deb`
+(amd64 or arm64) from the release and open it: App Center or Software installs it after your
+password, and the setup page opens in your browser (a computer without a screen prints the link and
+a QR code; `sudo apt install ./jarvis-automation-server_….deb` works too). It runs the same
+`jarvisd service install` and LAN-only firewall fix as the script, and jarvisd updates itself from
+the admin page afterwards. Removing the package stops the service and keeps the data in
+`/var/lib/jarvisd`; `sudo apt purge jarvis-automation-server` deletes it.
+`jarvis-automation-agent_<version>_<arch>.deb` adds "Jarvis Automation Agent" to the app menu: each
+person who opens it gets their own self-updating copy and the setup page. Removing the package
+leaves those copies; each person removes theirs from its setup page ("Remove Jarvis Automation
+Agent") or with `~/.local/lib/jarvis-agent/jarvis-agent uninstall --purge`.
 
 **Windows** (PowerShell, as Administrator or it asks for elevation):
 
