@@ -317,7 +317,7 @@ Bluetooth specifics:
 
 **Smart-home config GET** (60-91): the response's `nodes` options are the household's active nodes, each `{node_id, room, online, last_seen}`.
 
-> **Changed in jarvisd (2026-10-15):** each option also carries `node_kind` (`"desktop"` for a computer, including an agent that only reported `install_mode: desktop-agent`; otherwise the reported kind or null), so the primary-node picker can sort Pis first and label computers. See [decision](../decisions/2026-10-15-computer-as-primary-node.md).
+> **Changed in jarvisd (2026-10-15):** each option also carries `node_kind` (`"desktop"` for a computer, including an agent that only reported `install_mode: desktop-agent`; otherwise the reported kind or null), so the primary-node picker can sort Pis first and label computers. See [decision](../decisions/2026-10-15-computer-as-primary-node.md). Each option also carries `name`: the node's registered name (a desktop agent's computer name), null when it was registered without one, so the picker can tell computers apart (every agent's room is `desktop`).
 
 **Smart-home config PUT** (93-140):
 

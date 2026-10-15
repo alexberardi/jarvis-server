@@ -78,6 +78,9 @@ type UserVerifier interface {
 type NodeRegistry interface {
 	RegisterNode(ctx context.Context, nodeID, householdID, name string, services []string) (string, error)
 	DeactivateNode(ctx context.Context, nodeID string) error
+	// NodeNames is each known node's registered name, by node id (ids auth doesn't know are
+	// absent). It is read only, for the node list.
+	NodeNames(ctx context.Context, nodeIDs []string) (map[string]string, error)
 }
 
 // MQTTOptions configures the embedded broker. Empty addresses disable a listener; CC still

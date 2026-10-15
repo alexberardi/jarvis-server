@@ -264,6 +264,7 @@ func TestCCMQTTRows(t *testing.T) {
 			"nodes": NonEmptyArrayOf(Obj{
 				"node_id": String, "room": String, "online": Bool, "last_seen": NullOr(TimestampNaive),
 				"node_kind": Optional(NullOr(String)), // jarvisd addition; legacy omits it
+				"name":      Optional(NullOr(String)), // jarvisd addition; legacy omits it
 			}),
 		})
 		tg.Do(t, CommandCenter, http.MethodPut, cfg, map[string]any{"primary_node_id": "contract-nosuch"}, u.H()).

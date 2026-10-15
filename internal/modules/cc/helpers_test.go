@@ -31,6 +31,7 @@ import (
 
 type fakeNode struct {
 	key, household string
+	name           string
 	active         bool
 	services       []string
 }
@@ -136,7 +137,7 @@ type statusError struct {
 func (e *statusError) Error() string   { return e.msg }
 func (e *statusError) StatusCode() int { return e.status }
 
-func (a *fakeAuth) RegisterNode(_ context.Context, id, hh, _ string, services []string) (string, error) {
+func (a *fakeAuth) RegisterNode(_ context.Context, id, hh, name string, services []string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, ok := a.nodes[id]; ok {
@@ -147,8 +148,20 @@ func (a *fakeAuth) RegisterNode(_ context.Context, id, hh, _ string, services []
 	}
 	a.keys++
 	key := fmt.Sprintf("key-%d", a.keys)
-	a.nodes[id] = &fakeNode{key: key, household: hh, active: true, services: services}
+	a.nodes[id] = &fakeNode{key: key, household: hh, name: name, active: true, services: services}
 	return key, nil
+}
+
+func (a *fakeAuth) NodeNames(_ context.Context, ids []string) (map[string]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := map[string]string{}
+	for _, id := range ids {
+		if n, ok := a.nodes[id]; ok {
+			out[id] = n.name
+		}
+	}
+	return out, nil
 }
 
 func (a *fakeAuth) DeactivateNode(_ context.Context, id string) error {

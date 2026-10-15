@@ -111,8 +111,10 @@ func (n *nodeRow) caps() map[string]any {
 // response is NodeResponse. adapter_hash is gone with LoRA (D9; mobile's node type never
 // read it). node_kind and capabilities are jarvisd additions (install plan 1.8): null and {}
 // for a node that never reported them. owner_user_id (who paired it, null when unknown) lets the
-// web app offer Sign out to its owner; last_addr is never returned.
-func (n *nodeRow) response(now time.Time) map[string]any {
+// web app offer Sign out to its owner; last_addr is never returned. name is the node's registered
+// name (a desktop agent's computer name), null when it was registered without one: auth then
+// stores the node id, which says nothing the node_id key doesn't.
+func (n *nodeRow) response(now time.Time, name string) map[string]any {
 	user := "default"
 	if n.user.Valid {
 		user = n.user.String
@@ -127,7 +129,35 @@ func (n *nodeRow) response(now time.Time) map[string]any {
 		"last_seen_version": nullable(n.lastSeenVersion), "install_mode": nullable(n.installMode),
 		"git_sha": nullable(n.gitSHA), "is_busy": n.isBusy, "needs_k2": n.needsK2,
 		"node_kind": nullable(n.nodeKind), "capabilities": n.caps(), "owner_user_id": nullableInt(n.ownerUserID),
+		"name": nodeName(n.nodeID, name),
 	}
+}
+
+func nodeName(id, name string) any {
+	if name == "" || name == id {
+		return nil
+	}
+	return name
+}
+
+// nodeNames looks up the registered names of rows; a failure is logged and leaves them null,
+// since a name is a label and the list is still right without it.
+func (m *Module) nodeNames(ctx context.Context, rows ...*nodeRow) map[string]string {
+	ids := make([]string, len(rows))
+	for i, n := range rows {
+		ids[i] = n.nodeID
+	}
+	names, err := m.Nodes.NodeNames(ctx, ids)
+	if err != nil {
+		m.deps.Log.Warn("cc: node names", "err", err)
+		return nil
+	}
+	return names
+}
+
+// nodeResponse is one node's response, with its registered name.
+func (m *Module) nodeResponse(ctx context.Context, n *nodeRow) map[string]any {
+	return n.response(m.now(), m.nodeNames(ctx, n)[n.nodeID])
 }
 
 // --- GET /admin/nodes, GET /admin/nodes/{id} ---
@@ -176,6 +206,10 @@ func (m *Module) handleListNodes(w http.ResponseWriter, r *http.Request, u authn
 	}
 	now := m.now()
 	out := make([]map[string]any, 0, len(nodes))
+	var names map[string]string
+	if len(nodes) > 0 {
+		names = m.nodeNames(ctx, nodes...)
+	}
 	member := map[string]bool{}
 	for _, n := range nodes {
 		if !u.IsSuperuser && hh == "" {
@@ -196,7 +230,7 @@ func (m *Module) handleListNodes(w http.ResponseWriter, r *http.Request, u authn
 				continue
 			}
 		}
-		out = append(out, n.response(now))
+		out = append(out, n.response(now, names[n.nodeID]))
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -207,7 +241,7 @@ func (m *Module) handleGetNode(w http.ResponseWriter, r *http.Request, u authn.U
 		m.writeErr(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, n.response(m.now()))
+	httpx.WriteJSON(w, http.StatusOK, m.nodeResponse(r.Context(), n))
 }
 
 // --- POST /admin/nodes/heartbeat ---
@@ -482,7 +516,7 @@ func (m *Module) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 		m.internalError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, n.response(m.now()))
+	httpx.WriteJSON(w, http.StatusOK, m.nodeResponse(ctx, n))
 }
 
 // --- GET /node/mqtt-credentials ---

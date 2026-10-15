@@ -50,9 +50,13 @@ export function chatClient(nodeId: string, thisDeviceId: string): ChatClient {
   return { surface: 'web', same_device: !!nodeId && nodeId === thisDeviceId }
 }
 
-/** nodeLabel names a node in the picker and the banner: its room, else a short id. */
-export function nodeLabel(n: Pick<NodeLiveness, 'node_id' | 'room'> & { name?: string | null }): string {
-  const name = n.name?.trim()
+/**
+ * nodeLabel names a node in the picker and the banner. A computer is named by its registered name
+ * (the agent's computer name), since every agent's room is "desktop"; then the room, else a short
+ * id. A Pi keeps its room. Mobile's nodeDisplayName follows the same rule.
+ */
+export function nodeLabel(n: Pick<NodeLiveness, 'node_id' | 'room' | 'name' | 'node_kind'>): string {
+  const name = n.node_kind === 'desktop' ? n.name?.trim() : ''
   if (name) return name
   const room = n.room?.trim()
   if (room && room !== 'default') return room.replace(/_/g, ' ')
