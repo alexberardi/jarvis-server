@@ -19,11 +19,14 @@ const goldenInputs = "fixtures/golden/prompts/_inputs.json"
 //	              which command-center adds itself)
 //	"client"      the five-tool client set of the G1 fixtures
 //	"none"        no client tools
+//	"desktop"     a desktop agent's tools (toolsets/desktop.json, RenderDesktopToolset)
 //	otherwise     a path to a JSON array of OpenAI tool definitions
 func LoadToolSet(root, spec string) ([]json.RawMessage, error) {
 	switch spec {
 	case "none":
 		return []json.RawMessage{}, nil
+	case "desktop":
+		return LoadToolSet(root, filepath.Join(root, desktopToolset))
 	case "", "node", "client":
 		b, err := os.ReadFile(filepath.Join(root, goldenInputs))
 		if err != nil {

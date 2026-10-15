@@ -196,6 +196,12 @@ func (t *Tools) Available(context.Context) []node.ToolDef {
 	if t.Hub == nil || !t.Hub.Connected() {
 		return nil
 	}
+	return t.Defs()
+}
+
+// Defs is every browser tool, connected or not: what Available offers while a browser is
+// connected (tools/pipeline renders a desktop agent's tools from it).
+func (t *Tools) Defs() []node.ToolDef {
 	out := make([]node.ToolDef, 0, len(t.tools))
 	for _, tl := range t.tools {
 		out = append(out, tl.spec.Render())

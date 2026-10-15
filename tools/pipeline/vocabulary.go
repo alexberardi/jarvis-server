@@ -43,9 +43,13 @@ func DesktopVocabulary(root string) (string, error) {
 
 // resolveToolSpec is a scenario's tool set with a file path made relative to the scenario's
 // file: what LoadToolSet takes.
+// A "desktop" node with no tool set sends the desktop agent's ("desktop"), as a real one does.
 func resolveToolSpec(sc Scenario) string {
 	spec := sc.Tools
-	if spec != "" && spec != "node" && spec != "client" && spec != "none" && sc.File != "" && !filepath.IsAbs(spec) {
+	if spec == "" && sc.Node == "desktop" {
+		return "desktop"
+	}
+	if spec != "" && spec != "node" && spec != "client" && spec != "none" && spec != "desktop" && sc.File != "" && !filepath.IsAbs(spec) {
 		spec = filepath.Join(filepath.Dir(sc.File), spec)
 	}
 	return spec
@@ -69,6 +73,8 @@ func isDesktopToolset(root, spec string) bool {
 	switch spec {
 	case "", "node", "client", "none":
 		return false
+	case "desktop":
+		return true
 	}
 	a, err1 := filepath.Abs(spec)
 	b, err2 := filepath.Abs(filepath.Join(root, desktopToolset))

@@ -1,0 +1,223 @@
+[
+ {
+  "name": "desktop dev pass: remember (as transcribed) calls remember",
+  "node": "desktop",
+  "fresh_memories": true,
+  "turns": [
+   {
+    "say": "Remember that my parking spot is B12.",
+    "expect": {
+     "server_tool": "remember",
+     "args_match": {
+      "content": "(?i)B12"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop dev pass: remember a fact with no keyword calls remember",
+  "node": "desktop",
+  "fresh_memories": true,
+  "turns": [
+   {
+    "say": "Remember that my locker code is 4471.",
+    "expect": {
+     "server_tool": "remember",
+     "args_match": {
+      "content": "4471"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop dev pass: asking about an unknown fact searches memory",
+  "node": "desktop",
+  "fresh_memories": true,
+  "turns": [
+   {
+    "say": "Do you remember where I left my passport?",
+    "expect": {
+     "server_tool": "recall"
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop dev pass: can you remember (polite)",
+  "node": "desktop",
+  "fresh_memories": true,
+  "turns": [
+   {
+    "say": "Can you remember that my bike is in the garage?",
+    "expect": {
+     "server_tool": "remember",
+     "args_match": {
+      "content": "(?i)garage"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop dev pass: asking for an unknown code searches memory",
+  "node": "desktop",
+  "fresh_memories": true,
+  "turns": [
+   {
+    "say": "What's my gate code?",
+    "expect": {
+     "server_tool": "recall"
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop dev pass: open X and type Y (as transcribed)",
+  "node": "desktop",
+  "turns": [
+   {
+    "say": "Open Omerite and type hello there.",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {
+      "text": "(?i)^hello there\\.?$"
+     },
+     "not_reply": "(?i)\\b(now|you can|go ahead and) type\\b"
+    }
+   }
+  ],
+  "results": {
+   "desktop_open": {
+    "success": true,
+    "launched": "Omawrite",
+    "matched_app": "Omawrite",
+    "note": "requested; launch is not confirmed",
+    "fuzzy_match": true,
+    "heard_as": "Omerite"
+   },
+   "desktop_list_apps": {
+    "success": true,
+    "count": 0,
+    "apps": [],
+    "closest": [
+     "Omawrite"
+    ],
+    "best_match": "Omawrite",
+    "heard_as": "Omerite"
+   }
+  }
+ },
+ {
+  "name": "desktop dev pass: open X and write Y",
+  "node": "desktop",
+  "turns": [
+   {
+    "say": "open omawrite and write hello there",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {
+      "text": "(?i)^hello there\\.?$"
+     },
+     "not_reply": "(?i)\\b(now|you can|go ahead and) (type|write)\\b"
+    }
+   }
+  ],
+  "results": {
+   "desktop_open": {
+    "success": true,
+    "launched": "Omawrite",
+    "matched_app": "Omawrite",
+    "note": "requested; launch is not confirmed"
+   },
+   "desktop_list_apps": {
+    "success": true,
+    "count": 1,
+    "apps": [
+     "Omawrite"
+    ],
+    "closest": [
+     "Omawrite"
+    ],
+    "best_match": "Omawrite"
+   }
+  }
+ },
+ {
+  "name": "desktop dev pass: open X then type Y",
+  "node": "desktop",
+  "turns": [
+   {
+    "say": "open omawrite then type hello there",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {
+      "text": "(?i)^hello there\\.?$"
+     },
+     "not_reply": "(?i)\\b(now|you can|go ahead and) type\\b"
+    }
+   }
+  ],
+  "results": {
+   "desktop_open": {
+    "success": true,
+    "launched": "Omawrite",
+    "matched_app": "Omawrite",
+    "note": "requested; launch is not confirmed"
+   },
+   "desktop_list_apps": {
+    "success": true,
+    "count": 1,
+    "apps": [
+     "Omawrite"
+    ],
+    "closest": [
+     "Omawrite"
+    ],
+    "best_match": "Omawrite"
+   }
+  }
+ },
+ {
+  "name": "desktop dev pass: open X and type Y, misheard as one word",
+  "node": "desktop",
+  "turns": [
+   {
+    "say": "Open Neovim and Typeello World.",
+    "expect": {
+     "tool": "desktop_type_text",
+     "args_match": {
+      "text": "(?i)ello world"
+     },
+     "not_call": {
+      "tool": "desktop_open",
+      "args_match": {
+       "target": "(?i)ello"
+      }
+     },
+     "not_reply": "(?i)\\b(open|opening|launch|fire up)\\b[^.]*typeello"
+    }
+   }
+  ],
+  "results": {
+   "desktop_open": {
+    "success": true,
+    "launched": "Neovim",
+    "matched_app": "Neovim",
+    "note": "requested; launch is not confirmed"
+   },
+   "desktop_list_apps": {
+    "success": true,
+    "count": 1,
+    "apps": [
+     "Neovim"
+    ],
+    "closest": [
+     "Neovim"
+    ],
+    "best_match": "Neovim"
+   }
+  }
+ }
+]
