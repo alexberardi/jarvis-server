@@ -481,6 +481,7 @@ func (m *Module) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	rec, err := scanRefresh(m.deps.DB.Read.QueryRowContext(ctx,
 		`SELECT `+refreshCols+` FROM auth_refresh_tokens WHERE token_hash = ?`, hash))
 	if errors.Is(err, sql.ErrNoRows) {
+		m.refreshRejected("unknown_token", nil)
 		detail(w, http.StatusUnauthorized, "Invalid refresh token")
 		return
 	}
@@ -489,6 +490,7 @@ func (m *Module) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rec.expired() {
+		m.refreshRejected("expired", rec, "expires_at", rec.expiresAt)
 		detail(w, http.StatusUnauthorized, "Refresh token expired")
 		return
 	}
@@ -503,34 +505,39 @@ func (m *Module) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		var err error
 		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM auth_users WHERE id = ?`, rec.userID))
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !u.isActive) {
+			m.refreshRejected("user_inactive", rec)
 			return fail(http.StatusUnauthorized, "Invalid refresh token")
 		}
 		if err != nil {
 			return err
 		}
 		if u.mustChange && u.tempExpired() {
+			m.refreshRejected("temp_password_expired", rec)
 			return fail(http.StatusUnauthorized, "Temporary password expired. Ask your administrator for a new one.")
 		}
 		// Re-read under the write lock: a revocation may have landed since the first read.
 		rec, err = scanRefresh(tx.QueryRowContext(ctx, `SELECT `+refreshCols+` FROM auth_refresh_tokens WHERE id = ?`, rec.id))
 		if errors.Is(err, sql.ErrNoRows) {
+			m.refreshRejected("unknown_token", nil)
 			return fail(http.StatusUnauthorized, "Invalid refresh token")
 		}
 		if err != nil {
 			return err
 		}
 		if rec.revoked || rec.rotatedAt.Valid {
+			reason := "revoked"
 			if !rec.revoked {
+				reason = "reused_after_grace"
 				if rot, ok := parseTime(rec.rotatedAt.String); ok && now().Sub(rot) <= grace {
 					if cached = m.grace.get(rec.id); cached != "" {
 						return nil
 					}
 					// A miss inside the window means the process restarted after rotating.
 					// Like legacy, it falls through to the reuse handling below.
+					reason = "grace_miss"
 				}
 			}
-			m.deps.Log.Warn("refresh_token_reuse_detected", "family_id", rec.familyID, "user_id", rec.userID,
-				"presented_token_id", rec.id, "revoked_family", m.RevokeFamilyOnReuse)
+			m.refreshRejected(reason, rec, "rotated_at", rec.rotatedAt.String, "revoked_family", m.RevokeFamilyOnReuse)
 			if m.RevokeFamilyOnReuse {
 				return errReuse
 			}
@@ -568,6 +575,19 @@ func (m *Module) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, tokenResponse(access, refresh, u))
+}
+
+// refreshRejected logs why POST /auth/refresh answered 401, so a client's sign-out can be
+// traced: unknown_token, expired, user_inactive, temp_password_expired, revoked (logout,
+// password change, family revocation), reused_after_grace (a rotated token replayed after the
+// grace window) or grace_miss (replayed inside the window, but the cache was lost to a
+// restart). rec is nil when the token matched no row. The token itself is never logged.
+func (m *Module) refreshRejected(reason string, rec *refreshRow, extra ...any) {
+	args := []any{"reason", reason}
+	if rec != nil {
+		args = append(args, "user_id", rec.userID, "token_id", rec.id, "family_id", rec.familyID)
+	}
+	m.deps.Log.Warn("refresh_rejected", append(args, extra...)...)
 }
 
 // errReuse aborts the refresh transaction; the family revocation is then committed alone.

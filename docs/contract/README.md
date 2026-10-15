@@ -276,7 +276,7 @@ Not testable black-box, and why:
 
 - `POST /auth/setup` happy path, and jarvisd's setup-token 401/403 (AD2): they only run when the target has no superuser (unit-tested in `internal/modules/auth` `TestSetupToken*`).
 - `POST /settings/sync-from-env` happy path: it rewrites system settings from the target's env.
-- Expiry paths: `Refresh token expired` (14 days), `Temporary password expired…` (the minimum
+- Expiry paths: `Refresh token expired` (14 days on legacy, 30 on jarvisd), `Temporary password expired…` (the minimum
   is 1 h), and invite expiry (the minimum is 1 day).
 - Inactive users: no route deactivates one. That also covers temp-password's 409 for a
   deactivated user.
