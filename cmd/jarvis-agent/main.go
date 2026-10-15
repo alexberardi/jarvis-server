@@ -47,6 +47,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
+	"github.com/alexberardi/jarvis-server/internal/buildinfo"
 )
 
 var version = "dev"
@@ -144,7 +145,7 @@ func main() {
 	case "browser-host":
 		os.Exit(browserHost(strings.Join(os.Args[2:], " ")))
 	case "version":
-		fmt.Println(version)
+		fmt.Println(buildinfo.Version(version))
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 	default:
@@ -794,7 +795,14 @@ func status(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if line := staleBuildLine(version, sourceDir, gitHead, gitIsAncestor); line != "" {
+	line := staleBuildLine(version, sourceDir, gitHead, gitIsAncestor)
+	if sourceDir == "" { // a plain go build: find its checkout from the binary or its source
+		vcs, ok := buildinfo.Read()
+		if ok && buildinfo.IsDev(version) {
+			line = vcsStaleLine(version, vcs, ok, findCheckout(checkoutCandidates(), mainModule()), gitHead, gitIsAncestor, gitCommitTime)
+		}
+	}
+	if line != "" {
 		fmt.Println(line)
 	}
 	fmt.Printf("platform:     %s\ncapabilities: %s\n", h.Platform(), strings.Join(caps, ", "))
