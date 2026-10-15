@@ -1386,6 +1386,13 @@ file, so a failure stops Setup with the command's message and leaves nothing beh
   and upgrade-helper e2e jobs check that a self-update and the updater rewrite `DisplayVersion`.
   **Not covered by CI:** SmartScreen, the UAC prompt, the wizard's pages, a browser opening, the
   tray icon, and whether a console window flashes (user sign-off on a Windows PC).
+- **In the release** (PR #PRNUM, held for review: release signing): `release.yml`'s
+  `windows-installers` job (windows-latest, Inno Setup pinned) builds them from the run's own
+  windows binaries plus the launcher, named `Jarvis-Automation-Server-Setup-<v>.exe` and
+  `Jarvis-Automation-Agent-Setup-<v>.exe` (GitHub turns spaces in asset names into dots), before
+  `SHA256SUMS` is written, so the one minisign signature covers them. `verify` on Windows checks
+  them with `upgrade --verify-dir`, then installs each silently (the server's `/health` at the
+  release's version, the agent's Run key through the launcher) and uninstalls each with `/PURGE`.
 - **SmartScreen.** The installers aren't code-signed (decided, DESIGN §13 Q3). The text for the
   download page, the release notes and the docs:
 
