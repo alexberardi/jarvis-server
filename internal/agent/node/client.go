@@ -182,6 +182,9 @@ type Beat struct {
 	// NodeKind is "desktop" for the desktop agent (DESIGN §9 Q1); empty leaves it out, as a Pi
 	// reports nothing.
 	NodeKind string
+	// DeviceID is the computer's stable identity (internal/agent/deviceid), so a node enrolled
+	// before registration carried it gets it on file. "" leaves it out.
+	DeviceID string
 	// Capabilities is reported as is, e.g. {"browser_extension": "connected"}. Nil leaves it out.
 	Capabilities map[string]any
 	// NeedsK2 asks the app to provision the settings key (K2, DESIGN §16): the mobile app then
@@ -227,6 +230,9 @@ func (c *CC) Beat(ctx context.Context, b Beat) (BeatReply, error) {
 	}
 	if b.NodeKind != "" {
 		body["node_kind"] = b.NodeKind
+	}
+	if b.DeviceID != "" {
+		body["device_id"] = b.DeviceID
 	}
 	if b.Capabilities != nil {
 		body["capabilities"] = b.Capabilities

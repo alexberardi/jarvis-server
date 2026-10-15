@@ -1058,7 +1058,9 @@ step 3, as a page in the user's own browser (open question 1). Code: `internal/a
 - **Done and Remove.** Done closes the page ("You're all set"). Remove asks first, then runs
   `uninstall --purge` (login item, menu entries, link handler, native host, the running agent,
   sign-in and settings); on macOS the page then says to drag the app to the Trash. The node
-  stays on the server (sign it out from Add-ons, or with the status icon's "Sign out" before Remove).
+  stays on the server (sign it out from Add-ons, or with the status icon's "Sign out" before Remove)
+  until this computer is set up again by the same member in the same household, which replaces it
+  ("Enrolling again" below).
 - **Verified (2026-10-14).** Handler tests for every route and check. Headless Chromium against a
   throwaway jarvisd (own home, ports 461xx, no mDNS) in scratch HOMEs with fake `systemctl` and
   `xdg-open`: sign-in (wrong password, then right), pairing approved through the API by a seeded
@@ -1085,6 +1087,19 @@ error is never a sign-out. The owner is recorded at registration (`cc_nodes.owne
 migration 00180): whoever minted the provisioning token, i.e. the pairing approver or the member
 who signed in on the page; admin-key nodes and nodes paired before 00180 (beyond the one-day token
 history) have none, so only a household admin can sign those out.
+
+**Enrolling again (decision 2026-10-15, [decisions/2026-10-15-reenroll-replaces-node.md](../decisions/2026-10-15-reenroll-replaces-node.md)).**
+Every enrolment path (`enroll --email|--token|--code`, the setup page's sign-in and pairing code)
+sends `device_id` and `node_kind: "desktop"` to `POST /nodes/register`, and heartbeats carry
+`device_id` too (`internal/agent/deviceid`: an HMAC of the OS machine id and OS user id with an
+app salt; the raw machine id is never sent, nothing is stored, so it survives `uninstall
+--purge`). jarvisd stores it (`cc_nodes.device_id`, cc migration 00190) and, when a desktop
+registers, removes the same owner's other desktop nodes in the same household with the same id,
+through `removeNode` as above (`internal/modules/cc/reenroll.go`). Another member's computer, a
+Pi, an admin-key node and other households are never touched, so a forged id can only retire
+nodes its sender could sign out anyway. An agent still running on the replaced node gets the
+`signed-out` nudge; if `node.json` already holds the new node it keeps it and exits 1, so its
+supervisor restarts it signed in as the new node.
 
 **Who is speaking (decision 2026-10-14, [decisions/2026-10-14-desktop-voice-speaks-as-its-owner.md](../decisions/2026-10-14-desktop-voice-speaks-as-its-owner.md)).**
 The agent's voice turns act as its owner, as chat acts as the JWT user: the prompt names them,

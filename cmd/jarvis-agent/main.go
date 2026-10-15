@@ -35,6 +35,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/clock"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
+	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
@@ -371,7 +372,8 @@ func enroll(ctx context.Context, args []string) error {
 
 	// Prefer the URL jarvisd says nodes should use; if this machine can't reach it (a VPN, a
 	// loopback-only dev server), fall back to the one discovery gave us.
-	c, err := node.RegisterPreferring(ctx, hc, nodeCC, ccURL, *server, id, tok, regRoom, func(err error) {
+	reg := node.Registration{Room: regRoom, DeviceID: deviceid.Get(), NodeKind: nodeKind}
+	c, err := node.RegisterPreferring(ctx, hc, nodeCC, ccURL, *server, id, tok, reg, func(err error) {
 		fmt.Fprintf(os.Stderr, "note: %s unreachable (%v); registering via %s\n", nodeCC, err, ccURL)
 	})
 	if err != nil {
@@ -525,7 +527,7 @@ func run(ctx context.Context, args []string) error {
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	// Commands the household turned off in the app's node settings are neither offered nor run.
 	served := nodesettings.Gate{Tools: tools, Store: st}
-	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: installMode, NodeKind: nodeKind, Log: log}
+	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: installMode, NodeKind: nodeKind, DeviceID: deviceid.Get(), Log: log}
 	runner.Store(r)
 	r.Capabilities, r.Changed = heartbeatCaps(tools)
 	wireNodeSettings(r, st, tools, log)
@@ -554,7 +556,7 @@ func run(ctx context.Context, args []string) error {
 	setup := openSetupPage(log)
 	// Signed out (from Add-ons, an admin, or the menu's Sign out): drop node.json only, keep
 	// agent.json and apps.json, and open the setup page so someone can sign in again.
-	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, log, setup) }
+	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut}
 	sw.changed = ic.voiceChanged
 	var note atomic.Pointer[func(string)] // the island's note, once it is up

@@ -19,6 +19,9 @@ type Deps struct {
 	GOOS string
 	// ComputerName is how this computer is shown in Jarvis Automation (the hostname).
 	ComputerName string
+	// Identity is the device_id and node_kind sent when the computer registers, so jarvisd
+	// replaces the node an earlier enrolment of it left behind. Its Room is ignored.
+	Identity node.Registration
 	// Icon is the shield (PNG) the page shows.
 	Icon []byte
 

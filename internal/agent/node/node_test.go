@@ -446,17 +446,44 @@ func TestRegisterPreferringFallsBackOnlyWhenUnreachable(t *testing.T) {
 	ctx := context.Background()
 
 	var noted error
-	c, err := RegisterPreferring(ctx, cc.Client(), goneURL, cc.URL, "http://cfg", "n1", "t", "", func(e error) { noted = e })
+	c, err := RegisterPreferring(ctx, cc.Client(), goneURL, cc.URL, "http://cfg", "n1", "t", Registration{}, func(e error) { noted = e })
 	if err != nil || c.NodeKey != "k" || noted == nil || len(hits) != 1 {
 		t.Fatalf("unreachable node URL: %+v %v noted=%v hits=%v", c, err, noted, hits)
 	}
 	hits = nil
 	// An answer (even an error) from the preferred URL means the token may be spent: no retry.
-	if _, err := RegisterPreferring(ctx, cc.Client(), refusing.URL, cc.URL, "http://cfg", "n1", "t", "", nil); err == nil || len(hits) != 1 || hits[0] != "node-cc" {
+	if _, err := RegisterPreferring(ctx, cc.Client(), refusing.URL, cc.URL, "http://cfg", "n1", "t", Registration{}, nil); err == nil || len(hits) != 1 || hits[0] != "node-cc" {
 		t.Fatalf("refused: err=%v hits=%v", err, hits)
 	}
 	hits = nil
-	if _, err := RegisterPreferring(ctx, cc.Client(), "", cc.URL, "http://cfg", "n1", "t", "", nil); err != nil || len(hits) != 1 {
+	if _, err := RegisterPreferring(ctx, cc.Client(), "", cc.URL, "http://cfg", "n1", "t", Registration{}, nil); err != nil || len(hits) != 1 {
 		t.Fatalf("no node URL: err=%v hits=%v", err, hits)
+	}
+}
+
+// Register sends device_id and node_kind only when set, so a Pi's body is unchanged.
+func TestRegisterSendsIdentityWhenSet(t *testing.T) {
+	var sent map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = nil
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		fmt.Fprint(w, `{"node_id":"n1","room":"office","node_key":"k"}`)
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	if _, err := Register(ctx, srv.Client(), srv.URL, "http://cfg", "n1", "t",
+		Registration{Room: "office", DeviceID: "d1", NodeKind: "desktop"}); err != nil {
+		t.Fatal(err)
+	}
+	if sent["device_id"] != "d1" || sent["node_kind"] != "desktop" || sent["room"] != "office" {
+		t.Fatalf("sent %v", sent)
+	}
+	if _, err := Register(ctx, srv.Client(), srv.URL, "http://cfg", "n1", "t", Registration{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"device_id", "node_kind", "room"} {
+		if _, has := sent[k]; has {
+			t.Fatalf("empty %s was sent: %v", k, sent)
+		}
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
+	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/firstrun"
 	"github.com/alexberardi/jarvis-server/internal/agent/install"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
@@ -153,6 +154,7 @@ func setupDeps(log *slog.Logger, o setupOptions) firstrun.Deps {
 		Log:          log,
 		GOOS:         runtime.GOOS,
 		ComputerName: name,
+		Identity:     node.Registration{DeviceID: deviceid.Get(), NodeKind: nodeKind},
 		Icon:         tray.IconPNG(),
 		Creds: func() (node.Creds, bool) {
 			p, err := node.DefaultCredsPath()

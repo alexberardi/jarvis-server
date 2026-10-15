@@ -57,3 +57,24 @@ func TestBeatReplyAndUpdateFailure(t *testing.T) {
 		t.Fatalf("report: %s %v", statusPath, status)
 	}
 }
+
+// device_id goes out only when known: a Pi (or an OS that doesn't say) sends the old body.
+func TestBeatDeviceID(t *testing.T) {
+	var sent map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = nil
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+	c := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k1", ConfigURL: srv.URL})
+	if _, err := c.Beat(context.Background(), Beat{NodeKind: "desktop", DeviceID: "abc"}); err != nil || sent["device_id"] != "abc" {
+		t.Fatalf("device_id = %v, %v", sent["device_id"], err)
+	}
+	if _, err := c.Beat(context.Background(), Beat{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := sent["device_id"]; has {
+		t.Fatalf("an empty device id was sent: %v", sent)
+	}
+}

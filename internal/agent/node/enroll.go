@@ -83,11 +83,28 @@ func MintToken(ctx context.Context, hc *http.Client, ccURL, jwt, householdID, na
 	return t, err
 }
 
+// Registration is what a node says about itself when it redeems a token. Every field is
+// optional; a jarvisd that predates one ignores it.
+type Registration struct {
+	Room string // overrides the token's room
+	// DeviceID is the computer's stable identity (internal/agent/deviceid), so jarvisd can retire
+	// the node an earlier enrolment of the same computer left behind. "" for a Pi.
+	DeviceID string
+	// NodeKind is "desktop" for the desktop agent, as in heartbeats.
+	NodeKind string
+}
+
 // Register redeems a provisioning token and returns the node's credentials.
-func Register(ctx context.Context, hc *http.Client, ccURL, configURL, nodeID, token, room string) (Creds, error) {
+func Register(ctx context.Context, hc *http.Client, ccURL, configURL, nodeID, token string, reg Registration) (Creds, error) {
 	body := map[string]any{"node_id": nodeID, "provisioning_token": token}
-	if room != "" {
-		body["room"] = room
+	if reg.Room != "" {
+		body["room"] = reg.Room
+	}
+	if reg.DeviceID != "" {
+		body["device_id"] = reg.DeviceID
+	}
+	if reg.NodeKind != "" {
+		body["node_kind"] = reg.NodeKind
 	}
 	var resp struct {
 		NodeID  string `json:"node_id"`
@@ -107,17 +124,17 @@ func Register(ctx context.Context, hc *http.Client, ccURL, configURL, nodeID, to
 // use, and falls back to ccURL (the one discovery gave) only when nodeCC can't be reached: a
 // VPN, or a loopback-only dev server. The token is single use, so an answer from nodeCC (any
 // HTTP error) never falls back. note, when set, hears about the fallback.
-func RegisterPreferring(ctx context.Context, hc *http.Client, nodeCC, ccURL, configURL, nodeID, token, room string, note func(error)) (Creds, error) {
+func RegisterPreferring(ctx context.Context, hc *http.Client, nodeCC, ccURL, configURL, nodeID, token string, reg Registration, note func(error)) (Creds, error) {
 	if nodeCC == "" || nodeCC == ccURL {
-		return Register(ctx, hc, ccURL, configURL, nodeID, token, room)
+		return Register(ctx, hc, ccURL, configURL, nodeID, token, reg)
 	}
-	c, err := Register(ctx, hc, nodeCC, configURL, nodeID, token, room)
+	c, err := Register(ctx, hc, nodeCC, configURL, nodeID, token, reg)
 	var he *HTTPError
 	if err != nil && !errors.As(err, &he) {
 		if note != nil {
 			note(err)
 		}
-		return Register(ctx, hc, ccURL, configURL, nodeID, token, room)
+		return Register(ctx, hc, ccURL, configURL, nodeID, token, reg)
 	}
 	return c, err
 }

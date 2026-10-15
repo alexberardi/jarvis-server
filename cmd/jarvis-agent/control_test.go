@@ -78,7 +78,7 @@ func TestSignedOutKeepsSettingsAndOpensSetup(t *testing.T) {
 		}
 	}
 	opened := 0
-	err := signedOutToSetup(fmt.Errorf("run: %w", node.ErrSignedOut), filepath.Join(dir, "node.json"), slog.New(slog.DiscardHandler), func() { opened++ })
+	err := signedOutToSetup(fmt.Errorf("run: %w", node.ErrSignedOut), filepath.Join(dir, "node.json"), "n1", slog.New(slog.DiscardHandler), func() { opened++ })
 	if code := exitCode(err); code != exitNotSetUp {
 		t.Fatalf("exit %d (%v), want %d", code, err, exitNotSetUp)
 	}
@@ -94,18 +94,44 @@ func TestSignedOutKeepsSettingsAndOpensSetup(t *testing.T) {
 		}
 	}
 	// Already gone: still fine.
-	if err := signedOutToSetup(node.ErrSignedOut, filepath.Join(dir, "node.json"), slog.New(slog.DiscardHandler), nil); exitCode(err) != exitNotSetUp {
+	if err := signedOutToSetup(node.ErrSignedOut, filepath.Join(dir, "node.json"), "n1", slog.New(slog.DiscardHandler), nil); exitCode(err) != exitNotSetUp {
 		t.Fatalf("second sign-out: %v", err)
 	}
 	// Anything else passes through untouched.
 	other := errors.New("boom")
-	if err := signedOutToSetup(other, filepath.Join(dir, "agent.json"), slog.New(slog.DiscardHandler), func() { opened++ }); err != other || opened != 1 {
+	if err := signedOutToSetup(other, filepath.Join(dir, "agent.json"), "n1", slog.New(slog.DiscardHandler), func() { opened++ }); err != other || opened != 1 {
 		t.Fatalf("other error: %v, opened %d", err, opened)
 	}
-	if err := signedOutToSetup(nil, filepath.Join(dir, "agent.json"), slog.New(slog.DiscardHandler), nil); err != nil {
+	if err := signedOutToSetup(nil, filepath.Join(dir, "agent.json"), "n1", slog.New(slog.DiscardHandler), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "agent.json")); err != nil {
 		t.Fatal("agent.json removed on a clean exit")
+	}
+}
+
+// Signed out because this computer was enrolled again (jarvisd retired the old node): the new
+// node's credentials stay, no setup page opens, and the exit is an ordinary failure, so the
+// supervisor restarts the agent on them.
+func TestSignedOutByANewerEnrolmentKeepsItsCredentials(t *testing.T) {
+	t.Setenv("XPC_SERVICE_NAME", "")
+	path := filepath.Join(t.TempDir(), "node.json")
+	if err := node.SaveCreds(path, node.Creds{ConfigURL: "http://cfg", NodeID: "new", NodeKey: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	opened := 0
+	err := signedOutToSetup(fmt.Errorf("run: %w", node.ErrSignedOut), path, "old", slog.New(slog.DiscardHandler), func() { opened++ })
+	if err == nil || exitCode(err) == exitNotSetUp || exitCode(err) == 0 || opened != 0 {
+		t.Fatalf("err=%v exit=%d opened=%d", err, exitCode(err), opened)
+	}
+	if c, err := node.LoadCreds(path); err != nil || c.NodeID != "new" {
+		t.Fatalf("the new credentials were touched: %+v %v", c, err)
+	}
+	// The file still holds this run's node: the ordinary sign-out.
+	if err := signedOutToSetup(node.ErrSignedOut, path, "new", slog.New(slog.DiscardHandler), func() { opened++ }); exitCode(err) != exitNotSetUp || opened != 1 {
+		t.Fatalf("own sign-out: %v opened=%d", err, opened)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("node.json still there: %v", err)
 	}
 }
