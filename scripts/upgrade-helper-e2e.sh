@@ -245,6 +245,21 @@ fi
 J service status --json | tee "$W/stale.json"
 [ "$(json 'd["definition_stale"]' <"$W/stale.json")" = True ] || fail "the older definitions aren't reported stale"
 
+# Windows: an uninstall entry like the installer's (scripts/packaging/windows/server.iss), whose
+# DisplayVersion the helper keeps at the version it put in place.
+UNINSTALL_KEY='HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\net.jarvisautomation.jarvisd_is1'
+reg_() { MSYS2_ARG_CONV_EXCL='*' reg "$@"; }
+display_version() { reg_ query "$UNINSTALL_KEY" /v DisplayVersion 2>/dev/null | tr -d '\r' | awk '$1 == "DisplayVersion" {print $3}'; }
+wait_display_version() {
+  [ "$OS" = windows ] || return 0
+  for _ in $(seq 1 60); do [ "$(display_version)" = "$1" ] && return 0; sleep 1; done
+  fail "the uninstall entry's DisplayVersion is '$(display_version)', not $1"
+}
+if [ "$OS" = windows ]; then
+  reg_ add "$UNINSTALL_KEY" /v DisplayName /d "Jarvis Automation Server" /f >/dev/null
+  reg_ add "$UNINSTALL_KEY" /v DisplayVersion /d 0.0.1 /f >/dev/null
+fi
+
 say "2. the admin button: v0.0.2 through the helper"
 apply v0.0.2
 wait_version v0.0.2
@@ -254,6 +269,7 @@ PREV="$BINDIR/jarvisd.prev"
 ROLLEDBACK="$BINDIR/jarvisd.rolledback"
 [ "$OS" = windows ] && PREV="$BINDIR/jarvisd.prev.exe" && ROLLEDBACK="$BINDIR/jarvisd.rolledback.exe"
 [ "$(bin_version "$PREV")" = v0.0.1 ] || fail "jarvisd.prev is not v0.0.1"
+wait_display_version 0.0.2
 R grep -q "installed v0.0.2 (was v0.0.1)" "$HELPER_LOG" || fail "the helper didn't do the swap"
 say "2a. the helper rewrote the definitions as v0.0.2 writes them"
 R grep -q "rewrote the service definition" "$HELPER_LOG" || fail "the helper didn't refresh the definitions"
@@ -332,6 +348,7 @@ wait_version v0.0.2 60
 R grep -q "restored the previous binary" "$HELPER_LOG" || fail "the helper didn't restore the binary"
 [ "$(bin_version "$ROLLEDBACK")" = v0.0.3 ] || fail "jarvisd.rolledback is not v0.0.3"
 echo "reason: $(outcome reason)"
+wait_display_version 0.0.2
 
 say "5. the admin button: v0.0.4"
 apply v0.0.4
@@ -339,6 +356,8 @@ wait_version v0.0.4
 wait_outcome succeeded
 [ "$(bin_version "$PREV")" = v0.0.2 ] || fail "jarvisd.prev is not v0.0.2"
 R test ! -e "$ROLLEDBACK" || fail "the helper's swap kept a stale jarvisd.rolledback"
+wait_display_version 0.0.4
+[ "$OS" = windows ] && reg_ delete "$UNINSTALL_KEY" /f >/dev/null
 
 say "helper log"
 R cat "$HELPER_LOG"

@@ -158,6 +158,10 @@ func finishCmd(ctx context.Context, u *selfupdate.Updater, w io.Writer) error {
 	r := u.Finish(ctx, a)
 	switch r.Outcome {
 	case selfupdate.OutcomeSucceeded:
+		// Apps & features shows the installer's version until told otherwise (Windows).
+		if _, err := install.RecordVersion(install.NativeSys(nil, "").Reg, r.To); err != nil {
+			logger().Warn("update: couldn't record the version in the uninstall entry", "err", err)
+		}
 		if a.Running {
 			fmt.Fprintf(w, "Updated to %s; the agent is running it.\n", r.To)
 		} else {

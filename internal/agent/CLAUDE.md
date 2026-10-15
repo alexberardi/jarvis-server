@@ -97,6 +97,7 @@ to check a resolution: it never launches.
 
 ```
 cmd/jarvis-agent/     CLI: enroll, run, status, try, apps, browser, version (+ native host mode)
+cmd/jarvis-agentw/    Windows launcher (GUI subsystem, -H=windowsgui): starts jarvis-agent.exe with no console window
 internal/agent/
   host/               Backend interface + Host (gate, clamp, validate) + linux/darwin/windows backends
                       -- read host.go first

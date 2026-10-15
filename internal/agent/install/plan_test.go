@@ -59,6 +59,19 @@ func TestGoldenPlans(t *testing.T) {
 	}
 }
 
+// The Windows installer puts the windowless launcher beside the agent: the login item,
+// shortcuts and URL handler go through it, the start right after install and the browsers'
+// host don't (they have no window to hide, or need the console program's pipes).
+func TestWindowsLauncherPlan(t *testing.T) {
+	e := goldenEnvs()["windows"]
+	e.Launcher = `C:\Users\u\AppData\Local\Programs\Jarvis Agent\` + LauncherName
+	ops, err := Plan(e, Options{Browser: true, DesktopShortcut: true, Start: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "windows-install-launcher", Dump(e, ops))
+}
+
 func TestDarwinLaunchAgentPlan(t *testing.T) {
 	e := goldenEnvs()["darwin"]
 	e.Exe = "/Users/u/src/jarvis-server/dist/jarvis-agent" // a bare binary: no bundle
