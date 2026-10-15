@@ -76,3 +76,32 @@ func TestHeartbeatNodeKindAndCapabilities(t *testing.T) {
 	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"node_kind": 1}, n.h()).want(400)
 	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"capabilities": "connected"}, n.h()).want(400)
 }
+
+// Decision 2026-10-15 (primary node on a computer): the smart-home config's node options carry
+// node_kind so the primary-node picker can sort Pis first and label computers. An agent that
+// only reported its install mode still counts as a desktop; a Pi's is null.
+func TestSmartHomeConfigNodeKind(t *testing.T) {
+	e := newEnv(t)
+	tok := e.auth.addUser(1, "hh1", authn.RoleMember)
+	e.createNode("pi", "hh1")
+	desk := e.createNode("desk", "hh1")
+	old := e.createNode("old", "hh1")
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"node_kind": "desktop"}, desk.h()).want(200)
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"version_info": map[string]any{"version": "0.9", "install_mode": "desktop-agent"},
+	}, old.h()).want(200)
+
+	r := e.do("GET", hhPath+"/smart-home/config", nil, bearer(tok)).want(200).json()
+	want := map[string]any{"pi": nil, "desk": "desktop", "old": "desktop"}
+	nodes := r["nodes"].([]any)
+	if len(nodes) != len(want) {
+		t.Fatal(r)
+	}
+	for _, x := range nodes {
+		o := x.(map[string]any)
+		k, ok := o["node_kind"]
+		if !ok || k != want[o["node_id"].(string)] {
+			t.Fatalf("%v: node_kind = %v (present %v)", o["node_id"], k, ok)
+		}
+	}
+}

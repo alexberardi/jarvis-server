@@ -315,6 +315,10 @@ Bluetooth specifics:
 - Responses carry `device_count` (active devices only) and `node_count`, each with **N+1 queries**.
 - `GET devices?room_id&recursive=true` collects descendants by BFS (467).
 
+**Smart-home config GET** (60-91): the response's `nodes` options are the household's active nodes, each `{node_id, room, online, last_seen}`.
+
+> **Changed in jarvisd (2026-10-15):** each option also carries `node_kind` (`"desktop"` for a computer, including an agent that only reported `install_mode: desktop-agent`; otherwise the reported kind or null), so the primary-node picker can sort Pis first and label computers. See [decision](../decisions/2026-10-15-computer-as-primary-node.md).
+
 **Smart-home config PUT** (93-140):
 
 - It validates that `primary_node_id` belongs to the household (400).
