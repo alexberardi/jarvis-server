@@ -83,6 +83,10 @@ func TestSetupStepFromJobs(t *testing.T) {
 	if s := setupStep(false, "memory", missing); s != "memory" {
 		t.Errorf("saved: %q", s)
 	}
+	// The optional "this computer" step (install plan 3.3) resumes there too.
+	if s := setupStep(false, "computer", missing); s != "computer" {
+		t.Errorf("saved computer step: %q", s)
+	}
 	if s := setupStep(false, "models", missing); s != "hardware" { // pre-AD3b value: ignored
 		t.Errorf("stale saved: %q", s)
 	}

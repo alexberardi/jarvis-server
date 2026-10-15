@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Download, ExternalLink, Laptop, LogOut, Monitor, Play, Puzzle, Smartphone } from 'lucide-react'
+import { ExternalLink, Laptop, LogOut, Monitor, Play, Puzzle, Smartphone } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getThisDevice } from '@/api/chat'
 import { extensionState, getNodeLiveness, signOutDevice } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
+import AgentDownload from '@/components/addons/AgentDownload'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { useAuth } from '@/hooks/useAuth'
 import { AGENT_START_URL, canSignOut, detectOS, extensionLabel, LINKS, OS_NAME, yourDevices } from '@/lib/addons'
@@ -21,8 +22,6 @@ const linkButton =
   'inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]'
 const dangerButton =
   'inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60'
-const primaryButton =
-  'inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90'
 
 function Section({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (
@@ -36,9 +35,9 @@ function Section({ title, icon, children }: { title: string; icon: ReactNode; ch
   )
 }
 
-function External({ href, children, primary }: { href: string; children: ReactNode; primary?: boolean }) {
+function External({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={primary ? primaryButton : linkButton}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={linkButton}>
       {children}
       <ExternalLink size={14} aria-hidden="true" />
     </a>
@@ -204,12 +203,9 @@ export default function AddonsPage() {
         <p className="mb-3 text-sm text-[var(--color-text-muted)]">
           Talk to Jarvis with "Hey Jarvis" on a computer, and let it open apps, read the screen and type for you.
         </p>
-        <div className="flex flex-wrap gap-2">
-          {/* No agent installers in the release yet (install plan 2.1): the release page and the guide. */}
-          <External href={LINKS.releases} primary>
-            <Download size={14} aria-hidden="true" />
-            Download for {OS_NAME[os]}
-          </External>
+        {/* Through jarvisd, verified against the release signature (install plan 3.1). */}
+        <AgentDownload size="sm" />
+        <div className="mt-3 flex flex-wrap gap-2">
           <External href={LINKS.agentGuide}>Install guide</External>
         </div>
       </Section>

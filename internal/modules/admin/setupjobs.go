@@ -120,7 +120,7 @@ func jobInstall(i *llmmod.SetupInstall) *JobInstall {
 func chosen(s JobSummary) bool { return s.State != JobMissing }
 
 // wizardSteps are the steps a signed-in superuser can resume at, in order (AD3, AD3a, AD3b).
-var wizardSteps = []string{"hardware", "llm", "stt", "voice", "speaker", "memory", "privacy", "done"}
+var wizardSteps = []string{"hardware", "llm", "stt", "voice", "speaker", "memory", "privacy", "computer", "done"}
 
 // setupStep is where a signed-in superuser resumes the wizard, from the install itself rather
 // than one tab's storage (A10 F9): "" once it was finished; else the step the wizard last

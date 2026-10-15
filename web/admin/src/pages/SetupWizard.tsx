@@ -8,6 +8,7 @@ import { setupKeys, useSetupState } from '@/hooks/useSetup'
 import { updateSetting } from '@/api/settings'
 import AccountStep from '@/components/wizard/AccountStep'
 import CheckStep from '@/components/wizard/CheckStep'
+import ComputerStep from '@/components/wizard/ComputerStep'
 import DoneStep from '@/components/wizard/DoneStep'
 import HardwareStep from '@/components/wizard/HardwareStep'
 import JobStep from '@/components/wizard/JobStep'
@@ -28,7 +29,7 @@ import {
 } from '@/components/wizard/steps'
 
 /**
- * The step list. From `sm` up it is a row of labelled pills that wraps. Ten labels can't fit a
+ * The step list. From `sm` up it is a row of labelled pills that wraps. Eleven labels can't fit a
  * phone, so there each step is a numbered marker (a check once done) spread across the width,
  * and the current step's name is spelled out under them. The name stays in every marker
  * (screen-reader only on a phone), so each one is announced by its step either way.
@@ -52,8 +53,8 @@ function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
                 onClick={() => onPick(s)}
                 aria-current={current ? 'step' : undefined}
                 className={cn(
-                  // 32px circles: ten of the 40px touch-floor size (index.css) don't fit a 390px phone.
-                  'flex items-center justify-center gap-1 whitespace-nowrap rounded-full max-sm:h-8 max-sm:min-h-8 max-sm:w-8 sm:px-2.5 sm:py-1',
+                  // 28px circles: eleven of the 40px touch-floor size (index.css) don't fit a 390px phone.
+                  'flex items-center justify-center gap-1 whitespace-nowrap rounded-full max-sm:h-7 max-sm:min-h-7 max-sm:w-7 sm:px-2.5 sm:py-1',
                   current && 'bg-[var(--color-primary)] text-white',
                   done && 'text-[var(--color-text)]',
                   !done && !current && 'text-[var(--color-text-muted)]',
@@ -168,6 +169,7 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
             />
           )}
           {step === 'privacy' && <PrivacyStep onDone={next} />}
+          {step === 'computer' && <ComputerStep onNext={next} onBack={back} />}
           {step === 'done' && <DoneStep onFinish={finish} />}
         </div>
       </div>

@@ -2,9 +2,10 @@
 
 /**
  * AD3 + AD3a + AD3b: Check → Account → Hardware → one step per model job (Language model,
- * Speech-to-text, Voice, Voice recognition, Memory & search) → Privacy → Done.
+ * Speech-to-text, Voice, Voice recognition, Memory & search) → Privacy → This computer (optional,
+ * install plan §3.1) → Done.
  */
-export const STEPS = ['check', 'account', 'hardware', 'llm', 'stt', 'voice', 'speaker', 'memory', 'privacy', 'done'] as const
+export const STEPS = ['check', 'account', 'hardware', 'llm', 'stt', 'voice', 'speaker', 'memory', 'privacy', 'computer', 'done'] as const
 export type Step = (typeof STEPS)[number]
 
 export const TITLES: Record<Step, string> = {
@@ -17,6 +18,7 @@ export const TITLES: Record<Step, string> = {
   speaker: 'Voice recognition',
   memory: 'Memory & search',
   privacy: 'Privacy',
+  computer: 'This computer',
   done: 'Done',
 }
 
