@@ -58,6 +58,7 @@ function connect() {
   try {
     p = api.runtime.connectNative(HOST);
   } catch {
+    setState("unreachable");
     scheduleRetry();
     return;
   }
@@ -65,13 +66,41 @@ function connect() {
   connectedAt = Date.now();
   p.onMessage.addListener((msg) => onMessage(p, msg));
   p.onDisconnect.addListener(() => {
-    void api.runtime.lastError; // "host not found" / host exited: read so Chrome doesn't warn
+    // "host not found" / host exited: read it (so Chrome doesn't warn) for the popup's state.
+    const err = api.runtime.lastError ?? p.error;
+    setState(HOST_MISSING.test(String(err?.message ?? "")) ? "missing" : "unreachable");
     if (port === p) port = null;
     // A port that lived a while was a working host that went away: retry quickly.
     if (Date.now() - connectedAt > 10000) retryMs = RETRY_MIN_MS;
     scheduleRetry();
   });
   hello(p);
+  // A missing host closes the port at once; one still open a moment later was found.
+  setTimeout(() => {
+    if (port === p) setState("connected");
+  }, CONNECTED_AFTER_MS);
+}
+
+// --- the toolbar button's popup ---
+//
+// The popup (popup.html) says whether the agent's host answered and, when it didn't, links to
+// the desktop agent's download page. It learns the state from its own URL, set here with
+// action.setPopup: the popup sends this script nothing, so there is still no runtime.onMessage.
+
+const CONNECTED_AFTER_MS = 1000;
+// Chrome: "Specified native messaging host not found."; Firefox: "No such native application …".
+const HOST_MISSING = /not found|no such native application/i;
+let popupState = "";
+
+function setState(state) {
+  if (state === popupState || !api.action) return;
+  popupState = state;
+  const quiet = (r) => Promise.resolve(r).catch(() => {});
+  quiet(api.action.setPopup({ popup: "popup.html?state=" + state }));
+  quiet(api.action.setBadgeText({ text: state === "connected" ? "" : "!" }));
+  quiet(api.action.setTitle({
+    title: state === "connected" ? "Jarvis Browser Control" : "Jarvis Browser Control: the desktop agent isn't connected",
+  }));
 }
 
 function scheduleRetry() {

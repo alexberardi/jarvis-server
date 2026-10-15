@@ -773,8 +773,14 @@ checklist).
    - **Live:** the page polls the node status, so ticks turn green within seconds of the install
      finishing. Nobody has to reload the page.
    - **Several computers:** one row of checks per paired computer.
-   - **The extension's own popup** links back here when it can't reach an agent ("Install the
-     Jarvis desktop agent").
+   - **The extension's own popup** links to the agent download when it can't reach an agent
+     (built in 0.2.1, install plan 3.5). It can't link back here: the extension never learns the
+     server's address, so the link is the public release page. background.js puts the state
+     (`connected`, `missing`: no native host registered, `unreachable`: the host exited or was
+     refused) in the popup's URL with `action.setPopup` and shows a "!" badge when it isn't
+     connected; the popup sends the extension nothing (`TestPopupSurface`). "Connected" means the
+     agent's native host answered; the host stays up while the agent itself restarts, so the
+     popup says the agent is set up, not that it is running.
 
 6. **A shortcut that starts the agent** (user, 2026-10-12: "include an option to create a
    desktop shortcut for it if you're installing the agent", and "i'd just want it to start the

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jarvis Browser Control</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1a1a1a; --muted: #5c5c5c; --bg: #ffffff; --accent: #2563eb; --ok: #16a34a; --warn: #d97706; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #ececec; --muted: #a3a3a3; --bg: #1f1f1f; --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; } }
+  body { margin: 0; width: 300px; padding: 14px 16px; font: 14px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  h1 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
+  .ok .dot { background: var(--ok); }
+  p { margin: 0 0 10px; color: var(--muted); }
+  a.button { display: inline-block; padding: 7px 12px; border-radius: 8px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; }
+  a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<h1 id="heading"><span class="dot" aria-hidden="true"></span><span id="title">Desktop agent not connected</span></h1>
+<p id="message">Jarvis controls this browser through the Jarvis Automation desktop agent on this computer. It isn't connected.</p>
+<p id="hint" hidden></p>
+<a id="download" class="button" href="https://github.com/alexberardi/jarvis-server/releases" target="_blank" rel="noopener noreferrer">Download the Jarvis Automation agent</a>
+<script src="popup.js"></script>
+</body>
+</html>

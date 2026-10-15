@@ -255,7 +255,7 @@ do. Each item lands green on `main` on its own (the §8 style).
 | 3.2 | **Add-ons tab** (§3.2). **Minimal page built (webapp 01 P4, 2026-10-13):** nav slot, Your devices from cc's node list with extension state and a Start link, pending pairings, download/store link cards; "This computer" and the verified download wait on 3.1 | M | 3.1, Q2, Q3 | `admin` (vitest) | Live ticks with a mocked poll; "can't tell" state |
 | 3.3 | **Wizard step** (§3.1) | M | 3.1 | `admin` | Wizard test: skip, agent-only, agent + extension |
 | 3.4 | Mobile: "Add a computer" + pairing approval (jarvis-node-mobile) | M | 1.1 | mobile CI | Jest; physical-device pass |
-| 3.5 | Extension popup → Add-ons link; ship as 0.2.x | S | — | `browser-ext-lint` | `TestExtensionSurface` unchanged |
+| 3.5 | **Done (PR #PRNUM, 2026-10-14; 0.2.1, store resubmission pending: 4.2).** The toolbar popup says whether the agent's native host answered and, when it didn't, links to the agent download on the public release page (the extension never learns the server's address, so it can't link to Add-ons). Extension popup → Add-ons link; ship as 0.2.x | S | — | `browser-ext-lint` | `TestExtensionSurface` unchanged |
 | 3.6 | Landing page (jarvis-installer `feat/jarvisd-landing`): OS-detected buttons for server and agent, "Advanced (terminal)", the SmartScreen note | S | 2.2–2.4 | that repo | Manual |
 
 ### Phase 4: the user's part, and sign-off
@@ -263,7 +263,7 @@ do. Each item lands green on `main` on its own (the §8 style).
 | # | Item | Who |
 |---|---|---|
 | 4.1 | Confirm the Apple secrets (§8.4) also cover the new bundles. No new certificate: dmgs and apps sign with the same Developer ID Application, and there is no `.pkg`, so no Installer cert | **User** (check only) |
-| 4.2 | Chrome developer registration; upload 0.2.0 to the Chrome Web Store and AMO; re-sign the embedded `.xpi` | **User** |
+| 4.2 | Chrome developer registration; upload 0.2.1 to the Chrome Web Store and AMO; re-sign the embedded `.xpi` | **User** |
 | 4.3 | Decide Q1–Q8 (§6), one at a time | **User** |
 | 4.4 | **Clean-install sign-off** (STATUS checklist), each on a fresh machine or a fresh user account, starting from the landing page with no dev tools. The flow is install jarvisd → wizard (with the agent step) → add a computer → extension from the store → first voice command → admin Update → uninstall | **User** |
 
