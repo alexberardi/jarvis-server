@@ -485,6 +485,11 @@ func run(ctx context.Context, args []string) error {
 		if ctl != nil {
 			_ = ctl.Close()
 		}
+		if errors.Is(err, node.ErrNotEnrolled) && !interactive() {
+			// A login item on a computer that isn't set up: the status icon's "Set up", then
+			// the agent once it is (setupwait.go). Typed in a terminal, it says what to do.
+			return waitForSetup(ctx, log, path, *f.noTray)
+		}
 		return notSetUp(err)
 	}
 	migrateLegacyID(log)
