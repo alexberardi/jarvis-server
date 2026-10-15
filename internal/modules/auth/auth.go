@@ -46,7 +46,7 @@ func Definitions() []settings.Definition {
 	return []settings.Definition{
 		{Key: settingAccessMinutes, Category: "auth.token", Type: settings.Int, Default: int64(30),
 			Description: "Access token expiration time in minutes", EnvFallback: "ACCESS_TOKEN_EXPIRE_MINUTES"},
-		{Key: settingRefreshDays, Category: "auth.token", Type: settings.Int, Default: int64(14),
+		{Key: settingRefreshDays, Category: "auth.token", Type: settings.Int, Default: int64(30),
 			Description: "Refresh token expiration time in days", EnvFallback: "REFRESH_TOKEN_EXPIRE_DAYS"},
 		{Key: settingGraceSeconds, Category: "auth.token", Type: settings.Int, Default: int64(10),
 			Description: "Grace window (s) in which a benign double-submit of a just-rotated refresh token re-gets the cached successor instead of being rejected.",

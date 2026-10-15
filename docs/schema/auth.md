@@ -78,7 +78,7 @@ From `jarvis-auth/jarvis_auth/app/services/settings_service.py`; implemented as 
 | key | type | default | env fallback | description |
 |---|---|---|---|---|
 | `auth.token.access_expire_minutes` | int | `30` | ACCESS_TOKEN_EXPIRE_MINUTES | Access token expiration time in minutes |
-| `auth.token.refresh_expire_days` | int | `14` | REFRESH_TOKEN_EXPIRE_DAYS | Refresh token expiration time in days |
+| `auth.token.refresh_expire_days` | int | `14` (jarvisd: `30`, [decision](../decisions/2026-10-15-refresh-tokens-last-30-days.md)) | REFRESH_TOKEN_EXPIRE_DAYS | Refresh token expiration time in days |
 | `auth.token.refresh_grace_seconds` | int | `10` | REFRESH_TOKEN_GRACE_SECONDS | Grace window (s) in which a benign double-submit of a just-rotated refresh token re-gets the cached successor instead of being rejected. |
 | `auth.algorithm` | string | `'HS256'` | AUTH_ALGORITHM | JWT signing algorithm |
 
