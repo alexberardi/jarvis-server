@@ -121,6 +121,8 @@ func TestExpectCheck(t *testing.T) {
 		{AnyTool: []string{"recall", "remember"}},
 		{Reply: `12 minutes`, NotReply: `(?i)sorry`, Stop: "complete", MaxSeconds: 5},
 		{NotTool: []string{"cancel_timer"}},
+		{NotCall: &CallMatch{Tool: "set_timer", ArgsMatch: map[string]string{"label": "(?i)rice"}}},
+		{NotCall: &CallMatch{Tool: "cancel_timer"}},
 	}
 	for i, e := range ok {
 		if f := e.Check(tl); len(f) != 0 {
@@ -138,6 +140,8 @@ func TestExpectCheck(t *testing.T) {
 		{NotReply: "Timer"},
 		{Stop: "tool_calls"},
 		{MaxSeconds: 1},
+		{NotCall: &CallMatch{Tool: "set_timer", ArgsMatch: map[string]string{"label": "(?i)pasta"}}},
+		{NotCall: &CallMatch{Tool: "recall"}},
 	}
 	for i, e := range bad {
 		if f := e.Check(tl); len(f) != 1 {
@@ -162,6 +166,8 @@ func TestLoadScenarios(t *testing.T) {
 		`{"name":"n","turns":[]}`,
 		`{"name":"n","turns":[{"say":"x","expect":{"reply":"("}}]}`,
 		`{"name":"n","turns":[{"say":"x","expect":{"args":{"a":1}}}]}`,
+		`{"name":"n","turns":[{"say":"x","expect":{"not_call":{"args_match":{"a":"x"}}}}]}`,
+		`{"name":"n","turns":[{"say":"x","expect":{"not_call":{"tool":"t","args_match":{"a":"("}}}}]}`,
 	} {
 		p := filepath.Join(t.TempDir(), "x.json")
 		os.WriteFile(p, []byte(bad), 0o644)
@@ -201,6 +207,48 @@ func TestLoadToolSet(t *testing.T) {
 	}
 	if none, _ := LoadToolSet(root, "none"); len(none) != 0 {
 		t.Fatal("none")
+	}
+	desk, err := LoadToolSet(root, "desktop")
+	if err != nil || !slices.Contains(toolNames(desk), "desktop_type_text") {
+		t.Fatalf("desktop tools %v, %v", toolNames(desk), err)
+	}
+}
+
+// The checked-in desktop toolset is what the agent's own toolsets render, so a desktop scenario
+// offers what a real agent sends (keywords included: the must-call guard reads them).
+// Regenerate with: go run ./tools/pipeline toolset desktop > tools/pipeline/toolsets/desktop.json
+func TestDesktopToolsetIsCurrent(t *testing.T) {
+	want, err := RenderDesktopToolset()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile("toolsets/desktop.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("toolsets/desktop.json is stale: go run ./tools/pipeline toolset desktop > tools/pipeline/toolsets/desktop.json")
+	}
+	var tools []map[string]any
+	if err := json.Unmarshal(got, &tools); err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range tools {
+		if kw, _ := tl["keywords"].([]any); len(kw) == 0 {
+			t.Errorf("%v: no keywords", tl["function"])
+		}
+	}
+}
+
+func TestDesktopNodeDefaults(t *testing.T) {
+	if got := resolveToolSpec(Scenario{Node: "desktop"}); got != "desktop" {
+		t.Errorf("desktop node tools %q", got)
+	}
+	if got := resolveToolSpec(Scenario{Node: "desktop", Tools: "none"}); got != "none" {
+		t.Errorf("explicit tools %q", got)
+	}
+	if got := resolveToolSpec(Scenario{}); got != "" {
+		t.Errorf("seeded node tools %q", got)
 	}
 }
 
@@ -545,5 +593,55 @@ func TestDriverDesktopRemovedOwner(t *testing.T) {
 	}
 	if l := d.Run(context.Background(), Scenario{Name: "x", Node: "desktop", Owner: "someone", Turns: []Turn{{Say: "hi"}}}); l.Pass {
 		t.Fatal("unknown owner")
+	}
+}
+
+// "fresh_memories" deletes the primary's own memories before the run, through the app's API.
+func TestDriverFreshMemories(t *testing.T) {
+	var mu sync.Mutex
+	var deleted []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/auth/login":
+			io.WriteString(w, `{"access_token":"jwt"}`)
+		case r.URL.Path == "/households":
+			io.WriteString(w, `[{"id":"hh-1","role":"admin"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v0/mobile/memories":
+			if r.Header.Get("Authorization") != "Bearer jwt" || r.URL.Query().Get("household_id") != "hh-1" ||
+				r.URL.Query().Get("include_household") != "false" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			io.WriteString(w, `[{"id":3},{"id":5}]`)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v0/mobile/memories/"):
+			deleted = append(deleted, r.URL.Path+"?"+r.URL.RawQuery)
+			io.WriteString(w, `{"status":"deleted"}`)
+		case r.URL.Path == "/api/v0/conversation/start", r.URL.Path == "/api/v0/conversation/end":
+			io.WriteString(w, `{"status":"success"}`)
+		case r.URL.Path == "/api/v0/voice/command":
+			io.WriteString(w, `{"stop_reason":"complete","tool_calls":[],"assistant_message":"Okay."}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	root, _ := filepath.Abs("../..")
+	d := &Driver{Node: &Node{BaseURL: srv.URL, ID: "node", Key: "key"}, Root: root,
+		Desktop: &DesktopSetup{AuthURL: srv.URL, Email: "p@example.com", Password: "pw"}}
+	sc := Scenario{Name: "fresh", Tools: "none", Home: "none", FreshMemories: true, Turns: []Turn{{Say: "hi"}}}
+	if l := d.Run(context.Background(), sc); !l.Pass {
+		t.Fatalf("%+v", l)
+	}
+	want := []string{"/api/v0/mobile/memories/3?household_id=hh-1", "/api/v0/mobile/memories/5?household_id=hh-1"}
+	if !slices.Equal(deleted, want) {
+		t.Fatalf("deleted %v", deleted)
+	}
+	// Without the sandbox's sign-in it fails the run instead of playing it on stale memories.
+	d.Desktop = nil
+	if l := d.Run(context.Background(), sc); l.Pass {
+		t.Fatal("ran without clearing")
 	}
 }

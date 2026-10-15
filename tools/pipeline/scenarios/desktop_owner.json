@@ -2,6 +2,7 @@
   {
     "name": "desktop owner: remember stores as the signed-in member",
     "node": "desktop",
+    "fresh_memories": true,
     "tools": "../toolsets/desktop.json",
     "home": "none",
     "turns": [

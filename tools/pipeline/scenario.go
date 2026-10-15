@@ -49,6 +49,9 @@ type Scenario struct {
 	// ("" = the house voice). say/run --voice turns it on for every scenario.
 	Voice     bool   `json:"voice,omitempty"`
 	VoiceName string `json:"voice_name,omitempty"`
+	// FreshMemories deletes the primary user's own memories before each run (memories.go), so
+	// a memory scenario doesn't see what an earlier run stored.
+	FreshMemories bool `json:"fresh_memories,omitempty"`
 	// Skip, when set, is why the scenario cannot run yet; it is reported, not played.
 	Skip string `json:"skip,omitempty"`
 	// Results is the node's output per tool name for every call in the scenario; a turn's own
@@ -74,14 +77,37 @@ type Expect struct {
 	ServerTool string            `json:"server_tool,omitempty"` // this server tool is called
 	Args       map[string]any    `json:"args,omitempty"`        // on the Tool/ServerTool call: these keys equal these values
 	ArgsMatch  map[string]string `json:"args_match,omitempty"`  // on that call: each value's text matches the regexp
-	Reply      string            `json:"reply,omitempty"`       // the spoken reply matches this regexp
-	NotReply   string            `json:"not_reply,omitempty"`   // and does not match this one
-	Stop       string            `json:"stop,omitempty"`        // final stop_reason
-	MaxSeconds float64           `json:"max_seconds,omitempty"` // the turn finished within this
+	// NotCall: no call of this tool (node or server) has args matching all of these regexps,
+	// e.g. {"tool": "desktop_open", "args_match": {"target": "(?i)type"}}.
+	NotCall    *CallMatch `json:"not_call,omitempty"`
+	Reply      string     `json:"reply,omitempty"`       // the spoken reply matches this regexp
+	NotReply   string     `json:"not_reply,omitempty"`   // and does not match this one
+	Stop       string     `json:"stop,omitempty"`        // final stop_reason
+	MaxSeconds float64    `json:"max_seconds,omitempty"` // the turn finished within this
 	// Voice turns only: what STT made of the said text.
 	Heard    string   `json:"heard,omitempty"`     // the transcript matches this regexp
 	NotHeard string   `json:"not_heard,omitempty"` // and does not match this one
 	MaxWER   *float64 `json:"max_wer,omitempty"`   // word error rate against the said text ≤ this (0 = word for word)
+}
+
+// CallMatch is a tool name and a regexp per argument.
+type CallMatch struct {
+	Tool      string            `json:"tool"`
+	ArgsMatch map[string]string `json:"args_match,omitempty"`
+}
+
+// matches reports whether c is this tool with every listed argument matching.
+func (m CallMatch) matches(c CallLog) bool {
+	if c.Name != m.Tool {
+		return false
+	}
+	for k, re := range m.ArgsMatch {
+		v, ok := c.Args[k]
+		if !ok || !regexp.MustCompile(re).MatchString(valueText(v)) {
+			return false
+		}
+	}
+	return true
 }
 
 // hearing reports whether the expectation is about the transcript.
@@ -157,6 +183,16 @@ func (s Scenario) validate() error {
 		for k, re := range t.Expect.ArgsMatch {
 			if _, err := regexp.Compile(re); err != nil {
 				return fmt.Errorf("turn %d: args_match %s: %w", i+1, k, err)
+			}
+		}
+		if nc := t.Expect.NotCall; nc != nil {
+			if nc.Tool == "" {
+				return fmt.Errorf("turn %d: not_call needs a tool", i+1)
+			}
+			for k, re := range nc.ArgsMatch {
+				if _, err := regexp.Compile(re); err != nil {
+					return fmt.Errorf("turn %d: not_call args_match %s: %w", i+1, k, err)
+				}
 			}
 		}
 		if (len(t.Expect.Args) > 0 || len(t.Expect.ArgsMatch) > 0) && t.Expect.Tool == "" && t.Expect.ServerTool == "" {
@@ -252,6 +288,9 @@ func (e Expect) Check(t TurnLog) []string {
 	for _, c := range all {
 		if slices.Contains(e.NotTool, c.Name) {
 			fails = append(fails, "called "+c.Name)
+		}
+		if e.NotCall != nil && e.NotCall.matches(c) {
+			fails = append(fails, fmt.Sprintf("called %s %s", c.Name, jsonText(c.Args)))
 		}
 	}
 	if re := expandNow(e.Reply, t.End); re != "" && !regexp.MustCompile(re).MatchString(t.Reply) {
