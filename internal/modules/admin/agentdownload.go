@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -48,26 +47,26 @@ type agentAsset struct {
 	contentType string
 }
 
-// agentAssetFor names the release file for os/arch: the .deb on Linux unless format=archive,
-// else the agent archive. The dmg (macOS, item 2.2) and the Windows installer (2.3) take over
-// from the archives when the release carries them.
+// agentAssetFor names the release file for os/arch: the installer where the release has one
+// (the .deb on Linux, the Inno Setup exe on Windows, items 2.4 and 2.3), the archive with
+// format=archive and on macOS until its dmg (2.2) ships.
 func agentAssetFor(tag, goos, arch, format string) (agentAsset, error) {
 	platform := goos + "-" + arch
 	if !agentPlatforms[platform] {
 		return agentAsset{}, fmt.Errorf("There is no Jarvis Automation agent for %s yet", platform)
 	}
-	switch format {
-	case "", "archive", "deb":
-	default:
-		return agentAsset{}, fmt.Errorf("Unknown format %q (deb or archive)", format)
-	}
-	if goos == "linux" && format != "archive" {
+	ver := strings.TrimPrefix(tag, "v")
+	switch {
+	case format != "" && format != "archive" && format != "installer":
+		return agentAsset{}, fmt.Errorf("Unknown format %q (installer or archive)", format)
+	case format != "archive" && goos == "linux":
 		// build-debs.sh: jarvis-automation-agent_<tag without v>_<arch>.deb
-		return agentAsset{"jarvis-automation-agent_" + strings.TrimPrefix(tag, "v") + "_" + arch + ".deb",
-			"application/vnd.debian.binary-package"}, nil
-	}
-	if format == "deb" {
-		return agentAsset{}, errors.New("The .deb is for Linux only")
+		return agentAsset{"jarvis-automation-agent_" + ver + "_" + arch + ".deb", "application/vnd.debian.binary-package"}, nil
+	case format != "archive" && goos == "windows":
+		// release.yml (windows-installers): Jarvis-Automation-Agent-Setup-<tag without v>.exe
+		return agentAsset{"Jarvis-Automation-Agent-Setup-" + ver + ".exe", "application/vnd.microsoft.portable-executable"}, nil
+	case format == "installer":
+		return agentAsset{}, fmt.Errorf("There is no installer for %s yet; ask for format=archive", platform)
 	}
 	name := update.ProgramArchiveName(update.AgentProgram, tag, platform)
 	ct := "application/gzip"

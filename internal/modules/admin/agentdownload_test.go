@@ -39,6 +39,7 @@ func newAgentRelease(t *testing.T, k releaseKey, tag string, o agentReleaseOpts)
 		update.ProgramArchiveName(update.AgentProgram, tag, "darwin-arm64"):      []byte("mac agent archive"),
 		update.ProgramArchiveName(update.AgentProgram, tag, "windows-amd64"):     []byte("windows agent zip"),
 		"jarvis-automation-agent_" + strings.TrimPrefix(tag, "v") + "_amd64.deb": []byte("agent deb amd64"),
+		"Jarvis-Automation-Agent-Setup-" + strings.TrimPrefix(tag, "v") + ".exe": []byte("windows agent setup"),
 	}
 	var sums strings.Builder
 	for n, b := range builds {
@@ -112,7 +113,8 @@ func TestAgentDownloadVerifiesCachesAndStreams(t *testing.T) {
 		{"/api/addons/agent/linux/amd64", "jarvis-automation-agent_1.2.0_amd64.deb", "application/vnd.debian.binary-package", "agent deb amd64"},
 		{"/api/addons/agent/linux/amd64?format=archive", "jarvis-agent-v1.2.0-linux-amd64.tar.gz", "application/gzip", "linux agent archive"},
 		{"/api/addons/agent/darwin/arm64", "jarvis-agent-v1.2.0-darwin-arm64.tar.gz", "application/gzip", "mac agent archive"},
-		{"/api/addons/agent/windows/amd64", "jarvis-agent-v1.2.0-windows-amd64.zip", "application/zip", "windows agent zip"},
+		{"/api/addons/agent/windows/amd64", "Jarvis-Automation-Agent-Setup-1.2.0.exe", "application/vnd.microsoft.portable-executable", "windows agent setup"},
+		{"/api/addons/agent/windows/amd64?format=archive", "jarvis-agent-v1.2.0-windows-amd64.zip", "application/zip", "windows agent zip"},
 	}
 	for _, c := range cases {
 		// A member gets it, and asking twice downloads it from the release once.
@@ -209,7 +211,7 @@ func TestAgentDownloadRequests(t *testing.T) {
 		{"/api/addons/agent/linux/riscv64", member, http.StatusNotFound},
 		{"/api/addons/agent/darwin/amd64", member, http.StatusNotFound}, // no Intel Mac build
 		{"/api/addons/agent/freebsd/amd64", member, http.StatusNotFound},
-		{"/api/addons/agent/windows/amd64?format=deb", member, http.StatusNotFound},
+		{"/api/addons/agent/darwin/arm64?format=installer", member, http.StatusNotFound}, // no dmg yet
 		{"/api/addons/agent/linux/amd64?format=rpm", member, http.StatusNotFound},
 	} {
 		if w := send(e.mux, "GET", c.path, "", c.hdr...); w.Code != c.want {

@@ -1102,7 +1102,9 @@ behind the same address until that agent heartbeats again.
 
 **The verified agent download (installers plan item 3.1, 2026-10-14).** `GET
 /api/addons/agent/{os}/{arch}` (user tier; `linux`/`darwin`/`windows` × `amd64`/`arm64`, the
-builds a release carries; `?format=archive` for the Linux tarball instead of the `.deb`) hands a
+builds a release carries; the installer by default, the `.deb` on Linux and
+`Jarvis-Automation-Agent-Setup-<v>.exe` on Windows, `?format=archive` for the tarball or zip; macOS
+gets the archive until its dmg ships) hands a
 browser the agent for **jarvisd's own version**: jarvisd looks up that release, fetches
 `SHA256SUMS` and its signature first, verifies them with the keys compiled into jarvisd and checks
 that the trusted comment names the tag (`update.FetchSigned`, the updater's check), then fetches
