@@ -1386,7 +1386,7 @@ file, so a failure stops Setup with the command's message and leaves nothing beh
   and upgrade-helper e2e jobs check that a self-update and the updater rewrite `DisplayVersion`.
   **Not covered by CI:** SmartScreen, the UAC prompt, the wizard's pages, a browser opening, the
   tray icon, and whether a console window flashes (user sign-off on a Windows PC).
-- **In the release** (PR #PRNUM, held for review: release signing): `release.yml`'s
+- **In the release** (PR #165, held for review: release signing): `release.yml`'s
   `windows-installers` job (windows-latest, Inno Setup pinned) builds them from the run's own
   windows binaries plus the launcher, named `Jarvis-Automation-Server-Setup-<v>.exe` and
   `Jarvis-Automation-Agent-Setup-<v>.exe` (GitHub turns spaces in asset names into dots), before
