@@ -1585,6 +1585,16 @@ overrides, zero-width); Enter only as the separate `submit` step; keys from a cl
 modifiers other than Shift+Tab; nothing typed into a window whose focus wasn't confirmed; text
 never in logs or results; password fields only when named.
 
+**Typing is keystrokes: a terminal app in a modal mode runs them as commands** (noted
+2026-10-14 from a user's test, behaviour unchanged). Dictation presses keys in whatever has
+focus, exactly as a person would. The agent can't see an app's mode, so in Neovim or Vim in
+normal mode, `less`, `htop` or any TUI with single-key bindings, "type hello there" doesn't
+insert text: `h`, `e`, `l`… run as commands (move, edit, delete), and the result can be
+destructive. A shell prompt or an editor in insert mode is fine. Put the app in a mode that
+takes text first (in Vim, press `i`; "press escape" leaves it again), or type into a GUI field
+instead. Dictation never presses `i` by itself: guessing an app's mode from its window would be
+wrong as often as right, and a wrong guess types into the wrong place.
+
 ### Evidence (2026-10-13)
 
 - **Typing, keys, focus (sway, headless):** a nested `sway` 1.12 (`WLR_BACKENDS=headless`, its
