@@ -1666,6 +1666,15 @@ stand; this adds one case before them (`internal/agent/jarvispage`, `dictate/jar
   then adds one line to the turn ("the user is writing this in the Jarvis web page on this
   computer, which is the window in front; … put the app they name in app …"), only with
   `desktop_type_text` offered. Mobile sends no `client` and is unaffected.
+- **Keeping the app the user named (2026-10-14).** Chat sends no app names for speech-to-text,
+  so an unfamiliar name ("omawrite") reaches the model only as a word in the request, and the
+  model dropped it from `app` (#148: 1 of 3 with the hint). `desktop_type_text`'s description now
+  says first that a named app ("into X", "in X", "to X") always goes in `app` exactly as said,
+  even a name it doesn't recognise, with a "type into quillpad that …" example; the `app`
+  parameter and the hint above say the same. Pipeline (`desktop_type_app.json`, desktop node, no
+  vocabulary, qwen3.5-9b, 5 runs each): "type into omawrite that I need to walk the dogs" 0/5 →
+  4/5; "type buy more coffee filters into omawrite" 2/5 → 5/5 (before, "into omawrite" stayed in
+  `text`); "write … in slack" 5/5 both.
 
 ### The island note
 
