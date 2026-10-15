@@ -418,7 +418,8 @@ jobs:
         run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64
       - name: shellcheck
         run: |
-          shellcheck scripts/build-debs.sh scripts/deb-check.sh
+          # The Windows installers' scripts too (the windows runner has no shellcheck).
+          shellcheck scripts/build-debs.sh scripts/deb-check.sh scripts/build-windows-installers.sh scripts/inno-check.sh
           shellcheck -s sh scripts/packaging/deb/server/postinst scripts/packaging/deb/server/prerm \
             scripts/packaging/deb/server/postrm scripts/packaging/deb/server/open-setup scripts/packaging/deb/agent/postrm
       # v0.0.1 and v0.0.2 packages (an upgrade), and a v0.0.3 jarvisd standing in for one the
@@ -448,6 +449,49 @@ jobs:
         run: lintian --fail-on error,warning --info dist/*_0.0.2-deb_*.deb
       - name: Install, upgrade, remove, purge
         run: sudo CI=1 scripts/deb-check.sh dist v0.0.1-deb v0.0.2-deb bin/v0.0.3-deb-amd64/jarvisd
+
+  # The Windows installers (01-no-cli-plan 2.3), built with Inno Setup (pinned) from this
+  # commit's programs at v0.0.1-inno and v0.0.2-inno, plus a v0.0.3-inno jarvisd and agent
+  # standing in for self-updated ones. Then installed and uninstalled silently for real on the
+  # runner: the jarvisd service and /health, the firewall rule, the Start menu link, upgrades,
+  # self-updated programs kept, uninstall keeping data, /PURGE deleting it; the agent's Run key,
+  # shortcuts, jarvis-agent:// handler and launcher. See scripts/inno-check.sh.
+  inno:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh windows-amd64
+      - name: Install Inno Setup (pinned)
+        shell: pwsh
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+      - name: Build the installers
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          build() { # version
+            go build -trimpath -ldflags "-s -w -X main.version=$1" -o "bin/$1/jarvisd.exe" ./cmd/jarvisd
+            go build -trimpath -ldflags "-s -w -X main.version=$1" -o "bin/$1/jarvis-agent.exe" ./cmd/jarvis-agent
+            go build -trimpath -ldflags "-s -w -H=windowsgui" -o "bin/$1/jarvis-agentw.exe" ./cmd/jarvis-agentw
+          }
+          for v in v0.0.1-inno v0.0.2-inno v0.0.3-inno; do build $v; done
+          scripts/build-windows-installers.sh v0.0.1-inno bin/v0.0.1-inno dist
+          scripts/build-windows-installers.sh v0.0.2-inno bin/v0.0.2-inno dist
+      - name: Install, upgrade, uninstall
+        run: CI=1 scripts/inno-check.sh dist v0.0.1-inno v0.0.2-inno bin/v0.0.3-inno
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installers
+          path: dist/*.exe
+          retention-days: 7
 
   # The install scripts (I3, I4) end to end against a release-shaped archive of this commit,
   # served from a local HTTP server (--base-url): verify, install, firewall fix, health,

@@ -167,6 +167,8 @@ func (e *e2e) run() {
 	e.expectInstalled(vN)
 
 	say("3. the server moves to %s: the agent follows", vNext)
+	displayVersion, removeEntry := fakeUninstallEntry(strings.TrimPrefix(vN, "v"))
+	defer removeEntry()
 	e.srv.setServerVersion(vNext)
 	e.restartAgent()
 	e.waitResult(selfupdate.OutcomeSucceeded, vNext, 3*time.Minute)
@@ -174,6 +176,9 @@ func (e *e2e) run() {
 	e.waitHealthy(vNext, 60*time.Second)
 	e.srv.waitBeat(vNext, 60*time.Second)
 	e.waitLog("Updated to "+vNext+"; the agent is running it.", 60*time.Second) // the installer is done
+	if displayVersion != nil && displayVersion() != strings.TrimPrefix(vNext, "v") {
+		fail("the uninstall entry's DisplayVersion is %q after the update to %s", displayVersion(), vNext)
+	}
 
 	say("4. a release that fails at start (%s) is rolled back to %s", vBroken, vNext)
 	task = e.srv.queueUpdate(vBroken)
@@ -191,6 +196,9 @@ func (e *e2e) run() {
 	e.waitLog("was rolled back to "+vNext, 60*time.Second) // the installer saw it healthy and left
 	if strings.Contains(e.readLog(), "isn't healthy either") {
 		fail("the restored %s didn't come up", vNext)
+	}
+	if displayVersion != nil && displayVersion() != strings.TrimPrefix(vNext, "v") {
+		fail("the uninstall entry's DisplayVersion is %q after the rollback to %s", displayVersion(), vNext)
 	}
 	if runtime.GOOS == "darwin" {
 		out, err := exec.Command("/usr/bin/codesign", "--verify", "--deep", "--strict", e.bundle()).CombinedOutput()

@@ -115,12 +115,12 @@ func TestWindowsFixAndRemove(t *testing.T) {
 	got := w.FixCmds(ctx, nil, nil)
 	want := [][]string{
 		{"netsh", "advfirewall", "firewall", "delete", "rule", "name=all", "dir=in", `program="` + exe + `"`},
-		{"netsh", "advfirewall", "firewall", "add", "rule", "name=jarvisd", "dir=in", "action=allow", `program="` + exe + `"`, "enable=yes", "profile=private"},
+		{"netsh", "advfirewall", "firewall", "add", "rule", "name=jarvisd", "dir=in", "action=allow", `program="` + exe + `"`, "enable=yes", "profile=private", "remoteip=localsubnet"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("fix %q", got)
 	}
-	if fix := RenderFix("windows", got[1:], ""); fix != `netsh advfirewall firewall add rule name=jarvisd dir=in action=allow program="`+exe+`" enable=yes profile=private`+"\n(from an Administrator prompt)" {
+	if fix := RenderFix("windows", got[1:], ""); fix != `netsh advfirewall firewall add rule name=jarvisd dir=in action=allow program="`+exe+`" enable=yes profile=private remoteip=localsubnet`+"\n(from an Administrator prompt)" {
 		t.Errorf("rendered %q", fix)
 	}
 	if got := w.RemoveCmds(ctx); !reflect.DeepEqual(got, [][]string{{"netsh", "advfirewall", "firewall", "delete", "rule", "name=jarvisd"}}) {

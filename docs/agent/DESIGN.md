@@ -890,8 +890,14 @@ anything happens, so a page can do nothing through the link but start the agent.
 `scripts/agent-dev-run.sh --install/--uninstall` now call these. CI (`agent` job, 3 OSes) runs
 `scripts/agent-install-check.sh`: install twice and uninstall in a scratch HOME on Linux
 (`desktop-file-validate`, `systemd-analyze verify`) and macOS, and in the runner's own HKCU on
-Windows. **Known gaps:** no icon yet; a Windows console window flashes when the Run key or a
-shortcut starts the (console) binary.
+Windows. **Known gap:** no icon yet. **Fixed (2026-10-14, install plan 2.3):** the console window
+that flashed when the Run key or a shortcut started the (console) binary. The Windows installer
+puts a windowless launcher, `jarvis-agentw.exe` (a GUI program), beside the agent; `install` points
+the Run key, the shortcuts and the URL handler at it when it is there, and it starts
+`jarvis-agent.exe` in a console with no window. The agent itself stays a console program, so its
+CLI and the browsers' native-messaging pipes are unchanged ([00-installers §8.3](../install/00-installers.md)
+"The Windows installers"). **`install --bin PATH`** (the Windows installer's call) first puts the
+running copy at PATH unless the same or a newer release is there, then hands over to it.
 
 **Logs on macOS (2026-10-13).** Both login items log to `~/Library/Logs/jarvis-agent.log`
 (stdout and stderr in one file; it was `.log` + `.err.log`). The plain LaunchAgent names it.
@@ -961,7 +967,11 @@ nothing to do. Started by a login item it waits for setup instead (below).
   would be wrong. `run` started by a login item (stdin not a terminal: systemd, launchd, the Run
   key, or the autostart entry's `start --login`, which now spawns `run` where systemd doesn't
   start it) shows the status icon, "Jarvis Automation Agent — Not set up yet", with
-  "Set up / Settings…" and Quit, and keeps the control socket free. Where the desktop shows no
+  "Set up / Settings…" and Quit. It answers the control socket (since 2026-10-14, found by the
+  Windows installer's CI: `stop`, `uninstall` and an installer replacing the binary couldn't
+  reach it, so it kept running): quit ends the wait, show-running (the shortcut, the link)
+  opens the setup page, or nothing once the page has saved the credentials, ping answers; it
+  closes the socket before becoming the agent. Where the desktop shows no
   status icon, it opens the setup page, **once**: a marker (`setup-offered-at-login` next to
   `node.json`) keeps later logins quiet. The menu entry, the app and `jarvis-agent://start` still
   open the page.
@@ -1176,8 +1186,11 @@ checked exactly as jarvisd checks its own (installers 00 §8.2), and never needs
   are off on this computer"). `jarvis-agent update [--check] [--version vX] [--force]` does it
   by hand: the server's version unless `--version`; stages, swaps, restarts the running agent
   through its supervisor and waits for it, or with the agent stopped just swaps.
-- **Not covered.** The Windows uninstall key's `DisplayVersion` (the installer, item 2.3, will
-  have to read the version from the exe); a macOS app the user can't write (a standard user's
+- **Windows uninstall entry (2026-10-14, item 2.3).** After a successful update the agent sets
+  `DisplayVersion` in its installer's entry, `HKCU\…\Uninstall\net.jarvisautomation.agent_is1`,
+  when the installer made one (`install.RecordVersion`; the agent-upgrade e2e checks it on
+  Windows). A rollback leaves it at the version that runs.
+- **Not covered.** A macOS app the user can't write (a standard user's
   `/Applications`): refused with the reason, the update then needs the dmg.
 - **Verified.** Unit tests: `internal/update` (agent archives in the flat source, `FetchSigned`
   refusals, re-verification, `ExtractTree` refusing links out of the tree, hard links, devices,

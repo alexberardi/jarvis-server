@@ -97,6 +97,12 @@ func runHelper(ctx context.Context, home, owner string, onDemand bool, w io.Writ
 		}
 		if runtime.GOOS == "windows" {
 			update.CleanupOld(paths) // the old exe is free once jarvisd stopped
+			// Apps & features shows the installer's version until told otherwise.
+			if v, err := binaryVersion(ctx, exe); err == nil {
+				if _, err := service.RecordInstalledVersion(v); err != nil {
+					say("could not record %s in the uninstall entry: %v", v, err)
+				}
+			}
 		}
 	}
 	return nil

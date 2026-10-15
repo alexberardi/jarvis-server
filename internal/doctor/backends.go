@@ -359,7 +359,7 @@ func (w *windowsFirewall) FixCmds(ctx context.Context, _ []Port, _ *net.IPNet) [
 		}
 	}
 	return append(cmds, []string{"netsh", "advfirewall", "firewall", "add", "rule", "name=" + Tag, "dir=in", "action=allow",
-		program, "enable=yes", "profile=private"})
+		program, "enable=yes", "profile=private", "remoteip=localsubnet"})
 }
 
 func (w *windowsFirewall) FixNote() string { return "" }

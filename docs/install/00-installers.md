@@ -353,7 +353,8 @@ installing user (no Go change; loses run-before-logon). That is the second optio
 
 **Firewall.** `install.ps1` is elevated, so it applies the rule directly through `jarvisd doctor --fix`:
 `netsh advfirewall firewall add rule name="jarvisd" dir=in action=allow program="<exe>" enable=yes
-profile=private` (`internal/doctor/firewall.go:293-296`). A program rule covers every port and survives
+profile=private remoteip=localsubnet` (`internal/doctor/backends.go`; `remoteip=localsubnet` since the
+Windows installers, 2026-10-14: the local network only, as decided for the `.deb`, Q4). A program rule covers every port and survives
 port overrides. Engines bind loopback only, so they need no rule (verify in I0 by `netstat` on Windows).
 If the active network profile is **Public**, the rule does not apply: doctor must say so and print
 `Set-NetConnectionProfile -NetworkCategory Private` (NEW check, I2).
@@ -1195,7 +1196,7 @@ progress goes to stderr. Per backend, everything is tagged so uninstall finds it
 | ufw | `ufw allow from <lan> to any port <list> proto tcp\|udp comment jarvisd` (idempotent) | each `user.rules` tuple with the hex `jarvisd` comment → `ufw delete allow from … port … proto …` |
 | firewalld | `--new-service=jarvisd` (if missing), `--service=jarvisd --add-port=…` per port, one rich rule `source address=<lan> service name="jarvisd" accept`, `--reload`; the check now also reads rich rules and the service's ports | rich rules naming the service, `--delete-service=jarvisd`, `--reload` |
 | macOS | `socketfilterfw --add` + `--unblockapp` on the binary (block-all is left to the user, noted) | `socketfilterfw --remove` if listed |
-| Windows | `delete rule name=all dir=in program="<exe>"` when any rule names the exe (a "Cancel" block rule beats any allow), then `add rule name=jarvisd … profile=private`; netsh gets its command line verbatim (`SysProcAttr.CmdLine`) | `delete rule name=jarvisd` if it exists |
+| Windows | `delete rule name=all dir=in program="<exe>"` when any rule names the exe (a "Cancel" block rule beats any allow), then `add rule name=jarvisd … profile=private remoteip=localsubnet`; netsh gets its command line verbatim (`SysProcAttr.CmdLine`) | `delete rule name=jarvisd` if it exists |
 
 New checks: **ports** (fail): a TCP port answers but its HTTP `/health` lacks `Server: jarvisd`
 (every jarvisd listener now sends it, `httpx.ServerName`); the broker's ports count as
@@ -1323,6 +1324,76 @@ spelling tags a static Go binary can't satisfy, and prerm's fallback `systemctl`
   lintians them and, on the amd64 and arm64 runners, installs the server package with apt, checks
   the service and `/health` at the release's version, and purges it. The release notes point
   Debian/Ubuntu users at them.
+
+**The Windows installers** (2026-10-14, [01-no-cli-plan](01-no-cli-plan.md) item 2.3;
+[decision](../decisions/2026-10-14-windows-installers.md)): `Jarvis Automation Server Setup <tag
+without v>.exe` (jarvisd, per machine, UAC) and `Jarvis Automation Agent Setup <tag without v>.exe`
+(the desktop agent, per user, no UAC), unsigned, built with Inno Setup (pinned at 6.7.1, installed
+with choco on the windows runner) by `scripts/build-windows-installers.sh` from
+`scripts/packaging/windows/{server,agent}.iss` (shared `common.iss` and `common-code.iss`). Both stay thin: each runs its
+program's own command from the payload in `{tmp}` in `PrepareToInstall`, before Setup installs any
+file, so a failure stops Setup with the command's message and leaves nothing behind.
+
+- **Server:** `jarvisd install-from-app --bin "%ProgramFiles%\jarvisd\jarvisd.exe" --url-file
+  <tmp>` (plus `--no-firewall` when the box is unticked). That places the binary where the updater
+  swaps it, keeping a newer one (a self-updated install survives an older installer), registers
+  the service and its updater, refuses ports another program holds, and writes the setup link.
+  The wizard has one Tasks page: ☑ "Let phones, voice nodes and other computers on my local
+  network reach Jarvis Automation" (`doctor --fix`: the rule is now `profile=private
+  remoteip=localsubnet`, so the local network only), ☐ a desktop link. The Finish page opens the
+  link in the user's browser (`runasoriginaluser`); the Start menu gets "Jarvis Automation
+  Server", an Internet shortcut to `http://localhost:<admin port>/` (localhost, not the LAN address
+  the link uses, which can change). Data stays in `%ProgramData%\jarvisd`, so an upgrade keeps it.
+  Uninstall (Apps & features) runs `jarvisd service uninstall` (the service, the updater and the
+  firewall rule go) after asking "Also delete Jarvis Automation's data?", default **No** (Q6);
+  Yes adds `--purge --yes`. A silent uninstall keeps the data unless given `/PURGE`. The program
+  folder goes with everything the updater kept in it.
+- **Agent:** `jarvis-agent install --bin "%LocalAppData%\Programs\Jarvis Automation
+  Agent\jarvis-agent.exe" --no-start [--desktop-shortcut=false]`. `install --bin` is new: run from
+  another copy, it puts that copy at the path unless the same or a newer release is there
+  (`install.Place`: an agent that updated itself is kept; an older one, a dev build or one that
+  doesn't run is replaced, kept as `jarvis-agent.prev.exe` after the running agent is asked to
+  quit), then hands over to the binary at the path with the same arguments. That one does the
+  usual per-user install: HKCU Run, Start menu and desktop shortcuts, the `jarvis-agent://`
+  handler, the browsers' native-messaging host. The Finish page runs `start` (the agent, or its
+  setup page on a computer not added yet); a silent install runs `start --login` instead (running
+  if set up, else waiting for setup in its notification-area icon). Uninstall runs `jarvis-agent
+  uninstall` after asking "Also remove your Jarvis Automation Agent settings and sign-in?",
+  default No (`--purge` on Yes, or `/PURGE` when silent).
+- **No console window.** `jarvis-agent.exe` stays a console program, so its CLI, `enroll`'s
+  password prompt and the browsers' native-messaging pipes work as before. The installer adds
+  `jarvis-agentw.exe` (`cmd/jarvis-agentw`, built with `-H=windowsgui`; the build script checks the
+  PE subsystem of both): a launcher that starts the `jarvis-agent.exe` beside it with the same
+  arguments in a console without a window, then exits. `install` points the Run key, the
+  shortcuts and the URL handler at it when it is beside the agent, and at the agent otherwise.
+  The detached start `start` and `restart` use is now `CREATE_NO_WINDOW` without
+  `DETACHED_PROCESS`, so the agent's own console children (the Python sidecar, uv) share its
+  hidden console instead of each opening a window.
+- **The uninstall entry's version.** Setup records the version of the program that runs (its
+  `version`, at the end of Setup), which differs from the installer's when a newer one was kept.
+  After a self-update, the agent rewrites `DisplayVersion` in `HKCU\…\Uninstall\net.jarvisautomation.agent_is1`
+  and jarvisd's updater (LocalSystem) in `HKLM\…\Uninstall\net.jarvisautomation.jarvisd_is1`, after a
+  swap or a rollback alike. Neither creates the entry when no installer made it.
+- **CI job `inno`** (windows-latest, `scripts/inno-check.sh`): installers at v0.0.1 and v0.0.2 and a
+  v0.0.3 stand-in for self-updated programs, installed silently (`/VERYSILENT`) for real. Server:
+  service and updater registered, `/health`, the binary in Program Files, the firewall rule
+  (private, LocalSubnet), the Start menu link, the setup link, `DisplayVersion`; an upgrade
+  (`.prev`, same link, version); the stand-in kept by a re-run of the older installer (and its
+  version recorded); uninstall (services, rule, folder, link gone; `jarvis.db` kept); a reinstall
+  onto the kept data (same link); `/PURGE` (data gone). Agent: the Run key, handler and both
+  shortcuts going through the launcher, the agent started, the launcher passing its arguments on,
+  `DisplayVersion`; upgrade, stand-in kept, uninstall (settings kept), `/PURGE`. The agent-upgrade
+  and upgrade-helper e2e jobs check that a self-update and the updater rewrite `DisplayVersion`.
+  **Not covered by CI:** SmartScreen, the UAC prompt, the wizard's pages, a browser opening, the
+  tray icon, and whether a console window flashes (user sign-off on a Windows PC).
+- **SmartScreen.** The installers aren't code-signed (decided, DESIGN §13 Q3). The text for the
+  download page, the release notes and the docs:
+
+  > **Windows may warn you.** When you open the installer, Windows may say *Windows protected your
+  > PC*. Jarvis Automation is safe and open source; Windows shows this for any installer that
+  > isn't signed with a paid code-signing certificate, which we don't buy. Click **More info**,
+  > then **Run anyway**. To check the file first, compare its SHA-256 with `SHA256SUMS` on the
+  > release page (signed with the project's minisign key).
 
 **`jarvisd help`** prints the usage and exits 0; the scripts grep it for an `upgrade` command.
 

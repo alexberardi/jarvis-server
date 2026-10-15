@@ -7,10 +7,13 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// detach starts the child without a console of its own and outside install's process group.
+// detach starts the child in a console of its own that has no window, outside install's
+// process group: closing the terminal install ran in doesn't end it. Not DETACHED_PROCESS: an
+// agent with no console at all would open a console window for each console program it runs
+// (the Python sidecar, uv), where these inherit the hidden one.
 func detach(c *exec.Cmd) {
 	c.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
 		HideWindow:    true,
 	}
 }

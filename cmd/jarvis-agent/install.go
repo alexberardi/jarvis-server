@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -44,8 +45,14 @@ func installEnv() (install.Env, error) {
 			return os.Getenv(k)
 		}
 	}
-	return install.Env{GOOS: runtime.GOOS, Home: home, UID: os.Getuid(), Exe: exe, Getenv: getenv,
-		SMAppService: install.SMAppServiceAvailable()}, nil
+	e := install.Env{GOOS: runtime.GOOS, Home: home, UID: os.Getuid(), Exe: exe, Getenv: getenv,
+		SMAppService: install.SMAppServiceAvailable()}
+	if runtime.GOOS == "windows" {
+		if l := filepath.Join(filepath.Dir(exe), install.LauncherName); fileExists(l) {
+			e.Launcher = l
+		}
+	}
+	return e, nil
 }
 
 // xdgUserDir reads one entry of user-dirs.dirs (XDG_DESKTOP_DIR="$HOME/Desktop"), "" if absent.
@@ -142,6 +149,7 @@ func installCmd(ctx context.Context, args []string, w io.Writer) error {
 	loginItem := fs.String("login-item", install.LoginAuto, "macOS: auto (SMAppService when run from the app, else a LaunchAgent), smappservice or launchagent")
 	filesOnly := fs.Bool("files-only", false, "write the files only: no service manager, LaunchServices or start (packaging checks)")
 	dryRun := fs.Bool("dry-run", false, "print what would be done, and do nothing")
+	bin := fs.String("bin", "", "first put this binary at `path` (keeping a newer one there), then install that one (the Windows installer)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -151,6 +159,12 @@ func installCmd(ctx context.Context, args []string, w io.Writer) error {
 	e, err := installEnv()
 	if err != nil {
 		return err
+	}
+	if *bin != "" && !sameFile(e.Exe, *bin) {
+		if *dryRun {
+			return fmt.Errorf("--dry-run with --bin: run it from %s", *bin)
+		}
+		return installAt(ctx, e.Exe, *bin, args, w)
 	}
 	start, setup := installStarts(*noStart, *filesOnly, enrolled())
 	ops, err := install.Plan(e, install.Options{Browser: !*noBrowser, DesktopShortcut: *shortcut, Start: start,
@@ -188,6 +202,50 @@ func installCmd(ctx context.Context, args []string, w io.Writer) error {
 		return firstRun(ctx)
 	}
 	return nil
+}
+
+// installAt is `install --bin dst` run from another copy (the Windows installer's payload): put
+// this binary at dst unless a newer one is there (install.Place), then hand over to the binary
+// at dst with the same arguments, so the login item, shortcuts and URL handler name it.
+func installAt(ctx context.Context, self, dst string, args []string, w io.Writer) error {
+	if !filepath.IsAbs(dst) {
+		return errors.New("install: --bin must be an absolute path")
+	}
+	stop := func() {
+		if s, err := installSys(io.Discard); err == nil && s.Quit != nil {
+			_ = s.Quit() // the running agent holds dst open; install starts it again
+		}
+	}
+	if err := install.Place(self, dst, version, func(p string) (string, error) { return programVersion(ctx, p) }, stop, w); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, dst, append([]string{"install"}, args...)...)
+	cmd.Stdout, cmd.Stderr = w, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s install: %w", dst, err)
+	}
+	return nil
+}
+
+// programVersion is what `<bin> version` prints.
+func programVersion(ctx context.Context, bin string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "version").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// sameFile reports whether a and b are the same existing file.
+func sameFile(a, b string) bool {
+	sa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	sb, err := os.Stat(b)
+	return err == nil && os.SameFile(sa, sb)
 }
 
 // installStarts decides install's last step: start the agent (start), or, on a computer that

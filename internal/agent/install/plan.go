@@ -74,11 +74,14 @@ type Op struct {
 // Env is the machine the plan is for. Nothing here is read from the running OS, so a plan for
 // any OS can be computed (and golden-tested) anywhere.
 type Env struct {
-	GOOS   string
-	Home   string
-	UID    int    // the launchd GUI domain, gui/<UID>
-	Exe    string // the running jarvis-agent, absolute, symlinks resolved
-	Getenv func(string) string
+	GOOS string
+	Home string
+	UID  int    // the launchd GUI domain, gui/<UID>
+	Exe  string // the running jarvis-agent, absolute, symlinks resolved
+	// Launcher is the windowless launcher beside Exe (Windows: LauncherName), "" when there is
+	// none: the login item, shortcuts and URL handler then run Exe itself.
+	Launcher string
+	Getenv   func(string) string
 	// SMAppService: macOS 13 or later (the in-bundle login item).
 	SMAppService bool
 }
