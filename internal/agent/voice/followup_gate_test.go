@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"context"
 	"math"
 	"slices"
 	"sync"
@@ -208,5 +209,28 @@ func TestIgnoredAnswerDoesNotRestartTheWindow(t *testing.T) {
 				t.Fatalf("listened %d chunks, want ~%d", got, want)
 			}
 		})
+	}
+}
+
+func TestAnswerAfterAnIgnoredOneIsNeverAnEcho(t *testing.T) {
+	// Nothing was said since the ignored answer, so the mic can't be hearing our reply: the
+	// next answer is sent even when it repeats the reply's words.
+	srv := newServer()
+	srv.texts, srv.speakPCM = []string{"Pass the remote.", "Here is sad music."}, pcmOf(50)
+	srv.reply = func(context.Context) (Reply, error) { return audioReply(24000, "Here is sad music.", pcmOf(100)), nil }
+	srv.followUp = func(req StreamRequest) (*Control, error) {
+		if req.VoiceCommand == "Pass the remote." {
+			return &Control{StopReason: "not_for_me", KeepListening: true}, nil
+		}
+		return complete("Playing it again."), nil
+	}
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	answer(r, mic, utterance, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 2 || tr.FollowUps[0].Outcome != OutcomeIgnored || tr.FollowUps[1].Outcome != OutcomeSpoken {
+		t.Fatalf("window %s, follow-ups %+v", tr.FollowUpEnd, tr.FollowUps)
 	}
 }

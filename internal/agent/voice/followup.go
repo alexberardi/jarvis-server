@@ -133,6 +133,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			t.FollowUpEnd = EndTimeout
 			return
 		}
+		heardAfterReply := afterReply
 		afterReply = false
 		p.cue(CueThinking, 0)
 		ex := Exchange{RecordedSecs: float64(len(pcm)) / CaptureRate}
@@ -167,7 +168,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			it++
 			continue
 		}
-		if LooksLikeSelfEcho(text, lastSaid) {
+		// Only an answer heard right after we spoke can be our reply's echo: after an ignored
+		// answer nothing was said.
+		if heardAfterReply && LooksLikeSelfEcho(text, lastSaid) {
 			ex.Outcome = OutcomeEcho
 			t.FollowUps, t.FollowUpEnd = append(t.FollowUps, ex), EndEcho
 			s.log.Info("follow-up: heard our own reply, closing", "transcript", text)
@@ -374,49 +377,53 @@ func IsFollowUpNoise(text, prev string) bool {
 	return prev != "" && lowered == strings.TrimRight(strings.ToLower(strings.TrimSpace(prev)), ".!,?")
 }
 
-var echoWord = regexp.MustCompile(`[a-z']+`)
+var echoWord = regexp.MustCompile(`[a-z0-9']+`)
 
-// echoStopwords are ignored on the user's side (conversation_filters._ECHO_STOPWORDS).
-var echoStopwords = func() map[string]bool {
-	m := map[string]bool{}
-	for _, w := range strings.Fields(`the a an is are was were be been being to of and or for in on at by with
-		i you it we they he she me us them this that these those here there do does did have has had
-		will would can could should may might must what when where why how who`) {
-		m[w] = true
-	}
-	return m
-}()
-
-func echoWords(s string, dropStop bool) map[string]bool {
-	m := map[string]bool{}
-	for _, w := range echoWord.FindAllString(strings.ToLower(s), -1) {
-		if len(w) >= 2 && !(dropStop && echoStopwords[w]) {
-			m[w] = true
-		}
-	}
-	return m
+// echoTokens are s's words in order, lower-cased, apostrophes kept ("it's" is one word).
+func echoTokens(s string) []string {
+	return echoWord.FindAllString(strings.ToLower(s), -1)
 }
 
-// LooksLikeSelfEcho is conversation_filters.looks_like_self_echo: the transcript is mostly
-// the words of what we last said, so the mic heard the speaker, not the user. Two significant
-// words must both match; three or more, 85% of them.
+// Self-echo thresholds (LooksLikeSelfEcho).
+const (
+	echoMinWords     = 2   // a one-word answer is never an echo ("Kitchen." to "Kitchen or oven?")
+	echoOfTranscript = 0.9 // this much of the transcript is the reply's words, in order...
+	echoOfReply      = 0.5 // ...and it covers at least this much of the reply
+)
+
+// LooksLikeSelfEcho reports whether the transcript is the mic hearing what we last said rather
+// than the user: nearly all of it (90 % of its words, stopwords included) must be the reply's
+// own words in the reply's order, and those must cover at least half the reply. A user who
+// repeats a few of the reply's words inside a request of their own is never an echo:
+// "Can you type hello there?" after `Now, type "hello there" to get started.` matches 4 of its
+// 5 words in order, but only 4 of the reply's 16.
+//
+// Stricter than the Python node's conversation_filters.looks_like_self_echo, which counted
+// distinct non-stopwords in any order (85 %, or both of two) and so dropped that request
+// (user report, 2026-10-14). A missed echo costs little: command-center's follow-up gate
+// still rejects speech that isn't for Jarvis. A dropped request loses what the user asked.
 func LooksLikeSelfEcho(text, lastSaid string) bool {
-	if text == "" || lastSaid == "" {
+	user, said := echoTokens(text), echoTokens(lastSaid)
+	if len(user) < echoMinWords || len(said) == 0 {
 		return false
 	}
-	user := echoWords(text, true)
-	if len(user) < 2 {
-		return false
-	}
-	said := echoWords(lastSaid, false)
-	overlap := 0
-	for w := range user {
-		if said[w] {
-			overlap++
+	m := float64(inOrder(user, said))
+	return m/float64(len(user)) >= echoOfTranscript && m/float64(len(said)) >= echoOfReply
+}
+
+// inOrder is the length of the longest common subsequence of a and b: how many of a's words
+// appear in b in the same order.
+func inOrder(a, b []string) int {
+	prev, cur := make([]int, len(b)+1), make([]int, len(b)+1)
+	for i := range a {
+		for j := range b {
+			if a[i] == b[j] {
+				cur[j+1] = prev[j] + 1
+			} else {
+				cur[j+1] = max(prev[j+1], cur[j])
+			}
 		}
+		prev, cur = cur, prev
 	}
-	if len(user) == 2 {
-		return overlap == 2
-	}
-	return float64(overlap)/float64(len(user)) >= 0.85
+	return prev[len(b)]
 }
