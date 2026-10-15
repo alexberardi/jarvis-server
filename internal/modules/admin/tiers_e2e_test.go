@@ -392,6 +392,17 @@ func TestAddonsDeviceRoutesEndToEnd(t *testing.T) {
 		t.Errorf("this-device behind a forwarded header: %d %v", code, out)
 	}
 
+	// The agent download (install plan 3.1): every signed-in user reaches the handler (a dev
+	// build answers 409 with the release page), nobody anonymous.
+	if code, _ := call(t, "GET", base+"/api/addons/agent/linux/amd64", nil); code != 401 {
+		t.Errorf("agent download anonymous: %d", code)
+	}
+	for who, tok := range map[string]string{"member": m1, "another household's member": m2, "superuser": root} {
+		if code, out := call(t, "GET", base+"/api/addons/agent/linux/amd64", nil, bearer(tok)...); code != 409 {
+			t.Errorf("agent download as %s: %d %v", who, code, out)
+		}
+	}
+
 	// Sign-out: the pairer or a household admin; nobody else.
 	signOut := func(id, tok string) int {
 		h := []string{}

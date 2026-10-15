@@ -1100,6 +1100,22 @@ default chat node and the Add-ons label, and grants nothing. Known limits: NAT a
 address (ambiguous), and a stale address from an agent that moved can match another computer
 behind the same address until that agent heartbeats again.
 
+**The verified agent download (installers plan item 3.1, 2026-10-14).** `GET
+/api/addons/agent/{os}/{arch}` (user tier; `linux`/`darwin`/`windows` × `amd64`/`arm64`, the
+builds a release carries; the installer by default, the `.deb` on Linux and
+`Jarvis-Automation-Agent-Setup-<v>.exe` on Windows, `?format=archive` for the tarball or zip; macOS
+gets the archive until its dmg ships) hands a
+browser the agent for **jarvisd's own version**: jarvisd looks up that release, fetches
+`SHA256SUMS` and its signature first, verifies them with the keys compiled into jarvisd and checks
+that the trusted comment names the tag (`update.FetchSigned`, the updater's check), then fetches
+the file and checks its SHA-256 from the list. Only then does a byte go to the browser. The copy
+is kept under `<home>/updates/agent/<tag>/<file>/` with its signed list, verified again from disk
+on every request (an altered copy is fetched again, never served), and the other tags' copies are
+dropped. One fetch runs at a time and finishes even if the browser gives up. Refused (unsigned,
+wrong key, comment for another tag, hash mismatch) or unreachable: 502 with the reason and the
+release page; a dev build: 409 with the release page; an unknown platform: 404. It fetches only
+when someone asks, so `updates.enabled` (the background check) doesn't gate it.
+
 **The settings file (installers plan item 1.6, 2026-10-13).** The choices a user makes once are
 no longer only `run` flags: `<user config dir>/jarvis-agent/agent.json` (0600, next to
 `node.json`), e.g. `{"voice": true, "island": true, "confirm_dictation": "submit"}`. Keys:

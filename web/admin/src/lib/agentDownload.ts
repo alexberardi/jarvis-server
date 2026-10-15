@@ -66,8 +66,17 @@ export const AGENT_TARGETS: AgentTarget[] = [
     id: 'windows-amd64',
     os: 'windows',
     arch: 'amd64',
-    label: 'Windows (x64)',
+    label: 'Windows (x64, installer)',
     short: 'Windows',
+    hint: 'Open the installer. Windows may say "Windows protected your PC": it shows this for any installer without a paid code-signing certificate. Click More info, then Run anyway.',
+  },
+  {
+    id: 'windows-amd64-archive',
+    os: 'windows',
+    arch: 'amd64',
+    format: 'archive',
+    label: 'Windows (x64, .zip)',
+    short: 'Windows (.zip)',
     hint: 'Unpack the zip and open jarvis-agent.exe.',
   },
 ]

@@ -80,6 +80,7 @@ type Module struct {
 	doc       doctorCache
 	upd       updateCache
 	apply     applyState
+	agentDL   agentDownloads
 }
 
 func (m *Module) Name() string      { return "admin" }

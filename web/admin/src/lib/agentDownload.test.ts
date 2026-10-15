@@ -13,6 +13,7 @@ describe('agent download targets (install plan 3.1)', () => {
     expect(agentDownloadPath(agentTarget('linux-arm64-archive')!)).toBe('/api/addons/agent/linux/arm64?format=archive')
     expect(agentDownloadPath(agentTarget('darwin-arm64')!)).toBe('/api/addons/agent/darwin/arm64')
     expect(agentDownloadPath(agentTarget('windows-amd64')!)).toBe('/api/addons/agent/windows/amd64')
+    expect(agentDownloadPath(agentTarget('windows-amd64-archive')!)).toBe('/api/addons/agent/windows/amd64?format=archive')
     // Only the builds a release carries (release.yml).
     expect(new Set(AGENT_TARGETS.map((t) => `${t.os}-${t.arch}`))).toEqual(
       new Set(['linux-amd64', 'linux-arm64', 'darwin-arm64', 'windows-amd64']),
