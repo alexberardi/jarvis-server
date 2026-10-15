@@ -1427,6 +1427,14 @@ terminal in front. So a typing call that names no app within 15 s of a launch
 (`LaunchImplicit`) is for the launched app: it waits for that window the same way. Later, no
 app means the window in front again. The description also says to pass the opened app's name.
 
+**Opening without typing (2026-10-15).** On the dev server, "Open Omerite and type hello there."
+ran only `desktop_open`, then told the user to type "hello there" themselves. "Open Neovim and
+Typeello World." (heard for "type hello world") opened "Typeello World" as an app. Now
+`desktop_open`'s description says "open X and type Y" is two steps and Y is never a target, even
+with "type" run into Y's first word. `desktop_type_text` leaves that "type" out of the text. And
+command-center nudges a reply that ends with no typing call, quoting Y
+(`[UNFINISHED_REQUEST]`, [cc 02 §3.2](../cc/02-tool-loop.md)).
+
 `jarvis-agent try TOOL ARGS TOOL ARGS …` runs several calls in one process, as a model's chain
 would (`try desktop_open '{"target":"Oh my right"}' desktop_type_text '{"app":"Omerite",…}'`).
 

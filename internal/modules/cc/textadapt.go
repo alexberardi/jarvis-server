@@ -55,6 +55,9 @@ func isGenericFiller(msg string) bool {
 // forceGate is the shape-and-keyword half of the force-tools guard.
 func forceGate(conv *conversation, utterance string, replies []string) bool {
 	pool := tf.CollectToolKeywords(objectsAsAny(conv.commands), toolsAsAny(conv.tools))
+	if len(pool) > 0 { // an empty pool skips the keyword half; the memory words mustn't narrow it
+		pool = append(pool, offeredServerKeywords(conv)...)
+	}
 	return tf.ForceToolsGate(utterance, replies, pool)
 }
 

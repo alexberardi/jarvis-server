@@ -195,7 +195,7 @@ func ResponseClaimsAction(text string) bool {
 		return false
 	}
 	return claimIntentRE.search(s) || claimDoneRE.search(s) || claimPassiveRE.search(s) || claimProgressRE.search(s) ||
-		claimGotRE.search(s)
+		claimGotRE.search(s) || claimsBeyondLegacy(s)
 }
 
 // IsMusicControlShaped is is_music_control_shaped: a music-control verb opening the utterance

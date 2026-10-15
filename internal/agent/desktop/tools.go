@@ -99,8 +99,9 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	winID := node.Param{Name: "window_id", Type: "string", Required: true,
 		Description: "Opaque window id exactly as returned by desktop_list_windows"}
 	t.tools = []tool{
-		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed app by name: \"open X\" or \"launch X\" on the computer. Pass the name as heard, even if it looks misspelled or unfamiliar: the computer matches near and sound-alike names itself (matched_app says which). If the result is ambiguous or not found, ask the user which of the candidates or suggestions they meant. The launch is not confirmed.",
-			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "A full http(s) URL, e.g. https://example.com, or an app's name as the user said it, e.g. Steam"}},
+		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed app by name: \"open X\" or \"launch X\" on the computer. Pass the name as heard, even if it looks misspelled or unfamiliar: the computer matches near and sound-alike names itself (matched_app says which). If the result is ambiguous or not found, ask the user which of the candidates or suggestions they meant. The launch is not confirmed. " +
+			"\"Open X and type Y\" (or write, jot down) is two steps: open X here, then call desktop_type_text with Y and app X. Y is never a target to open, even when speech ran \"type\" into its first word.",
+			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "A full http(s) URL, e.g. https://example.com, or an app's name as the user said it, e.g. Steam. Only the app or link, never the words to type after it"}},
 			Keywords: []string{"open", "launch", "start", "app", "browser", "website", "computer", "desktop"},
 			Examples: []node.Example{
 				{VoiceCommand: "open youtube on my computer", Params: map[string]any{"target": "https://www.youtube.com"}, Primary: true},

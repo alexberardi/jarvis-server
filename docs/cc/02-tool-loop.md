@@ -272,6 +272,26 @@ Every return path attaches "reasoning" (joined think blocks) when any were captu
 >   minute?" (16 s).
 > - "thanks" → "No problem, dev. Anything else you need?" on both.
 
+> **Changed 2026-10-15 (follow-through guards, Go only; `followthrough.go`).** On a desktop agent
+> the must-call guard never armed for "Remember that my parking spot is B12.": the agent's tools
+> all carry keywords, so the keyword gate applied, and no keyword said "remember" (the memory
+> server tools carried none). Offered memory tools now add their own keywords (`remember`, `note`,
+> `don't forget`, `keep in mind`; `forget`) when the node's pool is non-empty, and a polite memory
+> request ("can you remember that…") counts as a command, not a question. A short clause ending
+> in a bare participle ("Parking spot B12 noted.") is a claim unless negated. After the must-call
+> guard and `[TOOL_FAILED_CLAIM]`, a prose reply gets at most one of these nudges per engine run
+> (scrubbed like the other nags):
+> - `[NOT_SAVED]`: a memory request, `remember` offered but not called this turn, and the reply
+>   accepts ("Got it, …", "…noted", "I'll keep that in mind"; a question back doesn't). This covers
+>   a spent must-call retry, or one answered with `recall`.
+> - `[NO_MEMORY_TOOL]`: the same with no `remember` offered: say plainly it can't be saved.
+> - `[RECALL_FIRST]`: a question about the speaker's own facts, `recall` offered, no tool run this
+>   turn, and the reply says it isn't stored ("Not in my memory", "I don't have your gate code").
+> - `[UNFINISHED_REQUEST]`: "open X and type Y" (or write / jot down / then type, or "type" run
+>   into the next word, "Typeello World") with `desktop_type_text` offered and not called this
+>   turn. The nudge quotes Y, the user's own words, never an app name.
+> Pipeline (`desktop_dev_pass.json`, the dev desktop agent's real tools, qwen3.5-9b): see PR #159.
+
 ### 3.3 Client vs server split
 
 `ToolExecutor.execute_tool_calls` (`core/tool_executor.py:96-171`) splits calls by name:

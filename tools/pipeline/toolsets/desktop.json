@@ -18,12 +18,12 @@
       }
     ],
     "function": {
-      "description": "On the user's computer, open a web link in the default browser, or launch an installed app by name: \"open X\" or \"launch X\" on the computer. Pass the name as heard, even if it looks misspelled or unfamiliar: the computer matches near and sound-alike names itself (matched_app says which). If the result is ambiguous or not found, ask the user which of the candidates or suggestions they meant. The launch is not confirmed.",
+      "description": "On the user's computer, open a web link in the default browser, or launch an installed app by name: \"open X\" or \"launch X\" on the computer. Pass the name as heard, even if it looks misspelled or unfamiliar: the computer matches near and sound-alike names itself (matched_app says which). If the result is ambiguous or not found, ask the user which of the candidates or suggestions they meant. The launch is not confirmed. \"Open X and type Y\" (or write, jot down) is two steps: open X here, then call desktop_type_text with Y and app X. Y is never a target to open, even when speech ran \"type\" into its first word.",
       "name": "desktop_open",
       "parameters": {
         "properties": {
           "target": {
-            "description": "A full http(s) URL, e.g. https://example.com, or an app's name as the user said it, e.g. Steam",
+            "description": "A full http(s) URL, e.g. https://example.com, or an app's name as the user said it, e.g. Steam. Only the app or link, never the words to type after it",
             "type": "string"
           }
         },
@@ -273,7 +273,7 @@
       }
     ],
     "function": {
-      "description": "Type text on the user's computer, as if typed on the keyboard: into the window in front, or into the app the user names (it is brought to the front first). Use it for dictation: \"type hello world\" → {text: \"hello world\"}; \"tell claude to run the tests\" → {app: \"claude\", text: \"run the tests\", submit: true}; \"write thanks in slack\" → {app: \"slack\", text: \"thanks\"}. Put only the words to type in text, never the instruction around them, and keep the user's wording. After opening an app with desktop_open, pass the same name in app. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" or \"… and press enter\"; false for \"type …\", \"write …\", \"put … in\". For a field on a web page use browser_fill instead. If the result says awaiting_confirmation, nothing was typed yet: ask the user the question.",
+      "description": "Type text on the user's computer, as if typed on the keyboard: into the window in front, or into the app the user names (it is brought to the front first). Use it for dictation: \"type hello world\" → {text: \"hello world\"}; \"tell claude to run the tests\" → {app: \"claude\", text: \"run the tests\", submit: true}; \"write thanks in slack\" → {app: \"slack\", text: \"thanks\"}. Put only the words to type in text, never the instruction around them, and keep the user's wording; if speech ran \"type\" into the first word (\"typehello there\"), leave \"type\" out. After opening an app with desktop_open, pass the same name in app. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" or \"… and press enter\"; false for \"type …\", \"write …\", \"put … in\". For a field on a web page use browser_fill instead. If the result says awaiting_confirmation, nothing was typed yet: ask the user the question.",
       "name": "desktop_type_text",
       "parameters": {
         "properties": {
