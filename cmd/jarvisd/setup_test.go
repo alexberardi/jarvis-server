@@ -117,6 +117,21 @@ func TestSetupLinkURLAndQR(t *testing.T) {
 	if err := printSetupLink(cfg, &out, opt); err != nil || out.String() != "http://127.0.0.1:7710/\n" {
 		t.Fatalf("set up, --url: %v %q", err, out.String())
 	}
+	// Set up, --qr: the admin URL as a code too (#105: "the URL" is the setup link while a
+	// token exists, the admin URL afterwards), so a phone can open the admin after setup.
+	qrOpt, _ := parseSetupLinkArgs([]string{"--qr"}, io.Discard)
+	out.Reset()
+	if err := printSetupLink(cfg, &out, qrOpt); err != nil {
+		t.Fatal(err)
+	}
+	var admin bytes.Buffer
+	if err := qrterm.Write(&admin, "http://127.0.0.1:7710/", qrterm.DarkOnLight); err != nil {
+		t.Fatal(err)
+	}
+	if s := out.String(); !strings.HasPrefix(s, "jarvisd is set up. The admin is at http://127.0.0.1:7710/\n") ||
+		!strings.Contains(s, "scan this with a phone") || !strings.HasSuffix(s, admin.String()) {
+		t.Fatalf("set up, --qr:\n%s", s)
+	}
 	os.WriteFile(filepath.Join(home, "setup-token"), []byte("abc123\n"), 0o600)
 	out.Reset()
 	if err := printSetupLink(cfg, &out, opt); err != nil || out.String() != "http://127.0.0.1:7710/setup#token=abc123\n" {
