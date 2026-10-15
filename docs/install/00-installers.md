@@ -1317,7 +1317,7 @@ spelling tags a static Go binary can't satisfy, and prerm's fallback `systemctl`
   that user's `uninstall --purge`. The same script passes in an `ubuntu:24.04` container booting
   systemd (`--privileged`, its own network namespace). Not covered by CI: App Center/GNOME
   Software, the polkit dialog and a real browser opening (user sign-off, plan §5 phase 4).
-- **In the release** (PR #PRB): `release.yml`'s `package` job builds both packages for amd64 and
+- **In the release** (PR #163): `release.yml`'s `package` job builds both packages for amd64 and
   arm64 from the same linux binaries as the archives, before `SHA256SUMS` is written, so the one
   minisign signature covers them (`upgrade --verify-dir` checks them in `verify`). `verify`
   lintians them and, on the amd64 and arm64 runners, installs the server package with apt, checks
