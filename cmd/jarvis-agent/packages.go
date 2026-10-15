@@ -1,0 +1,46 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+	"runtime"
+	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/packages"
+	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+)
+
+// newPackages is the installed Pantry packages under root, served by live (DESIGN.md §6).
+// JARVIS_AGENT_UV runs that uv instead of downloading the pinned one; JARVIS_AGENT_SDK installs
+// that jarvis-command-sdk requirement instead of the pinned commit (a local checkout, say).
+func newPackages(root string, live *sidecar.Live, st sidecar.Storage, log *slog.Logger) *packages.Manager {
+	hc := &http.Client{Timeout: 5 * time.Minute}
+	return &packages.Manager{
+		Root: root,
+		Python: &packages.Python{Root: root, UV: os.Getenv("JARVIS_AGENT_UV"), SDK: os.Getenv("JARVIS_AGENT_SDK"),
+			HTTP: hc, Run: packages.ExecRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
+		HTTP:     hc,
+		GOOS:     runtime.GOOS,
+		Sidecars: packages.LiveSidecars{Live: live, Log: log, Storage: st},
+		Log:      log,
+	}
+}
+
+// wirePackages answers the app's package install, uninstall and revert requests, and lists
+// the installed packages in report_tools. Call it after wireNodeSettings (which sets Topics).
+func wirePackages(r *node.Runner, pm *packages.Manager, log *slog.Logger) {
+	if pm == nil {
+		return
+	}
+	q := &packages.Requests{NodeID: r.Creds.NodeID, Manager: pm, Log: log}
+	if r.Topics == nil {
+		r.Topics = map[string]func(context.Context, *node.CC, []byte){}
+	}
+	for _, topic := range packages.Topics {
+		r.Topics[topic] = func(ctx context.Context, cc *node.CC, payload []byte) { q.Handle(ctx, cc, topic, payload) }
+	}
+	r.Packages = pm.Report
+}

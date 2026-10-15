@@ -104,7 +104,11 @@ internal/agent/
   apps/               installed-app catalogue (per-OS scanners), name resolution, apps.json
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch
-  sidecar/            Python package sidecar spike (JSON lines over stdin/stdout)
+  sidecar/            the Python package sidecar (JSON lines over stdin/stdout); Live is the one
+                      in service, swapped on every package change
+  packages/           Pantry package install/update/revert/uninstall from the app (DESIGN.md §6):
+                      the MQTT requests (requests.go), download (archive.go), manifest checks,
+                      uv + venv (python.go), pkgs/ and the sidecar swap (manager.go)
   browser/            browser control: native-messaging host relay (nativehost.go), the agent's
                       socket + peer check (ipc.go), Hub of connected browsers (hub.go), the 9
                       browser_* tools (tools.go), host-manifest registration per OS/browser

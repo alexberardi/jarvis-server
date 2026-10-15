@@ -43,6 +43,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
@@ -507,6 +508,7 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("node settings: %w", err)
 	}
+	tf.pkgRoot = filepath.Join(filepath.Dir(path), "packages")
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -521,6 +523,7 @@ func run(ctx context.Context, args []string) error {
 	runner.Store(r)
 	r.Capabilities, r.Changed = heartbeatCaps(tools)
 	wireNodeSettings(r, st, tools, log)
+	wirePackages(r, tf.pkgs, log)
 	hd := openHat(hf, log)
 	defer hd.Close()
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
@@ -631,6 +634,10 @@ type toolFlags struct {
 	// origins is this agent's server, for the Jarvis page guard (jarvispage.go): build makes
 	// it, the caller fills it once it knows the server.
 	origins *jarvispage.Origins
+	// pkgRoot, when the caller sets it, is where Pantry packages are installed: build starts
+	// the sidecar on them and leaves pkgs to answer the app's install requests.
+	pkgRoot string
+	pkgs    *packages.Manager
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -685,20 +692,30 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
-	if *f.py != "" && *f.cmdDir != "" {
-		var storage sidecar.Storage
-		if st != nil {
-			storage = st
-		}
+	// The package sidecar: the installed Pantry packages, or the spike's directory of modules.
+	live := &sidecar.Live{}
+	var storage sidecar.Storage
+	if st != nil {
+		storage = st
+	}
+	switch {
+	case *f.py != "" && *f.cmdDir != "":
 		sc, err := sidecar.Start(ctx, *f.py, *f.cmdDir, log, storage)
 		if err != nil {
 			closeAll()
 			return nil, nil, nil, fmt.Errorf("sidecar: %w", err)
 		}
-		stopBrowser := closeAll
-		closeAll = func() { _ = sc.Close(); stopBrowser() }
-		tools = append(tools, sc)
+		live.Swap(sc)
+	case f.pkgRoot != "":
+		f.pkgs = newPackages(f.pkgRoot, live, storage, log)
+		if err := f.pkgs.Boot(ctx); err != nil {
+			// The agent still serves its own tools; the app shows the packages as not loaded.
+			log.Warn("packages: not loaded", "err", err)
+		}
 	}
+	stopBrowser := closeAll
+	closeAll = func() { _ = live.Close(); stopBrowser() }
+	tools = append(tools, live)
 	// Last, so a sidecar's own get_current_time (Python's, with its city table) wins when present.
 	tools = append(tools, &clock.Tool{})
 	return h, tools, closeAll, nil

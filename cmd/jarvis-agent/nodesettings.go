@@ -16,7 +16,7 @@ func settingsCommands(tools node.Multi) func(ctx context.Context) []nodesettings
 	return func(ctx context.Context) []nodesettings.Command {
 		pkgs := map[string]nodesettings.Command{}
 		for _, t := range tools {
-			if sc, ok := t.(*sidecar.Sidecar); ok {
+			if sc, ok := t.(*sidecar.Live); ok {
 				for _, c := range sc.Commands() {
 					pkgs[c.Name] = c
 				}
@@ -39,7 +39,7 @@ func settingsCommands(tools node.Multi) func(ctx context.Context) []nodesettings
 // sidecar's packages (the agent's built-in tools keep no JarvisStorage records).
 func dataCommands(tools node.Multi) nodesettings.DataCommands {
 	for _, t := range tools {
-		if sc, ok := t.(*sidecar.Sidecar); ok {
+		if sc, ok := t.(*sidecar.Live); ok {
 			return sc
 		}
 	}

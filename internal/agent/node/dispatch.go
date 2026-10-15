@@ -22,6 +22,9 @@ type Dispatcher struct {
 	Log   *slog.Logger
 	// CallTimeout bounds one tool call (CC itself waits ~30 s for a result).
 	CallTimeout time.Duration
+	// Packages, if set, is report_tools' installed_packages (the app's Update / Revert / health
+	// on a package card); nil reports none.
+	Packages func() []map[string]any
 }
 
 // command is one element of the published array: [{"command": verb, "details": {...}}].
@@ -69,7 +72,13 @@ func (d *Dispatcher) Report(ctx context.Context) map[string]any {
 		clientTools = append(clientTools, t.ClientTool)
 		commands = append(commands, t.Command)
 	}
-	return map[string]any{"client_tools": clientTools, "available_commands": commands, "installed_packages": []any{}}
+	pkgs := []map[string]any{}
+	if d.Packages != nil {
+		if p := d.Packages(); p != nil {
+			pkgs = p
+		}
+	}
+	return map[string]any{"client_tools": clientTools, "available_commands": commands, "installed_packages": pkgs}
 }
 
 func (d *Dispatcher) reportTools(ctx context.Context, det map[string]any) {

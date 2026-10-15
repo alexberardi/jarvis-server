@@ -43,6 +43,8 @@ type Runner struct {
 	// OnMQTTConnect, if set, runs on its own goroutine after every MQTT (re)connect: the
 	// backstop for nudges sent while the node had no session.
 	OnMQTTConnect func(ctx context.Context, cc *CC)
+	// Packages, if set, is report_tools' installed_packages.
+	Packages func() []map[string]any
 	// NeedsK2, if set, is asked for each heartbeat's needs_k2.
 	NeedsK2 func() bool
 	// OnBeat, if set, gets jarvisd's answer to every heartbeat that went through (a pending
@@ -190,7 +192,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	d := &Dispatcher{CC: cc, Tools: r.Tools, Log: r.Log}
+	d := &Dispatcher{CC: cc, Tools: r.Tools, Log: r.Log, Packages: r.Packages}
 	topic := "jarvis/nodes/" + r.Creds.NodeID + "/commands"
 	opts := mqtt.NewClientOptions().
 		AddBroker(broker).

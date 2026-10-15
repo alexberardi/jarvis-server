@@ -1,0 +1,1 @@
+WORD = "hello from alpha"
