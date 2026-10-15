@@ -73,15 +73,19 @@ const (
 )
 
 var appParam = node.Param{Name: "app", Type: "string",
-	Description: "The app or window to switch to first, in the user's words: \"claude\", \"slack\", \"the terminal\", " +
-		"or words from its title. Leave it out to use whatever window is in front."}
+	Description: "The app or window to switch to first, exactly as the user said it: \"claude\", \"slack\", \"the terminal\", " +
+		"\"quillpad\", or words from its title. Always pass it when the user names one (\"into X\", \"in X\", \"to X\"), " +
+		"even a name you don't recognise. Leave it out only when they name none, to use whatever window is in front."}
 
 func typeSpec() node.Spec {
 	return node.Spec{Name: ToolType,
 		Description: "Type text on the user's computer, as if typed on the keyboard: into the window in front, or into the app " +
-			"the user names (it is brought to the front first). Use it for dictation: \"type hello world\" → {text: \"hello world\"}; " +
+			"the user names (it is brought to the front first). When the user names an app or window (\"into X\", \"in X\", " +
+			"\"to X\"), always set app to that name exactly as they said it, even one you don't recognise: never drop it, and " +
+			"never leave it in text. Use it for dictation: \"type hello world\" → {text: \"hello world\"}; " +
 			"\"tell claude to run the tests\" → {app: \"claude\", text: \"run the tests\", submit: true}; \"write thanks in slack\" → " +
-			"{app: \"slack\", text: \"thanks\"}. Put only the words to type in text, never the instruction around them, and " +
+			"{app: \"slack\", text: \"thanks\"}; \"type into quillpad that the build is green\" → {app: \"quillpad\", text: " +
+			"\"the build is green\"}. Put only the words to type in text, never the instruction around them, and " +
 			"keep the user's wording; if speech ran \"type\" into the first word (\"typehello there\"), leave \"type\" out. After opening an app with desktop_open, pass the same name in app. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" " +
 			"or \"… and press enter\"; false for \"type …\", \"write …\", \"put … in\". For a field on a web page use " +
 			"browser_fill instead. If the result says awaiting_confirmation, nothing was typed yet: ask the user the question.",
@@ -95,6 +99,7 @@ func typeSpec() node.Spec {
 			{VoiceCommand: "tell claude to test def", Params: map[string]any{"app": "claude", "text": "test def", "submit": true}, Primary: true},
 			{VoiceCommand: "type hello world", Params: map[string]any{"text": "hello world"}},
 			{VoiceCommand: "write see you at five in slack", Params: map[string]any{"app": "slack", "text": "see you at five"}},
+			{VoiceCommand: "type into quillpad that the build is green", Params: map[string]any{"app": "quillpad", "text": "the build is green"}},
 			{VoiceCommand: "type git status in the terminal and press enter", Params: map[string]any{"app": "terminal", "text": "git status", "submit": true}},
 		},
 		Risky: true,

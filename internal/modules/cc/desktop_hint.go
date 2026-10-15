@@ -116,7 +116,8 @@ const desktopTypeTool = "desktop_type_text"
 
 // SameDeviceHint is the line added to such a turn.
 const SameDeviceHint = "[web: the user is writing this in the Jarvis web page on this computer, which is the window in front. " +
-	"For desktop_type_text and desktop_press_key, an app the user names goes in app (\"type hi into slack\" → app: \"slack\"); " +
+	"For desktop_type_text and desktop_press_key, an app the user names always goes in app, exactly as they said it, even " +
+	"one you don't recognise (\"type hi into slack\" → app: \"slack\"; \"type into quillpad that …\" → app: \"quillpad\"); " +
 	"with none named, leave app out and the text goes to the window they used before this page.]"
 
 // sameDeviceHint is SameDeviceHint for a same-device web chat with the typing tool, or "".
