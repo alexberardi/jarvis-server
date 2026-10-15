@@ -350,9 +350,64 @@ func TestRefreshRotationGraceAndReuse(t *testing.T) {
 	e.expect(401, "Invalid refresh token", "POST", "/auth/refresh", map[string]any{"refresh_token": next}, nil)
 
 	e.expect(401, "Invalid refresh token", "POST", "/auth/refresh", map[string]any{"refresh_token": "garbage"}, nil)
-	// Expiry (14 days).
-	*clock = clock.Add(15 * 24 * time.Hour)
+	// Expiry (30 days).
+	*clock = clock.Add(31 * 24 * time.Hour)
 	e.expect(401, "Refresh token expired", "POST", "/auth/refresh", map[string]any{"refresh_token": r3["refresh_token"]}, nil)
+}
+
+// A session stays signed in for 30 days without use, and every refresh restarts the clock.
+func TestRefreshLastsThirtyDays(t *testing.T) {
+	clock := withClock(t, time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
+	e := newEnv(t)
+	u := e.register()
+	*clock = clock.Add(29 * 24 * time.Hour)
+	r := e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
+	*clock = clock.Add(29 * 24 * time.Hour)
+	r = e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": r["refresh_token"]}, nil)
+	*clock = clock.Add(30*24*time.Hour + time.Second)
+	e.expect(401, "Refresh token expired", "POST", "/auth/refresh", map[string]any{"refresh_token": r["refresh_token"]}, nil)
+}
+
+// Every rejected refresh logs why, so a sign-out can be traced from the server log.
+func TestRefreshRejectionsLogTheReason(t *testing.T) {
+	clock := withClock(t, time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
+	e := newEnv(t)
+	var logs bytes.Buffer
+	e.m.deps.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	reject := func(token, want, reason string) {
+		t.Helper()
+		logs.Reset()
+		e.expect(401, want, "POST", "/auth/refresh", map[string]any{"refresh_token": token}, nil)
+		if out := logs.String(); !strings.Contains(out, "msg=refresh_rejected") || !strings.Contains(out, "reason="+reason) {
+			t.Fatalf("want refresh_rejected reason=%s, got log %q", reason, out)
+		}
+		if strings.Contains(logs.String(), token) {
+			t.Fatal("the presented token was logged")
+		}
+	}
+	u := e.register()
+	reject("garbage", "Invalid refresh token", "unknown_token")
+
+	r1 := e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
+	*clock = clock.Add(time.Minute)
+	reject(u.refresh, "Invalid refresh token", "reused_after_grace")
+
+	r2 := e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": r1["refresh_token"]}, nil)
+	e.m.grace = newGraceCache() // "restart" inside the grace window
+	reject(r1["refresh_token"].(string), "Invalid refresh token", "grace_miss")
+
+	e.expect(204, "", "POST", "/auth/logout", map[string]any{"refresh_token": r2["refresh_token"]}, nil)
+	reject(r2["refresh_token"].(string), "Invalid refresh token", "revoked")
+
+	other := e.expect(200, "", "POST", "/auth/login", map[string]any{"email": u.email, "password": u.password}, nil)
+	*clock = clock.Add(31 * 24 * time.Hour)
+	reject(other["refresh_token"].(string), "Refresh token expired", "expired")
+
+	live := e.expect(200, "", "POST", "/auth/login", map[string]any{"email": u.email, "password": u.password}, nil)
+	if _, err := e.db.Write.Exec(`UPDATE auth_users SET is_active = 0`); err != nil {
+		t.Fatal(err)
+	}
+	reject(live["refresh_token"].(string), "Invalid refresh token", "user_inactive")
 }
 
 func TestRefreshRevokeFamilyOnReuse(t *testing.T) {
