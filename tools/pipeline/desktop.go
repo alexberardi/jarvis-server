@@ -93,36 +93,12 @@ func (d *Driver) remember(owner string, n *Node) {
 // removeOwner the member is a new one the primary invites, and removes once the agent is
 // paired (decision 2026-10-14: an owner who left the household no longer counts).
 func (d *Driver) pairDesktop(ctx context.Context, n *Node, removeOwner bool, statePath string) error {
-	var login struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := postJSON(ctx, d.Desktop.AuthURL+"/auth/login", nil,
-		map[string]string{"email": d.Desktop.Email, "password": d.Desktop.Password}, &login); err != nil {
+	primary, hh, err := d.primaryHousehold(ctx)
+	if err != nil {
 		return err
-	}
-	primary := map[string]string{"Authorization": "Bearer " + login.AccessToken}
-	var households []struct {
-		ID   string `json:"id"`
-		Role string `json:"role"`
-	}
-	if err := getJSON(ctx, d.Desktop.AuthURL+"/households", primary, &households); err != nil {
-		return err
-	}
-	hh := ""
-	for _, h := range households {
-		if hh == "" || h.Role == "admin" {
-			hh = h.ID
-		}
-		if h.Role == "admin" {
-			break
-		}
-	}
-	if hh == "" {
-		return errors.New("the primary user is in no household")
 	}
 	pairer, ownerID := primary, int64(0)
 	if removeOwner {
-		var err error
 		if pairer, ownerID, err = d.newMember(ctx, hh, primary); err != nil {
 			return err
 		}
@@ -170,6 +146,42 @@ func (d *Driver) pairDesktop(ctx context.Context, n *Node, removeOwner bool, sta
 		return err
 	}
 	return os.WriteFile(statePath, b, 0o600)
+}
+
+// primaryHousehold signs the primary user in and returns their bearer header and the
+// household they administer (else their first).
+func (d *Driver) primaryHousehold(ctx context.Context) (map[string]string, string, error) {
+	if d.Desktop == nil || d.Desktop.AuthURL == "" || d.Desktop.Email == "" {
+		return nil, "", errors.New("the sandbox exports no SBX_AUTH / SBX_EMAIL (scripts/sandbox up again)")
+	}
+	var login struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := postJSON(ctx, d.Desktop.AuthURL+"/auth/login", nil,
+		map[string]string{"email": d.Desktop.Email, "password": d.Desktop.Password}, &login); err != nil {
+		return nil, "", err
+	}
+	primary := map[string]string{"Authorization": "Bearer " + login.AccessToken}
+	var households []struct {
+		ID   string `json:"id"`
+		Role string `json:"role"`
+	}
+	if err := getJSON(ctx, d.Desktop.AuthURL+"/households", primary, &households); err != nil {
+		return nil, "", err
+	}
+	hh := ""
+	for _, h := range households {
+		if hh == "" || h.Role == "admin" {
+			hh = h.ID
+		}
+		if h.Role == "admin" {
+			break
+		}
+	}
+	if hh == "" {
+		return nil, "", errors.New("the primary user is in no household")
+	}
+	return primary, hh, nil
 }
 
 // newMember invites and registers a throwaway member of hh, returning its bearer header and id.

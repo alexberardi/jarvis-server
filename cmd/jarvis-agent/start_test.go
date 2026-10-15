@@ -102,10 +102,31 @@ func TestStartNotSetUpGoesToTheFirstRunPage(t *testing.T) {
 	if !slices.Contains(f.log, "first-run") || slices.ContainsFunc(f.log, func(s string) bool { return strings.HasPrefix(s, "spawn") }) {
 		t.Fatalf("did %q", f.log)
 	}
-	// At login, nothing to do and nothing to show.
+	// At login, no page: the login item's `run` waits for setup in its status icon
+	// (setupwait.go); without systemd starting it, the autostart entry spawns it.
 	f.log = nil
-	if err := f.starter(linuxEnv(t, "")).start(context.Background(), true); err != nil || slices.Contains(f.log, "first-run") {
+	e := linuxEnv(t, "")
+	if err := f.starter(e).start(context.Background(), true); err != nil || slices.Contains(f.log, "first-run") ||
+		!slices.Contains(f.log, "spawn "+e.Exe+" run") {
 		t.Fatal(err, f.log)
+	}
+}
+
+func TestInstallOnAComputerNotSetUpOpensTheSetupPage(t *testing.T) {
+	for _, c := range []struct {
+		noStart, filesOnly, enrolled bool
+		start, setup                 bool
+	}{
+		{enrolled: true, start: true},                   // set up: start it, as before
+		{enrolled: false, setup: true},                  // not set up: the page, which starts it after
+		{noStart: true, enrolled: false},                // --no-start: neither
+		{noStart: true, enrolled: true},                 //
+		{filesOnly: true, enrolled: false, start: true}, // --files-only: Plan starts nothing anyway
+	} {
+		start, setup := installStarts(c.noStart, c.filesOnly, c.enrolled)
+		if start != c.start || setup != c.setup {
+			t.Errorf("%+v: start %v setup %v", c, start, setup)
+		}
 	}
 }
 

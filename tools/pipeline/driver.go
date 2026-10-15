@@ -114,6 +114,9 @@ func (d *Driver) run(ctx context.Context, sc Scenario) ScenarioLog {
 		err = serr
 	}
 	home := sc.Home
+	if home == "" && sc.Node == "desktop" {
+		home = "none" // a desktop agent sends no devices (internal/agent/voice nodeContext)
+	}
 	if home != "" && home != "none" && sc.File != "" && (strings.ContainsRune(home, '/') || strings.HasSuffix(home, ".json")) && !filepath.IsAbs(home) {
 		home = filepath.Join(filepath.Dir(sc.File), home)
 	}
@@ -124,6 +127,9 @@ func (d *Driver) run(ctx context.Context, sc Scenario) ScenarioLog {
 	vocab, verr := scenarioVocabulary(d.Root, sc, spec)
 	if err == nil {
 		err = verr
+	}
+	if err == nil && sc.FreshMemories {
+		err = d.clearMemories(ctx)
 	}
 	if err == nil {
 		tz := sc.Timezone

@@ -13,6 +13,9 @@
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
 //	    exits 1 when any fails. --out writes each run's full log (model calls included) and,
 //	    for voiced turns, the audio.
+//	pipeline toolset desktop
+//	    print the desktop agent's client tools as its own toolsets render them (the source of
+//	    toolsets/desktop.json: pipeline toolset desktop > tools/pipeline/toolsets/desktop.json).
 //	pipeline tap [--listen ADDR] [--upstream URL] [--log FILE]
 //	    the LLM recording proxy scripts/sandbox starts in front of the installed jarvisd's LLM
 //	    API (:7704); JARVIS_TAP_APP_ID / JARVIS_TAP_APP_KEY are sent as its app credentials.
@@ -24,7 +27,9 @@
 //
 // --sandbox defaults to $JARVIS_SANDBOX, else "default"; the sandbox's sandbox.env supplies
 // command-center's URL and the seeded node's credentials, and its llm.jsonl the model calls.
-// TOOL SETS: node (a real Pi node's commands, the default), client, none, or a JSON file.
+// TOOL SETS: node (a real Pi node's commands, the default), client, desktop (the desktop agent's
+// tools, toolsets/desktop.json; the default for a "desktop" node, which also sends no devices),
+// none, or a JSON file.
 package main
 
 import (
@@ -67,7 +72,7 @@ func (e errFailed) Error() string { return fmt.Sprintf("%d failed", e.n) }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: pipeline say|run|tap ... (see the package doc)")
+		return errors.New("usage: pipeline say|run|tap|toolset ... (see the package doc)")
 	}
 	switch args[0] {
 	case "tap":
@@ -76,6 +81,16 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return runSay(ctx, args[1:], stdout)
 	case "run":
 		return runScenarios(ctx, args[1:], stdout)
+	case "toolset":
+		if len(args) != 2 || args[1] != "desktop" {
+			return errors.New("usage: pipeline toolset desktop")
+		}
+		b, err := RenderDesktopToolset()
+		if err != nil {
+			return err
+		}
+		_, err = stdout.Write(b)
+		return err
 	}
 	return fmt.Errorf("unknown command %q (say, run, tap)", args[0])
 }
@@ -178,7 +193,7 @@ func runTap(ctx context.Context, args []string) error {
 func runSay(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("say", flag.ContinueOnError)
 	sandbox := fs.String("sandbox", "", "sandbox name")
-	tools := fs.String("tools", "node", "tool set: node, client, none or a JSON file")
+	tools := fs.String("tools", "", "tool set: node, client, desktop, none or a JSON file (default node, or desktop with --node desktop)")
 	home := fs.String("home", "", `device payload: a tools/pipeline/homes name (default avery), "none", or a JSON file`)
 	vocab := fs.String("stt-vocabulary", "", `app names for whisper's prompt, as a desktop agent sends them ("Alacritty, Firefox, Omawrite"); default with the desktop tools or node: a typical agent's, "" none`)
 	speaker := fs.String("speaker", "primary", `who is speaking: "primary" (the seeded superuser), a user id, or "" (unidentified)`)

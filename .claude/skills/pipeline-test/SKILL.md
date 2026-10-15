@@ -78,6 +78,7 @@ each run's full log, model calls included. A file holds one scenario or an array
 - `args`: exact values on that call (numbers are compared after a JSON round trip).
   `args_match`: a regexp per arg. Both need `tool` or `server_tool`.
 - `any_tool`: one of these, node or server. `no_tool`: no node tool. `not_tool`: none of these.
+- `not_call`: no call of this tool has these args, e.g. `{"tool": "desktop_open", "args_match": {"target": "(?i)type"}}`.
 - `reply` / `not_reply`: regexps on the spoken reply. `stop`: the final stop_reason.
   `max_seconds`: an upper bound on the turn's time.
 
@@ -89,6 +90,8 @@ agent's, built from `tools/pipeline/toolsets/desktop.apps.json` by the agent's o
 (the "NeoVim as a follow-up" scenario is 0/3 without them, 3/3 with). Set your own string to
 override it, or `"stt_vocabulary": ""` to send none. `say` does the same: `--stt-vocabulary`
 overrides, `--stt-vocabulary ""` sends none.
+`"fresh_memories": true` deletes the primary's own memories before each run, so a memory scenario
+isn't answered from what an earlier run stored (it shows up in the prompt as a profile match).
 `"speaker"` (`primary`, a user id, or none) and `"home"` (a `tools/pipeline/homes` name, `none`, or a file) set who speaks and the device payload. `"node": "desktop"` (or `say --node desktop`) plays the turns as a desktop agent the primary signed in on (made once per sandbox, key in `.sandbox/<name>/desktop-node.json`), whose turns act as that owner with no voice match: leave `"speaker"` empty to test that. Add `"owner": "removed"` (or `say --owner removed`) for one whose owner left the household: a throwaway member pairs it and the primary removes them (key in `desktop-removed-owner-node.json`). `run` does not filter on
 them; `--filter` matches the name.
 
@@ -134,8 +137,12 @@ go run ./tools/pipeline run --sandbox voice --out /tmp/runs tools/pipeline/scena
   ready) is waited for up to 2 minutes.
 - TTS-to-STT is a clean signal: one synthetic voice, no room, no mic. A mishearing here is real;
   a clean transcript here does not prove a human voice is heard right.
-- `tools/pipeline/toolsets/desktop.json` is a copy of the desktop agent's open/type tools
-  (`internal/agent/desktop`, `internal/agent/dictate`) for `"tools": "../toolsets/desktop.json"`.
+- `tools/pipeline/toolsets/desktop.json` is the desktop agent's client tools as its own toolsets
+  render them (`go run ./tools/pipeline toolset desktop`; a test keeps the file current): apps,
+  volume, screen, typing, the browser extension's tools and the clock, with their descriptions,
+  examples and keywords, as a Linux agent with the extension connected sends them. The keywords
+  matter: the must-call guard only arms on an utterance matching one. `"node": "desktop"` uses it
+  (and no devices) unless the scenario sets `"tools"` / `"home"`; `--tools desktop` names it.
 - A real desktop agent also sends its app names as `node_context.stt_vocabulary`, and
   command-center puts them in whisper's prompt (DESIGN §14): without them "omawrite" is heard
   as "Omerite". Desktop scenarios send a typical agent's by default (§3); give one its own
