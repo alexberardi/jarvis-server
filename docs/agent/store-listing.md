@@ -113,9 +113,9 @@ way.
 The add-on already exists on AMO (`browser@jarvis.agent`, signed **unlisted**). Going public
 means submitting a **listed** version of the same add-on.
 
-1. **The version is already above the signed one:** `0.2.0` (2026-10-13, dictation's `fill`
-   and `click`). AMO refuses any version it has already signed, on either channel, and `0.1.0`
-   was signed unlisted. Submit 0.2.0 (not an older checkout) to both stores. The Chrome store will also need a version above the one it has
+1. **The version is already above the signed one:** `0.2.1` (0.2.0, 2026-10-13: dictation's `fill`
+   and `click`; 0.2.1, 2026-10-14: the toolbar popup with the agent download link, install plan 3.5). AMO refuses any version it has already signed, on either channel, and `0.1.0`
+   was signed unlisted. Submit 0.2.1 (not an older checkout) to both stores. The Chrome store will also need a version above the one it has
    for the next Chrome update, so this bump serves both.
 2. Build: `scripts/browser-ext-store-zip.sh firefox` → `dist/jarvis-browser-firefox-<version>.zip`.
 3. Developer Hub → My Add-ons → Jarvis Browser Control → **Upload New Version** → "On this
