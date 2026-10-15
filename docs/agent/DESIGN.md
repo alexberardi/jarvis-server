@@ -1886,6 +1886,11 @@ says `needs_k2: true` until it holds a key (then a beat goes out at once with `f
 no K2 at pairing or sign-in: the browser that approves a code or signs in has no K2, and the
 phone must hold the key to read the settings anyway, so **K2 delivery needs the phone**, as for
 a headless Pi. An admin opens the computer in the app's Nodes tab and taps Generate.
+Each sign-in gives the computer a new node id, so it is back to no key after every sign-out
+and sign-in. Until a key arrives the agent drops snapshot requests (it has nothing to seal them
+with; the Python node does the same). Every app screen that reads a snapshot must therefore
+check `needs_k2` first. The routine editor's command list didn't: it waited 30 s and said "Node
+did not respond in time" (jarvis-node-mobile #105 fixes it: it says the key is missing and offers to set one up).
 
 **What the agent does with it** (byte-compatible with the Python node; pinned by
 `testdata/k2_golden.json`, written by the Python node's own `encrypt_snapshot` and
