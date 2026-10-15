@@ -1,6 +1,6 @@
 # webapp 01: the admin opened to household members (jarvis-web's replacement)
 
-Status: **P1 built** (gateway tiers, 2026-10-13, PR #98); **P2 built** (SPA auth and shell, 2026-10-13); **P3 built** (Chat page, 2026-10-13); **P4 built** (Add-ons, minimal, 2026-10-13); **P5 built** (Inbox, 2026-10-13); P6–P7 not started. Code: `internal/modules/admin` (gateway + BFF) and
+Status: **P1 built** (gateway tiers, 2026-10-13, PR #98); **P2 built** (SPA auth and shell, 2026-10-13); **P3 built** (Chat page, 2026-10-13); **P4 built** (Add-ons, minimal, 2026-10-13); **P5 built** (Inbox, 2026-10-13); **P6 built**; **P7 references retired** (2026-10-15; archiving the repo is the user's call). Code: `internal/modules/admin` (gateway + BFF) and
 `web/admin` (React SPA). Legacy client: `jarvis-web` (Next.js, read-only here). Related:
 [admin/00-inventory.md](../admin/00-inventory.md) (how the admin gateway was built, AD1 / I8),
 [install/01-no-cli-plan.md](../install/01-no-cli-plan.md) §3.2 (the Add-ons page, owned there),
@@ -459,6 +459,19 @@ optional `client: {surface: "web", same_device}` (`chatClient` in `lib/chatNode.
 chosen node is `/api/addons/this-device`). cc adds `SameDeviceHint` to such a turn when
 `desktop_type_text` is offered. Tests: dictate (fake Hyprland/sway/history backends), jarvispage,
 browser, cc `TestSameDeviceHint`, vitest. A nested headless sway check is recorded in DESIGN §14 Evidence.
+
+**P7 as built (references only, 2026-10-15).** Root repo
+[jarvis#38](https://github.com/alexberardi/jarvis/pull/38): out of the `./jarvis` CLI (registry,
+coords, env block, banner), `clone-repos.sh`, `tag-release.sh`, `android-reverse`, the
+CLAUDE.md/README tables (now pointing here), and the install-e2e default module lists and tunnel
+ports; the installer lane's health row stays, presence-gated. jarvis-docs
+[#180](https://github.com/alexberardi/jarvis-docs/pull/180) (merged, not deployed): diagrams and
+tables, getting-started step 5 now "Chat from a browser" on 7710. jarvis-web
+[#35](https://github.com/alexberardi/jarvis-web/pull/35) (merged): README deprecation notice; its
+image build and `trigger-install-e2e` workflows are disabled (`gh workflow enable` restores them),
+CI stays on. jarvis-installer: #69 already deletes `LandingPage.tsx` and its "or use the web chat"
+line; a commit there says members chat on 7710. The live site keeps the old copy until #69 merges.
+Left to the user: archiving the jarvis-web repo, the prod tunnel hostname for 7722 (runbook §4.11).
 
 **The user verifies:** log in as a non-superuser member on a desktop and a phone. Chat picks this
 computer's agent, then (with it stopped) the primary node. Admin URLs give the notice, and the server
