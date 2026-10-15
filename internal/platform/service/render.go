@@ -124,6 +124,8 @@ var launchdTmpl = template.Must(template.New("plist").Funcs(template.FuncMap{"x"
 <dict>
 	<key>Label</key>
 	<string>{{x .Label}}</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>{{x .App}}</string>
 	<key>UserName</key>
 	<string>{{x .UserName}}</string>
 	<key>ProgramArguments</key>
@@ -171,8 +173,8 @@ func RenderLaunchd(p Plist) ([]byte, error) {
 	var b bytes.Buffer
 	err := launchdTmpl.Execute(&b, struct {
 		Plist
-		Label, Log string
-	}{p, LaunchdLabel, path.Join(p.Home, "logs", LogFile)})
+		Label, App, Log string
+	}{p, LaunchdLabel, ServerAppID, path.Join(p.Home, "logs", LogFile)})
 	return b.Bytes(), err
 }
 
@@ -199,6 +201,8 @@ var launchdHelperTmpl = template.Must(template.New("helper").Funcs(template.Func
 <dict>
 	<key>Label</key>
 	<string>{{x .Label}}</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>{{x .App}}</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>{{x .Binary}}</string>
@@ -239,8 +243,8 @@ func RenderLaunchdHelper(p HelperPlist) ([]byte, error) {
 	var b bytes.Buffer
 	err := launchdHelperTmpl.Execute(&b, struct {
 		HelperPlist
-		Label, Requests, Log string
-	}{p, HelperLabel, path.Join(p.Home, "updates", "requests"), HelperLog})
+		Label, App, Requests, Log string
+	}{p, HelperLabel, ServerAppID, path.Join(p.Home, "updates", "requests"), HelperLog})
 	return b.Bytes(), err
 }
 

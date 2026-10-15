@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist of "Jarvis Automation Server.app" (01-no-cli-plan item 2.2), the macOS server
+  installer. Its executable is cmd/jarvis-server-app, a launcher; the server is the release's own
+  signed jarvisd beside it (Contents/MacOS/jarvisd), which `install-from-app` copies to
+  /usr/local/bin. The LaunchDaemons name this bundle id in AssociatedBundleIdentifiers, so
+  "Allow in the Background" shows this app's name. __VERSION__ is the tag without its v.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>net.jarvisautomation.server</string>
+    <key>CFBundleName</key>
+    <!-- At most 15 characters here; the display name is the full one. -->
+    <string>Jarvis Server</string>
+    <key>CFBundleDisplayName</key>
+    <string>Jarvis Automation Server</string>
+    <key>CFBundleExecutable</key>
+    <string>jarvis-server-app</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__VERSION__</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>

@@ -5,6 +5,8 @@
 <dict>
 	<key>Label</key>
 	<string>net.jarvisautomation.jarvisd-updater</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>net.jarvisautomation.server</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/local/bin/jarvisd</string>
