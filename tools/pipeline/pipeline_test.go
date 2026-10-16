@@ -645,3 +645,33 @@ func TestDriverFreshMemories(t *testing.T) {
 		t.Fatal("ran without clearing")
 	}
 }
+
+// A text-path model (Qwen3 providers) writes its tool calls as <tool_call> blocks in the
+// content; command-center parses and runs them, so the harness must count them too.
+func TestTapReplyCallsFromText(t *testing.T) {
+	cases := []struct {
+		name  string
+		reply TapReply
+		want  []string
+	}{
+		{"structured", TapReply{ToolCalls: []ToolCall{{Function: FunctionCall{Name: "recall", Arguments: "{}"}}}}, []string{"recall"}},
+		{"text block", TapReply{Content: "<tool_call>\n{\"name\": \"remember\", \"arguments\": {\"content\": \"Parking spot is B12\", \"key\": \"parking_spot\"}}\n</tool_call>"}, []string{"remember"}},
+		{"think then two blocks", TapReply{Content: "<think>x</think><tool_call>{\"name\": \"desktop_open\", \"arguments\": {\"target\": \"omawrite\"}}</tool_call><tool_call>{\"name\": \"desktop_type\", \"arguments\": {\"text\": \"hi\"}}</tool_call>"}, []string{"desktop_open", "desktop_type"}},
+		{"plain text", TapReply{Content: "Got it, saved. <exchange_complete/>"}, nil},
+		{"bad json", TapReply{Content: "<tool_call>{nope</tool_call>"}, nil},
+	}
+	for _, c := range cases {
+		var got []string
+		for _, tc := range c.reply.Calls() {
+			got = append(got, tc.Function.Name)
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s: calls %v, want %v", c.name, got, c.want)
+		}
+	}
+	args := TapReply{Content: "<tool_call>{\"name\": \"remember\", \"arguments\": {\"key\": \"parking_spot\"}}</tool_call>"}.Calls()[0].Function.Arguments
+	var m map[string]any
+	if err := json.Unmarshal([]byte(args), &m); err != nil || m["key"] != "parking_spot" {
+		t.Errorf("arguments %q, want the call's arguments as a JSON object", args)
+	}
+}

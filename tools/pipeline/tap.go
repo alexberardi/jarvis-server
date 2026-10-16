@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 )
 
 // The LLM tap: an OpenAI-compatible pass-through between a sandbox's llm.live remote endpoint
@@ -36,6 +38,24 @@ type TapReply struct {
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	Finish    string     `json:"finish_reason,omitempty"`
 	Raw       string     `json:"raw,omitempty"` // only when the body could not be parsed
+}
+
+// Calls are the tool calls in the reply: the structured ones, or, when there are none, the
+// <tool_call> blocks a text-path model (the Qwen3 providers) writes in its content, parsed the
+// way command-center parses them before it runs them.
+func (r TapReply) Calls() []ToolCall {
+	if len(r.ToolCalls) > 0 || !strings.Contains(r.Content, "<tool_call>") {
+		return r.ToolCalls
+	}
+	out, ok := parse.ParseQwen3(r.Content, true)
+	if !ok {
+		out = r.Content
+	}
+	var calls []ToolCall
+	for _, c := range parse.ParseToolCalls(out).ToolCalls {
+		calls = append(calls, ToolCall{ID: c.ID, Type: "function", Function: FunctionCall{Name: c.Function.Name, Arguments: c.Function.Arguments}})
+	}
+	return calls
 }
 
 // Tap is the proxy. Upstream returns the base URL (scheme://host:port) per request. Header is
