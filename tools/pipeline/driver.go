@@ -175,7 +175,7 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		tl.Seconds = tl.End.Sub(start).Seconds()
 		tl.LLM = readTap(d.TapLog, mark)
 		for _, e := range tl.LLM {
-			for _, c := range e.Reply.ToolCalls {
+			for _, c := range e.Reply.Calls() {
 				if !slices.Contains(nodeNames, c.Function.Name) {
 					tl.ServerCalls = append(tl.ServerCalls, CallLog{Name: c.Function.Name, Args: c.Args()})
 				}
