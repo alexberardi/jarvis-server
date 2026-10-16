@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import NodesPage from './NodesPage'
@@ -15,6 +15,7 @@ beforeEach(() => {
         data: [
           { node_id: 'pc1', name: 'Office-PC', household_id: 'hh1', is_active: true, services: [] },
           { node_id: 'pi1', name: 'Kitchen', household_id: 'hh1', is_active: true, services: [] },
+          { node_id: 'old1', name: 'Old-PC', household_id: 'hh1', is_active: false, services: [] },
         ],
       }
     if (url === '/api/cc/api/v0/admin/nodes')
@@ -41,5 +42,20 @@ describe('NodesPage', () => {
     expect(screen.getByLabelText('Computer')).toBeInTheDocument()
     // The Pi reports no extension row.
     expect(screen.getAllByText(/Browser extension:/)).toHaveLength(1)
+  })
+
+  it('hides signed-out registrations until asked', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NodesPage />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('Office-PC')).toBeInTheDocument()
+    expect(screen.queryByText('Old-PC')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 signed-out node' }))
+    expect(screen.getByText('Old-PC')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide signed-out nodes' }))
+    expect(screen.queryByText('Old-PC')).not.toBeInTheDocument()
   })
 })
