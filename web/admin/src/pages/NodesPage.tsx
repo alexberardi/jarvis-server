@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { RefreshCw, Cpu, Laptop, Zap, ZapOff, Wifi, WifiOff } from 'lucide-react'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
@@ -96,11 +96,13 @@ function NodeGrid({ nodes, liveness }: { nodes: AdminNode[]; liveness: Map<strin
 /**
  * NodesPage lists every household and node on the install (S13: the operator manages them all,
  * through auth's /superuser views), with cc's liveness when available. Train Adapter is gone
- * with LoRA (PLAN §7).
+ * with LoRA (PLAN §7). A signed-out registration (auth keeps it inactive after Sign out, Delete,
+ * or a computer enrolling again) is hidden until the operator asks for it.
  */
 export default function NodesPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useNodesView()
   const { data: liveness } = useNodeLiveness()
+  const [showInactive, setShowInactive] = useState(false)
 
   const liveMap = useMemo(() => new Map((liveness ?? []).map((n) => [n.node_id, n])), [liveness])
 
@@ -110,6 +112,7 @@ export default function NodesPage() {
     const byHousehold = new Map<string, AdminNode[]>()
     const orphans: AdminNode[] = []
     for (const n of data.nodes) {
+      if (!n.is_active && !showInactive) continue
       if (n.household_id && known.has(n.household_id)) {
         byHousehold.set(n.household_id, [...(byHousehold.get(n.household_id) ?? []), n])
       } else {
@@ -117,7 +120,8 @@ export default function NodesPage() {
       }
     }
     return { byHousehold, orphans }
-  }, [data])
+  }, [data, showInactive])
+  const inactiveCount = useMemo(() => (data?.nodes ?? []).filter((n) => !n.is_active).length, [data])
 
   if (isLoading) {
     return (
@@ -159,6 +163,17 @@ export default function NodesPage() {
       </div>
 
       <PendingPairings />
+
+      {inactiveCount > 0 && (
+        <button
+          onClick={() => setShowInactive((v) => !v)}
+          className="text-xs text-[var(--color-text-muted)] underline hover:text-[var(--color-text)]"
+        >
+          {showInactive
+            ? 'Hide signed-out nodes'
+            : `Show ${inactiveCount} signed-out node${inactiveCount === 1 ? '' : 's'}`}
+        </button>
+      )}
 
       {households.length === 0 && grouped.orphans.length === 0 && (
         <div className="py-12 text-center">
