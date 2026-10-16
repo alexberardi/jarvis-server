@@ -6,6 +6,8 @@
 //   - POST /v1/chat/completions (non-stream, and stream:true with Jarvis frames {"delta"},
 //     {"done":true,...}, {"error"}, {"cancelled":true}; no [DONE]), POST
 //     /v1/chat/completions/cancel/{request_id}, POST /v1/embeddings: app credentials
+//   - POST /openai/v1/chat/completions: the same, but stream:true answers standard
+//     chat.completion.chunk lines and [DONE] for stock OpenAI clients (opt-in): app credentials
 //   - GET /v1/models, /v1/engine, /v1/adapters/date-keys, /health, /v1/health: no auth
 //   - POST /internal/queue/enqueue: app credentials; jobs run on the durable queue and call back
 //   - /settings: the platform settings router
@@ -177,6 +179,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 		BackgroundParallel: m.BackgroundParallel, DB: deps.DB, Queue: deps.Queue})
 
 	mux.HandleFunc("POST /v1/chat/completions", m.app(m.handleChat))
+	mux.HandleFunc("POST /openai/v1/chat/completions", m.app(m.handleOpenAIChat))
 	mux.HandleFunc("POST /v1/chat/completions/cancel/{request_id}", m.app(m.handleCancel))
 	mux.HandleFunc("POST /v1/embeddings", m.app(m.handleEmbeddings))
 	mux.HandleFunc("GET /v1/models", m.handleModels)

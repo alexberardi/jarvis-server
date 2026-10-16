@@ -92,7 +92,13 @@ type chatCompletionJSON struct {
 	DateKeys []string         `json:"date_keys"`
 }
 
-func (m *Module) handleChat(w http.ResponseWriter, r *http.Request) {
+func (m *Module) handleChat(w http.ResponseWriter, r *http.Request) { m.chat(w, r, false) }
+
+// handleOpenAIChat is /openai/v1/chat/completions: the same request, but stream:true answers
+// the standard chat.completion.chunk stream (openai_stream.go) for stock OpenAI clients.
+func (m *Module) handleOpenAIChat(w http.ResponseWriter, r *http.Request) { m.chat(w, r, true) }
+
+func (m *Module) chat(w http.ResponseWriter, r *http.Request, standard bool) {
 	body, ok := readJSONBody(w, r)
 	if !ok {
 		return
@@ -109,7 +115,11 @@ func (m *Module) handleChat(w http.ResponseWriter, r *http.Request) {
 	in.Req.RequestID = rid
 	svc := m.Service()
 	if in.Stream {
-		m.serveStream(w, r, in.Req, rid)
+		encode := legacyFrames
+		if standard {
+			encode = newChunkEncoder(in.Req.Label, includeUsage(body)).encode
+		}
+		m.serveStream(w, r, in.Req, rid, encode)
 		return
 	}
 	resp, err := svc.Chat(r.Context(), in.Req)
@@ -177,9 +187,23 @@ func frameJSON(f Frame) string {
 	return pyjson.Dumps(o, true)
 }
 
-// serveStream answers stream:true. Failures found before generation (label not ready, images)
+func legacyFrames(f Frame) []string { return []string{frameJSON(f)} }
+
+// includeUsage reads stream_options.include_usage leniently: a missing or invalid value is
+// false, never a 422 (the standard route only; the legacy route ignores stream_options).
+func includeUsage(o *pyjson.Object) bool {
+	v, _ := field(o, "stream_options")
+	so, ok := v.(*pyjson.Object)
+	if !ok {
+		return false
+	}
+	b := (&checker{}).optBool(so, "include_usage", nil)
+	return b != nil && *b
+}
+
+// serveStream answers stream:true, writing each payload encode gives as "data: <p>\n\n". Failures found before generation (label not ready, images)
 // are real error statuses (D8); after the 200 every failure is an {"error"} frame.
-func (m *Module) serveStream(w http.ResponseWriter, r *http.Request, req ChatRequest, rid string) {
+func (m *Module) serveStream(w http.ResponseWriter, r *http.Request, req ChatRequest, rid string, encode func(Frame) []string) {
 	frames, err := m.Service().Stream(r.Context(), req)
 	if err != nil {
 		writeAPIError(w, asAPIError(err))
@@ -196,11 +220,18 @@ func (m *Module) serveStream(w http.ResponseWriter, r *http.Request, req ChatReq
 	if flusher != nil {
 		flusher.Flush()
 	}
+	broken := false
 	for f := range frames {
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", frameJSON(f)); err != nil {
+		if broken {
 			continue // drain; the stream's context ends with the request
 		}
-		if flusher != nil {
+		for _, p := range encode(f) {
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", p); err != nil {
+				broken = true
+				break
+			}
+		}
+		if flusher != nil && !broken {
 			flusher.Flush()
 		}
 	}

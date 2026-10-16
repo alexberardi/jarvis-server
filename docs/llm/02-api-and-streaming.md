@@ -27,6 +27,7 @@ Inside jarvisd, CC and OCR call the llm module through Go (§11). They no longer
 | Method | Path | Auth | Live callers (non-test) | Prod use (3 days) |
 |---|---|---|---|---|
 | POST | `/v1/chat/completions` | app | CC `LLMProxyClient` (`jarvis-command-center/app/core/llm_proxy_client.py:86-300`, about 25 call sites), recipes (`jarvis_recipes/app/services/llm_client.py:366,485,611,725,862`, `url_parsing/extractors/llm.py:166`), OCR (`jarvis-ocr-service/app/provider_manager.py:220`, `providers/llm_proxy_provider.py:133,191`), TTS (`jarvis-tts/app/main.py:234`) | 524 requests |
+| POST | `/openai/v1/chat/completions` | app | Go-only addition (2026-10-16): stock OpenAI clients (OpenCode, the AI SDK, the openai SDKs) with `baseURL …/openai/v1`. §3.2a | – |
 | POST | `/v1/chat/completions/cancel/{request_id}` | app | No caller on disk. The commit `2b42986` says phone-gateway in-call turns use the stream (the gateway repo is not on disk). | 0 |
 | POST | `/v1/embeddings` | app | CC memory: `remember_tool.py:130`, `recall_tool.py:169`, `api/memories.py:384`, `agent_context_service.py:144`, `memory_service.py:187`, `memory_extraction_service.py:288` | 0 |
 | GET | `/v1/models` | none | none outside tests and admin's status | 2 |
@@ -157,6 +158,29 @@ Inside jarvisd, CC and OCR call the llm module through Go (§11). They no longer
 - **Registry.** Streams register `request_id → handle` in `_active_streams` (`model_service.py:457-458,615-634`). A new stream with an id that is already active **supersedes** the old one: the old stream is aborted and the new one takes the id.
 - **Granularity.** Abort lands at the next token boundary, via the producer thread with `gen.close()` (`:461-511`). Prompt prefill can't be interrupted.
 - **Client disconnect** tears down both hops deterministically (`services/streaming.py`, `chat_routes.py:325-337`).
+
+### 3.2a `POST /openai/v1/chat/completions`: opt-in standard OpenAI streaming
+
+**Go-only.** The legacy stream (§3.2) is frozen, so stock OpenAI clients cannot read it. This route takes the same body, auth (app credentials), validation and request id as `/v1/chat/completions`, and non-stream answers are identical (§3.1). Only `stream: true` differs. Point a client at `baseURL = http://<host>:7704/openai/v1`. Decision: `docs/decisions/2026-10-16-opt-in-openai-standard-streaming.md`.
+
+**Headers** are the same as §3.2, including `X-Request-Id`. Failures found before the stream opens (validation, label not ready, images) are the same HTTP errors as on the legacy route.
+
+**Chunks.** Each line is `data: <json>\n\n`. Every chunk is `{"id":"chatcmpl-<8 hex>","object":"chat.completion.chunk","created":<unix>,"model":"live|background","choices":[{"index":0,"delta":{…},"finish_reason":null}]}`, with the same `id` and `created` across one stream. The encoding is plain `encoding/json` (not `pyjson`).
+
+| Chunk | When |
+|---|---|
+| `delta: {"role":"assistant","content":""}` | First, once (also for a reply that is only tool calls) |
+| `delta: {"content":"<text>"}` | Each content piece, as it arrives. The full text is not repeated at the end. |
+| `delta: {"tool_calls":[{"index":i,"id","type":"function","function":{"name","arguments"}}]}` | One chunk per call, whole, after the content. Calls arrive merged from upstream, so arguments are never split. A missing id becomes `call_<12 hex>`; a missing name is `""`. |
+| `delta: {}`, `finish_reason: "stop\|length\|tool_calls"` | The final choice chunk |
+| `{"choices":[],"usage":{"prompt_tokens","completion_tokens","total_tokens"}}` | Only with `stream_options.include_usage: true`, after the final choice chunk, as OpenAI sends it. All earlier chunks then carry `"usage": null`; without the option no chunk has a `usage` key. |
+| `[DONE]` | Last, on success only |
+| `{"error":{"message":"<message>","type":"server_error"}}` | A failure after the 200 (the legacy `{"error"}` cases). The stream then ends **without `[DONE]`**. |
+| `{"error":{"message":"Request cancelled","type":"cancelled"}}` | After a cancel. Ends without `[DONE]`, so a client never mistakes a cut-off reply for a finished one. |
+
+- **`stream_options.include_usage`** is read leniently: absent, null or not a boolean means false. It is never a 422, and the legacy route ignores it.
+- **Cancel** is `POST /v1/chat/completions/cancel/{request_id}` (§3.3), for either route. Supersede and client disconnect work as in §3.2.
+- **Not served under `/openai/v1`:** models, embeddings and cancel. Use the `/v1` routes.
 
 ### 3.3 `POST /v1/chat/completions/cancel/{request_id}`
 

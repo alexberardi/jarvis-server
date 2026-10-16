@@ -266,7 +266,7 @@ func TestValidation(t *testing.T) {
 
 func TestAppAuth(t *testing.T) {
 	e := setup(t)
-	for _, p := range []string{"/v1/chat/completions", "/v1/chat/completions/cancel/x", "/v1/embeddings", "/internal/queue/enqueue"} {
+	for _, p := range []string{"/v1/chat/completions", "/openai/v1/chat/completions", "/v1/chat/completions/cancel/x", "/v1/embeddings", "/internal/queue/enqueue"} {
 		if r := e.do("POST", p, map[string]any{}, nil); r.status != 401 || r.json(t)["detail"] != "Missing app credentials" {
 			t.Errorf("%s no creds: %d %s", p, r.status, r.body)
 		}
