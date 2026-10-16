@@ -97,25 +97,29 @@ json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 # The installed jarvisd's LLM API, reached with an app client of its own (created once in its
 # admin, Connections → App clients). Kept outside the repo so every worktree shares it:
 #   INSTALLED_LLM_URL=http://127.0.0.1:7704     (optional; the default)
+#   INSTALLED_LLM_LABEL=live                    (optional; live or background: which of its
+#                                                chat labels the sandbox's live label calls)
 #   INSTALLED_APP_ID=claude-harness
 #   INSTALLED_APP_KEY=...
 CREDS=${JARVIS_HARNESS_ENV:-$HOME/.config/jarvis-harness/installed.env}
 load_creds() {
-  INSTALLED_LLM_URL=http://127.0.0.1:7704 INSTALLED_APP_ID= INSTALLED_APP_KEY=
+  INSTALLED_LLM_URL=http://127.0.0.1:7704 INSTALLED_LLM_LABEL=live INSTALLED_APP_ID= INSTALLED_APP_KEY=
   # shellcheck disable=SC1090
   [ -f "$CREDS" ] && . "$CREDS"
+  case $INSTALLED_LLM_LABEL in live | background) ;; *) die "INSTALLED_LLM_LABEL must be live or background, not '$INSTALLED_LLM_LABEL'" ;; esac
   [ -n "$INSTALLED_APP_ID" ] && [ -n "$INSTALLED_APP_KEY" ]
 }
 
-# installed_model prints the installed live model's id, window and vision flag, from its
-# unauthenticated /v1/models.
+# installed_model prints the id, window and vision flag of the model behind the installed
+# jarvisd's $INSTALLED_LLM_LABEL, from its unauthenticated /v1/models. That lists live, then
+# background, with one entry when both labels share an engine, so background is the last one.
 installed_model() {
   curl -sf -m 5 "$INSTALLED_LLM_URL/v1/models" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)["data"]
 if d:
-    m = d[0]
-    print(m["id"], m.get("context_length") or 0, "true" if m.get("supports_images") else "false")'
+    m = d[-1] if sys.argv[1] == "background" else d[0]
+    print(m["id"], m.get("context_length") or 0, "true" if m.get("supports_images") else "false")' "${INSTALLED_LLM_LABEL:-live}"
 }
 
 pick_offset() {
@@ -158,15 +162,15 @@ point_llm() {
     return
   fi
   local model
-  model=$(installed_model) || { set_setting "$llm" llm.live.engine '"off"'; say "llm: off. $INSTALLED_LLM_URL/v1/models lists no live model (is the installed jarvisd up?)"; return; }
+  model=$(installed_model) || { set_setting "$llm" llm.live.engine '"off"'; say "llm: off. $INSTALLED_LLM_URL/v1/models lists no model (is the installed jarvisd up?)"; return; }
   read -r alias ctx vision <<<"$model"
   # Through the tap (tools/pipeline), which logs every call to llm.jsonl and adds the app
-  # credentials, to the installed jarvisd's own LLM API: its live label, its GPU engine, its
+  # credentials, to the installed jarvisd's own LLM API: its $INSTALLED_LLM_LABEL label, its GPU engine, its
   # chat template and system-message folding (so folding is off here).
   set_setting "$llm" llm.live.engine '"remote"'
   set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$(port 7799)/v1\""
   set_setting "$llm" llm.live.remote_api '"openai"'
-  set_setting "$llm" llm.live.remote_model '"live"'
+  set_setting "$llm" llm.live.remote_model "\"$INSTALLED_LLM_LABEL\""
   set_setting "$llm" llm.live.context "$ctx"
   set_setting "$llm" llm.live.remote_vision "$vision"
   set_setting "$llm" llm.live.fold_system_messages '"off"'
@@ -188,7 +192,7 @@ for e in json.load(open(sys.argv[1])):
   else
     say "llm: $alias is not in the catalog; set llm.prompt_provider by hand"
   fi
-  say "llm: tap :$(port 7799) → installed jarvisd $INSTALLED_LLM_URL (live = $alias); calls logged to $DIR/llm.jsonl"
+  say "llm: tap :$(port 7799) → installed jarvisd $INSTALLED_LLM_URL ($INSTALLED_LLM_LABEL = $alias); calls logged to $DIR/llm.jsonl"
 }
 
 # Voice models live in one cache shared by every worktree and sandbox; the sandbox's settings
@@ -400,7 +404,7 @@ cmd_status() {
     echo "$NAME: not created"
   fi
   if load_creds; then c="app client $INSTALLED_APP_ID"; else c="no app client in $CREDS"; fi
-  if m=$(installed_model); then echo "installed jarvisd LLM: $INSTALLED_LLM_URL, live = ${m%% *} ($c)"; else echo "installed jarvisd LLM: $INSTALLED_LLM_URL not answering ($c)"; fi
+  if m=$(installed_model); then echo "installed jarvisd LLM: $INSTALLED_LLM_URL, $INSTALLED_LLM_LABEL = ${m%% *} ($c)"; else echo "installed jarvisd LLM: $INSTALLED_LLM_URL not answering ($c)"; fi
   gpu_report
 }
 
