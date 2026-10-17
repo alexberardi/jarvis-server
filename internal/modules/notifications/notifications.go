@@ -90,7 +90,8 @@ func (k KeysVerifier) VerifyUser(_ context.Context, token string) (authn.User, e
 
 // Module is the notifications module.
 type Module struct {
-	// Auth validates app-to-app callers (ValidateApp).
+	// Auth validates app-to-app callers (ValidateApp) and checks a user token's household
+	// membership on every inbox call (HouseholdRole).
 	Auth authn.Authority
 	// Users verifies mobile users' bearer tokens.
 	Users UserVerifier

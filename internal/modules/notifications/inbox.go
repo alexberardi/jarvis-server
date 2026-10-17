@@ -241,9 +241,21 @@ func (m *Module) handleUpdateInbox(w http.ResponseWriter, r *http.Request) {
 
 // --- HTTP: mobile ---
 
-func needHousehold(w http.ResponseWriter, u authn.User) bool {
+// needHousehold checks the token names a household and the user is still a member of it: the
+// claim outlives a removal until the token expires, and the member-removed purge leaves the
+// household-wide items. Not a member is 403 (cc's D5 wording); a failed lookup is a 500.
+func (m *Module) needHousehold(w http.ResponseWriter, r *http.Request, u authn.User) bool {
 	if u.HouseholdID == "" {
 		httpx.Error(w, http.StatusBadRequest, "No household_id in token")
+		return false
+	}
+	_, member, err := m.Auth.HouseholdRole(r.Context(), u.ID, u.HouseholdID)
+	if err != nil {
+		m.internalError(w, err)
+		return false
+	}
+	if !member {
+		httpx.Error(w, http.StatusForbidden, "User is not a member of this household")
 		return false
 	}
 	return true
@@ -305,7 +317,7 @@ func (m *Module) handleListInbox(w http.ResponseWriter, r *http.Request, u authn
 		httpx.ValidationError(w, errs...)
 		return
 	}
-	if !needHousehold(w, u) {
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	if c, ok := lastQuery(r, "category"); ok {
@@ -336,7 +348,7 @@ func (m *Module) handleListInbox(w http.ResponseWriter, r *http.Request, u authn
 }
 
 func (m *Module) handleUnreadCount(w http.ResponseWriter, r *http.Request, u authn.User) {
-	if !needHousehold(w, u) {
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	var n int
@@ -368,14 +380,14 @@ func (m *Module) markRead(ctx context.Context, id string, u authn.User) (InboxIt
 
 // handleGetInbox returns one item and marks it read (legacy auto-mark on open).
 func (m *Module) handleGetInbox(w http.ResponseWriter, r *http.Request, u authn.User) {
-	if !needHousehold(w, u) {
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	m.writeMarked(w, r, u)
 }
 
 func (m *Module) handleMarkRead(w http.ResponseWriter, r *http.Request, u authn.User) {
-	if !needHousehold(w, u) {
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	m.writeMarked(w, r, u)
@@ -395,7 +407,7 @@ func (m *Module) writeMarked(w http.ResponseWriter, r *http.Request, u authn.Use
 }
 
 func (m *Module) handleDeleteInbox(w http.ResponseWriter, r *http.Request, u authn.User) {
-	if !needHousehold(w, u) {
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	res, err := m.deps.DB.Write.ExecContext(r.Context(), `DELETE FROM notifications_inbox_items WHERE id = ? AND `+visible,
@@ -422,7 +434,7 @@ func (m *Module) bulk(w http.ResponseWriter, r *http.Request, u authn.User, stmt
 	if !o.done(w) {
 		return
 	}
-	if !needHousehold(w, u) {
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	var n int64
