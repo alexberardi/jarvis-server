@@ -173,6 +173,7 @@ func usage(w io.Writer) {
            (settings come from the config file, see config below; flags given here win)
            [--creds PATH] [--config PATH] [--allow-open-any] [--no-browser]
            [--confirm-dictation off|submit|all]   ask before typing/clicking sends anything
+           (default: submit)
            [--sidecar-python PY --sidecar-commands DIR]
            [--no-overlay] [--no-tray]   no on-screen island / no status icon
            [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4] [--wake-models DIR]
@@ -652,8 +653,8 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 	return &toolFlags{
 		anyOpen:   fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)"),
 		noBrowser: fs.Bool("no-browser", false, "don't serve the browser extension (no browser_* tools)"),
-		confirm: fs.String("confirm-dictation", dictate.ConfirmOff,
-			"ask the user before dictation acts: off, submit (before Enter, a click, a submitting fill) or all"),
+		confirm: fs.String("confirm-dictation", dictate.ConfirmSubmit,
+			"ask the user before dictation acts: off, submit (before Enter, a click, a submitting fill; the default) or all"),
 		py:     fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)"),
 		cmdDir: fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)"),
 	}
@@ -884,6 +885,8 @@ func try(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Off on purpose: this command runs the one call typed on its command line, with no model
+	// in the loop to be steered and nobody to answer a question.
 	dt, err := dictationTools(h, dictate.ConfirmOff, nil)
 	if err != nil {
 		return err

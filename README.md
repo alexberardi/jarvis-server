@@ -176,8 +176,9 @@ virtual-keyboard protocol itself), and on X11 neither (XTEST and EWMH are built 
 control needs no `wmctrl`/`xdotool` either). On GNOME and KDE (Wayland) it types through the
 desktop portal once you allow it: run `jarvis-agent dictation allow` and accept the dialog (asked
 once). macOS needs the Accessibility grant. Typing into a *named* app works on Hyprland, sway, X11,
-macOS and Windows (on GNOME/KDE, click into the app first). `jarvis-agent status` says what works; `run --confirm-dictation submit` makes Jarvis ask
-"Send … to Claude?" before anything is sent. Typing presses keys, as you would: in a terminal app
+macOS and Windows (on GNOME/KDE, click into the app first). `jarvis-agent status` says what works. By default Jarvis asks
+"Send … to Claude?" before anything is sent (Enter, a click, a submitting fill); `run --confirm-dictation off`
+turns that off, `all` asks before every keystroke too. Typing presses keys, as you would: in a terminal app
 with key bindings (Neovim/Vim in normal mode, `less`, `htop`) they run as commands, so switch it to
 insert mode first (DESIGN §14, "Safety summary").
 

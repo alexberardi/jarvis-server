@@ -816,6 +816,14 @@ func TestConfirmAllGatesKeys(t *testing.T) {
 	if _, err := ParseConfirmMode("sometimes"); err == nil {
 		t.Error("bad mode accepted")
 	}
+	// Unset means submit (#117: a page the model read can't make it press Enter unasked);
+	// off must be chosen.
+	if m, _ := ParseConfirmMode(""); m != ConfirmSubmit {
+		t.Errorf("default mode %q", m)
+	}
+	if m, _ := ParseConfirmMode("off"); m != ConfirmOff {
+		t.Errorf("off parsed as %q", m)
+	}
 }
 
 func TestWindowsInputs(t *testing.T) {

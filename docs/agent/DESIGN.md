@@ -1633,12 +1633,13 @@ The floor is `desktop_press_key`: Enter presses a dialog's default button and Es
 all three platforms, Tab / Shift+Tab move between buttons and Space presses the highlighted one.
 Clicking a native button by its label needs accessibility APIs (open question 6).
 
-### Confirmation (`--confirm-dictation off|submit|all`, default off)
+### Confirmation (`--confirm-dictation off|submit|all`, default submit)
 
 - **off:** nothing is asked; the island shows what is being typed, filled or clicked as it
   happens (same stance as closing windows by voice, §9.2).
-- **submit:** asks before anything is *sent*: `desktop_type_text` with `submit`, `browser_click`,
-  `browser_fill` with `submit`. Typing without Enter isn't asked (it can be deleted).
+- **submit (the default, since 2026-10-17):** asks before anything is *sent*: `desktop_type_text`
+  with `submit`, `browser_click`, `browser_fill` with `submit`. Typing without Enter isn't asked
+  (it can be deleted).
 - **all:** asks before every type, key, fill and click.
 
 A gated call does nothing and returns `status: awaiting_confirmation` with a `confirmation_id`
@@ -1895,9 +1896,13 @@ wrong as often as right, and a wrong guess types into the wrong place.
 
 ### Open questions (defaults chosen; the user reviews)
 
-1. **Confirmation default.** *Chosen:* `off`; the island shows what happens. *Alternative:*
-   `submit` by default, so "tell claude to …" asks "Send … to Claude?" every time. Recommend
-   keeping `off` and revisiting if a mishearing ever sends something.
+1. **Confirmation default.** *Chosen:* `submit` (**decided, user, 2026-10-17, #117**; it was
+   `off`). A page read with `browser_read_page` or a screen read with `desktop_read_screen` is
+   fenced as untrusted, but that is advice to the model, not a control: such text could steer it
+   into typing into a terminal and pressing Enter. So nothing is sent without the user's yes
+   unless they set `off`. The cost is one "Send … to Claude?" per send. A server-side gate
+   (confirm any `is_risky` call in a turn that already read untrusted content) is a separate
+   item.
 2. **Enforcing that the user really answered.** `desktop_confirm` trusts the model to pass the
    user's words. *Recommend:* if confirmation becomes the default, let command-center mint the
    confirmation (a `validation-response` carries the answer to the agent directly, so the model

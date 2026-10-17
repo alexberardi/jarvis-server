@@ -10,17 +10,18 @@ import (
 
 // Confirmation modes (--confirm-dictation).
 const (
-	ConfirmOff    = "off"    // never ask (the default)
-	ConfirmSubmit = "submit" // ask before anything is sent: Enter after typing, a browser click, a fill that submits
+	ConfirmOff    = "off"    // never ask
+	ConfirmSubmit = "submit" // ask before anything is sent: Enter after typing, a browser click, a fill that submits (the default)
 	ConfirmAll    = "all"    // ask before every typing, key press, fill or click
 )
 
-// ParseConfirmMode reads --confirm-dictation.
+// ParseConfirmMode reads --confirm-dictation. Unset is submit: page or screen text the model
+// read can steer it, so nothing is sent without the user's yes unless they turned that off.
 func ParseConfirmMode(s string) (string, error) {
 	switch m := strings.ToLower(strings.TrimSpace(s)); m {
-	case "", ConfirmOff:
-		return ConfirmOff, nil
-	case ConfirmSubmit, ConfirmAll:
+	case "":
+		return ConfirmSubmit, nil
+	case ConfirmOff, ConfirmSubmit, ConfirmAll:
 		return m, nil
 	}
 	return "", fmt.Errorf("--confirm-dictation must be off, submit or all (got %q)", s)
