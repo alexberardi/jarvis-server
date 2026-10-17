@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 )
 
 // Legacy listener names and their default ports (PLAN §3.1). jarvisd keeps every old port so
@@ -52,6 +54,34 @@ type Config struct {
 	// MDNSInterfaces, when set, names the LAN interfaces to advertise on and take the setup
 	// link's address from, instead of picking them automatically (netaddr.LAN).
 	MDNSInterfaces []string
+	// Env is what cmd/jarvisd wires into the modules from the environment.
+	Env Env
+}
+
+// Env holds the modules' bootstrap values from the environment: secrets, dev switches and the
+// MQTT broker's addresses. Runtime settings live in the settings DB.
+type Env struct {
+	ConfigAdminToken  string // JARVIS_CONFIG_ADMIN_TOKEN
+	MDNS              bool   // JARVIS_MDNS: advertise on mDNS unless "0"
+	AdminAPIKey       string // ADMIN_API_KEY (notifications and cc)
+	RelayHouseholdJWT string // RELAY_HOUSEHOLD_JWT
+	DevSpeakerHints   bool   // JARVIS_DEV_SPEAKER_HINTS=1
+	// MQTTAddr and MQTTWSAddr are JARVIS_MQTT_ADDR / JARVIS_MQTT_WS_ADDR when set (even to "",
+	// which disables that listener), else the broker's defaults moved by JARVIS_PORT_OFFSET.
+	MQTTAddr           string
+	MQTTWSAddr         string
+	MQTTAllowAnonymous bool   // JARVIS_MQTT_ALLOW_ANONYMOUS=1
+	AuthAdminToken     string // JARVIS_AUTH_ADMIN_TOKEN
+	AuthSecretKey      string // AUTH_SECRET_KEY: the legacy HS256 secret
+	AdminUIDir         string // JARVIS_ADMIN_UI_DIR
+	// AppID and AppKey are jarvisd's legacy app credentials (JARVIS_APP_ID, JARVIS_APP_KEY).
+	AppID, AppKey string
+	// OSXAPIURL and OSXAPIKey reach Apple Vision on a Mac (JARVIS_OSX_API_URL, JARVIS_OSX_API_KEY).
+	OSXAPIURL, OSXAPIKey string
+	// The telephony bootstrap: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER (cc's
+	// phone.EnvTwilio* names), JARVIS_PHONE_PUBLIC_URL and JARVIS_PHONE_PUBLIC_WSS_URL.
+	TwilioAccountSID, TwilioAuthToken, TwilioFromNumber string
+	PhonePublicURL, PhonePublicWSSURL                   string
 }
 
 // DBPath is the single SQLite database file.
@@ -75,11 +105,14 @@ func (c Config) Addr(listener string) (string, error) {
 //	JARVIS_PORT_<LISTENER>   per-listener port override, e.g. JARVIS_PORT_COMMAND_CENTER=17703;
 //	                         taken as is, without the offset
 //	JARVIS_MDNS_INTERFACES   comma-separated LAN interface names, e.g. "en0" or "eth0,wlan0"
+//
+// and the modules' bootstrap values (Env).
 func Load() (Config, error) {
-	return load(os.Getenv)
+	return load(os.LookupEnv)
 }
 
-func load(getenv func(string) string) (Config, error) {
+func load(lookup func(string) (string, bool)) (Config, error) {
+	getenv := func(k string) string { v, _ := lookup(k); return v }
 	c := Config{Home: getenv("JARVIS_HOME"), Host: getenv("JARVIS_HOST"), Ports: map[string]int{}}
 	if c.Home == "" {
 		h, err := os.UserHomeDir()
@@ -111,7 +144,40 @@ func load(getenv func(string) string) (Config, error) {
 			c.Ports[name] = p
 		}
 	}
+	c.Env = loadEnv(lookup, getenv, offset)
 	return c, nil
+}
+
+func loadEnv(lookup func(string) (string, bool), getenv func(string) string, offset int) Env {
+	// envOr keeps a set-but-empty value: "" disables the listener.
+	envOr := func(key, def string) string {
+		if v, ok := lookup(key); ok {
+			return v
+		}
+		return def
+	}
+	return Env{
+		ConfigAdminToken:   getenv("JARVIS_CONFIG_ADMIN_TOKEN"),
+		MDNS:               getenv("JARVIS_MDNS") != "0",
+		AdminAPIKey:        getenv("ADMIN_API_KEY"),
+		RelayHouseholdJWT:  getenv("RELAY_HOUSEHOLD_JWT"),
+		DevSpeakerHints:    getenv("JARVIS_DEV_SPEAKER_HINTS") == "1",
+		MQTTAddr:           envOr("JARVIS_MQTT_ADDR", ShiftAddr(mqtt.DefaultTCPAddr, offset)),
+		MQTTWSAddr:         envOr("JARVIS_MQTT_WS_ADDR", ShiftAddr(mqtt.DefaultWSAddr, offset)),
+		MQTTAllowAnonymous: getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
+		AuthAdminToken:     getenv("JARVIS_AUTH_ADMIN_TOKEN"),
+		AuthSecretKey:      getenv("AUTH_SECRET_KEY"),
+		AdminUIDir:         getenv("JARVIS_ADMIN_UI_DIR"),
+		AppID:              getenv("JARVIS_APP_ID"),
+		AppKey:             getenv("JARVIS_APP_KEY"),
+		OSXAPIURL:          getenv("JARVIS_OSX_API_URL"),
+		OSXAPIKey:          getenv("JARVIS_OSX_API_KEY"),
+		TwilioAccountSID:   getenv("TWILIO_ACCOUNT_SID"),
+		TwilioAuthToken:    getenv("TWILIO_AUTH_TOKEN"),
+		TwilioFromNumber:   getenv("TWILIO_FROM_NUMBER"),
+		PhonePublicURL:     getenv("JARVIS_PHONE_PUBLIC_URL"),
+		PhonePublicWSSURL:  getenv("JARVIS_PHONE_PUBLIC_WSS_URL"),
+	}
 }
 
 // maxPortOffset keeps every shifted default port, the MQTT broker's 9883 the highest, valid.

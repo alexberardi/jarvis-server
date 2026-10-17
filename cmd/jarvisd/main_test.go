@@ -16,6 +16,7 @@ import (
 	notifmod "github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	ocrmod "github.com/alexberardi/jarvis-server/internal/modules/ocr"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/module"
 )
 
 func TestRunCommands(t *testing.T) {
@@ -57,7 +58,7 @@ func TestDoctorPortsIncludeAdmin(t *testing.T) {
 
 // The admin BFF reaches every module it reads in process (A3, A4).
 func TestAdminWiring(t *testing.T) {
-	for _, m := range modules() {
+	for _, m := range testModules(t) {
 		a, ok := m.(*adminmod.Module)
 		if !ok {
 			continue
@@ -82,16 +83,26 @@ func TestAdminWiring(t *testing.T) {
 	t.Fatal("no admin module")
 }
 
+// testModules wires the modules from the test's environment, as serve does.
+func testModules(t *testing.T) []module.Module {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return modules(cfg.Env)
+}
+
 func TestMQTTAddrsFollowPortOffset(t *testing.T) {
 	t.Setenv("JARVIS_PORT_OFFSET", "10000")
-	if tcp, ws := mqttTCPAddr(), mqttWSAddr(); tcp != ":11884" || ws != ":19883" {
-		t.Fatalf("offset: tcp %q ws %q", tcp, ws)
+	if mqtt := testModules(t)[8].(*ccmod.Module).MQTT; mqtt.TCPAddr != ":11884" || mqtt.WSAddr != ":19883" {
+		t.Fatalf("offset: %+v", mqtt)
 	}
 	// An explicit address wins over the offset, and "" still disables the listener.
 	t.Setenv("JARVIS_MQTT_ADDR", "127.0.0.1:2000")
 	t.Setenv("JARVIS_MQTT_WS_ADDR", "")
-	if tcp, ws := mqttTCPAddr(), mqttWSAddr(); tcp != "127.0.0.1:2000" || ws != "" {
-		t.Fatalf("explicit: tcp %q ws %q", tcp, ws)
+	if mqtt := testModules(t)[8].(*ccmod.Module).MQTT; mqtt.TCPAddr != "127.0.0.1:2000" || mqtt.WSAddr != "" {
+		t.Fatalf("explicit: %+v", mqtt)
 	}
 }
 
@@ -104,12 +115,12 @@ func TestModulesWiring(t *testing.T) {
 		"JARVIS_MQTT_ADDR": "127.0.0.1:2000", "JARVIS_MQTT_WS_ADDR": "", "JARVIS_AUTH_ADMIN_TOKEN": "auth-tok",
 		"AUTH_SECRET_KEY": "hs256", "JARVIS_ADMIN_UI_DIR": "/ui", "JARVIS_APP_ID": "app-id", "JARVIS_APP_KEY": "app-key",
 		"JARVIS_OSX_API_URL": "http://mac:1", "JARVIS_OSX_API_KEY": "mac-key",
-		"TWILIO_ACCOUNT_SID": "sid", "TWILIO_AUTH_TOKEN": "twtok", "TWILIO_FROM_NUMBER": "+1555",
+		phone.EnvTwilioAccountSID: "sid", phone.EnvTwilioAuthToken: "twtok", phone.EnvTwilioFromNumber: "+1555",
 		"JARVIS_PHONE_PUBLIC_URL": "https://p", "JARVIS_PHONE_PUBLIC_WSS_URL": "wss://p",
 	} {
 		t.Setenv(k, v)
 	}
-	mods := modules()
+	mods := testModules(t)
 	var listeners []string
 	for _, m := range mods {
 		listeners = append(listeners, m.Listener())
