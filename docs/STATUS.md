@@ -65,6 +65,12 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   captures, the hero clip of the desktop agent (user), and a photo of the Pi node with the HAT.
 - [ ] **Docs:** update jarvis-docs, which still describes the multi-service Python stack, for jarvisd: install, upgrade, `import-legacy`, and the Go node. Also re-check this repo's README and `docs/install/` against the released version.
 
+### Prompts as text (in parallel)
+
+Contract: [cc/prompt-contract.md](cc/prompt-contract.md) ([decision](decisions/2026-10-16-prompts-as-text.md)).
+
+- [ ] **Prompts as text:** contract ✓, renderer, built-ins, model traits, LLM settings, voice path, household storage, API, admin UI
+
 ### Autonomy (in parallel, worktrees): Custom Rules, watches, goals
 
 Plan: [autonomy/PLAN.md](autonomy/PLAN.md). Merges into `main` as each phase is ready, off by default. **Next: P0a.**
