@@ -1,6 +1,7 @@
 [
   {
     "name": "watches (needs watches.enabled): watch a price",
+    "speaker": "primary",
     "turns": [
       {"say": "let me know when the price on https://www.example.com/item drops below 100 dollars",
        "expect": {"server_tool": "create_watch", "args_match": {"url": "example\\.com", "op": "lt", "value": "100"},
@@ -9,6 +10,7 @@
   },
   {
     "name": "watches (needs watches.enabled): list",
+    "speaker": "primary",
     "turns": [
       {"say": "what are you watching for me?",
        "expect": {"server_tool": "list_watches", "not_reply": "(?i)not sure who|turned off"}}
@@ -16,6 +18,7 @@
   },
   {
     "name": "watches (needs watches.enabled): cancel",
+    "speaker": "primary",
     "turns": [
       {"say": "stop watching the example price",
        "expect": {"server_tool": "cancel_watch", "not_reply": "(?i)not sure who|turned off"}}
@@ -23,6 +26,7 @@
   },
   {
     "name": "watches (needs watches.enabled): signal",
+    "speaker": "primary",
     "turns": [
       {"say": "tell me when I leave home",
        "expect": {"server_tool": "create_watch", "args_match": {"signal_kind": "presence\\.left"},
