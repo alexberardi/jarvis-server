@@ -359,16 +359,23 @@ func runningVersion(ctx context.Context, url string) string {
 // portsHeld is the doctor's failed "ports" check with the default (or environment's) ports,
 // nil when jarvisd's ports are free or answer as jarvisd.
 func portsHeld(ctx context.Context) *doctor.Check {
-	cfg, err := config.Load()
-	if err != nil {
-		cfg = config.Config{Ports: config.DefaultPorts}
-	}
+	cfg := portsConfig()
 	for _, c := range doctor.Run(ctx, doctor.Options{Ports: doctorPorts(cfg), Interfaces: cfg.MDNSInterfaces}) {
 		if c.Name == "ports" && c.Status == doctor.Fail {
 			return &c
 		}
 	}
 	return nil
+}
+
+// portsConfig is the config portsHeld checks: the environment's, or the default ports and the
+// environment's broker and mDNS settings when it doesn't load.
+func portsConfig() config.Config {
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = config.Config{Ports: config.DefaultPorts, Env: config.LoadEnv()}
+	}
+	return cfg
 }
 
 // waitSetupLink waits for the URL the installer should open: the setup link once the new

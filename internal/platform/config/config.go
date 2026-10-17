@@ -146,6 +146,12 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 	return c, nil
 }
 
+// LoadEnv is the modules' bootstrap values from the environment, with the MQTT defaults shifted
+// by PortOffset: the Env of a Config that doesn't Load.
+func LoadEnv() Env {
+	return loadEnv(os.LookupEnv, os.Getenv, PortOffset())
+}
+
 func loadEnv(lookup func(string) (string, bool), getenv func(string) string, offset int) Env {
 	// envOr keeps a set-but-empty value: "" disables the listener.
 	envOr := func(key, def string) string {
