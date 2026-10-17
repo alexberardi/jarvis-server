@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -28,7 +29,9 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
-type fakeAuth struct{}
+// fakeAuth treats every user as a member of every household except the (user, household)
+// pairs in removed; a removed entry for user 0 makes HouseholdRole fail.
+type fakeAuth struct{ removed map[string]bool }
 
 func (fakeAuth) ValidateApp(_ context.Context, id, key string) (authn.App, bool, error) {
 	if id == "boom" {
@@ -41,8 +44,14 @@ func (fakeAuth) ValidateNode(context.Context, string, string, string) (authn.Nod
 	return authn.NodeValidation{}, nil
 }
 
-func (fakeAuth) HouseholdRole(context.Context, int64, string) (authn.Role, bool, error) {
-	return "", false, nil
+func (a fakeAuth) HouseholdRole(_ context.Context, uid int64, hh string) (authn.Role, bool, error) {
+	if a.removed[fmt.Sprint(0, "/", hh)] {
+		return "", false, errors.New("db down")
+	}
+	if a.removed[fmt.Sprint(uid, "/", hh)] {
+		return "", false, nil
+	}
+	return authn.RoleMember, true, nil
 }
 
 var (
@@ -223,6 +232,58 @@ func TestNoHouseholdInToken(t *testing.T) {
 		t.Fatalf("tokens: %d %s", c, b)
 	}
 	e.json(t, 200, "GET", "/api/v0/tokens/me", "", u...) // no household needed
+}
+
+// TestInboxNonMember: a token still naming a household the user was removed from reads,
+// marks and deletes nothing there (403), even the household-wide items the member-removed
+// purge leaves behind; a membership lookup failure is a 500.
+func TestInboxNonMember(t *testing.T) {
+	e := setup(t, func(m *Module) { m.Auth = fakeAuth{removed: map[string]bool{"1/hh1": true, "0/hhx": true}} })
+	hh := asObj(e.json(t, 200, "POST", "/api/v0/inbox",
+		`{"household_id":"hh1","title":"hh","summary":"s","body":"b","category":"c","source_service":"cc"}`, appH...))["id"].(string)
+	gone, member, broken := userH(t, 1, "hh1"), userH(t, 2, "hh1"), userH(t, 2, "hhx")
+	for _, mp := range [][3]string{
+		{"GET", "/api/v0/inbox", ""}, {"GET", "/api/v0/inbox/unread-count", ""},
+		{"GET", "/api/v0/inbox/" + hh, ""}, {"PATCH", "/api/v0/inbox/" + hh + "/read", ""}, {"DELETE", "/api/v0/inbox/" + hh, ""},
+		{"POST", "/api/v0/inbox/bulk/read", `{"ids":["` + hh + `"]}`}, {"POST", "/api/v0/inbox/bulk/delete", `{"ids":["` + hh + `"]}`},
+	} {
+		if c, b := e.do(t, mp[0], mp[1], mp[2], gone...); c != 403 || detail(t, b) != "User is not a member of this household" {
+			t.Errorf("removed %s %s: %d %s", mp[0], mp[1], c, b)
+		}
+		if c, b := e.do(t, mp[0], mp[1], mp[2], broken...); c != 500 {
+			t.Errorf("lookup failure %s %s: %d %s", mp[0], mp[1], c, b)
+		}
+	}
+	if v := asObj(e.json(t, 200, "GET", "/api/v0/inbox/unread-count", "", member...)); v["count"].(json.Number).String() != "1" {
+		t.Fatalf("member still sees the household item unread: %v", v)
+	}
+	if got := idsOf(e.json(t, 200, "GET", "/api/v0/inbox", "", member...)); len(got) != 1 || got[0] != hh {
+		t.Fatalf("member list: %v", got)
+	}
+}
+
+// TestRegisterTokenNonMember: a token still naming a household the user was removed from
+// registers no push device there (403, no row), so household-wide pushes stop reaching it
+// after the member-removed purge; a membership lookup failure is a 500.
+func TestRegisterTokenNonMember(t *testing.T) {
+	e := setup(t, func(m *Module) { m.Auth = fakeAuth{removed: map[string]bool{"1/hh1": true, "0/hhx": true}} })
+	if c, b := e.do(t, "POST", "/api/v0/tokens", `{"push_token":"gone","device_type":"ios"}`, userH(t, 1, "hh1")...); c != 403 || detail(t, b) != "User is not a member of this household" {
+		t.Fatalf("removed: %d %s", c, b)
+	}
+	if c, b := e.do(t, "POST", "/api/v0/tokens", `{"push_token":"broken","device_type":"ios"}`, userH(t, 2, "hhx")...); c != 500 {
+		t.Fatalf("lookup failure: %d %s", c, b)
+	}
+	var n int
+	e.d.Read.QueryRow(`SELECT COUNT(*) FROM notifications_device_tokens`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d device tokens written for non-members", n)
+	}
+	e.json(t, 200, "POST", "/api/v0/tokens", `{"push_token":"ok","device_type":"ios"}`, userH(t, 2, "hh1")...)
+	var hh string
+	e.d.Read.QueryRow(`SELECT household_id FROM notifications_device_tokens WHERE push_token = 'ok'`).Scan(&hh)
+	if hh != "hh1" {
+		t.Fatalf("member register: household %q", hh)
+	}
 }
 
 func TestInboxVisibility(t *testing.T) {
