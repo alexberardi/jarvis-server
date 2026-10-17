@@ -7,13 +7,16 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -511,9 +514,79 @@ func TestVoiceAcknowledgeAndWakeResponse(t *testing.T) {
 	if req["max_tokens"] != 12.0 || req["temperature"] != 1.1 {
 		t.Fatalf("wake-response request %v", req)
 	}
+	// The LLM mode's suffix: the 8B's thinking switch, nothing for a remote model.
+	if msgs := messagesOf(req); msgs[len(msgs)-1]["content"] != "Hello Jarvis\n/no_think" {
+		t.Fatalf("wake-response user message %v", msgs)
+	}
 	ve.eng.say("")
 	if r = ve.do("POST", "/api/v0/wake-response", nil, ve.node.h()).want(200).json(); r["text"] != "Yes?" {
 		t.Fatalf("fallback %v", r)
+	}
+
+	remote := newVoiceEnv(t, prompts.ChatGPT)
+	remote.eng.say("Right here.")
+	remote.do("POST", "/api/v0/wake-response", nil, remote.node.h()).want(200)
+	if msgs := messagesOf(remote.eng.last()); msgs[len(msgs)-1]["content"] != "Hello Jarvis" {
+		t.Fatalf("remote wake-response user message %v", msgs)
+	}
+}
+
+// recLLM is the real llm.Service that also keeps each chat request cc built, for what the
+// service does not forward to the engine (response_format "text").
+type recLLM struct {
+	*llm.Service
+	mu   sync.Mutex
+	reqs []llm.ChatRequest
+}
+
+func (l *recLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	l.mu.Lock()
+	l.reqs = append(l.reqs, req)
+	l.mu.Unlock()
+	return l.Service.Chat(ctx, req)
+}
+
+func (l *recLLM) Stream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Frame, error) {
+	l.mu.Lock()
+	l.reqs = append(l.reqs, req)
+	l.mu.Unlock()
+	return l.Service.Stream(ctx, req)
+}
+
+func (l *recLLM) last(t *testing.T) llm.ChatRequest {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.reqs) == 0 {
+		t.Fatal("no chat request")
+	}
+	return l.reqs[len(l.reqs)-1]
+}
+
+// The text mode asks for a text response_format; the native mode never sends one.
+func TestVoiceResponseFormatByMode(t *testing.T) {
+	for _, c := range []struct {
+		provider string
+		want     *llm.ResponseFormat
+	}{
+		{prompts.Qwen3_8B, &llm.ResponseFormat{Type: "text"}},
+		{prompts.Qwen3_5_9B, nil},
+		{prompts.ChatGPT, nil},
+	} {
+		rec := &recLLM{}
+		ve := newVoiceEnv(t, c.provider, func(m *Module) {
+			rec.Service = m.LLM.(*llm.Service)
+			m.LLM = rec
+		})
+		ve.start("rf", weatherTool)
+		ve.eng.say("ok.")
+		ve.turn("/api/v0/voice/command", "rf", "what time is it", nil).want(200)
+		if got := rec.last(t).ResponseFormat; !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: response_format %+v, want %+v", c.provider, got, c.want)
+		}
+		if _, ok := ve.eng.last()["response_format"]; ok {
+			t.Errorf("%s: engine got response_format %v", c.provider, ve.eng.last()["response_format"])
+		}
 	}
 }
 

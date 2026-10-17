@@ -222,6 +222,34 @@ func TestBuiltins(t *testing.T) {
 	}
 }
 
+// D11: only the exact built-in names; no default, no case folding, no remap of the dropped
+// legacy names, and no path forms of a real name.
+func TestCheckBuiltin(t *testing.T) {
+	for _, n := range BuiltinNames() {
+		if err := CheckBuiltin(n); err != nil {
+			t.Errorf("CheckBuiltin(%q) = %v", n, err)
+		}
+	}
+	for _, n := range []string{
+		"", "qwen3_14b_compressed", "Qwen25MediumUntrained", "JarvisToolModel", "Qwen3LargeUntrained",
+		"./Qwen3_8B_Compressed", "x/../Qwen3_8B_Compressed", "../builtin/Qwen3_8B_Compressed",
+	} {
+		err := CheckBuiltin(n)
+		if err == nil {
+			t.Errorf("CheckBuiltin(%q) accepted", n)
+			continue
+		}
+		if _, ok := Builtin(n); ok {
+			t.Errorf("Builtin(%q) found", n)
+		}
+		for _, opt := range BuiltinNames() {
+			if !strings.Contains(err.Error(), opt) {
+				t.Errorf("CheckBuiltin(%q) error %q does not name %s", n, err, opt)
+			}
+		}
+	}
+}
+
 // _blocks.json: the generated rules.go constants equal every core_rules str constant.
 func TestRulesConstantsEqualPython(t *testing.T) {
 	consts := og(loadFixture(t, "_blocks.json"), "constants").(*pyjson.Object)
