@@ -3,6 +3,7 @@
 package contract
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -27,15 +28,10 @@ var pairingStarted = Obj{
 
 var pairingPending = Obj{"status": Eq("pending"), "expires_in": Int, "interval": Int}
 
+// The list never shows codes (loop #100): an approver types the one shown on the computer.
 var pairingList = Obj{
-	"pairings": ArrayOf(Obj{
-		"code":           pairingCode,
-		"name":           String,
-		"platform":       String,
-		"requested_from": String,
-		"created_at":     TimestampUTC,
-		"expires_in":     Int,
-	}),
+	"pairings":   EqDeep([]any{}),
+	"waiting":    Int,
 	"households": NonEmptyArrayOf(Obj{"id": NonEmptyString, "name": String, "role": NonEmptyString}),
 }
 
@@ -69,12 +65,8 @@ func TestCCPairing(t *testing.T) {
 	t.Run("list", func(t *testing.T) {
 		tg.Get(t, CommandCenter, pairingsPath).ExpectError(http.StatusUnauthorized, "Missing or invalid Authorization header")
 		l := tg.Get(t, CommandCenter, pairingsPath, u.H()).Expect(http.StatusOK, pairingList).Object()
-		found := false
-		for _, p := range l["pairings"].([]any) {
-			found = found || p.(map[string]any)["code"] == code
-		}
-		if !found {
-			t.Fatalf("code %s not listed: %v", code, l)
+		if n, _ := l["waiting"].(json.Number).Int64(); n < 1 {
+			t.Fatalf("pairing %s not counted: %v", code, l)
 		}
 	})
 	t.Run("cross_household_refused", func(t *testing.T) {
@@ -92,7 +84,8 @@ func TestCCPairing(t *testing.T) {
 			ExpectError(http.StatusNotFound, "Pairing code not found or expired")
 		cred := poll(secret).Expect(http.StatusOK, Obj{
 			"status": Eq("approved"), "node_id": NonEmptyString, "provisioning_token": Regexp(`^prov_`),
-			"household_id": Eq(u.HouseholdID), "room": Eq("contract"), "name": NonEmptyString,
+			"household_id": Eq(u.HouseholdID), "household_name": String, "approved_by": String,
+			"room": Eq("contract"), "name": NonEmptyString,
 			"expires_at": TimestampNaive, "expires_in": Int,
 			"node_command_center_url": Optional(NonEmptyString), "node_config_service_url": Optional(NonEmptyString),
 		}).Object()

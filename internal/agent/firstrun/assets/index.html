@@ -59,11 +59,21 @@
         </div>
       </div>
       <div id="join-code" hidden>
-        <p>Ask someone in your household to approve this code in Jarvis Automation, on its <strong>Nodes</strong> page:</p>
+        <p>Ask someone in your household to type this code into Jarvis Automation, on its <strong>Nodes</strong> page:</p>
         <p class="code" id="code"></p>
         <p class="muted">This computer shows up as <strong id="code-name"></strong>.</p>
         <p class="muted"><span class="spinner" aria-hidden="true"></span> Waiting for approval… <span id="code-left"></span></p>
         <button class="link" id="code-cancel" type="button">Cancel</button>
+      </div>
+      <div id="join-confirm" hidden>
+        <p>The code was approved. Add this computer to this household?</p>
+        <p class="household" id="confirm-household"></p>
+        <p class="muted" id="confirm-by"></p>
+        <p class="muted">Only say yes if this is your household. Whoever is in it can use this computer through Jarvis.</p>
+        <div class="inline">
+          <button type="button" id="confirm-yes">Yes, add it</button>
+          <button class="link" type="button" id="confirm-no">No, cancel</button>
+        </div>
       </div>
       <form id="signin-form" hidden>
         <div class="row"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required></div>
