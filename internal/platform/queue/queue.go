@@ -58,6 +58,8 @@ type Job struct {
 	Payload  []byte
 	Attempt  int // 1 on the first run
 	DedupKey string
+
+	maxAttempts int
 }
 
 // HandlerFunc runs a job. Returning nil marks it done with result; an error retries it
@@ -361,9 +363,9 @@ func (q *Queue) claim(ctx context.Context, jobType string, h Handler) (Job, bool
 			WHERE type = ? AND state = 'queued' AND run_at <= ?
 			ORDER BY priority DESC, run_at, id
 			LIMIT 1)
-		RETURNING id, type, payload, attempts, dedup_key`,
+		RETURNING id, type, payload, attempts, max_attempts, dedup_key`,
 		ms(now.Add(h.Lease)), ms(now), jobType, ms(now)).
-		Scan(&j.ID, &j.Type, &j.Payload, &j.Attempt, &dedup)
+		Scan(&j.ID, &j.Type, &j.Payload, &j.Attempt, &j.maxAttempts, &dedup)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, false, nil
 	}
@@ -371,8 +373,15 @@ func (q *Queue) claim(ctx context.Context, jobType string, h Handler) (Job, bool
 	return j, err == nil, err
 }
 
+// handlerTimeout is how long a run may take: its lease less a margin (a tenth, at most 30s),
+// so a handler that honours ctx records its outcome before the reaper can requeue the job.
+// One that ignores ctx and overruns is fenced by the attempts check on its outcome instead.
+func handlerTimeout(lease time.Duration) time.Duration {
+	return lease - min(lease/10, 30*time.Second)
+}
+
 func (q *Queue) execute(ctx context.Context, h Handler, j Job) {
-	jctx, cancel := context.WithTimeout(ctx, h.Lease)
+	jctx, cancel := context.WithTimeout(ctx, handlerTimeout(h.Lease))
 	result, err := safeRun(jctx, h.Run, j)
 	cancel()
 	if err != nil && ctx.Err() != nil {
@@ -389,32 +398,34 @@ func (q *Queue) execute(ctx context.Context, h Handler, j Job) {
 		}
 		return
 	}
+	// Every outcome is fenced by the attempt: if this run overran its lease and the job was
+	// requeued (and maybe claimed again), the late result must not overwrite the newer run.
 	now := q.now()
+	var res sql.Result
 	var dbErr error
 	switch {
 	case err == nil:
-		_, dbErr = q.db.Write.ExecContext(context.Background(), `
+		res, dbErr = q.db.Write.ExecContext(context.Background(), `
 			UPDATE platform_jobs SET state = 'done', result = ?, lease_until = NULL, updated_at = ?
-			WHERE id = ? AND state = 'running'`, result, ms(now), j.ID)
+			WHERE id = ? AND state = 'running' AND attempts = ?`, result, ms(now), j.ID, j.Attempt)
 	default:
 		var p permanent
-		var maxAttempts int
-		q.db.Write.QueryRowContext(context.Background(),
-			`SELECT max_attempts FROM platform_jobs WHERE id = ?`, j.ID).Scan(&maxAttempts)
-		if errors.As(err, &p) || j.Attempt >= maxAttempts {
+		if errors.As(err, &p) || j.Attempt >= j.maxAttempts {
 			q.log.Warn("queue: job failed", "type", j.Type, "id", j.ID, "attempt", j.Attempt, "err", err)
-			_, dbErr = q.db.Write.ExecContext(context.Background(), `
+			res, dbErr = q.db.Write.ExecContext(context.Background(), `
 				UPDATE platform_jobs SET state = 'failed', last_error = ?, lease_until = NULL, updated_at = ?
-				WHERE id = ? AND state = 'running'`, err.Error(), ms(now), j.ID)
+				WHERE id = ? AND state = 'running' AND attempts = ?`, err.Error(), ms(now), j.ID, j.Attempt)
 		} else {
 			q.log.Info("queue: job will retry", "type", j.Type, "id", j.ID, "attempt", j.Attempt, "err", err)
-			_, dbErr = q.db.Write.ExecContext(context.Background(), `
+			res, dbErr = q.db.Write.ExecContext(context.Background(), `
 				UPDATE platform_jobs SET state = 'queued', last_error = ?, lease_until = NULL, run_at = ?, updated_at = ?
-				WHERE id = ? AND state = 'running'`, err.Error(), ms(now.Add(h.Backoff(j.Attempt))), ms(now), j.ID)
+				WHERE id = ? AND state = 'running' AND attempts = ?`, err.Error(), ms(now.Add(h.Backoff(j.Attempt))), ms(now), j.ID, j.Attempt)
 		}
 	}
 	if dbErr != nil {
 		q.log.Error("queue: record outcome", "id", j.ID, "err", dbErr)
+	} else if n, _ := res.RowsAffected(); n == 0 {
+		q.log.Warn("queue: stale outcome dropped: the lease expired and the job was requeued", "type", j.Type, "id", j.ID, "attempt", j.Attempt)
 	}
 }
 
