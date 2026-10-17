@@ -22,6 +22,28 @@ import (
 // errPrecondition is ConversationPreconditionError: no (or an expired) conversation.
 var errPrecondition = errors.New("conversation not found or expired")
 
+// errConversationBusy: the caller gave up while another turn held the conversation.
+var errConversationBusy = errors.New("conversation is busy with another turn")
+
+// turnWaitKey carries the context a turn waits for the conversation on, when it differs from
+// the one the turn runs on (withTurnWait).
+type turnWaitKey struct{}
+
+// withTurnWait makes the turn run on ctx wait for the conversation only as long as wait lives:
+// mobile chat runs its turn on a detached context so history commits after a hang-up (§11),
+// but a turn still queued when the client leaves gives up.
+func withTurnWait(ctx, wait context.Context) context.Context {
+	return context.WithValue(ctx, turnWaitKey{}, wait)
+}
+
+// lockTurn takes conv's turn lock, waiting no longer than the caller (withTurnWait, else ctx).
+func lockTurn(ctx context.Context, conv *conversation) error {
+	if wait, ok := ctx.Value(turnWaitKey{}).(context.Context); ok {
+		ctx = wait
+	}
+	return conv.mu.lock(ctx)
+}
+
 // wakeVerifyWait is the longest a wake turn waits for the wake-clip verdict (fails open).
 const wakeVerifyWait = 1200 * time.Millisecond
 
@@ -70,7 +92,8 @@ type turnOutcome struct {
 	imageMsgID uint64
 }
 
-// processTurn runs one turn. It returns errPrecondition when the conversation is unknown.
+// processTurn runs one turn. It returns errPrecondition when the conversation is unknown and
+// errConversationBusy when the caller gives up waiting for another turn of it.
 func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (turnOutcome, error) {
 	tr := traceFrom(ctx)
 	endCache := tr.measure("cache_lookups", "cc", nil)
@@ -79,7 +102,10 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		endCache(errPrecondition)
 		return turnOutcome{}, errPrecondition
 	}
-	conv.mu.Lock()
+	if err := lockTurn(ctx, conv); err != nil {
+		endCache(err)
+		return turnOutcome{}, err
+	}
 	defer conv.mu.Unlock()
 	endCache(nil)
 	m.flushPendingTranscript(ctx, conv)
