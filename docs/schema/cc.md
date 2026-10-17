@@ -50,7 +50,7 @@ Migration: `internal/modules/cc/migrations/00001_baseline.sql` (goose, version t
 | 11 phone | `cc_phone_contacts`, `cc_phone_call_sessions` |
 | 12 packages | `cc_package_install_requests` |
 | 13 mobile chat / callbacks | `cc_callback_jobs` |
-| autonomy (docs/autonomy/PLAN.md) | **`cc_autonomy_events`** (new, 00200): the append-only activity log — what ran without a tap, what was asked and what was blocked, by which rule, with the source (errand, goal, watch, automation); **`cc_tool_rules`** (new, 00210): the household's Custom Rules — per scope (household, goal, watch) and tool, allow/ask/block (A1, A7) |
+| autonomy (docs/autonomy/PLAN.md) | **`cc_autonomy_events`** (new, 00200): the append-only activity log — what ran without a tap, what was asked and what was blocked, by which rule, with the source (errand, goal, watch, automation); **`cc_tool_rules`** (new, 00210): the household's Custom Rules — per scope (household, goal, watch) and tool, allow/ask/block (A1, A7); **`cc_watches`** (new, 00230): watches — a web page, a search or a signal kind, a deterministic condition and a fire policy (§2, A3, A8, A9) |
 
 Scheduler triggers (D27) and durable jobs live in the platform tables `platform_triggers` and `platform_jobs`, not here. `cc_schedules.next_fire_at` and `cc_routines.schedule` remain the domain and mobile-facing projections.
 
@@ -86,6 +86,7 @@ Scheduler triggers (D27) and durable jobs live in the platform tables `platform_
 | `cc_reaction_claims` (`WITHOUT ROWID`, PK `(household_id, claim_key)`, `expires_at`) | D40 10.Q5: leave-by claims and automation last-signature dedup are persisted with a TTL and claimed only on terminal outcomes |
 | `cc_autonomy_events` (00200) | docs/autonomy/PLAN.md §0.3: the autonomy activity log. `user_id` is de-identified on account deletion (D20), not deleted: the rows are the household's audit. `detail` is a JSON object or NULL; `effect` is the closed set allow/ask/block (CHECK), `outcome` the open set launched/ran/asked/blocked/failed/stopped/fired (comment, no CHECK). |
 | `cc_tool_rules` (00210) | docs/autonomy/PLAN.md §1, A1, A7: the household's Custom Rules, one row per `(household_id, scope_kind, scope_id, tool)` (UNIQUE; `scope_id` is `''` for household scope). `effect` is the closed set allow/ask/block (CHECK) and `scope_kind` the closed set household/goal/watch (CHECK). A table rather than a setting: household-setting writes only accept bool, int and string. `updated_by` is de-identified on account deletion (D20), not deleted. |
+| `cc_watches` (00230) | docs/autonomy/PLAN.md §2, A3, A8, A9: one row per watch (`id` `wt_<16 hex>`). `source_spec` and `condition` are JSON (`watches.Source`, `watches.Condition`); `source_kind` (web/signal) is validated in Go, not by a CHECK, so later kinds need no migration. `state` is the closed set active/paused/done and `fire_policy` once/every_change/cooldown (CHECK). `user_id` is the owner (NULL = the household); the user's watches are deleted on account deletion. Live watches (active or paused) past `expires_at` (default 30 days) become done. Indexes `(household_id, state)` and `(source_kind, state)`. |
 
 **Deliberately not added:**
 

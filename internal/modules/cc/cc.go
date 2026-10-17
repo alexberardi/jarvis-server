@@ -16,6 +16,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/watches"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
@@ -57,7 +58,7 @@ func Definitions() []settings.Definition {
 	return markHouseholdControllable(routineDefinitions(slices.Concat(nodeDefinitions(),
 		voiceDefinitions(prompts.DefaultPersona), followUpGateDefinitions(), packageDefinitions(), smartHomeDefinitions(),
 		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(),
-		householdSettingDefinitions(), compactionDefinitions())))
+		householdSettingDefinitions(), compactionDefinitions(), watchDefinitions())))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -203,6 +204,7 @@ type Module struct {
 	// Autonomy (docs/autonomy/PLAN.md): the activity log and the rule policy (P1 fills Rules).
 	autonomy *policy.Store
 	policy   *policy.Policy
+	watches  *watches.Store // watches (docs/autonomy/PLAN.md §2, watches.go)
 
 	// 5d interactive callbacks (callbacks.go): the static server-callback map and result waiters.
 	cbOnce sync.Once
@@ -369,6 +371,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerRoutines(mux)
 	// Signals, proposals and the attention broker (doc 10).
 	m.registerSignals(mux)
+	// Watches (docs/autonomy/PLAN.md §2).
+	m.registerWatches(mux)
 	// Phone calls, phonebook and call context (doc 11).
 	m.registerPhone(mux)
 	// Autonomy activity log and policy (docs/autonomy/PLAN.md §0).
@@ -460,6 +464,11 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 	}
 	if err := m.purgeSignals(ctx, tx, userID); err != nil {
 		return err
+	}
+	if m.watches != nil {
+		if err := m.watches.PurgeUser(ctx, tx, userID); err != nil {
+			return err
+		}
 	}
 	if m.autonomy != nil {
 		if err := m.autonomy.PurgeUser(ctx, tx, userID); err != nil {
