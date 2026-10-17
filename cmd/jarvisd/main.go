@@ -36,7 +36,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/logging"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
-	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
@@ -50,45 +49,43 @@ var version = "dev"
 // right after counting its start: the CI upgrade job's broken release, which must roll back.
 var crashForTest string
 
-// modules lists every module jarvisd serves. Modules are added here as they are ported.
-func modules() []module.Module {
-	mods := []module.Module{
-		&configmod.Module{
-			AdminToken: os.Getenv("JARVIS_CONFIG_ADMIN_TOKEN"),
-			Advertise:  os.Getenv("JARVIS_MDNS") != "0",
-		},
-		&logsmod.Module{},
-		&ocrmod.Module{},
-		&llmmod.Module{},
-		&ttsmod.Module{},
-		&sttmod.Module{},
-		&notifmod.Module{
-			AdminKey: os.Getenv("ADMIN_API_KEY"),
-			// The relay is the notifications relay.url setting (env fallback RELAY_URL; ID8).
-			// Normally empty: the relay token is registered per household.
-			RelayHouseholdJWT: os.Getenv("RELAY_HOUSEHOLD_JWT"),
-		},
-		// The household recipe box on 7030 (docs/recipes; jarvis-recipes-mobile's server).
-		&recipesmod.Module{},
-		&ccmod.Module{
-			AdminKey:        os.Getenv("ADMIN_API_KEY"),
-			DevSpeakerHints: os.Getenv("JARVIS_DEV_SPEAKER_HINTS") == "1",
-			MQTT: ccmod.MQTTOptions{
-				TCPAddr:        mqttTCPAddr(),
-				WSAddr:         mqttWSAddr(),
-				AllowAnonymous: os.Getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
-			},
-			Phone: phoneConfig(), // cmd/jarvisd/phone.go
-		},
-		&authmod.Module{
-			AdminToken: os.Getenv("JARVIS_AUTH_ADMIN_TOKEN"),
-			// Legacy HS256 secret: HS256 is minted (auth.algorithm=HS256) and verified only when set.
-			HMACSecret: os.Getenv("AUTH_SECRET_KEY"),
-		},
-		// The admin SPA on 7710. JARVIS_ADMIN_UI_DIR serves a built UI from disk instead of
-		// the embedded one (testing a rebuilt SPA without rebuilding jarvisd).
-		&adminmod.Module{UIDir: os.Getenv("JARVIS_ADMIN_UI_DIR"), Version: version},
+// modules lists every module jarvisd serves, wired from env (cfg.Env). Modules are added here as
+// they are ported. The slice's order is the listeners', the migrations' and the start order.
+func modules(env config.Env) []module.Module {
+	cfgm := &configmod.Module{AdminToken: env.ConfigAdminToken, Advertise: env.MDNS}
+	logs := &logsmod.Module{}
+	ocrm := &ocrmod.Module{}
+	llm := &llmmod.Module{}
+	ttsm := &ttsmod.Module{}
+	sttm := &sttmod.Module{}
+	notif := &notifmod.Module{
+		AdminKey: env.AdminAPIKey,
+		// The relay is the notifications relay.url setting (env fallback RELAY_URL; ID8).
+		// Normally empty: the relay token is registered per household.
+		RelayHouseholdJWT: env.RelayHouseholdJWT,
 	}
+	// The household recipe box on 7030 (docs/recipes; jarvis-recipes-mobile's server).
+	recipes := &recipesmod.Module{}
+	cc := &ccmod.Module{
+		AdminKey:        env.AdminAPIKey,
+		DevSpeakerHints: env.DevSpeakerHints,
+		MQTT: ccmod.MQTTOptions{
+			TCPAddr:        env.MQTTAddr,
+			WSAddr:         env.MQTTWSAddr,
+			AllowAnonymous: env.MQTTAllowAnonymous,
+		},
+		Phone: phoneConfig(env), // cmd/jarvisd/phone.go
+	}
+	auth := &authmod.Module{
+		AdminToken: env.AuthAdminToken,
+		// Legacy HS256 secret: HS256 is minted (auth.algorithm=HS256) and verified only when set.
+		HMACSecret: env.AuthSecretKey,
+	}
+	// The admin SPA on 7710. JARVIS_ADMIN_UI_DIR serves a built UI from disk instead of
+	// the embedded one (testing a rebuilt SPA without rebuilding jarvisd).
+	admin := &adminmod.Module{UIDir: env.AdminUIDir, Version: version}
+	mods := []module.Module{cfgm, logs, ocrm, llm, ttsm, sttm, notif, recipes, cc, auth, admin}
+
 	// The registry lists exactly the listeners jarvisd serves; account deletion skips the
 	// legacy HTTP purge for the same services.
 	var served, names []string
@@ -96,167 +93,128 @@ func modules() []module.Module {
 		served = append(served, m.Listener())
 		names = append(names, configmod.ServiceNames[m.Listener()])
 	}
-	var auth *authmod.Module
-	var llm *llmmod.Module
-	var sttm *sttmod.Module
-	var ttsm *ttsmod.Module
-	var notif *notifmod.Module
-	var cc *ccmod.Module
-	var logs *logsmod.Module
-	var cfg *configmod.Module
-	var ocrm *ocrmod.Module
-	var recipes *recipesmod.Module
-	for _, m := range mods {
-		switch x := m.(type) {
-		case *authmod.Module:
-			auth = x
-		case *llmmod.Module:
-			llm = x
-		case *sttmod.Module:
-			sttm = x
-		case *ttsmod.Module:
-			ttsm = x
-		case *notifmod.Module:
-			notif = x
-		case *ccmod.Module:
-			cc = x
-		case *logsmod.Module:
-			logs = x
-		case *configmod.Module:
-			cfg = x
-		case *ocrmod.Module:
-			ocrm = x
-		case *recipesmod.Module:
-			recipes = x
-		}
-	}
 	superuser := settings.SuperuserGuard(auth.VerifyUser)
-	for _, m := range mods {
-		switch c := m.(type) {
-		case *configmod.Module:
-			c.Served = served
-			c.SettingsGuard = superuser
-			c.MQTTPort = doctor.PortOf(mqttTCPAddr())
-			c.External = func(ctx context.Context) map[string]string {
-				// The system-level Pantry; households can override it for their own installs.
-				return map[string]string{"jarvis-pantry": cc.PantryBaseURL(ctx, "")}
-			}
-		case *authmod.Module:
-			c.InProcess = names
-		case *notifmod.Module:
-			c.Auth = auth
-			c.Users = auth
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
-			auth.OnUserDeleted(c.PurgeUser)
-			auth.OnMemberRemoved(c.PurgeUserHousehold)
-			auth.OnHouseholdDeleted(c.PurgeHousehold)
-		case *recipesmod.Module:
-			c.Users = auth
-			c.Households = auth
-			c.Clock = cc // "today" for the planner is the household's date
-			c.LLM = llm.Service()
-			c.OCR = ocrm     // photo import runs every available engine in process (§7.3)
-			c.Notify = notif // a chat photo import's outcome: inbox item + push
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
-			// RD4: the household keeps shared rows; private rows, jobs and imports go.
-			auth.OnUserDeleted(c.PurgeUser)
-			auth.OnMemberRemoved(c.PurgeUserHousehold)
-			auth.OnHouseholdDeleted(c.PurgeHousehold)
-		case *ocrmod.Module:
-			c.Auth = auth
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
-			c.Version = version
-			// jarvisd's app credentials (legacy env names) sign job-completion callbacks.
-			c.AppID, c.AppKey = os.Getenv("JARVIS_APP_ID"), os.Getenv("JARVIS_APP_KEY")
-			// Without them (every fresh install), jarvisd signs with its own app client.
-			c.AppCreds = auth.SelfAppCreds
-			c.LLM = llm.Service() // LLM vision and validation
-			c.AppleVisionURL, c.AppleVisionKey = os.Getenv("JARVIS_OSX_API_URL"), os.Getenv("JARVIS_OSX_API_KEY")
-		case *llmmod.Module:
-			c.Auth = auth
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
-			c.ManagerGuard = superuser
-			c.Version = version
-			c.AppID, c.AppKey = os.Getenv("JARVIS_APP_ID"), os.Getenv("JARVIS_APP_KEY")
-			c.AppCreds = auth.SelfAppCreds
-		case *ttsmod.Module:
-			c.Auth = auth
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
-			c.Version = version
-			c.Models = ttsmod.ModelPathFunc(llm.ModelPath)
-		case *sttmod.Module:
-			c.Auth = auth
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
-			c.Version = version
-			c.Engine = sttmod.ResolveFunc(func(ctx context.Context, label string) (string, error) {
-				ep, err := llm.Resolver.Resolve(ctx, label)
-				return ep.BaseURL, err
-			})
-			c.Models = sttmod.ModelPathFunc(llm.ModelPath)
-			auth.OnUserDeleted(c.PurgeUser)
-			auth.OnMemberRemoved(c.PurgeUserHousehold)
-			auth.OnHouseholdDeleted(c.PurgeHousehold)
-		case *ccmod.Module:
-			c.Auth = auth
-			c.Users = auth
-			c.Nodes = auth
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
-			c.Version = version
-			// The voice pipeline calls the other modules in process (5b).
-			c.LLM = ccmod.WaitingLLM(llm.Service(), ccmod.ReadyWait)
-			c.STT = sttm
-			c.TTS = ccmod.TTSFrom(ttsm)
-			c.Notify = notif
-			c.Names = auth
-			// Chat photo → recipe (save_recipe_from_image): the recipes photo import, in process.
-			c.Recipes = recipes
-			// Tool-result images (desktop_read_screen) as text when live has no vision.
-			c.OCR = ocrm
-			// With llm.prompt_provider unset, the live model's catalog entry names it, so a
-			// fresh install answers its first voice turn without anyone choosing one.
-			c.DefaultPromptProvider = llm.LivePromptProvider
-			// The live model's tool calling and thinking switch, for llm.tool_calling/thinking_switch auto.
-			c.LiveModelTraits = llm.LiveModelTraits
-			// Slot capabilities: vision for chat images, context size for compaction.
-			c.Endpoints = func(ctx context.Context, label string) (llmmod.Endpoint, error) {
-				if llm.Resolver == nil {
-					return llmmod.Endpoint{}, errors.New("no llm resolver")
-				}
-				return llm.Resolver.Resolve(ctx, label)
-			}
-			auth.OnUserDeleted(c.PurgeUser)
-			auth.OnMemberRemoved(c.PurgeUserHousehold)
-			auth.OnHouseholdDeleted(c.PurgeHousehold)
-		case *adminmod.Module:
-			c.Verify = auth.VerifyUser
-			// The BFF calls the modules in process (A3).
-			for _, s := range mods {
-				if src, ok := s.(adminmod.SettingsSource); ok {
-					c.SettingsSources = append(c.SettingsSources, src)
-				}
-			}
-			c.Traces, c.Prompts = cc, cc
-			c.Accounts, c.Households = auth, auth
-			c.Models = llm
-			if ttsm != nil {
-				c.TTS = ttsm // the wizard's voice sample (AD3b)
-			}
-			c.Exposure = exposure(served)
-			// A4: logs (AD9), connections (AD7: registry + app clients).
-			c.Logs, c.Registry, c.Apps = logs, cfg, auth
-		case *logsmod.Module:
-			c.Auth = auth
-			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
-			c.SettingsWrite = superuser
+	settingsRead := func() settings.Guard { return settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp) }
+
+	cfgm.Served = served
+	cfgm.SettingsGuard = superuser
+	cfgm.MQTTPort = doctor.PortOf(env.MQTTAddr)
+	cfgm.External = func(ctx context.Context) map[string]string {
+		// The system-level Pantry; households can override it for their own installs.
+		return map[string]string{"jarvis-pantry": cc.PantryBaseURL(ctx, "")}
+	}
+
+	logs.Auth = auth
+	logs.SettingsRead = settingsRead()
+	logs.SettingsWrite = superuser
+
+	ocrm.Auth = auth
+	ocrm.SettingsRead = settingsRead()
+	ocrm.SettingsWrite = superuser
+	ocrm.Version = version
+	// jarvisd's app credentials (legacy env names) sign job-completion callbacks.
+	ocrm.AppID, ocrm.AppKey = env.AppID, env.AppKey
+	// Without them (every fresh install), jarvisd signs with its own app client.
+	ocrm.AppCreds = auth.SelfAppCreds
+	ocrm.LLM = llm.Service() // LLM vision and validation
+	ocrm.AppleVisionURL, ocrm.AppleVisionKey = env.OSXAPIURL, env.OSXAPIKey
+
+	llm.Auth = auth
+	llm.SettingsRead = settingsRead()
+	llm.SettingsWrite = superuser
+	llm.ManagerGuard = superuser
+	llm.Version = version
+	llm.AppID, llm.AppKey = env.AppID, env.AppKey
+	llm.AppCreds = auth.SelfAppCreds
+
+	ttsm.Auth = auth
+	ttsm.SettingsRead = settingsRead()
+	ttsm.SettingsWrite = superuser
+	ttsm.Version = version
+	ttsm.Models = ttsmod.ModelPathFunc(llm.ModelPath)
+
+	sttm.Auth = auth
+	sttm.SettingsRead = settingsRead()
+	sttm.SettingsWrite = superuser
+	sttm.Version = version
+	sttm.Engine = sttmod.ResolveFunc(func(ctx context.Context, label string) (string, error) {
+		ep, err := llm.Resolver.Resolve(ctx, label)
+		return ep.BaseURL, err
+	})
+	sttm.Models = sttmod.ModelPathFunc(llm.ModelPath)
+	auth.OnUserDeleted(sttm.PurgeUser)
+	auth.OnMemberRemoved(sttm.PurgeUserHousehold)
+	auth.OnHouseholdDeleted(sttm.PurgeHousehold)
+
+	notif.Auth = auth
+	notif.Users = auth
+	notif.SettingsRead = settingsRead()
+	notif.SettingsWrite = superuser
+	auth.OnUserDeleted(notif.PurgeUser)
+	auth.OnMemberRemoved(notif.PurgeUserHousehold)
+	auth.OnHouseholdDeleted(notif.PurgeHousehold)
+
+	recipes.Users = auth
+	recipes.Households = auth
+	recipes.Clock = cc // "today" for the planner is the household's date
+	recipes.LLM = llm.Service()
+	recipes.OCR = ocrm     // photo import runs every available engine in process (§7.3)
+	recipes.Notify = notif // a chat photo import's outcome: inbox item + push
+	recipes.SettingsRead = settingsRead()
+	recipes.SettingsWrite = superuser
+	// RD4: the household keeps shared rows; private rows, jobs and imports go.
+	auth.OnUserDeleted(recipes.PurgeUser)
+	auth.OnMemberRemoved(recipes.PurgeUserHousehold)
+	auth.OnHouseholdDeleted(recipes.PurgeHousehold)
+
+	cc.Auth = auth
+	cc.Users = auth
+	cc.Nodes = auth
+	cc.SettingsRead = settingsRead()
+	cc.SettingsWrite = superuser
+	cc.Version = version
+	// The voice pipeline calls the other modules in process (5b).
+	cc.LLM = ccmod.WaitingLLM(llm.Service(), ccmod.ReadyWait)
+	cc.STT = sttm
+	cc.TTS = ccmod.TTSFrom(ttsm)
+	cc.Notify = notif
+	cc.Names = auth
+	// Chat photo → recipe (save_recipe_from_image): the recipes photo import, in process.
+	cc.Recipes = recipes
+	// Tool-result images (desktop_read_screen) as text when live has no vision.
+	cc.OCR = ocrm
+	// With llm.prompt_provider unset, the live model's catalog entry names it, so a
+	// fresh install answers its first voice turn without anyone choosing one.
+	cc.DefaultPromptProvider = llm.LivePromptProvider
+	// The live model's tool calling and thinking switch, for llm.tool_calling/thinking_switch auto.
+	cc.LiveModelTraits = llm.LiveModelTraits
+	// Slot capabilities: vision for chat images, context size for compaction.
+	cc.Endpoints = func(ctx context.Context, label string) (llmmod.Endpoint, error) {
+		if llm.Resolver == nil {
+			return llmmod.Endpoint{}, errors.New("no llm resolver")
+		}
+		return llm.Resolver.Resolve(ctx, label)
+	}
+	auth.OnUserDeleted(cc.PurgeUser)
+	auth.OnMemberRemoved(cc.PurgeUserHousehold)
+	auth.OnHouseholdDeleted(cc.PurgeHousehold)
+
+	auth.InProcess = names
+
+	admin.Verify = auth.VerifyUser
+	// The BFF calls the modules in process (A3).
+	for _, s := range mods {
+		if src, ok := s.(adminmod.SettingsSource); ok {
+			admin.SettingsSources = append(admin.SettingsSources, src)
 		}
 	}
+	admin.Traces, admin.Prompts = cc, cc
+	admin.Accounts, admin.Households = auth, auth
+	admin.Models = llm
+	admin.TTS = ttsm // the wizard's voice sample (AD3b)
+	admin.Exposure = exposure(served, env)
+	// A4: logs (AD9), connections (AD7: registry + app clients).
+	admin.Logs, admin.Registry, admin.Apps = logs, cfgm, auth
 	return mods
 }
 
@@ -267,16 +225,6 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-// mqttTCPAddr and mqttWSAddr are the broker's addresses: JARVIS_MQTT_ADDR / JARVIS_MQTT_WS_ADDR
-// when set, else the defaults moved by JARVIS_PORT_OFFSET like the listeners.
-func mqttTCPAddr() string {
-	return envOr("JARVIS_MQTT_ADDR", config.ShiftAddr(mqtt.DefaultTCPAddr, config.PortOffset()))
-}
-
-func mqttWSAddr() string {
-	return envOr("JARVIS_MQTT_WS_ADDR", config.ShiftAddr(mqtt.DefaultWSAddr, config.PortOffset()))
 }
 
 const usage = `usage: jarvisd <command> [--home DIR]
@@ -521,7 +469,7 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		}
 	}
 	defer closeDB()
-	mods := modules()
+	mods := modules(cfg.Env)
 	// jarvisd's own records go to stderr and, once migrated, into the logs module's store.
 	for _, m := range mods {
 		if l, ok := m.(*logsmod.Module); ok {
@@ -691,7 +639,7 @@ func migrateStatus(ctx context.Context, stdout io.Writer) error {
 	}
 	defer deps.DB.Close()
 	fmt.Fprintf(stdout, "%-20s %8s %8s %8s\n", "MODULE", "CURRENT", "LATEST", "PENDING")
-	for _, m := range modules() {
+	for _, m := range modules(deps.Config.Env) {
 		fsys := m.Migrations()
 		if fsys == nil {
 			continue

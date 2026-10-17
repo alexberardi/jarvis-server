@@ -35,7 +35,7 @@ func TestResolveHomePrecedence(t *testing.T) {
 
 // The code default is no longer the legacy stack's ~/.jarvis (ID1).
 func TestLoadDefaultHomeIsJarvisd(t *testing.T) {
-	c, err := load(func(string) string { return "" })
+	c, err := load(env(nil))
 	if err != nil {
 		t.Fatal(err)
 	}

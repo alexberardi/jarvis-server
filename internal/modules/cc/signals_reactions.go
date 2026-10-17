@@ -88,7 +88,12 @@ func (m *Module) reactionsFor(kind string) []reaction {
 	s := m.sig
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]reaction(nil), s.reactions[kind]...)
+	out := append([]reaction(nil), s.reactions[kind]...)
+	if kind != "*" {
+		// "*" reactions (watches) see every kind.
+		out = append(out, s.reactions["*"]...)
+	}
+	return out
 }
 
 // registerSignalReactions wires the built-in reactions (main.py:513-516): appt.upcoming →

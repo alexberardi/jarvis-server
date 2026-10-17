@@ -111,6 +111,13 @@ var passRoutes = []passRoute{
 	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/actions"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
+	// The household's prompt (Models page editor): cc requires the household admin role.
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/prompt"),
+	ccUserRoute("PUT /api/cc/api/v0/households/{household_id}/prompt"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/reset"),
+	ccUserRoute("PUT /api/cc/api/v0/households/{household_id}/prompt/base"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/import"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/preview"),
 	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc counts what
 	// waits (never listing codes) plus the caller's own households, and approves a typed code
 	// only into one of those.
