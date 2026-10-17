@@ -39,6 +39,9 @@ func NewQuickSearch(search WebSearcher, fetch *Fetcher, enabled WebSearchGate, l
 func (t *QuickSearch) Name() string               { return "quick_search" }
 func (t *QuickSearch) Definition() *pyjson.Object { return LegacyDefinition("quick_search") }
 
+// A read-only lookup: may run in the background without a tap (A7).
+func (*QuickSearch) RunWithoutConfirmation() bool { return true }
+
 func (t *QuickSearch) log() *slog.Logger {
 	if t.Log != nil {
 		return t.Log

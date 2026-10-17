@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { checkNow, getUpdate, setUpdatesEnabled, type UpdateInfo } from '@/api/update'
+import { checkNow, getLastUpgrade, getUpdate, setUpdatesEnabled, type LastUpgrade, type UpdateInfo } from '@/api/update'
 
 export const updateKey = ['update'] as const
 
@@ -30,5 +30,18 @@ export function useSetUpdatesEnabled() {
       qc.setQueryData(updateKey, data)
       void qc.invalidateQueries({ queryKey: ['settings'] })
     },
+  })
+}
+
+export const lastUpgradeKey = ['update', 'last'] as const
+
+/** useLastUpgrade reads the last finished upgrade's outcome (null when none or unsupported). */
+export function useLastUpgrade() {
+  return useQuery<LastUpgrade | null>({
+    queryKey: lastUpgradeKey,
+    queryFn: () => getLastUpgrade(),
+    staleTime: 60 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
   })
 }

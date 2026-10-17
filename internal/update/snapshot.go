@@ -179,5 +179,8 @@ func restoreSnapshot(home, snapshot, file string) error {
 		}
 	}
 	chownLike(home, tmp)
-	return os.Rename(tmp, file)
+	if err := os.Rename(tmp, file); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(file))
 }

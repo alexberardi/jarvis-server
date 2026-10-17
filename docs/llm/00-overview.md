@@ -134,7 +134,7 @@ Cites are `file:line` in each caller's repo.
 - `jarvis_recipes/app/services/llm_client.py:366,485,611,725,862` and `url_parsing/extractors/llm.py:166`.
 - Every call is `json_object`, non-stream, mostly live. The grocery matcher uses background.
 
-**jarvis-ocr-service** → the jarvisd OCR module (Phase 2, done). It calls an `LLMURL` today (`internal/modules/ocr/engines.go:361-470`, `ocr.go:91-94`). Legacy calls:
+**jarvis-ocr-service** → the jarvisd OCR module (Phase 2, done). It calls `llm.Service().Chat` in process (`Module.LLM`, `internal/modules/ocr/engines.go` `LLMVision`, `pipeline.go` `validate`). Legacy calls:
 - validation: `provider_manager.py:220`, model `ocr.validation_model` (default live)
 - vision: `providers/llm_proxy_provider.py:133`, background
 - vision validation: `llm_proxy_provider.py:191`, live
@@ -201,7 +201,7 @@ The full disposition is in 05 §5. In short, the 115 legacy keys come to about 2
   - optional remote OpenAI-compatible endpoints
 - **Consumers in jarvisd:**
   - CC (`llm.Service` in-process)
-  - OCR module (swap `LLMURL` HTTP for in-process when the llm module is enabled; keep HTTP for strangler mode)
+  - OCR module (`llm.Service` in-process)
   - phone (D16; streams)
   - notifications: none
 

@@ -192,7 +192,21 @@ for e in json.load(open(sys.argv[1])):
   else
     say "llm: $alias is not in the catalog; set llm.prompt_provider by hand"
   fi
-  say "llm: tap :$(port 7799) → installed jarvisd $INSTALLED_LLM_URL ($INSTALLED_LLM_LABEL = $alias); calls logged to $DIR/llm.jsonl"
+  # The LLM mode. Through the tap the sandbox's live label is remote, which resolves to native
+  # with no suffix, so set the mode that provider's model talked in before prompts became text
+  # (the Qwen 8B/14B prompts: text + suffix; the 9B's: native + suffix). That keeps the
+  # sandbox's model calls those of main for the same model. SANDBOX_TOOL_CALLING (native, text,
+  # auto) and SANDBOX_THINKING_SWITCH (suffix, none, auto) choose another, e.g. to measure the
+  # mode a local install detects from the model's template.
+  local tc=auto th=auto
+  case $provider in
+    Qwen3_5_9B*) tc=native th=suffix ;;
+    Qwen3_*) tc=text th=suffix ;;
+  esac
+  tc=${SANDBOX_TOOL_CALLING:-$tc} th=${SANDBOX_THINKING_SWITCH:-$th}
+  set_setting "$cc" llm.tool_calling "\"$tc\""
+  set_setting "$cc" llm.thinking_switch "\"$th\""
+  say "llm: tap :$(port 7799) → installed jarvisd $INSTALLED_LLM_URL ($INSTALLED_LLM_LABEL = $alias); mode $tc/$th; calls logged to $DIR/llm.jsonl"
 }
 
 # Voice models live in one cache shared by every worktree and sandbox; the sandbox's settings

@@ -47,7 +47,7 @@ func forceEnv(t *testing.T) (*chatEnv, string) {
 	ce := newChatEnv(t, prompts.Qwen3_5_9B)
 	ce.pub.toolReply = `{"output": {"success": true, "message": "Sunny, 72 degrees in Boston."}}`
 	cid := ce.warm("tok-7")
-	if conv := ce.m.convs.get(cid); conv == nil || !conv.forceTools {
+	if conv := ce.m.convs.get(cid); conv == nil || !conv.mode.ForceTools {
 		t.Fatal("the provider should force tool calls for this test to mean anything")
 	}
 	return ce, cid

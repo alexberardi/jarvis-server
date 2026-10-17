@@ -58,7 +58,7 @@ var Keys = []Key{
 	{"voice", "voice", false, `listen for "Hey Jarvis" (Linux, macOS; the menu's toggle sets it)`, func(s *Settings) any { return &s.Voice }},
 	{"island", "no-overlay", true, "show the on-screen indicator (voice states, the \"Jarvis is running\" pill)", func(s *Settings) any { return &s.Island }},
 	{"tray", "no-tray", true, "show the status icon and its menu (menu bar, tray, notification area)", func(s *Settings) any { return &s.Tray }},
-	{"confirm_dictation", "confirm-dictation", false, "ask before dictation acts: off, submit or all", func(s *Settings) any { return &s.ConfirmDictation }},
+	{"confirm_dictation", "confirm-dictation", false, "ask before dictation acts: off, submit (the default) or all", func(s *Settings) any { return &s.ConfirmDictation }},
 	{"browser", "no-browser", true, "serve the browser extension (browser_* tools)", func(s *Settings) any { return &s.Browser }},
 	{"chimes", "no-chimes", true, "play the wake and error chimes", func(s *Settings) any { return &s.Chimes }},
 	{"voice_input", "voice-input", false, `microphone: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceInput }},

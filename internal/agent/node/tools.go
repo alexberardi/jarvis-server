@@ -83,6 +83,9 @@ type Spec struct {
 	Keywords    []string
 	Examples    []Example
 	Risky       bool
+	// RunWithoutConfirmation: may run in the background without a tap when no household
+	// rule says otherwise (A7). Ignored by the server for risky tools.
+	RunWithoutConfirmation bool
 }
 
 var jsonType = map[string]string{"string": "string", "int": "integer", "float": "number", "bool": "boolean"}
@@ -129,11 +132,13 @@ func (s Spec) Render() ToolDef {
 				"name": s.Name, "description": s.Description,
 				"parameters": map[string]any{"type": "object", "properties": props, "required": required},
 			},
-			"allow_direct_answer": false, "is_risky": s.Risky, "keywords": keywords, "examples": examples,
+			"allow_direct_answer": false, "is_risky": s.Risky, "run_without_confirmation": s.RunWithoutConfirmation,
+			"keywords": keywords, "examples": examples,
 		},
 		Command: map[string]any{
 			"command_name": s.Name, "description": s.Description, "allow_direct_answer": false,
-			"is_risky": s.Risky, "examples": examples, "keywords": keywords, "parameters": params,
+			"is_risky": s.Risky, "run_without_confirmation": s.RunWithoutConfirmation,
+			"examples": examples, "keywords": keywords, "parameters": params,
 		},
 	}
 }

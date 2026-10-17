@@ -45,6 +45,19 @@ func TestRunSettingsFileAndFlags(t *testing.T) {
 	}
 }
 
+func TestRunConfirmsSubmitByDefault(t *testing.T) {
+	fs, f := newRunFlags(flag.ContinueOnError)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := applySettings(fs, filepath.Join(t.TempDir(), "none.json"), slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	if *f.tf.confirm != dictate.ConfirmSubmit {
+		t.Fatalf("confirm=%q, want submit", *f.tf.confirm)
+	}
+}
+
 func TestRunRefusesABrokenSettingsFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "agent.json")
 	if err := os.WriteFile(p, []byte(`{"confirm_dictation": "sometimes"}`), 0o600); err != nil {

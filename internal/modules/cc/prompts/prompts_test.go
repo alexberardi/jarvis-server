@@ -70,8 +70,8 @@ func TestStripJarvisExtensionsDoesNotMutate(t *testing.T) {
 		t.Errorf("native tool = %s", CompactASCII(got[0]))
 	}
 	// The text path removes refinable params (and from required) without touching the input.
-	q8, _ := Lookup(Qwen3_8B)
-	prompt := q8.BuildSystemPrompt(Context{Room: "k", VoiceMode: "brief"}, tools, nil)
+	q8, _ := Builtin(Qwen3_8B)
+	prompt, _ := SystemPrompt(q8, Inputs{Context: Context{Room: "k", VoiceMode: "brief"}, Tools: tools, ToolCalling: ToolsText}, Characterization{})
 	if !strings.Contains(prompt, `{"type":"function","function":{"name":"play","parameters":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}}}`) {
 		t.Errorf("text tools block wrong:\n%s", prompt)
 	}
@@ -88,21 +88,19 @@ func TestCompactASCII(t *testing.T) {
 	}
 }
 
-func TestWrapStashAndSwap(t *testing.T) {
-	prompt, stash := Wrap("BASE\n\n\n", "", Characterization{Enabled: true, Text: "  likes tea  "})
-	want := "BASE\n\n" + NotForMeInstruction + "\n\n" + ExchangeCompleteInstruction + "\n"
-	if stash != want {
+func TestSystemPromptStashAndSwap(t *testing.T) {
+	prompt, stash := SystemPrompt("BASE {{room}}\n", Inputs{Context: Context{Room: "k"}}, Characterization{Enabled: true, Text: "  likes tea  "})
+	if stash != "BASE k\n" {
 		t.Fatalf("stash = %q", stash)
 	}
-	if prompt != want+"\n"+CharacterizationSection("likes tea") {
+	if prompt != stash+"\n"+CharacterizationSection("likes tea") {
 		t.Errorf("prompt = %q", prompt)
 	}
 	if WithCharacterization(stash, "") != stash {
 		t.Error("empty characterization must leave the base")
 	}
-	p2, _ := Wrap("BASE", "Be dry.", Characterization{})
-	if !strings.HasSuffix(p2, "\n\n"+PersonalityReminder("Be dry.")+"\n") {
-		t.Errorf("reminder missing: %q", p2[len(p2)-80:])
+	if p2, s2 := SystemPrompt("BASE", Inputs{}, Characterization{Text: "likes tea"}); p2 != "BASE" || s2 != "BASE" {
+		t.Errorf("disabled characterization: %q %q", p2, s2)
 	}
 }
 

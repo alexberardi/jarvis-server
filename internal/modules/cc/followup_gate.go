@@ -218,6 +218,15 @@ func (s *convSignals) takeVoiceMatch(convID string) *float64 {
 // It never fails the transcription; done is closed when it has finished.
 func (m *Module) voiceCheck(ctx context.Context, convID string, file, speakerAudio []byte) (done <-chan struct{}) {
 	ch := make(chan struct{})
+	// The slot comes before the reference claim: a dropped check leaves the role to the next.
+	select {
+	case m.voiceSem <- struct{}{}:
+	default:
+		m.deps.Log.Warn("cc: follow-up voice check dropped (busy)", "conversation_id", convID,
+			"dropped", m.voiceDrops.Add(1))
+		close(ch)
+		return ch
+	}
 	ref := m.signals.claimReference(convID)
 	clip := file
 	if ref && len(speakerAudio) > 0 {
@@ -225,6 +234,7 @@ func (m *Module) voiceCheck(ctx context.Context, convID string, file, speakerAud
 	}
 	go func() {
 		defer close(ch)
+		defer func() { <-m.voiceSem }()
 		start := m.now()
 		v, err := m.STT.VoiceOf(ctx, clip)
 		ms := m.now().Sub(start).Milliseconds()

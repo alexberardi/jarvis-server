@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { AlertTriangle, ArrowUpCircle, CheckCircle2, CircleSlash, Copy, ExternalLink, HelpCircle, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
-import { applyUpdate, updateStatus, type UpdateInfo } from '@/api/update'
+import { applyUpdate, updateStatus, type LastUpgrade, type UpdateInfo } from '@/api/update'
 import { getSystemInfo, waitForRestart } from '@/api/system'
 import { buttonClass } from '@/components/models/styles'
 import { useFeatureAvailable } from '@/hooks/useFeature'
-import { updateKey, useCheckNow, useSetUpdatesEnabled, useUpdateCheck } from '@/hooks/useUpdateCheck'
+import { updateKey, useCheckNow, useLastUpgrade, useSetUpdatesEnabled, useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 
@@ -81,6 +81,51 @@ function Verdict({ info }: { info: UpdateInfo }) {
   }
 }
 
+/**
+ * LastOutcome is the last finished upgrade. A rollback that restored a database snapshot says
+ * from when writes were discarded (#109): the snapshot was taken at staging, so it covers the
+ * old version's last writes and everything the new version wrote before the rollback.
+ */
+function LastOutcome({ last }: { last: LastUpgrade }) {
+  const at = new Date(last.at).toLocaleString()
+  if (last.outcome === 'succeeded') {
+    return (
+      <p className="text-xs text-[var(--color-text-muted)]" data-testid="last-upgrade">
+        Last update: {last.from_version} → {last.to_version} on {at}.
+      </p>
+    )
+  }
+  const what =
+    last.outcome === 'rolled_back'
+      ? `The update to ${last.to_version} was rolled back to ${last.from_version} on ${at}`
+      : `The update to ${last.to_version} failed on ${at}`
+  return (
+    <div
+      className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-[var(--color-text)]"
+      data-testid="last-upgrade"
+    >
+      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
+      <div className="min-w-0 space-y-1">
+        <p className="break-words">
+          {what}
+          {last.reason ? `: ${last.reason}` : '.'}
+        </p>
+        {last.outcome === 'rolled_back' &&
+          (last.db_restored ? (
+            <p className="font-medium">
+              The database was restored from the snapshot taken before the update.{' '}
+              {last.data_since
+                ? `Data written since ${new Date(last.data_since).toLocaleString()} was rolled back with the database.`
+                : 'Data written since the update was staged was rolled back with it.'}
+            </p>
+          ) : (
+            <p className="text-[var(--color-text-muted)]">The database was kept as it was.</p>
+          ))}
+      </div>
+    </div>
+  )
+}
+
 function CopyLine({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2">
@@ -110,6 +155,7 @@ export default function UpdatePage() {
   const check = useCheckNow()
   const toggle = useSetUpdatesEnabled()
   const canApply = useFeatureAvailable('update-apply')
+  const { data: last } = useLastUpgrade()
   const [applying, setApplying] = useState(false)
   const [manual, setManual] = useState<{ detail: string; command?: string } | null>(null)
 
@@ -208,6 +254,7 @@ export default function UpdatePage() {
             <p className="text-xs text-[var(--color-text-muted)]">
               Running {data.current_version} on {data.platform}.
             </p>
+            {last && <LastOutcome last={last} />}
 
             {updateStatus(data) === 'available' && (
               <div className="space-y-3 border-t border-[var(--color-border)] pt-3">

@@ -212,6 +212,14 @@ func (m *Module) handleApply(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Another process (a CLI `jarvisd upgrade`) staging now holds the stage lock; Stage would
+	// refuse too, but only once the job had started.
+	if release, err := update.Lock(m.paths()); err != nil {
+		conflict("An update is already running: "+err.Error(), "")
+		return
+	} else {
+		release()
+	}
 	m.apply.mu.Lock()
 	if j := m.apply.job; j != nil && (j.State == "running" || j.State == "restarting") {
 		m.apply.mu.Unlock()

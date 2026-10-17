@@ -26,6 +26,8 @@ type MenuEntry struct {
 	Description string
 	Args        *pyjson.Object
 	IsRisky     bool
+	// RunWithoutConfirmation: the tool declares it may run in the background without a tap (A7).
+	RunWithoutConfirmation bool
 }
 
 // commandMenu is the FALLBACK menu (COMMAND_MENU), used only when no real menu can be sourced.
@@ -99,6 +101,7 @@ func NodeMenu(available []*pyjson.Object) []MenuEntry {
 		}
 		menu = append(menu, MenuEntry{
 			Command: name, Description: objStr(c, "description"), Args: args, IsRisky: objTruthy(c, "is_risky"),
+			RunWithoutConfirmation: objTruthy(c, "run_without_confirmation"),
 		})
 	}
 	return menu
@@ -168,7 +171,8 @@ func (s *Service) serverMenu(ctx context.Context, hh string, speaker *int64) []M
 		if cmd == "" {
 			cmd = name
 		}
-		menu = append(menu, MenuEntry{Command: cmd, Description: objStr(fn, "description"), Args: args, IsRisky: toolRisky(t)})
+		menu = append(menu, MenuEntry{Command: cmd, Description: objStr(fn, "description"), Args: args, IsRisky: toolRisky(t),
+			RunWithoutConfirmation: servertools.RunsWithoutConfirmation(t)})
 	}
 	return menu
 }
@@ -441,8 +445,9 @@ type Plan struct {
 	Steps   []Step
 }
 
-// planFromData is _plan_from_data: keep steps whose command is allowed, stamp is_risky.
-func planFromData(data *pyjson.Object, allowed map[string]bool, fallbackSummary string, risky map[string]bool, requireNonEmpty bool) (Plan, error) {
+// planFromData is _plan_from_data: keep steps whose command is allowed, stamp is_risky and
+// run_without_confirmation.
+func planFromData(data *pyjson.Object, allowed map[string]bool, fallbackSummary string, risky, free map[string]bool, requireNonEmpty bool) (Plan, error) {
 	var steps []Step
 	sv, _ := data.Get("steps")
 	list, _ := sv.([]any)
@@ -465,7 +470,7 @@ func planFromData(data *pyjson.Object, allowed map[string]bool, fallbackSummary 
 		if label == "" {
 			label = cmd
 		}
-		steps = append(steps, Step{Command: cmd, Args: args, Label: label, IsRisky: risky[cmd]})
+		steps = append(steps, Step{Command: cmd, Args: args, Label: label, IsRisky: risky[cmd], RunWithoutConfirmation: free[cmd]})
 		if cmd == cmdReplan {
 			// A checkpoint ends the plan (the prompt's rule): what follows it depends on results
 			// not known yet, and the replan decides it. Steps a model guessed past it anyway are
@@ -483,17 +488,17 @@ func planFromData(data *pyjson.Object, allowed map[string]bool, fallbackSummary 
 	return Plan{Summary: parse.PyStrip(summary), Steps: steps}, nil
 }
 
-func allowedOf(menu []MenuEntry) (map[string]bool, map[string]bool) {
-	allowed := map[string]bool{}
-	risky := map[string]bool{}
+func allowedOf(menu []MenuEntry) (allowed, risky, free map[string]bool) {
+	allowed, risky, free = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, c := range menu {
 		allowed[c.Command] = true
 		risky[c.Command] = c.IsRisky
+		free[c.Command] = c.RunWithoutConfirmation
 	}
 	for c := range controlCommands {
 		allowed[c] = true
 	}
-	return allowed, risky
+	return allowed, risky, free
 }
 
 // PlanErrand is plan_errand. An empty menu falls back to the static menu.
@@ -505,8 +510,8 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	if err != nil {
 		return Plan{}, err
 	}
-	allowed, risky := allowedOf(menu)
-	return planFromData(data, allowed, goal, risky, true)
+	allowed, risky, free := allowedOf(menu)
+	return planFromData(data, allowed, goal, risky, free, true)
 }
 
 // RefinePlan is refine_errand_plan: the allowed set also keeps the plan's own commands, so a
@@ -519,13 +524,13 @@ func (s *Service) RefinePlan(ctx context.Context, summary string, current []Step
 	if err != nil {
 		return Plan{}, err
 	}
-	allowed, risky := allowedOf(menu)
+	allowed, risky, free := allowedOf(menu)
 	for _, st := range current {
 		if st.Command != "" {
 			allowed[st.Command] = true
 		}
 	}
-	return planFromData(data, allowed, summary, risky, true)
+	return planFromData(data, allowed, summary, risky, free, true)
 }
 
 // ReplanFromProgress is replan_from_progress: the continuation after a checkpoint, which may be
@@ -539,12 +544,12 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 	if err != nil {
 		return Plan{}, err
 	}
-	allowed, risky := allowedOf(menu)
+	allowed, risky, free := allowedOf(menu)
 	fallback := truthyStr(data, "summary")
 	if fallback == "" {
 		fallback = "continue"
 	}
-	return planFromData(data, allowed, fallback, risky, false)
+	return planFromData(data, allowed, fallback, risky, free, false)
 }
 
 // compactResultData is _compact_result_data (cap 320): the step's real result for the replan.
