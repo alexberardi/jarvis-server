@@ -23,6 +23,15 @@ which still decides the untagged case.
   downloads (`packages.Manifest.CheckDesktop`) with the same rules plus `platforms`,
   `apt_sources` and `post_install`, and refuses there. jarvisd checks the latest version's
   detail, which is what the Store installs.
+- **Limitation: an older version is judged by the latest one.** A `package-install` request
+  carrying an older version's `git_tag` is still checked against the latest version's
+  `targets`/`apt_packages`, so jarvisd can let through an older Pi-only version (the agent's
+  `CheckDesktop` still refuses that on the downloaded manifest), or refuse with a 422 an older
+  version a computer could run, which nothing downstream overrides. Pantry has
+  no side-effect-free per-version manifest: `GET /v1/commands/{name}/versions` carries neither a
+  manifest nor the commit SHA that `/download` reports as `git_tag`, and `GET …/download?version=` is keyed
+  by version, counts an install and is rate-limited per IP. Fixing this needs a Pantry change
+  (for example, a manifest and `git_commit_sha` on each `/versions` entry).
 - **Pantry** returns `targets` on the detail since jarvis-pantry #33; a Pantry without it reads as
   "no targets", so only the `apt_packages` rule applies against it.
 

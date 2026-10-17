@@ -26,14 +26,19 @@ import (
 )
 
 // Screens, in the order they are shot. landing and login are taken logged out; chat sends one
-// message (once, in the first theme) and waits for the answer.
-var allScreens = []string{"landing", "login", "home", "devices", "pantry", "routines", "nodes", "settings", "inbox", "chat"}
+// message (once, in the first theme) and waits for the answer. inbox_detail opens the newest inbox
+// item from the inbox modal, and is skipped when the inbox is empty.
+var allScreens = []string{"landing", "login", "home", "devices", "pantry", "routines", "nodes", "settings", "inbox", "inbox_detail", "chat"}
 
 // tabs maps a screen to its bottom-tab label.
 var tabs = map[string]string{"home": "Home", "devices": "Devices", "pantry": "Pantry", "routines": "Routines", "nodes": "Nodes"}
 
 // modals are reached from buttons on Home's header (testIDs), closed with Back.
-var modals = map[string]string{"settings": "settings-button", "inbox": "inbox-button"}
+var modals = map[string]string{"settings": "settings-button", "inbox": "inbox-button", "inbox_detail": "inbox-button"}
+
+// selInboxItem is an inbox list card (InboxListScreen's testID inbox-item-<id>), not its
+// selection checkbox.
+var selInboxItem = MustSelector("id~^inbox-item-")
 
 const defaultChat = "what is 12 times 7"
 
@@ -207,7 +212,16 @@ type Index struct {
 	LoggedIn bool        `json:"logged_in"`
 	Chat     *ChatResult `json:"chat,omitempty"`
 	Shots    []Shot      `json:"shots"`
+	Skipped  []Skip      `json:"skipped,omitempty"`
 	Failures []string    `json:"failures"`
+}
+
+// Skip is a screen that had nothing to show in one look; not a failure.
+type Skip struct {
+	Screen    string `json:"screen"`
+	Theme     string `json:"theme"`
+	FontScale string `json:"font_scale"`
+	Reason    string `json:"reason"`
 }
 
 type runner struct {
@@ -461,10 +475,45 @@ func (r *runner) visit(ctx context.Context, screen string, l look) error {
 	if err := sleep(ctx, 1500*time.Millisecond); err != nil {
 		return err
 	}
-	err = r.shootScreen(ctx, screen, l)
+	if screen == "inbox_detail" {
+		err = r.inboxDetail(ctx, l)
+	} else {
+		err = r.shootScreen(ctx, screen, l)
+	}
 	_ = r.d.Key(ctx, "KEYCODE_BACK")
 	_ = sleep(ctx, time.Second)
 	return err
+}
+
+// inboxDetail opens the first (newest) card of the open inbox modal, shoots it and goes back
+// to the list. An empty inbox is recorded as skipped.
+func (r *runner) inboxDetail(ctx context.Context, l look) error {
+	sc, _, err := r.settle(ctx, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	item, ok := firstInboxItem(sc)
+	if !ok {
+		r.skip("inbox_detail", l, "no inbox items")
+		return nil
+	}
+	if err := r.d.Tap(ctx, item); err != nil {
+		return err
+	}
+	if err := sleep(ctx, 1500*time.Millisecond); err != nil {
+		return err
+	}
+	err = r.shootScreen(ctx, "inbox_detail", l)
+	_ = r.d.Key(ctx, "KEYCODE_BACK")
+	_ = sleep(ctx, time.Second)
+	return err
+}
+
+func firstInboxItem(sc *Screen) (Node, bool) { return sc.Find(selInboxItem) }
+
+func (r *runner) skip(screen string, l look, reason string) {
+	logf("skip %s (%s, font %s): %s", screen, l.theme, l.scale, reason)
+	r.idx.Skipped = append(r.idx.Skipped, Skip{Screen: screen, Theme: l.theme, FontScale: l.scale, Reason: reason})
 }
 
 // chatRound sends one message from Home and waits for the answer.
