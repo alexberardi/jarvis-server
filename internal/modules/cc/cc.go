@@ -136,6 +136,8 @@ type Module struct {
 	HouseholdClock HouseholdTimezone
 	// WebSearch replaces DuckDuckGo for quick_search / deep_research (tests).
 	WebSearch servertools.WebSearcher
+	// WatchFetcher replaces the SSRF-guarded fetcher a web watch reads its page with (tests).
+	WatchFetcher WatchFetcher
 	// DefaultPromptProvider names the prompt provider when llm.prompt_provider is unset (e.g.
 	// the live model's catalog entry). Nil: an unset setting is an error (D11).
 	DefaultPromptProvider func(ctx context.Context) string
