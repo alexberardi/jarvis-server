@@ -8,6 +8,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -26,6 +27,9 @@ const (
 	signalStart    = "start"
 	signalPhone    = "phone_call"
 	signalApproval = "approval"
+	// signalConfirm resumes a run parked on a step its household's rules ask about (autonomy
+	// PLAN §1, checkpoint 2). A resume kind only: the run waits on approval.
+	signalConfirm = "confirm_step"
 )
 
 // Suspend is a deferred step pausing the run on a signal.
@@ -34,6 +38,7 @@ type Suspend struct {
 	Kind    string // phone_call | approval
 	Key     string // the correlation key (a phone session id)
 	Results []Result
+	Confirm bool // an approval wait on the step at Cursor itself (a rule said ask), not a replan
 }
 
 // runCtx is the per-run context threaded to the handlers (WorkflowContext). It replaces the
@@ -415,6 +420,30 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 			}
 			continue
 		}
+		var v *policy.Verdict
+		if !controlCommands[cmd] && s.autonomous(ctx, w.HouseholdID) {
+			d := s.Policy.Decide(ctx, w.HouseholdID, policy.Action{Tool: cmd, Args: args, IsRisky: st.IsRisky,
+				RunWithoutConfirmation: st.RunWithoutConfirmation, Source: policy.SourceErrandStep})
+			v = &d
+			switch {
+			case d.Effect == policy.Block:
+				msg := "blocked by a household rule"
+				if d.Rule != nil && d.Rule.Note != "" {
+					msg += ": " + d.Rule.Note
+				}
+				s.recordStep(ctx, w, i, cmd, d, policy.OutcomeBlocked)
+				s.log().Info("errands: step blocked by a household rule", "index", i, "command", cmd)
+				results = append(results, Result{Command: cmd, Label: label, Error: msg})
+				if auto {
+					s.updateRanCard(ctx, w, results, "running", "")
+				}
+				agg := s.aggregateAndCompose(ctx, w.Goal, results)
+				return &agg, nil
+			case d.Effect == policy.Ask && auto && !st.Approved:
+				s.recordStep(ctx, w, i, cmd, d, policy.OutcomeAsked)
+				return nil, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true, Results: results}
+			}
+		}
 		r, susp := s.runStep(ctx, rc, cmd, args, label, i)
 		if susp != nil {
 			susp.Results = results
@@ -422,6 +451,13 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 		}
 		r.Label = label
 		results = append(results, r)
+		if auto && v != nil {
+			outcome := policy.OutcomeRan
+			if !r.Success {
+				outcome = policy.OutcomeFailed
+			}
+			s.recordStep(ctx, w, i, cmd, *v, outcome)
+		}
 		if auto {
 			s.updateRanCard(ctx, w, results, "running", "")
 		}
@@ -432,6 +468,12 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 	}
 	agg := s.aggregateAndCompose(ctx, w.Goal, results)
 	return &agg, nil
+}
+
+// recordStep logs what the household's rules did to one step of a run.
+func (s *Service) recordStep(ctx context.Context, w *workflowRow, i int, cmd string, v policy.Verdict, outcome string) {
+	s.record(ctx, policy.Event{HouseholdID: w.HouseholdID, UserID: w.UserID, Source: policy.SourceErrandStep, SourceID: w.ID,
+		Tool: cmd, Effect: v.Effect, Outcome: outcome, RuleID: ruleID(v), Reason: v.Reason, Detail: map[string]any{"step": i}})
 }
 
 // Aggregate is the finished run's result.
@@ -672,7 +714,7 @@ func (s *Service) deliver(ctx context.Context, j resumeJob) (bool, error) {
 	}()
 
 	results := append([]Result(nil), w.Results...)
-	if j.Kind != signalStart {
+	if j.Kind != signalStart && (j.Kind != signalConfirm || j.Fail != nil) { // an approved step runs from the cursor
 		var outcome Result
 		switch {
 		case j.Fail != nil:
@@ -739,7 +781,21 @@ func (s *Service) suspend(ctx context.Context, w *workflowRow, susp *Suspend) {
 	step := susp.Cursor - 1
 	switch susp.Kind {
 	case signalApproval:
-		s.enqueueDeadline(ctx, deadlineJob{WorkflowID: w.ID, Step: step, Kind: signalApproval}, s.ApprovalDeadline)
+		if susp.Confirm {
+			// A new wait: the revision bump makes earlier cards (and this wait's predecessors'
+			// deadlines) stale.
+			if err := s.saveSteps(ctx, w.ID, w.Steps, true); err != nil {
+				s.log().Error("errands: bump revision for a step card", "workflow", w.ID, "err", err)
+			}
+			w.Revision++
+			s.enqueueDeadline(ctx, deadlineJob{WorkflowID: w.ID, Step: step, Kind: signalApproval, Confirm: true,
+				Revision: w.Revision}, s.ApprovalDeadline)
+			s.postStepCard(ctx, w, susp.Cursor)
+			s.updateRanCard(ctx, w, susp.Results, "waiting", "")
+			break
+		}
+		s.enqueueDeadline(ctx, deadlineJob{WorkflowID: w.ID, Step: step, Kind: signalApproval, Revision: w.Revision},
+			s.ApprovalDeadline)
 		reason := ""
 		if step >= 0 && step < len(w.Steps) {
 			reason = truthyStr(w.Steps[step].Args, "reason")

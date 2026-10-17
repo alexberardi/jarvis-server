@@ -21,6 +21,9 @@ const (
 	// CategoryAutonomy is the "Ran on its own" card's inbox category.
 	CategoryAutonomy = "autonomy"
 	ranTitlePrefix   = "🤖 Ran on its own: "
+	// CallbackApproveStep is the step card's Approve: run the one step a rule asks about.
+	CallbackApproveStep = "approve_errand_step"
+	stepTitlePrefix     = "✋ Errand needs your OK: "
 )
 
 // RanStep is one step on the card: status pending | ok | failed | skipped; Result is the step's
@@ -221,4 +224,38 @@ func (s *Service) recordStopped(ctx context.Context, w *workflowRow, by *int64) 
 	s.record(ctx, policy.Event{HouseholdID: w.HouseholdID, UserID: by, Source: policy.SourceErrandPlan,
 		SourceID: s.planOf(ctx, w.ID), Effect: policy.Allow, Outcome: policy.OutcomeStopped,
 		Reason: "stopped by a household member", Detail: map[string]any{"workflow_id": w.ID}})
+}
+
+// StepCardMetadata is the step card's metadata: the one step an autorun run is parked on
+// (autonomy PLAN §1, checkpoint 2), with Approve and Stop.
+func StepCardMetadata(workflowID string, revision, step int, st Step, hh string) map[string]any {
+	return map[string]any{
+		"household_id": hh,
+		"workflow_id":  workflowID,
+		"revision":     revision,
+		"step":         step,
+		"steps":        []Step{st},
+		"interactive_elements": []any{
+			element("approve-step", "Approve", CallbackApproveStep,
+				map[string]any{"workflow_id": workflowID, "step": step, "revision": revision}),
+			element("stop-errand", "Stop", CallbackStop, map[string]any{"workflow_id": workflowID, "revision": revision}),
+		},
+	}
+}
+
+// postStepCard asks for the OK to run step i on a card of its own (the run's stored card stays
+// its "Ran on its own" card).
+func (s *Service) postStepCard(ctx context.Context, w *workflowRow, i int) {
+	if s.Cards == nil || i < 0 || i >= len(w.Steps) {
+		return
+	}
+	st := w.Steps[i]
+	label := firstNonEmpty(st.Label, parse.PyStrip(st.Command))
+	summary := "“" + w.DisplayTitle() + "” wants to run “" + label + "”; your household's rules say to ask first."
+	s.Cards.Post(ctx, Card{
+		HouseholdID: w.HouseholdID, UserID: w.UserID, Title: stepTitlePrefix + label, Summary: summary,
+		Body:     summary + "\n\nTap **Approve** to run it, or **Stop** to end the errand here.",
+		Category: planCategory, Metadata: StepCardMetadata(w.ID, w.Revision, i, st, w.HouseholdID), Push: true,
+		TargetType: targetType(w.UserID),
+	})
 }

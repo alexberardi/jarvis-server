@@ -153,6 +153,10 @@ func (s *Service) postReplanCard(ctx context.Context, w *workflowRow, reason str
 		Body: replanCardBody(title, reason, add), Category: planCategory,
 		Metadata: ReplanCardMetadata(w.ID, w.Revision, add, w.HouseholdID), Push: true, TargetType: targetType(w.UserID),
 	}
+	if w.Kind == KindAutorun {
+		s.Cards.Post(ctx, c) // the run's stored card is its "Ran on its own" card
+		return
+	}
 	id := ""
 	if w.InboxItemID != "" && s.Cards.Update(ctx, w.InboxItemID, c) {
 		id = w.InboxItemID

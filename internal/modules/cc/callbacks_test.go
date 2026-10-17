@@ -278,7 +278,7 @@ func TestCallbackFailFast(t *testing.T) {
 func TestServerCallbackWiring(t *testing.T) {
 	ce := newCBEnv(t)
 	want := []string{
-		"errand.approve_errand_plan", "errand.approve_replan", "errand.discard_errand_plan", "errand.refine_errand_plan",
+		"errand.approve_errand_plan", "errand.approve_errand_step", "errand.approve_replan", "errand.discard_errand_plan", "errand.refine_errand_plan",
 		"errand.stop_errand", "jarvis.proposable_action.dismiss", "jarvis.proposable_action.execute",
 		"jarvis.proposable_action.suppress", "jarvis.signal_automation.dismiss", "jarvis.signal_automation.execute",
 		"make_phone_call.cancel_call", "make_phone_call.confirm_call", "make_phone_call.escalation_answer",
