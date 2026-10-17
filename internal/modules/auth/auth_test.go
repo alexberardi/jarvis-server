@@ -921,6 +921,7 @@ func TestSuperuserAndTempPassword(t *testing.T) {
 	clock := withClock(t, time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
 	e := newEnv(t)
 	su := e.superuser()
+	e.openRegistration(true)
 	u := e.register()
 	e.expect(403, "Superuser access required", "GET", "/superuser/users", nil, bearerH(u.access))
 	users := e.list("GET", "/superuser/users", bearerH(su.access))
@@ -993,7 +994,7 @@ func TestSettingsGuards(t *testing.T) {
 	u := e.register()
 	su := e.superuser()
 	m := e.expect(200, "", "GET", "/settings/", nil, e.appH())
-	if m["total"] != float64(4) {
+	if m["total"] != float64(5) {
 		t.Fatal(m)
 	}
 	e.expect(200, "", "GET", "/settings/auth.algorithm", nil, bearerH(su.access))
