@@ -6,7 +6,7 @@ Edit it only when the state changes: an item is ticked or added, or the Next lin
 
 **Cutover gate (user 2026-10-08) — done: prod cut over to jarvisd rc12 on 2026-10-09 ([archive](status/archive-2026-10.md)). Historical status 2026-10-08: jarvisd `v0.1.0-rc3` published (recipes inside, R0–R11 done); node-setup v0.3.2 released; mobile Twilio (#83) and recipes-app image fix (#20) merged; all cutover questions Q1–Q11 answered (runbook §Answers). Remaining: Mac rehearsal on rc3 (user sudo on the MBP), kitchen node → 0.3.2 via legacy admin (user go), then schedule the cutover. Original gate: one coordinated release — jarvisd with recipes ported in (2026-10-08 decision) + node-setup v0.3.2 (#134/#135) + mobile Twilio section; recipes remapped by email.**
 
-## Current phase: 6 (packaging) — pre-releases through `v0.1.0-rc14`, no full release yet; prod cut over to jarvisd (rc12, 2026-10-09). Phases 0–5 done. In parallel: the Go node, `jarvis-agent` (desktop voice, browser control, island, read the screen, dictation; Pi phase 4.1 HAT done, 4.2 next)
+## Current phase: 6 (packaging) — pre-releases through `v0.1.0-rc15`, no full release yet; prod cut over to jarvisd (rc12, 2026-10-09). Phases 0–5 done. In parallel: the Go node, `jarvis-agent` (desktop voice, browser control, island, read the screen, dictation; Pi phase 4.1 HAT done, 4.2 next)
 
 ### Before the official release (user 2026-10-12): next step
 
