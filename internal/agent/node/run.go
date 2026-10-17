@@ -327,7 +327,7 @@ func (r *Runner) heartbeat(ctx context.Context, cc *CC) error {
 }
 
 func (r *Runner) beat() Beat {
-	b := Beat{Version: r.Version, InstallMode: r.InstallMode, NodeKind: r.NodeKind, DeviceID: r.DeviceID}
+	b := Beat{Version: r.Version, InstallMode: r.InstallMode, NodeKind: r.NodeKind, DeviceID: r.DeviceID, Name: r.Creds.Name}
 	if r.NeedsK2 != nil {
 		b.NeedsK2 = r.NeedsK2()
 	}

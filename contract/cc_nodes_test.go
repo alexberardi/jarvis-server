@@ -173,6 +173,18 @@ func TestCCNodeCreateAndHeartbeat(t *testing.T) {
 		t.Fatalf("heartbeat not reflected: %v", got)
 	}
 
+	// jarvisd addition (#62): a heartbeat's name renames that node's registration, which the
+	// node APIs show as name. Legacy ignores it as an unknown field; the answer is the same.
+	tg.Post(t, CommandCenter, "/api/v0/admin/nodes/heartbeat", map[string]any{"name": "contract renamed"}, n.APIKeyH()).
+		Expect(http.StatusOK, Obj{"status": Eq("ok")})
+	if Jarvisd() {
+		got = tg.Get(t, CommandCenter, "/api/v0/admin/nodes/"+n.ID, u.H()).
+			Expect(http.StatusOK, nodeResponseShape()).Object()
+		if got["name"] != "contract renamed" {
+			t.Fatalf("heartbeat name not reflected: %v", got["name"])
+		}
+	}
+
 	tg.Get(t, CommandCenter, "/api/v0/admin/nodes/contract-nosuch-"+randHex(3), u.H()).
 		ExpectError(http.StatusNotFound, "Node not found")
 }

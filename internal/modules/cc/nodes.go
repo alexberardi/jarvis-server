@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
@@ -258,6 +259,7 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	kind, hasKind := b.str("node_kind", false)
 	caps, hasCaps := b.object("capabilities", false)
 	devID, hasDevID := b.str("device_id", false)
+	name, hasName := b.str("name", false)
 	b.object("thread_status", false)
 	if !b.done(w) {
 		return
@@ -321,6 +323,14 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	if _, err := m.deps.DB.Write.ExecContext(ctx, q+` WHERE node_id = ?`, args...); err != nil {
 		m.internalError(w, err)
 		return
+	}
+	// A renamed computer reports its new name (#62). It renames only this node, the one the
+	// key authenticated; an empty or overlong name is ignored, so a bad node.json can't stop
+	// the heartbeat. A failure is logged: the name is a label, the beat still counts.
+	if s := nodeNameValue(name); hasName && s != nil {
+		if err := m.Nodes.RenameNode(ctx, n.ID, *s); err != nil {
+			m.deps.Log.Warn("cc: rename node", "node", n.ID, "err", err)
+		}
 	}
 	row, err := m.nodeByID(ctx, n.ID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -387,6 +397,18 @@ func cleanCaps(in map[string]any) map[string]any {
 func nodeKindValue(s string) *string {
 	s = strings.TrimSpace(s)
 	if s == "" || len(s) > maxCapLen {
+		return nil
+	}
+	return &s
+}
+
+// maxNodeNameLen bounds a name a heartbeat reports, in characters.
+const maxNodeNameLen = 100
+
+// nodeNameValue is a reported name, trimmed; empty or overlong is nil (ignored).
+func nodeNameValue(s string) *string {
+	s = strings.TrimSpace(s)
+	if s == "" || utf8.RuneCountInString(s) > maxNodeNameLen {
 		return nil
 	}
 	return &s
