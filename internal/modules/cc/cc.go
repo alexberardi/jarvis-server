@@ -383,6 +383,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerCallbacks(mux)
 	// Household settings from mobile (doc 13 §3.7).
 	m.registerHouseholdSettings(mux)
+	m.registerHouseholdPrompt(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)

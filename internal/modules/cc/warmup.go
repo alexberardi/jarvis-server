@@ -186,15 +186,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		memberIDs: append([]int64(nil), n.HouseholdMemberIDs...),
 		mode:      mode, promptName: promptName, chatUserID: req.chatUserID,
 	}
-	room, voiceMode := prompts.DefaultRoom, prompts.DefaultVoiceMode
-	if n.row != nil {
-		if n.row.room != "" {
-			room = n.row.room
-		}
-		if n.row.voiceMode.Valid && n.row.voiceMode.String != "" {
-			voiceMode = n.row.voiceMode.String
-		}
-	}
+	room, voiceMode := nodeRoomVoice(n.row)
 	conv.room = room
 
 	if loc := strings.TrimSpace(m.settings.String(ctx, settingHouseholdLocation, settings.Scope{HouseholdID: hh})); loc != "" {
