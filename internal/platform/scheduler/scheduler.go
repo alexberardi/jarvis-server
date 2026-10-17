@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -83,6 +84,8 @@ type Scheduler struct {
 	// Tick is how often due triggers are checked. Cron and routine granularity is one minute,
 	// so the default of 5 s fires within a few seconds of the due time.
 	Tick time.Duration
+
+	running sync.WaitGroup
 }
 
 func New(d *db.DB, q *queue.Queue, log *slog.Logger) *Scheduler {
@@ -193,7 +196,7 @@ func (s *Scheduler) Status(ctx context.Context, name string) (Status, error) {
 
 // Start runs the tick loop until ctx is cancelled. It returns at once.
 func (s *Scheduler) Start(ctx context.Context) {
-	go func() {
+	s.running.Go(func() {
 		t := time.NewTicker(s.Tick)
 		defer t.Stop()
 		for {
@@ -206,8 +209,12 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case <-t.C:
 			}
 		}
-	}()
+	})
 }
+
+// Wait blocks until the tick loop started by Start has returned (after its context is
+// cancelled): no trigger is being fired and no query is in flight.
+func (s *Scheduler) Wait() { s.running.Wait() }
 
 type due struct {
 	t       Trigger

@@ -20,6 +20,11 @@ import (
 // ShutdownTimeout bounds graceful shutdown of each listener.
 var ShutdownTimeout = 10 * time.Second
 
+// DrainTimeout bounds the wait, once the listeners are shut down, for queue workers and the
+// scheduler to return before Run does (and the caller closes the DB). It is its own budget so
+// slow requests cannot use it up.
+var DrainTimeout = 10 * time.Second
+
 // Runner serves a set of modules.
 type Runner struct {
 	Deps    Deps
@@ -185,6 +190,10 @@ func (r *Runner) Run(ctx context.Context) error {
 		srv := &http.Server{
 			Handler:           httpx.Middleware(r.Deps.Log, n, muxes[n]),
 			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+			// No WriteTimeout: SSE streams stay open. Requests get the run context instead, so
+			// cancelling it ends them (and lets Shutdown finish) instead of waiting them out.
+			BaseContext: func(net.Listener) context.Context { return ctx },
 		}
 		servers = append(servers, srv)
 		l := listeners[n]
@@ -229,15 +238,30 @@ func (r *Runner) Run(ctx context.Context) error {
 		srv.Shutdown(sctx)
 	}
 	wg.Wait()
-	if r.Deps.Queue != nil {
-		// Running jobs saw ctx cancelled; let them finish before the caller closes the DB.
-		done := make(chan struct{})
-		go func() { r.Deps.Queue.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-sctx.Done():
-			r.Deps.Log.Warn("module: queue workers still running at shutdown timeout")
-		}
-	}
+	r.drain()
 	return runErr
+}
+
+// drain waits up to DrainTimeout for the queue workers and the scheduler, which saw the run
+// context cancelled, to return before the caller closes the DB.
+func (r *Runner) drain() {
+	var waits []func()
+	if r.Deps.Queue != nil {
+		waits = append(waits, r.Deps.Queue.Wait)
+	}
+	if r.Deps.Scheduler != nil {
+		waits = append(waits, r.Deps.Scheduler.Wait)
+	}
+	var wg sync.WaitGroup
+	for _, w := range waits {
+		wg.Go(w)
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(DrainTimeout):
+		r.Deps.Log.Warn("module: queue workers or scheduler still running at drain timeout; closing the DB under them",
+			"timeout", DrainTimeout)
+	}
 }

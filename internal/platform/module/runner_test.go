@@ -1,6 +1,7 @@
 package module
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -293,5 +294,106 @@ func TestRunnerMigratesPlatformTables(t *testing.T) {
 		if err := d.DB.Read.QueryRow(`SELECT count(*) FROM ` + table).Scan(&n); err != nil {
 			t.Errorf("%s: %v", table, err)
 		}
+	}
+}
+
+// sseModule serves GET /stream like the admin log tail: one event, then it holds the
+// connection until the request's context ends.
+type sseModule struct{ cancelled atomic.Bool }
+
+func (*sseModule) Name() string      { return "sse" }
+func (*sseModule) Listener() string  { return config.ListenerAdmin }
+func (*sseModule) Migrations() fs.FS { return nil }
+func (m *sseModule) Register(mux *http.ServeMux, _ Deps) {
+	mux.HandleFunc("GET /stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: hi\n\n")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		m.cancelled.Store(true)
+	})
+}
+
+// openStream starts r with ctx and holds one SSE request open; it returns Run's result channel.
+func openStream(t *testing.T, ctx context.Context, r *Runner) chan error {
+	t.Helper()
+	ready := make(chan struct{})
+	r.OnReady = func() { close(ready) }
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	<-ready
+	resp, err := http.Get("http://" + r.Addr(config.ListenerAdmin) + "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	if _, err := bufio.NewReader(resp.Body).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	return done
+}
+
+func TestShutdownCancelsOpenStreams(t *testing.T) {
+	old := ShutdownTimeout
+	ShutdownTimeout = 5 * time.Second
+	defer func() { ShutdownTimeout = old }()
+	sse := &sseModule{}
+	r := &Runner{Deps: deps(t), Modules: []Module{sse}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := openStream(t, ctx, r)
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("Run never returned")
+	}
+	if el := time.Since(start); el > 2*time.Second {
+		t.Errorf("Run took %v to stop with an SSE stream open; want well under ShutdownTimeout (%v)", el, ShutdownTimeout)
+	}
+	if !sse.cancelled.Load() {
+		t.Error("the stream handler's request context was not cancelled")
+	}
+}
+
+func TestShutdownDrainsQueueBeforeReturning(t *testing.T) {
+	old, oldDrain := ShutdownTimeout, DrainTimeout
+	ShutdownTimeout, DrainTimeout = time.Second, 10*time.Second
+	defer func() { ShutdownTimeout, DrainTimeout = old, oldDrain }()
+	d := deps(t)
+	d.Queue = queue.New(d.DB, d.Log)
+	d.Queue.PollInterval = 10 * time.Millisecond
+	d.Scheduler = scheduler.New(d.DB, d.Queue, d.Log)
+	running := make(chan struct{})
+	var finished atomic.Bool
+	d.Queue.Register("slow", queue.Handler{Run: func(ctx context.Context, _ queue.Job) ([]byte, error) {
+		close(running)
+		<-ctx.Done()
+		time.Sleep(1500 * time.Millisecond) // longer than ShutdownTimeout: the drain has its own budget
+		finished.Store(true)
+		return nil, ctx.Err()
+	}})
+	r := &Runner{Deps: d, Modules: []Module{&sseModule{}}}
+	if err := r.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := openStream(t, ctx, r)
+	if _, err := d.Queue.Enqueue(context.Background(), "slow", nil, queue.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-running:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("job never started")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("Run never returned")
+	}
+	if !finished.Load() {
+		t.Error("Run returned (and the caller would close the DB) while a job was still running")
 	}
 }
