@@ -33,6 +33,7 @@ type connectOpts struct {
 	clean                bool
 	version              byte // 4 (3.1.1, default) or 5
 	ws                   bool
+	willTopic            string // sets the Last Will when not empty
 }
 
 // dial connects and returns the client plus the CONNACK. On a refused connect the client
@@ -72,6 +73,9 @@ func dial(t *testing.T, b *Broker, o connectOpts) (*testClient, packets.Packet) 
 			Username:         []byte(o.user),
 			PasswordFlag:     o.pass != "",
 			Password:         []byte(o.pass),
+			WillFlag:         o.willTopic != "",
+			WillTopic:        o.willTopic,
+			WillPayload:      []byte("will"),
 		},
 	})
 	return c, c.expect(packets.Connack)

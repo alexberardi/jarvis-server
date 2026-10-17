@@ -403,7 +403,7 @@ From every `os.Getenv` in `cmd/jarvisd/main.go` and `phone.go`, plus the legacy 
 | `JARVIS_PHONE_PUBLIC_URL`, `…_WSS_URL` | `phone.go:18-19` | no public media URL | — | Setting with env fallback (same change as AQ6). |
 | `RELAY_URL`, `RELAY_HOUSEHOLD_JWT` | `main.go:57-59` | **push delivery silently disabled** (`internal/modules/notifications/notifications.go:99-101`) | `env-generator.ts:99` defaulted to the public relay | Setting `notifications.relay_url`, opt-in in the wizard (IQ8). |
 | `JARVIS_OSX_API_URL/KEY` | `main.go:138` | no Apple Vision OCR | — | Setting with env fallback (no installer involvement). |
-| `JARVIS_MQTT_ADDR`, `…_WS_ADDR`, `JARVIS_MQTT_ALLOW_ANONYMOUS` | `main.go:64-66` | `:1884`/`:9883`, anonymous off | — | Bootstrap env, unchanged. |
+| `JARVIS_MQTT_ADDR`, `…_WS_ADDR`, `JARVIS_MQTT_ALLOW_ANONYMOUS`, `JARVIS_MQTT_WS_ALLOWED_ORIGINS` | `main.go` (`mqtt*` helpers) | `:1884`/`:9883`, anonymous off (on: read-only, publishes only under `jarvis/dev/`, WARN at start, doctor warns), no extra WebSocket origins | — | Bootstrap env. |
 | `JARVIS_MDNS` | `main.go:48` | advertise | — | Bootstrap env. |
 | `JARVIS_HOME`, `JARVIS_HOST`, `JARVIS_PORT_*` | `config.go:65-97` | defaults | — | Bootstrap env; `--home` flag added (I1). |
 | `JARVIS_BLOB_STORE`, `JARVIS_LOG_LEVEL`, `JARVIS_ADMIN_UI_DIR` | `main.go:253,267,77` | defaults | — | Bootstrap/dev env. |

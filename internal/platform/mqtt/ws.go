@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -31,17 +33,62 @@ type wsListener struct {
 
 func newWSListener(b *Broker, id string, ln net.Listener) *wsListener {
 	set := newConnSet()
-	return &wsListener{
+	l := &wsListener{
 		id:  id,
 		ln:  set.listen(ln),
 		raw: ln,
 		set: set,
 		b:   b,
-		upgrader: websocket.Upgrader{
-			Subprotocols: []string{"mqtt"},
-			CheckOrigin:  func(*http.Request) bool { return true },
-		},
 	}
+	l.upgrader = websocket.Upgrader{Subprotocols: []string{"mqtt"}, CheckOrigin: l.checkOrigin}
+	return l
+}
+
+// checkOrigin refuses (403) a browser page from another site, which could otherwise drive
+// the broker from a LAN user's browser.
+func (l *wsListener) checkOrigin(r *http.Request) bool {
+	if originAllowed(r, l.b.opts.AllowedOrigins) {
+		return true
+	}
+	l.log.Warn("mqtt websocket origin refused", "listener", l.id, "origin", r.Header.Get("Origin"), "remote", r.RemoteAddr)
+	return false
+}
+
+// originAllowed admits a request without an Origin (nodes and the mobile app aren't
+// browsers), and one whose Origin host is the request's own Host, localhost, a loopback,
+// private or link-local IP, an mDNS .local name, or one of allowed (host names, or URLs).
+func originAllowed(r *http.Request, allowed []string) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == originHost(r.Host) || host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		return true
+	}
+	for _, a := range allowed {
+		if a = strings.TrimSpace(a); strings.Contains(a, "://") {
+			if au, err := url.Parse(a); err == nil {
+				a = au.Host
+			}
+		}
+		if a != "" && host == originHost(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// originHost is the lower-cased host of a host[:port], without IPv6 brackets.
+func originHost(hostport string) string {
+	return strings.ToLower((&url.URL{Host: hostport}).Hostname())
 }
 
 func (l *wsListener) ID() string       { return l.id }

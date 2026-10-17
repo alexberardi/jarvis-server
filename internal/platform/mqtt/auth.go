@@ -17,10 +17,14 @@ const (
 	Node Kind = iota + 1
 	// Server is a trusted server-side client (e.g. an out-of-process CC). Unrestricted.
 	Server
-	// Anonymous is a client without credentials, admitted only with Options.AllowAnonymous.
-	// Unrestricted, matching the legacy shared-credential Mosquitto setup.
+	// Anonymous is a client without credentials, admitted only with Options.AllowAnonymous
+	// (dev only). It is read-only: it may subscribe to any topic but publish only under
+	// AnonymousPublishPrefix, so it can't command a node or forge a response.
 	Anonymous
 )
+
+// AnonymousPublishPrefix is the only topic subtree an anonymous client may publish to.
+const AnonymousPublishPrefix = "jarvis/dev/"
 
 // Principal is the identity a client authenticated as.
 type Principal struct {
@@ -140,6 +144,12 @@ func (h *authHook) OnConnectAuthenticate(cl *mochi.Client, pk packets.Packet) bo
 			return false
 		}
 	}
+	// mochi publishes the Last Will without an ACL check, so its topic must pass the
+	// publish rules here.
+	if pk.Connect.WillFlag && !canWrite(p, pk.Connect.WillTopic) {
+		h.reject(cl, user, "will topic not allowed: "+pk.Connect.WillTopic)
+		return false
+	}
 	h.mu.Lock()
 	h.principals[cl.ID] = principalEntry{p: p, cl: cl}
 	h.mu.Unlock()
@@ -165,13 +175,25 @@ func (h *authHook) OnACLCheck(cl *mochi.Client, topic string, write bool) bool {
 	if !ok {
 		return false
 	}
-	if p.Kind != Node {
+	if write {
+		return canWrite(p, topic)
+	}
+	switch p.Kind {
+	case Server, Anonymous:
 		return true
 	}
-	if write {
-		return CanPublish(p.NodeID, topic)
-	}
 	return CanSubscribe(p.NodeID, topic)
+}
+
+// canWrite reports whether p may publish to topic, directly or through its Last Will.
+func canWrite(p Principal, topic string) bool {
+	switch p.Kind {
+	case Server:
+		return true
+	case Anonymous:
+		return strings.HasPrefix(topic, AnonymousPublishPrefix)
+	}
+	return CanPublish(p.NodeID, topic)
 }
 
 // OnPublish strips the retain flag from node publishes: a retained response would be

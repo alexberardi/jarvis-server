@@ -119,7 +119,7 @@ func TestDoctorFlagsUFWBlockingTheLAN(t *testing.T) {
 	home := lan(t, "10.0.0.0/24")
 	fw := &linuxFirewall{ufw: writeUFW(t, "yes", "DROP", "### tuple ### allow tcp 22 0.0.0.0/0 any 10.0.0.0/24 in\n"), run: noFirewalld}
 	checks := Run(context.Background(), opts(fw, []*net.IPNet{home}))
-	if len(checks) != 3 || checks[0].Status != OK || checks[2].Name != "legacy stack" {
+	if len(checks) != 4 || checks[0].Status != OK || checks[2].Name != "legacy stack" || checks[3].Name != "mqtt anonymous" {
 		t.Fatalf("checks %+v", checks)
 	}
 	c := checks[1]

@@ -692,7 +692,7 @@ func (m *Module) runDoctor(ctx context.Context, refresh bool) doctorResult {
 		if run == nil {
 			run = doctor.Run
 		}
-		m.doc.checks = run(ctx, doctor.Options{Ports: m.Exposure.Ports(m.deps.Config.Ports)})
+		m.doc.checks = run(ctx, doctor.Options{Ports: m.Exposure.Ports(m.deps.Config.Ports), MQTTAnonymous: m.Exposure.MQTTAnonymous})
 		if m.doc.checks == nil {
 			m.doc.checks = []doctor.Check{}
 		}

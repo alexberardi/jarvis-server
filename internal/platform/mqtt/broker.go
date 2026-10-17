@@ -4,7 +4,8 @@
 // catalogue of docs/cc/05-nodes.md §2.4. What it adds on top of mochi:
 //   - per-node credentials and ACLs (D4): a node subscribes only to its own subtree and
 //     jarvis/auth/+/ready, and publishes only its own responses; anonymous clients are
-//     refused unless AllowAnonymous is set
+//     refused unless AllowAnonymous is set, and then read-only (see Anonymous)
+//   - an Origin check on the WebSocket listener (originAllowed)
 //   - in-process publishing for CC via mochi's inline client (no loopback connection)
 //   - Request, the subscribe-before-publish request/response helper (doc 05 §7.2)
 //
@@ -39,9 +40,14 @@ var ErrClosed = errors.New("mqtt: broker closed")
 
 // Options configures a Broker.
 type Options struct {
-	TCPAddr        string // "" disables the TCP listener
-	WSAddr         string // "" disables the WebSocket listener
-	AllowAnonymous bool   // legacy/dev only: admit clients without credentials, unrestricted
+	TCPAddr string // "" disables the TCP listener
+	WSAddr  string // "" disables the WebSocket listener
+	// AllowAnonymous (dev only) admits clients without credentials. They are read-only:
+	// they may subscribe to anything but publish only under AnonymousPublishPrefix.
+	AllowAnonymous bool
+	// AllowedOrigins are extra hosts (e.g. the admin's public name) whose pages may open the
+	// WebSocket listener; see originAllowed for the ones always admitted.
+	AllowedOrigins []string
 	Logger         *slog.Logger
 }
 
@@ -146,6 +152,10 @@ func (b *Broker) Start(ctx context.Context) error {
 		b.log.Info("mqtt listening", "listener", l.ID(), "addr", l.Address())
 	}
 	b.mu.Unlock()
+	if b.opts.AllowAnonymous {
+		b.log.Warn("mqtt: anonymous access is ON (JARVIS_MQTT_ALLOW_ANONYMOUS=1, dev only): clients without credentials may subscribe to every topic and publish under "+AnonymousPublishPrefix,
+			"tcp", b.TCPAddr(), "ws", b.WSAddr())
+	}
 	go func() {
 		select {
 		case <-ctx.Done():
