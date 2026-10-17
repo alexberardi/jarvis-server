@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -495,6 +496,42 @@ func pickServer(t *testing.T, s *Server, url string) stateView {
 		t.Fatalf("choose server: %d %s", w.Code, w.Body)
 	}
 	return decode[stateView](t, w)
+}
+
+// The response to POST /api/pair describes the attempt it started, even when the poll loop
+// finishes first (a slow CI runner, loop #129): the page has to get the code to show.
+func TestPairShowsCodeWhenApprovalWinsTheRace(t *testing.T) {
+	f := newFakeJarvisd(t)
+	j := &joinDeps{}
+	d := j.deps(f)
+	var s *Server
+	var slow atomic.Bool
+	creds := d.Creds
+	d.Creds = func() (node.Creds, bool) {
+		if slow.Load() {
+			// Let the poll loop (approved on its first poll) finish before the response is built.
+			done := make(chan struct{})
+			go func() { s.app.wg.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		return creds()
+	}
+	s = testServer(t, d)
+	pickServer(t, s, f.URL)
+	slow.Store(true)
+	w := send(s, req(s, "POST", "api/pair", map[string]any{}))
+	slow.Store(false)
+	st := decode[stateView](t, w)
+	if w.Code != 200 || st.Join.State != JoinWaiting || st.Join.Code != "ABCD-EFGH" {
+		t.Fatalf("pair: %d %s", w.Code, w.Body)
+	}
+	s.app.wg.Wait()
+	if st = decode[stateView](t, send(s, req(s, "GET", "api/state", nil))); st.Join.State != JoinConfirm {
+		t.Fatalf("after approval: %+v", st.Join)
+	}
 }
 
 func TestPairingHappyPath(t *testing.T) {

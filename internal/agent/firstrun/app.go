@@ -309,6 +309,8 @@ func (a *app) postPair(w http.ResponseWriter, r *http.Request) {
 	a.cancel = cancel
 	a.wg.Add(1)
 	a.mu.Unlock()
+	// The answer shows this attempt's code: built before the poll loop can move past it (loop #129).
+	v := a.state(r.Context())
 	go func() {
 		defer a.wg.Done()
 		defer cancel()
@@ -334,7 +336,7 @@ func (a *app) postPair(w http.ResponseWriter, r *http.Request) {
 		}
 		a.mu.Unlock()
 	}()
-	a.getState(w, r)
+	writeJSON(w, http.StatusOK, v)
 }
 
 // postPairConfirm joins the household the approver named, once this computer's user says yes.
