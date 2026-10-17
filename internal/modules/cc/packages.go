@@ -193,7 +193,7 @@ func isCommitSHA(s string) bool {
 // version is a git_tag Pantry lists for the package, a full commit id (what the app sends,
 // from Pantry's /download), or else Pantry's newest. It writes the refusal and returns false
 // when the install can't go ahead.
-func (m *Module) pinDesktopInstall(w http.ResponseWriter, ctx context.Context, hh, name, repo string, tag *string) (string, *string, bool) {
+func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, hh, name, repo string, tag *string) (string, *string, bool) {
 	unavailable := func(err error) (string, *string, bool) {
 		m.deps.Log.Warn("cc: Pantry can't vouch for a desktop install; refused", "command", name, "err", err)
 		detailCode(w, http.StatusServiceUnavailable, "The Pantry package store can't be reached to check "+name+
@@ -630,7 +630,7 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 		return nil, false
 	}
 	if needsPantry && node.desktop() {
-		if repo, tag, ok = m.pinDesktopInstall(w, ctx, hh, name, repo, tag); !ok {
+		if repo, tag, ok = m.pinDesktopInstall(ctx, w, hh, name, repo, tag); !ok {
 			return nil, false
 		}
 	}
