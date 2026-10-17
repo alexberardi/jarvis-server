@@ -39,7 +39,9 @@ func TestTurnLockWaitGivesUpWithCaller(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if err := l.lock(ctx); !errors.Is(err, errConversationBusy) {
+	var err error
+	gaveUpWithin(t, 2*time.Second, func() { err = l.lock(ctx) })
+	if !errors.Is(err, errConversationBusy) {
 		t.Fatalf("got %v, want errConversationBusy", err)
 	}
 	l.Unlock()
@@ -92,7 +94,7 @@ func TestVoiceRoutesBusyIs409(t *testing.T) {
 			t.Errorf("%s: status %d, want 409: %s", c.body, rec.Code, rec.Body)
 		}
 	}
-	// The streamed continue falls back to the blocking one, which then answers 409.
+	// The streamed continue gives up too and answers with the use_blocking_continue fallback.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"conversation_id":"tl2","tool_results":[{"tool_call_id":"c1","output":{}}]}`)).
 		WithContext(cancelledCtx())
@@ -114,12 +116,15 @@ func TestMobileChatWaitGivesUpWithClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conv.mu.Lock()
 	rec := httptest.NewRecorder()
-	gaveUpWithin(t, 2*time.Second, func() {
-		ce.m.chatStream(cancelledCtx(), &sseWriter{w: rec, rc: http.NewResponseController(rec)}, u, row, req)
-	})
-	conv.mu.Unlock()
+	func() {
+		// Deferred, so a regression fails in 2 s instead of hanging on the held lock.
+		conv.mu.Lock()
+		defer conv.mu.Unlock()
+		gaveUpWithin(t, 2*time.Second, func() {
+			ce.m.chatStream(cancelledCtx(), &sseWriter{w: rec, rc: http.NewResponseController(rec)}, u, row, req)
+		})
+	}()
 	if !strings.Contains(rec.Body.String(), `"type": "error"`) {
 		t.Fatalf("no error frame: %s", rec.Body)
 	}
