@@ -118,7 +118,8 @@ func TestAutorunLaunchesWithRanCard(t *testing.T) {
 		t.Fatalf("body = %q", up.Body)
 	}
 	evs := e.act.all()
-	if len(evs) != 1 || evs[0].Outcome != policy.OutcomeLaunched || evs[0].Source != policy.SourceErrandPlan ||
+	if strings.Join(outcomes(evs), ",") != "launched,ran,ran" || evs[1].Source != policy.SourceErrandStep ||
+		evs[1].SourceID != p.WorkflowID || evs[1].Tool != "get_weather" || *evs[1].RuleID != 4 || evs[0].Outcome != policy.OutcomeLaunched || evs[0].Source != policy.SourceErrandPlan ||
 		evs[0].SourceID != p.ID || evs[0].Detail["workflow_id"] != p.WorkflowID {
 		t.Fatalf("events = %+v", evs)
 	}
@@ -234,10 +235,12 @@ func TestAutorunStopWhileRunning(t *testing.T) {
 	if _, ok := up.Metadata["interactive_elements"]; ok {
 		t.Fatal("a stopped card keeps its Stop button")
 	}
-	if got := outcomes(e.act.all()); len(got) != 2 || got[0] != policy.OutcomeLaunched || got[1] != policy.OutcomeStopped {
+	// The step that ran before the Stop is logged too (checkpoint 2).
+	if got := outcomes(e.act.all()); len(got) != 3 || got[0] != policy.OutcomeLaunched || got[1] != policy.OutcomeRan ||
+		got[2] != policy.OutcomeStopped {
 		t.Fatalf("events = %v", got)
 	}
-	if ev := e.act.all()[1]; ev.UserID == nil || *ev.UserID != 7 {
+	if ev := e.act.all()[2]; ev.UserID == nil || *ev.UserID != 7 {
 		t.Fatalf("stopped event = %+v", ev)
 	}
 	if hasTitlePrefix(e.cards.all(), "✅") || hasTitlePrefix(e.cards.all(), "⚠️") {

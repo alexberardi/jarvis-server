@@ -49,6 +49,7 @@ func (s *Service) Callbacks() map[string]CallbackFunc {
 		CallbackDiscard:     s.handleDiscard,
 		CallbackApproveRepl: s.handleApproveReplan,
 		CallbackStop:        s.handleStop,
+		CallbackApproveStep: s.handleApproveStep,
 	}
 }
 
@@ -282,6 +283,66 @@ func (s *Service) handleApproveReplan(ctx context.Context, c CallbackContext) Ca
 	}
 	s.log().Info("errands: replan approved", "workflow", w.ID, "resume_at", step+1)
 	return CallbackResult{Success: true}
+}
+
+// dataInt reads an int a card sent as a JSON number, an int or a numeric string.
+func dataInt(d map[string]any, k string) (int, bool) {
+	switch x := d[k].(type) {
+	case float64:
+		if x == math.Trunc(x) && !math.IsInf(x, 0) {
+			return int(x), true
+		}
+	case json.Number:
+		if n, err := x.Int64(); err == nil {
+			return int(n), true
+		}
+	case int:
+		return x, true
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// handleApproveStep is the step card's Approve: mark the parked step approved and resume the
+// run from it.
+func (s *Service) handleApproveStep(ctx context.Context, c CallbackContext) CallbackResult {
+	if !s.Available() {
+		return fail("Errands are unavailable right now.")
+	}
+	id := dataStr(c.Data, "workflow_id")
+	if id == "" {
+		return fail("Missing workflow_id")
+	}
+	step, ok := dataInt(c.Data, "step")
+	if !ok {
+		return fail("Missing step")
+	}
+	w, err := s.workflowIn(ctx, id, c.HouseholdID)
+	if err != nil {
+		return fail("Couldn't load the errand.")
+	}
+	if w == nil {
+		return fail("Errand not found")
+	}
+	if w.State != "waiting" || w.WaitingOn != signalApproval || w.Cursor != step || step < 0 || step >= len(w.Steps) {
+		return handled(c.HouseholdID, "That step was already handled.")
+	}
+	if !revisionsMatch(c.Data["revision"], w.Revision) {
+		return fail("This errand was updated — open the latest card.")
+	}
+	w.Steps[step].Approved = true
+	if err := s.saveSteps(ctx, w.ID, w.Steps, true); err != nil {
+		return fail("Couldn't approve the step.")
+	}
+	if err := s.enqueueResume(ctx, resumeJob{WorkflowID: w.ID, Step: step - 1, Kind: signalConfirm}); err != nil {
+		return fail("Couldn't approve the step.")
+	}
+	label := firstNonEmpty(w.Steps[step].Label, strings.TrimSpace(w.Steps[step].Command))
+	s.log().Info("errands: step approved", "workflow", w.ID, "step", step)
+	return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, "👍 Approved", "“"+label+"” will run now.")}
 }
 
 // handleStop is the delta card's (and the "Ran on its own" card's) Stop: cancel the waiting run
