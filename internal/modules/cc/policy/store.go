@@ -84,10 +84,13 @@ func (s *Store) Events(ctx context.Context, hh string, limit int) ([]Event, erro
 	return out, rows.Err()
 }
 
-// PurgeUser de-identifies the user's events inside the caller's transaction (D20): the rows
-// stay, they are the household's audit; the user id goes.
+// PurgeUser de-identifies the user's events and rules inside the caller's transaction (D20):
+// the rows stay, they are the household's audit; the user id goes.
 func (s *Store) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE cc_autonomy_events SET user_id = NULL WHERE user_id = ?`, userID)
+	if _, err := tx.ExecContext(ctx, `UPDATE cc_autonomy_events SET user_id = NULL WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE cc_tool_rules SET updated_by = NULL WHERE updated_by = ?`, userID)
 	return err
 }
 
