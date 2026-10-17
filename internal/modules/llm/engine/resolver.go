@@ -121,10 +121,22 @@ type Resolver struct {
 	// later is noticed even when the label's settings are all "auto" (nil = in memory only).
 	Memory GPUMemory
 
+	// mu guards the maps below. It is never held while an engine stops (that waits up to
+	// StopTimeout): engines are detached from instances under mu and stopped after it is
+	// released, so other labels resolve meanwhile.
 	mu        sync.Mutex
 	instances map[string]*instance // by key hash
 	bound     map[string]string    // label -> key hash
 	wake      chan struct{}
+	// stopping holds the detached engines whose stop is under way; each channel closes once its
+	// engine has exited. No new engine starts while one is stopping, so a replacement loads
+	// only after the GPU memory is freed.
+	stopping map[*instance]chan struct{}
+	// detached are the engines detached since mu was taken, for release to stop.
+	detached []*instance
+	// last is each label's latest ensure outcome, which Status reports for local labels
+	// without an engine.
+	last map[string]error
 	// lastGood is Memory's content: label -> the GPU placement it last ran healthy on.
 	lastGood map[string]Placement
 	// gpuDown remembers labels refused for a lost GPU, to log each loss once.
@@ -148,6 +160,8 @@ func (r *Resolver) init() {
 		r.instances = map[string]*instance{}
 		r.bound = map[string]string{}
 		r.wake = make(chan struct{}, 1)
+		r.stopping = map[*instance]chan struct{}{}
+		r.last = map[string]error{}
 	}
 	if r.Log == nil {
 		r.Log = slog.Default()
@@ -169,45 +183,110 @@ func (r *Resolver) init() {
 // ErrNotConfigured, a *NotReadyError (errors.Is ErrNotReady) while the engine loads or is
 // down, or ErrUnknownLabel.
 func (r *Resolver) Resolve(ctx context.Context, label string) (Endpoint, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	ep, inst, err := r.ensure(ctx, label)
-	r.gc(ctx)
-	if err != nil || inst == nil {
-		return ep, err
+	for {
+		r.mu.Lock()
+		r.init()
+		ep, inst, err := r.ensure(ctx, label)
+		r.gc()
+		var wait []chan struct{}
+		if isStopWait(err) {
+			wait = slices.Collect(maps.Values(r.stopping))
+		}
+		r.release(ctx)
+		if wait != nil {
+			if waitAll(ctx, wait) != nil {
+				return Endpoint{}, err.(stopWait).NotReadyError
+			}
+			continue
+		}
+		if err != nil || inst == nil {
+			return ep, err
+		}
+		return ready(ep, inst)
 	}
+}
+
+// ready reports a local label's endpoint by its engine's state.
+func ready(ep Endpoint, inst *instance) (Endpoint, error) {
 	st := inst.sup.Status()
 	switch st.State {
 	case engines.Healthy:
 	case engines.Unhealthy:
 		ep.Degraded = true
 	default:
-		return Endpoint{}, &NotReadyError{Label: label, State: string(st.State), Reason: st.LastError}
+		return Endpoint{}, &NotReadyError{Label: ep.Label, State: string(st.State), Reason: st.LastError}
 	}
 	return ep, nil
 }
 
-// ensure brings label's engine into line with its config. It returns the endpoint (without
-// readiness) and, for local labels, the instance. r.mu is held.
-func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instance, error) {
-	c, err := r.Source.Label(ctx, label)
-	if err != nil {
-		return Endpoint{}, nil, err
+// stopWait is ensure's answer while the engine a label needs can't start yet because another
+// one is stopping: the caller waits for the stops and tries again.
+type stopWait struct{ *NotReadyError }
+
+func (e stopWait) Unwrap() error { return e.NotReadyError }
+
+func isStopWait(err error) bool {
+	var w stopWait
+	return errors.As(err, &w)
+}
+
+// waitAll waits for every channel to close, or for ctx.
+func waitAll(ctx context.Context, chs []chan struct{}) error {
+	for _, ch := range chs {
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	ep := Endpoint{Label: label, Kind: c.Kind, Embeddings: c.Embedding}
+	return nil
+}
+
+// release unlocks r.mu and then stops the engines detached while it was held (in parallel,
+// waiting for them).
+func (r *Resolver) release(ctx context.Context) {
+	ds := r.detached
+	r.detached = nil
+	r.mu.Unlock()
+	if len(ds) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	for _, inst := range ds {
+		wg.Go(func() { r.halt(ctx, inst) })
+	}
+	wg.Wait()
+	r.mu.Lock()
+	for _, inst := range ds {
+		close(r.stopping[inst])
+		delete(r.stopping, inst)
+	}
+	r.mu.Unlock()
+}
+
+// ensure brings label's engine into line with its config and records the outcome for Status.
+// It returns the endpoint (without readiness) and, for local labels, the instance. r.mu is
+// held.
+func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instance, error) {
+	ep, inst, err := r.apply(ctx, label)
+	r.last[label] = err
+	return ep, inst, err
+}
+
+// describe answers for a label that runs no local engine (off, remote, misconfigured, no
+// model); local is true otherwise, with ep holding only the label's identity.
+func describe(c LabelConfig) (ep Endpoint, local bool, err error) {
+	ep = Endpoint{Label: c.Label, Kind: c.Kind, Embeddings: c.Embedding}
 	switch {
 	case c.Engine == ModeOff:
-		delete(r.bound, label)
-		return ep, nil, ErrNotConfigured
+		return ep, false, ErrNotConfigured
 	case c.Engine == ModeRemote:
-		delete(r.bound, label)
 		if c.RemoteURL == "" {
-			return ep, nil, ErrNotConfigured
+			return ep, false, ErrNotConfigured
 		}
 		api := RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
 		if c.Embedding && api == APIAnthropic {
-			return ep, nil, &NotReadyError{Label: label, State: "misconfigured",
+			return ep, false, &NotReadyError{Label: c.Label, State: "misconfigured",
 				Reason: "the Anthropic API has no embeddings endpoint; use a local engine or an OpenAI-compatible remote (remote_api=openai)"}
 		}
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
@@ -215,16 +294,26 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 		// A remote's window is what the operator says it is (llm.<slot>.context; 0 = unknown):
 		// cc compaction needs it (docs/cc/chat-images.md §7).
 		ep.ContextLength, ep.Parallel = c.Context, 1
-		return ep, nil, nil
+		return ep, false, nil
 	case c.Problem != "":
-		delete(r.bound, label)
-		return ep, nil, &NotReadyError{Label: label, State: "misconfigured", Reason: c.Problem}
+		return ep, false, &NotReadyError{Label: c.Label, State: "misconfigured", Reason: c.Problem}
 	case c.Engine != ModeLocal:
-		delete(r.bound, label)
-		return ep, nil, &NotReadyError{Label: label, State: "misconfigured", Reason: "unknown engine mode " + c.Engine}
+		return ep, false, &NotReadyError{Label: c.Label, State: "misconfigured", Reason: "unknown engine mode " + c.Engine}
 	case c.ModelPath == "":
+		return ep, false, ErrNotConfigured
+	}
+	return ep, true, nil
+}
+
+func (r *Resolver) apply(ctx context.Context, label string) (Endpoint, *instance, error) {
+	c, err := r.Source.Label(ctx, label)
+	if err != nil {
+		return Endpoint{}, nil, err
+	}
+	ep, local, err := describe(c)
+	if !local {
 		delete(r.bound, label)
-		return ep, nil, ErrNotConfigured
+		return ep, nil, err
 	}
 
 	f, err := r.flavour(ctx, c)
@@ -259,10 +348,16 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 	h := key.hash()
 	inst := r.instances[h]
 	if inst == nil {
-		// Free whatever this label held alone before loading the replacement.
+		// Free whatever this label held alone before loading the replacement, and load nothing
+		// while an engine is still stopping.
 		if old, ok := r.bound[label]; ok && old != h && r.users(old) == 1 {
 			delete(r.bound, label)
-			r.stop(ctx, old)
+			r.detach(old)
+		}
+		if len(r.stopping) > 0 {
+			delete(r.bound, label)
+			return ep, nil, stopWait{&NotReadyError{Label: label, State: string(engines.Restarting),
+				Reason: "waiting for the previous engine to stop"}}
 		}
 		inst, err = r.start(c, key, h)
 		if err != nil {
@@ -407,29 +502,37 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 	return inst, nil
 }
 
-func (r *Resolver) stop(ctx context.Context, h string) {
+// detach takes an engine out of service for release to stop. r.mu is held.
+func (r *Resolver) detach(h string) {
 	inst := r.instances[h]
 	if inst == nil {
 		return
 	}
 	delete(r.instances, h)
+	r.stopping[inst] = make(chan struct{})
+	r.detached = append(r.detached, inst)
+}
+
+// halt stops a detached engine. r.mu is not held. The stop runs to its end even if the
+// caller's ctx is cancelled: a replacement waits for it.
+func (r *Resolver) halt(ctx context.Context, inst *instance) {
 	r.Log.Info("stopping engine", "engine", inst.name)
 	stopT := r.StopTimeout
 	if stopT <= 0 {
 		stopT = 10 * time.Second
 	}
-	sctx, cancel := context.WithTimeout(ctx, stopT+5*time.Second)
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopT+5*time.Second)
 	defer cancel()
 	if err := inst.sup.Stop(sctx); err != nil {
 		r.Log.Warn("engine stop", "engine", inst.name, "err", err)
 	}
 }
 
-// gc stops instances no label uses. r.mu is held.
-func (r *Resolver) gc(ctx context.Context) {
+// gc detaches instances no label uses. r.mu is held.
+func (r *Resolver) gc() {
 	for h := range r.instances {
 		if r.users(h) == 0 {
-			r.stop(ctx, h)
+			r.detach(h)
 		}
 	}
 }
@@ -437,16 +540,34 @@ func (r *Resolver) gc(ctx context.Context) {
 // Reconcile brings every label's engine into line with the current settings, retries failed
 // engines after their cooldown, and stops engines no label uses.
 func (r *Resolver) Reconcile(ctx context.Context) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	for _, d := range LabelDefs {
-		if _, _, err := r.ensure(ctx, d.Name); err != nil && !errors.Is(err, ErrNotConfigured) {
-			r.Log.Debug("label not ready", "label", d.Name, "err", err)
+	for {
+		r.mu.Lock()
+		r.init()
+		waiting := false
+		for _, d := range LabelDefs {
+			_, _, err := r.ensure(ctx, d.Name)
+			waiting = waiting || isStopWait(err)
+			if err != nil && !errors.Is(err, ErrNotConfigured) {
+				r.Log.Debug("label not ready", "label", d.Name, "err", err)
+			}
+		}
+		r.gc()
+		r.recordGPU(ctx)
+		r.retryFailed()
+		var wait []chan struct{}
+		if waiting {
+			wait = slices.Collect(maps.Values(r.stopping))
+		}
+		r.release(ctx)
+		if wait == nil || waitAll(ctx, wait) != nil {
+			return
 		}
 	}
-	r.gc(ctx)
-	r.recordGPU(ctx)
+}
+
+// retryFailed restarts failed engines after their cooldown. A failed supervisor has no
+// process, so Start only launches one and returns: it is safe under r.mu. r.mu is held.
+func (r *Resolver) retryFailed() {
 	base := r.RetryFailed
 	if base <= 0 {
 		base = time.Minute
@@ -466,7 +587,7 @@ func (r *Resolver) Reconcile(ctx context.Context) {
 		}
 		inst.retries++
 		r.Log.Info("retrying failed engine", "engine", inst.name, "attempt", inst.retries)
-		if err := inst.sup.Restart(ctx); err != nil {
+		if err := inst.sup.Start(); err != nil {
 			r.Log.Warn("engine retry failed", "engine", inst.name, "err", err)
 		}
 	}
@@ -526,7 +647,11 @@ func (r *Resolver) StopAll(ctx context.Context) {
 		delete(r.instances, h)
 		wg.Go(func() { _ = inst.sup.Stop(ctx) })
 	}
+	wait := slices.Collect(maps.Values(r.stopping))
+	r.mu.Unlock()
 	wg.Wait()
+	_ = waitAll(ctx, wait) // stops already under way
+	r.mu.Lock()
 }
 
 // LabelStatus is one label's state for admin and /health.
@@ -557,8 +682,9 @@ type InstanceStatus struct {
 	Args      []string      `json:"args"`
 }
 
-// Status reports every label against the current settings (it resolves each, so a changed
-// setting takes effect here too).
+// Status reports every label against the current settings. It only reads: a local label is
+// reported by the engine it is bound to, or by its last Resolve/Reconcile outcome, so a
+// changed setting shows once the reconcile loop (Notify) has applied it.
 func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 	var out []LabelStatus
 	for _, d := range LabelDefs {
@@ -571,7 +697,7 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 		}
 		c.RemoteAPIKey = ""
 		ls.Config = c
-		ep, err := r.Resolve(ctx, d.Name)
+		ep, err := r.peek(c)
 		var nr *NotReadyError
 		switch {
 		case errors.Is(err, ErrNotConfigured):
@@ -595,6 +721,26 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 		out = append(out, ls)
 	}
 	return out
+}
+
+// peek is Resolve without side effects, for Status.
+func (r *Resolver) peek(c LabelConfig) (Endpoint, error) {
+	ep, local, err := describe(c)
+	if !local {
+		return ep, err
+	}
+	r.mu.Lock()
+	r.init()
+	inst := r.instances[r.bound[c.Label]]
+	last, seen := r.last[c.Label]
+	r.mu.Unlock()
+	switch {
+	case inst != nil:
+		return ready(r.fill(ep, c, inst), inst)
+	case seen && last != nil:
+		return Endpoint{}, last
+	}
+	return Endpoint{}, &NotReadyError{Label: c.Label, State: string(engines.Stopped), Reason: "no engine running"}
 }
 
 // Instances reports the supervised engines, sorted by name.

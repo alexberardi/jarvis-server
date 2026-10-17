@@ -110,8 +110,9 @@ var passRoutes = []passRoute{
 	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/actions"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
-	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc lists what
-	// waits plus the caller's own households, and approves only into one of those.
+	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc counts what
+	// waits (never listing codes) plus the caller's own households, and approves a typed code
+	// only into one of those.
 	ccUserRoute("GET /api/cc/api/v0/nodes/pairings"),
 	ccUserRoute("POST /api/cc/api/v0/nodes/pairings/approve"),
 	ccUserRoute("POST /api/cc/api/v0/nodes/pairings/deny"),

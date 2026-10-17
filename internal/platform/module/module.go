@@ -34,6 +34,13 @@ type Starter interface {
 	Start(ctx context.Context) error
 }
 
+// Waiter is implemented by modules with background work that outlives a request (fire-and-forget
+// writes, live calls). The runner calls Wait once the run context is cancelled and the listeners
+// are shut down, under the same DrainTimeout as the queue, before the caller closes the DB.
+type Waiter interface {
+	Wait()
+}
+
 // Deps are the shared platform services handed to every module. Modules register queue job
 // handlers in Register; the runner starts the queue and scheduler after every module has
 // registered. The MQTT broker and mDNS advertiser join once the auth and config modules

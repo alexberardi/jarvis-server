@@ -87,7 +87,7 @@ function renderServer(s) {
     const where = s.server.where === "this computer" ? " (on this computer)" : "";
     $("server-name").textContent = "Using " + (s.server.name || s.server.url) + where;
   }
-  show("server-change", picked && !s.joined && s.join.state !== "waiting");
+  show("server-change", picked && !s.joined && s.join.state !== "waiting" && s.join.state !== "confirm_household");
   $("server-step").classList.toggle("done", picked);
 }
 
@@ -99,15 +99,22 @@ function renderJoin(s) {
   show("join-joined", joined);
   setText("join-warning", j.warning);
   const signinOpen = !$("signin-form").hidden;
-  show("join-choose", !joined && j.state !== "waiting" && j.state !== "choose_household" && !signinOpen);
+  const confirming = j.state === "confirm_household";
+  show("join-choose", !joined && j.state !== "waiting" && j.state !== "choose_household" && !confirming && !signinOpen);
   show("join-code", !joined && j.state === "waiting");
+  show("join-confirm", !joined && confirming);
+  if (confirming) {
+    $("confirm-household").textContent = j.household;
+    const by = [j.approved_by ? "Approved by " + j.approved_by : "", j.room ? "room: " + j.room : ""].filter(Boolean);
+    setText("confirm-by", by.join(", "));
+  }
   if (j.state === "waiting") {
     $("code").textContent = j.code;
     $("code-name").textContent = s.computer;
     const m = Math.floor(j.expires_in / 60), sec = String(j.expires_in % 60).padStart(2, "0");
     $("code-left").textContent = "(the code works for " + m + ":" + sec + ")";
   }
-  if (joined || j.state === "waiting" || j.state === "choose_household") show("signin-form", false);
+  if (joined || j.state === "waiting" || j.state === "choose_household" || confirming) show("signin-form", false);
   show("household-form", !joined && j.state === "choose_household");
   if (j.state === "choose_household" && $("household-list").childElementCount === 0) {
     const list = $("household-list");
@@ -314,6 +321,8 @@ function wire() {
   }, "server-error"));
   $("join-pair").addEventListener("click", () => act(async () => render(await api("pair", {})), "join-error"));
   $("code-cancel").addEventListener("click", () => act(async () => render(await api("pair/cancel", {})), "join-error"));
+  $("confirm-yes").addEventListener("click", () => act(async () => render(await api("pair/confirm", {})), "join-error"));
+  $("confirm-no").addEventListener("click", () => act(async () => render(await api("pair/cancel", {})), "join-error"));
   $("join-signin").addEventListener("click", () => {
     setError("join-error", "");
     show("join-choose", false);

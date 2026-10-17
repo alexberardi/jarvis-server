@@ -34,6 +34,8 @@ var expectedTables = []string{
 	"cc_package_install_requests", "cc_test_install_requests",
 	// 13 mobile
 	"cc_callback_jobs",
+	// autonomy (docs/autonomy/PLAN.md)
+	"cc_autonomy_events", "cc_tool_rules",
 }
 
 // Cut by decisions in docs/cc/QUESTIONS.md; they must never come back by accident.

@@ -37,6 +37,9 @@ const (
 	settingRefreshDays   = "auth.token.refresh_expire_days"
 	settingGraceSeconds  = "auth.token.refresh_grace_seconds"
 	settingAlgorithm     = "auth.algorithm"
+	// settingOpenRegistration lets /auth/register create accounts without an invite code once
+	// a superuser exists (decision 2026-10-17-close-open-registration).
+	settingOpenRegistration = "auth.open_registration"
 )
 
 var noScope = settings.Scope{}
@@ -55,6 +58,11 @@ func Definitions() []settings.Definition {
 		// settings row keeps whatever the old install used.
 		{Key: settingAlgorithm, Category: "auth", Type: settings.String, Default: authn.RS256,
 			Description: "JWT signing algorithm", EnvFallback: "AUTH_ALGORITHM"},
+		// Deviation (security): legacy registration was always open. Before the first
+		// superuser exists it still is; after that, sign-ups need an invite unless this is on.
+		{Key: settingOpenRegistration, Category: "auth", Type: settings.Bool, Default: false,
+			Description: "Allow sign-ups without an invite code once a superuser exists (each gets its own household)",
+			EnvFallback: "AUTH_OPEN_REGISTRATION"},
 	}
 }
 

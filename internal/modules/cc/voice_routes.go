@@ -340,7 +340,8 @@ func (m *Module) handleContinueStream(w http.ResponseWriter, r *http.Request, n 
 	start := m.now()
 	tr, ctx := startVoiceTrace(r.Context())
 	// Inbox actions are a real background job here, so audio isn't delayed (01 §11).
-	go m.pushActionsToInbox(context.WithoutCancel(r.Context()), n, results)
+	bg := context.WithoutCancel(r.Context())
+	m.background("inbox push", func() { m.pushActionsToInbox(bg, n, results) })
 	endPlan := tr.measure("continue_stream_dispatch", "cc", m.continueMeta(ctx, cid, results))
 	plan := m.planContinueStream(ctx, cid, results)
 	endPlan(nil)

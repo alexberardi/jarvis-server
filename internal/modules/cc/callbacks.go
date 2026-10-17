@@ -501,7 +501,7 @@ func (m *Module) dispatchServerCallback(jobID string) {
 			m.deps.Log.Error("cc: server callback enqueue failed; running inline", "job", jobID, "err", err)
 		}
 	}
-	go m.runServerCallback(context.Background(), jobID)
+	m.background("server callback", func() { m.runServerCallback(context.Background(), jobID) })
 }
 
 // runServerCallback is _run_server_callback_job. It never leaves the job pending: a missing

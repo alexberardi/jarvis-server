@@ -58,6 +58,8 @@ type Job struct {
 	Payload  []byte
 	Attempt  int // 1 on the first run
 	DedupKey string
+
+	maxAttempts int
 }
 
 // HandlerFunc runs a job. Returning nil marks it done with result; an error retries it
@@ -101,12 +103,16 @@ type Queue struct {
 	// PollInterval bounds how long a newly due job (delayed, retried, or enqueued by another
 	// process) waits before a worker notices it. Enqueue in this process wakes workers at once.
 	PollInterval time.Duration
+	// Retention is how long finished jobs (done, failed, cancelled) are kept before the
+	// purger deletes them; 0 or less keeps them forever. PurgeInterval is how often it runs.
+	Retention     time.Duration
+	PurgeInterval time.Duration
 
 	mu       sync.Mutex
 	handlers map[string]Handler
 	wake     map[string]chan struct{}
 	started  bool
-	// running tracks the workers and the reaper so shutdown can wait for them to let go of
+	// running tracks the workers, the reaper and the purger so shutdown can wait for them to let go of
 	// the database (Windows can't delete a file a connection still holds).
 	running sync.WaitGroup
 }
@@ -115,9 +121,11 @@ type Queue struct {
 func New(d *db.DB, log *slog.Logger) *Queue {
 	return &Queue{
 		db: d, log: log, now: time.Now,
-		PollInterval: time.Second,
-		handlers:     map[string]Handler{},
-		wake:         map[string]chan struct{}{},
+		PollInterval:  time.Second,
+		Retention:     7 * 24 * time.Hour,
+		PurgeInterval: time.Hour,
+		handlers:      map[string]Handler{},
+		wake:          map[string]chan struct{}{},
 	}
 }
 
@@ -313,9 +321,12 @@ func (q *Queue) Start(ctx context.Context) {
 		}
 	}
 	q.running.Go(func() { q.reaper(ctx) })
+	if q.Retention > 0 {
+		q.running.Go(func() { q.purger(ctx) })
+	}
 }
 
-// Wait blocks until the workers and the reaper started by Start have returned (after its
+// Wait blocks until the workers, the reaper and the purger started by Start have returned (after its
 // context is cancelled): no job is running and no query is in flight.
 func (q *Queue) Wait() { q.running.Wait() }
 
@@ -361,9 +372,9 @@ func (q *Queue) claim(ctx context.Context, jobType string, h Handler) (Job, bool
 			WHERE type = ? AND state = 'queued' AND run_at <= ?
 			ORDER BY priority DESC, run_at, id
 			LIMIT 1)
-		RETURNING id, type, payload, attempts, dedup_key`,
+		RETURNING id, type, payload, attempts, max_attempts, dedup_key`,
 		ms(now.Add(h.Lease)), ms(now), jobType, ms(now)).
-		Scan(&j.ID, &j.Type, &j.Payload, &j.Attempt, &dedup)
+		Scan(&j.ID, &j.Type, &j.Payload, &j.Attempt, &j.maxAttempts, &dedup)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, false, nil
 	}
@@ -371,8 +382,15 @@ func (q *Queue) claim(ctx context.Context, jobType string, h Handler) (Job, bool
 	return j, err == nil, err
 }
 
+// handlerTimeout is how long a run may take: its lease less a margin (a tenth, at most 30s),
+// so a handler that honours ctx records its outcome before the reaper can requeue the job.
+// One that ignores ctx and overruns is fenced by the attempts check on its outcome instead.
+func handlerTimeout(lease time.Duration) time.Duration {
+	return lease - min(lease/10, 30*time.Second)
+}
+
 func (q *Queue) execute(ctx context.Context, h Handler, j Job) {
-	jctx, cancel := context.WithTimeout(ctx, h.Lease)
+	jctx, cancel := context.WithTimeout(ctx, handlerTimeout(h.Lease))
 	result, err := safeRun(jctx, h.Run, j)
 	cancel()
 	if err != nil && ctx.Err() != nil {
@@ -389,32 +407,34 @@ func (q *Queue) execute(ctx context.Context, h Handler, j Job) {
 		}
 		return
 	}
+	// Every outcome is fenced by the attempt: if this run overran its lease and the job was
+	// requeued (and maybe claimed again), the late result must not overwrite the newer run.
 	now := q.now()
+	var res sql.Result
 	var dbErr error
 	switch {
 	case err == nil:
-		_, dbErr = q.db.Write.ExecContext(context.Background(), `
+		res, dbErr = q.db.Write.ExecContext(context.Background(), `
 			UPDATE platform_jobs SET state = 'done', result = ?, lease_until = NULL, updated_at = ?
-			WHERE id = ? AND state = 'running'`, result, ms(now), j.ID)
+			WHERE id = ? AND state = 'running' AND attempts = ?`, result, ms(now), j.ID, j.Attempt)
 	default:
 		var p permanent
-		var maxAttempts int
-		q.db.Write.QueryRowContext(context.Background(),
-			`SELECT max_attempts FROM platform_jobs WHERE id = ?`, j.ID).Scan(&maxAttempts)
-		if errors.As(err, &p) || j.Attempt >= maxAttempts {
+		if errors.As(err, &p) || j.Attempt >= j.maxAttempts {
 			q.log.Warn("queue: job failed", "type", j.Type, "id", j.ID, "attempt", j.Attempt, "err", err)
-			_, dbErr = q.db.Write.ExecContext(context.Background(), `
+			res, dbErr = q.db.Write.ExecContext(context.Background(), `
 				UPDATE platform_jobs SET state = 'failed', last_error = ?, lease_until = NULL, updated_at = ?
-				WHERE id = ? AND state = 'running'`, err.Error(), ms(now), j.ID)
+				WHERE id = ? AND state = 'running' AND attempts = ?`, err.Error(), ms(now), j.ID, j.Attempt)
 		} else {
 			q.log.Info("queue: job will retry", "type", j.Type, "id", j.ID, "attempt", j.Attempt, "err", err)
-			_, dbErr = q.db.Write.ExecContext(context.Background(), `
+			res, dbErr = q.db.Write.ExecContext(context.Background(), `
 				UPDATE platform_jobs SET state = 'queued', last_error = ?, lease_until = NULL, run_at = ?, updated_at = ?
-				WHERE id = ? AND state = 'running'`, err.Error(), ms(now.Add(h.Backoff(j.Attempt))), ms(now), j.ID)
+				WHERE id = ? AND state = 'running' AND attempts = ?`, err.Error(), ms(now.Add(h.Backoff(j.Attempt))), ms(now), j.ID, j.Attempt)
 		}
 	}
 	if dbErr != nil {
 		q.log.Error("queue: record outcome", "id", j.ID, "err", dbErr)
+	} else if n, _ := res.RowsAffected(); n == 0 {
+		q.log.Warn("queue: stale outcome dropped: the lease expired and the job was requeued", "type", j.Type, "id", j.ID, "attempt", j.Attempt)
 	}
 }
 
@@ -435,6 +455,25 @@ func (q *Queue) reaper(ctx context.Context) {
 	for {
 		if err := q.ReapExpired(ctx); err != nil && ctx.Err() == nil {
 			q.log.Error("queue: reap", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// purger deletes finished jobs older than Retention, at start and then every PurgeInterval,
+// so platform_jobs (payload and result blobs, a row per scheduler fire) doesn't grow forever.
+func (q *Queue) purger(ctx context.Context) {
+	t := time.NewTicker(q.PurgeInterval)
+	defer t.Stop()
+	for {
+		if n, err := q.Purge(ctx, q.now().Add(-q.Retention)); err != nil && ctx.Err() == nil {
+			q.log.Error("queue: purge finished jobs", "err", err)
+		} else if n > 0 {
+			q.log.Info("queue: purged finished jobs", "count", n)
 		}
 		select {
 		case <-ctx.Done():
@@ -486,13 +525,27 @@ func (q *Queue) ReapExpired(ctx context.Context) error {
 	})
 }
 
-// Purge deletes finished jobs (done, failed, cancelled) last updated before cutoff.
+// purgeBatch caps the rows one purge statement deletes, so the first purge on an old install
+// doesn't hold the write lock for one long DELETE.
+const purgeBatch = 1000
+
+// Purge deletes finished jobs (done, failed, cancelled) last updated before cutoff, in
+// batches of purgeBatch, and returns how many it deleted.
 func (q *Queue) Purge(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := q.db.Write.ExecContext(ctx, `
-		DELETE FROM platform_jobs
-		WHERE state IN ('done', 'failed', 'cancelled') AND updated_at < ?`, ms(cutoff))
-	if err != nil {
-		return 0, err
+	var total int64
+	for {
+		res, err := q.db.Write.ExecContext(ctx, `
+			DELETE FROM platform_jobs WHERE id IN (
+				SELECT id FROM platform_jobs
+				WHERE state IN ('done', 'failed', 'cancelled') AND updated_at < ?
+				LIMIT ?)`, ms(cutoff), purgeBatch)
+		if err != nil {
+			return total, err
+		}
+		n, err := res.RowsAffected()
+		total += n
+		if err != nil || n < purgeBatch {
+			return total, err
+		}
 	}
-	return res.RowsAffected()
 }

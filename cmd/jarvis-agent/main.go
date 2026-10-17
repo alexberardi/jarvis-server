@@ -403,8 +403,33 @@ func pairWithCode(ctx context.Context, hc *http.Client, ccURL, name string) (nod
 	if err != nil {
 		return node.PairingResult{}, err
 	}
-	fmt.Printf("Approved: room %q.\n", res.Room)
+	// Someone else may have typed the code: join only once the user here says the household
+	// is theirs (loop #100).
+	fmt.Print(pairingQuestion(res))
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if !pairingAnswerYes(line) {
+		return node.PairingResult{}, errors.New("not joined: the household was declined (start again for a new code)")
+	}
 	return res, nil
+}
+
+// pairingQuestion asks whether to join the household that approved the code.
+func pairingQuestion(res node.PairingResult) string {
+	hh := res.HouseholdName
+	if hh == "" {
+		hh = res.HouseholdID
+	}
+	by := ""
+	if res.ApprovedBy != "" {
+		by = " by " + res.ApprovedBy
+	}
+	return fmt.Sprintf("Approved%s into household %q (room %q).\nJoin this household? [y/N] ", by, hh, res.Room)
+}
+
+// pairingAnswerYes reads the join question's answer: only an explicit yes joins.
+func pairingAnswerYes(line string) bool {
+	a := strings.ToLower(strings.TrimSpace(line))
+	return a == "y" || a == "yes"
 }
 
 func readPassword(fromStdin bool) (string, error) {

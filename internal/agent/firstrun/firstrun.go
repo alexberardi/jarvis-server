@@ -269,6 +269,7 @@ func (s *Server) routes() *http.ServeMux {
 	m.HandleFunc("POST /api/server/forget", a.postForget)
 	m.HandleFunc("POST /api/pair", a.postPair)
 	m.HandleFunc("POST /api/pair/cancel", a.postPairCancel)
+	m.HandleFunc("POST /api/pair/confirm", a.postPairConfirm)
 	m.HandleFunc("POST /api/signin", a.postSignIn)
 	m.HandleFunc("POST /api/signin/household", a.postHousehold)
 	m.HandleFunc("POST /api/voice", a.postVoice)

@@ -15,6 +15,7 @@ import (
 func TestMustChangePasswordIsEnforced(t *testing.T) {
 	e := newEnv(t)
 	su := e.superuser()
+	e.openRegistration(true)
 	for _, target := range []*testUser{e.register(), e.superuser()} {
 		old := target.access // issued before the reset: the flag applies to it too
 		temp := e.expect(200, "", "POST", fmt.Sprintf("/superuser/users/%d/temp-password", target.id), nil,
