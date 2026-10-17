@@ -147,7 +147,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	native := conv.mode.Native()
 	var nativeTools []llm.Tool
 	if native {
-		nativeTools = llmTools(prompts.NativeTools(conv.tools))
+		nativeTools = nativePayload(conv.tools)
 	}
 	smallMode := m.settings.Bool(ctx, settingSmallModelMode, settings.Scope{})
 	budget := m.thinkingBudget(ctx, hh)
@@ -214,18 +214,18 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					finish = parse.FinishToolCalls
 				}
 			}
-		} else {
-			content := raw
-			if t, ok := prompts.ParseResponse(raw); ok {
-				content = t
-			}
-			pr := parse.ParseToolCalls(content)
-			finish, calls, message = pr.FinishReason, pr.ToolCalls, pr.Message
+			// A call llama-server couldn't parse (no tags, or tags in the content) is
+			// recovered as on the text path, but only when every call names an offered tool.
 			if finish == parse.FinishStop {
-				if c, prose, ok := trailingBareCall(message, conv.hasTool); ok {
-					finish, calls, message = parse.FinishToolCalls, []parse.ToolCall{c}, prose
+				if f, c, msg := recoverTextCalls(raw, conv.hasTool); f == parse.FinishToolCalls && allOffered(c, conv.hasTool) {
+					finish, calls, message = f, c, msg
+					for _, tc := range c {
+						m.deps.Log.Info("cc: native_call_rescued", "conversation_id", conv.id, "tool", tc.Function.Name)
+					}
 				}
 			}
+		} else {
+			finish, calls, message = recoverTextCalls(raw, conv.hasTool)
 		}
 		tr.span(llmName, "llm_proxy", llmStart, llmEnd, nil, map[string]any{"prompt_tokens": resp.Usage.PromptTokens,
 			"completion_tokens": resp.Usage.CompletionTokens, "finish_reason": finish, "output_preview": outputPreview(raw)})
@@ -546,9 +546,37 @@ func normalizeNativeCalls(raw []llm.ToolCall) []parse.ToolCall {
 		if id == "" {
 			id = parse.NewCallID()
 		}
-		out = append(out, parse.ToolCall{ID: id, Type: "function", Function: parse.FunctionCall{Name: c.Function.Name, Arguments: args}})
+		args, failure := takeFailureMessage(args)
+		out = append(out, parse.ToolCall{ID: id, Type: "function", Function: parse.FunctionCall{Name: c.Function.Name, Arguments: args},
+			FailureMessage: failure})
 	}
 	return out
+}
+
+// recoverTextCalls is the text path's reading of a reply: tagged calls (ParseToolCalls), else
+// one bare call at the end of the prose (trailingBareCall, #56).
+func recoverTextCalls(raw string, offered func(string) bool) (string, []parse.ToolCall, string) {
+	content := raw
+	if t, ok := prompts.ParseResponse(raw); ok {
+		content = t
+	}
+	pr := parse.ParseToolCalls(content)
+	finish, calls, message := pr.FinishReason, pr.ToolCalls, pr.Message
+	if finish == parse.FinishStop {
+		if c, prose, ok := trailingBareCall(message, offered); ok {
+			finish, calls, message = parse.FinishToolCalls, []parse.ToolCall{c}, prose
+		}
+	}
+	return finish, calls, message
+}
+
+func allOffered(calls []parse.ToolCall, offered func(string) bool) bool {
+	for _, c := range calls {
+		if !offered(c.Function.Name) {
+			return false
+		}
+	}
+	return len(calls) > 0
 }
 
 // forceGuardArmed decides whether the force-tools guard stays armed for a prose reply
