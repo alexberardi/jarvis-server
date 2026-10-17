@@ -118,8 +118,12 @@ func TestStreamIdleFirstByteAllowance(t *testing.T) {
 func TestStreamIdleSlowConsumer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
+		// The engine never goes quiet for 50 ms: it flushes a frame every 5 ms (about 0.5 s in all),
+		// so only the consumer's pause could trip the watchdog.
 		for i := 0; i < 100; i++ {
 			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
+			w.(http.Flusher).Flush()
+			time.Sleep(5 * time.Millisecond)
 		}
 		w.Write([]byte("data: [DONE]\n\n"))
 	}))
@@ -130,7 +134,7 @@ func TestStreamIdleSlowConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond) // the 64-frame buffer fills; the parser blocks on us
+	time.Sleep(time.Second) // longer than the whole stream: the 64-frame buffer fills and the parser blocks on us
 	frames := collect(t, ch)
 	if last := frames[len(frames)-1]; !last.Done || len(last.Content) != 100 {
 		t.Fatalf("last frame %+v", last)

@@ -297,7 +297,7 @@ Covered in 03 §3.1. Frozen by `TestLLMQueueEnqueue`. The enqueue response is `{
 
 None specific to the API. `llm.request_timeout_seconds` (05) bounds non-stream upstream calls. A stream has no overall bound (the caller's connection ends it); instead `llm.stream_idle_timeout_seconds` (default 60, 0 = off) cancels it when the engine sends nothing for that long, with an error frame (`llm: stream idle: engine sent nothing for 1m0s`) and a warn log, and frees its admission slot. Before the first byte the allowance is the larger of the two settings, since an engine sends nothing while it evaluates a long prompt; a consumer slow to read deltas doesn't count as engine silence.
 - **Prod's timeouts:** 240 s (`model_service.timeout_seconds`, `rest.timeout_seconds`).
-- **The 60 s default** would kill bg jobs with thinking on.
+- **A 60 s `request_timeout_seconds`** would kill bg jobs with thinking on.
 
 ## 6. Dependencies
 
