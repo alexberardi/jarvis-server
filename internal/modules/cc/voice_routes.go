@@ -28,6 +28,10 @@ import (
 
 const notInitialized = "Conversation not initialized for tool-based flow"
 
+// conversationBusy is the 409 detail when the caller gave up waiting for another turn of the
+// conversation (errConversationBusy). A client that left reads nothing.
+const conversationBusy = "Conversation is busy with another turn"
+
 // parseTurn reads VoiceCommandRequest.
 func parseTurn(w http.ResponseWriter, r *http.Request) (turnInput, bool) {
 	b, _, ok := readBody(w, r, false)
@@ -202,6 +206,10 @@ func (m *Module) handleVoiceCommand(w http.ResponseWriter, r *http.Request, n *n
 		detail(w, http.StatusUnprocessableEntity, notInitialized)
 		return
 	}
+	if errors.Is(err, errConversationBusy) {
+		detail(w, http.StatusConflict, conversationBusy)
+		return
+	}
 	if err != nil {
 		m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command", in.VoiceCommand, "", start, err)
 		httpx.WriteJSON(w, http.StatusOK, voiceResponse([]any{errorCommand("processing_error", "Failed to process command: "+err.Error())},
@@ -252,6 +260,10 @@ func (m *Module) handleVoiceStream(w http.ResponseWriter, r *http.Request, n *no
 	endTurn := tr.measure("process_voice_command_with_tools", "cc", nil)
 	out, err := m.processTurn(ctx, n, in)
 	endTurn(err)
+	if errors.Is(err, errConversationBusy) {
+		detail(w, http.StatusConflict, conversationBusy)
+		return
+	}
 	if err != nil {
 		m.recordVoiceTrace(n, tr, in.ConversationID, "voice_command_stream", in.VoiceCommand, "", start, err)
 		detail(w, http.StatusInternalServerError, "Failed to process command: "+err.Error())
@@ -282,11 +294,15 @@ func (m *Module) handleContinue(w http.ResponseWriter, r *http.Request, n *nodeC
 	start := m.now()
 	tr, ctx := startVoiceTrace(r.Context())
 	info := requestInfo("[continuation with tool results]", cid)
-	endCont := tr.measure("continue_conversation", "cc", m.continueMeta(cid, results))
+	endCont := tr.measure("continue_conversation", "cc", m.continueMeta(ctx, cid, results))
 	res, _, err := m.continueBlocking(ctx, cid, results)
 	endCont(err)
 	if errors.Is(err, errPrecondition) {
 		detail(w, http.StatusUnprocessableEntity, "Conversation "+cid+" not found or expired")
+		return
+	}
+	if errors.Is(err, errConversationBusy) {
+		detail(w, http.StatusConflict, conversationBusy)
 		return
 	}
 	endInbox := tr.measure("inbox_actions_push", "cc", nil)
@@ -325,7 +341,7 @@ func (m *Module) handleContinueStream(w http.ResponseWriter, r *http.Request, n 
 	tr, ctx := startVoiceTrace(r.Context())
 	// Inbox actions are a real background job here, so audio isn't delayed (01 §11).
 	go m.pushActionsToInbox(context.WithoutCancel(r.Context()), n, results)
-	endPlan := tr.measure("continue_stream_dispatch", "cc", m.continueMeta(cid, results))
+	endPlan := tr.measure("continue_stream_dispatch", "cc", m.continueMeta(ctx, cid, results))
 	plan := m.planContinueStream(ctx, cid, results)
 	endPlan(nil)
 	if plan == nil {
