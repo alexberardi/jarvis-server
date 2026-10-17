@@ -298,3 +298,74 @@ type intSettings map[string]int64
 
 func (f intSettings) Int(_ context.Context, key string, _ settings.Scope) int64 { return f[key] }
 func (intSettings) Bool(context.Context, string, settings.Scope) bool           { return true }
+
+// confirmFreeTool is a fakeTool declaring run_without_confirmation (servertools.ConfirmFreeTool).
+type confirmFreeTool struct{ fakeTool }
+
+func (*confirmFreeTool) RunWithoutConfirmation() bool { return true }
+
+func TestMenuDeclarations(t *testing.T) {
+	node := NodeMenu([]*pyjson.Object{
+		mustObj(t, `{"command_name": "read_sensor", "description": "Read", "run_without_confirmation": true}`),
+		mustObj(t, `{"command_name": "get_news", "description": "News"}`),
+	})
+	if len(node) != 2 || !node[0].RunWithoutConfirmation || node[1].RunWithoutConfirmation {
+		t.Fatalf("node menu = %+v", node)
+	}
+
+	e := newTenv(t, false)
+	e.set[settingWebSearch] = true
+	e.tools.Register(&confirmFreeTool{fakeTool{name: "quick_search", def: toolDef("quick_search", "Search",
+		"query", mustObj(t, `{"type": "string"}`))}})
+	e.tools.Register(&fakeTool{name: "deep_research", def: toolDef("deep_research", "Research",
+		"query", mustObj(t, `{"type": "string"}`))})
+	menu := e.s.FullMenu(context.Background(), []*pyjson.Object{
+		mustObj(t, `{"command_name": "read_sensor", "description": "Read", "run_without_confirmation": true}`),
+		mustObj(t, `{"command_name": "get_news", "description": "News"}`),
+	}, hh, nil)
+	free := map[string]bool{}
+	for _, c := range menu {
+		free[c.Command] = c.RunWithoutConfirmation
+	}
+	if len(free) != 4 || !free["quick_search"] || !free["read_sensor"] || free["deep_research"] || free["get_news"] {
+		t.Fatalf("menu declarations = %v", free)
+	}
+	// The stored menu keeps the declaration.
+	back := menuFromJSON(menuJSON(menu))
+	for i, c := range back {
+		if c.RunWithoutConfirmation != menu[i].RunWithoutConfirmation {
+			t.Fatalf("menu round trip %d = %+v, want %+v", i, c, menu[i])
+		}
+	}
+
+	e.llm.say("plan", planJSON("Look things up",
+		step("read_sensor", "Read", ""), step("quick_search", "Search", `{"query": "x"}`),
+		step("get_news", "News", ""), step("deep_research", "Research", `{"query": "y"}`)))
+	plan, err := e.s.PlanErrand(context.Background(), "goal", menu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []bool
+	for _, st := range plan.Steps {
+		got = append(got, st.RunWithoutConfirmation)
+	}
+	if len(got) != 4 || !got[0] || !got[1] || got[2] || got[3] {
+		t.Fatalf("step flags = %v (%+v)", got, plan.Steps)
+	}
+}
+
+func TestStepObjectFlags(t *testing.T) {
+	plain := Step{Command: "get_news", Label: "News"}
+	if got := pyjson.Compact(plain.Object()); got != `{"command":"get_news","args":{},"label":"News","is_risky":false}` {
+		t.Fatalf("plain = %s", got)
+	}
+	flagged := Step{Command: "quick_search", Label: "Search", RunWithoutConfirmation: true, Approved: true}
+	if got := pyjson.Compact(flagged.Object()); !strings.HasSuffix(got, `"is_risky":false,"run_without_confirmation":true,"approved":true}`) {
+		t.Fatalf("flagged = %s", got)
+	}
+	steps := parseSteps(stepsDumps([]Step{plain, flagged}))
+	if len(steps) != 2 || steps[0].RunWithoutConfirmation || steps[0].Approved ||
+		!steps[1].RunWithoutConfirmation || !steps[1].Approved {
+		t.Fatalf("round trip = %+v", steps)
+	}
+}

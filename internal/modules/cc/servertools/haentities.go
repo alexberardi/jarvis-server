@@ -20,6 +20,9 @@ func NewHAEntities() *HAEntities { return &HAEntities{} }
 func (t *HAEntities) Name() string               { return "get_ha_entities" }
 func (t *HAEntities) Definition() *pyjson.Object { return LegacyDefinition("get_ha_entities") }
 
+// A read-only lookup: may run in the background without a tap (A7).
+func (*HAEntities) RunWithoutConfirmation() bool { return true }
+
 // deviceAgentData is context_builders.device_agent_data: the HA integration's payload when
 // present (even empty), else the built-in device agent's.
 func deviceAgentData(agents *pyjson.Object) *pyjson.Object {
