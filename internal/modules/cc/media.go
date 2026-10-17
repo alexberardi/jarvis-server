@@ -253,7 +253,10 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 		m.signals.recordIdentity(convID, id)
 		if len(speakerAudio) > 0 && m.wakeMode(ctx, n.HouseholdID, n.ID) != "off" {
 			finish := m.signals.beginWake(convID)
-			go m.verifyWake(context.WithoutCancel(ctx), n, speakerAudio, finish)
+			bg := context.WithoutCancel(ctx)
+			if !m.background("wake verify", func() { m.verifyWake(bg, n, speakerAudio, finish) }) {
+				finish(nil) // fail open, as for any miss
+			}
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, res)

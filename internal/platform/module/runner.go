@@ -20,8 +20,8 @@ import (
 // ShutdownTimeout bounds graceful shutdown of each listener.
 var ShutdownTimeout = 10 * time.Second
 
-// DrainTimeout bounds the wait, once the listeners are shut down, for queue workers and the
-// scheduler to return before Run does (and the caller closes the DB). It is its own budget so
+// DrainTimeout bounds the wait, once the listeners are shut down, for queue workers, the
+// scheduler and modules' background work (Waiter) to return before Run does (and the caller closes the DB). It is its own budget so
 // slow requests cannot use it up.
 var DrainTimeout = 10 * time.Second
 
@@ -242,8 +242,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	return runErr
 }
 
-// drain waits up to DrainTimeout for the queue workers and the scheduler, which saw the run
-// context cancelled, to return before the caller closes the DB.
+// drain waits up to DrainTimeout for the queue workers, the scheduler and every Waiter module,
+// which saw the run context cancelled, to return before the caller closes the DB.
 func (r *Runner) drain() {
 	var waits []func()
 	if r.Deps.Queue != nil {
@@ -251,6 +251,11 @@ func (r *Runner) drain() {
 	}
 	if r.Deps.Scheduler != nil {
 		waits = append(waits, r.Deps.Scheduler.Wait)
+	}
+	for _, m := range r.Modules {
+		if w, ok := m.(Waiter); ok {
+			waits = append(waits, w.Wait)
+		}
 	}
 	var wg sync.WaitGroup
 	for _, w := range waits {
@@ -261,7 +266,7 @@ func (r *Runner) drain() {
 	select {
 	case <-done:
 	case <-time.After(DrainTimeout):
-		r.Deps.Log.Warn("module: queue workers or scheduler still running at drain timeout; closing the DB under them",
+		r.Deps.Log.Warn("module: queue workers, scheduler or module background work still running at drain timeout; closing the DB under them",
 			"timeout", DrainTimeout)
 	}
 }
