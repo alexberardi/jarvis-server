@@ -328,7 +328,7 @@ The install script (Phase 6) installs the binary and service unit, starts jarvis
 
 - **G1, prompt provider unset is a hard error.** `cc.Module.DefaultPromptProvider` exists
   (`internal/modules/cc/cc.go:122-124`) but `cmd/jarvisd/main.go` never sets it. With
-  `llm.prompt_provider` empty, `promptProvider()` fails (`internal/modules/cc/warmup.go:132-138`), so the
+  `llm.prompt_provider` empty, `promptText()` fails (`internal/modules/cc/warmup.go`), so the
   first voice turn fails until someone sets a setting the admin no longer has a screen for. Fix: wire it to
   the live label's installed model `prompt_provider` (06 §5 "installed" carries it). AQ4.
 - ~~**G2, the setup race is open to the LAN**~~ **fixed (AD2)**: `/auth/setup` needs the setup token

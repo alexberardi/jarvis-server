@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	tf "github.com/alexberardi/jarvis-server/internal/modules/cc/textfilter"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -88,7 +89,7 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 	}
 	conv.noteUsage(resp.Usage)
 	raw = resp.Content
-	content, reasoning := tf.FinishFormattedReply(raw, conv.provider.SanitizeText, outputs)
+	content, reasoning := tf.FinishFormattedReply(raw, prompts.SanitizeText, outputs)
 	if content != "" {
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: content})
 	}
@@ -201,7 +202,7 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 		msgs = append(msgs, toolMsg(tr))
 	}
 	var res engineResult
-	if native := conv.provider.SupportsNativeTools(); native || typingPending(conv, msgs) {
+	if native := conv.mode.Native(); native || typingPending(conv, msgs) {
 		msgs = append(msgs, failedNote(results)...)
 		utterance := lastUserContent(msgs)
 		maxIter := 10
@@ -262,7 +263,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 	stashReferenced(conv, results)
 	results = m.prepareToolImages(ctx, results)
 	msgs := m.visionGuard(ctx, cloneMsgs(conv.messages))
-	native := conv.provider.SupportsNativeTools()
+	native := conv.mode.Native()
 	plan := &continuePlan{conv: conv, results: results, base: cloneMsgs(conv.messages), rev: conv.rev}
 
 	{

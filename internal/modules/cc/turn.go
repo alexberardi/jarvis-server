@@ -151,7 +151,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		msgs = append(msgs, transientSys(prompts.PhotoActionsBlock)) // CI8: offer, don't act
 	}
 
-	suffix := conv.provider.UserMessageSuffix(m.householdBool(ctx, settingIncludeThinking, conv.householdID))
+	suffix := conv.mode.UserMessageSuffix(m.householdBool(ctx, settingIncludeThinking, conv.householdID))
 	hints := []string{
 		directionHint(in, turnSpeaker != 0),
 		affectHint(in.Affect),
@@ -181,7 +181,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	msgs = append(msgs, user)
 
 	maxIter := 3
-	if conv.provider.SupportsNativeTools() {
+	if conv.mode.Native() {
 		maxIter = 10
 	}
 	keys := lldates.Extract(in.VoiceCommand)
@@ -208,7 +208,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	}
 	if parse.ContainsNotForMe(res.Message) {
 		m.deps.Log.Info("cc: not_for_me_sentinel", "conversation_id", conv.id, "node_id", conv.nodeID,
-			"speaker_user_id", conv.speakerID, "prompt_provider", conv.provider.Name(), "turn_source", in.Source,
+			"speaker_user_id", conv.speakerID, "prompt_provider", conv.promptName, "turn_source", in.Source,
 			"transcript", in.VoiceCommand)
 		res = engineResult{Stop: stopNotForMe}
 	}
