@@ -12,8 +12,9 @@
 #
 #   --sandbox NAME  the scripts/sandbox to log in to (default: mob); it must be up
 #   --screens LIST  comma-separated (default: all): landing, login, home, devices, pantry,
-#                   routines, nodes, settings, inbox, chat. landing and login are shot logged
-#                   out; chat sends one message and waits for the reply.
+#                   routines, nodes, settings, inbox, inbox_detail, chat. landing and login
+#                   are shot logged out; chat sends one message and waits for the reply;
+#                   inbox_detail opens the newest inbox item (skipped when the inbox is empty).
 #   --themes LIST   light, dark (default: both); the emulator's night mode, which the app follows
 #   --font-scale L  Android font scales, e.g. 1.0,1.3 (default: 1.0); > 1 catches truncation
 #   --chat TEXT     the chat screen's message (default "what is 12 times 7")
