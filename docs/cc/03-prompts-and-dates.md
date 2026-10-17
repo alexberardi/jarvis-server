@@ -27,6 +27,7 @@ Source: `QUESTIONS.md`. §1–§9 still describe today's Python behaviour; chang
 - **D40 (B defaults).** Q8: date extraction from the raw transcript. Q9: one shared date-key constant closes the vocabulary gap, and the LLM fallback is dropped. Q11: keep `/generate/date-context`, never null.
 - **D3 / D21 / D30.** Speaker identity is per conversation; an unknown speaker gets `UNKNOWN_SPEAKER_BLOCK`, and no `<person_view>` is injected for an unknown speaker. With D35 (recognition off by default) that is the default case.
 - **D38.** The affect hint stays in the user-message assembly as a no-op (`affect` is always `null`).
+- **2026-10-16.** Providers are replaced by text prompts with variables; the contract is [prompt-contract.md](prompt-contract.md).
 
 ## 1. Purpose
 
