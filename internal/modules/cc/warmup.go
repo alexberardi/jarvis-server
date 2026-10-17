@@ -134,13 +134,18 @@ func parseStartRequest(w http.ResponseWriter, r *http.Request) (startRequest, bo
 	return req, true
 }
 
-// promptProvider resolves llm.prompt_provider. Unknown or unset is a hard error (D11).
-func (m *Module) promptProvider(ctx context.Context) (prompts.Provider, error) {
-	name := strings.TrimSpace(m.settings.String(ctx, settingPromptProvider, settings.Scope{}))
+// promptText is the household's prompt: for now the install's default built-in,
+// llm.prompt_provider when set, else the live model's. Unknown or unset is a hard error (D11).
+func (m *Module) promptText(ctx context.Context, hh string) (name, text string, err error) {
+	name = strings.TrimSpace(m.settings.String(ctx, settingPromptProvider, settings.Scope{}))
 	if name == "" && m.DefaultPromptProvider != nil {
 		name = m.DefaultPromptProvider(ctx)
 	}
-	return prompts.Lookup(name)
+	if err := prompts.CheckBuiltin(name); err != nil {
+		return "", "", err
+	}
+	text, _ = prompts.Builtin(name)
+	return name, text, nil
 }
 
 // householdBool reads a per-household bool setting.
@@ -177,15 +182,16 @@ func (m *Module) handleConversationStart(w http.ResponseWriter, r *http.Request,
 // the node's client tools), command flags, the byte-exact system prompt, the cache entry and
 // the warmup inference.
 func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*conversation, error) {
-	provider, err := m.promptProvider(ctx)
+	hh := n.HouseholdID
+	promptName, text, err := m.promptText(ctx, hh)
 	if err != nil {
 		return nil, err
 	}
-	hh := n.HouseholdID
+	mode, _, _ := m.llmMode(ctx, prompts.ModePrefs{})
 	conv := &conversation{
 		id: req.ConversationID, nodeID: n.ID, householdID: hh,
 		memberIDs: append([]int64(nil), n.HouseholdMemberIDs...),
-		provider:  provider, forceTools: provider.ForceToolCalls(), chatUserID: req.chatUserID,
+		mode:      mode, promptName: promptName, chatUserID: req.chatUserID,
 	}
 	room, voiceMode := prompts.DefaultRoom, prompts.DefaultVoiceMode
 	if n.row != nil {
@@ -265,7 +271,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	}
 	persona := parse.PyStrip(m.settings.String(ctx, settingPersona, settings.Scope{HouseholdID: hh}))
 
-	serverNames := m.gateErrandTools(ctx, hh, prompts.ServerToolNames(provider.SupportsNativeTools(), m.tools.Names(), gates))
+	serverNames := m.gateErrandTools(ctx, hh, prompts.ServerToolNames(mode.Native(), m.tools.Names(), gates))
 	serverDefs := m.tools.Definitions(serverNames)
 	conv.serverNames = map[string]bool{}
 	for _, d := range serverDefs {
@@ -290,7 +296,8 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		Room: room, VoiceMode: voiceMode, HouseholdPersona: persona,
 		DateKeys: m.dateVocabulary(), Agents: conv.agents, RoomHierarchy: m.roomHierarchy(ctx, hh),
 	}
-	system, _ := prompts.AssembleSystemPrompt(provider, pctx, conv.tools, commandFlags(conv.commands), prompts.Characterization{})
+	in := prompts.Inputs{Context: pctx, Tools: conv.tools, Flags: commandFlags(conv.commands), ToolCalling: mode.ToolCalling}
+	system, _ := prompts.SystemPrompt(text, in, prompts.Characterization{})
 	conv.commit([]chatMsg{sysMsg(system)})
 
 	m.convs.put(conv)
@@ -303,7 +310,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		one := 1
 		zero := 0.0
 		creq := llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(conv.messages), MaxTokens: &one, Temperature: &zero}
-		if provider.SupportsNativeTools() {
+		if mode.Native() {
 			creq.Tools = llmTools(prompts.NativeTools(conv.tools))
 			creq.ToolChoice = json.RawMessage(`"auto"`)
 		}
@@ -321,7 +328,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		}
 	}
 	m.deps.Log.Info("cc: conversation started", "conversation_id", conv.id, "node", n.ID,
-		"provider", provider.Name(), "server_tools", len(serverDefs), "client_tools", len(req.ClientTools))
+		"prompt", promptName, "tool_calling", mode.ToolCalling, "server_tools", len(serverDefs), "client_tools", len(req.ClientTools))
 	return conv, nil
 }
 

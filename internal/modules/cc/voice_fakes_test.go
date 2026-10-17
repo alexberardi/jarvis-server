@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
@@ -394,6 +395,24 @@ type voiceEnv struct {
 
 const voiceHH = "hh-voice"
 
+// providerTraits is a live model whose LLM mode reproduces what a legacy provider did:
+// ChatGPT a remote model (native, no suffix, no force-tools guard), the 9B a local native
+// template with the thinking switch, the 8B/14B a local text one with it.
+func providerTraits(provider string) llm.ModelTraits {
+	switch provider {
+	case prompts.ChatGPT:
+		return llm.ModelTraits{ToolCalling: string(prompts.ToolsNative), ToolCallingFrom: ModeSourceRemote}
+	case prompts.Qwen3_5_9B:
+		return llm.ModelTraits{ToolCalling: string(prompts.ToolsNative), ToolCallingFrom: ModeSourceTemplate, Thinking: true, Local: true}
+	}
+	return llm.ModelTraits{ToolCalling: string(prompts.ToolsText), ToolCallingFrom: ModeSourceTemplate, Thinking: true, Local: true}
+}
+
+// withTraits makes tr the live model's traits (the LLM mode's input).
+func withTraits(m *Module, tr llm.ModelTraits) {
+	m.LiveModelTraits = func(context.Context) llm.ModelTraits { return tr }
+}
+
 func newVoiceEnv(t *testing.T, provider string, configure ...func(m *Module)) *voiceEnv {
 	t.Helper()
 	eng := newFakeEngine(t)
@@ -403,6 +422,7 @@ func newVoiceEnv(t *testing.T, provider string, configure ...func(m *Module)) *v
 		m.LLM, m.STT, m.TTS, m.Notify = svc, ve.stt, ve.tts, ve.notify
 		m.Endpoints = engineResolver{eng}.Resolve
 		m.Names = fakeNames{7: "alex", 8: "sam"}
+		withTraits(m, providerTraits(provider))
 		for _, c := range configure {
 			c(m)
 		}

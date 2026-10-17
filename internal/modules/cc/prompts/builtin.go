@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"path"
 	"sort"
@@ -43,4 +44,13 @@ func BuiltinNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// CheckBuiltin says whether name is a built-in prompt. There is no default and no remap of
+// dropped legacy names (D11): anything else is an error.
+func CheckBuiltin(name string) error {
+	if _, ok := Builtin(name); !ok {
+		return fmt.Errorf("unknown prompt provider %q (want one of %s)", name, strings.Join(BuiltinNames(), ", "))
+	}
+	return nil
 }

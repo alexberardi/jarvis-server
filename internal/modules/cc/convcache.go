@@ -98,7 +98,10 @@ type conversation struct {
 	agents      *pyjson.Object
 	homeContext map[string]any
 
-	provider prompts.Provider
+	// mode is how this conversation talks to the live model, and promptName the prompt its
+	// messages[0] was rendered from; both are fixed at warmup (prefix cache).
+	mode       prompts.Mode
+	promptName string
 	// messages[0] is the byte-stable system prompt.
 	messages []chatMsg
 	// tools are the offered tools (gated server tools, then the node's client tools), as raw
@@ -106,7 +109,6 @@ type conversation struct {
 	tools       []prompts.Tool
 	serverNames map[string]bool
 	commands    []*pyjson.Object // merged available commands (examples, flags, param types)
-	forceTools  bool
 
 	referenced []any // the RECENTLY SHOWN items (raw)
 

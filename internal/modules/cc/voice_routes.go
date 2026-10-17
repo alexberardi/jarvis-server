@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	tf "github.com/alexberardi/jarvis-server/internal/modules/cc/textfilter"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
@@ -366,8 +367,7 @@ func (m *Module) streamContinueLLM(ctx context.Context, plan *continuePlan, say 
 		m.deps.Log.Error("cc: continue stream failed", "conversation_id", conv.id, "err", err)
 		return ""
 	}
-	start, end := conv.provider.ThinkDelimiters()
-	cs := tf.NewContinueStreamer(start, end)
+	cs := tf.NewContinueStreamer(prompts.ThinkOpen, prompts.ThinkClose)
 	alive := true
 	firstToken := true
 	chars := 0
@@ -522,32 +522,26 @@ func (m *Module) handleWakeResponse(w http.ResponseWriter, r *http.Request, n *n
 		return
 	}
 	ctx := r.Context()
-	provider, err := m.promptProvider(ctx)
+	mode, _, _ := m.llmMode(ctx, prompts.ModePrefs{})
 	user := "Hello Jarvis"
-	if err == nil {
-		if s := provider.UserMessageSuffix(m.householdBool(ctx, settingIncludeThinking, n.HouseholdID)); s != "" {
-			user += "\n" + s
-		}
+	if s := mode.UserMessageSuffix(m.householdBool(ctx, settingIncludeThinking, n.HouseholdID)); s != "" {
+		user += "\n" + s
 	}
 	maxTok := 12
 	temp := 1.1
 	off := 0
 	wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	resp, err2 := m.LLM.Chat(wctx, llm.ChatRequest{Label: llm.LabelLive, MaxTokens: &maxTok, Temperature: &temp, ReasoningBudget: &off,
+	resp, err := m.LLM.Chat(wctx, llm.ChatRequest{Label: llm.LabelLive, MaxTokens: &maxTok, Temperature: &temp, ReasoningBudget: &off,
 		Messages: []llm.Message{{Role: "system", Content: llm.TextContent(wakeSystemPrompt)}, {Role: "user", Content: llm.TextContent(user)}}})
-	if err2 != nil || resp.Content == "" {
-		if err2 != nil {
-			m.deps.Log.Warn("cc: wake-response LLM call failed", "err", err2)
+	if err != nil || resp.Content == "" {
+		if err != nil {
+			m.deps.Log.Warn("cc: wake-response LLM call failed", "err", err)
 		}
 		reply(wakeResponseFallback)
 		return
 	}
-	content := resp.Content
-	if err == nil {
-		content = provider.SanitizeText(content)
-	}
-	if text := parse.PyStrip(cleanForTTS(content)); text != "" {
+	if text := parse.PyStrip(cleanForTTS(prompts.SanitizeText(resp.Content))); text != "" {
 		reply(text)
 		return
 	}
