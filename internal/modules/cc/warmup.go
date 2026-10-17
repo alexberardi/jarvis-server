@@ -134,18 +134,10 @@ func parseStartRequest(w http.ResponseWriter, r *http.Request) (startRequest, bo
 	return req, true
 }
 
-// promptText is the household's prompt: for now the install's default built-in,
-// llm.prompt_provider when set, else the live model's. Unknown or unset is a hard error (D11).
+// promptText is the household's prompt name and text (resolvePrompt).
 func (m *Module) promptText(ctx context.Context, hh string) (name, text string, err error) {
-	name = strings.TrimSpace(m.settings.String(ctx, settingPromptProvider, settings.Scope{}))
-	if name == "" && m.DefaultPromptProvider != nil {
-		name = m.DefaultPromptProvider(ctx)
-	}
-	if err := prompts.CheckBuiltin(name); err != nil {
-		return "", "", err
-	}
-	text, _ = prompts.Builtin(name)
-	return name, text, nil
+	r, err := m.resolvePrompt(ctx, hh)
+	return r.Name, r.Text, err
 }
 
 // householdBool reads a per-household bool setting.
@@ -183,11 +175,12 @@ func (m *Module) handleConversationStart(w http.ResponseWriter, r *http.Request,
 // the warmup inference.
 func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*conversation, error) {
 	hh := n.HouseholdID
-	promptName, text, err := m.promptText(ctx, hh)
+	prompt, err := m.resolvePrompt(ctx, hh)
 	if err != nil {
 		return nil, err
 	}
-	mode, _, _ := m.llmMode(ctx, prompts.ModePrefs{})
+	promptName, text := prompt.Name, prompt.Text
+	mode, _, _ := m.llmMode(ctx, prompt.Prefs)
 	conv := &conversation{
 		id: req.ConversationID, nodeID: n.ID, householdID: hh,
 		memberIDs: append([]int64(nil), n.HouseholdMemberIDs...),
@@ -297,6 +290,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		DateKeys: m.dateVocabulary(), Agents: conv.agents, RoomHierarchy: m.roomHierarchy(ctx, hh),
 	}
 	in := prompts.Inputs{Context: pctx, Tools: conv.tools, Flags: commandFlags(conv.commands), ToolCalling: mode.ToolCalling}
+	m.lastInputs.set(n.ID, in)
 	system, _ := prompts.SystemPrompt(text, in, prompts.Characterization{})
 	conv.commit([]chatMsg{sysMsg(system)})
 

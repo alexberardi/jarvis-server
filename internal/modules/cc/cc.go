@@ -168,6 +168,8 @@ type Module struct {
 	resets   *resetStore
 	ambient  *ambientStore
 	releases *releaseCache
+	// lastInputs is each node's latest warmup prompt inputs (household_prompt.go).
+	lastInputs lastInputs
 
 	convs    *convCache
 	signals  *convSignals
