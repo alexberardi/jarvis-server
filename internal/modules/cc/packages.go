@@ -101,7 +101,9 @@ const notForComputersCode = "not_for_computers"
 // detail: targets that leave out "desktop", or apt packages, which only a Pi installs. A
 // package without targets is allowed (decision 2026-10-15-pantry-packages-on-desktop-agents).
 // Pantry being down or not knowing the package isn't a refusal: the agent checks the manifest
-// it downloads (packages.Manifest.CheckDesktop) with the same rules and more.
+// it downloads (packages.Manifest.CheckDesktop) with the same rules and more. The detail is
+// the latest version's, so an install pinned to an older git_tag is judged by the latest one:
+// Pantry has no side-effect-free per-version manifest (see the decision's Limitation).
 func (m *Module) piOnlyReason(ctx context.Context, householdID, name string) string {
 	ctx, cancel := context.WithTimeout(ctx, pantryDraftTimeout)
 	defer cancel()
