@@ -148,7 +148,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	native := p.SupportsNativeTools()
 	var nativeTools []llm.Tool
 	if native {
-		nativeTools = llmTools(prompts.NativeTools(p, conv.tools))
+		nativeTools = llmTools(prompts.NativeTools(conv.tools))
 	}
 	smallMode := m.settings.Bool(ctx, settingSmallModelMode, settings.Scope{})
 	budget := m.thinkingBudget(ctx, hh)

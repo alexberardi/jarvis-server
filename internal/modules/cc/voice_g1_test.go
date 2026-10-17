@@ -115,7 +115,7 @@ func TestG1ThroughWarmup(t *testing.T) {
 				t.Fatalf("warmup tools %d, want %d", len(gotTools), len(wantTools))
 			}
 			conv := ve.m.convs.get("g1")
-			for i, nt := range prompts.NativeTools(conv.provider, conv.tools) {
+			for i, nt := range prompts.NativeTools(conv.tools) {
 				if a, b := prompts.CompactASCII(nt), prompts.CompactASCII(wantTools[i]); a != b {
 					t.Fatalf("native tool %d %s", i, firstDiffStr(a, b))
 				}

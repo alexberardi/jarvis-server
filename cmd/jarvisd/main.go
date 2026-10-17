@@ -225,6 +225,8 @@ func modules() []module.Module {
 			// With llm.prompt_provider unset, the live model's catalog entry names it, so a
 			// fresh install answers its first voice turn without anyone choosing one.
 			c.DefaultPromptProvider = llm.LivePromptProvider
+			// The live model's tool calling and thinking switch, for llm.tool_calling/thinking_switch auto.
+			c.LiveModelTraits = llm.LiveModelTraits
 			// Slot capabilities: vision for chat images, context size for compaction.
 			c.Endpoints = func(ctx context.Context, label string) (llmmod.Endpoint, error) {
 				if llm.Resolver == nil {
