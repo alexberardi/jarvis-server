@@ -110,8 +110,12 @@ type Resolver struct {
 	StopTimeout    time.Duration // default 10s
 	Restart        engines.RestartPolicy
 	// RetryFailed is the base cooldown before a failed engine is tried again (doubling up to
-	// 10× it). Default 60s, as the legacy model service.
+	// 8× it). Default 60s, as the legacy model service.
 	RetryFailed time.Duration
+	// MaxRetries is how many times a failed engine is retried before the resolver gives up
+	// and leaves it failed until its settings change or Retry is called. Default 3;
+	// negative = never give up.
+	MaxRetries int
 	// Interval is how often Start's loop reconciles; default 15s.
 	Interval time.Duration
 	// TemplateDir holds the pinned chat templates engines are launched with
@@ -151,9 +155,17 @@ type instance struct {
 	apiKey string
 	alias  string
 	sup    *engines.Supervisor
-	// retries counts failed-engine retries, for the cooldown.
+	// retries counts failed-engine retries, for the cooldown and MaxRetries.
 	retries int
+	// gaveUp is set once retries reach MaxRetries: the engine stays failed until Retry.
+	gaveUp bool
 }
+
+// ErrUnknownEngine is returned by Retry for an engine name the resolver doesn't run.
+var ErrUnknownEngine = errors.New("unknown engine")
+
+// ErrNotFailed is returned by Retry for an engine that hasn't failed: there is nothing to retry.
+var ErrNotFailed = errors.New("engine has not failed")
 
 func (r *Resolver) init() {
 	if r.instances == nil {
@@ -188,6 +200,10 @@ func (r *Resolver) Resolve(ctx context.Context, label string) (Endpoint, error) 
 		r.init()
 		ep, inst, err := r.ensure(ctx, label)
 		r.gc()
+		var p parked
+		if inst != nil {
+			p = inst.parked()
+		}
 		var wait []chan struct{}
 		if isStopWait(err) {
 			wait = slices.Collect(maps.Values(r.stopping))
@@ -202,19 +218,31 @@ func (r *Resolver) Resolve(ctx context.Context, label string) (Endpoint, error) 
 		if err != nil || inst == nil {
 			return ep, err
 		}
-		return ready(ep, inst)
+		return ready(ep, inst, p)
 	}
 }
 
-// ready reports a local label's endpoint by its engine's state.
-func ready(ep Endpoint, inst *instance) (Endpoint, error) {
+// parked is whether the resolver gave up on an engine, read under r.mu for ready.
+type parked struct {
+	gaveUp  bool
+	retries int
+}
+
+func (inst *instance) parked() parked { return parked{inst.gaveUp, inst.retries} }
+
+// ready reports a local label's endpoint by its engine's state; p is its parked snapshot.
+func ready(ep Endpoint, inst *instance, p parked) (Endpoint, error) {
 	st := inst.sup.Status()
 	switch st.State {
 	case engines.Healthy:
 	case engines.Unhealthy:
 		ep.Degraded = true
 	default:
-		return Endpoint{}, &NotReadyError{Label: ep.Label, State: string(st.State), Reason: st.LastError}
+		reason := st.LastError
+		if p.gaveUp {
+			reason = fmt.Sprintf("gave up after %d retries (%s); fix the settings or press Retry", p.retries, st.LastError)
+		}
+		return Endpoint{}, &NotReadyError{Label: ep.Label, State: string(st.State), Reason: reason}
 	}
 	return ep, nil
 }
@@ -572,6 +600,10 @@ func (r *Resolver) retryFailed() {
 	if base <= 0 {
 		base = time.Minute
 	}
+	maxRetries := r.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
 	for _, inst := range r.instances {
 		st := inst.sup.Status()
 		if st.State != engines.Failed {
@@ -580,9 +612,15 @@ func (r *Resolver) retryFailed() {
 			}
 			continue
 		}
-		cool := base << min(inst.retries, 3)
-		cool = min(cool, 10*base)
-		if time.Since(st.Since) < cool {
+		if inst.gaveUp {
+			continue
+		}
+		if maxRetries >= 0 && inst.retries >= maxRetries {
+			inst.gaveUp = true
+			r.Log.Error("engine gave up: still failing after retries", "engine", inst.name, "retries", inst.retries, "err", st.LastError)
+			continue
+		}
+		if time.Since(st.Since) < retryCooldown(base, inst.retries) {
 			continue
 		}
 		inst.retries++
@@ -591,6 +629,33 @@ func (r *Resolver) retryFailed() {
 			r.Log.Warn("engine retry failed", "engine", inst.name, "err", err)
 		}
 	}
+}
+
+// retryCooldown is the wait before resolver retry retries+1: base doubling, up to 8× base.
+func retryCooldown(base time.Duration, retries int) time.Duration {
+	return base << min(retries, 3)
+}
+
+// Retry starts a failed engine (one the resolver gave up on, or one still waiting out its
+// cooldown) again with a fresh retry budget: the admin's "Retry" after fixing what broke it.
+// A failed supervisor has no process, so this never waits on a stop under r.mu (#207).
+// ErrUnknownEngine if name isn't running, ErrNotFailed if it hasn't failed.
+func (r *Resolver) Retry(_ context.Context, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	for _, inst := range r.instances {
+		if inst.name != name {
+			continue
+		}
+		if inst.sup.Status().State != engines.Failed {
+			return fmt.Errorf("%w: %q", ErrNotFailed, name)
+		}
+		inst.retries, inst.gaveUp = 0, false
+		r.Log.Info("retrying engine on request", "engine", inst.name)
+		return inst.sup.Start()
+	}
+	return fmt.Errorf("%w %q", ErrUnknownEngine, name)
 }
 
 // Notify asks the running loop to reconcile now (after a settings write, an install or a
@@ -673,13 +738,17 @@ type InstanceStatus struct {
 	Since     time.Time     `json:"since"`
 	Started   time.Time     `json:"started,omitzero"` // process launch; zero when none runs
 	LastError string        `json:"last_error,omitempty"`
-	Output    []string      `json:"output"`
-	Kind      Kind          `json:"kind"`
-	Flavour   Flavour       `json:"flavour"`
-	Port      int           `json:"port"`
-	Model     string        `json:"model"`
-	Labels    []string      `json:"labels"`
-	Args      []string      `json:"args"`
+	// Retries counts the resolver's retries of this failed engine; GaveUp is set once they
+	// reach MaxRetries and the engine is left failed until Retry or a settings change.
+	Retries int      `json:"retries"`
+	GaveUp  bool     `json:"gave_up"`
+	Output  []string `json:"output"`
+	Kind    Kind     `json:"kind"`
+	Flavour Flavour  `json:"flavour"`
+	Port    int      `json:"port"`
+	Model   string   `json:"model"`
+	Labels  []string `json:"labels"`
+	Args    []string `json:"args"`
 }
 
 // Status reports every label against the current settings. It only reads: a local label is
@@ -733,10 +802,14 @@ func (r *Resolver) peek(c LabelConfig) (Endpoint, error) {
 	r.init()
 	inst := r.instances[r.bound[c.Label]]
 	last, seen := r.last[c.Label]
+	var p parked
+	if inst != nil {
+		p = inst.parked()
+	}
 	r.mu.Unlock()
 	switch {
 	case inst != nil:
-		return ready(r.fill(ep, c, inst), inst)
+		return ready(r.fill(ep, c, inst), inst, p)
 	case seen && last != nil:
 		return Endpoint{}, last
 	}
@@ -760,7 +833,7 @@ func (r *Resolver) Instances() []InstanceStatus {
 		args, _ := inst.key.args(inst.port, inst.alias)
 		st := inst.sup.Status()
 		out = append(out, InstanceStatus{Name: st.Name, State: st.State, PID: st.PID, Restarts: st.Restarts,
-			Since: st.Since, Started: st.Started, LastError: st.LastError, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
+			Since: st.Since, Started: st.Started, LastError: st.LastError, Retries: inst.retries, GaveUp: inst.gaveUp, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
 			Port: inst.port, Model: inst.key.Model, Labels: labels, Args: args})
 	}
 	slices.SortFunc(out, func(a, b InstanceStatus) int { return strings.Compare(a.Name, b.Name) })

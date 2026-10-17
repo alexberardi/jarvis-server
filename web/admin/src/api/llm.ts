@@ -102,6 +102,10 @@ export interface EngineInstance {
   restarts: number
   since: string
   last_error?: string
+  /** The resolver's retries of this failed engine. */
+  retries: number
+  /** Retries ran out: the engine stays failed until Retry or a settings change. */
+  gave_up: boolean
   output: string[] | null
   kind: string
   flavour: string
@@ -147,6 +151,11 @@ export interface FetchEngineResponse {
 export async function fetchEngine(kind: string, flavour: string): Promise<FetchEngineResponse> {
   const { data } = await apiClient.post<FetchEngineResponse>('/api/llm/v1/hardware/engines', { kind, flavour })
   return data
+}
+
+/** retryEngine restarts an engine the resolver gave up on, with a fresh retry budget. */
+export async function retryEngine(name: string): Promise<void> {
+  await apiClient.post(`/api/llm/v1/hardware/engines/${encodeURIComponent(name)}/retry`)
 }
 
 // --- catalog and fit ---

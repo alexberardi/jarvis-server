@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -123,6 +124,33 @@ func TestReplacementStartsOnlyAfterStop(t *testing.T) {
 	g.ready(LabelLive)
 	if n := g.startsOf(b); n != 1 {
 		t.Fatalf("b started %d times", n)
+	}
+}
+
+// Loop item #113: Retry of an engine that hasn't failed is refused without stopping it, so
+// it never waits on a process exit under the resolver lock.
+func TestRetryOfHealthyEngineDoesNotStopIt(t *testing.T) {
+	g := newRig(t)
+	t.Setenv("FAKE_ENGINE_IGNORE_TERM", "1")
+	a := g.model("a.gguf")
+	g.src.set(g.llm(LabelLive, a))
+	ep := g.ready(LabelLive)
+	retried := make(chan error, 1)
+	go func() { retried <- g.r.Retry(context.Background(), ep.Engine) }()
+	time.Sleep(100 * time.Millisecond)
+	t0 := time.Now()
+	g.r.Instances()
+	if _, err := g.r.Resolve(context.Background(), LabelLive); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(t0); d > 500*time.Millisecond {
+		t.Fatalf("blocked %v behind Retry", d)
+	}
+	if err := <-retried; !errors.Is(err, ErrNotFailed) {
+		t.Fatalf("retry: %v", err)
+	}
+	if n := g.startsOf(a); n != 1 {
+		t.Fatalf("a started %d times", n)
 	}
 }
 
