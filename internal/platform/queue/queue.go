@@ -489,7 +489,7 @@ func (q *Queue) purger(ctx context.Context) {
 	t := time.NewTicker(q.PurgeInterval)
 	defer t.Stop()
 	for {
-		if n, err := q.purgeIfAny(ctx, q.now().Add(-q.Retention)); err != nil && ctx.Err() == nil {
+		if n, err := q.Purge(ctx, q.now().Add(-q.Retention)); err != nil && ctx.Err() == nil {
 			q.log.Error("queue: purge finished jobs", "err", err)
 		} else if n > 0 {
 			q.log.Info("queue: purged finished jobs", "count", n)
@@ -543,23 +543,6 @@ func (q *Queue) reapIfExpired(ctx context.Context) error {
 		return err
 	}
 	return q.ReapExpired(ctx)
-}
-
-// purgeIfAny runs Purge only if a read finds a finished job older than cutoff, so the
-// purger doesn't take the write connection on an install with nothing to purge (#120).
-func (q *Queue) purgeIfAny(ctx context.Context, cutoff time.Time) (int64, error) {
-	var one int
-	err := q.db.Read.QueryRowContext(ctx, `
-		SELECT 1 FROM platform_jobs
-		WHERE state IN ('done', 'failed', 'cancelled') AND updated_at < ?
-		LIMIT 1`, ms(cutoff)).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return q.Purge(ctx, cutoff)
 }
 
 // ReapExpired handles expired leases once. Exported for tests.
