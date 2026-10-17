@@ -55,8 +55,16 @@ func TestNotifyGated(t *testing.T) {
 		se.createNode("n1", sigHH)
 		se.set(settingAttention, true, sigHH)
 		se.set(settingAttnQuietHours, "", sigHH)
-		if id, by := se.m.notifyGated(ctx, note("dup")); id == "" || by != "" {
-			t.Fatal(id, by)
+		first, by := se.m.notifyGated(ctx, note("dup"))
+		if first == "" || by != "" {
+			t.Fatal(first, by)
+		}
+		var outcome, itemID string
+		if err := se.d.Read.QueryRow(`SELECT outcome, inbox_item_id FROM cc_attention_deliveries WHERE withheld_by IS NULL`).Scan(&outcome, &itemID); err != nil {
+			t.Fatal(err)
+		}
+		if outcome != "delivered" || itemID != first {
+			t.Fatal(outcome, itemID, first)
 		}
 		if id, by := se.m.notifyGated(ctx, note("dup")); id != "" || by != "dedupe" {
 			t.Fatal(id, by)
@@ -87,6 +95,21 @@ func TestNotifyGated(t *testing.T) {
 		n.Push = false
 		if id, _ := se.m.notifyGated(ctx, n); id == "" {
 			t.Fatal("not delivered")
+		}
+		if len(se.items()) != 1 || len(pushes(se)) != 0 {
+			t.Fatal(se.items(), pushes(se))
+		}
+	})
+
+	t.Run("inbox only, attention on", func(t *testing.T) {
+		se := newSigEnv(t)
+		se.createNode("n1", sigHH)
+		se.set(settingAttention, true, sigHH)
+		se.set(settingAttnQuietHours, "", sigHH)
+		n := note("inbox-on")
+		n.Push = false
+		if id, by := se.m.notifyGated(ctx, n); id == "" || by != "" {
+			t.Fatal(id, by)
 		}
 		if len(se.items()) != 1 || len(pushes(se)) != 0 {
 			t.Fatal(se.items(), pushes(se))
