@@ -15,9 +15,14 @@ type Step struct {
 	Args    *pyjson.Object
 	Label   string
 	IsRisky bool
+	// RunWithoutConfirmation: the step's tool declares it may run without a tap (A7).
+	RunWithoutConfirmation bool
+	// Approved: the user already approved this step.
+	Approved bool
 }
 
-// Object renders the step as the legacy dict (key order command, args, label, is_risky).
+// Object renders the step as the legacy dict (key order command, args, label, is_risky), then
+// run_without_confirmation and approved, each only when true so existing bytes are unchanged.
 func (s Step) Object() *pyjson.Object {
 	args := s.Args
 	if args == nil {
@@ -28,6 +33,12 @@ func (s Step) Object() *pyjson.Object {
 	o.Set("args", args)
 	o.Set("label", s.Label)
 	o.Set("is_risky", s.IsRisky)
+	if s.RunWithoutConfirmation {
+		o.Set("run_without_confirmation", true)
+	}
+	if s.Approved {
+		o.Set("approved", true)
+	}
 	return o
 }
 
@@ -41,7 +52,8 @@ func stepFromValue(v any) Step {
 	if !ok {
 		return Step{Args: pyjson.NewObject()}
 	}
-	st := Step{Command: objStr(o, "command"), Label: truthyStr(o, "label"), IsRisky: objTruthy(o, "is_risky")}
+	st := Step{Command: objStr(o, "command"), Label: truthyStr(o, "label"), IsRisky: objTruthy(o, "is_risky"),
+		RunWithoutConfirmation: objTruthy(o, "run_without_confirmation"), Approved: objTruthy(o, "approved")}
 	if av, ok := o.Get("args"); ok {
 		st.Args, _ = av.(*pyjson.Object)
 	}

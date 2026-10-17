@@ -18,18 +18,22 @@ package ocr
 // JARVIS_PARITY_OSX_URL/_OSX_KEY for Apple Vision, JARVIS_PARITY_TESSERACT ("-" disables).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
@@ -128,9 +132,7 @@ func TestParityServe(t *testing.T) {
 			SettingsRead:   settings.CombinedGuard(auth.verifyUser, auth.ValidateApp),
 			SettingsWrite:  settings.SuperuserGuard(auth.verifyUser),
 			Version:        "parity",
-			LLMURL:         os.Getenv("JARVIS_PARITY_LLM_URL"),
-			LLMAppID:       os.Getenv("JARVIS_PARITY_LLM_APP_ID"),
-			LLMAppKey:      os.Getenv("JARVIS_PARITY_LLM_APP_KEY"),
+			LLM:            parityLLMFromEnv(),
 			AppleVisionURL: os.Getenv("JARVIS_PARITY_OSX_URL"),
 			AppleVisionKey: os.Getenv("JARVIS_PARITY_OSX_KEY"),
 			TesseractPath:  os.Getenv("JARVIS_PARITY_TESSERACT"),
@@ -142,4 +144,53 @@ func TestParityServe(t *testing.T) {
 	if err := r.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// parityLLM sends the module's chat requests to an OpenAI-compatible endpoint
+// (JARVIS_PARITY_LLM_URL with JARVIS_PARITY_LLM_APP_ID/_APP_KEY); jarvisd itself calls its llm
+// module in process.
+type parityLLM struct{ url, id, key string }
+
+func parityLLMFromEnv() LLM {
+	l := parityLLM{os.Getenv("JARVIS_PARITY_LLM_URL"), os.Getenv("JARVIS_PARITY_LLM_APP_ID"), os.Getenv("JARVIS_PARITY_LLM_APP_KEY")}
+	if l.url == "" || l.id == "" || l.key == "" {
+		return nil
+	}
+	return l
+}
+
+func (l parityLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	body := map[string]any{"model": req.Label, "messages": req.Messages, "max_tokens": req.MaxTokens,
+		"temperature": req.Temperature, "response_format": req.ResponseFormat, "reasoning_budget": req.ReasoningBudget}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.url, "/")+"/v1/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	hr.Header.Set("X-Jarvis-App-Id", l.id)
+	hr.Header.Set("X-Jarvis-App-Key", l.key)
+	resp, err := http.DefaultClient.Do(hr)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("LLM endpoint returned %d: %s", resp.StatusCode, truncRunes(string(data), 200))
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || len(out.Choices) == 0 {
+		return nil, errors.New("invalid response format from LLM endpoint")
+	}
+	return &llm.ChatResponse{Content: out.Choices[0].Message.Content}, nil
 }

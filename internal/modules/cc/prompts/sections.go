@@ -49,15 +49,6 @@ type CommandFlag struct {
 	AllowDirectAnswer bool
 }
 
-// identityHeader is IJarvisPromptProvider.build_context_header.
-func identityHeader(ctx Context) string {
-	h := "You are Jarvis, a function calling voice assistant.\nContext: room=" + ctx.Room + ", style=" + ctx.VoiceMode
-	if p := PersonalityBlock(ctx.HouseholdPersona); p != "" {
-		h += "\n\n" + p
-	}
-	return h
-}
-
 // PersonalityBlock is core_rules.build_personality_block: the fenced household voice, or ""
 // for an empty persona.
 func PersonalityBlock(persona string) string {
