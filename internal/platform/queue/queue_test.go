@@ -346,3 +346,142 @@ func TestPurge(t *testing.T) {
 		t.Fatal("purge removed a live job")
 	}
 }
+
+// A graceful shutdown mid-job puts the job back to queued and refunds the attempt it claimed,
+// so the next boot runs it again instead of failing it for an expired lease (#104).
+func TestShutdownMidJobRefundsAttempt(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		maxAttempts int
+		prior       int // failed runs before the interrupted one
+	}{
+		{"single attempt", 1, 0},
+		{"first of three", 3, 0},
+		{"last of three", 3, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, d := newQueue(t)
+			clock := time.Now()
+			q.now = func() time.Time { return clock }
+			ctx := context.Background()
+			id, err := q.Enqueue(ctx, "work", nil, Options{MaxAttempts: tc.maxAttempts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.prior > 0 {
+				d.Write.Exec(`UPDATE platform_jobs SET attempts = ? WHERE id = ?`, tc.prior, id)
+			}
+			started := make(chan struct{})
+			q.Register("work", Handler{MaxAttempts: tc.maxAttempts, Run: func(ctx context.Context, _ Job) ([]byte, error) {
+				close(started)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}})
+			sctx, cancel := context.WithCancel(context.Background())
+			q.Start(sctx)
+			<-started
+			cancel()
+			q.Wait()
+			i, _ := q.Get(ctx, id)
+			if i.State != Queued || i.Attempts != tc.prior {
+				t.Fatalf("after shutdown: %+v, want queued with attempts %d", i, tc.prior)
+			}
+			// Even long after the lease would have run out, nothing fails it.
+			clock = clock.Add(2 * time.Hour)
+			if err := q.ReapExpired(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if i, _ := q.Get(ctx, id); i.State != Queued {
+				t.Fatalf("after reap: %+v", i)
+			}
+			// The next boot runs it.
+			q2 := New(d, q.log)
+			q2.PollInterval = 10 * time.Millisecond
+			q2.now = q.now
+			q2.Register("work", Handler{MaxAttempts: tc.maxAttempts, Run: func(context.Context, Job) ([]byte, error) { return []byte("ok"), nil }})
+			start(t, q2)
+			if i := waitState(t, q2, id, Done); i.Attempts != tc.prior+1 {
+				t.Fatalf("after reboot: %+v", i)
+			}
+		})
+	}
+}
+
+// A handler that succeeds as shutdown begins is recorded as done, not re-run.
+func TestShutdownAfterSuccessRecordsDone(t *testing.T) {
+	q, _ := newQueue(t)
+	ctx := context.Background()
+	id, _ := q.Enqueue(ctx, "work", nil, Options{MaxAttempts: 1})
+	sctx, cancel := context.WithCancel(context.Background())
+	q.Register("work", Handler{Run: func(context.Context, Job) ([]byte, error) {
+		cancel()
+		return []byte("finished"), nil
+	}})
+	q.Start(sctx)
+	q.Wait()
+	if i, _ := q.Get(ctx, id); i.State != Done || string(i.Result) != "finished" || i.Attempts != 1 {
+		t.Fatalf("%+v", i)
+	}
+}
+
+// jarvisd is one process, so every running row at boot was orphaned by a crash. Start
+// requeues it before any worker runs, without waiting for its lease; the crashed run still
+// counts as an attempt, and a row that was already on its extra run is failed (#104).
+func TestCrashThenBootRecoversOrphans(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		attempts    int
+		maxAttempts int
+		want        State
+		wantErr     string
+	}{
+		{"attempts left", 1, 3, Queued, ""},
+		{"last attempt gets one more run", 1, 1, Queued, ""},
+		{"crashed on its extra run", 2, 1, Failed, "interrupted by restart"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, d := newQueue(t)
+			clock := time.Now()
+			q.now = func() time.Time { return clock }
+			now := clock.UnixMilli()
+			var id int64
+			// Lease far in the future, as a 30 min / 1 h lease would be right after a crash.
+			if err := d.Write.QueryRow(`
+				INSERT INTO platform_jobs (type, state, attempts, max_attempts, run_at, lease_until, created_at, updated_at)
+				VALUES ('orphan', 'running', ?, ?, ?, ?, ?, ?) RETURNING id`,
+				tc.attempts, tc.maxAttempts, now-60_000, now+30*60_000, now-60_000, now-60_000).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			// No handler registered, so Start's recovery is all that can touch the row.
+			start(t, q)
+			i, _ := q.Get(context.Background(), id)
+			if i.State != tc.want || i.Attempts != tc.attempts || i.LastError != tc.wantErr {
+				t.Fatalf("after boot: %+v, want %s attempts %d err %q", i, tc.want, tc.attempts, tc.wantErr)
+			}
+			var runAt int64
+			var lease sql.NullInt64
+			d.Read.QueryRow(`SELECT run_at, lease_until FROM platform_jobs WHERE id = ?`, id).Scan(&runAt, &lease)
+			if lease.Valid {
+				t.Fatalf("lease_until still set: %d", lease.Int64)
+			}
+			if tc.want == Queued && runAt != now {
+				t.Fatalf("run_at %d, want now %d", runAt, now)
+			}
+		})
+	}
+}
+
+// An orphan with attempts left runs to done after boot.
+func TestCrashThenBootRunsOrphan(t *testing.T) {
+	q, d := newQueue(t)
+	now := time.Now().UnixMilli()
+	var id int64
+	d.Write.QueryRow(`
+		INSERT INTO platform_jobs (type, state, attempts, max_attempts, run_at, lease_until, created_at, updated_at)
+		VALUES ('orphan', 'running', 1, 1, ?, ?, ?, ?) RETURNING id`, now, now+3_600_000, now, now).Scan(&id)
+	q.Register("orphan", Handler{MaxAttempts: 1, Run: func(context.Context, Job) ([]byte, error) { return []byte("ok"), nil }})
+	start(t, q)
+	if i := waitState(t, q, id, Done); i.Attempts != 2 {
+		t.Fatalf("%+v", i)
+	}
+}

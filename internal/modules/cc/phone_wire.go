@@ -64,7 +64,7 @@ func (m *Module) registerPhone(mux *http.ServeMux) {
 	p.LLM, p.STT, p.Notify, p.Names, p.Blobs = m.LLM, m.STT, m.Notify, m.Names, m.deps.Blobs
 	p.Provider, p.Search, p.Calendar, p.Errands = m.Phone.Provider, search, m.Phone.Calendar, m.Phone.Errands
 	p.EnvCredentials, p.NewProvider = m.Phone.EnvCredentials, m.Phone.NewProvider
-	p.Options, p.Now = m.Phone.Options, m.now
+	p.Options, p.Now, p.Go = m.Phone.Options, m.now, m.tasks.Go
 	if m.TTS != nil {
 		p.TTS = phoneTTS{m.TTS}
 	}

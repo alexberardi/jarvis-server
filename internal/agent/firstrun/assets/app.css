@@ -113,6 +113,10 @@ button.big span { color: var(--muted); font-size: .92rem; }
   letter-spacing: .12em; text-align: center; margin: 14px 0;
   padding: 12px; border-radius: 10px; background: var(--field); border: 1px dashed var(--line);
 }
+.household {
+  font-size: 1.4rem; font-weight: 700; text-align: center; margin: 14px 0;
+  padding: 12px; border-radius: 10px; background: var(--field); border: 1px solid var(--line);
+}
 .perms { list-style: none; padding: 0; margin: 0; }
 .perms li {
   display: grid; grid-template-columns: 28px 1fr auto; gap: 4px 10px; align-items: center;

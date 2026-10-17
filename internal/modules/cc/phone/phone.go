@@ -142,8 +142,11 @@ type Service struct {
 	Fetch    *servertools.Fetcher
 	Calendar Availability
 	Errands  ErrandHook
-	Options  Options
-	Now      func() time.Time
+	// Go runs fire-and-forget work (an errand resume) on the owner's task group, so shutdown
+	// waits for it; it reports false when the group has drained. Nil runs a bare goroutine.
+	Go      func(fn func()) bool
+	Options Options
+	Now     func() time.Time
 	// Timing knobs (tests shorten them; zero = the legacy values).
 	StreamStartTimeout time.Duration
 	HeartbeatInterval  time.Duration
@@ -198,6 +201,17 @@ func (s *Service) Start(ctx context.Context) {
 func (s *Service) Wait() {
 	s.planWG.Wait()
 	s.wg.Wait()
+}
+
+// spawn runs fn through Go, or on a bare goroutine when Go is nil.
+func (s *Service) spawn(fn func()) {
+	if s.Go == nil {
+		go fn()
+		return
+	}
+	if !s.Go(fn) && s.Log != nil {
+		s.Log.Debug("phone: background task dropped at shutdown")
+	}
 }
 
 func (s *Service) baseCtx() context.Context {

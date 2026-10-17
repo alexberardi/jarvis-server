@@ -96,43 +96,64 @@ func (m *Module) PantryBaseURL(ctx context.Context, householdID string) string {
 // the Store's node picker for such a package, so it sees this only from an old app.
 const notForComputersCode = "not_for_computers"
 
-// piOnlyReason says why a desktop agent can't run Pantry's package name, or "" when it can or
-// Pantry can't say (decision 2026-10-15-store-hides-pi-only-packages). It reads the package's
-// detail: targets that leave out "desktop", or apt packages, which only a Pi installs. A
-// package without targets is allowed (decision 2026-10-15-pantry-packages-on-desktop-agents).
-// Pantry being down or not knowing the package isn't a refusal: the agent checks the manifest
-// it downloads (packages.Manifest.CheckDesktop) with the same rules and more. The detail is
-// the latest version's, so an install pinned to an older git_tag is judged by the latest one:
-// Pantry has no side-effect-free per-version manifest (see the decision's Limitation).
-func (m *Module) piOnlyReason(ctx context.Context, householdID, name string) string {
+// Codes of a refused install on a computer (loop item #101).
+const (
+	pantryUnavailableCode = "pantry_unavailable" // 503: Pantry can't be reached or answers nonsense
+	packageNotFoundCode   = "package_not_found"  // Pantry doesn't know the package or has no repo for it
+	repoMismatchCode      = "repo_mismatch"      // the caller's repo isn't the one Pantry lists
+	versionNotFoundCode   = "version_not_found"  // the git_tag isn't one Pantry lists, nor a commit
+)
+
+// errPantryNoPackage is Pantry's 404 for a package.
+var errPantryNoPackage = errors.New("pantry: no such package")
+
+// pantryCommand is the part of Pantry's GET /v1/commands/{name} that cc reads. It is
+// side-effect-free, unlike /download, which counts an install and is rate-limited
+// (decision 2026-10-15-store-hides-pi-only-packages).
+type pantryCommand struct {
+	CommandName   string   `json:"command_name"`
+	DisplayName   string   `json:"display_name"`
+	GithubRepoURL string   `json:"github_repo_url"`
+	Targets       []string `json:"targets"`
+	AptPackages   []any    `json:"apt_packages"`
+}
+
+// pantryGet decodes the household's Pantry at path into v: errPantryNoPackage on a 404, any
+// other failure (unreachable, another status, not JSON) as an error.
+func (m *Module) pantryGet(ctx context.Context, householdID, path string, v any) error {
 	ctx, cancel := context.WithTimeout(ctx, pantryDraftTimeout)
 	defer cancel()
-	u := strings.TrimRight(m.PantryBaseURL(ctx, householdID), "/") + "/v1/commands/" + url.PathEscape(name)
+	u := strings.TrimRight(m.PantryBaseURL(ctx, householdID), "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		m.deps.Log.Warn("cc: Pantry URL unusable for a desktop install check", "url", u, "err", err)
-		return ""
+		return err
 	}
 	resp, err := m.pantryHTTP.Do(req)
 	if err != nil {
-		m.deps.Log.Warn("cc: Pantry unreachable for a desktop install check", "url", u, "err", err)
-		return ""
+		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		m.deps.Log.Warn("cc: Pantry has no detail for a desktop install check", "url", u, "status", resp.StatusCode)
-		return ""
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return errPantryNoPackage
+	default:
+		return fmt.Errorf("pantry: %s: status %d", u, resp.StatusCode)
 	}
-	var d struct {
-		CommandName string   `json:"command_name"`
-		DisplayName string   `json:"display_name"`
-		Targets     []string `json:"targets"`
-		AptPackages []any    `json:"apt_packages"`
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(v); err != nil {
+		return fmt.Errorf("pantry: %s: %w", u, err)
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&d); err != nil {
-		m.deps.Log.Warn("cc: Pantry detail is not a package", "url", u, "err", err)
-		return ""
-	}
+	return nil
+}
+
+// piOnlyReason says why a desktop agent can't run the package, or "": targets that leave out
+// "desktop", or apt packages, which only a Pi installs (decision
+// 2026-10-15-store-hides-pi-only-packages). A package without targets is allowed (decision
+// 2026-10-15-pantry-packages-on-desktop-agents). The detail is the latest version's, so an
+// install pinned to an older git_tag is judged by the latest one: Pantry has no
+// side-effect-free per-version manifest (see the decision's Limitation). The agent checks the
+// manifest it downloads too (packages.Manifest.CheckDesktop).
+func (d *pantryCommand) piOnlyReason(name string) string {
 	label := cmp.Or(d.DisplayName, d.CommandName, name)
 	switch {
 	case len(d.Targets) > 0 && !slices.Contains(d.Targets, "desktop"):
@@ -141,6 +162,96 @@ func (m *Module) piOnlyReason(ctx context.Context, householdID, name string) str
 		return label + " needs system packages that only a Pi node installs"
 	}
 	return ""
+}
+
+// sameRepo compares repository URLs as spelt by people: case, spaces, a trailing slash and
+// ".git" don't matter.
+func sameRepo(a, b string) bool {
+	norm := func(s string) string {
+		s = strings.TrimRight(strings.ToLower(strings.TrimSpace(s)), "/")
+		return strings.TrimRight(strings.TrimSuffix(s, ".git"), "/")
+	}
+	return norm(a) == norm(b)
+}
+
+// isCommitSHA: a full 40-hex git commit id.
+func isCommitSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range strings.ToLower(s) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// pinDesktopInstall is the Pantry check for an install on a computer, which runs the package
+// as its signed-in member (loop item #101, decision 2026-10-17-desktop-installs-pinned-to-pantry).
+// It fails closed: the repository is Pantry's (the caller's must name the same one), the
+// version is a git_tag Pantry lists for the package, a full commit id (what the app sends,
+// from Pantry's /download), or else Pantry's newest. It writes the refusal and returns false
+// when the install can't go ahead.
+func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, hh, name, repo string, tag *string) (string, *string, bool) {
+	unavailable := func(err error) (string, *string, bool) {
+		m.deps.Log.Warn("cc: Pantry can't vouch for a desktop install; refused", "command", name, "err", err)
+		detailCode(w, http.StatusServiceUnavailable, "The Pantry package store can't be reached to check "+name+
+			", so it can't be installed on a computer right now. Try again later.", pantryUnavailableCode)
+		return "", nil, false
+	}
+	notFound := func() (string, *string, bool) {
+		detailCode(w, http.StatusUnprocessableEntity, "The Pantry has no package "+name+" to install on a computer", packageNotFoundCode)
+		return "", nil, false
+	}
+	var d pantryCommand
+	switch err := m.pantryGet(ctx, hh, "/v1/commands/"+url.PathEscape(name), &d); {
+	case errors.Is(err, errPantryNoPackage):
+		return notFound()
+	case err != nil:
+		return unavailable(err)
+	}
+	if reason := d.piOnlyReason(name); reason != "" {
+		detailCode(w, http.StatusUnprocessableEntity, reason, notForComputersCode)
+		return "", nil, false
+	}
+	pinned := strings.TrimSpace(d.GithubRepoURL)
+	if pinned == "" {
+		return notFound()
+	}
+	if !sameRepo(repo, pinned) {
+		detailCode(w, http.StatusUnprocessableEntity, "That repository isn't the one the Pantry lists for "+name, repoMismatchCode)
+		return "", nil, false
+	}
+	want := ""
+	if tag != nil {
+		want = strings.TrimSpace(*tag)
+	}
+	if isCommitSHA(want) {
+		return pinned, &want, true
+	}
+	var vs struct {
+		Versions []struct {
+			GitTag *string `json:"git_tag"`
+		} `json:"versions"`
+	}
+	switch err := m.pantryGet(ctx, hh, "/v1/commands/"+url.PathEscape(name)+"/versions", &vs); {
+	case errors.Is(err, errPantryNoPackage):
+		return notFound()
+	case err != nil:
+		return unavailable(err)
+	}
+	for _, v := range vs.Versions { // newest first
+		if v.GitTag != nil && *v.GitTag != "" && (want == "" || *v.GitTag == want) {
+			return pinned, v.GitTag, true
+		}
+	}
+	msg := "The Pantry lists no version of " + name + " to install"
+	if want != "" {
+		msg = "The Pantry lists no version " + want + " of " + name
+	}
+	detailCode(w, http.StatusUnprocessableEntity, msg, versionNotFoundCode)
+	return "", nil, false
 }
 
 func (m *Module) registerPackages(mux *http.ServeMux) {
@@ -371,6 +482,34 @@ func (m *Module) requirePkgHousehold(ctx context.Context, auth provAuth, househo
 	return m.requireRole(ctx, auth.user.ID, householdID, authn.RoleMember)
 }
 
+// errDesktopPkgRole is the 403 for a member changing what runs on someone else's computer.
+const errDesktopPkgRole = "Only the member who added this computer, or a household admin, can change its packages"
+
+// requireDesktopPkgRole: a desktop agent runs what's installed on it as its signed-in member,
+// so on a computer (after requirePkgHousehold) only the member who added it or a household
+// admin may install, uninstall, revert or test-install (loop item #101; a Pi keeps the
+// member rule, D5 and docs/cc/12 Q2). The admin key and, on a node without a household, a
+// superuser pass as requirePkgHousehold lets them. A computer with no owner is admins' only.
+func (m *Module) requireDesktopPkgRole(ctx context.Context, auth provAuth, node *nodeRow, householdID string) error {
+	if auth.admin || !node.desktop() {
+		return nil
+	}
+	if householdID == "" {
+		return nil // requirePkgHousehold let only a superuser through
+	}
+	if node.ownerUserID.Valid && node.ownerUserID.Int64 == auth.user.ID {
+		return nil
+	}
+	if err := m.requireRole(ctx, auth.user.ID, householdID, authn.RoleAdmin); err != nil {
+		var se *statusErr
+		if errors.As(err, &se) && se.status == http.StatusForbidden {
+			return fail(http.StatusForbidden, errDesktopPkgRole)
+		}
+		return err
+	}
+	return nil
+}
+
 // --- create ---
 
 func (m *Module) handleRequestInstall(w http.ResponseWriter, r *http.Request) {
@@ -393,9 +532,9 @@ func (m *Module) handleRequestInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The node ignores the repo info here and installs only what verify returns; it is kept
-	// for wire parity (D40 12.Q12).
+	// for wire parity (D40 12.Q12). On a computer both are Pantry's (pinDesktopInstall).
 	m.publishPkg(p.nodeID, opInstall, map[string]any{
-		"request_id": p.id, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullStr(tag),
+		"request_id": p.id, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullable(p.gitTag),
 		"pantry_url": m.PantryBaseURL(r.Context(), p.householdID),
 	})
 	writeCreated(w, p)
@@ -459,10 +598,11 @@ func (m *Module) handleRequestRevert(w http.ResponseWriter, r *http.Request) {
 	writeCreated(w, p)
 }
 
-// createPkg checks the node and household (from the node row, never the caller), and for an
-// install (needsPantry) that the household has the Pantry on, then inserts a pending row with
+// createPkg checks the node and household (from the node row, never the caller), the owner or
+// an admin on a computer, and for an install (needsPantry) that the household has the Pantry
+// on and, on a computer, Pantry's repository and version (pinDesktopInstall), then inserts a pending row with
 // the 5-minute pickup deadline.
-func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth, name, repo string, tag *string, needsPantry bool) (*pkgRequest, bool) {
+func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth, name, repo string, tag *string, needsPantry bool) (p *pkgRequest, ok bool) {
 	ctx := r.Context()
 	nodeID := r.PathValue("node_id")
 	node, err := m.nodeByID(ctx, nodeID)
@@ -482,17 +622,20 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 		m.writeErr(w, err)
 		return nil, false
 	}
+	if err := m.requireDesktopPkgRole(ctx, auth, node, hh); err != nil {
+		m.writeErr(w, err)
+		return nil, false
+	}
 	if needsPantry && !m.requirePantry(w, r, hh) {
 		return nil, false
 	}
 	if needsPantry && node.desktop() {
-		if reason := m.piOnlyReason(ctx, hh, name); reason != "" {
-			detailCode(w, http.StatusUnprocessableEntity, reason, notForComputersCode)
+		if repo, tag, ok = m.pinDesktopInstall(ctx, w, hh, name, repo, tag); !ok {
 			return nil, false
 		}
 	}
 	now := m.now()
-	p := &pkgRequest{id: uuid4(), nodeID: nodeID, householdID: hh, commandName: name, repoURL: repo,
+	p = &pkgRequest{id: uuid4(), nodeID: nodeID, householdID: hh, commandName: name, repoURL: repo,
 		status: pkgPending, createdAt: now, expiresAt: now.Add(pkgPickupTTL)}
 	if tag != nil {
 		p.gitTag = sql.NullString{String: *tag, Valid: true}

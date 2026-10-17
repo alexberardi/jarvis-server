@@ -49,7 +49,7 @@ func newSigEnv(t *testing.T, configure ...func(m *Module)) *sigEnv {
 			c(m)
 		}
 	}})
-	t.Cleanup(func() { e.m.sig.wg.Wait() })
+	t.Cleanup(e.m.tasks.Wait)
 	return &sigEnv{env: e, notify: n}
 }
 
@@ -66,7 +66,7 @@ func (se *sigEnv) items() []notifications.NewInboxItem {
 	return append([]notifications.NewInboxItem(nil), se.notify.items...)
 }
 
-func (se *sigEnv) wait() { se.m.sig.wg.Wait() }
+func (se *sigEnv) wait() { se.m.tasks.settle() }
 
 func signal(kind, key string, extra map[string]any) map[string]any {
 	s := map[string]any{"kind": kind, "source_key": key, "summary": "s"}

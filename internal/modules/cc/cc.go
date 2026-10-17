@@ -12,6 +12,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
@@ -188,6 +189,13 @@ type Module struct {
 	phone      *phone.Service   // 5c phone calls (phone_wire.go)
 	errands    *errands.Service // 5c errands and workflows (errands.go)
 
+	// tasks tracks fire-and-forget goroutines so shutdown waits for them (tasks.go, Wait).
+	tasks taskGroup
+
+	// Autonomy (docs/autonomy/PLAN.md): the activity log and the rule policy (P1 fills Rules).
+	autonomy *policy.Store
+	policy   *policy.Policy
+
 	// 5d interactive callbacks (callbacks.go): the static server-callback map and result waiters.
 	cbOnce sync.Once
 	cbMap  map[string]serverCallbackFunc
@@ -353,6 +361,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerSignals(mux)
 	// Phone calls, phonebook and call context (doc 11).
 	m.registerPhone(mux)
+	// Autonomy activity log and policy (docs/autonomy/PLAN.md §0).
+	m.registerAutonomy()
 	// Errands and workflows (doc 09).
 	m.registerErrands()
 	// Interactive callbacks (doc 13): after every subsystem that contributes server handlers.
@@ -440,6 +450,11 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 	}
 	if err := m.purgeSignals(ctx, tx, userID); err != nil {
 		return err
+	}
+	if m.autonomy != nil {
+		if err := m.autonomy.PurgeUser(ctx, tx, userID); err != nil {
+			return err
+		}
 	}
 	for _, q := range []string{
 		`DELETE FROM cc_conversation_transcripts WHERE user_id = ?`,

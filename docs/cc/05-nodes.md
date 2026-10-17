@@ -72,7 +72,7 @@ Auth: **N** = node `X-API-Key: node_id:node_key` (`deps.py:162-217`); **J** = us
 | GET | `/nodes/{id}/k2/provision/{rid}` | N (self) | node `_fetch_k2_from_cc` (`mqtt_tts_listener.py:1610`) | `node_settings.py:531` |
 | POST | `/nodes/{id}/k2/ack/{rid}` | N (**not checked against the path id**) | node `_ack_k2_provision` (`:1751`) | `node_settings.py:569` |
 | GET | `/node/mqtt-credentials` | N | node `utils/mqtt_credentials.py:58` | `api/node_mqtt.py:22` |
-| POST | `/nodes/{id}/actions` | J (member) | mobile (`commandCenterApi.ts`) | `api/node_commands.py:79` |
+| POST | `/nodes/{id}/actions` | J (member; a desktop agent: owner or household admin) | mobile (`commandCenterApi.ts`) | `api/node_commands.py:79` |
 | POST | `/nodes/{id}/commands` | A | jarvis-admin `routes/nodes.ts:44`, which only sends `train_adapter`. So it is **effectively LoRA-only.** **CUT (D9)** | `api/node_commands.py:138` |
 | POST | `/nodes/{id}/node-config` | J (member) | mobile `nodeApi.ts:73` | `api/node_commands.py:156` |
 | POST | `/nodes/{id}/led/preview` | J (member) | mobile `nodeApi.ts:88` | `api/node_commands.py:189` |

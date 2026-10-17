@@ -511,7 +511,13 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		return err
 	}
 	dbOpen := true
+	// The shipper writes into the DB: close it first, on every path that closes the DB
+	// (rollbackAfterGate closes it before the deferred calls run).
+	var shipper *logging.Shipper
 	closeDB := func() {
+		if shipper != nil {
+			shipper.Close()
+		}
 		if dbOpen {
 			deps.DB.Close()
 			dbOpen = false
@@ -522,8 +528,7 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 	// jarvisd's own records go to stderr and, once migrated, into the logs module's store.
 	for _, m := range mods {
 		if l, ok := m.(*logsmod.Module); ok {
-			shipper := logging.NewShipper(l.Sink(), 4096, 200, 2*time.Second)
-			defer shipper.Close()
+			shipper = logging.NewShipper(l.Sink(), 4096, 200, 2*time.Second)
 			deps.Log = logging.New(os.Stderr, logging.ParseLevel(os.Getenv("JARVIS_LOG_LEVEL")), shipper)
 			deps.Queue = queue.New(deps.DB, deps.Log)
 			deps.Scheduler = scheduler.New(deps.DB, deps.Queue, deps.Log)

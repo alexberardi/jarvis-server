@@ -186,8 +186,15 @@ func addMembership(ctx context.Context, tx *sql.Tx, householdID string, userID i
 	return err
 }
 
+// registrationClosed is the 403 detail for a sign-up without an invite once registration is
+// closed; the mobile app shows it as is.
+const registrationClosed = "Registration is closed: ask a household admin for an invite code"
+
 // handleRegister is POST /auth/register: create the user, join the invite's household (or
 // create "My Home" as admin), and log in.
+//
+// Deviation (security): once a superuser exists, a sign-up without an invite code is a 403
+// unless auth.open_registration is on. Before then (first run) it is open as in legacy.
 //
 // Deviation (D5, security): the legacy X-Household-Id header let anyone who knew a
 // household's id register straight into it, unauthenticated. No client sends it. An unknown
@@ -219,6 +226,17 @@ func (m *Module) handleRegister(w http.ResponseWriter, r *http.Request) {
 			detail(w, http.StatusBadRequest, "Invalid or expired invite code")
 		}
 		return
+	}
+	if !hasInvite {
+		open, err := m.registrationOpen(ctx)
+		if err != nil {
+			m.internalError(w, err)
+			return
+		}
+		if !open {
+			detail(w, http.StatusForbidden, registrationClosed)
+			return
+		}
 	}
 	var inv *invite
 	if hasInvite {
@@ -294,14 +312,29 @@ func (m *Module) respondRegistered(w http.ResponseWriter, r *http.Request, u *us
 	})
 }
 
+// registrationOpen reports whether /auth/register accepts a sign-up without an invite: always
+// before the first superuser exists, then only with auth.open_registration on.
+func (m *Module) registrationOpen(ctx context.Context) (bool, error) {
+	has, err := m.hasSuperuser(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !has || m.settings.Bool(ctx, settingOpenRegistration, noScope), nil
+}
+
+func (m *Module) hasSuperuser(ctx context.Context) (bool, error) {
+	n, err := count(ctx, m.deps.DB.Read, `SELECT COUNT(*) FROM auth_users WHERE is_superuser = 1`)
+	return n > 0, err
+}
+
 // handleSetupStatus is GET /auth/setup-status.
 func (m *Module) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
-	n, err := count(r.Context(), m.deps.DB.Read, `SELECT COUNT(*) FROM auth_users WHERE is_superuser = 1`)
+	has, err := m.hasSuperuser(r.Context())
 	if err != nil {
 		m.internalError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"needs_setup": n == 0})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"needs_setup": !has})
 }
 
 // handleSetup is POST /auth/setup: create the first superuser, only while none exists.

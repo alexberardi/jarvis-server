@@ -402,7 +402,7 @@ Environment variables:
 - **The test-install poll lacks `require_household_access`** (`test_install.py:230-242`). Any authenticated user who knows the node id and request id can read `package_name` and the error.
 - **Lazy-expiry write races:** concurrent poll and results calls can each commit a different status.
 - **There is no row retention.** Request tables grow forever.
-- **Who may install:** any household **member** can install arbitrary GitHub code on a shared node. CC does not validate `github_repo_url` (any host) or check it against Pantry (`:30-33`). See Q2. **Kept by D5:** this is intended for a self-hosted install.
+- **Who may install:** any household **member** can install arbitrary GitHub code on a shared node. CC does not validate `github_repo_url` (any host) or check it against Pantry (`:30-33`). See Q2. **Kept by D5:** this is intended for a self-hosted install. On a computer, owner or admin only and Pantry's repository (Q2's amendment).
 - **Stale caches:** the schema cache is not invalidated after install/uninstall/revert, which changes a node's commands and FieldSpecs. Mobile can see a stale form for up to 10 minutes. The docstring admits this (`:66-69`).
 - **Unguarded node responses:** `get_schema` and `list_records` index `response["mode"]` and `["fields"]` directly, and `get_record` indexes `response["record"]`. A node answering `ok:true` without them gives a 500 (`:393-395`, `:489`).
 - **`update` responses are not user_ref-enriched; `create` is enriched only if the schema happens to be cached.**
@@ -449,6 +449,7 @@ Node-side: `test_package_install_handler.py`, `test_command_data_handler.py`, `t
    - *Options:* (a) keep member; (b) require household admin/owner for install, uninstall, revert and test install, and keep member for command-data and the tools view; (c) (b) plus restrict `github_repo_url` to `https://github.com/`.
    - **Recommendation: (b) + (c),** if mobile users who install are already household admins in practice. Is that true for your household setup?
    - **Decided (D5):** (a): any household member, any URL. No allowlist, because private self-hosted Pantry instances are planned. A power-user gate is possible later.
+   - **Amended for computers (2026-10-17, [decision](../decisions/2026-10-17-desktop-installs-pinned-to-pantry.md)):** on a desktop node only its owner or a household admin may install, uninstall, revert or test-install, and an install takes Pantry's repository, failing closed when Pantry can't be reached. A Pi keeps (a).
 3. **[behaviour] The op-confusion gap in verify.** A broker-level attacker can replay a live install `request_id` on `/package-uninstall` and remove the package (§8).
    - *Options:* (a) accept it, and rely on broker ACLs (the embedded broker can make only `jarvisd` publish to `jarvis/nodes/+/…` except response topics); (b) also add an additive `action: "install"|"uninstall"|"revert"` field to the verify response, and an `action` column, so a post-freeze node can check it; (c) both.
    - **Recommendation: (c).** The ACL fixes it now; the field future-proofs it.
