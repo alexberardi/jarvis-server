@@ -102,8 +102,8 @@ updated_at`). Import copies rows 1:1, with these transforms:
     `JARVIS_OSX_API_URL`/`JARVIS_OSX_API_KEY` are set: the fallback behind the native reader on
     macOS (used when it is unavailable or fails), the only route on other OSes. The legacy
     in-process PyObjC provider and the separate `remote_ocr` name are folded into `apple_vision`.
-  LLM vision and text validation through an OpenAI-compatible URL (`Module.LLMURL`, the legacy
-  llm-proxy during the strangler phase).
+  LLM vision and text validation call jarvisd's llm module directly (`Module.LLM`, its
+  `Service().Chat`).
 - **Where tiers apply.** As before, `POST /v1/ocr/batch` with `auto` walks the fixed engine order
   (tesseract → apple_vision → llm_proxy_vision) and ignores `ocr.enabled_tiers`; the queued paths
   use the tier chain (enabled tiers, normalize, LLM-validate, truncate to `ocr.max_text_bytes`).
