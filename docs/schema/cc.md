@@ -50,6 +50,7 @@ Migration: `internal/modules/cc/migrations/00001_baseline.sql` (goose, version t
 | 11 phone | `cc_phone_contacts`, `cc_phone_call_sessions` |
 | 12 packages | `cc_package_install_requests` |
 | 13 mobile chat / callbacks | `cc_callback_jobs` |
+| autonomy (docs/autonomy/PLAN.md) | **`cc_autonomy_events`** (new, 00200): the append-only activity log — what ran without a tap, what was asked and what was blocked, by which rule, with the source (errand, goal, watch, automation) |
 
 Scheduler triggers (D27) and durable jobs live in the platform tables `platform_triggers` and `platform_jobs`, not here. `cc_schedules.next_fire_at` and `cc_routines.schedule` remain the domain and mobile-facing projections.
 
@@ -83,6 +84,7 @@ Scheduler triggers (D27) and durable jobs live in the platform tables `platform_
 | `cc_errand_plans.state = 'expired'` | D40 09.Q6: draft TTL |
 | `cc_automation_actions` | D7: an automation Confirm card carries only an opaque id; the action is stored server-side and run once after the household check |
 | `cc_reaction_claims` (`WITHOUT ROWID`, PK `(household_id, claim_key)`, `expires_at`) | D40 10.Q5: leave-by claims and automation last-signature dedup are persisted with a TTL and claimed only on terminal outcomes |
+| `cc_autonomy_events` (00200) | docs/autonomy/PLAN.md §0.3: the autonomy activity log. `user_id` is de-identified on account deletion (D20), not deleted: the rows are the household's audit. `detail` is a JSON object or NULL; `effect` is the closed set allow/ask/block (CHECK), `outcome` the open set launched/ran/asked/blocked/failed/stopped/fired (comment, no CHECK). |
 
 **Deliberately not added:**
 
