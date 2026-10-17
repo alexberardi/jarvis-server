@@ -18,22 +18,22 @@ import (
 // exposure is what the LAN must reach: the listeners the given modules serve, the MQTT
 // broker's TCP and WebSocket ports, and mDNS when advertising. The CLI doctor and the admin's
 // /api/doctor share it.
-func exposure(listeners []string) doctor.Exposure {
+func exposure(listeners []string, env config.Env) doctor.Exposure {
 	return doctor.Exposure{
 		Listeners:  listeners,
-		MQTTAddr:   mqttTCPAddr(),
-		MQTTWSAddr: mqttWSAddr(),
-		MDNS:       os.Getenv("JARVIS_MDNS") != "0",
+		MQTTAddr:   env.MQTTAddr,
+		MQTTWSAddr: env.MQTTWSAddr,
+		MDNS:       env.MDNS,
 	}
 }
 
 // doctorPorts lists the ports `jarvisd doctor` checks.
 func doctorPorts(cfg config.Config) []doctor.Port {
 	var listeners []string
-	for _, m := range modules() {
+	for _, m := range modules(cfg.Env) {
 		listeners = append(listeners, m.Listener())
 	}
-	return exposure(listeners).Ports(cfg.Ports)
+	return exposure(listeners, cfg.Env).Ports(cfg.Ports)
 }
 
 // runDoctor is `jarvisd doctor [--json] [--fix]`: it prints each check (or JSON) and fails

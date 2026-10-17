@@ -12,10 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/doctor"
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/update"
@@ -221,6 +223,23 @@ func TestRunningVersion(t *testing.T) {
 		}
 		if upToDate(context.Background(), s, c.home, c.runAs) {
 			t.Errorf("%s: up to date", name)
+		}
+	}
+}
+
+// When the config doesn't load, the fresh-install port check still covers the MQTT broker and
+// mDNS from the environment.
+func TestPortsConfigFallbackKeepsBrokerAndMDNS(t *testing.T) {
+	t.Setenv("JARVIS_HOME", t.TempDir())
+	unsetForTest(t, "JARVIS_MQTT_ADDR", "JARVIS_MQTT_WS_ADDR", "JARVIS_MDNS")
+	t.Setenv("JARVIS_PORT_OFFSET", "bogus")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("want the bogus offset to fail Load")
+	}
+	ports := doctorPorts(portsConfig())
+	for _, want := range []doctor.Port{{Name: "mqtt", Port: 1884, Proto: "tcp"}, {Name: "mqtt-ws", Port: 9883, Proto: "tcp"}, {Name: "mdns", Port: 5353, Proto: "udp"}} {
+		if !slices.Contains(ports, want) {
+			t.Errorf("%+v missing from %v", want, ports)
 		}
 	}
 }
