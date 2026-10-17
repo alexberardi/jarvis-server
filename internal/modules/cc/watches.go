@@ -12,8 +12,8 @@ import (
 )
 
 // Watches (docs/autonomy/PLAN.md §2): the store, the household switch, firing (watches_fire.go),
-// the signal source (watches_signal.go) and the hourly expiry sweep. Web checks and the voice
-// tools come later; nothing reads max_active or min_cadence_minutes yet.
+// the signal source (watches_signal.go), web checks (watches_web.go) and the hourly expiry sweep.
+// The voice tools come later; nothing reads max_active yet.
 const (
 	settingWatchesEnabled    = "watches.enabled"
 	settingWatchesMaxActive  = "watches.max_active"
@@ -32,8 +32,8 @@ func watchDefinitions() []settings.Definition {
 	}
 }
 
-// registerWatches sets up the watches store, the signal source (watches_signal.go) and the expiry
-// sweep's job. It has no routes.
+// registerWatches sets up the watches store, the signal source (watches_signal.go), the web
+// check's job and the expiry sweep's job. It has no routes.
 func (m *Module) registerWatches(_ *http.ServeMux) {
 	m.watches = &watches.Store{DB: m.deps.DB, Now: m.now}
 	m.registerWatchSignals()
@@ -41,18 +41,24 @@ func (m *Module) registerWatches(_ *http.ServeMux) {
 		m.deps.Queue.Register(watchSweepJob, queue.Handler{Run: func(ctx context.Context, _ queue.Job) ([]byte, error) {
 			return nil, m.sweepWatches(ctx)
 		}})
+		m.deps.Queue.Register(watchCheckJob, queue.Handler{Run: m.runWatchCheck, Concurrency: 1, MaxAttempts: 1,
+			Lease: 5 * time.Minute})
 	}
 }
 
-// startWatches schedules the expiry sweep (D27: a trigger, not a loop).
+// startWatches schedules the expiry sweep (D27: a trigger, not a loop) and arms any web watch
+// whose next check is missing.
 func (m *Module) startWatches(ctx context.Context) error {
 	if m.deps.Scheduler == nil {
 		return nil
 	}
-	return m.deps.Scheduler.Ensure(ctx, scheduler.Trigger{
+	if err := m.deps.Scheduler.Ensure(ctx, scheduler.Trigger{
 		Name: watchSweepJob, Kind: scheduler.KindInterval, JobType: watchSweepJob,
 		Spec: scheduler.Spec{Every: time.Hour},
-	})
+	}); err != nil {
+		return err
+	}
+	return m.reconcileWatchTriggers(ctx)
 }
 
 // watchesEnabled reports whether the household has watches on (watches.enabled). Fail closed: a
