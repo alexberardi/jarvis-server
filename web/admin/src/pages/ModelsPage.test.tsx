@@ -70,7 +70,16 @@ beforeEach(() => {
   api.listInstalls.mockResolvedValue([])
   api.listInstalled.mockResolvedValue({ models: [], disk_bytes: 0, dir: '/m' })
   api.getHardware.mockRejectedValue(new Error('no'))
-  api.getPromptProvider.mockResolvedValue({ value: '', derived: '', effective: '', source: '', valid: false, options: [] })
+  api.getPromptProvider.mockResolvedValue({
+    value: '',
+    derived: '',
+    effective: '',
+    source: '',
+    valid: false,
+    options: [],
+    tool_calling: { value: 'auto', detected: '', effective: 'text', source: 'default' },
+    thinking_switch: { value: 'auto', detected: '', effective: 'none', source: 'default' },
+  })
   api.hfTokenIsSet.mockResolvedValue(false)
 })
 

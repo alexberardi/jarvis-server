@@ -478,6 +478,18 @@ export async function putLabels(body: Partial<Record<Label, LabelUpdate>>): Prom
 
 // --- prompt provider (AD4) ---
 
+/** One LLM mode setting (llm.tool_calling, llm.thinking_switch) as the server resolves it. */
+export interface ModeSetting {
+  /** The setting as set: "auto" unless the superuser chose one. */
+  value: string
+  /** The live model's own value ("" when unknown). */
+  detected: string
+  /** What a turn uses. */
+  effective: string
+  /** Where effective comes from. */
+  source: 'setting' | 'prompt' | 'template' | 'remote' | 'default'
+}
+
 export interface PromptProvider {
   /** llm.prompt_provider as set; "" = derive from the live model. */
   value: string
@@ -488,6 +500,8 @@ export interface PromptProvider {
   /** Effective is a registered provider; a voice turn fails otherwise. */
   valid: boolean
   options: string[] | null
+  tool_calling: ModeSetting
+  thinking_switch: ModeSetting
 }
 
 export async function getPromptProvider(): Promise<PromptProvider> {
