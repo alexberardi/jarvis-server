@@ -83,3 +83,19 @@ func waitFor(t *testing.T, ok func() bool) {
 	}
 	t.Fatal("condition never held")
 }
+
+// At shutdown the task group refuses the verification: its slot comes back and the turn fails open.
+func TestWakeVerificationRefusedAtShutdownFreesItsSlot(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.set(settingWakeMode, "enforce", settings.Scope{HouseholdID: voiceHH})
+	ve.m.tasks.Wait() // drained: background refuses new tasks
+	ve.start("c1", "[]")
+	ve.transcribe("c1", true)
+	if len(ve.m.wakeSem) != 0 || ve.m.wakeDrops.Load() != 0 {
+		t.Fatalf("slots held %d, drops %d; want 0 and 0", len(ve.m.wakeSem), ve.m.wakeDrops.Load())
+	}
+	start := time.Now()
+	if v := ve.m.signals.wakeVerdict(context.Background(), "c1", 5*time.Second); v != nil || time.Since(start) > time.Second {
+		t.Fatalf("a refused verification gives no verdict at once: %v after %v", v, time.Since(start))
+	}
+}
