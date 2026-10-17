@@ -1,7 +1,10 @@
 import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, MessageSquareCode } from 'lucide-react'
 import { toast } from 'sonner'
-import { usePromptProvider, useSetPromptProvider } from '@/hooks/useModelManager'
+import type { ModeSetting } from '@/api/llm'
+import { updateSetting } from '@/api/settings'
+import { mmKeys, usePromptProvider, useSetPromptProvider } from '@/hooks/useModelManager'
 import { useSetupState } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
 import { buttonClass, inputClass } from './styles'
@@ -10,6 +13,61 @@ import { Pill, Section } from './ui'
 const SOURCE_TEXT: Record<string, string> = {
   model: 'from model',
   setting: 'set by you',
+}
+
+/** Where a mode's detected value came from; null when the server doesn't say (it was overridden). */
+function detectedText(m: ModeSetting): string | null {
+  if (!m.detected) return 'not detected'
+  if (m.source === 'template') return "from the model's chat template"
+  if (m.source === 'remote') return 'remote model'
+  return null
+}
+
+/**
+ * ModeRow shows one LLM mode setting (docs/cc/prompt-contract.md): what turns use, whether it was
+ * detected or set by the superuser, and a select to override it ("auto" follows the detection).
+ */
+function ModeRow({ id, label, mode, options }: { id: string; label: string; mode: ModeSetting; options: string[] }) {
+  const qc = useQueryClient()
+  const set = useMutation<unknown, Error, string>({
+    mutationFn: (value) => updateSetting('cc', `llm.${id}`, value),
+    onSuccess: (_, value) => {
+      toast.success(`${label} set to ${value}`)
+      void qc.invalidateQueries({ queryKey: mmKeys.prompt })
+    },
+    onError: (err) => toast.error(errorMessage(err, `Could not set ${label.toLowerCase()}`)),
+  })
+  const detected = detectedText(mode)
+  const setByYou = mode.value !== 'auto'
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor={`llm-${id}`} className="w-32 text-sm text-[var(--color-text-muted)]">
+        {label}
+      </label>
+      <code className="text-sm text-[var(--color-text)]">{mode.effective}</code>
+      <Pill>{detected ?? `detected: ${mode.detected}`}</Pill>
+      {setByYou ? (
+        <Pill tone="info">set by you</Pill>
+      ) : (
+        <span className="text-xs text-[var(--color-text-muted)]">households' prompts may set their own</span>
+      )}
+      <select
+        id={`llm-${id}`}
+        value={mode.value}
+        disabled={set.isPending}
+        onChange={(e) => set.mutate(e.target.value)}
+        className={`${inputClass} ml-auto w-auto max-w-xs`}
+      >
+        <option value="auto">auto ({mode.detected || 'not detected'})</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
 }
 
 /**
@@ -46,9 +104,9 @@ export default function PromptProviderCard() {
 
   return (
     <Section
-      title="Prompt provider"
+      title="Prompt and model behaviour"
       icon={MessageSquareCode}
-      description="How voice turns are formatted for the live model. It normally comes from the model."
+      description="The default prompt for households without their own, and how the live model calls tools and thinks."
     >
       {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
       {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the prompt provider')}</p>}
@@ -133,6 +191,11 @@ export default function PromptProviderCard() {
                 {data.derived ? `Use the model's (${data.derived})` : 'Clear override'}
               </button>
             )}
+          </div>
+
+          <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
+            <ModeRow id="tool_calling" label="Tool calling" mode={data.tool_calling} options={['native', 'text']} />
+            <ModeRow id="thinking_switch" label="Thinking switch" mode={data.thinking_switch} options={['suffix', 'none']} />
           </div>
         </div>
       )}

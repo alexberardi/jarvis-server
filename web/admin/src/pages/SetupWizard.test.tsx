@@ -132,7 +132,16 @@ const superState: authApi.SetupState = {
     proposal: { live: { gpu_backend: 'cuda', gpu_devices: '0' }, background: { gpu_backend: 'cuda', gpu_devices: '0' } },
     flavours: { 'llama-server': ['cpu', 'cuda', 'vulkan'], 'whisper-server': ['cpu', 'cuda'] },
   },
-  prompt_provider: { value: '', derived: '', effective: '', source: '', valid: false, options: [] },
+  prompt_provider: {
+    value: '',
+    derived: '',
+    effective: '',
+    source: '',
+    valid: false,
+    options: [],
+    tool_calling: { value: 'auto', detected: '', effective: 'text', source: 'default' },
+    thinking_switch: { value: 'auto', detected: '', effective: 'none', source: 'default' },
+  },
   doctor: { status: 'ok', failing: [], ran_at: '' },
   jobs: jobs(),
 }
