@@ -211,6 +211,27 @@ func TestThinkingControl(t *testing.T) {
 	}
 }
 
+func TestChatPriority(t *testing.T) {
+	e := setup(t)
+	if r := e.post("/v1/chat/completions", chat("hi", map[string]any{"priority": "background"})); r.status != 200 {
+		t.Fatalf("background: %d %s", r.status, r.body)
+	}
+	if n := len(e.engine.requests()); n != 1 {
+		t.Fatalf("engine saw %d requests", n)
+	}
+	r := e.post("/v1/chat/completions", chat("hi", map[string]any{"priority": "urgent"}))
+	var first map[string]any
+	if d, _ := r.json(t)["detail"].([]any); len(d) > 0 {
+		first, _ = d[0].(map[string]any)
+	}
+	if loc, _ := first["loc"].([]any); r.status != 422 || len(loc) != 2 || loc[0] != "body" || loc[1] != "priority" || first["type"] != "literal_error" {
+		t.Fatalf("urgent: %d %s", r.status, r.body)
+	}
+	if r := e.post("/v1/chat/completions", chat("hi", nil)); r.status != 200 {
+		t.Fatalf("no priority: %d %s", r.status, r.body)
+	}
+}
+
 func TestDateKeys(t *testing.T) {
 	e := setup(t)
 	r := e.post("/v1/chat/completions", chat("Remind me tomorrow morning to call mom.", map[string]any{"include_date_context": true}))

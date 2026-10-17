@@ -83,6 +83,7 @@ Inside jarvisd, CC and OCR call the llm module through Go (§11). They no longer
   | `include_date_context` | Jarvis extension |
   | `adapter_settings{hash, scale, enabled}` | LoRA; Go accepts and ignores it |
   | `reasoning_budget` | Jarvis extension |
+  | `priority` | Jarvis extension: `"live"` (default) or `"background"`; a background call waits for live ones on the same engine. Anything else is 422 `literal_error` on `body.priority` |
 
 - **Unknown fields are accepted and ignored.** `extra="allow"` covers CC's `conversation_id`.
 - **Messages:**

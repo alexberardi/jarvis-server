@@ -552,6 +552,28 @@ func TestLLMQueueEnqueue(t *testing.T) {
 	})
 }
 
+// TestLLMChatPriority freezes jarvisd's chat priority (autonomy PLAN §0.1): "live" or
+// "background", anything else a 422 on body.priority.
+func TestLLMChatPriority(t *testing.T) {
+	tg := needLLM(t)
+	if !Jarvisd() {
+		t.Skip("contract: chat priority is jarvisd-only (no legacy equivalent); set " + EnvImpl + "=jarvisd")
+	}
+	app := SharedApp(t)
+
+	t.Run("background", func(t *testing.T) {
+		r := tg.SlowJSON(t, LLM, "/v1/chat/completions",
+			chatReq("Reply with the word OK.", map[string]any{"priority": "background"}), app.H())
+		skipIfNotLoaded(t, r.Resp)
+		r.Expect(http.StatusOK, chatCompletion("live", Null))
+	})
+
+	t.Run("unknown priority", func(t *testing.T) {
+		tg.SlowJSON(t, LLM, "/v1/chat/completions", chatReq("hi", map[string]any{"priority": "urgent"}), app.H()).
+			Expect(http.StatusUnprocessableEntity, ValidationError("body", "priority"))
+	})
+}
+
 // TestLLMAppAuth freezes the proxy's own require_app_auth (auth/app_auth.py) on every
 // app-authenticated route CC calls.
 func TestLLMAppAuth(t *testing.T) {

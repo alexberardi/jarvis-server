@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,8 @@ import (
 )
 
 // The LLM tap: an OpenAI-compatible pass-through between a sandbox's llm.live remote endpoint
-// and the real engine. It forwards every request untouched, streams the answer back as it
+// and the real engine. It forwards every request as is (except that chat calls are marked
+// background, see withBackgroundPriority), streams the answer back as it
 // arrives, and appends one TapEntry per call to a JSONL log: the full request (messages,
 // tools) and the reply assembled from either a JSON body or SSE frames. The pipeline runner
 // reads the entries a turn produced to show what the model saw and did, server tools included.
@@ -58,6 +60,27 @@ func (r TapReply) Calls() []ToolCall {
 	return calls
 }
 
+// withBackgroundPriority marks a sandbox's chat calls as background so the installed jarvisd
+// serves the house first (autonomy PLAN §0.1).
+func withBackgroundPriority(path string, body []byte) []byte {
+	if !strings.HasSuffix(path, "/chat/completions") {
+		return body
+	}
+	var o map[string]json.RawMessage
+	if json.Unmarshal(body, &o) != nil || o == nil {
+		return body
+	}
+	if _, ok := o["priority"]; ok {
+		return body
+	}
+	i := bytes.IndexByte(body, '{') + 1
+	field := `"priority":"background"`
+	if len(o) > 0 {
+		field += ","
+	}
+	return slices.Concat(body[:i:i], []byte(field), body[i:])
+}
+
 // Tap is the proxy. Upstream returns the base URL (scheme://host:port) per request. Header is
 // set on every forwarded request (the installed jarvisd's app-to-app credentials).
 type Tap struct {
@@ -77,6 +100,7 @@ func (t *Tap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	body = withBackgroundPriority(r.URL.Path, body)
 	entry := TapEntry{Time: start.UTC(), Path: r.URL.Path}
 	if json.Valid(body) {
 		entry.Request = body
