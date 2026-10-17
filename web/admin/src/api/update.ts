@@ -89,3 +89,29 @@ export async function applyUpdate(version?: string | null): Promise<ApplyResult>
     throw err
   }
 }
+
+/**
+ * updates/last-upgrade.json, as `last` in GET /api/update/apply. A rollback that restored a
+ * database snapshot (`db_restored`) discarded everything written since `data_since` (#109);
+ * results written by older versions have no `data_since`.
+ */
+export interface LastUpgrade {
+  outcome: 'succeeded' | 'rolled_back' | 'failed'
+  from_version: string
+  to_version: string
+  reason?: string
+  db_restored?: boolean
+  data_since?: string
+  at: string
+}
+
+/** getLastUpgrade reads the last finished upgrade; null when none, or on a jarvisd without the route (404). */
+export async function getLastUpgrade(): Promise<LastUpgrade | null> {
+  try {
+    const { data } = await apiClient.get<{ last?: LastUpgrade | null }>('/api/update/apply')
+    return data?.last ?? null
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) return null
+    throw err
+  }
+}

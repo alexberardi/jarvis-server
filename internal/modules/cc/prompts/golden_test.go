@@ -103,8 +103,21 @@ func firstDiff(a, b string) string {
 
 func itoa(i int) string { return pyjson.Repr(i) }
 
-// G1: all 88 prompt fixtures (4 providers × 22 cases) byte for byte: messages[0], the user
-// suffix, response_format, the native flag and (native providers) the tools payload.
+// fixtureMode is the mode that reproduces a legacy provider fixture: 14B/8B text + suffix,
+// 9B native + suffix, ChatGPT native with no suffix.
+func fixtureMode(provider string) Mode {
+	switch provider {
+	case Qwen3_14B, Qwen3_8B:
+		return Mode{ToolCalling: ToolsText, ThinkingSuffix: true}
+	case Qwen3_5_9B:
+		return Mode{ToolCalling: ToolsNative, ThinkingSuffix: true}
+	}
+	return Mode{ToolCalling: ToolsNative}
+}
+
+// G1: all 88 prompt fixtures (4 providers × 22 cases) byte for byte, rendered from the
+// built-in text with the fixture's mode: messages[0], the user suffix, the native flag, the
+// native tools payload, and response_format on text-mode fixtures (native never sends one).
 func TestG1PromptsGolden(t *testing.T) {
 	inputs := loadFixture(t, "_inputs.json")
 	toolSets := og(inputs, "tool_sets").(*pyjson.Object)
@@ -116,101 +129,74 @@ func TestG1PromptsGolden(t *testing.T) {
 	for _, row := range index {
 		file := og(row, "file").(string)
 		fx := loadFixture(t, file)
-		p, err := Lookup(og(fx, "provider").(string))
-		if err != nil {
-			t.Fatal(err)
+		prov := og(fx, "provider").(string)
+		text, found := Builtin(prov)
+		if !found {
+			t.Fatalf("%s: no built-in %q", file, prov)
 		}
+		mode := fixtureMode(prov)
 		in := og(fx, "inputs")
 		ctx, ch := toContext(t, og(in, "node_context").(*pyjson.Object))
 		ch.Enabled = og(in, "characterization_injection").(bool)
 		tools := toTools(og(toolSets, og(in, "tools").(string)))
 		flags := toFlags(og(in, "command_flags"))
 
-		got, _ := AssembleSystemPrompt(p, ctx, tools, flags, ch)
+		got, _ := SystemPrompt(text, Inputs{Context: ctx, Tools: tools, Flags: flags, ToolCalling: mode.ToolCalling}, ch)
 		want := og(fx, "system_prompt").(string)
 		ok := true
 		if got != want {
 			ok = false
 			t.Errorf("%s system_prompt %s", file, firstDiff(got, want))
 		}
-		if s := p.UserMessageSuffix(og(in, "include_thinking").(bool)); s != og(fx, "user_message_suffix").(string) {
+		if s := mode.UserMessageSuffix(og(in, "include_thinking").(bool)); s != og(fx, "user_message_suffix").(string) {
 			ok = false
 			t.Errorf("%s suffix %q", file, s)
 		}
-		if p.SupportsNativeTools() != og(fx, "supports_native_tools").(bool) {
+		if mode.Native() != og(fx, "supports_native_tools").(bool) {
 			ok = false
 			t.Errorf("%s supports_native_tools", file)
 		}
-		var rf any
-		if f := p.ResponseFormat(); f != nil {
-			rf = f
-		}
-		if a, b := pyjson.Dumps(rf, true), pyjson.Dumps(og(fx, "response_format"), true); a != b {
-			ok = false
-			t.Errorf("%s response_format %s want %s", file, a, b)
-		}
-		if p.SupportsNativeTools() {
-			got := p.BuildTools(tools)
-			want := og(fx, "native_tools").([]any)
-			if len(got) != len(want) {
+		if mode.Native() {
+			if mode.ResponseFormat() != nil {
 				ok = false
-				t.Errorf("%s native_tools: %d, want %d", file, len(got), len(want))
-			} else {
-				for i := range got {
-					if a, b := CompactASCII(got[i]), CompactASCII(want[i]); a != b {
+				t.Errorf("%s: native mode sends a response_format", file)
+			}
+			// The fixture is the legacy ToolBuilder.build output; what the server sends
+			// (NativeTools) is that payload with the Jarvis extensions stripped (D8, 02.Q7).
+			want := toTools(og(fx, "native_tools"))
+			for _, c := range []struct {
+				what      string
+				got, want []Tool
+			}{
+				{"native_tools", buildTools(tools, nativeBuild), want},
+				{"NativeTools", NativeTools(tools), StripJarvisExtensions(want)},
+			} {
+				if len(c.got) != len(c.want) {
+					ok = false
+					t.Errorf("%s %s: %d, want %d", file, c.what, len(c.got), len(c.want))
+					continue
+				}
+				for i := range c.got {
+					if a, b := CompactASCII(c.got[i]), CompactASCII(c.want[i]); a != b {
 						ok = false
-						t.Errorf("%s native_tools[%d] %s", file, i, firstDiff(a, b))
+						t.Errorf("%s %s[%d] %s", file, c.what, i, firstDiff(a, b))
 					}
 				}
 			}
-		} else if _, has := fx.(*pyjson.Object).Get("native_tools"); has {
-			t.Errorf("%s: text provider fixture has native_tools", file)
+		} else {
+			if a, b := pyjson.Dumps(mode.ResponseFormat(), true), pyjson.Dumps(og(fx, "response_format"), true); a != b {
+				ok = false
+				t.Errorf("%s response_format %s want %s", file, a, b)
+			}
+			if _, has := fx.(*pyjson.Object).Get("native_tools"); has {
+				t.Errorf("%s: text-mode fixture has native_tools", file)
+			}
 		}
 		if ok {
 			matched++
 		}
 	}
 	t.Logf("G1: %d/88 fixtures byte-exact", matched)
-}
-
-// G1 through the built-in text prompts: each fixture's messages[0] from Builtin(provider)
-// rendered by SystemPrompt (tools as text except for the two native providers).
-func TestG1BuiltinsGolden(t *testing.T) {
-	inputs := loadFixture(t, "_inputs.json")
-	toolSets := og(inputs, "tool_sets").(*pyjson.Object)
-	index := loadFixture(t, "_index.json").([]any)
-	if len(index) != 88 {
-		t.Fatalf("index has %d fixtures, want 88", len(index))
-	}
-	matched := 0
-	for _, row := range index {
-		file := og(row, "file").(string)
-		fx := loadFixture(t, file)
-		prov := og(fx, "provider").(string)
-		text, ok := Builtin(prov)
-		if !ok {
-			t.Fatalf("%s: no built-in %q", file, prov)
-		}
-		in := og(fx, "inputs")
-		ctx, ch := toContext(t, og(in, "node_context").(*pyjson.Object))
-		ch.Enabled = og(in, "characterization_injection").(bool)
-		tc := ToolsText
-		if prov == Qwen3_5_9B || prov == ChatGPT {
-			tc = ToolsNative
-		}
-		got, _ := SystemPrompt(text, Inputs{
-			Context:     ctx,
-			Tools:       toTools(og(toolSets, og(in, "tools").(string))),
-			Flags:       toFlags(og(in, "command_flags")),
-			ToolCalling: tc,
-		}, ch)
-		if want := og(fx, "system_prompt").(string); got != want {
-			t.Errorf("%s system_prompt %s", file, firstDiff(got, want))
-		} else {
-			matched++
-		}
-	}
-	t.Logf("G1 built-ins: %d/88 fixtures byte-exact", matched)
 }
 
 func TestBuiltins(t *testing.T) {
@@ -233,6 +219,34 @@ func TestBuiltins(t *testing.T) {
 	}
 	if _, ok := Builtin("nope"); ok {
 		t.Error("Builtin(nope) found")
+	}
+}
+
+// D11: only the exact built-in names; no default, no case folding, no remap of the dropped
+// legacy names, and no path forms of a real name.
+func TestCheckBuiltin(t *testing.T) {
+	for _, n := range BuiltinNames() {
+		if err := CheckBuiltin(n); err != nil {
+			t.Errorf("CheckBuiltin(%q) = %v", n, err)
+		}
+	}
+	for _, n := range []string{
+		"", "qwen3_14b_compressed", "Qwen25MediumUntrained", "JarvisToolModel", "Qwen3LargeUntrained",
+		"./Qwen3_8B_Compressed", "x/../Qwen3_8B_Compressed", "../builtin/Qwen3_8B_Compressed",
+	} {
+		err := CheckBuiltin(n)
+		if err == nil {
+			t.Errorf("CheckBuiltin(%q) accepted", n)
+			continue
+		}
+		if _, ok := Builtin(n); ok {
+			t.Errorf("Builtin(%q) found", n)
+		}
+		for _, opt := range BuiltinNames() {
+			if !strings.Contains(err.Error(), opt) {
+				t.Errorf("CheckBuiltin(%q) error %q does not name %s", n, err, opt)
+			}
+		}
 	}
 }
 
@@ -332,89 +346,55 @@ func TestRecentlyShownGolden(t *testing.T) {
 	}
 }
 
-// G5: parse_response and sanitize_text per provider. The one intended difference (D22, a D8
-// fix): 8B/9B sanitize_text now unwraps <message>, so rows whose input has a <message>
-// wrapper differ there and must equal the 14B behaviour instead.
+// G5: one cleanup for every model (docs/decisions/2026-10-16-prompts-as-text.md). For each
+// raw input, ParseResponse and SanitizeText give the Qwen3_14B row's legacy values; the other
+// providers' rows that differ from their own legacy value are counted and logged.
 func TestG5ParseGolden(t *testing.T) {
 	rows := loadFixture(t, "_parse.json").([]any)
 	if len(rows) != 52 {
 		t.Fatalf("%d parse rows, want 52", len(rows))
 	}
-	exact, divergent := 0, 0
+	type legacy struct {
+		parse   string
+		parseOK bool
+		san     string
+	}
+	byRaw := map[string]legacy{}
 	for _, row := range rows {
-		name := og(row, "provider").(string)
-		p, err := Lookup(name)
-		if err != nil {
-			t.Fatal(err)
+		if og(row, "provider").(string) == Qwen3_14B {
+			p, ok := og(row, "parse_response").(string)
+			byRaw[og(row, "raw").(string)] = legacy{p, ok, og(row, "sanitize_text").(string)}
 		}
-		raw := og(row, "raw").(string)
-		got, ok := p.ParseResponse(raw)
-		want, wantOK := og(row, "parse_response").(string)
-		if ok != wantOK || got != want {
-			t.Errorf("%s parse_response(%q) = %q,%v want %q,%v", name, raw, got, ok, want, wantOK)
+	}
+	if len(byRaw) != 13 {
+		t.Fatalf("%d Qwen3_14B rows, want 13", len(byRaw))
+	}
+	parseDiff, sanDiff := map[string]int{}, map[string]int{}
+	for _, row := range rows {
+		name, raw := og(row, "provider").(string), og(row, "raw").(string)
+		want, ok := byRaw[raw]
+		if !ok {
+			t.Fatalf("%s raw %q has no Qwen3_14B row", name, raw)
 		}
-		san := p.SanitizeText(raw)
-		wantSan := og(row, "sanitize_text").(string)
-		if (name == Qwen3_8B || name == Qwen3_5_9B) && strings.Contains(raw, "<message>") {
-			q14, _ := Lookup(Qwen3_14B)
-			if san == wantSan {
-				t.Errorf("%s sanitize(%q): expected the D22 <message> divergence", name, raw)
+		if name == Qwen3_14B {
+			got, gotOK := ParseResponse(raw)
+			if gotOK != want.parseOK || got != want.parse {
+				t.Errorf("parse_response(%q) = %q,%v want %q,%v", raw, got, gotOK, want.parse, want.parseOK)
 			}
-			if san != q14.SanitizeText(raw) {
-				t.Errorf("%s sanitize(%q) = %q, want the 14B result", name, raw, san)
+			if san := SanitizeText(raw); san != want.san {
+				t.Errorf("sanitize_text(%q) = %q want %q", raw, san, want.san)
 			}
-			divergent++
 			continue
 		}
-		if san != wantSan {
-			t.Errorf("%s sanitize_text(%q) = %q want %q", name, raw, san, wantSan)
+		p, pOK := og(row, "parse_response").(string)
+		if pOK != want.parseOK || p != want.parse {
+			parseDiff[name]++
 		}
-		exact++
-	}
-	t.Logf("G5: %d rows exact, %d rows the documented D22 <message> sanitize divergence", exact, divergent)
-}
-
-func TestLookup(t *testing.T) {
-	for _, n := range []string{Qwen3_14B, Qwen3_8B, Qwen3_5_9B, ChatGPT} {
-		p, err := Lookup(n)
-		if err != nil || p.Name() != n {
-			t.Fatalf("Lookup(%s) = %v, %v", n, p, err)
+		if og(row, "sanitize_text").(string) != want.san {
+			sanDiff[name]++
 		}
 	}
-	for _, n := range []string{"", "qwen3_14b_compressed", "Qwen25MediumUntrained", "JarvisToolModel", "Qwen3LargeUntrained"} {
-		if _, err := Lookup(n); err == nil {
-			t.Errorf("Lookup(%q) must fail (D11)", n)
-		}
-	}
-	names := Names()
-	if !sort.StringsAreSorted(names) || len(names) != 4 {
-		t.Errorf("Names() = %v", names)
-	}
-}
-
-func TestProviderFlags(t *testing.T) {
-	cases := []struct {
-		name            string
-		native, force   bool
-		suffix, suffix2 string
-		caps            string
-	}{
-		{Qwen3_14B, false, true, "/no_think", "/think", `{"provider_name":"Qwen3_14B_Compressed","model_family":"qwen","size_tier":"large","training_tier":"untrained","use_tool_classifier":true,"supports_native_tools":false}`},
-		{Qwen3_8B, false, true, "/no_think", "/think", `{"provider_name":"Qwen3_8B_Compressed","model_family":"qwen","size_tier":"medium","training_tier":"untrained","use_tool_classifier":true,"supports_native_tools":false}`},
-		{Qwen3_5_9B, true, true, "/no_think", "/think", `{"provider_name":"Qwen3_5_9B_Compressed","model_family":"qwen3.5","size_tier":"medium","training_tier":"untrained","use_tool_classifier":true,"supports_native_tools":true}`},
-		{ChatGPT, true, false, "", "", `{"provider_name":"ChatGPTOpenAI","model_family":"openai","size_tier":"large","training_tier":"untrained","use_tool_classifier":false,"supports_native_tools":true}`},
-	}
-	for _, c := range cases {
-		p, _ := Lookup(c.name)
-		if p.SupportsNativeTools() != c.native || p.ForceToolCalls() != c.force ||
-			p.UserMessageSuffix(false) != c.suffix || p.UserMessageSuffix(true) != c.suffix2 {
-			t.Errorf("%s flags wrong", c.name)
-		}
-		if got := mustJSON(t, p.Capabilities()); got != c.caps {
-			t.Errorf("%s caps %s", c.name, got)
-		}
-		if o, cl := p.ThinkDelimiters(); o != "<think>" || cl != "</think>" {
-			t.Errorf("%s think delimiters", c.name)
-		}
+	for _, n := range []string{Qwen3_8B, Qwen3_5_9B, ChatGPT} {
+		t.Logf("G5 %s: %d/13 parse_response and %d/13 sanitize_text rows differ from legacy", n, parseDiff[n], sanDiff[n])
 	}
 }

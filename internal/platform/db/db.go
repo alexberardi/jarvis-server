@@ -111,6 +111,8 @@ func (d *DB) Tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	if err != nil {
 		return err
 	}
+	// Roll back if fn panics; a no-op (ErrTxDone) once Commit or Rollback ran.
+	defer func() { _ = tx.Rollback() }()
 	if err := fn(tx); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}

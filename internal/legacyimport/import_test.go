@@ -70,7 +70,7 @@ func migrated(t *testing.T) *db.DB {
 func opts(apply bool) Options {
 	return Options{
 		Apply: apply, Settings: testDefs(),
-		PromptProvider: func(n string) error { _, err := prompts.Lookup(n); return err },
+		PromptProvider: prompts.CheckBuiltin,
 		Now:            func() time.Time { return time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC) },
 	}
 }

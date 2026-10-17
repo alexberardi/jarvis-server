@@ -133,7 +133,8 @@ func Resolve(ctx context.Context, o StageOptions) (*Plan, error) {
 // Stage downloads the release for this platform, verifies the signature and the checksum,
 // unpacks the binary, checks that it runs and reports the release's version, snapshots every
 // database and records the migration state, and writes the marker (StateStaged). Swap (or a
-// privileged pre-start) puts it in place.
+// privileged pre-start) puts it in place. It holds updates/stage.lock throughout (ErrLocked
+// while another process stages); once the marker is written, the marker refuses the next one.
 func Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 	report := func(p Progress) {
 		if o.Progress != nil {
@@ -141,6 +142,11 @@ func Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 		}
 	}
 	p := o.Paths
+	release, err := Lock(p)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if m, err := ReadMarker(p); err != nil {
 		return nil, err
 	} else if m != nil {
@@ -234,6 +240,7 @@ func Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 	if m.GooseBefore, err = gooseVersions(ctx, p.Home, files); err != nil {
 		return fail(err)
 	}
+	m.SnapshotAt = time.Now().UTC()
 	for _, f := range files {
 		snap, err := Snapshot(ctx, p.Home, f, p.BackupsDir(), o.Current)
 		if err != nil {
@@ -529,7 +536,7 @@ func extractNamed(archive, dst, want string) error {
 			break
 		}
 	}
-	if err := out.Close(); err != nil {
+	if err := errors.Join(out.Sync(), out.Close()); err != nil {
 		return err
 	}
 	if !found {

@@ -31,3 +31,16 @@ func TestRunsWithoutConfirmation(t *testing.T) {
 		t.Error("tool without the method: want false")
 	}
 }
+
+func TestDeclaredServerTools(t *testing.T) {
+	for _, tool := range []ServerTool{&QuickSearch{}, &DeepResearch{}, &HAEntities{}} {
+		if !RunsWithoutConfirmation(tool) {
+			t.Errorf("%s: want true", tool.Name())
+		}
+	}
+	for _, tool := range []ServerTool{&RequestValidation{}, &IdentifySpeaker{}} {
+		if RunsWithoutConfirmation(tool) {
+			t.Errorf("%s: want false", tool.Name())
+		}
+	}
+}

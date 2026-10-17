@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestMain lets the test binary stand in for a released jarvisd: with JARVISD_FAKE_VERSION set,
@@ -142,9 +143,13 @@ func TestStageSwapConfirm(t *testing.T) {
 			steps = append(steps, p.Step)
 		}
 	}
+	before := time.Now()
 	m, err := Stage(ctx, o)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if m.SnapshotAt.Before(before) || m.SnapshotAt.After(time.Now()) || m.SnapshotAt.Before(m.StagedAt) {
+		t.Fatalf("snapshot at %v (staged %v, began %v)", m.SnapshotAt, m.StagedAt, before)
 	}
 	if m.State != StateStaged || m.To != "v1.1.0" || m.From != "v1.0.0" || m.Exe != in.paths.Exe {
 		t.Fatalf("marker %+v", m)
@@ -380,7 +385,7 @@ func TestCrashLoopRollsBack(t *testing.T) {
 		t.Fatal("binary not restored")
 	}
 	res, _ := ReadResult(in.paths)
-	if res.Outcome != ResultRolledBack || res.DBRestored || !strings.Contains(res.Reason, "failed to start") {
+	if res.Outcome != ResultRolledBack || res.DBRestored || !res.DataSince.IsZero() || !strings.Contains(res.Reason, "failed to start") {
 		t.Fatalf("result %+v", res)
 	}
 	if got := in.users(t); len(got) != 2 {
@@ -400,12 +405,23 @@ func TestGateFailureRestoresMigratedDB(t *testing.T) {
 	if err := RequestRollback(in.paths, "health gate: no /health within 120s"); err != nil {
 		t.Fatal(err)
 	}
+	m, err := ReadMarker(in.paths)
+	if err != nil || m == nil || m.SnapshotAt.IsZero() {
+		t.Fatalf("marker %+v %v: no snapshot time", m, err)
+	}
 	res, err := Rollback(ctx, in.paths, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.DBRestored || res.Reason != "health gate: no /health within 120s" {
 		t.Fatalf("result %+v", res)
+	}
+	// #109: the result says from when the restore discarded writes, and keeps it on disk.
+	if !res.DataSince.Equal(m.SnapshotAt) {
+		t.Fatalf("data since %v, want the snapshot time %v", res.DataSince, m.SnapshotAt)
+	}
+	if last, err := ReadResult(in.paths); err != nil || !last.DataSince.Equal(m.SnapshotAt) {
+		t.Fatalf("last-upgrade.json %+v %v", last, err)
 	}
 	if got := in.users(t); len(got) != 1 || got[0] != "before" {
 		t.Fatalf("users %v", got)
@@ -430,6 +446,31 @@ func TestGateFailureRestoresMigratedDB(t *testing.T) {
 	}
 	if _, err := os.Stat(in.paths.RolledBack()); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("stale rolled-back binary left: %v", err)
+	}
+}
+
+// TestRollbackDataSinceOldMarker: a marker staged by a version without snapshot_at falls back
+// to staged_at, which comes just before the snapshots.
+func TestRollbackDataSinceOldMarker(t *testing.T) {
+	in, _, _ := swapped(t)
+	m, err := ReadMarker(in.paths)
+	if err != nil || m == nil {
+		t.Fatal(m, err)
+	}
+	m.SnapshotAt = time.Time{}
+	if err := WriteMarker(in.paths, m); err != nil {
+		t.Fatal(err)
+	}
+	in.exec(t, `INSERT INTO goose_auth (version_id, is_applied) VALUES (3, 1)`)
+	if err := RequestRollback(in.paths, "gate"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Rollback(context.Background(), in.paths, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.DBRestored || !res.DataSince.Equal(m.StagedAt) {
+		t.Fatalf("result %+v, want data since the staging time %v", res, m.StagedAt)
 	}
 }
 

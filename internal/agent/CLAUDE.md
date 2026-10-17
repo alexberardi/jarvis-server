@@ -56,7 +56,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent try --save-images /tmp/x desktop_read_screen '{"scope":"window"}'   # a real capture (0600 files)
 JARVIS_SCREEN_NATIVE=1 go test -v -run TestNativeCapture ./internal/agent/screen/   # capture this desktop
 JARVIS_DICTATE_NATIVE_LIST=1 go test -v -run TestNativeWindowsReadOnly ./internal/agent/dictate/  # list windows, read-only
-./jarvis-agent run --confirm-dictation submit  # ask before dictation sends anything (off|submit|all)
+./jarvis-agent run --confirm-dictation off     # don't ask before dictation sends anything (off|submit|all; default submit)
 ./jarvis-agent config set tray false          # the settings file run reads (agent.json); flags win
 ./jarvis-agent config                          # show it: every key, set or not
 ./jarvis-agent update [--check] [--version vX] # self-update to the server's version (agent.json auto_update
@@ -346,7 +346,7 @@ the agent (+~4.5 MB), the price of one verification path.
     claimed success over a bare error. Text: `dictate.Sanitize` (≤ 2000 characters,
     line breaks → spaces, control/format characters dropped), on stdin never argv, never in a
     log (`node.RedactedArgs`) or a result. Enter only as the `submit` step; keys from the closed
-    `dictate.Keys` set. A confirmation (`--confirm-dictation`) is single use, replaced by a newer
+    `dictate.Keys` set. A confirmation (`--confirm-dictation`, default `submit`) is single use, replaced by a newer
     one, and cancels on no, unclear or timeout (`Confirmer.Now`/`Timeout` are injected in
     tests). **Never type or press keys in a desktop someone is using in tests:** use fakes, or a
     nested headless compositor (`WLR_BACKENDS=headless sway` with its own `WAYLAND_DISPLAY`,

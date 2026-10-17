@@ -361,7 +361,9 @@ type chatState struct {
 // commits (§11); node waits stop when the client is gone.
 func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, row *nodeRow, req chatRequest) {
 	tr := newReqTrace()
-	llmCtx := withTrace(context.WithoutCancel(ctx), tr) // the pipeline's spans land on tr
+	// The pipeline's spans land on tr; a turn still waiting for the conversation gives up with
+	// the client.
+	llmCtx := withTurnWait(withTrace(context.WithoutCancel(ctx), tr), ctx)
 	cid := req.ConversationID
 	if cid == "" {
 		cid = newMobileConversationID()
@@ -476,7 +478,7 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 				finish("", "client disconnected")
 				return
 			}
-			end := tr.measure("continue_conversation", "cc", m.continueMeta(cid, results))
+			end := tr.measure("continue_conversation", "cc", m.continueMeta(llmCtx, cid, results))
 			res, _, err = m.continueBlocking(llmCtx, cid, results)
 			end(err)
 			if err != nil {

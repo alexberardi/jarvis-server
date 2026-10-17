@@ -328,7 +328,7 @@ The install script (Phase 6) installs the binary and service unit, starts jarvis
 
 - **G1, prompt provider unset is a hard error.** `cc.Module.DefaultPromptProvider` exists
   (`internal/modules/cc/cc.go:122-124`) but `cmd/jarvisd/main.go` never sets it. With
-  `llm.prompt_provider` empty, `promptProvider()` fails (`internal/modules/cc/warmup.go:132-138`), so the
+  `llm.prompt_provider` empty, `promptText()` fails (`internal/modules/cc/warmup.go`), so the
   first voice turn fails until someone sets a setting the admin no longer has a screen for. Fix: wire it to
   the live label's installed model `prompt_provider` (06 §5 "installed" carries it). AQ4.
 - ~~**G2, the setup race is open to the LAN**~~ **fixed (AD2)**: `/auth/setup` needs the setup token
@@ -545,7 +545,7 @@ superuser-gated, a nil interface answers 503):*
   upgrade"`), or while another upgrade is pending.
 - `GET /api/update/apply` → `{job: {state: running|restarting|failed, step, bytes_done, bytes_total,
   from_version, to_version, error, started_at} | null, pending: {state, from_version, to_version, attempts}
-  | null, last: {outcome: succeeded|rolled_back|failed, from_version, to_version, reason, db_restored, at} |
+  | null, last: {outcome: succeeded|rolled_back|failed, from_version, to_version, reason, db_restored, data_since, at} |
   null, current_version, can_apply, blocked_reason?, command?}`. Poll it; after the restart the new process
   answers with `pending` (health gate running) and then `last`.
 - `GET /api/update` and `POST /api/update/check` also carry `can_apply`, `apply_blocked`, `apply_command`.
