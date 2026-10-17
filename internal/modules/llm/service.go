@@ -35,6 +35,17 @@ type Service struct {
 	// LLM call at a time" by default (03 §11, PLAN §3.2).
 	bg chan struct{}
 
+	// Live-first admission (autonomy PLAN §0.1), per engine (engineKey): live calls in flight,
+	// when the last one ended, and a channel closed (and replaced) whenever one ends.
+	lmu      sync.Mutex
+	liveN    map[string]int
+	liveEnd  map[string]time.Time
+	liveWake chan struct{}
+	// Test overrides for llm.background.live_grace_ms (0: the setting) and
+	// llm.background.max_tokens (nil: the setting).
+	graceOverride time.Duration
+	capOverride   *int
+
 	mu      sync.Mutex
 	streams map[string]*streamHandle
 
@@ -62,7 +73,8 @@ type ServiceConfig struct {
 
 // NewService builds a Service.
 func NewService(c ServiceConfig) *Service {
-	s := &Service{streams: map[string]*streamHandle{}, handlers: map[string]NotifyFunc{}}
+	s := &Service{streams: map[string]*streamHandle{}, handlers: map[string]NotifyFunc{},
+		liveN: map[string]int{}, liveEnd: map[string]time.Time{}, liveWake: make(chan struct{})}
 	s.configure(c)
 	return s
 }
@@ -88,6 +100,13 @@ func (s *Service) setNow(f func() time.Time) {
 	s.clockMu.Lock()
 	s.nowFn = f
 	s.clockMu.Unlock()
+}
+
+// setAdmission overrides the live grace and the background max-tokens cap (tests).
+func (s *Service) setAdmission(grace time.Duration, maxTokens int) {
+	s.lmu.Lock()
+	s.graceOverride, s.capOverride = grace, &maxTokens
+	s.lmu.Unlock()
 }
 
 func (s *Service) now() time.Time {
@@ -254,15 +273,127 @@ func (s *Service) waitReady(ctx context.Context, label string, wait time.Duratio
 	}
 }
 
-func (s *Service) acquire(ctx context.Context, label string) (func(), error) {
-	if label != LabelBackground {
-		return func() {}, nil
+// --- admission ---
+
+// engineKey identifies an engine: its base URL without trailing slashes or "/v1", so two
+// labels served by one llama-server share a key.
+func engineKey(ep Endpoint) string {
+	k := strings.TrimRight(ep.BaseURL, "/")
+	k = strings.TrimSuffix(k, "/v1")
+	return strings.TrimRight(k, "/")
+}
+
+// background reports whether a call yields to live ones: the background label, or a
+// background priority on any label.
+func background(label, priority string) bool {
+	return label == LabelBackground || priority == PriorityBackground
+}
+
+// acquire admits a call. A live call never waits; it is counted against its engine until
+// released. A background call takes a bg slot, then waits until no live call is in flight on
+// its engine and the grace since the last one ended has passed (live-first, PLAN §0.1).
+func (s *Service) acquire(ctx context.Context, label string, ep Endpoint, priority string) (func(), error) {
+	key := engineKey(ep)
+	if !background(label, priority) {
+		s.lmu.Lock()
+		s.liveN[key]++
+		s.lmu.Unlock()
+		return func() {
+			s.lmu.Lock()
+			s.liveN[key]--
+			s.liveEnd[key] = admissionNow()
+			close(s.liveWake)
+			s.liveWake = make(chan struct{})
+			s.lmu.Unlock()
+		}, nil
 	}
 	select {
 	case s.bg <- struct{}{}:
-		return func() { <-s.bg }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+	if err := s.waitLive(ctx, key); err != nil {
+		<-s.bg
+		return nil, err
+	}
+	return func() { <-s.bg }, nil
+}
+
+// admissionNow is the admission clock: always the real one, so a test that freezes s.now()
+// (jobs) can't stall a grace period forever.
+func admissionNow() time.Time { return time.Now() }
+
+// waitLive blocks until no live call is in flight on the engine and the grace since the last
+// one ended has passed, or ctx ends.
+func (s *Service) waitLive(ctx context.Context, key string) error {
+	grace := s.liveGrace(ctx)
+	for {
+		s.lmu.Lock()
+		n := s.liveN[key]
+		left := grace - admissionNow().Sub(s.liveEnd[key])
+		if n == 0 && left <= 0 {
+			s.lmu.Unlock()
+			return nil
+		}
+		wake := s.liveWake
+		s.lmu.Unlock()
+		var t *time.Timer
+		var timer <-chan time.Time
+		if n == 0 {
+			t = time.NewTimer(left)
+			timer = t.C
+		}
+		select {
+		case <-wake:
+		case <-timer:
+		case <-ctx.Done():
+		}
+		if t != nil {
+			t.Stop()
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+}
+
+// liveGrace is llm.background.live_grace_ms.
+func (s *Service) liveGrace(ctx context.Context) time.Duration {
+	s.lmu.Lock()
+	o := s.graceOverride
+	s.lmu.Unlock()
+	if o > 0 {
+		return o
+	}
+	n, err := strconv.Atoi(s.setting(ctx, "llm.background.live_grace_ms"))
+	if err != nil || n < 0 {
+		n = 4000
+	}
+	return time.Duration(n) * time.Millisecond
+}
+
+// backgroundCap is llm.background.max_tokens; 0 means no cap.
+func (s *Service) backgroundCap(ctx context.Context) int {
+	s.lmu.Lock()
+	o := s.capOverride
+	s.lmu.Unlock()
+	if o != nil {
+		return *o
+	}
+	n, err := strconv.Atoi(s.setting(ctx, "llm.background.max_tokens"))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// capTokens lowers a background call's max_tokens to the cap (setting none means the cap).
+func (s *Service) capTokens(ctx context.Context, req *ChatRequest, label string) {
+	if !background(label, req.Priority) {
+		return
+	}
+	if c := s.backgroundCap(ctx); c > 0 && (req.MaxTokens == nil || *req.MaxTokens > c) {
+		req.MaxTokens = &c
 	}
 }
 
@@ -449,7 +580,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.acquire(ctx, label)
+	s.capTokens(ctx, &req, label)
+	release, err := s.acquire(ctx, label, ep, req.Priority)
 	if err != nil {
 		return nil, err
 	}
@@ -556,6 +688,9 @@ func (s *Service) retryJSON(ctx context.Context, ep Endpoint, label string, req 
 		orig = *req.MaxTokens
 	}
 	mt := jsonmode.RetryMaxTokens(orig, invalid)
+	if c := s.backgroundCap(ctx); background(label, req.Priority) && c > 0 && mt > c {
+		mt = c
+	}
 	p := &chatPayload{Model: ep.Model, Messages: retry, Temperature: jsonmode.RetryTemperature(t),
 		MaxTokens: &mt, TopP: req.TopP, Seed: req.Seed}
 	p.applyThinking(s.budget(ctx, label, req))
@@ -614,6 +749,7 @@ func (s *Service) Stream(ctx context.Context, req ChatRequest) (<-chan Frame, er
 	if err != nil {
 		return nil, err
 	}
+	s.capTokens(ctx, &req, label)
 	p := s.payload(ctx, ep, label, &req, msgs, true)
 	if ep.API == APIAnthropic {
 		// Refuse untranslatable history (a tool message without its id) with a real status.
@@ -653,7 +789,7 @@ func (s *Service) Stream(ctx context.Context, req ChatRequest) (<-chan Frame, er
 				return false
 			}
 		}
-		res, err := s.runStream(sctx, ep, label, p, func(d string) bool {
+		res, err := s.runStream(sctx, ep, label, req.Priority, p, func(d string) bool {
 			select {
 			case ch <- Frame{Delta: d}:
 				return true
@@ -675,8 +811,8 @@ func (s *Service) Stream(ctx context.Context, req ChatRequest) (<-chan Frame, er
 	return ch, nil
 }
 
-func (s *Service) runStream(ctx context.Context, ep Endpoint, label string, p *chatPayload, onDelta func(string) bool) (streamResult, error) {
-	release, err := s.acquire(ctx, label)
+func (s *Service) runStream(ctx context.Context, ep Endpoint, label, priority string, p *chatPayload, onDelta func(string) bool) (streamResult, error) {
+	release, err := s.acquire(ctx, label, ep, priority)
 	if err != nil {
 		return streamResult{}, err
 	}

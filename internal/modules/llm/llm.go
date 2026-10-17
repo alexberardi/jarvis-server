@@ -66,6 +66,10 @@ var Definitions = []settings.Definition{
 		Description: "Default thinking budget for the background label (LD8: the user's choice): 0 off, -1 unrestricted, N on; \"server\" leaves the engine's launch flags in charge"},
 	{Key: "llm.request_timeout_seconds", Category: "llm", Type: settings.Int, Default: int64(240),
 		Description: "Upper bound for one model call (thinking background jobs need minutes)"},
+	{Key: "llm.background.live_grace_ms", Category: "llm.background", Type: settings.Int, Default: int64(4000),
+		Description: "How long (ms) a background call waits after the last live call on its engine ends, so a conversation's next turn keeps the engine"},
+	{Key: "llm.background.max_tokens", Category: "llm.background", Type: settings.Int, Default: int64(12000),
+		Description: "max_tokens cap for background calls (a smaller request is kept); 0 means no cap"},
 }
 
 // Module is the llm module.

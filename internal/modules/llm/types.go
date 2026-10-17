@@ -15,6 +15,12 @@ const (
 	LabelEmbeddings = "embeddings"
 )
 
+// Priorities: a live call never waits; a background one waits for live calls on its engine.
+const (
+	PriorityLive       = "live"
+	PriorityBackground = "background"
+)
+
 // Endpoint is the server for a label: a supervised llama-server or a remote (LD2). BaseURL is
 // the server root; "/v1" on the end is accepted. It speaks the OpenAI-compatible API unless
 // API says otherwise.
@@ -221,6 +227,9 @@ type ChatRequest struct {
 	WantDateKeys bool `json:"want_date_keys,omitempty"`
 	// RequestID is the stream's cancel handle (X-Request-Id).
 	RequestID string `json:"request_id,omitempty"`
+	// Priority is "live" (default) or "background": a background call waits for live calls on
+	// its engine (autonomy PLAN §0.1).
+	Priority string `json:"priority,omitempty"`
 }
 
 // Usage is token usage.

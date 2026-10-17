@@ -170,6 +170,10 @@ func TestChatShape(t *testing.T) {
 
 func TestChatModelLabels(t *testing.T) {
 	e := setup(t)
+	// Background calls here follow live ones on the same engine: no grace (live-first admission).
+	if err := e.m.settings.Set(e.ctx, "llm.background.live_grace_ms", "0", settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
 	for model, want := range map[string]string{"gpt-4o": "live", "background": "background", "Background": "Background", "LIVE": "LIVE"} {
 		r := e.post("/v1/chat/completions", chat("hi", map[string]any{"model": model}))
 		if got := r.json(t)["model"]; got != want {
@@ -679,6 +683,184 @@ func TestBackgroundSerialised(t *testing.T) {
 	wg.Wait()
 	if p := e.engine.peak.Load(); p != 1 {
 		t.Fatalf("peak %d", p)
+	}
+}
+
+// --- live-first admission ---
+
+// waitUntil polls cond (hang guard: 30 s).
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// goChat runs Chat in the background; the channel gets its error.
+func goChat(ctx context.Context, s *Service, req ChatRequest) <-chan error {
+	done := make(chan error, 1)
+	if req.Messages == nil {
+		req.Messages = []Message{{Role: "user", Content: TextContent("x")}}
+	}
+	go func() {
+		_, err := s.Chat(ctx, req)
+		done <- err
+	}()
+	return done
+}
+
+// backgroundWaits holds a live call at the engine, starts bg, and checks that bg reaches the
+// engine only once the live call has finished and the grace (150 ms) has passed.
+func backgroundWaits(t *testing.T, e *env, bg ChatRequest) {
+	t.Helper()
+	s := e.m.Service()
+	s.setAdmission(150*time.Millisecond, 0)
+	e.engine.gate = make(chan struct{})
+	live := goChat(e.ctx, s, ChatRequest{Label: "live"})
+	waitUntil(t, "the live call", func() bool { return len(e.engine.requests()) == 1 })
+	back := goChat(e.ctx, s, bg)
+	time.Sleep(100 * time.Millisecond)
+	if n := len(e.engine.requests()); n != 1 {
+		t.Fatalf("engine saw %d requests while the live call was in flight", n)
+	}
+	released := time.Now()
+	e.engine.gate <- struct{}{}
+	if err := <-live; err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the background call", func() bool { return len(e.engine.requests()) == 2 })
+	if d := time.Since(released); d < 150*time.Millisecond {
+		t.Fatalf("background call reached the engine %s after the live call finished", d)
+	}
+	e.engine.gate <- struct{}{}
+	if err := <-back; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBackgroundWaitsForLiveCall(t *testing.T) {
+	e := setup(t)
+	backgroundWaits(t, e, ChatRequest{Label: "background"})
+}
+
+func TestPriorityBackgroundOnLiveLabel(t *testing.T) {
+	e := setup(t)
+	backgroundWaits(t, e, ChatRequest{Label: "live", Priority: PriorityBackground})
+}
+
+func TestBackgroundOtherEngineDoesNotWait(t *testing.T) {
+	e := setup(t)
+	other := newFakeEngine()
+	t.Cleanup(other.close)
+	e.res.set(LabelBackground, Endpoint{BaseURL: other.srv.URL, Model: "qwen-bg.gguf"}, nil)
+	s := e.m.Service()
+	s.setAdmission(150*time.Millisecond, 0)
+	e.engine.gate = make(chan struct{})
+	live := goChat(e.ctx, s, ChatRequest{Label: "live"})
+	waitUntil(t, "the live call", func() bool { return len(e.engine.requests()) == 1 })
+	if err := <-goChat(e.ctx, s, ChatRequest{Label: "background"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(other.requests()); n != 1 {
+		t.Fatalf("other engine saw %d requests", n)
+	}
+	e.engine.gate <- struct{}{}
+	if err := <-live; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLiveNeverWaitsForBackground(t *testing.T) {
+	e := setup(t)
+	s := e.m.Service()
+	s.setAdmission(150*time.Millisecond, 0)
+	e.engine.gate = make(chan struct{})
+	back := goChat(e.ctx, s, ChatRequest{Label: "background"})
+	waitUntil(t, "the background call", func() bool { return e.engine.active.Load() == 1 })
+	live := goChat(e.ctx, s, ChatRequest{Label: "live"})
+	waitUntil(t, "the live call", func() bool { return e.engine.active.Load() == 2 })
+	e.engine.gate <- struct{}{}
+	e.engine.gate <- struct{}{}
+	for _, c := range []<-chan error{back, live} {
+		if err := <-c; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p := e.engine.peak.Load(); p != 2 {
+		t.Fatalf("peak %d", p)
+	}
+}
+
+func TestBackgroundWaitCancelled(t *testing.T) {
+	e := setup(t)
+	s := e.m.Service()
+	s.setAdmission(150*time.Millisecond, 0)
+	e.engine.gate = make(chan struct{})
+	live := goChat(e.ctx, s, ChatRequest{Label: "live"})
+	waitUntil(t, "the live call", func() bool { return len(e.engine.requests()) == 1 })
+	ctx, cancel := context.WithCancel(e.ctx)
+	back := goChat(ctx, s, ChatRequest{Label: "background"})
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	if err := <-back; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled wait: %v", err)
+	}
+	e.engine.gate <- struct{}{}
+	if err := <-live; err != nil {
+		t.Fatal(err)
+	}
+	// The cancelled waiter gave its background slot back: the next call runs.
+	e.engine.gate = nil
+	if err := <-goChat(e.ctx, s, ChatRequest{Label: "background"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.engine.requests()); n != 2 {
+		t.Fatalf("engine saw %d requests", n)
+	}
+}
+
+func TestBackgroundMaxTokensCap(t *testing.T) {
+	e := setup(t)
+	s := e.m.Service()
+	s.setAdmission(150*time.Millisecond, 100)
+	ip := func(n int) *int { return &n }
+	for _, c := range []struct {
+		label string
+		max   *int
+		want  any
+	}{
+		{"background", nil, float64(100)},
+		{"background", ip(50), float64(50)},
+		{"background", ip(500), float64(100)},
+		{"live", ip(500), float64(500)},
+	} {
+		if _, err := s.Chat(e.ctx, ChatRequest{Label: c.label, MaxTokens: c.max, Messages: []Message{{Role: "user", Content: TextContent("x")}}}); err != nil {
+			t.Fatal(err)
+		}
+		if got := e.engine.last()["max_tokens"]; got != c.want {
+			t.Fatalf("%s %v: max_tokens %v, want %v", c.label, c.max, got, c.want)
+		}
+	}
+	// Streams are capped too.
+	ch, err := s.Stream(e.ctx, ChatRequest{Label: "background", MaxTokens: ip(500), Messages: []Message{{Role: "user", Content: TextContent("x")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if got := e.engine.last()["max_tokens"]; got != float64(100) {
+		t.Fatalf("stream: max_tokens %v", got)
+	}
+	s.setAdmission(time.Millisecond, 0)
+	if _, err := s.Chat(e.ctx, ChatRequest{Label: "background", Messages: []Message{{Role: "user", Content: TextContent("x")}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := e.engine.last()["max_tokens"]; ok {
+		t.Fatalf("cap 0: max_tokens %v", got)
 	}
 }
 
