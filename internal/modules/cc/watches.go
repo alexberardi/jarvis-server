@@ -12,8 +12,8 @@ import (
 )
 
 // Watches (docs/autonomy/PLAN.md §2): the store, the household switch, firing (watches_fire.go),
-// web checks (watches_web.go) and the hourly expiry sweep. The voice tools come later; nothing
-// reads max_active yet.
+// the signal source (watches_signal.go), web checks (watches_web.go) and the hourly expiry sweep.
+// The voice tools come later; nothing reads max_active yet.
 const (
 	settingWatchesEnabled    = "watches.enabled"
 	settingWatchesMaxActive  = "watches.max_active"
@@ -32,10 +32,11 @@ func watchDefinitions() []settings.Definition {
 	}
 }
 
-// registerWatches sets up the watches store, the web check's job and the expiry sweep's job. It
-// has no routes.
+// registerWatches sets up the watches store, the signal source (watches_signal.go), the web
+// check's job and the expiry sweep's job. It has no routes.
 func (m *Module) registerWatches(_ *http.ServeMux) {
 	m.watches = &watches.Store{DB: m.deps.DB, Now: m.now}
+	m.registerWatchSignals()
 	if m.deps.Queue != nil {
 		m.deps.Queue.Register(watchSweepJob, queue.Handler{Run: func(ctx context.Context, _ queue.Job) ([]byte, error) {
 			return nil, m.sweepWatches(ctx)
