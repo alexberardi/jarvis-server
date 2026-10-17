@@ -335,7 +335,7 @@ export default function PromptEditorCard() {
                 {nodeList.length === 0 && <option value="">No nodes</option>}
                 {nodeList.map((n) => (
                   <option key={n.node_id} value={n.node_id}>
-                    {n.room ? `${n.room} (${n.node_id})` : n.node_id}
+                    {n.room ? `${n.room} · ${n.node_id.slice(0, 8)}` : n.node_id}
                   </option>
                 ))}
               </select>
