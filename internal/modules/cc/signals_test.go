@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -674,4 +676,173 @@ func TestToolsReportDeclaration(t *testing.T) {
 			t.Errorf("%s: got (%v, %v), want (%v, %v)", c.command, risky, free, c.risky, c.free)
 		}
 	}
+}
+
+// --- the signal automation checkpoint (autonomy PLAN §1 checkpoint 3) ---
+
+// autoEnv is a household with a presence.left automation over a fake node that locks doors.
+type autoEnv struct {
+	*sigEnv
+	agent *fakeNodeAgent
+	tok   string
+}
+
+func newAutoEnv(t *testing.T, delivery string, autonomous bool, report map[string]any) *autoEnv {
+	t.Helper()
+	se := newSigEnv(t, func(m *Module) {
+		m.LLM = fakeLLMFunc(func(map[string]any) (string, string) { return "lock_door", `{"door": "front"}` })
+	})
+	n := se.createNode("n1", sigHH)
+	agent := &fakeNodeAgent{report: report, tool: func(string, map[string]any) map[string]any {
+		return map[string]any{"success": true, "message": "Front door locked"}
+	}}
+	se.runNode(n, agent)
+	tok := se.auth.addUser(5, sigHH, authn.RoleMember)
+	admin := se.auth.addUser(6, sigHH, authn.RoleAdmin)
+	se.do("PUT", "/api/v0/mobile/household/"+sigHH+"/signal-automations/presence.left",
+		map[string]any{"instruction": "Lock the front door", "delivery": delivery}, bearer(admin)).want(200)
+	if autonomous {
+		se.set(errands.SettingAutonomous, true, sigHH)
+	}
+	return &autoEnv{sigEnv: se, agent: agent, tok: tok}
+}
+
+func (ae *autoEnv) householdRule(effect policy.Effect) {
+	ae.t.Helper()
+	if _, err := ae.m.autonomy.PutRule(context.Background(), policy.Rule{HouseholdID: sigHH, ScopeKind: policy.ScopeHousehold,
+		Tool: "lock_door", Effect: effect}); err != nil {
+		ae.t.Fatal(err)
+	}
+}
+
+// leave reports the user away and waits for the reaction.
+func (ae *autoEnv) leave() {
+	ae.do("POST", "/api/v0/mobile/presence", map[string]any{"household_id": sigHH, "state": "away"}, bearer(ae.tok)).want(200)
+	ae.wait()
+}
+
+func (ae *autoEnv) events() []policy.Event {
+	ae.t.Helper()
+	evs, err := ae.m.autonomy.Events(context.Background(), sigHH, 10)
+	if err != nil {
+		ae.t.Fatal(err)
+	}
+	return evs
+}
+
+// wantEvent checks the single automation event.
+func (ae *autoEnv) wantEvent(outcome string) policy.Event {
+	ae.t.Helper()
+	evs := ae.events()
+	if len(evs) != 1 || evs[0].Outcome != outcome || evs[0].Source != policy.SourceAutomation ||
+		evs[0].SourceID != "presence.left" || evs[0].Tool != "lock_door" || evs[0].UserID == nil || *evs[0].UserID != 5 {
+		ae.t.Fatalf("events = %+v", evs)
+	}
+	return evs[0]
+}
+
+// wantRanCard checks the single "Ran on its own" card and returns its metadata.
+func (ae *autoEnv) wantRanCard(scope string) map[string]any {
+	ae.t.Helper()
+	if !ae.agent.called("tool:lock_door") {
+		ae.t.Fatal("not dispatched")
+	}
+	items := ae.items()
+	if len(items) != 1 || items[0].Category != errands.CategoryAutonomy || items[0].Title != "🤖 Ran on its own: I leave home" ||
+		items[0].Summary != "Ran lock_door." || items[0].UserID == nil || *items[0].UserID != 5 {
+		ae.t.Fatalf("items = %+v", items)
+	}
+	md := items[0].Metadata
+	src, _ := md["source"].(map[string]any)
+	rules, _ := md["rules"].([]any)
+	steps, _ := md["steps"].([]any)
+	if md["card_type"] != "autonomy_ran" || md["state"] != "done" || src["kind"] != "automation" || len(rules) != 1 ||
+		rules[0].(map[string]any)["scope"] != scope || len(steps) != 1 {
+		ae.t.Fatalf("metadata = %+v", md)
+	}
+	if st := steps[0].(map[string]any); st["status"] != "ok" || st["command"] != "lock_door" || st["result"] != "Front door locked" {
+		ae.t.Fatalf("step = %+v", st)
+	}
+	return md
+}
+
+func TestAutomationRulesOffUnchanged(t *testing.T) {
+	ae := newAutoEnv(t, "automatic", false, nodeReport())
+	ae.leave()
+	if !ae.agent.called("tool:lock_door") || len(ae.items()) != 0 {
+		t.Fatalf("automatic: called=%v items=%+v", ae.agent.called("tool:lock_door"), ae.items())
+	}
+	ae = newAutoEnv(t, "notification", false, nodeReport())
+	ae.householdRule(policy.Allow) // ignored while autonomy is off
+	ae.leave()
+	if items := ae.items(); ae.agent.called("tool:lock_door") || len(items) != 1 || items[0].Title != "Confirm automation" {
+		t.Fatalf("notification: items=%+v", items)
+	}
+	if evs := ae.events(); len(evs) != 0 {
+		t.Fatalf("events = %+v", evs)
+	}
+}
+
+func TestAutomationAutomaticRunsWithCard(t *testing.T) {
+	ae := newAutoEnv(t, "automatic", true, nodeReport())
+	ae.leave()
+	ae.wantRanCard(policy.ScopeAutomation)
+	if e := ae.wantEvent(policy.OutcomeRan); e.Effect != policy.Allow {
+		t.Fatalf("event = %+v", e)
+	}
+}
+
+func TestAutomationHouseholdAllow(t *testing.T) {
+	ae := newAutoEnv(t, "notification", true, nodeReport())
+	ae.householdRule(policy.Allow)
+	ae.leave()
+	md := ae.wantRanCard(policy.ScopeHousehold)
+	if e := ae.wantEvent(policy.OutcomeRan); e.RuleID == nil || md["rules"].([]any)[0].(map[string]any)["rule_id"] != *e.RuleID {
+		t.Fatalf("event = %+v, metadata = %+v", e, md)
+	}
+}
+
+func TestAutomationAsks(t *testing.T) {
+	ae := newAutoEnv(t, "notification", true, nodeReport())
+	ae.leave()
+	if items := ae.items(); ae.agent.called("tool:lock_door") || len(items) != 1 || items[0].Title != "Confirm automation" ||
+		items[0].Category != "proposal" {
+		t.Fatalf("items = %+v", items)
+	}
+	ae.wantEvent(policy.OutcomeAsked)
+}
+
+func TestAutomationBlocked(t *testing.T) {
+	ae := newAutoEnv(t, "notification", true, nodeReport())
+	ae.householdRule(policy.Block)
+	uid := int64(5)
+	rc := reactionCtx{HouseholdID: sigHH, Kind: "presence.left", NodeID: "n1", UserID: &uid, Facts: `{"user_id": 5, "state": "away"}`}
+	if got := ae.m.reactAutomation(context.Background(), rc); got != "blocked:lock_door" {
+		t.Fatalf("status = %q", got)
+	}
+	ae.wait()
+	if ae.agent.called("tool:lock_door") || len(ae.items()) != 0 {
+		t.Fatalf("blocked ran: items=%+v", ae.items())
+	}
+	if e := ae.wantEvent(policy.OutcomeBlocked); e.Effect != policy.Block || e.RuleID == nil {
+		t.Fatalf("event = %+v", e)
+	}
+}
+
+func TestAutomationDeclaredTool(t *testing.T) {
+	rep := nodeReport()
+	cmds := rep["available_commands"].([]any)
+	cmds[1] = map[string]any{"command_name": "lock_door", "run_without_confirmation": true}
+	ae := newAutoEnv(t, "notification", true, rep)
+	ae.leave()
+	ae.wantRanCard("tool")
+	ae.wantEvent(policy.OutcomeRan)
+}
+
+func TestAutomationAutomaticBeatsHouseholdBlock(t *testing.T) {
+	ae := newAutoEnv(t, "automatic", true, nodeReport())
+	ae.householdRule(policy.Block)
+	ae.leave()
+	ae.wantRanCard(policy.ScopeAutomation)
+	ae.wantEvent(policy.OutcomeRan)
 }
