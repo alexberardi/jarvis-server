@@ -128,6 +128,10 @@ func (m *Module) buildServerCallbacks() map[string]serverCallbackFunc {
 		}
 		return callbackResult{Success: true, ContextData: cd}, nil
 	}
+	// Watch alerts' Pause / Resume / Stop watching (autonomy PLAN §2).
+	for key, f := range m.watchCallbacks() {
+		out[key] = f
+	}
 	return out
 }
 
