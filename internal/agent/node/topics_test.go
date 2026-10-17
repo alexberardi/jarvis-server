@@ -15,7 +15,8 @@ import (
 // The runner subscribes the extra node topics (the K2 relay, settings requests, config pushes)
 // and runs the connect backstop; each message reaches its handler with the run's CC client.
 func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
-	b, err := mqtt.New(nil, mqtt.Options{TCPAddr: "127.0.0.1:0", AllowAnonymous: true, Logger: quiet})
+	// The node connects with its own credential: an anonymous client can't publish responses.
+	b, err := mqtt.New(nodeCred{}, mqtt.Options{TCPAddr: "127.0.0.1:0", Logger: quiet})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,7 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 				{"name": SvcMQTT, "url": "mqtt://" + b.TCPAddr()},
 			}})
 		case "/api/v0/node/mqtt-credentials":
-			_, _ = w.Write([]byte(`{"username":null,"password":null}`))
+			_, _ = w.Write([]byte(`{"username":"n1","password":"k"}`))
 		case "/api/v0/admin/nodes/heartbeat":
 			var m map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&m)
@@ -106,4 +107,11 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+}
+
+// nodeCred admits node n1 with its node key.
+type nodeCred struct{}
+
+func (nodeCred) Authenticate(user, pass string) (mqtt.Principal, bool) {
+	return mqtt.Principal{Kind: mqtt.Node, NodeID: "n1"}, user == "n1" && pass == "k"
 }

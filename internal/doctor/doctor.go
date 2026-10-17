@@ -87,6 +87,9 @@ type Options struct {
 	// LegacyUID is the account whose LaunchAgents (macOS) the legacy check looks at (default:
 	// this user, or $SUDO_UID under sudo; "" with neither skips them).
 	LegacyUID string
+	// MQTTAnonymous is JARVIS_MQTT_ALLOW_ANONYMOUS=1: the broker admits clients without
+	// credentials.
+	MQTTAnonymous bool
 }
 
 // Firewall reports whether the host firewall admits a port from a subnet, and how to make
@@ -141,6 +144,7 @@ func Run(ctx context.Context, o Options) []Check {
 	out = append(out, osChecks(ctx, o)...)
 	out = append(out, permissions(o.Home)...)
 	out = append(out, legacy(ctx, o, portsHeld)...)
+	out = append(out, mqttAnonymous(o.MQTTAnonymous))
 	return out
 }
 
@@ -439,4 +443,15 @@ func LocalLANs(allow []string) []*net.IPNet {
 // shown to the operator, or "" when there is none.
 func LANAddr(allow []string) string {
 	return netaddr.LANAddr(allow)
+}
+
+// mqttAnonymous warns when the broker admits clients without credentials: anyone who reaches
+// its ports can read every topic (nodes' commands and tool calls included).
+func mqttAnonymous(on bool) Check {
+	const name = "mqtt anonymous"
+	if !on {
+		return Check{Name: name, Status: OK, Detail: "the MQTT broker requires credentials"}
+	}
+	return Check{Name: name, Status: Warn,
+		Detail: "JARVIS_MQTT_ALLOW_ANONYMOUS=1: the MQTT broker admits clients without credentials, who can read every topic (dev only); unset JARVIS_MQTT_ALLOW_ANONYMOUS and restart jarvisd"}
 }

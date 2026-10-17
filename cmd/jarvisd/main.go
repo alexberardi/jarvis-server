@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -76,7 +77,8 @@ func modules() []module.Module {
 			MQTT: ccmod.MQTTOptions{
 				TCPAddr:        mqttTCPAddr(),
 				WSAddr:         mqttWSAddr(),
-				AllowAnonymous: os.Getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
+				AllowAnonymous: mqttAllowAnonymous(),
+				AllowedOrigins: mqttAllowedOrigins(),
 			},
 			Phone: phoneConfig(), // cmd/jarvisd/phone.go
 		},
@@ -280,6 +282,22 @@ func mqttTCPAddr() string {
 
 func mqttWSAddr() string {
 	return envOr("JARVIS_MQTT_WS_ADDR", config.ShiftAddr(mqtt.DefaultWSAddr, config.PortOffset()))
+}
+
+// mqttAllowAnonymous is JARVIS_MQTT_ALLOW_ANONYMOUS=1 (dev only): the broker admits clients
+// without credentials, read-only. jarvisd logs a WARN at start and doctor flags it.
+func mqttAllowAnonymous() bool { return os.Getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1" }
+
+// mqttAllowedOrigins is JARVIS_MQTT_WS_ALLOWED_ORIGINS, comma-separated hosts (or URLs) whose
+// pages may open the broker's WebSocket besides this host, localhost and the LAN.
+func mqttAllowedOrigins() []string {
+	var out []string
+	for _, h := range strings.Split(os.Getenv("JARVIS_MQTT_WS_ALLOWED_ORIGINS"), ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 const usage = `usage: jarvisd <command> [--home DIR]

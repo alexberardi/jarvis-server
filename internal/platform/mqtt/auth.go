@@ -17,10 +17,14 @@ const (
 	Node Kind = iota + 1
 	// Server is a trusted server-side client (e.g. an out-of-process CC). Unrestricted.
 	Server
-	// Anonymous is a client without credentials, admitted only with Options.AllowAnonymous.
-	// Unrestricted, matching the legacy shared-credential Mosquitto setup.
+	// Anonymous is a client without credentials, admitted only with Options.AllowAnonymous
+	// (dev only). It is read-only: it may subscribe to any topic but publish only under
+	// AnonymousPublishPrefix, so it can't command a node or forge a response.
 	Anonymous
 )
+
+// AnonymousPublishPrefix is the only topic subtree an anonymous client may publish to.
+const AnonymousPublishPrefix = "jarvis/dev/"
 
 // Principal is the identity a client authenticated as.
 type Principal struct {
@@ -165,8 +169,11 @@ func (h *authHook) OnACLCheck(cl *mochi.Client, topic string, write bool) bool {
 	if !ok {
 		return false
 	}
-	if p.Kind != Node {
+	switch p.Kind {
+	case Server:
 		return true
+	case Anonymous:
+		return !write || strings.HasPrefix(topic, AnonymousPublishPrefix)
 	}
 	if write {
 		return CanPublish(p.NodeID, topic)

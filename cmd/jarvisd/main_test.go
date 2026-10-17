@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	adminmod "github.com/alexberardi/jarvis-server/internal/modules/admin"
+	ccmod "github.com/alexberardi/jarvis-server/internal/modules/cc"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
@@ -86,4 +87,28 @@ func TestMQTTAddrsFollowPortOffset(t *testing.T) {
 	if tcp, ws := mqttTCPAddr(), mqttWSAddr(); tcp != "127.0.0.1:2000" || ws != "" {
 		t.Fatalf("explicit: tcp %q ws %q", tcp, ws)
 	}
+}
+
+// JARVIS_MQTT_ALLOW_ANONYMOUS reaches the broker and the doctor (CLI and admin), and
+// JARVIS_MQTT_WS_ALLOWED_ORIGINS the broker's WebSocket Origin check.
+func TestMQTTAnonymousAndOriginsWiring(t *testing.T) {
+	t.Setenv("JARVIS_MQTT_ALLOW_ANONYMOUS", "")
+	t.Setenv("JARVIS_MQTT_WS_ALLOWED_ORIGINS", "")
+	if mqttAllowAnonymous() || exposure(nil).MQTTAnonymous || mqttAllowedOrigins() != nil {
+		t.Fatal("anonymous or origins on by default")
+	}
+	t.Setenv("JARVIS_MQTT_ALLOW_ANONYMOUS", "1")
+	t.Setenv("JARVIS_MQTT_WS_ALLOWED_ORIGINS", " jarvis.example.com, ,https://admin.example.net ")
+	if !exposure(nil).MQTTAnonymous {
+		t.Error("exposure misses anonymous")
+	}
+	for _, m := range modules() {
+		if cc, ok := m.(*ccmod.Module); ok {
+			if !cc.MQTT.AllowAnonymous || !slices.Equal(cc.MQTT.AllowedOrigins, []string{"jarvis.example.com", "https://admin.example.net"}) {
+				t.Errorf("cc mqtt options %+v", cc.MQTT)
+			}
+			return
+		}
+	}
+	t.Fatal("no cc module")
 }
