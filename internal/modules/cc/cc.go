@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
@@ -168,14 +169,19 @@ type Module struct {
 	ambient  *ambientStore
 	releases *releaseCache
 
-	convs    *convCache
-	signals  *convSignals
-	vocab    sttVocab // desktop nodes' app names for whisper (stt_vocabulary.go)
-	enroll   *enrollments
-	pairings *pairingStore // device-code pairing (pairing.go)
-	tools    *servertools.Registry
-	dateKeys []string      // DT_KEYS override (tests); nil = the shared vocabulary
-	lanAddr  func() string // this host's LAN address override (tests); nil = netaddr.LANAddr
+	convs   *convCache
+	signals *convSignals
+	// wakeSem and voiceSem bound the wake verifications and follow-up voice checks running
+	// beside node transcriptions (whisper and the speaker model are shared): one more is
+	// dropped, fail open, and counted.
+	wakeSem, voiceSem     chan struct{}
+	wakeDrops, voiceDrops atomic.Int64
+	vocab                 sttVocab // desktop nodes' app names for whisper (stt_vocabulary.go)
+	enroll                *enrollments
+	pairings              *pairingStore // device-code pairing (pairing.go)
+	tools                 *servertools.Registry
+	dateKeys              []string      // DT_KEYS override (tests); nil = the shared vocabulary
+	lanAddr               func() string // this host's LAN address override (tests); nil = netaddr.LANAddr
 	// localIPs overrides this server's own addresses for "this computer" (tests; thisdevice.go).
 	localIPs func() []net.IP
 
@@ -239,6 +245,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.releases = &releaseCache{}
 	m.convs = newConvCache(m.now)
 	m.signals = newConvSignals(m.now)
+	m.wakeSem = make(chan struct{}, wakeVerifyLimit)
+	m.voiceSem = make(chan struct{}, voiceCheckLimit)
 	m.enroll = newEnrollments()
 	m.pairings = newPairingStore()
 	if m.tools == nil {

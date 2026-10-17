@@ -253,7 +253,17 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 		m.signals.recordIdentity(convID, id)
 		if len(speakerAudio) > 0 && m.wakeMode(ctx, n.HouseholdID, n.ID) != "off" {
 			finish := m.signals.beginWake(convID)
-			go m.verifyWake(context.WithoutCancel(ctx), n, speakerAudio, finish)
+			select {
+			case m.wakeSem <- struct{}{}:
+				go func() {
+					defer func() { <-m.wakeSem }()
+					m.verifyWake(context.WithoutCancel(ctx), n, speakerAudio, finish)
+				}()
+			default:
+				finish(nil) // no verdict: the turn fails open without waiting for one
+				m.deps.Log.Warn("cc: wake verification dropped (busy)", "node", n.ID, "conversation_id", convID,
+					"dropped", m.wakeDrops.Add(1))
+			}
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, res)
@@ -272,6 +282,12 @@ func (m *Module) sttError(w http.ResponseWriter, err error) {
 		m.internalError(w, err)
 	}
 }
+
+// wakeVerifyLimit and voiceCheckLimit bound the background work node transcriptions start.
+const (
+	wakeVerifyLimit = 2
+	voiceCheckLimit = 2
+)
 
 // verifyWake transcribes the leading wake slice of the speaker audio and stores the verdict
 // (run_wake_verification), after the main transcription, never concurrently with it.
