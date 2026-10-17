@@ -11,7 +11,7 @@ text without needing vision. The user's own emulator is never touched.
 ```sh
 scripts/sandbox up --name mob --llm shared      # chat needs a model; --llm none + --no-chat otherwise
 scripts/mobile-shot deps                        # once: checks the SDK, creates the AVD, builds the APK
-scripts/mobile-shot --sandbox mob               # landing … inbox, light + dark, one chat round trip
+scripts/mobile-shot --sandbox mob               # landing … inbox_detail, light + dark, one chat round trip
 scripts/mobile-shot --sandbox mob --screens settings --themes dark --font-scale 1.0,1.3
 scripts/mobile-shot --sandbox mob --keep        # leave the emulator up; the next run skips the boot
 scripts/mobile-shot stop --sandbox mob          # kill a kept emulator
@@ -51,10 +51,10 @@ The output goes to `.sandbox/<name>/mobile/<timestamp>/`:
 
 | File | What it is |
 |---|---|
-| `<screen>__<theme>[__f<scale>].png` | The whole 1080x2400 display. Screens: `landing`, `login` (logged out), `home`, `devices`, `pantry`, `routines`, `nodes`, `settings`, `inbox` (logged in) and `chat`. A font scale other than 1.0 adds `__f1.3`. |
+| `<screen>__<theme>[__f<scale>].png` | The whole 1080x2400 display. Screens: `landing`, `login` (logged out), `home`, `devices`, `pantry`, `routines`, `nodes`, `settings`, `inbox`, `inbox_detail` (logged in) and `chat`. `inbox_detail` is the newest inbox item's detail: the first `inbox-item-*` card of the inbox, tapped; with an empty inbox it is skipped with `no inbox items`. A font scale other than 1.0 adds `__f1.3`. |
 | `….p2.png`, `….p3.png` | The next screenfuls of a scrolling screen. The tool swipes up and shoots again while the content still moves, up to `--pages` (3). |
 | `<same>.xml` | The uiautomator dump for that shot: every view's text, content description, testID (`resource-id`), hint and bounds. |
-| `index.json` | Per shot: the visible texts, the views sticking out past the screen edge (`overflow`), the mean luminance with `theme_ok` (is a dark shot actually dark?), and `still_loading` when a spinner or "Loading…" never went away. Also whether login worked, the chat message with its reply and timing, and `failures`. |
+| `index.json` | Per shot: the visible texts, the views sticking out past the screen edge (`overflow`), the mean luminance with `theme_ok` (is a dark shot actually dark?), and `still_loading` when a spinner or "Loading…" never went away. Also whether login worked, the chat message with its reply and timing, `skipped` (a screen with nothing to show in one look, with its theme, font scale and reason; not a failure), and `failures`. |
 | `logcat.txt` | The app's JS console (`ReactNativeJS`) and crashes. |
 
 The script exits 1 when login, a screen or the chat failed, so it doubles as a smoke test of the
