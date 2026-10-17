@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 )
 
 // Legacy listener names and their default ports (PLAN §3.1). jarvisd keeps every old port so
@@ -162,8 +160,8 @@ func loadEnv(lookup func(string) (string, bool), getenv func(string) string, off
 		AdminAPIKey:        getenv("ADMIN_API_KEY"),
 		RelayHouseholdJWT:  getenv("RELAY_HOUSEHOLD_JWT"),
 		DevSpeakerHints:    getenv("JARVIS_DEV_SPEAKER_HINTS") == "1",
-		MQTTAddr:           envOr("JARVIS_MQTT_ADDR", ShiftAddr(mqtt.DefaultTCPAddr, offset)),
-		MQTTWSAddr:         envOr("JARVIS_MQTT_WS_ADDR", ShiftAddr(mqtt.DefaultWSAddr, offset)),
+		MQTTAddr:           envOr("JARVIS_MQTT_ADDR", ShiftAddr(DefaultMQTTAddr, offset)),
+		MQTTWSAddr:         envOr("JARVIS_MQTT_WS_ADDR", ShiftAddr(DefaultMQTTWSAddr, offset)),
 		MQTTAllowAnonymous: getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
 		AuthAdminToken:     getenv("JARVIS_AUTH_ADMIN_TOKEN"),
 		AuthSecretKey:      getenv("AUTH_SECRET_KEY"),
@@ -179,6 +177,13 @@ func loadEnv(lookup func(string) (string, bool), getenv func(string) string, off
 		PhonePublicWSSURL:  getenv("JARVIS_PHONE_PUBLIC_WSS_URL"),
 	}
 }
+
+// The MQTT broker's default listen addresses. They equal mqtt.DefaultTCPAddr and
+// mqtt.DefaultWSAddr (a test checks); importing mqtt here would link the broker into every binary.
+const (
+	DefaultMQTTAddr   = ":1884"
+	DefaultMQTTWSAddr = ":9883"
+)
 
 // maxPortOffset keeps every shifted default port, the MQTT broker's 9883 the highest, valid.
 const maxPortOffset = 65535 - 9883

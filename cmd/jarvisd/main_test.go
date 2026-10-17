@@ -15,6 +15,7 @@ import (
 	llmmod "github.com/alexberardi/jarvis-server/internal/modules/llm"
 	notifmod "github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	ocrmod "github.com/alexberardi/jarvis-server/internal/modules/ocr"
+	ttsmod "github.com/alexberardi/jarvis-server/internal/modules/tts"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 )
@@ -164,7 +165,7 @@ func TestModulesWiring(t *testing.T) {
 		t.Errorf("llm: AppID %q AppKey %q", llm.AppID, llm.AppKey)
 	}
 	if admin.UIDir != "/ui" || admin.Version != version || admin.Exposure.MDNS || admin.Exposure.MQTTWSAddr != "" ||
-		admin.Exposure.MQTTAddr != "127.0.0.1:2000" || !slices.Equal(admin.Exposure.Listeners, want) {
-		t.Errorf("admin: UIDir %q Exposure %+v", admin.UIDir, admin.Exposure)
+		admin.Exposure.MQTTAddr != "127.0.0.1:2000" || !slices.Equal(admin.Exposure.Listeners, want) || admin.TTS != adminmod.Speech(mods[4].(*ttsmod.Module)) {
+		t.Errorf("admin: UIDir %q Exposure %+v TTS %v", admin.UIDir, admin.Exposure, admin.TTS)
 	}
 }

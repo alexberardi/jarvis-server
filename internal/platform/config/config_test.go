@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/mqtt"
 )
 
 func env(m map[string]string) func(string) (string, bool) {
@@ -138,6 +140,13 @@ func TestLoadEnvDefaults(t *testing.T) {
 	c, _ = load(env(map[string]string{"JARVIS_HOME": "/d", "JARVIS_PORT_OFFSET": "10000"}))
 	if c.Env.MQTTAddr != ":11884" || c.Env.MQTTWSAddr != ":19883" {
 		t.Fatalf("offset: %+v", c.Env)
+	}
+}
+
+// config keeps its own copy of the broker's defaults so it does not link the broker.
+func TestMQTTDefaultsMatchBroker(t *testing.T) {
+	if DefaultMQTTAddr != mqtt.DefaultTCPAddr || DefaultMQTTWSAddr != mqtt.DefaultWSAddr {
+		t.Fatalf("config %q/%q, mqtt %q/%q", DefaultMQTTAddr, DefaultMQTTWSAddr, mqtt.DefaultTCPAddr, mqtt.DefaultWSAddr)
 	}
 }
 
