@@ -168,13 +168,15 @@ func addResultMeta(meta map[string]any, output any) {
 }
 
 // continueMeta is the continue span's metadata: the results' summary, when the conversation
-// is known.
-func (m *Module) continueMeta(convID string, results []toolResult) map[string]any {
+// is known and the caller doesn't give up waiting for it.
+func (m *Module) continueMeta(ctx context.Context, convID string, results []toolResult) map[string]any {
 	conv := m.convs.get(convID)
 	if conv == nil || len(results) == 0 {
 		return nil
 	}
-	conv.mu.Lock()
+	if lockTurn(ctx, conv) != nil {
+		return nil
+	}
 	defer conv.mu.Unlock()
 	return map[string]any{"tool_results": toolResultsMeta(conv.messages, results)}
 }
@@ -193,7 +195,9 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	if conv == nil {
 		return engineResult{}, nil, errPrecondition
 	}
-	conv.mu.Lock()
+	if err := lockTurn(ctx, conv); err != nil {
+		return engineResult{}, nil, err
+	}
 	defer conv.mu.Unlock()
 	stashReferenced(conv, results)
 	results = m.prepareToolImages(ctx, results)
@@ -249,13 +253,16 @@ type continuePlan struct {
 }
 
 // planContinueStream is the first half of stream_continue_with_tool_results; nil means
-// "fall back to the blocking continue" (202).
+// "fall back to the blocking continue" (202), also when the caller gives up waiting for
+// another turn of the conversation.
 func (m *Module) planContinueStream(ctx context.Context, convID string, results []toolResult) *continuePlan {
 	conv := m.convs.get(convID)
 	if conv == nil {
 		return nil
 	}
-	conv.mu.Lock()
+	if lockTurn(ctx, conv) != nil {
+		return nil
+	}
 	defer conv.mu.Unlock()
 	if len(conv.messages) == 0 || typingPending(conv, conv.messages) {
 		return nil // the typing is still owed: the blocking continue runs the loop
