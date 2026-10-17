@@ -30,7 +30,7 @@ func (m *Module) registerErrands() {
 	s := &errands.Service{
 		DB: m.deps.DB, Log: m.deps.Log, LLM: m.LLM, Tools: m.tools, Settings: m.settings,
 		Nodes: errandNodes{m}, Cards: errandCards{m}, Phone: phoneCalls, Schedules: schedules,
-		Timezone: m.householdTimezone, Now: m.now,
+		Timezone: m.householdTimezone, Now: m.now, Policy: m.policy, Activity: m.autonomy,
 	}
 	if m.deps.Queue != nil {
 		s.Register(m.deps.Queue)
@@ -258,10 +258,17 @@ func (n errandNodes) ReportCommands(ctx context.Context, nodeID string, timeout 
 	return out, true
 }
 
-// errandCards posts through the notify service (D31).
+// errandCards posts through the notify service (D31); a gated card (an autorun report) goes
+// through the attention gate first.
 type errandCards struct{ m *Module }
 
 func (c errandCards) Post(ctx context.Context, card errands.Card) string {
+	if card.Gated {
+		id, _ := c.m.notifyGated(ctx, gatedNote{HouseholdID: card.HouseholdID, UserID: card.UserID, Source: "errand",
+			Category: card.Category, Title: card.Title, Summary: card.Summary, Body: card.Body, Metadata: card.Metadata,
+			DedupeKey: card.DedupeKey, Push: card.Push})
+		return id
+	}
 	return c.m.postInboxItem(ctx, card.HouseholdID, card.UserID, card.Title, card.Summary, card.Body, card.Category,
 		card.Metadata, card.Push, card.TargetType)
 }
