@@ -191,5 +191,6 @@ func (s *Service) resumeErrand(ctx context.Context, sess *Session) {
 	if err != nil {
 		cur = sess
 	}
-	go s.Errands.CallTerminal(context.WithoutCancel(ctx), snapshotOf(cur))
+	bg, snap := context.WithoutCancel(ctx), snapshotOf(cur)
+	s.spawn(func() { s.Errands.CallTerminal(bg, snap) })
 }

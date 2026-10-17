@@ -189,6 +189,9 @@ type Module struct {
 	phone      *phone.Service   // 5c phone calls (phone_wire.go)
 	errands    *errands.Service // 5c errands and workflows (errands.go)
 
+	// tasks tracks fire-and-forget goroutines so shutdown waits for them (tasks.go, Wait).
+	tasks taskGroup
+
 	// Autonomy (docs/autonomy/PLAN.md): the activity log and the rule policy (P1 fills Rules).
 	autonomy *policy.Store
 	policy   *policy.Policy
