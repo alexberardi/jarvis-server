@@ -6,7 +6,9 @@
 //   - dedup keys: at most one live (queued or running) job per key
 //   - delayed jobs (RunAt), which also serve as timers
 //   - priorities, retries with backoff, Permanent errors that skip retries
-//   - leases: a job whose worker died (crash, restart) is picked up again after its lease
+//   - leases: a job whose worker overran or hung is picked up again after its lease
+//   - restarts: a graceful shutdown puts in-flight jobs back to queued and refunds their
+//     attempt; at boot, Start requeues every job a crash left running (see Start)
 //   - transactional enqueue: EnqueueTx writes the job in the caller's transaction, so a job
 //     and the state that caused it commit together (docs/cc D31)
 package queue
@@ -282,9 +284,21 @@ func (q *Queue) Get(ctx context.Context, id int64) (Info, error) {
 	return i, err
 }
 
-// Start launches the workers and the lease reaper; they stop when ctx is cancelled. Start
-// returns at once.
+// Start recovers orphaned jobs, then launches the workers and the lease reaper; they stop when
+// ctx is cancelled. Start returns once recovery is done.
+//
+// jarvisd is one process and only it starts the queue, so any job still running before the
+// workers start was orphaned by a crash (a graceful shutdown requeues its own jobs). It is
+// requeued at once, without waiting for its lease, and the crashed run counts as an attempt.
+// A job on its last attempt still gets one more run (so a crash doesn't fail a MaxAttempts:1
+// job), but one that was already past its last attempt, i.e. orphaned again on that extra
+// run, is failed: a job that crashes the process can't loop on every boot.
 func (q *Queue) Start(ctx context.Context) {
+	if n, err := q.recoverOrphans(ctx); err != nil {
+		q.log.Error("queue: recover orphaned jobs", "err", err)
+	} else if n > 0 {
+		q.log.Info("queue: recovered jobs orphaned by a restart", "count", n)
+	}
 	q.mu.Lock()
 	q.started = true
 	handlers := make(map[string]Handler, len(q.handlers))
@@ -361,8 +375,18 @@ func (q *Queue) execute(ctx context.Context, h Handler, j Job) {
 	jctx, cancel := context.WithTimeout(ctx, h.Lease)
 	result, err := safeRun(jctx, h.Run, j)
 	cancel()
-	if ctx.Err() != nil {
-		// Shutting down: leave the job running; its lease expires and it is retried.
+	if err != nil && ctx.Err() != nil {
+		// Shutting down: the run was interrupted, not failed. Put the job back and refund the
+		// attempt it claimed, so the next boot runs it again. A run that succeeded is recorded
+		// below as usual.
+		_, dbErr := q.db.Write.ExecContext(context.Background(), `
+			UPDATE platform_jobs SET state = 'queued', attempts = attempts - 1, lease_until = NULL, run_at = ?, updated_at = ?
+			WHERE id = ? AND state = 'running' AND attempts = ?`, ms(q.now()), ms(q.now()), j.ID, j.Attempt)
+		if dbErr != nil {
+			q.log.Error("queue: requeue on shutdown", "id", j.ID, "err", dbErr)
+		} else {
+			q.log.Info("queue: job requeued on shutdown", "type", j.Type, "id", j.ID, "attempt", j.Attempt)
+		}
 		return
 	}
 	now := q.now()
@@ -420,7 +444,33 @@ func (q *Queue) reaper(ctx context.Context) {
 	}
 }
 
-// ReapExpired handles expired leases once. Exported for tests and for startup.
+// recoverOrphans requeues the jobs a crash left running (see Start), failing those already
+// past their last attempt. It returns how many rows it touched.
+func (q *Queue) recoverOrphans(ctx context.Context) (int64, error) {
+	now := ms(q.now())
+	var n int64
+	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE platform_jobs SET state = 'failed', last_error = 'interrupted by restart', lease_until = NULL, updated_at = ?
+			WHERE state = 'running' AND attempts > max_attempts`, now)
+		if err != nil {
+			return err
+		}
+		failed, _ := res.RowsAffected()
+		res, err = tx.ExecContext(ctx, `
+			UPDATE platform_jobs SET state = 'queued', lease_until = NULL, run_at = ?, updated_at = ?
+			WHERE state = 'running'`, now, now)
+		if err != nil {
+			return err
+		}
+		requeued, _ := res.RowsAffected()
+		n = failed + requeued
+		return nil
+	})
+	return n, err
+}
+
+// ReapExpired handles expired leases once. Exported for tests.
 func (q *Queue) ReapExpired(ctx context.Context) error {
 	now := ms(q.now())
 	return q.db.Tx(ctx, func(tx *sql.Tx) error {
