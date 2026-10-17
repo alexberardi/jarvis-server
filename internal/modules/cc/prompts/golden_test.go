@@ -173,6 +173,69 @@ func TestG1PromptsGolden(t *testing.T) {
 	t.Logf("G1: %d/88 fixtures byte-exact", matched)
 }
 
+// G1 through the built-in text prompts: each fixture's messages[0] from Builtin(provider)
+// rendered by SystemPrompt (tools as text except for the two native providers).
+func TestG1BuiltinsGolden(t *testing.T) {
+	inputs := loadFixture(t, "_inputs.json")
+	toolSets := og(inputs, "tool_sets").(*pyjson.Object)
+	index := loadFixture(t, "_index.json").([]any)
+	if len(index) != 88 {
+		t.Fatalf("index has %d fixtures, want 88", len(index))
+	}
+	matched := 0
+	for _, row := range index {
+		file := og(row, "file").(string)
+		fx := loadFixture(t, file)
+		prov := og(fx, "provider").(string)
+		text, ok := Builtin(prov)
+		if !ok {
+			t.Fatalf("%s: no built-in %q", file, prov)
+		}
+		in := og(fx, "inputs")
+		ctx, ch := toContext(t, og(in, "node_context").(*pyjson.Object))
+		ch.Enabled = og(in, "characterization_injection").(bool)
+		tc := ToolsText
+		if prov == Qwen3_5_9B || prov == ChatGPT {
+			tc = ToolsNative
+		}
+		got, _ := SystemPrompt(text, Inputs{
+			Context:     ctx,
+			Tools:       toTools(og(toolSets, og(in, "tools").(string))),
+			Flags:       toFlags(og(in, "command_flags")),
+			ToolCalling: tc,
+		}, ch)
+		if want := og(fx, "system_prompt").(string); got != want {
+			t.Errorf("%s system_prompt %s", file, firstDiff(got, want))
+		} else {
+			matched++
+		}
+	}
+	t.Logf("G1 built-ins: %d/88 fixtures byte-exact", matched)
+}
+
+func TestBuiltins(t *testing.T) {
+	want := []string{ChatGPT, Qwen3_14B, Qwen3_5_9B, Qwen3_8B}
+	sort.Strings(want)
+	if got := BuiltinNames(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("BuiltinNames = %v, want %v", got, want)
+	}
+	for _, n := range want {
+		text, ok := Builtin(n)
+		if !ok {
+			t.Fatalf("Builtin(%q) missing", n)
+		}
+		if err := Validate(text); err != nil {
+			t.Errorf("%s: %v", n, err)
+		}
+		if strings.Contains(text, "{terminology}") {
+			t.Errorf("%s contains {terminology}", n)
+		}
+	}
+	if _, ok := Builtin("nope"); ok {
+		t.Error("Builtin(nope) found")
+	}
+}
+
 // _blocks.json: the generated rules.go constants equal every core_rules str constant.
 func TestRulesConstantsEqualPython(t *testing.T) {
 	consts := og(loadFixture(t, "_blocks.json"), "constants").(*pyjson.Object)
