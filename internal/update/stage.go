@@ -234,6 +234,7 @@ func Stage(ctx context.Context, o StageOptions) (*Marker, error) {
 	if m.GooseBefore, err = gooseVersions(ctx, p.Home, files); err != nil {
 		return fail(err)
 	}
+	m.SnapshotAt = time.Now().UTC()
 	for _, f := range files {
 		snap, err := Snapshot(ctx, p.Home, f, p.BackupsDir(), o.Current)
 		if err != nil {

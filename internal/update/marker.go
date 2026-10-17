@@ -99,10 +99,14 @@ type Marker struct {
 	// file: a rollback restores a snapshot only when these changed (migrations ran).
 	GooseBefore map[string]map[string][]int64 `json:"goose_before,omitempty"`
 	// Attempts counts starts of the new version that haven't passed the gate.
-	Attempts  int       `json:"attempts"`
-	Reason    string    `json:"reason,omitempty"`
-	StagedAt  time.Time `json:"staged_at"`
-	SwappedAt time.Time `json:"swapped_at,omitzero"`
+	Attempts int       `json:"attempts"`
+	Reason   string    `json:"reason,omitempty"`
+	StagedAt time.Time `json:"staged_at"`
+	// SnapshotAt is when Stage began the database snapshots: a rollback that restores one
+	// discards what was written since. Markers staged by older versions lack it (StagedAt is
+	// just before).
+	SnapshotAt time.Time `json:"snapshot_at,omitzero"`
+	SwappedAt  time.Time `json:"swapped_at,omitzero"`
 	// By is who started it: "cli" or "admin".
 	By string `json:"by,omitempty"`
 	// FromFinishesRestore: the From binary (the one a rollback restores) finishes a rollback a
@@ -113,12 +117,15 @@ type Marker struct {
 
 // Result is updates/last-upgrade.json.
 type Result struct {
-	Outcome    string    `json:"outcome"`
-	From       string    `json:"from_version"`
-	To         string    `json:"to_version"`
-	Reason     string    `json:"reason,omitempty"`
-	DBRestored bool      `json:"db_restored,omitempty"`
-	At         time.Time `json:"at"`
+	Outcome    string `json:"outcome"`
+	From       string `json:"from_version"`
+	To         string `json:"to_version"`
+	Reason     string `json:"reason,omitempty"`
+	DBRestored bool   `json:"db_restored,omitempty"`
+	// DataSince is set with DBRestored: the snapshot's time, so everything written since then
+	// (the old version's last writes and the new version's) was rolled back.
+	DataSince time.Time `json:"data_since,omitzero"`
+	At        time.Time `json:"at"`
 }
 
 // ReadMarker returns the in-progress upgrade, nil when there is none.

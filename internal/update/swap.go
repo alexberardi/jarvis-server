@@ -244,6 +244,10 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 			return nil, fmt.Errorf("update: restore the database snapshot %s: %w", snap, err)
 		}
 		res.DBRestored = true
+		res.DataSince = m.SnapshotAt
+		if res.DataSince.IsZero() {
+			res.DataSince = m.StagedAt
+		}
 	}
 	if err := finish(p, res); err != nil {
 		return nil, err
