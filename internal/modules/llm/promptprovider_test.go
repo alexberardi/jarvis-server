@@ -1,10 +1,13 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -42,6 +45,9 @@ func TestLivePromptProvider(t *testing.T) {
 	if p := m.LivePromptProvider(ctx); p != "" {
 		t.Fatalf("no live model: %q", p)
 	}
+	if tr := m.LiveModelTraits(ctx); tr != (ModelTraits{}) {
+		t.Fatalf("no live model: %+v", tr)
+	}
 	store := m.stack.Manager.Store
 	e, _ := models.CatalogEntry("qwen3-8b")
 	if err := store.Upsert(ctx, models.Model{ID: "qwen3-8b", Kind: "llm", Display: "q", CatalogID: e.ID, Path: "/x", State: models.StateReady}); err != nil {
@@ -53,6 +59,11 @@ func TestLivePromptProvider(t *testing.T) {
 	if p := m.LivePromptProvider(ctx); p == "" || p != e.PromptProvider {
 		t.Fatalf("catalog provider: %q want %q", p, e.PromptProvider)
 	}
+	// Its catalog entry pins the template llama-server renders with (the file at /x is not read).
+	want := ModelTraits{PromptProvider: e.PromptProvider, ToolCalling: "native", ToolCallingFrom: "template", Thinking: true, Local: true}
+	if tr := m.LiveModelTraits(ctx); tr != want {
+		t.Fatalf("catalog model traits: %+v want %+v", tr, want)
+	}
 	// The installed row's own provider wins (set at install, or by hand for a registered file).
 	if err := store.Upsert(ctx, models.Model{ID: "mine", Kind: "llm", Display: "m", Path: "/y", PromptProvider: "Qwen3_14B_Compressed", State: models.StateReady}); err != nil {
 		t.Fatal(err)
@@ -63,6 +74,62 @@ func TestLivePromptProvider(t *testing.T) {
 	if p := m.LivePromptProvider(ctx); p != "Qwen3_14B_Compressed" {
 		t.Fatalf("row provider: %q", p)
 	}
+	// No template found (no file at /y): tool calling unknown.
+	want = ModelTraits{PromptProvider: "Qwen3_14B_Compressed", Local: true}
+	if tr := m.LiveModelTraits(ctx); tr != want {
+		t.Fatalf("no template traits: %+v want %+v", tr, want)
+	}
+
+	// A hand-registered GGUF whose own template renders no tools.
+	gguf := writeTestGGUF(t, "{% for m in messages %}{{ m.content }}{% endfor %} You may use tools.")
+	if err := store.Upsert(ctx, models.Model{ID: "plain", Kind: "llm", Display: "p", Path: gguf, State: models.StateReady}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.settings.Set(ctx, "llm.live.model", "plain", settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
+	want = ModelTraits{ToolCalling: "text", ToolCallingFrom: "template", Local: true}
+	if tr := m.LiveModelTraits(ctx); tr != want {
+		t.Fatalf("gguf traits: %+v want %+v", tr, want)
+	}
+
+	// A remote live label calls tools natively, whatever llm.live.model says.
+	for k, v := range map[string]string{"llm.live.engine": "remote", "llm.live.remote_url": "https://api.example.com/v1"} {
+		if err := m.settings.Set(ctx, k, v, settings.Scope{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if st := m.LabelStates(ctx)["live"]; st != "remote" {
+		t.Fatalf("live label state %q, want remote", st)
+	}
+	want = ModelTraits{ToolCalling: "native", ToolCallingFrom: "remote"}
+	if tr := m.LiveModelTraits(ctx); tr != want {
+		t.Fatalf("remote traits: %+v want %+v", tr, want)
+	}
+}
+
+// writeTestGGUF writes a minimal v3 GGUF header (no tensors) carrying tpl as its
+// tokenizer.chat_template.
+func writeTestGGUF(t *testing.T, tpl string) string {
+	t.Helper()
+	var b bytes.Buffer
+	le := func(v any) { binary.Write(&b, binary.LittleEndian, v) }
+	str := func(s string) { le(uint64(len(s))); b.WriteString(s) }
+	b.WriteString("GGUF")
+	le(uint32(3))
+	le(uint64(0)) // tensors
+	le(uint64(2)) // KVs
+	str("general.alignment")
+	le(uint32(4)) // u32
+	le(uint32(32))
+	str("tokenizer.chat_template")
+	le(uint32(8)) // string
+	str(tpl)
+	p := filepath.Join(t.TempDir(), "plain.gguf")
+	if err := os.WriteFile(p, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // The admin setup state reads label states and the hardware summary in process (A3).
