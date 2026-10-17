@@ -261,9 +261,10 @@ func TestSignedOutComputerRefusals(t *testing.T) {
 }
 
 // Mobile (and web) chat keep their JWT user even when the target node is someone else's
-// desktop agent.
+// desktop agent (which only a household admin may chat to, besides its owner).
 func TestChatToSomeonesDesktopKeepsTheJWTUser(t *testing.T) {
 	ce := newChatEnv(t, prompts.Qwen3_5_9B)
+	ce.auth.addUser(7, voiceHH, "admin")
 	ce.makeDesktop(8) // sam's computer
 	cid := ce.warm("tok-7")
 	conv := ce.m.convs.get(cid)
