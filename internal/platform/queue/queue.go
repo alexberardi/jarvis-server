@@ -103,12 +103,16 @@ type Queue struct {
 	// PollInterval bounds how long a newly due job (delayed, retried, or enqueued by another
 	// process) waits before a worker notices it. Enqueue in this process wakes workers at once.
 	PollInterval time.Duration
+	// Retention is how long finished jobs (done, failed, cancelled) are kept before the
+	// purger deletes them; 0 or less keeps them forever. PurgeInterval is how often it runs.
+	Retention     time.Duration
+	PurgeInterval time.Duration
 
 	mu       sync.Mutex
 	handlers map[string]Handler
 	wake     map[string]chan struct{}
 	started  bool
-	// running tracks the workers and the reaper so shutdown can wait for them to let go of
+	// running tracks the workers, the reaper and the purger so shutdown can wait for them to let go of
 	// the database (Windows can't delete a file a connection still holds).
 	running sync.WaitGroup
 }
@@ -117,9 +121,11 @@ type Queue struct {
 func New(d *db.DB, log *slog.Logger) *Queue {
 	return &Queue{
 		db: d, log: log, now: time.Now,
-		PollInterval: time.Second,
-		handlers:     map[string]Handler{},
-		wake:         map[string]chan struct{}{},
+		PollInterval:  time.Second,
+		Retention:     7 * 24 * time.Hour,
+		PurgeInterval: time.Hour,
+		handlers:      map[string]Handler{},
+		wake:          map[string]chan struct{}{},
 	}
 }
 
@@ -315,9 +321,12 @@ func (q *Queue) Start(ctx context.Context) {
 		}
 	}
 	q.running.Go(func() { q.reaper(ctx) })
+	if q.Retention > 0 {
+		q.running.Go(func() { q.purger(ctx) })
+	}
 }
 
-// Wait blocks until the workers and the reaper started by Start have returned (after its
+// Wait blocks until the workers, the reaper and the purger started by Start have returned (after its
 // context is cancelled): no job is running and no query is in flight.
 func (q *Queue) Wait() { q.running.Wait() }
 
@@ -455,6 +464,25 @@ func (q *Queue) reaper(ctx context.Context) {
 	}
 }
 
+// purger deletes finished jobs older than Retention, at start and then every PurgeInterval,
+// so platform_jobs (payload and result blobs, a row per scheduler fire) doesn't grow forever.
+func (q *Queue) purger(ctx context.Context) {
+	t := time.NewTicker(q.PurgeInterval)
+	defer t.Stop()
+	for {
+		if n, err := q.Purge(ctx, q.now().Add(-q.Retention)); err != nil && ctx.Err() == nil {
+			q.log.Error("queue: purge finished jobs", "err", err)
+		} else if n > 0 {
+			q.log.Info("queue: purged finished jobs", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
 // recoverOrphans requeues the jobs a crash left running (see Start), failing those already
 // past their last attempt. It returns how many rows it touched.
 func (q *Queue) recoverOrphans(ctx context.Context) (int64, error) {
@@ -497,13 +525,27 @@ func (q *Queue) ReapExpired(ctx context.Context) error {
 	})
 }
 
-// Purge deletes finished jobs (done, failed, cancelled) last updated before cutoff.
+// purgeBatch caps the rows one purge statement deletes, so the first purge on an old install
+// doesn't hold the write lock for one long DELETE.
+const purgeBatch = 1000
+
+// Purge deletes finished jobs (done, failed, cancelled) last updated before cutoff, in
+// batches of purgeBatch, and returns how many it deleted.
 func (q *Queue) Purge(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := q.db.Write.ExecContext(ctx, `
-		DELETE FROM platform_jobs
-		WHERE state IN ('done', 'failed', 'cancelled') AND updated_at < ?`, ms(cutoff))
-	if err != nil {
-		return 0, err
+	var total int64
+	for {
+		res, err := q.db.Write.ExecContext(ctx, `
+			DELETE FROM platform_jobs WHERE id IN (
+				SELECT id FROM platform_jobs
+				WHERE state IN ('done', 'failed', 'cancelled') AND updated_at < ?
+				LIMIT ?)`, ms(cutoff), purgeBatch)
+		if err != nil {
+			return total, err
+		}
+		n, err := res.RowsAffected()
+		total += n
+		if err != nil || n < purgeBatch {
+			return total, err
+		}
 	}
-	return res.RowsAffected()
 }
