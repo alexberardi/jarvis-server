@@ -226,6 +226,53 @@ func TestShippedScenariosLoad(t *testing.T) {
 	}
 }
 
+// The pasta timer has 263 s left: any fair rounding passes (#93), a wrong one does not.
+func TestTimeLeftReplyExpectation(t *testing.T) {
+	scs, err := LoadScenarios([]string{"scenarios/timers.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(scs, func(s Scenario) bool { return s.Name == "timer: how much time is left" })
+	if i < 0 {
+		t.Fatal("scenario not found")
+	}
+	e := scs[i].Turns[0].Expect
+	check := func(reply string) []string {
+		return e.Check(TurnLog{NodeCalls: []CallLog{{Name: "check_timers"}}, Reply: reply, Stop: "complete"})
+	}
+	for _, r := range []string{
+		"There are about 4 and a half minutes left on the pasta timer.",
+		"About four and a half minutes left.",
+		"Your pasta timer has 4 minutes and 23 seconds left.",
+		"About 4.4 minutes to go.",
+		"Just over four minutes left.",
+		"4:23 remaining.",
+		"263 seconds left.",
+		"About 4.5 minutes left.",
+		"About 4.3 minutes left.",
+		"About 4 mins left.",
+		"4 min 23 sec left.",
+	} {
+		if f := check(r); len(f) != 0 {
+			t.Errorf("%q: %v", r, f)
+		}
+	}
+	for _, r := range []string{
+		"About 5 minutes left on the pasta timer.",
+		"Three minutes left.",
+		"About 14 minutes left.",
+		"4 seconds left.",
+		"About 3 and a half minutes left.",
+		"About 5.5 minutes left.",
+		"About 5 mins left.",
+		"5 minutes left.",
+	} {
+		if f := check(r); len(f) == 0 {
+			t.Errorf("%q: want a failure", r)
+		}
+	}
+}
+
 func TestLoadToolSet(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
