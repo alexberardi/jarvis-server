@@ -536,7 +536,7 @@ func extractNamed(archive, dst, want string) error {
 			break
 		}
 	}
-	if err := out.Close(); err != nil {
+	if err := errors.Join(out.Sync(), out.Close()); err != nil {
 		return err
 	}
 	if !found {
