@@ -162,14 +162,15 @@ func TestPassThroughIsAnAllowList(t *testing.T) {
 	mux, targets := gatewayMux(t)
 	su := []string{"Authorization", "Bearer root"}
 	for _, c := range []struct{ method, path string }{
-		{"POST", "/api/config/services"},           // registry writes go through the BFF
-		{"DELETE", "/api/config/services/x"},       // ditto
-		{"GET", "/api/auth/admin/app-clients"},     // admin-token routes are not exposed
-		{"GET", "/api/admin/users/1"},              // only the listed superuser views
-		{"POST", "/api/llm/v1/chat/completions"},   // not the inference surface
-		{"GET", "/api/cc/api/v0/admin/traces"},     // traces come from the BFF
-		{"POST", "/api/cc/api/v0/nodes/pairings"},  // starting a pairing is the computer's, on cc
-		{"GET", "/api/llm/v1/models/catalog/../x"}, // cleaned by the mux, then not listed
+		{"POST", "/api/config/services"},                // registry writes go through the BFF
+		{"DELETE", "/api/config/services/x"},            // ditto
+		{"GET", "/api/auth/admin/app-clients"},          // admin-token routes are not exposed
+		{"GET", "/api/admin/users/1"},                   // only the listed superuser views
+		{"POST", "/api/llm/v1/chat/completions"},        // not the inference surface
+		{"POST", "/api/llm/openai/v1/chat/completions"}, // nor its OpenAI-stream twin
+		{"GET", "/api/cc/api/v0/admin/traces"},          // traces come from the BFF
+		{"POST", "/api/cc/api/v0/nodes/pairings"},       // starting a pairing is the computer's, on cc
+		{"GET", "/api/llm/v1/models/catalog/../x"},      // cleaned by the mux, then not listed
 	} {
 		// The mux redirects an unclean path (301 before Go 1.27, 307 since); either way it never
 		// reaches a module, which the targets check below proves.

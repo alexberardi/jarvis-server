@@ -266,7 +266,7 @@ func TestValidation(t *testing.T) {
 
 func TestAppAuth(t *testing.T) {
 	e := setup(t)
-	for _, p := range []string{"/v1/chat/completions", "/v1/chat/completions/cancel/x", "/v1/embeddings", "/internal/queue/enqueue"} {
+	for _, p := range []string{"/v1/chat/completions", "/openai/v1/chat/completions", "/v1/chat/completions/cancel/x", "/v1/embeddings", "/internal/queue/enqueue"} {
 		if r := e.do("POST", p, map[string]any{}, nil); r.status != 401 || r.json(t)["detail"] != "Missing app credentials" {
 			t.Errorf("%s no creds: %d %s", p, r.status, r.body)
 		}
@@ -549,6 +549,25 @@ func TestStreamToolCalls(t *testing.T) {
 	}
 	if e.engine.last()["tools"] == nil {
 		t.Fatal("tools dropped on the stream path")
+	}
+}
+
+// TestStreamLegacyBytes pins the legacy stream byte for byte (captured before the standard
+// OpenAI route was added): deltas, the done frame with tool calls, and an error frame.
+func TestStreamLegacyBytes(t *testing.T) {
+	e := setup(t)
+	e.engine.script(fakeReply{Content: "Hi café ", ToolCalls: []map[string]any{{"id": "call_9", "function": map[string]any{"name": "f", "arguments": `{"a":1}`}}}})
+	r := e.post("/v1/chat/completions", chat("x", map[string]any{"stream": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "f"}}}}))
+	want := "data: {\"delta\": \"Hi \"}\n\n" +
+		"data: {\"delta\": \"caf\\u00e9 \"}\n\n" +
+		"data: {\"done\": true, \"content\": \"Hi caf\\u00e9 \", \"usage\": {\"prompt_tokens\": 9, \"completion_tokens\": 5, \"total_tokens\": 14}, " +
+		"\"tool_calls\": [{\"id\": \"call_9\", \"type\": \"function\", \"function\": {\"name\": \"f\", \"arguments\": \"{\\\"a\\\":1}\"}}], \"finish_reason\": \"tool_calls\"}\n\n"
+	if string(r.body) != want {
+		t.Fatalf("legacy stream bytes changed:\n got %q\nwant %q", r.body, want)
+	}
+	e.engine.script(fakeReply{Status: 500, Body: "boom"})
+	if r := e.post("/v1/chat/completions", chat("x", map[string]any{"stream": true})); string(r.body) != "data: {\"error\": \"HTTP 500: boom\"}\n\n" {
+		t.Fatalf("legacy error bytes changed: %q", r.body)
 	}
 }
 
