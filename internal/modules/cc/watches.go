@@ -11,9 +11,9 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
-// Watches (docs/autonomy/PLAN.md §2): the store, the household switch, firing (watches_fire.go)
-// and the hourly expiry sweep. Checks and the voice tools come later; nothing reads max_active or
-// min_cadence_minutes yet.
+// Watches (docs/autonomy/PLAN.md §2): the store, the household switch, firing (watches_fire.go),
+// the signal source (watches_signal.go) and the hourly expiry sweep. Web checks and the voice
+// tools come later; nothing reads max_active or min_cadence_minutes yet.
 const (
 	settingWatchesEnabled    = "watches.enabled"
 	settingWatchesMaxActive  = "watches.max_active"
@@ -32,9 +32,11 @@ func watchDefinitions() []settings.Definition {
 	}
 }
 
-// registerWatches sets up the watches store and the expiry sweep's job. It has no routes.
+// registerWatches sets up the watches store, the signal source (watches_signal.go) and the expiry
+// sweep's job. It has no routes.
 func (m *Module) registerWatches(_ *http.ServeMux) {
 	m.watches = &watches.Store{DB: m.deps.DB, Now: m.now}
+	m.registerWatchSignals()
 	if m.deps.Queue != nil {
 		m.deps.Queue.Register(watchSweepJob, queue.Handler{Run: func(ctx context.Context, _ queue.Job) ([]byte, error) {
 			return nil, m.sweepWatches(ctx)

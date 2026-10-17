@@ -71,10 +71,14 @@ func TestSignalJobsOnTheScheduler(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.do("POST", "/api/v0/mobile/presence", map[string]any{"household_id": "hh1", "state": "away"}, bearer(tok)).want(200)
-	var jobs int
-	d.Read.QueryRow(`SELECT COUNT(*) FROM platform_jobs WHERE type = ?`, signalReactionJob).Scan(&jobs)
-	if jobs != 1 {
-		t.Fatalf("reaction jobs %d", jobs)
+	// One job per reaction: the kind's automation and the "*" watch reaction.
+	for _, r := range []string{"automation", "watch"} {
+		var jobs int
+		d.Read.QueryRow(`SELECT COUNT(*) FROM platform_jobs WHERE type = ? AND json_extract(payload, '$.reaction') = ?`,
+			signalReactionJob, r).Scan(&jobs)
+		if jobs != 1 {
+			t.Fatalf("%s reaction jobs %d", r, jobs)
+		}
 	}
 
 	node := e.createNode("n1", "hh1")
