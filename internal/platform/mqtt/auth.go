@@ -144,6 +144,12 @@ func (h *authHook) OnConnectAuthenticate(cl *mochi.Client, pk packets.Packet) bo
 			return false
 		}
 	}
+	// mochi publishes the Last Will without an ACL check, so its topic must pass the
+	// publish rules here.
+	if pk.Connect.WillFlag && !canWrite(p, pk.Connect.WillTopic) {
+		h.reject(cl, user, "will topic not allowed: "+pk.Connect.WillTopic)
+		return false
+	}
 	h.mu.Lock()
 	h.principals[cl.ID] = principalEntry{p: p, cl: cl}
 	h.mu.Unlock()
@@ -169,16 +175,25 @@ func (h *authHook) OnACLCheck(cl *mochi.Client, topic string, write bool) bool {
 	if !ok {
 		return false
 	}
+	if write {
+		return canWrite(p, topic)
+	}
+	switch p.Kind {
+	case Server, Anonymous:
+		return true
+	}
+	return CanSubscribe(p.NodeID, topic)
+}
+
+// canWrite reports whether p may publish to topic, directly or through its Last Will.
+func canWrite(p Principal, topic string) bool {
 	switch p.Kind {
 	case Server:
 		return true
 	case Anonymous:
-		return !write || strings.HasPrefix(topic, AnonymousPublishPrefix)
+		return strings.HasPrefix(topic, AnonymousPublishPrefix)
 	}
-	if write {
-		return CanPublish(p.NodeID, topic)
-	}
-	return CanSubscribe(p.NodeID, topic)
+	return CanPublish(p.NodeID, topic)
 }
 
 // OnPublish strips the retain flag from node publishes: a retained response would be

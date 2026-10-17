@@ -9,7 +9,9 @@ we chose both: an anonymous client may **subscribe to any topic** (watching traf
 flag is for) but **publish only under `jarvis/dev/`**, which nothing in jarvisd or the nodes
 listens to. A node that needs to publish responses connects with its own credential. jarvisd
 logs a WARN at start naming both listener addresses, and `jarvisd doctor` (and the admin's
-doctor) reports a `mqtt anonymous` warning while it is on.
+doctor) reports a `mqtt anonymous` warning while it is on. A Last Will topic goes through the
+same publish rules: a CONNECT whose will the client could not publish itself is refused (this
+also stops a node placing a will on another node's topics).
 
 The WebSocket listener (9883, published through the Cloudflare tunnel on prod) now refuses a
 browser page from another site with 403. It admits a request without an `Origin` (nodes are not

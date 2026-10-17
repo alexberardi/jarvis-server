@@ -195,3 +195,35 @@ func TestOriginSameHost(t *testing.T) {
 		}
 	}
 }
+
+// A Last Will is published by the broker without an ACL check, so its topic is checked
+// against the publish rules at CONNECT.
+func TestWillTopicFollowsPublishRules(t *testing.T) {
+	b := startBroker(t, true)
+	seen := collect(t, b)
+
+	refused := []connectOpts{
+		{clientID: "anon-will", clean: true, willTopic: "jarvis/nodes/n1/commands"},
+		{clientID: "anon-will-dev", clean: true, willTopic: "jarvis/dev"},
+	}
+	n1 := node("n1")
+	n1.willTopic = "jarvis/nodes/n2/commands"
+	refused = append(refused, n1)
+	for _, o := range refused {
+		c, ack := dial(t, b, o)
+		if ack.ReasonCode == 0 {
+			t.Fatalf("%s with a will on %s: connected", o.clientID, o.willTopic)
+		}
+		c.expectClosed()
+	}
+
+	c, ack := dial(t, b, connectOpts{clientID: "anon-dev", clean: true, willTopic: "jarvis/dev/x"})
+	if ack.ReasonCode != 0 {
+		t.Fatalf("anonymous with a will on jarvis/dev/x: connack %#x", ack.ReasonCode)
+	}
+	_ = c.conn.Close() // ungraceful: the broker sends the will
+	waitFor(t, func() bool { return len(seen()) > 0 })
+	if got := seen(); fmt.Sprint(got) != "[jarvis/dev/x]" {
+		t.Fatalf("routed %v, want only [jarvis/dev/x]", got)
+	}
+}
