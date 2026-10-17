@@ -110,6 +110,16 @@ type ServerTool interface {
 	Execute(ctx context.Context, call Call, turn Turn) (any, error)
 }
 
+// ConfirmFreeTool is implemented by server tools that may run in the background without a tap
+// when no household rule says otherwise (autonomy PLAN §1, A7): read-only lookups.
+type ConfirmFreeTool interface{ RunWithoutConfirmation() bool }
+
+// RunsWithoutConfirmation reports whether t implements ConfirmFreeTool and returns true.
+func RunsWithoutConfirmation(t ServerTool) bool {
+	c, ok := t.(ConfirmFreeTool)
+	return ok && c.RunWithoutConfirmation()
+}
+
 // Registry holds the registered server tools. It is safe for concurrent use.
 type Registry struct {
 	mu    sync.RWMutex
