@@ -450,6 +450,14 @@ func parseChat(o *pyjson.Object) (chatInput, []httpx.FieldError) {
 		}
 	}
 	r.ReasoningBudget = intPtr(c.optInt(o, "reasoning_budget", body))
+	if p, ok := c.str(o, "priority", false, body); ok {
+		switch p {
+		case PriorityLive, PriorityBackground:
+			r.Priority = p
+		default:
+			c.fail("literal_error", "Input should be 'live' or 'background'", p, at(body, "priority"))
+		}
+	}
 	r.Label = echoLabel(in.Model)
 	r.WantDateKeys = in.IncludeDateContext
 	in.Req = r

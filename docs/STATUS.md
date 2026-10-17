@@ -67,9 +67,9 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
 
 ### Autonomy (in parallel, worktrees): Custom Rules, watches, goals
 
-Plan: [autonomy/PLAN.md](autonomy/PLAN.md). Merges into `main` as each phase is ready, off by default. **Next: P0a.**
+Plan: [autonomy/PLAN.md](autonomy/PLAN.md). Merges into `main` as each phase is ready, off by default. **Next: P0b.**
 
-- [ ] **P0a** Live-first LLM admission; the LLM API takes a `priority`, and the harness tap sends `background`
+- [x] **P0a** Live-first LLM admission; the LLM API takes a `priority`, and the harness tap sends `background`
 - [ ] **P0b** `notifyGated`, `cc_autonomy_events`, the `policy` package (everything resolves to ask)
 - [ ] **P1** Custom Rules: `cc_tool_rules`, checks in errands and signal automations, autorun via rules, SDK `run_without_confirmation`
 - [ ] **P2** Watches v1: `web` and `signal` sources, deterministic conditions, voice tools

@@ -69,7 +69,7 @@ func TestTapPassesThroughAndLogsJSON(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(body) != reply || gotPath != "/v1/chat/completions" || gotBody != `{"model":"m","messages":[]}` {
+	if string(body) != reply || gotPath != "/v1/chat/completions" || gotBody != `{"priority":"background","model":"m","messages":[]}` {
 		t.Fatalf("passthrough: body %q path %q upstream body %q", body, gotPath, gotBody)
 	}
 	var e TapEntry
@@ -77,8 +77,50 @@ func TestTapPassesThroughAndLogsJSON(t *testing.T) {
 		t.Fatalf("log %q", b)
 	}
 	if e.Seq != 1 || e.Status != 200 || e.Reply.Reasoning != "think" || e.Reply.Finish != "tool_calls" ||
-		len(e.Reply.ToolCalls) != 1 || e.Reply.ToolCalls[0].Args()["minutes"] != 5.0 || string(e.Request) != `{"model":"m","messages":[]}` {
+		len(e.Reply.ToolCalls) != 1 || e.Reply.ToolCalls[0].Args()["minutes"] != 5.0 || string(e.Request) != `{"priority":"background","model":"m","messages":[]}` {
 		t.Fatalf("entry %+v", e)
+	}
+}
+
+func TestTapSendsBackgroundPriority(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer up.Close()
+	log := &syncBuf{}
+	tap := httptest.NewServer(&Tap{Upstream: func() (string, error) { return up.URL, nil }, Log: log})
+	defer tap.Close()
+
+	for i, c := range []struct{ path, in, want string }{
+		{"/v1/chat/completions", `{"model":"m","messages":[]}`, `{"priority":"background","model":"m","messages":[]}`},
+		{"/openai/v1/chat/completions", `{"priority":"live","model":"m"}`, `{"priority":"live","model":"m"}`},
+		{"/v1/chat/completions", `{}`, `{"priority":"background"}`},
+		{"/v1/embeddings", `{"input":"x"}`, `{"input":"x"}`},
+	} {
+		resp, err := http.Post(tap.URL+c.path, "application/json", strings.NewReader(c.in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		mu.Lock()
+		got := gotBody
+		mu.Unlock()
+		if got != c.want {
+			t.Errorf("%s %s: upstream got %s, want %s", c.path, c.in, got, c.want)
+		}
+		lines := bytes.Split(bytes.TrimSpace(log.wait(t, i+1)), []byte("\n"))
+		var e TapEntry
+		if err := json.Unmarshal(lines[i], &e); err != nil || string(e.Request) != c.want {
+			t.Errorf("%s %s: logged %s, want %s", c.path, c.in, e.Request, c.want)
+		}
 	}
 }
 
