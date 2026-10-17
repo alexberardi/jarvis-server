@@ -329,7 +329,7 @@ func (q *Queue) worker(ctx context.Context, jobType string, h Handler) {
 	defer t.Stop()
 	for {
 		for {
-			job, ok, err := q.claim(ctx, jobType, h)
+			job, ok, err := q.claimIfReady(ctx, jobType, h)
 			if err != nil {
 				if ctx.Err() != nil {
 					return
@@ -349,6 +349,25 @@ func (q *Queue) worker(ctx context.Context, jobType string, h Handler) {
 		case <-t.C:
 		}
 	}
+}
+
+// claimIfReady claims a job only if a read finds one due: an idle worker's poll must not take
+// the single write connection, where it would queue ahead of everyone else's writes. The read
+// sees every committed job, so it can only be wrong the other way (another worker claims the
+// job first), and then claim finds nothing.
+func (q *Queue) claimIfReady(ctx context.Context, jobType string, h Handler) (Job, bool, error) {
+	var one int
+	err := q.db.Read.QueryRowContext(ctx, `
+		SELECT 1 FROM platform_jobs
+		WHERE type = ? AND state = 'queued' AND run_at <= ?
+		LIMIT 1`, jobType, ms(q.now())).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, false, nil
+	}
+	if err != nil {
+		return Job{}, false, err
+	}
+	return q.claim(ctx, jobType, h)
 }
 
 func (q *Queue) claim(ctx context.Context, jobType string, h Handler) (Job, bool, error) {
@@ -444,7 +463,7 @@ func (q *Queue) reaper(ctx context.Context) {
 	t := time.NewTicker(q.PollInterval)
 	defer t.Stop()
 	for {
-		if err := q.ReapExpired(ctx); err != nil && ctx.Err() == nil {
+		if err := q.reapIfExpired(ctx); err != nil && ctx.Err() == nil {
 			q.log.Error("queue: reap", "err", err)
 		}
 		select {
@@ -479,6 +498,23 @@ func (q *Queue) recoverOrphans(ctx context.Context) (int64, error) {
 		return nil
 	})
 	return n, err
+}
+
+// reapIfExpired runs ReapExpired only if a read finds an expired lease, so the reaper's
+// poll doesn't take the write lock (BEGIN IMMEDIATE) while nothing has expired.
+func (q *Queue) reapIfExpired(ctx context.Context) error {
+	var one int
+	err := q.db.Read.QueryRowContext(ctx, `
+		SELECT 1 FROM platform_jobs
+		WHERE state = 'running' AND lease_until < ?
+		LIMIT 1`, ms(q.now())).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return q.ReapExpired(ctx)
 }
 
 // ReapExpired handles expired leases once. Exported for tests.

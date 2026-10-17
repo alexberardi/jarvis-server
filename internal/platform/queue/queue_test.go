@@ -485,3 +485,29 @@ func TestCrashThenBootRunsOrphan(t *testing.T) {
 		t.Fatalf("%+v", i)
 	}
 }
+
+// An idle queue must not touch the single write connection: claims and reaps queue on it
+// ahead of everyone else's writes (#120). Hold that connection while the workers and the
+// reaper poll; any of them reaching for it shows up as a wait.
+func TestIdleQueueLeavesTheWriterAlone(t *testing.T) {
+	q, d := newQueue(t)
+	for _, typ := range []string{"a", "b", "c"} {
+		q.Register(typ, Handler{Concurrency: 2, Run: func(context.Context, Job) ([]byte, error) { return nil, nil }})
+	}
+	// Finished and future jobs don't count as work to claim or reap.
+	if _, err := q.Enqueue(context.Background(), "a", nil, Options{RunAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	start(t, q)
+	conn, err := d.Write.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := d.Write.Stats().WaitCount
+	time.Sleep(20 * q.PollInterval)
+	waits := d.Write.Stats().WaitCount - before
+	conn.Close()
+	if waits != 0 {
+		t.Fatalf("idle queue waited for the writer %d times, want 0", waits)
+	}
+}
