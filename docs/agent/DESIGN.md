@@ -99,7 +99,11 @@ CC feeds the output back to the LLM and streams the answer to the app
   jarvisd's `localhost` rows rewritten to the host the agent reached config on.
 - Heartbeat: `POST /admin/nodes/heartbeat` every 60 s with
   `version_info.install_mode = "desktop-agent"` (how the app can tell it from a Pi) and
-  `needs_k2`: true until the node has its settings key (§16).
+  `needs_k2`: true until the node has its settings key (§16). It also sends `name` from
+  node.json when set (#62), so editing the name there (or re-enrolling with `--name`) relabels
+  the computer in pickers after the agent restarts. A hostname change alone doesn't: node.json
+  keeps the name it was enrolled with, and the agent never falls back to the hostname (that
+  would overwrite a name the app gave a node enrolled without one).
 - Other verbs (`tts`, `action`, `routine`, ...) are logged and ignored, so CC times out as for
   an offline node. (Open question 1.)
 - Outputs follow the Pi convention: `success`, and on failure `error` plus an `error_code`

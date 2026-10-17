@@ -78,3 +78,27 @@ func TestBeatDeviceID(t *testing.T) {
 		t.Fatalf("an empty device id was sent: %v", sent)
 	}
 }
+
+// name goes out only when node.json has one, so jarvisd can follow a renamed computer; an
+// agent without one sends the old body and its registered name stays.
+func TestBeatName(t *testing.T) {
+	var sent map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = nil
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+	c := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k1", ConfigURL: srv.URL})
+	r := &Runner{Creds: Creds{NodeID: "n1", Name: "studio"}}
+	if err := r.heartbeat(context.Background(), c); err != nil || sent["name"] != "studio" {
+		t.Fatalf("name = %v, %v", sent["name"], err)
+	}
+	r.Creds.Name = ""
+	if err := r.heartbeat(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := sent["name"]; has {
+		t.Fatalf("an empty name was sent: %v", sent)
+	}
+}

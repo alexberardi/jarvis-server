@@ -81,6 +81,8 @@ type NodeRegistry interface {
 	// NodeNames is each known node's registered name, by node id (ids auth doesn't know are
 	// absent). It is read only, for the node list.
 	NodeNames(ctx context.Context, nodeIDs []string) (map[string]string, error)
+	// RenameNode sets an active node's registered name (its heartbeat reports a new one).
+	RenameNode(ctx context.Context, nodeID, name string) error
 }
 
 // MQTTOptions configures the embedded broker. Empty addresses disable a listener; CC still

@@ -319,7 +319,11 @@ Liveness writes never raise.
 
 ### 3.8 Heartbeat and updates
 
-The heartbeat (`admin.py:296-342`) sends `{version_info:{version,install_mode,git_sha}, is_busy, protocols[], needs_k2, thread_status?, memory?}`. Unknown fields are ignored. All fields are optional; `protocols` is stored as JSON text. The handler then:
+The heartbeat (`admin.py:296-342`) sends `{version_info:{version,install_mode,git_sha}, is_busy, protocols[], needs_k2, thread_status?, memory?}`. Unknown fields are ignored. All fields are optional; `protocols` is stored as JSON text.
+
+**Go addition (#62): `name`.** A node's heartbeat may carry `name` (the desktop agent sends its node.json name). jarvisd trims it and, when it is 1–100 characters, sets that node's `auth_node_registrations.name` (auth's in-process `RenameNode`; only the node the key authenticated, only an active registration, no write when unchanged). An empty, whitespace-only or overlong name is ignored with a 200, as a malformed `device_id` is, so a bad node.json never breaks the heartbeat; a non-string `name` is the usual validation error. A beat without `name` (legacy, a Pi) leaves the name alone. The response is unchanged.
+
+The handler then:
 
 1. `reconcile_open_task` (`node_updates.py:342-394`) looks at the newest open update task:
    - If the reported version equals the target → `success`.

@@ -164,6 +164,15 @@ func (a *fakeAuth) NodeNames(_ context.Context, ids []string) (map[string]string
 	return out, nil
 }
 
+func (a *fakeAuth) RenameNode(_ context.Context, id, name string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if n, ok := a.nodes[id]; ok && n.active {
+		n.name = name
+	}
+	return nil
+}
+
 func (a *fakeAuth) DeactivateNode(_ context.Context, id string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -185,6 +185,9 @@ type Beat struct {
 	// DeviceID is the computer's stable identity (internal/agent/deviceid), so a node enrolled
 	// before registration carried it gets it on file. "" leaves it out.
 	DeviceID string
+	// Name is the node's name from node.json, so a renamed computer's label follows it (#62).
+	// "" leaves it out and the registered name stays.
+	Name string
 	// Capabilities is reported as is, e.g. {"browser_extension": "connected"}. Nil leaves it out.
 	Capabilities map[string]any
 	// NeedsK2 asks the app to provision the settings key (K2, DESIGN §16): the mobile app then
@@ -215,7 +218,7 @@ type BeatReply struct {
 // the app can tell a desktop agent from a Pi, and jarvisd only offers remote updates to
 // "tarball" installs (cc/updates.go), so the desktop agent must not claim it.
 // version_info.runtime tells a Go node from the Python one (go-pi-node.md §8 Q6). node_kind and
-// capabilities are newer: a jarvisd that predates them ignores them.
+// capabilities (and name) are newer: a jarvisd that predates them ignores them.
 func (c *CC) Heartbeat(ctx context.Context, b Beat) error {
 	_, err := c.Beat(ctx, b)
 	return err
@@ -233,6 +236,9 @@ func (c *CC) Beat(ctx context.Context, b Beat) (BeatReply, error) {
 	}
 	if b.DeviceID != "" {
 		body["device_id"] = b.DeviceID
+	}
+	if b.Name != "" {
+		body["name"] = b.Name
 	}
 	if b.Capabilities != nil {
 		body["capabilities"] = b.Capabilities

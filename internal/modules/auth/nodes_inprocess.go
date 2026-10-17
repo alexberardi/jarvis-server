@@ -30,6 +30,15 @@ func (m *Module) DeactivateNode(ctx context.Context, nodeID string) error {
 	return nil
 }
 
+// RenameNode sets an active node's registered name, for command-center's heartbeat (the
+// computer was renamed). The caller has authenticated the node and bounds the name; an
+// unknown or deactivated node, or the same name, writes nothing.
+func (m *Module) RenameNode(ctx context.Context, nodeID, name string) error {
+	_, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE auth_node_registrations SET name = ?, updated_at = ?
+		WHERE node_id = ? AND is_active = 1 AND name <> ?`, name, dbTime(now()), nodeID, name)
+	return err
+}
+
 // NodeNames is each registered node's name, by node id, for command-center's node list. Ids
 // auth doesn't know are absent; deactivated registrations still answer (the list can include
 // inactive nodes).

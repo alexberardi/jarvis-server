@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -62,4 +63,53 @@ func TestSmartHomeConfigNodeName(t *testing.T) {
 			t.Fatalf("%v: name = %v (present %v)", o["node_id"], n, ok)
 		}
 	}
+}
+
+// #62: a heartbeat's name renames that node's registration (and so its label in the node
+// list). A legacy beat without one, or an empty or overlong one, leaves it alone and still
+// answers 200; one node's beat never renames another.
+func TestHeartbeatRenamesNode(t *testing.T) {
+	e := newEnv(t)
+	owner := e.auth.addUser(1, "hh1", authn.RoleOwner)
+	desk := e.createNode("desk", "hh1")
+	e.createNode("pi", "hh1")
+	e.auth.mu.Lock()
+	e.auth.nodes["desk"].name = "omarchy"
+	e.auth.nodes["pi"].name = "kitchen pi"
+	e.auth.mu.Unlock()
+	name := func(id string) any {
+		t.Helper()
+		return e.do("GET", "/api/v0/admin/nodes/"+id, nil, bearer(owner)).want(200).json()["name"]
+	}
+	beat := func(body map[string]any) {
+		t.Helper()
+		e.do("POST", "/api/v0/admin/nodes/heartbeat", body, desk.h()).want(200)
+	}
+
+	beat(map[string]any{"is_busy": false, "name": "  studio  "})
+	if got := name("desk"); got != "studio" {
+		t.Fatalf("renamed: %v", got)
+	}
+	if got := name("pi"); got != "kitchen pi" {
+		t.Fatalf("another node was renamed: %v", got)
+	}
+	for _, body := range []map[string]any{
+		{"is_busy": false}, // legacy: no name
+		nil,
+		{"name": ""},
+		{"name": "   "},
+		{"name": strings.Repeat("é", maxNodeNameLen+1)},
+	} {
+		beat(body)
+		if got := name("desk"); got != "studio" {
+			t.Fatalf("beat %v changed the name: %v", body, got)
+		}
+	}
+	long := strings.Repeat("é", maxNodeNameLen)
+	beat(map[string]any{"name": long})
+	if got := name("desk"); got != long {
+		t.Fatalf("a name at the bound: %v", got)
+	}
+	// A non-string name is a validation error, like any other mistyped heartbeat key.
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"name": 3}, desk.h()).want(400)
 }
