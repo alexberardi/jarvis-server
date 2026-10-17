@@ -210,6 +210,12 @@ func TestStoreRecordCheckAndFire(t *testing.T) {
 		t.Fatalf("error not cleared: %+v", got)
 	}
 
+	if err := s.RecordFire(ctx, a.ID, "finished"); err == nil || err.Error() != `watch: unknown state "finished"` {
+		t.Fatalf("RecordFire with an unknown state: %v", err)
+	}
+	if got, _ = s.Get(ctx, hh, a.ID); got.LastFiredAt != nil {
+		t.Fatalf("a refused fire was recorded: %+v", got)
+	}
 	if err := s.RecordFire(ctx, a.ID, StateDone); err != nil {
 		t.Fatal(err)
 	}

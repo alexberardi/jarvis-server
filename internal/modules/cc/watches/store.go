@@ -117,10 +117,8 @@ func (s *Store) CountLive(ctx context.Context, hh string) (int, error) {
 
 // SetState moves the household's watch to state; false when there is no such watch.
 func (s *Store) SetState(ctx context.Context, hh, id, state string) (bool, error) {
-	switch state {
-	case StateActive, StatePaused, StateDone:
-	default:
-		return false, fmt.Errorf("watch: unknown state %q", state)
+	if err := checkState(state); err != nil {
+		return false, err
 	}
 	res, err := s.DB.Write.ExecContext(ctx, `UPDATE cc_watches SET state = ?, updated_at = ?
 		WHERE household_id = ? AND id = ?`, state, fmtTime(s.now()), hh, id)
@@ -129,6 +127,15 @@ func (s *Store) SetState(ctx context.Context, hh, id, state string) (bool, error
 	}
 	n, err := res.RowsAffected()
 	return n > 0, err
+}
+
+// checkState refuses a state the table does not know.
+func checkState(state string) error {
+	switch state {
+	case StateActive, StatePaused, StateDone:
+		return nil
+	}
+	return fmt.Errorf("watch: unknown state %q", state)
 }
 
 // RecordCheck notes a check: last_checked_at is now, last_value is replaced only by a non-empty
@@ -143,6 +150,9 @@ func (s *Store) RecordCheck(ctx context.Context, id, value, errText string) erro
 
 // RecordFire notes that the watch fired and moves it to state (done for a once watch).
 func (s *Store) RecordFire(ctx context.Context, id, state string) error {
+	if err := checkState(state); err != nil {
+		return err
+	}
 	now := fmtTime(s.now())
 	_, err := s.DB.Write.ExecContext(ctx, `UPDATE cc_watches SET last_fired_at = ?, state = ?, updated_at = ?
 		WHERE id = ?`, now, state, now, id)
