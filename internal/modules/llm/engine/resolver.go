@@ -110,8 +110,12 @@ type Resolver struct {
 	StopTimeout    time.Duration // default 10s
 	Restart        engines.RestartPolicy
 	// RetryFailed is the base cooldown before a failed engine is tried again (doubling up to
-	// 10× it). Default 60s, as the legacy model service.
+	// 8× it). Default 60s, as the legacy model service.
 	RetryFailed time.Duration
+	// MaxRetries is how many times a failed engine is retried before the resolver gives up
+	// and leaves it failed until its settings change or Retry is called. Default 3;
+	// negative = never give up.
+	MaxRetries int
 	// Interval is how often Start's loop reconciles; default 15s.
 	Interval time.Duration
 	// TemplateDir holds the pinned chat templates engines are launched with
@@ -139,9 +143,14 @@ type instance struct {
 	apiKey string
 	alias  string
 	sup    *engines.Supervisor
-	// retries counts failed-engine retries, for the cooldown.
+	// retries counts failed-engine retries, for the cooldown and MaxRetries.
 	retries int
+	// gaveUp is set once retries reach MaxRetries: the engine stays failed until Retry.
+	gaveUp bool
 }
+
+// ErrUnknownEngine is returned by Retry for an engine name the resolver doesn't run.
+var ErrUnknownEngine = errors.New("unknown engine")
 
 func (r *Resolver) init() {
 	if r.instances == nil {
@@ -183,7 +192,11 @@ func (r *Resolver) Resolve(ctx context.Context, label string) (Endpoint, error) 
 	case engines.Unhealthy:
 		ep.Degraded = true
 	default:
-		return Endpoint{}, &NotReadyError{Label: label, State: string(st.State), Reason: st.LastError}
+		reason := st.LastError
+		if inst.gaveUp {
+			reason = fmt.Sprintf("gave up after %d retries (%s); fix the settings or press Retry", inst.retries, st.LastError)
+		}
+		return Endpoint{}, &NotReadyError{Label: label, State: string(st.State), Reason: reason}
 	}
 	return ep, nil
 }
@@ -451,6 +464,10 @@ func (r *Resolver) Reconcile(ctx context.Context) {
 	if base <= 0 {
 		base = time.Minute
 	}
+	maxRetries := r.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
 	for _, inst := range r.instances {
 		st := inst.sup.Status()
 		if st.State != engines.Failed {
@@ -459,9 +476,15 @@ func (r *Resolver) Reconcile(ctx context.Context) {
 			}
 			continue
 		}
-		cool := base << min(inst.retries, 3)
-		cool = min(cool, 10*base)
-		if time.Since(st.Since) < cool {
+		if inst.gaveUp {
+			continue
+		}
+		if maxRetries >= 0 && inst.retries >= maxRetries {
+			inst.gaveUp = true
+			r.Log.Error("engine gave up: still failing after retries", "engine", inst.name, "retries", inst.retries, "err", st.LastError)
+			continue
+		}
+		if time.Since(st.Since) < retryCooldown(base, inst.retries) {
 			continue
 		}
 		inst.retries++
@@ -470,6 +493,29 @@ func (r *Resolver) Reconcile(ctx context.Context) {
 			r.Log.Warn("engine retry failed", "engine", inst.name, "err", err)
 		}
 	}
+}
+
+// retryCooldown is the wait before resolver retry retries+1: base doubling, up to 8× base.
+func retryCooldown(base time.Duration, retries int) time.Duration {
+	return base << min(retries, 3)
+}
+
+// Retry restarts an engine the resolver gave up on (or any failed one) with a fresh retry
+// budget: the admin's "Retry" after fixing what broke it. ErrUnknownEngine if name isn't
+// running.
+func (r *Resolver) Retry(ctx context.Context, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	for _, inst := range r.instances {
+		if inst.name != name {
+			continue
+		}
+		inst.retries, inst.gaveUp = 0, false
+		r.Log.Info("retrying engine on request", "engine", inst.name)
+		return inst.sup.Restart(ctx)
+	}
+	return fmt.Errorf("%w %q", ErrUnknownEngine, name)
 }
 
 // Notify asks the running loop to reconcile now (after a settings write, an install or a
@@ -548,13 +594,17 @@ type InstanceStatus struct {
 	Since     time.Time     `json:"since"`
 	Started   time.Time     `json:"started,omitzero"` // process launch; zero when none runs
 	LastError string        `json:"last_error,omitempty"`
-	Output    []string      `json:"output"`
-	Kind      Kind          `json:"kind"`
-	Flavour   Flavour       `json:"flavour"`
-	Port      int           `json:"port"`
-	Model     string        `json:"model"`
-	Labels    []string      `json:"labels"`
-	Args      []string      `json:"args"`
+	// Retries counts the resolver's retries of this failed engine; GaveUp is set once they
+	// reach MaxRetries and the engine is left failed until Retry or a settings change.
+	Retries int      `json:"retries"`
+	GaveUp  bool     `json:"gave_up"`
+	Output  []string `json:"output"`
+	Kind    Kind     `json:"kind"`
+	Flavour Flavour  `json:"flavour"`
+	Port    int      `json:"port"`
+	Model   string   `json:"model"`
+	Labels  []string `json:"labels"`
+	Args    []string `json:"args"`
 }
 
 // Status reports every label against the current settings (it resolves each, so a changed
@@ -614,7 +664,7 @@ func (r *Resolver) Instances() []InstanceStatus {
 		args, _ := inst.key.args(inst.port, inst.alias)
 		st := inst.sup.Status()
 		out = append(out, InstanceStatus{Name: st.Name, State: st.State, PID: st.PID, Restarts: st.Restarts,
-			Since: st.Since, Started: st.Started, LastError: st.LastError, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
+			Since: st.Since, Started: st.Started, LastError: st.LastError, Retries: inst.retries, GaveUp: inst.gaveUp, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
 			Port: inst.port, Model: inst.key.Model, Labels: labels, Args: args})
 	}
 	slices.SortFunc(out, func(a, b InstanceStatus) int { return strings.Compare(a.Name, b.Name) })

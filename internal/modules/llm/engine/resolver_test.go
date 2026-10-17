@@ -443,6 +443,75 @@ func TestEngineCrashAndFailedRetry(t *testing.T) {
 	}
 }
 
+// A model that never loads: after MaxRetries resolver retries the engine stays failed (no
+// more launches), Instances and Resolve say it gave up, and Retry starts it again.
+func TestEngineGivesUpAfterMaxRetries(t *testing.T) {
+	g := newRig(t)
+	g.r.MaxRetries = 2
+	g.r.RetryFailed = 20 * time.Millisecond
+	bad := g.model("bad.gguf")
+	g.src.set(g.llm(LabelBackground, bad))
+	os.Remove(bad)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.r.Start(ctx)
+	g.r.Resolve(context.Background(), LabelBackground)
+	var inst InstanceStatus
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if is := g.r.Instances(); len(is) == 1 && is[0].GaveUp {
+			inst = is[0]
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("never gave up: %+v", g.r.Instances())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if inst.State != engines.Failed || inst.Retries != 2 {
+		t.Fatalf("gave up: %+v", inst)
+	}
+	launches := len(g.starts())
+	// Many cooldowns later: no further launch, still failed.
+	time.Sleep(500 * time.Millisecond)
+	if n := len(g.starts()); n != launches {
+		t.Fatalf("launched %d more times after giving up", n-launches)
+	}
+	if i := instanceFor(g.r, inst.Name); i.State != engines.Failed || !i.GaveUp || i.Retries != 2 {
+		t.Fatalf("after giving up: %+v", i)
+	}
+	var nr *NotReadyError
+	if _, err := g.r.Resolve(context.Background(), LabelBackground); !errors.As(err, &nr) ||
+		nr.State != string(engines.Failed) || !strings.Contains(nr.Reason, "gave up after 2 retries") {
+		t.Fatalf("resolve after giving up: %v", err)
+	}
+
+	if err := g.r.Retry(context.Background(), "nope"); !errors.Is(err, ErrUnknownEngine) {
+		t.Fatalf("retry unknown: %v", err)
+	}
+	// The file comes back and the admin presses Retry: a fresh budget, and it comes up.
+	os.WriteFile(bad, []byte("gguf"), 0o644)
+	if err := g.r.Retry(context.Background(), inst.Name); err != nil {
+		t.Fatal(err)
+	}
+	if i := instanceFor(g.r, inst.Name); i.GaveUp || i.Retries != 0 {
+		t.Fatalf("after retry: %+v", i)
+	}
+	if ep := g.ready(LabelBackground); ep.Engine != inst.Name {
+		t.Fatalf("ready on %s, want %s", ep.Engine, inst.Name)
+	}
+}
+
+// The cooldown before resolver retry n doubles from RetryFailed and stops at 8× it.
+func TestRetryCooldown(t *testing.T) {
+	base := time.Second
+	for retries, want := range []time.Duration{1, 2, 4, 8, 8, 8} {
+		if got := retryCooldown(base, retries); got != want*base {
+			t.Errorf("retries %d: %v, want %v", retries, got, want*base)
+		}
+	}
+}
+
 func TestRemoteAPI(t *testing.T) {
 	for _, tc := range []struct{ mode, url, want string }{
 		{"", "https://api.anthropic.com", APIAnthropic},

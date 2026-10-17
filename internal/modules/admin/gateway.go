@@ -82,6 +82,7 @@ var passRoutes = []passRoute{
 	// The model manager (docs/llm/06 §5; G6: disk, GPU and the live model for everyone).
 	llmRoute("GET /api/llm/v1/hardware"),
 	llmRoute("POST /api/llm/v1/hardware/engines"),
+	llmRoute("POST /api/llm/v1/hardware/engines/{name}/retry"),
 	llmRoute("GET /api/llm/v1/models/catalog"),
 	llmRoute("GET /api/llm/v1/models/hf/{repo...}"),
 	llmRoute("POST /api/llm/v1/models/install"),

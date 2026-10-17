@@ -188,10 +188,22 @@ type fakeLabels struct {
 	notified  int
 	status    []engine.LabelStatus
 	instances []engine.InstanceStatus
+	retried   []string
 }
 
 func (f *fakeLabels) Status(context.Context) []engine.LabelStatus { return f.status }
 func (f *fakeLabels) Instances() []engine.InstanceStatus          { return f.instances }
+func (f *fakeLabels) Retry(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, i := range f.instances {
+		if i.Name == name {
+			f.retried = append(f.retried, name)
+			return nil
+		}
+	}
+	return engine.ErrUnknownEngine
+}
 func (f *fakeLabels) Notify() {
 	f.mu.Lock()
 	f.notified++
