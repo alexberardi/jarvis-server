@@ -131,7 +131,8 @@ func setupLinkMessage(cfg config.Config) (url, msg string, err error) {
 }
 
 // announceSetup shows the operator the setup token and link: plainly on w (stderr), since
-// it is the one thing they must see on first start, and in the log. It opens a browser at
+// it is the one thing they must see on first start. The log gets the link without the token
+// (it reaches journald, launchd and the logs DB, which others may read). It opens a browser at
 // the link when browser is set and this looks like an interactive desktop session.
 func announceSetup(w io.Writer, log *slog.Logger, cfg config.Config, token, path string, browser bool) {
 	link := setupLink(cfg, token)
@@ -141,7 +142,7 @@ func announceSetup(w io.Writer, log *slog.Logger, cfg config.Config, token, path
 		fmt.Fprintf(w, "(also in %s; it is deleted once setup is done)\n", path)
 	}
 	fmt.Fprintln(w)
-	log.Info("first-run setup", "url", link, "token_file", path)
+	log.Info("first-run setup", "url", strings.TrimSuffix(setupLink(cfg, ""), "#token="), "token_file", path)
 	if browser && interactiveDesktop(os.Getenv, os.Stderr) {
 		if err := openBrowser(link); err != nil {
 			log.Debug("could not open a browser", "err", err)
