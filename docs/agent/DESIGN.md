@@ -249,6 +249,9 @@ Install, Update, Revert and Uninstall work on a computer as on a Pi:
   `GET /api/v0/nodes/{id}/package-install/{rid}/verify` and takes the repository, ref and
   package name from that answer, never from the nudge. It posts
   `{success, error?, details?}` to `.../package-{op}/{rid}/results`. A repeated nudge is ignored.
+  jarvisd accepts a request for a computer only from its owner or a household admin, and installs
+  the repository Pantry lists for the package, refusing when Pantry can't be reached
+  ([decision](../decisions/2026-10-17-desktop-installs-pinned-to-pantry.md)).
   There is no `restarting` step.
 - **Download.** The repository's `/archive/{ref}.tar.gz` (`HEAD` without a ref), as the Pi's
   first try; no git. Only https owner/repo URLs. Extraction writes plain files and directories

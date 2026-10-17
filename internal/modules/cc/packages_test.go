@@ -383,19 +383,20 @@ func TestPackageInstallPiOnlyOnDesktop(t *testing.T) {
 	member := e.auth.addUser(1, "hh1", authn.RoleMember)
 	e.createNode("pi", "hh1")
 	e.createNode("desk", "hh1")
-	if _, err := e.d.Write.Exec(`UPDATE cc_nodes SET node_kind = 'desktop' WHERE node_id = 'desk'`); err != nil {
+	if _, err := e.d.Write.Exec(`UPDATE cc_nodes SET node_kind = 'desktop', owner_user_id = 1 WHERE node_id = 'desk'`); err != nil {
 		t.Fatal(err)
 	}
 	e.createNode("old-agent", "hh1") // an agent that hasn't sent node_kind yet
-	if _, err := e.d.Write.Exec(`UPDATE cc_nodes SET install_mode = 'desktop-agent' WHERE node_id = 'old-agent'`); err != nil {
+	if _, err := e.d.Write.Exec(`UPDATE cc_nodes SET install_mode = 'desktop-agent', owner_user_id = 1 WHERE node_id = 'old-agent'`); err != nil {
 		t.Fatal(err)
 	}
 	pantry.set(func() {
 		pantry.commands["pi_only"] = `{"command_name":"pi_only","display_name":"Doorbell","targets":["node"],"apt_packages":[]}`
 		pantry.commands["apt"] = `{"command_name":"apt","display_name":"","apt_packages":["ffmpeg"]}`
-		pantry.commands["both"] = `{"command_name":"both","targets":["node","desktop"],"apt_packages":[]}`
-		pantry.commands["untagged"] = `{"command_name":"untagged","apt_packages":[]}`
-		pantry.commands["garbled"] = `<html>`
+		pantry.commands["both"] = `{"command_name":"both","github_repo_url":"https://example.com/r.git","targets":["node","desktop"],"apt_packages":[]}`
+		pantry.commands["untagged"] = `{"command_name":"untagged","github_repo_url":"https://example.com/r.git","apt_packages":[]}`
+		pantry.commands["both/versions"] = `{"versions":[{"git_tag":"v1.0.0"}]}`
+		pantry.commands["untagged/versions"] = `{"versions":[{"git_tag":"v1.0.0"}]}`
 	})
 	count := func() int {
 		var n int
@@ -440,18 +441,200 @@ func TestPackageInstallPiOnlyOnDesktop(t *testing.T) {
 		t.Fatal("asked Pantry about a Pi install:", pantry.lastAsked())
 	}
 
-	// When Pantry can't say, the request goes ahead: the agent checks the manifest it downloads
-	// (packages.Manifest.CheckDesktop) and refuses there.
-	install("desk", "unknown", bearer(member)).want(201)
-	install("desk", "garbled", bearer(member)).want(201)
-	pantry.set(func() { pantry.status = http.StatusInternalServerError })
-	install("desk", "pi_only", bearer(member)).want(201)
-	if n := count(); n != 7 {
-		t.Fatalf("%d rows, want 7", n)
+	// When Pantry can't say, the install is refused (TestPackageDesktopPantryPin).
+	if n := count(); n != 4 {
+		t.Fatalf("%d rows, want 4", n)
 	}
 
 	// An outsider still learns nothing about the package.
 	stranger := e.auth.addUser(2, "hh2", authn.RoleOwner)
 	pantry.set(func() { pantry.status = 0 })
 	install("desk", "pi_only", bearer(stranger)).detail(403, "User is not a member of this household")
+}
+
+// desktopPkgEnv is hh1 with a fake Pantry, a Pi, a computer that user 2 (a plain member)
+// added, an agent that hasn't sent node_kind yet (also user 2's) and a computer with no owner.
+type desktopPkgEnv struct {
+	*env
+	pantry                 *fakePantry
+	member, owner, hhAdmin string
+	desk                   testNode
+}
+
+func newDesktopPkgEnv(t *testing.T) *desktopPkgEnv {
+	t.Helper()
+	e := newEnv(t, envOpts{noMQTT: true})
+	pantry := newFakePantry(t)
+	setPantry(t, e, "hh1", pantry.URL)
+	d := &desktopPkgEnv{env: e, pantry: pantry,
+		member:  e.auth.addUser(1, "hh1", authn.RoleMember),
+		owner:   e.auth.addUser(2, "hh1", authn.RoleMember),
+		hhAdmin: e.auth.addUser(3, "hh1", authn.RoleAdmin),
+	}
+	e.createNode("pi", "hh1")
+	d.desk = e.createNode("desk", "hh1")
+	e.createNode("old-agent", "hh1")
+	e.createNode("unowned", "hh1")
+	for _, q := range []string{
+		`UPDATE cc_nodes SET node_kind = 'desktop', owner_user_id = 2 WHERE node_id = 'desk'`,
+		`UPDATE cc_nodes SET install_mode = 'desktop-agent', owner_user_id = 2 WHERE node_id = 'old-agent'`,
+		`UPDATE cc_nodes SET node_kind = 'desktop' WHERE node_id = 'unowned'`,
+	} {
+		if _, err := e.d.Write.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pantry.set(func() {
+		pantry.commands["weather"] = `{"command_name":"weather","github_repo_url":"https://github.com/acme/weather.git","apt_packages":[]}`
+		pantry.commands["weather/versions"] = `{"command_name":"weather","versions":[{"version":"1.2.0","git_tag":"v1.2.0"},{"version":"1.1.0","git_tag":"v1.1.0"}]}`
+	})
+	return d
+}
+
+func (d *desktopPkgEnv) count(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := d.d.Read.QueryRow(`SELECT COUNT(*) FROM cc_package_install_requests`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func (d *desktopPkgEnv) install(node string, body map[string]any, h hdr) *resp {
+	if body["github_repo_url"] == nil {
+		body["github_repo_url"] = "https://github.com/acme/weather"
+	}
+	return d.do("POST", "/api/v0/nodes/"+node+"/package-install", body, h)
+}
+
+// A computer runs what's installed on it as its signed-in member, so only that member (the
+// one who added it) or a household admin may change its packages (loop item #101). A Pi keeps
+// the household-member rule (D5, docs/cc/12 Q2).
+func TestPackageDesktopOwnerOrAdmin(t *testing.T) {
+	d := newDesktopPkgEnv(t)
+	const notOwner = "Only the member who added this computer, or a household admin, can change its packages"
+	weather := func() map[string]any { return map[string]any{"command_name": "weather"} }
+
+	for _, node := range []string{"desk", "old-agent", "unowned"} {
+		d.install(node, weather(), bearer(d.member)).detail(403, notOwner)
+		d.do("POST", "/api/v0/nodes/"+node+"/package-uninstall", map[string]any{"command_name": "weather", "component_type": "command"}, bearer(d.member)).detail(403, notOwner)
+		d.do("POST", "/api/v0/nodes/"+node+"/package-revert", map[string]any{"command_name": "weather"}, bearer(d.member)).detail(403, notOwner)
+	}
+	d.install("unowned", weather(), bearer(d.owner)).detail(403, notOwner) // not theirs
+	if n := d.count(t); n != 0 {
+		t.Fatalf("%d rows; a refused request must not create one", n)
+	}
+	if got := d.pantry.lastAsked(); got != "" {
+		t.Fatal("asked Pantry before the role check:", got)
+	}
+
+	d.install("desk", weather(), bearer(d.owner)).want(201)
+	d.install("old-agent", weather(), bearer(d.owner)).want(201)
+	d.do("POST", "/api/v0/nodes/desk/package-uninstall", map[string]any{"command_name": "weather", "component_type": "command"}, bearer(d.owner)).want(201)
+	d.do("POST", "/api/v0/nodes/desk/package-revert", map[string]any{"command_name": "weather"}, bearer(d.owner)).want(201)
+	d.install("desk", weather(), bearer(d.hhAdmin)).want(201)
+	d.install("unowned", weather(), bearer(d.hhAdmin)).want(201)
+	d.install("unowned", weather(), adminH()).want(201)
+
+	// A Pi: any member, as before.
+	d.install("pi", weather(), bearer(d.member)).want(201)
+	d.do("POST", "/api/v0/nodes/pi/package-uninstall", map[string]any{"command_name": "weather", "component_type": "command"}, bearer(d.member)).want(201)
+
+	// Forge test install runs a draft on the computer too.
+	d.pantry.set(func() {
+		d.pantry.drafts["ABC123"] = `{"package_name":"weather_test","files":[]}`
+	})
+	d.do("POST", "/api/v0/nodes/desk/test-install", map[string]any{"share_code": "ABC123"}, bearer(d.member)).detail(403, notOwner)
+	d.do("POST", "/api/v0/nodes/desk/test-install", map[string]any{"share_code": "ABC123"}, bearer(d.owner)).want(201)
+	d.do("POST", "/api/v0/nodes/pi/test-install", map[string]any{"share_code": "ABC123"}, bearer(d.member)).want(201)
+
+	// An outsider still learns nothing about the computer.
+	stranger := d.auth.addUser(9, "hh2", authn.RoleOwner)
+	d.install("desk", weather(), bearer(stranger)).detail(403, "User is not a member of this household")
+}
+
+// An install on a computer takes its repository from Pantry, never from the caller, and is
+// refused when Pantry can't vouch for it (loop item #101).
+func TestPackageDesktopPantryPin(t *testing.T) {
+	d := newDesktopPkgEnv(t)
+	refused := func(r *resp, status int, code string) {
+		t.Helper()
+		if b := r.want(status).json(); b["code"] != code {
+			t.Fatal(b)
+		}
+	}
+	row := func(rid string) (repo string, tag sql.NullString) {
+		t.Helper()
+		if err := d.d.Read.QueryRow(`SELECT github_repo_url, git_tag FROM cc_package_install_requests WHERE id = ?`, rid).Scan(&repo, &tag); err != nil {
+			t.Fatal(err)
+		}
+		return repo, tag
+	}
+
+	// Another repository than Pantry's is refused.
+	refused(d.install("desk", map[string]any{"command_name": "weather", "github_repo_url": "https://evil.example/x.git"}, bearer(d.owner)),
+		422, "repo_mismatch")
+	refused(d.install("desk", map[string]any{"command_name": "weather", "github_repo_url": "https://github.com/acme/weather-fork"}, adminH()),
+		422, "repo_mismatch")
+
+	// The same repository, spelt differently, goes ahead and Pantry's URL is what's stored.
+	for _, u := range []string{"https://github.com/acme/weather", "https://GitHub.com/acme/weather.git", " https://github.com/acme/weather/ "} {
+		rid := d.install("desk", map[string]any{"command_name": "weather", "github_repo_url": u, "git_tag": "v1.1.0"}, bearer(d.owner)).want(201).json()["id"].(string)
+		if repo, tag := row(rid); repo != "https://github.com/acme/weather.git" || tag.String != "v1.1.0" {
+			t.Fatalf("%q: stored %q @ %v", u, repo, tag)
+		}
+	}
+
+	// The version: a tag Pantry lists, or a commit (what the app sends, from Pantry's
+	// /download), or none (Pantry's newest).
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	rid := d.install("desk", map[string]any{"command_name": "weather", "git_tag": sha}, bearer(d.owner)).want(201).json()["id"].(string)
+	if _, tag := row(rid); tag.String != sha {
+		t.Fatal(tag)
+	}
+	rid = d.install("desk", map[string]any{"command_name": "weather"}, bearer(d.owner)).want(201).json()["id"].(string)
+	if _, tag := row(rid); tag.String != "v1.2.0" {
+		t.Fatal(tag)
+	}
+	refused(d.install("desk", map[string]any{"command_name": "weather", "git_tag": "evil-branch"}, bearer(d.owner)), 422, "version_not_found")
+	refused(d.install("desk", map[string]any{"command_name": "weather", "git_tag": "0123abc"}, bearer(d.owner)), 422, "version_not_found")
+
+	// What the agent is told to install is the stored row.
+	v := d.do("GET", "/api/v0/nodes/desk/package-install/"+rid+"/verify", nil, d.desk.h()).want(200).json()
+	if v["github_repo_url"] != "https://github.com/acme/weather.git" || v["git_tag"] != "v1.2.0" {
+		t.Fatal(v)
+	}
+
+	before := d.count(t)
+	// Pantry doesn't know the package, or has no repository for it.
+	refused(d.install("desk", map[string]any{"command_name": "unknown"}, bearer(d.owner)), 422, "package_not_found")
+	d.pantry.set(func() {
+		d.pantry.commands["norepo"] = `{"command_name":"norepo","apt_packages":[]}`
+		d.pantry.commands["garbled"] = `<html>`
+		d.pantry.commands["noversions"] = `{"command_name":"noversions","github_repo_url":"https://github.com/acme/noversions"}`
+		d.pantry.commands["noversions/versions"] = `{"command_name":"noversions","versions":[{"version":"0.1.0","git_tag":null}]}`
+	})
+	refused(d.install("desk", map[string]any{"command_name": "norepo"}, bearer(d.owner)), 422, "package_not_found")
+	refused(d.install("desk", map[string]any{"command_name": "noversions", "github_repo_url": "https://github.com/acme/noversions"}, bearer(d.owner)),
+		422, "version_not_found")
+	// Pantry broken or down: refused, not waved through.
+	refused(d.install("desk", map[string]any{"command_name": "garbled"}, bearer(d.owner)), 503, "pantry_unavailable")
+	d.pantry.set(func() { d.pantry.status = http.StatusInternalServerError })
+	refused(d.install("desk", map[string]any{"command_name": "weather"}, bearer(d.owner)), 503, "pantry_unavailable")
+	setPantry(t, d.env, "hh1", "http://127.0.0.1:1")
+	refused(d.install("desk", map[string]any{"command_name": "weather"}, bearer(d.owner)), 503, "pantry_unavailable")
+	refused(d.install("desk", map[string]any{"command_name": "weather"}, adminH()), 503, "pantry_unavailable")
+	if n := d.count(t); n != before {
+		t.Fatalf("%d rows, want %d: a refused install must not create one", n, before)
+	}
+
+	// A Pi installs as before: the caller's repository, and Pantry isn't asked.
+	d.pantry.set(func() { d.pantry.asked = nil })
+	rid = d.install("pi", map[string]any{"command_name": "anything", "github_repo_url": "https://example.com/r.git"}, bearer(d.member)).want(201).json()["id"].(string)
+	if repo, _ := row(rid); repo != "https://example.com/r.git" {
+		t.Fatal(repo)
+	}
+	if got := d.pantry.lastAsked(); got != "" {
+		t.Fatal("asked Pantry about a Pi install:", got)
+	}
 }
