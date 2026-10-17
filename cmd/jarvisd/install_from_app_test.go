@@ -231,10 +231,7 @@ func TestRunningVersion(t *testing.T) {
 // mDNS from the environment.
 func TestPortsConfigFallbackKeepsBrokerAndMDNS(t *testing.T) {
 	t.Setenv("JARVIS_HOME", t.TempDir())
-	for _, k := range []string{"JARVIS_MQTT_ADDR", "JARVIS_MQTT_WS_ADDR", "JARVIS_MDNS"} {
-		t.Setenv(k, "")
-		os.Unsetenv(k)
-	}
+	unsetForTest(t, "JARVIS_MQTT_ADDR", "JARVIS_MQTT_WS_ADDR", "JARVIS_MDNS")
 	t.Setenv("JARVIS_PORT_OFFSET", "bogus")
 	if _, err := config.Load(); err == nil {
 		t.Fatal("want the bogus offset to fail Load")
