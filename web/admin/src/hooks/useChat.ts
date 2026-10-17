@@ -80,6 +80,17 @@ export interface UseChat {
  * the per-tab conversation (sessionStorage), warmup with the node's tools, and turns streamed
  * through the event reducer.
  */
+/** useChatNodes is the household's nodes for a picker (the chat page's and the prompt preview's). */
+export function useChatNodes(householdId: string) {
+  return useQuery({
+    queryKey: ['chat-nodes', householdId],
+    queryFn: () => listChatNodes(householdId),
+    enabled: !!householdId,
+    refetchInterval: NODE_POLL_MS,
+    retry: false,
+  })
+}
+
 export function useChat(userId: number | string, householdId: string): UseChat {
   const key = chatKey(userId, householdId)
   const [chat, setChat] = useState<ChatState>(() => loadChat(key) ?? emptyChat())
@@ -103,13 +114,7 @@ export function useChat(userId: number | string, householdId: string): UseChat {
   // Stop a running turn when the page goes away.
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  const nodesQ = useQuery({
-    queryKey: ['chat-nodes', householdId],
-    queryFn: () => listChatNodes(householdId),
-    enabled: !!householdId,
-    refetchInterval: NODE_POLL_MS,
-    retry: false,
-  })
+  const nodesQ = useChatNodes(householdId)
   const primaryQ = useQuery({
     queryKey: ['chat-primary', householdId],
     queryFn: () => getPrimaryNodeId(householdId).catch(() => ''),
