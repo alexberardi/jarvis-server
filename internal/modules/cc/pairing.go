@@ -24,11 +24,15 @@ import (
 //
 //  1. The agent calls POST /nodes/pairings (no auth). It gets a short human code, a pairing id
 //     and a poll secret. Only the agent ever sees the secret.
-//  2. The agent shows the code; any member of a household sees the same code in the admin or
-//     the app (GET /nodes/pairings) and approves it into one of their own households and a room
-//     (POST /nodes/pairings/approve), or denies it.
+//  2. The agent shows the code; a member of a household types that code into the admin or the
+//     app and approves it into one of their own households and a room
+//     (POST /nodes/pairings/approve), or denies it. GET /nodes/pairings lists the approver's
+//     households and how many pairings wait, never the codes: a pairing has no owner before it
+//     is approved, so knowing the code (seeing the computer's screen) is the only proof that the
+//     approver may enrol it (loop #100: a list let any member pick a stranger's computer).
 //  3. The agent polls POST /nodes/pairings/{id}/poll with the secret. Once approved, the answer
-//     is an ordinary provisioning token for that household, which the agent redeems at
+//     is an ordinary provisioning token for that household, with the household's name and the
+//     approver. The agent shows them and asks its user to confirm before it redeems the token at
 //     POST /nodes/register: the node ends up exactly like one enrolled with a token today.
 //
 // Pairings live in memory: they last 10 minutes, and a restart only means starting again.
@@ -36,8 +40,6 @@ import (
 // Guessing: a code is 8 symbols from a 32-symbol alphabet (40 bits). A user gets
 // pairingApproveFailLimit wrong codes per pairingTTL, and at most maxPendingPairings are live,
 // so one window's chance of hitting any of them is about 10·100/2^40, under one in a billion.
-// The approval list shows the codes to members anyway (the code is shown on both screens, plan
-// §7 item 3): the limit matters for an app that approves a typed code.
 
 const (
 	pairingTTL = 10 * time.Minute
@@ -83,6 +85,9 @@ type pairing struct {
 	room       string
 	nodeName   string
 	approvedBy int64
+	// householdName and approverEmail are shown on the computer before it joins.
+	householdName string
+	approverEmail string
 	// nodeID is fixed at the first credential hand-out, so a repeated poll refreshes the same
 	// node's token instead of minting another node.
 	nodeID string
@@ -317,14 +322,14 @@ func (m *Module) handlePollPairing(w http.ResponseWriter, r *http.Request) {
 	p.nodeID = nodeID
 	out := map[string]any{
 		"status": "approved", "node_id": nodeID, "provisioning_token": raw,
-		"household_id": p.household, "room": room, "name": name,
-		"expires_at": pyNaive(expires), "expires_in": int(provisioningTTL.Seconds()),
+		"household_id": p.household, "household_name": p.householdName, "approved_by": p.approverEmail,
+		"room": room, "name": name, "expires_at": pyNaive(expires), "expires_in": int(provisioningTTL.Seconds()),
 	}
 	m.addNodeURLs(r, out)
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// --- GET /nodes/pairings (user JWT, a household member): what is waiting ---
+// --- GET /nodes/pairings (user JWT, a household member): the approver's households ---
 
 // memberships lists the user's households (the auth module implements authn.MembershipLister).
 func (m *Module) memberships(ctx context.Context, uid int64) ([]authn.Membership, error) {
@@ -347,37 +352,30 @@ func (m *Module) requireAnyHousehold(ctx context.Context, uid int64) ([]authn.Me
 	return hs, nil
 }
 
+// handleListPairings answers the approval form: the households the caller may approve into and
+// how many pairings wait. "pairings" stays, always empty, for clients that read it: the codes
+// are never listed (see the top of this file).
 func (m *Module) handleListPairings(w http.ResponseWriter, r *http.Request, u authn.User) {
 	hs, err := m.requireAnyHousehold(r.Context(), u.ID)
 	if err != nil {
 		m.writeErr(w, err)
 		return
 	}
-	now := m.now()
 	s := m.pairings
 	s.mu.Lock()
-	var pending []*pairing
-	s.sweepLocked(now)
+	s.sweepLocked(m.now())
+	waiting := 0
 	for _, p := range s.byID {
 		if p.state == pairingPending {
-			pending = append(pending, p)
+			waiting++
 		}
 	}
 	s.mu.Unlock()
-	slices.SortFunc(pending, func(a, b *pairing) int { return a.created.Compare(b.created) })
-	list := make([]map[string]any, 0, len(pending))
-	for _, p := range pending {
-		list = append(list, map[string]any{
-			"code": displayPairingCode(p.code), "name": p.name, "platform": p.platform,
-			"requested_from": p.from, "created_at": p.created.UTC().Format(time.RFC3339),
-			"expires_in": int(p.expires.Sub(now).Seconds()),
-		})
-	}
 	households := make([]map[string]any, 0, len(hs))
 	for _, h := range hs {
 		households = append(households, map[string]any{"id": h.HouseholdID, "name": h.Name, "role": string(h.Role)})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"pairings": list, "households": households})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"pairings": []any{}, "waiting": waiting, "households": households})
 }
 
 // pendingByCode finds a live, pending pairing by its code, counting a miss against the user.
@@ -447,6 +445,14 @@ func (m *Module) handleApprovePairing(w http.ResponseWriter, r *http.Request, u 
 	if name = cleanLabel(name, 64); name == "" {
 		name = p.name
 	}
+	hhName := ""
+	if hs, err := m.memberships(ctx, u.ID); err == nil {
+		for _, h := range hs {
+			if h.HouseholdID == hh {
+				hhName = h.Name
+			}
+		}
+	}
 	s := m.pairings
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -456,6 +462,7 @@ func (m *Module) handleApprovePairing(w http.ResponseWriter, r *http.Request, u 
 		return
 	}
 	p.state, p.household, p.room, p.nodeName, p.approvedBy = pairingApproved, hh, room, name, u.ID
+	p.householdName, p.approverEmail = hhName, u.Email
 	m.deps.Log.Info("cc: pairing approved", "pairing", p.id, "household", hh, "room", room, "by", u.ID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"status": "approved", "code": displayPairingCode(p.code), "household_id": hh, "room": room, "name": name,

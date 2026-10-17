@@ -52,20 +52,11 @@ func TestPairingHappyPath(t *testing.T) {
 		t.Fatalf("poll: %v", got)
 	}
 
-	// The member sees the same code, and the households they can approve into.
+	// The member sees how many wait and the households they can approve into, never the code:
+	// they type the one shown on the computer.
 	list := e.do("GET", pairingsPath, nil, bearer(member)).want(200).json()
-	ps := list["pairings"].([]any)
-	if len(ps) != 1 {
+	if ps := list["pairings"].([]any); len(ps) != 0 || list["waiting"] != 1.0 || strings.Contains(fmt.Sprint(list), p.code) {
 		t.Fatalf("list: %v", list)
-	}
-	row := ps[0].(map[string]any)
-	if row["code"] != p.code || row["name"] != "Office-PC" || row["platform"] != "linux" || row["requested_from"] != "127.0.0.1" {
-		t.Fatalf("row: %v", row)
-	}
-	for _, k := range []string{"pairing_id", "poll_secret", "provisioning_token"} {
-		if _, ok := row[k]; ok {
-			t.Fatalf("list leaks %s: %v", k, row)
-		}
 	}
 	hs := list["households"].([]any)
 	if len(hs) != 1 || hs[0].(map[string]any)["id"] != "hh1" {
@@ -79,9 +70,9 @@ func TestPairingHappyPath(t *testing.T) {
 	if _, ok := ap["provisioning_token"]; ok {
 		t.Fatalf("approval leaks the token: %v", ap)
 	}
-	// Gone from the waiting list.
-	if got := e.do("GET", pairingsPath, nil, bearer(member)).want(200).json()["pairings"].([]any); len(got) != 0 {
-		t.Fatalf("still listed: %v", got)
+	// No longer waiting.
+	if got := e.do("GET", pairingsPath, nil, bearer(member)).want(200).json()["waiting"]; got != 0.0 {
+		t.Fatalf("still waiting: %v", got)
 	}
 
 	cred := e.pollPairing(p).want(200).json()
@@ -143,8 +134,8 @@ func TestPairingExpiry(t *testing.T) {
 	e.advance(time.Second)
 	e.pollPairing(p).detail(404, pairingNotFound)
 	e.do("POST", pairingsPath+"/approve", approveBody(p.code, "hh1", ""), bearer(member)).detail(404, "Pairing code not found or expired")
-	if got := e.do("GET", pairingsPath, nil, bearer(member)).want(200).json()["pairings"].([]any); len(got) != 0 {
-		t.Fatalf("expired still listed: %v", got)
+	if got := e.do("GET", pairingsPath, nil, bearer(member)).want(200).json()["waiting"]; got != 0.0 {
+		t.Fatalf("expired still waiting: %v", got)
 	}
 }
 
@@ -280,8 +271,8 @@ func TestPairingApproveRateLimit(t *testing.T) {
 	}
 	e.do("POST", pairingsPath+"/deny", map[string]any{"code": p.code}, bearer(member)).want(429)
 	// Per user: another member is unaffected.
-	if got := e.do("GET", pairingsPath, nil, bearer(other)).want(200).json()["pairings"].([]any); len(got) != 1 {
-		t.Fatalf("list: %v", got)
+	if got := e.do("GET", pairingsPath, nil, bearer(other)).want(200).json()["waiting"]; got != 1.0 {
+		t.Fatalf("waiting: %v", got)
 	}
 	e.advance(pairingTTL / 2)
 	q := e.startPairing("pc2")
@@ -295,10 +286,48 @@ func TestPairingStartValidation(t *testing.T) {
 	long := strings.Repeat("x", 200) + "\x07"
 	r := e.do("POST", pairingsPath, map[string]any{"name": long}, nil).want(201).json()
 	member := e.auth.addUser(1, "hh1", authn.RoleMember)
-	got := e.do("GET", pairingsPath, nil, bearer(member)).want(200).json()["pairings"].([]any)[0].(map[string]any)
-	if got["name"] != strings.Repeat("x", 64) || got["code"] != r["code"] {
+	got := e.do("POST", pairingsPath+"/approve", approveBody(r["code"].(string), "hh1", ""), bearer(member)).want(200).json()
+	if got["name"] != strings.Repeat("x", 64) {
 		t.Fatalf("cleaned name: %v", got)
 	}
 	// No body at all: a default name.
 	e.do("POST", pairingsPath, nil, nil).want(201)
+}
+
+// Loop #100: the waiting list shows no codes, so a member of another household (or anyone on
+// the LAN with an account) can't pick a stranger's computer from it. Approving needs the code
+// as shown on that computer, and a wrong code counts against the approver.
+func TestPairingOtherHouseholdCannotListOrApprove(t *testing.T) {
+	e := newEnv(t)
+	_ = e.auth.addUser(1, "hhA", authn.RoleOwner)
+	b := e.auth.addUser(2, "hhB", authn.RoleMember)
+	p := e.startPairing("A-desktop")
+	list := e.do("GET", pairingsPath, nil, bearer(b)).want(200).json()
+	if ps := list["pairings"].([]any); len(ps) != 0 {
+		t.Fatalf("B lists other people's pending codes: %v", ps)
+	}
+	if strings.Contains(fmt.Sprint(list), p.code) || strings.Contains(fmt.Sprint(list), "A-desktop") {
+		t.Fatalf("list leaks the pairing: %v", list)
+	}
+	// Guessing costs a failure each and ends in a lockout; the pairing stays pending.
+	for i := 0; i < pairingApproveFailLimit; i++ {
+		e.do("POST", pairingsPath+"/approve", approveBody(fmt.Sprintf("ZZZZ-%04d", i), "hhB", ""), bearer(b)).want(404)
+	}
+	e.do("POST", pairingsPath+"/approve", approveBody(p.code, "hhB", ""), bearer(b)).want(429)
+	if got := e.pollPairing(p).want(200).json(); got["status"] != "pending" {
+		t.Fatalf("poll: %v", got)
+	}
+}
+
+// The approved poll names the household and the approver, so the computer can ask its user to
+// confirm before it joins.
+func TestPairingPollNamesHousehold(t *testing.T) {
+	e := newEnv(t)
+	member := e.auth.addUser(1, "hh1", authn.RoleMember)
+	p := e.startPairing("pc")
+	e.do("POST", pairingsPath+"/approve", approveBody(p.code, "hh1", ""), bearer(member)).want(200)
+	got := e.pollPairing(p).want(200).json()
+	if got["household_id"] != "hh1" || got["household_name"] != "Household hh1" || got["approved_by"] != "user1@example.com" {
+		t.Fatalf("poll: %v", got)
+	}
 }

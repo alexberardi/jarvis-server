@@ -117,7 +117,7 @@ func TestNewServerRefusesANonLoopbackListener(t *testing.T) {
 var apiRoutes = []struct{ method, path string }{
 	{"GET", ""}, {"GET", "app.js"}, {"GET", "app.css"}, {"GET", "icon.png"},
 	{"GET", "api/state"}, {"GET", "api/servers"}, {"POST", "api/servers/search"}, {"POST", "api/server"},
-	{"POST", "api/server/forget"}, {"POST", "api/pair"}, {"POST", "api/pair/cancel"}, {"POST", "api/signin"},
+	{"POST", "api/server/forget"}, {"POST", "api/pair"}, {"POST", "api/pair/cancel"}, {"POST", "api/pair/confirm"}, {"POST", "api/signin"},
 	{"POST", "api/signin/household"}, {"POST", "api/voice"}, {"GET", "api/mic"}, {"POST", "api/permission"},
 	{"POST", "api/portal"}, {"POST", "api/done"}, {"POST", "api/remove"},
 }
@@ -437,7 +437,7 @@ func newFakeJarvisd(t *testing.T) *fakeJarvisd {
 			_, _ = io.WriteString(w, `{"status":"`+f.pollStatus+`"}`)
 			return
 		}
-		_, _ = io.WriteString(w, `{"status":"approved","node_id":"node-2","provisioning_token":"prov_2","household_id":"h1","room":"office","name":"Office PC"}`)
+		_, _ = io.WriteString(w, `{"status":"approved","node_id":"node-2","provisioning_token":"prov_2","household_id":"h1","household_name":"The Smiths","approved_by":"sam@example.com","room":"office","name":"Office PC"}`)
 	})
 	mux.HandleFunc("POST /api/v0/nodes/register", func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]any
@@ -514,9 +514,19 @@ func TestPairingHappyPath(t *testing.T) {
 		t.Fatalf("pair: %d %s", w.Code, w.Body)
 	}
 	s.app.wg.Wait() // the poll loop: pending, then approved
+	// Approved, but nothing joins until this computer's user sees whose household it is.
 	st = decode[stateView](t, send(s, req(s, "GET", "api/state", nil)))
-	if !st.Joined || st.Join.State != JoinJoined || st.Join.Code != "" {
-		t.Fatalf("after approval: %+v", st.Join)
+	if st.Joined || st.Join.State != JoinConfirm || st.Join.Household != "The Smiths" || st.Join.ApprovedBy != "sam@example.com" ||
+		st.Join.Room != "office" || st.Join.Code != "" || len(j.saved) != 0 || len(f.registered) != 0 {
+		t.Fatalf("after approval: %+v saved=%v", st.Join, j.saved)
+	}
+	if w := send(s, req(s, "POST", "api/server/forget", map[string]any{})); w.Code != http.StatusConflict {
+		t.Fatalf("forget while confirming: %d", w.Code)
+	}
+	w = send(s, req(s, "POST", "api/pair/confirm", map[string]any{}))
+	st = decode[stateView](t, w)
+	if w.Code != 200 || !st.Joined || st.Join.State != JoinJoined || st.Join.Code != "" {
+		t.Fatalf("after confirming: %d %+v", w.Code, st.Join)
 	}
 	if len(j.saved) != 1 || j.saved[0].NodeID != "node-2" || j.saved[0].NodeKey != "key-node-2" || j.saved[0].Name != "Office PC" ||
 		j.saved[0].ConfigURL != f.URL || j.after != 1 || j.waits != 1 {
@@ -582,6 +592,31 @@ func TestPairingCancel(t *testing.T) {
 	s.app.wg.Wait()
 	if st.Join.State != JoinIdle || len(j.saved) != 0 {
 		t.Fatalf("after cancel: %+v", st.Join)
+	}
+}
+
+// Declining the household the approver named: nothing registers or is saved, and the page is
+// back where it started.
+func TestPairingDeclineHousehold(t *testing.T) {
+	f := newFakeJarvisd(t)
+	j := &joinDeps{}
+	s := testServer(t, j.deps(f))
+	pickServer(t, s, f.URL)
+	if w := send(s, req(s, "POST", "api/pair/confirm", map[string]any{})); w.Code != http.StatusConflict {
+		t.Fatalf("confirm with nothing approved: %d", w.Code)
+	}
+	send(s, req(s, "POST", "api/pair", map[string]any{}))
+	s.app.wg.Wait()
+	st := decode[stateView](t, send(s, req(s, "GET", "api/state", nil)))
+	if st.Join.State != JoinConfirm {
+		t.Fatalf("not asking: %+v", st.Join)
+	}
+	st = decode[stateView](t, send(s, req(s, "POST", "api/pair/cancel", map[string]any{})))
+	if st.Joined || st.Join.State != JoinIdle || len(j.saved) != 0 || len(f.registered) != 0 || j.after != 0 {
+		t.Fatalf("after declining: %+v saved=%v registered=%v", st.Join, j.saved, f.registered)
+	}
+	if w := send(s, req(s, "POST", "api/pair/confirm", map[string]any{})); w.Code != http.StatusConflict {
+		t.Fatalf("confirm after declining: %d", w.Code)
 	}
 }
 

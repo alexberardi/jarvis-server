@@ -149,9 +149,9 @@ install into the user's session):
    key (the updater's check, §8.2), caches it under `<home>/updates/agent/`, and streams it to the
    browser. Offline: a link to the release page.
 2. **Install:** the user opens the download (§2.2). The agent finds jarvisd on loopback first.
-3. **Pair:** the step polls pending pairings. The request shows its code and computer name **on
-   both screens**, and the user clicks Approve (contradiction 3 in §7). The household is the one
-   setup just created, and the room is "desktop".
+3. **Pair:** the user types the code the agent shows into the step's approval form and clicks
+   Approve; the agent then names the household and asks before it joins (contradiction 3 in §7).
+   The household is the one setup just created, and the room is "desktop".
 4. **Extension:** the store button for the detected browser. It turns green when the agent's
    heartbeat reports the extension connected (item 1.8).
 5. **macOS:** a note that the agent's own page handles permissions (it runs as the user and can see
@@ -402,8 +402,10 @@ Sign-off matrix:
    with DESIGN §10 ("no `externally_connectable`", `TestExtensionSurface`), and it isn't feasible
    for LAN hosts (§3.2, Q2).
 3. **Approve with or without a code.** 00 §9.1 step 3 says the wizard approves "with no code to read
-   out"; DESIGN §13 uses a device code. This plan shows the code on both screens (nothing to type),
-   so a pairing request from another LAN device can't be approved by mistake.
+   out"; DESIGN §13 uses a device code. This plan first showed the code on both screens (nothing to
+   type). **Superseded (decision 2026-10-17, loop #100):** a list of codes let any member approve a
+   stranger's computer into their own household, so the approver types the code from the
+   computer's screen and the computer confirms the household before it joins.
 4. **The service account on macOS.** 00 §9.2 says jarvisd runs as `jarvisd` on macOS. §2.2 and §8.1
    say it runs as a LaunchDaemon *as the installing user*. §9.2's conclusion still holds: a daemon
    is outside the GUI session and can't hold TCC grants.

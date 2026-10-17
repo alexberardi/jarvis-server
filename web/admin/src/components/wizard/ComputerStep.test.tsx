@@ -52,7 +52,7 @@ beforeEach(() => {
   localStorage.setItem('jarvis-admin:refresh_token', 'r')
   localStorage.setItem('jarvis-admin:user', JSON.stringify({ id: 1, email: 'op@example.com', is_superuser: true }))
   households.list.mockResolvedValue([{ id: 'h1', name: 'Home', role: 'owner' }])
-  api.getPairings.mockResolvedValue({ pairings: [], households: [{ id: 'h1', name: 'Home', role: 'owner' }] })
+  api.getPairings.mockResolvedValue({ waiting: 0, households: [{ id: 'h1', name: 'Home', role: 'owner' }] })
   api.getNodeLiveness.mockResolvedValue([])
   chatApi.getThisDevice.mockResolvedValue({ node_id: null, reason: 'no_agents' })
   addonsApi.fetchAgent.mockResolvedValue({ blob: new Blob(['x']), filename: 'jarvis-automation-agent_1.2.0_amd64.deb', release: 'v1.2.0' })
@@ -73,7 +73,7 @@ describe('wizard: This computer (install plan 3.3)', () => {
 
   it('agent only: download, approve the code, and the checks turn green as it connects', async () => {
     api.getPairings.mockResolvedValue({
-      pairings: [{ code: 'ABCD-1234', name: 'Office-PC', platform: 'linux', requested_from: '127.0.0.1', created_at: '', expires_in: 540 }],
+      waiting: 1,
       households: [{ id: 'h1', name: 'Home', role: 'owner' }],
     })
     const { onNext } = renderStep()
@@ -86,8 +86,8 @@ describe('wizard: This computer (install plan 3.3)', () => {
     expect(await within(steps).findByText(/Saved jarvis-automation-agent_1.2.0_amd64.deb/)).toBeInTheDocument()
     expect(within(steps).getByText(/Checked against the signed release v1.2.0/)).toBeInTheDocument()
 
-    // The pairing code shows here, to approve.
-    expect(await within(steps).findByText('ABCD-1234')).toBeInTheDocument()
+    // The approval form shows here, to type the code the agent shows.
+    expect(await within(steps).findByLabelText('Code shown on the computer')).toBeInTheDocument()
     expect(screen.getByTestId('agent-connected')).toHaveTextContent('Waiting for the agent to connect')
 
     // It pairs and this-device names it: green.
@@ -95,8 +95,8 @@ describe('wizard: This computer (install plan 3.3)', () => {
     chatApi.getThisDevice.mockResolvedValue({ node_id: 'n1' })
     expect(await screen.findByText('Office-PC', { selector: 'strong' }, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.getByTestId('agent-connected')).toHaveTextContent('The agent is connected (Office-PC)')
-    // Approved: the pairing list makes way.
-    expect(within(steps).queryByText('ABCD-1234')).toBeNull()
+    // Approved: the approval form makes way.
+    expect(within(steps).queryByLabelText('Code shown on the computer')).toBeNull()
     expect(within(steps).queryAllByLabelText('Not yet')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onNext).toHaveBeenCalled()

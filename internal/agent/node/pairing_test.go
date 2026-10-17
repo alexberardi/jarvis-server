@@ -67,7 +67,7 @@ func startFake(t *testing.T, answers ...func(http.ResponseWriter)) (*fakePairing
 func TestPairingApproved(t *testing.T) {
 	f, srv, p := startFake(t,
 		reply(200, pendingJSON), reply(200, pendingJSON),
-		reply(200, `{"status":"approved","node_id":"n1","provisioning_token":"prov_x","household_id":"hh1","room":"office","name":"Office-PC","node_command_center_url":"http://192.0.2.1:7703"}`))
+		reply(200, `{"status":"approved","node_id":"n1","provisioning_token":"prov_x","household_id":"hh1","household_name":"The Smiths","approved_by":"sam@example.com","room":"office","name":"Office-PC","node_command_center_url":"http://192.0.2.1:7703"}`))
 	if p.Code != "ABCD-EFGH" || f.started["name"] != "Office-PC" || f.started["platform"] != "linux" {
 		t.Fatalf("start: %+v %v", p, f.started)
 	}
@@ -79,7 +79,7 @@ func TestPairingApproved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Token != "prov_x" || res.NodeID != "n1" || res.Room != "office" || res.HouseholdID != "hh1" || res.NodeCommandCenterURL != "http://192.0.2.1:7703" {
+	if res.Token != "prov_x" || res.NodeID != "n1" || res.Room != "office" || res.HouseholdID != "hh1" || res.HouseholdName != "The Smiths" || res.ApprovedBy != "sam@example.com" || res.NodeCommandCenterURL != "http://192.0.2.1:7703" {
 		t.Fatalf("result: %+v", res)
 	}
 	if len(waits) != 2 || waits[0] != 3*time.Second {
