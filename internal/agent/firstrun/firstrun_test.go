@@ -510,6 +510,8 @@ func TestPairShowsCodeWhenApprovalWinsTheRace(t *testing.T) {
 	d.Creds = func() (node.Creds, bool) {
 		if slow.Load() {
 			// Let the poll loop (approved on its first poll) finish before the response is built.
+			// With the fix the view is built before the loop starts, so this always waits the
+			// full 200 ms on the passing path; only the old ordering lets wg.Wait return early.
 			done := make(chan struct{})
 			go func() { s.app.wg.Wait(); close(done) }()
 			select {
