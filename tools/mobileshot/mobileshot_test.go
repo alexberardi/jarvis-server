@@ -278,3 +278,73 @@ func TestDeviceAlwaysNamesItsSerial(t *testing.T) {
 		}
 	}
 }
+
+func TestScreenOrder(t *testing.T) {
+	want := "landing,login,home,devices,pantry,routines,nodes,settings,inbox,inbox_detail,chat"
+	if got := strings.Join(allScreens, ","); got != want {
+		t.Fatalf("allScreens %s, want %s", got, want)
+	}
+	if modals["inbox_detail"] != "inbox-button" {
+		t.Fatalf("inbox_detail opens from %q, want inbox-button", modals["inbox_detail"])
+	}
+}
+
+// inboxDump is the inbox modal in select mode: the checkboxes and select-all must not count as
+// items.
+func inboxDump(items string) string {
+	return `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">
+<node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.jarvis.nodemobile" content-desc="" bounds="[0,0][1080,2400]">
+  <node index="0" text="Inbox" resource-id="" class="android.widget.TextView" content-desc="" bounds="[42,160][215,240]"/>
+  <node index="1" text="" resource-id="inbox-select-all" class="android.widget.Button" content-desc="" bounds="[790,150][890,250]"/>
+  <node index="2" text="" resource-id="inbox-checkbox-7" class="android.widget.CheckBox" content-desc="" bounds="[20,400][100,480]"/>
+` + items + `</node>
+</hierarchy>`
+}
+
+const inboxItems = `  <node index="3" text="" resource-id="inbox-item-9" class="android.view.ViewGroup" content-desc="" clickable="true" bounds="[0,400][1080,600]">
+    <node index="0" text="Weather in Boston" resource-id="" class="android.widget.TextView" content-desc="" bounds="[120,420][900,480]"/>
+  </node>
+  <node index="4" text="" resource-id="com.jarvis.nodemobile:id/inbox-item-7" class="android.view.ViewGroup" content-desc="" clickable="true" bounds="[0,600][1080,800]"/>
+`
+
+func TestFirstInboxItem(t *testing.T) {
+	if n, ok := firstInboxItem(mustParse(t, inboxDump(""))); ok {
+		t.Fatalf("an empty inbox has an item: %+v", n)
+	}
+	n, ok := firstInboxItem(mustParse(t, inboxDump(inboxItems)))
+	if !ok || n.ID != "inbox-item-9" {
+		t.Fatalf("first item %+v %v, want inbox-item-9", n, ok)
+	}
+}
+
+func TestInboxDetailSkipsAnEmptyInbox(t *testing.T) {
+	var calls []string
+	fake := func(_ context.Context, args ...string) ([]byte, error) {
+		last := args[len(args)-1]
+		calls = append(calls, last)
+		if strings.HasPrefix(last, "cat ") {
+			return []byte(inboxDump("")), nil
+		}
+		return nil, nil
+	}
+	d, err := NewDevice("emulator-5580", fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &runner{c: &config{pages: 1}, d: d, idx: &Index{Failures: []string{}}}
+	if err := r.inboxDetail(context.Background(), look{"dark", "1.3"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []Skip{{Screen: "inbox_detail", Theme: "dark", FontScale: "1.3", Reason: "no inbox items"}}
+	if len(r.idx.Skipped) != 1 || r.idx.Skipped[0] != want[0] {
+		t.Fatalf("skipped %+v, want %+v", r.idx.Skipped, want)
+	}
+	if len(r.idx.Failures) != 0 || len(r.idx.Shots) != 0 {
+		t.Fatalf("an empty inbox failed or shot: %+v", r.idx)
+	}
+	for _, c := range calls {
+		if strings.HasPrefix(c, "input ") || strings.HasPrefix(c, "screencap") {
+			t.Fatalf("an empty inbox tapped or shot: %q", c)
+		}
+	}
+}
