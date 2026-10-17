@@ -188,12 +188,15 @@ func writeJSON(p Paths, path string, v any) error {
 		return err
 	}
 	_, err = f.Write(append(b, '\n'))
-	if err := errors.Join(err, f.Close()); err != nil {
+	if err := errors.Join(err, f.Sync(), f.Close()); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	chownLike(p.Home, tmp)
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
 }
 
 // createFresh creates path (0600) for writing, replacing whatever was there without following
