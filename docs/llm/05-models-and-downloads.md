@@ -221,6 +221,7 @@ Keys come from `services/settings_service.py`. A key not listed here is cut: its
 | Key | Values / meaning |
 |---|---|
 | `llm.request_timeout_seconds` | default 240, prod's value |
+| `llm.stream_idle_timeout_seconds` | default 60 (new: a stream with no engine bytes for this long is cancelled; 0 = off) |
 | `llm.embeddings.model` | catalog id; default MiniLM GGUF (01 §3.7) |
 | `llm.embeddings.engine` | `local` \| `remote` \| `off` |
 | `llm.hf_token` | secret |
