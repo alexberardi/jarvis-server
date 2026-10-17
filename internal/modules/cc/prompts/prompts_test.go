@@ -9,29 +9,42 @@ import (
 )
 
 func TestServerToolGates(t *testing.T) {
-	all := []string{"deep_research", "forget", "get_ha_entities", "identify_speaker", "list_scheduled_errands",
-		"make_phone_call", "quick_search", "recall", "remember", "request_validation", "run_errand", "schedule_errand"}
+	all := []string{"cancel_watch", "create_watch", "deep_research", "forget", "get_ha_entities", "identify_speaker",
+		"list_scheduled_errands", "list_watches", "make_phone_call", "quick_search", "recall", "remember", "request_validation",
+		"run_errand", "schedule_errand"}
+	watch := []string{"create_watch", "list_watches", "cancel_watch"}
 	base := []string{"answer_question", "make_phone_call", "run_errand", "schedule_errand", "list_scheduled_errands"}
 	cases := []struct {
 		g          ToolGates
 		text       []string
 		nativeDrop []string
+		watches    bool // the watch tools pass (otherwise they join nativeDrop)
 	}{
-		{ToolGates{}, base, []string{"deep_research", "quick_search", "remember", "forget", "recall"}},
-		{ToolGates{WebSearch: true}, append(append([]string{}, base...), "deep_research", "quick_search"), []string{"remember", "forget", "recall"}},
+		{ToolGates{}, base, []string{"deep_research", "quick_search", "remember", "forget", "recall"}, false},
+		{ToolGates{WebSearch: true}, append(append([]string{}, base...), "deep_research", "quick_search"), []string{"remember", "forget", "recall"}, false},
 		// Memory without a known speaker offers nothing (D21).
-		{ToolGates{MemoryEnabled: true, RecallEnabled: true}, base, []string{"deep_research", "quick_search", "remember", "forget", "recall"}},
-		{ToolGates{SpeakerKnown: true, MemoryEnabled: true}, append(append([]string{}, base...), "remember", "forget"), []string{"deep_research", "quick_search", "recall"}},
+		{ToolGates{MemoryEnabled: true, RecallEnabled: true}, base, []string{"deep_research", "quick_search", "remember", "forget", "recall"}, false},
+		{ToolGates{SpeakerKnown: true, MemoryEnabled: true}, append(append([]string{}, base...), "remember", "forget"), []string{"deep_research", "quick_search", "recall"}, false},
 		{ToolGates{WebSearch: true, SpeakerKnown: true, MemoryEnabled: true, RecallEnabled: true},
-			append(append([]string{}, base...), "deep_research", "quick_search", "remember", "forget", "recall"), nil},
+			append(append([]string{}, base...), "deep_research", "quick_search", "remember", "forget", "recall"), nil, false},
 		// Recall needs memory too.
-		{ToolGates{SpeakerKnown: true, RecallEnabled: true}, base, []string{"deep_research", "quick_search", "remember", "forget", "recall"}},
+		{ToolGates{SpeakerKnown: true, RecallEnabled: true}, base, []string{"deep_research", "quick_search", "remember", "forget", "recall"}, false},
+		// Watches need watches on and a known speaker (A8); they follow recall.
+		{ToolGates{Watches: true}, base, []string{"deep_research", "quick_search", "remember", "forget", "recall"}, false},
+		{ToolGates{Watches: true, SpeakerKnown: true}, append(append([]string{}, base...), watch...), []string{"deep_research", "quick_search", "remember", "forget", "recall"}, true},
+		{ToolGates{WebSearch: true, SpeakerKnown: true, MemoryEnabled: true, RecallEnabled: true, Watches: true},
+			append(append([]string{}, base...), "deep_research", "quick_search", "remember", "forget", "recall", "create_watch", "list_watches", "cancel_watch"), nil, true},
 	}
 	for i, c := range cases {
 		if got := ServerToolNames(false, all, c.g); !reflect.DeepEqual(got, c.text) {
 			t.Errorf("%d text = %v, want %v", i, got, c.text)
 		}
 		drop := map[string]bool{}
+		if !c.watches {
+			for _, w := range watch {
+				drop[w] = true
+			}
+		}
 		for _, d := range c.nativeDrop {
 			drop[d] = true
 		}
