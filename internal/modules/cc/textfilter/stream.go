@@ -15,7 +15,7 @@ type ThinkStripper struct {
 	unclosed   *regexp.Regexp
 }
 
-// NewThinkStripper builds a stripper for (start, end), e.g. prompts.Provider.ThinkDelimiters().
+// NewThinkStripper builds a stripper for (start, end), e.g. (prompts.ThinkOpen, prompts.ThinkClose).
 func NewThinkStripper(start, end string) *ThinkStripper {
 	return &ThinkStripper{
 		start:    start,

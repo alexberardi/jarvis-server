@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -45,6 +46,8 @@ type Service struct {
 	// llm.background.max_tokens (nil: the setting).
 	graceOverride time.Duration
 	capOverride   *int
+	// Test overrides for the stream watchdog (0: the settings).
+	idleOverride, firstOverride time.Duration
 
 	mu      sync.Mutex
 	streams map[string]*streamHandle
@@ -59,7 +62,8 @@ type Service struct {
 type ServiceConfig struct {
 	Resolver Resolver
 	// HTTPClient talks to engines; nil uses a client without an overall timeout (streams are
-	// long; non-stream calls are bounded by llm.request_timeout_seconds).
+	// long; non-stream calls are bounded by llm.request_timeout_seconds, streams by
+	// llm.stream_idle_timeout_seconds between engine bytes).
 	HTTPClient *http.Client
 	// Settings supplies the label defaults; nil uses the definitions' defaults.
 	Settings *settings.Service
@@ -106,6 +110,13 @@ func (s *Service) setNow(f func() time.Time) {
 func (s *Service) setAdmission(grace time.Duration, maxTokens int) {
 	s.lmu.Lock()
 	s.graceOverride, s.capOverride = grace, &maxTokens
+	s.lmu.Unlock()
+}
+
+// setStreamIdle overrides the stream idle window and the first-byte allowance (tests).
+func (s *Service) setStreamIdle(idle, first time.Duration) {
+	s.lmu.Lock()
+	s.idleOverride, s.firstOverride = idle, first
 	s.lmu.Unlock()
 }
 
@@ -161,6 +172,28 @@ func (s *Service) requestTimeout(ctx context.Context) time.Duration {
 		n = 240
 	}
 	return time.Duration(n) * time.Second
+}
+
+// streamIdle is how long a stream may go without a byte from the engine
+// (llm.stream_idle_timeout_seconds; 0 turns the watchdog off) and the allowance before the
+// first byte: at least llm.request_timeout_seconds, since an engine sends nothing (not even
+// headers) while it evaluates a long prompt.
+func (s *Service) streamIdle(ctx context.Context) (idle, first time.Duration) {
+	s.lmu.Lock()
+	idle, first = s.idleOverride, s.firstOverride
+	s.lmu.Unlock()
+	if idle > 0 {
+		return idle, max(idle, first)
+	}
+	n, err := strconv.Atoi(s.setting(ctx, "llm.stream_idle_timeout_seconds"))
+	if err != nil || n < 0 {
+		n = 60
+	}
+	if n == 0 {
+		return 0, 0
+	}
+	idle = time.Duration(n) * time.Second
+	return idle, max(idle, s.requestTimeout(ctx))
 }
 
 // --- labels ---
@@ -817,6 +850,34 @@ func (s *Service) runStream(ctx context.Context, ep Endpoint, label, priority st
 		return streamResult{}, err
 	}
 	defer release()
+	idle, first := s.streamIdle(ctx)
+	if idle <= 0 {
+		return s.streamFrom(ctx, ep, p, func(r io.Reader) io.Reader { return r }, onDelta)
+	}
+	// The watchdog: an engine that goes quiet (before headers, before the first byte, or
+	// mid-stream) cancels the request, so the parser returns and release frees the slot
+	// instead of holding it until the caller leaves.
+	ictx, icancel := context.WithCancelCause(ctx)
+	defer icancel(nil)
+	w := &idleWatch{idle: idle, quiet: first}
+	w.t = time.AfterFunc(first, func() { icancel(errStreamIdle) })
+	defer w.t.Stop()
+	res, err := s.streamFrom(ictx, ep, p, w.reader, func(d string) bool {
+		// A consumer slow to take the delta is not a quiet engine.
+		w.t.Stop()
+		ok := onDelta(d)
+		w.t.Reset(idle)
+		return ok
+	})
+	if err != nil && errors.Is(context.Cause(ictx), errStreamIdle) {
+		s.log.Warn("llm stream idle, cancelled", "label", label, "endpoint", ep.BaseURL, "model", ep.Model, "after", w.quiet)
+		return res, fmt.Errorf("%w: engine sent nothing for %s", errStreamIdle, w.quiet)
+	}
+	return res, err
+}
+
+// streamFrom posts the streamed request and parses the body, wrapped by wrap.
+func (s *Service) streamFrom(ctx context.Context, ep Endpoint, p *chatPayload, wrap func(io.Reader) io.Reader, onDelta func(string) bool) (streamResult, error) {
 	if ep.API == APIAnthropic {
 		body, err := anthropicBody(p)
 		if err != nil {
@@ -827,14 +888,41 @@ func (s *Service) runStream(ctx context.Context, ep Endpoint, label, priority st
 			return streamResult{}, err
 		}
 		defer resp.Body.Close()
-		return parseAnthropicStream(resp.Body, onDelta, s.log)
+		return parseAnthropicStream(wrap(resp.Body), onDelta, s.log)
 	}
 	resp, err := s.post(ctx, ep, "/chat/completions", p)
 	if err != nil {
 		return streamResult{}, err
 	}
 	defer resp.Body.Close()
-	return parseStream(resp.Body, onDelta)
+	return parseStream(wrap(resp.Body), onDelta)
+}
+
+// errStreamIdle marks a stream the watchdog stopped because the engine went quiet.
+var errStreamIdle = errors.New("llm: stream idle")
+
+// idleWatch re-arms its timer on every read that brings bytes. quiet is the window that was
+// running (the first-byte allowance, then idle), for the error message. Only the parsing
+// goroutine touches it; the timer's func only cancels.
+type idleWatch struct {
+	t           *time.Timer
+	idle, quiet time.Duration
+}
+
+func (w *idleWatch) reader(r io.Reader) io.Reader { return idleReader{r, w} }
+
+type idleReader struct {
+	r io.Reader
+	w *idleWatch
+}
+
+func (r idleReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if n > 0 {
+		r.w.t.Reset(r.w.idle)
+		r.w.quiet = r.w.idle
+	}
+	return n, err
 }
 
 func streamErrMsg(err error) string {

@@ -67,7 +67,7 @@ func TestFindTesseractSkipsNonExecutablesAndDirs(t *testing.T) {
 // Without tesseract or Apple Vision, photo import works only if LLM vision is switched on;
 // the start log says so (A10e: every photo import on the MBP's rc4 was ocr_unavailable).
 func TestNoTextEngineHint(t *testing.T) {
-	llmOnly := []Engine{&LLMVision{URL: "x"}}
+	llmOnly := []Engine{&LLMVision{}}
 	if h := noTextEngineHint(llmOnly); h == "" {
 		t.Fatal("want a hint when only LLM vision is built")
 	}

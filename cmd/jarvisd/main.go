@@ -112,14 +112,11 @@ func modules(env config.Env) []module.Module {
 	ocrm.SettingsRead = settingsRead()
 	ocrm.SettingsWrite = superuser
 	ocrm.Version = version
-	// During the strangler phase LLM vision goes to the legacy llm-proxy; jarvisd's own
-	// app credentials (legacy names) sign outbound calls and job-completion callbacks.
+	// jarvisd's app credentials (legacy env names) sign job-completion callbacks.
 	ocrm.AppID, ocrm.AppKey = env.AppID, env.AppKey
 	// Without them (every fresh install), jarvisd signs with its own app client.
 	ocrm.AppCreds = auth.SelfAppCreds
-	// LLM vision and validation go to jarvisd's own llm module, in memory.
-	ocrm.LLMURL, ocrm.LLMAppID, ocrm.LLMAppKey = llmmod.InProcessBaseURL, "jarvisd", "in-process"
-	ocrm.LLMClient = llm.InProcessClient()
+	ocrm.LLM = llm.Service() // LLM vision and validation
 	ocrm.AppleVisionURL, ocrm.AppleVisionKey = env.OSXAPIURL, env.OSXAPIKey
 
 	llm.Auth = auth
@@ -620,7 +617,7 @@ func rollbackAfterGate(ctx context.Context, log *slog.Logger, p update.Paths, re
 	if err != nil {
 		return err
 	}
-	log.Info("upgrade: rolled back", "from", res.To, "to", res.From, "db_restored", res.DBRestored)
+	log.Info("upgrade: rolled back", "from", res.To, "to", res.From, "db_restored", res.DBRestored, "data_since", res.DataSince)
 	if supervised {
 		return service.ErrRestart
 	}

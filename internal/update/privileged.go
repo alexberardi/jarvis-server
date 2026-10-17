@@ -264,7 +264,10 @@ func (h *homeDir) writeJSON(name string, v any) error {
 		_ = h.root.Remove(tmp)
 		return err
 	}
-	return h.root.Rename(tmp, name)
+	if err := h.root.Rename(tmp, name); err != nil {
+		return err
+	}
+	return syncRootDir(h.root, filepath.Dir(name))
 }
 
 // finish records the outcome and drops the marker and the staged files, all inside the home.

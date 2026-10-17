@@ -194,3 +194,30 @@ func TestAcceptedAck(t *testing.T) {
 		}
 	}
 }
+
+func TestGatedErrandCard(t *testing.T) {
+	ctx := context.Background()
+	uid := int64(7)
+	se := newSigEnv(t)
+	se.createNode("n1", sigHH)
+	se.set(settingAttention, true, sigHH)
+	se.set(settingAttnQuietHours, "", sigHH)
+	card := errands.Card{HouseholdID: sigHH, UserID: &uid, Title: "🤖 Ran on its own: Weather", Summary: "Done.", Body: "b",
+		Category: errands.CategoryAutonomy, Metadata: map[string]any{"card_type": "autonomy_ran"}, Push: true, TargetType: "user",
+		Gated: true, DedupeKey: "autorun:wf_1"}
+	cards := errandCards{se.m}
+	first := cards.Post(ctx, card)
+	if first == "" {
+		t.Fatal("first card withheld")
+	}
+	var n int
+	if err := se.d.Read.QueryRow(`SELECT COUNT(*) FROM cc_attention_deliveries WHERE inbox_item_id = ?`, first).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("deliveries = %d, %v", n, err)
+	}
+	if id := cards.Post(ctx, card); id != "" {
+		t.Fatalf("duplicate delivered as %s", id)
+	}
+	if items := se.items(); len(items) != 1 || items[0].Metadata["card_type"] != "autonomy_ran" {
+		t.Fatal(items)
+	}
+}

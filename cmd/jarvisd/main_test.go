@@ -158,7 +158,7 @@ func TestModulesWiring(t *testing.T) {
 		t.Errorf("cc not wired: %+v", cc)
 	}
 	if ocrm.AppID != "app-id" || ocrm.AppKey != "app-key" || ocrm.AppleVisionURL != "http://mac:1" ||
-		ocrm.AppleVisionKey != "mac-key" || ocrm.LLMClient == nil || ocrm.AppCreds == nil {
+		ocrm.AppleVisionKey != "mac-key" || ocrm.LLM == nil || ocrm.AppCreds == nil {
 		t.Errorf("ocr: %+v", ocrm)
 	}
 	if llm.AppID != "app-id" || llm.AppKey != "app-key" || llm.AppCreds == nil {

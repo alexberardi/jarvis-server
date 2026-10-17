@@ -32,7 +32,11 @@ func (m *Module) handleNodeAction(w http.ResponseWriter, r *http.Request, u auth
 	}
 	ctx := r.Context()
 	id := r.PathValue("node_id")
-	if _, err := m.requireNodeAccess(ctx, u, id, authn.RoleMember, "Not authorized"); err != nil {
+	n, err := m.requireNodeAccess(ctx, u, id, authn.RoleMember, "Not authorized")
+	if err == nil {
+		err = m.canUseDesktop(ctx, u, n, errDesktopActionRole)
+	}
+	if err != nil {
 		m.writeErr(w, err)
 		return
 	}

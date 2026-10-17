@@ -6,13 +6,15 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 )
 
-// Wiring for the autonomy activity log (docs/autonomy/PLAN.md §0.3): the store and the policy
-// that decides background actions. Nothing is gated on it yet; P1 adds the rules and the calls.
+// Wiring for the autonomy activity log (docs/autonomy/PLAN.md §0.3) and the Custom Rules
+// (docs/autonomy/PLAN.md §1, A7): the store and the policy that decides background actions.
+// Nothing is gated on the policy yet; the checkpoints come with the rest of P1.
 
-// registerAutonomy builds the activity-log store and the (rule-less) policy.
+// registerAutonomy builds the activity-log store and the policy that resolves background
+// actions against the household's Custom Rules (docs/autonomy/PLAN.md §1, A7).
 func (m *Module) registerAutonomy() {
 	m.autonomy = &policy.Store{DB: m.deps.DB, Now: m.now}
-	m.policy = &policy.Policy{}
+	m.policy = &policy.Policy{Rules: m.autonomy}
 }
 
 // recordAutonomy appends one autonomy event; a failure to log is a warning, not an error to the

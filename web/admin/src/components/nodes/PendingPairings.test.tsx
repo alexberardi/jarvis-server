@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError, AxiosHeaders } from 'axios'
 import { apiClient } from '@/api/client'
 import type { PairingsView } from '@/api/nodes'
+import { toast } from 'sonner'
 import PendingPairings from './PendingPairings'
 
 vi.mock('sonner', () => ({
@@ -27,16 +28,7 @@ function renderIt() {
 beforeEach(() => {
   vi.clearAllMocks()
   view = {
-    pairings: [
-      {
-        code: 'ABCD-EFGH',
-        name: 'Office-PC',
-        platform: 'linux',
-        requested_from: '192.0.2.7',
-        created_at: '2026-10-13T12:00:00Z',
-        expires_in: 540,
-      },
-    ],
+    waiting: 1,
     households: [
       { id: 'hh1', name: 'Home', role: 'owner' },
       { id: 'hh2', name: 'Cabin', role: 'member' },
@@ -55,50 +47,56 @@ afterEach(() => {
 })
 
 describe('PendingPairings', () => {
-  it('shows the code and approves into the chosen household and room', async () => {
+  it('lists no codes: approves the typed code into the chosen household and room', async () => {
     renderIt()
-    expect(await screen.findByText('ABCD-EFGH')).toBeInTheDocument()
-    expect(screen.getByText('Office-PC')).toBeInTheDocument()
+    expect(await screen.findByTestId('pairings-waiting')).toHaveTextContent(
+      '1 computer is waiting for approval. Type the code shown on the computer.',
+    )
+    const approve = screen.getByRole('button', { name: /approve/i })
+    expect(approve).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Code shown on the computer'), { target: { value: 'abcd-efgh ' } })
     fireEvent.change(screen.getByLabelText('Household'), { target: { value: 'hh2' } })
     fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'study' } })
-    fireEvent.click(screen.getByRole('button', { name: /approve/i }))
+    fireEvent.click(approve)
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/cc/api/v0/nodes/pairings/approve', {
-        code: 'ABCD-EFGH',
+        code: 'abcd-efgh',
         household_id: 'hh2',
         room: 'study',
       }),
     )
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Approved. The computer asks to confirm Cabin before it joins.'))
+    expect(screen.getByLabelText('Code shown on the computer')).toHaveValue('')
   })
 
-  it('denies by code', async () => {
+  it('denies the typed code', async () => {
     renderIt()
-    fireEvent.click(await screen.findByRole('button', { name: /deny/i }))
+    fireEvent.change(await screen.findByLabelText('Code shown on the computer'), { target: { value: 'ABCD-EFGH' } })
+    fireEvent.click(screen.getByRole('button', { name: /deny/i }))
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/cc/api/v0/nodes/pairings/deny', { code: 'ABCD-EFGH' }))
   })
 
-  it('says how to start a pairing when nothing waits', async () => {
-    view = { pairings: [], households: view.households }
+  it('says how to start a pairing when nothing waits, and still takes a code', async () => {
+    view = { waiting: 0, households: view.households }
     renderIt()
     expect(await screen.findByText('Pending pairings')).toBeInTheDocument()
     expect(screen.getByText(/No computers waiting/)).toHaveTextContent(
-      "No computers waiting. On the computer, open Jarvis Automation Agent or run jarvis-agent enroll --server <this server's address>; its code appears here.",
+      "No computers waiting. On the computer, open Jarvis Automation Agent or run jarvis-agent enroll --server <this server's address>, then type the code it shows below.",
     )
-    expect(screen.queryByRole('button', { name: /approve/i })).toBeNull()
+    expect(screen.getByLabelText('Code shown on the computer')).toBeInTheDocument()
   })
 
-  it('shows a new code on the next poll, without a reload', async () => {
+  it('shows a new request on the next poll, without a reload', async () => {
     vi.useFakeTimers()
-    const pending = view.pairings
-    view = { pairings: [], households: view.households }
+    view = { waiting: 0, households: view.households }
     renderIt()
     await act(() => vi.advanceTimersByTimeAsync(0))
     expect(screen.getByText(/No computers waiting/)).toBeInTheDocument()
 
-    view = { pairings: pending, households: view.households }
+    view = { waiting: 2, households: view.households }
     // usePairings' 3 s refetchInterval fires; the rest flushes react-query's and React's zero timeouts.
     await act(() => vi.advanceTimersByTimeAsync(3_100))
-    expect(screen.getByText('ABCD-EFGH')).toBeInTheDocument()
+    expect(screen.getByTestId('pairings-waiting')).toHaveTextContent('2 computers are waiting')
     expect(screen.queryByText(/No computers waiting/)).toBeNull()
   })
 

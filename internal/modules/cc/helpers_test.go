@@ -53,7 +53,7 @@ func (a *fakeAuth) addUser(id int64, household string, role authn.Role) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	tok := fmt.Sprintf("tok-%d", id)
-	a.users[tok] = authn.User{ID: id, HouseholdID: household}
+	a.users[tok] = authn.User{ID: id, Email: fmt.Sprintf("user%d@example.com", id), HouseholdID: household}
 	if household != "" {
 		if a.roles[household] == nil {
 			a.roles[household] = map[int64]authn.Role{}

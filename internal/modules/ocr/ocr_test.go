@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -646,31 +647,107 @@ func TestAppleVisionEngine(t *testing.T) {
 	}
 }
 
+// fakeLLM records each chat request and answers with content (or err); with block set it
+// waits for the request's context to end.
+type fakeLLM struct {
+	mu      sync.Mutex
+	reqs    []llm.ChatRequest
+	content string
+	err     error
+	block   bool
+}
+
+func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.mu.Lock()
+	f.reqs = append(f.reqs, req)
+	f.mu.Unlock()
+	if f.block {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &llm.ChatResponse{Content: f.content}, nil
+}
+
+func (f *fakeLLM) last(t *testing.T) llm.ChatRequest {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.reqs) == 0 {
+		t.Fatal("no LLM call")
+	}
+	return f.reqs[len(f.reqs)-1]
+}
+
 func TestLLMVisionEngine(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Model           string `json:"model"`
-			ReasoningBudget *int   `json:"reasoning_budget"`
-			Messages        []struct {
-				Content []map[string]any `json:"content"`
-			} `json:"messages"`
-		}
-		json.NewDecoder(r.Body).Decode(&in)
-		url := in.Messages[0].Content[1]["image_url"].(map[string]any)["url"].(string)
-		if r.Header.Get("X-Jarvis-App-Id") != "id" || in.Model != "background" || !strings.HasPrefix(url, "data:image/jpeg;base64,") ||
-			// Thinking off: a thinking background model spends max_tokens reasoning and
-			// answers nothing (Qwen3.5-9B: 4096 reasoning tokens, empty content).
-			in.ReasoningBudget == nil || *in.ReasoningBudget != 0 {
-			w.WriteHeader(400)
-			return
-		}
-		io.WriteString(w, `{"choices":[{"message":{"content":" {\"page1\": {\"text\": \"Soup\"}} "}}]}`)
-	}))
-	defer srv.Close()
-	l := &LLMVision{URL: srv.URL, AppID: "id", AppKey: "k"}
+	f := &fakeLLM{content: ` {"page1": {"text": "Soup"}} `}
+	l := &LLMVision{LLM: f}
+	if !l.Available(context.Background()) || (&LLMVision{}).Available(context.Background()) {
+		t.Fatal("available iff an LLM is wired")
+	}
 	r, err := l.Recognize(context.Background(), Image{Data: testPNG("HI"), ContentType: "image/jpeg"}, Options{ReturnBoxes: true})
 	if err != nil || r.Text != "Soup" || len(r.Blocks) != 1 || r.Blocks[0].Confidence != 0.95 {
 		t.Fatalf("%+v %v", r, err)
+	}
+	req := f.last(t)
+	if req.Label != llm.LabelBackground || len(req.Messages) != 1 || req.Messages[0].Role != "user" ||
+		req.Messages[0].Content == nil || len(req.Messages[0].Content.Parts) != 2 {
+		t.Fatalf("request: %+v", req)
+	}
+	parts := req.Messages[0].Content.Parts
+	if parts[0].Type != "text" || !strings.HasPrefix(parts[0].Text, "OCR this image") ||
+		parts[1].Type != "image_url" || parts[1].ImageURL == nil || !strings.HasPrefix(parts[1].ImageURL.URL, "data:image/jpeg;base64,") {
+		t.Fatalf("parts: %+v", parts)
+	}
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_object" || req.MaxTokens == nil || *req.MaxTokens != 4096 ||
+		// Thinking off: a thinking background model spends max_tokens reasoning and
+		// answers nothing (Qwen3.5-9B: 4096 reasoning tokens, empty content).
+		req.ReasoningBudget == nil || *req.ReasoningBudget != 0 || req.Priority != "" {
+		t.Fatalf("request options: %+v", req)
+	}
+	f.err = errors.New("model not loaded")
+	if _, err := l.Recognize(context.Background(), Image{Data: testPNG("HI")}, Options{}); err == nil || !strings.Contains(err.Error(), "model not loaded") {
+		t.Fatalf("LLM error: %v", err)
+	}
+	if _, err := (&LLMVision{}).Recognize(context.Background(), Image{Data: testPNG("HI")}, Options{}); err == nil {
+		t.Fatal("no LLM: want an error")
+	}
+}
+
+// Validation asks the label in ocr.validation_model (live/background, anything else live) and
+// fails open when no LLM is wired or it errors.
+func TestValidateWithLLM(t *testing.T) {
+	f := &fakeLLM{content: `{"is_valid": false, "confidence": 0.9, "reason": "garbled"}`}
+	e := setup(t, &Module{LLM: f})
+	e.m.Validator = nil // setup installs a fake validator; this test exercises the LLM one
+	text := "some long enough OCR text for validation"
+	if ok, conf, reason := e.m.validate(e.ctx, text); ok || conf != 0.9 || reason != "garbled" {
+		t.Fatalf("validate: %v %v %q", ok, conf, reason)
+	}
+	req := f.last(t)
+	if req.Label != llm.LabelLive || req.MaxTokens == nil || *req.MaxTokens != 200 || req.Temperature == nil || *req.Temperature != 0.2 ||
+		req.ResponseFormat == nil || req.ResponseFormat.Type != "json_object" || len(req.Messages) != 1 ||
+		req.Messages[0].Content == nil || req.Messages[0].Content.Text == nil || !strings.Contains(*req.Messages[0].Content.Text, text) {
+		t.Fatalf("request: %+v", req)
+	}
+	for model, want := range map[string]string{"Background": llm.LabelBackground, "qwen": llm.LabelLive} {
+		if err := e.m.settings.Set(e.ctx, "ocr.validation_model", model, settings.Scope{}); err != nil {
+			t.Fatal(err)
+		}
+		e.m.validate(e.ctx, text)
+		if got := f.last(t).Label; got != want {
+			t.Fatalf("ocr.validation_model %q: label %q, want %q", model, got, want)
+		}
+	}
+	f.err = errors.New("boom")
+	if ok, conf, reason := e.m.validate(e.ctx, text); !ok || conf != 0.5 || !strings.Contains(reason, "boom") {
+		t.Fatalf("LLM error fails open: %v %v %q", ok, conf, reason)
+	}
+	e.m.LLM = nil
+	if ok, _, reason := e.m.validate(e.ctx, text); !ok || !strings.Contains(reason, "unavailable") {
+		t.Fatalf("no LLM fails open: %v %q", ok, reason)
 	}
 }
 

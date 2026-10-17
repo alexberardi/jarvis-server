@@ -130,7 +130,10 @@ func Swap(ctx context.Context, p Paths, o SwapOptions) (*Marker, error) {
 // process keeps its inode). Windows: the running executable is renamed aside, then src renamed
 // in; CleanupOld deletes the parked copy on the next start. Each rename retries a transient
 // lock (renameRetry): antivirus briefly holds a just-written or just-started executable.
+// The directory is then synced, best effort: once src is in place a failed sync must not fail
+// the swap, or the marker would stay staged and a retry would copy the new binary over Prev.
 func installBinary(p Paths, src string, keepPrev bool) error {
+	dir := filepath.Dir(p.Exe)
 	if keepPrev {
 		tmp := p.Prev() + ".tmp"
 		if err := copyFile(p.Exe, tmp); err != nil {
@@ -160,10 +163,15 @@ func installBinary(p Paths, src string, keepPrev bool) error {
 				_ = renameRetry(aside, p.Exe) // never leave the service without its binary
 				return err
 			}
+			_ = syncDir(dir)
 			return nil
 		}
 	}
-	return renameRetry(src, p.Exe)
+	if err := renameRetry(src, p.Exe); err != nil {
+		return err
+	}
+	_ = syncDir(dir)
+	return nil
 }
 
 // copyFile copies src to dst with src's permissions (dst is replaced).
@@ -244,6 +252,10 @@ func Rollback(ctx context.Context, p Paths, reason string) (*Result, error) {
 			return nil, fmt.Errorf("update: restore the database snapshot %s: %w", snap, err)
 		}
 		res.DBRestored = true
+		res.DataSince = m.SnapshotAt
+		if res.DataSince.IsZero() {
+			res.DataSince = m.StagedAt
+		}
 	}
 	if err := finish(p, res); err != nil {
 		return nil, err
@@ -263,7 +275,9 @@ func keepRolledBack(p Paths) {
 	}
 	if err := os.Rename(tmp, p.RolledBack()); err != nil {
 		os.Remove(tmp)
+		return
 	}
+	_ = syncDir(filepath.Dir(p.RolledBack()))
 }
 
 // snapshotPathsOK reports whether a marker's snapshot entry names a database directly in the

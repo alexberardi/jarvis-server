@@ -48,7 +48,7 @@ beforeEach(() => {
   localStorage.setItem('jarvis-admin:access_token', 'a.e30.s')
   localStorage.setItem('jarvis-admin:refresh_token', 'r')
   localStorage.setItem('jarvis-admin:user', JSON.stringify({ id: 7, email: 'm@example.com', is_superuser: false }))
-  api.getPairings.mockResolvedValue({ pairings: [], households: [{ id: 'h1', name: 'Home', role: 'member' }] })
+  api.getPairings.mockResolvedValue({ waiting: 0, households: [{ id: 'h1', name: 'Home', role: 'member' }] })
   households.list.mockResolvedValue([{ id: 'h1', name: 'Home', role: 'member' }])
   chatApi.getThisDevice.mockResolvedValue({ node_id: null, reason: 'no_match' })
   api.signOutDevice.mockResolvedValue(undefined)

@@ -23,12 +23,15 @@ type Pairing struct {
 }
 
 // PairingResult is an approved pairing: a provisioning token for the approver's household,
-// plus where the approver put this computer.
+// plus where the approver put this computer. HouseholdName and ApprovedBy are what the computer
+// shows its user to confirm before it redeems the token.
 type PairingResult struct {
 	ProvisioningToken
-	HouseholdID string
-	Room        string
-	Name        string
+	HouseholdID   string
+	HouseholdName string
+	ApprovedBy    string
+	Room          string
+	Name          string
 }
 
 var (
@@ -55,6 +58,8 @@ type pollAnswer struct {
 	NodeID               string `json:"node_id"`
 	Token                string `json:"provisioning_token"`
 	HouseholdID          string `json:"household_id"`
+	HouseholdName        string `json:"household_name"`
+	ApprovedBy           string `json:"approved_by"`
 	Room                 string `json:"room"`
 	Name                 string `json:"name"`
 	NodeCommandCenterURL string `json:"node_command_center_url"`
@@ -83,7 +88,8 @@ func PollPairing(ctx context.Context, hc *http.Client, ccURL string, p Pairing) 
 		}
 		return PairingResult{
 			ProvisioningToken: ProvisioningToken{Token: a.Token, NodeID: a.NodeID, NodeCommandCenterURL: a.NodeCommandCenterURL},
-			HouseholdID:       a.HouseholdID, Room: a.Room, Name: a.Name,
+			HouseholdID:       a.HouseholdID, HouseholdName: a.HouseholdName, ApprovedBy: a.ApprovedBy,
+			Room: a.Room, Name: a.Name,
 		}, true, nil
 	}
 	return PairingResult{}, true, fmt.Errorf("pairing: unexpected status %q", a.Status)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 )
 
@@ -129,6 +130,11 @@ type deadlineJob struct {
 	Step       int    `json:"step"`
 	Kind       string `json:"kind"` // approval | phone_call
 	SessionID  string `json:"session_id,omitempty"`
+	// Confirm: the wait is on the step after Step itself (a rule said ask), not a replan.
+	Confirm bool `json:"confirm,omitempty"`
+	// Revision is the run's revision when the wait began; a later wait at the same cursor (a
+	// checkpoint's added step that asks) bumped it, so this deadline is not its. 0: unchecked.
+	Revision int `json:"revision,omitempty"`
 }
 
 func (s *Service) enqueueDeadline(ctx context.Context, j deadlineJob, after time.Duration) {
@@ -160,12 +166,25 @@ func (s *Service) runDeadlineJob(ctx context.Context, job queue.Job) ([]byte, er
 	if w == nil || w.State != "waiting" || w.Cursor != j.Step+1 || w.WaitingOn != j.Kind {
 		return nil, nil // resolved in time
 	}
+	if j.Revision != 0 && j.Revision != w.Revision {
+		return nil, nil // another wait at the same cursor
+	}
 	label := ""
 	if j.Step >= 0 && j.Step < len(w.Steps) {
 		label = w.Steps[j.Step].Label
 	}
 	switch j.Kind {
 	case signalApproval:
+		if j.Confirm {
+			i := j.Step + 1
+			if i < 0 || i >= len(w.Steps) {
+				return nil, nil
+			}
+			cmd := parse.PyStrip(w.Steps[i].Command)
+			_, err := s.deliver(ctx, resumeJob{WorkflowID: w.ID, Step: j.Step, Kind: signalConfirm, Fail: &failOutcome{
+				Command: cmd, Label: firstNonEmpty(w.Steps[i].Label, cmd), Error: "nobody approved this step in time"}})
+			return nil, err
+		}
 		s.declineCalls(ctx, w.ID)
 		_, err := s.deliver(ctx, resumeJob{WorkflowID: w.ID, Step: j.Step, Kind: signalApproval,
 			Fail: &failOutcome{Command: cmdReplan, Label: firstNonEmpty(label, "Replan"),

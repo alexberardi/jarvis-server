@@ -42,10 +42,10 @@ All routes are under `/api/v0`. Mount points are at `main.py:722,807,812,816,837
 
 | Method + path | Auth | Live caller | Notes |
 |---|---|---|---|
-| `POST /mobile/chat` | user JWT + household `member` | mobile `chatApi.ts:138`, web `lib/api.ts:186` | SSE stream (§3.1) |
-| `POST /mobile/chat/warmup` | user JWT + `member` | mobile `chatApi.ts:289`, web `lib/api.ts:223` | returns `{conversation_id, tools_loaded}` |
+| `POST /mobile/chat` | user JWT + household `member`. A desktop agent: its owner (still a member) or a household admin, else 403 (jarvisd, #102). | mobile `chatApi.ts:138`, web `lib/api.ts:186` | SSE stream (§3.1) |
+| `POST /mobile/chat/warmup` | user JWT + `member`; desktop agent as for chat | mobile `chatApi.ts:289`, web `lib/api.ts:223` | returns `{conversation_id, tools_loaded}` |
 | `GET /mobile/chat/capabilities` (jarvisd only, 2026-10-09) | user JWT | mobile (chat images) | `{images, max_images: 4, max_image_bytes: 2097152}`; see [chat-images.md](chat-images.md) §6 |
-| `POST /nodes/{node_id}/actions` | user JWT + `member` of the node's household | mobile `commandCenterApi.ts:39` (chat bubble buttons and inbox confirmation buttons), web `lib/api.ts:628` | blocks for up to 10 s (`node_commands.py:83-135`) |
+| `POST /nodes/{node_id}/actions` | user JWT + `member` of the node's household. A desktop agent: its owner (still a member) or a household admin, else 403 (jarvisd, #102). | mobile `commandCenterApi.ts:39` (chat bubble buttons and inbox confirmation buttons), web `lib/api.ts:628` | blocks for up to 10 s (`node_commands.py:83-135`) |
 | `POST /node/inbox-item` | node `X-API-Key` | node `services/inbox_backend.py:86` (SDK `JarvisInbox`), `export_shopping_list_command.py:624`, `export_todo_list_command.py:363`, community packages | `node_commands.py:629-702` |
 | `POST /node/push-notification` | node `X-API-Key` | node `agents/reminder_agent.py:151`, community packages | `node_commands.py:333-446` |
 | `POST /node/send-link` | node `X-API-Key` | node `commands/send_link_command.py:223` | `node_commands.py:507-582` |

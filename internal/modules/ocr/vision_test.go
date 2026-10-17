@@ -3,10 +3,7 @@ package ocr
 import (
 	"context"
 	"errors"
-	"io"
 	"math"
-	"net/http"
-	"net/http/httptest"
 	"runtime"
 	"slices"
 	"strings"
@@ -140,30 +137,25 @@ func TestAppleVisionDefaultFollowsOS(t *testing.T) {
 }
 
 func TestLLMVisionTimeoutSetting(t *testing.T) {
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
-			return
-		}
-		io.WriteString(w, `{"choices":[{"message":{"content":"{\"page1\":{\"text\":\"late\"}}"}}]}`)
-	}))
-	defer srv.Close()
-	defer close(release)
+	f := &fakeLLM{block: true}
 
 	// buildEngines wires the setting into the engine it builds.
 	var built *LLMVision
-	for _, en := range (&Module{LLMURL: srv.URL, LLMAppID: "id", LLMAppKey: "k", TesseractPath: "-"}).buildEngines() {
+	for _, en := range (&Module{LLM: f, TesseractPath: "-"}).buildEngines() {
 		if v, ok := en.(*LLMVision); ok {
 			built = v
 		}
 	}
-	if built == nil || built.TimeoutFn == nil {
-		t.Fatalf("LLM vision engine without the timeout setting: %+v", built)
+	if built == nil || built.TimeoutFn == nil || built.LLM != f {
+		t.Fatalf("LLM vision engine without the LLM or the timeout setting: %+v", built)
 	}
-	e := setup(t, &Module{LLMURL: srv.URL, LLMAppID: "id", LLMAppKey: "k"})
-	l := &LLMVision{URL: srv.URL, AppID: "id", AppKey: "k", TimeoutFn: e.m.llmVisionTimeout}
+	for _, en := range (&Module{TesseractPath: "-"}).buildEngines() {
+		if _, ok := en.(*LLMVision); ok {
+			t.Fatal("no LLM: no LLM vision engine")
+		}
+	}
+	e := setup(t, &Module{LLM: f})
+	l := &LLMVision{LLM: f, TimeoutFn: e.m.llmVisionTimeout}
 	if got := l.timeout(e.ctx); got != 180*time.Second {
 		t.Fatalf("default timeout %v, want 180s (M4)", got)
 	}

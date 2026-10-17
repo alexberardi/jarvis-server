@@ -25,7 +25,7 @@ beforeEach(() => {
           { node_id: 'pi1', room: 'kitchen', household_id: 'hh1', online: true, last_seen: null, last_seen_version: null, is_busy: false, node_kind: null, capabilities: {} },
         ],
       }
-    if (url === '/api/cc/api/v0/nodes/pairings') return { data: { pairings: [], households: [] } }
+    if (url === '/api/cc/api/v0/nodes/pairings') return { data: { waiting: 0, households: [] } }
     throw new Error(`unexpected GET ${url}`)
   })
 })
