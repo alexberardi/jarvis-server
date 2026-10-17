@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func env(m map[string]string) func(string) string {
-	return func(k string) string { return m[k] }
+func env(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -124,5 +124,50 @@ func TestAddrUnknownListener(t *testing.T) {
 	c, _ := load(env(map[string]string{"JARVIS_HOME": "/d"}))
 	if _, err := c.Addr("nope"); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestLoadEnvDefaults(t *testing.T) {
+	c, err := load(env(map[string]string{"JARVIS_HOME": "/d"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Env{MDNS: true, MQTTAddr: ":1884", MQTTWSAddr: ":9883"}); c.Env != want {
+		t.Fatalf("Env = %+v, want %+v", c.Env, want)
+	}
+	c, _ = load(env(map[string]string{"JARVIS_HOME": "/d", "JARVIS_PORT_OFFSET": "10000"}))
+	if c.Env.MQTTAddr != ":11884" || c.Env.MQTTWSAddr != ":19883" {
+		t.Fatalf("offset: %+v", c.Env)
+	}
+}
+
+func TestLoadEnv(t *testing.T) {
+	c, err := load(env(map[string]string{
+		"JARVIS_HOME": "/d", "JARVIS_PORT_OFFSET": "10000",
+		"JARVIS_CONFIG_ADMIN_TOKEN": "ct", "JARVIS_MDNS": "0", "ADMIN_API_KEY": "ak", "RELAY_HOUSEHOLD_JWT": "jwt",
+		"JARVIS_DEV_SPEAKER_HINTS": "1", "JARVIS_MQTT_ADDR": "127.0.0.1:2000", "JARVIS_MQTT_WS_ADDR": "",
+		"JARVIS_MQTT_ALLOW_ANONYMOUS": "1", "JARVIS_AUTH_ADMIN_TOKEN": "at", "AUTH_SECRET_KEY": "hs",
+		"JARVIS_ADMIN_UI_DIR": "/ui", "JARVIS_APP_ID": "id", "JARVIS_APP_KEY": "key",
+		"JARVIS_OSX_API_URL": "http://mac", "JARVIS_OSX_API_KEY": "mk",
+		"TWILIO_ACCOUNT_SID": "sid", "TWILIO_AUTH_TOKEN": "tt", "TWILIO_FROM_NUMBER": "+1",
+		"JARVIS_PHONE_PUBLIC_URL": "https://p", "JARVIS_PHONE_PUBLIC_WSS_URL": "wss://p",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An explicit MQTT address wins over the offset, and "" still disables the listener.
+	want := Env{ConfigAdminToken: "ct", AdminAPIKey: "ak", RelayHouseholdJWT: "jwt", DevSpeakerHints: true,
+		MQTTAddr: "127.0.0.1:2000", MQTTWSAddr: "", MQTTAllowAnonymous: true, AuthAdminToken: "at",
+		AuthSecretKey: "hs", AdminUIDir: "/ui", AppID: "id", AppKey: "key", OSXAPIURL: "http://mac", OSXAPIKey: "mk",
+		TwilioAccountSID: "sid", TwilioAuthToken: "tt", TwilioFromNumber: "+1",
+		PhonePublicURL: "https://p", PhonePublicWSSURL: "wss://p"}
+	if c.Env != want {
+		t.Fatalf("Env = %+v, want %+v", c.Env, want)
+	}
+	// Only "1" turns the dev switches on; any value but "0" keeps mDNS on.
+	c, _ = load(env(map[string]string{"JARVIS_HOME": "/d", "JARVIS_MDNS": "false",
+		"JARVIS_DEV_SPEAKER_HINTS": "true", "JARVIS_MQTT_ALLOW_ANONYMOUS": "yes"}))
+	if !c.Env.MDNS || c.Env.DevSpeakerHints || c.Env.MQTTAllowAnonymous {
+		t.Fatalf("switches: %+v", c.Env)
 	}
 }
