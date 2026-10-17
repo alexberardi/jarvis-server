@@ -523,7 +523,6 @@ func waitOutcome(ctx context.Context, p update.Paths, wait time.Duration, kind s
 	return errNoOutcome
 }
 
-// logHint says where the service's log is.
 // dataSinceLayout is how the CLI shows the snapshot time a database restore went back to.
 const dataSinceLayout = "2006-01-02 15:04:05 MST"
 
@@ -540,6 +539,7 @@ func dbNote(res *update.Result) string {
 	}
 }
 
+// logHint says where the service's log is.
 func logHint(kind service.Kind, home string) string {
 	if kind == service.Systemd {
 		return "journalctl -u jarvisd"
