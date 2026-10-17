@@ -169,14 +169,11 @@ func modules() []module.Module {
 			c.SettingsRead = settings.CombinedGuard(auth.VerifyUser, auth.ValidateApp)
 			c.SettingsWrite = superuser
 			c.Version = version
-			// During the strangler phase LLM vision goes to the legacy llm-proxy; jarvisd's own
-			// app credentials (legacy names) sign outbound calls and job-completion callbacks.
+			// jarvisd's app credentials (legacy env names) sign job-completion callbacks.
 			c.AppID, c.AppKey = os.Getenv("JARVIS_APP_ID"), os.Getenv("JARVIS_APP_KEY")
 			// Without them (every fresh install), jarvisd signs with its own app client.
 			c.AppCreds = auth.SelfAppCreds
-			// LLM vision and validation go to jarvisd's own llm module, in memory.
-			c.LLMURL, c.LLMAppID, c.LLMAppKey = llmmod.InProcessBaseURL, "jarvisd", "in-process"
-			c.LLMClient = llm.InProcessClient()
+			c.LLM = llm.Service() // LLM vision and validation
 			c.AppleVisionURL, c.AppleVisionKey = os.Getenv("JARVIS_OSX_API_URL"), os.Getenv("JARVIS_OSX_API_KEY")
 		case *llmmod.Module:
 			c.Auth = auth
