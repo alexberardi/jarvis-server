@@ -146,6 +146,7 @@ func TestChatThroughGatewayEndToEnd(t *testing.T) {
 		t.Fatalf("household: %d %v", code, out)
 	}
 	hh := obj(t, out)["id"].(string)
+	openRegistration(t, authURL, root)
 	code, out = call(t, "POST", authURL+"/auth/register", map[string]any{"email": "m@example.com", "password": "password1"})
 	if code != 201 && code != 200 {
 		t.Fatalf("register: %d %v", code, out)
