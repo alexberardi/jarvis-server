@@ -72,8 +72,8 @@
         "say": "how long is left on the pasta timer",
         "expect": {
           "tool": "check_timers",
-          "reply": "(?i)\\b(4|four)\\b[^.,;!?]{0,20}\\bminutes?\\b|\\b4\\.[1-5]\\s*min|\\b4:2\\d\\b|\\b263\\b",
-          "not_reply": "(?i)\\b(3|three|5|five)( and a half)? minutes?\\b|\\b(3|5)\\.\\d\\s*min"
+          "reply": "(?i)\\b(4|four)\\b[^.,;!?]{0,20}\\bmin(ute)?s?\\b|\\b4\\.[1-5]\\s*min|\\b4:2\\d\\b|\\b263\\b",
+          "not_reply": "(?i)(^|[^.\\d])\\b(3|three|5|five)( and a half)? min(ute)?s?\\b|\\b(3|5)\\.\\d\\s*min"
         }
       }
     ]

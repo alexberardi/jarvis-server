@@ -206,6 +206,10 @@ func TestTimeLeftReplyExpectation(t *testing.T) {
 		"Just over four minutes left.",
 		"4:23 remaining.",
 		"263 seconds left.",
+		"About 4.5 minutes left.",
+		"About 4.3 minutes left.",
+		"About 4 mins left.",
+		"4 min 23 sec left.",
 	} {
 		if f := check(r); len(f) != 0 {
 			t.Errorf("%q: %v", r, f)
@@ -218,6 +222,8 @@ func TestTimeLeftReplyExpectation(t *testing.T) {
 		"4 seconds left.",
 		"About 3 and a half minutes left.",
 		"About 5.5 minutes left.",
+		"About 5 mins left.",
+		"5 minutes left.",
 	} {
 		if f := check(r); len(f) == 0 {
 			t.Errorf("%q: want a failure", r)
