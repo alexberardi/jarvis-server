@@ -72,6 +72,23 @@ func TestAnnounceSetupPrintsTokenAndLink(t *testing.T) {
 	}
 }
 
+// The log reaches journald, launchd and the logs module's DB sink, which other local users
+// may read: it names the token file but never carries the token itself.
+func TestAnnounceSetupLogOmitsToken(t *testing.T) {
+	var logged bytes.Buffer
+	cfg := config.Config{Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710}}
+	announceSetup(io.Discard, slog.New(slog.NewTextHandler(&logged, nil)), cfg, "abc123", "/home/x/setup-token", false)
+	s := logged.String()
+	if strings.Contains(s, "abc123") || strings.Contains(s, "#token=") {
+		t.Errorf("log carries the setup token: %q", s)
+	}
+	for _, want := range []string{"url=http://127.0.0.1:7710/setup ", "token_file=/home/x/setup-token"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in %q", want, s)
+		}
+	}
+}
+
 func TestInteractiveDesktop(t *testing.T) {
 	f, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
 	if err != nil {
