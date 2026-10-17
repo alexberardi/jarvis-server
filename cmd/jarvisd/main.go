@@ -672,7 +672,7 @@ func rollbackAfterGate(ctx context.Context, log *slog.Logger, p update.Paths, re
 	if err != nil {
 		return err
 	}
-	log.Info("upgrade: rolled back", "from", res.To, "to", res.From, "db_restored", res.DBRestored)
+	log.Info("upgrade: rolled back", "from", res.To, "to", res.From, "db_restored", res.DBRestored, "data_since", res.DataSince)
 	if supervised {
 		return service.ErrRestart
 	}

@@ -156,7 +156,7 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 				return err
 			}
 			back = res.From
-			fmt.Fprintf(stdout, "rolled back %s to %s (database restored: %v)\n", res.To, res.From, res.DBRestored)
+			fmt.Fprintf(stdout, "rolled back %s to %s (%s)\n", res.To, res.From, dbNote(res))
 		}
 		if _, err := os.Stat(paths.RolledBack()); err == nil {
 			fmt.Fprintf(stdout, "the binary rolled back from is kept as %s\n", paths.RolledBack())
@@ -440,8 +440,8 @@ func rollbackStalled(ctx context.Context, mgr service.Manager, st service.Status
 	if serr := mgr.Start(ctx); serr != nil {
 		return serr
 	}
-	return fmt.Errorf("%s never became healthy and was rolled back to %s (database restored: %v); see %s",
-		res.To, res.From, res.DBRestored, logHint(st.Kind, p.Home))
+	return fmt.Errorf("%s never became healthy and was rolled back to %s (%s); see %s",
+		res.To, res.From, dbNote(res), logHint(st.Kind, p.Home))
 }
 
 var errNoOutcome = errors.New("no upgrade outcome")
@@ -508,8 +508,8 @@ func waitOutcome(ctx context.Context, p update.Paths, wait time.Duration, kind s
 				fmt.Fprintf(stdout, "jarvisd %s is up and healthy\n", res.To)
 				return nil
 			case update.ResultRolledBack:
-				return fmt.Errorf("%s failed (%s) and was rolled back to %s (database restored: %v); see %s",
-					res.To, res.Reason, res.From, res.DBRestored, logHint(kind, p.Home))
+				return fmt.Errorf("%s failed (%s) and was rolled back to %s (%s); see %s",
+					res.To, res.Reason, res.From, dbNote(res), logHint(kind, p.Home))
 			default:
 				return fmt.Errorf("upgrade to %s failed: %s", res.To, res.Reason)
 			}
@@ -524,6 +524,22 @@ func waitOutcome(ctx context.Context, p update.Paths, wait time.Duration, kind s
 }
 
 // logHint says where the service's log is.
+// dataSinceLayout is how the CLI shows the snapshot time a database restore went back to.
+const dataSinceLayout = "2006-01-02 15:04:05 MST"
+
+// dbNote says what a rollback did to the databases: kept, or restored from the snapshot taken
+// at staging, which discards everything written since (#109).
+func dbNote(res *update.Result) string {
+	switch {
+	case !res.DBRestored:
+		return "database kept"
+	case res.DataSince.IsZero():
+		return "database restored from the pre-upgrade snapshot"
+	default:
+		return "database restored: data written since " + res.DataSince.Local().Format(dataSinceLayout) + " was rolled back"
+	}
+}
+
 func logHint(kind service.Kind, home string) string {
 	if kind == service.Systemd {
 		return "journalctl -u jarvisd"

@@ -36,6 +36,7 @@ function info(over: Partial<UpdateInfo>): UpdateInfo {
 }
 
 let current: UpdateInfo
+let applyStatus: unknown
 const get = vi.spyOn(apiClient, 'get')
 const post = vi.spyOn(apiClient, 'post')
 const put = vi.spyOn(apiClient, 'put')
@@ -56,8 +57,13 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   resetFeatures()
+  applyStatus = { job: null, pending: null, last: null, can_apply: true }
   get.mockImplementation(async (url: string) => {
     if (url === '/api/update') return { data: current }
+    if (url === '/api/update/apply') {
+      if (applyStatus instanceof Error) throw applyStatus
+      return { data: applyStatus }
+    }
     if (url === '/api/system/info') return { data: { started_at: 't0', version: 'v0.1.0' } }
     throw new Error(`unexpected GET ${url}`)
   })
@@ -170,5 +176,55 @@ describe('update apply (AD5, feature-detected)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Update now/ }))
     expect(await screen.findByText('jarvisd is not supervised')).toBeInTheDocument()
     expect(screen.getByText('sudo systemctl restart jarvisd')).toBeInTheDocument()
+  })
+})
+
+describe('last upgrade (#109)', () => {
+  it('a rollback that restored the database says which writes were discarded', async () => {
+    current = info({ up_to_date: true })
+    const since = '2026-10-17T14:03:05Z'
+    applyStatus = {
+      job: null,
+      pending: null,
+      can_apply: true,
+      last: {
+        outcome: 'rolled_back',
+        from_version: 'v0.1.0',
+        to_version: 'v0.2.0',
+        reason: 'health gate: no /health within 120s',
+        db_restored: true,
+        data_since: since,
+        at: '2026-10-17T14:09:00Z',
+      },
+    }
+    renderPage()
+    expect(await screen.findByText(/The update to v0\.2\.0 was rolled back to v0\.1\.0/)).toBeInTheDocument()
+    expect(screen.getByText(/health gate: no \/health within 120s/)).toBeInTheDocument()
+    expect(
+      screen.getByText(`Data written since ${new Date(since).toLocaleString()} was rolled back with the database.`, { exact: false }),
+    ).toBeInTheDocument()
+  })
+
+  it('a rollback that kept the database says so', async () => {
+    current = info({ up_to_date: true })
+    applyStatus = {
+      job: null,
+      pending: null,
+      can_apply: true,
+      last: { outcome: 'rolled_back', from_version: 'v0.1.0', to_version: 'v0.2.0', reason: 'failed to start', at: '2026-10-17T14:09:00Z' },
+    }
+    renderPage()
+    expect(await screen.findByText(/The update to v0\.2\.0 was rolled back/)).toBeInTheDocument()
+    expect(screen.getByText(/The database was kept/)).toBeInTheDocument()
+    expect(screen.queryByText(/Data written since/)).toBeNull()
+  })
+
+  it('shows nothing when there is no last upgrade or the route is missing (older jarvisd)', async () => {
+    current = info({ up_to_date: true })
+    applyStatus = Object.assign(new Error('404'), { isAxiosError: true, response: { status: 404, data: { detail: 'Not found' } } })
+    renderPage()
+    expect(await screen.findByText('jarvisd is up to date')).toBeInTheDocument()
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/api/update/apply'))
+    expect(screen.queryByTestId('last-upgrade')).toBeNull()
   })
 })

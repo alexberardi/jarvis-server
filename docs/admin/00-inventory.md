@@ -545,7 +545,7 @@ superuser-gated, a nil interface answers 503):*
   upgrade"`), or while another upgrade is pending.
 - `GET /api/update/apply` → `{job: {state: running|restarting|failed, step, bytes_done, bytes_total,
   from_version, to_version, error, started_at} | null, pending: {state, from_version, to_version, attempts}
-  | null, last: {outcome: succeeded|rolled_back|failed, from_version, to_version, reason, db_restored, at} |
+  | null, last: {outcome: succeeded|rolled_back|failed, from_version, to_version, reason, db_restored, data_since, at} |
   null, current_version, can_apply, blocked_reason?, command?}`. Poll it; after the restart the new process
   answers with `pending` (health gate running) and then `last`.
 - `GET /api/update` and `POST /api/update/check` also carry `can_apply`, `apply_blocked`, `apply_command`.
