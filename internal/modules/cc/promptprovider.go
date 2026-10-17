@@ -36,11 +36,16 @@ type PromptProviderStatus struct {
 	// Options are the providers an override may name. The admin offers the pick-list when
 	// Derived is "" (a hand-registered model that declares none).
 	Options []string `json:"options"`
+	// ToolCalling and ThinkingSwitch are the install's LLM mode (llmmode.go): the settings, the
+	// live model's values and what a household without its own prompt values gets.
+	ToolCalling    ModeSetting `json:"tool_calling"`
+	ThinkingSwitch ModeSetting `json:"thinking_switch"`
 }
 
 // PromptProvider reports the effective prompt provider and where it comes from.
 func (m *Module) PromptProvider(ctx context.Context) PromptProviderStatus {
 	st := PromptProviderStatus{Options: prompts.Names()}
+	_, st.ToolCalling, st.ThinkingSwitch = m.llmMode(ctx, prompts.ModePrefs{})
 	if m.settings != nil {
 		st.Value = strings.TrimSpace(m.settings.String(ctx, settingPromptProvider, settings.Scope{}))
 	}

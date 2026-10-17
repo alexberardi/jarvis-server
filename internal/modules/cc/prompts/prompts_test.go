@@ -61,8 +61,7 @@ func mustTools(t *testing.T, js string) []Tool {
 func TestStripJarvisExtensionsDoesNotMutate(t *testing.T) {
 	tools := mustTools(t, `[{"type":"function","keywords":["a"],"is_server_tool":true,"function":{"name":"play","parameters":{"type":"object","properties":{"speaker":{"type":"string","_refinable":true},"q":{"type":"string"}},"required":["q","speaker"]}}}]`)
 	before := CompactASCII(tools[0])
-	p, _ := Lookup(Qwen3_5_9B)
-	got := NativeTools(p, tools)
+	got := NativeTools(tools)
 	if CompactASCII(tools[0]) != before {
 		t.Fatal("input tool mutated")
 	}

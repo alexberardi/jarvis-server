@@ -304,7 +304,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		zero := 0.0
 		creq := llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(conv.messages), MaxTokens: &one, Temperature: &zero}
 		if provider.SupportsNativeTools() {
-			creq.Tools = llmTools(prompts.NativeTools(provider, conv.tools))
+			creq.Tools = llmTools(prompts.NativeTools(conv.tools))
 			creq.ToolChoice = json.RawMessage(`"auto"`)
 		}
 		creq.ReasoningBudget = m.thinkingBudget(ctx, hh)

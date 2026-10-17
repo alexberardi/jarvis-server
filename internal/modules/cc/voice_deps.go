@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
@@ -148,6 +149,8 @@ type AttentionDecision struct {
 // Setting keys the voice pipeline reads (D11: only keys something reads are declared).
 const (
 	settingPromptProvider    = "llm.prompt_provider"
+	settingToolCalling       = "llm.tool_calling"
+	settingThinkingSwitch    = "llm.thinking_switch"
 	settingMaxTurns          = "conversation.max_turns"
 	settingIncludeThinking   = "model.include_thinking"
 	settingSmallModelMode    = "model.small_model_mode"
@@ -170,9 +173,20 @@ const (
 func voiceDefinitions(defaultPersona string) []settings.Definition {
 	return []settings.Definition{
 		{Key: settingPromptProvider, Category: "llm", Type: settings.String, Default: "", RequiresReload: false,
-			Description: "Prompt provider for the live voice model (D11: renamed from llm.interface; set at install " +
-				"time from the model catalog). One of Qwen3_14B_Compressed, Qwen3_8B_Compressed, " +
-				"Qwen3_5_9B_Compressed, ChatGPTOpenAI. An unknown name fails /conversation/start."},
+			Description: "Default built-in prompt for households without their own (docs/cc/prompt-contract.md; " +
+				"D11: renamed from llm.interface; set at install time from the model catalog). One of " +
+				"Qwen3_14B_Compressed, Qwen3_8B_Compressed, Qwen3_5_9B_Compressed, ChatGPTOpenAI. An unknown name " +
+				"fails /conversation/start."},
+		{Key: settingToolCalling, Category: "llm", Type: settings.String, Default: modeAuto,
+			Options:  []any{modeAuto, string(prompts.ToolsNative), string(prompts.ToolsText)},
+			Validate: oneOf(modeAuto, string(prompts.ToolsNative), string(prompts.ToolsText)),
+			Description: "How the live model calls tools: native (tools via the API) or text (<tool_call> in the reply). " +
+				"auto uses the household prompt's value, else the model's chat template."},
+		{Key: settingThinkingSwitch, Category: "llm", Type: settings.String, Default: modeAuto,
+			Options:  []any{modeAuto, thinkingSuffix, thinkingNone},
+			Validate: oneOf(modeAuto, thinkingSuffix, thinkingNone),
+			Description: "How thinking on/off reaches the model: suffix appends /think or /no_think to the user turn. " +
+				"auto uses the household prompt's value, else the chat template."},
 		{Key: settingMaxTurns, Category: "conversation", Type: settings.Int, Default: int64(10),
 			Description: "Maximum user/assistant exchanges kept in conversation history (sliding window — oldest " +
 				"turns are dropped first, atomically with their tool calls/results; keeps prompts bounded for the LLM)"},

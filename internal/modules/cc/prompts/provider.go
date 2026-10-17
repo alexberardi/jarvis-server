@@ -52,7 +52,7 @@ type Provider interface {
 	// SanitizeText cleans any user-facing text before TTS.
 	SanitizeText(text string) string
 	// BuildTools is the native tools payload transform (ToolBuilder.build). Pass
-	// StripJarvisExtensions(tools) first, as NativeTools does.
+	// StripJarvisExtensions(tools) first, as NativeTools does (the same for every provider).
 	BuildTools(tools []Tool) []Tool
 	// ThinkDelimiters are the chain-of-thought markers streaming code strips.
 	ThinkDelimiters() (open, close string)
@@ -180,12 +180,6 @@ func (s *spec) SanitizeText(text string) string {
 }
 
 func (s *spec) BuildTools(tools []Tool) []Tool { return buildTools(tools, nativeBuild) }
-
-// NativeTools is the native path's tools payload: p.BuildTools(StripJarvisExtensions(tools)).
-// Warmup and inference must both send exactly this for the prefix cache to hit (03 §7.3).
-func NativeTools(p Provider, tools []Tool) []Tool {
-	return p.BuildTools(StripJarvisExtensions(tools))
-}
 
 func sub(rule string) string { return strings.ReplaceAll(rule, "{terminology}", "function") }
 

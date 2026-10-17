@@ -136,6 +136,10 @@ type Module struct {
 	// DefaultPromptProvider names the prompt provider when llm.prompt_provider is unset (e.g.
 	// the live model's catalog entry). Nil: an unset setting is an error (D11).
 	DefaultPromptProvider func(ctx context.Context) string
+	// LiveModelTraits reports the live model's tool calling and thinking switch, for the auto
+	// values of llm.tool_calling and llm.thinking_switch (llmmode.go). Nil: text tools, no
+	// thinking suffix, the force-tools guard armed.
+	LiveModelTraits func(ctx context.Context) llm.ModelTraits
 	// Endpoints resolves an llm slot ("live", "background") for its capabilities: vision for
 	// chat images, the context size for compaction (chat_images.go, compaction.go). Nil: no
 	// images, no compaction.
