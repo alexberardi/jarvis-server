@@ -4,6 +4,7 @@ package contract
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,10 @@ var provisioningTokenShape = Obj{
 	"node_id":    NonEmptyString,
 	"expires_at": TimestampNaive, // LEGACY-BUG: naive (datetime.utcnow()), as elsewhere in CC.
 	"expires_in": Eq(provisioningTTLSeconds()),
+	// jarvisd addition (nodeurl.go): the URLs a LAN node should use; omitted when no node-facing
+	// URL can be worked out (loopback Host and no LAN address). Legacy never sends them.
+	"node_command_center_url": Optional(NonEmptyString),
+	"node_config_service_url": Optional(NonEmptyString),
 }
 
 // provisioningTTLSeconds: legacy tokens live 10 minutes; jarvisd's 30 (a node power-cycled
@@ -52,6 +57,31 @@ var nodeCreateShape = Obj{
 	"user":       Eq("default"),
 	"voice_mode": Eq("brief"),
 	"node_key":   NonEmptyString,
+}
+
+// TestProvisioningTokenShape runs without a target: jarvisd adds the node_*_url keys only when it
+// can work out a node-facing URL (a LAN Host, or loopback with a LAN address), which a loopback
+// contract run inside a sandbox with no LAN address never sees. Both responses are captured ones.
+func TestProvisioningTokenShape(t *testing.T) {
+	base := func() map[string]any {
+		return map[string]any{
+			"token": "prov_" + strings.Repeat("A", 43), "node_id": "83d8b341-8757-40c4-b24b-1ae9a25efc35",
+			"expires_at": "2026-10-17T01:48:17.878041", "expires_in": float64(provisioningTTLSeconds()),
+		}
+	}
+	withURLs := base()
+	withURLs["node_command_center_url"] = "http://192.168.1.50:17703"
+	withURLs["node_config_service_url"] = "http://192.168.1.50:17700"
+	unknown := base()
+	unknown["surprise"] = "x"
+	for name, c := range map[string]struct {
+		body map[string]any
+		ok   bool
+	}{"loopback, keys omitted": {base(), true}, "LAN host, keys present": {withURLs, true}, "unknown key": {unknown, false}} {
+		if errs := provisioningTokenShape.Match("$", c.body); (len(errs) == 0) != c.ok {
+			t.Errorf("%s: ok=%v, got %v", name, c.ok, errs)
+		}
+	}
 }
 
 func TestCCProvisioning(t *testing.T) {
