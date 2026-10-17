@@ -262,6 +262,30 @@ func TestInboxNonMember(t *testing.T) {
 	}
 }
 
+// TestRegisterTokenNonMember: a token still naming a household the user was removed from
+// registers no push device there (403, no row), so household-wide pushes stop reaching it
+// after the member-removed purge; a membership lookup failure is a 500.
+func TestRegisterTokenNonMember(t *testing.T) {
+	e := setup(t, func(m *Module) { m.Auth = fakeAuth{removed: map[string]bool{"1/hh1": true, "0/hhx": true}} })
+	if c, b := e.do(t, "POST", "/api/v0/tokens", `{"push_token":"gone","device_type":"ios"}`, userH(t, 1, "hh1")...); c != 403 || detail(t, b) != "User is not a member of this household" {
+		t.Fatalf("removed: %d %s", c, b)
+	}
+	if c, b := e.do(t, "POST", "/api/v0/tokens", `{"push_token":"broken","device_type":"ios"}`, userH(t, 2, "hhx")...); c != 500 {
+		t.Fatalf("lookup failure: %d %s", c, b)
+	}
+	var n int
+	e.d.Read.QueryRow(`SELECT COUNT(*) FROM notifications_device_tokens`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d device tokens written for non-members", n)
+	}
+	e.json(t, 200, "POST", "/api/v0/tokens", `{"push_token":"ok","device_type":"ios"}`, userH(t, 2, "hh1")...)
+	var hh string
+	e.d.Read.QueryRow(`SELECT household_id FROM notifications_device_tokens WHERE push_token = 'ok'`).Scan(&hh)
+	if hh != "hh1" {
+		t.Fatalf("member register: household %q", hh)
+	}
+}
+
 func TestInboxVisibility(t *testing.T) {
 	e := setup(t)
 	// Each item is created a millisecond after the last, so the newest-first order is fixed.
