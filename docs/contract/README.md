@@ -281,7 +281,9 @@ Not testable black-box, and why:
   is 1 h), and invite expiry (the minimum is 1 day).
 - Inactive users: no route deactivates one. That also covers temp-password's 409 for a
   deactivated user.
-- `REFRESH_TOKEN_REVOKE_FAMILY_ON_REUSE`: an env flag that is off on the target.
+- Refresh-family revocation on reuse: on jarvisd it is the setting `auth.token.revoke_family_on_reuse`
+  (env fallback `REFRESH_TOKEN_REVOKE_FAMILY_ON_REUSE`), off by default and on the target
+  (unit-tested in `internal/modules/auth` `TestRefreshRevokeFamilyOnReuse*`, `TestRefreshGraceMissNeverRevokesFamily`).
 - The DELETE /auth/me 502 when a downstream purge 5xxes.
 - The admin token compare is not constant-time (`!=`). That is not observable over HTTP.
 
