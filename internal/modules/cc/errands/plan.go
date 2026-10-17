@@ -69,6 +69,9 @@ func menuJSON(menu []MenuEntry) json.RawMessage {
 		}
 		o.Set("args", args)
 		o.Set("is_risky", c.IsRisky)
+		if c.RunWithoutConfirmation {
+			o.Set("run_without_confirmation", true)
+		}
 		list[i] = o
 	}
 	return json.RawMessage(pyjson.Compact(list))
@@ -94,7 +97,7 @@ func menuFromJSON(raw json.RawMessage) []MenuEntry {
 			args = pyjson.NewObject()
 		}
 		out = append(out, MenuEntry{Command: objStr(o, "command"), Description: objStr(o, "description"),
-			Args: args, IsRisky: objTruthy(o, "is_risky")})
+			Args: args, IsRisky: objTruthy(o, "is_risky"), RunWithoutConfirmation: objTruthy(o, "run_without_confirmation")})
 	}
 	return out
 }

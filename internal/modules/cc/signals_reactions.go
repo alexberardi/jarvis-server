@@ -241,8 +241,10 @@ type toolsEntry struct {
 type toolsReport struct {
 	raw      string
 	Commands []struct {
-		CommandName       string           `json:"command_name"`
-		ProposableActions []map[string]any `json:"proposable_actions"`
+		CommandName            string           `json:"command_name"`
+		ProposableActions      []map[string]any `json:"proposable_actions"`
+		IsRisky                bool             `json:"is_risky"`
+		RunWithoutConfirmation bool             `json:"run_without_confirmation"`
 	} `json:"available_commands"`
 }
 
@@ -283,6 +285,17 @@ func (r *toolsReport) commandNames() map[string]bool {
 		}
 	}
 	return out
+}
+
+// declaration is what the report declares for command: is_risky and run_without_confirmation
+// (false, false for a command it doesn't advertise).
+func (r *toolsReport) declaration(command string) (isRisky, runWithoutConfirmation bool) {
+	for _, c := range r.Commands {
+		if c.CommandName == command {
+			return c.IsRisky, c.RunWithoutConfirmation
+		}
+	}
+	return false, false
 }
 
 // proposable is capability_registry.resolve_proposable_action: the advertised action for

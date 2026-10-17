@@ -76,6 +76,9 @@ func (*recallTool) Name() string { return "recall" }
 
 func (*recallTool) Definition() *pyjson.Object { return servertools.LegacyDefinition("recall") }
 
+// A read-only lookup: may run in the background without a tap (A7).
+func (*recallTool) RunWithoutConfirmation() bool { return true }
+
 // Execute is semantic search over the speaker's own memories, unioned with keyword search
 // (M1, LD6). category "general" is a wildcard.
 func (t *recallTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {

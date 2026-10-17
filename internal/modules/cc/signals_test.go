@@ -657,3 +657,21 @@ func TestPurgeSignals(t *testing.T) {
 		t.Fatal("purge left rows")
 	}
 }
+
+func TestToolsReportDeclaration(t *testing.T) {
+	rep := &toolsReport{}
+	raw := `{"available_commands": [
+		{"command_name": "unlock_door", "is_risky": true},
+		{"command_name": "read_sensor", "is_risky": false, "run_without_confirmation": true}]}`
+	if err := json.Unmarshal([]byte(raw), rep); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		command     string
+		risky, free bool
+	}{{"unlock_door", true, false}, {"read_sensor", false, true}, {"unknown", false, false}} {
+		if risky, free := rep.declaration(c.command); risky != c.risky || free != c.free {
+			t.Errorf("%s: got (%v, %v), want (%v, %v)", c.command, risky, free, c.risky, c.free)
+		}
+	}
+}
