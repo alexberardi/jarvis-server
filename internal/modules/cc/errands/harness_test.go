@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -140,9 +142,17 @@ type fakeNodes struct {
 	outputs  map[string]*pyjson.Object // command → output
 	commands []*pyjson.Object
 	report   bool
+	// hold, when set, makes every RunTool wait until it is closed; entered counts the calls that
+	// reached it.
+	hold    chan struct{}
+	entered atomic.Int32
 }
 
 func (f *fakeNodes) RunTool(_ context.Context, node, cmd string, args *pyjson.Object, uid *int64, voice string, _ time.Duration) *pyjson.Object {
+	if f.hold != nil {
+		f.entered.Add(1)
+		<-f.hold
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, nodeCall{node, cmd, pyjson.Dumps(args, true), uid, voice})
@@ -287,6 +297,57 @@ func toolDef(name, desc string, props ...any) *pyjson.Object {
 		"parameters", servertools.Obj("type", "object", "properties", servertools.Obj(props...))))
 }
 
+// fakePolicy answers per tool (default ask) and counts its calls.
+type fakePolicy struct {
+	mu       sync.Mutex
+	verdicts map[string]policy.Verdict
+	calls    []policy.Action
+}
+
+func (f *fakePolicy) Decide(_ context.Context, _ string, a policy.Action) policy.Verdict {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, a)
+	if v, ok := f.verdicts[a.Tool]; ok {
+		return v
+	}
+	return policy.Verdict{Effect: policy.Ask, Reason: "no rule; asks by default"}
+}
+
+func (f *fakePolicy) set(tool string, v policy.Verdict) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.verdicts == nil {
+		f.verdicts = map[string]policy.Verdict{}
+	}
+	f.verdicts[tool] = v
+}
+
+func (f *fakePolicy) n() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+// fakeActivity records the autonomy events.
+type fakeActivity struct {
+	mu     sync.Mutex
+	events []policy.Event
+}
+
+func (f *fakeActivity) Record(_ context.Context, e policy.Event) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, e)
+	return nil
+}
+
+func (f *fakeActivity) all() []policy.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]policy.Event(nil), f.events...)
+}
+
 // --- environment ---
 
 type tenv struct {
@@ -300,6 +361,8 @@ type tenv struct {
 	phone  *fakePhone
 	tools  *servertools.Registry
 	set    fakeSettings
+	policy *fakePolicy
+	act    *fakeActivity
 	cancel context.CancelFunc
 }
 
@@ -328,9 +391,9 @@ func newTenv(t *testing.T, start bool) *tenv {
 	q.PollInterval = 10 * time.Millisecond
 	e := &tenv{t: t, d: d, q: q, llm: &fakeLLM{}, nodes: &fakeNodes{outputs: map[string]*pyjson.Object{}},
 		cards: &fakeCards{}, phone: &fakePhone{status: map[string]CallOutcome{}}, tools: servertools.NewRegistry(),
-		set: fakeSettings{}}
+		set: fakeSettings{}, policy: &fakePolicy{}, act: &fakeActivity{}}
 	e.s = &Service{DB: d, Log: log, LLM: e.llm, Tools: e.tools, Settings: e.set, Nodes: e.nodes, Cards: e.cards,
-		Phone: e.phone, Timezone: func(context.Context, string) string { return "America/New_York" }}
+		Phone: e.phone, Policy: e.policy, Activity: e.act, Timezone: func(context.Context, string) string { return "America/New_York" }}
 	e.s.Register(q)
 	if start {
 		qctx, cancel := context.WithCancel(ctx)

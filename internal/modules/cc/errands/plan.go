@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 )
@@ -148,8 +150,33 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 	}
 	row := &planRow{ID: hexID("pl_"), HouseholdID: r.HouseholdID, UserID: r.UserID, NodeID: r.NodeID,
 		Goal: r.Goal, Summary: plan.Summary, Steps: plan.Steps}
+	// Checkpoint 1 (autonomy PLAN §1): with autonomy on, the household's rules decide the plan.
+	var asked *policy.Event
+	if s.autonomous(ctx, r.HouseholdID) {
+		verdicts := s.decideSteps(ctx, r.HouseholdID, plan.Steps, policy.SourceErrandPlan)
+		for _, v := range verdicts {
+			if v.Effect == policy.Block {
+				return s.blockPlan(ctx, row, verdicts)
+			}
+		}
+		ok, reason := IsAutorunEligible(plan.Steps, verdicts)
+		if ok {
+			return s.autorunPlan(ctx, row)
+		}
+		asked = &policy.Event{Effect: policy.Ask, Outcome: policy.OutcomeAsked, Reason: reason}
+		for i, v := range verdicts {
+			if v.Effect != policy.Allow {
+				asked.Tool, asked.Reason, asked.RuleID = strings.TrimSpace(plan.Steps[i].Command), v.Reason, ruleID(v)
+				break
+			}
+		}
+	}
 	if err := s.insertPlan(ctx, row); err != nil {
 		return nil, err
+	}
+	if asked != nil {
+		asked.HouseholdID, asked.UserID, asked.Source, asked.SourceID = row.HouseholdID, row.UserID, policy.SourceErrandPlan, row.ID
+		s.record(ctx, *asked)
 	}
 	if id := s.postPlanCard(ctx, row); id != "" && id != row.InboxItemID {
 		row.InboxItemID = id
@@ -158,6 +185,98 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 	s.enqueueExpire(ctx, row)
 	s.log().Info("errands: plan drafted", "plan", row.ID, "household", r.HouseholdID, "node", r.NodeID, "steps", len(row.Steps))
 	return row, nil
+}
+
+func ruleID(v policy.Verdict) *int64 {
+	if v.Rule == nil {
+		return nil
+	}
+	id := v.Rule.ID
+	return &id
+}
+
+// blockPlan stores a plan a household rule blocks as cancelled and says so on a card.
+func (s *Service) blockPlan(ctx context.Context, p *planRow, verdicts []policy.Verdict) (*planRow, error) {
+	if err := s.insertPlan(ctx, p); err != nil {
+		return nil, err
+	}
+	if _, err := s.DB.Write.ExecContext(ctx, `UPDATE cc_errand_plans SET state = 'cancelled', error = 'blocked by a household rule',
+		updated_at = ? WHERE id = ?`, dbTime(s.now()), p.ID); err != nil {
+		return nil, err
+	}
+	p.State = "cancelled"
+	summary := firstNonEmpty(p.Summary, p.Goal)
+	var lines []string
+	for i, v := range verdicts {
+		if v.Effect != policy.Block {
+			continue
+		}
+		st := p.Steps[i]
+		cmd := strings.TrimSpace(st.Command)
+		line := "- " + firstNonEmpty(st.Label, cmd) + " (" + cmd + ")"
+		if v.Rule != nil && v.Rule.Note != "" {
+			line += ": " + v.Rule.Note
+		}
+		lines = append(lines, line)
+		s.record(ctx, policy.Event{HouseholdID: p.HouseholdID, UserID: p.UserID, Source: policy.SourceErrandPlan, SourceID: p.ID,
+			Tool: cmd, Effect: policy.Block, Outcome: policy.OutcomeBlocked, RuleID: ruleID(v), Reason: v.Reason})
+	}
+	if s.Cards != nil {
+		s.Cards.Post(ctx, Card{
+			HouseholdID: p.HouseholdID, UserID: p.UserID, Title: "🚫 Errand blocked: " + summary,
+			Summary: "Your household's rules block this errand.", Category: planCategory,
+			Body: "I didn't run this errand because your household's rules block:\n\n" + strings.Join(lines, "\n") +
+				"\n\nA household admin can change the rules.",
+			Metadata: map[string]any{"household_id": p.HouseholdID, "plan_id": p.ID, "state": "blocked",
+				"steps": stepsOrEmpty(p.Steps)},
+			Push: true, TargetType: targetType(p.UserID),
+		})
+	}
+	s.log().Info("errands: plan blocked by a household rule", "plan", p.ID, "household", p.HouseholdID)
+	return p, nil
+}
+
+// autorunPlan launches a plan the household's rules allow at once, reporting on a "Ran on its
+// own" card (through the attention gate, which may withhold it; the run goes ahead either way).
+func (s *Service) autorunPlan(ctx context.Context, p *planRow) (*planRow, error) {
+	if err := s.insertPlan(ctx, p); err != nil {
+		return nil, err
+	}
+	wfID := hexID("wf_")
+	w := &workflowRow{ID: wfID, Kind: KindAutorun, HouseholdID: p.HouseholdID, UserID: p.UserID, NodeID: p.NodeID,
+		Goal: firstNonEmpty(p.Goal, p.Summary), Title: firstNonEmpty(p.Summary, p.Goal), Steps: p.Steps, Revision: 1}
+	rc := s.ranCard(ctx, w, nil, "running")
+	rc.PlanID = p.ID
+	cardID := ""
+	if s.Cards != nil {
+		card := s.ranCardOf(w, rc, "")
+		card.Gated, card.DedupeKey = true, "autorun:"+wfID
+		cardID = s.Cards.Post(ctx, card)
+	}
+	raced, err := s.launch(ctx, p, wfID, KindAutorun, cardID)
+	if cardID != "" {
+		p.InboxItemID = cardID
+		s.setPlanInbox(ctx, p.ID, cardID)
+	}
+	if err != nil {
+		w.InboxItemID = cardID
+		rc.State = "failed"
+		s.putRanCard(ctx, w, rc, "I couldn't start that errand.")
+		return nil, err
+	}
+	if raced {
+		return p, nil
+	}
+	p.State, p.WorkflowID = "launched", wfID
+	cmds := make([]any, 0, len(p.Steps))
+	for _, st := range p.Steps {
+		cmds = append(cmds, strings.TrimSpace(st.Command))
+	}
+	s.record(ctx, policy.Event{HouseholdID: p.HouseholdID, UserID: p.UserID, Source: policy.SourceErrandPlan, SourceID: p.ID,
+		Effect: policy.Allow, Outcome: policy.OutcomeLaunched, Reason: "every step is allowed by the household's rules",
+		Detail: map[string]any{"workflow_id": wfID, "steps": cmds}})
+	s.log().Info("errands: plan autorun", "plan", p.ID, "workflow", wfID, "household", p.HouseholdID, "steps", len(p.Steps))
+	return p, nil
 }
 
 type expireJob struct {

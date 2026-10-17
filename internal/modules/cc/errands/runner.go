@@ -383,6 +383,7 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 	results := append([]Result(nil), prior...)
 	rc := &runCtx{workflowID: w.ID, householdID: w.HouseholdID, nodeID: w.NodeID, userID: w.UserID, goal: w.Goal,
 		timezone: s.timezone(ctx, w.HouseholdID), convID: "errand-" + hexID(""), results: &results}
+	auto := w.Kind == KindAutorun
 	for i := start; i < len(w.Steps); i++ {
 		st := w.Steps[i]
 		cmd := parse.PyStrip(st.Command)
@@ -394,11 +395,24 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 			args = pyjson.NewObject()
 		}
 		label := firstNonEmpty(st.Label, cmd)
+		if auto {
+			if by, ok := s.stopRequested.LoadAndDelete(w.ID); ok {
+				agg := aggregate(results)
+				agg.Status, agg.Message, agg.Results = "stopped", "Stopped before “"+label+"”.", results
+				if uid, ok := by.(int64); ok {
+					agg.stoppedBy = &uid
+				}
+				return &agg, nil
+			}
+		}
 		args, skip := ResolveStepArgs(args, results, s.now())
 		if skip != "" {
 			s.log().Info("errands: step skipped", "index", i, "command", cmd, "reason", skip)
 			results = append(results, Result{Command: cmd, Label: label, Success: true,
 				Data: servertools.Obj("skipped", skip)})
+			if auto {
+				s.updateRanCard(ctx, w, results, "running", "")
+			}
 			continue
 		}
 		r, susp := s.runStep(ctx, rc, cmd, args, label, i)
@@ -408,6 +422,9 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 		}
 		r.Label = label
 		results = append(results, r)
+		if auto {
+			s.updateRanCard(ctx, w, results, "running", "")
+		}
 		if !r.Success {
 			s.log().Info("errands: fail-fast", "index", i, "command", cmd)
 			break
@@ -419,11 +436,13 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 
 // Aggregate is the finished run's result.
 type Aggregate struct {
-	Status  string // success | partial | failed
+	Status  string // success | partial | failed | stopped (an autorun run's Stop)
 	Passed  int
 	Failed  int
 	Message string
 	Results []Result
+
+	stoppedBy *int64 // Status "stopped": who tapped Stop
 }
 
 // composeMessage is _compose_message: the plain per-step roll-up (the compose fallback).
@@ -576,8 +595,11 @@ func (s *Service) aggregateAndCompose(ctx context.Context, goal string, results 
 }
 
 func terminalState(a Aggregate) string {
-	if a.Status == "success" {
+	switch a.Status {
+	case "success":
 		return "done"
+	case "stopped":
+		return "cancelled"
 	}
 	if a.Status == "" {
 		return "failed"
@@ -685,9 +707,18 @@ func (s *Service) drive(ctx context.Context, w *workflowRow, prior []Result) {
 	s.finish(ctx, w, *agg)
 }
 
-// finish posts the one completion card and lands the run terminal.
+// finish posts the one completion card (an autorun run's "Ran on its own" card is updated
+// instead) and lands the run terminal.
 func (s *Service) finish(ctx context.Context, w *workflowRow, agg Aggregate) {
-	s.postCompletionCard(ctx, w.HouseholdID, w.DisplayTitle(), agg, w.UserID)
+	if w.Kind == KindAutorun {
+		s.stopRequested.Delete(w.ID) // a Stop during the last step
+		s.updateRanCard(ctx, w, agg.Results, ranState(agg), agg.Message)
+		if agg.Status == "stopped" {
+			s.recordStopped(ctx, w, agg.stoppedBy)
+		}
+	} else {
+		s.postCompletionCard(ctx, w.HouseholdID, w.DisplayTitle(), agg, w.UserID)
+	}
 	errText := ""
 	if agg.Status != "success" {
 		errText = truncRunes(agg.Message, 500)

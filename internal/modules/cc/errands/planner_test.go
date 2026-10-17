@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -247,20 +248,29 @@ func TestWidensEnvelopeTruthTable(t *testing.T) {
 	}
 }
 
-func TestAutorunGateDormant(t *testing.T) {
-	ok, _ := IsAutorunEligible([]Step{{Command: "get_drive_time", Args: pyjson.NewObject()}, {Command: "reminder", Args: pyjson.NewObject()}})
-	if !ok {
-		t.Fatal("allowlisted plan not eligible")
+func TestIsAutorunEligible(t *testing.T) {
+	allow := policy.Verdict{Effect: policy.Allow}
+	ask := policy.Verdict{Effect: policy.Ask}
+	st := func(cmd string) Step { return Step{Command: cmd, Args: pyjson.NewObject()} }
+	cases := []struct {
+		name     string
+		steps    []Step
+		verdicts []policy.Verdict
+		ok       bool
+		reason   string
+	}{
+		{"empty", nil, nil, false, "empty plan"},
+		{"four steps", []Step{st("a"), st("b"), st("c"), st("d")}, []policy.Verdict{allow, allow, allow, allow}, false,
+			"too many steps for autorun (4 > 3)"},
+		{"one asks", []Step{st("get_weather"), st("quick_search")}, []policy.Verdict{allow, ask}, false,
+			"step 'quick_search' resolves to ask"},
+		{"missing verdict", []Step{st("get_weather")}, nil, false, "step 'get_weather' resolves to ask"},
+		{"all allow", []Step{st("get_weather"), st("quick_search")}, []policy.Verdict{allow, allow}, true, "eligible"},
 	}
-	for _, steps := range [][]Step{
-		nil,
-		{{Command: "get_weather", Args: pyjson.NewObject()}},
-		{{Command: "reminder", Args: pyjson.NewObject(), IsRisky: true}},
-		{{Command: "reminder", Args: mustObj(t, `{"business": "X"}`)}},
-		{{Command: "reminder"}, {Command: "reminder"}, {Command: "reminder"}, {Command: "reminder"}},
-	} {
-		if ok, _ := IsAutorunEligible(steps); ok {
-			t.Fatalf("%+v eligible", steps)
+	for _, c := range cases {
+		ok, reason := IsAutorunEligible(c.steps, c.verdicts)
+		if ok != c.ok || reason != c.reason {
+			t.Errorf("%s: got %v %q", c.name, ok, reason)
 		}
 	}
 }
