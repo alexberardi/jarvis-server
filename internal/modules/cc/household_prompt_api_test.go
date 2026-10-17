@@ -1,11 +1,13 @@
 package cc
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 const promptBase = "/api/v0/households/" + voiceHH + "/prompt"
@@ -184,12 +186,28 @@ func TestHouseholdPromptPreview(t *testing.T) {
 	if got["system_prompt"] != "Room kitchen." {
 		t.Fatalf("draft preview: %v", got)
 	}
+	// The persona is re-read from settings, not taken from the warmup.
+	before := ve.do("POST", promptBase+"/preview", map[string]any{"text": "{{persona}}", "node_id": ve.node.id}, admin).want(200).json()["system_prompt"].(string)
+	if err := ve.m.settings.Set(context.Background(), settingPersona, "Talk like a pirate.", settings.Scope{HouseholdID: voiceHH}); err != nil {
+		t.Fatal(err)
+	}
+	got = ve.do("POST", promptBase+"/preview", map[string]any{"text": "{{persona}}", "node_id": ve.node.id}, admin).want(200).json()
+	if sys := got["system_prompt"].(string); !strings.Contains(sys, "Talk like a pirate.") || sys == before {
+		t.Fatalf("cached preview kept the warmup's persona: %q", sys)
+	}
+	if _, err := ve.m.settings.Delete(context.Background(), settingPersona, settings.Scope{HouseholdID: voiceHH}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Native: the tools go through the API.
 	ve.do("PUT", promptBase, map[string]any{"text": text, "tool_calling": "native"}, admin).want(200)
 	got = ve.do("POST", promptBase+"/preview", map[string]any{"text": text, "node_id": ve.node.id}, admin).want(200).json()
 	if got["tool_calling"] != "native" || got["tools_via_api"].(float64) == 0 {
 		t.Fatalf("native preview: %v", got)
+	}
+	// Rendered in the current (native) mode, not the warmup's text mode.
+	if got["system_prompt"] == want {
+		t.Fatal("native preview rendered the warmup's text-mode prompt")
 	}
 
 	got = ve.do("POST", promptBase+"/preview", map[string]any{"text": "{{nope}}", "node_id": ve.node.id}, admin).want(400).json()
