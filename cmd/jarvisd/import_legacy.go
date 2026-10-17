@@ -178,7 +178,7 @@ func runImportLegacy(ctx context.Context, args []string, stdout io.Writer) error
 
 	rep, runErr := legacyimport.Run(ctx, d, src, legacyimport.Options{
 		Apply: *apply, AcceptHeads: accept, Settings: importSettingDefs(),
-		PromptProvider: func(name string) error { _, err := prompts.Lookup(name); return err },
+		PromptProvider: prompts.CheckBuiltin,
 	})
 	rep.Write(stdout)
 	if rep.Committed {

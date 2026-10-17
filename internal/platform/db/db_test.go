@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 func open(t *testing.T) *DB {
@@ -98,6 +99,35 @@ func TestTxRollsBack(t *testing.T) {
 	d.Read.QueryRow(`SELECT count(*) FROM r`).Scan(&n)
 	if n != 0 {
 		t.Fatal("not rolled back")
+	}
+}
+
+// A panic in fn must still release the single write connection: under a
+// context that is never cancelled nothing else would.
+func TestTxRollsBackOnPanic(t *testing.T) {
+	d := open(t)
+	d.Write.Exec(`CREATE TABLE r (n INTEGER)`)
+	ctx := context.Background()
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("panic not propagated")
+			}
+		}()
+		d.Tx(ctx, func(tx *sql.Tx) error {
+			tx.Exec(`INSERT INTO r VALUES (1)`)
+			panic("boom")
+		})
+	}()
+	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := d.Tx(wctx, func(tx *sql.Tx) error { return nil }); err != nil {
+		t.Fatalf("write connection still held after panic: %v", err)
+	}
+	var n int
+	d.Read.QueryRow(`SELECT count(*) FROM r`).Scan(&n)
+	if n != 0 {
+		t.Fatal("panicked tx not rolled back")
 	}
 }
 

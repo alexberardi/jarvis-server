@@ -492,7 +492,7 @@ func TestPhotoOnlyTurnOffers(t *testing.T) {
 	imp := &fakeImporter{}
 	ce, _ := newRecipeChatEnv(t, prompts.Qwen3_5_9B, imp)
 	cid := ce.warm("tok-7")
-	if conv := ce.m.convs.get(cid); !conv.forceTools {
+	if conv := ce.m.convs.get(cid); !conv.mode.ForceTools {
 		t.Fatal("the provider should force tool calls for this test to mean anything")
 	}
 	before := len(ce.eng.requests())

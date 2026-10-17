@@ -44,6 +44,7 @@
       "computer",
       "desktop"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -93,6 +94,7 @@
       "computer",
       "desktop"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -119,6 +121,7 @@
       "computer",
       "desktop"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -156,6 +159,7 @@
       "computer",
       "desktop"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -233,6 +237,7 @@
       "summarise",
       "computer"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -317,6 +322,7 @@
       "terminal",
       "message"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -397,6 +403,7 @@
       "click",
       "accept"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -439,6 +446,7 @@
       "firefox",
       "chrome"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -485,6 +493,7 @@
       "search",
       "go to"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -514,6 +523,7 @@
       "go to",
       "show"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -541,6 +551,7 @@
       "close",
       "tab"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -588,6 +599,7 @@
       "refresh",
       "page"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -633,6 +645,7 @@
       "website",
       "this"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -708,6 +721,7 @@
       "skip",
       "rewind"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -755,6 +769,7 @@
       "down",
       "up"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -796,6 +811,7 @@
       "page",
       "where"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -868,6 +884,7 @@
       "enter",
       "page"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -928,6 +945,7 @@
       "link",
       "dialog"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   },
   {
@@ -1046,6 +1064,7 @@
       "clock",
       "timezone"
     ],
+    "run_without_confirmation": false,
     "type": "function"
   }
 ]

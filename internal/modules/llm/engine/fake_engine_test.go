@@ -6,7 +6,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -70,6 +72,9 @@ func runFakeEngine(args []string) {
 	if _, err := os.Stat(flag("-m")); err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load model:", err)
 		os.Exit(1)
+	}
+	if os.Getenv("FAKE_ENGINE_IGNORE_TERM") == "1" {
+		signal.Ignore(syscall.SIGTERM)
 	}
 	loading, _ := time.ParseDuration(os.Getenv("FAKE_ENGINE_LOADING"))
 	start := time.Now()

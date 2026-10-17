@@ -496,7 +496,8 @@ func (t *refreshRow) expired() bool {
 //   - A token rotated less than auth.token.refresh_grace_seconds ago gets the successor it
 //     already produced (a benign double submit), from the in-process cache.
 //   - Any other replay of a rotated or revoked token is a 401. The family is revoked too only
-//     when RevokeFamilyOnReuse is set (legacy default off: replays are far likelier benign).
+//     when auth.token.revoke_family_on_reuse is on (default off: replays are far likelier
+//     benign), and never on a grace miss (rotated inside the window, cache lost to a restart).
 //
 // The whole check-and-rotate runs in one write transaction; jarvisd has a single writer, so
 // it serializes with revocation (the legacy user-row lock).
@@ -565,13 +566,14 @@ func (m *Module) handleRefresh(w http.ResponseWriter, r *http.Request) {
 					if cached = m.grace.get(rec.id); cached != "" {
 						return nil
 					}
-					// A miss inside the window means the process restarted after rotating.
-					// Like legacy, it falls through to the reuse handling below.
+					// A miss inside the window means the process restarted after rotating:
+					// a 401, but never a family revocation (unlike legacy).
 					reason = "grace_miss"
 				}
 			}
-			m.refreshRejected(reason, rec, "rotated_at", rec.rotatedAt.String, "revoked_family", m.RevokeFamilyOnReuse)
-			if m.RevokeFamilyOnReuse {
+			revoke := reason != "grace_miss" && m.settings.Bool(ctx, settingRevokeFamilyOnReuse, noScope)
+			m.refreshRejected(reason, rec, "rotated_at", rec.rotatedAt.String, "revoked_family", revoke)
+			if revoke {
 				return errReuse
 			}
 			return fail(http.StatusUnauthorized, "Invalid refresh token")

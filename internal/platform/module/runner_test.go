@@ -397,3 +397,61 @@ func TestShutdownDrainsQueueBeforeReturning(t *testing.T) {
 		t.Error("Run returned (and the caller would close the DB) while a job was still running")
 	}
 }
+
+// waitModule is a Waiter whose background work finishes when release is closed.
+type waitModule struct {
+	sseModule
+	release  chan struct{}
+	finished atomic.Bool
+}
+
+func (m *waitModule) Wait() {
+	<-m.release
+	m.finished.Store(true)
+}
+
+func TestShutdownWaitsForModuleBackgroundWork(t *testing.T) {
+	old, oldDrain := ShutdownTimeout, DrainTimeout
+	ShutdownTimeout, DrainTimeout = time.Second, 10*time.Second
+	defer func() { ShutdownTimeout, DrainTimeout = old, oldDrain }()
+	w := &waitModule{release: make(chan struct{})}
+	r := &Runner{Deps: deps(t), Modules: []Module{w}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := openStream(t, ctx, r)
+	cancel()
+	select {
+	case <-done:
+		t.Fatal("Run returned (and the caller would close the DB) before the module's Wait did")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(w.release)
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("Run never returned")
+	}
+	if !w.finished.Load() {
+		t.Error("the module's Wait did not finish")
+	}
+}
+
+func TestShutdownGivesUpOnModuleWaitAtDrainTimeout(t *testing.T) {
+	old, oldDrain := ShutdownTimeout, DrainTimeout
+	ShutdownTimeout, DrainTimeout = time.Second, 300*time.Millisecond
+	defer func() { ShutdownTimeout, DrainTimeout = old, oldDrain }()
+	w := &waitModule{release: make(chan struct{})}
+	defer close(w.release)
+	r := &Runner{Deps: deps(t), Modules: []Module{w}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := openStream(t, ctx, r)
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("Run never returned with a module stuck in Wait")
+	}
+	if el := time.Since(start); el < DrainTimeout || el > 5*time.Second {
+		t.Errorf("Run returned after %v; want about DrainTimeout (%v)", el, DrainTimeout)
+	}
+}

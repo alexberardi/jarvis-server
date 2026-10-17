@@ -312,6 +312,15 @@ func TestApplyUpdate(t *testing.T) {
 	if caps, _ := info["capabilities"].(map[string]any); caps["self_update"] != true || caps["restart"] != true {
 		t.Fatalf("capabilities %v", info["capabilities"])
 	}
+	// A CLI `jarvisd upgrade` staging meanwhile (it holds the stage lock): refused up front.
+	release, err := update.Lock(e.m.paths())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out := apply(); code != http.StatusConflict || !strings.Contains(fmt.Sprint(out["detail"]), "another upgrade is running") {
+		t.Fatalf("locked: %d %v", code, out)
+	}
+	release()
 	code, out := apply()
 	if code != http.StatusAccepted {
 		t.Fatalf("apply: %d %v", code, out)

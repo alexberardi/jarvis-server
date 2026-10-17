@@ -329,7 +329,6 @@ func outputsOf(v any) []any {
 
 func TestTextModeFormatGolden(t *testing.T) {
 	fx := loadVoice(t, "format.json")
-	p, _ := prompts.Lookup(prompts.Qwen3_14B)
 	const voiceCommand = "Is it going to rain today?\n/no_think" // the stripped latest user message
 	for _, r := range rows(fx, "text_mode") {
 		outs := outputsOf(g(r, "outputs"))
@@ -345,7 +344,7 @@ func TestTextModeFormatGolden(t *testing.T) {
 		if prompt != gs(r, "sent_user") {
 			t.Errorf("%s: prompt\n got %q\nwant %q", gs(r, "case"), prompt, gs(r, "sent_user"))
 		}
-		text, reasoning := FinishFormattedReply(gs(r, "reply"), p.SanitizeText, outs)
+		text, reasoning := FinishFormattedReply(gs(r, "reply"), prompts.SanitizeText, outs)
 		if text != gs(res, "assistant_message") || reasoning != gs(res, "reasoning") {
 			t.Errorf("%s / %q: got %q (%q), want %v", gs(r, "case"), gs(r, "reply"), text, reasoning, res)
 		}

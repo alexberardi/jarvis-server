@@ -16,37 +16,11 @@ type Characterization struct {
 	Text string
 }
 
-// AssembleSystemPrompt is the full messages[0]: the provider's prompt (layer 1) wrapped by
-// the handler (layer 2, Wrap). base is the stashed byte-stable prompt before the
-// characterization tail (only meaningful when ch.Enabled); WithCharacterization rebuilds the
-// tail per turn from it.
-func AssembleSystemPrompt(p Provider, ctx Context, tools []Tool, flags []CommandFlag, ch Characterization) (prompt, base string) {
-	return Wrap(p.BuildSystemPrompt(ctx, tools, flags), ctx.HouseholdPersona, ch)
-}
-
 // SystemPrompt renders a text prompt into messages[0]. base is the byte-stable prompt before
 // the characterization tail (only meaningful when ch.Enabled); WithCharacterization rebuilds
 // the tail per turn from it.
 func SystemPrompt(text string, in Inputs, ch Characterization) (prompt, base string) {
 	prompt = Render(text, in.Values())
-	if !ch.Enabled {
-		return prompt, prompt
-	}
-	return WithCharacterization(prompt, ch.Text), prompt
-}
-
-// Wrap is ConversationHandler._get_system_prompt's layer 2 (docs/cc/03 §3.3):
-//
-//	base.rstrip() + "\n\n" + NOT_FOR_ME + "\n\n" + EXCHANGE_COMPLETE + "\n"
-//	[+ "\n" + personality reminder + "\n"]          when the persona is non-empty
-//	[+ "\n" + <person_view> section]                when enabled and the text is non-empty
-//
-// stash is the prompt before the characterization tail.
-func Wrap(providerPrompt, persona string, ch Characterization) (prompt, stash string) {
-	prompt = parse.PyRStrip(providerPrompt) + "\n\n" + NotForMeInstruction + "\n\n" + ExchangeCompleteInstruction + "\n"
-	if r := PersonalityReminder(persona); r != "" {
-		prompt += "\n" + r + "\n"
-	}
 	if !ch.Enabled {
 		return prompt, prompt
 	}
