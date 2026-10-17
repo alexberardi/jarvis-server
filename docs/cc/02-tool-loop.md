@@ -661,6 +661,7 @@ The decision is `{"tool_name","score","used": score >= JARVIS_TOOL_CLASSIFIER_MI
      - (b) Unify on the loop for both paths.
    - **Recommendation:** (a) for parity in Phase 5, and revisit once native Qwen3.5 is the default.
    - **Decided (D23):** (a). Chaining on the text path is fixed in the post-port prompt-provider redesign.
+   - **Amended (2026-10-16, [decision](../decisions/2026-10-16-text-path-continue-finishes-typing.md)):** one exception: while "open X and type Y" still owes `desktop_type_text`, the text path's continue re-enters the loop (max 3 iterations) so the unfinished-request nudge can fire.
 5. **[behaviour] `/api/v0/chat` is unauthenticated.** The node already sends `X-API-Key`.
    - *Options:*
      - (a) Require node auth (or app/JWT) in Go.

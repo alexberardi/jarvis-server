@@ -185,3 +185,89 @@ func TestFollowThroughUnsavedAfterOtherTool(t *testing.T) {
 		t.Fatalf("after remember: %q", nag)
 	}
 }
+
+// Prod's text path (Qwen3_14B, qwen3.8-27b): the continue after desktop_open re-enters the loop
+// while the typing is pending, so the same nudge fires (#56; the text path's continue was one
+// formatting call with no tools, which answered "Done.").
+func TestFollowThroughTypeAfterOpenTextPath(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_14B)
+	ve.start("t4", desktopTools)
+	ve.eng.say(`<tool_call>{"name": "desktop_open", "arguments": {"target": "neovim"}}</tool_call>`)
+	r := ve.turn("/api/v0/voice/command/stream", "t4", "open neovim and type hello world", nil).want(202).json()
+	calls, _ := r["tool_calls"].([]any)
+	if r["stop_reason"] != "tool_calls" || len(calls) != 1 {
+		t.Fatalf("%v", r)
+	}
+	openID := calls[0].(map[string]any)["id"]
+
+	// The stream continue hands this one to the blocking continue (the loop).
+	ve.do("POST", "/api/v0/voice/command/continue/stream", map[string]any{"conversation_id": "t4",
+		"tool_results": []any{map[string]any{"tool_call_id": openID, "output": map[string]any{"success": true}}}},
+		ve.node.h()).want(202)
+
+	ve.eng.say("Done.")
+	ve.eng.say(`<tool_call>{"name": "desktop_type_text", "arguments": {"text": "hello world", "app": "neovim"}}</tool_call>`)
+	b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "t4",
+		"tool_results": []any{map[string]any{"tool_call_id": openID, "output": map[string]any{"success": true}}}},
+		ve.node.h()).want(200).json()
+	calls, _ = b["tool_calls"].([]any)
+	if b["stop_reason"] != "tool_calls" || len(calls) != 1 || !strings.Contains(jsonOf(calls[0]), "desktop_type_text") {
+		t.Fatalf("continue %v", b)
+	}
+	if !lastIsNag(ve, nagUnfinished) {
+		t.Fatal("no unfinished-request nudge before the call")
+	}
+	typeID := calls[0].(map[string]any)["id"]
+
+	// Once the typing ran, the continue is the text path's formatting call again.
+	before := len(ve.eng.requests())
+	ve.eng.say("Typed hello world in neovim.")
+	b = ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "t4",
+		"tool_results": []any{map[string]any{"tool_call_id": typeID, "output": map[string]any{"success": true}}}},
+		ve.node.h()).want(200).json()
+	if b["assistant_message"] != "Typed hello world in neovim." || len(ve.eng.requests())-before != 1 {
+		t.Fatalf("after typing %v (%d model calls)", b, len(ve.eng.requests())-before)
+	}
+	if req := ve.eng.last(); req["tools"] != nil {
+		t.Fatalf("formatting call offered tools: %v", req["tools"])
+	}
+}
+
+// qwen3.8-27b once answered the nudge with a sentence and then the call as a bare object, no
+// <tool_call> tags: on the text path's loop that is the call (an offered tool only).
+func TestFollowThroughTypeAfterOpenBareCall(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_14B)
+	ve.start("t5", desktopTools)
+	ve.eng.say(`<tool_call>{"name": "desktop_open", "arguments": {"target": "neovim"}}</tool_call>`)
+	r := ve.turn("/api/v0/voice/command/stream", "t5", "open neovim and type hello world", nil).want(202).json()
+	openID := r["tool_calls"].([]any)[0].(map[string]any)["id"]
+	ve.eng.say("Done.")
+	ve.eng.say("I'll type that now.\n{\"name\": \"desktop_type_text\", \"arguments\": {\"text\": \"hello world\", \"app\": \"neovim\"}}")
+	b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "t5",
+		"tool_results": []any{map[string]any{"tool_call_id": openID, "output": map[string]any{"success": true}}}},
+		ve.node.h()).want(200).json()
+	calls, _ := b["tool_calls"].([]any)
+	if b["stop_reason"] != "tool_calls" || len(calls) != 1 || !strings.Contains(jsonOf(calls[0]), `hello world`) ||
+		!strings.Contains(jsonOf(calls[0]), "desktop_type_text") {
+		t.Fatalf("continue %v", b)
+	}
+}
+
+func TestTrailingBareCall(t *testing.T) {
+	offered := func(n string) bool { return n == "desktop_type_text" }
+	for _, c := range []struct {
+		in, name, prose string
+	}{
+		{"I'll type that now.\n{\"name\": \"desktop_type_text\", \"arguments\": {\"text\": \"hi\"}}", "desktop_type_text", "I'll type that now."},
+		{"Sure: {\"name\": \"desktop_type_text\", \"arguments\": {}}  ", "desktop_type_text", "Sure:"},
+		{"I'll run {\"name\": \"rm_rf\", \"arguments\": {}}", "", ""},                  // not offered
+		{"{\"name\": \"desktop_type_text\", \"arguments\": {}} and then some", "", ""}, // not trailing
+		{"The config is {\"name\": \"desktop_type_text\"}", "", ""},                    // no arguments
+		{"Nothing to see here.", "", ""},
+	} {
+		call, prose, ok := trailingBareCall(c.in, offered)
+		if ok != (c.name != "") || (ok && (call.Function.Name != c.name || prose != c.prose)) {
+			t.Errorf("%q: %v %q %v", c.in, call, prose, ok)
+		}
+	}
+}

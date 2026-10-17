@@ -222,6 +222,11 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			}
 			pr := parse.ParseToolCalls(content)
 			finish, calls, message = pr.FinishReason, pr.ToolCalls, pr.Message
+			if finish == parse.FinishStop {
+				if c, prose, ok := trailingBareCall(message, conv.hasTool); ok {
+					finish, calls, message = parse.FinishToolCalls, []parse.ToolCall{c}, prose
+				}
+			}
 		}
 		tr.span(llmName, "llm_proxy", llmStart, llmEnd, nil, map[string]any{"prompt_tokens": resp.Usage.PromptTokens,
 			"completion_tokens": resp.Usage.CompletionTokens, "finish_reason": finish, "output_preview": outputPreview(raw)})
@@ -646,4 +651,38 @@ func llmErrText(err error) string {
 		return msg
 	}
 	return err.Error()
+}
+
+// trailingBareCall is a reply that ends in a bare {"name", "arguments"} call after prose
+// (beyond legacy, #56: qwen3.8-27b wrote "I'll type that now." and then the call with no
+// <tool_call> tags; ParseQwen25 only wraps an object that is the whole reply). Only an offered
+// tool counts, so prose that quotes some other JSON stays prose.
+func trailingBareCall(message string, offered func(string) bool) (parse.ToolCall, string, bool) {
+	text := parse.PyStrip(parse.OutsideThink(message))
+	for i := strings.IndexByte(text, '{'); i >= 0; {
+		obj, isObj := func() (*pyjson.Object, bool) {
+			v, err := pyjson.Loads(text[i:])
+			o, ok := v.(*pyjson.Object)
+			return o, err == nil && ok
+		}()
+		if isObj {
+			name, _ := obj.Get("name")
+			n, _ := name.(string)
+			_, hasArgs := obj.Get("arguments")
+			if !hasArgs || !offered(n) {
+				return parse.ToolCall{}, "", false
+			}
+			pr := parse.ParseToolCalls(text[i:])
+			if len(pr.ToolCalls) != 1 {
+				return parse.ToolCall{}, "", false
+			}
+			return pr.ToolCalls[0], parse.PyStrip(text[:i]), true
+		}
+		j := strings.IndexByte(text[i+1:], '{')
+		if j < 0 {
+			break
+		}
+		i += 1 + j
+	}
+	return parse.ToolCall{}, "", false
 }

@@ -11,7 +11,9 @@ import (
 )
 
 // Continuing a conversation with the node's client tool results (docs/cc/01 §3.4, 02 §3.4).
-// D23: the text path is one formatting call; the native path re-enters the loop.
+// D23: the text path is one formatting call; the native path re-enters the loop. Except (#56):
+// while "open X and type Y" still owes the typing, the text path re-enters the loop too, so the
+// follow-through nudge can fire (typingPending).
 
 // toolResult is one {tool_call_id, output} the node posts; Output is the decoded JSON value
 // (ordered), or a string.
@@ -199,10 +201,14 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 		msgs = append(msgs, toolMsg(tr))
 	}
 	var res engineResult
-	if conv.provider.SupportsNativeTools() {
+	if native := conv.provider.SupportsNativeTools(); native || typingPending(conv, msgs) {
 		msgs = append(msgs, failedNote(results)...)
 		utterance := lastUserContent(msgs)
-		res, msgs = m.runEngine(ctx, engineInput{conv: conv, msgs: msgs, maxIter: 10, utterance: utterance,
+		maxIter := 10
+		if !native {
+			maxIter = 3
+		}
+		res, msgs = m.runEngine(ctx, engineInput{conv: conv, msgs: msgs, maxIter: maxIter, utterance: utterance,
 			dateKeys: conv.dateKeys, turn: m.toolTurn(conv, utterance)})
 	} else {
 		res, msgs = m.formatTextMode(ctx, conv, msgs, results)
@@ -216,6 +222,14 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	res = applyExchangeComplete(res)
 	m.completeTranscript(ctx, conv, res)
 	return res, conv, nil
+}
+
+// typingPending reports an "open X and type Y" turn whose typing hasn't been called yet (the
+// unfinished-request nudge's condition, followthrough.go): its continue needs the tool loop on
+// either path, not one formatting call.
+func typingPending(conv *conversation, msgs []chatMsg) bool {
+	return conv.hasTool(desktopTypeTool) && !calledThisTurn(msgs, desktopTypeTool) &&
+		tf.TypeAfterOpenWords(lastUserContent(msgs)) != ""
 }
 
 // continuePlan is the prepared continue-stream: either text to speak directly (fast path) or
@@ -242,10 +256,10 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 	}
 	conv.mu.Lock()
 	defer conv.mu.Unlock()
-	stashReferenced(conv, results)
-	if len(conv.messages) == 0 {
-		return nil
+	if len(conv.messages) == 0 || typingPending(conv, conv.messages) {
+		return nil // the typing is still owed: the blocking continue runs the loop
 	}
+	stashReferenced(conv, results)
 	results = m.prepareToolImages(ctx, results)
 	msgs := m.visionGuard(ctx, cloneMsgs(conv.messages))
 	native := conv.provider.SupportsNativeTools()
