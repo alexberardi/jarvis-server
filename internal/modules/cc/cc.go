@@ -426,6 +426,9 @@ func (m *Module) Start(ctx context.Context) error {
 	if err := m.startSignals(ctx); err != nil {
 		return err
 	}
+	if err := m.startWatches(ctx); err != nil {
+		return err
+	}
 	if err := m.startPhone(ctx); err != nil {
 		return err
 	}
