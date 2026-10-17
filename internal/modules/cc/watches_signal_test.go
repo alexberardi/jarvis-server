@@ -188,6 +188,41 @@ func TestSignalWatchAbsentFor(t *testing.T) {
 	}
 }
 
+// An armed absent timer says nothing once the household turns watches off.
+func TestSignalWatchAbsentForWatchesOff(t *testing.T) {
+	se := newSigWatchEnv(t)
+	w := se.signalWatch(watches.Source{Kind: "door.state"},
+		watches.Condition{Op: watches.OpAbsentFor, Field: "state", Value: "closed", For: "10m"})
+	se.post("door.state", 0, map[string]any{"state": "open"})
+	if !se.absentArmed(w.ID) {
+		t.Fatal("an open door did not arm the absent timer")
+	}
+	se.set(settingWatchesEnabled, false, sigHH)
+	se.advance(10 * time.Minute)
+	se.runAbsent(w.ID)
+	if a := se.alerts(); len(a) != 0 {
+		t.Fatal("fired with watches off", a)
+	}
+	if got := se.watch(sigHH, w.ID); got.LastError != "watches are turned off for this household" {
+		t.Fatal(got.LastError)
+	}
+}
+
+// Stopping a signal watch drops its absent timer too.
+func TestSignalWatchStopDisarmsAbsent(t *testing.T) {
+	se := newSigWatchEnv(t)
+	w := se.signalWatch(watches.Source{Kind: "door.state"},
+		watches.Condition{Op: watches.OpAbsentFor, Field: "state", Value: "closed", For: "10m"})
+	se.post("door.state", 0, map[string]any{"state": "open"})
+	if !se.absentArmed(w.ID) {
+		t.Fatal("not armed")
+	}
+	se.m.disarmWatch(context.Background(), w.ID)
+	if se.absentArmed(w.ID) {
+		t.Fatal("disarmWatch left the absent timer")
+	}
+}
+
 func TestSignalWatchAlongsideAutomation(t *testing.T) {
 	ae := newAutoEnv(t, "automatic", false, nodeReport())
 	ae.set(settingHouseholdTimezone, "America/New_York", sigHH)

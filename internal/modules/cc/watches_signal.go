@@ -163,6 +163,10 @@ func (m *Module) runWatchAbsent(ctx context.Context, hh, id string) error {
 	if normValue(w.LastValue) == normValue(w.Condition.Value) {
 		return nil
 	}
+	if !m.watchesEnabled(ctx, hh) {
+		m.observeWatch(ctx, *w, watchObservation{Err: "watches are turned off for this household", At: m.now()})
+		return nil
+	}
 	c := w.Condition
 	m.fireWatch(ctx, *w, "", watchObservation{Value: w.LastValue, At: m.now()},
 		c.Field+" hasn't been "+c.Value+" for "+c.For)

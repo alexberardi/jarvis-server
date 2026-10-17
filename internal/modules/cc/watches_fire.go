@@ -44,6 +44,8 @@ func (m *Module) disarmWatch(ctx context.Context, id string) {
 	if err := m.deps.Scheduler.Delete(ctx, watchTrigger(id)); err != nil {
 		m.deps.Log.Error("cc: disarm watch", "id", id, "err", err)
 	}
+	// A signal watch's absent_for timer goes with it (paused, stopped or done).
+	m.disarmWatchAbsent(ctx, id)
 }
 
 // watchObservation is one check's result: the value read, or the error that stopped the read.
