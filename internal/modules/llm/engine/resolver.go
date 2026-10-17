@@ -164,6 +164,9 @@ type instance struct {
 // ErrUnknownEngine is returned by Retry for an engine name the resolver doesn't run.
 var ErrUnknownEngine = errors.New("unknown engine")
 
+// ErrNotFailed is returned by Retry for an engine that hasn't failed: there is nothing to retry.
+var ErrNotFailed = errors.New("engine has not failed")
+
 func (r *Resolver) init() {
 	if r.instances == nil {
 		r.instances = map[string]*instance{}
@@ -633,10 +636,11 @@ func retryCooldown(base time.Duration, retries int) time.Duration {
 	return base << min(retries, 3)
 }
 
-// Retry restarts an engine the resolver gave up on (or any failed one) with a fresh retry
-// budget: the admin's "Retry" after fixing what broke it. ErrUnknownEngine if name isn't
-// running.
-func (r *Resolver) Retry(ctx context.Context, name string) error {
+// Retry starts a failed engine (one the resolver gave up on, or one still waiting out its
+// cooldown) again with a fresh retry budget: the admin's "Retry" after fixing what broke it.
+// A failed supervisor has no process, so this never waits on a stop under r.mu (#207).
+// ErrUnknownEngine if name isn't running, ErrNotFailed if it hasn't failed.
+func (r *Resolver) Retry(_ context.Context, name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.init()
@@ -644,9 +648,12 @@ func (r *Resolver) Retry(ctx context.Context, name string) error {
 		if inst.name != name {
 			continue
 		}
+		if inst.sup.Status().State != engines.Failed {
+			return fmt.Errorf("%w: %q", ErrNotFailed, name)
+		}
 		inst.retries, inst.gaveUp = 0, false
 		r.Log.Info("retrying engine on request", "engine", inst.name)
-		return inst.sup.Restart(ctx)
+		return inst.sup.Start()
 	}
 	return fmt.Errorf("%w %q", ErrUnknownEngine, name)
 }

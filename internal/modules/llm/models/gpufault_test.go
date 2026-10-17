@@ -56,10 +56,11 @@ func TestAPIReportsGPUFault(t *testing.T) {
 }
 
 // POST /v1/hardware/engines/{name}/retry asks the resolver to retry an engine it gave up on;
-// an engine it doesn't run is 404.
+// an engine it doesn't run is 404, and one that hasn't failed is 409.
 func TestAPIRetryEngine(t *testing.T) {
 	e := newEnv(t)
-	e.labels.instances = []engine.InstanceStatus{{Name: "llama-1", State: "failed", GaveUp: true, Retries: 3}}
+	e.labels.instances = []engine.InstanceStatus{{Name: "llama-1", State: "failed", GaveUp: true, Retries: 3},
+		{Name: "llama-2", State: "healthy"}}
 	mux := http.NewServeMux()
 	(&API{Manager: e.mgr, Resolver: e.labels}).Mount(mux, func(http.ResponseWriter, *http.Request) bool { return true })
 	post := func(path string) int {
@@ -72,6 +73,9 @@ func TestAPIRetryEngine(t *testing.T) {
 	}
 	if code := post("/v1/hardware/engines/nope/retry"); code != http.StatusNotFound {
 		t.Fatalf("unknown: %d", code)
+	}
+	if code := post("/v1/hardware/engines/llama-2/retry"); code != http.StatusConflict {
+		t.Fatalf("healthy: %d", code)
 	}
 	if len(e.labels.retried) != 1 || e.labels.retried[0] != "llama-1" {
 		t.Fatalf("retried %v", e.labels.retried)

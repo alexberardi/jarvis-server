@@ -359,6 +359,8 @@ func (a *API) retryEngine(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, engine.ErrUnknownEngine):
 		httpx.Error(w, http.StatusNotFound, "Not found")
+	case errors.Is(err, engine.ErrNotFailed):
+		httpx.Error(w, http.StatusConflict, "Engine has not failed")
 	case err != nil:
 		writeErr(w, err)
 	default:

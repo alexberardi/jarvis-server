@@ -198,6 +198,9 @@ func (f *fakeLabels) Retry(_ context.Context, name string) error {
 	defer f.mu.Unlock()
 	for _, i := range f.instances {
 		if i.Name == name {
+			if i.State != "failed" {
+				return engine.ErrNotFailed
+			}
 			f.retried = append(f.retried, name)
 			return nil
 		}
