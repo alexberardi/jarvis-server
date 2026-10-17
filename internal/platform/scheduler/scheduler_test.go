@@ -224,3 +224,20 @@ func TestFiresThroughQueue(t *testing.T) {
 		t.Fatal("job never ran")
 	}
 }
+
+func TestWaitReturnsAfterStop(t *testing.T) {
+	f := newFixture(t)
+	f.s.Wait() // never started: returns at once
+	f.s.Tick = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	f.s.Start(ctx)
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	done := make(chan struct{})
+	go func() { f.s.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("Wait never returned after the tick loop's ctx was cancelled")
+	}
+}

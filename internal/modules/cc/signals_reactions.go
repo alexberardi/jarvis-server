@@ -129,12 +129,12 @@ func (m *Module) dispatchSignal(rc reactionCtx) {
 			m.deps.Log.Warn("cc: signal reaction dropped (busy)", "reaction", r.name, "kind", rc.Kind)
 			continue
 		}
-		m.sig.wg.Add(1)
-		go func(r reaction) {
-			defer m.sig.wg.Done()
+		if !m.background("signal reaction", func() {
 			defer func() { <-m.sig.sem }()
 			m.runReaction(context.Background(), r, rc)
-		}(r)
+		}) {
+			<-m.sig.sem
+		}
 	}
 }
 

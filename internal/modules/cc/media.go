@@ -255,10 +255,14 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 			finish := m.signals.beginWake(convID)
 			select {
 			case m.wakeSem <- struct{}{}:
-				go func() {
+				bg := context.WithoutCancel(ctx)
+				if !m.background("wake verify", func() {
 					defer func() { <-m.wakeSem }()
-					m.verifyWake(context.WithoutCancel(ctx), n, speakerAudio, finish)
-				}()
+					m.verifyWake(bg, n, speakerAudio, finish)
+				}) {
+					<-m.wakeSem
+					finish(nil) // fail open, as for any miss
+				}
 			default:
 				finish(nil) // no verdict: the turn fails open without waiting for one
 				m.deps.Log.Warn("cc: wake verification dropped (busy)", "node", n.ID, "conversation_id", convID,

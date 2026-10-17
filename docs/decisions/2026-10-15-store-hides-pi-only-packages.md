@@ -37,3 +37,7 @@ which still decides the untagged case.
 
 Supersedes the "Pantry doesn't filter by node kind" line of
 [agent/DESIGN.md §8](../agent/DESIGN.md)'s as-built note.
+
+The "if Pantry is down … the request goes ahead" rule is superseded for computers by
+[2026-10-17-desktop-installs-pinned-to-pantry](2026-10-17-desktop-installs-pinned-to-pantry.md):
+an install on a computer is refused when Pantry can't vouch for it.

@@ -113,8 +113,7 @@ type signalState struct {
 	journal   map[string]string     // household -> journal trigger spec already put
 	reactions map[string][]reaction // kind -> reactions, registration order
 
-	sem chan struct{} // bounds in-process reactions when there is no queue
-	wg  sync.WaitGroup
+	sem chan struct{} // bounds in-process reactions (run on the module's task group) when there is no queue
 }
 
 type rateBucket struct {

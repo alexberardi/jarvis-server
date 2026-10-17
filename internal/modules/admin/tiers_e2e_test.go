@@ -97,6 +97,15 @@ func login(t *testing.T, base, email string) (string, int64) {
 	return o["access_token"].(string), int64(obj(t, o["user"])["id"].(float64))
 }
 
+// openRegistration turns auth.open_registration on as the superuser, so the test can sign up
+// plain accounts and place them with /households/{id}/members.
+func openRegistration(t *testing.T, authURL, root string) {
+	t.Helper()
+	if code, out := call(t, "PUT", authURL+"/settings/auth.open_registration", map[string]any{"value": true}, bearer(root)...); code != 200 {
+		t.Fatalf("open registration: %d %v", code, out)
+	}
+}
+
 func TestMemberTiersEndToEnd(t *testing.T) {
 	base, authURL, ccURL, notif, home := memberStack(t)
 
@@ -120,6 +129,7 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 		return obj(t, out)["id"].(string)
 	}
 	h1, h2 := mkHousehold("H1"), mkHousehold("H2")
+	openRegistration(t, authURL, root)
 	users := map[string]string{}
 	for _, u := range []struct{ email, hh, role string }{
 		{"m1@example.com", h1, "member"}, {"p1@example.com", h1, "power_user"},
@@ -330,6 +340,7 @@ func TestAddonsDeviceRoutesEndToEnd(t *testing.T) {
 		return obj(t, out)["id"].(string)
 	}
 	h1, h2 := mkHousehold("H1"), mkHousehold("H2")
+	openRegistration(t, authURL, root)
 	users := map[string]string{}
 	for _, u := range []struct{ email, hh, role string }{
 		{"m1@example.com", h1, "member"}, {"o1@example.com", h1, "member"}, {"p1@example.com", h1, "power_user"},

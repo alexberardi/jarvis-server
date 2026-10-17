@@ -166,6 +166,10 @@ func (m *Module) handleRequestTestInstall(w http.ResponseWriter, r *http.Request
 		m.writeErr(w, err)
 		return
 	}
+	if err := m.requireDesktopPkgRole(ctx, auth, node, hh); err != nil {
+		m.writeErr(w, err)
+		return
+	}
 	if !m.requirePantry(w, r, hh) {
 		return
 	}

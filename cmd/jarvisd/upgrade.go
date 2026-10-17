@@ -417,9 +417,18 @@ func restartAfter(ctx context.Context, mgr service.Manager, st service.Status, p
 	if !errors.Is(err, errNoOutcome) {
 		return err
 	}
+	return rollbackStalled(ctx, mgr, st, p, wait, stdout)
+}
+
+// rollbackStalled stops the service and rolls back an upgrade whose new version never
+// reported an outcome within wait. The rollback replaces the binary and may restore the
+// database snapshot, so it needs jarvisd stopped: if the stop fails, it touches nothing and
+// tells the operator to stop jarvisd and roll back by hand.
+func rollbackStalled(ctx context.Context, mgr service.Manager, st service.Status, p update.Paths, wait time.Duration, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "no result after %s; rolling back\n", wait)
 	if serr := mgr.Stop(ctx); serr != nil {
-		fmt.Fprintln(stdout, "stopping the service failed:", serr)
+		return fmt.Errorf("no health result within %s and stopping the service failed: %w; nothing was rolled back. Stop jarvisd and run %s; see %s",
+			wait, serr, elevated("jarvisd upgrade --rollback"), logHint(st.Kind, p.Home))
 	}
 	if rerr := update.RequestRollback(p, "no health result within "+wait.String()); rerr != nil {
 		return rerr
