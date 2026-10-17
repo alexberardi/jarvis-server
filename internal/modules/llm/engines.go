@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/models"
@@ -83,24 +84,95 @@ func (m *Module) ModelPath(ctx context.Context, kind string) (string, bool) {
 // then needs llm.prompt_provider set (D11). This is how a fresh install talks without anyone
 // choosing a provider.
 func (m *Module) LivePromptProvider(ctx context.Context) string {
-	if m.stack == nil || m.stack.Manager == nil || m.settings == nil {
-		return ""
+	return m.LiveModelTraits(ctx).PromptProvider
+}
+
+// ModelTraits is what cc needs to know about the live model to resolve its auto settings.
+type ModelTraits struct {
+	// PromptProvider: see LivePromptProvider.
+	PromptProvider string
+	// ToolCalling is "native" (the model calls tools through the API), "text" (its template
+	// renders no tools) or "" (unknown: no template found); ToolCallingFrom says how it was
+	// decided ("remote", "template").
+	ToolCalling, ToolCallingFrom string
+	// Thinking: the model's template has the enable_thinking switch.
+	Thinking bool
+	// Local: the local engine serves the live label.
+	Local bool
+}
+
+// templateTraits caches the traits read from a local model's chat template, per model ID and
+// path: a template never changes for an installed file.
+var templateTraits sync.Map // id+"\x00"+path -> ModelTraits
+
+// LiveModelTraits reports the live label's model traits. A remote label calls tools natively
+// and has no thinking switch. A local model's come from the chat template llama-server
+// renders with: the catalog entry's pinned one (--chat-template-file), else the one in the
+// model's files (GGUF header, chat_template.jinja, tokenizer_config.json). The zero value
+// when the live label has no model.
+func (m *Module) LiveModelTraits(ctx context.Context) ModelTraits {
+	if m.stack == nil || m.stack.Manager == nil || m.stack.Resolver == nil || m.settings == nil {
+		return ModelTraits{}
+	}
+	// As LabelStates reports remote: engine=remote with a URL (without one it is not_configured).
+	c, err := m.stack.Resolver.Source.Label(ctx, "live")
+	if err != nil {
+		return ModelTraits{}
+	}
+	switch c.Engine {
+	case engine.ModeRemote:
+		if c.RemoteURL == "" {
+			return ModelTraits{}
+		}
+		return ModelTraits{ToolCalling: "native", ToolCallingFrom: "remote"}
+	case engine.ModeOff:
+		return ModelTraits{}
 	}
 	id := strings.TrimSpace(m.settings.String(ctx, "llm.live.model", settings.Scope{}))
 	if id == "" {
-		return ""
+		return ModelTraits{}
 	}
 	mod, err := m.stack.Manager.Store.Get(ctx, id)
 	if err != nil {
-		return ""
+		return ModelTraits{}
 	}
-	if mod.PromptProvider != "" {
-		return mod.PromptProvider
+	e, inCatalog := models.CatalogEntry(mod.CatalogID)
+	key := mod.ID + "\x00" + mod.Path
+	var tr ModelTraits
+	if v, ok := templateTraits.Load(key); ok {
+		tr = v.(ModelTraits)
+	} else if tr, err = readTemplateTraits(e, inCatalog, mod); err != nil {
+		m.deps.Log.Debug("llm: no chat template for the live model", "model", mod.ID, "path", mod.Path, "err", err)
+	} else {
+		templateTraits.Store(key, tr)
 	}
-	if e, ok := models.CatalogEntry(mod.CatalogID); ok {
-		return e.PromptProvider
+	tr.PromptProvider = mod.PromptProvider
+	if tr.PromptProvider == "" && inCatalog {
+		tr.PromptProvider = e.PromptProvider
 	}
-	return ""
+	return tr
+}
+
+// readTemplateTraits reads a local model's tool calling and thinking from its chat template
+// (on an error, the traits of a model without one).
+func readTemplateTraits(e models.Entry, inCatalog bool, mod models.Model) (ModelTraits, error) {
+	tr := ModelTraits{Local: true}
+	var tpl string
+	var err error
+	if inCatalog && e.ChatTemplate != "" {
+		tpl, err = e.Template()
+	} else {
+		tpl, err = models.ModelChatTemplate(mod.Path)
+	}
+	if err != nil || tpl == "" {
+		return tr, err
+	}
+	tr.ToolCalling, tr.ToolCallingFrom = "text", "template"
+	if models.TemplateSupportsTools(tpl) {
+		tr.ToolCalling = "native"
+	}
+	tr.Thinking = models.TemplateHasThinking(tpl)
+	return tr, nil
 }
 
 // LabelStates reports every label's state for the admin's setup state: the engine labels
