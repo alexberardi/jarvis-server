@@ -87,13 +87,51 @@ Everything a run leaves is under `.e2e/<run>/` (gitignored), `<run>` = `YYYYMMDD
       "error": null, "screenshots": [], "trace": null, "console_errors": [],
       "skip_reason": "needs biometric enrollment, which the headless emulator has not got"
     }
-  ]
+  ],
+  "coverage": {
+    "web": {"entries": 34, "covered": ["/chat", "…"], "manual": ["<route>: <reason>"], "pending": [],
+            "invalid": [], "missing": null, "stale": null, "checked_by": "CI (web/admin/src/coverage.test.tsx)"},
+    "mobile": {"entries": 64, "covered": ["RoutinesStackNavigator/ScheduleList"], "manual": ["…"],
+               "pending": ["MainTabNavigator/HomeTab: #145: nav-tabs.yaml, home-chat.yaml"],
+               "invalid": [], "missing": [], "stale": [], "checked_by": "this run's mobile suite"}
+  }
 }
 ```
 
 Paths are relative to `.e2e/<run>/`. A suite with `status: error` did not run (its `error` says
 why, e.g. a sandbox that did not come up); the run is then `failed` too. `console_errors` are
 recorded, not failures: a refused password or a deleted item's 404 logs one on purpose.
+
+`coverage` (and report.md's Coverage section) is the coverage gate's state, below. `missing`
+and `stale` are `null` where this run did not check them: always for web (CI does), and for
+mobile when the mobile suite did not run.
+
+## The coverage gate (`e2e/coverage.json`)
+
+Every admin SPA route and every mobile screen has an entry in `e2e/coverage.json`: the specs
+or flows covering it, or why it has none. **A new page or screen needs an entry in the same
+PR**, or the check fails. Why and the format:
+[`../decisions/2026-10-18-e2e-coverage-gate.md`](../decisions/2026-10-18-e2e-coverage-gate.md).
+
+```json
+"web":    {"/admin/traces/:id": {"tests": ["e2e/web/tests/admin/traces.spec.ts"]}},
+"mobile": {"RoutinesStackNavigator/ScheduleList": {"flows": [".maestro/schedules.yaml"]},
+           "DevicesStackNavigator/CameraView": {"manual": "a live camera stream; the sandbox has no camera device"},
+           "MainTabNavigator/HomeTab": {"pending": "#145: nav-tabs.yaml, home-chat.yaml"}}
+```
+
+- **Web, in CI:** `web/admin/src/coverage.test.tsx` walks the real route tree (`appRoutes()`
+  in `routes.tsx`, which `App.tsx` renders) and fails on a route with no entry, an entry for a route
+  that is gone, an entry that isn't exactly one kind, and a spec file that doesn't exist.
+- **Mobile, in `scripts/e2e mobile`:** the suite's first test, `coverage: …`
+  (`tools/e2emobile/coverage.go`), reads the `<X.Screen name=…>` registrations of the same
+  mobile commit's `src/navigation/` (as `<Navigator file>/<name>`; a registration whose
+  component is another navigator there is a container and not listed) and fails the same
+  ways, with flow files looked up in that commit's `.maestro/`. By hand:
+  `go run ./tools/e2emobile coverage --coverage e2e/coverage.json --flows <checkout>/.maestro --nav <checkout>/src/navigation`.
+- `pending` is a screen with a test still to come (name the item); `manual` is one an
+  automated test can't reach here (camera, microphone, third-party sign-in, the fake-node
+  lane). When a pending flow lands, turn its entry into `flows`.
 
 ## The web suite (`e2e/web/`)
 
@@ -110,7 +148,7 @@ one auth rate limit.
 | `inbox.spec.ts` | list with unread marks and the sidebar badge; detail renders markdown and reads it (server and badge); delete from the detail; bulk mark read and delete |
 | `addons.spec.ts` | the page's sections; a paired desktop agent is listed; signing it out removes it on the server |
 | `household.spec.ts` | the switcher appears with two households; the inbox and the chat devices follow the pick, across a reload; no switcher with one |
-| `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
+| `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page, every old top-level path and `/admin` itself forward to their `/admin` page (query kept), an unknown path shows the 404 page in the shell and under `/admin`; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
 | `admin/dashboard.spec.ts` | System card = `/api/system/info`; no Restart when unsupervised; Stop asks and Cancel leaves jarvisd up (stop is never sent); "Finish setup" vs "Voice isn't ready" banner from `setup.completed`, the latter naming the missing jobs and leading to their models; no update or GPU banner without their state |
 | `admin/models.spec.ts` | every catalog model listed; Install asks and nothing downloads; a job's Set up narrows the catalog to its kind, Show all restores it; a model assigned to the live label is saved (server and page, across a reload; background follows). Skipped: Hugging Face installs |
 | `admin/settings.spec.ts` | a household's own value of a household setting: edited, saved on the server, kept across a reload; Use default removes it; the default untouched |
