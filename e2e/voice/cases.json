@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "name": "wake + timer",
+      "model": true,
+      "audio": [{"say": "Hey Jarvis."}, {"silence": 0.4}, {"say": "Set a timer for five minutes."}, {"silence": 2}],
+      "expect": {"reply": "(?i)timer|minute", "max_secs": 20}
+    },
+    {
+      "name": "lights",
+      "model": true,
+      "audio": [{"say": "Hey Jarvis."}, {"silence": 0.4}, {"say": "Turn on the kitchen lights."}, {"silence": 2}],
+      "expect": {"reply": "(?i)light|kitchen", "max_secs": 20}
+    },
+    {
+      "name": "a question",
+      "model": true,
+      "audio": [{"say": "Hey Jarvis."}, {"silence": 0.4}, {"say": "How many days are there in a week?"}, {"silence": 2}],
+      "expect": {"reply": "(?i)\\bseven\\b|\\b7\\b", "max_secs": 20}
+    },
+    {
+      "name": "the time, through the clock tool",
+      "model": true,
+      "audio": [{"say": "Hey Jarvis."}, {"silence": 0.4}, {"say": "What time is it?"}, {"silence": 2}],
+      "expect": {"tool": "get_current_time", "reply": "(?i)\\d|o'clock|past|to|noon|midnight|morning|afternoon|evening", "max_secs": 20}
+    },
+    {
+      "name": "no wake word stays silent",
+      "audio": [{"say": "Set a timer for five minutes."}, {"silence": 1}, {"say": "Turn on the kitchen lights."}, {"silence": 2}],
+      "expect": {"silent": true}
+    },
+    {
+      "name": "background noise stays silent",
+      "audio": [{"noise": "pink", "secs": 8, "gain": 0.3}, {"silence": 1}],
+      "expect": {"silent": true}
+    },
+    {
+      "name": "music with talk over it stays silent",
+      "audio": [
+        {"noise": "music", "secs": 10, "gain": 0.3},
+        {"say": "I was telling my sister about the weather yesterday.", "over": 7},
+        {"silence": 1}
+      ],
+      "expect": {"silent": true}
+    },
+    {
+      "name": "barge-in stops a long reply",
+      "model": true,
+      "needs": "pipewire",
+      "audio": [
+        {"say": "Hey Jarvis."}, {"silence": 0.4}, {"say": "Tell me a long story about the sea."},
+        {"silence": 14}, {"say": "Hey Jarvis."}, {"silence": 3}
+      ],
+      "expect": {"outcome": "interrupted"}
+    }
+  ]
+}

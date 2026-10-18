@@ -1,0 +1,11 @@
+{
+  "fallback": "Scripted model: no rule matched that.",
+  "rules": [
+    {"match": "(?i)\\btimer\\b", "reply": "Your five minute timer is set."},
+    {"match": "(?i)\\blights?\\b", "reply": "The kitchen lights are on."},
+    {"match": "(?i)days .*\\bweek\\b", "reply": "There are seven days in a week."},
+    {"match": "(?i)what time", "tool_calls": [{"name": "get_current_time", "arguments": {}}]},
+    {"after_tool": "get_current_time", "reply": "It is ten past three in the afternoon."},
+    {"match": "(?i)story", "reply": "Once upon a time a lighthouse keeper lived alone on a rock far out at sea. Every night he climbed the hundred steps of his tower, lit the great lamp and watched the ships go by. One winter a storm blew for a week without stopping, and the waves rose higher than the gallery. On the seventh night a small fishing boat lost its way in the dark, and the keeper rang the fog bell until morning, when the boat came safely into the harbour and the whole village came out to thank him."}
+  ]
+}
