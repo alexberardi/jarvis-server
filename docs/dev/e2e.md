@@ -26,7 +26,7 @@ Exit status: 0 when every test passed, 1 when one failed or a suite could not ru
   `$SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN`). Only the setup wizard's test uses it.
 
 Both are purged afterwards (`scripts/sandbox down --purge`) unless `--keep`. A run takes about
-2 minutes on the dev box (build, seed, ~45 browser tests).
+2 minutes on the dev box (build, seed, ~70 browser tests).
 
 ## The report
 
@@ -98,6 +98,15 @@ one auth rate limit.
 | `addons.spec.ts` | the page's sections; a paired desktop agent is listed; signing it out removes it on the server |
 | `household.spec.ts` | the switcher appears with two households; the inbox and the chat devices follow the pick, across a reload; no switcher with one |
 | `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
+| `admin/dashboard.spec.ts` | System card = `/api/system/info`; no Restart when unsupervised; Stop asks and Cancel leaves jarvisd up (stop is never sent); "Finish setup" vs "Voice isn't ready" banner from `setup.completed`, the latter naming the missing jobs and leading to their models; no update or GPU banner without their state |
+| `admin/models.spec.ts` | every catalog model listed; Install asks and nothing downloads; a job's Set up narrows the catalog to its kind, Show all restores it; a model assigned to the live label is saved (server and page, across a reload; background follows). Skipped: Hugging Face installs |
+| `admin/settings.spec.ts` | a household's own value of a household setting: edited, saved on the server, kept across a reload; Use default removes it; the default untouched |
+| `admin/connections.spec.ts` | listeners and external services with their health as the server has it; an app client created here: its key (shown once) authenticates, Rotate replaces it, Revoke stops it |
+| `admin/logs.spec.ts` | lines sent through jarvis-logs' ingest found with the module, text and level filters; context opens; no match says so |
+| `admin/traces.spec.ts` | a chat turn becomes a trace: on the dashboard's recent requests, in the list, and its detail is that turn |
+| `admin/nodes.spec.ts` | a pairing computer approved into a household (it then registers and is listed), another denied (told so, gone); a signed-out node behind Show signed-out nodes. Skipped: rename/remove (not in the web admin) |
+| `admin/users.spec.ts` | every account with households, roles and badges; a generated and a chosen temporary password both sign the user in to the forced change; a deactivated account (seeded) marked and not resettable. Skipped: invite, role change, disable (mobile only in v1) |
+| `admin/update.spec.ts` | checks off: says so, the running version, no update offered; the switch saved on the server both ways; apply is blocked throughout. Skipped: an available update and applying it |
 
 ### Writing a test
 
@@ -112,6 +121,11 @@ one auth rate limit.
 - Login, register and refresh share one per-IP limit of 30 a minute and every test comes from
   127.0.0.1. `asUser` starts from the registration's session instead of the form; the form is
   `auth.spec.ts`'s. A 429 waits the minute out once (the test timeout allows it).
+- Never stop, restart or update the shared sandbox, and put back any install-wide setting a
+  test changes; what each admin page's test leaves out, and why:
+  [`../decisions/2026-10-17-e2e-admin-pages.md`](../decisions/2026-10-17-e2e-admin-pages.md).
+- A form sign-in that should succeed: fill it, then `pressSignIn(page)` (`helpers/login.ts`), which
+  waits out the rate limit once.
 - Chat answers come from `e2e/llm/web.json` (`useScript` switches it); add a rule there for a
   new conversation, and match on the user's words.
 - Run one file against a kept sandbox while writing it:

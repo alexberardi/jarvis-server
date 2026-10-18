@@ -225,3 +225,25 @@ export function modelCalls(): any[] {
 }
 
 export const repoRoot = path.resolve(import.meta.dirname, '../../..')
+
+export interface Pairing {
+  pairing_id: string
+  poll_secret: string
+  /** The code the computer shows, e.g. ABCD-EFGH. */
+  code: string
+}
+
+/** startPairing asks to pair as a computer does (jarvis-agent enroll): cc gives it a code to show. */
+export async function startPairing(name: string): Promise<Pairing> {
+  return must('POST', `${env('SBX_CC')}/api/v0/nodes/pairings`, { body: { name, platform: 'linux' } })
+}
+
+/** pollPairing is the computer's poll: pending, denied, or approved with a provisioning token. */
+export async function pollPairing(p: Pairing): Promise<any> {
+  return must('POST', `${env('SBX_CC')}/api/v0/nodes/pairings/${p.pairing_id}/poll`, { body: { poll_secret: p.poll_secret } })
+}
+
+/** postLog sends one log line as an app would (jarvis-logs' ingest). */
+export async function postLog(entry: { service: string; level: string; message: string; context?: Record<string, unknown> }): Promise<void> {
+  await must('POST', `${env('SBX_LOGS')}/api/v0/logs`, { headers: await appHeaders(), body: entry })
+}

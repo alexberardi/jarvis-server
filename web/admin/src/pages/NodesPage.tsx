@@ -17,7 +17,7 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const ext = extensionState(live)
   const Icon = desktop ? Laptop : Cpu
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid={`node-${node.node_id}`}>
       {/* The badges drop below the name when both don't fit, rather than squeezing the name. */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
