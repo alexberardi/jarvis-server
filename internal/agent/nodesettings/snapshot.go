@@ -63,11 +63,26 @@ func (st *Store) secretsList(specs []SecretSpec, includeValues bool, uid *int64)
 	return out
 }
 
-// Snapshot is build_snapshot for a desktop agent: its commands with their secrets and enabled
-// state; no background agents, device families or managers; and a node_config that says it has
-// none of a Pi's hardware (the app hides the HAT card on hat_detected false). The Pi's voice and
-// maintenance keys are left out: they are the Pi's, and the agent ignores pushes of them.
-func (st *Store) Snapshot(cmds []Command, includeValues bool, uid *int64) map[string]any {
+// DesktopNodeConfig is a computer's node_config: none of a Pi's hardware (the app hides the HAT
+// card on hat_detected false). The Pi's voice and maintenance keys are left out: they are the
+// Pi's, and the agent ignores pushes of them.
+func DesktopNodeConfig() map[string]any {
+	return map[string]any{
+		"hardware": map[string]any{"hat_detected": false, "led_chain_available": false, "button_available": false},
+	}
+}
+
+func (h *Handler) nodeConfig() map[string]any {
+	if h.NodeConfig != nil {
+		return h.NodeConfig()
+	}
+	return DesktopNodeConfig()
+}
+
+// Snapshot is build_snapshot for the agent: its commands with their secrets and enabled state;
+// no background agents, device families or managers; and nodeConfig as node_config
+// (DesktopNodeConfig on a computer, the HAT and voice settings on a Pi).
+func (st *Store) Snapshot(cmds []Command, nodeConfig map[string]any, includeValues bool, uid *int64) map[string]any {
 	entries := []map[string]any{}
 	for _, c := range cmds {
 		e := map[string]any{
@@ -89,8 +104,6 @@ func (st *Store) Snapshot(cmds []Command, includeValues bool, uid *int64) map[st
 		"agents":                  []any{},
 		"device_families":         []any{},
 		"device_managers":         []any{},
-		"node_config": map[string]any{
-			"hardware": map[string]any{"hat_detected": false, "led_chain_available": false, "button_available": false},
-		},
+		"node_config":             nodeConfig,
 	}
 }

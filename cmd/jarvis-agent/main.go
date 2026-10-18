@@ -37,6 +37,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
+	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
@@ -52,11 +53,6 @@ import (
 )
 
 var version = "dev"
-
-const installMode = "desktop-agent"
-
-// nodeKind tells jarvisd this is a computer, not a Pi (DESIGN §9 Q1; reported in heartbeats).
-const nodeKind = "desktop"
 
 // Values of the heartbeat's browser_extension capability.
 const (
@@ -179,6 +175,9 @@ func usage(w io.Writer) {
            [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4] [--wake-models DIR]
            [--no-chimes]   listening for "Hey Jarvis" (Linux, macOS): on and off from the
            status icon's menu
+           [--profile auto|desktop|pi]   pi: a Raspberry Pi voice node, headless, no desktop
+           tools (auto: pi on a Pi with the ReSpeaker HAT or with /etc/jarvis-node; also for
+           enroll, status and listen)
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   install  set the agent up for this user: start at login, the app menu entry (and desktop
@@ -270,8 +269,13 @@ func enroll(ctx context.Context, args []string) error {
 	browserYes := fs.Bool("browser", false, "set up browser control after enrolling, without asking")
 	browserNo := fs.Bool("no-browser", false, "don't offer browser control setup")
 	useCode := fs.Bool("code", false, "pair with a code a household member approves (the default without --email or --token)")
+	prof := profileFlag(fs)
 	_ = fs.Parse(args)
 	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
+	p, err := thisProfile(*prof)
+	if err != nil {
 		return err
 	}
 	roomSet := false
@@ -373,7 +377,7 @@ func enroll(ctx context.Context, args []string) error {
 
 	// Prefer the URL jarvisd says nodes should use; if this machine can't reach it (a VPN, a
 	// loopback-only dev server), fall back to the one discovery gave us.
-	reg := node.Registration{Room: regRoom, DeviceID: deviceid.Get(), NodeKind: nodeKind}
+	reg := node.Registration{Room: regRoom, DeviceID: deviceid.Get(), NodeKind: p.nodeKind}
 	c, err := node.RegisterPreferring(ctx, hc, nodeCC, ccURL, *server, id, tok, reg, func(err error) {
 		fmt.Fprintf(os.Stderr, "note: %s unreachable (%v); registering via %s\n", nodeCC, err, ccURL)
 	})
@@ -385,7 +389,9 @@ func enroll(ctx context.Context, args []string) error {
 		return fmt.Errorf("saving credentials: %w", err)
 	}
 	fmt.Printf("Enrolled as node %s (room %q). Credentials saved to %s.\n", c.NodeID, c.Room, path)
-	offerBrowserSetup(*browserYes, *browserNo)
+	if p.desktop {
+		offerBrowserSetup(*browserYes, *browserNo)
+	}
 	fmt.Println("Next: jarvis-agent run")
 	return nil
 }
@@ -456,6 +462,7 @@ type runFlags struct {
 	voiceOn, noOverlay *bool
 	noTray             *bool
 	noAutoUpdate       *bool
+	profile            *string
 	vf                 *voiceFlags
 	hf                 *hatFlags
 }
@@ -476,8 +483,9 @@ func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 		noTray:    fs.Bool("no-tray", false, "don't show the status icon and its menu (menu bar, tray, notification area)"),
 		noAutoUpdate: fs.Bool("no-auto-update", false, "don't update to the server's version by itself, and refuse updates sent from Jarvis Automation "+
 			"(jarvis-agent update still works)"),
-		vf: addVoiceFlags(fs),
-		hf: addHatFlags(fs),
+		profile: profileFlag(fs),
+		vf:      addVoiceFlags(fs),
+		hf:      addHatFlags(fs),
 	}
 }
 
@@ -494,7 +502,16 @@ func run(ctx context.Context, args []string) error {
 	if err := applySettings(fs, *f.config, log); err != nil {
 		return err
 	}
+	p, err := thisProfile(*f.profile)
+	if err != nil {
+		return err
+	}
+	if !p.desktop {
+		// A Pi is headless: no status icon, no island, nothing that opens a browser.
+		*f.noTray, *f.noOverlay = true, true
+	}
 	cp, tf, voiceOn, noOverlay, vf, hf := f.cp, f.tf, f.voiceOn, f.noOverlay, f.vf, f.hf
+	tf.pi = !p.desktop
 	// One agent per user: the control socket is the lock, and how a second launch, the
 	// start-only shortcut and uninstall reach this one (installers plan item 1.9).
 	ctl, err := listenControl()
@@ -511,7 +528,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	c, err := node.LoadCreds(path)
 	if err != nil {
-		if errors.Is(err, node.ErrNotEnrolled) && !interactive() {
+		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && p.desktop {
 			// A login item on a computer that isn't set up: the status icon's "Set up", then
 			// the agent once it is (setupwait.go). Typed in a terminal, it says what to do.
 			return waitForSetup(ctx, log, path, *f.noTray, ctl)
@@ -553,13 +570,20 @@ func run(ctx context.Context, args []string) error {
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	// Commands the household turned off in the app's node settings are neither offered nor run.
 	served := nodesettings.Gate{Tools: tools, Store: st}
-	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: installMode, NodeKind: nodeKind, DeviceID: deviceid.Get(), Log: log}
+	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: p.installMode, NodeKind: p.nodeKind, DeviceID: deviceid.Get(), Log: log}
 	runner.Store(r)
-	r.Capabilities, r.Changed = heartbeatCaps(tools)
-	wireNodeSettings(r, st, tools, log)
-	wirePackages(r, tf.pkgs, log)
+	if p.desktop {
+		// The browser extension's state is a computer's; a Pi has none to report.
+		r.Capabilities, r.Changed = heartbeatCaps(tools)
+	}
 	hd := openHat(hf, log)
 	defer hd.Close()
+	var nodeConfig func() map[string]any
+	if !p.desktop {
+		nodeConfig = piNodeConfig(vf, hf, hd, hat.Detected())
+	}
+	wireNodeSettings(r, st, tools, nodeConfig, log)
+	wirePackages(r, tf.pkgs, log)
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
 	// toggle turns it on and off while the agent runs (voiceSwitch).
 	sw := newVoiceSwitch(*voiceOn && voice.Supported, log)
@@ -579,7 +603,10 @@ func run(ctx context.Context, args []string) error {
 	} else if *voiceOn {
 		log.Info("voice: not supported on " + runtime.GOOS + " yet")
 	}
-	setup := openSetupPage(log)
+	var setup func()
+	if p.desktop {
+		setup = openSetupPage(log)
+	}
 	// Signed out (from Add-ons, an admin, or the menu's Sign out): drop node.json only, keep
 	// agent.json and apps.json, and open the setup page so someone can sign in again.
 	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
@@ -672,6 +699,8 @@ type toolFlags struct {
 	// the sidecar on them and leaves pkgs to answer the app's install requests.
 	pkgRoot string
 	pkgs    *packages.Manager
+	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools.
+	pi bool
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -691,11 +720,16 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 // long-running `run` does; `listen`, a test command often started over SSH, doesn't).
 //
 // st, when set, is the node's settings store: the sidecar's packages read their secrets and
-// keep their data there (DESIGN §16).
+// keep their data there (DESIGN §16). The Pi profile (f.pi) has only the sidecar and the clock.
 func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, st *nodesettings.Store) (*host.Host, node.Multi, func(), error) {
 	h, err := nativeHost()
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	f.origins = &jarvispage.Origins{}
+	if f.pi {
+		tools, closeAll, err := f.addCommon(ctx, log, st, node.Multi{}, func() {})
+		return h, tools, closeAll, err
 	}
 	// JARVIS_AGENT_NO_AX_PROMPT=1: a throwaway test copy (its own bundle id) mustn't ask.
 	if promptAX && macax.Supported() && !macax.Trusted() && os.Getenv("JARVIS_AGENT_NO_AX_PROMPT") == "" {
@@ -712,7 +746,6 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	f.origins = &jarvispage.Origins{}
 	guard := &jarvispage.Guard{Origins: f.origins}
 	dt.JarvisPage = guard.InFront
 	tools := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), dt), &screen.Tools{C: screen.Native(), Log: log}, dt}
@@ -726,6 +759,13 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
+	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)
+	return h, tools, closeAll, err
+}
+
+// addCommon adds what every profile has: the package sidecar's commands and the clock. On an
+// error it has already run closeAll.
+func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodesettings.Store, tools node.Multi, closeAll func()) (node.Multi, func(), error) {
 	// The package sidecar: the installed Pantry packages, or the spike's directory of modules.
 	live := &sidecar.Live{}
 	var storage sidecar.Storage
@@ -737,7 +777,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		sc, err := sidecar.Start(ctx, *f.py, *f.cmdDir, log, storage)
 		if err != nil {
 			closeAll()
-			return nil, nil, nil, fmt.Errorf("sidecar: %w", err)
+			return nil, nil, fmt.Errorf("sidecar: %w", err)
 		}
 		live.Swap(sc)
 	case f.pkgRoot != "":
@@ -752,7 +792,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	tools = append(tools, live)
 	// Last, so a sidecar's own get_current_time (Python's, with its city table) wins when present.
 	tools = append(tools, &clock.Tool{})
-	return h, tools, closeAll, nil
+	return tools, closeAll, nil
 }
 
 // dictationTools types and presses keys on this desktop (DESIGN.md §14). One Confirmer serves
@@ -811,8 +851,13 @@ func dictationStatus(ctx context.Context, h *host.Host) string {
 func status(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	cp := fs.String("creds", "", "credentials file")
+	prof := profileFlag(fs)
 	_ = fs.Parse(args)
 	if err := noStrayArgs(fs); err != nil {
+		return err
+	}
+	p, err := thisProfile(*prof)
+	if err != nil {
 		return err
 	}
 	h, err := nativeHost()
@@ -833,6 +878,7 @@ func status(ctx context.Context, args []string) error {
 	if line != "" {
 		fmt.Println(line)
 	}
+	fmt.Printf("profile:      %s\n", p.name)
 	fmt.Printf("platform:     %s\ncapabilities: %s\n", h.Platform(), strings.Join(caps, ", "))
 	if macax.Supported() {
 		trusted := macax.Trusted()
@@ -889,7 +935,7 @@ func status(ctx context.Context, args []string) error {
 	}
 	// No capabilities: this process doesn't hold the browser connection, so it must not report
 	// the extension's state over the running agent's.
-	if err := node.NewCC(ccURL, c).Heartbeat(ctx, node.Beat{Version: version, InstallMode: installMode, NodeKind: nodeKind, Busy: true}); err != nil {
+	if err := node.NewCC(ccURL, c).Heartbeat(ctx, node.Beat{Version: version, InstallMode: p.installMode, NodeKind: p.nodeKind, Busy: true}); err != nil {
 		fmt.Printf("jarvisd:      reachable, but the node key was refused or failed (%v)\n", err)
 		return nil
 	}

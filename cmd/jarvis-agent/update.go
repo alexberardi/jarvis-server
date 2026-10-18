@@ -227,7 +227,8 @@ func serverVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	r, err := node.NewCC(ccURL, c).Beat(ctx, node.Beat{Version: version, InstallMode: installMode, NodeKind: nodeKind, Busy: true})
+	p, _ := thisProfile("auto")
+	r, err := node.NewCC(ccURL, c).Beat(ctx, node.Beat{Version: version, InstallMode: p.installMode, NodeKind: p.nodeKind, Busy: true})
 	if err != nil {
 		return "", err
 	}

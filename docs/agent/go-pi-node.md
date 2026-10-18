@@ -945,6 +945,11 @@ These are **still needed**; install.sh step lines are cited:
    - macOS (AudioQueue via purego) and Windows (WASAPI over COM) follow.
 4. **Pi node.** In order:
    1. HAT audio (`dsnoopmic`/`output`), LEDs and button. **Done 2026-10-12 (§3.11).**
+      A Pi profile (`--profile pi`, auto on a Pi with the HAT or `/etc/jarvis-node`):
+      heartbeat `install_mode "tarball"`, no `node_kind`, runtime `go` (§8 Q6); no desktop,
+      screen, dictation or browser tools; headless (no tray, island or setup page); the settings
+      snapshot's `node_config` reports the HAT and the voice/LED settings. **Done 2026-10-17**
+      (unit tests; not yet run on a Pi).
    2. Heartbeat `pending_update` → updater.
    3. The tarball + install.sh variant (§6).
    4. The provisioning AP + HTTP API port.

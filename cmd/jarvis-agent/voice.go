@@ -139,10 +139,16 @@ func listen(ctx context.Context, args []string) error {
 	tf := addToolFlags(fs)
 	vf := addVoiceFlags(fs)
 	hf := addHatFlags(fs)
+	prof := profileFlag(fs)
 	_ = fs.Parse(args)
 	if err := noStrayArgs(fs); err != nil {
 		return err
 	}
+	p, err := thisProfile(*prof)
+	if err != nil {
+		return err
+	}
+	tf.pi = !p.desktop
 	path, err := credsPath(*cp)
 	if err != nil {
 		return err
