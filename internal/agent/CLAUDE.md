@@ -16,7 +16,8 @@ roadmap is [docs/agent/go-pi-node.md](../../docs/agent/go-pi-node.md).
 The agent talks to jarvisd only as a node (HTTP client + MQTT client). Its local listeners are
 user-only Unix sockets (browser, control, `setup.sock`; see `browser/`, `control/`) and, only
 while `jarvis-agent setup` runs, the setup page on 127.0.0.1 behind a per-launch secret
-(`firstrun/`). Nothing listens on the LAN.
+(`firstrun/`). Nothing listens on the LAN, except `jarvis-agent provision`: a Pi in setup mode
+serves the unauthenticated provisioning API on :8080 for the mobile app (`provisioning/`).
 
 > **Identity rule:** `internal/agent/host` owns *how to do a thing on this OS*. It owns no policy, no
 > routing and no voice logic. Deciding *which* window the user meant, or *whether* they may,
@@ -70,6 +71,7 @@ scripts/browser-ext-store-zip.sh chrome|firefox   # store upload zips -> dist/ (
 ./jarvis-agent run --voice=false               # no "Hey Jarvis" (on by default on Linux, macOS; the menu toggles it)
 ./jarvis-agent run --no-overlay --no-tray      # without the on-screen island / the status icon
 ./jarvis-agent run --voice --voice-input dsnoopmic --voice-output output   # a Pi with the HAT (--hat auto)
+./jarvis-agent provision --wifi simulated     # the Pi setup API on :8080 (no radio; the app or curl)
 ./jarvis-agent hat cycle | hat pattern thinking --for 5s | hat button   # the HAT by hand (no poweroff)
 ./jarvis-agent island-demo [--hold follow_up --for 20s]   # play the island's states (no mic, no server)
 ./jarvis-agent listen --voice-input wav:clip.wav --voice-output wav:reply.wav --once --no-chimes

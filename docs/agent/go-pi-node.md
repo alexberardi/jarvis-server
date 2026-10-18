@@ -952,7 +952,14 @@ These are **still needed**; install.sh step lines are cited:
       (unit tests; not yet run on a Pi).
    2. Heartbeat `pending_update` → updater.
    3. The tarball + install.sh variant (§6).
-   4. The provisioning AP + HTTP API port.
+   4. The provisioning AP + HTTP API port. **HTTP API done 2026-10-17** (loop #169):
+      `internal/agent/provisioning` (routes, state machine, registration retries, rollback and
+      hotspot restore, golden-tested against `N:provisioning/models.py`) behind a `WiFi`
+      interface, served by `jarvis-agent provision` on :8080 (`--captive-listen :80` optional).
+      Verified with a simulated radio against a sandbox jarvisd; differences from Python in
+      [decisions/2026-10-17-pi-provisioning-api.md](../decisions/2026-10-17-pi-provisioning-api.md).
+      **Still open:** the NetworkManager D-Bus Wi-Fi/hotspot backend (§8 Q7), starting setup mode
+      at boot, and the recovery watcher.
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land.
 
    Ship it to the lab Pi alongside the Python node (`install_mode` decides).

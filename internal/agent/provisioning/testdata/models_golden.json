@@ -1,0 +1,33 @@
+{
+  "states": [
+    "AP_MODE",
+    "CONNECTING",
+    "REGISTERING",
+    "PROVISIONED",
+    "ERROR"
+  ],
+  "error_codes": [
+    "config_write_failed",
+    "wifi_connect_failed",
+    "registration_failed",
+    "credentials_save_failed",
+    "internal_error"
+  ],
+  "cases": {
+    "info": "{\"node_id\":\"jarvis-a1b2c3d4\",\"firmware_version\":\"1.0.0\",\"hardware\":\"pi-zero-w\",\"mac_address\":\"b8:27:eb:a1:b2:c3\",\"capabilities\":[\"voice\",\"speaker\"],\"state\":\"AP_MODE\",\"previously_provisioned\":false}",
+    "info_previously_provisioned": "{\"node_id\":\"jarvis-a1b2c3d4\",\"firmware_version\":\"1.0.0\",\"hardware\":\"raspberry-pi\",\"mac_address\":\"b8:27:eb:a1:b2:c3\",\"capabilities\":[],\"state\":\"ERROR\",\"previously_provisioned\":true}",
+    "scan": "{\"networks\":[{\"ssid\":\"HomeNetwork\",\"signal_strength\":-45,\"security\":\"WPA2\"},{\"ssid\":\"Café <&>\",\"signal_strength\":-80,\"security\":\"OPEN\"}]}",
+    "scan_empty": "{\"networks\":[]}",
+    "provision_accepted": "{\"success\":true,\"message\":\"Credentials received. Attempting connection...\"}",
+    "provision_busy": "{\"success\":false,\"message\":\"Provisioning already in progress\"}",
+    "status_idle": "{\"state\":\"AP_MODE\",\"message\":\"Waiting for mobile app connection...\",\"progress_percent\":0,\"error\":null,\"error_code\":null,\"registration_status\":null,\"retryable\":false,\"hotspot_restored\":false}",
+    "status_connecting": "{\"state\":\"CONNECTING\",\"message\":\"Connecting to HomeNetwork...\",\"progress_percent\":35,\"error\":null,\"error_code\":null,\"registration_status\":null,\"retryable\":false,\"hotspot_restored\":false}",
+    "status_registration_failed": "{\"state\":\"ERROR\",\"message\":\"Provisioning failed — reconnect to the node's setup network and try again\",\"progress_percent\":70,\"error\":\"Command center rejected registration (HTTP 401): Invalid or expired provisioning token\",\"error_code\":\"registration_failed\",\"registration_status\":401,\"retryable\":true,\"hotspot_restored\":true}",
+    "status_internal": "{\"state\":\"ERROR\",\"message\":\"Provisioning failed\",\"progress_percent\":10,\"error\":\"boom\",\"error_code\":\"internal_error\",\"registration_status\":null,\"retryable\":false,\"hotspot_restored\":false}",
+    "status_provisioned": "{\"state\":\"PROVISIONED\",\"message\":\"Provisioning complete! You can now start the main Jarvis service.\",\"progress_percent\":100,\"error\":null,\"error_code\":null,\"registration_status\":null,\"retryable\":false,\"hotspot_restored\":false}",
+    "k2_ok": "{\"success\":true,\"node_id\":\"0b7c4e1e-1111-2222-3333-444455556666\",\"kid\":\"k2-2026-01\",\"error\":null}",
+    "k2_refused": "{\"success\":false,\"node_id\":null,\"kid\":null,\"error\":\"Node is already provisioned. Re-enter pairing mode to update K2.\"}",
+    "reset_ok": "{\"success\":true,\"cleared\":[\"provisioning_marker\",\"k2_key\"],\"error\":null}",
+    "reset_failed": "{\"success\":false,\"cleared\":[],\"error\":\"permission denied\"}"
+  }
+}
