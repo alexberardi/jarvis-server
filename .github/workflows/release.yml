@@ -36,9 +36,16 @@ name: release
 # self-update on a Mac replaces the whole app from it (item 1.7). The dmgs are listed in
 # SHA256SUMS, and verify mounts, checks and installs them on macOS.
 #
+# The Raspberry Pi voice node (go-pi-node.md §7 phase 4.3) installs from the same linux-arm64
+# jarvis-agent archive (onnxruntime embedded, decisions/2026-10-18-pi-ort-embedded.md) with
+# install-pi.sh, stamped with the tag like the other one-line installers but, unlike them, listed
+# in SHA256SUMS: it runs as root on the Pi, so someone who trusts the key can check the script
+# before running it. The install-pi job runs the stamped copy against this run's own files.
+#
 # Jobs: build (all 8 binaries and the two launchers) → sign-macos (Developer ID + notarization
 # of the darwin jarvisd, the two apps and the two dmgs) and windows-installers (Inno Setup) →
-# package (archives, .debs, SHA256SUMS, minisign) → verify (each OS) → publish. Signing
+# package (archives, .debs, install-pi.sh, SHA256SUMS, minisign) → verify (each OS) and
+# install-agent, install-pi → publish. Signing
 # happens before packaging so SHA256SUMS and its signature cover the notarized files.
 
 on:
@@ -51,6 +58,10 @@ on:
       - scripts/install.ps1
       - scripts/install-agent.sh
       - scripts/install-agent-check.sh
+      - scripts/install-pi.sh
+      - scripts/install-pi-check.sh
+      - scripts/packaging/pi/**
+      - scripts/testdata/install-pi.golden
       - scripts/build-debs.sh
       - scripts/packaging/deb/**
       - scripts/build-windows-installers.sh
@@ -464,6 +475,11 @@ jobs:
           done
           # The disk images (item 2.2), notarized and stapled in sign-macos.
           cp darwin-apps/*.dmg dist/
+          # The Pi node's installer, stamped with the tag (A10b) like the ones added below, but
+          # in SHA256SUMS: it runs as root, so it is covered by the signature like the archive
+          # it installs.
+          sed "s/^RELEASE_VERSION=\"\"$/RELEASE_VERSION=\"$VERSION\"/" scripts/install-pi.sh > dist/install-pi.sh
+          grep -qx "RELEASE_VERSION=\"$VERSION\"" dist/install-pi.sh
           # One list for both programs and the packages, so one signature covers every asset.
           (cd dist && sha256sum -- * > SHA256SUMS)
           [ "$(grep -c ' jarvisd-' dist/SHA256SUMS)" = 4 ] && [ "$(grep -c ' jarvis-agent-' dist/SHA256SUMS)" = 4 ]
@@ -472,6 +488,7 @@ jobs:
           grep -qx "[0-9a-f]*  Jarvis-Automation-Agent-Setup-${VERSION#v}\.exe" dist/SHA256SUMS
           grep -qx "[0-9a-f]*  Jarvis-Automation-Server-${VERSION#v}\.dmg" dist/SHA256SUMS
           grep -qx "[0-9a-f]*  Jarvis-Automation-Agent-${VERSION#v}\.dmg" dist/SHA256SUMS
+          grep -qx "[0-9a-f]*  install-pi\.sh" dist/SHA256SUMS
           ls -l dist && cat dist/SHA256SUMS
       # SHA256SUMS.minisig is the self-update trust root (AD5, ID9): jarvisd verifies it with
       # the project key built into the running binary before it installs anything. Signed with
@@ -529,7 +546,7 @@ jobs:
       # The one-line installers (install-agent.sh: the desktop agent on Fedora, Bazzite, Arch;
       # decided Q8) ship as release assets (the admin's update check shows an
       # install command only when they are there). They are fetched on their own over TLS, so
-      # they stay out of SHA256SUMS. Each is stamped with the tag (A10b): the copy at a
+      # they stay out of SHA256SUMS (install-pi.sh, added before it, is the exception). Each is stamped with the tag (A10b): the copy at a
       # release's URL installs that release, prereleases included, with no --version.
       - name: Add the install scripts
         env:
@@ -707,12 +724,13 @@ jobs:
           cd dist
           exe=jarvisd; [ "${{ matrix.ext }}" = zip ] && exe=jarvisd.exe
           if [ -f SHA256SUMS.minisig ]; then
-            # Every asset present (jarvisd's and the agent's archives, the .debs, the Windows installers, the dmgs) must match the signed list.
+            # Every asset present (jarvisd's and the agent's archives, the .debs, the Windows installers, the dmgs, install-pi.sh) must match the signed list.
             JARVIS_HOME="$RUNNER_TEMP/jarvis" "$PWD/$NAME/$exe" upgrade --verify-dir "$PWD" | tee verified
             grep -q "jarvis-agent-" verified
             grep -q "jarvis-automation-server_" verified && grep -q "jarvis-automation-agent_" verified
             grep -q "Jarvis-Automation-Server-Setup-" verified && grep -q "Jarvis-Automation-Agent-Setup-" verified
             grep -q "Jarvis-Automation-Server-.*\.dmg" verified && grep -q "Jarvis-Automation-Agent-.*\.dmg" verified
+            grep -qx "install-pi.sh" verified
           else
             echo "::warning::no SHA256SUMS.minisig (unsigned dry run); signature not checked"
           fi
@@ -762,8 +780,40 @@ jobs:
             CI=1 scripts/install-agent-check.sh dist "$VERSION" valid
           fi
 
+  # install-pi.sh as published (stamped, listed in SHA256SUMS) on arm64, under --root (a scratch
+  # root, every system command only logged): pinned to this tag, and installing this run's own
+  # linux-arm64 agent (--from-dir). Without minisign on the checksum; with minisign the real
+  # release's signature must verify and a dry run's throwaway one must be refused. The full
+  # golden check (scripts/install-pi-check.sh with no arguments) runs in CI's own workflow.
+  install-pi:
+    needs: [build, package]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvisd-${{ needs.build.outputs.version }}
+          path: dist
+      - name: shellcheck
+        run: shellcheck -s sh scripts/install-pi.sh dist/install-pi.sh && shellcheck scripts/install-pi-check.sh
+      - name: Checksum only (no minisign)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: scripts/install-pi-check.sh dist "$VERSION"
+      - name: With minisign
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          if [ "$EVENT" = pull_request ]; then
+            scripts/install-pi-check.sh dist "$VERSION" invalid
+          else
+            scripts/install-pi-check.sh dist "$VERSION" valid
+          fi
+
   publish:
-    needs: [build, verify, install-agent]
+    needs: [build, verify, install-agent, install-pi]
     if: ${{ github.event_name == 'push' || inputs.publish }}
     runs-on: ubuntu-latest
     permissions:
@@ -781,5 +831,5 @@ jobs:
           set -euo pipefail
           pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
           gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
-            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. macOS: open \`Jarvis-Automation-Server-<version>.dmg\` (the server) or \`Jarvis-Automation-Agent-<version>.dmg\` (the desktop agent), drag the app to Applications and open it (both are notarized). Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Debian/Ubuntu: open \`jarvis-automation-server_<version>_<arch>.deb\` (the server) or \`jarvis-automation-agent_<version>_<arch>.deb\` (the desktop agent) to install it with App Center or Software. Windows: \`Jarvis-Automation-Server-Setup-<version>.exe\` installs the server, \`Jarvis-Automation-Agent-Setup-<version>.exe\` the desktop agent (for you only, no administrator needed). Windows may say *Windows protected your PC*: Jarvis Automation is safe and open source, and Windows shows this for any installer that isn't signed with a paid code-signing certificate, which we don't buy. Click **More info**, then **Run anyway**. To check the file first, compare its SHA-256 with SHA256SUMS. Other Linux desktop agents: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`." \
+            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. macOS: open \`Jarvis-Automation-Server-<version>.dmg\` (the server) or \`Jarvis-Automation-Agent-<version>.dmg\` (the desktop agent), drag the app to Applications and open it (both are notarized). Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Debian/Ubuntu: open \`jarvis-automation-server_<version>_<arch>.deb\` (the server) or \`jarvis-automation-agent_<version>_<arch>.deb\` (the desktop agent) to install it with App Center or Software. Windows: \`Jarvis-Automation-Server-Setup-<version>.exe\` installs the server, \`Jarvis-Automation-Agent-Setup-<version>.exe\` the desktop agent (for you only, no administrator needed). Windows may say *Windows protected your PC*: Jarvis Automation is safe and open source, and Windows shows this for any installer that isn't signed with a paid code-signing certificate, which we don't buy. Click **More info**, then **Run anyway**. To check the file first, compare its SHA-256 with SHA256SUMS. Other Linux desktop agents: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`. Raspberry Pi voice node (64-bit Raspberry Pi OS, ReSpeaker 2-mics HAT): \`curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-pi.sh && sudo sh install-pi.sh\` (install-pi.sh is listed in SHA256SUMS, so it can be checked first)." \
             $pre

@@ -7,6 +7,9 @@
 #
 #   scripts/install-pi-check.sh            # check
 #   UPDATE=1 scripts/install-pi-check.sh   # rewrite the golden file after a deliberate change
+#   scripts/install-pi-check.sh DIST VERSION [valid|invalid]
+#                                          # release mode (release.yml's install-pi job): the
+#                                          # stamped DIST/install-pi.sh against that run's files
 #
 # No Pi or root needed. The agent in the fake release is a shell script; the wake models are the
 # real ones (their hashes are pinned), from .models/openwakeword (scripts/fetch-test-models.sh)
