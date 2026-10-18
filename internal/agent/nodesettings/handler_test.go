@@ -211,9 +211,10 @@ func TestSettingsRequestUploadsAnEncryptedSnapshot(t *testing.T) {
 	if snap["schema_version"] != 1.0 || snap["commands_schema_version"] != 2.0 || len(snap["agents"].([]any)) != 0 {
 		t.Fatalf("snapshot = %v", snap)
 	}
-	hw := snap["node_config"].(map[string]any)["hardware"].(map[string]any)
-	if hw["hat_detected"] != false {
-		t.Fatalf("hardware = %v", hw)
+	nc := snap["node_config"].(map[string]any)
+	hw := nc["hardware"].(map[string]any)
+	if len(nc) != 1 || len(hw) != 3 || hw["hat_detected"] != false || hw["led_chain_available"] != false || hw["button_available"] != false {
+		t.Fatalf("node_config = %v", nc)
 	}
 	s := secretsOf(snap, "get_weather")
 	if s["WEATHER_API_KEY"]["is_set"] != true || s["WEATHER_API_KEY"]["value"] != nil {
@@ -413,5 +414,22 @@ func TestGateHidesDisabledCommands(t *testing.T) {
 	_ = st.SetEnabled("a", true)
 	if out, _ := g.Call(context.Background(), "a", nil, node.Request{}); out["ran"] != "a" {
 		t.Fatalf("re-enabled call = %v", out)
+	}
+}
+
+// A Pi's node_config (Handler.NodeConfig) goes in the snapshot as given.
+func TestSnapshotCarriesTheNodeConfig(t *testing.T) {
+	h, f, _ := newHandler(t, "n1")
+	h.Commands = func(context.Context) []Command { return nil }
+	h.NodeConfig = func() map[string]any {
+		return map[string]any{"wake_word_threshold": 0.5, "hardware": map[string]any{"hat_detected": true}}
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	h.Handle(context.Background(), TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1"}`))
+	nc := decryptUpload(t, f, h, "r1")["node_config"].(map[string]any)
+	if nc["wake_word_threshold"] != 0.5 || nc["hardware"].(map[string]any)["hat_detected"] != true {
+		t.Fatalf("node_config = %v", nc)
 	}
 }

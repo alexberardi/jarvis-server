@@ -49,9 +49,10 @@ func dataCommands(tools node.Multi) nodesettings.DataCommands {
 // wireNodeSettings makes the runner a participant in the K2 settings protocol (DESIGN §16):
 // the K2 relay, settings snapshots and config pushes over MQTT nudges, the backstop on every
 // connect, and needs_k2 in the heartbeat until a key is stored. It also answers the app's
-// command-data browser (§16, "Stored data").
-func wireNodeSettings(r *node.Runner, st *nodesettings.Store, tools node.Multi, log *slog.Logger) {
-	h := &nodesettings.Handler{NodeID: r.Creds.NodeID, Store: st, Commands: settingsCommands(tools), Log: log,
+// command-data browser (§16, "Stored data"). nodeConfig, when set, is the snapshot's node_config
+// (the Pi profile's piNodeConfig); nil is a computer's.
+func wireNodeSettings(r *node.Runner, st *nodesettings.Store, tools node.Multi, nodeConfig func() map[string]any, log *slog.Logger) {
+	h := &nodesettings.Handler{NodeID: r.Creds.NodeID, Store: st, Commands: settingsCommands(tools), NodeConfig: nodeConfig, Log: log,
 		KeyChanged: r.BeatNow} // the app sees needs_k2: false within seconds
 	var once sync.Once
 	bind := func(cc *node.CC) *nodesettings.Handler {

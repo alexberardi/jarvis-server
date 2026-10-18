@@ -154,7 +154,7 @@ func setupDeps(log *slog.Logger, o setupOptions) firstrun.Deps {
 		Log:          log,
 		GOOS:         runtime.GOOS,
 		ComputerName: name,
-		Identity:     node.Registration{DeviceID: deviceid.Get(), NodeKind: nodeKind},
+		Identity:     node.Registration{DeviceID: deviceid.Get(), NodeKind: desktopProfile.nodeKind}, // the setup page is a computer's
 		Icon:         tray.IconPNG(),
 		Creds: func() (node.Creds, bool) {
 			p, err := node.DefaultCredsPath()
