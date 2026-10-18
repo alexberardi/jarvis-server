@@ -37,7 +37,7 @@ func scanToken(sc interface{ Scan(...any) error }) (DeviceToken, error) {
 }
 
 // handleRegisterToken upserts by push_token: a token moves to whoever registers it last and
-// is reactivated.
+// is reactivated. The caller must still be a member of the token's household (needHousehold).
 func (m *Module) handleRegisterToken(w http.ResponseWriter, r *http.Request, u authn.User) {
 	o, ok := readObject(w, r)
 	if !ok {
@@ -58,6 +58,9 @@ func (m *Module) handleRegisterToken(w http.ResponseWriter, r *http.Request, u a
 	}
 	if u.HouseholdID == "" {
 		httpx.Error(w, http.StatusBadRequest, "User JWT missing household_id claim")
+		return
+	}
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	var t DeviceToken

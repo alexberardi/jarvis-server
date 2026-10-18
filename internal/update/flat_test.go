@@ -175,7 +175,7 @@ func TestCheckDisk(t *testing.T) {
 // The install scripts verify a fresh install against the same key the binary trusts.
 func TestScriptsTrustTheProjectKey(t *testing.T) {
 	re := regexp.MustCompile(`RW[A-Za-z0-9+/]{54}`)
-	for _, f := range []string{"install.sh", "install.ps1", "install-agent.sh"} {
+	for _, f := range []string{"install.sh", "install.ps1", "install-agent.sh", "install-pi.sh"} {
 		b, err := os.ReadFile(filepath.Join("..", "..", "scripts", f))
 		if err != nil {
 			t.Fatal(err)

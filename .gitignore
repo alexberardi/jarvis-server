@@ -17,3 +17,6 @@ HOSTS.local.md
 /.claude/worktrees/
 /.claude/settings.local.json
 /tools/screenshots/node_modules/
+/e2e/web/node_modules/
+/e2e/web/test-results/
+/.e2e/

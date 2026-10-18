@@ -76,14 +76,14 @@ func (c caller) authorOnly(col string) (string, []any) {
 // resolve builds the caller from a verified token.
 func (m *Module) resolve(ctx context.Context, u authn.User) (caller, error) {
 	c := caller{ID: u.ID, Email: u.Email}
+	// Without a membership source the caller has no households (own rows only): the token's
+	// claim alone outlives a removal until it expires.
 	if m.Households != nil {
 		hhs, err := m.Households.UserHouseholds(ctx, u.ID)
 		if err != nil {
 			return caller{}, err
 		}
 		c.households = hhs
-	} else if u.HouseholdID != "" {
-		c.households = []string{u.HouseholdID} // no membership source (tests): trust the claim
 	}
 	switch {
 	case u.HouseholdID != "" && slices.Contains(c.households, u.HouseholdID):
