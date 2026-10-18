@@ -2,7 +2,7 @@
 """Merges each suite's results.json in an scripts/e2e run into report.json and report.md.
 
 A suite writes <out>/<suite>/results.json ({"suite", "status", "duration_ms", "tests": [...]},
-one record per test, e2e/web/reporter.ts) and scripts/e2e writes <out>/<suite>.exit. The
+one record per test, e2e/web/reporter.ts and tools/e2emobile) and scripts/e2e writes <out>/<suite>.exit. The
 report.json schema is in docs/dev/e2e.md; loop item #149 reads it, so keep it stable (add
 fields, don't rename them). Exits 1 when a test failed or a suite did not run to the end.
 """
@@ -86,6 +86,8 @@ def markdown(rep: dict) -> str:
                 lines.append(f"![screenshot]({s})")
             if t.get("trace"):
                 lines.append(f"- trace: `{t['trace']}` (`npx playwright show-trace` in e2e/web)")
+            for a in t.get("attachments", []):
+                lines.append(f"- attachment: `{a}`")
             for e in t.get("console_errors", [])[:20]:
                 lines.append(f"- console: `{e[:300]}`")
             lines.append("")
@@ -94,7 +96,8 @@ def markdown(rep: dict) -> str:
             lines += ["", f"**{name}**: {s['error']}"]
     lines += ["", "## Tests", "", "| status | suite | test | time | console errors |", "|---|---|---|---|---|"]
     for t in rep["tests"]:
-        lines.append(f"| {t['status']} | {t['suite']} | {t['title']} | {t['duration_ms'] / 1000:.1f} s | {len(t.get('console_errors', []))} |")
+        title = t["title"] + (f" (skipped: {t['skip_reason']})" if t.get("skip_reason") else "")
+        lines.append(f"| {t['status']} | {t['suite']} | {title} | {t['duration_ms'] / 1000:.1f} s | {len(t.get('console_errors', []))} |")
     return "\n".join(lines) + "\n"
 
 
@@ -115,7 +118,7 @@ def main() -> int:
         tests += t
     if a.requested == "all":
         for name in KNOWN:
-            suites.setdefault(name, {"status": "not_run", "exit_code": None, "error": "not built yet", "duration_ms": 0})
+            suites.setdefault(name, {"status": "not_run", "exit_code": None, "error": "not requested", "duration_ms": 0})
     bad = any(s["status"] in ("failed", "error") for s in suites.values()) or not tests
     rep = {
         "schema": 1,
