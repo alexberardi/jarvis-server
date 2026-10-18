@@ -276,15 +276,16 @@ func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, li
 		pn.Voice = live
 	}
 	r.Verbs = pn.Verbs()
-	return piNodeConfig(pn.State, hd, hat.Detected())
+	return piNodeConfig(pn.State, vf.bargeIn, hd, hat.Detected())
 }
 
 // piNodeConfig is the Pi profile's settings-snapshot node_config: the HAT (detected: hat.Detected;
 // the LEDs and button this agent actually opened) and the voice and LED settings it runs with
-// now (state: the flags, then the app's changes), under the Python node's keys
-// (settings_snapshot_service.py build_snapshot). Keys the Go node has no setting for yet
-// (silence thresholds, barge-in, maintenance restart, update consent) are left out.
-func piNodeConfig(state func() pinode.State, hd *hatDevices, detected bool) func() map[string]any {
+// now (state: the flags, then the app's changes; bargeIn: the flag, not changed live yet), under
+// the Python node's keys (settings_snapshot_service.py build_snapshot). Keys the Go node has no
+// setting for yet (silence thresholds, barge-in thresholds, maintenance restart, update consent)
+// are left out.
+func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, detected bool) func() map[string]any {
 	return func() map[string]any {
 		leds := hd != nil && hd.leds != nil
 		st := state()
@@ -293,6 +294,7 @@ func piNodeConfig(state func() pinode.State, hd *hatDevices, detected bool) func
 			"wake_ack_audio_enabled":     st.WakeAck,
 			"follow_up_listen_seconds":   st.FollowUpListen,
 			"follow_up_silence_duration": st.FollowUpSilence,
+			"barge_in_enabled":           bargeIn,
 			"led_enabled":                st.LEDEnabled,
 			"led_brightness_percent":     st.LEDBrightness,
 			"hardware": map[string]any{

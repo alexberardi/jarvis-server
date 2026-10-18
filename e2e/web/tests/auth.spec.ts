@@ -2,7 +2,7 @@
 import { call, asSuperuser, login, newUser } from '../helpers/api'
 import { env } from '../helpers/env'
 import { expect, test } from '../helpers/fixtures'
-import { submitLogin } from '../helpers/login'
+import { pressSignIn, submitLogin } from '../helpers/login'
 
 const ACCESS = 'jarvis-admin:access_token'
 const REFRESH = 'jarvis-admin:refresh_token'
@@ -36,7 +36,7 @@ test('a wrong password is refused, then the right one signs in', async ({ freshP
   expect(await token(page)).toBeNull()
 
   await page.getByLabel('Password').fill(u.password)
-  await page.getByRole('button', { name: 'Sign in' }).click()
+  await pressSignIn(page)
   await expect(page).toHaveURL(/\/chat$/)
   expect(await token(page)).toBeTruthy()
 })

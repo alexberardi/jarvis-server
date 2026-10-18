@@ -3,7 +3,7 @@
 - **Date:** 2026-10-17 (build agent, loop #171; for review)
 
 Choices made porting `update_node_config`, `preview_led_pattern` and `measure_ambient_noise` to
-the Go Pi node ([agent/go-pi-node.md §3.13](../agent/go-pi-node.md)):
+the Go Pi node ([agent/go-pi-node.md §3.14](../agent/go-pi-node.md)):
 
 - **Persisted in agent.json, not a config.json.** The Go agent's settings file is agent.json;
   each Python key the Go node supports maps to an agent.json key that is also a `run` flag

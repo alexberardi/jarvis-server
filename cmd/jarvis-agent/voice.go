@@ -29,6 +29,7 @@ type voiceFlags struct {
 	noChimes      bool
 	followUp      float64
 	followSilence float64
+	bargeIn       bool
 	debounce      time.Duration
 	onsetWait     time.Duration
 }
@@ -51,6 +52,8 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; the Python node's follow_up_listen_seconds)")
 	fs.Float64Var(&v.followSilence, "follow-up-silence", voice.DefaultFollowUp().SilenceSecs,
 		"seconds of silence that end a follow-up answer (the Python node's follow_up_silence_duration is 0.5)")
+	fs.BoolVar(&v.bargeIn, "barge-in", voice.DefaultBargeIn().Enabled,
+		"stop a reply when \"hey Jarvis\" is said over it (-barge-in=false: off; the Python node's barge_in_enabled)")
 	fs.DurationVar(&v.debounce, "wake-debounce", voice.DefaultConfig().Debounce,
 		"no second wake this soon after one (at least 500ms)")
 	fs.DurationVar(&v.onsetWait, "listen-onset-wait", 0,
@@ -103,6 +106,7 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	cfg.Debounce = wakeDebounce(f.debounce)
 	cfg.Endpointing.OnsetWaitSecs = max(0, f.onsetWait.Seconds())
 	cfg.FollowUp.ListenSecs = f.followUp
+	cfg.BargeIn.Enabled = f.bargeIn
 	if f.followSilence > 0 {
 		cfg.FollowUp.SilenceSecs = f.followSilence
 	}

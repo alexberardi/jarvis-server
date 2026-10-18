@@ -155,6 +155,8 @@ type fakeServer struct {
 	text     string
 	reply    func(ctx context.Context) (Reply, error)
 	speakPCM []byte
+	// speakBody, when set, is Speak's audio instead of speakPCM.
+	speakBody func(ctx context.Context, text string) io.ReadCloser
 	// cont answers /voice/command/continue; nil means "complete" with nothing to say.
 	cont func(results []ToolResult) (*Control, error)
 	// texts are the transcripts of the recordings after the first, in order (then text).
@@ -215,13 +217,17 @@ func (s *fakeServer) VoiceStream(ctx context.Context, req StreamRequest) (Reply,
 	s.mu.Unlock()
 	return s.reply(ctx)
 }
-func (s *fakeServer) Speak(_ context.Context, text string) (*Audio, error) {
+func (s *fakeServer) Speak(ctx context.Context, text string) (*Audio, error) {
 	s.log("speak")
 	s.mu.Lock()
 	s.spoken = text
 	s.said = append(s.said, text)
+	body := io.NopCloser(bytes.NewReader(s.speakPCM))
+	if s.speakBody != nil {
+		body = s.speakBody(ctx, text)
+	}
 	s.mu.Unlock()
-	return &Audio{Rate: 22050, Channels: 1, Message: text, Body: io.NopCloser(bytes.NewReader(s.speakPCM))}, nil
+	return &Audio{Rate: 22050, Channels: 1, Message: text, Body: body}, nil
 }
 
 func (s *fakeServer) ContinueTools(_ context.Context, id string, results []ToolResult) (*Control, error) {

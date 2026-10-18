@@ -154,7 +154,7 @@ function UserRow({ user }: { user: AdminUser }) {
   }
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid={`user-${user.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">

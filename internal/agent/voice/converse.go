@@ -131,7 +131,7 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 			if last != nil && last.firstErr != "" {
 				msg = "Sorry, that didn't work: " + last.firstErr
 			}
-			return p.say(ctx, ex, msg, "")
+			return p.say(ctx, s, ex, msg, "")
 		}
 		prevSig = sig
 		rr := p.runRound(ctx, s, ex, c.ToolCalls)
@@ -174,7 +174,7 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 		ex.Outcome, ex.Err = OutcomeError, fmt.Errorf("command-center stopped with %q", c.StopReason)
 		if msg != "" {
 			ex.Message = msg
-			ex.ReplySecs, _ = p.speak(ctx, msg)
+			ex.ReplySecs, _ = p.speak(ctx, msg, nil)
 		} else {
 			p.chime(ctx, errorChime)
 		}
@@ -213,14 +213,19 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 		ex.Outcome = OutcomeSilent
 		return end
 	}
-	return p.say(ctx, ex, msg, end)
+	return p.say(ctx, s, ex, msg, end)
 }
 
-// say speaks msg as the exchange's reply.
-func (p *Pipeline) say(ctx context.Context, ex *Exchange, msg string, end FollowUpEnd) FollowUpEnd {
+// say speaks msg as the exchange's reply. The user may talk over it (barge-in), which ends
+// the conversation without a follow-up window.
+func (p *Pipeline) say(ctx context.Context, s *session, ex *Exchange, msg string, end FollowUpEnd) FollowUpEnd {
 	ex.Message = msg
-	secs, err := p.speak(ctx, msg)
+	secs, err := p.speak(ctx, msg, s)
 	ex.ReplySecs += secs
+	if errors.Is(err, errBargeIn) {
+		ex.Outcome = OutcomeInterrupted
+		return EndBargeIn
+	}
 	if err != nil {
 		p.fail(ctx, ex, err)
 		return EndError
@@ -235,7 +240,7 @@ func (p *Pipeline) say(ctx context.Context, ex *Exchange, msg string, end Follow
 func (p *Pipeline) askValidation(ctx context.Context, s *session, ex *Exchange, v *ValidationRequest) (string, error) {
 	q := v.spoken()
 	s.log.Info("validation question", "question", q, "parameter", v.ParameterName)
-	secs, err := p.speak(ctx, q)
+	secs, err := p.speak(ctx, q, nil)
 	ex.ReplySecs += secs
 	if err != nil {
 		return "", err

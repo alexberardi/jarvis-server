@@ -57,27 +57,29 @@ type Config struct {
 	Chimes        bool          // wake and error chimes
 	ToolTimeout   time.Duration // bound on one client tool call (25 s, the MQTT dispatcher's)
 	FollowUp      FollowUpConfig
+	BargeIn       BargeInConfig
 }
 
 // DefaultConfig is the Python node's behaviour (go-pi-node.md §1.1).
 func DefaultConfig() Config {
 	return Config{WakeThreshold: 0.4, Debounce: 8 * time.Second, Endpointing: DefaultEndpointing(),
 		JoinWarmup: 10 * time.Second, StreamIdle: 8 * time.Second, Timezone: LocalTimezone(), Chimes: true,
-		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp()}
+		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp(), BargeIn: DefaultBargeIn()}
 }
 
 // Outcome is how one exchange (an utterance and its reply) ended.
 type Outcome string
 
 const (
-	OutcomeSpoken    Outcome = "spoken"     // a reply was played
-	OutcomeNotForMe  Outcome = "not_for_me" // CC decided the speech wasn't addressed to Jarvis
-	OutcomeNonSpeech Outcome = "non_speech" // STT heard nothing that looks like words
-	OutcomeSilent    Outcome = "silent"     // "complete" with nothing to say
-	OutcomeNoise     Outcome = "noise"      // follow-up only: an exact repeat, not sent
-	OutcomeEcho      Outcome = "self_echo"  // follow-up only: the mic heard our own reply
-	OutcomeIgnored   Outcome = "ignored"    // follow-up only: CC's gate said not for me, keep listening
-	OutcomeError     Outcome = "error"
+	OutcomeSpoken      Outcome = "spoken"      // a reply was played
+	OutcomeNotForMe    Outcome = "not_for_me"  // CC decided the speech wasn't addressed to Jarvis
+	OutcomeNonSpeech   Outcome = "non_speech"  // STT heard nothing that looks like words
+	OutcomeSilent      Outcome = "silent"      // "complete" with nothing to say
+	OutcomeNoise       Outcome = "noise"       // follow-up only: an exact repeat, not sent
+	OutcomeEcho        Outcome = "self_echo"   // follow-up only: the mic heard our own reply
+	OutcomeIgnored     Outcome = "ignored"     // follow-up only: CC's gate said not for me, keep listening
+	OutcomeInterrupted Outcome = "interrupted" // the user talked over the reply (barge-in): it was cut off
+	OutcomeError       Outcome = "error"
 )
 
 // Exchange is one utterance and what came of it: the command after the wake word, or one
@@ -498,7 +500,11 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	// window opens.)
 	if reply.Audio != nil {
 		ex.Message = reply.Audio.Message
-		ex.ReplySecs, err = p.playAudio(sctx, cancel, reply.Audio)
+		ex.ReplySecs, err = p.playAudio(sctx, cancel, reply.Audio, s)
+		if errors.Is(err, errBargeIn) {
+			ex.Outcome = OutcomeInterrupted
+			return EndBargeIn, true
+		}
 		if err != nil {
 			p.fail(ctx, ex, err)
 			return "", false
@@ -557,19 +563,25 @@ func (p *Pipeline) fail(ctx context.Context, ex *Exchange, err error) {
 	}
 }
 
-func (p *Pipeline) speak(ctx context.Context, text string) (float64, error) {
+// speak says text. With a session, the user may talk over it (barge-in: errBargeIn).
+func (p *Pipeline) speak(ctx context.Context, text string, s *session) (float64, error) {
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	a, err := p.Server.Speak(sctx, text)
 	if err != nil {
 		return 0, fmt.Errorf("tts: %w", err)
 	}
-	return p.playAudio(sctx, cancel, a)
+	return p.playAudio(sctx, cancel, a, s)
 }
 
 // playAudio streams PCM to the speaker as it arrives. A body silent for StreamIdle is
 // abandoned (cancel aborts the request), as the Python node's 8 s inter-chunk timeout does.
-func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *Audio) (float64, error) {
+//
+// With a session (a reply, not a validation question or an error message: the Python node
+// watches only replies) and barge-in on, the microphone is watched while it plays: a wake word
+// over the reply aborts the request, stops the speaker without draining what it holds (Close
+// drops it) and returns errBargeIn.
+func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *Audio, s *session) (float64, error) {
 	defer a.Close()
 	pb, err := p.Playback(a.Rate, a.Channels)
 	if err != nil {
@@ -577,6 +589,11 @@ func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *
 	}
 	defer pb.Close()
 	p.cue(CueSpeaking, 0)
+	var barged atomic.Bool
+	if s != nil && p.Cfg.BargeIn.Enabled {
+		stop := p.watchBargeIn(s.log, s.chunks, func() { barged.Store(true); cancel() })
+		defer stop() // before pb.Close: the speaker stops once the watch is over
+	}
 	var idle atomic.Bool
 	timer := time.AfterFunc(p.Cfg.StreamIdle, func() { idle.Store(true); cancel() })
 	defer timer.Stop()
@@ -590,17 +607,20 @@ func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *
 			timer.Reset(p.Cfg.StreamIdle)
 			pending = append(pending, buf[:n]...)
 			if usable := len(pending) - len(pending)%frameBytes; usable > 0 {
-				s := make([]int16, usable/2)
-				for i := range s {
-					s[i] = int16(binary.LittleEndian.Uint16(pending[2*i:]))
+				pcm := make([]int16, usable/2)
+				for i := range pcm {
+					pcm[i] = int16(binary.LittleEndian.Uint16(pending[2*i:]))
 				}
-				p.level(s)
-				if err := pb.Write(s); err != nil {
+				p.level(pcm)
+				if err := pb.Write(pcm); err != nil {
 					return float64(frames) / float64(a.Rate), fmt.Errorf("speaker: %w", err)
 				}
 				frames += usable / frameBytes
 				pending = append(pending[:0], pending[usable:]...)
 			}
+		}
+		if barged.Load() {
+			return float64(frames) / float64(a.Rate), errBargeIn
 		}
 		if errors.Is(rerr, io.EOF) {
 			break
