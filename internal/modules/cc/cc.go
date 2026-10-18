@@ -93,8 +93,9 @@ type NodeRegistry interface {
 type MQTTOptions struct {
 	TCPAddr        string
 	WSAddr         string
-	AllowAnonymous bool // dev only: admit clients without credentials, unrestricted
-	Disabled       bool // no broker at all (MQTT routes answer 503 / log, as legacy without MQTT)
+	AllowAnonymous bool     // dev only: admit clients without credentials, read-only (mqtt.Anonymous)
+	AllowedOrigins []string // extra hosts whose pages may open the WebSocket listener
+	Disabled       bool     // no broker at all (MQTT routes answer 503 / log, as legacy without MQTT)
 }
 
 // Module is the command-center module.
@@ -280,7 +281,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	pub := m.Publisher
 	if pub == nil && !m.MQTT.Disabled {
 		b, err := mqtt.New(brokerAuth{auth: m.Auth, serviceID: m.serviceID()}, mqtt.Options{
-			TCPAddr: m.MQTT.TCPAddr, WSAddr: m.MQTT.WSAddr, AllowAnonymous: m.MQTT.AllowAnonymous, Logger: deps.Log,
+			TCPAddr: m.MQTT.TCPAddr, WSAddr: m.MQTT.WSAddr, AllowAnonymous: m.MQTT.AllowAnonymous,
+			AllowedOrigins: m.MQTT.AllowedOrigins, Logger: deps.Log,
 		})
 		if err != nil {
 			deps.Log.Error("cc: mqtt broker unavailable", "err", err)

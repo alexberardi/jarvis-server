@@ -20,10 +20,11 @@ import (
 // /api/doctor share it.
 func exposure(listeners []string, env config.Env) doctor.Exposure {
 	return doctor.Exposure{
-		Listeners:  listeners,
-		MQTTAddr:   env.MQTTAddr,
-		MQTTWSAddr: env.MQTTWSAddr,
-		MDNS:       env.MDNS,
+		Listeners:     listeners,
+		MQTTAddr:      env.MQTTAddr,
+		MQTTWSAddr:    env.MQTTWSAddr,
+		MDNS:          env.MDNS,
+		MQTTAnonymous: env.MQTTAllowAnonymous,
 	}
 }
 
@@ -59,7 +60,8 @@ func runDoctor(ctx context.Context, envErr error, args []string, stdout, stderr 
 		return err
 	}
 	check := func() []doctor.Check {
-		checks := doctor.Run(ctx, doctor.Options{Ports: doctorPorts(cfg), Interfaces: cfg.MDNSInterfaces, Home: cfg.Home})
+		checks := doctor.Run(ctx, doctor.Options{Ports: doctorPorts(cfg), Interfaces: cfg.MDNSInterfaces, Home: cfg.Home,
+			MQTTAnonymous: cfg.Env.MQTTAllowAnonymous})
 		if envErr != nil {
 			checks = append([]doctor.Check{envCheck(envErr)}, checks...)
 		}

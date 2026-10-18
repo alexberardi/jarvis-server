@@ -68,10 +68,13 @@ type Env struct {
 	// which disables that listener), else the broker's defaults moved by JARVIS_PORT_OFFSET.
 	MQTTAddr           string
 	MQTTWSAddr         string
-	MQTTAllowAnonymous bool   // JARVIS_MQTT_ALLOW_ANONYMOUS=1
-	AuthAdminToken     string // JARVIS_AUTH_ADMIN_TOKEN
-	AuthSecretKey      string // AUTH_SECRET_KEY: the legacy HS256 secret
-	AdminUIDir         string // JARVIS_ADMIN_UI_DIR
+	MQTTAllowAnonymous bool // JARVIS_MQTT_ALLOW_ANONYMOUS=1
+	// MQTTWSAllowedOrigins is JARVIS_MQTT_WS_ALLOWED_ORIGINS as set: comma-separated hosts (or
+	// URLs) whose pages may open the broker's WebSocket besides this host, localhost and the LAN.
+	MQTTWSAllowedOrigins string
+	AuthAdminToken       string // JARVIS_AUTH_ADMIN_TOKEN
+	AuthSecretKey        string // AUTH_SECRET_KEY: the legacy HS256 secret
+	AdminUIDir           string // JARVIS_ADMIN_UI_DIR
 	// AppID and AppKey are jarvisd's legacy app credentials (JARVIS_APP_ID, JARVIS_APP_KEY).
 	AppID, AppKey string
 	// OSXAPIURL and OSXAPIKey reach Apple Vision on a Mac (JARVIS_OSX_API_URL, JARVIS_OSX_API_KEY).
@@ -161,26 +164,27 @@ func loadEnv(lookup func(string) (string, bool), getenv func(string) string, off
 		return def
 	}
 	return Env{
-		ConfigAdminToken:   getenv("JARVIS_CONFIG_ADMIN_TOKEN"),
-		MDNS:               getenv("JARVIS_MDNS") != "0",
-		AdminAPIKey:        getenv("ADMIN_API_KEY"),
-		RelayHouseholdJWT:  getenv("RELAY_HOUSEHOLD_JWT"),
-		DevSpeakerHints:    getenv("JARVIS_DEV_SPEAKER_HINTS") == "1",
-		MQTTAddr:           envOr("JARVIS_MQTT_ADDR", ShiftAddr(DefaultMQTTAddr, offset)),
-		MQTTWSAddr:         envOr("JARVIS_MQTT_WS_ADDR", ShiftAddr(DefaultMQTTWSAddr, offset)),
-		MQTTAllowAnonymous: getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
-		AuthAdminToken:     getenv("JARVIS_AUTH_ADMIN_TOKEN"),
-		AuthSecretKey:      getenv("AUTH_SECRET_KEY"),
-		AdminUIDir:         getenv("JARVIS_ADMIN_UI_DIR"),
-		AppID:              getenv("JARVIS_APP_ID"),
-		AppKey:             getenv("JARVIS_APP_KEY"),
-		OSXAPIURL:          getenv("JARVIS_OSX_API_URL"),
-		OSXAPIKey:          getenv("JARVIS_OSX_API_KEY"),
-		TwilioAccountSID:   getenv("TWILIO_ACCOUNT_SID"),
-		TwilioAuthToken:    getenv("TWILIO_AUTH_TOKEN"),
-		TwilioFromNumber:   getenv("TWILIO_FROM_NUMBER"),
-		PhonePublicURL:     getenv("JARVIS_PHONE_PUBLIC_URL"),
-		PhonePublicWSSURL:  getenv("JARVIS_PHONE_PUBLIC_WSS_URL"),
+		ConfigAdminToken:     getenv("JARVIS_CONFIG_ADMIN_TOKEN"),
+		MDNS:                 getenv("JARVIS_MDNS") != "0",
+		AdminAPIKey:          getenv("ADMIN_API_KEY"),
+		RelayHouseholdJWT:    getenv("RELAY_HOUSEHOLD_JWT"),
+		DevSpeakerHints:      getenv("JARVIS_DEV_SPEAKER_HINTS") == "1",
+		MQTTAddr:             envOr("JARVIS_MQTT_ADDR", ShiftAddr(DefaultMQTTAddr, offset)),
+		MQTTWSAddr:           envOr("JARVIS_MQTT_WS_ADDR", ShiftAddr(DefaultMQTTWSAddr, offset)),
+		MQTTAllowAnonymous:   getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
+		MQTTWSAllowedOrigins: getenv("JARVIS_MQTT_WS_ALLOWED_ORIGINS"),
+		AuthAdminToken:       getenv("JARVIS_AUTH_ADMIN_TOKEN"),
+		AuthSecretKey:        getenv("AUTH_SECRET_KEY"),
+		AdminUIDir:           getenv("JARVIS_ADMIN_UI_DIR"),
+		AppID:                getenv("JARVIS_APP_ID"),
+		AppKey:               getenv("JARVIS_APP_KEY"),
+		OSXAPIURL:            getenv("JARVIS_OSX_API_URL"),
+		OSXAPIKey:            getenv("JARVIS_OSX_API_KEY"),
+		TwilioAccountSID:     getenv("TWILIO_ACCOUNT_SID"),
+		TwilioAuthToken:      getenv("TWILIO_AUTH_TOKEN"),
+		TwilioFromNumber:     getenv("TWILIO_FROM_NUMBER"),
+		PhonePublicURL:       getenv("JARVIS_PHONE_PUBLIC_URL"),
+		PhonePublicWSSURL:    getenv("JARVIS_PHONE_PUBLIC_WSS_URL"),
 	}
 }
 

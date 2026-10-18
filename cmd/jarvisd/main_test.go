@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -113,7 +114,8 @@ func TestModulesWiring(t *testing.T) {
 	for k, v := range map[string]string{
 		"JARVIS_CONFIG_ADMIN_TOKEN": "cfg-tok", "JARVIS_MDNS": "0", "ADMIN_API_KEY": "admin-key",
 		"RELAY_HOUSEHOLD_JWT": "relay-jwt", "JARVIS_DEV_SPEAKER_HINTS": "1", "JARVIS_MQTT_ALLOW_ANONYMOUS": "1",
-		"JARVIS_MQTT_ADDR": "127.0.0.1:2000", "JARVIS_MQTT_WS_ADDR": "", "JARVIS_AUTH_ADMIN_TOKEN": "auth-tok",
+		"JARVIS_MQTT_WS_ALLOWED_ORIGINS": " jarvis.example.com, ,https://admin.example.net ",
+		"JARVIS_MQTT_ADDR":               "127.0.0.1:2000", "JARVIS_MQTT_WS_ADDR": "", "JARVIS_AUTH_ADMIN_TOKEN": "auth-tok",
 		"AUTH_SECRET_KEY": "hs256", "JARVIS_ADMIN_UI_DIR": "/ui", "JARVIS_APP_ID": "app-id", "JARVIS_APP_KEY": "app-key",
 		"JARVIS_OSX_API_URL": "http://mac:1", "JARVIS_OSX_API_KEY": "mac-key",
 		phone.EnvTwilioAccountSID: "sid", phone.EnvTwilioAuthToken: "twtok", phone.EnvTwilioFromNumber: "+1555",
@@ -147,8 +149,9 @@ func TestModulesWiring(t *testing.T) {
 	if notif.AdminKey != "admin-key" || notif.RelayHouseholdJWT != "relay-jwt" || notif.Auth == nil || notif.Users == nil {
 		t.Errorf("notifications: %+v", notif)
 	}
-	wantMQTT := ccmod.MQTTOptions{TCPAddr: "127.0.0.1:2000", WSAddr: "", AllowAnonymous: true}
-	if cc.AdminKey != "admin-key" || !cc.DevSpeakerHints || cc.MQTT != wantMQTT ||
+	wantMQTT := ccmod.MQTTOptions{TCPAddr: "127.0.0.1:2000", WSAddr: "", AllowAnonymous: true,
+		AllowedOrigins: []string{"jarvis.example.com", "https://admin.example.net"}}
+	if cc.AdminKey != "admin-key" || !cc.DevSpeakerHints || !reflect.DeepEqual(cc.MQTT, wantMQTT) ||
 		cc.Phone.EnvCredentials != (phone.Credentials{AccountSID: "sid", AuthToken: "twtok", FromNumber: "+1555"}) ||
 		cc.Phone.Options.PublicURL != "https://p" || cc.Phone.Options.PublicWSSURL != "wss://p" {
 		t.Errorf("cc: AdminKey %q hints %v MQTT %+v Phone %+v", cc.AdminKey, cc.DevSpeakerHints, cc.MQTT, cc.Phone)
@@ -164,8 +167,24 @@ func TestModulesWiring(t *testing.T) {
 	if llm.AppID != "app-id" || llm.AppKey != "app-key" || llm.AppCreds == nil {
 		t.Errorf("llm: AppID %q AppKey %q", llm.AppID, llm.AppKey)
 	}
-	if admin.UIDir != "/ui" || admin.Version != version || admin.Exposure.MDNS || admin.Exposure.MQTTWSAddr != "" ||
+	if admin.UIDir != "/ui" || admin.Version != version || admin.Exposure.MDNS || !admin.Exposure.MQTTAnonymous || admin.Exposure.MQTTWSAddr != "" ||
 		admin.Exposure.MQTTAddr != "127.0.0.1:2000" || !slices.Equal(admin.Exposure.Listeners, want) || admin.TTS != adminmod.Speech(mods[4].(*ttsmod.Module)) {
 		t.Errorf("admin: UIDir %q Exposure %+v TTS %v", admin.UIDir, admin.Exposure, admin.TTS)
+	}
+}
+
+// Anonymous MQTT and extra WebSocket Origins are off unless set; the doctor sees the switch.
+func TestMQTTAnonymousAndOriginsDefaultOff(t *testing.T) {
+	t.Setenv("JARVIS_MQTT_ALLOW_ANONYMOUS", "")
+	t.Setenv("JARVIS_MQTT_WS_ALLOWED_ORIGINS", "")
+	mods := testModules(t)
+	if cc := mods[8].(*ccmod.Module); cc.MQTT.AllowAnonymous || cc.MQTT.AllowedOrigins != nil {
+		t.Errorf("cc mqtt options %+v", cc.MQTT)
+	}
+	if mods[10].(*adminmod.Module).Exposure.MQTTAnonymous {
+		t.Error("exposure reports anonymous")
+	}
+	if mqttAllowedOrigins(" , ") != nil {
+		t.Error("blank origins list not empty")
 	}
 }

@@ -13,6 +13,8 @@ type Exposure struct {
 	MQTTAddr   string   // e.g. ":1883"
 	MQTTWSAddr string
 	MDNS       bool
+	// MQTTAnonymous: the broker admits clients without credentials (Options.MQTTAnonymous).
+	MQTTAnonymous bool
 }
 
 // Ports lists what the LAN must reach, with each listener's port from ports (a listener

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -73,6 +74,7 @@ func modules(env config.Env) []module.Module {
 			TCPAddr:        env.MQTTAddr,
 			WSAddr:         env.MQTTWSAddr,
 			AllowAnonymous: env.MQTTAllowAnonymous,
+			AllowedOrigins: mqttAllowedOrigins(env.MQTTWSAllowedOrigins),
 		},
 		Phone: phoneConfig(env), // cmd/jarvisd/phone.go
 	}
@@ -225,6 +227,19 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// mqttAllowedOrigins splits JARVIS_MQTT_WS_ALLOWED_ORIGINS (config.Env.MQTTWSAllowedOrigins):
+// comma-separated hosts (or URLs) whose pages may open the broker's WebSocket besides this
+// host, localhost and the LAN.
+func mqttAllowedOrigins(v string) []string {
+	var out []string
+	for _, h := range strings.Split(v, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 const usage = `usage: jarvisd <command> [--home DIR]

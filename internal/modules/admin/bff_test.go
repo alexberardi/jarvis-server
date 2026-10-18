@@ -411,6 +411,18 @@ func TestDoctorBFF(t *testing.T) {
 	}
 }
 
+// The in-process doctor checks the broker's anonymous access too.
+func TestDoctorBFFPassesMQTTAnonymous(t *testing.T) {
+	e := newBFF(t)
+	e.m.Exposure.MQTTAnonymous = true
+	var got doctor.Options
+	e.m.RunDoctor = func(_ context.Context, o doctor.Options) []doctor.Check { got = o; return nil }
+	send(e.mux, "GET", "/api/doctor", "", root...)
+	if !got.MQTTAnonymous {
+		t.Fatalf("doctor options %+v", got)
+	}
+}
+
 func TestSetupState(t *testing.T) {
 	e := newBFF(t)
 	// Fresh install: the reduced view, open, with where to find the token.

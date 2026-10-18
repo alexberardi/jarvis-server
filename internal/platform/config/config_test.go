@@ -155,7 +155,7 @@ func TestLoadEnv(t *testing.T) {
 		"JARVIS_HOME": "/d", "JARVIS_PORT_OFFSET": "10000",
 		"JARVIS_CONFIG_ADMIN_TOKEN": "ct", "JARVIS_MDNS": "0", "ADMIN_API_KEY": "ak", "RELAY_HOUSEHOLD_JWT": "jwt",
 		"JARVIS_DEV_SPEAKER_HINTS": "1", "JARVIS_MQTT_ADDR": "127.0.0.1:2000", "JARVIS_MQTT_WS_ADDR": "",
-		"JARVIS_MQTT_ALLOW_ANONYMOUS": "1", "JARVIS_AUTH_ADMIN_TOKEN": "at", "AUTH_SECRET_KEY": "hs",
+		"JARVIS_MQTT_ALLOW_ANONYMOUS": "1", "JARVIS_MQTT_WS_ALLOWED_ORIGINS": "a.example, b.example", "JARVIS_AUTH_ADMIN_TOKEN": "at", "AUTH_SECRET_KEY": "hs",
 		"JARVIS_ADMIN_UI_DIR": "/ui", "JARVIS_APP_ID": "id", "JARVIS_APP_KEY": "key",
 		"JARVIS_OSX_API_URL": "http://mac", "JARVIS_OSX_API_KEY": "mk",
 		"TWILIO_ACCOUNT_SID": "sid", "TWILIO_AUTH_TOKEN": "tt", "TWILIO_FROM_NUMBER": "+1",
@@ -166,7 +166,7 @@ func TestLoadEnv(t *testing.T) {
 	}
 	// An explicit MQTT address wins over the offset, and "" still disables the listener.
 	want := Env{ConfigAdminToken: "ct", AdminAPIKey: "ak", RelayHouseholdJWT: "jwt", DevSpeakerHints: true,
-		MQTTAddr: "127.0.0.1:2000", MQTTWSAddr: "", MQTTAllowAnonymous: true, AuthAdminToken: "at",
+		MQTTAddr: "127.0.0.1:2000", MQTTWSAddr: "", MQTTAllowAnonymous: true, MQTTWSAllowedOrigins: "a.example, b.example", AuthAdminToken: "at",
 		AuthSecretKey: "hs", AdminUIDir: "/ui", AppID: "id", AppKey: "key", OSXAPIURL: "http://mac", OSXAPIKey: "mk",
 		TwilioAccountSID: "sid", TwilioAuthToken: "tt", TwilioFromNumber: "+1",
 		PhonePublicURL: "https://p", PhonePublicWSSURL: "wss://p"}
