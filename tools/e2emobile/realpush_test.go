@@ -51,7 +51,9 @@ type pushFakes struct {
 	srv                      *httptest.Server
 	mu                       sync.Mutex
 	posted                   map[string]any
-	tokens                   []string
+	// stale are the user's tokens from before (a --keep run's fake one); tokens are the ones
+	// the app registers once the login flow has run.
+	stale, tokens []string
 }
 
 func newPushFakes(t *testing.T, opened bool) *pushFakes {
@@ -59,7 +61,7 @@ func newPushFakes(t *testing.T, opened bool) *pushFakes {
 	f.calls = filepath.Join(f.dir, "calls.log")
 	f.adb = filepath.Join(f.dir, "adb")
 	f.maestro = filepath.Join(f.dir, "maestro")
-	write(t, f.maestro, "#!/bin/sh\necho \"maestro $*\" >>"+f.calls+"\n")
+	write(t, f.maestro, "#!/bin/sh\necho \"maestro $*\" >>"+f.calls+"\ntouch "+f.dir+"/signed-in\n")
 	appXML := filepath.Join(f.dir, "opened.xml")
 	if !opened {
 		appXML = filepath.Join(f.dir, "shade.xml") // the tap did nothing
@@ -82,7 +84,11 @@ esac
 			}
 			f.mu.Lock()
 			out := []map[string]any{}
-			for _, tok := range f.tokens {
+			toks := f.stale
+			if _, err := os.Stat(filepath.Join(f.dir, "signed-in")); err == nil {
+				toks = append(append([]string{}, f.stale...), f.tokens...)
+			}
+			for _, tok := range toks {
 				out = append(out, map[string]any{"push_token": tok, "device_type": "android"})
 			}
 			f.mu.Unlock()
@@ -179,6 +185,25 @@ func TestRealPushFailsWhenTheAppRegistersNoToken(t *testing.T) {
 	r := res.Tests[0]
 	if r.Status != "failed" || r.Error == nil || !strings.Contains(*r.Error, "push token") {
 		t.Fatalf("record = %+v", r)
+	}
+}
+
+func TestRealPushWantsANewTokenNotAStaleOne(t *testing.T) {
+	f := newPushFakes(t, true)
+	f.stale, f.tokens = []string{"ExponentPushToken[e2e-mobile-old]"}, nil
+	res, err := realPush(context.Background(), f.config(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Tests[0]
+	if r.Status != "failed" || r.Error == nil || !strings.Contains(*r.Error, "push token") {
+		t.Fatalf("a token from before the sign-in passed step 1: %+v", r)
+	}
+
+	f = newPushFakes(t, true)
+	f.stale = []string{"ExponentPushToken[e2e-mobile-old]"}
+	if res, err = realPush(context.Background(), f.config(t)); err != nil || res.Tests[0].Status != "passed" {
+		t.Fatalf("a new token beside a stale one: %+v, %v", res, err)
 	}
 }
 

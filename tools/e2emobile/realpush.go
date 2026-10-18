@@ -143,11 +143,16 @@ func (pc *pushConfig) lane(ctx context.Context, r Record) Record {
 	}
 	_, _ = pc.adbCmd(ctx, "logcat", "-c")
 
-	// 1. Sign in with the mobile repo's own login subflow; the app then registers its token.
+	// 1. Sign in with the mobile repo's own login subflow; the app then registers its token. Only
+	// a token that was not there before counts: a reused sandbox may still hold an old one.
+	before, err := pc.tokens(ctx)
+	if err != nil {
+		return fail("listing the user's push tokens failed: "+err.Error(), "")
+	}
 	if err := pc.login(ctx); err != nil {
 		return fail("signing in failed: "+err.Error(), "login-failed")
 	}
-	if err := pc.until(ctx, pc.tokenWait, pc.hasToken); err != nil {
+	if err := pc.until(ctx, pc.tokenWait, func(ctx context.Context) error { return pc.hasNewToken(ctx, before) }); err != nil {
 		return fail(fmt.Sprintf("the app registered no push token in %s (FCM on the emulator? the APK's push config?): %v",
 			pc.tokenWait, err), "no-token")
 	}
@@ -250,17 +255,33 @@ func (pc *pushConfig) login(ctx context.Context) error {
 	return nil
 }
 
-func (pc *pushConfig) hasToken(ctx context.Context) error {
+// tokens is the set of the user's registered push tokens.
+func (pc *pushConfig) tokens(ctx context.Context) (map[string]bool, error) {
 	var toks []struct {
 		PushToken string `json:"push_token"`
 	}
 	if err := pc.api(ctx, http.MethodGet, pc.notifications+"/api/v0/tokens/me", map[string]string{"Authorization": "Bearer " + pc.userToken}, nil, &toks); err != nil {
+		return nil, err
+	}
+	set := map[string]bool{}
+	for _, t := range toks {
+		set[t.PushToken] = true
+	}
+	return set, nil
+}
+
+// hasNewToken succeeds once the user has a token that is not in before.
+func (pc *pushConfig) hasNewToken(ctx context.Context, before map[string]bool) error {
+	now, err := pc.tokens(ctx)
+	if err != nil {
 		return err
 	}
-	if len(toks) == 0 {
-		return errors.New("no device token registered")
+	for t := range now {
+		if !before[t] {
+			return nil
+		}
 	}
-	return nil
+	return errors.New("no new device token registered")
 }
 
 func (pc *pushConfig) postEvent(ctx context.Context, title string) error {

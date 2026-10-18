@@ -190,7 +190,13 @@ run_real_push() {
     return
   fi
   say "run $RUN: sandbox $NAME on the real relay $E2E_REAL_RELAY_URL (log in $OUT/sandbox-$NAME.log)"
-  up mobile-push "$NAME" --profile rich --llm scripted --relay "$E2E_REAL_RELAY_URL"
+  "$ROOT/scripts/sandbox" down --name "$NAME" --purge >/dev/null 2>&1 || true # no tokens from an earlier run
+  if ! "$ROOT/scripts/sandbox" up --name "$NAME" --profile rich --llm scripted --relay "$E2E_REAL_RELAY_URL" \
+    >"$OUT/sandbox-$NAME.log" 2>&1; then
+    tail -20 "$OUT/sandbox-$NAME.log" >&2
+    broken mobile-push "sandbox $NAME did not come up (sandbox-$NAME.log)"
+    return
+  fi
   say "mobile-push: running (log in mobile-push.log)"
   set +e
   (
