@@ -6,6 +6,7 @@ import (
 	"flag"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
 
 func TestResolveProfile(t *testing.T) {
@@ -132,5 +134,15 @@ func TestPiNodeConfig(t *testing.T) {
 	hd.closeLine = nil
 	if h := piNodeConfig(vf, hf, hd, true)()["hardware"].(map[string]any); h["button_available"] != false || h["led_chain_available"] != true {
 		t.Errorf("button busy: %v", h)
+	}
+}
+
+func TestOnlyAPiSpeaksTheVoiceProfileVerbs(t *testing.T) {
+	if v := voiceProfileVerbs(desktopProfile, voice.NewMic(), slog.Default()); v != nil {
+		t.Fatalf("desktop registers %v: its speaker is the signed-in user (#143)", slices.Collect(maps.Keys(v)))
+	}
+	v := voiceProfileVerbs(piProfile, voice.NewMic(), slog.Default())
+	if got := slices.Sorted(maps.Keys(v)); !slices.Equal(got, []string{"enroll_voice", "verify_voice"}) {
+		t.Fatalf("pi verbs = %v", got)
 	}
 }
