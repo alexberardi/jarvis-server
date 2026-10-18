@@ -84,6 +84,7 @@ const (
 	EndMaxIterations FollowUpEnd = "max_iterations"
 	EndIgnored       FollowUpEnd = "ignored"  // FollowUp.MaxIgnored answers rejected in one window
 	EndDisabled      FollowUpEnd = "disabled" // FollowUp.ListenSecs <= 0
+	EndBargeIn       FollowUpEnd = "barge_in" // the user talked over the reply: back to the wake word
 	EndError         FollowUpEnd = "error"
 )
 

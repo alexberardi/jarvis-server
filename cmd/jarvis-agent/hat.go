@@ -255,7 +255,7 @@ func hatCmd(ctx context.Context, args []string) error {
 // piNodeConfig is the Pi profile's settings-snapshot node_config: the HAT (detected: hat.Detected;
 // the LEDs and button this agent actually opened) and the voice and LED settings it runs with,
 // under the Python node's keys (settings_snapshot_service.py build_snapshot). Keys the Go node
-// has no setting for yet (silence thresholds, barge-in, maintenance restart, update consent) are
+// has no setting for yet (silence thresholds, barge-in thresholds, maintenance restart, update consent) are
 // left out.
 func piNodeConfig(vf *voiceFlags, hf *hatFlags, hd *hatDevices, detected bool) func() map[string]any {
 	return func() map[string]any {
@@ -265,6 +265,7 @@ func piNodeConfig(vf *voiceFlags, hf *hatFlags, hd *hatDevices, detected bool) f
 			"wake_ack_audio_enabled":     !vf.noChimes,
 			"follow_up_listen_seconds":   vf.followUp,
 			"follow_up_silence_duration": vf.followSilence,
+			"barge_in_enabled":           vf.bargeIn,
 			"led_enabled":                hf.mode != "off",
 			"led_brightness_percent":     hf.brightness,
 			"hardware": map[string]any{

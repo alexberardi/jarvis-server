@@ -85,7 +85,7 @@ Tags:
 | 14 | `POST /api/v0/conversation/end {conversation_id}`. Python skips this after barge-in and boot warmups; Go should always send it. | `N:core/follow_up_loop.py:424-428` | `S:warmup.go:310-323` | MVS |
 | 15 | Error phrases ("I can't reach my server right now." and so on), with a fallback chime | `N:core/wake_transcription.py:185-196` | – | MVS (chime only) |
 | 16 | Follow-up window after **every** reply not marked terminal (`end_of_exchange`) or `not_for_me`: 4 s, −2 s per iteration (floor 3 s), ≤5 iterations, quiet-wait, onset detection, noise and self-echo filters, blocking `POST /voice/command` with `turn_source:"follow_up"`, `follow_up_iteration` | `N:core/follow_up_loop.py:97-428`, `N:scripts/speech_to_text.py:455-691`, `N:core/conversation_filters.py` | `S:voice_routes.go:171-220` | **done for the desktop agent (§3.9); widened by the follow-up gate (§3.10)** |
-| 17 | Barge-in: local only. oww score > 0.04 plus an RMS gate, 2 consecutive chunks → cancel playback and close the stream. Nothing is sent to the server. | `N:core/barge_in.py:100-359` | – | later |
+| 17 | Barge-in: local only. oww score > 0.04 plus an RMS gate, 2 consecutive chunks → cancel playback and close the stream. Nothing is sent to the server. | `N:core/barge_in.py:100-359` | – | **done in the Go agent (§3.13)** |
 | 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | **done for the desktop agent (§3.8)**, blocking continue only |
 | 19 | Validation: speak the question (+ "Your options are: …"), re-listen with `listen()`, `POST /voice/command/continue` with `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` | `N:core/wake_transcription.py:204-231`, `N:clients/jarvis_command_center_client.py:362-412` | `S:engine.go:339-366`, `S:continue.go` | **done for the desktop agent (§3.9)** |
 | 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | later |
@@ -411,10 +411,11 @@ input"; the golden tests never hit it because their stacks were already grown.
   microphone prompt (`NSMicrophoneUsageDescription` is now in Info.plist; without it macOS kills
   the app on first capture).
 
-**Not yet (phase 5 parity list):** ~~follow-up~~ (§3.9), barge-in, ~~client tools/continue~~ (§3.8),
+**Not yet (phase 5 parity list):** ~~follow-up~~ (§3.9), ~~barge-in~~ (§3.13), ~~client tools/continue~~ (§3.8),
 ~~validation~~ (§3.9), processing ack / wake greeting, `pre_wake_speech_seconds`, AEC (on a desktop with
-speakers the reply can reach the mic; wake is paused while it plays, so it can't wake itself,
-but there is no barge-in), device selection on macOS (default devices only), Windows WASAPI.
+speakers the reply can reach the mic; wake is paused while it plays, so it can't wake itself;
+barge-in's energy gate keeps the reply from interrupting itself), device selection on macOS
+(default devices only), Windows WASAPI.
 
 ### 3.8 Client tools in voice turns (2026-10-10)
 
@@ -526,7 +527,7 @@ handles) or guesses. Covered by the pipeline tests and the server test above. Al
 
 **Deferred:** `act_on_items` (a node-side dispatcher over items earlier commands returned, a
 separate mechanism: it needs the sidecar to keep `ref_id → command` and call commands'
-callbacks), a listening cue on desktops (**done 2026-10-11: the island, DESIGN.md §11**), barge-in during follow-up replies, the not_for_me
+callbacks), a listening cue on desktops (**done 2026-10-11: the island, DESIGN.md §11**), barge-in during follow-up replies (**done 2026-10-17, §3.13**), the not_for_me
 wake cool-down, an `end_of_exchange` header on the stream route (server).
 
 ### 3.10 The follow-up gate: "is this speech for me?" (2026-10-10)
@@ -779,6 +780,56 @@ over; the 7 s cap still applies. 0 keeps the Python node's behaviour.
 **`--wake-debounce DURATION`** (default 8s, the Python node's; at least 500ms): no second wake
 this soon after one.
 
+### 3.13 Barge-in (2026-10-17, loop #172)
+
+Saying "hey Jarvis" over a reply stops it (`internal/agent/voice/bargein.go`, a port of
+`N:core/barge_in.py`). While a reply plays, a goroutine reads the microphone (otherwise idle
+during a turn), decimates and scores it with the same `Detector` as the wake loop, and feeds a
+pure state machine (`bargeIn`) with each 80 ms chunk's RMS and score:
+
+- the first 0.5 s is skipped (not scored); the next 1 s scores the detector (to prime it) and
+  learns the reply's level through the mic: effective energy gate = max(500, p75 RMS × 2);
+- a chunk qualifies when score > 0.04 **and** the loudest chunk of the trailing 1 s beats the
+  gate (oww peaks 0.5-1 s after the voice's energy); 2 in a row fire. Python's "tier 1"
+  (score > 0.5 with the same gate) is implied.
+
+On a fire the reply's request is cancelled, the speaker is closed without draining (ALSA
+`snd_pcm_close` drops what it holds; AudioQueue stops immediately), and the exchange ends with
+outcome `interrupted` and follow-up end `barge_in`: no error chime or LED, no follow-up
+window, nothing sent but the usual `/conversation/end`; the pipeline goes back to the wake word
+(Python does the same). The detector is reset after every watched reply. Worst-case reaction
+is one speaker write (≤ ~170 ms at 24 kHz) after the second qualifying chunk, plus the device
+buffer dropped on close; a fire during the final `Drain` (≤ 200 ms of buffer) is not cut.
+
+Watched: the wake reply (streamed) and every reply `say`s (follow-up replies and wake-turn
+replies that come back as control responses). **Not watched**, as in Python: validation
+questions (the user must answer them anyway) and command-center error messages.
+
+Config: `Config.BargeIn` (`DefaultBargeIn()`: Python's `barge_in_enabled`, `barge_in_threshold`
+0.04, `barge_in_energy_threshold` 500, 2 confirm chunks, 0.5 s skip, 1 s baseline);
+`--barge-in=false` turns it off; the Pi's settings snapshot reports `barge_in_enabled`. With
+`JARVIS_AGENT_LOG=debug` it logs the baseline, every score > 0.05 and a summary every 25 chunks
+(as Python does), and the fire at info.
+
+**Verified:** unit tests of the state machine (one chunk doesn't fire, two do, a broken run
+doesn't, the lagging score, skip/baseline never fire, the p75 baseline blocks the reply's own
+wake word) and lockstep rig tests (`bargein_test.go`): the wake reply and a follow-up reply are
+cut short, undrained, with no follow-up; one chunk, or a wake word at the reply's own level,
+lets the reply play out. **Not verified:** acoustically, on a desktop or the lab Pi 4 (no
+runner reaches the Pi, #183). To check on the Pi 4 (never the kitchen node):
+
+```bash
+sudo systemctl stop jarvis-node
+JARVIS_AGENT_LOG=debug ./jarvis-agent listen --profile pi --voice-input dsnoopmic --voice-output output
+# "hey Jarvis, tell me a long story" → say "hey Jarvis" over it → playback stops within ~0.3 s,
+# LEDs leave cyan, back to idle; the turn prints "follow-up window: barge_in".
+# Also: a reply that itself says "Jarvis" must play out (log "barge-in: score" without a fire).
+sudo systemctl start jarvis-node
+```
+
+On a desktop: `JARVIS_AGENT_LOG=debug jarvis-agent listen --once`, ask for something long and
+say "hey Jarvis" over it (`--once` exits 1: the turn ended `interrupted`).
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -958,7 +1009,9 @@ These are **still needed**; install.sh step lines are cited:
    Ship it to the lab Pi alongside the Python node (`install_mode` decides).
 5. **Parity**, in order:
    1. Follow-up. **Desktop agent done 2026-10-10 (§3.9)**, with validation questions.
-   2. Barge-in (re-use the wake detector at threshold 0.04 plus the RMS gate).
+   2. Barge-in (re-use the wake detector at threshold 0.04 plus the RMS gate). **Done
+      2026-10-17 (§3.13)** in the shared pipeline (desktop and Pi); lockstep rig tests only,
+      not yet heard on a Pi or a desktop.
    3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the sidecar.
    4. `update_node_config`, `measure_ambient_noise`, LED preview.
    5. K2 + settings snapshot (AES-GCM).
