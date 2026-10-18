@@ -134,7 +134,7 @@ Tags:
 | `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | later (sidecar) |
 | `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | later |
 | `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | later |
-| `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | later |
+| `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | done in the Pi profile (§3.15) |
 | `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | later |
 | `/command-data/{op}`, `/context/{op}` (the node **publishes** responses) | `:2484-2501` | `S:commanddata.go:119` | MQTT publish | command-data built for the desktop agent (`nodesettings.CommandData` over the sidecar's packages, pinned by the Python node's own handler, [DESIGN §16](DESIGN.md)); context later |
 | `tts`, `train_adapter`, `/camera-credentials`; the button publishes (denied by the ACL) | various | none or no route | – | drop |
@@ -888,6 +888,56 @@ jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output out
 sudo systemctl start jarvis-node
 ```
 
+### 3.15 Parity 5.8: Bluetooth (2026-10-18, loop #178)
+
+The Pi profile subscribes to the six `bluetooth-*` topics jarvisd publishes
+(`internal/agent/bluetooth`, wired by `cmd/jarvis-agent/bluetooth.go`; the desktop profile
+doesn't). BlueZ is reached over D-Bus (`bluez_linux.go`: `Adapter1`, `Device1`,
+`AgentManager1`, and the node's own `Agent1`), PulseAudio through `pactl`. Without BlueZ (no
+system bus, no adapter) the node runs without Bluetooth. Decisions:
+[decisions/2026-10-18-pi-node-bluetooth.md](../decisions/2026-10-18-pi-node-bluetooth.md).
+
+| Topic (payload) | Does | Reply |
+|---|---|---|
+| `bluetooth-scan` (`request_id`, `role`) | drop unpaired cache entries, BR/EDR then LE discovery 10 s each, list the named devices with `device_type` (audio icon or Audio Sink → `audio_sink`, phone icon → `phone`, Audio Source → `audio_source`) and their real `paired`/`connected` | `POST …/bluetooth-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
+| `bluetooth-pair` (`request_id`, `mac_address`, `role`) | remove an existing bond, rescan ≤12 s if BlueZ doesn't know it, pair (30 s), trust, connect; an audio device must show a bluez sink/source for 2 s within 15 s or it is disconnected; `role: sink` loads the phone's loopback; saved for the reconnect loop | `POST …/bluetooth/pair/{rid}/results` `{"success", "device_name"}` or `{"success": false, "error"}` (N:'s messages) |
+| `bluetooth-disconnect` (`mac_address`) | unload its loopback, disconnect | – |
+| `bluetooth-discoverable` (`timeout`, default 120) | Powered, Pairable, DiscoverableTimeout, Discoverable, in N:'s order | – |
+| `bluetooth-release` (`mac_address`, `forget`) | disconnect and turn its auto-connect off; `forget`: remove the pairing and the record | – |
+| `bluetooth-auto-connect` (`mac_address`, `enabled`) | set the saved device's auto-connect (a device never paired here is ignored) | – |
+
+At start the agent is registered as BlueZ's default and the adapter made pairable; a pairing a
+phone starts (the node discoverable) is trusted and connected, as N:'s agent does on
+`Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. TTS stays on
+`jarvis_output`; a paired speaker is for the music packages (SDK `BluetoothAudio`).
+`install-pi.sh` installs `bluez`, `pulseaudio-module-bluetooth` and `rfkill`, unblocks the radio
+and sets BlueZ's Class of Device to audio (0x240404) in `/etc/bluetooth/main.conf`.
+
+**Verified** with unit tests over an in-memory bus and Pulse, the D-Bus client and agent against a
+fake `org.bluez` on a private dbus-daemon (names, signatures, BlueZ's errors), the handler
+against jarvisd's own routes through the node's HTTP client (`internal/modules/cc`
+`TestGoNodeBluetoothAgainstTheseRoutes`), and `install-pi-check`. **Not yet on a Pi.** On the
+lab Pi 4 (never the prod kitchen node), with a Bluetooth speaker in reach:
+
+```bash
+sudo systemctl stop jarvis-node
+groups | grep -qw bluetooth && rfkill list bluetooth   # in group bluetooth; not soft-blocked
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# The app, this node's Hardware tab:
+#   Scan: the speaker (in pairing mode) is listed as audio_sink; the log has "scan complete"
+#   Pair it: "Paired"; bluetoothctl info <MAC> shows Paired/Trusted/Connected: yes
+pactl list sinks short            # a bluez_sink.<MAC>.a2dp_sink, and jarvis_output
+pactl get-default-sink            # still jarvis_output: "What time is it?" is spoken on the HAT
+paplay -d bluez_sink.<MAC_>.a2dp_sink /usr/share/sounds/alsa/Front_Center.wav   # plays on the speaker
+#   Status after a new scan: the speaker under Connected
+#   Disconnect: bluetoothctl info shows Connected: no; the bluez sink is gone
+#   Restart the agent (Ctrl-C, run again): within ~30 s the speaker reconnects ("reconnected" in the log)
+#   Auto-reconnect off, restart: it stays disconnected
+#   Make discoverable: a phone sees the node and pairs; the log has "trust and connect after an incoming pair"
+#   Forget: bluetoothctl devices no longer lists it; ~/.config/jarvis-agent/bluetooth.json drops it
+sudo systemctl start jarvis-node
+```
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -1139,7 +1189,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    5. K2 + settings snapshot (AES-GCM).
    6. Packages.
    7. factory-reset.
-   8. Bluetooth.
+   8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
+      against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).
    9. Device control.
    10. Voice-profile takes (`enroll_voice` / `verify_voice`, the app's "record on this node").
        **Done 2026-10-17** for the Pi profile: `voice.Mic` hands a fixed-length take to the

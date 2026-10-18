@@ -50,6 +50,9 @@ seed() {
   mkdir -p "$1/boot/firmware/overlays" "$1/etc"
   printf '[all]\ndtparam=audio=on\ndtoverlay=wm8960-soundcard\n' >"$1/boot/firmware/config.txt"
   printf 'proc /proc proc defaults 0 0\n' >"$1/etc/fstab"
+  # BlueZ's, as Debian 13 ships it (the Class commented out).
+  mkdir -p "$1/etc/bluetooth"
+  printf '[General]\n#Name = BlueZ\n#Class = 0x000100\n\n[Policy]\n#AutoEnable=true\n' >"$1/etc/bluetooth/main.conf"
 }
 R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} sh "$SCRIPT" "$@"; }
 
@@ -173,9 +176,10 @@ grep -q "reboot" "$T/out" && fail "a re-run changed config.txt"
 snapshot "$ROOT" >"$T/got2"
 diff -u "$T/got" "$T/got2" || fail "a second run changed what was written"
 
-echo "--- an existing /etc/jarvis-node (the Python node's) is kept, a user's mask on pulseaudio isn't"
+echo "--- an existing /etc/jarvis-node (the Python node's) is kept, a user's mask on pulseaudio isn't, a main.conf without a Class gets one"
 R2=$T/root2
 seed "$R2"
+printf '[General]\nName = kitchen\n\n[Policy]\n' >"$R2/etc/bluetooth/main.conf"
 mkdir -p "$R2/etc/jarvis-node" "$R2/home/pi/.config/systemd/user"
 echo '{}' >"$R2/etc/jarvis-node/audio_config.json"
 ln -s /dev/null "$R2/home/pi/.config/systemd/user/pulseaudio.service"
@@ -183,6 +187,7 @@ R --root "$R2" --from-dir "$T/dist" >/dev/null 2>"$T/err"
 [ "$(cat "$R2/etc/jarvis-node/audio_config.json")" = '{}' ] || fail "the Python node's /etc/jarvis-node was touched"
 [ ! -L "$R2/home/pi/.config/systemd/user/pulseaudio.service" ] || fail "the per-user mask on pulseaudio.service was kept"
 grep -q "removed a per-user mask on pulseaudio.service" "$T/err" || fail "no warning for the removed mask: $(cat "$T/err")"
+[ "$(sed -n 2p "$R2/etc/bluetooth/main.conf")" = "Class = 0x240404" ] || fail "no audio Class in [General]: $(cat "$R2/etc/bluetooth/main.conf")"
 
 echo "--- wlan0 reports no connection: power-save off on the active Wi-Fi one, no reconcile (as N:)"
 R5=$T/root-nowlan
