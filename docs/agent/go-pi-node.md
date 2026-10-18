@@ -950,7 +950,11 @@ These are **still needed**; install.sh step lines are cited:
       screen, dictation or browser tools; headless (no tray, island or setup page); the settings
       snapshot's `node_config` reports the HAT and the voice/LED settings. **Done 2026-10-17**
       (unit tests; not yet run on a Pi).
-   2. Heartbeat `pending_update` → updater.
+   2. Heartbeat `pending_update` → updater. **Server side done 2026-10-17:** jarvisd stores
+      `version_info.runtime` (`cc_nodes.runtime`, on the node response); a `runtime "go"` node
+      follows this server like a desktop agent (heartbeat `server_version`, "latest" = jarvisd's
+      own tag, never the jarvis-node-setup release). Python nodes are unchanged. The node-side
+      applier is still to do.
    3. The tarball + install.sh variant (§6).
    4. The provisioning AP + HTTP API port.
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land.
