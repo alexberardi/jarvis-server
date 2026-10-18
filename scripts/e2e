@@ -4,14 +4,23 @@
 #
 #   scripts/e2e [web|mobile|all|voice] [--filter RE] [--keep] [--name N] [--mobile-repo PATH]
 #               [--llm shared|scripted] [--audio wav|pipewire] [--repeat N] [--agent-arg FLAG]
+#   scripts/e2e mobile --real-push [--keep] [--name N] [--mobile-repo PATH]
 #
-#   web      the admin SPA (Playwright, e2e/web/)
+#   web     the admin SPA (Playwright, e2e/web/)
 #   mobile   the mobile app: the Maestro flows of jarvis-node-mobile's .maestro/ on a headless
 #            harness emulator (scripts/lib/mobile.sh), logged in to the sandbox
 #   all      every suite but voice (default)
 #   voice    the virtual node voice lane (tools/voicelane, e2e/voice/cases.json): the real
 #            jarvis-agent (--profile pi) hears TTS and its spoken replies are transcribed and
 #            checked; only when asked, since it takes the real model and minutes
+#   --real-push  mobile: instead of the flows, the overnight real push lane (suite mobile-push):
+#            a Google Play emulator (AVD jarvis-harness-play), the APK built with the push
+#            config, the sandbox on the real relay; a node alert must reach the shade through
+#            Expo and FCM, and tapping it must open the item in the app. Needs
+#            E2E_REAL_RELAY_URL and E2E_PUSH_GOOGLE_SERVICES (in the environment or
+#            ~/.config/jarvis-harness/push.env, or the file $JARVIS_HARNESS_PUSH_ENV) and the
+#            google_apis_playstore image; without them it is skipped, with the reason in the
+#            report (docs/decisions/2026-10-18-e2e-push.md)
 #   --filter RE  run only the tests whose title matches RE (Playwright --grep; for mobile, the
 #            flow's name or file name; voice: case names)
 #   --mobile-repo PATH  the jarvis-node-mobile checkout or worktree whose HEAD commit gives the
@@ -28,7 +37,7 @@
 #   --agent-arg  voice: an extra `jarvis-agent listen` flag, repeatable (--agent-arg=--wake-threshold=0.6)
 #
 # The sandboxes: N is `scripts/sandbox up --profile rich --llm scripted --ui` (the seeded
-# household, every role's login, the scripted model); N-setup is `--profile empty`, an install
+# household, every role's login, the scripted model, pushes recorded by tools/fakerelay); N-setup is `--profile empty`, an install
 # whose first-run setup is still to do, for the wizard. The voice suite has only N, as
 # `--profile rich --voice --llm shared|scripted`. Writes .e2e/<run>/report.md and
 # report.json (per test: status, time, error, failure screenshots, trace, console errors), with
@@ -39,14 +48,15 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 say() { echo "e2e: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; }
 
-SUITE=all FILTER='' KEEP=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=()
+SUITE=all FILTER='' KEEP=0 REAL_PUSH=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=()
 while [ $# -gt 0 ]; do
   case $1 in
     web|mobile|all|voice) SUITE=$1; shift ;;
     --filter) FILTER=$2; shift 2 ;;
     --keep) KEEP=1; shift ;;
+    --real-push) REAL_PUSH=1; shift ;;
     --name) NAME=$2; shift 2 ;;
     --mobile-repo) MOBILE_REPO_ARG=$(cd "$2" && pwd) || die "--mobile-repo: no directory $2"; shift 2 ;;
     --llm) VLLM=$2; shift 2 ;;
@@ -61,6 +71,7 @@ done
 case $VLLM in shared | scripted) ;; *) die "--llm: shared or scripted" ;; esac
 case $AUDIO in wav | pipewire) ;; *) die "--audio: wav or pipewire" ;; esac
 case $REPEAT in '' | *[!0-9]* | 0) die "--repeat: a positive number" ;; esac
+[ "$REAL_PUSH" = 0 ] || [ "$SUITE" = mobile ] || die "--real-push goes with the mobile suite: scripts/e2e mobile --real-push"
 
 RUN=$(date +%Y%m%d-%H%M%S)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')
 NAME=${NAME:-e2e-$RUN}
@@ -121,6 +132,106 @@ seed_whisper() {
   [ -x "$src/whisper-server" ] && [ ! -e "$dst" ] || return 0
   mkdir -p "$dst" && cp -r "$src/." "$dst/" && touch "$dst/.jarvis-complete"
 }
+
+# --- the real push lane (scripts/e2e mobile --real-push) ------------------------------------------
+PUSH_ENV=${JARVIS_HARNESS_PUSH_ENV:-$HOME/.config/jarvis-harness/push.env}
+# load_push_env reads E2E_REAL_RELAY_URL and E2E_PUSH_GOOGLE_SERVICES from $PUSH_ENV; the
+# environment wins.
+load_push_env() {
+  local relay=${E2E_REAL_RELAY_URL:-} gs=${E2E_PUSH_GOOGLE_SERVICES:-}
+  # shellcheck disable=SC1090
+  if [ -f "$PUSH_ENV" ]; then . "$PUSH_ENV"; fi
+  E2E_REAL_RELAY_URL=${relay:-${E2E_REAL_RELAY_URL:-}}
+  E2E_PUSH_GOOGLE_SERVICES=${gs:-${E2E_PUSH_GOOGLE_SERVICES:-}}
+}
+
+# real_push_missing prints why the lane cannot run here (nothing when it can).
+real_push_missing() {
+  if [ -z "$E2E_REAL_RELAY_URL" ]; then
+    echo "no real relay: set E2E_REAL_RELAY_URL (e.g. https://relay.jarvisautomation.io) in the environment or $PUSH_ENV"; return
+  fi
+  case $E2E_REAL_RELAY_URL in http://* | https://*) ;; *) echo "E2E_REAL_RELAY_URL is not an http(s) URL"; return ;; esac
+  if [ -z "$E2E_PUSH_GOOGLE_SERVICES" ]; then
+    echo "no push config for the APK: set E2E_PUSH_GOOGLE_SERVICES to the app's google-services.json in the environment or $PUSH_ENV"; return
+  fi
+  [ -r "$E2E_PUSH_GOOGLE_SERVICES" ] || { echo "E2E_PUSH_GOOGLE_SERVICES: $E2E_PUSH_GOOGLE_SERVICES is not readable"; return; }
+  # shellcheck source=lib/mobile.sh
+  (. "$ROOT/scripts/lib/mobile.sh" && play_image >/dev/null) ||
+    { echo "no Google Play system image (FCM needs Play services): sdkmanager 'system-images;android-36;google_apis_playstore;x86_64'"; return; }
+  # Any HTTP answer will do (an empty register is refused): only no answer at all stops the lane.
+  local code
+  code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' \
+    "${E2E_REAL_RELAY_URL%/}/v1/register" 2>/dev/null) || true
+  [ "${code:-000}" != 000 ] || echo "the relay $E2E_REAL_RELAY_URL is unreachable from here"
+}
+
+run_real_push() {
+  local mdir=$OUT/mobile-push rc=0 why
+  mkdir -p "$mdir"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -o "$mdir/e2emobile" ./tools/e2emobile) ||
+    { broken mobile-push "building tools/e2emobile failed"; return; }
+  load_push_env
+  why=$(real_push_missing)
+  if [ -n "$why" ]; then
+    say "mobile-push: skipped: $why"
+    "$mdir/e2emobile" realpush --out "$mdir" --skip "$why" 2>>"$OUT/mobile-push.log"
+    echo 0 >"$OUT/mobile-push.exit"
+    SUITES+=(mobile-push)
+    return
+  fi
+  say "run $RUN: sandbox $NAME on the real relay $E2E_REAL_RELAY_URL (log in $OUT/sandbox-$NAME.log)"
+  up mobile-push "$NAME" --profile rich --llm scripted --relay "$E2E_REAL_RELAY_URL"
+  say "mobile-push: running (log in mobile-push.log)"
+  set +e
+  (
+    set -e
+    # shellcheck source=lib/mobile.sh
+    . "$ROOT/scripts/lib/mobile.sh"
+    use_play_store
+    REF=origin/main FETCH=1
+    if [ -n "$MOBILE_REPO_ARG" ]; then MOBILE_REPO=$MOBILE_REPO_ARG REF=HEAD FETCH=0; fi
+    WORK=$mdir STATEF=$mdir/emulator.port KEEP=0
+    [ "$(uname -s)" = Linux ] || die "Linux only (the Android emulator needs KVM)"
+    [ -x "$ADB" ] || die "no adb at $ADB (Android SDK platform-tools; set ANDROID_HOME)"
+    # shellcheck disable=SC1090
+    source "$ROOT/.sandbox/$NAME/sandbox.env"
+    maestro=$(ensure_maestro)
+    ensure_avd
+    apk=$(build_apk "$REF" 0 "$FETCH" "$E2E_PUSH_GOOGLE_SERVICES")
+    sha=$(git -C "$MOBILE_REPO" rev-parse --verify -q "$REF^{commit}")
+    mkdir -p "$mdir/src"
+    git -C "$MOBILE_REPO" archive --format=tar "$sha" .maestro 2>/dev/null | tar -x -C "$mdir/src" ||
+      die "no .maestro/ in jarvis-node-mobile ${sha:0:12} ($MOBILE_REPO)"
+    login=$mdir/src/.maestro/subflows/login.yaml
+    [ -f "$login" ] || login=$mdir/src/.maestro/login.yaml
+    [ -f "$login" ] || die "no login flow in jarvis-node-mobile ${sha:0:12} (.maestro/subflows/login.yaml)"
+
+    trap kill_emulator EXIT
+    trap 'exit 130' INT TERM
+    boot_emulator
+    prep_emulator
+    # Demo mode hides notification icons; this lane wants the real status bar.
+    "$ADB" -s "$SERIAL" shell am broadcast -a com.android.systemui.demo -e command exit >/dev/null
+    reverse_sandbox
+    install_app "$apk"
+    "$mdir/e2emobile" realpush --out "$mdir" --serial "$SERIAL" --maestro "$maestro" --adb "$ADB" \
+      --login-flow "$login" -e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD"
+  ) 2>&1 | tee "$OUT/mobile-push.log"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [ ! -f "$mdir/results.json" ]; then
+    why=$(grep -v '^[[:space:]]*$' "$OUT/mobile-push.log" | tail -1 | sed -E 's/^e2e(mobile)?: //')
+    broken mobile-push "real push lane did not run: ${why:-exit $rc, see mobile-push.log}"
+    return
+  fi
+  echo "$rc" >"$OUT/mobile-push.exit"
+  SUITES+=(mobile-push)
+}
+
+if [ "$REAL_PUSH" = 1 ]; then
+  run_real_push
+  report
+fi
 
 if [ "$SUITE" = voice ]; then
   say "run $RUN: sandbox $NAME (voice, --llm $VLLM, --audio $AUDIO; log in $OUT/sandbox-$NAME.log)"
@@ -213,6 +324,17 @@ run_mobile() {
       v=SBX_EMAIL_$r
       [ -z "${!v:-}" ] || env+=(-e "EMAIL_$r=${!v}")
     done
+    # Pushes (docs/decisions/2026-10-18-e2e-push.md): the emulator has no FCM, so the superuser
+    # gets a fake device token; a flow makes an event happen (in the app, or as the seeded node
+    # through CC_URL with NODE_API_KEY) and checks FAKE_RELAY/control/pushes?token=PUSH_TOKEN
+    # from a runScript (which runs on this host).
+    push_token="ExponentPushToken[e2e-mobile-$RUN]"
+    curl -sf -o /dev/null -X POST "$SBX_NOTIFICATIONS/api/v0/tokens" -H "Authorization: Bearer $SBX_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d "{\"push_token\": \"$push_token\", \"device_type\": \"android\", \"device_name\": \"E2E (fake relay)\"}" ||
+      die "could not register the flows' push token"
+    env+=(-e "FAKE_RELAY=$SBX_FAKERELAY" -e "PUSH_TOKEN=$push_token" -e "CC_URL=$SBX_CC"
+      -e "NODE_API_KEY=$SBX_NODE_ID:$SBX_NODE_KEY" -e "USER_ID=$SBX_USER_ID")
     "$mdir/e2emobile" run --flows "$mdir/src/.maestro" --out "$mdir" --serial "$SERIAL" \
       --maestro "$maestro" --adb "$ADB" ${FILTER:+--filter "$FILTER"} "${env[@]}"
   ) 2>&1 | tee "$OUT/mobile.log"
