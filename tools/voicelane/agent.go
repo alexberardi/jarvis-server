@@ -23,6 +23,7 @@ type Turn struct {
 	Said        string   `json:"said,omitempty"`
 	ClientTools []string `json:"client_tools,omitempty"`
 	Recorded    float64  `json:"recorded_secs"`
+	ReplySecs   float64  `json:"reply_audio_secs,omitempty"` // the reply's length, as the node said
 	TookSecs    float64  `json:"took_secs"`
 }
 
@@ -30,7 +31,7 @@ var (
 	turnHead    = regexp.MustCompile(`recorded ([0-9.]+) s .*?heard ("(?:[^"\\]|\\.)*")(.*)`)
 	turnRan     = regexp.MustCompile(`, ran ([A-Za-z0-9_.:-]+)`)
 	turnOutcome = regexp.MustCompile(` -> ([a-z_]+)`)
-	turnSaid    = regexp.MustCompile(`, said ("(?:[^"\\]|\\.)*")`)
+	turnSaid    = regexp.MustCompile(`, said ("(?:[^"\\]|\\.)*")(?: \(([0-9.]+) s of audio\))?`)
 	turnTook    = regexp.MustCompile(`^\s+took (\S+)`)
 	wakeLine    = regexp.MustCompile(`msg=wake .*score=([0-9.]+)`)
 )
@@ -72,6 +73,7 @@ func parseTurns(out string) []Turn {
 				}
 				if s := turnSaid.FindStringSubmatch(rest); s != nil {
 					cur.Said, _ = strconv.Unquote(s[1])
+					cur.ReplySecs, _ = strconv.ParseFloat(s[2], 64)
 				}
 			}
 			continue
@@ -198,15 +200,7 @@ func newPWRig(ctx context.Context, l *lane, dev, mic, spk string) (*pwRig, error
 }
 
 func (r *pwRig) play(ctx context.Context, in, out, dir string, wait time.Duration) ([]Turn, float64, error) {
-	// Whatever the node printed since the last case (a turn a barge-in started) is not this one's.
-drain:
-	for {
-		select {
-		case <-r.lines:
-		default:
-			break drain
-		}
-	}
+	drain(r.lines)
 	// The speaker is a sink: record its monitor.
 	rec := exec.CommandContext(ctx, "pw-record", "--target", r.spk, "-P", "{ stream.capture.sink = true }",
 		"--rate", "16000", "--channels", "1", out)
@@ -223,35 +217,11 @@ drain:
 		return nil, 0, fmt.Errorf("pw-play: %v: %s", err, b)
 	}
 	playEnd := time.Now()
-	// The turn ends with its "took" line; a silent case listens for the whole window, and
-	// longer once the node has woken, to see the turn through.
-	var buf strings.Builder
-	deadline := time.After(wait)
-	extended := false
-wait:
-	for {
-		select {
-		case line, ok := <-r.lines:
-			if !ok {
-				break wait
-			}
-			buf.WriteString(line + "\n")
-			if turnTook.MatchString(line) {
-				break wait
-			}
-			if !extended && wakeLine.MatchString(line) {
-				deadline, extended = time.After(r.l.replyWait), true
-			}
-		case <-deadline:
-			break wait
-		case <-ctx.Done():
-			break wait
-		}
-	}
+	log := waitTurn(ctx, r.lines, wait, r.l.replyWait)
 	time.Sleep(500 * time.Millisecond) // the reply's tail
 	stopRec()
-	os.WriteFile(filepath.Join(dir, "agent.log"), []byte(buf.String()), 0o644)
-	turns := parseTurns(buf.String())
+	os.WriteFile(filepath.Join(dir, "agent.log"), []byte(log), 0o644)
+	turns := parseTurns(log)
 	resp := 0.0
 	if s, rate, err := readWAVFile(out); err == nil {
 		if secs, first := voiced(s, rate); secs > 0 {
@@ -259,6 +229,49 @@ wait:
 		}
 	}
 	return turns, resp, nil
+}
+
+// drain drops whatever the node printed since the last case (a turn a barge-in started): it
+// is not the next case's.
+func drain(lines <-chan string) {
+	for {
+		select {
+		case _, ok := <-lines:
+			if !ok {
+				return
+			}
+		default:
+			return
+		}
+	}
+}
+
+// waitTurn collects the node's lines until its turn ends with its "took" line; a silent case
+// listens for the whole window (wait), and for replyWait once the node has woken, to see the
+// turn through.
+func waitTurn(ctx context.Context, lines <-chan string, wait, replyWait time.Duration) string {
+	var buf strings.Builder
+	deadline := time.After(wait)
+	extended := false
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return buf.String()
+			}
+			buf.WriteString(line + "\n")
+			if turnTook.MatchString(line) {
+				return buf.String()
+			}
+			if !extended && wakeLine.MatchString(line) {
+				deadline, extended = time.After(replyWait), true
+			}
+		case <-deadline:
+			return buf.String()
+		case <-ctx.Done():
+			return buf.String()
+		}
+	}
 }
 
 func (r *pwRig) close() {

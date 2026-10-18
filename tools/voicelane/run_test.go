@@ -19,7 +19,11 @@ import (
 // to the tap log and prints the turn as printTurn does; otherwise it says what `listen --once`
 // says when no wake word was heard and exits 1.
 func TestMain(m *testing.M) {
-	if os.Getenv("VOICELANE_FAKE_AGENT") != "" {
+	switch os.Getenv("VOICELANE_FAKE_AGENT") {
+	case "":
+	case "pi":
+		os.Exit(fakePiAgent(os.Args[1:]))
+	default:
 		os.Exit(fakeAgent(os.Args[1:]))
 	}
 	os.Exit(m.Run())
@@ -67,9 +71,11 @@ func fakeAgent(args []string) int {
 	return 0
 }
 
-func TestRunAgainstAFakeNodeAndSandbox(t *testing.T) {
-	root := t.TempDir()
-	cc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// fakeSandbox is a sandbox under root/.sandbox/t whose cc speaks a "Hey Jarvis" WAV at the
+// fake node's wake level (0.5) and transcribes every reply as "It is three.".
+func fakeSandbox(t *testing.T, root string) (cc *httptest.Server, sbx string) {
+	t.Helper()
+	cc = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-API-Key") != "node-1:key-1" {
 			http.Error(w, "who", http.StatusUnauthorized)
 			return
@@ -90,10 +96,16 @@ func TestRunAgainstAFakeNodeAndSandbox(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer cc.Close()
-	sbx := filepath.Join(root, ".sandbox", "t")
+	t.Cleanup(cc.Close)
+	sbx = filepath.Join(root, ".sandbox", "t")
 	os.MkdirAll(sbx, 0o755)
 	writeFile(t, sbx, "sandbox.env", fmt.Sprintf("export SBX_CC=%s\nexport SBX_CONFIG=%s\nexport SBX_NODE_ID=node-1\nexport SBX_NODE_KEY=key-1\nexport SBX_VOICE=whisper-small.en\n", cc.URL, cc.URL))
+	return cc, sbx
+}
+
+func TestRunAgainstAFakeNodeAndSandbox(t *testing.T) {
+	root := t.TempDir()
+	cc, sbx := fakeSandbox(t, root)
 	writeFile(t, sbx, "llm.jsonl", `{"reply":{"content":"from before the run"}}`+"\n")
 	cases := writeFile(t, root, "cases.json", `{"cases": [
   {"name": "the time", "model": true, "audio": [{"say": "Hey Jarvis."}, {"say": "What time is it?"}],

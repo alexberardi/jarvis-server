@@ -22,6 +22,7 @@ type lane struct {
 	agentArgs  []string
 	creds      string
 	wakeModels string
+	voices     string
 	nodeHome   string
 	out        string
 	audio      string
@@ -33,12 +34,17 @@ type lane struct {
 // listenArgs is `jarvis-agent listen` as the lane runs it: the Pi build, no chimes (they would
 // be recorded as the reply) and no follow-up window (one exchange per case).
 func (l *lane) listenArgs(in, out string) []string {
-	a := []string{"listen", "--profile", "pi", "--creds", l.creds, "--voice-input", in, "--voice-output", out,
+	return listenArgs(l.creds, l.wakeModels, in, out, l.agentArgs)
+}
+
+// listenArgs is listen's flags with the node's files where it runs (the Pi has its own paths).
+func listenArgs(creds, wakeModels, in, out string, extra []string) []string {
+	a := []string{"listen", "--profile", "pi", "--creds", creds, "--voice-input", in, "--voice-output", out,
 		"--no-chimes", "--follow-up", "0"}
-	if l.wakeModels != "" {
-		a = append(a, "--wake-models", l.wakeModels)
+	if wakeModels != "" {
+		a = append(a, "--wake-models", wakeModels)
 	}
-	return append(a, l.agentArgs...)
+	return append(a, extra...)
 }
 
 // Run is one run of a case: what the node did and what was checked.
@@ -126,10 +132,14 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	rel := fs.String("rel", "", "the prefix artifact paths get in results.json (the report's dir, relative)")
 	agent := fs.String("agent", "", "the jarvis-agent binary; required")
 	wakeModels := fs.String("wake-models", "", "openWakeWord models directory (default: the node downloads them into its own cache)")
-	audioMode := fs.String("audio", "wav", "wav (WAV files in and out) or pipewire (scripts/e2e's private PipeWire)")
+	audioMode := fs.String("audio", "wav", "wav (WAV files in and out), pipewire (scripts/e2e's private PipeWire) or pi (a Pi's own mic and speaker, over ssh)")
 	dev := fs.String("alsa-device", "pipewire", "pipewire: the ALSA PCM the node opens for its mic and speaker")
 	mic := fs.String("mic", "e2e_mic", "pipewire: the virtual source the node listens to (played into)")
 	spk := fs.String("speaker", "e2e_speaker", "pipewire: the sink the node plays to (its monitor is recorded)")
+	voices := fs.String("voices", "", "recorded voices: DIR/<slug of the text>.wav says a case's text instead of the TTS (\"Hey Jarvis.\" is hey-jarvis.wav)")
+	piHost := fs.String("pi-host", os.Getenv("JARVIS_E2E_PI"), "pi: the Pi, as ssh reaches it (user@host)")
+	piCard := fs.String("pi-card", "auto", "pi: the HAT's ALSA card index (auto: the seeed card)")
+	sshCmd := fs.String("ssh", "ssh", "pi: the ssh command")
 	replyWait := fs.Duration("reply-wait", 60*time.Second, "how long after the audio a reply may take")
 	silentWait := fs.Duration("silent-wait", 5*time.Second, "how long after the audio a silent case is listened to")
 	var agentArgs stringList
@@ -141,7 +151,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return errors.New("--sandbox, --out and --agent are required")
 	}
 	// The node's XDG dirs must be absolute, and its flags outlive the working directory.
-	for _, p := range []*string{out, agent, wakeModels, root} {
+	for _, p := range []*string{out, agent, wakeModels, root, voices} {
 		if *p == "" {
 			continue
 		}
@@ -168,7 +178,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	l := &lane{node: &node{cc: env["SBX_CC"], id: env["SBX_NODE_ID"], key: env["SBX_NODE_KEY"]},
 		tapLog: filepath.Join(*root, ".sandbox", *sandbox, "llm.jsonl"), agent: *agent, agentArgs: agentArgs,
-		wakeModels: *wakeModels, out: *out, audio: *audioMode, replyWait: *replyWait, silentWait: *silentWait, nodeHome: filepath.Join(*out, "node")}
+		wakeModels: *wakeModels, voices: *voices, out: *out, audio: *audioMode, replyWait: *replyWait, silentWait: *silentWait, nodeHome: filepath.Join(*out, "node")}
 	if err := os.MkdirAll(filepath.Join(l.nodeHome, "config"), 0o700); err != nil {
 		return err
 	}
@@ -184,8 +194,15 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 			return err
 		}
 		l.rig = r
+	case "pi":
+		ssh := []string{*sshCmd, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"}
+		r, err := newPiRig(ctx, l, env, ssh, *piHost, *piCard)
+		if err != nil {
+			return err
+		}
+		l.rig = r
 	default:
-		return fmt.Errorf("--audio %q: wav or pipewire", *audioMode)
+		return fmt.Errorf("--audio %q: wav, pipewire or pi", *audioMode)
 	}
 	defer l.rig.close()
 
@@ -207,8 +224,17 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if failed > 0 || len(tests) == 0 {
 		status = "failed"
 	}
-	b, _ := json.MarshalIndent(map[string]any{"suite": "voice", "status": status, "audio": *audioMode,
-		"duration_ms": time.Since(start).Milliseconds(), "tests": tests}, "", "  ")
+	res := map[string]any{"suite": "voice", "status": status, "audio": *audioMode,
+		"duration_ms": time.Since(start).Milliseconds(), "tests": tests}
+	if r, ok := l.rig.(*piRig); ok {
+		// What the Pi ran before and after, and what was stopped and restored.
+		r.close()
+		res["pi"] = r.notes()
+		for _, n := range r.notes() {
+			fmt.Fprintln(stdout, "voice: pi:", n)
+		}
+	}
+	b, _ := json.MarshalIndent(res, "", "  ")
 	if err := os.WriteFile(filepath.Join(*out, "results.json"), append(b, '\n'), 0o644); err != nil {
 		return err
 	}
@@ -223,9 +249,9 @@ func (l *lane) runCase(ctx context.Context, c Case, file string, repeat int, rel
 		Screenshots: []string{}, ConsoleErrors: []string{}, Artifacts: []string{}, Runs: []Run{}}
 	start := time.Now()
 	defer func() { t.DurationMS = time.Since(start).Milliseconds() }()
-	if c.Needs == "pipewire" && l.audio != "pipewire" {
+	if c.Needs == "pipewire" && l.audio == "wav" {
 		t.Status = "skipped"
-		e := "needs real-time audio (--audio pipewire): a WAV speaker is written at once, so nothing can be said over it"
+		e := "needs real-time audio (--audio pipewire or pi): a WAV speaker is written at once, so nothing can be said over it"
 		t.Error = &e
 		return t
 	}
@@ -267,7 +293,7 @@ func (l *lane) runOnce(ctx context.Context, c Case, dir string, seed int64) (r R
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return failed(err)
 	}
-	s, rate, err := renderCase(ctx, l.node.Speak, c.Audio, seed)
+	s, rate, err := renderCase(ctx, l.speak, c.Audio, seed)
 	if err != nil {
 		return failed(err)
 	}
@@ -304,6 +330,17 @@ func (l *lane) runOnce(ctx context.Context, c Case, dir string, seed int64) (r R
 	}
 	judge(c.Expect, &r)
 	return r
+}
+
+// speak is a recorded voice saying text (--voices DIR/<slug of the text>.wav) or, without
+// one, the sandbox's TTS.
+func (l *lane) speak(ctx context.Context, text string) ([]byte, error) {
+	if l.voices != "" {
+		if b, err := os.ReadFile(filepath.Join(l.voices, slug(text)+".wav")); err == nil {
+			return b, nil
+		}
+	}
+	return l.node.Speak(ctx, text)
 }
 
 type stringList []string

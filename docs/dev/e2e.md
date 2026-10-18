@@ -218,6 +218,8 @@ scripts/e2e voice --llm scripted           # the lane itself, on e2e/llm/voice.j
 scripts/e2e voice --audio pipewire         # a private PipeWire's virtual mic and speaker (barge-in too)
 scripts/e2e voice --filter 'timer|silent' --repeat 1
 scripts/e2e voice --agent-arg=--wake-threshold=0.6   # any extra `jarvis-agent listen` flag
+scripts/e2e voice --audio pi --pi-host <user>@<pi4-node>   # a real Pi in the room (overnight only, below)
+scripts/e2e voice --voices ~/voices        # recorded human voices instead of the TTS, where there is one
 ```
 
 It brings up one sandbox, `scripts/sandbox up --profile rich --voice --llm shared|scripted`,
@@ -236,7 +238,12 @@ and XDG dirs under the run and the sandbox's seeded node identity. Per case:
 
 `model: true` cases run `--repeat` times (default 3) and pass only when every run does. Read
 them by the regressions-only rule: a regression is 3/3 on main and 0/3 on the change. `needs:
-pipewire` cases (barge-in) are skipped with `--audio wav`, whose speaker is written at once.
+pipewire` cases (barge-in) need real-time audio: they are skipped with `--audio wav`, whose
+speaker is written at once, and run with `pipewire` and `pi`.
+
+`--voices DIR` says a `say` line with a recording where there is one: `DIR/<slug of the
+text>.wav` ("Hey Jarvis." is `hey-jarvis.wav`, "What time is it?" `what-time-is-it.wav`), any
+sample rate (resampled to the TTS's); other lines are still the TTS.
 
 | case | checks |
 |---|---|
@@ -247,13 +254,15 @@ pipewire` cases (barge-in) are skipped with `--audio wav`, whose speaker is writ
 | no wake word stays silent | the timer and lights commands without "Hey Jarvis" |
 | background noise stays silent | 8 s of pink noise |
 | music with talk over it stays silent | a chord loop with a sentence spoken over it |
-| barge-in stops a long reply | "Hey Jarvis" over a long story ends the turn `interrupted` (`--audio pipewire` only) |
+| barge-in stops a long reply | "Hey Jarvis" over a long story ends the turn `interrupted` (`--audio pipewire` or `pi`) |
 
 What it leaves under `.e2e/<run>/`: `voice/results.json` (the report's test shape plus each
 case's `runs`: the turn, the reply heard, the response time, the model's calls and tools, the
 failures), `voice/cases/<case>/run-N/` (`utterance.wav`, `reply.wav`, `agent.log`, `run.json`;
 `report.md` lists them under a failure), `voice.log`, and with PipeWire `voice/pipewire.log`
-and `voice/agent.log` (the one long node).
+and `voice/agent.log` (the one long node; on a Pi also what the Pi side did, and
+`results.json`'s `pi`: the card, the services before and after, what was stopped and
+restored).
 
 - **Offline caches.** A box that can't reach GitHub's release CDN can seed
   `$JARVIS_HARNESS_CACHE` (default `~/.cache/jarvis-harness`) with
@@ -266,3 +275,40 @@ and `voice/agent.log` (the one long node).
   session-bus variables unset, and is killed when the run ends.
 - **A new case** goes in `e2e/voice/cases.json` (unknown keys are an error); with
   `--llm scripted` it needs a rule in `e2e/llm/voice.json` too.
+
+### On a real Pi (`--audio pi`, overnight only)
+
+The same cases and asserts on real hardware: the Pi 4 lab node (`<pi4-node>`, a Seeed 2-mic HAT),
+in a room where playing speech out loud for half an hour is fine, hence overnight (the E2E
+schedule, loop item #152, runs it). Why it is built this way:
+[`../decisions/2026-10-18-e2e-pi-voice-lane.md`](../decisions/2026-10-18-e2e-pi-voice-lane.md).
+
+- **What the Pi needs:** ssh key auth from the dev box for `--pi-host` (`BatchMode`: no
+  prompts), aarch64, bash, `aplay`/`arecord` (alsa-utils), the HAT's driver loaded, and
+  passwordless `sudo -n systemctl` when a system service (the installed Jarvis node) must be
+  stopped. The wake models go along from the harness cache when they are there; otherwise the
+  node on the Pi downloads them.
+- **What a run does:** builds the node for linux-arm64 (fetching the arm64 sherpa-onnx
+  libraries once), copies it, the sandbox's seeded node identity, the wake models and
+  `tools/voicelane/pi.sh` into a fresh `mktemp -d /tmp/jarvis-e2e-*` on the Pi, and runs it
+  there with `HOME` and XDG dirs in that directory, over one ssh session whose `-R` forwards
+  put the sandbox's ports on the Pi's loopback. The node's config URL is
+  `http://127.0.0.1:<sandbox port>`: the dev box's sandbox, never prod (voicelane refuses a
+  sandbox whose services aren't on 127.0.0.1).
+- **Leaving the Pi as found:** it records the active `jarvis*`, `pulseaudio*`, `pipewire*` and
+  `wireplumber*` services (system and user), stops every Jarvis node (it would hear the cases and
+  answer through its own server) and, only when the card is busy, the audio servers (sockets
+  first). When the run ends, however it ends (done, a failure, Ctrl-C, voicelane killed: the
+  Pi side watches its ssh stdin), it stops the test node, starts exactly what it stopped and
+  deletes the run's directory, which holds the node identity: that is the un-pairing (the
+  sandbox, and the node in it, are purged afterwards unless `--keep`). Both states are in
+  `voice/agent.log` and printed as `voice: pi: …`.
+- **Audio:** ALSA only, from an `.asoundrc` in the run's `HOME` (the Pi's own ALSA config is not
+  touched): the node listens on a dsnoop of the HAT and speaks into its dmix through a tee that
+  writes what it plays to the run's directory, fetched and transcribed per case. Each case's WAV
+  is played with `aplay` straight into the same dmix, beside the node's stream and never
+  through it, so the mic hears it in the room. The playback level is the Pi's mixer setting
+  (`alsamixer -c <card>`); the response time is the turn less its recording and its reply's
+  playback, as with WAV files.
+- **When it fails to start:** the error says which step (`ssh`, the architecture, no seeed card:
+  `--pi-card N`, a service it could not stop, the card still busy and who holds it).
