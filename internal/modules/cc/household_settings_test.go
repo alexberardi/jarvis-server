@@ -20,7 +20,7 @@ func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
 			t.Errorf("%s: Household=%v, allowlisted=%v", d.Key, d.Household, allowed)
 		}
 	}
-	if len(householdControllable) != 20 {
+	if len(householdControllable) != 21 {
 		t.Fatal(len(householdControllable))
 	}
 	for _, s := range householdControllable {
@@ -41,7 +41,7 @@ func TestHouseholdSettingsGet(t *testing.T) {
 		`"phone_calls.audio_retention_days":30,"phone_calls.max_call_seconds":600,"phone_calls.calls_per_day":10,` +
 		`"phone_calls.monthly_minutes_cap":60,"phone_calls.max_concurrent_calls":1,"household.location":"",` +
 		`"persona.household_prompt":` + jsonStr(prompts.DefaultPersona) + `,"memory.enabled":true,"memory.extraction_enabled":true,` +
-		`"household.timezone":"","phone.twilio_account_sid":null,"phone.twilio_auth_token":null,"phone.twilio_from_number":null,"pantry.enabled":false,"watches.enabled":false}}`
+		`"household.timezone":"","phone.twilio_account_sid":null,"phone.twilio_auth_token":null,"phone.twilio_from_number":null,"pantry.enabled":false,"watches.enabled":false,"errands.autonomous_enabled":false}}`
 	if got := string(bytes.TrimSpace(r.body)); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
@@ -84,6 +84,7 @@ func TestHouseholdSettingsPut(t *testing.T) {
 	// Allowlist before role: a non-admin probing an unlisted key gets 404, not 403.
 	put(member, "llm.prompt_provider", map[string]any{"value": "x"}).detail(404, "Setting is not household-controllable: llm.prompt_provider")
 	put(member, "web_search.enabled", map[string]any{"value": true}).detail(403, "User has member role, requires admin or higher")
+	put(member, "errands.autonomous_enabled", map[string]any{"value": true}).detail(403, "User has member role, requires admin or higher")
 	put(admin, "web_search.enabled", map[string]any{}).want(400)
 
 	cases := []struct {
@@ -101,6 +102,7 @@ func TestHouseholdSettingsPut(t *testing.T) {
 		{"phone_calls.calls_per_day", `{"value": [1]}`, `{"detail":"Invalid value for phone_calls.calls_per_day: expected an integer, got list"}`, 400},
 		{"household.location", `{"value": "Springfield, IL"}`, `{"success":true,"key":"household.location","value":"Springfield, IL"}`, 200},
 		{"persona.household_prompt", `{"value": "` + strings.Repeat("é", 2001) + `"}`, `{"detail":"Persona is too long (2001 chars); max is 2000."}`, 400},
+		{"errands.autonomous_enabled", `{"value": true}`, `{"success":true,"key":"errands.autonomous_enabled","value":true}`, 200},
 	}
 	for _, c := range cases {
 		r := put(admin, c.key, c.body)
@@ -125,7 +127,8 @@ func TestHouseholdSettingsPut(t *testing.T) {
 	}
 	// The GET reflects the writes.
 	s := e.do("GET", "/api/v0/mobile/household/hh1/settings", nil, bearer(member)).want(200).json()["settings"].(map[string]any)
-	if s["phone_calls.calls_per_day"] != float64(5) || s["memory.extraction_enabled"] != false || s["web_search.enabled"] != false {
+	if s["phone_calls.calls_per_day"] != float64(5) || s["memory.extraction_enabled"] != false || s["web_search.enabled"] != false ||
+		s["errands.autonomous_enabled"] != true {
 		t.Fatal(s)
 	}
 	// An owner of another household can't write here.

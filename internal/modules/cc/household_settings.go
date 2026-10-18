@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -64,7 +65,8 @@ var householdControllable = []householdSetting{
 	{key: phone.SettingTwilioFromNumber, typ: "string", own: true},
 	// Privacy (2026-10-09): may the household use the Pantry package store (packages.go).
 	{key: settingPantryEnabled, typ: "bool"},
-	{key: settingWatchesEnabled, typ: "bool"}, // A8: watches (autonomy P2)
+	{key: settingWatchesEnabled, typ: "bool"},     // A8: watches (autonomy P2)
+	{key: errands.SettingAutonomous, typ: "bool"}, // A1: household rules may run background errands
 }
 
 func householdSettingType(key string) (householdSetting, bool) {
