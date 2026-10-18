@@ -471,6 +471,9 @@ func TestCallbacksOnTheQueue(t *testing.T) {
 		t.Fatalf("server callback jobs %d", jobs)
 	}
 	q.Start(ctx)
+	// Stop the workers before the DB closes and the temp dirs go: a poll still in flight
+	// leaves SQLite's -wal/-shm files behind and RemoveAll fails ("directory not empty").
+	t.Cleanup(func() { cancel(); q.Wait() })
 	ce := &cbEnv{env: e}
 	if s := ce.pollStatus(id, tok); s["status"] != "completed" {
 		t.Fatal(s)
