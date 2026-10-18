@@ -15,6 +15,7 @@
 import { chromium } from 'playwright'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { signIn } from './signin.mjs'
 
 const VIEWPORTS = {
   phone: { width: 390, height: 844, isMobile: true, hasTouch: true },
@@ -95,19 +96,7 @@ const pageName = (p) => slug(p.replace(/^\/admin\//, '/'))
 async function login(browser, a) {
   const ctx = await browser.newContext({ viewport: VIEWPORTS.desktop })
   const page = await ctx.newPage()
-  await page.goto(`${a.admin}/login`)
-  await page.getByLabel('Email').fill(a.email)
-  await page.getByLabel('Password').fill(a.password)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  // A sign-in lands on /setup, which forwards to the dashboard once setup is finished and
-  // otherwise resumes the wizard (a fresh sandbox has not finished it). Either way the session
-  // is in localStorage; the admin pages don't gate on setup, so go to the dashboard directly.
-  try {
-    await page.waitForFunction(() => localStorage.getItem('jarvis-admin:access_token'), null, { timeout: 15000 })
-  } catch {
-    const alert = await page.getByRole('alert').textContent({ timeout: 1000 }).catch(() => null)
-    throw new Error(`login failed at ${page.url()}${alert ? `: ${alert}` : ''}`)
-  }
+  await signIn(page, a.admin, a.email, a.password)
   // The user the SPA stored at sign-in (auth/AuthContext.tsx): who the shots are of.
   const user = await page.evaluate(() => {
     try {
