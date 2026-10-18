@@ -6,14 +6,15 @@ and takes the sandboxes down again. It is run on demand (the user, or the loop's
 
 ```sh
 scripts/e2e web                       # the admin SPA suite
-scripts/e2e                           # every suite there is (all); mobile is "not_run" until #144
+scripts/e2e                           # every suite (all): web, then mobile
+scripts/e2e mobile                    # the mobile app's Maestro flows on a headless harness emulator
+scripts/e2e mobile --mobile-repo ~/src/jarvis-node-mobile-branch   # flows + APK of that checkout's HEAD
 scripts/e2e web --filter 'inbox'      # only tests whose title matches (Playwright --grep)
 scripts/e2e web --keep                # leave the sandboxes up to poke at afterwards
 scripts/e2e web --name loop-142       # pick the sandbox name (default e2e-<run>); never default
 ```
 
-Exit status: 0 when every test passed, 1 when one failed or a suite could not run, 2 for
-`scripts/e2e mobile` (not built yet: E2E 4/9, loop item #144).
+Exit status: 0 when every test passed, 1 when one failed or a suite could not run.
 
 ## What it brings up
 
@@ -23,7 +24,8 @@ Exit status: 0 when every test passed, 1 when one failed or a suite could not ru
   this checkout with the SPA.
 - `<name>-setup`: `scripts/sandbox up --profile empty`: no seeding, no superuser, first-run
   setup still to do. `sandbox.env` has `SBX_SETUP_TOKEN` (the wizard link is
-  `$SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN`). Only the setup wizard's test uses it.
+  `$SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN`). Only the setup wizard's test uses it, so
+  `scripts/e2e mobile` does not bring it up.
 
 Both are purged afterwards (`scripts/sandbox down --purge`) unless `--keep`. A run takes about
 2 minutes on the dev box (build, seed, ~70 browser tests).
@@ -41,7 +43,12 @@ Everything a run leaves is under `.e2e/<run>/` (gitignored), `<run>` = `YYYYMMDD
   same shape and `scripts/e2e` lists it.
 - `web/artifacts/<test>/`: per failed test `test-failed-N.png` and `trace.zip`
   (`cd e2e/web && npx playwright show-trace <path>`).
-- `web.log` (Playwright's own output), `sandbox-<name>.log` (sandbox start-up).
+- `mobile/results.json` (`tools/e2emobile`), and per failed flow `mobile/<flow>/`:
+  `screenshot.png`, `window.xml` (uiautomator dump), `logcat.txt`, `maestro.log` and Maestro's
+  debug output `maestro/`. Skipped flows carry `skip_reason`; a record's `attachments` lists
+  the files beyond the screenshot.
+- `web.log` (Playwright's own output), `mobile.log` (APK build, emulator, Maestro),
+  `sandbox-<name>.log` (sandbox start-up).
 
 `report.json`, schema 1:
 
@@ -58,7 +65,7 @@ Everything a run leaves is under `.e2e/<run>/` (gitignored), `<run>` = `YYYYMMDD
   "counts": {"total": 43, "passed": 43, "failed": 0, "skipped": 0},
   "suites": {
     "web": {"status": "passed | failed | error", "exit_code": 0, "error": null, "duration_ms": 87400},
-    "mobile": {"status": "not_run", "exit_code": null, "error": "not built yet", "duration_ms": 0}
+    "mobile": {"status": "passed | failed | error", "exit_code": 0, "error": null, "duration_ms": 312000}
   },
   "tests": [
     {
@@ -73,6 +80,12 @@ Everything a run leaves is under `.e2e/<run>/` (gitignored), `<run>` = `YYYYMMDD
       "screenshots": ["web/artifacts/…/test-failed-1.png"],
       "trace": "web/artifacts/…/trace.zip",
       "console_errors": ["/inbox/…: Failed to load resource: … 404 (Not Found)"]
+    },
+    {
+      "suite": "mobile", "id": "biometric-login", "title": "Biometric login",
+      "file": ".maestro/biometric-login.yaml", "line": 1, "status": "skipped", "duration_ms": 0,
+      "error": null, "screenshots": [], "trace": null, "console_errors": [],
+      "skip_reason": "needs biometric enrollment, which the headless emulator has not got"
     }
   ]
 }
@@ -132,6 +145,28 @@ one auth rate limit.
   `scripts/e2e web --keep --filter 'my test'`, then
   `cd e2e/web && (source ../../.sandbox/<name>/sandbox.env; E2E_OUT=/tmp/x npx playwright test -g 'my test')`
   (the setup test also needs `E2E_SETUP_ADMIN` and `E2E_SETUP_TOKEN` from `<name>-setup`).
+
+## The mobile suite (`scripts/e2e mobile`)
+
+The Maestro flows of jarvis-node-mobile's `.maestro/`, played by `tools/e2emobile` one Maestro
+process per flow on a headless harness emulator (the AVD, APK and adb reverse of
+`scripts/mobile-shot`, shared in `scripts/lib/mobile.sh`), logged in to the run's rich sandbox.
+Why, and the contract the flows follow (which files run, the `skip` tag and
+`properties.skip_reason`, the `-e` variables `EMAIL`, `PASSWORD`, `EMAIL_ADMIN`/`_POWER`/`_MEMBER`,
+`CHAT_MESSAGE`/`CHAT_REPLY`): [`../decisions/2026-10-18-e2e-mobile-runner.md`](../decisions/2026-10-18-e2e-mobile-runner.md).
+
+- Needs what `scripts/mobile-shot` needs (Linux, KVM, the Android SDK, mise for the APK build)
+  plus Java 17+ for Maestro, which the first run installs into
+  `~/.cache/jarvis-harness/maestro/<version>/` (pinned, sha256-checked).
+- The flows and the APK come from one commit: `origin/main` of `$JARVIS_MOBILE_REPO` (default
+  `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
+  Commit flow changes before running them; uncommitted edits are not picked up.
+- During the suite the scripted model answers from `e2e/llm/mobile.json`.
+- Writing a flow: run it by hand against a kept sandbox and a kept emulator
+  (`scripts/mobile-shot --sandbox <name> --keep --screens login`, then
+  `~/.cache/jarvis-harness/maestro/2.11.0/maestro/bin/maestro --device emulator-<port> test
+  -e EMAIL=… -e PASSWORD=… .maestro/my-flow.yaml`), then the whole suite with
+  `scripts/e2e mobile --mobile-repo <checkout> --filter my-flow`.
 
 ## The voice lane (`scripts/e2e voice`)
 

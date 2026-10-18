@@ -2,17 +2,22 @@
 # End-to-end regression: brings up its own sandboxes, runs the suites against them, writes a
 # report and takes the sandboxes down again. Run on demand (docs/dev/e2e.md).
 #
-#   scripts/e2e [web|mobile|all|voice] [--filter RE] [--keep] [--name N]
+#   scripts/e2e [web|mobile|all|voice] [--filter RE] [--keep] [--name N] [--mobile-repo PATH]
 #               [--llm shared|scripted] [--audio wav|pipewire|pi] [--pi-host USER@HOST] [--pi-card N]
 #               [--voices DIR] [--repeat N] [--agent-arg FLAG]
 #
 #   web      the admin SPA (Playwright, e2e/web/)
-#   mobile   the mobile app: not yet (E2E 4/9, loop item #144); exits 2
-#   all      every suite there is but voice (default); mobile is reported as not run until it exists
+#   mobile   the mobile app: the Maestro flows of jarvis-node-mobile's .maestro/ on a headless
+#            harness emulator (scripts/lib/mobile.sh), logged in to the sandbox
+#   all      every suite but voice (default)
 #   voice    the virtual node voice lane (tools/voicelane, e2e/voice/cases.json): the real
 #            jarvis-agent (--profile pi) hears TTS and its spoken replies are transcribed and
 #            checked; only when asked, since it takes the real model and minutes
-#   --filter RE  run only the tests whose title matches RE (Playwright --grep; voice: case names)
+#   --filter RE  run only the tests whose title matches RE (Playwright --grep; for mobile, the
+#            flow's name or file name; voice: case names)
+#   --mobile-repo PATH  the jarvis-node-mobile checkout or worktree whose HEAD commit gives the
+#            APK and the flows (to test a branch); default: origin/main of $JARVIS_MOBILE_REPO
+#            (or ../jarvis-node-mobile), fetched first
 #   --keep   leave the sandboxes up afterwards (scripts/sandbox down --name N --purge, and
 #            N-setup, to remove them by hand); without it they are purged
 #   --name N the sandbox name (default e2e-<run>); the setup wizard's empty sandbox is N-setup
@@ -40,15 +45,16 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 say() { echo "e2e: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; }
 
-SUITE=all FILTER='' KEEP=0 NAME='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=() PI_HOST=${JARVIS_E2E_PI:-} PI_CARD=auto VOICES=''
+SUITE=all FILTER='' KEEP=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=() PI_HOST=${JARVIS_E2E_PI:-} PI_CARD=auto VOICES=''
 while [ $# -gt 0 ]; do
   case $1 in
     web|mobile|all|voice) SUITE=$1; shift ;;
     --filter) FILTER=$2; shift 2 ;;
     --keep) KEEP=1; shift ;;
     --name) NAME=$2; shift 2 ;;
+    --mobile-repo) MOBILE_REPO_ARG=$(cd "$2" && pwd) || die "--mobile-repo: no directory $2"; shift 2 ;;
     --llm) VLLM=$2; shift 2 ;;
     --audio) AUDIO=$2; shift 2 ;;
     --repeat) REPEAT=$2; shift 2 ;;
@@ -61,10 +67,6 @@ while [ $# -gt 0 ]; do
     *) usage >&2; die "unknown argument $1" ;;
   esac
 done
-if [ "$SUITE" = mobile ]; then
-  say "the mobile suite is not there yet (E2E 4/9, loop item #144)"
-  exit 2
-fi
 case $VLLM in shared | scripted) ;; *) die "--llm: shared or scripted" ;; esac
 case $AUDIO in wav | pipewire | pi) ;; *) die "--audio: wav, pipewire or pi" ;; esac
 [ "$AUDIO" != pi ] || [ -n "$PI_HOST" ] || die "--audio pi needs --pi-host USER@HOST (or JARVIS_E2E_PI)"
@@ -107,12 +109,15 @@ broken() {
   SUITES+=("$1")
 }
 
-up() { # suite, name, then scripts/sandbox up's flags
-  local suite=$1 n=$2
+up() { # suites (space-separated), name, then scripts/sandbox up's flags
+  local suites=$1 n=$2
   shift 2
   "$ROOT/scripts/sandbox" up --name "$n" "$@" >"$OUT/sandbox-$n.log" 2>&1 && return
   tail -20 "$OUT/sandbox-$n.log" >&2
-  broken "$suite" "sandbox $n did not come up (sandbox-$n.log)"
+  local s
+  for s in $suites; do
+    case $SUITE in "$s" | all) broken "$s" "sandbox $n did not come up (sandbox-$n.log)" ;; esac
+  done
   report
 }
 
@@ -133,10 +138,10 @@ if [ "$SUITE" = voice ]; then
   seed_whisper "$NAME"
   up voice "$NAME" --profile rich --voice --llm "$VLLM"
 else
-  say "run $RUN: sandboxes $NAME and $SETUP (logs in $OUT/sandbox-*.log)"
+  if [ "$SUITE" = mobile ]; then say "run $RUN: sandbox $NAME (log in $OUT/sandbox-$NAME.log)"; else say "run $RUN: sandboxes $NAME and $SETUP (logs in $OUT/sandbox-*.log)"; fi
   "$ROOT/scripts/sandbox" down --name "$SETUP" --purge >/dev/null 2>&1 || true # empty means empty
-  up web "$NAME" --profile rich --llm scripted --ui
-  up web "$SETUP" --profile empty --llm scripted
+  up "web mobile" "$NAME" --profile rich --llm scripted --ui
+  [ "$SUITE" = mobile ] || up web "$SETUP" --profile empty --llm scripted # only the web suite's wizard test uses it
 fi
 
 run_web() {
@@ -166,6 +171,70 @@ run_web() {
   ) 2>&1 | tee "$OUT/web.log" || rc=$?
   echo "$rc" >"$OUT/web.exit"
   SUITES+=(web)
+}
+
+# run_mobile plays the mobile app's Maestro flows on a disposable harness emulator, logged in to
+# $NAME (docs/decisions/2026-10-18-e2e-mobile-runner.md). Everything that can die runs in a
+# subshell, so a missing SDK or a failed build becomes the suite's error instead of ending the run.
+run_mobile() {
+  local mdir=$OUT/mobile rc=0 why
+  mkdir -p "$mdir"
+  say "mobile: running (log in mobile.log)"
+  # errexit is off inside a subshell tested with ||, so the status comes from PIPESTATUS instead.
+  set +e
+  (
+    set -e
+    # shellcheck source=lib/mobile.sh
+    . "$ROOT/scripts/lib/mobile.sh"
+    REF=origin/main FETCH=1
+    if [ -n "$MOBILE_REPO_ARG" ]; then MOBILE_REPO=$MOBILE_REPO_ARG REF=HEAD FETCH=0; fi
+    WORK=$mdir STATEF=$mdir/emulator.port KEEP=0
+    [ "$(uname -s)" = Linux ] || die "Linux only (the Android emulator needs KVM)"
+    [ -x "$ADB" ] || die "no adb at $ADB (Android SDK platform-tools; set ANDROID_HOME)"
+    command -v go >/dev/null || die "go not on PATH"
+    # shellcheck disable=SC1090
+    source "$ROOT/.sandbox/$NAME/sandbox.env"
+
+    maestro=$(ensure_maestro)
+    ensure_avd
+    apk=$(build_apk "$REF" 0 "$FETCH")
+    # The flows of the very commit the APK was built from.
+    sha=$(git -C "$MOBILE_REPO" rev-parse --verify -q "$REF^{commit}")
+    mkdir -p "$mdir/src"
+    git -C "$MOBILE_REPO" archive --format=tar "$sha" .maestro 2>/dev/null | tar -x -C "$mdir/src" ||
+      die "no .maestro/ in jarvis-node-mobile ${sha:0:12} ($MOBILE_REPO)"
+    say "flows: .maestro/ of jarvis-node-mobile ${sha:0:12} ($REF in $MOBILE_REPO)"
+    (cd "$ROOT" && CGO_ENABLED=0 go build -o "$mdir/e2emobile" ./tools/e2emobile)
+    # The chat flows' answers (CHAT_MESSAGE → CHAT_REPLY below).
+    curl -sf -o /dev/null -X POST "$SBX_SCRIPTLLM/control/script" -H 'Content-Type: application/json' \
+      -d '{"path": "e2e/llm/mobile.json"}' || die "could not switch the scripted model to e2e/llm/mobile.json"
+
+    trap kill_emulator EXIT
+    trap 'exit 130' INT TERM
+    boot_emulator
+    prep_emulator
+    reverse_sandbox
+    install_app "$apk"
+
+    # The flows' environment: the contract in docs/decisions/2026-10-18-e2e-mobile-runner.md.
+    env=(-e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD" -e "EMAIL_SUPERUSER=$SBX_EMAIL"
+      -e "CHAT_MESSAGE=what is 12 times 7" -e "CHAT_REPLY=12 times 7 is 84.")
+    for r in ADMIN POWER MEMBER; do
+      v=SBX_EMAIL_$r
+      [ -z "${!v:-}" ] || env+=(-e "EMAIL_$r=${!v}")
+    done
+    "$mdir/e2emobile" run --flows "$mdir/src/.maestro" --out "$mdir" --serial "$SERIAL" \
+      --maestro "$maestro" --adb "$ADB" ${FILTER:+--filter "$FILTER"} "${env[@]}"
+  ) 2>&1 | tee "$OUT/mobile.log"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [ ! -f "$mdir/results.json" ]; then
+    why=$(grep -v '^[[:space:]]*$' "$OUT/mobile.log" | tail -1 | sed -E 's/^e2e(mobile)?: //')
+    broken mobile "mobile suite did not run: ${why:-exit $rc, see mobile.log}"
+    return
+  fi
+  echo "$rc" >"$OUT/mobile.exit"
+  SUITES+=(mobile)
 }
 
 # start_audio starts a private PipeWire (its own runtime dir under the run, never the user's
@@ -245,5 +314,8 @@ run_voice() {
 case $SUITE in
   web | all) run_web ;;
   voice) run_voice ;;
+esac
+case $SUITE in
+  mobile | all) run_mobile ;;
 esac
 report

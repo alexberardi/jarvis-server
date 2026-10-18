@@ -1,0 +1,13 @@
+{
+  "fallback": "Scripted model: no rule matched that.",
+  "rules": [
+    {
+      "match": "(?i)what is 12 times 7",
+      "reply": "12 times 7 is 84."
+    },
+    {
+      "match": "(?i)\\b(hello|hi|hey)\\b",
+      "reply": "Hello from the scripted model."
+    }
+  ]
+}
