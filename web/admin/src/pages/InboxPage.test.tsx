@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
   bulkDelete: vi.fn(),
   sendNodeAction: vi.fn(),
   unreadCount: vi.fn(),
+  fetchAttachment: vi.fn(),
 }))
 vi.mock('@/api/inbox', async (orig) => ({ ...(await orig<typeof import('@/api/inbox')>()), ...api }))
 vi.mock('@/api/chat', async (orig) => ({ ...(await orig<typeof import('@/api/chat')>()), sendNodeAction: api.sendNodeAction }))
@@ -128,6 +129,47 @@ describe('InboxItemPage (detail)', () => {
     renderAt('/inbox/r1')
     expect(await screen.findByRole('heading', { name: 'Best coffee beans' })).toBeInTheDocument()
     await vi.waitFor(() => expect(screen.getByTestId('badge')).toHaveTextContent('1'))
+  })
+
+  it('shows image attachments and plays video ones, fetched with the session', async () => {
+    const urls: string[] = []
+    URL.createObjectURL = vi.fn(() => {
+      urls.push(`blob:att-${urls.length + 1}`)
+      return urls[urls.length - 1]
+    })
+    URL.revokeObjectURL = vi.fn()
+    api.getInboxItem.mockResolvedValue(
+      it1({
+        is_read: true,
+        attachments: [
+          { id: 'a1', mime: 'image/png', size: 10, width: 640, height: 480, duration_ms: null },
+          { id: 'a2', mime: 'video/mp4', size: 20, width: null, height: null, duration_ms: null },
+          { id: 'a3', mime: 'image/webp', size: 30, width: null, height: null, duration_ms: null },
+        ],
+      }),
+    )
+    api.fetchAttachment.mockImplementation((_item: string, id: string) =>
+      id === 'a3' ? Promise.reject(new Error('404')) : Promise.resolve(new Blob([id])),
+    )
+    renderAt('/inbox/r1')
+    const img = await screen.findByRole('img', { name: 'Attachment 1' })
+    expect(img).toHaveAttribute('src', expect.stringMatching(/^blob:/))
+    expect(img).toHaveAttribute('width', '640')
+    const video = screen.getByLabelText('Attachment 2')
+    expect(video.tagName).toBe('VIDEO')
+    expect(video).toHaveAttribute('controls')
+    expect(video).toHaveAttribute('src', expect.stringMatching(/^blob:/))
+    expect(await screen.findByText('Could not load attachment 3.')).toBeInTheDocument()
+    expect(api.fetchAttachment).toHaveBeenCalledWith('r1', 'a1')
+    expect(api.fetchAttachment).toHaveBeenCalledWith('r1', 'a2')
+  })
+
+  it('has no attachments section for an item without any', async () => {
+    api.getInboxItem.mockResolvedValue(it1({ is_read: true }))
+    renderAt('/inbox/r1')
+    await screen.findByRole('heading', { name: 'Findings' })
+    expect(screen.queryByRole('region', { name: 'Attachments' })).toBeNull()
+    expect(api.fetchAttachment).not.toHaveBeenCalled()
   })
 
   it("runs a confirmation's button on its node", async () => {

@@ -7,6 +7,7 @@
 package blob
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,6 +46,34 @@ type Store interface {
 	// in S3), sorted by key.
 	List(ctx context.Context, prefix string) ([]Info, error)
 }
+
+// Seeker is implemented by stores that can open an object for random access (HTTP Range
+// requests on video). OpenSeeker falls back to reading the object into memory without it.
+type Seeker interface {
+	GetSeeker(ctx context.Context, key string) (io.ReadSeekCloser, Info, error)
+}
+
+// OpenSeeker opens key for random access: through the store's Seeker when it has one,
+// otherwise by reading the whole object into memory. The caller must close it.
+func OpenSeeker(ctx context.Context, s Store, key string) (io.ReadSeekCloser, Info, error) {
+	if sk, ok := s.(Seeker); ok {
+		return sk.GetSeeker(ctx, key)
+	}
+	rc, info, err := s.Get(ctx, key)
+	if err != nil {
+		return nil, Info{}, err
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, Info{}, fmt.Errorf("blob: read %q: %w", key, err)
+	}
+	return nopSeekCloser{bytes.NewReader(b)}, info, nil
+}
+
+type nopSeekCloser struct{ io.ReadSeeker }
+
+func (nopSeekCloser) Close() error { return nil }
 
 // ValidateKey reports whether key is safe to use. Keys are slash-separated; each segment
 // must be non-empty, must not start with "." (which rules out "." and ".." and keeps the

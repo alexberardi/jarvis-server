@@ -22,6 +22,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
+	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
@@ -74,11 +75,12 @@ func jwtSub(id int64) jwt.RegisteredClaims {
 }
 
 type env struct {
-	m   *Module
-	h   http.Handler
-	d   *db.DB
-	q   *queue.Queue
-	ctx context.Context
+	m     *Module
+	blobs *blob.FS
+	h     http.Handler
+	d     *db.DB
+	q     *queue.Queue
+	ctx   context.Context
 }
 
 type opt func(*Module)
@@ -108,13 +110,17 @@ func setup(t *testing.T, opts ...opt) *env {
 	for _, o := range opts {
 		o(m)
 	}
+	blobs, err := blob.NewFS(filepath.Join(t.TempDir(), "blobs"), log)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
-	m.Register(mux, module.Deps{DB: d, Log: log, Queue: q, Scheduler: scheduler.New(d, q, log)})
+	m.Register(mux, module.Deps{DB: d, Log: log, Queue: q, Scheduler: scheduler.New(d, q, log), Blobs: blobs})
 	if err := m.settings.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
 	q.Start(ctx)
-	return &env{m: m, h: mux, d: d, q: q, ctx: ctx}
+	return &env{m: m, blobs: blobs, h: mux, d: d, q: q, ctx: ctx}
 }
 
 func (e *env) do(t *testing.T, method, path, body string, hdr ...string) (int, string) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -351,14 +352,32 @@ func (s *fakeSpeech) Next() ([]byte, error) {
 func (s *fakeSpeech) Close() error { return nil }
 
 type fakeNotifier struct {
-	mu     sync.Mutex
-	items  []notifications.NewInboxItem
-	pushes []notifications.Notification
+	mu      sync.Mutex
+	items   []notifications.NewInboxItem
+	pushes  []notifications.Notification
+	uploads []fakeUpload
+}
+
+type fakeUpload struct{ owner, household, contentType, body string }
+
+// UploadInboxAttachment refuses a body of "bad" as the real one refuses an unknown type.
+func (f *fakeNotifier) UploadInboxAttachment(_ context.Context, owner, household, contentType string, r io.Reader) (notifications.Attachment, error) {
+	b, _ := io.ReadAll(r)
+	if string(b) == "bad" {
+		return notifications.Attachment{}, &notifications.AttachmentError{Status: 415, Detail: "Unsupported attachment type"}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uploads = append(f.uploads, fakeUpload{owner, household, contentType, string(b)})
+	return notifications.Attachment{ID: fmt.Sprintf("att-%d", len(f.uploads)), Mime: contentType, Size: int64(len(b))}, nil
 }
 
 func (f *fakeNotifier) CreateInboxItem(_ context.Context, _ *sql.Tx, in notifications.NewInboxItem) (notifications.InboxItem, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if slices.Contains(in.AttachmentIDs, "bad") {
+		return notifications.InboxItem{}, &notifications.AttachmentError{Status: 422, Detail: "Unknown or already used attachment: bad"}
+	}
 	f.items = append(f.items, in)
 	return notifications.InboxItem{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", len(f.items)), HouseholdID: in.HouseholdID}, nil
 }

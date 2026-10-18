@@ -222,14 +222,21 @@ func (m *Module) runCleanup(ctx context.Context, _ queue.Job) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if logs > 0 || tokens > 0 {
-		m.deps.Log.Info("notifications: cleanup", "logs_pruned", logs, "tokens_deactivated", tokens)
+	blobs, err := m.SweepAttachments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if logs > 0 || tokens > 0 || blobs > 0 {
+		m.deps.Log.Info("notifications: cleanup", "logs_pruned", logs, "tokens_deactivated", tokens, "attachment_blobs_removed", blobs)
 	}
 	return nil, nil
 }
 
 func (m *Module) handleCleanup(w http.ResponseWriter, r *http.Request) {
 	logs, tokens, err := m.Cleanup(r.Context())
+	if err == nil {
+		_, err = m.SweepAttachments(r.Context()) // not reported: the response keeps the legacy shape
+	}
 	if err != nil {
 		m.internalError(w, err)
 		return
