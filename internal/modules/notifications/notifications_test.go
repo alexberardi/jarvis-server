@@ -251,6 +251,7 @@ func TestInboxNonMember(t *testing.T) {
 	for _, mp := range [][3]string{
 		{"GET", "/api/v0/inbox", ""}, {"GET", "/api/v0/inbox/unread-count", ""},
 		{"GET", "/api/v0/inbox/" + hh, ""}, {"PATCH", "/api/v0/inbox/" + hh + "/read", ""}, {"DELETE", "/api/v0/inbox/" + hh, ""},
+		{"GET", "/api/v0/inbox/" + hh + "/attachments/a1", ""},
 		{"POST", "/api/v0/inbox/bulk/read", `{"ids":["` + hh + `"]}`}, {"POST", "/api/v0/inbox/bulk/delete", `{"ids":["` + hh + `"]}`},
 	} {
 		if c, b := e.do(t, mp[0], mp[1], mp[2], gone...); c != 403 || detail(t, b) != "User is not a member of this household" {

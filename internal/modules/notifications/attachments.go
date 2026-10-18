@@ -311,7 +311,7 @@ func (m *Module) handleUploadAttachment(w http.ResponseWriter, r *http.Request) 
 // whoever may see the item (404 for anyone else), with Range support. It does not mark the
 // item read.
 func (m *Module) handleGetAttachment(w http.ResponseWriter, r *http.Request, u authn.User) {
-	if !needHousehold(w, u) {
+	if !m.needHousehold(w, r, u) {
 		return
 	}
 	var hash, typ string
