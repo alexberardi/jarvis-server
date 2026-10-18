@@ -1,15 +1,11 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 
 import { ThemeProvider } from '@/theme/ThemeProvider'
 import { AuthProvider, useAuth } from '@/auth/AuthContext'
-import AppShell from '@/components/layout/AppShell'
-import LoginPage from '@/pages/LoginPage'
-import SetupWizard from '@/pages/SetupWizard'
-import ChangePasswordPage from '@/pages/ChangePasswordPage'
-import { shellRoutes } from '@/routes'
+import { appRoutes } from '@/routes'
 import SessionCacheGuard from '@/auth/SessionCacheGuard'
 import { getSetupState } from '@/api/auth'
 
@@ -45,14 +41,7 @@ export function AppRoutes() {
     return <Navigate to="/setup" replace />
   }
 
-  return (
-    <Routes>
-      <Route path="/setup" element={<SetupWizard needsSuperuser={needsSuperuser} />} />
-      <Route path="/change-password" element={<ChangePasswordPage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route element={<AppShell />}>{shellRoutes()}</Route>
-    </Routes>
-  )
+  return <Routes>{appRoutes(needsSuperuser)}</Routes>
 }
 
 export default function App() {

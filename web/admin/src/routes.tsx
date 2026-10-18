@@ -2,20 +2,24 @@ import type { ReactNode } from 'react'
 import { Navigate, Route } from 'react-router-dom'
 
 import RequireSuperuser from '@/auth/RequireSuperuser'
+import AppShell from '@/components/layout/AppShell'
 import ToAdmin from '@/components/layout/ToAdmin'
 import AccountPage from '@/pages/AccountPage'
 import AddonsPage from '@/pages/AddonsPage'
+import ChangePasswordPage from '@/pages/ChangePasswordPage'
 import ChatPage from '@/pages/ChatPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
 import InboxItemPage from '@/pages/InboxItemPage'
 import InboxPage from '@/pages/InboxPage'
+import LoginPage from '@/pages/LoginPage'
 import LogsPage from '@/pages/LogsPage'
 import ModelsPage from '@/pages/ModelsPage'
 import NodesPage from '@/pages/NodesPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import SettingsPage from '@/pages/SettingsPage'
+import SetupWizard from '@/pages/SetupWizard'
 import TraceDetailPage from '@/pages/TraceDetailPage'
 import TracesPage from '@/pages/TracesPage'
 import UpdatePage from '@/pages/UpdatePage'
@@ -37,6 +41,21 @@ const adminPages: { path: string; element: ReactNode }[] = [
   { path: 'users', element: <UsersPage /> },
   { path: 'update', element: <UpdatePage /> },
 ]
+
+/**
+ * appRoutes is the whole route tree: the pages outside the app shell, then the shell's.
+ * e2e/coverage.json maps each of its paths to the E2E tests covering it (coverage.test.tsx).
+ */
+export function appRoutes(needsSuperuser = false) {
+  return (
+    <>
+      <Route path="/setup" element={<SetupWizard needsSuperuser={needsSuperuser} />} />
+      <Route path="/change-password" element={<ChangePasswordPage />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<AppShell />}>{shellRoutes()}</Route>
+    </>
+  )
+}
 
 /** shellRoutes are the pages inside the app shell: member pages at the root, admin under /admin. */
 export function shellRoutes() {
