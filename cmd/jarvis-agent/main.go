@@ -135,6 +135,8 @@ func main() {
 		err = browserCmd(ctx, os.Args[2:])
 	case "hat":
 		err = hatCmd(ctx, os.Args[2:])
+	case "provision":
+		err = provisionCmd(ctx, os.Args[2:])
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
 	case "island-demo":
@@ -178,6 +180,10 @@ func usage(w io.Writer) {
            [--profile auto|desktop|pi]   pi: a Raspberry Pi voice node, headless, no desktop
            tools (auto: pi on a Pi with the ReSpeaker HAT or with /etc/jarvis-node; also for
            enroll, status and listen)
+  provision  a Pi's setup API for the mobile app (:8080, no authentication: only while the
+           setup hotspot is up), until the node is provisioned
+           --wifi simulated (the NetworkManager backend is still to come) [--listen :8080]
+           [--captive-listen :80] [--ap-ssid SSID] [--creds PATH]
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   install  set the agent up for this user: start at login, the app menu entry (and desktop
@@ -575,6 +581,11 @@ func run(ctx context.Context, args []string) error {
 	if p.desktop {
 		// The browser extension's state is a computer's; a Pi has none to report.
 		r.Capabilities, r.Changed = heartbeatCaps(tools)
+	}
+	if !p.desktop && hat.Detected() {
+		// Before voice opens the mic: the codec may have come back from a boot without the
+		// installer's ADC filter and output levels.
+		hat.HealCodec(ctx, hat.ExecRun, log)
 	}
 	hd := openHat(hf, log)
 	defer hd.Close()

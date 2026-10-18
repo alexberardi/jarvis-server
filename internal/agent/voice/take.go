@@ -76,7 +76,7 @@ func (p *Pipeline) take(ctx context.Context, chunks <-chan []int16, t Take) ([]i
 	defer p.cue(CueIdle, 0)
 	if t.Cue != "" {
 		p.cue(CueSpeaking, 0)
-		if _, err := p.speak(ctx, t.Cue); err != nil {
+		if _, err := p.speak(ctx, t.Cue, nil); err != nil {
 			p.Log.Warn("voice: take cue not said; recording anyway", "err", err)
 		}
 	}
