@@ -132,6 +132,8 @@ type Pipeline struct {
 	// as node_context.stt_vocabulary at each conversation start for whisper's prompt. Never
 	// the LLM's (DESIGN.md §14).
 	Vocabulary func(ctx context.Context) string
+	// Live, when set, lets the node retune and measure this pipeline while it runs (live.go).
+	Live *Live
 	// Mic, when set, is how others record through this pipeline's microphone (take.go).
 	Mic *Mic
 
@@ -150,6 +152,7 @@ type Pipeline struct {
 
 	dropped atomic.Int64
 	ends    sync.WaitGroup
+	tuned   int // Live.tunes applied so far
 }
 
 // Dropped counts captured chunks discarded because the pipeline was busy.
@@ -169,6 +172,11 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	}
 	if p.Log == nil {
 		p.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if p.Live != nil {
+		p.tune()
+		p.Live.attach()
+		defer p.Live.detach()
 	}
 	if p.Mic != nil {
 		p.Mic.attached.Add(1)
@@ -288,8 +296,13 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 	pre := &ring[float64]{n: preWakeChunks}
 	clip := &ring[[]int16]{n: wakeClipChunks}
 	var lastFire time.Time
-	// fresh starts listening again on new audio after a turn or a take: what was captured
-	// meanwhile (our own reply, mostly) is neither scored nor counted as the room's noise floor.
+	var measure chan measureReq
+	if p.Live != nil {
+		measure = p.Live.measure
+	}
+	// fresh starts listening again on new audio after a turn, a take or a room measurement:
+	// what was captured meanwhile (our own reply, mostly) is neither scored nor counted as the
+	// room's noise floor.
 	fresh := func() {
 		flush(chunks)
 		pre.items, clip.items, pend = pre.items[:0], clip.items[:0], pend[:0]
@@ -307,6 +320,13 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 			}
 			fresh()
 			continue
+		case r := <-measure:
+			// Wake detection is paused while the room is measured, then starts afresh.
+			if err := p.measureRoom(ctx, chunks, r); err != nil {
+				return err
+			}
+			fresh()
+			continue
 		case c, ok := <-chunks:
 			if !ok {
 				return context.Canceled // capture stopped (its error is reported by Run)
@@ -315,6 +335,7 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 		case <-ctx.Done():
 			return context.Canceled
 		}
+		p.tune()
 		pre.push(RMS(chunk))
 		clip.push(chunk)
 		pend = dec.Process(chunk, pend)

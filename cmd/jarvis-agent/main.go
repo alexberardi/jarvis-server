@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -590,18 +591,30 @@ func run(ctx context.Context, args []string) error {
 	hd := openHat(hf, log)
 	defer hd.Close()
 	var nodeConfig func() map[string]any
+	var live *voice.Live // the Pi's: the app's settings and noise measurements reach the pipeline
 	if !p.desktop {
-		nodeConfig = piNodeConfig(vf, hf, hd, hat.Detected())
+		live = voice.NewLive()
+		sp, err := settingsPath(*f.config)
+		if err != nil {
+			return err
+		}
+		nodeConfig = wirePiNode(r, vf, hf, hd, live, sp, log)
 	}
 	wireNodeSettings(r, st, tools, nodeConfig, log)
 	wirePackages(r, tf.pkgs, log)
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
 	// toggle turns it on and off while the agent runs (voiceSwitch).
 	sw := newVoiceSwitch(*voiceOn && voice.Supported, log)
-	sw.load = func(ctx context.Context) (*voiceStack, error) { return loadVoice(ctx, vf, log) }
+	sw.load = func(ctx context.Context) (*voiceStack, error) {
+		vs, err := loadVoice(ctx, vf, log)
+		if vs != nil {
+			vs.live = live
+		}
+		return vs, err
+	}
 	// A Pi's voice-profile takes go through the pipeline's microphone (voiceprofile.go).
 	mic := voice.NewMic()
-	r.Verbs = voiceProfileVerbs(p, mic, log)
+	addVerbs(r, voiceProfileVerbs(p, mic, log))
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)
@@ -1092,4 +1105,13 @@ func appsCmd(args []string) error {
 	}
 	fmt.Printf("%s -> %s%s\n", p.App.Name, p.App.Path, how)
 	return nil
+}
+
+// addVerbs gives the runner more command verbs (the Pi's settings verbs, its voice-profile
+// takes), keeping those it has.
+func addVerbs(r *node.Runner, verbs map[string]func(context.Context, *node.CC, map[string]any)) {
+	if r.Verbs == nil {
+		r.Verbs = map[string]func(context.Context, *node.CC, map[string]any){}
+	}
+	maps.Copy(r.Verbs, verbs)
 }

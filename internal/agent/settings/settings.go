@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // FileName is the config file's name in the agent's config dir.
@@ -41,6 +42,11 @@ type Settings struct {
 	VoiceOutput      *string  `json:"voice_output,omitempty"`
 	WakeThreshold    *float64 `json:"wake_threshold,omitempty"`
 	AutoUpdate       *bool    `json:"auto_update,omitempty"`
+	// A Pi node's settings, also written by the app's node settings (update_node_config).
+	FollowUp        *float64 `json:"follow_up,omitempty"`
+	FollowUpSilence *float64 `json:"follow_up_silence,omitempty"`
+	LEDs            *bool    `json:"leds,omitempty"`
+	LEDBrightness   *int     `json:"led_brightness,omitempty"`
 }
 
 // Key describes one setting: its name in the file, the `run` flag it stands for, and whether
@@ -50,7 +56,7 @@ type Key struct {
 	Flag   string
 	Invert bool
 	Help   string
-	field  func(*Settings) any // pointer to the field: **bool, **string or **float64
+	field  func(*Settings) any // pointer to the field: **bool, **string, **float64 or **int
 }
 
 // Keys are every setting, in the order `config show` lists them.
@@ -65,6 +71,10 @@ var Keys = []Key{
 	{"voice_output", "voice-output", false, `speaker: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceOutput }},
 	{"wake_threshold", "wake-threshold", false, "wake word fires above this score (0 to 1)", func(s *Settings) any { return &s.WakeThreshold }},
 	{"auto_update", "no-auto-update", true, "update to the server's version by itself, and accept updates sent from Jarvis Automation", func(s *Settings) any { return &s.AutoUpdate }},
+	{"follow_up", "follow-up", false, "after a reply, listen this many seconds for a follow-up without the wake word (0: off)", func(s *Settings) any { return &s.FollowUp }},
+	{"follow_up_silence", "follow-up-silence", false, "seconds of silence that end a follow-up answer", func(s *Settings) any { return &s.FollowUpSilence }},
+	{"leds", "no-leds", true, "light the ReSpeaker HAT's LEDs (a Pi)", func(s *Settings) any { return &s.LEDs }},
+	{"led_brightness", "led-brightness", false, "HAT LED brightness, percent (0 to 100)", func(s *Settings) any { return &s.LEDBrightness }},
 }
 
 // Lookup finds a key by its name in the file.
@@ -142,6 +152,15 @@ func (s Settings) Validate() error {
 	if s.WakeThreshold != nil && (*s.WakeThreshold <= 0 || *s.WakeThreshold >= 1) {
 		return fmt.Errorf("wake_threshold is %v; use a number between 0 and 1", *s.WakeThreshold)
 	}
+	if s.FollowUp != nil && *s.FollowUp < 0 {
+		return fmt.Errorf("follow_up is %v; use 0 (off) or more seconds", *s.FollowUp)
+	}
+	if s.FollowUpSilence != nil && *s.FollowUpSilence <= 0 {
+		return fmt.Errorf("follow_up_silence is %v; use a number of seconds above 0", *s.FollowUpSilence)
+	}
+	if s.LEDBrightness != nil && (*s.LEDBrightness < 0 || *s.LEDBrightness > 100) {
+		return fmt.Errorf("led_brightness is %d; use 0 to 100", *s.LEDBrightness)
+	}
 	for _, p := range []*string{s.VoiceInput, s.VoiceOutput} {
 		if p != nil && strings.TrimSpace(*p) == "" {
 			return errors.New("voice_input and voice_output can't be empty (unset them for the default device)")
@@ -182,6 +201,25 @@ func Save(path string, s Settings) error {
 	return os.Rename(f.Name(), path)
 }
 
+// updateMu serializes this process's read-modify-writes of the file: the voice toggle and
+// the app's node settings may write it at the same time.
+var updateMu sync.Mutex
+
+// Update loads the file, lets change edit it, and saves it (Validate still applies), one
+// caller at a time.
+func Update(path string, change func(*Settings) error) error {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	s, _, err := Load(path)
+	if err != nil {
+		return err
+	}
+	if err := change(&s); err != nil {
+		return err
+	}
+	return Save(path, s)
+}
+
 // Get is the value of key as text ("" when unset).
 func (s *Settings) Get(k Key) (string, bool) {
 	switch p := k.field(s).(type) {
@@ -196,6 +234,10 @@ func (s *Settings) Get(k Key) (string, bool) {
 	case **float64:
 		if *p != nil {
 			return strconv.FormatFloat(**p, 'g', -1, 64), true
+		}
+	case **int:
+		if *p != nil {
+			return strconv.Itoa(**p), true
 		}
 	}
 	return "", false
@@ -218,6 +260,12 @@ func (s *Settings) Set(k Key, value string) error {
 			return fmt.Errorf("%s takes a number, not %q", k.Name, value)
 		}
 		*p = &f
+	case **int:
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("%s takes a whole number, not %q", k.Name, value)
+		}
+		*p = &n
 	}
 	return s.Validate()
 }
@@ -230,6 +278,8 @@ func (s *Settings) Unset(k Key) {
 	case **string:
 		*p = nil
 	case **float64:
+		*p = nil
+	case **int:
 		*p = nil
 	}
 }
