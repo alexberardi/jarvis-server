@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# End-to-end regression: brings up its own sandboxes, runs the suites against them, writes a
+# report and takes the sandboxes down again. Run on demand (docs/dev/e2e.md).
+#
+#   scripts/e2e [web|mobile|all] [--filter RE] [--keep] [--name N]
+#
+#   web      the admin SPA (Playwright, e2e/web/)
+#   mobile   the mobile app: not yet (E2E 4/9, loop item #144); exits 2
+#   all      every suite there is (default); mobile is reported as not run until it exists
+#   --filter RE  run only the tests whose title matches RE (Playwright --grep)
+#   --keep   leave the sandboxes up afterwards (scripts/sandbox down --name N --purge, and
+#            N-setup, to remove them by hand); without it they are purged
+#   --name N the sandbox name (default e2e-<run>); the setup wizard's empty sandbox is N-setup
+#
+# The sandboxes: N is `scripts/sandbox up --profile rich --llm scripted --ui` (the seeded
+# household, every role's login, the scripted model); N-setup is `--profile empty`, an install
+# whose first-run setup is still to do, for the wizard. Writes .e2e/<run>/report.md and
+# report.json (per test: status, time, error, failure screenshots, trace, console errors), with
+# each suite's own files under .e2e/<run>/<suite>/. Exits 1 when any test failed or a suite
+# could not run.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+say() { echo "e2e: $*" >&2; }
+die() { say "$*"; exit 1; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; }
+
+SUITE=all FILTER='' KEEP=0 NAME=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    web|mobile|all) SUITE=$1; shift ;;
+    --filter) FILTER=$2; shift 2 ;;
+    --keep) KEEP=1; shift ;;
+    --name) NAME=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument $1" ;;
+  esac
+done
+if [ "$SUITE" = mobile ]; then
+  say "the mobile suite is not there yet (E2E 4/9, loop item #144)"
+  exit 2
+fi
+
+RUN=$(date +%Y%m%d-%H%M%S)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')
+NAME=${NAME:-e2e-$RUN}
+[ "$NAME" != default ] || die "--name default is the shared sandbox; pick another name"
+SETUP=$NAME-setup
+OUT=$ROOT/.e2e/$RUN
+mkdir -p "$OUT"
+STARTED=$(date -Iseconds)
+
+# shellcheck disable=SC2329 # run by the trap
+cleanup() {
+  if [ "$KEEP" = 1 ]; then
+    say "kept: scripts/sandbox down --name $NAME --purge; scripts/sandbox down --name $SETUP --purge"
+  else
+    "$ROOT/scripts/sandbox" down --name "$NAME" --purge >/dev/null 2>&1 || true
+    "$ROOT/scripts/sandbox" down --name "$SETUP" --purge >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+say "run $RUN: sandboxes $NAME and $SETUP (logs in $OUT/sandbox-*.log)"
+"$ROOT/scripts/sandbox" down --name "$SETUP" --purge >/dev/null 2>&1 || true # empty means empty
+SUITES=()
+# report writes report.json and report.md from what the suites left, and exits with its verdict.
+report() {
+  python3 "$ROOT/scripts/lib/e2e_report.py" --out "$OUT" --run "$RUN" --sandbox "$NAME" --started "$STARTED" \
+    --filter "$FILTER" --requested "$SUITE" "${SUITES[@]}"
+  exit $?
+}
+# broken: a suite could not run at all (its report entry says why).
+broken() {
+  say "$2"
+  mkdir -p "$OUT/$1"
+  echo "$2" >"$OUT/$1/error.txt"
+  echo 1 >"$OUT/$1.exit"
+  SUITES+=("$1")
+}
+
+up() { # name, then scripts/sandbox up's flags
+  local n=$1
+  shift
+  "$ROOT/scripts/sandbox" up --name "$n" "$@" >"$OUT/sandbox-$n.log" 2>&1 && return
+  tail -20 "$OUT/sandbox-$n.log" >&2
+  broken web "sandbox $n did not come up (sandbox-$n.log)"
+  report
+}
+up "$NAME" --profile rich --llm scripted --ui
+up "$SETUP" --profile empty --llm scripted
+
+run_web() {
+  local dir=$ROOT/e2e/web rc=0
+  command -v node >/dev/null || { broken web "node is not on PATH"; return; }
+  if [ ! -d "$dir/node_modules/@playwright/test" ]; then
+    say "installing Playwright (e2e/web)"
+    npm --prefix "$dir" ci --silent || { broken web "npm ci in e2e/web failed"; return; }
+  fi
+  # Chromium for this Playwright version, unless it is in the cache already.
+  if ! (cd "$dir" && node -e "const fs=require('fs');process.exit(fs.existsSync(require('playwright-core').chromium.executablePath())?0:1)"); then
+    say "installing Chromium for Playwright"
+    (cd "$dir" && npx --no-install playwright install chromium >/dev/null) || { broken web "playwright install chromium failed"; return; }
+  fi
+  mkdir -p "$OUT/web"
+  say "web: running"
+  (
+    # shellcheck disable=SC1090
+    source "$ROOT/.sandbox/$NAME/sandbox.env"
+    # shellcheck disable=SC1090
+    E2E_SETUP_ADMIN=$(. "$ROOT/.sandbox/$SETUP/sandbox.env" && echo "$SBX_ADMIN")
+    # shellcheck disable=SC1090
+    E2E_SETUP_TOKEN=$(. "$ROOT/.sandbox/$SETUP/sandbox.env" && echo "$SBX_SETUP_TOKEN")
+    export E2E_SETUP_ADMIN E2E_SETUP_TOKEN E2E_OUT=$OUT/web
+    cd "$dir"
+    npx --no-install playwright test ${FILTER:+--grep "$FILTER"}
+  ) 2>&1 | tee "$OUT/web.log" || rc=$?
+  echo "$rc" >"$OUT/web.exit"
+  SUITES+=(web)
+}
+
+case $SUITE in
+  web | all) run_web ;;
+esac
+report

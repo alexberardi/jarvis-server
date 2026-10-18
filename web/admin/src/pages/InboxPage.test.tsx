@@ -6,6 +6,13 @@ import { AuthProvider } from '@/auth/AuthContext'
 import type { InboxItem } from '@/api/inbox'
 import InboxPage from './InboxPage'
 import InboxItemPage from './InboxItemPage'
+import { useUnreadCount } from '@/hooks/useInbox'
+
+/** The sidebar's unread badge, as Sidebar.tsx reads it. */
+function Badge() {
+  const unread = useUnreadCount()
+  return <output data-testid="badge">{unread.data ?? ''}</output>
+}
 
 const api = vi.hoisted(() => ({
   listInbox: vi.fn(),
@@ -15,6 +22,7 @@ const api = vi.hoisted(() => ({
   bulkRead: vi.fn(),
   bulkDelete: vi.fn(),
   sendNodeAction: vi.fn(),
+  unreadCount: vi.fn(),
 }))
 vi.mock('@/api/inbox', async (orig) => ({ ...(await orig<typeof import('@/api/inbox')>()), ...api }))
 vi.mock('@/api/chat', async (orig) => ({ ...(await orig<typeof import('@/api/chat')>()), sendNodeAction: api.sendNodeAction }))
@@ -41,6 +49,7 @@ function renderAt(path: string) {
     <QueryClientProvider client={qc}>
       <AuthProvider>
         <MemoryRouter initialEntries={[path]}>
+          <Badge />
           <Routes>
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/inbox/:id" element={<InboxItemPage />} />
@@ -58,6 +67,7 @@ beforeEach(() => {
   localStorage.setItem('jarvis-admin:refresh_token', 'r')
   localStorage.setItem('jarvis-admin:user', JSON.stringify({ id: 7, email: 'm@example.com', is_superuser: false }))
   api.markRead.mockResolvedValue(undefined)
+  api.unreadCount.mockResolvedValue(0)
   api.bulkRead.mockResolvedValue(undefined)
   api.bulkDelete.mockResolvedValue(undefined)
 })
@@ -109,6 +119,15 @@ describe('InboxItemPage (detail)', () => {
     expect(src).toHaveAttribute('rel', expect.stringContaining('noopener'))
     expect(screen.getByText(/Researched in 42s · 5\/6 pages/)).toBeInTheDocument()
     expect(api.markRead).toHaveBeenCalledWith('r1')
+  })
+
+  it('refreshes the unread badge when opening the item read it on the server', async () => {
+    // GET /inbox/{id} marks the item read itself (legacy parity), so it arrives already read.
+    api.unreadCount.mockResolvedValueOnce(2).mockResolvedValue(1)
+    api.getInboxItem.mockResolvedValue(it1({ is_read: true }))
+    renderAt('/inbox/r1')
+    expect(await screen.findByRole('heading', { name: 'Best coffee beans' })).toBeInTheDocument()
+    await vi.waitFor(() => expect(screen.getByTestId('badge')).toHaveTextContent('1'))
   })
 
   it("runs a confirmation's button on its node", async () => {

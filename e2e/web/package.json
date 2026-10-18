@@ -1,0 +1,16 @@
+{
+  "name": "jarvis-e2e-web",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "module",
+  "description": "End-to-end tests of the admin SPA on a scripts/sandbox instance (scripts/e2e web)",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
