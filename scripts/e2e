@@ -2,24 +2,35 @@
 # End-to-end regression: brings up its own sandboxes, runs the suites against them, writes a
 # report and takes the sandboxes down again. Run on demand (docs/dev/e2e.md).
 #
-#   scripts/e2e [web|mobile|all] [--filter RE] [--keep] [--name N] [--mobile-repo PATH]
+#   scripts/e2e [web|mobile|all|voice] [--filter RE] [--keep] [--name N] [--mobile-repo PATH]
+#               [--llm shared|scripted] [--audio wav|pipewire] [--repeat N] [--agent-arg FLAG]
 #
 #   web      the admin SPA (Playwright, e2e/web/)
 #   mobile   the mobile app: the Maestro flows of jarvis-node-mobile's .maestro/ on a headless
 #            harness emulator (scripts/lib/mobile.sh), logged in to the sandbox
-#   all      every suite (default)
+#   all      every suite but voice (default)
+#   voice    the virtual node voice lane (tools/voicelane, e2e/voice/cases.json): the real
+#            jarvis-agent (--profile pi) hears TTS and its spoken replies are transcribed and
+#            checked; only when asked, since it takes the real model and minutes
 #   --filter RE  run only the tests whose title matches RE (Playwright --grep; for mobile, the
-#            flow's name or file name)
+#            flow's name or file name; voice: case names)
 #   --mobile-repo PATH  the jarvis-node-mobile checkout or worktree whose HEAD commit gives the
 #            APK and the flows (to test a branch); default: origin/main of $JARVIS_MOBILE_REPO
 #            (or ../jarvis-node-mobile), fetched first
 #   --keep   leave the sandboxes up afterwards (scripts/sandbox down --name N --purge, and
 #            N-setup, to remove them by hand); without it they are purged
 #   --name N the sandbox name (default e2e-<run>); the setup wizard's empty sandbox is N-setup
+#   --llm    voice: the model, shared (the real one through the tap, default) or scripted
+#            (e2e/llm/voice.json, to check the lane itself)
+#   --audio  voice: wav (WAV files as the node's mic and speaker, default) or pipewire (a
+#            private PipeWire's virtual mic and speaker, never the user's audio session)
+#   --repeat voice: runs of each model-dependent case (default 3)
+#   --agent-arg  voice: an extra `jarvis-agent listen` flag, repeatable (--agent-arg=--wake-threshold=0.6)
 #
 # The sandboxes: N is `scripts/sandbox up --profile rich --llm scripted --ui` (the seeded
 # household, every role's login, the scripted model); N-setup is `--profile empty`, an install
-# whose first-run setup is still to do, for the wizard. Writes .e2e/<run>/report.md and
+# whose first-run setup is still to do, for the wizard. The voice suite has only N, as
+# `--profile rich --voice --llm shared|scripted`. Writes .e2e/<run>/report.md and
 # report.json (per test: status, time, error, failure screenshots, trace, console errors), with
 # each suite's own files under .e2e/<run>/<suite>/. Exits 1 when any test failed or a suite
 # could not run.
@@ -28,20 +39,28 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 say() { echo "e2e: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
 
-SUITE=all FILTER='' KEEP=0 NAME='' MOBILE_REPO_ARG=''
+SUITE=all FILTER='' KEEP=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=()
 while [ $# -gt 0 ]; do
   case $1 in
-    web|mobile|all) SUITE=$1; shift ;;
+    web|mobile|all|voice) SUITE=$1; shift ;;
     --filter) FILTER=$2; shift 2 ;;
     --keep) KEEP=1; shift ;;
     --name) NAME=$2; shift 2 ;;
     --mobile-repo) MOBILE_REPO_ARG=$(cd "$2" && pwd) || die "--mobile-repo: no directory $2"; shift 2 ;;
+    --llm) VLLM=$2; shift 2 ;;
+    --audio) AUDIO=$2; shift 2 ;;
+    --repeat) REPEAT=$2; shift 2 ;;
+    --agent-arg) AGENT_ARGS+=("--agent-arg=$2"); shift 2 ;;
+    --agent-arg=*) AGENT_ARGS+=("--agent-arg=${1#--agent-arg=}"); shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument $1" ;;
   esac
 done
+case $VLLM in shared | scripted) ;; *) die "--llm: shared or scripted" ;; esac
+case $AUDIO in wav | pipewire) ;; *) die "--audio: wav or pipewire" ;; esac
+case $REPEAT in '' | *[!0-9]* | 0) die "--repeat: a positive number" ;; esac
 
 RUN=$(date +%Y%m%d-%H%M%S)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')
 NAME=${NAME:-e2e-$RUN}
@@ -51,8 +70,10 @@ OUT=$ROOT/.e2e/$RUN
 mkdir -p "$OUT"
 STARTED=$(date -Iseconds)
 
+AUDIO_PIDS=()
 # shellcheck disable=SC2329 # run by the trap
 cleanup() {
+  if [ ${#AUDIO_PIDS[@]} -gt 0 ]; then kill "${AUDIO_PIDS[@]}" 2>/dev/null || true; fi
   if [ "$KEEP" = 1 ]; then
     say "kept: scripts/sandbox down --name $NAME --purge; scripts/sandbox down --name $SETUP --purge"
   else
@@ -62,8 +83,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ "$SUITE" = mobile ]; then say "run $RUN: sandbox $NAME (log in $OUT/sandbox-$NAME.log)"; else say "run $RUN: sandboxes $NAME and $SETUP (logs in $OUT/sandbox-*.log)"; fi
-"$ROOT/scripts/sandbox" down --name "$SETUP" --purge >/dev/null 2>&1 || true # empty means empty
 SUITES=()
 # report writes report.json and report.md from what the suites left, and exits with its verdict.
 report() {
@@ -80,19 +99,40 @@ broken() {
   SUITES+=("$1")
 }
 
-up() { # name, then scripts/sandbox up's flags
-  local n=$1
-  shift
+up() { # suites (space-separated), name, then scripts/sandbox up's flags
+  local suites=$1 n=$2
+  shift 2
   "$ROOT/scripts/sandbox" up --name "$n" "$@" >"$OUT/sandbox-$n.log" 2>&1 && return
   tail -20 "$OUT/sandbox-$n.log" >&2
   local s
-  for s in web mobile; do
+  for s in $suites; do
     case $SUITE in "$s" | all) broken "$s" "sandbox $n did not come up (sandbox-$n.log)" ;; esac
   done
   report
 }
-up "$NAME" --profile rich --llm scripted --ui
-[ "$SUITE" = mobile ] || up "$SETUP" --profile empty --llm scripted # only the web suite's wizard test uses it
+
+CACHE=${JARVIS_HARNESS_CACHE:-$HOME/.cache/jarvis-harness}
+# seed_whisper puts a whisper-server build seeded in the harness cache (the CPU release jarvisd
+# would fetch, extracted: $CACHE/engines/whisper-b5454-bin-ubuntu-x64/) where the sandbox's
+# jarvisd installs it, for a box that can't reach GitHub's release CDN. Without one jarvisd
+# fetches it as usual.
+seed_whisper() {
+  local src=$CACHE/engines/whisper-b5454-bin-ubuntu-x64 dst=$ROOT/.sandbox/$1/home/engines/whisper-server/b5454-cpu
+  [ -x "$src/whisper-server" ] && [ ! -e "$dst" ] || return 0
+  mkdir -p "$dst" && cp -r "$src/." "$dst/" && touch "$dst/.jarvis-complete"
+}
+
+if [ "$SUITE" = voice ]; then
+  say "run $RUN: sandbox $NAME (voice, --llm $VLLM, --audio $AUDIO; log in $OUT/sandbox-$NAME.log)"
+  "$ROOT/scripts/sandbox" down --name "$NAME" --purge >/dev/null 2>&1 || true # a fresh household
+  seed_whisper "$NAME"
+  up voice "$NAME" --profile rich --voice --llm "$VLLM"
+else
+  if [ "$SUITE" = mobile ]; then say "run $RUN: sandbox $NAME (log in $OUT/sandbox-$NAME.log)"; else say "run $RUN: sandboxes $NAME and $SETUP (logs in $OUT/sandbox-*.log)"; fi
+  "$ROOT/scripts/sandbox" down --name "$SETUP" --purge >/dev/null 2>&1 || true # empty means empty
+  up "web mobile" "$NAME" --profile rich --llm scripted --ui
+  [ "$SUITE" = mobile ] || up web "$SETUP" --profile empty --llm scripted # only the web suite's wizard test uses it
+fi
 
 run_web() {
   local dir=$ROOT/e2e/web rc=0
@@ -122,7 +162,6 @@ run_web() {
   echo "$rc" >"$OUT/web.exit"
   SUITES+=(web)
 }
-
 
 # run_mobile plays the mobile app's Maestro flows on a disposable harness emulator, logged in to
 # $NAME (docs/decisions/2026-10-18-e2e-mobile-runner.md). Everything that can die runs in a
@@ -188,8 +227,71 @@ run_mobile() {
   SUITES+=(mobile)
 }
 
+# start_audio starts a private PipeWire (its own runtime dir under the run, never the user's
+# session) with a virtual speaker (e2e_speaker, a null sink whose monitor is recorded) and a
+# virtual mic (e2e_mic, a virtual source the cases are played into), both the defaults. The
+# environment it exports reaches the node, pw-play and pw-record, and nothing else.
+start_audio() {
+  local rt=$OUT/voice/rt log=$OUT/voice/pipewire.log tool
+  for tool in pipewire wireplumber pw-cli pw-dump pw-metadata pw-play pw-record; do
+    command -v "$tool" >/dev/null || { echo "$tool is not installed"; return 1; }
+  done
+  mkdir -p "$rt" && chmod 700 "$rt"
+  export XDG_RUNTIME_DIR=$rt PIPEWIRE_RUNTIME_DIR=$rt JARVIS_E2E_AUDIO=private
+  unset PIPEWIRE_REMOTE PULSE_SERVER PULSE_RUNTIME_PATH DBUS_SESSION_BUS_ADDRESS
+  [ "$XDG_RUNTIME_DIR" != "/run/user/$(id -u)" ] || { echo "refusing the user's own runtime dir"; return 1; }
+  pipewire >"$log" 2>&1 &
+  AUDIO_PIDS+=($!)
+  for _ in $(seq 1 50); do [ -S "$rt/pipewire-0" ] && break; sleep 0.1; done
+  [ -S "$rt/pipewire-0" ] || { echo "pipewire did not start (voice/pipewire.log)"; return 1; }
+  wireplumber >>"$log" 2>&1 &
+  AUDIO_PIDS+=($!)
+  if ! pw-cli create-node adapter '{ factory.name = support.null-audio-sink node.name = e2e_speaker media.class = Audio/Sink audio.position = [ MONO ] object.linger = true }' >>"$log" 2>&1 ||
+    ! pw-cli create-node adapter '{ factory.name = support.null-audio-sink node.name = e2e_mic media.class = Audio/Source/Virtual audio.position = [ MONO ] object.linger = true }' >>"$log" 2>&1; then
+    echo "creating the virtual devices failed (voice/pipewire.log)"
+    return 1
+  fi
+  pw-metadata 0 default.configured.audio.sink '{ "name": "e2e_speaker" }' >>"$log" 2>&1
+  pw-metadata 0 default.configured.audio.source '{ "name": "e2e_mic" }' >>"$log" 2>&1
+  for _ in $(seq 1 50); do
+    pw-dump 2>/dev/null | grep -q '"node.name": "e2e_mic"' && return 0
+    sleep 0.1
+  done
+  echo "the virtual mic did not appear (voice/pipewire.log)"
+  return 1
+}
+
+run_voice() {
+  local dir=$OUT/voice rc=0 wake=()
+  mkdir -p "$dir/bin"
+  say "voice: building jarvis-agent and tools/voicelane"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -o "$dir/bin/jarvis-agent" ./cmd/jarvis-agent &&
+    CGO_ENABLED=0 go build -o "$dir/bin/voicelane" ./tools/voicelane) >"$dir/build.log" 2>&1 ||
+    { broken voice "building jarvis-agent or tools/voicelane failed (voice/build.log)"; return; }
+  # Wake models seeded in the cache keep the run offline; else the node fetches them once into
+  # its own cache under the run.
+  if [ -f "$CACHE/openwakeword/hey_jarvis_v0.1.onnx" ]; then wake=(--wake-models "$CACHE/openwakeword"); fi
+  if [ "$VLLM" = scripted ]; then
+    # shellcheck disable=SC1090
+    (source "$ROOT/.sandbox/$NAME/sandbox.env" && curl -sf -X POST "$SBX_SCRIPTLLM/control/script" \
+      -H 'Content-Type: application/json' -d '{"path": "e2e/llm/voice.json"}' >/dev/null) ||
+      { broken voice "could not switch the scripted model to e2e/llm/voice.json"; return; }
+  fi
+  if [ "$AUDIO" = pipewire ]; then
+    # Not in a subshell: its exports and PIDs are this script's.
+    start_audio >"$dir/audio-error.txt" || { broken voice "private PipeWire: $(cat "$dir/audio-error.txt")"; return; }
+  fi
+  say "voice: running (--audio $AUDIO, --repeat $REPEAT)"
+  (cd "$ROOT" && "$dir/bin/voicelane" --root "$ROOT" --sandbox "$NAME" --cases e2e/voice/cases.json --out "$dir" \
+    --rel voice --agent "$dir/bin/jarvis-agent" --audio "$AUDIO" --repeat "$REPEAT" "${wake[@]}" "${AGENT_ARGS[@]}" \
+    ${FILTER:+--filter "$FILTER"}) 2>&1 | tee "$OUT/voice.log" || rc=$?
+  echo "$rc" >"$OUT/voice.exit"
+  SUITES+=(voice)
+}
+
 case $SUITE in
   web | all) run_web ;;
+  voice) run_voice ;;
 esac
 case $SUITE in
   mobile | all) run_mobile ;;

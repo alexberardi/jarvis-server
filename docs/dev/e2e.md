@@ -28,7 +28,7 @@ Exit status: 0 when every test passed, 1 when one failed or a suite could not ru
   `scripts/e2e mobile` does not bring it up.
 
 Both are purged afterwards (`scripts/sandbox down --purge`) unless `--keep`. A run takes about
-2 minutes on the dev box (build, seed, ~45 browser tests).
+2 minutes on the dev box (build, seed, ~70 browser tests).
 
 ## The report
 
@@ -111,6 +111,15 @@ one auth rate limit.
 | `addons.spec.ts` | the page's sections; a paired desktop agent is listed; signing it out removes it on the server |
 | `household.spec.ts` | the switcher appears with two households; the inbox and the chat devices follow the pick, across a reload; no switcher with one |
 | `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
+| `admin/dashboard.spec.ts` | System card = `/api/system/info`; no Restart when unsupervised; Stop asks and Cancel leaves jarvisd up (stop is never sent); "Finish setup" vs "Voice isn't ready" banner from `setup.completed`, the latter naming the missing jobs and leading to their models; no update or GPU banner without their state |
+| `admin/models.spec.ts` | every catalog model listed; Install asks and nothing downloads; a job's Set up narrows the catalog to its kind, Show all restores it; a model assigned to the live label is saved (server and page, across a reload; background follows). Skipped: Hugging Face installs |
+| `admin/settings.spec.ts` | a household's own value of a household setting: edited, saved on the server, kept across a reload; Use default removes it; the default untouched |
+| `admin/connections.spec.ts` | listeners and external services with their health as the server has it; an app client created here: its key (shown once) authenticates, Rotate replaces it, Revoke stops it |
+| `admin/logs.spec.ts` | lines sent through jarvis-logs' ingest found with the module, text and level filters; context opens; no match says so |
+| `admin/traces.spec.ts` | a chat turn becomes a trace: on the dashboard's recent requests, in the list, and its detail is that turn |
+| `admin/nodes.spec.ts` | a pairing computer approved into a household (it then registers and is listed), another denied (told so, gone); a signed-out node behind Show signed-out nodes. Skipped: rename/remove (not in the web admin) |
+| `admin/users.spec.ts` | every account with households, roles and badges; a generated and a chosen temporary password both sign the user in to the forced change; a deactivated account (seeded) marked and not resettable. Skipped: invite, role change, disable (mobile only in v1) |
+| `admin/update.spec.ts` | checks off: says so, the running version, no update offered; the switch saved on the server both ways; apply is blocked throughout. Skipped: an available update and applying it |
 
 ### Writing a test
 
@@ -125,6 +134,11 @@ one auth rate limit.
 - Login, register and refresh share one per-IP limit of 30 a minute and every test comes from
   127.0.0.1. `asUser` starts from the registration's session instead of the form; the form is
   `auth.spec.ts`'s. A 429 waits the minute out once (the test timeout allows it).
+- Never stop, restart or update the shared sandbox, and put back any install-wide setting a
+  test changes; what each admin page's test leaves out, and why:
+  [`../decisions/2026-10-17-e2e-admin-pages.md`](../decisions/2026-10-17-e2e-admin-pages.md).
+- A form sign-in that should succeed: fill it, then `pressSignIn(page)` (`helpers/login.ts`), which
+  waits out the rate limit once.
 - Chat answers come from `e2e/llm/web.json` (`useScript` switches it); add a rule there for a
   new conversation, and match on the user's words.
 - Run one file against a kept sandbox while writing it:
@@ -153,3 +167,64 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `~/.cache/jarvis-harness/maestro/2.11.0/maestro/bin/maestro --device emulator-<port> test
   -e EMAIL=… -e PASSWORD=… .maestro/my-flow.yaml`), then the whole suite with
   `scripts/e2e mobile --mobile-repo <checkout> --filter my-flow`.
+
+## The voice lane (`scripts/e2e voice`)
+
+The real node software hears spoken commands and its spoken replies are checked. Why it is
+built this way: [`../decisions/2026-10-17-e2e-voice-lane.md`](../decisions/2026-10-17-e2e-voice-lane.md).
+`all` does not include it: it takes the real model and a few minutes.
+
+```sh
+scripts/e2e voice                          # the real model through the tap, WAV files as mic and speaker
+scripts/e2e voice --llm scripted           # the lane itself, on e2e/llm/voice.json (no installed jarvisd)
+scripts/e2e voice --audio pipewire         # a private PipeWire's virtual mic and speaker (barge-in too)
+scripts/e2e voice --filter 'timer|silent' --repeat 1
+scripts/e2e voice --agent-arg=--wake-threshold=0.6   # any extra `jarvis-agent listen` flag
+```
+
+It brings up one sandbox, `scripts/sandbox up --profile rich --voice --llm shared|scripted`,
+builds `cmd/jarvis-agent` and `tools/voicelane`, and runs every case in
+`e2e/voice/cases.json` against `jarvis-agent listen --profile pi`, which has its own `HOME`
+and XDG dirs under the run and the sandbox's seeded node identity. Per case:
+
+1. The mic's audio: the sandbox's TTS says the case's lines (`say`), with silence and generated
+   noise (`noise`: `pink` or `music`; `over` mixes a part over the end of the ones before it).
+2. The node hears it: wake word, endpointing, speech-to-text and the voice turn through cc,
+   the model, TTS, and the reply played to its speaker, which is recorded.
+3. The sandbox's whisper transcribes the recording, and the case checks `expect`: `outcome`
+   (default `spoken`), `reply` (a regexp on the transcript), `tool` (called by the model, from
+   the run's new `llm.jsonl` lines, or run by the node), `max_secs` (the response time), or
+   `silent` (no turn, no reply audio, no model call).
+
+`model: true` cases run `--repeat` times (default 3) and pass only when every run does. Read
+them by the regressions-only rule: a regression is 3/3 on main and 0/3 on the change. `needs:
+pipewire` cases (barge-in) are skipped with `--audio wav`, whose speaker is written at once.
+
+| case | checks |
+|---|---|
+| wake + timer | "Hey Jarvis. Set a timer for five minutes." gets a spoken reply about the timer (the Go Pi node has no timer tool yet) |
+| lights | "…Turn on the kitchen lights." gets a reply about the lights (no `control_device` for this node yet) |
+| a question | "…How many days are there in a week?" is answered seven |
+| the time, through the clock tool | "…What time is it?" calls `get_current_time` and says a time |
+| no wake word stays silent | the timer and lights commands without "Hey Jarvis" |
+| background noise stays silent | 8 s of pink noise |
+| music with talk over it stays silent | a chord loop with a sentence spoken over it |
+| barge-in stops a long reply | "Hey Jarvis" over a long story ends the turn `interrupted` (`--audio pipewire` only) |
+
+What it leaves under `.e2e/<run>/`: `voice/results.json` (the report's test shape plus each
+case's `runs`: the turn, the reply heard, the response time, the model's calls and tools, the
+failures), `voice/cases/<case>/run-N/` (`utterance.wav`, `reply.wav`, `agent.log`, `run.json`;
+`report.md` lists them under a failure), `voice.log`, and with PipeWire `voice/pipewire.log`
+and `voice/agent.log` (the one long node).
+
+- **Offline caches.** A box that can't reach GitHub's release CDN can seed
+  `$JARVIS_HARNESS_CACHE` (default `~/.cache/jarvis-harness`) with
+  `engines/whisper-b5454-bin-ubuntu-x64/` (the extracted CPU whisper-server release jarvisd
+  fetches; copied into the sandbox before it starts) and `openwakeword/` (the three wake models,
+  checked against their pinned SHA-256). Without them jarvisd and the node download as usual.
+- **PipeWire** needs `pipewire`, `wireplumber`, `pw-cli`, `pw-dump`, `pw-metadata`, `pw-play`,
+  `pw-record` and alsa-lib's `pipewire` PCM (`/etc/alsa/conf.d/50-pipewire.conf`). It runs with
+  `XDG_RUNTIME_DIR` and `PIPEWIRE_RUNTIME_DIR` set to `.e2e/<run>/voice/rt`, the pulse and
+  session-bus variables unset, and is killed when the run ends.
+- **A new case** goes in `e2e/voice/cases.json` (unknown keys are an error); with
+  `--llm scripted` it needs a rule in `e2e/llm/voice.json` too.
