@@ -130,6 +130,9 @@ type Target struct {
 	Exe string
 	// Bundle is the macOS app Exe runs from ("…/X.app"), "" when it is a bare binary.
 	Bundle string
+	// Pi: Exe is the Pi node's agent in /opt/jarvis-agent, run by its system unit
+	// (install-pi.sh). The update is the same; the restart is the unit's (install.Restart).
+	Pi bool
 }
 
 // Updater stages and installs agent releases.
@@ -236,7 +239,10 @@ func (u *Updater) writable() error {
 	f, err := os.CreateTemp(dir, ".jarvis-agent-write-check-*")
 	if err != nil {
 		hint := ""
-		if u.Target.GOOS == "linux" {
+		switch {
+		case u.Target.Pi:
+			hint = " (run install-pi.sh again: it gives " + dir + " to the node's user, so the agent updates itself)"
+		case u.Target.GOOS == "linux":
 			hint = " (run `jarvis-agent install`: it sets the agent up in ~/.local/lib/jarvis-agent, which updates itself)"
 		}
 		return fmt.Errorf("%w: %s isn't writable here%s", ErrNotWritable, what, hint)

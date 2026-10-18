@@ -2,7 +2,7 @@
 """Merges each suite's results.json in an scripts/e2e run into report.json and report.md.
 
 A suite writes <out>/<suite>/results.json ({"suite", "status", "duration_ms", "tests": [...]},
-one record per test, e2e/web/reporter.ts) and scripts/e2e writes <out>/<suite>.exit. The
+one record per test, e2e/web/reporter.ts and tools/e2emobile) and scripts/e2e writes <out>/<suite>.exit. The
 report.json schema is in docs/dev/e2e.md; loop item #149 reads it, so keep it stable (add
 fields, don't rename them). Exits 1 when a test failed or a suite did not run to the end.
 """
@@ -15,6 +15,7 @@ import sys
 
 FAILED = {"failed", "timedOut", "interrupted"}
 KNOWN = ("web", "mobile")
+COVERAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "e2e", "coverage.json")
 
 
 def git(*args: str) -> str:
@@ -60,6 +61,61 @@ def counts(tests: list[dict]) -> dict:
     return c
 
 
+def kind(e: dict) -> str:
+    return "covered" if e.get("tests") or e.get("flows") else "manual" if e.get("manual") else "pending" if e.get("pending") else "invalid"
+
+
+def load_coverage(out: str, path: str = COVERAGE) -> dict | None:
+    """The coverage gate's state (docs/decisions/2026-10-18-e2e-coverage-gate.md): per side, the
+    entries of e2e/coverage.json by kind. The web side's routes are checked in CI
+    (web/admin/src/coverage.test.tsx); the mobile side's screens by the mobile suite, whose
+    <out>/mobile/coverage.json adds the missing, stale and invalid entries when it ran."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            cov = json.load(f)
+    except (OSError, ValueError):
+        return None
+    res = {}
+    for side in ("web", "mobile"):
+        entries = cov.get(side, {})
+        c = {"entries": len(entries), "covered": [], "manual": [], "pending": [], "invalid": [],
+             "missing": None, "stale": None, "checked_by": "CI (web/admin/src/coverage.test.tsx)" if side == "web" else None}
+        for name, e in sorted(entries.items()):
+            k = kind(e)
+            c[k].append(name if k in ("covered", "invalid") else f"{name}: {e[k]}")
+        res[side] = c
+    try:
+        with open(os.path.join(out, "mobile", "coverage.json"), encoding="utf-8") as f:
+            m = json.load(f)
+        res["mobile"].update({"entries": m["screens"], "covered": m["covered"], "manual": m["manual"], "pending": m["pending"],
+                              "invalid": m["invalid"], "missing": m["missing"], "stale": m["stale"], "checked_by": "this run's mobile suite"})
+    except (OSError, ValueError, KeyError):
+        pass
+    return res
+
+
+def coverage_md(cov: dict) -> list[str]:
+    lines = ["", "## Coverage", "", "Every route and screen has tests, or a reason it has none (`e2e/coverage.json`).", "",
+             "| | routes/screens | tests | manual | pending | missing | stale or invalid | checked by |", "|---|---|---|---|---|---|---|---|"]
+    for side, c in cov.items():
+        missing = ("in CI" if side == "web" else "?") if c["missing"] is None else str(len(c["missing"]))
+        bad = len(c["invalid"]) + len(c["stale"] or [])
+        lines.append(f"| {side} | {c['entries']} | {len(c['covered'])} | {len(c['manual'])} | {len(c['pending'])} | {missing} | {bad} | "
+                     f"{c['checked_by'] or 'not checked: the mobile suite did not run'} |")
+    for side, c in cov.items():
+        problems = [f"no entry: {s}" for s in c["missing"] or []] + [f"no such screen: {s}" for s in c["stale"] or []] + c["invalid"]
+        if problems:
+            lines += ["", f"**{side}, to fix:**", ""] + [f"- {p}" for p in problems]
+        for k, title in (("manual", "manual only"), ("pending", "pending")):
+            groups: dict[str, list[str]] = {}
+            for item in c[k]:
+                name, _, why = item.partition(": ")
+                groups.setdefault(why, []).append(name)
+            if groups:
+                lines += ["", f"**{side}, {title}:**", ""] + [f"- {why}: {', '.join(names)}" for why, names in groups.items()]
+    return lines
+
+
 def markdown(rep: dict) -> str:
     c = rep["counts"]
     lines = [
@@ -86,6 +142,8 @@ def markdown(rep: dict) -> str:
                 lines.append(f"![screenshot]({s})")
             if t.get("trace"):
                 lines.append(f"- trace: `{t['trace']}` (`npx playwright show-trace` in e2e/web)")
+            for a in t.get("attachments", []):
+                lines.append(f"- attachment: `{a}`")
             for a in t.get("artifacts", [])[:30]:
                 lines.append(f"- artifact: `{a}`")
             for e in t.get("console_errors", [])[:20]:
@@ -96,7 +154,10 @@ def markdown(rep: dict) -> str:
             lines += ["", f"**{name}**: {s['error']}"]
     lines += ["", "## Tests", "", "| status | suite | test | time | console errors |", "|---|---|---|---|---|"]
     for t in rep["tests"]:
-        lines.append(f"| {t['status']} | {t['suite']} | {t['title']} | {t['duration_ms'] / 1000:.1f} s | {len(t.get('console_errors', []))} |")
+        title = t["title"] + (f" (skipped: {t['skip_reason']})" if t.get("skip_reason") else "")
+        lines.append(f"| {t['status']} | {t['suite']} | {title} | {t['duration_ms'] / 1000:.1f} s | {len(t.get('console_errors', []))} |")
+    if rep.get("coverage"):
+        lines += coverage_md(rep["coverage"])
     return "\n".join(lines) + "\n"
 
 
@@ -117,7 +178,7 @@ def main() -> int:
         tests += t
     if a.requested == "all":
         for name in KNOWN:
-            suites.setdefault(name, {"status": "not_run", "exit_code": None, "error": "not built yet", "duration_ms": 0})
+            suites.setdefault(name, {"status": "not_run", "exit_code": None, "error": "not requested", "duration_ms": 0})
     bad = any(s["status"] in ("failed", "error") for s in suites.values()) or not tests
     rep = {
         "schema": 1,
@@ -132,6 +193,7 @@ def main() -> int:
         "counts": counts(tests),
         "suites": suites,
         "tests": tests,
+        "coverage": load_coverage(a.out),
     }
     with open(os.path.join(a.out, "report.json"), "w", encoding="utf-8") as f:
         json.dump(rep, f, indent=2)

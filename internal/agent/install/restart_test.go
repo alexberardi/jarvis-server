@@ -166,3 +166,50 @@ func TestStopWindowsOnlyQuits(t *testing.T) {
 		t.Fatalf("log %q cmds %q spawned %q", log, f.cmds, f.spawned)
 	}
 }
+
+// The Pi node (install-pi.sh): the system unit (Restart=always) supervises the agent, so a
+// restart is sudoers' `systemctl restart`, with no quit first (systemd would only start it
+// again) and never a detached run (a second agent on the HAT).
+func TestRestartPiThroughTheSystemUnit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix paths")
+	}
+	e := Env{GOOS: "linux", Home: t.TempDir(), Exe: PiDir + "/jarvis-agent", PiUnit: true}
+	f := fakeSys{active: true}
+	var log []string
+	if err := Restart(context.Background(), e, restartSys(&f, true, nil, &log)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.cmds, []string{"sudo -n /usr/bin/systemctl restart jarvis-agent.service"}) || slices.Contains(log, "quit") || len(f.spawned) != 0 {
+		t.Fatalf("log %q cmds %q spawned %q", log, f.cmds, f.spawned)
+	}
+	// sudo refused (no sudoers line): the error, and still nothing spawned.
+	f = fakeSys{}
+	s := restartSys(&f, true, nil, &log)
+	s.Run = func(context.Context, ...string) error { return errors.New("sudo: a password is required") }
+	if err := Restart(context.Background(), e, s); err == nil || len(f.spawned) != 0 {
+		t.Fatalf("err %v spawned %q", err, f.spawned)
+	}
+}
+
+func TestPiSystemUnit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix paths")
+	}
+	root := t.TempDir()
+	exe := root + PiDir + "/jarvis-agent"
+	if PiSystemUnit(root, exe) {
+		t.Fatal("a Pi install without its unit")
+	}
+	if err := writeFile(root+PiUnitFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !PiSystemUnit(root, exe) {
+		t.Fatal("the Pi install wasn't recognised")
+	}
+	for _, other := range []string{root + "/home/pi/.local/lib/jarvis-agent/jarvis-agent", root + PiDir + "/jarvis-agent.prev", PiDir + "/jarvis-agent"} {
+		if PiSystemUnit(root, other) {
+			t.Fatalf("%s counted as the Pi install", other)
+		}
+	}
+}

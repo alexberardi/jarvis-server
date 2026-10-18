@@ -6,14 +6,15 @@ and takes the sandboxes down again. It is run on demand (the user, or the loop's
 
 ```sh
 scripts/e2e web                       # the admin SPA suite
-scripts/e2e                           # every suite there is (all); mobile is "not_run" until #144
+scripts/e2e                           # every suite (all): web, then mobile
+scripts/e2e mobile                    # the mobile app's Maestro flows on a headless harness emulator
+scripts/e2e mobile --mobile-repo ~/src/jarvis-node-mobile-branch   # flows + APK of that checkout's HEAD
 scripts/e2e web --filter 'inbox'      # only tests whose title matches (Playwright --grep)
 scripts/e2e web --keep                # leave the sandboxes up to poke at afterwards
 scripts/e2e web --name loop-142       # pick the sandbox name (default e2e-<run>); never default
 ```
 
-Exit status: 0 when every test passed, 1 when one failed or a suite could not run, 2 for
-`scripts/e2e mobile` (not built yet: E2E 4/9, loop item #144).
+Exit status: 0 when every test passed, 1 when one failed or a suite could not run.
 
 ## What it brings up
 
@@ -23,7 +24,8 @@ Exit status: 0 when every test passed, 1 when one failed or a suite could not ru
   this checkout with the SPA.
 - `<name>-setup`: `scripts/sandbox up --profile empty`: no seeding, no superuser, first-run
   setup still to do. `sandbox.env` has `SBX_SETUP_TOKEN` (the wizard link is
-  `$SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN`). Only the setup wizard's test uses it.
+  `$SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN`). Only the setup wizard's test uses it, so
+  `scripts/e2e mobile` does not bring it up.
 
 Both are purged afterwards (`scripts/sandbox down --purge`) unless `--keep`. A run takes about
 2 minutes on the dev box (build, seed, ~70 browser tests).
@@ -41,7 +43,12 @@ Everything a run leaves is under `.e2e/<run>/` (gitignored), `<run>` = `YYYYMMDD
   same shape and `scripts/e2e` lists it.
 - `web/artifacts/<test>/`: per failed test `test-failed-N.png` and `trace.zip`
   (`cd e2e/web && npx playwright show-trace <path>`).
-- `web.log` (Playwright's own output), `sandbox-<name>.log` (sandbox start-up).
+- `mobile/results.json` (`tools/e2emobile`), and per failed flow `mobile/<flow>/`:
+  `screenshot.png`, `window.xml` (uiautomator dump), `logcat.txt`, `maestro.log` and Maestro's
+  debug output `maestro/`. Skipped flows carry `skip_reason`; a record's `attachments` lists
+  the files beyond the screenshot.
+- `web.log` (Playwright's own output), `mobile.log` (APK build, emulator, Maestro),
+  `sandbox-<name>.log` (sandbox start-up).
 
 `report.json`, schema 1:
 
@@ -58,7 +65,7 @@ Everything a run leaves is under `.e2e/<run>/` (gitignored), `<run>` = `YYYYMMDD
   "counts": {"total": 43, "passed": 43, "failed": 0, "skipped": 0},
   "suites": {
     "web": {"status": "passed | failed | error", "exit_code": 0, "error": null, "duration_ms": 87400},
-    "mobile": {"status": "not_run", "exit_code": null, "error": "not built yet", "duration_ms": 0}
+    "mobile": {"status": "passed | failed | error", "exit_code": 0, "error": null, "duration_ms": 312000}
   },
   "tests": [
     {
@@ -73,14 +80,58 @@ Everything a run leaves is under `.e2e/<run>/` (gitignored), `<run>` = `YYYYMMDD
       "screenshots": ["web/artifacts/…/test-failed-1.png"],
       "trace": "web/artifacts/…/trace.zip",
       "console_errors": ["/inbox/…: Failed to load resource: … 404 (Not Found)"]
+    },
+    {
+      "suite": "mobile", "id": "biometric-login", "title": "Biometric login",
+      "file": ".maestro/biometric-login.yaml", "line": 1, "status": "skipped", "duration_ms": 0,
+      "error": null, "screenshots": [], "trace": null, "console_errors": [],
+      "skip_reason": "needs biometric enrollment, which the headless emulator has not got"
     }
-  ]
+  ],
+  "coverage": {
+    "web": {"entries": 34, "covered": ["/chat", "…"], "manual": ["<route>: <reason>"], "pending": [],
+            "invalid": [], "missing": null, "stale": null, "checked_by": "CI (web/admin/src/coverage.test.tsx)"},
+    "mobile": {"entries": 64, "covered": ["RoutinesStackNavigator/ScheduleList"], "manual": ["…"],
+               "pending": ["MainTabNavigator/HomeTab: #145: nav-tabs.yaml, home-chat.yaml"],
+               "invalid": [], "missing": [], "stale": [], "checked_by": "this run's mobile suite"}
+  }
 }
 ```
 
 Paths are relative to `.e2e/<run>/`. A suite with `status: error` did not run (its `error` says
 why, e.g. a sandbox that did not come up); the run is then `failed` too. `console_errors` are
 recorded, not failures: a refused password or a deleted item's 404 logs one on purpose.
+
+`coverage` (and report.md's Coverage section) is the coverage gate's state, below. `missing`
+and `stale` are `null` where this run did not check them: always for web (CI does), and for
+mobile when the mobile suite did not run.
+
+## The coverage gate (`e2e/coverage.json`)
+
+Every admin SPA route and every mobile screen has an entry in `e2e/coverage.json`: the specs
+or flows covering it, or why it has none. **A new page or screen needs an entry in the same
+PR**, or the check fails. Why and the format:
+[`../decisions/2026-10-18-e2e-coverage-gate.md`](../decisions/2026-10-18-e2e-coverage-gate.md).
+
+```json
+"web":    {"/admin/traces/:id": {"tests": ["e2e/web/tests/admin/traces.spec.ts"]}},
+"mobile": {"RoutinesStackNavigator/ScheduleList": {"flows": [".maestro/schedules.yaml"]},
+           "DevicesStackNavigator/CameraView": {"manual": "a live camera stream; the sandbox has no camera device"},
+           "MainTabNavigator/HomeTab": {"pending": "#145: nav-tabs.yaml, home-chat.yaml"}}
+```
+
+- **Web, in CI:** `web/admin/src/coverage.test.tsx` walks the real route tree (`appRoutes()`
+  in `routes.tsx`, which `App.tsx` renders) and fails on a route with no entry, an entry for a route
+  that is gone, an entry that isn't exactly one kind, and a spec file that doesn't exist.
+- **Mobile, in `scripts/e2e mobile`:** the suite's first test, `coverage: …`
+  (`tools/e2emobile/coverage.go`), reads the `<X.Screen name=…>` registrations of the same
+  mobile commit's `src/navigation/` (as `<Navigator file>/<name>`; a registration whose
+  component is another navigator there is a container and not listed) and fails the same
+  ways, with flow files looked up in that commit's `.maestro/`. By hand:
+  `go run ./tools/e2emobile coverage --coverage e2e/coverage.json --flows <checkout>/.maestro --nav <checkout>/src/navigation`.
+- `pending` is a screen with a test still to come (name the item); `manual` is one an
+  automated test can't reach here (camera, microphone, third-party sign-in, the fake-node
+  lane). When a pending flow lands, turn its entry into `flows`.
 
 ## The web suite (`e2e/web/`)
 
@@ -97,7 +148,7 @@ one auth rate limit.
 | `inbox.spec.ts` | list with unread marks and the sidebar badge; detail renders markdown and reads it (server and badge); delete from the detail; bulk mark read and delete |
 | `addons.spec.ts` | the page's sections; a paired desktop agent is listed; signing it out removes it on the server |
 | `household.spec.ts` | the switcher appears with two households; the inbox and the chat devices follow the pick, across a reload; no switcher with one |
-| `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
+| `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page, every old top-level path and `/admin` itself forward to their `/admin` page (query kept), an unknown path shows the 404 page in the shell and under `/admin`; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
 | `admin/dashboard.spec.ts` | System card = `/api/system/info`; no Restart when unsupervised; Stop asks and Cancel leaves jarvisd up (stop is never sent); "Finish setup" vs "Voice isn't ready" banner from `setup.completed`, the latter naming the missing jobs and leading to their models; no update or GPU banner without their state |
 | `admin/models.spec.ts` | every catalog model listed; Install asks and nothing downloads; a job's Set up narrows the catalog to its kind, Show all restores it; a model assigned to the live label is saved (server and page, across a reload; background follows). Skipped: Hugging Face installs |
 | `admin/settings.spec.ts` | a household's own value of a household setting: edited, saved on the server, kept across a reload; Use default removes it; the default untouched |
@@ -133,6 +184,28 @@ one auth rate limit.
   `cd e2e/web && (source ../../.sandbox/<name>/sandbox.env; E2E_OUT=/tmp/x npx playwright test -g 'my test')`
   (the setup test also needs `E2E_SETUP_ADMIN` and `E2E_SETUP_TOKEN` from `<name>-setup`).
 
+## The mobile suite (`scripts/e2e mobile`)
+
+The Maestro flows of jarvis-node-mobile's `.maestro/`, played by `tools/e2emobile` one Maestro
+process per flow on a headless harness emulator (the AVD, APK and adb reverse of
+`scripts/mobile-shot`, shared in `scripts/lib/mobile.sh`), logged in to the run's rich sandbox.
+Why, and the contract the flows follow (which files run, the `skip` tag and
+`properties.skip_reason`, the `-e` variables `EMAIL`, `PASSWORD`, `EMAIL_ADMIN`/`_POWER`/`_MEMBER`,
+`CHAT_MESSAGE`/`CHAT_REPLY`): [`../decisions/2026-10-18-e2e-mobile-runner.md`](../decisions/2026-10-18-e2e-mobile-runner.md).
+
+- Needs what `scripts/mobile-shot` needs (Linux, KVM, the Android SDK, mise for the APK build)
+  plus Java 17+ for Maestro, which the first run installs into
+  `~/.cache/jarvis-harness/maestro/<version>/` (pinned, sha256-checked).
+- The flows and the APK come from one commit: `origin/main` of `$JARVIS_MOBILE_REPO` (default
+  `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
+  Commit flow changes before running them; uncommitted edits are not picked up.
+- During the suite the scripted model answers from `e2e/llm/mobile.json`.
+- Writing a flow: run it by hand against a kept sandbox and a kept emulator
+  (`scripts/mobile-shot --sandbox <name> --keep --screens login`, then
+  `~/.cache/jarvis-harness/maestro/2.11.0/maestro/bin/maestro --device emulator-<port> test
+  -e EMAIL=… -e PASSWORD=… .maestro/my-flow.yaml`), then the whole suite with
+  `scripts/e2e mobile --mobile-repo <checkout> --filter my-flow`.
+
 ## The voice lane (`scripts/e2e voice`)
 
 The real node software hears spoken commands and its spoken replies are checked. Why it is
@@ -145,6 +218,8 @@ scripts/e2e voice --llm scripted           # the lane itself, on e2e/llm/voice.j
 scripts/e2e voice --audio pipewire         # a private PipeWire's virtual mic and speaker (barge-in too)
 scripts/e2e voice --filter 'timer|silent' --repeat 1
 scripts/e2e voice --agent-arg=--wake-threshold=0.6   # any extra `jarvis-agent listen` flag
+scripts/e2e voice --audio pi --pi-host <user>@<pi4-node>   # a real Pi in the room (overnight only, below)
+scripts/e2e voice --voices ~/voices        # recorded human voices instead of the TTS, where there is one
 ```
 
 It brings up one sandbox, `scripts/sandbox up --profile rich --voice --llm shared|scripted`,
@@ -163,7 +238,12 @@ and XDG dirs under the run and the sandbox's seeded node identity. Per case:
 
 `model: true` cases run `--repeat` times (default 3) and pass only when every run does. Read
 them by the regressions-only rule: a regression is 3/3 on main and 0/3 on the change. `needs:
-pipewire` cases (barge-in) are skipped with `--audio wav`, whose speaker is written at once.
+pipewire` cases (barge-in) need real-time audio: they are skipped with `--audio wav`, whose
+speaker is written at once, and run with `pipewire` and `pi`.
+
+`--voices DIR` says a `say` line with a recording where there is one: `DIR/<slug of the
+text>.wav` ("Hey Jarvis." is `hey-jarvis.wav`, "What time is it?" `what-time-is-it.wav`), any
+sample rate (resampled to the TTS's); other lines are still the TTS.
 
 | case | checks |
 |---|---|
@@ -174,13 +254,15 @@ pipewire` cases (barge-in) are skipped with `--audio wav`, whose speaker is writ
 | no wake word stays silent | the timer and lights commands without "Hey Jarvis" |
 | background noise stays silent | 8 s of pink noise |
 | music with talk over it stays silent | a chord loop with a sentence spoken over it |
-| barge-in stops a long reply | "Hey Jarvis" over a long story ends the turn `interrupted` (`--audio pipewire` only) |
+| barge-in stops a long reply | "Hey Jarvis" over a long story ends the turn `interrupted` (`--audio pipewire` or `pi`) |
 
 What it leaves under `.e2e/<run>/`: `voice/results.json` (the report's test shape plus each
 case's `runs`: the turn, the reply heard, the response time, the model's calls and tools, the
 failures), `voice/cases/<case>/run-N/` (`utterance.wav`, `reply.wav`, `agent.log`, `run.json`;
 `report.md` lists them under a failure), `voice.log`, and with PipeWire `voice/pipewire.log`
-and `voice/agent.log` (the one long node).
+and `voice/agent.log` (the one long node; on a Pi also what the Pi side did, and
+`results.json`'s `pi`: the card, the services before and after, what was stopped and
+restored).
 
 - **Offline caches.** A box that can't reach GitHub's release CDN can seed
   `$JARVIS_HARNESS_CACHE` (default `~/.cache/jarvis-harness`) with
@@ -193,3 +275,40 @@ and `voice/agent.log` (the one long node).
   session-bus variables unset, and is killed when the run ends.
 - **A new case** goes in `e2e/voice/cases.json` (unknown keys are an error); with
   `--llm scripted` it needs a rule in `e2e/llm/voice.json` too.
+
+### On a real Pi (`--audio pi`, overnight only)
+
+The same cases and asserts on real hardware: the Pi 4 lab node (`<pi4-node>`, a Seeed 2-mic HAT),
+in a room where playing speech out loud for half an hour is fine, hence overnight (the E2E
+schedule, loop item #152, runs it). Why it is built this way:
+[`../decisions/2026-10-18-e2e-pi-voice-lane.md`](../decisions/2026-10-18-e2e-pi-voice-lane.md).
+
+- **What the Pi needs:** ssh key auth from the dev box for `--pi-host` (`BatchMode`: no
+  prompts), aarch64, bash, `aplay`/`arecord` (alsa-utils), the HAT's driver loaded, and
+  passwordless `sudo -n systemctl` when a system service (the installed Jarvis node) must be
+  stopped. The wake models go along from the harness cache when they are there; otherwise the
+  node on the Pi downloads them.
+- **What a run does:** builds the node for linux-arm64 (fetching the arm64 sherpa-onnx
+  libraries once), copies it, the sandbox's seeded node identity, the wake models and
+  `tools/voicelane/pi.sh` into a fresh `mktemp -d /tmp/jarvis-e2e-*` on the Pi, and runs it
+  there with `HOME` and XDG dirs in that directory, over one ssh session whose `-R` forwards
+  put the sandbox's ports on the Pi's loopback. The node's config URL is
+  `http://127.0.0.1:<sandbox port>`: the dev box's sandbox, never prod (voicelane refuses a
+  sandbox whose services aren't on 127.0.0.1).
+- **Leaving the Pi as found:** it records the active `jarvis*`, `pulseaudio*`, `pipewire*` and
+  `wireplumber*` services (system and user), stops every Jarvis node (it would hear the cases and
+  answer through its own server) and, only when the card is busy, the audio servers (sockets
+  first). When the run ends, however it ends (done, a failure, Ctrl-C, voicelane killed: the
+  Pi side watches its ssh stdin), it stops the test node, starts exactly what it stopped and
+  deletes the run's directory, which holds the node identity: that is the un-pairing (the
+  sandbox, and the node in it, are purged afterwards unless `--keep`). Both states are in
+  `voice/agent.log` and printed as `voice: pi: …`.
+- **Audio:** ALSA only, from an `.asoundrc` in the run's `HOME` (the Pi's own ALSA config is not
+  touched): the node listens on a dsnoop of the HAT and speaks into its dmix through a tee that
+  writes what it plays to the run's directory, fetched and transcribed per case. Each case's WAV
+  is played with `aplay` straight into the same dmix, beside the node's stream and never
+  through it, so the mic hears it in the room. The playback level is the Pi's mixer setting
+  (`alsamixer -c <card>`); the response time is the turn less its recording and its reply's
+  playback, as with WAV files.
+- **When it fails to start:** the error says which step (`ssh`, the architecture, no seeed card:
+  `--pi-card N`, a service it could not stop, the card still busy and who holds it).

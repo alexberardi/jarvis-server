@@ -5,9 +5,10 @@
 #   sudo sh install-pi.sh [--activate]
 #
 # It downloads the release's linux-arm64 agent archive, checks it against SHA256SUMS (and
-# SHA256SUMS.minisig when minisign is installed), puts the agent in /opt/jarvis-agent, and does
-# the openWakeWord models next to it (pinned by SHA-256, so the node never downloads them), and
-# does the system setup the Python node's install.sh does: the packages below, the overlay,
+# SHA256SUMS.minisig when minisign is installed), puts the agent in /opt/jarvis-agent (the node
+# user's, so the agent updates itself there) and the openWakeWord models in
+# /usr/local/share/jarvis-agent (pinned by SHA-256, so the node never downloads them), and does
+# the system setup the Python node's install.sh does: the packages below, the overlay,
 # config.txt, ALSA (dsnoopmic and output), PulseAudio instead of PipeWire with the HAT as a fixed
 # sink, the mixer baseline, groups and linger, sudoers, journald, swappiness, swap, Wi-Fi
 # power-save off and the NetworkManager profiles, hostapd/dnsmasq masked, the network watchdog,
@@ -42,6 +43,7 @@ ROOT=${JARVIS_PI_ROOT:-}
 VERSION="" FORCE=0 NODE_USER=pi ACTION=install
 ARCH=arm64
 OPT=/opt/jarvis-agent
+SHARE=/usr/local/share/jarvis-agent
 UNIT=jarvis-agent.service
 PY_UNIT=jarvis-node.service
 CARD=seeed2micvoicec
@@ -49,7 +51,7 @@ OVERLAY=respeaker-2mic-v2_0-overlay
 NEEDS_REBOOT=0
 # The wake-word models (the unit's --wake-models), exactly internal/agent/voice/models.go's
 # WakeModels and owwRelease (a unit test keeps them equal): name and SHA-256.
-MODELS=$OPT/openwakeword
+MODELS=$SHARE/openwakeword
 OWW_RELEASE=https://github.com/dscripka/openWakeWord/releases/download/v0.5.1
 WAKE_MODELS="melspectrogram.onnx ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f
 embedding_model.onnx 70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f
@@ -87,6 +89,10 @@ P() { printf '%s%s' "$ROOT" "$1"; }
 # run CMD...: a command that changes the live system; under --root it is only logged.
 run() {
   if [ -n "$ROOT" ]; then printf '%s\n' "$*" >>"$ROOT/install-pi-commands.log"; else "$@"; fi
+}
+# as_node CMD...: CMD as the node's user (under --root, as whoever runs it).
+as_node() {
+  if [ -n "$ROOT" ]; then "$@"; else runuser -u "$NODE_USER" -- "$@"; fi
 }
 # put PATH MODE: write stdin to PATH (under --root) with MODE, through a temp file and a rename.
 put() {
@@ -140,6 +146,12 @@ install_packages() {
 
 install_agent() {
   agent=$(P "$OPT/jarvis-agent")
+  # $OPT belongs to the node's user, so the agent replaces itself there (its self-update: stage
+  # beside it, rename, keep .prev for a rollback). That user can then change anything in it, so
+  # root never runs or writes a file there: the installed agent's version and the new copy are
+  # the node user's doing (as_node), and the HAT's overlay source lives in $SHARE.
+  mkdir -p "$(P "$OPT")"
+  run chown "$NODE_USER:" "$OPT"
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/jarvis-pi-install.XXXXXX")
   trap 'rm -rf "$TMP"' EXIT INT TERM
   fetch SHA256SUMS "$TMP/SHA256SUMS" || die "could not download $(url SHA256SUMS)"
@@ -151,7 +163,7 @@ install_agent() {
   VERSION=$REL
 
   CUR=""
-  [ -x "$agent" ] && CUR=$("$agent" version 2>/dev/null || echo unknown)
+  [ -x "$agent" ] && CUR=$(as_node "$agent" version 2>/dev/null || echo unknown)
   if [ "$CUR" = "$VERSION" ] && [ $FORCE = 0 ]; then
     say "jarvis-agent $VERSION is already installed in $OPT."
     return
@@ -181,10 +193,9 @@ install_agent() {
   [ "$("$NEW" version)" = "$VERSION" ] || die "the downloaded agent does not run here"
 
   # A rename, so a running agent keeps its old file until it restarts.
-  mkdir -p "$(P "$OPT")"
-  cp "$NEW" "$agent.new"
-  chmod 0755 "$agent.new"
-  mv -f "$agent.new" "$agent"
+  # shellcheck disable=SC2016 # $1 and $2 are the inner shell's
+  as_node sh -c 'cat >"$1" && chmod 0755 "$1" && mv -f "$1" "$2"' sh "$agent.new" "$agent" <"$NEW" ||
+    die "could not write $OPT/jarvis-agent as $NODE_USER"
   [ -z "$CUR" ] || run systemctl try-restart "$UNIT"
   say "jarvis-agent $VERSION installed in $OPT."
 }
@@ -232,7 +243,8 @@ EOF
 
 # The overlay, compiled on the Pi from Seeed's DTS (scripts/packaging/pi/, N:install.sh:912-934).
 install_overlay() {
-  dts=$OPT/$OVERLAY.dts
+  dts=$SHARE/$OVERLAY.dts
+  rm -f "$(P "$OPT/$OVERLAY.dts")" # where an older install-pi.sh kept it
   overlays=/boot/firmware/overlays
   if [ ! -d "$(P $overlays)" ] && [ -d "$(P /boot/overlays)" ]; then overlays=/boot/overlays; fi
   overlay_dts | put "$dts" 0644
@@ -437,7 +449,6 @@ $NODE_USER ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
 # Not yet, added with the step that needs them (go-pi-node.md §7):
 # TODO(phase 4.4, provisioning AP): NetworkManager, nmcli (and hostapd/dnsmasq only if the NM AP fails).
-# TODO(#161, self-update): the self-update helper.
 # TODO(parity 5.6, packages): the apt and post-install wrappers.
 # TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
 EOF

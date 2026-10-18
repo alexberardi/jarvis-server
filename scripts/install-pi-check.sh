@@ -84,7 +84,8 @@ snapshot() {
   (cd "$1" && find . -mindepth 1 ! -name install-pi-commands.log \( -type l -printf '%y %m %P -> %l\n' -o -printf '%y %m %P\n' \) | sort -k3)
   echo "## commands"
   cat "$1/install-pi-commands.log"
-  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path ./usr/local/sbin/jarvis-net-watchdog -printf '%P\n' | sort) |
+  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path './usr/local/share/jarvis-agent/*' ! -path ./usr/local/sbin/jarvis-net-watchdog -printf '%P
+' | sort) |
     while read -r f; do
       echo "## $f"
       cat "$1/$f"
@@ -97,13 +98,13 @@ echo "--- install"
 R --root "$ROOT" --from-dir "$T/dist" | tee "$T/out"
 grep -q "installed in /opt/jarvis-agent" "$T/out" || fail "no agent installed"
 grep -q "reboot" "$T/out" || fail "no reboot note after a config.txt change"
-cmp -s "$ROOT/opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" "$DTS" ||
+cmp -s "$ROOT/usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" "$DTS" ||
   fail "the DTS in install-pi.sh differs from scripts/packaging/pi/respeaker-2mic-v2_0-overlay.dts"
 cmp -s "$ROOT/usr/local/sbin/jarvis-net-watchdog" "$WATCHDOG" ||
   fail "the watchdog in install-pi.sh differs from scripts/packaging/pi/jarvis-net-watchdog"
 [ "$("$ROOT/opt/jarvis-agent/jarvis-agent" version)" = "$V" ] || fail "the agent in /opt is not $V"
 for m in $WAKE_MODELS; do
-  cmp -s "$ROOT/opt/jarvis-agent/openwakeword/$m" "$T/dist/$m" || fail "the wake model $m is not in /opt/jarvis-agent/openwakeword"
+  cmp -s "$ROOT/usr/local/share/jarvis-agent/openwakeword/$m" "$T/dist/$m" || fail "the wake model $m is not in /usr/local/share/jarvis-agent/openwakeword"
 done
 snapshot "$ROOT" >"$T/got"
 if [ "${UPDATE:-}" = 1 ]; then
@@ -133,12 +134,21 @@ R --root "$R2" --from-dir "$T/dist" >/dev/null 2>"$T/err"
 grep -q "removed a per-user mask on pulseaudio.service" "$T/err" || fail "no warning for the removed mask: $(cat "$T/err")"
 
 echo "--- wlan0 reports no connection: power-save off on the active Wi-Fi one, no reconcile (as N:)"
-R4=$T/root-nowlan
-seed "$R4"
-FAKE_WLAN0=none R --root "$R4" --from-dir "$T/dist" >/dev/null
-grep -qx "nmcli connection modify jarvis-Home wifi.powersave 2" "$R4/install-pi-commands.log" ||
+R5=$T/root-nowlan
+seed "$R5"
+FAKE_WLAN0=none R --root "$R5" --from-dir "$T/dist" >/dev/null
+grep -qx "nmcli connection modify jarvis-Home wifi.powersave 2" "$R5/install-pi-commands.log" ||
   fail "power-save was not turned off on the active Wi-Fi connection"
-grep -q "autoconnect" "$R4/install-pi-commands.log" && fail "reconciled the Wi-Fi profiles with no connection on wlan0"
+grep -q "autoconnect" "$R5/install-pi-commands.log" && fail "reconciled the Wi-Fi profiles with no connection on wlan0"
+
+echo "--- an older install (root's /opt, the overlay source in it) is moved over"
+R4=$T/root4
+seed "$R4"
+mkdir -p "$R4/opt/jarvis-agent"
+echo old >"$R4/opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts"
+R --root "$R4" --from-dir "$T/dist" >/dev/null
+[ ! -e "$R4/opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" ] || fail "the overlay source was left in the node user's /opt/jarvis-agent"
+grep -qx 'chown pi: /opt/jarvis-agent' "$R4/install-pi-commands.log" || fail "/opt/jarvis-agent was not given to the node's user"
 
 echo "--- --activate / --deactivate"
 R --root "$ROOT" --from-dir "$T/dist" --activate >/dev/null
@@ -164,9 +174,9 @@ T3=$T/badmodel
 mkdir -p "$T3"
 cp "$T/dist"/* "$T3/"
 printf 'x' >>"$T3/hey_jarvis_v0.1.onnx"
-if R --root "$T/root4" --from-dir "$T3" >"$T/out" 2>&1; then cat "$T/out"; fail "installed a tampered wake model"; fi
+if R --root "$T/root-badmodel" --from-dir "$T3" >"$T/out" 2>&1; then cat "$T/out"; fail "installed a tampered wake model"; fi
 grep -q "checksum mismatch for the wake model" "$T/out" || { cat "$T/out"; fail "refused the tampered wake model for another reason"; }
-[ ! -e "$T/root4/opt/jarvis-agent/openwakeword/hey_jarvis_v0.1.onnx" ] || fail "the refused install left the tampered wake model"
+[ ! -e "$T/root-badmodel/usr/local/share/jarvis-agent/openwakeword/hey_jarvis_v0.1.onnx" ] || fail "the refused install left the tampered wake model"
 if R --root "$R3" --from-dir "$T/dist" --version v1.0.0 >"$T/out" 2>&1; then fail "installed another version than asked"; fi
 R --root "$R3" --nope >/dev/null 2>&1 && fail "accepted an unknown option"
 echo "install-pi-check: PASS"

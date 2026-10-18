@@ -53,8 +53,11 @@ func newUpdater(stateDir string, log *slog.Logger) (*selfupdate.Updater, error) 
 		}
 	}
 	t := selfupdate.Target{GOOS: runtime.GOOS, Exe: exe}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		t.Bundle = install.BundleOf(exe)
+	case "linux":
+		t.Pi = install.PiSystemUnit(os.Getenv(install.PiRootEnv), exe)
 	}
 	return &selfupdate.Updater{
 		Paths: p, Target: t, Current: version, Log: log,
@@ -162,9 +165,12 @@ func finishCmd(ctx context.Context, u *selfupdate.Updater, w io.Writer) error {
 		if _, err := install.RecordVersion(install.NativeSys(nil, "").Reg, r.To); err != nil {
 			logger().Warn("update: couldn't record the version in the uninstall entry", "err", err)
 		}
-		if a.Running {
+		switch {
+		case a.Running:
 			fmt.Fprintf(w, "Updated to %s; the agent is running it.\n", r.To)
-		} else {
+		case u.Target.Pi:
+			fmt.Fprintf(w, "Updated to %s. %s runs it when it starts (sudo systemctl start %s).\n", r.To, install.PiUnit, install.PiUnit)
+		default:
 			fmt.Fprintf(w, "Updated to %s. It starts at the next login, or now with `jarvis-agent start`.\n", r.To)
 		}
 		return nil
@@ -271,21 +277,29 @@ func startUpdate(u *selfupdate.Updater, status func(string), log *slog.Logger) f
 // handOver starts `update --finish` outside this agent's lifetime: under systemd a transient
 // user unit (a child in the agent's own unit would be stopped with it when the unit restarts),
 // otherwise a detached process (its own session; launchd stops only the job's process group).
+// The Pi node's system unit is always systemd and gets no fallback: its restart stops every
+// process in its cgroup, a detached one too, so the installer would die with the agent it
+// restarts. The node user's manager runs the transient unit (install-pi.sh enables linger).
 func handOver(u *selfupdate.Updater, log *slog.Logger) error {
 	args := []string{u.Target.Exe, "update", "--finish", "--state-dir", u.Paths.Dir}
-	if runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != "" {
-		if sr, err := exec.LookPath("systemd-run"); err == nil {
+	if runtime.GOOS == "linux" && (os.Getenv("INVOCATION_ID") != "" || u.Target.Pi) {
+		sr, err := exec.LookPath("systemd-run")
+		if err == nil {
 			cmd := []string{"--user", "--collect", "--quiet", "--unit=jarvis-agent-update-" + strconv.FormatInt(time.Now().Unix(), 10)}
 			for _, kv := range forwardEnv() {
 				cmd = append(cmd, "--setenv="+kv)
 			}
-			out, err := exec.Command(sr, append(append(cmd, "--"), args...)...).CombinedOutput()
-			if err == nil {
+			var out []byte
+			if out, err = exec.Command(sr, append(append(cmd, "--"), args...)...).CombinedOutput(); err == nil {
 				log.Info("update: handed over to a transient systemd unit")
 				return nil
 			}
-			log.Warn("update: systemd-run failed; starting the installer detached", "err", err, "out", strings.TrimSpace(string(out)))
+			err = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 		}
+		if u.Target.Pi {
+			return fmt.Errorf("systemd-run --user: %w", err)
+		}
+		log.Warn("update: systemd-run failed; starting the installer detached", "err", err)
 	}
 	return install.NativeSys(nil, u.Paths.LogPath()).Spawn(args...)
 }

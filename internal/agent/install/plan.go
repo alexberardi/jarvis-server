@@ -84,6 +84,8 @@ type Env struct {
 	Getenv   func(string) string
 	// SMAppService: macOS 13 or later (the in-bundle login item).
 	SMAppService bool
+	// PiUnit: Exe is the Pi node's agent, which the system unit runs (PiSystemUnit).
+	PiUnit bool
 }
 
 func (e Env) getenv(k string) string {

@@ -41,22 +41,25 @@ f 644 etc/udev/rules.d/89-jarvis-hat-pulse-ignore.rules
 d 755 opt
 d 755 opt/jarvis-agent
 f 755 opt/jarvis-agent/jarvis-agent
-d 755 opt/jarvis-agent/openwakeword
-f 644 opt/jarvis-agent/openwakeword/embedding_model.onnx
-f 644 opt/jarvis-agent/openwakeword/hey_jarvis_v0.1.onnx
-f 644 opt/jarvis-agent/openwakeword/melspectrogram.onnx
-f 644 opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 d 755 usr
 d 755 usr/local
 d 755 usr/local/sbin
 f 755 usr/local/sbin/jarvis-net-watchdog
+d 755 usr/local/share
+d 755 usr/local/share/jarvis-agent
+d 755 usr/local/share/jarvis-agent/openwakeword
+f 644 usr/local/share/jarvis-agent/openwakeword/embedding_model.onnx
+f 644 usr/local/share/jarvis-agent/openwakeword/hey_jarvis_v0.1.onnx
+f 644 usr/local/share/jarvis-agent/openwakeword/melspectrogram.onnx
+f 644 usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 d 755 var
 d 755 var/log
 d 755 var/log/journal
 ## commands
 apt-get update -q
 env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio iw hostapd dnsmasq device-tree-compiler alsa-utils
-dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
+chown pi: /opt/jarvis-agent
+dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 udevadm control --reload
 amixer -q -c seeed2micvoicec sset PCM 100% unmute
 amixer -q -c seeed2micvoicec sset Line 2 unmute
@@ -165,7 +168,6 @@ pi ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot, /usr/s
 pi ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
 # Not yet, added with the step that needs them (go-pi-node.md §7):
 # TODO(phase 4.4, provisioning AP): NetworkManager, nmcli (and hostapd/dnsmasq only if the NM AP fails).
-# TODO(#161, self-update): the self-update helper.
 # TODO(parity 5.6, packages): the apt and post-install wrappers.
 # TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
 ## etc/sysctl.d/99-jarvis-node.conf
@@ -194,7 +196,7 @@ StartLimitIntervalSec=1800
 [Service]
 User=pi
 Group=pi
-ExecStart=/opt/jarvis-agent/jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output --wake-models /opt/jarvis-agent/openwakeword
+ExecStart=/opt/jarvis-agent/jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output --wake-models /usr/local/share/jarvis-agent/openwakeword
 WorkingDirectory=/home/pi
 Restart=always
 RestartSec=5

@@ -47,6 +47,9 @@ func installEnv() (install.Env, error) {
 	}
 	e := install.Env{GOOS: runtime.GOOS, Home: home, UID: os.Getuid(), Exe: exe, Getenv: getenv,
 		SMAppService: install.SMAppServiceAvailable()}
+	if runtime.GOOS == "linux" {
+		e.PiUnit = install.PiSystemUnit(os.Getenv(install.PiRootEnv), exe)
+	}
 	if runtime.GOOS == "windows" {
 		if l := filepath.Join(filepath.Dir(exe), install.LauncherName); fileExists(l) {
 			e.Launcher = l

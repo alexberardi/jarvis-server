@@ -45,6 +45,7 @@ func NewStack(deps module.Deps, set *settings.Service) *Stack {
 		},
 		Log:         log,
 		TemplateDir: filepath.Join(deps.Config.Home, "templates"),
+		PIDDir:      filepath.Join(deps.Config.Home, "engines", "run"),
 	}
 	hf := &HF{
 		Endpoint: func() string { return str(engine.KeyHFEndpoint) },

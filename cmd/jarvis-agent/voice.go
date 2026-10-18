@@ -69,6 +69,8 @@ type voiceStack struct {
 	close func()
 	// indicator is the on-screen island (run, unless --no-overlay); nil shows nothing.
 	indicator voice.Indicator
+	// live, when set, retunes and measures the running pipeline (the Pi's node settings).
+	live *voice.Live
 }
 
 // loadVoice resolves the wake models (fetching them into the cache on first use unless
@@ -114,7 +116,7 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 func (v *voiceStack) options(cc *node.CC, tools node.Toolset, log *slog.Logger, onTurn func(voice.Turn)) voice.Options {
 	return voice.Options{Input: v.flags.input, Output: v.flags.output, Config: v.cfg, Detector: v.det,
 		Server: voice.NewHTTPServer(cc.BaseURL, cc.Creds), Tools: tools, Log: log, OnTurn: onTurn,
-		Indicator: v.indicator, Vocabulary: vocabularyOf(tools)}
+		Indicator: v.indicator, Vocabulary: vocabularyOf(tools), Live: v.live}
 }
 
 // vocabularyOf is the app names for speech-to-text from the toolset's dictation tools (their

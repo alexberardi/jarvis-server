@@ -1,7 +1,7 @@
 // Command agent-upgrade-e2e checks the desktop agent's self-update end to end on this OS
 // (01-no-cli-plan item 1.7; CI job agent-upgrade, all three OSes):
 //
-//	go run ./scripts/agent-upgrade-e2e [-work DIR] [-keep]
+//	go run ./scripts/agent-upgrade-e2e [-work DIR] [-keep] [-pi]
 //
 // It builds the agent at four release versions that trust a throwaway minisign key (test builds
 // only, -X …/internal/update.extraTrustedKey, as the jarvisd upgrade jobs do), serves them as a
@@ -17,6 +17,10 @@
 //     --finish`, which swaps, restarts and sees N+1 connected;
 //  3. rollback: jarvisd asks for N+2, a build that fails at start; the update is swapped in,
 //     never comes up, and is rolled back to N+1, which reports the failed task.
+//
+// -pi (Linux) runs the same steps on the Pi node's layout (install-pi.sh: /opt/jarvis-agent
+// under a scratch root, the system unit) under a fake systemd (pi.go): every restart must be
+// sudoers' `systemctl restart jarvis-agent.service` and the installer a systemd-run --user unit.
 //
 // Never run it on a machine someone uses for the agent: on macOS a loaded
 // net.jarvisautomation.agent LaunchAgent would be restarted. It refuses to run outside CI
@@ -70,13 +74,20 @@ const (
 )
 
 func main() {
+	if code, ok := fakeTool(); ok {
+		os.Exit(code)
+	}
 	work := flag.String("work", "", "work directory (default: a temporary one)")
 	keep := flag.Bool("keep", false, "keep the work directory")
+	pi := flag.Bool("pi", false, "the Pi node's layout and system unit, under a fake systemd (Linux)")
 	flag.Parse()
+	if *pi && runtime.GOOS != "linux" {
+		fail("-pi is the Pi node's lane: Linux only")
+	}
 	if os.Getenv("CI") == "" && os.Getenv("JARVIS_AGENT_UPGRADE_E2E_OK") == "" {
 		fail("CI only (set JARVIS_AGENT_UPGRADE_E2E_OK=1 on a machine where no agent runs)")
 	}
-	e := &e2e{work: *work}
+	e := &e2e{work: *work, pi: *pi}
 	if e.work == "" {
 		d, err := os.MkdirTemp("", "aue")
 		must(err)
@@ -103,6 +114,8 @@ type e2e struct {
 	exe  string // the installed agent
 	env  []string
 	srv  *fakeServer
+	pi   bool
+	sd   *fakeSystemd // -pi
 }
 
 func say(format string, a ...any) { fmt.Printf("agent-upgrade-e2e: "+format+"\n", a...) }
@@ -194,6 +207,9 @@ func (e *e2e) run() {
 		fail("the rolled-back task was reported as %q", msg)
 	}
 	e.waitLog("was rolled back to "+vNext, 60*time.Second) // the installer saw it healthy and left
+	if e.pi {
+		e.checkPiCalls()
+	}
 	if strings.Contains(e.readLog(), "isn't healthy either") {
 		fail("the restored %s didn't come up", vNext)
 	}
@@ -347,7 +363,7 @@ func (e *e2e) install() {
 	default:
 		e.exe = filepath.Join(h, ".local", "lib", "jarvis-agent", "jarvis-agent")
 	}
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS != "darwin" && !e.pi {
 		must(os.MkdirAll(filepath.Dir(e.exe), 0o755))
 		must(copyFile(filepath.Join(e.buildDir(vN), exeName()), e.exe, 0o755))
 	}
@@ -359,11 +375,15 @@ func (e *e2e) install() {
 	e.env = append(os.Environ(),
 		"HOME="+h, "USERPROFILE="+h,
 		"XDG_CONFIG_HOME="+cfg, "XDG_CACHE_HOME="+filepath.Join(h, "cache"), "XDG_RUNTIME_DIR="+sock,
+		"XDG_DATA_HOME="+filepath.Join(h, "data"), "XDG_STATE_HOME="+filepath.Join(h, "state"), // never the user's
 		"APPDATA="+cfg, "LOCALAPPDATA="+filepath.Join(h, "AppData", "Local"),
 		browser.SocketEnv+"="+filepath.Join(sock, "b.sock"), browser.ControlSocketEnv+"="+filepath.Join(sock, "c.sock"),
 		"JARVIS_UPDATE_API="+e.srv.url, "JARVIS_AGENT_UPDATE_GATE=25s", "JARVIS_AGENT_NO_AX_PROMPT=1",
 		"INVOCATION_ID=", // never a systemd service here, even inside a runner's
 	)
+	if e.pi {
+		e.installPi()
+	}
 	for _, k := range []string{browser.SocketEnv, browser.ControlSocketEnv} {
 		must(os.Setenv(k, envOf(e.env, k)))
 	}
@@ -414,6 +434,10 @@ func (e *e2e) agent(args ...string) (string, error) {
 // startAgent runs the agent detached, as the login item would (not `start`: on macOS that sets a
 // bundle up as a login item first).
 func (e *e2e) startAgent() {
+	if e.pi {
+		e.sd.Start()
+		return
+	}
 	log, err := os.OpenFile(filepath.Join(e.work, "first-run.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	must(err)
 	c := exec.Command(e.exe, "run")
@@ -431,6 +455,9 @@ func (e *e2e) restartAgent() {
 }
 
 func (e *e2e) stopAgent() {
+	if e.sd != nil {
+		e.sd.Close() // first: Restart=always would start it again
+	}
 	if e.exe != "" {
 		_, _ = e.agent("stop")
 	}
@@ -443,7 +470,7 @@ func (e *e2e) stopAgent() {
 }
 
 func (e *e2e) dumpLogs() {
-	for _, p := range []string{filepath.Join(e.updatesDir(), "update.log"), filepath.Join(filepath.Dir(e.updatesDir()), "agent.log"),
+	for _, p := range []string{e.updateLog(), filepath.Join(e.work, "jarvis-agent.service.log"), filepath.Join(filepath.Dir(e.updatesDir()), "agent.log"),
 		filepath.Join(e.home(), "Library", "Logs", "jarvis-agent.log")} {
 		if b, err := os.ReadFile(p); err == nil {
 			fmt.Printf("--- %s (last 4 KB)\n%s\n", p, tail(b, 4096))
@@ -473,12 +500,21 @@ func (e *e2e) waitHealthy(v string, d time.Duration) {
 	fail("the agent isn't healthy as %s after %s (last: %s)", v, d, last)
 }
 
+// updateLog is where `update --finish` writes: update.log when it runs detached, the transient
+// unit's output under the Pi node's (fake) systemd.
+func (e *e2e) updateLog() string {
+	if e.sd != nil {
+		return e.sd.runLog
+	}
+	return filepath.Join(e.updatesDir(), "update.log")
+}
+
 func (e *e2e) readLog() string {
-	b, _ := os.ReadFile(filepath.Join(e.updatesDir(), "update.log"))
+	b, _ := os.ReadFile(e.updateLog())
 	return string(b)
 }
 
-// waitLog waits for `update --finish` (detached, logging to update.log) to write s.
+// waitLog waits for `update --finish` to write s (updateLog).
 func (e *e2e) waitLog(s string, d time.Duration) {
 	for end := time.Now().Add(d); time.Now().Before(end); time.Sleep(500 * time.Millisecond) {
 		if strings.Contains(e.readLog(), s) {
@@ -486,7 +522,7 @@ func (e *e2e) waitLog(s string, d time.Duration) {
 		}
 	}
 	e.dumpLogs()
-	fail("update.log never said %q", s)
+	fail("%s never said %q", filepath.Base(e.updateLog()), s)
 }
 
 func (e *e2e) expectInstalled(v string) {

@@ -296,6 +296,11 @@ func (c *CC) PostToolResult(ctx context.Context, rid string, output map[string]a
 // (decision 2026-10-14).
 var ErrSignedOut = errors.New("this computer was signed out of Jarvis Automation")
 
+// PostAmbientResult answers measure_ambient_noise on this node's measurement sink.
+func (c *CC) PostAmbientResult(ctx context.Context, rid string, payload map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/nodes/"+url.PathEscape(c.Creds.NodeID)+"/ambient-noise-measurements/"+url.PathEscape(rid)+"/result", payload, nil)
+}
+
 // Revoked reports whether err is jarvisd refusing this node's key: 401 (an unknown, deactivated
 // or deleted node) or 403. Not a network error and not a 5xx: those are retried, never a reason
 // to drop credentials.

@@ -46,10 +46,27 @@ test.describe('superuser', () => {
   }
 
   test('old top-level admin paths forward to /admin', async ({ page }) => {
-    await page.goto('/settings')
-    await expect(page).toHaveURL(/\/admin\/settings$/)
+    for (const p of [...ADMIN_PAGES.map((a) => a.path.replace('/admin', '')), '/traces/abc']) {
+      await page.goto(p + '?q=1')
+      await expect(page, p).toHaveURL(new RegExp(`/admin${p}\\?q=1$`))
+    }
     await page.goto('/services')
     await expect(page).toHaveURL(/\/admin\/connections$/)
+    await page.goto('/admin/services')
+    await expect(page).toHaveURL(/\/admin\/connections$/)
+    await page.goto('/admin')
+    await expect(page).toHaveURL(/\/admin\/dashboard$/)
+  })
+
+  test('an unknown path shows the not-found page, in the shell and under /admin', async ({ page }) => {
+    for (const p of ['/no-such-page', '/admin/no-such-page']) {
+      await page.goto(p)
+      await expect(page.getByRole('heading', { name: '404' }), p).toBeVisible()
+      await expect(page.getByText('Page not found')).toBeVisible()
+    }
+    // Home is Chat, or the dashboard while the install needs attention (HomeRedirect).
+    await page.getByRole('link', { name: 'Go home' }).click()
+    await expect(page).toHaveURL(/\/(chat|admin\/dashboard)$/)
   })
 })
 

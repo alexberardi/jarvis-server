@@ -86,8 +86,13 @@ func Start(ctx context.Context, e Env, s Sys, login bool) error {
 // `systemctl --user restart` where the unit runs it, `launchctl kickstart -k` under launchd
 // (the plain LaunchAgent and the app's SMAppService one share the label). The kill in those
 // covers an agent that didn't quit. Otherwise (no unit or graphical session, no LaunchAgent,
-// Windows' Run key, which supervises nothing) it is a detached run, as `start` does.
+// Windows' Run key, which supervises nothing) it is a detached run, as `start` does. The Pi
+// node's system unit is restarted through sudo, with no quit first: it has Restart=always, so a
+// clean exit would only make systemd start it again.
 func Restart(ctx context.Context, e Env, s Sys) error {
+	if e.PiUnit {
+		return s.Run(ctx, PiRestart...)
+	}
 	var quitErr error
 	if s.Quit != nil {
 		quitErr = s.Quit()
