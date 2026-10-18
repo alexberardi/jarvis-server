@@ -62,7 +62,12 @@ export async function pushTo(token: string, title: string): Promise<Push> {
 
 /** nodeOf is a node in u's household, with its X-API-Key, for what a Pi or a desktop agent sends. */
 export async function nodeOf(u: User): Promise<Record<string, string>> {
+  return (await nodeWithId(u)).headers
+}
+
+/** nodeWithId is nodeOf with the node's id too (a chat turn names the node it goes through). */
+export async function nodeWithId(u: User): Promise<{ id: string; headers: Record<string, string> }> {
   const id = crypto.randomUUID()
   const key = await provisionNode(u.token, u.householdId, { id, name: 'E2E kitchen', room: 'kitchen' })
-  return { 'X-API-Key': `${id}:${key}` }
+  return { id, headers: { 'X-API-Key': `${id}:${key}` } }
 }

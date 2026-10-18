@@ -3,12 +3,14 @@
 // web inbox opens. Each test has its own household and devices, and every title is unique: the
 // server drops an identical push within 60 s (notifications DedupWindow).
 // docs/decisions/2026-10-18-e2e-push.md lists the events and which test covers each.
-import { call, createInboxItem, appHeaders, must, newUser, unique } from '../helpers/api'
+import { call, createInboxItem, appHeaders, inbox, must, newUser, unique, useScript } from '../helpers/api'
 import { env } from '../helpers/env'
 import { expect, test } from '../helpers/fixtures'
-import { activeTokens, nodeOf, pushesTo, pushTo, registerDevice } from '../helpers/push'
+import { activeTokens, nodeOf, nodeWithId, pushesTo, pushTo, registerDevice } from '../helpers/push'
 
 const cc = () => env('SBX_CC')
+
+test.beforeAll(() => useScript('e2e/llm/web.json'))
 
 test('a node timer, reminder and alert each push to the phone, and the push opens its inbox item', async ({ asUser }) => {
   const u = await newUser('pushnode')
@@ -143,4 +145,30 @@ test('signing a phone out of push stops its pushes', async () => {
   await must('POST', `${cc()}/api/v0/node/push-notification`, { headers: node, body: { title, body: '', user_id: u.id, target_type: 'user' } })
   expect((await pushTo(kept, title)).tokens).toEqual([kept])
   expect(await pushesTo(phone)).toEqual([])
+})
+
+test('a signal watch made in chat pushes its alert when the signal comes', async () => {
+  const u = await newUser('pushwatch')
+  const phone = await registerDevice(u)
+  const node = await nodeWithId(u)
+  await must('PUT', `${cc()}/api/v0/mobile/household/${u.householdId}/settings/watches.enabled`, { token: u.token, body: { value: true } })
+
+  // The scripted model (e2e/llm/web.json) answers this with create_watch on appt.upcoming.
+  const chat = await must<string>('POST', `${cc()}/api/v0/mobile/chat`, {
+    token: u.token,
+    body: { message: 'tell me when my e2e dentist appointment comes up', node_id: node.id, household_id: u.householdId },
+  })
+  expect(chat).toContain("I'll tell you when it comes up.")
+
+  // The node sees the appointment coming up; the watch fires and pushes to the user's phone.
+  const appt = unique('E2E dentist')
+  await must('POST', `${cc()}/api/v0/signals`, {
+    headers: node.headers,
+    body: { signal: { kind: 'appt.upcoming', source_key: appt, summary: `${appt} soon` }, data: { title: appt } },
+  })
+  const p = await pushTo(phone, '👀 E2E dentist appointment')
+  expect(p).toMatchObject({ tokens: [phone], household_id: u.householdId, data: { type: 'watch_alert' } })
+  expect(p.body).toContain(appt)
+  const item = (await inbox(u.token)).find((i) => i.id === p.data.inbox_item_id)
+  expect(item?.title).toBe('👀 E2E dentist appointment')
 })
