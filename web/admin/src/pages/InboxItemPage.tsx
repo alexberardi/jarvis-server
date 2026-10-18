@@ -31,11 +31,14 @@ export default function InboxItemPage() {
   const [running, setRunning] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
-  // Opening an item reads it.
+  // Opening an item reads it. The server's GET already marks it read (legacy parity), so it
+  // usually arrives read: the list and the unread badge catch up either way (not the item
+  // itself, which would refetch it and run this again).
   useEffect(() => {
-    if (!item || item.is_read) return
-    markRead(item.id)
-      .then(() => qc.invalidateQueries({ queryKey: inboxKeys.all }))
+    if (!item) return
+    const read = item.is_read ? Promise.resolve() : markRead(item.id)
+    read
+      .then(() => qc.invalidateQueries({ queryKey: inboxKeys.all, predicate: (q) => q.queryKey[2] !== 'item' }))
       .catch(() => {})
   }, [item, qc])
 
