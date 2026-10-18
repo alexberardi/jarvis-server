@@ -156,12 +156,20 @@ export interface InboxItem {
 /** createInboxItem posts an item as a service would (a research result, say). */
 export async function createInboxItem(
   to: { id: number; householdId: string },
-  item: { title: string; body?: string; summary?: string; category?: string; metadata?: Record<string, unknown> },
+  item: { title: string; body?: string; summary?: string; category?: string; metadata?: Record<string, unknown>; attachment_ids?: string[] },
 ): Promise<InboxItem> {
   return must('POST', `${env('SBX_NOTIFICATIONS')}/api/v0/inbox`, {
     headers: await appHeaders(),
     body: { user_id: to.id, household_id: to.householdId, source_service: 'e2e', category: 'deep_research', summary: '', body: '', ...item },
   })
+}
+
+/** uploadAttachment uploads a file as a service would, for an item's attachment_ids. */
+export async function uploadAttachment(bytes: Uint8Array<ArrayBuffer>, mime: string): Promise<{ id: string }> {
+  const url = `${env('SBX_NOTIFICATIONS')}/api/v0/inbox/attachments`
+  const r = await fetch(url, { method: 'POST', headers: { ...(await appHeaders()), 'Content-Type': mime }, body: new Blob([bytes]) })
+  if (r.status !== 201) throw new Error(`POST ${url} → ${r.status}: ${(await r.text()).slice(0, 300)}`)
+  return r.json()
 }
 
 /** inbox is the token's household's items for its user, as the inbox page lists them. */
