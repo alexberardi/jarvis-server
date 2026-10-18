@@ -7,13 +7,18 @@ import (
 	"time"
 )
 
-// Backend is what the dispatcher needs from jarvisd: verification and the two result sinks.
+// Backend is what the dispatcher needs from jarvisd: verification and the result sinks.
 // *CC implements it; tests fake it.
 type Backend interface {
 	Verify(ctx context.Context, rid string) (bool, error)
 	PostToolReport(ctx context.Context, rid string, report any) error
 	PostToolResult(ctx context.Context, rid string, output map[string]any) error
+	PostAmbientResult(ctx context.Context, rid string, payload map[string]any) error
 }
+
+// Verb handles one more command verb (a Pi node's update_node_config, preview_led_pattern,
+// measure_ambient_noise: internal/agent/pinode). It verifies and replies itself, through cc.
+type Verb func(ctx context.Context, cc Backend, details map[string]any)
 
 // Dispatcher turns command messages from jarvis/nodes/{id}/commands into tool work.
 type Dispatcher struct {
@@ -25,6 +30,8 @@ type Dispatcher struct {
 	// Packages, if set, is report_tools' installed_packages (the app's Update / Revert / health
 	// on a package card); nil reports none.
 	Packages func() []map[string]any
+	// Verbs, if set, handles the verbs it names beyond report_tools and tool_call.
+	Verbs map[string]Verb
 }
 
 // command is one element of the published array: [{"command": verb, "details": {...}}].
@@ -53,6 +60,10 @@ func (d *Dispatcher) Handle(ctx context.Context, payload []byte) {
 		case "tool_call":
 			d.toolCall(ctx, c.Details)
 		default:
+			if v, ok := d.Verbs[c.Command]; ok {
+				v(ctx, d.CC, c.Details)
+				continue
+			}
 			// A desktop node speaks two verbs. Others (tts, action, routine, ...) get no reply,
 			// so CC times out exactly as with an offline node; guessing a sink would be worse.
 			d.Log.Info("ignoring unsupported verb", "verb", c.Command)

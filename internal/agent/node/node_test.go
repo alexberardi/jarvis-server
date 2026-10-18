@@ -499,3 +499,52 @@ func TestSpecRenderRunWithoutConfirmation(t *testing.T) {
 		}
 	}
 }
+
+func (f *fakeCC) PostAmbientResult(_ context.Context, rid string, p map[string]any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.results["ambient:"+rid] = p
+	return nil
+}
+
+func TestVerbsHookGetsItsVerbsOnly(t *testing.T) {
+	cc := newFakeCC()
+	var got []string
+	d := &Dispatcher{CC: cc, Tools: &echoTools{}, Log: quiet, Verbs: map[string]Verb{
+		"preview_led_pattern": func(_ context.Context, b Backend, det map[string]any) {
+			if b != cc {
+				t.Error("the verb didn't get the dispatcher's backend")
+			}
+			got = append(got, "preview:"+str(det, "pattern"))
+		},
+	}}
+	d.Handle(context.Background(), publish(t, "preview_led_pattern", map[string]any{"pattern": "thinking"}))
+	d.Handle(context.Background(), publish(t, "tts", map[string]any{"message": "hi"}))
+	if len(got) != 1 || got[0] != "preview:thinking" {
+		t.Fatalf("verbs = %v", got)
+	}
+	if len(cc.results)+len(cc.reports)+len(cc.verified) != 0 {
+		t.Fatal("an unhooked verb produced traffic")
+	}
+}
+
+func TestPostAmbientResultHitsTheNodesSink(t *testing.T) {
+	var path, key string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, key = r.Method+" "+r.URL.Path, r.Header.Get("X-API-Key")
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+	cc := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k"})
+	if err := cc.PostAmbientResult(context.Background(), "r 1", map[string]any{"success": false, "error": "no_audio_captured"}); err != nil {
+		t.Fatal(err)
+	}
+	if path != "POST /api/v0/nodes/n1/ambient-noise-measurements/r 1/result" || key != "n1:k" {
+		t.Fatalf("%s with key %q", path, key)
+	}
+	if body["success"] != false || body["error"] != "no_audio_captured" {
+		t.Fatalf("body = %v", body)
+	}
+}
