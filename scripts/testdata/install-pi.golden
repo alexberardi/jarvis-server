@@ -1,0 +1,155 @@
+## paths
+d 755 boot
+d 755 boot/firmware
+f 644 boot/firmware/config.txt
+d 755 boot/firmware/overlays
+d 755 etc
+f 644 etc/asound.conf
+f 644 etc/fstab
+d 755 etc/jarvis-node
+d 755 etc/modprobe.d
+f 644 etc/modprobe.d/alsa-base.conf
+d 755 etc/sudoers.d
+f 440 etc/sudoers.d/jarvis-agent
+d 755 etc/sysctl.d
+f 644 etc/sysctl.d/99-jarvis-node.conf
+d 755 etc/systemd
+d 755 etc/systemd/journald.conf.d
+f 644 etc/systemd/journald.conf.d/jarvis.conf
+d 755 etc/systemd/system
+f 644 etc/systemd/system/jarvis-agent.service
+d 755 opt
+d 755 opt/jarvis-agent
+f 755 opt/jarvis-agent/jarvis-agent
+f 644 opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
+d 755 var
+d 755 var/log
+d 755 var/log/journal
+## commands
+dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
+amixer -q -c seeed2micvoicec sset PCM 100% unmute
+amixer -q -c seeed2micvoicec sset Line 2 unmute
+amixer -q -c seeed2micvoicec sset Line DAC 115 unmute
+amixer -q -c seeed2micvoicec sset Left Line Mixer DACL1 on
+amixer -q -c seeed2micvoicec sset Right Line Mixer DACR1 on
+amixer -q -c seeed2micvoicec sset HP 0 mute
+amixer -q -c seeed2micvoicec sset HP DAC 0 mute
+amixer -q -c seeed2micvoicec sset HPCOM 0 mute
+amixer -q -c seeed2micvoicec sset HPCOM DAC 0 mute
+amixer -q -c seeed2micvoicec sset PGA 49%
+amixer -q -c seeed2micvoicec sset Left PGA Mixer Line1L on
+amixer -q -c seeed2micvoicec sset Right PGA Mixer Line1R on
+amixer -q -c seeed2micvoicec cset name=ADC HPF Cut-off 1
+alsactl store
+usermod -aG audio pi
+usermod -aG spi pi
+usermod -aG gpio pi
+usermod -aG i2c pi
+usermod -aG bluetooth pi
+loginctl enable-linger pi
+systemd-tmpfiles --create --prefix /var/log/journal
+systemctl restart systemd-journald
+journalctl --flush
+sysctl -q -w vm.swappiness=1
+fallocate -l 1G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+systemctl daemon-reload
+## boot/firmware/config.txt
+[all]
+dtparam=audio=off
+#dtoverlay=wm8960-soundcard # replaced for ReSpeaker v2.0
+dtoverlay=respeaker-2mic-v2_0-overlay
+dtparam=spi=on
+dtparam=i2c_arm=on
+## etc/asound.conf
+# --- Playback -----------------------------------------------------------
+pcm.output {
+    type pulse
+}
+
+# --- Capture ------------------------------------------------------------
+pcm.dsnoopmic_hw {
+    type dsnoop
+    ipc_key 87654321
+    slave {
+        pcm "hw:CARD=seeed2micvoicec,DEV=0"
+        channels 2
+        rate 48000
+        format S16_LE
+        # ~85 ms of ring buffer, so the wake word never scores stale audio (N:install.sh).
+        period_size 1024
+        buffer_size 4096
+    }
+}
+
+pcm.dsnoopmic {
+    type plug
+    slave.pcm "dsnoopmic_hw"
+}
+
+# --- Default split: playback via PA, capture direct --------------------
+pcm.!default {
+    type asym
+    playback.pcm "output"
+    capture.pcm "dsnoopmic"
+}
+
+ctl.!default {
+    type pulse
+}
+## etc/fstab
+proc /proc proc defaults 0 0
+/swapfile none swap sw 0 0
+## etc/modprobe.d/alsa-base.conf
+options snd-soc-tlv320aic3x index=0
+## etc/sudoers.d/jarvis-agent
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+# What the Go node (jarvis-agent.service, User=pi) may run as root.
+# The HAT button (3 s held) and the admin's reboot.
+pi ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
+pi ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot, /usr/sbin/reboot
+pi ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
+# Not yet, added with the step that needs them (go-pi-node.md §7):
+# TODO(phase 4.4, provisioning AP): NetworkManager, nmcli (and hostapd/dnsmasq only if the NM AP fails).
+# TODO(#161, self-update): the self-update helper.
+# TODO(parity 5.6, packages): the apt and post-install wrappers.
+# TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
+## etc/sysctl.d/99-jarvis-node.conf
+# Keep the jarvis node's working set resident in RAM: SD-card swap is slow and causes 7-8 s wakes
+# after idle. 1 (not 0) keeps swap as a last-resort OOM safety valve.
+vm.swappiness=1
+## etc/systemd/journald.conf.d/jarvis.conf
+# Jarvis node: a persistent, size-capped journal, so a wedge or a network drop can still be read
+# after the reboot.
+[Journal]
+Storage=persistent
+SystemMaxUse=200M
+SystemKeepFree=100M
+SystemMaxFileSize=20M
+## etc/systemd/system/jarvis-agent.service
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+[Unit]
+Description=Jarvis voice node (Go)
+After=network-online.target sound.target
+Wants=network-online.target
+# One node owns the HAT: starting this stops the Python node, and starting it stops this.
+Conflicts=jarvis-node.service
+StartLimitBurst=10
+StartLimitIntervalSec=1800
+
+[Service]
+User=pi
+Group=pi
+ExecStart=/opt/jarvis-agent/jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+WorkingDirectory=/home/pi
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+Environment=HOME=/home/pi
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+SyslogIdentifier=jarvis-agent
+
+[Install]
+WantedBy=multi-user.target
