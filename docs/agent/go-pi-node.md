@@ -123,7 +123,7 @@ Tags:
 | `action` (mobile action / device control) | `:192-298` | `S:commands.go:44`, `S:smarthome_control.go:116` | `/device-control-results/{rid}` | later |
 | `callback` | `:301-422` | `S:callbacks.go:460` | `GET /callbacks/{job}`, `POST …/result` | later |
 | `routine` (carries the full definition) | `:926-982` | `S:routines_run.go:104-110` | `/device-control-results/{rid}` | later |
-| `enroll_voice` / `verify_voice` | `:554-803` | `S:media.go:495` | `/media/whisper/voice-profiles/*`, `/mobile/voice-profile-results/{rid}` | later |
+| `enroll_voice` / `verify_voice` | `:554-803` | `S:media.go:495` | `/media/whisper/voice-profiles/*`, `/mobile/voice-profile-results/{rid}` | done in Go core (Pi profile only; a desktop's speaker is the signed-in user) |
 | `update_node_config` (settings push; restart only for `wake_word_model`) | `:1092-1177` | `S:commands.go:91` | – | later |
 | `preview_led_pattern` | `:1180-1221` | `S:commands.go:112` | – | later |
 | `measure_ambient_noise` | `:1257-1383` | `S:ambient.go:64` | `POST /nodes/{id}/ambient-noise-measurements/{rid}/result` | later |
@@ -966,6 +966,12 @@ These are **still needed**; install.sh step lines are cited:
    7. factory-reset.
    8. Bluetooth.
    9. Device control.
+   10. Voice-profile takes (`enroll_voice` / `verify_voice`, the app's "record on this node").
+       **Done 2026-10-17** for the Pi profile: `voice.Mic` hands a fixed-length take to the
+       running pipeline, which records it between turns with the wake word paused (cue, 1.5 s
+       preroll, 48 kHz WAV like a voice turn's upload); `voice.VoiceProfiles` uploads it to
+       M4/M5 and posts V9 (Python's success and `audio_bus_unavailable` / `record_failed` /
+       `upload_failed` / `verify_failed` shapes). Unit tests; not yet run on a Pi.
 
    Then retire the Python node.
 

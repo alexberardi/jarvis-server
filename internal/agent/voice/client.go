@@ -336,6 +336,59 @@ func (s *HTTPServer) Transcribe(ctx context.Context, command, speaker []byte, id
 	return t, json.Unmarshal(raw, &t)
 }
 
+// EnrollVoice is M4: POST /media/whisper/voice-profiles/enroll?user_id=…, the take as
+// multipart file. A take jarvisd finds too poor is a 422 *node.HTTPError.
+func (s *HTTPServer) EnrollVoice(ctx context.Context, userID int64, wav []byte) (map[string]any, error) {
+	var out map[string]any
+	q := url.Values{"user_id": {strconv.FormatInt(userID, 10)}}
+	return out, s.uploadWAV(ctx, "/api/v0/media/whisper/voice-profiles/enroll", q, wav, &out)
+}
+
+// VerifyVoice is M5: POST /media/whisper/voice-profiles/verify?user_id=…&household_id=….
+func (s *HTTPServer) VerifyVoice(ctx context.Context, userID int64, householdID string, wav []byte) (VerifyResult, error) {
+	var out VerifyResult
+	q := url.Values{"user_id": {strconv.FormatInt(userID, 10)}, "household_id": {householdID}}
+	return out, s.uploadWAV(ctx, "/api/v0/media/whisper/voice-profiles/verify", q, wav, &out)
+}
+
+// PostVoiceProfileResult is V9: a take's outcome, for the app polling V10.
+func (s *HTTPServer) PostVoiceProfileResult(ctx context.Context, rid string, result map[string]any) error {
+	ctx, cancel := context.WithTimeout(ctx, endTimeout)
+	defer cancel()
+	return s.postJSON(ctx, "/api/v0/mobile/voice-profile-results/"+url.PathEscape(rid), result, nil)
+}
+
+// uploadWAV posts wav as the multipart field "file" and decodes the JSON answer into out.
+func (s *HTTPServer) uploadWAV(ctx context.Context, path string, q url.Values, wav []byte, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, sttTimeout)
+	defer cancel()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", `form-data; name="file"; filename="voice.wav"`)
+	h.Set("Content-Type", "audio/wav")
+	w, err := mw.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(wav); err != nil {
+		return err
+	}
+	if err := mw.Close(); err != nil {
+		return err
+	}
+	resp, err := s.request(ctx, path+"?"+q.Encode(), mw.FormDataContentType(), &body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode/100 != 2 {
+		return httpError(path, resp.StatusCode, raw)
+	}
+	return json.Unmarshal(raw, out)
+}
+
 // VoiceStream is POST /voice/command/stream: 200 audio/raw with X-Audio-* headers, or 202
 // JSON. ctx governs the whole body, so cancelling it stops a stream mid-reply.
 func (s *HTTPServer) VoiceStream(ctx context.Context, req StreamRequest) (Reply, error) {

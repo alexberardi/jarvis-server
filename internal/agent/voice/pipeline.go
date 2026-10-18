@@ -130,6 +130,8 @@ type Pipeline struct {
 	// as node_context.stt_vocabulary at each conversation start for whisper's prompt. Never
 	// the LLM's (DESIGN.md §14).
 	Vocabulary func(ctx context.Context) string
+	// Mic, when set, is how others record through this pipeline's microphone (take.go).
+	Mic *Mic
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -165,6 +167,10 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	}
 	if p.Log == nil {
 		p.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if p.Mic != nil {
+		p.Mic.attached.Add(1)
+		defer p.Mic.attached.Add(-1)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	queue := chunkQueue
@@ -280,10 +286,32 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 	pre := &ring[float64]{n: preWakeChunks}
 	clip := &ring[[]int16]{n: wakeClipChunks}
 	var lastFire time.Time
+	// fresh starts listening again on new audio after a turn or a take: what was captured
+	// meanwhile (our own reply, mostly) is neither scored nor counted as the room's noise floor.
+	fresh := func() {
+		flush(chunks)
+		pre.items, clip.items, pend = pre.items[:0], clip.items[:0], pend[:0]
+		dec = audio.NewDecimator(decimation)
+		p.Detector.Reset()
+	}
 	for {
-		chunk, err := recv(ctx, chunks, 0)
-		if err != nil {
-			return err
+		var chunk []int16
+		select {
+		case req := <-p.takes():
+			pcm, err := p.take(ctx, chunks, req.take)
+			req.done <- takeResult{pcm, err}
+			if ctx.Err() != nil {
+				return nil
+			}
+			fresh()
+			continue
+		case c, ok := <-chunks:
+			if !ok {
+				return context.Canceled // capture stopped (its error is reported by Run)
+			}
+			chunk = c
+		case <-ctx.Done():
+			return context.Canceled
 		}
 		pre.push(RMS(chunk))
 		clip.push(chunk)
@@ -304,12 +332,7 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			// Back to listening on fresh audio: what was captured during the turn (our own
-			// reply, mostly) is neither scored nor counted as the room's noise floor.
-			flush(chunks)
-			pre.items, clip.items, pend = pre.items[:0], clip.items[:0], pend[:0]
-			dec = audio.NewDecimator(decimation)
-			p.Detector.Reset()
+			fresh()
 			break
 		}
 	}

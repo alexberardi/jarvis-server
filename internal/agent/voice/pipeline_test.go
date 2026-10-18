@@ -173,6 +173,7 @@ type fakeServer struct {
 	streamIn StreamRequest
 	spoken   string
 	ended    chan string
+	onSpeak  func(text string) // called before Speak answers
 }
 
 func newServer() *fakeServer {
@@ -220,7 +221,11 @@ func (s *fakeServer) Speak(_ context.Context, text string) (*Audio, error) {
 	s.mu.Lock()
 	s.spoken = text
 	s.said = append(s.said, text)
+	onSpeak := s.onSpeak
 	s.mu.Unlock()
+	if onSpeak != nil {
+		onSpeak(text)
+	}
 	return &Audio{Rate: 22050, Channels: 1, Message: text, Body: io.NopCloser(bytes.NewReader(s.speakPCM))}, nil
 }
 

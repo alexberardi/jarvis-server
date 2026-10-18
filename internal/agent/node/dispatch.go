@@ -25,6 +25,10 @@ type Dispatcher struct {
 	// Packages, if set, is report_tools' installed_packages (the app's Update / Revert / health
 	// on a package card); nil reports none.
 	Packages func() []map[string]any
+	// Verbs are the verbs this node speaks beyond report_tools and tool_call (a Pi's
+	// enroll_voice and verify_voice), each given the command's details. They can't replace
+	// the two built-ins. A verb in neither is ignored.
+	Verbs map[string]func(ctx context.Context, details map[string]any)
 }
 
 // command is one element of the published array: [{"command": verb, "details": {...}}].
@@ -53,6 +57,10 @@ func (d *Dispatcher) Handle(ctx context.Context, payload []byte) {
 		case "tool_call":
 			d.toolCall(ctx, c.Details)
 		default:
+			if h := d.Verbs[c.Command]; h != nil {
+				h(ctx, c.Details)
+				continue
+			}
 			// A desktop node speaks two verbs. Others (tts, action, routine, ...) get no reply,
 			// so CC times out exactly as with an offline node; guessing a sink would be worse.
 			d.Log.Info("ignoring unsupported verb", "verb", c.Command)
