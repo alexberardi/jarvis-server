@@ -29,6 +29,9 @@ import (
 const (
 	errDesktopNoReset = "A desktop agent has no factory reset. Sign it out instead."
 	errSignOutRole    = "Only the member who added this device, or a household admin, can sign it out"
+	// Chat and actions on a desktop agent (canUseDesktop).
+	errDesktopChatRole   = "Only the member signed in on this computer, or a household admin, can chat to it"
+	errDesktopActionRole = "Only the member signed in on this computer, or a household admin, can run its actions"
 )
 
 // desktop: the node said it is the desktop agent (heartbeat node_kind, or its install mode).
@@ -81,13 +84,29 @@ func (m *Module) revokeNode(ctx context.Context, id string) error {
 }
 
 // canSignOut: the owner while still a member of the node's household, or a household admin.
-// A node without a household is the superuser's (requireNodeAccess's rule, D8).
 func (m *Module) canSignOut(ctx context.Context, u authn.User, n *nodeRow) error {
+	return m.ownerOrAdmin(ctx, u, n, errSignOutRole)
+}
+
+// canUseDesktop gates chat and node actions on a desktop agent, whose client tools read the
+// screen and type on someone's own computer: the owner (while still a member) or a household
+// admin, so an ownerless desktop is admin only. Any other node (a Pi) passes.
+func (m *Module) canUseDesktop(ctx context.Context, u authn.User, n *nodeRow, msg string) error {
+	if !n.desktop() {
+		return nil
+	}
+	return m.ownerOrAdmin(ctx, u, n, msg)
+}
+
+// ownerOrAdmin: the owner while still a member of the node's household, or a household admin;
+// msg is the 403 for any other member. A node without a household is the superuser's
+// (requireNodeAccess's rule, D8).
+func (m *Module) ownerOrAdmin(ctx context.Context, u authn.User, n *nodeRow, msg string) error {
 	if !n.householdID.Valid || n.householdID.String == "" {
 		if u.IsSuperuser {
 			return nil
 		}
-		return fail(http.StatusForbidden, errSignOutRole)
+		return fail(http.StatusForbidden, msg)
 	}
 	role, member, err := m.Auth.HouseholdRole(ctx, u.ID, n.householdID.String)
 	if err != nil {
@@ -102,7 +121,7 @@ func (m *Module) canSignOut(ctx context.Context, u authn.User, n *nodeRow) error
 	if roleRank(role) >= roleRank(authn.RoleAdmin) {
 		return nil
 	}
-	return fail(http.StatusForbidden, errSignOutRole)
+	return fail(http.StatusForbidden, msg)
 }
 
 // handleSignOutNode is POST /nodes/{node_id}/sign-out (user JWT): Add-ons' Sign out.

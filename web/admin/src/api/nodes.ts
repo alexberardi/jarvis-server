@@ -56,16 +56,6 @@ export async function getNodesView(): Promise<NodesView> {
   return { households, nodes }
 }
 
-/** PendingPairing is a computer waiting for approval (device-code pairing, DESIGN §13). */
-export interface PendingPairing {
-  code: string
-  name: string
-  platform: string
-  requested_from: string
-  created_at: string
-  expires_in: number
-}
-
 /** PairingHousehold is one of the caller's own households, the only ones they can approve into. */
 export interface PairingHousehold {
   id: string
@@ -73,12 +63,17 @@ export interface PairingHousehold {
   role: string
 }
 
+/**
+ * PairingsView is what the approval form needs: how many computers wait and the caller's
+ * households. cc never lists the codes (loop #100): the approver types the one the computer
+ * shows, so only someone who can see that computer can approve it.
+ */
 export interface PairingsView {
-  pairings: PendingPairing[]
+  waiting: number
   households: PairingHousehold[]
 }
 
-/** getPairings lists the computers waiting for approval, and the caller's households. */
+/** getPairings counts the computers waiting for approval, and lists the caller's households. */
 export async function getPairings(): Promise<PairingsView> {
   const { data } = await apiClient.get<PairingsView>('/api/cc/api/v0/nodes/pairings')
   return data

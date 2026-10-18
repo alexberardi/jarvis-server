@@ -410,15 +410,54 @@ func TestRefreshRejectionsLogTheReason(t *testing.T) {
 	reject(live["refresh_token"].(string), "Invalid refresh token", "user_inactive")
 }
 
+// revokeFamilyOnReuse sets auth.token.revoke_family_on_reuse.
+func (e *env) revokeFamilyOnReuse(on bool) {
+	e.t.Helper()
+	if err := e.m.settings.Set(context.Background(), settingRevokeFamilyOnReuse, on, noScope); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 func TestRefreshRevokeFamilyOnReuse(t *testing.T) {
 	clock := withClock(t, time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
-	e := newEnv(t, func(m *Module) { m.RevokeFamilyOnReuse = true })
+	e := newEnv(t)
+	e.revokeFamilyOnReuse(true)
 	u := e.register()
 	r1 := e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
 	*clock = clock.Add(time.Minute)
 	e.expect(401, "Invalid refresh token", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
 	// The live tail of the family was revoked too.
 	e.expect(401, "Invalid refresh token", "POST", "/auth/refresh", map[string]any{"refresh_token": r1["refresh_token"]}, nil)
+}
+
+// The legacy env var still turns it on when the settings DB has no row.
+func TestRefreshRevokeFamilyOnReuseEnvFallback(t *testing.T) {
+	t.Setenv("REFRESH_TOKEN_REVOKE_FAMILY_ON_REUSE", "true")
+	clock := withClock(t, time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
+	e := newEnv(t)
+	u := e.register()
+	r1 := e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
+	*clock = clock.Add(time.Minute)
+	e.expect(401, "Invalid refresh token", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
+	e.expect(401, "Invalid refresh token", "POST", "/auth/refresh", map[string]any{"refresh_token": r1["refresh_token"]}, nil)
+}
+
+// A grace miss (a restart inside the grace window) is a benign double submit the server
+// forgot, not a theft: even with revocation on, the live session survives.
+func TestRefreshGraceMissNeverRevokesFamily(t *testing.T) {
+	withClock(t, time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
+	e := newEnv(t)
+	e.revokeFamilyOnReuse(true)
+	var logs bytes.Buffer
+	e.m.deps.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	u := e.register()
+	r1 := e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
+	e.m.grace = newGraceCache() // "restart": the in-process cache is gone
+	e.expect(401, "Invalid refresh token", "POST", "/auth/refresh", map[string]any{"refresh_token": u.refresh}, nil)
+	if out := logs.String(); !strings.Contains(out, "reason=grace_miss") || !strings.Contains(out, "revoked_family=false") {
+		t.Fatalf("want grace_miss with revoked_family=false, got %q", out)
+	}
+	e.expect(200, "", "POST", "/auth/refresh", map[string]any{"refresh_token": r1["refresh_token"]}, nil)
 }
 
 func TestRefreshGraceMissAfterRestart(t *testing.T) {
@@ -994,7 +1033,7 @@ func TestSettingsGuards(t *testing.T) {
 	u := e.register()
 	su := e.superuser()
 	m := e.expect(200, "", "GET", "/settings/", nil, e.appH())
-	if m["total"] != float64(5) {
+	if m["total"] != float64(6) {
 		t.Fatal(m)
 	}
 	e.expect(200, "", "GET", "/settings/auth.algorithm", nil, bearerH(su.access))

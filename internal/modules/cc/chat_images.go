@@ -186,7 +186,7 @@ func (m *Module) scheduleConvJob(jobType string, j convJob, dedup string) {
 		if jobType == convCompactJob {
 			fn = m.compactJob
 		}
-		go fn(context.Background(), j)
+		m.background(jobType, func() { fn(context.Background(), j) })
 		return
 	}
 	payload, _ := json.Marshal(j)

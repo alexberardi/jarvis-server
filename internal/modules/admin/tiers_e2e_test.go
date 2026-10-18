@@ -13,6 +13,7 @@ import (
 
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	ccmod "github.com/alexberardi/jarvis-server/internal/modules/cc"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	notifmod "github.com/alexberardi/jarvis-server/internal/modules/notifications"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -107,7 +108,10 @@ func openRegistration(t *testing.T, authURL, root string) {
 }
 
 func TestMemberTiersEndToEnd(t *testing.T) {
-	base, authURL, ccURL, notif, home := memberStack(t)
+	// No live model names the default built-in prompt here; the prompt routes need one.
+	base, authURL, ccURL, notif, home := memberStackWith(t, func(c *ccmod.Module) {
+		c.DefaultPromptProvider = func(context.Context) string { return prompts.Qwen3_8B }
+	})
 
 	// The superuser, through the gateway with the setup token (AD2).
 	tok, err := os.ReadFile(authmod.SetupTokenPath(home))
@@ -232,6 +236,18 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/households/"+h2+"/smart-home/config", nil,
 		append(bearer(m1), "X-API-Key", tierCCAdminKey)...); code != 403 {
 		t.Errorf("foreign smart-home config with the admin key alongside: %d %v", code, out)
+	}
+
+	// The household prompt: cc lets only an admin of that household in.
+	a1 := users["a1@example.com"]
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/households/"+h1+"/prompt", nil, bearer(a1)...); code != 200 {
+		t.Errorf("own prompt as a household admin: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/households/"+h1+"/prompt", nil, bearer(m1)...); code != 403 {
+		t.Errorf("own prompt as a member: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", base+"/api/cc/api/v0/households/"+h2+"/prompt", map[string]any{"text": "Hi."}, bearer(a1)...); code != 403 {
+		t.Errorf("foreign prompt edit as another household's admin: %d %v", code, out)
 	}
 
 	// Inbox: the caller's own rows.

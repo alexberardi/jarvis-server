@@ -84,9 +84,40 @@ type wakeVerdict struct {
 	Similarity float64
 }
 
+// turnLock serializes a conversation's turns. A turn holds it across LLM calls (compaction,
+// the tool loop), so a waiting turn gives up with its caller (lock) instead of piling up
+// behind it; the short internal holders use Lock. The zero value is unlocked.
+type turnLock struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (l *turnLock) sem() chan struct{} {
+	l.once.Do(func() { l.ch = make(chan struct{}, 1) })
+	return l.ch
+}
+
+// lock takes the lock, or returns errConversationBusy once ctx ends while it waits.
+func (l *turnLock) lock(ctx context.Context) error {
+	select {
+	case l.sem() <- struct{}{}:
+		return nil
+	default:
+	}
+	select {
+	case l.sem() <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return errConversationBusy
+	}
+}
+
+func (l *turnLock) Lock()   { l.sem() <- struct{}{} }
+func (l *turnLock) Unlock() { <-l.sem() }
+
 // conversation is one cached voice conversation.
 type conversation struct {
-	mu sync.Mutex // serializes turns
+	mu turnLock // serializes turns
 
 	id          string
 	nodeID      string
@@ -98,7 +129,10 @@ type conversation struct {
 	agents      *pyjson.Object
 	homeContext map[string]any
 
-	provider prompts.Provider
+	// mode is how this conversation talks to the live model, and promptName the prompt its
+	// messages[0] was rendered from; both are fixed at warmup (prefix cache).
+	mode       prompts.Mode
+	promptName string
 	// messages[0] is the byte-stable system prompt.
 	messages []chatMsg
 	// tools are the offered tools (gated server tools, then the node's client tools), as raw
@@ -106,7 +140,6 @@ type conversation struct {
 	tools       []prompts.Tool
 	serverNames map[string]bool
 	commands    []*pyjson.Object // merged available commands (examples, flags, param types)
-	forceTools  bool
 
 	referenced []any // the RECENTLY SHOWN items (raw)
 

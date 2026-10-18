@@ -49,11 +49,11 @@ func TestModeParseAndSanitize(t *testing.T) {
 	}
 }
 
-func TestModeNativeToolsMatchesProviders(t *testing.T) {
+func TestModeNativeTools(t *testing.T) {
 	tools := mustTools(t, `[{"type":"function","keywords":["a"],"function":{"name":"play","description":"d","parameters":{"type":"object","properties":{"q":{"type":"string","description":"x","format":"date","_refinable":true}}}}}]`)
-	want, _ := Lookup(Qwen3_5_9B)
-	if got, exp := CompactASCII(NativeTools(tools)[0]), CompactASCII(want.BuildTools(StripJarvisExtensions(tools))[0]); got != exp {
-		t.Fatalf("native tools %s, want %s", got, exp)
+	want := `{"type":"function","function":{"name":"play","description":"d","parameters":{"type":"object","properties":{"q":{"type":"string","description":"x","format":"date"}}}}}`
+	if got := CompactASCII(NativeTools(tools)[0]); got != want {
+		t.Fatalf("native tools %s, want %s", got, want)
 	}
 }
 

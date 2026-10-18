@@ -135,7 +135,8 @@ func parseChatRequest(w http.ResponseWriter, r *http.Request, warmup bool) (chat
 
 // chatNode is the pre-stream gate: household membership (403), then the node must belong to
 // that household (404, legacy _validate_node_in_household). Cross-household is blocked by
-// both: a user can only chat to nodes of a household they are a member of.
+// both: a user can only chat to nodes of a household they are a member of. A desktop agent is
+// its owner's or a household admin's (canUseDesktop, 403).
 func (m *Module) chatNode(ctx context.Context, u authn.User, req chatRequest) (*nodeRow, error) {
 	if err := m.requireRole(ctx, u.ID, req.HouseholdID, authn.RoleMember); err != nil {
 		return nil, err
@@ -146,6 +147,9 @@ func (m *Module) chatNode(ctx context.Context, u authn.User, req chatRequest) (*
 	}
 	if err != nil || !row.householdID.Valid || row.householdID.String != req.HouseholdID {
 		return nil, m.chatNodeNotFound(ctx, req)
+	}
+	if err := m.canUseDesktop(ctx, u, row, errDesktopChatRole); err != nil {
+		return nil, err
 	}
 	return row, nil
 }
@@ -357,7 +361,9 @@ type chatState struct {
 // commits (§11); node waits stop when the client is gone.
 func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, row *nodeRow, req chatRequest) {
 	tr := newReqTrace()
-	llmCtx := withTrace(context.WithoutCancel(ctx), tr) // the pipeline's spans land on tr
+	// The pipeline's spans land on tr; a turn still waiting for the conversation gives up with
+	// the client.
+	llmCtx := withTurnWait(withTrace(context.WithoutCancel(ctx), tr), ctx)
 	cid := req.ConversationID
 	if cid == "" {
 		cid = newMobileConversationID()
@@ -472,7 +478,7 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 				finish("", "client disconnected")
 				return
 			}
-			end := tr.measure("continue_conversation", "cc", m.continueMeta(cid, results))
+			end := tr.measure("continue_conversation", "cc", m.continueMeta(llmCtx, cid, results))
 			res, _, err = m.continueBlocking(llmCtx, cid, results)
 			end(err)
 			if err != nil {

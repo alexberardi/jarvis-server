@@ -29,7 +29,20 @@ server. No provider classes, no interface, no registry. The contract is
   `prompt_provider` defaults don't change.
 - **Cleanup is always on.** Stripping `<think>`, unwrapping `<message>` and parsing `<tool_call>`
   run for every model; they are not a setting. Response format and force-tools aren't settings
-  either.
+  either. Against the G5 parse goldens (`fixtures/golden/prompts/_parse.json`, 13 raw outputs
+  per provider), every row now gets the `Qwen3_14B_Compressed` result. The rows that differ from
+  their provider's legacy value (counted by `TestG5ParseGolden`):
+
+  | provider | `parse_response` | `sanitize_text` | which rows |
+  | --- | --- | --- | --- |
+  | `Qwen3_8B_Compressed` | 2/13 | 2/13 | the two `<message>`-wrapped replies are unwrapped on parse too (sanitize already did since D22) |
+  | `Qwen3_5_9B_Compressed` | 2/13 | 2/13 | the same two rows |
+  | `ChatGPTOpenAI` | 10/13 | 5/13 | legacy parse was always `None`; sanitize was the identity, now it strips `<think>` (also unclosed), unwraps `<message>` and trims |
+
+  `parse_response` runs only on the text tool-calling path, so the 9B and ChatGPT parse rows
+  change nothing until such a model runs in text mode. The 8B/9B sanitize rows already behaved
+  this way before the change (D22); what a turn sees change today is the 8B's parse of a
+  `<message>`-wrapped reply and ChatGPT's sanitize of the 5 rows.
 - **One prompt per household:** a built-in by name (the install default, `llm.prompt_provider`)
   or an edited/imported text, with reset back to the default and a fallback to it when a stored
   prompt stops validating. Edits apply from the next conversation.

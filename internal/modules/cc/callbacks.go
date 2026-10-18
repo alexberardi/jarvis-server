@@ -128,6 +128,10 @@ func (m *Module) buildServerCallbacks() map[string]serverCallbackFunc {
 		}
 		return callbackResult{Success: true, ContextData: cd}, nil
 	}
+	// Watch alerts' Pause / Resume / Stop watching (autonomy PLAN §2).
+	for key, f := range m.watchCallbacks() {
+		out[key] = f
+	}
 	return out
 }
 
@@ -501,7 +505,7 @@ func (m *Module) dispatchServerCallback(jobID string) {
 			m.deps.Log.Error("cc: server callback enqueue failed; running inline", "job", jobID, "err", err)
 		}
 	}
-	go m.runServerCallback(context.Background(), jobID)
+	m.background("server callback", func() { m.runServerCallback(context.Background(), jobID) })
 }
 
 // runServerCallback is _run_server_callback_job. It never leaves the job pending: a missing

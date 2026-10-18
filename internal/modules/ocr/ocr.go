@@ -96,10 +96,9 @@ type Module struct {
 	// Version is what /health reports.
 	Version string
 
-	// LLMURL is an OpenAI-compatible endpoint (during the strangler phase the legacy
-	// llm-proxy, later jarvisd's own) used for LLM vision and for text validation, with
-	// LLMAppID/LLMAppKey as app credentials. Empty: no LLM vision, validation fails open.
-	LLMURL, LLMAppID, LLMAppKey string
+	// LLM is jarvisd's llm module (its Service), used for LLM vision and for text
+	// validation. Nil: no LLM vision, validation fails open.
+	LLM LLM
 	// AppleVisionURL/AppleVisionKey reach jarvis-osx-api (POST /v1/ocr, an ocr:read key). On
 	// macOS jarvisd reads with Vision in process (ID13) and this is only the fallback.
 	AppleVisionURL, AppleVisionKey string
@@ -115,9 +114,6 @@ type Module struct {
 	// CallbackAttempts bounds callback retries (default 12, exponential backoff up to 5 min).
 	CallbackAttempts int
 	HTTPClient       *http.Client
-	// LLMClient carries the LLM vision and validation calls (jarvisd routes them in memory to
-	// its llm module). Nil uses HTTPClient.
-	LLMClient *http.Client
 
 	// Engines, when set, replaces the engines built from the fields above (tests).
 	Engines []Engine
@@ -167,9 +163,8 @@ func (m *Module) buildEngines() []Engine {
 	if av := appleVisionEngine(native, remote); av != nil {
 		out = append(out, av)
 	}
-	if m.LLMURL != "" {
-		out = append(out, &LLMVision{URL: m.LLMURL, AppID: m.LLMAppID, AppKey: m.LLMAppKey, Client: m.llmClient(),
-			TimeoutFn: m.llmVisionTimeout})
+	if m.LLM != nil {
+		out = append(out, &LLMVision{LLM: m.LLM, TimeoutFn: m.llmVisionTimeout})
 	}
 	return out
 }
@@ -607,11 +602,4 @@ func readPart(fh *multipart.FileHeader) (Image, error) {
 		ct = strings.TrimSpace(ct[:i])
 	}
 	return Image{Data: data, ContentType: ct}, nil
-}
-
-func (m *Module) llmClient() *http.Client {
-	if m.LLMClient != nil {
-		return m.LLMClient
-	}
-	return m.HTTPClient
 }

@@ -884,8 +884,8 @@ GitHub API base (the e2e uses it); it can't weaken anything since the signature 
    for an unsigned release), verify, download the archive (size-checked, progress reported), checksum,
    extract `jarvisd(.exe)`, run `<new> version` and require the tag.
 3. Snapshot every `<home>/*.db` with `VACUUM INTO` → `<home>/backups/<db>-<fromver>-<UTC>.db` (0600, keep 3
-   per DB) and record every `goose_*` table's applied versions. Write the marker
-   `<home>/updates/upgrade.json` (`staged`).
+   per DB) and record every `goose_*` table's applied versions and the time the snapshots began
+   (`snapshot_at`). Write the marker `<home>/updates/upgrade.json` (`staged`).
 4. Swap, when this process can write the executable's directory: re-verify the staged files, extract the
    binary next to the executable, copy the executable to `jarvisd.prev` (`jarvisd.prev.exe`), rename the
    new one over it (Windows: the running exe is renamed to `jarvisd.exe.old` first, deleted on the next
@@ -928,7 +928,10 @@ disabled); success within `JARVIS_UPGRADE_GATE_TIMEOUT` (default 2 m) records `s
 `<home>/updates/last-upgrade.json` and clears the marker. Timeout → serve stops, the DB is closed, and
 rollback runs (in process if writable, else exit 75 for the helper). Rollback copies `jarvisd.prev` back
 and restores a DB snapshot **only if** that DB's goose versions differ from the recorded ones, then records
-`rolled_back` with the reason. A swapped marker seen by another version is closed as `failed`. If the new
+`rolled_back` with the reason. A restore discards everything written since the snapshot (the old
+version's writes after staging and the new version's during its gate attempts), so the result also
+records `data_since` (the marker's `snapshot_at`, or `staged_at` for markers staged before #109); the CLI
+says "database restored: data written since <time> was rolled back" and the admin Updates page shows it. A swapped marker seen by another version is closed as `failed`. If the new
 binary never reports anything (can't start far enough to count), the waiting CLI rolls back itself after
 `2 × (gate + 15 s) + 1 m`. `jarvisd upgrade --rollback` rolls back a pending upgrade, or (no marker) just
 restores `jarvisd.prev` and leaves the DB (the guard then tells you about snapshots if needed), recording

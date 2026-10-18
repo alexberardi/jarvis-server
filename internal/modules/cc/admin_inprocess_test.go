@@ -56,7 +56,7 @@ func TestPromptProviderStatus(t *testing.T) {
 		m.DefaultPromptProvider = func(context.Context) string { return derived }
 	}})
 	ctx := context.Background()
-	names := prompts.Names()
+	names := prompts.BuiltinNames()
 	if len(names) < 2 {
 		t.Fatalf("need two providers, have %v", names)
 	}
@@ -75,8 +75,8 @@ func TestPromptProviderStatus(t *testing.T) {
 	if st := e.m.PromptProvider(ctx); st.Effective != names[1] || st.Source != PromptSourceSetting || st.Derived != names[0] {
 		t.Fatalf("override: %+v", st)
 	}
-	if p, err := e.m.promptProvider(ctx); err != nil || p.Name() != names[1] {
-		t.Fatalf("voice turn uses %v %v", p, err)
+	if name, text, err := e.m.promptText(ctx, ""); err != nil || name != names[1] || text == "" {
+		t.Fatalf("voice turn uses %q %v", name, err)
 	}
 	if err := e.m.SetPromptProvider(ctx, "Llama2"); !errors.Is(err, ErrUnknownPromptProvider) {
 		t.Fatalf("unknown provider: %v", err)

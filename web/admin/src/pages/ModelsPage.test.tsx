@@ -11,6 +11,8 @@ import ModelsPage from './ModelsPage'
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
 }))
+// The voice prompt editor has its own tests and needs a signed-in household.
+vi.mock('@/components/models/PromptEditorCard', () => ({ default: () => null }))
 vi.mock('@/api/auth', async (orig) => ({ ...(await orig<typeof import('@/api/auth')>()), getSetupState: vi.fn() }))
 vi.mock('@/api/llm', async (orig) => ({
   ...(await orig<typeof import('@/api/llm')>()),

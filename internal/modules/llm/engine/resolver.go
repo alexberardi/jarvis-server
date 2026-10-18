@@ -110,8 +110,12 @@ type Resolver struct {
 	StopTimeout    time.Duration // default 10s
 	Restart        engines.RestartPolicy
 	// RetryFailed is the base cooldown before a failed engine is tried again (doubling up to
-	// 10× it). Default 60s, as the legacy model service.
+	// 8× it). Default 60s, as the legacy model service.
 	RetryFailed time.Duration
+	// MaxRetries is how many times a failed engine is retried before the resolver gives up
+	// and leaves it failed until its settings change or Retry is called. Default 3;
+	// negative = never give up.
+	MaxRetries int
 	// Interval is how often Start's loop reconciles; default 15s.
 	Interval time.Duration
 	// TemplateDir holds the pinned chat templates engines are launched with
@@ -121,10 +125,22 @@ type Resolver struct {
 	// later is noticed even when the label's settings are all "auto" (nil = in memory only).
 	Memory GPUMemory
 
+	// mu guards the maps below. It is never held while an engine stops (that waits up to
+	// StopTimeout): engines are detached from instances under mu and stopped after it is
+	// released, so other labels resolve meanwhile.
 	mu        sync.Mutex
 	instances map[string]*instance // by key hash
 	bound     map[string]string    // label -> key hash
 	wake      chan struct{}
+	// stopping holds the detached engines whose stop is under way; each channel closes once its
+	// engine has exited. No new engine starts while one is stopping, so a replacement loads
+	// only after the GPU memory is freed.
+	stopping map[*instance]chan struct{}
+	// detached are the engines detached since mu was taken, for release to stop.
+	detached []*instance
+	// last is each label's latest ensure outcome, which Status reports for local labels
+	// without an engine.
+	last map[string]error
 	// lastGood is Memory's content: label -> the GPU placement it last ran healthy on.
 	lastGood map[string]Placement
 	// gpuDown remembers labels refused for a lost GPU, to log each loss once.
@@ -139,15 +155,25 @@ type instance struct {
 	apiKey string
 	alias  string
 	sup    *engines.Supervisor
-	// retries counts failed-engine retries, for the cooldown.
+	// retries counts failed-engine retries, for the cooldown and MaxRetries.
 	retries int
+	// gaveUp is set once retries reach MaxRetries: the engine stays failed until Retry.
+	gaveUp bool
 }
+
+// ErrUnknownEngine is returned by Retry for an engine name the resolver doesn't run.
+var ErrUnknownEngine = errors.New("unknown engine")
+
+// ErrNotFailed is returned by Retry for an engine that hasn't failed: there is nothing to retry.
+var ErrNotFailed = errors.New("engine has not failed")
 
 func (r *Resolver) init() {
 	if r.instances == nil {
 		r.instances = map[string]*instance{}
 		r.bound = map[string]string{}
 		r.wake = make(chan struct{}, 1)
+		r.stopping = map[*instance]chan struct{}{}
+		r.last = map[string]error{}
 	}
 	if r.Log == nil {
 		r.Log = slog.Default()
@@ -169,45 +195,126 @@ func (r *Resolver) init() {
 // ErrNotConfigured, a *NotReadyError (errors.Is ErrNotReady) while the engine loads or is
 // down, or ErrUnknownLabel.
 func (r *Resolver) Resolve(ctx context.Context, label string) (Endpoint, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	ep, inst, err := r.ensure(ctx, label)
-	r.gc(ctx)
-	if err != nil || inst == nil {
-		return ep, err
+	for {
+		r.mu.Lock()
+		r.init()
+		ep, inst, err := r.ensure(ctx, label)
+		r.gc()
+		var p parked
+		if inst != nil {
+			p = inst.parked()
+		}
+		var wait []chan struct{}
+		if isStopWait(err) {
+			wait = slices.Collect(maps.Values(r.stopping))
+		}
+		r.release(ctx)
+		if wait != nil {
+			if waitAll(ctx, wait) != nil {
+				return Endpoint{}, err.(stopWait).NotReadyError
+			}
+			continue
+		}
+		if err != nil || inst == nil {
+			return ep, err
+		}
+		return ready(ep, inst, p)
 	}
+}
+
+// parked is whether the resolver gave up on an engine, read under r.mu for ready.
+type parked struct {
+	gaveUp  bool
+	retries int
+}
+
+func (inst *instance) parked() parked { return parked{inst.gaveUp, inst.retries} }
+
+// ready reports a local label's endpoint by its engine's state; p is its parked snapshot.
+func ready(ep Endpoint, inst *instance, p parked) (Endpoint, error) {
 	st := inst.sup.Status()
 	switch st.State {
 	case engines.Healthy:
 	case engines.Unhealthy:
 		ep.Degraded = true
 	default:
-		return Endpoint{}, &NotReadyError{Label: label, State: string(st.State), Reason: st.LastError}
+		reason := st.LastError
+		if p.gaveUp {
+			reason = fmt.Sprintf("gave up after %d retries (%s); fix the settings or press Retry", p.retries, st.LastError)
+		}
+		return Endpoint{}, &NotReadyError{Label: ep.Label, State: string(st.State), Reason: reason}
 	}
 	return ep, nil
 }
 
-// ensure brings label's engine into line with its config. It returns the endpoint (without
-// readiness) and, for local labels, the instance. r.mu is held.
-func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instance, error) {
-	c, err := r.Source.Label(ctx, label)
-	if err != nil {
-		return Endpoint{}, nil, err
+// stopWait is ensure's answer while the engine a label needs can't start yet because another
+// one is stopping: the caller waits for the stops and tries again.
+type stopWait struct{ *NotReadyError }
+
+func (e stopWait) Unwrap() error { return e.NotReadyError }
+
+func isStopWait(err error) bool {
+	var w stopWait
+	return errors.As(err, &w)
+}
+
+// waitAll waits for every channel to close, or for ctx.
+func waitAll(ctx context.Context, chs []chan struct{}) error {
+	for _, ch := range chs {
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	ep := Endpoint{Label: label, Kind: c.Kind, Embeddings: c.Embedding}
+	return nil
+}
+
+// release unlocks r.mu and then stops the engines detached while it was held (in parallel,
+// waiting for them).
+func (r *Resolver) release(ctx context.Context) {
+	ds := r.detached
+	r.detached = nil
+	r.mu.Unlock()
+	if len(ds) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	for _, inst := range ds {
+		wg.Go(func() { r.halt(ctx, inst) })
+	}
+	wg.Wait()
+	r.mu.Lock()
+	for _, inst := range ds {
+		close(r.stopping[inst])
+		delete(r.stopping, inst)
+	}
+	r.mu.Unlock()
+}
+
+// ensure brings label's engine into line with its config and records the outcome for Status.
+// It returns the endpoint (without readiness) and, for local labels, the instance. r.mu is
+// held.
+func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instance, error) {
+	ep, inst, err := r.apply(ctx, label)
+	r.last[label] = err
+	return ep, inst, err
+}
+
+// describe answers for a label that runs no local engine (off, remote, misconfigured, no
+// model); local is true otherwise, with ep holding only the label's identity.
+func describe(c LabelConfig) (ep Endpoint, local bool, err error) {
+	ep = Endpoint{Label: c.Label, Kind: c.Kind, Embeddings: c.Embedding}
 	switch {
 	case c.Engine == ModeOff:
-		delete(r.bound, label)
-		return ep, nil, ErrNotConfigured
+		return ep, false, ErrNotConfigured
 	case c.Engine == ModeRemote:
-		delete(r.bound, label)
 		if c.RemoteURL == "" {
-			return ep, nil, ErrNotConfigured
+			return ep, false, ErrNotConfigured
 		}
 		api := RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
 		if c.Embedding && api == APIAnthropic {
-			return ep, nil, &NotReadyError{Label: label, State: "misconfigured",
+			return ep, false, &NotReadyError{Label: c.Label, State: "misconfigured",
 				Reason: "the Anthropic API has no embeddings endpoint; use a local engine or an OpenAI-compatible remote (remote_api=openai)"}
 		}
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
@@ -215,16 +322,26 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 		// A remote's window is what the operator says it is (llm.<slot>.context; 0 = unknown):
 		// cc compaction needs it (docs/cc/chat-images.md §7).
 		ep.ContextLength, ep.Parallel = c.Context, 1
-		return ep, nil, nil
+		return ep, false, nil
 	case c.Problem != "":
-		delete(r.bound, label)
-		return ep, nil, &NotReadyError{Label: label, State: "misconfigured", Reason: c.Problem}
+		return ep, false, &NotReadyError{Label: c.Label, State: "misconfigured", Reason: c.Problem}
 	case c.Engine != ModeLocal:
-		delete(r.bound, label)
-		return ep, nil, &NotReadyError{Label: label, State: "misconfigured", Reason: "unknown engine mode " + c.Engine}
+		return ep, false, &NotReadyError{Label: c.Label, State: "misconfigured", Reason: "unknown engine mode " + c.Engine}
 	case c.ModelPath == "":
+		return ep, false, ErrNotConfigured
+	}
+	return ep, true, nil
+}
+
+func (r *Resolver) apply(ctx context.Context, label string) (Endpoint, *instance, error) {
+	c, err := r.Source.Label(ctx, label)
+	if err != nil {
+		return Endpoint{}, nil, err
+	}
+	ep, local, err := describe(c)
+	if !local {
 		delete(r.bound, label)
-		return ep, nil, ErrNotConfigured
+		return ep, nil, err
 	}
 
 	f, err := r.flavour(ctx, c)
@@ -259,10 +376,16 @@ func (r *Resolver) ensure(ctx context.Context, label string) (Endpoint, *instanc
 	h := key.hash()
 	inst := r.instances[h]
 	if inst == nil {
-		// Free whatever this label held alone before loading the replacement.
+		// Free whatever this label held alone before loading the replacement, and load nothing
+		// while an engine is still stopping.
 		if old, ok := r.bound[label]; ok && old != h && r.users(old) == 1 {
 			delete(r.bound, label)
-			r.stop(ctx, old)
+			r.detach(old)
+		}
+		if len(r.stopping) > 0 {
+			delete(r.bound, label)
+			return ep, nil, stopWait{&NotReadyError{Label: label, State: string(engines.Restarting),
+				Reason: "waiting for the previous engine to stop"}}
 		}
 		inst, err = r.start(c, key, h)
 		if err != nil {
@@ -407,29 +530,37 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 	return inst, nil
 }
 
-func (r *Resolver) stop(ctx context.Context, h string) {
+// detach takes an engine out of service for release to stop. r.mu is held.
+func (r *Resolver) detach(h string) {
 	inst := r.instances[h]
 	if inst == nil {
 		return
 	}
 	delete(r.instances, h)
+	r.stopping[inst] = make(chan struct{})
+	r.detached = append(r.detached, inst)
+}
+
+// halt stops a detached engine. r.mu is not held. The stop runs to its end even if the
+// caller's ctx is cancelled: a replacement waits for it.
+func (r *Resolver) halt(ctx context.Context, inst *instance) {
 	r.Log.Info("stopping engine", "engine", inst.name)
 	stopT := r.StopTimeout
 	if stopT <= 0 {
 		stopT = 10 * time.Second
 	}
-	sctx, cancel := context.WithTimeout(ctx, stopT+5*time.Second)
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopT+5*time.Second)
 	defer cancel()
 	if err := inst.sup.Stop(sctx); err != nil {
 		r.Log.Warn("engine stop", "engine", inst.name, "err", err)
 	}
 }
 
-// gc stops instances no label uses. r.mu is held.
-func (r *Resolver) gc(ctx context.Context) {
+// gc detaches instances no label uses. r.mu is held.
+func (r *Resolver) gc() {
 	for h := range r.instances {
 		if r.users(h) == 0 {
-			r.stop(ctx, h)
+			r.detach(h)
 		}
 	}
 }
@@ -437,19 +568,41 @@ func (r *Resolver) gc(ctx context.Context) {
 // Reconcile brings every label's engine into line with the current settings, retries failed
 // engines after their cooldown, and stops engines no label uses.
 func (r *Resolver) Reconcile(ctx context.Context) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	for _, d := range LabelDefs {
-		if _, _, err := r.ensure(ctx, d.Name); err != nil && !errors.Is(err, ErrNotConfigured) {
-			r.Log.Debug("label not ready", "label", d.Name, "err", err)
+	for {
+		r.mu.Lock()
+		r.init()
+		waiting := false
+		for _, d := range LabelDefs {
+			_, _, err := r.ensure(ctx, d.Name)
+			waiting = waiting || isStopWait(err)
+			if err != nil && !errors.Is(err, ErrNotConfigured) {
+				r.Log.Debug("label not ready", "label", d.Name, "err", err)
+			}
+		}
+		r.gc()
+		r.recordGPU(ctx)
+		r.retryFailed()
+		var wait []chan struct{}
+		if waiting {
+			wait = slices.Collect(maps.Values(r.stopping))
+		}
+		r.release(ctx)
+		if wait == nil || waitAll(ctx, wait) != nil {
+			return
 		}
 	}
-	r.gc(ctx)
-	r.recordGPU(ctx)
+}
+
+// retryFailed restarts failed engines after their cooldown. A failed supervisor has no
+// process, so Start only launches one and returns: it is safe under r.mu. r.mu is held.
+func (r *Resolver) retryFailed() {
 	base := r.RetryFailed
 	if base <= 0 {
 		base = time.Minute
+	}
+	maxRetries := r.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = 3
 	}
 	for _, inst := range r.instances {
 		st := inst.sup.Status()
@@ -459,17 +612,50 @@ func (r *Resolver) Reconcile(ctx context.Context) {
 			}
 			continue
 		}
-		cool := base << min(inst.retries, 3)
-		cool = min(cool, 10*base)
-		if time.Since(st.Since) < cool {
+		if inst.gaveUp {
+			continue
+		}
+		if maxRetries >= 0 && inst.retries >= maxRetries {
+			inst.gaveUp = true
+			r.Log.Error("engine gave up: still failing after retries", "engine", inst.name, "retries", inst.retries, "err", st.LastError)
+			continue
+		}
+		if time.Since(st.Since) < retryCooldown(base, inst.retries) {
 			continue
 		}
 		inst.retries++
 		r.Log.Info("retrying failed engine", "engine", inst.name, "attempt", inst.retries)
-		if err := inst.sup.Restart(ctx); err != nil {
+		if err := inst.sup.Start(); err != nil {
 			r.Log.Warn("engine retry failed", "engine", inst.name, "err", err)
 		}
 	}
+}
+
+// retryCooldown is the wait before resolver retry retries+1: base doubling, up to 8× base.
+func retryCooldown(base time.Duration, retries int) time.Duration {
+	return base << min(retries, 3)
+}
+
+// Retry starts a failed engine (one the resolver gave up on, or one still waiting out its
+// cooldown) again with a fresh retry budget: the admin's "Retry" after fixing what broke it.
+// A failed supervisor has no process, so this never waits on a stop under r.mu (#207).
+// ErrUnknownEngine if name isn't running, ErrNotFailed if it hasn't failed.
+func (r *Resolver) Retry(_ context.Context, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	for _, inst := range r.instances {
+		if inst.name != name {
+			continue
+		}
+		if inst.sup.Status().State != engines.Failed {
+			return fmt.Errorf("%w: %q", ErrNotFailed, name)
+		}
+		inst.retries, inst.gaveUp = 0, false
+		r.Log.Info("retrying engine on request", "engine", inst.name)
+		return inst.sup.Start()
+	}
+	return fmt.Errorf("%w %q", ErrUnknownEngine, name)
 }
 
 // Notify asks the running loop to reconcile now (after a settings write, an install or a
@@ -526,7 +712,11 @@ func (r *Resolver) StopAll(ctx context.Context) {
 		delete(r.instances, h)
 		wg.Go(func() { _ = inst.sup.Stop(ctx) })
 	}
+	wait := slices.Collect(maps.Values(r.stopping))
+	r.mu.Unlock()
 	wg.Wait()
+	_ = waitAll(ctx, wait) // stops already under way
+	r.mu.Lock()
 }
 
 // LabelStatus is one label's state for admin and /health.
@@ -548,17 +738,22 @@ type InstanceStatus struct {
 	Since     time.Time     `json:"since"`
 	Started   time.Time     `json:"started,omitzero"` // process launch; zero when none runs
 	LastError string        `json:"last_error,omitempty"`
-	Output    []string      `json:"output"`
-	Kind      Kind          `json:"kind"`
-	Flavour   Flavour       `json:"flavour"`
-	Port      int           `json:"port"`
-	Model     string        `json:"model"`
-	Labels    []string      `json:"labels"`
-	Args      []string      `json:"args"`
+	// Retries counts the resolver's retries of this failed engine; GaveUp is set once they
+	// reach MaxRetries and the engine is left failed until Retry or a settings change.
+	Retries int      `json:"retries"`
+	GaveUp  bool     `json:"gave_up"`
+	Output  []string `json:"output"`
+	Kind    Kind     `json:"kind"`
+	Flavour Flavour  `json:"flavour"`
+	Port    int      `json:"port"`
+	Model   string   `json:"model"`
+	Labels  []string `json:"labels"`
+	Args    []string `json:"args"`
 }
 
-// Status reports every label against the current settings (it resolves each, so a changed
-// setting takes effect here too).
+// Status reports every label against the current settings. It only reads: a local label is
+// reported by the engine it is bound to, or by its last Resolve/Reconcile outcome, so a
+// changed setting shows once the reconcile loop (Notify) has applied it.
 func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 	var out []LabelStatus
 	for _, d := range LabelDefs {
@@ -571,7 +766,7 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 		}
 		c.RemoteAPIKey = ""
 		ls.Config = c
-		ep, err := r.Resolve(ctx, d.Name)
+		ep, err := r.peek(c)
 		var nr *NotReadyError
 		switch {
 		case errors.Is(err, ErrNotConfigured):
@@ -597,6 +792,30 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 	return out
 }
 
+// peek is Resolve without side effects, for Status.
+func (r *Resolver) peek(c LabelConfig) (Endpoint, error) {
+	ep, local, err := describe(c)
+	if !local {
+		return ep, err
+	}
+	r.mu.Lock()
+	r.init()
+	inst := r.instances[r.bound[c.Label]]
+	last, seen := r.last[c.Label]
+	var p parked
+	if inst != nil {
+		p = inst.parked()
+	}
+	r.mu.Unlock()
+	switch {
+	case inst != nil:
+		return ready(r.fill(ep, c, inst), inst, p)
+	case seen && last != nil:
+		return Endpoint{}, last
+	}
+	return Endpoint{}, &NotReadyError{Label: c.Label, State: string(engines.Stopped), Reason: "no engine running"}
+}
+
 // Instances reports the supervised engines, sorted by name.
 func (r *Resolver) Instances() []InstanceStatus {
 	r.mu.Lock()
@@ -614,7 +833,7 @@ func (r *Resolver) Instances() []InstanceStatus {
 		args, _ := inst.key.args(inst.port, inst.alias)
 		st := inst.sup.Status()
 		out = append(out, InstanceStatus{Name: st.Name, State: st.State, PID: st.PID, Restarts: st.Restarts,
-			Since: st.Since, Started: st.Started, LastError: st.LastError, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
+			Since: st.Since, Started: st.Started, LastError: st.LastError, Retries: inst.retries, GaveUp: inst.gaveUp, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
 			Port: inst.port, Model: inst.key.Model, Labels: labels, Args: args})
 	}
 	slices.SortFunc(out, func(a, b InstanceStatus) int { return strings.Compare(a.Name, b.Name) })

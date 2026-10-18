@@ -82,6 +82,7 @@ var passRoutes = []passRoute{
 	// The model manager (docs/llm/06 §5; G6: disk, GPU and the live model for everyone).
 	llmRoute("GET /api/llm/v1/hardware"),
 	llmRoute("POST /api/llm/v1/hardware/engines"),
+	llmRoute("POST /api/llm/v1/hardware/engines/{name}/retry"),
 	llmRoute("GET /api/llm/v1/models/catalog"),
 	llmRoute("GET /api/llm/v1/models/hf/{repo...}"),
 	llmRoute("POST /api/llm/v1/models/install"),
@@ -110,8 +111,16 @@ var passRoutes = []passRoute{
 	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/actions"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
-	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc lists what
-	// waits plus the caller's own households, and approves only into one of those.
+	// The household's prompt (Models page editor): cc requires the household admin role.
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/prompt"),
+	ccUserRoute("PUT /api/cc/api/v0/households/{household_id}/prompt"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/reset"),
+	ccUserRoute("PUT /api/cc/api/v0/households/{household_id}/prompt/base"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/import"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/preview"),
+	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc counts what
+	// waits (never listing codes) plus the caller's own households, and approves a typed code
+	// only into one of those.
 	ccUserRoute("GET /api/cc/api/v0/nodes/pairings"),
 	ccUserRoute("POST /api/cc/api/v0/nodes/pairings/approve"),
 	ccUserRoute("POST /api/cc/api/v0/nodes/pairings/deny"),

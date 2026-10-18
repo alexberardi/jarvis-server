@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
@@ -86,7 +88,12 @@ func (m *Module) reactionsFor(kind string) []reaction {
 	s := m.sig
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]reaction(nil), s.reactions[kind]...)
+	out := append([]reaction(nil), s.reactions[kind]...)
+	if kind != "*" {
+		// "*" reactions (watches) see every kind.
+		out = append(out, s.reactions["*"]...)
+	}
+	return out
 }
 
 // registerSignalReactions wires the built-in reactions (main.py:513-516): appt.upcoming →
@@ -129,12 +136,12 @@ func (m *Module) dispatchSignal(rc reactionCtx) {
 			m.deps.Log.Warn("cc: signal reaction dropped (busy)", "reaction", r.name, "kind", rc.Kind)
 			continue
 		}
-		m.sig.wg.Add(1)
-		go func(r reaction) {
-			defer m.sig.wg.Done()
+		if !m.background("signal reaction", func() {
 			defer func() { <-m.sig.sem }()
 			m.runReaction(context.Background(), r, rc)
-		}(r)
+		}) {
+			<-m.sig.sem
+		}
 	}
 }
 
@@ -241,8 +248,10 @@ type toolsEntry struct {
 type toolsReport struct {
 	raw      string
 	Commands []struct {
-		CommandName       string           `json:"command_name"`
-		ProposableActions []map[string]any `json:"proposable_actions"`
+		CommandName            string           `json:"command_name"`
+		ProposableActions      []map[string]any `json:"proposable_actions"`
+		IsRisky                bool             `json:"is_risky"`
+		RunWithoutConfirmation bool             `json:"run_without_confirmation"`
 	} `json:"available_commands"`
 }
 
@@ -283,6 +292,17 @@ func (r *toolsReport) commandNames() map[string]bool {
 		}
 	}
 	return out
+}
+
+// declaration is what the report declares for command: is_risky and run_without_confirmation
+// (false, false for a command it doesn't advertise).
+func (r *toolsReport) declaration(command string) (isRisky, runWithoutConfirmation bool) {
+	for _, c := range r.Commands {
+		if c.CommandName == command {
+			return c.IsRisky, c.RunWithoutConfirmation
+		}
+	}
+	return false, false
 }
 
 // proposable is capability_registry.resolve_proposable_action: the advertised action for
@@ -716,7 +736,7 @@ func automationIdentity(rc reactionCtx) (string, string) {
 }
 
 // reactAutomation is react_to_signal_automation. Statuses: no_rule, unchanged, no_tools,
-// no_action, ran:<cmd>, failed:<cmd>, confirm:<cmd>, confirm_failed, error.
+// no_action, ran:<cmd>, failed:<cmd>, confirm:<cmd>, confirm_failed, blocked:<cmd>, error.
 func (m *Module) reactAutomation(ctx context.Context, rc reactionCtx) string {
 	rule := m.enabledRule(ctx, rc.HouseholdID, rc.Kind)
 	if rule == nil {
@@ -727,7 +747,7 @@ func (m *Module) reactAutomation(ctx context.Context, rc reactionCtx) string {
 	if v, ok := m.claimValue(ctx, rc.HouseholdID, claimKey); ok && v == sig {
 		return "unchanged"
 	}
-	nodeID, tools := m.resolveNodeAndTools(ctx, rc.HouseholdID, rc.NodeID)
+	nodeID, tools, rep := m.resolveNodeAndTools(ctx, rc.HouseholdID, rc.NodeID)
 	if nodeID == "" || len(tools) == 0 {
 		return "no_tools"
 	}
@@ -749,6 +769,9 @@ func (m *Module) reactAutomation(ctx context.Context, rc reactionCtx) string {
 	if name == "" {
 		return "no_action"
 	}
+	if m.policy != nil && m.householdBool(ctx, errands.SettingAutonomous, rc.HouseholdID) {
+		return m.automationByRule(ctx, rc, rule, nodeID, name, args, label, rep, claimKey, sig)
+	}
 	if rule.Delivery == "automatic" {
 		// D7: automatic keeps full power, no allowlist; no trusted flag (D4).
 		ok := dispatchOK(m.dispatchNodeCommand(ctx, nodeID, name, args, rc.UserID, dispatchTimeout))
@@ -764,9 +787,70 @@ func (m *Module) reactAutomation(ctx context.Context, rc reactionCtx) string {
 	return "confirm_failed"
 }
 
+// automationByRule is the signal automation checkpoint (autonomy PLAN §1 checkpoint 3): with
+// autonomy on, the household's rules decide the chosen action. Automatic delivery is an inline
+// allow; allow runs it and posts a "Ran on its own" card, ask posts the confirm card, block
+// drops it.
+func (m *Module) automationByRule(ctx context.Context, rc reactionCtx, rule *automationRule, nodeID, name string,
+	args map[string]any, label string, rep *toolsReport, claimKey, sig string) string {
+	risky, free := rep.declaration(name)
+	scope := &policy.Scope{Kind: policy.ScopeAutomation, ID: rc.Kind}
+	if rule.Delivery == "automatic" {
+		scope.Effect = policy.Allow
+	}
+	v := m.policy.Decide(ctx, rc.HouseholdID, policy.Action{Tool: name, Args: args, IsRisky: risky,
+		RunWithoutConfirmation: free, Source: policy.SourceAutomation, Scope: scope})
+	ev := policy.Event{HouseholdID: rc.HouseholdID, UserID: rc.UserID, Source: policy.SourceAutomation, SourceID: rc.Kind,
+		Tool: name, Effect: v.Effect, Reason: v.Reason}
+	if v.Rule != nil {
+		id := v.Rule.ID
+		ev.RuleID = &id
+	}
+	switch v.Effect {
+	case policy.Block:
+		ev.Outcome = policy.OutcomeBlocked
+		m.recordAutonomy(ctx, ev)
+		m.deps.Log.Info("cc: signal automation blocked by a household rule", "household", rc.HouseholdID,
+			"kind", rc.Kind, "command", name)
+		return "blocked:" + name
+	case policy.Allow:
+		out := m.dispatchNodeCommand(ctx, nodeID, name, args, rc.UserID, dispatchTimeout)
+		ok := dispatchOK(out)
+		m.deps.Log.Info("cc: signal automation auto-ran", "command", name, "success", ok, "scope", v.Scope)
+		step := errands.RanStep{Label: name, Command: name, Status: "ok"}
+		state, summary, status := "done", "Ran "+name+".", "ran:"+name
+		ev.Outcome = policy.OutcomeRan
+		if ok {
+			step.Result, _ = out["message"].(string)
+		} else {
+			step.Status = "failed"
+			if step.Result, _ = out["error"].(string); step.Result == "" {
+				step.Result = "failed"
+			}
+			state, summary, status = "failed", "Tried "+name+", but it failed.", "failed:"+name
+			ev.Outcome = policy.OutcomeFailed
+		}
+		m.recordAutonomy(ctx, ev)
+		c := errands.RanCard{HouseholdID: rc.HouseholdID, State: state, SourceKind: "automation", SourceLabel: label,
+			Steps: []errands.RanStep{step}, Rules: []errands.RanRule{errands.RanRuleOf(name, v)}}
+		m.notifyGated(ctx, gatedNote{HouseholdID: rc.HouseholdID, UserID: rc.UserID, Source: "automation",
+			Category: errands.CategoryAutonomy, Title: "🤖 Ran on its own: " + label, Summary: summary,
+			Body: errands.RanCardBody(c), Metadata: errands.RanCardMetadata(c),
+			DedupeKey: "automation-ran:" + claimKey + ":" + shortHash(sig), Push: true})
+		return status
+	}
+	ev.Outcome = policy.OutcomeAsked
+	m.recordAutonomy(ctx, ev)
+	if m.emitAutomationCard(ctx, rc.HouseholdID, rc.UserID, nodeID, name, args, label, rule.Instruction) {
+		return "confirm:" + name
+	}
+	return "confirm_failed"
+}
+
 // resolveNodeAndTools is _resolve_node_and_tools: the preferred node, then household nodes by
-// recency (sequentially, 4 s each); the first with a non-empty tool menu wins.
-func (m *Module) resolveNodeAndTools(ctx context.Context, hh, preferred string) (string, []prompts.Tool) {
+// recency (sequentially, 4 s each); the first with a non-empty tool menu wins, with the report
+// it came from.
+func (m *Module) resolveNodeAndTools(ctx context.Context, hh, preferred string) (string, []prompts.Tool, *toolsReport) {
 	var cands []string
 	if preferred != "" {
 		cands = append(cands, preferred)
@@ -782,10 +866,10 @@ func (m *Module) resolveNodeAndTools(ctx context.Context, hh, preferred string) 
 			continue
 		}
 		if tools := rep.clientTools(); len(tools) > 0 {
-			return id, tools
+			return id, tools, rep
 		}
 	}
-	return "", nil
+	return "", nil, nil
 }
 
 // pickAction is _pick_action: one background-slot tool-call inference (thinking off). An

@@ -184,23 +184,30 @@ JSON parse error (discovery says the same if it ever gets a page instead of JSON
 3. **Device code** (the default, 2026-10-13; `--code` names it): `jarvis-agent enroll --server URL`
    with no `--email`/`--token` calls `POST /api/v0/nodes/pairings`, prints the code (`ABCD-EFGH`)
    and polls `POST /api/v0/nodes/pairings/{id}/poll` with the poll secret that only the start
-   answer carries. Any member of a household approves it (`POST /api/v0/nodes/pairings/approve`
-   `{code, household_id, room}`) into one of **their own** households; another household is a
-   403, superuser or not. The poll then hands out an ordinary provisioning token for that
-   household (minted by the approver), which the agent redeems, so the node is exactly one
-   enrolled with a token. `GET /api/v0/nodes/pairings` lists what waits plus the caller's
-   households; `…/deny` refuses one. The admin's Nodes page shows "Pending pairings" (today
-   superuser-only through the gateway; members get it with the web app). It is shown whenever
-   the caller belongs to a household, polls every 3 s while the tab is visible, and while nothing
-   waits it says how to start: open the agent, or run `jarvis-agent enroll --server <URL>`, with
-   the URL taken from the page's host and jarvisd's config port (a placeholder on loopback). Details:
+   answer carries. Any member of a household approves it by **typing the code the computer
+   shows** (`POST /api/v0/nodes/pairings/approve` `{code, household_id, room}`) into one of
+   **their own** households; another household is a 403, superuser or not. The poll then hands
+   out an ordinary provisioning token for that household (minted by the approver), with the
+   household's name and the approver's email (`household_name`, `approved_by`). The agent shows
+   them and asks "Join this household?" (`enroll --code`: `[y/N]`; the setup page: Yes / No)
+   before it redeems the token, so the node is exactly one enrolled with a token.
+   `GET /api/v0/nodes/pairings` never lists codes (decision 2026-10-17, loop #100): it answers
+   how many wait (`waiting`), the caller's households and an always-empty `pairings` kept for old
+   clients. A pairing has no owner before approval, so knowing the code (seeing the computer's
+   screen) is the only proof that the approver may enrol it; a list let any member pick a
+   stranger's computer. `…/deny` refuses a typed code. The admin's Nodes page shows "Pending
+   pairings" (today superuser-only through the gateway; members get it with the web app): a
+   code field, the household and the room. It is shown whenever the caller belongs to a
+   household, polls the count every 3 s while the tab is visible, and while nothing waits it says
+   how to start: open the agent, or run `jarvis-agent enroll --server <URL>`, with the URL taken
+   from the page's host and jarvisd's config port (a placeholder on loopback). Details:
    `internal/modules/cc/pairing.go`.
    - **Codes and limits:** 8 symbols from 32 (40 bits), single use, 10-minute life, in memory (a
      restart only means pairing again). 10 starts per address per 10 minutes; at most 100 live
      pairings; 10 failed approvals or denials (unknown code, foreign household) per user per 10
      minutes, after which even the right code is refused until the window passes.
    - **The secret:** an unknown id and a wrong secret answer the same 404; neither the list nor
-     the approval carries a token. A repeated poll (a lost answer) replaces the token, so only
+     the approval carries a token (and the list carries no codes). A repeated poll (a lost answer) replaces the token, so only
      the latest works; once the node registers, the pairing is gone (410, then 404).
    - **Room:** the approver's (default `desktop`); `enroll --room` still overrides it, as with a
      token.
@@ -249,6 +256,9 @@ Install, Update, Revert and Uninstall work on a computer as on a Pi:
   `GET /api/v0/nodes/{id}/package-install/{rid}/verify` and takes the repository, ref and
   package name from that answer, never from the nudge. It posts
   `{success, error?, details?}` to `.../package-{op}/{rid}/results`. A repeated nudge is ignored.
+  jarvisd accepts a request for a computer only from its owner or a household admin, and installs
+  the repository Pantry lists for the package, refusing when Pantry can't be reached
+  ([decision](../decisions/2026-10-17-desktop-installs-pinned-to-pantry.md)).
   There is no `restarting` step.
 - **Download.** The repository's `/archive/{ref}.tar.gz` (`HEAD` without a ref), as the Pi's
   first try; no git. Only https owner/repo URLs. Extraction writes plain files and directories
@@ -749,8 +759,8 @@ checklist).
    - **Linux:** the one-liner plus a `.deb`, both writing the systemd user unit.
 3. **First run: a small window, not a terminal.**
    - **Pairing:** a device code (§9.5). The agent shows a short code and the server name it
-     discovered over mDNS. The user approves it in the admin or the app, and the agent
-     receives its node credentials. This needs a small jarvisd endpoint pair (start and
+     discovered over mDNS. The user types it into the admin or the app to approve it; the agent
+     shows the approving household and joins once its user confirms. This needs a small jarvisd endpoint pair (start and
      poll) and an approve screen in admin and app. No password is typed into the agent.
    - **Browser control:** a "Set up browser control" checkbox, ticked by default (matching the
      2026-10-11 `[Y/n]` decision). It registers the native host and opens Firefox's own
@@ -1035,8 +1045,10 @@ step 3, as a page in the user's own browser (open question 1). Code: `internal/a
   addresses skipped), and a typed address (`192.168.1.10` → `http://192.168.1.10:7700`). The user
   picks; choosing checks `/info` and that discovery lists command-center and auth.
 - **2. Add this computer.** *Show a pairing code*: §5 item 3 in the page; the code shows big with
-  the computer's name and a countdown, and the page turns green on approval (the approver's room
-  and name are kept). *Sign in*: §5 item 1 in the page: login, households (the only one, or a
+  the computer's name and a countdown. On approval the page names the household and the approver
+  ("Add this computer to this household?") and joins only on *Yes, add it*; *No, cancel* saves
+  nothing and the unused token expires (`confirm_household`, `POST /api/pair/confirm`). The
+  approver's room and name are kept. *Sign in*: §5 item 1 in the page: login, households (the only one, or a
   choice), a provisioning token for room `desktop`, register. A temporary password gets "change
   your password first" (`node.ErrPasswordChangeRequired`). The password is in the POST and the
   login call only; the JWT stays in memory until the computer is added or the page closes.
@@ -1633,12 +1645,13 @@ The floor is `desktop_press_key`: Enter presses a dialog's default button and Es
 all three platforms, Tab / Shift+Tab move between buttons and Space presses the highlighted one.
 Clicking a native button by its label needs accessibility APIs (open question 6).
 
-### Confirmation (`--confirm-dictation off|submit|all`, default off)
+### Confirmation (`--confirm-dictation off|submit|all`, default submit)
 
 - **off:** nothing is asked; the island shows what is being typed, filled or clicked as it
   happens (same stance as closing windows by voice, §9.2).
-- **submit:** asks before anything is *sent*: `desktop_type_text` with `submit`, `browser_click`,
-  `browser_fill` with `submit`. Typing without Enter isn't asked (it can be deleted).
+- **submit (the default, since 2026-10-17):** asks before anything is *sent*: `desktop_type_text`
+  with `submit`, `browser_click`, `browser_fill` with `submit`. Typing without Enter isn't asked
+  (it can be deleted).
 - **all:** asks before every type, key, fill and click.
 
 A gated call does nothing and returns `status: awaiting_confirmation` with a `confirmation_id`
@@ -1895,9 +1908,13 @@ wrong as often as right, and a wrong guess types into the wrong place.
 
 ### Open questions (defaults chosen; the user reviews)
 
-1. **Confirmation default.** *Chosen:* `off`; the island shows what happens. *Alternative:*
-   `submit` by default, so "tell claude to …" asks "Send … to Claude?" every time. Recommend
-   keeping `off` and revisiting if a mishearing ever sends something.
+1. **Confirmation default.** *Chosen:* `submit` (**decided, user, 2026-10-17, #117**; it was
+   `off`). A page read with `browser_read_page` or a screen read with `desktop_read_screen` is
+   fenced as untrusted, but that is advice to the model, not a control: such text could steer it
+   into typing into a terminal and pressing Enter. So nothing is sent without the user's yes
+   unless they set `off`. The cost is one "Send … to Claude?" per send. A server-side gate
+   (confirm any `is_risky` call in a turn that already read untrusted content) is a separate
+   item.
 2. **Enforcing that the user really answered.** `desktop_confirm` trusts the model to pass the
    user's words. *Recommend:* if confirmation becomes the default, let command-center mint the
    confirmation (a `validation-response` carries the answer to the agent directly, so the model

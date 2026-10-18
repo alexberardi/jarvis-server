@@ -1,6 +1,7 @@
 package errands
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/big"
@@ -8,40 +9,57 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 )
 
-// Errand autonomy, ported dormant (D9, 09.Q5): the plan-start blast gate (autorun_gate.py)
-// and the inter-step value resolver (step_value_resolver.py). Nothing produces $-directives
-// or autoruns a plan yet; the runner still resolves directives on every step, as legacy did.
-
-// autorunAllowlist is the trust boundary: read-only or node-local reversible writes only.
-var autorunAllowlist = map[string]bool{"get_drive_time": true, "reminder": true}
+// Errand autonomy: the plan-start checkpoint (autonomy PLAN §1, checkpoint 1; legacy
+// autorun_gate.py) and the inter-step value resolver (step_value_resolver.py). The household's
+// rules, resolved by the policy (A7), are the trust boundary, not an allowlist: a plan autoruns
+// only when every step resolves to allow. Risky steps and steps with a business counterparty
+// never resolve to allow from a tool's declaration alone (policy.Decide). Nothing produces
+// $-directives yet; the runner still resolves them on every step, as legacy did.
 
 const maxAutorunSteps = 3
 
-// IsAutorunEligible is is_autorun_eligible: whether a fresh plan may run without a tap.
-// Fail-closed.
-func IsAutorunEligible(steps []Step) (bool, string) {
+// IsAutorunEligible is is_autorun_eligible: whether a fresh plan may run without a tap, given
+// each step's verdict (in step order). Fail-closed: a missing verdict asks.
+func IsAutorunEligible(steps []Step, verdicts []policy.Verdict) (bool, string) {
 	if len(steps) == 0 {
 		return false, "empty plan"
 	}
 	if len(steps) > maxAutorunSteps {
 		return false, fmt.Sprintf("too many steps for autorun (%d > %d)", len(steps), maxAutorunSteps)
 	}
-	for _, st := range steps {
-		cmd := strings.TrimSpace(st.Command)
-		if !autorunAllowlist[cmd] {
-			return false, fmt.Sprintf("command '%s' is not autorun-allowlisted", cmd)
+	for i, st := range steps {
+		effect := policy.Ask
+		if i < len(verdicts) {
+			effect = verdicts[i].Effect
 		}
-		if st.IsRisky {
-			return false, fmt.Sprintf("step '%s' is marked risky", cmd)
-		}
-		if objTruthy(st.Args, "business") {
-			return false, fmt.Sprintf("step '%s' targets an outbound counterparty", cmd)
+		if effect != policy.Allow {
+			return false, fmt.Sprintf("step '%s' resolves to %s", strings.TrimSpace(st.Command), effect)
 		}
 	}
 	return true, "eligible"
+}
+
+// decideSteps resolves each step against the household's rules. A control step (replan) is not
+// a capability and is allowed without asking the policy.
+func (s *Service) decideSteps(ctx context.Context, hh string, steps []Step, source string) []policy.Verdict {
+	out := make([]policy.Verdict, len(steps))
+	for i, st := range steps {
+		cmd := strings.TrimSpace(st.Command)
+		switch {
+		case controlCommands[cmd]:
+			out[i] = policy.Verdict{Effect: policy.Allow, Reason: "control step"}
+		case s.Policy == nil:
+			out[i] = policy.Verdict{Effect: policy.Ask, Reason: "no rules; asks"}
+		default:
+			out[i] = s.Policy.Decide(ctx, hh, policy.Action{Tool: cmd, Args: st.Args, IsRisky: st.IsRisky,
+				RunWithoutConfirmation: st.RunWithoutConfirmation, Source: source})
+		}
+	}
+	return out
 }
 
 func isDirective(v any) (string, *pyjson.Object, bool) {

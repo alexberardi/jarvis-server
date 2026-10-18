@@ -128,6 +128,10 @@ func TestChatThroughGatewayEndToEnd(t *testing.T) {
 		c.LLM = llm.NewService(llm.ServiceConfig{Resolver: chatResolver{srv.URL}})
 		c.Endpoints = chatResolver{srv.URL}.Resolve
 		c.DefaultPromptProvider = func(context.Context) string { return prompts.Qwen3_8B }
+		// The 8B's mode: a local model whose template has text tools and the thinking switch.
+		c.LiveModelTraits = func(context.Context) llm.ModelTraits {
+			return llm.ModelTraits{ToolCalling: "text", ToolCallingFrom: "template", Thinking: true, Local: true}
+		}
 		c.Publisher = node
 	})
 	node.ccURL = ccURL

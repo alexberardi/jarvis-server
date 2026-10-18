@@ -82,6 +82,7 @@ type API struct {
 	Resolver interface {
 		Status(ctx context.Context) []engine.LabelStatus
 		Instances() []engine.InstanceStatus
+		Retry(ctx context.Context, name string) error
 	}
 }
 
@@ -111,6 +112,7 @@ func (a *API) Mount(mux *http.ServeMux, guard settings.Guard) {
 	mux.HandleFunc("PUT /v1/models/labels", g(a.putLabels))
 	mux.HandleFunc("GET /v1/hardware", g(a.hardware))
 	mux.HandleFunc("POST /v1/hardware/engines", g(a.fetchEngine))
+	mux.HandleFunc("POST /v1/hardware/engines/{name}/retry", g(a.retryEngine))
 }
 
 func writeErr(w http.ResponseWriter, err error) {
@@ -349,6 +351,21 @@ func (a *API) hardware(w http.ResponseWriter, r *http.Request) {
 		"engines":   a.Resolver.Instances(),
 		"voice":     a.Manager.VoiceStatus(ctx),
 	})
+}
+
+// retryEngine restarts an engine the resolver gave up on, with a fresh retry budget.
+func (a *API) retryEngine(w http.ResponseWriter, r *http.Request) {
+	err := a.Resolver.Retry(r.Context(), r.PathValue("name"))
+	switch {
+	case errors.Is(err, engine.ErrUnknownEngine):
+		httpx.Error(w, http.StatusNotFound, "Not found")
+	case errors.Is(err, engine.ErrNotFailed):
+		httpx.Error(w, http.StatusConflict, "Engine has not failed")
+	case err != nil:
+		writeErr(w, err)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (a *API) fetchEngine(w http.ResponseWriter, r *http.Request) {

@@ -487,3 +487,15 @@ func TestRegisterSendsIdentityWhenSet(t *testing.T) {
 		}
 	}
 }
+
+func TestSpecRenderRunWithoutConfirmation(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		def := Spec{Name: "lookup", Description: "lookup", RunWithoutConfirmation: want}.Render()
+		if got := def.ClientTool["run_without_confirmation"]; got != want {
+			t.Errorf("ClientTool run_without_confirmation = %v, want %v", got, want)
+		}
+		if got := def.Command["run_without_confirmation"]; got != want {
+			t.Errorf("Command run_without_confirmation = %v, want %v", got, want)
+		}
+	}
+}

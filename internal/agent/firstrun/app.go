@@ -20,8 +20,9 @@ const (
 	ModeSignIn = "signin"
 
 	JoinIdle            = ""
-	JoinWaiting         = "waiting"          // a code is shown, nobody approved it yet
-	JoinChooseHousehold = "choose_household" // signed in, belongs to several households
+	JoinWaiting         = "waiting"           // a code is shown, nobody approved it yet
+	JoinConfirm         = "confirm_household" // approved: this computer's user confirms the household
+	JoinChooseHousehold = "choose_household"  // signed in, belongs to several households
 	JoinJoined          = "joined"
 	JoinFailed          = "failed"
 )
@@ -34,6 +35,10 @@ type joinState struct {
 	ExpiresIn  int         `json:"expires_in,omitempty"` // seconds left on the code
 	Error      string      `json:"error,omitempty"`
 	Households []household `json:"households,omitempty"`
+	// Household, ApprovedBy and Room: who approved the code and where to (JoinConfirm).
+	Household  string `json:"household,omitempty"`
+	ApprovedBy string `json:"approved_by,omitempty"`
+	Room       string `json:"room,omitempty"`
 	// Warning: joined, but setting up the rest (browser host, starting the agent) failed.
 	Warning string `json:"warning,omitempty"`
 }
@@ -57,8 +62,15 @@ type app struct {
 	cancel   context.CancelFunc // the pairing poll running now
 	jwt      string             // signed in, choosing a household; memory only
 	busy     bool               // a join is being finished
+	approved *approvedPairing   // waiting for this computer's user to confirm (JoinConfirm)
 	wg       sync.WaitGroup
 	joinedAs node.Creds
+}
+
+// approvedPairing is an approval the computer's user hasn't confirmed yet.
+type approvedPairing struct {
+	srv chosen
+	res node.PairingResult
 }
 
 func newApp(s *Server) *app {
@@ -219,7 +231,7 @@ func (a *app) postServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.Lock()
-	if a.join.State == JoinWaiting || a.busy {
+	if a.pairingShown() {
 		a.mu.Unlock()
 		fail(w, http.StatusConflict, "Cancel the code on screen first.")
 		return
@@ -234,7 +246,7 @@ func (a *app) postForget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.Lock()
-	if a.join.State == JoinWaiting || a.busy {
+	if a.pairingShown() {
 		a.mu.Unlock()
 		fail(w, http.StatusConflict, "Cancel the code on screen first.")
 		return
@@ -245,6 +257,12 @@ func (a *app) postForget(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- joining ---
+
+// pairingShown: a code or an approval to confirm is on screen, or a join is being finished.
+// The caller holds a.mu.
+func (a *app) pairingShown() bool {
+	return a.join.State == JoinWaiting || a.join.State == JoinConfirm || a.busy
+}
 
 // startJoin claims the join step for a new attempt, or answers why not.
 func (a *app) startJoin(w http.ResponseWriter) (chosen, bool) {
@@ -266,7 +284,7 @@ func (a *app) startJoin(w http.ResponseWriter) (chosen, bool) {
 		a.cancel() // a code shown before: replaced
 		a.cancel = nil
 	}
-	a.jwt = ""
+	a.jwt, a.approved = "", nil
 	return *a.server, true
 }
 
@@ -291,6 +309,8 @@ func (a *app) postPair(w http.ResponseWriter, r *http.Request) {
 	a.cancel = cancel
 	a.wg.Add(1)
 	a.mu.Unlock()
+	// The answer shows this attempt's code: built before the poll loop can move past it (loop #129).
+	v := a.state(r.Context())
 	go func() {
 		defer a.wg.Done()
 		defer cancel()
@@ -302,13 +322,49 @@ func (a *app) postPair(w http.ResponseWriter, r *http.Request) {
 			a.failJoin(ModePair, err)
 			return
 		}
-		name := res.Name
-		if name == "" {
-			name = a.d.ComputerName
+		// Approved, but the code may have been typed by someone else: show whose household
+		// it is and join only once this computer's user confirms (loop #100).
+		hh := res.HouseholdName
+		if hh == "" {
+			hh = res.HouseholdID
 		}
-		// The approver chose the room: register without one.
-		a.finishJoin(ctx, ModePair, srv, res.ProvisioningToken, "", name)
+		a.mu.Lock()
+		if ctx.Err() == nil {
+			a.approved = &approvedPairing{srv: srv, res: res}
+			a.join = joinState{Mode: ModePair, State: JoinConfirm, Household: hh, ApprovedBy: res.ApprovedBy, Room: res.Room}
+			a.cancel = nil
+		}
+		a.mu.Unlock()
 	}()
+	writeJSON(w, http.StatusOK, v)
+}
+
+// postPairConfirm joins the household the approver named, once this computer's user says yes.
+func (a *app) postPairConfirm(w http.ResponseWriter, r *http.Request) {
+	if !readJSON(w, r, &struct{}{}) {
+		return
+	}
+	a.mu.Lock()
+	ap := a.approved
+	if ap == nil || a.join.State != JoinConfirm || a.busy {
+		a.mu.Unlock()
+		fail(w, http.StatusConflict, "Nothing to confirm. Show a new code.")
+		return
+	}
+	a.approved = nil
+	a.mu.Unlock()
+	name := ap.res.Name
+	if name == "" {
+		name = a.d.ComputerName
+	}
+	// The approver chose the room: register without one.
+	if !a.finishJoin(r.Context(), ModePair, ap.srv, ap.res.ProvisioningToken, "", name) {
+		a.mu.Lock()
+		msg := a.join.Error
+		a.mu.Unlock()
+		fail(w, http.StatusBadGateway, msg)
+		return
+	}
 	a.getState(w, r)
 }
 
@@ -317,10 +373,15 @@ func (a *app) postPairCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.Lock()
-	if a.cancel != nil && !a.busy {
+	switch {
+	case a.busy:
+	case a.cancel != nil:
 		a.cancel()
 		a.cancel = nil
 		a.join = joinState{}
+	case a.join.State == JoinConfirm:
+		// Declined: the provisioning token goes unused and expires on its own.
+		a.approved, a.join = nil, joinState{}
 	}
 	a.mu.Unlock()
 	a.getState(w, r)

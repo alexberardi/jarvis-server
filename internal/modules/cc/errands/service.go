@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -63,6 +64,10 @@ type Card struct {
 	Metadata    map[string]any
 	Push        bool
 	TargetType  string // "user" | "household"
+	// Gated sends the card through the attention gate (dedupe, budgets, quiet hours), which may
+	// withhold it: Post then returns "".
+	Gated     bool
+	DedupeKey string
 }
 
 // Cards posts and updates inbox cards through the notify service (D31).
@@ -93,6 +98,15 @@ type Service struct {
 	// Timezone is the household's IANA zone (D18; "" or nil = UTC).
 	Timezone func(ctx context.Context, householdID string) string
 	Now      func() time.Time
+	// Policy resolves background actions against the household's rules (docs/autonomy/PLAN.md §1,
+	// A7). Nil: everything asks (no autorun).
+	Policy interface {
+		Decide(ctx context.Context, hh string, a policy.Action) policy.Verdict
+	}
+	// Activity is the autonomy activity log. Nil: nothing is recorded.
+	Activity interface {
+		Record(ctx context.Context, e policy.Event) error
+	}
 
 	// Tunables (tests shorten them).
 	NodeTimeout      time.Duration // node step wait (30 s)
@@ -104,6 +118,9 @@ type Service struct {
 	PlannerThinkTimeout time.Duration
 
 	driving sync.Map // workflow id → struct{}: runs this process is driving right now
+	// stopRequested: autorun workflow id → the tapping user id (int64); the run stops before its
+	// next step. In memory: only the process driving the run honours it.
+	stopRequested sync.Map
 }
 
 func (s *Service) now() time.Time {
@@ -165,14 +182,7 @@ func Definitions() []settings.Definition {
 			Description: "Offer errands: the run_errand, schedule_errand and list_scheduled_errands voice tools, " +
 				"and scheduled errand fires. Off removes the tools from the voice prompt."},
 		{Key: SettingAutonomous, Category: "errands", Type: settings.Bool, Default: false,
-			Description: "Allow a Signal to AUTORUN a low-blast multi-step plan without a " +
-				"tap-to-confirm card (e.g. an upcoming appointment auto-checks drive time " +
-				"and sets a leave-by reminder). When off (default), a signal-triggered " +
-				"plan is proposed as a card instead of executed. Even when on, only plans " +
-				"that pass the plan-start blast gate (allowlisted, non-risky, no outbound " +
-				"counterparty, few steps) autorun; anything else falls back to a card. " +
-				"Fail-closed — any settings error disables autorun — because it lets a " +
-				"background signal originate real writes with no human confirmation."},
+			Description: "Let household rules run background errands without a tap (A1)."},
 		{Key: SettingPlannerMaxTokens, Category: "errands", Type: settings.Int, Default: int64(defaultPlannerMaxTokens),
 			Description: "Most tokens one errand planning call may produce, thinking included. Planning needs " +
 				"thinking to split multi-step and conditional goals; if the model thinks past this it retries " +
@@ -193,12 +203,29 @@ func (s *Service) Enabled(ctx context.Context, hh string) bool {
 	return s.Settings.Bool(ctx, SettingEnabled, settings.Scope{HouseholdID: hh})
 }
 
-// AutonomousEnabled reports errands.autonomous_enabled (dormant, D9: nothing calls it yet).
+// AutonomousEnabled reports errands.autonomous_enabled: whether a fresh plan every step of which
+// the household's rules allow may run without a tap (autonomy PLAN §1, checkpoint 1). Off when
+// there are no settings (fail-closed).
 func (s *Service) AutonomousEnabled(ctx context.Context, hh string) bool {
 	if s.Settings == nil {
 		return false
 	}
 	return s.Settings.Bool(ctx, SettingAutonomous, settings.Scope{HouseholdID: hh})
+}
+
+// autonomous reports whether the household's rules may run its errands without a tap.
+func (s *Service) autonomous(ctx context.Context, hh string) bool {
+	return s.Policy != nil && s.AutonomousEnabled(ctx, hh)
+}
+
+// record appends one autonomy event; a failure to log is a warning.
+func (s *Service) record(ctx context.Context, e policy.Event) {
+	if s.Activity == nil {
+		return
+	}
+	if err := s.Activity.Record(ctx, e); err != nil {
+		s.log().Warn("errands: autonomy event not recorded", "outcome", e.Outcome, "source", e.Source, "err", err)
+	}
 }
 
 // Available reports whether the runner can work at all (it needs the queue and the database).

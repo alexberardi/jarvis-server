@@ -44,7 +44,7 @@ type PromptProviderStatus struct {
 
 // PromptProvider reports the effective prompt provider and where it comes from.
 func (m *Module) PromptProvider(ctx context.Context) PromptProviderStatus {
-	st := PromptProviderStatus{Options: prompts.Names()}
+	st := PromptProviderStatus{Options: prompts.BuiltinNames()}
 	_, st.ToolCalling, st.ThinkingSwitch = m.llmMode(ctx, prompts.ModePrefs{})
 	if m.settings != nil {
 		st.Value = strings.TrimSpace(m.settings.String(ctx, settingPromptProvider, settings.Scope{}))
@@ -59,8 +59,7 @@ func (m *Module) PromptProvider(ctx context.Context) PromptProviderStatus {
 		st.Effective, st.Source = st.Derived, PromptSourceModel
 	}
 	if st.Effective != "" {
-		_, err := prompts.Lookup(st.Effective)
-		st.Valid = err == nil
+		_, st.Valid = prompts.Builtin(st.Effective)
 	}
 	return st
 }
@@ -70,7 +69,7 @@ func (m *Module) PromptProvider(ctx context.Context) PromptProviderStatus {
 func (m *Module) SetPromptProvider(ctx context.Context, name string) error {
 	name = strings.TrimSpace(name)
 	if name != "" {
-		if _, err := prompts.Lookup(name); err != nil {
+		if _, ok := prompts.Builtin(name); !ok {
 			return ErrUnknownPromptProvider
 		}
 	}
