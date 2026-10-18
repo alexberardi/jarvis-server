@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -21,6 +22,9 @@ type config struct {
 	flowsDir, rel, out      string
 	coverage, nav           string // e2e/coverage.json and the checkout's src/navigation; both or neither
 	maestro, adb, serial    string
+	platform                string   // android (also when empty) or ios
+	xcrun, udid, deviceName string   // ios: the harness simulator, by UDID and the name it was created with
+	process, bundleID       string   // ios: the app's executable (its log) and bundle id (simctl push)
 	env                     []string // KEY=VALUE, passed to every flow as -e
 	filter                  string
 	flowTimeout, adbTimeout time.Duration
@@ -56,10 +60,32 @@ type Results struct {
 // errNoFlows: nothing to run; scripts/e2e reports the suite as not run (an error), not as green.
 var errNoFlows = errors.New("no flows")
 
+func (c *config) ios() bool { return c.platform == "ios" }
+
+// suite is the name of the suite in the run's report: mobile (Android) or ios.
+func (c *config) suite() string {
+	if c.ios() {
+		return "ios"
+	}
+	return "mobile"
+}
+
+// device is what Maestro's --device names: the emulator's serial or the simulator's UDID.
+func (c *config) device() string {
+	if c.ios() {
+		return c.udid
+	}
+	return c.serial
+}
+
 // run plays every flow one at a time (each with its own Maestro process, logcat cleared before
 // it, and its artifacts on failure) and writes <out>/results.json.
 func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
-	if c.serial == "" || c.serial == userSerial {
+	if c.ios() {
+		if err := c.checkSimulator(ctx); err != nil {
+			return nil, err
+		}
+	} else if c.serial == "" || c.serial == userSerial {
 		return nil, fmt.Errorf("refusing serial %q: the harness only drives its own emulator", c.serial)
 	}
 	if len(flows) == 0 {
@@ -68,8 +94,18 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 	if err := os.MkdirAll(c.out, 0o755); err != nil {
 		return nil, err
 	}
+	if c.ios() {
+		url, stop, err := c.startPush()
+		if err != nil {
+			return nil, err
+		}
+		defer stop()
+		cc := *c
+		cc.env = append(slices.Clip(c.env), "PUSH_URL="+url)
+		c = &cc
+	}
 	t0 := time.Now()
-	res := &Results{Suite: "mobile", Status: "passed", Tests: []Record{}}
+	res := &Results{Suite: c.suite(), Status: "passed", Tests: []Record{}}
 	if c.coverage != "" {
 		cr, rec, err := coverage(c.coverage, c.nav, c.flowsDir, c.rel, c.out)
 		if err != nil {
@@ -107,7 +143,7 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 }
 
 func (c *config) runFlow(ctx context.Context, f Flow) Record {
-	r := Record{Suite: "mobile", ID: f.Slug, Title: f.Name, File: f.File, Line: 1, Status: "skipped",
+	r := Record{Suite: c.suite(), ID: f.Slug, Title: f.Name, File: f.File, Line: 1, Status: "skipped",
 		Screenshots: []string{}, ConsoleErrors: []string{}}
 	if f.Skipped() {
 		r.SkipReason = f.SkipReason
@@ -125,10 +161,13 @@ func (c *config) runFlow(ctx context.Context, f Flow) Record {
 		}
 		return filepath.ToSlash(s)
 	}
-	_, _ = c.adbCmd(ctx, "logcat", "-c") // this flow's log only
+	started := time.Now() // ios: the start of this flow's part of the simulator's log
+	if !c.ios() {
+		_, _ = c.adbCmd(ctx, "logcat", "-c") // this flow's log only
+	}
 
 	junit, debug, logf := filepath.Join(dir, "junit.xml"), filepath.Join(dir, "maestro"), filepath.Join(dir, "maestro.log")
-	args := []string{"--device", c.serial, "test", f.Path, "--format", "junit", "--output", junit, "--debug-output", debug}
+	args := []string{"--device", c.device(), "test", f.Path, "--format", "junit", "--output", junit, "--debug-output", debug}
 	for _, kv := range c.env {
 		args = append(args, "-e", kv)
 	}
@@ -163,7 +202,20 @@ func (c *config) runFlow(ctx context.Context, f Flow) Record {
 	}
 	r.Error = &msg
 
-	// The screen as the flow left it: a picture, the view tree (texts, testIDs) and the log.
+	if c.ios() {
+		c.iosArtifacts(ctx, dir, started, &r, rel)
+	} else {
+		c.androidArtifacts(ctx, dir, &r, rel)
+	}
+	if st, err := os.Stat(debug); err == nil && st.IsDir() {
+		r.Attachments = append(r.Attachments, rel(debug))
+	}
+	return r
+}
+
+// androidArtifacts keeps the screen as the flow left it: a picture, the view tree (texts,
+// testIDs) and the logcat.
+func (c *config) androidArtifacts(ctx context.Context, dir string, r *Record, rel func(string) string) {
 	png := filepath.Join(dir, "screenshot.png")
 	if out, err := c.adbCmd(ctx, "exec-out", "screencap -p"); err == nil && bytes.HasPrefix(out, []byte("\x89PNG")) &&
 		os.WriteFile(png, out, 0o644) == nil {
@@ -184,10 +236,6 @@ func (c *config) runFlow(ctx context.Context, f Flow) Record {
 		}
 		r.ConsoleErrors = jsErrors(string(out), 20)
 	}
-	if st, err := os.Stat(debug); err == nil && st.IsDir() {
-		r.Attachments = append(r.Attachments, rel(debug))
-	}
-	return r
 }
 
 func failed(r Record, msg string) Record {

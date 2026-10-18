@@ -4,7 +4,7 @@
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
 #   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich|empty] [--llm shared|none|scripted] [--ui]
-#                      [--voice [--stt-model ID]] [--relay fake|none|URL]
+#                      [--voice [--stt-model ID]] [--relay fake|none|URL] [--lan]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
 #   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
@@ -56,6 +56,14 @@
 #                    does; never the project's). With JARVIS_UPDATE_API (or JARVISD_RELEASE_BASE)
 #                    in the environment of `up`, jarvisd reads a fake release signed with it
 #
+#   --lan            listen on every interface instead of 127.0.0.1 (jarvisd, the scripted
+#                    model and the fake relay), for a device on another machine: the iOS lane's
+#                    simulator on the Mac (scripts/e2e ios). The dev box's LAN address (or
+#                    $JARVIS_LAN_HOST) goes into sandbox.env as SBX_LAN_HOST and SBX_LAN_CONFIG,
+#                    and .sandbox/<name>/sandbox-lan.env is sandbox.env with every URL on that
+#                    address but the LLM tap (loopback only), for the other machine. The seeded
+#                    logins and keys are open to the LAN while it is up: take it down after.
+#
 # Nodes may claim who is speaking (JARVIS_DEV_SPEAKER_HINTS=1), standing in for voice ID.
 # Without --voice, STT is off and TTS has no voice models: pipeline tests start from text
 # (go run ./tools/pipeline say "turn on the kitchen lights"; ... run for the scenarios).
@@ -69,10 +77,10 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,61p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
-VERSION=dev-sandbox TRUST_KEY= RELAY=fake
+VERSION=dev-sandbox TRUST_KEY= RELAY=fake LAN=0 LAN_HOST=""
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -85,9 +93,10 @@ while [ $# -gt 0 ]; do
     --version) VERSION=$2; shift 2 ;;
     --trust-key) TRUST_KEY=$2; shift 2 ;;
     --relay) RELAY=$2; shift 2 ;;
+    --lan) LAN=1; shift ;;
     --purge) PURGE=1; shift ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,61p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -101,6 +110,7 @@ HOME_DIR=$DIR/home
 PIDFILE=$DIR/jarvisd.pid
 LOG=$DIR/jarvisd.log
 ENVF=$DIR/sandbox.env
+LANENVF=$DIR/sandbox-lan.env
 OFFSETF=$DIR/offset
 TAPPID=$DIR/tap.pid
 SCRIPTPID=$DIR/scriptllm.pid
@@ -349,6 +359,15 @@ for role, var in (("admin", "ADMIN"), ("power_user", "POWER"), ("member", "MEMBE
         print("export SBX_EMAIL_" + var + "=" + m["email"])' || true
 }
 
+# lan_host is the address the LAN reaches this box on: $JARVIS_LAN_HOST, else the source address
+# of the default route.
+lan_host() {
+  local h=${JARVIS_LAN_HOST:-}
+  [ -n "$h" ] || h=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)
+  [ -n "$h" ] && [ "$h" != 127.0.0.1 ] || return 1
+  echo "$h"
+}
+
 write_env() {
   local node_id node_key
   node_id=5eed0000-0000-4000-8000-00000000a0de
@@ -360,6 +379,10 @@ write_env() {
     echo "export JARVIS_SANDBOX=$NAME"
     echo "export JARVIS_HOME=$HOME_DIR"
     echo "export JARVIS_PORT_OFFSET=$(cat "$OFFSETF")"
+    if [ "$LAN" = 1 ]; then
+      echo "export SBX_LAN_HOST=$LAN_HOST"
+      echo "export SBX_LAN_CONFIG=http://$LAN_HOST:$(port 7700)"
+    fi
     for l in config:7700 auth:7701 logs:7702 cc:7703 llm:7704 whisper:7706 tts:7707 notifications:7712 recipes:7030 ocr:7031 admin:7710; do
       n=$(tr '[:lower:]' '[:upper:]' <<<"${l%%:*}")
       echo "export SBX_$n=http://127.0.0.1:$(port "${l#*:}")"
@@ -412,7 +435,12 @@ cmd_up() {
   echo "$RELAY" >"$DIR/relay-mode"
 
   cmd_stop
-  local ui=
+  local ui="" bind=127.0.0.1
+  if [ "$LAN" = 1 ]; then
+    LAN_HOST=$(lan_host) || die "--lan: could not tell this box's LAN address; set JARVIS_LAN_HOST"
+    bind=0.0.0.0
+    say "--lan: listening on every interface; the LAN reaches it at $LAN_HOST"
+  fi
   [ -d "$ROOT/web/admin/dist/ui" ] && ui=$ROOT/web/admin/dist/ui
   say "starting on offset $(cat "$OFFSETF") (cc :$(port 7703), admin :$(port 7710))"
   # The push relay is relay.url's env fallback, so it applies before seeding and on --profile
@@ -420,20 +448,20 @@ cmd_up() {
   local relay_url=
   case $RELAY in
     fake)
-      setsid "$DIR/fakerelay" --listen "127.0.0.1:$(port 7797)" --log "$DIR/pushes.jsonl" >>"$DIR/fakerelay.log" 2>&1 </dev/null &
+      setsid "$DIR/fakerelay" --listen "$bind:$(port 7797)" --log "$DIR/pushes.jsonl" >>"$DIR/fakerelay.log" 2>&1 </dev/null &
       echo $! >"$RELAYPID"
       relay_url=http://127.0.0.1:$(port 7797) ;;
     none) ;;
     *) relay_url=$RELAY ;;
   esac
   say "push relay: ${relay_url:-none}$([ "$RELAY" != fake ] || echo " (tools/fakerelay; pushes in $DIR/pushes.jsonl)")"
-  RELAY_URL=$relay_url JARVIS_HOST=127.0.0.1 JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
+  RELAY_URL=$relay_url JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
     setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"
   local upstream
   if [ "$LLM" = scripted ]; then
-    setsid "$DIR/scriptllm" --listen "127.0.0.1:$(port 7798)" --dir "$ROOT" --script e2e/llm/default.json \
+    setsid "$DIR/scriptllm" --listen "$bind:$(port 7798)" --dir "$ROOT" --script e2e/llm/default.json \
       --log "$DIR/scriptllm-unmatched.jsonl" >>"$DIR/scriptllm.log" 2>&1 </dev/null &
     echo $! >"$SCRIPTPID"
     upstream=http://127.0.0.1:$(port 7798) INSTALLED_APP_ID= INSTALLED_APP_KEY=
@@ -464,6 +492,16 @@ cmd_up() {
     setup_voice
   fi
   write_env
+  rm -f "$LANENVF"
+  if [ "$LAN" = 1 ]; then
+    # For the other machine: the same file with every loopback URL on the LAN address. Each one
+    # listens there: jarvisd's services, the scripted model and the fake relay on $bind, MQTT on
+    # every interface (its default). The LLM tap stays on loopback (only jarvisd calls it), so
+    # SBX_LLM_TAP is left out.
+    grep -v '^export SBX_LLM_TAP=' "$ENVF" | sed "s#127\.0\.0\.1#$LAN_HOST#g" >"$LANENVF"
+    say "up: source $ENVF (on another machine: $LANENVF)"
+    return
+  fi
   say "up: source $ENVF"
 }
 
