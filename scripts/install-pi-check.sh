@@ -9,15 +9,15 @@
 #   UPDATE=1 scripts/install-pi-check.sh   # rewrite the golden file after a deliberate change
 #
 # No Pi or root needed. The agent in the fake release is a shell script; the wake models are the
-# real ones (their hashes are pinned), from .models (scripts/fetch-test-models.sh) or downloaded
-# from openWakeWord's release. A stand-in nmcli answers the Wi-Fi queries.
+# real ones (their hashes are pinned), from .models/openwakeword (scripts/fetch-test-models.sh)
+# or downloaded from openWakeWord's release. A stand-in nmcli answers the Wi-Fi queries.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SCRIPT=$HERE/install-pi.sh
 GOLDEN=$HERE/testdata/install-pi.golden
 DTS=$HERE/packaging/pi/respeaker-2mic-v2_0-overlay.dts
 WATCHDOG=$HERE/packaging/pi/jarvis-net-watchdog
-MODELS=${JARVIS_SHERPA_MODELS:-$HERE/../.models}
+MODELS=${JARVIS_SHERPA_MODELS:-$HERE/../.models}/openwakeword
 WAKE_MODELS="melspectrogram.onnx embedding_model.onnx hey_jarvis_v0.1.onnx"
 V=v9.9.9
 fail() { echo "install-pi-check: $*" >&2; exit 1; }
