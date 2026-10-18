@@ -86,6 +86,15 @@ write_state() {
     printf 'fail=%s\nonline=%s\n' "$1" "$2" > "$STATE" 2>/dev/null || true
 }
 
+# --- (0) The Go node's provisioning hotspot (NetworkManager AP mode, profile
+#     jarvis-setup-ap) has no gateway by design, and forcing the preferred
+#     profile up would tear it down: leave the interface alone while it is up.
+#     jarvis-agent's recovery cycle handles the way back. (Not in N:.)
+if nmcli -t -f NAME connection show --active 2>/dev/null | grep -qx 'jarvis-setup-ap'; then
+    write_state 0 "$online"
+    exit 0
+fi
+
 # --- (1) Enforce power-save OFF on the live interface. iw is the driver-level
 #     control install.sh now installs; nmcli reapply alone does not always push
 #     powersave to brcmfmac. Cheap + idempotent, so do it every run.
