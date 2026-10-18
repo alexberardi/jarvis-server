@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Cpu, RefreshCw, Server } from 'lucide-react'
 import { toast } from 'sonner'
 import type { EngineInstance, HardwareResponse } from '@/api/llm'
-import { useFetchEngine, useHardware, useRefreshHardware } from '@/hooks/useModelManager'
+import { useFetchEngine, useHardware, useRefreshHardware, useRetryEngine } from '@/hooks/useModelManager'
 import { errorMessage } from '@/lib/errors'
 import { formatMB } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -58,6 +58,7 @@ export function DetectedHardware({ data }: { data: Pick<HardwareResponse, 'hardw
 
 function EngineRow({ e }: { e: EngineInstance }) {
   const [open, setOpen] = useState(false)
+  const retry = useRetryEngine()
   return (
     <li className="rounded-lg border border-[var(--color-border)] p-2">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -78,6 +79,21 @@ function EngineRow({ e }: { e: EngineInstance }) {
         </div>
       </div>
       {e.last_error && <p className="mt-1 text-xs text-red-500">{e.last_error}</p>}
+      {e.gave_up && (
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[var(--color-text-muted)]">
+            Gave up after {e.retries} retries. Fix the model or its settings, then retry.
+          </span>
+          <button
+            type="button"
+            className={buttonClass.secondary}
+            disabled={retry.isPending}
+            onClick={() => retry.mutate(e.name, { onError: (err) => toast.error(errorMessage(err, 'Retry failed')) })}
+          >
+            <RefreshCw size={12} className={cn(retry.isPending && 'animate-spin')} /> Retry
+          </button>
+        </div>
+      )}
       {open && (
         <div className="mt-2 space-y-1">
           <p className="break-all font-mono text-[11px] text-[var(--color-text-muted)]">{(e.args ?? []).join(' ')}</p>
