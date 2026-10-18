@@ -546,8 +546,9 @@ jobs:
       # The one-line installers (install-agent.sh: the desktop agent on Fedora, Bazzite, Arch;
       # decided Q8) ship as release assets (the admin's update check shows an
       # install command only when they are there). They are fetched on their own over TLS, so
-      # they stay out of SHA256SUMS (install-pi.sh, added before it, is the exception). Each is stamped with the tag (A10b): the copy at a
-      # release's URL installs that release, prereleases included, with no --version.
+      # they stay out of SHA256SUMS (install-pi.sh, added before it, is the exception). Each is
+      # stamped with the tag (A10b): the copy at a release's URL installs that release,
+      # prereleases included, with no --version.
       - name: Add the install scripts
         env:
           VERSION: ${{ needs.build.outputs.version }}
@@ -724,13 +725,15 @@ jobs:
           cd dist
           exe=jarvisd; [ "${{ matrix.ext }}" = zip ] && exe=jarvisd.exe
           if [ -f SHA256SUMS.minisig ]; then
-            # Every asset present (jarvisd's and the agent's archives, the .debs, the Windows installers, the dmgs, install-pi.sh) must match the signed list.
+            # Every asset present (jarvisd's and the agent's archives, the .debs, the Windows
+            # installers, the dmgs, install-pi.sh) must match the signed list. --verify-dir
+            # prints one line, "...; verified a, b, ...", so match names as list items.
             JARVIS_HOME="$RUNNER_TEMP/jarvis" "$PWD/$NAME/$exe" upgrade --verify-dir "$PWD" | tee verified
             grep -q "jarvis-agent-" verified
             grep -q "jarvis-automation-server_" verified && grep -q "jarvis-automation-agent_" verified
             grep -q "Jarvis-Automation-Server-Setup-" verified && grep -q "Jarvis-Automation-Agent-Setup-" verified
             grep -q "Jarvis-Automation-Server-.*\.dmg" verified && grep -q "Jarvis-Automation-Agent-.*\.dmg" verified
-            grep -qx "install-pi.sh" verified
+            grep -qE '(verified |, )install-pi\.sh(,|$)' verified
           else
             echo "::warning::no SHA256SUMS.minisig (unsigned dry run); signature not checked"
           fi
