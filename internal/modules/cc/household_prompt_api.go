@@ -355,6 +355,7 @@ func (m *Module) previewServerTools(ctx context.Context, hh string, native bool)
 		SpeakerKnown:  m.STT != nil && m.STT.RecognitionEnabled(ctx, hh),
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
+		Watches:       m.householdBool(ctx, settingWatchesEnabled, hh),
 		PhotoTools:    map[string]bool{},
 	}
 	for n := range m.serverPhotoTools() {

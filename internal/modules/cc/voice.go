@@ -54,6 +54,10 @@ func (m *Module) registerServerTools() {
 	m.tools.Register(servertools.NewHAEntities())
 	m.tools.Register(m.phoneService().Tool()) // make_phone_call (5c, phone_wire.go)
 	m.registerErrandTools()
+	// create_watch / list_watches / cancel_watch (watch_tools.go)
+	m.tools.Register(&createWatchTool{m: m})
+	m.tools.Register(&listWatchesTool{m: m})
+	m.tools.Register(&cancelWatchTool{m: m})
 	if m.Recipes != nil {
 		m.tools.Register(&saveRecipeTool{m: m, imp: m.Recipes}) // chat photo → recipe (chat_image_actions.go)
 	}

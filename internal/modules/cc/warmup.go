@@ -248,6 +248,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		SpeakerKnown:  recognition || conv.chatUserID != 0 || conv.ownerUserID != 0 || conv.desktopVoice,
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
+		Watches:       m.householdBool(ctx, settingWatchesEnabled, hh),
 		ChatPhotos:    photosPossible,
 		PhotoTools:    make(map[string]bool, len(serverPhoto)),
 	}

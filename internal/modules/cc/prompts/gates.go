@@ -9,6 +9,7 @@ type ToolGates struct {
 	SpeakerKnown  bool // a confidently identified speaker for this conversation (D21)
 	MemoryEnabled bool // memory.enabled
 	RecallEnabled bool // memory.recall_enabled
+	Watches       bool // watches.enabled
 	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
 	// photos come from (docs/cc/chat-images.md §8-9). Gates every photo tool.
 	ChatPhotos bool
@@ -47,7 +48,8 @@ var textPathWhitelist = []string{
 }
 
 // ServerToolAllowed is the gate itself: web tools need web search on; remember/forget need a
-// known speaker and memory on; recall additionally needs recall on. Every other tool passes.
+// known speaker and memory on; recall additionally needs recall on; the watch tools need watches
+// on and a known speaker (A8). Every other tool passes.
 func ServerToolAllowed(name string, g ToolGates) bool {
 	switch name {
 	case "deep_research", "quick_search":
@@ -56,6 +58,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.SpeakerKnown && g.MemoryEnabled
 	case "recall":
 		return g.SpeakerKnown && g.MemoryEnabled && g.RecallEnabled
+	case "create_watch", "list_watches", "cancel_watch":
+		return g.Watches && g.SpeakerKnown
 	}
 	if g.PhotoTools[name] {
 		return g.ChatPhotos
@@ -64,7 +68,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 }
 
 // TextServerTools is the text path's server-tool list, in the legacy order: the whitelist,
-// then deep_research and quick_search, then remember, forget and recall, then the photo tools
+// then deep_research and quick_search, then remember, forget and recall, then create_watch,
+// list_watches and cancel_watch, then the photo tools
 // (sorted), each behind its gate. Names the caller's registry does not have are skipped by the
 // caller (legacy get_tool).
 func TextServerTools(g ToolGates) []string {
@@ -74,7 +79,8 @@ func TextServerTools(g ToolGates) []string {
 		photo = append(photo, n)
 	}
 	sort.Strings(photo)
-	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall"}, photo...) {
+	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall",
+		"create_watch", "list_watches", "cancel_watch"}, photo...) {
 		if ServerToolAllowed(n, g) {
 			out = append(out, n)
 		}

@@ -105,8 +105,8 @@ func (d *Driver) Run(ctx context.Context, sc Scenario) ScenarioLog {
 	return as.run(ctx, sc)
 }
 
-func (d *Driver) run(ctx context.Context, sc Scenario) ScenarioLog {
-	out := ScenarioLog{Name: sc.Name, File: sc.File, ConversationID: newUUID(), Pass: true}
+func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
+	out = ScenarioLog{Name: sc.Name, File: sc.File, ConversationID: newUUID(), Pass: true}
 	spec := resolveToolSpec(sc)
 	tools, err := LoadToolSet(d.Root, spec)
 	speaker, serr := d.speakerID(sc.Speaker)
@@ -130,6 +130,18 @@ func (d *Driver) run(ctx context.Context, sc Scenario) ScenarioLog {
 	}
 	if err == nil && sc.FreshMemories {
 		err = d.clearMemories(ctx)
+	}
+	if err == nil && len(sc.Settings) > 0 {
+		var restore func(context.Context) error
+		if restore, err = d.applySettings(ctx, sc.Settings); err == nil {
+			defer func() {
+				if rerr := restore(context.WithoutCancel(ctx)); rerr != nil && len(out.Turns) > 0 {
+					last := &out.Turns[len(out.Turns)-1]
+					last.Failures = append(last.Failures, rerr.Error())
+					out.Pass = false
+				}
+			}()
+		}
 	}
 	if err == nil {
 		tz := sc.Timezone

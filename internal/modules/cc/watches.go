@@ -12,8 +12,8 @@ import (
 )
 
 // Watches (docs/autonomy/PLAN.md §2): the store, the household switch, firing (watches_fire.go),
-// the signal source (watches_signal.go), web checks (watches_web.go) and the hourly expiry sweep.
-// The voice tools come later; nothing reads max_active yet.
+// the signal source (watches_signal.go), web checks (watches_web.go), the voice tools
+// (watch_tools.go) and the hourly expiry sweep.
 const (
 	settingWatchesEnabled    = "watches.enabled"
 	settingWatchesMaxActive  = "watches.max_active"
