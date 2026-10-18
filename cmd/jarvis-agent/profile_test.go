@@ -104,12 +104,12 @@ func TestPiToolset(t *testing.T) {
 // The Pi's node_config: the HAT as opened, and the voice and LED settings, under the Python
 // node's keys.
 func TestPiNodeConfig(t *testing.T) {
-	vf := &voiceFlags{threshold: 0.6, noChimes: true, followUp: 4, followSilence: 0.5}
+	vf := &voiceFlags{threshold: 0.6, noChimes: true, followUp: 4, followSilence: 0.5, bargeIn: true}
 	hf := &hatFlags{mode: "auto", brightness: 40}
 	got := piNodeConfig(vf, hf, nil, false)()
 	want := map[string]any{
 		"wake_word_threshold": 0.6, "wake_ack_audio_enabled": false,
-		"follow_up_listen_seconds": 4.0, "follow_up_silence_duration": 0.5,
+		"follow_up_listen_seconds": 4.0, "follow_up_silence_duration": 0.5, "barge_in_enabled": true,
 		"led_enabled": true, "led_brightness_percent": 40,
 		"hardware": map[string]any{"hat_detected": false, "led_chain_available": false, "button_available": false},
 	}
