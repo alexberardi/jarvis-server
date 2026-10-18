@@ -31,7 +31,10 @@ type FS struct {
 	log  *slog.Logger
 }
 
-var _ Store = (*FS)(nil)
+var (
+	_ Store  = (*FS)(nil)
+	_ Seeker = (*FS)(nil)
+)
 
 // maxHeader bounds the header line so a corrupt file can't make reads buffer unboundedly.
 const maxHeader = 4096
@@ -134,6 +137,37 @@ func (s *FS) Get(ctx context.Context, key string) (io.ReadCloser, Info, error) {
 		return nil, Info{}, err
 	}
 	return readCloser{br, f}, info, nil
+}
+
+// GetSeeker implements Seeker: the content is a section of the file past its header line.
+func (s *FS) GetSeeker(ctx context.Context, key string) (io.ReadSeekCloser, Info, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, Info{}, err
+	}
+	p, err := s.path(key)
+	if err != nil {
+		return nil, Info{}, err
+	}
+	f, err := openShared(p)
+	if err != nil {
+		return nil, Info{}, notFound(key, err)
+	}
+	info, err := readInfo(f, bufio.NewReaderSize(f, 512), key)
+	if err != nil {
+		_ = f.Close()
+		return nil, Info{}, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, Info{}, fmt.Errorf("blob: stat %q: %w", key, err)
+	}
+	return sectionCloser{io.NewSectionReader(f, st.Size()-info.Size, info.Size), f}, info, nil
+}
+
+type sectionCloser struct {
+	*io.SectionReader
+	io.Closer
 }
 
 // Stat implements Store.

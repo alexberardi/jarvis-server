@@ -1,6 +1,7 @@
 // The inbox: what a service posts shows up, opening an item reads it, and the actions change
 // the items on the server.
-import { createInboxItem, inbox, newUser } from '../helpers/api'
+import { call, createInboxItem, inbox, newUser, uploadAttachment } from '../helpers/api'
+import { env } from '../helpers/env'
 import { expect, sidebar, test } from '../helpers/fixtures'
 
 test('lists items with the unread badge, and the detail marks one read', async ({ asUser }) => {
@@ -70,4 +71,35 @@ test('select: mark read and delete several at once', async ({ asUser }) => {
   await expect.poll(async () => (await inbox(u.token)).map((i) => i.id)).toEqual([keep.id])
   await expect(page.locator('main li')).toHaveCount(1)
   await expect(page.locator('main li')).toContainText('Keep this one')
+})
+
+// A 1×1 PNG, and enough of an MP4 (an ftyp box) for the server's sniffing.
+const png = Uint8Array.from(
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
+  (c) => c.charCodeAt(0),
+)
+const mp4 = new Uint8Array([...new TextEncoder().encode('\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2'), ...new Uint8Array(64)])
+
+test("the detail shows an item's image and video attachments, only to its user", async ({ asUser }) => {
+  const u = await newUser('inboxatt')
+  const img = await uploadAttachment(png, 'image/png')
+  const vid = await uploadAttachment(mp4, 'video/mp4')
+  const a = await createInboxItem(u, { title: 'Made for you', body: 'Two files.', attachment_ids: [img.id, vid.id] })
+
+  const page = await asUser(u)
+  await page.goto(`/inbox/${a.id}`)
+  const shown = page.getByRole('region', { name: 'Attachments' })
+  const image = shown.getByRole('img', { name: 'Attachment 1' })
+  await expect(image).toHaveAttribute('src', /^blob:/)
+  // The bytes decoded: a broken image has no natural size.
+  await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1)
+  const video = shown.getByLabel('Attachment 2')
+  await expect(video).toHaveAttribute('src', /^blob:/)
+  await expect(video).toHaveAttribute('controls', '')
+
+  // Someone else (another household) gets a 404 for the file, not the bytes.
+  const other = await newUser('inboxatt2')
+  const url = `${env('SBX_NOTIFICATIONS')}/api/v0/inbox/${a.id}/attachments/${img.id}`
+  expect((await call('GET', url, { token: other.token })).status).toBe(404)
+  expect((await call('GET', url, { token: u.token })).status).toBe(200)
 })
