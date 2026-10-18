@@ -121,6 +121,10 @@ type Resolver struct {
 	// TemplateDir holds the pinned chat templates engines are launched with
 	// (<home>/templates); default <tmp>/jarvisd-chat-templates.
 	TemplateDir string
+	// PIDDir holds a pid file per running engine (<home>/engines/run). The first use of the
+	// resolver kills engines a previous jarvisd left there (engines.Sweep): on macOS they
+	// outlive a crashed jarvisd. Empty = no pid files.
+	PIDDir string
 	// Memory persists where each label last ran healthy on a GPU, so a GPU that disappears
 	// later is noticed even when the label's settings are all "auto" (nil = in memory only).
 	Memory GPUMemory
@@ -168,15 +172,19 @@ var ErrUnknownEngine = errors.New("unknown engine")
 var ErrNotFailed = errors.New("engine has not failed")
 
 func (r *Resolver) init() {
+	if r.Log == nil {
+		r.Log = slog.Default()
+	}
 	if r.instances == nil {
 		r.instances = map[string]*instance{}
 		r.bound = map[string]string{}
 		r.wake = make(chan struct{}, 1)
 		r.stopping = map[*instance]chan struct{}{}
 		r.last = map[string]error{}
-	}
-	if r.Log == nil {
-		r.Log = slog.Default()
+		// Before any engine starts, so only a previous jarvisd's are in the dir.
+		if n := engines.Sweep(r.PIDDir, r.Log); n > 0 {
+			r.Log.Warn("killed engines left running by a previous jarvisd", "count", n)
+		}
 	}
 	if r.lastGood == nil {
 		r.lastGood = map[string]Placement{}
@@ -514,6 +522,7 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 		StartTimeout: def(r.StartTimeout, 10*time.Minute),
 		StopTimeout:  def(r.StopTimeout, 10*time.Second),
 		Restart:      r.Restart,
+		PIDDir:       r.PIDDir,
 	}
 	sup, err := engines.New(spec, r.Log)
 	if err != nil {

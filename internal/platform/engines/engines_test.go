@@ -30,6 +30,7 @@ import (
 //	HELPER_ENV_FILE         write the environment here
 //	HELPER_CHILD_PID_FILE   spawn a sleeping grandchild and write its pid here
 //	HELPER_IGNORE_TERM      ignore SIGTERM
+//	HELPER_IGNORE_PIPE      ignore SIGPIPE, as llama-server (cpp-httplib) does, so it outlives its pipes
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("ENGINES_HELPER") != "1" {
 		t.Skip("helper process")
@@ -45,6 +46,9 @@ func runHelper() {
 	}
 	if os.Getenv("HELPER_IGNORE_TERM") == "1" {
 		signal.Ignore(syscall.SIGTERM)
+	}
+	if os.Getenv("HELPER_IGNORE_PIPE") == "1" {
+		signal.Ignore(syscall.SIGPIPE)
 	}
 	if f := os.Getenv("HELPER_ENV_FILE"); f != "" {
 		_ = os.WriteFile(f, []byte(strings.Join(os.Environ(), "\n")), 0o600)
