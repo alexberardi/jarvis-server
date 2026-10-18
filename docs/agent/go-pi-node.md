@@ -956,6 +956,11 @@ These are **still needed**; install.sh step lines are cited:
       own tag, never the jarvis-node-setup release). Python nodes are unchanged. The node-side
       applier is still to do.
    3. The tarball + install.sh variant (§6).
+      **3a built 2026-10-17:** `scripts/install-pi.sh` (agent in `/opt/jarvis-agent`; overlay, config.txt,
+      modprobe, asound.conf, mixer baseline, groups + linger, sudoers, journald, swappiness, swap, the
+      `/etc/jarvis-node` marker, `jarvis-agent.service`); golden-tested against a scratch root
+      (`scripts/install-pi-check.sh`), **pending on-device** (lab Pi 4). 3b (#160): Pulse, Wi-Fi powersave and
+      NM, hostapd/dnsmasq, the net watchdog, models in the tarball.
    4. The provisioning AP + HTTP API port.
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land.
 
@@ -989,6 +994,7 @@ These are **still needed**; install.sh step lines are cited:
 | 8 | Python quick win | **Done:** jarvis-node-setup #144 (−77 MB RSS), shipped in node v0.3.5. |
 | 9 | Runtime package vs SDK backends | **SDK backends (§5.2).** |
 | 10 | Desktop voice order | **Linux and macOS together** (not Linux-first). ALSA via purego and AudioQueue via purego land in the same phase; Windows (WASAPI) follows. |
+| 11 | Which node runs on a Pi with both (2026-10-17, #159) | **`--activate`/`--deactivate` plus `Conflicts=jarvis-node.service`** in `jarvis-agent.service`: install-pi.sh installs the unit disabled; `--activate` disables and stops the Python node and enables the Go one, `--deactivate` the reverse; Conflicts= keeps the two off the HAT at once ([decision](../decisions/2026-10-17-pi-node-activation.md)). |
 
 Phase 3 of §7 therefore covers both Linux and macOS desktop voice, and phase 4.4 ports
 provisioning to NetworkManager D-Bus rather than hostapd.
