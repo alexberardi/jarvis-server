@@ -955,7 +955,6 @@ These are **still needed**; install.sh step lines are cited:
       (unit tests; not yet run on a Pi).
       The HAT codec self-heal (ADC HPF, output mixer baseline; §6) at every start. **Done
       2026-10-17** (unit tests with a fake amixer; not yet run on a Pi).
-   2. Heartbeat `pending_update` → updater.
    2. Heartbeat `pending_update` → updater. **Server side done 2026-10-17:** jarvisd stores
       `version_info.runtime` (`cc_nodes.runtime`, on the node response); a `runtime "go"` node
       follows this server like a desktop agent (heartbeat `server_version`, "latest" = jarvisd's

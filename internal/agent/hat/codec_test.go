@@ -20,7 +20,8 @@ func (f *fakeAmixer) run(_ context.Context, name string, args ...string) (string
 	argv := strings.Join(append([]string{name}, args...), " ")
 	f.calls = append(f.calls, argv)
 	if f.fail[argv] {
-		return "", errors.New("exit status 1")
+		// The canned stdout comes back with the error, so a caller has to check err.
+		return f.out[argv], errors.New("exit status 1")
 	}
 	if out, ok := f.out[argv]; ok {
 		return out, nil
