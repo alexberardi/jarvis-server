@@ -53,11 +53,13 @@ chmod 0755 "$T/bin/minisign"
 
 # nmcli: wlan0 is on jarvis-Home (SSID Home); preconfigured (netplan's) is the same SSID, Office
 # another one, and there is a wired connection. Only queries: under --root a change is logged.
+# FAKE_WLAN0=none: wlan0 reports no connection, though jarvis-Home is still active.
 cat >"$T/bin/nmcli" <<'EOF'
 #!/bin/sh
 ssid() { case $1 in jarvis-Home | preconfigured) echo Home ;; Office) echo Office ;; esac; }
 case "$*" in
-  "-t -f GENERAL.CONNECTION device show wlan0") echo GENERAL.CONNECTION:jarvis-Home ;;
+  "-t -f GENERAL.CONNECTION device show wlan0") [ "${FAKE_WLAN0:-}" = none ] && echo GENERAL.CONNECTION: || echo GENERAL.CONNECTION:jarvis-Home ;;
+  "-t -f NAME,TYPE connection show --active") printf '%s\n' 'Wired connection 1:802-3-ethernet' jarvis-Home:802-11-wireless ;;
   "-t -f NAME,TYPE connection show") printf '%s\n' preconfigured:802-11-wireless 'Wired connection 1:802-3-ethernet' Office:802-11-wireless jarvis-Home:802-11-wireless ;;
   "-t -g 802-11-wireless.ssid connection show "*) ssid "$6" ;;
   *) echo "nmcli $*: not a query" >&2; exit 1 ;;
@@ -74,7 +76,7 @@ seed() {
   printf '[all]\ndtparam=audio=on\ndtoverlay=wm8960-soundcard\n' >"$1/boot/firmware/config.txt"
   printf 'proc /proc proc defaults 0 0\n' >"$1/etc/fstab"
 }
-R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} sh "$SCRIPT" "$@"; }
+R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} sh "$SCRIPT" "$@"; }
 
 # snapshot ROOT: what the install wrote, as text.
 snapshot() {
@@ -129,6 +131,14 @@ R --root "$R2" --from-dir "$T/dist" >/dev/null 2>"$T/err"
 [ "$(cat "$R2/etc/jarvis-node/audio_config.json")" = '{}' ] || fail "the Python node's /etc/jarvis-node was touched"
 [ ! -L "$R2/home/pi/.config/systemd/user/pulseaudio.service" ] || fail "the per-user mask on pulseaudio.service was kept"
 grep -q "removed a per-user mask on pulseaudio.service" "$T/err" || fail "no warning for the removed mask: $(cat "$T/err")"
+
+echo "--- wlan0 reports no connection: power-save off on the active Wi-Fi one, no reconcile (as N:)"
+R4=$T/root-nowlan
+seed "$R4"
+FAKE_WLAN0=none R --root "$R4" --from-dir "$T/dist" >/dev/null
+grep -qx "nmcli connection modify jarvis-Home wifi.powersave 2" "$R4/install-pi-commands.log" ||
+  fail "power-save was not turned off on the active Wi-Fi connection"
+grep -q "autoconnect" "$R4/install-pi-commands.log" && fail "reconciled the Wi-Fi profiles with no connection on wlan0"
 
 echo "--- --activate / --deactivate"
 R --root "$ROOT" --from-dir "$T/dist" --activate >/dev/null

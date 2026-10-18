@@ -203,9 +203,9 @@ fetch() { # fetch ASSET DEST: a URL, or a file in a local directory
   esac
 }
 
-# The wake-word models, so the node never fetches them at run time: from the release files when
-# they have them (--from-dir for an offline install), else from openWakeWord's release, each
-# checked against its pinned hash. One that is already in place with the right hash is kept.
+# The wake-word models, so the node never fetches them at run time: from --from-dir or --base-url
+# when it has them (an offline install), else from openWakeWord's release, each checked against
+# its pinned hash. One that is already in place with the right hash is kept.
 install_wake_models() {
   mkdir -p "$(P "$MODELS")"
   while read -r name sum; do
@@ -542,16 +542,16 @@ mask_ap_services() {
 # wlan0's NetworkManager connection, or nothing (nmcli only reads here).
 wifi_connection() {
   command -v nmcli >/dev/null 2>&1 || return 0
-  con=$(nmcli -t -f GENERAL.CONNECTION device show "$WIFI" 2>/dev/null | cut -d: -f2-)
-  [ -n "$con" ] || con=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2 == "802-11-wireless" {print $1; exit}')
-  printf '%s' "$con"
+  nmcli -t -f GENERAL.CONNECTION device show "$WIFI" 2>/dev/null | cut -d: -f2-
 }
 
 # Wi-Fi power-save off (N:install.sh:1194-1227): in the active connection, which lasts, and in
-# the driver now, since brcmfmac doesn't always get NetworkManager's setting. The watchdog
+# the driver now, since brcmfmac doesn't always get NetworkManager's setting. When wlan0 reports
+# no connection, the first active Wi-Fi one (as N:; the reconcile below skips instead). The watchdog
 # enforces it every minute after that.
 wifi_powersave_off() {
   con=$(wifi_connection)
+  [ -n "$con" ] || con=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2 == "802-11-wireless" {print $1; exit}')
   if [ -n "$con" ]; then
     run nmcli connection modify "$con" wifi.powersave 2 2>/dev/null || true
     run nmcli device reapply "$WIFI" >/dev/null 2>&1 || true
@@ -566,7 +566,8 @@ wifi_powersave_off() {
 # One NetworkManager profile per SSID (N:install.sh:2148-2191): two autoconnecting profiles for
 # the SSID wlan0 is on (a provisioning one and a netplan one) make NM thrash between them after a
 # drop and strand the node (the 2026-06 kitchen incident). The one in use gets autoconnect and
-# priority 999 (which the watchdog brings up first), the others stop autoconnecting.
+# priority 999 (which the watchdog brings up first), the others stop autoconnecting. Nothing
+# changes when wlan0 reports no connection.
 reconcile_wifi_profiles() {
   con=$(wifi_connection)
   [ -n "$con" ] || return 0
