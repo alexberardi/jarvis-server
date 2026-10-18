@@ -149,6 +149,7 @@ one auth rate limit.
 | `push.spec.ts` | the push each event sends, as the fake relay recorded it (title, body, `data.type`, `data.inbox_item_id`, priority, target tokens): a node's timer, reminder and alert inbox items (and the web inbox opens the item the push names); a node push (confirmation card); send_link (`open_url`); a household push reaches every phone in it and none elsewhere; a service's `notify` and `notify/batch`; no push for an inbox item that asked for none; a token the relay calls unregistered is deactivated; a signed-out token gets nothing |
 | `addons.spec.ts` | the page's sections; a paired desktop agent is listed; signing it out removes it on the server |
 | `household.spec.ts` | the switcher appears with two households; the inbox and the chat devices follow the pick, across a reload; no switcher with one |
+| `pairing.spec.ts` | a simulated node (below) asks to pair; the superuser types its code and a room on the Nodes page; the agent joins and its card shows up online in that room |
 | `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page, every old top-level path and `/admin` itself forward to their `/admin` page (query kept), an unknown path shows the 404 page in the shell and under `/admin`; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
 | `admin/dashboard.spec.ts` | System card = `/api/system/info`; no Restart when unsupervised; Stop asks and Cancel leaves jarvisd up (stop is never sent); "Finish setup" vs "Voice isn't ready" banner from `setup.completed`, the latter naming the missing jobs and leading to their models; no update or GPU banner without their state |
 | `admin/models.spec.ts` | every catalog model listed; Install asks and nothing downloads; a job's Set up narrows the catalog to its kind, Show all restores it; a model assigned to the live label is saved (server and page, across a reload; background follows). Skipped: Hugging Face installs |
@@ -159,6 +160,22 @@ one auth rate limit.
 | `admin/nodes.spec.ts` | a pairing computer approved into a household (it then registers and is listed), another denied (told so, gone); a signed-out node behind Show signed-out nodes. Skipped: rename/remove (not in the web admin) |
 | `admin/users.spec.ts` | every account with households, roles and badges; a generated and a chosen temporary password both sign the user in to the forced change; a deactivated account (seeded) marked and not resettable. Skipped: invite, role change, disable (mobile only in v1) |
 | `admin/update.spec.ts` | checks off: says so, the running version, no update offered; the switch saved on the server both ways; apply is blocked throughout. Skipped: an available update and applying it |
+
+### A simulated node for pairing
+
+`scripts/sandbox node-sim --name N [--node-name X]` pairs a node with no hardware: it builds
+`./cmd/jarvis-agent` and runs the real agent headless (`enroll --code --profile pi`, then
+`run --voice=false`), with its own HOME, XDG dirs and no desktop session under
+`.sandbox/N/simnode/X/`. It prints the pairing code on stdout once the agent shows it (cc never
+lists codes, so this is the only place it comes from) and also writes it to
+`.sandbox/N/simnode/X/code`. Once a member approves the code, the agent answers yes to "Join
+this household?", registers and stays up as the node (MQTT, heartbeats) until
+`scripts/sandbox down`. The agent's output is `.sandbox/N/simnode/X/agent.log`.
+
+In the web suite, `startSimNode(name)` (`helpers/simnode.ts`) runs it and returns the code.
+The mobile app's approval is a Maestro flow in jarvis-node-mobile (after the Maestro runner,
+#144): start `node-sim`, read the code from the `code` file, approve it in the app, and check
+the node in the app's node list.
 
 ### Writing a test
 
@@ -351,3 +368,26 @@ schedule, loop item #152, runs it). Why it is built this way:
   playback, as with WAV files.
 - **When it fails to start:** the error says which step (`ssh`, the architecture, no seeed card:
   `--pi-card N`, a service it could not stop, the card still busy and who holds it).
+
+## Home Assistant (`--ha`)
+
+Not built yet; split into its own item. `scripts/sandbox up --ha` will run the official Home
+Assistant image (pinned) with demo and template devices, onboarded by script, so the smart-home
+setup (discovery, auth, import, rooms) runs against the real thing. Its device-control test
+stays skipped until the Go node talks to Home Assistant (#176/#177): on the server, control goes
+through a node. See
+[`../decisions/2026-10-18-e2e-real-ha-and-sim-node.md`](../decisions/2026-10-18-e2e-real-ha-and-sim-node.md).
+
+## What stays manual
+
+The suites cover what can run unattended against real local systems. These stay with a person:
+
+- **Camera**: the camera and its streams need real hardware (a lens, a scene, the device's
+  encoder); an emulator's fake camera only proves that a frame arrives, not that the feature works.
+- **Biometrics**: the fingerprint and face prompts are the OS's own dialogs. They can't be
+  passed honestly from a script on the emulator, and faking the result tests the fake.
+- **Visual polish**: spacing, alignment and how a screen looks need a person's judgment. The
+  screenshot tools (`scripts/screenshots`, `scripts/mobile-shot`, `scripts/desktop-shot`) make
+  that review quick, and flag overflow and console errors, but don't decide it.
+- **Packages** (pantry and store installs): out of scope by the user's decision (2026-10-17);
+  they depend on the public pantry service and change outside this repo.
