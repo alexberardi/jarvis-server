@@ -9,6 +9,11 @@ f 644 etc/fstab
 d 755 etc/jarvis-node
 d 755 etc/modprobe.d
 f 644 etc/modprobe.d/alsa-base.conf
+d 755 etc/pulse
+d 755 etc/pulse/default.pa.d
+f 644 etc/pulse/default.pa.d/97-jarvis-hat-sink.pa
+f 644 etc/pulse/default.pa.d/98-jarvis-stream-restore.pa
+f 644 etc/pulse/default.pa.d/99-jarvis-no-suspend.pa
 d 755 etc/sudoers.d
 f 440 etc/sudoers.d/jarvis-agent
 d 755 etc/sysctl.d
@@ -18,20 +23,44 @@ d 755 etc/systemd/journald.conf.d
 f 644 etc/systemd/journald.conf.d/jarvis.conf
 d 755 etc/systemd/system
 f 644 etc/systemd/system/jarvis-agent.service
+f 644 etc/systemd/system/jarvis-net-watchdog.service
+f 644 etc/systemd/system/jarvis-net-watchdog.timer
+d 755 etc/systemd/user
+d 755 etc/systemd/user/default.target.wants
+l 777 etc/systemd/user/default.target.wants/pulseaudio.service -> /usr/lib/systemd/user/pulseaudio.service
+l 777 etc/systemd/user/pipewire-pulse.service -> /dev/null
+l 777 etc/systemd/user/pipewire-pulse.socket -> /dev/null
+l 777 etc/systemd/user/pipewire.service -> /dev/null
+l 777 etc/systemd/user/pipewire.socket -> /dev/null
+d 755 etc/systemd/user/sockets.target.wants
+l 777 etc/systemd/user/sockets.target.wants/pulseaudio.socket -> /usr/lib/systemd/user/pulseaudio.socket
+l 777 etc/systemd/user/wireplumber.service -> /dev/null
+d 755 etc/udev
+d 755 etc/udev/rules.d
+f 644 etc/udev/rules.d/89-jarvis-hat-pulse-ignore.rules
 d 755 opt
 d 755 opt/jarvis-agent
 f 755 opt/jarvis-agent/jarvis-agent
 d 755 usr
 d 755 usr/local
+d 755 usr/local/sbin
+f 755 usr/local/sbin/jarvis-net-watchdog
 d 755 usr/local/share
 d 755 usr/local/share/jarvis-agent
+d 755 usr/local/share/jarvis-agent/openwakeword
+f 644 usr/local/share/jarvis-agent/openwakeword/embedding_model.onnx
+f 644 usr/local/share/jarvis-agent/openwakeword/hey_jarvis_v0.1.onnx
+f 644 usr/local/share/jarvis-agent/openwakeword/melspectrogram.onnx
 f 644 usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 d 755 var
 d 755 var/log
 d 755 var/log/journal
 ## commands
+apt-get update -q
+env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio iw hostapd dnsmasq device-tree-compiler alsa-utils
 chown pi: /opt/jarvis-agent
 dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
+udevadm control --reload
 amixer -q -c seeed2micvoicec sset PCM 100% unmute
 amixer -q -c seeed2micvoicec sset Line 2 unmute
 amixer -q -c seeed2micvoicec sset Line DAC 115 unmute
@@ -60,6 +89,16 @@ fallocate -l 1G /swapfile
 chmod 600 /swapfile
 mkswap /swapfile
 swapon /swapfile
+systemctl stop hostapd dnsmasq
+systemctl disable hostapd dnsmasq
+systemctl mask hostapd dnsmasq
+nmcli connection modify jarvis-Home wifi.powersave 2
+nmcli device reapply wlan0
+iw dev wlan0 set power_save off
+nmcli connection modify preconfigured connection.autoconnect no
+nmcli connection modify jarvis-Home connection.autoconnect yes connection.autoconnect-priority 999
+systemctl daemon-reload
+systemctl enable --now jarvis-net-watchdog.timer
 systemctl daemon-reload
 ## boot/firmware/config.txt
 [all]
@@ -109,6 +148,17 @@ proc /proc proc defaults 0 0
 /swapfile none swap sw 0 0
 ## etc/modprobe.d/alsa-base.conf
 options snd-soc-tlv320aic3x index=0
+## etc/pulse/default.pa.d/97-jarvis-hat-sink.pa
+.nofail
+load-module module-alsa-sink device=hw:CARD=seeed2micvoicec,DEV=0 sink_name=jarvis_output rate=48000 tsched=0
+set-default-sink jarvis_output
+## etc/pulse/default.pa.d/98-jarvis-stream-restore.pa
+.nofail
+unload-module module-stream-restore
+load-module module-stream-restore restore_device=false restore_muted=false restore_volume=false
+## etc/pulse/default.pa.d/99-jarvis-no-suspend.pa
+.nofail
+unload-module module-suspend-on-idle
 ## etc/sudoers.d/jarvis-agent
 # Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
 # What the Go node (jarvis-agent.service, User=pi) may run as root.
@@ -146,7 +196,7 @@ StartLimitIntervalSec=1800
 [Service]
 User=pi
 Group=pi
-ExecStart=/opt/jarvis-agent/jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+ExecStart=/opt/jarvis-agent/jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output --wake-models /usr/local/share/jarvis-agent/openwakeword
 WorkingDirectory=/home/pi
 Restart=always
 RestartSec=5
@@ -157,3 +207,53 @@ SyslogIdentifier=jarvis-agent
 
 [Install]
 WantedBy=multi-user.target
+## etc/systemd/system/jarvis-net-watchdog.service
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+[Unit]
+Description=Jarvis node network self-heal (recovers wlan0 from power-save / association loss)
+# Run after the network stack is up; the watchdog tolerates "no network yet"
+# on its own (it only escalates after FAIL_* consecutive checks and never
+# reboots until it has actually been online this boot).
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+User=root
+# One check per invocation; all run-state lives in tmpfs (resets on reboot,
+# which is the boot-loop guard). See /usr/local/sbin/jarvis-net-watchdog for the
+# escalation ladder and why each threshold is where it is.
+ExecStart=/usr/local/sbin/jarvis-net-watchdog
+# Tunables (consecutive ~60s checks before each escalation step):
+Environment=NETWD_IFACE=wlan0
+Environment=NETWD_FAIL_REAPPLY=3
+Environment=NETWD_FAIL_BOUNCE=4
+Environment=NETWD_FAIL_REBOOT=6
+# Don't reboot in the first MIN_UPTIME seconds even if it looks down — gives
+# WiFi/NetworkManager time to associate on a cold boot.
+Environment=NETWD_MIN_UPTIME=120
+# Persistent reboot-rate cap so a flapping link can't reboot-loop the node:
+# at most NETWD_REBOOT_MAX reboots per NETWD_REBOOT_WINDOW seconds.
+Environment=NETWD_REBOOT_MAX=3
+Environment=NETWD_REBOOT_WINDOW=3600
+SyslogIdentifier=jarvis-net-watchdog
+StandardOutput=journal
+StandardError=journal
+## etc/systemd/system/jarvis-net-watchdog.timer
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+[Unit]
+Description=Run the Jarvis node network self-heal every 60s
+
+[Timer]
+# First check 90s after boot (lets NetworkManager associate), then every 60s.
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=10s
+# Liveness watching, not a missed-job catch-up.
+Persistent=false
+Unit=jarvis-net-watchdog.service
+
+[Install]
+WantedBy=timers.target
+## etc/udev/rules.d/89-jarvis-hat-pulse-ignore.rules
+SUBSYSTEM=="sound", KERNEL=="card*", ATTR{id}=="seeed2micvoicec", ENV{PULSE_IGNORE}="1"

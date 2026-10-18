@@ -1010,7 +1010,8 @@ like JSON-RPC.
 
 ## 6. Install and system: what the Go node still needs from install.sh
 
-These are **still needed**; install.sh step lines are cited:
+These are **still needed**; install.sh step lines are cited. `scripts/install-pi.sh` (§7 4.3) does
+all of them except `jarvis-alsa-store` (not yet run on a Pi):
 - The ReSpeaker overlay compiled from the vendored DTS (`:912-934`).
 - config.txt edits (`dtparam=spi=on`, `i2c`, `audio=off`) (`:936-984`).
 - The modprobe index (`:991-993`).
@@ -1021,7 +1022,7 @@ These are **still needed**; install.sh step lines are cited:
   ported: `internal/agent/hat/codec.go`, run at every start of the Pi profile with the HAT
   (2026-10-17; unit tests, not yet run on a Pi).
 - Groups `spi`/`gpio`/`i2c`/`bluetooth`, and linger (`:1174-1178,1611-1625`).
-- The Pulse config (`:365-536`), if D9 keeps Pulse.
+- The Pulse config (`:365-536`), kept for v1 (§8 Q2).
 - Wi-Fi powersave off and the NM profile reconciliation (`:1208-1226,2148-2191`).
 - hostapd/dnsmasq installed and masked (`:206-252`).
 - journald, swappiness, swapfile (`:107-154,889-901,2090-2114`).
@@ -1033,7 +1034,11 @@ These are **still needed**; install.sh step lines are cited:
   `XDG_RUNTIME_DIR` and `Restart=always`.
 - Download, verify, extract and rollback (`:553-870`), via `internal/update`.
 - Database migrations (alembic): the Go node keeps its own small state store.
-- Wake-model staging (ship the models in the tarball).
+- Wake-model staging: install-pi.sh puts the pinned openWakeWord models in
+  `/usr/local/share/jarvis-agent/openwakeword` (the unit's `--wake-models`; root's, like the
+  overlay source, since `/opt/jarvis-agent` is the node user's for self-update), from
+  `--from-dir`/`--base-url` when it has them, else openWakeWord's release; shipping them in the
+  tarball is #162.
 
 **Python node only (or sidecar only):**
 - python/venv, portaudio, libopenblas, sqlcipher dev headers.
@@ -1081,8 +1086,15 @@ These are **still needed**; install.sh step lines are cited:
       **3a built 2026-10-17:** `scripts/install-pi.sh` (agent in `/opt/jarvis-agent`; overlay, config.txt,
       modprobe, asound.conf, mixer baseline, groups + linger, sudoers, journald, swappiness, swap, the
       `/etc/jarvis-node` marker, `jarvis-agent.service`); golden-tested against a scratch root
-      (`scripts/install-pi-check.sh`), **pending on-device** (lab Pi 4). 3b (#160): Pulse, Wi-Fi powersave and
-      NM, hostapd/dnsmasq, the net watchdog, models in the tarball.
+      (`scripts/install-pi-check.sh`), **pending on-device** (lab Pi 4).
+      **3b built 2026-10-18 (#160):** apt packages (pulseaudio, iw, hostapd, dnsmasq, dtc,
+      alsa-utils), PipeWire masked for PulseAudio with the HAT as the fixed `jarvis_output` sink
+      (udev PULSE_IGNORE, no suspend, no stream restore), hostapd/dnsmasq masked, Wi-Fi
+      power-save off, NM same-SSID profile reconciliation, the net watchdog
+      (`scripts/packaging/pi/jarvis-net-watchdog`, N:'s byte for byte) and its 60 s timer, and the
+      wake models staged at install in `/usr/local/share/jarvis-agent/openwakeword` against the
+      hashes in `voice.WakeModels` (a unit test keeps them equal); same golden check, **pending
+      on-device** (lab Pi 4).
    4. The provisioning AP + HTTP API port. **HTTP API done 2026-10-17** (loop #169):
       `internal/agent/provisioning` (routes, state machine, registration retries, rollback and
       hotspot restore, golden-tested against `N:provisioning/models.py`) behind a `WiFi`

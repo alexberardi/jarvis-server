@@ -6,10 +6,13 @@
 #
 # It downloads the release's linux-arm64 agent archive, checks it against SHA256SUMS (and
 # SHA256SUMS.minisig when minisign is installed), puts the agent in /opt/jarvis-agent (the node
-# user's, so the agent updates itself there), and does
-# the system setup the Python node's install.sh does for the HAT: the overlay, config.txt, ALSA
-# (dsnoopmic and output), the mixer baseline, groups and linger, sudoers, journald, swappiness,
-# swap, the /etc/jarvis-node marker and the jarvis-agent.service unit. Every step can run again.
+# user's, so the agent updates itself there) and the openWakeWord models in
+# /usr/local/share/jarvis-agent (pinned by SHA-256, so the node never downloads them), and does
+# the system setup the Python node's install.sh does: the packages below, the overlay,
+# config.txt, ALSA (dsnoopmic and output), PulseAudio instead of PipeWire with the HAT as a fixed
+# sink, the mixer baseline, groups and linger, sudoers, journald, swappiness, swap, Wi-Fi
+# power-save off and the NetworkManager profiles, hostapd/dnsmasq masked, the network watchdog,
+# the /etc/jarvis-node marker and the jarvis-agent.service unit. Every step can run again.
 #
 # Only one node may own the HAT. The unit says Conflicts=jarvis-node.service (starting one stops
 # the other) and is installed disabled; --activate makes the Go node the one that runs at boot.
@@ -46,6 +49,14 @@ PY_UNIT=jarvis-node.service
 CARD=seeed2micvoicec
 OVERLAY=respeaker-2mic-v2_0-overlay
 NEEDS_REBOOT=0
+# The wake-word models (the unit's --wake-models), exactly internal/agent/voice/models.go's
+# WakeModels and owwRelease (a unit test keeps them equal): name and SHA-256.
+MODELS=$SHARE/openwakeword
+OWW_RELEASE=https://github.com/dscripka/openWakeWord/releases/download/v0.5.1
+WAKE_MODELS="melspectrogram.onnx ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f
+embedding_model.onnx 70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f
+hey_jarvis_v0.1.onnx 94a13cfe60075b132f6a472e7e462e8123ee70861bc3fb58434a73712ee0d2cb"
+WIFI=wlan0
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -64,7 +75,7 @@ while [ $# -gt 0 ]; do
     --deactivate) ACTION=deactivate ;;
     --root) [ $# -ge 2 ] || die "--root needs a value"; ROOT=$2; shift ;;
     --root=*) ROOT=${1#*=} ;;
-    -h | --help) sed -n '2,28p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h | --help) sed -n '2,31p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
   shift
@@ -90,6 +101,13 @@ put() {
   chmod "$2" "$(P "$1").tmp"
   mv -f "$(P "$1").tmp" "$(P "$1")"
 }
+# update PATH MODE: put, and a reboot note when the content changed (PulseAudio and udev read
+# these at start).
+update() {
+  old=$(cat "$(P "$1")" 2>/dev/null || true)
+  put "$1" "$2"
+  [ "$(cat "$(P "$1")")" = "$old" ] || NEEDS_REBOOT=1
+}
 
 preflight() {
   if [ -n "$ROOT" ]; then
@@ -105,6 +123,23 @@ preflight() {
   id -u "$NODE_USER" >/dev/null 2>&1 || die "there is no user $NODE_USER (Pi Imager creates it; or pass --user)"
   NODE_UID=$(id -u "$NODE_USER")
   NODE_HOME=$(getent passwd "$NODE_USER" | cut -d: -f6)
+}
+
+# What this install needs from apt that Raspberry Pi OS may lack (N:install.sh:206-245):
+# PulseAudio (§8 Q2), iw, and hostapd/dnsmasq, the provisioning AP's fallback when the
+# NetworkManager AP fails (§8 Q7). The overlay compiler and the ALSA tools too.
+install_packages() {
+  missing=""
+  for pkg in pulseaudio iw hostapd dnsmasq device-tree-compiler alsa-utils; do
+    if [ -n "$ROOT" ] || ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
+      missing="$missing $pkg"
+    fi
+  done
+  [ -n "$missing" ] || return 0
+  say "Installing$missing..."
+  # shellcheck disable=SC2086 # missing is words
+  { run apt-get update -q && run env DEBIAN_FRONTEND=noninteractive apt-get install -y -q $missing; } >/dev/null ||
+    warn "apt-get could not install$missing"
 }
 
 # --- The agent ---------------------------------------------------------------------------------
@@ -177,6 +212,31 @@ fetch() { # fetch ASSET DEST: a URL, or a file in a local directory
       curl -fsSL --retry 3 --connect-timeout 30 -o "$2" "$(url "$1")" ;;
     *) cp "$BASE/$1" "$2" ;;
   esac
+}
+
+# The wake-word models, so the node never fetches them at run time: from --from-dir or --base-url
+# when it has them (an offline install), else from openWakeWord's release, each checked against
+# its pinned hash. One that is already in place with the right hash is kept.
+install_wake_models() {
+  mkdir -p "$(P "$MODELS")"
+  while read -r name sum; do
+    dest=$(P "$MODELS/$name")
+    [ -f "$dest" ] && [ "$(sha256sum "$dest" | awk '{print $1}')" = "$sum" ] && continue
+    if [ -n "$BASE" ] && fetch "$name" "$TMP/$name" 2>/dev/null; then
+      from=$(url "$name")
+    else
+      from=$OWW_RELEASE/$name
+      command -v curl >/dev/null || die "curl is required"
+      curl -fsSL --retry 3 --connect-timeout 30 -o "$TMP/$name" "$from" || die "could not download $from"
+    fi
+    [ "$(sha256sum "$TMP/$name" | awk '{print $1}')" = "$sum" ] || die "checksum mismatch for the wake model $from (corrupt or tampered download)"
+    cp "$TMP/$name" "$dest.new"
+    chmod 0644 "$dest.new"
+    mv -f "$dest.new" "$dest"
+    say "Installed the wake model $name."
+  done <<EOF
+$WAKE_MODELS
+EOF
 }
 
 # --- The HAT (N:install.sh configure_audio) -----------------------------------------------------
@@ -263,6 +323,68 @@ ctl.!default {
     type pulse
 }
 ASOUND
+}
+
+# PulseAudio instead of PipeWire, for every user (N:install.sh:365-420; go-pi-node.md §8 Q2):
+# PipeWire's bluez5 plugin doesn't register A2DP sinks, and asound.conf's "output" is Pulse's.
+# A per-user mask on pulseaudio (a debugging leftover) beats the system-wide enable and makes
+# every reply silent, so it goes.
+switch_to_pulseaudio() {
+  if [ -z "$ROOT" ] && [ ! -f /usr/lib/systemd/user/pulseaudio.socket ]; then
+    warn "pulseaudio is not installed: the audio stack stays as it is, and the node's replies have no output"
+    return
+  fi
+  etc_user=/etc/systemd/user
+  mkdir -p "$(P $etc_user/sockets.target.wants)" "$(P $etc_user/default.target.wants)"
+  for unit in pipewire.socket pipewire.service pipewire-pulse.socket pipewire-pulse.service wireplumber.service; do
+    [ "$(readlink "$(P $etc_user/$unit)" 2>/dev/null)" = /dev/null ] && continue
+    ln -sf /dev/null "$(P $etc_user/$unit)"
+    NEEDS_REBOOT=1
+  done
+  for link in sockets.target.wants/pulseaudio.socket default.target.wants/pulseaudio.service; do
+    [ -L "$(P $etc_user/$link)" ] && continue
+    ln -sf "/usr/lib/systemd/user/${link#*/}" "$(P $etc_user/$link)"
+    NEEDS_REBOOT=1
+  done
+  for unit in pulseaudio.socket pulseaudio.service; do
+    mask=$(P "$NODE_HOME/.config/systemd/user/$unit")
+    if [ "$(readlink "$mask" 2>/dev/null)" = /dev/null ]; then
+      rm -f "$mask"
+      warn "removed a per-user mask on $unit ($NODE_HOME/.config/systemd/user)"
+      NEEDS_REBOOT=1
+    fi
+  done
+}
+
+# PulseAudio's drop-ins (/etc/pulse/default.pa includes default.pa.d; .nofail keeps a missing
+# module from stopping Pulse):
+#   - no suspend on idle (N:install.sh:425-443): the codec doesn't resume a suspended sink
+#     reliably, so a reply blocks and the node stops hearing the wake word;
+#   - the HAT as the fixed sink jarvis_output, playback only, at 48 kHz (N:install.sh:445-490):
+#     udev-detect leaves the card alone (PULSE_IGNORE), so Pulse never takes the capture side
+#     the node's dsnoop needs, whatever starts first; the codec runs both directions from one
+#     clock, so 44.1 kHz playback would kill the 48 kHz mic;
+#   - no restored mute or volume per app (N:install.sh:492-536): a ducked or muted stream
+#     would come back that way.
+configure_pulseaudio() {
+  update /etc/pulse/default.pa.d/99-jarvis-no-suspend.pa 0644 <<'EOF'
+.nofail
+unload-module module-suspend-on-idle
+EOF
+  update /etc/udev/rules.d/89-jarvis-hat-pulse-ignore.rules 0644 <<EOF
+SUBSYSTEM=="sound", KERNEL=="card*", ATTR{id}=="$CARD", ENV{PULSE_IGNORE}="1"
+EOF
+  run udevadm control --reload 2>/dev/null || true
+  update /etc/pulse/default.pa.d/97-jarvis-hat-sink.pa 0644 <<EOF
+.nofail
+load-module module-alsa-sink device=hw:CARD=$CARD,DEV=0 sink_name=jarvis_output rate=48000 tsched=0
+set-default-sink jarvis_output
+EOF
+  update /etc/pulse/default.pa.d/98-jarvis-stream-restore.pa 0644 <<'EOF'
+.nofail
+unload-module module-stream-restore
+load-module module-stream-restore restore_device=false restore_muted=false restore_volume=false
+EOF
 }
 
 card_present() { aplay -l 2>/dev/null | grep -qi "$CARD"; }
@@ -403,7 +525,7 @@ StartLimitIntervalSec=1800
 [Service]
 User=$NODE_USER
 Group=$NODE_USER
-ExecStart=$OPT/jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+ExecStart=$OPT/jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output --wake-models $MODELS
 WorkingDirectory=$NODE_HOME
 Restart=always
 RestartSec=5
@@ -416,6 +538,122 @@ SyslogIdentifier=jarvis-agent
 WantedBy=multi-user.target
 EOF
   run systemctl daemon-reload
+}
+
+# --- The network --------------------------------------------------------------------------------
+
+# hostapd and dnsmasq are the provisioning AP's fallback, started by the node itself, never by
+# systemd (N:install.sh:247-252).
+mask_ap_services() {
+  run systemctl stop hostapd dnsmasq 2>/dev/null || true
+  run systemctl disable hostapd dnsmasq 2>/dev/null || true
+  run systemctl mask hostapd dnsmasq 2>/dev/null || true
+}
+
+# wlan0's NetworkManager connection, or nothing (nmcli only reads here).
+wifi_connection() {
+  command -v nmcli >/dev/null 2>&1 || return 0
+  nmcli -t -f GENERAL.CONNECTION device show "$WIFI" 2>/dev/null | cut -d: -f2-
+}
+
+# Wi-Fi power-save off (N:install.sh:1194-1227): in the active connection, which lasts, and in
+# the driver now, since brcmfmac doesn't always get NetworkManager's setting. When wlan0 reports
+# no connection, the first active Wi-Fi one (as N:; the reconcile below skips instead). The watchdog
+# enforces it every minute after that.
+wifi_powersave_off() {
+  con=$(wifi_connection)
+  [ -n "$con" ] || con=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2 == "802-11-wireless" {print $1; exit}')
+  if [ -n "$con" ]; then
+    run nmcli connection modify "$con" wifi.powersave 2 2>/dev/null || true
+    run nmcli device reapply "$WIFI" >/dev/null 2>&1 || true
+  elif command -v nmcli >/dev/null 2>&1; then
+    warn "$WIFI has no NetworkManager connection: the network watchdog keeps its power-save off"
+  fi
+  if [ -n "$ROOT" ] || command -v iw >/dev/null 2>&1; then
+    run iw dev "$WIFI" set power_save off >/dev/null 2>&1 || true
+  fi
+}
+
+# One NetworkManager profile per SSID (N:install.sh:2148-2191): two autoconnecting profiles for
+# the SSID wlan0 is on (a provisioning one and a netplan one) make NM thrash between them after a
+# drop and strand the node (the 2026-06 kitchen incident). The one in use gets autoconnect and
+# priority 999 (which the watchdog brings up first), the others stop autoconnecting. Nothing
+# changes when wlan0 reports no connection.
+reconcile_wifi_profiles() {
+  con=$(wifi_connection)
+  [ -n "$con" ] || return 0
+  ssid=$(nmcli -t -g 802-11-wireless.ssid connection show "$con" 2>/dev/null)
+  [ -n "$ssid" ] || return 0
+  nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '$2 == "802-11-wireless" {print $1}' >"$TMP/wifi-profiles"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    [ "$(nmcli -t -g 802-11-wireless.ssid connection show "$name" 2>/dev/null)" = "$ssid" ] || continue
+    if [ "$name" = "$con" ]; then
+      run nmcli connection modify "$name" connection.autoconnect yes connection.autoconnect-priority 999 2>/dev/null || true
+    else
+      run nmcli connection modify "$name" connection.autoconnect no 2>/dev/null || true
+      say "The Wi-Fi profile '$name' no longer autoconnects: '$con' is the one for $ssid."
+    fi
+  done <"$TMP/wifi-profiles"
+}
+
+# The network watchdog (N:install.sh:2116-2146): a root timer that keeps wlan0's power-save off
+# and brings a node that fell off the LAN back (reapply, then a link bounce, then a reboot, at
+# most 3 an hour and only after it was online this boot). The script is N:'s, byte for byte.
+install_net_watchdog() {
+  net_watchdog | put /usr/local/sbin/jarvis-net-watchdog 0755
+  put /etc/systemd/system/jarvis-net-watchdog.service 0644 <<'EOF'
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+[Unit]
+Description=Jarvis node network self-heal (recovers wlan0 from power-save / association loss)
+# Run after the network stack is up; the watchdog tolerates "no network yet"
+# on its own (it only escalates after FAIL_* consecutive checks and never
+# reboots until it has actually been online this boot).
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+User=root
+# One check per invocation; all run-state lives in tmpfs (resets on reboot,
+# which is the boot-loop guard). See /usr/local/sbin/jarvis-net-watchdog for the
+# escalation ladder and why each threshold is where it is.
+ExecStart=/usr/local/sbin/jarvis-net-watchdog
+# Tunables (consecutive ~60s checks before each escalation step):
+Environment=NETWD_IFACE=wlan0
+Environment=NETWD_FAIL_REAPPLY=3
+Environment=NETWD_FAIL_BOUNCE=4
+Environment=NETWD_FAIL_REBOOT=6
+# Don't reboot in the first MIN_UPTIME seconds even if it looks down — gives
+# WiFi/NetworkManager time to associate on a cold boot.
+Environment=NETWD_MIN_UPTIME=120
+# Persistent reboot-rate cap so a flapping link can't reboot-loop the node:
+# at most NETWD_REBOOT_MAX reboots per NETWD_REBOOT_WINDOW seconds.
+Environment=NETWD_REBOOT_MAX=3
+Environment=NETWD_REBOOT_WINDOW=3600
+SyslogIdentifier=jarvis-net-watchdog
+StandardOutput=journal
+StandardError=journal
+EOF
+  put /etc/systemd/system/jarvis-net-watchdog.timer 0644 <<'EOF'
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+[Unit]
+Description=Run the Jarvis node network self-heal every 60s
+
+[Timer]
+# First check 90s after boot (lets NetworkManager associate), then every 60s.
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=10s
+# Liveness watching, not a missed-job catch-up.
+Persistent=false
+Unit=jarvis-net-watchdog.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  run systemctl daemon-reload
+  run systemctl enable --now jarvis-net-watchdog.timer >/dev/null 2>&1 || warn "could not enable jarvis-net-watchdog.timer"
 }
 
 # --- Which node runs ----------------------------------------------------------------------------
@@ -434,6 +672,207 @@ deactivate() {
   else
     say "The Go node is stopped and disabled (there is no Python node to start)."
   fi
+}
+
+# The network watchdog, scripts/packaging/pi/jarvis-net-watchdog byte for byte (N:scripts/;
+# scripts/install-pi-check.sh compares them).
+net_watchdog() {
+  cat <<'WATCHDOG'
+#!/bin/bash
+# jarvis-net-watchdog — cause-agnostic network self-heal for Pi nodes.
+#
+# Runs as a root oneshot every ~60s (jarvis-net-watchdog.timer). One check
+# per invocation; all state lives in a tmpfs file so it resets cleanly on
+# reboot (that reset IS the boot-loop guard — see below).
+#
+# WHY THIS EXISTS (2026-06 kitchen-node incident):
+#   A Pi node went unreachable — no SSH, no ping, no mDNS — while the CPU was
+#   still running (LEDs on, wake word still fired locally). That is the classic
+#   "wlan0 dropped off the network but the box is alive" failure: WiFi power-
+#   save after idle, a brcmfmac association loss, or a NetworkManager/netplan
+#   profile that didn't enforce power-save on the live interface. install.sh
+#   *tries* to disable power-save at setup, but that fix is one-shot and
+#   silently no-ops on some stacks (iwconfig absent, netplan-managed
+#   connection, wrong profile matched). Nothing then RECOVERED the node, and
+#   the app-layer post-install watchdog only ever checked jarvis-node.service —
+#   never the network — so a node that was "off the network but running" was
+#   invisible to it. This watchdog closes that gap regardless of root cause,
+#   and also re-fills the connectivity-watchdog role removed in v0.1.69.
+#
+# WHAT IT DOES, each run:
+#   1. Idempotently force WiFi power-save OFF on the live interface (the
+#      enforcement install.sh's config-layer setting can't guarantee).
+#   2. Probe LAN reachability (ping the default gateway).
+#   3. On sustained loss, escalate: reapply -> bounce -> reboot (last resort).
+#
+# ESCALATION (counts are consecutive failed checks, ~60s apart):
+#   >= FAIL_REAPPLY (3, ~3 min): nmcli device reapply  (re-push NM config)
+#   >= FAIL_BOUNCE  (4, ~4 min): ip link down/up + reapply  (re-associate)
+#   >= FAIL_REBOOT  (6, ~6 min): reboot — ONLY if we were online earlier this
+#                                boot (online==1), uptime >= MIN_UPTIME, AND we
+#                                are under the persistent reboot-rate limit.
+#                                (fail 5 keeps bouncing, giving DHCP/assoc ~2
+#                                min after the bounce before we resort to reboot.)
+#   TWO reboot guards:
+#     1. online==1 (tmpfs): never reboot on a boot where we never reached the
+#        network — a node that simply never gets WiFi keeps retrying forever.
+#     2. REBOOT_MAX in REBOOT_WINDOW (PERSISTENT, survives reboot): the tmpfs
+#        flag re-arms every boot, so on a flapping link guard #1 alone would
+#        reboot every ~10 min indefinitely. This caps reboots to REBOOT_MAX per
+#        REBOOT_WINDOW; past that we keep bouncing but stop rebooting.
+
+set -u
+
+IFACE="${NETWD_IFACE:-wlan0}"
+FAIL_REAPPLY="${NETWD_FAIL_REAPPLY:-3}"
+FAIL_BOUNCE="${NETWD_FAIL_BOUNCE:-4}"
+FAIL_REBOOT="${NETWD_FAIL_REBOOT:-6}"
+MIN_UPTIME="${NETWD_MIN_UPTIME:-120}"
+PING_WAIT="${NETWD_PING_WAIT:-2}"
+STATE="${NETWD_STATE:-/run/jarvis-net-watchdog.state}"
+BREADCRUMB="${NETWD_BREADCRUMB:-/var/log/jarvis-net-watchdog.json}"
+# Persistent reboot-rate limit (survives reboot — this is the loop guard the
+# tmpfs state can't provide): at most REBOOT_MAX reboots per REBOOT_WINDOW sec.
+REBOOT_LOG="${NETWD_REBOOT_LOG:-/var/lib/jarvis-net-watchdog/reboots}"
+REBOOT_MAX="${NETWD_REBOOT_MAX:-3}"
+REBOOT_WINDOW="${NETWD_REBOOT_WINDOW:-3600}"
+# Paths below are overridable only so the test suite can drive the script on a
+# non-Pi host; on a real node they resolve to the kernel's standard locations.
+SYSFS_NET="${NETWD_SYSFS_NET:-/sys/class/net}"
+UPTIME_FILE="${NETWD_UPTIME_FILE:-/proc/uptime}"
+
+log() { printf '[net-watchdog] %s\n' "$*"; }
+
+# --- Skip cleanly when there's nothing to watch (e.g. ethernet-only, container).
+if [ ! -e "${SYSFS_NET}/${IFACE}" ]; then
+    log "interface ${IFACE} not present — nothing to watch"
+    exit 0
+fi
+
+# --- Read prior state (fail count + whether we've ever been online this boot).
+fail=0
+online=0
+if [ -r "$STATE" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE" 2>/dev/null || true
+    fail="${fail:-0}"
+    online="${online:-0}"
+fi
+case "$fail" in *[!0-9]*) fail=0 ;; esac
+case "$online" in *[!0-9]*) online=0 ;; esac
+
+write_state() {
+    # tmpfs file; key=val so it can be sourced back next run.
+    printf 'fail=%s\nonline=%s\n' "$1" "$2" > "$STATE" 2>/dev/null || true
+}
+
+# --- (1) Enforce power-save OFF on the live interface. iw is the driver-level
+#     control install.sh now installs; nmcli reapply alone does not always push
+#     powersave to brcmfmac. Cheap + idempotent, so do it every run.
+if command -v iw >/dev/null 2>&1; then
+    iw dev "$IFACE" set power_save off >/dev/null 2>&1 || true
+fi
+
+# --- (2) Probe LAN reachability via the default gateway on this interface.
+gw="$(ip route show default 0.0.0.0/0 dev "$IFACE" 2>/dev/null | awk '/default/{print $3; exit}')"
+[ -z "$gw" ] && gw="$(ip route show default 2>/dev/null | awk '/default/{print $3; exit}')"
+
+healthy=0
+if [ -n "$gw" ] && ping -c1 -W "$PING_WAIT" "$gw" >/dev/null 2>&1; then
+    healthy=1
+fi
+
+if [ "$healthy" -eq 1 ]; then
+    if [ "$fail" -ne 0 ]; then
+        log "LAN recovered (gw=${gw}) after ${fail} failed check(s)"
+    fi
+    write_state 0 1
+    exit 0
+fi
+
+# --- (3) Unhealthy: increment and escalate.
+fail=$((fail + 1))
+write_state "$fail" "$online"
+log "no LAN on ${IFACE} (gw='${gw:-none}') consecutive_fail=${fail}"
+
+uptime_s="$(cut -d. -f1 "$UPTIME_FILE" 2>/dev/null || echo 0)"
+case "$uptime_s" in *[!0-9]*) uptime_s=0 ;; esac
+
+if [ "$fail" -ge "$FAIL_REBOOT" ] && [ "$online" -eq 1 ] && [ "$uptime_s" -ge "$MIN_UPTIME" ]; then
+    # Persistent cross-reboot rate limit. The tmpfs `online` flag re-arms on
+    # every boot, so without this a node on a flapping link reboots forever.
+    # Count reboots recorded within REBOOT_WINDOW; if we're at the cap, do NOT
+    # reboot — fall through and keep bouncing instead.
+    now_epoch="$(date +%s 2>/dev/null || echo 0)"
+    case "$now_epoch" in *[!0-9]*) now_epoch=0 ;; esac
+    recent=0
+    if [ -r "$REBOOT_LOG" ]; then
+        tmpf="${REBOOT_LOG}.$$"
+        : > "$tmpf" 2>/dev/null || true
+        while read -r ts; do
+            case "$ts" in '' | *[!0-9]*) continue ;; esac
+            # now_epoch==0 means the clock is unreadable — treat every prior
+            # reboot as "recent" (fail safe toward NOT rebooting).
+            if [ "$now_epoch" -eq 0 ] || [ $((now_epoch - ts)) -lt "$REBOOT_WINDOW" ]; then
+                printf '%s\n' "$ts" >> "$tmpf" 2>/dev/null || true
+                recent=$((recent + 1))
+            fi
+        done < "$REBOOT_LOG"
+        mv "$tmpf" "$REBOOT_LOG" 2>/dev/null || rm -f "$tmpf" 2>/dev/null || true
+    fi
+
+    if [ "$recent" -ge "$REBOOT_MAX" ]; then
+        log "reboot rate-limited: ${recent} reboot(s) in the last ${REBOOT_WINDOW}s — NOT rebooting; continuing bounce/reapply"
+    else
+        log "LAN down for ${fail} checks, online this boot — rebooting (last resort; ${recent} prior in window)"
+        mkdir -p "$(dirname "$REBOOT_LOG")" 2>/dev/null || true
+        printf '%s\n' "$now_epoch" >> "$REBOOT_LOG" 2>/dev/null || true
+        now="$(date -Iseconds 2>/dev/null || date 2>/dev/null || echo unknown)"
+        mkdir -p "$(dirname "$BREADCRUMB")" 2>/dev/null || true
+        cat > "$BREADCRUMB" 2>/dev/null <<JSON || true
+{"action":"reboot","reason":"lan_down_after_online","iface":"${IFACE}","gateway":"${gw:-none}","consecutive_fail":${fail},"uptime_s":${uptime_s},"reboots_in_window":${recent},"timestamp":"${now}"}
+JSON
+        sync 2>/dev/null || true
+        systemctl reboot 2>/dev/null || reboot 2>/dev/null || true
+        exit 0
+    fi
+fi
+
+# Preferred wifi profile = the highest autoconnect-priority 802-11-wireless
+# connection (install.sh pins the known-good one to 999). Forcing it up
+# recovers — WITHOUT a reboot — from a duplicate-same-SSID profile race where
+# NM latched onto a profile that can't authenticate (the 2026-06 root cause).
+pref="$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \
+    | awk -F: '$2=="802-11-wireless"{print $1}' \
+    | while IFS= read -r n; do
+        printf '%s\t%s\n' "$(nmcli -t -g connection.autoconnect-priority connection show "$n" 2>/dev/null || echo 0)" "$n"
+      done | sort -rn | head -1 | cut -f2-)"
+
+if [ "$fail" -ge "$FAIL_BOUNCE" ]; then
+    log "bouncing ${IFACE} (link down/up + reapply + force preferred profile)"
+    ip link set "$IFACE" down 2>/dev/null || true
+    sleep 2
+    ip link set "$IFACE" up 2>/dev/null || true
+    nmcli device reapply "$IFACE" >/dev/null 2>&1 || true
+    if [ -n "$pref" ]; then
+        nmcli connection up "$pref" >/dev/null 2>&1 || true
+    fi
+    exit 0
+fi
+
+if [ "$fail" -ge "$FAIL_REAPPLY" ]; then
+    log "reapplying NM config + forcing preferred profile on ${IFACE}"
+    nmcli device reapply "$IFACE" >/dev/null 2>&1 || true
+    if [ -n "$pref" ]; then
+        log "forcing up preferred wifi profile: ${pref}"
+        nmcli connection up "$pref" >/dev/null 2>&1 || true
+    fi
+    exit 0
+fi
+
+# fail 1..(FAIL_REAPPLY-1): just observe; could be a transient gateway blip.
+exit 0
+WATCHDOG
 }
 
 # The DTS, scripts/packaging/pi/respeaker-2mic-v2_0-overlay.dts byte for byte
@@ -539,17 +978,25 @@ preflight
 case $ACTION in
   deactivate) deactivate; exit 0 ;;
 esac
+install_packages
 install_agent
+install_wake_models
 install_overlay
 configure_boot_config
 configure_alsa
+switch_to_pulseaudio
+configure_pulseaudio
 mixer_baseline
 setup_user
 install_sudoers
 configure_journald
 configure_swappiness
 configure_swap
+mask_ap_services
+wifi_powersave_off
+reconcile_wifi_profiles
+install_net_watchdog
 write_marker
 install_unit
 if [ $ACTION = activate ]; then activate; else say "Installed $UNIT, disabled: --activate makes it the node that runs."; fi
-[ $NEEDS_REBOOT = 0 ] || say "The HAT's boot settings changed: reboot (sudo reboot) for them to take effect."
+[ $NEEDS_REBOOT = 0 ] || say "The HAT's boot settings or the audio stack changed: reboot (sudo reboot) for them to take effect."

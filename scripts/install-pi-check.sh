@@ -8,12 +8,17 @@
 #   scripts/install-pi-check.sh            # check
 #   UPDATE=1 scripts/install-pi-check.sh   # rewrite the golden file after a deliberate change
 #
-# No Pi, root or network needed. The agent in the fake release is a shell script.
+# No Pi or root needed. The agent in the fake release is a shell script; the wake models are the
+# real ones (their hashes are pinned), from .models/openwakeword (scripts/fetch-test-models.sh)
+# or downloaded from openWakeWord's release. A stand-in nmcli answers the Wi-Fi queries.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SCRIPT=$HERE/install-pi.sh
 GOLDEN=$HERE/testdata/install-pi.golden
 DTS=$HERE/packaging/pi/respeaker-2mic-v2_0-overlay.dts
+WATCHDOG=$HERE/packaging/pi/jarvis-net-watchdog
+MODELS=${JARVIS_SHERPA_MODELS:-$HERE/../.models}/openwakeword
+WAKE_MODELS="melspectrogram.onnx embedding_model.onnx hey_jarvis_v0.1.onnx"
 V=v9.9.9
 fail() { echo "install-pi-check: $*" >&2; exit 1; }
 
@@ -26,6 +31,13 @@ mkdir -p "$T/stage/jarvis-agent-$V-linux-arm64" "$T/dist"
 printf '#!/bin/sh\n[ "$1" = version ] && echo %s\n' "$V" >"$T/stage/jarvis-agent-$V-linux-arm64/jarvis-agent"
 chmod 0755 "$T/stage/jarvis-agent-$V-linux-arm64/jarvis-agent"
 tar -C "$T/stage" -czf "$T/dist/jarvis-agent-$V-linux-arm64.tar.gz" "jarvis-agent-$V-linux-arm64"
+# The wake models ship with the release files.
+for m in $WAKE_MODELS; do
+  if [ -f "$MODELS/$m" ]; then cp "$MODELS/$m" "$T/dist/"; else
+    curl -fsSL --retry 3 -o "$T/dist/$m" "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/$m" ||
+      fail "could not download the wake model $m (or run scripts/fetch-test-models.sh)"
+  fi
+done
 (cd "$T/dist" && { echo "$(printf '0%.0s' $(seq 64))  jarvis-agent-$V-linux-amd64.tar.gz"; sha256sum -- *.tar.gz; } >SHA256SUMS)
 
 # minisign: a stand-in that isn't usable (-v fails), so the run is checksums only and the same
@@ -38,6 +50,22 @@ cat >"$T/bin/minisign" <<'EOF'
 exit 1
 EOF
 chmod 0755 "$T/bin/minisign"
+
+# nmcli: wlan0 is on jarvis-Home (SSID Home); preconfigured (netplan's) is the same SSID, Office
+# another one, and there is a wired connection. Only queries: under --root a change is logged.
+# FAKE_WLAN0=none: wlan0 reports no connection, though jarvis-Home is still active.
+cat >"$T/bin/nmcli" <<'EOF'
+#!/bin/sh
+ssid() { case $1 in jarvis-Home | preconfigured) echo Home ;; Office) echo Office ;; esac; }
+case "$*" in
+  "-t -f GENERAL.CONNECTION device show wlan0") [ "${FAKE_WLAN0:-}" = none ] && echo GENERAL.CONNECTION: || echo GENERAL.CONNECTION:jarvis-Home ;;
+  "-t -f NAME,TYPE connection show --active") printf '%s\n' 'Wired connection 1:802-3-ethernet' jarvis-Home:802-11-wireless ;;
+  "-t -f NAME,TYPE connection show") printf '%s\n' preconfigured:802-11-wireless 'Wired connection 1:802-3-ethernet' Office:802-11-wireless jarvis-Home:802-11-wireless ;;
+  "-t -g 802-11-wireless.ssid connection show "*) ssid "$6" ;;
+  *) echo "nmcli $*: not a query" >&2; exit 1 ;;
+esac
+EOF
+chmod 0755 "$T/bin/nmcli"
 for m in /usr/local/bin/minisign /usr/bin/minisign; do
   [ ! -x "$m" ] || fail "$m is installed: the check needs a machine without minisign in the fixed paths"
 done
@@ -48,15 +76,16 @@ seed() {
   printf '[all]\ndtparam=audio=on\ndtoverlay=wm8960-soundcard\n' >"$1/boot/firmware/config.txt"
   printf 'proc /proc proc defaults 0 0\n' >"$1/etc/fstab"
 }
-R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} sh "$SCRIPT" "$@"; }
+R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} sh "$SCRIPT" "$@"; }
 
 # snapshot ROOT: what the install wrote, as text.
 snapshot() {
   echo "## paths"
-  (cd "$1" && find . -mindepth 1 ! -name install-pi-commands.log -printf '%y %m %P\n' | sort -k3)
+  (cd "$1" && find . -mindepth 1 ! -name install-pi-commands.log \( -type l -printf '%y %m %P -> %l\n' -o -printf '%y %m %P\n' \) | sort -k3)
   echo "## commands"
   cat "$1/install-pi-commands.log"
-  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path './usr/local/share/jarvis-agent/*' -printf '%P\n' | sort) |
+  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path './usr/local/share/jarvis-agent/*' ! -path ./usr/local/sbin/jarvis-net-watchdog -printf '%P
+' | sort) |
     while read -r f; do
       echo "## $f"
       cat "$1/$f"
@@ -71,7 +100,12 @@ grep -q "installed in /opt/jarvis-agent" "$T/out" || fail "no agent installed"
 grep -q "reboot" "$T/out" || fail "no reboot note after a config.txt change"
 cmp -s "$ROOT/usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" "$DTS" ||
   fail "the DTS in install-pi.sh differs from scripts/packaging/pi/respeaker-2mic-v2_0-overlay.dts"
+cmp -s "$ROOT/usr/local/sbin/jarvis-net-watchdog" "$WATCHDOG" ||
+  fail "the watchdog in install-pi.sh differs from scripts/packaging/pi/jarvis-net-watchdog"
 [ "$("$ROOT/opt/jarvis-agent/jarvis-agent" version)" = "$V" ] || fail "the agent in /opt is not $V"
+for m in $WAKE_MODELS; do
+  cmp -s "$ROOT/usr/local/share/jarvis-agent/openwakeword/$m" "$T/dist/$m" || fail "the wake model $m is not in /usr/local/share/jarvis-agent/openwakeword"
+done
 snapshot "$ROOT" >"$T/got"
 if [ "${UPDATE:-}" = 1 ]; then
   mkdir -p "$(dirname "$GOLDEN")"
@@ -83,17 +117,29 @@ diff -u "$GOLDEN" "$T/got" || fail "what install-pi.sh writes differs from $GOLD
 echo "--- a second run changes nothing"
 R --root "$ROOT" --from-dir "$T/dist" | tee "$T/out"
 grep -q "already installed" "$T/out" || fail "a re-run downloaded again"
+grep -q "wake model" "$T/out" && fail "a re-run installed the wake models again"
 grep -q "reboot" "$T/out" && fail "a re-run changed config.txt"
 snapshot "$ROOT" >"$T/got2"
 diff -u "$T/got" "$T/got2" || fail "a second run changed what was written"
 
-echo "--- an existing /etc/jarvis-node (the Python node's) is kept"
+echo "--- an existing /etc/jarvis-node (the Python node's) is kept, a user's mask on pulseaudio isn't"
 R2=$T/root2
 seed "$R2"
-mkdir -p "$R2/etc/jarvis-node"
+mkdir -p "$R2/etc/jarvis-node" "$R2/home/pi/.config/systemd/user"
 echo '{}' >"$R2/etc/jarvis-node/audio_config.json"
-R --root "$R2" --from-dir "$T/dist" >/dev/null
+ln -s /dev/null "$R2/home/pi/.config/systemd/user/pulseaudio.service"
+R --root "$R2" --from-dir "$T/dist" >/dev/null 2>"$T/err"
 [ "$(cat "$R2/etc/jarvis-node/audio_config.json")" = '{}' ] || fail "the Python node's /etc/jarvis-node was touched"
+[ ! -L "$R2/home/pi/.config/systemd/user/pulseaudio.service" ] || fail "the per-user mask on pulseaudio.service was kept"
+grep -q "removed a per-user mask on pulseaudio.service" "$T/err" || fail "no warning for the removed mask: $(cat "$T/err")"
+
+echo "--- wlan0 reports no connection: power-save off on the active Wi-Fi one, no reconcile (as N:)"
+R5=$T/root-nowlan
+seed "$R5"
+FAKE_WLAN0=none R --root "$R5" --from-dir "$T/dist" >/dev/null
+grep -qx "nmcli connection modify jarvis-Home wifi.powersave 2" "$R5/install-pi-commands.log" ||
+  fail "power-save was not turned off on the active Wi-Fi connection"
+grep -q "autoconnect" "$R5/install-pi-commands.log" && fail "reconciled the Wi-Fi profiles with no connection on wlan0"
 
 echo "--- an older install (root's /opt, the overlay source in it) is moved over"
 R4=$T/root4
@@ -124,6 +170,13 @@ grep -q "checksum mismatch" "$T/out" || { cat "$T/out"; fail "refused the tamper
 echo 'sig' >"$T2/SHA256SUMS.minisig"
 if FAKE_MINISIGN=invalid R --root "$R3" --from-dir "$T2" >"$T/out" 2>&1; then cat "$T/out"; fail "installed with a bad signature"; fi
 grep -q "signature is INVALID" "$T/out" || { cat "$T/out"; fail "refused the bad signature for another reason"; }
+T3=$T/badmodel
+mkdir -p "$T3"
+cp "$T/dist"/* "$T3/"
+printf 'x' >>"$T3/hey_jarvis_v0.1.onnx"
+if R --root "$T/root-badmodel" --from-dir "$T3" >"$T/out" 2>&1; then cat "$T/out"; fail "installed a tampered wake model"; fi
+grep -q "checksum mismatch for the wake model" "$T/out" || { cat "$T/out"; fail "refused the tampered wake model for another reason"; }
+[ ! -e "$T/root-badmodel/usr/local/share/jarvis-agent/openwakeword/hey_jarvis_v0.1.onnx" ] || fail "the refused install left the tampered wake model"
 if R --root "$R3" --from-dir "$T/dist" --version v1.0.0 >"$T/out" 2>&1; then fail "installed another version than asked"; fi
 R --root "$R3" --nope >/dev/null 2>&1 && fail "accepted an unknown option"
 echo "install-pi-check: PASS"
