@@ -111,6 +111,9 @@ func nodeResponseShape() Obj {
 		// Additive: the registered name (a desktop agent's computer name, so the apps can tell
 		// several computers in the "desktop" room apart); null when registered without one.
 		shape["name"] = NullOr(String)
+		// Go Pi node phase 2 (docs/agent/go-pi-node.md §7), additive: the heartbeat's
+		// version_info.runtime ("go" for the Go node core), null for the Python node.
+		shape["runtime"] = NullOr(String)
 	}
 	return shape
 }
