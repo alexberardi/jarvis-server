@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -762,5 +763,78 @@ func TestTapReplyCallsFromText(t *testing.T) {
 	var m map[string]any
 	if err := json.Unmarshal([]byte(args), &m); err != nil || m["key"] != "parking_spot" {
 		t.Errorf("arguments %q, want the call's arguments as a JSON object", args)
+	}
+}
+
+// A scenario's settings are put as the primary household admin before the conversation starts
+// and the earlier values put back after it.
+func TestDriverSettings(t *testing.T) {
+	var mu sync.Mutex
+	var log []string
+	vals := map[string]any{"watches.enabled": false, "web_search.enabled": false}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		const base = "/api/v0/mobile/household/hh-1/settings"
+		switch {
+		case r.URL.Path == "/auth/login":
+			io.WriteString(w, `{"access_token":"jwt"}`)
+		case r.URL.Path == "/households":
+			io.WriteString(w, `[{"id":"hh-0","role":"member"},{"id":"hh-1","role":"admin"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == base:
+			b, _ := json.Marshal(map[string]any{"household_id": "hh-1", "settings": vals})
+			w.Write(b)
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, base+"/"):
+			if r.Header.Get("Authorization") != "Bearer jwt" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			var body struct {
+				Value any `json:"value"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			key := strings.TrimPrefix(r.URL.Path, base+"/")
+			vals[key] = body.Value
+			log = append(log, fmt.Sprintf("put %s=%v", key, body.Value))
+			io.WriteString(w, `{"success":true}`)
+		case r.URL.Path == "/api/v0/conversation/start":
+			log = append(log, fmt.Sprintf("start watches=%v", vals["watches.enabled"]))
+			io.WriteString(w, `{"status":"success"}`)
+		case r.URL.Path == "/api/v0/conversation/end":
+			io.WriteString(w, `{"status":"success"}`)
+		case r.URL.Path == "/api/v0/voice/command":
+			io.WriteString(w, `{"stop_reason":"complete","tool_calls":[],"assistant_message":"Okay."}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	root, _ := filepath.Abs("../..")
+	d := &Driver{Node: &Node{BaseURL: srv.URL, ID: "node", Key: "key"}, Root: root,
+		Desktop: &DesktopSetup{AuthURL: srv.URL, Email: "p@example.com", Password: "pw"}}
+	sc := Scenario{Name: "settings", Tools: "none", Home: "none", Turns: []Turn{{Say: "hi"}},
+		Settings: map[string]any{"watches.enabled": true, "web_search.enabled": true}}
+	if l := d.Run(context.Background(), sc); !l.Pass {
+		t.Fatalf("%+v", l)
+	}
+	want := []string{"put watches.enabled=true", "put web_search.enabled=true", "start watches=true",
+		"put watches.enabled=false", "put web_search.enabled=false"}
+	if !slices.Equal(log, want) {
+		t.Fatalf("calls %v", log)
+	}
+	// A key the household can't set fails the run before it starts, and puts back what it set.
+	log = nil
+	sc.Settings = map[string]any{"watches.enabled": true, "zz.unknown": 1}
+	if l := d.Run(context.Background(), sc); l.Pass || !strings.Contains(l.Turns[0].Error, "zz.unknown") {
+		t.Fatalf("%+v", l)
+	}
+	if want := []string{"put watches.enabled=true", "put watches.enabled=false"}; !slices.Equal(log, want) {
+		t.Fatalf("calls %v", log)
+	}
+	// Without the sandbox's sign-in it fails instead of playing with the settings off.
+	d.Desktop = nil
+	if l := d.Run(context.Background(), sc); l.Pass {
+		t.Fatal("ran without the settings")
 	}
 }

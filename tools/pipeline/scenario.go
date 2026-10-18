@@ -52,6 +52,10 @@ type Scenario struct {
 	// FreshMemories deletes the primary user's own memories before each run (memories.go), so
 	// a memory scenario doesn't see what an earlier run stored.
 	FreshMemories bool `json:"fresh_memories,omitempty"`
+	// Settings are household settings the scenario needs (e.g. {"watches.enabled": true}): the
+	// driver puts them as the primary household admin before the conversation starts and puts
+	// the earlier values back afterwards (settings.go).
+	Settings map[string]any `json:"settings,omitempty"`
 	// Skip, when set, is why the scenario cannot run yet; it is reported, not played.
 	Skip string `json:"skip,omitempty"`
 	// Results is the node's output per tool name for every call in the scenario; a turn's own
