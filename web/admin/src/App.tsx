@@ -15,7 +15,7 @@ import { getSetupState } from '@/api/auth'
 
 const queryClient = new QueryClient()
 
-function AppRoutes() {
+export function AppRoutes() {
   const [checking, setChecking] = useState(true)
   const [needsSuperuser, setNeedsSuperuser] = useState(false)
   const location = useLocation()
@@ -29,6 +29,10 @@ function AppRoutes() {
       .finally(() => setChecking(false))
   }, [])
 
+  // Someone is signed in, so the install has its superuser: the boot flag is stale from here
+  // on (signing out after setup must reach the login page, not bounce back into the wizard).
+  if (needsSuperuser && auth.isAuthenticated) setNeedsSuperuser(false)
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
@@ -37,7 +41,6 @@ function AppRoutes() {
     )
   }
 
-  // Once setup signs the new superuser in, the stale flag no longer redirects.
   if (needsSuperuser && !auth.isAuthenticated && location.pathname !== '/setup') {
     return <Navigate to="/setup" replace />
   }

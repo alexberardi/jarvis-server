@@ -1,0 +1,39 @@
+{
+  "fallback": "Scripted model: no rule matched that.",
+  "rules": [
+    {
+      "match": "(?i)turn on the kitchen lights",
+      "tool_calls": [{"name": "control_device", "arguments": {"device_name": "Kitchen Lights", "action": "turn_on"}}]
+    },
+    {
+      "after_tool": "control_device",
+      "match": "(?i)\"success\":\\s*true",
+      "reply": "Done, the kitchen lights are switched."
+    },
+    {
+      "after_tool": "control_device",
+      "reply": "Sorry, the kitchen lights did not respond."
+    },
+    {
+      "match": "(?i)remember that my e2e code word is marmalade",
+      "tool_calls": [{"name": "remember", "arguments": {"content": "The e2e code word is marmalade", "category": "fact"}}]
+    },
+    {
+      "after_tool": "remember",
+      "match": "remembered",
+      "reply": "Saved to your memories."
+    },
+    {
+      "after_tool": "remember",
+      "reply": "Sorry, I could not save that."
+    },
+    {
+      "match": "(?i)what is in this photo",
+      "reply": "Scripted model: I got your photo."
+    },
+    {
+      "match": "(?i)\\b(hello|hi|hey)\\b",
+      "reply": "Hello from the scripted model."
+    }
+  ]
+}

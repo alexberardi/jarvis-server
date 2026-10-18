@@ -3,7 +3,7 @@
 # its own ports, seeded with the dev household, and talking to the installed instance's model
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
-#   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich] [--llm shared|none|scripted] [--ui]
+#   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich|empty] [--llm shared|none|scripted] [--ui]
 #                      [--voice [--stt-model ID]]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
@@ -21,7 +21,10 @@
 # rebuilds and restarts it on the same data.
 #
 #   --offset N       port offset (default: the first free of 10000, 11000, ...; kept per name)
-#   --profile        seed-dev.py profile (default minimal)
+#   --profile        seed-dev.py profile (default minimal). empty: no seeding at all, so no
+#                    superuser and first-run setup still to do (the setup wizard's E2E test);
+#                    sandbox.env then has SBX_SETUP_TOKEN and no logins, and the model is left
+#                    as it is (no superuser to set it with)
 #   --llm shared     (default) llm.live = the installed jarvisd's live model through its own LLM
 #                    API (:7704), so no second model on the GPU; requests queue behind the
 #                    house's (one slot). Needs an app client of the installed jarvisd in
@@ -60,7 +63,7 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
 VERSION=dev-sandbox TRUST_KEY=
@@ -77,12 +80,13 @@ while [ $# -gt 0 ]; do
     --trust-key) TRUST_KEY=$2; shift 2 ;;
     --purge) PURGE=1; shift ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
 case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
 case $LLM in '' | shared | none | scripted) ;; *) die "--llm: shared, none or scripted" ;; esac
+case $PROFILE in minimal | rich | empty) ;; *) die "--profile: minimal, rich or empty" ;; esac
 
 DIR=$SBX_ROOT/$NAME
 HOME_DIR=$DIR/home
@@ -338,8 +342,8 @@ for role, var in (("admin", "ADMIN"), ("power_user", "POWER"), ("member", "MEMBE
 write_env() {
   local node_id node_key
   node_id=5eed0000-0000-4000-8000-00000000a0de
-  node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json" 2>/dev/null || true)
-  TOKEN=$(login)
+  node_key=$(json "d.get('nodes',{}).get('$node_id','')" 2>/dev/null <"$HOME_DIR/seed-dev-state.json" || true)
+  if [ "$PROFILE" = empty ]; then TOKEN=; else TOKEN=$(login); fi
   umask 077
   {
     echo "# scripts/sandbox $NAME ($(date -Iseconds)); source this file"
@@ -354,6 +358,15 @@ write_env() {
     echo "export SBX_LLM_TAP=http://127.0.0.1:$(port 7799)"
     echo "export SBX_LLM_LOG=$DIR/llm.jsonl"
     if [ "$LLM" = scripted ]; then echo "export SBX_SCRIPTLLM=http://127.0.0.1:$(port 7798)"; fi
+    echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
+    echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
+    if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
+    if [ "$PROFILE" = empty ]; then
+      # Nobody to sign in as: first-run setup is still to do, with this one-time token
+      # (the wizard's link is $SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN).
+      echo "export SBX_SETUP_TOKEN=$(cat "$HOME_DIR/setup-token")"
+      return
+    fi
     echo "export SBX_EMAIL=test@jarvisautomation.io"
     echo "export SBX_PASSWORD='DevPass123!'"
     echo "export SBX_TOKEN=$TOKEN"
@@ -363,9 +376,6 @@ write_env() {
     role_emails
     echo "export SBX_NODE_ID=$node_id"
     echo "export SBX_NODE_KEY=$node_key"
-    echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
-    echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
-    if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
   } >"$ENVF"
 }
 
@@ -416,12 +426,17 @@ cmd_up() {
   done
   curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null || die "not healthy after 30s (log: $LOG)"
 
-  say "seeding ($PROFILE)"
-  python3 "$ROOT/scripts/seed-dev.py" --home "$HOME_DIR" --base-url http://127.0.0.1 \
-    --auth-port "$(port 7701)" --cc-port "$(port 7703)" --admin-port "$(port 7710)" \
-    --profile "$PROFILE" >"$DIR/seed.log" 2>&1 || { tail -20 "$DIR/seed.log" >&2; die "seeding failed (log: $DIR/seed.log)"; }
-  point_llm
-  setup_voice
+  if [ "$PROFILE" = empty ]; then
+    [ -f "$HOME_DIR/setup-token" ] || die "--profile empty: $HOME_DIR/setup-token is missing (was this sandbox seeded before? down --purge it first)"
+    say "not seeding (--profile empty): first-run setup is still to do"
+  else
+    say "seeding ($PROFILE)"
+    python3 "$ROOT/scripts/seed-dev.py" --home "$HOME_DIR" --base-url http://127.0.0.1 \
+      --auth-port "$(port 7701)" --cc-port "$(port 7703)" --admin-port "$(port 7710)" \
+      --profile "$PROFILE" >"$DIR/seed.log" 2>&1 || { tail -20 "$DIR/seed.log" >&2; die "seeding failed (log: $DIR/seed.log)"; }
+    point_llm
+    setup_voice
+  fi
   write_env
   say "up: source $ENVF"
 }
