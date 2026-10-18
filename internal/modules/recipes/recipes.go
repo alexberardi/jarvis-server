@@ -89,8 +89,8 @@ const blobPurgeJobType = "recipes.blob_purge"
 type Module struct {
 	// Users verifies the mobile app's bearer tokens.
 	Users UserVerifier
-	// Households resolves the caller's memberships for the RD7 union. Nil trusts the token's
-	// household claim alone (tests).
+	// Households resolves the caller's memberships for the RD7 union. Nil gives the caller
+	// no households (own rows only): the token's claim is never trusted on its own.
 	Households HouseholdLister
 	// LLM runs the background passes (the grocery SKU match) in process. Nil: they learn nothing.
 	LLM LLM

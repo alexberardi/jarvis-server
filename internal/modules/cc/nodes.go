@@ -37,11 +37,12 @@ type nodeRow struct {
 	capabilities    sql.NullString // JSON object, from the heartbeat
 	ownerUserID     sql.NullInt64  // who paired it (migration 00180); NULL: the admin key, or unknown
 	lastAddr        sql.NullString // the latest heartbeat's TCP peer address (thisdevice.go)
+	runtime         sql.NullString // version_info.runtime: "go" for the Go node core, NULL for Python
 }
 
 const nodeCols = `node_id, room, "user", voice_mode, last_seen, household_id, last_seen_version,
 	install_mode, is_busy, git_sha, is_active, protocols, needs_k2, contacted, node_kind, capabilities,
-	owner_user_id, last_addr`
+	owner_user_id, last_addr, runtime`
 
 type scanner interface{ Scan(...any) error }
 
@@ -49,7 +50,7 @@ func scanNode(s scanner) (*nodeRow, error) {
 	var n nodeRow
 	err := s.Scan(&n.nodeID, &n.room, &n.user, &n.voiceMode, &n.lastSeen, &n.householdID, &n.lastSeenVersion,
 		&n.installMode, &n.isBusy, &n.gitSHA, &n.isActive, &n.protocols, &n.needsK2, &n.contacted,
-		&n.nodeKind, &n.capabilities, &n.ownerUserID, &n.lastAddr)
+		&n.nodeKind, &n.capabilities, &n.ownerUserID, &n.lastAddr, &n.runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +131,8 @@ func (n *nodeRow) response(now time.Time, name string) map[string]any {
 		"last_seen_version": nullable(n.lastSeenVersion), "install_mode": nullable(n.installMode),
 		"git_sha": nullable(n.gitSHA), "is_busy": n.isBusy, "needs_k2": n.needsK2,
 		"node_kind": nullable(n.nodeKind), "capabilities": n.caps(), "owner_user_id": nullableInt(n.ownerUserID),
-		"name": nodeName(n.nodeID, name),
+		"runtime": nullable(n.runtime),
+		"name":    nodeName(n.nodeID, name),
 	}
 }
 
@@ -280,8 +282,9 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 			if s, ok := versionInfo["version"].(string); ok {
 				reported = &s
 			}
-			sets = append(sets, "last_seen_version = ?", "install_mode = ?", "git_sha = ?")
-			args = append(args, str("version"), str("install_mode"), str("git_sha"))
+			rt, _ := versionInfo["runtime"].(string)
+			sets = append(sets, "last_seen_version = ?", "install_mode = ?", "git_sha = ?", "runtime = ?")
+			args = append(args, str("version"), str("install_mode"), str("git_sha"), nullStr(runtimeValue(rt)))
 		}
 		if hasBusy {
 			sets = append(sets, "is_busy = ?")
@@ -354,9 +357,10 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	if pending != nil {
 		resp["pending_update"] = pending
 	}
-	if row.desktop() {
-		// A desktop agent follows this server's release (01-no-cli-plan 1.7): it updates itself
-		// to the same version, so a household's agents match its jarvisd.
+	if row.followsServer() {
+		// A desktop agent or Go Pi node follows this server's release (01-no-cli-plan 1.7,
+		// go-pi-node.md §7): it updates itself to the same version, so a household's agents
+		// match its jarvisd.
 		resp["server_version"] = m.Version
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
@@ -396,6 +400,15 @@ func cleanCaps(in map[string]any) map[string]any {
 // nodeKindValue is a reported node_kind, trimmed; empty or overlong clears it.
 func nodeKindValue(s string) *string {
 	s = strings.TrimSpace(s)
+	if s == "" || len(s) > maxCapLen {
+		return nil
+	}
+	return &s
+}
+
+// runtimeValue is a reported runtime, trimmed and lower-cased; empty or overlong is nil.
+func runtimeValue(s string) *string {
+	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" || len(s) > maxCapLen {
 		return nil
 	}
