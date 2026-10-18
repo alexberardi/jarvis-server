@@ -307,6 +307,9 @@ func newEnv(t *testing.T) *env {
 
 	q := queue.New(d, quiet())
 	q.PollInterval = 10 * time.Millisecond
+	// Cleanups run last-registered first: stop the workers (and wait for their last writes) before the
+	// db closes and home is removed, or a job still finishing races TempDir's RemoveAll.
+	t.Cleanup(func() { cancel(); q.Wait() })
 	deps := module.Deps{Config: config.Config{Home: home}, DB: d, Log: quiet(), Queue: q}
 	str := func(k string) string { return set.String(context.Background(), k, settings.Scope{}) }
 	bins := engine.NewBinaries(home, quiet())
