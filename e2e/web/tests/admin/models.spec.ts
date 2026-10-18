@@ -45,7 +45,8 @@ test.describe('admin models', () => {
     const catalog: CatalogEntry[] = (await get('/catalog')).models.filter((m: CatalogEntry) => LISTED.includes(m.kind))
     await page.goto('/admin/models')
     const setUp = page.getByRole('region', { name: 'Jobs' }).getByRole('button', { name: /^Set up / })
-    test.skip((await setUp.count()) === 0, 'every job is set up on this sandbox')
+    // The sandbox never sets up stt or voice (no downloads), so a Set up button is always there.
+    await expect(setUp.first()).toBeVisible()
     await setUp.first().click()
     const job = new URL(page.url()).searchParams.get('job')!
     const kind = JOB_KIND[job]
