@@ -19,6 +19,7 @@ const userSerial = "emulator-5554"
 
 type config struct {
 	flowsDir, rel, out      string
+	coverage, nav           string // e2e/coverage.json and the checkout's src/navigation; both or neither
 	maestro, adb, serial    string
 	env                     []string // KEY=VALUE, passed to every flow as -e
 	filter                  string
@@ -69,6 +70,20 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 	}
 	t0 := time.Now()
 	res := &Results{Suite: "mobile", Status: "passed", Tests: []Record{}}
+	if c.coverage != "" {
+		cr, rec, err := coverage(c.coverage, c.nav, c.flowsDir, c.rel, c.out)
+		if err != nil {
+			msg := err.Error()
+			rec.Status, rec.Error = "failed", &msg
+		}
+		fmt.Fprintf(os.Stderr, "e2emobile: %-8s %s (%d screens: %d covered, %d manual, %d pending)\n",
+			rec.Status, rec.Title, cr.Screens, len(cr.Covered), len(cr.Manual), len(cr.Pending))
+		if rec.Error != nil {
+			fmt.Fprint(os.Stderr, *rec.Error)
+			res.Status = "failed"
+		}
+		res.Tests = append(res.Tests, rec)
+	}
 	for _, f := range flows {
 		if ctx.Err() != nil {
 			break

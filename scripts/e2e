@@ -204,6 +204,9 @@ run_mobile() {
     git -C "$MOBILE_REPO" archive --format=tar "$sha" .maestro 2>/dev/null | tar -x -C "$mdir/src" ||
       die "no .maestro/ in jarvis-node-mobile ${sha:0:12} ($MOBILE_REPO)"
     say "flows: .maestro/ of jarvis-node-mobile ${sha:0:12} ($REF in $MOBILE_REPO)"
+    # Its screens, for the coverage gate (e2e/coverage.json; the suite's first test).
+    git -C "$MOBILE_REPO" archive --format=tar "$sha" src/navigation 2>/dev/null | tar -x -C "$mdir/src" ||
+      die "no src/navigation/ in jarvis-node-mobile ${sha:0:12} ($MOBILE_REPO)"
     (cd "$ROOT" && CGO_ENABLED=0 go build -o "$mdir/e2emobile" ./tools/e2emobile)
     # The chat flows' answers (CHAT_MESSAGE → CHAT_REPLY below).
     curl -sf -o /dev/null -X POST "$SBX_SCRIPTLLM/control/script" -H 'Content-Type: application/json' \
@@ -224,7 +227,8 @@ run_mobile() {
       [ -z "${!v:-}" ] || env+=(-e "EMAIL_$r=${!v}")
     done
     "$mdir/e2emobile" run --flows "$mdir/src/.maestro" --out "$mdir" --serial "$SERIAL" \
-      --maestro "$maestro" --adb "$ADB" ${FILTER:+--filter "$FILTER"} "${env[@]}"
+      --maestro "$maestro" --adb "$ADB" --coverage "$ROOT/e2e/coverage.json" --nav "$mdir/src/src/navigation" \
+      ${FILTER:+--filter "$FILTER"} "${env[@]}"
   ) 2>&1 | tee "$OUT/mobile.log"
   rc=${PIPESTATUS[0]}
   set -e
