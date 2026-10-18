@@ -388,3 +388,29 @@ func TestNotWritable(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// The Pi node: /opt/jarvis-agent belongs to the node's user (install-pi.sh), so the same stage,
+// swap, restart and rollback replace the agent there; a root-owned one (an older install-pi.sh)
+// says what to run instead of pointing at `jarvis-agent install`.
+func TestPiTarget(t *testing.T) {
+	f := newFixture(t, "v1.0.0", "linux")
+	f.u.Target.Pi = true
+	if err := f.u.Allowed("v1.1.0", false); err != nil {
+		t.Fatalf("a writable /opt/jarvis-agent: %v", err)
+	}
+	f.publish("v1.1.0", relOpt{})
+	f.u.Source = f.rel.source("v1.1.0")
+	if _, err := f.u.Stage(context.Background(), StageOptions{Target: "v1.1.0", TaskID: "t1", By: ByServer}); err != nil {
+		t.Fatal(err)
+	}
+	a, log := f.agent("v1.1.0") // the new version never answers
+	if r := f.u.Finish(context.Background(), *a); r.Outcome != OutcomeRolledBack || r.TaskID != "t1" || f.installed() != "v1.0.0" {
+		t.Fatalf("result %+v, installed %s, restarts %v", r, f.installed(), *log)
+	}
+
+	f.u.Target.Exe = filepath.Join(t.TempDir(), "missing", "jarvis-agent")
+	err := f.u.Allowed("v1.1.0", false)
+	if !errors.Is(err, ErrNotWritable) || !strings.Contains(err.Error(), "install-pi.sh") || strings.Contains(err.Error(), "jarvis-agent install") {
+		t.Fatalf("%v", err)
+	}
+}

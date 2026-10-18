@@ -346,7 +346,7 @@ jobs:
   # and a fake GitHub serving releases signed with a throwaway key that only these builds trust:
   # refusal of an older and an unsigned release, following the server to N+1 (stage, hand over,
   # swap, restart, health), and the rollback of a release that fails at start. macOS updates an
-  # ad-hoc signed app bundle. See scripts/agent-upgrade-e2e.
+  # ad-hoc signed app bundle; Linux also runs it as the Pi node (-pi). See scripts/agent-upgrade-e2e.
   agent-upgrade:
     strategy:
       fail-fast: false
@@ -370,6 +370,13 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: go run ./scripts/agent-upgrade-e2e
+      # The same on the Pi node's layout (install-pi.sh) under a fake systemd: restarts through
+      # sudoers' systemctl restart, the installer through systemd-run --user.
+      - name: Agent self-update end to end, Pi node
+        if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: "0"
+        run: go run ./scripts/agent-upgrade-e2e -pi
 
   # `jarvisd install-from-app` (01-no-cli-plan 1.10), the GUI installers' privileged step, as
   # each installer calls it: the .deb postinst (ubuntu, ufw on), the macOS app under sudo, the

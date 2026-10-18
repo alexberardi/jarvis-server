@@ -56,7 +56,7 @@ snapshot() {
   (cd "$1" && find . -mindepth 1 ! -name install-pi-commands.log -printf '%y %m %P\n' | sort -k3)
   echo "## commands"
   cat "$1/install-pi-commands.log"
-  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' -printf '%P\n' | sort) |
+  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path './usr/local/share/jarvis-agent/*' -printf '%P\n' | sort) |
     while read -r f; do
       echo "## $f"
       cat "$1/$f"
@@ -69,7 +69,7 @@ echo "--- install"
 R --root "$ROOT" --from-dir "$T/dist" | tee "$T/out"
 grep -q "installed in /opt/jarvis-agent" "$T/out" || fail "no agent installed"
 grep -q "reboot" "$T/out" || fail "no reboot note after a config.txt change"
-cmp -s "$ROOT/opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" "$DTS" ||
+cmp -s "$ROOT/usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" "$DTS" ||
   fail "the DTS in install-pi.sh differs from scripts/packaging/pi/respeaker-2mic-v2_0-overlay.dts"
 [ "$("$ROOT/opt/jarvis-agent/jarvis-agent" version)" = "$V" ] || fail "the agent in /opt is not $V"
 snapshot "$ROOT" >"$T/got"
@@ -94,6 +94,15 @@ mkdir -p "$R2/etc/jarvis-node"
 echo '{}' >"$R2/etc/jarvis-node/audio_config.json"
 R --root "$R2" --from-dir "$T/dist" >/dev/null
 [ "$(cat "$R2/etc/jarvis-node/audio_config.json")" = '{}' ] || fail "the Python node's /etc/jarvis-node was touched"
+
+echo "--- an older install (root's /opt, the overlay source in it) is moved over"
+R4=$T/root4
+seed "$R4"
+mkdir -p "$R4/opt/jarvis-agent"
+echo old >"$R4/opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts"
+R --root "$R4" --from-dir "$T/dist" >/dev/null
+[ ! -e "$R4/opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" ] || fail "the overlay source was left in the node user's /opt/jarvis-agent"
+grep -qx 'chown pi: /opt/jarvis-agent' "$R4/install-pi-commands.log" || fail "/opt/jarvis-agent was not given to the node's user"
 
 echo "--- --activate / --deactivate"
 R --root "$ROOT" --from-dir "$T/dist" --activate >/dev/null
