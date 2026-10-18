@@ -23,7 +23,7 @@ type Case struct {
 	// Model marks a case whose result depends on the model: it runs --repeat times, under the
 	// regressions-only rule (docs/dev/e2e.md).
 	Model bool `json:"model,omitempty"`
-	// Needs is "pipewire" for a case only real-time audio can play (barge-in).
+	// Needs is "pipewire" for a case only real-time audio (pipewire or pi) can play (barge-in).
 	Needs  string `json:"needs,omitempty"`
 	Expect Expect `json:"expect"`
 	Line   int    `json:"-"` // 1-based line of its name in the cases file, for the report

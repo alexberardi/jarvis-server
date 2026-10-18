@@ -3,7 +3,8 @@
 # report and takes the sandboxes down again. Run on demand (docs/dev/e2e.md).
 #
 #   scripts/e2e [web|mobile|all|voice] [--filter RE] [--keep] [--name N]
-#               [--llm shared|scripted] [--audio wav|pipewire] [--repeat N] [--agent-arg FLAG]
+#               [--llm shared|scripted] [--audio wav|pipewire|pi] [--pi-host USER@HOST] [--pi-card N]
+#               [--voices DIR] [--repeat N] [--agent-arg FLAG]
 #
 #   web      the admin SPA (Playwright, e2e/web/)
 #   mobile   the mobile app: not yet (E2E 4/9, loop item #144); exits 2
@@ -17,8 +18,13 @@
 #   --name N the sandbox name (default e2e-<run>); the setup wizard's empty sandbox is N-setup
 #   --llm    voice: the model, shared (the real one through the tap, default) or scripted
 #            (e2e/llm/voice.json, to check the lane itself)
-#   --audio  voice: wav (WAV files as the node's mic and speaker, default) or pipewire (a
-#            private PipeWire's virtual mic and speaker, never the user's audio session)
+#   --audio  voice: wav (WAV files as the node's mic and speaker, default), pipewire (a
+#            private PipeWire's virtual mic and speaker, never the user's audio session) or pi
+#            (a real Pi over ssh: the linux-arm64 node on its HAT, the cases played out of its
+#            own speaker; overnight only, docs/decisions/2026-10-18-e2e-pi-voice-lane.md)
+#   --pi-host  pi: the Pi as ssh reaches it, key auth (default: $JARVIS_E2E_PI)
+#   --pi-card  pi: the HAT's ALSA card index (default: the seeed card)
+#   --voices   voice: recorded voices, DIR/<slug of the text>.wav said instead of the TTS
 #   --repeat voice: runs of each model-dependent case (default 3)
 #   --agent-arg  voice: an extra `jarvis-agent listen` flag, repeatable (--agent-arg=--wake-threshold=0.6)
 #
@@ -34,9 +40,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 say() { echo "e2e: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
 
-SUITE=all FILTER='' KEEP=0 NAME='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=()
+SUITE=all FILTER='' KEEP=0 NAME='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=() PI_HOST=${JARVIS_E2E_PI:-} PI_CARD=auto VOICES=''
 while [ $# -gt 0 ]; do
   case $1 in
     web|mobile|all|voice) SUITE=$1; shift ;;
@@ -46,6 +52,9 @@ while [ $# -gt 0 ]; do
     --llm) VLLM=$2; shift 2 ;;
     --audio) AUDIO=$2; shift 2 ;;
     --repeat) REPEAT=$2; shift 2 ;;
+    --pi-host) PI_HOST=$2; shift 2 ;;
+    --pi-card) PI_CARD=$2; shift 2 ;;
+    --voices) VOICES=$(cd "$2" && pwd); shift 2 ;;
     --agent-arg) AGENT_ARGS+=("--agent-arg=$2"); shift 2 ;;
     --agent-arg=*) AGENT_ARGS+=("--agent-arg=${1#--agent-arg=}"); shift ;;
     -h|--help) usage; exit 0 ;;
@@ -57,7 +66,8 @@ if [ "$SUITE" = mobile ]; then
   exit 2
 fi
 case $VLLM in shared | scripted) ;; *) die "--llm: shared or scripted" ;; esac
-case $AUDIO in wav | pipewire) ;; *) die "--audio: wav or pipewire" ;; esac
+case $AUDIO in wav | pipewire | pi) ;; *) die "--audio: wav, pipewire or pi" ;; esac
+[ "$AUDIO" != pi ] || [ -n "$PI_HOST" ] || die "--audio pi needs --pi-host USER@HOST (or JARVIS_E2E_PI)"
 case $REPEAT in '' | *[!0-9]* | 0) die "--repeat: a positive number" ;; esac
 
 RUN=$(date +%Y%m%d-%H%M%S)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')
@@ -195,8 +205,19 @@ start_audio() {
 run_voice() {
   local dir=$OUT/voice rc=0 wake=()
   mkdir -p "$dir/bin"
-  say "voice: building jarvis-agent and tools/voicelane"
-  (cd "$ROOT" && CGO_ENABLED=0 go build -o "$dir/bin/jarvis-agent" ./cmd/jarvis-agent &&
+  local goos='' goarch='' pi=()
+  if [ "$AUDIO" = pi ]; then
+    # The Pi's build, with the linux-arm64 onnxruntime embedded for the wake word.
+    goos=linux goarch=arm64
+    pi=(--pi-host "$PI_HOST" --pi-card "$PI_CARD")
+    if ! ls "$ROOT/internal/voice/sherpa/libs/linux-arm64/"*.so* >/dev/null 2>&1; then
+      say "voice: fetching the linux-arm64 sherpa-onnx libraries"
+      (cd "$ROOT" && scripts/fetch-sherpa-libs.sh linux-arm64) >"$dir/build.log" 2>&1 ||
+        { broken voice "fetching the linux-arm64 sherpa-onnx libraries failed (voice/build.log)"; return; }
+    fi
+  fi
+  say "voice: building jarvis-agent${goarch:+ ($goos/$goarch)} and tools/voicelane"
+  (cd "$ROOT" && CGO_ENABLED=0 GOOS=${goos:-$(go env GOOS)} GOARCH=${goarch:-$(go env GOARCH)} go build -o "$dir/bin/jarvis-agent" ./cmd/jarvis-agent &&
     CGO_ENABLED=0 go build -o "$dir/bin/voicelane" ./tools/voicelane) >"$dir/build.log" 2>&1 ||
     { broken voice "building jarvis-agent or tools/voicelane failed (voice/build.log)"; return; }
   # Wake models seeded in the cache keep the run offline; else the node fetches them once into
@@ -212,9 +233,10 @@ run_voice() {
     # Not in a subshell: its exports and PIDs are this script's.
     start_audio >"$dir/audio-error.txt" || { broken voice "private PipeWire: $(cat "$dir/audio-error.txt")"; return; }
   fi
-  say "voice: running (--audio $AUDIO, --repeat $REPEAT)"
+  say "voice: running (--audio $AUDIO${pi:+ on $PI_HOST}, --repeat $REPEAT)"
   (cd "$ROOT" && "$dir/bin/voicelane" --root "$ROOT" --sandbox "$NAME" --cases e2e/voice/cases.json --out "$dir" \
-    --rel voice --agent "$dir/bin/jarvis-agent" --audio "$AUDIO" --repeat "$REPEAT" "${wake[@]}" "${AGENT_ARGS[@]}" \
+    --rel voice --agent "$dir/bin/jarvis-agent" --audio "$AUDIO" --repeat "$REPEAT" "${wake[@]}" "${pi[@]}" "${AGENT_ARGS[@]}" \
+    ${VOICES:+--voices "$VOICES"} \
     ${FILTER:+--filter "$FILTER"}) 2>&1 | tee "$OUT/voice.log" || rc=$?
   echo "$rc" >"$OUT/voice.exit"
   SUITES+=(voice)
