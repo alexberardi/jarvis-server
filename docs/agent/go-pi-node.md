@@ -1009,8 +1009,16 @@ These are **still needed**; install.sh step lines are cited:
    2. Heartbeat `pending_update` → updater. **Server side done 2026-10-17:** jarvisd stores
       `version_info.runtime` (`cc_nodes.runtime`, on the node response); a `runtime "go"` node
       follows this server like a desktop agent (heartbeat `server_version`, "latest" = jarvisd's
-      own tag, never the jarvis-node-setup release). Python nodes are unchanged. The node-side
-      applier is still to do.
+      own tag, never the jarvis-node-setup release). Python nodes are unchanged. **Node side built
+      2026-10-18** (loop #161): the desktop agent's self-update (stage, swap, health gate,
+      rollback, failures on `/nodes/tasks/{id}/status`) runs on the Pi install. `install-pi.sh`
+      gives `/opt/jarvis-agent` to the node's user (root never runs or writes a file there; the
+      overlay source moved to `/usr/local/share/jarvis-agent`); the restart is sudoers'
+      `sudo -n /usr/bin/systemctl restart jarvis-agent.service` with no quit first, and the
+      installer runs in a `systemd-run --user` unit of the node user's manager (linger), never
+      detached (the unit's restart stops its whole cgroup). CI: `agent-upgrade-e2e -pi` (the Pi
+      layout under a fake systemd). **Pending on-device** (lab Pi 4): one real update, and whether
+      `systemd-run --user` reaches pi's manager from the system unit.
    3. The tarball + install.sh variant (§6).
       **3a built 2026-10-17:** `scripts/install-pi.sh` (agent in `/opt/jarvis-agent`; overlay, config.txt,
       modprobe, asound.conf, mixer baseline, groups + linger, sudoers, journald, swappiness, swap, the
