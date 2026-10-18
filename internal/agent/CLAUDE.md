@@ -149,6 +149,9 @@ internal/agent/
   hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's
                       patterns (leds.go, golden-tested), the GPIO17 button (button.go), spidev +
                       gpiocdev (device_linux.go); voice states reach it through voice.Indicator
+  pinode/             a Pi node's extra command verbs (go-pi-node.md §3.13): update_node_config
+                      (trust-anchor filter, live apply, agent.json), preview_led_pattern,
+                      measure_ambient_noise (through voice.Live; stats golden-tested vs numpy)
   tray/               the status icon and its menu (DESIGN.md §15): the menu as data (tray.go),
                       the shield icon + macOS template (icon.go), StatusNotifierItem + dbusmenu
                       over godbus (sni_linux.go), NSStatusItem over purego in the island's AppKit
