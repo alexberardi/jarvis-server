@@ -32,9 +32,9 @@ func TestResolveCaller(t *testing.T) {
 			t.Errorf("user %d claim %q: write %q households %v", c.id, c.claim, got.writeHousehold, got.households)
 		}
 	}
-	// Without a membership source the claim is trusted (tests and tools).
+	// Without a membership source the claim is not trusted: own rows only, nothing to write to.
 	got, _ := (&Module{}).resolve(context.Background(), authn.User{ID: 1, HouseholdID: "A"})
-	if got.writeHousehold != "A" || !slices.Equal(got.households, []string{"A"}) {
+	if got.writeHousehold != "" || len(got.households) != 0 {
 		t.Errorf("no lister: %+v", got)
 	}
 }
