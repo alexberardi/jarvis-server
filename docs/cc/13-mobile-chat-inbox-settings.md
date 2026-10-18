@@ -380,6 +380,8 @@ mobile (stack/popover) ─GET /callbacks/{id}/status (poll)──▶ {id,status,
 >
 > **Added 2026-10-17 (jarvisd-only, autonomy P2, A8 in [docs/autonomy/PLAN.md](../autonomy/PLAN.md)):** `watches.enabled` (bool, category `watches`, default **false**), last in the GET's key order. Lets household members ask Jarvis to watch a web page, a search or a signal and get told when it changes. Any member reads it; a household admin writes it with `PUT …/settings/watches.enabled {"value": true|false}` (same coercion as the other bools). Off by default and on an upgraded install; the watch tools and checks that read it arrive in later P2 pieces. `watches.max_active` (int, 10) and `watches.min_cadence_minutes` (int, 30) are install-wide, not household-controllable.
 >
+> **Added 2026-10-18 (jarvisd-only, autonomy P1, A1 in [docs/autonomy/PLAN.md](../autonomy/PLAN.md)):** `errands.autonomous_enabled` (bool, category `errands`, default **false**), last in the GET's key order. When on, the household's custom rules may run background errands without confirmation (autonomy P1). Any member reads it; a household admin writes it with `PUT …/settings/errands.autonomous_enabled {"value": true|false}` (same coercion as the other bools). Off by default and on an upgraded install.
+>
 > `GET /mobile/household/{hh}/timezone` (any member; 403 for a non-member, 401 without a JWT) shows the effective zone and where it came from, so the app can render "Automatic — <zone> (from your nodes)": `{"household_id": "...", "timezone": "<effective or \"\">", "source": "setting"|"node"|"default", "node_timezone": "<node-derived or \"\">"}`. It ignores `HouseholdClock`. The legacy stack has neither the key nor the route; the app hides the row then.
 
 **GET** (`:99-124`):
