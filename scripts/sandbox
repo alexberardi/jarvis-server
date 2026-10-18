@@ -3,14 +3,14 @@
 # its own ports, seeded with the dev household, and talking to the installed instance's model
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
-#   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich] [--llm shared|none] [--ui]
+#   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich] [--llm shared|none|scripted] [--ui]
 #                      [--voice [--stt-model ID]]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
 #   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
 #   scripts/sandbox logs [--name N] [-f]
-#   scripts/sandbox llm [--name N]         re-point the sandbox at the installed model (after
-#                                          writing the app client, or a model change)
+#   scripts/sandbox llm [--name N]         re-point the sandbox at its model again (the mode `up`
+#                                          chose; after writing the app client, or a model change)
 #   scripts/sandbox list
 #
 # up builds ./cmd/jarvisd, starts `jarvisd serve --port-offset N` on .sandbox/<name>/home bound
@@ -29,6 +29,9 @@
 #                    Calls go through the tap (tools/pipeline tap, port 7799 + offset), which
 #                    logs every model call to .sandbox/<name>/llm.jsonl.
 #   --llm none       no model: everything but the LLM works
+#   --llm scripted   a deterministic model for UI tests: tools/scriptllm (port 7798 + offset, behind
+#                    the tap) answers from e2e/llm/default.json; needs no installed jarvisd. Tests
+#                    switch scripts at $SBX_SCRIPTLLM/control/script (docs/decisions/2026-10-17-scripted-llm.md)
 #   --ui             build the admin SPA first (npm) and serve it; otherwise web/admin/dist/ui
 #                    is served when it exists, else the built-in placeholder page
 #   --voice          real TTS and STT, for voice pipeline runs (pipeline say --voice): Kokoro,
@@ -57,9 +60,9 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
-NAME=default OFFSET= PROFILE=minimal LLM=shared UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
+NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
 VERSION=dev-sandbox TRUST_KEY=
 while [ $# -gt 0 ]; do
   case $1 in
@@ -74,11 +77,12 @@ while [ $# -gt 0 ]; do
     --trust-key) TRUST_KEY=$2; shift 2 ;;
     --purge) PURGE=1; shift ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
 case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
+case $LLM in '' | shared | none | scripted) ;; *) die "--llm: shared, none or scripted" ;; esac
 
 DIR=$SBX_ROOT/$NAME
 HOME_DIR=$DIR/home
@@ -87,9 +91,12 @@ LOG=$DIR/jarvisd.log
 ENVF=$DIR/sandbox.env
 OFFSETF=$DIR/offset
 TAPPID=$DIR/tap.pid
+SCRIPTPID=$DIR/scriptllm.pid
+LLMF=$DIR/llm-mode
 
 running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 tap_running() { [ -f "$TAPPID" ] && kill -0 "$(cat "$TAPPID")" 2>/dev/null; }
+scriptllm_running() { [ -f "$SCRIPTPID" ] && kill -0 "$(cat "$SCRIPTPID")" 2>/dev/null; }
 port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
 port() { echo $(($1 + $(cat "$OFFSETF"))); }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
@@ -154,6 +161,10 @@ point_llm() {
     say "llm: off"
     return
   fi
+  if [ "$LLM" = scripted ]; then
+    point_scripted
+    return
+  fi
   if ! load_creds; then
     set_setting "$llm" llm.live.engine '"off"'
     say "llm: off. No app client for the installed jarvisd in $CREDS."
@@ -207,6 +218,29 @@ for e in json.load(open(sys.argv[1])):
   set_setting "$cc" llm.tool_calling "\"$tc\""
   set_setting "$cc" llm.thinking_switch "\"$th\""
   say "llm: tap :$(port 7799) → installed jarvisd $INSTALLED_LLM_URL ($INSTALLED_LLM_LABEL = $alias); mode $tc/$th; calls logged to $DIR/llm.jsonl"
+}
+
+# point_scripted makes llm.live the scripted model (tools/scriptllm) through the tap, so model
+# calls still land in llm.jsonl. Native tool calls with no thinking switch: cc sends the tools
+# and reads the OpenAI tool_calls the script returns, so no prompt format is involved. The prompt
+# provider is a fixed catalog one (a remote model derives none).
+point_scripted() {
+  local llm=$(port 7704) cc=$(port 7703)
+  scriptllm_running || { tail -5 "$DIR/scriptllm.log" >&2; die "scriptllm is not running (log: $DIR/scriptllm.log)"; }
+  set_setting "$llm" llm.live.engine '"remote"'
+  set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$(port 7799)/v1\""
+  set_setting "$llm" llm.live.remote_api '"openai"'
+  set_setting "$llm" llm.live.remote_model '"scripted"'
+  set_setting "$llm" llm.live.context 32768
+  set_setting "$llm" llm.live.remote_vision false
+  set_setting "$llm" llm.live.fold_system_messages '"off"'
+  set_setting "$llm" llm.background.engine '"shared"'
+  set_setting "$llm" llm.embeddings.engine '"off"'
+  set_setting "$(port 7706)" voice.recognition_enabled true
+  set_setting "$cc" llm.prompt_provider '"Qwen3_5_9B_Compressed"'
+  set_setting "$cc" llm.tool_calling '"native"'
+  set_setting "$cc" llm.thinking_switch '"none"'
+  say "llm: tap :$(port 7799) → scripted model :$(port 7798) ($(curl -sf "http://127.0.0.1:$(port 7798)/control/script" | json 'd["script"]')); unmatched turns in $DIR/scriptllm-unmatched.jsonl"
 }
 
 # Voice models live in one cache shared by every worktree and sandbox; the sandbox's settings
@@ -319,6 +353,7 @@ write_env() {
     echo "export SBX_MQTT=127.0.0.1:$(port 1884)"
     echo "export SBX_LLM_TAP=http://127.0.0.1:$(port 7799)"
     echo "export SBX_LLM_LOG=$DIR/llm.jsonl"
+    if [ "$LLM" = scripted ]; then echo "export SBX_SCRIPTLLM=http://127.0.0.1:$(port 7798)"; fi
     echo "export SBX_EMAIL=test@jarvisautomation.io"
     echo "export SBX_PASSWORD='DevPass123!'"
     echo "export SBX_TOKEN=$TOKEN"
@@ -349,6 +384,8 @@ cmd_up() {
   [ -z "$TRUST_KEY" ] || ldflags="$ldflags -X github.com/alexberardi/jarvis-server/internal/update.extraTrustedKey=$TRUST_KEY"
   (cd "$ROOT" && CGO_ENABLED=0 go build -ldflags "$ldflags" -o "$DIR/jarvisd" ./cmd/jarvisd)
   (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/pipeline" ./tools/pipeline)
+  [ "$LLM" != scripted ] || (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/scriptllm" ./tools/scriptllm)
+  echo "$LLM" >"$LLMF"
 
   cmd_stop
   local ui=
@@ -358,9 +395,18 @@ cmd_up() {
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
     setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"
-  load_creds || true
+  local upstream
+  if [ "$LLM" = scripted ]; then
+    setsid "$DIR/scriptllm" --listen "127.0.0.1:$(port 7798)" --dir "$ROOT" --script e2e/llm/default.json \
+      --log "$DIR/scriptllm-unmatched.jsonl" >>"$DIR/scriptllm.log" 2>&1 </dev/null &
+    echo $! >"$SCRIPTPID"
+    upstream=http://127.0.0.1:$(port 7798) INSTALLED_APP_ID= INSTALLED_APP_KEY=
+  else
+    load_creds || true
+    upstream=$INSTALLED_LLM_URL
+  fi
   JARVIS_TAP_APP_ID=$INSTALLED_APP_ID JARVIS_TAP_APP_KEY=$INSTALLED_APP_KEY \
-    setsid "$DIR/pipeline" tap --listen "127.0.0.1:$(port 7799)" --upstream "$INSTALLED_LLM_URL" --log "$DIR/llm.jsonl" \
+    setsid "$DIR/pipeline" tap --listen "127.0.0.1:$(port 7799)" --upstream "$upstream" --log "$DIR/llm.jsonl" \
     >>"$DIR/tap.log" 2>&1 </dev/null &
   echo $! >"$TAPPID"
   for _ in $(seq 1 60); do
@@ -391,6 +437,8 @@ cmd_stop() {
   rm -f "$PIDFILE"
   if tap_running; then kill "$(cat "$TAPPID")"; fi
   rm -f "$TAPPID"
+  if scriptllm_running; then kill "$(cat "$SCRIPTPID")"; fi
+  rm -f "$SCRIPTPID"
 }
 
 cmd_down() {
@@ -423,12 +471,15 @@ cmd_status() {
 }
 
 case $CMD in
-  up) cmd_up ;;
+  up) LLM=${LLM:-shared}; cmd_up ;;
   down) cmd_down ;;
   status) cmd_status ;;
   env) [ -f "$ENVF" ] || die "no $ENVF (scripts/sandbox up)"; cat "$ENVF" ;;
   logs) if [ "$FOLLOW" = 1 ]; then tail -f "$LOG"; else tail -100 "$LOG"; fi ;;
-  llm) running || die "$NAME is not up"; point_llm ;;
+  llm) running || die "$NAME is not up"
+       saved=$(cat "$LLMF" 2>/dev/null || echo shared)
+       [ -z "$LLM" ] || [ "$LLM" = "$saved" ] || die "$NAME runs --llm $saved; switch with scripts/sandbox up --name $NAME --llm $LLM"
+       LLM=$saved; point_llm ;;
   list) for d in "$SBX_ROOT"/*/; do [ -d "$d" ] && NAME=$(basename "$d") DIR=$d PIDFILE=$d/jarvisd.pid OFFSETF=$d/offset && \
           if running; then echo "$NAME up offset $(cat "$OFFSETF")"; else echo "$NAME down"; fi; done ;;
   *) die "unknown command $CMD (up, down, status, env, logs, llm, list)" ;;
