@@ -4,7 +4,9 @@
 emulator, logs it in to a `scripts/sandbox` jarvisd, visits every main screen in light and
 dark (and optionally a larger font), sends one chat message, and saves a PNG and a UI dump of
 each screen. An agent can Read the PNGs, or read the `.xml` dumps and `index.json` for the
-text without needing vision. The user's own emulator is never touched.
+text without needing vision. The user's own emulator is never touched. Its emulator, AVD,
+APK and adb reverse code is in `scripts/lib/mobile.sh`, which `scripts/e2e mobile` (the
+Maestro suite, [`e2e.md`](e2e.md)) shares.
 
 ## Run it (Linux)
 
