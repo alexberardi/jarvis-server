@@ -91,6 +91,8 @@ HOUSEHOLD_NAME = "Avery Household"
 DEFAULT_PASSWORD = "DevPass123!"
 PRIMARY_EMAIL = "test@jarvisautomation.io"
 PARTNER_EMAIL = "carl@jarvisautomation.io"
+# Rich profile only: a deactivated account in no household (the admin Users page shows it).
+DEACTIVATED_EMAIL = "former@jarvisautomation.io"
 
 PEOPLE = [
     # (email, username, display, role, is_primary)
@@ -642,6 +644,14 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
                         (household_id, primary, node_id, kind, subject, f"seed:{kind}:{i}", summary,
                          stamp, stamp, stamp)).rowcount
     counts["signals"] = n
+
+    # A deactivated account, in no household (so no role login picks it), for the admin's
+    # Users page (e2e/web/tests/admin/users.spec.ts). No API deactivates a user; its password
+    # hash matches no password, so it can never sign in.
+    counts["deactivated_users"] = cx.execute(
+        """INSERT INTO auth_users (email, username, password_hash, is_active, created_at, updated_at)
+        VALUES (?, ?, '!', 0, ?, ?) ON CONFLICT DO NOTHING""",
+        (DEACTIVATED_EMAIL, "former", stamp, stamp)).rowcount
     return counts
 
 
