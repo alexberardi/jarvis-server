@@ -72,9 +72,12 @@ func (n *Node) State() State {
 	return n.state
 }
 
-// Verbs are the dispatcher's handlers (node.Dispatcher.Verbs).
-func (n *Node) Verbs() map[string]node.Verb {
-	return map[string]node.Verb{
+// Verb handles one command verb; it verifies and replies itself, through cc.
+type Verb func(ctx context.Context, cc node.Backend, details map[string]any)
+
+// Verbs are the node's handlers (node.Runner.Verbs, given the connected command-center).
+func (n *Node) Verbs() map[string]Verb {
+	return map[string]Verb{
 		"update_node_config":    n.updateNodeConfig,
 		"preview_led_pattern":   n.previewLEDPattern,
 		"measure_ambient_noise": n.measureAmbientNoise,

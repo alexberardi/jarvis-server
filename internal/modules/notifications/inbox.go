@@ -25,6 +25,9 @@ type InboxItem struct {
 	Metadata      map[string]any `json:"metadata"`
 	IsRead        bool           `json:"is_read"`
 	CreatedAt     string         `json:"created_at"` // naive UTC isoformat, as Python emitted
+	// Attachments are the item's images and video. Omitted when there are none, so an item
+	// without any keeps the legacy shape.
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // NewInboxItem is what a producer writes. UserID nil means household-wide (every member sees it).
@@ -38,6 +41,10 @@ type NewInboxItem struct {
 	SourceService string
 	// Metadata is stored as JSON. An empty map is stored as NULL (legacy `if metadata`).
 	Metadata map[string]any
+	// AttachmentIDs are uploads (UploadInboxAttachment) to attach, in order. Each must be
+	// AttachmentOwner's and unclaimed; a refused one fails the create with an AttachmentError.
+	AttachmentIDs   []string
+	AttachmentOwner string
 }
 
 // InboxUpdate changes an item in place; nil fields are left alone.
@@ -88,7 +95,15 @@ func scanInbox(sc interface{ Scan(...any) error }) (InboxItem, error) {
 }
 
 func getInbox(ctx context.Context, q querier, id string) (InboxItem, error) {
-	return scanInbox(q.QueryRowContext(ctx, `SELECT `+inboxCols+` FROM notifications_inbox_items WHERE id = ?`, id))
+	it, err := scanInbox(q.QueryRowContext(ctx, `SELECT `+inboxCols+` FROM notifications_inbox_items WHERE id = ?`, id))
+	if err != nil {
+		return InboxItem{}, err
+	}
+	items := []InboxItem{it}
+	if err := loadAttachments(ctx, q, items); err != nil {
+		return InboxItem{}, err
+	}
+	return items[0], nil
 }
 
 // CreateInboxItem writes an inbox item. With tx non-nil it joins the caller's transaction
@@ -107,12 +122,19 @@ func (m *Module) CreateInboxItem(ctx context.Context, tx *sql.Tx, in NewInboxIte
 		uid = *in.UserID
 	}
 	id := newUUID()
+	var maxItem int64
+	if len(in.AttachmentIDs) > 0 {
+		_, maxItem = m.attachmentCaps(ctx)
+	}
 	var it InboxItem
 	err := m.inTx(ctx, tx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO notifications_inbox_items
 			(id, user_id, household_id, title, summary, body, category, source_service, metadata_json, is_read, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
 			id, uid, in.HouseholdID, in.Title, in.Summary, in.Body, in.Category, in.SourceService, meta, ts(m.now())); err != nil {
+			return err
+		}
+		if err := m.claimAttachments(ctx, tx, id, in, maxItem); err != nil {
 			return err
 		}
 		var err error
@@ -198,10 +220,17 @@ func (m *Module) handleCreateInbox(w http.ResponseWriter, r *http.Request) {
 		in.UserID = &uid
 	}
 	in.Metadata, _ = o.optDict("metadata")
+	in.AttachmentIDs = o.optStrList("attachment_ids")
 	if !o.done(w) {
 		return
 	}
+	if app, ok := authn.AppFrom(r.Context()); ok {
+		in.AttachmentOwner = "app:" + app.ID
+	}
 	it, err := m.CreateInboxItem(r.Context(), nil, in)
+	if WriteAttachmentError(w, err) {
+		return
+	}
 	if err != nil {
 		m.internalError(w, err)
 		return
@@ -341,6 +370,11 @@ func (m *Module) handleListInbox(w http.ResponseWriter, r *http.Request, u authn
 		out = append(out, it)
 	}
 	if err := rows.Err(); err != nil {
+		m.internalError(w, err)
+		return
+	}
+	rows.Close()
+	if err := loadAttachments(r.Context(), m.deps.DB.Read, out); err != nil {
 		m.internalError(w, err)
 		return
 	}

@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -132,19 +133,30 @@ func (m *Module) pushConfirmation(ctx context.Context, hh string, userID *int64,
 // postInboxItem is post_inbox_item_sync.
 func (m *Module) postInboxItem(ctx context.Context, hh string, userID *int64, title, summary, body, category string,
 	metadata map[string]any, push bool, targetType string) string {
+	id, _ := m.postInboxItemWith(ctx, notifications.NewInboxItem{HouseholdID: hh, UserID: userID, Title: title, Summary: summary,
+		Body: body, Category: category, Metadata: metadata}, push, targetType)
+	return id
+}
+
+// postInboxItemWith is postInboxItem for an item that may carry attachments. A refused
+// attachment comes back as the notifications AttachmentError (and no item); other failures
+// are logged and return "".
+func (m *Module) postInboxItemWith(ctx context.Context, in notifications.NewInboxItem, push bool, targetType string) (string, error) {
 	if m.Notify == nil {
-		return ""
+		return "", nil
 	}
-	if metadata == nil {
-		metadata = map[string]any{}
+	if in.Metadata == nil {
+		in.Metadata = map[string]any{}
 	}
-	it, err := m.Notify.CreateInboxItem(ctx, nil, notifications.NewInboxItem{
-		HouseholdID: hh, UserID: userID, Title: title, Summary: summary, Body: body, Category: category,
-		SourceService: sourceService, Metadata: metadata,
-	})
+	in.SourceService = sourceService
+	hh, userID, title, summary, category := in.HouseholdID, in.UserID, in.Title, in.Summary, in.Category
+	it, err := m.Notify.CreateInboxItem(ctx, nil, in)
+	if notifications.IsAttachmentError(err) {
+		return "", err
+	}
 	if err != nil {
 		m.deps.Log.Error("cc: failed to post inbox item", "category", category, "err", err)
-		return ""
+		return "", nil
 	}
 	if push {
 		tt, tid := pushTarget(targetType, userID, hh)
@@ -155,7 +167,7 @@ func (m *Module) postInboxItem(ctx context.Context, hh string, userID *int64, ti
 			m.deps.Log.Warn("cc: push notification error", "err", err)
 		}
 	}
-	return it.ID
+	return it.ID, nil
 }
 
 // sendLinkPush is send_link_push_sync: a user-scoped "link" card, then a user push.
@@ -327,6 +339,7 @@ func (m *Module) handleNodeInboxItem(w http.ResponseWriter, r *http.Request, n *
 	targetType := targetTypeField(b)
 	dedupe, _ := b.str("dedupe_key", false)
 	force, _ := b.boolean("force")
+	attachmentIDs, _ := b.strList("attachment_ids")
 	if !b.done(w) {
 		return
 	}
@@ -374,7 +387,42 @@ func (m *Module) handleNodeInboxItem(w http.ResponseWriter, r *http.Request, n *
 	if gated {
 		push = d.Rung == "push"
 	}
-	id := m.postInboxItem(ctx, hh, userID, title, summary, text, category, md, push, targetType)
+	id, err := m.postInboxItemWith(ctx, notifications.NewInboxItem{HouseholdID: hh, UserID: userID, Title: title, Summary: summary,
+		Body: text, Category: category, Metadata: md, AttachmentIDs: attachmentIDs, AttachmentOwner: "node:" + n.ID}, push, targetType)
 	m.attentionOutcome(ctx, d, gated, id != "", id)
+	if notifications.WriteAttachmentError(w, err) {
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": nullIfBlank(id), "sent": id != "", "withheld_by": nil})
+}
+
+// inboxAttacher stores inbox attachments (the notifications module's UploadInboxAttachment).
+type inboxAttacher interface {
+	UploadInboxAttachment(ctx context.Context, owner, householdID, contentType string, r io.Reader) (notifications.Attachment, error)
+}
+
+var _ inboxAttacher = (*notifications.Module)(nil)
+
+// handleNodeInboxAttachment is POST /node/inbox-attachment: a node uploads an image or video
+// (the raw file as the body, its type as Content-Type) for an item it posts next through
+// /node/inbox-item's attachment_ids. 201 with the attachment (docs/decisions/2026-10-17-inbox-attachments.md).
+func (m *Module) handleNodeInboxAttachment(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+	up, ok := m.Notify.(inboxAttacher)
+	if !ok {
+		httpx.Error(w, http.StatusServiceUnavailable, "Attachments are not available on this server")
+		return
+	}
+	if n.HouseholdID == "" {
+		httpx.Error(w, http.StatusBadRequest, "This node has no household")
+		return
+	}
+	a, err := up.UploadInboxAttachment(r.Context(), "node:"+n.ID, n.HouseholdID, r.Header.Get("Content-Type"), r.Body)
+	if notifications.WriteAttachmentError(w, err) {
+		return
+	}
+	if err != nil {
+		m.internalError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, a)
 }

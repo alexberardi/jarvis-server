@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -611,9 +612,14 @@ func run(ctx context.Context, args []string) error {
 		}
 		return vs, err
 	}
+	// A Pi's voice-profile takes go through the pipeline's microphone (voiceprofile.go).
+	mic := voice.NewMic()
+	addVerbs(r, voiceProfileVerbs(p, mic, log))
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
-		_ = voice.Serve(ctx, vs.options(cc, served, log, nil))
+		o := vs.options(cc, served, log, nil)
+		o.Mic = mic
+		_ = voice.Serve(ctx, o)
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }
 	sw.available = voice.Supported
@@ -1099,4 +1105,13 @@ func appsCmd(args []string) error {
 	}
 	fmt.Printf("%s -> %s%s\n", p.App.Name, p.App.Path, how)
 	return nil
+}
+
+// addVerbs gives the runner more command verbs (the Pi's settings verbs, its voice-profile
+// takes), keeping those it has.
+func addVerbs(r *node.Runner, verbs map[string]func(context.Context, *node.CC, map[string]any)) {
+	if r.Verbs == nil {
+		r.Verbs = map[string]func(context.Context, *node.CC, map[string]any){}
+	}
+	maps.Copy(r.Verbs, verbs)
 }

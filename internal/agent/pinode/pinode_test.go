@@ -103,7 +103,10 @@ func run(t *testing.T, n *Node, cc node.Backend, verb string, det map[string]any
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := &node.Dispatcher{CC: cc, Log: quiet, Verbs: n.Verbs()}
+	d := &node.Dispatcher{CC: cc, Log: quiet, Verbs: map[string]func(context.Context, map[string]any){}}
+	for name, v := range n.Verbs() {
+		d.Verbs[name] = func(ctx context.Context, det map[string]any) { v(ctx, cc, det) }
+	}
 	d.Handle(context.Background(), b)
 }
 

@@ -66,13 +66,14 @@ var wantTiers = map[string]tier{
 	"GET /api/addons/agent/{os}/{arch}": tierUser,
 
 	// The inbox: per-user rows.
-	"GET /api/notifications/api/v0/inbox":                  tierUser,
-	"GET /api/notifications/api/v0/inbox/unread-count":     tierUser,
-	"POST /api/notifications/api/v0/inbox/bulk/read":       tierUser,
-	"POST /api/notifications/api/v0/inbox/bulk/delete":     tierUser,
-	"GET /api/notifications/api/v0/inbox/{item_id}":        tierUser,
-	"PATCH /api/notifications/api/v0/inbox/{item_id}/read": tierUser,
-	"DELETE /api/notifications/api/v0/inbox/{item_id}":     tierUser,
+	"GET /api/notifications/api/v0/inbox":                                       tierUser,
+	"GET /api/notifications/api/v0/inbox/unread-count":                          tierUser,
+	"POST /api/notifications/api/v0/inbox/bulk/read":                            tierUser,
+	"POST /api/notifications/api/v0/inbox/bulk/delete":                          tierUser,
+	"GET /api/notifications/api/v0/inbox/{item_id}":                             tierUser,
+	"GET /api/notifications/api/v0/inbox/{item_id}/attachments/{attachment_id}": tierUser,
+	"PATCH /api/notifications/api/v0/inbox/{item_id}/read":                      tierUser,
+	"DELETE /api/notifications/api/v0/inbox/{item_id}":                          tierUser,
 
 	// G7: every user and email; resetting anyone's password.
 	"GET /api/admin/households":                     tierSuperuser,

@@ -29,6 +29,7 @@ func (m *Module) registerVoice(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+v0+"/generate/date-context", m.node(m.handleDateContext))
 	mux.HandleFunc("POST "+v0+"/node/push-notification", m.node(m.handleNodePush))
 	mux.HandleFunc("POST "+v0+"/node/inbox-item", m.node(m.handleNodeInboxItem))
+	mux.HandleFunc("POST "+v0+"/node/inbox-attachment", m.node(m.handleNodeInboxAttachment))
 	mux.HandleFunc("POST "+v0+"/node/send-link", m.node(m.handleNodeSendLink))
 
 	// Media proxy and the node-mic enrollment handoff.

@@ -16,10 +16,6 @@ type Backend interface {
 	PostAmbientResult(ctx context.Context, rid string, payload map[string]any) error
 }
 
-// Verb handles one more command verb (a Pi node's update_node_config, preview_led_pattern,
-// measure_ambient_noise: internal/agent/pinode). It verifies and replies itself, through cc.
-type Verb func(ctx context.Context, cc Backend, details map[string]any)
-
 // Dispatcher turns command messages from jarvis/nodes/{id}/commands into tool work.
 type Dispatcher struct {
 	CC    Backend
@@ -30,8 +26,10 @@ type Dispatcher struct {
 	// Packages, if set, is report_tools' installed_packages (the app's Update / Revert / health
 	// on a package card); nil reports none.
 	Packages func() []map[string]any
-	// Verbs, if set, handles the verbs it names beyond report_tools and tool_call.
-	Verbs map[string]Verb
+	// Verbs are the verbs this node speaks beyond report_tools and tool_call (a Pi's
+	// enroll_voice and verify_voice), each given the command's details. They can't replace
+	// the two built-ins. A verb in neither is ignored.
+	Verbs map[string]func(ctx context.Context, details map[string]any)
 }
 
 // command is one element of the published array: [{"command": verb, "details": {...}}].
@@ -60,8 +58,8 @@ func (d *Dispatcher) Handle(ctx context.Context, payload []byte) {
 		case "tool_call":
 			d.toolCall(ctx, c.Details)
 		default:
-			if v, ok := d.Verbs[c.Command]; ok {
-				v(ctx, d.CC, c.Details)
+			if h := d.Verbs[c.Command]; h != nil {
+				h(ctx, c.Details)
 				continue
 			}
 			// A desktop node speaks two verbs. Others (tts, action, routine, ...) get no reply,

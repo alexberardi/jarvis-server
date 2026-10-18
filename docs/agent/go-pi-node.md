@@ -123,7 +123,7 @@ Tags:
 | `action` (mobile action / device control) | `:192-298` | `S:commands.go:44`, `S:smarthome_control.go:116` | `/device-control-results/{rid}` | later |
 | `callback` | `:301-422` | `S:callbacks.go:460` | `GET /callbacks/{job}`, `POST …/result` | later |
 | `routine` (carries the full definition) | `:926-982` | `S:routines_run.go:104-110` | `/device-control-results/{rid}` | later |
-| `enroll_voice` / `verify_voice` | `:554-803` | `S:media.go:495` | `/media/whisper/voice-profiles/*`, `/mobile/voice-profile-results/{rid}` | later |
+| `enroll_voice` / `verify_voice` | `:554-803` | `S:media.go:495` | `/media/whisper/voice-profiles/*`, `/mobile/voice-profile-results/{rid}` | done in Go core (Pi profile only; a desktop's speaker is the signed-in user) |
 | `update_node_config` (settings push; restart only for `wake_word_model`) | `:1092-1177` | `S:commands.go:91` | – | done in the Pi profile (§3.14) |
 | `preview_led_pattern` | `:1180-1221` | `S:commands.go:112` | – | done in the Pi profile (§3.14) |
 | `measure_ambient_noise` | `:1257-1383` | `S:ambient.go:64` | `POST /nodes/{id}/ambient-noise-measurements/{rid}/result` | done in the Pi profile (§3.14) |
@@ -831,8 +831,9 @@ On a desktop: `JARVIS_AGENT_LOG=debug jarvis-agent listen --once`, ask for somet
 say "hey Jarvis" over it (`--once` exits 1: the turn ended `interrupted`).
 ### 3.14 Parity 5.4: node settings, LED preview, ambient noise (2026-10-17)
 
-The Pi profile answers three more `/commands` verbs (`internal/agent/pinode`, handed to the node
-dispatcher's `Verbs` hook; the desktop profile still ignores them). Decisions:
+The Pi profile answers three more `/commands` verbs (`internal/agent/pinode`, handed to
+`node.Runner.Verbs` beside the voice-profile verbs of parity 10; the desktop profile still
+ignores them). Decisions:
 [decisions/2026-10-17-pi-node-settings-verbs.md](../decisions/2026-10-17-pi-node-settings-verbs.md).
 
 **`update_node_config`** (`N:handle_update_node_config`). First, exactly as Python's
@@ -1098,6 +1099,12 @@ These are **still needed**; install.sh step lines are cited:
    7. factory-reset.
    8. Bluetooth.
    9. Device control.
+   10. Voice-profile takes (`enroll_voice` / `verify_voice`, the app's "record on this node").
+       **Done 2026-10-17** for the Pi profile: `voice.Mic` hands a fixed-length take to the
+       running pipeline, which records it between turns with the wake word paused (cue, 1.5 s
+       preroll, 48 kHz WAV like a voice turn's upload); `voice.VoiceProfiles` uploads it to
+       M4/M5 and posts V9 (Python's success and `audio_bus_unavailable` / `record_failed` /
+       `upload_failed` / `verify_failed` shapes). Unit tests; not yet run on a Pi.
 
    Then retire the Python node.
 

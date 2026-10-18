@@ -39,7 +39,7 @@ func waitMeasure(t *testing.T, l *Live, d time.Duration) ([]float64, error) {
 	}
 }
 
-func waitAttached(t *testing.T, l *Live) {
+func waitLiveAttached(t *testing.T, l *Live) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -95,7 +95,7 @@ func TestMeasureEndsWithItsCaller(t *testing.T) {
 	stop := r.run(t)
 	defer stop()
 	defer close(mic.open)
-	waitAttached(t, l)
+	waitLiveAttached(t, l)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if _, err := l.Measure(ctx, time.Second); !errors.Is(err, context.DeadlineExceeded) {

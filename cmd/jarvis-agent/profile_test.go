@@ -6,6 +6,7 @@ import (
 	"flag"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -158,7 +159,10 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 	}
 	b, _ := json.Marshal([]map[string]any{{"command": "update_node_config", "details": map[string]any{
 		"settings": map[string]any{"led_brightness_percent": 30, "wake_word_threshold": 0.7}}}})
-	d := &node.Dispatcher{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Verbs: r.Verbs}
+	d := &node.Dispatcher{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Verbs: map[string]func(context.Context, map[string]any){}}
+	for name, v := range r.Verbs {
+		d.Verbs[name] = func(ctx context.Context, det map[string]any) { v(ctx, nil, det) }
+	}
 	d.Handle(context.Background(), b)
 	got := cfg()
 	if got["led_brightness_percent"] != 30 || got["wake_word_threshold"] != 0.7 {
@@ -167,5 +171,27 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 	s, _, err := settings.Load(path)
 	if err != nil || *s.LEDBrightness != 30 || *s.WakeThreshold != 0.7 {
 		t.Fatalf("saved %+v %v", s, err)
+	}
+}
+
+// A Pi speaks its settings verbs and its voice-profile verbs: neither wiring drops the other's.
+func TestAPiKeepsAllItsVerbs(t *testing.T) {
+	r := &node.Runner{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	wirePiNode(r, &voiceFlags{threshold: 0.4}, &hatFlags{mode: "auto", brightness: 100}, nil, voice.NewLive(), "", log)
+	addVerbs(r, voiceProfileVerbs(piProfile, voice.NewMic(), log))
+	want := []string{"enroll_voice", "measure_ambient_noise", "preview_led_pattern", "update_node_config", "verify_voice"}
+	if got := slices.Sorted(maps.Keys(r.Verbs)); !slices.Equal(got, want) {
+		t.Fatalf("verbs = %v", got)
+	}
+}
+
+func TestOnlyAPiSpeaksTheVoiceProfileVerbs(t *testing.T) {
+	if v := voiceProfileVerbs(desktopProfile, voice.NewMic(), slog.Default()); v != nil {
+		t.Fatalf("desktop registers %v: its speaker is the signed-in user (#143)", slices.Collect(maps.Keys(v)))
+	}
+	v := voiceProfileVerbs(piProfile, voice.NewMic(), slog.Default())
+	if got := slices.Sorted(maps.Keys(v)); !slices.Equal(got, []string{"enroll_voice", "verify_voice"}) {
+		t.Fatalf("pi verbs = %v", got)
 	}
 }

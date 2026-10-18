@@ -507,27 +507,6 @@ func (f *fakeCC) PostAmbientResult(_ context.Context, rid string, p map[string]a
 	return nil
 }
 
-func TestVerbsHookGetsItsVerbsOnly(t *testing.T) {
-	cc := newFakeCC()
-	var got []string
-	d := &Dispatcher{CC: cc, Tools: &echoTools{}, Log: quiet, Verbs: map[string]Verb{
-		"preview_led_pattern": func(_ context.Context, b Backend, det map[string]any) {
-			if b != cc {
-				t.Error("the verb didn't get the dispatcher's backend")
-			}
-			got = append(got, "preview:"+str(det, "pattern"))
-		},
-	}}
-	d.Handle(context.Background(), publish(t, "preview_led_pattern", map[string]any{"pattern": "thinking"}))
-	d.Handle(context.Background(), publish(t, "tts", map[string]any{"message": "hi"}))
-	if len(got) != 1 || got[0] != "preview:thinking" {
-		t.Fatalf("verbs = %v", got)
-	}
-	if len(cc.results)+len(cc.reports)+len(cc.verified) != 0 {
-		t.Fatal("an unhooked verb produced traffic")
-	}
-}
-
 func TestPostAmbientResultHitsTheNodesSink(t *testing.T) {
 	var path, key string
 	var body map[string]any

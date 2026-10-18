@@ -139,6 +139,7 @@ var passRoutes = []passRoute{
 	inboxRoute("POST /api/notifications/api/v0/inbox/bulk/read"),
 	inboxRoute("POST /api/notifications/api/v0/inbox/bulk/delete"),
 	inboxRoute("GET /api/notifications/api/v0/inbox/{item_id}"),
+	inboxRoute("GET /api/notifications/api/v0/inbox/{item_id}/attachments/{attachment_id}"),
 	inboxRoute("PATCH /api/notifications/api/v0/inbox/{item_id}/read"),
 	inboxRoute("DELETE /api/notifications/api/v0/inbox/{item_id}"),
 }

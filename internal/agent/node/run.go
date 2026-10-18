@@ -46,9 +46,8 @@ type Runner struct {
 	OnMQTTConnect func(ctx context.Context, cc *CC)
 	// Packages, if set, is report_tools' installed_packages.
 	Packages func() []map[string]any
-	// Verbs, if set, are the command verbs this node handles beyond the desktop's two
-	// (Dispatcher.Verbs): the Pi profile's.
-	Verbs map[string]Verb
+	// Verbs are extra command verbs (Dispatcher.Verbs), given the connected command-center.
+	Verbs map[string]func(ctx context.Context, cc *CC, details map[string]any)
 	// NeedsK2, if set, is asked for each heartbeat's needs_k2.
 	NeedsK2 func() bool
 	// OnBeat, if set, gets jarvisd's answer to every heartbeat that went through (a pending
@@ -196,7 +195,10 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	d := &Dispatcher{CC: cc, Tools: r.Tools, Log: r.Log, Packages: r.Packages, Verbs: r.Verbs}
+	d := &Dispatcher{CC: cc, Tools: r.Tools, Log: r.Log, Packages: r.Packages, Verbs: map[string]func(context.Context, map[string]any){}}
+	for verb, h := range r.Verbs {
+		d.Verbs[verb] = func(ctx context.Context, det map[string]any) { h(ctx, cc, det) }
+	}
 	topic := "jarvis/nodes/" + r.Creds.NodeID + "/commands"
 	opts := mqtt.NewClientOptions().
 		AddBroker(broker).

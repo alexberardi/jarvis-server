@@ -275,7 +275,11 @@ func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, li
 	if voice.Supported {
 		pn.Voice = live
 	}
-	r.Verbs = pn.Verbs()
+	verbs := map[string]func(context.Context, *node.CC, map[string]any){}
+	for name, v := range pn.Verbs() {
+		verbs[name] = func(ctx context.Context, cc *node.CC, det map[string]any) { v(ctx, cc, det) }
+	}
+	addVerbs(r, verbs)
 	return piNodeConfig(pn.State, vf.bargeIn, hd, hat.Detected())
 }
 
