@@ -1,0 +1,37 @@
+[
+  {
+    "name": "scripted: a node tool call round-trips through cc",
+    "turns": [
+      {
+        "say": "turn on the kitchen lights",
+        "expect": {
+          "tool": "control_device",
+          "args": {"device_name": "Kitchen Lights", "action": "turn_on"},
+          "reply": "^Done, the kitchen lights are switched\\.$",
+          "stop": "complete"
+        }
+      }
+    ]
+  },
+  {
+    "name": "scripted: a failed tool result gets the failure line",
+    "results": {"control_device": {"success": false, "error": "unreachable"}},
+    "turns": [
+      {
+        "say": "turn off the kitchen lights",
+        "expect": {
+          "tool": "control_device",
+          "args": {"device_name": "Kitchen Lights", "action": "turn_off"},
+          "reply": "^Sorry, the kitchen lights did not respond\\.$"
+        }
+      }
+    ]
+  },
+  {
+    "name": "scripted: a plain reply and the fallback",
+    "turns": [
+      {"say": "hello there", "expect": {"no_tool": true, "reply": "^Hello from the scripted model\\.$"}},
+      {"say": "what is the meaning of life", "expect": {"no_tool": true, "reply": "^Scripted model: no rule matched that\\.$"}}
+    ]
+  }
+]
