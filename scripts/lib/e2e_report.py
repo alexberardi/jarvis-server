@@ -86,6 +86,8 @@ def markdown(rep: dict) -> str:
                 lines.append(f"![screenshot]({s})")
             if t.get("trace"):
                 lines.append(f"- trace: `{t['trace']}` (`npx playwright show-trace` in e2e/web)")
+            for a in t.get("artifacts", [])[:30]:
+                lines.append(f"- artifact: `{a}`")
             for e in t.get("console_errors", [])[:20]:
                 lines.append(f"- console: `{e[:300]}`")
             lines.append("")

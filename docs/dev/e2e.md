@@ -118,3 +118,64 @@ one auth rate limit.
   `scripts/e2e web --keep --filter 'my test'`, then
   `cd e2e/web && (source ../../.sandbox/<name>/sandbox.env; E2E_OUT=/tmp/x npx playwright test -g 'my test')`
   (the setup test also needs `E2E_SETUP_ADMIN` and `E2E_SETUP_TOKEN` from `<name>-setup`).
+
+## The voice lane (`scripts/e2e voice`)
+
+The real node software hears spoken commands and its spoken replies are checked. Why it is
+built this way: [`../decisions/2026-10-17-e2e-voice-lane.md`](../decisions/2026-10-17-e2e-voice-lane.md).
+`all` does not include it: it takes the real model and a few minutes.
+
+```sh
+scripts/e2e voice                          # the real model through the tap, WAV files as mic and speaker
+scripts/e2e voice --llm scripted           # the lane itself, on e2e/llm/voice.json (no installed jarvisd)
+scripts/e2e voice --audio pipewire         # a private PipeWire's virtual mic and speaker (barge-in too)
+scripts/e2e voice --filter 'timer|silent' --repeat 1
+scripts/e2e voice --agent-arg=--wake-threshold=0.6   # any extra `jarvis-agent listen` flag
+```
+
+It brings up one sandbox, `scripts/sandbox up --profile rich --voice --llm shared|scripted`,
+builds `cmd/jarvis-agent` and `tools/voicelane`, and runs every case in
+`e2e/voice/cases.json` against `jarvis-agent listen --profile pi`, which has its own `HOME`
+and XDG dirs under the run and the sandbox's seeded node identity. Per case:
+
+1. The mic's audio: the sandbox's TTS says the case's lines (`say`), with silence and generated
+   noise (`noise`: `pink` or `music`; `over` mixes a part over the end of the ones before it).
+2. The node hears it: wake word, endpointing, speech-to-text and the voice turn through cc,
+   the model, TTS, and the reply played to its speaker, which is recorded.
+3. The sandbox's whisper transcribes the recording, and the case checks `expect`: `outcome`
+   (default `spoken`), `reply` (a regexp on the transcript), `tool` (called by the model, from
+   the run's new `llm.jsonl` lines, or run by the node), `max_secs` (the response time), or
+   `silent` (no turn, no reply audio, no model call).
+
+`model: true` cases run `--repeat` times (default 3) and pass only when every run does. Read
+them by the regressions-only rule: a regression is 3/3 on main and 0/3 on the change. `needs:
+pipewire` cases (barge-in) are skipped with `--audio wav`, whose speaker is written at once.
+
+| case | checks |
+|---|---|
+| wake + timer | "Hey Jarvis. Set a timer for five minutes." gets a spoken reply about the timer (the Go Pi node has no timer tool yet) |
+| lights | "…Turn on the kitchen lights." gets a reply about the lights (no `control_device` for this node yet) |
+| a question | "…How many days are there in a week?" is answered seven |
+| the time, through the clock tool | "…What time is it?" calls `get_current_time` and says a time |
+| no wake word stays silent | the timer and lights commands without "Hey Jarvis" |
+| background noise stays silent | 8 s of pink noise |
+| music with talk over it stays silent | a chord loop with a sentence spoken over it |
+| barge-in stops a long reply | "Hey Jarvis" over a long story ends the turn `interrupted` (`--audio pipewire` only) |
+
+What it leaves under `.e2e/<run>/`: `voice/results.json` (the report's test shape plus each
+case's `runs`: the turn, the reply heard, the response time, the model's calls and tools, the
+failures), `voice/cases/<case>/run-N/` (`utterance.wav`, `reply.wav`, `agent.log`, `run.json`;
+`report.md` lists them under a failure), `voice.log`, and with PipeWire `voice/pipewire.log`
+and `voice/agent.log` (the one long node).
+
+- **Offline caches.** A box that can't reach GitHub's release CDN can seed
+  `$JARVIS_HARNESS_CACHE` (default `~/.cache/jarvis-harness`) with
+  `engines/whisper-b5454-bin-ubuntu-x64/` (the extracted CPU whisper-server release jarvisd
+  fetches; copied into the sandbox before it starts) and `openwakeword/` (the three wake models,
+  checked against their pinned SHA-256). Without them jarvisd and the node download as usual.
+- **PipeWire** needs `pipewire`, `wireplumber`, `pw-cli`, `pw-dump`, `pw-metadata`, `pw-play`,
+  `pw-record` and alsa-lib's `pipewire` PCM (`/etc/alsa/conf.d/50-pipewire.conf`). It runs with
+  `XDG_RUNTIME_DIR` and `PIPEWIRE_RUNTIME_DIR` set to `.e2e/<run>/voice/rt`, the pulse and
+  session-bus variables unset, and is killed when the run ends.
+- **A new case** goes in `e2e/voice/cases.json` (unknown keys are an error); with
+  `--llm scripted` it needs a rule in `e2e/llm/voice.json` too.
