@@ -582,6 +582,11 @@ func run(ctx context.Context, args []string) error {
 		// The browser extension's state is a computer's; a Pi has none to report.
 		r.Capabilities, r.Changed = heartbeatCaps(tools)
 	}
+	if !p.desktop && hat.Detected() {
+		// Before voice opens the mic: the codec may have come back from a boot without the
+		// installer's ADC filter and output levels.
+		hat.HealCodec(ctx, hat.ExecRun, log)
+	}
 	hd := openHat(hf, log)
 	defer hd.Close()
 	var nodeConfig func() map[string]any

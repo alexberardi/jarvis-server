@@ -906,8 +906,11 @@ These are **still needed**; install.sh step lines are cited:
 - config.txt edits (`dtparam=spi=on`, `i2c`, `audio=off`) (`:936-984`).
 - The modprobe index (`:991-993`).
 - `/etc/asound.conf` with `dsnoopmic` and `output` (`:1019-1064`).
-- The amixer baseline + `alsactl store` (`:1132-1167`). The runtime self-heal in
-  `N:utils/audio_volume.py:271,459` (ADC HPF, output baseline) must be ported to Go.
+- The amixer baseline + `alsactl store` (`:1132-1167`), and `/usr/local/sbin/jarvis-alsa-store`
+  with its NOPASSWD sudoers line (`:1802-1852`): the Go node's runtime self-heal persists through
+  it. The self-heal itself (`N:utils/audio_volume.py:271,459`, ADC HPF and output baseline) is
+  ported: `internal/agent/hat/codec.go`, run at every start of the Pi profile with the HAT
+  (2026-10-17; unit tests, not yet run on a Pi).
 - Groups `spi`/`gpio`/`i2c`/`bluetooth`, and linger (`:1174-1178,1611-1625`).
 - The Pulse config (`:365-536`), if D9 keeps Pulse.
 - Wi-Fi powersave off and the NM profile reconciliation (`:1208-1226,2148-2191`).
@@ -950,6 +953,8 @@ These are **still needed**; install.sh step lines are cited:
       screen, dictation or browser tools; headless (no tray, island or setup page); the settings
       snapshot's `node_config` reports the HAT and the voice/LED settings. **Done 2026-10-17**
       (unit tests; not yet run on a Pi).
+      The HAT codec self-heal (ADC HPF, output mixer baseline; §6) at every start. **Done
+      2026-10-17** (unit tests with a fake amixer; not yet run on a Pi).
    2. Heartbeat `pending_update` → updater. **Server side done 2026-10-17:** jarvisd stores
       `version_info.runtime` (`cc_nodes.runtime`, on the node response); a `runtime "go"` node
       follows this server like a desktop agent (heartbeat `server_version`, "latest" = jarvisd's
