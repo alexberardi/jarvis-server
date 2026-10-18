@@ -53,6 +53,9 @@ func setup(t *testing.T, opts ...func(*Module)) *env {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	q := queue.New(d, log)
 	q.PollInterval = 10 * time.Millisecond
+	// Cleanups run last-registered first: stop the workers (and wait for their last writes) before the
+	// db closes and the temp dir is removed, or a job still finishing races TempDir's RemoveAll.
+	t.Cleanup(func() { cancel(); q.Wait() })
 	eng := newFakeEngine()
 	t.Cleanup(eng.close)
 	res := &fakeResolver{eps: map[string]Endpoint{
