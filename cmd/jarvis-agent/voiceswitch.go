@@ -200,10 +200,5 @@ func saveVoice(path string, on bool) error {
 			return err
 		}
 	}
-	s, _, err := settings.Load(path)
-	if err != nil {
-		return err
-	}
-	s.Voice = &on
-	return settings.Save(path, s)
+	return settings.Update(path, func(s *settings.Settings) error { s.Voice = &on; return nil })
 }

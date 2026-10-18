@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
 
@@ -19,6 +21,7 @@ import (
 type hatFlags struct {
 	mode       string
 	brightness int
+	noLEDs     bool
 	poweroff   bool
 }
 
@@ -26,6 +29,7 @@ func addHatFlags(fs *flag.FlagSet) *hatFlags {
 	h := &hatFlags{}
 	fs.StringVar(&h.mode, "hat", "auto", `ReSpeaker 2-mics HAT LEDs and button: "auto" (a Raspberry Pi with the HAT), "on" or "off"`)
 	fs.IntVar(&h.brightness, "led-brightness", 100, "HAT LED brightness, percent (the Python node's led_brightness_percent)")
+	fs.BoolVar(&h.noLEDs, "no-leds", false, "keep the HAT LEDs dark (the Python node's led_enabled false)")
 	fs.BoolVar(&h.poweroff, "button-poweroff", true, "holding the HAT button 3 s powers the Pi off (sudo -n systemctl poweroff), as the Python node does")
 	return h
 }
@@ -59,6 +63,7 @@ func openHat(f *hatFlags, log *slog.Logger) *hatDevices {
 	}
 	h := &hatDevices{leds: hat.NewLEDs(strip, log)}
 	h.leds.SetBrightness(f.brightness)
+	h.leds.SetEnabled(!f.noLEDs)
 	h.button = &hat.Button{LEDs: h.leds, Log: log,
 		OnShortPress: func() {
 			// Python speaks queued alerts here; the Go node has no alert queue yet.
@@ -252,21 +257,44 @@ func hatCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
+// piState is the node settings the Pi starts with: its flags, after agent.json.
+func piState(vf *voiceFlags, hf *hatFlags) pinode.State {
+	return pinode.State{WakeThreshold: vf.threshold, WakeAck: !vf.noChimes, FollowUpListen: vf.followUp,
+		FollowUpSilence: vf.followSilence, LEDEnabled: hf.mode != "off" && !hf.noLEDs, LEDBrightness: hf.brightness}
+}
+
+// wirePiNode gives the runner the Pi's verbs (update_node_config, preview_led_pattern,
+// measure_ambient_noise; internal/agent/pinode): changes go to the HAT's LEDs (hd, nil
+// without one), to the voice pipeline through live, and into agent.json at path. It returns
+// the settings snapshot's node_config, which reports them.
+func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, live *voice.Live, path string, log *slog.Logger) func() map[string]any {
+	pn := pinode.New(piState(vf, hf), path, log)
+	if hd != nil && hd.leds != nil {
+		pn.LEDs = hd.leds
+	}
+	if voice.Supported {
+		pn.Voice = live
+	}
+	r.Verbs = pn.Verbs()
+	return piNodeConfig(pn.State, hd, hat.Detected())
+}
+
 // piNodeConfig is the Pi profile's settings-snapshot node_config: the HAT (detected: hat.Detected;
-// the LEDs and button this agent actually opened) and the voice and LED settings it runs with,
-// under the Python node's keys (settings_snapshot_service.py build_snapshot). Keys the Go node
-// has no setting for yet (silence thresholds, barge-in, maintenance restart, update consent) are
-// left out.
-func piNodeConfig(vf *voiceFlags, hf *hatFlags, hd *hatDevices, detected bool) func() map[string]any {
+// the LEDs and button this agent actually opened) and the voice and LED settings it runs with
+// now (state: the flags, then the app's changes), under the Python node's keys
+// (settings_snapshot_service.py build_snapshot). Keys the Go node has no setting for yet
+// (silence thresholds, barge-in, maintenance restart, update consent) are left out.
+func piNodeConfig(state func() pinode.State, hd *hatDevices, detected bool) func() map[string]any {
 	return func() map[string]any {
 		leds := hd != nil && hd.leds != nil
+		st := state()
 		return map[string]any{
-			"wake_word_threshold":        vf.threshold,
-			"wake_ack_audio_enabled":     !vf.noChimes,
-			"follow_up_listen_seconds":   vf.followUp,
-			"follow_up_silence_duration": vf.followSilence,
-			"led_enabled":                hf.mode != "off",
-			"led_brightness_percent":     hf.brightness,
+			"wake_word_threshold":        st.WakeThreshold,
+			"wake_ack_audio_enabled":     st.WakeAck,
+			"follow_up_listen_seconds":   st.FollowUpListen,
+			"follow_up_silence_duration": st.FollowUpSilence,
+			"led_enabled":                st.LEDEnabled,
+			"led_brightness_percent":     st.LEDBrightness,
 			"hardware": map[string]any{
 				"hat_detected":        detected || leds,
 				"led_chain_available": leds,

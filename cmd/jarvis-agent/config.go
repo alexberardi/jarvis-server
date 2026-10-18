@@ -15,11 +15,9 @@ import (
 // flags the command line gave alone. A broken file stops the agent: running with a choice such
 // as confirm_dictation silently dropped would be worse.
 func applySettings(fs *flag.FlagSet, path string, log *slog.Logger) error {
-	if path == "" {
-		var err error
-		if path, err = settings.DefaultPath(); err != nil {
-			return err
-		}
+	path, err := settingsPath(path)
+	if err != nil {
+		return err
 	}
 	s, unknown, err := settings.Load(path)
 	if err != nil {
@@ -29,6 +27,14 @@ func applySettings(fs *flag.FlagSet, path string, log *slog.Logger) error {
 		log.Warn("config file: ignoring unknown keys", "path", path, "keys", unknown)
 	}
 	return s.Apply(fs)
+}
+
+// settingsPath is run's --config, or the default file.
+func settingsPath(path string) (string, error) {
+	if path != "" {
+		return path, nil
+	}
+	return settings.DefaultPath()
 }
 
 // configCmd shows and edits the settings file: show (the default), path, set KEY VALUE,

@@ -37,7 +37,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
-	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
@@ -579,15 +578,27 @@ func run(ctx context.Context, args []string) error {
 	hd := openHat(hf, log)
 	defer hd.Close()
 	var nodeConfig func() map[string]any
+	var live *voice.Live // the Pi's: the app's settings and noise measurements reach the pipeline
 	if !p.desktop {
-		nodeConfig = piNodeConfig(vf, hf, hd, hat.Detected())
+		live = voice.NewLive()
+		sp, err := settingsPath(*f.config)
+		if err != nil {
+			return err
+		}
+		nodeConfig = wirePiNode(r, vf, hf, hd, live, sp, log)
 	}
 	wireNodeSettings(r, st, tools, nodeConfig, log)
 	wirePackages(r, tf.pkgs, log)
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
 	// toggle turns it on and off while the agent runs (voiceSwitch).
 	sw := newVoiceSwitch(*voiceOn && voice.Supported, log)
-	sw.load = func(ctx context.Context) (*voiceStack, error) { return loadVoice(ctx, vf, log) }
+	sw.load = func(ctx context.Context) (*voiceStack, error) {
+		vs, err := loadVoice(ctx, vf, log)
+		if vs != nil {
+			vs.live = live
+		}
+		return vs, err
+	}
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		_ = voice.Serve(ctx, vs.options(cc, served, log, nil))
