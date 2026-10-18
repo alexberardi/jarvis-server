@@ -40,6 +40,9 @@ const (
 	// settingOpenRegistration lets /auth/register create accounts without an invite code once
 	// a superuser exists (decision 2026-10-17-close-open-registration).
 	settingOpenRegistration = "auth.open_registration"
+	// settingRevokeFamilyOnReuse revokes a refresh family when a rotated token is replayed
+	// after the grace window (decision 2026-10-17-refresh-family-revocation).
+	settingRevokeFamilyOnReuse = "auth.token.revoke_family_on_reuse"
 )
 
 var noScope = settings.Scope{}
@@ -54,6 +57,11 @@ func Definitions() []settings.Definition {
 		{Key: settingGraceSeconds, Category: "auth.token", Type: settings.Int, Default: int64(10),
 			Description: "Grace window (s) in which a benign double-submit of a just-rotated refresh token re-gets the cached successor instead of being rejected.",
 			EnvFallback: "REFRESH_TOKEN_GRACE_SECONDS"},
+		// Off until the mobile app's foreground stops replaying a refresh token the
+		// background task already rotated: on, that replay would sign the phone out.
+		{Key: settingRevokeFamilyOnReuse, Category: "auth.token", Type: settings.Bool, Default: false,
+			Description: "Revoke the whole refresh family (sign that device out) when a rotated refresh token is replayed after the grace window. A replay inside the window that the server forgot (restart) never revokes. Leave off until every mobile client re-reads its stored token before refreshing: older apps replay stale tokens on resume and would be signed out.",
+			EnvFallback: "REFRESH_TOKEN_REVOKE_FAMILY_ON_REUSE"},
 		// Deviation: the legacy default was HS256. Fresh installs mint RS256; an imported
 		// settings row keeps whatever the old install used.
 		{Key: settingAlgorithm, Category: "auth", Type: settings.String, Default: authn.RS256,
@@ -94,9 +102,6 @@ type Module struct {
 	InProcess []string
 	// RateLimit tunes the auth flood guard.
 	RateLimit RateLimit
-	// RevokeFamilyOnReuse revokes a whole refresh family when a rotated token is replayed
-	// outside the grace window (legacy REFRESH_TOKEN_REVOKE_FAMILY_ON_REUSE, default off).
-	RevokeFamilyOnReuse bool
 	// TempPasswordTTL is the default lifetime of admin-issued temporary passwords (24 h).
 	TempPasswordTTL time.Duration
 	// PurgeTimeout bounds each legacy downstream purge call (5 s).

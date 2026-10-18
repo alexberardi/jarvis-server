@@ -49,6 +49,7 @@ func (s *Service) Callbacks() map[string]CallbackFunc {
 		CallbackDiscard:     s.handleDiscard,
 		CallbackApproveRepl: s.handleApproveReplan,
 		CallbackStop:        s.handleStop,
+		CallbackApproveStep: s.handleApproveStep,
 	}
 }
 
@@ -128,11 +129,26 @@ func (s *Service) handleApprove(ctx context.Context, c CallbackContext) Callback
 		return fail("This errand has no steps to run.")
 	}
 	wfID := hexID("wf_")
+	raced, err := s.launch(ctx, p, wfID, "errand", "")
+	if err != nil {
+		s.log().Error("errands: launch run", "plan", p.ID, "err", err)
+		return fail("I couldn't start that errand — try again in a bit.")
+	}
+	if raced {
+		return handled(c.HouseholdID, "This errand is already launched.")
+	}
+	s.log().Info("errands: plan launched", "plan", p.ID, "workflow", wfID)
+	return CallbackResult{Success: true}
+}
+
+// launch moves a draft plan to launched and spawns its run (state waiting, no signal) of the
+// given kind, with its first drive queued in the same transaction. raced: the plan was no
+// longer a draft, and nothing was created.
+func (s *Service) launch(ctx context.Context, p *planRow, wfID, kind, inboxID string) (raced bool, err error) {
 	now := dbTime(s.now())
-	raced := false
 	err = s.DB.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE cc_errand_plans SET state = 'launched', workflow_id = ?, confirmed_at = ?,
-			updated_at = ? WHERE id = ? AND household_id = ? AND state = 'draft'`, wfID, now, now, p.ID, c.HouseholdID)
+			updated_at = ? WHERE id = ? AND household_id = ? AND state = 'draft'`, wfID, now, now, p.ID, p.HouseholdID)
 		if err != nil {
 			return err
 		}
@@ -141,26 +157,21 @@ func (s *Service) handleApprove(ctx context.Context, c CallbackContext) Callback
 			return nil
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO cc_workflows (id, kind, household_id, user_id, node_id, goal, title,
-			steps, cursor, results_json, revision, state, waiting_on, created_at, updated_at)
-			VALUES (?, 'errand', ?, ?, ?, ?, ?, ?, 0, '[]', 1, 'waiting', NULL, ?, ?)`,
-			wfID, c.HouseholdID, nullInt(p.UserID), nullText(p.NodeID), firstNonEmpty(p.Goal, p.Summary),
-			nullText(firstNonEmpty(p.Summary, p.Goal)), stepsDumps(p.Steps), now, now); err != nil {
+			steps, cursor, results_json, revision, state, waiting_on, inbox_item_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, '[]', 1, 'waiting', NULL, ?, ?, ?)`,
+			wfID, kind, p.HouseholdID, nullInt(p.UserID), nullText(p.NodeID), firstNonEmpty(p.Goal, p.Summary),
+			nullText(firstNonEmpty(p.Summary, p.Goal)), stepsDumps(p.Steps), nullText(inboxID), now, now); err != nil {
 			return err
 		}
 		b, _ := json.Marshal(resumeJob{WorkflowID: wfID, Step: -1, Kind: signalStart})
 		_, err = s.Queue.EnqueueTx(ctx, tx, JobResume, b, queue.Options{})
 		return err
 	})
-	if err != nil {
-		s.log().Error("errands: launch run", "plan", p.ID, "err", err)
-		return fail("I couldn't start that errand — try again in a bit.")
-	}
-	if raced {
-		return handled(c.HouseholdID, "This errand is already launched.")
+	if err != nil || raced {
+		return raced, err
 	}
 	s.Queue.Notify(JobResume)
-	s.log().Info("errands: plan launched", "plan", p.ID, "workflow", wfID)
-	return CallbackResult{Success: true}
+	return false, nil
 }
 
 // cancelWaiting atomically cancels a waiting run (only a parked run is safe to cancel; a
@@ -274,7 +285,68 @@ func (s *Service) handleApproveReplan(ctx context.Context, c CallbackContext) Ca
 	return CallbackResult{Success: true}
 }
 
-// handleStop is the delta card's Stop: cancel the waiting run here.
+// dataInt reads an int a card sent as a JSON number, an int or a numeric string.
+func dataInt(d map[string]any, k string) (int, bool) {
+	switch x := d[k].(type) {
+	case float64:
+		if x == math.Trunc(x) && !math.IsInf(x, 0) {
+			return int(x), true
+		}
+	case json.Number:
+		if n, err := x.Int64(); err == nil {
+			return int(n), true
+		}
+	case int:
+		return x, true
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// handleApproveStep is the step card's Approve: mark the parked step approved and resume the
+// run from it.
+func (s *Service) handleApproveStep(ctx context.Context, c CallbackContext) CallbackResult {
+	if !s.Available() {
+		return fail("Errands are unavailable right now.")
+	}
+	id := dataStr(c.Data, "workflow_id")
+	if id == "" {
+		return fail("Missing workflow_id")
+	}
+	step, ok := dataInt(c.Data, "step")
+	if !ok {
+		return fail("Missing step")
+	}
+	w, err := s.workflowIn(ctx, id, c.HouseholdID)
+	if err != nil {
+		return fail("Couldn't load the errand.")
+	}
+	if w == nil {
+		return fail("Errand not found")
+	}
+	if w.State != "waiting" || w.WaitingOn != signalApproval || w.Cursor != step || step < 0 || step >= len(w.Steps) {
+		return handled(c.HouseholdID, "That step was already handled.")
+	}
+	if !revisionsMatch(c.Data["revision"], w.Revision) {
+		return fail("This errand was updated — open the latest card.")
+	}
+	w.Steps[step].Approved = true
+	if err := s.saveSteps(ctx, w.ID, w.Steps, true); err != nil {
+		return fail("Couldn't approve the step.")
+	}
+	if err := s.enqueueResume(ctx, resumeJob{WorkflowID: w.ID, Step: step - 1, Kind: signalConfirm}); err != nil {
+		return fail("Couldn't approve the step.")
+	}
+	label := firstNonEmpty(w.Steps[step].Label, strings.TrimSpace(w.Steps[step].Command))
+	s.log().Info("errands: step approved", "workflow", w.ID, "step", step)
+	return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, "👍 Approved", "“"+label+"” will run now.")}
+}
+
+// handleStop is the delta card's (and the "Ran on its own" card's) Stop: cancel the waiting run
+// here; a running autorun run stops before its next step.
 func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackResult {
 	if s.DB == nil {
 		return fail("Errands are unavailable right now.")
@@ -285,6 +357,11 @@ func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackRes
 	}
 	if w == nil {
 		return CallbackResult{Success: true}
+	}
+	if w.Kind == KindAutorun && w.State == "running" {
+		s.stopRequested.Store(w.ID, c.UserID)
+		return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, "🛑 Stopping the errand",
+			"I'll stop “"+w.DisplayTitle()+"” before its next step.")}
 	}
 	if w.State == "waiting" {
 		ok, err := s.cancelWaiting(ctx, w.ID)
@@ -298,6 +375,10 @@ func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackRes
 			}
 			_, _ = s.DB.Write.ExecContext(ctx, `UPDATE cc_errand_plans SET state = 'cancelled', updated_at = ?
 				WHERE workflow_id = ?`, dbTime(s.now()), w.ID)
+			if w.Kind == KindAutorun {
+				s.updateRanCard(ctx, w, w.Results, "stopped", "")
+				s.recordStopped(ctx, w, &c.UserID)
+			}
 			return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, "🗑️ Errand stopped",
 				firstNonEmpty(w.Title, w.Goal, "The errand")+" stopped."+note)}
 		}

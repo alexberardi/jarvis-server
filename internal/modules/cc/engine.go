@@ -132,7 +132,6 @@ func filterMsgs(msgs []chatMsg, drop func(chatMsg) bool) []chatMsg {
 // runEngine executes the loop. It returns the result and the working history.
 func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, []chatMsg) {
 	conv := in.conv
-	p := conv.provider
 	msgs := m.visionGuard(ctx, in.msgs)
 	hh := conv.householdID
 
@@ -145,10 +144,10 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		msgs = append(append([]chatMsg(nil), head...), rest...)
 	}
 
-	native := p.SupportsNativeTools()
+	native := conv.mode.Native()
 	var nativeTools []llm.Tool
 	if native {
-		nativeTools = llmTools(prompts.NativeTools(conv.tools))
+		nativeTools = nativePayload(conv.tools)
 	}
 	smallMode := m.settings.Bool(ctx, settingSmallModelMode, settings.Scope{})
 	budget := m.thinkingBudget(ctx, hh)
@@ -183,7 +182,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		if native {
 			req.Tools = nativeTools
 			req.ToolChoice = json.RawMessage(`"auto"`)
-		} else if rf := p.ResponseFormat(); rf != nil {
+		} else if rf := conv.mode.ResponseFormat(); rf != nil {
 			t, _ := rf.Get("type")
 			ts, _ := t.(string)
 			req.ResponseFormat = &llm.ResponseFormat{Type: ts}
@@ -215,18 +214,18 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					finish = parse.FinishToolCalls
 				}
 			}
-		} else {
-			content := raw
-			if t, ok := p.ParseResponse(raw); ok {
-				content = t
-			}
-			pr := parse.ParseToolCalls(content)
-			finish, calls, message = pr.FinishReason, pr.ToolCalls, pr.Message
+			// A call llama-server couldn't parse (no tags, or tags in the content) is
+			// recovered as on the text path, but only when every call names an offered tool.
 			if finish == parse.FinishStop {
-				if c, prose, ok := trailingBareCall(message, conv.hasTool); ok {
-					finish, calls, message = parse.FinishToolCalls, []parse.ToolCall{c}, prose
+				if f, c, msg := recoverTextCalls(raw, conv.hasTool); f == parse.FinishToolCalls && allOffered(c, conv.hasTool) {
+					finish, calls, message = f, c, msg
+					for _, tc := range c {
+						m.deps.Log.Info("cc: native_call_rescued", "conversation_id", conv.id, "tool", tc.Function.Name)
+					}
 				}
 			}
+		} else {
+			finish, calls, message = recoverTextCalls(raw, conv.hasTool)
 		}
 		tr.span(llmName, "llm_proxy", llmStart, llmEnd, nil, map[string]any{"prompt_tokens": resp.Usage.PromptTokens,
 			"completion_tokens": resp.Usage.CompletionTokens, "finish_reason": finish, "output_preview": outputPreview(raw)})
@@ -247,7 +246,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				for len(msgs) > 0 && isNag(msgs[len(msgs)-1], nagMustCall) {
 					msgs = msgs[:len(msgs)-1]
 				}
-				restored := cleanForTTS(p.SanitizeText(poppedProse))
+				restored := cleanForTTS(prompts.SanitizeText(poppedProse))
 				msgs = append(msgs, chatMsg{Role: "assistant", Content: restored})
 				return withReasoning(engineResult{Stop: stopComplete, Message: restored}), msgs
 			}
@@ -274,7 +273,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			// error is the answer, and re-arming on every continue looped the node's tool), and
 			// it fires at most once a turn.
 			// A dedupe nudge counts as using the tool: it asked for an answer from the results above.
-			force := conv.forceTools && !in.noForce && !deduped && !toolRanThisTurn(msgs)
+			force := conv.mode.ForceTools && !in.noForce && !deduped && !toolRanThisTurn(msgs)
 			retries := countNags(msgs, nagMustCall)
 			if force && retries < maxMustCallRetries && !doubleChecked && !terminal && in.utterance != "" {
 				force = m.forceGuardArmed(conv, in.utterance, raw, message)
@@ -307,7 +306,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			}
 			cleaned := message
 			if message != "" {
-				cleaned = cleanForTTS(p.SanitizeText(message))
+				cleaned = cleanForTTS(prompts.SanitizeText(message))
 			}
 			return withReasoning(engineResult{Stop: stopComplete, Message: cleaned, EndOfExchange: exchange}), msgs
 
@@ -411,7 +410,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				continue
 			}
 			if len(clientCalls) > 0 {
-				if conv.forceTools && in.utterance != "" && !native {
+				if conv.mode.ForceTools && in.utterance != "" && !native {
 					clientCalls = m.refineParams(ctx, conv, clientCalls, in.utterance)
 				}
 				if name, key, since, dup := m.findDuplicate(ctx, conv, clientCalls, nudged); dup {
@@ -457,7 +456,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				// ack is the only true thing to say yet. A composed reply turned "I'm planning
 				// that errand" into "I've got the timer set" while the plan later failed, and it
 				// cost a second live call (the demo dry run). Say the ack as is.
-				ack = cleanForTTS(p.SanitizeText(ack))
+				ack = cleanForTTS(prompts.SanitizeText(ack))
 				msgs = append(msgs, chatMsg{Role: "assistant", Content: ack})
 				return withReasoning(engineResult{Stop: stopComplete, Message: ack}), msgs
 			}
@@ -547,9 +546,37 @@ func normalizeNativeCalls(raw []llm.ToolCall) []parse.ToolCall {
 		if id == "" {
 			id = parse.NewCallID()
 		}
-		out = append(out, parse.ToolCall{ID: id, Type: "function", Function: parse.FunctionCall{Name: c.Function.Name, Arguments: args}})
+		args, failure := takeFailureMessage(args)
+		out = append(out, parse.ToolCall{ID: id, Type: "function", Function: parse.FunctionCall{Name: c.Function.Name, Arguments: args},
+			FailureMessage: failure})
 	}
 	return out
+}
+
+// recoverTextCalls is the text path's reading of a reply: tagged calls (ParseToolCalls), else
+// one bare call at the end of the prose (trailingBareCall, #56).
+func recoverTextCalls(raw string, offered func(string) bool) (string, []parse.ToolCall, string) {
+	content := raw
+	if t, ok := prompts.ParseResponse(raw); ok {
+		content = t
+	}
+	pr := parse.ParseToolCalls(content)
+	finish, calls, message := pr.FinishReason, pr.ToolCalls, pr.Message
+	if finish == parse.FinishStop {
+		if c, prose, ok := trailingBareCall(message, offered); ok {
+			finish, calls, message = parse.FinishToolCalls, []parse.ToolCall{c}, prose
+		}
+	}
+	return finish, calls, message
+}
+
+func allOffered(calls []parse.ToolCall, offered func(string) bool) bool {
+	for _, c := range calls {
+		if !offered(c.Function.Name) {
+			return false
+		}
+	}
+	return len(calls) > 0
 }
 
 // forceGuardArmed decides whether the force-tools guard stays armed for a prose reply

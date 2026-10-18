@@ -278,11 +278,11 @@ func TestCallbackFailFast(t *testing.T) {
 func TestServerCallbackWiring(t *testing.T) {
 	ce := newCBEnv(t)
 	want := []string{
-		"errand.approve_errand_plan", "errand.approve_replan", "errand.discard_errand_plan", "errand.refine_errand_plan",
+		"errand.approve_errand_plan", "errand.approve_errand_step", "errand.approve_replan", "errand.discard_errand_plan", "errand.refine_errand_plan",
 		"errand.stop_errand", "jarvis.proposable_action.dismiss", "jarvis.proposable_action.execute",
 		"jarvis.proposable_action.suppress", "jarvis.signal_automation.dismiss", "jarvis.signal_automation.execute",
 		"make_phone_call.cancel_call", "make_phone_call.confirm_call", "make_phone_call.escalation_answer",
-		"schedule.cancel_schedule",
+		"schedule.cancel_schedule", "watch.cancel_watch", "watch.pause_watch", "watch.resume_watch",
 	}
 	if got := ce.m.ServerCallbackNames(); !slices.Equal(got, want) {
 		t.Fatalf("got %v", got)
@@ -297,6 +297,7 @@ func TestServerCallbackWiring(t *testing.T) {
 		{"errand", "stop_errand", map[string]any{"workflow_id": "missing"}, "completed", ""},
 		{"make_phone_call", "confirm_call", map[string]any{}, "failed", "Missing session_id"},
 		{"schedule", "cancel_schedule", map[string]any{}, "failed", "No schedule to cancel."},
+		{"watch", "pause_watch", map[string]any{"watch_id": "missing"}, "completed", ""},
 		{"jarvis.proposable_action", "dismiss", map[string]any{}, "completed", ""},
 		{"jarvis.signal_automation", "execute", map[string]any{}, "failed", "malformed automation action"},
 	}

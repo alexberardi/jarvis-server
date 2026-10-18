@@ -36,6 +36,10 @@ var expectedTables = []string{
 	"cc_callback_jobs",
 	// autonomy (docs/autonomy/PLAN.md)
 	"cc_autonomy_events", "cc_tool_rules",
+	// prompts as text (plan P2)
+	"cc_household_prompts",
+	// watches (autonomy P2)
+	"cc_watches",
 }
 
 // Cut by decisions in docs/cc/QUESTIONS.md; they must never come back by accident.

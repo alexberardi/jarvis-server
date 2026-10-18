@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 )
 
 // Engine names, as /v1/providers and the request's `provider` field spell them.
@@ -358,14 +360,17 @@ func (a *AppleVision) Recognize(ctx context.Context, img Image, o Options) (Resu
 	return res, nil
 }
 
-// --- LLM vision through an OpenAI-compatible endpoint ---
+// --- LLM vision through jarvisd's llm module ---
 
-// LLMVision asks a vision model to transcribe the image (legacy LLMProxyVisionProvider, model
-// "background"). During the strangler phase the endpoint is the legacy llm-proxy.
+// LLM is the in-process chat completion the module uses (the llm module's Service).
+type LLM interface {
+	Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error)
+}
+
+// LLMVision asks a vision model to transcribe the image (legacy LLMProxyVisionProvider, label
+// "background").
 type LLMVision struct {
-	URL, AppID, AppKey string
-	Model              string // default "background"
-	Client             *http.Client
+	LLM LLM
 	// TimeoutFn is the per-image timeout (the module reads ocr.llm_vision_timeout_seconds);
 	// nil: defaultLLMVisionTimeout.
 	TimeoutFn func(context.Context) time.Duration
@@ -387,7 +392,7 @@ func (l *LLMVision) timeout(ctx context.Context) time.Duration {
 func (l *LLMVision) Name() string { return EngineLLMVision }
 
 func (l *LLMVision) Available(context.Context) bool {
-	return l.URL != "" && l.AppID != "" && l.AppKey != ""
+	return l.LLM != nil
 }
 
 const llmOCRPrompt = `OCR this image and extract all text. Return the result as JSON in this exact format:
@@ -411,27 +416,25 @@ func (l *LLMVision) Recognize(ctx context.Context, img Image, o Options) (Result
 	if ct == "" {
 		ct = "image/png"
 	}
-	model := l.Model
-	if model == "" {
-		model = "background"
-	}
-	content, err := chatCompletion(ctx, l.Client, l.URL, l.AppID, l.AppKey, l.timeout(ctx), map[string]any{
-		"model": model,
-		"messages": []any{map[string]any{"role": "user", "content": []any{
-			map[string]any{"type": "text", "text": prompt},
-			map[string]any{"type": "image_url", "image_url": map[string]any{
-				"url": "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(img.Data)}},
-		}}},
-		"max_tokens":      4096,
-		"response_format": map[string]any{"type": "json_object"},
+	cctx, cancel := context.WithTimeout(ctx, l.timeout(ctx))
+	defer cancel()
+	resp, err := l.LLM.Chat(cctx, llm.ChatRequest{
+		Label: llm.LabelBackground,
+		Messages: []llm.Message{{Role: "user", Content: &llm.Content{Parts: []llm.Part{
+			{Type: "text", Text: prompt},
+			{Type: "image_url", ImageURL: &llm.ImageURL{URL: "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(img.Data)}},
+		}}}},
+		MaxTokens:      intPtr(4096),
+		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 		// Thinking off whatever the label's default: transcription needs no reasoning, and
 		// the background label thinks without limit, so a thinking model (Qwen3.5-9B) spent
 		// all 4096 tokens reasoning and answered nothing (an empty transcription).
-		"reasoning_budget": 0,
+		ReasoningBudget: intPtr(0),
 	})
 	if err != nil {
 		return Result{}, err
 	}
+	content := strings.TrimSpace(resp.Content)
 	text := content
 	var parsed struct {
 		Page1 struct {
@@ -449,43 +452,4 @@ func (l *LLMVision) Recognize(ctx context.Context, img Image, o Options) (Result
 	return res, nil
 }
 
-// chatCompletion posts an OpenAI-compatible chat request with app credentials and returns
-// the first choice's content, trimmed.
-func chatCompletion(ctx context.Context, client *http.Client, baseURL, appID, appKey string, timeout time.Duration, body any) (string, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return "", err
-	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/v1/chat/completions", bytes.NewReader(raw))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Jarvis-App-Id", appID)
-	req.Header.Set("X-Jarvis-App-Key", appKey)
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to reach LLM endpoint: %w", err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("LLM endpoint returned %d: %s", resp.StatusCode, truncRunes(string(data), 200))
-	}
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(data, &out); err != nil || len(out.Choices) == 0 {
-		return "", errors.New("invalid response format from LLM endpoint")
-	}
-	return strings.TrimSpace(out.Choices[0].Message.Content), nil
-}
+func intPtr(n int) *int { return &n }

@@ -93,6 +93,9 @@ func NewDeepResearch(jobs JobEnqueuer, enabled WebSearchGate, log *slog.Logger) 
 func (t *DeepResearch) Name() string               { return "deep_research" }
 func (t *DeepResearch) Definition() *pyjson.Object { return LegacyDefinition("deep_research") }
 
+// A read-only lookup: may run in the background without a tap (A7).
+func (*DeepResearch) RunWithoutConfirmation() bool { return true }
+
 func (t *DeepResearch) Execute(ctx context.Context, call Call, turn Turn) (any, error) {
 	query := call.Str("query")
 	depth := call.Str("depth")

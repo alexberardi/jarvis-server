@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
@@ -15,6 +16,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/watches"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
@@ -56,7 +58,7 @@ func Definitions() []settings.Definition {
 	return markHouseholdControllable(routineDefinitions(slices.Concat(nodeDefinitions(),
 		voiceDefinitions(prompts.DefaultPersona), followUpGateDefinitions(), packageDefinitions(), smartHomeDefinitions(),
 		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(),
-		householdSettingDefinitions(), compactionDefinitions())))
+		householdSettingDefinitions(), compactionDefinitions(), watchDefinitions())))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -134,6 +136,8 @@ type Module struct {
 	HouseholdClock HouseholdTimezone
 	// WebSearch replaces DuckDuckGo for quick_search / deep_research (tests).
 	WebSearch servertools.WebSearcher
+	// WatchFetcher replaces the SSRF-guarded fetcher a web watch reads its page with (tests).
+	WatchFetcher WatchFetcher
 	// DefaultPromptProvider names the prompt provider when llm.prompt_provider is unset (e.g.
 	// the live model's catalog entry). Nil: an unset setting is an error (D11).
 	DefaultPromptProvider func(ctx context.Context) string
@@ -168,15 +172,22 @@ type Module struct {
 	resets   *resetStore
 	ambient  *ambientStore
 	releases *releaseCache
+	// lastInputs is each node's latest warmup prompt inputs (household_prompt.go).
+	lastInputs lastInputs
 
-	convs    *convCache
-	signals  *convSignals
-	vocab    sttVocab // desktop nodes' app names for whisper (stt_vocabulary.go)
-	enroll   *enrollments
-	pairings *pairingStore // device-code pairing (pairing.go)
-	tools    *servertools.Registry
-	dateKeys []string      // DT_KEYS override (tests); nil = the shared vocabulary
-	lanAddr  func() string // this host's LAN address override (tests); nil = netaddr.LANAddr
+	convs   *convCache
+	signals *convSignals
+	// wakeSem and voiceSem bound the wake verifications and follow-up voice checks running
+	// beside node transcriptions (whisper and the speaker model are shared): one more is
+	// dropped, fail open, and counted.
+	wakeSem, voiceSem     chan struct{}
+	wakeDrops, voiceDrops atomic.Int64
+	vocab                 sttVocab // desktop nodes' app names for whisper (stt_vocabulary.go)
+	enroll                *enrollments
+	pairings              *pairingStore // device-code pairing (pairing.go)
+	tools                 *servertools.Registry
+	dateKeys              []string      // DT_KEYS override (tests); nil = the shared vocabulary
+	lanAddr               func() string // this host's LAN address override (tests); nil = netaddr.LANAddr
 	// localIPs overrides this server's own addresses for "this computer" (tests; thisdevice.go).
 	localIPs func() []net.IP
 
@@ -195,6 +206,7 @@ type Module struct {
 	// Autonomy (docs/autonomy/PLAN.md): the activity log and the rule policy (P1 fills Rules).
 	autonomy *policy.Store
 	policy   *policy.Policy
+	watches  *watches.Store // watches (docs/autonomy/PLAN.md §2, watches.go)
 
 	// 5d interactive callbacks (callbacks.go): the static server-callback map and result waiters.
 	cbOnce sync.Once
@@ -247,6 +259,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.releases = &releaseCache{}
 	m.convs = newConvCache(m.now)
 	m.signals = newConvSignals(m.now)
+	m.wakeSem = make(chan struct{}, wakeVerifyLimit)
+	m.voiceSem = make(chan struct{}, voiceCheckLimit)
 	m.enroll = newEnrollments()
 	m.pairings = newPairingStore()
 	if m.tools == nil {
@@ -359,6 +373,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerRoutines(mux)
 	// Signals, proposals and the attention broker (doc 10).
 	m.registerSignals(mux)
+	// Watches (docs/autonomy/PLAN.md §2).
+	m.registerWatches(mux)
 	// Phone calls, phonebook and call context (doc 11).
 	m.registerPhone(mux)
 	// Autonomy activity log and policy (docs/autonomy/PLAN.md §0).
@@ -369,6 +385,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.registerCallbacks(mux)
 	// Household settings from mobile (doc 13 §3.7).
 	m.registerHouseholdSettings(mux)
+	m.registerHouseholdPrompt(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -411,6 +428,9 @@ func (m *Module) Start(ctx context.Context) error {
 	if err := m.startSignals(ctx); err != nil {
 		return err
 	}
+	if err := m.startWatches(ctx); err != nil {
+		return err
+	}
 	if err := m.startPhone(ctx); err != nil {
 		return err
 	}
@@ -450,6 +470,11 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 	}
 	if err := m.purgeSignals(ctx, tx, userID); err != nil {
 		return err
+	}
+	if m.watches != nil {
+		if err := m.watches.PurgeUser(ctx, tx, userID); err != nil {
+			return err
+		}
 	}
 	if m.autonomy != nil {
 		if err := m.autonomy.PurgeUser(ctx, tx, userID); err != nil {

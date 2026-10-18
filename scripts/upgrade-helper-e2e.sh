@@ -123,17 +123,22 @@ for t in v0.0.1 v0.0.2 v0.0.3 v0.0.4; do publish "$t"; done
 # The fake GitHub. On windows-latest it once stopped answering between start-up and the first
 # update check (connection refused, run 37859290598 and later), so: its output goes to a log
 # that fail() prints, start-up waits until it answers, and srv_up restarts it before each step
-# that needs it.
+# that needs it. A cold windows-latest python can also take well over 10 s to start answering
+# (an empty srv.log after 10 s, run 39077286540), so start-up waits up to 60 s, runs python
+# unbuffered so the log shows what it did, and fails at once if the server exits.
 SRV_LOG="$WR/srv.log"
 srv_start() {
-  "$PY" -m http.server "$API_PORT" --bind 127.0.0.1 --directory "$WR/srv" >>"$SRV_LOG" 2>&1 &
+  "$PY" -u -m http.server "$API_PORT" --bind 127.0.0.1 --directory "$WR/srv" >>"$SRV_LOG" 2>&1 &
   SRV_PID=$!
-  for _ in $(seq 1 50); do
+  local deadline=$((SECONDS + ${SRV_START_TIMEOUT:-60}))
+  while [ "$SECONDS" -lt "$deadline" ]; do
     curl -fsS --max-time 2 -o /dev/null "$API/repos/alexberardi/jarvis-server/releases/tags/v0.0.1" 2>/dev/null && return 0
+    kill -0 "$SRV_PID" 2>/dev/null || fail "the fake release server exited (pid $SRV_PID, $(srv_python))"
     sleep 0.2
   done
-  fail "the fake release server never answered on $API"
+  fail "the fake release server never answered on $API within ${SRV_START_TIMEOUT:-60}s (pid $SRV_PID, $(srv_python))"
 }
+srv_python() { echo "python: $(command -v "$PY") $("$PY" --version 2>&1)"; }
 srv_up() {
   curl -fsS --max-time 2 -o /dev/null "$API/repos/alexberardi/jarvis-server/releases/tags/v0.0.1" 2>/dev/null && return 0
   echo "fake release server was down (pid $SRV_PID); restarting it" >&2

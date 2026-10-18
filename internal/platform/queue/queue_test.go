@@ -347,6 +347,97 @@ func TestPurge(t *testing.T) {
 	}
 }
 
+// Purge deletes in batches; a backlog bigger than one batch is still cleared in one call.
+func TestPurgeClearsMoreThanOneBatch(t *testing.T) {
+	q, d := newQueue(t)
+	old := time.Now().Add(-time.Hour).UnixMilli()
+	if _, err := d.Write.Exec(`
+		WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+		INSERT INTO platform_jobs (type, state, attempts, max_attempts, run_at, created_at, updated_at)
+		SELECT 'x', 'done', 1, 3, ?, ?, ? FROM n`, 2*purgeBatch+5, old, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := q.Purge(context.Background(), time.Now()); n != 2*purgeBatch+5 || err != nil {
+		t.Fatalf("purged %d %v", n, err)
+	}
+}
+
+// Start purges finished jobs older than Retention on its own schedule, so platform_jobs stays
+// bounded; recent finished jobs and live ones stay (#119).
+func TestStartPurgesOldFinishedJobs(t *testing.T) {
+	q, d := newQueue(t)
+	q.PurgeInterval = 10 * time.Millisecond
+	ids := seedPurgeRows(t, d, q.Retention)
+	start(t, q)
+	deadline := time.Now().Add(30 * time.Second) // hang guard
+	for remaining(t, d, ids.old) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("old finished jobs never purged")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := remaining(t, d, ids.kept); n != len(ids.kept) {
+		t.Fatalf("%d of %d recent or live jobs left", n, len(ids.kept))
+	}
+}
+
+func TestZeroRetentionNeverPurges(t *testing.T) {
+	q, d := newQueue(t)
+	ids := seedPurgeRows(t, d, 7*24*time.Hour)
+	q.Retention = 0
+	q.PurgeInterval = 10 * time.Millisecond
+	start(t, q)
+	time.Sleep(100 * time.Millisecond)
+	all := append(ids.old, ids.kept...)
+	if n := remaining(t, d, all); n != len(all) {
+		t.Fatalf("%d of %d jobs left", n, len(all))
+	}
+}
+
+type purgeRows struct{ old, kept []int64 }
+
+// seedPurgeRows inserts finished jobs older than retention (old), and recent finished plus
+// old live jobs (kept). The live ones have no handler and a lease far ahead, so nothing
+// claims or reaps them.
+func seedPurgeRows(t *testing.T, d *db.DB, retention time.Duration) purgeRows {
+	t.Helper()
+	now := time.Now()
+	stale := now.Add(-retention - time.Hour).UnixMilli()
+	recent := now.Add(-time.Hour).UnixMilli()
+	far := now.Add(time.Hour).UnixMilli()
+	insert := func(state string, updated int64, lease any) int64 {
+		var id int64
+		if err := d.Write.QueryRow(`
+			INSERT INTO platform_jobs (type, state, attempts, max_attempts, run_at, lease_until, created_at, updated_at)
+			VALUES ('idle', ?, 1, 3, ?, ?, ?, ?) RETURNING id`, state, far, lease, updated, updated).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	var r purgeRows
+	for _, s := range []string{"done", "failed", "cancelled"} {
+		r.old = append(r.old, insert(s, stale, nil))
+		r.kept = append(r.kept, insert(s, recent, nil))
+	}
+	r.kept = append(r.kept, insert("queued", stale, nil), insert("running", stale, far))
+	return r
+}
+
+func remaining(t *testing.T, d *db.DB, ids []int64) int {
+	t.Helper()
+	n := 0
+	for _, id := range ids {
+		var one int
+		err := d.Write.QueryRow(`SELECT 1 FROM platform_jobs WHERE id = ?`, id).Scan(&one)
+		if err == nil {
+			n++
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal(err)
+		}
+	}
+	return n
+}
+
 // A graceful shutdown mid-job puts the job back to queued and refunds the attempt it claimed,
 // so the next boot runs it again instead of failing it for an expired lease (#104).
 func TestShutdownMidJobRefundsAttempt(t *testing.T) {
@@ -483,5 +574,31 @@ func TestCrashThenBootRunsOrphan(t *testing.T) {
 	start(t, q)
 	if i := waitState(t, q, id, Done); i.Attempts != 2 {
 		t.Fatalf("%+v", i)
+	}
+}
+
+// An idle queue must not touch the single write connection: claims and reaps queue on it
+// ahead of everyone else's writes (#120). Hold that connection while the workers and the
+// reaper poll; any of them reaching for it shows up as a wait.
+func TestIdleQueueLeavesTheWriterAlone(t *testing.T) {
+	q, d := newQueue(t)
+	for _, typ := range []string{"a", "b", "c"} {
+		q.Register(typ, Handler{Concurrency: 2, Run: func(context.Context, Job) ([]byte, error) { return nil, nil }})
+	}
+	// Finished and future jobs don't count as work to claim or reap.
+	if _, err := q.Enqueue(context.Background(), "a", nil, Options{RunAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	start(t, q)
+	conn, err := d.Write.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := d.Write.Stats().WaitCount
+	time.Sleep(20 * q.PollInterval)
+	waits := d.Write.Stats().WaitCount - before
+	conn.Close()
+	if waits != 0 {
+		t.Fatalf("idle queue waited for the writer %d times, want 0", waits)
 	}
 }

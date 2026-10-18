@@ -52,6 +52,14 @@ export function useFetchEngine() {
   })
 }
 
+export function useRetryEngine() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => llm.retryEngine(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: mmKeys.hardware }),
+  })
+}
+
 export function useCatalog() {
   return useQuery<CatalogResponse>({ queryKey: mmKeys.catalog, queryFn: llm.getCatalog, staleTime: 15_000 })
 }

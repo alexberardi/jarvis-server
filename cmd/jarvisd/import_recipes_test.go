@@ -57,7 +57,7 @@ func TestImportRecipesCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range modules() {
+	for _, m := range testModules(t) {
 		if fsys := m.Migrations(); fsys != nil {
 			if err := db.Migrate(ctx, d, m.Name(), fsys); err != nil {
 				t.Fatal(err)

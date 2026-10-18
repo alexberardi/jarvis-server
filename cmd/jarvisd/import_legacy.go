@@ -178,7 +178,7 @@ func runImportLegacy(ctx context.Context, args []string, stdout io.Writer) error
 
 	rep, runErr := legacyimport.Run(ctx, d, src, legacyimport.Options{
 		Apply: *apply, AcceptHeads: accept, Settings: importSettingDefs(),
-		PromptProvider: func(name string) error { _, err := prompts.Lookup(name); return err },
+		PromptProvider: prompts.CheckBuiltin,
 	})
 	rep.Write(stdout)
 	if rep.Committed {
@@ -261,7 +261,7 @@ func migratedDB(ctx context.Context, cfg config.Config, path string) (*db.DB, er
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	q := queue.New(d, log)
-	r := &module.Runner{Deps: module.Deps{Config: cfg, DB: d, Log: log, Queue: q, Scheduler: scheduler.New(d, q, log)}, Modules: modules()}
+	r := &module.Runner{Deps: module.Deps{Config: cfg, DB: d, Log: log, Queue: q, Scheduler: scheduler.New(d, q, log)}, Modules: modules(cfg.Env)}
 	if err := r.Migrate(ctx); err != nil {
 		d.Close()
 		return nil, err

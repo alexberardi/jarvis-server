@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -247,20 +248,29 @@ func TestWidensEnvelopeTruthTable(t *testing.T) {
 	}
 }
 
-func TestAutorunGateDormant(t *testing.T) {
-	ok, _ := IsAutorunEligible([]Step{{Command: "get_drive_time", Args: pyjson.NewObject()}, {Command: "reminder", Args: pyjson.NewObject()}})
-	if !ok {
-		t.Fatal("allowlisted plan not eligible")
+func TestIsAutorunEligible(t *testing.T) {
+	allow := policy.Verdict{Effect: policy.Allow}
+	ask := policy.Verdict{Effect: policy.Ask}
+	st := func(cmd string) Step { return Step{Command: cmd, Args: pyjson.NewObject()} }
+	cases := []struct {
+		name     string
+		steps    []Step
+		verdicts []policy.Verdict
+		ok       bool
+		reason   string
+	}{
+		{"empty", nil, nil, false, "empty plan"},
+		{"four steps", []Step{st("a"), st("b"), st("c"), st("d")}, []policy.Verdict{allow, allow, allow, allow}, false,
+			"too many steps for autorun (4 > 3)"},
+		{"one asks", []Step{st("get_weather"), st("quick_search")}, []policy.Verdict{allow, ask}, false,
+			"step 'quick_search' resolves to ask"},
+		{"missing verdict", []Step{st("get_weather")}, nil, false, "step 'get_weather' resolves to ask"},
+		{"all allow", []Step{st("get_weather"), st("quick_search")}, []policy.Verdict{allow, allow}, true, "eligible"},
 	}
-	for _, steps := range [][]Step{
-		nil,
-		{{Command: "get_weather", Args: pyjson.NewObject()}},
-		{{Command: "reminder", Args: pyjson.NewObject(), IsRisky: true}},
-		{{Command: "reminder", Args: mustObj(t, `{"business": "X"}`)}},
-		{{Command: "reminder"}, {Command: "reminder"}, {Command: "reminder"}, {Command: "reminder"}},
-	} {
-		if ok, _ := IsAutorunEligible(steps); ok {
-			t.Fatalf("%+v eligible", steps)
+	for _, c := range cases {
+		ok, reason := IsAutorunEligible(c.steps, c.verdicts)
+		if ok != c.ok || reason != c.reason {
+			t.Errorf("%s: got %v %q", c.name, ok, reason)
 		}
 	}
 }
@@ -298,3 +308,74 @@ type intSettings map[string]int64
 
 func (f intSettings) Int(_ context.Context, key string, _ settings.Scope) int64 { return f[key] }
 func (intSettings) Bool(context.Context, string, settings.Scope) bool           { return true }
+
+// confirmFreeTool is a fakeTool declaring run_without_confirmation (servertools.ConfirmFreeTool).
+type confirmFreeTool struct{ fakeTool }
+
+func (*confirmFreeTool) RunWithoutConfirmation() bool { return true }
+
+func TestMenuDeclarations(t *testing.T) {
+	node := NodeMenu([]*pyjson.Object{
+		mustObj(t, `{"command_name": "read_sensor", "description": "Read", "run_without_confirmation": true}`),
+		mustObj(t, `{"command_name": "get_news", "description": "News"}`),
+	})
+	if len(node) != 2 || !node[0].RunWithoutConfirmation || node[1].RunWithoutConfirmation {
+		t.Fatalf("node menu = %+v", node)
+	}
+
+	e := newTenv(t, false)
+	e.set[settingWebSearch] = true
+	e.tools.Register(&confirmFreeTool{fakeTool{name: "quick_search", def: toolDef("quick_search", "Search",
+		"query", mustObj(t, `{"type": "string"}`))}})
+	e.tools.Register(&fakeTool{name: "deep_research", def: toolDef("deep_research", "Research",
+		"query", mustObj(t, `{"type": "string"}`))})
+	menu := e.s.FullMenu(context.Background(), []*pyjson.Object{
+		mustObj(t, `{"command_name": "read_sensor", "description": "Read", "run_without_confirmation": true}`),
+		mustObj(t, `{"command_name": "get_news", "description": "News"}`),
+	}, hh, nil)
+	free := map[string]bool{}
+	for _, c := range menu {
+		free[c.Command] = c.RunWithoutConfirmation
+	}
+	if len(free) != 4 || !free["quick_search"] || !free["read_sensor"] || free["deep_research"] || free["get_news"] {
+		t.Fatalf("menu declarations = %v", free)
+	}
+	// The stored menu keeps the declaration.
+	back := menuFromJSON(menuJSON(menu))
+	for i, c := range back {
+		if c.RunWithoutConfirmation != menu[i].RunWithoutConfirmation {
+			t.Fatalf("menu round trip %d = %+v, want %+v", i, c, menu[i])
+		}
+	}
+
+	e.llm.say("plan", planJSON("Look things up",
+		step("read_sensor", "Read", ""), step("quick_search", "Search", `{"query": "x"}`),
+		step("get_news", "News", ""), step("deep_research", "Research", `{"query": "y"}`)))
+	plan, err := e.s.PlanErrand(context.Background(), "goal", menu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []bool
+	for _, st := range plan.Steps {
+		got = append(got, st.RunWithoutConfirmation)
+	}
+	if len(got) != 4 || !got[0] || !got[1] || got[2] || got[3] {
+		t.Fatalf("step flags = %v (%+v)", got, plan.Steps)
+	}
+}
+
+func TestStepObjectFlags(t *testing.T) {
+	plain := Step{Command: "get_news", Label: "News"}
+	if got := pyjson.Compact(plain.Object()); got != `{"command":"get_news","args":{},"label":"News","is_risky":false}` {
+		t.Fatalf("plain = %s", got)
+	}
+	flagged := Step{Command: "quick_search", Label: "Search", RunWithoutConfirmation: true, Approved: true}
+	if got := pyjson.Compact(flagged.Object()); !strings.HasSuffix(got, `"is_risky":false,"run_without_confirmation":true,"approved":true}`) {
+		t.Fatalf("flagged = %s", got)
+	}
+	steps := parseSteps(stepsDumps([]Step{plain, flagged}))
+	if len(steps) != 2 || steps[0].RunWithoutConfirmation || steps[0].Approved ||
+		!steps[1].RunWithoutConfirmation || !steps[1].Approved {
+		t.Fatalf("round trip = %+v", steps)
+	}
+}

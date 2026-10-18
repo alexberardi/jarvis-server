@@ -9,6 +9,7 @@ import InstalledList from '@/components/models/InstalledList'
 import InstallsList from '@/components/models/InstallsList'
 import LabelsEditor from '@/components/models/LabelsEditor'
 import PromptProviderCard from '@/components/models/PromptProviderCard'
+import PromptEditorCard from '@/components/models/PromptEditorCard'
 import { buttonClass } from '@/components/models/styles'
 import { Section } from '@/components/models/ui'
 import JobChecklist from '@/components/setup/JobChecklist'
@@ -76,6 +77,7 @@ export default function ModelsPage() {
       <InstallsList />
       <LabelsEditor />
       <PromptProviderCard />
+      <PromptEditorCard />
       <div ref={catalogRef} className="scroll-mt-4 space-y-2">
         {filter && (
           <div className="flex items-center justify-between rounded-lg bg-[var(--color-surface-alt)] px-3 py-2 text-xs text-[var(--color-text)]">

@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -135,7 +136,7 @@ func (m *Module) validate(ctx context.Context, text string) (bool, float64, stri
 	if m.Validator != nil {
 		return m.Validator.Validate(ctx, text)
 	}
-	if m.LLMURL == "" || m.LLMAppID == "" || m.LLMAppKey == "" {
+	if m.LLM == nil {
 		return true, 0.5, "Validation service unavailable, assuming valid"
 	}
 	model := m.settings.String(ctx, "ocr.validation_model", settings.Scope{})
@@ -156,12 +157,15 @@ IMPORTANT INSTRUCTIONS:
   "confidence": 0.0-1.0,
   "reason": "brief explanation (max 200 characters)"
 }`, truncRunes(text, 500))
-	content, err := chatCompletion(ctx, m.llmClient(), m.LLMURL, m.LLMAppID, m.LLMAppKey, 10*time.Second, map[string]any{
-		"model":           model,
-		"messages":        []any{map[string]any{"role": "user", "content": prompt}},
-		"response_format": map[string]any{"type": "json_object"},
-		"max_tokens":      200,
-		"temperature":     0.2,
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	temp := 0.2
+	resp, err := m.LLM.Chat(cctx, llm.ChatRequest{
+		Label:          llm.NormalizeLabel(model),
+		Messages:       []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
+		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
+		MaxTokens:      intPtr(200),
+		Temperature:    &temp,
 	})
 	if err != nil {
 		m.deps.Log.Warn("ocr: validation unavailable, treating output as valid", "err", err)
@@ -172,7 +176,7 @@ IMPORTANT INSTRUCTIONS:
 		Confidence *float64 `json:"confidence"`
 		Reason     string   `json:"reason"`
 	}
-	if json.Unmarshal([]byte(content), &v) != nil {
+	if json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &v) != nil {
 		return true, 0.5, "Validation error: unparseable validator response"
 	}
 	valid, conf := true, 0.5
