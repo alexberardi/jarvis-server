@@ -327,7 +327,6 @@ $NODE_USER ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
 # Not yet, added with the step that needs them (go-pi-node.md §7):
 # TODO(phase 4.4, provisioning AP): NetworkManager, nmcli (and hostapd/dnsmasq only if the NM AP fails).
-# TODO(#161, self-update): the self-update helper.
 # TODO(parity 5.6, packages): the apt and post-install wrappers.
 # TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
 EOF
