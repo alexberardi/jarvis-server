@@ -1653,7 +1653,10 @@ hashes; background with an arrow, the Applications link, lzfse).
   not behind its dialog, and goes before the URL opens or the error dialog ("… wasn't
   installed", with the installer's last lines) shows. It opens the URL that prints. Later opens run `jarvisd service status --json`
   and `setup-link --url` as the user (the home is theirs) and open the setup link or the admin.
-  After an admin Stop it offers Start (`service start` as root). When the app carries a newer
+  After an admin Stop it offers Start (`service start` as root, then `service status --wait 1m`
+  as the user). The same progress window ("Starting Jarvis Automation Server…") shows from the
+  accepted password until the server answers; then the admin opens, or the "… couldn't start"
+  (the root script failed) or "… didn't start" (it never answered) dialog shows. When the app carries a newer
   jarvisd than `/usr/local/bin`, it offers Update (`install-from-app --no-firewall`). Holding
   Option while opening offers Uninstall…: `service uninstall [--purge --yes]`, then the binary and
   what upgrades leave beside it, with "Also delete … data?" defaulting to Keep (Q6).
