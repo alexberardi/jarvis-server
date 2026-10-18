@@ -21,12 +21,17 @@ f 644 etc/systemd/system/jarvis-agent.service
 d 755 opt
 d 755 opt/jarvis-agent
 f 755 opt/jarvis-agent/jarvis-agent
-f 644 opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
+d 755 usr
+d 755 usr/local
+d 755 usr/local/share
+d 755 usr/local/share/jarvis-agent
+f 644 usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 d 755 var
 d 755 var/log
 d 755 var/log/journal
 ## commands
-dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /opt/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
+chown pi: /opt/jarvis-agent
+dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 amixer -q -c seeed2micvoicec sset PCM 100% unmute
 amixer -q -c seeed2micvoicec sset Line 2 unmute
 amixer -q -c seeed2micvoicec sset Line DAC 115 unmute
