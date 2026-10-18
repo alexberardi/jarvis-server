@@ -15,7 +15,8 @@ func TestInstallPiPinsTheWakeModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(b)
+	// Windows checkouts convert the script to CRLF.
+	s := strings.ReplaceAll(string(b), "\r\n", "\n")
 	got := map[string]string{}
 	for _, m := range regexp.MustCompile(`(?m)^(?:WAKE_MODELS=")?([\w.]+\.onnx) ([0-9a-f]{64})"?$`).FindAllStringSubmatch(s, -1) {
 		got[m[1]] = m[2]
