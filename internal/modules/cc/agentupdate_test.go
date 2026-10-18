@@ -62,5 +62,71 @@ func TestDesktopAgentUpdateFromADevServer(t *testing.T) {
 	owner := e.auth.addUser(1, "hh1", authn.RoleMember)
 	n := e.pairDesktop(owner, "hh1")
 	e.do("POST", "/api/v0/nodes/"+n.id+"/update", nil, bearer(owner)).detail(503,
-		"This server is a development build (dev): there is no release for its desktop agents to follow.")
+		"This server is a development build (dev): there is no release for its agents to follow.")
+}
+
+// Go Pi node phase 2 (docs/agent/go-pi-node.md §7): a node whose heartbeat says runtime "go"
+// follows this server like a desktop agent, whatever its install mode. The Python node
+// (no runtime, or "python") keeps the jarvis-node-setup release.
+func TestGoPiNodeFollowsTheServer(t *testing.T) {
+	// No GitHub stub: a Go Pi's "latest" must not need the node release (the gate is off, so a
+	// Python node's "latest" answers 503 here).
+	e := newEnv(t)
+	e.m.Version = "v0.2.0"
+	owner := e.auth.addUser(1, "hh1", authn.RoleMember)
+	pi := e.createNode("gopi", "hh1")
+	beat := func(version, runtime string) map[string]any {
+		vi := map[string]any{"version": version, "install_mode": "tarball"}
+		if runtime != "" {
+			vi["runtime"] = runtime
+		}
+		return e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"version_info": vi}, pi.h()).want(200).json()
+	}
+	if r := beat("v0.1.0", " Go "); r["server_version"] != "v0.2.0" || r["pending_update"] != nil {
+		t.Fatalf("go pi heartbeat: %v", r)
+	}
+	if n := e.do("GET", "/api/v0/admin/nodes/gopi", nil, bearer(owner)).want(200).json(); n["runtime"] != "go" {
+		t.Fatalf("runtime: %v", n["runtime"])
+	}
+
+	path := "/api/v0/nodes/gopi/update"
+	task := e.do("POST", path, nil, bearer(owner)).want(200).json()
+	if task["target_version"] != "v0.2.0" || task["state"] != "pending" {
+		t.Fatal(task)
+	}
+	tid := task["id"].(string)
+	if pu, _ := beat("v0.1.0", "go")["pending_update"].(map[string]any); pu == nil || pu["task_id"] != tid {
+		t.Fatalf("dispatch: %v", pu)
+	}
+	e.advance(5 * time.Second)
+	beat("v0.2.0", "go")
+	if s := e.do("GET", "/api/v0/tasks/"+tid, nil, bearer(owner)).json(); s["state"] != "success" {
+		t.Fatal(s)
+	}
+	e.do("POST", path, map[string]any{"target_version": "v0.2.0"}, bearer(owner)).detail(400,
+		"Node is already on version v0.2.0; target v0.2.0 is not newer.")
+
+	// The same node reporting the Python runtime (or none) is back on the node release path.
+	for _, rt := range []string{"python", ""} {
+		r := beat("0.3.0", rt)
+		if _, ok := r["server_version"]; ok {
+			t.Fatalf("runtime %q got server_version: %v", rt, r)
+		}
+		if n := e.do("GET", "/api/v0/admin/nodes/gopi", nil, bearer(owner)).json(); rt == "" && n["runtime"] != nil {
+			t.Fatalf("runtime not cleared: %v", n["runtime"])
+		}
+		e.do("POST", path, nil, bearer(owner)).want(503)
+	}
+}
+
+func TestGoPiNodeUpdateFromADevServer(t *testing.T) {
+	e := newEnv(t)
+	e.m.Version = "dev"
+	owner := e.auth.addUser(1, "hh1", authn.RoleMember)
+	pi := e.createNode("gopi", "hh1")
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"version_info": map[string]any{"version": "dev", "install_mode": "tarball", "runtime": "go"},
+	}, pi.h()).want(200)
+	e.do("POST", "/api/v0/nodes/gopi/update", nil, bearer(owner)).detail(503,
+		"This server is a development build (dev): there is no release for its agents to follow.")
 }

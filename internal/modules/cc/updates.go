@@ -151,8 +151,8 @@ func (m *Module) handleRequestUpdate(w http.ResponseWriter, r *http.Request, u a
 	if requested == "" {
 		requested = "latest"
 	}
-	if node.desktop() {
-		m.requestDesktopUpdate(w, r, node, requested)
+	if node.followsServer() {
+		m.requestServerVersionUpdate(w, r, node, requested)
 		return
 	}
 	var target string
@@ -201,12 +201,18 @@ func (m *Module) queueUpdate(w http.ResponseWriter, r *http.Request, id, target 
 	httpx.WriteJSON(w, http.StatusOK, t.response())
 }
 
-// requestDesktopUpdate queues an update for a desktop agent (01-no-cli-plan 1.7). Agents follow
-// this server: "latest" means this jarvisd's own version, never the Pi node's release, and the
-// agent fetches its archive from that jarvis-server release. The target keeps its v (agent
-// versions are release tags). The agent itself refuses anything not newer than it runs and
-// anything not signed with the project key; refusing here only saves a stranded task.
-func (m *Module) requestDesktopUpdate(w http.ResponseWriter, r *http.Request, node *nodeRow, requested string) {
+// followsServer: the node runs the Go node core (a desktop agent, or a Pi on runtime "go"), which
+// updates from this jarvisd's own jarvis-server release; the Python node follows jarvis-node-setup's.
+func (n *nodeRow) followsServer() bool {
+	return n.desktop() || (n.runtime.Valid && n.runtime.String == "go")
+}
+
+// requestServerVersionUpdate queues an update for a node that follows this server (01-no-cli-plan
+// 1.7, go-pi-node.md §7): "latest" means this jarvisd's own version, never the Python node's
+// release, and the node fetches its archive from that jarvis-server release. The target keeps its
+// v (Go node versions are release tags). The node itself refuses anything not newer than it runs
+// and anything not signed with the project key; refusing here only saves a stranded task.
+func (m *Module) requestServerVersionUpdate(w http.ResponseWriter, r *http.Request, node *nodeRow, requested string) {
 	target := requested
 	if strings.EqualFold(requested, "latest") {
 		target = m.Version
@@ -218,7 +224,7 @@ func (m *Module) requestDesktopUpdate(w http.ResponseWriter, r *http.Request, no
 	if !ok {
 		if strings.EqualFold(requested, "latest") {
 			detail(w, http.StatusServiceUnavailable, fmt.Sprintf(
-				"This server is a development build (%s): there is no release for its desktop agents to follow.", m.Version))
+				"This server is a development build (%s): there is no release for its agents to follow.", m.Version))
 			return
 		}
 		detail(w, http.StatusBadRequest, fmt.Sprintf("%s is not a release version.", requested))
