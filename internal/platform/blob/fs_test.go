@@ -277,3 +277,39 @@ func TestConcurrentWritersNoTornReads(t *testing.T) {
 		t.Fatalf("temp files left: %v", entries)
 	}
 }
+
+// memOnly hides FS's Seeker, so OpenSeeker takes its in-memory fallback.
+type memOnly struct{ Store }
+
+func TestOpenSeeker(t *testing.T) {
+	s, ctx := newFS(t), context.Background()
+	content := []byte("0123456789abcdef")
+	if _, err := s.Put(ctx, "v/clip", bytes.NewReader(content), "video/mp4"); err != nil {
+		t.Fatal(err)
+	}
+	for name, st := range map[string]Store{"fs": s, "fallback": memOnly{s}} {
+		t.Run(name, func(t *testing.T) {
+			rs, info, err := OpenSeeker(ctx, st, "v/clip")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rs.Close()
+			if info.Size != 16 || info.ContentType != "video/mp4" {
+				t.Fatalf("%+v", info)
+			}
+			if _, err := rs.Seek(10, io.SeekStart); err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(rs)
+			if string(b) != "abcdef" {
+				t.Fatalf("after seek: %q", b)
+			}
+			if end, _ := rs.Seek(0, io.SeekEnd); end != 16 {
+				t.Fatalf("end %d", end)
+			}
+			if _, _, err := OpenSeeker(ctx, st, "v/missing"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("missing: %v", err)
+			}
+		})
+	}
+}

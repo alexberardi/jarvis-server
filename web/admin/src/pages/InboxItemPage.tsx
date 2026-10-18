@@ -7,6 +7,7 @@ import { confirmationOf, deleteItem, getInboxItem, markRead, sourcesOf } from '@
 import type { InboxAction } from '@/api/inbox'
 import { sendNodeAction } from '@/api/chat'
 import Markdown from '@/components/chat/Markdown'
+import InboxAttachments from '@/components/inbox/InboxAttachments'
 import { useAuth } from '@/hooks/useAuth'
 import { inboxKeys } from '@/hooks/useInbox'
 import { errorMessage } from '@/lib/errors'
@@ -20,7 +21,7 @@ const actionStyle = (t?: string) =>
       ? 'bg-red-600 text-white hover:opacity-90'
       : 'border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]'
 
-/** InboxItemPage shows one item: its body as markdown, sources, and a confirmation's buttons. */
+/** InboxItemPage shows one item: its body as markdown, attachments, sources, and a confirmation's buttons. */
 export default function InboxItemPage() {
   const { id = '' } = useParams()
   const { activeHouseholdId } = useAuth()
@@ -137,6 +138,8 @@ export default function InboxItemPage() {
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm text-[var(--color-text)] sm:p-6">
         <Markdown>{item.body || item.summary || ''}</Markdown>
       </div>
+
+      <InboxAttachments itemId={item.id} attachments={item.attachments ?? []} />
 
       {sources.length > 0 && (
         <section>

@@ -131,10 +131,10 @@ type Module struct {
 const SettingRelayURL = "relay.url"
 
 // Definitions are the module's settings.
-var Definitions = []settings.Definition{
+var Definitions = append([]settings.Definition{
 	{Key: SettingRelayURL, Category: "relay", Type: settings.String, Default: "", EnvFallback: "RELAY_URL",
 		Description: "Push relay URL (e.g. https://relay.jarvisautomation.io). Push titles and bodies are sent through it to Expo. Empty disables push delivery; the inbox still works."},
-}
+}, attachmentDefinitions...)
 
 // Settings returns the module's settings service.
 func (m *Module) Settings() *settings.Service { return m.settings }
@@ -196,6 +196,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST /api/v0/inbox/bulk/read", m.user(m.handleBulkRead))
 	mux.HandleFunc("POST /api/v0/inbox/bulk/delete", m.user(m.handleBulkDelete))
 	mux.HandleFunc("GET /api/v0/inbox/{item_id}", m.user(m.handleGetInbox))
+	mux.HandleFunc("GET /api/v0/inbox/{item_id}/attachments/{attachment_id}", m.user(m.handleGetAttachment))
 	mux.HandleFunc("PATCH /api/v0/inbox/{item_id}/read", m.user(m.handleMarkRead))
 	mux.HandleFunc("DELETE /api/v0/inbox/{item_id}", m.user(m.handleDeleteInbox))
 	mux.HandleFunc("POST /api/v0/tokens", m.user(m.handleRegisterToken))
@@ -205,6 +206,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 
 	// Services (app-to-app).
 	mux.HandleFunc("POST /api/v0/inbox", m.app(m.handleCreateInbox))
+	mux.HandleFunc("POST /api/v0/inbox/attachments", m.app(m.handleUploadAttachment))
 	mux.HandleFunc("PATCH /api/v0/inbox/{item_id}", m.app(m.handleUpdateInbox))
 	mux.HandleFunc("POST /api/v0/notify", m.app(m.handleNotify))
 	mux.HandleFunc("POST /api/v0/notify/batch", m.app(m.handleNotifyBatch))
@@ -511,6 +513,14 @@ func (o *obj) list(name string) ([]any, bool) {
 		return nil, false
 	}
 	return l, true
+}
+
+// optStrList reads an optional, nullable list of strings.
+func (o *obj) optStrList(name string) []string {
+	if v, present := o.m[name]; !present || v == nil {
+		return nil
+	}
+	return o.strList(name)
 }
 
 // strList reads a required list of strings.

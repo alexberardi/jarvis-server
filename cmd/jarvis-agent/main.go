@@ -599,9 +599,14 @@ func run(ctx context.Context, args []string) error {
 	// toggle turns it on and off while the agent runs (voiceSwitch).
 	sw := newVoiceSwitch(*voiceOn && voice.Supported, log)
 	sw.load = func(ctx context.Context) (*voiceStack, error) { return loadVoice(ctx, vf, log) }
+	// A Pi's voice-profile takes go through the pipeline's microphone (voiceprofile.go).
+	mic := voice.NewMic()
+	r.Verbs = voiceProfileVerbs(p, mic, log)
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
-		_ = voice.Serve(ctx, vs.options(cc, served, log, nil))
+		o := vs.options(cc, served, log, nil)
+		o.Mic = mic
+		_ = voice.Serve(ctx, o)
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }
 	sw.available = voice.Supported

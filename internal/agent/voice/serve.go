@@ -22,6 +22,8 @@ type Options struct {
 	Indicator     Indicator // the on-screen state (nil: none)
 	// Vocabulary is the names speech-to-text should expect (nil: none; Pipeline.Vocabulary).
 	Vocabulary func(ctx context.Context) string
+	// Mic, when set, records takes through the pipeline (Pipeline.Mic).
+	Mic *Mic
 }
 
 // Serve listens on Input until ctx ends. If the pipeline stops (a microphone unplugged or
@@ -56,8 +58,8 @@ func serveOnce(ctx context.Context, o Options) error {
 	defer mic.Close()
 	o.Detector.Reset()
 	p := &Pipeline{Cfg: o.Config, Capture: mic, Detector: o.Detector, Server: o.Server, Tools: o.Tools, Log: o.Log, OnTurn: o.OnTurn, Indicator: o.Indicator,
-		Vocabulary: o.Vocabulary,
-		Playback:   func(rate, ch int) (device.Playback, error) { return device.OpenPlayback(o.Output, rate, ch) }}
+		Vocabulary: o.Vocabulary, Mic: o.Mic,
+		Playback: func(rate, ch int) (device.Playback, error) { return device.OpenPlayback(o.Output, rate, ch) }}
 	o.Log.Info("voice: listening", "input", o.Input, "output", o.Output, "backend", device.Backend(),
 		"wake_threshold", o.Config.WakeThreshold)
 	err = p.Run(ctx)

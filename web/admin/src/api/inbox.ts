@@ -7,6 +7,19 @@ import { apiClient } from './client'
  */
 const INBOX = '/api/notifications/api/v0/inbox'
 
+/**
+ * An image or video on an item (docs/decisions/2026-10-17-inbox-attachments.md). Width and
+ * height are known for images; duration_ms is not filled in yet.
+ */
+export interface InboxAttachment {
+  id: string
+  mime: string
+  size: number
+  width: number | null
+  height: number | null
+  duration_ms: number | null
+}
+
 export interface InboxItem {
   id: string
   user_id: number | null
@@ -19,6 +32,8 @@ export interface InboxItem {
   metadata: Record<string, unknown> | null
   is_read: boolean
   created_at: string
+  /** Absent when the item has none. */
+  attachments?: InboxAttachment[]
 }
 
 export async function listInbox(params?: { limit?: number; is_read?: boolean; category?: string }): Promise<InboxItem[]> {
@@ -28,6 +43,18 @@ export async function listInbox(params?: { limit?: number; is_read?: boolean; ca
 
 export async function getInboxItem(id: string): Promise<InboxItem> {
   const { data } = await apiClient.get<InboxItem>(`${INBOX}/${encodeURIComponent(id)}`)
+  return data
+}
+
+/**
+ * fetchAttachment downloads one attachment. The gateway wants the bearer header, which an
+ * <img>/<video> src can't send, so it comes through axios as a Blob for an object URL.
+ */
+export async function fetchAttachment(itemId: string, attachmentId: string): Promise<Blob> {
+  const { data } = await apiClient.get<Blob>(
+    `${INBOX}/${encodeURIComponent(itemId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { responseType: 'blob' },
+  )
   return data
 }
 

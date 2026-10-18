@@ -59,3 +59,15 @@ The module (`internal/modules/notifications`) uses the baseline unchanged; no 00
   record (its `target_id` still holds the user id for `target_type = 'user'`; it is pruned after
   30 days). `PurgeHousehold` deletes a deleted household's tokens and inbox items (D49).
 - `push_token` keeps its UNIQUE index: registration is an `ON CONFLICT (push_token)` upsert.
+
+## 00002: inbox attachments (2026-10-17)
+
+`notifications_inbox_attachments` (jarvisd only; legacy had no attachments): one image or video
+on one inbox item. `item_id` references `notifications_inbox_items (id) ON DELETE CASCADE` (a
+same-module FK, so every path that deletes items, including `PurgeUser`, `PurgeUserHousehold` and
+`PurgeHousehold`, deletes their attachment rows). It is NULL from upload until an item claims the
+row. `owner` is the uploader (`app:<id>` or `node:<id>`), `sha256` names the blob
+(`inbox/sha256/<ab>/<sha256>` in the blob store, shared by identical files), and `width`,
+`height`, `duration_ms` are NULL when unknown. The cleanup job drops rows unclaimed after an hour
+and blobs no row references. Settings `inbox.attachment_max_file_bytes` (25 MB) and
+`inbox.attachment_max_item_bytes` (50 MB). Design: `docs/decisions/2026-10-17-inbox-attachments.md`.

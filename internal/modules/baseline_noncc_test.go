@@ -33,7 +33,7 @@ var nonCCBaselines = []struct {
 	{"config", config.Migrations(), []string{"config_services"}},
 	{"logs", logs.Migrations(), []string{"logs_entries"}},
 	{"notifications", notifications.Migrations(), []string{
-		"notifications_device_tokens", "notifications_inbox_items", "notifications_notification_log",
+		"notifications_device_tokens", "notifications_inbox_attachments", "notifications_inbox_items", "notifications_notification_log",
 	}},
 	{"recipes", recipes.Migrations(), []string{
 		"recipes_grocery_sku_map", "recipes_import_log", "recipes_ingredients", "recipes_meal_plan_items", "recipes_meal_plans",
