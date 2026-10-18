@@ -35,10 +35,10 @@ func TestTakePausesTheWakeWordAndListeningResumesAfter(t *testing.T) {
 	srv := newServer()
 	r := newRig(t, mic, srv)
 	r.p.Mic = NewMic()
-	const preroll = 3
+	const preroll, reading = 3, 13 // 13 chunks: the 1 s take, and no loud audio left after it
 	// The user reads loudly (the fake detector's wake level) once the cue has been said: had the
 	// wake loop scored it, a turn would start.
-	srv.onSpeak = func(string) { mic.push(rep(noise, preroll), rep(wake, 30)) }
+	srv.onSpeak = func(string) { mic.push(rep(noise, preroll), rep(wake, reading)) }
 	stop := r.run(t)
 	defer stop()
 	waitAttached(t, r.p.Mic)
@@ -46,6 +46,9 @@ func TestTakePausesTheWakeWordAndListeningResumesAfter(t *testing.T) {
 	take := Take{Cue: "Read the prompt on your screen, starting now.", Preroll: preroll * ChunkSamples * time.Second / CaptureRate, Secs: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	r.det.mu.Lock()
+	resets := r.det.resets
+	r.det.mu.Unlock()
 	pcm, err := r.p.Mic.Record(ctx, take)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +56,7 @@ func TestTakePausesTheWakeWordAndListeningResumesAfter(t *testing.T) {
 	if len(pcm) != CaptureRate {
 		t.Fatalf("recorded %d samples, want %d (1 s at 48 kHz)", len(pcm), CaptureRate)
 	}
-	if !slices.Equal(pcm[len(pcm)-ChunkSamples:], wake[:ChunkSamples]) {
+	if !slices.Equal(pcm[:ChunkSamples], wake[:ChunkSamples]) {
 		t.Fatal("the take is not the audio after the preroll")
 	}
 	if got := srv.callList(); !slices.Equal(got, []string{"speak"}) {
@@ -62,6 +65,9 @@ func TestTakePausesTheWakeWordAndListeningResumesAfter(t *testing.T) {
 	if srv.said[0] != take.Cue {
 		t.Fatalf("said %q", srv.said)
 	}
+
+	// The wake loop starts again on new audio: what was read during the take is not scored.
+	r.waitResets(t, resets+1)
 
 	// Listening resumes: the wake word now starts a turn.
 	srv.onSpeak = nil
