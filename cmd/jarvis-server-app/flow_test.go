@@ -18,11 +18,15 @@ type fakeUI struct {
 	answers           []string // button labels, in order
 	seen              []string // titles
 	busyShown         []string // progress windows that showed (started closed before done)
+	whenDone          func()   // runs as a progress window closes
 }
 
 // busy waits for done like the real one, then records whether the window had shown.
 func (f *fakeUI) busy(title, _ string, started, done <-chan struct{}) {
 	<-done
+	if f.whenDone != nil {
+		f.whenDone()
+	}
 	select {
 	case <-started:
 		f.busyShown = append(f.busyShown, title)
@@ -58,6 +62,7 @@ type world struct {
 	link      string
 	adminOut  string
 	adminErr  error
+	waitErr   error // from service status --wait
 
 	scripts []string
 	runs    []string
@@ -91,6 +96,8 @@ func newApp(w *world, ui *fakeUI) *app {
 				return []byte(w.status), nil
 			case strings.Contains(line, "setup-link --url"):
 				return []byte(w.link + "\n"), nil
+			case strings.Contains(line, "service status --wait"):
+				return nil, w.waitErr
 			}
 			return nil, nil
 		},
@@ -311,14 +318,80 @@ func TestStoppedOffersStart(t *testing.T) {
 		link:      "http://192.168.1.5:7710/",
 	}
 	ui := &fakeUI{answers: []string{btnStart}}
+	waitedUnderWindow := false
+	ui.whenDone = func() { waitedUnderWindow = contains(w.runs, waitStatus) }
 	if err := newApp(w, ui).main(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(w.scripts) != 1 || w.scripts[0] != "/usr/local/bin/jarvisd service start" {
 		t.Fatalf("root ran %q", w.scripts)
 	}
-	if !contains(w.runs, "/usr/local/bin/jarvisd service status --wait 1m") || len(w.opened) != 1 {
+	if !contains(w.runs, waitStatus) || len(w.opened) != 1 {
 		t.Fatalf("runs %q, opened %q", w.runs, w.opened)
+	}
+	// The progress window, up from the accepted password until the server answered.
+	if len(ui.busyShown) != 1 || ui.busyShown[0] != "Starting "+productName+"…" || w.stopped != 1 || !waitedUnderWindow {
+		t.Fatalf("progress %q, beacons stopped %d, waited under the window %v", ui.busyShown, w.stopped, waitedUnderWindow)
+	}
+}
+
+const waitStatus = "/usr/local/bin/jarvisd service status --wait 1m"
+
+func stoppedWorld() *world {
+	return &world{
+		installed: true,
+		status:    `{"installed":true,"running":false,"healthy":false,"home":"/Users/alice/.jarvisd"}`,
+		link:      "http://192.168.1.5:7710/",
+	}
+}
+
+func TestStartCanceled(t *testing.T) {
+	w := stoppedWorld()
+	w.adminErr = errCanceled
+	ui := &fakeUI{answers: []string{btnStart}}
+	if err := newApp(w, ui).main(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ui.busyShown) != 0 || contains(w.runs, waitStatus) || len(w.opened) != 0 || w.stopped != 1 {
+		t.Fatalf("progress %q, runs %q, opened %q, beacons stopped %d", ui.busyShown, w.runs, w.opened, w.stopped)
+	}
+}
+
+func TestStartFailureIsShown(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		adminErr, waitErr error
+		dialog, wantInErr string
+	}{
+		{"root script", errors.New("launchctl: bootstrap failed"), nil, "couldn't start", "bootstrap failed"},
+		{"status wait", nil, errors.New("not healthy after 1m0s"), "didn't start", "not healthy"},
+	} {
+		w := stoppedWorld()
+		w.adminErr, w.waitErr = tc.adminErr, tc.waitErr
+		ui := &fakeUI{answers: []string{btnStart}}
+		err := newApp(w, ui).main(context.Background())
+		if err == nil || !strings.Contains(err.Error(), tc.wantInErr) {
+			t.Fatalf("%s: err = %v", tc.name, err)
+		}
+		// The start dialog, the progress window, then the error dialog once it has gone.
+		if len(ui.seen) != 3 || ui.seen[1] != "Starting "+productName+"…" || ui.seen[2] != productName+" "+tc.dialog {
+			t.Fatalf("%s: dialogs %q", tc.name, ui.seen)
+		}
+		if len(w.opened) != 0 {
+			t.Fatalf("%s: opened %q", tc.name, w.opened)
+		}
+	}
+}
+
+func TestStartWithoutABeaconShowsProgressAtOnce(t *testing.T) {
+	w := stoppedWorld()
+	w.noBeacon = true
+	ui := &fakeUI{answers: []string{btnStart}}
+	if err := newApp(w, ui).main(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ui.busyShown) != 1 || w.scripts[0] != "/usr/local/bin/jarvisd service start" || len(w.opened) != 1 {
+		t.Fatalf("progress %q, root ran %q, opened %q", ui.busyShown, w.scripts, w.opened)
 	}
 }
 

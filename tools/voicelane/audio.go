@@ -12,7 +12,7 @@ import (
 )
 
 // renderCase builds a case's mic audio at the TTS's sample rate (the first spoken part sets
-// it; 16 kHz when nothing is spoken). speak returns a WAV.
+// it, and later ones are resampled to it; 16 kHz when nothing is spoken). speak returns a WAV.
 func renderCase(ctx context.Context, speak func(context.Context, string) ([]byte, error), parts []AudioPart, seed int64) ([]float32, int, error) {
 	spoken := make([][]float32, len(parts))
 	rate := 0
@@ -31,7 +31,7 @@ func renderCase(ctx context.Context, speak func(context.Context, string) ([]byte
 		if rate == 0 {
 			rate = r
 		} else if r != rate {
-			return nil, 0, fmt.Errorf("tts %q: %d Hz after %d Hz", p.Say, r, rate)
+			s = resample(s, r, rate) // a recording beside the TTS
 		}
 		spoken[i] = s
 	}
@@ -55,6 +55,26 @@ func renderCase(ctx context.Context, speak func(context.Context, string) ([]byte
 		out = mix(out, s, int(p.Over*float64(rate)))
 	}
 	return out, rate, nil
+}
+
+// resample is s from rate from to rate to, by linear interpolation: enough for speech played
+// to a mic.
+func resample(s []float32, from, to int) []float32 {
+	if from == to || from <= 0 || len(s) == 0 {
+		return s
+	}
+	out := make([]float32, int(int64(len(s))*int64(to)/int64(from)))
+	for i := range out {
+		x := float64(i) * float64(from) / float64(to)
+		j := int(x)
+		if j+1 >= len(s) {
+			out[i] = s[len(s)-1]
+			continue
+		}
+		f := float32(x - float64(j))
+		out[i] = s[j]*(1-f) + s[j+1]*f
+	}
+	return out
 }
 
 // mix adds s to out starting over samples before out's end (0: appended), clipping at ±1.

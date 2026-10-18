@@ -99,15 +99,19 @@ func (a *app) main(ctx context.Context) error {
 			"It was stopped from the admin page, or it couldn't start. Start it again?",
 			btnStart, btnUninstall, btnCancel) {
 		case 0:
-			_, err := a.admin(ctx, productName+" wants to start.", shellJoin(a.installed, "service", "start"))
+			// The window stays up from the accepted password until the server answers (up to a minute).
+			var waitErr error
+			_, err := a.adminBusy(ctx, productName+" wants to start.", shellJoin(a.installed, "service", "start"),
+				"Starting "+productName+"…", "This takes up to a minute. Your browser opens when it's started.",
+				func() { _, waitErr = a.run(ctx, a.installed, "service", "status", "--wait", "1m") })
 			if errors.Is(err, errCanceled) {
 				return nil
 			}
 			if err != nil {
 				return a.report("couldn't start", err)
 			}
-			if _, err := a.run(ctx, a.installed, "service", "status", "--wait", "1m"); err != nil {
-				return a.report("didn't start", err)
+			if waitErr != nil {
+				return a.report("didn't start", waitErr)
 			}
 			st = a.status(ctx)
 		case 1:
@@ -151,7 +155,7 @@ func (a *app) installFromApp(ctx context.Context, what string, extra ...string) 
 		title = "Updating " + productName + "…"
 	}
 	out, err := a.adminBusy(ctx, productName+" wants to "+what+" its background service.", shellJoin(argv...),
-		title, "This takes up to a minute. Your browser opens when it's done.")
+		title, "This takes up to a minute. Your browser opens when it's done.", nil)
 	if errors.Is(err, errCanceled) {
 		return nil
 	}
@@ -167,8 +171,9 @@ func (a *app) installFromApp(ctx context.Context, what string, extra ...string) 
 
 // adminBusy runs script as root (a.admin) with the progress window up while it runs. The
 // script first touches the beacon's path, so the window waits for the password dialog to be
-// answered rather than sitting behind it.
-func (a *app) adminBusy(ctx context.Context, prompt, script, title, text string) (string, error) {
+// answered rather than sitting behind it. If the script succeeds, then (when not nil) runs before
+// the window closes, so a wait for the work's result stays under it too.
+func (a *app) adminBusy(ctx context.Context, prompt, script, title, text string, then func()) (string, error) {
 	path, started, stop, err := a.beacon()
 	if err != nil {
 		// No beacon: show the window at once rather than not at all.
@@ -190,6 +195,9 @@ func (a *app) adminBusy(ctx context.Context, prompt, script, title, text string)
 	go func() {
 		defer close(done)
 		out, err := a.admin(ctx, prompt, script)
+		if err == nil && then != nil {
+			then()
+		}
 		res <- result{out, err}
 	}()
 	a.ui.busy(title, text, started, done)

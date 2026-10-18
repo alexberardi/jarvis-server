@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -24,6 +25,10 @@ func runFlags() (*flag.FlagSet, map[string]any) {
 		"voice-output":      fs.String("voice-output", "default", ""),
 		"wake-threshold":    fs.Float64("wake-threshold", 0.4, ""),
 		"no-auto-update":    fs.Bool("no-auto-update", false, ""),
+		"follow-up":         fs.Float64("follow-up", 4, ""),
+		"follow-up-silence": fs.Float64("follow-up-silence", 1, ""),
+		"no-leds":           fs.Bool("no-leds", false, ""),
+		"led-brightness":    fs.Int("led-brightness", 100, ""),
 	}
 	return fs, v
 }
@@ -113,6 +118,10 @@ func TestBadValuesAreRefused(t *testing.T) {
 		`{"wake_threshold": 0}`,
 		`{"voice": "yes"}`,
 		`{"voice_input": " "}`,
+		`{"follow_up": -1}`,
+		`{"follow_up_silence": 0}`,
+		`{"led_brightness": 101}`,
+		`{"led_brightness": 50.5}`,
 		`[1, 2]`,
 		`{"voice": tru`,
 	} {
@@ -124,7 +133,8 @@ func TestBadValuesAreRefused(t *testing.T) {
 
 func TestSetGetUnsetSaveRoundTrip(t *testing.T) {
 	var s Settings
-	for name, val := range map[string]string{"voice": "true", "island": "false", "confirm_dictation": "all", "wake_threshold": "0.55", "voice_output": "wav:out.wav"} {
+	for name, val := range map[string]string{"voice": "true", "island": "false", "confirm_dictation": "all", "wake_threshold": "0.55", "voice_output": "wav:out.wav",
+		"follow_up": "6", "follow_up_silence": "0.5", "leds": "false", "led_brightness": "40"} {
 		k, ok := Lookup(name)
 		if !ok {
 			t.Fatal(name)
@@ -136,7 +146,7 @@ func TestSetGetUnsetSaveRoundTrip(t *testing.T) {
 			t.Fatalf("%s: got %q", name, got)
 		}
 	}
-	for name, bad := range map[string]string{"voice": "maybe", "confirm_dictation": "never", "wake_threshold": "high"} {
+	for name, bad := range map[string]string{"voice": "maybe", "confirm_dictation": "never", "wake_threshold": "high", "led_brightness": "dim"} {
 		k, _ := Lookup(name)
 		c := s
 		if err := c.Set(k, bad); err == nil {
@@ -162,7 +172,8 @@ func TestSetGetUnsetSaveRoundTrip(t *testing.T) {
 		t.Fatalf("unset key written:\n%s", b)
 	}
 	back, _, err := Load(p)
-	if err != nil || *back.Voice != true || *back.Island != false || *back.ConfirmDictation != "all" || *back.WakeThreshold != 0.55 {
+	if err != nil || *back.Voice != true || *back.Island != false || *back.ConfirmDictation != "all" || *back.WakeThreshold != 0.55 ||
+		*back.FollowUp != 6 || *back.FollowUpSilence != 0.5 || *back.LEDs != false || *back.LEDBrightness != 40 {
 		t.Fatal(back, err)
 	}
 }
@@ -178,5 +189,53 @@ func TestConfirmModesMatchTheFlag(t *testing.T) {
 	// dictate.ParseConfirmMode accepts exactly these; cmd/jarvis-agent's test checks the link.
 	if !slices.Equal(ConfirmModes, []string{"off", "submit", "all"}) {
 		t.Fatal(ConfirmModes)
+	}
+}
+
+func TestApplySetsTheNodeSettingsFlags(t *testing.T) {
+	fs, v := runFlags()
+	_ = fs.Parse(nil)
+	s, _, err := Load(write(t, `{"leds": false, "led_brightness": 30, "follow_up": 0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Apply(fs); err != nil {
+		t.Fatal(err)
+	}
+	if !*v["no-leds"].(*bool) || *v["led-brightness"].(*int) != 30 || *v["follow-up"].(*float64) != 0 {
+		t.Fatal(*v["no-leds"].(*bool), *v["led-brightness"].(*int), *v["follow-up"].(*float64))
+	}
+}
+
+func TestUpdateIsSerialized(t *testing.T) {
+	p := filepath.Join(t.TempDir(), FileName)
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := Update(p, func(s *Settings) error {
+				if i%2 == 0 {
+					n := i
+					s.LEDBrightness = &n
+				} else {
+					on := true
+					s.Voice = &on
+				}
+				return nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	s, _, err := Load(p)
+	if err != nil || s.Voice == nil || s.LEDBrightness == nil {
+		t.Fatalf("a writer's change was lost: %+v %v", s, err)
+	}
+	bad := "never"
+	if err := Update(p, func(s *Settings) error { s.ConfirmDictation = &bad; return nil }); err == nil {
+		t.Fatal("saved an invalid file")
 	}
 }

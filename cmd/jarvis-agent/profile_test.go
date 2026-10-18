@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
+	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
 
@@ -108,7 +111,9 @@ func TestPiToolset(t *testing.T) {
 func TestPiNodeConfig(t *testing.T) {
 	vf := &voiceFlags{threshold: 0.6, noChimes: true, followUp: 4, followSilence: 0.5, bargeIn: true}
 	hf := &hatFlags{mode: "auto", brightness: 40}
-	got := piNodeConfig(vf, hf, nil, false)()
+	st := piState(vf, hf)
+	state := func() pinode.State { return st }
+	got := piNodeConfig(state, true, nil, false)()
 	want := map[string]any{
 		"wake_word_threshold": 0.6, "wake_ack_audio_enabled": false,
 		"follow_up_listen_seconds": 4.0, "follow_up_silence_duration": 0.5, "barge_in_enabled": true,
@@ -119,21 +124,65 @@ func TestPiNodeConfig(t *testing.T) {
 		t.Errorf("no HAT:\n got %v\nwant %v", got, want)
 	}
 	// Detected, but its LEDs couldn't be opened (or --hat off).
-	hw := piNodeConfig(vf, &hatFlags{mode: "off"}, nil, true)()
+	off := piState(vf, &hatFlags{mode: "off"})
+	hw := piNodeConfig(func() pinode.State { return off }, true, nil, true)()
 	if h := hw["hardware"].(map[string]any); h["hat_detected"] != true || h["led_chain_available"] != false || hw["led_enabled"] != false {
 		t.Errorf("detected, off: %v", hw)
 	}
 	// LEDs open and the button line held.
 	hd := &hatDevices{leds: hat.NewLEDs(nopStrip{}, slog.New(slog.NewTextHandler(io.Discard, nil))), closeLine: func() error { return nil }}
 	defer hd.leds.Close()
-	on := piNodeConfig(vf, hf, hd, true)()["hardware"]
+	on := piNodeConfig(state, true, hd, true)()["hardware"]
 	if !reflect.DeepEqual(on, map[string]any{"hat_detected": true, "led_chain_available": true, "button_available": true}) {
 		t.Errorf("HAT open: %v", on)
 	}
 	// The button line busy (the Python node holds it).
 	hd.closeLine = nil
-	if h := piNodeConfig(vf, hf, hd, true)()["hardware"].(map[string]any); h["button_available"] != false || h["led_chain_available"] != true {
+	if h := piNodeConfig(state, true, hd, true)()["hardware"].(map[string]any); h["button_available"] != false || h["led_chain_available"] != true {
 		t.Errorf("button busy: %v", h)
+	}
+}
+
+// The app's settings change what node_config reports, and --no-leds starts the LEDs dark.
+func TestPiNodeReportsUpdates(t *testing.T) {
+	vf := &voiceFlags{threshold: 0.4, followUp: 4, followSilence: 0.5}
+	hf := &hatFlags{mode: "auto", brightness: 100, noLEDs: true}
+	if piState(vf, hf).LEDEnabled {
+		t.Fatal("--no-leds reported as led_enabled")
+	}
+	r := &node.Runner{}
+	live := voice.NewLive()
+	path := filepath.Join(t.TempDir(), "agent.json")
+	cfg := wirePiNode(r, vf, hf, nil, live, path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if len(r.Verbs) != 3 {
+		t.Fatalf("verbs %v", r.Verbs)
+	}
+	b, _ := json.Marshal([]map[string]any{{"command": "update_node_config", "details": map[string]any{
+		"settings": map[string]any{"led_brightness_percent": 30, "wake_word_threshold": 0.7}}}})
+	d := &node.Dispatcher{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Verbs: map[string]func(context.Context, map[string]any){}}
+	for name, v := range r.Verbs {
+		d.Verbs[name] = func(ctx context.Context, det map[string]any) { v(ctx, nil, det) }
+	}
+	d.Handle(context.Background(), b)
+	got := cfg()
+	if got["led_brightness_percent"] != 30 || got["wake_word_threshold"] != 0.7 {
+		t.Fatalf("node_config %v", got)
+	}
+	s, _, err := settings.Load(path)
+	if err != nil || *s.LEDBrightness != 30 || *s.WakeThreshold != 0.7 {
+		t.Fatalf("saved %+v %v", s, err)
+	}
+}
+
+// A Pi speaks its settings verbs and its voice-profile verbs: neither wiring drops the other's.
+func TestAPiKeepsAllItsVerbs(t *testing.T) {
+	r := &node.Runner{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	wirePiNode(r, &voiceFlags{threshold: 0.4}, &hatFlags{mode: "auto", brightness: 100}, nil, voice.NewLive(), "", log)
+	addVerbs(r, voiceProfileVerbs(piProfile, voice.NewMic(), log))
+	want := []string{"enroll_voice", "measure_ambient_noise", "preview_led_pattern", "update_node_config", "verify_voice"}
+	if got := slices.Sorted(maps.Keys(r.Verbs)); !slices.Equal(got, want) {
+		t.Fatalf("verbs = %v", got)
 	}
 }
 

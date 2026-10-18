@@ -19,6 +19,9 @@ func setProcAttrs(cmd *exec.Cmd) {
 // interrupt has no graceful equivalent for a console engine on Windows; the caller kills.
 func interrupt(*os.Process) error { return errors.ErrUnsupported }
 
+// interruptGroup is unused on Windows: no pid files are written there (see procIdentity).
+func interruptGroup(int) error { return errors.ErrUnsupported }
+
 // killTree kills the engine and its descendants, best effort. taskkill walks the tree from
 // the live parent, so this must run before the engine exits.
 func killTree(p *os.Process) {

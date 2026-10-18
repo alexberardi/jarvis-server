@@ -123,6 +123,9 @@ type Spec struct {
 	// process tree is killed at once.
 	StopTimeout time.Duration
 	Restart     RestartPolicy
+	// PIDDir, if set, holds a pid file for the running engine so Sweep can kill it after
+	// jarvisd dies without stopping it (macOS has no Pdeathsig). Names must be unique in it.
+	PIDDir string
 }
 
 func (s Spec) withDefaults() Spec {
@@ -589,6 +592,7 @@ func (s *Supervisor) terminate(r *run, p *proc) {
 		}
 	}
 	killLeftovers(p.cmd.Process.Pid)
+	s.removePID()
 }
 
 // proc is one launched engine process.
@@ -621,6 +625,7 @@ func (s *Supervisor) spawn() (*proc, error) {
 	if err := contain(cmd.Process); err != nil {
 		s.log.Warn("engine not tied to jarvisd's lifetime; it may outlive a crash", "err", err)
 	}
+	s.writePID(cmd.Process.Pid)
 	s.log.Info("engine started", "pid", cmd.Process.Pid, "path", s.spec.Path)
 	p := &proc{cmd: cmd, exited: make(chan struct{})}
 	go func() {

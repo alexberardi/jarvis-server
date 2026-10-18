@@ -7,12 +7,13 @@ import (
 	"time"
 )
 
-// Backend is what the dispatcher needs from jarvisd: verification and the two result sinks.
+// Backend is what the dispatcher needs from jarvisd: verification and the result sinks.
 // *CC implements it; tests fake it.
 type Backend interface {
 	Verify(ctx context.Context, rid string) (bool, error)
 	PostToolReport(ctx context.Context, rid string, report any) error
 	PostToolResult(ctx context.Context, rid string, output map[string]any) error
+	PostAmbientResult(ctx context.Context, rid string, payload map[string]any) error
 }
 
 // Dispatcher turns command messages from jarvis/nodes/{id}/commands into tool work.

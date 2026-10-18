@@ -99,7 +99,7 @@ turn c2: wake 0.500, recorded 1.00 s (silence threshold 300), heard "", -> non_s
 func TestParseTurns(t *testing.T) {
 	got := parseTurns(agentOut)
 	want := []Turn{
-		{Heard: "What time is it?", Outcome: "spoken", Said: `It's "ten" past -> three.`, ClientTools: []string{"get_current_time", "other_tool"}, Recorded: 2.88, TookSecs: 5.873},
+		{Heard: "What time is it?", Outcome: "spoken", Said: `It's "ten" past -> three.`, ClientTools: []string{"get_current_time", "other_tool"}, Recorded: 2.88, ReplySecs: 1.2, TookSecs: 5.873},
 		{Heard: "", Outcome: "non_speech", Recorded: 1, TookSecs: 1.5},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -209,8 +209,9 @@ func TestRenderCase(t *testing.T) {
 		n++
 		return wav(t, tone(10, 0.1), 16000*n), nil
 	}
-	if _, _, err := renderCase(context.Background(), mixed, []AudioPart{{Say: "a"}, {Say: "b"}}, 1); err == nil {
-		t.Error("two sample rates: no error")
+	// A second rate (a recorded voice beside the TTS) is resampled to the first.
+	if s, rate, err := renderCase(context.Background(), mixed, []AudioPart{{Say: "a"}, {Say: "b"}}, 1); err != nil || rate != 16000 || len(s) != 15 {
+		t.Errorf("two sample rates: %d Hz, %d samples, %v", rate, len(s), err)
 	}
 	if _, _, err := renderCase(context.Background(), func(context.Context, string) ([]byte, error) { return nil, fmt.Errorf("503") }, []AudioPart{{Say: "a"}}, 1); err == nil || !strings.Contains(err.Error(), `tts "a"`) {
 		t.Errorf("tts failure: %v", err)

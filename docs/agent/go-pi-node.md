@@ -124,9 +124,9 @@ Tags:
 | `callback` | `:301-422` | `S:callbacks.go:460` | `GET /callbacks/{job}`, `POST …/result` | later |
 | `routine` (carries the full definition) | `:926-982` | `S:routines_run.go:104-110` | `/device-control-results/{rid}` | later |
 | `enroll_voice` / `verify_voice` | `:554-803` | `S:media.go:495` | `/media/whisper/voice-profiles/*`, `/mobile/voice-profile-results/{rid}` | done in Go core (Pi profile only; a desktop's speaker is the signed-in user) |
-| `update_node_config` (settings push; restart only for `wake_word_model`) | `:1092-1177` | `S:commands.go:91` | – | later |
-| `preview_led_pattern` | `:1180-1221` | `S:commands.go:112` | – | later |
-| `measure_ambient_noise` | `:1257-1383` | `S:ambient.go:64` | `POST /nodes/{id}/ambient-noise-measurements/{rid}/result` | later |
+| `update_node_config` (settings push; restart only for `wake_word_model`) | `:1092-1177` | `S:commands.go:91` | – | done in the Pi profile (§3.14) |
+| `preview_led_pattern` | `:1180-1221` | `S:commands.go:112` | – | done in the Pi profile (§3.14) |
+| `measure_ambient_noise` | `:1257-1383` | `S:ambient.go:64` | `POST /nodes/{id}/ambient-noise-measurements/{rid}/result` | done in the Pi profile (§3.14) |
 | `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | later |
 | `/k2/provision` (K2 AES key) | `:1622-1669` | `S:settingsreq.go:316` | `GET …/k2/provision/{rid}`, `POST …/k2/ack/{rid}` | built for the desktop agent (`internal/agent/nodesettings`, [DESIGN §16](DESIGN.md)); the Go Pi node reuses it |
 | `/settings/request` (AES-256-GCM snapshot with K2, AAD `{node}:settings:snapshot`), plus a backstop poll on connect | `:1837-1876`, `N:services/settings_snapshot_service.py:749-857` | `S:settingsreq.go:92` | `PUT …/settings/requests/{rid}/snapshot` | built for the desktop agent (`internal/agent/nodesettings`), including the app's secret Sync as source (`include_values` + user) and target (`settings:secrets` push), pinned by `sync_golden.json`; the Pi adds its node_config and hardware |
@@ -723,7 +723,7 @@ JARVIS_AGENT_LOG=debug ...                                                 # log
   every release. A short press logs only: the Go node has no alert queue yet (Python reads
   queued alerts). The MQTT `button/*` publishes are not sent (the ACL denies them, §1.4).
 - Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`), alert-queue
-  wiring of the `alert` pattern, `preview_led_pattern` over MQTT (parity item 5.4).
+  wiring of the `alert` pattern. (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
 
 **Verified on hardware** (Python node stopped for each test and restarted after; both Pis are back
 as they were):
@@ -829,6 +829,64 @@ sudo systemctl start jarvis-node
 
 On a desktop: `JARVIS_AGENT_LOG=debug jarvis-agent listen --once`, ask for something long and
 say "hey Jarvis" over it (`--once` exits 1: the turn ended `interrupted`).
+### 3.14 Parity 5.4: node settings, LED preview, ambient noise (2026-10-17)
+
+The Pi profile answers three more `/commands` verbs (`internal/agent/pinode`, handed to
+`node.Runner.Verbs` beside the voice-profile verbs of parity 10; the desktop profile still
+ignores them). Decisions:
+[decisions/2026-10-17-pi-node-settings-verbs.md](../decisions/2026-10-17-pi-node-settings-verbs.md).
+
+**`update_node_config`** (`N:handle_update_node_config`). First, exactly as Python's
+`_reject_trust_anchor_keys`: `node_id`, `api_key`, every `*_url`, `mqtt_*` and `_*` key and the
+update/egress consent keys (`allow_updates`, `wake_word_model_autodownload_enabled`,
+`release_track`) are dropped and logged. Then each key the Go node has is applied live and saved
+to agent.json in one serialized write (`settings.Update`, shared with the voice toggle):
+
+| Python key | agent.json key / flag | Live |
+|---|---|---|
+| `led_enabled` | `leds` / `--no-leds` | `LEDs.SetEnabled` |
+| `led_brightness_percent` | `led_brightness` / `--led-brightness` | `LEDs.SetBrightness` |
+| `wake_word_threshold` | `wake_threshold` / `--wake-threshold` | the running pipeline, from its next chunk (`voice.Live.Tune`) |
+| `wake_ack_audio_enabled` | `chimes` / `--no-chimes` | same |
+| `follow_up_listen_seconds` | `follow_up` / `--follow-up` | same (from the next turn) |
+| `follow_up_silence_duration` | `follow_up_silence` / `--follow-up-silence` | same |
+
+A bad value skips that key with a log line. `volume_percent` and `is_muted` are logged and
+neither applied nor saved: the Go node has no Pi volume control yet. `wake_word_model` is
+ignored (the Go node has one wake word), so `restart` never restarts anything; every key it takes
+applies live. Any other key is logged and ignored. The settings snapshot's `node_config` reports
+the values in effect.
+
+**`preview_led_pattern`** (`N:handle_preview_led_pattern`): `hat.LEDs.Preview`, then back to
+what was showing (a real voice state set meanwhile survives the timer). `duration_seconds`
+defaults to 3 (also for null or a non-number) and is clamped to [0.5, 30]; an unknown pattern
+renders off, as Python's. No reply. Without the HAT it logs and does nothing.
+
+**`measure_ambient_noise`** (`N:handle_measure_ambient_noise`): verified with
+`POST /commands/{rid}/verify` first. `duration_seconds` defaults to 3, clamped to [1, 10]. The
+running pipeline takes `round(d / 80 ms)` chunks from its own capture with wake detection paused
+(`voice.Live.Measure`; a turn in progress finishes first, up to 30 s), then starts listening
+afresh. Stats as Python's: numpy-linear p50/p75/p95 over float32 and the max, suggested
+`clamp(round(p75 × 1.3 / 100) × 100, 1000, 10000)` with Python's half-to-even `round`
+(golden: `tools/golden/export_ambient.py` → `internal/agent/pinode/testdata`). Failures post
+`{"success": false, "error": …}`: `audio_bus_unavailable` (voice off), `no_audio_captured`,
+`capture_failed: …` (including a pipeline that stayed busy).
+
+**Verified** with unit tests and end to end against a sandbox jarvisd: the agent as `--profile pi`
+with the three verbs sent through jarvisd's own HTTP API (node-config, led/preview, ambient
+measurement and poll), and a `wav:` microphone (a square wave of RMS 1200 → 25 chunks in 2 s,
+suggested 1600). **Not yet on a Pi.** On the lab Pi 4 (never the prod kitchen node):
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# In the app's node settings for this node:
+#   Test LEDs: each pattern shows ~3 s, then the previous state returns
+#   LED brightness / LEDs off: applies at once; restart the agent: still applied (agent.json)
+#   Silence threshold → Set Automatically: a value 1000..10000 comes back; the log has p50/p75/p95
+#   Wake sensitivity: the log's next wake uses it; agent.json has wake_threshold
+sudo systemctl start jarvis-node
+```
 
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
@@ -1009,8 +1067,16 @@ These are **still needed**; install.sh step lines are cited:
    2. Heartbeat `pending_update` → updater. **Server side done 2026-10-17:** jarvisd stores
       `version_info.runtime` (`cc_nodes.runtime`, on the node response); a `runtime "go"` node
       follows this server like a desktop agent (heartbeat `server_version`, "latest" = jarvisd's
-      own tag, never the jarvis-node-setup release). Python nodes are unchanged. The node-side
-      applier is still to do.
+      own tag, never the jarvis-node-setup release). Python nodes are unchanged. **Node side built
+      2026-10-18** (loop #161): the desktop agent's self-update (stage, swap, health gate,
+      rollback, failures on `/nodes/tasks/{id}/status`) runs on the Pi install. `install-pi.sh`
+      gives `/opt/jarvis-agent` to the node's user (root never runs or writes a file there; the
+      overlay source moved to `/usr/local/share/jarvis-agent`); the restart is sudoers'
+      `sudo -n /usr/bin/systemctl restart jarvis-agent.service` with no quit first, and the
+      installer runs in a `systemd-run --user` unit of the node user's manager (linger), never
+      detached (the unit's restart stops its whole cgroup). CI: `agent-upgrade-e2e -pi` (the Pi
+      layout under a fake systemd). **Pending on-device** (lab Pi 4): one real update, and whether
+      `systemd-run --user` reaches pi's manager from the system unit.
    3. The tarball + install.sh variant (§6).
       **3a built 2026-10-17:** `scripts/install-pi.sh` (agent in `/opt/jarvis-agent`; overlay, config.txt,
       modprobe, asound.conf, mixer baseline, groups + linger, sudoers, journald, swappiness, swap, the
@@ -1034,7 +1100,8 @@ These are **still needed**; install.sh step lines are cited:
       2026-10-17 (§3.13)** in the shared pipeline (desktop and Pi); lockstep rig tests only,
       not yet heard on a Pi or a desktop.
    3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the sidecar.
-   4. `update_node_config`, `measure_ambient_noise`, LED preview.
+   4. `update_node_config`, `measure_ambient_noise`, LED preview. **Done 2026-10-17 (§3.14)**
+      (unit tests and a sandbox jarvisd end to end; not yet on a Pi).
    5. K2 + settings snapshot (AES-GCM).
    6. Packages.
    7. factory-reset.

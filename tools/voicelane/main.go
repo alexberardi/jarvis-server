@@ -3,7 +3,8 @@
 // case's audio, and its spoken reply is recorded, transcribed and checked.
 //
 //	voicelane --sandbox N --agent BIN --out DIR [--wake-models DIR] [--cases FILE] [--filter RE]
-//	          [--repeat 3] [--audio wav|pipewire] [--reply-wait 60s] [--silent-wait 5s] [--agent-arg FLAG]...
+//	          [--repeat 3] [--audio wav|pipewire|pi] [--pi-host USER@HOST] [--pi-card N] [--voices DIR]
+//	          [--reply-wait 60s] [--silent-wait 5s] [--agent-arg FLAG]...
 //
 // A case's audio is the sandbox's own TTS (POST /api/v0/media/tts/speak as the seeded node)
 // plus silence and generated noise. The reply is transcribed by the sandbox's whisper, and the
@@ -20,6 +21,15 @@
 //     its private PipeWire (JARVIS_E2E_AUDIO=private); each case is played into the virtual mic
 //     (pw-play) while the virtual speaker's monitor is recorded (pw-record). The response time
 //     is the end of the audio to the reply's first sound.
+//   - pi: a real Pi over ssh (pi.go, pi.sh): the node built for linux-arm64 runs one long
+//     `listen` on the HAT's mic and speaker, with the sandbox's ports forwarded to the Pi's
+//     loopback; each case is played out of the Pi's own speaker with aplay (beside the node's
+//     output, never through it) and what the node played is teed to a file. The Pi side stops
+//     any Jarvis node there (and an audio server holding the card) and puts it all back when
+//     the run ends. Overnight only (docs/decisions/2026-10-18-e2e-pi-voice-lane.md).
+//
+// --voices DIR says a case's line with a recording (DIR/<slug of the text>.wav) where there is
+// one, instead of the TTS.
 //
 // The node runs with its own HOME and XDG dirs under --out, with the sandbox's seeded node
 // identity, so the user's own agent is never touched. Writes --out/results.json in the E2E
