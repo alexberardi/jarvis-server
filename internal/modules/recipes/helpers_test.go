@@ -110,6 +110,9 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	q.Start(ctx)
+	// Stop the workers before the DB closes and the temp dirs go: a poll still in flight
+	// leaves SQLite's -wal/-shm files behind and RemoveAll fails ("directory not empty").
+	t.Cleanup(func() { cancel(); q.Wait() })
 	return &env{m: m, h: mux, d: d, q: q, blobs: bs, hh: hh, ctx: ctx}
 }
 
