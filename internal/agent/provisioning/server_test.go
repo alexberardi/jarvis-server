@@ -53,6 +53,8 @@ func (f *fakeWiFi) StartAPMode(_ context.Context, ssid string) error {
 	f.note("ap " + ssid)
 	return f.apErr
 }
+func (f *fakeWiFi) StopAPMode(context.Context) error            { f.note("ap down"); return nil }
+func (f *fakeWiFi) CurrentSSID(context.Context) (string, error) { return "", nil }
 
 // fakeCC answers /api/v0/nodes/register with status (0 means 200 with a key) and counts calls.
 type fakeCC struct {
