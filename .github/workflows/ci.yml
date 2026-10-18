@@ -142,6 +142,31 @@ jobs:
         env:
           JARVIS_HOST_NATIVE: "1"
         run: go test -count=1 -v -run Native ./internal/agent/host/
+      # The device id from the real OS lookups (/etc/machine-id, IOPlatformUUID, MachineGuid):
+      # present, the same in two processes, and different for another OS user. Prints only
+      # pass/fail, never the id.
+      - name: Device id (this runner's own OS)
+        run: scripts/deviceid-native-check.sh "${{ runner.temp }}/deviceid" ${{ matrix.os != 'windows-latest' && '--other-user' || '' }}
+      - name: Device id as another Windows user
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'deviceid'
+          icacls $dir /grant '*S-1-1-0:(OI)(CI)RX' | Out-Null
+          $pw = [guid]::NewGuid().ToString() + 'aA1!'
+          net user jarvisprobe $pw /add | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'net user failed' }
+          $cred = [pscredential]::new('jarvisprobe', (ConvertTo-SecureString $pw -AsPlainText -Force))
+          $env:JARVIS_HOST_NATIVE = '1'
+          $env:JARVIS_DEVICEID_DIFFERS_FROM = Join-Path $dir 'fp'
+          $out = Join-Path $env:RUNNER_TEMP 'deviceid-other.out'
+          $err = Join-Path $env:RUNNER_TEMP 'deviceid-other.err'
+          $p = Start-Process -FilePath (Join-Path $dir 'deviceid.test.exe') -ArgumentList '-test.run','^TestNativeDeviceID$','-test.v' `
+            -Credential $cred -WorkingDirectory $dir -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError $err
+          Get-Content $out, $err
+          if ($p.ExitCode -ne 0) { throw "device id test as another user exited $($p.ExitCode)" }
       - name: Static build (CGO_ENABLED=0)
         env:
           CGO_ENABLED: "0"
