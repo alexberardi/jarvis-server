@@ -3,7 +3,7 @@ package computeruse
 import "testing"
 
 func TestIsInternalTool(t *testing.T) {
-	for _, n := range []string{ToolObserve, ToolAct, ToolFiles, ToolStop, ToolRecordStart, ToolRecordStop, "computer_future"} {
+	for _, n := range []string{ToolObserve, ToolAct, ToolFiles, ToolStop, ToolRecordStart, ToolRecordStop, ToolRecordDelete, "computer_future"} {
 		if !IsInternalTool(n) {
 			t.Errorf("IsInternalTool(%q) = false", n)
 		}

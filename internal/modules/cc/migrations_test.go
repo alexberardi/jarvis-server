@@ -41,7 +41,7 @@ var expectedTables = []string{
 	// watches (autonomy P2)
 	"cc_watches",
 	// computer control (plan P3)
-	"cc_computer_approvals",
+	"cc_computer_approvals", "cc_taught_workflows", "cc_recordings",
 }
 
 // Cut by decisions in docs/cc/QUESTIONS.md; they must never come back by accident.
