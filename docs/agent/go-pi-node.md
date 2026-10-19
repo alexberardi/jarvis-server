@@ -778,6 +778,16 @@ silence window (after the 2 s minimum) cut the speaker off. With a wait set, sil
 recording only once speech has been heard (a chunk at or above the threshold) or the wait is
 over; the 7 s cap still applies. 0 keeps the Python node's behaviour.
 
+**`--listen-preroll DURATION`** (default 1s; `Endpointing.PreRollSecs`; loop #229). The wake
+chime plays synchronously after the fire, and everything the microphone captured meanwhile used
+to be flushed (the Python node's `history_secs=0`). A command said right after "hey Jarvis"
+starts under the chime, so on the Pi 4 "Set a timer" was heard as "It's at a timer". Now up to
+this much of the audio queued since the fire (at most the 1.28 s queue) goes in front of the
+recording. Endpointing still starts after the chime, and the follow-up gate's level reference is
+measured without the pre-roll (it may hold the chime's echo). The wake word is not in it: it
+ended before the fire. The turn line reports it (`recorded 2.40 s (pre-roll 0.32 s, …)`, log
+`pre_roll_s`), which is how the Pi lane measures the chime gap. 0 is the old behaviour.
+
 **`--wake-debounce DURATION`** (default 8s, the Python node's; at least 500ms): no second wake
 this soon after one.
 
