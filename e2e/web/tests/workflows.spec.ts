@@ -14,7 +14,7 @@ const cc = (p: string) => `${env('SBX_CC')}/api/v0${p}`
 test('lists the taught workflows: yours and the shared one', async ({ page }) => {
   await page.goto('/chat')
   await sidebar(page).getByRole('link', { name: 'Workflows' }).click()
-  await expect(page.getByRole('heading', { name: 'Workflows' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Workflows', exact: true })).toBeVisible()
   const bank = page.getByRole('link', { name: /Download bank statement/ })
   await expect(bank).toContainText('Yours')
   await expect(bank).toContainText('5 steps')
@@ -58,7 +58,7 @@ test('edits a workflow and the server keeps the edit', async ({ page }) => {
       'Go to statements',
       'Enter the month {month}',
       'Download the CSV',
-      'Pick the checking account',
+      'Pick the {account} account',
     ])
     expect(after.steps[4].action.text).toBe('{account}')
     expect(after.steps[0].risk).toBe('submit_third_party')
@@ -77,7 +77,7 @@ test('views and deletes a recording', async ({ page }) => {
   const token = tokenOf('superuser')
   await page.goto('/workflows')
   await page.getByRole('link', { name: 'Recordings' }).first().click()
-  await expect(page.getByRole('heading', { name: 'Recordings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recordings', exact: true })).toBeVisible()
   const items = page.getByTestId('recording')
   await expect(items).toHaveCount(2)
   await expect(items.nth(0)).toContainText('7 steps')
