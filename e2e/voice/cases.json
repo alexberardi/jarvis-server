@@ -19,9 +19,9 @@
       "expect": {"reply": "(?i)\\bseven\\b|\\b7\\b", "max_secs": 20}
     },
     {
-      "name": "the time, through the clock tool",
+      "name": "the time in another city, through the clock tool",
       "model": true,
-      "audio": [{"say": "Hey Jarvis."}, {"silence": 0.4}, {"say": "What time is it?"}, {"silence": 2}],
+      "audio": [{"say": "Hey Jarvis."}, {"silence": 0.4}, {"say": "What time is it in Tokyo?"}, {"silence": 2}],
       "expect": {"tool": "get_current_time", "reply": "(?i)\\d|o'clock|past|to|noon|midnight|morning|afternoon|evening", "max_secs": 20}
     },
     {

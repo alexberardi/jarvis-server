@@ -34,11 +34,18 @@ type Manifest struct {
 	Targets     []string    `yaml:"targets"`
 	Components  []Component `yaml:"components"`
 	Packages    []PipDep    `yaml:"packages"`
-	// Pi-only system setup: a desktop agent installs no system packages and runs no
-	// post-install steps, so a package that needs them is refused.
-	AptPackages []any `yaml:"apt_packages"`
-	AptSources  []any `yaml:"apt_sources"`
-	PostInstall []any `yaml:"post_install"`
+	// Pi-only system setup, run by the Pi profile's System: a desktop agent installs no system
+	// packages and runs no post-install steps, so a package that needs them is refused there.
+	AptPackages []string         `yaml:"apt_packages"`
+	AptSources  []AptSource      `yaml:"apt_sources"`
+	PostInstall []map[string]any `yaml:"post_install"`
+}
+
+// AptSource is a third-party apt repository a package needs (its signing key and its line).
+type AptSource struct {
+	Name   string `yaml:"name"`
+	KeyURL string `yaml:"key_url"`
+	Repo   string `yaml:"repo"`
 }
 
 // Component is one installable part of a package.
@@ -74,6 +81,8 @@ var (
 	// manifest must not be able to pass flags to uv or point it at another index.
 	pipNameRE    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,-]+\])?$`)
 	pipVersionRE = regexp.MustCompile(`^(==|>=|<=|~=|!=|>|<)?[0-9A-Za-z][0-9A-Za-z.*+!_-]*(,(==|>=|<=|~=|!=|>|<)[0-9A-Za-z][0-9A-Za-z.*+!_-]*)*$`)
+	// A Debian package name, as N:scripts/jarvis-apt-install checks it.
+	aptNameRE = regexp.MustCompile(`^[a-z][a-z0-9.+-]*$`)
 )
 
 // ParseManifest reads and checks a manifest. It refuses anything that could reach outside the
@@ -105,6 +114,21 @@ func ParseManifest(b []byte) (*Manifest, error) {
 		}
 		if v := strings.TrimSpace(d.Version); v != "" && !pipVersionRE.MatchString(v) {
 			return nil, fmt.Errorf("%s: invalid version %q for %s", ManifestFile, d.Version, d.Name)
+		}
+	}
+	for _, p := range m.AptPackages {
+		if !aptNameRE.MatchString(p) {
+			return nil, fmt.Errorf("%s: invalid apt package name %q", ManifestFile, p)
+		}
+	}
+	for _, src := range m.AptSources {
+		if src.Name == "" || src.KeyURL == "" || src.Repo == "" {
+			return nil, fmt.Errorf("%s: an apt_sources entry needs a name, a key_url and a repo", ManifestFile)
+		}
+	}
+	for i, op := range m.PostInstall {
+		if t, _ := op["type"].(string); postInstallOps[t] == "" {
+			return nil, fmt.Errorf("%s: post_install[%d]: unknown op type %q", ManifestFile, i, op["type"])
 		}
 	}
 	return &m, nil
@@ -209,6 +233,25 @@ func (m *Manifest) CheckDesktop(goos string, runs ...string) error {
 	}
 	if len(m.Commands()) == 0 && !slices.ContainsFunc(m.Components, func(c Component) bool { return slices.Contains(runs, c.Type) }) {
 		return fmt.Errorf("%s has no commands a computer can run", m.label())
+	}
+	return nil
+}
+
+// Node is the target name a package declares to run on a Pi node (DESIGN.md §8).
+const Node = "node"
+
+// CheckPi refuses a package a Pi node can't run: another OS in platforms, targets that leave
+// out the node, or nothing it loads (commands, or the runs types: Manager.runs). Its system
+// setup is the Pi profile's System's to run.
+func (m *Manifest) CheckPi(runs ...string) error {
+	if len(m.Platforms) > 0 && !slices.Contains(m.Platforms, "linux") {
+		return fmt.Errorf("%s supports %s, not linux", m.label(), strings.Join(m.Platforms, ", "))
+	}
+	if len(m.Targets) > 0 && !slices.Contains(m.Targets, Node) {
+		return fmt.Errorf("%s is made for computers, not Pi nodes", m.label())
+	}
+	if len(m.Commands()) == 0 && !slices.ContainsFunc(m.Components, func(c Component) bool { return slices.Contains(runs, c.Type) }) {
+		return fmt.Errorf("%s has no commands a node can run", m.label())
 	}
 	return nil
 }

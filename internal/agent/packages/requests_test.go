@@ -12,7 +12,8 @@ import (
 // fakeAPI is jarvisd's side of a package request: the verify answer and the posted results.
 type fakeAPI struct {
 	mu      sync.Mutex
-	verify  map[string]verifyAnswer // by request id
+	verify  map[string]verifyAnswer   // by request id
+	tests   map[string]map[string]any // test-install verify answers, by request id
 	calls   []string
 	results map[string]map[string]any // path -> body
 }
@@ -24,7 +25,13 @@ func (f *fakeAPI) Do(_ context.Context, method, path string, body, out any) erro
 	switch {
 	case method == "GET" && strings.HasSuffix(path, "/verify"):
 		rid := strings.TrimSuffix(path[strings.LastIndex(path[:len(path)-len("/verify")], "/")+1:], "/verify")
-		v, ok := f.verify[rid]
+		var v any
+		var ok bool
+		if strings.Contains(path, "/test-install/") {
+			v, ok = f.tests[rid]
+		} else {
+			v, ok = f.verify[rid]
+		}
 		if !ok {
 			return errors.New("404 Package install request not found")
 		}

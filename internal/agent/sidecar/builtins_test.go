@@ -47,7 +47,16 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 
 	var mu sync.Mutex
 	var mixer []string
+	var pushes []string
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v0/node/push-notification" {
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			pushes = append(pushes, string(b))
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"content":"You have one storm warning."}`))
 	}))
 	defer llm.Close()
@@ -87,12 +96,12 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 		names[tl.Name] = true
 	}
 	for _, want := range []string{"calculate", "set_timer", "check_timers", "cancel_timer", "check_alerts", "shopping_list",
-		"todo_list", "control_node", "tell_joke", "get_current_time", "answer_question", "convert_measurement"} {
+		"todo_list", "control_node", "tell_joke", "get_current_time", "answer_question", "convert_measurement", "reminder"} {
 		if !names[want] {
 			t.Errorf("no %s among %v", want, names)
 		}
 	}
-	for _, skipped := range []string{"control_device", "routine", "reminder", "send_link"} {
+	for _, skipped := range []string{"control_device", "routine", "send_link"} {
 		if names[skipped] {
 			t.Errorf("%s is offered; it still needs the Python node", skipped)
 		}
@@ -157,6 +166,52 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	}
 	if out := call("tell_joke", nil); out["success"] != true {
 		t.Errorf("tell_joke = %v", out)
+	}
+
+	// Reminders: set by the command into the agent's store, nothing due yet.
+	out = call("reminder", map[string]any{"action": "set", "text": "check the oven", "relative_minutes": 30})
+	if out["success"] != true {
+		t.Fatalf("reminder set = %v", out)
+	}
+	due, pending, err := sc.RemindersDue(ctx)
+	if err != nil || len(due) != 0 || pending != 1 {
+		t.Fatalf("RemindersDue before it is due = %v, %d, %v", due, pending, err)
+	}
+	// Half an hour on: the record's time moved back in the store, read by a new sidecar (as
+	// after a restart or a package install), which restores it and fires it once.
+	recs := st.Records("set_reminder", time.Now())
+	if len(recs) != 1 {
+		t.Fatalf("stored reminders: %v", recs)
+	}
+	rec := recs[0].Data
+	rec.Set("due_at", json.RawMessage(`"`+time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)+`"`))
+	if err := st.SaveData("set_reminder", recs[0].Key, rec, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSecret("REMINDER_PUSH_NOTIFICATIONS", "true", "integration", "string", nil); err != nil {
+		t.Fatal(err)
+	}
+	sc.Close()
+	sc2, err := StartWith(ctx, py, listing, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Storage: st, Host: h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc2.Close()
+	due, pending, err = sc2.RemindersDue(ctx)
+	if err != nil || len(due) != 1 || due[0].Text != "check the oven" || due[0].ID != recs[0].Key || pending != 1 ||
+		due[0].UserID == nil || *due[0].UserID != uid {
+		t.Fatalf("RemindersDue once due = %+v, %d, %v", due, pending, err)
+	}
+	if again, pending, err := sc2.RemindersDue(ctx); err != nil || len(again) != 0 || pending != 0 {
+		t.Errorf("RemindersDue again = %v, %d, %v; want it said once", again, pending, err)
+	}
+	if d, _ := st.Data("set_reminder", recs[0].Key, time.Now()); d.Value("announced") != true {
+		t.Errorf("stored after firing: %v", d)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(pushes) != 1 || !strings.Contains(pushes[0], `"body":"check the oven"`) || !strings.Contains(pushes[0], `"target_type":"user"`) {
+		t.Errorf("pushes: %v", pushes)
 	}
 }
 

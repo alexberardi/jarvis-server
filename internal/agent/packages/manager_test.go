@@ -322,13 +322,13 @@ components:
 	}
 }
 
-// On a Pi (built-ins on) a package's device families and managers are listed for the sidecar
+// On a Pi (built-ins and System on) a package's device families and managers are listed for the sidecar
 // and not reported as skipped. A desktop refuses a package of only those, as before; with a
 // command too it skips them.
 func TestPiListsDeviceFamilies(t *testing.T) {
 	r := newRepos(t)
 	repo := r.add(t, "o/govee", "HEAD", govee())
-	m, _, _ := newTestManager(t, r)
+	m, _, _, _ := newPiManager(t, r)
 	m.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands"}
 	details, err := m.Install(context.Background(), repo, "")
 	if err != nil {

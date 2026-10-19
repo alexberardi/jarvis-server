@@ -32,6 +32,7 @@ type voiceFlags struct {
 	bargeIn       bool
 	debounce      time.Duration
 	onsetWait     time.Duration
+	preRoll       time.Duration
 }
 
 // minWakeDebounce is the shortest --wake-debounce: below it one utterance of the wake word
@@ -58,8 +59,15 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 		"no second wake this soon after one (at least 500ms)")
 	fs.DurationVar(&v.onsetWait, "listen-onset-wait", 0,
 		"after the wake word, wait up to this long for speech before silence can end the recording (0: silence counts from the start, as the Python node)")
+	fs.DurationVar(&v.preRoll, "listen-preroll", defaultPreRoll,
+		"keep up to this much of what the microphone heard while the wake chime played, in front of the command (0: drop it, as the Python node)")
 	return v
 }
+
+// defaultPreRoll covers the wake chime (210 ms) plus the speaker's open and drain latency on a
+// Pi: a command said right after "hey Jarvis" starts under the chime (#229). The queue holds
+// at most 1.28 s anyway.
+const defaultPreRoll = time.Second
 
 // voiceStack is a loaded wake word detector plus the pipeline settings.
 type voiceStack struct {
@@ -105,6 +113,7 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	cfg.Chimes = !f.noChimes
 	cfg.Debounce = wakeDebounce(f.debounce)
 	cfg.Endpointing.OnsetWaitSecs = max(0, f.onsetWait.Seconds())
+	cfg.Endpointing.PreRollSecs = max(0, f.preRoll.Seconds())
 	cfg.FollowUp.ListenSecs = f.followUp
 	cfg.BargeIn.Enabled = f.bargeIn
 	if f.followSilence > 0 {
@@ -178,7 +187,7 @@ func listen(ctx context.Context, args []string) error {
 		return fmt.Errorf("voice: %w", err)
 	}
 	defer vs.close()
-	if hd := openHat(hf, log); hd != nil {
+	if hd := openHat(hf, nil, log); hd != nil {
 		defer hd.Close()
 		vs.addIndicator(&ledCue{leds: hd.leds, log: log})
 	}
@@ -227,8 +236,8 @@ func listen(ctx context.Context, args []string) error {
 }
 
 func printTurn(t voice.Turn) {
-	fmt.Printf("turn %s: wake %.3f, recorded %.2f s (silence threshold %.0f), ",
-		t.ConversationID, t.WakeScore, t.RecordedSecs, t.Threshold)
+	fmt.Printf("turn %s: wake %.3f, recorded %.2f s (pre-roll %.2f s, silence threshold %.0f), ",
+		t.ConversationID, t.WakeScore, t.RecordedSecs, t.PreRollSecs, t.Threshold)
 	printExchange(t.Exchange)
 	for i, f := range t.FollowUps {
 		fmt.Printf("  follow-up %d: recorded %.2f s, ", i+1, f.RecordedSecs)

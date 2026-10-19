@@ -52,7 +52,10 @@ f 755 opt/jarvis-agent/jarvis-agent
 d 755 usr
 d 755 usr/local
 d 755 usr/local/sbin
+f 755 usr/local/sbin/jarvis-apt-install
+f 755 usr/local/sbin/jarvis-apt-source
 f 755 usr/local/sbin/jarvis-net-watchdog
+f 755 usr/local/sbin/jarvis-post-install
 d 755 usr/local/share
 d 755 usr/local/share/jarvis-agent
 d 755 usr/local/share/jarvis-agent/openwakeword
@@ -65,7 +68,7 @@ d 755 var/log
 d 755 var/log/journal
 ## commands
 apt-get update -q
-env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils
+env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils python3
 chown pi: /opt/jarvis-agent
 dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 udevadm control --reload
@@ -198,10 +201,14 @@ pi ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot, /usr/s
 pi ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
 # A crash loop (a self-update's broken release) hits the unit's start limit; the rollback's restart needs it reset.
 pi ALL=(root) NOPASSWD: /usr/bin/systemctl reset-failed jarvis-agent, /usr/bin/systemctl reset-failed jarvis-agent.service
+# Pantry packages' system setup (parity 5.6): apt packages, apt sources and post_install ops,
+# through root-owned wrappers that shape-check their arguments (install_package_wrappers).
+pi ALL=(root) NOPASSWD: /usr/local/sbin/jarvis-apt-install *
+pi ALL=(root) NOPASSWD: /usr/local/sbin/jarvis-apt-source *
+pi ALL=(root) NOPASSWD: /usr/local/sbin/jarvis-post-install *
 # Provisioning drives Wi-Fi through NetworkManager's D-Bus API, which polkit allows instead
 # (configure_nm_ap); hostapd/dnsmasq get entries here only if the NM AP fails on a chip.
 # Not yet, added with the step that needs them (go-pi-node.md §7):
-# TODO(parity 5.6, packages): the apt and post-install wrappers.
 # TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
 ## etc/sysctl.d/99-jarvis-node.conf
 # Keep the jarvis node's working set resident in RAM: SD-card swap is slow and causes 7-8 s wakes

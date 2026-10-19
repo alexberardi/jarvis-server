@@ -1,12 +1,16 @@
 package cc
 
 import (
+	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/watches"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // A desktop agent's tools, as it sends them: each carries keywords (internal/agent/node Spec).
@@ -269,5 +273,76 @@ func TestTrailingBareCall(t *testing.T) {
 		if ok != (c.name != "") || (ok && (call.Function.Name != c.name || prose != c.prose)) {
 			t.Errorf("%q: %v %q %v", c.in, call, prose, ok)
 		}
+	}
+}
+
+// #221: "stop watching the example.com one" answered "I've stopped watching it" with no
+// cancel_watch call this turn (list_watches ran the turn before) gets one nudge to call it.
+func TestFollowThroughNotCancelled(t *testing.T) {
+	conv := &conversation{serverNames: map[string]bool{"list_watches": true, "cancel_watch": true}}
+	utt := "stop watching the example.com one"
+	msgs := []chatMsg{{Role: "user", Content: "what are you watching?"},
+		{Role: "assistant", ToolCalls: []parse.ToolCall{{Function: parse.FunctionCall{Name: "list_watches"}}}},
+		{Role: "tool", Content: `{"watches": []}`}, {Role: "assistant", Content: "You're watching one thing."},
+		{Role: "user", Content: utt}}
+	if nag := followThroughNag(conv, utt, "Okay, I've stopped watching the example.com price.", msgs); nag != notCancelledRetry {
+		t.Fatalf("nag %q", nag)
+	}
+	if nag := followThroughNag(conv, utt, "Which one do you mean?", msgs); nag != "" {
+		t.Fatalf("question: %q", nag)
+	}
+	// Spent once per run.
+	nagged := append(slices.Clone(msgs), sysMsg(notCancelledRetry))
+	if nag := followThroughNag(conv, utt, "Stopped it.", nagged); nag != "" {
+		t.Fatalf("second nag %q", nag)
+	}
+	ran := append(slices.Clone(msgs), chatMsg{Role: "assistant", ToolCalls: []parse.ToolCall{{Function: parse.FunctionCall{Name: "cancel_watch"}}}},
+		chatMsg{Role: "tool", Content: `{"status": "cancelled"}`})
+	if nag := followThroughNag(conv, utt, "Stopped watching price on example.com item.", ran); nag != "" {
+		t.Fatalf("after cancel_watch: %q", nag)
+	}
+	// Without the watch tools offered, nothing to nudge toward.
+	if nag := followThroughNag(&conversation{serverNames: map[string]bool{}}, utt, "I've stopped watching it.", msgs); nag != "" {
+		t.Fatalf("no tool: %q", nag)
+	}
+}
+
+// #221 through the engine: the reply claims the watch stopped without cancel_watch; the nudge
+// asks for the call, which runs and cancels the watch, and the reply comes after its result.
+func TestFollowThroughNotCancelledEngine(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B, func(m *Module) { m.DevSpeakerHints = true })
+	ve.stt.recognition = true // the watch tools are offered to a speaker the household can recognise
+	ve.set(settingWatchesEnabled, true, settings.Scope{HouseholdID: voiceHH})
+	uid := int64(7)
+	w, err := ve.m.watches.Create(context.Background(), watches.Watch{HouseholdID: voiceHH, UserID: &uid,
+		Title: "price on example.com item", SourceKind: watches.SourceWeb,
+		Source:    watches.Source{URL: "https://www.example.com/item", Extract: "the price"},
+		Condition: priceBelow100, FirePolicy: watches.FireOnce, CadenceSeconds: 3600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ve.start("w1", weatherTool)
+	ve.eng.say("Okay, I've stopped watching the example.com price.")
+	ve.eng.push(nativeCall("call_w1", "cancel_watch", `{"watch": "the example.com one"}`))
+	ve.eng.say("Stopped watching price on example.com item.")
+	b := ve.turn("/api/v0/voice/command", "w1", "stop watching the example.com one",
+		map[string]any{"speaker_user_id": 7}).want(200).json()
+	nagged, result := false, ""
+	for _, r := range ve.eng.requests() {
+		for _, m := range messagesOf(r) {
+			s, _ := m["content"].(string)
+			nagged = nagged || m["role"] == "system" && strings.HasPrefix(s, nagNotCancelled)
+			if m["role"] == "tool" {
+				result = s
+			}
+		}
+	}
+	got, err := ve.m.watches.Get(context.Background(), voiceHH, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nagged || !strings.Contains(result, `"cancelled"`) || got.State != watches.StateDone ||
+		b["assistant_message"] != "Stopped watching price on example.com item." {
+		t.Fatalf("nagged %v, result %s, state %s, reply %v", nagged, result, got.State, b["assistant_message"])
 	}
 }

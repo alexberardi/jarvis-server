@@ -18,13 +18,16 @@ import (
 //   - "Do you remember where my parking spot is?" got "Not in my memory" without a search
 //     (nagRecallFirst);
 //   - "Open Omerite and type hello there." opened the app, then told the user to type "hello
-//     there" themselves (nagUnfinished).
+//     there" themselves (nagUnfinished);
+//   - "Stop watching the example.com one" got "I've stopped watching it" with no cancel_watch
+//     call, and the watch stayed on (#221, nagNotCancelled).
 
 const (
 	nagRecallFirst  = "[RECALL_FIRST]"
 	nagUnfinished   = "[UNFINISHED_REQUEST]"
 	nagNoMemoryTool = "[NO_MEMORY_TOOL]"
 	nagUnsaved      = "[NOT_SAVED]"
+	nagNotCancelled = "[NOT_CANCELLED]"
 )
 
 const (
@@ -36,6 +39,9 @@ const (
 		"Never tell the user to type it themselves."
 	unsavedRetry = nagUnsaved + " Nothing was saved: remember has not run this turn, so your reply is not true yet. " +
 		"Call remember now with what the user asked you to remember."
+	notCancelledRetry = nagNotCancelled + " Nothing was stopped: cancel_watch has not run this turn, so your reply " +
+		"is not true yet. Call cancel_watch now with the watch the user means (its watch_id from list_watches if " +
+		"you have it), then tell the user its message."
 	noMemoryToolRetry = nagNoMemoryTool + " None of your tools can save that, so nothing was saved. Answer " +
 		"again: tell the user plainly, in one short sentence, that you can't remember it for them here. Do not " +
 		"say it was noted or saved."
@@ -74,6 +80,9 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 	case !ran && !conv.serverNames["remember"] && countNags(msgs, nagNoMemoryTool) < 1 &&
 		tf.IsRememberRequest(utterance) && tf.ClaimsRemembered(reply):
 		return noMemoryToolRetry
+	case conv.serverNames["cancel_watch"] && !calledThisTurn(msgs, "cancel_watch") && countNags(msgs, nagNotCancelled) < 1 &&
+		tf.IsStopWatchingRequest(utterance) && tf.ClaimsStoppedWatching(reply):
+		return notCancelledRetry
 	case !ran && conv.serverNames["recall"] && countNags(msgs, nagRecallFirst) < 1 &&
 		tf.AsksOwnFact(utterance) && tf.DeniesStoredFact(reply):
 		return recallFirstRetry
@@ -104,5 +113,6 @@ func calledThisTurn(msgs []chatMsg, name string) bool {
 
 // isFollowThroughNag reports one of this file's nudges (scrubbed like the other nags).
 func isFollowThroughNag(m chatMsg) bool {
-	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved)
+	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved) ||
+		isNag(m, nagNotCancelled)
 }

@@ -55,7 +55,7 @@ func PiBuiltins(requirement string) *Builtins {
 		requirement = NodeCommandsRequirement
 	}
 	return &Builtins{Requirement: requirement, Package: "commands",
-		Skip: []string{"control_device_command", "reminder_command", "routine_command", "send_link_command"}}
+		Skip: []string{"control_device_command", "routine_command", "send_link_command"}}
 }
 
 // pythonVersion is the interpreter uv installs for the venv: its own standalone build, so the

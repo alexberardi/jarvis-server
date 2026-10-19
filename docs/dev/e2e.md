@@ -318,7 +318,7 @@ sample rate (resampled to the TTS's); other lines are still the TTS.
 | wake + timer | "Hey Jarvis. Set a timer for five minutes." gets a spoken reply about the timer (the Go Pi node has no timer tool yet) |
 | lights | "…Turn on the kitchen lights." gets a reply about the lights (no `control_device` for this node yet) |
 | a question | "…How many days are there in a week?" is answered seven |
-| the time, through the clock tool | "…What time is it?" calls `get_current_time` and says a time |
+| the time in another city, through the clock tool | "…What time is it in Tokyo?" calls `get_current_time` and says a time (the local time is in the prompt, so a plain "what time is it?" is answered without the tool, #229) |
 | no wake word stays silent | the timer and lights commands without "Hey Jarvis" |
 | background noise stays silent | 8 s of pink noise |
 | music with talk over it stays silent | a chord loop with a sentence spoken over it |

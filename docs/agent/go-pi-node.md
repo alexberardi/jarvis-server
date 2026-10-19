@@ -131,7 +131,7 @@ Tags:
 | `/k2/provision` (K2 AES key) | `:1622-1669` | `S:settingsreq.go:316` | `GET …/k2/provision/{rid}`, `POST …/k2/ack/{rid}` | built for the desktop agent (`internal/agent/nodesettings`, [DESIGN §16](DESIGN.md)); the Go Pi node reuses it |
 | `/settings/request` (AES-256-GCM snapshot with K2, AAD `{node}:settings:snapshot`), plus a backstop poll on connect | `:1837-1876`, `N:services/settings_snapshot_service.py:749-857` | `S:settingsreq.go:92` | `PUT …/settings/requests/{rid}/snapshot` | built for the desktop agent (`internal/agent/nodesettings`), including the app's secret Sync as source (`include_values` + user) and target (`settings:secrets` push), pinned by `sync_golden.json`; the Pi adds its node_config and hardware |
 | `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines later |
-| `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | later (sidecar) |
+| `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | built (§7 parity 5.6; apt/post_install and test-install on the Pi profile only) |
 | `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | later |
 | `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | done in the Pi profile (§3.17) |
 | `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | done in the Pi profile (§3.15) |
@@ -721,10 +721,32 @@ JARVIS_AGENT_LOG=debug ...                                                 # log
 - **Button** = `button_service.py`: active low with pull-up via go-gpiocdev (gpiochip0 line 17),
   50 ms debounce, `shutdown_warning` after 1 s held, power off after 3 s
   (`sudo -n systemctl poweroff`; `--button-poweroff=false` turns it off), the overlay cleared on
-  every release. A short press logs only: the Go node has no alert queue yet (Python reads
-  queued alerts). The MQTT `button/*` publishes are not sent (the ACL denies them, §1.4).
-- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`), alert-queue
-  wiring of the `alert` pattern. (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
+  every release. A short press reads every pending alert, most urgent first, then removes them,
+  or says "No new notifications." (N:`announce_pending_and_flush`); with nothing heard (no
+  pipeline listening) they stay queued and the LEDs flash `error` for 2 s (loop #175). The MQTT
+  `button/*` publishes are not sent (the ACL denies them, §1.4).
+- **Alert pattern** (loop #175): the stable layer is `alert` (middle LED purple) while the queue
+  holds an alert at priority 3 or above, `normal` otherwise (N:main.py's `on_change`, re-synced
+  by the queue's 10 s sweep).
+- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`).
+  (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
+
+**Reminders and alerts on the lab Pi 4** (loop #175; not run yet: no runner reaches the Pi). Lab
+Pi 4 only, never the kitchen node:
+
+```bash
+sudo systemctl stop jarvis-node
+JARVIS_AGENT_LOG=debug jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# "hey Jarvis, remind me in 2 minutes to check the oven" → "Reminder set: …"
+#   by ~5 min after setting it (the poll is 300 s while none is pending, then 60 s):
+#   log "reminders: due", the middle LED purple,
+#   then "Reminder: check the oven" said between turns, log "alerts: announced"; LED back to white
+# set another, and keep a turn going when it falls due: it is said once the turn ends
+# "hey Jarvis, what's up?" with one queued: whats_up lists it, the LED goes white
+# a short button press with one queued: it is read out; with none: "No new notifications."
+# the push (reminder settings: push notifications on): the owner's phone gets "Reminder"
+sudo systemctl start jarvis-node
+```
 
 **Verified on hardware** (Python node stopped for each test and restarted after; both Pis are back
 as they were):
@@ -777,6 +799,16 @@ the wake word counts trailing silence from its first chunk, so a pause longer th
 silence window (after the 2 s minimum) cut the speaker off. With a wait set, silence can end the
 recording only once speech has been heard (a chunk at or above the threshold) or the wait is
 over; the 7 s cap still applies. 0 keeps the Python node's behaviour.
+
+**`--listen-preroll DURATION`** (default 1s; `Endpointing.PreRollSecs`; loop #229). The wake
+chime plays synchronously after the fire, and everything the microphone captured meanwhile used
+to be flushed (the Python node's `history_secs=0`). A command said right after "hey Jarvis"
+starts under the chime, so on the Pi 4 "Set a timer" was heard as "It's at a timer". Now up to
+this much of the audio queued since the fire (at most the 1.28 s queue) goes in front of the
+recording. Endpointing still starts after the chime, and the follow-up gate's level reference is
+measured without the pre-roll (it may hold the chime's echo). The wake word is not in it: it
+ended before the fire. The turn line reports it (`recorded 2.40 s (pre-roll 0.32 s, …)`, log
+`pre_roll_s`), which is how the Pi lane measures the chime gap. 0 is the old behaviour.
 
 **`--wake-debounce DURATION`** (default 8s, the Python node's; at least 500ms): no second wake
 this soon after one.
@@ -1076,7 +1108,7 @@ fail only because they import 3-line `core.*` files that re-export SDK classes:
 | send_link | `jarvis_log_client`; lazy `RestClient` + discovery → `/node/send-link` | needs **CC POST** |
 | shopping_list, todo_list | `jarvis_log_client`; SDK `JarvisStorage` | needs **Storage** backend |
 | export_shopping_list, export_todo_list | as above, plus a hand-rolled `/node/inbox-item` POST (should use SDK `JarvisInbox`) | needs Storage + Inbox |
-| reminder | `services.reminder_service` (itself only JarvisStorage + logger); firing is in `agents/reminder_agent.py` | needs Storage; the **host** owns the due-poll and announcement |
+| reminder | `services.reminder_service` (itself only JarvisStorage + logger); firing is in `agents/reminder_agent.py` | needs Storage; the **host** owns the due-poll and announcement (loop #175: the sidecar's `reminders_due`, polled by `internal/agent/reminders`) |
 | set_timer, cancel_timer, check_timers | `services.timer_service` (SQLCipher `SessionLocal`, `threading.Timer`, TTS on expiry) | needs **Timer** backend |
 | control_node | `utils.audio_volume` (pactl/amixer, config write) | needs **AudioControl** backend |
 | whats_up | CC `chat_text`, `services.alert_queue_service` (in-memory), discovery | needs **LLM** + **AlertQueue** |
@@ -1186,6 +1218,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
 - journald, swappiness, swapfile (`:107-154,889-901,2090-2114`).
 - The net watchdog (`:2116-2146`).
 - The sudoers file (`:1819-1862`).
+- The package wrappers `jarvis-apt-install`, `jarvis-apt-source`, `jarvis-post-install` and their
+  sudoers lines (`:1662-1800,1842-1844`): **done 2026-10-19** (§7 parity 5.6).
 
 **Replaced by the Go binary or its packaging:**
 - The systemd unit's ExecStart and environment (`:1865-1958`); the unit keeps `User=pi`,
@@ -1286,12 +1320,12 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
       2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
       profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the
-      sidecar loads its commands next to the Pantry packages, less control_device, reminder,
-      routine and send_link (they still call the Python node's code). Their SDK backends ask
+      sidecar loads its commands next to the Pantry packages, less control_device, routine and
+      send_link (they still call the Python node's code). Their SDK backends ask
       the Go agent over the child→Go RPC (`internal/agent/sdkhost`): LLM and CC HTTP
       (`/api/v0/node/...` only) as the node, Inbox, Signals, the timers
       (`internal/agent/timers`, persisted in the state dir, said on expiry between turns), the
-      alert queue (in memory; its producers are #175), the volume (pactl on the default sink or
+      alert queue (in memory), the volume (pactl on the default sink or
       `jarvis_output`, else amixer; persisted) and speech; CommandInvoker runs in the sidecar.
       Tests: the real commands (calculate, timers, control_node, check_alerts, shopping_list,
       tell_joke) against the real Go backends with a real Python, each backend's RPC, and the
@@ -1300,6 +1334,18 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       change. Not done: `update_node_config`'s `volume_percent`/`is_muted` and the settings
       snapshot's volume still say "no Pi volume control" (§3.14); they can use the same
       `sdkhost.Audio`.
+      **Reminders, alerts and the button built 2026-10-19** (loop #175,
+      [decision](../decisions/2026-10-19-pi-reminders-alerts.md)): `reminder` loads (the sidecar
+      stands in for `jarvis_log_client` and restores the reminders when it loads them); the
+      reminder agent's run is the sidecar's `reminders_due`, polled by `internal/agent/reminders`
+      (60 s while one is pending, 300 s otherwise, as N:reminder_agent.py), each due reminder a
+      priority-3 alert for 10 minutes; `sdkhost.Announcer` says the alerts at priority 3 and up
+      between turns (N:alert_announcer.py) and removes what it said; the `alert` LED pattern and
+      the button's short press (§3.11). Not ported: Python's 8 s inline listen after an
+      announcement (a reply to it needs the wake word). Tests: the queue's watcher, the
+      announcer and the poller with an injected clock, the button through `hat.Button`, and the
+      pinned reminder command set, restored and fired once (with its push) through a real
+      sidecar. **Pending on-device** (lab Pi 4, §3.11).
 
    Ship it to the lab Pi alongside the Python node (`install_mode` decides).
 5. **Parity**, in order:
@@ -1312,7 +1358,18 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    4. `update_node_config`, `measure_ambient_noise`, LED preview. **Done 2026-10-17 (§3.14)**
       (unit tests and a sandbox jarvisd end to end; not yet on a Pi).
    5. K2 + settings snapshot (AES-GCM).
-   6. Packages.
+   6. Packages. **Built 2026-10-19** (loop #174,
+      [decision](../decisions/2026-10-19-pi-node-package-system-setup.md)): the Pi profile runs a
+      package's `apt_sources`, `apt_packages` and `post_install` through the Python node's root
+      wrappers (`sudo -n /usr/local/sbin/jarvis-apt-source|jarvis-apt-install|jarvis-post-install`,
+      `internal/agent/packages/system.go`), removes its drop-ins on uninstall and failed installs,
+      reruns the previous version's ops on revert, heals orphaned drop-ins at boot, and answers
+      `test-install` (Forge drafts served 20 minutes). `install-pi.sh` ships the wrappers (byte for
+      byte, checked by `install-pi-check.sh`) and their sudoers lines. Tests: exec fakes for every
+      wrapper call (argv, stdin JSON, order, rollback), a fake jarvisd + Pantry for test-install,
+      the golden install, and N:'s 68 wrapper tests against the vendored copies. **Pending
+      on-device** (lab Pi 4): Music Assistant installed from the app (shairport-sync, its drop-in,
+      a "play …" turn), uninstalled, and a Forge test install; the commands are in the PR.
    7. factory-reset.
    8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
       against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).
