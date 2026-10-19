@@ -22,7 +22,7 @@ const maxContinues = 6
 type CallLog struct {
 	Name   string         `json:"name"`
 	Args   map[string]any `json:"args"`
-	Result any            `json:"result,omitempty"` // the node's answer (node tools only)
+	Result any            `json:"result,omitempty"` // the node's answer, or what the server tool returned (serverCallLogs)
 }
 
 // TurnLog is everything one turn did.
@@ -186,13 +186,7 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		tl.End = time.Now()
 		tl.Seconds = tl.End.Sub(start).Seconds()
 		tl.LLM = readTap(d.TapLog, mark)
-		for _, e := range tl.LLM {
-			for _, c := range e.Reply.Calls() {
-				if !slices.Contains(nodeNames, c.Function.Name) {
-					tl.ServerCalls = append(tl.ServerCalls, CallLog{Name: c.Function.Name, Args: c.Args()})
-				}
-			}
-		}
+		tl.ServerCalls = serverCallLogs(tl.LLM, nodeNames)
 	}()
 	text := say
 	if voiced {
@@ -244,6 +238,83 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		tl.Reply = resp.ValidationRequest.Question
 	}
 	return tl
+}
+
+// serverCallLogs are the model calls in the tapped entries that command-center ran itself (not
+// in the node's set), each with its result: the role=tool message the next request sends the
+// model (serverResult).
+func serverCallLogs(entries []TapEntry, nodeNames []string) []CallLog {
+	var out []CallLog
+	for i, e := range entries {
+		for _, c := range e.Reply.Calls() {
+			if !slices.Contains(nodeNames, c.Function.Name) {
+				out = append(out, CallLog{Name: c.Function.Name, Args: c.Args(), Result: serverResult(entries[i+1:], c)})
+			}
+		}
+	}
+	return out
+}
+
+// serverResult is the call's result in the first later request that has messages: the
+// role=tool message with its id, else (a text-path model's calls are parsed with fresh ids) the
+// last one of its name after that request's last assistant message. JSON content is decoded;
+// nil when there is none.
+func serverResult(later []TapEntry, c ToolCall) any {
+	for _, e := range later {
+		var req struct {
+			Messages []struct {
+				Role       string          `json:"role"`
+				ToolCallID string          `json:"tool_call_id"`
+				Name       string          `json:"name"`
+				Content    json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if json.Unmarshal(e.Request, &req) != nil || len(req.Messages) == 0 {
+			continue
+		}
+		var byName json.RawMessage
+		for _, m := range req.Messages {
+			switch {
+			case m.Role == "assistant":
+				byName = nil
+			case m.Role != "tool":
+			case c.ID != "" && m.ToolCallID == c.ID:
+				return decodeContent(m.Content)
+			case m.Name == c.Function.Name:
+				byName = m.Content
+			}
+		}
+		if byName != nil {
+			return decodeContent(byName)
+		}
+		return nil
+	}
+	return nil
+}
+
+// decodeContent is a message's content (a string, or text parts): JSON text decoded, other
+// text as is.
+func decodeContent(raw json.RawMessage) any {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(raw, &parts) != nil {
+			var v any
+			_ = json.Unmarshal(raw, &v)
+			return v
+		}
+		for _, p := range parts {
+			s += p.Text
+		}
+	}
+	var v any
+	if json.Unmarshal([]byte(s), &v) == nil {
+		return v
+	}
+	return s
 }
 
 func toolNames(tools []json.RawMessage) []string {
