@@ -58,7 +58,9 @@ way `TestEveryAPIRouteHasATier` keeps every `/api` route classified. How to use 
   entry lists. A new flow therefore needs its screens in `coverage.json` before the mobile
   suite is green again, the same both-directions rule as screens. `pending` stays free text
   (no required `#N`): some screens have no item yet, and an invented one would be worse. The
-  map was redone from mobile `5ee0208`'s flows and its `.maestro/COVERAGE.md`: 22 covered,
+  map was redone from mobile `5ee0208`'s flows and its `.maestro/COVERAGE.md`, and checked
+  again at `8c09db0` (mobile #121 adds `household-watches-errands.yaml`, on HouseholdEdit): 22 covered,
   15 manual (the Store screens other than the Pantry tab are packages, manual by the user's
   2026-10-17 call), 27 pending (Home Assistant's screens on its own item split out of #154,
-  `AddComputer`'s approval flow, and the screens COVERAGE.md calls later).
+  `AddComputer`'s approval flow, the Devices, Routines and Inbox screens COVERAGE.md puts
+  later on #145, and the CommandData-side ones it leaves out of piece 6 with no item yet).
