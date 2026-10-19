@@ -18,6 +18,17 @@ JSON-lines requests on stdin:
     <- {"id": 5, "result": {"key", "record"} | {"rejected": "..."} | {"failed": "..."}}
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
+A Pi's packages may also have device families and managers (the listing's "families" and
+"managers"; describe adds them as "families"/"managers"). Their methods return the body the
+Python node posts to jarvisd (docs/agent/go-pi-node.md §3.16):
+
+    -> {"method": "device_scan"}                              <- {"devices": [...]}
+    -> {"method": "device_list", "params": {"manager_name"}}  <- {"devices", "manager_name", "can_edit_devices"} | {"error"}
+    -> {"method": "device_state", "params": {"details": {...}}}  <- {"entity_id", "domain", "state", "ui_hints"} | {..., "error"}
+    -> {"method": "device_removed", "params": {"details": {...}}}  <- {"ran": bool}
+    -> {"method": "store_auth", "params": {"provider", "values", "user_id"}}  <- {"stored": "family x" | null}
+    -> {"method": "device_families"}                          <- {"families": [...], "managers": [...]}
+
 Storage (JarvisStorage: command secrets and command data) is the agent's, not this process's
 (DESIGN §16). A registered StorageBackend asks the Go agent over the same pipes, between a
 request and its reply:
