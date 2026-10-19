@@ -120,6 +120,8 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
+		// Again before each listen: the last reply's command may have just started a player.
+		p.duck(ctx)
 		p.cue(CueFollowUp, time.Duration(timeout*float64(time.Second)))
 		pcm, err := p.listenFollowUp(ctx, s, timeout, it, afterReply, &used)
 		if err != nil {
