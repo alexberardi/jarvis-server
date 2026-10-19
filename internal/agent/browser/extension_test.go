@@ -125,6 +125,12 @@ func TestExtensionSurface(t *testing.T) {
 			t.Errorf("snapCollect lost its secret-field guard %q", guard)
 		}
 	}
+	// act never types into a password field.
+	for _, guard := range []string{`type === "password"`, `code: "password_field"`} {
+		if !strings.Contains(jsFunc(t, js, "actDo"), guard) {
+			t.Errorf("actDo lost its password-field refusal %q", guard)
+		}
+	}
 	// act finds its element only through the extension's own isolated-world state: the page can
 	// write data-jarvis-* attributes itself, so they never pick the element.
 	for _, fn := range []string{"actFind", "actDo"} {
@@ -136,7 +142,11 @@ func TestExtensionSurface(t *testing.T) {
 	}
 	for _, banned := range []string{"onMessageExternal", "onConnectExternal", "runtime.onMessage", "runtime.onConnect.",
 		"eval(", "new Function", "innerHTML", ".value", "fetch(", "XMLHttpRequest", "WebSocket"} {
-		if strings.Contains(strings.Replace(js, snap, "", 1), banned) {
+		in := js
+		if banned == ".value" { // snapCollect alone reads values; every other ban holds there too
+			in = strings.Replace(js, snap, "", 1)
+		}
+		if strings.Contains(in, banned) {
 			t.Errorf("background.js contains %q", banned)
 		}
 	}

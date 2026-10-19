@@ -63,11 +63,25 @@ func (t *Tools) Snapshot(ctx context.Context, tab string, max int) (computeruse.
 		e := &s.Elements[i]
 		e.Name = clipRunes(e.Name, snapshotNameMax)
 		e.Value = clipRunes(e.Value, snapshotNameMax)
-		if e.Element().Secure {
+		if secretField(*e) {
 			e.Value = "" // never, even from an extension that sent it
 		}
 	}
 	return s, nil
+}
+
+// secretField is snapCollect's secret(): a password, hidden, card or one-time-code field,
+// whose value a snapshot never carries.
+func secretField(e computeruse.SnapElement) bool {
+	if e.Element().Secure || strings.EqualFold(e.Type, "hidden") {
+		return true
+	}
+	for _, a := range strings.Fields(strings.ToLower(e.Autocomplete)) {
+		if strings.HasPrefix(a, "cc-") || a == "one-time-code" {
+			return true
+		}
+	}
+	return false
 }
 
 // Act does op on the element ref ("e12") of snapshot gen in tab. value is set_value's text,

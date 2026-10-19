@@ -16,6 +16,9 @@ func TestSnapshotParses(t *testing.T) {
 			map[string]any{"ref": "e2", "role": "button", "name": long, "type": "button", "state": []any{"disabled"}},
 			map[string]any{"ref": "e3", "role": "textbox", "name": "Password", "type": "password", "value": "leaked"},
 			map[string]any{"ref": "e4", "role": "link", "name": "Cart", "type": "a", "frame": 3},
+			map[string]any{"ref": "e5", "role": "textbox", "name": "Card", "type": "text", "autocomplete": "billing cc-number", "value": "4111111111111111"},
+			map[string]any{"ref": "e6", "role": "textbox", "name": "Code", "type": "text", "autocomplete": "one-time-code", "value": "123456"},
+			map[string]any{"ref": "e7", "role": "textbox", "type": "hidden", "value": "csrf-token"},
 		}})
 	})
 	ts := NewTools(h)
@@ -23,7 +26,7 @@ func TestSnapshotParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Gen != 7 || s.URL != "https://shop.test/" || s.Title != "Shop" || len(s.Elements) != 4 {
+	if s.Gen != 7 || s.URL != "https://shop.test/" || s.Title != "Shop" || len(s.Elements) != 7 {
 		t.Fatalf("snapshot %+v", s)
 	}
 	if e := s.Find("e1"); e == nil || e.Role != "searchbox" || e.Value != "socks" || e.Frame != 0 {
@@ -34,6 +37,11 @@ func TestSnapshotParses(t *testing.T) {
 	}
 	if e := s.Find("e3"); e.Value != "" || !e.Element().Secure {
 		t.Errorf("password field: %+v", e)
+	}
+	for _, ref := range []string{"e5", "e6", "e7"} {
+		if e := s.Find(ref); e.Value != "" {
+			t.Errorf("secret field %s value %q", ref, e.Value)
+		}
 	}
 	if e := s.Find("e4"); e.Frame != 3 {
 		t.Errorf("e4 frame %d", e.Frame)
