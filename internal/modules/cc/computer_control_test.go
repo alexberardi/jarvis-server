@@ -5,9 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // computerTools is a desktop agent's tool list with its computer-control tools.
@@ -170,5 +172,31 @@ func TestComputerControlOffHintAndErrandRefusal(t *testing.T) {
 	}
 	if got := errand("Order a phone case"); strings.Contains(got, "computer_control_off") {
 		t.Fatalf("run_errand with the switch on: %s", got)
+	}
+}
+
+// An errand a phone call can do is not refused: with phone calls on, the errand planner may
+// run "order a pie from Tony's" by phone (make_phone_call), so no switch is needed for it.
+func TestComputerControlOffLeavesPhoneErrands(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.setComputerControl("off")
+	ve.start("c1", weatherTool)
+	errand := func(goal string) string {
+		res := ve.m.tools.Execute(context.Background(), servertools.Call{Name: "run_errand", Args: servertools.Obj("goal", goal)},
+			servertools.Turn{ConversationID: "c1", HouseholdID: voiceHH, NodeID: ve.node.id})
+		return pyjson.Dumps(res, false)
+	}
+	if got := errand("order me a phone case"); !strings.Contains(got, `"error": "computer_control_off"`) {
+		t.Fatalf("phone calls off: %s", got)
+	}
+
+	ve.set(phone.SettingEnabled, true, settings.Scope{HouseholdID: voiceHH})
+	if got := errand("order a large pie from Tony's for pickup at 6"); strings.Contains(got, "computer_control_off") {
+		t.Fatalf("phone errand refused: %s", got)
+	}
+	ve.eng.say("On it.")
+	ve.turn("/api/v0/voice/command", "c1", "order a large pie from Tony's for pickup at 6", map[string]any{"turn_source": "wake", "wake_confidence": 0.9}).want(200)
+	if u := lastUserOf(ve); strings.Contains(u, "[computer control:") {
+		t.Fatalf("hint with phone calls on: %q", u)
 	}
 }

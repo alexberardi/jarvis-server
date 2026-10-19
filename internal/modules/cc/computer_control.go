@@ -121,10 +121,11 @@ func withoutComputerTools(tools, commands []*pyjson.Object) ([]*pyjson.Object, [
 }
 
 // computerControlOff is offMessage when a request for goal needs a computer and no computer in
-// the household has the switch on, else "". A failed lookup is logged and lets it through: the
-// agent refuses on its own (C8).
+// the household has the switch on, else "". With phone calls on, the errand planner may do it by
+// phone instead (make_phone_call: "order a pie from Tony's"), so it is let through to the planner.
+// A failed lookup is logged and lets it through: the agent refuses on its own (C8).
 func (m *Module) computerControlOff(ctx context.Context, hh, goal string) string {
-	if !needsComputer(goal) {
+	if !needsComputer(goal) || m.phoneCallsEnabled(ctx, hh) {
 		return ""
 	}
 	cc, err := m.computerControl(ctx, hh)
@@ -136,6 +137,14 @@ func (m *Module) computerControlOff(ctx context.Context, hh, goal string) string
 		return ""
 	}
 	return cc.offMessage()
+}
+
+// phoneCallsEnabled is the errand planner's own check for make_phone_call (errands.PhoneCalls).
+func (m *Module) phoneCallsEnabled(ctx context.Context, hh string) bool {
+	if m.ErrandPhone != nil {
+		return m.ErrandPhone.Enabled(ctx, hh)
+	}
+	return errandPhone{m}.Enabled(ctx, hh)
 }
 
 // computerControlHint is the turn's line when it needs a computer and none has the switch on.
