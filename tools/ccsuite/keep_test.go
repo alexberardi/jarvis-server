@@ -52,3 +52,25 @@ func TestDown(t *testing.T) {
 		t.Error("down without kept.json succeeded")
 	}
 }
+
+// TestLeaderIs: a live leader is matched by its program's name, on Linux and macOS alike, and a
+// leader that is gone (only its group left) counts as ours.
+func TestLeaderIs(t *testing.T) {
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Skip("no sleep:", err)
+	}
+	defer cmd.Wait()
+	defer cmd.Process.Kill()
+	if !leaderIs(cmd.Process.Pid, cmd.Args[0]) {
+		t.Error("a sleep is not taken for a sleep")
+	}
+	if leaderIs(cmd.Process.Pid, "/opt/chromium/chrome") {
+		t.Error("a sleep is taken for chrome")
+	}
+	cmd.Process.Kill()
+	cmd.Wait()
+	if !leaderIs(cmd.Process.Pid, "/opt/chromium/chrome") {
+		t.Error("a leader that is gone is not taken for ours")
+	}
+}
