@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -179,15 +180,19 @@ func TestLearnFromBankTrace(t *testing.T) {
 
 func TestLearnRejectsBadAnswers(t *testing.T) {
 	ctx := context.Background()
-	for _, reply := range []string{
+	le := newLearnEnv(t, "")
+	for i, reply := range []string{
 		`not json`,
 		`{"name": "Nothing", "steps": [{"intent": "Make it up", "event_seqs": [99]}]}`,
 	} {
-		le := newLearnEnv(t, reply)
-		if _, err := le.m.createRecording(ctx, Recording{ID: "rec_bad", HouseholdID: cbHH, OwnerID: 5, Mode: "browser", Trace: bankTrace(t)}); err != nil {
+		le.model.mu.Lock()
+		le.model.reply = reply
+		le.model.mu.Unlock()
+		id := fmt.Sprintf("rec_bad%d", i)
+		if _, err := le.m.createRecording(ctx, Recording{ID: id, HouseholdID: cbHH, OwnerID: 5, Mode: "browser", Trace: bankTrace(t)}); err != nil {
 			t.Fatal(err)
 		}
-		if err := le.m.learnFromRecording(ctx, "rec_bad"); err == nil {
+		if err := le.m.learnFromRecording(ctx, id); err == nil {
 			t.Fatalf("%s: learnt", reply)
 		}
 		if ws, _ := le.m.listWorkflows(ctx, cbHH, 5); len(ws) != 0 || len(le.items()) != 0 {
@@ -195,7 +200,6 @@ func TestLearnRejectsBadAnswers(t *testing.T) {
 		}
 	}
 	// A recording deleted before the job ran is nothing to do.
-	le := newLearnEnv(t, bankModel)
 	if err := le.m.learnFromRecording(ctx, "rec_gone"); err != nil {
 		t.Fatal(err)
 	}
