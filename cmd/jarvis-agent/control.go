@@ -95,7 +95,7 @@ func appEvents(pill *runningPill, log *slog.Logger) island.AppEvents {
 // toggle (voice is nil until the switch exists), computer-stop and computer-status stop and
 // report what Jarvis is doing with the computer. It returns a func that waits for it.
 func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch,
-	health func() error, activity *computer.Activity) func() {
+	health func() error, activity *computer.Activity, computerSw *computer.Switch) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -111,6 +111,19 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 					return "stopped", nil
 				}
 				return "idle", nil
+			case control.ComputerOn, control.ComputerOff:
+				if computerSw == nil {
+					return "", errors.New("computer control isn't available on this device")
+				}
+				on := cmd == control.ComputerOn
+				log.Info("asked to turn computer control "+map[bool]string{true: "on", false: "off"}[on], "activity", activity.String())
+				if err := computerSw.Set(on); err != nil {
+					log.Warn("computer control: couldn't save the choice; it lasts until the agent restarts", "err", err)
+				}
+				if on {
+					return "on", nil
+				}
+				return "off", nil
 			case control.ShowRunning:
 				// No island (--no-overlay, no display): nothing to show, but it is running.
 				pill.Show()

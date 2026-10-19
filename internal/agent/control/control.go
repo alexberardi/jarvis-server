@@ -42,10 +42,14 @@ const (
 	// ComputerStatus answers what Jarvis is doing with the computer: "idle", or the activity
 	// and its intent ("controlling: Ordering the blue mug").
 	ComputerStatus = "computer-status"
+	// ComputerOn and ComputerOff turn computer control on or off, as the status icon's
+	// "Computer control" does (COMPUTER-CONTROL.md C11). Off stops a task going on.
+	ComputerOn  = "computer-on"
+	ComputerOff = "computer-off"
 )
 
 // Commands is every command the agent accepts.
-var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus}
+var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second

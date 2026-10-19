@@ -10,6 +10,8 @@
 //	Updated to v0.2.0                           (a disabled line, only after/during a self-update)
 //	─────────────
 //	✓ Listen for "Hey Jarvis"                   (voice on/off, live; saved in agent.json)
+//	  Computer control                          (lets Jarvis use this computer; off by default,
+//	                                             saved in agent.json; off stops a running task)
 //	  Open Jarvis Automation                    (the server's web UI, when it is known)
 //	  Set up / Settings…                        (the agent's setup page in the browser)
 //	  Sign out of Jarvis Automation             (removes this computer; back to the setup page)
@@ -37,6 +39,10 @@ type State struct {
 	// VoiceAvailable shows the voice toggle (voice works on this OS); Voice is its checkmark.
 	VoiceAvailable bool
 	Voice          bool
+	// ComputerAvailable shows the "Computer control" toggle (a desktop); Computer is its
+	// checkmark: Jarvis may use this computer only while it is on (COMPUTER-CONTROL.md C11).
+	ComputerAvailable bool
+	Computer          bool
 	// OpenURL, when set, shows "Open Jarvis Automation" (the server's web UI).
 	OpenURL string
 	// Setup shows "Set up / Settings…" (the agent's own setup page).
@@ -88,6 +94,8 @@ type Actions struct {
 	SignOut func()
 	// StopTask stops what Jarvis is doing with the computer (State.Activity).
 	StopTask func()
+	// SetComputer turns computer control on or off.
+	SetComputer func(on bool)
 }
 
 // The menu items' ids (D-Bus menu ids, NSMenuItem tags, Win32 command ids). 0 is the root.
@@ -103,6 +111,7 @@ const (
 	IDUpdate
 	IDActivity
 	IDStopTask
+	IDComputer
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
@@ -113,6 +122,7 @@ const (
 	SignOutLabel  = "Sign out of Jarvis Automation"
 	QuitLabel     = "Quit " + appid.DisplayName
 	StopTaskLabel = "Stop Jarvis"
+	ComputerLabel = "Computer control"
 )
 
 // Item is one menu entry.
@@ -165,6 +175,9 @@ func Items(s State) []Item {
 	if s.VoiceAvailable {
 		items = append(items, Item{ID: IDVoice, Label: VoiceLabel, Enabled: true, Toggle: true, Checked: s.Voice})
 	}
+	if s.ComputerAvailable {
+		items = append(items, Item{ID: IDComputer, Label: ComputerLabel, Enabled: true, Toggle: true, Checked: s.Computer})
+	}
 	if s.OpenURL != "" {
 		items = append(items, Item{ID: IDOpen, Label: OpenLabel, Enabled: true})
 	}
@@ -174,7 +187,7 @@ func Items(s State) []Item {
 	if s.SignOut {
 		items = append(items, Item{ID: IDSignOut, Label: SignOutLabel, Enabled: true})
 	}
-	if s.VoiceAvailable || s.OpenURL != "" || s.Setup || s.SignOut {
+	if s.VoiceAvailable || s.ComputerAvailable || s.OpenURL != "" || s.Setup || s.SignOut {
 		items = append(items, Item{ID: idSep2, Separator: true})
 	}
 	return append(items, Item{ID: IDQuit, Label: QuitLabel, Enabled: true})
@@ -262,6 +275,11 @@ func (t *Tray) clicked(id int32) {
 		case IDVoice:
 			if s.VoiceAvailable && t.act.SetVoice != nil {
 				t.act.SetVoice(!s.Voice)
+			}
+		case IDComputer:
+			if s.ComputerAvailable && t.act.SetComputer != nil {
+				t.log.Info("tray: Computer control chosen", "on", !s.Computer)
+				t.act.SetComputer(!s.Computer)
 			}
 		case IDOpen:
 			if s.OpenURL != "" && t.act.Open != nil {
