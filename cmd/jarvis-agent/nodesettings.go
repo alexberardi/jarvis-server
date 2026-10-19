@@ -51,11 +51,12 @@ func dataCommands(tools node.Multi) nodesettings.DataCommands {
 // connect, and needs_k2 in the heartbeat until a key is stored. It also answers the app's
 // command-data browser (§16, "Stored data"). nodeConfig, when set, is the snapshot's node_config
 // (the Pi profile's piNodeConfig); nil is a computer's. devs, when set, are the snapshot's device
-// families and managers (a Pi's sidecar); nil reports none, as a computer has none.
+// families and managers (a Pi's sidecar); nil reports none, as a computer has none. secrets,
+// when set, runs after the app pushes secrets (a Pi describes its families again).
 func wireNodeSettings(r *node.Runner, st *nodesettings.Store, tools node.Multi, nodeConfig func() map[string]any,
-	devs func(context.Context) nodesettings.Devices, log *slog.Logger) {
+	devs func(context.Context) nodesettings.Devices, secrets func(), log *slog.Logger) {
 	h := &nodesettings.Handler{NodeID: r.Creds.NodeID, Store: st, Commands: settingsCommands(tools), NodeConfig: nodeConfig, Log: log,
-		Devices: devs, KeyChanged: r.BeatNow} // the app sees needs_k2: false within seconds
+		Devices: devs, SecretsChanged: secrets, KeyChanged: r.BeatNow} // the app sees needs_k2: false within seconds
 	var once sync.Once
 	bind := func(cc *node.CC) *nodesettings.Handler {
 		once.Do(func() { h.API = cc }) // one command-center client per run

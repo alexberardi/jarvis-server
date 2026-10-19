@@ -608,12 +608,20 @@ func run(ctx context.Context, args []string) error {
 	}
 	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
 	// and are in its settings snapshot; a computer has none.
+	// A secrets push can configure a family (an API key): it joins the heartbeat's protocols.
 	var devs func(context.Context) nodesettings.Devices
+	var secrets func()
 	sc := liveSidecar(tools)
 	if !p.desktop && sc != nil {
 		devs = sc.Devices
+		secrets = func() {
+			if err := sc.RefreshDevices(); err != nil {
+				log.Warn("devices: families not described again after a secrets push", "err", err)
+			}
+			r.BeatNow()
+		}
 	}
-	wireNodeSettings(r, st, tools, nodeConfig, devs, log)
+	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, log)
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()

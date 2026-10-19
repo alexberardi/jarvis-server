@@ -132,6 +132,17 @@ func TestSidecarScansDevices(t *testing.T) {
 	if got := st.Secret("CLOUDY_TOKEN", "integration", nil); got != "tok@https://cloud" {
 		t.Fatalf("token = %q", got)
 	}
+	seven := int64(7)
+	if got, none := st.Secret("CLOUDY_USER", "user", &seven), st.Secret("CLOUDY_USER", "user", nil); got != "tok" || none != "" {
+		t.Fatalf("user token: user 7 %q, no user %q", got, none)
+	}
+	// The user is the flow's for store_auth_values only: a later call runs as no user.
+	if res, err := sc.DeviceCall("device_removed", map[string]any{"details": map[string]any{"entity_id": "light.lamp_cloudy", "protocol": "cloudy"}}); err != nil || res["ran"] != true {
+		t.Fatalf("removed = %v, %v", res, err)
+	}
+	if rec, ok := st.Data("cloudy", "removed", time.Now()); !ok || rec.Value("user_token") != nil {
+		t.Fatalf("after store_auth a call still runs as the flow's user: %v", rec)
+	}
 	if p := sc.Protocols(); !reflect.DeepEqual(p, []string{"cloudy", "fakelight"}) {
 		t.Fatalf("protocols after auth = %v", p)
 	}
@@ -247,5 +258,46 @@ func TestSidecarRemovesADevice(t *testing.T) {
 	}
 	if res, _ := sc.DeviceCall("device_removed", map[string]any{"details": map[string]any{"protocol": "nope"}}); res["ran"] != false {
 		t.Fatalf("unknown protocol = %v", res)
+	}
+}
+
+// A family configured by the app's secrets push (not OAuth) is described again without a
+// restart: configured in the snapshot (which re-reads the families) and, once the push's hook
+// refreshes them, in the heartbeat's protocols.
+func TestSidecarRedescribesFamiliesAfterASecretIsSet(t *testing.T) {
+	sc, st := startLights(t)
+	var l Live
+	l.Swap(sc)
+	if err := st.SetSecret("CLOUDY_TOKEN", "key", "integration", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if p := l.Protocols(); !reflect.DeepEqual(p, []string{"fakelight"}) {
+		t.Fatalf("protocols before the refresh = %v", p)
+	}
+	fams := l.Devices(context.Background()).Families
+	if len(fams) != 2 || fams[1].Entry["family_name"] != "cloudy" || fams[1].Entry["is_configured"] != true {
+		t.Fatalf("snapshot families = %v", fams)
+	}
+	if err := st.SetSecret("CLOUDY_TOKEN", "", "integration", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RefreshDevices(); err != nil {
+		t.Fatal(err)
+	}
+	if p := l.Protocols(); !reflect.DeepEqual(p, []string{"fakelight"}) {
+		t.Fatalf("protocols after clearing the token = %v", p)
+	}
+	if err := st.SetSecret("CLOUDY_TOKEN", "key", "integration", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RefreshDevices(); err != nil {
+		t.Fatal(err)
+	}
+	if p := l.Protocols(); !reflect.DeepEqual(p, []string{"cloudy", "fakelight"}) {
+		t.Fatalf("protocols after the refresh = %v", p)
+	}
+	var none Live
+	if err := none.RefreshDevices(); err != nil {
+		t.Fatalf("refresh without a sidecar = %v", err)
 	}
 }

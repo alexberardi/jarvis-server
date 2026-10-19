@@ -111,12 +111,22 @@ func (l *Live) Failed() map[string]string {
 	return nil
 }
 
-// Devices are the device families and managers, for the settings snapshot.
+// Devices are the device families and managers, for the settings snapshot: described again
+// (the last description if that fails), so is_configured follows the secrets set since.
 func (l *Live) Devices(context.Context) nodesettings.Devices {
 	if sc := l.Current(); sc != nil {
+		_ = sc.RefreshDevices()
 		return sc.Devices()
 	}
 	return nodesettings.Devices{}
+}
+
+// RefreshDevices is Sidecar.RefreshDevices on the sidecar in service (nothing without one).
+func (l *Live) RefreshDevices() error {
+	if sc := l.Current(); sc != nil {
+		return sc.RefreshDevices()
+	}
+	return nil
 }
 
 // Protocols are the configured device families (the heartbeat's protocols); none without a

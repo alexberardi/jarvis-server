@@ -262,6 +262,8 @@ func TestConfigPushAppliesGoldenPushesAndAcks(t *testing.T) {
 	// A push sealed for another node is left pending (not acked).
 	f.pending = append(f.pending, map[string]any{"id": "bad", "config_type": "settings:secrets",
 		"ciphertext": g.Pushes[0].Ciphertext, "nonce": g.Pushes[0].Nonce, "tag": g.Pushes[1].Tag})
+	changed := 0
+	h.SecretsChanged = func() { changed++ }
 
 	h.Handle(context.Background(), TopicConfigPush, []byte(`{"push_id":"p0","config_type":"settings:secrets"}`))
 	for i := range g.Pushes {
@@ -283,6 +285,10 @@ func TestConfigPushAppliesGoldenPushesAndAcks(t *testing.T) {
 	}
 	if st.Enabled("get_weather") {
 		t.Error("command_registry push didn't disable get_weather")
+	}
+	// Each applied secrets push (three of them) re-reads what depends on secrets.
+	if changed != 3 {
+		t.Errorf("SecretsChanged ran %d times, want 3", changed)
 	}
 }
 

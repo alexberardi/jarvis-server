@@ -961,7 +961,10 @@ The registry is `GET /api/v0/node/devices` (direct devices), fetched on the firs
 every 5 minutes, for device control (#177). The heartbeat sends `protocols` (the configured
 families, sorted) and beats again when the sidecar comes up, so jarvisd's `pickNode` sends a
 family's device state and removal here. The settings snapshot lists `device_families` and
-`device_managers` in N:'s shape, so the app can set a family's secrets on this node.
+`device_managers` in N:'s shape, so the app can set a family's secrets on this node. The
+families are described again for every snapshot and after each secrets push (which also beats),
+so a family the app configures with an API key shows `is_configured` and joins `protocols`
+without a restart.
 
 **Verified** with sidecar tests over a fake family package
 (`internal/agent/sidecar/testdata/packages/lights`: scan, collisions, list, state per domain with

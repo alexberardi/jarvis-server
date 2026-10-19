@@ -22,6 +22,8 @@ class Cloudy(IJarvisDeviceProtocol):
     def store_auth_values(self, values: dict) -> None:
         token = f"{values.get('access_token')}@{values.get('_base_url')}"
         JarvisStorage("cloudy").set_secret("CLOUDY_TOKEN", token, "integration")
+        # As the user who ran the flow (the sidecar sets them for this call only).
+        JarvisStorage("cloudy").set_secret("CLOUDY_USER", str(values.get("access_token")), "user")
 
     async def discover(self, timeout: float = 5.0) -> list:
         # The same entity_id as fakelight's lamp: the scan keeps both.
@@ -33,3 +35,7 @@ class Cloudy(IJarvisDeviceProtocol):
 
     async def get_state(self, ip, **kwargs):
         return {"state": "off"}
+
+    async def on_removed(self, device, **kwargs):
+        # Records whose user-scoped secret a call without a user sees (none).
+        JarvisStorage("cloudy").save("removed", {"user_token": JarvisStorage("cloudy").get_secret("CLOUDY_USER", "user")})

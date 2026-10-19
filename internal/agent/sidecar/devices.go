@@ -41,11 +41,22 @@ func (s *Sidecar) setDevices(d deviceComponents) {
 }
 
 // Devices are the installed packages' device families and managers (with the built-in
-// jarvis_direct manager), for the settings snapshot: read at start and after StoreAuth.
+// jarvis_direct manager) as last described: at start, after StoreAuth and on RefreshDevices.
 func (s *Sidecar) Devices() nodesettings.Devices {
 	s.devMu.Lock()
 	defer s.devMu.Unlock()
 	return s.devices
+}
+
+// RefreshDevices describes the families again: whether each is configured follows the secrets
+// its validate_secrets reads, which the app's secrets push and OAuth set while it runs.
+func (s *Sidecar) RefreshDevices() error {
+	var d deviceComponents
+	if err := s.roundTrip("device_families", nil, &d); err != nil {
+		return err
+	}
+	s.setDevices(d)
+	return nil
 }
 
 // Protocols are the configured device families' names, sorted: the heartbeat's "protocols",
@@ -87,10 +98,5 @@ func (s *Sidecar) StoreAuth(provider string, values map[string]any, uid any) (st
 	if res.Stored == nil {
 		return "", nil
 	}
-	var d deviceComponents
-	if err := s.roundTrip("device_families", nil, &d); err != nil {
-		return *res.Stored, err
-	}
-	s.setDevices(d)
-	return *res.Stored, nil
+	return *res.Stored, s.RefreshDevices()
 }

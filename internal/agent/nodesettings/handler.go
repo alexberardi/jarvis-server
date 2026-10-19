@@ -41,6 +41,9 @@ type Handler struct {
 	Log        *slog.Logger
 	// KeyChanged, if set, runs after K2 is stored (the heartbeat then says needs_k2: false).
 	KeyChanged func()
+	// SecretsChanged, if set, runs after a secrets push is applied (a Pi's device families
+	// read their secrets to say whether they are configured).
+	SecretsChanged func()
 
 	pushMu sync.Mutex // one config-push pass at a time (a nudge and the backstop can overlap)
 }
@@ -300,7 +303,13 @@ func (h *Handler) apply(configType string, data map[string]any) error {
 		h.Log.Info("config: push type not used on a desktop agent; acknowledged", "config_type", configType)
 		return nil
 	}
-	return h.applySecrets(data)
+	if err := h.applySecrets(data); err != nil {
+		return err
+	}
+	if h.SecretsChanged != nil {
+		h.SecretsChanged()
+	}
+	return nil
 }
 
 // applySecrets is _dispatch_secrets: with __user_id__ every value is that user's personal
