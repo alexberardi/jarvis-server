@@ -40,7 +40,23 @@ var uvReleaseBase = "https://github.com/astral-sh/uv/releases/download/"
 // SDKRequirement is the jarvis-command-sdk every venv gets, pinned to a commit (the SDK isn't
 // on PyPI; CI's sidecar test installs the same tree). JARVIS_AGENT_SDK overrides it, e.g. with
 // a local checkout's path. Move it forward when the sidecar script needs a newer SDK.
-const SDKRequirement = "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/6e04cd0d97902d066e30fa3fdbbb82f5982d3872.tar.gz"
+const SDKRequirement = "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/708193cc3e74d23294cf05625dabdac61336d57e.tar.gz"
+
+// NodeCommandsRequirement is the Pi's built-in commands: jarvis-node-setup pinned to a commit
+// (its pyproject packages commands*, core*, services*, …, and needs only the SDK >= 0.13.0).
+// JARVIS_AGENT_NODE_COMMANDS overrides it, e.g. with a local checkout's path.
+const NodeCommandsRequirement = "jarvis-node-setup @ https://github.com/alexberardi/jarvis-node-setup/archive/962bb56f256208cf029c16565a7ce5df0709ea8d.tar.gz"
+
+// PiBuiltins are the built-in commands the Pi profile loads: every module of jarvis-node-setup's
+// commands package but those that still call the Python node's own code
+// (docs/decisions/2026-10-18-pi-builtin-commands.md).
+func PiBuiltins(requirement string) *Builtins {
+	if requirement == "" {
+		requirement = NodeCommandsRequirement
+	}
+	return &Builtins{Requirement: requirement, Package: "commands",
+		Skip: []string{"control_device_command", "reminder_command", "routine_command", "send_link_command"}}
+}
 
 // pythonVersion is the interpreter uv installs for the venv: its own standalone build, so the
 // sidecar doesn't depend on (or break with) a system or Homebrew Python.

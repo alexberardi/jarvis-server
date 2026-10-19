@@ -126,8 +126,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install jarvis-command-sdk (sidecar test)
-        run: python -m pip install "git+https://github.com/alexberardi/jarvis-command-sdk@main"
+      # jarvis-node-setup at packages.NodeCommandsRequirement's commit: the Pi's built-in
+      # commands for TestSidecarRunsTheNodesBuiltins (move both together).
+      - name: Install jarvis-command-sdk and the node's commands (sidecar tests)
+        run: >-
+          python -m pip install "git+https://github.com/alexberardi/jarvis-command-sdk@main"
+          "jarvis-node-setup @ https://github.com/alexberardi/jarvis-node-setup/archive/962bb56f256208cf029c16565a7ce5df0709ea8d.tar.gz"
       # desktop-file-validate checks the menu, autostart and URL-handler entries `install` writes.
       - name: Install desktop-file-utils
         if: matrix.os == 'ubuntu-latest'
