@@ -150,13 +150,17 @@ func downCmd(args []string, stdout io.Writer) error {
 	return os.Remove(f)
 }
 
-// leaderIs tells whether process pid, if it is still there, still runs argv0's program (Linux:
-// /proc, by name, as Chromium may retitle itself; elsewhere, or when the leader is gone and only
-// its group is left, yes).
+// leaderIs tells whether process pid, if it is still there, still runs argv0's program, by name
+// (Linux: /proc's command line, as Chromium may retitle itself; macOS: the kernel's command name,
+// which it cuts to 16 bytes; elsewhere, or when the leader is gone and only its group is left,
+// yes).
 func leaderIs(pid int, argv0 string) bool {
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil || len(b) == 0 {
-		return true
+	name := filepath.Base(argv0)
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil && len(b) > 0 {
+		return strings.Contains(string(b), name)
 	}
-	return strings.Contains(string(b), filepath.Base(argv0))
+	if comm := procComm(pid); comm != "" {
+		return strings.HasPrefix(name, comm)
+	}
+	return true
 }
