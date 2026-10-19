@@ -79,6 +79,9 @@ type Handler struct {
 	// agent quits and systemd starts it again, now without credentials), as N: falls back to.
 	Reboot func() error
 	Exit   func()
+	// Freeze, if set, runs once jarvisd has confirmed the reset and before the wipe: it stops
+	// what the agent still holds (settings, timers) from writing a file back before the reboot.
+	Freeze func()
 	Log    *slog.Logger
 
 	busy atomic.Bool // a redelivered message while one runs is dropped
@@ -123,6 +126,9 @@ func (h *Handler) Handle(ctx context.Context, api API, payload []byte) {
 		h.Log.Warn("factory-reset: jarvisd refused the in_progress report (a spoof or an expired token); nothing wiped",
 			"task", m.TaskID, "err", err)
 		return
+	}
+	if h.Freeze != nil {
+		h.Freeze()
 	}
 	h.Log.Info("factory-reset: wiping the node", "task", m.TaskID)
 	cleared, err := h.Wipe(ctx)

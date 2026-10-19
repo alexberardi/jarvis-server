@@ -1215,7 +1215,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       [decision](../decisions/2026-10-19-pi-node-factory-reset.md)): `internal/agent/reset`
       handles jarvisd's tracked task (`in_progress` with `X-Reset-Token` first, which is also the
       anti-spoof check, then the wipe, `success` or `failed`, then `sudo -n systemctl reboot`) and
-      the legacy verify-reset; `reset.Wipe` (K2, the node DB, timers, Bluetooth devices, Pantry
+      the legacy verify-reset; the settings store and the timers are sealed before the wipe, so
+      nothing writes a file back before the reboot; `reset.Wipe` (K2, the node DB, timers, Bluetooth devices, Pantry
       packages, node.json last) is also the provisioning API's `POST /api/v1/factory-reset`.
       `nodesettings.Routines` pulls `GET /nodes/{id}/routines` into `routine/<slug>` command data
       on `routines/sync` and every connect (defaults and Pantry routines never pruned; nothing

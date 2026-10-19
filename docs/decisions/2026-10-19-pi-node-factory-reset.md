@@ -21,6 +21,11 @@ Choices made porting `factory-reset`, `routines/sync` and `context/{op}` to the 
   built-in commands (the node's runtime; reinstalling it would need the network at first boot).
   N:'s Wi-Fi credentials file has no Go counterpart: the Wi-Fi profile lives in NetworkManager, and
   N: doesn't remove that either.
+- **Nothing writes back after the wipe.** Once jarvisd confirms the reset, and before the wipe,
+  the agent seals its settings store and its timers (`Store.Seal`, `timers.Service.Seal`): a
+  config push, a command saving data or a timer change before the reboot then fails without
+  writing, so `node-settings.json`, `k2.json` and `timers.json` stay gone. A wipe that fails
+  leaves them sealed until the agent restarts.
 - **The provisioning API's `POST /api/v1/factory-reset` runs the same wipe** (it answered "not
   available on this node yet" before). It is reachable only while `jarvis-agent provision` serves
   setup mode, unauthenticated as N:'s is.

@@ -276,3 +276,25 @@ func TestWipeKeepsGoingPastAFailure(t *testing.T) {
 		t.Fatalf("cleared = %v; the rest of the wipe must still run", cleared)
 	}
 }
+
+// Freeze runs once jarvisd has confirmed the reset and before the wipe, so nothing the agent
+// still holds (settings, timers) can write a file back between the wipe and the reboot.
+func TestFreezeBeforeWipe(t *testing.T) {
+	g := newRig(t)
+	var order []string
+	g.h.Freeze = func() { order = append(order, "freeze") }
+	wipe := g.h.Wipe
+	g.h.Wipe = func(ctx context.Context) ([]string, error) { order = append(order, "wipe"); return wipe(ctx) }
+	g.h.Handle(context.Background(), g.cc, msg("tok-1", "n1", "task-1"))
+	if !slices.Equal(order, []string{"freeze", "wipe"}) {
+		t.Fatalf("order = %v, want freeze then wipe", order)
+	}
+
+	g = newRig(t)
+	frozen := false
+	g.h.Freeze = func() { frozen = true }
+	g.h.Handle(context.Background(), g.cc, msg("forged", "n1", "task-1"))
+	if frozen {
+		t.Fatal("a rejected reset froze the node")
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/provisioning"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 )
 
 // The Pi profile adds the factory reset and the routines nudge to the node's topics, the
@@ -39,7 +41,9 @@ func TestWirePiTasks(t *testing.T) {
 	r := &node.Runner{Creds: creds, Log: log}
 	wireNodeSettings(r, st, tools, nil, log)
 	quit := make(chan struct{})
-	wirePiTasks(r, st, dir, tools, nil, func() { close(quit) }, log)
+	tm := &timers.Service{Path: filepath.Join(dir, "timers.json"), Log: log}
+	tm.Start()
+	wirePiTasks(r, st, dir, tools, nil, tm, func() { close(quit) }, log)
 
 	var topics, requests []string
 	for k := range r.Topics {
@@ -97,6 +101,18 @@ func TestWirePiTasks(t *testing.T) {
 	}
 	if reboots != 1 {
 		t.Fatalf("reboots = %d", reboots)
+	}
+	// Sealed before the wipe: a config push or a timer before the reboot writes nothing back.
+	if err := st.SetEnabled("weather", false); !errors.Is(err, nodesettings.ErrSealed) {
+		t.Fatalf("SetEnabled after the reset = %v, want ErrSealed", err)
+	}
+	if _, err := tm.Set(60, nil); err == nil {
+		t.Fatal("a timer was set after the reset")
+	}
+	for _, f := range []string{nodesettings.SettingsFile, "timers.json"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Fatalf("%s after the reset: %v", f, err)
+		}
 	}
 	mu.Lock()
 	defer mu.Unlock()

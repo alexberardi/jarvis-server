@@ -212,3 +212,25 @@ func TestRealClockFires(t *testing.T) {
 		t.Fatal("the timer never fired")
 	}
 }
+
+// Seal stops the timers and never writes the file again: a factory reset is wiping it.
+func TestSealStopsAndNeverWrites(t *testing.T) {
+	dir := t.TempDir()
+	c := &fakeClock{now: time.Unix(0, 0)}
+	s, f := newService(t, dir, c)
+	s.Start()
+	_, _ = s.Set(10, str("a"))
+	s.Seal()
+	if err := os.Remove(filepath.Join(dir, "timers.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(20, str("b")); err == nil {
+		t.Fatal("a timer was set after Seal")
+	}
+	s.ClearAll()
+	c.Advance(time.Minute)
+	f.none(t)
+	if _, err := os.Stat(filepath.Join(dir, "timers.json")); err == nil {
+		t.Fatal("timers.json written after Seal")
+	}
+}
