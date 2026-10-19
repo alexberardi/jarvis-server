@@ -10,21 +10,27 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
+	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 )
 
 // newPackages is the installed Pantry packages under root, served by live (DESIGN.md §6).
 // JARVIS_AGENT_UV runs that uv instead of downloading the pinned one; JARVIS_AGENT_SDK installs
 // that jarvis-command-sdk requirement instead of the pinned commit (a local checkout, say).
-func newPackages(root string, live *sidecar.Live, st sidecar.Storage, log *slog.Logger) *packages.Manager {
+// host, on a Pi, answers the built-in commands' SDK backends (pibuiltins.go).
+func newPackages(root string, live *sidecar.Live, st sidecar.Storage, host *sdkhost.Host, log *slog.Logger) *packages.Manager {
 	hc := &http.Client{Timeout: 5 * time.Minute}
+	var h sidecar.Host // a nil *sdkhost.Host must stay a nil interface: no backends
+	if host != nil {
+		h = host
+	}
 	return &packages.Manager{
 		Root: root,
 		Python: &packages.Python{Root: root, UV: os.Getenv("JARVIS_AGENT_UV"), SDK: os.Getenv("JARVIS_AGENT_SDK"),
 			HTTP: hc, Run: packages.ExecRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		HTTP:     hc,
 		GOOS:     runtime.GOOS,
-		Sidecars: packages.LiveSidecars{Live: live, Log: log, Storage: st},
+		Sidecars: packages.LiveSidecars{Live: live, Log: log, Storage: st, Host: h},
 		Log:      log,
 	}
 }
