@@ -6,6 +6,7 @@
 //
 // Storage (JarvisStorage's secrets and command data) is answered from the agent's settings
 // store over the same pipes (DESIGN §16): the child asks between a request and its reply.
+// With a Host (the Pi profile), the SDK's other backends ask the same way.
 //
 // Not built yet (see docs/agent/DESIGN.md): restart-on-crash, per-call cancellation.
 package sidecar
@@ -22,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +42,21 @@ type Storage interface {
 	Records(command string, now time.Time) []nodesettings.Record
 	DeleteData(command, key string) (bool, error)
 	DeleteAllData(command string) (int, error)
+}
+
+// Host answers the child's SDK backend requests other than storage (llm.*, cc.*, timer.*,
+// audio.*, alerts.*, inbox.*, signals.*: docs/agent/go-pi-node.md §5.2). The result is
+// JSON-encoded back to the child; an error reaches the command as an exception, which the
+// SDK's helpers turn into their safe default.
+type Host interface {
+	Answer(ctx context.Context, method string, params json.RawMessage) (any, error)
+}
+
+// Options are what a sidecar's commands reach in the agent. Storage nil leaves storage calls
+// unanswered (a secret reads as unset); Host nil registers no other backend in the child.
+type Options struct {
+	Storage Storage
+	Host    Host
 }
 
 //go:embed jarvis_sidecar.py
@@ -63,6 +80,7 @@ type Sidecar struct {
 	pkgOf   map[string]string // command -> the installed package it came from
 	failed  map[string]string // package -> why its commands didn't load
 	store   Storage
+	host    Host
 	now     func() time.Time
 }
 
@@ -92,6 +110,11 @@ type reply struct {
 // or an installed-packages .json file) and loads the tool list.
 // st answers the commands' storage calls; nil leaves them unanswered (a secret reads as unset).
 func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st Storage) (*Sidecar, error) {
+	return StartWith(ctx, python, commandsDir, log, Options{Storage: st})
+}
+
+// StartWith is Start with the Pi's backends: o.Host set registers them in the child.
+func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger, o Options) (*Sidecar, error) {
 	dir, err := os.MkdirTemp("", "jarvis-sidecar-")
 	if err != nil {
 		return nil, err
@@ -102,7 +125,11 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 		return nil, err
 	}
 	// Not CommandContext: the child lives as long as the Sidecar, and Close ends it.
-	cmd := exec.Command(python, "-u", script, commandsDir)
+	args := []string{"-u", script, commandsDir}
+	if o.Host != nil {
+		args = append(args, "--backends")
+	}
+	cmd := exec.Command(python, args...)
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -131,7 +158,7 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 	}()
 	out := bufio.NewScanner(stdout)
 	out.Buffer(make([]byte, 64<<10), 16<<20)
-	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, dir: dir, store: st, now: time.Now,
+	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, dir: dir, store: o.Storage, host: o.Host, now: time.Now,
 		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{}}
 	var desc struct {
 		Tools []struct {
@@ -336,10 +363,19 @@ type storageParams struct {
 
 // answer serves one reverse request from the child.
 func (s *Sidecar) answer(q reply) error {
-	result, err := s.storage(q.Method, q.Params)
+	var result any
+	var err error
+	switch {
+	case strings.HasPrefix(q.Method, "storage."):
+		result, err = s.storage(q.Method, q.Params)
+	case s.host != nil:
+		result, err = s.host.Answer(context.Background(), q.Method, q.Params)
+	default:
+		err = fmt.Errorf("unknown method %q", q.Method)
+	}
 	out := map[string]any{"to": "child", "id": q.ID, "result": result}
 	if err != nil {
-		s.log.Warn("sidecar: storage call failed", "method", q.Method, "err", err)
+		s.log.Warn("sidecar: backend call failed", "method", q.Method, "err", err)
 		out = map[string]any{"to": "child", "id": q.ID, "error": err.Error()}
 	}
 	b, err := json.Marshal(out)
