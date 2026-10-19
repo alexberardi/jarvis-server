@@ -42,7 +42,21 @@ func bankTrace(t *testing.T) json.RawMessage {
 	return out
 }
 
-// bankModel is what a model answers for the bank trace: an invented event (42) and an
+// secretPassword is a value the recorder should never have sent for the masked password field;
+// bankTraceWithSecret puts it there, to show that it never reaches the model.
+const secretPassword = "hunter2-do-not-send"
+
+func bankTraceWithSecret(t *testing.T) json.RawMessage {
+	t.Helper()
+	tr := bankTrace(t)
+	out := bytes.Replace(tr, []byte(`"masked":true}`), []byte(`"masked":true,"value":"`+secretPassword+`"}`), 1)
+	if bytes.Equal(out, tr) {
+		t.Fatal("no masked event in the bank trace")
+	}
+	return out
+}
+
+// invented param, and a param of an unknown kind on a real candidate (event 8), which the job drops.
 // invented param, and a param of an unknown kind, which the job drops.
 const bankModel = `{"name": "Download bank statement", "triggers": ["download my bank statement", " "],
  "steps": [
@@ -58,7 +72,7 @@ const bankModel = `{"name": "Download bank statement", "triggers": ["download my
  "params": [
   {"name": "month", "kind": "month", "example": "2026-09", "from_seqs": [7, 8]},
   {"name": "account", "kind": "text", "example": "checking", "from_seqs": [42]},
-  {"name": "user", "kind": "colour", "example": "alex", "from_seqs": [2]}
+  {"name": "statement_month", "kind": "colour", "example": "2026-09", "from_seqs": [8]}
  ],
  "success": {"download": {"name_like": "statement_*.csv"}}}`
 
@@ -104,7 +118,7 @@ func (le *learnEnv) store(id string, trace json.RawMessage, narration string) Ta
 
 func TestLearnFromBankTrace(t *testing.T) {
 	le := newLearnEnv(t, bankModel)
-	w := le.store("rec_bank1", bankTrace(t), "this is how I get my bank statement")
+	w := le.store("rec_bank1", bankTraceWithSecret(t), "this is how I get my bank statement")
 
 	if w.Name != "Download bank statement" || w.OwnerID != 5 || w.Shared || w.HouseholdID != cbHH {
 		t.Fatalf("workflow %+v", w)
@@ -150,8 +164,26 @@ func TestLearnFromBankTrace(t *testing.T) {
 	le.model.mu.Lock()
 	reqs := slices.Clone(le.model.reqs)
 	le.model.mu.Unlock()
-	if len(reqs) != 1 || reqs[0].Label != llm.LabelBackground {
+	if len(reqs) != 1 || reqs[0].Label != llm.LabelBackground || len(reqs[0].Messages) != 2 {
 		t.Fatalf("model calls %+v", reqs)
+	}
+	golden, err := os.ReadFile(filepath.Join("testdata", "learn_prompt.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, wantUser, ok := strings.Cut(string(golden), "\n\nUSER:\n")
+	if !ok {
+		t.Fatal("no USER part in learn_prompt.golden")
+	}
+	sys, user := reqs[0].Messages[0], reqs[0].Messages[1]
+	if sys.Role != "system" || sys.Content.Text == nil || *sys.Content.Text != learnSystemPrompt {
+		t.Fatalf("system message %+v", sys)
+	}
+	if user.Role != "user" || user.Content.Text == nil || *user.Content.Text != strings.TrimSuffix(wantUser, "\n") {
+		t.Fatalf("user message differs from the golden's USER part:\n%+v", user)
+	}
+	if raw, err := json.Marshal(reqs[0]); err != nil || bytes.Contains(raw, []byte(secretPassword)) {
+		t.Fatalf("the masked password reached the model (err %v)", err)
 	}
 
 	// The card asks the owner to review it.
