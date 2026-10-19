@@ -15,26 +15,34 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
+	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-// computerCmd is `jarvis-agent computer stop|status`: stop what Jarvis is doing with this
-// computer (a computer task, a recording), as the status icon's "Stop Jarvis" does, or say
-// what it is doing. Both ask the running agent over its control socket. (`computer snapshot`
-// is computerSnapshotCmd, which main dispatches before this.)
+// computerCmd is `jarvis-agent computer stop|status|on|off`: stop what Jarvis is doing with
+// this computer (a computer task, a recording), as the status icon's "Stop Jarvis" does, say
+// what it is doing, or turn computer control on or off, as its "Computer control" does. All
+// ask the running agent over its control socket. (`computer snapshot` is computerSnapshotCmd,
+// which main dispatches before this.)
 func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
-	if len(args) != 1 || (args[0] != "stop" && args[0] != "status") {
-		return errors.New("usage: jarvis-agent computer stop|status|snapshot URL")
+	cmds := map[string]string{"stop": control.ComputerStop, "status": control.ComputerStatus,
+		"on": control.ComputerOn, "off": control.ComputerOff}
+	cmd := ""
+	if len(args) == 1 {
+		cmd = cmds[args[0]]
 	}
-	cmd := control.ComputerStatus
-	if args[0] == "stop" {
-		cmd = control.ComputerStop
+	if cmd == "" {
+		return errors.New("usage: jarvis-agent computer stop|status|on|off|snapshot URL")
 	}
 	r, err := control.Ask(dial, cmd)
 	if err != nil {
 		return err
 	}
 	switch {
+	case cmd == control.ComputerOn:
+		fmt.Fprintln(w, "Computer control is on: Jarvis may use this computer.")
+	case cmd == control.ComputerOff:
+		fmt.Fprintln(w, "Computer control is off: Jarvis won't use this computer.")
 	case cmd == control.ComputerStop && r.Answer == "stopped":
 		fmt.Fprintln(w, "Stopped.")
 	case cmd == control.ComputerStop:
@@ -67,6 +75,16 @@ func islandActivity(k computer.Kind) island.State {
 		return island.Recording
 	}
 	return island.Hidden
+}
+
+// saveComputer writes agent.json's computer_control key (path: run's --config, or the default
+// file).
+func saveComputer(path string, on bool) error {
+	path, err := settingsPath(path)
+	if err != nil {
+		return err
+	}
+	return settings.Update(path, func(s *settings.Settings) error { s.ComputerControl = &on; return nil })
 }
 
 // --- jarvis-agent computer snapshot URL: computer control's browser calls, by hand ---

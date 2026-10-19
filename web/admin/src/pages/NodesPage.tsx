@@ -7,7 +7,7 @@ import { formatVersion } from '@/lib/format'
 import { timeAgo } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import type { AdminNode } from '@/api/admin'
-import { extensionState } from '@/api/nodes'
+import { computerControlState, extensionState } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
 
 const extensionText = { connected: 'connected', disconnected: 'not connected', disabled: 'off' } as const
@@ -15,6 +15,7 @@ const extensionText = { connected: 'connected', disconnected: 'not connected', d
 function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const desktop = live?.node_kind === 'desktop'
   const ext = extensionState(live)
+  const computerControl = computerControlState(live)
   const Icon = desktop ? Laptop : Cpu
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid={`node-${node.node_id}`}>
@@ -66,6 +67,11 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
         {ext && (
           <p>
             <span className="font-medium">Browser extension:</span> {extensionText[ext]}
+          </p>
+        )}
+        {computerControl && (
+          <p title='Turned on and off with "Computer control" in the Jarvis Automation menu on this computer'>
+            <span className="font-medium">Computer control:</span> {computerControl}
           </p>
         )}
         {node.services.length > 0 && (
