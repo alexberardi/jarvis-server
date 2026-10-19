@@ -78,7 +78,7 @@ type Manager struct {
 	System *System
 
 	mu     sync.Mutex
-	now    func() time.Time // time.Now; tests move it
+	now    func() time.Time  // time.Now; tests move it
 	failed map[string]string // of the sidecar in service
 }
 
@@ -154,7 +154,9 @@ func (m *Manager) Boot(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.System != nil {
-		m.System.Heal(ctx, func(name string) bool { return exists(filepath.Join(m.dir(name), ManifestFile)) || exists(filepath.Join(m.dir(name), CommandManifestFile)) })
+		m.System.Heal(ctx, func(name string) bool {
+			return exists(filepath.Join(m.dir(name), ManifestFile)) || exists(filepath.Join(m.dir(name), CommandManifestFile))
+		})
 	}
 	m.removeTests(true)
 	if m.Builtins != nil {

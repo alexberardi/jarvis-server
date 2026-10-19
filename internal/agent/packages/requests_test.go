@@ -12,7 +12,7 @@ import (
 // fakeAPI is jarvisd's side of a package request: the verify answer and the posted results.
 type fakeAPI struct {
 	mu      sync.Mutex
-	verify  map[string]verifyAnswer // by request id
+	verify  map[string]verifyAnswer   // by request id
 	tests   map[string]map[string]any // test-install verify answers, by request id
 	calls   []string
 	results map[string]map[string]any // path -> body
