@@ -126,7 +126,7 @@ func TestRunAgainstAFakeNodeAndSandbox(t *testing.T) {
 	if !errors.As(err, &fail) || fail.n != 1 {
 		t.Fatalf("run: %v\n%s", err, stdout.String())
 	}
-	for _, want := range []string{"passed  the time (2/2)", "passed  no wake (1/1)", "skipped barge-in (0/0)", "failed  wrong reply (0/1)"} {
+	for _, want := range []string{"passed  the time (2/2)", "passed  no wake (1/1)", "skipped barge-in: needs real-time audio", "failed  wrong reply (0/1)"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
 		}
@@ -160,7 +160,7 @@ func TestRunAgainstAFakeNodeAndSandbox(t *testing.T) {
 	if nw := res.Tests[1]; nw.Status != "passed" || nw.Runs[0].Turn != nil || nw.Runs[0].ModelCalls != 0 {
 		t.Errorf("no wake: %+v", nw)
 	}
-	if bi := res.Tests[2]; bi.Status != "skipped" || bi.Error == nil || !strings.Contains(*bi.Error, "--audio pipewire") {
+	if bi := res.Tests[2]; bi.Status != "skipped" || bi.Error != nil || !strings.Contains(bi.SkipReason, "--audio pipewire") {
 		t.Errorf("barge-in: %+v", bi)
 	}
 	if wr := res.Tests[3]; wr.Status != "failed" || wr.Error == nil || !strings.Contains(*wr.Error, "want /seven/") {
