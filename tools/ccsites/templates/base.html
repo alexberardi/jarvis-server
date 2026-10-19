@@ -1,0 +1,44 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; color: #1d1d1f; background: #f6f6f8; }
+header { background: #23395d; color: #fff; padding: 12px 24px; display: flex; gap: 24px; align-items: center; }
+header a { color: #fff; text-decoration: none; }
+header form { display: flex; gap: 6px; margin: 0; }
+header .brand { font-weight: 700; font-size: 1.2em; }
+main { max-width: 960px; margin: 24px auto; background: #fff; padding: 24px; border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; }
+td.num, th.num { text-align: right; }
+.btn { background: #23395d; color: #fff; border: 0; padding: 10px 18px; border-radius: 6px; font-size: 1em; cursor: pointer; }
+.btn.secondary { background: #e3e6ec; color: #1d1d1f; }
+.cta { background: #e8792b; color: #fff; border: 2px solid #b85a17; padding: 8px 22px; border-radius: 20px; font-size: 1em; cursor: pointer; }
+.toolbar { display: flex; justify-content: flex-end; gap: 12px; padding: 10px; background: #fff4e8; border-radius: 8px; margin-bottom: 16px; }
+.actions { margin-top: 20px; }
+.sponsored { color: #8a6d00; background: #fff6cc; font-size: .8em; padding: 2px 6px; border-radius: 4px; }
+.result { display: flex; gap: 16px; padding: 12px 0; border-bottom: 1px solid #eee; }
+.error { color: #b00020; }
+.over { color: #b00020; font-weight: 700; }
+label { display: block; margin-top: 12px; font-weight: 600; }
+input[type=text], input[type=email], input[type=date], input[type=password], select, textarea { width: 100%; max-width: 420px; padding: 6px; font-size: 1em; }
+fieldset { border: 0; padding: 0; margin-top: 12px; }
+fieldset label { display: inline; font-weight: 400; margin-right: 12px; }
+</style>
+</head>
+<body>
+{{if eq .Site "store"}}<header><a class="brand" href="{{.U "/store/"}}">Test Store</a>
+<form role="search" method="get" action="/store/search">{{if .Moved}}<input type="hidden" name="layout" value="moved">{{end}}<input type="text" name="q" aria-label="Search products" placeholder="Search products"> <button class="btn secondary" type="submit">Search</button></form>
+<a href="{{.U "/store/cart"}}">Cart</a></header>
+{{else if eq .Site "bank"}}<header><a class="brand" href="{{.U "/bank/statements"}}">Test Bank</a><a href="{{.U "/bank/statements"}}">Statements</a></header>
+{{else if eq .Site "card"}}<header><a class="brand" href="{{.U "/card/statements"}}">Test Card Services</a><a href="{{.U "/card/statements"}}">Statements</a></header>
+{{else if eq .Site "form"}}<header><a class="brand" href="/form/">Springfield Community Gardens</a></header>
+{{else}}<header><span class="brand">Fixture sites</span></header>{{end}}
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>{{end}}

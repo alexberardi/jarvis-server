@@ -1,0 +1,14 @@
+{{define "content"}}<h1>Results for “{{.D.Q}}”</h1>
+<p>{{len .D.Results}} results</p>
+<form method="get" action="/store/compare">{{if .Moved}}<input type="hidden" name="layout" value="moved">{{end}}
+{{range .D.Results}}<div class="result">
+<input type="checkbox" name="id" value="{{.ID}}" aria-label="Compare {{.Name}}">
+<div>
+{{if .Sponsored}}<span class="sponsored">Sponsored</span> {{end}}<a href="{{$.U (printf "/store/product/%s" .ID)}}"><strong>{{.Name}}</strong></a>
+<div>{{money .Price}}{{if .ListPrice}} <s>{{money .ListPrice}}</s>{{end}} · {{stars .Rating}} {{printf "%.1f" .Rating}} ({{.Reviews}} reviews) · Battery: {{.BatteryDays}} days · Sold by {{.Seller}}</div>
+</div>
+</div>
+{{else}}<p>No products match your search.</p>
+{{end}}
+{{if .D.Results}}<div class="actions"><button class="btn secondary" type="submit">Compare selected</button></div>{{end}}
+</form>{{end}}

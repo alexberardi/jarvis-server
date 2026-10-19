@@ -3,9 +3,12 @@ package packages
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +19,8 @@ const (
 	TopicInstall   = "package-install"
 	TopicUninstall = "package-uninstall"
 	TopicRevert    = "package-revert"
+	// TopicTestInstall is a Forge test install (cc testinstall.go); the Pi profile answers it.
+	TopicTestInstall = "test-install"
 )
 
 // Topics are the three, for the runner's subscriptions.
@@ -66,7 +71,7 @@ type verifyAnswer struct {
 
 // Handle serves one nudge on topic (one of Topics). It blocks until the result is posted.
 func (q *Requests) Handle(ctx context.Context, api API, topic string, payload []byte) {
-	op := topic[len("package-"):]
+	op := strings.TrimPrefix(topic, "package-")
 	var nudge struct {
 		RequestID string `json:"request_id"`
 	}
@@ -76,6 +81,10 @@ func (q *Requests) Handle(ctx context.Context, api API, topic string, payload []
 	}
 	rid := nudge.RequestID
 	if !q.take(rid) {
+		return
+	}
+	if topic == TopicTestInstall {
+		q.testInstall(ctx, api, rid)
 		return
 	}
 	var v verifyAnswer
@@ -120,6 +129,69 @@ func (q *Requests) Handle(ctx context.Context, api API, topic string, payload []
 	q.post(ctx, api, op, rid, details, "")
 }
 
+// testInstall serves a test-install nudge as N:services/test_install_handler.py does: verify,
+// download the draft from the Pantry URL jarvisd gave (unauthenticated: the share code is the
+// secret, and the node's credentials are jarvisd's only), install it, post the result.
+func (q *Requests) testInstall(ctx context.Context, api API, rid string) {
+	const op = "test-install"
+	var v struct {
+		Confirmed   bool   `json:"confirmed"`
+		PackageName string `json:"package_name"`
+		DraftURL    string `json:"pantry_download_url"`
+	}
+	path := "/api/v0/nodes/" + url.PathEscape(q.NodeID) + "/test-install/" + url.PathEscape(rid) + "/verify"
+	if err := api.Do(ctx, http.MethodGet, path, nil, &v); err != nil || !v.Confirmed {
+		q.Log.Warn("packages: test install not confirmed by jarvisd", "request_id", rid, "err", err)
+		q.post(ctx, api, op, rid, nil, "Verification failed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
+	q.Log.Info("packages: test install", "request_id", rid, "package", v.PackageName)
+	var draft struct {
+		Files []DraftFile `json:"files"`
+	}
+	if err := q.download(ctx, v.DraftURL, &draft); err != nil {
+		q.Log.Warn("packages: test install: draft download failed", "request_id", rid, "err", err)
+		q.post(ctx, api, op, rid, nil, "Failed to download from Pantry")
+		return
+	}
+	if len(draft.Files) == 0 {
+		q.post(ctx, api, op, rid, nil, "No files in draft")
+		return
+	}
+	details, err := q.Manager.TestInstall(ctx, v.PackageName, draft.Files)
+	if err != nil {
+		q.Log.Error("packages: test install failed", "request_id", rid, "err", err)
+		q.post(ctx, api, op, rid, nil, err.Error())
+		return
+	}
+	q.post(ctx, api, op, rid, details, "")
+}
+
+// download GETs a JSON document (at most 16 MB) with the Manager's client and no credentials.
+func (q *Requests) download(ctx context.Context, u string, out any) error {
+	pu, err := url.Parse(u)
+	if err != nil || (pu.Scheme != "http" && pu.Scheme != "https") {
+		return fmt.Errorf("not an http(s) URL: %q", u)
+	}
+	dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(dctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := q.Manager.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", u, resp.Status)
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out)
+}
+
 func (q *Requests) post(ctx context.Context, api API, op, rid string, details map[string]any, errText string) {
 	body := map[string]any{"success": errText == ""}
 	if errText != "" {
@@ -128,7 +200,11 @@ func (q *Requests) post(ctx context.Context, api API, op, rid string, details ma
 	if len(details) > 0 {
 		body["details"] = details
 	}
-	path := "/api/v0/nodes/" + url.PathEscape(q.NodeID) + "/package-" + op + "/" + url.PathEscape(rid) + "/results"
+	route := "/package-" + op
+	if op == "test-install" {
+		route = "/test-install"
+	}
+	path := "/api/v0/nodes/" + url.PathEscape(q.NodeID) + route + "/" + url.PathEscape(rid) + "/results"
 	// The change is done whatever the deadline did to it; give the post its own.
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()

@@ -36,10 +36,22 @@ type Store struct {
 	dir    string
 	nodeID string
 
-	mu  sync.Mutex
-	k2  *K2
-	key []byte
-	s   settingsFile
+	mu     sync.Mutex
+	k2     *K2
+	key    []byte
+	s      settingsFile
+	sealed bool // Seal: a factory reset is wiping the files
+}
+
+// ErrSealed is a write to a sealed store.
+var ErrSealed = errors.New("nodesettings: the node is being reset")
+
+// Seal makes every later write fail with ErrSealed without touching the files: a factory reset
+// is wiping them, and a write landing between the wipe and the reboot would bring one back.
+func (st *Store) Seal() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.sealed = true
 }
 
 type secret struct {
@@ -162,6 +174,9 @@ func (st *Store) SaveK2(k2, kid, createdAt string) error {
 	k := K2{NodeID: st.nodeID, K2: k2, Kid: kid, CreatedAt: createdAt}
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if st.sealed {
+		return ErrSealed
+	}
 	if err := writeJSON(filepath.Join(st.dir, K2File), k); err != nil {
 		return err
 	}
@@ -170,6 +185,9 @@ func (st *Store) SaveK2(k2, kid, createdAt string) error {
 }
 
 func (st *Store) saveLocked() error {
+	if st.sealed {
+		return ErrSealed
+	}
 	st.s.NodeID = st.nodeID
 	return writeJSON(filepath.Join(st.dir, SettingsFile), st.s)
 }

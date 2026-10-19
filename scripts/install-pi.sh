@@ -128,10 +128,10 @@ preflight() {
 # What this install needs from apt that Raspberry Pi OS may lack (N:install.sh:206-245):
 # PulseAudio (§8 Q2) with its Bluetooth modules, BlueZ and rfkill, iw, and hostapd/dnsmasq,
 # the provisioning AP's fallback when the NetworkManager AP fails (§8 Q7). The overlay
-# compiler and the ALSA tools too.
+# compiler and the ALSA tools too, and python3 for jarvis-post-install.
 install_packages() {
   missing=""
-  for pkg in pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils; do
+  for pkg in pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils python3; do
     if [ -n "$ROOT" ] || ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
       missing="$missing $pkg"
     fi
@@ -458,6 +458,14 @@ setup_user() {
   run loginctl enable-linger "$NODE_USER" || warn "loginctl enable-linger $NODE_USER failed: Pulse may not be up when the node starts"
 }
 
+# The wrappers a Pantry package's system setup runs as root through sudoers (parity 5.6;
+# N:install.sh:1662-1800): root's, 0755, in /usr/local/sbin. The agent runs them with sudo -n.
+install_package_wrappers() {
+  apt_install_wrapper | put /usr/local/sbin/jarvis-apt-install 0755
+  apt_source_wrapper | put /usr/local/sbin/jarvis-apt-source 0755
+  post_install_wrapper | put /usr/local/sbin/jarvis-post-install 0755
+}
+
 # What the agent may run as root, checked with visudo before it goes in place
 # (N:install.sh:1819-1862, cut to what the Go node runs today).
 install_sudoers() {
@@ -473,10 +481,14 @@ $NODE_USER ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
 # A crash loop (a self-update's broken release) hits the unit's start limit; the rollback's restart needs it reset.
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl reset-failed jarvis-agent, /usr/bin/systemctl reset-failed jarvis-agent.service
+# Pantry packages' system setup (parity 5.6): apt packages, apt sources and post_install ops,
+# through root-owned wrappers that shape-check their arguments (install_package_wrappers).
+$NODE_USER ALL=(root) NOPASSWD: /usr/local/sbin/jarvis-apt-install *
+$NODE_USER ALL=(root) NOPASSWD: /usr/local/sbin/jarvis-apt-source *
+$NODE_USER ALL=(root) NOPASSWD: /usr/local/sbin/jarvis-post-install *
 # Provisioning drives Wi-Fi through NetworkManager's D-Bus API, which polkit allows instead
 # (configure_nm_ap); hostapd/dnsmasq get entries here only if the NM AP fails on a chip.
 # Not yet, added with the step that needs them (go-pi-node.md §7):
-# TODO(parity 5.6, packages): the apt and post-install wrappers.
 # TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
 EOF
   chmod 0440 "$tmp"
@@ -934,6 +946,760 @@ exit 0
 WATCHDOG
 }
 
+# The package wrappers, scripts/packaging/pi/jarvis-apt-install, jarvis-apt-source and
+# jarvis-post-install byte for byte (N:scripts/ at 73b3660; scripts/install-pi-check.sh compares them).
+apt_install_wrapper() {
+  cat <<'APT_INSTALL'
+#!/bin/sh
+# jarvis-apt-install — minimal sudo-able shim around apt-get install.
+#
+# Installed to /usr/local/sbin/jarvis-apt-install (root-owned, 0755) by
+# install.sh, with /etc/sudoers.d/jarvis-node granting the service user
+# NOPASSWD access. Receives a list of debian package names from
+# command_store_service._install_apt_deps() and forwards them to
+# apt-get install after a regex shape check.
+#
+# The regex (^[a-z][a-z0-9.+-]*$) is a defensive shape guard against shell
+# injection and obviously-bogus input, NOT an allow-list. Allow-list
+# enforcement lives server-side (Pantry submission time, tracked as #16).
+# By the time a name reaches this wrapper it has already been vetted.
+
+set -eu
+
+# Zero args: short-circuit. apt-get install with no packages is a no-op
+# anyway; surface that as a successful no-op rather than running apt.
+if [ "$#" -eq 0 ]; then
+    exit 0
+fi
+
+# Validate each name before invoking apt-get. One bad name aborts the
+# whole call — no partial installs.
+for name in "$@"; do
+    case "$name" in
+        "")
+            echo "jarvis-apt-install: invalid package name (empty)" >&2
+            exit 2
+            ;;
+    esac
+    # POSIX sh has no regex matching; delegate to grep -E with -q.
+    if ! printf '%s' "$name" | grep -Eq '^[a-z][a-z0-9.+-]*$'; then
+        echo "jarvis-apt-install: invalid package name: $name" >&2
+        exit 2
+    fi
+done
+
+# nice -n 15: lower priority so the install doesn't starve the voice
+# pipeline, MQTT, SSH on the Pi's shared cores. DPkg::Lock::Timeout=60:
+# wait up to 60s if dpkg is locked (apt already running) instead of
+# failing immediately.
+exec nice -n 15 apt-get -o DPkg::Lock::Timeout=60 install -y --no-install-recommends "$@"
+APT_INSTALL
+}
+
+apt_source_wrapper() {
+  cat <<'APT_SOURCE'
+#!/bin/sh
+# jarvis-apt-source — minimal sudo-able shim that registers a 3rd-party apt
+# source (signing key + sources.list entry) on the node.
+#
+# Installed to /usr/local/sbin/jarvis-apt-source (root-owned, 0755) by
+# install.sh, with /etc/sudoers.d/jarvis-node granting the service user
+# NOPASSWD access. Invoked by command_store_service._install_apt_sources()
+# for every source declared in a package's `apt_sources:` manifest field.
+#
+# The wrapper does NOT carry an allowlist — Pantry validates submissions
+# against config/apt-source-allowlist.yaml before they ever reach a node.
+# The shape checks below are a defensive injection guard, not an authz check.
+#
+# Usage:
+#   jarvis-apt-source <name> <key_url> <repo_line>
+#
+#   name      e.g. "raspotify"  (matches ^[a-z][a-z0-9._-]*$)
+#   key_url   e.g. "https://dtcooper.github.io/raspotify/key.asc"
+#   repo_line e.g. "deb https://dtcooper.github.io/raspotify raspotify main"
+#
+# Idempotent — if the key+source files are already present and match, exit 0.
+
+set -eu
+
+if [ "$#" -ne 3 ]; then
+    echo "jarvis-apt-source: usage: jarvis-apt-source <name> <key_url> <repo_line>" >&2
+    exit 2
+fi
+
+name="$1"
+key_url="$2"
+repo_line="$3"
+
+# --- Validate name (sources.list.d filename component) ---
+if ! printf '%s' "$name" | grep -Eq '^[a-z][a-z0-9._-]*$'; then
+    echo "jarvis-apt-source: invalid source name: $name" >&2
+    exit 2
+fi
+
+# --- Validate key URL (must be https) ---
+case "$key_url" in
+    https://*) ;;
+    *)
+        echo "jarvis-apt-source: key_url must be https:// (got: $key_url)" >&2
+        exit 2
+        ;;
+esac
+# No newlines, no shell metacharacters that would break later writes.
+if printf '%s' "$key_url" | grep -qE '[[:cntrl:]]|[;&|`$\\<>"'\''(){}*?[\]!]'; then
+    echo "jarvis-apt-source: key_url contains illegal characters" >&2
+    exit 2
+fi
+
+# --- Validate repo line ---
+# Standard deb sources.list format: must start with "deb " or "deb [opts] ".
+# Reject control chars and shell metacharacters that would corrupt the file
+# or trick downstream parsers.
+case "$repo_line" in
+    "deb "*|"deb-src "*) ;;
+    *)
+        echo "jarvis-apt-source: repo_line must start with 'deb ' or 'deb-src '" >&2
+        exit 2
+        ;;
+esac
+if printf '%s' "$repo_line" | grep -qE '[[:cntrl:]]|[;&|`$\\<>"'\'']'; then
+    echo "jarvis-apt-source: repo_line contains illegal characters" >&2
+    exit 2
+fi
+
+key_path="/etc/apt/trusted.gpg.d/${name}.asc"
+list_path="/etc/apt/sources.list.d/${name}.list"
+
+# --- Fetch + install signing key ---
+# Idempotent: if the file already exists with the same content, leave it
+# alone. Otherwise download and atomically swap in.
+fetch_key() {
+    local tmp
+    tmp="$(mktemp)" || return 1
+    if curl -fsSL --max-time 30 "$key_url" -o "$tmp"; then
+        # Sanity check: must not be empty + must look like ASCII-armored or
+        # binary GPG. We don't want to install a 0-byte file or an HTML 404.
+        if [ ! -s "$tmp" ]; then
+            echo "jarvis-apt-source: fetched key is empty" >&2
+            rm -f "$tmp"
+            return 1
+        fi
+        # ASCII-armored keys start with "-----BEGIN PGP PUBLIC KEY BLOCK-----".
+        # Binary keys (rare) start with byte 0x99 or 0xC6 — accept either.
+        if ! head -c 64 "$tmp" | grep -q "BEGIN PGP PUBLIC KEY BLOCK" \
+           && ! head -c 1 "$tmp" | od -An -tx1 | grep -Eq '^ (99|c6)' ; then
+            echo "jarvis-apt-source: fetched key doesn't look like a GPG key" >&2
+            rm -f "$tmp"
+            return 1
+        fi
+        # Atomic swap (mv across same filesystem).
+        chmod 0644 "$tmp"
+        mv "$tmp" "$key_path"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+if [ -f "$key_path" ]; then
+    # Already present. Trust it — we don't re-validate the key URL against
+    # the existing key; Pantry's allowlist is the source of truth, not us.
+    :
+else
+    if ! fetch_key; then
+        echo "jarvis-apt-source: failed to fetch key from $key_url" >&2
+        exit 1
+    fi
+fi
+
+# --- Write sources.list entry ---
+# Use a single-line file so the next run can `grep -qxF` to check identity
+# without rewriting when the content matches.
+if [ -f "$list_path" ] && grep -qxF "$repo_line" "$list_path"; then
+    # Already exact match — no-op.
+    :
+else
+    printf '%s\n' "$repo_line" > "$list_path.tmp"
+    chmod 0644 "$list_path.tmp"
+    mv "$list_path.tmp" "$list_path"
+    # Stamp apt's cache stale so the next `apt-get install` refreshes for
+    # this new source. Avoid a full apt-get update here — that's slow and
+    # the caller (command_store_service) will run it anyway as part of
+    # _install_apt_deps.
+    touch -d '1 hour ago' /var/cache/apt/pkgcache.bin 2>/dev/null || true
+fi
+
+exit 0
+APT_SOURCE
+}
+
+post_install_wrapper() {
+  cat <<'POST_INSTALL'
+#!/usr/bin/env python3
+"""jarvis-post-install — sudoers-gated dispatcher for declarative post-install ops.
+
+Installed to /usr/local/sbin/jarvis-post-install (root-owned, 0755) by
+install.sh, with /etc/sudoers.d/jarvis-node granting the service user
+NOPASSWD access. Invoked once per op by
+command_store_service._run_post_install().
+
+Two ops are supported (the SDK schema in jarvis-command-sdk
+forge.MANIFEST_SCHEMA["post_install"] mirrors these names):
+
+  configure-systemd-service   — write a systemd drop-in for the named service
+  set-config-file-value       — idempotent key=value in a structured config
+
+Both ops are bounded by a Pantry-side allow-list checked at submission
+time (jarvis-pantry/config/post-install-allowlist.yaml), so by the time
+input reaches this wrapper the (op_type, target) pair has been vetted.
+This wrapper still performs defensive shape checks — path traversal,
+unit-name regex, atomic file writes — as defense in depth.
+
+The op's JSON payload is read from stdin. Stdout is informational;
+non-zero exit code signals failure.
+
+Idempotency:
+  - configure-systemd-service writes the same drop-in deterministically;
+    re-running on an already-configured service is a no-op (after the
+    file compare).
+  - set-config-file-value upserts the key inside the named section. If
+    the key already has the requested value, the file is left untouched.
+
+Uninstall:
+  - drop-ins carry a `# managed-by: jarvis-package <name>` marker line.
+    command_store_service's uninstall path scans for this marker and
+    removes drop-ins owned by the package being uninstalled.
+  - config-file edits do NOT auto-revert today (POC limitation). The
+    edit is logged so an operator can audit / hand-revert if needed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+# ── Shape guards ────────────────────────────────────────────────────────
+
+# Real systemd unit naming is permissive but a community package should
+# only ever name a *short* unit (no template-instance @, no path-escaped).
+# Allow letters, digits, dot/dash/underscore. Reject everything else.
+_UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+# Drop-in file we own. ONE per service. install.sh / uninstall scan for
+# this exact name so re-running the wrapper for the same service+package
+# overwrites cleanly.
+_DROPIN_FILENAME = "jarvis.conf"
+
+# Marker line that lets the uninstall path identify drop-ins this wrapper
+# wrote, scoped to a specific package.
+_MANAGED_BY_PREFIX = "# managed-by: jarvis-package "
+
+# Second marker line, present only when THIS wrapper ran `systemctl enable`
+# (the unit was not enabled before). Uninstall then runs `disable --now`
+# instead of a restart, undoing exactly what the package did and never
+# disabling a unit the user had enabled themselves.
+_ENABLED_BY_PACKAGE_MARKER = "# jarvis-enabled-by-package: true"
+
+# Crash-loop guard for any drop-in that sets Restart=. systemd's default
+# limit (5 starts / 10 s) never trips with RestartSec=5, so a broken
+# drop-in restarts forever (jarvis-dev mpd, 2026-10: 5,067 restarts).
+# 5 starts / 300 s stops it within a minute.
+_START_LIMIT_INTERVAL_SEC = 300
+_START_LIMIT_BURST = 5
+
+# Environment values under a jarvis packages dir are files the package
+# ships; they vanish when the package does. Each becomes a
+# ConditionPathExists= so a drop-in that outlives its package makes the
+# unit skip cleanly (inactive, condition failed) instead of crash-looping.
+_PACKAGE_PATH_MARKER = "/.jarvis/packages/"
+
+
+def _die(msg: str, code: int = 2) -> "None":
+    print(f"jarvis-post-install: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def _read_payload() -> dict:
+    raw = sys.stdin.read()
+    if not raw.strip():
+        _die("empty payload on stdin")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        _die(f"payload is not valid JSON: {e}")
+        return {}  # unreachable, for type checkers
+    if not isinstance(data, dict):
+        _die(f"payload must be an object, got {type(data).__name__}")
+    return data
+
+
+def _validate_package_name(name: str) -> str:
+    """Package name carries into the managed-by marker; constrain to safe chars."""
+    if not isinstance(name, str) or not _UNIT_NAME_RE.match(name or ""):
+        _die(f"invalid --package: {name!r}")
+    return name
+
+
+def _validate_service_name(name: object) -> str:
+    if not isinstance(name, str) or not name or not _UNIT_NAME_RE.match(name):
+        _die(f"invalid service name: {name!r}")
+    return name  # type: ignore[return-value]
+
+
+def _atomic_write(path: Path, content: str, mode: int = 0o644) -> None:
+    """Write `content` to `path` atomically — write to tmp in the same dir, fsync, rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".tmp-", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+# ── op: configure-systemd-service ───────────────────────────────────────
+
+
+def _render_dropin(payload: dict, package: str, enabled_by_package: bool = False) -> str:
+    """Render a systemd drop-in (.conf in *.service.d/) from a payload dict.
+
+    Supported keys (all optional except `service`, which is validated by the
+    caller):
+      run_as      — User=
+      group       — Group=
+      environment — dict[str,str], rendered as Environment="K=V" lines
+      wants       — list[str], rendered as Wants= in [Unit]
+      after       — list[str], rendered as After= in [Unit]
+      restart     — Restart= value (e.g. "on-failure")
+      restart_sec — RestartSec= seconds
+
+    Derived, not configurable (crash-loop guards):
+      ConditionPathExists= for each environment value that is a file under
+        a jarvis packages dir; StartLimitIntervalSec=/StartLimitBurst= in
+        [Unit] whenever restart is set.
+    """
+    unit_lines: list[str] = []
+    service_lines: list[str] = []
+
+    wants = payload.get("wants")
+    if isinstance(wants, list) and wants:
+        for w in wants:
+            if not isinstance(w, str) or not w.strip():
+                _die(f"wants[] entry must be a non-empty string: {w!r}")
+            unit_lines.append(f"Wants={w}")
+
+    after = payload.get("after")
+    if isinstance(after, list) and after:
+        for a in after:
+            if not isinstance(a, str) or not a.strip():
+                _die(f"after[] entry must be a non-empty string: {a!r}")
+            unit_lines.append(f"After={a}")
+
+    run_as = payload.get("run_as")
+    if run_as:
+        if not isinstance(run_as, str) or not _UNIT_NAME_RE.match(run_as):
+            _die(f"invalid run_as: {run_as!r}")
+        service_lines.append(f"User={run_as}")
+
+    group = payload.get("group")
+    if group:
+        if not isinstance(group, str) or not _UNIT_NAME_RE.match(group):
+            _die(f"invalid group: {group!r}")
+        service_lines.append(f"Group={group}")
+
+    env = payload.get("environment")
+    if env:
+        if not isinstance(env, dict):
+            _die("environment must be a mapping")
+        for k, v in env.items():
+            if not isinstance(k, str) or "=" in k or not k:
+                _die(f"invalid environment key: {k!r}")
+            if not isinstance(v, str):
+                _die(f"environment value for {k!r} must be a string")
+            # Escape any embedded double quotes — Environment=" ... " syntax.
+            escaped = v.replace("\\", "\\\\").replace("\"", "\\\"")
+            service_lines.append(f'Environment="{k}={escaped}"')
+            if (
+                v.startswith("/")
+                and _PACKAGE_PATH_MARKER in v
+                and os.path.normpath(v) == v
+                and "\n" not in v
+            ):
+                unit_lines.append(f"ConditionPathExists={v}")
+
+    restart = payload.get("restart")
+    if restart:
+        if not isinstance(restart, str) or not re.match(r"^[a-z-]+$", restart):
+            _die(f"invalid restart: {restart!r}")
+        service_lines.append(f"Restart={restart}")
+        unit_lines.append(f"StartLimitIntervalSec={_START_LIMIT_INTERVAL_SEC}")
+        unit_lines.append(f"StartLimitBurst={_START_LIMIT_BURST}")
+
+    restart_sec = payload.get("restart_sec")
+    if restart_sec is not None:
+        if not isinstance(restart_sec, int) or restart_sec < 0:
+            _die(f"invalid restart_sec: {restart_sec!r}")
+        service_lines.append(f"RestartSec={restart_sec}")
+
+    parts: list[str] = [f"{_MANAGED_BY_PREFIX}{package}"]
+    if enabled_by_package:
+        parts.append(_ENABLED_BY_PACKAGE_MARKER)
+    if unit_lines:
+        parts.append("[Unit]")
+        parts.extend(unit_lines)
+        parts.append("")
+    if service_lines:
+        parts.append("[Service]")
+        parts.extend(service_lines)
+        parts.append("")
+    return "\n".join(parts) + "\n"
+
+
+def _systemctl(*args: str) -> None:
+    """Run systemctl, dying with a useful message on non-zero."""
+    cmd = ["systemctl", *args]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30.0)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        _die(f"systemctl {' '.join(args)} failed: {e}")
+        return
+    if r.returncode != 0:
+        _die(
+            f"systemctl {' '.join(args)} exited {r.returncode}: "
+            f"{(r.stderr or r.stdout).strip()[:500]}"
+        )
+
+
+def _op_configure_systemd_service(payload: dict, package: str) -> None:
+    service = _validate_service_name(payload.get("service"))
+    dropin_dir = Path("/etc/systemd/system") / f"{service}.service.d"
+    dropin_path = dropin_dir / _DROPIN_FILENAME
+
+    enable_raw = payload.get("enable", False)
+    if not isinstance(enable_raw, bool):
+        _die(f"invalid enable: must be a bool, got {type(enable_raw).__name__}")
+    enable = bool(enable_raw)
+
+    current: str | None = None
+    if dropin_path.exists():
+        try:
+            current = dropin_path.read_text()
+        except OSError:
+            current = ""
+
+    # Did (or will) this wrapper be the one that enabled the unit? Keep the
+    # ownership marker across re-installs; otherwise only claim it when the
+    # unit isn't enabled yet.
+    enabled_by_package = enable and (
+        (current is not None and _ENABLED_BY_PACKAGE_MARKER in current.splitlines())
+        or not _unit_is_enabled(service)
+    )
+    rendered = _render_dropin(payload, package, enabled_by_package=enabled_by_package)
+
+    # Idempotency: if content matches what we'd write AND the unit is already
+    # enabled (when requested), skip the daemon-reload and restart entirely
+    # so re-installs are quiet no-ops. The enable check costs ~50ms but
+    # without it a reinstall on an already-enabled unit re-runs systemctl
+    # restart and daemon-reload for no reason.
+    if current is not None:
+        if current == rendered and (not enable or _unit_is_enabled(service)):
+            print(f"configure-systemd-service: {service} already up to date")
+            return
+
+    _atomic_write(dropin_path, rendered, mode=0o644)
+    _systemctl("daemon-reload")
+    if enable:
+        _systemctl("enable", service)
+    _systemctl("restart", service)
+    msg = f"configure-systemd-service: wrote {dropin_path} and restarted {service}"
+    if enable:
+        msg += " (enabled for boot)"
+    print(msg)
+
+
+def _unit_is_enabled(service: str) -> bool:
+    """True iff `systemctl is-enabled <service>` reports enabled.
+
+    `is-enabled` is the canonical check. Returns rc=0 only for fully enabled
+    states (enabled, enabled-runtime, alias, static). All other states
+    (disabled, masked, not-found, etc.) return non-zero. We treat any
+    non-zero as "needs enabling" so the idempotency check is conservative.
+    """
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-enabled", service],
+            capture_output=True, text=True, timeout=10.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+# ── op: set-config-file-value ───────────────────────────────────────────
+
+
+def _normalize_target_file(raw: object) -> Path:
+    """Defensive path-traversal guard. Refuses non-absolute paths and
+    `..`/redundant segments (anything `os.path.normpath` would rewrite).
+
+    Deliberately does NOT call ``Path.resolve()`` — on macOS `/etc` is a
+    symlink to `/private/etc`, which would make a legitimate target look
+    rewritten. Symlink-escape is mitigated by the Pantry-side allow-list
+    of permitted file paths above us, not by the wrapper.
+    """
+    if not isinstance(raw, str) or not raw.startswith("/"):
+        _die(f"invalid file: must be an absolute path: {raw!r}")
+        return Path()  # unreachable
+    if os.path.normpath(raw) != raw:
+        _die(
+            f"path has '..' or redundant segments: {raw!r} "
+            f"(normalizes to {os.path.normpath(raw)!r})"
+        )
+    return Path(raw)
+
+
+def _libconfig_upsert(
+    src: str, section: str, key: str, value: str,
+) -> str:
+    """Idempotently set `key = "value";` inside the named libconfig section.
+
+    libconfig (used by shairport-sync among others) syntax for our purposes:
+
+        section =
+        {
+            key = "value";
+            // commented_key = "default";
+        };
+
+    Behavior:
+      - If a non-commented `key = ...;` line exists inside `section`, the
+        value is replaced.
+      - Otherwise a new `key = "value";` line is appended immediately after
+        the opening `{`.
+      - If the named `section = { ... };` block is missing, one is added at
+        the end of the file. (Doesn't apply to shairport.conf which ships
+        all blocks pre-stubbed, but keeps the wrapper resilient.)
+
+    Values are wrapped in double quotes and embedded quotes escaped.
+    """
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", section):
+        _die(f"invalid section name: {section!r}")
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+        _die(f"invalid key name: {key!r}")
+    escaped_value = value.replace("\\", "\\\\").replace("\"", "\\\"")
+    new_line = f'\t{key} = "{escaped_value}";'
+
+    # Find the section's `{ ... };` block.
+    section_open_re = re.compile(
+        rf"^[ \t]*{re.escape(section)}[ \t]*=[ \t]*\n[ \t]*\{{",
+        re.MULTILINE,
+    )
+    m = section_open_re.search(src)
+    if not m:
+        # Append a new section at the end.
+        return src.rstrip() + f"\n\n{section} =\n{{\n{new_line}\n}};\n"
+
+    # Locate the closing `};` after the opening brace.
+    brace_pos = m.end()  # index just after the `{`
+    close_re = re.compile(r"\n\s*\}\s*;", re.MULTILINE)
+    cm = close_re.search(src, pos=brace_pos)
+    if not cm:
+        _die(f"section {section!r} opens but never closes — refusing to edit")
+        return src  # unreachable
+
+    block = src[brace_pos:cm.start()]
+    block_end = cm.start()
+
+    # Look for an existing (non-commented) `key = ...;` line.
+    key_line_re = re.compile(
+        rf"^([ \t]*)({re.escape(key)})[ \t]*=[ \t]*[^\n]*;",
+        re.MULTILINE,
+    )
+    found_replacement: str | None = None
+    for km in key_line_re.finditer(block):
+        prefix = block[max(0, km.start() - 4):km.start()]
+        # Skip commented-out template lines like `//\tkey = "default";`.
+        # libconfig also supports `#` comments; we treat both as inactive.
+        if prefix.lstrip().startswith(("//", "#")):
+            continue
+        # Replace this line, preserving the leading indent.
+        indent = km.group(1)
+        replaced = f'{indent}{key} = "{escaped_value}";'
+        found_replacement = (
+            block[:km.start()] + replaced + block[km.end():]
+        )
+        break
+
+    if found_replacement is not None:
+        new_block = found_replacement
+    else:
+        # Insert immediately after the opening brace (with a newline).
+        new_block = "\n" + new_line + block.rstrip("\n") + "\n"
+
+    return src[:brace_pos] + new_block + src[block_end:]
+
+
+def _op_set_config_file_value(payload: dict, package: str) -> None:
+    fmt = payload.get("format")
+    if fmt != "libconfig":
+        _die(f"unsupported format: {fmt!r} (supported: libconfig)")
+
+    target = _normalize_target_file(payload.get("file"))
+    if not target.exists():
+        _die(f"file does not exist: {target}")
+
+    section = payload.get("section")
+    key = payload.get("key")
+    value = payload.get("value")
+    if not isinstance(section, str) or not isinstance(key, str):
+        _die("section and key must be strings")
+    if not isinstance(value, str):
+        _die("value must be a string")
+
+    src = target.read_text()
+    out = _libconfig_upsert(src, section, key, value)  # type: ignore[arg-type]
+
+    if out == src:
+        print(f"set-config-file-value: {target} already has {section}.{key} = {value!r}")
+        return
+
+    _atomic_write(target, out, mode=0o644)
+    print(
+        f"set-config-file-value: updated {target} "
+        f"({section}.{key} = {value!r}, package={package})"
+    )
+
+
+# ── CLI ─────────────────────────────────────────────────────────────────
+
+
+def _op_remove_managed_dropins(package: str) -> None:
+    """Find and remove systemd drop-ins owned by this package.
+
+    Scans /etc/systemd/system/*.service.d/*.conf for files whose first
+    non-empty line is the marker `# managed-by: jarvis-package <name>`.
+    Each matching file is removed and systemctl daemon-reload runs once.
+    Then, per affected service: if the drop-in carried the
+    enabled-by-package marker, `systemctl disable --now` (undo the
+    install's enable); otherwise `try-restart`, which applies the revert
+    to a running unit and never starts a stopped one.
+
+    This op takes no payload — just the --package arg. Idempotent: if no
+    drop-ins match (uninstall on a package that never wrote any), the op
+    is a clean no-op.
+    """
+    dropin_root = Path("/etc/systemd/system")
+    if not dropin_root.exists():
+        print("remove-managed-dropins: /etc/systemd/system does not exist; nothing to do")
+        return
+
+    marker = f"{_MANAGED_BY_PREFIX}{package}"
+    removed: list[str] = []
+    affected_services: list[str] = []
+    disable_services: set[str] = set()
+
+    for service_dir in sorted(dropin_root.glob("*.service.d")):
+        for dropin in sorted(service_dir.glob("*.conf")):
+            try:
+                first_line = dropin.read_text().splitlines()[:1]
+            except OSError:
+                continue
+            if not first_line or first_line[0].strip() != marker:
+                continue
+            try:
+                owned_enable = _ENABLED_BY_PACKAGE_MARKER in dropin.read_text().splitlines()
+            except OSError:
+                owned_enable = False
+            try:
+                dropin.unlink()
+            except OSError as e:
+                print(f"remove-managed-dropins: failed to remove {dropin}: {e}",
+                      file=sys.stderr)
+                continue
+            removed.append(str(dropin))
+            service_name = service_dir.name[: -len(".service.d")]
+            if service_name not in affected_services:
+                affected_services.append(service_name)
+            if owned_enable:
+                disable_services.add(service_name)
+
+    if not removed:
+        print(f"remove-managed-dropins: no drop-ins for package {package!r}")
+        return
+
+    # Reload, then undo the enable we own, or re-apply package defaults.
+    _systemctl("daemon-reload")
+    actions: list[str] = []
+    for svc in affected_services:
+        args = ("disable", "--now", svc) if svc in disable_services else ("try-restart", svc)
+        try:
+            _systemctl(*args)
+            actions.append(f"{args[0]} {svc}")
+        except SystemExit:
+            # The service may be in a bad state; our drop-in is already
+            # gone, so partial success is fine.
+            print(f"remove-managed-dropins: warn — {' '.join(args)} failed (continuing)",
+                  file=sys.stderr)
+
+    print(
+        f"remove-managed-dropins: removed {len(removed)} drop-in(s) for {package!r}; "
+        f"{', '.join(actions) or 'no service actions'}"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Jarvis post-install op dispatcher")
+    parser.add_argument(
+        "--package", required=True,
+        help="Name of the Jarvis package that owns this op (used in managed-by marker).",
+    )
+    sub = parser.add_subparsers(dest="op", required=True)
+    sub.add_parser("configure-systemd-service", help="Write a systemd drop-in.")
+    sub.add_parser("set-config-file-value", help="Set a key=value in a config file.")
+    sub.add_parser(
+        "remove-managed-dropins",
+        help="Remove all drop-ins this package previously wrote (uninstall).",
+    )
+    args = parser.parse_args()
+
+    package = _validate_package_name(args.package)
+
+    if args.op == "remove-managed-dropins":
+        # No stdin payload — operates purely on --package.
+        _op_remove_managed_dropins(package)
+        return 0
+
+    payload = _read_payload()
+
+    if args.op == "configure-systemd-service":
+        _op_configure_systemd_service(payload, package)
+    elif args.op == "set-config-file-value":
+        _op_set_config_file_value(payload, package)
+    else:
+        _die(f"unknown op: {args.op}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+POST_INSTALL
+}
+
 # The DTS, scripts/packaging/pi/respeaker-2mic-v2_0-overlay.dts byte for byte
 # (scripts/install-pi-check.sh compares them).
 overlay_dts() {
@@ -1048,6 +1814,7 @@ configure_pulseaudio
 configure_bluetooth
 mixer_baseline
 setup_user
+install_package_wrappers
 install_sudoers
 configure_journald
 configure_swappiness
