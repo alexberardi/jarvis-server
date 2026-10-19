@@ -126,6 +126,21 @@ func TestExtensionSurface(t *testing.T) {
 			t.Errorf("snapCollect lost its secret-field guard %q", guard)
 		}
 	}
+	// recInstall (recording) is the only other: its events carry no value for those fields, nor
+	// for password-manager fields or fields labelled as a card, CVV, SSN or PIN (masked instead).
+	rec := jsFunc(t, js, "recInstall")
+	for _, guard := range []string{`t === "password"`, `t === "hidden"`, `a.startsWith("cc-")`, `a === "one-time-code"`,
+		`a === "current-password"`, `a === "new-password"`, "REC_SECRET_LABEL.test(", "if (secret(el)) return undefined;",
+		"e.masked = true;", "if (!ev.isTrusted) return;"} {
+		if !strings.Contains(rec, guard) {
+			t.Errorf("recInstall lost its secret-field guard %q", guard)
+		}
+	}
+	for _, term := range []string{"card", "cvv", "ssn", "pin"} {
+		if m := regexp.MustCompile(`const REC_SECRET_LABEL = (/.*/i);`).FindStringSubmatch(rec); m == nil || !strings.Contains(m[1], term) {
+			t.Errorf("recInstall's REC_SECRET_LABEL doesn't match %q", term)
+		}
+	}
 	// act never types into a password field.
 	for _, guard := range []string{`type === "password"`, `code: "password_field"`} {
 		if !strings.Contains(jsFunc(t, js, "actDo"), guard) {
@@ -144,8 +159,8 @@ func TestExtensionSurface(t *testing.T) {
 	for _, banned := range []string{"onMessageExternal", "onConnectExternal", "runtime.onMessage", "runtime.onConnect.",
 		"eval(", "new Function", "innerHTML", ".value", "fetch(", "XMLHttpRequest", "WebSocket"} {
 		in := js
-		if banned == ".value" { // snapCollect alone reads values; every other ban holds there too
-			in = strings.Replace(js, snap, "", 1)
+		if banned == ".value" { // snapCollect and recInstall alone read values; every other ban holds there too
+			in = strings.Replace(strings.Replace(js, snap, "", 1), rec, "", 1)
 		}
 		if strings.Contains(in, banned) {
 			t.Errorf("background.js contains %q", banned)
@@ -225,6 +240,12 @@ func TestCommandParity(t *testing.T) {
 	}
 	if _, _, err := ts.OpenBackground(ctx, "https://example.com"); err != nil {
 		t.Errorf("OpenBackground: %v", err)
+	}
+	if err := ts.RecordStart(ctx, "rec_1"); err != nil {
+		t.Errorf("RecordStart: %v", err)
+	}
+	if _, err := ts.RecordStop(ctx, "rec_1"); err != nil {
+		t.Errorf("RecordStop: %v", err)
 	}
 	mu.Lock()
 	var fromGo []string

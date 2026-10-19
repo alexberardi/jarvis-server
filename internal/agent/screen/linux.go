@@ -14,7 +14,7 @@ import (
 // Wayland captures with grim (wlroots screencopy): Hyprland and sway. The focused window's
 // geometry comes from the compositor (hyprctl / swaymsg), in the layout coordinates grim's -g
 // takes. GNOME and KDE don't offer screencopy; they need the xdg-desktop-portal Screenshot
-// path (later), as does X11.
+// path (later). X11 is x11.go.
 type Wayland struct {
 	X Exec
 }
@@ -35,7 +35,7 @@ func (l *Wayland) compositor() string {
 
 func (l *Wayland) Available(context.Context) (bool, string) {
 	if l.compositor() == "" {
-		return false, "reading the screen needs Hyprland or sway on this Linux desktop (GNOME, KDE and X11 aren't supported yet)"
+		return false, "reading the screen needs Hyprland, sway or an X11 session on this Linux desktop (GNOME and KDE on Wayland aren't supported yet)"
 	}
 	if !l.X.LookPath("grim") {
 		return false, "reading the screen needs grim installed (the Wayland screenshot tool)"

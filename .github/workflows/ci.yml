@@ -438,9 +438,13 @@ jobs:
           shellcheck -s sh scripts/packaging/deb/server/postinst scripts/packaging/deb/server/prerm \
             scripts/packaging/deb/server/postrm scripts/packaging/deb/server/open-setup scripts/packaging/deb/agent/postrm
           shellcheck -s sh scripts/install-pi.sh && shellcheck scripts/install-pi-check.sh
+          shellcheck scripts/pi-soak.sh scripts/pi-soak-check.sh
       # The Pi node's installer against a scratch root and its golden file (go-pi-node.md §7 4.3).
       - name: install-pi.sh golden
         run: scripts/install-pi-check.sh
+      # The Pi node's soak script against a fake /proc, systemctl and journal (go-pi-node.md §3.19).
+      - name: pi-soak.sh check
+        run: scripts/pi-soak-check.sh
       # v0.0.1 and v0.0.2 packages (an upgrade), and a v0.0.3 jarvisd standing in for one the
       # self-updater installed.
       - name: Build the packages

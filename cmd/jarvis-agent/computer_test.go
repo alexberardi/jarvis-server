@@ -180,3 +180,17 @@ func TestFakeActivity(t *testing.T) {
 		t.Fatal("idle: want an error")
 	}
 }
+
+// The recorder's trace says masked, never a value, for a secret field.
+func TestPrintRecordEvent(t *testing.T) {
+	var b strings.Builder
+	printRecordEvent(&b, browser.RecordEvent{Seq: 3, Kind: "input", URL: "https://bank.test/login", Masked: true,
+		Element: &browser.RecordElement{Role: "textbox", Name: "Password", Tag: "input", Type: "password", Selector: "#password"}})
+	printRecordEvent(&b, browser.RecordEvent{Seq: 4, Kind: "key", Key: "Enter", URL: "https://bank.test/login",
+		Element: &browser.RecordElement{Role: "textbox", Name: "Username", Tag: "input", Type: "text", Selector: "#username", Frame: 2}})
+	want := "   3 input    textbox \"Password\" type=password sel=#password masked  https://bank.test/login\n" +
+		"   4 key      Enter textbox \"Username\" type=text sel=#username frame=2  https://bank.test/login\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
+	}
+}

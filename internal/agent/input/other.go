@@ -1,6 +1,6 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package input
 
-// Native is nil off macOS until the Linux and Windows backends land.
+// Native is nil where no backend exists yet (Windows).
 func Native() Input { return nil }

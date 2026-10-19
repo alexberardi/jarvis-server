@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,7 +34,7 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 		cmd = cmds[args[0]]
 	}
 	if cmd == "" {
-		return errors.New("usage: jarvis-agent computer stop|status|on|off|snapshot URL")
+		return errors.New("usage: jarvis-agent computer stop|status|on|off|snapshot URL|record --browser")
 	}
 	r, err := control.Ask(dial, cmd)
 	if err != nil {
@@ -169,4 +171,88 @@ func printSnapshot(w io.Writer, s computeruse.Snapshot) {
 		}
 		fmt.Fprintln(w, b.String())
 	}
+}
+
+// --- jarvis-agent computer record --browser: the extension's recorder, by hand ---
+
+// computerRecordCmd is `jarvis-agent computer record --browser`; args follow "record". It
+// records the default browser until a line on in (Enter) or ctx ends (^C), printing each event.
+func computerRecordCmd(ctx context.Context, args []string, in io.Reader, w io.Writer) error {
+	fs := flag.NewFlagSet("computer record", flag.ExitOnError)
+	inBrowser := fs.Bool("browser", false, "record the browser (the only mode so far)")
+	wait := fs.Duration("wait", 10*time.Second, "how long to wait for the browser extension to connect")
+	asJSON := fs.Bool("json", false, "print each event as a JSON line")
+	_ = fs.Parse(args)
+	if !*inBrowser || fs.NArg() != 0 {
+		return errors.New("usage: jarvis-agent computer record --browser [--wait 10s] [--json]")
+	}
+	hub, stopBrowser := startBrowser(ctx, logger())
+	defer stopBrowser()
+	wctx, cancel := context.WithTimeout(ctx, *wait)
+	connected := hub.WaitConnected(wctx)
+	cancel()
+	if !connected {
+		return fmt.Errorf("no browser extension connected in %s (if a jarvis-agent is running, it holds browser control: stop it first)", *wait)
+	}
+	enc := json.NewEncoder(w)
+	hub.SetRecordSink(func(e browser.RecordEvent) {
+		if *asJSON {
+			_ = enc.Encode(e)
+		} else {
+			printRecordEvent(w, e)
+		}
+	})
+	id := fmt.Sprintf("rec_debug_%d", time.Now().Unix())
+	bt := browser.NewTools(hub)
+	if err := bt.RecordStart(ctx, id); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "recording %s: do the task in the browser, then press Enter (or ^C)\n", id)
+	line := make(chan struct{})
+	go func() {
+		_, _ = bufio.NewReader(in).ReadString('\n')
+		close(line)
+	}()
+	select {
+	case <-line:
+	case <-ctx.Done():
+	}
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	n, err := bt.RecordStop(sctx, id)
+	if err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Millisecond) // the last events arrive just before stop's answer; let them print
+	fmt.Fprintf(os.Stderr, "stopped %s: %d events\n", id, n)
+	return nil
+}
+
+func printRecordEvent(w io.Writer, e browser.RecordEvent) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%4d %-8s", e.Seq, e.Kind)
+	if e.Key != "" {
+		fmt.Fprintf(&b, " %s", e.Key)
+	}
+	if el := e.Element; el != nil {
+		fmt.Fprintf(&b, " %s %q", cmp.Or(el.Role, el.Tag), el.Name)
+		if el.Type != "" && el.Type != el.Tag {
+			fmt.Fprintf(&b, " type=%s", el.Type)
+		}
+		fmt.Fprintf(&b, " sel=%s", el.Selector)
+		if el.Frame != 0 {
+			fmt.Fprintf(&b, " frame=%d", el.Frame)
+		}
+	}
+	switch {
+	case e.Masked:
+		b.WriteString(" masked")
+	case e.Value != "":
+		fmt.Fprintf(&b, " value=%q", e.Value)
+	}
+	if e.Mime != "" {
+		fmt.Fprintf(&b, " mime=%s", e.Mime)
+	}
+	fmt.Fprintf(&b, "  %s", e.URL)
+	fmt.Fprintln(w, b.String())
 }
