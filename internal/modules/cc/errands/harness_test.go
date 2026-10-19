@@ -162,6 +162,10 @@ func (f *fakeNodes) RunTool(_ context.Context, node, cmd string, args *pyjson.Ob
 	return servertools.Obj("success", true, "message", cmd+" ok")
 }
 
+func (f *fakeNodes) RunToolImages(ctx context.Context, node, cmd string, args *pyjson.Object, uid *int64, timeout time.Duration) (*pyjson.Object, []ToolImage, error) {
+	return f.RunTool(ctx, node, cmd, args, uid, "", timeout), nil, nil
+}
+
 func (f *fakeNodes) ReportCommands(context.Context, string, time.Duration) ([]*pyjson.Object, bool) {
 	return f.commands, f.report
 }
