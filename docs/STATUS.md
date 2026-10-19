@@ -73,7 +73,7 @@ Contract: [cc/prompt-contract.md](cc/prompt-contract.md) ([decision](decisions/2
 
 ### Computer control: errands on your computer
 
-Plan: [agent/COMPUTER-CONTROL.md](agent/COMPUTER-CONTROL.md) (decisions C1–C10 incl. Teach Jarvis, open questions Q1–Q8). Planned 2026-10-18; goes through the loop's planning flow. **Next: the brief.**
+Plan: [agent/COMPUTER-CONTROL.md](agent/COMPUTER-CONTROL.md) (decisions C1–C10 incl. Teach Jarvis, open questions Q1–Q8). Planned 2026-10-18; goes through the loop's planning flow. Blueprint approved 2026-10-19; building (loop pieces).
 
 ### Autonomy (in parallel, worktrees): Custom Rules, watches, goals
 
