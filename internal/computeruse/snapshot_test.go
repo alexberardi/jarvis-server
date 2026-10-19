@@ -7,6 +7,7 @@ func TestSnapElement(t *testing.T) {
 		{Ref: "e1", Role: "textbox", Name: "Password", Type: "password"},
 		{Ref: "e2", Role: "button", Name: "Place order", Type: "submit"},
 		{Ref: "a1", Role: "AXSecureTextField", Name: "Password"},
+		{Ref: "a2", Role: "passwordtext", Name: "Password"},
 	}}
 	if e := s.Find("e1").Element(); !e.Secure || e.Name != "Password" {
 		t.Errorf("password field: %+v", e)
@@ -16,6 +17,9 @@ func TestSnapElement(t *testing.T) {
 	}
 	if e := s.Find("a1").Element(); !e.Secure {
 		t.Errorf("secure text field (accessibility): %+v", e)
+	}
+	if e := s.Find("a2").Element(); !e.Secure {
+		t.Errorf("password text (AT-SPI): %+v", e)
 	}
 	if s.Find("e9") != nil {
 		t.Error("found a ref the snapshot doesn't have")
