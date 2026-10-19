@@ -216,8 +216,9 @@ func (s *System) RemoveDropins(ctx context.Context, pkg string) bool {
 
 // Heal removes the drop-ins of packages that are no longer installed
 // (N:services/post_install_dropins.py heal_stale_dropins): a package deleted by hand, or by a
-// factory reset, leaves a unit pointing at files that are gone. It only reads the drop-ins
-// (0644); removal goes through the wrapper.
+// factory reset, leaves a unit pointing at files that are gone. A package the Python node on
+// the same Pi installed (~/.jarvis/packages/<name>.json; install-pi.sh --deactivate goes back to
+// it) is still installed. It only reads the drop-ins (0644); removal goes through the wrapper.
 func (s *System) Heal(ctx context.Context, installed func(name string) bool) {
 	files, _ := filepath.Glob(filepath.Join(s.dropinRoot(), "*.service.d", "*.conf"))
 	seen := map[string]bool{}
@@ -229,7 +230,7 @@ func (s *System) Heal(ctx context.Context, installed func(name string) bool) {
 		first, _, _ := strings.Cut(string(b), "\n")
 		owner, ok := strings.CutPrefix(first, managedByPrefix)
 		owner = strings.TrimSpace(owner)
-		if !ok || !nameRE.MatchString(owner) || installed(owner) || seen[owner] {
+		if !ok || !nameRE.MatchString(owner) || installed(owner) || seen[owner] || s.pythonNodeHas(owner) {
 			continue
 		}
 		seen[owner] = true
@@ -238,4 +239,9 @@ func (s *System) Heal(ctx context.Context, installed func(name string) bool) {
 			s.Log.Warn("packages: run `sudo " + s.wrapper(PostInstallWrapper) + " --package " + owner + " remove-managed-dropins` on the node")
 		}
 	}
+}
+
+// pythonNodeHas reports whether the Python node's package list has name (its metadata file).
+func (s *System) pythonNodeHas(name string) bool {
+	return s.Home != "" && exists(filepath.Join(s.Home, ".jarvis", "packages", name+".json"))
 }

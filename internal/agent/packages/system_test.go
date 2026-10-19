@@ -277,12 +277,20 @@ func TestPiBootHealsOrphanDropins(t *testing.T) {
 		"mpd":            "# managed-by: jarvis-package audacy\n[Service]\n",
 		"spotifyd":       "# a user's own\n[Service]\n",
 		"evil":           "# managed-by: jarvis-package ../x\n",
+		"raspotify":      "# managed-by: jarvis-package spotify\n[Service]\n", // the Python node's
 	} {
 		d := filepath.Join(m.System.DropinRoot, svc+".service.d")
 		_ = os.MkdirAll(d, 0o755)
 		if err := os.WriteFile(filepath.Join(d, "jarvis.conf"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// The Python node on the same Pi (install-pi.sh --deactivate goes back to it) installed spotify.
+	m.System.Home = t.TempDir()
+	py := filepath.Join(m.System.Home, ".jarvis", "packages")
+	_ = os.MkdirAll(py, 0o755)
+	if err := os.WriteFile(filepath.Join(py, "spotify.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	fs.calls = nil
 	if err := m.Boot(ctx); err != nil {

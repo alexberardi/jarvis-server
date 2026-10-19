@@ -24,7 +24,9 @@ answers Forge test installs (`test-install`). A desktop agent still refuses syst
   are not reverted (as on the Python node).
 - **Uninstall** removes the package's drop-ins; **revert** reruns the previous version's ops (no
   apt: its packages are still installed). **Boot** removes drop-ins whose owner package is no
-  longer installed (`N:services/post_install_dropins.py`'s self-heal, owner check only).
+  longer installed (`N:services/post_install_dropins.py`'s self-heal, owner check only), and keeps
+  those of packages the Python node on the same Pi has (`~/.jarvis/packages/<name>.json`), since
+  `install-pi.sh --deactivate` goes back to it.
 - **Test installs** are served as `test:<name>` from `<packages>/tests/<name>/` for 20 minutes,
   then removed and the sidecar restarted. The draft is fetched from the Pantry URL in jarvisd's
   verify answer without credentials (the share code is the secret). Only requirement lines of its
