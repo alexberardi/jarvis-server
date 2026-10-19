@@ -129,7 +129,7 @@ func (t *refTable) snapshot(ctx context.Context, root axNode, max int) (computer
 type walker struct {
 	ctx   context.Context
 	max   int
-	out   []computeruse.SnapshotElement
+	out   []computeruse.SnapElement
 	nodes map[string]entry
 	err   error
 }
@@ -162,7 +162,7 @@ func (w *walker) visit(n axNode, parentRole string, depth int) bool {
 func (w *walker) keep(n axNode, role string) {
 	role, secure := secureRole(n, role)
 	name, v := describe(n, role, secure)
-	el := computeruse.SnapshotElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: name, Bounds: n.bounds()}
+	el := computeruse.SnapElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: name, Bounds: n.bounds()}
 	switch {
 	case toggleRoles[role]:
 		if v == "1" {

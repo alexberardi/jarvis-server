@@ -144,7 +144,11 @@ func main() {
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
 	case "computer":
-		err = computerCmd(os.Args[2:], os.Stdout, controlDial)
+		if len(os.Args) > 2 && os.Args[2] == "snapshot" {
+			err = computerSnapshotCmd(ctx, os.Args[3:])
+		} else {
+			err = computerCmd(os.Args[2:], os.Stdout, controlDial)
+		}
 	case "island-demo":
 		err = islandDemo(ctx, os.Args[2:])
 	case "browser-host":
@@ -220,6 +224,8 @@ func usage(w io.Writer) {
   browser  browser control (Firefox, Chrome, Edge, Brave, Arc):
            install [--all] [--no-open]   register the native host, set up the extension
            uninstall | status | pack --target firefox|chromium --out DIR
+  computer snapshot [--json] URL   open URL in a background browser window and list its
+           elements as computer control sees them (debug; serves the extension like try)
   version
 `)
 }

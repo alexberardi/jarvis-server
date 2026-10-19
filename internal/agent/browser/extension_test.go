@@ -36,7 +36,8 @@ func backgroundJS(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	// Windows checkouts convert the script to CRLF; the source guards match LF.
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 // The unpacked id Chromium assigns comes from the manifest's public key: sha256 of the DER,
@@ -117,9 +118,36 @@ func TestExtensionSurface(t *testing.T) {
 		}
 	}
 	js := regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(backgroundJS(t), "") // code, not comments
+	// snapCollect (computer control's snapshot) is the one place that reads field values, and
+	// never a password, hidden, card or one-time-code field's.
+	snap := jsFunc(t, js, "snapCollect")
+	for _, guard := range []string{`t === "password"`, `t === "hidden"`, `a.startsWith("cc-")`, `a === "one-time-code"`, "if (secret(el)) return undefined;"} {
+		if !strings.Contains(snap, guard) {
+			t.Errorf("snapCollect lost its secret-field guard %q", guard)
+		}
+	}
+	// act never types into a password field.
+	for _, guard := range []string{`type === "password"`, `code: "password_field"`} {
+		if !strings.Contains(jsFunc(t, js, "actDo"), guard) {
+			t.Errorf("actDo lost its password-field refusal %q", guard)
+		}
+	}
+	// act finds its element only through the extension's own isolated-world state: the page can
+	// write data-jarvis-* attributes itself, so they never pick the element.
+	for _, fn := range []string{"actFind", "actDo"} {
+		for _, banned := range []string{"querySelector", "getAttribute(\"data-jarvis"} {
+			if strings.Contains(jsFunc(t, js, fn), banned) {
+				t.Errorf("%s looks the element up in the page's DOM (%q)", fn, banned)
+			}
+		}
+	}
 	for _, banned := range []string{"onMessageExternal", "onConnectExternal", "runtime.onMessage", "runtime.onConnect.",
 		"eval(", "new Function", "innerHTML", ".value", "fetch(", "XMLHttpRequest", "WebSocket"} {
-		if strings.Contains(js, banned) {
+		in := js
+		if banned == ".value" { // snapCollect alone reads values; every other ban holds there too
+			in = strings.Replace(js, snap, "", 1)
+		}
+		if strings.Contains(in, banned) {
 			t.Errorf("background.js contains %q", banned)
 		}
 	}
@@ -140,6 +168,17 @@ func TestExtensionSurface(t *testing.T) {
 	}
 }
 
+// jsFunc returns the source of the top-level function name in js.
+func jsFunc(t *testing.T, js, name string) string {
+	t.Helper()
+	i := strings.Index(js, "\nfunction "+name+"(")
+	if i < 0 {
+		t.Fatalf("background.js has no function %s", name)
+	}
+	f := js[i+1:]
+	return f[:strings.Index(f, "\n}\n")+2]
+}
+
 // Every command a tool sends exists in the extension, and the extension has none no tool uses.
 func TestCommandParity(t *testing.T) {
 	js := backgroundJS(t)
@@ -158,7 +197,8 @@ func TestCommandParity(t *testing.T) {
 		mu.Lock()
 		sent[m.Cmd] = true
 		mu.Unlock()
-		return ok(map[string]any{"tabs": []any{}, "text": "x", "context": ""})
+		return ok(map[string]any{"tabs": []any{}, "text": "x", "context": "", "gen": 1, "elements": []any{}, "ok": true,
+			"tab": map[string]any{"tab_id": 1}, "window_id": 2})
 	})
 	ts := NewTools(h)
 	args := map[string]map[string]any{
@@ -174,6 +214,17 @@ func TestCommandParity(t *testing.T) {
 		if out, _ := ts.Call(context.Background(), d.Name, a, node.Request{}); out["success"] != true {
 			t.Errorf("%s: %v", d.Name, out)
 		}
+	}
+	// The computer-control commands have Go callers that are not model tools.
+	ctx := context.Background()
+	if _, err := ts.Snapshot(ctx, "firefox:1", 0); err != nil {
+		t.Errorf("Snapshot: %v", err)
+	}
+	if _, err := ts.Act(ctx, "firefox:1", 1, "e1", "press", "", nil); err != nil {
+		t.Errorf("Act: %v", err)
+	}
+	if _, _, err := ts.OpenBackground(ctx, "https://example.com"); err != nil {
+		t.Errorf("OpenBackground: %v", err)
 	}
 	mu.Lock()
 	var fromGo []string
