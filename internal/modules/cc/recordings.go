@@ -58,6 +58,7 @@ type Recording struct {
 	Trace       json.RawMessage `json:"trace,omitempty"`
 	Narration   string          `json:"narration"`
 	Keyframes   int             `json:"keyframes"`
+	Steps       int             `json:"steps"` // the trace's events (0 when it isn't a list)
 	CreatedAt   time.Time       `json:"created_at"`
 	ExpiresAt   time.Time       `json:"expires_at"`
 }
@@ -100,7 +101,8 @@ func (m *Module) createRecording(ctx context.Context, rec Recording) (Recording,
 }
 
 // recordingColumns without the trace (lists), and with it (one recording).
-const recordingColumns = `id, household_id, owner_id, node_id, mode, narration, keyframes, created_at, expires_at`
+const recordingColumns = `id, household_id, owner_id, node_id, mode, narration, keyframes, created_at, expires_at,
+	CASE json_type(trace) WHEN 'array' THEN json_array_length(trace) ELSE 0 END`
 
 func scanRecording(sc interface{ Scan(...any) error }, trace bool) (Recording, error) {
 	var (
@@ -109,7 +111,7 @@ func scanRecording(sc interface{ Scan(...any) error }, trace bool) (Recording, e
 		ca, ea string
 		tr     string
 	)
-	dest := []any{&rec.ID, &rec.HouseholdID, &rec.OwnerID, &node, &rec.Mode, &rec.Narration, &rec.Keyframes, &ca, &ea}
+	dest := []any{&rec.ID, &rec.HouseholdID, &rec.OwnerID, &node, &rec.Mode, &rec.Narration, &rec.Keyframes, &ca, &ea, &rec.Steps}
 	if trace {
 		dest = append(dest, &tr)
 	}

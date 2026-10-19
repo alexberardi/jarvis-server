@@ -30,7 +30,7 @@ const THEME_KEY = 'jarvis-admin-theme' // src/theme/ThemeProvider.tsx
 const ADMIN_PAGES = ['dashboard', 'models', 'settings', 'connections', 'logs', 'traces', 'nodes', 'users', 'update']
   .map((n) => ({ name: n, path: `/admin/${n}` }))
 // A member's default pages: the sidebar's, plus Account (the header's link).
-const MEMBER_PAGES = ['chat', 'addons', 'inbox', 'account']
+const MEMBER_PAGES = ['chat', 'addons', 'inbox', 'workflows', 'recordings', 'account']
 // The heading of the notice an admin page shows a member (auth/RequireSuperuser.tsx).
 const ADMIN_ONLY = /administrator/i
 
