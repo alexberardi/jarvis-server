@@ -17,6 +17,8 @@ JSON-lines requests on stdin:
     <- {"id": 4, "result": {"summaries": [{"title", "subtitle", "icon"} | null, ...]}}
     -> {"id": 5, "method": "data_create", "params": {"command_name", "fields", "requesting_user_id"}}
     <- {"id": 5, "result": {"key", "record"} | {"rejected": "..."} | {"failed": "..."}}
+    -> {"id": 6, "method": "reminders_due"}
+    <- {"id": 6, "result": {"due": [{"id", "text", "user_id"}, ...], "pending": N}}
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
 Storage (JarvisStorage: command secrets and command data) is the agent's, not this process's
@@ -117,6 +119,46 @@ class AgentStorage(StorageBackend):
 COMMANDS: dict = {}
 
 
+def _log_client_shim():
+    """jarvis_log_client, the Python node's own log package, which N:services/reminder_service
+    imports: JarvisLogger(service=...).info(msg, **fields) and the like, to stdlib logging
+    (stderr, the Go agent's log)."""
+    import logging
+    import types
+
+    class JarvisLogger:
+        def __init__(self, service="jarvis-node", **_):
+            self._log = logging.getLogger(service)
+
+        def _emit(self, level, msg, fields):
+            if fields:
+                msg = f"{msg} " + " ".join(f"{k}={v}" for k, v in fields.items())
+            self._log.log(level, msg)
+
+        def debug(self, msg, **fields):
+            self._emit(logging.DEBUG, msg, fields)
+
+        def info(self, msg, **fields):
+            self._emit(logging.INFO, msg, fields)
+
+        def warning(self, msg, **fields):
+            self._emit(logging.WARNING, msg, fields)
+
+        warn = warning
+
+        def error(self, msg, **fields):
+            self._emit(logging.ERROR, msg, fields)
+
+        exception = error
+
+        def critical(self, msg, **fields):
+            self._emit(logging.CRITICAL, msg, fields)
+
+    mod = types.ModuleType("jarvis_log_client")
+    mod.JarvisLogger = JarvisLogger
+    return mod
+
+
 def register_backends() -> None:
     """The Pi's SDK backends. Imported here, not at the top: a desktop venv may hold an SDK
     older than these modules."""
@@ -136,6 +178,8 @@ def register_backends() -> None:
 
     # get_logger's stdlib fallback; stderr is the Go agent's log.
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(name)s %(levelname)s: %(message)s")
+    if importlib.util.find_spec("jarvis_log_client") is None:
+        sys.modules["jarvis_log_client"] = _log_client_shim()
 
     alert_fields = {f.name for f in dataclasses.fields(Alert)}
 
@@ -342,7 +386,45 @@ def load_builtins(spec: dict) -> dict:
             continue
         for cmd in commands:
             found[cmd.command_name] = cmd
+    if "reminder" in found:
+        # The Python node restores its reminders at boot (N:scripts/main.py); each sidecar does
+        # here, before the command or reminders_due reads the service's cache.
+        try:
+            importlib.import_module("services.reminder_service").initialize_reminder_service()
+        except BaseException as exc:
+            print(f"sidecar: reminders not restored:\n{traceback.format_exc()}", file=sys.stderr)
+            FAILED["builtin reminder_command"] = f"{type(exc).__name__}: {exc}"
+            del found["reminder"]
     return found
+
+
+def reminders_due() -> dict:
+    """One run of N:agents/reminder_agent.py (the Go agent owns its schedule and the alerts): drop
+    the one-shot reminders announced past the snooze window, mark the due ones announced (a
+    recurring one moves to its next time) and push each to its owner's phone when the reminder
+    settings' push_notifications is on. "pending" is how many were not announced before."""
+    from jarvis_command_sdk import UserSettings
+    from jarvis_command_sdk.cc_http import cc_post
+    from services.reminder_service import get_reminder_service
+
+    service = get_reminder_service()
+    service.cleanup_expired()
+    pending = len(service.get_all_reminders(include_announced=False))
+    if not pending:
+        return {"due": [], "pending": 0}
+    push = UserSettings("reminder").is_enabled("push_notifications")
+    due = []
+    for r in service.get_due_reminders():
+        service.mark_announced(r.reminder_id)
+        if push:
+            payload = {"title": "Reminder", "body": r.text, "priority": "high", "category": "reminder"}
+            if r.user_id is not None:
+                payload["user_id"] = r.user_id
+                payload["target_type"] = "user"
+            if cc_post("/api/v0/node/push-notification", payload) is None:
+                print(f"sidecar: reminder push failed: {r.reminder_id}", file=sys.stderr)
+        due.append({"id": r.reminder_id, "text": r.text, "user_id": r.user_id})
+    return {"due": due, "pending": pending}
 
 
 def load(target: str) -> dict:
@@ -529,6 +611,10 @@ def main() -> None:
                 reply = {"id": msg_id, "result": data_summaries(commands, msg.get("params") or {})}
             elif method == "data_create":
                 reply = {"id": msg_id, "result": data_create(commands, msg.get("params") or {})}
+            elif method == "reminders_due":
+                if "reminder" not in commands:
+                    raise RuntimeError("no built-in reminder command in this sidecar")
+                reply = {"id": msg_id, "result": reminders_due()}
             else:
                 reply = {"id": msg_id, "error": f"unknown method {method!r}"}
         except Exception as exc:

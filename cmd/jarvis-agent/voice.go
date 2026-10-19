@@ -187,7 +187,7 @@ func listen(ctx context.Context, args []string) error {
 		return fmt.Errorf("voice: %w", err)
 	}
 	defer vs.close()
-	if hd := openHat(hf, log); hd != nil {
+	if hd := openHat(hf, nil, log); hd != nil {
 		defer hd.Close()
 		vs.addIndicator(&ledCue{leds: hd.leds, log: log})
 	}

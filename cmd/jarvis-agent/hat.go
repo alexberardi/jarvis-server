@@ -41,9 +41,9 @@ type hatDevices struct {
 	closeLine func() error
 }
 
-// openHat opens the LEDs and the button. It returns nil (and logs why) when the HAT is off,
-// absent or unusable: the agent runs without it.
-func openHat(f *hatFlags, log *slog.Logger) *hatDevices {
+// openHat opens the LEDs and the button, whose short press runs press (nil: logged only). It
+// returns nil (and logs why) when the HAT is off, absent or unusable: the agent runs without it.
+func openHat(f *hatFlags, press func(leds *hat.LEDs), log *slog.Logger) *hatDevices {
 	switch f.mode {
 	case "off":
 		return nil
@@ -66,8 +66,11 @@ func openHat(f *hatFlags, log *slog.Logger) *hatDevices {
 	h.leds.SetEnabled(!f.noLEDs)
 	h.button = &hat.Button{LEDs: h.leds, Log: log,
 		OnShortPress: func() {
-			// Python speaks queued alerts here; the Go node has no alert queue yet.
-			log.Info("hat: button pressed (no queued alerts to read)")
+			if press == nil {
+				log.Info("hat: button pressed (no alert queue to read)")
+				return
+			}
+			press(h.leds)
 		}}
 	if f.poweroff {
 		h.button.OnHold = func() {
