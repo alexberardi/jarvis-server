@@ -384,7 +384,11 @@ func printLog(w io.Writer, l ScenarioLog, verbose bool) {
 			fmt.Fprintf(w, "  %s  [%.1fs audio, tts %.1fs, stt %.1fs]\n", heard, v.AudioSeconds, v.TTSSeconds, v.STTSeconds)
 		}
 		for _, c := range t.ServerCalls {
-			fmt.Fprintf(w, "  server %s %s\n", c.Name, jsonText(c.Args))
+			if c.Result == nil {
+				fmt.Fprintf(w, "  server %s %s\n", c.Name, jsonText(c.Args))
+			} else {
+				fmt.Fprintf(w, "  server %s %s → %s\n", c.Name, jsonText(c.Args), truncate(jsonText(c.Result), 200))
+			}
 		}
 		for _, c := range t.NodeCalls {
 			fmt.Fprintf(w, "  node   %s %s → %s\n", c.Name, jsonText(c.Args), truncate(jsonText(c.Result), 200))

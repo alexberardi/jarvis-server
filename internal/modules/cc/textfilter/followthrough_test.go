@@ -129,3 +129,36 @@ func TestForceToolsGateRememberRequest(t *testing.T) {
 		t.Error("no matching keyword must still disarm (the pool decides)")
 	}
 }
+
+// #221: "stop watching the example.com one" got "I've stopped watching it" with no
+// cancel_watch call, and the watch stayed on.
+func TestStopWatchingShapes(t *testing.T) {
+	for _, s := range []string{"stop watching the example.com one", "Stop tracking the kettle price.",
+		"cancel the toaster watch", "please stop monitoring that page", "Jarvis, quit watching the kettle",
+		"don't watch the kettle price anymore", "you can stop keeping an eye on the toaster",
+		"remove the example.com watch", "I don't need the kettle watch anymore"} {
+		if !IsStopWatchingRequest(s) {
+			t.Errorf("IsStopWatchingRequest(%q) = false", s)
+		}
+	}
+	for _, s := range []string{"what are you watching?", "watch the kettle price", "stop the music",
+		"cancel my timer", "tell me when I leave home", "keep an eye on the toaster price"} {
+		if IsStopWatchingRequest(s) {
+			t.Errorf("IsStopWatchingRequest(%q) = true", s)
+		}
+	}
+	for _, s := range []string{"I've stopped watching the example.com price.", "Done, I'm no longer watching it.",
+		"Okay, I won't watch it anymore.", "Stopped watching price on example.com item.",
+		"The example.com watch has been cancelled.", "I removed that watch.", "I'll stop watching the kettle price.", "Got it."} {
+		if !ClaimsStoppedWatching(s) {
+			t.Errorf("ClaimsStoppedWatching(%q) = false", s)
+		}
+	}
+	for _, s := range []string{"Which one: the kettle price or the toaster price?",
+		"I couldn't find a watch matching that. Nothing was cancelled.", "You aren't watching anything.",
+		"I haven't stopped it yet."} {
+		if ClaimsStoppedWatching(s) {
+			t.Errorf("ClaimsStoppedWatching(%q) = true", s)
+		}
+	}
+}
