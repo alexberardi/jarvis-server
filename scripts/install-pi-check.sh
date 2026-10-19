@@ -20,6 +20,7 @@ SCRIPT=$HERE/install-pi.sh
 GOLDEN=$HERE/testdata/install-pi.golden
 DTS=$HERE/packaging/pi/respeaker-2mic-v2_0-overlay.dts
 WATCHDOG=$HERE/packaging/pi/jarvis-net-watchdog
+WRAPPERS="jarvis-apt-install jarvis-apt-source jarvis-post-install"
 MODELS=${JARVIS_SHERPA_MODELS:-$HERE/../.models}/openwakeword
 WAKE_MODELS="melspectrogram.onnx embedding_model.onnx hey_jarvis_v0.1.onnx"
 V=v9.9.9
@@ -138,7 +139,7 @@ snapshot() {
   (cd "$1" && find . -mindepth 1 ! -name install-pi-commands.log \( -type l -printf '%y %m %P -> %l\n' -o -printf '%y %m %P\n' \) | sort -k3)
   echo "## commands"
   cat "$1/install-pi-commands.log"
-  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path './usr/local/share/jarvis-agent/*' ! -path ./usr/local/sbin/jarvis-net-watchdog -printf '%P
+  (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path './usr/local/share/jarvis-agent/*' ! -path ./usr/local/sbin/jarvis-net-watchdog ! -path './usr/local/sbin/jarvis-apt-*' ! -path ./usr/local/sbin/jarvis-post-install -printf '%P
 ' | sort) |
     while read -r f; do
       echo "## $f"
@@ -156,6 +157,14 @@ cmp -s "$ROOT/usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts" "$DT
   fail "the DTS in install-pi.sh differs from scripts/packaging/pi/respeaker-2mic-v2_0-overlay.dts"
 cmp -s "$ROOT/usr/local/sbin/jarvis-net-watchdog" "$WATCHDOG" ||
   fail "the watchdog in install-pi.sh differs from scripts/packaging/pi/jarvis-net-watchdog"
+for w in $WRAPPERS; do
+  cmp -s "$ROOT/usr/local/sbin/$w" "$HERE/packaging/pi/$w" ||
+    fail "$w in install-pi.sh differs from scripts/packaging/pi/$w"
+done
+# The sudoers file parses (install-pi.sh runs the same check on a Pi; under --root it can't).
+if command -v visudo >/dev/null; then
+  visudo -cf "$ROOT/etc/sudoers.d/jarvis-agent" >/dev/null 2>&1 || fail "the sudoers file fails visudo: $(visudo -cf "$ROOT/etc/sudoers.d/jarvis-agent" 2>&1)"
+fi
 [ "$("$ROOT/opt/jarvis-agent/jarvis-agent" version)" = "$V" ] || fail "the agent in /opt is not $V"
 for m in $WAKE_MODELS; do
   cmp -s "$ROOT/usr/local/share/jarvis-agent/openwakeword/$m" "$T/dist/$m" || fail "the wake model $m is not in /usr/local/share/jarvis-agent/openwakeword"
