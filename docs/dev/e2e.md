@@ -204,6 +204,14 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
   Commit flow changes before running them; uncommitted edits are not picked up.
 - During the suite the scripted model answers from `e2e/llm/mobile.json`.
+- adb transport drops: the harness emulator's adb connection drops now and then (adb's log:
+  `emulator-5580: connection terminated: read failed`), and every drop wipes all the adb reverse
+  tunnels. So before every flow (and the real push lane) `e2emobile` waits for the device, sets
+  the tunnels again (`--reverse`, from `reverse_pairs` in `scripts/lib/mobile.sh`) and probes the
+  sandbox's `/health` from inside the emulator (`--health-port`). A flow that fails on a drop
+  (`device offline`, `not found`, `DeviceServerDied`), or finds the device not ready, is run once
+  more; the report says so on it (`note`). Every adb call carries `-s <serial>`: never
+  `adb kill-server`, nor `reverse --remove-all` without `-s`, as other emulators may be attached.
 - Pushes: the superuser has a fake device token (`PUSH_TOKEN`); a flow checks
   `${FAKE_RELAY}/control/pushes?token=${PUSH_TOKEN}` from a `runScript` and can make a node
   event happen through `${CC_URL}` with `${NODE_API_KEY}` for `${USER_ID}`

@@ -91,7 +91,14 @@ func realPush(ctx context.Context, pc *pushConfig) (*Results, error) {
 	if pc.skipReason != "" {
 		r.SkipReason = pc.skipReason
 	} else {
-		r = pc.lane(ctx, r)
+		base := r
+		r = pc.retryOnDrop(ctx, base, func() (Record, string) {
+			r := pc.lane(ctx, base)
+			if r.Error != nil {
+				return r, *r.Error
+			}
+			return r, ""
+		})
 	}
 	r.DurationMS = time.Since(t0).Milliseconds()
 	res := &Results{Suite: "mobile-push", Status: "passed", DurationMS: r.DurationMS, Tests: []Record{r}}
