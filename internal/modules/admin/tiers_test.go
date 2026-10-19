@@ -56,9 +56,13 @@ var wantTiers = map[string]tier{
 	"PUT /api/cc/api/v0/households/{household_id}/prompt/base":     tierUser,
 	"POST /api/cc/api/v0/households/{household_id}/prompt/import":  tierUser,
 	"POST /api/cc/api/v0/households/{household_id}/prompt/preview": tierUser,
-	"GET /api/cc/api/v0/nodes/pairings":                            tierUser,
-	"POST /api/cc/api/v0/nodes/pairings/approve":                   tierUser,
-	"POST /api/cc/api/v0/nodes/pairings/deny":                      tierUser,
+	// Household settings (Account page): any member reads, cc requires the household admin
+	// role to write.
+	"GET /api/cc/api/v0/mobile/household/{household_id}/settings":          tierUser,
+	"PUT /api/cc/api/v0/mobile/household/{household_id}/settings/{key...}": tierUser,
+	"GET /api/cc/api/v0/nodes/pairings":                                    tierUser,
+	"POST /api/cc/api/v0/nodes/pairings/approve":                           tierUser,
+	"POST /api/cc/api/v0/nodes/pairings/deny":                              tierUser,
 	// Add-ons: device sign-out (cc: the pairer or a household admin) and "this computer" (a hint).
 	"POST /api/cc/api/v0/nodes/{node_id}/sign-out": tierUser,
 	"GET /api/addons/this-device":                  tierUser,

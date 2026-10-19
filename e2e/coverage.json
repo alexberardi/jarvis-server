@@ -9,7 +9,7 @@
     "/addons": { "tests": ["e2e/web/tests/addons.spec.ts"] },
     "/inbox": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/household.spec.ts"] },
     "/inbox/:id": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/push.spec.ts"] },
-    "/account": { "tests": ["e2e/web/tests/account.spec.ts"] },
+    "/account": { "tests": ["e2e/web/tests/account.spec.ts", "e2e/web/tests/household-settings.spec.ts"] },
     "/admin": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/admin/dashboard": { "tests": ["e2e/web/tests/admin/dashboard.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/models": { "tests": ["e2e/web/tests/admin/models.spec.ts", "e2e/web/tests/roles.spec.ts"] },
