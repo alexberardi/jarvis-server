@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 )
@@ -30,9 +31,20 @@ type Host struct {
 	// Say queues text for the speaker and returns at once (audio.speak, a timer's expiry): a
 	// command may speak mid-turn, while the voice pipeline is waiting for it. False: not queued.
 	Say func(text string) bool
-	Log *slog.Logger
+	// Music, when set, takes the speaker over for a music command's "play" (BeforeCall).
+	Music *music.Ducker
+	Log   *slog.Logger
 
 	cc atomic.Pointer[node.CC]
+}
+
+// BeforeCall is the sidecar's takeover hook (sidecar.Takeover): before a music command's
+// "play" runs, the other players stop (N:utils/command_execution_service.py
+// _maybe_take_over_music). It never fails the call.
+func (h *Host) BeforeCall(ctx context.Context, command, declared string, args map[string]any) {
+	if h.Music != nil {
+		h.Music.BeforeCall(ctx, music.TakeoverBinary(command, declared), args)
+	}
 }
 
 // SetCC is the node's command-center client, once the agent is connected.

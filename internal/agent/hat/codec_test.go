@@ -188,3 +188,37 @@ func TestHealCodecRunsBoth(t *testing.T) {
 		t.Fatalf("writes =\n%q\nwant\n%q", got, want)
 	}
 }
+
+// pgaSget is amixer sget PGA on the seeed2micvoicec card (N:utils/audio_volume.py's format).
+func pgaSget(l, r int) string {
+	return "Simple mixer control 'PGA',0\n  Capabilities: cvolume\n  Capture channels: Front Left - Front Right\n" +
+		"  Limits: Capture 0 - 119\n" +
+		fmt.Sprintf("  Front Left: Capture %d [%d%%] [29.00dB]\n  Front Right: Capture %d [%d%%] [29.00dB]\n", l*119/100, l, r*119/100, r)
+}
+
+func TestCapturePGA(t *testing.T) {
+	read := "amixer -c seeed2micvoicec sget PGA"
+	f := &fakeAmixer{out: map[string]string{read: pgaSget(49, 52)}}
+	if pct, ok := CapturePGA(context.Background(), f.run); !ok || pct != 52 {
+		t.Fatalf("CapturePGA = %d, %v; want the louder channel, 52", pct, ok)
+	}
+	f = &fakeAmixer{out: map[string]string{read: "garbage"}}
+	if _, ok := CapturePGA(context.Background(), f.run); ok {
+		t.Fatal("unparseable output read as a gain")
+	}
+	f = &fakeAmixer{fail: map[string]bool{read: true}}
+	if _, ok := CapturePGA(context.Background(), f.run); ok {
+		t.Fatal("a failed amixer read as a gain")
+	}
+	f = &fakeAmixer{}
+	if !SetCapturePGA(context.Background(), f.run, 140) {
+		t.Fatal("SetCapturePGA failed")
+	}
+	if want := []string{"amixer -c seeed2micvoicec sset PGA 100%"}; !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("calls = %q, want %q (clamped)", f.calls, want)
+	}
+	f = &fakeAmixer{fail: map[string]bool{"amixer -c seeed2micvoicec sset PGA 49%": true}}
+	if SetCapturePGA(context.Background(), f.run, 49) {
+		t.Fatal("a failed sset reported success")
+	}
+}

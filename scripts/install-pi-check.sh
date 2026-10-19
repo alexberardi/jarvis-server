@@ -136,11 +136,11 @@ done
 # snapshot ROOT: what the install wrote, as text.
 snapshot() {
   echo "## paths"
-  (cd "$1" && find . -mindepth 1 ! -name install-pi-commands.log \( -type l -printf '%y %m %P -> %l\n' -o -printf '%y %m %P\n' \) | sort -k3)
+  (cd "$1" && find . -mindepth 1 ! -name install-pi-commands.log \( -type l -printf '%y %m %P -> %l\n' -o -printf '%y %m %P\n' \) | LC_ALL=C sort -k3)
   echo "## commands"
   cat "$1/install-pi-commands.log"
   (cd "$1" && find . -type f ! -name install-pi-commands.log ! -path './opt/*' ! -path './usr/local/share/jarvis-agent/*' ! -path ./usr/local/sbin/jarvis-net-watchdog ! -path './usr/local/sbin/jarvis-apt-*' ! -path ./usr/local/sbin/jarvis-post-install -printf '%P
-' | sort) |
+' | LC_ALL=C sort) |
     while read -r f; do
       echo "## $f"
       cat "$1/$f"
@@ -244,4 +244,23 @@ grep -q "checksum mismatch for the wake model" "$T/out" || { cat "$T/out"; fail 
 [ ! -e "$T/root-badmodel/usr/local/share/jarvis-agent/openwakeword/hey_jarvis_v0.1.onnx" ] || fail "the refused install left the tampered wake model"
 if R --root "$R3" --from-dir "$T/dist" --version v1.0.0 >"$T/out" 2>&1; then fail "installed another version than asked"; fi
 R --root "$R3" --nope >/dev/null 2>&1 && fail "accepted an unknown option"
+
+echo "--- the net watchdog leaves wlan0 alone while the provisioning hotspot is up"
+W=$T/wd
+mkdir -p "$W/bin" "$W/sys/wlan0"
+# Stand-ins that log their calls; nmcli lists the hotspot as active.
+for c in nmcli ip ping iw; do
+  cat >"$W/bin/$c" <<EOF
+#!/bin/sh
+echo "$c \$*" >>"$W/calls"
+[ "$c \$*" = "nmcli -t -f NAME connection show --active" ] && echo jarvis-setup-ap
+exit 0
+EOF
+  chmod 0755 "$W/bin/$c"
+done
+printf 'fail=5\nonline=1\n' >"$W/state"
+env -i PATH="$W/bin:/usr/bin:/bin" NETWD_SYSFS_NET="$W/sys" NETWD_STATE="$W/state" bash "$WATCHDOG" >"$T/out" 2>&1 ||
+  { cat "$T/out"; fail "the watchdog failed with the hotspot up"; }
+[ "$(cat "$W/state")" = "$(printf 'fail=0\nonline=1')" ] || fail "the watchdog counted the hotspot as a LAN failure: $(cat "$W/state")"
+[ "$(cat "$W/calls")" = "nmcli -t -f NAME connection show --active" ] || fail "the watchdog touched wlan0 with the hotspot up: $(cat "$W/calls")"
 echo "install-pi-check: PASS"

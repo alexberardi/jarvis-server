@@ -212,9 +212,10 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	}
 	keys := lldates.Extract(in.VoiceCommand)
 	conv.dateKeys = keys
+	conv.voiceCommand = in.VoiceCommand
 	endLoop := tr.measure("tool_execution_loop", "cc", nil)
 	res, out := m.runEngine(ctx, engineInput{
-		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, dateKeys: keys,
+		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, voiceCommand: in.VoiceCommand, dateKeys: keys,
 		doubleCheck: doubleCheckSentinel(in, st) && !ev.doubted(), doubleCheckMsg: doubleCheckFor(in),
 		turn:    m.toolTurn(conv, in.VoiceCommand),
 		noForce: in.photoOnly(),
