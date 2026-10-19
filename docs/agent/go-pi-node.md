@@ -131,7 +131,7 @@ Tags:
 | `/k2/provision` (K2 AES key) | `:1622-1669` | `S:settingsreq.go:316` | `GET …/k2/provision/{rid}`, `POST …/k2/ack/{rid}` | built for the desktop agent (`internal/agent/nodesettings`, [DESIGN §16](DESIGN.md)); the Go Pi node reuses it |
 | `/settings/request` (AES-256-GCM snapshot with K2, AAD `{node}:settings:snapshot`), plus a backstop poll on connect | `:1837-1876`, `N:services/settings_snapshot_service.py:749-857` | `S:settingsreq.go:92` | `PUT …/settings/requests/{rid}/snapshot` | built for the desktop agent (`internal/agent/nodesettings`), including the app's secret Sync as source (`include_values` + user) and target (`settings:secrets` push), pinned by `sync_golden.json`; the Pi adds its node_config and hardware |
 | `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines later |
-| `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | later (sidecar) |
+| `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | built (§7 parity 5.6; apt/post_install and test-install on the Pi profile only) |
 | `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | later |
 | `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | later |
 | `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | done in the Pi profile (§3.15) |
@@ -1092,6 +1092,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
 - journald, swappiness, swapfile (`:107-154,889-901,2090-2114`).
 - The net watchdog (`:2116-2146`).
 - The sudoers file (`:1819-1862`).
+- The package wrappers `jarvis-apt-install`, `jarvis-apt-source`, `jarvis-post-install` and their
+  sudoers lines (`:1662-1800,1842-1844`): **done 2026-10-19** (§7 parity 5.6).
 
 **Replaced by the Go binary or its packaging:**
 - The systemd unit's ExecStart and environment (`:1865-1958`); the unit keeps `User=pi`,
@@ -1208,7 +1210,18 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    4. `update_node_config`, `measure_ambient_noise`, LED preview. **Done 2026-10-17 (§3.14)**
       (unit tests and a sandbox jarvisd end to end; not yet on a Pi).
    5. K2 + settings snapshot (AES-GCM).
-   6. Packages.
+   6. Packages. **Built 2026-10-19** (loop #174,
+      [decision](../decisions/2026-10-19-pi-node-package-system-setup.md)): the Pi profile runs a
+      package's `apt_sources`, `apt_packages` and `post_install` through the Python node's root
+      wrappers (`sudo -n /usr/local/sbin/jarvis-apt-source|jarvis-apt-install|jarvis-post-install`,
+      `internal/agent/packages/system.go`), removes its drop-ins on uninstall and failed installs,
+      reruns the previous version's ops on revert, heals orphaned drop-ins at boot, and answers
+      `test-install` (Forge drafts served 20 minutes). `install-pi.sh` ships the wrappers (byte for
+      byte, checked by `install-pi-check.sh`) and their sudoers lines. Tests: exec fakes for every
+      wrapper call (argv, stdin JSON, order, rollback), a fake jarvisd + Pantry for test-install,
+      the golden install, and N:'s 68 wrapper tests against the vendored copies. **Pending
+      on-device** (lab Pi 4): Music Assistant installed from the app (shairport-sync, its drop-in,
+      a "play …" turn), uninstalled, and a Forge test install; the commands are in the PR.
    7. factory-reset.
    8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
       against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).
