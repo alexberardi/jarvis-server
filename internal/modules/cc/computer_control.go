@@ -150,8 +150,8 @@ func (m *Module) computerControlHint(ctx context.Context, conv *conversation, ut
 }
 
 // needsComputer is whether a request (an utterance, an errand's goal) asks Jarvis to act on a
-// website or app: buy, order, check out, fill in a form. A phone call ("call Joe's and order …")
-// and research don't.
+// website or app: buy, order, check out, fill in a form. A phone call ("call Joe's and order …"),
+// a reminder ("remind me to buy milk"), a list item and research don't.
 func needsComputer(s string) bool {
 	ws := strings.Fields(strings.ToLower(s))
 	for i := range ws {
@@ -165,8 +165,8 @@ func needsComputer(s string) bool {
 		}
 		return false
 	}
-	if has("call") || has("ring") || has("dial") {
-		return false
+	if has("call") || has("ring") || has("dial") || has("remind") || has("reminder") || has("list") {
+		return false // a phone call, a reminder or a list item about buying something
 	}
 	for i, w := range ws {
 		next := ""

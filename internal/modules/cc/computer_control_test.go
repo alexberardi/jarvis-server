@@ -120,6 +120,8 @@ func TestNeedsComputer(t *testing.T) {
 		"put the movies in order":                      false,
 		"what did I order last week":                   false,
 		"call Joe's pizza and order a large pepperoni": false,
+		"remind me to buy milk tomorrow":               false,
+		"add buy batteries to my shopping list":        false,
 		"research the best smart watch":                false,
 		"open steam":                                   false,
 	} {
