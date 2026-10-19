@@ -59,6 +59,8 @@ type Hub struct {
 	conns   map[int]*hubConn
 	nextID  int
 	changed chan struct{} // closed and replaced whenever the set of ready browsers changes
+
+	recordSink func(RecordEvent) // SetRecordSink; guarded by mu
 }
 
 type hubConn struct {
@@ -172,6 +174,12 @@ func (h *Hub) handle(ctx context.Context, c net.Conn) {
 				h.notify()
 			}
 		case "event":
+			if m.Event == "record" {
+				h.mu.Lock()
+				key := hc.info.Key
+				h.mu.Unlock()
+				h.deliverRecord(sc.Bytes(), key)
+			}
 			if m.Event == "focus" {
 				h.mu.Lock()
 				hc.info.Focused = m.Focused
