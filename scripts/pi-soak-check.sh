@@ -133,7 +133,7 @@ grep -E 'systemctl (start|stop)' "$T/calls.log" >"$T/order"
 printf '%s\n' 'systemctl stop jarvis-node.service' 'systemctl start jarvis-agent.service' \
   'systemctl stop jarvis-agent.service' 'systemctl start jarvis-node.service' >"$T/want"
 diff -u "$T/want" "$T/order" || fail "units not stopped and put back in order"
-[ -e "$T/units/jarvis-node.service" ] && [ ! -e "$T/units/jarvis-agent.service" ] || fail "not back as before"
+if [ ! -e "$T/units/jarvis-node.service" ] || [ -e "$T/units/jarvis-agent.service" ]; then fail "not back as before"; fi
 
 S=$T/out/samples.csv
 head -1 "$S" | grep -q '^ts,pid,agent_cpu_pct,agent_rss_kb' || fail "samples.csv header"
@@ -198,7 +198,7 @@ kill -TERM "$pid"
 rc=0
 wait "$pid" || rc=$?
 [ "$rc" = 130 ] || { cat "$T/term.err"; fail "TERM: exit $rc, want 130"; }
-[ -e "$T/units/jarvis-node.service" ] && [ ! -e "$T/units/jarvis-agent.service" ] || fail "TERM: not back as before"
+if [ ! -e "$T/units/jarvis-node.service" ] || [ -e "$T/units/jarvis-agent.service" ]; then fail "TERM: not back as before"; fi
 [ -s "$T/term/summary.md" ] || fail "TERM: no summary"
 
 echo "pi-soak-check: ok"
