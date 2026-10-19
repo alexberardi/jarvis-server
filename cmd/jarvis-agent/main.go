@@ -158,7 +158,11 @@ func main() {
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
 	case "computer":
-		err = computerCmd(os.Args[2:], os.Stdout, controlDial)
+		if len(os.Args) > 2 && os.Args[2] == "snapshot" {
+			err = computerSnapshotCmd(ctx, os.Args[3:])
+		} else {
+			err = computerCmd(os.Args[2:], os.Stdout, controlDial)
+		}
 	case "island-demo":
 		err = islandDemo(ctx, os.Args[2:])
 	case "browser-host":
@@ -236,6 +240,8 @@ func usage(w io.Writer) {
   browser  browser control (Firefox, Chrome, Edge, Brave, Arc):
            install [--all] [--no-open]   register the native host, set up the extension
            uninstall | status | pack --target firefox|chromium --out DIR
+  computer snapshot [--json] URL   open URL in a background browser window and list its
+           elements as computer control sees them (debug; serves the extension like try)
   version
 `)
 }
@@ -676,6 +682,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, log)
+	// action, callback and toggle_command: the app's device control, a command's buttons and
+	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
+	wireActions(r, sc, st, sayNow(mic), log)
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
 		if sc != nil {
@@ -699,6 +708,7 @@ func run(ctx context.Context, args []string) error {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)
 		o.Mic = mic
+		o.Computer = activity // the wake word pauses a computer task, "stop" ends it
 		if duck != nil {
 			o.Music = duck
 		}

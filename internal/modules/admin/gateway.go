@@ -134,6 +134,17 @@ var passRoutes = []passRoute{
 	// plan §3.2 Q2 (a)). A hint that grants nothing; cc matches the TCP peer address, which pass
 	// keeps (G11), never a forwarded header.
 	{pattern: "GET /api/addons/this-device", listener: pconfig.ListenerCC, strip: "/api/addons", prefix: "/api/v0/nodes", tier: tierUser},
+	// Taught workflows and recordings (Workflows and Recordings pages, plan P3 piece 26): cc shows a
+	// workflow to its owner, and to the household when shared; only the owner or a household
+	// admin changes it. A recording is its owner's alone.
+	ccUserRoute("GET /api/cc/api/v0/workflows"),
+	ccUserRoute("GET /api/cc/api/v0/workflows/{id}"),
+	ccUserRoute("PUT /api/cc/api/v0/workflows/{id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/workflows/{id}"),
+	ccUserRoute("POST /api/cc/api/v0/workflows/{id}/run"),
+	ccUserRoute("GET /api/cc/api/v0/recordings"),
+	ccUserRoute("GET /api/cc/api/v0/recordings/{id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/recordings/{id}"),
 
 	// Inbox (webapp 01 P5): the caller's own rows. Creating and updating items is app-to-app
 	// only and not exposed.

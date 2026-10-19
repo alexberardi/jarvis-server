@@ -139,6 +139,9 @@ type Pipeline struct {
 	Mic *Mic
 	// Music, when set, is ducked for each turn and restored after it (music.go).
 	Music Music
+	// Computer, when set, is paused by the wake word while Jarvis controls the computer or
+	// records, stopped by a "stop" turn and resumed after any other (computer.go).
+	Computer Computer
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -407,7 +410,8 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	t := Turn{ConversationID: p.NewID(), WakeScore: score}
 	log := p.Log.With("conversation_id", t.ConversationID)
 	log.Info("wake", "score", fmt.Sprintf("%.3f", score))
-	p.duck(ctx) // the music down while the user speaks (music.go)
+	h := p.holdComputer(log) // first: the user is about to speak to Jarvis
+	p.duck(ctx)              // the music down while the user speaks (music.go)
 
 	// Row 7: warm the conversation up while the user is still talking.
 	st := &pendingStart{done: make(chan struct{})}
@@ -429,9 +433,10 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		}
 	}()
 
-	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: wakeClip}
+	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: wakeClip, held: h}
 	p.cue(CueListening, 0)
 	defer func() {
+		p.releaseComputer(s)
 		if t.Err != nil || t.FollowUpEnd == EndError {
 			p.cue(CueError, 0)
 		} else {
@@ -510,6 +515,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		ex.Outcome = OutcomeNonSpeech
 		return "", true
 	}
+	p.stopIfAsked(s, tr.Text) // locally, at once; the server still hears it
 
 	// Row 11: join the warmup (bounded), then the streaming turn.
 	select {

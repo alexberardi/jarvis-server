@@ -167,3 +167,16 @@ func TestTrayComputerControl(t *testing.T) {
 		t.Fatalf("no switch: %+v", s)
 	}
 }
+
+func TestFakeActivity(t *testing.T) {
+	a, err := fakeActivity("controlling:Ordering the blue mug")
+	if err != nil || a.String() != "controlling: Ordering the blue mug" {
+		t.Fatalf("got %v, %v", a, err)
+	}
+	if a, err := fakeActivity(""); a != nil || err != nil {
+		t.Fatalf("none: got %v, %v", a, err)
+	}
+	if _, err := fakeActivity("idle:x"); err == nil {
+		t.Fatal("idle: want an error")
+	}
+}

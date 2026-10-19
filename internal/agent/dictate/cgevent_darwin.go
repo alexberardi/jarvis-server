@@ -97,4 +97,5 @@ func (p cgPoster) Key(code uint16, shift bool) error {
 	return p.post(code, false, nil, flags)
 }
 
-func nativeMacPoster() MacPoster { return cgPoster{} }
+// NativeMacPoster is the CGEvent poster (input.Mac types through it too).
+func NativeMacPoster() MacPoster { return cgPoster{} }
