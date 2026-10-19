@@ -221,7 +221,57 @@ func TestInjecting(t *testing.T) {
 	before := time.Now()
 	_ = m.Keys(ctx, []string{"a"})
 	s, e := m.Injecting()
-	if s.Before(before) || e.Before(s) || time.Since(e) < 0 {
+	if s.Before(before) || e.Before(s) {
 		t.Fatalf("Injecting = %v..%v, called at %v", s, e, before)
+	}
+}
+
+// blockingPoster holds KeyEvent until release is closed.
+type blockingPoster struct {
+	fakePoster
+	posting chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingPoster) KeyEvent(code uint16, down bool, flags uint64) error {
+	select {
+	case b.posting <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return nil
+}
+
+// TestInjectingWhilePosting: the input monitor polls Injecting mid-post, so it must not wait for
+// the post and must report the window as still open.
+func TestInjectingWhilePosting(t *testing.T) {
+	ctx := context.Background()
+	b := &blockingPoster{posting: make(chan struct{}, 1), release: make(chan struct{})}
+	m := &Mac{Trusted: func() bool { return true }, Post: b}
+	done := make(chan error, 1)
+	go func() { done <- m.Keys(ctx, []string{"a"}) }()
+	<-b.posting
+
+	type window struct{ s, e time.Time }
+	got := make(chan window, 1)
+	go func() { s, e := m.Injecting(); got <- window{s, e} }()
+	var w window
+	select {
+	case w = <-got:
+	case <-time.After(100 * time.Millisecond):
+		close(b.release)
+		t.Fatal("Injecting blocked while a call was posting")
+	}
+	if w.s.IsZero() || !w.e.IsZero() {
+		close(b.release)
+		t.Fatalf("mid-post Injecting = %v..%v, want start set and end zero", w.s, w.e)
+	}
+
+	close(b.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if s, e := m.Injecting(); e.Before(s) || !s.Equal(w.s) {
+		t.Fatalf("after post Injecting = %v..%v, mid-post start %v", s, e, w.s)
 	}
 }

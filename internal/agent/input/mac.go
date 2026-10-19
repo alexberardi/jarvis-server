@@ -91,9 +91,11 @@ type Mac struct {
 	Trusted func() bool
 	Post    MacPoster
 
-	mu         sync.Mutex
+	mu   sync.Mutex      // serializes posting calls; held across post
+	held map[string]bool // buttons down from Button, so Move drags them
+
+	winMu      sync.Mutex // guards start and end only; never held across post
 	start, end time.Time
-	held       map[string]bool // buttons down from Button, so Move drags them
 }
 
 func (m *Mac) Available(context.Context) (bool, string) {
@@ -107,9 +109,15 @@ func (m *Mac) Available(context.Context) (bool, string) {
 }
 
 func (m *Mac) Injecting() (start, end time.Time) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.winMu.Lock()
+	defer m.winMu.Unlock()
 	return m.start, m.end
+}
+
+func (m *Mac) setWindow(start, end time.Time) {
+	m.winMu.Lock()
+	m.start, m.end = start, end
+	m.winMu.Unlock()
 }
 
 // inject runs post with the injection window recorded around it. Calls are serialized.
@@ -122,8 +130,9 @@ func (m *Mac) inject(ctx context.Context, post func() error) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.start, m.end = time.Now(), time.Time{}
-	defer func() { m.end = time.Now() }()
+	start := time.Now()
+	m.setWindow(start, time.Time{})
+	defer func() { m.setWindow(start, time.Now()) }()
 	return post()
 }
 
