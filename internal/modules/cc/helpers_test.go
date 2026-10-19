@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -238,6 +239,47 @@ func withEnvExtra(t *testing.T, x envExtra) {
 	t.Cleanup(func() { envExtras.Delete(t) })
 }
 
+func migrateEnvDB(ctx context.Context, d *db.DB) error {
+	if err := db.Migrate(ctx, d, "cc", Migrations()); err != nil {
+		return err
+	}
+	// The platform's tables, as in jarvisd (purges touch triggers and jobs).
+	if err := db.Migrate(ctx, d, queue.MigrationModule, queue.Migrations()); err != nil {
+		return err
+	}
+	return db.Migrate(ctx, d, scheduler.MigrationModule, scheduler.Migrations())
+}
+
+// migratedDB is a database file with every migration applied, made once per test binary: each
+// env starts from a copy of it, since migrating a fresh file in every test took this package
+// past go test's 10-minute limit under -race on CI.
+var migratedDB = sync.OnceValues(func() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "cc-test-db")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "jarvis.db")
+	ctx := context.Background()
+	d, err := db.Open(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if err := migrateEnvDB(ctx, d); err != nil {
+		d.Close()
+		return nil, err
+	}
+	// Everything into the main file, so the copy needs no -wal.
+	if _, err := d.Write.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		d.Close()
+		return nil, err
+	}
+	if err := d.Close(); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+})
+
 func newEnv(t *testing.T, o ...envOpts) *env {
 	t.Helper()
 	var opt envOpts
@@ -251,19 +293,22 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 		opt.auth = newFakeAuth()
 	}
 	ctx := context.Background()
+	// A new file starts as a copy of the migrated one; a reopened file is migrated as it is.
+	if _, err := os.Stat(opt.dbPath); os.IsNotExist(err) {
+		b, err := migratedDB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(opt.dbPath, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	d, err := db.Open(ctx, opt.dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
-	if err := db.Migrate(ctx, d, "cc", Migrations()); err != nil {
-		t.Fatal(err)
-	}
-	// The platform's tables, as in jarvisd (purges touch triggers and jobs).
-	if err := db.Migrate(ctx, d, queue.MigrationModule, queue.Migrations()); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(ctx, d, scheduler.MigrationModule, scheduler.Migrations()); err != nil {
+	if err := migrateEnvDB(ctx, d); err != nil {
 		t.Fatal(err)
 	}
 	e := &env{t: t, auth: opt.auth, d: d, now: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}
