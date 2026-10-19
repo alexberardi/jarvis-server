@@ -193,7 +193,7 @@ func TestVerbsInvalidateAndRemove(t *testing.T) {
 func TestAuthReadyStoresTheCredentials(t *testing.T) {
 	fam := &fakeFamilies{stored: "family nest"}
 	api := &fakeAPI{gets: map[string]string{
-		"/api/v0/oauth/provider/nest/credentials": `{"access_token":"a","refresh_token":"r","token_data":{"expires_in":3600},"base_url":"https://x","user_id":7}`,
+		"/api/v0/oauth/provider/nest/credentials": `{"access_token":"a","refresh_token":"r","token_data":{"expires_in":3600},"base_url":"https://x","user_id":9007199254740993}`,
 	}}
 	beats := 0
 	n := newNode(fam)
@@ -211,9 +211,9 @@ func TestAuthReadyStoresTheCredentials(t *testing.T) {
 	if vals["access_token"] != "a" || vals["_base_url"] != "https://x" || vals["base_url"] != "https://x" || vals["user_id"] != nil {
 		t.Fatalf("values = %v", vals)
 	}
-	// The user id stays an integer on its way to Python.
-	if b, _ := json.Marshal(fam.auth[2]); string(b) != "7" {
-		t.Fatalf("user id = %s", b)
+	// The user id stays an exact integer on its way to Python (a float64 would round 2^53+1).
+	if uid, ok := fam.auth[2].(json.Number); !ok || uid != "9007199254740993" {
+		t.Fatalf("user id = %#v", fam.auth[2])
 	}
 	if b, _ := json.Marshal(vals["token_data"]); string(b) != `{"expires_in":3600}` {
 		t.Fatalf("token_data = %s", b)

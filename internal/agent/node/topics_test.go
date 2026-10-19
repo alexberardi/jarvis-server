@@ -90,23 +90,23 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
-	if beat := <-beats; beat["needs_k2"] != true || len(beat["protocols"].([]any)) != 1 {
+	if beat := within(t, beats, "the first heartbeat"); beat["needs_k2"] != true || len(beat["protocols"].([]any)) != 1 {
 		t.Fatalf("first beat needs_k2 = %v, protocols = %v", beat["needs_k2"], beat["protocols"])
 	}
-	if cc := <-connected; cc == nil || cc.Creds.NodeID != "n1" {
+	if cc := within(t, connected, "the backstop"); cc == nil || cc.Creds.NodeID != "n1" {
 		t.Fatalf("backstop got %v", cc)
 	}
 	// Subscribed before the backstop runs, so this nudge is delivered.
 	if err := b.Publish("jarvis/nodes/n1/k2/provision", []byte(`{"request_id":"r1"}`), 1, false); err != nil {
 		t.Fatal(err)
 	}
-	if p := <-got; p != `{"request_id":"r1"}` {
+	if p := within(t, got, "the k2 nudge"); p != `{"request_id":"r1"}` {
 		t.Fatalf("payload = %s", p)
 	}
 	if err := b.Publish("jarvis/auth/govee/ready", []byte(`{"node_id":"n1"}`), 1, false); err != nil {
 		t.Fatal(err)
 	}
-	if p := <-auth; p != `jarvis/auth/govee/ready {"node_id":"n1"}` {
+	if p := within(t, auth, "the auth-ready message"); p != `jarvis/auth/govee/ready {"node_id":"n1"}` {
 		t.Fatalf("auth ready = %s", p)
 	}
 	rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
@@ -117,12 +117,26 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 	// BeatNow sends a heartbeat without waiting for the (never reached) tick.
 	needs.Store(false)
 	r.BeatNow()
-	if beat := <-beats; beat["needs_k2"] != false {
+	if beat := within(t, beats, "the kicked heartbeat"); beat["needs_k2"] != false {
 		t.Fatalf("kicked beat needs_k2 = %v", beat["needs_k2"])
 	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// within is the next value from c, failing the test if none comes in 10 s (a missing
+// subscription fails fast instead of hanging until go test's timeout).
+func within[T any](t *testing.T, c <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-c:
+		return v
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s didn't come within 10 s", what)
+		var zero T
+		return zero
 	}
 }
 
