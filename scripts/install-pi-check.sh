@@ -7,6 +7,9 @@
 #
 #   scripts/install-pi-check.sh            # check
 #   UPDATE=1 scripts/install-pi-check.sh   # rewrite the golden file after a deliberate change
+#   scripts/install-pi-check.sh DIST VERSION [valid|invalid]
+#                                          # release mode (release.yml's install-pi job): the
+#                                          # stamped DIST/install-pi.sh against that run's files
 #
 # No Pi or root needed. The agent in the fake release is a shell script; the wake models are the
 # real ones (their hashes are pinned), from .models/openwakeword (scripts/fetch-test-models.sh)
@@ -25,6 +28,82 @@ fail() { echo "install-pi-check: $*" >&2; exit 1; }
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
+# nmcli: wlan0 is on jarvis-Home (SSID Home); preconfigured (netplan's) is the same SSID, Office
+# another one, and there is a wired connection. Only queries: under --root a change is logged.
+# FAKE_WLAN0=none: wlan0 reports no connection, though jarvis-Home is still active.
+mkdir -p "$T/bin"
+cat >"$T/bin/nmcli" <<'NMCLI'
+#!/bin/sh
+ssid() { case $1 in jarvis-Home | preconfigured) echo Home ;; Office) echo Office ;; esac; }
+case "$*" in
+  "-t -f GENERAL.CONNECTION device show wlan0") [ "${FAKE_WLAN0:-}" = none ] && echo GENERAL.CONNECTION: || echo GENERAL.CONNECTION:jarvis-Home ;;
+  "-t -f NAME,TYPE connection show --active") printf '%s\n' 'Wired connection 1:802-3-ethernet' jarvis-Home:802-11-wireless ;;
+  "-t -f NAME,TYPE connection show") printf '%s\n' preconfigured:802-11-wireless 'Wired connection 1:802-3-ethernet' Office:802-11-wireless jarvis-Home:802-11-wireless ;;
+  "-t -g 802-11-wireless.ssid connection show "*) ssid "$6" ;;
+  *) echo "nmcli $*: not a query" >&2; exit 1 ;;
+esac
+NMCLI
+chmod 0755 "$T/bin/nmcli"
+
+# A Pi's boot partition and fstab, before the install.
+seed() {
+  mkdir -p "$1/boot/firmware/overlays" "$1/etc"
+  printf '[all]\ndtparam=audio=on\ndtoverlay=wm8960-soundcard\n' >"$1/boot/firmware/config.txt"
+  printf 'proc /proc proc defaults 0 0\n' >"$1/etc/fstab"
+  # BlueZ's, as Debian 13 ships it (the Class commented out).
+  mkdir -p "$1/etc/bluetooth"
+  printf '[General]\n#Name = BlueZ\n#Class = 0x000100\n\n[Policy]\n#AutoEnable=true\n' >"$1/etc/bluetooth/main.conf"
+}
+R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} sh "$SCRIPT" "$@"; }
+
+# Release mode (release.yml's install-pi job, on arm64): the stamped DIST/install-pi.sh, as
+# published, against that run's own files. It must be listed in the signed SHA256SUMS, pinned to
+# VERSION (with no --from-dir it fetches that tag's files), and install the real agent from DIST.
+# valid: minisign is installed and the signature must verify; invalid: it must be refused (a
+# dry run's throwaway key); neither: checksums only, minisign must not be installed.
+if [ $# -gt 0 ]; then
+  [ $# -ge 2 ] || fail "usage: $0 [DIST VERSION [valid|invalid]]"
+  DIST=$(cd "$1" && pwd) V=$2 SIG=${3:-}
+  SCRIPT=$DIST/install-pi.sh
+  grep -qx "RELEASE_VERSION=\"$V\"" "$SCRIPT" || fail "$SCRIPT is not stamped with $V"
+  grep -x "[0-9a-f]*  install-pi.sh" "$DIST/SHA256SUMS" >"$T/sum" || fail "install-pi.sh is not in SHA256SUMS"
+  (cd "$DIST" && sha256sum -c --quiet "$T/sum") || fail "install-pi.sh differs from its SHA256SUMS line"
+
+  echo "--- pinned to $V"
+  mkdir -p "$T/nocurl"
+  printf '#!/bin/sh\nexit 22\n' >"$T/nocurl/curl"
+  chmod 0755 "$T/nocurl/curl"
+  seed "$T/pin"
+  if env -i HOME="$T" TMPDIR="$T" PATH="$T/nocurl:$T/bin:$PATH" sh "$SCRIPT" --root "$T/pin" >"$T/out" 2>&1; then
+    cat "$T/out"; fail "installed with every download failing"
+  fi
+  grep -qF "could not download https://github.com/alexberardi/jarvis-server/releases/download/$V/SHA256SUMS" "$T/out" ||
+    { cat "$T/out"; fail "the stamped script does not fetch release $V"; }
+
+  echo "--- install from $DIST (${SIG:-checksums only})"
+  case $SIG in
+    "") for m in /usr/local/bin/minisign /usr/bin/minisign; do [ ! -x "$m" ] || fail "$m is installed (pass valid or invalid)"; done ;;
+    valid | invalid) command -v minisign >/dev/null || fail "minisign is not installed" ;;
+    *) fail "unknown signature mode $SIG" ;;
+  esac
+  ROOT=$T/root
+  seed "$ROOT"
+  if [ "$SIG" = invalid ]; then
+    if R --root "$ROOT" --from-dir "$DIST" >"$T/out" 2>&1; then cat "$T/out"; fail "installed with a signature from another key"; fi
+    grep -q "signature is INVALID" "$T/out" || { cat "$T/out"; fail "refused for another reason than the signature"; }
+    [ ! -e "$ROOT/opt/jarvis-agent/jarvis-agent" ] || fail "the refused install left an agent"
+    echo "install-pi-check: PASS (release $V, signature refused)"
+    exit 0
+  fi
+  R --root "$ROOT" --from-dir "$DIST" | tee "$T/out"
+  grep -q "installed in /opt/jarvis-agent" "$T/out" || fail "no agent installed"
+  [ "$SIG" != valid ] || grep -q "SHA256SUMS signature verified" "$T/out" || fail "the signature was not checked"
+  [ "$("$ROOT/opt/jarvis-agent/jarvis-agent" version)" = "$V" ] || fail "the agent in /opt is not $V"
+  [ -f "$ROOT/etc/systemd/system/jarvis-agent.service" ] || fail "no jarvis-agent.service"
+  echo "install-pi-check: PASS (release $V)"
+  exit 0
+fi
+
 # A release: the arm64 agent, and an amd64 one listed first (the script must pick arm64).
 mkdir -p "$T/stage/jarvis-agent-$V-linux-arm64" "$T/dist"
 # shellcheck disable=SC2016 # $1 is the fake agent's own argument
@@ -42,44 +121,16 @@ done
 
 # minisign: a stand-in that isn't usable (-v fails), so the run is checksums only and the same
 # on every machine. FAKE_MINISIGN=invalid makes it usable and every signature bad.
-mkdir -p "$T/bin"
-cat >"$T/bin/minisign" <<'EOF'
+cat >"$T/bin/minisign" <<'MINISIGN'
 #!/bin/sh
 [ "${FAKE_MINISIGN:-}" = invalid ] || exit 1
 [ "$1" = -v ] && exit 0
 exit 1
-EOF
+MINISIGN
 chmod 0755 "$T/bin/minisign"
-
-# nmcli: wlan0 is on jarvis-Home (SSID Home); preconfigured (netplan's) is the same SSID, Office
-# another one, and there is a wired connection. Only queries: under --root a change is logged.
-# FAKE_WLAN0=none: wlan0 reports no connection, though jarvis-Home is still active.
-cat >"$T/bin/nmcli" <<'EOF'
-#!/bin/sh
-ssid() { case $1 in jarvis-Home | preconfigured) echo Home ;; Office) echo Office ;; esac; }
-case "$*" in
-  "-t -f GENERAL.CONNECTION device show wlan0") [ "${FAKE_WLAN0:-}" = none ] && echo GENERAL.CONNECTION: || echo GENERAL.CONNECTION:jarvis-Home ;;
-  "-t -f NAME,TYPE connection show --active") printf '%s\n' 'Wired connection 1:802-3-ethernet' jarvis-Home:802-11-wireless ;;
-  "-t -f NAME,TYPE connection show") printf '%s\n' preconfigured:802-11-wireless 'Wired connection 1:802-3-ethernet' Office:802-11-wireless jarvis-Home:802-11-wireless ;;
-  "-t -g 802-11-wireless.ssid connection show "*) ssid "$6" ;;
-  *) echo "nmcli $*: not a query" >&2; exit 1 ;;
-esac
-EOF
-chmod 0755 "$T/bin/nmcli"
 for m in /usr/local/bin/minisign /usr/bin/minisign; do
   [ ! -x "$m" ] || fail "$m is installed: the check needs a machine without minisign in the fixed paths"
 done
-
-# A Pi's boot partition and fstab, before the install.
-seed() {
-  mkdir -p "$1/boot/firmware/overlays" "$1/etc"
-  printf '[all]\ndtparam=audio=on\ndtoverlay=wm8960-soundcard\n' >"$1/boot/firmware/config.txt"
-  printf 'proc /proc proc defaults 0 0\n' >"$1/etc/fstab"
-  # BlueZ's, as Debian 13 ships it (the Class commented out).
-  mkdir -p "$1/etc/bluetooth"
-  printf '[General]\n#Name = BlueZ\n#Class = 0x000100\n\n[Policy]\n#AutoEnable=true\n' >"$1/etc/bluetooth/main.conf"
-}
-R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} sh "$SCRIPT" "$@"; }
 
 # snapshot ROOT: what the install wrote, as text.
 snapshot() {

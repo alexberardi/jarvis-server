@@ -1060,6 +1060,20 @@ like JSON-RPC.
 
 ## 6. Install and system: what the Go node still needs from install.sh
 
+**Install** (64-bit Raspberry Pi OS; each release ships `install-pi.sh` stamped with its tag and
+listed in the signed `SHA256SUMS`, #162):
+
+```sh
+curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/<tag>/install-pi.sh && sudo sh install-pi.sh
+```
+
+To check the script before running it as root, fetch `SHA256SUMS` and `SHA256SUMS.minisig` from
+the same release, `minisign -Vm SHA256SUMS -P RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L`,
+then `sha256sum -c --ignore-missing SHA256SUMS`. With minisign installed, the script itself
+refuses an agent archive whose signature doesn't verify. The archive is the desktop's
+`jarvis-agent-<v>-linux-arm64.tar.gz`, onnxruntime embedded
+([decision](../decisions/2026-10-18-pi-ort-embedded.md), superseding §8 Q3).
+
 These are **still needed**; install.sh step lines are cited. `scripts/install-pi.sh` (§7 4.3) does
 all of them except `jarvis-alsa-store` (not yet run on a Pi):
 - The ReSpeaker overlay compiled from the vendored DTS (`:912-934`).
@@ -1087,8 +1101,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
 - Wake-model staging: install-pi.sh puts the pinned openWakeWord models in
   `/usr/local/share/jarvis-agent/openwakeword` (the unit's `--wake-models`; root's, like the
   overlay source, since `/opt/jarvis-agent` is the node user's for self-update), from
-  `--from-dir`/`--base-url` when it has them, else openWakeWord's release; shipping them in the
-  tarball is #162.
+  `--from-dir`/`--base-url` when it has them, else openWakeWord's release. The release (#162)
+  doesn't ship them yet, so an install fetches them from openWakeWord's release.
 
 **Python node only (or sidecar only):**
 - python/venv, portaudio, libopenblas, sqlcipher dev headers.
@@ -1145,6 +1159,14 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       wake models staged at install in `/usr/local/share/jarvis-agent/openwakeword` against the
       hashes in `voice.WakeModels` (a unit test keeps them equal); same golden check, **pending
       on-device** (lab Pi 4).
+      **Release built 2026-10-18 (#162):** each release ships `install-pi.sh` stamped with its tag
+      (the copy at a release's URL installs that release) and, unlike the other one-line
+      installers, listed in the signed `SHA256SUMS`; the agent is the existing linux-arm64 archive
+      with onnxruntime embedded ([decision](../decisions/2026-10-18-pi-ort-embedded.md)). The
+      release notes carry the one-liner (§6). Job `install-pi` (`ubuntu-24.04-arm`) runs the stamped
+      copy under `--root` against the run's own files: pinned to the tag, installs that agent,
+      checksum only and with minisign (a dry run's throwaway signature refused); `verify` checks
+      it against the signed list. **Pending:** the first real release, and a run on the lab Pi.
    4. The provisioning AP + HTTP API port. **HTTP API done 2026-10-17** (loop #169):
       `internal/agent/provisioning` (routes, state machine, registration retries, rollback and
       hotspot restore, golden-tested against `N:provisioning/models.py`) behind a `WiFi`
@@ -1187,7 +1209,7 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
 |---|---|---|
 | 1 | STT upload rate | **48 kHz first** for parity; A/B speaker ID at 16 kHz, switch if it holds up. |
 | 2 | PulseAudio on the Pi | **Keep for v1** (Bluetooth, echo cancellation, ducking). ALSA-only mode later for HAT-only nodes. |
-| 3 | ORT packaging | **Separate file in the Pi tarball; embedded in the desktop binary.** |
+| 3 | ORT packaging | ~~Separate file in the Pi tarball; embedded in the desktop binary.~~ **Superseded 2026-10-18 (#162): embedded on the Pi too**, the same linux-arm64 archive as the desktop ([decision](../decisions/2026-10-18-pi-ort-embedded.md)). |
 | 4 | Sidecar start | **Eagerly at boot.** Revisit only if a Zero 2 W gets tight. |
 | 5 | Wake engine | **openWakeWord `hey_jarvis`** (bit-exact, thresholds carry over). |
 | 6 | Heartbeat identity | **`install_mode: "tarball"` + `version_info.runtime: "go"`.** |
