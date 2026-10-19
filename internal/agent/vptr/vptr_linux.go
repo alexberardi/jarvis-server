@@ -22,15 +22,14 @@ const (
 	// zwlr_virtual_pointer_v1
 	opMotion, opMotionAbsolute, opButton, opAxis, opFrame, opAxisSource, opAxisStop, opAxisDiscrete, opDestroy = 0, 1, 2, 3, 4, 5, 6, 7, 8
 	// zxdg_output_manager_v1.get_xdg_output; zxdg_output_v1 events
-	opGetXdgOutput      = 1
-	evLogicalPosition   = 0
-	evLogicalSize       = 1
-	buttonReleased      = 0
-	buttonPressed       = 1
-	axisVertical        = 0
-	axisHorizontal      = 1
-	axisSourceWheel     = 0
-	managerVersionWheel = 2 // axis_discrete
+	opGetXdgOutput    = 1
+	evLogicalPosition = 0
+	evLogicalSize     = 1
+	buttonReleased    = 0
+	buttonPressed     = 1
+	axisVertical      = 0
+	axisHorizontal    = 1
+	axisSourceWheel   = 0
 )
 
 // Pointer is the virtual-pointer backend. The zero value is ready; fields are for tests.
@@ -48,11 +47,10 @@ type Pointer struct {
 
 // session is one connection with its virtual pointer and the outputs it tracks.
 type session struct {
-	c       *wlwire.Conn
-	reg     uint32
-	ptr     uint32
-	version uint32 // the manager's, as bound
-	xdgMgr  uint32
+	c      *wlwire.Conn
+	reg    uint32
+	ptr    uint32
+	xdgMgr uint32
 
 	mu      sync.Mutex               // guards the maps: the reader goroutine writes them
 	globals map[uint32]wlwire.Global // wl_output globals by name, as the registry has them now
@@ -238,8 +236,7 @@ func (p *Pointer) connect(ctx context.Context) (*session, error) {
 		return fail(errors.New(why))
 	}
 	seatID := c.Bind(reg, seat, 1, nil)
-	s.version = min(mgr.Version, managerVersionWheel)
-	mgrID := c.Bind(reg, mgr, s.version, nil)
+	mgrID := c.Bind(reg, mgr, 1, nil) // v1 has axis_discrete; v2 only adds create_virtual_pointer_with_output
 	s.xdgMgr = c.Bind(reg, xdg, 1, nil)
 	s.ptr = c.NewID()
 	if err := c.Send(mgrID, opCreateVirtualPointer, wlwire.NewArgs().U32(seatID).U32(s.ptr).Bytes(), -1); err != nil {
@@ -363,11 +360,7 @@ func (p *Pointer) post(ctx context.Context, s *session, evs []Event) error {
 					continue
 				}
 				v := fixed(float64(ax[1] * NotchValue))
-				if s.version >= managerVersionWheel {
-					_ = c.Send(s.ptr, opAxisDiscrete, wlwire.NewArgs().U32(t).U32(uint32(ax[0])).U32(v).I32(int32(ax[1])).Bytes(), -1)
-				} else {
-					_ = c.Send(s.ptr, opAxis, wlwire.NewArgs().U32(t).U32(uint32(ax[0])).U32(v).Bytes(), -1)
-				}
+				_ = c.Send(s.ptr, opAxisDiscrete, wlwire.NewArgs().U32(t).U32(uint32(ax[0])).U32(v).I32(int32(ax[1])).Bytes(), -1)
 			}
 		default:
 			continue

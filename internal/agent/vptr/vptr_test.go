@@ -217,7 +217,7 @@ func TestPointerMotionExtent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if f.id("ptr") == 0 || f.id("ptr.seat") != f.id(IfaceSeat) || f.id(IfaceSeat+".v") != 1 ||
-		f.id(IfaceManager+".v") != 2 || f.id(IfaceOutputManager+".v") != 1 {
+		f.id(IfaceManager+".v") != 1 || f.id(IfaceOutputManager+".v") != 1 {
 		t.Fatalf("binds: %v", f.ids)
 	}
 	want := "abs 1380 50 / 3200 1080, frame, abs 0 1079 / 3200 1080, frame"
@@ -286,9 +286,8 @@ func TestAxisFixed(t *testing.T) {
 		mgr  global
 		want string
 	}{
-		// Version 1: axis, the value a wl_fixed (15 per notch, ×256).
-		{mgrV1, "source 0, axis 0 11520, axis 1 -3840, frame"},
-		// Version 2: axis_discrete, with the notch count.
+		// axis_discrete is in version 1: the value a wl_fixed (15 per notch, ×256), with the notch count.
+		{mgrV1, "source 0, discrete 0 11520 3, discrete 1 -3840 -1, frame"},
 		{mgrV2, "source 0, discrete 0 11520 3, discrete 1 -3840 -1, frame"},
 	} {
 		f, dial := newFake(t, seat, tc.mgr, xdgMgr, main)
