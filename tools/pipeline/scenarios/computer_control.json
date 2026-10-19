@@ -13,5 +13,20 @@
         }
       }
     ]
+  },
+  {
+    "name": "computer control off: Jarvis, watch me calls start_recording, which says to turn it on",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "Jarvis, watch me",
+        "expect": {
+          "server_tool": "start_recording",
+          "reply": "(?i)computer control"
+        }
+      }
+    ]
   }
 ]

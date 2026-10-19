@@ -10,6 +10,9 @@ type ToolGates struct {
 	MemoryEnabled bool // memory.enabled
 	RecallEnabled bool // memory.recall_enabled
 	Watches       bool // watches.enabled
+	// Computers: the household has a computer (a desktop agent). Gates start_recording and
+	// stop_recording, which also need a known speaker (the recording is theirs).
+	Computers bool
 	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
 	// photos come from (docs/cc/chat-images.md §8-9). Gates every photo tool.
 	ChatPhotos bool
@@ -49,7 +52,8 @@ var textPathWhitelist = []string{
 
 // ServerToolAllowed is the gate itself: web tools need web search on; remember/forget need a
 // known speaker and memory on; recall additionally needs recall on; the watch tools need watches
-// on and a known speaker (A8). Every other tool passes.
+// on and a known speaker (A8); the recording tools a computer in the household and a known
+// speaker. Every other tool passes.
 func ServerToolAllowed(name string, g ToolGates) bool {
 	switch name {
 	case "deep_research", "quick_search":
@@ -60,6 +64,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.SpeakerKnown && g.MemoryEnabled && g.RecallEnabled
 	case "create_watch", "list_watches", "cancel_watch":
 		return g.Watches && g.SpeakerKnown
+	case "start_recording", "stop_recording":
+		return g.Computers && g.SpeakerKnown
 	}
 	if g.PhotoTools[name] {
 		return g.ChatPhotos
@@ -69,7 +75,7 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 
 // TextServerTools is the text path's server-tool list, in the legacy order: the whitelist,
 // then deep_research and quick_search, then remember, forget and recall, then create_watch,
-// list_watches and cancel_watch, then the photo tools
+// list_watches and cancel_watch, then start_recording and stop_recording, then the photo tools
 // (sorted), each behind its gate. Names the caller's registry does not have are skipped by the
 // caller (legacy get_tool).
 func TextServerTools(g ToolGates) []string {
@@ -80,7 +86,7 @@ func TextServerTools(g ToolGates) []string {
 	}
 	sort.Strings(photo)
 	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall",
-		"create_watch", "list_watches", "cancel_watch"}, photo...) {
+		"create_watch", "list_watches", "cancel_watch", "start_recording", "stop_recording"}, photo...) {
 		if ServerToolAllowed(n, g) {
 			out = append(out, n)
 		}

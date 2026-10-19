@@ -75,8 +75,8 @@ func (m *Module) recordingRetention(ctx context.Context, hh string) int {
 	return int(n)
 }
 
-// createRecording stores a recording: its id, created_at and expires_at (created_at + the
-// household's retention) are filled in. It returns the stored row.
+// createRecording stores a recording: its id (unless the agent's is given), created_at and
+// expires_at (created_at + the household's retention) are filled in. It returns the stored row.
 func (m *Module) createRecording(ctx context.Context, rec Recording) (Recording, error) {
 	if rec.HouseholdID == "" || rec.OwnerID == 0 {
 		return Recording{}, errors.New("a recording needs a household and an owner")
@@ -90,8 +90,14 @@ func (m *Module) createRecording(ctx context.Context, rec Recording) (Recording,
 	if !json.Valid(rec.Trace) {
 		return Recording{}, errors.New("the trace is not JSON")
 	}
+	switch {
+	case rec.ID == "":
+		rec.ID = "rec_" + randHex(8)
+	case !recordingIDPattern.MatchString(rec.ID): // an agent's own id (recording_tools.go)
+		return Recording{}, fmt.Errorf("bad recording id %q", rec.ID)
+	}
 	now := m.now().UTC().Truncate(time.Millisecond)
-	rec.ID, rec.CreatedAt = "rec_"+randHex(8), now
+	rec.CreatedAt = now
 	rec.ExpiresAt = now.AddDate(0, 0, m.recordingRetention(ctx, rec.HouseholdID))
 	_, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_recordings (id, household_id, owner_id, node_id,
 		mode, trace, narration, keyframes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

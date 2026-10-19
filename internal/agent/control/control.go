@@ -46,13 +46,32 @@ const (
 	// "Computer control" does (COMPUTER-CONTROL.md C11). Off stops a task going on.
 	ComputerOn  = "computer-on"
 	ComputerOff = "computer-off"
+	// ComputerRecordStart and ComputerRecordStop start a recording of what the user does in
+	// the browser and stop it, sending the trace to jarvisd, as the status icon's "Watch me"
+	// and "Stop recording" do (`jarvis-agent computer record start|stop`). Start answers the
+	// recording's id; stop "<id> <events>".
+	ComputerRecordStart = "computer-record-start"
+	ComputerRecordStop  = "computer-record-stop"
 )
 
 // Commands is every command the agent accepts.
-var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff}
+var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff,
+	ComputerRecordStart, ComputerRecordStop}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second
+
+// RecordTimeout bounds the recording commands: stopping waits up to 10 s for the browser
+// extension to send its last events.
+const RecordTimeout = 15 * time.Second
+
+// Timeout bounds cmd's request and answer.
+func Timeout(cmd string) time.Duration {
+	if cmd == ComputerRecordStart || cmd == ComputerRecordStop {
+		return RecordTimeout
+	}
+	return IOTimeout
+}
 
 type request struct {
 	Cmd string `json:"cmd"`
@@ -121,6 +140,7 @@ func handle(c net.Conn, h AnswerHandler, version string) {
 	case !slices.Contains(Commands, req.Cmd):
 		resp = response{Error: fmt.Sprintf("unknown command %q", req.Cmd)}
 	default:
+		_ = c.SetDeadline(time.Now().Add(Timeout(req.Cmd)))
 		answer, err := h(req.Cmd)
 		if err != nil {
 			resp = response{Error: err.Error()}
@@ -152,7 +172,7 @@ func Ask(dial Dialer, cmd string) (Reply, error) {
 		return Reply{}, ErrNotRunning
 	}
 	defer c.Close()
-	_ = c.SetDeadline(time.Now().Add(IOTimeout))
+	_ = c.SetDeadline(time.Now().Add(Timeout(cmd)))
 	b, _ := json.Marshal(request{Cmd: cmd})
 	if _, err := c.Write(append(b, '\n')); err != nil {
 		return Reply{}, err

@@ -299,6 +299,13 @@ func (c *CC) VerifyApproval(ctx context.Context, token, digest string) (bool, er
 	return v.Valid, nil
 }
 
+// UploadRecording sends a recording the user stopped on this computer (the status icon, the
+// CLI, voice "stop", its 30 minutes) to jarvisd, which keeps it for its owner and learns a
+// workflow from it. out is computer_record_stop's output (computer.TraceOutput).
+func (c *CC) UploadRecording(ctx context.Context, out map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/computer/recordings", out, nil)
+}
+
 // PostToolReport answers report_tools.
 func (c *CC) PostToolReport(ctx context.Context, rid string, report any) error {
 	return c.do(ctx, http.MethodPost, "/api/v0/mobile/node-tool-reports/"+url.PathEscape(rid), report, nil)

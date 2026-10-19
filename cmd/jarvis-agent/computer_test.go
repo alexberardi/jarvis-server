@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"os"
@@ -33,7 +34,7 @@ func TestComputerStopAndStatus(t *testing.T) {
 	a.OnStop(func() { stopped++ })
 	ctx, cancel := context.WithCancel(context.Background())
 	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return nil },
-		func() error { return nil }, a, computer.NewSwitch(false, a))
+		func() error { return nil }, a, computer.NewSwitch(false, a), nil)
 	defer func() { cancel(); wait() }()
 	dial := func() (net.Conn, error) { return browser.Dial(path) }
 
@@ -113,7 +114,7 @@ func TestComputerOnOff(t *testing.T) {
 	sw.Persist = func(on bool) error { saved = append(saved, on); return nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return nil },
-		func() error { return nil }, a, sw)
+		func() error { return nil }, a, sw, nil)
 	defer func() { cancel(); wait() }()
 	dial := func() (net.Conn, error) { return browser.Dial(path) }
 	run := func(args ...string) string {
@@ -192,5 +193,77 @@ func TestPrintRecordEvent(t *testing.T) {
 		"   4 key      Enter textbox \"Username\" type=text sel=#username frame=2  https://bank.test/login\n"
 	if b.String() != want {
 		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
+// fakeRecSource is the browser extension's recorder.
+type fakeRecSource struct{ emit func(json.RawMessage) }
+
+func (s *fakeRecSource) Start(_ context.Context, _ string, emit func(json.RawMessage)) error {
+	s.emit = emit
+	return nil
+}
+func (s *fakeRecSource) Stop(context.Context, string) error { return nil }
+
+// `jarvis-agent computer record start|stop` and the menu's "Watch me" / "Stop recording"
+// record through the running agent's recorder; a stop hands the trace on for upload.
+func TestComputerRecordStartStop(t *testing.T) {
+	dir, err := os.MkdirTemp("", "jcr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "c.sock")
+	ln, err := browser.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &computer.Activity{}
+	sw := computer.NewSwitch(true, a)
+	src := &fakeRecSource{}
+	handed := make(chan computer.Trace, 2)
+	rec := &computer.Recorder{Dir: filepath.Join(dir, "recordings"), Switch: sw, Activity: a,
+		Sources: map[string]computer.Source{computer.ModeBrowser: src}, Stopped: func(tr computer.Trace) { handed <- tr }}
+	ctx, cancel := context.WithCancel(context.Background())
+	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return nil },
+		func() error { return nil }, a, sw, func() *computer.Recorder { return rec })
+	defer func() { cancel(); wait() }()
+	dial := func() (net.Conn, error) { return browser.Dial(path) }
+	run := func(args ...string) (string, error) {
+		var b bytes.Buffer
+		err := computerCmd(args, &b, dial)
+		return strings.TrimSpace(b.String()), err
+	}
+	got, err := run("record", "start")
+	if err != nil || !strings.HasPrefix(got, "Recording (rec_") {
+		t.Fatalf("record start: %q %v", got, err)
+	}
+	if k, _ := a.Status(); k != computer.Recording {
+		t.Fatalf("activity %v", k)
+	}
+	src.emit(json.RawMessage(`{"kind":"click"}`))
+	got, err = run("record", "stop")
+	if err != nil || !strings.HasSuffix(got, ": 1 events, sent to Jarvis.") {
+		t.Fatalf("record stop: %q %v", got, err)
+	}
+	if tr := <-handed; len(tr.Events) != 1 {
+		t.Fatalf("handed on %+v", tr)
+	}
+	if _, err := run("record", "stop"); err == nil || !strings.Contains(err.Error(), "no recording") {
+		t.Fatalf("stop with nothing going on: %v", err)
+	}
+
+	// The menu.
+	ic := &trayIcon{log: slog.New(slog.DiscardHandler), sw: newFakeVoice().sw(false), activity: a, computer: sw, recorder: rec}
+	if s := ic.state(); !s.Record {
+		t.Fatalf("Watch me hidden: %+v", s)
+	}
+	ic.recordFromMenu(true)
+	if rec.Current() == "" {
+		t.Fatal("Watch me didn't start a recording")
+	}
+	ic.recordFromMenu(false)
+	if tr := <-handed; tr.ID == "" || rec.Current() != "" {
+		t.Fatalf("Stop recording: %+v, still %q", tr, rec.Current())
 	}
 }

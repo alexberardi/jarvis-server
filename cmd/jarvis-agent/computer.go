@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -17,30 +18,38 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-// computerCmd is `jarvis-agent computer stop|status|on|off`: stop what Jarvis is doing with
-// this computer (a computer task, a recording), as the status icon's "Stop Jarvis" does, say
-// what it is doing, or turn computer control on or off, as its "Computer control" does. All
-// ask the running agent over its control socket. (`computer snapshot` is computerSnapshotCmd,
-// which main dispatches before this.)
+// computerCmd is `jarvis-agent computer stop|status|on|off|record start|record stop`: stop what
+// Jarvis is doing with this computer (a computer task, a recording), as the status icon's "Stop
+// Jarvis" does, say what it is doing, turn computer control on or off, as its "Computer
+// control" does, or record what the user does in the browser, as its "Watch me" does. All ask
+// the running agent over its control socket. (`computer snapshot` and `computer record
+// --browser` are computerSnapshotCmd and computerRecordCmd, which main dispatches before this.)
 func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 	cmds := map[string]string{"stop": control.ComputerStop, "status": control.ComputerStatus,
-		"on": control.ComputerOn, "off": control.ComputerOff}
+		"on": control.ComputerOn, "off": control.ComputerOff,
+		"record start": control.ComputerRecordStart, "record stop": control.ComputerRecordStop}
 	cmd := ""
-	if len(args) == 1 {
-		cmd = cmds[args[0]]
+	if len(args) >= 1 && len(args) <= 2 {
+		cmd = cmds[strings.Join(args, " ")]
 	}
 	if cmd == "" {
-		return errors.New("usage: jarvis-agent computer stop|status|on|off|snapshot URL|record --browser")
+		return errors.New("usage: jarvis-agent computer stop|status|on|off|record start|record stop|snapshot URL|record --browser")
 	}
 	r, err := control.Ask(dial, cmd)
 	if err != nil {
 		return err
 	}
 	switch {
+	case cmd == control.ComputerRecordStart:
+		fmt.Fprintf(w, "Recording (%s): do the task in the browser, then run `jarvis-agent computer record stop` or choose Stop recording in the menu.\n", r.Answer)
+	case cmd == control.ComputerRecordStop:
+		id, n, _ := strings.Cut(r.Answer, " ")
+		fmt.Fprintf(w, "Stopped %s: %s events, sent to Jarvis.\n", id, n)
 	case cmd == control.ComputerOn:
 		fmt.Fprintln(w, "Computer control is on: Jarvis may use this computer.")
 	case cmd == control.ComputerOff:
@@ -64,6 +73,85 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 		fmt.Fprintln(w, line)
 	}
 	return nil
+}
+
+// --- recording (plan P3 piece 29) ---
+
+// newRecorder is the agent's recorder: traces under dir (<agent dir>/recordings), the browser
+// extension's events (a browser toolset in tools), and a trace stopped here (the menu, the CLI,
+// voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected: then it is
+// kept here only).
+func newRecorder(dir string, sw *computer.Switch, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {
+	sources := map[string]computer.Source{}
+	for _, t := range tools {
+		if bt, ok := t.(*browser.Tools); ok {
+			sources[computer.ModeBrowser] = browserRecording{bt}
+		}
+	}
+	return &computer.Recorder{Dir: dir, Switch: sw, Activity: activity, Sources: sources, Log: log,
+		Stopped: func(tr computer.Trace) { go uploadRecording(cc(), tr, log) }}
+}
+
+// uploadRecording sends a trace stopped on this computer to jarvisd (POST
+// /api/v0/computer/recordings); on a failure the local copy stays.
+func uploadRecording(cc *node.CC, tr computer.Trace, log *slog.Logger) {
+	if cc == nil {
+		log.Warn("recording: not connected to jarvisd; the recording stays on this computer only", "recording", tr.ID)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := cc.UploadRecording(ctx, computer.TraceOutput(tr)); err != nil {
+		log.Warn("recording: upload failed; the recording stays on this computer only", "recording", tr.ID, "err", err)
+		return
+	}
+	log.Info("recording: sent to jarvisd", "recording", tr.ID, "events", len(tr.Events))
+}
+
+// recordFromHere starts a browser recording or ends the one going on, uploading it: the
+// status icon's "Watch me" / "Stop recording" and `jarvis-agent computer record start|stop`.
+// The answer is the recording's id, and on stop its events too ("rec_… 12").
+func recordFromHere(ctx context.Context, rec *computer.Recorder, start bool, log *slog.Logger) (string, error) {
+	if start {
+		id, err := rec.Start(ctx, computer.ModeBrowser)
+		if err != nil {
+			log.Warn("recording: couldn't start", "err", err)
+		}
+		return id, err
+	}
+	tr, err := rec.End()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s %d", tr.ID, len(tr.Events)), nil
+}
+
+// browserRecording is the recorder's browser mode: the extension's record events (piece 28).
+type browserRecording struct{ bt *browser.Tools }
+
+func (b browserRecording) Start(ctx context.Context, id string, emit func(json.RawMessage)) error {
+	if b.bt.Hub == nil || !b.bt.Hub.Connected() {
+		return errors.New("no browser with the Jarvis extension is connected: open your browser and try again")
+	}
+	b.bt.Hub.SetRecordSink(func(e browser.RecordEvent) {
+		if e.RecordingID != id {
+			return
+		}
+		if raw, err := json.Marshal(e); err == nil {
+			emit(raw)
+		}
+	})
+	if err := b.bt.RecordStart(ctx, id); err != nil {
+		b.bt.Hub.SetRecordSink(nil)
+		return err
+	}
+	return nil
+}
+
+func (b browserRecording) Stop(ctx context.Context, id string) error {
+	defer b.bt.Hub.SetRecordSink(nil)
+	_, err := b.bt.RecordStop(ctx, id)
+	return err
 }
 
 // islandActivity is the island's state for an activity.
