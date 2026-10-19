@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
@@ -482,6 +483,9 @@ type Aggregate struct {
 	Passed  int
 	Failed  int
 	Message string
+	// Answer is the composed report (what the errand found, or what it did), "" when the
+	// compose fell back to the plain roll-up (#232). The cards show it above the steps.
+	Answer  string
 	Results []Result
 
 	stoppedBy *int64 // Status "stopped": who tapped Stop
@@ -554,7 +558,60 @@ func compactData(data *pyjson.Object, limit int) string {
 	return truncRunes(strings.Join(parts, "; "), limit)
 }
 
-// ComposePrompt is the completion-summary prompt (_compose_errand_message), byte-exact.
+// stepContentLimit caps what one step's found content adds to the compose prompt.
+const stepContentLimit = 3000
+
+// stepContent is what a step found, for the composer (#232): the items of a result's list
+// (search sources, memories, results), title and text each, cut to share stepContentLimit. The
+// step's own line keeps its short status ("2 sources"); "" when the result has no list.
+func stepContent(r Result) string {
+	if !r.Success || r.Data == nil {
+		return ""
+	}
+	var list []any
+	for _, k := range []string{"sources", "memories", "results", "items"} {
+		v, _ := r.Data.Get(k)
+		if l, ok := v.([]any); ok && len(l) > 0 {
+			list = l
+			break
+		}
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	each := max(stepContentLimit/len(list), 200)
+	var lines []string
+	total := 0
+	for _, it := range list {
+		var line string
+		switch v := it.(type) {
+		case *pyjson.Object:
+			title := firstNonEmpty(truthyStr(v, "title"), truthyStr(v, "name"))
+			text := firstNonEmpty(truthyStr(v, "content"), truthyStr(v, "snippet"), truthyStr(v, "text"),
+				truthyStr(v, "summary"), truthyStr(v, "value"))
+			line = strings.Join(slices.DeleteFunc([]string{title, text}, func(s string) bool { return s == "" }), ": ")
+		case string:
+			line = v
+		default:
+			line = pyjson.Str(v)
+		}
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			continue
+		}
+		if runeLen(line) > each {
+			line = truncRunes(line, each) + "…"
+		}
+		if total += runeLen(line); total > stepContentLimit+200 {
+			break
+		}
+		lines = append(lines, "    • "+line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ComposePrompt is the completion report prompt (_compose_errand_message, extended by #232:
+// it sees what each step found and answers an information goal with that answer).
 func ComposePrompt(goal string, results []Result) string {
 	lines := make([]string, len(results))
 	for i, r := range results {
@@ -572,11 +629,20 @@ func ComposePrompt(goal string, results []Result) string {
 			ok = "ok"
 		}
 		lines[i] = "- " + label + " [" + ok + "]: " + detail
+		if found := stepContent(r); found != "" {
+			lines[i] += "\n  What it found:\n" + found
+		}
 	}
 	return "You are Jarvis giving the user the FINAL report on a background errand that " +
 		"has now FINISHED. Their goal was: " + goal + "\n\nWhat ACTUALLY happened, step by " +
 		"step:\n" + strings.Join(lines, "\n") +
-		"\n\nWrite a short, friendly 1-2 sentence summary. Base EVERY statement STRICTLY " +
+		"\n\nIf the goal asks for information (to find, search, look up, compare, list or " +
+		"summarize something), this report IS the answer the user is waiting for: give it. " +
+		"Name the specific things found with their key facts (names, prices, ratings, times) " +
+		"taken from what the steps found, one per line, then one short closing sentence. If " +
+		"fewer were found than asked for, give the ones found and say so. A request to 'send', " +
+		"'tell' or 'let me know' the result is fulfilled by this report. Otherwise write a " +
+		"short, friendly 1-2 sentence summary. Base EVERY statement STRICTLY " +
 		"on the detail shown after each step — quote the useful information (the weather, " +
 		"the answer, who you reached). NEVER invent an outcome: if a step's detail says it " +
 		"'returned no information', report that it ran but do NOT claim what it produced — " +
@@ -590,32 +656,32 @@ func ComposePrompt(goal string, results []Result) string {
 		"If the goal mentions such an action but there is NO step for it above, you MUST " +
 		"state it was NOT done (e.g. 'I checked the forecast — 100% rain — but I did not set " +
 		"a reminder'). Do not imply a conditional follow-up happened just because its " +
-		"condition was met. No preamble, no markdown."
+		"condition was met. No preamble, no markdown (plain lines only)."
 }
 
-// composeErrandMessage LLM-composes the summary on the background label (D40 09.Q11; legacy
-// used the live slot), thinking off; any failure or empty output falls back.
-func (s *Service) composeErrandMessage(ctx context.Context, goal string, results []Result, fallback string) string {
+// composeErrandMessage LLM-composes the report on the background label (D40 09.Q11; legacy
+// used the live slot), thinking off; any failure or empty output falls back (ok false).
+func (s *Service) composeErrandMessage(ctx context.Context, goal string, results []Result, fallback string) (string, bool) {
 	if s.LLM == nil {
-		return fallback
+		return fallback, false
 	}
-	temp, maxTok, off := 0.3, 400, 0
+	temp, maxTok, off := 0.3, 800, 0
 	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
 		Label: "background", Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &off,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(ComposePrompt(goal, results))}},
 	})
 	if err != nil {
 		s.log().Warn("errands: result compose failed; using the plain summary", "err", err)
-		return fallback
+		return fallback, false
 	}
 	content := resp.Content
 	if i := strings.Index(content, "</think>"); i >= 0 {
 		content = content[i+len("</think>"):]
 	}
 	if content = parse.PyStrip(content); content != "" {
-		return content
+		return content, true
 	}
-	return fallback
+	return fallback, false
 }
 
 // aggregateAndCompose is aggregate_and_compose: control steps leave the tally and the summary
@@ -632,9 +698,28 @@ func (s *Service) aggregateAndCompose(ctx context.Context, goal string, results 
 	}
 	agg := aggregate(visible)
 	agg.Results = results
-	agg.Message = s.composeErrandMessage(ctx, goal, visible, agg.Message)
+	msg, composed := s.composeErrandMessage(ctx, goal, visible, agg.Message)
+	agg.Message = msg
+	if composed {
+		agg.Answer = msg
+	}
 	return agg
 }
+
+// cardSummary is a finished run's card summary (the inbox line and the push): the answer's
+// first line, else the message.
+func cardSummary(a Aggregate) string {
+	if a.Answer == "" {
+		return a.Message
+	}
+	first, _, _ := strings.Cut(a.Answer, "\n")
+	if first = parse.PyStrip(first); runeLen(first) > summaryLimit {
+		first = truncRunes(first, summaryLimit-1) + "…"
+	}
+	return first
+}
+
+const summaryLimit = 200
 
 func terminalState(a Aggregate) string {
 	switch a.Status {
@@ -754,7 +839,11 @@ func (s *Service) drive(ctx context.Context, w *workflowRow, prior []Result) {
 func (s *Service) finish(ctx context.Context, w *workflowRow, agg Aggregate) {
 	if w.Kind == KindAutorun {
 		s.stopRequested.Delete(w.ID) // a Stop during the last step
-		s.updateRanCard(ctx, w, agg.Results, ranState(agg), agg.Message)
+		if w.InboxItemID != "" {
+			c := s.ranCard(ctx, w, agg.Results, ranState(agg))
+			c.Answer = agg.Answer
+			s.putRanCard(ctx, w, c, cardSummary(agg))
+		}
 		if agg.Status == "stopped" {
 			s.recordStopped(ctx, w, agg.stoppedBy)
 		}

@@ -13,7 +13,9 @@ import (
 // The "Ran on its own" card (autonomy PLAN §1; blueprint Interfaces "Card metadata"): what an
 // autorun errand did, step by step, and which rule allowed each tool. Mobile renders it from
 // card_type autonomy_ran, so the metadata keys are a contract; old app builds still get a
-// working Stop from interactive_elements.
+// working Stop from interactive_elements. A finished errand's card carries "answer": the
+// composed report (what the errand found), which the app shows above the steps; each step's
+// "result" stays a short status (#232).
 
 const (
 	// KindAutorun is the cc_workflows kind of a run the household's rules launched.
@@ -39,12 +41,13 @@ type RanRule struct {
 }
 
 // RanCard is the card's content. State is running | waiting | done | partial | failed | stopped.
-// WorkflowID and PlanID are "" for an automation.
+// WorkflowID and PlanID are "" for an automation. Answer is a finished errand's report (what it
+// found, #232), "" until then and when the compose failed.
 type RanCard struct {
-	HouseholdID, State, WorkflowID, PlanID, SourceKind, SourceLabel string
-	Revision                                                        int
-	Steps                                                           []RanStep
-	Rules                                                           []RanRule
+	HouseholdID, State, WorkflowID, PlanID, SourceKind, SourceLabel, Answer string
+	Revision                                                                int
+	Steps                                                                   []RanStep
+	Rules                                                                   []RanRule
 }
 
 // RanRuleOf is the card's line for the verdict that allowed tool.
@@ -87,6 +90,9 @@ func RanCardMetadata(c RanCard) map[string]any {
 	if c.PlanID != "" {
 		md["plan_id"] = c.PlanID
 	}
+	if c.Answer != "" {
+		md["answer"] = c.Answer
+	}
 	if c.State == "running" || c.State == "waiting" {
 		md["interactive_elements"] = []any{
 			element("stop-errand", "Stop", CallbackStop, map[string]any{"workflow_id": c.WorkflowID, "revision": c.Revision}),
@@ -99,7 +105,11 @@ var ranStepIcon = map[string]string{"ok": "✅", "failed": "⚠️", "skipped": 
 
 // RanCardBody is the card's markdown body (what an app without the structured layout shows).
 func RanCardBody(c RanCard) string {
-	lines := []string{"I ran this on its own because your household's rules allow it.", ""}
+	var lines []string
+	if c.Answer != "" {
+		lines = append(lines, c.Answer, "")
+	}
+	lines = append(lines, "I ran this on its own because your household's rules allow it.", "")
 	for i, st := range c.Steps {
 		line := fmt.Sprintf("%d. %s %s", i+1, ranStepIcon[st.Status], st.Label)
 		if st.Result != "" {
