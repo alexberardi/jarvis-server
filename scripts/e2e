@@ -224,7 +224,9 @@ run_real_push() {
     # shellcheck source=lib/mobile.sh
     . "$ROOT/scripts/lib/mobile.sh"
     use_play_store
+    # shellcheck disable=SC2030 # this subshell's own, like the other suites' (mobile_flows reads theirs)
     REF=origin/main FETCH=1
+    # shellcheck disable=SC2030
     if [ -n "$MOBILE_REPO_ARG" ]; then MOBILE_REPO=$MOBILE_REPO_ARG REF=HEAD FETCH=0; fi
     WORK=$mdir STATEF=$mdir/emulator.port KEEP=0
     [ "$(uname -s)" = Linux ] || die "Linux only (the Android emulator needs KVM)"
@@ -313,7 +315,8 @@ run_web() {
 }
 
 # mobile_flows SHA DIR: the .maestro/ of that mobile commit into DIR/src (the flows of the very
-# commit the app was built from).
+# commit the app was built from). Called inside the suites' subshells, which set MOBILE_REPO and REF.
+# shellcheck disable=SC2031
 mobile_flows() {
   mkdir -p "$2/src"
   git -C "$MOBILE_REPO" archive --format=tar "$1" .maestro 2>/dev/null | tar -x -C "$2/src" ||

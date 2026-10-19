@@ -45,7 +45,7 @@ ios_app_path() { # SHA CONFIG_URL: one build per mobile commit and baked-in conf
 }
 
 build_ios_app() { # SHA CONFIG_URL → prints the .app path
-  local sha=$1 config=$2 app src lockhash built
+  local sha=$1 config=$2 app src lockhash built cand
   app=$(ios_app_path "$sha" "$config")
   if [ -d "$app" ]; then say "app (cached): $app"; echo "$app"; return; fi
   src=$IOS_CACHE/build
@@ -74,8 +74,9 @@ build_ios_app() { # SHA CONFIG_URL → prints the .app path
     export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 # CocoaPods fails without a UTF-8 locale
     nodex npx expo prebuild --platform ios --clean --no-install || exit 1
     (cd ios && nodex pod install) || exit 1
-    local ws scheme
-    ws=$(ls -d ios/*.xcworkspace 2>/dev/null | head -1)
+    local ws scheme w
+    ws=
+    for w in ios/*.xcworkspace; do [ -d "$w" ] && { ws=$w; break; }; done
     [ -n "$ws" ] || { echo "expo prebuild made no ios/*.xcworkspace"; exit 1; }
     scheme=$(basename "$ws" .xcworkspace)
     # The simulator's arch only (arm64 on Apple silicon), no signing: nothing here needs the
@@ -89,7 +90,8 @@ build_ios_app() { # SHA CONFIG_URL → prints the .app path
     tail -40 "$IOS_CACHE/build.log" >&2
     die "iOS build failed; see $IOS_CACHE/build.log"
   }
-  built=$(ls -d "$src"/ios/build/Build/Products/Release-iphonesimulator/*.app 2>/dev/null | head -1)
+  built=
+  for cand in "$src"/ios/build/Build/Products/Release-iphonesimulator/*.app; do [ -d "$cand" ] && { built=$cand; break; }; done
   [ -n "$built" ] || { unlock "$IOS_CACHE/build.lock"; die "xcodebuild left no .app (see $IOS_CACHE/build.log)"; }
   # Whole or not at all: a run checking the cache without the lock never installs half an app.
   rm -rf "$app.tmp.$$"
