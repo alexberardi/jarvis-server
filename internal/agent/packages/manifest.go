@@ -90,7 +90,7 @@ func ParseManifest(b []byte) (*Manifest, error) {
 		if c.Type == "" || c.Name == "" {
 			return nil, fmt.Errorf("%s: a component needs a type and a name", ManifestFile)
 		}
-		if c.Type == "command" {
+		if c.Type == "command" || (deviceEntry[c.Type] != "" && c.Path != "") {
 			if err := checkRelPath(c.Path); err != nil {
 				return nil, fmt.Errorf("%s: component %s: %w", ManifestFile, c.Name, err)
 			}
@@ -196,7 +196,8 @@ const Desktop = "desktop"
 // CheckDesktop refuses a package this desktop can't run: another OS in platforms, targets that
 // leave out the desktop, or Pi system setup. A package that declares no targets is allowed: no
 // Pantry package declares them yet, and the user picks the computer in the app.
-func (m *Manifest) CheckDesktop(goos string) error {
+// runs are the component types beyond commands that this node loads (Manager.runs).
+func (m *Manifest) CheckDesktop(goos string, runs ...string) error {
 	if len(m.Platforms) > 0 && !slices.Contains(m.Platforms, goos) {
 		return fmt.Errorf("%s supports %s, not %s", m.label(), strings.Join(m.Platforms, ", "), goos)
 	}
@@ -206,7 +207,7 @@ func (m *Manifest) CheckDesktop(goos string) error {
 	if len(m.AptPackages) > 0 || len(m.AptSources) > 0 || len(m.PostInstall) > 0 {
 		return fmt.Errorf("%s needs system packages or setup steps that only a Pi node runs", m.label())
 	}
-	if len(m.Commands()) == 0 {
+	if len(m.Commands()) == 0 && !slices.ContainsFunc(m.Components, func(c Component) bool { return slices.Contains(runs, c.Type) }) {
 		return fmt.Errorf("%s has no commands a computer can run", m.label())
 	}
 	return nil
@@ -224,11 +225,35 @@ func (m *Manifest) Commands() []Component {
 	return out
 }
 
-// Skipped names the components a desktop doesn't run, as "type:name".
-func (m *Manifest) Skipped() []string {
+// DeviceTypes are the device component types a Pi's sidecar loads: families and managers.
+var DeviceTypes = []string{"device_protocol", "device_manager"}
+
+// deviceEntry is where a device component declared without a path is (the Pi's convention).
+var deviceEntry = map[string]string{"device_protocol": "device_families/%s/protocol.py", "device_manager": "device_managers/%s/manager.py"}
+
+// Paths are the files of the components of type typ, a device component without a declared
+// path at its conventional place.
+func (m *Manifest) Paths(typ string) []string {
 	var out []string
 	for _, c := range m.Components {
-		if c.Type != "command" {
+		if c.Type != typ {
+			continue
+		}
+		p := c.Path
+		if p == "" && deviceEntry[typ] != "" {
+			p = fmt.Sprintf(deviceEntry[typ], c.Name)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// Skipped names the components this node doesn't run, as "type:name": all but commands and
+// the types in runs.
+func (m *Manifest) Skipped(runs ...string) []string {
+	var out []string
+	for _, c := range m.Components {
+		if c.Type != "command" && !slices.Contains(runs, c.Type) {
 			out = append(out, c.Type+":"+c.Name)
 		}
 	}

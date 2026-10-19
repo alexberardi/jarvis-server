@@ -81,6 +81,9 @@ type Sidecar struct {
 	browser []nodesettings.DataCommand
 	pkgOf   map[string]string // command -> the installed package it came from
 	failed  map[string]string // package -> why its commands didn't load
+
+	devMu   sync.Mutex
+	devices nodesettings.Devices
 	store   Storage
 	host    Host
 	now     func() time.Time
@@ -176,6 +179,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			extras
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
+		deviceComponents
 	}
 	if err := s.roundTrip("describe", nil, &desc); err != nil {
 		s.Close()
@@ -194,6 +198,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		}
 	}
 	s.failed = desc.Failed
+	s.setDevices(desc.deviceComponents)
 	return s, nil
 }
 

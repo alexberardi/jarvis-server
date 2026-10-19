@@ -34,8 +34,12 @@ func TestBeatReplyAndUpdateFailure(t *testing.T) {
 	if err != nil || r.PendingUpdate != nil || r.ServerVersion != "" {
 		t.Fatalf("plain answer: %+v %v", r, err)
 	}
-	if sent["is_busy"] != false {
-		t.Fatalf("is_busy = %v", sent["is_busy"])
+	if _, ok := sent["protocols"]; sent["is_busy"] != false || ok {
+		t.Fatalf("is_busy = %v, protocols = %v", sent["is_busy"], sent["protocols"])
+	}
+	// A Pi with no device families says so (jarvisd keeps the last list otherwise).
+	if _, err := c.Beat(ctx, Beat{Protocols: []string{}}); err != nil || sent["protocols"] == nil || len(sent["protocols"].([]any)) != 0 {
+		t.Fatalf("protocols = %v, %v", sent["protocols"], err)
 	}
 	answer = `{"status":"ok","server_version":"v0.2.0","pending_update":{"task_id":"t1","target_version":"v0.2.0"}}`
 	r, err = c.Beat(ctx, Beat{Version: "v0.1.0"})

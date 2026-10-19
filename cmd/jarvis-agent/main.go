@@ -606,10 +606,20 @@ func run(ctx context.Context, args []string) error {
 		}
 		nodeConfig = wirePiNode(r, vf, hf, hd, live, sp, log)
 	}
-	wireNodeSettings(r, st, tools, nodeConfig, log)
+	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
+	// and are in its settings snapshot; a computer has none.
+	var devs func(context.Context) nodesettings.Devices
+	sc := liveSidecar(tools)
+	if !p.desktop && sc != nil {
+		devs = sc.Devices
+	}
+	wireNodeSettings(r, st, tools, nodeConfig, devs, log)
 	wirePackages(r, tf.pkgs, log)
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
+		if sc != nil {
+			wireDevices(r, sc, log)
+		}
 	}
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
 	// toggle turns it on and off while the agent runs (voiceSwitch).

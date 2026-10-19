@@ -97,3 +97,36 @@ func (l *Live) Failed() map[string]string {
 	}
 	return nil
 }
+
+// Devices are the device families and managers, for the settings snapshot.
+func (l *Live) Devices(context.Context) nodesettings.Devices {
+	if sc := l.Current(); sc != nil {
+		return sc.Devices()
+	}
+	return nodesettings.Devices{}
+}
+
+// Protocols are the configured device families (the heartbeat's protocols); none without a
+// sidecar.
+func (l *Live) Protocols() []string {
+	if sc := l.Current(); sc != nil {
+		return sc.Protocols()
+	}
+	return []string{}
+}
+
+// DeviceCall is Sidecar.DeviceCall on the sidecar in service.
+func (l *Live) DeviceCall(method string, params map[string]any) (map[string]any, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.DeviceCall(method, params)
+	}
+	return nil, ErrNoPackages
+}
+
+// StoreAuth is Sidecar.StoreAuth on the sidecar in service.
+func (l *Live) StoreAuth(provider string, values map[string]any, uid any) (string, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.StoreAuth(provider, values, uid)
+	}
+	return "", ErrNoPackages
+}
