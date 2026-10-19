@@ -1,0 +1,16 @@
+{{define "addform"}}<form method="post" action="/store/cart/add"><input type="hidden" name="id" value="{{.D.ID}}">{{if .Moved}}<input type="hidden" name="layout" value="moved"><button id="buy-box-add" class="cta" type="submit">Add to cart</button>{{else}}<button id="add-to-cart" class="btn" type="submit">Add to cart</button>{{end}}</form>{{end}}
+{{define "content"}}{{$p := .D}}
+{{if .Moved}}<aside class="toolbar"><span class="buy-box">{{money $p.Price}} {{template "addform" .}}</span></aside>{{end}}
+<h1>{{$p.Name}}</h1>
+{{if $p.Sponsored}}<p><span class="sponsored">Sponsored</span></p>{{end}}
+<p><strong>{{money $p.Price}}</strong>{{if $p.ListPrice}} <s>{{money $p.ListPrice}}</s>{{end}} · {{stars $p.Rating}} {{printf "%.1f" $p.Rating}} ({{$p.Reviews}} reviews)</p>
+<p>Sold by {{$p.Seller}}</p>
+<h2>Description</h2>
+<p>{{$p.Description}}</p>
+<h2>Specifications</h2>
+<table>
+{{if $p.BatteryDays}}<tr><th>Battery</th><td>{{$p.BatteryDays}} days</td></tr>{{end}}
+{{range $k, $v := $p.Specs}}<tr><th>{{$k}}</th><td>{{$v}}</td></tr>{{end}}
+</table>
+{{if not .Moved}}<div class="actions">{{template "addform" .}}</div>{{end}}
+{{end}}
