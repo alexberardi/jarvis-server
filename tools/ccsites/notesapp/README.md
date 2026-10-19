@@ -2,7 +2,7 @@
 
 A small desktop notes app for the computer-control suite's desktop cases
 (`notes_x11`, `notes_wlroots`). The agent drives it like any desktop app; the suite then reads
-what was saved from the state file (`NotesState` in `../notesapp.go`).
+what was saved from the state file (`NotesState` in `notesapp.go`, Go package `tools/ccsites/notesapp`).
 
 - One window, titled **Jarvis Test Notes**: the notes list on the left, a **New note** button, a
   **Title** entry, a **Body** text area, a **Save** button, and a menu bar (**File → New, Save**;
@@ -51,5 +51,5 @@ python3 -m unittest notes_test        # from this directory
 
 The tests create a note, save it, edit it, add a second one, and read the state file back. They
 skip without `tkinter` or without a display (`DISPLAY` or `WAYLAND_DISPLAY`), so run them under
-`xvfb-run -a python3 -m unittest notes_test`. CI does not run them; `go test ./tools/ccsites/`
+`xvfb-run -a python3 -m unittest notes_test`. CI does not run them; `go test ./tools/ccsites/notesapp/`
 covers the Go reader against `testdata/notes.json`.
