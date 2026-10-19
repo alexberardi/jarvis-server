@@ -63,7 +63,7 @@ func TestPrintSetupLink(t *testing.T) {
 func TestAnnounceSetupPrintsTokenAndLink(t *testing.T) {
 	var out bytes.Buffer
 	cfg := config.Config{Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710}}
-	announceSetup(&out, slog.New(slog.NewTextHandler(io.Discard, nil)), cfg, "abc123", "/home/x/setup-token", false)
+	announceSetup(&out, true, slog.New(slog.NewTextHandler(io.Discard, nil)), cfg, "abc123", "/home/x/setup-token", false)
 	s := out.String()
 	for _, want := range []string{"http://127.0.0.1:7710/setup#token=abc123", "Setup token: abc123", "/home/x/setup-token"} {
 		if !strings.Contains(s, want) {
@@ -77,7 +77,7 @@ func TestAnnounceSetupPrintsTokenAndLink(t *testing.T) {
 func TestAnnounceSetupLogOmitsToken(t *testing.T) {
 	var logged bytes.Buffer
 	cfg := config.Config{Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710}}
-	announceSetup(io.Discard, slog.New(slog.NewTextHandler(&logged, nil)), cfg, "abc123", "/home/x/setup-token", false)
+	announceSetup(io.Discard, true, slog.New(slog.NewTextHandler(&logged, nil)), cfg, "abc123", "/home/x/setup-token", false)
 	s := logged.String()
 	if strings.Contains(s, "abc123") || strings.Contains(s, "#token=") {
 		t.Errorf("log carries the setup token: %q", s)
@@ -86,6 +86,67 @@ func TestAnnounceSetupLogOmitsToken(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in %q", want, s)
 		}
+	}
+}
+
+// #224: under systemd, launchd or a Windows service stderr is a pipe into the journal or a
+// log file, which other local users may read. A non-terminal stderr never gets the token: it
+// gets a line pointing at `jarvisd setup-link` instead, and the log still omits the token.
+func TestAnnounceSetupNonTerminalOmitsToken(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var logged bytes.Buffer
+	cfg := config.Config{Host: "127.0.0.1", Ports: map[string]int{config.ListenerAdmin: 7710}}
+	announceSetup(w, stderrIsTerminal(func(string) string { return "" }, w), slog.New(slog.NewTextHandler(&logged, nil)),
+		cfg, "abc123", "/home/x/setup-token", false)
+	w.Close()
+	b, _ := io.ReadAll(r)
+	for name, s := range map[string]string{"stderr": string(b), "log": logged.String()} {
+		if strings.Contains(s, "abc123") || strings.Contains(s, "#token=") {
+			t.Errorf("%s carries the setup token: %q", name, s)
+		}
+	}
+	for _, want := range []string{"jarvisd setup-link", "/home/x/setup-token"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("stderr: missing %q in %q", want, b)
+		}
+	}
+}
+
+func TestStderrIsTerminal(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devnull.Close()
+	none := func(string) string { return "" }
+	for name, f := range map[string]*os.File{"file": f, "pipe": w, "null device": devnull} {
+		if stderrIsTerminal(none, f) {
+			t.Errorf("a %s is not a terminal", name)
+		}
+	}
+	// systemd sets INVOCATION_ID; a unit with a TTY for stderr still writes nothing secret.
+	if stderrIsTerminal(func(k string) string {
+		if k == "INVOCATION_ID" {
+			return "x"
+		}
+		return ""
+	}, os.Stderr) {
+		t.Error("systemd unit")
 	}
 }
 

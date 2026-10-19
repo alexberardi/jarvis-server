@@ -130,18 +130,28 @@ func setupLinkMessage(cfg config.Config) (url, msg string, err error) {
 		"is still to do. The admin is at %s\n", link), nil
 }
 
-// announceSetup shows the operator the setup token and link: plainly on w (stderr), since
-// it is the one thing they must see on first start. The log gets the link without the token
-// (it reaches journald, launchd and the logs DB, which others may read). It opens a browser at
-// the link when browser is set and this looks like an interactive desktop session.
-func announceSetup(w io.Writer, log *slog.Logger, cfg config.Config, token, path string, browser bool) {
+// announceSetup shows the operator the setup token and link: plainly on w (stderr) when
+// tty says stderr is a person's terminal, since it is the one thing they must see on first
+// start. Otherwise stderr goes to journald, launchd's or a service's log, which other local
+// users may read (#224), so it only says where to get the link. The log gets the link without
+// the token (it reaches those logs and the logs DB too). It opens a browser at the link when
+// browser is set and this looks like an interactive desktop session.
+func announceSetup(w io.Writer, tty bool, log *slog.Logger, cfg config.Config, token, path string, browser bool) {
 	link := setupLink(cfg, token)
-	fmt.Fprintf(w, "\njarvisd: no admin account yet. Finish setup in a browser:\n\n    %s\n\n", link)
-	fmt.Fprintf(w, "Setup token: %s\n", token)
-	if path != "" {
-		fmt.Fprintf(w, "(also in %s; it is deleted once setup is done)\n", path)
+	if tty {
+		fmt.Fprintf(w, "\njarvisd: no admin account yet. Finish setup in a browser:\n\n    %s\n\n", link)
+		fmt.Fprintf(w, "Setup token: %s\n", token)
+		if path != "" {
+			fmt.Fprintf(w, "(also in %s; it is deleted once setup is done)\n", path)
+		}
+		fmt.Fprintln(w)
+	} else {
+		fmt.Fprint(w, "jarvisd: no admin account yet; run `jarvisd setup-link` to get the setup link")
+		if path != "" {
+			fmt.Fprintf(w, " (the token is in %s)", path)
+		}
+		fmt.Fprintln(w)
 	}
-	fmt.Fprintln(w)
 	log.Info("first-run setup", "url", strings.TrimSuffix(setupLink(cfg, ""), "#token="), "token_file", path)
 	if browser && interactiveDesktop(os.Getenv, os.Stderr) {
 		if err := openBrowser(link); err != nil {
@@ -150,15 +160,16 @@ func announceSetup(w io.Writer, log *slog.Logger, cfg config.Config, token, path
 	}
 }
 
+// stderrIsTerminal reports whether stderr is a person's terminal, not a service manager's
+// pipe or file (systemd sets INVOCATION_ID; launchd and Windows services have no terminal).
+func stderrIsTerminal(getenv func(string) string, stderr *os.File) bool {
+	return getenv("INVOCATION_ID") == "" && term.IsTerminal(int(stderr.Fd()))
+}
+
 // interactiveDesktop reports whether jarvisd was started by a person at a desktop: stderr is
-// a terminal, not a service manager (systemd sets INVOCATION_ID; launchd and Windows
-// services have no terminal), not over SSH, and on Linux/BSD a display is available.
+// a terminal (stderrIsTerminal), not over SSH, and on Linux/BSD a display is available.
 func interactiveDesktop(getenv func(string) string, stderr *os.File) bool {
-	if getenv("INVOCATION_ID") != "" || getenv("SSH_CONNECTION") != "" || getenv("SSH_TTY") != "" {
-		return false
-	}
-	fi, err := stderr.Stat()
-	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+	if !stderrIsTerminal(getenv, stderr) || getenv("SSH_CONNECTION") != "" || getenv("SSH_TTY") != "" {
 		return false
 	}
 	switch runtime.GOOS {
