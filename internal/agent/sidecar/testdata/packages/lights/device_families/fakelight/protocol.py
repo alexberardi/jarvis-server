@@ -1,6 +1,8 @@
 """A LAN device family, as a Pantry package ships one (device_families/<name>/protocol.py)."""
 
-from jarvis_command_sdk import DeviceControlResult, DiscoveredDevice, IJarvisDeviceProtocol, JarvisStorage
+import asyncio
+
+from jarvis_command_sdk import DeviceControlResult, DiscoveredDevice, InputRequest, IJarvisDeviceProtocol, JarvisStorage
 
 
 class FakeLight(IJarvisDeviceProtocol):
@@ -21,7 +23,26 @@ class FakeLight(IJarvisDeviceProtocol):
         ]
 
     async def control(self, ip, action, data=None, **kwargs):
-        return DeviceControlResult(success=True, entity_id=kwargs.get("entity_id", ""), action=action)
+        # The Python node passes the device itself where the SDK says ip (and the whole
+        # action context as data); a family written for it reads the device's fields.
+        dev = ip
+        if not isinstance(dev, DiscoveredDevice):
+            return DeviceControlResult(success=False, entity_id="", action=action, error=f"not a device: {dev!r}")
+        if action == "explode":
+            raise RuntimeError("the bulb popped")
+        if action == "pair_start":
+            # A pairing session lives on the loop it started on (pyatv's do), across calls.
+            self._pairing = asyncio.get_running_loop()
+            return DeviceControlResult(success=False, entity_id=dev.entity_id, action=action, error="PIN needed",
+                                       input_required=InputRequest(type="pin", prompt="Enter the PIN", session_id="s1"))
+        if action == "pair_finish":
+            same = getattr(self, "_pairing", None) is asyncio.get_running_loop()
+            ok = same and (data or {}).get("pin") == "1234"
+            return DeviceControlResult(success=ok, entity_id=dev.entity_id, action=action,
+                                       error=None if ok else f"pairing lost (same loop: {same})")
+        got = (dev.entity_id, dev.name, dev.domain, dev.local_ip, dev.mac_address, (data or {}).get("brightness"))
+        JarvisStorage("fakelight").save("controlled", {"action": action, "device": list(got)})
+        return DeviceControlResult(success=True, entity_id=dev.entity_id, action=action)
 
     async def get_state(self, ip, **kwargs):
         entity_id = kwargs.get("entity_id")
