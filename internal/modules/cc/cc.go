@@ -201,8 +201,8 @@ type Module struct {
 	// recordingTasks is what the user said they would show, by recording id, from
 	// start_recording until the recording is stored (its narration).
 	recordingTasks sync.Map
-	// learnRecording gets every recording stored from an agent: piece 30 queues learning a
-	// workflow from it here. nil: nothing yet.
+	// learnRecording gets every recording stored from an agent: it queues learning a
+	// workflow from it (workflows_learn.go; tests replace it).
 	learnRecording func(ctx context.Context, rec Recording) error
 
 	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
@@ -397,6 +397,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// Taught workflows and recordings (docs/agent/COMPUTER_CONTROL.md, plan P3 piece 26).
 	m.registerWorkflows(mux)
 	m.registerRecordings(mux)
+	m.registerWorkflowLearning()
 	// Phone calls, phonebook and call context (doc 11).
 	m.registerPhone(mux)
 	// Autonomy activity log and policy (docs/autonomy/PLAN.md §0).

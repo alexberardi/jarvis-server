@@ -1,0 +1,11 @@
+{"recording_id":"rec_bank1","seq":1,"ts":1760000000000,"kind":"navigate","url":"https://bank.example.com/login","tab":1}
+{"recording_id":"rec_bank1","seq":2,"ts":1760000002000,"kind":"input","url":"https://bank.example.com/login","tab":1,"element":{"role":"textbox","name":"Username","tag":"input","type":"text","selector":"#username"},"value":"ale"}
+{"recording_id":"rec_bank1","seq":3,"ts":1760000002500,"kind":"change","url":"https://bank.example.com/login","tab":1,"element":{"role":"textbox","name":"Username","tag":"input","type":"text","selector":"#username"},"value":"alex"}
+{"recording_id":"rec_bank1","seq":4,"ts":1760000004000,"kind":"change","url":"https://bank.example.com/login","tab":1,"element":{"role":"textbox","name":"Password","tag":"input","type":"password","selector":"#password"},"masked":true}
+{"recording_id":"rec_bank1","seq":5,"ts":1760000005000,"kind":"click","url":"https://bank.example.com/login","tab":1,"element":{"role":"button","name":"Sign in","tag":"button","type":"submit","selector":"#sign-in"}}
+{"recording_id":"rec_bank1","seq":6,"ts":1760000006000,"kind":"navigate","url":"https://bank.example.com/accounts","tab":1}
+{"recording_id":"rec_bank1","seq":7,"ts":1760000008000,"kind":"click","url":"https://bank.example.com/accounts","tab":1,"element":{"role":"link","name":"Statements","tag":"a","selector":"#nav-statements"}}
+{"recording_id":"rec_bank1","seq":8,"ts":1760000008500,"kind":"navigate","url":"https://bank.example.com/statements?month=2026-08","tab":1}
+{"recording_id":"rec_bank1","seq":9,"ts":1760000011000,"kind":"change","url":"https://bank.example.com/statements?month=2026-08","tab":1,"element":{"role":"textbox","name":"Statement month","tag":"input","type":"month","selector":"#month"},"value":"2026-09"}
+{"recording_id":"rec_bank1","seq":10,"ts":1760000013000,"kind":"click","url":"https://bank.example.com/statements?month=2026-09","tab":1,"element":{"role":"button","name":"Download CSV","tag":"button","selector":"[data-testid=download-csv]","frame":2}}
+{"recording_id":"rec_bank1","seq":11,"ts":1760000013400,"kind":"download","url":"https://bank.example.com/statements/download?month=2026-09","tab":1,"value":"statement_2026-09.csv","mime":"text/csv"}
