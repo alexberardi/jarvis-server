@@ -1103,6 +1103,188 @@ jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output out
 sudo systemctl start jarvis-node
 ```
 
+### 3.19 The soak, the parity checklist and the Python node's retirement (2026-10-19, loop #181)
+
+**Status:** the soak tooling is written and tested without a Pi; **the soak has not run** (no
+runner reaches a Pi: it is the user's QA, below). **The retirement is BLOCKED** on the open parity
+gaps (a)–(e) in the checklist and on a passing soak. The user chose this order on 2026-10-19:
+the docs and the script now, the gaps as their own items.
+
+**`scripts/pi-soak.sh`** runs on the Pi as the node's user. `run --lab-host NAME` refuses unless
+`hostname` is NAME, and refuses any host whose name contains "kitchen". It stops
+`jarvis-node.service`, starts the installed `jarvis-agent.service` (§6; its `Conflicts=` keeps the
+two off the HAT together) and puts both back as they were on any exit: the end, Ctrl-C, TERM or an
+error. It writes to one directory:
+
+- `samples.csv`: one row every `--interval` (60 s). The agent's CPU as % of one core (from
+  `/proc/PID/stat` deltas, as §3.11 measured it), its RSS, PSS, anonymous and swap
+  (`smaps_rollup`), the same for its child processes (the command sidecar), MemAvailable, swap in
+  use, load, SoC temperature, `vcgencmd get_throttled`, and the unit's `NRestarts`.
+- `turns.log`: one scripted turn per command family every `--turns-every` (4 h; the first round
+  5 min in). `<family>.wav` from `--wavs DIR` plays out of the HAT's speaker (`aplay -D output`)
+  to the running node. It passes when the node logs `msg="voice turn" outcome=spoken` within
+  `--turn-wait` (90 s), and when the line matches `<family>.expect` (an extended regex), if that
+  file exists.
+- `journal.log`: the unit's journal for the run, taken after the stop so that it holds the
+  capture stats.
+- `summary.md`: the numbers for the results table below. Overruns and dropped chunks are the sums
+  of `msg="voice: capture stats"` (printed when a pipeline stops, so at every restart and at the
+  end). It also counts pipeline restarts (`voice: pipeline stopped; restarting`), wakes
+  (`msg=wake`), turn outcomes, false wakes (`non_speech` + `not_for_me` turns), and ERROR/WARN
+  lines and panics.
+
+`scripts/pi-soak-check.sh` (CI `deb` job, next to `install-pi-check.sh`) runs it against a fake
+`/proc`, `/sys`, systemctl, journalctl and hostname. It checks the refusals, the stop/start order,
+the sample columns, the turn verdicts, every summary count, `summarize` again from the files, and
+a TERM partway through that still puts the Python node back. The awk is POSIX (Raspberry Pi OS
+ships mawk); the check also passes under `gawk --posix`.
+
+**Running the soak** (user QA). Use the lab Zero 2 W (<dev-node>), or the lab Pi 4 (<pi4-node>)
+for a first short run. **Never the prod kitchen node.** The §3.11 rules apply: the Python node
+stays installed and the script starts it again at the end. Do not reboot during the run: the
+Python unit is still enabled, so a boot would bring it back and stop the Go node (the samples
+show `pid` 0).
+
+```bash
+# Your machine: the script to the lab Pi.
+scp scripts/pi-soak.sh <user>@<dev-node>.local:~/
+ssh <user>@<dev-node>.local
+
+# The Pi, once: the Go node next to the Python node, NOT activated (the unit stays disabled).
+curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/<tag>/install-pi.sh && sudo sh install-pi.sh
+# Its own identity, as the node's user (pi, the unit's User=): approve the code it prints in the
+# app or the admin Nodes page. It is a new node, not the Python node's (the retirement proposal).
+/opt/jarvis-agent/jarvis-agent enroll --server <prod-host> --room lab
+
+# The turn recordings, once, with the Python node stopped so that the mic is free. Say each
+# phrase when "say:" appears; 5 s each. Families: the built-ins in the sidecar plus music.
+sudo systemctl stop jarvis-node
+mkdir -p ~/soak-wavs && cd ~/soak-wavs
+rec() { echo "say: $2"; sleep 1; arecord -q -D dsnoopmic -f S16_LE -r 16000 -c 1 -d 5 "$1.wav"; }
+rec time       "hey Jarvis, what time is it?"
+rec weather    "hey Jarvis, what's the weather today?"
+rec timer      "hey Jarvis, set a timer for one minute"
+rec reminder   "hey Jarvis, remind me in two minutes to check the soak"
+rec calculate  "hey Jarvis, what is twelve times nineteen?"
+rec joke       "hey Jarvis, tell me a joke"
+rec whats_up   "hey Jarvis, what's up?"
+rec music      "hey Jarvis, play some jazz on Spotify"
+rec music_stop "hey Jarvis, stop the music"
+echo '228' >calculate.expect
+echo 'timer' >timer.expect
+cd ~ && sudo systemctl start jarvis-node
+
+# The soak: 24 h inside tmux so that it outlives the ssh session (sudo -v first: it uses sudo -n).
+sudo -v
+# Type the lab Pi's hostname yourself: the guard is that it must equal `hostname`.
+tmux new -s soak "./pi-soak.sh run --lab-host <dev-node> --duration 24h --wavs ~/soak-wavs --out ~/pi-soak-zero2w; bash"
+# Detach with Ctrl-b d; check on it with: tail -3 ~/pi-soak-zero2w/samples.csv; cat ~/pi-soak-zero2w/turns.log
+# Stop it early with Ctrl-C in the tmux window: the Python node is started again and the summary written.
+
+# Afterwards, from your machine:
+scp -r <user>@<dev-node>.local:pi-soak-zero2w .
+ssh <user>@<dev-node>.local systemctl is-active jarvis-node jarvis-agent   # active, inactive
+```
+
+By hand, once during the soak (not scriptable): device control from the app (Devices → toggle a
+device, §3.18; voice control is gap (b)); Bluetooth status in the node's Hardware tab (§3.15); a
+reminder heard on its own when due (§3.11); the LEDs through a turn and a short button press.
+Write the results in the table.
+
+**Results** (to fill in from `summary.md`; the Python column is §3.11's 5-minute measurement on
+the same Zero 2 W):
+
+| | Go node, 24 h soak, Zero 2 W | Python node (§3.11, 5 min idle) |
+|---|---|---|
+| Date, agent version | | 2026-10-12 |
+| CPU, % of one core: mean / p95 / max | | 87.1% (mean) |
+| RSS MB: min / mean / max (first → last, for a leak) | | – |
+| Anonymous MB: mean / max (first → last) | | 129 MB |
+| Sidecar RSS MB: mean / max | | (in the process) |
+| Swap in use, max | | 106 MB |
+| SoC temperature max; throttling | | |
+| Unit restarts / pipeline restarts | | 0 / 0 (5 min) |
+| ALSA overruns / dropped chunks | | 0 (5 min) |
+| Wakes / false wakes | | |
+| Scripted turns passed (per family in `summary.md`) | | |
+| Errors / warnings / panics | | |
+| By hand: device control, Bluetooth, reminder, LEDs and button | | |
+
+**Pass bar to propose** (the user's to change): no unit or pipeline restarts; overruns at most 1
+an hour; the last hour's anonymous memory within 10% of the first hour's (no leak); a mean CPU at
+or below §3.11's 55% plus the sidecar's idle cost; no throttling; every scripted turn passes; at
+most 2 false wakes a day in the lab.
+
+#### Parity checklist (main at 94952cd, 2026-10-19)
+
+"Built" means unit tests or a sandbox jarvisd. "On a Pi" means checked on the lab Pi 4 or the
+Zero 2 W. Every Pi item from loop #159–#180, #220 and #229 is still in QA, and none has been
+checked on the lab Pi 4 since it was built.
+
+| §7 item | Status | On a Pi |
+|---|---|---|
+| 4.1 HAT audio, LEDs, button | built | **verified** (§3.11: every pattern over SPI, the button line, a `wav:` turn, idle CPU/RSS, 0 overruns) |
+| 4.1 Pi profile, HAT codec self-heal | built | no |
+| 4.2 self-update on the Pi | built | partly: `systemd-run --user` reaches pi's manager; **open (e)**: the rollback repro after rerunning `install-pi.sh` (#220) |
+| 4.3 `install-pi.sh` (3a, 3b), the release | built | no; no published release yet |
+| 4.4 provisioning API, NetworkManager backend, recovery | built | no; **open (d)**: setup mode is not started at boot |
+| 4.5 the built-in commands in the sidecar; reminders, alerts, button | built | no; **open (b)**: `control_device`, `routine`, `send_link` are skipped (`internal/agent/packages/python.go:58`) |
+| 5.1 follow-up | built (heard on the desktop) | no |
+| 5.2 barge-in | built (rig tests) | no |
+| 5.3 client tools / continue | built | no |
+| 5.4 `update_node_config`, ambient noise, LED preview | built; Pi volume not applied | no |
+| 5.5 K2 + settings snapshot | built for the desktop agent (`internal/agent/nodesettings`); the Pi reports its `node_config` | **open (c)**: not marked done or checked for the Pi profile; the snapshot's volume says "no Pi volume control" |
+| 5.6 packages (apt, post_install, test-install) | built | no |
+| 5.7 factory reset, routines sync, context requests | built | no; **open (d)**: a reset node doesn't return to provisioning; jarvisd's broker drops `context/operations` answers (ACL, held for the user) |
+| 5.8 Bluetooth | built | no |
+| 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
+| 5.10 voice-profile takes | built | no |
+| 5.11 music ducking and takeover (17a) | built | no; **open (a)**: 17b echo cancellation during music, 17c tentative wake and `pre_wake_speech_seconds`, 17d wake auto-calibration and the false-wake cool-down, 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
+
+What each open gap blocks, if the Python node were retired today:
+
+- **(a)** music is louder in the mic than with the Python node (no AEC), so wakes over music fail
+  more often; there is no tentative wake, no auto-calibration and no false-wake cool-down; and a
+  Pi without the HAT has no LED at all.
+- **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
+  the node. The app's device control still works.
+- **(c)** the app's node settings (and their secrets' Sync) may not reach a Pi; not confirmed.
+- **(d)** a factory reset (from the app or the provisioning API) leaves a node that is offline
+  with no hotspot: someone has to reinstall it by hand.
+- **(e)** a bad release that crash-loops may not roll back by itself on a Pi.
+
+#### Retirement proposal (BLOCKED on (a)–(e) and the soak; for the user to approve)
+
+Nothing here is done. It is the order proposed once the checklist has no open row, every Pi item
+is checked on the lab Pi 4 and the soak meets the pass bar:
+
+1. **The `install_mode` switch.** Today `install-pi.sh` installs `jarvis-agent.service` disabled
+   and `--activate` swaps the nodes
+   ([decision](../decisions/2026-10-17-pi-node-activation.md)); jarvisd tells them apart by the
+   heartbeat (`install_mode "tarball"`, `runtime "go"`, §8 Q6). Proposed: on a Pi with no
+   `jarvis-node.service`, `install-pi.sh` activates by default; on a Pi with one, it stays
+   opt-in. After the kitchen node has run on Go for a week, `--activate` becomes the default
+   everywhere, and `--keep-python` the way out.
+2. **The identity.** The Go node enrolls as a new node (`~/.config/jarvis-agent/node.json`). No
+   code takes over the Python node's node id, room or settings: there is none for this in
+   `internal/agent` or `cmd/jarvis-agent`. Either a migration is built (an item of its own:
+   read the Python node's credentials, keep the node id), or the swap is "enroll, move the room,
+   delete the old node" and the docs say so. **The user decides which.**
+3. **The docs.** README's Raspberry Pi section (it still says there is no installer, hotspot,
+   self-update or package support, and that jarvis-node-setup is the supported Pi node), §6's
+   install as the one way to set up a Pi, docs/install's `00-installers.md` (the install-pi.sh
+   section becomes the Pi's only installer), `docs/STATUS.md`, and jarvis-docs (STATUS's open
+   docs item).
+4. **jarvis-node-setup.** Archive the **node** on GitHub, after a final release whose README
+   points to `install-pi.sh`: `install.sh`, the service and the node code. **Keep the commands
+   package:** the sidecar still pip-installs jarvis-node-setup at a pinned commit
+   (`packages.NodeCommandsRequirement`, `internal/agent/packages/python.go:48`) for the
+   built-in commands. Before the repository is archived, either move those commands into their
+   own package (or Pantry), or keep the repository unarchived and read-only for the node part.
+   An archived repository still serves the pinned tarball, but no fix can land in it.
+5. **Last:** jarvisd's Python-node-only paths (the jarvis-node-setup release as "latest" for
+   nodes with no runtime, §7 4.2) stay until no heartbeat in the field reports a Python node.
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -1451,7 +1633,12 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
        auto-calibration and the false-wake cool-down; 17e the wake greeting prefetch (row 20),
        maintenance restart and the ACT-LED fallback without a HAT.
 
-   Then retire the Python node.
+   Then retire the Python node. **Proposed 2026-10-19, BLOCKED** (loop #181, §3.19): the soak
+   script (`scripts/pi-soak.sh`) and its commands, the parity checklist and the retirement path
+   are written; the 24 h soak on the lab Zero 2 W is the user's to run, and the retirement waits
+   on the open gaps: (a) #180's 17b–17e, (b) voice `control_device`/`routine`/`send_link` in the
+   sidecar, (c) K2 and the settings snapshot on the Pi, (d) setup mode at boot, (e) the on-device
+   rollback repro. It also needs the user's choice on the node identity (§3.19 step 2).
 
 ---
 
