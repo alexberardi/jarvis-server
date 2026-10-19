@@ -272,6 +272,35 @@ func TestLoopStopsAtBudget(t *testing.T) {
 }
 
 func TestLoopStopRequested(t *testing.T) {
+	t.Run("between rounds", testStopBetweenRounds)
+	t.Run("while waiting for approval", func(t *testing.T) {
+		e := newEnv(t)
+		e.script(actions(press("e5", "Place the order")), doneAnswer)
+		out := e.run()
+		if out.State != StateNeedsApproval || len(out.Pending) != 1 {
+			t.Fatalf("outcome %+v", out)
+		}
+		// The user presses Stop while the run waits, then approves: the held batch must not run.
+		if err := e.loop.Store.RequestStop(context.Background(), out.RunID); err != nil {
+			t.Fatal(err)
+		}
+		tk := task()
+		tk.RunID = out.RunID
+		tk.Approved = []string{out.Pending[0].Digest}
+		out2 := e.loop.Run(context.Background(), tk)
+		if out2.State != StateStopped || len(e.exec.batches) != 0 || len(e.mint.digests) != 0 {
+			t.Fatalf("resume %+v, batches %d, minted %v", out2, len(e.exec.batches), e.mint.digests)
+		}
+		if len(e.exec.stops) != 1 || e.exec.stops[0] != out.RunID {
+			t.Fatalf("executor stops %v", e.exec.stops)
+		}
+		if r := e.storedRun(out.RunID); r.State != RunStopped || r.Pending != nil {
+			t.Fatalf("stored %+v", r)
+		}
+	})
+}
+
+func testStopBetweenRounds(t *testing.T) {
 	e := newEnv(t)
 	e.script(actions(press("e1", "Go home")), actions(press("e1", "Go home")), doneAnswer)
 	var runID string
@@ -348,6 +377,43 @@ func TestRiskyAsksGrouped(t *testing.T) {
 	}
 	if r := e.storedRun(out.RunID); r.Pending != nil || r.State != RunDone {
 		t.Fatalf("after resume %+v", r)
+	}
+}
+
+// A risky action the household allows, held in a batch with one it asks about, is part of the
+// same confirmation, and gets its token on resume like the rest.
+func TestRiskyAsksGroupedWithAllowedRisky(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	if _, err := e.rules.PutRule(ctx, policy.Rule{HouseholdID: "hh-1", ScopeKind: policy.ScopeHousehold,
+		Tool: policy.ToolComputerTask, Target: "action:sensitive_input", Effect: policy.Allow}); err != nil {
+		t.Fatal(err)
+	}
+	e.script(actions(`{"kind": "set_value", "ref": "e2", "text": "4111 1111 1111 1111", "intent": "Fill in the card number"}`,
+		press("e5", "Place the order")), doneAnswer)
+	out := e.run()
+	if out.State != StateNeedsApproval || len(out.Pending) != 2 ||
+		out.Pending[0].Category != computeruse.CatSensitiveInput || out.Pending[1].Category != computeruse.CatPay {
+		t.Fatalf("outcome %+v", out)
+	}
+	tk := task()
+	tk.RunID = out.RunID
+	tk.Approved = []string{out.Pending[0].Digest, out.Pending[1].Digest}
+	if out2 := e.loop.Run(ctx, tk); out2.State != StateDone || len(e.exec.batches) != 1 {
+		t.Fatalf("resume %+v, batches %d", out2, len(e.exec.batches))
+	}
+	b := e.exec.batches[0]
+	if len(b.Actions) != 2 || len(e.mint.digests) != 2 {
+		t.Fatalf("resumed batch %+v minted %v", b.Actions, e.mint.digests)
+	}
+	for i, a := range b.Actions {
+		if a.Approval == "" {
+			t.Fatalf("action %d %q has no approval token", i, a.Intent)
+		}
+		// The digest the agent recomputes matches the one minted.
+		if got := a.Digest(b.RunID, b.Target); got != e.mint.digests[i] || got != out.Pending[i].Digest {
+			t.Fatalf("action %d digest %s, minted %s, pending %s", i, got, e.mint.digests[i], out.Pending[i].Digest)
+		}
 	}
 }
 

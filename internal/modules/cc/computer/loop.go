@@ -243,13 +243,17 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 
 	if held := run.Pending; held != nil {
 		run.Pending = nil
+		// A stop pressed while the run waited wins over a later approval: the held batch is
+		// dropped unsent.
+		if l.stopRequested(ctx, run) {
+			return l.end(ctx, run, Outcome{State: StateStopped, Summary: "Stopped."})
+		}
 		if out, done := l.runApproved(ctx, r, held); done {
 			return l.end(ctx, run, out)
 		}
 	}
 	for {
-		if stop, err := l.Store.StopRequested(ctx, run.ID); err != nil || stop {
-			l.Exec.Stop(ctx, run.ID)
+		if l.stopRequested(ctx, run) {
 			return l.end(ctx, run, Outcome{State: StateStopped, Summary: "Stopped."})
 		}
 		if run.Rounds >= maxRounds {
@@ -271,6 +275,16 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 			return l.end(ctx, run, Outcome{State: StateFailed, Summary: "I couldn't save the task's progress."})
 		}
 	}
+}
+
+// stopRequested reports a durable stop (or a store that can't say), and passes it on to the
+// executor.
+func (l *Loop) stopRequested(ctx context.Context, run *Run) bool {
+	if stop, err := l.Store.StopRequested(ctx, run.ID); err != nil || stop {
+		l.Exec.Stop(ctx, run.ID)
+		return true
+	}
+	return false
 }
 
 // round is one observe → model → policy → act cycle; done reports an outcome that ends the call.
@@ -415,14 +429,22 @@ func (l *Loop) decideAndAct(ctx context.Context, r *round, obs Observation, acti
 		}
 	}
 
+	// When anything in the batch waits for the user, every risky action of it is in the same
+	// confirmation, the ones the household allows too: on resume each approved one gets its token.
+	asks := false
+	for _, d := range ds {
+		asks = asks || d.verdict.Effect == policy.Ask
+	}
 	var pending []PendingAction
 	held := &Held{Target: tgt}
 	for i, d := range ds {
 		h := HeldAction{Action: d.action}
-		if d.risk.Level == computeruse.LevelConfirm && d.verdict.Effect == policy.Ask {
+		switch {
+		case !asks:
+		case d.risk.Level == computeruse.LevelConfirm:
 			h.Category, h.Reason, h.Digest = d.risk.Category, d.risk.Reason, d.action.Digest(r.run.ID, tgt)
 			pending = append(pending, PendingAction{Index: i, Action: d.action, Category: h.Category, Reason: h.Reason, Digest: h.Digest})
-		} else if d.verdict.Effect == policy.Ask {
+		case d.verdict.Effect == policy.Ask:
 			// A site or app the household asks about: the whole batch waits, as one confirmation.
 			h.Reason, h.Digest = d.verdict.Reason, d.action.Digest(r.run.ID, tgt)
 			pending = append(pending, PendingAction{Index: i, Action: d.action, Reason: h.Reason, Digest: h.Digest})
