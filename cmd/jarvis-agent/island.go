@@ -38,9 +38,12 @@ func islandState(c voice.Cue) island.State {
 //
 //	jarvis-agent island-demo                       # one turn: listen, think, speak, follow-up, ...
 //	jarvis-agent island-demo --hold follow_up --for 20s
+//	jarvis-agent island-demo --hold controlling --text "Ordering the blue mug"
 func islandDemo(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("island-demo", flag.ExitOnError)
-	hold := fs.String("hold", "", "show only this state: listening, thinking, speaking, follow_up, error")
+	hold := fs.String("hold", "", "show only this state: listening, thinking, speaking, follow_up, error, "+
+		"controlling, paused, recording")
+	text := fs.String("text", "", "with --hold controlling, paused or recording: the task's intent")
 	dur := fs.Duration("for", 10*time.Second, "with --hold: for how long")
 	_ = fs.Parse(args)
 	if err := noStrayArgs(fs); err != nil {
@@ -67,12 +70,23 @@ func islandDemo(ctx context.Context, args []string) error {
 			}
 			return true
 		}
+		if a := map[string]island.State{"controlling": island.Controlling, "paused": island.Paused,
+			"recording": island.Recording}[*hold]; a != island.Hidden {
+			i.SetActivity(a, *text)
+			select {
+			case <-ctx.Done():
+			case <-time.After(*dur):
+			}
+			i.SetActivity(island.Hidden, "")
+			time.Sleep(500 * time.Millisecond)
+			return nil
+		}
 		if *hold != "" {
 			states := map[string]island.State{"listening": island.Listening, "thinking": island.Thinking,
 				"speaking": island.Speaking, "follow_up": island.FollowUp, "error": island.Error}
 			s, ok := states[*hold]
 			if !ok {
-				return errors.New("--hold: listening, thinking, speaking, follow_up or error")
+				return errors.New("--hold: listening, thinking, speaking, follow_up, error, controlling, paused or recording")
 			}
 			step(s, *dur, *dur, s == island.Listening || s == island.Speaking)
 			i.Set(island.Hidden, 0)
