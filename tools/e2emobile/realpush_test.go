@@ -67,7 +67,7 @@ func newPushFakes(t *testing.T, opened bool) *pushFakes {
 		appXML = filepath.Join(f.dir, "shade.xml") // the tap did nothing
 	}
 	write(t, f.adb, `#!/bin/sh
-echo "adb $*" >>`+f.calls+`
+printf 'adb %s\n' "$*" >>`+f.calls+`
 case "$*" in
   *"input tap"*) touch `+f.dir+`/tapped ;;
   *"screencap -p"*) printf '\211PNG\r\n\032\nfake' ;;

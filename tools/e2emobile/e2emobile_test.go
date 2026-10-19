@@ -99,7 +99,7 @@ func fakes(t *testing.T) (maestro, adb, calls string) {
 	calls = filepath.Join(d, "calls.log")
 	maestro, adb = filepath.Join(d, "maestro"), filepath.Join(d, "adb")
 	write(t, maestro, `#!/bin/sh
-echo "maestro $*" >>`+calls+`
+printf 'maestro %s\n' "$*" >>`+calls+`
 out=
 flow=
 while [ $# -gt 0 ]; do
@@ -128,7 +128,7 @@ esac
 echo "[Passed] ok"
 `)
 	write(t, adb, `#!/bin/sh
-echo "adb $*" >>`+calls+`
+printf 'adb %s\n' "$*" >>`+calls+`
 case "$*" in
   *"screencap -p"*) printf '\211PNG\r\n\032\nfake' ;;
   *"exec-out cat"*) echo '<hierarchy><node text="Chat"/></hierarchy>' ;;
@@ -367,6 +367,9 @@ func TestRunFailsAFlowWhenTheSandboxIsUnreachable(t *testing.T) {
 	r := res.Tests[0]
 	if r.Status != "failed" || r.Error == nil || !strings.Contains(*r.Error, "can't reach the sandbox") || !strings.Contains(r.Note, "retried once") {
 		t.Errorf("%+v", r)
+	}
+	if !strings.HasPrefix(r.Note, "retried once: the emulator was not ready") || strings.Contains(r.Note, "transport dropped") {
+		t.Errorf("note %q: a failed readiness check is not a transport drop", r.Note)
 	}
 	log, _ := os.ReadFile(calls)
 	if strings.Contains(string(log), "maestro ") {
