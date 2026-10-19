@@ -1,4 +1,5 @@
-package main
+// Package notesapp reads the fixture notes app's (notes.py) state file for the computer-task suite.
+package notesapp
 
 import (
 	"encoding/json"
@@ -6,7 +7,7 @@ import (
 	"os"
 )
 
-// Note is one note in the notes fixture's state file (notesapp/notes.py --state).
+// Note is one note in the notes fixture's state file (notes.py --state).
 type Note struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`

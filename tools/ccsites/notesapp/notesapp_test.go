@@ -1,4 +1,4 @@
-package main
+package notesapp
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestNotesState(t *testing.T) {
-	got, err := NotesState(filepath.Join("notesapp", "testdata", "notes.json"))
+	got, err := NotesState(filepath.Join("testdata", "notes.json"))
 	if err != nil {
 		t.Fatalf("NotesState: %v", err)
 	}
