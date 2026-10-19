@@ -136,6 +136,8 @@ func main() {
 		err = appsCmd(os.Args[2:])
 	case "browser":
 		err = browserCmd(ctx, os.Args[2:])
+	case "computer":
+		err = computerCmd(ctx, os.Args[2:])
 	case "hat":
 		err = hatCmd(ctx, os.Args[2:])
 	case "provision":
@@ -215,6 +217,8 @@ func usage(w io.Writer) {
   browser  browser control (Firefox, Chrome, Edge, Brave, Arc):
            install [--all] [--no-open]   register the native host, set up the extension
            uninstall | status | pack --target firefox|chromium --out DIR
+  computer snapshot [--json] URL   open URL in a background browser window and list its
+           elements as computer control sees them (debug; serves the extension like try)
   version
 `)
 }
