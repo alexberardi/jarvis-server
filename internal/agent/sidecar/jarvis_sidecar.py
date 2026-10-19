@@ -21,7 +21,7 @@ JSON-lines requests on stdin:
 
 A Pi's packages may also have device families and managers (the listing's "families" and
 "managers"; describe adds them as "families"/"managers"). Their methods return the body the
-Python node posts to jarvisd (docs/agent/go-pi-node.md §3.16):
+Python node posts to jarvisd (docs/agent/go-pi-node.md §3.17):
 
     -> {"method": "device_scan"}                              <- {"devices": [...]}
     -> {"method": "device_list", "params": {"manager_name"}}  <- {"devices", "manager_name", "can_edit_devices"} | {"error"}

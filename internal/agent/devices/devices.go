@@ -3,7 +3,7 @@
 // registry of direct devices. The device families themselves are Python (Pantry packages,
 // jarvis_command_sdk.IJarvisDeviceProtocol) and run in the package sidecar; this package owns
 // MQTT and the uploads, as the Python node's mqtt_tts_listener and device_*_handler do
-// (docs/agent/go-pi-node.md §3.16).
+// (docs/agent/go-pi-node.md §3.17).
 package devices
 
 import (

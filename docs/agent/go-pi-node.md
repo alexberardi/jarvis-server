@@ -127,15 +127,15 @@ Tags:
 | `update_node_config` (settings push; restart only for `wake_word_model`) | `:1092-1177` | `S:commands.go:91` | – | done in the Pi profile (§3.14) |
 | `preview_led_pattern` | `:1180-1221` | `S:commands.go:112` | – | done in the Pi profile (§3.14) |
 | `measure_ambient_noise` | `:1257-1383` | `S:ambient.go:64` | `POST /nodes/{id}/ambient-noise-measurements/{rid}/result` | done in the Pi profile (§3.14) |
-| `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | `invalidate_device_cache`, `device_removed` done in the Pi profile (§3.16); `toggle_command` later |
+| `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | `invalidate_device_cache`, `device_removed` done in the Pi profile (§3.17); `toggle_command` later |
 | `/k2/provision` (K2 AES key) | `:1622-1669` | `S:settingsreq.go:316` | `GET …/k2/provision/{rid}`, `POST …/k2/ack/{rid}` | built for the desktop agent (`internal/agent/nodesettings`, [DESIGN §16](DESIGN.md)); the Go Pi node reuses it |
 | `/settings/request` (AES-256-GCM snapshot with K2, AAD `{node}:settings:snapshot`), plus a backstop poll on connect | `:1837-1876`, `N:services/settings_snapshot_service.py:749-857` | `S:settingsreq.go:92` | `PUT …/settings/requests/{rid}/snapshot` | built for the desktop agent (`internal/agent/nodesettings`), including the app's secret Sync as source (`include_values` + user) and target (`settings:secrets` push), pinned by `sync_golden.json`; the Pi adds its node_config and hardware |
 | `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines later |
 | `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | later (sidecar) |
 | `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | later |
-| `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | done in the Pi profile (§3.16) |
+| `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | done in the Pi profile (§3.17) |
 | `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | done in the Pi profile (§3.15) |
-| `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | done in the Pi profile (§3.16) |
+| `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | done in the Pi profile (§3.17) |
 | `/command-data/{op}`, `/context/{op}` (the node **publishes** responses) | `:2484-2501` | `S:commanddata.go:119` | MQTT publish | command-data built for the desktop agent (`nodesettings.CommandData` over the sidecar's packages, pinned by the Python node's own handler, [DESIGN §16](DESIGN.md)); context later |
 | `tts`, `train_adapter`, `/camera-credentials`; the button publishes (denied by the ACL) | various | none or no route | – | drop |
 
@@ -939,7 +939,49 @@ paplay -d bluez_sink.<MAC_>.a2dp_sink /usr/share/sounds/alsa/Front_Center.wav   
 sudo systemctl start jarvis-node
 ```
 
-### 3.16 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)
+### 3.16 Parity 5.11: music ducking and takeover (2026-10-19, loop #180 17a)
+
+`internal/agent/music` ports `N:core/music_control.py`; the Pi profile wires it
+([decision](../decisions/2026-10-19-pi-node-music-ducking.md), which also lists #180's other
+four slices, 17b–17e, still to build).
+
+| When | Does |
+|---|---|
+| Wake word fires; before each follow-up listen | `Duck`, in the background: SIGSTOP class (mpv, ffplay, cvlc, vlc, spotifyd, librespot) moved to the `jarvis_duck_null` sink and SIGSTOPped; mute-only class (shairport-sync, go-librespot, mpd) set to 20% of the stream (its volume saved once per turn), muted if the volume can't be read |
+| The turn is over (follow-ups included) | `Restore` (SIGCONT, moves back to `@DEFAULT_SINK@`, unmute, saved volumes back), then each `on_response_complete`; a deferred play that ran marks the node's own music as playing |
+| The node's own music starts / stops | The HAT's mic PGA drops to 49% / goes back to what it was (a no-op on the installer's 49% baseline); at start, a PGA left at the music level is put back |
+| A music command's call with `action: "play"` | `sdkhost.Host.BeforeCall` stops every other player that has an uncorked stream: mpd by `stop`+`clear` on :6600, go-librespot by `POST :3678/player/pause`, the rest by SIGINT; the command's own player (`takes_over_playback_binary`, else N:'s legacy map) is left alone |
+
+The voice pipeline runs the duck and restore steps in order on one background queue
+(`voice/music.go`), so a restore never overtakes a slow duck and listening never waits for
+pactl; `Run` waits for the queue, so a stopping agent still restores the music. It runs on a Pi
+install only (the HAT or `/etc/jarvis-node`): `--profile pi` on a dev box (node-sim, the voice
+lane) leaves the user's own players alone.
+
+**Verified** with unit tests: N:'s `tests/test_music_control.py` cases over a fake pactl/pkill
+(`music_test.go`, including the control-API invariant that mpd, go-librespot and shairport-sync
+are never SIGSTOPped), a fake mpd port and go-librespot API, the PGA read/write against amixer's
+output (`hat/codec_test.go`), the pipeline's step order through a whole turn with a deferred
+play (`voice/music_test.go`), and the takeover hook through a real Python sidecar
+(`TestSidecarTakeoverHook`). **Not yet on a Pi.** On the lab Pi 4 (never the prod kitchen node),
+with a music package installed (Spotify or Audacy):
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# "Hey Jarvis, play some jazz on Spotify": the reply, then the music starts (deferred play);
+#   the log has "music: restore" then "music: mic gain profile engaged" (or nothing, at 49% already)
+pactl list sink-inputs short           # the player's stream on jarvis_output
+# "Hey Jarvis" over the music: it drops to ~20% while you speak ("music: duck ... ducked=[N]")
+#   and comes back to its own level after the reply ("music: restore ... unducked=[N]")
+amixer -c seeed2micvoicec sget PGA     # 49% while the music plays
+# "Hey Jarvis, play Z100 on Audacy" while Spotify plays: Spotify stops ("music: takeover ...
+#   stopped=[go-librespot]"), then the station plays
+# "Hey Jarvis, stop the music": answered at once (go-librespot/mpd were never frozen)
+sudo systemctl start jarvis-node
+```
+
+### 3.17 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)
 
 The Pi profile answers the app's device requests over the household's device families, which
 are Pantry packages' Python (`device_families/<name>/protocol.py`, SDK `IJarvisDeviceProtocol`;
@@ -987,45 +1029,6 @@ jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output out
 #   A cloud family with OAuth: sign in; the log has "devices: auth credentials stored", and the
 #     next scan lists its devices
 #   Delete a device: the log has "devices: device removed ... ran=true"
-### 3.16 Parity 5.11: music ducking and takeover (2026-10-19, loop #180 17a)
-
-`internal/agent/music` ports `N:core/music_control.py`; the Pi profile wires it
-([decision](../decisions/2026-10-19-pi-node-music-ducking.md), which also lists #180's other
-four slices, 17b–17e, still to build).
-
-| When | Does |
-|---|---|
-| Wake word fires; before each follow-up listen | `Duck`, in the background: SIGSTOP class (mpv, ffplay, cvlc, vlc, spotifyd, librespot) moved to the `jarvis_duck_null` sink and SIGSTOPped; mute-only class (shairport-sync, go-librespot, mpd) set to 20% of the stream (its volume saved once per turn), muted if the volume can't be read |
-| The turn is over (follow-ups included) | `Restore` (SIGCONT, moves back to `@DEFAULT_SINK@`, unmute, saved volumes back), then each `on_response_complete`; a deferred play that ran marks the node's own music as playing |
-| The node's own music starts / stops | The HAT's mic PGA drops to 49% / goes back to what it was (a no-op on the installer's 49% baseline); at start, a PGA left at the music level is put back |
-| A music command's call with `action: "play"` | `sdkhost.Host.BeforeCall` stops every other player that has an uncorked stream: mpd by `stop`+`clear` on :6600, go-librespot by `POST :3678/player/pause`, the rest by SIGINT; the command's own player (`takes_over_playback_binary`, else N:'s legacy map) is left alone |
-
-The voice pipeline runs the duck and restore steps in order on one background queue
-(`voice/music.go`), so a restore never overtakes a slow duck and listening never waits for
-pactl; `Run` waits for the queue, so a stopping agent still restores the music. It runs on a Pi
-install only (the HAT or `/etc/jarvis-node`): `--profile pi` on a dev box (node-sim, the voice
-lane) leaves the user's own players alone.
-
-**Verified** with unit tests: N:'s `tests/test_music_control.py` cases over a fake pactl/pkill
-(`music_test.go`, including the control-API invariant that mpd, go-librespot and shairport-sync
-are never SIGSTOPped), a fake mpd port and go-librespot API, the PGA read/write against amixer's
-output (`hat/codec_test.go`), the pipeline's step order through a whole turn with a deferred
-play (`voice/music_test.go`), and the takeover hook through a real Python sidecar
-(`TestSidecarTakeoverHook`). **Not yet on a Pi.** On the lab Pi 4 (never the prod kitchen node),
-with a music package installed (Spotify or Audacy):
-
-```bash
-sudo systemctl stop jarvis-node
-jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
-# "Hey Jarvis, play some jazz on Spotify": the reply, then the music starts (deferred play);
-#   the log has "music: restore" then "music: mic gain profile engaged" (or nothing, at 49% already)
-pactl list sink-inputs short           # the player's stream on jarvis_output
-# "Hey Jarvis" over the music: it drops to ~20% while you speak ("music: duck ... ducked=[N]")
-#   and comes back to its own level after the reply ("music: restore ... unducked=[N]")
-amixer -c seeed2micvoicec sget PGA     # 49% while the music plays
-# "Hey Jarvis, play Z100 on Audacy" while Spotify plays: Spotify stops ("music: takeover ...
-#   stopped=[go-librespot]"), then the station plays
-# "Hey Jarvis, stop the music": answered at once (go-librespot/mpd were never frozen)
 sudo systemctl start jarvis-node
 ```
 
@@ -1313,7 +1316,7 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    7. factory-reset.
    8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
       against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).
-   9. Device control. **14a, the device registry: built 2026-10-19 (§3.16)**: scan, list and
+   9. Device control. **14a, the device registry: built 2026-10-19 (§3.17)**: scan, list and
       state over the sidecar's Pantry device families, `invalidate_device_cache`,
       `device_removed`, OAuth's auth-ready and the heartbeat's `protocols` (unit tests and a
       sandbox jarvisd end to end; not yet on a Pi). Control itself (`control_device`, the

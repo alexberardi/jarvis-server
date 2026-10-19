@@ -3,7 +3,7 @@
 - **Date:** 2026-10-19 (build agent, loop #176; for review)
 
 Choices made porting device scan, list and state, `invalidate_device_cache`, `device_removed`
-and `jarvis/auth/+/ready` to the Go Pi node ([agent/go-pi-node.md §3.16](../agent/go-pi-node.md)):
+and `jarvis/auth/+/ready` to the Go Pi node ([agent/go-pi-node.md §3.17](../agent/go-pi-node.md)):
 
 - **Device families stay Python, in the package sidecar.** They are Pantry packages
   (`device_families/<name>/protocol.py`, an SDK `IJarvisDeviceProtocol`; managers in
