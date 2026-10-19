@@ -1289,6 +1289,8 @@ function recInstall(rid) {
     if (tid) return cut(`[data-testid=${quote(tid)}]`, SEL_MAX);
     const nm = el.getAttribute("name");
     if (nm && el.localName !== "a") return cut(`${el.localName}[name=${quote(nm)}]`, SEL_MAX);
+    const action = el.localName === "form" && el.getAttribute("action");
+    if (action) return cut(`form[action=${quote(action)}]`, SEL_MAX);
     const path = [];
     for (let a = el.parentElement; a && path.length < 2; a = a.parentElement) {
       const label = clean(a.getAttribute("aria-label"));
