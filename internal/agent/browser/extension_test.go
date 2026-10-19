@@ -36,7 +36,8 @@ func backgroundJS(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	// Windows checkouts convert the script to CRLF; the source guards match LF.
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 // The unpacked id Chromium assigns comes from the manifest's public key: sha256 of the DER,
