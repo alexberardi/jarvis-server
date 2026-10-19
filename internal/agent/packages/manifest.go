@@ -34,11 +34,18 @@ type Manifest struct {
 	Targets     []string    `yaml:"targets"`
 	Components  []Component `yaml:"components"`
 	Packages    []PipDep    `yaml:"packages"`
-	// Pi-only system setup: a desktop agent installs no system packages and runs no
-	// post-install steps, so a package that needs them is refused.
-	AptPackages []any `yaml:"apt_packages"`
-	AptSources  []any `yaml:"apt_sources"`
-	PostInstall []any `yaml:"post_install"`
+	// Pi-only system setup, run by the Pi profile's System: a desktop agent installs no system
+	// packages and runs no post-install steps, so a package that needs them is refused there.
+	AptPackages []string         `yaml:"apt_packages"`
+	AptSources  []AptSource      `yaml:"apt_sources"`
+	PostInstall []map[string]any `yaml:"post_install"`
+}
+
+// AptSource is a third-party apt repository a package needs (its signing key and its line).
+type AptSource struct {
+	Name   string `yaml:"name"`
+	KeyURL string `yaml:"key_url"`
+	Repo   string `yaml:"repo"`
 }
 
 // Component is one installable part of a package.
@@ -74,6 +81,8 @@ var (
 	// manifest must not be able to pass flags to uv or point it at another index.
 	pipNameRE    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,-]+\])?$`)
 	pipVersionRE = regexp.MustCompile(`^(==|>=|<=|~=|!=|>|<)?[0-9A-Za-z][0-9A-Za-z.*+!_-]*(,(==|>=|<=|~=|!=|>|<)[0-9A-Za-z][0-9A-Za-z.*+!_-]*)*$`)
+	// A Debian package name, as N:scripts/jarvis-apt-install checks it.
+	aptNameRE = regexp.MustCompile(`^[a-z][a-z0-9.+-]*$`)
 )
 
 // ParseManifest reads and checks a manifest. It refuses anything that could reach outside the
@@ -90,7 +99,7 @@ func ParseManifest(b []byte) (*Manifest, error) {
 		if c.Type == "" || c.Name == "" {
 			return nil, fmt.Errorf("%s: a component needs a type and a name", ManifestFile)
 		}
-		if c.Type == "command" {
+		if c.Type == "command" || (deviceEntry[c.Type] != "" && c.Path != "") {
 			if err := checkRelPath(c.Path); err != nil {
 				return nil, fmt.Errorf("%s: component %s: %w", ManifestFile, c.Name, err)
 			}
@@ -105,6 +114,21 @@ func ParseManifest(b []byte) (*Manifest, error) {
 		}
 		if v := strings.TrimSpace(d.Version); v != "" && !pipVersionRE.MatchString(v) {
 			return nil, fmt.Errorf("%s: invalid version %q for %s", ManifestFile, d.Version, d.Name)
+		}
+	}
+	for _, p := range m.AptPackages {
+		if !aptNameRE.MatchString(p) {
+			return nil, fmt.Errorf("%s: invalid apt package name %q", ManifestFile, p)
+		}
+	}
+	for _, src := range m.AptSources {
+		if src.Name == "" || src.KeyURL == "" || src.Repo == "" {
+			return nil, fmt.Errorf("%s: an apt_sources entry needs a name, a key_url and a repo", ManifestFile)
+		}
+	}
+	for i, op := range m.PostInstall {
+		if t, _ := op["type"].(string); postInstallOps[t] == "" {
+			return nil, fmt.Errorf("%s: post_install[%d]: unknown op type %q", ManifestFile, i, op["type"])
 		}
 	}
 	return &m, nil
@@ -196,7 +220,8 @@ const Desktop = "desktop"
 // CheckDesktop refuses a package this desktop can't run: another OS in platforms, targets that
 // leave out the desktop, or Pi system setup. A package that declares no targets is allowed: no
 // Pantry package declares them yet, and the user picks the computer in the app.
-func (m *Manifest) CheckDesktop(goos string) error {
+// runs are the component types beyond commands that this node loads (Manager.runs).
+func (m *Manifest) CheckDesktop(goos string, runs ...string) error {
 	if len(m.Platforms) > 0 && !slices.Contains(m.Platforms, goos) {
 		return fmt.Errorf("%s supports %s, not %s", m.label(), strings.Join(m.Platforms, ", "), goos)
 	}
@@ -206,8 +231,27 @@ func (m *Manifest) CheckDesktop(goos string) error {
 	if len(m.AptPackages) > 0 || len(m.AptSources) > 0 || len(m.PostInstall) > 0 {
 		return fmt.Errorf("%s needs system packages or setup steps that only a Pi node runs", m.label())
 	}
-	if len(m.Commands()) == 0 {
+	if len(m.Commands()) == 0 && !slices.ContainsFunc(m.Components, func(c Component) bool { return slices.Contains(runs, c.Type) }) {
 		return fmt.Errorf("%s has no commands a computer can run", m.label())
+	}
+	return nil
+}
+
+// Node is the target name a package declares to run on a Pi node (DESIGN.md §8).
+const Node = "node"
+
+// CheckPi refuses a package a Pi node can't run: another OS in platforms, targets that leave
+// out the node, or nothing it loads (commands, or the runs types: Manager.runs). Its system
+// setup is the Pi profile's System's to run.
+func (m *Manifest) CheckPi(runs ...string) error {
+	if len(m.Platforms) > 0 && !slices.Contains(m.Platforms, "linux") {
+		return fmt.Errorf("%s supports %s, not linux", m.label(), strings.Join(m.Platforms, ", "))
+	}
+	if len(m.Targets) > 0 && !slices.Contains(m.Targets, Node) {
+		return fmt.Errorf("%s is made for computers, not Pi nodes", m.label())
+	}
+	if len(m.Commands()) == 0 && !slices.ContainsFunc(m.Components, func(c Component) bool { return slices.Contains(runs, c.Type) }) {
+		return fmt.Errorf("%s has no commands a node can run", m.label())
 	}
 	return nil
 }
@@ -224,11 +268,35 @@ func (m *Manifest) Commands() []Component {
 	return out
 }
 
-// Skipped names the components a desktop doesn't run, as "type:name".
-func (m *Manifest) Skipped() []string {
+// DeviceTypes are the device component types a Pi's sidecar loads: families and managers.
+var DeviceTypes = []string{"device_protocol", "device_manager"}
+
+// deviceEntry is where a device component declared without a path is (the Pi's convention).
+var deviceEntry = map[string]string{"device_protocol": "device_families/%s/protocol.py", "device_manager": "device_managers/%s/manager.py"}
+
+// Paths are the files of the components of type typ, a device component without a declared
+// path at its conventional place.
+func (m *Manifest) Paths(typ string) []string {
 	var out []string
 	for _, c := range m.Components {
-		if c.Type != "command" {
+		if c.Type != typ {
+			continue
+		}
+		p := c.Path
+		if p == "" && deviceEntry[typ] != "" {
+			p = fmt.Sprintf(deviceEntry[typ], c.Name)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// Skipped names the components this node doesn't run, as "type:name": all but commands and
+// the types in runs.
+func (m *Manifest) Skipped(runs ...string) []string {
+	var out []string
+	for _, c := range m.Components {
+		if c.Type != "command" && !slices.Contains(runs, c.Type) {
 			out = append(out, c.Type+":"+c.Name)
 		}
 	}

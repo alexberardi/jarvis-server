@@ -22,7 +22,7 @@ const maxContinues = 6
 type CallLog struct {
 	Name   string         `json:"name"`
 	Args   map[string]any `json:"args"`
-	Result any            `json:"result,omitempty"` // the node's answer (node tools only)
+	Result any            `json:"result,omitempty"` // the node's answer, or what the server tool returned (serverCallLogs)
 }
 
 // TurnLog is everything one turn did.
@@ -186,13 +186,7 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		tl.End = time.Now()
 		tl.Seconds = tl.End.Sub(start).Seconds()
 		tl.LLM = readTap(d.TapLog, mark)
-		for _, e := range tl.LLM {
-			for _, c := range e.Reply.Calls() {
-				if !slices.Contains(nodeNames, c.Function.Name) {
-					tl.ServerCalls = append(tl.ServerCalls, CallLog{Name: c.Function.Name, Args: c.Args()})
-				}
-			}
-		}
+		tl.ServerCalls = serverCallLogs(tl.LLM, nodeNames)
 	}()
 	text := say
 	if voiced {
@@ -244,6 +238,144 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		tl.Reply = resp.ValidationRequest.Question
 	}
 	return tl
+}
+
+// serverCallLogs are the model calls in the tapped entries that command-center ran itself (not
+// in the node's set), each with its result as the next request shows it to the model
+// (serverResults). A text-path fast path speaks the results' messages with no further model
+// call, so its results are not seen (nil).
+func serverCallLogs(entries []TapEntry, nodeNames []string) []CallLog {
+	var out []CallLog
+	for i, e := range entries {
+		var calls []ToolCall
+		for _, c := range e.Reply.Calls() {
+			if !slices.Contains(nodeNames, c.Function.Name) {
+				calls = append(calls, c)
+			}
+		}
+		results := serverResults(entries[i+1:], calls)
+		for k, c := range calls {
+			out = append(out, CallLog{Name: c.Function.Name, Args: c.Args(), Result: results[k]})
+		}
+	}
+	return out
+}
+
+// textResultsHeaders open the text path's results prompt (textfilter TextModeFormatPrompt,
+// ContinueToolResultsMessage): the results follow the next blank line, one per line.
+var textResultsHeaders = []string{"Tool results below.", "Here are the tool results."}
+
+// serverResults are the calls' results in the first later request that has messages. Native:
+// the role=tool message with the call's id, else (a text-path model's calls are parsed with
+// fresh ids) the last one of its name after that request's last assistant message. Text path:
+// the lines of the results prompt in its last user message, in call order. JSON is decoded.
+func serverResults(later []TapEntry, calls []ToolCall) []any {
+	out := make([]any, len(calls))
+	for _, e := range later {
+		var req struct {
+			Messages []struct {
+				Role       string          `json:"role"`
+				ToolCallID string          `json:"tool_call_id"`
+				Name       string          `json:"name"`
+				Content    json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if json.Unmarshal(e.Request, &req) != nil || len(req.Messages) == 0 {
+			continue
+		}
+		type toolMsg struct {
+			id, name string
+			content  json.RawMessage
+		}
+		var all, recent []toolMsg // every role=tool message; those after the last assistant message
+		for _, m := range req.Messages {
+			switch m.Role {
+			case "assistant":
+				recent = nil
+			case "tool":
+				t := toolMsg{m.ToolCallID, m.Name, m.Content}
+				all, recent = append(all, t), append(recent, t)
+			}
+		}
+		found := false
+		used := make([]bool, len(recent))
+		for k, c := range calls {
+			if i := slices.IndexFunc(all, func(t toolMsg) bool { return c.ID != "" && t.id == c.ID }); i >= 0 {
+				out[k], found = decodeContent(all[i].content), true
+				continue
+			}
+			for i, t := range recent {
+				if !used[i] && t.name == c.Function.Name {
+					used[i], out[k], found = true, decodeContent(t.content), true
+					break
+				}
+			}
+		}
+		if !found {
+			for i := len(req.Messages) - 1; i >= 0; i-- {
+				if m := req.Messages[i]; m.Role == "user" {
+					// Lines match calls by place, so only when there is one per call: a
+					// prompt that also held node tools' results would misalign them.
+					text, _ := decodeContent(m.Content).(string)
+					if lines := textResults(text); len(lines) == len(out) {
+						for k, line := range lines {
+							out[k] = decodeContent(mustJSON(line))
+						}
+					}
+					break
+				}
+			}
+		}
+		return out
+	}
+	return out
+}
+
+// textResults are the result lines of a text-path results prompt, nil when text isn't one.
+func textResults(text string) []string {
+	for _, h := range textResultsHeaders {
+		i := strings.Index(text, h)
+		if i < 0 {
+			continue
+		}
+		j := strings.Index(text[i:], "\n\n")
+		if j < 0 {
+			return nil
+		}
+		body := strings.TrimSuffix(strings.TrimSpace(text[i+j+2:]), "/no_think")
+		return strings.Split(strings.TrimSpace(body), "\n")
+	}
+	return nil
+}
+
+func mustJSON(s string) json.RawMessage {
+	b, _ := json.Marshal(s)
+	return b
+}
+
+// decodeContent is a message's content (a string, or text parts): JSON text decoded, other
+// text as is.
+func decodeContent(raw json.RawMessage) any {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(raw, &parts) != nil {
+			var v any
+			_ = json.Unmarshal(raw, &v)
+			return v
+		}
+		for _, p := range parts {
+			s += p.Text
+		}
+	}
+	var v any
+	if json.Unmarshal([]byte(s), &v) == nil {
+		return v
+	}
+	return s
 }
 
 func toolNames(tools []json.RawMessage) []string {

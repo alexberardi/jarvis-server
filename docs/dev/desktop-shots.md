@@ -10,7 +10,7 @@ in their tray or on their session bus.
 ```sh
 scripts/desktop-shot deps                     # once: sway + swaybar (system, or built into ~/.cache)
 scripts/sandbox up --name desk --llm none     # a jarvisd to enroll against (or use --offline)
-scripts/desktop-shot --sandbox desk           # ~30 s: 2 themes x (icon + 6 island states)
+scripts/desktop-shot --sandbox desk           # ~30 s: 2 themes x (icon + 9 island states)
 scripts/desktop-shot --offline --states listening --bars dark   # no server, one shot
 scripts/sandbox down --name desk --purge
 ```
@@ -22,7 +22,7 @@ end (see `--help`):
 |---|---|
 | `desktop__dark.png`, `desktop__light.png` | The whole 1920x1080 output: a full-screen window in the theme's colour, and the bar at the bottom with the icon at its right end. |
 | `tray__<theme>.png` | The status icon, found by diffing the bar before and after the agent started, cropped and enlarged 4x. |
-| `island__<state>__<theme>.png` | The island, found by diffing the top third of the screen, cropped. The states are `running` (the "Jarvis is running" pill, asked for over the control socket), `listening`, `thinking`, `speaking`, `follow_up` and `error`. |
+| `island__<state>__<theme>.png` | The island, found by diffing the top third of the screen, cropped. The states are `running` (the "Jarvis is running" pill, asked for over the control socket), `listening`, `thinking`, `speaking`, `follow_up`, `error`, and the computer-task indicators `controlling`, `paused` and `recording` (`island-demo --hold <state> --text <intent>`, a sample intent). |
 | `desktop-island__<theme>.png` | The whole output with the last state showing, for placement. |
 | `menu.txt` | The icon's StatusNotifierItem properties and its dbusmenu, read the way a tray host reads them (swaybar draws no menus). |
 | `icon-pixmap.png` | The largest pixmap the icon offers (64x64). |
@@ -94,8 +94,8 @@ Omarchy does not ship:
   desktop that makes it a noticeably greyer, lower-contrast pill than the other states. This
   is worth a look, but it is not a bug.
 - **Status icon:** it registers and shows in the tray on both bar colours. The menu reads
-  "Jarvis Automation Agent — Running", then the "Listen for "Hey Jarvis"" checkbox, then
-  "Open Jarvis Automation" (once jarvisd's discovery answers; this item is missing with
+  "Jarvis Automation Agent — Running", then the "Listen for "Hey Jarvis"" checkbox, the
+  "Computer control" checkbox (unchecked: off by default), then "Open Jarvis Automation" (once jarvisd's discovery answers; this item is missing with
   `--offline`), then Quit.
   **Finding:** at tray size (about 20 px on a 26 px bar), the shield is a plain downscale
   of the 64 px art (`tray.Color`, CatmullRom). It loses its white outline and pointed bottom,

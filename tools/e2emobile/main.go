@@ -8,11 +8,12 @@
 //	e2emobile run --flows DIR --out DIR --serial emulator-5580 [--maestro PATH] [--adb PATH]
 //	              [--rel .maestro] [--filter RE] [--flow-timeout 10m] [-e KEY=VALUE ...]
 //	              [--coverage e2e/coverage.json --nav DIR]
+//	              [--reverse tcp:7700=tcp:18700 ...] [--health-port 7700]
 //	e2emobile run --platform ios --udid UDID --process NAME --flows DIR --out DIR [--xcrun PATH]
 //	              [--device-name jarvis-harness-e2e] [--bundle-id com.jarvis.nodemobile] ...
 //	e2emobile list --flows DIR [--filter RE]   the flows it would run, and the skipped ones
 //	e2emobile realpush --out DIR --serial S --login-flow FILE [--maestro PATH] [--adb PATH]
-//	              [--skip REASON] [-e KEY=VALUE ...]
+//	              [--skip REASON] [--reverse ...] [--health-port PORT] [-e KEY=VALUE ...]
 //	              the real push lane (realpush.go): sign in, wait for the app's push token, send
 //	              a node alert, find it in the shade, tap it, check the app opened it. The
 //	              sandbox comes from the environment (sandbox.env: SBX_NOTIFICATIONS, SBX_CC,
@@ -27,9 +28,12 @@
 // On iOS every flow also gets PUSH_URL: a POST of an APNs JSON payload there is delivered to the
 // app with `xcrun simctl push` (docs/decisions/2026-10-18-e2e-ios-lane.md).
 //
-// The emulator or simulator, the app build, the adb reverse tunnels and the sandbox are the
-// script's job. Exit
-// status: 0 all passed (or skipped), 1 a flow failed, 3 no flows to run, 2 bad usage.
+// The emulator or simulator, the app build and the sandbox are the script's job. On Android it
+// also sets the adb reverse tunnels, and passes them as --reverse so that before every flow (and
+// the push lane) the runner waits for the device, sets them again and probes --health-port's
+// /health from inside the emulator: an adb transport drop wipes every tunnel. A flow that fails
+// on such a drop is run once more (run.go retryOnDrop), and its record says so (note).
+// Exit status: 0 all passed (or skipped), 1 a flow failed, 3 no flows to run, 2 bad usage.
 // Contract with the flows: docs/decisions/2026-10-18-e2e-mobile-runner.md.
 package main
 
@@ -57,6 +61,18 @@ func (e *envFlag) Set(s string) error {
 	return nil
 }
 
+// reverseFlag is --reverse LOCAL=REMOTE (adb reverse's specs, e.g. tcp:7700=tcp:18700).
+type reverseFlag []string
+
+func (r *reverseFlag) String() string { return strings.Join(*r, ",") }
+func (r *reverseFlag) Set(s string) error {
+	if l, rem, ok := strings.Cut(s, "="); !ok || !strings.Contains(l, ":") || !strings.Contains(rem, ":") {
+		return fmt.Errorf("--reverse %q: want LOCAL=REMOTE, e.g. tcp:7700=tcp:18700", s)
+	}
+	*r = append(*r, s)
+	return nil
+}
+
 func parseConfig(cmd string, args []string) (*config, *regexp.Regexp, error) {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	c := &config{}
@@ -78,10 +94,13 @@ func parseConfig(cmd string, args []string) (*config, *regexp.Regexp, error) {
 	fs.StringVar(&c.filter, "filter", "", "run only flows whose name or file name matches this regexp")
 	fs.DurationVar(&c.flowTimeout, "flow-timeout", 10*time.Minute, "give up on a flow after this long")
 	fs.Var(&env, "e", "KEY=VALUE for every flow (repeatable)")
+	var rev reverseFlag
+	fs.Var(&rev, "reverse", "an adb reverse tunnel LOCAL=REMOTE to set before every flow (repeatable)")
+	fs.StringVar(&c.healthPort, "health-port", "", "the emulator's port whose /health must answer before every flow")
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
 	}
-	c.env, c.adbTimeout = env, 60*time.Second
+	c.env, c.reverse, c.adbTimeout = env, rev, 60*time.Second
 	if c.flowsDir == "" {
 		return nil, nil, errors.New("--flows is required")
 	}
@@ -182,10 +201,13 @@ func mainRealPush(args []string) int {
 	fs.StringVar(&pc.loginFlow, "login-flow", "", "the mobile repo's login subflow (required unless --skip)")
 	fs.StringVar(&pc.skipReason, "skip", "", "record the lane as skipped with this reason")
 	fs.Var(&env, "e", "KEY=VALUE for the login flow (repeatable)")
+	var rev reverseFlag
+	fs.Var(&rev, "reverse", "an adb reverse tunnel LOCAL=REMOTE to set before the lane (repeatable)")
+	fs.StringVar(&pc.healthPort, "health-port", "", "the emulator's port whose /health must answer before the lane")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	pc.env, pc.adbTimeout = env, 60*time.Second
+	pc.env, pc.reverse, pc.adbTimeout = env, rev, 60*time.Second
 	if pc.out == "" {
 		fmt.Fprintln(os.Stderr, "e2emobile realpush: --out is required")
 		return 2
@@ -219,6 +241,9 @@ func mainRealPush(args []string) int {
 	default:
 		fmt.Fprintf(os.Stderr, "e2emobile: %-8s real push: %s\n", t.Status, *t.Error)
 		return 1
+	}
+	if t.Note != "" {
+		fmt.Fprintf(os.Stderr, "e2emobile:          %s\n", t.Note)
 	}
 	return 0
 }

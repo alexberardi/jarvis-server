@@ -1,13 +1,15 @@
 import { type FormEvent, useState } from 'react'
 import { toast } from 'sonner'
+import HouseholdSettings from '@/components/account/HouseholdSettings'
 import { useAuth } from '@/hooks/useAuth'
 import { errorMessage } from '@/lib/errors'
 import { nameOf } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
 /**
- * AccountPage is the v1 account view (webapp 01 §4.4): who you are and the name Jarvis calls
- * you. Password, household and invite management stay in the mobile app for v1.
+ * AccountPage is the v1 account view (webapp 01 §4.4): who you are, the name Jarvis calls you,
+ * and the active household's feature switches (a household admin flips them). Password,
+ * household and invite management stay in the mobile app for v1.
  */
 export default function AccountPage() {
   const { state, updateDisplayName } = useAuth()
@@ -75,6 +77,7 @@ export default function AccountPage() {
           </button>
         </form>
       </div>
+      <HouseholdSettings />
     </div>
   )
 }

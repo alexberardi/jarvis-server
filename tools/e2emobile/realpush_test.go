@@ -67,7 +67,7 @@ func newPushFakes(t *testing.T, opened bool) *pushFakes {
 		appXML = filepath.Join(f.dir, "shade.xml") // the tap did nothing
 	}
 	write(t, f.adb, `#!/bin/sh
-echo "adb $*" >>`+f.calls+`
+printf 'adb %s\n' "$*" >>`+f.calls+`
 case "$*" in
   *"input tap"*) touch `+f.dir+`/tapped ;;
   *"screencap -p"*) printf '\211PNG\r\n\032\nfake' ;;
@@ -247,5 +247,47 @@ func TestRealPushRefusesTheUsersEmulator(t *testing.T) {
 	pc.serial = "emulator-5554"
 	if _, err := realPush(context.Background(), pc); err == nil {
 		t.Fatal("ran on emulator-5554")
+	}
+}
+
+// The lane readies the device first (tunnels, /health) and, when the sign-in dies on an adb
+// transport drop, does it all once more.
+func TestRealPushRetriesOnceWhenTheDeviceDrops(t *testing.T) {
+	f := newPushFakes(t, true)
+	write(t, f.maestro, "#!/bin/sh\necho \"maestro $*\" >>"+f.calls+"\nif [ ! -f "+f.dir+"/dropped ]; then touch "+f.dir+
+		"/dropped; echo 'dadb.DeviceServerDied: device offline'; exit 1; fi\ntouch "+f.dir+"/signed-in\n")
+	pc := f.config(t)
+	pc.reverse = []string{"tcp:7700=tcp:18700"}
+	res, err := realPush(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Tests[0]
+	if r.Status != "passed" || !strings.Contains(r.Note, "retried once") {
+		t.Fatalf("record = %+v", r)
+	}
+	calls, _ := os.ReadFile(f.calls)
+	log := string(calls)
+	if n := strings.Count(log, "adb -s emulator-5590 reverse tcp:7700 tcp:18700"); n != 2 {
+		t.Errorf("tunnels set %d times, want before each try (2):\n%s", n, log)
+	}
+	if n := strings.Count(log, "maestro "); n != 2 {
+		t.Errorf("%d sign-ins, want 2", n)
+	}
+}
+
+func TestRealPushDoesNotRetryAnOrdinaryFailure(t *testing.T) {
+	f := newPushFakes(t, false)
+	pc := f.config(t)
+	res, err := realPush(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Tests[0]; r.Status != "failed" || r.Note != "" {
+		t.Fatalf("record = %+v", r)
+	}
+	calls, _ := os.ReadFile(f.calls)
+	if n := strings.Count(string(calls), "maestro "); n != 1 {
+		t.Errorf("%d sign-ins, want 1", n)
 	}
 }

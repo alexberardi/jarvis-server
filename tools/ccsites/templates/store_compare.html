@@ -1,0 +1,10 @@
+{{define "content"}}<h1>Compare</h1>
+{{if .D.Products}}<table>
+<tr><th></th>{{range .D.Products}}<th><a href="{{$.U (printf "/store/product/%s" .ID)}}">{{.Name}}</a>{{if .Sponsored}} <span class="sponsored">Sponsored</span>{{end}}</th>{{end}}</tr>
+<tr><th>Price</th>{{range .D.Products}}<td>{{money .Price}}</td>{{end}}</tr>
+<tr><th>Rating</th>{{range .D.Products}}<td>{{printf "%.1f" .Rating}} ({{.Reviews}})</td>{{end}}</tr>
+<tr><th>Battery</th>{{range .D.Products}}<td>{{.BatteryDays}} days</td>{{end}}</tr>
+<tr><th>Seller</th>{{range .D.Products}}<td>{{.Seller}}</td>{{end}}</tr>
+{{range $spec := .D.Specs}}<tr><th>{{$spec}}</th>{{range $.D.Products}}<td>{{index .Specs $spec}}</td>{{end}}</tr>{{end}}
+</table>
+{{else}}<p>Choose products to compare from the search results.</p>{{end}}{{end}}

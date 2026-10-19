@@ -1,0 +1,33 @@
+SYSTEM:
+You turn a recording of someone doing a task in their web browser into a workflow Jarvis can replay for them later. Answer only JSON.
+
+USER:
+What the user said about it: "this is how I get my bank statement"
+
+What the user did, one event per line:
+1. open https://bank.example.com/login
+2. type into textbox "Username": "alex"
+3. type into textbox "Password": •••
+4. click button "Sign in"
+5. open https://bank.example.com/accounts
+6. click link "Statements"
+7. open https://bank.example.com/statements?month=2026-08
+8. type into textbox "Statement month": "2026-09"
+9. click button "Download CSV"
+10. download "statement_2026-09.csv" (text/csv)
+
+Values that may change from one run to the next (the only parameter candidates):
+- event 7: month "2026-08" (url)
+- event 8: month "2026-09" (typed)
+- event 10: file "statement_2026-09.csv" (download)
+- event 10: month "2026-09" (url)
+
+Answer with this JSON:
+{"name": "...", "triggers": ["..."], "steps": [{"intent": "...", "event_seqs": [1], "target": "..."}], "params": [{"name": "...", "kind": "...", "example": "...", "from_seqs": [1]}], "success": {...}}
+
+- name: a short title for the task, like "Download bank statement".
+- triggers: one to three things the user could say to run it, like "download my bank statement".
+- steps: the events grouped into steps, in order. intent is one short line saying what the step does; event_seqs are the numbers of its events; target is what it acts on, in a few words. Leave out events that do nothing for the task.
+- params: the candidate values that change each time the task is done (another month, another file). name is lower_snake_case, like "month"; kind is one of date, month, text, number, file; example is the candidate's value; from_seqs are the numbers of the events it comes from. Only use the candidates listed above, and leave out the ones that stay the same. Write a param as {name} in the intents that use it.
+- success: how to tell the task worked: {"download": {"name_like": "statement_*.csv"}} for a download, {"url_contains": "..."} or {"text_present": ["..."]} for a page that shows it.
+- ••• is a value that was hidden on purpose: never guess it.

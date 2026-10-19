@@ -193,6 +193,9 @@ type Beat struct {
 	// NeedsK2 asks the app to provision the settings key (K2, DESIGN §16): the mobile app then
 	// offers "Generate Encryption Key" and relays it through command-center.
 	NeedsK2 bool
+	// Protocols are the device families this node runs (a Pi's sidecar), so jarvisd picks it for
+	// their devices' state and removal. Nil leaves it out; empty reports none.
+	Protocols []string
 	// Busy reports is_busy: true, so jarvisd hands this heartbeat no work (pending_update).
 	// `jarvis-agent status` sends one: it isn't the running agent and couldn't act on it.
 	Busy bool
@@ -243,6 +246,9 @@ func (c *CC) Beat(ctx context.Context, b Beat) (BeatReply, error) {
 	if b.Capabilities != nil {
 		body["capabilities"] = b.Capabilities
 	}
+	if b.Protocols != nil {
+		body["protocols"] = b.Protocols
+	}
 	var resp struct {
 		PendingUpdate *struct {
 			TaskID        string  `json:"task_id"`
@@ -279,6 +285,25 @@ func (c *CC) Verify(ctx context.Context, rid string) (bool, error) {
 		return false, err
 	}
 	return v.Valid, nil
+}
+
+// VerifyApproval asks CC whether token is a live approval it minted for this node's computer task,
+// for the actions digest stands for (single use: a valid answer spends it).
+func (c *CC) VerifyApproval(ctx context.Context, token, digest string) (bool, error) {
+	var v struct {
+		Valid bool `json:"valid"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v0/computer/approvals/"+url.PathEscape(token)+"/verify", map[string]any{"digest": digest}, &v); err != nil {
+		return false, err
+	}
+	return v.Valid, nil
+}
+
+// UploadRecording sends a recording the user stopped on this computer (the status icon, the
+// CLI, voice "stop", its 30 minutes) to jarvisd, which keeps it for its owner and learns a
+// workflow from it. out is computer_record_stop's output (computer.TraceOutput).
+func (c *CC) UploadRecording(ctx context.Context, out map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/computer/recordings", out, nil)
 }
 
 // PostToolReport answers report_tools.

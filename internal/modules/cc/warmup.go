@@ -249,6 +249,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		MemoryEnabled: m.householdBool(ctx, settingMemoryEnabled, hh),
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
 		Watches:       m.householdBool(ctx, settingWatchesEnabled, hh),
+		Computers:     m.hasComputer(ctx, hh),
 		ChatPhotos:    photosPossible,
 		PhotoTools:    make(map[string]bool, len(serverPhoto)),
 	}
@@ -267,6 +268,10 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	conv.imageParams = imageParamsOf(clientTools, serverPhoto)
 	if !photosPossible {
 		clientTools, commands = withoutPhotoTools(clientTools, commands)
+	}
+	if !n.row.computerOn() {
+		// C11: a computer's computer-control tools only while its switch is on.
+		clientTools, commands = withoutComputerTools(clientTools, commands)
 	}
 	offered := append(append([]prompts.Tool(nil), serverDefs...), clientTools...)
 	conv.tools = make([]prompts.Tool, len(offered))

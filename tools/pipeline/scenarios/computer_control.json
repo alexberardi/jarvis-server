@@ -1,0 +1,32 @@
+[
+  {
+    "name": "computer control off: order me a phone case gets the turn-it-on answer, not an errand",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "order me a phone case",
+        "expect": {
+          "not_tool": ["run_errand", "schedule_errand"],
+          "reply": "(?i)computer control"
+        }
+      }
+    ]
+  },
+  {
+    "name": "computer control off: Jarvis, watch me calls start_recording, which says to turn it on",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "Jarvis, watch me",
+        "expect": {
+          "server_tool": "start_recording",
+          "reply": "(?i)computer control"
+        }
+      }
+    ]
+  }
+]

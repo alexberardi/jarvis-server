@@ -52,7 +52,10 @@ var (
 	thinkCol   = color.NRGBA{157, 140, 255, 255} // thinking
 	speakCol   = color.NRGBA{235, 245, 255, 255} // speaking
 	errorCol   = color.NRGBA{255, 69, 58, 255}
-	noteCol    = color.NRGBA{48, 209, 88, 255} // typing, a question
+	noteCol    = color.NRGBA{48, 209, 88, 255}  // typing, a question
+	controlCol = color.NRGBA{255, 159, 10, 255} // Jarvis controls the computer
+	pausedCol  = color.NRGBA{255, 214, 10, 255} // a task paused
+	recordCol  = color.NRGBA{255, 55, 95, 255}  // recording the user
 	textCol    = color.NRGBA{242, 242, 247, 255}
 	ringTrackA = 0.18
 )
@@ -64,7 +67,7 @@ type Frame struct {
 	Bars   [nBars]float64 // 0..1 bar heights
 	Ring   float64        // follow-up: the fraction of the window left (1 → 0)
 	Glow   float64        // 0..1 halo around the orb (loudness)
-	Text   string         // Note: the text shown
+	Text   string         // Note and the activity states: the text shown
 }
 
 // Render draws f into dst (CanvasW·scale × CanvasH·scale), clearing it first.
@@ -80,7 +83,8 @@ func Render(dst *image.RGBA, f Frame, scale float64) {
 	w := float64(pillW)
 	var face font.Face
 	var text string
-	if f.State == Note {
+	textPill := f.State == Note || f.State.activity()
+	if textPill {
 		face = noteFace(scale)
 		text, w = fitNote(face, f.Text, scale)
 	}
@@ -94,8 +98,18 @@ func Render(dst *image.RGBA, f Frame, scale float64) {
 
 	accent := accentFor(f.State)
 	cx, cy := x0+orbX, y0+pillH/2
-	if f.State == Note {
-		c.fill(func(z *rast) { z.circle(cx, cy, orbR) }, accent, 1)
+	if textPill {
+		switch f.State {
+		case Paused: // two bars, the pause sign
+			for _, dx := range []float64{-3.25, 1.25} {
+				c.fill(func(z *rast) { z.roundRect(cx+dx, cy-orbR, 2.5, 2*orbR, 1) }, accent, 1)
+			}
+		default:
+			if f.Glow > 0.02 {
+				c.fill(func(z *rast) { z.circle(cx, cy, orbR+2+3*f.Glow) }, accent, 0.28*f.Glow)
+			}
+			c.fill(func(z *rast) { z.circle(cx, cy, orbR) }, accent, 1)
+		}
 		c.text(face, text, x0+noteTextX, cy, textCol)
 		return
 	}
@@ -136,6 +150,12 @@ func accentFor(s State) color.NRGBA {
 		return errorCol
 	case Note:
 		return noteCol
+	case Controlling:
+		return controlCol
+	case Paused:
+		return pausedCol
+	case Recording:
+		return recordCol
 	}
 	return listenCol
 }

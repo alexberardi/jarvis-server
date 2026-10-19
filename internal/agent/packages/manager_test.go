@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -236,5 +237,133 @@ func TestBootServesInstalledPackages(t *testing.T) {
 	m3 := &Manager{Root: m.Root, Python: m.Python, HTTP: m.HTTP, GOOS: "linux", Sidecars: &fakeSidecars{}, Log: quiet}
 	if err := m3.Boot(ctx); err == nil || !strings.Contains(err.Error(), "Python environment is missing") {
 		t.Fatalf("boot without venv = %v", err)
+	}
+}
+
+// The Pi profile: the node's built-in commands are pip-installed into the venv at boot, once
+// per pinned requirement, and every sidecar loads them, with or without packages.
+func TestBootInstallsAndServesTheBuiltins(t *testing.T) {
+	r := newRepos(t)
+	repo := r.add(t, "o/weather", "HEAD", weather("1.0.0"))
+	m, fr, sc := newTestManager(t, r)
+	m.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands", Skip: []string{"routine_command"}}
+	ctx := context.Background()
+	if err := m.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.calls) != 2 || fr.calls[0][1] != "venv" ||
+		strings.Join(fr.calls[1], " ") != "uv pip install --python "+m.Python.Interpreter()+" --quiet "+SDKRequirement+" jarvis-node-setup @ https://x/a.tar.gz" {
+		t.Fatalf("uv calls = %v", fr.calls)
+	}
+	if sc.live == nil || len(sc.livePackages()) != 0 {
+		t.Fatalf("no sidecar for the built-ins alone: %v", sc.live)
+	}
+	b, _ := os.ReadFile(filepath.Join(m.Root, "commands.json"))
+	var doc struct {
+		Builtins struct {
+			Package string   `json:"package"`
+			Skip    []string `json:"skip"`
+		} `json:"builtins"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil || doc.Builtins.Package != "commands" || !reflect.DeepEqual(doc.Builtins.Skip, []string{"routine_command"}) {
+		t.Fatalf("commands.json = %s", b)
+	}
+
+	// The next start doesn't reinstall them; a new pin does.
+	m2 := &Manager{Root: m.Root, Python: m.Python, HTTP: m.HTTP, GOOS: "linux", Sidecars: &fakeSidecars{}, Log: quiet, Builtins: m.Builtins}
+	if err := m2.Boot(ctx); err != nil || len(fr.calls) != 2 {
+		t.Fatalf("second boot: %v, uv calls %v", err, fr.calls)
+	}
+	m2.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/b.tar.gz", Package: "commands"}
+	if err := m2.Boot(ctx); err != nil || len(fr.calls) != 3 || !strings.HasSuffix(strings.Join(fr.calls[2], " "), "b.tar.gz") {
+		t.Fatalf("new pin: %v, uv calls %v", err, fr.calls)
+	}
+
+	// Removing the last package keeps the built-ins in service.
+	if _, err := m.Install(ctx, repo, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Uninstall(ctx, "get_weather_meteo"); err != nil {
+		t.Fatal(err)
+	}
+	if sc.live == nil {
+		t.Fatal("the built-ins went with the last package")
+	}
+
+	// Offline at a new pin: the venv's built-ins still serve.
+	fr.pipFail = errors.New("no network")
+	m2.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/c.tar.gz", Package: "commands"}
+	if err := m2.Boot(ctx); err != nil {
+		t.Fatalf("offline boot = %v", err)
+	}
+	// A fresh node offline: say so.
+	_ = os.RemoveAll(filepath.Join(m.Root, "venv"))
+	_ = os.Remove(filepath.Join(m.Root, "builtins.txt"))
+	if err := m2.Boot(ctx); err == nil || !strings.Contains(err.Error(), "no network") {
+		t.Fatalf("offline boot without a venv = %v", err)
+	}
+}
+
+// govee is a package with a device family (declared without a path: it is at the
+// conventional place) and a device manager.
+func govee() map[string]string {
+	return map[string]string{
+		"jarvis_package.yaml": `name: "govee"
+version: "1.0.0"
+components:
+  - type: device_protocol
+    name: govee
+  - type: device_manager
+    name: hub
+    path: device_managers/hub/manager.py
+`,
+		"device_families/govee/protocol.py": "",
+		"device_managers/hub/manager.py":    "",
+	}
+}
+
+// On a Pi (built-ins and System on) a package's device families and managers are listed for the sidecar
+// and not reported as skipped. A desktop refuses a package of only those, as before; with a
+// command too it skips them.
+func TestPiListsDeviceFamilies(t *testing.T) {
+	r := newRepos(t)
+	repo := r.add(t, "o/govee", "HEAD", govee())
+	m, _, _, _ := newPiManager(t, r)
+	m.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands"}
+	details, err := m.Install(context.Background(), repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := readList(filepath.Join(m.Root, "commands.json"))
+	if len(list) != 1 || details["skipped_components"] != nil ||
+		!reflect.DeepEqual(list[0].Families, []string{"device_families/govee/protocol.py"}) ||
+		!reflect.DeepEqual(list[0].Managers, []string{"device_managers/hub/manager.py"}) {
+		t.Fatalf("pi: details %v, list %+v", details, list)
+	}
+
+	desk, _, _ := newTestManager(t, r)
+	if _, err := desk.Install(context.Background(), repo, ""); err == nil || !strings.Contains(err.Error(), "no commands a computer can run") {
+		t.Fatalf("desktop install = %v", err)
+	}
+	both := govee()
+	both["jarvis_package.yaml"] += "  - type: command\n    name: hi\n    path: commands/hi/command.py\n"
+	both["commands/hi/command.py"] = ""
+	repo2 := r.add(t, "o/govee2", "HEAD", both)
+	details, err = desk.Install(context.Background(), repo2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ = readList(filepath.Join(desk.Root, "commands.json"))
+	if !reflect.DeepEqual(details["skipped_components"], []string{"device_protocol:govee", "device_manager:hub"}) ||
+		len(list) != 1 || list[0].Families != nil || list[0].Managers != nil {
+		t.Fatalf("desktop: details %v, list %+v", details, list)
+	}
+}
+
+// A device component's declared path must stay inside the package.
+func TestManifestRefusesADeviceComponentOutside(t *testing.T) {
+	_, err := ParseManifest([]byte("name: x\ncomponents:\n  - type: device_protocol\n    name: x\n    path: ../x/protocol.py\n"))
+	if err == nil {
+		t.Fatal("accepted a path outside the package")
 	}
 }

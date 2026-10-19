@@ -40,6 +40,8 @@ var expectedTables = []string{
 	"cc_household_prompts",
 	// watches (autonomy P2)
 	"cc_watches",
+	// computer control (plan P3)
+	"cc_computer_approvals", "cc_taught_workflows", "cc_recordings", "cc_computer_runs",
 }
 
 // Cut by decisions in docs/cc/QUESTIONS.md; they must never come back by accident.
@@ -273,5 +275,133 @@ func TestBaselineDownRemovesEverything(t *testing.T) {
 	}
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestToolRuleTargetsMigration: 00250 rebuilds cc_tool_rules with a target; the rules from before
+// keep their id and get target ”, and Down keeps those and drops the ones with a target.
+func TestToolRuleTargetsMigration(t *testing.T) {
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	store, err := database.NewStore(database.DialectSQLite3, "goose_cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := goose.NewProvider("", d.Write, Migrations(), goose.WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 240); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.ExecContext(ctx, `INSERT INTO cc_tool_rules (id, household_id, scope_kind, scope_id, tool, effect, note, updated_by, updated_at)
+		VALUES (41, 'hh-1', 'watch', 'wt_1', 'notify', 'allow', 'kept', 7, '2026-10-01T00:00:00.000Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 250); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		target, note string
+		ub           int64
+	)
+	if err := d.Read.QueryRowContext(ctx, `SELECT target, note, updated_by FROM cc_tool_rules WHERE id = 41 AND scope_id = 'wt_1' AND tool = 'notify' AND effect = 'allow'`).
+		Scan(&target, &note, &ub); err != nil {
+		t.Fatal(err)
+	}
+	if target != "" || note != "kept" || ub != 7 {
+		t.Fatalf("after up: target %q note %q updated_by %d", target, note, ub)
+	}
+	// The same tool with two targets is two rows; a duplicate (tool, target) is refused.
+	ins := `INSERT INTO cc_tool_rules (household_id, scope_kind, scope_id, tool, target, effect, updated_at)
+		VALUES ('hh-1', 'watch', 'wt_1', 'notify', ?, 'block', 'x')`
+	if _, err := d.Write.ExecContext(ctx, ins, "site:example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.ExecContext(ctx, ins, "site:example.com"); err == nil {
+		t.Fatal("duplicate (tool, target) accepted")
+	}
+	if _, err := d.Write.ExecContext(ctx, `INSERT INTO cc_tool_rules (household_id, tool, effect, updated_at) VALUES ('hh-1', 't', 'maybe', 'x')`); err == nil {
+		t.Fatal("effect CHECK lost in the rebuild")
+	}
+	if _, err := p.DownTo(ctx, 240); err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	rows, err := d.Read.QueryContext(ctx, `SELECT id FROM cc_tool_rules`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if !slices.Equal(ids, []int64{41}) {
+		t.Fatalf("after down: ids %v, want [41]", ids)
+	}
+	if slices.Contains(tables(t, d.Read), "cc_computer_approvals") {
+		t.Fatal("cc_computer_approvals left after down")
+	}
+	if _, err := p.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestComputerRunsMigration: 00270 creates cc_computer_runs with its state and target checks and
+// defaults; Down drops it.
+func TestComputerRunsMigration(t *testing.T) {
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	store, err := database.NewStore(database.DialectSQLite3, "goose_cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := goose.NewProvider("", d.Write, Migrations(), goose.WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 270); err != nil {
+		t.Fatal(err)
+	}
+	ins := `INSERT INTO cc_computer_runs (id, household_id, node_id, goal, target, state, created_at, updated_at)
+		VALUES (?, 'hh-1', 'n1', 'order soap', ?, ?, 'x', 'x')`
+	if _, err := d.Write.ExecContext(ctx, ins, "cr_1", "browser", "running"); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		history string
+		stop    int
+		rounds  int
+	)
+	if err := d.Read.QueryRowContext(ctx, `SELECT history, stop_requested, rounds FROM cc_computer_runs WHERE id = 'cr_1'`).
+		Scan(&history, &stop, &rounds); err != nil {
+		t.Fatal(err)
+	}
+	if history != "[]" || stop != 0 || rounds != 0 {
+		t.Fatalf("defaults: history %q stop %d rounds %d", history, stop, rounds)
+	}
+	if _, err := d.Write.ExecContext(ctx, ins, "cr_2", "browser", "maybe"); err == nil {
+		t.Fatal("state CHECK missing")
+	}
+	if _, err := d.Write.ExecContext(ctx, ins, "cr_3", "phone", "running"); err == nil {
+		t.Fatal("target CHECK missing")
+	}
+	if _, err := p.DownTo(ctx, 260); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(tables(t, d.Read), "cc_computer_runs") {
+		t.Fatal("cc_computer_runs left after down")
 	}
 }

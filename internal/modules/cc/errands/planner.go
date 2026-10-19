@@ -61,6 +61,15 @@ var menuDeny = map[string]bool{
 	"resolve_relative_date": true, "get_command_examples": true,
 }
 
+// menuNotes are added to a server tool's description in the errand menu, where it behaves
+// unlike in a conversation. deep_research returns as soon as it has started; its report arrives
+// later as a card of its own, so the errand can report nothing it found (#232).
+var menuNotes = map[string]string{
+	"deep_research": "In an errand this only STARTS a long report that arrives later on its own; " +
+		"the errand cannot report what it finds. To look something up that the errand should " +
+		"report back (answer, list, comparison, summary), use quick_search.",
+}
+
 // controlCommands are control-flow commands the planner may emit that are not capabilities;
 // they always pass validation and are never risky.
 var controlCommands = map[string]bool{cmdReplan: true}
@@ -171,7 +180,11 @@ func (s *Service) serverMenu(ctx context.Context, hh string, speaker *int64) []M
 		if cmd == "" {
 			cmd = name
 		}
-		menu = append(menu, MenuEntry{Command: cmd, Description: objStr(fn, "description"), Args: args, IsRisky: toolRisky(t),
+		desc := objStr(fn, "description")
+		if note := menuNotes[cmd]; note != "" {
+			desc = strings.TrimSpace(desc + " " + note)
+		}
+		menu = append(menu, MenuEntry{Command: cmd, Description: desc, Args: args, IsRisky: toolRisky(t),
 			RunWithoutConfirmation: servertools.RunsWithoutConfirmation(t)})
 	}
 	return menu

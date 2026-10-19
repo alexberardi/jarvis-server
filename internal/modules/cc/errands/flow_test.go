@@ -164,11 +164,11 @@ func TestRunNodeAndServerStepsToCompletion(t *testing.T) {
 	cards := e.cards.all()
 	last := cards[len(cards)-1]
 	if last.Title != "✅ Errand done: Weather and search" || last.Summary != "It will rain tomorrow, and I found 2 sources." ||
-		last.Category != "errand" || mustJSON(last.Metadata) != `{"household_id":"hh-1","status":"success"}` {
+		last.Category != "errand" || mustJSON(last.Metadata) != `{"answer":"It will rain tomorrow, and I found 2 sources.","household_id":"hh-1","status":"success"}` {
 		t.Fatalf("completion = %+v", last)
 	}
 	compose := e.llm.requests("compose")[0]
-	if compose.Label != "background" || *compose.MaxTokens != 400 || *compose.ReasoningBudget != 0 || *compose.Temperature != 0.3 {
+	if compose.Label != "background" || *compose.MaxTokens != 800 || *compose.ReasoningBudget != 0 || *compose.Temperature != 0.3 {
 		t.Fatalf("compose req = %+v", compose)
 	}
 	cp := *compose.Messages[0].Content.Text
@@ -623,5 +623,33 @@ func TestPurgeUser(t *testing.T) {
 	_ = e.d.Read.QueryRow(`SELECT COUNT(*) FROM platform_jobs WHERE state = 'cancelled'`).Scan(&cancelledJobs)
 	if plans != 1 || owned != 0 || cancelledJobs != 1 || e.wfState("wf_b") != "cancelled" || e.wfState("wf_a") != "done" {
 		t.Fatalf("plans %d owned %d cancelled jobs %d wf_b %s", plans, owned, cancelledJobs, e.wfState("wf_b"))
+	}
+}
+
+// A node step whose output carries image_attachments never stores the image data: the
+// results_json row keeps each label and nothing else of it.
+func TestNodeStepNeverStoresImages(t *testing.T) {
+	e := newTenv(t, true)
+	e.llm.say("plan", planJSON("Look", step("get_weather", "Look at the screen", `{}`)))
+	e.llm.say("compose", "Done.")
+	e.nodes.outputs["get_weather"] = servertools.Obj("success", true, "message", "read the screen",
+		"image_attachments", []any{
+			servertools.Obj("mime", "image/png", "data", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", "label", "screen"),
+			servertools.Obj("data", "QUJDREVGR0g="),
+			"already a label",
+		})
+	p := e.draft("look", ptr(7), weatherMenu(t))
+	wf := launch(t, e, p)
+	e.idle()
+	if st := e.wfState(wf); st != "done" {
+		t.Fatalf("state = %s", st)
+	}
+	var results string
+	_ = e.d.Read.QueryRow(`SELECT results_json FROM cc_workflows WHERE id = ?`, wf).Scan(&results)
+	if strings.Contains(results, "iVBORw0KGgo") || strings.Contains(results, "QUJDREVGR0g") || strings.Contains(results, `"mime"`) {
+		t.Fatalf("image data stored: %s", results)
+	}
+	if !strings.Contains(results, `"image_attachments": ["screen", "image 2", "already a label"]`) {
+		t.Fatalf("labels not kept: %s", results)
 	}
 }

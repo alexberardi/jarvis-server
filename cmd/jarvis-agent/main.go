@@ -35,6 +35,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/clock"
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
@@ -44,10 +45,12 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
+	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
+	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
@@ -62,24 +65,38 @@ const (
 	extDisabled     = "disabled"     // run --no-browser
 )
 
-// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes.
-func heartbeatCaps(tools node.Multi) (caps func() map[string]any, changed func() <-chan struct{}) {
+// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes;
+// with sw, also computer control's switch as computer_control "on" or "off" (its changes wake
+// a heartbeat through Runner.BeatNow).
+func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[string]any, changed func() <-chan struct{}) {
 	var hub *browser.Hub
 	for _, t := range tools {
 		if bt, ok := t.(*browser.Tools); ok {
 			hub = bt.Hub
 		}
 	}
-	if hub == nil {
-		return func() map[string]any { return map[string]any{"browser_extension": extDisabled} }, nil
-	}
 	return func() map[string]any {
-		state := extDisconnected
-		if hub.Connected() {
-			state = extConnected
+		state := extDisabled
+		if hub != nil {
+			state = extDisconnected
+			if hub.Connected() {
+				state = extConnected
+			}
 		}
-		return map[string]any{"browser_extension": state}
-	}, hub.Changed
+		out := map[string]any{"browser_extension": state}
+		if sw != nil {
+			out["computer_control"] = map[bool]string{true: "on", false: "off"}[sw.On()]
+		}
+		return out
+	}, hubChanged(hub)
+}
+
+// hubChanged is hub's Changed, nil without a hub.
+func hubChanged(hub *browser.Hub) func() <-chan struct{} {
+	if hub == nil {
+		return nil
+	}
+	return hub.Changed
 }
 
 func main() {
@@ -140,6 +157,14 @@ func main() {
 		err = provisionCmd(ctx, os.Args[2:])
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
+	case "computer":
+		if len(os.Args) > 2 && os.Args[2] == "snapshot" {
+			err = computerSnapshotCmd(ctx, os.Args[3:])
+		} else if len(os.Args) > 3 && os.Args[2] == "record" && os.Args[3] != "start" && os.Args[3] != "stop" {
+			err = computerRecordCmd(ctx, os.Args[3:], os.Stdin, os.Stdout)
+		} else {
+			err = computerCmd(os.Args[2:], os.Stdout, controlDial)
+		}
 	case "island-demo":
 		err = islandDemo(ctx, os.Args[2:])
 	case "browser-host":
@@ -198,6 +223,10 @@ func usage(w io.Writer) {
            code or your Jarvis Automation sign-in), browser extension, permissions, voice,
            remove (the status icon's "Set up / Settings…") [--no-open] [--no-start]
   stop     stop the running agent until the next login or start (the menu's Quit does the same)
+  computer stop | status   stop what Jarvis is doing with this computer (a computer task, a
+           recording; the menu's "Stop Jarvis" does the same), or say what it is doing
+  computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
+           off by default, and off stops a task going on)
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   update   update to the version of the jarvisd this computer is signed in to (the agent also
@@ -213,6 +242,10 @@ func usage(w io.Writer) {
   browser  browser control (Firefox, Chrome, Edge, Brave, Arc):
            install [--all] [--no-open]   register the native host, set up the extension
            uninstall | status | pack --target firefox|chromium --out DIR
+  computer snapshot [--json] URL   open URL in a background browser window and list its
+           elements as computer control sees them (debug; serves the extension like try)
+  computer record --browser [--json]   record what you do in the browser until Enter or ^C,
+           printing each event as it arrives (debug; serves the extension like try)
   version
 `)
 }
@@ -467,6 +500,7 @@ type runFlags struct {
 	cp, config         *string
 	tf                 *toolFlags
 	voiceOn, noOverlay *bool
+	computerOn         *bool
 	noTray             *bool
 	noAutoUpdate       *bool
 	profile            *string
@@ -482,10 +516,12 @@ const voiceByDefault = true
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
 	return fs, &runFlags{
-		cp:        fs.String("creds", "", "credentials file"),
-		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
-		tf:        addToolFlags(fs),
-		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
+		cp:      fs.String("creds", "", "credentials file"),
+		config:  fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
+		tf:      addToolFlags(fs),
+		voiceOn: fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
+		computerOn: fs.Bool("computer-control", false, `let Jarvis use this computer (computer tasks, recording); `+
+			`off by default, the menu's "Computer control" sets it`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
 		noTray:    fs.Bool("no-tray", false, "don't show the status icon and its menu (menu bar, tray, notification area)"),
 		noAutoUpdate: fs.Bool("no-auto-update", false, "don't update to the server's version by itself, and refuse updates sent from Jarvis Automation "+
@@ -549,7 +585,18 @@ func run(ctx context.Context, args []string) error {
 	ctx, quit := context.WithCancel(ctx)
 	defer quit()
 	pill := &runningPill{}
+	// What Jarvis is doing with the computer: the island and the status icon show it; the
+	// icon's Stop, `jarvis-agent computer stop` and the control socket end it.
+	activity := &computer.Activity{}
+	// Computer control's switch (COMPUTER-CONTROL.md C11): a computer's only, off unless
+	// agent.json's computer_control (the menu's toggle) turned it on.
+	var computerSw *computer.Switch
+	if p.desktop {
+		computerSw = computer.NewSwitch(*f.computerOn, activity)
+		computerSw.Persist = func(on bool) error { return saveComputer(*f.config, on) }
+	}
 	var swReady atomic.Pointer[voiceSwitch]
+	var recReady atomic.Pointer[computer.Recorder]
 	var runner atomic.Pointer[node.Runner]
 	if ctl != nil {
 		// Healthy (the self-update's check) once connected to jarvisd's broker.
@@ -559,7 +606,7 @@ func run(ctx context.Context, args []string) error {
 			}
 			return errors.New("not connected to jarvisd yet")
 		}
-		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health)()
+		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity, computerSw, recReady.Load)()
 	}
 	// K2, command secrets and data live next to node.json; another node's are dropped here.
 	st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
@@ -567,11 +614,28 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("node settings: %w", err)
 	}
 	tf.pkgRoot = filepath.Join(filepath.Dir(path), "packages")
+	// The pipeline's microphone: voice-profile takes, and on a Pi what its built-ins say.
+	mic := voice.NewMic()
+	var duck *music.Ducker // a Pi's music: ducked for each turn, taken over by a music "play"
+	if !p.desktop {
+		duck = newPiMusic(hat.Detected, fileExists, log)
+		tf.host = newPiHost(ctx, filepath.Dir(path), mic, log)
+		tf.host.Music = duck
+	}
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
 	}
 	defer closeTools()
+	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
+	// is uploaded once connected to jarvisd (liveCC).
+	var liveCC atomic.Pointer[node.CC]
+	var recorder *computer.Recorder
+	if p.desktop {
+		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), computerSw, activity, tools, liveCC.Load, log)
+		tools = append(tools, &computer.RecordTools{R: recorder})
+		recReady.Store(recorder)
+	}
 	go learnServer(ctx, c.ConfigURL, tf.origins, log)
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
@@ -581,15 +645,30 @@ func run(ctx context.Context, args []string) error {
 	runner.Store(r)
 	if p.desktop {
 		// The browser extension's state is a computer's; a Pi has none to report.
-		r.Capabilities, r.Changed = heartbeatCaps(tools)
+		r.Capabilities, r.Changed = heartbeatCaps(tools, computerSw)
+		computerSw.Watch(func(on bool) {
+			log.Info("computer control turned " + map[bool]string{true: "on", false: "off"}[on])
+			r.BeatNow()
+		})
 	}
 	if !p.desktop && hat.Detected() {
 		// Before voice opens the mic: the codec may have come back from a boot without the
 		// installer's ADC filter and output levels.
 		hat.HealCodec(ctx, hat.ExecRun, log)
 	}
-	hd := openHat(hf, log)
+	if duck != nil {
+		duck.NormalizePGA(ctx) // a crash mid-music must not leave the mic at the music gain
+	}
+	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
+	if tf.host != nil {
+		alerts := startAlerts(ctx, tf.host, mic, tf.live, log)
+		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
+	}
+	hd := openHat(hf, press, log)
 	defer hd.Close()
+	if hd != nil && tf.host != nil {
+		tf.host.Alerts.Watch(alertLED(hd.leds))
+	}
 	var nodeConfig func() map[string]any
 	var live *voice.Live // the Pi's: the app's settings and noise measurements reach the pipeline
 	if !p.desktop {
@@ -600,10 +679,32 @@ func run(ctx context.Context, args []string) error {
 		}
 		nodeConfig = wirePiNode(r, vf, hf, hd, live, sp, log)
 	}
-	wireNodeSettings(r, st, tools, nodeConfig, log)
+	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
+	// and are in its settings snapshot; a computer has none.
+	// A secrets push can configure a family (an API key): it joins the heartbeat's protocols.
+	var devs func(context.Context) nodesettings.Devices
+	var secrets func()
+	sc := liveSidecar(tools)
+	if !p.desktop && sc != nil {
+		devs = sc.Devices
+		secrets = func() {
+			if err := sc.RefreshDevices(); err != nil {
+				log.Warn("devices: families not described again after a secrets push", "err", err)
+			}
+			r.BeatNow()
+		}
+	}
+	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, log)
+	// action, callback and toggle_command: the app's device control, a command's buttons and
+	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
+	wireActions(r, sc, st, sayNow(mic), log)
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
+		if sc != nil {
+			wireDevices(r, sc, log)
+		}
+		wirePiTasks(r, st, filepath.Dir(path), tools, tf.pkgs, tf.host.Timers, quit, log)
 	}
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
 	// toggle turns it on and off while the agent runs (voiceSwitch).
@@ -616,12 +717,15 @@ func run(ctx context.Context, args []string) error {
 		return vs, err
 	}
 	// A Pi's voice-profile takes go through the pipeline's microphone (voiceprofile.go).
-	mic := voice.NewMic()
 	addVerbs(r, voiceProfileVerbs(p, mic, log))
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)
 		o.Mic = mic
+		o.Computer = activity // the wake word pauses a computer task, "stop" ends it
+		if duck != nil {
+			o.Music = duck
+		}
 		_ = voice.Serve(ctx, o)
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }
@@ -635,6 +739,17 @@ func run(ctx context.Context, args []string) error {
 	} else if *voiceOn {
 		log.Info("voice: not supported on " + runtime.GOOS + " yet")
 	}
+	if onConnected := r.OnConnected; p.desktop {
+		r.OnConnected = func(ctx context.Context, cc *node.CC) {
+			liveCC.Store(cc)
+			if onConnected != nil {
+				onConnected(ctx, cc)
+			} else {
+				<-ctx.Done()
+			}
+		}
+	}
+	connectHost(r, tf.host)
 	var setup func()
 	if p.desktop {
 		setup = openSetupPage(log)
@@ -642,8 +757,13 @@ func run(ctx context.Context, args []string) error {
 	// Signed out (from Add-ons, an admin, or the menu's Sign out): drop node.json only, keep
 	// agent.json and apps.json, and open the setup page so someone can sign in again.
 	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
-	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut}
+	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
+		activity: activity, computer: computerSw, recorder: recorder}
 	sw.changed = ic.voiceChanged
+	if computerSw != nil {
+		computerSw.Watch(func(bool) { ic.refresh() })
+	}
+	activity.Show(ic.activityChanged)
 	var note atomic.Pointer[func(string)] // the island's note, once it is up
 	followServer(ctx, r, !*f.noAutoUpdate, func(text string) {
 		ic.setUpdate(text)
@@ -657,7 +777,7 @@ func run(ctx context.Context, args []string) error {
 			return runNode(ctx)
 		}
 		// No island, but macOS's menu-bar icon still needs AppKit's loop on the main thread.
-		return island.RunLoop(ctx, log, appEvents(pill, log), func(loop bool) error {
+		return island.RunLoop(ctx, log, appEvents(pill, activity, log), func(loop bool) error {
 			ic.mainLoop = loop
 			defer ic.show(ctx)()
 			return runNode(ctx)
@@ -667,11 +787,13 @@ func run(ctx context.Context, args []string) error {
 	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
 	// It runs with voice off too, for the "Jarvis is running" pill; it shows voice states and
 	// dictation's notes only while listening is on.
-	return island.RunWith(ctx, log, appEvents(pill, log), func(i *island.Island) error {
+	return island.RunWith(ctx, log, appEvents(pill, activity, log), func(i *island.Island) error {
 		if i == nil {
 			pill.Attach(nil)
 		} else {
 			hideFromScreenshots(tools, i)
+			// Shown whether or not listening is on: Jarvis using the computer is always shown.
+			activity.Show(func(k computer.Kind, text string) { i.SetActivity(islandActivity(k), text) })
 			n := func(text string) { i.Note(text, 8*time.Second) }
 			note.Store(&n)
 			if voice.Supported {
@@ -731,8 +853,12 @@ type toolFlags struct {
 	// the sidecar on them and leaves pkgs to answer the app's install requests.
 	pkgRoot string
 	pkgs    *packages.Manager
-	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools.
-	pi bool
+	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools; its
+	// sidecar also loads the node's built-in commands, whose SDK backends host answers.
+	pi   bool
+	host *sdkhost.Host
+	// live is the sidecar in service once build ran (the Pi's reminders are polled from it).
+	live *sidecar.Live
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -800,6 +926,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodesettings.Store, tools node.Multi, closeAll func()) (node.Multi, func(), error) {
 	// The package sidecar: the installed Pantry packages, or the spike's directory of modules.
 	live := &sidecar.Live{}
+	f.live = live
 	var storage sidecar.Storage
 	if st != nil {
 		storage = st
@@ -813,10 +940,22 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		}
 		live.Swap(sc)
 	case f.pkgRoot != "":
-		f.pkgs = newPackages(f.pkgRoot, live, storage, log)
-		if err := f.pkgs.Boot(ctx); err != nil {
-			// The agent still serves its own tools; the app shows the packages as not loaded.
-			log.Warn("packages: not loaded", "err", err)
+		f.pkgs = newPackages(f.pkgRoot, live, storage, f.host, log)
+		boot := func() {
+			if err := f.pkgs.Boot(ctx); err != nil {
+				// The agent still serves its own tools; the app shows the packages as not loaded.
+				log.Warn("packages: not loaded", "err", err)
+			}
+		}
+		if f.pi && f.host != nil {
+			// The first start installs the built-ins (a download): the node comes up meanwhile,
+			// and their tools join the next turn's list.
+			f.pkgs.Builtins = packages.PiBuiltins(os.Getenv("JARVIS_AGENT_NODE_COMMANDS"))
+			// apt packages and post_install ops through install-pi.sh's root wrappers.
+			f.pkgs.System = packages.NewSystem(log)
+			go boot()
+		} else {
+			boot()
 		}
 	}
 	stopBrowser := closeAll

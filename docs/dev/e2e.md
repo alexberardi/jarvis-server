@@ -12,6 +12,7 @@ scripts/e2e mobile --mobile-repo ~/src/jarvis-node-mobile-branch   # flows + APK
 scripts/e2e web --filter 'inbox'      # only tests whose title matches (Playwright --grep)
 scripts/e2e web --keep                # leave the sandboxes up to poke at afterwards
 scripts/e2e web --name loop-142       # pick the sandbox name (default e2e-<run>); never default
+scripts/e2e computer --llm scripted   # the computer-task suite's plumbing (below; not in all)
 ```
 
 Exit status: 0 when every test passed, 1 when one failed or a suite could not run.
@@ -117,7 +118,7 @@ PR**, or the check fails. Why and the format:
 "web":    {"/admin/traces/:id": {"tests": ["e2e/web/tests/admin/traces.spec.ts"]}},
 "mobile": {"RoutinesStackNavigator/ScheduleList": {"flows": [".maestro/schedules.yaml"]},
            "DevicesStackNavigator/CameraView": {"manual": "a live camera stream; the sandbox has no camera device"},
-           "MainTabNavigator/HomeTab": {"pending": "#145: nav-tabs.yaml, home-chat.yaml"}}
+           "NodesStackNavigator/AddComputer": {"pending": "#154 gave it a code to approve (…); the approval flow is jarvis-node-mobile's, not written yet"}}
 ```
 
 - **Web, in CI:** `web/admin/src/coverage.test.tsx` walks the real route tree (`appRoutes()`
@@ -127,11 +128,15 @@ PR**, or the check fails. Why and the format:
   (`tools/e2emobile/coverage.go`), reads the `<X.Screen name=…>` registrations of the same
   mobile commit's `src/navigation/` (as `<Navigator file>/<name>`; a registration whose
   component is another navigator there is a container and not listed) and fails the same
-  ways, with flow files looked up in that commit's `.maestro/`. By hand:
+  ways, with flow files looked up in that commit's `.maestro/`. It also fails when merged
+  flows hide behind `pending`: a `pending` text that names a flow file which exists
+  (`"#145: nav-tabs.yaml"` once `nav-tabs.yaml` is there), and a flow the suite runs (a
+  top-level `.maestro/*.yaml` not tagged `skip`) that no entry lists under `flows`. By hand:
   `go run ./tools/e2emobile coverage --coverage e2e/coverage.json --flows <checkout>/.maestro --nav <checkout>/src/navigation`.
 - `pending` is a screen with a test still to come (name the item); `manual` is one an
   automated test can't reach here (camera, microphone, third-party sign-in, the fake-node
-  lane). When a pending flow lands, turn its entry into `flows`.
+  lane). When a pending flow lands, turn its entry into `flows`: the next mobile run fails until
+  you do. jarvis-node-mobile's `.maestro/COVERAGE.md` says which screens each flow reaches.
 
 ## The web suite (`e2e/web/`)
 
@@ -149,6 +154,7 @@ one auth rate limit.
 | `push.spec.ts` | the push each event sends, as the fake relay recorded it (title, body, `data.type`, `data.inbox_item_id`, priority, target tokens): a node's timer, reminder and alert inbox items (and the web inbox opens the item the push names); a node push (confirmation card); send_link (`open_url`); a household push reaches every phone in it and none elsewhere; a service's `notify` and `notify/batch`; no push for an inbox item that asked for none; a token the relay calls unregistered is deactivated; a signed-out token gets nothing |
 | `addons.spec.ts` | the page's sections; a paired desktop agent is listed; signing it out removes it on the server |
 | `household.spec.ts` | the switcher appears with two households; the inbox and the chat devices follow the pick, across a reload; no switcher with one |
+| `pairing.spec.ts` | a simulated node (below) asks to pair; the superuser types its code and a room on the Nodes page; the agent joins and its card shows up online in that room |
 | `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page, every old top-level path and `/admin` itself forward to their `/admin` page (query kept), an unknown path shows the 404 page in the shell and under `/admin`; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
 | `admin/dashboard.spec.ts` | System card = `/api/system/info`; no Restart when unsupervised; Stop asks and Cancel leaves jarvisd up (stop is never sent); "Finish setup" vs "Voice isn't ready" banner from `setup.completed`, the latter naming the missing jobs and leading to their models; no update or GPU banner without their state |
 | `admin/models.spec.ts` | every catalog model listed; Install asks and nothing downloads; a job's Set up narrows the catalog to its kind, Show all restores it; a model assigned to the live label is saved (server and page, across a reload; background follows). Skipped: Hugging Face installs |
@@ -159,6 +165,22 @@ one auth rate limit.
 | `admin/nodes.spec.ts` | a pairing computer approved into a household (it then registers and is listed), another denied (told so, gone); a signed-out node behind Show signed-out nodes. Skipped: rename/remove (not in the web admin) |
 | `admin/users.spec.ts` | every account with households, roles and badges; a generated and a chosen temporary password both sign the user in to the forced change; a deactivated account (seeded) marked and not resettable. Skipped: invite, role change, disable (mobile only in v1) |
 | `admin/update.spec.ts` | checks off: says so, the running version, no update offered; the switch saved on the server both ways; apply is blocked throughout. Skipped: an available update and applying it |
+
+### A simulated node for pairing
+
+`scripts/sandbox node-sim --name N [--node-name X]` pairs a node with no hardware: it builds
+`./cmd/jarvis-agent` and runs the real agent headless (`enroll --code --profile pi`, then
+`run --voice=false`), with its own HOME, XDG dirs and no desktop session under
+`.sandbox/N/simnode/X/`. It prints the pairing code on stdout once the agent shows it (cc never
+lists codes, so this is the only place it comes from) and also writes it to
+`.sandbox/N/simnode/X/code`. Once a member approves the code, the agent answers yes to "Join
+this household?", registers and stays up as the node (MQTT, heartbeats) until
+`scripts/sandbox down`. The agent's output is `.sandbox/N/simnode/X/agent.log`.
+
+In the web suite, `startSimNode(name)` (`helpers/simnode.ts`) runs it and returns the code.
+The mobile app's approval is a Maestro flow in jarvis-node-mobile (after the Maestro runner,
+#144): start `node-sim`, read the code from the `code` file, approve it in the app, and check
+the node in the app's node list.
 
 ### Writing a test
 
@@ -204,6 +226,14 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
   Commit flow changes before running them; uncommitted edits are not picked up.
 - During the suite the scripted model answers from `e2e/llm/mobile.json`.
+- adb transport drops: the harness emulator's adb connection drops now and then (adb's log:
+  `emulator-5580: connection terminated: read failed`), and every drop wipes all the adb reverse
+  tunnels. So before every flow (and the real push lane) `e2emobile` waits for the device, sets
+  the tunnels again (`--reverse`, from `reverse_pairs` in `scripts/lib/mobile.sh`) and probes the
+  sandbox's `/health` from inside the emulator (`--health-port`). A flow that fails on a drop
+  (`device offline`, `not found`, `DeviceServerDied`), or finds the device not ready, is run once
+  more; the report says so on it (`note`). Every adb call carries `-s <serial>`: never
+  `adb kill-server`, nor `reverse --remove-all` without `-s`, as other emulators may be attached.
 - Pushes: the superuser has a fake device token (`PUSH_TOKEN`); a flow checks
   `${FAKE_RELAY}/control/pushes?token=${PUSH_TOKEN}` from a `runScript` and can make a node
   event happen through `${CC_URL}` with `${NODE_API_KEY}` for `${USER_ID}`
@@ -314,7 +344,7 @@ sample rate (resampled to the TTS's); other lines are still the TTS.
 | wake + timer | "Hey Jarvis. Set a timer for five minutes." gets a spoken reply about the timer (the Go Pi node has no timer tool yet) |
 | lights | "…Turn on the kitchen lights." gets a reply about the lights (no `control_device` for this node yet) |
 | a question | "…How many days are there in a week?" is answered seven |
-| the time, through the clock tool | "…What time is it?" calls `get_current_time` and says a time |
+| the time in another city, through the clock tool | "…What time is it in Tokyo?" calls `get_current_time` and says a time (the local time is in the prompt, so a plain "what time is it?" is answered without the tool, #229) |
 | no wake word stays silent | the timer and lights commands without "Hey Jarvis" |
 | background noise stays silent | 8 s of pink noise |
 | music with talk over it stays silent | a chord loop with a sentence spoken over it |
@@ -376,3 +406,53 @@ schedule, loop item #152, runs it). Why it is built this way:
   playback, as with WAV files.
 - **When it fails to start:** the error says which step (`ssh`, the architecture, no seeed card:
   `--pi-card N`, a service it could not stop, the card still busy and who holds it).
+
+## The computer-task suite (`scripts/e2e computer`)
+
+Not in `all`, like `voice`: it takes the real model and many minutes. It builds and runs
+`tools/ccsuite run --out .e2e/<run>/computer --rel computer`, which brings up its **own** sandbox
+(`ccsuite-<run>`, purged afterwards, so `--name` and `--keep` don't apply), the fixture sites, and
+a headless sway or Xvfb session with the real agent and Chromium; the cases are
+`tools/ccsuite/cases/*.json`. What it covers and how a case is written:
+[`computer-suite.md`](computer-suite.md).
+
+```sh
+scripts/e2e computer --llm scripted                    # the plumbing (CI's check; every pending case skipped)
+scripts/e2e computer --filter 'store_' --repeat 3      # some cases, three runs each
+scripts/e2e computer --include-pending --filter web_form
+```
+
+Overnight, on the dev box (a model run takes the installed jarvisd's one slot, so not while the
+house uses it):
+
+```sh
+scripts/e2e computer --llm shared --label background --repeat 3
+```
+
+It leaves `computer/report.md`, `report.json` and `results.json` (one test per case; a pending
+case that ran and failed is listed skipped, with how it failed, so only `required` cases fail the
+run), `computer/cases/<case>/run-N/` (`state.json`: what the checks read; `failure.png`) and
+`computer/logs/` (sandbox, sites, session, agent, browser), plus `computer.log`.
+
+## Home Assistant (`--ha`)
+
+Not built yet; split into its own item. `scripts/sandbox up --ha` will run the official Home
+Assistant image (pinned) with demo and template devices, onboarded by script, so the smart-home
+setup (discovery, auth, import, rooms) runs against the real thing. Its device-control test
+stays skipped until the Go node talks to Home Assistant (#176/#177): on the server, control goes
+through a node. See
+[`../decisions/2026-10-18-e2e-real-ha-and-sim-node.md`](../decisions/2026-10-18-e2e-real-ha-and-sim-node.md).
+
+## What stays manual
+
+The suites cover what can run unattended against real local systems. These stay with a person:
+
+- **Camera**: the camera and its streams need real hardware (a lens, a scene, the device's
+  encoder); an emulator's fake camera only proves that a frame arrives, not that the feature works.
+- **Biometrics**: the fingerprint and face prompts are the OS's own dialogs. They can't be
+  passed honestly from a script on the emulator, and faking the result tests the fake.
+- **Visual polish**: spacing, alignment and how a screen looks need a person's judgment. The
+  screenshot tools (`scripts/screenshots`, `scripts/mobile-shot`, `scripts/desktop-shot`) make
+  that review quick, and flag overflow and console errors, but don't decide it.
+- **Packages** (pantry and store installs): out of scope by the user's decision (2026-10-17);
+  they depend on the public pantry service and change outside this repo.

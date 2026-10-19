@@ -35,6 +35,31 @@ type Command struct {
 	SetupGuide        json.RawMessage
 }
 
+// DeviceComponent is a device family or manager in the snapshot: N:'s entry as the sidecar
+// builds it (settings_snapshot_service.py), less "secrets", and the secrets it declares.
+type DeviceComponent struct {
+	Entry   map[string]any
+	Secrets []SecretSpec
+}
+
+// Devices are the snapshot's device_families and device_managers.
+type Devices struct{ Families, Managers []DeviceComponent }
+
+// deviceEntries are a snapshot list of device components, their secrets' values read here as N:
+// does: no requesting user, and a manager's sensitive values never (honor_include_values=False).
+func (st *Store) deviceEntries(cs []DeviceComponent, includeValues bool) []map[string]any {
+	out := []map[string]any{}
+	for _, c := range cs {
+		e := make(map[string]any, len(c.Entry)+1)
+		for k, v := range c.Entry {
+			e[k] = v
+		}
+		e["secrets"] = st.secretsList(c.Secrets, includeValues, nil)
+		out = append(out, e)
+	}
+	return out
+}
+
 // secretsList is _build_secrets_list (honor_include_values=True): every declared secret with
 // is_set, and its value when it isn't sensitive or the request asked for values. A user-scoped
 // secret is looked up for the requesting user.
@@ -80,9 +105,9 @@ func (h *Handler) nodeConfig() map[string]any {
 }
 
 // Snapshot is build_snapshot for the agent: its commands with their secrets and enabled state;
-// no background agents, device families or managers; and nodeConfig as node_config
-// (DesktopNodeConfig on a computer, the HAT and voice settings on a Pi).
-func (st *Store) Snapshot(cmds []Command, nodeConfig map[string]any, includeValues bool, uid *int64) map[string]any {
+// no background agents; the sidecar's device families and managers (a Pi's); and nodeConfig as
+// node_config (DesktopNodeConfig on a computer, the HAT and voice settings on a Pi).
+func (st *Store) Snapshot(cmds []Command, dev Devices, nodeConfig map[string]any, includeValues bool, uid *int64) map[string]any {
 	entries := []map[string]any{}
 	for _, c := range cmds {
 		e := map[string]any{
@@ -102,8 +127,8 @@ func (st *Store) Snapshot(cmds []Command, nodeConfig map[string]any, includeValu
 		"commands_schema_version": CommandsSchemaVersion,
 		"commands":                entries,
 		"agents":                  []any{},
-		"device_families":         []any{},
-		"device_managers":         []any{},
+		"device_families":         st.deviceEntries(dev.Families, includeValues),
+		"device_managers":         st.deviceEntries(dev.Managers, false),
 		"node_config":             nodeConfig,
 	}
 }

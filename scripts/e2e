@@ -2,16 +2,16 @@
 # End-to-end regression: brings up its own sandboxes, runs the suites against them, writes a
 # report and takes the sandboxes down again. Run on demand (docs/dev/e2e.md).
 #
-#   scripts/e2e [web|mobile|all|voice] [--filter RE] [--keep] [--name N] [--mobile-repo PATH]
+#   scripts/e2e [web|mobile|all|voice|computer] [--filter RE] [--keep] [--name N] [--mobile-repo PATH]
 #               [--llm shared|scripted] [--audio wav|pipewire|pi] [--pi-host USER@HOST] [--pi-card N]
-#               [--voices DIR] [--repeat N] [--agent-arg FLAG]
+#               [--voices DIR] [--repeat N] [--agent-arg FLAG] [--label live|background] [--include-pending]
 #   scripts/e2e mobile --real-push [--keep] [--name N] [--mobile-repo PATH]
 #   scripts/e2e ios --sandbox-env FILE [--filter RE] [--mobile-repo PATH]
 #
 #   web     the admin SPA (Playwright, e2e/web/)
 #   mobile   the mobile app: the Maestro flows of jarvis-node-mobile's .maestro/ on a headless
 #            harness emulator (scripts/lib/mobile.sh), logged in to the sandbox
-#   all      every suite but voice and ios (default)
+#   all      every suite but voice, computer and ios (default)
 #   ios      the same Maestro flows on the iOS Simulator, on a Mac with Xcode (scripts/lib/ios.sh):
 #            the app built for the simulator, the harness's own simulator (jarvis-harness-e2e),
 #            erased per run; against a sandbox on another machine that is up with --lan
@@ -21,6 +21,10 @@
 #   voice    the virtual node voice lane (tools/voicelane, e2e/voice/cases.json): the real
 #            jarvis-agent (--profile pi) hears TTS and its spoken replies are transcribed and
 #            checked; only when asked, since it takes the real model and minutes
+#   computer the computer-task suite (tools/ccsuite, docs/dev/computer-suite.md): errands on a
+#            headless desktop and the fixture sites, scored from the fixtures' state; it brings
+#            up its own sandbox (ccsuite-<run>), so --name and --keep don't apply. Only when
+#            asked (the real model, many minutes): overnight
 #   --real-push  mobile: instead of the flows, the overnight real push lane (suite mobile-push):
 #            a Google Play emulator (AVD jarvis-harness-play), the APK built with the push
 #            config, the sandbox on the real relay; a node alert must reach the shade through
@@ -30,15 +34,15 @@
 #            google_apis_playstore image; without them it is skipped, with the reason in the
 #            report (docs/decisions/2026-10-18-e2e-push.md)
 #   --filter RE  run only the tests whose title matches RE (Playwright --grep; for mobile, the
-#            flow's name or file name; voice: case names)
+#            flow's name or file name; voice, computer: case names)
 #   --mobile-repo PATH  the jarvis-node-mobile checkout or worktree whose HEAD commit gives the
 #            APK and the flows (to test a branch); default: origin/main of $JARVIS_MOBILE_REPO
 #            (or ../jarvis-node-mobile), fetched first
 #   --keep   leave the sandboxes up afterwards (scripts/sandbox down --name N --purge, and
 #            N-setup, to remove them by hand); without it they are purged
 #   --name N the sandbox name (default e2e-<run>); the setup wizard's empty sandbox is N-setup
-#   --llm    voice: the model, shared (the real one through the tap, default) or scripted
-#            (e2e/llm/voice.json, to check the lane itself)
+#   --llm    voice, computer: the model, shared (the real one through the tap, default) or
+#            scripted (voice: e2e/llm/voice.json; both: to check the lane itself)
 #   --audio  voice: wav (WAV files as the node's mic and speaker, default), pipewire (a
 #            private PipeWire's virtual mic and speaker, never the user's audio session) or pi
 #            (a real Pi over ssh: the linux-arm64 node on its HAT, the cases played out of its
@@ -46,7 +50,11 @@
 #   --pi-host  pi: the Pi as ssh reaches it, key auth (default: $JARVIS_E2E_PI)
 #   --pi-card  pi: the HAT's ALSA card index (default: the seeed card)
 #   --voices   voice: recorded voices, DIR/<slug of the text>.wav said instead of the TTS
-#   --repeat voice: runs of each model-dependent case (default 3)
+#   --repeat voice: runs of each model-dependent case (default 3); computer: runs of each case
+#            (default 1)
+#   --label  computer: the installed jarvisd's label the model comes from, live or background
+#            (default: as the harness env file says)
+#   --include-pending  computer: run the pending cases too (they never fail the run)
 #   --agent-arg  voice: an extra `jarvis-agent listen` flag, repeatable (--agent-arg=--wake-threshold=0.6)
 #
 # The sandboxes: N is `scripts/sandbox up --profile rich --llm scripted --ui` (the seeded
@@ -61,12 +69,13 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 say() { echo "e2e: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; }
 
-SUITE=all FILTER='' KEEP=0 REAL_PUSH=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT=3 AGENT_ARGS=() PI_HOST=${JARVIS_E2E_PI:-} PI_CARD=auto VOICES='' SANDBOX_ENV=''
+SUITE=all FILTER='' KEEP=0 REAL_PUSH=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT='' AGENT_ARGS=() PI_HOST=${JARVIS_E2E_PI:-} PI_CARD=auto VOICES='' SANDBOX_ENV=''
+LABEL='' PENDING=0
 while [ $# -gt 0 ]; do
   case $1 in
-    web|mobile|all|voice|ios) SUITE=$1; shift ;;
+    web|mobile|all|voice|computer|ios) SUITE=$1; shift ;;
     --filter) FILTER=$2; shift 2 ;;
     --keep) KEEP=1; shift ;;
     --real-push) REAL_PUSH=1; shift ;;
@@ -79,6 +88,8 @@ while [ $# -gt 0 ]; do
     --pi-host) PI_HOST=$2; shift 2 ;;
     --pi-card) PI_CARD=$2; shift 2 ;;
     --voices) VOICES=$(cd "$2" && pwd); shift 2 ;;
+    --label) LABEL=$2; shift 2 ;;
+    --include-pending) PENDING=1; shift ;;
     --agent-arg) AGENT_ARGS+=("--agent-arg=$2"); shift 2 ;;
     --agent-arg=*) AGENT_ARGS+=("--agent-arg=${1#--agent-arg=}"); shift ;;
     -h|--help) usage; exit 0 ;;
@@ -88,7 +99,8 @@ done
 case $VLLM in shared | scripted) ;; *) die "--llm: shared or scripted" ;; esac
 case $AUDIO in wav | pipewire | pi) ;; *) die "--audio: wav, pipewire or pi" ;; esac
 [ "$AUDIO" != pi ] || [ -n "$PI_HOST" ] || die "--audio pi needs --pi-host USER@HOST (or JARVIS_E2E_PI)"
-case $REPEAT in '' | *[!0-9]* | 0) die "--repeat: a positive number" ;; esac
+case $REPEAT in '') ;; *[!0-9]* | 0) die "--repeat: a positive number" ;; esac
+case $LABEL in '' | live | background) ;; *) die "--label: live or background" ;; esac
 [ "$REAL_PUSH" = 0 ] || [ "$SUITE" = mobile ] || die "--real-push goes with the mobile suite: scripts/e2e mobile --real-push"
 if [ "$SUITE" = ios ]; then
   [ -n "$SANDBOX_ENV" ] || die "ios: --sandbox-env FILE (the sandbox-lan.env of a sandbox up with --lan) is required"
@@ -251,9 +263,10 @@ run_real_push() {
     # Demo mode hides notification icons; this lane wants the real status bar.
     "$ADB" -s "$SERIAL" shell am broadcast -a com.android.systemui.demo -e command exit >/dev/null
     reverse_sandbox
+    reverse_args
     install_app "$apk"
     "$mdir/e2emobile" realpush --out "$mdir" --serial "$SERIAL" --maestro "$maestro" --adb "$ADB" \
-      --login-flow "$login" -e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD"
+      --login-flow "$login" "${REVERSE_ARGS[@]}" -e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD"
   ) 2>&1 | tee "$OUT/mobile-push.log"
   rc=${PIPESTATUS[0]}
   set -e
@@ -273,6 +286,8 @@ fi
 
 if [ "$SUITE" = ios ]; then
   say "run $RUN: sandbox $NAME on another machine ($SANDBOX_ENV)"
+elif [ "$SUITE" = computer ]; then
+  : # tools/ccsuite brings up (and purges) its own sandbox, ccsuite-<run>
 elif [ "$SUITE" = voice ]; then
   say "run $RUN: sandbox $NAME (voice, --llm $VLLM, --audio $AUDIO; log in $OUT/sandbox-$NAME.log)"
   "$ROOT/scripts/sandbox" down --name "$NAME" --purge >/dev/null 2>&1 || true # a fresh household
@@ -389,10 +404,11 @@ run_mobile() {
     boot_emulator
     prep_emulator
     reverse_sandbox
+    reverse_args
     install_app "$apk"
 
     "$mdir/e2emobile" run --flows "$mdir/src/.maestro" --out "$mdir" --serial "$SERIAL" \
-      --maestro "$maestro" --adb "$ADB" --coverage "$ROOT/e2e/coverage.json" --nav "$mdir/src/src/navigation" \
+      --maestro "$maestro" --adb "$ADB" "${REVERSE_ARGS[@]}" --coverage "$ROOT/e2e/coverage.json" --nav "$mdir/src/src/navigation" \
       ${FILTER:+--filter "$FILTER"} "${FLOW_ENV[@]}"
   ) 2>&1 | tee "$OUT/mobile.log"
   rc=${PIPESTATUS[0]}
@@ -528,19 +544,38 @@ run_voice() {
     # Not in a subshell: its exports and PIDs are this script's.
     start_audio >"$dir/audio-error.txt" || { broken voice "private PipeWire: $(cat "$dir/audio-error.txt")"; return; }
   fi
-  say "voice: running (--audio $AUDIO${pi:+ on $PI_HOST}, --repeat $REPEAT)"
+  say "voice: running (--audio $AUDIO${pi:+ on $PI_HOST}, --repeat ${REPEAT:-3})"
   (cd "$ROOT" && "$dir/bin/voicelane" --root "$ROOT" --sandbox "$NAME" --cases e2e/voice/cases.json --out "$dir" \
-    --rel voice --agent "$dir/bin/jarvis-agent" --audio "$AUDIO" --repeat "$REPEAT" "${wake[@]}" "${pi[@]}" "${AGENT_ARGS[@]}" \
+    --rel voice --agent "$dir/bin/jarvis-agent" --audio "$AUDIO" --repeat "${REPEAT:-3}" "${wake[@]}" "${pi[@]}" "${AGENT_ARGS[@]}" \
     ${VOICES:+--voices "$VOICES"} \
     ${FILTER:+--filter "$FILTER"}) 2>&1 | tee "$OUT/voice.log" || rc=$?
   echo "$rc" >"$OUT/voice.exit"
   SUITES+=(voice)
 }
 
+# run_computer: the computer-task suite (tools/ccsuite), which brings up its own sandbox, fixture
+# sites and headless desktop, and writes results.json into $OUT/computer.
+run_computer() {
+  local dir=$OUT/computer rc=0 args=()
+  mkdir -p "$dir"
+  say "computer: building tools/ccsuite"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -o "$dir/ccsuite" ./tools/ccsuite) >"$dir/build.log" 2>&1 ||
+    { broken computer "building tools/ccsuite failed (computer/build.log)"; return; }
+  [ -z "$LABEL" ] || args+=(--label "$LABEL")
+  [ "$PENDING" = 0 ] || args+=(--include-pending)
+  say "computer: running (--llm $VLLM${LABEL:+ --label $LABEL}, --repeat ${REPEAT:-1})"
+  (cd "$ROOT" && "$dir/ccsuite" run --out "$dir" --rel computer --llm "$VLLM" --repeat "${REPEAT:-1}" "${args[@]}" \
+    ${FILTER:+--filter "$FILTER"}) 2>&1 | tee "$OUT/computer.log" || rc=$?
+  [ -f "$dir/results.json" ] || { broken computer "the computer suite did not run (computer.log, exit $rc)"; return; }
+  echo "$rc" >"$OUT/computer.exit"
+  SUITES+=(computer)
+}
+
 case $SUITE in
   web | all) run_web ;;
   voice) run_voice ;;
   ios) run_ios ;;
+  computer) run_computer ;;
 esac
 case $SUITE in
   mobile | all) run_mobile ;;

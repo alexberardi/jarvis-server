@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -28,6 +29,11 @@ type config struct {
 	env                     []string // KEY=VALUE, passed to every flow as -e
 	filter                  string
 	flowTimeout, adbTimeout time.Duration
+	// reverse are the adb reverse tunnels ("tcp:7700=tcp:18700") and healthPort the emulator's
+	// port whose /health must answer 200 through them: prepDevice sets them before every flow.
+	reverse    []string
+	healthPort string
+	probePause time.Duration // between health probes (default 2 s)
 }
 
 // Record is one flow in results.json: the record shape of e2e/web/reporter.ts (merged into the
@@ -47,6 +53,8 @@ type Record struct {
 	ConsoleErrors []string `json:"console_errors"`
 	SkipReason    string   `json:"skip_reason,omitempty"`
 	Attachments   []string `json:"attachments,omitempty"`
+	// Note says the flow was run twice: the emulator's adb transport dropped, or it was not ready, on the first try.
+	Note string `json:"note,omitempty"`
 }
 
 // Results is results.json.
@@ -124,8 +132,16 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 		if ctx.Err() != nil {
 			break
 		}
-		r := c.runFlow(ctx, f)
+		var r Record
+		if f.Skipped() || c.ios() { // the simulator has no adb transport to drop
+			r, _ = c.runFlow(ctx, f)
+		} else {
+			r = c.retryOnDrop(ctx, c.flowRecord(f), func() (Record, string) { return c.runFlow(ctx, f) })
+		}
 		fmt.Fprintf(os.Stderr, "e2emobile: %-8s %s (%s, %.1f s)\n", r.Status, f.Name, f.File, float64(r.DurationMS)/1000)
+		if r.Note != "" {
+			fmt.Fprintf(os.Stderr, "e2emobile:          %s\n", r.Note)
+		}
 		if r.Status != "passed" && r.Status != "skipped" {
 			res.Status = "failed"
 		}
@@ -142,17 +158,22 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 	return res, os.WriteFile(filepath.Join(c.out, "results.json"), append(raw, '\n'), 0o644)
 }
 
-func (c *config) runFlow(ctx context.Context, f Flow) Record {
-	r := Record{Suite: c.suite(), ID: f.Slug, Title: f.Name, File: f.File, Line: 1, Status: "skipped",
+func (c *config) flowRecord(f Flow) Record {
+	return Record{Suite: c.suite(), ID: f.Slug, Title: f.Name, File: f.File, Line: 1, Status: "skipped",
 		Screenshots: []string{}, ConsoleErrors: []string{}}
+}
+
+// runFlow plays one flow; it also returns Maestro's output, for retryOnDrop.
+func (c *config) runFlow(ctx context.Context, f Flow) (Record, string) {
+	r := c.flowRecord(f)
 	if f.Skipped() {
 		r.SkipReason = f.SkipReason
-		return r
+		return r, ""
 	}
 	dir := filepath.Join(c.out, f.Slug)
 	_ = os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return failed(r, err.Error())
+		return failed(r, err.Error()), ""
 	}
 	rel := func(p string) string {
 		s, err := filepath.Rel(filepath.Dir(c.out), p)
@@ -184,7 +205,7 @@ func (c *config) runFlow(ctx context.Context, f Flow) Record {
 	r.Attachments = []string{rel(logf)}
 	if err == nil {
 		r.Status = "passed"
-		return r
+		return r, log.String()
 	}
 
 	msg := junitFailure(junit)
@@ -210,7 +231,7 @@ func (c *config) runFlow(ctx context.Context, f Flow) Record {
 	if st, err := os.Stat(debug); err == nil && st.IsDir() {
 		r.Attachments = append(r.Attachments, rel(debug))
 	}
-	return r
+	return r, log.String() + "\n" + msg
 }
 
 // androidArtifacts keeps the screen as the flow left it: a picture, the view tree (texts,
@@ -236,6 +257,87 @@ func (c *config) androidArtifacts(ctx context.Context, dir string, r *Record, re
 		}
 		r.ConsoleErrors = jsErrors(string(out), 20)
 	}
+}
+
+// deviceDropped matches what an adb transport drop leaves in Maestro's output or adb's errors
+// (adb's log has "emulator-5580: connection terminated: read failed"; every reverse tunnel goes
+// with it).
+var deviceDropped = regexp.MustCompile(`device offline|device '?[\w.:-]+'? not found|no devices/emulators found|DeviceServerDied|connection terminated`)
+
+// prepDevice readies the harness emulator for a flow. An adb transport drop takes every reverse
+// tunnel with it, so before each flow: wait for the device, set the tunnels again (adb reverse
+// replaces one that is there; never --remove-all, which would be the only global call) and
+// prove the sandbox answers from inside the emulator.
+func (c *config) prepDevice(ctx context.Context) error {
+	if _, err := c.adbCmd(ctx, "wait-for-device"); err != nil {
+		return err
+	}
+	for _, p := range c.reverse {
+		local, remote, _ := strings.Cut(p, "=")
+		if _, err := c.adbCmd(ctx, "reverse", local, remote); err != nil {
+			return err
+		}
+	}
+	if c.healthPort == "" {
+		return nil
+	}
+	// toybox nc drops the connection at stdin's EOF, hence the sleep.
+	probe := fmt.Sprintf("(printf 'GET /health HTTP/1.0\\r\\n\\r\\n'; sleep 2) | nc 127.0.0.1 %s", c.healthPort)
+	pause := c.probePause
+	if pause == 0 {
+		pause = 2 * time.Second
+	}
+	for i := 1; ; i++ {
+		out, err := c.adbCmd(ctx, "shell", probe)
+		if err == nil && bytes.Contains(out, []byte(" 200 ")) {
+			return nil
+		}
+		if i == 3 {
+			why := "no 200"
+			if err != nil {
+				why = err.Error()
+			}
+			return fmt.Errorf("the emulator can't reach the sandbox through adb reverse (localhost:%s/health): %s", c.healthPort, why)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pause):
+		}
+	}
+}
+
+// retryOnDrop readies the device and plays a test (play returns its record and the output to
+// look for a drop in). When the device was not ready or the test failed on an adb transport
+// drop, it does both once more, keeps the second result and notes the drop on it.
+func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Record, string)) Record {
+	// once returns why the try deserves another ("" when it does not).
+	once := func() (Record, string) {
+		if err := c.prepDevice(ctx); err != nil {
+			return failed(base, "the emulator was not ready for it (adb device, reverse tunnels, sandbox /health): "+err.Error()),
+				"the emulator was not ready"
+		}
+		r, out := play()
+		if r.Status != "passed" && r.Status != "skipped" && deviceDropped.MatchString(out) {
+			return r, "the emulator's adb transport dropped"
+		}
+		return r, ""
+	}
+	r, why := once()
+	if why == "" || ctx.Err() != nil {
+		return r
+	}
+	first := ""
+	if r.Error != nil {
+		first, _, _ = strings.Cut(strings.TrimSpace(*r.Error), "\n")
+		if len(first) > 300 {
+			first = first[:300] + "…"
+		}
+	}
+	fmt.Fprintf(os.Stderr, "e2emobile: %s: %s (%s); readying it again and retrying once\n", r.Title, why, first)
+	r, _ = once()
+	r.Note = fmt.Sprintf("retried once: %s on the first try (%s)", why, first)
+	return r
 }
 
 func failed(r Record, msg string) Record {

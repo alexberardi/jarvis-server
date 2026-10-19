@@ -3,6 +3,7 @@ package nodesettings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -262,6 +263,8 @@ func TestConfigPushAppliesGoldenPushesAndAcks(t *testing.T) {
 	// A push sealed for another node is left pending (not acked).
 	f.pending = append(f.pending, map[string]any{"id": "bad", "config_type": "settings:secrets",
 		"ciphertext": g.Pushes[0].Ciphertext, "nonce": g.Pushes[0].Nonce, "tag": g.Pushes[1].Tag})
+	changed := 0
+	h.SecretsChanged = func() { changed++ }
 
 	h.Handle(context.Background(), TopicConfigPush, []byte(`{"push_id":"p0","config_type":"settings:secrets"}`))
 	for i := range g.Pushes {
@@ -283,6 +286,10 @@ func TestConfigPushAppliesGoldenPushesAndAcks(t *testing.T) {
 	}
 	if st.Enabled("get_weather") {
 		t.Error("command_registry push didn't disable get_weather")
+	}
+	// Each applied secrets push (three of them) re-reads what depends on secrets.
+	if changed != 3 {
+		t.Errorf("SecretsChanged ran %d times, want 3", changed)
 	}
 }
 
@@ -431,5 +438,73 @@ func TestSnapshotCarriesTheNodeConfig(t *testing.T) {
 	nc := decryptUpload(t, f, h, "r1")["node_config"].(map[string]any)
 	if nc["wake_word_threshold"] != 0.5 || nc["hardware"].(map[string]any)["hat_detected"] != true {
 		t.Fatalf("node_config = %v", nc)
+	}
+}
+
+// The sidecar's device families and managers go in the snapshot as N: builds them, their
+// secrets read from this store: a family's sensitive value only with include_values, a
+// manager's never (N:'s honor_include_values=False).
+func TestSnapshotCarriesDeviceFamiliesAndManagers(t *testing.T) {
+	h, f, _ := newHandler(t, "n1")
+	h.Commands = func(context.Context) []Command { return nil }
+	secret := []SecretSpec{{Key: "GOVEE_KEY", Scope: "integration", ValueType: "string", Required: true, IsSensitive: true}}
+	h.Devices = func(context.Context) Devices {
+		return Devices{
+			Families: []DeviceComponent{{Entry: map[string]any{"family_name": "govee", "is_configured": true}, Secrets: secret}},
+			Managers: []DeviceComponent{{Entry: map[string]any{"manager_name": "jarvis_direct"}, Secrets: secret}},
+		}
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Store.SetSecret("GOVEE_KEY", "k-123", "integration", "string", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Handle(context.Background(), TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1","include_values":true}`))
+	snap := decryptUpload(t, f, h, "r1")
+	fams := snap["device_families"].([]any)
+	if len(fams) != 1 {
+		t.Fatalf("device_families = %v", fams)
+	}
+	fam := fams[0].(map[string]any)
+	fs := fam["secrets"].([]any)[0].(map[string]any)
+	if fam["family_name"] != "govee" || fam["is_configured"] != true || fs["is_set"] != true || fs["value"] != "k-123" {
+		t.Fatalf("family = %v", fam)
+	}
+	mgr := snap["device_managers"].([]any)[0].(map[string]any)
+	ms := mgr["secrets"].([]any)[0].(map[string]any)
+	if mgr["manager_name"] != "jarvis_direct" || ms["is_set"] != true || ms["value"] != nil {
+		t.Fatalf("manager = %v", mgr)
+	}
+}
+
+// A sealed store (a factory reset is wiping it) refuses every write and never writes a file
+// back.
+func TestSealedStoreNeverWrites(t *testing.T) {
+	dir := t.TempDir()
+	st, err := OpenStore(dir, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetEnabled("weather", false); err != nil {
+		t.Fatal(err)
+	}
+	st.Seal()
+	if err := os.Remove(filepath.Join(dir, SettingsFile)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetEnabled("weather", true); !errors.Is(err, ErrSealed) {
+		t.Fatalf("SetEnabled after Seal = %v, want ErrSealed", err)
+	}
+	if err := st.SaveData("weather", "k", obj(t, `{"a":1}`), nil); !errors.Is(err, ErrSealed) {
+		t.Fatalf("SaveData after Seal = %v, want ErrSealed", err)
+	}
+	if err := st.SaveK2(testKey, "kid", "2026-10-14T00:00:00Z"); !errors.Is(err, ErrSealed) {
+		t.Fatalf("SaveK2 after Seal = %v, want ErrSealed", err)
+	}
+	for _, f := range []string{SettingsFile, K2File} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Fatalf("%s written after Seal", f)
+		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 )
@@ -35,10 +36,11 @@ type LiveSidecars struct {
 	Live    *sidecar.Live
 	Log     *slog.Logger
 	Storage sidecar.Storage
+	Host    sidecar.Host // the Pi's SDK backends; nil registers none
 }
 
 func (s LiveSidecars) Start(ctx context.Context, python, commandsFile string) (Sidecar, error) {
-	sc, err := sidecar.Start(ctx, python, commandsFile, s.Log, s.Storage)
+	sc, err := sidecar.StartWith(ctx, python, commandsFile, s.Log, sidecar.Options{Storage: s.Storage, Host: s.Host})
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +58,8 @@ func (s LiveSidecars) Swap(sc Sidecar) {
 //	Root/pkgs/<name>.previous/   the version before the last update (what revert restores)
 //	Root/commands.json           the sidecar's list, rebuilt from pkgs/ on every change
 //	Root/venv, Root/python, Root/bin   the Python environment (Python)
+//	Root/builtins.txt            what the venv's built-in commands were installed from (Builtins)
+//	Root/tests/<name>/           a Forge test install, served for 20 minutes (TestInstall)
 //
 // One change runs at a time. Every change ends with a fresh sidecar on the new list; an
 // install or revert whose commands don't load is undone and the old sidecar keeps serving.
@@ -66,9 +70,24 @@ type Manager struct {
 	GOOS     string
 	Sidecars Sidecars
 	Log      *slog.Logger
+	// Builtins, when set (the Pi profile), are the node's own commands: every sidecar loads
+	// them, with or without packages.
+	Builtins *Builtins
+	// System, when set (the Pi profile), runs a package's apt sources, apt packages and
+	// post_install ops; without it a package that needs them is refused.
+	System *System
 
 	mu     sync.Mutex
+	now    func() time.Time  // time.Now; tests move it
 	failed map[string]string // of the sidecar in service
+}
+
+// Builtins are a node's built-in commands: a pip requirement Boot installs into the venv (once
+// per requirement), and the Python package whose *_command modules the sidecar loads, less Skip.
+type Builtins struct {
+	Requirement string
+	Package     string
+	Skip        []string
 }
 
 // Installed is one installed package.
@@ -130,11 +149,25 @@ func (m *Manager) Report() []map[string]any {
 	return out
 }
 
-// Boot starts the sidecar on the installed packages, if there are any.
+// Boot starts the sidecar on the installed packages, if there are any, and the built-ins.
 func (m *Manager) Boot(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.List()) == 0 {
+	if m.System != nil {
+		m.System.Heal(ctx, func(name string) bool {
+			return exists(filepath.Join(m.dir(name), ManifestFile)) || exists(filepath.Join(m.dir(name), CommandManifestFile))
+		})
+	}
+	m.removeTests(true)
+	if m.Builtins != nil {
+		if err := m.installBuiltins(ctx); err != nil {
+			if !exists(m.builtinsStamp()) && len(m.List()) == 0 {
+				return fmt.Errorf("installing the built-in commands: %w", err)
+			}
+			// Offline at a new pin: the venv's copy serves until the next start.
+			m.Log.Warn("packages: built-in commands not updated", "err", err)
+		}
+	} else if len(m.List()) == 0 && len(m.tests()) == 0 {
 		return nil
 	}
 	if !m.Python.Ready() {
@@ -151,22 +184,64 @@ func (m *Manager) Boot(ctx context.Context) error {
 	return nil
 }
 
+// runs are the component types beyond commands this node's sidecar loads: on a Pi (the one
+// with built-ins) device families and managers, which only its device topics use.
+func (m *Manager) runs() []string {
+	if m.Builtins != nil {
+		return DeviceTypes
+	}
+	return nil
+}
+
+func (m *Manager) builtinsStamp() string { return filepath.Join(m.Root, "builtins.txt") }
+
+// installBuiltins pip-installs the built-ins (with the SDK) unless the venv already has this
+// requirement.
+func (m *Manager) installBuiltins(ctx context.Context) error {
+	sdk := m.Python.SDK
+	if sdk == "" {
+		sdk = SDKRequirement
+	}
+	want := sdk + "\n" + m.Builtins.Requirement + "\n"
+	if b, err := os.ReadFile(m.builtinsStamp()); err == nil && string(b) == want && m.Python.Ready() {
+		return nil
+	}
+	m.Log.Info("packages: installing the built-in commands", "requirement", m.Builtins.Requirement)
+	if err := m.Python.Install(ctx, []string{m.Builtins.Requirement}); err != nil {
+		return err
+	}
+	return writeAtomic(m.builtinsStamp(), []byte(want))
+}
+
 // writeList rewrites commands.json from pkgs/ and returns how many packages it lists.
 func (m *Manager) writeList() (int, error) {
 	type entry struct {
 		Name     string   `json:"name"`
 		Root     string   `json:"root"`
 		Commands []string `json:"commands"`
+		Families []string `json:"families,omitempty"`
+		Managers []string `json:"managers,omitempty"`
 	}
 	list := []entry{}
+	pi := len(m.runs()) > 0
 	for _, in := range m.List() {
 		e := entry{Name: in.Manifest.Name, Root: in.Dir}
 		for _, c := range in.Manifest.Commands() {
 			e.Commands = append(e.Commands, c.Path)
 		}
+		if pi {
+			e.Families, e.Managers = in.Manifest.Paths("device_protocol"), in.Manifest.Paths("device_manager")
+		}
 		list = append(list, e)
 	}
-	b, err := json.MarshalIndent(map[string]any{"packages": list}, "", "  ")
+	for _, tp := range m.tests() {
+		list = append(list, entry{Name: testPrefix + tp.name, Root: tp.dir, Commands: tp.commands})
+	}
+	doc := map[string]any{"packages": list}
+	if bi := m.Builtins; bi != nil {
+		doc["builtins"] = map[string]any{"package": bi.Package, "skip": bi.Skip}
+	}
+	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return 0, err
 	}
@@ -174,10 +249,10 @@ func (m *Manager) writeList() (int, error) {
 }
 
 // start rewrites commands.json and starts a sidecar on it (not yet in service). With no
-// packages it returns nil, nil.
+// packages and no built-ins it returns nil, nil.
 func (m *Manager) start(ctx context.Context) (Sidecar, error) {
 	n, err := m.writeList()
-	if err != nil || n == 0 {
+	if err != nil || (n == 0 && m.Builtins == nil) {
 		return nil, err
 	}
 	return m.Sidecars.Start(ctx, m.Python.Interpreter(), m.commandsFile())
@@ -215,8 +290,13 @@ func (m *Manager) Install(ctx context.Context, repo, ref string) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	if err := man.CheckDesktop(m.GOOS); err != nil {
+	if err := m.checkManifest(man); err != nil {
 		return nil, err
+	}
+	if m.System != nil {
+		if err := m.System.Prepare(ctx, man); err != nil {
+			return nil, err
+		}
 	}
 	var reqs []string
 	for _, d := range man.Packages {
@@ -237,8 +317,16 @@ func (m *Manager) Install(ctx context.Context, repo, ref string) (map[string]any
 		m.putBack(live, old, update)
 		return nil, err
 	}
-	if err := m.check(ctx, man.Name); err != nil {
+	err = nil
+	if m.System != nil {
+		err = m.System.PostInstall(ctx, man)
+	}
+	if err == nil {
+		err = m.check(ctx, man.Name)
+	}
+	if err != nil {
 		m.putBack(live, old, update)
+		m.undoPostInstall(ctx, man.Name, old, update)
 		return nil, err
 	}
 	if update {
@@ -247,12 +335,37 @@ func (m *Manager) Install(ctx context.Context, repo, ref string) (map[string]any
 			m.Log.Warn("packages: couldn't keep the previous version", "package", man.Name, "err", err)
 		}
 	}
-	m.Log.Info("packages: installed", "package", man.Name, "version", man.Version, "skipped", man.Skipped())
+	m.Log.Info("packages: installed", "package", man.Name, "version", man.Version, "skipped", man.Skipped(m.runs()...))
 	details := map[string]any{"package_name": man.Name, "version": man.Version, "components": len(man.Components)}
-	if s := man.Skipped(); len(s) > 0 {
+	if s := man.Skipped(m.runs()...); len(s) > 0 {
 		details["skipped_components"] = s
 	}
 	return details, nil
+}
+
+// checkManifest refuses a package this agent can't run (CheckDesktop, or CheckPi with a System).
+func (m *Manager) checkManifest(man *Manifest) error {
+	if m.System != nil {
+		return man.CheckPi(m.runs()...)
+	}
+	return man.CheckDesktop(m.GOOS, m.runs()...)
+}
+
+// undoPostInstall follows a failed install's putBack: a fresh install's drop-ins go, an
+// update's previous version (back in place) gets its own ops again. Best effort.
+func (m *Manager) undoPostInstall(ctx context.Context, name, old string, update bool) {
+	if m.System == nil {
+		return
+	}
+	if !update {
+		m.System.RemoveDropins(ctx, name)
+		return
+	}
+	if prev, err := LoadManifest(m.dir(name)); err == nil && len(prev.PostInstall) > 0 {
+		if err := m.System.PostInstall(ctx, prev); err != nil {
+			m.Log.Warn("packages: couldn't reapply the previous version's post_install", "package", name, "err", err)
+		}
+	}
 }
 
 // check starts a sidecar on pkgs/ as it is now and puts it in service, unless it doesn't start
@@ -324,6 +437,9 @@ func (m *Manager) Uninstall(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	_ = os.RemoveAll(in.Dir + ".previous")
+	if m.System != nil {
+		m.System.RemoveDropins(ctx, in.Manifest.Name)
+	}
 	sc, err := m.start(ctx)
 	if err != nil {
 		m.commit(nil)
@@ -352,7 +468,8 @@ func (m *Manager) Revert(ctx context.Context, name string) (string, string, erro
 	}
 	defer os.RemoveAll(stage)
 	// Its dependencies first (best effort: what the newer version added is harmless).
-	if prev, err := LoadManifest(in.Dir + ".previous"); err == nil {
+	prev, err := LoadManifest(in.Dir + ".previous")
+	if err == nil {
 		var reqs []string
 		for _, d := range prev.Packages {
 			reqs = append(reqs, d.Spec())
@@ -369,7 +486,15 @@ func (m *Manager) Revert(ctx context.Context, name string) (string, string, erro
 		m.putBack(in.Dir, cur, true)
 		return "", "", err
 	}
-	if err := m.check(ctx, in.Manifest.Name); err != nil {
+	err = nil
+	if m.System != nil && prev != nil {
+		// Its post_install ops again (idempotent, as on the Python node's reinstall).
+		err = m.System.PostInstall(ctx, prev)
+	}
+	if err == nil {
+		err = m.check(ctx, in.Manifest.Name)
+	}
+	if err != nil {
 		// The previous version stays where it was, and the current one comes back.
 		if err2 := os.Rename(in.Dir, in.Dir+".previous"); err2 != nil {
 			m.Log.Error("packages: couldn't keep the previous version", "err", err2)

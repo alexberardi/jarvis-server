@@ -14,14 +14,16 @@ import (
 )
 
 // The -pi lane's fake systemd, without an agent: the unit is a shell script that logs each
-// start, sudo allows only the sudoers line, systemctl alone is refused, a restart stops the old
-// process, Restart=always restarts a crash, and systemd-run --user runs with only --setenv.
+// start, sudo allows only the sudoers lines, systemctl alone is refused, a restart stops the old
+// process, Restart=always restarts a crash until the start limit, which only reset-failed
+// clears, and systemd-run --user runs with only --setenv.
 func TestFakeSystemd(t *testing.T) {
 	work := t.TempDir()
 	starts := filepath.Join(work, "starts")
 	crash := filepath.Join(work, "crash")
 	e := &e2e{work: work, exe: filepath.Join(work, "jarvis-agent")}
-	script := "#!/bin/sh\necho \"$$ $*\" >>" + starts + "\n[ -e " + crash + " ] && { rm -f " + crash + "; exit 3; }\nexec sleep 60\n"
+	loop := filepath.Join(work, "loop")
+	script := "#!/bin/sh\necho \"$$ $*\" >>" + starts + "\n[ -e " + crash + " ] && { rm -f " + crash + "; exit 3; }\n[ -e " + loop + " ] && exit 3\nexec sleep 60\n"
 	if err := os.WriteFile(e.exe, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +89,39 @@ func TestFakeSystemd(t *testing.T) {
 	}
 	call("sudo", sudoersLine...)
 	waitStarts(4)
+
+	// A crash loop: the start limit (here 6 starts in the interval, 4 of them so far) fails the
+	// unit, Restart=always stops, and a restart is refused until reset-failed.
+	s.mu.Lock()
+	s.burst = 6
+	s.mu.Unlock()
+	if err := os.WriteFile(loop, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call("sudo", sudoersLine...)
+	waitStarts(6)
+	for end := time.Now().Add(5 * time.Second); !s.Failed() && time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+	}
+	if !s.Failed() || s.LimitHits() != 1 {
+		t.Fatalf("after %d starts: failed %v, limit hits %d", len(lines()), s.Failed(), s.LimitHits())
+	}
+	time.Sleep(1500 * time.Millisecond) // past RestartSec: nothing restarts a failed unit
+	if got := lines(); len(got) != 6 {
+		t.Fatalf("a failed unit restarted: starts %q", got)
+	}
+	if r := call("sudo", sudoersLine...); r.Code == 0 || !strings.Contains(r.Out, "failed") {
+		t.Fatalf("restarting a failed unit: %+v", r)
+	}
+	if err := os.Remove(loop); err != nil {
+		t.Fatal(err)
+	}
+	if r := call("sudo", resetFailedLine...); r.Code != 0 || s.Failed() {
+		t.Fatalf("reset-failed: %+v, failed %v", r, s.Failed())
+	}
+	if r := call("sudo", sudoersLine...); r.Code != 0 {
+		t.Fatalf("restart after reset-failed: %+v", r)
+	}
+	waitStarts(7)
 
 	out := filepath.Join(work, "env")
 	if r := call("systemd-run", "--user", "--setenv=FOO=bar", "--", "/bin/sh", "-c", "env >"+out); r.Code != 0 {

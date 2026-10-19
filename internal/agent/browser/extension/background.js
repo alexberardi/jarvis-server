@@ -12,6 +12,15 @@
 // field only when they named it as one; values are written, never read back), and click
 // presses one button by its visible label. Each refuses unless exactly one visible element
 // matches.
+//
+// Computer control (0.3.0, docs/agent/DESIGN.md §10): snapshot lists a page's interactive elements
+// with refs (with field values, except password, card and one-time-code fields), and act does one
+// thing to the element a ref names (never typing into a password field), in a task window that
+// open { background: true } creates behind the user's.
+//
+// Recording (record_start/record_stop): while the user records a task, every frame reports their
+// clicks, field changes, submits and Enter/Escape/Tab, plus navigations and downloads, as
+// structured events. Secret fields' values are never read (masked: true instead).
 "use strict";
 
 const api = globalThis.browser ?? globalThis.chrome;
@@ -253,6 +262,13 @@ const COMMANDS = {
 
   async open(args) {
     const url = checkURL(args.url);
+    if (args.background === true) {
+      // A task window behind the user's: the agent works in it without taking their focus.
+      const w = await api.windows.create({ url, focused: false, state: "normal" });
+      const tab = w.tabs?.[0] ?? (await api.tabs.query({ windowId: w.id }))[0];
+      if (!tab) throw fail("failed", "the browser opened no tab in the new window");
+      return { tab: describe(tab), window_id: w.id };
+    }
     const tab = await api.tabs.create({ url, active: true });
     await focusWindow(tab.windowId);
     return { tab: describe(tab) };
@@ -370,9 +386,130 @@ const COMMANDS = {
     if (res.error) throw fail(res.code ?? "failed", res.error);
     return { tab: describe(t), ...res };
   },
+
+  // snapshot lists the tab's visible interactive elements, every frame's, each stamped with a
+  // ref act can name. A ref is good for one snapshot (gen) of one document.
+  async snapshot(args) {
+    const t = await tabFor(args);
+    const max = clampInt(args.max, 1, SNAPSHOT_MAX, 300);
+    const gen = ++genSeq;
+    const probes = (await inject(t, { func: snapCollect, args: [gen, max], allFrames: true }))
+      .filter((p) => p?.result?.token)
+      .sort((a, b) => a.frameId - b.frameId);
+    const top = probes.find((p) => p.frameId === 0)?.result;
+    const elements = [];
+    const commit = {};
+    const frameOf = new Map();
+    for (const p of probes) {
+      const offset = elements.length;
+      const keep = Math.max(0, Math.min(p.result.elements.length, max - offset));
+      commit[p.result.token] = [offset, keep];
+      for (const e of p.result.elements.slice(0, keep)) {
+        const n = offset + e.k;
+        frameOf.set(n, p.frameId);
+        const { k, ...rest } = e;
+        elements.push({ ref: "e" + n, ...rest, frame: p.frameId });
+      }
+    }
+    await inject(t, { func: snapCommit, args: [gen, commit], allFrames: true });
+    snaps.set(t.id, { gen, frameOf });
+    return { gen, url: clip(top?.url ?? t.url, URL_MAX), title: clip(top?.title ?? t.title, TITLE_MAX), elements };
+  },
+
+  // act does one op on the element a snapshot ref names. It refuses a ref from another snapshot
+  // or document (stale_ref), and typing into a password field (password_field).
+  async act(args) {
+    const t = await tabFor(args);
+    const gen = Number(args.gen);
+    const m = /^e([1-9][0-9]{0,5})$/.exec(String(args.ref ?? ""));
+    if (!Number.isInteger(gen) || gen <= 0 || !m) throw fail("invalid_argument", "gen and ref (e.g. e12) from a snapshot are required");
+    const n = Number(m[1]);
+    const op = String(args.op ?? "");
+    if (!ACT_OPS.has(op)) throw fail("invalid_argument", `op must be one of ${[...ACT_OPS].join(", ")}`);
+    const value = String(args["value"] ?? ""); // the agent's text, not the page's
+    if (value.length > FILL_MAX) throw fail("invalid_argument", `value is longer than ${FILL_MAX} characters`);
+    const keys = Array.isArray(args.keys) ? args.keys.map(String) : [];
+    if (op === "keys" && (!keys.length || keys.some((k) => !ACT_KEYS.has(k)))) {
+      throw fail("invalid_argument", `keys must be some of ${[...ACT_KEYS].join(", ")}`);
+    }
+    const known = snaps.get(t.id);
+    if (known && known.gen !== gen) throw fail("stale_ref", "the page has a newer snapshot; take a snapshot and use its refs");
+    const probes = (await inject(t, { func: actFind, args: [gen, n], allFrames: true })).filter((p) => p?.result);
+    if (!probes.some((p) => p.result.gen === gen)) throw fail("stale_ref", "the page changed since that snapshot; take a new one");
+    if (probes.some((p) => p.result.moved)) throw fail("stale_ref", `${args.ref} moved to another frame; take a new snapshot`);
+    const holders = probes.filter((p) => p.result.found);
+    if (!holders.length) throw fail("not_found", `${args.ref} is no longer on the page; take a new snapshot`);
+    const frame = holders[0].frameId;
+    const was = known?.frameOf.get(n);
+    if (holders.length > 1 || (was != null && was !== frame)) {
+      throw fail("stale_ref", `${args.ref} moved to another frame; take a new snapshot`);
+    }
+    const [r] = await inject(t, { func: actDo, args: [gen, n, op, value, keys], frameIds: [frame] });
+    const res = r?.result;
+    if (!res) throw fail("failed", "the page returned nothing");
+    if (res.error) throw fail(res.code ?? "failed", res.error);
+    const after = await settled(t.id);
+    return { ok: true, url_after: clip(after.url, URL_MAX), title_after: clip(after.title, TITLE_MAX) };
+  },
+
+  // record_start starts recording the user's actions in every tab (recInstall), and in each tab
+  // that loads while it runs; they go to the agent as "record" events until record_stop.
+  async record_start(args) {
+    const id = String(args.recording_id ?? "");
+    if (!REC_ID.test(id)) throw fail("invalid_argument", "recording_id must be 1-64 letters, digits, _ or -");
+    if (rec && rec.id !== id) throw fail("busy", "another recording is running; stop it first");
+    if (!rec) rec = { id, seq: 0, tabs: new Set(), polling: new Set() };
+    const r = rec;
+    await Promise.all((await api.tabs.query({})).map((t) => recTab(r, t)));
+    return { ok: true, tabs: r.tabs.size };
+  },
+
+  // record_stop removes the listeners, sends what they still held, and says how many events the
+  // recording sent.
+  async record_stop(args) {
+    const id = String(args.recording_id ?? "");
+    if (!rec || rec.id !== id) throw fail("not_recording", `recording ${clip(id, 64)} isn't running`);
+    const r = rec;
+    for (const tabId of r.tabs) {
+      let res = [];
+      try {
+        res = await api.scripting.executeScript({ target: { tabId, allFrames: true }, func: recStop, args: [r.id] });
+      } catch {} // the tab is gone or can't be scripted any more
+      for (const f of res ?? []) for (const e of f?.result?.events ?? []) recPost(r, tabId, f.frameId, e);
+    }
+    rec = null;
+    return { events: r.seq };
+  },
 };
 
 const FILL_MAX = 2000;
+const SNAPSHOT_MAX = 1000;
+const ACT_OPS = new Set(["press", "set_value", "select", "check", "focus", "scroll_into_view", "keys"]);
+const ACT_KEYS = new Set(["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+
+// Snapshot generations: one sequence for all tabs, seeded from the clock so a restarted service
+// worker doesn't hand out a gen an older snapshot already used. snaps remembers each tab's last
+// snapshot (its gen and each ref's frame) while this worker lives; the page holds the rest.
+let genSeq = Math.floor(Date.now() / 1000) % 1000000000;
+const snaps = new Map();
+api.tabs.onRemoved.addListener((id) => snaps.delete(id));
+
+// settled waits (≤ 5 s) for the tab to finish loading after an act, and returns it.
+async function settled(tabId) {
+  const until = Date.now() + 5000;
+  await new Promise((r) => setTimeout(r, 150)); // a click's navigation starts a moment later
+  let t;
+  try {
+    t = await api.tabs.get(tabId);
+    while (t.status === "loading" && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 100));
+      t = await api.tabs.get(tabId);
+    }
+  } catch {
+    return { url: "", title: "" }; // the act closed the tab
+  }
+  return { url: t.pendingUrl || t.url, title: t.title };
+}
 
 // uniqueFrame probes every frame of the tab with func (a dry run) and returns the frame holding
 // the one element that matches best. Several equally good matches, anywhere, are refused.
@@ -422,6 +559,76 @@ async function mediaCandidates(args) {
   if (!out.length) throw fail("tab_not_found", "no tab to control");
   return out;
 }
+
+// --- recording ---
+
+// While a recording runs, every frame of every tab carries recInstall's listeners, which queue
+// the user's actions in this extension's isolated world. Pages have no way to message the
+// extension (no runtime.onMessage), so the background long-polls each frame instead: recPoll
+// returns as soon as the frame has an event (or after REC_POLL_MS with none), and each event goes
+// to the agent as { type: "event", event: "record", recording_id, seq, ... }. A navigation ends
+// that document's recorder; the tab's next load (tabs.onUpdated complete) installs a new one.
+const REC_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const REC_POLL_MS = 20000;
+let rec = null; // { id, seq, tabs: tab ids with a recorder, polling: "tab:frame:token" keys }
+
+function recPost(r, tabId, frameId, e) {
+  r.seq++;
+  const m = { type: "event", event: "record", recording_id: r.id, seq: r.seq, ts: Number(e.ts) || Date.now(), kind: String(e.kind), url: clip(e.url, URL_MAX) };
+  if (tabId != null) m.tab = tabId;
+  if (e.key) m.key = String(e.key);
+  if (e.mime) m.mime = clip(e.mime, 100);
+  if (e.element) m.element = { ...e.element, frame: frameId ?? 0 };
+  if (e.masked) m.masked = true;
+  else if (e["value"] != null) m["value"] = String(e["value"]);
+  if (port) post(port, m);
+}
+
+// recTab installs the recorder in every frame of t and polls each new one.
+async function recTab(r, t) {
+  if (rec !== r || !/^https?:/.test(t.url ?? "")) return;
+  let res;
+  try {
+    res = await inject(t, { func: recInstall, args: [r.id], allFrames: true });
+  } catch {
+    return; // a page the browser doesn't let extensions script
+  }
+  r.tabs.add(t.id);
+  for (const f of res) if (f?.result?.token) recPollFrame(r, t.id, f.frameId, f.result.token);
+}
+
+async function recPollFrame(r, tabId, frameId, token) {
+  const key = `${tabId}:${frameId}:${token}`;
+  if (r.polling.has(key)) return;
+  r.polling.add(key);
+  try {
+    while (rec === r) {
+      let res;
+      try {
+        [res] = await api.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: recPoll, args: [r.id, token, REC_POLL_MS] });
+      } catch {
+        break; // the frame or tab went away
+      }
+      const out = res?.result;
+      if (rec === r) for (const e of out?.events ?? []) recPost(r, tabId, frameId, e);
+      if (!out?.alive) break;
+    }
+  } finally {
+    r.polling.delete(key);
+  }
+}
+
+api.tabs.onUpdated.addListener((tabId, info, t) => {
+  const r = rec;
+  if (!r) return;
+  if (info.url && /^https?:/.test(info.url)) recPost(r, tabId, null, { kind: "navigate", url: info.url });
+  if (info.status === "complete") recTab(r, t);
+});
+api.tabs.onRemoved.addListener((id) => rec?.tabs.delete(id));
+// Downloads need the "downloads" permission; without it there is no api.downloads and no event.
+api.downloads?.onCreated.addListener((d) => {
+  if (rec) recPost(rec, null, null, { kind: "download", url: d.finalUrl || d.url, mime: d.mime });
+});
 
 // --- functions injected into pages (self-contained: they run in the page's isolated world) ---
 
@@ -751,6 +958,469 @@ function buttonAct(query, act) {
   el.scrollIntoView({ block: "center", behavior: "instant" });
   el.click();
   return { clicked: short(label), in_dialog: !!el.closest(DIALOG) };
+}
+
+// snapCollect lists this frame's visible interactive elements (the snapshot command; snapCommit
+// then stamps the ones kept). Names follow what a person reads: aria-labelledby, aria-label, the
+// <label>, placeholder, title, then the text. Values are left out for password, card and
+// one-time-code fields. The elements stay in this extension's isolated world (__jarvisSnap), out
+// of the page's reach, so act finds the very element even if the page copies a ref attribute.
+function snapCollect(gen, max) {
+  const NAME_MAX = 120;
+  const SEL = "button, input, select, textarea, [contenteditable], a[href], summary, [role]";
+  const ROLES = new Set(["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemcheckbox",
+    "menuitemradio", "option", "combobox", "textbox", "searchbox", "listbox", "slider", "spinbutton", "treeitem"]);
+  const INPUT_ROLE = { checkbox: "checkbox", radio: "radio", range: "slider", number: "spinbutton", search: "searchbox",
+    button: "button", submit: "button", reset: "button", image: "button", file: "button", color: "button" };
+  const clean = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+  const short = (s) => {
+    s = clean(s);
+    return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + "…" : s;
+  };
+  const visible = (el) => (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : true) && el.getClientRects().length > 0;
+  const typeOf = (el) => (el.localName === "input" ? (el.getAttribute("type") || "text").toLowerCase() : el.localName);
+  const isField = (el) => ["input", "select", "textarea"].includes(el.localName) || el.isContentEditable;
+  const textOf = (id) => {
+    const e = document.getElementById(id);
+    return e ? e.textContent : "";
+  };
+  const roleOf = (el) => {
+    const r = (el.getAttribute("role") || "").trim().split(/\s+/)[0].toLowerCase();
+    if (ROLES.has(r)) return r;
+    switch (el.localName) {
+      case "a":
+        return el.hasAttribute("href") ? "link" : "";
+      case "button":
+      case "summary":
+        return "button";
+      case "select":
+        return el.multiple || el.size > 1 ? "listbox" : "combobox";
+      case "textarea":
+        return "textbox";
+      case "input": {
+        const t = typeOf(el);
+        return t === "hidden" ? "" : INPUT_ROLE[t] ?? "textbox";
+      }
+    }
+    return el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable) ? "textbox" : "";
+  };
+  const nameOf = (el) => {
+    const by = (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map(textOf).join(" ");
+    const out = [by, el.getAttribute("aria-label")];
+    if (el.labels) for (const l of el.labels) out.push(l.textContent);
+    const wrap = el.closest("label");
+    if (wrap) out.push(wrap.textContent);
+    out.push(el.getAttribute("placeholder"), el.getAttribute("title"));
+    if (!isField(el)) out.push(el.innerText ?? el.textContent, el.querySelector("img[alt]")?.getAttribute("alt"));
+    if (el.localName === "input" && INPUT_ROLE[typeOf(el)] === "button") out.push(el.value, el.getAttribute("alt"));
+    return short(out.map(clean).find(Boolean) || "");
+  };
+  const secret = (el) => {
+    const t = typeOf(el);
+    const auto = (el.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
+    return t === "password" || t === "hidden" || auto.some((a) => a.startsWith("cc-") || a === "one-time-code");
+  };
+  const valueOf = (el) => {
+    if (secret(el)) return undefined;
+    if (el.localName === "select") return short([...el.selectedOptions].map((o) => o.label || o.text).join(", "));
+    if (el.localName === "textarea") return short(el.value);
+    if (el.localName === "input") {
+      const t = typeOf(el);
+      return t === "checkbox" || t === "radio" || INPUT_ROLE[t] === "button" ? undefined : short(el.value);
+    }
+    if (el.isContentEditable) return short(el.innerText);
+    return undefined;
+  };
+  const stateOf = (el) => {
+    const a = (n) => el.getAttribute(n) === "true";
+    const s = [];
+    if ((el.localName === "input" && el.checked) || a("aria-checked")) s.push("checked");
+    if (el.disabled || a("aria-disabled")) s.push("disabled");
+    if (a("aria-expanded") || (el.localName === "summary" && el.parentElement?.open)) s.push("expanded");
+    if (a("aria-selected") || (el.localName === "option" && el.selected)) s.push("selected");
+    if (el.required || a("aria-required")) s.push("required");
+    return s;
+  };
+
+  for (const el of document.querySelectorAll("[data-jarvis-ref]")) el.removeAttribute("data-jarvis-ref");
+  const pending = [];
+  const elements = [];
+  for (const el of document.querySelectorAll(SEL)) {
+    if (pending.length >= max) break;
+    const role = roleOf(el);
+    if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]")) continue;
+    pending.push(el);
+    const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
+    const v = valueOf(el);
+    if (v) e.value = v;
+    elements.push(e);
+  }
+  const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  globalThis.__jarvisSnap = { gen, token, pending, refs: null };
+  return { token, url: location.href, title: document.title, elements };
+}
+
+// snapCommit stamps the elements the snapshot kept with data-jarvis-ref="<gen>.<n>"; commit maps
+// each frame's token to its [offset, keep].
+function snapCommit(gen, commit) {
+  const s = globalThis.__jarvisSnap;
+  if (!s || s.gen !== gen || !s.pending) return { ok: false };
+  const [offset, keep] = commit[s.token] || [0, 0];
+  const refs = new Map();
+  s.pending.forEach((el, i) => {
+    if (i >= keep) return;
+    el.setAttribute("data-jarvis-ref", gen + "." + (offset + i + 1));
+    refs.set(offset + i + 1, el);
+  });
+  s.pending = null;
+  s.refs = refs;
+  return { ok: true, count: refs.size };
+}
+
+// actFind says whether this frame holds ref n of snapshot gen (and this frame's gen). Refs live
+// only in this extension's isolated world: a new document has none (stale_ref), and data-jarvis-*
+// attributes, which the page can write too, never pick the element.
+function actFind(gen, n) {
+  const s = globalThis.__jarvisSnap;
+  const g = s?.refs ? s.gen : 0;
+  if (g !== gen) return { gen: g, found: false };
+  const el = s.refs.get(n);
+  return { gen: g, found: !!el && el.isConnected && el.ownerDocument === document, moved: !!el && el.ownerDocument !== document };
+}
+
+// actDo does op on ref n of snapshot gen in this frame. Typing goes through execCommand so
+// frameworks see input events, with the native value setter as the fallback (fieldAct's writer).
+function actDo(gen, n, op, value, keys) {
+  const s = globalThis.__jarvisSnap;
+  const el = s?.refs && s.gen === gen ? s.refs.get(n) : null;
+  if (!el || !el.isConnected || el.ownerDocument !== document) return { error: "the element is no longer on the page; take a new snapshot", code: "stale_ref" };
+  const TEXTY = new Set(["", "text", "email", "search", "tel", "url", "password", "number"]);
+  const KEY_CODES = { Enter: 13, Escape: 27, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
+  const norm = (x) => String(x ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  const type = el.localName === "input" ? (el.getAttribute("type") || "").toLowerCase() : "";
+  const role = (el.getAttribute("role") || "").toLowerCase();
+  if ((el.disabled || el.getAttribute("aria-disabled") === "true") && op !== "focus" && op !== "scroll_into_view") {
+    return { error: "that element is disabled", code: "disabled" };
+  }
+  el.scrollIntoView({ block: "center", behavior: "instant" });
+  switch (op) {
+    case "press":
+      el.click();
+      break;
+    case "focus":
+      el.focus();
+      break;
+    case "scroll_into_view":
+      break;
+    case "set_value": {
+      if (el.localName === "input" && type === "password") {
+        return { error: "that is a password field: Jarvis doesn't type passwords there; the user enters it", code: "password_field" };
+      }
+      const editable = el.localName === "textarea" || (el.localName === "input" && TEXTY.has(type)) || el.isContentEditable;
+      if (!editable || el.readOnly) return { error: "that element isn't a text field", code: "invalid_argument" };
+      el.focus();
+      if (el.isContentEditable) {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      } else {
+        el.select();
+      }
+      let ok = false;
+      try {
+        ok = value ? document.execCommand("insertText", false, value) : document.execCommand("delete", false);
+      } catch {}
+      if (!ok) {
+        if (el.isContentEditable) {
+          el.textContent = value;
+        } else {
+          const proto = el.localName === "textarea" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      break;
+    }
+    case "select": {
+      if (el.localName !== "select") return { error: "select works on a drop-down list; press the option instead", code: "invalid_argument" };
+      const want = norm(value);
+      const opts = [...el.options];
+      const o = opts.find((x) => norm(x.label || x.text) === want) ?? opts.find((x) => norm(x.getAttribute("value")) === want);
+      if (!o) {
+        const have = opts.slice(0, 20).map((x) => (x.label || x.text).trim()).join("; ");
+        return { error: `no option ${JSON.stringify(String(value).slice(0, 60))}; the options are: ${have}`, code: "not_found" };
+      }
+      if (o.disabled) return { error: "that option is disabled", code: "disabled" };
+      el.focus();
+      o.selected = true; // in a single-choice list, unselects the rest
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      break;
+    }
+    case "check": {
+      const box = type === "checkbox" || type === "radio";
+      if (!box && !["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"].includes(role)) {
+        return { error: "check works on a checkbox, radio button or switch", code: "invalid_argument" };
+      }
+      const want = !/^(false|off|0|no|unchecked)$/i.test(String(value).trim());
+      const now = box ? el.checked : el.getAttribute("aria-checked") === "true";
+      if (now !== want) {
+        if (!want && (type === "radio" || role === "radio" || role === "menuitemradio")) {
+          return { error: "a radio button can't be unchecked; check another one", code: "invalid_argument" };
+        }
+        el.click();
+      }
+      break;
+    }
+    case "keys": {
+      el.focus();
+      for (const k of keys) {
+        const target = document.activeElement || el;
+        const init = { key: k, code: k, keyCode: KEY_CODES[k], which: KEY_CODES[k], bubbles: true, cancelable: true };
+        target.dispatchEvent(new KeyboardEvent("keydown", init));
+        if (k === "Enter") target.dispatchEvent(new KeyboardEvent("keypress", init));
+        target.dispatchEvent(new KeyboardEvent("keyup", init));
+      }
+      break;
+    }
+    default:
+      return { error: "unknown op", code: "invalid_argument" };
+  }
+  return { done: op };
+}
+
+// recInstall starts recording this frame's user actions for recording rid; installing it again
+// in the same document keeps the first. Elements are described as snapCollect names them (role,
+// name), with a selector: a stable id, then data-testid, then name, then an aria path. Typing is
+// reported once, with the final value, when the user stops (or moves on). Values are never read
+// from password, hidden, card, one-time-code or password-manager fields, nor from a field
+// labelled as a card, CVV, SSN or PIN: those events say masked: true instead. Only the user's own
+// (trusted) events count. The queue lives in this extension's isolated world (__jarvisRec), out
+// of the page's reach, until recPoll collects it.
+function recInstall(rid) {
+  const old = globalThis.__jarvisRec;
+  if (old && old.rid === rid) return { token: old.token };
+  if (old) old.off();
+  const NAME_MAX = 120;
+  const REC_VALUE_MAX = 500;
+  const SEL_MAX = 200;
+  const QUEUE_MAX = 1000;
+  const TYPING_IDLE_MS = 1000;
+  const REC_SECRET_LABEL = /card|cvv|cvc|csc|ssn|social security|security code|(^|[^a-z])pin([^a-z]|$)/i;
+  const INTERACTIVE = "button, input, select, textarea, [contenteditable], a[href], summary, [role]";
+  const ROLES = new Set(["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemcheckbox",
+    "menuitemradio", "option", "combobox", "textbox", "searchbox", "listbox", "slider", "spinbutton", "treeitem"]);
+  const INPUT_ROLE = { checkbox: "checkbox", radio: "radio", range: "slider", number: "spinbutton", search: "searchbox",
+    button: "button", submit: "button", reset: "button", image: "button", file: "button", color: "button" };
+  const TEXTY = new Set(["text", "email", "search", "tel", "url", "password", "number"]);
+  const clean = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+  const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  const short = (s) => cut(clean(s), NAME_MAX);
+  const typeOf = (el) => (el.localName === "input" ? (el.getAttribute("type") || "text").toLowerCase() : el.localName);
+  const isField = (el) => ["input", "select", "textarea"].includes(el.localName) || el.isContentEditable;
+  const textLike = (el) => el.localName === "textarea" || el.isContentEditable || (el.localName === "input" && TEXTY.has(typeOf(el)));
+  const textOf = (id) => {
+    const e = document.getElementById(id);
+    return e ? e.textContent : "";
+  };
+  const roleOf = (el) => {
+    const r = (el.getAttribute("role") || "").trim().split(/\s+/)[0].toLowerCase();
+    if (ROLES.has(r)) return r;
+    switch (el.localName) {
+      case "a":
+        return el.hasAttribute("href") ? "link" : "";
+      case "button":
+      case "summary":
+        return "button";
+      case "select":
+        return el.multiple || el.size > 1 ? "listbox" : "combobox";
+      case "textarea":
+        return "textbox";
+      case "form":
+        return "form";
+      case "input": {
+        const t = typeOf(el);
+        return t === "hidden" ? "" : INPUT_ROLE[t] ?? "textbox";
+      }
+    }
+    return el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable) ? "textbox" : "";
+  };
+  const nameOf = (el) => {
+    if (el.localName === "form") return short(el.getAttribute("aria-label") || el.getAttribute("name") || el.getAttribute("id"));
+    const by = (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map(textOf).join(" ");
+    const out = [by, el.getAttribute("aria-label")];
+    if (el.labels) for (const l of el.labels) out.push(l.textContent);
+    const wrap = el.closest("label");
+    if (wrap) out.push(wrap.textContent);
+    out.push(el.getAttribute("placeholder"), el.getAttribute("title"));
+    if (!isField(el)) out.push(el.innerText ?? el.textContent, el.querySelector("img[alt]")?.getAttribute("alt"));
+    if (el.localName === "input" && INPUT_ROLE[typeOf(el)] === "button") out.push(el.value, el.getAttribute("alt"));
+    return short(out.map(clean).find(Boolean) || "");
+  };
+  const secret = (el) => {
+    const t = typeOf(el);
+    const auto = (el.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
+    const label = [nameOf(el), el.getAttribute("name"), el.getAttribute("id")].join(" ").replace(/([a-z])([A-Z])/g, "$1 $2");
+    return t === "password" || t === "hidden" || REC_SECRET_LABEL.test(label) ||
+      auto.some((a) => a.startsWith("cc-") || a === "one-time-code" || a === "current-password" || a === "new-password");
+  };
+  const valueOf = (el) => {
+    if (secret(el)) return undefined;
+    if (el.localName === "select") return cut([...el.selectedOptions].map((o) => o.label || o.text).join(", "), REC_VALUE_MAX);
+    if (el.localName === "textarea") return cut(el.value, REC_VALUE_MAX);
+    if (el.localName === "input") {
+      const t = typeOf(el);
+      if (t === "checkbox" || t === "radio") return String(el.checked);
+      if (t === "file") return cut([...(el.files ?? [])].map((f) => f.name).join(", "), REC_VALUE_MAX);
+      return INPUT_ROLE[t] === "button" ? undefined : cut(el.value, REC_VALUE_MAX);
+    }
+    if (el.isContentEditable) return cut(el.innerText, REC_VALUE_MAX);
+    return undefined;
+  };
+  const quote = (s) => JSON.stringify(String(s));
+  const selectorOf = (el) => {
+    const id = el.getAttribute("id");
+    // Generated ids (react's ":r1:", "ember123") change between visits.
+    if (id && !/\d{3,}|:/.test(id) && document.querySelectorAll("#" + CSS.escape(id)).length === 1) return "#" + CSS.escape(id);
+    const tid = el.getAttribute("data-testid");
+    if (tid) return cut(`[data-testid=${quote(tid)}]`, SEL_MAX);
+    const nm = el.getAttribute("name");
+    if (nm && el.localName !== "a") return cut(`${el.localName}[name=${quote(nm)}]`, SEL_MAX);
+    const action = el.localName === "form" && el.getAttribute("action");
+    if (action) return cut(`form[action=${quote(action)}]`, SEL_MAX);
+    const path = [];
+    for (let a = el.parentElement; a && path.length < 2; a = a.parentElement) {
+      const label = clean(a.getAttribute("aria-label"));
+      if (label) path.unshift(`${a.getAttribute("role") || a.localName} ${quote(cut(label, 40))}`);
+    }
+    path.push(`${roleOf(el) || el.localName} ${quote(cut(nameOf(el), 60))}`);
+    return cut(path.join(" > "), SEL_MAX);
+  };
+  const describe = (el) => ({ role: roleOf(el), name: nameOf(el), tag: el.localName, type: typeOf(el),
+    autocomplete: clean(el.getAttribute("autocomplete")), selector: selectorOf(el) });
+  const targetOf = (ev) => {
+    let n = ev.composedPath?.()[0] ?? ev.target;
+    while (n && n.nodeType !== 1) n = n.parentNode;
+    return n;
+  };
+
+  const queue = [];
+  let waiter = null;
+  let typing = null; // { el, timer }: the field being typed in
+  const wake = () => {
+    const w = waiter;
+    waiter = null;
+    if (w) w();
+  };
+  const record = (kind, el, extra, withValue) => {
+    if (queue.length >= QUEUE_MAX) return;
+    const e = { kind, ts: Date.now(), url: location.href, ...extra };
+    if (el) {
+      e.element = describe(el);
+      if (withValue && secret(el)) {
+        e.masked = true;
+      } else if (withValue) {
+        const v = valueOf(el);
+        if (v !== undefined) e["value"] = v;
+      }
+    }
+    queue.push(e);
+    wake();
+  };
+  const flushTyping = () => {
+    if (!typing) return;
+    clearTimeout(typing.timer);
+    const el = typing.el;
+    typing = null;
+    record("input", el, {}, true);
+  };
+  const on = {
+    click(el) {
+      el = el.closest(INTERACTIVE) || el;
+      if (typing && typing.el !== el) flushTyping();
+      record("click", el, {}, false);
+    },
+    input(el) {
+      if (!textLike(el)) return;
+      if (typing && typing.el !== el) flushTyping();
+      typing ??= { el };
+      clearTimeout(typing.timer);
+      typing.timer = setTimeout(flushTyping, TYPING_IDLE_MS);
+    },
+    change(el) {
+      if (textLike(el)) {
+        if (typing?.el === el) flushTyping(); // input reports text fields
+        return;
+      }
+      flushTyping();
+      record("change", el, {}, true);
+    },
+    submit(el) {
+      flushTyping();
+      record("submit", el, {}, false);
+    },
+    keydown(el, ev) {
+      if (ev.key !== "Enter" && ev.key !== "Escape" && ev.key !== "Tab") return;
+      flushTyping();
+      record("key", el, { key: ev.key }, false);
+    },
+  };
+  const listeners = Object.entries(on).map(([type, h]) => [type, (ev) => {
+    if (!ev.isTrusted) return;
+    const el = targetOf(ev);
+    if (!el) return;
+    try {
+      h(el, ev);
+    } catch {}
+  }]);
+  listeners.push(["pagehide", () => flushTyping()]);
+  for (const [type, fn] of listeners) addEventListener(type, fn, true);
+
+  const state = {
+    rid,
+    token: Math.random().toString(36).slice(2) + Date.now().toString(36),
+    // poll returns the queued events, waiting up to waitMs for one; alive is false once stopped.
+    poll(waitMs) {
+      wake(); // one poll at a time: an older one returns now
+      if (queue.length) return { alive: true, events: queue.splice(0) };
+      return new Promise((resolve) => {
+        const fire = () => {
+          clearTimeout(timer);
+          if (waiter === fire) waiter = null;
+          resolve({ alive: globalThis.__jarvisRec === state, events: queue.splice(0) });
+        };
+        const timer = setTimeout(fire, waitMs);
+        waiter = fire;
+      });
+    },
+    // off removes the listeners and returns the events not yet collected.
+    off() {
+      flushTyping();
+      for (const [type, fn] of listeners) removeEventListener(type, fn, true);
+      if (globalThis.__jarvisRec === state) delete globalThis.__jarvisRec;
+      const events = queue.splice(0);
+      wake();
+      return events;
+    },
+  };
+  globalThis.__jarvisRec = state;
+  return { token: state.token };
+}
+
+// recPoll collects this frame's recorded events (recInstall's poll).
+function recPoll(rid, token, waitMs) {
+  const r = globalThis.__jarvisRec;
+  if (!r || r.rid !== rid || r.token !== token) return { alive: false, events: [] };
+  return r.poll(waitMs);
+}
+
+// recStop ends recording rid in this frame and returns the events it still held.
+function recStop(rid) {
+  const r = globalThis.__jarvisRec;
+  return { events: r && r.rid === rid ? r.off() : [] };
 }
 
 // --- start ---

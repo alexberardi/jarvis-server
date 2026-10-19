@@ -9,6 +9,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 )
 
@@ -24,8 +25,8 @@ func TestWirePackages(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &node.Runner{Creds: node.Creds{NodeID: "n1"}, Log: log}
-	wireNodeSettings(r, st, tools, nil, log)
-	wirePackages(r, newPackages(t.TempDir(), live, st, log), log)
+	wireNodeSettings(r, st, tools, nil, nil, nil, log)
+	wirePackages(r, newPackages(t.TempDir(), live, st, nil, log), log)
 	var topics []string
 	for k := range r.Topics {
 		topics = append(topics, k)
@@ -40,6 +41,14 @@ func TestWirePackages(t *testing.T) {
 	}
 	if dataCommands(tools) != live {
 		t.Fatal("Stored data doesn't follow the live sidecar")
+	}
+	// The Pi profile's Manager has a System: it answers test installs too.
+	pi := &node.Runner{Creds: node.Creds{NodeID: "n1"}, Log: log}
+	pm := newPackages(t.TempDir(), live, st, nil, log)
+	pm.System = packages.NewSystem(log)
+	wirePackages(pi, pm, log)
+	if pi.Topics[packages.TopicTestInstall] == nil || len(packages.Topics) != 3 {
+		t.Fatalf("pi topics = %v", pi.Topics)
 	}
 	wirePackages(r, nil, log) // the spike's --sidecar-commands: no package requests
 }

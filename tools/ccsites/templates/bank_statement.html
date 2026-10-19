@@ -1,0 +1,17 @@
+{{define "dlform"}}<form method="get" action="/{{.Site}}/statements/{{.D.Month}}/download">{{if .Moved}}<button id="export-statement" class="cta" type="submit">Download CSV</button>{{else}}<button id="download-csv" class="btn" type="submit">Download CSV</button>{{end}}</form>{{end}}
+{{define "content"}}
+{{if .Moved}}<aside class="toolbar"><span>Export</span>{{template "dlform" .}}</aside>{{end}}
+<h1>{{.D.SiteName}}: statement {{.D.Month}}</h1>
+<p>Other months: {{range .D.Months}}{{if ne . $.D.Month}}<a href="{{$.U (printf "/%s/statements/%s" $.Site .)}}">{{.}}</a> {{end}}{{end}}</p>
+{{if not .Moved}}<div class="actions">{{template "dlform" .}}</div>{{end}}
+<h2>Spending by category</h2>
+<table>
+<tr><th>Category</th><th class="num">Spent</th><th class="num">Budget</th><th></th></tr>
+{{range .D.Totals}}<tr><td>{{.Category}}</td><td class="num">${{dollars .Spent}}</td><td class="num">${{dollars .Budget}}</td><td>{{if .Over}}<span class="over">Over budget</span>{{end}}</td></tr>{{end}}
+</table>
+<h2>Transactions</h2>
+<table>
+<tr><th>Date</th><th>Description</th><th>Category</th><th class="num">Amount</th></tr>
+{{range .D.Txns}}<tr><td>{{.Date}}</td><td>{{.Description}}</td><td>{{.Category}}</td><td class="num">${{dollars .Amount}}</td></tr>{{end}}
+<tr><th colspan="3">Total</th><td class="num"><strong>${{dollars .D.Total}}</strong></td></tr>
+</table>{{end}}

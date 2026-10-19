@@ -228,18 +228,32 @@ kill_emulator() {
 }
 
 # --- the app on the emulator, logged in to a sandbox -------------------------------------------
-# reverse_sandbox tunnels the sourced sandbox.env's ports into the emulator.
-reverse_sandbox() {
+# reverse_pairs prints the tunnels from the emulator to the sourced sandbox.env, one LOCAL=REMOTE
+# per line: every sandbox listener at the same port inside the emulator (config-service hands out
+# absolute 127.0.0.1:<port> URLs), plus the baked localhost:7700 → the sandbox's config port.
+reverse_pairs() {
   local v p
-  # Every sandbox listener at the same port inside the emulator (config-service hands out absolute
-  # 127.0.0.1:<port> URLs), plus the baked localhost:7700 → the sandbox's config port.
-  "$ADB" -s "$SERIAL" reverse --remove-all
   for v in SBX_CONFIG SBX_AUTH SBX_LOGS SBX_CC SBX_LLM SBX_WHISPER SBX_TTS SBX_NOTIFICATIONS SBX_RECIPES SBX_OCR SBX_ADMIN; do
     p=${!v##*:}
-    "$ADB" -s "$SERIAL" reverse "tcp:$p" "tcp:$p" >/dev/null
+    echo "tcp:$p=tcp:$p"
   done
-  for p in 1884 9883; do "$ADB" -s "$SERIAL" reverse "tcp:$((p + JARVIS_PORT_OFFSET))" "tcp:$((p + JARVIS_PORT_OFFSET))" >/dev/null; done
-  "$ADB" -s "$SERIAL" reverse "tcp:${BAKED_CONFIG##*:}" "tcp:${SBX_CONFIG##*:}" >/dev/null
+  for p in 1884 9883; do echo "tcp:$((p + JARVIS_PORT_OFFSET))=tcp:$((p + JARVIS_PORT_OFFSET))"; done
+  echo "tcp:${BAKED_CONFIG##*:}=tcp:${SBX_CONFIG##*:}"
+}
+
+# reverse_args sets REVERSE_ARGS: the tunnels and the port to probe, as e2emobile's --reverse and
+# --health-port, which sets them again before every flow (an adb transport drop wipes them all).
+reverse_args() {
+  local pair
+  REVERSE_ARGS=(--health-port "${BAKED_CONFIG##*:}")
+  while read -r pair; do REVERSE_ARGS+=(--reverse "$pair"); done < <(reverse_pairs)
+}
+
+# reverse_sandbox tunnels the sourced sandbox.env's ports into the emulator.
+reverse_sandbox() {
+  local pair
+  "$ADB" -s "$SERIAL" reverse --remove-all
+  while read -r pair; do "$ADB" -s "$SERIAL" reverse "${pair%%=*}" "${pair#*=}" >/dev/null; done < <(reverse_pairs)
   # Prove the tunnel from inside the emulator before blaming the app.
   # (toybox nc drops the connection at stdin's EOF, hence the sleep.)
   "$ADB" -s "$SERIAL" shell "(printf 'GET /health HTTP/1.0\r\n\r\n'; sleep 2) | nc 127.0.0.1 ${BAKED_CONFIG##*:}" 2>/dev/null | grep -q ' 200 ' ||

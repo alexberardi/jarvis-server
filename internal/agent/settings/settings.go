@@ -47,6 +47,9 @@ type Settings struct {
 	FollowUpSilence *float64 `json:"follow_up_silence,omitempty"`
 	LEDs            *bool    `json:"leds,omitempty"`
 	LEDBrightness   *int     `json:"led_brightness,omitempty"`
+	// ComputerControl: Jarvis may use this computer (COMPUTER-CONTROL.md C11). Unset is off:
+	// a new install and an upgrade both start off; the menu's toggle sets it.
+	ComputerControl *bool `json:"computer_control,omitempty"`
 }
 
 // Key describes one setting: its name in the file, the `run` flag it stands for, and whether
@@ -75,6 +78,8 @@ var Keys = []Key{
 	{"follow_up_silence", "follow-up-silence", false, "seconds of silence that end a follow-up answer", func(s *Settings) any { return &s.FollowUpSilence }},
 	{"leds", "no-leds", true, "light the ReSpeaker HAT's LEDs (a Pi)", func(s *Settings) any { return &s.LEDs }},
 	{"led_brightness", "led-brightness", false, "HAT LED brightness, percent (0 to 100)", func(s *Settings) any { return &s.LEDBrightness }},
+	{"computer_control", "computer-control", false, `let Jarvis use this computer (off by default; the menu's "Computer control" sets it)`,
+		func(s *Settings) any { return &s.ComputerControl }},
 }
 
 // Lookup finds a key by its name in the file.

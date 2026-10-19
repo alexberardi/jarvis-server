@@ -18,12 +18,15 @@ import LogsPage from '@/pages/LogsPage'
 import ModelsPage from '@/pages/ModelsPage'
 import NodesPage from '@/pages/NodesPage'
 import NotFoundPage from '@/pages/NotFoundPage'
+import RecordingsPage from '@/pages/RecordingsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import SetupWizard from '@/pages/SetupWizard'
 import TraceDetailPage from '@/pages/TraceDetailPage'
 import TracesPage from '@/pages/TracesPage'
 import UpdatePage from '@/pages/UpdatePage'
 import UsersPage from '@/pages/UsersPage'
+import WorkflowEditPage from '@/pages/WorkflowEditPage'
+import WorkflowsPage from '@/pages/WorkflowsPage'
 
 /**
  * The Admin pages (webapp 01 §4.2), under /admin/. Their old top-level paths redirect, so
@@ -66,6 +69,9 @@ export function shellRoutes() {
       <Route path="/addons" element={<AddonsPage />} />
       <Route path="/inbox" element={<InboxPage />} />
       <Route path="/inbox/:id" element={<InboxItemPage />} />
+      <Route path="/workflows" element={<WorkflowsPage />} />
+      <Route path="/workflows/:id" element={<WorkflowEditPage />} />
+      <Route path="/recordings" element={<RecordingsPage />} />
       <Route path="/account" element={<AccountPage />} />
       <Route path="/admin" element={<RequireSuperuser />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />

@@ -30,9 +30,10 @@ node_env() {
 # units SCOPE lists the active services and sockets of SCOPE (system, user) that could hear the
 # test (a Jarvis node) or hold the sound card (an audio server).
 units() {
-  local s=()
-  [ "$1" = user ] && s=(--user)
-  systemctl "${s[@]}" list-units --type=service,socket --state=active --plain --no-legend \
+  local s=
+  [ "$1" = user ] && s=--user
+  # shellcheck disable=SC2086 # $s is one word or none (an empty array is unbound under set -u in bash 3.2)
+  systemctl $s list-units --type=service,socket --state=active --plain --no-legend \
     'jarvis*' 'pulseaudio*' 'pipewire*' 'wireplumber*' 2>/dev/null | awk '{print $1}'
 }
 state() { echo "system: $(units system | xargs); user: $(units user | xargs)"; }
@@ -125,7 +126,8 @@ EOF
   say "ready"
   cat <&3 >/dev/null & # a background job's stdin is /dev/null unless it is named
   CAT=$!
-  wait -n "$NODE" "$CAT"
+  # Until either ends (bash 3.2, macOS's, has no `wait -n`).
+  while kill -0 "$NODE" 2>/dev/null && kill -0 "$CAT" 2>/dev/null; do sleep 0.2; done
   if ! kill -0 "$NODE" 2>/dev/null; then say "the node exited"; exit 1; fi
   exit 0
 }
@@ -134,7 +136,8 @@ case $cmd in
   serve) serve "${@:3}" ;;
   play)
     cat >"$run/utterance.wav"
-    stat -c %s "$run/reply.raw" 2>/dev/null || echo 0
+    # wc, not stat: `stat -c` is GNU-only.
+    { wc -c <"$run/reply.raw" || echo 0; } 2>/dev/null | tr -d ' '
     (node_env aplay -q -D e2e_play "$run/utterance.wav")
     ;;
   fetch) tail -c +$((${3:-0} + 1)) "$run/reply.raw" 2>/dev/null || true ;;

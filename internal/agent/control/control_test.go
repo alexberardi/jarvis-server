@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 )
@@ -144,5 +146,73 @@ func TestHealthNamesTheVersion(t *testing.T) {
 	}
 	if r, err := Ask(dial, Ping); err != nil || r.Version != "v1.2.3" {
 		t.Fatalf("ping: %+v %v", r, err)
+	}
+}
+
+// computer-status and computer-stop: the answer carries what Jarvis is doing with the
+// computer, and what stopping did (jarvis-agent computer status|stop prints it).
+func TestComputerVerbs(t *testing.T) {
+	for _, c := range []string{ComputerStop, ComputerStatus} {
+		if !slices.Contains(Commands, c) {
+			t.Fatalf("%s isn't a command", c)
+		}
+	}
+	dir, err := shortDir(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "c.sock")
+	ln, err := browser.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := "controlling: Ordering the blue mug"
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = ServeAnswers(ctx, ln, func(cmd string) (string, error) {
+			switch cmd {
+			case ComputerStatus:
+				return activity, nil
+			case ComputerStop:
+				activity = "idle"
+				return "stopped", nil
+			}
+			return "", nil
+		}, "v9")
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	dial := func() (net.Conn, error) { return browser.Dial(path) }
+	for _, step := range []struct{ cmd, want string }{
+		{ComputerStatus, "controlling: Ordering the blue mug"},
+		{ComputerStop, "stopped"},
+		{ComputerStatus, "idle"},
+		{Ping, ""},
+	} {
+		r, err := Ask(dial, step.cmd)
+		if err != nil || r.Answer != step.want || r.Version != "v9" {
+			t.Fatalf("%s: %+v %v, want %q", step.cmd, r, err, step.want)
+		}
+	}
+}
+
+// Stopping a recording waits for the browser's last events (up to 10 s): longer than
+// IOTimeout, and both ends wait for it.
+func TestRecordStopOutlastsIOTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits past IOTimeout")
+	}
+	if Timeout(ComputerRecordStop) < 10*time.Second || Timeout(ComputerRecordStart) < 10*time.Second || Timeout(Ping) != IOTimeout {
+		t.Fatalf("timeouts: stop %v, start %v, ping %v", Timeout(ComputerRecordStop), Timeout(ComputerRecordStart), Timeout(Ping))
+	}
+	dial, _ := serve(t, func(cmd string) error {
+		if cmd == ComputerRecordStop {
+			time.Sleep(IOTimeout + 500*time.Millisecond)
+		}
+		return nil
+	})
+	if err := Send(dial, ComputerRecordStop); err != nil {
+		t.Fatal(err)
 	}
 }

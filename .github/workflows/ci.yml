@@ -126,8 +126,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install jarvis-command-sdk (sidecar test)
-        run: python -m pip install "git+https://github.com/alexberardi/jarvis-command-sdk@main"
+      # The SDK at packages.SDKRequirement's commit and jarvis-node-setup at
+      # packages.NodeCommandsRequirement's (the Pi's built-in commands for
+      # TestSidecarRunsTheNodesBuiltins): what the agent installs, so move them together.
+      - name: Install jarvis-command-sdk and the node's commands (sidecar tests)
+        run: >-
+          python -m pip install
+          "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/708193cc3e74d23294cf05625dabdac61336d57e.tar.gz"
+          "jarvis-node-setup @ https://github.com/alexberardi/jarvis-node-setup/archive/962bb56f256208cf029c16565a7ce5df0709ea8d.tar.gz"
       # desktop-file-validate checks the menu, autostart and URL-handler entries `install` writes.
       - name: Install desktop-file-utils
         if: matrix.os == 'ubuntu-latest'
@@ -432,9 +438,13 @@ jobs:
           shellcheck -s sh scripts/packaging/deb/server/postinst scripts/packaging/deb/server/prerm \
             scripts/packaging/deb/server/postrm scripts/packaging/deb/server/open-setup scripts/packaging/deb/agent/postrm
           shellcheck -s sh scripts/install-pi.sh && shellcheck scripts/install-pi-check.sh
+          shellcheck scripts/pi-soak.sh scripts/pi-soak-check.sh
       # The Pi node's installer against a scratch root and its golden file (go-pi-node.md §7 4.3).
       - name: install-pi.sh golden
         run: scripts/install-pi-check.sh
+      # The Pi node's soak script against a fake /proc, systemctl and journal (go-pi-node.md §3.19).
+      - name: pi-soak.sh check
+        run: scripts/pi-soak-check.sh
       # v0.0.1 and v0.0.2 packages (an upgrade), and a v0.0.3 jarvisd standing in for one the
       # self-updater installed.
       - name: Build the packages

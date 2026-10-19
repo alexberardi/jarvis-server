@@ -131,6 +131,18 @@ export async function createHousehold(token: string, name: string): Promise<stri
   return b.id
 }
 
+/**
+ * joinHousehold adds member to owner's household with a role (owner is its admin) and returns
+ * member signed in there: a token scoped to that household.
+ */
+export async function joinHousehold(owner: User, member: User, role = 'member'): Promise<User> {
+  await must('POST', `${env('SBX_AUTH')}/households/${owner.householdId}/members`, {
+    token: owner.token,
+    body: { user_id: member.id, role },
+  })
+  return { ...member, token: await switchHousehold(member.token, owner.householdId), householdId: owner.householdId }
+}
+
 let app: { id: string; key: string } | undefined
 /** appHeaders are an app client's credentials (made once per run with the auth admin token). */
 export async function appHeaders(): Promise<Record<string, string>> {

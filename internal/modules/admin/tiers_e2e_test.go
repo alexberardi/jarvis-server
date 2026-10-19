@@ -250,6 +250,24 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 		t.Errorf("foreign prompt edit as another household's admin: %d %v", code, out)
 	}
 
+	// Household settings: a member reads them, only that household's admin writes them.
+	hhSettings := func(hh string) string { return base + "/api/cc/api/v0/mobile/household/" + hh + "/settings" }
+	if code, out := call(t, "GET", hhSettings(h1), nil, bearer(m1)...); code != 200 {
+		t.Errorf("own household settings as a member: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", hhSettings(h2), nil, bearer(m1)...); code != 403 {
+		t.Errorf("foreign household settings as a member: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", hhSettings(h1)+"/watches.enabled", map[string]any{"value": true}, bearer(m1)...); code != 403 {
+		t.Errorf("household setting write as a member: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", hhSettings(h1)+"/watches.enabled", map[string]any{"value": true}, bearer(a1)...); code != 200 {
+		t.Errorf("household setting write as its admin: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", hhSettings(h2)+"/watches.enabled", map[string]any{"value": true}, bearer(a1)...); code != 403 {
+		t.Errorf("household setting write as another household's admin: %d %v", code, out)
+	}
+
 	// Inbox: the caller's own rows.
 	it, err := notif.CreateInboxItem(context.Background(), nil, notifmod.NewInboxItem{
 		HouseholdID: h1, UserID: &m1ID, Title: "Research done", Summary: "s", Body: "b", Category: "deep_research", SourceService: "test"})

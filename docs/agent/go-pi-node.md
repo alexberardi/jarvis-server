@@ -111,7 +111,9 @@ Tags:
 - The Go core already does this (narrower: `/commands` only).
 
 **Broker ACL:** the node may publish only `.../command-data/{op}/response/{cid}` and
-`.../context/query/response/{cid}` (`internal/platform/mqtt/auth.go:48-75`).
+`.../context/query/response/{cid}` (`internal/platform/mqtt/auth.go:48-75`). Not
+`.../context/operations/response/{cid}`: the Go node answers `context/operations` (as N: does), but the
+broker drops that answer until the ACL allows it (an access change, held for the user; §7 5.7).
 
 **Verify before acting.** jarvisd never sends `trusted`, so the node verifies `action`,
 `measure_ambient_noise` and `tool_call` with `POST /commands/{rid}/verify` (`S:bus.go:96-150`).
@@ -120,23 +122,23 @@ Tags:
 |---|---|---|---|---|
 | `report_tools` | `:454-551` | `S:nodetools.go:100` | `POST /mobile/node-tool-reports/{rid}` | done in Go core |
 | `tool_call` | `:830-923` | `S:mobile_chat.go:598`, `S:errands.go:208`, `S:signals_reactions.go:348` | `POST /device-control-results/{rid} {"output":…}` | done in Go core |
-| `action` (mobile action / device control) | `:192-298` | `S:commands.go:44`, `S:smarthome_control.go:116` | `/device-control-results/{rid}` | later |
-| `callback` | `:301-422` | `S:callbacks.go:460` | `GET /callbacks/{job}`, `POST …/result` | later |
+| `action` (mobile action / device control) | `:192-298` | `S:commands.go:44`, `S:smarthome_control.go:116` | `/device-control-results/{rid}` (top-level `{success, error, input_required}`) | done in Go core, every profile (§3.18) |
+| `callback` | `:301-422` | `S:callbacks.go:460` | `GET /callbacks/{job}`, `POST …/result` | done in Go core, every profile (§3.18) |
 | `routine` (carries the full definition) | `:926-982` | `S:routines_run.go:104-110` | `/device-control-results/{rid}` | later |
 | `enroll_voice` / `verify_voice` | `:554-803` | `S:media.go:495` | `/media/whisper/voice-profiles/*`, `/mobile/voice-profile-results/{rid}` | done in Go core (Pi profile only; a desktop's speaker is the signed-in user) |
 | `update_node_config` (settings push; restart only for `wake_word_model`) | `:1092-1177` | `S:commands.go:91` | – | done in the Pi profile (§3.14) |
 | `preview_led_pattern` | `:1180-1221` | `S:commands.go:112` | – | done in the Pi profile (§3.14) |
 | `measure_ambient_noise` | `:1257-1383` | `S:ambient.go:64` | `POST /nodes/{id}/ambient-noise-measurements/{rid}/result` | done in the Pi profile (§3.14) |
-| `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | later |
+| `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | `invalidate_device_cache`, `device_removed` done in the Pi profile (§3.17); `toggle_command` done in Go core, every profile (§3.18) |
 | `/k2/provision` (K2 AES key) | `:1622-1669` | `S:settingsreq.go:316` | `GET …/k2/provision/{rid}`, `POST …/k2/ack/{rid}` | built for the desktop agent (`internal/agent/nodesettings`, [DESIGN §16](DESIGN.md)); the Go Pi node reuses it |
 | `/settings/request` (AES-256-GCM snapshot with K2, AAD `{node}:settings:snapshot`), plus a backstop poll on connect | `:1837-1876`, `N:services/settings_snapshot_service.py:749-857` | `S:settingsreq.go:92` | `PUT …/settings/requests/{rid}/snapshot` | built for the desktop agent (`internal/agent/nodesettings`), including the app's secret Sync as source (`include_values` + user) and target (`settings:secrets` push), pinned by `sync_golden.json`; the Pi adds its node_config and hardware |
-| `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines later |
-| `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | later (sidecar) |
-| `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | later |
-| `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | later |
+| `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack; routines: `GET /nodes/{id}/routines` | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines sync done in the Pi profile (§7 5.7) |
+| `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | built (§7 parity 5.6; apt/post_install and test-install on the Pi profile only) |
+| `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | done in the Pi profile (§7 5.7) |
+| `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | done in the Pi profile (§3.17) |
 | `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | done in the Pi profile (§3.15) |
-| `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | later |
-| `/command-data/{op}`, `/context/{op}` (the node **publishes** responses) | `:2484-2501` | `S:commanddata.go:119` | MQTT publish | command-data built for the desktop agent (`nodesettings.CommandData` over the sidecar's packages, pinned by the Python node's own handler, [DESIGN §16](DESIGN.md)); context later |
+| `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | done in the Pi profile (§3.17) |
+| `/command-data/{op}`, `/context/{op}` (the node **publishes** responses) | `:2484-2501` | `S:commanddata.go:119` | MQTT publish | command-data built for the desktop agent (`nodesettings.CommandData` over the sidecar's packages, pinned by the Python node's own handler, [DESIGN §16](DESIGN.md)); context done in the Pi profile (§7 5.7) |
 | `tts`, `train_adapter`, `/camera-credentials`; the button publishes (denied by the ACL) | various | none or no route | – | drop |
 
 ### 1.3 Heartbeat
@@ -456,8 +458,9 @@ barge-in's energy gate keeps the reply from interrupting itself), device selecti
   `desktop_close_window` is marked `is_risky` (only errands' planner reads that) and is a
   graceful close (the app may prompt to save); nothing else the desktop offers is
   destructive. See DESIGN.md §9 Q2.
-- **Not ported:** `act_on_items`, `post_process_tool_call`, music takeover. (`wait_for_input`,
-  `clear_history` and `on_response_complete` landed with follow-up, §3.9.)
+- **Not ported:** `act_on_items`, `post_process_tool_call`. (`wait_for_input`,
+  `clear_history` and `on_response_complete` landed with follow-up, §3.9; music takeover with
+  §3.16.)
 
 **Verified live** (2026-10-10, `listen --voice-input wav:… --no-chimes`, Kokoro-rendered
 "Hey Jarvis." + command, against this box's dev jarvisd, as the MBP's node):
@@ -720,10 +723,32 @@ JARVIS_AGENT_LOG=debug ...                                                 # log
 - **Button** = `button_service.py`: active low with pull-up via go-gpiocdev (gpiochip0 line 17),
   50 ms debounce, `shutdown_warning` after 1 s held, power off after 3 s
   (`sudo -n systemctl poweroff`; `--button-poweroff=false` turns it off), the overlay cleared on
-  every release. A short press logs only: the Go node has no alert queue yet (Python reads
-  queued alerts). The MQTT `button/*` publishes are not sent (the ACL denies them, §1.4).
-- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`), alert-queue
-  wiring of the `alert` pattern. (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
+  every release. A short press reads every pending alert, most urgent first, then removes them,
+  or says "No new notifications." (N:`announce_pending_and_flush`); with nothing heard (no
+  pipeline listening) they stay queued and the LEDs flash `error` for 2 s (loop #175). The MQTT
+  `button/*` publishes are not sent (the ACL denies them, §1.4).
+- **Alert pattern** (loop #175): the stable layer is `alert` (middle LED purple) while the queue
+  holds an alert at priority 3 or above, `normal` otherwise (N:main.py's `on_change`, re-synced
+  by the queue's 10 s sweep).
+- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`).
+  (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
+
+**Reminders and alerts on the lab Pi 4** (loop #175; not run yet: no runner reaches the Pi). Lab
+Pi 4 only, never the kitchen node:
+
+```bash
+sudo systemctl stop jarvis-node
+JARVIS_AGENT_LOG=debug jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# "hey Jarvis, remind me in 2 minutes to check the oven" → "Reminder set: …"
+#   by ~5 min after setting it (the poll is 300 s while none is pending, then 60 s):
+#   log "reminders: due", the middle LED purple,
+#   then "Reminder: check the oven" said between turns, log "alerts: announced"; LED back to white
+# set another, and keep a turn going when it falls due: it is said once the turn ends
+# "hey Jarvis, what's up?" with one queued: whats_up lists it, the LED goes white
+# a short button press with one queued: it is read out; with none: "No new notifications."
+# the push (reminder settings: push notifications on): the owner's phone gets "Reminder"
+sudo systemctl start jarvis-node
+```
 
 **Verified on hardware** (Python node stopped for each test and restarted after; both Pis are back
 as they were):
@@ -776,6 +801,16 @@ the wake word counts trailing silence from its first chunk, so a pause longer th
 silence window (after the 2 s minimum) cut the speaker off. With a wait set, silence can end the
 recording only once speech has been heard (a chunk at or above the threshold) or the wait is
 over; the 7 s cap still applies. 0 keeps the Python node's behaviour.
+
+**`--listen-preroll DURATION`** (default 1s; `Endpointing.PreRollSecs`; loop #229). The wake
+chime plays synchronously after the fire, and everything the microphone captured meanwhile used
+to be flushed (the Python node's `history_secs=0`). A command said right after "hey Jarvis"
+starts under the chime, so on the Pi 4 "Set a timer" was heard as "It's at a timer". Now up to
+this much of the audio queued since the fire (at most the 1.28 s queue) goes in front of the
+recording. Endpointing still starts after the chime, and the follow-up gate's level reference is
+measured without the pre-roll (it may hold the chime's echo). The wake word is not in it: it
+ended before the fire. The turn line reports it (`recorded 2.40 s (pre-roll 0.32 s, …)`, log
+`pre_roll_s`), which is how the Pi lane measures the chime gap. 0 is the old behaviour.
 
 **`--wake-debounce DURATION`** (default 8s, the Python node's; at least 500ms): no second wake
 this soon after one.
@@ -938,6 +973,318 @@ paplay -d bluez_sink.<MAC_>.a2dp_sink /usr/share/sounds/alsa/Front_Center.wav   
 sudo systemctl start jarvis-node
 ```
 
+### 3.16 Parity 5.11: music ducking and takeover (2026-10-19, loop #180 17a)
+
+`internal/agent/music` ports `N:core/music_control.py`; the Pi profile wires it
+([decision](../decisions/2026-10-19-pi-node-music-ducking.md), which also lists #180's other
+four slices, 17b–17e, still to build).
+
+| When | Does |
+|---|---|
+| Wake word fires; before each follow-up listen | `Duck`, in the background: SIGSTOP class (mpv, ffplay, cvlc, vlc, spotifyd, librespot) moved to the `jarvis_duck_null` sink and SIGSTOPped; mute-only class (shairport-sync, go-librespot, mpd) set to 20% of the stream (its volume saved once per turn), muted if the volume can't be read |
+| The turn is over (follow-ups included) | `Restore` (SIGCONT, moves back to `@DEFAULT_SINK@`, unmute, saved volumes back), then each `on_response_complete`; a deferred play that ran marks the node's own music as playing |
+| The node's own music starts / stops | The HAT's mic PGA drops to 49% / goes back to what it was (a no-op on the installer's 49% baseline); at start, a PGA left at the music level is put back |
+| A music command's call with `action: "play"` | `sdkhost.Host.BeforeCall` stops every other player that has an uncorked stream: mpd by `stop`+`clear` on :6600, go-librespot by `POST :3678/player/pause`, the rest by SIGINT; the command's own player (`takes_over_playback_binary`, else N:'s legacy map) is left alone |
+
+The voice pipeline runs the duck and restore steps in order on one background queue
+(`voice/music.go`), so a restore never overtakes a slow duck and listening never waits for
+pactl; `Run` waits for the queue, so a stopping agent still restores the music. It runs on a Pi
+install only (the HAT or `/etc/jarvis-node`): `--profile pi` on a dev box (node-sim, the voice
+lane) leaves the user's own players alone.
+
+**Verified** with unit tests: N:'s `tests/test_music_control.py` cases over a fake pactl/pkill
+(`music_test.go`, including the control-API invariant that mpd, go-librespot and shairport-sync
+are never SIGSTOPped), a fake mpd port and go-librespot API, the PGA read/write against amixer's
+output (`hat/codec_test.go`), the pipeline's step order through a whole turn with a deferred
+play (`voice/music_test.go`), and the takeover hook through a real Python sidecar
+(`TestSidecarTakeoverHook`). **Not yet on a Pi.** On the lab Pi 4 (never the prod kitchen node),
+with a music package installed (Spotify or Audacy):
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# "Hey Jarvis, play some jazz on Spotify": the reply, then the music starts (deferred play);
+#   the log has "music: restore" then "music: mic gain profile engaged" (or nothing, at 49% already)
+pactl list sink-inputs short           # the player's stream on jarvis_output
+# "Hey Jarvis" over the music: it drops to ~20% while you speak ("music: duck ... ducked=[N]")
+#   and comes back to its own level after the reply ("music: restore ... unducked=[N]")
+amixer -c seeed2micvoicec sget PGA     # 49% while the music plays
+# "Hey Jarvis, play Z100 on Audacy" while Spotify plays: Spotify stops ("music: takeover ...
+#   stopped=[go-librespot]"), then the station plays
+# "Hey Jarvis, stop the music": answered at once (go-librespot/mpd were never frozen)
+sudo systemctl start jarvis-node
+```
+
+### 3.17 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)
+
+The Pi profile answers the app's device requests over the household's device families, which
+are Pantry packages' Python (`device_families/<name>/protocol.py`, SDK `IJarvisDeviceProtocol`;
+managers in `device_managers/<name>/manager.py`). The package sidecar loads them (a Pi's
+`commands.json` lists `families` and `managers` per package) and does what N:'s
+`device_*_handler.py` did; Go (`internal/agent/devices`, wired by
+`cmd/jarvis-agent/devices.go`) owns MQTT, the uploads and the registry. Decisions:
+[decisions/2026-10-19-pi-node-device-registry.md](../decisions/2026-10-19-pi-node-device-registry.md).
+
+| Message | Does | Reply |
+|---|---|---|
+| `device-scan` (`request_id`) | every configured family's `discover()` (10 s, together), deduplicated by MAC > IP > cloud id > entity id, a taken `entity_id` suffixed `_<protocol>`; `extra` dropped, the family's `supported_actions` added | `POST …/device-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
+| `device-list` (`request_id`, `manager_name`; jarvisd sends `all`) | `jarvis_direct` (the families' devices as manager devices), a Pantry manager's `collect_devices()`, or all of them | `POST …/device-list/{rid}/results` `{"devices", "manager_name", "can_edit_devices"}` or the error shape |
+| `device-state` (`request_id`, `entity_id`, `domain`, `protocol`, `source`, `local_ip`, `mac_address`, `cloud_id`) | the family's `get_state()`, normalised by N:'s domain handler (light, climate, switch, lock, camera, cover, media_player, kettle) with UI hints; `needs_pairing` → `control_type: pairing` | `POST /device-state-results/{rid}` |
+| verb `invalidate_device_cache` | drop the registry; the next read fetches it | – |
+| verb `device_removed` (the device) | the family's `on_removed()` (a HomeKit unpair), then drop the registry | – |
+| `jarvis/auth/{provider}/ready` (`provider`, `node_id`) | this node's only: `GET /oauth/provider/{p}/credentials` (once), `user_id` as the SDK user, `base_url` also as `_base_url`, to the command or family whose `authentication.provider` matches (`store_auth_values`); beat again | – |
+
+The registry is `GET /api/v0/node/devices` (direct devices), fetched on the first connect and
+every 5 minutes, for device control (#177). The heartbeat sends `protocols` (the configured
+families, sorted) and beats again when the sidecar comes up, so jarvisd's `pickNode` sends a
+family's device state and removal here. The settings snapshot lists `device_families` and
+`device_managers` in N:'s shape, so the app can set a family's secrets on this node. The
+families are described again for every snapshot and after each secrets push (which also beats),
+so a family the app configures with an API key shows `is_configured` and joins `protocols`
+without a restart.
+
+**Verified** with sidecar tests over a fake family package
+(`internal/agent/sidecar/testdata/packages/lights`: scan, collisions, list, state per domain with
+Python's rounding, pairing, `on_removed`, OAuth turning a family on), handler and registry tests
+over a fake jarvisd, the runner's subscription to `jarvis/auth/+/ready` on the real broker, and
+end to end on a sandbox jarvisd: the real `jarvis-agent --profile pi` (`scripts/sandbox node-sim`)
+with that package, through jarvisd's own routes (scan request → completed with the devices,
+list, import, state of a light and a thermostat, delete → `on_removed`). **Not yet on a Pi** or
+with a real family. On the lab Pi 4 (never the prod kitchen node), with a family package from
+Pantry whose devices are on the LAN (Kasa, LIFX, Govee):
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# The app: install the family's package on this node (Pantry), then Settings → Smart home:
+#   primary node = this node
+#   Devices → Scan: the LAN devices are listed; the log has "devices: scan requested"
+#   Add them; open one: its state and controls show (the log has "devices: state requested")
+#   A cloud family with OAuth: sign in; the log has "devices: auth credentials stored", and the
+#     next scan lists its devices
+#   Delete a device: the log has "devices: device removed ... ran=true"
+sudo systemctl start jarvis-node
+```
+
+### 3.18 Parity 5.9b: device control, actions, callbacks, toggle_command (2026-10-19, loop #177)
+
+Three verbs from N:'s `mqtt_tts_listener.py` (`handle_action` `:193-298`, `handle_callback`
+`:302-452`, `handle_toggle_command` `:1009-1040`), in `internal/agent/actions` (wired by
+`cmd/jarvis-agent/actions.go` on **every profile**). The commands and families run in the
+sidecar (`action` and `callback` methods in `jarvis_sidecar.py`); Go verifies, fetches and posts.
+Decisions: [decisions/2026-10-19-pi-node-device-control.md](../decisions/2026-10-19-pi-node-device-control.md).
+
+| Verb (details) | Does | Reply |
+|---|---|---|
+| `action` (`request_id`, `command_name`, `action_name`, `context`, `user_id`?, `reply_request_id`?) | `POST /commands/{rid}/verify` first (dropped, no reply, if it fails: jarvisd never sends `trusted`); then the command's `handle_action(action, context)` as the user, or for `control_device` with no such command (or one the household turned off) the family named by `context.protocol`: `control(device, action, context)`, the device built from the context as N: does and passed where the SDK says `ip`, on one persistent event loop so a pairing session survives `pair_start` → `pair_finish`. A voice-originated action (no `reply_request_id`) has its `message` said between turns | `POST /device-control-results/{reply_request_id or request_id}` `{"success", "error", "input_required"?}` (top level, not `{"output"}`) |
+| `callback` (`request_id` = the job) | `GET /callbacks/{job}` (the verification; nothing is posted if it fails), then the command's `@callback` (`get_callbacks()[name](data, RequestInformation)`) as the user | `POST /callbacks/{job}/result` `{"success", "error", "context_data"?}`; every failure after the fetch is a result too (N:'s messages: unknown command, no callbacks, unknown callback, a raise) |
+| `toggle_command` (`command_name`, `enabled` read as N: does: true/1/yes) | the settings store's switch (the `command_registry` push's): the command leaves `report_tools` and voice turns, and `action`/`callback` treat it as absent | – |
+
+**Verified** with handler tests over a fake jarvisd (verification, both reply ids, the top-level
+body, input_required, the spoken message, every callback failure, the lax bool), real-sidecar
+tests (the fake `fakelight` family: the device it is handed, a raise, unknown protocol, pairing
+across calls with a scan in between; a test command's `handle_action`, SDK `cancel_click`,
+`@callback`s and their failures), and end to end on a sandbox jarvisd: the real
+`jarvis-agent run --profile pi` with the fake family, through jarvisd's
+`POST /households/{hh}/devices/{id}/control` (turn on/off → 200 `success: true`, a raising
+family → `success: false` with its error, `pair_start` → `input_required`, `pair_finish` with the
+PIN → `success: true`) and `PUT …/smart-home/config` `use_external_devices` → `toggle_command`.
+A routine's device step does not reach a Go node yet: jarvisd sends routines as the `routine`
+verb (§1 table, still to port), not as `action`.
+**Not yet on a Pi** or with a real family. On the lab Pi 4 (never the prod kitchen node), with a
+family package from Pantry whose device is on the LAN (Kasa, LIFX, Govee), after §3.17's steps:
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# The app: Devices → the family's device → toggle it on and off: the device follows, no
+#   "node did not respond"; the log has "msg=action command=control_device ... success=true"
+# Settings → Smart home → use external devices on and off: the log has "msg=toggle_command"
+sudo systemctl start jarvis-node
+```
+
+### 3.19 The soak, the parity checklist and the Python node's retirement (2026-10-19, loop #181)
+
+**Status:** the soak tooling is written and tested without a Pi; **the soak has not run** (no
+runner reaches a Pi: it is the user's QA, below). **The retirement is BLOCKED** on the open parity
+gaps (a)–(e) in the checklist and on a passing soak. The user chose this order on 2026-10-19:
+the docs and the script now, the gaps as their own items.
+
+**`scripts/pi-soak.sh`** runs on the Pi as the node's user. `run --lab-host NAME` refuses unless
+`hostname` is NAME, and refuses any host whose name contains "kitchen". It stops
+`jarvis-node.service`, starts the installed `jarvis-agent.service` (§6; its `Conflicts=` keeps the
+two off the HAT together) and puts both back as they were on any exit: the end, Ctrl-C, TERM or an
+error. It writes to one directory:
+
+- `samples.csv`: one row every `--interval` (60 s). The agent's CPU as % of one core (from
+  `/proc/PID/stat` deltas, as §3.11 measured it), its RSS, PSS, anonymous and swap
+  (`smaps_rollup`), the same for its child processes (the command sidecar), MemAvailable, swap in
+  use, load, SoC temperature, `vcgencmd get_throttled`, and the unit's `NRestarts`.
+- `turns.log`: one scripted turn per command family every `--turns-every` (4 h; the first round
+  5 min in). `<family>.wav` from `--wavs DIR` plays out of the HAT's speaker (`aplay -D output`)
+  to the running node. It passes when the node logs `msg="voice turn" outcome=spoken` within
+  `--turn-wait` (90 s), and when the line matches `<family>.expect` (an extended regex), if that
+  file exists.
+- `journal.log`: the unit's journal for the run, taken after the stop so that it holds the
+  capture stats.
+- `summary.md`: the numbers for the results table below. Overruns and dropped chunks are the sums
+  of `msg="voice: capture stats"` (printed when a pipeline stops, so at every restart and at the
+  end). It also counts pipeline restarts (`voice: pipeline stopped; restarting`), wakes
+  (`msg=wake`), turn outcomes, false wakes (`non_speech` + `not_for_me` turns), and ERROR/WARN
+  lines and panics.
+
+`scripts/pi-soak-check.sh` (CI `deb` job, next to `install-pi-check.sh`) runs it against a fake
+`/proc`, `/sys`, systemctl, journalctl and hostname. It checks the refusals, the stop/start order,
+the sample columns, the turn verdicts, every summary count, `summarize` again from the files, and
+a TERM partway through that still puts the Python node back. The awk is POSIX (Raspberry Pi OS
+ships mawk); the check also passes under `gawk --posix`.
+
+**Running the soak** (user QA). Use the lab Zero 2 W (<dev-node>), or the lab Pi 4 (<pi4-node>)
+for a first short run. **Never the prod kitchen node.** The §3.11 rules apply: the Python node
+stays installed and the script starts it again at the end. Do not reboot during the run: the
+Python unit is still enabled, so a boot would bring it back and stop the Go node (the samples
+show `pid` 0).
+
+```bash
+# Your machine: the script to the lab Pi.
+scp scripts/pi-soak.sh <user>@<dev-node>.local:~/
+ssh <user>@<dev-node>.local
+
+# The Pi, once: the Go node next to the Python node, NOT activated (the unit stays disabled).
+curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/<tag>/install-pi.sh && sudo sh install-pi.sh
+# Its own identity, as the node's user (pi, the unit's User=): approve the code it prints in the
+# app or the admin Nodes page. It is a new node, not the Python node's (the retirement proposal).
+/opt/jarvis-agent/jarvis-agent enroll --server <prod-host> --room lab
+
+# The turn recordings, once, with the Python node stopped so that the mic is free. Say each
+# phrase when "say:" appears; 5 s each. Families: the built-ins in the sidecar plus music.
+sudo systemctl stop jarvis-node
+mkdir -p ~/soak-wavs && cd ~/soak-wavs
+rec() { echo "say: $2"; sleep 1; arecord -q -D dsnoopmic -f S16_LE -r 16000 -c 1 -d 5 "$1.wav"; }
+rec time       "hey Jarvis, what time is it?"
+rec weather    "hey Jarvis, what's the weather today?"
+rec timer      "hey Jarvis, set a timer for one minute"
+rec reminder   "hey Jarvis, remind me in two minutes to check the soak"
+rec calculate  "hey Jarvis, what is twelve times nineteen?"
+rec joke       "hey Jarvis, tell me a joke"
+rec whats_up   "hey Jarvis, what's up?"
+rec music      "hey Jarvis, play some jazz on Spotify"
+rec music_stop "hey Jarvis, stop the music"
+echo '228' >calculate.expect
+echo 'timer' >timer.expect
+cd ~ && sudo systemctl start jarvis-node
+
+# The soak: 24 h inside tmux so that it outlives the ssh session (sudo -v first: it uses sudo -n).
+sudo -v
+# Type the lab Pi's hostname yourself: the guard is that it must equal `hostname`.
+tmux new -s soak "./pi-soak.sh run --lab-host <dev-node> --duration 24h --wavs ~/soak-wavs --out ~/pi-soak-zero2w; bash"
+# Detach with Ctrl-b d; check on it with: tail -3 ~/pi-soak-zero2w/samples.csv; cat ~/pi-soak-zero2w/turns.log
+# Stop it early with Ctrl-C in the tmux window: the Python node is started again and the summary written.
+
+# Afterwards, from your machine:
+scp -r <user>@<dev-node>.local:pi-soak-zero2w .
+ssh <user>@<dev-node>.local systemctl is-active jarvis-node jarvis-agent   # active, inactive
+```
+
+By hand, once during the soak (not scriptable): device control from the app (Devices → toggle a
+device, §3.18; voice control is gap (b)); Bluetooth status in the node's Hardware tab (§3.15); a
+reminder heard on its own when due (§3.11); the LEDs through a turn and a short button press.
+Write the results in the table.
+
+**Results** (to fill in from `summary.md`; the Python column is §3.11's 5-minute measurement on
+the same Zero 2 W):
+
+| | Go node, 24 h soak, Zero 2 W | Python node (§3.11, 5 min idle) |
+|---|---|---|
+| Date, agent version | | 2026-10-12 |
+| CPU, % of one core: mean / p95 / max | | 87.1% (mean) |
+| RSS MB: min / mean / max (first → last, for a leak) | | – |
+| Anonymous MB: mean / max (first → last) | | 129 MB |
+| Sidecar RSS MB: mean / max | | (in the process) |
+| Swap in use, max | | 106 MB |
+| SoC temperature max; throttling | | |
+| Unit restarts / pipeline restarts | | 0 / 0 (5 min) |
+| ALSA overruns / dropped chunks | | 0 (5 min) |
+| Wakes / false wakes | | |
+| Scripted turns passed (per family in `summary.md`) | | |
+| Errors / warnings / panics | | |
+| By hand: device control, Bluetooth, reminder, LEDs and button | | |
+
+**Pass bar to propose** (the user's to change): no unit or pipeline restarts; overruns at most 1
+an hour; the last hour's anonymous memory within 10% of the first hour's (no leak); a mean CPU at
+or below §3.11's 55% plus the sidecar's idle cost; no throttling; every scripted turn passes; at
+most 2 false wakes a day in the lab.
+
+#### Parity checklist (main at 94952cd, 2026-10-19)
+
+"Built" means unit tests or a sandbox jarvisd. "On a Pi" means checked on the lab Pi 4 or the
+Zero 2 W. Every Pi item from loop #159–#180, #220 and #229 is still in QA, and none has been
+checked on the lab Pi 4 since it was built.
+
+| §7 item | Status | On a Pi |
+|---|---|---|
+| 4.1 HAT audio, LEDs, button | built | **verified** (§3.11: every pattern over SPI, the button line, a `wav:` turn, idle CPU/RSS, 0 overruns) |
+| 4.1 Pi profile, HAT codec self-heal | built | no |
+| 4.2 self-update on the Pi | built | partly: `systemd-run --user` reaches pi's manager; **open (e)**: the rollback repro after rerunning `install-pi.sh` (#220) |
+| 4.3 `install-pi.sh` (3a, 3b), the release | built | no; no published release yet |
+| 4.4 provisioning API, NetworkManager backend, recovery | built | no; **open (d)**: setup mode is not started at boot |
+| 4.5 the built-in commands in the sidecar; reminders, alerts, button | built | no; **open (b)**: `control_device`, `routine`, `send_link` are skipped (`internal/agent/packages/python.go:58`) |
+| 5.1 follow-up | built (heard on the desktop) | no |
+| 5.2 barge-in | built (rig tests) | no |
+| 5.3 client tools / continue | built | no |
+| 5.4 `update_node_config`, ambient noise, LED preview | built; Pi volume not applied | no |
+| 5.5 K2 + settings snapshot | built for the desktop agent (`internal/agent/nodesettings`); the Pi reports its `node_config` | **open (c)**: not marked done or checked for the Pi profile; the snapshot's volume says "no Pi volume control" |
+| 5.6 packages (apt, post_install, test-install) | built | no |
+| 5.7 factory reset, routines sync, context requests | built | no; **open (d)**: a reset node doesn't return to provisioning; jarvisd's broker drops `context/operations` answers (ACL, held for the user) |
+| 5.8 Bluetooth | built | no |
+| 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
+| 5.10 voice-profile takes | built | no |
+| 5.11 music ducking and takeover (17a) | built | no; **open (a)**: 17b echo cancellation during music, 17c tentative wake and `pre_wake_speech_seconds`, 17d wake auto-calibration and the false-wake cool-down, 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
+
+What each open gap blocks, if the Python node were retired today:
+
+- **(a)** music is louder in the mic than with the Python node (no AEC), so wakes over music fail
+  more often; there is no tentative wake, no auto-calibration and no false-wake cool-down; and a
+  Pi without the HAT has no LED at all.
+- **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
+  the node. The app's device control still works.
+- **(c)** the app's node settings (and their secrets' Sync) may not reach a Pi; not confirmed.
+- **(d)** a factory reset (from the app or the provisioning API) leaves a node that is offline
+  with no hotspot: someone has to reinstall it by hand.
+- **(e)** a bad release that crash-loops may not roll back by itself on a Pi.
+
+#### Retirement proposal (BLOCKED on (a)–(e) and the soak; for the user to approve)
+
+Nothing here is done. It is the order proposed once the checklist has no open row, every Pi item
+is checked on the lab Pi 4 and the soak meets the pass bar:
+
+1. **The `install_mode` switch.** Today `install-pi.sh` installs `jarvis-agent.service` disabled
+   and `--activate` swaps the nodes
+   ([decision](../decisions/2026-10-17-pi-node-activation.md)); jarvisd tells them apart by the
+   heartbeat (`install_mode "tarball"`, `runtime "go"`, §8 Q6). Proposed: on a Pi with no
+   `jarvis-node.service`, `install-pi.sh` activates by default; on a Pi with one, it stays
+   opt-in. After the kitchen node has run on Go for a week, `--activate` becomes the default
+   everywhere, and `--keep-python` the way out.
+2. **The identity.** The Go node enrolls as a new node (`~/.config/jarvis-agent/node.json`). No
+   code takes over the Python node's node id, room or settings: there is none for this in
+   `internal/agent` or `cmd/jarvis-agent`. Either a migration is built (an item of its own:
+   read the Python node's credentials, keep the node id), or the swap is "enroll, move the room,
+   delete the old node" and the docs say so. **The user decides which.**
+3. **The docs.** README's Raspberry Pi section (it still says there is no installer, hotspot,
+   self-update or package support, and that jarvis-node-setup is the supported Pi node), §6's
+   install as the one way to set up a Pi, docs/install's `00-installers.md` (the install-pi.sh
+   section becomes the Pi's only installer), `docs/STATUS.md`, and jarvis-docs (STATUS's open
+   docs item).
+4. **jarvis-node-setup.** Archive the **node** on GitHub, after a final release whose README
+   points to `install-pi.sh`: `install.sh`, the service and the node code. **Keep the commands
+   package:** the sidecar still pip-installs jarvis-node-setup at a pinned commit
+   (`packages.NodeCommandsRequirement`, `internal/agent/packages/python.go:48`) for the
+   built-in commands. Before the repository is archived, either move those commands into their
+   own package (or Pantry), or keep the repository unarchived and read-only for the node part.
+   An archived repository still serves the pinned tarball, but no fix can land in it.
+5. **Last:** jarvisd's Python-node-only paths (the jarvis-node-setup release as "latest" for
+   nodes with no runtime, §7 4.2) stay until no heartbeat in the field reports a Python node.
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -982,7 +1329,7 @@ fail only because they import 3-line `core.*` files that re-export SDK classes:
 | send_link | `jarvis_log_client`; lazy `RestClient` + discovery → `/node/send-link` | needs **CC POST** |
 | shopping_list, todo_list | `jarvis_log_client`; SDK `JarvisStorage` | needs **Storage** backend |
 | export_shopping_list, export_todo_list | as above, plus a hand-rolled `/node/inbox-item` POST (should use SDK `JarvisInbox`) | needs Storage + Inbox |
-| reminder | `services.reminder_service` (itself only JarvisStorage + logger); firing is in `agents/reminder_agent.py` | needs Storage; the **host** owns the due-poll and announcement |
+| reminder | `services.reminder_service` (itself only JarvisStorage + logger); firing is in `agents/reminder_agent.py` | needs Storage; the **host** owns the due-poll and announcement (loop #175: the sidecar's `reminders_due`, polled by `internal/agent/reminders`) |
 | set_timer, cancel_timer, check_timers | `services.timer_service` (SQLCipher `SessionLocal`, `threading.Timer`, TTS on expiry) | needs **Timer** backend |
 | control_node | `utils.audio_volume` (pactl/amixer, config write) | needs **AudioControl** backend |
 | whats_up | CC `chat_text`, `services.alert_queue_service` (in-memory), discovery | needs **LLM** + **AlertQueue** |
@@ -1092,6 +1439,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
 - journald, swappiness, swapfile (`:107-154,889-901,2090-2114`).
 - The net watchdog (`:2116-2146`).
 - The sudoers file (`:1819-1862`).
+- The package wrappers `jarvis-apt-install`, `jarvis-apt-source`, `jarvis-post-install` and their
+  sudoers lines (`:1662-1800,1842-1844`): **done 2026-10-19** (§7 parity 5.6).
 
 **Replaced by the Go binary or its packaging:**
 - The systemd unit's ExecStart and environment (`:1865-1958`); the unit keeps `User=pi`,
@@ -1144,8 +1493,12 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       `sudo -n /usr/bin/systemctl restart jarvis-agent.service` with no quit first, and the
       installer runs in a `systemd-run --user` unit of the node user's manager (linger), never
       detached (the unit's restart stops its whole cgroup). CI: `agent-upgrade-e2e -pi` (the Pi
-      layout under a fake systemd). **Pending on-device** (lab Pi 4): one real update, and whether
-      `systemd-run --user` reaches pi's manager from the system unit.
+      layout under a fake systemd). On-device (lab Pi 4, 2026-10-18): `systemd-run --user` does
+      reach pi's manager from the system unit; a crash-looping release hit the unit's start limit
+      and the rollback's restart was refused (loop #220). Since then every restart runs sudoers'
+      `systemctl reset-failed jarvis-agent.service` first, and the -pi lane's fake systemd models
+      the start limit. **Pending on-device:** the rollback repro again after rerunning
+      `install-pi.sh` (for the new sudoers line).
    3. The tarball + install.sh variant (§6).
       **3a built 2026-10-17:** `scripts/install-pi.sh` (agent in `/opt/jarvis-agent`; overlay, config.txt,
       modprobe, asound.conf, mixer baseline, groups + linger, sudoers, journald, swappiness, swap, the
@@ -1173,9 +1526,47 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       interface, served by `jarvis-agent provision` on :8080 (`--captive-listen :80` optional).
       Verified with a simulated radio against a sandbox jarvisd; differences from Python in
       [decisions/2026-10-17-pi-provisioning-api.md](../decisions/2026-10-17-pi-provisioning-api.md).
-      **Still open:** the NetworkManager D-Bus Wi-Fi/hotspot backend (§8 Q7), starting setup mode
-      at boot, and the recovery watcher.
-   5. The sidecar with the built-in commands once the SDK backends (§5.2) land.
+      **NetworkManager backend and recovery cycle built 2026-10-18** (loop #170, 8b):
+      `provisioning.NetworkManager` over the system D-Bus (scan with a pre-hotspot cache, join
+      through a `jarvis-<ssid>` profile with commit at priority 999 or rollback, the open
+      `jarvis-setup-ap` hotspot on 192.168.4.1 in NM's shared mode) and `provisioning.Recovery`
+      (N:'s AP↔STA cycle and its `JARVIS_RECOVERY_*` knobs), behind `jarvis-agent provision
+      --wifi networkmanager`, which scans, starts the hotspot and, for a node provisioned before,
+      runs the cycle. `install-pi.sh` adds a polkit rule for the node's user, the hotspot's
+      captive DNS and a net-watchdog guard for the hotspot. Unit-tested over a fake bus; **pending
+      on-device** (lab Pi 4, provisioned from the app). hostapd stays unbuilt unless NM's AP
+      fails on the chip. Differences from N: in
+      [decisions/2026-10-18-pi-wifi-networkmanager-dbus.md](../decisions/2026-10-18-pi-wifi-networkmanager-dbus.md).
+      **Still open:** starting setup mode at boot.
+   5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
+      2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
+      profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the
+      sidecar loads its commands next to the Pantry packages, less control_device, routine and
+      send_link (they still call the Python node's code). Their SDK backends ask
+      the Go agent over the child→Go RPC (`internal/agent/sdkhost`): LLM and CC HTTP
+      (`/api/v0/node/...` only) as the node, Inbox, Signals, the timers
+      (`internal/agent/timers`, persisted in the state dir, said on expiry between turns), the
+      alert queue (in memory), the volume (pactl on the default sink or
+      `jarvis_output`, else amixer; persisted) and speech; CommandInvoker runs in the sidecar.
+      Tests: the real commands (calculate, timers, control_node, check_alerts, shopping_list,
+      tell_joke) against the real Go backends with a real Python, each backend's RPC, and the
+      timers' restart and expiry with a fake clock. **Pending on-device** (lab Pi 4): the first
+      boot's install, a voice turn per family, a timer heard on expiry, the volume heard to
+      change. Not done: `update_node_config`'s `volume_percent`/`is_muted` and the settings
+      snapshot's volume still say "no Pi volume control" (§3.14); they can use the same
+      `sdkhost.Audio`.
+      **Reminders, alerts and the button built 2026-10-19** (loop #175,
+      [decision](../decisions/2026-10-19-pi-reminders-alerts.md)): `reminder` loads (the sidecar
+      stands in for `jarvis_log_client` and restores the reminders when it loads them); the
+      reminder agent's run is the sidecar's `reminders_due`, polled by `internal/agent/reminders`
+      (60 s while one is pending, 300 s otherwise, as N:reminder_agent.py), each due reminder a
+      priority-3 alert for 10 minutes; `sdkhost.Announcer` says the alerts at priority 3 and up
+      between turns (N:alert_announcer.py) and removes what it said; the `alert` LED pattern and
+      the button's short press (§3.11). Not ported: Python's 8 s inline listen after an
+      announcement (a reply to it needs the wake word). Tests: the queue's watcher, the
+      announcer and the poller with an injected clock, the button through `hat.Button`, and the
+      pinned reminder command set, restored and fired once (with its push) through a real
+      sidecar. **Pending on-device** (lab Pi 4, §3.11).
 
    Ship it to the lab Pi alongside the Python node (`install_mode` decides).
 5. **Parity**, in order:
@@ -1183,23 +1574,71 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    2. Barge-in (re-use the wake detector at threshold 0.04 plus the RMS gate). **Done
       2026-10-17 (§3.13)** in the shared pipeline (desktop and Pi); lockstep rig tests only,
       not yet heard on a Pi or a desktop.
-   3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the sidecar.
+   3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the
+      sidecar: **built 2026-10-18** (§7 4.5), not yet run on a Pi.
    4. `update_node_config`, `measure_ambient_noise`, LED preview. **Done 2026-10-17 (§3.14)**
       (unit tests and a sandbox jarvisd end to end; not yet on a Pi).
    5. K2 + settings snapshot (AES-GCM).
-   6. Packages.
-   7. factory-reset.
+   6. Packages. **Built 2026-10-19** (loop #174,
+      [decision](../decisions/2026-10-19-pi-node-package-system-setup.md)): the Pi profile runs a
+      package's `apt_sources`, `apt_packages` and `post_install` through the Python node's root
+      wrappers (`sudo -n /usr/local/sbin/jarvis-apt-source|jarvis-apt-install|jarvis-post-install`,
+      `internal/agent/packages/system.go`), removes its drop-ins on uninstall and failed installs,
+      reruns the previous version's ops on revert, heals orphaned drop-ins at boot, and answers
+      `test-install` (Forge drafts served 20 minutes). `install-pi.sh` ships the wrappers (byte for
+      byte, checked by `install-pi-check.sh`) and their sudoers lines. Tests: exec fakes for every
+      wrapper call (argv, stdin JSON, order, rollback), a fake jarvisd + Pantry for test-install,
+      the golden install, and N:'s 68 wrapper tests against the vendored copies. **Pending
+      on-device** (lab Pi 4): Music Assistant installed from the app (shairport-sync, its drop-in,
+      a "play …" turn), uninstalled, and a Forge test install; the commands are in the PR.
+   7. factory-reset. **Built 2026-10-19** (loop #173, with routines sync and context requests;
+      [decision](../decisions/2026-10-19-pi-node-factory-reset.md)): `internal/agent/reset`
+      handles jarvisd's tracked task (`in_progress` with `X-Reset-Token` first, which is also the
+      anti-spoof check, then the wipe, `success` or `failed`, then `sudo -n systemctl reboot`) and
+      the legacy verify-reset; the settings store and the timers are sealed before the wipe, so
+      nothing writes a file back before the reboot; `reset.Wipe` (K2, the node DB, timers, Bluetooth devices, Pantry
+      packages, node.json last) is also the provisioning API's `POST /api/v1/factory-reset`.
+      `nodesettings.Routines` pulls `GET /nodes/{id}/routines` into `routine/<slug>` command data
+      on `routines/sync` and every connect (defaults and Pantry routines never pruned; nothing
+      changes when jarvisd can't be reached): a cache until the routine command runs (4.5 skips
+      it). `nodesettings.Context` answers `context/operations` and `context/query` from the
+      sidecar's declared context operations (describe's `context_operations`, a
+      `context_query` round trip as the requesting user, 128 KiB cap, every failure answered).
+      Unit tests (an httptest jarvisd, a temp state dir) and a real sidecar for context.
+      **Open:** after the reboot the node has no credentials, and `run` does not start setup mode
+      yet (4.4's "starting setup mode at boot"), so it is not back in provisioning mode by itself;
+      jarvisd's broker drops `context/operations` answers (ACL, held for the user).
+      **Pending on-device** (lab Pi 4): a reset from the app, watched to `success`.
    8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
       against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).
-   9. Device control.
+   9. Device control. **14a, the device registry: built 2026-10-19 (§3.17)**: scan, list and
+      state over the sidecar's Pantry device families, `invalidate_device_cache`,
+      `device_removed`, OAuth's auth-ready and the heartbeat's `protocols` (unit tests and a
+      sandbox jarvisd end to end; not yet on a Pi). **14b, control: built 2026-10-19 (§3.18,
+      loop #177)**: the `action`, `callback` and `toggle_command` verbs; the app's device control
+      reaches the family's `control()` (pairing included) through the sidecar (unit tests, a real
+      sidecar, and a sandbox jarvisd end to end; not yet on a Pi). Voice control (the
+      `control_device` tool, which uses the registry) is still to do.
    10. Voice-profile takes (`enroll_voice` / `verify_voice`, the app's "record on this node").
        **Done 2026-10-17** for the Pi profile: `voice.Mic` hands a fixed-length take to the
        running pipeline, which records it between turns with the wake word paused (cue, 1.5 s
        preroll, 48 kHz WAV like a voice turn's upload); `voice.VoiceProfiles` uploads it to
        M4/M5 and posts V9 (Python's success and `audio_bus_unavailable` / `record_failed` /
        `upload_failed` / `verify_failed` shapes). Unit tests; not yet run on a Pi.
+   11. Music ducking and takeover (loop #180 17a). **Built 2026-10-19 (§3.16)**: duck on wake
+       and each follow-up, restore before the deferred play, the mic gain profile, takeover on a
+       music command's play. Unit tests; not yet on a Pi. Still to build from #180, in order
+       ([decision](../decisions/2026-10-19-pi-node-music-ducking.md)): 17b echo cancellation
+       during music; 17c tentative wake and `pre_wake_speech_seconds` (§1.1 rows 21–22); 17d wake
+       auto-calibration and the false-wake cool-down; 17e the wake greeting prefetch (row 20),
+       maintenance restart and the ACT-LED fallback without a HAT.
 
-   Then retire the Python node.
+   Then retire the Python node. **Proposed 2026-10-19, BLOCKED** (loop #181, §3.19): the soak
+   script (`scripts/pi-soak.sh`) and its commands, the parity checklist and the retirement path
+   are written; the 24 h soak on the lab Zero 2 W is the user's to run, and the retirement waits
+   on the open gaps: (a) #180's 17b–17e, (b) voice `control_device`/`routine`/`send_link` in the
+   sidecar, (c) K2 and the settings snapshot on the Pi, (d) setup mode at boot, (e) the on-device
+   rollback repro. It also needs the user's choice on the node identity (§3.19 step 2).
 
 ---
 

@@ -838,3 +838,97 @@ func TestDriverSettings(t *testing.T) {
 		t.Fatal("ran without the settings")
 	}
 }
+
+// #221: a server tool's result is the role=tool message command-center sends the model next:
+// matched by the call's id, or (a text-path model's parsed calls get fresh ids) by its name
+// among the results after the request's last assistant message. An earlier turn's result for
+// the same tool is not this call's.
+func TestServerCallResults(t *testing.T) {
+	req := func(msgs ...map[string]any) json.RawMessage {
+		b, _ := json.Marshal(map[string]any{"messages": msgs})
+		return b
+	}
+	old := map[string]any{"role": "tool", "tool_call_id": "c0", "name": "cancel_watch", "content": `{"error": "not_found"}`}
+	entries := []TapEntry{
+		{Request: req(old), Reply: TapReply{ToolCalls: []ToolCall{{ID: "c1", Function: FunctionCall{Name: "cancel_watch", Arguments: `{"watch": "example.com"}`}},
+			{ID: "n1", Function: FunctionCall{Name: "set_timer", Arguments: `{}`}}}}},
+		{Request: req(old, map[string]any{"role": "assistant"},
+			map[string]any{"role": "tool", "tool_call_id": "c1", "name": "cancel_watch", "content": `{"status": "cancelled", "watch_id": "wt_1"}`}),
+			Reply: TapReply{Content: `<tool_call>{"name": "list_watches", "arguments": {}}</tool_call>`}},
+		{Request: req(old, map[string]any{"role": "assistant"},
+			map[string]any{"role": "tool", "tool_call_id": "other-id", "name": "list_watches", "content": `{"watches": []}`}),
+			Reply: TapReply{Content: `<tool_call>{"name": "cancel_watch", "arguments": {}}</tool_call>`}},
+		{Request: req(old, map[string]any{"role": "assistant"}), Reply: TapReply{Content: "Done."}},
+	}
+	// The text path sends results as a formatting prompt, one JSON line per call, in order.
+	prompt := "The user asked: \"x\"\n\nTool results below. Answer the user's question DIRECTLY. Be brief.\n\n" +
+		`{"status": "watching", "watch_id": "wt_9"}` + "\n" + `{"watches": []}` + "\n/no_think"
+	text := []TapEntry{
+		{Reply: TapReply{Content: `<tool_call>{"name": "create_watch", "arguments": {}}</tool_call><tool_call>{"name": "list_watches", "arguments": {}}</tool_call>`}},
+		{Request: req(old, map[string]any{"role": "user", "content": prompt}), Reply: TapReply{Content: "You're set."}},
+	}
+	if got := serverCallLogs(text, nil); len(got) != 2 || jsonText(got[0].Result) != `{"status":"watching","watch_id":"wt_9"}` ||
+		jsonText(got[1].Result) != `{"watches":[]}` {
+		t.Fatalf("text path: %+v", got)
+	}
+	// Lines match calls by place, so a prompt with a line too many (a node tool's result
+	// alongside) gives no result rather than the wrong one.
+	extra := strings.Replace(prompt, "\n/no_think", "\n"+`{"ok": true}`+"\n/no_think", 1)
+	text[1].Request = req(map[string]any{"role": "user", "content": extra})
+	if got := serverCallLogs(text, nil); len(got) != 2 || got[0].Result != nil || got[1].Result != nil {
+		t.Fatalf("misaligned lines: %+v", got)
+	}
+	// Content as text parts reads the same.
+	if r := decodeContent(json.RawMessage(`[{"type": "text", "text": "{\"status\": \"watching\"}"}]`)); jsonText(r) != `{"status":"watching"}` {
+		t.Fatalf("parts: %v", r)
+	}
+	got := serverCallLogs(entries, []string{"set_timer"})
+	if len(got) != 3 || got[0].Name != "cancel_watch" || got[1].Name != "list_watches" || got[2].Name != "cancel_watch" {
+		t.Fatalf("%+v", got)
+	}
+	if r, _ := got[0].Result.(map[string]any); r["status"] != "cancelled" || got[0].Args["watch"] != "example.com" {
+		t.Fatalf("by id: %+v", got[0])
+	}
+	if jsonText(got[1].Result) != `{"watches":[]}` {
+		t.Fatalf("by name: %+v", got[1])
+	}
+	if got[2].Result != nil {
+		t.Fatalf("no result of its own: %+v", got[2])
+	}
+}
+
+// The tool expectation is judged on the call that meets it, the last one when none does: on
+// qwen3.5-9b the first create_watch omits signal_kind, fails, and the retry succeeds.
+func TestExpectJudgesTheCallThatMeetsIt(t *testing.T) {
+	tl := TurnLog{ServerCalls: []CallLog{
+		{Name: "create_watch", Args: map[string]any{"source": "signal"}, Result: map[string]any{"error": "invalid"}},
+		{Name: "create_watch", Args: map[string]any{"source": "signal", "signal_kind": "presence.left"},
+			Result: map[string]any{"status": "watching", "watch_id": "wt_2"}},
+	}}
+	ok := []Expect{
+		{ServerTool: "create_watch", ArgsMatch: map[string]string{"signal_kind": `presence\.left`},
+			ResultMatch: map[string]string{"status": "^watching$"}},
+		{ServerTool: "create_watch", ResultMatch: map[string]string{"error": "invalid"}},
+		{ServerTool: "create_watch", NotResultMatch: map[string]string{"error": "."}},
+	}
+	for i, e := range ok {
+		if f := e.Check(tl); len(f) != 0 {
+			t.Errorf("ok[%d]: %v", i, f)
+		}
+	}
+	bad := []Expect{
+		{ServerTool: "create_watch", ResultMatch: map[string]string{"status": "^cancelled$"}},
+		{ServerTool: "create_watch", ArgsMatch: map[string]string{"signal_kind": `presence\.arrived`}},
+		{ServerTool: "create_watch", NotResultMatch: map[string]string{"status": "watching", "error": "invalid"}},
+	}
+	for i, e := range bad {
+		if f := e.Check(tl); len(f) != 1 {
+			t.Errorf("bad[%d]: want one failure, got %v", i, f)
+		}
+	}
+	// A node tool's result is the node's answer.
+	node := TurnLog{NodeCalls: []CallLog{{Name: "set_timer", Args: map[string]any{}, Result: map[string]any{"success": true}}}}
+	if f := (Expect{Tool: "set_timer", ResultMatch: map[string]string{"success": "true"}}).Check(node); len(f) != 0 {
+		t.Errorf("node result: %v", f)
+	}
+}

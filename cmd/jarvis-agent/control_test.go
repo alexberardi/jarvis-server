@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
@@ -46,7 +47,8 @@ func TestAppEventsShowThePill(t *testing.T) {
 	got := make(chan struct{}, 4)
 	var p runningPill
 	p.Attach(func() { got <- struct{}{} })
-	ev := appEvents(&p, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	activity := &computer.Activity{}
+	ev := appEvents(&p, activity, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ev.Reopen()
 	<-got
 	for _, u := range []string{"jarvis-agent://start", "jarvis-agent:start", "jarvis-agent://start/"} {
@@ -64,6 +66,16 @@ func TestAppEventsShowThePill(t *testing.T) {
 			t.Fatalf("%s: showed the pill", u)
 		default:
 		}
+	}
+
+	// The stop hotkey stops what Jarvis is doing with the computer.
+	activity.Set(computer.Controlling, "Ordering the blue mug")
+	stopped := make(chan struct{})
+	activity.OnStop(func() { close(stopped) })
+	ev.StopHotkey()
+	<-stopped
+	if k, _ := activity.Status(); k != computer.Idle {
+		t.Fatalf("after the stop hotkey the activity is %q", k)
 	}
 }
 

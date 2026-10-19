@@ -190,6 +190,49 @@ func TestLiftToolImages(t *testing.T) {
 	}
 }
 
+// TestLiftImagesLimits: the errand lift keeps liftToolImages' limits (at most 4, at most
+// 2 MiB, a sniffed type), returns the decoded bytes, and leaves labels, never data, behind.
+func TestLiftImagesLimits(t *testing.T) {
+	jpeg := base64.StdEncoding.EncodeToString(jpegBytes)
+	big := base64.StdEncoding.EncodeToString(append(append([]byte{}, jpegBytes...), make([]byte, chatMaxImageBytes)...))
+	out, err := pyjson.Loads(`{"success": true, "image_attachments": [
+		{"data": "` + jpeg + `", "label": "one"},
+		{"data": "data:image/png;base64,` + base64.StdEncoding.EncodeToString(pngBytes) + `", "label": "two"},
+		{"data": "` + big + `", "label": "huge"},
+		{"data": "` + base64.StdEncoding.EncodeToString(gifBytes) + `"},
+		{"data": "` + jpeg + `"},
+		{"data": "` + jpeg + `", "label": "four"},
+		{"data": "` + jpeg + `", "label": "five"}], "after": 1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clean, imgs, err := liftImages(out.(*pyjson.Object))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 4 || imgs[0].MIME != "image/jpeg" || imgs[1].MIME != "image/png" || imgs[0].Label != "one" ||
+		imgs[2].Label != "image 5" || imgs[3].Label != "four" || !bytes.Equal(imgs[0].Data, jpegBytes) || !bytes.Equal(imgs[1].Data, pngBytes) {
+		t.Fatalf("lifted %+v", imgs)
+	}
+	got := pyjson.Dumps(clean, true)
+	want := `{"success": true, "image_attachments": ["one` + toolImageNote + `", "two` + toolImageNote +
+		`", "[image dropped: too large]", "[image dropped: not a jpeg, png or webp image]", "image 5` + toolImageNote +
+		`", "four` + toolImageNote + `", "[image dropped: more than 4 attached]"], "after": 1}`
+	if got != want {
+		t.Fatalf("clean output\n got %s\nwant %s", got, want)
+	}
+	if strings.Contains(got, jpeg[:16]) {
+		t.Fatal("image data left in the output")
+	}
+	if o, imgs, err := liftImages(servertools0()); err != nil || imgs != nil || pyjson.Dumps(o, true) != `{"temp": 80}` {
+		t.Fatal("an output without attachments changed")
+	}
+	bad, _ := pyjson.Loads(`{"image_attachments": "` + jpeg + `"}`)
+	if o, imgs, err := liftImages(bad.(*pyjson.Object)); err == nil || imgs != nil || pyjson.Dumps(o, true) != `{"image_attachments": []}` {
+		t.Fatalf("a non-list attachment kept: %s %v", pyjson.Dumps(o, true), err)
+	}
+}
+
 func servertools0() *pyjson.Object {
 	o := pyjson.NewObject()
 	o.Set("temp", 80)

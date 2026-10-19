@@ -22,7 +22,7 @@ func ForOS(goos string, h *host.Host, x Exec, macTrusted func() bool) (Keyboard,
 				Portal: &portal.Keyboard{R: &portal.RemoteDesktop{}}},
 			&LinuxWindows{X: x, X11: xw, XWM: disp}, nil
 	case "darwin":
-		return &MacKeyboard{Trusted: macTrusted, Post: nativeMacPoster()},
+		return &MacKeyboard{Trusted: macTrusted, Post: NativeMacPoster()},
 			&HostWindows{H: h, SameFn: SameMacPid, ActiveFn: MacFrontPid(x), HistoryFn: MacFrontToBack(x)}, nil
 	case "windows":
 		desktop := func() bool { return h != nil && h.Has(context.Background(), host.CapOpen) }

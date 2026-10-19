@@ -6,6 +6,7 @@
 //
 // Storage (JarvisStorage's secrets and command data) is answered from the agent's settings
 // store over the same pipes (DESIGN §16): the child asks between a request and its reply.
+// With a Host (the Pi profile), the SDK's other backends ask the same way.
 //
 // Not built yet (see docs/agent/DESIGN.md): restart-on-crash, per-call cancellation.
 package sidecar
@@ -22,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +44,28 @@ type Storage interface {
 	DeleteAllData(command string) (int, error)
 }
 
+// Host answers the child's SDK backend requests other than storage (llm.*, cc.*, timer.*,
+// audio.*, alerts.*, inbox.*, signals.*: docs/agent/go-pi-node.md §5.2). The result is
+// JSON-encoded back to the child; an error reaches the command as an exception, which the
+// SDK's helpers turn into their safe default.
+type Host interface {
+	Answer(ctx context.Context, method string, params json.RawMessage) (any, error)
+}
+
+// Takeover is a Host that takes over the speaker for a music command (sdkhost.Host on a Pi):
+// BeforeCall runs before every call, with the command's declared takes_over_playback_binary
+// ("" when it declares none), and stops the other players when the call is a "play".
+type Takeover interface {
+	BeforeCall(ctx context.Context, command, declared string, args map[string]any)
+}
+
+// Options are what a sidecar's commands reach in the agent. Storage nil leaves storage calls
+// unanswered (a secret reads as unset); Host nil registers no other backend in the child.
+type Options struct {
+	Storage Storage
+	Host    Host
+}
+
 //go:embed jarvis_sidecar.py
 var hostScript []byte
 
@@ -53,6 +77,8 @@ type Sidecar struct {
 	out   *bufio.Scanner
 	log   *slog.Logger
 	dir   string
+	// logged closes when the child's stderr is read to the end.
+	logged chan struct{}
 
 	mu      sync.Mutex
 	nextID  int
@@ -60,9 +86,15 @@ type Sidecar struct {
 	secrets map[string][]nodesettings.SecretSpec
 	extras  map[string]extras
 	browser []nodesettings.DataCommand
+	context []nodesettings.ContextCommand
 	pkgOf   map[string]string // command -> the installed package it came from
+	player  map[string]string // command -> its takes_over_playback_binary
 	failed  map[string]string // package -> why its commands didn't load
+
+	devMu   sync.Mutex
+	devices nodesettings.Devices
 	store   Storage
+	host    Host
 	now     func() time.Time
 }
 
@@ -92,6 +124,11 @@ type reply struct {
 // or an installed-packages .json file) and loads the tool list.
 // st answers the commands' storage calls; nil leaves them unanswered (a secret reads as unset).
 func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st Storage) (*Sidecar, error) {
+	return StartWith(ctx, python, commandsDir, log, Options{Storage: st})
+}
+
+// StartWith is Start with the Pi's backends: o.Host set registers them in the child.
+func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger, o Options) (*Sidecar, error) {
 	dir, err := os.MkdirTemp("", "jarvis-sidecar-")
 	if err != nil {
 		return nil, err
@@ -102,8 +139,13 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 		return nil, err
 	}
 	// Not CommandContext: the child lives as long as the Sidecar, and Close ends it.
-	cmd := exec.Command(python, "-u", script, commandsDir)
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	args := []string{"-u", script, commandsDir}
+	if o.Host != nil {
+		args = append(args, "--backends")
+	}
+	cmd := exec.Command(python, args...)
+	// UTF-8 both ways whatever the platform's locale (Windows' Python would speak cp1252).
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		os.RemoveAll(dir)
@@ -123,7 +165,9 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 		os.RemoveAll(dir)
 		return nil, err
 	}
+	logged := make(chan struct{})
 	go func() { // the child's stderr is its log
+		defer close(logged)
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			log.Info("sidecar", "line", sc.Text())
@@ -131,8 +175,9 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 	}()
 	out := bufio.NewScanner(stdout)
 	out.Buffer(make([]byte, 64<<10), 16<<20)
-	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, dir: dir, store: st, now: time.Now,
-		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{}}
+	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, logged: logged, dir: dir, store: o.Storage, host: o.Host, now: time.Now,
+		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{},
+		player: map[string]string{}}
 	var desc struct {
 		Tools []struct {
 			Name        string                    `json:"name"`
@@ -141,9 +186,12 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 			Secrets     []nodesettings.SecretSpec `json:"secrets"`
 			DataBrowser *nodesettings.DataCommand `json:"data_browser"`
 			Package     string                    `json:"package"`
+			ContextOps  []json.RawMessage         `json:"context_operations"`
+			Player      string                    `json:"takes_over_playback_binary"`
 			extras
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
+		deviceComponents
 	}
 	if err := s.roundTrip("describe", nil, &desc); err != nil {
 		s.Close()
@@ -156,12 +204,17 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 		if t.Package != "" {
 			s.pkgOf[t.Name] = t.Package
 		}
+		s.context = append(s.context, nodesettings.ContextCommand{Name: t.Name, Operations: t.ContextOps})
+		if t.Player != "" {
+			s.player[t.Name] = t.Player
+		}
 		if b := t.DataBrowser; b != nil { // nil: its settings couldn't be read, so it stays out
 			b.Name = t.Name
 			s.browser = append(s.browser, *b)
 		}
 	}
 	s.failed = desc.Failed
+	s.setDevices(desc.deviceComponents)
 	return s, nil
 }
 
@@ -222,6 +275,55 @@ func (s *Sidecar) Create(_ context.Context, command string, values nodesettings.
 	return res.Key, res.Record, nil
 }
 
+// ContextCommands are the commands with the context operations they declared, read once at start.
+func (s *Sidecar) ContextCommands() []nodesettings.ContextCommand { return s.context }
+
+// ContextQuery runs one context operation as uid (nil: no user) and returns its result dict.
+// An error is the operation raising, or the sidecar failing.
+func (s *Sidecar) ContextQuery(_ context.Context, command, operation string, params json.RawMessage, uid *int64) (nodesettings.Object, error) {
+	var who any // JSON null for no user
+	if uid != nil {
+		who = *uid
+	}
+	var res struct {
+		Result *nodesettings.Object `json:"result"`
+		Raised *string              `json:"raised"`
+	}
+	err := s.roundTrip("context_query", map[string]any{"command_name": command, "operation": operation, "params": params, "user_id": who}, &res)
+	switch {
+	case err != nil:
+		return nodesettings.Object{}, err
+	case res.Raised != nil:
+		return nodesettings.Object{}, errors.New(*res.Raised)
+	case res.Result == nil:
+		return nodesettings.Object{}, errors.New("context_query: no result")
+	}
+	return *res.Result, nil
+}
+
+// DueReminder is one reminder reminders_due found due and marked announced.
+type DueReminder struct {
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	UserID *int64 `json:"user_id"`
+}
+
+// RemindersDue is one run of the Python node's reminder agent in the child (its
+// services.reminder_service, the one owner of the reminders): the due ones, now marked
+// announced (a recurring one moved to its next time) and pushed to their owner's phone when
+// that setting is on, and how many were pending before it. An error: no built-in reminder
+// command in this sidecar.
+func (s *Sidecar) RemindersDue(_ context.Context) ([]DueReminder, int, error) {
+	var res struct {
+		Due     []DueReminder `json:"due"`
+		Pending int           `json:"pending"`
+	}
+	if err := s.roundTrip("reminders_due", map[string]any{}, &res); err != nil {
+		return nil, 0, err
+	}
+	return res.Due, res.Pending, nil
+}
+
 func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -267,13 +369,16 @@ func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error
 func (s *Sidecar) Available(context.Context) []node.ToolDef { return s.tools }
 
 // Call forwards one tool call. The context's deadline is not yet propagated to the child.
-func (s *Sidecar) Call(_ context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
+func (s *Sidecar) Call(ctx context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
 	known := false
 	for _, t := range s.tools {
 		known = known || t.Name == name
 	}
 	if !known {
 		return nil, false
+	}
+	if tk, ok := s.host.(Takeover); ok {
+		tk.BeforeCall(ctx, name, s.player[name], args)
 	}
 	r := map[string]any{"tool_call_id": req.ToolCallID, "voice_command": req.VoiceCommand}
 	if req.UserID != nil {
@@ -317,6 +422,12 @@ func (s *Sidecar) Call(_ context.Context, name string, args map[string]any, req 
 // Close ends the child (closing stdin lets it exit cleanly) and removes its script.
 func (s *Sidecar) Close() error {
 	_ = s.stdin.Close()
+	// Wait closes the stderr pipe, so read the child's last lines first; bounded, as a
+	// process the child left behind may hold the pipe open.
+	select {
+	case <-s.logged:
+	case <-time.After(2 * time.Second):
+	}
 	err := s.cmd.Wait()
 	os.RemoveAll(s.dir)
 	return err
@@ -336,10 +447,19 @@ type storageParams struct {
 
 // answer serves one reverse request from the child.
 func (s *Sidecar) answer(q reply) error {
-	result, err := s.storage(q.Method, q.Params)
+	var result any
+	var err error
+	switch {
+	case strings.HasPrefix(q.Method, "storage."):
+		result, err = s.storage(q.Method, q.Params)
+	case s.host != nil:
+		result, err = s.host.Answer(context.Background(), q.Method, q.Params)
+	default:
+		err = fmt.Errorf("unknown method %q", q.Method)
+	}
 	out := map[string]any{"to": "child", "id": q.ID, "result": result}
 	if err != nil {
-		s.log.Warn("sidecar: storage call failed", "method", q.Method, "err", err)
+		s.log.Warn("sidecar: backend call failed", "method", q.Method, "err", err)
 		out = map[string]any{"to": "child", "id": q.ID, "error": err.Error()}
 	}
 	b, err := json.Marshal(out)

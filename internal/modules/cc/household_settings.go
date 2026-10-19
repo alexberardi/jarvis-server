@@ -67,6 +67,7 @@ var householdControllable = []householdSetting{
 	{key: settingPantryEnabled, typ: "bool"},
 	{key: settingWatchesEnabled, typ: "bool"},     // A8: watches (autonomy P2)
 	{key: errands.SettingAutonomous, typ: "bool"}, // A1: household rules may run background errands
+	{key: settingRecordingRetention, typ: "int"},  // plan P3 piece 27: the Recordings page
 }
 
 func householdSettingType(key string) (householdSetting, bool) {
@@ -218,8 +219,9 @@ func (m *Module) handlePutHouseholdSetting(w http.ResponseWriter, r *http.Reques
 			coerced = strings.TrimSpace(str)
 		}
 	}
-	// A declared validator (settings.Definition.Validate) runs before the write.
-	if err := m.settings.Validate(key, coerced); err != nil {
+	// A declared validator (settings.Definition.Validate) runs before the write, on the value as
+	// it is stored (an int is an int64 there, not a *big.Int).
+	if err := m.settings.Validate(key, storeValue(coerced)); err != nil {
 		detail(w, http.StatusBadRequest, fmt.Sprintf("Invalid value for %s: %s", key, settings.InvalidValueMessage(err)))
 		return
 	}

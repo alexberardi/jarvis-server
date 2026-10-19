@@ -12,6 +12,9 @@
 #   scripts/sandbox llm [--name N]         re-point the sandbox at its model again (the mode `up`
 #                                          chose; after writing the app client, or a model change)
 #   scripts/sandbox list
+#   scripts/sandbox node-sim [--name N] [--node-name X]
+#                                          a simulated node pairing with a code (below); prints
+#                                          the code
 #
 # up builds ./cmd/jarvisd, starts `jarvisd serve --port-offset N` on .sandbox/<name>/home bound
 # to 127.0.0.1 (no mDNS, no browser), runs scripts/seed-dev.py, and writes
@@ -63,6 +66,13 @@
 #                    and .sandbox/<name>/sandbox-lan.env is sandbox.env with every URL on that
 #                    address but the LLM tap (loopback only), for the other machine. The seeded
 #                    logins and keys are open to the LAN while it is up: take it down after.
+# node-sim builds ./cmd/jarvis-agent and runs the real agent headless as a Pi node (--profile pi,
+# voice off, no auto-update) with its own HOME under .sandbox/<name>/simnode/<X>/: `enroll --code`
+# against the sandbox, so a pending pairing appears for the admin's Nodes page or the app to
+# approve. It prints the pairing code on stdout once the agent shows it (and writes it to
+# simnode/<X>/code, for Maestro), answers yes to the agent's "Join this household?" once
+# approved, then stays up as `jarvis-agent run` (heartbeats, MQTT) until down. --node-name
+# (default sim-node) is the name the pairing asks for; one agent per name. Log: simnode/<X>/agent.log.
 #
 # Nodes may claim who is speaking (JARVIS_DEV_SPEAKER_HINTS=1), standing in for voice ID.
 # Without --voice, STT is off and TTS has no voice models: pipeline tests start from text
@@ -77,10 +87,10 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,79p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
-VERSION=dev-sandbox TRUST_KEY= RELAY=fake LAN=0 LAN_HOST=""
+VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST=""
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -95,12 +105,14 @@ while [ $# -gt 0 ]; do
     --relay) RELAY=$2; shift 2 ;;
     --lan) LAN=1; shift ;;
     --purge) PURGE=1; shift ;;
+    --node-name) NODE_NAME=$2; shift 2 ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,79p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
 case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
+case $NODE_NAME in *[!a-zA-Z0-9_-]*|'') die "--node-name: letters, digits, - and _ only" ;; esac
 case $LLM in '' | shared | none | scripted) ;; *) die "--llm: shared, none or scripted" ;; esac
 case $PROFILE in minimal | rich | empty) ;; *) die "--profile: minimal, rich or empty" ;; esac
 case $RELAY in fake | none | http://* | https://*) ;; *) die "--relay: fake, none or an http(s) URL" ;; esac
@@ -505,7 +517,55 @@ cmd_up() {
   say "up: source $ENVF"
 }
 
+# cmd_node_sim starts a simulated node (see the header) and prints its pairing code.
+cmd_node_sim() {
+  running || die "$NAME is not up"
+  local sim=$DIR/simnode/$NODE_NAME pid run
+  if [ -f "$sim/pid" ] && kill -0 "$(cat "$sim/pid")" 2>/dev/null; then
+    die "node-sim $NODE_NAME is already running (pid $(cat "$sim/pid")); pick another --node-name or down the sandbox"
+  fi
+  rm -rf "$sim"
+  mkdir -p "$sim/home"
+  # The control socket's directory: short, since a unix socket path has ~100 bytes at most.
+  run=$(mktemp -d "${TMPDIR:-/tmp}/jsim.XXXXXX")
+  echo "$run" >"$sim/rundir"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/jarvis-agent" ./cmd/jarvis-agent)
+  # Its own HOME, XDG dirs and runtime dir, and none of this session's desktop (display, session
+  # bus): its node.json, settings and control socket stay here, and it never touches this user's
+  # files or a desktop agent they run. Stdin is the "y" the join question reads once a member
+  # approved the code.
+  local agent=$DIR/jarvis-agent creds=$sim/node.json h=$sim/home
+  env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u XDG_SESSION_TYPE -u XDG_CURRENT_DESKTOP \
+    HOME=$h XDG_CONFIG_HOME=$h/.config XDG_CACHE_HOME=$h/.cache XDG_DATA_HOME=$h/.local/share \
+    XDG_STATE_HOME=$h/.local/state XDG_RUNTIME_DIR=$run \
+    JARVIS_AGENT_CONTROL_SOCKET=$run/control.sock JARVIS_AGENT_BROWSER_SOCKET=$run/browser.sock \
+    setsid bash -c 'echo y | "$1" enroll --code --profile pi --no-browser --name "$2" --creds "$3" --server "$4" &&
+      exec "$1" run --profile pi --voice=false --no-auto-update --creds "$3"' \
+    simnode "$agent" "$NODE_NAME" "$creds" "http://127.0.0.1:$(port 7700)" >"$sim/agent.log" 2>&1 </dev/null &
+  pid=$!
+  echo "$pid" >"$sim/pid"
+  # The code is the indented line after "approve this code" (pairWithCode in cmd/jarvis-agent).
+  local code=
+  for _ in $(seq 1 120); do
+    code=$(sed -n '/approve this code/,/Waiting for approval/{s/^    \([A-Z0-9-]\{4,\}\)$/\1/p}' "$sim/agent.log")
+    [ -n "$code" ] && break
+    kill -0 "$pid" 2>/dev/null || { tail -20 "$sim/agent.log" >&2; die "node-sim: the agent exited (log: $sim/agent.log)"; }
+    sleep 0.25
+  done
+  [ -n "$code" ] || { tail -20 "$sim/agent.log" >&2; die "node-sim: no pairing code after 30s (log: $sim/agent.log)"; }
+  echo "$code" >"$sim/code"
+  say "node-sim $NODE_NAME: waiting for approval of $code (log: $sim/agent.log)"
+  echo "$code"
+}
+
 cmd_stop() {
+  local p
+  for p in "$DIR"/simnode/*/pid; do
+    # The whole session: the enroll wrapper or the agent it became.
+    [ -f "$p" ] && kill -- "-$(cat "$p")" 2>/dev/null || true
+    rm -f "$p"
+    [ -f "${p%/pid}/rundir" ] && rm -rf "$(cat "${p%/pid}/rundir")" "${p%/pid}/rundir"
+  done
   if running; then
     local pid
     pid=$(cat "$PIDFILE")
@@ -563,5 +623,6 @@ case $CMD in
        LLM=$saved; point_llm ;;
   list) for d in "$SBX_ROOT"/*/; do [ -d "$d" ] && NAME=$(basename "$d") DIR=$d PIDFILE=$d/jarvisd.pid OFFSETF=$d/offset && \
           if running; then echo "$NAME up offset $(cat "$OFFSETF")"; else echo "$NAME down"; fi; done ;;
-  *) die "unknown command $CMD (up, down, status, env, logs, llm, list)" ;;
+  node-sim) cmd_node_sim ;;
+  *) die "unknown command $CMD (up, down, status, env, logs, llm, list, node-sim)" ;;
 esac

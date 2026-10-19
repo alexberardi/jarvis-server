@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/modules/ocr"
@@ -38,6 +39,10 @@ type ImageOCR interface {
 // (that's what the live slot couldn't do).
 var screenOCREngines = []string{"apple_vision", "rapidocr", "tesseract", "paddleocr", "easyocr"}
 
+// ToolImage is one image lifted out of a node tool output (errands.ToolImage: errands can't
+// import cc).
+type ToolImage = errands.ToolImage
+
 // liftToolImages takes the attached images out of a tool output: it returns the output with
 // each image replaced by its label, and the images. Anything malformed is dropped with a note
 // the model can read. Outputs without attachments come back unchanged.
@@ -46,12 +51,33 @@ func liftToolImages(out any) (any, []chatImage) {
 	if !ok {
 		return out, nil
 	}
-	raw, ok := o.Get(toolImagesKey)
-	if !ok {
-		return out, nil
+	clean, imgs, _ := liftImages(o)
+	var chat []chatImage
+	for _, im := range imgs {
+		chat = append(chat, chatImage{mime: im.MIME, dataURL: "data:" + im.MIME + ";base64," + base64.StdEncoding.EncodeToString(im.Data)})
 	}
-	list, _ := raw.([]any)
-	var imgs []chatImage
+	return clean, chat
+}
+
+// liftImages takes the attached images out of a node output: at most toolMaxImages, each at
+// most chatMaxImageBytes of a sniffed jpeg, png or webp. The output keeps each label with
+// toolImageNote, or an "[image dropped: …]" note, and never the data. err is set when
+// image_attachments isn't a list (the output then keeps an empty one). Outputs without
+// attachments come back unchanged.
+func liftImages(out *pyjson.Object) (*pyjson.Object, []ToolImage, error) {
+	if out == nil {
+		return nil, nil, nil
+	}
+	raw, ok := out.Get(toolImagesKey)
+	if !ok {
+		return out, nil, nil
+	}
+	var err error
+	list, ok := raw.([]any)
+	if !ok && raw != nil {
+		err = fmt.Errorf("%s is not a list", toolImagesKey)
+	}
+	var imgs []ToolImage
 	labels := []any{}
 	for i, e := range list {
 		label := fmt.Sprintf("image %d", i+1)
@@ -70,31 +96,31 @@ func liftToolImages(out any) (any, []chatImage) {
 			continue
 		}
 		data, _ := a.Get("data")
-		img, why := decodeToolImage(data)
+		mime, b, why := decodeToolImage(data)
 		if why != "" {
 			labels = append(labels, "[image dropped: "+why+"]")
 			continue
 		}
-		imgs = append(imgs, img)
+		imgs = append(imgs, ToolImage{MIME: mime, Data: b, Label: label})
 		labels = append(labels, label+toolImageNote)
 	}
 	clean := pyjson.NewObject()
-	for _, k := range o.Keys() {
-		v, _ := o.Get(k)
+	for _, k := range out.Keys() {
+		v, _ := out.Get(k)
 		if k == toolImagesKey {
 			v = labels
 		}
 		clean.Set(k, v)
 	}
-	return clean, imgs
+	return clean, imgs, err
 }
 
 // decodeToolImage validates one attachment's data (base64 or a data URL): at most
 // chatMaxImageBytes of jpeg, png or webp by its bytes. It returns the reason when it can't.
-func decodeToolImage(v any) (chatImage, string) {
+func decodeToolImage(v any) (string, []byte, string) {
 	s, ok := v.(string)
 	if !ok || s == "" {
-		return chatImage{}, "no data"
+		return "", nil, "no data"
 	}
 	if strings.HasPrefix(s, "data:") {
 		if _, b64, ok := strings.Cut(s, ","); ok {
@@ -102,20 +128,20 @@ func decodeToolImage(v any) (chatImage, string) {
 		}
 	}
 	if base64.StdEncoding.DecodedLen(len(s)) > chatMaxImageBytes+3 {
-		return chatImage{}, "too large"
+		return "", nil, "too large"
 	}
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return chatImage{}, "not base64"
+		return "", nil, "not base64"
 	}
 	if len(b) > chatMaxImageBytes {
-		return chatImage{}, "too large"
+		return "", nil, "too large"
 	}
 	mime := sniffImage(b)
 	if mime == "" {
-		return chatImage{}, "not a jpeg, png or webp image"
+		return "", nil, "not a jpeg, png or webp image"
 	}
-	return chatImage{mime: mime, dataURL: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(b)}, ""
+	return mime, b, ""
 }
 
 // toolMsg is a client tool result as a history message, with its images.

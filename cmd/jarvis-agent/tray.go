@@ -8,7 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/tray"
@@ -33,6 +35,12 @@ type trayIcon struct {
 	signOut func()
 	// mainLoop: macOS's AppKit loop runs (the status item lives in it).
 	mainLoop bool
+	// activity is what Jarvis is doing with the computer: the menu's line and Stop item.
+	activity *computer.Activity
+	// computer is computer control's switch (the menu's "Computer control"); nil hides it.
+	computer *computer.Switch
+	// recorder records what the user does (the menu's "Watch me"); nil hides it.
+	recorder *computer.Recorder
 
 	t      atomic.Pointer[tray.Tray]
 	update atomic.Pointer[string] // the self-update's status line
@@ -54,7 +62,8 @@ func (ic *trayIcon) show(ctx context.Context) func() {
 		return func() {}
 	}
 	t, err := tray.Start(tray.Options{Log: ic.log, State: ic.state(), MainLoop: ic.mainLoop,
-		Actions: tray.Actions{SetVoice: ic.sw.Set, Open: ic.open, Setup: ic.setup, Quit: ic.quitFromMenu, SignOut: ic.signOutFromMenu}})
+		Actions: tray.Actions{SetVoice: ic.sw.Set, Open: ic.open, Setup: ic.setup, Quit: ic.quitFromMenu, SignOut: ic.signOutFromMenu,
+			StopTask: ic.stopTaskFromMenu, SetComputer: ic.setComputerFromMenu, Record: ic.recordFromMenu}})
 	if err != nil {
 		ic.log.Info("tray: no status icon", "reason", err)
 		return func() {}
@@ -84,11 +93,43 @@ func (ic *trayIcon) state() tray.State {
 	if u := ic.update.Load(); u != nil {
 		s.Update = *u
 	}
+	k, _ := ic.activity.Status()
+	s.Activity = string(k)
+	s.StopHotkey = island.StopHotkey()
+	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
+	s.Record = ic.recorder != nil
 	return s
 }
 
+// setComputerFromMenu is "Computer control": off also stops a task going on.
+func (ic *trayIcon) setComputerFromMenu(on bool) {
+	ic.log.Info("Computer control chosen in the menu", "on", on, "activity", ic.activity.String())
+	if err := ic.computer.Set(on); err != nil {
+		ic.log.Warn("computer control: couldn't save the choice; it lasts until the agent restarts", "err", err)
+	}
+}
+
+// activityChanged is the Activity telling the menu.
+func (ic *trayIcon) activityChanged(computer.Kind, string) { ic.refresh() }
+
+func (ic *trayIcon) stopTaskFromMenu() {
+	ic.log.Info("Stop Jarvis chosen in the menu", "activity", ic.activity.String())
+	ic.activity.Stop()
+}
+
+// recordFromMenu is "Watch me" (start) and "Stop recording": a stopped trace goes to jarvisd.
+func (ic *trayIcon) recordFromMenu(start bool) {
+	ic.log.Info("recording chosen in the menu", "start", start, "activity", ic.activity.String())
+	if ic.recorder != nil {
+		_, _ = recordFromHere(context.Background(), ic.recorder, start, ic.log)
+	}
+}
+
 // voiceChanged is the voice switch telling the menu.
-func (ic *trayIcon) voiceChanged(bool) {
+func (ic *trayIcon) voiceChanged(bool) { ic.refresh() }
+
+// refresh shows ic.state() in the menu.
+func (ic *trayIcon) refresh() {
 	if t := ic.t.Load(); t != nil {
 		t.Update(func(s *tray.State) { *s = ic.withWebUI(ic.state(), s.OpenURL) })
 	}

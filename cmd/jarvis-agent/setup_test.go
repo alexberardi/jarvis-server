@@ -68,7 +68,7 @@ func TestControlSocketVoiceCommands(t *testing.T) {
 	sw := f.sw(true)
 	var ready *voiceSwitch
 	ctx, cancel := context.WithCancel(context.Background())
-	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return ready }, func() error { return nil })
+	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return ready }, func() error { return nil }, nil, nil, nil)
 	defer func() { cancel(); wait() }()
 	dial := func() (net.Conn, error) { return browser.Dial(path) }
 

@@ -5,9 +5,13 @@
 // One menu on every OS, built here as data (Items):
 //
 //	Jarvis Automation Agent — Running          (a disabled header: the agent's state)
+//	Jarvis is controlling this computer         (a disabled line, only while Jarvis controls it,
+//	Stop Jarvis                                  is paused or records; Stop ends the task)
 //	Updated to v0.2.0                           (a disabled line, only after/during a self-update)
 //	─────────────
 //	✓ Listen for "Hey Jarvis"                   (voice on/off, live; saved in agent.json)
+//	  Computer control                          (lets Jarvis use this computer; off by default,
+//	                                             saved in agent.json; off stops a running task)
 //	  Open Jarvis Automation                    (the server's web UI, when it is known)
 //	  Set up / Settings…                        (the agent's setup page in the browser)
 //	  Sign out of Jarvis Automation             (removes this computer; back to the setup page)
@@ -35,6 +39,13 @@ type State struct {
 	// VoiceAvailable shows the voice toggle (voice works on this OS); Voice is its checkmark.
 	VoiceAvailable bool
 	Voice          bool
+	// ComputerAvailable shows the "Computer control" toggle (a desktop); Computer is its
+	// checkmark: Jarvis may use this computer only while it is on (COMPUTER-CONTROL.md C11).
+	ComputerAvailable bool
+	Computer          bool
+	// Record shows "Watch me" while computer control is on and nothing is going on, and "Stop
+	// recording" while recording (a computer that can record).
+	Record bool
 	// OpenURL, when set, shows "Open Jarvis Automation" (the server's web UI).
 	OpenURL string
 	// Setup shows "Set up / Settings…" (the agent's own setup page).
@@ -44,6 +55,33 @@ type State struct {
 	// Update, when set, is a disabled line under the header about the self-update
 	// ("Update available (v0.2.0), restarting…", "Updated to v0.2.0").
 	Update string
+	// Activity is what Jarvis is doing with the computer: "" (nothing), ActivityControlling,
+	// ActivityPaused or ActivityRecording. Not "": a line saying so, "Stop Jarvis", and the
+	// icon's badge.
+	Activity string
+	// StopHotkey, when set, is the hotkey that stops it ("⌃⌥⎋"): the tooltip names it while
+	// there is an activity.
+	StopHotkey string
+}
+
+// The activities (computer.Kind's values).
+const (
+	ActivityControlling = "controlling"
+	ActivityPaused      = "paused"
+	ActivityRecording   = "recording"
+)
+
+// ActivityLine is the menu's line for an activity ("" for none).
+func ActivityLine(activity string) string {
+	switch activity {
+	case "":
+		return ""
+	case ActivityPaused:
+		return "Paused"
+	case ActivityRecording:
+		return "Recording"
+	}
+	return "Jarvis is controlling this computer"
 }
 
 // Actions are what the menu's items do. Each runs on its own goroutine, never on the OS's UI
@@ -60,6 +98,12 @@ type Actions struct {
 	// SignOut signs this computer out of the server and returns to the setup page
 	// (decision 2026-10-14: the node is removed, its credentials deleted, settings kept).
 	SignOut func()
+	// StopTask stops what Jarvis is doing with the computer (State.Activity).
+	StopTask func()
+	// SetComputer turns computer control on or off.
+	SetComputer func(on bool)
+	// Record starts a recording (start) or stops the one going on (State.Record).
+	Record func(start bool)
 }
 
 // The menu items' ids (D-Bus menu ids, NSMenuItem tags, Win32 command ids). 0 is the root.
@@ -73,15 +117,23 @@ const (
 	IDSetup
 	IDSignOut
 	IDUpdate
+	IDActivity
+	IDStopTask
+	IDComputer
+	IDRecord
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
 const (
-	VoiceLabel   = `Listen for "Hey Jarvis"`
-	OpenLabel    = "Open Jarvis Automation"
-	SetupLabel   = "Set up / Settings…"
-	SignOutLabel = "Sign out of Jarvis Automation"
-	QuitLabel    = "Quit " + appid.DisplayName
+	VoiceLabel    = `Listen for "Hey Jarvis"`
+	OpenLabel     = "Open Jarvis Automation"
+	SetupLabel    = "Set up / Settings…"
+	SignOutLabel  = "Sign out of Jarvis Automation"
+	QuitLabel     = "Quit " + appid.DisplayName
+	StopTaskLabel = "Stop Jarvis"
+	ComputerLabel = "Computer control"
+	RecordLabel   = "Watch me"
+	StopRecLabel  = "Stop recording"
 )
 
 // Item is one menu entry.
@@ -103,15 +155,50 @@ func Header(s State) string {
 	return appid.DisplayName + " — " + st
 }
 
+// Tooltip is the icon's tooltip: what Jarvis is doing with the computer (and the hotkey that
+// stops it), else the header.
+func Tooltip(s State) string {
+	if l := ActivityLine(s.Activity); l != "" {
+		if s.StopHotkey != "" {
+			l += " (" + s.StopHotkey + " stops it)"
+		}
+		return l
+	}
+	return Header(s)
+}
+
+// Active says the menu is one with an activity (its Stop item): the icon shows its badge.
+func Active(items []Item) bool {
+	for _, it := range items {
+		if it.ID == IDStopTask {
+			return true
+		}
+	}
+	return false
+}
+
 // Items is the menu for s.
 func Items(s State) []Item {
 	items := []Item{{ID: IDHeader, Label: Header(s)}}
+	if l := ActivityLine(s.Activity); l != "" {
+		items = append(items, Item{ID: IDActivity, Label: l})
+		if s.Record && s.Activity == ActivityRecording {
+			items = append(items, Item{ID: IDRecord, Label: StopRecLabel, Enabled: true})
+		}
+		items = append(items, Item{ID: IDStopTask, Label: StopTaskLabel, Enabled: true})
+	}
 	if s.Update != "" {
 		items = append(items, Item{ID: IDUpdate, Label: s.Update})
 	}
 	items = append(items, Item{ID: idSep1, Separator: true})
 	if s.VoiceAvailable {
 		items = append(items, Item{ID: IDVoice, Label: VoiceLabel, Enabled: true, Toggle: true, Checked: s.Voice})
+	}
+	if s.ComputerAvailable {
+		items = append(items, Item{ID: IDComputer, Label: ComputerLabel, Enabled: true, Toggle: true, Checked: s.Computer})
+	}
+	if s.Record && s.ComputerAvailable && s.Computer && s.Activity == "" {
+		items = append(items, Item{ID: IDRecord, Label: RecordLabel, Enabled: true})
 	}
 	if s.OpenURL != "" {
 		items = append(items, Item{ID: IDOpen, Label: OpenLabel, Enabled: true})
@@ -122,7 +209,7 @@ func Items(s State) []Item {
 	if s.SignOut {
 		items = append(items, Item{ID: IDSignOut, Label: SignOutLabel, Enabled: true})
 	}
-	if s.VoiceAvailable || s.OpenURL != "" || s.Setup || s.SignOut {
+	if s.VoiceAvailable || s.ComputerAvailable || s.OpenURL != "" || s.Setup || s.SignOut {
 		items = append(items, Item{ID: idSep2, Separator: true})
 	}
 	return append(items, Item{ID: IDQuit, Label: QuitLabel, Enabled: true})
@@ -165,7 +252,7 @@ func (t *Tray) attach(be backend) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.be = be
-	return be.update(Items(t.state), Header(t.state))
+	return be.update(Items(t.state), Tooltip(t.state))
 }
 
 // State is what the menu shows now.
@@ -189,7 +276,7 @@ func (t *Tray) Update(f func(*State)) {
 	if t.be == nil || t.closed {
 		return
 	}
-	if err := t.be.update(Items(t.state), Header(t.state)); err != nil {
+	if err := t.be.update(Items(t.state), Tooltip(t.state)); err != nil {
 		t.log.Warn("tray: couldn't update the menu", "err", err)
 	}
 }
@@ -211,6 +298,22 @@ func (t *Tray) clicked(id int32) {
 			if s.VoiceAvailable && t.act.SetVoice != nil {
 				t.act.SetVoice(!s.Voice)
 			}
+		case IDComputer:
+			if s.ComputerAvailable && t.act.SetComputer != nil {
+				t.log.Info("tray: Computer control chosen", "on", !s.Computer)
+				t.act.SetComputer(!s.Computer)
+			}
+		case IDRecord:
+			if !s.Record || t.act.Record == nil {
+				break
+			}
+			if s.Activity == ActivityRecording {
+				t.log.Info("tray: Stop recording chosen")
+				t.act.Record(false)
+			} else if s.Activity == "" && s.ComputerAvailable && s.Computer {
+				t.log.Info("tray: Watch me chosen")
+				t.act.Record(true)
+			}
 		case IDOpen:
 			if s.OpenURL != "" && t.act.Open != nil {
 				t.act.Open(s.OpenURL)
@@ -223,6 +326,11 @@ func (t *Tray) clicked(id int32) {
 			if s.SignOut && t.act.SignOut != nil {
 				t.log.Info("tray: Sign out chosen")
 				t.act.SignOut()
+			}
+		case IDStopTask:
+			if s.Activity != "" && t.act.StopTask != nil {
+				t.log.Info("tray: Stop Jarvis chosen")
+				t.act.StopTask()
 			}
 		case IDQuit:
 			if t.act.Quit != nil {

@@ -1,7 +1,9 @@
 package cc
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -48,6 +50,8 @@ type autoNode struct {
 	mu   sync.Mutex
 	m    *Module
 	cmds []map[string]any
+	// output, when set, is every tool_call's output.
+	output string
 }
 
 func (a *autoNode) Publish(topic string, payload []byte, _ byte, _ bool) error {
@@ -65,6 +69,9 @@ func (a *autoNode) Publish(topic string, payload []byte, _ byte, _ bool) error {
 	switch msgs[0]["command"] {
 	case "tool_call":
 		body = `{"output": {"success": true, "message": "sunny", "echo": ` + jsonString(d["arguments"]) + `}}`
+		if a.output != "" {
+			body = `{"output": ` + a.output + `}`
+		}
 	case "report_tools":
 		body = `{"client_tools": [], "available_commands": [{"command_name": "get_weather", "description": "W"}]}`
 	}
@@ -105,6 +112,30 @@ func TestErrandNodeAdapter(t *testing.T) {
 	out = errandNodes{silent.m}.RunTool(ctx, "node-1", "x", nil, nil, "", 10*time.Millisecond)
 	if got := pyjson.Dumps(out, false); got != `{"success": false, "error": "could not dispatch to node: MQTT is unavailable"}` {
 		t.Fatal(got)
+	}
+}
+
+// TestErrandNodeImages: RunTool drops a node's attached images (labels kept), so a step can
+// never store them; RunToolImages hands them back for one call; nothing answering is an error.
+func TestErrandNodeImages(t *testing.T) {
+	pub := &autoNode{output: `{"success": true, "image_attachments": [{"mime": "image/png", "data": "` +
+		base64.StdEncoding.EncodeToString(pngBytes) + `", "label": "screen"}]}`}
+	e := newEnv(t, envOpts{configure: func(m *Module) { m.Publisher = pub; pub.m = m }})
+	nodes := errandNodes{e.m}
+	ctx := context.Background()
+	want := `{"success": true, "image_attachments": ["screen` + toolImageNote + `"]}`
+	if got := pyjson.Dumps(nodes.RunTool(ctx, "node-1", "desktop_read_screen", nil, nil, "", time.Second), false); got != want {
+		t.Fatal(got)
+	}
+	out, imgs, err := nodes.RunToolImages(ctx, "node-1", "desktop_read_screen", nil, nil, time.Second)
+	if err != nil || pyjson.Dumps(out, false) != want || len(imgs) != 1 || imgs[0].MIME != "image/png" ||
+		imgs[0].Label != "screen" || !bytes.Equal(imgs[0].Data, pngBytes) {
+		t.Fatalf("images = %s %+v %v", pyjson.Dumps(out, false), imgs, err)
+	}
+	silent := newEnv(t, envOpts{noMQTT: true})
+	out, imgs, err = errandNodes{silent.m}.RunToolImages(ctx, "node-1", "x", nil, nil, 10*time.Millisecond)
+	if err == nil || imgs != nil || pyjson.Dumps(out, false) != `{"success": false, "error": "could not dispatch to node: MQTT is unavailable"}` {
+		t.Fatalf("no MQTT = %s %v", pyjson.Dumps(out, false), err)
 	}
 }
 

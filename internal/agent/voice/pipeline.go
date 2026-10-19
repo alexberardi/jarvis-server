@@ -107,6 +107,7 @@ type Turn struct {
 	ConversationID string
 	WakeScore      float32
 	Threshold      float64 // silence threshold used for endpointing
+	PreRollSecs    float64 // of RecordedSecs, the audio kept from under the wake chime
 	HitMax         bool
 	Exchange                  // the command after the wake word
 	FollowUps      []Exchange // answers in the follow-up window, in order
@@ -136,6 +137,11 @@ type Pipeline struct {
 	Live *Live
 	// Mic, when set, is how others record through this pipeline's microphone (take.go).
 	Mic *Mic
+	// Music, when set, is ducked for each turn and restored after it (music.go).
+	Music Music
+	// Computer, when set, is paused by the wake word while Jarvis controls the computer or
+	// records, stopped by a "stop" turn and resumed after any other (computer.go).
+	Computer Computer
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -151,8 +157,9 @@ type Pipeline struct {
 	lockstep bool
 
 	dropped atomic.Int64
-	ends    sync.WaitGroup
-	tuned   int // Live.tunes applied so far
+	ends    sync.WaitGroup // pending /conversation/end calls and background music steps
+	bg      serial         // the music steps, in order (music.go)
+	tuned   int            // Live.tunes applied so far
 }
 
 // Dropped counts captured chunks discarded because the pipeline was busy.
@@ -275,6 +282,25 @@ func flush(chunks <-chan []int16) {
 	}
 }
 
+// takePreRoll empties the queue, keeping its last n chunks (the most recent audio) in order.
+func takePreRoll(chunks <-chan []int16, n int) []int16 {
+	var kept [][]int16
+	for {
+		select {
+		case c, ok := <-chunks:
+			if ok {
+				kept = append(kept, c)
+				if len(kept) > n {
+					kept = kept[1:]
+				}
+				continue
+			}
+		default:
+		}
+		return slices.Concat(kept...)
+	}
+}
+
 // ring keeps the last n items.
 type ring[T any] struct {
 	n     int
@@ -384,6 +410,8 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	t := Turn{ConversationID: p.NewID(), WakeScore: score}
 	log := p.Log.With("conversation_id", t.ConversationID)
 	log.Info("wake", "score", fmt.Sprintf("%.3f", score))
+	h := p.holdComputer(log) // first: the user is about to speak to Jarvis
+	p.duck(ctx)              // the music down while the user speaks (music.go)
 
 	// Row 7: warm the conversation up while the user is still talking.
 	st := &pendingStart{done: make(chan struct{})}
@@ -405,9 +433,10 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		}
 	}()
 
-	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: wakeClip}
+	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: wakeClip, held: h}
 	p.cue(CueListening, 0)
 	defer func() {
+		p.releaseComputer(s)
 		if t.Err != nil || t.FollowUpEnd == EndError {
 			p.cue(CueError, 0)
 		} else {
@@ -419,36 +448,35 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 			lvl = slog.LevelWarn
 		}
 		log.Log(ctx, lvl, "voice turn", "outcome", t.Outcome, "transcript", t.Transcript, "reply", t.Message,
-			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
+			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "pre_roll_s", fmt.Sprintf("%.2f", t.PreRollSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
-		// A command's deferred step (a media command starting playback) runs once everything
-		// has been said, as the Python node runs on_response_complete after its follow-up
-		// loop. Off the pipeline goroutine: listening must not wait for it.
-		for _, f := range s.onComplete {
-			go func() {
-				if err := f(); err != nil {
-					log.Warn("on_response_complete failed", "err", err)
-				}
-			}()
-		}
+		// The music back, then a command's deferred step (music.go). Off the pipeline
+		// goroutine: listening must not wait for it.
+		p.afterTurn(ctx, s)
 		if p.OnTurn != nil {
 			p.OnTurn(t)
 		}
 	}()
 
-	// Row 6: acknowledge, then record from after the chime (history_secs=0).
+	// Row 6: acknowledge, then record from after the chime, keeping up to PreRollSecs of what
+	// was heard while it played (0: history_secs=0, all of it dropped).
 	p.chime(ctx, wakeChime)
-	flush(chunks)
+	pre := takePreRoll(chunks, frames(p.Cfg.Endpointing.PreRollSecs))
 
 	// Row 8: record with RMS endpointing.
 	t.Threshold = p.Cfg.Endpointing.Threshold(preRMS)
 	s.threshold = t.Threshold
 	pcm, hitMax, err := p.record(ctx, s)
-	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
+	// The level reference leaves the pre-roll out: it may hold the chime's own echo.
 	if db, ok := SpeechLevel(pcm, s.threshold); ok {
 		s.wakeLevel = &db // the follow-up gate's level reference
 	}
+	if len(pcm) > 0 {
+		pcm = slices.Concat(pre, pcm)
+		t.PreRollSecs = float64(len(pre)) / CaptureRate
+	}
+	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
 	if err != nil {
 		t.Outcome, t.Err = OutcomeError, err
 		return
@@ -487,6 +515,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		ex.Outcome = OutcomeNonSpeech
 		return "", true
 	}
+	p.stopIfAsked(s, tr.Text) // locally, at once; the server still hears it
 
 	// Row 11: join the warmup (bounded), then the streaming turn.
 	select {

@@ -171,3 +171,32 @@ func parsePlayback(out string) (int, switchState, bool) {
 	}
 	return 0, noSwitch, false
 }
+
+// pgaControl is the codec's mic programmable-gain amplifier (install-pi.sh's baseline: 49%).
+const pgaControl = "PGA"
+
+var reCapture = regexp.MustCompile(`Capture\s+\d+\s+\[(\d+)%\]`)
+
+// CapturePGA is the mic gain as an amixer percent, the louder channel (N:utils/audio_volume.py
+// get_capture_pga_percent); false when it can't be read.
+func CapturePGA(ctx context.Context, run Run) (int, bool) {
+	out, err := run(ctx, "amixer", "-c", Card, "sget", pgaControl)
+	if err != nil {
+		return 0, false
+	}
+	best, ok := 0, false
+	for _, m := range reCapture.FindAllStringSubmatch(out, -1) {
+		if v, err := strconv.Atoi(m[1]); err == nil && (!ok || v > best) {
+			best, ok = v, true
+		}
+	}
+	return best, ok
+}
+
+// SetCapturePGA sets both channels' mic gain, clamped to 0-100 (set_capture_pga_percent). Not
+// persisted: the music profile is transient and the installer's baseline is the resting value.
+func SetCapturePGA(ctx context.Context, run Run, pct int) bool {
+	pct = max(0, min(100, pct))
+	_, err := run(ctx, "amixer", "-c", Card, "sset", pgaControl, strconv.Itoa(pct)+"%")
+	return err == nil
+}

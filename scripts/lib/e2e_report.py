@@ -136,6 +136,8 @@ def markdown(rep: dict) -> str:
         lines += ["", "## Failures", ""]
         for t in failed:
             lines += [f"### {t['suite']}: {t['title']}", "", f"`{t['file']}:{t['line']}`, {t['status']} after {t['duration_ms'] / 1000:.1f} s", ""]
+            if t.get("note"):
+                lines += [t["note"], ""]
             if t.get("error"):
                 lines += ["```", t["error"].strip()[:4000], "```", ""]
             for s in t.get("screenshots", []):
@@ -155,6 +157,7 @@ def markdown(rep: dict) -> str:
     lines += ["", "## Tests", "", "| status | suite | test | time | console errors |", "|---|---|---|---|---|"]
     for t in rep["tests"]:
         title = t["title"] + (f" (skipped: {t['skip_reason']})" if t.get("skip_reason") else "")
+        title += f" ({t['note'].split(' on the first try')[0]})" if t.get("note") else ""
         lines.append(f"| {t['status']} | {t['suite']} | {title} | {t['duration_ms'] / 1000:.1f} s | {len(t.get('console_errors', []))} |")
     if rep.get("coverage"):
         lines += coverage_md(rep["coverage"])

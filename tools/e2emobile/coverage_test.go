@@ -99,7 +99,7 @@ func TestCheckCoverage(t *testing.T) {
 		"A/Tests":   {Tests: []string{"e2e/web/tests/chat.spec.ts"}},
 		"A/Removed": {Manual: "was a screen once"},
 	}
-	r := CheckCoverage(entries, screens, flows, ".maestro")
+	r := CheckCoverage(entries, screens, discover(t, flows), flows, ".maestro")
 	if r.OK() {
 		t.Fatal("OK with problems")
 	}
@@ -114,7 +114,8 @@ func TestCheckCoverage(t *testing.T) {
 	check("pending", r.Pending, []string{"A/Pending: #145"})
 	check("missing", r.Missing, []string{"A/Missing"})
 	check("stale", r.Stale, []string{"A/Removed"})
-	if len(r.Invalid) != 3 || !strings.Contains(strings.Join(r.Invalid, "\n"), "no flow .maestro/gone.yaml") {
+	// chat-fail.yaml and bare.yml are listed by no entry (biometric-login.yaml is skipped).
+	if len(r.Invalid) != 5 || !strings.Contains(strings.Join(r.Invalid, "\n"), "no flow .maestro/gone.yaml") {
 		t.Errorf("invalid: %q", r.Invalid)
 	}
 	p := r.Problems()
@@ -124,9 +125,66 @@ func TestCheckCoverage(t *testing.T) {
 		}
 	}
 
-	ok := CheckCoverage(map[string]Entry{"A/Covered": entries["A/Covered"]}, []string{"A/Covered"}, flows, ".maestro")
+	ok := CheckCoverage(map[string]Entry{"A/Covered": {Flows: []string{".maestro/login-admin.yaml", ".maestro/chat-fail.yaml",
+		".maestro/bare.yml"}}}, []string{"A/Covered"}, discover(t, flows), flows, ".maestro")
 	if !ok.OK() || ok.Problems() != "" {
 		t.Errorf("clean: %+v", ok)
+	}
+}
+
+func discover(t *testing.T, dir string) []Flow {
+	t.Helper()
+	flows, err := Discover(dir, ".maestro", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return flows
+}
+
+// A pending entry that names a flow which exists points at merged work: the gate fails until
+// the entry lists it under flows. Free text and a flow still to be written pass.
+func TestCheckCoveragePendingNamingAnExistingFlow(t *testing.T) {
+	dir := flowsDir(t)
+	all := Entry{Flows: []string{".maestro/login-admin.yaml", ".maestro/chat-fail.yaml", ".maestro/bare.yml"}}
+	for _, tc := range []struct {
+		pending string
+		invalid string // "" when the entry stays pending
+	}{
+		{"#145", ""},
+		{"#145: payments.yaml (not written yet)", ""},
+		{"#145: chat-fail.yaml", "A/Pending: pending names .maestro/chat-fail.yaml, which exists: list it under flows"},
+		{"#145: .maestro/login-admin.yaml, subflows/login.yaml", "A/Pending: pending names .maestro/login-admin.yaml, .maestro/subflows/login.yaml, which exist: list them under flows"},
+		{"#145: biometric-login.yaml", "A/Pending: pending names .maestro/biometric-login.yaml, which exists: list it under flows"},
+	} {
+		r := CheckCoverage(map[string]Entry{"A/All": all, "A/Pending": {Pending: tc.pending}}, []string{"A/All", "A/Pending"},
+			discover(t, dir), dir, ".maestro")
+		if tc.invalid == "" {
+			if !r.OK() || len(r.Pending) != 1 {
+				t.Errorf("%q: %+v", tc.pending, r)
+			}
+			continue
+		}
+		if r.OK() || len(r.Pending) != 0 || len(r.Invalid) != 1 || r.Invalid[0] != tc.invalid {
+			t.Errorf("%q: invalid %q, pending %q; want %q", tc.pending, r.Invalid, r.Pending, tc.invalid)
+		}
+	}
+}
+
+// Every flow the suite runs covers some screen: a flow no entry lists is merged work the map
+// has not caught up with. Skipped flows and subflows need no entry.
+func TestCheckCoverageEveryRunFlowIsListed(t *testing.T) {
+	dir := flowsDir(t)
+	r := CheckCoverage(map[string]Entry{"A/Home": {Flows: []string{".maestro/login-admin.yaml", ".maestro/subflows/login.yaml"}},
+		"A/Chat": {Pending: "#145"}}, []string{"A/Home", "A/Chat"}, discover(t, dir), dir, ".maestro")
+	want := []string{
+		"flow .maestro/bare.yml covers no screen: list it under the flows of the screens it reaches",
+		"flow .maestro/chat-fail.yaml covers no screen: list it under the flows of the screens it reaches",
+	}
+	if !reflect.DeepEqual(r.Invalid, want) {
+		t.Errorf("invalid: got %q\nwant %q", r.Invalid, want)
+	}
+	if !strings.Contains(r.Problems(), "e2e/coverage.json: flow .maestro/bare.yml covers no screen") {
+		t.Errorf("problems:\n%s", r.Problems())
 	}
 }
 
@@ -136,7 +194,7 @@ func writeCoverage(t *testing.T, drop string) string {
 		"InboxStackNavigator/Detail":    {Pending: "#145"},
 		"InboxStackNavigator/InboxList": {Flows: []string{".maestro/login-admin.yaml"}},
 		"MainTabNavigator/Detail":       {Manual: "needs a camera"},
-		"MainTabNavigator/HomeTab":      {Flows: []string{".maestro/chat-fail.yaml"}},
+		"MainTabNavigator/HomeTab":      {Flows: []string{".maestro/chat-fail.yaml", ".maestro/bare.yml"}},
 		"RootNavigator/Settings":        {Pending: "#153"},
 	}
 	delete(mobile, drop)

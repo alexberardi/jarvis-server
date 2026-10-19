@@ -193,14 +193,18 @@ func (s *Service) postCompletionCard(ctx context.Context, hh, title string, agg 
 	if !ok {
 		ih = statusCard["failed"]
 	}
-	summary := agg.Message
+	summary := cardSummary(agg)
 	if summary == "" {
 		summary = "The errand finished."
 	}
+	body := firstNonEmpty(agg.Answer, summary)
+	md := map[string]any{"household_id": hh, "status": status}
+	if agg.Answer != "" {
+		md["answer"] = agg.Answer // the report in full (#232); the summary is its first line
+	}
 	s.Cards.Post(ctx, Card{
-		HouseholdID: hh, UserID: uid, Title: ih[0] + " Errand " + ih[1] + ": " + title, Summary: summary, Body: summary,
-		Category: completionCategory, Metadata: map[string]any{"household_id": hh, "status": status},
-		Push: true, TargetType: targetType(uid),
+		HouseholdID: hh, UserID: uid, Title: ih[0] + " Errand " + ih[1] + ": " + title, Summary: summary, Body: body,
+		Category: completionCategory, Metadata: md, Push: true, TargetType: targetType(uid),
 	})
 }
 

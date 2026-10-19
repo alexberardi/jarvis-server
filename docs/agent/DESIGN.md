@@ -1728,6 +1728,19 @@ stand; this adds one case before them (`internal/agent/jarvispage`, `dictate/jar
   vocabulary, qwen3.5-9b, 5 runs each): "type into omawrite that I need to walk the dogs" 0/5 →
   4/5; "type buy more coffee filters into omawrite" 2/5 → 5/5 (before, "into omawrite" stayed in
   `text`); "write … in slack" 5/5 both.
+- **Filling in the app the model dropped (2026-10-19, #230).** The 9B still dropped `app` (the
+  rc16 verification: 2 of 3 scenarios failed), so command-center no longer relies on the
+  description alone. A `desktop_type_text` call with no `app` gets one from the utterance before
+  it goes to the node (`fillTypedApp`, `desktop_hint.go`): after a typing verb ("type", "write",
+  "enter", …), "into X" or "in X" where X is one or two words (after an optional "the"/"my") that
+  end the utterance or come before "that", "saying", "and", "please" or punctuation. X is left
+  out when any of its words is in the text ("type I live in Boston"), when it is a manner or a
+  place rather than an app ("in all caps", "in spanish", "in here", "in it"), and when the
+  request opens an app first ("open X and type Y" types into the launch). "to X" is never used:
+  it is a person or part of the sentence too often. A call that names an app keeps the model's. X
+  is kept as said, article and all ("the terminal"), as `app` asks. The fill reads the voice
+  command as heard, on a continue too (the conversation keeps the turn's): the composed user
+  message carries the hints, the `/no_think` suffix and the overheard framing after or around it.
 
 ### The island note
 
@@ -1955,6 +1968,7 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
 Updated to v0.2.0                           (disabled, only around a self-update, §13)
 ─────────────
 ✓ Listen for "Hey Jarvis"                   (Linux, macOS)
+  Computer control                          (off by default; COMPUTER-CONTROL.md C11)
   Open Jarvis Automation                    (once discovery names the web UI)
   Set up / Settings…                        (the setup page, §13)
   Sign out of Jarvis Automation             (§13 "Signing out")
@@ -1970,6 +1984,12 @@ Updated to v0.2.0                           (disabled, only around a self-update
   says "couldn't start listening", and the saved choice is kept. A `--voice` given on `run`'s
   command line still wins at the next start (flags beat the file, §13). Dictation's island notes
   show only while listening is on, as before.
+- **Computer control** lets Jarvis use this computer (computer tasks, recording;
+  [COMPUTER-CONTROL.md](COMPUTER-CONTROL.md) C11). Off by default, on every install and after an
+  upgrade; each choice is saved as agent.json `computer_control`, and `jarvis-agent computer
+  on|off` does the same. While it is off the agent refuses every computer action and recording
+  (`computer.Switch`); turning it off stops a task going on, as "Stop Jarvis" does. The heartbeat
+  reports it (`computer_control`), so jarvisd targets only computers with it on.
 - **Open Jarvis Automation** opens discovery's `jarvis-admin` URL (http/https only, no user
   info) in the default browser; it appears once jarvisd answers discovery.
 - **Set up / Settings…** starts `jarvis-agent setup` as a process of its own (§13 "The setup

@@ -91,14 +91,15 @@ func TestBrokenHeaderIsAnError(t *testing.T) {
 }
 
 // fakes writes a maestro and an adb that log their arguments to calls.log. The maestro fails
-// any flow whose path has "fail" in it (and writes a JUnit report saying why), and sleeps on
-// "slow".
+// any flow whose path has "fail" in it (and writes a JUnit report saying why), sleeps on
+// "slow", and on "drop" dies the way an adb transport drop kills it, the first time only. The
+// adb's /health probe answers 200 on the emulator's port 7700 only.
 func fakes(t *testing.T) (maestro, adb, calls string) {
 	d := t.TempDir()
 	calls = filepath.Join(d, "calls.log")
 	maestro, adb = filepath.Join(d, "maestro"), filepath.Join(d, "adb")
 	write(t, maestro, `#!/bin/sh
-echo "maestro $*" >>`+calls+`
+printf 'maestro %s\n' "$*" >>`+calls+`
 out=
 flow=
 while [ $# -gt 0 ]; do
@@ -112,6 +113,12 @@ while [ $# -gt 0 ]; do
 done
 case $flow in
   *slow*) sleep 3 ;;
+  *drop*)
+    if [ ! -f `+d+`/dropped ]; then
+      touch `+d+`/dropped
+      echo "Exception in thread main dadb.DeviceServerDied: device offline"
+      exit 1
+    fi ;;
   *fail*)
     echo "Assertion is false: \"84\" is visible"
     cat >"$out" <<X
@@ -122,10 +129,11 @@ esac
 echo "[Passed] ok"
 `)
 	write(t, adb, `#!/bin/sh
-echo "adb $*" >>`+calls+`
+printf 'adb %s\n' "$*" >>`+calls+`
 case "$*" in
   *"screencap -p"*) printf '\211PNG\r\n\032\nfake' ;;
   *"exec-out cat"*) echo '<hierarchy><node text="Chat"/></hierarchy>' ;;
+  *"nc 127.0.0.1 7700"*) echo 'HTTP/1.0 200 OK' ;;
   *"logcat -d"*) echo '10-18 09:41:00.000  1234  1250 E ReactNativeJS: TypeError: x is undefined'; echo '10-18 09:41:00.000  1234  1250 I ReactNativeJS: fine' ;;
 esac
 `)
@@ -247,8 +255,128 @@ func TestParseConfig(t *testing.T) {
 	if _, _, err := parseConfig("list", []string{"--flows", "d", "-e", "NOEQUALS"}); err == nil {
 		t.Error("-e without =")
 	}
-	c, re, err := parseConfig("run", []string{"--flows", "d", "--out", "o", "--serial", "emulator-5580", "-e", "A=1", "-e", "B=x=y", "--filter", "chat"})
-	if err != nil || re == nil || strings.Join(c.env, " ") != "A=1 B=x=y" {
+	c, re, err := parseConfig("run", []string{"--flows", "d", "--out", "o", "--serial", "emulator-5580", "-e", "A=1", "-e", "B=x=y", "--filter", "chat",
+		"--reverse", "tcp:7700=tcp:18700", "--reverse", "tcp:1=tcp:1", "--health-port", "7700"})
+	if err != nil || re == nil || strings.Join(c.env, " ") != "A=1 B=x=y" ||
+		strings.Join(c.reverse, " ") != "tcp:7700=tcp:18700 tcp:1=tcp:1" || c.healthPort != "7700" {
 		t.Fatalf("%+v %v %v", c, re, err)
+	}
+	if _, _, err := parseConfig("run", []string{"--flows", "d", "--reverse", "7700"}); err == nil {
+		t.Error("--reverse without =")
+	}
+}
+
+// prepCalls are the adb calls before each maestro run, one string per run.
+func prepCalls(t *testing.T, calls string) []string {
+	t.Helper()
+	log, _ := os.ReadFile(calls)
+	var out []string
+	var cur []string
+	for _, l := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		if strings.HasPrefix(l, "maestro ") {
+			out = append(out, strings.Join(cur, "\n"))
+			cur = nil
+			continue
+		}
+		if !strings.HasPrefix(l, "adb -s emulator-5580 ") {
+			t.Errorf("adb call without the harness serial: %s", l)
+		}
+		if strings.Contains(l, "kill-server") || strings.Contains(l, "remove-all") || strings.Contains(l, "reconnect") {
+			t.Errorf("a global adb call: %s", l)
+		}
+		cur = append(cur, l)
+	}
+	return out
+}
+
+func dropConfig(t *testing.T, flows map[string]string) (*config, []Flow, string) {
+	maestro, adb, calls := fakes(t)
+	d := filepath.Join(t.TempDir(), ".maestro")
+	for name, title := range flows {
+		write(t, filepath.Join(d, name), "appId: a\nname: "+title+"\n---\n- launchApp\n")
+	}
+	c := &config{flowsDir: d, rel: ".maestro", out: filepath.Join(t.TempDir(), "mobile"), maestro: maestro, adb: adb,
+		serial: "emulator-5580", flowTimeout: time.Minute, adbTimeout: 10 * time.Second, probePause: time.Millisecond,
+		reverse: []string{"tcp:18710=tcp:18710", "tcp:7700=tcp:18700"}, healthPort: "7700"}
+	fl, err := Discover(d, ".maestro", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, fl, calls
+}
+
+// An adb transport drop wipes every reverse tunnel: before each flow the runner waits for the
+// device, sets the tunnels again and probes /health through them.
+func TestRunReadiesTheDeviceBeforeEveryFlow(t *testing.T) {
+	c, flows, calls := dropConfig(t, map[string]string{"a.yaml": "a", "b.yaml": "b"})
+	res, err := run(context.Background(), c, flows)
+	if err != nil || res.Status != "passed" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	runs := prepCalls(t, calls)
+	if len(runs) != 2 {
+		t.Fatalf("%d maestro runs, want 2", len(runs))
+	}
+	for i, pre := range runs {
+		wait := strings.Index(pre, "adb -s emulator-5580 wait-for-device")
+		r1 := strings.Index(pre, "adb -s emulator-5580 reverse tcp:18710 tcp:18710")
+		r2 := strings.Index(pre, "adb -s emulator-5580 reverse tcp:7700 tcp:18700")
+		probe := strings.Index(pre, "| nc 127.0.0.1 7700")
+		if wait < 0 || r1 < wait || r2 < r1 || probe < r2 {
+			t.Errorf("flow %d: want wait-for-device, the two tunnels, then the probe, got:\n%s", i+1, pre)
+		}
+	}
+}
+
+func TestRunRetriesAFlowOnceWhenTheDeviceDrops(t *testing.T) {
+	c, flows, calls := dropConfig(t, map[string]string{"drop.yaml": "chat after a drop", "z-fail.yaml": "plain failure"})
+	res, err := run(context.Background(), c, flows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Tests) != 2 {
+		t.Fatalf("%+v", res)
+	}
+	d := res.Tests[0]
+	if d.Status != "passed" || !strings.Contains(d.Note, "retried once") || !strings.Contains(d.Note, "DeviceServerDied") {
+		t.Errorf("dropped flow: %+v", d)
+	}
+	f := res.Tests[1]
+	if f.Status != "failed" || f.Note != "" {
+		t.Errorf("an ordinary failure is not retried: %+v", f)
+	}
+	runs := prepCalls(t, calls)
+	if len(runs) != 3 {
+		t.Fatalf("%d maestro runs, want 3 (the dropped flow twice, the failing one once)", len(runs))
+	}
+	if !strings.Contains(runs[1], "reverse tcp:7700 tcp:18700") {
+		t.Errorf("the retry did not set the tunnels again:\n%s", runs[1])
+	}
+	raw, _ := os.ReadFile(filepath.Join(c.out, "results.json"))
+	if !strings.Contains(string(raw), `"note": "retried once`) {
+		t.Errorf("results.json lacks the note:\n%s", raw)
+	}
+}
+
+func TestRunFailsAFlowWhenTheSandboxIsUnreachable(t *testing.T) {
+	c, flows, calls := dropConfig(t, map[string]string{"a.yaml": "a"})
+	c.healthPort = "7799" // the fake answers nothing there
+	res, err := run(context.Background(), c, flows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Tests[0]
+	if r.Status != "failed" || r.Error == nil || !strings.Contains(*r.Error, "can't reach the sandbox") || !strings.Contains(r.Note, "retried once") {
+		t.Errorf("%+v", r)
+	}
+	if !strings.HasPrefix(r.Note, "retried once: the emulator was not ready") || strings.Contains(r.Note, "transport dropped") {
+		t.Errorf("note %q: a failed readiness check is not a transport drop", r.Note)
+	}
+	log, _ := os.ReadFile(calls)
+	if strings.Contains(string(log), "maestro ") {
+		t.Error("ran the flow without a tunnel to the sandbox")
+	}
+	if n := strings.Count(string(log), "nc 127.0.0.1 7799"); n != 6 {
+		t.Errorf("%d probes, want 3 per try, 2 tries", n)
 	}
 }

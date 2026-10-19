@@ -548,3 +548,61 @@ func TestPostBluetoothResultsHitTheNodesRequests(t *testing.T) {
 		t.Fatalf("got %v", paths)
 	}
 }
+
+func TestVerifyApproval(t *testing.T) {
+	var path, key string
+	var body map[string]any
+	valid, status := true, http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, key = r.Method+" "+r.URL.EscapedPath(), r.Header.Get("X-API-Key")
+		body = nil
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(status)
+		fmt.Fprintf(w, `{"valid":%v}`, valid)
+	}))
+	defer srv.Close()
+	cc := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k"})
+	ctx := context.Background()
+	ok, err := cc.VerifyApproval(ctx, "a/b c", "sha256:abc")
+	if err != nil || !ok {
+		t.Fatalf("valid: %v %v", ok, err)
+	}
+	if path != "POST /api/v0/computer/approvals/a%2Fb%20c/verify" || key != "n1:k" {
+		t.Fatalf("%s with key %q", path, key)
+	}
+	if len(body) != 1 || body["digest"] != "sha256:abc" {
+		t.Fatalf("body = %v", body)
+	}
+	valid = false
+	if ok, err := cc.VerifyApproval(ctx, "tok", "sha256:abc"); err != nil || ok {
+		t.Fatalf("invalid: %v %v", ok, err)
+	}
+	valid, status = true, http.StatusUnauthorized
+	if ok, err := cc.VerifyApproval(ctx, "tok", "sha256:abc"); err == nil || ok {
+		t.Fatalf("401: %v %v", ok, err)
+	}
+}
+
+func TestUploadRecording(t *testing.T) {
+	var path, key string
+	var body map[string]any
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, key = r.Method+" "+r.URL.EscapedPath(), r.Header.Get("X-API-Key")
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(status)
+		fmt.Fprint(w, `{"id":"rec_1"}`)
+	}))
+	defer srv.Close()
+	cc := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k"})
+	if err := cc.UploadRecording(context.Background(), map[string]any{"recording_id": "rec_1", "mode": "browser", "trace": []any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if path != "POST /api/v0/computer/recordings" || key != "n1:k" || body["recording_id"] != "rec_1" {
+		t.Fatalf("%s with key %q, body %v", path, key, body)
+	}
+	status = http.StatusForbidden
+	if err := cc.UploadRecording(context.Background(), map[string]any{}); err == nil {
+		t.Fatal("403 is an error")
+	}
+}
