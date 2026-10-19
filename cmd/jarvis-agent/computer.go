@@ -19,26 +19,29 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-// computerCmd is `jarvis-agent computer stop|status|on|off|record start|record stop`: stop what
-// Jarvis is doing with this computer (a computer task, a recording), as the status icon's "Stop
-// Jarvis" does, say what it is doing, turn computer control on or off, as its "Computer
-// control" does, or record what the user does in the browser, as its "Watch me" does. All ask
+// computerCmd is `jarvis-agent computer stop|status|on|off|record start [--desktop]|record stop`:
+// stop what Jarvis is doing with this computer (a computer task, a recording), as the status
+// icon's "Stop Jarvis" does, say what it is doing, turn computer control on or off, as its
+// "Computer control" does, or record what the user does in the browser, as its "Watch me" does
+// (or on the desktop, with --desktop). All ask
 // the running agent over its control socket. (`computer snapshot` and `computer record
 // --browser` are computerSnapshotCmd and computerRecordCmd, which main dispatches before this.)
 func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 	cmds := map[string]string{"stop": control.ComputerStop, "status": control.ComputerStatus,
 		"on": control.ComputerOn, "off": control.ComputerOff,
-		"record start": control.ComputerRecordStart, "record stop": control.ComputerRecordStop}
+		"record start": control.ComputerRecordStart, "record stop": control.ComputerRecordStop,
+		"record start --desktop": control.ComputerRecordDesktop}
 	cmd := ""
-	if len(args) >= 1 && len(args) <= 2 {
+	if len(args) >= 1 && len(args) <= 3 {
 		cmd = cmds[strings.Join(args, " ")]
 	}
 	if cmd == "" {
-		return errors.New("usage: jarvis-agent computer stop|status|on|off|record start|record stop|snapshot URL|record --browser")
+		return errors.New("usage: jarvis-agent computer stop|status|on|off|record start [--desktop]|record stop|snapshot URL|record --browser")
 	}
 	r, err := control.Ask(dial, cmd)
 	if err != nil {
@@ -47,6 +50,9 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 	switch {
 	case cmd == control.ComputerRecordStart:
 		fmt.Fprintf(w, "Recording (%s): do the task in the browser, then run `jarvis-agent computer record stop` or choose Stop recording in the menu.\n", r.Answer)
+	case cmd == control.ComputerRecordDesktop:
+		fmt.Fprintf(w, "Recording the desktop (%s): do the task, then run `jarvis-agent computer record stop` or choose Stop recording in the menu. "+
+			"What you type into password fields isn't kept.\n", r.Answer)
 	case cmd == control.ComputerRecordStop:
 		id, n, _ := strings.Cut(r.Answer, " ")
 		fmt.Fprintf(w, "Stopped %s: %s events, sent to Jarvis.\n", id, n)
@@ -78,18 +84,44 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 // --- recording (plan P3 piece 29) ---
 
 // newRecorder is the agent's recorder: traces under dir (<agent dir>/recordings), the browser
-// extension's events (a browser toolset in tools), and a trace stopped here (the menu, the CLI,
-// voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected: then it is
-// kept here only).
+// extension's events (a browser toolset in tools), the desktop where this OS can record it
+// (macOS, with keyframes from the screen toolset in tools), and a trace stopped here (the menu,
+// the CLI, voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected:
+// then it is kept here only).
 func newRecorder(dir string, sw *computer.Switch, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {
 	sources := map[string]computer.Source{}
+	var shots screen.Capturer
 	for _, t := range tools {
-		if bt, ok := t.(*browser.Tools); ok {
-			sources[computer.ModeBrowser] = browserRecording{bt}
+		switch t := t.(type) {
+		case *browser.Tools:
+			sources[computer.ModeBrowser] = browserRecording{t}
+		case *screen.Tools:
+			shots = t.C
 		}
+	}
+	if src := computer.NewDesktopSource(dir, keyframer(shots), log); src != nil {
+		sources[computer.ModeDesktop] = src
 	}
 	return &computer.Recorder{Dir: dir, Switch: sw, Activity: activity, Sources: sources, Log: log,
 		Stopped: func(tr computer.Trace) { go uploadRecording(cc(), tr, log) }}
+}
+
+// keyframer is a desktop recording's keyframe: the screen as a JPEG (nil without a capturer).
+func keyframer(c screen.Capturer) func(context.Context) ([]byte, error) {
+	if c == nil {
+		return nil
+	}
+	return func(ctx context.Context) ([]byte, error) {
+		if ok, why := c.Available(ctx); !ok {
+			return nil, errors.New(why)
+		}
+		shot, err := c.Capture(ctx, screen.ScopeScreen, "")
+		if err != nil {
+			return nil, err
+		}
+		b, _, _, err := screen.Encode(shot.Image)
+		return b, err
+	}
 }
 
 // uploadRecording sends a trace stopped on this computer to jarvisd (POST
@@ -108,12 +140,13 @@ func uploadRecording(cc *node.CC, tr computer.Trace, log *slog.Logger) {
 	log.Info("recording: sent to jarvisd", "recording", tr.ID, "events", len(tr.Events))
 }
 
-// recordFromHere starts a browser recording or ends the one going on, uploading it: the
-// status icon's "Watch me" / "Stop recording" and `jarvis-agent computer record start|stop`.
-// The answer is the recording's id, and on stop its events too ("rec_… 12").
-func recordFromHere(ctx context.Context, rec *computer.Recorder, start bool, log *slog.Logger) (string, error) {
-	if start {
-		id, err := rec.Start(ctx, computer.ModeBrowser)
+// recordFromHere starts a recording in mode or, with mode "", ends the one going on, uploading
+// it: the status icon's "Watch me" / "Stop recording" and `jarvis-agent computer record
+// start [--desktop]|stop`. The answer is the recording's id, and on stop its events too
+// ("rec_… 12").
+func recordFromHere(ctx context.Context, rec *computer.Recorder, mode string, log *slog.Logger) (string, error) {
+	if mode != "" {
+		id, err := rec.Start(ctx, mode)
 		if err != nil {
 			log.Warn("recording: couldn't start", "err", err)
 		}

@@ -121,7 +121,11 @@ func (ic *trayIcon) stopTaskFromMenu() {
 func (ic *trayIcon) recordFromMenu(start bool) {
 	ic.log.Info("recording chosen in the menu", "start", start, "activity", ic.activity.String())
 	if ic.recorder != nil {
-		_, _ = recordFromHere(context.Background(), ic.recorder, start, ic.log)
+		mode := ""
+		if start {
+			mode = computer.ModeBrowser
+		}
+		_, _ = recordFromHere(context.Background(), ic.recorder, mode, ic.log)
 	}
 }
 

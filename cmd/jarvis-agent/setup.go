@@ -282,10 +282,11 @@ const (
 	paneMicrophone    = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
 	paneAutomation    = "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
 	paneScreen        = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+	paneInput         = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
 	systemEventsID    = "com.apple.systemevents"
 )
 
-// macPermissions are the four grants the agent uses, each with a live status and what asks
+// macPermissions are the five grants the agent uses, each with a live status and what asks
 // for it. macOS only.
 func macPermissions() []firstrun.Permission {
 	open := func(pane string) {
@@ -327,31 +328,45 @@ func macPermissions() []firstrun.Permission {
 		{ID: "screen", Label: "Screen Recording", Pane: paneScreen,
 			Why: "So Jarvis can read what's on your screen when you ask it to.",
 			// A process sees a new Screen Recording grant only after it restarts: ask a fresh one.
-			Status: func() string { return boolStatus(freshScreenStatus()) },
+			Status: func() string { return boolStatus(freshStatus("screen")) },
 			Ask:    func() { macax.ScreenPrompt(); open(paneScreen) }},
+		{ID: "input-monitoring", Label: "Input Monitoring", Pane: paneInput,
+			Why: "So Jarvis can watch what you do in an app when you ask it to learn a task (never what you type into a password field).",
+			// Like Screen Recording, the grant applies to a fresh process.
+			Status: func() string { return boolStatus(freshStatus("input-monitoring")) },
+			Ask:    func() { macax.ListenPrompt(); open(paneInput) }},
 	}
 }
 
-// freshScreenStatus asks a new process of this binary (`jarvis-agent permission screen`), which
+// freshChecks are the grants macOS shows a process only after it restarts, which
+// `jarvis-agent permission <name>` checks in a fresh one.
+var freshChecks = map[string]func() bool{"screen": macax.ScreenTrusted, "input-monitoring": macax.ListenTrusted}
+
+// freshStatus asks a new process of this binary (`jarvis-agent permission <name>`), which
 // macOS answers with the current grant; this process's own answer is fixed at its start.
-func freshScreenStatus() bool {
+func freshStatus(name string) bool {
 	exe, err := agentExe()
 	if err != nil {
-		return macax.ScreenTrusted()
+		return freshChecks[name]()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, exe, "permission", "screen").Output()
+	out, err := exec.CommandContext(ctx, exe, "permission", name).Output()
 	return err == nil && strings.TrimSpace(string(out)) == firstrun.Granted
 }
 
-// permissionCmd is `jarvis-agent permission screen`: the setup page's fresh Screen Recording
-// check (prints granted or not_asked). Hidden: not in the usage.
+// permissionCmd is `jarvis-agent permission screen|input-monitoring`: the setup page's fresh
+// Screen Recording or Input Monitoring check (prints granted or not_asked). Hidden: not in
+// the usage.
 func permissionCmd(args []string, w io.Writer) error {
-	if len(args) != 1 || args[0] != "screen" {
-		return errors.New("usage: jarvis-agent permission screen")
+	var check func() bool
+	if len(args) == 1 {
+		check = freshChecks[args[0]]
 	}
-	if macax.ScreenTrusted() {
+	if check == nil {
+		return errors.New("usage: jarvis-agent permission screen|input-monitoring")
+	}
+	if check() {
 		fmt.Fprintln(w, firstrun.Granted)
 	} else {
 		fmt.Fprintln(w, firstrun.NotAsked)
