@@ -456,8 +456,9 @@ barge-in's energy gate keeps the reply from interrupting itself), device selecti
   `desktop_close_window` is marked `is_risky` (only errands' planner reads that) and is a
   graceful close (the app may prompt to save); nothing else the desktop offers is
   destructive. See DESIGN.md §9 Q2.
-- **Not ported:** `act_on_items`, `post_process_tool_call`, music takeover. (`wait_for_input`,
-  `clear_history` and `on_response_complete` landed with follow-up, §3.9.)
+- **Not ported:** `act_on_items`, `post_process_tool_call`. (`wait_for_input`,
+  `clear_history` and `on_response_complete` landed with follow-up, §3.9; music takeover with
+  §3.16.)
 
 **Verified live** (2026-10-10, `listen --voice-input wav:… --no-chimes`, Kokoro-rendered
 "Hey Jarvis." + command, against this box's dev jarvisd, as the MBP's node):
@@ -938,6 +939,48 @@ paplay -d bluez_sink.<MAC_>.a2dp_sink /usr/share/sounds/alsa/Front_Center.wav   
 sudo systemctl start jarvis-node
 ```
 
+### 3.16 Parity 5.11: music ducking and takeover (2026-10-19, loop #180 17a)
+
+`internal/agent/music` ports `N:core/music_control.py`; the Pi profile wires it
+([decision](../decisions/2026-10-19-pi-node-music-ducking.md), which also lists #180's other
+four slices, 17b–17e, still to build).
+
+| When | Does |
+|---|---|
+| Wake word fires; before each follow-up listen | `Duck`, in the background: SIGSTOP class (mpv, ffplay, cvlc, vlc, spotifyd, librespot) moved to the `jarvis_duck_null` sink and SIGSTOPped; mute-only class (shairport-sync, go-librespot, mpd) set to 20% of the stream (its volume saved once per turn), muted if the volume can't be read |
+| The turn is over (follow-ups included) | `Restore` (SIGCONT, moves back to `@DEFAULT_SINK@`, unmute, saved volumes back), then each `on_response_complete`; a deferred play that ran marks the node's own music as playing |
+| The node's own music starts / stops | The HAT's mic PGA drops to 49% / goes back to what it was (a no-op on the installer's 49% baseline); at start, a PGA left at the music level is put back |
+| A music command's call with `action: "play"` | `sdkhost.Host.BeforeCall` stops every other player that has an uncorked stream: mpd by `stop`+`clear` on :6600, go-librespot by `POST :3678/player/pause`, the rest by SIGINT; the command's own player (`takes_over_playback_binary`, else N:'s legacy map) is left alone |
+
+The voice pipeline runs the duck and restore steps in order on one background queue
+(`voice/music.go`), so a restore never overtakes a slow duck and listening never waits for
+pactl; `Run` waits for the queue, so a stopping agent still restores the music. It runs on a Pi
+install only (the HAT or `/etc/jarvis-node`): `--profile pi` on a dev box (node-sim, the voice
+lane) leaves the user's own players alone.
+
+**Verified** with unit tests: N:'s `tests/test_music_control.py` cases over a fake pactl/pkill
+(`music_test.go`, including the control-API invariant that mpd, go-librespot and shairport-sync
+are never SIGSTOPped), a fake mpd port and go-librespot API, the PGA read/write against amixer's
+output (`hat/codec_test.go`), the pipeline's step order through a whole turn with a deferred
+play (`voice/music_test.go`), and the takeover hook through a real Python sidecar
+(`TestSidecarTakeoverHook`). **Not yet on a Pi.** On the lab Pi 4 (never the prod kitchen node),
+with a music package installed (Spotify or Audacy):
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# "Hey Jarvis, play some jazz on Spotify": the reply, then the music starts (deferred play);
+#   the log has "music: restore" then "music: mic gain profile engaged" (or nothing, at 49% already)
+pactl list sink-inputs short           # the player's stream on jarvis_output
+# "Hey Jarvis" over the music: it drops to ~20% while you speak ("music: duck ... ducked=[N]")
+#   and comes back to its own level after the reply ("music: restore ... unducked=[N]")
+amixer -c seeed2micvoicec sget PGA     # 49% while the music plays
+# "Hey Jarvis, play Z100 on Audacy" while Spotify plays: Spotify stops ("music: takeover ...
+#   stopped=[go-librespot]"), then the station plays
+# "Hey Jarvis, stop the music": answered at once (go-librespot/mpd were never frozen)
+sudo systemctl start jarvis-node
+```
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -1219,6 +1262,13 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
        preroll, 48 kHz WAV like a voice turn's upload); `voice.VoiceProfiles` uploads it to
        M4/M5 and posts V9 (Python's success and `audio_bus_unavailable` / `record_failed` /
        `upload_failed` / `verify_failed` shapes). Unit tests; not yet run on a Pi.
+   11. Music ducking and takeover (loop #180 17a). **Built 2026-10-19 (§3.16)**: duck on wake
+       and each follow-up, restore before the deferred play, the mic gain profile, takeover on a
+       music command's play. Unit tests; not yet on a Pi. Still to build from #180, in order
+       ([decision](../decisions/2026-10-19-pi-node-music-ducking.md)): 17b echo cancellation
+       during music; 17c tentative wake and `pre_wake_speech_seconds` (§1.1 rows 21–22); 17d wake
+       auto-calibration and the false-wake cool-down; 17e the wake greeting prefetch (row 20),
+       maintenance restart and the ACT-LED fallback without a HAT.
 
    Then retire the Python node.
 
