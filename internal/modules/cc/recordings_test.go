@@ -152,6 +152,10 @@ func TestRecordingsAreTheOwners(t *testing.T) {
 	if len(l) != 1 || l[0].(map[string]any)["id"] != rec.ID || l[0].(map[string]any)["trace"] != nil {
 		t.Fatalf("owner's list (no traces): %v", l)
 	}
+	// The list counts the trace's events for the Recordings page (piece 27).
+	if n := l[0].(map[string]any)["steps"]; n != float64(1) {
+		t.Fatalf("steps = %v, want 1", n)
+	}
 	if got := e.do("GET", recBase+"/"+rec.ID, nil, owner).want(200).json(); got["narration"] != rec.Narration || got["trace"] == nil {
 		t.Fatalf("owner GET: %v", got)
 	}

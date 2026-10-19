@@ -382,6 +382,8 @@ mobile (stack/popover) ─GET /callbacks/{id}/status (poll)──▶ {id,status,
 >
 > **Added 2026-10-18 (jarvisd-only, autonomy P1, A1 in [docs/autonomy/PLAN.md](../autonomy/PLAN.md)):** `errands.autonomous_enabled` (bool, category `errands`, default **false**), last in the GET's key order. When on, the household's custom rules may run background errands without confirmation (autonomy P1). Any member reads it; a household admin writes it with `PUT …/settings/errands.autonomous_enabled {"value": true|false}` (same coercion as the other bools). Off by default and on an upgraded install.
 >
+> **Added 2026-10-19 (jarvisd-only, computer control plan P3 piece 27):** `computer.recording_retention_days` (int, category `computer`, default **30**, 1 to 3650), last in the GET's key order. Days a recording of a task shown to Jarvis is kept; it applies to recordings stored after the change ([2026-10-19-workflow-and-recording-access.md](../decisions/2026-10-19-workflow-and-recording-access.md)). Any member reads it; a household admin writes it (the admin web's Recordings page) with `PUT …/settings/computer.recording_retention_days {"value": 14}` (same coercion as the other ints; out of range → 400). A declared validator runs on the value as stored (an `int64`).
+>
 > `GET /mobile/household/{hh}/timezone` (any member; 403 for a non-member, 401 without a JWT) shows the effective zone and where it came from, so the app can render "Automatic — <zone> (from your nodes)": `{"household_id": "...", "timezone": "<effective or \"\">", "source": "setting"|"node"|"default", "node_timezone": "<node-derived or \"\">"}`. It ignores `HouseholdClock`. The legacy stack has neither the key nor the route; the app hides the row then.
 
 **GET** (`:99-124`):
