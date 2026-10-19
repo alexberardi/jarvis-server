@@ -272,7 +272,8 @@ func (*cancelWatchTool) Definition() *pyjson.Object {
 
 // Execute cancels the one live watch of the speaker's that the words pick (#221): its id, its
 // place n in list_watches, or else the watch whose words best cover the query's (watchScore).
-// A tie asks which and no match says so, both with the candidates' ids; neither cancels.
+// A tie, or a best watch that lacks some of the words ("toaster price" for "kettle price"),
+// asks which and no match says so, both with the candidates' ids; neither cancels.
 func (t *cancelWatchTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
 	m := t.m
 	if e := m.watchToolPrecheck(ctx, turn); e != nil {
@@ -283,16 +284,16 @@ func (t *cancelWatchTool) Execute(ctx context.Context, call servertools.Call, tu
 		return nil, err
 	}
 	q := argText(call, "watch")
-	hits := pickWatches(ws, q)
-	switch len(hits) {
-	case 0:
+	hits, all := pickWatches(ws, q)
+	switch {
+	case len(hits) == 0:
 		msg := "You aren't watching anything, so nothing was cancelled."
 		if len(ws) > 0 {
 			msg = "I couldn't find a watch matching " + strconv.Quote(q) + ". Nothing was cancelled. You're watching " +
 				watchTitles(ws, "and") + "."
 		}
 		return servertools.Obj("error", "not_found", "message", msg, "watches", watchRefs(ws, ws)), nil
-	case 1:
+	case len(hits) == 1 && all:
 	default:
 		return servertools.Obj("error", "ambiguous", "message",
 			"Nothing was cancelled yet: did you mean "+watchTitles(hits, "or")+"?", "candidates", watchRefs(ws, hits)), nil
@@ -308,42 +309,42 @@ func (t *cancelWatchTool) Execute(ctx context.Context, call servertools.Call, tu
 }
 
 // pickWatches is the watches q names: the one with that id or place n (1-based, "2" or "#2"),
-// else the best-scoring ones (several on a tie, none when nothing scores).
-func pickWatches(ws []watches.Watch, q string) []watches.Watch {
+// else the best-scoring ones (several on a tie, none when nothing scores); all is whether they
+// have every one of q's words, so a partial match is only a guess to ask about.
+func pickWatches(ws []watches.Watch, q string) (hits []watches.Watch, all bool) {
 	for _, w := range ws {
 		if w.ID == q {
-			return []watches.Watch{w}
+			return []watches.Watch{w}, true
 		}
 	}
 	if n, err := strconv.Atoi(strings.TrimPrefix(q, "#")); err == nil {
 		if n >= 1 && n <= len(ws) {
-			return []watches.Watch{ws[n-1]}
+			return []watches.Watch{ws[n-1]}, true
 		}
-		return nil
+		return nil, false
 	}
 	words := watchWords(q)
-	var hits []watches.Watch
-	best := 0
+	best, found := 0, 0
 	for _, w := range ws {
-		switch s := watchScore(w, words); {
+		switch s, f := watchScore(w, words); {
 		case s == 0 || s < best:
 		case s > best:
-			best, hits = s, []watches.Watch{w}
+			best, found, hits = s, f, []watches.Watch{w}
 		default:
 			hits = append(hits, w)
 		}
 	}
-	return hits
+	return hits, found == len(words)
 }
 
 // watchScore is how well the query's words name w: first how many of them it has anywhere (its
 // title, or what it watches: description with the page's site, search or signal kind), then how
 // many of those are in its title. "the example.net one" picks the example.net watch titled
-// "blender price" over one titled "price on example.com item".
-func watchScore(w watches.Watch, words []string) int {
+// "blender price" over one titled "price on example.com item". found is the first count alone.
+func watchScore(w watches.Watch, words []string) (score, found int) {
 	title := watchWords(w.Title)
 	rest := watchWords(watches.Describe(w) + " " + w.Source.Query + " " + w.Source.Kind)
-	found, inTitle := 0, 0
+	inTitle := 0
 	for _, x := range words {
 		switch {
 		case slices.Contains(title, x):
@@ -353,7 +354,7 @@ func watchScore(w watches.Watch, words []string) int {
 			found++
 		}
 	}
-	return found*(len(words)+1) + inTitle
+	return found*(len(words)+1) + inTitle, found
 }
 
 // watchFiller are words that don't tell watches apart ("the example.com one", "my kettle watch").

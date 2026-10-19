@@ -339,6 +339,28 @@ func TestCancelWatchNoMatch(t *testing.T) {
 	}
 }
 
+// TestCancelWatchPartialMatch (#221 review): a watch that has only some of the words isn't the
+// one meant. With only "kettle price" live, "toaster price" or "kettle deals" used to stop it;
+// now nothing is cancelled and the reply asks whether it was meant, with its n and id.
+func TestCancelWatchPartialMatch(t *testing.T) {
+	we := newWebWatchEnv(t)
+	kettle := we.tool("create_watch", priceWatchArgs, 8)["watch_id"].(string)
+	for _, q := range []string{"toaster price", "lawnmower price", "kettle deals"} {
+		r := we.tool("cancel_watch", `{"watch": `+strconv.Quote(q)+`}`, 8)
+		if r["error"] != "ambiguous" || r["status"] != nil || candidateTitles(r) != "kettle price" ||
+			r["message"] != "Nothing was cancelled yet: did you mean kettle price?" {
+			t.Fatalf("%q: %v", q, r)
+		}
+		if got := we.watch(sigHH, kettle); got.State != watches.StateActive {
+			t.Fatalf("%q: kettle price is %s", q, got.State)
+		}
+	}
+	// All the words still cancel it.
+	if r := we.tool("cancel_watch", `{"watch": "the kettle price one"}`, 8); r["status"] != "cancelled" {
+		t.Fatalf("%v", r)
+	}
+}
+
 // TestWatchToolsOffered: the tools are offered at warmup only with watches on and a known speaker.
 func TestWatchToolsOffered(t *testing.T) {
 	names := []string{"create_watch", "list_watches", "cancel_watch"}

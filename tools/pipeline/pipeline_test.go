@@ -871,6 +871,13 @@ func TestServerCallResults(t *testing.T) {
 		jsonText(got[1].Result) != `{"watches":[]}` {
 		t.Fatalf("text path: %+v", got)
 	}
+	// Lines match calls by place, so a prompt with a line too many (a node tool's result
+	// alongside) gives no result rather than the wrong one.
+	extra := strings.Replace(prompt, "\n/no_think", "\n"+`{"ok": true}`+"\n/no_think", 1)
+	text[1].Request = req(map[string]any{"role": "user", "content": extra})
+	if got := serverCallLogs(text, nil); len(got) != 2 || got[0].Result != nil || got[1].Result != nil {
+		t.Fatalf("misaligned lines: %+v", got)
+	}
 	// Content as text parts reads the same.
 	if r := decodeContent(json.RawMessage(`[{"type": "text", "text": "{\"status\": \"watching\"}"}]`)); jsonText(r) != `{"status":"watching"}` {
 		t.Fatalf("parts: %v", r)

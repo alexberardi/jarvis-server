@@ -314,9 +314,11 @@ func serverResults(later []TapEntry, calls []ToolCall) []any {
 		if !found {
 			for i := len(req.Messages) - 1; i >= 0; i-- {
 				if m := req.Messages[i]; m.Role == "user" {
+					// Lines match calls by place, so only when there is one per call: a
+					// prompt that also held node tools' results would misalign them.
 					text, _ := decodeContent(m.Content).(string)
-					for k, line := range textResults(text) {
-						if k < len(out) {
+					if lines := textResults(text); len(lines) == len(out) {
+						for k, line := range lines {
 							out[k] = decodeContent(mustJSON(line))
 						}
 					}
