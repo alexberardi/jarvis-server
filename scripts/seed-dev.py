@@ -645,6 +645,75 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
                          stamp, stamp, stamp)).rowcount
     counts["signals"] = n
 
+    # Taught workflows and recordings (computer control, plan P3) ---------------
+    # For the admin's Workflows and Recordings pages (e2e/web/tests/workflows.spec.ts): the
+    # primary's bank download (a month param, one typed literal, one step that asks first), the
+    # partner's shared bill payment, and two of the primary's recordings. Shapes:
+    # internal/modules/cc/workflows.go and recordings.go.
+    def wstep(intent, action, element=None, risk=""):
+        st = {"intent": intent, "target": "browser", "site": "bank.example.com",
+              "action": {"intent": intent, **action}}
+        if element:
+            st["element"] = element
+        if risk:
+            st["risk"] = risk
+        return st
+    bank_steps = [
+        wstep("Open the bank", {"kind": "navigate", "url": "https://bank.example.com/login"}),
+        wstep("Go to statements", {"kind": "press", "ref": "e3"},
+              {"role": "link", "name": "Statements", "selector": "#nav-statements"}),
+        wstep("Enter the month {month}", {"kind": "type", "text": "{month}"},
+              {"role": "textbox", "name": "Statement month", "selector": "#month"}),
+        wstep("Pick the checking account", {"kind": "select", "text": "checking", "ref": "e5"},
+              {"role": "combobox", "name": "Account", "selector": "#account"}),
+        wstep("Download the CSV", {"kind": "press", "ref": "e9"},
+              {"role": "button", "name": "Download CSV", "selector": "[data-testid=download-csv]"}),
+    ]
+    water_steps = [
+        {"intent": "Open the water company", "target": "browser", "site": "water.example.com",
+         "action": {"kind": "navigate", "intent": "Open the water company", "url": "https://water.example.com/billing"}},
+        {"intent": "Pay the balance", "target": "browser", "site": "water.example.com",
+         "action": {"kind": "press", "intent": "Pay the balance", "ref": "e4"},
+         "element": {"role": "button", "name": "Pay now"}, "risk": "pay"},
+    ]
+    workflows = [
+        ("tw_5eed000000000001", primary, "Download bank statement", ["download my bank statement"],
+         [{"name": "month", "kind": "month", "example": "2026-09", "description": "the statement month"}],
+         bank_steps, {"download": {"name_like": "statement*.csv"}}, 0, "rec_5eed000000000001"),
+        ("tw_5eed000000000002", partner, "Pay the water bill", ["pay the water bill"], [],
+         water_steps, {"text_present": ["Payment received"]}, 1, None),
+    ]
+    n = 0
+    for wid, owner, name, triggers, params, steps, success, shared, rec in workflows:
+        n += cx.execute("""INSERT INTO cc_taught_workflows (id, household_id, owner_id, name, slug,
+            trigger_phrases, params, steps, success, shared, recording_id, version, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT DO NOTHING""",
+                        (wid, household_id, owner, name, slugify(name), json.dumps(triggers), json.dumps(params),
+                         json.dumps(steps), json.dumps(success), shared, rec, stamp, stamp)).rowcount
+    counts["taught_workflows"] = n
+    bank_trace = [
+        {"seq": 1, "kind": "navigate", "url": "https://bank.example.com/login"},
+        {"seq": 2, "kind": "change", "element": {"role": "textbox", "name": "Password", "type": "password"}, "masked": True},
+        {"seq": 3, "kind": "click", "element": {"role": "link", "name": "Statements"}},
+        {"seq": 4, "kind": "change", "element": {"role": "textbox", "name": "Statement month"}, "value": "2026-09"},
+        {"seq": 5, "kind": "change", "element": {"role": "combobox", "name": "Account"}, "value": "checking"},
+        {"seq": 6, "kind": "click", "element": {"role": "button", "name": "Download CSV"}},
+        {"seq": 7, "kind": "download", "filename": "statement-2026-09.csv"},
+    ]
+    recordings = [
+        ("rec_5eed000000000001", "browser", bank_trace, "this is how I get the bank statement", 3, 2),
+        ("rec_5eed000000000002", "browser", bank_trace[:3], "", 0, 9),
+    ]
+    n = 0
+    for rid, mode, trace, narration, keyframes, age in recordings:
+        made = now - timedelta(days=age)
+        n += cx.execute("""INSERT INTO cc_recordings (id, household_id, owner_id, node_id, mode, trace,
+            narration, keyframes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING""",
+                        (rid, household_id, primary, node_id, mode, json.dumps(trace), narration, keyframes,
+                         ts(made), ts(made + timedelta(days=30)))).rowcount
+    counts["recordings"] = n
+
     # A deactivated account, in no household (so no role login picks it), for the admin's
     # Users page (e2e/web/tests/admin/users.spec.ts). No API deactivates a user; its password
     # hash matches no password, so it can never sign in.

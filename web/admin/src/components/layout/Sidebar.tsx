@@ -13,6 +13,8 @@ import {
   MessageSquare,
   Puzzle,
   Inbox,
+  Workflow,
+  Video,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useUnreadCount } from '@/hooks/useInbox'
@@ -34,6 +36,8 @@ const memberNav: NavItem[] = [
   { label: 'Chat', icon: MessageSquare, path: '/chat' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
+  { label: 'Workflows', icon: Workflow, path: '/workflows' },
+  { label: 'Recordings', icon: Video, path: '/recordings' },
 ]
 
 /** The Admin group: superusers only, and the server refuses these routes to anyone else (G1). */
