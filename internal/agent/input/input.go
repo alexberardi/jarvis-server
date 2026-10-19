@@ -1,10 +1,11 @@
 // Package input drives the pointer and keyboard for computer tasks: one interface, a backend per
-// OS (macOS CGEvent here; Linux and Windows later).
+// OS (macOS CGEvent; wlroots virtual pointer and keyboard; X11 and Windows later).
 package input
 
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -39,3 +40,22 @@ type Input interface {
 
 // ErrUnavailable is returned when input can't be posted (no backend, no permission).
 var ErrUnavailable = errors.New("input not available")
+
+// injectWindow records when the latest call began and ended posting (Injecting). Its lock is
+// never held across posting, so the input monitor can poll it mid-call.
+type injectWindow struct {
+	winMu      sync.Mutex
+	start, end time.Time
+}
+
+func (w *injectWindow) Injecting() (start, end time.Time) {
+	w.winMu.Lock()
+	defer w.winMu.Unlock()
+	return w.start, w.end
+}
+
+func (w *injectWindow) set(start, end time.Time) {
+	w.winMu.Lock()
+	w.start, w.end = start, end
+	w.winMu.Unlock()
+}

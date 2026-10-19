@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
+	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/tray"
 )
 
@@ -265,5 +267,47 @@ func TestComputerRecordStartStop(t *testing.T) {
 	ic.recordFromMenu(false)
 	if tr := <-handed; tr.ID == "" || rec.Current() != "" {
 		t.Fatalf("Stop recording: %+v, still %q", tr, rec.Current())
+	}
+}
+
+// clickInput records clicks; the rest of input.Input is never called.
+type clickInput struct {
+	input.Input
+	why    string
+	clicks []string
+}
+
+func (c *clickInput) Available(context.Context) (bool, string) { return c.why == "", c.why }
+
+func (c *clickInput) Click(_ context.Context, x, y int, b string, n int) error {
+	c.clicks = append(c.clicks, fmt.Sprintf("%d,%d %s %d", x, y, b, n))
+	return nil
+}
+
+// `jarvis-agent computer click X Y` clicks through the desktop's input backend.
+func TestComputerClick(t *testing.T) {
+	defer func(f func() input.Input) { nativeInput = f }(nativeInput)
+	fake := &clickInput{}
+	nativeInput = func() input.Input { return fake }
+	never := func() (net.Conn, error) { t.Fatal("dialed the agent"); return nil, nil }
+	var b bytes.Buffer
+	if err := computerCmd([]string{"click", "640", "-12"}, &b, never); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(fake.clicks, ";") != "640,-12 left 1" || strings.TrimSpace(b.String()) != "Clicked at 640,-12." {
+		t.Fatalf("clicks %q, output %q", fake.clicks, b.String())
+	}
+	for _, args := range [][]string{{"click", "x", "1"}, {"click", "1"}} {
+		if err := computerCmd(args, &b, never); err == nil || !strings.Contains(err.Error(), "usage") {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	fake.why = "the compositor doesn't offer the virtual-pointer protocol"
+	if err := computerCmd([]string{"click", "1", "1"}, &b, never); err == nil || !strings.Contains(err.Error(), fake.why) {
+		t.Fatalf("unavailable: %v", err)
+	}
+	nativeInput = func() input.Input { return nil }
+	if err := computerCmd([]string{"click", "1", "1"}, &b, never); err == nil {
+		t.Fatal("no backend: no error")
 	}
 }

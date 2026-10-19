@@ -227,6 +227,8 @@ func usage(w io.Writer) {
            recording; the menu's "Stop Jarvis" does the same), or say what it is doing
   computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
            off by default, and off stops a task going on)
+  computer click X Y       debug: a left click at X, Y (global logical coordinates) through
+           this desktop's input backend
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   update   update to the version of the jarvisd this computer is signed in to (the agent also
