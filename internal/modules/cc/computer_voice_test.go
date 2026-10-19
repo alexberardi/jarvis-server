@@ -173,7 +173,7 @@ func TestRecordingWithComputerControlOff(t *testing.T) {
 func TestStopRecordingAsksForAName(t *testing.T) {
 	ve, agent, _ := newRecToolEnv(t)
 	ve.computerRow(ve.node.id, 7, "MacBook", "off")
-	runTool(t, &startRecordingTool{m: ve.m}, "", ve.recTurn(7))
+	runTool(t, &startRecordingTool{m: ve.m}, `{"task": "learn how I do this"}`, ve.recTurn(7)) // the phrase isn't a name
 	stop := &stopRecordingTool{m: ve.m}
 	out := runTool(t, stop, "", ve.recTurn(7))
 	if out["error"] != "need_name" || !strings.Contains(out["message"].(string), "call") || len(agent.calls) != 1 {

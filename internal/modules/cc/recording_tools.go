@@ -36,6 +36,11 @@ const (
 	recordingCallTimeout = 20 * time.Second
 )
 
+// recordingPhrases are start_recording's own phrases (compactName): a model passing one as the
+// task gave no name, so stop_recording still asks for one.
+var recordingPhrases = map[string]bool{"recordthismacro": true, "recordamacro": true, "watchme": true, "watchmedothis": true,
+	"learnhowidothis": true, "watchhowidothis": true, "dothis": true, "this": true}
+
 // recordingIDPattern is an agent's recording id (computer.newRecordingID).
 var recordingIDPattern = regexp.MustCompile(`^rec_[A-Za-z0-9_-]{1,60}$`)
 
@@ -88,7 +93,7 @@ func (*startRecordingTool) Definition() *pyjson.Object {
 			"'watch me do this', 'learn how I do this', 'let me show you how to ...': it starts recording a macro, watching what "+
 			"they do in the browser on their computer so Jarvis can learn to do it. Saying you're watching without it records "+
 			"nothing. Not for reminders, notes or audio. Stop with stop_recording when they say they're done.",
-		servertools.Obj("task", strProp("The macro's name or what the user is about to show, in their words (e.g. 'pay the water bill' from 'record a macro called pay the water bill'); empty for 'record this macro' or 'watch me' alone"),
+		servertools.Obj("task", strProp("The macro's name or what the user is about to show, in their words (e.g. 'pay the water bill' from 'record a macro called pay the water bill'); empty when they only said 'record this macro', 'watch me (do this)' or 'learn how I do this'"),
 			"computer", computerProp()))
 }
 
@@ -107,7 +112,7 @@ func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call,
 		return recordingRefusal(agentCode(out, "start_failed"), "I couldn't start recording: "+agentError(out)), nil
 	}
 	id, _ := out["recording_id"].(string)
-	if task := strings.TrimSpace(argText(call, "task")); task != "" && id != "" {
+	if task := strings.TrimSpace(argText(call, "task")); task != "" && !recordingPhrases[compactName(task)] && id != "" {
 		m.recordingTasks.Store(id, task)
 		m.recordingNamed.Store(nodeID, id)
 	} else {
