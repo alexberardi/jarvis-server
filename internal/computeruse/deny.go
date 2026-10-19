@@ -2,6 +2,7 @@ package computeruse
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"slices"
 	"strings"
@@ -59,10 +60,12 @@ var settingsPaneWords = []string{"users", "passwords", "password", "privacy", "l
 var settingsPaneIDs = []string{"privacysecurity", "users-groups", "passwords-settings", "loginitems", "touchid"}
 
 // powerWords are lock, log out, shut down, restart and quit all, on desktop elements (menu items,
-// the shell's power menu). Websites' own "Log out" buttons are not on the list.
+// the shell's power menu, Windows' Start menu). Websites' own "Log out"/"Sign out" buttons are
+// not on the list.
 var powerWords = []string{
-	"shut down", "shutdown", "power off", "restart", "reboot", "log out", "logout",
-	"lock screen", "quit all",
+	"shut down", "shutdown", "power off", "restart", "reboot",
+	"log out", "logout", "log off", "sign out",
+	"lock", "lock screen", "quit all",
 }
 
 // powerChords are keypresses that lock, log out or force-quit, as sorted key sets.
@@ -75,15 +78,15 @@ var powerChords = [][]string{
 
 var (
 	originsMu     sync.RWMutex
-	serverOrigins []string // siteKey of each
+	serverOrigins []hostPort
 )
 
 // SetServerOrigins records the Jarvis server's origins ("https://host:port"), which browser
 // targets may not act on. Call it once the server URL is known; a later call replaces the list.
 func SetServerOrigins(origins ...string) {
-	keys := make([]string, 0, len(origins))
+	keys := make([]hostPort, 0, len(origins))
 	for _, o := range origins {
-		if k := siteKey(o); k != "" {
+		if k := siteKey(o); k.host != "" {
 			keys = append(keys, k)
 		}
 	}
@@ -158,28 +161,46 @@ func appKey(app string) string {
 	return strings.TrimSuffix(k, ".exe")
 }
 
-// siteKey is the lower-case host[:port] of a site or origin: "https://h:1/x" and "h:1" are "h:1".
-func siteKey(s string) string {
+// hostPort is a site's lower-case host and port; port is "" when the site does not say one.
+type hostPort struct{ host, port string }
+
+// siteKey parses a site or origin. A URL's port defaults to its scheme's ("https://h/x" is h:443);
+// a bare "h" or "h:1" keeps what it says.
+func siteKey(s string) hostPort {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if strings.Contains(s, "://") {
 		u, err := url.Parse(s)
 		if err != nil {
-			return ""
+			return hostPort{}
 		}
-		return u.Host
+		port := u.Port()
+		if port == "" {
+			port = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+		}
+		return hostPort{u.Hostname(), port}
 	}
-	host, _, _ := strings.Cut(s, "/")
-	return host
+	s, _, _ = strings.Cut(s, "/")
+	if host, port, err := net.SplitHostPort(s); err == nil {
+		return hostPort{host, port}
+	}
+	return hostPort{strings.Trim(s, "[]"), ""}
 }
 
+// siteIsServer is whether site is one of the server's origins: the same host, and the same port
+// when both say one (so a bare host matches every origin on it).
 func siteIsServer(site string) bool {
 	k := siteKey(site)
-	if k == "" {
+	if k.host == "" {
 		return false
 	}
 	originsMu.RLock()
 	defer originsMu.RUnlock()
-	return slices.Contains(serverOrigins, k)
+	for _, o := range serverOrigins {
+		if o.host == k.host && (k.port == "" || o.port == "" || o.port == k.port) {
+			return true
+		}
+	}
+	return false
 }
 
 func set(items ...string) map[string]bool {

@@ -46,8 +46,8 @@ type Action struct {
 	Approval  string   `json:"approval,omitempty"` // token minted by cc for this action
 }
 
-// Target is what a run acts on: a browser tab (Site is its host) or a desktop app (App is its
-// bundle id, app id or name).
+// Target is what a run acts on: a browser tab (Site is its host[:port], the port only when the
+// URL names one) or a desktop app (App is its bundle id, app id or name).
 type Target struct {
 	Kind     string `json:"kind"` // browser | desktop
 	Site     string `json:"site,omitempty"`

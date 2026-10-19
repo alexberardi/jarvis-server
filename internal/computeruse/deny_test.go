@@ -3,7 +3,7 @@ package computeruse
 import "testing"
 
 func TestBuiltinDeny(t *testing.T) {
-	SetServerOrigins("https://jarvis.example:8443", "http://192.0.2.10:7700")
+	SetServerOrigins("https://jarvis.example:8443", "http://192.0.2.10:7700", "https://jarvis.home.example")
 	defer SetServerOrigins()
 
 	app := func(a string) Target { return Target{Kind: "desktop", App: a} }
@@ -41,7 +41,15 @@ func TestBuiltinDeny(t *testing.T) {
 		{"server origin", site("jarvis.example:8443"), nil, true},
 		{"server origin as URL", site("https://jarvis.example:8443/admin"), nil, true},
 		{"server by ip", site("192.0.2.10:7700"), nil, true},
-		{"server host other port", site("jarvis.example"), nil, false},
+		{"server bare host", site("jarvis.example"), nil, true},
+		{"server bare ip", site("192.0.2.10"), nil, true},
+		{"server default port", site("jarvis.home.example:443"), nil, true},
+		{"server default port as URL", site("https://jarvis.home.example/"), nil, true},
+		{"server bare host, no port origin", site("JARVIS.home.example"), nil, true},
+		{"server host other port", site("jarvis.example:9000"), nil, false},
+		{"server host http port", site("jarvis.home.example:80"), nil, false},
+		{"other host same port", site("shop.example:8443"), nil, false},
+		{"other ip same port", site("192.0.2.11:7700"), nil, false},
 		// OS authentication prompts
 		{"SecurityAgent", app("com.apple.SecurityAgent"), nil, true},
 		{"coreauthd", app("com.apple.coreauthd"), nil, true},
@@ -65,7 +73,13 @@ func TestBuiltinDeny(t *testing.T) {
 		{"log out menu item", app("com.apple.finder"), &Element{Role: "menu item", Name: "Log Out Alex…"}, true},
 		{"lock screen", app("com.apple.finder"), &Element{Role: "menu item", Name: "Lock Screen"}, true},
 		{"restart", app("org.gnome.Shell"), &Element{Role: "button", Name: "Restart"}, true},
-		{"sign out on a site", site("shop.example"), &Element{Role: "button", Name: "Log out"}, false},
+		{"sign out, Windows Start", app("explorer.exe"), &Element{Role: "menu item", Name: "Sign out"}, true},
+		{"sign out, ChromeOS shelf", app("org.chromium.shell"), &Element{Role: "button", Name: "Sign out"}, true},
+		{"lock, Windows Start", app("explorer.exe"), &Element{Role: "menu item", Name: "Lock"}, true},
+		{"lock, GNOME power menu", app("org.gnome.Shell"), &Element{Role: "button", Name: "Lock"}, true},
+		{"unlock is not lock", app("com.apple.Notes"), &Element{Role: "button", Name: "Unlock"}, false},
+		{"log out on a site", site("shop.example"), &Element{Role: "button", Name: "Log out"}, false},
+		{"sign out on a site", site("shop.example"), &Element{Role: "button", Name: "Sign out"}, false},
 		// allowed
 		{"Notes", app("com.apple.Notes"), nil, false},
 		{"Finder", app("com.apple.finder"), &Element{Role: "button", Name: "Open"}, false},
