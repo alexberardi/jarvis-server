@@ -28,5 +28,8 @@ func TestWakeDebounceFlag(t *testing.T) {
 		if c.args == nil && f.onsetWait != 0 {
 			t.Errorf("--listen-onset-wait defaults to %v, want 0", f.onsetWait)
 		}
+		if c.args == nil && f.preRoll != time.Second {
+			t.Errorf("--listen-preroll defaults to %v, want 1s", f.preRoll)
+		}
 	}
 }

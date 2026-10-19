@@ -107,6 +107,7 @@ type Turn struct {
 	ConversationID string
 	WakeScore      float32
 	Threshold      float64 // silence threshold used for endpointing
+	PreRollSecs    float64 // of RecordedSecs, the audio kept from under the wake chime
 	HitMax         bool
 	Exchange                  // the command after the wake word
 	FollowUps      []Exchange // answers in the follow-up window, in order
@@ -275,6 +276,25 @@ func flush(chunks <-chan []int16) {
 	}
 }
 
+// takePreRoll empties the queue, keeping its last n chunks (the most recent audio) in order.
+func takePreRoll(chunks <-chan []int16, n int) []int16 {
+	var kept [][]int16
+	for {
+		select {
+		case c, ok := <-chunks:
+			if ok {
+				kept = append(kept, c)
+				if len(kept) > n {
+					kept = kept[1:]
+				}
+				continue
+			}
+		default:
+		}
+		return slices.Concat(kept...)
+	}
+}
+
 // ring keeps the last n items.
 type ring[T any] struct {
 	n     int
@@ -419,7 +439,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 			lvl = slog.LevelWarn
 		}
 		log.Log(ctx, lvl, "voice turn", "outcome", t.Outcome, "transcript", t.Transcript, "reply", t.Message,
-			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
+			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "pre_roll_s", fmt.Sprintf("%.2f", t.PreRollSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
 		// A command's deferred step (a media command starting playback) runs once everything
@@ -437,18 +457,24 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		}
 	}()
 
-	// Row 6: acknowledge, then record from after the chime (history_secs=0).
+	// Row 6: acknowledge, then record from after the chime, keeping up to PreRollSecs of what
+	// was heard while it played (0: history_secs=0, all of it dropped).
 	p.chime(ctx, wakeChime)
-	flush(chunks)
+	pre := takePreRoll(chunks, frames(p.Cfg.Endpointing.PreRollSecs))
 
 	// Row 8: record with RMS endpointing.
 	t.Threshold = p.Cfg.Endpointing.Threshold(preRMS)
 	s.threshold = t.Threshold
 	pcm, hitMax, err := p.record(ctx, s)
-	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
+	// The level reference leaves the pre-roll out: it may hold the chime's own echo.
 	if db, ok := SpeechLevel(pcm, s.threshold); ok {
 		s.wakeLevel = &db // the follow-up gate's level reference
 	}
+	if len(pcm) > 0 {
+		pcm = slices.Concat(pre, pcm)
+		t.PreRollSecs = float64(len(pre)) / CaptureRate
+	}
+	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
 	if err != nil {
 		t.Outcome, t.Err = OutcomeError, err
 		return
