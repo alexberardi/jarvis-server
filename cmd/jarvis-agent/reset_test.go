@@ -18,6 +18,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/provisioning"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
@@ -144,5 +145,36 @@ func TestProvisionOptionsFactoryReset(t *testing.T) {
 	}
 	if o.Provisioned() {
 		t.Fatal("still provisioned after the reset")
+	}
+}
+
+// A routines pull keeps the routines the installed Pantry packages ship: their routine components.
+func TestPantryRoutines(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, manifest string, files ...string) {
+		t.Helper()
+		dir := filepath.Join(root, "pkgs", name)
+		for _, f := range append(files, packages.ManifestFile) {
+			p := filepath.Join(dir, filepath.FromSlash(f))
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	write("cinema", "name: cinema\nversion: \"1.0\"\ncomponents:\n"+
+		"  - {type: routine, name: movie_night, path: routines/movie_night/routine.json}\n"+
+		"  - {type: command, name: projector, path: commands/projector/command.py}\n",
+		"routines/movie_night/routine.json", "commands/projector/command.py")
+	write("plain", "name: plain\nversion: \"1.0\"\ncomponents:\n  - {type: command, name: lamp, path: commands/lamp/command.py}\n",
+		"commands/lamp/command.py")
+	pm := &packages.Manager{Root: root, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if got := pantryRoutines(pm)(); !slices.Equal(got, []string{"movie_night"}) {
+		t.Fatalf("pantryRoutines = %v, want [movie_night]", got)
+	}
+	if got := pantryRoutines(nil)(); got != nil {
+		t.Fatalf("pantryRoutines(nil) = %v", got)
 	}
 }

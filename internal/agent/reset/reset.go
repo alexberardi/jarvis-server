@@ -43,6 +43,10 @@ var wiped = []struct {
 	{"node.json", []string{"provisioning_marker", "config_credentials"}},
 }
 
+// removeAll is os.RemoveAll; a var so a test can make one entry fail on every OS (a read-only
+// directory stops a removal on Linux, not on Windows).
+var removeAll = os.RemoveAll
+
 // Wipe clears a node's state under dir and lists what it removed. It keeps the agent itself,
 // its unit, the settings file (agent.json: the node's config, as N: keeps config.json), the
 // volume, the self-update records and the packages' Python environment. A file that is not
@@ -55,7 +59,7 @@ func Wipe(dir string) ([]string, error) {
 		if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		if err := os.RemoveAll(p); err != nil {
+		if err := removeAll(p); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", w.labels[0], err))
 			continue
 		}

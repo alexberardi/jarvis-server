@@ -259,15 +259,15 @@ func TestWipeListsWhatItCleared(t *testing.T) {
 }
 
 func TestWipeKeepsGoingPastAFailure(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root can remove anything")
-	}
 	dir := stateDir(t)
 	pkgs := filepath.Join(dir, "packages", "pkgs")
-	if err := os.Chmod(pkgs, 0o500); err != nil { // its entries can't be removed
-		t.Fatal(err)
+	removeAll = func(p string) error {
+		if p == pkgs {
+			return &os.PathError{Op: "unlinkat", Path: p, Err: os.ErrPermission}
+		}
+		return os.RemoveAll(p)
 	}
-	t.Cleanup(func() { os.Chmod(pkgs, 0o700) })
+	t.Cleanup(func() { removeAll = os.RemoveAll })
 	cleared, err := Wipe(dir)
 	if err == nil || !strings.Contains(err.Error(), "pantry:packages") {
 		t.Fatalf("err = %v, want the packages failure", err)

@@ -279,10 +279,13 @@ func isoformat(t time.Time) string {
 // Seal stops the timers, as Close does, and never writes the file again: a factory reset is
 // wiping it, and a save between the wipe and the reboot would bring it back.
 func (s *Service) Seal() {
-	s.Close()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sealed = true
+	s.sealed = true // under the same lock as the stop: no Set lands in between
+	for _, e := range s.timers {
+		e.stop()
+	}
+	s.timers = nil
 }
 
 // saveLocked writes the timers (atomically); a failure is logged, as the Python node's.
