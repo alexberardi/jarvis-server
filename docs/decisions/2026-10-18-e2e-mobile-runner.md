@@ -74,3 +74,7 @@ sandbox. How to run it: [`../dev/e2e.md`](../dev/e2e.md). It builds on
 - **The app** is the release APK `scripts/mobile-shot` uses (`com.jarvis.nodemobile`, JS
   bundled, `EXPO_PUBLIC_DEV_MODE=true`, config URL `http://localhost:7700`, which adb reverse
   points at the sandbox). It is not a dev client: no Metro, no dev menu.
+
+The iOS lane runs these flows on the iOS Simulator too, and adds two rules to this contract
+(platform conditions instead of copies, and `PUSH_URL`):
+[`2026-10-18-e2e-ios-lane.md`](2026-10-18-e2e-ios-lane.md).

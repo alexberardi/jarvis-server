@@ -1,13 +1,16 @@
-// Command e2emobile is the mobile suite of scripts/e2e: it plays the Maestro flows of a
-// jarvis-node-mobile checkout's .maestro/ on the harness emulator (always addressed by serial),
-// one Maestro process per flow, and writes results.json in the record shape of the web suite.
-// On a failure it keeps the screen (screenshot, uiautomator dump), the logcat and Maestro's
-// debug output in <out>/<flow>/.
+// Command e2emobile is the mobile suite of scripts/e2e (and, with --platform ios, its ios
+// suite): it plays the Maestro flows of a jarvis-node-mobile checkout's .maestro/ on the harness
+// emulator (always addressed by serial) or the harness simulator (by UDID), one Maestro process
+// per flow, and writes results.json in the record shape of the web suite. On a failure it keeps
+// the screen (screenshot, uiautomator dump or Maestro's hierarchy), the logcat or the
+// simulator's log of the app, and Maestro's debug output in <out>/<flow>/.
 //
 //	e2emobile run --flows DIR --out DIR --serial emulator-5580 [--maestro PATH] [--adb PATH]
 //	              [--rel .maestro] [--filter RE] [--flow-timeout 10m] [-e KEY=VALUE ...]
 //	              [--coverage e2e/coverage.json --nav DIR]
 //	              [--reverse tcp:7700=tcp:18700 ...] [--health-port 7700]
+//	e2emobile run --platform ios --udid UDID --process NAME --flows DIR --out DIR [--xcrun PATH]
+//	              [--device-name jarvis-harness-e2e] [--bundle-id com.jarvis.nodemobile] ...
 //	e2emobile list --flows DIR [--filter RE]   the flows it would run, and the skipped ones
 //	e2emobile realpush --out DIR --serial S --login-flow FILE [--maestro PATH] [--adb PATH]
 //	              [--skip REASON] [--reverse ...] [--health-port PORT] [-e KEY=VALUE ...]
@@ -22,11 +25,14 @@
 // registered screen has an entry in e2e/coverage.json (coverage.go); the check is the suite's
 // first test, and <out>/coverage.json its result for the report. coverage runs only the check.
 //
-// The emulator, the APK and the sandbox are the script's job; it also sets the adb reverse
-// tunnels, and passes them as --reverse so that before every flow (and the push lane) the
-// runner waits for the device, sets them again and probes --health-port's /health from inside
-// the emulator: an adb transport drop wipes every tunnel. A flow that fails on such a drop is
-// run once more (run.go retryOnDrop), and its record says so (note).
+// On iOS every flow also gets PUSH_URL: a POST of an APNs JSON payload there is delivered to the
+// app with `xcrun simctl push` (docs/decisions/2026-10-18-e2e-ios-lane.md).
+//
+// The emulator or simulator, the app build and the sandbox are the script's job. On Android it
+// also sets the adb reverse tunnels, and passes them as --reverse so that before every flow (and
+// the push lane) the runner waits for the device, sets them again and probes --health-port's
+// /health from inside the emulator: an adb transport drop wipes every tunnel. A flow that fails
+// on such a drop is run once more (run.go retryOnDrop), and its record says so (note).
 // Exit status: 0 all passed (or skipped), 1 a flow failed, 3 no flows to run, 2 bad usage.
 // Contract with the flows: docs/decisions/2026-10-18-e2e-mobile-runner.md.
 package main
@@ -76,9 +82,15 @@ func parseConfig(cmd string, args []string) (*config, *regexp.Regexp, error) {
 	fs.StringVar(&c.out, "out", "", "output directory (required for run)")
 	fs.StringVar(&c.maestro, "maestro", "maestro", "the maestro binary")
 	fs.StringVar(&c.adb, "adb", "adb", "the adb binary")
-	fs.StringVar(&c.serial, "serial", "", "the harness emulator's serial (required for run)")
 	fs.StringVar(&c.coverage, "coverage", "", "e2e/coverage.json: check every screen of --nav has an entry")
 	fs.StringVar(&c.nav, "nav", "", "the checkout's src/navigation (with --coverage)")
+	fs.StringVar(&c.serial, "serial", "", "the harness emulator's serial (required for an android run)")
+	fs.StringVar(&c.platform, "platform", "android", "android or ios")
+	fs.StringVar(&c.xcrun, "xcrun", "xcrun", "ios: the xcrun binary")
+	fs.StringVar(&c.udid, "udid", "", "ios: the harness simulator's UDID (required for an ios run)")
+	fs.StringVar(&c.deviceName, "device-name", harnessSimulator, "ios: the name the harness gave its simulator; any other device is refused")
+	fs.StringVar(&c.process, "process", "", "ios: the app's executable name, for its log")
+	fs.StringVar(&c.bundleID, "bundle-id", "com.jarvis.nodemobile", "ios: the app's bundle id, for simctl push")
 	fs.StringVar(&c.filter, "filter", "", "run only flows whose name or file name matches this regexp")
 	fs.DurationVar(&c.flowTimeout, "flow-timeout", 10*time.Minute, "give up on a flow after this long")
 	fs.Var(&env, "e", "KEY=VALUE for every flow (repeatable)")
@@ -92,8 +104,17 @@ func parseConfig(cmd string, args []string) (*config, *regexp.Regexp, error) {
 	if c.flowsDir == "" {
 		return nil, nil, errors.New("--flows is required")
 	}
-	if cmd == "run" && (c.out == "" || c.serial == "") {
-		return nil, nil, errors.New("--out and --serial are required")
+	switch c.platform {
+	case "android":
+		if cmd == "run" && (c.out == "" || c.serial == "") {
+			return nil, nil, errors.New("--out and --serial are required")
+		}
+	case "ios":
+		if cmd == "run" && (c.out == "" || c.udid == "") {
+			return nil, nil, errors.New("--out and --udid are required with --platform ios")
+		}
+	default:
+		return nil, nil, fmt.Errorf("--platform %q: android or ios", c.platform)
 	}
 	if (c.coverage == "") != (c.nav == "") || (cmd == "coverage" && c.coverage == "") {
 		return nil, nil, errors.New("--coverage and --nav go together")

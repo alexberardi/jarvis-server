@@ -275,6 +275,31 @@ Two layers ([`../decisions/2026-10-18-e2e-push.md`](../decisions/2026-10-18-e2e-
   (`$JARVIS_HARNESS_PUSH_ENV` names another file). Keep the file out of the repo; a real push
   goes to the emulator only, since only its token is registered in the throwaway sandbox.
 
+## The iOS lane (`scripts/e2e ios`)
+
+The same flows on the iOS Simulator of a Mac with Xcode, against a sandbox on the dev box. Why,
+and what the flows add for iOS (platform conditions, `PUSH_URL`):
+[`../decisions/2026-10-18-e2e-ios-lane.md`](../decisions/2026-10-18-e2e-ios-lane.md). `all`
+does not include it.
+
+1. On the dev box: `scripts/sandbox up --name e2e-ios --profile rich --llm scripted --lan`
+   (`JARVIS_LAN_HOST=<ip>` if it guesses the wrong address). It is open to the LAN until step 3.
+2. On the Mac, with `.sandbox/e2e-ios/sandbox-lan.env` copied over:
+   `scripts/e2e ios --sandbox-env sandbox-lan.env [--mobile-repo PATH] [--filter RE]`.
+3. On the dev box: `scripts/sandbox down --name e2e-ios --purge`.
+
+- Needs Xcode (not just the command-line tools: the Mac mini has only those) with the iOS 18.0
+  simulator runtime, CocoaPods, node 22 (or mise), Go and Java 17+. The first run creates the
+  harness's simulator, `jarvis-harness-e2e`; it is erased before every run and shut down after.
+  The user's simulators are never used.
+- The app is a Release build for the simulator, unsigned, with the sandbox's config URL baked in,
+  cached per mobile commit and config URL in `~/.cache/jarvis-harness/mobile/ios/` (the first
+  build takes a while; its log is `build.log` there).
+- On a failure, `.e2e/<run>/ios/<flow>/` keeps `screenshot.png`, `hierarchy.json`,
+  `device.log`, `maestro.log` and `maestro/`.
+- Writing an iOS step: `xcrun simctl boot <udid of jarvis-harness-e2e>` and
+  `~/.cache/jarvis-harness/maestro/2.11.0/maestro/bin/maestro --device <udid> test -e … flow.yaml`.
+
 ## The voice lane (`scripts/e2e voice`)
 
 The real node software hears spoken commands and its spoken replies are checked. Why it is

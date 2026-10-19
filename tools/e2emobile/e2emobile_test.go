@@ -107,6 +107,7 @@ while [ $# -gt 0 ]; do
     --output) out=$2; shift 2 ;;
     --debug-output) mkdir -p "$2"; echo cmds >"$2/commands.json"; shift 2 ;;
     test) flow=$2; shift 2 ;;
+    hierarchy) echo '{"attributes": {"text": "Chat"}}'; exit 0 ;;
     *) shift ;;
   esac
 done

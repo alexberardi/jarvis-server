@@ -290,14 +290,17 @@ ensure_maestro() { # → prints the maestro binary, downloading the release once
     rm -rf "$tmp"
     die "could not download Maestro $MAESTRO_VERSION"
   fi
-  if ! echo "$MAESTRO_SHA256  $tmp/maestro.zip" | sha256sum -c --quiet - >/dev/null 2>&1; then
+  # sha256sum, or shasum on a Mac without coreutils (the iOS lane).
+  if ! echo "$MAESTRO_SHA256  $tmp/maestro.zip" | { if command -v sha256sum >/dev/null; then sha256sum -c --quiet -; else shasum -a 256 -c -s -; fi; } >/dev/null 2>&1; then
     rm -rf "$tmp"
     die "Maestro $MAESTRO_VERSION: maestro.zip does not match its pinned sha256"
   fi
   unzip -q "$tmp/maestro.zip" -d "$tmp/x" || { rm -rf "$tmp"; die "could not unpack maestro.zip"; }
   [ -x "$tmp/x/maestro/bin/maestro" ] || { rm -rf "$tmp"; die "maestro.zip has no maestro/bin/maestro"; }
   # Atomic: a concurrent run either finds the whole install or none (and then installs its own).
-  mv -T "$tmp/x" "$MAESTRO_HOME" 2>/dev/null || [ -x "$bin" ] || { rm -rf "$tmp"; die "could not install Maestro into $MAESTRO_HOME"; }
+  # (BSD mv has no -T: there, only when nothing is in the way.)
+  mv -T "$tmp/x" "$MAESTRO_HOME" 2>/dev/null || { [ ! -e "$MAESTRO_HOME" ] && mv "$tmp/x" "$MAESTRO_HOME"; } 2>/dev/null ||
+    [ -x "$bin" ] || { rm -rf "$tmp"; die "could not install Maestro into $MAESTRO_HOME"; }
   rm -rf "$tmp"
   echo "$bin"
 }
