@@ -41,8 +41,7 @@ var expectedTables = []string{
 	// watches (autonomy P2)
 	"cc_watches",
 	// computer control (plan P3)
-	"cc_computer_approvals",
-	"cc_computer_runs",
+	"cc_computer_approvals", "cc_taught_workflows", "cc_recordings", "cc_computer_runs",
 }
 
 // Cut by decisions in docs/cc/QUESTIONS.md; they must never come back by accident.
@@ -356,7 +355,7 @@ func TestToolRuleTargetsMigration(t *testing.T) {
 	}
 }
 
-// TestComputerRunsMigration: 00260 creates cc_computer_runs with its state and target checks and
+// TestComputerRunsMigration: 00270 creates cc_computer_runs with its state and target checks and
 // defaults; Down drops it.
 func TestComputerRunsMigration(t *testing.T) {
 	ctx := context.Background()
@@ -373,7 +372,7 @@ func TestComputerRunsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 260); err != nil {
+	if _, err := p.UpTo(ctx, 270); err != nil {
 		t.Fatal(err)
 	}
 	ins := `INSERT INTO cc_computer_runs (id, household_id, node_id, goal, target, state, created_at, updated_at)
@@ -399,7 +398,7 @@ func TestComputerRunsMigration(t *testing.T) {
 	if _, err := d.Write.ExecContext(ctx, ins, "cr_3", "phone", "running"); err == nil {
 		t.Fatal("target CHECK missing")
 	}
-	if _, err := p.DownTo(ctx, 250); err != nil {
+	if _, err := p.DownTo(ctx, 260); err != nil {
 		t.Fatal(err)
 	}
 	if slices.Contains(tables(t, d.Read), "cc_computer_runs") {

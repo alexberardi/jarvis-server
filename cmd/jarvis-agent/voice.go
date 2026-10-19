@@ -11,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
@@ -151,6 +153,7 @@ func listen(ctx context.Context, args []string) error {
 	once := fs.Bool("once", false, "exit after the first voice turn, follow-ups included (exit status 1 unless a reply was spoken)")
 	timeout := fs.Duration("timeout", 0, "give up after this long (0: run until interrupted)")
 	noTools := fs.Bool("no-tools", false, "offer voice turns no client tools")
+	fake := fs.String("computer", "", `a pretend computer task for the turns, KIND:TEXT ("controlling:Ordering the blue mug"); its status is printed at the end`)
 	tf := addToolFlags(fs)
 	vf := addVoiceFlags(fs)
 	hf := addHatFlags(fs)
@@ -164,6 +167,10 @@ func listen(ctx context.Context, args []string) error {
 		return err
 	}
 	tf.pi = !p.desktop
+	activity, err := fakeActivity(*fake)
+	if err != nil {
+		return err
+	}
 	path, err := credsPath(*cp)
 	if err != nil {
 		return err
@@ -221,8 +228,15 @@ func listen(ctx context.Context, args []string) error {
 			stop()
 		}
 	}
-	if err := voice.Serve(ctx, vs.options(node.NewCC(ccURL, c), tools, log, onTurn)); err != nil {
+	o := vs.options(node.NewCC(ccURL, c), tools, log, onTurn)
+	if activity != nil {
+		o.Computer = activity
+	}
+	if err := voice.Serve(ctx, o); err != nil {
 		return err
+	}
+	if activity != nil {
+		fmt.Println("computer:", activity)
 	}
 	if *once {
 		switch {
@@ -233,6 +247,22 @@ func listen(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// fakeActivity is listen --computer's pretend task: KIND:TEXT, KIND one of controlling or
+// recording. "" is none.
+func fakeActivity(s string) (*computer.Activity, error) {
+	if s == "" {
+		return nil, nil
+	}
+	k, text, _ := strings.Cut(s, ":")
+	switch kind := computer.Kind(k); kind {
+	case computer.Controlling, computer.Recording, computer.Paused:
+		a := &computer.Activity{}
+		a.Set(kind, text)
+		return a, nil
+	}
+	return nil, fmt.Errorf("--computer %q: want controlling:TEXT, recording:TEXT or paused:TEXT", s)
 }
 
 func printTurn(t voice.Turn) {

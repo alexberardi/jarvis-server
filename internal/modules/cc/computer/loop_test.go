@@ -201,7 +201,7 @@ func actions(acts ...string) string {
 	return `{"thought": "next", "actions": [` + strings.Join(acts, ",") + `]}`
 }
 
-const doneAnswer = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": ["/thanks"]}}`
+const doneAnswer = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/thanks"}}`
 
 // --- tests ---
 
@@ -212,7 +212,7 @@ func TestLoopDone(t *testing.T) {
 	if out.State != StateDone || out.Summary != "Ordered the soap." || out.Rounds != 2 {
 		t.Fatalf("outcome %+v", out)
 	}
-	if out.Verify == nil || len(out.Verify.URLContains) != 1 || out.Verify.URLContains[0] != "/thanks" {
+	if out.Verify == nil || out.Verify.URLContains != "/thanks" {
 		t.Fatalf("verify %+v", out.Verify)
 	}
 	if len(e.exec.batches) != 1 || e.exec.batches[0].Actions[0].Ref != "e3" || e.exec.batches[0].Actions[0].Approval != "" {

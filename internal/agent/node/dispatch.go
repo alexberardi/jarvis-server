@@ -62,8 +62,8 @@ func (d *Dispatcher) Handle(ctx context.Context, payload []byte) {
 				h(ctx, c.Details)
 				continue
 			}
-			// A desktop node speaks two verbs. Others (tts, action, routine, ...) get no reply,
-			// so CC times out exactly as with an offline node; guessing a sink would be worse.
+			// A verb nobody wired (tts, routine, ...) gets no reply, so CC times out exactly as
+			// with an offline node; guessing a sink would be worse.
 			d.Log.Info("ignoring unsupported verb", "verb", c.Command)
 		}
 	}

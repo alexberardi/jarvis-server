@@ -1,0 +1,14 @@
+{
+  "name": "replay_moved_button",
+  "about": "Replay the taught bank download on the ?layout=moved variant, whose buttons moved: the replay heals the target. Flipping it (piece 32) adds the demonstrate setup step.",
+  "phase": "teach",
+  "status": "pending",
+  "say": "Download my bank statement for September from {{sites}}/bank/{{layout}}",
+  "target": "browser",
+  "setup": {"login": ["bank"], "layout": "moved"},
+  "answers": [],
+  "checks": [
+    {"kind": "download", "site": "bank", "month": "2026-09"}
+  ],
+  "max_minutes": 10
+}

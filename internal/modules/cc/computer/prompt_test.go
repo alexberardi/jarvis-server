@@ -23,7 +23,7 @@ func TestPromptGolden(t *testing.T) {
 	hist[9].Result = "failed: stale_ref the page changed"
 	got := "SYSTEM:\n" + systemPrompt + "\n\nUSER:\n" + renderPrompt(promptInput{
 		Goal:    "Order the lavender soap,\n2 bars",
-		Success: &SuccessCheck{URLContains: []string{"/thanks"}, TextPresent: []string{"Order placed"}},
+		Success: &SuccessCheck{URLContains: "/thanks", TextPresent: []string{"Order placed"}},
 		Rules:   "Ask before paying. Never use example.org.",
 		Answer:  "Yes, two bars",
 		History: hist, Obs: page, Images: 2,

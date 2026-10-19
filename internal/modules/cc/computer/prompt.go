@@ -23,7 +23,7 @@ const systemPrompt = `You are Jarvis, doing a task on the user's computer for th
 Answer with exactly one JSON object and nothing else, in one of these shapes:
 1. Next actions: {"thought": "<one short sentence>", "actions": [<action>, ...]}
 2. Next actions that buy something: {"checkout": {"product": "...", "price": "...", "currency": "...", "seller": "...", "ship_to": "...", "card": "<last 4 digits>"}, "actions": [...]}
-3. Finished: {"done": true, "summary": "<what you did, for the user>", "verify": {"url_contains": ["..."], "text_present": ["..."]}}
+3. Finished: {"done": true, "summary": "<what you did, for the user>", "verify": {"url_contains": "...", "text_present": ["..."]}}
 4. A question for the user: {"ask": "<the question>", "reason": "page_instructions" | "unclear" | "login_needed"}
 
 An action is {"kind": "...", "intent": "<what this action is for, one line>", ...}. Kinds:
@@ -136,8 +136,8 @@ func (c *SuccessCheck) describe() string {
 		return ""
 	}
 	var parts []string
-	for _, u := range c.URLContains {
-		parts = append(parts, fmt.Sprintf("the address contains %q", u))
+	if c.URLContains != "" {
+		parts = append(parts, fmt.Sprintf("the address contains %q", c.URLContains))
 	}
 	for _, t := range c.TextPresent {
 		parts = append(parts, fmt.Sprintf("the page shows %q", t))

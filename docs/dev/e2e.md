@@ -12,6 +12,7 @@ scripts/e2e mobile --mobile-repo ~/src/jarvis-node-mobile-branch   # flows + APK
 scripts/e2e web --filter 'inbox'      # only tests whose title matches (Playwright --grep)
 scripts/e2e web --keep                # leave the sandboxes up to poke at afterwards
 scripts/e2e web --name loop-142       # pick the sandbox name (default e2e-<run>); never default
+scripts/e2e computer --llm scripted   # the computer-task suite's plumbing (below; not in all)
 ```
 
 Exit status: 0 when every test passed, 1 when one failed or a suite could not run.
@@ -380,6 +381,33 @@ schedule, loop item #152, runs it). Why it is built this way:
   playback, as with WAV files.
 - **When it fails to start:** the error says which step (`ssh`, the architecture, no seeed card:
   `--pi-card N`, a service it could not stop, the card still busy and who holds it).
+
+## The computer-task suite (`scripts/e2e computer`)
+
+Not in `all`, like `voice`: it takes the real model and many minutes. It builds and runs
+`tools/ccsuite run --out .e2e/<run>/computer --rel computer`, which brings up its **own** sandbox
+(`ccsuite-<run>`, purged afterwards, so `--name` and `--keep` don't apply), the fixture sites, and
+a headless sway or Xvfb session with the real agent and Chromium; the cases are
+`tools/ccsuite/cases/*.json`. What it covers and how a case is written:
+[`computer-suite.md`](computer-suite.md).
+
+```sh
+scripts/e2e computer --llm scripted                    # the plumbing (CI's check; every pending case skipped)
+scripts/e2e computer --filter 'store_' --repeat 3      # some cases, three runs each
+scripts/e2e computer --include-pending --filter web_form
+```
+
+Overnight, on the dev box (a model run takes the installed jarvisd's one slot, so not while the
+house uses it):
+
+```sh
+scripts/e2e computer --llm shared --label background --repeat 3
+```
+
+It leaves `computer/report.md`, `report.json` and `results.json` (one test per case; a pending
+case that ran and failed is listed skipped, with how it failed, so only `required` cases fail the
+run), `computer/cases/<case>/run-N/` (`state.json`: what the checks read; `failure.png`) and
+`computer/logs/` (sandbox, sites, session, agent, browser), plus `computer.log`.
 
 ## Home Assistant (`--ha`)
 

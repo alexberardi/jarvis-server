@@ -2,4 +2,5 @@
 
 package dictate
 
-func nativeMacPoster() MacPoster { return nil }
+// NativeMacPoster is nil off macOS.
+func NativeMacPoster() MacPoster { return nil }

@@ -116,25 +116,6 @@ type Task struct {
 	Answer string
 }
 
-// SuccessCheck is how the result of a task is checked (the checks themselves are piece 12).
-type SuccessCheck struct {
-	URLContains []string       `json:"url_contains,omitempty"`
-	TextPresent []string       `json:"text_present,omitempty"`
-	Download    *DownloadCheck `json:"download,omitempty"`
-	File        *FileCheck     `json:"file,omitempty"`
-	Screen      string         `json:"screen,omitempty"`
-}
-
-type DownloadCheck struct {
-	NameLike string `json:"name_like"`
-	MinBytes int64  `json:"min_bytes,omitempty"`
-}
-
-type FileCheck struct {
-	Path     string   `json:"path"`
-	Contains []string `json:"contains,omitempty"`
-}
-
 // Outcome is where a Run call ended.
 type Outcome struct {
 	RunID    string
