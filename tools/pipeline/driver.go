@@ -241,25 +241,36 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 }
 
 // serverCallLogs are the model calls in the tapped entries that command-center ran itself (not
-// in the node's set), each with its result: the role=tool message the next request sends the
-// model (serverResult).
+// in the node's set), each with its result as the next request shows it to the model
+// (serverResults). A text-path fast path speaks the results' messages with no further model
+// call, so its results are not seen (nil).
 func serverCallLogs(entries []TapEntry, nodeNames []string) []CallLog {
 	var out []CallLog
 	for i, e := range entries {
+		var calls []ToolCall
 		for _, c := range e.Reply.Calls() {
 			if !slices.Contains(nodeNames, c.Function.Name) {
-				out = append(out, CallLog{Name: c.Function.Name, Args: c.Args(), Result: serverResult(entries[i+1:], c)})
+				calls = append(calls, c)
 			}
+		}
+		results := serverResults(entries[i+1:], calls)
+		for k, c := range calls {
+			out = append(out, CallLog{Name: c.Function.Name, Args: c.Args(), Result: results[k]})
 		}
 	}
 	return out
 }
 
-// serverResult is the call's result in the first later request that has messages: the
-// role=tool message with its id, else (a text-path model's calls are parsed with fresh ids) the
-// last one of its name after that request's last assistant message. JSON content is decoded;
-// nil when there is none.
-func serverResult(later []TapEntry, c ToolCall) any {
+// textResultsHeaders open the text path's results prompt (textfilter TextModeFormatPrompt,
+// ContinueToolResultsMessage): the results follow the next blank line, one per line.
+var textResultsHeaders = []string{"Tool results below.", "Here are the tool results."}
+
+// serverResults are the calls' results in the first later request that has messages. Native:
+// the role=tool message with the call's id, else (a text-path model's calls are parsed with
+// fresh ids) the last one of its name after that request's last assistant message. Text path:
+// the lines of the results prompt in its last user message, in call order. JSON is decoded.
+func serverResults(later []TapEntry, calls []ToolCall) []any {
+	out := make([]any, len(calls))
 	for _, e := range later {
 		var req struct {
 			Messages []struct {
@@ -272,24 +283,72 @@ func serverResult(later []TapEntry, c ToolCall) any {
 		if json.Unmarshal(e.Request, &req) != nil || len(req.Messages) == 0 {
 			continue
 		}
-		var byName json.RawMessage
+		type toolMsg struct {
+			id, name string
+			content  json.RawMessage
+		}
+		var all, recent []toolMsg // every role=tool message; those after the last assistant message
 		for _, m := range req.Messages {
-			switch {
-			case m.Role == "assistant":
-				byName = nil
-			case m.Role != "tool":
-			case c.ID != "" && m.ToolCallID == c.ID:
-				return decodeContent(m.Content)
-			case m.Name == c.Function.Name:
-				byName = m.Content
+			switch m.Role {
+			case "assistant":
+				recent = nil
+			case "tool":
+				t := toolMsg{m.ToolCallID, m.Name, m.Content}
+				all, recent = append(all, t), append(recent, t)
 			}
 		}
-		if byName != nil {
-			return decodeContent(byName)
+		found := false
+		used := make([]bool, len(recent))
+		for k, c := range calls {
+			if i := slices.IndexFunc(all, func(t toolMsg) bool { return c.ID != "" && t.id == c.ID }); i >= 0 {
+				out[k], found = decodeContent(all[i].content), true
+				continue
+			}
+			for i, t := range recent {
+				if !used[i] && t.name == c.Function.Name {
+					used[i], out[k], found = true, decodeContent(t.content), true
+					break
+				}
+			}
 		}
-		return nil
+		if !found {
+			for i := len(req.Messages) - 1; i >= 0; i-- {
+				if m := req.Messages[i]; m.Role == "user" {
+					text, _ := decodeContent(m.Content).(string)
+					for k, line := range textResults(text) {
+						if k < len(out) {
+							out[k] = decodeContent(mustJSON(line))
+						}
+					}
+					break
+				}
+			}
+		}
+		return out
+	}
+	return out
+}
+
+// textResults are the result lines of a text-path results prompt, nil when text isn't one.
+func textResults(text string) []string {
+	for _, h := range textResultsHeaders {
+		i := strings.Index(text, h)
+		if i < 0 {
+			continue
+		}
+		j := strings.Index(text[i:], "\n\n")
+		if j < 0 {
+			return nil
+		}
+		body := strings.TrimSuffix(strings.TrimSpace(text[i+j+2:]), "/no_think")
+		return strings.Split(strings.TrimSpace(body), "\n")
 	}
 	return nil
+}
+
+func mustJSON(s string) json.RawMessage {
+	b, _ := json.Marshal(s)
+	return b
 }
 
 // decodeContent is a message's content (a string, or text parts): JSON text decoded, other

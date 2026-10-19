@@ -860,6 +860,17 @@ func TestServerCallResults(t *testing.T) {
 			Reply: TapReply{Content: `<tool_call>{"name": "cancel_watch", "arguments": {}}</tool_call>`}},
 		{Request: req(old, map[string]any{"role": "assistant"}), Reply: TapReply{Content: "Done."}},
 	}
+	// The text path sends results as a formatting prompt, one JSON line per call, in order.
+	prompt := "The user asked: \"x\"\n\nTool results below. Answer the user's question DIRECTLY. Be brief.\n\n" +
+		`{"status": "watching", "watch_id": "wt_9"}` + "\n" + `{"watches": []}` + "\n/no_think"
+	text := []TapEntry{
+		{Reply: TapReply{Content: `<tool_call>{"name": "create_watch", "arguments": {}}</tool_call><tool_call>{"name": "list_watches", "arguments": {}}</tool_call>`}},
+		{Request: req(old, map[string]any{"role": "user", "content": prompt}), Reply: TapReply{Content: "You're set."}},
+	}
+	if got := serverCallLogs(text, nil); len(got) != 2 || jsonText(got[0].Result) != `{"status":"watching","watch_id":"wt_9"}` ||
+		jsonText(got[1].Result) != `{"watches":[]}` {
+		t.Fatalf("text path: %+v", got)
+	}
 	// Content as text parts reads the same.
 	if r := decodeContent(json.RawMessage(`[{"type": "text", "text": "{\"status\": \"watching\"}"}]`)); jsonText(r) != `{"status":"watching"}` {
 		t.Fatalf("parts: %v", r)
