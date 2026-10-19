@@ -49,3 +49,16 @@ way `TestEveryAPIRouteHasATier` keeps every `/api` route classified. How to use 
   the Home Assistant, pairing and discovery screens wait for E2E 7/9's fakes, and the camera,
   microphone, WebView, OAuth and fake-node-lane screens are `manual`. The rest are `pending`
   on a later mobile flows item.
+- **Merged flows can't stay `pending` (2026-10-18, loop item #228).** #145's flows merged in
+  jarvis-node-mobile while 51 screens still said `pending` and the gate passed: nothing tied
+  an entry to the flows that exist. The gate can't know whether an item merged (no network in
+  CI or the sandbox), so it uses what the checkout shows: a `pending` text that names an
+  existing flow file is invalid ("list it under flows"), and so is a flow the suite runs (a
+  top-level `.maestro/` file not tagged `skip`; subflows are run by the others) that no
+  entry lists. A new flow therefore needs its screens in `coverage.json` before the mobile
+  suite is green again, the same both-directions rule as screens. `pending` stays free text
+  (no required `#N`): some screens have no item yet, and an invented one would be worse. The
+  map was redone from mobile `5ee0208`'s flows and its `.maestro/COVERAGE.md`: 22 covered,
+  15 manual (the Store screens other than the Pantry tab are packages, manual by the user's
+  2026-10-17 call), 27 pending (Home Assistant's screens on its own item split out of #154,
+  `AddComputer`'s approval flow, and the screens COVERAGE.md calls later).

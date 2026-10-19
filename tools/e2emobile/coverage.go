@@ -119,7 +119,9 @@ type CoverageResult struct {
 	Pending []string `json:"pending"` // "<screen>: <item>"
 	Missing []string `json:"missing"` // registered, no entry
 	Stale   []string `json:"stale"`   // an entry, not registered
-	Invalid []string `json:"invalid"` // an entry that isn't exactly one kind, or names a flow that doesn't exist
+	// an entry that isn't exactly one kind, names a flow that doesn't exist, or is pending on a
+	// flow that does; a flow the suite runs that no entry lists
+	Invalid []string `json:"invalid"`
 }
 
 func (r CoverageResult) OK() bool { return len(r.Missing)+len(r.Stale)+len(r.Invalid) == 0 }
@@ -139,9 +141,25 @@ func (r CoverageResult) Problems() string {
 	return b.String()
 }
 
-// CheckCoverage compares the mobile entries with the registered screens. flowsDir is the
-// checkout's .maestro (rel, as in the entries' paths: ".maestro/home-chat.yaml").
-func CheckCoverage(entries map[string]Entry, screens []string, flowsDir, rel string) CoverageResult {
+// flowFile is a flow file named in an entry's text: "#145: nav-tabs.yaml, subflows/login.yaml".
+var flowFile = regexp.MustCompile(`[\w./-]+\.ya?ml\b`)
+
+// existingFlows are the flow files text names that exist under flowsDir, as rel paths.
+func existingFlows(text, flowsDir, rel string) []string {
+	var out []string
+	for _, f := range flowFile.FindAllString(text, -1) {
+		f = strings.TrimPrefix(strings.TrimPrefix(f, "./"), rel+"/")
+		if isFile(filepath.Join(flowsDir, f)) {
+			out = append(out, rel+"/"+f)
+		}
+	}
+	return out
+}
+
+// CheckCoverage compares the mobile entries with the registered screens and the flows the
+// suite runs (Discover's, of flowsDir: the checkout's .maestro; rel, as in the entries'
+// paths: ".maestro/home-chat.yaml").
+func CheckCoverage(entries map[string]Entry, screens []string, flows []Flow, flowsDir, rel string) CoverageResult {
 	r := CoverageResult{Screens: len(screens), Covered: []string{}, Manual: []string{}, Pending: []string{},
 		Missing: []string{}, Stale: []string{}, Invalid: []string{}}
 	registered := map[string]bool{}
@@ -156,8 +174,12 @@ func CheckCoverage(entries map[string]Entry, screens []string, flowsDir, rel str
 		names = append(names, k)
 	}
 	sort.Strings(names)
+	listed := map[string]bool{}
 	for _, s := range names {
 		e := entries[s]
+		for _, f := range e.Flows {
+			listed[f] = true
+		}
 		if !registered[s] {
 			r.Stale = append(r.Stale, s)
 			continue
@@ -182,9 +204,21 @@ func CheckCoverage(entries map[string]Entry, screens []string, flowsDir, rel str
 		case "manual":
 			r.Manual = append(r.Manual, s+": "+e.Manual)
 		case "pending":
-			r.Pending = append(r.Pending, s+": "+e.Pending)
+			switch named := existingFlows(e.Pending, flowsDir, rel); len(named) {
+			case 0:
+				r.Pending = append(r.Pending, s+": "+e.Pending)
+			case 1:
+				r.Invalid = append(r.Invalid, fmt.Sprintf("%s: pending names %s, which exists: list it under flows", s, named[0]))
+			default:
+				r.Invalid = append(r.Invalid, fmt.Sprintf("%s: pending names %s, which exist: list them under flows", s, strings.Join(named, ", ")))
+			}
 		default:
 			r.Invalid = append(r.Invalid, s+`: want exactly one of "flows", "manual" or "pending"`)
+		}
+	}
+	for _, f := range flows {
+		if !f.Skipped() && !listed[f.File] {
+			r.Invalid = append(r.Invalid, fmt.Sprintf("flow %s covers no screen: list it under the flows of the screens it reaches", f.File))
 		}
 	}
 	return r
@@ -207,7 +241,11 @@ func coverage(covPath, navDir, flowsDir, rel, out string) (CoverageResult, Recor
 	if err != nil {
 		return CoverageResult{}, rec, err
 	}
-	res := CheckCoverage(cov.Mobile, screens, flowsDir, rel)
+	flows, err := Discover(flowsDir, rel, nil)
+	if err != nil {
+		return CoverageResult{}, rec, err
+	}
+	res := CheckCoverage(cov.Mobile, screens, flows, flowsDir, rel)
 	if !res.OK() {
 		msg := res.Problems()
 		rec.Status, rec.Error = "failed", &msg
