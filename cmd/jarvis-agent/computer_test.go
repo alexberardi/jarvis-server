@@ -205,7 +205,7 @@ func (s *fakeRecSource) Start(_ context.Context, _ string, emit func(json.RawMes
 }
 func (s *fakeRecSource) Stop(context.Context, string) error { return nil }
 
-// `jarvis-agent computer record start|stop` and the menu's "Watch me" / "Stop recording"
+// `jarvis-agent computer record start|stop` and the menu's "Record a macro…" / "Stop recording"
 // record through the running agent's recorder; a stop hands the trace on for upload.
 func TestComputerRecordStartStop(t *testing.T) {
 	dir, err := os.MkdirTemp("", "jcr")
@@ -219,10 +219,10 @@ func TestComputerRecordStartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &computer.Activity{}
-	sw := computer.NewSwitch(true, a)
+	sw := computer.NewSwitch(false, a) // recording isn't gated by computer control
 	src := &fakeRecSource{}
 	handed := make(chan computer.Trace, 2)
-	rec := &computer.Recorder{Dir: filepath.Join(dir, "recordings"), Switch: sw, Activity: a,
+	rec := &computer.Recorder{Dir: filepath.Join(dir, "recordings"), Activity: a,
 		Sources: map[string]computer.Source{computer.ModeBrowser: src}, Stopped: func(tr computer.Trace) { handed <- tr }}
 	ctx, cancel := context.WithCancel(context.Background())
 	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return nil },
@@ -256,11 +256,11 @@ func TestComputerRecordStartStop(t *testing.T) {
 	// The menu.
 	ic := &trayIcon{log: slog.New(slog.DiscardHandler), sw: newFakeVoice().sw(false), activity: a, computer: sw, recorder: rec}
 	if s := ic.state(); !s.Record {
-		t.Fatalf("Watch me hidden: %+v", s)
+		t.Fatalf("Record a macro… hidden: %+v", s)
 	}
 	ic.recordFromMenu(true)
 	if rec.Current() == "" {
-		t.Fatal("Watch me didn't start a recording")
+		t.Fatal("Record a macro… didn't start a recording")
 	}
 	ic.recordFromMenu(false)
 	if tr := <-handed; tr.ID == "" || rec.Current() != "" {

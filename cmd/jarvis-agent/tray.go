@@ -38,7 +38,7 @@ type trayIcon struct {
 	activity *computer.Activity
 	// computer is computer control's switch (the menu's "Computer control"); nil hides it.
 	computer *computer.Switch
-	// recorder records what the user does (the menu's "Watch me"); nil hides it.
+	// recorder records what the user does (the menu's "Record a macro…"); nil hides it.
 	recorder *computer.Recorder
 
 	t      atomic.Pointer[tray.Tray]
@@ -115,7 +115,7 @@ func (ic *trayIcon) stopTaskFromMenu() {
 	ic.activity.Stop()
 }
 
-// recordFromMenu is "Watch me" (start) and "Stop recording": a stopped trace goes to jarvisd.
+// recordFromMenu is "Record a macro…" (start) and "Stop recording": a stopped trace goes to jarvisd.
 func (ic *trayIcon) recordFromMenu(start bool) {
 	ic.log.Info("recording chosen in the menu", "start", start, "activity", ic.activity.String())
 	if ic.recorder != nil {

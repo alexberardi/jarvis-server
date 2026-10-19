@@ -18,6 +18,8 @@ blueprint piece 29):
   local). Only a computer's agent may upload (a Pi: 403).
 - **Which computer.** A turn on a computer records that computer. A turn elsewhere (a Pi, the
   phone) records the speaker's own computer with computer control on; never someone else's.
+  (Superseded by [2026-10-19-record-a-macro-and-voice-switch](2026-10-19-record-a-macro-and-voice-switch.md):
+  recording no longer needs computer control on.)
   `computer_record_stop` takes no id from jarvisd: the agent stops the one going on, so a
   restarted jarvisd can still stop it.
 - **Offered only with a computer.** `start_recording` / `stop_recording` are offered (text and

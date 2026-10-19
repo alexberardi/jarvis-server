@@ -13,6 +13,9 @@ const (
 	ToolRecordStop  = "computer_record_stop"
 	// ToolRecordDelete deletes the agent's local copy of a recording (piece 29 adds it to the agent).
 	ToolRecordDelete = "computer_record_delete"
+	// ToolSwitch turns the computer's "Computer control" switch on or off ({on}), as its menu does:
+	// cc's enable_computer_control / disable_computer_control call it (COMPUTER-CONTROL.md C11).
+	ToolSwitch = "computer_switch"
 
 	toolPrefix = "computer_"
 )

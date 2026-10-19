@@ -201,6 +201,9 @@ type Module struct {
 	// recordingTasks is what the user said they would show, by recording id, from
 	// start_recording until the recording is stored (its narration).
 	recordingTasks sync.Map
+	// recordingNamed is, by computer, the recording a voice start_recording named (its id):
+	// stop_recording asks for a name otherwise.
+	recordingNamed sync.Map
 	// learnRecording gets every recording stored from an agent: piece 30 queues learning a
 	// workflow from it here. nil: nothing yet.
 	learnRecording func(ctx context.Context, rec Recording) error

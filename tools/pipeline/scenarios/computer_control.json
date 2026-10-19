@@ -8,14 +8,17 @@
       {
         "say": "order me a phone case",
         "expect": {
-          "not_tool": ["run_errand", "schedule_errand"],
+          "not_tool": [
+            "run_errand",
+            "schedule_errand"
+          ],
           "reply": "(?i)computer control"
         }
       }
     ]
   },
   {
-    "name": "computer control off: Jarvis, watch me calls start_recording, which says to turn it on",
+    "name": "recording isn't gated by computer control: Jarvis, watch me calls start_recording, with no turn-it-on answer",
     "node": "desktop",
     "tools": "../toolsets/desktop.json",
     "home": "none",
@@ -24,9 +27,259 @@
         "say": "Jarvis, watch me",
         "expect": {
           "server_tool": "start_recording",
-          "reply": "(?i)computer control"
+          "not_reply": "(?i)turn (it|computer control) on"
         }
       }
     ]
+  },
+  {
+    "name": "voice: enable computer control on this computer",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "Hey Jarvis, enable computer control",
+        "expect": {
+          "server_tool": "enable_computer_control",
+          "not_tool": [
+            "disable_computer_control",
+            "computer_control_status",
+            "start_recording",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: turn off computer control",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "turn off computer control",
+        "expect": {
+          "server_tool": "disable_computer_control",
+          "not_tool": [
+            "enable_computer_control",
+            "computer_control_status",
+            "start_recording",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: is computer control on?",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "is computer control on?",
+        "expect": {
+          "server_tool": "computer_control_status",
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "start_recording",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: record this macro",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "Hey Jarvis, record this macro",
+        "expect": {
+          "server_tool": "start_recording",
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: record a macro called pay the water bill names it",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "record a macro called pay the water bill",
+        "expect": {
+          "server_tool": "start_recording",
+          "args_match": {
+            "task": "(?i)water bill"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: watch me do this",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "watch me do this",
+        "expect": {
+          "server_tool": "start_recording",
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: learn how I do this",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "learn how I do this",
+        "expect": {
+          "server_tool": "start_recording",
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: stop recording",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "stop recording",
+        "expect": {
+          "server_tool": "stop_recording",
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "start_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice: I'm done after record this macro stops the recording",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "record this macro",
+        "expect": {
+          "server_tool": "start_recording"
+        }
+      },
+      {
+        "say": "I'm done",
+        "expect": {
+          "server_tool": "stop_recording"
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice near-miss: enable dark mode calls none of the computer control tools",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "enable dark mode",
+        "expect": {
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "start_recording",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice near-miss: record a reminder calls none of the recording tools",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "record a reminder to call mom at five",
+        "expect": {
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "start_recording",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice near-miss: turn on the computer calls none of the computer control tools",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "turn on the computer",
+        "expect": {
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "start_recording",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice from the kitchen Pi: enable computer control targets the speaker's computer",
+    "home": "none",
+    "turns": [
+      {
+        "say": "Hey Jarvis, enable computer control",
+        "expect": {
+          "server_tool": "enable_computer_control"
+        }
+      }
+    ],
+    "speaker": "primary"
   }
 ]

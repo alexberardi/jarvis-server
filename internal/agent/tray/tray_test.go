@@ -55,16 +55,17 @@ func TestItems(t *testing.T) {
 			`(Jarvis Automation Agent — Running) | -- | [x] Listen for "Hey Jarvis" | [ ] Computer control | Open Jarvis Automation | -- | Quit Jarvis Automation Agent`},
 		{State{Status: "Running", ComputerAvailable: true, Computer: true},
 			`(Jarvis Automation Agent — Running) | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
-		// Recording: "Watch me" while computer control is on and nothing is going on, "Stop
-		// recording" while recording.
-		{State{Status: "Running", ComputerAvailable: true, Computer: true, Record: true},
-			`(Jarvis Automation Agent — Running) | -- | [x] Computer control | Watch me | -- | Quit Jarvis Automation Agent`},
+		// Recording: "Record a macro…" right below Computer control whenever nothing is going
+		// on, also with computer control off (recording isn't gated by it), and "Stop
+		// recording" in the same place while recording.
+		{State{Status: "Running", VoiceAvailable: true, Voice: true, ComputerAvailable: true, Computer: true, Record: true, OpenURL: "http://x/"},
+			`(Jarvis Automation Agent — Running) | -- | [x] Listen for "Hey Jarvis" | [x] Computer control | Record a macro… | Open Jarvis Automation | -- | Quit Jarvis Automation Agent`},
 		{State{Status: "Running", ComputerAvailable: true, Record: true},
-			`(Jarvis Automation Agent — Running) | -- | [ ] Computer control | -- | Quit Jarvis Automation Agent`},
+			`(Jarvis Automation Agent — Running) | -- | [ ] Computer control | Record a macro… | -- | Quit Jarvis Automation Agent`},
 		{State{Status: "Running", ComputerAvailable: true, Computer: true, Record: true, Activity: ActivityControlling},
 			`(Jarvis Automation Agent — Running) | (Jarvis is controlling this computer) | Stop Jarvis | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
-		{State{Status: "Running", ComputerAvailable: true, Computer: true, Record: true, Activity: ActivityRecording},
-			`(Jarvis Automation Agent — Running) | (Recording) | Stop recording | Stop Jarvis | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", ComputerAvailable: true, Record: true, Activity: ActivityRecording},
+			`(Jarvis Automation Agent — Running) | (Recording) | Stop Jarvis | -- | [ ] Computer control | Stop recording | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
 		{State{Status: "Running"}, `(Jarvis Automation Agent — Running) | -- | Quit Jarvis Automation Agent`},
 	} {
@@ -162,8 +163,8 @@ func TestClicksRunActions(t *testing.T) {
 	tr.Update(func(s *State) { s.Activity = "" })
 	tr.clicked(IDRecord) // not shown: nothing
 	tr.wait()
-	tr.Update(func(s *State) { s.Record, s.ComputerAvailable, s.Computer = true, true, true })
-	tr.clicked(IDRecord) // Watch me
+	tr.Update(func(s *State) { s.Record, s.ComputerAvailable, s.Computer = true, true, false })
+	tr.clicked(IDRecord) // Record a macro…, with computer control off
 	tr.wait()
 	tr.Update(func(s *State) { s.Activity = ActivityRecording })
 	tr.clicked(IDRecord) // Stop recording

@@ -92,8 +92,6 @@ func TraceOutput(tr Trace) map[string]any {
 func recordFail(err error) map[string]any {
 	o := node.Fail("%v", err)
 	switch {
-	case errors.Is(err, ErrOff):
-		o["error_code"] = "computer_control_off"
 	case errors.Is(err, ErrNotRecording):
 		o["error_code"] = "not_recording"
 	case errors.Is(err, ErrBusy):

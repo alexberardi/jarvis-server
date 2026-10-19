@@ -17,10 +17,12 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
-// Recording from voice and from the computer (docs/agent/COMPUTER_CONTROL.md, plan P3 piece
-// 29): "Jarvis, watch me" (start_recording) asks the speaker's computer to record what they do
-// in the browser (computer_record_start), and "I'm done" (stop_recording) stops it
-// (computer_record_stop) and keeps the trace as the speaker's recording. A recording stopped on
+// Recording from voice and from the computer (docs/agent/COMPUTER-CONTROL.md C10, C11, plan P3
+// piece 29): "record this macro", "watch me" (start_recording) asks a computer to record what
+// the user does in the browser (computer_record_start), and "I'm done" (stop_recording) stops it
+// (computer_record_stop) and keeps the trace as the speaker's recording, named. Recording isn't
+// gated by computer control: the computer you're at records, else the one you name or your only
+// one (pickComputer). A recording stopped on
 // the computer itself (its menu, its CLI, voice "stop", its 30 minutes) is uploaded by the agent
 // to POST /api/v0/computer/recordings, owned by whoever is signed in there. Either way the
 // recording keeps the agent's id (so computer_record_delete finds its local copy) and is handed
@@ -37,7 +39,8 @@ const (
 // recordingIDPattern is an agent's recording id (computer.newRecordingID).
 var recordingIDPattern = regexp.MustCompile(`^rec_[A-Za-z0-9_-]{1,60}$`)
 
-// agentRecordingCall runs one recording tool on the node: computer_record_start / _stop.
+// agentRecordingCall runs one of the agent's computer tools on the node: computer_record_start /
+// _stop, computer_switch.
 func (m *Module) agentRecordingCall(ctx context.Context, nodeID, tool string, args map[string]any, uid int64) map[string]any {
 	if call := m.recordingAgent; call != nil {
 		return call(ctx, nodeID, tool, args, uid)
@@ -52,8 +55,7 @@ func (m *Module) agentRecordingCall(ctx context.Context, nodeID, tool string, ar
 }
 
 // hasComputer is whether the household has a computer (a desktop agent), switch on or off: the
-// recording tools are offered then (off, they say where to turn it on). A failed lookup offers
-// none.
+// recording and computer control tools are offered then. A failed lookup offers none.
 func (m *Module) hasComputer(ctx context.Context, hh string) bool {
 	if hh == "" {
 		return false
@@ -65,49 +67,6 @@ func (m *Module) hasComputer(ctx context.Context, hh string) bool {
 		m.deps.Log.Warn("cc: computer lookup", "household", hh, "err", err)
 	}
 	return err == nil
-}
-
-// recordingNode is the computer a turn's recording happens on: the turn's own node when it is a
-// computer, else the speaker's computer with computer control on. Not found: what to say.
-func (m *Module) recordingNode(ctx context.Context, turn servertools.Turn) (string, string, error) {
-	if turn.NodeID != "" {
-		n, err := m.nodeByID(ctx, turn.NodeID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return "", "", err
-		}
-		if n != nil && n.desktop() {
-			if !n.computerOn() {
-				return "", `Computer control is off. Turn it on with "Computer control" in the Jarvis Automation menu on this computer.`, nil
-			}
-			return n.nodeID, "", nil
-		}
-	}
-	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT `+nodeCols+` FROM cc_nodes
-		WHERE household_id = ? AND is_active AND owner_user_id = ? ORDER BY last_seen DESC, node_id`, turn.HouseholdID, turn.Speaker.UserID)
-	if err != nil {
-		return "", "", err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return "", "", err
-		}
-		if n.computerOn() {
-			return n.nodeID, "", nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return "", "", err
-	}
-	cc, err := m.computerControl(ctx, turn.HouseholdID)
-	if err != nil {
-		return "", "", err
-	}
-	if len(cc.on) == 0 {
-		return "", cc.offMessage(), nil
-	}
-	return "", "I can only watch you on your own computer. Ask me there, or sign in to Jarvis Automation on it.", nil
 }
 
 // recordingRefusal is a recording tool's answer when it can't go ahead.
@@ -125,10 +84,12 @@ func (*startRecordingTool) Name() string { return toolStartRecording }
 
 func (*startRecordingTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolStartRecording,
-		"Start watching what the user does in their browser on their computer, so Jarvis can learn to do it. "+
-			"Use when the user says 'watch me', 'watch how I do this', 'let me show you how to ...'. "+
+		"Start recording a macro: watch what the user does in their browser on their computer, so Jarvis can learn to do it. "+
+			"Use when the user says 'record this macro', 'record a macro called ...', 'watch me', 'watch me do this', "+
+			"'learn how I do this', 'let me show you how to ...'. Not for reminders, notes or audio. "+
 			"Stop with stop_recording when they say they're done.",
-		servertools.Obj("task", strProp("What the user is about to show, in their words (e.g. 'download my bank statement'); leave it empty when they only said 'watch me'")))
+		servertools.Obj("task", strProp("The macro's name or what the user is about to show, in their words (e.g. 'pay the water bill' from 'record a macro called pay the water bill'); leave it empty when they gave none"),
+			"computer", computerProp()))
 }
 
 func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
@@ -136,13 +97,11 @@ func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call,
 	if e := toolSpeakerError(turn); e != nil {
 		return e, nil
 	}
-	nodeID, why, err := m.recordingNode(ctx, turn)
-	if err != nil {
-		return nil, err
+	p, err := m.pickComputer(ctx, turn, argText(call, "computer"), ownComputers, nil)
+	if err != nil || p.refusal != nil {
+		return p.refusal, err
 	}
-	if nodeID == "" {
-		return recordingRefusal("computer_control_off", why), nil
-	}
+	nodeID := p.target.row.nodeID
 	out := m.agentRecordingCall(ctx, nodeID, computeruse.ToolRecordStart, map[string]any{"mode": "browser"}, turn.Speaker.UserID)
 	if !dispatchOK(out) {
 		return recordingRefusal(agentCode(out, "start_failed"), "I couldn't start recording: "+agentError(out)), nil
@@ -150,6 +109,9 @@ func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call,
 	id, _ := out["recording_id"].(string)
 	if task := strings.TrimSpace(argText(call, "task")); task != "" && id != "" {
 		m.recordingTasks.Store(id, task)
+		m.recordingNamed.Store(nodeID, id)
+	} else {
+		m.recordingNamed.Delete(nodeID)
 	}
 	return servertools.Obj("status", "recording", "recording_id", id, "message",
 		"I'm watching. Do it in your browser, then say \"I'm done\". I stop by myself after 30 minutes."), nil
@@ -161,22 +123,28 @@ func (*stopRecordingTool) Name() string { return toolStopRecording }
 
 func (*stopRecordingTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolStopRecording,
-		"Stop watching the user (after start_recording) and keep what they showed, to learn from it. "+
-			"Use when the user says 'I'm done', 'that's it', 'stop watching'.",
-		servertools.Obj())
+		"Stop recording the macro (after start_recording) and keep what the user showed, to learn from it. "+
+			"Use when the user says 'I'm done', 'that's it', 'stop recording', 'stop watching'. If it answers need_name, "+
+			"ask what to call the macro and call it again with the name.",
+		servertools.Obj("name", strProp("The macro's name, when the user gave one (e.g. 'pay the water bill')"),
+			"computer", computerProp()))
 }
 
-func (t *stopRecordingTool) Execute(ctx context.Context, _ servertools.Call, turn servertools.Turn) (any, error) {
+func (t *stopRecordingTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
 	m := t.m
 	if e := toolSpeakerError(turn); e != nil {
 		return e, nil
 	}
-	nodeID, why, err := m.recordingNode(ctx, turn)
-	if err != nil {
-		return nil, err
+	p, err := m.pickComputer(ctx, turn, argText(call, "computer"), ownComputers, nil)
+	if err != nil || p.refusal != nil {
+		return p.refusal, err
 	}
-	if nodeID == "" {
-		return recordingRefusal("computer_control_off", why), nil
+	nodeID := p.target.row.nodeID
+	name := strings.TrimSpace(argText(call, "name"))
+	if name == "" {
+		if _, named := m.recordingNamed.Load(nodeID); !named {
+			return recordingRefusal("need_name", "What should I call this macro? The recording keeps going until you tell me."), nil
+		}
 	}
 	out := m.agentRecordingCall(ctx, nodeID, computeruse.ToolRecordStop, map[string]any{}, turn.Speaker.UserID)
 	if !dispatchOK(out) {
@@ -189,13 +157,18 @@ func (t *stopRecordingTool) Execute(ctx context.Context, _ servertools.Call, tur
 	if err != nil {
 		return nil, err
 	}
-	rec.HouseholdID, rec.OwnerID, rec.NodeID = turn.HouseholdID, turn.Speaker.UserID, nodeID
+	m.recordingNamed.Delete(nodeID)
+	rec.HouseholdID, rec.OwnerID, rec.NodeID, rec.Narration = turn.HouseholdID, turn.Speaker.UserID, nodeID, name
 	rec, err = m.storeAgentRecording(ctx, rec)
 	if err != nil {
 		return nil, err
 	}
+	saved := "what you showed me"
+	if rec.Narration != "" {
+		saved = `"` + rec.Narration + `"`
+	}
 	return servertools.Obj("status", "saved", "recording_id", rec.ID, "steps", rec.Steps, "message",
-		fmt.Sprintf("Got it: I saved what you showed me (%d steps). I'll learn it as a workflow.", rec.Steps)), nil
+		fmt.Sprintf("Got it: I saved %s (%d steps). I'll learn it as a workflow.", saved, rec.Steps)), nil
 }
 
 // agentCode is a failed agent output's error_code (dflt when it has none).
