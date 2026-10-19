@@ -59,6 +59,9 @@ type State struct {
 	// ActivityPaused or ActivityRecording. Not "": a line saying so, "Stop Jarvis", and the
 	// icon's badge.
 	Activity string
+	// StopHotkey, when set, is the hotkey that stops it ("⌃⌥⎋"): the tooltip names it while
+	// there is an activity.
+	StopHotkey string
 }
 
 // The activities (computer.Kind's values).
@@ -152,9 +155,13 @@ func Header(s State) string {
 	return appid.DisplayName + " — " + st
 }
 
-// Tooltip is the icon's tooltip: what Jarvis is doing with the computer, else the header.
+// Tooltip is the icon's tooltip: what Jarvis is doing with the computer (and the hotkey that
+// stops it), else the header.
 func Tooltip(s State) string {
 	if l := ActivityLine(s.Activity); l != "" {
+		if s.StopHotkey != "" {
+			l += " (" + s.StopHotkey + " stops it)"
+		}
 		return l
 	}
 	return Header(s)

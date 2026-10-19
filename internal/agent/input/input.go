@@ -37,5 +37,11 @@ type Input interface {
 	Injecting() (start, end time.Time)
 }
 
+// Monitor tells when the user last used the mouse or keyboard (NativeMonitor), so a computer
+// task can pause when they take over.
+type Monitor interface {
+	Since(ctx context.Context) (time.Time, error)
+}
+
 // ErrUnavailable is returned when input can't be posted (no backend, no permission).
 var ErrUnavailable = errors.New("input not available")

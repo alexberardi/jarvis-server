@@ -141,3 +141,17 @@ func TestMacAppEventsHandler(t *testing.T) {
 		t.Fatalf("get-URL: got %q", g)
 	}
 }
+
+// TestHotkeySymbols: the Carbon functions the stop hotkey binds are there (registering it needs
+// a GUI session and AppKit's loop: checked live, by pressing ⌃⌥⎋ on the Mac).
+func TestHotkeySymbols(t *testing.T) {
+	lib, err := purego.Dlopen(hiToolbox, purego.RTLD_GLOBAL|purego.RTLD_NOW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sym := range []string{"GetApplicationEventTarget", "InstallEventHandler", "RegisterEventHotKey"} {
+		if _, err := purego.Dlsym(lib, sym); err != nil {
+			t.Errorf("%s: %v", sym, err)
+		}
+	}
+}
