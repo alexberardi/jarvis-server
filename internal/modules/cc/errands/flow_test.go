@@ -164,11 +164,11 @@ func TestRunNodeAndServerStepsToCompletion(t *testing.T) {
 	cards := e.cards.all()
 	last := cards[len(cards)-1]
 	if last.Title != "✅ Errand done: Weather and search" || last.Summary != "It will rain tomorrow, and I found 2 sources." ||
-		last.Category != "errand" || mustJSON(last.Metadata) != `{"household_id":"hh-1","status":"success"}` {
+		last.Category != "errand" || mustJSON(last.Metadata) != `{"answer":"It will rain tomorrow, and I found 2 sources.","household_id":"hh-1","status":"success"}` {
 		t.Fatalf("completion = %+v", last)
 	}
 	compose := e.llm.requests("compose")[0]
-	if compose.Label != "background" || *compose.MaxTokens != 400 || *compose.ReasoningBudget != 0 || *compose.Temperature != 0.3 {
+	if compose.Label != "background" || *compose.MaxTokens != 800 || *compose.ReasoningBudget != 0 || *compose.Temperature != 0.3 {
 		t.Fatalf("compose req = %+v", compose)
 	}
 	cp := *compose.Messages[0].Content.Text
