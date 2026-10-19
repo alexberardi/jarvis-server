@@ -7,11 +7,14 @@
 //
 //	ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted] [--label live|background]
 //	            [--include-pending] [--out DIR] [--keep] [--settle 1m] [--chromium PATH]
+//	ccsuite down --run DIR
 //
 // Writes report.md, report.json and results.json (the E2E report's suite shape, for
 // scripts/e2e computer) into .ccsuite/<run>/ (or --out). Pending cases are skipped unless
 // --include-pending, and never fail the run; a required case that fails exits 1, a run that
-// could not bring its world up exits 2.
+// could not bring its world up exits 2. With --keep the whole world (sandbox, sites, a desktop
+// session with the agent and the browser) is left running, described in <run>/kept.json, until
+// `ccsuite down --run DIR`.
 package main
 
 import (
@@ -40,10 +43,13 @@ func main() {
 }
 
 func dispatch(ctx context.Context, args []string, stdout io.Writer) error {
-	if len(args) == 0 || args[0] != "run" {
-		return errors.New("usage: ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted] [--label live|background] [--include-pending] [--out DIR] [--keep]")
+	switch {
+	case len(args) > 0 && args[0] == "run":
+		return runCmd(ctx, args[1:], stdout)
+	case len(args) > 0 && args[0] == "down":
+		return downCmd(args[1:], stdout)
 	}
-	return runCmd(ctx, args[1:], stdout)
+	return errors.New("usage: ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted] [--label live|background] [--include-pending] [--out DIR] [--keep]\n       ccsuite down --run DIR")
 }
 
 // errFailed is a run whose required cases failed (exit 1, already reported).

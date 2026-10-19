@@ -11,13 +11,14 @@ flips it to `required`.
 go run ./tools/ccsuite run --llm scripted                       # the plumbing: bring-up, every pending case skipped, tear-down
 go run ./tools/ccsuite run --llm shared --label background      # the required cases against the installed background model
 go run ./tools/ccsuite run --include-pending --filter 'store_' --repeat 3
-go run ./tools/ccsuite run --filter none --keep                 # bring-up only, the sandbox left up
+go run ./tools/ccsuite run --filter none --keep                 # bring-up only, all of it left running (below)
+go run ./tools/ccsuite down --run .ccsuite/<run>               # and taken down again
 scripts/e2e computer --llm shared --label background --repeat 3 # the same from the E2E runner (overnight; docs/dev/e2e.md)
 ```
 
 Flags: `--filter RE` (case names), `--repeat N` (runs per case, default 1), `--llm shared|scripted`,
 `--label live|background`, `--include-pending`, `--out DIR` (default `.ccsuite/<run>/`, ignored by
-git), `--keep` (leave the sandbox up), `--settle 1m` (below), `--chromium PATH`. Exit 0 when every
+git), `--keep` (leave it all running: below), `--settle 1m` (below), `--chromium PATH`. Exit 0 when every
 required case passed, 1 when one failed, 2 when the run could not bring its world up.
 
 ## The cases
@@ -104,7 +105,27 @@ rewrites it).
    or ImageMagick's `import` on X11). A case passes when at least two thirds of its runs pass
    (1 of 1, 2 of 3).
 4. **Tear-down**, also on Ctrl-C: browser, agent, notes app and session (each its own process
-   group), the sites, `scripts/sandbox down --purge` (unless `--keep`).
+   group), the sites, `scripts/sandbox down --purge`. With `--keep`, nothing is stopped instead:
+
+## Keeping the world up (`--keep`)
+
+`run --keep` leaves the sandbox, the fixture sites, a desktop session (headless sway unless the
+last case used X11), the enrolled agent and Chromium with the extension running after ccsuite
+exits, and brings the session, agent and browser up even when no case needed them (`--filter
+none --keep`: bring-up only). That is the suite browser a later piece checks new extension
+commands in by hand. It prints, and writes into `<run>/kept.json`, what it left: the sites' URL,
+the session's `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY` and `SWAYSOCK` (or `DISPLAY`), the agent's
+control and browser sockets, each process group, and the commands to use and end it:
+
+```sh
+HOME=.ccsuite/<run>/agent-home JARVIS_AGENT_BROWSER_SOCKET=<rt>/browser.sock \
+  .ccsuite/<run>/bin/jarvis-agent browser status    # the extension, connected
+go run ./tools/ccsuite down --run .ccsuite/<run>    # stops every kept group, removes the runtime dir, purges the sandbox
+```
+
+Every kept process logs to a file in `<run>/logs/`, not to ccsuite, and Chromium's DevTools pipe
+is held open by a `sleep` in the browser's process group (Chromium quits when that pipe closes).
+`down` signals only groups whose leader still runs the program it started.
 
 Output in `.ccsuite/<run>/`: `report.md` (the table, then each failure with its screenshot),
 `report.json` (`{run, model, label, llm, duration_ms, cases: [{name, phase, case_status, status,

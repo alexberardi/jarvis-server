@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,7 +25,8 @@ import (
 // (scripts/sandbox up --name ccsuite-<run>), the fixture sites (tools/ccsites), and, only when a
 // case needs them, a desktop session (headless sway, or Xvfb for X11) with the real agent
 // enrolled to the sandbox and Playwright's Chromium carrying the extension. Down takes it all
-// away again; every process it starts is in its own process group.
+// away again (or, with Keep, leaves it all running for `ccsuite down`); every process it starts
+// is in its own process group.
 type Env struct {
 	Root     string        // the jarvis-server checkout
 	Dir      string        // the run dir (absolute): bin/, logs/, agent-home/, browser/, ...
@@ -33,7 +34,7 @@ type Env struct {
 	LLM      string        // shared or scripted
 	Label    string        // shared: the installed jarvisd's label (live, background); "" = as configured
 	Chromium string        // the browser binary; "" = Playwright's newest Chromium
-	Keep     bool          // leave the sandbox up at the end
+	Keep     bool          // leave it all running at the end (kept.json; ccsuite down --run DIR)
 	Settle   time.Duration // an errand is over once nothing happened this long after the chat's answer
 	Log      io.Writer
 
@@ -59,6 +60,8 @@ type desktop struct {
 	agent   *proc
 	browser *proc
 	cdp     *cdpPipe
+	cdpW    *os.File // the DevTools pipe's ends, for a kept browser's holder
+	cdpR    *os.File
 	notes   *proc
 	notesSt string // the notes app's state file
 }
@@ -236,57 +239,57 @@ func firstNonEmpty(s ...string) string {
 }
 
 func (e *Env) startSites(ctx context.Context) error {
+	// Its output goes to its log file, not a pipe of ours: a kept ccsites outlives ccsuite, and
+	// would die of SIGPIPE writing to a pipe nobody reads. The first line is its URL.
 	cmd := exec.Command(e.path("bin", "ccsites"), "--listen", "127.0.0.1:0", "--state", e.path("sites"))
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
+	var err error
 	if e.sitesProc, err = e.start("ccsites", cmd); err != nil {
 		return err
 	}
-	line := make(chan string, 1)
-	go func() {
-		sc := bufio.NewScanner(out)
-		for sc.Scan() {
-			select {
-			case line <- sc.Text():
-			default:
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if b, _ := os.ReadFile(e.path("logs", "ccsites.log")); bytes.IndexByte(b, '\n') >= 0 {
+			l, _, _ := strings.Cut(string(b), "\n")
+			u, ok := strings.CutPrefix(l, "ccsites: ")
+			if !ok {
+				return fmt.Errorf("ccsites said %q (logs/ccsites.log)", l)
 			}
+			e.Sites = u
+			break
 		}
-	}()
-	select {
-	case l := <-line:
-		u, ok := strings.CutPrefix(l, "ccsites: ")
-		if !ok {
-			return fmt.Errorf("ccsites said %q (logs/ccsites.log)", l)
+		if !e.sitesProc.alive() || time.Now().After(deadline) {
+			return errors.New("ccsites did not start (logs/ccsites.log)")
 		}
-		e.Sites = u
-	case <-time.After(15 * time.Second):
-		return errors.New("ccsites did not start (logs/ccsites.log)")
-	case <-ctx.Done():
-		return ctx.Err()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	e.logf("fixture sites at %s", e.Sites)
 	return nil
 }
 
-// Down stops everything Up and the cases started, and purges the sandbox unless Keep.
+// Down stops everything Up and the cases started, and purges the sandbox; with Keep it leaves it
+// all running instead and says how to take it down.
 func (e *Env) Down() {
+	if e.Keep {
+		e.keepAll()
+		return
+	}
 	e.stopDesktop()
 	e.sitesProc.stop()
-	if !e.sandboxUp {
-		return
+	if e.sandboxUp {
+		purgeSandbox(e.Root, e.Name, e.Log)
 	}
-	if e.Keep {
-		e.logf("kept: sandbox %s (scripts/sandbox down --name %s --purge)", e.Name, e.Name)
-		return
-	}
-	cmd := exec.Command(filepath.Join(e.Root, "scripts", "sandbox"), "down", "--name", e.Name, "--purge")
-	cmd.Dir = e.Root
+}
+
+func purgeSandbox(root, name string, log io.Writer) {
+	cmd := exec.Command(filepath.Join(root, "scripts", "sandbox"), "down", "--name", name, "--purge")
+	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		e.logf("sandbox down: %v: %s", err, strings.TrimSpace(string(out)))
+		fmt.Fprintf(log, "ccsuite: sandbox down: %v: %s\n", err, strings.TrimSpace(string(out)))
 	} else {
-		e.logf("sandbox %s purged", e.Name)
+		fmt.Fprintf(log, "ccsuite: sandbox %s purged\n", name)
 	}
 }
 
@@ -635,7 +638,7 @@ func (e *Env) startBrowser(ctx context.Context, d *desktop) error {
 		resR.Close()
 		return err
 	}
-	d.cdp = newCDP(cmdW, resR)
+	d.cdp, d.cdpW, d.cdpR = newCDP(cmdW, resR), cmdW, resR
 	vctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	_, err = d.cdp.Call(vctx, "Browser.getVersion", nil)
 	cancel()

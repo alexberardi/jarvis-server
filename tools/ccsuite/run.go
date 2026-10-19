@@ -36,7 +36,7 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 	includePending := fs.Bool("include-pending", false, "run pending cases too (they never fail the run)")
 	out := fs.String("out", "", "the run's directory (default .ccsuite/<run>)")
 	rel := fs.String("rel", "", "prefix for the paths in results.json (scripts/e2e: the suite's dir in its run)")
-	keep := fs.Bool("keep", false, "leave the sandbox up afterwards")
+	keep := fs.Bool("keep", false, "leave it all running afterwards, a desktop session with the agent and the browser included (ccsuite down --run DIR)")
 	chromium := fs.String("chromium", "", "the Chromium binary (default: $CCSUITE_CHROMIUM, else Playwright's newest)")
 	settle := fs.Duration("settle", time.Minute, "an errand is over once nothing happened for this long after the chat's answer")
 	if err := fs.Parse(args); err != nil {
@@ -125,6 +125,16 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 			fmt.Fprintf(stdout, "ccsuite: %-8s %s (%d/%d runs)\n", cr.Status, c.Name, cr.Passed, cr.Runs)
 		}
 		rep.Cases = append(rep.Cases, cr)
+	}
+	// Kept for use by hand: a desktop with the agent and the browser even when no case needed one.
+	if *keep && upErr == nil && ctx.Err() == nil {
+		kind := "wlroots"
+		if env.desk != nil {
+			kind = env.desk.kind
+		}
+		if _, err := env.Desktop(ctx, kind, true); err != nil {
+			upErr = fmt.Errorf("--keep: %w", err)
+		}
 	}
 	rep.DurationMS = time.Since(start).Milliseconds()
 	if err := rep.write(dir, *rel); err != nil {

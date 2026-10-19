@@ -100,6 +100,7 @@ func TestChecks(t *testing.T) {
 		{"form_submitted wrong field", Check{Kind: "form_submitted", Fields: map[string]string{"plan": "premium"}}, &st, "1 sent"},
 		{"note_exists", Check{Kind: "note_exists", Title: "groceries", Body: "EGGS"}, &st, ""},
 		{"note_exists wrong body", Check{Kind: "note_exists", Title: "Groceries", Body: "butter"}, &st, "notes: Groceries"},
+		{"note_exists wrong title", Check{Kind: "note_exists", Title: "Shopping", Body: "eggs"}, &st, "notes: Groceries"},
 		{"note_exists none", Check{Kind: "note_exists", Title: "Groceries"}, &empty, "notes: none"},
 		{"reply_matches", Check{Kind: "reply_matches", Pattern: "(?i)dining is over"}, &st, ""},
 		{"reply_matches fails", Check{Kind: "reply_matches", Pattern: "Travel"}, &st, `matches "Travel"`},
