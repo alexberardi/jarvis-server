@@ -33,6 +33,9 @@ func TestRenderGolden(t *testing.T) {
 		{"note", Frame{State: Note, Appear: 1, Text: "Typing into Claude: test def"}},
 		{"running", Frame{State: Note, Appear: 1, Text: RunningNote}},
 		{"note_long", Frame{State: Note, Appear: 1, Text: "Send \"please run the whole test suite again and tell me which ones fail\" to Claude? Say yes or cancel."}},
+		{"controlling", Frame{State: Controlling, Appear: 1, Glow: 0.6, Text: "Ordering the blue mug from Example Store"}},
+		{"paused", Frame{State: Paused, Appear: 1, Text: "Paused: Ordering the blue mug from Example Store"}},
+		{"recording", Frame{State: Recording, Appear: 1, Glow: 0.6, Text: "Recording"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			img := image.NewRGBA(image.Rect(0, 0, CanvasW*2, CanvasH*2))
@@ -458,4 +461,114 @@ func TestFitNote(t *testing.T) {
 	if !strings.HasSuffix(long, "…") || w < noteMaxW-8 || w > noteMaxW || len(long) > 200 {
 		t.Errorf("long note %q %v", long, w)
 	}
+}
+
+// TestActivityStates: controlling, paused and recording show as a pill with their text
+// (the intent), each in its own colour, and say so by name.
+func TestActivityStates(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	for _, tc := range []struct {
+		s          State
+		name, text string
+		want       string
+	}{
+		{Controlling, "controlling", "Ordering the blue mug", "Ordering the blue mug"},
+		{Controlling, "controlling", "", "Jarvis is controlling this computer"},
+		{Paused, "paused", "Ordering the blue mug", "Paused: Ordering the blue mug"},
+		{Paused, "paused", "", "Paused"},
+		{Recording, "recording", "", "Recording"},
+		{Recording, "recording", "Downloading the statement", "Recording: Downloading the statement"},
+	} {
+		if tc.s.String() != tc.name {
+			t.Fatalf("%v.String() = %q", int(tc.s), tc.s.String())
+		}
+		var m model
+		m.setActivity(tc.s, tc.text)
+		var f Frame
+		for d := time.Duration(0); d <= 500*time.Millisecond; d += 50 * time.Millisecond {
+			f, _ = m.step(t0.Add(d))
+		}
+		if f.State != tc.s || f.Text != tc.want || f.Appear != 1 {
+			t.Fatalf("%s %q: %+v", tc.name, tc.text, f)
+		}
+	}
+	if accentFor(Controlling) == accentFor(Paused) || accentFor(Controlling) == accentFor(Recording) ||
+		accentFor(Paused) == accentFor(Recording) || accentFor(Controlling) == accentFor(Listening) {
+		t.Fatal("the activity states need colours of their own")
+	}
+}
+
+// TestActivityOutlastsVoiceAndNotes: the indicator stays while Jarvis controls the computer.
+// A voice turn or a note shows over it, and when they end it is back; only clearing the
+// activity hides it.
+func TestActivityOutlastsVoiceAndNotes(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	var m model
+	m.setActivity(Controlling, "Ordering the blue mug")
+	m.set(Listening, 0, t0)
+	if s := m.shown(t0); s != Listening {
+		t.Fatalf("a voice turn over controlling: %v", s)
+	}
+	m.set(Hidden, 0, t0)
+	if s := m.shown(t0); s != Controlling {
+		t.Fatalf("after the turn: %v", s)
+	}
+	m.set(Error, 0, t0)
+	if s := m.shown(t0.Add(2 * errorHold)); s != Controlling {
+		t.Fatalf("after an error flash: %v", s)
+	}
+	m.set(Hidden, 0, t0)
+	m.setNote("Typing: hi", time.Second, t0)
+	if s := m.shown(t0); s != Note {
+		t.Fatalf("a note over controlling: %v", s)
+	}
+	if s := m.shown(t0.Add(2 * time.Second)); s != Controlling {
+		t.Fatalf("after the note: %v", s)
+	}
+	m.setActivity(Paused, "Ordering the blue mug")
+	if s := m.shown(t0.Add(2 * time.Second)); s != Paused {
+		t.Fatalf("paused: %v", s)
+	}
+	m.setActivity(Hidden, "")
+	if s := m.shown(t0.Add(2 * time.Second)); s != Hidden {
+		t.Fatalf("cleared: %v", s)
+	}
+	// Set with an activity state is the same as SetActivity without a text.
+	m.set(Recording, 0, t0)
+	if s := m.shown(t0.Add(2 * time.Second)); s != Recording || m.state != Hidden {
+		t.Fatalf("Set(Recording): shown %v, voice state %v", s, m.state)
+	}
+}
+
+// TestSuspendKeepsTheActivity: a screenshot during a computer task hides the indicator for
+// the capture only; once it is taken the indicator is back with its text.
+func TestSuspendKeepsTheActivity(t *testing.T) {
+	be := newFakeBackend()
+	i, d := newDriven(t, be)
+	defer i.Close()
+	i.SetActivity(Controlling, "Ordering the blue mug")
+	d.next()
+	resumed := make(chan func(), 1)
+	go func() { resumed <- i.Suspend() }()
+	d.untilHidden(be)
+	var resume func()
+	select {
+	case resume = <-resumed:
+	case <-time.After(hangGuard):
+		t.Fatal("Suspend did not return once the island was hidden")
+	}
+	resume()
+	d.next()
+	d.next()
+	if s, _, _ := be.counts(); s != 2 {
+		t.Fatalf("not back after the capture: %d shows", s)
+	}
+	i.mu.Lock()
+	f, visible := i.m.step(d.now())
+	i.mu.Unlock()
+	if !visible || f.State != Controlling || f.Text != "Ordering the blue mug" {
+		t.Fatalf("after the capture: %+v %v", f, visible)
+	}
+	i.SetActivity(Hidden, "")
+	d.untilHidden(be)
 }

@@ -25,7 +25,7 @@ func TestWirePackages(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &node.Runner{Creds: node.Creds{NodeID: "n1"}, Log: log}
-	wireNodeSettings(r, st, tools, nil, log)
+	wireNodeSettings(r, st, tools, nil, nil, nil, log)
 	wirePackages(r, newPackages(t.TempDir(), live, st, nil, log), log)
 	var topics []string
 	for k := range r.Topics {

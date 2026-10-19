@@ -3,8 +3,9 @@
 // the agent that is already running. It is also the agent's single-instance lock: a second
 // `run` finds the socket live and stops.
 //
-// One JSON line per connection, one answer: {"cmd": "show-running"} → {"ok": true}. The
-// commands are a closed set and take no arguments. The socket lives in the browser socket's
+// One JSON line per connection, one answer: {"cmd": "show-running"} → {"ok": true}, with an
+// "answer" for the commands that report something (computer-status). The commands are a closed
+// set and take no arguments. The socket lives in the browser socket's
 // user-only directory, is 0600, and peers must be this user (browser.Listen).
 package control
 
@@ -34,10 +35,17 @@ const (
 	// Health answers ok only once the agent is connected to jarvisd (MQTT): the self-update's
 	// check that a new version came up (01-no-cli-plan 1.7). The answer names the version.
 	Health = "health"
+	// ComputerStop stops what Jarvis is doing with the computer (a computer task, a
+	// recording): the tray's "Stop Jarvis", `jarvis-agent computer stop`. The answer says
+	// whether anything was stopped.
+	ComputerStop = "computer-stop"
+	// ComputerStatus answers what Jarvis is doing with the computer: "idle", or the activity
+	// and its intent ("controlling: Ordering the blue mug").
+	ComputerStatus = "computer-status"
 )
 
 // Commands is every command the agent accepts.
-var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health}
+var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second
@@ -49,6 +57,8 @@ type request struct {
 type response struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Answer is what a command reports (computer-status).
+	Answer string `json:"answer,omitempty"`
 	// Version is the answering agent's version (every answer, from agents that know it).
 	Version string `json:"version,omitempty"`
 }
@@ -56,10 +66,14 @@ type response struct {
 // Reply is an agent's answer.
 type Reply struct {
 	Version string // "" from an agent that predates it
+	Answer  string // what the command reported, if anything
 }
 
 // Handler runs a command (one of Commands).
 type Handler func(cmd string) error
+
+// AnswerHandler runs a command and returns what it reports.
+type AnswerHandler func(cmd string) (string, error)
 
 // Serve answers connections on ln until ctx ends or ln is closed.
 func Serve(ctx context.Context, ln net.Listener, h Handler) error {
@@ -68,6 +82,11 @@ func Serve(ctx context.Context, ln net.Listener, h Handler) error {
 
 // ServeVersion is Serve, naming version in every answer.
 func ServeVersion(ctx context.Context, ln net.Listener, h Handler, version string) error {
+	return ServeAnswers(ctx, ln, func(cmd string) (string, error) { return "", h(cmd) }, version)
+}
+
+// ServeAnswers is ServeVersion with a handler that reports something.
+func ServeAnswers(ctx context.Context, ln net.Listener, h AnswerHandler, version string) error {
 	go func() {
 		<-ctx.Done()
 		_ = ln.Close()
@@ -84,7 +103,7 @@ func ServeVersion(ctx context.Context, ln net.Listener, h Handler, version strin
 	}
 }
 
-func handle(c net.Conn, h Handler, version string) {
+func handle(c net.Conn, h AnswerHandler, version string) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(IOTimeout))
 	line, err := bufio.NewReader(c).ReadBytes('\n')
@@ -98,8 +117,11 @@ func handle(c net.Conn, h Handler, version string) {
 	case !slices.Contains(Commands, req.Cmd):
 		resp = response{Error: fmt.Sprintf("unknown command %q", req.Cmd)}
 	default:
-		if err := h(req.Cmd); err != nil {
+		answer, err := h(req.Cmd)
+		if err != nil {
 			resp = response{Error: err.Error()}
+		} else {
+			resp.Answer = answer
 		}
 	}
 	resp.Version = version
@@ -139,7 +161,7 @@ func Ask(dial Dialer, cmd string) (Reply, error) {
 	if err := json.Unmarshal(line, &resp); err != nil {
 		return Reply{}, err
 	}
-	r := Reply{Version: resp.Version}
+	r := Reply{Version: resp.Version, Answer: resp.Answer}
 	if !resp.OK {
 		return r, errors.New(resp.Error)
 	}

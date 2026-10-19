@@ -184,6 +184,15 @@ func (m *Manager) Boot(ctx context.Context) error {
 	return nil
 }
 
+// runs are the component types beyond commands this node's sidecar loads: on a Pi (the one
+// with built-ins) device families and managers, which only its device topics use.
+func (m *Manager) runs() []string {
+	if m.Builtins != nil {
+		return DeviceTypes
+	}
+	return nil
+}
+
 func (m *Manager) builtinsStamp() string { return filepath.Join(m.Root, "builtins.txt") }
 
 // installBuiltins pip-installs the built-ins (with the SDK) unless the venv already has this
@@ -210,12 +219,18 @@ func (m *Manager) writeList() (int, error) {
 		Name     string   `json:"name"`
 		Root     string   `json:"root"`
 		Commands []string `json:"commands"`
+		Families []string `json:"families,omitempty"`
+		Managers []string `json:"managers,omitempty"`
 	}
 	list := []entry{}
+	pi := len(m.runs()) > 0
 	for _, in := range m.List() {
 		e := entry{Name: in.Manifest.Name, Root: in.Dir}
 		for _, c := range in.Manifest.Commands() {
 			e.Commands = append(e.Commands, c.Path)
+		}
+		if pi {
+			e.Families, e.Managers = in.Manifest.Paths("device_protocol"), in.Manifest.Paths("device_manager")
 		}
 		list = append(list, e)
 	}
@@ -320,9 +335,9 @@ func (m *Manager) Install(ctx context.Context, repo, ref string) (map[string]any
 			m.Log.Warn("packages: couldn't keep the previous version", "package", man.Name, "err", err)
 		}
 	}
-	m.Log.Info("packages: installed", "package", man.Name, "version", man.Version, "skipped", man.Skipped())
+	m.Log.Info("packages: installed", "package", man.Name, "version", man.Version, "skipped", man.Skipped(m.runs()...))
 	details := map[string]any{"package_name": man.Name, "version": man.Version, "components": len(man.Components)}
-	if s := man.Skipped(); len(s) > 0 {
+	if s := man.Skipped(m.runs()...); len(s) > 0 {
 		details["skipped_components"] = s
 	}
 	return details, nil
@@ -331,9 +346,9 @@ func (m *Manager) Install(ctx context.Context, repo, ref string) (map[string]any
 // checkManifest refuses a package this agent can't run (CheckDesktop, or CheckPi with a System).
 func (m *Manager) checkManifest(man *Manifest) error {
 	if m.System != nil {
-		return man.CheckPi()
+		return man.CheckPi(m.runs()...)
 	}
-	return man.CheckDesktop(m.GOOS)
+	return man.CheckDesktop(m.GOOS, m.runs()...)
 }
 
 // undoPostInstall follows a failed install's putBack: a fresh install's drop-ins go, an

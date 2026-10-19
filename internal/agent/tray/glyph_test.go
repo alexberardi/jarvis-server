@@ -20,6 +20,7 @@ func TestGlyphGolden(t *testing.T) {
 	cases := map[string]*image.NRGBA{"template-36": Template(36)}
 	for _, n := range []int{16, 20, 22, 24, 32} {
 		cases[fmt.Sprintf("color-%d", n)] = Color(n)
+		cases[fmt.Sprintf("color-active-%d", n)] = ColorActive(n)
 	}
 	for name, img := range cases {
 		t.Run(name, func(t *testing.T) {

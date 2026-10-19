@@ -12,8 +12,62 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
+	"github.com/alexberardi/jarvis-server/internal/agent/control"
+	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
+
+// computerCmd is `jarvis-agent computer stop|status`: stop what Jarvis is doing with this
+// computer (a computer task, a recording), as the status icon's "Stop Jarvis" does, or say
+// what it is doing. Both ask the running agent over its control socket. (`computer snapshot`
+// is computerSnapshotCmd, which main dispatches before this.)
+func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
+	if len(args) != 1 || (args[0] != "stop" && args[0] != "status") {
+		return errors.New("usage: jarvis-agent computer stop|status|snapshot URL")
+	}
+	cmd := control.ComputerStatus
+	if args[0] == "stop" {
+		cmd = control.ComputerStop
+	}
+	r, err := control.Ask(dial, cmd)
+	if err != nil {
+		return err
+	}
+	switch {
+	case cmd == control.ComputerStop && r.Answer == "stopped":
+		fmt.Fprintln(w, "Stopped.")
+	case cmd == control.ComputerStop:
+		fmt.Fprintln(w, "Jarvis wasn't using this computer.")
+	case r.Answer == "idle" || r.Answer == "":
+		fmt.Fprintln(w, "Jarvis isn't using this computer.")
+	default:
+		// "controlling: Ordering the blue mug" (computer.Activity's String).
+		kind, text, _ := strings.Cut(r.Answer, ": ")
+		line := map[string]string{string(computer.Controlling): "Jarvis is controlling this computer",
+			string(computer.Paused): "Jarvis is paused", string(computer.Recording): "Jarvis is recording"}[kind]
+		if line == "" {
+			line = r.Answer
+		} else if text != "" {
+			line += ": " + text
+		}
+		fmt.Fprintln(w, line)
+	}
+	return nil
+}
+
+// islandActivity is the island's state for an activity.
+func islandActivity(k computer.Kind) island.State {
+	switch k {
+	case computer.Controlling:
+		return island.Controlling
+	case computer.Paused:
+		return island.Paused
+	case computer.Recording:
+		return island.Recording
+	}
+	return island.Hidden
+}
 
 // --- jarvis-agent computer snapshot URL: computer control's browser calls, by hand ---
 //
@@ -21,15 +75,13 @@ import (
 // reach them). This debug command serves the extension itself, like `try`, so it needs no
 // running agent holding the browser socket.
 
-func computerCmd(ctx context.Context, args []string) error {
-	if len(args) == 0 || args[0] != "snapshot" {
-		return errors.New("usage: jarvis-agent computer snapshot [--wait 10s] [--max 300] [--json] URL")
-	}
+// computerSnapshotCmd is `jarvis-agent computer snapshot`; args follow "snapshot".
+func computerSnapshotCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("computer snapshot", flag.ExitOnError)
 	wait := fs.Duration("wait", 10*time.Second, "how long to wait for the browser extension to connect")
 	maxEls := fs.Int("max", browser.DefaultSnapshotMax, "at most this many elements")
 	asJSON := fs.Bool("json", false, "print the snapshot as JSON")
-	_ = fs.Parse(args[1:])
+	_ = fs.Parse(args)
 	if fs.NArg() != 1 {
 		return errors.New("usage: jarvis-agent computer snapshot [--wait 10s] [--max 300] [--json] URL")
 	}

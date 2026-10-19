@@ -24,6 +24,9 @@ type Runner struct {
 	DeviceID    string // reported in heartbeats: this computer's identity (internal/agent/deviceid)
 	// Capabilities, if set, is asked for the heartbeat's capabilities on every beat.
 	Capabilities func() map[string]any
+	// Protocols, if set, is asked for the heartbeat's protocols (the device families) on every
+	// beat.
+	Protocols func() []string
 	// Changed, if set, returns a channel that is closed when a capability changes: the next
 	// heartbeat goes out at once instead of at the next tick (the admin's ticks turn green
 	// within seconds of the browser extension connecting).
@@ -37,6 +40,10 @@ type Runner struct {
 	// Topics are extra sub-topics of jarvis/nodes/{id}/ to subscribe to (e.g. "k2/provision"),
 	// each with its handler. Handlers run on their own goroutine.
 	Topics map[string]func(ctx context.Context, cc *CC, payload []byte)
+	// Absolute are topic filters outside jarvis/nodes/{id}/ (OAuth's jarvis/auth/+/ready, which
+	// the broker lets every node read), each with its handler, given the message's topic.
+	// Handlers run on their own goroutine.
+	Absolute map[string]func(ctx context.Context, cc *CC, topic string, payload []byte)
 	// Requests are request/response sub-topic filters (e.g. "command-data/+"): each message's
 	// full topic and payload go to the handler on its own goroutine, and the answer is
 	// published at QoS 1 on the topic it returns ("" for no answer).
@@ -230,6 +237,14 @@ func (r *Runner) Run(ctx context.Context) error {
 				r.Log.Error("mqtt subscribe failed", "topic", sub, "err", tok.Error())
 			}
 		}
+		for filter, h := range r.Absolute {
+			tok := c.Subscribe(filter, 1, func(_ mqtt.Client, m mqtt.Message) {
+				go h(ctx, cc, m.Topic(), m.Payload())
+			})
+			if tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
+				r.Log.Error("mqtt subscribe failed", "topic", filter, "err", tok.Error())
+			}
+		}
 		for sub, h := range r.Requests {
 			tok := c.Subscribe("jarvis/nodes/"+r.Creds.NodeID+"/"+sub, 1, func(c mqtt.Client, m mqtt.Message) {
 				go func() {
@@ -338,6 +353,9 @@ func (r *Runner) beat() Beat {
 	}
 	if r.Capabilities != nil {
 		b.Capabilities = r.Capabilities()
+	}
+	if r.Protocols != nil {
+		b.Protocols = r.Protocols()
 	}
 	return b
 }

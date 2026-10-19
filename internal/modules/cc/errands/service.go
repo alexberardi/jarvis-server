@@ -11,8 +11,10 @@ package errands
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +53,53 @@ type Nodes interface {
 	// ReportCommands asks a node for its available commands (report_tools). ok=false when it
 	// didn't answer.
 	ReportCommands(ctx context.Context, nodeID string, timeout time.Duration) ([]*pyjson.Object, bool)
+	// RunToolImages runs one command like RunTool and also returns the images the output
+	// carried (image_attachments), for one model call only: the returned output keeps their
+	// labels, never their data. err is set when nothing answered (no bus, offline, timeout).
+	RunToolImages(ctx context.Context, nodeID, command string, args *pyjson.Object, userID *int64, timeout time.Duration) (*pyjson.Object, []ToolImage, error)
+}
+
+// ToolImage is one image a node tool attached to its output: decoded, size-checked bytes of
+// a sniffed type. It lives for the model call that asked for it and is never stored.
+type ToolImage struct {
+	MIME  string
+	Data  []byte
+	Label string
+}
+
+// stripImages replaces each image_attachments entry of a node output with its label, so a
+// step result can never store image data (the cc adapter already lifts them; this is the
+// guard for any other Nodes). Outputs without attachments come back unchanged.
+func stripImages(out *pyjson.Object) *pyjson.Object {
+	raw, ok := out.Get("image_attachments")
+	if !ok {
+		return out
+	}
+	list, _ := raw.([]any)
+	labels := []any{}
+	for i, e := range list {
+		label := fmt.Sprintf("image %d", i+1)
+		switch a := e.(type) {
+		case string:
+			label = a
+		case *pyjson.Object:
+			if l, ok := a.Get("label"); ok {
+				if s, ok := l.(string); ok && strings.TrimSpace(s) != "" {
+					label = strings.TrimSpace(s)
+				}
+			}
+		}
+		labels = append(labels, label)
+	}
+	clean := pyjson.NewObject()
+	for _, k := range out.Keys() {
+		v, _ := out.Get(k)
+		if k == "image_attachments" {
+			v = labels
+		}
+		clean.Set(k, v)
+	}
+	return clean
 }
 
 // Card is one inbox card (post_inbox_item_sync's arguments).

@@ -4,10 +4,12 @@ package tray
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -158,12 +160,14 @@ func TestStatusNotifierItemOnAPrivateBus(t *testing.T) {
 	voice := make(chan bool, 4)
 	quit := make(chan struct{}, 1)
 	opened := make(chan string, 1)
+	stopped := make(chan struct{}, 1)
 	tr, err := startOn(agent, Options{
 		State: State{Status: "Running", VoiceAvailable: true, OpenURL: "http://jarvis.example:7710/"},
 		Actions: Actions{
 			SetVoice: func(on bool) { voice <- on },
 			Open:     func(u string) { opened <- u },
 			Quit:     func() { quit <- struct{}{} },
+			StopTask: func() { stopped <- struct{}{} },
 		},
 	})
 	if err != nil {
@@ -246,6 +250,31 @@ func TestStatusNotifierItemOnAPrivateBus(t *testing.T) {
 		t.Fatal(err)
 	}
 	within(t, quit, "Quit")
+
+	// Jarvis takes control: the icon gets its badge (NewIcon), the menu its Stop item.
+	if err := host.AddMatchSignal(dbus.WithMatchObjectPath(itemPath), dbus.WithMatchInterface(itemIface), dbus.WithMatchMember("NewIcon")); err != nil {
+		t.Fatal(err)
+	}
+	tr.Update(func(s *State) { s.Activity = ActivityControlling })
+	for s := within(t, sig, "NewIcon"); s.Name != itemIface+".NewIcon"; s = within(t, sig, "NewIcon") {
+	}
+	v, err = item.GetProperty(itemIface + ".IconPixmap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dbus.Store([]any{v.Value()}, &pix); err != nil {
+		t.Fatal(err)
+	}
+	if want := pixmapsFor(true); len(pix) != len(want) || !bytes.Equal(pix[0].Data, want[0].Data) {
+		t.Fatal("the icon has no badge while Jarvis controls the computer")
+	}
+	if labels, _ := menuLabels(t, menu); !slices.Contains(labels, StopTaskLabel) || !slices.Contains(labels, "(Jarvis is controlling this computer)") {
+		t.Fatalf("menu while controlling %q", labels)
+	}
+	if err := menu.Call(menuIface+".Event", 0, IDStopTask, "clicked", dbus.MakeVariant(""), uint32(0)).Err; err != nil {
+		t.Fatal(err)
+	}
+	within(t, stopped, "StopTask")
 
 	// The bar restarts: the item registers again with the new watcher.
 	if _, err := host.ReleaseName(watcherName); err != nil {
