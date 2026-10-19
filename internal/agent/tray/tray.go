@@ -43,6 +43,9 @@ type State struct {
 	// checkmark: Jarvis may use this computer only while it is on (COMPUTER-CONTROL.md C11).
 	ComputerAvailable bool
 	Computer          bool
+	// Record shows "Watch me" while computer control is on and nothing is going on, and "Stop
+	// recording" while recording (a computer that can record).
+	Record bool
 	// OpenURL, when set, shows "Open Jarvis Automation" (the server's web UI).
 	OpenURL string
 	// Setup shows "Set up / Settings…" (the agent's own setup page).
@@ -96,6 +99,8 @@ type Actions struct {
 	StopTask func()
 	// SetComputer turns computer control on or off.
 	SetComputer func(on bool)
+	// Record starts a recording (start) or stops the one going on (State.Record).
+	Record func(start bool)
 }
 
 // The menu items' ids (D-Bus menu ids, NSMenuItem tags, Win32 command ids). 0 is the root.
@@ -112,6 +117,7 @@ const (
 	IDActivity
 	IDStopTask
 	IDComputer
+	IDRecord
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
@@ -123,6 +129,8 @@ const (
 	QuitLabel     = "Quit " + appid.DisplayName
 	StopTaskLabel = "Stop Jarvis"
 	ComputerLabel = "Computer control"
+	RecordLabel   = "Watch me"
+	StopRecLabel  = "Stop recording"
 )
 
 // Item is one menu entry.
@@ -166,7 +174,11 @@ func Active(items []Item) bool {
 func Items(s State) []Item {
 	items := []Item{{ID: IDHeader, Label: Header(s)}}
 	if l := ActivityLine(s.Activity); l != "" {
-		items = append(items, Item{ID: IDActivity, Label: l}, Item{ID: IDStopTask, Label: StopTaskLabel, Enabled: true})
+		items = append(items, Item{ID: IDActivity, Label: l})
+		if s.Record && s.Activity == ActivityRecording {
+			items = append(items, Item{ID: IDRecord, Label: StopRecLabel, Enabled: true})
+		}
+		items = append(items, Item{ID: IDStopTask, Label: StopTaskLabel, Enabled: true})
 	}
 	if s.Update != "" {
 		items = append(items, Item{ID: IDUpdate, Label: s.Update})
@@ -177,6 +189,9 @@ func Items(s State) []Item {
 	}
 	if s.ComputerAvailable {
 		items = append(items, Item{ID: IDComputer, Label: ComputerLabel, Enabled: true, Toggle: true, Checked: s.Computer})
+	}
+	if s.Record && s.ComputerAvailable && s.Computer && s.Activity == "" {
+		items = append(items, Item{ID: IDRecord, Label: RecordLabel, Enabled: true})
 	}
 	if s.OpenURL != "" {
 		items = append(items, Item{ID: IDOpen, Label: OpenLabel, Enabled: true})
@@ -280,6 +295,17 @@ func (t *Tray) clicked(id int32) {
 			if s.ComputerAvailable && t.act.SetComputer != nil {
 				t.log.Info("tray: Computer control chosen", "on", !s.Computer)
 				t.act.SetComputer(!s.Computer)
+			}
+		case IDRecord:
+			if !s.Record || t.act.Record == nil {
+				break
+			}
+			if s.Activity == ActivityRecording {
+				t.log.Info("tray: Stop recording chosen")
+				t.act.Record(false)
+			} else if s.Activity == "" && s.ComputerAvailable && s.Computer {
+				t.log.Info("tray: Watch me chosen")
+				t.act.Record(true)
 			}
 		case IDOpen:
 			if s.OpenURL != "" && t.act.Open != nil {

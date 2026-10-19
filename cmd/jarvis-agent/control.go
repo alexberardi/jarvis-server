@@ -93,9 +93,10 @@ func appEvents(pill *runningPill, log *slog.Logger) island.AppEvents {
 // serveControl answers the control socket until ctx ends: show-running flashes the island's
 // pill (when there is an island), quit stops the agent, voice-on/off is the status icon's
 // toggle (voice is nil until the switch exists), computer-stop and computer-status stop and
-// report what Jarvis is doing with the computer. It returns a func that waits for it.
+// report what Jarvis is doing with the computer, computer-record-start|stop record (recorder
+// is nil, or answers nil, until the recorder exists). It returns a func that waits for it.
 func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch,
-	health func() error, activity *computer.Activity, computerSw *computer.Switch) func() {
+	health func() error, activity *computer.Activity, computerSw *computer.Switch, recorder func() *computer.Recorder) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -124,6 +125,15 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 					return "on", nil
 				}
 				return "off", nil
+			case control.ComputerRecordStart, control.ComputerRecordStop:
+				var rec *computer.Recorder
+				if recorder != nil {
+					rec = recorder()
+				}
+				if rec == nil {
+					return "", errors.New("recording isn't available on this device")
+				}
+				return recordFromHere(ctx, rec, cmd == control.ComputerRecordStart, log)
 			case control.ShowRunning:
 				// No island (--no-overlay, no display): nothing to show, but it is running.
 				pill.Show()

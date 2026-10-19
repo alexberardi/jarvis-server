@@ -46,10 +46,17 @@ const (
 	// "Computer control" does (COMPUTER-CONTROL.md C11). Off stops a task going on.
 	ComputerOn  = "computer-on"
 	ComputerOff = "computer-off"
+	// ComputerRecordStart and ComputerRecordStop start a recording of what the user does in
+	// the browser and stop it, sending the trace to jarvisd, as the status icon's "Watch me"
+	// and "Stop recording" do (`jarvis-agent computer record start|stop`). Start answers the
+	// recording's id; stop "<id> <events>".
+	ComputerRecordStart = "computer-record-start"
+	ComputerRecordStop  = "computer-record-stop"
 )
 
 // Commands is every command the agent accepts.
-var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff}
+var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff,
+	ComputerRecordStart, ComputerRecordStop}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second

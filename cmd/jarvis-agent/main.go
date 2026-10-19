@@ -160,7 +160,7 @@ func main() {
 	case "computer":
 		if len(os.Args) > 2 && os.Args[2] == "snapshot" {
 			err = computerSnapshotCmd(ctx, os.Args[3:])
-		} else if len(os.Args) > 2 && os.Args[2] == "record" {
+		} else if len(os.Args) > 3 && os.Args[2] == "record" && os.Args[3] != "start" && os.Args[3] != "stop" {
 			err = computerRecordCmd(ctx, os.Args[3:], os.Stdin, os.Stdout)
 		} else {
 			err = computerCmd(os.Args[2:], os.Stdout, controlDial)
@@ -596,6 +596,7 @@ func run(ctx context.Context, args []string) error {
 		computerSw.Persist = func(on bool) error { return saveComputer(*f.config, on) }
 	}
 	var swReady atomic.Pointer[voiceSwitch]
+	var recReady atomic.Pointer[computer.Recorder]
 	var runner atomic.Pointer[node.Runner]
 	if ctl != nil {
 		// Healthy (the self-update's check) once connected to jarvisd's broker.
@@ -605,7 +606,7 @@ func run(ctx context.Context, args []string) error {
 			}
 			return errors.New("not connected to jarvisd yet")
 		}
-		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity, computerSw)()
+		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity, computerSw, recReady.Load)()
 	}
 	// K2, command secrets and data live next to node.json; another node's are dropped here.
 	st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
@@ -626,6 +627,15 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	defer closeTools()
+	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
+	// is uploaded once connected to jarvisd (liveCC).
+	var liveCC atomic.Pointer[node.CC]
+	var recorder *computer.Recorder
+	if p.desktop {
+		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), computerSw, activity, tools, liveCC.Load, log)
+		tools = append(tools, &computer.RecordTools{R: recorder})
+		recReady.Store(recorder)
+	}
 	go learnServer(ctx, c.ConfigURL, tf.origins, log)
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
@@ -729,6 +739,16 @@ func run(ctx context.Context, args []string) error {
 	} else if *voiceOn {
 		log.Info("voice: not supported on " + runtime.GOOS + " yet")
 	}
+	if onConnected := r.OnConnected; p.desktop {
+		r.OnConnected = func(ctx context.Context, cc *node.CC) {
+			liveCC.Store(cc)
+			if onConnected != nil {
+				onConnected(ctx, cc)
+			} else {
+				<-ctx.Done()
+			}
+		}
+	}
 	connectHost(r, tf.host)
 	var setup func()
 	if p.desktop {
@@ -738,7 +758,7 @@ func run(ctx context.Context, args []string) error {
 	// agent.json and apps.json, and open the setup page so someone can sign in again.
 	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
-		activity: activity, computer: computerSw}
+		activity: activity, computer: computerSw, recorder: recorder}
 	sw.changed = ic.voiceChanged
 	if computerSw != nil {
 		computerSw.Watch(func(bool) { ic.refresh() })

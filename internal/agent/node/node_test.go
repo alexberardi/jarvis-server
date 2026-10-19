@@ -582,3 +582,27 @@ func TestVerifyApproval(t *testing.T) {
 		t.Fatalf("401: %v %v", ok, err)
 	}
 }
+
+func TestUploadRecording(t *testing.T) {
+	var path, key string
+	var body map[string]any
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, key = r.Method+" "+r.URL.EscapedPath(), r.Header.Get("X-API-Key")
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(status)
+		fmt.Fprint(w, `{"id":"rec_1"}`)
+	}))
+	defer srv.Close()
+	cc := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k"})
+	if err := cc.UploadRecording(context.Background(), map[string]any{"recording_id": "rec_1", "mode": "browser", "trace": []any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if path != "POST /api/v0/computer/recordings" || key != "n1:k" || body["recording_id"] != "rec_1" {
+		t.Fatalf("%s with key %q, body %v", path, key, body)
+	}
+	status = http.StatusForbidden
+	if err := cc.UploadRecording(context.Background(), map[string]any{}); err == nil {
+		t.Fatal("403 is an error")
+	}
+}

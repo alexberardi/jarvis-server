@@ -38,6 +38,8 @@ type trayIcon struct {
 	activity *computer.Activity
 	// computer is computer control's switch (the menu's "Computer control"); nil hides it.
 	computer *computer.Switch
+	// recorder records what the user does (the menu's "Watch me"); nil hides it.
+	recorder *computer.Recorder
 
 	t      atomic.Pointer[tray.Tray]
 	update atomic.Pointer[string] // the self-update's status line
@@ -60,7 +62,7 @@ func (ic *trayIcon) show(ctx context.Context) func() {
 	}
 	t, err := tray.Start(tray.Options{Log: ic.log, State: ic.state(), MainLoop: ic.mainLoop,
 		Actions: tray.Actions{SetVoice: ic.sw.Set, Open: ic.open, Setup: ic.setup, Quit: ic.quitFromMenu, SignOut: ic.signOutFromMenu,
-			StopTask: ic.stopTaskFromMenu, SetComputer: ic.setComputerFromMenu}})
+			StopTask: ic.stopTaskFromMenu, SetComputer: ic.setComputerFromMenu, Record: ic.recordFromMenu}})
 	if err != nil {
 		ic.log.Info("tray: no status icon", "reason", err)
 		return func() {}
@@ -93,6 +95,7 @@ func (ic *trayIcon) state() tray.State {
 	k, _ := ic.activity.Status()
 	s.Activity = string(k)
 	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
+	s.Record = ic.recorder != nil
 	return s
 }
 
@@ -110,6 +113,14 @@ func (ic *trayIcon) activityChanged(computer.Kind, string) { ic.refresh() }
 func (ic *trayIcon) stopTaskFromMenu() {
 	ic.log.Info("Stop Jarvis chosen in the menu", "activity", ic.activity.String())
 	ic.activity.Stop()
+}
+
+// recordFromMenu is "Watch me" (start) and "Stop recording": a stopped trace goes to jarvisd.
+func (ic *trayIcon) recordFromMenu(start bool) {
+	ic.log.Info("recording chosen in the menu", "start", start, "activity", ic.activity.String())
+	if ic.recorder != nil {
+		_, _ = recordFromHere(context.Background(), ic.recorder, start, ic.log)
+	}
 }
 
 // voiceChanged is the voice switch telling the menu.

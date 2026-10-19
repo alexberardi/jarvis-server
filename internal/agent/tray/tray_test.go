@@ -55,6 +55,16 @@ func TestItems(t *testing.T) {
 			`(Jarvis Automation Agent — Running) | -- | [x] Listen for "Hey Jarvis" | [ ] Computer control | Open Jarvis Automation | -- | Quit Jarvis Automation Agent`},
 		{State{Status: "Running", ComputerAvailable: true, Computer: true},
 			`(Jarvis Automation Agent — Running) | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
+		// Recording: "Watch me" while computer control is on and nothing is going on, "Stop
+		// recording" while recording.
+		{State{Status: "Running", ComputerAvailable: true, Computer: true, Record: true},
+			`(Jarvis Automation Agent — Running) | -- | [x] Computer control | Watch me | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", ComputerAvailable: true, Record: true},
+			`(Jarvis Automation Agent — Running) | -- | [ ] Computer control | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", ComputerAvailable: true, Computer: true, Record: true, Activity: ActivityControlling},
+			`(Jarvis Automation Agent — Running) | (Jarvis is controlling this computer) | Stop Jarvis | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", ComputerAvailable: true, Computer: true, Record: true, Activity: ActivityRecording},
+			`(Jarvis Automation Agent — Running) | (Recording) | Stop recording | Stop Jarvis | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
 		{State{Status: "Running"}, `(Jarvis Automation Agent — Running) | -- | Quit Jarvis Automation Agent`},
 	} {
@@ -97,6 +107,13 @@ func TestClicksRunActions(t *testing.T) {
 		Quit:     func() { rec("quit") },
 		SignOut:  func() { rec("sign out") },
 		StopTask: func() { rec("stop task") },
+		Record: func(start bool) {
+			if start {
+				rec("record start")
+			} else {
+				rec("record stop")
+			}
+		},
 		SetComputer: func(on bool) {
 			if on {
 				rec("computer on")
@@ -143,14 +160,23 @@ func TestClicksRunActions(t *testing.T) {
 	tr.clicked(IDStopTask)
 	tr.wait()
 	tr.Update(func(s *State) { s.Activity = "" })
+	tr.clicked(IDRecord) // not shown: nothing
+	tr.wait()
+	tr.Update(func(s *State) { s.Record, s.ComputerAvailable, s.Computer = true, true, true })
+	tr.clicked(IDRecord) // Watch me
+	tr.wait()
+	tr.Update(func(s *State) { s.Activity = ActivityRecording })
+	tr.clicked(IDRecord) // Stop recording
+	tr.wait()
+	tr.Update(func(s *State) { s.Activity, s.Record = "", false })
 	tr.clicked(IDHeader) // the header does nothing
 	tr.clicked(IDActivity)
 	tr.clicked(IDQuit)
 	tr.wait()
-	if strings.Join(got, ", ") != "voice on, voice off, computer on, computer off, open http://jarvis.example/, setup, sign out, stop task, quit" {
+	if strings.Join(got, ", ") != "voice on, voice off, computer on, computer off, open http://jarvis.example/, setup, sign out, stop task, record start, record stop, quit" {
 		t.Fatalf("actions %q", got)
 	}
-	if len(be.shown) != 9 || !strings.Contains(be.shown[7], "Stop Jarvis") || strings.Contains(be.shown[8], "Stop Jarvis") || !strings.Contains(be.shown[1], "[x] Listen") ||
+	if len(be.shown) != 12 || !strings.Contains(be.shown[7], "Stop Jarvis") || strings.Contains(be.shown[8], "Stop Jarvis") || !strings.Contains(be.shown[1], "[x] Listen") ||
 		!strings.Contains(be.shown[2], "[ ] Computer control") || !strings.Contains(be.shown[3], "[x] Computer control") || !strings.Contains(be.shown[5], "Set up / Settings…") ||
 		!strings.Contains(be.shown[6], "Sign out of Jarvis Automation") {
 		t.Fatalf("shown %q", be.shown)
@@ -159,7 +185,7 @@ func TestClicksRunActions(t *testing.T) {
 	tr.Close()
 	tr.clicked(IDQuit) // after Close: ignored
 	tr.wait()
-	if !be.closed || len(got) != 9 {
+	if !be.closed || len(got) != 11 {
 		t.Fatalf("closed %v, actions %q", be.closed, got)
 	}
 }

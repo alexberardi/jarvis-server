@@ -134,6 +134,10 @@ password the model can see.
 1. **Record.** "Jarvis, watch me", a hotkey or the tray. The indicator shows recording. The user
    does the task once, ideally narrating ("now I'm downloading last month's statement"); the
    narration is transcribed and is the best signal of *why* each step happens.
+   Built (piece 29): `start_recording` / `stop_recording` ("Jarvis, watch me", "I'm done"), the
+   menu's "Watch me" / "Stop recording" and `jarvis-agent computer record start|stop`; browser
+   only for now, 30 minutes at most; a recording stopped on the computer is uploaded to
+   `POST /api/v0/computer/recordings` ([decision](../decisions/2026-10-19-agent-recording.md)).
 2. **Capture structure, not just pixels.**
    - Browser (extension): each element acted on (role, accessible name, a stable selector),
      values typed (password and sensitive fields masked, never stored), navigations, downloads

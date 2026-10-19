@@ -195,6 +195,15 @@ type Module struct {
 	// recordingDeleter asks an agent to delete its copy of a recording (recordings.go; tests
 	// replace it).
 	recordingDeleter func(ctx context.Context, nodeID, recordingID string) error
+	// recordingAgent runs computer_record_start / _stop on a node (recording_tools.go; nil =
+	// over the bus, tests replace it).
+	recordingAgent func(ctx context.Context, nodeID, tool string, args map[string]any, uid int64) map[string]any
+	// recordingTasks is what the user said they would show, by recording id, from
+	// start_recording until the recording is stored (its narration).
+	recordingTasks sync.Map
+	// learnRecording gets every recording stored from an agent: piece 30 queues learning a
+	// workflow from it here. nil: nothing yet.
+	learnRecording func(ctx context.Context, rec Recording) error
 
 	cmdData *schemaCache // command-data schema cache (doc 12, packages.go)
 	// pantryHTTP is the Forge share-code check's client (testinstall.go; legacy 10 s timeout).
@@ -357,6 +366,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST "+v0+"/commands/{request_id}/verify", m.node(m.handleVerifyCommand))
 	// Computer tasks: the agent verifies a single-use approval token before a risky action.
 	mux.HandleFunc("POST "+v0+"/computer/approvals/{token}/verify", m.node(m.handleVerifyApproval))
+	// A recording the user stopped on their computer (the agent's menu, CLI or 30 minutes).
+	mux.HandleFunc("POST "+v0+"/computer/recordings", m.node(m.handleUploadRecording))
 	for _, p := range []string{"/device-control-results/", "/device-state-results/", "/mobile/node-tool-reports/"} {
 		mux.HandleFunc("POST "+v0+p+"{request_id}", m.node(m.handleResult))
 	}
