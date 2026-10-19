@@ -108,7 +108,7 @@ func TestExtensionSurface(t *testing.T) {
 			perms = append(perms, p.(string))
 		}
 		sort.Strings(perms)
-		if got := strings.Join(perms, ","); got != "alarms,nativeMessaging,scripting,tabs" {
+		if got := strings.Join(perms, ","); got != "alarms,downloads,nativeMessaging,scripting,tabs" {
 			t.Errorf("%s permissions %s", target, got)
 		}
 		for _, k := range []string{"externally_connectable", "content_scripts", "web_accessible_resources", "optional_permissions", "content_security_policy"} {
@@ -206,6 +206,7 @@ func TestCommandParity(t *testing.T) {
 	sort.Strings(inJS)
 
 	h, path := startHub(t)
+	jpeg1x1 := jpegB64(t, 1, 1)
 	var mu sync.Mutex
 	sent := map[string]bool{}
 	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
@@ -213,7 +214,8 @@ func TestCommandParity(t *testing.T) {
 		sent[m.Cmd] = true
 		mu.Unlock()
 		return ok(map[string]any{"tabs": []any{}, "text": "x", "context": "", "gen": 1, "elements": []any{}, "ok": true,
-			"tab": map[string]any{"tab_id": 1}, "window_id": 2})
+			"tab": map[string]any{"tab_id": 1}, "window_id": 2,
+			"data": jpeg1x1, "width": 1, "height": 1, "device_pixel_ratio": 1, "path": "/d/x.csv", "bytes": 1, "filename": "x.csv"})
 	})
 	ts := NewTools(h)
 	args := map[string]map[string]any{
@@ -246,6 +248,12 @@ func TestCommandParity(t *testing.T) {
 	}
 	if _, err := ts.RecordStop(ctx, "rec_1"); err != nil {
 		t.Errorf("RecordStop: %v", err)
+	}
+	if _, _, err := ts.Screenshot(ctx, "firefox:2"); err != nil {
+		t.Errorf("Screenshot: %v", err)
+	}
+	if _, err := ts.Download(ctx, "firefox:1", "e1", ""); err != nil {
+		t.Errorf("Download: %v", err)
 	}
 	mu.Lock()
 	var fromGo []string

@@ -1,20 +1,26 @@
 package browser
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-// Computer control (blueprint P3 piece 6): the computer-task executor reads a page as a list of
-// interactive elements with refs and acts on one element by its ref, in a task window opened
-// behind the user's. These are not model tools: the executor (computer_observe, computer_act)
+// Computer control (blueprint P3 pieces 6 and 7): the computer-task executor reads a page as a
+// list of interactive elements with refs and acts on one element by its ref, in a task window
+// opened behind the user's; it screenshots that window when elements aren't enough, and saves
+// downloads (statements). These are not model tools: the executor (computer_observe, computer_act)
 // calls them. Snapshot names and values are untrusted page content; whoever renders them for a
 // model wraps them with Wrap.
 
@@ -146,6 +152,96 @@ func (t *Tools) OpenBackground(ctx context.Context, rawURL string) (tab, window 
 		return "", "", outdated(info, "open a task window")
 	}
 	return fmt.Sprintf("%s:%d", info.Key, int64(tid)), fmt.Sprintf("%s:%d", info.Key, int64(w)), nil
+}
+
+// Screenshot captures the visible page of window ("KEY:N", from OpenBackground): a JPEG of the
+// page viewport in physical pixels, and its geometry (origin 0,0 of the viewport, its CSS size,
+// the device pixel ratio as Scale). The extension refuses a minimised window (window_minimized).
+func (t *Tools) Screenshot(ctx context.Context, window string) (screen.Shot, computeruse.Geometry, error) {
+	key, id, err := tabArg(map[string]any{"tab_id": window})
+	if err != nil || id == nil {
+		return screen.Shot{}, computeruse.Geometry{}, fmt.Errorf("%w: window must be a task window such as \"firefox:9\"", errBadArgs)
+	}
+	b, err := t.Hub.Lookup(key)
+	if err != nil {
+		return screen.Shot{}, computeruse.Geometry{}, err
+	}
+	// Not t.call: the command names a window, not a tab.
+	res, info, err := t.Hub.Call(ctx, b.ID, "screenshot", map[string]any{"window_id": id})
+	var ce *CommandError
+	if errors.As(err, &ce) && ce.Code == "unknown_command" {
+		return screen.Shot{}, computeruse.Geometry{}, outdated(info, "screenshot a task window")
+	}
+	if err != nil {
+		return screen.Shot{}, computeruse.Geometry{}, err
+	}
+	var r struct {
+		Data   string  `json:"data"`
+		Width  int     `json:"width"`
+		Height int     `json:"height"`
+		DPR    float64 `json:"device_pixel_ratio"`
+	}
+	err = decode(res, &r)
+	if err == nil && (r.Width <= 0 || r.Height <= 0 || r.DPR <= 0) {
+		err = errors.New("no viewport size")
+	}
+	if err != nil {
+		return screen.Shot{}, computeruse.Geometry{}, fmt.Errorf("the extension's screenshot is malformed: %v", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(r.Data)
+	if err != nil {
+		return screen.Shot{}, computeruse.Geometry{}, fmt.Errorf("the extension's screenshot is malformed: %v", err)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return screen.Shot{}, computeruse.Geometry{}, fmt.Errorf("the extension's screenshot is malformed: %v", err)
+	}
+	g := computeruse.Geometry{LogicalW: r.Width, LogicalH: r.Height, Scale: r.DPR,
+		ImageW: img.Bounds().Dx(), ImageH: img.Bounds().Dy()}
+	return screen.Shot{Image: img, App: info.Browser, Geometry: g}, g, nil
+}
+
+// downloadTimeout outwaits the extension: 10 s for a press to start a download, 60 s for it to
+// complete.
+var downloadTimeout = 75 * time.Second
+
+// DownloadResult is a completed download: where the browser saved it.
+type DownloadResult struct {
+	Path     string `json:"path"`
+	Bytes    int64  `json:"bytes"`
+	MIME     string `json:"mime,omitempty"`
+	Filename string `json:"filename"`
+}
+
+// Download saves a file through the browser of tab: the one pressing ref (of the tab's last
+// snapshot) starts, or url's. Exactly one of ref and url. It returns once the file is complete.
+func (t *Tools) Download(ctx context.Context, tab, ref, rawURL string) (DownloadResult, error) {
+	extra := map[string]any{}
+	switch {
+	case (ref == "") == (rawURL == ""):
+		return DownloadResult{}, fmt.Errorf("%w: give either a ref or a url", errBadArgs)
+	case ref != "" && !refPattern.MatchString(ref):
+		return DownloadResult{}, fmt.Errorf("%w: ref must be a snapshot ref such as e12", errBadArgs)
+	case ref != "":
+		extra["ref"] = ref
+	default:
+		u, err := webURL(rawURL)
+		if err != nil {
+			return DownloadResult{}, err
+		}
+		extra["url"] = u
+	}
+	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
+	res, err := t.call(ctx, "download", map[string]any{"tab_id": tab}, extra)
+	if err != nil {
+		return DownloadResult{}, err
+	}
+	var r DownloadResult
+	if err := decode(res, &r); err != nil || r.Path == "" {
+		return DownloadResult{}, fmt.Errorf("the extension's download result is malformed: %v", cmpErr(err, "no path"))
+	}
+	return r, nil
 }
 
 func decode(m map[string]any, v any) error {
