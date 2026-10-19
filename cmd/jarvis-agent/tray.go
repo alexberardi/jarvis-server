@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -96,9 +95,7 @@ func (ic *trayIcon) state() tray.State {
 	}
 	k, _ := ic.activity.Status()
 	s.Activity = string(k)
-	if runtime.GOOS == "darwin" {
-		s.StopHotkey = island.StopHotkeyLabel
-	}
+	s.StopHotkey = island.StopHotkey()
 	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
 	s.Record = ic.recorder != nil
 	return s

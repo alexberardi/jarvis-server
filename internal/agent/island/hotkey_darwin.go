@@ -29,7 +29,7 @@ var (
 	hotkeyEv   atomic.Pointer[AppEvents]
 
 	getApplicationEventTarget func() uintptr
-	installEventHandler       func(target, handler uintptr, n uint32, list *eventTypeSpec, data uintptr, out *uintptr) int32
+	installEventHandler       func(target, handler uintptr, n uintptr, list *eventTypeSpec, data uintptr, out *uintptr) int32
 	registerEventHotKey       func(code, mods uint32, id uint64, target uintptr, opts uint32, out *uintptr) int32
 )
 

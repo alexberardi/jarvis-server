@@ -143,7 +143,9 @@ func TestOwnInputIgnored(t *testing.T) {
 	f.clock.Advance(100 * time.Millisecond)
 	f.g.poll(ctx)
 
-	// An action left in progress: its window has no end yet.
+	// An action left in progress: its window has no end yet (and the earlier ones' 250 ms are
+	// long over).
+	f.clock.Advance(300 * time.Millisecond)
 	f.in.mu.Lock()
 	f.in.start, f.in.end = f.clock.Now(), time.Time{}
 	f.in.mu.Unlock()
@@ -295,5 +297,69 @@ func TestRunPolls(t *testing.T) {
 	<-done
 	if !errors.Is(f.g.Check(), ErrPaused) {
 		t.Fatal("Run never paused on the user's input")
+	}
+}
+
+// hookMonitor runs hook once inside Since: between look's other reads.
+type hookMonitor struct {
+	*fakeMonitor
+	hook func()
+}
+
+func (h *hookMonitor) Since(ctx context.Context) (time.Time, error) {
+	if f := h.hook; f != nil {
+		h.hook = nil
+		f()
+	}
+	return h.fakeMonitor.Since(ctx)
+}
+
+// hookInput runs hook once inside Cursor, after the pointer is read.
+type hookInput struct {
+	*fakeInput
+	hook func()
+}
+
+func (h *hookInput) Cursor(ctx context.Context) (int, int, error) {
+	x, y, err := h.fakeInput.Cursor(ctx)
+	if f := h.hook; f != nil {
+		h.hook = nil
+		f()
+	}
+	return x, y, err
+}
+
+// TestInjectionStartingDuringPollIgnored: one of our actions starts (and posts its first event)
+// while a poll reads the monitor; that event is ours, not the user's.
+func TestInjectionStartingDuringPollIgnored(t *testing.T) {
+	ctx := context.Background()
+	f := newGuard(t)
+	f.clock.Advance(time.Second)
+	f.g.Monitor = &hookMonitor{fakeMonitor: f.mon, hook: func() {
+		f.in.mu.Lock()
+		f.in.start, f.in.end = f.clock.Now(), time.Time{}
+		f.in.mu.Unlock()
+		f.clock.Advance(2 * time.Millisecond)
+		f.mon.set(f.clock.Now())
+	}}
+	f.g.poll(ctx)
+	if err := f.g.Check(); err != nil {
+		t.Fatalf("our own injection paused the task: %v", err)
+	}
+}
+
+// TestActionDuringCursorReadIgnored: a whole guarded action runs between a poll's cursor read
+// and its check; the pointer it read is from before our move, not the user's drift.
+func TestActionDuringCursorReadIgnored(t *testing.T) {
+	ctx := context.Background()
+	f := newGuard(t)
+	hi := &hookInput{fakeInput: f.in}
+	f.g.Input = hi
+	f.g.Begin(ctx)
+	f.clock.Advance(time.Second)
+	hi.hook = func() { f.g.Guarded().Move(ctx, 300, 200) }
+	f.g.poll(ctx)
+	if err := f.g.Check(); err != nil {
+		t.Fatalf("our own move paused the task: %v", err)
 	}
 }

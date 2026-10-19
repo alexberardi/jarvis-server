@@ -1,5 +1,7 @@
 package island
 
+import "sync/atomic"
+
 // AppEvents are what the OS asks of the running app while the island's event loop runs. On
 // macOS, once `run` has called NSApplication's finishLaunching, LaunchServices treats the agent
 // as "Jarvis Automation Agent.app" running: opening the app again (Finder, the Dock, Spotlight)
@@ -18,6 +20,18 @@ type AppEvents struct {
 
 // StopHotkeyLabel is the stop hotkey as the tray's tooltip names it.
 const StopHotkeyLabel = "⌃⌥⎋"
+
+// stopHotkeyOn is set once the stop hotkey is registered.
+var stopHotkeyOn atomic.Bool
+
+// StopHotkey is StopHotkeyLabel once the stop hotkey works (registered with the OS), "" before
+// that or when it couldn't be (another app holds it, or not macOS).
+func StopHotkey() string {
+	if stopHotkeyOn.Load() {
+		return StopHotkeyLabel
+	}
+	return ""
+}
 
 // The stop hotkey as Carbon's RegisterEventHotKey takes it.
 const (

@@ -51,3 +51,16 @@ func TestStopHotkey(t *testing.T) {
 	<-stopped
 	AppEvents{}.hotkey()
 }
+
+// TestStopHotkeyOnlyOnceRegistered: the tooltip names the stop hotkey only once it works.
+func TestStopHotkeyOnlyOnceRegistered(t *testing.T) {
+	defer stopHotkeyOn.Store(stopHotkeyOn.Load())
+	stopHotkeyOn.Store(false)
+	if got := StopHotkey(); got != "" {
+		t.Fatalf("unregistered stop hotkey is %q, want none", got)
+	}
+	stopHotkeyOn.Store(true)
+	if got := StopHotkey(); got != StopHotkeyLabel {
+		t.Fatalf("registered stop hotkey is %q, want %q", got, StopHotkeyLabel)
+	}
+}

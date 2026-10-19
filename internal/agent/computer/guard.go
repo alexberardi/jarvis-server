@@ -15,9 +15,7 @@ var ErrPaused = errors.New("paused: the user is using the computer")
 
 // InputMonitor tells when the user last used the mouse or keyboard: the last HID activity
 // (input.NativeMonitor).
-type InputMonitor interface {
-	Since(ctx context.Context) (time.Time, error)
-}
+type InputMonitor = input.Monitor
 
 const (
 	guardEvery = 100 * time.Millisecond
@@ -126,12 +124,14 @@ func (g *Guard) poll(ctx context.Context) {
 
 // look reports whether the user's hand is on the mouse or keyboard; then the guard is paused.
 func (g *Guard) look(ctx context.Context) (paused bool) {
-	start, end := g.Input.Injecting()
+	// The monitor first: an injection sets its start before it posts, so the window of any
+	// event of ours the monitor saw is in the Injecting read after it.
 	var last time.Time
 	var monErr error
 	if g.Monitor != nil {
 		last, monErr = g.Monitor.Since(ctx)
 	}
+	start, end := g.Input.Injecting()
 	injecting := !start.IsZero() && end.IsZero()
 	var x, y int
 	var curErr error
@@ -151,7 +151,9 @@ func (g *Guard) look(ctx context.Context) (paused bool) {
 		g.paused = true
 		return true
 	}
-	if injecting || curErr != nil {
+	// A guarded action that ran since the reads above has moved the baseline past the pointer
+	// they read.
+	if injecting || curErr != nil || g.lastEnd.After(end) {
 		return false
 	}
 	if end.After(g.lastEnd) || !g.known {
