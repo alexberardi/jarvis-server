@@ -301,6 +301,17 @@ func (c *CC) PostAmbientResult(ctx context.Context, rid string, payload map[stri
 	return c.do(ctx, http.MethodPost, "/api/v0/nodes/"+url.PathEscape(c.Creds.NodeID)+"/ambient-noise-measurements/"+url.PathEscape(rid)+"/result", payload, nil)
 }
 
+// PostBluetoothScanResult answers a bluetooth-scan request: {"devices": [...]} or, failed,
+// {"devices": [], "error": "..."}.
+func (c *CC) PostBluetoothScanResult(ctx context.Context, rid string, body map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/nodes/"+url.PathEscape(c.Creds.NodeID)+"/bluetooth-scan/"+url.PathEscape(rid)+"/results", body, nil)
+}
+
+// PostBluetoothPairResult answers a bluetooth-pair request: {"success", "device_name"|"error"}.
+func (c *CC) PostBluetoothPairResult(ctx context.Context, rid string, body map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/nodes/"+url.PathEscape(c.Creds.NodeID)+"/bluetooth/pair/"+url.PathEscape(rid)+"/results", body, nil)
+}
+
 // Revoked reports whether err is jarvisd refusing this node's key: 401 (an unknown, deactivated
 // or deleted node) or 403. Not a network error and not a 5xx: those are retried, never a reason
 // to drop credentials.

@@ -151,6 +151,9 @@ internal/agent/
   hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's
                       patterns (leds.go, golden-tested), the GPIO17 button (button.go), spidev +
                       gpiocdev (device_linux.go); voice states reach it through voice.Indicator
+  bluetooth/          a Pi node's bluetooth-* topics (go-pi-node.md §3.15): scan, pair, disconnect,
+                      discoverable, release, auto-connect over BlueZ D-Bus (bluez_linux.go, its own
+                      Agent1), Pulse routing through pactl, the reconnect loop, bluetooth.json
   pinode/             a Pi node's extra command verbs (go-pi-node.md §3.14): update_node_config
                       (trust-anchor filter, live apply, agent.json), preview_led_pattern,
                       measure_ambient_noise (through voice.Live; stats golden-tested vs numpy)
@@ -406,7 +409,7 @@ the agent (+~4.5 MB), the price of one verification path.
 Beyond jarvisd's own: `github.com/eclipse/paho.mqtt.golang` (jarvisd embeds a broker; the agent is a client), `golang.org/x/sys` (Windows syscalls),
 `golang.org/x/term` (password prompt), `github.com/jezek/xgb` (X11 protocol for XTEST typing and
 EWMH window control; pure Go, no dependencies, Linux builds only, +0.5 MB),
-`github.com/godbus/dbus/v5` (D-Bus for the RemoteDesktop portal; pure Go, needs only x/sys, Linux
+`github.com/godbus/dbus/v5` (D-Bus for the RemoteDesktop portal, the status icon and a Pi's BlueZ; pure Go, needs only x/sys, Linux
 builds only), `github.com/warthog618/go-gpiocdev` (the HAT button, pure
 Go), `github.com/ebitengine/purego` (macOS AX, AudioToolbox,
 libasound and onnxruntime via dlopen). `CGO_ENABLED=0` builds everywhere: Windows volume is

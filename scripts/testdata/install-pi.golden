@@ -8,6 +8,8 @@ d 755 etc/NetworkManager
 d 755 etc/NetworkManager/dnsmasq-shared.d
 f 644 etc/NetworkManager/dnsmasq-shared.d/jarvis-captive.conf
 f 644 etc/asound.conf
+d 755 etc/bluetooth
+f 644 etc/bluetooth/main.conf
 f 644 etc/fstab
 d 755 etc/jarvis-node
 d 755 etc/modprobe.d
@@ -63,10 +65,12 @@ d 755 var/log
 d 755 var/log/journal
 ## commands
 apt-get update -q
-env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio iw hostapd dnsmasq device-tree-compiler alsa-utils
+env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils
 chown pi: /opt/jarvis-agent
 dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 udevadm control --reload
+rfkill unblock bluetooth
+systemctl restart bluetooth
 amixer -q -c seeed2micvoicec sset PCM 100% unmute
 amixer -q -c seeed2micvoicec sset Line 2 unmute
 amixer -q -c seeed2micvoicec sset Line DAC 115 unmute
@@ -154,6 +158,13 @@ pcm.!default {
 ctl.!default {
     type pulse
 }
+## etc/bluetooth/main.conf
+[General]
+#Name = BlueZ
+Class = 0x240404
+
+[Policy]
+#AutoEnable=true
 ## etc/fstab
 proc /proc proc defaults 0 0
 /swapfile none swap sw 0 0

@@ -28,6 +28,20 @@
       "reply": "Sorry, I could not save that."
     },
     {
+      "match": "(?i)tell me when my e2e dentist appointment comes up",
+      "tool_calls": [{"name": "create_watch", "arguments": {"title": "E2E dentist appointment", "source": "signal",
+        "signal_kind": "appt.upcoming", "field": "title", "op": "contains", "value": "dentist"}}]
+    },
+    {
+      "after_tool": "create_watch",
+      "match": "\"status\":\\s*\"watching\"",
+      "reply": "I'll tell you when it comes up."
+    },
+    {
+      "after_tool": "create_watch",
+      "reply": "Sorry, I could not set up that watch."
+    },
+    {
       "match": "(?i)what is in this photo",
       "reply": "Scripted model: I got your photo."
     },

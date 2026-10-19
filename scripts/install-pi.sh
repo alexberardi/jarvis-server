@@ -126,11 +126,12 @@ preflight() {
 }
 
 # What this install needs from apt that Raspberry Pi OS may lack (N:install.sh:206-245):
-# PulseAudio (§8 Q2), iw, and hostapd/dnsmasq, the provisioning AP's fallback when the
-# NetworkManager AP fails (§8 Q7). The overlay compiler and the ALSA tools too.
+# PulseAudio (§8 Q2) with its Bluetooth modules, BlueZ and rfkill, iw, and hostapd/dnsmasq,
+# the provisioning AP's fallback when the NetworkManager AP fails (§8 Q7). The overlay
+# compiler and the ALSA tools too.
 install_packages() {
   missing=""
-  for pkg in pulseaudio iw hostapd dnsmasq device-tree-compiler alsa-utils; do
+  for pkg in pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils; do
     if [ -n "$ROOT" ] || ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
       missing="$missing $pkg"
     fi
@@ -385,6 +386,29 @@ EOF
 unload-module module-stream-restore
 load-module module-stream-restore restore_device=false restore_muted=false restore_volume=false
 EOF
+}
+
+# Bluetooth (go-pi-node.md §7 item 5.8; N:install.sh:283-347): the radio unblocked (Raspberry
+# Pi OS ships it soft-blocked, so bluetoothd can't go discoverable and a phone never sees the
+# node), and an audio Class of Device (0x240404), without which iOS lists the node as a
+# computer and won't send it A2DP. The node's user is in group bluetooth (setup_user), which
+# bluetoothd's D-Bus policy lets in.
+configure_bluetooth() {
+  restart=""
+  if [ -n "$ROOT" ] || rfkill list bluetooth 2>/dev/null | grep -q "Soft blocked: yes"; then
+    run rfkill unblock bluetooth
+    restart=1
+  fi
+  conf=$(P /etc/bluetooth/main.conf)
+  if [ -f "$conf" ] && ! grep -q '^Class = 0x240404$' "$conf"; then
+    if grep -q '^#*Class = ' "$conf"; then
+      sed -i 's/^#*Class = .*/Class = 0x240404/' "$conf"
+    else
+      sed -i '/^\[General\]/a Class = 0x240404' "$conf"
+    fi
+    restart=1
+  fi
+  [ -z "$restart" ] || run systemctl restart bluetooth
 }
 
 card_present() { aplay -l 2>/dev/null | grep -qi "$CARD"; }
@@ -1019,6 +1043,7 @@ configure_boot_config
 configure_alsa
 switch_to_pulseaudio
 configure_pulseaudio
+configure_bluetooth
 mixer_baseline
 setup_user
 install_sudoers

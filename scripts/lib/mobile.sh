@@ -14,6 +14,7 @@ SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}
 export ANDROID_HOME=$SDK ANDROID_SDK_ROOT=$SDK
 export ANDROID_AVD_HOME=$CACHE/avd # never the user's ~/.android/avd
 AVD=jarvis-harness
+IMAGE_FLAVOR=google_apis # use_play_store: google_apis_playstore, for real FCM delivery
 PKG=com.jarvis.nodemobile
 # The config URL baked into the APK. The emulator's localhost:7700 is adb-reversed to the
 # sandbox's config port, so one APK serves every sandbox.
@@ -27,13 +28,30 @@ AVDMANAGER=$SDK/cmdline-tools/latest/bin/avdmanager
 
 # --- the AVD: the user's jarvis-pixel8 system image, a pixel_8 profile ------------------------
 system_image() {
-  local cfg=$HOME/.android/avd/jarvis-pixel8.avd/config.ini dir
+  local cfg=$HOME/.android/avd/jarvis-pixel8.avd/config.ini dir=
+  if [ "$IMAGE_FLAVOR" = google_apis_playstore ]; then
+    dir=$(play_image) || die "no Google Play x86_64 system image under $SDK/system-images (sdkmanager 'system-images;android-36;google_apis_playstore;x86_64')"
+    echo "${dir//\//;}"
+    return
+  fi
   dir=$(sed -n 's/^image.sysdir.1=//p' "$cfg" 2>/dev/null || true)
   [ -n "$dir" ] || dir=$(cd "$SDK" && ls -d system-images/android-*/google_apis/x86_64/ 2>/dev/null | sort -V | tail -1)
   [ -n "$dir" ] && [ -d "$SDK/$dir" ] || die "no x86_64 system image under $SDK/system-images (sdkmanager 'system-images;android-36;google_apis;x86_64')"
   dir=${dir%/}
   echo "${dir//\//;}"
 }
+
+# play_image prints the newest Google Play x86_64 system image (relative to $SDK), if any.
+play_image() {
+  local dir
+  dir=$(cd "$SDK" 2>/dev/null && ls -d system-images/android-*/google_apis_playstore/x86_64/ 2>/dev/null | sort -V | tail -1)
+  [ -n "$dir" ] && [ -d "$SDK/$dir" ] && echo "${dir%/}"
+}
+
+# use_play_store switches to the real push lane's own AVD (jarvis-harness-play), on a Google
+# Play image: FCM needs Play services, which google_apis images lack. The default lane's AVD
+# is untouched.
+use_play_store() { AVD=jarvis-harness-play IMAGE_FLAVOR=google_apis_playstore; }
 
 ensure_avd() {
   [ -x "$EMULATOR" ] || die "no emulator at $EMULATOR (sdkmanager emulator)"
@@ -64,8 +82,12 @@ CFG
 # --- the APK: a release build (JS bundled in, no Metro) from a git archive of the mobile repo --
 apk_path() { echo "$CACHE/apk/jarvis-mobile-$1-r$RECIPE.apk"; }
 
-build_apk() { # REF REBUILD FETCH → prints the APK path
-  local ref=$1 rebuild=$2 fetch=$3 sha apk src lockhash lockfd
+# build_apk REF REBUILD FETCH [PUSH_CONFIG] → prints the APK path. PUSH_CONFIG is a
+# google-services.json (the real push lane): it goes into the build as ./google-services.json
+# and $GOOGLE_SERVICES_JSON, for the app config's android.googleServicesFile, and the APK is
+# cached apart (by the file's hash) from the default one.
+build_apk() {
+  local ref=$1 rebuild=$2 fetch=$3 push=${4:-} sha apk src lockhash lockfd
   # Any git repo: a checkout, a worktree (.git is a file) or a bare repo (no .git at all).
   git -C "$MOBILE_REPO" rev-parse --git-dir >/dev/null 2>&1 ||
     die "no jarvis-node-mobile git repo at $MOBILE_REPO (set JARVIS_MOBILE_REPO)"
@@ -74,6 +96,10 @@ build_apk() { # REF REBUILD FETCH → prints the APK path
   sha=$(git -C "$MOBILE_REPO" rev-parse --verify -q "$ref^{commit}") || die "--ref $ref: no such commit in $MOBILE_REPO"
   sha=${sha:0:12}
   apk=$(apk_path "$sha")
+  if [ -n "$push" ]; then
+    [ -r "$push" ] || die "push config $push is not readable"
+    apk=$(apk_path "$sha-push-$(sha256sum <"$push" | cut -c1-8)")
+  fi
   if [ "$rebuild" = 0 ] && [ -f "$apk" ]; then say "APK (cached): $apk"; echo "$apk"; return; fi
 
   command -v mise >/dev/null || die "mise not found (it provides node 22 and java 17)"
@@ -104,6 +130,10 @@ build_apk() { # REF REBUILD FETCH → prints the APK path
       mise exec node@22 -- npm ci --no-audit --no-fund
       echo "$lockhash" >.lockhash
     fi
+    if [ -n "$push" ]; then
+      cp "$push" google-services.json
+      export GOOGLE_SERVICES_JSON=$src/google-services.json
+    fi
     export EXPO_PUBLIC_DEV_MODE=true EXPO_PUBLIC_MANUAL_CONFIG_URL=$BAKED_CONFIG
     export NODE_ENV=production EXPO_NO_TELEMETRY=1 CI=1
     mise exec node@22 -- npx expo prebuild --platform android --clean --no-install
@@ -113,6 +143,9 @@ build_apk() { # REF REBUILD FETCH → prints the APK path
     mise exec node@22 java@temurin-17 -- ./gradlew --no-daemon -q assembleRelease \
       -PreactNativeArchitectures=x86_64 -Dorg.gradle.jvmargs=-Xmx3g
   ) >"$CACHE/build.log" 2>&1 || { tail -40 "$CACHE/build.log" >&2; die "APK build failed; see $CACHE/build.log"; }
+  # Expo's prebuild copies the file into the native project only when the app config names it.
+  [ -z "$push" ] || [ -f "$src/android/app/google-services.json" ] ||
+    die "the APK has no push config: jarvis-node-mobile's app config sets no android.googleServicesFile (./google-services.json or \$GOOGLE_SERVICES_JSON)"
   # Atomic, so a run checking the cache without the lock never installs half a file.
   cp "$src/android/app/build/outputs/apk/release/app-release.apk" "$apk.tmp.$$"
   mv -f "$apk.tmp.$$" "$apk"

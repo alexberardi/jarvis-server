@@ -527,3 +527,24 @@ func TestPostAmbientResultHitsTheNodesSink(t *testing.T) {
 		t.Fatalf("body = %v", body)
 	}
 }
+
+func TestPostBluetoothResultsHitTheNodesRequests(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path+" "+r.Header.Get("X-API-Key"))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+	cc := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k"})
+	ctx := context.Background()
+	if err := cc.PostBluetoothScanResult(ctx, "r1", map[string]any{"devices": []any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cc.PostBluetoothPairResult(ctx, "r2", map[string]any{"success": true, "device_name": "JBL"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"POST /api/v0/nodes/n1/bluetooth-scan/r1/results n1:k", "POST /api/v0/nodes/n1/bluetooth/pair/r2/results n1:k"}
+	if fmt.Sprint(paths) != fmt.Sprint(want) {
+		t.Fatalf("got %v", paths)
+	}
+}

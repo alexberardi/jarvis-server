@@ -1618,6 +1618,15 @@ or the scripts: version `v0.0.0-pr<N>`, no Apple signing, `SHA256SUMS` signed by
 the whole package → verify → install-agent chain runs without the project's keys; `publish` never
 runs for them.
 
+**`install-pi.sh`** (the Go Raspberry Pi voice node, [go-pi-node.md §6](../agent/go-pi-node.md);
+#162) ships the same way, stamped with the tag, but **inside** `SHA256SUMS`: it runs as root on the
+Pi, so someone who trusts the key can check the script before running it. One line:
+`curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/<tag>/install-pi.sh && sudo sh install-pi.sh`.
+It installs the linux-arm64 agent archive (onnxruntime embedded:
+[decision](../decisions/2026-10-18-pi-ort-embedded.md)). Job `install-pi` (`ubuntu-24.04-arm`,
+`scripts/install-pi-check.sh dist <tag> [valid|invalid]`) runs the stamped copy under `--root`
+against the run's own files, and `verify` requires it in the signed list.
+
 **Firewall.** With a Developer ID signature the application firewall's allow entry is keyed on a
 designated requirement that is the same for every release (identifier + team), so it survives
 upgrades; the §8.2 re-admit guard stays for ad-hoc builds. (Not exercised on a real upgrade yet:

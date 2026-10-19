@@ -146,6 +146,7 @@ one auth rate limit.
 | `account.spec.ts` | display name saved (server and page, survives reload); change password (form checks, old one refused, new one works) |
 | `chat.spec.ts` | scripted reply shown; a tool call's effect (`remember` saves a memory, checked through the API); device picker (the turn goes through the picked node, remembered across reload); a photo with a vision model (sent, shown, in the model's request) and no photo button without one |
 | `inbox.spec.ts` | list with unread marks and the sidebar badge; detail renders markdown and reads it (server and badge); delete from the detail; bulk mark read and delete |
+| `push.spec.ts` | the push each event sends, as the fake relay recorded it (title, body, `data.type`, `data.inbox_item_id`, priority, target tokens): a node's timer, reminder and alert inbox items (and the web inbox opens the item the push names); a node push (confirmation card); send_link (`open_url`); a household push reaches every phone in it and none elsewhere; a service's `notify` and `notify/batch`; no push for an inbox item that asked for none; a token the relay calls unregistered is deactivated; a signed-out token gets nothing |
 | `addons.spec.ts` | the page's sections; a paired desktop agent is listed; signing it out removes it on the server |
 | `household.spec.ts` | the switcher appears with two households; the inbox and the chat devices follow the pick, across a reload; no switcher with one |
 | `roles.spec.ts` | the role matrix from `routes.tsx`/`Sidebar.tsx`: superuser sees and opens every admin page, every old top-level path and `/admin` itself forward to their `/admin` page (query kept), an unknown path shows the 404 page in the shell and under `/admin`; admin, power user and member see Chat/Add-ons/Inbox only, get the notice on every admin URL, and the server answers the admin pages' calls with 403 |
@@ -177,6 +178,9 @@ one auth rate limit.
   [`../decisions/2026-10-17-e2e-admin-pages.md`](../decisions/2026-10-17-e2e-admin-pages.md).
 - A form sign-in that should succeed: fill it, then `pressSignIn(page)` (`helpers/login.ts`), which
   waits out the rate limit once.
+- Pushes: `registerDevice(u)` gives the user a fake phone, `pushTo(token, title)` waits for the
+  push the fake relay got (`helpers/push.ts`). Give each push a `unique()` title: the server
+  drops an identical one within 60 s.
 - Chat answers come from `e2e/llm/web.json` (`useScript` switches it); add a rule there for a
   new conversation, and match on the user's words.
 - Run one file against a kept sandbox while writing it:
@@ -200,11 +204,46 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
   Commit flow changes before running them; uncommitted edits are not picked up.
 - During the suite the scripted model answers from `e2e/llm/mobile.json`.
+- Pushes: the superuser has a fake device token (`PUSH_TOKEN`); a flow checks
+  `${FAKE_RELAY}/control/pushes?token=${PUSH_TOKEN}` from a `runScript` and can make a node
+  event happen through `${CC_URL}` with `${NODE_API_KEY}` for `${USER_ID}`
+  ([Push notifications](#push-notifications)).
 - Writing a flow: run it by hand against a kept sandbox and a kept emulator
   (`scripts/mobile-shot --sandbox <name> --keep --screens login`, then
   `~/.cache/jarvis-harness/maestro/2.11.0/maestro/bin/maestro --device emulator-<port> test
   -e EMAIL=… -e PASSWORD=… .maestro/my-flow.yaml`), then the whole suite with
   `scripts/e2e mobile --mobile-repo <checkout> --filter my-flow`.
+
+## Push notifications
+
+Two layers ([`../decisions/2026-10-18-e2e-push.md`](../decisions/2026-10-18-e2e-push.md)):
+
+- **Every run: a fake relay.** Every sandbox starts `tools/fakerelay` (port 7797 + offset) and
+  points `relay.url` at it (`scripts/sandbox up --relay fake`, the default). It speaks the real
+  relay's protocol and records each push instead of sending it: `GET $SBX_FAKERELAY/control/pushes`
+  (`?token=`, `?household_id=`, `?title=`), `DELETE` to forget them, and every push is also a line
+  in `.sandbox/<name>/pushes.jsonl`. A token starting with `fail:` answers `DeviceNotRegistered`;
+  `POST /control/fail {"status": 503, "count": 1}` fails the next sends. `--relay none` is an
+  install without push; `--relay URL` a real relay.
+- **Overnight: real FCM.** `scripts/e2e mobile --real-push` runs one test (suite `mobile-push`)
+  instead of the flows: on a Google Play emulator (its own AVD, `jarvis-harness-play`) the app,
+  built with the push config, signs in through the mobile repo's login subflow and registers its
+  real Expo token with a sandbox on the real relay; a node alert is sent; the test waits for it in
+  the shade (`cmd statusbar expand-notifications` + `uiautomator dump`, up to 3 minutes), taps it
+  and checks that the app opened the item. The shade and the opened screen are kept as
+  `mobile-push/shade.png`, `opened.png` (and `.xml`).
+
+  What it needs, else the test is **skipped** with the reason in the report:
+
+  | need | how |
+  |---|---|
+  | the relay | `E2E_REAL_RELAY_URL` (e.g. `https://relay.jarvisautomation.io`), answering from this box. The relay holds the Expo credentials; jarvisd only registers the sandbox's household (`/v1/register`) |
+  | the app's push config | `E2E_PUSH_GOOGLE_SERVICES`: the `google-services.json` of the Firebase project behind the Expo app's FCM credentials. It goes into the build as `./google-services.json` and `$GOOGLE_SERVICES_JSON`; the app config must name it in `android.googleServicesFile`, or the build stops saying so. The APK is cached apart from the default one |
+  | a Google Play image | `sdkmanager 'system-images;android-36;google_apis_playstore;x86_64'` (FCM needs Play services; no Google account needed) |
+
+  The two variables come from the environment or from `~/.config/jarvis-harness/push.env`
+  (`$JARVIS_HARNESS_PUSH_ENV` names another file). Keep the file out of the repo; a real push
+  goes to the emulator only, since only its token is registered in the throwaway sandbox.
 
 ## The voice lane (`scripts/e2e voice`)
 
