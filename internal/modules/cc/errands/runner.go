@@ -558,8 +558,9 @@ func compactData(data *pyjson.Object, limit int) string {
 	return truncRunes(strings.Join(parts, "; "), limit)
 }
 
-// stepContentLimit caps what one step's found content adds to the compose prompt.
-const stepContentLimit = 3000
+// stepContentLimit caps what one step's found content adds to the compose prompt: two
+// quick_search sources in full (it keeps 4000 characters of each page).
+const stepContentLimit = 8000
 
 // stepContent is what a step found, for the composer (#232): the items of a result's list
 // (search sources, memories, results), title and text each, cut to share stepContentLimit. The

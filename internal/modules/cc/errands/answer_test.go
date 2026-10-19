@@ -57,7 +57,7 @@ func TestComposePromptCarriesStepContent(t *testing.T) {
 
 // Long pages are cut so the prompt stays bounded.
 func TestStepContentIsCapped(t *testing.T) {
-	long := strings.Repeat("espresso ", 2000)
+	long := strings.Repeat("espresso ", 4000)
 	o := servertools.Obj("sources", []any{servertools.Obj("title", "A", "content", long),
 		servertools.Obj("title", "B", "content", long), servertools.Obj("title", "C", "content", long)})
 	got := stepContent(Result{Success: true, Data: o})
