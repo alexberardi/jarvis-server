@@ -86,6 +86,7 @@ type Sidecar struct {
 	secrets map[string][]nodesettings.SecretSpec
 	extras  map[string]extras
 	browser []nodesettings.DataCommand
+	context []nodesettings.ContextCommand
 	pkgOf   map[string]string // command -> the installed package it came from
 	player  map[string]string // command -> its takes_over_playback_binary
 	failed  map[string]string // package -> why its commands didn't load
@@ -185,6 +186,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			Secrets     []nodesettings.SecretSpec `json:"secrets"`
 			DataBrowser *nodesettings.DataCommand `json:"data_browser"`
 			Package     string                    `json:"package"`
+			ContextOps  []json.RawMessage         `json:"context_operations"`
 			Player      string                    `json:"takes_over_playback_binary"`
 			extras
 		} `json:"tools"`
@@ -202,6 +204,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		if t.Package != "" {
 			s.pkgOf[t.Name] = t.Package
 		}
+		s.context = append(s.context, nodesettings.ContextCommand{Name: t.Name, Operations: t.ContextOps})
 		if t.Player != "" {
 			s.player[t.Name] = t.Player
 		}
@@ -270,6 +273,32 @@ func (s *Sidecar) Create(_ context.Context, command string, values nodesettings.
 		return "", nil, errors.New(*res.Failed)
 	}
 	return res.Key, res.Record, nil
+}
+
+// ContextCommands are the commands with the context operations they declared, read once at start.
+func (s *Sidecar) ContextCommands() []nodesettings.ContextCommand { return s.context }
+
+// ContextQuery runs one context operation as uid (nil: no user) and returns its result dict.
+// An error is the operation raising, or the sidecar failing.
+func (s *Sidecar) ContextQuery(_ context.Context, command, operation string, params json.RawMessage, uid *int64) (nodesettings.Object, error) {
+	var who any // JSON null for no user
+	if uid != nil {
+		who = *uid
+	}
+	var res struct {
+		Result *nodesettings.Object `json:"result"`
+		Raised *string              `json:"raised"`
+	}
+	err := s.roundTrip("context_query", map[string]any{"command_name": command, "operation": operation, "params": params, "user_id": who}, &res)
+	switch {
+	case err != nil:
+		return nodesettings.Object{}, err
+	case res.Raised != nil:
+		return nodesettings.Object{}, errors.New(*res.Raised)
+	case res.Result == nil:
+		return nodesettings.Object{}, errors.New("context_query: no result")
+	}
+	return *res.Result, nil
 }
 
 // DueReminder is one reminder reminders_due found due and marked announced.

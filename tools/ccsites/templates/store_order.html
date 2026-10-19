@@ -1,0 +1,7 @@
+{{define "content"}}<h1>Thank you, your order is placed</h1>
+<p>Order number: <strong id="order-number">{{.D.Number}}</strong></p>
+<table>
+{{range .D.Items}}<tr><td>{{.Name}} × {{.Qty}}</td><td class="num">{{money .Price}}</td></tr>{{end}}
+<tr><th>Total charged to {{.D.Card}}</th><td class="num"><strong>{{money .D.Total}}</strong></td></tr>
+</table>
+<p>Shipping to {{.D.ShipTo.Name}}, {{.D.ShipTo.Street}}, {{.D.ShipTo.City}} {{.D.ShipTo.Zip}}.</p>{{end}}

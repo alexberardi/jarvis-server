@@ -1,0 +1,25 @@
+{{define "content"}}<h1>Garden plot application</h1>
+<p>Apply for a plot at Springfield Community Gardens. All fields except the newsletter are required.</p>
+{{if .D.Errors}}<p class="error" role="alert">Please fix the errors below.</p>{{end}}
+<form method="post" action="/form/" novalidate>
+<label for="full_name">Full name</label><input type="text" id="full_name" name="full_name" value="{{index .D.Values "full_name"}}" required>
+{{with index .D.Errors "full_name"}}<p class="error">{{.}}</p>{{end}}
+<label for="email">Email</label><input type="email" id="email" name="email" value="{{index .D.Values "email"}}" required>
+{{with index .D.Errors "email"}}<p class="error">{{.}}</p>{{end}}
+<label for="phone">Phone</label><input type="text" id="phone" name="phone" value="{{index .D.Values "phone"}}" required>
+{{with index .D.Errors "phone"}}<p class="error">{{.}}</p>{{end}}
+<label for="start_date">Start date</label><input type="date" id="start_date" name="start_date" value="{{index .D.Values "start_date"}}" required>
+{{with index .D.Errors "start_date"}}<p class="error">{{.}}</p>{{end}}
+<label for="country">Country</label><select id="country" name="country" required><option value="">Choose…</option>{{$c := index .D.Values "country"}}{{range .D.Countries}}<option value="{{.}}"{{if eq . $c}} selected{{end}}>{{.}}</option>{{end}}</select>
+{{with index .D.Errors "country"}}<p class="error">{{.}}</p>{{end}}
+<fieldset><legend>Plot size</legend>{{$pl := index .D.Values "plan"}}{{range .D.Plans}}<input type="radio" id="plan-{{.}}" name="plan" value="{{.}}"{{if eq . $pl}} checked{{end}}><label for="plan-{{.}}">{{.}}</label>{{end}}</fieldset>
+{{with index .D.Errors "plan"}}<p class="error">{{.}}</p>{{end}}
+<label for="contact_method">Preferred contact</label><select id="contact_method" name="contact_method" required><option value="">Choose…</option>{{$cm := index .D.Values "contact_method"}}{{range .D.ContactMethods}}<option value="{{.}}"{{if eq . $cm}} selected{{end}}>{{.}}</option>{{end}}</select>
+{{with index .D.Errors "contact_method"}}<p class="error">{{.}}</p>{{end}}
+<fieldset><input type="checkbox" id="newsletter" name="newsletter"{{if eq (index .D.Values "newsletter") "on"}} checked{{end}}><label for="newsletter">Send me the monthly newsletter</label></fieldset>
+<fieldset><input type="checkbox" id="terms" name="terms" required{{if eq (index .D.Values "terms") "on"}} checked{{end}}><label for="terms">I accept the garden rules</label></fieldset>
+{{with index .D.Errors "terms"}}<p class="error">{{.}}</p>{{end}}
+<label for="message">Why would you like a plot?</label><textarea id="message" name="message" rows="4" required>{{index .D.Values "message"}}</textarea>
+{{with index .D.Errors "message"}}<p class="error">{{.}}</p>{{end}}
+<div class="actions"><button class="btn" type="submit">Submit application</button></div>
+</form>{{end}}

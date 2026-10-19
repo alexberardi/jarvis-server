@@ -41,6 +41,7 @@ type Service struct {
 	NewID     func() string
 
 	mu     sync.Mutex
+	sealed bool     // Seal: a factory reset is wiping the file
 	timers []*entry // in the order they were set: find_by_label's first match, as Python's dict
 }
 
@@ -177,6 +178,9 @@ func (s *Service) Set(seconds int, label *string) (string, error) {
 	t := Timer{ID: s.newID(), Label: label, Duration: seconds, Started: now, Ends: now.Add(d)}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.sealed {
+		return "", errors.New("timers: the node is being reset")
+	}
 	s.arm(t, d)
 	s.saveLocked()
 	return t.ID, nil
@@ -272,8 +276,23 @@ func isoformat(t time.Time) string {
 	return t.Format("2006-01-02T15:04:05+00:00")
 }
 
+// Seal stops the timers, as Close does, and never writes the file again: a factory reset is
+// wiping it, and a save between the wipe and the reboot would bring it back.
+func (s *Service) Seal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sealed = true // under the same lock as the stop: no Set lands in between
+	for _, e := range s.timers {
+		e.stop()
+	}
+	s.timers = nil
+}
+
 // saveLocked writes the timers (atomically); a failure is logged, as the Python node's.
 func (s *Service) saveLocked() {
+	if s.sealed {
+		return
+	}
 	list := make([]Timer, 0, len(s.timers))
 	for _, e := range s.timers {
 		list = append(list, e.Timer)

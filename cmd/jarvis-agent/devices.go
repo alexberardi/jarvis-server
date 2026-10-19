@@ -10,16 +10,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 )
 
-// liveSidecar is the package sidecar among tools (nil for none).
-func liveSidecar(tools node.Multi) *sidecar.Live {
-	for _, t := range tools {
-		if sc, ok := t.(*sidecar.Live); ok {
-			return sc
-		}
-	}
-	return nil
-}
-
 // wireDevices answers the app's device requests on a Pi (device-scan, device-list,
 // device-state), jarvisd's invalidate_device_cache and device_removed verbs and OAuth's
 // jarvis/auth/+/ready over the sidecar's device families (internal/agent/devices), reports the

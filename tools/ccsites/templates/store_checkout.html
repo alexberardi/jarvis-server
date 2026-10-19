@@ -1,0 +1,21 @@
+{{define "placebtn"}}{{if .Moved}}<button id="submit-order" class="cta" type="submit" form="checkout">Place order</button>{{else}}<button id="place-order" class="btn" type="submit" form="checkout">Place order</button>{{end}}{{end}}
+{{define "content"}}
+{{if .Moved}}<aside class="toolbar"><span>Order total {{money .D.Total}}</span>{{template "placebtn" .}}</aside>{{end}}
+<h1>Checkout</h1>
+<form id="checkout" method="post" action="/store/checkout">
+{{if .Moved}}<input type="hidden" name="layout" value="moved">{{end}}
+<h2>Ship to</h2>
+<label for="name">Full name</label><input type="text" id="name" name="name" value="{{.D.ShipTo.Name}}">
+<label for="street">Street address</label><input type="text" id="street" name="street" value="{{.D.ShipTo.Street}}">
+<label for="city">City and state</label><input type="text" id="city" name="city" value="{{.D.ShipTo.City}}">
+<label for="zip">ZIP code</label><input type="text" id="zip" name="zip" value="{{.D.ShipTo.Zip}}">
+<h2>Payment</h2>
+<fieldset><input type="radio" id="card" name="card" value="4242" checked><label for="card">Saved Visa {{.D.Card}}</label></fieldset>
+<h2>Order summary</h2>
+<table>
+{{range .D.Items}}<tr><td>{{.Name}} × {{.Qty}}</td><td class="num">{{money .Price}}</td></tr>{{end}}
+<tr><th>Total</th><td class="num"><strong>{{money .D.Total}}</strong></td></tr>
+</table>
+</form>
+{{if not .Moved}}<div class="actions">{{template "placebtn" .}}</div>{{end}}
+{{end}}

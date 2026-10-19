@@ -3,6 +3,7 @@ package nodesettings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -474,5 +475,36 @@ func TestSnapshotCarriesDeviceFamiliesAndManagers(t *testing.T) {
 	ms := mgr["secrets"].([]any)[0].(map[string]any)
 	if mgr["manager_name"] != "jarvis_direct" || ms["is_set"] != true || ms["value"] != nil {
 		t.Fatalf("manager = %v", mgr)
+	}
+}
+
+// A sealed store (a factory reset is wiping it) refuses every write and never writes a file
+// back.
+func TestSealedStoreNeverWrites(t *testing.T) {
+	dir := t.TempDir()
+	st, err := OpenStore(dir, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetEnabled("weather", false); err != nil {
+		t.Fatal(err)
+	}
+	st.Seal()
+	if err := os.Remove(filepath.Join(dir, SettingsFile)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetEnabled("weather", true); !errors.Is(err, ErrSealed) {
+		t.Fatalf("SetEnabled after Seal = %v, want ErrSealed", err)
+	}
+	if err := st.SaveData("weather", "k", obj(t, `{"a":1}`), nil); !errors.Is(err, ErrSealed) {
+		t.Fatalf("SaveData after Seal = %v, want ErrSealed", err)
+	}
+	if err := st.SaveK2(testKey, "kid", "2026-10-14T00:00:00Z"); !errors.Is(err, ErrSealed) {
+		t.Fatalf("SaveK2 after Seal = %v, want ErrSealed", err)
+	}
+	for _, f := range []string{SettingsFile, K2File} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Fatalf("%s written after Seal", f)
+		}
 	}
 }

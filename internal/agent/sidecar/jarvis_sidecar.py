@@ -498,6 +498,17 @@ def _optional(cmd, attr):
         return None
 
 
+def _context_ops(cmd) -> list:
+    """The command's declared context operations (N:services/context_handler.py _declared_ops):
+    a bad implementation declares none rather than breaking describe."""
+    try:
+        ops = list(getattr(cmd, "context_operations", None) or [])
+        return [op.to_dict() if hasattr(op, "to_dict") else {"name": str(op)} for op in ops]
+    except Exception as exc:
+        print(f"sidecar: {cmd.command_name}: context_operations failed: {exc}", file=sys.stderr)
+        return []
+
+
 def _takeover(cmd):
     """The player binary a music command controls (takes_over_playback_binary), else None: the
     agent stops the other players before its "play" runs."""
@@ -513,6 +524,7 @@ def describe(commands: dict) -> dict:
                           "secrets": _secrets(cmd), "data_browser": _browser(cmd),
                           "associated_service": _optional(cmd, "associated_service"),
                           "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name),
+                          "context_operations": _context_ops(cmd),
                           "takes_over_playback_binary": _takeover(cmd)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
@@ -967,6 +979,25 @@ def _secrets_of(obj, name: str) -> list:
     return out
 
 
+def context_query(commands: dict, params: dict) -> dict:
+    """Run one declared context operation (the agent has checked it is declared and its required
+    params are there) as the requesting user, as on a voice turn. A raise comes back as
+    {"raised": message}; a result is its to_dict(), or {ok, data, error} for a bare value."""
+    cmd = commands.get(params.get("command_name", ""))
+    if cmd is None:
+        return {"raised": "command not loaded"}
+    set_current_user_id(params.get("user_id"))
+    try:
+        result = cmd.execute_context_operation(params.get("operation", ""), params.get("params") or {})
+    except Exception as exc:
+        return {"raised": str(exc)}
+    finally:
+        set_current_user_id(None)
+    if hasattr(result, "to_dict"):
+        return {"result": result.to_dict()}
+    return {"result": {"ok": True, "data": result, "error": None}}
+
+
 # Deferred on_response_complete callables by token. Bounded: a token the agent never completes
 # (a crashed turn) must not pin a command's state forever.
 _PENDING: dict = {}
@@ -1063,6 +1094,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": DEVICE_METHODS[method](msg.get("params") or {})}
             elif method == "store_auth":
                 reply = {"id": msg_id, "result": store_auth(commands, msg.get("params") or {})}
+            elif method == "context_query":
+                reply = {"id": msg_id, "result": context_query(commands, msg.get("params") or {})}
             elif method == "reminders_due":
                 if "reminder" not in commands:
                     raise RuntimeError("no built-in reminder command in this sidecar")
