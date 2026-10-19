@@ -90,6 +90,20 @@ func (l *Live) Create(ctx context.Context, command string, values nodesettings.O
 	return "", nil, ErrNoPackages
 }
 
+func (l *Live) ContextCommands() []nodesettings.ContextCommand {
+	if sc := l.Current(); sc != nil {
+		return sc.ContextCommands()
+	}
+	return nil
+}
+
+func (l *Live) ContextQuery(ctx context.Context, command, operation string, params json.RawMessage, uid *int64) (nodesettings.Object, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.ContextQuery(ctx, command, operation, params, uid)
+	}
+	return nodesettings.Object{}, ErrNoPackages
+}
+
 func (l *Live) RemindersDue(ctx context.Context) ([]DueReminder, int, error) {
 	if sc := l.Current(); sc != nil {
 		return sc.RemindersDue(ctx)

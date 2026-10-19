@@ -111,7 +111,9 @@ Tags:
 - The Go core already does this (narrower: `/commands` only).
 
 **Broker ACL:** the node may publish only `.../command-data/{op}/response/{cid}` and
-`.../context/query/response/{cid}` (`internal/platform/mqtt/auth.go:48-75`).
+`.../context/query/response/{cid}` (`internal/platform/mqtt/auth.go:48-75`). Not
+`.../context/operations/response/{cid}`: the Go node answers `context/operations` (as N: does), but the
+broker drops that answer until the ACL allows it (an access change, held for the user; §7 5.7).
 
 **Verify before acting.** jarvisd never sends `trusted`, so the node verifies `action`,
 `measure_ambient_noise` and `tool_call` with `POST /commands/{rid}/verify` (`S:bus.go:96-150`).
@@ -130,13 +132,13 @@ Tags:
 | `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | later |
 | `/k2/provision` (K2 AES key) | `:1622-1669` | `S:settingsreq.go:316` | `GET …/k2/provision/{rid}`, `POST …/k2/ack/{rid}` | built for the desktop agent (`internal/agent/nodesettings`, [DESIGN §16](DESIGN.md)); the Go Pi node reuses it |
 | `/settings/request` (AES-256-GCM snapshot with K2, AAD `{node}:settings:snapshot`), plus a backstop poll on connect | `:1837-1876`, `N:services/settings_snapshot_service.py:749-857` | `S:settingsreq.go:92` | `PUT …/settings/requests/{rid}/snapshot` | built for the desktop agent (`internal/agent/nodesettings`), including the app's secret Sync as source (`include_values` + user) and target (`settings:secrets` push), pinned by `sync_golden.json`; the Pi adds its node_config and hardware |
-| `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines later |
+| `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack; routines: `GET /nodes/{id}/routines` | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines sync done in the Pi profile (§7 5.7) |
 | `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | built (§7 parity 5.6; apt/post_install and test-install on the Pi profile only) |
-| `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | later |
+| `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | done in the Pi profile (§7 5.7) |
 | `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | later |
 | `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | done in the Pi profile (§3.15) |
 | `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | later |
-| `/command-data/{op}`, `/context/{op}` (the node **publishes** responses) | `:2484-2501` | `S:commanddata.go:119` | MQTT publish | command-data built for the desktop agent (`nodesettings.CommandData` over the sidecar's packages, pinned by the Python node's own handler, [DESIGN §16](DESIGN.md)); context later |
+| `/command-data/{op}`, `/context/{op}` (the node **publishes** responses) | `:2484-2501` | `S:commanddata.go:119` | MQTT publish | command-data built for the desktop agent (`nodesettings.CommandData` over the sidecar's packages, pinned by the Python node's own handler, [DESIGN §16](DESIGN.md)); context done in the Pi profile (§7 5.7) |
 | `tts`, `train_adapter`, `/camera-credentials`; the button publishes (denied by the ACL) | various | none or no route | – | drop |
 
 ### 1.3 Heartbeat
@@ -1319,7 +1321,24 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       the golden install, and N:'s 68 wrapper tests against the vendored copies. **Pending
       on-device** (lab Pi 4): Music Assistant installed from the app (shairport-sync, its drop-in,
       a "play …" turn), uninstalled, and a Forge test install; the commands are in the PR.
-   7. factory-reset.
+   7. factory-reset. **Built 2026-10-19** (loop #173, with routines sync and context requests;
+      [decision](../decisions/2026-10-19-pi-node-factory-reset.md)): `internal/agent/reset`
+      handles jarvisd's tracked task (`in_progress` with `X-Reset-Token` first, which is also the
+      anti-spoof check, then the wipe, `success` or `failed`, then `sudo -n systemctl reboot`) and
+      the legacy verify-reset; the settings store and the timers are sealed before the wipe, so
+      nothing writes a file back before the reboot; `reset.Wipe` (K2, the node DB, timers, Bluetooth devices, Pantry
+      packages, node.json last) is also the provisioning API's `POST /api/v1/factory-reset`.
+      `nodesettings.Routines` pulls `GET /nodes/{id}/routines` into `routine/<slug>` command data
+      on `routines/sync` and every connect (defaults and Pantry routines never pruned; nothing
+      changes when jarvisd can't be reached): a cache until the routine command runs (4.5 skips
+      it). `nodesettings.Context` answers `context/operations` and `context/query` from the
+      sidecar's declared context operations (describe's `context_operations`, a
+      `context_query` round trip as the requesting user, 128 KiB cap, every failure answered).
+      Unit tests (an httptest jarvisd, a temp state dir) and a real sidecar for context.
+      **Open:** after the reboot the node has no credentials, and `run` does not start setup mode
+      yet (4.4's "starting setup mode at boot"), so it is not back in provisioning mode by itself;
+      jarvisd's broker drops `context/operations` answers (ACL, held for the user).
+      **Pending on-device** (lab Pi 4): a reset from the app, watched to `success`.
    8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
       against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).
    9. Device control.
