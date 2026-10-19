@@ -13,8 +13,9 @@ type Snapshot struct {
 }
 
 // SnapElement is one element of a Snapshot. Value is left out for password, card and one-time-code
-// fields. State holds any of checked, disabled, expanded, selected, required. Frame is the
-// browser frame the element is in (0: the top document).
+// fields (and for an AXSecureTextField). State holds any of checked, disabled, expanded, selected,
+// required. Frame is the browser frame the element is in (0: the top document). Bounds is
+// [x, y, width, height] in global screen points, when known (desktop windows).
 type SnapElement struct {
 	Ref          string   `json:"ref"`
 	Role         string   `json:"role,omitempty"`
@@ -24,12 +25,13 @@ type SnapElement struct {
 	Value        string   `json:"value,omitempty"`
 	State        []string `json:"state,omitempty"`
 	Frame        int      `json:"frame,omitempty"`
+	Bounds       *[4]int  `json:"bounds,omitempty"`
 }
 
 // Element is what Classify and BuiltinDeny read about e.
 func (e SnapElement) Element() *Element {
 	return &Element{Role: e.Role, Name: e.Name, Type: e.Type, Autocomplete: e.Autocomplete,
-		Secure: strings.EqualFold(e.Type, "password")}
+		Secure: strings.EqualFold(e.Type, "password") || e.Role == "AXSecureTextField"}
 }
 
 // Find returns the element with ref, or nil.
