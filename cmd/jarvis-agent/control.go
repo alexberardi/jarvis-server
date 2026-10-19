@@ -12,6 +12,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/install"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
@@ -91,15 +92,25 @@ func appEvents(pill *runningPill, log *slog.Logger) island.AppEvents {
 
 // serveControl answers the control socket until ctx ends: show-running flashes the island's
 // pill (when there is an island), quit stops the agent, voice-on/off is the status icon's
-// toggle (voice is nil until the switch exists). It returns a func that waits for it.
-func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch, health func() error) func() {
+// toggle (voice is nil until the switch exists), computer-stop and computer-status stop and
+// report what Jarvis is doing with the computer. It returns a func that waits for it.
+func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch,
+	health func() error, activity *computer.Activity) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		err := control.ServeVersion(ctx, ln, func(cmd string) error {
+		err := control.ServeAnswers(ctx, ln, func(cmd string) (string, error) {
 			switch cmd {
 			case control.Health:
-				return health()
+				return "", health()
+			case control.ComputerStatus:
+				return activity.String(), nil
+			case control.ComputerStop:
+				log.Info("asked to stop what Jarvis is doing with the computer", "activity", activity.String())
+				if activity.Stop() {
+					return "stopped", nil
+				}
+				return "idle", nil
 			case control.ShowRunning:
 				// No island (--no-overlay, no display): nothing to show, but it is running.
 				pill.Show()
@@ -109,14 +120,14 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 			case control.VoiceOn, control.VoiceOff:
 				sw := voice()
 				if sw == nil {
-					return errors.New("the agent is still starting")
+					return "", errors.New("the agent is still starting")
 				}
 				if !sw.available {
-					return errors.New("listening isn't supported on this computer")
+					return "", errors.New("listening isn't supported on this computer")
 				}
 				sw.Set(cmd == control.VoiceOn)
 			}
-			return nil
+			return "", nil
 		}, version)
 		if err != nil {
 			log.Warn("control socket stopped", "err", err)

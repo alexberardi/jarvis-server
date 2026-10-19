@@ -30,10 +30,38 @@ const (
 	FollowUp        // the follow-up window is open: a countdown ring
 	Error           // a short red flash, then hidden
 	Note            // a line of text (what is being typed, a question waiting for a yes) over any state
+
+	// The activity states say Jarvis is using the computer (SetActivity). They stay on screen
+	// until cleared, under any voice state or note, and show their text (the task's intent).
+	Controlling // Jarvis is driving the mouse and keyboard
+	Paused      // a task is paused (the user took over)
+	Recording   // Jarvis is watching the user, to learn a workflow
 )
 
 func (s State) String() string {
-	return [...]string{"hidden", "listening", "thinking", "speaking", "follow_up", "error", "note"}[s]
+	return [...]string{"hidden", "listening", "thinking", "speaking", "follow_up", "error", "note",
+		"controlling", "paused", "recording"}[s]
+}
+
+// activity says s is one of the activity states.
+func (s State) activity() bool { return s == Controlling || s == Paused || s == Recording }
+
+// ActivityText is the pill's text for an activity state s with the task's text.
+func ActivityText(s State, text string) string {
+	switch s {
+	case Controlling:
+		if text == "" {
+			return "Jarvis is controlling this computer"
+		}
+		return text
+	case Paused, Recording:
+		label := map[State]string{Paused: "Paused", Recording: "Recording"}[s]
+		if text == "" {
+			return label
+		}
+		return label + ": " + text
+	}
+	return text
 }
 
 const (
@@ -90,7 +118,8 @@ func (i *Island) start() *Island {
 	return i
 }
 
-// Set shows s. window is the time left in the follow-up window (FollowUp only).
+// Set shows s. window is the time left in the follow-up window (FollowUp only). An activity
+// state is SetActivity(s, "").
 func (i *Island) Set(s State, window time.Duration) {
 	if i == nil {
 		return
@@ -102,6 +131,26 @@ func (i *Island) Set(s State, window time.Duration) {
 	}
 	i.m.set(s, window, i.now())
 	select { // under mu: Close can't close wake meanwhile
+	case i.wake <- struct{}{}:
+	default:
+	}
+	i.mu.Unlock()
+}
+
+// SetActivity shows that Jarvis controls the computer (Controlling, Paused, Recording) with
+// text, the task's intent, until it is called with Hidden. A voice turn or a note shows over
+// it; a screenshot (Suspend) hides it for the capture only.
+func (i *Island) SetActivity(s State, text string) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	if i.off || i.closed {
+		i.mu.Unlock()
+		return
+	}
+	i.m.setActivity(s, text)
+	select {
 	case i.wake <- struct{}{}:
 	default:
 	}
@@ -286,16 +335,30 @@ type model struct {
 
 	note      string // Note's text, shown until noteUntil
 	noteUntil time.Time
-	seenNote  string  // the last note shown, for sliding out
-	loud      float64 // the newest level, decaying
-	bars      [nBars]float64
+	seenText  string // the last note or activity text shown, for sliding out
+
+	activity     State // Controlling, Paused, Recording or Hidden: under the voice state
+	activityText string
+	loud         float64 // the newest level, decaying
+	bars         [nBars]float64
 }
 
 func (m *model) set(s State, window time.Duration, now time.Time) {
+	if s.activity() {
+		m.setActivity(s, "")
+		return
+	}
 	if s == m.state && s != FollowUp {
 		return
 	}
 	m.state, m.since, m.window = s, now, window
+}
+
+func (m *model) setActivity(s State, text string) {
+	if !s.activity() {
+		s, text = Hidden, ""
+	}
+	m.activity, m.activityText = s, text
 }
 
 func (m *model) level(v float64) { m.loud = math.Max(m.loud*0.5, v) }
@@ -307,14 +370,14 @@ func (m *model) setNote(text string, d time.Duration, now time.Time) {
 	}
 }
 
-// shown is the state on screen: a note while it lasts, else the voice state once an error
-// flash has run its course.
+// shown is the state on screen: a note while it lasts, else the voice state (once an error
+// flash has run its course), else the activity.
 func (m *model) shown(now time.Time) State {
 	if m.note != "" && now.Before(m.noteUntil) {
 		return Note
 	}
-	if m.state == Error && now.Sub(m.since) > errorHold {
-		return Hidden
+	if m.state == Hidden || m.state == Error && now.Sub(m.since) > errorHold {
+		return m.activity
 	}
 	return m.state
 }
@@ -366,16 +429,21 @@ func (m *model) step(now time.Time) (Frame, bool) {
 	if s != Hidden {
 		m.seen = s
 	}
-	if s == Note {
-		m.seenNote = m.note
+	switch {
+	case s == Note:
+		m.seenText = m.note
+	case s.activity():
+		m.seenText = ActivityText(s, m.activityText)
 	}
 	f := Frame{State: m.seen, Appear: m.appear, Bars: m.bars}
-	if f.State == Note {
-		f.Text = m.seenNote
+	if f.State == Note || f.State.activity() {
+		f.Text = m.seenText
 	}
 	switch s {
 	case Listening, Speaking:
 		f.Glow = n
+	case Controlling, Recording:
+		f.Glow = 0.5 + 0.5*math.Sin(2*math.Pi*0.6*m.t) // a slow breathing halo
 	case FollowUp:
 		if m.window > 0 {
 			f.Ring = clamp01(1 - now.Sub(m.since).Seconds()/m.window.Seconds())

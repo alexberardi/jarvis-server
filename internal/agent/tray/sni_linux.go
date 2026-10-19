@@ -70,10 +70,16 @@ type menuEvent struct {
 // iconSizes are the pixmaps offered; the host picks the nearest.
 var iconSizes = []int{16, 22, 24, 32, 48, 64}
 
-func pixmaps() []pixmap {
+func pixmaps() []pixmap { return pixmapsFor(false) }
+
+// pixmapsFor is the icon, with the activity badge when active.
+func pixmapsFor(active bool) []pixmap {
 	var out []pixmap
 	for _, n := range iconSizes {
 		img := Color(n)
+		if active {
+			img = ColorActive(n)
+		}
 		data := make([]byte, 0, n*n*4)
 		for i := 0; i < len(img.Pix); i += 4 {
 			p := img.Pix[i : i+4] // R, G, B, A (not premultiplied)
@@ -96,6 +102,7 @@ type sni struct {
 	mu       sync.Mutex
 	items    []Item
 	tooltip  string
+	active   bool // the icon shows the activity badge
 	rev      uint32
 	closed   bool
 	register func() error // tells the watcher; replaced in tests only
@@ -242,14 +249,24 @@ func (s *sni) update(items []Item, tooltip string) error {
 	s.items, s.tooltip = slices.Clone(items), tooltip
 	s.rev++
 	rev := s.rev
+	active := Active(items)
+	newIcon := active != s.active
+	s.active = active
 	s.mu.Unlock()
 	if s.props != nil {
 		s.props.SetMust(itemIface, "ToolTip", toolTip{Title: tooltip})
+		if newIcon {
+			s.props.SetMust(itemIface, "IconPixmap", pixmapsFor(active))
+		}
 	}
-	return errors.Join(
+	errs := []error{
 		s.conn.Emit(menuPath, menuIface+".LayoutUpdated", rev, int32(0)),
 		s.conn.Emit(itemPath, itemIface+".NewToolTip"),
-	)
+	}
+	if newIcon {
+		errs = append(errs, s.conn.Emit(itemPath, itemIface+".NewIcon"))
+	}
+	return errors.Join(errs...)
 }
 
 func (s *sni) close() {
