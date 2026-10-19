@@ -737,7 +737,8 @@ Pi 4 only, never the kitchen node:
 sudo systemctl stop jarvis-node
 JARVIS_AGENT_LOG=debug jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
 # "hey Jarvis, remind me in 2 minutes to check the oven" → "Reminder set: …"
-#   within ~1 min of due (60 s poll): log "reminders: due", the middle LED purple,
+#   by ~5 min after setting it (the poll is 300 s while none is pending, then 60 s):
+#   log "reminders: due", the middle LED purple,
 #   then "Reminder: check the oven" said between turns, log "alerts: announced"; LED back to white
 # set another, and keep a turn going when it falls due: it is said once the turn ends
 # "hey Jarvis, what's up?" with one queued: whats_up lists it, the LED goes white
