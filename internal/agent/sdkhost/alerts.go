@@ -10,6 +10,10 @@ import (
 // maxAlerts caps the queue, as N:services/alert_queue_service.py's MAX_ALERTS.
 const maxAlerts = 50
 
+// AnnouncePriority is the lowest priority the node speaks unasked and lights the LED for
+// (N:ALERT_ANNOUNCE_PRIORITY: reminders, urgent mail). Lower ones wait for whats_up or the button.
+const AnnouncePriority = 3
+
 // Alert is the SDK's Alert (jarvis_command_sdk/agent.py), as the queue keeps it.
 type Alert struct {
 	ID           string    `json:"id"`
@@ -27,11 +31,44 @@ type Alert struct {
 // Alerts is the node's in-memory alert queue (N:alert_queue_service): what background agents
 // produced, read by whats_up through the SDK's AlertQueueBackend. Expired alerts are dropped
 // on every read and write.
+//
+// After every write (Add, Flush, Remove, Sweep) each watcher gets the announceable count
+// (alerts at AnnouncePriority or above): a level, not an edge, so the same value repeats and
+// the periodic Sweep re-syncs a watcher (N:on_change; Flush always reports 0). Reads don't
+// report, so a watcher that reads the queue doesn't call itself again.
 type Alerts struct {
 	Now func() time.Time // nil: time.Now
 
-	mu     sync.Mutex
-	alerts []Alert
+	mu       sync.Mutex
+	alerts   []Alert
+	watchers []func(announceable int)
+}
+
+// Watch adds f, called outside the lock after every write.
+func (q *Alerts) Watch(f func(announceable int)) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.watchers = append(q.watchers, f)
+}
+
+// announceable counts the alerts at AnnouncePriority or above. Callers hold mu, after a sweep.
+func (q *Alerts) announceable() int {
+	n := 0
+	for _, a := range q.alerts {
+		if a.Priority >= AnnouncePriority {
+			n++
+		}
+	}
+	return n
+}
+
+// unlock releases mu, then reports n to the watchers.
+func (q *Alerts) unlock(n int) {
+	ws := q.watchers
+	q.mu.Unlock()
+	for _, w := range ws {
+		w(n)
+	}
 }
 
 func (q *Alerts) now() time.Time {
@@ -61,8 +98,8 @@ func (q *Alerts) Add(a Alert) {
 		return
 	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.sweep()
+	defer func() { q.unlock(q.announceable()) }()
 	title := strings.ToLower(strings.TrimSpace(a.Title))
 	for i, e := range q.alerts {
 		if strings.ToLower(strings.TrimSpace(e.Title)) == title {
@@ -108,17 +145,16 @@ func (q *Alerts) Pending() []Alert {
 // Flush returns the queued alerts, most urgent first, and empties the queue.
 func (q *Alerts) Flush() []Alert {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.sweep()
 	out := byUrgency(q.alerts)
 	q.alerts = nil
+	q.unlock(0)
 	return out
 }
 
 // Remove drops the alerts with these ids and returns how many it dropped.
 func (q *Alerts) Remove(ids []string) int {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	drop := map[string]bool{}
 	for _, id := range ids {
 		drop[id] = true
@@ -132,7 +168,16 @@ func (q *Alerts) Remove(ids []string) int {
 	n := len(q.alerts) - len(kept)
 	q.alerts = kept
 	q.sweep()
+	q.unlock(q.announceable())
 	return n
+}
+
+// Sweep drops the expired alerts and reports the count to the watchers (N:sweep_expired, run
+// on every scheduler tick so a watcher re-syncs).
+func (q *Alerts) Sweep() {
+	q.mu.Lock()
+	q.sweep()
+	q.unlock(q.announceable())
 }
 
 // Count is how many alerts are queued.

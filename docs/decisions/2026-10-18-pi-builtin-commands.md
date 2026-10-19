@@ -20,7 +20,7 @@ keeps serving. `JARVIS_AGENT_NODE_COMMANDS` overrides the requirement (a local c
 Python node's own code at run time and would be offered to the model only to fail:
 `control_device` (Devices: #176/#177), `routine` (node-setup's command discovery and secret
 service; #173), `reminder` (`services.reminder_service` imports `jarvis_log_client`, and firing
-reminders is #175) and `send_link` (node-setup's `RestClient` and service discovery, not the
+reminders is #175; loaded since #175, [decision](2026-10-19-pi-reminders-alerts.md)) and `send_link` (node-setup's `RestClient` and service discovery, not the
 SDK's `cc_post`). Each comes back when it uses only the SDK (a change in jarvis-node-setup)
 or when its Go side lands; the list is `packages.PiBuiltins`. A module that fails to import is
 reported alone (`builtin <module>` in the sidecar's failed list) and the others load. A Pantry
