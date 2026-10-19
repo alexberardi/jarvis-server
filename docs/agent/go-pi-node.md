@@ -1144,8 +1144,12 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       `sudo -n /usr/bin/systemctl restart jarvis-agent.service` with no quit first, and the
       installer runs in a `systemd-run --user` unit of the node user's manager (linger), never
       detached (the unit's restart stops its whole cgroup). CI: `agent-upgrade-e2e -pi` (the Pi
-      layout under a fake systemd). **Pending on-device** (lab Pi 4): one real update, and whether
-      `systemd-run --user` reaches pi's manager from the system unit.
+      layout under a fake systemd). On-device (lab Pi 4, 2026-10-18): `systemd-run --user` does
+      reach pi's manager from the system unit; a crash-looping release hit the unit's start limit
+      and the rollback's restart was refused (loop #220). Since then every restart runs sudoers'
+      `systemctl reset-failed jarvis-agent.service` first, and the -pi lane's fake systemd models
+      the start limit. **Pending on-device:** the rollback repro again after rerunning
+      `install-pi.sh` (for the new sudoers line).
    3. The tarball + install.sh variant (§6).
       **3a built 2026-10-17:** `scripts/install-pi.sh` (agent in `/opt/jarvis-agent`; overlay, config.txt,
       modprobe, asound.conf, mixer baseline, groups + linger, sudoers, journald, swappiness, swap, the
