@@ -20,6 +20,9 @@ class DeferredCommand(IJarvisCommand):
     def parameters(self) -> List[JarvisParameter]:
         return [JarvisParameter("marker", "string", required=True, description="File the deferred step writes")]
 
+    # The player this media command controls: a "play" stops the others first (music takeover).
+    takes_over_playback_binary = "mpv"
+
     @property
     def required_secrets(self) -> list:
         return []

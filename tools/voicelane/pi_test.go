@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
@@ -133,6 +135,15 @@ type fakePi struct {
 // newFakePi is a fake Pi whose units are active ("system/jarvis-node.service", …), and a
 // fake sandbox for it.
 func newFakePi(t *testing.T, units ...string) *fakePi {
+	p := newFakePiHost(t, units...)
+	_, p.sbx = fakeSandbox(t, p.root)
+	writeFile(t, p.sbx, "llm.jsonl", "")
+	t.Setenv("VOICELANE_TAP", filepath.Join(p.sbx, "llm.jsonl"))
+	return p
+}
+
+// newFakePiHost is the fake Pi alone, without the sandbox (which listens on ports).
+func newFakePiHost(t *testing.T, units ...string) *fakePi {
 	p := &fakePi{dir: t.TempDir(), tmp: t.TempDir(), root: t.TempDir()}
 	bin := filepath.Join(p.dir, "bin")
 	os.MkdirAll(bin, 0o755)
@@ -150,15 +161,12 @@ func newFakePi(t *testing.T, units ...string) *fakePi {
 	writeFile(t, p.dir, "cards", " 0 [Headphones     ]: bcm2835_headpho - bcm2835 Headphones\n"+
 		"                      bcm2835 Headphones\n 2 [seeed2micvoicec]: seeed-2mic-voic - seeed-2mic-voicecard\n")
 	p.ssh = filepath.Join(bin, "ssh")
-	_, p.sbx = fakeSandbox(t, p.root)
-	writeFile(t, p.sbx, "llm.jsonl", "")
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("TMPDIR", p.tmp)
 	t.Setenv("FAKE_PI", p.dir)
 	t.Setenv("E2E_PI_CARDS", filepath.Join(p.dir, "cards"))
 	t.Setenv("E2E_PI_SETTLE", "0.3")
 	t.Setenv("VOICELANE_FAKE_AGENT", "pi")
-	t.Setenv("VOICELANE_TAP", filepath.Join(p.sbx, "llm.jsonl"))
 	return p
 }
 
@@ -276,6 +284,106 @@ func TestPiRestoresWhenTheNodeDies(t *testing.T) {
 	}
 	if left := p.runDirsLeft(); len(left) > 0 {
 		t.Errorf("run dirs left: %v", left)
+	}
+}
+
+// pi.sh runs on the Pi's bash 5, and in these tests on this machine's: macOS's /bin/bash is 3.2
+// (no `wait -n`; an empty array is unbound under set -u) and its stat has no -c. This drives
+// pi.sh's serve, play and fetch with each bash here, without the sandbox (which listens on ports).
+func TestPiScriptRunsOnEveryBash(t *testing.T) {
+	var bashes []string
+	for _, b := range []string{"bash", "/bin/bash"} {
+		if p, err := exec.LookPath(b); err == nil {
+			if p, err = filepath.EvalSymlinks(p); err == nil && !slices.Contains(bashes, p) {
+				bashes = append(bashes, p)
+			}
+		}
+	}
+	if len(bashes) == 0 {
+		t.Skip("no bash")
+	}
+	var wav bytes.Buffer
+	if err := audio.WriteWAV(&wav, tone(16000, 0.5), 16000); err != nil { // the fake TTS's wake level
+		t.Fatal(err)
+	}
+	for _, bash := range bashes {
+		t.Run(bash, func(t *testing.T) {
+			before := []string{"system/jarvis-node.service", "user/pulseaudio.service"}
+			p := newFakePiHost(t, before...)
+			t.Setenv("VOICELANE_TAP", filepath.Join(p.dir, "llm.jsonl"))
+			run := filepath.Join(p.tmp, "jarvis-e2e-test")
+			os.MkdirAll(run, 0o755)
+			self, _ := os.Executable()
+			if err := os.Symlink(self, filepath.Join(run, "jarvis-agent")); err != nil {
+				t.Fatal(err)
+			}
+			script := writeFile(t, run, "pi.sh", string(piScript))
+			creds := writeFile(t, run, "credentials.json", "{}")
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			serve := exec.CommandContext(ctx, bash, script, "serve", run, "auto", "--",
+				"listen", "--creds", creds, "--voice-input", "e2e_mic", "--voice-output", "e2e_node_out")
+			stdin, _ := serve.StdinPipe()
+			stdout, _ := serve.StdoutPipe()
+			var stderr strings.Builder
+			serve.Stderr = &stderr
+			if err := serve.Start(); err != nil {
+				t.Fatal(err)
+			}
+			lines := bufio.NewScanner(stdout)
+			var said []string
+			for lines.Scan() {
+				if said = append(said, lines.Text()); lines.Text() == "e2e-pi: ready" {
+					break
+				}
+			}
+			if len(said) == 0 || said[len(said)-1] != "e2e-pi: ready" {
+				stdin.Close()
+				serve.Wait()
+				t.Fatalf("serve never got ready:\n%s\n%s", strings.Join(said, "\n"), stderr.String())
+			}
+
+			// play prints the reply tee's size before it plays; fetch is the tee from there.
+			writeFile(t, run, "reply.raw", "0123456789")
+			play := exec.CommandContext(ctx, bash, script, "play", run)
+			play.Stdin = bytes.NewReader(wav.Bytes())
+			if o, err := play.CombinedOutput(); err != nil || string(o) != "10\n" {
+				t.Errorf("play: %q, %v", o, err)
+			}
+			const reply = 16000 * 2 // the fake node's reply, S16_LE
+			for i := 0; i < 200; i++ {
+				if fi, err := os.Stat(filepath.Join(run, "reply.raw")); err == nil && fi.Size() >= 10+reply {
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			if o, err := exec.CommandContext(ctx, bash, script, "fetch", run, "10").Output(); err != nil || len(o) != reply {
+				t.Errorf("fetch: %d bytes, %v; want %d", len(o), err, reply)
+			}
+
+			// ssh's stdin closes: serve stops the node and puts the Pi back.
+			stdin.Close()
+			for lines.Scan() {
+				said = append(said, lines.Text())
+			}
+			if err := serve.Wait(); err != nil {
+				t.Errorf("serve: %v\n%s", err, stderr.String())
+			}
+			got := strings.Join(said, "\n")
+			for _, w := range []string{"before: system: jarvis-node.service; user: pulseaudio.service",
+				"stopped the test node", "after: system: jarvis-node.service; user: pulseaudio.service", "e2e-pi: done"} {
+				if !strings.Contains(got, w) {
+					t.Errorf("serve lacks %q:\n%s", w, got)
+				}
+			}
+			if got := p.units(t); !slices.Equal(got, before) {
+				t.Errorf("units after %v, want %v", got, before)
+			}
+			if _, err := os.Stat(run); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("run dir left: %v", err)
+			}
+		})
 	}
 }
 

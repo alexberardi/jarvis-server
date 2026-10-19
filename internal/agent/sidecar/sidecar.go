@@ -52,6 +52,13 @@ type Host interface {
 	Answer(ctx context.Context, method string, params json.RawMessage) (any, error)
 }
 
+// Takeover is a Host that takes over the speaker for a music command (sdkhost.Host on a Pi):
+// BeforeCall runs before every call, with the command's declared takes_over_playback_binary
+// ("" when it declares none), and stops the other players when the call is a "play".
+type Takeover interface {
+	BeforeCall(ctx context.Context, command, declared string, args map[string]any)
+}
+
 // Options are what a sidecar's commands reach in the agent. Storage nil leaves storage calls
 // unanswered (a secret reads as unset); Host nil registers no other backend in the child.
 type Options struct {
@@ -81,6 +88,7 @@ type Sidecar struct {
 	browser []nodesettings.DataCommand
 	context []nodesettings.ContextCommand
 	pkgOf   map[string]string // command -> the installed package it came from
+	player  map[string]string // command -> its takes_over_playback_binary
 	failed  map[string]string // package -> why its commands didn't load
 	store   Storage
 	host    Host
@@ -165,7 +173,8 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 	out := bufio.NewScanner(stdout)
 	out.Buffer(make([]byte, 64<<10), 16<<20)
 	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, logged: logged, dir: dir, store: o.Storage, host: o.Host, now: time.Now,
-		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{}}
+		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{},
+		player: map[string]string{}}
 	var desc struct {
 		Tools []struct {
 			Name        string                    `json:"name"`
@@ -175,6 +184,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			DataBrowser *nodesettings.DataCommand `json:"data_browser"`
 			Package     string                    `json:"package"`
 			ContextOps  []json.RawMessage         `json:"context_operations"`
+			Player      string                    `json:"takes_over_playback_binary"`
 			extras
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
@@ -191,6 +201,9 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			s.pkgOf[t.Name] = t.Package
 		}
 		s.context = append(s.context, nodesettings.ContextCommand{Name: t.Name, Operations: t.ContextOps})
+		if t.Player != "" {
+			s.player[t.Name] = t.Player
+		}
 		if b := t.DataBrowser; b != nil { // nil: its settings couldn't be read, so it stays out
 			b.Name = t.Name
 			s.browser = append(s.browser, *b)
@@ -328,13 +341,16 @@ func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error
 func (s *Sidecar) Available(context.Context) []node.ToolDef { return s.tools }
 
 // Call forwards one tool call. The context's deadline is not yet propagated to the child.
-func (s *Sidecar) Call(_ context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
+func (s *Sidecar) Call(ctx context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
 	known := false
 	for _, t := range s.tools {
 		known = known || t.Name == name
 	}
 	if !known {
 		return nil, false
+	}
+	if tk, ok := s.host.(Takeover); ok {
+		tk.BeforeCall(ctx, name, s.player[name], args)
 	}
 	r := map[string]any{"tool_call_id": req.ToolCallID, "voice_command": req.VoiceCommand}
 	if req.UserID != nil {

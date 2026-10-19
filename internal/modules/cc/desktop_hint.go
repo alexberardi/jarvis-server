@@ -3,6 +3,9 @@ package cc
 import (
 	"strings"
 	"unicode"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 )
 
 // The desktop app hint (docs/agent/DESIGN.md §14 "A name before a request"). On a follow-up
@@ -126,4 +129,105 @@ func sameDeviceHint(conv *conversation, in turnInput) string {
 		return ""
 	}
 	return SameDeviceHint
+}
+
+// The app a typing request names (DESIGN.md §14 "Typing keeps the app the user named"). The
+// 9B sometimes calls desktop_type_text without app for "type into omawrite that …", and the
+// text lands in the window in front. When the call has no app and the utterance says "into X"
+// or "in X" after a typing verb, X (one or two words, not part of the text) goes in app.
+
+// typeVerbs start a typing request.
+var typeVerbs = map[string]bool{"type": true, "write": true, "enter": true, "put": true, "paste": true, "dictate": true}
+
+// appEnds end the app name after "into X": "type into omawrite that …".
+var appEnds = map[string]bool{"that": true, "saying": true, "and": true, "please": true, "then": true, "so": true}
+
+// notApps follow "in" without naming an app: "in all caps", "in spanish", "in here".
+var notApps = map[string]bool{"caps": true, "capitals": true, "uppercase": true, "lowercase": true, "bold": true,
+	"italics": true, "quotes": true, "english": true, "spanish": true, "french": true, "german": true, "here": true,
+	"there": true, "it": true, "this": true, "window": true, "field": true, "box": true}
+
+// typedAppNamed is the app the typing request utterance names for text, as the user said it,
+// or "".
+func typedAppNamed(utterance, text string) string {
+	ws := strings.Fields(utterance)
+	verb := -1
+	for i, w := range ws {
+		c := compactName(w)
+		if openVerbs[c] {
+			return "" // "open X and type Y": typing follows the launch (LaunchImplicit)
+		}
+		if typeVerbs[c] {
+			verb = i
+			break
+		}
+	}
+	if verb < 0 {
+		return ""
+	}
+	inText := map[string]bool{}
+	for _, w := range strings.Fields(text) {
+		inText[compactName(w)] = true
+	}
+	for i := verb + 1; i < len(ws); i++ {
+		if c := compactName(ws[i]); c != "in" && c != "into" {
+			continue
+		}
+		j := i + 1
+		if j < len(ws) && (compactName(ws[j]) == "the" || compactName(ws[j]) == "my") {
+			j++
+		}
+		k, ended := j, false
+		for ; k < len(ws) && k-j < 3; k++ {
+			if appEnds[compactName(ws[k])] {
+				ended = true
+				break
+			}
+			if strings.ContainsAny(ws[k][len(ws[k])-1:], ",.:;!?") {
+				k++
+				ended = true
+				break
+			}
+		}
+		if k == len(ws) {
+			ended = true
+		}
+		if !ended || k == j || k-j > 2 {
+			continue
+		}
+		ok := true
+		for _, w := range ws[j:k] {
+			if c := compactName(w); c == "" || notApps[c] || inText[c] {
+				ok = false
+			}
+		}
+		if ok {
+			return strings.TrimRight(strings.Join(ws[i+1:k], " "), ",.:;!?")
+		}
+	}
+	return ""
+}
+
+// fillTypedApp is call's arguments with the app the utterance names, when call is a
+// desktop_type_text that names none.
+func fillTypedApp(utterance string, call parse.ToolCall) (string, bool) {
+	if call.Function.Name != desktopTypeTool {
+		return "", false
+	}
+	v, err := pyjson.Loads(call.Function.Arguments)
+	o, isObj := v.(*pyjson.Object)
+	if err != nil || !isObj {
+		return "", false
+	}
+	if app, ok := o.Get("app"); ok && app != nil && app != "" {
+		return "", false
+	}
+	text, _ := o.Get("text")
+	ts, _ := text.(string)
+	app := typedAppNamed(utterance, ts)
+	if app == "" {
+		return "", false
+	}
+	o.Set("app", app)
+	return pyjson.Dumps(o, true), true
 }

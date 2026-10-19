@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/hat"
+	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
@@ -58,6 +60,29 @@ func newPiHost(ctx context.Context, stateDir string, mic *voice.Mic, log *slog.L
 	go h.Audio.Restore(ctx)
 	go func() { <-ctx.Done(); h.Timers.Close() }()
 	return h
+}
+
+// newPiMusic is the Pi's music ducking and takeover (internal/agent/music) with N:'s defaults;
+// with the HAT, its mic gain follows the music (the codec's PGA). Only on a Pi install (the HAT,
+// or install-pi.sh's marker): a dev box run with --profile pi (node-sim, the voice lane) must
+// never SIGSTOP or interrupt the user's own players.
+func newPiMusic(detected func() bool, exists func(string) bool, log *slog.Logger) *music.Ducker {
+	if !detected() && !exists(piMarker) {
+		return nil
+	}
+	var gain music.Gain
+	if detected() {
+		gain = hatGain{}
+	}
+	return music.New(gain, log)
+}
+
+// hatGain is the HAT codec's mic PGA.
+type hatGain struct{}
+
+func (hatGain) Get(ctx context.Context) (int, bool) { return hat.CapturePGA(ctx, hat.ExecRun) }
+func (hatGain) Set(ctx context.Context, pct int) bool {
+	return hat.SetCapturePGA(ctx, hat.ExecRun, pct)
 }
 
 // connectHost hands host the node's command-center client as the runner connects, before

@@ -26,6 +26,8 @@ type Options struct {
 	Live *Live
 	// Mic, when set, records takes through the pipeline (Pipeline.Mic).
 	Mic *Mic
+	// Music, when set, is ducked for each turn (Pipeline.Music).
+	Music Music
 }
 
 // Serve listens on Input until ctx ends. If the pipeline stops (a microphone unplugged or
@@ -60,7 +62,7 @@ func serveOnce(ctx context.Context, o Options) error {
 	defer mic.Close()
 	o.Detector.Reset()
 	p := &Pipeline{Cfg: o.Config, Capture: mic, Detector: o.Detector, Server: o.Server, Tools: o.Tools, Log: o.Log, OnTurn: o.OnTurn, Indicator: o.Indicator,
-		Vocabulary: o.Vocabulary, Live: o.Live, Mic: o.Mic,
+		Vocabulary: o.Vocabulary, Live: o.Live, Mic: o.Mic, Music: o.Music,
 		Playback: func(rate, ch int) (device.Playback, error) { return device.OpenPlayback(o.Output, rate, ch) }}
 	o.Log.Info("voice: listening", "input", o.Input, "output", o.Output, "backend", device.Backend(),
 		"wake_threshold", o.Config.WakeThreshold)

@@ -38,6 +38,12 @@ type Endpointing struct {
 	// SilenceSecs doesn't cut the speaker off. 0 (the default) is the Python node's listen():
 	// silence counts from the first chunk. MaxSecs still applies.
 	OnsetWaitSecs float64
+	// PreRollSecs keeps up to this much of the audio heard between the wake fire and the end
+	// of the wake chime, and puts it in front of the recording: a command said right after
+	// the wake word starts under the chime (#229). Endpointing still starts after the chime,
+	// and the wake word itself is not kept (it ended before the fire). 0 (the default) is the
+	// Python node's history_secs=0: recording starts after the chime.
+	PreRollSecs float64
 }
 
 // DefaultEndpointing is the Python node's configuration out of the box.

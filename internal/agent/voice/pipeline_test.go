@@ -647,3 +647,62 @@ func TestQuietRoomUsesStaticThresholdAndRecordsTheMinimum(t *testing.T) {
 		t.Fatalf("recorded %.2f s, want the 2 s minimum (26 chunks)", tr.RecordedSecs)
 	}
 }
+
+// slowDrain is a speaker whose Drain lasts until wait returns: the wake chime's playback time,
+// during which a real microphone keeps capturing.
+type slowDrain struct {
+	device.Playback
+	wait func()
+}
+
+func (s slowDrain) Drain() error { s.wait(); return s.Playback.Drain() }
+
+// A command said right after the wake word starts while the chime plays (#229). With a
+// pre-roll the audio heard since the fire opens the recording; without one (the Python node's
+// history_secs=0) it is dropped and STT hears the command without its first words.
+func TestSpeechUnderTheChimeIsKept(t *testing.T) {
+	for _, c := range []struct {
+		preRoll  float64
+		min, max int // chunks of the command upload at speech level
+	}{
+		{preRoll: 1, min: 13, max: 16}, // the 5 under the chime + the 8 after (+ the wake word's tail)
+		{preRoll: 0, min: 6, max: 8},   // only what came after the chime
+	} {
+		// 3.2 s of room, "hey jarvis", then 13 chunks of command: the first 5 while the chime plays.
+		mic := script(rep(noise, 40), rep(wake, 3), rep(speech, 13))
+		mic.pace = 5 * time.Millisecond
+		r := newRig(t, mic, newServer())
+		r.p.lockstep = false // a real microphone: it keeps capturing into the queue during the chime
+		r.p.Cfg.Endpointing.PreRollSecs = c.preRoll
+		open, first := r.p.Playback, true
+		r.p.Playback = func(rate, ch int) (device.Playback, error) {
+			pb, err := open(rate, ch)
+			if first { // the wake chime drains until the mic has captured the first 5 command chunks
+				first = false
+				pb = slowDrain{pb, func() {
+					for mic.readCount() < 48 {
+						time.Sleep(time.Millisecond)
+					}
+				}}
+			}
+			return pb, err
+		}
+		stop := r.run(t)
+		tr := r.turn(t)
+		_ = stop()
+		cmd, _ := decodeWAV(t, r.srv.cmdWAV)
+		loud := 0
+		for i := 0; i+ChunkSamples <= len(cmd); i += ChunkSamples {
+			if RMS(cmd[i:i+ChunkSamples]) > 1000 { // normalised speech; the room stays under 400
+				loud++
+			}
+		}
+		if loud < c.min || loud > c.max {
+			t.Errorf("pre-roll %v s: %d chunks of speech in the command (recorded %.2f s, pre-roll %.2f s), want %d-%d",
+				c.preRoll, loud, tr.RecordedSecs, tr.PreRollSecs, c.min, c.max)
+		}
+		if c.preRoll == 0 && tr.PreRollSecs != 0 {
+			t.Errorf("pre-roll off but %.2f s kept", tr.PreRollSecs)
+		}
+	}
+}
