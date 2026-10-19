@@ -117,7 +117,8 @@ internal/agent/
                       browser_* tools (tools.go), host-manifest registration per OS/browser
                       (install.go), the embedded MV3 extension (extension/, extension.go) and
                       the Mozilla-signed .xpi when a build has one (signed/)
-  screen/             read the screen: desktop_read_screen, grim/hyprctl/swaymsg (linux.go),
+  screen/             read the screen: desktop_read_screen, grim/hyprctl/swaymsg (linux.go), X11
+                      GetImage (x11.go; native.go's Linux picks per call),
                       screencapture + the purego front-window lookup (mac.go, frontwin_darwin.go)
   winmatch/           naming a window ("firefox", "the terminal", title words): Pick (screen),
                       PickUnique (dictation: one match or ambiguous_window); last tier fuzzy.go
@@ -138,8 +139,8 @@ internal/agent/
                       `jarvis-agent dictation allow|revoke|status` (cmd/jarvis-agent/dictation.go)
   vkbd/               the Wayland virtual keyboard (zwp_virtual_keyboard_manager_v1), pure Go:
                       what wtype does, without wtype (DESIGN.md §14)
-  x11/                X11 without helpers: XTEST typing (spare-keycode remap, settle, restore)
-                      and EWMH windows (list, activate, close, iconify, active) over a narrow
+  x11/                X11 without helpers: XTEST typing (spare-keycode remap, settle, restore),
+                      pointer, chords and root GetImage capture (pointer.go), and EWMH windows (list, activate, close, iconify, active) over a narrow
                       Conn (x11.go, unit-tested with a fake everywhere); the real Conn is
                       github.com/jezek/xgb (dial_linux.go)
   xkb/                keysyms for text and dictation's keys, and the minimal XKB keymap a
@@ -367,7 +368,8 @@ the agent (+~4.5 MB), the price of one verification path.
     reach a real X server; the dictate backends read the session through `Exec.Getenv` for the
     same reason); xdotool/wmctrl only without XTEST or an EWMH window manager. An XTEST remap is
     always restored (a deferred blank of every spare keycode used). `JARVIS_X11_TYPE=…` /
-    `JARVIS_X11_LIST=1 go test -run Native ./internal/agent/x11/` are for a throwaway Xvfb only.
+    `JARVIS_X11_LIST=1` / `JARVIS_X11_CLICK=x,y` (`JARVIS_X11_CHORD=ctrl+a`) /
+    `JARVIS_X11_CAPTURE=1 go test -run Native ./internal/agent/x11/` are for a throwaway Xvfb only.
     GNOME/KDE Wayland type through the RemoteDesktop portal (`portal`), after the virtual keyboard
     and wtype, before ydotool. **Only `jarvis-agent dictation allow` may show the portal's
     dialog**: probing reads properties only, typing restores from the stored token, and a token

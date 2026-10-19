@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
 	"slices"
 	"strings"
 	"time"
@@ -46,6 +47,17 @@ type Conn interface {
 	LockOn() (bool, error)
 	// FakeKey presses or releases a key through XTEST.
 	FakeKey(code byte, press bool) error
+	// FakeMotion moves the pointer to x, y on the root window through XTEST.
+	FakeMotion(x, y int) error
+	// FakeButton presses or releases core pointer button b (1-3; 4-7 are the wheel) through XTEST.
+	FakeButton(b byte, down bool) error
+	// QueryPointer is where the pointer is, in root coordinates.
+	QueryPointer() (x, y int, err error)
+	// GetImage reads r of win as a ZPixmap: the drawable's depth and 32 bits per pixel,
+	// little-endian (B, G, R, pad). Other pixel layouts are an error.
+	GetImage(win uint32, r image.Rectangle) (depth byte, data []byte, err error)
+	// Geometry is win's rectangle with its origin in root coordinates.
+	Geometry(win uint32) (x, y, w, h int, err error)
 	// Sync waits until the server has processed every request sent so far.
 	Sync() error
 	Close()

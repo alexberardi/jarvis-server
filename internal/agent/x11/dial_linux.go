@@ -3,6 +3,8 @@
 package x11
 
 import (
+	"fmt"
+	"image"
 	"io"
 	"log"
 	"os"
@@ -149,4 +151,57 @@ func (x *xconn) FakeKey(code byte, press bool) error {
 func (x *xconn) Sync() error {
 	_, err := xproto.GetInputFocus(x.c).Reply()
 	return err
+}
+
+func (x *xconn) FakeMotion(px, py int) error {
+	// Unchecked, like FakeKey: the caller's Sync surfaces a broken connection.
+	xtest.FakeInput(x.c, xproto.MotionNotify, 0, 0, x.root, int16(px), int16(py), 0)
+	return nil
+}
+
+func (x *xconn) FakeButton(b byte, down bool) error {
+	t := byte(xproto.ButtonRelease)
+	if down {
+		t = xproto.ButtonPress
+	}
+	xtest.FakeInput(x.c, t, b, 0, x.root, 0, 0, 0)
+	return nil
+}
+
+func (x *xconn) QueryPointer() (int, int, error) {
+	r, err := xproto.QueryPointer(x.c, x.root).Reply()
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(r.RootX), int(r.RootY), nil
+}
+
+func (x *xconn) GetImage(win uint32, r image.Rectangle) (byte, []byte, error) {
+	rep, err := xproto.GetImage(x.c, xproto.ImageFormatZPixmap, xproto.Drawable(win),
+		int16(r.Min.X), int16(r.Min.Y), uint16(r.Dx()), uint16(r.Dy()), 0xffffffff).Reply()
+	if err != nil {
+		return 0, nil, err
+	}
+	bpp := 0
+	for _, f := range x.setup.PixmapFormats {
+		if f.Depth == rep.Depth {
+			bpp = int(f.BitsPerPixel)
+		}
+	}
+	if bpp != 32 || x.setup.ImageByteOrder != xproto.ImageOrderLSBFirst {
+		return 0, nil, fmt.Errorf("unsupported pixel format: depth %d at %d bits per pixel (byte order %d)", rep.Depth, bpp, x.setup.ImageByteOrder)
+	}
+	return rep.Depth, rep.Data, nil
+}
+
+func (x *xconn) Geometry(win uint32) (int, int, int, int, error) {
+	g, err := xproto.GetGeometry(x.c, xproto.Drawable(win)).Reply()
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	t, err := xproto.TranslateCoordinates(x.c, xproto.Window(win), x.root, 0, 0).Reply()
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return int(t.DstX), int(t.DstY), int(g.Width), int(g.Height), nil
 }
