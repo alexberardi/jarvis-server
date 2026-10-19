@@ -33,7 +33,7 @@ func TestComputerStopAndStatus(t *testing.T) {
 	a.OnStop(func() { stopped++ })
 	ctx, cancel := context.WithCancel(context.Background())
 	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return nil },
-		func() error { return nil }, a)
+		func() error { return nil }, a, computer.NewSwitch(false, a))
 	defer func() { cancel(); wait() }()
 	dial := func() (net.Conn, error) { return browser.Dial(path) }
 
@@ -91,6 +91,80 @@ func TestTrayFollowsTheActivity(t *testing.T) {
 	ic.stopTaskFromMenu()
 	if k, _ := a.Status(); k != computer.Idle || !stopped {
 		t.Fatalf("Stop Jarvis: %v, stopped %v", k, stopped)
+	}
+}
+
+// `jarvis-agent computer on|off` set the running agent's switch over the control socket; off
+// stops a task going on, as "Stop Jarvis" does.
+func TestComputerOnOff(t *testing.T) {
+	dir, err := os.MkdirTemp("", "jco")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "c.sock")
+	ln, err := browser.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &computer.Activity{}
+	sw := computer.NewSwitch(false, a)
+	var saved []bool
+	sw.Persist = func(on bool) error { saved = append(saved, on); return nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return nil },
+		func() error { return nil }, a, sw)
+	defer func() { cancel(); wait() }()
+	dial := func() (net.Conn, error) { return browser.Dial(path) }
+	run := func(args ...string) string {
+		t.Helper()
+		var b bytes.Buffer
+		if err := computerCmd(args, &b, dial); err != nil {
+			t.Fatalf("computer %v: %v", args, err)
+		}
+		return strings.TrimSpace(b.String())
+	}
+	if got := run("on"); got != "Computer control is on: Jarvis may use this computer." || !sw.On() {
+		t.Fatalf("on: %q (switch %v)", got, sw.On())
+	}
+	stopped := 0
+	a.OnStop(func() { stopped++ })
+	a.Set(computer.Controlling, "Ordering the blue mug")
+	if got := run("off"); got != "Computer control is off: Jarvis won't use this computer." || sw.On() || stopped != 1 {
+		t.Fatalf("off: %q (switch %v, %d stops)", got, sw.On(), stopped)
+	}
+	if k, _ := a.Status(); k != computer.Idle {
+		t.Fatalf("after off: %v", k)
+	}
+	if len(saved) != 2 || !saved[0] || saved[1] {
+		t.Fatalf("saved %v", saved)
+	}
+}
+
+// The status icon's "Computer control" follows the switch; choosing it turns the switch over,
+// and off stops the task going on.
+func TestTrayComputerControl(t *testing.T) {
+	a := &computer.Activity{}
+	sw := computer.NewSwitch(false, a)
+	ic := &trayIcon{log: slog.New(slog.DiscardHandler), sw: newFakeVoice().sw(false), activity: a, computer: sw}
+	if s := ic.state(); !s.ComputerAvailable || s.Computer {
+		t.Fatalf("default: %+v", s)
+	}
+	ic.setComputerFromMenu(true)
+	if s := ic.state(); !s.Computer || !sw.On() {
+		t.Fatalf("after on: %+v", s)
+	}
+	stopped := false
+	a.OnStop(func() { stopped = true })
+	a.Set(computer.Controlling, "Ordering the blue mug")
+	ic.setComputerFromMenu(false)
+	if s := ic.state(); s.Computer || s.Activity != "" || !stopped {
+		t.Fatalf("after off mid-task: %+v, stopped %v", s, stopped)
+	}
+	// A Pi (no switch) shows no item.
+	ic.computer = nil
+	if s := ic.state(); s.ComputerAvailable {
+		t.Fatalf("no switch: %+v", s)
 	}
 }
 

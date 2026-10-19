@@ -1,0 +1,17 @@
+[
+  {
+    "name": "computer control off: order me a phone case gets the turn-it-on answer, not an errand",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "order me a phone case",
+        "expect": {
+          "not_tool": ["run_errand", "schedule_errand"],
+          "reply": "(?i)computer control"
+        }
+      }
+    ]
+  }
+]

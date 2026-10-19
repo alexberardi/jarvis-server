@@ -45,6 +45,48 @@ func TestRunSettingsFileAndFlags(t *testing.T) {
 	}
 }
 
+// Computer control is off unless turned on: a new install (no agent.json), an upgrade (an
+// agent.json without the key), and on again after a restart once the menu saved it.
+func TestComputerControlDefaultsOffAndSurvivesRestart(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "agent.json")
+	runWith := func() bool {
+		t.Helper()
+		fs, f := newRunFlags(flag.ContinueOnError)
+		if err := fs.Parse([]string{"--config", p}); err != nil {
+			t.Fatal(err)
+		}
+		if err := applySettings(fs, *f.config, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+			t.Fatal(err)
+		}
+		return *f.computerOn
+	}
+	if runWith() {
+		t.Fatal("a new install starts with computer control on")
+	}
+	if err := os.WriteFile(p, []byte(`{"voice": true, "island": true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if runWith() {
+		t.Fatal("an upgrade (agent.json without computer_control) starts with it on")
+	}
+	if err := saveComputer(p, true); err != nil {
+		t.Fatal(err)
+	}
+	if !runWith() {
+		t.Fatal("turned on in the menu, then restarted: off")
+	}
+	if err := saveComputer(p, false); err != nil {
+		t.Fatal(err)
+	}
+	if runWith() {
+		t.Fatal("turned off in the menu, then restarted: on")
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), `"voice": true`) {
+		t.Fatalf("saving the switch lost the other settings: %s", b)
+	}
+}
+
 func TestRunConfirmsSubmitByDefault(t *testing.T) {
 	fs, f := newRunFlags(flag.ContinueOnError)
 	if err := fs.Parse(nil); err != nil {

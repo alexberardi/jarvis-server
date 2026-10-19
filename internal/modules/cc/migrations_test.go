@@ -41,7 +41,7 @@ var expectedTables = []string{
 	// watches (autonomy P2)
 	"cc_watches",
 	// computer control (plan P3)
-	"cc_computer_approvals", "cc_taught_workflows", "cc_recordings",
+	"cc_computer_approvals", "cc_taught_workflows", "cc_recordings", "cc_computer_runs",
 }
 
 // Cut by decisions in docs/cc/QUESTIONS.md; they must never come back by accident.
@@ -352,5 +352,56 @@ func TestToolRuleTargetsMigration(t *testing.T) {
 	}
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestComputerRunsMigration: 00270 creates cc_computer_runs with its state and target checks and
+// defaults; Down drops it.
+func TestComputerRunsMigration(t *testing.T) {
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	store, err := database.NewStore(database.DialectSQLite3, "goose_cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := goose.NewProvider("", d.Write, Migrations(), goose.WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 270); err != nil {
+		t.Fatal(err)
+	}
+	ins := `INSERT INTO cc_computer_runs (id, household_id, node_id, goal, target, state, created_at, updated_at)
+		VALUES (?, 'hh-1', 'n1', 'order soap', ?, ?, 'x', 'x')`
+	if _, err := d.Write.ExecContext(ctx, ins, "cr_1", "browser", "running"); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		history string
+		stop    int
+		rounds  int
+	)
+	if err := d.Read.QueryRowContext(ctx, `SELECT history, stop_requested, rounds FROM cc_computer_runs WHERE id = 'cr_1'`).
+		Scan(&history, &stop, &rounds); err != nil {
+		t.Fatal(err)
+	}
+	if history != "[]" || stop != 0 || rounds != 0 {
+		t.Fatalf("defaults: history %q stop %d rounds %d", history, stop, rounds)
+	}
+	if _, err := d.Write.ExecContext(ctx, ins, "cr_2", "browser", "maybe"); err == nil {
+		t.Fatal("state CHECK missing")
+	}
+	if _, err := d.Write.ExecContext(ctx, ins, "cr_3", "phone", "running"); err == nil {
+		t.Fatal("target CHECK missing")
+	}
+	if _, err := p.DownTo(ctx, 260); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(tables(t, d.Read), "cc_computer_runs") {
+		t.Fatal("cc_computer_runs left after down")
 	}
 }

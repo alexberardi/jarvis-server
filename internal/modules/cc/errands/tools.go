@@ -38,6 +38,9 @@ func disabledResult() *pyjson.Object {
 type RunErrandTool struct {
 	Svc      func() *Service
 	Commands CommandsFunc
+	// ComputerOff, when set, says why goal can't run in the household: it needs a computer and
+	// none has computer control on (COMPUTER-CONTROL.md C11). "" lets it through.
+	ComputerOff func(ctx context.Context, householdID, goal string) string
 }
 
 func (*RunErrandTool) Name() string { return "run_errand" }
@@ -54,6 +57,12 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 	}
 	if turn.HouseholdID == "" || turn.NodeID == "" {
 		return errObj("no_context", "I couldn't tell which node to run this on."), nil
+	}
+	if t.ComputerOff != nil {
+		if msg := t.ComputerOff(ctx, turn.HouseholdID, goal); msg != "" {
+			// No errand, and nothing else in its place: the user turns it on, or doesn't.
+			return errObj("computer_control_off", msg), nil
+		}
 	}
 	s := t.Svc()
 	if s == nil {

@@ -268,6 +268,10 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	if !photosPossible {
 		clientTools, commands = withoutPhotoTools(clientTools, commands)
 	}
+	if !n.row.computerOn() {
+		// C11: a computer's computer-control tools only while its switch is on.
+		clientTools, commands = withoutComputerTools(clientTools, commands)
+	}
 	offered := append(append([]prompts.Tool(nil), serverDefs...), clientTools...)
 	conv.tools = make([]prompts.Tool, len(offered))
 	for i, t := range offered {

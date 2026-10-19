@@ -65,24 +65,38 @@ const (
 	extDisabled     = "disabled"     // run --no-browser
 )
 
-// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes.
-func heartbeatCaps(tools node.Multi) (caps func() map[string]any, changed func() <-chan struct{}) {
+// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes;
+// with sw, also computer control's switch as computer_control "on" or "off" (its changes wake
+// a heartbeat through Runner.BeatNow).
+func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[string]any, changed func() <-chan struct{}) {
 	var hub *browser.Hub
 	for _, t := range tools {
 		if bt, ok := t.(*browser.Tools); ok {
 			hub = bt.Hub
 		}
 	}
-	if hub == nil {
-		return func() map[string]any { return map[string]any{"browser_extension": extDisabled} }, nil
-	}
 	return func() map[string]any {
-		state := extDisconnected
-		if hub.Connected() {
-			state = extConnected
+		state := extDisabled
+		if hub != nil {
+			state = extDisconnected
+			if hub.Connected() {
+				state = extConnected
+			}
 		}
-		return map[string]any{"browser_extension": state}
-	}, hub.Changed
+		out := map[string]any{"browser_extension": state}
+		if sw != nil {
+			out["computer_control"] = map[bool]string{true: "on", false: "off"}[sw.On()]
+		}
+		return out
+	}, hubChanged(hub)
+}
+
+// hubChanged is hub's Changed, nil without a hub.
+func hubChanged(hub *browser.Hub) func() <-chan struct{} {
+	if hub == nil {
+		return nil
+	}
+	return hub.Changed
 }
 
 func main() {
@@ -211,6 +225,8 @@ func usage(w io.Writer) {
   stop     stop the running agent until the next login or start (the menu's Quit does the same)
   computer stop | status   stop what Jarvis is doing with this computer (a computer task, a
            recording; the menu's "Stop Jarvis" does the same), or say what it is doing
+  computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
+           off by default, and off stops a task going on)
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   update   update to the version of the jarvisd this computer is signed in to (the agent also
@@ -484,6 +500,7 @@ type runFlags struct {
 	cp, config         *string
 	tf                 *toolFlags
 	voiceOn, noOverlay *bool
+	computerOn         *bool
 	noTray             *bool
 	noAutoUpdate       *bool
 	profile            *string
@@ -499,10 +516,12 @@ const voiceByDefault = true
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
 	return fs, &runFlags{
-		cp:        fs.String("creds", "", "credentials file"),
-		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
-		tf:        addToolFlags(fs),
-		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
+		cp:      fs.String("creds", "", "credentials file"),
+		config:  fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
+		tf:      addToolFlags(fs),
+		voiceOn: fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
+		computerOn: fs.Bool("computer-control", false, `let Jarvis use this computer (computer tasks, recording); `+
+			`off by default, the menu's "Computer control" sets it`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
 		noTray:    fs.Bool("no-tray", false, "don't show the status icon and its menu (menu bar, tray, notification area)"),
 		noAutoUpdate: fs.Bool("no-auto-update", false, "don't update to the server's version by itself, and refuse updates sent from Jarvis Automation "+
@@ -569,6 +588,13 @@ func run(ctx context.Context, args []string) error {
 	// What Jarvis is doing with the computer: the island and the status icon show it; the
 	// icon's Stop, `jarvis-agent computer stop` and the control socket end it.
 	activity := &computer.Activity{}
+	// Computer control's switch (COMPUTER-CONTROL.md C11): a computer's only, off unless
+	// agent.json's computer_control (the menu's toggle) turned it on.
+	var computerSw *computer.Switch
+	if p.desktop {
+		computerSw = computer.NewSwitch(*f.computerOn, activity)
+		computerSw.Persist = func(on bool) error { return saveComputer(*f.config, on) }
+	}
 	var swReady atomic.Pointer[voiceSwitch]
 	var runner atomic.Pointer[node.Runner]
 	if ctl != nil {
@@ -579,7 +605,7 @@ func run(ctx context.Context, args []string) error {
 			}
 			return errors.New("not connected to jarvisd yet")
 		}
-		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity)()
+		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity, computerSw)()
 	}
 	// K2, command secrets and data live next to node.json; another node's are dropped here.
 	st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
@@ -609,7 +635,11 @@ func run(ctx context.Context, args []string) error {
 	runner.Store(r)
 	if p.desktop {
 		// The browser extension's state is a computer's; a Pi has none to report.
-		r.Capabilities, r.Changed = heartbeatCaps(tools)
+		r.Capabilities, r.Changed = heartbeatCaps(tools, computerSw)
+		computerSw.Watch(func(on bool) {
+			log.Info("computer control turned " + map[bool]string{true: "on", false: "off"}[on])
+			r.BeatNow()
+		})
 	}
 	if !p.desktop && hat.Detected() {
 		// Before voice opens the mic: the codec may have come back from a boot without the
@@ -708,8 +738,11 @@ func run(ctx context.Context, args []string) error {
 	// agent.json and apps.json, and open the setup page so someone can sign in again.
 	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
-		activity: activity}
+		activity: activity, computer: computerSw}
 	sw.changed = ic.voiceChanged
+	if computerSw != nil {
+		computerSw.Watch(func(bool) { ic.refresh() })
+	}
 	activity.Show(ic.activityChanged)
 	var note atomic.Pointer[func(string)] // the island's note, once it is up
 	followServer(ctx, r, !*f.noAutoUpdate, func(text string) {

@@ -50,6 +50,11 @@ func TestItems(t *testing.T) {
 			`(Jarvis Automation Agent — Running) | (Paused) | Stop Jarvis | (Updated to v0.2.0) | -- | Quit Jarvis Automation Agent`},
 		{State{Status: "Running", Activity: ActivityRecording},
 			`(Jarvis Automation Agent — Running) | (Recording) | Stop Jarvis | -- | Quit Jarvis Automation Agent`},
+		// Computer control: a toggle right after the voice one, off unless turned on.
+		{State{Status: "Running", VoiceAvailable: true, Voice: true, ComputerAvailable: true, OpenURL: "http://x/"},
+			`(Jarvis Automation Agent — Running) | -- | [x] Listen for "Hey Jarvis" | [ ] Computer control | Open Jarvis Automation | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", ComputerAvailable: true, Computer: true},
+			`(Jarvis Automation Agent — Running) | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
 		{State{Status: "Running"}, `(Jarvis Automation Agent — Running) | -- | Quit Jarvis Automation Agent`},
 	} {
@@ -92,6 +97,13 @@ func TestClicksRunActions(t *testing.T) {
 		Quit:     func() { rec("quit") },
 		SignOut:  func() { rec("sign out") },
 		StopTask: func() { rec("stop task") },
+		SetComputer: func(on bool) {
+			if on {
+				rec("computer on")
+			} else {
+				rec("computer off")
+			}
+		},
 	}, State{VoiceAvailable: true})
 	be := &fakeBackend{}
 	if err := tr.attach(be); err != nil {
@@ -101,6 +113,14 @@ func TestClicksRunActions(t *testing.T) {
 	tr.wait()
 	tr.Update(func(s *State) { s.Voice = true })
 	tr.clicked(IDVoice) // checked: turn it off
+	tr.wait()
+	tr.clicked(IDComputer) // not shown: nothing
+	tr.wait()
+	tr.Update(func(s *State) { s.ComputerAvailable = true })
+	tr.clicked(IDComputer) // unchecked: turn it on
+	tr.wait()
+	tr.Update(func(s *State) { s.Computer = true })
+	tr.clicked(IDComputer) // checked: turn it off
 	tr.wait()
 	tr.clicked(IDOpen) // no URL: nothing
 	tr.wait()
@@ -127,18 +147,19 @@ func TestClicksRunActions(t *testing.T) {
 	tr.clicked(IDActivity)
 	tr.clicked(IDQuit)
 	tr.wait()
-	if strings.Join(got, ", ") != "voice on, voice off, open http://jarvis.example/, setup, sign out, stop task, quit" {
+	if strings.Join(got, ", ") != "voice on, voice off, computer on, computer off, open http://jarvis.example/, setup, sign out, stop task, quit" {
 		t.Fatalf("actions %q", got)
 	}
-	if len(be.shown) != 7 || !strings.Contains(be.shown[5], "Stop Jarvis") || strings.Contains(be.shown[6], "Stop Jarvis") || !strings.Contains(be.shown[1], "[x] Listen") || !strings.Contains(be.shown[3], "Set up / Settings…") ||
-		!strings.Contains(be.shown[4], "Sign out of Jarvis Automation") {
+	if len(be.shown) != 9 || !strings.Contains(be.shown[7], "Stop Jarvis") || strings.Contains(be.shown[8], "Stop Jarvis") || !strings.Contains(be.shown[1], "[x] Listen") ||
+		!strings.Contains(be.shown[2], "[ ] Computer control") || !strings.Contains(be.shown[3], "[x] Computer control") || !strings.Contains(be.shown[5], "Set up / Settings…") ||
+		!strings.Contains(be.shown[6], "Sign out of Jarvis Automation") {
 		t.Fatalf("shown %q", be.shown)
 	}
 	tr.Close()
 	tr.Close()
 	tr.clicked(IDQuit) // after Close: ignored
 	tr.wait()
-	if !be.closed || len(got) != 7 {
+	if !be.closed || len(got) != 9 {
 		t.Fatalf("closed %v, actions %q", be.closed, got)
 	}
 }

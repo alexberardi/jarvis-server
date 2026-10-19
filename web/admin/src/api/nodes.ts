@@ -13,7 +13,10 @@ export interface NodeLiveness {
   is_busy: boolean
   /** What the node said it is: "desktop" for the desktop agent, null when it never said (a Pi). */
   node_kind?: string | null
-  /** What the node reported, e.g. browser_extension: "connected" | "disconnected" | "disabled". */
+  /**
+   * What the node reported, e.g. browser_extension: "connected" | "disconnected" | "disabled",
+   * computer_control: "on" | "off".
+   */
   capabilities?: Record<string, string | boolean | number>
   /** Who paired it (the approver of its code, or who signed in on it); null when unknown. */
   owner_user_id?: number | null
@@ -25,6 +28,15 @@ export interface NodeLiveness {
 export function extensionState(n: NodeLiveness | undefined): 'connected' | 'disconnected' | 'disabled' | null {
   const v = n?.capabilities?.browser_extension
   return v === 'connected' || v === 'disconnected' || v === 'disabled' ? v : null
+}
+
+/**
+ * computerControlState is a computer's "Computer control" switch (COMPUTER-CONTROL.md C11), set in
+ * its agent's menu and only shown here: off unless it reported on. Null for a node that isn't a computer.
+ */
+export function computerControlState(n: NodeLiveness | undefined): 'on' | 'off' | null {
+  if (n?.node_kind !== 'desktop') return null
+  return n.capabilities?.computer_control === 'on' ? 'on' : 'off'
 }
 
 /**

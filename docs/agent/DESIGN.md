@@ -1968,6 +1968,7 @@ Jarvis Automation Agent — Running          (disabled: the agent's state)
 Updated to v0.2.0                           (disabled, only around a self-update, §13)
 ─────────────
 ✓ Listen for "Hey Jarvis"                   (Linux, macOS)
+  Computer control                          (off by default; COMPUTER-CONTROL.md C11)
   Open Jarvis Automation                    (once discovery names the web UI)
   Set up / Settings…                        (the setup page, §13)
   Sign out of Jarvis Automation             (§13 "Signing out")
@@ -1983,6 +1984,12 @@ Updated to v0.2.0                           (disabled, only around a self-update
   says "couldn't start listening", and the saved choice is kept. A `--voice` given on `run`'s
   command line still wins at the next start (flags beat the file, §13). Dictation's island notes
   show only while listening is on, as before.
+- **Computer control** lets Jarvis use this computer (computer tasks, recording;
+  [COMPUTER-CONTROL.md](COMPUTER-CONTROL.md) C11). Off by default, on every install and after an
+  upgrade; each choice is saved as agent.json `computer_control`, and `jarvis-agent computer
+  on|off` does the same. While it is off the agent refuses every computer action and recording
+  (`computer.Switch`); turning it off stops a task going on, as "Stop Jarvis" does. The heartbeat
+  reports it (`computer_control`), so jarvisd targets only computers with it on.
 - **Open Jarvis Automation** opens discovery's `jarvis-admin` URL (http/https only, no user
   info) in the default browser; it appears once jarvisd answers discovery.
 - **Set up / Settings…** starts `jarvis-agent setup` as a process of its own (§13 "The setup
