@@ -1,6 +1,7 @@
 package errands
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -128,5 +129,21 @@ func TestNoAnswerWhenComposeFails(t *testing.T) {
 	last := cards[len(cards)-1]
 	if _, ok := last.Metadata["answer"]; ok || last.Summary != "Search for espresso machines: 2 sources" {
 		t.Fatalf("completion = %+v", last)
+	}
+}
+
+// deep_research only starts a report that arrives on its own later, so the errand menu says so
+// and points at quick_search for what the errand should report back (#232).
+func TestMenuNotesDeepResearchIsDetached(t *testing.T) {
+	e := newTenv(t, false)
+	e.tools.Register(&fakeTool{name: "deep_research", def: toolDef("deep_research", "Research a topic in depth.")})
+	e.tools.Register(&fakeTool{name: "quick_search", def: toolDef("quick_search", "Search the web.")})
+	e.set[settingWebSearch] = true
+	m := e.s.FullMenu(context.Background(), nil, hh, nil)
+	if len(m) != 2 || m[0].Command != "deep_research" || m[1].Description != "Search the web." {
+		t.Fatalf("menu = %+v", m)
+	}
+	if d := m[0].Description; !strings.HasPrefix(d, "Research a topic in depth. ") || !strings.Contains(d, "use quick_search") {
+		t.Fatalf("deep_research = %q", d)
 	}
 }
