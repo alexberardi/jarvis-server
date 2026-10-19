@@ -24,7 +24,11 @@ type fakeRecAgent struct {
 func (f *fakeRecAgent) call(_ context.Context, nodeID, tool string, args map[string]any, uid int64) map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, nodeID+" "+tool)
+	call := nodeID + " " + tool
+	if tool == computeruse.ToolSwitch {
+		call += map[bool]string{true: " on", false: " off"}[args["on"] == true]
+	}
+	f.calls = append(f.calls, call)
 	return f.answers[tool]
 }
 
@@ -69,19 +73,15 @@ func runTool(t *testing.T, tool servertools.ServerTool, args string, turn server
 	return out
 }
 
-// "Jarvis, watch me" on a computer with computer control on starts the agent's recording; off,
-// or with nobody known, it says why and asks nothing of the agent.
+// "Record this macro" on a computer starts the agent's recording, with computer control off as
+// well as on (C11); with no computer, or nobody known, it says why and asks nothing of the agent.
 func TestStartRecordingTool(t *testing.T) {
 	ve, agent, _ := newRecToolEnv(t)
 	start := &startRecordingTool{m: ve.m}
 
 	// No computer at all: where to set one up.
-	if out := runTool(t, start, "", ve.recTurn(7)); out["error"] != "computer_control_off" || !strings.Contains(out["message"].(string), "set it up") {
+	if out := runTool(t, start, "", ve.recTurn(7)); out["error"] != "no_computer" || !strings.Contains(out["message"].(string), "set it up") {
 		t.Fatalf("no computer: %v", out)
-	}
-	ve.setComputerControl("off")
-	if out := runTool(t, start, "", ve.recTurn(7)); out["error"] != "computer_control_off" || !strings.Contains(out["message"].(string), "Jarvis Automation menu") {
-		t.Fatalf("switch off: %v", out)
 	}
 	if out := runTool(t, start, "", ve.recTurn(0)); out["error"] != "no_speaker" {
 		t.Fatalf("unknown speaker: %v", out)
@@ -89,7 +89,7 @@ func TestStartRecordingTool(t *testing.T) {
 	if len(agent.calls) != 0 {
 		t.Fatalf("asked the agent: %v", agent.calls)
 	}
-	ve.setComputerControl("on")
+	ve.setComputerControl("off")
 	out := runTool(t, start, `{"task": "download my bank statement"}`, ve.recTurn(7))
 	if out["status"] != "recording" || out["recording_id"] != "rec_00aa11bb22cc33dd" || !strings.Contains(out["message"].(string), "I'm done") {
 		t.Fatalf("start: %v", out)
@@ -105,7 +105,7 @@ func TestStartRecordingTool(t *testing.T) {
 	}
 }
 
-// From a Pi in the room, the speaker's own computer with the switch on is the one recorded.
+// From a Pi in the room, the speaker's own computer is the one recorded.
 func TestStartRecordingFindsTheSpeakersComputer(t *testing.T) {
 	ve, agent, _ := newRecToolEnv(t)
 	pc := ve.createNode("node-pc", voiceHH)
@@ -118,7 +118,7 @@ func TestStartRecordingFindsTheSpeakersComputer(t *testing.T) {
 		t.Fatalf("the speaker's computer: %v %v", out, agent.calls)
 	}
 	// Someone else's computer isn't watched.
-	if out := runTool(t, start, "", ve.recTurn(8)); out["error"] != "computer_control_off" || !strings.Contains(out["message"].(string), "your own computer") {
+	if out := runTool(t, start, "", ve.recTurn(8)); out["error"] != "no_computer" || !strings.Contains(out["message"].(string), "your own computer") {
 		t.Fatalf("another member: %v", out)
 	}
 }
@@ -150,7 +150,7 @@ func TestStopStoresRecording(t *testing.T) {
 
 	// Nothing going on: said plainly, nothing stored.
 	agent.answers[computeruse.ToolRecordStop] = map[string]any{"success": false, "error": "no recording is going on", "error_code": "not_recording"}
-	if out := runTool(t, &stopRecordingTool{m: ve.m}, "", ve.recTurn(7)); out["error"] != "not_recording" {
+	if out := runTool(t, &stopRecordingTool{m: ve.m}, `{"name": "bank statement"}`, ve.recTurn(7)); out["error"] != "not_recording" {
 		t.Fatalf("nothing recording: %v", out)
 	}
 	if len(*learned) != 1 {

@@ -36,7 +36,7 @@ func TestLiveDesktopRecording(t *testing.T) {
 	}
 	dir := t.TempDir()
 	activity := &Activity{}
-	r := &Recorder{Dir: filepath.Join(dir, "recordings"), Switch: NewSwitch(true, activity), Activity: activity,
+	r := &Recorder{Dir: filepath.Join(dir, "recordings"), Activity: activity,
 		Sources: map[string]Source{ModeDesktop: NewDesktopSource(filepath.Join(dir, "recordings"), nil, nil)}}
 	ctx := context.Background()
 	id, err := r.Start(ctx, ModeDesktop)

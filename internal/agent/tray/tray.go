@@ -12,6 +12,8 @@
 //	✓ Listen for "Hey Jarvis"                   (voice on/off, live; saved in agent.json)
 //	  Computer control                          (lets Jarvis use this computer; off by default,
 //	                                             saved in agent.json; off stops a running task)
+//	  Record a macro…                           (Teach Jarvis: records what you do; "Stop recording"
+//	                                             while recording; not gated by Computer control)
 //	  Open Jarvis Automation                    (the server's web UI, when it is known)
 //	  Set up / Settings…                        (the agent's setup page in the browser)
 //	  Sign out of Jarvis Automation             (removes this computer; back to the setup page)
@@ -43,8 +45,9 @@ type State struct {
 	// checkmark: Jarvis may use this computer only while it is on (COMPUTER-CONTROL.md C11).
 	ComputerAvailable bool
 	Computer          bool
-	// Record shows "Watch me" while computer control is on and nothing is going on, and "Stop
-	// recording" while recording (a computer that can record).
+	// Record shows "Record a macro…" right below "Computer control" while nothing is going on,
+	// whether computer control is on or off, and "Stop recording" in its place while recording
+	// (a computer that can record).
 	Record bool
 	// OpenURL, when set, shows "Open Jarvis Automation" (the server's web UI).
 	OpenURL string
@@ -132,7 +135,7 @@ const (
 	QuitLabel     = "Quit " + appid.DisplayName
 	StopTaskLabel = "Stop Jarvis"
 	ComputerLabel = "Computer control"
-	RecordLabel   = "Watch me"
+	RecordLabel   = "Record a macro…"
 	StopRecLabel  = "Stop recording"
 )
 
@@ -182,9 +185,6 @@ func Items(s State) []Item {
 	items := []Item{{ID: IDHeader, Label: Header(s)}}
 	if l := ActivityLine(s.Activity); l != "" {
 		items = append(items, Item{ID: IDActivity, Label: l})
-		if s.Record && s.Activity == ActivityRecording {
-			items = append(items, Item{ID: IDRecord, Label: StopRecLabel, Enabled: true})
-		}
 		items = append(items, Item{ID: IDStopTask, Label: StopTaskLabel, Enabled: true})
 	}
 	if s.Update != "" {
@@ -197,8 +197,13 @@ func Items(s State) []Item {
 	if s.ComputerAvailable {
 		items = append(items, Item{ID: IDComputer, Label: ComputerLabel, Enabled: true, Toggle: true, Checked: s.Computer})
 	}
-	if s.Record && s.ComputerAvailable && s.Computer && s.Activity == "" {
-		items = append(items, Item{ID: IDRecord, Label: RecordLabel, Enabled: true})
+	if s.Record && s.ComputerAvailable {
+		switch s.Activity {
+		case "":
+			items = append(items, Item{ID: IDRecord, Label: RecordLabel, Enabled: true})
+		case ActivityRecording:
+			items = append(items, Item{ID: IDRecord, Label: StopRecLabel, Enabled: true})
+		}
 	}
 	if s.OpenURL != "" {
 		items = append(items, Item{ID: IDOpen, Label: OpenLabel, Enabled: true})
@@ -310,8 +315,8 @@ func (t *Tray) clicked(id int32) {
 			if s.Activity == ActivityRecording {
 				t.log.Info("tray: Stop recording chosen")
 				t.act.Record(false)
-			} else if s.Activity == "" && s.ComputerAvailable && s.Computer {
-				t.log.Info("tray: Watch me chosen")
+			} else if s.Activity == "" && s.ComputerAvailable {
+				t.log.Info("tray: Record a macro chosen")
 				t.act.Record(true)
 			}
 		case IDOpen:

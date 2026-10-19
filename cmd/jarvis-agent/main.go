@@ -228,7 +228,7 @@ func usage(w io.Writer) {
   computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
            off by default, and off stops a task going on)
   computer record start [--desktop] | stop   record what you do in the browser (the menu's
-           "Watch me"), or on the desktop (macOS), and send it to Jarvis when you stop
+           "Record a macro…"), or on the desktop (macOS), and send it to Jarvis when you stop
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   update   update to the version of the jarvisd this computer is signed in to (the agent also
@@ -630,12 +630,13 @@ func run(ctx context.Context, args []string) error {
 	}
 	defer closeTools()
 	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
-	// is uploaded once connected to jarvisd (liveCC).
+	// is uploaded once connected to jarvisd (liveCC). computer_switch is computer control's
+	// switch for jarvisd's voice tools (enable/disable_computer_control).
 	var liveCC atomic.Pointer[node.CC]
 	var recorder *computer.Recorder
 	if p.desktop {
-		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), computerSw, activity, tools, liveCC.Load, log)
-		tools = append(tools, &computer.RecordTools{R: recorder})
+		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, log)
+		tools = append(tools, &computer.RecordTools{R: recorder}, &computer.SwitchTools{S: computerSw})
 		recReady.Store(recorder)
 	}
 	go learnServer(ctx, c.ConfigURL, tf.origins, log)

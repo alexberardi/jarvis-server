@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// Recording (plan P3 piece 29): "Jarvis, watch me", the status icon's "Watch me" or
+// Recording (plan P3 piece 29): "Jarvis, watch me", the status icon's "Record a macro…" or
 // `jarvis-agent computer record start` records what the user does, so a workflow can be learnt
 // from it (jarvisd, piece 30). The trace is kept on this computer in
 // <agent dir>/recordings/<id>.jsonl (the file 0600, the directory 0700) until jarvisd's
@@ -94,9 +94,8 @@ type Trace struct {
 type Recorder struct {
 	// Dir holds the traces (<agent dir>/recordings).
 	Dir string
-	// Switch is computer control's switch: off refuses Start. Activity shows the recording
-	// and stops it.
-	Switch   *Switch
+	// Activity shows the recording and stops it. Computer control's switch doesn't gate
+	// recording (COMPUTER-CONTROL.md C11): each one is an explicit act, shown while it runs.
 	Activity *Activity
 	// Sources by mode; a mode without one can't be recorded.
 	Sources map[string]Source
@@ -142,9 +141,6 @@ func (r *Recorder) Path(id string) string { return filepath.Join(r.Dir, id+".jso
 
 // Start starts recording in mode and returns the recording's id.
 func (r *Recorder) Start(ctx context.Context, mode string) (string, error) {
-	if err := r.Switch.Allow(Record); err != nil {
-		return "", err
-	}
 	if mode != ModeBrowser && mode != ModeDesktop {
 		return "", fmt.Errorf("unknown recording mode %q: want browser or desktop", mode)
 	}

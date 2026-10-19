@@ -94,7 +94,7 @@ func newRecEnv(t *testing.T) *recEnv {
 	e := &recEnv{src: &fakeSource{}, timer: &fakeTimer{}, activity: &Activity{}}
 	e.sw = NewSwitch(true, e.activity)
 	clock := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
-	e.r = &Recorder{Dir: filepath.Join(t.TempDir(), "jarvis-agent", "recordings"), Switch: e.sw, Activity: e.activity,
+	e.r = &Recorder{Dir: filepath.Join(t.TempDir(), "jarvis-agent", "recordings"), Activity: e.activity,
 		Sources: map[string]Source{ModeBrowser: e.src},
 		Stopped: func(tr Trace) { e.mu.Lock(); e.handed = append(e.handed, tr); e.mu.Unlock() },
 		now:     func() time.Time { clock = clock.Add(time.Second); return clock }, after: e.timer.after}
@@ -253,12 +253,6 @@ func TestOutsideStopHandsTraceOn(t *testing.T) {
 	if _, err := e.r.End(); !errors.Is(err, ErrNotRecording) {
 		t.Fatalf("end with nothing going on: %v", err)
 	}
-	// Turning computer control off stops a recording too.
-	e.r.Start(context.Background(), ModeBrowser)
-	_ = e.sw.Set(false)
-	if got := e.handedOn(); len(got) != 3 || got[2].Reason != StopFromOutside {
-		t.Fatalf("handed on %+v", got)
-	}
 }
 
 func TestStartRefusals(t *testing.T) {
@@ -285,10 +279,33 @@ func TestStartRefusals(t *testing.T) {
 	if k, _ := e.activity.Status(); k != Idle {
 		t.Fatalf("activity %q", k)
 	}
-	e.src.failErr = nil
+}
+
+// Recording isn't gated by computer control (C11): each recording is an explicit act and the
+// indicator shows while it runs. Starting one doesn't turn the switch on, and turning the
+// switch off doesn't end it; replaying (a computer action) is still refused while off.
+func TestRecordingWithComputerControlOff(t *testing.T) {
+	e := newRecEnv(t)
 	_ = e.sw.Set(false)
-	if _, err := e.r.Start(ctx, ModeBrowser); !errors.Is(err, ErrOff) {
-		t.Fatalf("switch off: %v", err)
+	id, err := e.r.Start(context.Background(), ModeBrowser)
+	if err != nil {
+		t.Fatalf("start with computer control off: %v", err)
+	}
+	if e.sw.On() {
+		t.Fatal("starting a recording turned computer control on")
+	}
+	if k, _ := e.activity.Status(); k != Recording {
+		t.Fatalf("the indicator shows %q, want recording", k)
+	}
+	_ = e.sw.Set(false)
+	if e.r.Current() != id {
+		t.Fatal("turning computer control off ended the recording")
+	}
+	if !errors.Is(e.sw.Allow(TargetBrowser), ErrOff) || !errors.Is(e.sw.Allow(TargetDesktop), ErrOff) {
+		t.Fatal("a replay's actions are allowed with computer control off")
+	}
+	if _, err := e.r.Stop(id); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -352,9 +369,10 @@ func TestRecordTools(t *testing.T) {
 	}
 	_ = e.sw.Set(false)
 	out, _ = tools.Call(ctx, "computer_record_start", map[string]any{"mode": "browser"}, node.Request{})
-	if out["error_code"] != "computer_control_off" {
-		t.Fatalf("off %v", out)
+	if out["success"] != true {
+		t.Fatalf("start with computer control off %v", out)
 	}
+	_, _ = tools.Call(ctx, "computer_record_stop", map[string]any{}, node.Request{})
 	if _, ok := tools.Call(ctx, "computer_act", nil, node.Request{}); ok {
 		t.Fatal("handled another tool")
 	}
