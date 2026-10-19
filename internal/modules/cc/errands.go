@@ -187,14 +187,37 @@ func (m *Module) purgeErrands(ctx context.Context, tx *sql.Tx, userID int64) err
 type errandNodes struct{ m *Module }
 
 // RunTool is dispatch_node_command: the tool_call verb (no `trusted`, D4) and the node's POST
-// to /device-control-results/{reply_request_id}.
+// to /device-control-results/{reply_request_id}. Attached images are dropped (their labels
+// stay), so a node step never stores image data.
 func (n errandNodes) RunTool(ctx context.Context, nodeID, command string, args *pyjson.Object, userID *int64, voice string, timeout time.Duration) *pyjson.Object {
+	out, _ := n.dispatch(ctx, nodeID, command, args, userID, voice, timeout)
+	out, _, _ = liftImages(out)
+	return out
+}
+
+// RunToolImages is RunTool that also hands back the output's images, for one model call: the
+// output keeps their labels only. err is set (with the failure dict) when nothing answered.
+func (n errandNodes) RunToolImages(ctx context.Context, nodeID, command string, args *pyjson.Object, userID *int64, timeout time.Duration) (*pyjson.Object, []ToolImage, error) {
+	out, err := n.dispatch(ctx, nodeID, command, args, userID, "", timeout)
+	if err != nil {
+		return out, nil, err
+	}
+	out, imgs, lerr := liftImages(out)
+	if lerr != nil {
+		n.m.deps.Log.Warn("cc: errand tool images", "command", command, "err", lerr)
+	}
+	return out, imgs, nil
+}
+
+// dispatch sends one tool_call and waits for the output dict. err is set, with the legacy
+// failure dict, when nothing answered (no MQTT, node offline, timeout).
+func (n errandNodes) dispatch(ctx context.Context, nodeID, command string, args *pyjson.Object, userID *int64, voice string, timeout time.Duration) (*pyjson.Object, error) {
 	if n.m.bus == nil || !n.m.bus.Available() {
-		return servertools.Obj("success", false, "error", "could not dispatch to node: MQTT is unavailable")
+		return servertools.Obj("success", false, "error", "could not dispatch to node: MQTT is unavailable"), errors.New("MQTT is unavailable")
 	}
 	if up, known := n.m.bus.NodeSession(nodeID); known && !up {
 		// Nothing would answer: fail the step now rather than after the 30 s wait.
-		return servertools.Obj("success", false, "error", "the node is offline")
+		return servertools.Obj("success", false, "error", "the node is offline"), errors.New("the node is offline")
 	}
 	if args == nil {
 		args = pyjson.NewObject()
@@ -211,11 +234,11 @@ func (n errandNodes) RunTool(ctx context.Context, nodeID, command string, args *
 	defer cancel()
 	_, res, err := n.m.bus.CommandAwait(wctx, nodeID, "tool_call", details, key)
 	if err != nil {
-		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true)
+		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true), errors.New("the node didn't respond in time")
 	}
 	v, err := pyjson.Loads(string(res))
 	if err != nil {
-		return servertools.Obj("success", true, "result", string(res))
+		return servertools.Obj("success", true, "result", string(res)), nil
 	}
 	output := v
 	if o, ok := v.(*pyjson.Object); ok {
@@ -224,9 +247,9 @@ func (n errandNodes) RunTool(ctx context.Context, nodeID, command string, args *
 		}
 	}
 	if o, ok := output.(*pyjson.Object); ok {
-		return o
+		return o, nil
 	}
-	return servertools.Obj("success", true, "result", output)
+	return servertools.Obj("success", true, "result", output), nil
 }
 
 // ReportCommands is _request_tools_from_node: report_tools and the node's available_commands.

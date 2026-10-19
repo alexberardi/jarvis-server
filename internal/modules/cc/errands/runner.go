@@ -373,7 +373,7 @@ func nodeOutcome(cmd string, out *pyjson.Object) Result {
 	r := Result{Command: cmd, Success: success}
 	if success {
 		r.Message = truthyStr(out, "message")
-		r.Data = out
+		r.Data = stripImages(out)
 	} else if truthy(ev) {
 		r.Error = pyjson.Str(ev)
 	} else {
