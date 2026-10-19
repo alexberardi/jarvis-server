@@ -389,6 +389,17 @@ def _optional(cmd, attr):
         return None
 
 
+def _context_ops(cmd) -> list:
+    """The command's declared context operations (N:services/context_handler.py _declared_ops):
+    a bad implementation declares none rather than breaking describe."""
+    try:
+        ops = list(getattr(cmd, "context_operations", None) or [])
+        return [op.to_dict() if hasattr(op, "to_dict") else {"name": str(op)} for op in ops]
+    except Exception as exc:
+        print(f"sidecar: {cmd.command_name}: context_operations failed: {exc}", file=sys.stderr)
+        return []
+
+
 def describe(commands: dict) -> dict:
     tools = []
     for name, cmd in commands.items():
@@ -396,7 +407,8 @@ def describe(commands: dict) -> dict:
             tools.append({"name": name, "client_tool": cmd.to_openai_tool_schema(), "command": cmd.get_command_schema(),
                           "secrets": _secrets(cmd), "data_browser": _browser(cmd),
                           "associated_service": _optional(cmd, "associated_service"),
-                          "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name)})
+                          "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name),
+                          "context_operations": _context_ops(cmd)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
             if name in PACKAGE_OF:
@@ -430,6 +442,25 @@ def data_create(commands: dict, params: dict) -> dict:
     except Exception as exc:
         return {"failed": str(exc)}
     return {"key": key, "record": record}
+
+
+def context_query(commands: dict, params: dict) -> dict:
+    """Run one declared context operation (the agent has checked it is declared and its required
+    params are there) as the requesting user, as on a voice turn. A raise comes back as
+    {"raised": message}; a result is its to_dict(), or {ok, data, error} for a bare value."""
+    cmd = commands.get(params.get("command_name", ""))
+    if cmd is None:
+        return {"raised": "command not loaded"}
+    set_current_user_id(params.get("user_id"))
+    try:
+        result = cmd.execute_context_operation(params.get("operation", ""), params.get("params") or {})
+    except Exception as exc:
+        return {"raised": str(exc)}
+    finally:
+        set_current_user_id(None)
+    if hasattr(result, "to_dict"):
+        return {"result": result.to_dict()}
+    return {"result": {"ok": True, "data": result, "error": None}}
 
 
 # Deferred on_response_complete callables by token. Bounded: a token the agent never completes
@@ -520,6 +551,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": data_summaries(commands, msg.get("params") or {})}
             elif method == "data_create":
                 reply = {"id": msg_id, "result": data_create(commands, msg.get("params") or {})}
+            elif method == "context_query":
+                reply = {"id": msg_id, "result": context_query(commands, msg.get("params") or {})}
             else:
                 reply = {"id": msg_id, "error": f"unknown method {method!r}"}
         except Exception as exc:

@@ -79,6 +79,7 @@ type Sidecar struct {
 	secrets map[string][]nodesettings.SecretSpec
 	extras  map[string]extras
 	browser []nodesettings.DataCommand
+	context []nodesettings.ContextCommand
 	pkgOf   map[string]string // command -> the installed package it came from
 	failed  map[string]string // package -> why its commands didn't load
 	store   Storage
@@ -173,6 +174,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			Secrets     []nodesettings.SecretSpec `json:"secrets"`
 			DataBrowser *nodesettings.DataCommand `json:"data_browser"`
 			Package     string                    `json:"package"`
+			ContextOps  []json.RawMessage         `json:"context_operations"`
 			extras
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
@@ -188,6 +190,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		if t.Package != "" {
 			s.pkgOf[t.Name] = t.Package
 		}
+		s.context = append(s.context, nodesettings.ContextCommand{Name: t.Name, Operations: t.ContextOps})
 		if b := t.DataBrowser; b != nil { // nil: its settings couldn't be read, so it stays out
 			b.Name = t.Name
 			s.browser = append(s.browser, *b)
@@ -252,6 +255,32 @@ func (s *Sidecar) Create(_ context.Context, command string, values nodesettings.
 		return "", nil, errors.New(*res.Failed)
 	}
 	return res.Key, res.Record, nil
+}
+
+// ContextCommands are the commands with the context operations they declared, read once at start.
+func (s *Sidecar) ContextCommands() []nodesettings.ContextCommand { return s.context }
+
+// ContextQuery runs one context operation as uid (nil: no user) and returns its result dict.
+// An error is the operation raising, or the sidecar failing.
+func (s *Sidecar) ContextQuery(_ context.Context, command, operation string, params json.RawMessage, uid *int64) (nodesettings.Object, error) {
+	var who any // JSON null for no user
+	if uid != nil {
+		who = *uid
+	}
+	var res struct {
+		Result *nodesettings.Object `json:"result"`
+		Raised *string              `json:"raised"`
+	}
+	err := s.roundTrip("context_query", map[string]any{"command_name": command, "operation": operation, "params": params, "user_id": who}, &res)
+	switch {
+	case err != nil:
+		return nodesettings.Object{}, err
+	case res.Raised != nil:
+		return nodesettings.Object{}, errors.New(*res.Raised)
+	case res.Result == nil:
+		return nodesettings.Object{}, errors.New("context_query: no result")
+	}
+	return *res.Result, nil
 }
 
 func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error {

@@ -13,6 +13,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/provisioning"
+	"github.com/alexberardi/jarvis-server/internal/agent/reset"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
 )
 
@@ -97,5 +98,7 @@ func provisionOptions(path string, w provisioning.WiFi, apSSID string, log *slog
 			return st.SaveK2(k2, kid, createdAt)
 		},
 		Provisioned: func() bool { _, ok := enrolled(); return ok },
+		// The same wipe as jarvisd's factory-reset task (reset.Wipe); the node stays in setup mode.
+		FactoryReset: func(context.Context) ([]string, error) { return reset.Wipe(filepath.Dir(path)) },
 	}
 }
