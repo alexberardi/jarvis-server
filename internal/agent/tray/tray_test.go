@@ -43,6 +43,13 @@ func TestItems(t *testing.T) {
 		// The self-update's line sits under the header.
 		{State{Status: "Running", Update: "Updated to v0.2.0"},
 			`(Jarvis Automation Agent — Running) | (Updated to v0.2.0) | -- | Quit Jarvis Automation Agent`},
+		// While Jarvis controls the computer (or records), the menu says so and can stop it.
+		{State{Status: "Running", VoiceAvailable: true, Voice: true, Activity: ActivityControlling},
+			`(Jarvis Automation Agent — Running) | (Jarvis is controlling this computer) | Stop Jarvis | -- | [x] Listen for "Hey Jarvis" | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", Activity: ActivityPaused, Update: "Updated to v0.2.0"},
+			`(Jarvis Automation Agent — Running) | (Paused) | Stop Jarvis | (Updated to v0.2.0) | -- | Quit Jarvis Automation Agent`},
+		{State{Status: "Running", Activity: ActivityRecording},
+			`(Jarvis Automation Agent — Running) | (Recording) | Stop Jarvis | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
 		{State{Status: "Running"}, `(Jarvis Automation Agent — Running) | -- | Quit Jarvis Automation Agent`},
 	} {
@@ -80,10 +87,11 @@ func TestClicksRunActions(t *testing.T) {
 				rec("voice off")
 			}
 		},
-		Open:    func(u string) { rec("open " + u) },
-		Setup:   func() { rec("setup") },
-		Quit:    func() { rec("quit") },
-		SignOut: func() { rec("sign out") },
+		Open:     func(u string) { rec("open " + u) },
+		Setup:    func() { rec("setup") },
+		Quit:     func() { rec("quit") },
+		SignOut:  func() { rec("sign out") },
+		StopTask: func() { rec("stop task") },
 	}, State{VoiceAvailable: true})
 	be := &fakeBackend{}
 	if err := tr.attach(be); err != nil {
@@ -109,13 +117,20 @@ func TestClicksRunActions(t *testing.T) {
 	tr.Update(func(s *State) { s.SignOut = true })
 	tr.clicked(IDSignOut)
 	tr.wait()
+	tr.clicked(IDStopTask) // nothing going on: nothing
+	tr.wait()
+	tr.Update(func(s *State) { s.Activity = ActivityControlling })
+	tr.clicked(IDStopTask)
+	tr.wait()
+	tr.Update(func(s *State) { s.Activity = "" })
 	tr.clicked(IDHeader) // the header does nothing
+	tr.clicked(IDActivity)
 	tr.clicked(IDQuit)
 	tr.wait()
-	if strings.Join(got, ", ") != "voice on, voice off, open http://jarvis.example/, setup, sign out, quit" {
+	if strings.Join(got, ", ") != "voice on, voice off, open http://jarvis.example/, setup, sign out, stop task, quit" {
 		t.Fatalf("actions %q", got)
 	}
-	if len(be.shown) != 5 || !strings.Contains(be.shown[1], "[x] Listen") || !strings.Contains(be.shown[3], "Set up / Settings…") ||
+	if len(be.shown) != 7 || !strings.Contains(be.shown[5], "Stop Jarvis") || strings.Contains(be.shown[6], "Stop Jarvis") || !strings.Contains(be.shown[1], "[x] Listen") || !strings.Contains(be.shown[3], "Set up / Settings…") ||
 		!strings.Contains(be.shown[4], "Sign out of Jarvis Automation") {
 		t.Fatalf("shown %q", be.shown)
 	}
@@ -123,7 +138,7 @@ func TestClicksRunActions(t *testing.T) {
 	tr.Close()
 	tr.clicked(IDQuit) // after Close: ignored
 	tr.wait()
-	if !be.closed || len(got) != 6 {
+	if !be.closed || len(got) != 7 {
 		t.Fatalf("closed %v, actions %q", be.closed, got)
 	}
 }
@@ -175,5 +190,34 @@ func TestIcons(t *testing.T) {
 	}
 	if len(PNG(tpl)) < 100 {
 		t.Fatal("template PNG too small")
+	}
+}
+
+// TestTooltipAndIconFollowTheActivity: the tooltip names what Jarvis is doing, and the icon
+// gets its badge (Color's active variant) while it does it.
+func TestTooltipAndIconFollowTheActivity(t *testing.T) {
+	if got := Tooltip(State{Status: "Running"}); got != "Jarvis Automation Agent — Running" {
+		t.Fatalf("idle tooltip %q", got)
+	}
+	if got := Tooltip(State{Status: "Running", Activity: ActivityControlling}); got != "Jarvis is controlling this computer" {
+		t.Fatalf("controlling tooltip %q", got)
+	}
+	if Active(Items(State{})) || !Active(Items(State{Activity: ActivityRecording})) {
+		t.Fatal("Active should follow the Stop item")
+	}
+	for _, n := range []int{16, 22, 32, 64} {
+		plain, act := Color(n), ColorActive(n)
+		if act.Bounds() != plain.Bounds() {
+			t.Fatalf("ColorActive(%d) is %v", n, act.Bounds())
+		}
+		// The badge sits in the bottom-right corner, in the activity colour; the rest is the
+		// plain shield.
+		c := act.NRGBAAt(n-1-n/8, n-1-n/8)
+		if c.A < 200 || c.R < 200 || c.B > 80 {
+			t.Fatalf("ColorActive(%d): no badge at the corner (%v)", n, c)
+		}
+		if act.NRGBAAt(n/2, n/3) != plain.NRGBAAt(n/2, n/3) {
+			t.Fatalf("ColorActive(%d) changed the shield", n)
+		}
 	}
 }

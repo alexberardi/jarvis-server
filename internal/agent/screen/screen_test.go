@@ -11,11 +11,13 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // fakeExec scripts commands: outputs by the command line's first words.
@@ -273,6 +275,15 @@ func TestToolAttachesTheCapture(t *testing.T) {
 	if a["label"] != `screenshot of the window "Error"` || out["window_title"] != "Error" || out["app"] != "firefox" {
 		t.Errorf("label %v, title %v, app %v", a["label"], out["window_title"], out["app"])
 	}
+	if _, has := out["capture"]; has {
+		t.Errorf("capture block without a geometry: %v", out["capture"])
+	}
+	fc.shot.Geometry = computeruse.Geometry{OriginX: 1920, OriginY: 30, LogicalW: 32, LogicalH: 24, Scale: 2, Monitor: "DP-2"}
+	out, _ = tl.Call(context.Background(), ToolRead, map[string]any{}, node.Request{})
+	want := map[string]any{"origin_x": 1920, "origin_y": 30, "logical_w": 32, "logical_h": 24, "scale": 2.0, "monitor": "DP-2"}
+	if got, _ := out["capture"].(map[string]any); !reflect.DeepEqual(got, want) || out["width"] != 64 || out["height"] != 48 {
+		t.Errorf("capture = %v (want %v), size %vx%v", out["capture"], want, out["width"], out["height"])
+	}
 	if _, ok := tl.Call(context.Background(), ToolRead, map[string]any{"scope": "SCREEN"}, node.Request{}); !ok || fc.scope != ScopeScreen {
 		t.Errorf("scope screen not passed: %q", fc.scope)
 	}
@@ -298,5 +309,144 @@ func TestToolUnavailableOrFailing(t *testing.T) {
 	}
 	if defs := (&Tools{}).Available(context.Background()); len(defs) != 0 {
 		t.Error("a nil capturer offered the tool")
+	}
+}
+
+func wantGeo(t *testing.T, what string, got, want computeruse.Geometry) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s: geometry = %+v, want %+v", what, got, want)
+	}
+}
+
+// TestGeometryHyprlandWindow: a window's at/size are layout coordinates; its monitor gives the
+// scale and name. A monitor's logical size is its mode over its scale (turned by a transform).
+func TestGeometryHyprlandWindow(t *testing.T) {
+	f := hypr()
+	f.out["hyprctl -j activewindow"] = []byte(`{"at":[1930,40],"size":[800,600],"title":"Docs","class":"firefox","monitor":1}`)
+	f.out["hyprctl -j monitors"] = []byte(`[
+		{"id":0,"name":"DP-1","x":0,"y":0,"width":1920,"height":1080,"scale":1,"transform":0,"focused":false,"activeWorkspace":{"id":1}},
+		{"id":1,"name":"HDMI-A-1","x":1920,"y":0,"width":3840,"height":2160,"scale":1.5,"transform":0,"focused":true,"activeWorkspace":{"id":2}}]`)
+	f.out["hyprctl -j clients"] = []byte(`[{"at":[10,20],"size":[640,480],"title":"notes","class":"foot","workspace":{"id":1},"monitor":0}]`)
+	f.out["grim"] = pngOf(120, 90)
+	l := &Wayland{X: f}
+	shot, err := l.Capture(context.Background(), ScopeWindow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "window", shot.Geometry, computeruse.Geometry{OriginX: 1930, OriginY: 40, LogicalW: 800, LogicalH: 600, Scale: 1.5, Monitor: "HDMI-A-1"})
+	if shot, err = l.Capture(context.Background(), ScopeScreen, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "monitor", shot.Geometry, computeruse.Geometry{OriginX: 1920, OriginY: 0, LogicalW: 2560, LogicalH: 1440, Scale: 1.5, Monitor: "HDMI-A-1"})
+	if shot, err = l.Capture(context.Background(), ScopeWindow, "foot"); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "named", shot.Geometry, computeruse.Geometry{OriginX: 10, OriginY: 20, LogicalW: 640, LogicalH: 480, Scale: 1, Monitor: "DP-1"})
+
+	// No focused monitor: every output, the box around them at the highest scale. DP-1 is
+	// turned a quarter (transform 1): 1080 wide, 1920 high.
+	f.out["hyprctl -j monitors"] = []byte(`[
+		{"id":0,"name":"DP-1","x":0,"y":0,"width":1920,"height":1080,"scale":1,"transform":1},
+		{"id":1,"name":"HDMI-A-1","x":1080,"y":0,"width":3840,"height":2160,"scale":2,"transform":0}]`)
+	if shot, err = l.Capture(context.Background(), ScopeScreen, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "every output", shot.Geometry, computeruse.Geometry{LogicalW: 3000, LogicalH: 1920, Scale: 2})
+
+	// Without the monitor list the window still has its place; the scale comes from the image.
+	f.out["hyprctl -j monitors"] = []byte(`not json`)
+	f.out["grim"] = pngOf(1200, 900)
+	if shot, err = l.Capture(context.Background(), ScopeWindow, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "no monitors", shot.Geometry, computeruse.Geometry{OriginX: 1930, OriginY: 40, LogicalW: 800, LogicalH: 600, Scale: 1.5})
+}
+
+// TestGeometrySwayScale2: rects are layout coordinates; the output's scale is the scale, or the
+// image's when the tree has none.
+func TestGeometrySwayScale2(t *testing.T) {
+	tree := `{"type":"root","rect":{"x":0,"y":0,"width":1280,"height":800},"nodes":[
+		{"type":"output","name":"__i3","rect":{"x":0,"y":0,"width":1280,"height":800}},
+		{"type":"output","name":"eDP-1","scale":2,"current_workspace":"1","rect":{"x":0,"y":0,"width":1280,"height":800},"nodes":[
+		{"type":"workspace","name":"1","nodes":[{"type":"con","name":"vim","app_id":"foot","focused":true,
+		"rect":{"x":10,"y":20,"width":300,"height":200}}]}]}]}`
+	f := &fakeExec{
+		env:   map[string]string{"WAYLAND_DISPLAY": "w", "SWAYSOCK": "/s"},
+		paths: map[string]bool{"swaymsg": true, "grim": true},
+		out:   map[string][]byte{"swaymsg -t get_tree": []byte(tree), "grim": pngOf(600, 400)},
+	}
+	l := &Wayland{X: f}
+	shot, err := l.Capture(context.Background(), ScopeWindow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "window", shot.Geometry, computeruse.Geometry{OriginX: 10, OriginY: 20, LogicalW: 300, LogicalH: 200, Scale: 2, Monitor: "eDP-1"})
+	if shot, err = l.Capture(context.Background(), ScopeWindow, "vim"); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "named", shot.Geometry, computeruse.Geometry{OriginX: 10, OriginY: 20, LogicalW: 300, LogicalH: 200, Scale: 2, Monitor: "eDP-1"})
+	if shot, err = l.Capture(context.Background(), ScopeScreen, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "output", shot.Geometry, computeruse.Geometry{LogicalW: 1280, LogicalH: 800, Scale: 2, Monitor: "eDP-1"})
+
+	// An older sway without the output's scale: the image says 600 px over 300 points.
+	f.out["swaymsg -t get_tree"] = []byte(strings.Replace(tree, `"scale":2,`, "", 1))
+	if shot, err = l.Capture(context.Background(), ScopeWindow, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "no scale", shot.Geometry, computeruse.Geometry{OriginX: 10, OriginY: 20, LogicalW: 300, LogicalH: 200, Scale: 2, Monitor: "eDP-1"})
+
+	// Nothing focused: every output but sway's scratchpad (__i3).
+	f.out["swaymsg -t get_tree"] = []byte(strings.Replace(tree, `"focused":true`, `"focused":false`, 1))
+	if shot, err = l.Capture(context.Background(), ScopeScreen, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "every output", shot.Geometry, computeruse.Geometry{LogicalW: 1280, LogicalH: 800, Scale: 2})
+}
+
+// TestGeometryMac: a window's place is its kCGWindowBounds, its scale the image over its points;
+// -m is the main display's.
+func TestGeometryMac(t *testing.T) {
+	img := pngOf(800, 600)
+	f := &fakeExec{out: map[string][]byte{screencapture: nil}, onRun: func(_ string, args []string) error {
+		return os.WriteFile(args[len(args)-1], img, 0o600)
+	}}
+	m := &Mac{X: f, Trusted: func() bool { return true },
+		Windows: func() ([]MacWindow, error) {
+			return []MacWindow{{ID: 9, Title: "Report", App: "Preview", X: -1200, Y: 25, W: 400, H: 300, OnScreen: true}}, nil
+		},
+		Main: func() (computeruse.Geometry, error) {
+			return computeruse.Geometry{LogicalW: 1440, LogicalH: 900, Scale: 2, Monitor: "main"}, nil
+		}}
+	shot, err := m.Capture(context.Background(), ScopeWindow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "window", shot.Geometry, computeruse.Geometry{OriginX: -1200, OriginY: 25, LogicalW: 400, LogicalH: 300, Scale: 2})
+	if shot, err = m.Capture(context.Background(), ScopeScreen, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantGeo(t, "main display", shot.Geometry, computeruse.Geometry{LogicalW: 1440, LogicalH: 900, Scale: 2, Monitor: "main"})
+	m.Main = func() (computeruse.Geometry, error) { return computeruse.Geometry{}, errors.New("no display") }
+	if shot, err = m.Capture(context.Background(), ScopeScreen, ""); err != nil || shot.Geometry != (computeruse.Geometry{}) {
+		t.Errorf("no main display: %+v %v", shot.Geometry, err)
+	}
+}
+
+// TestEncodeKeepsGeometry: encoding records the downscaled size and keeps the rest, so a point
+// on the image the model saw maps back to the screen.
+func TestEncodeKeepsGeometry(t *testing.T) {
+	g := computeruse.Geometry{OriginX: 1920, OriginY: 0, LogicalW: 1568, LogicalH: 980, Scale: 2, Monitor: "HDMI-A-1"}
+	shot := Shot{Image: image.NewRGBA(image.Rect(0, 0, 3136, 1960)), Geometry: g}
+	data, err := EncodeShot(&shot)
+	if err != nil || len(data) == 0 {
+		t.Fatal(err)
+	}
+	g.ImageW, g.ImageH = 1568, 980
+	wantGeo(t, "encoded", shot.Geometry, g)
+	if x, y := shot.Geometry.ToGlobal(784, 490); x != 1920+784 || y != 490 {
+		t.Errorf("ToGlobal(784, 490) = %d, %d", x, y)
 	}
 }

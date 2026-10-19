@@ -40,7 +40,7 @@ func TestWirePiTasks(t *testing.T) {
 	live := &sidecar.Live{}
 	tools := node.Multi{live}
 	r := &node.Runner{Creds: creds, Log: log}
-	wireNodeSettings(r, st, tools, nil, log)
+	wireNodeSettings(r, st, tools, nil, nil, nil, log)
 	quit := make(chan struct{})
 	tm := &timers.Service{Path: filepath.Join(dir, "timers.json"), Log: log}
 	tm.Start()

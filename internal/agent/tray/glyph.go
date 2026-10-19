@@ -158,3 +158,25 @@ func toNRGBA(src *image.RGBA) *image.NRGBA {
 	draw.Draw(out, out.Bounds(), src, src.Bounds().Min, draw.Src)
 	return out
 }
+
+// badgeCol is the activity badge's colour: the island's controlling orange.
+var badgeCol = color.NRGBA{255, 159, 10, 255}
+
+// ColorActive is Color with the activity badge: a dot in the bottom-right corner, ringed in
+// the shield's light colour, shown while Jarvis controls the computer or records.
+func ColorActive(size int) *image.NRGBA {
+	img := Color(size)
+	n := float64(size)
+	r := math.Max(2.5, n*0.2)
+	rim := math.Max(1, math.Round(n/16))
+	cx, cy := n-r, n-r
+	out := image.NewRGBA(img.Bounds())
+	draw.Draw(out, out.Bounds(), img, image.Point{}, draw.Src)
+	dot := func(col color.NRGBA, rad float64) {
+		m := mask(size, func(z *vector.Rasterizer) { roundRect(z, cx-rad, cy-rad, cx+rad, cy+rad, rad, rad) })
+		draw.DrawMask(out, out.Bounds(), image.NewUniform(col), image.Point{}, m, image.Point{}, draw.Over)
+	}
+	dot(shieldLight, r)
+	dot(badgeCol, r-rim)
+	return toNRGBA(out)
+}

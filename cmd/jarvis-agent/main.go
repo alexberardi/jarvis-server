@@ -35,6 +35,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/clock"
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
@@ -142,6 +143,8 @@ func main() {
 		err = provisionCmd(ctx, os.Args[2:])
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
+	case "computer":
+		err = computerCmd(os.Args[2:], os.Stdout, controlDial)
 	case "island-demo":
 		err = islandDemo(ctx, os.Args[2:])
 	case "browser-host":
@@ -200,6 +203,8 @@ func usage(w io.Writer) {
            code or your Jarvis Automation sign-in), browser extension, permissions, voice,
            remove (the status icon's "Set up / Settings…") [--no-open] [--no-start]
   stop     stop the running agent until the next login or start (the menu's Quit does the same)
+  computer stop | status   stop what Jarvis is doing with this computer (a computer task, a
+           recording; the menu's "Stop Jarvis" does the same), or say what it is doing
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   update   update to the version of the jarvisd this computer is signed in to (the agent also
@@ -551,6 +556,9 @@ func run(ctx context.Context, args []string) error {
 	ctx, quit := context.WithCancel(ctx)
 	defer quit()
 	pill := &runningPill{}
+	// What Jarvis is doing with the computer: the island and the status icon show it; the
+	// icon's Stop, `jarvis-agent computer stop` and the control socket end it.
+	activity := &computer.Activity{}
 	var swReady atomic.Pointer[voiceSwitch]
 	var runner atomic.Pointer[node.Runner]
 	if ctl != nil {
@@ -561,7 +569,7 @@ func run(ctx context.Context, args []string) error {
 			}
 			return errors.New("not connected to jarvisd yet")
 		}
-		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health)()
+		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity)()
 	}
 	// K2, command secrets and data live next to node.json; another node's are dropped here.
 	st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
@@ -621,10 +629,31 @@ func run(ctx context.Context, args []string) error {
 		}
 		nodeConfig = wirePiNode(r, vf, hf, hd, live, sp, log)
 	}
-	wireNodeSettings(r, st, tools, nodeConfig, log)
+	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
+	// and are in its settings snapshot; a computer has none.
+	// A secrets push can configure a family (an API key): it joins the heartbeat's protocols.
+	var devs func(context.Context) nodesettings.Devices
+	var secrets func()
+	sc := liveSidecar(tools)
+	if !p.desktop && sc != nil {
+		devs = sc.Devices
+		secrets = func() {
+			if err := sc.RefreshDevices(); err != nil {
+				log.Warn("devices: families not described again after a secrets push", "err", err)
+			}
+			r.BeatNow()
+		}
+	}
+	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, log)
+	// action, callback and toggle_command: the app's device control, a command's buttons and
+	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
+	wireActions(r, sc, st, sayNow(mic), log)
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
+		if sc != nil {
+			wireDevices(r, sc, log)
+		}
 		wirePiTasks(r, st, filepath.Dir(path), tools, tf.pkgs, tf.host.Timers, quit, log)
 	}
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
@@ -643,6 +672,7 @@ func run(ctx context.Context, args []string) error {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)
 		o.Mic = mic
+		o.Computer = activity // the wake word pauses a computer task, "stop" ends it
 		if duck != nil {
 			o.Music = duck
 		}
@@ -667,8 +697,10 @@ func run(ctx context.Context, args []string) error {
 	// Signed out (from Add-ons, an admin, or the menu's Sign out): drop node.json only, keep
 	// agent.json and apps.json, and open the setup page so someone can sign in again.
 	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
-	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut}
+	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
+		activity: activity}
 	sw.changed = ic.voiceChanged
+	activity.Show(ic.activityChanged)
 	var note atomic.Pointer[func(string)] // the island's note, once it is up
 	followServer(ctx, r, !*f.noAutoUpdate, func(text string) {
 		ic.setUpdate(text)
@@ -697,6 +729,8 @@ func run(ctx context.Context, args []string) error {
 			pill.Attach(nil)
 		} else {
 			hideFromScreenshots(tools, i)
+			// Shown whether or not listening is on: Jarvis using the computer is always shown.
+			activity.Show(func(k computer.Kind, text string) { i.SetActivity(islandActivity(k), text) })
 			n := func(text string) { i.Note(text, 8*time.Second) }
 			note.Store(&n)
 			if voice.Supported {

@@ -15,7 +15,8 @@
 #                   jarvisd; the icon and island still show, the menu lacks "Open Jarvis …")
 #   --states LIST   island states to capture, comma-separated (default: all of them):
 #                   running (the "Jarvis is running" pill), listening, thinking, speaking,
-#                   follow_up, error
+#                   follow_up, error, and the computer-task indicators controlling, paused,
+#                   recording (with a sample intent)
 #   --bars LIST     themes, one session each (default: dark,light): the bar's colours and the
 #                   full-screen window behind the island
 #   --size WxH      the headless output (default 1920x1080)
@@ -231,7 +232,9 @@ PY
       fi
       SETTLE=0.25 wait_change "$TOP" "$dst" 6 --pad 16 || { log "no pill after show-running"; rc=1; }
     else
-      "$DS_AGENT" island-demo --hold "$st" --for 60s >>"$out/agent-$THEME.log" 2>&1 &
+      text=
+      case $st in controlling|paused) text="Ordering the blue mug from Example Store" ;; esac
+      "$DS_AGENT" island-demo --hold "$st" --text "$text" --for 60s >>"$out/agent-$THEME.log" 2>&1 &
       demo=$!
       pids+=("$demo")
       wait_change "$TOP" "$dst" 10 --pad 16 || { log "island state $st never showed"; rc=1; }
@@ -250,7 +253,7 @@ PY
 fi
 
 # --- the outer part: build, enroll, one isolated session per theme ------------------------------
-NAME=desk OFFLINE=0 STATES=running,listening,thinking,speaking,follow_up,error THEMES=dark,light
+NAME=desk OFFLINE=0 STATES=running,listening,thinking,speaking,follow_up,error,controlling,paused,recording THEMES=dark,light
 SIZE=1920x1080 OUT=
 while [ $# -gt 0 ]; do
   case $1 in
@@ -265,7 +268,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 for s in ${STATES//,/ }; do
-  case $s in running|listening|thinking|speaking|follow_up|error) ;; *) die "--states: unknown state $s" ;; esac
+  case $s in running|listening|thinking|speaking|follow_up|error|controlling|paused|recording) ;; *) die "--states: unknown state $s" ;; esac
 done
 for t in ${THEMES//,/ }; do case $t in dark|light) ;; *) die "--bars: dark or light, not $t" ;; esac; done
 [[ $SIZE =~ ^[0-9]{3,4}x[0-9]{3,4}$ ]] || die "--size: WxH, e.g. 1920x1080"

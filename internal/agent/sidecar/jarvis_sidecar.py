@@ -21,6 +21,17 @@ JSON-lines requests on stdin:
     <- {"id": 6, "result": {"due": [{"id", "text", "user_id"}, ...], "pending": N}}
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
+A Pi's packages may also have device families and managers (the listing's "families" and
+"managers"; describe adds them as "families"/"managers"). Their methods return the body the
+Python node posts to jarvisd (docs/agent/go-pi-node.md §3.17):
+
+    -> {"method": "device_scan"}                              <- {"devices": [...]}
+    -> {"method": "device_list", "params": {"manager_name"}}  <- {"devices", "manager_name", "can_edit_devices"} | {"error"}
+    -> {"method": "device_state", "params": {"details": {...}}}  <- {"entity_id", "domain", "state", "ui_hints"} | {..., "error"}
+    -> {"method": "device_removed", "params": {"details": {...}}}  <- {"ran": bool}
+    -> {"method": "store_auth", "params": {"provider", "values", "user_id"}}  <- {"stored": "family x" | null}
+    -> {"method": "device_families"}                          <- {"families": [...], "managers": [...]}
+
 Storage (JarvisStorage: command secrets and command data) is the agent's, not this process's
 (DESIGN §16). A registered StorageBackend asks the Go agent over the same pipes, between a
 request and its reply:
@@ -309,6 +320,9 @@ def load_commands(directory: str) -> dict:
 FAILED: dict = {}
 # The package each command came from.
 PACKAGE_OF: dict = {}
+# The installed packages' device families by protocol_name, and device managers by name.
+FAMILIES: dict = {}
+MANAGERS: dict = {}
 
 
 def load_packages(listing: str) -> dict:
@@ -358,7 +372,30 @@ def load_packages(listing: str) -> dict:
                     continue
                 found[cname] = cmd
                 PACKAGE_OF[cname] = name
+        for rel in pkg.get("families") or []:
+            _load_device_component(name, top, rel, "protocol_name", FAMILIES)
+        for rel in pkg.get("managers") or []:
+            _load_device_component(name, top, rel, "name", MANAGERS)
     return found
+
+
+def _load_device_component(package: str, top: str, rel: str, key: str, into: dict) -> None:
+    """A Pantry device family (device_families/<name>/protocol.py: an IJarvisDeviceProtocol)
+    or device manager (device_managers/<name>/manager.py: an IJarvisDeviceManager)."""
+    from jarvis_command_sdk import IJarvisDeviceManager, IJarvisDeviceProtocol
+
+    base = IJarvisDeviceProtocol if into is FAMILIES else IJarvisDeviceManager
+    try:
+        module = importlib.import_module(top + "." + rel[: -len(".py")].replace("/", "."))
+        found = [cls() for _, cls in inspect.getmembers(module, inspect.isclass)
+                 if issubclass(cls, base) and cls.__module__ == module.__name__ and not inspect.isabstract(cls)]
+        if not found:
+            FAILED[package] = f"{rel}: no {base.__name__} in it"
+        for obj in found:
+            into[getattr(obj, key)] = obj
+    except BaseException as exc:
+        print(f"sidecar: {package}: failed to load {rel}:\n{traceback.format_exc()}", file=sys.stderr)
+        FAILED[package] = f"{rel}: {type(exc).__name__}: {exc}"
 
 
 def load_builtins(spec: dict) -> dict:
@@ -437,18 +474,7 @@ _SECRET_FIELDS = ("key", "scope", "description", "value_type", "required", "is_s
 
 def _secrets(cmd) -> list:
     """The command's required_secrets for the settings snapshot; a bad one is skipped alone."""
-    out = []
-    try:
-        declared = cmd.required_secrets or []
-    except Exception as exc:
-        print(f"sidecar: {cmd.command_name}: required_secrets failed: {exc}", file=sys.stderr)
-        return out
-    for secret in declared:
-        try:
-            out.append({f: getattr(secret, f, None) for f in _SECRET_FIELDS})
-        except Exception as exc:
-            print(f"sidecar: {cmd.command_name}: skipping a secret: {exc}", file=sys.stderr)
-    return out
+    return _secrets_of(cmd, cmd.command_name)
 
 
 def _browser(cmd):
@@ -504,7 +530,7 @@ def describe(commands: dict) -> dict:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
             if name in PACKAGE_OF:
                 FAILED[PACKAGE_OF[name]] = f"{name}: {type(exc).__name__}: {exc}"
-    return {"tools": tools, "failed": FAILED}
+    return {"tools": tools, "failed": FAILED, **device_families()}
 
 
 def data_summaries(commands: dict, params: dict) -> dict:
@@ -533,6 +559,424 @@ def data_create(commands: dict, params: dict) -> dict:
     except Exception as exc:
         return {"failed": str(exc)}
     return {"key": key, "record": record}
+
+
+# --- Devices: the Python node's device_scan/list/state handlers over the installed families ---
+# (N: services/device_scan_handler.py, device_list_handler.py, device_state_handler.py,
+# device_managers/jarvis_direct_manager.py, direct_device_service.remove_device). The Go agent
+# owns MQTT and the uploads; these return what N: uploads.
+
+SCAN_TIMEOUT = 10.0
+
+
+def _run(coro):
+    """One request's coroutine. asyncio.run shuts the loop's default executor down (N:'s note:
+    a hand-rolled loop leaked to_thread workers per request)."""
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+def _configured(obj) -> bool:
+    """validate_secrets() is empty (or absent): N:'s discovery skips a family or manager with
+    missing secrets."""
+    try:
+        return not (obj.validate_secrets() if hasattr(obj, "validate_secrets") else [])
+    except Exception as exc:
+        print(f"sidecar: validate_secrets failed: {exc}", file=sys.stderr)
+        return False
+
+
+def _active_families() -> dict:
+    return {name: fam for name, fam in FAMILIES.items() if _configured(fam)}
+
+
+def _as_dict(dev) -> dict:
+    import dataclasses
+
+    d = dataclasses.asdict(dev) if dataclasses.is_dataclass(dev) else dict(vars(dev))
+    d.pop("extra", None)  # internal data never leaves the node
+    return d
+
+
+async def _discover_all() -> list:
+    """Every configured family's discover() at once, deduplicated by mac > ip > cloud_id >
+    entity_id; a family that fails is logged and left out."""
+    import asyncio
+
+    families = _active_families()
+
+    async def one(fam):
+        return await fam.discover(timeout=SCAN_TIMEOUT)
+
+    names = list(families)
+    results = await asyncio.gather(*(one(families[n]) for n in names), return_exceptions=True)
+    by_key = {}
+    for name, result in zip(names, results):
+        if isinstance(result, BaseException):
+            print(f"sidecar: {name}: discover failed: {result}", file=sys.stderr)
+            continue
+        print(f"sidecar: {name}: discovered {len(result)} devices", file=sys.stderr)
+        for dev in result:
+            key = (dev.mac_address or "").lower() or dev.local_ip or dev.cloud_id or dev.entity_id
+            by_key[key] = dev
+    return list(by_key.values())
+
+
+def device_scan(params: dict) -> dict:
+    """{"devices": [...]} for POST /nodes/{id}/device-scan/{rid}/results: each device without
+    its extra, with its protocol's supported_actions. A second device with an entity_id already
+    taken gets "_<protocol>" appended (N:'s DeviceScannerService), so an import keeps both."""
+    devices = _run(_discover_all())
+    actions = {}
+    for name, fam in FAMILIES.items():
+        try:
+            actions[name] = [a.to_dict() for a in fam.supported_actions]
+        except Exception as exc:
+            print(f"sidecar: {name}: supported_actions failed: {exc}", file=sys.stderr)
+    seen = set()
+    out = []
+    for dev in devices:
+        if dev.entity_id in seen:
+            dev.entity_id = f"{dev.entity_id}_{dev.protocol}"
+        seen.add(dev.entity_id)
+        d = _as_dict(dev)
+        if dev.protocol in actions:
+            d["supported_actions"] = actions[dev.protocol]
+        out.append(d)
+    return {"devices": out}
+
+
+class _JarvisDirect:
+    """N:'s built-in JarvisDirectDeviceManager: the families' devices as manager devices."""
+
+    name = "jarvis_direct"
+    friendly_name = "Jarvis Direct"
+    description = "WiFi devices controlled directly (LIFX, Kasa, Govee, etc.)"
+    can_edit_devices = True
+    required_secrets: list = []
+    authentication = None
+
+    async def collect_devices(self) -> list:
+        from jarvis_command_sdk import DeviceManagerDevice
+
+        return [DeviceManagerDevice(
+            name=d.name, domain=d.domain, entity_id=d.entity_id, is_controllable=d.is_controllable,
+            manufacturer=d.manufacturer, model=d.model, protocol=d.protocol, local_ip=d.local_ip,
+            mac_address=d.mac_address, cloud_id=d.cloud_id, device_class=d.device_class, source="direct",
+        ) for d in await _discover_all()]
+
+
+def _managers(configured_only: bool) -> dict:
+    out = {"jarvis_direct": _JarvisDirect()}
+    for name, mgr in MANAGERS.items():
+        if not configured_only or _configured(mgr):
+            out[name] = mgr
+    return out
+
+
+def device_list(params: dict) -> dict:
+    """The body for POST /nodes/{id}/device-list/{rid}/results: manager_name's devices, or every
+    manager's for "all" (one that fails is skipped), or {"error": ...}."""
+    name = params.get("manager_name") or "jarvis_direct"
+    managers = _managers(configured_only=True)
+    if name == "all":
+        devices = []
+        for mname, mgr in managers.items():
+            try:
+                devices.extend(_run(mgr.collect_devices()))
+            except Exception as exc:
+                print(f"sidecar: manager {mname} failed, skipping: {exc}", file=sys.stderr)
+        return {"devices": [_as_dict(d) for d in devices], "manager_name": "all", "can_edit_devices": False}
+    mgr = managers.get(name)
+    if mgr is None:
+        return {"error": f"Device manager '{name}' not found or not configured"}
+    devices = _run(mgr.collect_devices())
+    return {"devices": [_as_dict(d) for d in devices], "manager_name": mgr.name,
+            "can_edit_devices": mgr.can_edit_devices}
+
+
+def _temp_unit() -> str:
+    """NEST_TEMP_UNIT (integration secret), F or C; F by default (N:'s climate handler)."""
+    from jarvis_command_sdk.storage import get_backend
+
+    try:
+        backend = get_backend()
+        unit = (backend.get_secret("NEST_TEMP_UNIT", "integration") if backend else None) or ""
+    except Exception:
+        unit = ""
+    return unit.upper() if unit.upper() in ("F", "C") else "F"
+
+
+def _num(v) -> int:
+    return round(float(v))
+
+
+def _normalize_light(raw: dict) -> dict:
+    out = {"state": str(raw.get("state", "off")).lower()}
+    if raw.get("brightness") is not None:
+        b = float(raw["brightness"])
+        if b > 100:  # HA's 0-255
+            b = round(b / 255 * 100)
+        out["brightness"] = round(b)
+    rgb = raw.get("rgb") or raw.get("rgb_color")
+    if isinstance(rgb, (list, tuple)) and len(rgb) == 3:
+        out["rgb"] = [int(c) for c in rgb]
+    if raw.get("hue") is not None:
+        out["hue"] = _num(raw["hue"])
+    if raw.get("saturation") is not None:
+        out["saturation"] = _num(raw["saturation"])
+    hs = raw.get("hs_color")
+    if isinstance(hs, (list, tuple)) and len(hs) == 2:
+        out.setdefault("hue", _num(hs[0]))
+        out.setdefault("saturation", _num(hs[1]))
+    ct = raw.get("color_temp") or raw.get("color_temp_kelvin")
+    if ct is not None:
+        out["color_temp"] = int(ct)
+    return out
+
+
+def _normalize_climate(raw: dict, unit: str) -> dict:
+    out = {"unit": unit, "online": raw.get("online", True)}
+    out["state"] = str(raw.get("hvac_action") or raw.get("state") or "off").lower()
+    mode = raw.get("hvac_mode") or raw.get("mode") or "off"
+    out["mode"] = str(mode).lower()
+    current = raw.get("current_temperature")
+    if current is None:
+        current = raw.get("current_temperature_f" if unit == "F" else "current_temperature_c")
+    if current is not None:
+        out["current_temperature"] = _num(current)
+    target = raw.get("target_temperature")
+    if target is None:
+        if str(mode).lower() == "cool" and "cool_setpoint" in raw:
+            target = raw.get("cool_setpoint")
+        elif "heat_setpoint" in raw:
+            target = raw.get("heat_setpoint")
+    if target is None:
+        if "current_temperature" in raw or "current_temperature" in out:
+            target = raw.get("temperature")
+        elif raw.get("temperature") is not None and current is None:
+            target = raw.get("temperature")
+    if target is None:
+        target = raw.get("target_temperature_f" if unit == "F" else "target_temperature_c")
+    if target is not None:
+        out["target_temperature"] = _num(target)
+    if raw.get("humidity") is not None:
+        out["humidity"] = _num(raw["humidity"])
+    return out
+
+
+def _normalize_kettle(raw: dict) -> dict:
+    out = {"online": raw.get("online", True), "state": str(raw.get("state", "off")).lower()}
+    for key in ("current_temperature", "target_temperature"):
+        if raw.get(key) is not None:
+            out[key] = _num(raw[key])
+    unit = raw.get("unit", "C")
+    out["unit"] = unit.upper() if isinstance(unit, str) else "C"
+    mode = raw.get("mode") or raw.get("work_mode")
+    if mode is not None:
+        out["mode"] = str(mode).lower()
+    return out
+
+
+def _normalize_cover(raw: dict) -> dict:
+    out = {"state": str(raw.get("state", "unknown")).lower()}
+    if raw.get("current_position") is not None:
+        out["position"] = _num(raw["current_position"])
+    return out
+
+
+def _normalize_media(raw: dict) -> dict:
+    out = {"state": str(raw.get("state", "off")).lower()}
+    if raw.get("volume_level") is not None:
+        out["volume"] = round(float(raw["volume_level"]) * 100)
+    for key in ("media_title", "media_artist", "source"):
+        if raw.get(key):
+            out[key] = raw[key]
+    return out
+
+
+def _normalize_camera(raw: dict) -> dict:
+    online = raw.get("online", raw.get("state") != "offline")
+    return {"state": "online" if online else "offline", "online": bool(online)}
+
+
+def _normalize_lock(raw: dict) -> dict:
+    state = str(raw.get("state", "unknown")).lower()
+    return {"state": state, "is_locked": state == "locked"}
+
+
+def _hints(control_type, features, default=(), lo=None, hi=None, step=None, unit=None) -> dict:
+    return {"control_type": control_type, "features": features or list(default), "min_value": lo,
+            "max_value": hi, "step": step, "unit": unit}
+
+
+def _domain(domain: str, raw: dict, features):
+    """N:'s device_families/domains: (normalized state, ui_hints) for domain, or None for a
+    domain without a handler."""
+    if domain == "light":
+        return _normalize_light(raw), _hints("light", features, ("brightness", "color", "color_temp"), 0, 100, 1, "%")
+    if domain == "climate":
+        unit = _temp_unit()
+        return _normalize_climate(raw, unit), _hints("thermostat", features, ("heat", "cool", "off"),
+                                                     50 if unit == "F" else 10, 90 if unit == "F" else 32, 1, unit)
+    if domain == "switch":
+        return {"state": str(raw.get("state", "off")).lower()}, _hints("toggle", features)
+    if domain == "lock":
+        return _normalize_lock(raw), _hints("lock", features)
+    if domain == "camera":
+        return _normalize_camera(raw), _hints("camera", features)
+    if domain == "cover":
+        return _normalize_cover(raw), _hints("cover", features, (), 0, 100, 1, "%")
+    if domain == "media_player":
+        return _normalize_media(raw), _hints("media", features)
+    if domain == "kettle":
+        return _normalize_kettle(raw), _hints("kettle", features, ("boil", "keep_warm", "off"), 40, 100, 1, "C")
+    return None
+
+
+def device_state(params: dict) -> dict:
+    """The body for POST /device-state-results/{rid}: the device's state from its family,
+    normalized for its domain, with UI hints; {"needs_pairing": true} with control_type
+    "pairing" when the family says so. A Home Assistant device (source not "direct") has no
+    state here: N: asks HA through ha_shared, which this node doesn't have."""
+    details = params.get("details") or {}
+    entity_id = details.get("entity_id") or ""
+    domain = details.get("domain") or ""
+    if not entity_id:
+        return {"error": "missing entity_id"}
+    if not domain and "." in entity_id:
+        domain = entity_id.split(".", 1)[0]
+    raw = None
+    if (details.get("source") or "direct") == "direct":
+        fam = _active_families().get(details.get("protocol") or "")
+        if fam is not None:
+            try:
+                raw = _run(fam.get_state(ip=details.get("local_ip") or "", entity_id=entity_id,
+                                         cloud_id=details.get("cloud_id") or "",
+                                         mac_address=details.get("mac_address") or ""))
+            except Exception as exc:
+                print(f"sidecar: device state query failed for {entity_id}: {exc}", file=sys.stderr)
+    if raw is None:
+        return {"entity_id": entity_id, "domain": domain, "error": "Failed to query device state"}
+    if raw.get("needs_pairing"):
+        return {"entity_id": entity_id, "domain": domain, "state": {"needs_pairing": True},
+                "ui_hints": {"control_type": "pairing"}}
+    available = [str(m).lower() for m in raw.get("available_features", raw.get("available_modes", []))]
+    handled = _domain(domain, raw, available or None)
+    state, hints = handled if handled else (raw, _hints("toggle", None))
+    return {"entity_id": entity_id, "domain": domain, "state": state, "ui_hints": hints}
+
+
+def device_removed(params: dict) -> dict:
+    """The device's family's on_removed (e.g. a HomeKit unpair); best effort."""
+    from jarvis_command_sdk import DiscoveredDevice
+
+    details = params.get("details") or {}
+    protocol = details.get("protocol") or ""
+    fam = FAMILIES.get(protocol)
+    if fam is None:
+        return {"ran": False}
+    entity_id = details.get("entity_id") or ""
+    dev = DiscoveredDevice(name=details.get("name") or "", domain=details.get("domain") or "", manufacturer=protocol,
+                           model=details.get("model") or "", protocol=protocol, entity_id=entity_id,
+                           local_ip=details.get("local_ip"), mac_address=details.get("mac_address"),
+                           cloud_id=details.get("cloud_id"))
+    try:
+        _run(fam.on_removed(dev, entity_id=entity_id))
+    except Exception as exc:
+        print(f"sidecar: {protocol}: on_removed failed for {entity_id}: {exc}", file=sys.stderr)
+        return {"ran": False, "error": str(exc)}
+    return {"ran": True}
+
+
+def store_auth(commands: dict, params: dict) -> dict:
+    """OAuth credentials jarvisd holds for provider, stored by the command or family whose
+    authentication names it (N:'s _pull_auth_credentials), as the user who ran the flow."""
+    provider = params.get("provider") or ""
+    values = params.get("values") or {}
+    owners = [("command", c.command_name, c) for c in commands.values()]
+    owners += [("family", name, f) for name, f in FAMILIES.items()]
+    for kind, name, owner in owners:
+        try:
+            auth = owner.authentication
+        except Exception:
+            continue
+        if not auth or getattr(auth, "provider", None) != provider:
+            continue
+        set_current_user_id(params.get("user_id"))
+        try:
+            owner.store_auth_values(values)
+        finally:
+            set_current_user_id(None)
+        return {"stored": f"{kind} {name}"}
+    return {"stored": None}
+
+
+def _guard(errors: list, what: str, fn, default):
+    """N:'s _EntryGuard: a property that raises is recorded and replaced by default."""
+    try:
+        return fn()
+    except Exception as exc:
+        errors.append(f"{what}: {type(exc).__name__}: {exc}")
+        return default
+
+
+def device_families() -> dict:
+    """The families and managers for the settings snapshot (N:'s entries; Go adds the secrets'
+    values) and the heartbeat (a family's "active": its secrets are set)."""
+    families = []
+    for name, fam in FAMILIES.items():
+        errs: list = []
+        e = {"family_name": name,
+             "friendly_name": _guard(errs, "friendly_name", lambda: fam.friendly_name, ""),
+             "description": _guard(errs, "description", lambda: fam.description, ""),
+             "connection_type": _guard(errs, "connection_type", lambda: fam.connection_type, ""),
+             "supported_domains": _guard(errs, "supported_domains", lambda: list(fam.supported_domains), []),
+             "supported_actions": _guard(errs, "supported_actions",
+                                         lambda: [a.to_dict() for a in fam.supported_actions], []),
+             "secrets": _secrets_of(fam, name), "is_configured": _configured(fam), "is_custom": True}
+        auth = _guard(errs, "authentication", lambda: fam.authentication and fam.authentication.to_dict(), None)
+        if auth:
+            e["authentication"] = auth
+        guide = _guard(errs, "setup_guide", lambda: getattr(fam, "setup_guide", None), None)
+        if guide:
+            e["setup_guide"] = guide
+        if errs:
+            e["_errors"] = errs
+        families.append(e)
+    managers = []
+    for name, mgr in _managers(configured_only=False).items():
+        errs = []
+        avail = getattr(mgr, "is_available", None)  # N:'s own interface has it, the SDK's doesn't
+        e = {"manager_name": name,
+             "friendly_name": _guard(errs, "friendly_name", lambda: mgr.friendly_name, ""),
+             "description": _guard(errs, "description", lambda: mgr.description, ""),
+             "can_edit_devices": _guard(errs, "can_edit_devices", lambda: bool(mgr.can_edit_devices), False),
+             "is_available": _guard(errs, "is_available", lambda: bool(avail()) if callable(avail) else True, False),
+             "secrets": _secrets_of(mgr, name)}
+        auth = _guard(errs, "authentication", lambda: mgr.authentication and mgr.authentication.to_dict(), None)
+        if auth:
+            e["authentication"] = auth
+        if errs:
+            e["_errors"] = errs
+        managers.append(e)
+    return {"families": families, "managers": managers}
+
+
+def _secrets_of(obj, name: str) -> list:
+    out = []
+    try:
+        declared = obj.required_secrets or []
+    except Exception as exc:
+        print(f"sidecar: {name}: required_secrets failed: {exc}", file=sys.stderr)
+        return out
+    for secret in declared:
+        try:
+            out.append({f: getattr(secret, f, None) for f in _SECRET_FIELDS})
+        except Exception as exc:
+            print(f"sidecar: {name}: skipping a secret: {exc}", file=sys.stderr)
+    return out
 
 
 def context_query(commands: dict, params: dict) -> dict:
@@ -609,6 +1053,123 @@ def call(commands: dict, params: dict) -> dict:
     return {"output": output, "signals": signals}
 
 
+# --- Actions and callbacks: N:'s handle_action and handle_callback past the MQTT and HTTP, which
+# the Go agent does (internal/agent/actions); these return the body N: posts. ---
+
+_CONTROL_LOOP = None
+
+
+def _control_loop():
+    """N:'s persistent device loop (_get_device_protocol_loop): a family's pairing session
+    (pair_start, then pair_finish with the PIN) lives on the loop it started on, across calls."""
+    import asyncio
+
+    global _CONTROL_LOOP
+    if _CONTROL_LOOP is None or _CONTROL_LOOP.is_closed():
+        _CONTROL_LOOP = asyncio.new_event_loop()
+    return _CONTROL_LOOP
+
+
+def _device_control(action_name: str, context: dict) -> dict:
+    """N:'s _handle_device_protocol_control: control_device with no such command goes to the
+    device's family, configured or not. As on N:, the family's control() gets the device itself
+    where the SDK says ip, and the whole action context as data."""
+    from jarvis_command_sdk import DiscoveredDevice
+
+    protocol = context.get("protocol") or ""
+    if not protocol:
+        return {"success": False, "error": "No protocol specified in device context"}
+    fam = FAMILIES.get(protocol)
+    if fam is None:
+        return {"success": False, "error": f"Device protocol '{protocol}' not found"}
+    entity_id = context.get("entity_id") or ""
+    dev = DiscoveredDevice(entity_id=entity_id, name=context.get("name") or entity_id,
+                           domain=context.get("domain") or "switch", manufacturer=protocol,
+                           model=context.get("model") or "", protocol=protocol, cloud_id=context.get("cloud_id"),
+                           local_ip=context.get("local_ip"), mac_address=context.get("mac_address"))
+    try:
+        result = _control_loop().run_until_complete(fam.control(dev, action_name, context))
+    except Exception as exc:
+        print(f"sidecar: {protocol}: control {action_name} failed for {entity_id}: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    out = {"success": bool(result.success), "error": None if result.success else result.error}
+    if result.input_required:
+        out["input_required"] = result.input_required.to_dict()
+    return out
+
+
+def action(commands: dict, params: dict) -> dict:
+    """{success, error, input_required?, message} for a command's handle_action, as the
+    requesting user; control_device with no such command (or one the household turned off) is
+    the device family's control. message is what N: speaks for a voice-originated action."""
+    name = params.get("command_name") or ""
+    action_name = params.get("action_name") or ""
+    context = params.get("context") or {}
+    cmd = commands.get(name) if params.get("enabled", True) else None
+    if cmd is None and name == "control_device":
+        return _device_control(action_name, context)
+    if cmd is None:
+        return {"success": False, "error": f"Command '{name}' not found on this node"}
+    set_current_user_id(params.get("user_id"))
+    try:
+        resp = cmd.handle_action(action_name, context)
+    except Exception as exc:
+        print(f"sidecar: {name}: action {action_name} failed: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    finally:
+        set_current_user_id(None)
+    data = resp.context_data or {}
+    error = data.get("error")
+    if not resp.success and resp.error_details:
+        error = resp.error_details
+    out = {"success": bool(resp.success), "error": error, "message": data.get("message") or ""}
+    if data.get("input_required"):
+        out["input_required"] = data["input_required"]
+    return out
+
+
+def callback(commands: dict, params: dict) -> dict:
+    """{success, error, context_data?} for a command's @callback, as the requesting user; every
+    failure is a result too (N:'s messages), so the inbox item doesn't wait forever."""
+    name = params.get("command_name") or ""
+    cb_name = params.get("callback_name") or ""
+    cmd = commands.get(name) if params.get("enabled", True) else None
+    if cmd is None:
+        return {"success": False, "error": f"Command '{name}' not found on this node"}
+    get_callbacks = getattr(cmd, "get_callbacks", None)
+    if not callable(get_callbacks):
+        return {"success": False, "error": f"Command '{name}' does not support callbacks"}
+    try:
+        callbacks = get_callbacks()
+    except Exception as exc:
+        return {"success": False, "error": f"get_callbacks failed: {exc}"}
+    fn = callbacks.get(cb_name)
+    if fn is None:
+        return {"success": False, "error": f"Callback '{cb_name}' not registered on '{name}'"}
+    uid = params.get("user_id")
+    set_current_user_id(uid)
+    try:
+        ri = RequestInformation(voice_command=params.get("voice_command") or f"cb:{cb_name}",
+                                conversation_id=params.get("conversation_id") or "callback", user_id=uid)
+        resp = fn(params.get("data") or {}, ri)
+    except Exception as exc:
+        print(f"sidecar: {name}: callback {cb_name} failed: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    finally:
+        set_current_user_id(None)
+    error = (resp.context_data or {}).get("error")
+    if not resp.success and resp.error_details:
+        error = resp.error_details
+    out = {"success": bool(resp.success), "error": error}
+    if resp.context_data is not None:
+        out["context_data"] = resp.context_data
+    return out
+
+
+DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "device_state": device_state,
+                  "device_removed": device_removed, "device_families": lambda params: device_families()}
+
+
 def main() -> None:
     set_backend(AgentStorage())
     if "--backends" in sys.argv[2:]:
@@ -636,12 +1197,20 @@ def main() -> None:
                 reply = {"id": msg_id, "result": describe(commands)}
             elif method == "call":
                 reply = {"id": msg_id, "result": call(commands, msg.get("params") or {})}
+            elif method == "action":
+                reply = {"id": msg_id, "result": action(commands, msg.get("params") or {})}
+            elif method == "callback":
+                reply = {"id": msg_id, "result": callback(commands, msg.get("params") or {})}
             elif method == "complete":
                 reply = {"id": msg_id, "result": complete(msg.get("params") or {})}
             elif method == "data_summaries":
                 reply = {"id": msg_id, "result": data_summaries(commands, msg.get("params") or {})}
             elif method == "data_create":
                 reply = {"id": msg_id, "result": data_create(commands, msg.get("params") or {})}
+            elif method in DEVICE_METHODS:
+                reply = {"id": msg_id, "result": DEVICE_METHODS[method](msg.get("params") or {})}
+            elif method == "store_auth":
+                reply = {"id": msg_id, "result": store_auth(commands, msg.get("params") or {})}
             elif method == "context_query":
                 reply = {"id": msg_id, "result": context_query(commands, msg.get("params") or {})}
             elif method == "reminders_due":

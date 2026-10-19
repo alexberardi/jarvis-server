@@ -33,12 +33,17 @@ type Handler struct {
 	Store  *Store
 	// Commands lists what the snapshot shows, enabled or not.
 	Commands func(ctx context.Context) []Command
+	// Devices, if set, are the snapshot's device families and managers (a Pi's sidecar).
+	Devices func(ctx context.Context) Devices
 	// NodeConfig, if set, is the snapshot's node_config (a Pi's hardware and voice settings);
 	// nil reports a computer's (DesktopNodeConfig).
 	NodeConfig func() map[string]any
 	Log        *slog.Logger
 	// KeyChanged, if set, runs after K2 is stored (the heartbeat then says needs_k2: false).
 	KeyChanged func()
+	// SecretsChanged, if set, runs after a secrets push is applied (a Pi's device families
+	// read their secrets to say whether they are configured).
+	SecretsChanged func()
 
 	pushMu sync.Mutex // one config-push pass at a time (a nudge and the backstop can overlap)
 }
@@ -165,7 +170,11 @@ func (h *Handler) snapshot(ctx context.Context, rid string, include bool, uid *i
 	if h.Commands != nil {
 		cmds = h.Commands(ctx)
 	}
-	plain, err := json.Marshal(h.Store.Snapshot(cmds, h.nodeConfig(), include, uid))
+	var dev Devices
+	if h.Devices != nil {
+		dev = h.Devices(ctx)
+	}
+	plain, err := json.Marshal(h.Store.Snapshot(cmds, dev, h.nodeConfig(), include, uid))
 	if err != nil {
 		h.Log.Error("settings: snapshot", "err", err)
 		return
@@ -294,7 +303,13 @@ func (h *Handler) apply(configType string, data map[string]any) error {
 		h.Log.Info("config: push type not used on a desktop agent; acknowledged", "config_type", configType)
 		return nil
 	}
-	return h.applySecrets(data)
+	if err := h.applySecrets(data); err != nil {
+		return err
+	}
+	if h.SecretsChanged != nil {
+		h.SecretsChanged()
+	}
+	return nil
 }
 
 // applySecrets is _dispatch_secrets: with __user_id__ every value is that user's personal

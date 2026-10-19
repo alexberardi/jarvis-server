@@ -17,21 +17,21 @@ func TestPutRuleAndLookup(t *testing.T) {
 	if got.ID == 0 || got.Tool != "quick_search" || got.Note != "fine" || got.UpdatedBy == nil || *got.UpdatedBy != 7 {
 		t.Fatalf("put: %+v", got)
 	}
-	r, err := s.Rule(ctx, "hh-1", "household", "", "quick_search")
+	r, err := s.Rule(ctx, "hh-1", "household", "", "quick_search", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r == nil || r.ID != got.ID || r.Effect != Allow || r.Note != "fine" || r.UpdatedBy == nil || *r.UpdatedBy != 7 {
 		t.Fatalf("lookup: %+v", r)
 	}
-	none, err := s.Rule(ctx, "hh-1", "household", "", "make_phone_call")
+	none, err := s.Rule(ctx, "hh-1", "household", "", "make_phone_call", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if none != nil {
 		t.Fatalf("other tool: %+v", none)
 	}
-	other, err := s.Rule(ctx, "hh-2", "household", "", "quick_search")
+	other, err := s.Rule(ctx, "hh-2", "household", "", "quick_search", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestPutRuleUpserts(t *testing.T) {
 	if second.ID != first.ID {
 		t.Fatalf("upsert changed the id: %d -> %d", first.ID, second.ID)
 	}
-	r, err := s.Rule(ctx, "hh-1", "household", "", "quick_search")
+	r, err := s.Rule(ctx, "hh-1", "household", "", "quick_search", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,10 +80,54 @@ func TestPutRuleValidation(t *testing.T) {
 		{HouseholdID: "hh-1", ScopeKind: ScopeGoal, Tool: "quick_search", Effect: Allow},
 		{HouseholdID: "hh-1", ScopeKind: ScopeHousehold, ScopeID: "x", Tool: "quick_search", Effect: Allow},
 		{HouseholdID: "hh-1", ScopeKind: "bogus", Tool: "quick_search", Effect: Allow},
+		{HouseholdID: "hh-1", ScopeKind: ScopeHousehold, Tool: "computer_task", Target: "url:x", Effect: Allow},
+		{HouseholdID: "hh-1", ScopeKind: ScopeHousehold, Tool: "computer_task", Target: "site:", Effect: Allow},
+		{HouseholdID: "hh-1", ScopeKind: ScopeHousehold, Tool: "computer_task", Target: "app:a b", Effect: Allow},
 	} {
 		if _, err := s.PutRule(ctx, r); err == nil {
 			t.Errorf("accepted %+v", r)
 		}
+	}
+}
+
+func TestRuleTargets(t *testing.T) {
+	_, s, _ := storeEnv(t)
+	ctx := context.Background()
+	put := func(target string, e Effect) Rule {
+		t.Helper()
+		r, err := s.PutRule(ctx, Rule{HouseholdID: "hh-1", ScopeKind: ScopeHousehold, Tool: "computer_task", Target: target, Effect: e})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	tool := put("", Ask)
+	site := put(" site:Example.COM. ", Block)
+	if site.Target != "site:example.com" || site.ID == tool.ID {
+		t.Fatalf("site rule: %+v", site)
+	}
+	pay := put("action:pay", Allow)
+	if again := put("site:example.com", Allow); again.ID != site.ID {
+		t.Fatalf("same target made a new row: %d -> %d", site.ID, again.ID)
+	}
+	got, err := s.ListRules(ctx, "hh-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].ID != tool.ID || got[1].ID != pay.ID || got[2].ID != site.ID ||
+		got[2].Target != "site:example.com" || got[2].Effect != Allow {
+		t.Fatalf("list: %+v", got)
+	}
+	r, err := s.Rule(ctx, "hh-1", ScopeHousehold, "", "computer_task", "action:pay")
+	if err != nil || r == nil || r.ID != pay.ID || r.Target != "action:pay" {
+		t.Fatalf("lookup by target: %+v, %v", r, err)
+	}
+	if r, err := s.Rule(ctx, "hh-1", ScopeHousehold, "", "computer_task", "app:x"); err != nil || r != nil {
+		t.Fatalf("other target: %+v, %v", r, err)
+	}
+	v := (&Policy{Rules: s}).Decide(ctx, "hh-1", Action{Tool: "computer_task", Target: "site:shop.example.com"})
+	if v.Effect != Allow || v.Rule == nil || v.Rule.ID != site.ID {
+		t.Fatalf("decide by parent domain: %+v", v)
 	}
 }
 
@@ -154,7 +198,7 @@ func TestRulesPurgeUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.Rule(ctx, "hh-1", "household", "", "quick_search")
+	r, err := s.Rule(ctx, "hh-1", "household", "", "quick_search", "")
 	if err != nil {
 		t.Fatal(err)
 	}

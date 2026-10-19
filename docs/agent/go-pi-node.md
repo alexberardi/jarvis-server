@@ -122,22 +122,22 @@ broker drops that answer until the ACL allows it (an access change, held for the
 |---|---|---|---|---|
 | `report_tools` | `:454-551` | `S:nodetools.go:100` | `POST /mobile/node-tool-reports/{rid}` | done in Go core |
 | `tool_call` | `:830-923` | `S:mobile_chat.go:598`, `S:errands.go:208`, `S:signals_reactions.go:348` | `POST /device-control-results/{rid} {"output":…}` | done in Go core |
-| `action` (mobile action / device control) | `:192-298` | `S:commands.go:44`, `S:smarthome_control.go:116` | `/device-control-results/{rid}` | later |
-| `callback` | `:301-422` | `S:callbacks.go:460` | `GET /callbacks/{job}`, `POST …/result` | later |
+| `action` (mobile action / device control) | `:192-298` | `S:commands.go:44`, `S:smarthome_control.go:116` | `/device-control-results/{rid}` (top-level `{success, error, input_required}`) | done in Go core, every profile (§3.18) |
+| `callback` | `:301-422` | `S:callbacks.go:460` | `GET /callbacks/{job}`, `POST …/result` | done in Go core, every profile (§3.18) |
 | `routine` (carries the full definition) | `:926-982` | `S:routines_run.go:104-110` | `/device-control-results/{rid}` | later |
 | `enroll_voice` / `verify_voice` | `:554-803` | `S:media.go:495` | `/media/whisper/voice-profiles/*`, `/mobile/voice-profile-results/{rid}` | done in Go core (Pi profile only; a desktop's speaker is the signed-in user) |
 | `update_node_config` (settings push; restart only for `wake_word_model`) | `:1092-1177` | `S:commands.go:91` | – | done in the Pi profile (§3.14) |
 | `preview_led_pattern` | `:1180-1221` | `S:commands.go:112` | – | done in the Pi profile (§3.14) |
 | `measure_ambient_noise` | `:1257-1383` | `S:ambient.go:64` | `POST /nodes/{id}/ambient-noise-measurements/{rid}/result` | done in the Pi profile (§3.14) |
-| `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | later |
+| `toggle_command`, `invalidate_device_cache`, `device_removed` | `:1005-1254` | `S:smarthome*.go` | – | `invalidate_device_cache`, `device_removed` done in the Pi profile (§3.17); `toggle_command` done in Go core, every profile (§3.18) |
 | `/k2/provision` (K2 AES key) | `:1622-1669` | `S:settingsreq.go:316` | `GET …/k2/provision/{rid}`, `POST …/k2/ack/{rid}` | built for the desktop agent (`internal/agent/nodesettings`, [DESIGN §16](DESIGN.md)); the Go Pi node reuses it |
 | `/settings/request` (AES-256-GCM snapshot with K2, AAD `{node}:settings:snapshot`), plus a backstop poll on connect | `:1837-1876`, `N:services/settings_snapshot_service.py:749-857` | `S:settingsreq.go:92` | `PUT …/settings/requests/{rid}/snapshot` | built for the desktop agent (`internal/agent/nodesettings`), including the app's secret Sync as source (`include_values` + user) and target (`settings:secrets` push), pinned by `sync_golden.json`; the Pi adds its node_config and hardware |
 | `/config/push`, `/routines/sync` | `:1769-1812` | `S:settingsreq.go:424`, `S:routines.go:867` | GET pending / ack; routines: `GET /nodes/{id}/routines` | config push built for the desktop agent (`internal/agent/nodesettings`: secrets, command_registry); routines sync done in the Pi profile (§7 5.7) |
 | `/package-install`, `-uninstall`, `-revert`, `/test-install` | `:1940-2020,2207-2224` | `S:packages.go:96-451`, `S:testinstall.go` | verify + results | built (§7 parity 5.6; apt/post_install and test-install on the Pi profile only) |
 | `/factory-reset` (tracked with `task_id` + `X-Reset-Token`, or legacy) | `:2023-2204` | `S:reset.go:84,189` | `POST /nodes/factory-reset/{task}/status` | done in the Pi profile (§7 5.7) |
-| `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | later |
+| `/device-list`, `/device-scan`, `/device-state` | `:1879-1917,2357-2374` | `S:smarthome*.go` | results POSTs | done in the Pi profile (§3.17) |
 | `/bluetooth-*` (scan, pair, disconnect, discoverable, release, auto-connect) | `:2227-2354` | `S:smarthome.go:102-111` | results POSTs | done in the Pi profile (§3.15) |
-| `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | later |
+| `jarvis/auth/{provider}/ready` | `:1505-1596` | `S:smarthome_oauth.go:602` | `GET /oauth/provider/{p}/credentials` | done in the Pi profile (§3.17) |
 | `/command-data/{op}`, `/context/{op}` (the node **publishes** responses) | `:2484-2501` | `S:commanddata.go:119` | MQTT publish | command-data built for the desktop agent (`nodesettings.CommandData` over the sidecar's packages, pinned by the Python node's own handler, [DESIGN §16](DESIGN.md)); context done in the Pi profile (§7 5.7) |
 | `tts`, `train_adapter`, `/camera-credentials`; the button publishes (denied by the ACL) | various | none or no route | – | drop |
 
@@ -1015,6 +1015,94 @@ amixer -c seeed2micvoicec sget PGA     # 49% while the music plays
 sudo systemctl start jarvis-node
 ```
 
+### 3.17 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)
+
+The Pi profile answers the app's device requests over the household's device families, which
+are Pantry packages' Python (`device_families/<name>/protocol.py`, SDK `IJarvisDeviceProtocol`;
+managers in `device_managers/<name>/manager.py`). The package sidecar loads them (a Pi's
+`commands.json` lists `families` and `managers` per package) and does what N:'s
+`device_*_handler.py` did; Go (`internal/agent/devices`, wired by
+`cmd/jarvis-agent/devices.go`) owns MQTT, the uploads and the registry. Decisions:
+[decisions/2026-10-19-pi-node-device-registry.md](../decisions/2026-10-19-pi-node-device-registry.md).
+
+| Message | Does | Reply |
+|---|---|---|
+| `device-scan` (`request_id`) | every configured family's `discover()` (10 s, together), deduplicated by MAC > IP > cloud id > entity id, a taken `entity_id` suffixed `_<protocol>`; `extra` dropped, the family's `supported_actions` added | `POST …/device-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
+| `device-list` (`request_id`, `manager_name`; jarvisd sends `all`) | `jarvis_direct` (the families' devices as manager devices), a Pantry manager's `collect_devices()`, or all of them | `POST …/device-list/{rid}/results` `{"devices", "manager_name", "can_edit_devices"}` or the error shape |
+| `device-state` (`request_id`, `entity_id`, `domain`, `protocol`, `source`, `local_ip`, `mac_address`, `cloud_id`) | the family's `get_state()`, normalised by N:'s domain handler (light, climate, switch, lock, camera, cover, media_player, kettle) with UI hints; `needs_pairing` → `control_type: pairing` | `POST /device-state-results/{rid}` |
+| verb `invalidate_device_cache` | drop the registry; the next read fetches it | – |
+| verb `device_removed` (the device) | the family's `on_removed()` (a HomeKit unpair), then drop the registry | – |
+| `jarvis/auth/{provider}/ready` (`provider`, `node_id`) | this node's only: `GET /oauth/provider/{p}/credentials` (once), `user_id` as the SDK user, `base_url` also as `_base_url`, to the command or family whose `authentication.provider` matches (`store_auth_values`); beat again | – |
+
+The registry is `GET /api/v0/node/devices` (direct devices), fetched on the first connect and
+every 5 minutes, for device control (#177). The heartbeat sends `protocols` (the configured
+families, sorted) and beats again when the sidecar comes up, so jarvisd's `pickNode` sends a
+family's device state and removal here. The settings snapshot lists `device_families` and
+`device_managers` in N:'s shape, so the app can set a family's secrets on this node. The
+families are described again for every snapshot and after each secrets push (which also beats),
+so a family the app configures with an API key shows `is_configured` and joins `protocols`
+without a restart.
+
+**Verified** with sidecar tests over a fake family package
+(`internal/agent/sidecar/testdata/packages/lights`: scan, collisions, list, state per domain with
+Python's rounding, pairing, `on_removed`, OAuth turning a family on), handler and registry tests
+over a fake jarvisd, the runner's subscription to `jarvis/auth/+/ready` on the real broker, and
+end to end on a sandbox jarvisd: the real `jarvis-agent --profile pi` (`scripts/sandbox node-sim`)
+with that package, through jarvisd's own routes (scan request → completed with the devices,
+list, import, state of a light and a thermostat, delete → `on_removed`). **Not yet on a Pi** or
+with a real family. On the lab Pi 4 (never the prod kitchen node), with a family package from
+Pantry whose devices are on the LAN (Kasa, LIFX, Govee):
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# The app: install the family's package on this node (Pantry), then Settings → Smart home:
+#   primary node = this node
+#   Devices → Scan: the LAN devices are listed; the log has "devices: scan requested"
+#   Add them; open one: its state and controls show (the log has "devices: state requested")
+#   A cloud family with OAuth: sign in; the log has "devices: auth credentials stored", and the
+#     next scan lists its devices
+#   Delete a device: the log has "devices: device removed ... ran=true"
+sudo systemctl start jarvis-node
+```
+
+### 3.18 Parity 5.9b: device control, actions, callbacks, toggle_command (2026-10-19, loop #177)
+
+Three verbs from N:'s `mqtt_tts_listener.py` (`handle_action` `:193-298`, `handle_callback`
+`:302-452`, `handle_toggle_command` `:1009-1040`), in `internal/agent/actions` (wired by
+`cmd/jarvis-agent/actions.go` on **every profile**). The commands and families run in the
+sidecar (`action` and `callback` methods in `jarvis_sidecar.py`); Go verifies, fetches and posts.
+Decisions: [decisions/2026-10-19-pi-node-device-control.md](../decisions/2026-10-19-pi-node-device-control.md).
+
+| Verb (details) | Does | Reply |
+|---|---|---|
+| `action` (`request_id`, `command_name`, `action_name`, `context`, `user_id`?, `reply_request_id`?) | `POST /commands/{rid}/verify` first (dropped, no reply, if it fails: jarvisd never sends `trusted`); then the command's `handle_action(action, context)` as the user, or for `control_device` with no such command (or one the household turned off) the family named by `context.protocol`: `control(device, action, context)`, the device built from the context as N: does and passed where the SDK says `ip`, on one persistent event loop so a pairing session survives `pair_start` → `pair_finish`. A voice-originated action (no `reply_request_id`) has its `message` said between turns | `POST /device-control-results/{reply_request_id or request_id}` `{"success", "error", "input_required"?}` (top level, not `{"output"}`) |
+| `callback` (`request_id` = the job) | `GET /callbacks/{job}` (the verification; nothing is posted if it fails), then the command's `@callback` (`get_callbacks()[name](data, RequestInformation)`) as the user | `POST /callbacks/{job}/result` `{"success", "error", "context_data"?}`; every failure after the fetch is a result too (N:'s messages: unknown command, no callbacks, unknown callback, a raise) |
+| `toggle_command` (`command_name`, `enabled` read as N: does: true/1/yes) | the settings store's switch (the `command_registry` push's): the command leaves `report_tools` and voice turns, and `action`/`callback` treat it as absent | – |
+
+**Verified** with handler tests over a fake jarvisd (verification, both reply ids, the top-level
+body, input_required, the spoken message, every callback failure, the lax bool), real-sidecar
+tests (the fake `fakelight` family: the device it is handed, a raise, unknown protocol, pairing
+across calls with a scan in between; a test command's `handle_action`, SDK `cancel_click`,
+`@callback`s and their failures), and end to end on a sandbox jarvisd: the real
+`jarvis-agent run --profile pi` with the fake family, through jarvisd's
+`POST /households/{hh}/devices/{id}/control` (turn on/off → 200 `success: true`, a raising
+family → `success: false` with its error, `pair_start` → `input_required`, `pair_finish` with the
+PIN → `success: true`) and `PUT …/smart-home/config` `use_external_devices` → `toggle_command`.
+A routine's device step does not reach a Go node yet: jarvisd sends routines as the `routine`
+verb (§1 table, still to port), not as `action`.
+**Not yet on a Pi** or with a real family. On the lab Pi 4 (never the prod kitchen node), with a
+family package from Pantry whose device is on the LAN (Kasa, LIFX, Govee), after §3.17's steps:
+
+```bash
+sudo systemctl stop jarvis-node
+jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# The app: Devices → the family's device → toggle it on and off: the device follows, no
+#   "node did not respond"; the log has "msg=action command=control_device ... success=true"
+# Settings → Smart home → use external devices on and off: the log has "msg=toggle_command"
+sudo systemctl start jarvis-node
+```
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -1341,7 +1429,14 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       **Pending on-device** (lab Pi 4): a reset from the app, watched to `success`.
    8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
       against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).
-   9. Device control.
+   9. Device control. **14a, the device registry: built 2026-10-19 (§3.17)**: scan, list and
+      state over the sidecar's Pantry device families, `invalidate_device_cache`,
+      `device_removed`, OAuth's auth-ready and the heartbeat's `protocols` (unit tests and a
+      sandbox jarvisd end to end; not yet on a Pi). **14b, control: built 2026-10-19 (§3.18,
+      loop #177)**: the `action`, `callback` and `toggle_command` verbs; the app's device control
+      reaches the family's `control()` (pairing included) through the sidecar (unit tests, a real
+      sidecar, and a sandbox jarvisd end to end; not yet on a Pi). Voice control (the
+      `control_device` tool, which uses the registry) is still to do.
    10. Voice-profile takes (`enroll_voice` / `verify_voice`, the app's "record on this node").
        **Done 2026-10-17** for the Pi profile: `voice.Mic` hands a fixed-length take to the
        running pipeline, which records it between turns with the wake word paused (cue, 1.5 s

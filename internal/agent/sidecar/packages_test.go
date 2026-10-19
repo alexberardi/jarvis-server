@@ -133,6 +133,11 @@ func TestLiveSwapsSidecars(t *testing.T) {
 	if _, _, err := l.Create(ctx, "x", nodesettings.Object{}, ""); err != ErrNoPackages {
 		t.Fatalf("create = %v", err)
 	}
+	if _, err := l.DeviceCall("device_scan", nil); err != ErrNoPackages || len(l.Protocols()) != 0 || l.Devices(ctx).Families != nil {
+		t.Fatalf("devices on an empty Live: %v", err)
+	}
+	swaps := 0
+	l.OnSwap(func() { swaps++ }) // the Pi's heartbeat: the new sidecar's device families
 
 	py := python(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -149,6 +154,9 @@ func TestLiveSwapsSidecars(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.Swap(b) // closes a
+	if swaps != 2 {
+		t.Fatalf("swaps = %d", swaps)
+	}
 	if _, ok := a.Call(ctx, "alpha_greet", nil, node.Request{}); !ok {
 		t.Fatal("a forgot its tools")
 	} else if out, _ := a.Call(ctx, "alpha_greet", nil, node.Request{}); out["success"] != false {

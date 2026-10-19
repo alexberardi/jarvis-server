@@ -4,11 +4,14 @@ package screen
 
 import (
 	"errors"
+	"math"
 	"sort"
 	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // windowList reads CGWindowListCopyWindowInfo: every window, on-screen ones front to back
@@ -46,7 +49,14 @@ var (
 	cfDictionaryGetTypeID      func() uint
 	cfRelease                  func(ref uintptr)
 
-	keyLayer, keyNumber, keyOwner, keyName, keyBounds, keyOnscreen, keyWidth, keyHeight uintptr
+	cgMainDisplayID            func() uint32
+	cgDisplayCopyDisplayMode   func(display uint32) uintptr
+	cgDisplayModeGetWidth      func(mode uintptr) uintptr
+	cgDisplayModeGetHeight     func(mode uintptr) uintptr
+	cgDisplayModeGetPixelWidth func(mode uintptr) uintptr
+	cgDisplayModeRelease       func(mode uintptr)
+
+	keyLayer, keyNumber, keyOwner, keyName, keyBounds, keyOnscreen, keyX, keyY, keyWidth, keyHeight uintptr
 )
 
 func loadFW() error {
@@ -76,6 +86,12 @@ func loadFW() error {
 		purego.RegisterLibFunc(&cfBooleanGetValue, cf, "CFBooleanGetValue")
 		purego.RegisterLibFunc(&cfDictionaryGetTypeID, cf, "CFDictionaryGetTypeID")
 		purego.RegisterLibFunc(&cfRelease, cf, "CFRelease")
+		purego.RegisterLibFunc(&cgMainDisplayID, cg, "CGMainDisplayID")
+		purego.RegisterLibFunc(&cgDisplayCopyDisplayMode, cg, "CGDisplayCopyDisplayMode")
+		purego.RegisterLibFunc(&cgDisplayModeGetWidth, cg, "CGDisplayModeGetWidth")
+		purego.RegisterLibFunc(&cgDisplayModeGetHeight, cg, "CGDisplayModeGetHeight")
+		purego.RegisterLibFunc(&cgDisplayModeGetPixelWidth, cg, "CGDisplayModeGetPixelWidth")
+		purego.RegisterLibFunc(&cgDisplayModeRelease, cg, "CGDisplayModeRelease")
 		// The kCGWindow* key constants are CFStrings whose values are their own names.
 		keyLayer = cfStringCreateWithCString(0, "kCGWindowLayer", cfStringEncodingUTF8)
 		keyNumber = cfStringCreateWithCString(0, "kCGWindowNumber", cfStringEncodingUTF8)
@@ -83,10 +99,12 @@ func loadFW() error {
 		keyName = cfStringCreateWithCString(0, "kCGWindowName", cfStringEncodingUTF8)
 		keyBounds = cfStringCreateWithCString(0, "kCGWindowBounds", cfStringEncodingUTF8)
 		keyOnscreen = cfStringCreateWithCString(0, "kCGWindowIsOnscreen", cfStringEncodingUTF8)
-		keyWidth = cfStringCreateWithCString(0, "Width", cfStringEncodingUTF8) // the bounds dictionary's keys
+		keyX = cfStringCreateWithCString(0, "X", cfStringEncodingUTF8) // the bounds dictionary's keys
+		keyY = cfStringCreateWithCString(0, "Y", cfStringEncodingUTF8)
+		keyWidth = cfStringCreateWithCString(0, "Width", cfStringEncodingUTF8)
 		keyHeight = cfStringCreateWithCString(0, "Height", cfStringEncodingUTF8)
 		if keyLayer == 0 || keyNumber == 0 || keyOwner == 0 || keyName == 0 || keyBounds == 0 || keyOnscreen == 0 ||
-			keyWidth == 0 || keyHeight == 0 {
+			keyX == 0 || keyY == 0 || keyWidth == 0 || keyHeight == 0 {
 			fwErr = errors.New("CoreFoundation: could not create window-info keys")
 		}
 	})
@@ -117,6 +135,8 @@ func windowList() ([]MacWindow, error) {
 		w := MacWindow{ID: uint32(id), Layer: int(layer), Title: cfString(cfDictionaryGetValue(d, keyName)),
 			App: cfString(cfDictionaryGetValue(d, keyOwner)), OnScreen: cfBool(cfDictionaryGetValue(d, keyOnscreen))}
 		if b := cfDictionaryGetValue(d, keyBounds); b != 0 && cfGetTypeID(b) == cfDictionaryGetTypeID() {
+			w.X, _ = cfFloat(cfDictionaryGetValue(b, keyX))
+			w.Y, _ = cfFloat(cfDictionaryGetValue(b, keyY))
 			w.W, _ = cfFloat(cfDictionaryGetValue(b, keyWidth))
 			w.H, _ = cfFloat(cfDictionaryGetValue(b, keyHeight))
 		}
@@ -125,6 +145,29 @@ func windowList() ([]MacWindow, error) {
 	// On-screen windows come front to back; keep them first whatever the list did.
 	sort.SliceStable(out, func(a, b int) bool { return out[a].OnScreen && !out[b].OnScreen })
 	return out, nil
+}
+
+// mainDisplay is the main display's geometry: global points start at its top-left, its size is
+// its mode's in points, and its scale is the mode's pixels per point (the backing scale factor
+// NSScreen reports, and what screencapture -m writes).
+func mainDisplay() (computeruse.Geometry, error) {
+	if err := loadFW(); err != nil {
+		return computeruse.Geometry{}, err
+	}
+	mode := cgDisplayCopyDisplayMode(cgMainDisplayID())
+	if mode == 0 {
+		return computeruse.Geometry{}, errors.New("no display mode for the main display")
+	}
+	defer cgDisplayModeRelease(mode)
+	w, h, px := int(cgDisplayModeGetWidth(mode)), int(cgDisplayModeGetHeight(mode)), int(cgDisplayModeGetPixelWidth(mode))
+	if w <= 0 || h <= 0 {
+		return computeruse.Geometry{}, errors.New("main display has no size")
+	}
+	scale := 1.0
+	if px > 0 {
+		scale = math.Round(float64(px)/float64(w)*100) / 100
+	}
+	return computeruse.Geometry{LogicalW: w, LogicalH: h, Scale: scale, Monitor: "main"}, nil
 }
 
 func cfBool(ref uintptr) bool {

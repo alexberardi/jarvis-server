@@ -303,3 +303,67 @@ func TestBootInstallsAndServesTheBuiltins(t *testing.T) {
 		t.Fatalf("offline boot without a venv = %v", err)
 	}
 }
+
+// govee is a package with a device family (declared without a path: it is at the
+// conventional place) and a device manager.
+func govee() map[string]string {
+	return map[string]string{
+		"jarvis_package.yaml": `name: "govee"
+version: "1.0.0"
+components:
+  - type: device_protocol
+    name: govee
+  - type: device_manager
+    name: hub
+    path: device_managers/hub/manager.py
+`,
+		"device_families/govee/protocol.py": "",
+		"device_managers/hub/manager.py":    "",
+	}
+}
+
+// On a Pi (built-ins and System on) a package's device families and managers are listed for the sidecar
+// and not reported as skipped. A desktop refuses a package of only those, as before; with a
+// command too it skips them.
+func TestPiListsDeviceFamilies(t *testing.T) {
+	r := newRepos(t)
+	repo := r.add(t, "o/govee", "HEAD", govee())
+	m, _, _, _ := newPiManager(t, r)
+	m.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands"}
+	details, err := m.Install(context.Background(), repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := readList(filepath.Join(m.Root, "commands.json"))
+	if len(list) != 1 || details["skipped_components"] != nil ||
+		!reflect.DeepEqual(list[0].Families, []string{"device_families/govee/protocol.py"}) ||
+		!reflect.DeepEqual(list[0].Managers, []string{"device_managers/hub/manager.py"}) {
+		t.Fatalf("pi: details %v, list %+v", details, list)
+	}
+
+	desk, _, _ := newTestManager(t, r)
+	if _, err := desk.Install(context.Background(), repo, ""); err == nil || !strings.Contains(err.Error(), "no commands a computer can run") {
+		t.Fatalf("desktop install = %v", err)
+	}
+	both := govee()
+	both["jarvis_package.yaml"] += "  - type: command\n    name: hi\n    path: commands/hi/command.py\n"
+	both["commands/hi/command.py"] = ""
+	repo2 := r.add(t, "o/govee2", "HEAD", both)
+	details, err = desk.Install(context.Background(), repo2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ = readList(filepath.Join(desk.Root, "commands.json"))
+	if !reflect.DeepEqual(details["skipped_components"], []string{"device_protocol:govee", "device_manager:hub"}) ||
+		len(list) != 1 || list[0].Families != nil || list[0].Managers != nil {
+		t.Fatalf("desktop: details %v, list %+v", details, list)
+	}
+}
+
+// A device component's declared path must stay inside the package.
+func TestManifestRefusesADeviceComponentOutside(t *testing.T) {
+	_, err := ParseManifest([]byte("name: x\ncomponents:\n  - type: device_protocol\n    name: x\n    path: ../x/protocol.py\n"))
+	if err == nil {
+		t.Fatal("accepted a path outside the package")
+	}
+}
