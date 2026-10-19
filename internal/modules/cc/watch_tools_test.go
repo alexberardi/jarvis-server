@@ -2,6 +2,9 @@ package cc
 
 import (
 	"context"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +16,9 @@ import (
 
 const priceWatchArgs = `{"title": "kettle price", "source": "web", "url": "https://www.example.com/item", ` +
 	`"look_for": "the price", "op": "lt", "value": 100}`
+
+const toasterWatchArgs = `{"title": "Toaster price", "source": "web", "url": "https://www.example.com/t", ` +
+	`"look_for": "the price", "op": "changed"}`
 
 // watchTurn is a tool turn in the watch env's household for the speaker (0 = unknown).
 func watchTurn(speaker int64) servertools.Turn {
@@ -179,6 +185,12 @@ func TestListWatches(t *testing.T) {
 	if second == nil || second["state"] != "paused" || second["last_checked_at"] != nil {
 		t.Fatalf("second: %v", second)
 	}
+	// Each entry has its 1-based place in the list, the "n" cancel_watch takes ("the second one").
+	for i, e := range list {
+		if n := e.(map[string]any)["n"]; n != float64(i+1) {
+			t.Fatalf("entry %d has n %v", i, n)
+		}
+	}
 	tool, _ := we.m.tools.Get("list_watches")
 	if !servertools.RunsWithoutConfirmation(tool) {
 		t.Fatal("list_watches needs a tap")
@@ -195,9 +207,7 @@ func TestCancelWatch(t *testing.T) {
 	other := we.createURL() // member 7's "Kettle price"
 
 	r := we.tool("cancel_watch", `{"watch": "KETTLE"}`, 8)
-	cands, _ := r["candidates"].([]any)
-	if r["error"] != "ambiguous" || len(cands) != 2 || !(cands[0] == "kettle price" && cands[1] == "Kettle deals" ||
-		cands[1] == "kettle price" && cands[0] == "Kettle deals") {
+	if r["error"] != "ambiguous" || candidateTitles(r) != "Kettle deals|kettle price" {
 		t.Fatalf("ambiguous: %v", r)
 	}
 	we.wantToolError(we.tool("cancel_watch", `{"watch": "lawnmower"}`, 8), "not_found")
@@ -217,6 +227,115 @@ func TestCancelWatch(t *testing.T) {
 	}
 	if got := we.watch(sigHH, other.ID); got.State != watches.StateActive {
 		t.Fatalf("member 7's watch is %s", got.State)
+	}
+}
+
+// candidateTitles is an ambiguous or not_found result's watches, "title|title" sorted by
+// lower-case title (same-second watches list in id order); each must carry its id and its
+// place n, which cancel_watch takes back.
+func candidateTitles(r map[string]any) string {
+	list, _ := r["candidates"].([]any)
+	if list == nil {
+		list, _ = r["watches"].([]any)
+	}
+	var titles []string
+	for _, e := range list {
+		c, _ := e.(map[string]any)
+		if id, _ := c["watch_id"].(string); id == "" || c["n"] == nil {
+			return "missing id or n: " + jsonOf(c)
+		}
+		titles = append(titles, c["title"].(string))
+	}
+	slices.SortFunc(titles, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+	return strings.Join(titles, "|")
+}
+
+// TestCancelWatchLooseTitle (#221): "stop watching the example.com one" for a watch titled
+// "price on example.com item" said not_found, because the title had to contain the words as
+// typed. Words now match the title's words (and the page, search or signal it watches) in any
+// order, filler dropped; the best match alone is cancelled.
+func TestCancelWatchLooseTitle(t *testing.T) {
+	for _, q := range []string{"example price", "example.com price", "the example.com one", "Example.com",
+		"price on example.com item", "the example prices"} {
+		t.Run(q, func(t *testing.T) {
+			we := newWebWatchEnv(t)
+			id := we.tool("create_watch", `{"title": "price on example.com item", "source": "web", `+
+				`"url": "https://www.example.com/item", "look_for": "the price", "op": "lt", "value": 100}`, 8)["watch_id"].(string)
+			we.tool("create_watch", `{"title": "Toaster deals", "source": "web", "query": "toaster deals", `+
+				`"look_for": "the price", "op": "changed"}`, 8)
+			r := we.tool("cancel_watch", `{"watch": `+strconv.Quote(q)+`}`, 8)
+			if r["status"] != "cancelled" || r["watch_id"] != id || r["message"] != "Stopped watching price on example.com item." {
+				t.Fatalf("%v", r)
+			}
+			if got := we.watch(sigHH, id); got.State != watches.StateDone {
+				t.Fatalf("state %s", got.State)
+			}
+		})
+	}
+}
+
+// More of the words beats more of them in the title: "example.net" names the watch on
+// example.net, not the one with "example" in its title.
+func TestCancelWatchWordsBeforeTitle(t *testing.T) {
+	we := newWebWatchEnv(t)
+	we.tool("create_watch", `{"title": "price on example.com item", "source": "web", `+
+		`"url": "https://www.example.com/item", "look_for": "the price", "op": "lt", "value": 100}`, 8)
+	blender := we.tool("create_watch", `{"title": "blender price", "source": "web", `+
+		`"url": "https://shop.example.net/blender", "look_for": "the price", "op": "lt", "value": 80}`, 8)["watch_id"].(string)
+	if r := we.tool("cancel_watch", `{"watch": "the example.net one"}`, 8); r["watch_id"] != blender {
+		t.Fatalf("%v", r)
+	}
+}
+
+// TestCancelWatchByPlace: the n from list_watches (a number, or its text) picks that watch.
+func TestCancelWatchByPlace(t *testing.T) {
+	we := newWebWatchEnv(t)
+	we.tool("create_watch", priceWatchArgs, 8)
+	we.tool("create_watch", toasterWatchArgs, 8)
+	list, _ := we.tool("list_watches", `{}`, 8)["watches"].([]any)
+	first, second := list[0].(map[string]any), list[1].(map[string]any)
+	we.wantToolError(we.tool("cancel_watch", `{"watch": 3}`, 8), "not_found")
+	if r := we.tool("cancel_watch", `{"watch": 2}`, 8); r["status"] != "cancelled" || r["watch_id"] != second["watch_id"] {
+		t.Fatalf("by number: %v, list %v", r, list)
+	}
+	if r := we.tool("cancel_watch", `{"watch": "#1"}`, 8); r["status"] != "cancelled" || r["watch_id"] != first["watch_id"] {
+		t.Fatalf("by text: %v, list %v", r, list)
+	}
+}
+
+// TestCancelWatchNoMatch: a tie asks which, with each candidate's id; no match lists the live
+// watches so the model can pick one or ask; nothing is cancelled either way.
+func TestCancelWatchNoMatch(t *testing.T) {
+	we := newWebWatchEnv(t)
+	we.wantToolError(we.tool("cancel_watch", `{"watch": "kettle"}`, 8), "not_found")
+	we.tool("create_watch", priceWatchArgs, 8)
+	we.tool("create_watch", toasterWatchArgs, 8)
+	r := we.tool("cancel_watch", `{"watch": "the example.com price"}`, 8)
+	if r["error"] != "ambiguous" || candidateTitles(r) != "kettle price|Toaster price" ||
+		!strings.Contains(r["message"].(string), "kettle price") {
+		t.Fatalf("tie: %v", r)
+	}
+	// A candidate's n is its place in the whole list, so it cancels that watch.
+	cands, _ := r["candidates"].([]any)
+	c := cands[1].(map[string]any)
+	byN := we.tool("cancel_watch", `{"watch": `+jsonOf(c["n"])+`}`, 8)
+	if byN["watch_id"] != c["watch_id"] {
+		t.Fatalf("candidate %v, n cancelled %v", c, byN)
+	}
+	if byN["title"] == "kettle price" {
+		we.tool("create_watch", priceWatchArgs, 8)
+	} else {
+		we.tool("create_watch", toasterWatchArgs, 8)
+	}
+	for _, q := range []string{"lawnmower", "the one", ""} {
+		r = we.tool("cancel_watch", `{"watch": `+strconv.Quote(q)+`}`, 8)
+		if r["error"] != "not_found" || candidateTitles(r) != "kettle price|Toaster price" ||
+			!strings.Contains(r["message"].(string), "Nothing was cancelled") {
+			t.Fatalf("%q: %v", q, r)
+		}
+	}
+	if n := len(we.live(8)); n != 2 {
+		t.Fatalf("%d live", n)
 	}
 }
 

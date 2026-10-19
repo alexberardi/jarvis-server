@@ -3,9 +3,11 @@ package cc
 import (
 	"context"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/watches"
@@ -231,7 +233,8 @@ func (*listWatchesTool) Name() string { return "list_watches" }
 func (*listWatchesTool) Definition() *pyjson.Object {
 	return watchToolDefinition("list_watches",
 		"List what you are watching for the user (web pages, searches and household signals they asked you to keep "+
-			"an eye on). Use when the user asks what you're watching or tracking for them.",
+			"an eye on). Use when the user asks what you're watching or tracking for them. Each watch has a "+
+			"watch_id and its place n in the list: pass the watch_id to cancel_watch to stop one.",
 		servertools.Obj())
 }
 
@@ -248,8 +251,8 @@ func (t *listWatchesTool) Execute(ctx context.Context, _ servertools.Call, turn 
 	}
 	out := make([]any, len(ws))
 	for i, w := range ws {
-		out[i] = servertools.Obj("watch_id", w.ID, "title", w.Title, "description", watches.Describe(w), "state", w.State,
-			"last_value", w.LastValue, "last_checked_at", watchTime(w.LastCheckedAt))
+		out[i] = servertools.Obj("n", i+1, "watch_id", w.ID, "title", w.Title, "description", watches.Describe(w),
+			"state", w.State, "last_value", w.LastValue, "last_checked_at", watchTime(w.LastCheckedAt))
 	}
 	return servertools.Obj("watches", out), nil
 }
@@ -260,12 +263,16 @@ func (*cancelWatchTool) Name() string { return "cancel_watch" }
 
 func (*cancelWatchTool) Definition() *pyjson.Object {
 	return watchToolDefinition("cancel_watch",
-		"Stop watching something for the user. Use when the user asks you to stop watching or tracking something.",
-		servertools.Obj("watch", strProp("Which watch: its id, or words from its title (e.g. 'kettle price')")))
+		"Stop watching something for the user. Use when the user asks you to stop watching or tracking something. "+
+			"You must call this to stop a watch: it is stopped only when this returns status cancelled, so never "+
+			"say it is stopped otherwise. Tell the user its message.",
+		servertools.Obj("watch", strProp("Which watch: prefer its watch_id (or n) from list_watches; "+
+			"otherwise words from its title or page (e.g. 'kettle price', 'example.com')")))
 }
 
-// Execute cancels the one live watch of the speaker's that matches: an id, or a title containing
-// the words (any case). Several matches ask which; none says so.
+// Execute cancels the one live watch of the speaker's that the words pick (#221): its id, its
+// place n in list_watches, or else the watch whose words best cover the query's (watchScore).
+// A tie asks which and no match says so, both with the candidates' ids; neither cancels.
 func (t *cancelWatchTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
 	m := t.m
 	if e := m.watchToolPrecheck(ctx, turn); e != nil {
@@ -276,31 +283,19 @@ func (t *cancelWatchTool) Execute(ctx context.Context, call servertools.Call, tu
 		return nil, err
 	}
 	q := argText(call, "watch")
-	var hits []watches.Watch
-	for _, w := range ws {
-		if w.ID == q {
-			hits = []watches.Watch{w}
-			break
-		}
-		if strings.Contains(strings.ToLower(w.Title), strings.ToLower(q)) {
-			hits = append(hits, w)
-		}
-	}
+	hits := pickWatches(ws, q)
 	switch len(hits) {
 	case 0:
-		msg := "You aren't watching anything."
+		msg := "You aren't watching anything, so nothing was cancelled."
 		if len(ws) > 0 {
-			msg = "I couldn't find a watch matching " + strconv.Quote(q) + "."
+			msg = "I couldn't find a watch matching " + strconv.Quote(q) + ". Nothing was cancelled. You're watching " +
+				watchTitles(ws, "and") + "."
 		}
-		return servertools.Obj("error", "not_found", "message", msg), nil
+		return servertools.Obj("error", "not_found", "message", msg, "watches", watchRefs(ws, ws)), nil
 	case 1:
 	default:
-		titles := make([]any, len(hits))
-		for i, w := range hits {
-			titles[i] = w.Title
-		}
-		return servertools.Obj("error", "ambiguous", "message", "Several watches match; which one?",
-			"candidates", titles), nil
+		return servertools.Obj("error", "ambiguous", "message",
+			"Nothing was cancelled yet: did you mean "+watchTitles(hits, "or")+"?", "candidates", watchRefs(ws, hits)), nil
 	}
 	w := hits[0]
 	if _, err := m.watches.SetState(ctx, turn.HouseholdID, w.ID, watches.StateDone); err != nil {
@@ -308,5 +303,101 @@ func (t *cancelWatchTool) Execute(ctx context.Context, call servertools.Call, tu
 	}
 	m.disarmWatch(ctx, w.ID)
 	m.deps.Log.Info("cc: watch cancelled", "id", w.ID, "user_id", turn.Speaker.UserID)
-	return servertools.Obj("status", "cancelled", "watch_id", w.ID, "title", w.Title), nil
+	return servertools.Obj("status", "cancelled", "watch_id", w.ID, "title", w.Title,
+		"message", "Stopped watching "+w.Title+"."), nil
+}
+
+// pickWatches is the watches q names: the one with that id or place n (1-based, "2" or "#2"),
+// else the best-scoring ones (several on a tie, none when nothing scores).
+func pickWatches(ws []watches.Watch, q string) []watches.Watch {
+	for _, w := range ws {
+		if w.ID == q {
+			return []watches.Watch{w}
+		}
+	}
+	if n, err := strconv.Atoi(strings.TrimPrefix(q, "#")); err == nil {
+		if n >= 1 && n <= len(ws) {
+			return []watches.Watch{ws[n-1]}
+		}
+		return nil
+	}
+	words := watchWords(q)
+	var hits []watches.Watch
+	best := 0
+	for _, w := range ws {
+		switch s := watchScore(w, words); {
+		case s == 0 || s < best:
+		case s > best:
+			best, hits = s, []watches.Watch{w}
+		default:
+			hits = append(hits, w)
+		}
+	}
+	return hits
+}
+
+// watchScore is how well the query's words name w: first how many of them it has anywhere (its
+// title, or what it watches: description with the page's site, search or signal kind), then how
+// many of those are in its title. "the example.net one" picks the example.net watch titled
+// "blender price" over one titled "price on example.com item".
+func watchScore(w watches.Watch, words []string) int {
+	title := watchWords(w.Title)
+	rest := watchWords(watches.Describe(w) + " " + w.Source.Query + " " + w.Source.Kind)
+	found, inTitle := 0, 0
+	for _, x := range words {
+		switch {
+		case slices.Contains(title, x):
+			found++
+			inTitle++
+		case slices.Contains(rest, x):
+			found++
+		}
+	}
+	return found*(len(words)+1) + inTitle
+}
+
+// watchFiller are words that don't tell watches apart ("the example.com one", "my kettle watch").
+var watchFiller = map[string]bool{"a": true, "an": true, "the": true, "one": true, "ones": true, "on": true,
+	"my": true, "me": true, "for": true, "of": true, "to": true, "that": true, "this": true, "it": true, "please": true,
+	"watch": true, "watching": true, "stop": true, "cancel": true, "tracking": true, "track": true, "about": true,
+	"www": true, "http": true, "https": true}
+
+// watchWords is text's distinguishing words: lower case, split at anything not a letter or
+// digit ("example.com" is "example" and "com"), filler dropped, a plural's s dropped.
+func watchWords(text string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len(f) > 3 && strings.HasSuffix(f, "s") && !strings.HasSuffix(f, "ss") {
+			f = f[:len(f)-1]
+		}
+		if !watchFiller[f] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// watchRefs is how a result names some of the live watches for the model: place n in all
+// (list_watches' n), id and title.
+func watchRefs(all, some []watches.Watch) []any {
+	out := make([]any, len(some))
+	for i, w := range some {
+		n := slices.IndexFunc(all, func(x watches.Watch) bool { return x.ID == w.ID }) + 1
+		out[i] = servertools.Obj("n", n, "watch_id", w.ID, "title", w.Title)
+	}
+	return out
+}
+
+// watchTitles is "a, b and c" (or "or c").
+func watchTitles(ws []watches.Watch, last string) string {
+	titles := make([]string, len(ws))
+	for i, w := range ws {
+		titles[i] = w.Title
+	}
+	if len(titles) < 2 {
+		return strings.Join(titles, "")
+	}
+	return strings.Join(titles[:len(titles)-1], ", ") + " " + last + " " + titles[len(titles)-1]
 }

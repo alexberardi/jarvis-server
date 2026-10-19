@@ -41,6 +41,18 @@ var (
 	// asksOwnFactRE: a question about the speaker's own facts ("where's my…", "do you remember…").
 	asksOwnFactRE = mustPyI(`\b(?:my|mine|i|me)\b|\b(?:remember|recall)\b`)
 
+	// stopWatchingRequestRE: an utterance asking to stop a watch (#221): "stop watching the
+	// example.com one", "cancel the kettle watch", "I don't need the kettle watch anymore".
+	stopWatchingRequestRE = mustPyI(`\b(?:stop|quit|cancel|end|remove|delete|drop)\b(?:\s+\S+){0,4}?\s+` +
+		`(?:watch(?:es|ing)?|track(?:ing)?|monitor(?:ing)?|keeping\s+an\s+eye)\b` +
+		`|\b(?:don'?t|do\s+not|no\s+longer)\s+(?:(?:need|want)\b[^.!?]*?\s)?(?:watch|track|monitor)`)
+	// stoppedClaimRE: a reply saying a watch was stopped, unless its clause is negated ("I
+	// haven't stopped it", "Nothing was cancelled"), that it will be ("I'll stop watching it"),
+	// or that it no longer is watched ("I won't watch it anymore").
+	stoppedClaimRE = mustPyI(`(?:^|[.!?,;:—–]\s*)(?![^.!?,;:—–]*` + negation + `)[^.!?,;:—–]*?` +
+		`\b(?:stopped|cancel+ed|removed|deleted|turned\s+off)\b` +
+		`|\bi(?:'ll|\s+will)\s+(?:stop|cancel)\b|\bno\s+longer\s+(?:watching|tracking|monitoring)\b|\bwon'?t\s+(?:watch|track|monitor)\w*\b[^.!?]*\banymore\b`)
+
 	// typeAfterOpenRE: "open X and type Y", "launch X then write Y": a request to open an app and
 	// type words into it, with words to type. Speech can run "type" into the next word ("Open
 	// Neovim and Typeello World" for "type hello world"), so "type" glued to more letters counts,
@@ -74,6 +86,23 @@ func IsRememberRequest(text string) bool {
 		return false
 	}
 	return rememberRequestRE.search(s)
+}
+
+// IsStopWatchingRequest reports an utterance asking Jarvis to stop watching something.
+func IsStopWatchingRequest(text string) bool {
+	s := parse.PyStrip(text)
+	return s != "" && !HasMultiSpeakerMarkers(s) && stopWatchingRequestRE.search(s)
+}
+
+// ClaimsStoppedWatching reports a reply to a stop-watching request that says it was stopped:
+// "stopped", "no longer watching", or one that opens by accepting ("Okay, …"). A question back
+// claims nothing. Not ResponseClaimsAction: it reads "Nothing was cancelled." as a claim.
+func ClaimsStoppedWatching(reply string) bool {
+	s := parse.PyStrip(reply)
+	if s == "" || strings.HasSuffix(s, "?") {
+		return false
+	}
+	return stoppedClaimRE.search(s) || ackOpenerRE.search(s)
 }
 
 // DeniesStoredFact reports a reply saying a fact about the user isn't stored ("Not in my
