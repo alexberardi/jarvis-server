@@ -281,6 +281,18 @@ func (c *CC) Verify(ctx context.Context, rid string) (bool, error) {
 	return v.Valid, nil
 }
 
+// VerifyApproval asks CC whether token is a live approval it minted for this node's computer task,
+// for the actions digest stands for (single use: a valid answer spends it).
+func (c *CC) VerifyApproval(ctx context.Context, token, digest string) (bool, error) {
+	var v struct {
+		Valid bool `json:"valid"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v0/computer/approvals/"+url.PathEscape(token)+"/verify", map[string]any{"digest": digest}, &v); err != nil {
+		return false, err
+	}
+	return v.Valid, nil
+}
+
 // PostToolReport answers report_tools.
 func (c *CC) PostToolReport(ctx context.Context, rid string, report any) error {
 	return c.do(ctx, http.MethodPost, "/api/v0/mobile/node-tool-reports/"+url.PathEscape(rid), report, nil)
