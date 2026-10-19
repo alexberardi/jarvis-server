@@ -34,6 +34,7 @@ type session struct {
 	wakeLevel  *float64 // the woken command's speech level (dBFS); follow-ups report theirs against it
 	userID     *int64   // the last speaker STT identified
 	onComplete []func() error
+	held       *held // the computer task the wake word paused (computer.go)
 }
 
 // ValidationRequest is a 202's validation_request.
