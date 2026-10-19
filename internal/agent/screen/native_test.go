@@ -41,15 +41,17 @@ func TestNativeCapture(t *testing.T) {
 			t.Errorf("%s: %v", scope, err)
 			continue
 		}
-		data, w, h, err := Encode(shot.Image)
-		t.Logf("%s: %v -> %dx%d, %d bytes jpeg, app %q, title set %v (err %v)", scope, shot.Image.Bounds().Size(), w, h, len(data), shot.App, shot.Title != "", err)
+		data, err := EncodeShot(&shot)
+		g := shot.Geometry
+		t.Logf("%s: %v -> %dx%d, %d bytes jpeg, app %q, title set %v (err %v)", scope, shot.Image.Bounds().Size(), g.ImageW, g.ImageH, len(data), shot.App, shot.Title != "", err)
+		t.Logf("%s: geometry origin %d,%d logical %dx%d scale %v monitor %q", scope, g.OriginX, g.OriginY, g.LogicalW, g.LogicalH, g.Scale, g.Monitor)
 	}
 	if q := os.Getenv("JARVIS_SCREEN_WINDOW"); q != "" {
 		shot, err := c.Capture(context.Background(), ScopeWindow, q)
 		if err != nil {
 			t.Logf("named %q: %v", q, err)
 		} else {
-			t.Logf("named %q: %v, app %q", q, shot.Image.Bounds().Size(), shot.App)
+			t.Logf("named %q: %v, app %q, geometry %+v", q, shot.Image.Bounds().Size(), shot.App, shot.Geometry)
 		}
 	}
 }
