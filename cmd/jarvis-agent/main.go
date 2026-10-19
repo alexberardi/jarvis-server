@@ -146,6 +146,8 @@ func main() {
 	case "computer":
 		if len(os.Args) > 2 && os.Args[2] == "snapshot" {
 			err = computerSnapshotCmd(ctx, os.Args[3:])
+		} else if len(os.Args) > 2 && os.Args[2] == "record" {
+			err = computerRecordCmd(ctx, os.Args[3:], os.Stdin, os.Stdout)
 		} else {
 			err = computerCmd(os.Args[2:], os.Stdout, controlDial)
 		}
@@ -226,6 +228,8 @@ func usage(w io.Writer) {
            uninstall | status | pack --target firefox|chromium --out DIR
   computer snapshot [--json] URL   open URL in a background browser window and list its
            elements as computer control sees them (debug; serves the extension like try)
+  computer record --browser [--json]   record what you do in the browser until Enter or ^C,
+           printing each event as it arrives (debug; serves the extension like try)
   version
 `)
 }
