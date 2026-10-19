@@ -147,3 +147,29 @@ func TestMenuNotesDeepResearchIsDetached(t *testing.T) {
 		t.Fatalf("deep_research = %q", d)
 	}
 }
+
+func TestCardSummarySkipsLeadIn(t *testing.T) {
+	for answer, want := range map[string]string{
+		"Here are the three:\n\n1. Gaggia Classic Pro ($449)\n2. Bambino": "1. Gaggia Classic Pro ($449)",
+		"It will rain tomorrow.": "It will rain tomorrow.",
+		"Found these:":           "Found these:",
+		strings.Repeat("a", 300): strings.Repeat("a", summaryLimit-1) + "…",
+	} {
+		if got := cardSummary(Aggregate{Message: answer, Answer: answer}); got != want {
+			t.Errorf("summary of %q = %q", answer, got)
+		}
+	}
+	if got := cardSummary(Aggregate{Message: "Search: 2 sources"}); got != "Search: 2 sources" {
+		t.Errorf("no answer: %q", got)
+	}
+}
+
+// Asking for the result to be sent to the user is fulfilled by the report (seen on the sandbox:
+// "I did not send this summary" after a "send me a summary" goal).
+func TestComposePromptSendMeIsTheReport(t *testing.T) {
+	p := ComposePrompt(espressoGoal, []Result{serverOutcome("quick_search", espressoSources())})
+	if !strings.Contains(p, "'send me a summary', 'let me know') is NOT an undone action") ||
+		!strings.Contains(p, "no lead-in line") {
+		t.Fatalf("compose prompt:\n%s", p)
+	}
+}

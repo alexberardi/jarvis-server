@@ -640,9 +640,9 @@ func ComposePrompt(goal string, results []Result) string {
 		"\n\nIf the goal asks for information (to find, search, look up, compare, list or " +
 		"summarize something), this report IS the answer the user is waiting for: give it. " +
 		"Name the specific things found with their key facts (names, prices, ratings, times) " +
-		"taken from what the steps found, one per line, then one short closing sentence. If " +
-		"fewer were found than asked for, give the ones found and say so. A request to 'send', " +
-		"'tell' or 'let me know' the result is fulfilled by this report. Otherwise write a " +
+		"taken from what the steps found, one per line, starting with the first one (no " +
+		"lead-in line), then one short closing sentence. If fewer were found than asked for, " +
+		"give the ones found and say so. Otherwise write a " +
 		"short, friendly 1-2 sentence summary. Base EVERY statement STRICTLY " +
 		"on the detail shown after each step — quote the useful information (the weather, " +
 		"the answer, who you reached). NEVER invent an outcome: if a step's detail says it " +
@@ -657,7 +657,10 @@ func ComposePrompt(goal string, results []Result) string {
 		"If the goal mentions such an action but there is NO step for it above, you MUST " +
 		"state it was NOT done (e.g. 'I checked the forecast — 100% rain — but I did not set " +
 		"a reminder'). Do not imply a conditional follow-up happened just because its " +
-		"condition was met. No preamble, no markdown (plain lines only)."
+		"condition was met. EXCEPTION: asking for the result to be sent, told or summarized " +
+		"to the user themselves ('send me a summary', 'let me know') is NOT an undone " +
+		"action: this report is how they get it, so never say it was not sent. No " +
+		"preamble, no markdown (plain lines only)."
 }
 
 // composeErrandMessage LLM-composes the report on the background label (D40 09.Q11; legacy
@@ -708,13 +711,24 @@ func (s *Service) aggregateAndCompose(ctx context.Context, goal string, results 
 }
 
 // cardSummary is a finished run's card summary (the inbox line and the push): the answer's
-// first line, else the message.
+// first line that is not a lead-in ending in ":", else the message.
 func cardSummary(a Aggregate) string {
 	if a.Answer == "" {
 		return a.Message
 	}
-	first, _, _ := strings.Cut(a.Answer, "\n")
-	if first = parse.PyStrip(first); runeLen(first) > summaryLimit {
+	var first string
+	for _, line := range strings.Split(a.Answer, "\n") {
+		if line = parse.PyStrip(line); line != "" {
+			if first == "" {
+				first = line
+			}
+			if !strings.HasSuffix(line, ":") { // past a lead-in ("Here are the three:")
+				first = line
+				break
+			}
+		}
+	}
+	if runeLen(first) > summaryLimit {
 		first = truncRunes(first, summaryLimit-1) + "…"
 	}
 	return first
