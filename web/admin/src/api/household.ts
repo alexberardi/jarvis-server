@@ -15,5 +15,5 @@ export async function getHouseholdSettings(householdId: string): Promise<Record<
 }
 
 export async function putHouseholdSetting(householdId: string, key: string, value: unknown): Promise<void> {
-  await apiClient.put(`${base(householdId)}/${key}`, { value })
+  await apiClient.put(`${base(householdId)}/${encodeURIComponent(key)}`, { value })
 }
