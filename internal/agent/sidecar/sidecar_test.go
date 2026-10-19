@@ -3,11 +3,13 @@ package sidecar
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -181,5 +183,35 @@ func TestSidecarDataBrowserSettingsAndGetAll(t *testing.T) {
 	// The store's copy is untouched by what get_all added.
 	if d, _ := st.Data("journal", "j1", time.Now()); d.Len() != 2 {
 		t.Fatalf("stored record = %v", d.Keys())
+	}
+}
+
+// takeoverHost records the takeover hook's calls.
+type takeoverHost struct{ calls []string }
+
+func (h *takeoverHost) Answer(context.Context, string, json.RawMessage) (any, error) { return nil, nil }
+func (h *takeoverHost) BeforeCall(_ context.Context, command, declared string, args map[string]any) {
+	h.calls = append(h.calls, command+"|"+declared+"|"+fmt.Sprint(args["action"]))
+}
+
+// N:utils/command_execution_service.py _maybe_take_over_music: the hook sees each call before
+// it runs, with the command's declared player.
+func TestSidecarTakeoverHook(t *testing.T) {
+	py := python(t)
+	ctx := context.Background()
+	h := &takeoverHost{}
+	sc, err := StartWith(ctx, py, "testdata/commands", slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Host: h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	marker := filepath.Join(t.TempDir(), "played")
+	if out, _ := sc.Call(ctx, "deferred", map[string]any{"marker": marker, "action": "play"}, node.Request{}); out["success"] != true {
+		t.Fatalf("call = %v", out)
+	}
+	sc.Call(ctx, "shout", map[string]any{"text": "hi"}, node.Request{})
+	sc.Call(ctx, "nope", nil, node.Request{})
+	if want := []string{"deferred|mpv|play", "shout||<nil>"}; !slices.Equal(h.calls, want) {
+		t.Fatalf("hook calls %q, want %q", h.calls, want)
 	}
 }

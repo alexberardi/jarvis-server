@@ -44,6 +44,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
+	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
@@ -570,8 +571,11 @@ func run(ctx context.Context, args []string) error {
 	tf.pkgRoot = filepath.Join(filepath.Dir(path), "packages")
 	// The pipeline's microphone: voice-profile takes, and on a Pi what its built-ins say.
 	mic := voice.NewMic()
+	var duck *music.Ducker // a Pi's music: ducked for each turn, taken over by a music "play"
 	if !p.desktop {
+		duck = newPiMusic(hat.Detected, fileExists, log)
 		tf.host = newPiHost(ctx, filepath.Dir(path), mic, log)
+		tf.host.Music = duck
 	}
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
@@ -593,6 +597,9 @@ func run(ctx context.Context, args []string) error {
 		// Before voice opens the mic: the codec may have come back from a boot without the
 		// installer's ADC filter and output levels.
 		hat.HealCodec(ctx, hat.ExecRun, log)
+	}
+	if duck != nil {
+		duck.NormalizePGA(ctx) // a crash mid-music must not leave the mic at the music gain
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
 	if tf.host != nil {
@@ -635,6 +642,9 @@ func run(ctx context.Context, args []string) error {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)
 		o.Mic = mic
+		if duck != nil {
+			o.Music = duck
+		}
 		_ = voice.Serve(ctx, o)
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }

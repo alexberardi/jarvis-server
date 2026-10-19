@@ -1,9 +1,11 @@
 package cc
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 )
 
@@ -100,4 +102,88 @@ func TestSameDeviceHint(t *testing.T) {
 	ce := newChatEnv(t, prompts.Qwen3_5_9B)
 	ce.do("POST", "/api/v0/mobile/chat", map[string]any{"node_id": ce.node.id, "household_id": voiceHH, "message": "hi",
 		"client": "web"}, bearer("tok-7")).want(400)
+}
+
+func TestTypedAppNamed(t *testing.T) {
+	for _, c := range []struct{ utt, text, want string }{
+		{"type into omawrite that I need to walk the dogs", "I need to walk the dogs", "omawrite"},
+		{"type buy more coffee filters into omawrite", "buy more coffee filters", "omawrite"},
+		{"write running ten minutes late in slack", "running ten minutes late", "slack"},
+		{"Type hello into the terminal.", "hello", "the terminal"},
+		{"type hi into google chrome please", "hi", "google chrome"},
+		{"type hi into visual studio code", "hi", ""}, // three words after "into"
+		{"type into Visual Studio, fix the build", "fix the build", "Visual Studio"},
+		{"type I'm going to the store", "I'm going to the store", ""}, // "to" is not an app
+		{"type hello world", "hello world", ""},
+		{"type I live in Boston", "I live in Boston", ""}, // the place is part of the text
+		{"type hello in all caps", "HELLO", ""},
+		{"write hola in spanish", "hola", ""},
+		{"type it in here", "it", ""},
+		{"open slack and type hi in it", "hi", ""},
+		{"I left my keys in the car", "", ""}, // no typing verb before "in"
+	} {
+		if got := typedAppNamed(c.utt, c.text); got != c.want {
+			t.Errorf("%q (text %q) -> %q, want %q", c.utt, c.text, got, c.want)
+		}
+	}
+}
+
+func TestFillTypedApp(t *testing.T) {
+	utt := "type into omawrite that I need to walk the dogs"
+	call := func(name, args string) parse.ToolCall {
+		return parse.ToolCall{Function: parse.FunctionCall{Name: name, Arguments: args}}
+	}
+	for _, c := range []struct {
+		call parse.ToolCall
+		want string // "" = unchanged
+	}{
+		{call(desktopTypeTool, `{"text": "I need to walk the dogs"}`), `{"text": "I need to walk the dogs", "app": "omawrite"}`},
+		{call(desktopTypeTool, `{"text": "I need to walk the dogs", "app": ""}`), `{"text": "I need to walk the dogs", "app": "omawrite"}`},
+		{call(desktopTypeTool, `{"text": "I need to walk the dogs", "app": "quillpad"}`), ""}, // the model's own app stands
+		{call("desktop_press_key", `{"key": "enter"}`), ""},
+		{call(desktopTypeTool, `not json`), ""},
+	} {
+		got, ok := fillTypedApp(utt, c.call)
+		if ok != (c.want != "") || (ok && got != c.want) {
+			t.Errorf("%s %s -> %q %v, want %q", c.call.Function.Name, c.call.Function.Arguments, got, ok, c.want)
+		}
+	}
+}
+
+// "type into omawrite that I need to walk the dogs": the 9B called desktop_type_text without
+// app 2 times in 3 (#230), and the text went to the window in front. The node gets the app.
+func TestTypingKeepsNamedApp(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.start("m5", desktopTools)
+	ve.eng.push(nativeCall("call_t1", "desktop_type_text", `{"text": "I need to walk the dogs"}`))
+	r := ve.turn("/api/v0/voice/command/stream", "m5", "type into omawrite that I need to walk the dogs", nil).want(202).json()
+	calls, _ := r["tool_calls"].([]any)
+	if r["stop_reason"] != "tool_calls" || len(calls) != 1 {
+		t.Fatalf("%v", r)
+	}
+	if s := jsonOf(calls[0]); !strings.Contains(s, `\"app\": \"omawrite\"`) {
+		t.Fatalf("call %s", s)
+	}
+}
+
+// On the continue path the fill reads the voice command, not the composed user message (its
+// hints and /no_think suffix follow the app name).
+func TestTypingKeepsNamedAppOnContinue(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.start("m6", desktopTools)
+	ve.eng.push(nativeCall("call_f1", "desktop_list_windows", `{}`))
+	ve.turn("/api/v0/voice/command/stream", "m6", "type buy more coffee filters into omawrite", nil).want(202)
+	ve.eng.push(nativeCall("call_t1", "desktop_type_text", `{"text": "buy more coffee filters"}`))
+	b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "m6",
+		"tool_results": []any{map[string]any{"tool_call_id": "call_f1", "output": map[string]any{"success": true}}}},
+		ve.node.h()).want(200).json()
+	calls, _ := b["tool_calls"].([]any)
+	if b["stop_reason"] != "tool_calls" || len(calls) != 1 {
+		t.Fatalf("continue %v", b)
+	}
+	var args map[string]any
+	fn, _ := calls[0].(map[string]any)["function"].(map[string]any)
+	if s, _ := fn["arguments"].(string); json.Unmarshal([]byte(s), &args) != nil || args["app"] != "omawrite" {
+		t.Fatalf("call %s", jsonOf(calls[0]))
+	}
 }

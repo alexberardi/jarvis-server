@@ -214,7 +214,7 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 			maxIter = 3
 		}
 		res, msgs = m.runEngine(ctx, engineInput{conv: conv, msgs: msgs, maxIter: maxIter, utterance: utterance,
-			dateKeys: conv.dateKeys, turn: m.toolTurn(conv, utterance)})
+			dateKeys: conv.dateKeys, voiceCommand: conv.voiceCommand, turn: m.toolTurn(conv, utterance)})
 	} else {
 		res, msgs = m.formatTextMode(ctx, conv, msgs, results)
 	}

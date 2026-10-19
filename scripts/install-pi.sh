@@ -473,8 +473,9 @@ $NODE_USER ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
 # A crash loop (a self-update's broken release) hits the unit's start limit; the rollback's restart needs it reset.
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl reset-failed jarvis-agent, /usr/bin/systemctl reset-failed jarvis-agent.service
+# Provisioning drives Wi-Fi through NetworkManager's D-Bus API, which polkit allows instead
+# (configure_nm_ap); hostapd/dnsmasq get entries here only if the NM AP fails on a chip.
 # Not yet, added with the step that needs them (go-pi-node.md §7):
-# TODO(phase 4.4, provisioning AP): NetworkManager, nmcli (and hostapd/dnsmasq only if the NM AP fails).
 # TODO(parity 5.6, packages): the apt and post-install wrappers.
 # TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
 EOF
@@ -574,6 +575,29 @@ mask_ap_services() {
   run systemctl stop hostapd dnsmasq 2>/dev/null || true
   run systemctl disable hostapd dnsmasq 2>/dev/null || true
   run systemctl mask hostapd dnsmasq 2>/dev/null || true
+}
+
+# The provisioning hotspot is NetworkManager's AP mode over D-Bus (go-pi-node.md §8 Q7):
+# - polkit lets the node's user (not root) scan, add and delete Wi-Fi profiles and share the
+#   connection, what the sudoers file's nmcli entry did for N:;
+# - NM's shared-mode dnsmasq answers every name with the hotspot's address, as N:'s hostapd
+#   dnsmasq did (address=/#/), so the phones' connectivity checks reach the captive listener.
+configure_nm_ap() {
+  put /etc/polkit-1/rules.d/50-jarvis-agent-networkmanager.rules 0644 <<EOF
+// Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+// jarvis-agent (User=$NODE_USER) provisions Wi-Fi through NetworkManager's D-Bus API.
+polkit.addRule(function(action, subject) {
+  if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.user === "$NODE_USER") {
+    return polkit.Result.YES;
+  }
+});
+EOF
+  put /etc/NetworkManager/dnsmasq-shared.d/jarvis-captive.conf 0644 <<'EOF'
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+# The provisioning hotspot (jarvis-setup-ap, NetworkManager shared mode on 192.168.4.1) answers
+# every name with itself, so phones' connectivity checks reach jarvis-agent's captive listener.
+address=/#/192.168.4.1
+EOF
 }
 
 # wlan0's NetworkManager connection, or nothing (nmcli only reads here).
@@ -791,6 +815,15 @@ write_state() {
     # tmpfs file; key=val so it can be sourced back next run.
     printf 'fail=%s\nonline=%s\n' "$1" "$2" > "$STATE" 2>/dev/null || true
 }
+
+# --- (0) The Go node's provisioning hotspot (NetworkManager AP mode, profile
+#     jarvis-setup-ap) has no gateway by design, and forcing the preferred
+#     profile up would tear it down: leave the interface alone while it is up.
+#     jarvis-agent's recovery cycle handles the way back. (Not in N:.)
+if nmcli -t -f NAME connection show --active 2>/dev/null | grep -qx 'jarvis-setup-ap'; then
+    write_state 0 "$online"
+    exit 0
+fi
 
 # --- (1) Enforce power-save OFF on the live interface. iw is the driver-level
 #     control install.sh now installs; nmcli reapply alone does not always push
@@ -1020,6 +1053,7 @@ configure_journald
 configure_swappiness
 configure_swap
 mask_ap_services
+configure_nm_ap
 wifi_powersave_off
 reconcile_wifi_profiles
 install_net_watchdog

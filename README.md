@@ -206,7 +206,7 @@ it is detected (`--hat auto|on|off`; holding the button 3 s powers the Pi off un
 
 Some flags are not in `jarvis-agent --help` yet (`--no-overlay`, `--hat`, `--led-brightness`,
 `--button-poweroff`, `--follow-up`, `--follow-up-silence`, `--wake-debounce`,
-`--listen-onset-wait`); `jarvis-agent run -h` lists them all.
+`--listen-onset-wait`, `--listen-preroll`); `jarvis-agent run -h` lists them all.
 
 ## Documentation
 
