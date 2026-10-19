@@ -65,6 +65,17 @@ func TestEnableComputerControlHere(t *testing.T) {
 	if out := runTool(t, enable, "", ve.recTurn(0)); out["error"] != "no_speaker" {
 		t.Fatalf("unknown speaker: %v", out)
 	}
+	// Never from something that didn't ask for it (C11): "turn on the computer".
+	calls := len(agent.calls)
+	turn := ve.recTurn(7)
+	turn.Utterance = "turn on the computer"
+	if out := runTool(t, enable, "", turn); out["error"] != "not_asked" || len(agent.calls) != calls {
+		t.Fatalf("not asked: %v %v", out, agent.calls)
+	}
+	turn.Utterance = "Hey Jarvis, enable computer control"
+	if out := runTool(t, enable, "", turn); out["error"] == "not_asked" {
+		t.Fatalf("asked: %v", out)
+	}
 }
 
 // From another node (a Pi): the computer named, else the speaker's only one, else ask which.

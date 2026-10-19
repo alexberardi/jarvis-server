@@ -113,6 +113,26 @@
     ]
   },
   {
+    "name": "voice: record this macro (no wake word in the transcript)",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "record this macro",
+        "expect": {
+          "server_tool": "start_recording",
+          "not_tool": [
+            "enable_computer_control",
+            "disable_computer_control",
+            "computer_control_status",
+            "stop_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
     "name": "voice: record a macro called pay the water bill names it",
     "node": "desktop",
     "tools": "../toolsets/desktop.json",

@@ -225,16 +225,20 @@ func (*enableComputerControlTool) Name() string { return toolEnableComputerContr
 
 func (*enableComputerControlTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolEnableComputerControl,
-		"Turn on computer control on the user's computer: lets Jarvis use its mouse, keyboard and browser for tasks "+
-			"(the 'Computer control' switch in the Jarvis Automation menu). Use only when the user asks for computer "+
-			"control by name: 'enable computer control', 'turn on computer control'. Not for turning a computer on, dark "+
-			"mode or any other setting.",
+		"ONLY when the user says the words 'computer control' ('enable computer control', 'turn on computer control'): "+
+			"turns on the 'Computer control' switch that lets Jarvis use their computer's mouse, keyboard and browser. "+
+			"Never for 'turn on the computer' (powering a computer on, which Jarvis can't do), dark mode or any other setting.",
 		servertools.Obj("computer", computerProp()))
 }
 
 func (t *enableComputerControlTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
 	if e := toolSpeakerError(turn); e != nil {
 		return e, nil
+	}
+	// C11: never from something the user said that wasn't asking for it ("turn on the computer").
+	if u := strings.ToLower(turn.Utterance); u != "" && !strings.Contains(u, "control") {
+		return recordingRefusal("not_asked", `Computer control is only turned on when you ask for it by name: "enable computer control". `+
+			"I can't power a computer on."), nil
 	}
 	p, err := t.m.pickComputer(ctx, turn, argText(call, "computer"), ownComputers, nil)
 	if err != nil || p.refusal != nil {

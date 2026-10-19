@@ -84,11 +84,11 @@ func (*startRecordingTool) Name() string { return toolStartRecording }
 
 func (*startRecordingTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolStartRecording,
-		"Start recording a macro: watch what the user does in their browser on their computer, so Jarvis can learn to do it. "+
-			"Use when the user says 'record this macro', 'record a macro called ...', 'watch me', 'watch me do this', "+
-			"'learn how I do this', 'let me show you how to ...'. Not for reminders, notes or audio. "+
-			"Stop with stop_recording when they say they're done.",
-		servertools.Obj("task", strProp("The macro's name or what the user is about to show, in their words (e.g. 'pay the water bill' from 'record a macro called pay the water bill'); leave it empty when they gave none"),
+		"Call this (never just reply) when the user says 'record this macro', 'record a macro called ...', 'watch me', "+
+			"'watch me do this', 'learn how I do this', 'let me show you how to ...': it starts recording a macro, watching what "+
+			"they do in the browser on their computer so Jarvis can learn to do it. Saying you're watching without it records "+
+			"nothing. Not for reminders, notes or audio. Stop with stop_recording when they say they're done.",
+		servertools.Obj("task", strProp("The macro's name or what the user is about to show, in their words (e.g. 'pay the water bill' from 'record a macro called pay the water bill'); empty for 'record this macro' or 'watch me' alone"),
 			"computer", computerProp()))
 }
 
