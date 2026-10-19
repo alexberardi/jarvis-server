@@ -351,6 +351,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/node-config", m.user(m.handleNodeConfig))
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/led/preview", m.user(m.handleLEDPreview))
 	mux.HandleFunc("POST "+v0+"/commands/{request_id}/verify", m.node(m.handleVerifyCommand))
+	// Computer tasks: the agent verifies a single-use approval token before a risky action.
+	mux.HandleFunc("POST "+v0+"/computer/approvals/{token}/verify", m.node(m.handleVerifyApproval))
 	for _, p := range []string{"/device-control-results/", "/device-state-results/", "/mobile/node-tool-reports/"} {
 		mux.HandleFunc("POST "+v0+p+"{request_id}", m.node(m.handleResult))
 	}

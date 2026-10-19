@@ -42,7 +42,9 @@ type Scope struct {
 // Action is one background tool call to decide on.
 type Action struct {
 	Tool                            string
-	Args                            any // *pyjson.Object or map[string]any; only "business" is read
+	Target                          string // "", site:<host>, app:<id> or action:<category>
+	NewApp                          Effect // app: target used for the first time: computer.new_app ("" = allow)
+	Args                            any    // *pyjson.Object or map[string]any; only "business" is read
 	IsRisky, RunWithoutConfirmation bool
 	Source                          string
 	Scope                           *Scope
@@ -52,6 +54,7 @@ type Action struct {
 type Rule struct {
 	ID                                    int64
 	HouseholdID, ScopeKind, ScopeID, Tool string
+	Target                                string // "" = every target of the tool
 	Effect                                Effect
 	Note                                  string
 	UpdatedBy                             *int64
@@ -62,41 +65,50 @@ type Rule struct {
 type Verdict struct {
 	Effect  Effect
 	Rule    *Rule  // the table rule that matched, or nil
-	Scope   string // household|goal|watch|automation|tool|"" (what decided it)
+	Scope   string // household|goal|watch|automation|tool|default|"" (what decided it)
 	Reason  string
 	Warning string // a declaration ignored because the tool is risky / has a business party
 }
 
 // RuleSource looks up one rule.
 type RuleSource interface {
-	Rule(ctx context.Context, hh, scopeKind, scopeID, tool string) (*Rule, error) // nil, nil: none
+	Rule(ctx context.Context, hh, scopeKind, scopeID, tool, target string) (*Rule, error) // nil, nil: none
 }
 
 // Policy resolves actions against the household's rules.
 type Policy struct{ Rules RuleSource } // nil Rules: no rules
 
 // Decide resolves an action, first match wins (A7): an inline scope effect, a scoped table rule,
-// the household rule, the tool's run_without_confirmation declaration, then ask.
+// the household rule, the computer task defaults, the tool's run_without_confirmation
+// declaration, then ask. Within a scope, a rule for the action's target wins (for a site, then
+// each parent domain), then the tool's rule for every target; a scoped rule beats any household
+// rule.
 func (p *Policy) Decide(ctx context.Context, hh string, a Action) Verdict {
 	if s := a.Scope; s != nil && s.Effect != "" {
 		return Verdict{Effect: s.Effect, Scope: s.Kind, Reason: "set on the " + s.Kind}
 	}
 	if p.Rules != nil {
+		type scope struct{ kind, id string }
+		scopes := []scope{{ScopeHousehold, ""}}
 		if s := a.Scope; s != nil && s.ID != "" {
-			r, err := p.Rules.Rule(ctx, hh, s.Kind, s.ID, a.Tool)
-			if err != nil {
-				return unavailable()
-			}
-			if r != nil {
-				return Verdict{Effect: r.Effect, Rule: r, Scope: s.Kind, Reason: s.Kind + " rule"}
+			scopes = []scope{{s.Kind, s.ID}, {ScopeHousehold, ""}}
+		}
+		targets := targetChain(a.Target)
+		for _, s := range scopes {
+			for _, t := range targets {
+				r, err := p.Rules.Rule(ctx, hh, s.kind, s.id, a.Tool, t)
+				if err != nil {
+					return unavailable()
+				}
+				if r != nil {
+					return Verdict{Effect: r.Effect, Rule: r, Scope: s.kind, Reason: s.kind + " rule"}
+				}
 			}
 		}
-		r, err := p.Rules.Rule(ctx, hh, ScopeHousehold, "", a.Tool)
-		if err != nil {
-			return unavailable()
-		}
-		if r != nil {
-			return Verdict{Effect: r.Effect, Rule: r, Scope: ScopeHousehold, Reason: "household rule"}
+	}
+	if a.Tool == ToolComputerTask {
+		if r := computerDefault(a); r != nil {
+			return Verdict{Effect: r.Effect, Scope: "default", Reason: "computer task default (" + r.Target + ")"}
 		}
 	}
 	var warning string
@@ -111,6 +123,29 @@ func (p *Policy) Decide(ctx context.Context, hh string, a Action) Verdict {
 		}
 	}
 	return Verdict{Effect: Ask, Reason: "no rule; asks by default", Warning: warning}
+}
+
+// targetChain is the targets to look a rule up by, most specific first: the target, for a site
+// each parent domain down to two labels (site:shop.example.com, site:example.com), then "".
+func targetChain(target string) []string {
+	if target == "" {
+		return []string{""}
+	}
+	if t, err := normalizeTarget(target); err == nil {
+		target = t
+	}
+	out := []string{target}
+	if host, ok := strings.CutPrefix(target, TargetSite); ok {
+		for {
+			_, parent, ok := strings.Cut(host, ".")
+			if !ok || !strings.Contains(parent, ".") {
+				break
+			}
+			host = parent
+			out = append(out, TargetSite+host)
+		}
+	}
+	return append(out, "")
 }
 
 func unavailable() Verdict { return Verdict{Effect: Ask, Reason: "rules unavailable; asks"} }
