@@ -22,11 +22,17 @@ type fakeNode struct {
 	focused  int
 	value    string
 	gone     bool
+	fetched  int    // children() calls
+	onFetch  func() // runs on each children() call
 }
 
 func (n *fakeNode) attr(name string) string { return n.attrs[name] }
 func (n *fakeNode) bounds() *[4]int         { return n.box }
 func (n *fakeNode) children() []axNode {
+	n.fetched++
+	if n.onFetch != nil {
+		n.onFetch()
+	}
 	out := make([]axNode, len(n.kids))
 	for i, k := range n.kids {
 		out[i] = k
@@ -95,6 +101,7 @@ func TestSnapshotRoles(t *testing.T) {
 		),
 		tr.n("AXLink", map[string]string{"AXValue": "Help"}),
 		tr.n("AXImage", map[string]string{"AXDescription": "logo"}),
+		tr.n("AXTextField", map[string]string{"AXValue": "eggs"}),
 	)
 	total := tr.count(win)
 
@@ -107,6 +114,7 @@ func TestSnapshotRoles(t *testing.T) {
 		"a1:AXButton:OK", "a2:AXTextField:Search", "a3:AXCheckBox:Pinned",
 		"a4:AXRadioButton:General", "a5:AXGroup:Advanced",
 		"a6:AXRow:", "a7:AXCell:Groceries", "a8:AXLink:Help",
+		"a9:AXTextField:", // typed text is never a name, even with no title
 	}
 	if got := roles(s); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("elements\n got %v\nwant %v", got, want)
@@ -126,6 +134,9 @@ func TestSnapshotRoles(t *testing.T) {
 	}
 	if !has(el[3].State, "checked") || !has(el[5].State, "selected") {
 		t.Errorf("tab %+v should be checked, row %+v selected", el[3], el[5])
+	}
+	if el[8].Value != "eggs" {
+		t.Errorf("untitled text field = %+v, want value eggs", el[8])
 	}
 	if el[7].Value != "" {
 		t.Errorf("link value %q: a name taken from AXValue isn't repeated as the value", el[7].Value)
@@ -199,6 +210,9 @@ func TestMaxElements(t *testing.T) {
 	if len(s.Elements) != 5 || s.Elements[4].Name != "b4" {
 		t.Fatalf("elements = %v, want b0..b4", roles(s))
 	}
+	if b4 := kids[4].kids[0]; b4.fetched != 0 {
+		t.Errorf("fetched the children of the last kept node %d times after the cap", b4.fetched)
+	}
 	// Handed out: the window, its 20 groups and the first 5 groups' buttons. The other groups'
 	// children are never fetched once the cap is reached.
 	if want := 1 + 20 + 5 - 5; tr.released != want {
@@ -209,6 +223,33 @@ func TestMaxElements(t *testing.T) {
 	cancel()
 	if _, err := refs.snapshot(ctx, tr.n("AXWindow", nil, tr.n("AXButton", nil)), 5); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled snapshot err = %v", err)
+	}
+}
+
+// A walk cancelled after it kept some nodes releases them, and leaves the table as it was.
+func TestCancelMidWalk(t *testing.T) {
+	var tr tree
+	var refs refTable
+	prev, err := refs.snapshot(context.Background(), tr.n("AXWindow", nil, tr.n("AXButton", nil)), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.released = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	late := tr.n("AXGroup", nil, tr.n("AXButton", nil), tr.n("AXButton", nil))
+	late.onFetch = cancel
+	win := tr.n("AXWindow", nil, tr.n("AXButton", nil), tr.n("AXCheckBox", nil), late)
+	total := tr.count(win)
+	if _, err := refs.snapshot(ctx, win, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want canceled", err)
+	}
+	if tr.released != total {
+		t.Errorf("released %d of %d nodes handed out", tr.released, total)
+	}
+	if refs.gen != prev.Gen || len(refs.nodes) != 1 {
+		t.Errorf("table = gen %d with %d nodes, want the previous generation untouched", refs.gen, len(refs.nodes))
 	}
 }
 

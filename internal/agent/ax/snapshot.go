@@ -148,7 +148,7 @@ func (w *walker) visit(n axNode, parentRole string, depth int) bool {
 		w.keep(n, role)
 		kept = true
 	}
-	if depth >= maxDepth {
+	if depth >= maxDepth || w.full() {
 		return kept
 	}
 	for _, c := range n.children() {
@@ -161,19 +161,15 @@ func (w *walker) visit(n axNode, parentRole string, depth int) bool {
 
 func (w *walker) keep(n axNode, role string) {
 	role, secure := secureRole(n, role)
-	el := computeruse.SnapshotElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: baseName(n), Bounds: n.bounds()}
-	if !secure {
-		v := clip(n.attr("AXValue"))
-		switch {
-		case toggleRoles[role]:
-			if v == "1" {
-				el.State = append(el.State, "checked")
-			}
-		case textRoles[role]:
-			el.Value = v
-		case el.Name == "":
-			el.Name = v
+	name, v := describe(n, role, secure)
+	el := computeruse.SnapshotElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: name, Bounds: n.bounds()}
+	switch {
+	case toggleRoles[role]:
+		if v == "1" {
+			el.State = append(el.State, "checked")
 		}
+	case textRoles[role]:
+		el.Value = v
 	}
 	if n.attr("AXEnabled") == "false" {
 		el.State = append(el.State, "disabled")
@@ -199,15 +195,23 @@ func secureRole(n axNode, role string) (string, bool) {
 	return role, false
 }
 
-// baseName is the first of AXTitle, AXDescription and AXLabel that is set. AXValue comes after
-// them, but only for roles whose value isn't typed text or a toggle.
-func baseName(n axNode) string {
+// describe reads n's name and AXValue. The name is the first of AXTitle, AXDescription and
+// AXLabel that is set, then AXValue, but only for roles whose value isn't typed text or a toggle
+// (and value is "" once it became the name). A secure field's value is never read.
+func describe(n axNode, role string, secure bool) (name, value string) {
 	for _, a := range []string{"AXTitle", "AXDescription", "AXLabel"} {
-		if s := clip(n.attr(a)); s != "" {
-			return s
+		if name = clip(n.attr(a)); name != "" {
+			break
 		}
 	}
-	return ""
+	if secure {
+		return name, ""
+	}
+	value = clip(n.attr("AXValue"))
+	if name == "" && !textRoles[role] && !toggleRoles[role] {
+		return value, ""
+	}
+	return name, value
 }
 
 func clip(s string) string {

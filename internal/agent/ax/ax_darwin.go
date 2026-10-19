@@ -350,9 +350,6 @@ func elementAt(x, y float64) (*computeruse.Element, error) {
 	e := elem(out)
 	defer e.release()
 	role, secure := identity(e)
-	name := baseName(e)
-	if name == "" && !secure && !textRoles[role] && !toggleRoles[role] {
-		name = clip(e.attr("AXValue"))
-	}
+	name, _ := describe(e, role, secure)
 	return &computeruse.Element{Role: role, Name: name, Secure: secure}, nil
 }
