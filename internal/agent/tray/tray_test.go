@@ -249,6 +249,12 @@ func TestTooltipAndIconFollowTheActivity(t *testing.T) {
 	if got := Tooltip(State{Status: "Running", Activity: ActivityControlling}); got != "Jarvis is controlling this computer" {
 		t.Fatalf("controlling tooltip %q", got)
 	}
+	if got := Tooltip(State{Activity: ActivityControlling, StopHotkey: "⌃⌥⎋"}); got != "Jarvis is controlling this computer (⌃⌥⎋ stops it)" {
+		t.Fatalf("tooltip with the stop hotkey %q", got)
+	}
+	if got := Tooltip(State{Status: "Running", StopHotkey: "⌃⌥⎋"}); got != "Jarvis Automation Agent — Running" {
+		t.Fatalf("idle tooltip with the stop hotkey %q", got)
+	}
 	if Active(Items(State{})) || !Active(Items(State{Activity: ActivityRecording})) {
 		t.Fatal("Active should follow the Stop item")
 	}

@@ -11,6 +11,29 @@ type AppEvents struct {
 	Reopen func()
 	// OpenURL: a URL of the app's scheme was opened (kAEGetURL); the receiver checks it.
 	OpenURL func(url string)
+	// StopHotkey: the user pressed ⌃⌥⎋ (StopHotkeyLabel), anywhere: stop what Jarvis is doing
+	// with the computer. macOS only for now.
+	StopHotkey func()
+}
+
+// StopHotkeyLabel is the stop hotkey as the tray's tooltip names it.
+const StopHotkeyLabel = "⌃⌥⎋"
+
+// The stop hotkey as Carbon's RegisterEventHotKey takes it.
+const (
+	stopKeyCode   = 53              // kVK_Escape
+	stopModifiers = 0x1000 | 0x0800 // controlKey | optionKey
+)
+
+// hotkeySig is the signature of our hotkeys' EventHotKeyID.
+var hotkeySig = fourCC("jarv")
+
+// hotkey hands a press of the stop hotkey to StopHotkey, on a goroutine (the caller is the main
+// thread).
+func (ev AppEvents) hotkey() {
+	if ev.StopHotkey != nil {
+		go ev.StopHotkey()
+	}
 }
 
 // fourCC is a Mac four-character code ("aevt") as its 32-bit value.
