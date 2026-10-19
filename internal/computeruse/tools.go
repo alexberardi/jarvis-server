@@ -11,6 +11,8 @@ const (
 	ToolStop        = "computer_stop"
 	ToolRecordStart = "computer_record_start"
 	ToolRecordStop  = "computer_record_stop"
+	// ToolRecordDelete deletes the agent's local copy of a recording (piece 29 adds it to the agent).
+	ToolRecordDelete = "computer_record_delete"
 
 	toolPrefix = "computer_"
 )

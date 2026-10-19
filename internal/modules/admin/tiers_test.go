@@ -66,6 +66,15 @@ var wantTiers = map[string]tier{
 	// Add-ons: device sign-out (cc: the pairer or a household admin) and "this computer" (a hint).
 	"POST /api/cc/api/v0/nodes/{node_id}/sign-out": tierUser,
 	"GET /api/addons/this-device":                  tierUser,
+	// Taught workflows and recordings: cc checks the owner, sharing and the household admin role.
+	"GET /api/cc/api/v0/workflows":           tierUser,
+	"GET /api/cc/api/v0/workflows/{id}":      tierUser,
+	"PUT /api/cc/api/v0/workflows/{id}":      tierUser,
+	"DELETE /api/cc/api/v0/workflows/{id}":   tierUser,
+	"POST /api/cc/api/v0/workflows/{id}/run": tierUser,
+	"GET /api/cc/api/v0/recordings":          tierUser,
+	"GET /api/cc/api/v0/recordings/{id}":     tierUser,
+	"DELETE /api/cc/api/v0/recordings/{id}":  tierUser,
 	// The desktop agent download (install plan 3.1): a public release asset, verified here.
 	"GET /api/addons/agent/{os}/{arch}": tierUser,
 
