@@ -70,16 +70,22 @@ class NotesAppTest(unittest.TestCase):
 
     def test_moved_layout_swaps_buttons(self):
         default = notes.NotesApp(self.root, state_path=self.state)
-        self.root.update()
-        new_parent, save_parent = default.new_button.master, default.save_button.master
-
         other = tk.Toplevel(self.root)
         moved = notes.NotesApp(other, layout="moved")
         self.root.update()
-        self.assertEqual(moved.new_button.master.winfo_name(), save_parent.winfo_name())
-        self.assertEqual(moved.save_button.master.winfo_name(), new_parent.winfo_name())
-        self.assertNotEqual(new_parent.winfo_name(), save_parent.winfo_name())
 
+        # Default: "New note" in the left column (above the list), "Save" in
+        # the right one (below the editor).
+        self.assertIs(default.new_button.master.master, default.left)
+        self.assertIs(default.save_button.master.master, default.right)
+        self.assertEqual(default.new_button.master.winfo_name(), "top_left")
+        self.assertEqual(default.save_button.master.winfo_name(), "bottom_right")
+
+        # Moved: the two swap columns.
+        self.assertIs(moved.new_button.master.master, moved.right)
+        self.assertIs(moved.save_button.master.master, moved.left)
+        self.assertEqual(moved.new_button.master.winfo_name(), "bottom_right")
+        self.assertEqual(moved.save_button.master.winfo_name(), "top_left")
 
 if __name__ == "__main__":
     unittest.main()

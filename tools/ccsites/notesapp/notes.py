@@ -46,14 +46,14 @@ class NotesApp:
         root.bind("<Control-n>", lambda _e: self.new_note())
         root.bind("<Control-s>", lambda _e: self.save())
 
-        left = tk.Frame(root)
+        self.left = left = tk.Frame(root, name="left")
         left.pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=8)
-        right = tk.Frame(root)
+        self.right = right = tk.Frame(root, name="right")
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8, pady=8)
 
         # Default: "New note" above the list, "Save" below the editor.
         # Moved: the two swap places.
-        top_left = tk.Frame(left)
+        top_left = tk.Frame(left, name="top_left")
         top_left.pack(side=tk.TOP, fill=tk.X)
         tk.Label(left, text="Notes").pack(side=tk.TOP, anchor=tk.W)
         self.listbox = tk.Listbox(left, width=24, exportselection=False)
@@ -64,7 +64,7 @@ class NotesApp:
         self.title_entry = tk.Entry(right)
         self.title_entry.pack(side=tk.TOP, fill=tk.X)
         tk.Label(right, text="Body").pack(side=tk.TOP, anchor=tk.W)
-        bottom_right = tk.Frame(right)
+        bottom_right = tk.Frame(right, name="bottom_right")
         bottom_right.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
         self.body_text = tk.Text(right, wrap=tk.WORD, undo=True)
         self.body_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
