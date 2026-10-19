@@ -118,6 +118,9 @@ var passRoutes = []passRoute{
 	ccUserRoute("PUT /api/cc/api/v0/households/{household_id}/prompt/base"),
 	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/import"),
 	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/prompt/preview"),
+	// Household settings (Account page): cc lets any member read, only a household admin write.
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/settings"),
+	ccUserRoute("PUT /api/cc/api/v0/mobile/household/{household_id}/settings/{key...}"),
 	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc counts what
 	// waits (never listing codes) plus the caller's own households, and approves a typed code
 	// only into one of those.

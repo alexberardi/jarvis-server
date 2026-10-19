@@ -471,6 +471,8 @@ install_sudoers() {
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
 $NODE_USER ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot, /usr/sbin/reboot
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
+# A crash loop (a self-update's broken release) hits the unit's start limit; the rollback's restart needs it reset.
+$NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl reset-failed jarvis-agent, /usr/bin/systemctl reset-failed jarvis-agent.service
 # Provisioning drives Wi-Fi through NetworkManager's D-Bus API, which polkit allows instead
 # (configure_nm_ap); hostapd/dnsmasq get entries here only if the NM AP fails on a chip.
 # Not yet, added with the step that needs them (go-pi-node.md §7):

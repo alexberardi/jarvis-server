@@ -501,7 +501,9 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		switch x := m.(type) {
 		case *authmod.Module:
 			log, cfg := deps.Log, deps.Config
-			x.OnSetupToken = func(token, path string) { announceSetup(os.Stderr, log, cfg, token, path, browser) }
+			x.OnSetupToken = func(token, path string) {
+				announceSetup(os.Stderr, stderrIsTerminal(os.Getenv, os.Stderr), log, cfg, token, path, browser)
+			}
 		case *adminmod.Module:
 			// AD8 restart button and AD5 one-click update.
 			x.Restarter = restarter

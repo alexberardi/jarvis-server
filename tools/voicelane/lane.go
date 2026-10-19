@@ -114,6 +114,7 @@ type Test struct {
 	Screenshots   []string `json:"screenshots"`
 	Trace         *string  `json:"trace"`
 	ConsoleErrors []string `json:"console_errors"`
+	SkipReason    string   `json:"skip_reason,omitempty"`
 	// Artifacts are each run's audio and node log, relative to the run's directory.
 	Artifacts      []string `json:"artifacts"`
 	ModelDependent bool     `json:"model_dependent"`
@@ -217,7 +218,11 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		if t.Status == "failed" {
 			failed++
 		}
-		fmt.Fprintf(stdout, "voice: %-7s %s (%d/%d)\n", t.Status, c.Name, t.Passes, len(t.Runs))
+		if t.Status == "skipped" {
+			fmt.Fprintf(stdout, "voice: %-7s %s: %s\n", t.Status, c.Name, t.SkipReason)
+		} else {
+			fmt.Fprintf(stdout, "voice: %-7s %s (%d/%d)\n", t.Status, c.Name, t.Passes, len(t.Runs))
+		}
 		tests = append(tests, t)
 	}
 	status := "passed"
@@ -251,8 +256,7 @@ func (l *lane) runCase(ctx context.Context, c Case, file string, repeat int, rel
 	defer func() { t.DurationMS = time.Since(start).Milliseconds() }()
 	if c.Needs == "pipewire" && l.audio == "wav" {
 		t.Status = "skipped"
-		e := "needs real-time audio (--audio pipewire or pi): a WAV speaker is written at once, so nothing can be said over it"
-		t.Error = &e
+		t.SkipReason = "needs real-time audio (--audio pipewire or pi): a WAV speaker is written at once, so nothing can be said over it"
 		return t
 	}
 	runs := 1
