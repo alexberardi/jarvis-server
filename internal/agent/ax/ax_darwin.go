@@ -408,6 +408,8 @@ var (
 	bundleIDs  sync.Map
 )
 
+func forgetApps() { bundleIDs.Clear() }
+
 // bundleID is the bundle id of the app with this pid ("" when it has none), remembered per pid.
 func bundleID(pid int32) string {
 	if v, ok := bundleIDs.Load(pid); ok {

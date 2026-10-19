@@ -165,6 +165,7 @@ func macTap(send func(DeskInput)) (func(), error) {
 	if !curTap.CompareAndSwap(nil, st) {
 		return nil, ErrBusy
 	}
+	ax.ForgetApps()
 	ready, exited := make(chan error, 1), make(chan struct{})
 	go func() {
 		runtime.LockOSThread() // never unlocked: the thread ends with the goroutine

@@ -327,3 +327,49 @@ func TestDesktopRecording(t *testing.T) {
 		t.Fatalf("a failed start left %v", left)
 	}
 }
+
+// A worker stuck past Stop's wait (an app not answering AX) does nothing more once Stop
+// returns: no keyframe written after the trace was handed over, the queued events skipped.
+func TestStopAbandonsStuckWorker(t *testing.T) {
+	defer func(d time.Duration) { deskWorkerAwait = d }(deskWorkerAwait)
+	deskWorkerAwait = 50 * time.Millisecond
+	desk, tap := newFakeDesk(), &fakeTap{}
+	p := desk.platform()
+	release, calls := make(chan struct{}), 0
+	var mu sync.Mutex
+	p.ElementAt = func(x, y float64) (*ax.Recorded, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		<-release
+		return newNoteBtn, nil
+	}
+	dir := t.TempDir()
+	src := &DesktopSource{Dir: dir, Tap: tap.start, Platform: p, now: desk.now}
+	if err := src.Start(context.Background(), "rec_x", func(json.RawMessage) {}); err != nil {
+		t.Fatal(err)
+	}
+	worker := src.cur.worker
+	tap.input(DeskInput{Kind: InClick, X: 1, Y: 1, At: desk.tick(time.Second)})
+	tap.input(DeskInput{Kind: InClick, X: 2, Y: 2, At: desk.tick(3 * time.Second)})
+	for {
+		mu.Lock()
+		n := calls
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := src.Stop(context.Background(), "rec_x"); err == nil {
+		t.Fatal("Stop didn't say events were dropped")
+	}
+	close(release)
+	<-worker
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.jpg")); len(left) != 0 {
+		t.Fatalf("keyframes written after Stop: %v", left)
+	}
+	if calls != 1 {
+		t.Fatalf("the worker handled %d clicks after Stop, want the stuck one only", calls)
+	}
+}

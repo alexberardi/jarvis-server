@@ -29,10 +29,11 @@ import (
 const KeyframeEvery = 2 * time.Second
 
 const (
-	deskQueue       = 512             // raw events waiting for the worker; more are dropped
-	deskScrollGap   = time.Second     // scrolls closer than this are one scroll event
-	deskWorkerAwait = 5 * time.Second // how long Stop waits for the queue to drain
+	deskQueue     = 512         // raw events waiting for the worker; more are dropped
+	deskScrollGap = time.Second // scrolls closer than this are one scroll event
 )
+
+var deskWorkerAwait = 5 * time.Second // how long Stop waits for the queue to drain (tests shorten it)
 
 // Raw input kinds (DeskInput.Kind).
 const (
@@ -155,7 +156,9 @@ func (s *DesktopSource) Start(_ context.Context, id string, emit func(json.RawMe
 	go func() {
 		defer close(ses.worker)
 		for in := range ses.ch {
-			ses.rec.handle(in)
+			if !ses.rec.isAbandoned() {
+				ses.rec.handle(in)
+			}
 		}
 	}()
 	s.cur = ses
@@ -180,6 +183,9 @@ func (s *DesktopSource) Stop(ctx context.Context, id string) error {
 	case <-ses.worker:
 		ses.rec.finish()
 	case <-wait.Done():
+		// The worker is stuck (an app not answering AX): what it hasn't emitted yet is lost,
+		// text being typed too, and it writes no keyframe once the trace is handed over.
+		ses.rec.abandon()
 		err = errors.New("desktop recording: events still waiting; dropped")
 	}
 	cancel()
@@ -202,7 +208,7 @@ func (s *DesktopSource) Keyframes(id string) []Keyframe {
 }
 
 // deskRecorder groups one recording's raw events. Only the worker goroutine calls it (finish
-// once the worker is done).
+// once the worker is done), but for abandon, from Stop.
 type deskRecorder struct {
 	id   string
 	dir  string
@@ -216,9 +222,10 @@ type deskRecorder struct {
 	scroll   *DesktopEvent
 	scrolled time.Time
 
-	kmu      sync.Mutex
-	kf       []Keyframe
-	lastShot time.Time
+	kmu       sync.Mutex
+	kf        []Keyframe
+	abandoned bool // Stop gave up waiting: keep no more keyframes, skip what is queued
+	lastShot  time.Time
 }
 
 // deskTyping is the text typed into one element so far.
@@ -396,13 +403,29 @@ func (d *deskRecorder) keyframe(seq int64) {
 		return
 	}
 	path := filepath.Join(d.dir, d.id+"."+strconv.FormatInt(seq, 10)+".jpg")
+	d.kmu.Lock()
+	defer d.kmu.Unlock()
+	if d.abandoned {
+		return
+	}
 	if err := writePrivate(path, b); err != nil {
 		d.log.Warn("desktop recording: couldn't keep a keyframe", "err", err)
 		return
 	}
-	d.kmu.Lock()
 	d.kf = append(d.kf, Keyframe{Seq: int(seq), Path: path})
+}
+
+// abandon is Stop giving up on the worker; once it returns, no keyframe is written.
+func (d *deskRecorder) abandon() {
+	d.kmu.Lock()
+	d.abandoned = true
 	d.kmu.Unlock()
+}
+
+func (d *deskRecorder) isAbandoned() bool {
+	d.kmu.Lock()
+	defer d.kmu.Unlock()
+	return d.abandoned
 }
 
 func (d *deskRecorder) finish() { d.flush() }

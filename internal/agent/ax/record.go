@@ -23,6 +23,10 @@ func RecordedAt(x, y float64) (*Recorded, error) { return recordedAt(x, y) }
 // nil when there's none.
 func FocusedElement() (*Recorded, error) { return focusedElement() }
 
+// ForgetApps drops the bundle ids remembered per pid (a pid can be reused once its app quits):
+// each recording starts with none.
+func ForgetApps() { forgetApps() }
+
 const maxPathDepth = 32
 
 // recordedOf reads n's identity and path. parent returns a node's AXParent (owned by the
