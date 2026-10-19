@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func packagesFile(t *testing.T, names ...string) string {
 		Commands []string `json:"commands"`
 	}
 	cmds := map[string]string{"alpha": "commands/greet/command.py", "beta": "commands/greet/command.py",
-		"broken": "commands/boom/command.py"}
+		"broken": "commands/boom/command.py", "dup": "commands/hello/command.py"}
 	var list []entry
 	for _, n := range names {
 		root, err := filepath.Abs(filepath.Join("testdata", "packages", n))
@@ -71,6 +72,48 @@ func TestSidecarLoadsInstalledPackages(t *testing.T) {
 		if !ok || out["message"] != want {
 			t.Fatalf("%s = %v", name, out)
 		}
+	}
+}
+
+// A Pi's built-in commands (testdata/builtins/fakenode stands in for jarvis-node-setup's
+// commands package) load next to the packages: every *_command module but the skipped ones.
+// A module that can't import is reported alone, and a package can't take a built-in's name.
+func TestSidecarLoadsTheBuiltins(t *testing.T) {
+	py := python(t)
+	ctx := context.Background()
+	root, _ := filepath.Abs(filepath.Join("testdata", "builtins"))
+	t.Setenv("PYTHONPATH", root)
+	listing := packagesFile(t, "alpha", "dup")
+	var doc map[string]any
+	b, _ := os.ReadFile(listing)
+	_ = json.Unmarshal(b, &doc)
+	doc["builtins"] = map[string]any{"package": "fakenode", "skip": []string{"skipped_command"}}
+	b, _ = json.Marshal(doc)
+	_ = os.WriteFile(listing, b, 0o600)
+
+	sc, err := Start(ctx, py, listing, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	var names []string
+	for _, tl := range sc.Available(ctx) {
+		names = append(names, tl.Name)
+	}
+	if sort.Strings(names); strings.Join(names, ",") != "alpha_greet,hello" {
+		t.Fatalf("tools = %v", names)
+	}
+	if sc.Package("hello") != "" {
+		t.Fatalf("a built-in has a package: %q", sc.Package("hello"))
+	}
+	f := sc.Failed()
+	if len(f) != 2 || !strings.Contains(f["builtin broken_command"], "needs the Python node") ||
+		!strings.Contains(f["dup"], "command hello is already provided by the node") {
+		t.Fatalf("failed = %v", f)
+	}
+	out, _ := sc.Call(ctx, "hello", nil, node.Request{})
+	if out["message"] != "hi" {
+		t.Fatalf("hello = %v", out)
 	}
 }
 

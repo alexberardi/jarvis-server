@@ -48,6 +48,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
+	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
@@ -567,6 +568,11 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("node settings: %w", err)
 	}
 	tf.pkgRoot = filepath.Join(filepath.Dir(path), "packages")
+	// The pipeline's microphone: voice-profile takes, and on a Pi what its built-ins say.
+	mic := voice.NewMic()
+	if !p.desktop {
+		tf.host = newPiHost(ctx, filepath.Dir(path), mic, log)
+	}
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -616,7 +622,6 @@ func run(ctx context.Context, args []string) error {
 		return vs, err
 	}
 	// A Pi's voice-profile takes go through the pipeline's microphone (voiceprofile.go).
-	mic := voice.NewMic()
 	addVerbs(r, voiceProfileVerbs(p, mic, log))
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
@@ -635,6 +640,7 @@ func run(ctx context.Context, args []string) error {
 	} else if *voiceOn {
 		log.Info("voice: not supported on " + runtime.GOOS + " yet")
 	}
+	connectHost(r, tf.host)
 	var setup func()
 	if p.desktop {
 		setup = openSetupPage(log)
@@ -731,8 +737,10 @@ type toolFlags struct {
 	// the sidecar on them and leaves pkgs to answer the app's install requests.
 	pkgRoot string
 	pkgs    *packages.Manager
-	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools.
-	pi bool
+	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools; its
+	// sidecar also loads the node's built-in commands, whose SDK backends host answers.
+	pi   bool
+	host *sdkhost.Host
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -813,10 +821,20 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		}
 		live.Swap(sc)
 	case f.pkgRoot != "":
-		f.pkgs = newPackages(f.pkgRoot, live, storage, log)
-		if err := f.pkgs.Boot(ctx); err != nil {
-			// The agent still serves its own tools; the app shows the packages as not loaded.
-			log.Warn("packages: not loaded", "err", err)
+		f.pkgs = newPackages(f.pkgRoot, live, storage, f.host, log)
+		boot := func() {
+			if err := f.pkgs.Boot(ctx); err != nil {
+				// The agent still serves its own tools; the app shows the packages as not loaded.
+				log.Warn("packages: not loaded", "err", err)
+			}
+		}
+		if f.pi && f.host != nil {
+			// The first start installs the built-ins (a download): the node comes up meanwhile,
+			// and their tools join the next turn's list.
+			f.pkgs.Builtins = packages.PiBuiltins(os.Getenv("JARVIS_AGENT_NODE_COMMANDS"))
+			go boot()
+		} else {
+			boot()
 		}
 	}
 	stopBrowser := closeAll

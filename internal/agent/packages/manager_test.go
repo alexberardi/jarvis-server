@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -236,5 +237,69 @@ func TestBootServesInstalledPackages(t *testing.T) {
 	m3 := &Manager{Root: m.Root, Python: m.Python, HTTP: m.HTTP, GOOS: "linux", Sidecars: &fakeSidecars{}, Log: quiet}
 	if err := m3.Boot(ctx); err == nil || !strings.Contains(err.Error(), "Python environment is missing") {
 		t.Fatalf("boot without venv = %v", err)
+	}
+}
+
+// The Pi profile: the node's built-in commands are pip-installed into the venv at boot, once
+// per pinned requirement, and every sidecar loads them, with or without packages.
+func TestBootInstallsAndServesTheBuiltins(t *testing.T) {
+	r := newRepos(t)
+	repo := r.add(t, "o/weather", "HEAD", weather("1.0.0"))
+	m, fr, sc := newTestManager(t, r)
+	m.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands", Skip: []string{"routine_command"}}
+	ctx := context.Background()
+	if err := m.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.calls) != 2 || fr.calls[0][1] != "venv" ||
+		strings.Join(fr.calls[1], " ") != "uv pip install --python "+m.Python.Interpreter()+" --quiet "+SDKRequirement+" jarvis-node-setup @ https://x/a.tar.gz" {
+		t.Fatalf("uv calls = %v", fr.calls)
+	}
+	if sc.live == nil || len(sc.livePackages()) != 0 {
+		t.Fatalf("no sidecar for the built-ins alone: %v", sc.live)
+	}
+	b, _ := os.ReadFile(filepath.Join(m.Root, "commands.json"))
+	var doc struct {
+		Builtins struct {
+			Package string   `json:"package"`
+			Skip    []string `json:"skip"`
+		} `json:"builtins"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil || doc.Builtins.Package != "commands" || !reflect.DeepEqual(doc.Builtins.Skip, []string{"routine_command"}) {
+		t.Fatalf("commands.json = %s", b)
+	}
+
+	// The next start doesn't reinstall them; a new pin does.
+	m2 := &Manager{Root: m.Root, Python: m.Python, HTTP: m.HTTP, GOOS: "linux", Sidecars: &fakeSidecars{}, Log: quiet, Builtins: m.Builtins}
+	if err := m2.Boot(ctx); err != nil || len(fr.calls) != 2 {
+		t.Fatalf("second boot: %v, uv calls %v", err, fr.calls)
+	}
+	m2.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/b.tar.gz", Package: "commands"}
+	if err := m2.Boot(ctx); err != nil || len(fr.calls) != 3 || !strings.HasSuffix(strings.Join(fr.calls[2], " "), "b.tar.gz") {
+		t.Fatalf("new pin: %v, uv calls %v", err, fr.calls)
+	}
+
+	// Removing the last package keeps the built-ins in service.
+	if _, err := m.Install(ctx, repo, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Uninstall(ctx, "get_weather_meteo"); err != nil {
+		t.Fatal(err)
+	}
+	if sc.live == nil {
+		t.Fatal("the built-ins went with the last package")
+	}
+
+	// Offline at a new pin: the venv's built-ins still serve.
+	fr.pipFail = errors.New("no network")
+	m2.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/c.tar.gz", Package: "commands"}
+	if err := m2.Boot(ctx); err != nil {
+		t.Fatalf("offline boot = %v", err)
+	}
+	// A fresh node offline: say so.
+	_ = os.RemoveAll(filepath.Join(m.Root, "venv"))
+	_ = os.Remove(filepath.Join(m.Root, "builtins.txt"))
+	if err := m2.Boot(ctx); err == nil || !strings.Contains(err.Error(), "no network") {
+		t.Fatalf("offline boot without a venv = %v", err)
 	}
 }

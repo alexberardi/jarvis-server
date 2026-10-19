@@ -28,6 +28,13 @@ request and its reply:
 so a package reads the settings the household set from the mobile app exactly as on a Pi
 (storage.get_secret(...)), with the requesting user set for user-scoped secrets.
 
+With --backends (the Pi profile) the SDK's other node backends answer the same way: llm.*,
+cc.*, timer.*, audio.*, alerts.*, inbox.* and signals.* go to the Go agent, which holds the
+key, the timers, the alert queue and the speaker (docs/agent/go-pi-node.md §5.2).
+CommandInvoker runs another loaded command in this process, and the SDK's stdlib logger
+fallback writes to stderr. Without the flag (the desktop agent) none is registered, so a
+command gets the SDK's safe defaults.
+
 "signals" are the CommandResponse fields only the node acts on; they never reach
 command-center. A command's on_response_complete callable (a media command's deferred "start
 playing now") stays here under a token; the agent runs it with "complete" once the spoken reply
@@ -105,6 +112,130 @@ class AgentStorage(StorageBackend):
         _ask("storage.delete_secret", {"key": key, "scope": scope, "user_id": user_id})
 
 
+# The loaded commands, by name: CommandInvoker's lookup.
+COMMANDS: dict = {}
+
+
+def register_backends() -> None:
+    """The Pi's SDK backends. Imported here, not at the top: a desktop venv may hold an SDK
+    older than these modules."""
+    import dataclasses
+    import logging
+    from datetime import datetime
+
+    from jarvis_command_sdk.agent import Alert
+    from jarvis_command_sdk.alert_queue import AlertQueueBackend, set_alert_queue_backend
+    from jarvis_command_sdk.audio_control import AudioControlBackend, set_audio_control_backend
+    from jarvis_command_sdk.cc_http import CCHttpBackend, set_cc_backend
+    from jarvis_command_sdk.command_invoker import CommandInvokerBackend, set_command_invoker_backend
+    from jarvis_command_sdk.inbox import InboxBackend, set_inbox_backend
+    from jarvis_command_sdk.llm import LLMBackend, set_llm_backend
+    from jarvis_command_sdk.signals import SignalsBackend, set_signals_backend
+    from jarvis_command_sdk.timer import TimerBackend, set_timer_backend
+
+    # get_logger's stdlib fallback; stderr is the Go agent's log.
+    logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(name)s %(levelname)s: %(message)s")
+
+    alert_fields = {f.name for f in dataclasses.fields(Alert)}
+
+    def alert(d: dict):
+        for k in ("created_at", "expires_at"):
+            if isinstance(d.get(k), str):
+                d[k] = datetime.fromisoformat(d[k])
+        return Alert(**{k: v for k, v in d.items() if k in alert_fields})
+
+    class AgentLLM(LLMBackend):
+        def chat_text(self, prompt):
+            return _ask("llm.chat_text", {"prompt": prompt})
+
+    class AgentCC(CCHttpBackend):
+        def post(self, path, json):
+            return _ask("cc.post", {"path": path, "json": json})
+
+    class AgentTimer(TimerBackend):
+        def set(self, seconds, label=None):
+            return _ask("timer.set", {"seconds": seconds, "label": label})
+
+        def cancel(self, timer_id):
+            return bool(_ask("timer.cancel", {"timer_id": timer_id}))
+
+        def list_active(self):
+            return _ask("timer.list_active", {}) or []
+
+        def get(self, timer_id):
+            return _ask("timer.get", {"timer_id": timer_id})
+
+        def find_by_label(self, label):
+            return _ask("timer.find_by_label", {"label": label})
+
+        def clear_all(self):
+            return int(_ask("timer.clear_all", {}) or 0)
+
+    class AgentAudio(AudioControlBackend):
+        def set_volume_percent(self, percent):
+            return bool(_ask("audio.set_volume_percent", {"percent": percent}))
+
+        def adjust_volume_percent(self, delta):
+            return _ask("audio.adjust_volume_percent", {"delta": delta})
+
+        def set_muted(self, muted):
+            return bool(_ask("audio.set_muted", {"muted": muted}))
+
+        def speak(self, text):
+            return bool(_ask("audio.speak", {"text": text}))
+
+    class AgentAlerts(AlertQueueBackend):
+        def pending(self):
+            return [alert(d) for d in _ask("alerts.pending", {}) or []]
+
+        def flush(self):
+            return [alert(d) for d in _ask("alerts.flush", {}) or []]
+
+        def remove(self, ids):
+            return int(_ask("alerts.remove", {"ids": list(ids)}) or 0)
+
+        def count(self):
+            return int(_ask("alerts.count", {}) or 0)
+
+    class AgentInbox(InboxBackend):
+        # No attachments parameter: a post with attachments gets "attachments_unsupported".
+        def post_inbox_item(self, command_name, *, title, summary="", body="", category="general", metadata=None,
+                            user_id=None, create_push_notification=False, target_type="household"):
+            try:
+                return _ask("inbox.post", {"command_name": command_name, "title": title, "summary": summary,
+                                           "body": body, "category": category, "metadata": metadata,
+                                           "user_id": user_id, "create_push_notification": create_push_notification,
+                                           "target_type": target_type})
+            except Exception as exc:  # a tag, never an exception, into a command
+                print(f"sidecar: inbox post failed: {exc}", file=sys.stderr)
+                return "http_error"
+
+    class AgentSignals(SignalsBackend):
+        def emit_signal(self, payload):
+            try:
+                return _ask("signals.emit", {"payload": payload})
+            except Exception as exc:
+                print(f"sidecar: signal emit failed: {exc}", file=sys.stderr)
+                return "http_error"
+
+    class InProcessInvoker(CommandInvokerBackend):
+        """Another loaded command, in this process; it reads its own secrets through storage,
+        as the requesting user of the call in progress."""
+
+        def invoke(self, name, request_info, /, **args):
+            cmd = COMMANDS.get(name)
+            return None if cmd is None else cmd.execute(request_info, **args)
+
+    set_llm_backend(AgentLLM())
+    set_cc_backend(AgentCC())
+    set_timer_backend(AgentTimer())
+    set_audio_control_backend(AgentAudio())
+    set_alert_queue_backend(AgentAlerts())
+    set_inbox_backend(AgentInbox())
+    set_signals_backend(AgentSignals())
+    set_command_invoker_backend(InProcessInvoker())
+
+
 def _commands_in(module) -> list:
     return [cls() for _, cls in inspect.getmembers(module, inspect.isclass)
             if issubclass(cls, IJarvisCommand) and cls.__module__ == module.__name__ and not inspect.isabstract(cls)]
@@ -138,15 +269,19 @@ PACKAGE_OF: dict = {}
 def load_packages(listing: str) -> dict:
     """Installed Pantry packages, from the agent's commands file:
 
-        {"packages": [{"name": "pkg", "root": "/abs/dir", "commands": ["commands/x/command.py"]}]}
+        {"packages": [{"name": "pkg", "root": "/abs/dir", "commands": ["commands/x/command.py"]}],
+         "builtins": {"package": "commands", "skip": ["routine_command"]}}   (builtins: a Pi's)
+
+    The built-ins load first; a package command with a built-in's name is refused.
 
     Each package is imported as its own top-level package (jarvis_pkgs_<name>), so two packages
     may both have a commands/get_weather/ and a command's relative imports work. Its root also
     goes on sys.path for the shared code a bundle imports by absolute name, as on a Pi.
     """
     with open(listing, encoding="utf-8") as f:
-        packages = json.load(f).get("packages") or []
-    found = {}
+        doc = json.load(f)
+    packages = doc.get("packages") or []
+    found = load_builtins(doc["builtins"]) if doc.get("builtins") else {}
     for pkg in packages:
         name, root = pkg["name"], pkg["root"]
         top = "jarvis_pkgs_" + re.sub(r"\W", "_", name)
@@ -174,10 +309,38 @@ def load_packages(listing: str) -> dict:
                     FAILED[name] = f"{rel}: command_name: {exc}"
                     continue
                 if cname in found and PACKAGE_OF.get(cname) != name:
-                    FAILED[name] = f"{rel}: command {cname} is already provided by {PACKAGE_OF.get(cname)}"
+                    FAILED[name] = f"{rel}: command {cname} is already provided by {PACKAGE_OF.get(cname) or 'the node'}"
                     continue
                 found[cname] = cmd
                 PACKAGE_OF[cname] = name
+    return found
+
+
+def load_builtins(spec: dict) -> dict:
+    """The node's built-in commands: every *_command module of an installed package (the
+    commands package of jarvis-node-setup), less spec["skip"]. A module that fails to import is
+    in FAILED as "builtin <module>"; one whose node-only code fails later fails that call."""
+    import pkgutil
+
+    found = {}
+    skip = set(spec.get("skip") or [])
+    try:
+        pkg = importlib.import_module(spec["package"])
+    except BaseException as exc:
+        FAILED["builtin " + spec["package"]] = f"{type(exc).__name__}: {exc}"
+        return found
+    for info in sorted(pkgutil.iter_modules(pkg.__path__), key=lambda i: i.name):
+        if info.ispkg or not info.name.endswith("_command") or info.name in skip:
+            continue
+        try:
+            module = importlib.import_module(f"{spec['package']}.{info.name}")
+            commands = _commands_in(module)
+        except BaseException as exc:
+            print(f"sidecar: failed to load built-in {info.name}:\n{traceback.format_exc()}", file=sys.stderr)
+            FAILED["builtin " + info.name] = f"{type(exc).__name__}: {exc}"
+            continue
+        for cmd in commands:
+            found[cmd.command_name] = cmd
     return found
 
 
@@ -326,6 +489,8 @@ def call(commands: dict, params: dict) -> dict:
 
 def main() -> None:
     set_backend(AgentStorage())
+    if "--backends" in sys.argv[2:]:
+        register_backends()
     commands = None
     while True:
         line = sys.stdin.readline()  # not `for line in sys.stdin`: _ask reads replies from it too
@@ -338,6 +503,7 @@ def main() -> None:
             # Loaded once the first request is read, so a command that touches storage while it
             # is constructed gets the agent's answer, not the next request, from stdin.
             commands = load(sys.argv[1])
+            COMMANDS.update(commands)
             print(f"sidecar: loaded {sorted(commands)}", file=sys.stderr)
         msg_id = None
         try:

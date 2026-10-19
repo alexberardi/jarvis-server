@@ -94,3 +94,30 @@ func TestTakeFailsWhenTheMicrophoneFails(t *testing.T) {
 		t.Fatal("Run did not report the microphone")
 	}
 }
+
+// Say speaks between turns (a timer's expiry) with the wake word paused, records nothing, and
+// listening resumes on fresh audio.
+func TestSayBetweenTurns(t *testing.T) {
+	mic := script()
+	srv := newServer()
+	r := newRig(t, mic, srv)
+	r.p.Mic = NewMic()
+	stop := r.run(t)
+	defer stop()
+	if err := NewMic().Say(context.Background(), "x"); !errors.Is(err, ErrMicUnavailable) {
+		t.Fatalf("say without a pipeline = %v", err)
+	}
+	waitAttached(t, r.p.Mic)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := r.p.Mic.Say(ctx, "Your pasta timer is done!"); err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.callList(); !slices.Equal(got, []string{"speak"}) || srv.said[0] != "Your pasta timer is done!" {
+		t.Fatalf("calls = %v, said %q", got, srv.said)
+	}
+	mic.push(rep(wake, 2), rep(speech, 5))
+	if tr := r.turn(t); tr.Transcript != srv.text {
+		t.Fatalf("turn after saying = %+v", tr)
+	}
+}

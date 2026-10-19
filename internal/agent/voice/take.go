@@ -15,6 +15,8 @@ type Take struct {
 	Cue     string        // said first; "" says nothing. A cue that can't be said is logged, not fatal
 	Preroll time.Duration // then this much audio is skipped while the reader starts
 	Secs    float64       // then this many seconds are recorded
+
+	sayOnly bool // Say's: the cue is all, and failing to say it is the error
 }
 
 // ErrMicUnavailable: no voice pipeline is listening (voice off, or the microphone is being
@@ -61,6 +63,14 @@ func (m *Mic) Record(ctx context.Context, t Take) ([]int16, error) {
 	}
 }
 
+// Say speaks text between turns with the wake word paused (a timer's expiry, a command's
+// audio_speak), as the Python node's announcements do, then listens again on fresh audio. It
+// waits for a turn in progress to end; ErrMicUnavailable at once if no pipeline is running.
+func (m *Mic) Say(ctx context.Context, text string) error {
+	_, err := m.Record(ctx, Take{Cue: text, sayOnly: true})
+	return err
+}
+
 // takes is the channel the wake loop serves (nil, never ready, without a Mic).
 func (p *Pipeline) takes() chan *takeReq {
 	if p.Mic == nil {
@@ -72,8 +82,15 @@ func (p *Pipeline) takes() chan *takeReq {
 // take records t on the pipeline goroutine: the cue, the preroll skipped, then t.Secs of
 // audio. A microphone silent for 1 s fails the take.
 func (p *Pipeline) take(ctx context.Context, chunks <-chan []int16, t Take) ([]int16, error) {
-	p.Log.Info("voice: recording a take", "secs", t.Secs)
+	if !t.sayOnly {
+		p.Log.Info("voice: recording a take", "secs", t.Secs)
+	}
 	defer p.cue(CueIdle, 0)
+	if t.sayOnly {
+		p.cue(CueSpeaking, 0)
+		_, err := p.speak(ctx, t.Cue, nil)
+		return nil, err
+	}
 	if t.Cue != "" {
 		p.cue(CueSpeaking, 0)
 		if _, err := p.speak(ctx, t.Cue, nil); err != nil {

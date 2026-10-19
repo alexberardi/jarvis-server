@@ -35,10 +35,11 @@ type LiveSidecars struct {
 	Live    *sidecar.Live
 	Log     *slog.Logger
 	Storage sidecar.Storage
+	Host    sidecar.Host // the Pi's SDK backends; nil registers none
 }
 
 func (s LiveSidecars) Start(ctx context.Context, python, commandsFile string) (Sidecar, error) {
-	sc, err := sidecar.Start(ctx, python, commandsFile, s.Log, s.Storage)
+	sc, err := sidecar.StartWith(ctx, python, commandsFile, s.Log, sidecar.Options{Storage: s.Storage, Host: s.Host})
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +57,7 @@ func (s LiveSidecars) Swap(sc Sidecar) {
 //	Root/pkgs/<name>.previous/   the version before the last update (what revert restores)
 //	Root/commands.json           the sidecar's list, rebuilt from pkgs/ on every change
 //	Root/venv, Root/python, Root/bin   the Python environment (Python)
+//	Root/builtins.txt            what the venv's built-in commands were installed from (Builtins)
 //
 // One change runs at a time. Every change ends with a fresh sidecar on the new list; an
 // install or revert whose commands don't load is undone and the old sidecar keeps serving.
@@ -66,9 +68,20 @@ type Manager struct {
 	GOOS     string
 	Sidecars Sidecars
 	Log      *slog.Logger
+	// Builtins, when set (the Pi profile), are the node's own commands: every sidecar loads
+	// them, with or without packages.
+	Builtins *Builtins
 
 	mu     sync.Mutex
 	failed map[string]string // of the sidecar in service
+}
+
+// Builtins are a node's built-in commands: a pip requirement Boot installs into the venv (once
+// per requirement), and the Python package whose *_command modules the sidecar loads, less Skip.
+type Builtins struct {
+	Requirement string
+	Package     string
+	Skip        []string
 }
 
 // Installed is one installed package.
@@ -130,11 +143,19 @@ func (m *Manager) Report() []map[string]any {
 	return out
 }
 
-// Boot starts the sidecar on the installed packages, if there are any.
+// Boot starts the sidecar on the installed packages, if there are any, and the built-ins.
 func (m *Manager) Boot(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.List()) == 0 {
+	if m.Builtins != nil {
+		if err := m.installBuiltins(ctx); err != nil {
+			if !exists(m.builtinsStamp()) && len(m.List()) == 0 {
+				return fmt.Errorf("installing the built-in commands: %w", err)
+			}
+			// Offline at a new pin: the venv's copy serves until the next start.
+			m.Log.Warn("packages: built-in commands not updated", "err", err)
+		}
+	} else if len(m.List()) == 0 {
 		return nil
 	}
 	if !m.Python.Ready() {
@@ -149,6 +170,26 @@ func (m *Manager) Boot(ctx context.Context) error {
 		m.Log.Warn("packages: a package didn't load", "package", name, "err", why)
 	}
 	return nil
+}
+
+func (m *Manager) builtinsStamp() string { return filepath.Join(m.Root, "builtins.txt") }
+
+// installBuiltins pip-installs the built-ins (with the SDK) unless the venv already has this
+// requirement.
+func (m *Manager) installBuiltins(ctx context.Context) error {
+	sdk := m.Python.SDK
+	if sdk == "" {
+		sdk = SDKRequirement
+	}
+	want := sdk + "\n" + m.Builtins.Requirement + "\n"
+	if b, err := os.ReadFile(m.builtinsStamp()); err == nil && string(b) == want && m.Python.Ready() {
+		return nil
+	}
+	m.Log.Info("packages: installing the built-in commands", "requirement", m.Builtins.Requirement)
+	if err := m.Python.Install(ctx, []string{m.Builtins.Requirement}); err != nil {
+		return err
+	}
+	return writeAtomic(m.builtinsStamp(), []byte(want))
 }
 
 // writeList rewrites commands.json from pkgs/ and returns how many packages it lists.
@@ -166,7 +207,11 @@ func (m *Manager) writeList() (int, error) {
 		}
 		list = append(list, e)
 	}
-	b, err := json.MarshalIndent(map[string]any{"packages": list}, "", "  ")
+	doc := map[string]any{"packages": list}
+	if bi := m.Builtins; bi != nil {
+		doc["builtins"] = map[string]any{"package": bi.Package, "skip": bi.Skip}
+	}
+	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return 0, err
 	}
@@ -174,10 +219,10 @@ func (m *Manager) writeList() (int, error) {
 }
 
 // start rewrites commands.json and starts a sidecar on it (not yet in service). With no
-// packages it returns nil, nil.
+// packages and no built-ins it returns nil, nil.
 func (m *Manager) start(ctx context.Context) (Sidecar, error) {
 	n, err := m.writeList()
-	if err != nil || n == 0 {
+	if err != nil || (n == 0 && m.Builtins == nil) {
 		return nil, err
 	}
 	return m.Sidecars.Start(ctx, m.Python.Interpreter(), m.commandsFile())
