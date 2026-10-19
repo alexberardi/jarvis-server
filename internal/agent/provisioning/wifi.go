@@ -21,6 +21,11 @@ type WiFi interface {
 	RollbackConnection(ctx context.Context) error
 	// StartAPMode broadcasts the setup hotspot ssid again.
 	StartAPMode(ctx context.Context, ssid string) error
+	// StopAPMode takes the hotspot down so the radio can rejoin the saved network (the
+	// recovery watcher's STA retry). No hotspot is not an error.
+	StopAPMode(ctx context.Context) error
+	// CurrentSSID is the network joined as a client, "" when none.
+	CurrentSSID(ctx context.Context) (string, error)
 }
 
 // Simulated is SimulatedWiFi: four made-up networks; Connect succeeds for those only.
@@ -66,4 +71,12 @@ func (s *Simulated) StartAPMode(context.Context, string) error {
 	s.connected = ""
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *Simulated) StopAPMode(context.Context) error { return nil }
+
+func (s *Simulated) CurrentSSID(context.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.connected, nil
 }

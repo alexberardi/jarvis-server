@@ -1220,8 +1220,18 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       interface, served by `jarvis-agent provision` on :8080 (`--captive-listen :80` optional).
       Verified with a simulated radio against a sandbox jarvisd; differences from Python in
       [decisions/2026-10-17-pi-provisioning-api.md](../decisions/2026-10-17-pi-provisioning-api.md).
-      **Still open:** the NetworkManager D-Bus Wi-Fi/hotspot backend (§8 Q7), starting setup mode
-      at boot, and the recovery watcher.
+      **NetworkManager backend and recovery cycle built 2026-10-18** (loop #170, 8b):
+      `provisioning.NetworkManager` over the system D-Bus (scan with a pre-hotspot cache, join
+      through a `jarvis-<ssid>` profile with commit at priority 999 or rollback, the open
+      `jarvis-setup-ap` hotspot on 192.168.4.1 in NM's shared mode) and `provisioning.Recovery`
+      (N:'s AP↔STA cycle and its `JARVIS_RECOVERY_*` knobs), behind `jarvis-agent provision
+      --wifi networkmanager`, which scans, starts the hotspot and, for a node provisioned before,
+      runs the cycle. `install-pi.sh` adds a polkit rule for the node's user, the hotspot's
+      captive DNS and a net-watchdog guard for the hotspot. Unit-tested over a fake bus; **pending
+      on-device** (lab Pi 4, provisioned from the app). hostapd stays unbuilt unless NM's AP
+      fails on the chip. Differences from N: in
+      [decisions/2026-10-18-pi-wifi-networkmanager-dbus.md](../decisions/2026-10-18-pi-wifi-networkmanager-dbus.md).
+      **Still open:** starting setup mode at boot.
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
       2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
       profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the
