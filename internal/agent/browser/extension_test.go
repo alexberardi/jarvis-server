@@ -125,6 +125,15 @@ func TestExtensionSurface(t *testing.T) {
 			t.Errorf("snapCollect lost its secret-field guard %q", guard)
 		}
 	}
+	// act finds its element only through the extension's own isolated-world state: the page can
+	// write data-jarvis-* attributes itself, so they never pick the element.
+	for _, fn := range []string{"actFind", "actDo"} {
+		for _, banned := range []string{"querySelector", "getAttribute(\"data-jarvis"} {
+			if strings.Contains(jsFunc(t, js, fn), banned) {
+				t.Errorf("%s looks the element up in the page's DOM (%q)", fn, banned)
+			}
+		}
+	}
 	for _, banned := range []string{"onMessageExternal", "onConnectExternal", "runtime.onMessage", "runtime.onConnect.",
 		"eval(", "new Function", "innerHTML", ".value", "fetch(", "XMLHttpRequest", "WebSocket"} {
 		if strings.Contains(strings.Replace(js, snap, "", 1), banned) {

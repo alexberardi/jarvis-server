@@ -971,20 +971,17 @@ function snapCommit(gen, commit) {
   });
   s.pending = null;
   s.refs = refs;
-  document.documentElement.setAttribute("data-jarvis-gen", String(gen));
   return { ok: true, count: refs.size };
 }
 
-// actFind says whether this frame holds ref n of snapshot gen (and this frame's gen).
+// actFind says whether this frame holds ref n of snapshot gen (and this frame's gen). Refs live
+// only in this extension's isolated world: a new document has none (stale_ref), and data-jarvis-*
+// attributes, which the page can write too, never pick the element.
 function actFind(gen, n) {
   const s = globalThis.__jarvisSnap;
-  const g = s?.refs ? s.gen : Number(document.documentElement.getAttribute("data-jarvis-gen")) || 0;
+  const g = s?.refs ? s.gen : 0;
   if (g !== gen) return { gen: g, found: false };
-  let el = s?.refs ? s.refs.get(n) : null;
-  if (!s?.refs) {
-    const hits = document.querySelectorAll(`[data-jarvis-ref="${gen}.${n}"]`);
-    el = hits.length === 1 ? hits[0] : null;
-  }
+  const el = s.refs.get(n);
   return { gen: g, found: !!el && el.isConnected && el.ownerDocument === document, moved: !!el && el.ownerDocument !== document };
 }
 
@@ -992,11 +989,7 @@ function actFind(gen, n) {
 // frameworks see input events, with the native value setter as the fallback (fieldAct's writer).
 function actDo(gen, n, op, value, keys) {
   const s = globalThis.__jarvisSnap;
-  let el = s?.refs && s.gen === gen ? s.refs.get(n) : null;
-  if (!s?.refs) {
-    const hits = document.querySelectorAll(`[data-jarvis-ref="${gen}.${n}"]`);
-    el = hits.length === 1 ? hits[0] : null;
-  }
+  const el = s?.refs && s.gen === gen ? s.refs.get(n) : null;
   if (!el || !el.isConnected || el.ownerDocument !== document) return { error: "the element is no longer on the page; take a new snapshot", code: "stale_ref" };
   const TEXTY = new Set(["", "text", "email", "search", "tel", "url", "password", "number"]);
   const KEY_CODES = { Enter: 13, Escape: 27, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
