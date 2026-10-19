@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
@@ -47,6 +46,7 @@ func (h *fakeHost) Answer(_ context.Context, method string, raw json.RawMessage)
 // one request to the Go side, and its answer is what the command gets back.
 func TestSidecarBackendsReachTheHost(t *testing.T) {
 	py := python(t)
+	t.Setenv("PYTHONIOENCODING", "cp1252") // Windows' Python: the protocol must stay UTF-8 anyway
 	ctx := context.Background()
 	timer := map[string]any{"timer_id": "ab12cd34", "label": "pasta", "duration_seconds": 90, "remaining_seconds": 89}
 	h := &fakeHost{answers: map[string]any{
@@ -112,12 +112,9 @@ func TestSidecarBackendsReachTheHost(t *testing.T) {
 	if p := h.params["audio.adjust_volume_percent"]; p["delta"] != -10.0 {
 		t.Errorf("audio.adjust params = %v", p)
 	}
-	// The SDK's stdlib logger reaches the agent's log (stderr is read on its own goroutine).
-	for i := 0; !strings.Contains(logs.String(), "everything WARNING: to stderr"); i++ {
-		if i == 100 {
-			t.Fatalf("log lacks the command's warning:\n%s", logs.String())
-		}
-		time.Sleep(20 * time.Millisecond)
+	// The SDK's stdlib logger reaches the agent's log, all of it by the time Close returns.
+	if !strings.Contains(logs.String(), "everything WARNING: to stderr") {
+		t.Fatalf("log lacks the command's warning:\n%s", logs.String())
 	}
 }
 

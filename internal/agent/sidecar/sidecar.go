@@ -70,6 +70,8 @@ type Sidecar struct {
 	out   *bufio.Scanner
 	log   *slog.Logger
 	dir   string
+	// logged closes when the child's stderr is read to the end.
+	logged chan struct{}
 
 	mu      sync.Mutex
 	nextID  int
@@ -130,7 +132,8 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		args = append(args, "--backends")
 	}
 	cmd := exec.Command(python, args...)
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	// UTF-8 both ways whatever the platform's locale (Windows' Python would speak cp1252).
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		os.RemoveAll(dir)
@@ -150,7 +153,9 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		os.RemoveAll(dir)
 		return nil, err
 	}
+	logged := make(chan struct{})
 	go func() { // the child's stderr is its log
+		defer close(logged)
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			log.Info("sidecar", "line", sc.Text())
@@ -158,7 +163,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 	}()
 	out := bufio.NewScanner(stdout)
 	out.Buffer(make([]byte, 64<<10), 16<<20)
-	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, dir: dir, store: o.Storage, host: o.Host, now: time.Now,
+	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, logged: logged, dir: dir, store: o.Storage, host: o.Host, now: time.Now,
 		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{}}
 	var desc struct {
 		Tools []struct {
@@ -344,6 +349,12 @@ func (s *Sidecar) Call(_ context.Context, name string, args map[string]any, req 
 // Close ends the child (closing stdin lets it exit cleanly) and removes its script.
 func (s *Sidecar) Close() error {
 	_ = s.stdin.Close()
+	// Wait closes the stderr pipe, so read the child's last lines first; bounded, as a
+	// process the child left behind may hold the pipe open.
+	select {
+	case <-s.logged:
+	case <-time.After(2 * time.Second):
+	}
 	err := s.cmd.Wait()
 	os.RemoveAll(s.dir)
 	return err
