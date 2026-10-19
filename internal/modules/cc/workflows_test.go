@@ -32,7 +32,7 @@ func newWFEnv(t *testing.T) wfEnv {
 
 func wfStep() WStep {
 	return WStep{Intent: "open the bank's statements page", Target: "browser", Site: "bank.example",
-		Action: computeruse.Action{Kind: "navigate", Intent: "open statements", URL: "https://bank.example/statements"},
+		Action:  computeruse.Action{Kind: "navigate", Intent: "open statements", URL: "https://bank.example/statements"},
 		Element: &RecordedElement{Role: "link", Name: "Statements"}}
 }
 
