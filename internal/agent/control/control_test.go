@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 )
@@ -193,5 +194,25 @@ func TestComputerVerbs(t *testing.T) {
 		if err != nil || r.Answer != step.want || r.Version != "v9" {
 			t.Fatalf("%s: %+v %v, want %q", step.cmd, r, err, step.want)
 		}
+	}
+}
+
+// Stopping a recording waits for the browser's last events (up to 10 s): longer than
+// IOTimeout, and both ends wait for it.
+func TestRecordStopOutlastsIOTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits past IOTimeout")
+	}
+	if Timeout(ComputerRecordStop) < 10*time.Second || Timeout(ComputerRecordStart) < 10*time.Second || Timeout(Ping) != IOTimeout {
+		t.Fatalf("timeouts: stop %v, start %v, ping %v", Timeout(ComputerRecordStop), Timeout(ComputerRecordStart), Timeout(Ping))
+	}
+	dial, _ := serve(t, func(cmd string) error {
+		if cmd == ComputerRecordStop {
+			time.Sleep(IOTimeout + 500*time.Millisecond)
+		}
+		return nil
+	})
+	if err := Send(dial, ComputerRecordStop); err != nil {
+		t.Fatal(err)
 	}
 }

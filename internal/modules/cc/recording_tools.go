@@ -128,7 +128,7 @@ func (*startRecordingTool) Definition() *pyjson.Object {
 		"Start watching what the user does in their browser on their computer, so Jarvis can learn to do it. "+
 			"Use when the user says 'watch me', 'watch how I do this', 'let me show you how to ...'. "+
 			"Stop with stop_recording when they say they're done.",
-		servertools.Obj("task", strProp("What the user is about to show, in their words, if they said (e.g. 'download my bank statement')")))
+		servertools.Obj("task", strProp("What the user is about to show, in their words (e.g. 'download my bank statement'); leave it empty when they only said 'watch me'")))
 }
 
 func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {

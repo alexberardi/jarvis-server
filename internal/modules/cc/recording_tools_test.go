@@ -207,6 +207,22 @@ func TestUploadRecordingRoute(t *testing.T) {
 		t.Fatalf("the second upload was learnt again: %d", len(*learned))
 	}
 
+	// An id another household's computer already has: refused, and that row is left alone.
+	if _, err := ve.m.createRecording(context.Background(), Recording{ID: "rec_feedface00000002", HouseholdID: "hh-other",
+		OwnerID: 9, NodeID: "node-other", Mode: "browser"}); err != nil {
+		t.Fatal(err)
+	}
+	theirs := map[string]any{"recording_id": "rec_feedface00000002", "mode": "browser", "trace": []any{map[string]any{"kind": "click"}}}
+	if got := ve.do("POST", uploadPath, theirs, ve.node.h()).want(409).json(); got["id"] != nil || got["steps"] != nil {
+		t.Fatalf("the conflict leaks the other row: %v", got)
+	}
+	if rec, _ := ve.m.getRecording(context.Background(), "rec_feedface00000002"); rec == nil || rec.HouseholdID != "hh-other" || rec.NodeID != "node-other" {
+		t.Fatalf("the other household's row: %+v", rec)
+	}
+	if len(*learned) != 1 {
+		t.Fatalf("a refused upload was learnt: %d", len(*learned))
+	}
+
 	// Malformed: a bad id, an unknown mode, a trace that isn't a list.
 	for _, bad := range []map[string]any{
 		{"recording_id": "../x", "mode": "browser", "trace": []any{}},

@@ -116,6 +116,9 @@ func TestTraceFilePerms(t *testing.T) {
 	if err := os.MkdirAll(e.r.Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(e.r.Dir, 0o755); err != nil { // whatever the umask made of it
+		t.Fatal(err)
+	}
 	id, err := e.r.Start(context.Background(), ModeBrowser)
 	if err != nil {
 		t.Fatal(err)
@@ -186,11 +189,11 @@ func TestStopReturnsTrace(t *testing.T) {
 	}
 	// The file: a header, the events, a footer.
 	f, _ := os.Open(e.r.Path(id))
-	defer f.Close()
 	var lines []string
 	for sc := bufio.NewScanner(f); sc.Scan(); {
 		lines = append(lines, sc.Text())
 	}
+	f.Close() // before Delete: Windows won't remove an open file
 	if len(lines) != 5 || !strings.Contains(lines[0], `"recording_id":"`+id) || !strings.Contains(lines[4], `"reason":"stopped"`) {
 		t.Fatalf("file %q", lines)
 	}

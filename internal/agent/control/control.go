@@ -61,6 +61,18 @@ var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, Comp
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second
 
+// RecordTimeout bounds the recording commands: stopping waits up to 10 s for the browser
+// extension to send its last events.
+const RecordTimeout = 15 * time.Second
+
+// Timeout bounds cmd's request and answer.
+func Timeout(cmd string) time.Duration {
+	if cmd == ComputerRecordStart || cmd == ComputerRecordStop {
+		return RecordTimeout
+	}
+	return IOTimeout
+}
+
 type request struct {
 	Cmd string `json:"cmd"`
 }
@@ -128,6 +140,7 @@ func handle(c net.Conn, h AnswerHandler, version string) {
 	case !slices.Contains(Commands, req.Cmd):
 		resp = response{Error: fmt.Sprintf("unknown command %q", req.Cmd)}
 	default:
+		_ = c.SetDeadline(time.Now().Add(Timeout(req.Cmd)))
 		answer, err := h(req.Cmd)
 		if err != nil {
 			resp = response{Error: err.Error()}
@@ -159,7 +172,7 @@ func Ask(dial Dialer, cmd string) (Reply, error) {
 		return Reply{}, ErrNotRunning
 	}
 	defer c.Close()
-	_ = c.SetDeadline(time.Now().Add(IOTimeout))
+	_ = c.SetDeadline(time.Now().Add(Timeout(cmd)))
 	b, _ := json.Marshal(request{Cmd: cmd})
 	if _, err := c.Write(append(b, '\n')); err != nil {
 		return Reply{}, err
