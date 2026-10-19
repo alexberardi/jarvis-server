@@ -24,4 +24,14 @@ anyway). The installer (`update --finish`) runs in a `systemd-run --user` unit o
 manager (linger is enabled), with no detached fallback: the system unit's restart stops its whole
 cgroup, so a detached installer would die with the agent it restarts.
 
+**Start limit (2026-10-18, loop #220).** The unit has `StartLimitBurst=10` in 30 min with
+`RestartSec=5`, so a release that crash-loops hits the limit in about 50 s, before the 2 min health
+gate gives up; systemd then refuses the rollback's restart ("Start request repeated too quickly")
+and the node stays down. Every restart of the unit (`install.Restart`) therefore runs `sudo -n
+/usr/bin/systemctl reset-failed jarvis-agent.service` first, which a second sudoers line allows.
+The reset is best effort: a node installed before that line refuses it and restarts as before, so
+existing Pi installs need `install-pi.sh` rerun. The health gate stays at 2 min (shortening it
+under the limit's ~50 s would fail a slow but healthy Pi start). The -pi lane's fake systemd
+models the start limit (10 starts per minute at `RestartSec` 1 s), so the rollback there hits it.
+
 Plan: [go-pi-node.md §7](../agent/go-pi-node.md) 4.2.

@@ -471,6 +471,8 @@ install_sudoers() {
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
 $NODE_USER ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot, /usr/sbin/reboot
 $NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
+# A crash loop (a self-update's broken release) hits the unit's start limit; the rollback's restart needs it reset.
+$NODE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl reset-failed jarvis-agent, /usr/bin/systemctl reset-failed jarvis-agent.service
 # Not yet, added with the step that needs them (go-pi-node.md §7):
 # TODO(phase 4.4, provisioning AP): NetworkManager, nmcli (and hostapd/dnsmasq only if the NM AP fails).
 # TODO(parity 5.6, packages): the apt and post-install wrappers.

@@ -168,8 +168,9 @@ func TestStopWindowsOnlyQuits(t *testing.T) {
 }
 
 // The Pi node (install-pi.sh): the system unit (Restart=always) supervises the agent, so a
-// restart is sudoers' `systemctl restart`, with no quit first (systemd would only start it
-// again) and never a detached run (a second agent on the HAT).
+// restart is sudoers' `systemctl reset-failed` (a crash loop's start limit would refuse the
+// restart) then `systemctl restart`, with no quit first (systemd would only start it again) and
+// never a detached run (a second agent on the HAT).
 func TestRestartPiThroughTheSystemUnit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix paths")
@@ -180,12 +181,26 @@ func TestRestartPiThroughTheSystemUnit(t *testing.T) {
 	if err := Restart(context.Background(), e, restartSys(&f, true, nil, &log)); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(f.cmds, []string{"sudo -n /usr/bin/systemctl restart jarvis-agent.service"}) || slices.Contains(log, "quit") || len(f.spawned) != 0 {
+	if !slices.Equal(f.cmds, []string{"sudo -n /usr/bin/systemctl reset-failed jarvis-agent.service", "sudo -n /usr/bin/systemctl restart jarvis-agent.service"}) ||
+		slices.Contains(log, "quit") || len(f.spawned) != 0 {
 		t.Fatalf("log %q cmds %q spawned %q", log, f.cmds, f.spawned)
+	}
+	// An older sudoers without the reset-failed line: refused, and the restart still runs.
+	var ran []string
+	s := restartSys(&f, true, nil, &log)
+	s.Run = func(_ context.Context, argv ...string) error {
+		ran = append(ran, strings.Join(argv, " "))
+		if slices.Contains(argv, "reset-failed") {
+			return errors.New("sudo: a password is required")
+		}
+		return nil
+	}
+	if err := Restart(context.Background(), e, s); err != nil || len(ran) != 2 || !strings.HasSuffix(ran[1], "restart jarvis-agent.service") {
+		t.Fatalf("err %v ran %q", err, ran)
 	}
 	// sudo refused (no sudoers line): the error, and still nothing spawned.
 	f = fakeSys{}
-	s := restartSys(&f, true, nil, &log)
+	s = restartSys(&f, true, nil, &log)
 	s.Run = func(context.Context, ...string) error { return errors.New("sudo: a password is required") }
 	if err := Restart(context.Background(), e, s); err == nil || len(f.spawned) != 0 {
 		t.Fatalf("err %v spawned %q", err, f.spawned)

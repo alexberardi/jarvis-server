@@ -5,13 +5,18 @@ package main
 // unit's file), supervised by a fake systemd. The fake's tools are this program under their
 // names on the agent's PATH, talking to this process over HTTP:
 //
-//	sudo         allows exactly the sudoers line install-pi.sh writes (-n /usr/bin/systemctl
-//	             restart jarvis-agent.service) and refuses anything else, as sudo -n does
-//	systemctl    restart jarvis-agent.service, only through that sudo (the agent's user isn't root)
+//	sudo         allows exactly the sudoers lines install-pi.sh writes (-n /usr/bin/systemctl
+//	             restart|reset-failed jarvis-agent.service) and refuses anything else, as sudo -n does
+//	systemctl    restart and reset-failed jarvis-agent.service, only through that sudo (the agent's
+//	             user isn't root)
 //	systemd-run  --user only: a transient unit with only the --setenv environment
 //
 // The unit is Restart=always (RestartSec 1 s): a restart stops the agent's process group, the
-// way systemd stops the unit's cgroup, and starts `run --profile pi` again.
+// way systemd stops the unit's cgroup, and starts `run --profile pi` again. It has a start
+// limit, as install-pi.sh's unit does (StartLimitBurst=10 in StartLimitIntervalSec, scaled here
+// to RestartSec 1 s): one start too many in the window and the unit is failed (start-limit-hit),
+// Restart=always stops, and a restart is refused ("Start request repeated too quickly") until
+// reset-failed.
 
 import (
 	"bytes"
@@ -34,8 +39,20 @@ import (
 // systemd-run's transient unit, as the agent forwards its own overrides).
 const envFakeSystemd = "JARVIS_E2E_FAKE_SYSTEMD"
 
-// sudoersLine is what install-pi.sh's sudoers lets the node's user run (install.PiRestart).
-var sudoersLine = install.PiRestart[1:]
+// sudoersLine and resetFailedLine are what install-pi.sh's sudoers lets the node's user run
+// (install.PiRestart, install.PiResetFailed).
+var (
+	sudoersLine     = install.PiRestart[1:]
+	resetFailedLine = install.PiResetFailed[1:]
+)
+
+// The fake unit's start limit (StartLimitBurst, StartLimitIntervalSec): a release that fails at
+// start hits it in about 15 s, well inside the lane's 25 s gate, as the real unit's 10 starts
+// 5 s apart hit it in about 50 s, inside the 2 min gate.
+const (
+	startLimitBurst    = 10
+	startLimitInterval = time.Minute
+)
 
 // fakeTool runs this program as one of the fake systemd's tools when it was started under that
 // name; ok is false when it wasn't.
@@ -78,20 +95,26 @@ type fakeSystemd struct {
 	runLog  string // the transient units' output (`update --finish`)
 	srv     *http.Server
 
-	mu      sync.Mutex
-	calls   []string
-	cur     *exec.Cmd
-	done    chan struct{}
-	gen     int // the current start; a waiter of an older one doesn't restart anything
-	stopped bool
-	starts  int
+	mu       sync.Mutex
+	calls    []string
+	cur      *exec.Cmd
+	done     chan struct{}
+	gen      int // the current start; a waiter of an older one doesn't restart anything
+	stopped  bool
+	starts   int
+	burst    int           // StartLimitBurst
+	interval time.Duration // StartLimitIntervalSec
+	recent   []time.Time   // the starts inside the interval
+	failed   bool          // start-limit-hit, until reset-failed
+	limitHit int           // how many times it hit the start limit
 }
 
 func newFakeSystemd(e *e2e) *fakeSystemd {
 	self, err := os.Executable()
 	must(err)
 	s := &fakeSystemd{e: e, bin: filepath.Join(e.work, "fakebin"),
-		journal: filepath.Join(e.work, "jarvis-agent.service.log"), runLog: filepath.Join(e.work, "jarvis-agent-update.log")}
+		journal: filepath.Join(e.work, "jarvis-agent.service.log"), runLog: filepath.Join(e.work, "jarvis-agent-update.log"),
+		burst: startLimitBurst, interval: startLimitInterval}
 	must(os.MkdirAll(s.bin, 0o755))
 	for _, t := range []string{"sudo", "systemctl", "systemd-run"} {
 		must(os.Symlink(self, filepath.Join(s.bin, t)))
@@ -127,12 +150,20 @@ func (s *fakeSystemd) call(c toolCall) toolReply {
 	line := strings.TrimSpace(c.Tool + " " + strings.Join(c.Args, " "))
 	switch c.Tool {
 	case "sudo":
-		if !slices.Equal(c.Args, sudoersLine) {
+		switch {
+		case slices.Equal(c.Args, sudoersLine):
+			if !s.restart() {
+				s.record(line + " FAILED")
+				return toolReply{Code: 1, Out: "Job for " + install.PiUnit + " failed.\nSee \"systemctl status " + install.PiUnit +
+					"\" and \"journalctl -xeu " + install.PiUnit + "\" for details.\n"}
+			}
+		case slices.Equal(c.Args, resetFailedLine):
+			s.resetFailed()
+		default:
 			s.record(line + " REFUSED")
 			return toolReply{Code: 1, Out: "sudo: a password is required\n"}
 		}
 		s.record(line)
-		s.restart()
 		return toolReply{}
 	case "systemctl":
 		// Not root: systemd refuses to manage a system unit (polkit would ask for a password).
@@ -181,8 +212,21 @@ func (s *fakeSystemd) Start() {
 	s.start()
 }
 
-// start runs the unit's ExecStart; s.mu is held.
-func (s *fakeSystemd) start() {
+// start runs the unit's ExecStart, unless that start is one too many for the start limit: then
+// the unit is failed and start reports false. s.mu is held.
+func (s *fakeSystemd) start() bool {
+	if s.failed {
+		return false
+	}
+	now := time.Now()
+	s.recent = slices.DeleteFunc(s.recent, func(t time.Time) bool { return now.Sub(t) >= s.interval })
+	if len(s.recent) >= s.burst {
+		s.failed = true // start-limit-hit: "Start request repeated too quickly"
+		s.limitHit++
+		s.cur = nil
+		return false
+	}
+	s.recent = append(s.recent, now)
 	out, err := os.OpenFile(s.journal, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	must(err)
 	c := exec.Command(s.e.exe, "run", "--profile", "pi")
@@ -204,6 +248,7 @@ func (s *fakeSystemd) start() {
 			s.start() // Restart=always
 		}
 	}()
+	return true
 }
 
 // stop stops the running agent's process group and waits (TimeoutStopSec, then a kill); s.mu is
@@ -223,11 +268,32 @@ func (s *fakeSystemd) stop() {
 	s.cur = nil
 }
 
-func (s *fakeSystemd) restart() {
+func (s *fakeSystemd) restart() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stop()
-	s.start()
+	return s.start()
+}
+
+// resetFailed clears the unit's failed state and its start count (systemctl reset-failed).
+func (s *fakeSystemd) resetFailed() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failed, s.recent = false, nil
+}
+
+// Failed reports whether the unit is failed (start-limit-hit, not reset since).
+func (s *fakeSystemd) Failed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failed
+}
+
+// LimitHits is how many times the unit hit its start limit.
+func (s *fakeSystemd) LimitHits() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.limitHit
 }
 
 // Starts is how many times the unit started the agent.
@@ -260,29 +326,34 @@ func (e *e2e) installPi() {
 		"INVOCATION_ID=e2e-pi-unit") // the agent runs under a (system) unit
 }
 
-// checkPiCalls checks how the Pi node was restarted: only through sudoers' systemctl restart,
-// the installer through systemd-run --user, and nothing refused.
+// checkPiCalls checks how the Pi node was restarted: only through sudoers' systemctl
+// reset-failed and restart, the installer through systemd-run --user, and nothing refused or
+// failed.
 func (e *e2e) checkPiCalls() {
 	calls := e.sd.Calls()
 	restart := "sudo " + strings.Join(sudoersLine, " ")
-	var restarts, runs int
+	reset := "sudo " + strings.Join(resetFailedLine, " ")
+	var restarts, resets, runs int
 	for _, c := range calls {
 		switch {
-		case strings.HasSuffix(c, " REFUSED"):
-			fail("the fake systemd refused %q (calls: %q)", c, calls)
+		case strings.HasSuffix(c, " REFUSED") || strings.HasSuffix(c, " FAILED"):
+			fail("the fake systemd: %q (calls: %q)", c, calls)
 		case c == restart:
 			restarts++
+		case c == reset:
+			resets++
 		case strings.HasPrefix(c, "systemd-run --user ") && strings.Contains(c, " -- "+e.exe+" update --finish "):
 			runs++
 		default:
 			fail("unexpected call %q (calls: %q)", c, calls)
 		}
 	}
-	// The update to vNext and the one rolled back: each handed over once. Restarts: the
-	// harness's own `jarvis-agent restart` before steps 2, 3 and 4, the installer's into vNext
-	// and vBroken, and the rollback's into vNext again.
-	if runs != 2 || restarts != 6 {
-		fail("%d systemd-run handovers and %d unit restarts (calls: %q)", runs, restarts, calls)
+	// The update to vNext and the one rolled back: each handed over once. Restarts, each after a
+	// reset-failed: the harness's own `jarvis-agent restart` before steps 2, 3 and 4, the
+	// installer's into vNext and vBroken, and the rollback's into vNext again (after vBroken hit
+	// the start limit).
+	if runs != 2 || restarts != 6 || resets != restarts || e.sd.LimitHits() != 1 {
+		fail("%d systemd-run handovers, %d unit restarts, %d reset-failed, start limit hit %d times (calls: %q)", runs, restarts, resets, e.sd.LimitHits(), calls)
 	}
 	say("pi: %d unit restarts through sudo, %d handovers through systemd-run --user, %d starts by the unit", restarts, runs, e.sd.Starts())
 }

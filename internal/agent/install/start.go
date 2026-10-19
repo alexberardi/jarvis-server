@@ -88,9 +88,12 @@ func Start(ctx context.Context, e Env, s Sys, login bool) error {
 // covers an agent that didn't quit. Otherwise (no unit or graphical session, no LaunchAgent,
 // Windows' Run key, which supervises nothing) it is a detached run, as `start` does. The Pi
 // node's system unit is restarted through sudo, with no quit first: it has Restart=always, so a
-// clean exit would only make systemd start it again.
+// clean exit would only make systemd start it again. Its failed state is reset first: after a
+// crash loop (a self-update's broken release) systemd refuses the restart until then. That
+// reset is best effort, since a sudoers from before it was allowed refuses it.
 func Restart(ctx context.Context, e Env, s Sys) error {
 	if e.PiUnit {
+		_ = s.Run(ctx, PiResetFailed...)
 		return s.Run(ctx, PiRestart...)
 	}
 	var quitErr error
