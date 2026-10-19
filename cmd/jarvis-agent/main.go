@@ -832,6 +832,8 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 			// The first start installs the built-ins (a download): the node comes up meanwhile,
 			// and their tools join the next turn's list.
 			f.pkgs.Builtins = packages.PiBuiltins(os.Getenv("JARVIS_AGENT_NODE_COMMANDS"))
+			// apt packages and post_install ops through install-pi.sh's root wrappers.
+			f.pkgs.System = packages.NewSystem(log)
 			go boot()
 		} else {
 			boot()

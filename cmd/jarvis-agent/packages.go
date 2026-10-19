@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -35,7 +36,8 @@ func newPackages(root string, live *sidecar.Live, st sidecar.Storage, host *sdkh
 	}
 }
 
-// wirePackages answers the app's package install, uninstall and revert requests, and lists
+// wirePackages answers the app's package install, uninstall and revert requests (and on a Pi
+// its test installs), and lists
 // the installed packages in report_tools. Call it after wireNodeSettings (which sets Topics).
 func wirePackages(r *node.Runner, pm *packages.Manager, log *slog.Logger) {
 	if pm == nil {
@@ -45,7 +47,12 @@ func wirePackages(r *node.Runner, pm *packages.Manager, log *slog.Logger) {
 	if r.Topics == nil {
 		r.Topics = map[string]func(context.Context, *node.CC, []byte){}
 	}
-	for _, topic := range packages.Topics {
+	topics := packages.Topics
+	if pm.System != nil {
+		// The Pi profile answers Forge test installs too, as the Python node does.
+		topics = append(slices.Clone(topics), packages.TopicTestInstall)
+	}
+	for _, topic := range topics {
 		r.Topics[topic] = func(ctx context.Context, cc *node.CC, payload []byte) { q.Handle(ctx, cc, topic, payload) }
 	}
 	r.Packages = pm.Report
