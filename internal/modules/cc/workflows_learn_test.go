@@ -48,16 +48,28 @@ const secretPassword = "hunter2-do-not-send"
 
 func bankTraceWithSecret(t *testing.T) json.RawMessage {
 	t.Helper()
+	return replaceMasked(t, `"masked":true,"value":"`+secretPassword+`"}`)
+}
+
+// bankTraceUnflagged is the bank trace with the password field's masked flag missing and its
+// value sent, as a recorder that forgot to mask it would send it.
+func bankTraceUnflagged(t *testing.T) json.RawMessage {
+	t.Helper()
+	return replaceMasked(t, `"value":"`+secretPassword+`"}`)
+}
+
+func replaceMasked(t *testing.T, with string) json.RawMessage {
+	t.Helper()
 	tr := bankTrace(t)
-	out := bytes.Replace(tr, []byte(`"masked":true}`), []byte(`"masked":true,"value":"`+secretPassword+`"}`), 1)
+	out := bytes.Replace(tr, []byte(`"masked":true}`), []byte(with), 1)
 	if bytes.Equal(out, tr) {
 		t.Fatal("no masked event in the bank trace")
 	}
 	return out
 }
 
+// bankModel is what a model answers for the bank trace: an invented event (42) and an
 // invented param, and a param of an unknown kind on a real candidate (event 8), which the job drops.
-// invented param, and a param of an unknown kind, which the job drops.
 const bankModel = `{"name": "Download bank statement", "triggers": ["download my bank statement", " "],
  "steps": [
   {"intent": "Open the bank's sign-in page", "event_seqs": [1], "target": "the sign-in page"},
@@ -207,6 +219,32 @@ func TestLearnFromBankTrace(t *testing.T) {
 	}
 	if ws, _ := le.m.listWorkflows(context.Background(), cbHH, 5); len(ws) != 1 {
 		t.Fatalf("%d workflows", len(ws))
+	}
+}
+
+// TestLearnUnflaggedPassword: a password field's value is dropped even when the recorder
+// didn't mark it masked.
+func TestLearnUnflaggedPassword(t *testing.T) {
+	le := newLearnEnv(t, bankModel)
+	w := le.store("rec_bank1", bankTraceUnflagged(t), "this is how I get my bank statement")
+
+	le.model.mu.Lock()
+	reqs := slices.Clone(le.model.reqs)
+	le.model.mu.Unlock()
+	if len(reqs) != 1 || len(reqs[0].Messages) != 2 {
+		t.Fatalf("model calls %+v", reqs)
+	}
+	if raw, err := json.Marshal(reqs[0]); err != nil || bytes.Contains(raw, []byte(secretPassword)) {
+		t.Fatalf("the unflagged password reached the model (err %v)", err)
+	}
+	if user := reqs[0].Messages[1].Content.Text; user == nil || !strings.Contains(*user, `type into textbox "Password": •••`) {
+		t.Fatalf("the password isn't shown as •••:\n%v", user)
+	}
+	if raw, err := json.Marshal(w); err != nil || bytes.Contains(raw, []byte(secretPassword)) {
+		t.Fatalf("the unflagged password is in the stored workflow (err %v)", err)
+	}
+	if s := w.Steps[2]; s.Intent != "Enter the password" || s.Action.Text != maskedValue || s.Risk != computeruse.CatSensitiveInput {
+		t.Fatalf("password step %+v", s)
 	}
 }
 
