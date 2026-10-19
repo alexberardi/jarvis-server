@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -162,5 +163,27 @@ func TestTypingKeepsNamedApp(t *testing.T) {
 	}
 	if s := jsonOf(calls[0]); !strings.Contains(s, `\"app\": \"omawrite\"`) {
 		t.Fatalf("call %s", s)
+	}
+}
+
+// On the continue path the fill reads the voice command, not the composed user message (its
+// hints and /no_think suffix follow the app name).
+func TestTypingKeepsNamedAppOnContinue(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.start("m6", desktopTools)
+	ve.eng.push(nativeCall("call_f1", "desktop_list_windows", `{}`))
+	ve.turn("/api/v0/voice/command/stream", "m6", "type buy more coffee filters into omawrite", nil).want(202)
+	ve.eng.push(nativeCall("call_t1", "desktop_type_text", `{"text": "buy more coffee filters"}`))
+	b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "m6",
+		"tool_results": []any{map[string]any{"tool_call_id": "call_f1", "output": map[string]any{"success": true}}}},
+		ve.node.h()).want(200).json()
+	calls, _ := b["tool_calls"].([]any)
+	if b["stop_reason"] != "tool_calls" || len(calls) != 1 {
+		t.Fatalf("continue %v", b)
+	}
+	var args map[string]any
+	fn, _ := calls[0].(map[string]any)["function"].(map[string]any)
+	if s, _ := fn["arguments"].(string); json.Unmarshal([]byte(s), &args) != nil || args["app"] != "omawrite" {
+		t.Fatalf("call %s", jsonOf(calls[0]))
 	}
 }

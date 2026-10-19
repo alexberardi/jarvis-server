@@ -85,6 +85,9 @@ type engineInput struct {
 	// noForce turns off the must-call retry for this turn (a photo-only chat message: with no
 	// words the force guard can't run, and there is no request to force a tool for, CI8).
 	noForce bool
+	// voiceCommand is the turn's voice command as heard, without hints or suffix (the typed-app
+	// fill: utterance is the composed user message on the continue path).
+	voiceCommand string
 }
 
 var thinkCaptureRE = regexp.MustCompile(`(?s)<think>(.*?)</think>`)
@@ -334,7 +337,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			}
 			// 2b. Typing keeps the app the user named (desktop_hint.go).
 			for i := range calls {
-				if out, changed := fillTypedApp(in.utterance, calls[i]); changed {
+				if out, changed := fillTypedApp(in.voiceCommand, calls[i]); changed {
 					calls[i].Function.Arguments = out
 					m.deps.Log.Info("cc: typed_app_filled", "conversation_id", conv.id)
 				}

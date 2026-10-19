@@ -1737,7 +1737,10 @@ stand; this adds one case before them (`internal/agent/jarvispage`, `dictate/jar
   out when any of its words is in the text ("type I live in Boston"), when it is a manner or a
   place rather than an app ("in all caps", "in spanish", "in here", "in it"), and when the
   request opens an app first ("open X and type Y" types into the launch). "to X" is never used:
-  it is a person or part of the sentence too often. A call that names an app keeps the model's.
+  it is a person or part of the sentence too often. A call that names an app keeps the model's. X
+  is kept as said, article and all ("the terminal"), as `app` asks. The fill reads the voice
+  command as heard, on a continue too (the conversation keeps the turn's): the composed user
+  message carries the hints, the `/no_think` suffix and the overheard framing after or around it.
 
 ### The island note
 
