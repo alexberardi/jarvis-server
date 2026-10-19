@@ -47,7 +47,7 @@ const (
 	ComputerOn  = "computer-on"
 	ComputerOff = "computer-off"
 	// ComputerRecordStart and ComputerRecordStop start a recording of what the user does in
-	// the browser and stop it, sending the trace to jarvisd, as the status icon's "Watch me"
+	// the browser and stop it, sending the trace to jarvisd, as the status icon's "Record a macro…"
 	// and "Stop recording" do (`jarvis-agent computer record start|stop`). Start answers the
 	// recording's id; stop "<id> <events>".
 	ComputerRecordStart = "computer-record-start"

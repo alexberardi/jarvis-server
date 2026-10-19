@@ -26,7 +26,7 @@ import (
 // computerCmd is `jarvis-agent computer stop|status|on|off|record start|record stop`: stop what
 // Jarvis is doing with this computer (a computer task, a recording), as the status icon's "Stop
 // Jarvis" does, say what it is doing, turn computer control on or off, as its "Computer
-// control" does, or record what the user does in the browser, as its "Watch me" does. All ask
+// control" does, or record what the user does in the browser, as its "Record a macro…" does. All ask
 // the running agent over its control socket. (`computer snapshot` and `computer record
 // --browser` are computerSnapshotCmd and computerRecordCmd, which main dispatches before this.)
 func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
@@ -81,14 +81,14 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 // extension's events (a browser toolset in tools), and a trace stopped here (the menu, the CLI,
 // voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected: then it is
 // kept here only).
-func newRecorder(dir string, sw *computer.Switch, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {
+func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {
 	sources := map[string]computer.Source{}
 	for _, t := range tools {
 		if bt, ok := t.(*browser.Tools); ok {
 			sources[computer.ModeBrowser] = browserRecording{bt}
 		}
 	}
-	return &computer.Recorder{Dir: dir, Switch: sw, Activity: activity, Sources: sources, Log: log,
+	return &computer.Recorder{Dir: dir, Activity: activity, Sources: sources, Log: log,
 		Stopped: func(tr computer.Trace) { go uploadRecording(cc(), tr, log) }}
 }
 
@@ -109,7 +109,7 @@ func uploadRecording(cc *node.CC, tr computer.Trace, log *slog.Logger) {
 }
 
 // recordFromHere starts a browser recording or ends the one going on, uploading it: the
-// status icon's "Watch me" / "Stop recording" and `jarvis-agent computer record start|stop`.
+// status icon's "Record a macro…" / "Stop recording" and `jarvis-agent computer record start|stop`.
 // The answer is the recording's id, and on stop its events too ("rec_… 12").
 func recordFromHere(ctx context.Context, rec *computer.Recorder, start bool, log *slog.Logger) (string, error) {
 	if start {
