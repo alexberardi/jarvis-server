@@ -54,6 +54,7 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 	needs.Store(true)
 	connected := make(chan *CC, 4)
 	got := make(chan string, 4)
+	auth := make(chan string, 4)
 	r := &Runner{Creds: Creds{ConfigURL: srv.URL, NodeID: "n1", NodeKey: "k"}, Tools: Multi{}, Log: quiet,
 		Heartbeat: 1 << 40,
 		Topics: map[string]func(context.Context, *CC, []byte){
@@ -74,23 +75,39 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 				return topic + "/response/c1", append([]byte("re:"), p...)
 			},
 		},
+		// A topic outside the node's subtree (OAuth's auth-ready, for every node).
+		Absolute: map[string]func(context.Context, *CC, string, []byte){
+			"jarvis/auth/+/ready": func(_ context.Context, cc *CC, topic string, p []byte) {
+				if cc == nil {
+					t.Error("no CC client")
+				}
+				auth <- topic + " " + string(p)
+			},
+		},
 		OnMQTTConnect: func(_ context.Context, cc *CC) { connected <- cc },
 		NeedsK2:       func() bool { return needs.Load() },
+		Protocols:     func() []string { return []string{"govee"} },
 	}
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
-	if beat := <-beats; beat["needs_k2"] != true {
-		t.Fatalf("first beat needs_k2 = %v", beat["needs_k2"])
+	if beat := within(t, beats, "the first heartbeat"); beat["needs_k2"] != true || len(beat["protocols"].([]any)) != 1 {
+		t.Fatalf("first beat needs_k2 = %v, protocols = %v", beat["needs_k2"], beat["protocols"])
 	}
-	if cc := <-connected; cc == nil || cc.Creds.NodeID != "n1" {
+	if cc := within(t, connected, "the backstop"); cc == nil || cc.Creds.NodeID != "n1" {
 		t.Fatalf("backstop got %v", cc)
 	}
 	// Subscribed before the backstop runs, so this nudge is delivered.
 	if err := b.Publish("jarvis/nodes/n1/k2/provision", []byte(`{"request_id":"r1"}`), 1, false); err != nil {
 		t.Fatal(err)
 	}
-	if p := <-got; p != `{"request_id":"r1"}` {
+	if p := within(t, got, "the k2 nudge"); p != `{"request_id":"r1"}` {
 		t.Fatalf("payload = %s", p)
+	}
+	if err := b.Publish("jarvis/auth/govee/ready", []byte(`{"node_id":"n1"}`), 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if p := within(t, auth, "the auth-ready message"); p != `jarvis/auth/govee/ready {"node_id":"n1"}` {
+		t.Fatalf("auth ready = %s", p)
 	}
 	rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer rcancel()
@@ -100,12 +117,26 @@ func TestRunnerServesExtraTopicsAndTheConnectBackstop(t *testing.T) {
 	// BeatNow sends a heartbeat without waiting for the (never reached) tick.
 	needs.Store(false)
 	r.BeatNow()
-	if beat := <-beats; beat["needs_k2"] != false {
+	if beat := within(t, beats, "the kicked heartbeat"); beat["needs_k2"] != false {
 		t.Fatalf("kicked beat needs_k2 = %v", beat["needs_k2"])
 	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// within is the next value from c, failing the test if none comes in 10 s (a missing
+// subscription fails fast instead of hanging until go test's timeout).
+func within[T any](t *testing.T, c <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-c:
+		return v
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s didn't come within 10 s", what)
+		var zero T
+		return zero
 	}
 }
 

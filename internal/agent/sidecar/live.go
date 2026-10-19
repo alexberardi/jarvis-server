@@ -15,8 +15,17 @@ import (
 // settings snapshot and the Stored data tab follow without restarting the agent. Empty (no
 // packages) it offers nothing.
 type Live struct {
-	mu sync.RWMutex
-	sc *Sidecar
+	mu     sync.RWMutex
+	sc     *Sidecar
+	onSwap func()
+}
+
+// OnSwap runs f after every Swap (the Pi beats at once: the new sidecar's device families are
+// its heartbeat's protocols).
+func (l *Live) OnSwap(f func()) {
+	l.mu.Lock()
+	l.onSwap = f
+	l.mu.Unlock()
 }
 
 // ErrNoPackages is the Stored data tab asking about a command while no sidecar runs.
@@ -35,9 +44,13 @@ func (l *Live) Swap(sc *Sidecar) {
 	l.mu.Lock()
 	old := l.sc
 	l.sc = sc
+	f := l.onSwap
 	l.mu.Unlock()
 	if old != nil && old != sc {
 		_ = old.Close()
+	}
+	if f != nil {
+		f()
 	}
 }
 
@@ -117,4 +130,47 @@ func (l *Live) Failed() map[string]string {
 		return sc.Failed()
 	}
 	return nil
+}
+
+// Devices are the device families and managers, for the settings snapshot: described again
+// (the last description if that fails), so is_configured follows the secrets set since.
+func (l *Live) Devices(context.Context) nodesettings.Devices {
+	if sc := l.Current(); sc != nil {
+		_ = sc.RefreshDevices()
+		return sc.Devices()
+	}
+	return nodesettings.Devices{}
+}
+
+// RefreshDevices is Sidecar.RefreshDevices on the sidecar in service (nothing without one).
+func (l *Live) RefreshDevices() error {
+	if sc := l.Current(); sc != nil {
+		return sc.RefreshDevices()
+	}
+	return nil
+}
+
+// Protocols are the configured device families (the heartbeat's protocols); none without a
+// sidecar.
+func (l *Live) Protocols() []string {
+	if sc := l.Current(); sc != nil {
+		return sc.Protocols()
+	}
+	return []string{}
+}
+
+// DeviceCall is Sidecar.DeviceCall on the sidecar in service.
+func (l *Live) DeviceCall(method string, params map[string]any) (map[string]any, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.DeviceCall(method, params)
+	}
+	return nil, ErrNoPackages
+}
+
+// StoreAuth is Sidecar.StoreAuth on the sidecar in service.
+func (l *Live) StoreAuth(provider string, values map[string]any, uid any) (string, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.StoreAuth(provider, values, uid)
+	}
+	return "", ErrNoPackages
 }

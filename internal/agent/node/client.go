@@ -193,6 +193,9 @@ type Beat struct {
 	// NeedsK2 asks the app to provision the settings key (K2, DESIGN §16): the mobile app then
 	// offers "Generate Encryption Key" and relays it through command-center.
 	NeedsK2 bool
+	// Protocols are the device families this node runs (a Pi's sidecar), so jarvisd picks it for
+	// their devices' state and removal. Nil leaves it out; empty reports none.
+	Protocols []string
 	// Busy reports is_busy: true, so jarvisd hands this heartbeat no work (pending_update).
 	// `jarvis-agent status` sends one: it isn't the running agent and couldn't act on it.
 	Busy bool
@@ -242,6 +245,9 @@ func (c *CC) Beat(ctx context.Context, b Beat) (BeatReply, error) {
 	}
 	if b.Capabilities != nil {
 		body["capabilities"] = b.Capabilities
+	}
+	if b.Protocols != nil {
+		body["protocols"] = b.Protocols
 	}
 	var resp struct {
 		PendingUpdate *struct {
