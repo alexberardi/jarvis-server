@@ -15,8 +15,17 @@ import (
 // settings snapshot and the Stored data tab follow without restarting the agent. Empty (no
 // packages) it offers nothing.
 type Live struct {
-	mu sync.RWMutex
-	sc *Sidecar
+	mu     sync.RWMutex
+	sc     *Sidecar
+	onSwap func()
+}
+
+// OnSwap runs f after every Swap (the Pi beats at once: the new sidecar's device families are
+// its heartbeat's protocols).
+func (l *Live) OnSwap(f func()) {
+	l.mu.Lock()
+	l.onSwap = f
+	l.mu.Unlock()
 }
 
 // ErrNoPackages is the Stored data tab asking about a command while no sidecar runs.
@@ -35,9 +44,13 @@ func (l *Live) Swap(sc *Sidecar) {
 	l.mu.Lock()
 	old := l.sc
 	l.sc = sc
+	f := l.onSwap
 	l.mu.Unlock()
 	if old != nil && old != sc {
 		_ = old.Close()
+	}
+	if f != nil {
+		f()
 	}
 }
 

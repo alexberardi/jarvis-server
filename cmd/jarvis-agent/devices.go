@@ -46,6 +46,7 @@ func wireDevices(r *node.Runner, live *sidecar.Live, log *slog.Logger) {
 		n.AuthReady(ctx, cc, topic, payload)
 	}
 	r.Protocols = live.Protocols
+	live.OnSwap(r.BeatNow) // the families boot in the background, after the first beat
 	var once sync.Once
 	prev := r.OnMQTTConnect
 	r.OnMQTTConnect = func(ctx context.Context, cc *node.CC) {
