@@ -126,6 +126,15 @@ func TestDisableComputerControl(t *testing.T) {
 	if out := runTool(t, disable, "", ve.recTurn(8)); out["status"] != "off" || !strings.Contains(out["message"].(string), "already off") || len(agent.calls) != 1 {
 		t.Fatalf("nothing on: %v %v", out, agent.calls)
 	}
+	// Off is the safe direction: a computer last seen off is still asked, in case it came on since.
+	if out := runTool(t, disable, `{"computer": "iMac"}`, ve.recTurn(8)); out["message"] != "Computer control is off for the iMac." || len(agent.calls) != 2 || agent.calls[1] != "node-imac computer_switch off" {
+		t.Fatalf("last seen off: %v %v", out, agent.calls)
+	}
+	// One that can't be reached and was last seen off: it says so rather than failing.
+	agent.answers[computeruse.ToolSwitch] = map[string]any{"success": false, "error": "the computer is offline", "error_code": "offline"}
+	if out := runTool(t, disable, `{"computer": "iMac"}`, ve.recTurn(8)); out["status"] != "off" || !strings.Contains(out["message"].(string), "already off") {
+		t.Fatalf("offline, last seen off: %v %v", out, agent.calls)
+	}
 }
 
 // "Is computer control on?" answers from the heartbeat, for this computer or the speaker's.

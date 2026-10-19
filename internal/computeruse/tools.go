@@ -23,3 +23,13 @@ const (
 // IsInternalTool is whether name is one of the computer-control tools (any "computer_" name, so a
 // newer agent's tools are hidden from an older server too).
 func IsInternalTool(name string) bool { return strings.HasPrefix(name, toolPrefix) }
+
+// IsServerOnlyTool is whether name is one only jarvisd's own tools call (the switch and the
+// recorder): never offered to the live model, whatever the switch says.
+func IsServerOnlyTool(name string) bool {
+	switch name {
+	case ToolSwitch, ToolRecordStart, ToolRecordStop, ToolRecordDelete:
+		return true
+	}
+	return false
+}

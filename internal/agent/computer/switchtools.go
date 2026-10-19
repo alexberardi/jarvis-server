@@ -10,7 +10,7 @@ import (
 // SwitchTools is the switch's node tool, computer_switch {on}: jarvisd's
 // enable_computer_control / disable_computer_control (voice, from this computer or another
 // device) call it. It is the menu's own path (Set), so agent.json, the tray and the heartbeat
-// follow, and off stops a task going on. The model never sees it (computeruse.IsInternalTool).
+// follow, and off stops a task going on. The model never sees it (computeruse.IsServerOnlyTool).
 type SwitchTools struct{ S *Switch }
 
 var switchSpec = node.Spec{Name: computeruse.ToolSwitch, Description: `Turn "Computer control" on or off on this computer.`,

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -271,7 +272,10 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	}
 	if !n.row.computerOn() {
 		// C11: a computer's computer-control tools only while its switch is on.
-		clientTools, commands = withoutComputerTools(clientTools, commands)
+		clientTools, commands = withoutComputerTools(clientTools, commands, computeruse.IsInternalTool)
+	} else {
+		// The switch and the recorder only through jarvisd's tools (enable_computer_control, start_recording).
+		clientTools, commands = withoutComputerTools(clientTools, commands, computeruse.IsServerOnlyTool)
 	}
 	offered := append(append([]prompts.Tool(nil), serverDefs...), clientTools...)
 	conv.tools = make([]prompts.Tool, len(offered))

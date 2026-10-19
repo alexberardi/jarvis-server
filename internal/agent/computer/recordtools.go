@@ -18,7 +18,7 @@ const MaxKeyframeAttachments = 4
 // RecordTools are the recorder's node tools: computer_record_start {mode},
 // computer_record_stop {recording_id} and computer_record_delete {recording_id}. jarvisd's
 // start_recording / stop_recording tools and its retention sweep call them; the model never
-// sees them (computeruse.IsInternalTool).
+// sees them (computeruse.IsServerOnlyTool).
 type RecordTools struct{ R *Recorder }
 
 var recordSpecs = []node.Spec{

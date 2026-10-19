@@ -207,11 +207,16 @@ func computerProp() *pyjson.Object {
 // setComputerControl turns target's switch on or off through its agent and says what it did.
 func (m *Module) setComputerControl(ctx context.Context, target voiceComputer, on bool, uid int64) *pyjson.Object {
 	state := map[bool]string{true: "on", false: "off"}[on]
-	if target.row.computerOn() == on {
-		return servertools.Obj("status", state, "message", "Computer control is already "+state+" for "+target.label()+".")
+	already := servertools.Obj("status", state, "message", "Computer control is already "+state+" for "+target.label()+".")
+	if on && target.row.computerOn() {
+		return already
 	}
+	// Off is the safe direction, so it is asked of the agent even when the heartbeat says off.
 	out := m.agentRecordingCall(ctx, target.row.nodeID, computeruse.ToolSwitch, map[string]any{"on": on}, uid)
 	if !dispatchOK(out) {
+		if !on && !target.row.computerOn() {
+			return already
+		}
 		return recordingRefusal(agentCode(out, "switch_failed"),
 			"I couldn't turn computer control "+state+" for "+target.label()+": "+agentError(out)+".")
 	}

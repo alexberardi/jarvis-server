@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 )
 
@@ -77,17 +76,18 @@ func (c computerControl) offMessage() string {
 	return `Computer control is off. Turn it on with "Computer control" in the Jarvis Automation menu on ` + where + "."
 }
 
-// withoutComputerTools drops a node's computer-control tools (computeruse.IsInternalTool) and
-// their commands: offered only for a computer whose switch is on.
-func withoutComputerTools(tools, commands []*pyjson.Object) ([]*pyjson.Object, []*pyjson.Object) {
+// withoutComputerTools drops a node's tools and commands whose name drop reports: its
+// computer-control tools (computeruse.IsInternalTool), offered only for a computer whose switch is
+// on, or the switch and recorder tools (computeruse.IsServerOnlyTool), never offered.
+func withoutComputerTools(tools, commands []*pyjson.Object, drop func(string) bool) ([]*pyjson.Object, []*pyjson.Object) {
 	var keptTools, keptCmds []*pyjson.Object
 	for _, t := range tools {
-		if !computeruse.IsInternalTool(toolName(t)) {
+		if !drop(toolName(t)) {
 			keptTools = append(keptTools, t)
 		}
 	}
 	for _, c := range commands {
-		if !computeruse.IsInternalTool(toolName2(c)) {
+		if !drop(toolName2(c)) {
 			keptCmds = append(keptCmds, c)
 		}
 	}

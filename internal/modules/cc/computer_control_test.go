@@ -68,6 +68,21 @@ func TestComputerToolsOnlyWithTheSwitchOn(t *testing.T) {
 	}
 }
 
+// The switch and recorder tools are jarvisd's to call (enable_computer_control, start_recording):
+// the live model never gets them, even at a computer whose switch is on.
+func TestSwitchAndRecorderToolsNeverOffered(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.setComputerControl("on")
+	tools := strings.TrimSuffix(computerTools, "]") +
+		`,{"type":"function","function":{"name":"computer_switch","description":"Turn it on or off.","parameters":{"type":"object","properties":{}}}}` +
+		`,{"type":"function","function":{"name":"computer_record_start","description":"Start recording.","parameters":{"type":"object","properties":{}}}}]`
+	ve.start("c1", tools)
+	got := offeredNames(ve.m.convs.get("c1"))
+	if !got["computer_act"] || got["computer_switch"] || got["computer_record_start"] {
+		t.Fatalf("offered %v", got)
+	}
+}
+
 func TestComputerTargets(t *testing.T) {
 	ve := newVoiceEnv(t, prompts.Qwen3_8B)
 	ctx := context.Background()
