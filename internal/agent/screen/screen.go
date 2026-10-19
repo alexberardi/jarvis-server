@@ -16,6 +16,7 @@ import (
 	"image/jpeg"
 	_ "image/png" // grim and screencapture output
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"golang.org/x/image/draw"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // ToolRead is the tool's name.
@@ -50,11 +52,22 @@ const (
 // ErrUnavailable: this desktop can't be captured (no supported compositor, no permission).
 var ErrUnavailable = errors.New("screen capture unavailable")
 
-// Shot is one capture before encoding: the image and what it shows.
+// Shot is one capture before encoding: the image, what it shows and where it is. Geometry's
+// LogicalW is 0 when the capturer doesn't know; ImageW/ImageH are set by EncodeShot.
 type Shot struct {
-	Image image.Image
-	Title string // window title (window scope), or "" (screen)
-	App   string
+	Image    image.Image
+	Title    string // window title (window scope), or "" (screen)
+	App      string
+	Geometry computeruse.Geometry
+}
+
+// physicalScale fills g.Scale from the image when the compositor didn't say: a capture is in
+// physical pixels, so it is the image's width over the logical width (to 0.01).
+func physicalScale(g computeruse.Geometry, img image.Image) computeruse.Geometry {
+	if g.Scale <= 0 && g.LogicalW > 0 && img != nil {
+		g.Scale = math.Round(float64(img.Bounds().Dx())/float64(g.LogicalW)*100) / 100
+	}
+	return g
 }
 
 // Capturer is one platform's capture.
@@ -194,7 +207,8 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 		return failure(err.Error(), "capture_failed"), true
 	}
 	log.Info("read screen", "scope", scope, "window", window, "app", shot.App, "title", node.Truncate(shot.Title, 40))
-	data, w, h, err := Encode(shot.Image)
+	data, err := EncodeShot(&shot)
+	w, h := shot.Geometry.ImageW, shot.Geometry.ImageH
 	if err != nil {
 		return failure(err.Error(), "capture_failed"), true
 	}
@@ -211,6 +225,12 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 	}
 	if shot.App != "" {
 		out["app"] = shot.App
+	}
+	if g := shot.Geometry; g.LogicalW > 0 && g.LogicalH > 0 {
+		// Where the image is on the desktop: image pixel (x, y) is logical global pixel
+		// origin + (x*logical_w/width, y*logical_h/height).
+		out["capture"] = map[string]any{"origin_x": g.OriginX, "origin_y": g.OriginY,
+			"logical_w": g.LogicalW, "logical_h": g.LogicalH, "scale": g.Scale, "monitor": g.Monitor}
 	}
 	return out, true
 }
@@ -252,6 +272,17 @@ func Encode(img image.Image) ([]byte, int, int, error) {
 		}
 	}
 	return nil, 0, 0, errors.New("capture too large to send")
+}
+
+// EncodeShot encodes shot.Image like Encode and records the size the model sees in
+// shot.Geometry (ImageW, ImageH), so a point on that image maps back to the screen.
+func EncodeShot(shot *Shot) ([]byte, error) {
+	data, w, h, err := Encode(shot.Image)
+	if err != nil {
+		return nil, err
+	}
+	shot.Geometry.ImageW, shot.Geometry.ImageH = w, h
+	return data, nil
 }
 
 // decode reads a PNG/JPEG capture.

@@ -3,9 +3,12 @@ package screen
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // MacWindow is one entry of CGWindowListCopyWindowInfo, in its order (front to back).
@@ -14,6 +17,7 @@ type MacWindow struct {
 	Title    string // empty without the Screen Recording grant
 	App      string // owner name
 	Layer    int
+	X, Y     float64 // top-left, global points (kCGWindowBounds)
 	W, H     float64
 	OnScreen bool
 }
@@ -63,6 +67,9 @@ type Mac struct {
 	X       Exec
 	Trusted func() bool                 // the Screen Recording grant (macax.ScreenTrusted)
 	Windows func() ([]MacWindow, error) // the window list, front to back (CGWindowListCopyWindowInfo)
+	// Main is the main display's geometry (what -m captures): origin 0,0, size in points and
+	// its backing scale. Nil or failing: the capture has no geometry.
+	Main func() (computeruse.Geometry, error)
 }
 
 const screencapture = "/usr/sbin/screencapture"
@@ -110,8 +117,16 @@ func (m *Mac) Capture(ctx context.Context, scope, window string) (Shot, error) {
 	if hasWin {
 		args = append(args, "-o", "-l", strconv.FormatUint(uint64(win.ID), 10)) // -o: no shadow
 		shot.Title, shot.App = win.Title, win.App
+		// The scale comes from the image: -l writes the window at its display's pixels.
+		shot.Geometry = computeruse.Geometry{OriginX: int(math.Round(win.X)), OriginY: int(math.Round(win.Y)),
+			LogicalW: int(math.Round(win.W)), LogicalH: int(math.Round(win.H))}
 	} else {
 		args = append(args, "-m") // the main display
+		if m.Main != nil {
+			if g, err := m.Main(); err == nil {
+				shot.Geometry = g
+			}
+		}
 	}
 	if _, err := m.X.Output(ctx, screencapture, append(args, file)...); err != nil {
 		return Shot{}, err
@@ -129,5 +144,6 @@ func (m *Mac) Capture(ctx context.Context, scope, window string) (Shot, error) {
 		return Shot{}, err
 	}
 	shot.Image = img
+	shot.Geometry = physicalScale(shot.Geometry, img)
 	return shot, nil
 }
