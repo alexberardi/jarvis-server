@@ -117,7 +117,7 @@ PR**, or the check fails. Why and the format:
 "web":    {"/admin/traces/:id": {"tests": ["e2e/web/tests/admin/traces.spec.ts"]}},
 "mobile": {"RoutinesStackNavigator/ScheduleList": {"flows": [".maestro/schedules.yaml"]},
            "DevicesStackNavigator/CameraView": {"manual": "a live camera stream; the sandbox has no camera device"},
-           "MainTabNavigator/HomeTab": {"pending": "#145: nav-tabs.yaml, home-chat.yaml"}}
+           "NodesStackNavigator/AddComputer": {"pending": "#154 gave it a code to approve (…); the approval flow is jarvis-node-mobile's, not written yet"}}
 ```
 
 - **Web, in CI:** `web/admin/src/coverage.test.tsx` walks the real route tree (`appRoutes()`
@@ -127,11 +127,15 @@ PR**, or the check fails. Why and the format:
   (`tools/e2emobile/coverage.go`), reads the `<X.Screen name=…>` registrations of the same
   mobile commit's `src/navigation/` (as `<Navigator file>/<name>`; a registration whose
   component is another navigator there is a container and not listed) and fails the same
-  ways, with flow files looked up in that commit's `.maestro/`. By hand:
+  ways, with flow files looked up in that commit's `.maestro/`. It also fails when merged
+  flows hide behind `pending`: a `pending` text that names a flow file which exists
+  (`"#145: nav-tabs.yaml"` once `nav-tabs.yaml` is there), and a flow the suite runs (a
+  top-level `.maestro/*.yaml` not tagged `skip`) that no entry lists under `flows`. By hand:
   `go run ./tools/e2emobile coverage --coverage e2e/coverage.json --flows <checkout>/.maestro --nav <checkout>/src/navigation`.
 - `pending` is a screen with a test still to come (name the item); `manual` is one an
   automated test can't reach here (camera, microphone, third-party sign-in, the fake-node
-  lane). When a pending flow lands, turn its entry into `flows`.
+  lane). When a pending flow lands, turn its entry into `flows`: the next mobile run fails until
+  you do. jarvis-node-mobile's `.maestro/COVERAGE.md` says which screens each flow reaches.
 
 ## The web suite (`e2e/web/`)
 

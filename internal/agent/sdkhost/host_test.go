@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 )
@@ -292,4 +293,34 @@ func TestSpeakQueuesWithoutBlocking(t *testing.T) {
 	if _, err := (&Host{}).Answer(context.Background(), "bogus.x", nil); err == nil {
 		t.Fatal("an unknown method was answered")
 	}
+}
+
+// A music command's play stops the other players: the legacy map names spotify's own player
+// (go-librespot), so only mpv is interrupted; anything else leaves them alone.
+func TestBeforeCallTakesOverForAMusicPlay(t *testing.T) {
+	var calls []string
+	run := func(_ context.Context, name string, args ...string) (string, error) {
+		argv := strings.Join(append([]string{name}, args...), " ")
+		calls = append(calls, argv)
+		if argv == "pactl -f json list sink-inputs" {
+			return `[{"index": 1, "corked": false, "properties": {"application.process.binary": "/usr/bin/mpv"}},
+				{"index": 2, "corked": false, "properties": {"application.process.binary": "/opt/go-librespot"}}]`, nil
+		}
+		return "", nil
+	}
+	m := music.New(nil, nil)
+	m.Run = run
+	m.LibrespotURL = "http://127.0.0.1:1" // must not be reached: it's the caller's own player
+	h := &Host{Music: m}
+	ctx := context.Background()
+	h.BeforeCall(ctx, "spotify", "", map[string]any{"action": "now_playing"})
+	h.BeforeCall(ctx, "get_weather", "", map[string]any{"action": "play"})
+	if len(calls) != 0 {
+		t.Fatalf("not a music play, but ran %q", calls)
+	}
+	h.BeforeCall(ctx, "spotify", "", map[string]any{"action": "play"})
+	if want := []string{"pactl -f json list sink-inputs", "pkill -INT -x mpv"}; strings.Join(calls, ";") != strings.Join(want, ";") {
+		t.Fatalf("calls %q, want %q", calls, want)
+	}
+	(&Host{}).BeforeCall(ctx, "spotify", "", map[string]any{"action": "play"}) // no Music: nothing
 }

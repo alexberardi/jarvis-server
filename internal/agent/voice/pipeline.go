@@ -136,6 +136,8 @@ type Pipeline struct {
 	Live *Live
 	// Mic, when set, is how others record through this pipeline's microphone (take.go).
 	Mic *Mic
+	// Music, when set, is ducked for each turn and restored after it (music.go).
+	Music Music
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -151,8 +153,9 @@ type Pipeline struct {
 	lockstep bool
 
 	dropped atomic.Int64
-	ends    sync.WaitGroup
-	tuned   int // Live.tunes applied so far
+	ends    sync.WaitGroup // pending /conversation/end calls and background music steps
+	bg      serial         // the music steps, in order (music.go)
+	tuned   int            // Live.tunes applied so far
 }
 
 // Dropped counts captured chunks discarded because the pipeline was busy.
@@ -384,6 +387,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	t := Turn{ConversationID: p.NewID(), WakeScore: score}
 	log := p.Log.With("conversation_id", t.ConversationID)
 	log.Info("wake", "score", fmt.Sprintf("%.3f", score))
+	p.duck(ctx) // the music down while the user speaks (music.go)
 
 	// Row 7: warm the conversation up while the user is still talking.
 	st := &pendingStart{done: make(chan struct{})}
@@ -422,16 +426,9 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
-		// A command's deferred step (a media command starting playback) runs once everything
-		// has been said, as the Python node runs on_response_complete after its follow-up
-		// loop. Off the pipeline goroutine: listening must not wait for it.
-		for _, f := range s.onComplete {
-			go func() {
-				if err := f(); err != nil {
-					log.Warn("on_response_complete failed", "err", err)
-				}
-			}()
-		}
+		// The music back, then a command's deferred step (music.go). Off the pipeline
+		// goroutine: listening must not wait for it.
+		p.afterTurn(ctx, s)
 		if p.OnTurn != nil {
 			p.OnTurn(t)
 		}

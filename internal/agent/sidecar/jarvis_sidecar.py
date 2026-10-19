@@ -5,7 +5,8 @@ load_packages) or, for the spike's --sidecar-commands, every module in a directo
 JSON-lines requests on stdin:
 
     -> {"id": 1, "method": "describe"}
-    <- {"id": 1, "result": {"tools": [{"name", "client_tool", "command", "package"}, ...],
+    <- {"id": 1, "result": {"tools": [{"name", "client_tool", "command", "package",
+                                       "takes_over_playback_binary"}, ...],
                             "failed": {"package": "why its commands didn't load"}}}
     -> {"id": 2, "method": "call", "params": {"command_name", "arguments", "request": {...}}}
     <- {"id": 2, "result": {"output": {...}, "signals": {"wait_for_input", "clear_history",
@@ -415,6 +416,13 @@ def _optional(cmd, attr):
         return None
 
 
+def _takeover(cmd):
+    """The player binary a music command controls (takes_over_playback_binary), else None: the
+    agent stops the other players before its "play" runs."""
+    binary = _optional(cmd, "takes_over_playback_binary")
+    return binary if isinstance(binary, str) else None
+
+
 def describe(commands: dict) -> dict:
     tools = []
     for name, cmd in commands.items():
@@ -422,7 +430,8 @@ def describe(commands: dict) -> dict:
             tools.append({"name": name, "client_tool": cmd.to_openai_tool_schema(), "command": cmd.get_command_schema(),
                           "secrets": _secrets(cmd), "data_browser": _browser(cmd),
                           "associated_service": _optional(cmd, "associated_service"),
-                          "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name)})
+                          "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name),
+                          "takes_over_playback_binary": _takeover(cmd)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
             if name in PACKAGE_OF:

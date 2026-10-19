@@ -4,6 +4,9 @@ d 755 boot/firmware
 f 644 boot/firmware/config.txt
 d 755 boot/firmware/overlays
 d 755 etc
+d 755 etc/NetworkManager
+d 755 etc/NetworkManager/dnsmasq-shared.d
+f 644 etc/NetworkManager/dnsmasq-shared.d/jarvis-captive.conf
 f 644 etc/asound.conf
 d 755 etc/bluetooth
 f 644 etc/bluetooth/main.conf
@@ -11,6 +14,9 @@ f 644 etc/fstab
 d 755 etc/jarvis-node
 d 755 etc/modprobe.d
 f 644 etc/modprobe.d/alsa-base.conf
+d 755 etc/polkit-1
+d 755 etc/polkit-1/rules.d
+f 644 etc/polkit-1/rules.d/50-jarvis-agent-networkmanager.rules
 d 755 etc/pulse
 d 755 etc/pulse/default.pa.d
 f 644 etc/pulse/default.pa.d/97-jarvis-hat-sink.pa
@@ -111,6 +117,11 @@ dtparam=audio=off
 dtoverlay=respeaker-2mic-v2_0-overlay
 dtparam=spi=on
 dtparam=i2c_arm=on
+## etc/NetworkManager/dnsmasq-shared.d/jarvis-captive.conf
+# Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+# The provisioning hotspot (jarvis-setup-ap, NetworkManager shared mode on 192.168.4.1) answers
+# every name with itself, so phones' connectivity checks reach jarvis-agent's captive listener.
+address=/#/192.168.4.1
 ## etc/asound.conf
 # --- Playback -----------------------------------------------------------
 pcm.output {
@@ -159,6 +170,14 @@ proc /proc proc defaults 0 0
 /swapfile none swap sw 0 0
 ## etc/modprobe.d/alsa-base.conf
 options snd-soc-tlv320aic3x index=0
+## etc/polkit-1/rules.d/50-jarvis-agent-networkmanager.rules
+// Written by jarvis-server scripts/install-pi.sh; do not edit by hand.
+// jarvis-agent (User=pi) provisions Wi-Fi through NetworkManager's D-Bus API.
+polkit.addRule(function(action, subject) {
+  if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.user === "pi") {
+    return polkit.Result.YES;
+  }
+});
 ## etc/pulse/default.pa.d/97-jarvis-hat-sink.pa
 .nofail
 load-module module-alsa-sink device=hw:CARD=seeed2micvoicec,DEV=0 sink_name=jarvis_output rate=48000 tsched=0
@@ -179,8 +198,9 @@ pi ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff, /sbin/reboot, /usr/s
 pi ALL=(root) NOPASSWD: /usr/bin/systemctl restart jarvis-agent, /usr/bin/systemctl restart jarvis-agent.service
 # A crash loop (a self-update's broken release) hits the unit's start limit; the rollback's restart needs it reset.
 pi ALL=(root) NOPASSWD: /usr/bin/systemctl reset-failed jarvis-agent, /usr/bin/systemctl reset-failed jarvis-agent.service
+# Provisioning drives Wi-Fi through NetworkManager's D-Bus API, which polkit allows instead
+# (configure_nm_ap); hostapd/dnsmasq get entries here only if the NM AP fails on a chip.
 # Not yet, added with the step that needs them (go-pi-node.md §7):
-# TODO(phase 4.4, provisioning AP): NetworkManager, nmcli (and hostapd/dnsmasq only if the NM AP fails).
 # TODO(parity 5.6, packages): the apt and post-install wrappers.
 # TODO(the mixer self-heal port, N:utils/audio_volume.py): jarvis-alsa-store.
 ## etc/sysctl.d/99-jarvis-node.conf

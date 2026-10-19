@@ -168,6 +168,8 @@ type conversation struct {
 	ignoredFollowUps int
 	issued           []issuedCall
 	dateKeys         []string // the last turn's extracted date keys (native continue reuses them)
+	// voiceCommand is the last turn's voice command as heard (the continue path's typed-app fill).
+	voiceCommand string
 
 	pendingTranscript *pendingTranscript
 
