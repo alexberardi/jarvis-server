@@ -71,6 +71,10 @@ Contract: [cc/prompt-contract.md](cc/prompt-contract.md) ([decision](decisions/2
 
 - [ ] **Prompts as text:** contract ✓, renderer, built-ins, model traits, LLM settings, voice path, household storage, API, admin UI
 
+### Computer control: errands on your computer
+
+Plan: [agent/COMPUTER-CONTROL.md](agent/COMPUTER-CONTROL.md) (decisions C1–C9, open questions Q1–Q6). Planned 2026-10-18; goes through the loop's planning flow. **Next: the brief.**
+
 ### Autonomy (in parallel, worktrees): Custom Rules, watches, goals
 
 Plan: [autonomy/PLAN.md](autonomy/PLAN.md). Merges into `main` as each phase is ready, off by default. **Next: P3.**
