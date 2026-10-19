@@ -1189,9 +1189,6 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       fails on the chip. Differences from N: in
       [decisions/2026-10-18-pi-wifi-networkmanager-dbus.md](../decisions/2026-10-18-pi-wifi-networkmanager-dbus.md).
       **Still open:** starting setup mode at boot.
-   5. The sidecar with the built-in commands once the SDK backends (§5.2) land.
-      **Still open:** the NetworkManager D-Bus Wi-Fi/hotspot backend (§8 Q7), starting setup mode
-      at boot, and the recovery watcher.
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
       2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
       profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the
