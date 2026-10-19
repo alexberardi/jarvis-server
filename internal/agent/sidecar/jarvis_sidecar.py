@@ -1053,6 +1053,119 @@ def call(commands: dict, params: dict) -> dict:
     return {"output": output, "signals": signals}
 
 
+# --- Actions and callbacks: N:'s handle_action and handle_callback past the MQTT and HTTP, which
+# the Go agent does (internal/agent/actions); these return the body N: posts. ---
+
+_CONTROL_LOOP = None
+
+
+def _control_loop():
+    """N:'s persistent device loop (_get_device_protocol_loop): a family's pairing session
+    (pair_start, then pair_finish with the PIN) lives on the loop it started on, across calls."""
+    import asyncio
+
+    global _CONTROL_LOOP
+    if _CONTROL_LOOP is None or _CONTROL_LOOP.is_closed():
+        _CONTROL_LOOP = asyncio.new_event_loop()
+    return _CONTROL_LOOP
+
+
+def _device_control(action_name: str, context: dict) -> dict:
+    """N:'s _handle_device_protocol_control: control_device with no such command goes to the
+    device's family, configured or not. As on N:, the family's control() gets the device itself
+    where the SDK says ip, and the whole action context as data."""
+    from jarvis_command_sdk import DiscoveredDevice
+
+    protocol = context.get("protocol") or ""
+    if not protocol:
+        return {"success": False, "error": "No protocol specified in device context"}
+    fam = FAMILIES.get(protocol)
+    if fam is None:
+        return {"success": False, "error": f"Device protocol '{protocol}' not found"}
+    entity_id = context.get("entity_id") or ""
+    dev = DiscoveredDevice(entity_id=entity_id, name=context.get("name") or entity_id,
+                           domain=context.get("domain") or "switch", manufacturer=protocol,
+                           model=context.get("model") or "", protocol=protocol, cloud_id=context.get("cloud_id"),
+                           local_ip=context.get("local_ip"), mac_address=context.get("mac_address"))
+    try:
+        result = _control_loop().run_until_complete(fam.control(dev, action_name, context))
+    except Exception as exc:
+        print(f"sidecar: {protocol}: control {action_name} failed for {entity_id}: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    out = {"success": bool(result.success), "error": None if result.success else result.error}
+    if result.input_required:
+        out["input_required"] = result.input_required.to_dict()
+    return out
+
+
+def action(commands: dict, params: dict) -> dict:
+    """{success, error, input_required?, message} for a command's handle_action, as the
+    requesting user; control_device with no such command (or one the household turned off) is
+    the device family's control. message is what N: speaks for a voice-originated action."""
+    name = params.get("command_name") or ""
+    action_name = params.get("action_name") or ""
+    context = params.get("context") or {}
+    cmd = commands.get(name) if params.get("enabled", True) else None
+    if cmd is None and name == "control_device":
+        return _device_control(action_name, context)
+    if cmd is None:
+        return {"success": False, "error": f"Command '{name}' not found on this node"}
+    set_current_user_id(params.get("user_id"))
+    try:
+        resp = cmd.handle_action(action_name, context)
+    except Exception as exc:
+        print(f"sidecar: {name}: action {action_name} failed: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    finally:
+        set_current_user_id(None)
+    data = resp.context_data or {}
+    error = data.get("error")
+    if not resp.success and resp.error_details:
+        error = resp.error_details
+    out = {"success": bool(resp.success), "error": error, "message": data.get("message") or ""}
+    if data.get("input_required"):
+        out["input_required"] = data["input_required"]
+    return out
+
+
+def callback(commands: dict, params: dict) -> dict:
+    """{success, error, context_data?} for a command's @callback, as the requesting user; every
+    failure is a result too (N:'s messages), so the inbox item doesn't wait forever."""
+    name = params.get("command_name") or ""
+    cb_name = params.get("callback_name") or ""
+    cmd = commands.get(name) if params.get("enabled", True) else None
+    if cmd is None:
+        return {"success": False, "error": f"Command '{name}' not found on this node"}
+    get_callbacks = getattr(cmd, "get_callbacks", None)
+    if not callable(get_callbacks):
+        return {"success": False, "error": f"Command '{name}' does not support callbacks"}
+    try:
+        callbacks = get_callbacks()
+    except Exception as exc:
+        return {"success": False, "error": f"get_callbacks failed: {exc}"}
+    fn = callbacks.get(cb_name)
+    if fn is None:
+        return {"success": False, "error": f"Callback '{cb_name}' not registered on '{name}'"}
+    uid = params.get("user_id")
+    set_current_user_id(uid)
+    try:
+        ri = RequestInformation(voice_command=params.get("voice_command") or f"cb:{cb_name}",
+                                conversation_id=params.get("conversation_id") or "callback", user_id=uid)
+        resp = fn(params.get("data") or {}, ri)
+    except Exception as exc:
+        print(f"sidecar: {name}: callback {cb_name} failed: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    finally:
+        set_current_user_id(None)
+    error = (resp.context_data or {}).get("error")
+    if not resp.success and resp.error_details:
+        error = resp.error_details
+    out = {"success": bool(resp.success), "error": error}
+    if resp.context_data is not None:
+        out["context_data"] = resp.context_data
+    return out
+
+
 DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "device_state": device_state,
                   "device_removed": device_removed, "device_families": lambda params: device_families()}
 
@@ -1084,6 +1197,10 @@ def main() -> None:
                 reply = {"id": msg_id, "result": describe(commands)}
             elif method == "call":
                 reply = {"id": msg_id, "result": call(commands, msg.get("params") or {})}
+            elif method == "action":
+                reply = {"id": msg_id, "result": action(commands, msg.get("params") or {})}
+            elif method == "callback":
+                reply = {"id": msg_id, "result": callback(commands, msg.get("params") or {})}
             elif method == "complete":
                 reply = {"id": msg_id, "result": complete(msg.get("params") or {})}
             elif method == "data_summaries":

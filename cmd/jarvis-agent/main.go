@@ -646,6 +646,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, log)
+	// action, callback and toggle_command: the app's device control, a command's buttons and
+	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
+	wireActions(r, sc, st, sayNow(mic), log)
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
 		if sc != nil {
