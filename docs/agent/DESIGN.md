@@ -1728,6 +1728,16 @@ stand; this adds one case before them (`internal/agent/jarvispage`, `dictate/jar
   vocabulary, qwen3.5-9b, 5 runs each): "type into omawrite that I need to walk the dogs" 0/5 →
   4/5; "type buy more coffee filters into omawrite" 2/5 → 5/5 (before, "into omawrite" stayed in
   `text`); "write … in slack" 5/5 both.
+- **Filling in the app the model dropped (2026-10-19, #230).** The 9B still dropped `app` (the
+  rc16 verification: 2 of 3 scenarios failed), so command-center no longer relies on the
+  description alone. A `desktop_type_text` call with no `app` gets one from the utterance before
+  it goes to the node (`fillTypedApp`, `desktop_hint.go`): after a typing verb ("type", "write",
+  "enter", …), "into X" or "in X" where X is one or two words (after an optional "the"/"my") that
+  end the utterance or come before "that", "saying", "and", "please" or punctuation. X is left
+  out when any of its words is in the text ("type I live in Boston"), when it is a manner or a
+  place rather than an app ("in all caps", "in spanish", "in here", "in it"), and when the
+  request opens an app first ("open X and type Y" types into the launch). "to X" is never used:
+  it is a person or part of the sentence too often. A call that names an app keeps the model's.
 
 ### The island note
 

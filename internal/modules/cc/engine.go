@@ -332,6 +332,13 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					calls[i].Function.Arguments = out
 				}
 			}
+			// 2b. Typing keeps the app the user named (desktop_hint.go).
+			for i := range calls {
+				if out, changed := fillTypedApp(in.utterance, calls[i]); changed {
+					calls[i].Function.Arguments = out
+					m.deps.Log.Info("cc: typed_app_filled", "conversation_id", conv.id)
+				}
+			}
 			// The history keeps the calls as executed.
 			msgs[len(msgs)-1].ToolCalls = append([]parse.ToolCall(nil), calls...)
 
