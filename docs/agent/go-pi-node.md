@@ -1175,7 +1175,23 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       [decisions/2026-10-17-pi-provisioning-api.md](../decisions/2026-10-17-pi-provisioning-api.md).
       **Still open:** the NetworkManager D-Bus Wi-Fi/hotspot backend (§8 Q7), starting setup mode
       at boot, and the recovery watcher.
-   5. The sidecar with the built-in commands once the SDK backends (§5.2) land.
+   5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
+      2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
+      profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the
+      sidecar loads its commands next to the Pantry packages, less control_device, reminder,
+      routine and send_link (they still call the Python node's code). Their SDK backends ask
+      the Go agent over the child→Go RPC (`internal/agent/sdkhost`): LLM and CC HTTP
+      (`/api/v0/node/...` only) as the node, Inbox, Signals, the timers
+      (`internal/agent/timers`, persisted in the state dir, said on expiry between turns), the
+      alert queue (in memory; its producers are #175), the volume (pactl on the default sink or
+      `jarvis_output`, else amixer; persisted) and speech; CommandInvoker runs in the sidecar.
+      Tests: the real commands (calculate, timers, control_node, check_alerts, shopping_list,
+      tell_joke) against the real Go backends with a real Python, each backend's RPC, and the
+      timers' restart and expiry with a fake clock. **Pending on-device** (lab Pi 4): the first
+      boot's install, a voice turn per family, a timer heard on expiry, the volume heard to
+      change. Not done: `update_node_config`'s `volume_percent`/`is_muted` and the settings
+      snapshot's volume still say "no Pi volume control" (§3.14); they can use the same
+      `sdkhost.Audio`.
 
    Ship it to the lab Pi alongside the Python node (`install_mode` decides).
 5. **Parity**, in order:
@@ -1183,7 +1199,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    2. Barge-in (re-use the wake detector at threshold 0.04 plus the RMS gate). **Done
       2026-10-17 (§3.13)** in the shared pipeline (desktop and Pi); lockstep rig tests only,
       not yet heard on a Pi or a desktop.
-   3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the sidecar.
+   3. Client tools / continue. **Desktop agent done 2026-10-10 (§3.8)**; the Pi gets it with the
+      sidecar: **built 2026-10-18** (§7 4.5), not yet run on a Pi.
    4. `update_node_config`, `measure_ambient_noise`, LED preview. **Done 2026-10-17 (§3.14)**
       (unit tests and a sandbox jarvisd end to end; not yet on a Pi).
    5. K2 + settings snapshot (AES-GCM).
