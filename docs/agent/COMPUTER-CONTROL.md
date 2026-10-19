@@ -125,7 +125,9 @@ password the model can see.
   suspected injection: stop and ask.
 - **While controlling the desktop (C9):** an always-visible "Jarvis is controlling" indicator
   (island + tray), auto-pause the moment the user touches mouse or keyboard, "stop" by voice and
-  by hotkey.
+  by hotkey. On macOS (`computer.Guard`): HID activity outside our own injection windows
+  (+250 ms), or the pointer > 3 px from where our last action left it, polled every 100 ms,
+  pauses the task; ⌃⌥⎋ (Carbon hotkey, named in the tray tooltip) stops it.
 - **Audit:** every action (intent, target, result) in `cc_autonomy_events`; screenshots kept
   locally with a retention setting.
 

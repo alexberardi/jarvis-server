@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -239,45 +241,41 @@ func withEnvExtra(t *testing.T, x envExtra) {
 	t.Cleanup(func() { envExtras.Delete(t) })
 }
 
+// migrateEnvDB runs the migrations of the tables a test env uses: cc's and the platform's,
+// as in jarvisd (purges touch triggers and jobs).
 func migrateEnvDB(ctx context.Context, d *db.DB) error {
 	if err := db.Migrate(ctx, d, "cc", Migrations()); err != nil {
 		return err
 	}
-	// The platform's tables, as in jarvisd (purges touch triggers and jobs).
 	if err := db.Migrate(ctx, d, queue.MigrationModule, queue.Migrations()); err != nil {
 		return err
 	}
 	return db.Migrate(ctx, d, scheduler.MigrationModule, scheduler.Migrations())
 }
 
-// migratedDB is a database file with every migration applied, made once per test binary: each
-// env starts from a copy of it, since migrating a fresh file in every test took this package
-// past go test's 10-minute limit under -race on CI.
+// migratedDB is a freshly migrated database file, built once per test binary: migrating is
+// most of an env's setup under -race (about 0.5 s of 0.6 s), and the package's race run
+// neared go test's 10-minute limit in CI, so each new env starts from a copy of it.
 var migratedDB = sync.OnceValues(func() ([]byte, error) {
-	dir, err := os.MkdirTemp("", "cc-test-db")
+	dir, err := os.MkdirTemp("", "cc-envdb-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "jarvis.db")
 	ctx := context.Background()
-	d, err := db.Open(ctx, path)
+	d, err := db.Open(ctx, filepath.Join(dir, "migrate.db"))
 	if err != nil {
 		return nil, err
 	}
+	defer d.Close()
 	if err := migrateEnvDB(ctx, d); err != nil {
-		d.Close()
 		return nil, err
 	}
-	// Everything into the main file, so the copy needs no -wal.
-	if _, err := d.Write.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		d.Close()
+	out := filepath.Join(dir, "template.db")
+	if _, err := d.Write.ExecContext(ctx, `VACUUM INTO ?`, out); err != nil {
 		return nil, err
 	}
-	if err := d.Close(); err != nil {
-		return nil, err
-	}
-	return os.ReadFile(path)
+	return os.ReadFile(out)
 })
 
 func newEnv(t *testing.T, o ...envOpts) *env {
@@ -293,8 +291,7 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 		opt.auth = newFakeAuth()
 	}
 	ctx := context.Background()
-	// A new file starts as a copy of the migrated one; a reopened file is migrated as it is.
-	if _, err := os.Stat(opt.dbPath); os.IsNotExist(err) {
+	if _, err := os.Stat(opt.dbPath); errors.Is(err, fs.ErrNotExist) {
 		b, err := migratedDB()
 		if err != nil {
 			t.Fatal(err)

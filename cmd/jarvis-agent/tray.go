@@ -10,6 +10,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/tray"
@@ -94,6 +95,7 @@ func (ic *trayIcon) state() tray.State {
 	}
 	k, _ := ic.activity.Status()
 	s.Activity = string(k)
+	s.StopHotkey = island.StopHotkey()
 	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
 	s.Record = ic.recorder != nil
 	return s

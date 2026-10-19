@@ -76,9 +76,14 @@ func (p *runningPill) Attach(show func()) {
 }
 
 // appEvents is what opening the macOS app, or its jarvis-agent:// link, does while this agent
-// runs: LaunchServices sends the running agent an Apple event instead of starting `start`.
-func appEvents(pill *runningPill, log *slog.Logger) island.AppEvents {
+// runs: LaunchServices sends the running agent an Apple event instead of starting `start`. The
+// stop hotkey (⌃⌥⎋) stops what Jarvis is doing with the computer.
+func appEvents(pill *runningPill, activity *computer.Activity, log *slog.Logger) island.AppEvents {
 	return island.AppEvents{
+		StopHotkey: func() {
+			log.Info("stop hotkey pressed", "activity", activity.String())
+			activity.Stop()
+		},
 		Reopen: pill.Show,
 		OpenURL: func(u string) {
 			if err := install.CheckStartURL(u); err != nil {

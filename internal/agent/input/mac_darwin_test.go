@@ -64,3 +64,19 @@ func TestMacEventLocation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestMacPrivateSource: our events post from a private source, not the default one, so the HID
+// system state (NativeMonitor) doesn't count them as the user's. Both need a GUI session (a
+// sandbox or ssh gets no source, and NativeMonitor blocks), so it runs on the Mac test host
+// with JARVIS_INPUT_MAC_LIVE=1; the computer package's TestGuardMacLive runs NativeMonitor.
+func TestMacLivePrivateSource(t *testing.T) {
+	if os.Getenv("JARVIS_INPUT_MAC_LIVE") != "1" {
+		t.Skip("set JARVIS_INPUT_MAC_LIVE=1 on the Mac test host")
+	}
+	if err := loadCG(); err != nil {
+		t.Fatal(err)
+	}
+	if cgSource == 0 {
+		t.Error("no private event source: our events would count as the user's")
+	}
+}
