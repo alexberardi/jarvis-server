@@ -49,7 +49,7 @@ type Record struct {
 	ConsoleErrors []string `json:"console_errors"`
 	SkipReason    string   `json:"skip_reason,omitempty"`
 	Attachments   []string `json:"attachments,omitempty"`
-	// Note says the flow was run twice: the emulator's adb transport dropped on the first try.
+	// Note says the flow was run twice: the emulator's adb transport dropped, or it was not ready, on the first try.
 	Note string `json:"note,omitempty"`
 }
 
@@ -263,15 +263,20 @@ func (c *config) prepDevice(ctx context.Context) error {
 // look for a drop in). When the device was not ready or the test failed on an adb transport
 // drop, it does both once more, keeps the second result and notes the drop on it.
 func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Record, string)) Record {
-	once := func() (Record, bool) {
+	// once returns why the try deserves another ("" when it does not).
+	once := func() (Record, string) {
 		if err := c.prepDevice(ctx); err != nil {
-			return failed(base, "the emulator was not ready for it (adb device, reverse tunnels, sandbox /health): "+err.Error()), true
+			return failed(base, "the emulator was not ready for it (adb device, reverse tunnels, sandbox /health): "+err.Error()),
+				"the emulator was not ready"
 		}
 		r, out := play()
-		return r, r.Status != "passed" && r.Status != "skipped" && deviceDropped.MatchString(out)
+		if r.Status != "passed" && r.Status != "skipped" && deviceDropped.MatchString(out) {
+			return r, "the emulator's adb transport dropped"
+		}
+		return r, ""
 	}
-	r, dropped := once()
-	if !dropped || ctx.Err() != nil {
+	r, why := once()
+	if why == "" || ctx.Err() != nil {
 		return r
 	}
 	first := ""
@@ -281,9 +286,9 @@ func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Reco
 			first = first[:300] + "…"
 		}
 	}
-	fmt.Fprintf(os.Stderr, "e2emobile: %s: the emulator's adb transport dropped (%s); readying it again and retrying once\n", r.Title, first)
+	fmt.Fprintf(os.Stderr, "e2emobile: %s: %s (%s); readying it again and retrying once\n", r.Title, why, first)
 	r, _ = once()
-	r.Note = fmt.Sprintf("retried once: the emulator's adb transport dropped on the first try (%s)", first)
+	r.Note = fmt.Sprintf("retried once: %s on the first try (%s)", why, first)
 	return r
 }
 
