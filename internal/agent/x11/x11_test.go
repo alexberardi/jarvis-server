@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
 	"slices"
 	"strings"
 	"testing"
@@ -27,6 +28,10 @@ type fakeConn struct {
 	props   map[string]prop // "win/ATOM"
 	log     []string
 	failMap bool
+	pointer [2]int
+	geoms   map[uint32][4]int // win -> root-relative x, y, w, h
+	depth   byte
+	pixels  []byte // what GetImage returns
 }
 
 type prop struct {
@@ -109,6 +114,31 @@ func (f *fakeConn) FakeKey(code byte, press bool) error {
 	}
 	f.log = append(f.log, fmt.Sprintf("key %d %s", code, st))
 	return nil
+}
+func (f *fakeConn) FakeMotion(x, y int) error {
+	f.pointer = [2]int{x, y}
+	f.log = append(f.log, fmt.Sprintf("motion %d,%d", x, y))
+	return nil
+}
+func (f *fakeConn) FakeButton(b byte, down bool) error {
+	st := "up"
+	if down {
+		st = "down"
+	}
+	f.log = append(f.log, fmt.Sprintf("button %d %s", b, st))
+	return nil
+}
+func (f *fakeConn) QueryPointer() (int, int, error) { return f.pointer[0], f.pointer[1], nil }
+func (f *fakeConn) GetImage(win uint32, r image.Rectangle) (byte, []byte, error) {
+	f.log = append(f.log, fmt.Sprintf("image %#x %v", win, r))
+	return f.depth, f.pixels, nil
+}
+func (f *fakeConn) Geometry(win uint32) (int, int, int, int, error) {
+	g, ok := f.geoms[win]
+	if !ok {
+		return 0, 0, 0, 0, errors.New("BadWindow")
+	}
+	return g[0], g[1], g[2], g[3], nil
 }
 func (f *fakeConn) Sync() error { f.log = append(f.log, "sync"); return nil }
 func (f *fakeConn) Close()      {}
