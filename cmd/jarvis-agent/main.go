@@ -594,8 +594,16 @@ func run(ctx context.Context, args []string) error {
 		// installer's ADC filter and output levels.
 		hat.HealCodec(ctx, hat.ExecRun, log)
 	}
-	hd := openHat(hf, log)
+	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
+	if tf.host != nil {
+		alerts := startAlerts(ctx, tf.host, mic, tf.live, log)
+		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
+	}
+	hd := openHat(hf, press, log)
 	defer hd.Close()
+	if hd != nil && tf.host != nil {
+		tf.host.Alerts.Watch(alertLED(hd.leds))
+	}
 	var nodeConfig func() map[string]any
 	var live *voice.Live // the Pi's: the app's settings and noise measurements reach the pipeline
 	if !p.desktop {
@@ -741,6 +749,8 @@ type toolFlags struct {
 	// sidecar also loads the node's built-in commands, whose SDK backends host answers.
 	pi   bool
 	host *sdkhost.Host
+	// live is the sidecar in service once build ran (the Pi's reminders are polled from it).
+	live *sidecar.Live
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -808,6 +818,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodesettings.Store, tools node.Multi, closeAll func()) (node.Multi, func(), error) {
 	// The package sidecar: the installed Pantry packages, or the spike's directory of modules.
 	live := &sidecar.Live{}
+	f.live = live
 	var storage sidecar.Storage
 	if st != nil {
 		storage = st

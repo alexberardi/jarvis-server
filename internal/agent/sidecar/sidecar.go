@@ -254,6 +254,29 @@ func (s *Sidecar) Create(_ context.Context, command string, values nodesettings.
 	return res.Key, res.Record, nil
 }
 
+// DueReminder is one reminder reminders_due found due and marked announced.
+type DueReminder struct {
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	UserID *int64 `json:"user_id"`
+}
+
+// RemindersDue is one run of the Python node's reminder agent in the child (its
+// services.reminder_service, the one owner of the reminders): the due ones, now marked
+// announced (a recurring one moved to its next time) and pushed to their owner's phone when
+// that setting is on, and how many were pending before it. An error: no built-in reminder
+// command in this sidecar.
+func (s *Sidecar) RemindersDue(_ context.Context) ([]DueReminder, int, error) {
+	var res struct {
+		Due     []DueReminder `json:"due"`
+		Pending int           `json:"pending"`
+	}
+	if err := s.roundTrip("reminders_due", map[string]any{}, &res); err != nil {
+		return nil, 0, err
+	}
+	return res.Due, res.Pending, nil
+}
+
 func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

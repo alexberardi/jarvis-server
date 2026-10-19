@@ -90,6 +90,13 @@ func (l *Live) Create(ctx context.Context, command string, values nodesettings.O
 	return "", nil, ErrNoPackages
 }
 
+func (l *Live) RemindersDue(ctx context.Context) ([]DueReminder, int, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.RemindersDue(ctx)
+	}
+	return nil, 0, ErrNoPackages
+}
+
 // Failed are the installed packages whose commands didn't load.
 func (l *Live) Failed() map[string]string {
 	if sc := l.Current(); sc != nil {

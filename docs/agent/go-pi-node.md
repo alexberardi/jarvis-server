@@ -720,10 +720,31 @@ JARVIS_AGENT_LOG=debug ...                                                 # log
 - **Button** = `button_service.py`: active low with pull-up via go-gpiocdev (gpiochip0 line 17),
   50 ms debounce, `shutdown_warning` after 1 s held, power off after 3 s
   (`sudo -n systemctl poweroff`; `--button-poweroff=false` turns it off), the overlay cleared on
-  every release. A short press logs only: the Go node has no alert queue yet (Python reads
-  queued alerts). The MQTT `button/*` publishes are not sent (the ACL denies them, §1.4).
-- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`), alert-queue
-  wiring of the `alert` pattern. (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
+  every release. A short press reads every pending alert, most urgent first, then removes them,
+  or says "No new notifications." (N:`announce_pending_and_flush`); with nothing heard (no
+  pipeline listening) they stay queued and the LEDs flash `error` for 2 s (loop #175). The MQTT
+  `button/*` publishes are not sent (the ACL denies them, §1.4).
+- **Alert pattern** (loop #175): the stable layer is `alert` (middle LED purple) while the queue
+  holds an alert at priority 3 or above, `normal` otherwise (N:main.py's `on_change`, re-synced
+  by the queue's 10 s sweep).
+- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`).
+  (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
+
+**Reminders and alerts on the lab Pi 4** (loop #175; not run yet: no runner reaches the Pi). Lab
+Pi 4 only, never the kitchen node:
+
+```bash
+sudo systemctl stop jarvis-node
+JARVIS_AGENT_LOG=debug jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output output
+# "hey Jarvis, remind me in 2 minutes to check the oven" → "Reminder set: …"
+#   within ~1 min of due (60 s poll): log "reminders: due", the middle LED purple,
+#   then "Reminder: check the oven" said between turns, log "alerts: announced"; LED back to white
+# set another, and keep a turn going when it falls due: it is said once the turn ends
+# "hey Jarvis, what's up?" with one queued: whats_up lists it, the LED goes white
+# a short button press with one queued: it is read out; with none: "No new notifications."
+# the push (reminder settings: push notifications on): the owner's phone gets "Reminder"
+sudo systemctl start jarvis-node
+```
 
 **Verified on hardware** (Python node stopped for each test and restarted after; both Pis are back
 as they were):
@@ -982,7 +1003,7 @@ fail only because they import 3-line `core.*` files that re-export SDK classes:
 | send_link | `jarvis_log_client`; lazy `RestClient` + discovery → `/node/send-link` | needs **CC POST** |
 | shopping_list, todo_list | `jarvis_log_client`; SDK `JarvisStorage` | needs **Storage** backend |
 | export_shopping_list, export_todo_list | as above, plus a hand-rolled `/node/inbox-item` POST (should use SDK `JarvisInbox`) | needs Storage + Inbox |
-| reminder | `services.reminder_service` (itself only JarvisStorage + logger); firing is in `agents/reminder_agent.py` | needs Storage; the **host** owns the due-poll and announcement |
+| reminder | `services.reminder_service` (itself only JarvisStorage + logger); firing is in `agents/reminder_agent.py` | needs Storage; the **host** owns the due-poll and announcement (loop #175: the sidecar's `reminders_due`, polled by `internal/agent/reminders`) |
 | set_timer, cancel_timer, check_timers | `services.timer_service` (SQLCipher `SessionLocal`, `threading.Timer`, TTS on expiry) | needs **Timer** backend |
 | control_node | `utils.audio_volume` (pactl/amixer, config write) | needs **AudioControl** backend |
 | whats_up | CC `chat_text`, `services.alert_queue_service` (in-memory), discovery | needs **LLM** + **AlertQueue** |
@@ -1182,12 +1203,12 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
       2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
       profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the
-      sidecar loads its commands next to the Pantry packages, less control_device, reminder,
-      routine and send_link (they still call the Python node's code). Their SDK backends ask
+      sidecar loads its commands next to the Pantry packages, less control_device, routine and
+      send_link (they still call the Python node's code). Their SDK backends ask
       the Go agent over the child→Go RPC (`internal/agent/sdkhost`): LLM and CC HTTP
       (`/api/v0/node/...` only) as the node, Inbox, Signals, the timers
       (`internal/agent/timers`, persisted in the state dir, said on expiry between turns), the
-      alert queue (in memory; its producers are #175), the volume (pactl on the default sink or
+      alert queue (in memory), the volume (pactl on the default sink or
       `jarvis_output`, else amixer; persisted) and speech; CommandInvoker runs in the sidecar.
       Tests: the real commands (calculate, timers, control_node, check_alerts, shopping_list,
       tell_joke) against the real Go backends with a real Python, each backend's RPC, and the
@@ -1196,6 +1217,18 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       change. Not done: `update_node_config`'s `volume_percent`/`is_muted` and the settings
       snapshot's volume still say "no Pi volume control" (§3.14); they can use the same
       `sdkhost.Audio`.
+      **Reminders, alerts and the button built 2026-10-19** (loop #175,
+      [decision](../decisions/2026-10-19-pi-reminders-alerts.md)): `reminder` loads (the sidecar
+      stands in for `jarvis_log_client` and restores the reminders when it loads them); the
+      reminder agent's run is the sidecar's `reminders_due`, polled by `internal/agent/reminders`
+      (60 s while one is pending, 300 s otherwise, as N:reminder_agent.py), each due reminder a
+      priority-3 alert for 10 minutes; `sdkhost.Announcer` says the alerts at priority 3 and up
+      between turns (N:alert_announcer.py) and removes what it said; the `alert` LED pattern and
+      the button's short press (§3.11). Not ported: Python's 8 s inline listen after an
+      announcement (a reply to it needs the wake word). Tests: the queue's watcher, the
+      announcer and the poller with an injected clock, the button through `hat.Button`, and the
+      pinned reminder command set, restored and fired once (with its push) through a real
+      sidecar. **Pending on-device** (lab Pi 4, §3.11).
 
    Ship it to the lab Pi alongside the Python node (`install_mode` decides).
 5. **Parity**, in order:
