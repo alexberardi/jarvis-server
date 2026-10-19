@@ -1,0 +1,2 @@
+{{define "content"}}<h1>{{.D.SiteName}}: statements</h1>
+<ul>{{range .D.Months}}<li><a href="{{$.U (printf "/%s/statements/%s" $.Site .)}}">Statement {{.}}</a></li>{{end}}</ul>{{end}}
