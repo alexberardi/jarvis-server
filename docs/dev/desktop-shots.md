@@ -94,8 +94,8 @@ Omarchy does not ship:
   desktop that makes it a noticeably greyer, lower-contrast pill than the other states. This
   is worth a look, but it is not a bug.
 - **Status icon:** it registers and shows in the tray on both bar colours. The menu reads
-  "Jarvis Automation Agent — Running", then the "Listen for "Hey Jarvis"" checkbox, then
-  "Open Jarvis Automation" (once jarvisd's discovery answers; this item is missing with
+  "Jarvis Automation Agent — Running", then the "Listen for "Hey Jarvis"" checkbox, the
+  "Computer control" checkbox (unchecked: off by default), then "Open Jarvis Automation" (once jarvisd's discovery answers; this item is missing with
   `--offline`), then Quit.
   **Finding:** at tray size (about 20 px on a 26 px bar), the shield is a plain downscale
   of the 64 px art (`tray.Color`, CatmullRom). It loses its white outline and pointed bottom,

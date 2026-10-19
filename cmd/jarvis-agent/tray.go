@@ -36,6 +36,8 @@ type trayIcon struct {
 	mainLoop bool
 	// activity is what Jarvis is doing with the computer: the menu's line and Stop item.
 	activity *computer.Activity
+	// computer is computer control's switch (the menu's "Computer control"); nil hides it.
+	computer *computer.Switch
 
 	t      atomic.Pointer[tray.Tray]
 	update atomic.Pointer[string] // the self-update's status line
@@ -58,7 +60,7 @@ func (ic *trayIcon) show(ctx context.Context) func() {
 	}
 	t, err := tray.Start(tray.Options{Log: ic.log, State: ic.state(), MainLoop: ic.mainLoop,
 		Actions: tray.Actions{SetVoice: ic.sw.Set, Open: ic.open, Setup: ic.setup, Quit: ic.quitFromMenu, SignOut: ic.signOutFromMenu,
-			StopTask: ic.stopTaskFromMenu}})
+			StopTask: ic.stopTaskFromMenu, SetComputer: ic.setComputerFromMenu}})
 	if err != nil {
 		ic.log.Info("tray: no status icon", "reason", err)
 		return func() {}
@@ -90,7 +92,16 @@ func (ic *trayIcon) state() tray.State {
 	}
 	k, _ := ic.activity.Status()
 	s.Activity = string(k)
+	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
 	return s
+}
+
+// setComputerFromMenu is "Computer control": off also stops a task going on.
+func (ic *trayIcon) setComputerFromMenu(on bool) {
+	ic.log.Info("Computer control chosen in the menu", "on", on, "activity", ic.activity.String())
+	if err := ic.computer.Set(on); err != nil {
+		ic.log.Warn("computer control: couldn't save the choice; it lasts until the agent restarts", "err", err)
+	}
 }
 
 // activityChanged is the Activity telling the menu.
