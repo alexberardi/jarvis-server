@@ -81,6 +81,12 @@ type Expect struct {
 	ServerTool string            `json:"server_tool,omitempty"` // this server tool is called
 	Args       map[string]any    `json:"args,omitempty"`        // on the Tool/ServerTool call: these keys equal these values
 	ArgsMatch  map[string]string `json:"args_match,omitempty"`  // on that call: each value's text matches the regexp
+	// ResultMatch: on that call, each field of its result (the node's answer, or what the server
+	// tool returned) matches the regexp, e.g. {"status": "^cancelled$"}; NotResultMatch: none
+	// does (a missing field doesn't). With several calls of the tool, the expectation holds when
+	// one call meets all of it (args and result), and is reported on the last call otherwise.
+	ResultMatch    map[string]string `json:"result_match,omitempty"`
+	NotResultMatch map[string]string `json:"not_result_match,omitempty"`
 	// NotCall: no call of this tool (node or server) has args matching all of these regexps,
 	// e.g. {"tool": "desktop_open", "args_match": {"target": "(?i)type"}}.
 	NotCall    *CallMatch `json:"not_call,omitempty"`
@@ -184,11 +190,6 @@ func (s Scenario) validate() error {
 				return fmt.Errorf("turn %d: %w", i+1, err)
 			}
 		}
-		for k, re := range t.Expect.ArgsMatch {
-			if _, err := regexp.Compile(re); err != nil {
-				return fmt.Errorf("turn %d: args_match %s: %w", i+1, k, err)
-			}
-		}
 		if nc := t.Expect.NotCall; nc != nil {
 			if nc.Tool == "" {
 				return fmt.Errorf("turn %d: not_call needs a tool", i+1)
@@ -199,8 +200,15 @@ func (s Scenario) validate() error {
 				}
 			}
 		}
-		if (len(t.Expect.Args) > 0 || len(t.Expect.ArgsMatch) > 0) && t.Expect.Tool == "" && t.Expect.ServerTool == "" {
-			return fmt.Errorf("turn %d: args need tool or server_tool", i+1)
+		for k, re := range mergedRegexps(t.Expect.ArgsMatch, t.Expect.ResultMatch, t.Expect.NotResultMatch) {
+			if _, err := regexp.Compile(re); err != nil {
+				return fmt.Errorf("turn %d: %s: %w", i+1, k, err)
+			}
+		}
+		e := t.Expect
+		if (len(e.Args) > 0 || len(e.ArgsMatch) > 0 || len(e.ResultMatch) > 0 || len(e.NotResultMatch) > 0) &&
+			e.Tool == "" && e.ServerTool == "" {
+			return fmt.Errorf("turn %d: args and results need tool or server_tool", i+1)
 		}
 	}
 	return nil
@@ -246,38 +254,37 @@ func (e Expect) Check(t TurnLog) []string {
 		}
 		return n
 	}
-	checkArgs := func(c CallLog) {
-		for k, want := range e.Args {
-			if got, ok := c.Args[k]; !ok || !reflect.DeepEqual(normalize(got), normalize(want)) {
-				fails = append(fails, fmt.Sprintf("%s.%s = %s, want %s", c.Name, k, jsonText(c.Args[k]), jsonText(want)))
+	// judge is the call expectation's failures on the calls of the tool: none when one of them
+	// meets it, else the last one's.
+	judge := func(cs []CallLog, name string) (bool, []string) {
+		var last []string
+		called := false
+		for i := len(cs) - 1; i >= 0; i-- {
+			if cs[i].Name != name {
+				continue
 			}
-		}
-		for k, re := range e.ArgsMatch {
-			v, ok := c.Args[k]
-			if !ok || !regexp.MustCompile(re).MatchString(valueText(v)) {
-				fails = append(fails, fmt.Sprintf("%s.%s = %s, want /%s/", c.Name, k, jsonText(v), re))
+			f := e.callFails(cs[i])
+			if len(f) == 0 {
+				return true, nil
 			}
-		}
-	}
-	find := func(cs []CallLog, name string) (CallLog, bool) {
-		for _, c := range cs {
-			if c.Name == name {
-				return c, true
+			if !called {
+				last = f
 			}
+			called = true
 		}
-		return CallLog{}, false
+		return called, last
 	}
 	if e.Tool != "" {
-		if c, ok := find(t.NodeCalls, e.Tool); ok {
-			checkArgs(c)
+		if ok, f := judge(t.NodeCalls, e.Tool); ok {
+			fails = append(fails, f...)
 		} else {
 			fails = append(fails, fmt.Sprintf("node tool %s not called (node: %v, server: %v)", e.Tool, names(t.NodeCalls), names(t.ServerCalls)))
 		}
 	}
 	if e.ServerTool != "" {
-		if c, ok := find(t.ServerCalls, e.ServerTool); ok {
+		if ok, f := judge(t.ServerCalls, e.ServerTool); ok {
 			if e.Tool == "" {
-				checkArgs(c)
+				fails = append(fails, f...)
 			}
 		} else {
 			fails = append(fails, fmt.Sprintf("server tool %s not called (server: %v)", e.ServerTool, names(t.ServerCalls)))
@@ -310,6 +317,60 @@ func (e Expect) Check(t TurnLog) []string {
 		fails = append(fails, fmt.Sprintf("took %.1fs, want ≤ %.1fs", t.Seconds, e.MaxSeconds))
 	}
 	return fails
+}
+
+// callFails is what of the args and result expectations a call misses.
+func (e Expect) callFails(c CallLog) []string {
+	var fails []string
+	for _, k := range sortedKeys(e.Args) {
+		want := e.Args[k]
+		if got, ok := c.Args[k]; !ok || !reflect.DeepEqual(normalize(got), normalize(want)) {
+			fails = append(fails, fmt.Sprintf("%s.%s = %s, want %s", c.Name, k, jsonText(c.Args[k]), jsonText(want)))
+		}
+	}
+	for _, k := range sortedKeys(e.ArgsMatch) {
+		re := e.ArgsMatch[k]
+		v, ok := c.Args[k]
+		if !ok || !regexp.MustCompile(re).MatchString(valueText(v)) {
+			fails = append(fails, fmt.Sprintf("%s.%s = %s, want /%s/", c.Name, k, jsonText(v), re))
+		}
+	}
+	result, _ := c.Result.(map[string]any)
+	for _, k := range sortedKeys(e.ResultMatch) {
+		re := e.ResultMatch[k]
+		v, ok := result[k]
+		if !ok || !regexp.MustCompile(re).MatchString(valueText(v)) {
+			fails = append(fails, fmt.Sprintf("%s result %s = %s, want /%s/ (result %s)", c.Name, k, jsonText(v), re, jsonText(c.Result)))
+		}
+	}
+	for _, k := range sortedKeys(e.NotResultMatch) {
+		re := e.NotResultMatch[k]
+		if v, ok := result[k]; ok && regexp.MustCompile(re).MatchString(valueText(v)) {
+			fails = append(fails, fmt.Sprintf("%s result %s = %s, matches /%s/", c.Name, k, jsonText(v), re))
+		}
+	}
+	return fails
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// mergedRegexps is the regexp maps under one key space ("args_match label", …), for validation.
+func mergedRegexps(argsMatch, resultMatch, notResultMatch map[string]string) map[string]string {
+	out := map[string]string{}
+	for name, m := range map[string]map[string]string{"args_match": argsMatch, "result_match": resultMatch,
+		"not_result_match": notResultMatch} {
+		for k, re := range m {
+			out[name+" "+k] = re
+		}
+	}
+	return out
 }
 
 // normalize round-trips a value through JSON so 12 and 12.0, int and float64, compare equal.
