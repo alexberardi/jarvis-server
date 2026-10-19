@@ -35,10 +35,12 @@ const (
 
 // Pointer is the virtual-pointer backend. The zero value is ready; fields are for tests.
 type Pointer struct {
-	Getenv  func(string) string          // os.Getenv when nil
-	Dial    func() (*wlwire.Conn, error) // wlwire.Dial when nil
-	Timeout time.Duration                // per round trip; 2 s when zero
-	Now     func() time.Time             // event timestamps; time.Now when nil
+	Getenv  func(string) string                        // os.Getenv when nil
+	Dial    func() (*wlwire.Conn, error)               // wlwire.Dial when nil
+	Timeout time.Duration                              // per round trip; 2 s when zero
+	Now     func() time.Time                           // event timestamps; time.Now when nil
+	Settle  time.Duration                              // DefaultSettle when zero; <0: none
+	Sleep   func(context.Context, time.Duration) error // a real timer when nil
 
 	mu sync.Mutex // serializes Send and Close; held across a call
 	s  *session   // the live connection and pointer; nil until the first Send
@@ -248,6 +250,15 @@ func (p *Pointer) connect(ctx context.Context) (*session, error) {
 		return fail(fmt.Errorf("creating the virtual pointer: %w", err))
 	}
 	s.reg = reg
+	if settle := cmp.Or(p.Settle, DefaultSettle); settle > 0 {
+		sleep := p.Sleep
+		if sleep == nil {
+			sleep = sleepCtx
+		}
+		if err := sleep(ctx, settle); err != nil {
+			return fail(err)
+		}
+	}
 	return s, nil
 }
 
@@ -366,4 +377,16 @@ func (p *Pointer) post(ctx context.Context, s *session, evs []Event) error {
 		}
 	}
 	return p.rt(ctx, c)
+}
+
+// sleepCtx waits d or until ctx ends.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

@@ -14,7 +14,10 @@
 // after that, so a pointer made per click would lose the click that races the client.
 package vptr
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Name is the backend's name in status and logs.
 const Name = "wlroots virtual-pointer"
@@ -26,6 +29,11 @@ const (
 	IfaceOutput        = "wl_output"
 	IfaceOutputManager = "zxdg_output_manager_v1"
 )
+
+// DefaultSettle is how long a new pointer gets before its first event: when it is the seat's
+// first pointer, clients bind their wl_pointer only once the seat says it has one, and an
+// event sent before that is lost (a click on a headless sway went missing without it).
+const DefaultSettle = 100 * time.Millisecond
 
 // Linux input event codes for the buttons (linux/input-event-codes.h).
 const (

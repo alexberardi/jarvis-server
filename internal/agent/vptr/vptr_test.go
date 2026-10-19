@@ -212,7 +212,7 @@ func join(s []string) string { return strings.Join(s, ", ") }
 
 func TestPointerMotionExtent(t *testing.T) {
 	f, dial := newFake(t, global{"wl_compositor", 6, Box{}}, seat, mgrV2, main, xdgMgr, left)
-	p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard}
+	p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard, Settle: -1}
 	if err := p.Send(context.Background(), Motion(100, 50), Motion(-1280, 1079)); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestPointerMotionExtent(t *testing.T) {
 // one joins it.
 func TestPointerFollowsOutputs(t *testing.T) {
 	f, dial := newFake(t, seat, mgrV2, xdgMgr, main, left)
-	p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard}
+	p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard, Settle: -1}
 	ctx := context.Background()
 	if err := p.Send(ctx, Motion(0, 0)); err != nil {
 		t.Fatal(err)
@@ -257,7 +257,7 @@ func TestPointerFollowsOutputs(t *testing.T) {
 
 func TestButtonPressRelease(t *testing.T) {
 	f, dial := newFake(t, seat, mgrV2, xdgMgr, main)
-	p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard}
+	p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard, Settle: -1}
 	ctx := context.Background()
 	if err := p.Send(ctx, Motion(10, 20), Press(BtnLeft), Release(BtnLeft)); err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestAxisFixed(t *testing.T) {
 		{mgrV2, "source 0, discrete 0 11520 3, discrete 1 -3840 -1, frame"},
 	} {
 		f, dial := newFake(t, seat, tc.mgr, xdgMgr, main)
-		p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard}
+		p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard, Settle: -1}
 		if err := p.Send(context.Background(), Wheel(-1, 3)); err != nil {
 			t.Fatal(err)
 		}
@@ -328,5 +328,27 @@ func TestAvailable(t *testing.T) {
 	never := func() (*wlwire.Conn, error) { t.Fatal("dialed"); return nil, nil }
 	if ok, _ := (&Pointer{Getenv: env(nil), Dial: never}).Available(ctx); ok {
 		t.Fatal("available without Wayland")
+	}
+}
+
+// A new pointer waits DefaultSettle before its first event (clients bind their wl_pointer only
+// once the seat has one); a live one doesn't wait again.
+func TestSettleOnCreate(t *testing.T) {
+	f, dial := newFake(t, seat, mgrV2, xdgMgr, main)
+	var slept []time.Duration
+	var eventsAtSleep int
+	p := &Pointer{Getenv: wlEnv, Dial: dial, Timeout: guard, Sleep: func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		eventsAtSleep = len(f.events())
+		return nil
+	}}
+	ctx := context.Background()
+	for range 2 {
+		if err := p.Send(ctx, Motion(1, 1), Press(BtnLeft), Release(BtnLeft)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(slept) != 1 || slept[0] != DefaultSettle || eventsAtSleep != 0 {
+		t.Fatalf("slept %v with %d events sent", slept, eventsAtSleep)
 	}
 }
