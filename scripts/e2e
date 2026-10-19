@@ -229,9 +229,10 @@ run_real_push() {
     # Demo mode hides notification icons; this lane wants the real status bar.
     "$ADB" -s "$SERIAL" shell am broadcast -a com.android.systemui.demo -e command exit >/dev/null
     reverse_sandbox
+    reverse_args
     install_app "$apk"
     "$mdir/e2emobile" realpush --out "$mdir" --serial "$SERIAL" --maestro "$maestro" --adb "$ADB" \
-      --login-flow "$login" -e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD"
+      --login-flow "$login" "${REVERSE_ARGS[@]}" -e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD"
   ) 2>&1 | tee "$OUT/mobile-push.log"
   rc=${PIPESTATUS[0]}
   set -e
@@ -334,6 +335,7 @@ run_mobile() {
     boot_emulator
     prep_emulator
     reverse_sandbox
+    reverse_args
     install_app "$apk"
 
     # The flows' environment: the contract in docs/decisions/2026-10-18-e2e-mobile-runner.md.
@@ -355,7 +357,7 @@ run_mobile() {
     env+=(-e "FAKE_RELAY=$SBX_FAKERELAY" -e "PUSH_TOKEN=$push_token" -e "CC_URL=$SBX_CC"
       -e "NODE_API_KEY=$SBX_NODE_ID:$SBX_NODE_KEY" -e "USER_ID=$SBX_USER_ID")
     "$mdir/e2emobile" run --flows "$mdir/src/.maestro" --out "$mdir" --serial "$SERIAL" \
-      --maestro "$maestro" --adb "$ADB" --coverage "$ROOT/e2e/coverage.json" --nav "$mdir/src/src/navigation" \
+      --maestro "$maestro" --adb "$ADB" "${REVERSE_ARGS[@]}" --coverage "$ROOT/e2e/coverage.json" --nav "$mdir/src/src/navigation" \
       ${FILTER:+--filter "$FILTER"} "${env[@]}"
   ) 2>&1 | tee "$OUT/mobile.log"
   rc=${PIPESTATUS[0]}
