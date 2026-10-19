@@ -192,6 +192,13 @@ func runApp(log *slog.Logger, ev AppEvents, withIsland bool, fn func(*Island) er
 	if err := listenAppEvents(ev); err != nil {
 		log.Warn("opening the app again won't reach this agent", "err", err)
 	}
+	if ev.StopHotkey != nil {
+		if err := registerStopHotkey(ev); err != nil {
+			log.Warn("the stop hotkey "+StopHotkeyLabel+" won't work", "err", err)
+		} else {
+			stopHotkeyOn.Store(true)
+		}
+	}
 
 	var i *Island
 	if withIsland {

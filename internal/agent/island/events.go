@@ -1,5 +1,7 @@
 package island
 
+import "sync/atomic"
+
 // AppEvents are what the OS asks of the running app while the island's event loop runs. On
 // macOS, once `run` has called NSApplication's finishLaunching, LaunchServices treats the agent
 // as "Jarvis Automation Agent.app" running: opening the app again (Finder, the Dock, Spotlight)
@@ -11,6 +13,41 @@ type AppEvents struct {
 	Reopen func()
 	// OpenURL: a URL of the app's scheme was opened (kAEGetURL); the receiver checks it.
 	OpenURL func(url string)
+	// StopHotkey: the user pressed ⌃⌥⎋ (StopHotkeyLabel), anywhere: stop what Jarvis is doing
+	// with the computer. macOS only for now.
+	StopHotkey func()
+}
+
+// StopHotkeyLabel is the stop hotkey as the tray's tooltip names it.
+const StopHotkeyLabel = "⌃⌥⎋"
+
+// stopHotkeyOn is set once the stop hotkey is registered.
+var stopHotkeyOn atomic.Bool
+
+// StopHotkey is StopHotkeyLabel once the stop hotkey works (registered with the OS), "" before
+// that or when it couldn't be (another app holds it, or not macOS).
+func StopHotkey() string {
+	if stopHotkeyOn.Load() {
+		return StopHotkeyLabel
+	}
+	return ""
+}
+
+// The stop hotkey as Carbon's RegisterEventHotKey takes it.
+const (
+	stopKeyCode   = 53              // kVK_Escape
+	stopModifiers = 0x1000 | 0x0800 // controlKey | optionKey
+)
+
+// hotkeySig is the signature of our hotkeys' EventHotKeyID.
+var hotkeySig = fourCC("jarv")
+
+// hotkey hands a press of the stop hotkey to StopHotkey, on a goroutine (the caller is the main
+// thread).
+func (ev AppEvents) hotkey() {
+	if ev.StopHotkey != nil {
+		go ev.StopHotkey()
+	}
 }
 
 // fourCC is a Mac four-character code ("aevt") as its 32-bit value.

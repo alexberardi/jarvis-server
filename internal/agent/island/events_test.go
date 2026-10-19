@@ -36,3 +36,31 @@ func TestAppEventsDispatch(t *testing.T) {
 		t.Fatal("reopen without a handler should still count as ours")
 	}
 }
+
+// TestStopHotkey: ⌃⌥⎋ is Escape with control and option, as Carbon has them, and pressing it
+// calls StopHotkey on a goroutine (never on the main thread); none set is fine.
+func TestStopHotkey(t *testing.T) {
+	if stopKeyCode != 53 || stopModifiers != 0x1000|0x0800 {
+		t.Fatalf("the stop hotkey is %d/%#x, want Escape (53) with control|option (0x1800)", stopKeyCode, stopModifiers)
+	}
+	if hotkeySig != 0x6a617276 { // "jarv"
+		t.Fatalf("hotkeySig = %#x", hotkeySig)
+	}
+	stopped := make(chan struct{})
+	AppEvents{StopHotkey: func() { close(stopped) }}.hotkey()
+	<-stopped
+	AppEvents{}.hotkey()
+}
+
+// TestStopHotkeyOnlyOnceRegistered: the tooltip names the stop hotkey only once it works.
+func TestStopHotkeyOnlyOnceRegistered(t *testing.T) {
+	defer stopHotkeyOn.Store(stopHotkeyOn.Load())
+	stopHotkeyOn.Store(false)
+	if got := StopHotkey(); got != "" {
+		t.Fatalf("unregistered stop hotkey is %q, want none", got)
+	}
+	stopHotkeyOn.Store(true)
+	if got := StopHotkey(); got != StopHotkeyLabel {
+		t.Fatalf("registered stop hotkey is %q, want %q", got, StopHotkeyLabel)
+	}
+}
