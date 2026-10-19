@@ -1,0 +1,14 @@
+{
+  "name": "replay_changed_param",
+  "about": "Replay a taught workflow (download the bank statement, demonstrated for 2026-09) with another month. Flipping it (piece 32) adds the demonstrate setup step.",
+  "phase": "teach",
+  "status": "pending",
+  "say": "Download my bank statement for August.",
+  "target": "browser",
+  "setup": {"login": ["bank"]},
+  "answers": [],
+  "checks": [
+    {"kind": "download", "site": "bank", "month": "2026-08"}
+  ],
+  "max_minutes": 10
+}

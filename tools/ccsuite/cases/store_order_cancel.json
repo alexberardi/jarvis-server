@@ -1,0 +1,15 @@
+{
+  "name": "store_order_cancel",
+  "about": "The same errand as store_order_approve, but the phone's confirmation is cancelled: nothing is ordered. Flipped by piece 14.",
+  "phase": "browser",
+  "status": "pending",
+  "say": "Order me the best-rated smart watch under $300 from the test store at {{sites}}/store/ and ship it to my saved address.",
+  "target": "browser",
+  "setup": {"login": ["store"]},
+  "answers": [{"when": "confirm", "tap": "cancel"}],
+  "checks": [
+    {"kind": "asked", "pattern": "(?i)pulse active 2"},
+    {"kind": "no_order"}
+  ],
+  "max_minutes": 15
+}
