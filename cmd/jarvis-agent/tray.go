@@ -10,6 +10,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/tray"
@@ -38,7 +39,7 @@ type trayIcon struct {
 	activity *computer.Activity
 	// computer is computer control's switch (the menu's "Computer control"); nil hides it.
 	computer *computer.Switch
-	// recorder records what the user does (the menu's "Watch me"); nil hides it.
+	// recorder records what the user does (the menu's "Record a macro…"); nil hides it.
 	recorder *computer.Recorder
 
 	t      atomic.Pointer[tray.Tray]
@@ -94,6 +95,7 @@ func (ic *trayIcon) state() tray.State {
 	}
 	k, _ := ic.activity.Status()
 	s.Activity = string(k)
+	s.StopHotkey = island.StopHotkey()
 	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
 	s.Record = ic.recorder != nil
 	return s
@@ -115,7 +117,7 @@ func (ic *trayIcon) stopTaskFromMenu() {
 	ic.activity.Stop()
 }
 
-// recordFromMenu is "Watch me" (start) and "Stop recording": a stopped trace goes to jarvisd.
+// recordFromMenu is "Record a macro…" (start) and "Stop recording": a stopped trace goes to jarvisd.
 func (ic *trayIcon) recordFromMenu(start bool) {
 	ic.log.Info("recording chosen in the menu", "start", start, "activity", ic.activity.String())
 	if ic.recorder != nil {

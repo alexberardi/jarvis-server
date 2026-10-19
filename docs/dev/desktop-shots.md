@@ -25,6 +25,7 @@ end (see `--help`):
 | `island__<state>__<theme>.png` | The island, found by diffing the top third of the screen, cropped. The states are `running` (the "Jarvis is running" pill, asked for over the control socket), `listening`, `thinking`, `speaking`, `follow_up`, `error`, and the computer-task indicators `controlling`, `paused` and `recording` (`island-demo --hold <state> --text <intent>`, a sample intent). |
 | `desktop-island__<theme>.png` | The whole output with the last state showing, for placement. |
 | `menu.txt` | The icon's StatusNotifierItem properties and its dbusmenu, read the way a tray host reads them (swaybar draws no menus). |
+| `menu-computer-on.txt` | The dbusmenu again with computer control turned on (the control socket's `computer-on`), then turned back off. |
 | `icon-pixmap.png` | The largest pixmap the icon offers (64x64). |
 | `agent-<theme>.log`, `sway-<theme>.log`, `enroll.log` | Logs. |
 

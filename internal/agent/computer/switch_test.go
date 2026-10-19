@@ -1,9 +1,12 @@
 package computer
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
 func TestSwitchOffRefusesEveryAction(t *testing.T) {
@@ -11,7 +14,7 @@ func TestSwitchOffRefusesEveryAction(t *testing.T) {
 	if s.On() {
 		t.Fatal("a new switch is on")
 	}
-	for _, what := range []string{TargetBrowser, TargetDesktop, Record} {
+	for _, what := range []string{TargetBrowser, TargetDesktop} {
 		err := s.Allow(what)
 		if !errors.Is(err, ErrOff) {
 			t.Fatalf("%s with the switch off: %v, want ErrOff", what, err)
@@ -23,7 +26,7 @@ func TestSwitchOffRefusesEveryAction(t *testing.T) {
 	if err := s.Set(true); err != nil {
 		t.Fatal(err)
 	}
-	for _, what := range []string{TargetBrowser, TargetDesktop, Record} {
+	for _, what := range []string{TargetBrowser, TargetDesktop} {
 		if err := s.Allow(what); err != nil {
 			t.Fatalf("%s with the switch on: %v", what, err)
 		}
@@ -83,5 +86,38 @@ func TestTurningOffStopsTheTask(t *testing.T) {
 	}
 	if !errors.Is(s.Allow(TargetBrowser), ErrOff) {
 		t.Fatal("the task's next action is allowed after off")
+	}
+}
+
+// computer_switch is jarvisd's "enable/disable computer control" by voice: the menu's own path
+// (Set: agent.json, the tray, the heartbeat), answered with the new state.
+func TestSwitchTool(t *testing.T) {
+	a := &Activity{}
+	s := NewSwitch(false, a)
+	var saved []bool
+	s.Persist = func(on bool) error { saved = append(saved, on); return nil }
+	tools := &SwitchTools{S: s}
+	if defs := tools.Available(context.Background()); len(defs) != 1 {
+		t.Fatalf("%d tools", len(defs))
+	}
+	out, ok := tools.Call(context.Background(), "computer_switch", map[string]any{"on": true}, node.Request{})
+	if !ok || out["success"] != true || out["computer_control"] != "on" || !s.On() {
+		t.Fatalf("on: %v", out)
+	}
+	stopped := 0
+	defer a.OnStop(func() { stopped++ })()
+	a.Set(Controlling, "Ordering the blue mug")
+	out, _ = tools.Call(context.Background(), "computer_switch", map[string]any{"on": false}, node.Request{})
+	if out["computer_control"] != "off" || s.On() || stopped != 1 {
+		t.Fatalf("off: %v, stopped %d", out, stopped)
+	}
+	if len(saved) != 2 {
+		t.Fatalf("saved %v", saved)
+	}
+	if out, _ := tools.Call(context.Background(), "computer_switch", map[string]any{}, node.Request{}); out["success"] != false {
+		t.Fatalf("no on: %v", out)
+	}
+	if _, ok := tools.Call(context.Background(), "computer_act", nil, node.Request{}); ok {
+		t.Fatal("handled another tool")
 	}
 }

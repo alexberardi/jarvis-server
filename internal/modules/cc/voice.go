@@ -59,8 +59,11 @@ func (m *Module) registerServerTools() {
 	m.tools.Register(&createWatchTool{m: m})
 	m.tools.Register(&listWatchesTool{m: m})
 	m.tools.Register(&cancelWatchTool{m: m})
-	m.tools.Register(&startRecordingTool{m: m}) // "Jarvis, watch me" (recording_tools.go)
+	m.tools.Register(&startRecordingTool{m: m}) // "record this macro" (recording_tools.go)
 	m.tools.Register(&stopRecordingTool{m: m})
+	m.tools.Register(&enableComputerControlTool{m: m}) // "enable computer control" (computer_voice.go)
+	m.tools.Register(&disableComputerControlTool{m: m})
+	m.tools.Register(&computerControlStatusTool{m: m})
 	if m.Recipes != nil {
 		m.tools.Register(&saveRecipeTool{m: m, imp: m.Recipes}) // chat photo → recipe (chat_image_actions.go)
 	}

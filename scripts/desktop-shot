@@ -26,7 +26,7 @@
 # status icon, cropped and enlarged 4x), island__<state>__T.png (the island, cropped),
 # desktop-island__T.png (the whole output with the last state up), agent-T.log, sway-T.log;
 # and once: menu.txt (the icon's properties and menu as a tray host reads them over D-Bus),
-# icon-pixmap.png (the largest pixmap offered). Exits 1 if the icon or a state never showed.
+# menu-computer-on.txt (the menu with computer control on), icon-pixmap.png (the largest pixmap offered). Exits 1 if the icon or a state never showed.
 #
 # Isolation: its own XDG_RUNTIME_DIR (a /tmp dir, so a fresh WAYLAND_DISPLAY), its own session
 # bus (dbus-run-session), its own HOME and XDG_CONFIG_HOME for the agent, `env -i` so nothing of
@@ -220,6 +220,15 @@ PY
   if [ "$THEME" = "$DS_FIRST_THEME" ]; then
     sleep 1 # the menu gains "Open Jarvis Automation" once discovery answers
     "$DS_HELPER" menu --icon "$out/icon-pixmap.png" >"$out/menu.txt" 2>&1 || log "menu dump failed (menu.txt)"
+    # The menu with computer control turned on (the control socket's computer-on, as the menu's
+    # toggle does), then off again: "Record a macro…" stays right below it either way.
+    if ctl computer-on; then
+      sleep 0.5
+      "$DS_HELPER" menu >"$out/menu-computer-on.txt" 2>&1 || log "menu dump failed (menu-computer-on.txt)"
+      ctl computer-off || log "control socket: computer-off failed"
+    else
+      log "control socket: computer-on failed"
+    fi
   fi
   shot "$base" # the new baseline: the bar with its icon, no island
 
@@ -348,4 +357,5 @@ done
 say "screenshots in $OUT:"
 ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' >&2
 [ -f "$OUT/menu.txt" ] && say "menu: $OUT/menu.txt"
+[ -f "$OUT/menu-computer-on.txt" ] && say "menu, computer control on: $OUT/menu-computer-on.txt"
 exit $rc

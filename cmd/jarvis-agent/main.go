@@ -630,12 +630,13 @@ func run(ctx context.Context, args []string) error {
 	}
 	defer closeTools()
 	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
-	// is uploaded once connected to jarvisd (liveCC).
+	// is uploaded once connected to jarvisd (liveCC). computer_switch is computer control's
+	// switch for jarvisd's voice tools (enable/disable_computer_control).
 	var liveCC atomic.Pointer[node.CC]
 	var recorder *computer.Recorder
 	if p.desktop {
-		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), computerSw, activity, tools, liveCC.Load, log)
-		tools = append(tools, &computer.RecordTools{R: recorder})
+		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, log)
+		tools = append(tools, &computer.RecordTools{R: recorder}, &computer.SwitchTools{S: computerSw})
 		recReady.Store(recorder)
 	}
 	go learnServer(ctx, c.ConfigURL, tf.origins, log)
@@ -779,7 +780,7 @@ func run(ctx context.Context, args []string) error {
 			return runNode(ctx)
 		}
 		// No island, but macOS's menu-bar icon still needs AppKit's loop on the main thread.
-		return island.RunLoop(ctx, log, appEvents(pill, log), func(loop bool) error {
+		return island.RunLoop(ctx, log, appEvents(pill, activity, log), func(loop bool) error {
 			ic.mainLoop = loop
 			defer ic.show(ctx)()
 			return runNode(ctx)
@@ -789,7 +790,7 @@ func run(ctx context.Context, args []string) error {
 	// other goroutines. Where it can't show one, it says why once and runs the agent as is.
 	// It runs with voice off too, for the "Jarvis is running" pill; it shows voice states and
 	// dictation's notes only while listening is on.
-	return island.RunWith(ctx, log, appEvents(pill, log), func(i *island.Island) error {
+	return island.RunWith(ctx, log, appEvents(pill, activity, log), func(i *island.Island) error {
 		if i == nil {
 			pill.Attach(nil)
 		} else {

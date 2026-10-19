@@ -30,8 +30,17 @@ const (
 	cgEventGap = 2 * time.Millisecond
 )
 
-// cgSource is the CGEventSourceRef every event is created with (0: the default source).
+// cgSource is the CGEventSourceRef every event is created with: a private source
+// (kCGEventSourceStatePrivate), so our events stay apart from the HID system state that tells
+// when the user last used the mouse or keyboard (NativeMonitor). 0 (the default source) if it
+// couldn't be created.
 var cgSource uintptr
+
+const (
+	cgStatePrivate   = -1         // kCGEventSourceStatePrivate
+	cgStateHIDSystem = 1          // kCGEventSourceStateHIDSystemState
+	cgAnyInputEvent  = ^uint32(0) // kCGAnyInputEventType
+)
 
 type cgPoint struct{ X, Y float64 }
 
@@ -47,6 +56,8 @@ var (
 	cgEventSetFlags                func(ev uintptr, flags uint64)
 	cgEventGetLocation             func(ev uintptr) cgPoint
 	cgEventPost                    func(tap uint32, ev uintptr)
+	cgEventSourceCreate            func(state int32) uintptr
+	cgSecondsSinceLastEvent        func(state int32, typ uint32) float64
 	cfRelease                      func(ref uintptr)
 )
 
@@ -70,7 +81,10 @@ func loadCG() error {
 		purego.RegisterLibFunc(&cgEventSetFlags, cg, "CGEventSetFlags")
 		purego.RegisterLibFunc(&cgEventGetLocation, cg, "CGEventGetLocation")
 		purego.RegisterLibFunc(&cgEventPost, cg, "CGEventPost")
+		purego.RegisterLibFunc(&cgEventSourceCreate, cg, "CGEventSourceCreate")
+		purego.RegisterLibFunc(&cgSecondsSinceLastEvent, cg, "CGEventSourceSecondsSinceLastEventType")
 		purego.RegisterLibFunc(&cfRelease, cf, "CFRelease")
+		cgSource = cgEventSourceCreate(cgStatePrivate) // kept for the process's life
 	})
 	return cgErr
 }

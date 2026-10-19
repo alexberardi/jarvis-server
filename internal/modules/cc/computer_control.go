@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 )
 
@@ -35,42 +34,16 @@ func (n *nodeRow) computerOn() bool {
 // computerControl lists the household's active computers by their switch.
 func (m *Module) computerControl(ctx context.Context, hh string) (computerControl, error) {
 	var out computerControl
-	if hh == "" {
-		return out, nil
-	}
-	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT `+nodeCols+` FROM cc_nodes WHERE household_id = ? AND is_active ORDER BY node_id`, hh)
+	all, err := m.householdComputers(ctx, hh)
 	if err != nil {
 		return out, err
 	}
-	var nodes []*nodeRow
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			rows.Close()
-			return out, err
-		}
-		if n.desktop() {
-			nodes = append(nodes, n)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return out, err
-	}
-	var names map[string]string
-	if len(nodes) > 0 {
-		names = m.nodeNames(ctx, nodes...)
-	}
-	for _, n := range nodes {
-		name := names[n.nodeID]
-		if name == n.nodeID {
-			name = ""
-		}
-		c := computerNode{id: n.nodeID, name: name}
-		if n.computerOn() {
-			out.on = append(out.on, c)
+	for _, c := range all {
+		n := computerNode{id: c.row.nodeID, name: c.name}
+		if c.row.computerOn() {
+			out.on = append(out.on, n)
 		} else {
-			out.off = append(out.off, c)
+			out.off = append(out.off, n)
 		}
 	}
 	return out, nil
@@ -103,17 +76,18 @@ func (c computerControl) offMessage() string {
 	return `Computer control is off. Turn it on with "Computer control" in the Jarvis Automation menu on ` + where + "."
 }
 
-// withoutComputerTools drops a node's computer-control tools (computeruse.IsInternalTool) and
-// their commands: offered only for a computer whose switch is on.
-func withoutComputerTools(tools, commands []*pyjson.Object) ([]*pyjson.Object, []*pyjson.Object) {
+// withoutComputerTools drops a node's tools and commands whose name drop reports: its
+// computer-control tools (computeruse.IsInternalTool), offered only for a computer whose switch is
+// on, or the switch and recorder tools (computeruse.IsServerOnlyTool), never offered.
+func withoutComputerTools(tools, commands []*pyjson.Object, drop func(string) bool) ([]*pyjson.Object, []*pyjson.Object) {
 	var keptTools, keptCmds []*pyjson.Object
 	for _, t := range tools {
-		if !computeruse.IsInternalTool(toolName(t)) {
+		if !drop(toolName(t)) {
 			keptTools = append(keptTools, t)
 		}
 	}
 	for _, c := range commands {
-		if !computeruse.IsInternalTool(toolName2(c)) {
+		if !drop(toolName2(c)) {
 			keptCmds = append(keptCmds, c)
 		}
 	}
