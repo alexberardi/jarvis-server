@@ -8,6 +8,7 @@ package notifications
 // cleanup job's sweep removes unclaimed uploads and blobs no row references any more.
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -122,6 +123,38 @@ func sniffMedia(b []byte) (string, bool) {
 	return "", false
 }
 
+// XLSXMime is an Excel workbook, which only jarvisd itself attaches (UploadServerAttachment).
+const XLSXMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+// isWorkbook is whether the upload of n bytes at key (head is its start) is an .xlsx: a zip
+// with a [Content_Types].xml and an xl/workbook.xml.
+func (m *Module) isWorkbook(ctx context.Context, key string, head []byte, n int64) bool {
+	if !bytes.HasPrefix(head, []byte("PK\x03\x04")) {
+		return false
+	}
+	b := head
+	if n > int64(len(head)) {
+		rc, _, err := m.deps.Blobs.Get(ctx, key)
+		if err != nil {
+			return false
+		}
+		defer rc.Close()
+		if b, err = io.ReadAll(io.LimitReader(rc, n)); err != nil {
+			return false
+		}
+	}
+	z, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		return false
+	}
+	var types, book bool
+	for _, f := range z.File {
+		types = types || f.Name == "[Content_Types].xml"
+		book = book || f.Name == "xl/workbook.xml"
+	}
+	return types && book
+}
+
 // prefixWriter keeps the first max bytes written to it.
 type prefixWriter struct {
 	b   []byte
@@ -146,6 +179,16 @@ func (m *Module) attachmentCaps(ctx context.Context) (perFile, perItem int64) {
 // application/octet-stream, must agree with it. The result's id goes in the item's
 // AttachmentIDs; an upload no item claims within an hour is swept.
 func (m *Module) UploadInboxAttachment(ctx context.Context, owner, householdID, contentType string, r io.Reader) (Attachment, error) {
+	return m.uploadAttachment(ctx, owner, householdID, contentType, r, false)
+}
+
+// UploadServerAttachment is UploadInboxAttachment for a file jarvisd made itself (an errand's
+// spreadsheet): an .xlsx workbook is allowed too. The upload routes never take one.
+func (m *Module) UploadServerAttachment(ctx context.Context, owner, householdID, contentType string, r io.Reader) (Attachment, error) {
+	return m.uploadAttachment(ctx, owner, householdID, contentType, r, true)
+}
+
+func (m *Module) uploadAttachment(ctx context.Context, owner, householdID, contentType string, r io.Reader, server bool) (Attachment, error) {
 	if m.deps.Blobs == nil {
 		return Attachment{}, attachmentErr(http.StatusServiceUnavailable, "Attachments are not available on this server")
 	}
@@ -167,6 +210,9 @@ func (m *Module) UploadInboxAttachment(ctx context.Context, owner, householdID, 
 		return Attachment{}, attachmentErr(http.StatusRequestEntityTooLarge, "Attachment too large (the limit is %d bytes)", maxFile)
 	}
 	typ, ok := sniffMedia(head.b)
+	if !ok && server && m.isWorkbook(ctx, tmp, head.b, n) {
+		typ, ok = XLSXMime, true
+	}
 	if !ok {
 		return Attachment{}, attachmentErr(http.StatusUnsupportedMediaType,
 			"Unsupported attachment type: send image/png, image/jpeg, image/webp, image/gif, video/mp4 or video/webm")

@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"archive/zip"
 	"bytes"
 	"database/sql"
 	"encoding/json"
@@ -296,5 +297,55 @@ func TestInboxAttachmentsDeletedWithItems(t *testing.T) {
 		"", nil, userH(t, 2, "hh1")...)
 	if rec.Code != 200 || !bytes.Equal(rec.Body.Bytes(), shared) {
 		t.Fatalf("shared blob: %d", rec.Code)
+	}
+}
+
+// zipBytes is a zip with the given entry names (empty files).
+func zipBytes(t *testing.T, names ...string) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	for _, n := range names {
+		if _, err := z.Create(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+// A spreadsheet jarvisd wrote (an errand's write_spreadsheet) is attached in process; the upload
+// routes stay media only, and a zip that isn't a workbook is refused either way.
+func TestInboxSpreadsheetAttachment(t *testing.T) {
+	e := setup(t)
+	xlsx := zipBytes(t, "[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/worksheets/sheet1.xml")
+	a, err := e.m.UploadServerAttachment(e.ctx, "server:errands", "hh1", XLSXMime, bytes.NewReader(xlsx))
+	if err != nil || a.Mime != XLSXMime || a.Size != int64(len(xlsx)) || a.Width != nil {
+		t.Fatalf("server upload: %+v %v", a, err)
+	}
+	it, err := e.m.CreateInboxItem(e.ctx, nil, NewInboxItem{HouseholdID: "hh1", Title: "t", Category: "c", SourceService: "x",
+		AttachmentOwner: "server:errands", AttachmentIDs: []string{a.ID}})
+	if err != nil || len(it.Attachments) != 1 || it.Attachments[0].Mime != XLSXMime {
+		t.Fatalf("claim: %+v %v", it, err)
+	}
+	rec := e.raw(t, "GET", "/api/v0/inbox/"+it.ID+"/attachments/"+a.ID, "", nil, userH(t, 1, "hh1")...)
+	if rec.Code != 200 || !bytes.Equal(rec.Body.Bytes(), xlsx) || rec.Header().Get("Content-Type") != XLSXMime {
+		t.Fatalf("download: %d %v", rec.Code, rec.Header())
+	}
+
+	if _, err := e.m.UploadServerAttachment(e.ctx, "server:errands", "hh1", "", bytes.NewReader(zipBytes(t, "a.txt"))); !IsAttachmentError(err) {
+		t.Fatalf("a plain zip: %v", err)
+	}
+	if _, err := e.m.UploadInboxAttachment(e.ctx, "node:kitchen", "hh1", "", bytes.NewReader(xlsx)); !IsAttachmentError(err) {
+		t.Fatalf("a node's spreadsheet: %v", err)
+	}
+	if rec := e.raw(t, "POST", "/api/v0/inbox/attachments", XLSXMime, xlsx, appH...); rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("an app's spreadsheet: %d %s", rec.Code, rec.Body)
+	}
+	// Media still goes in through the server upload.
+	if p, err := e.m.UploadServerAttachment(e.ctx, "server:errands", "hh1", "", bytes.NewReader(pngBytes(t, 1, 1))); err != nil || p.Mime != "image/png" {
+		t.Fatalf("png: %+v %v", p, err)
 	}
 }

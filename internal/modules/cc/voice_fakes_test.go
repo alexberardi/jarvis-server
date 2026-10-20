@@ -372,6 +372,10 @@ func (f *fakeNotifier) UploadInboxAttachment(_ context.Context, owner, household
 	return notifications.Attachment{ID: fmt.Sprintf("att-%d", len(f.uploads)), Mime: contentType, Size: int64(len(b))}, nil
 }
 
+func (f *fakeNotifier) UploadServerAttachment(ctx context.Context, owner, household, contentType string, r io.Reader) (notifications.Attachment, error) {
+	return f.UploadInboxAttachment(ctx, owner, household, contentType, r)
+}
+
 func (f *fakeNotifier) CreateInboxItem(_ context.Context, _ *sql.Tx, in notifications.NewInboxItem) (notifications.InboxItem, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
