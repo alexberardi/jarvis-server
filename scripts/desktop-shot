@@ -47,11 +47,14 @@ usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; }
 # --- deps: sway + swaybar (tray) from source, when the system has none ---------------------------
 # Arch: `sudo pacman -S sway` makes this unnecessary. The build needs only what Hyprland already
 # pulled in (wayland, wlroots' deps, pango, cairo, json-c, libsystemd), plus meson/ninja from a
-# private venv. Nothing is installed outside $CACHE.
+# private venv. Nothing is installed outside $CACHE. With Xwayland installed (Hyprland pulls it
+# in) the build has it too, which the computer suite's Linux cases need for their X11 notes app;
+# a cached build from before Xwayland was there is rebuilt.
+xwayland_wanted() { command -v Xwayland >/dev/null && [ ! -f "$CACHE/sway-$SWAY_VER/.xwayland" ]; }
 find_sway() {
   if command -v sway >/dev/null && command -v swaybar >/dev/null; then
     SWAY=$(command -v sway); SWAYBAR=$(command -v swaybar)
-  elif [ -x "$CACHE/sway-$SWAY_VER/bin/sway" ]; then
+  elif [ -x "$CACHE/sway-$SWAY_VER/bin/sway" ] && ! xwayland_wanted; then
     SWAY=$CACHE/sway-$SWAY_VER/bin/sway; SWAYBAR=$CACHE/sway-$SWAY_VER/bin/swaybar
   else
     return 1
@@ -80,13 +83,19 @@ build_sway() {
   (
     cd "$src/sway-$SWAY_VER"
     export PATH=$venv/bin:$PATH
+    xw=disabled
+    if command -v Xwayland >/dev/null; then
+      xw=enabled
+      [ -f "$prefix/.xwayland" ] || rm -rf build
+    fi
     [ -f build/build.ninja ] || { rm -rf build; meson setup build --prefix="$prefix" --buildtype=release \
-      -Ddefault_library=static -Dwlroots:xwayland=disabled -Dwlroots:examples=false \
+      -Ddefault_library=static -Dwlroots:xwayland=$xw -Dwlroots:examples=false \
       -Dman-pages=disabled -Dtray=enabled -Dgdk-pixbuf=enabled \
       -Dswaybar=true -Dswaynag=false -Ddefault-wallpaper=false \
       -Dbash-completions=false -Dzsh-completions=false -Dfish-completions=false; }
     ninja -C build
     ninja -C build install
+    if [ "$xw" = enabled ]; then touch "$prefix/.xwayland"; fi
   ) >"$CACHE/build.log" 2>&1 || die "sway build failed; see $CACHE/build.log (or: sudo pacman -S sway)"
   find_sway || die "built, but $prefix/bin/sway is missing; see $CACHE/build.log"
   say "sway: $SWAY"

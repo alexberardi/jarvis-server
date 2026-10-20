@@ -58,6 +58,10 @@ type Conn interface {
 	GetImage(win uint32, r image.Rectangle) (depth byte, data []byte, err error)
 	// Geometry is win's rectangle with its origin in root coordinates.
 	Geometry(win uint32) (x, y, w, h int, err error)
+	// Children is win's child windows, bottom to top (QueryTree).
+	Children(win uint32) ([]uint32, error)
+	// Viewable reports whether win is mapped and all its ancestors are.
+	Viewable(win uint32) (bool, error)
 	// Sync waits until the server has processed every request sent so far.
 	Sync() error
 	// IdleTime is how long since the last input event, ours (XTEST) included
