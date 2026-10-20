@@ -203,7 +203,7 @@ tool's invocation policy) not vendored. Line numbers are upstream's.
 ## What the remaining hits are
 
 `grep -rniE 'npm|npx|pnpm|yarn|bun|curl|wget|https?://|install|fetch|settings\.json|bash|upload|analytics|telemetry'` plus upstream's tool names (`impeccable <verb>`, `critique-storage`, `comp-spec`, `concept-seed`, `serve-question`)
-over the skills (licenses aside) finds only:
+over the skills (licenses aside) finds only these (line numbers of the vendored files):
 
 - `onboard.md` L225, `optimize.md` L227, `typeset.md` L14, `optimize.md` L66, `document.md` L5:
   the prohibitions this vendoring added ("do not add analytics", "do not upload pages to external
