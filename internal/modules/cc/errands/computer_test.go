@@ -799,6 +799,42 @@ func TestPlanErrandMergesComputerSteps(t *testing.T) {
 	}
 }
 
+// A computer task whose goal names two web addresses is one task per address: the house model
+// wrote one task for the bank's and the card's statements, and only the card's was downloaded.
+func TestPlanErrandSplitsComputerTaskPerAddress(t *testing.T) {
+	c := newComputerEnv(t)
+	bank, card := "http://127.0.0.1:42683/bank/", "http://127.0.0.1:42683/card/"
+	c.llm.say("plan", planJSON("Download bank and card statements, then build the spreadsheet",
+		step(policy.ToolComputerTask, "Download bank and card statements", `{"goal": "download the statements from my bank (`+bank+`) and my card (`+card+`)", "target": "browser", "site": "`+bank+`", "success": "both statements downloaded"}`),
+		step(cmdReplan, "Wait for files", `{"reason": "read the downloaded statements"}`)))
+	menu := []MenuEntry{computerEntry(), {Command: cmdReplan, Description: "checkpoint"}}
+	p, err := c.s.PlanErrand(context.Background(), "do my budget from "+bank+" and "+card, menu)
+	if err != nil || len(p.Steps) != 3 {
+		t.Fatalf("plan = %+v %v", p, err)
+	}
+	for i, site := range []string{bank, card} {
+		st := p.Steps[i]
+		goal := truthyStr(st.Args, "goal")
+		if st.Command != cmdComputer || truthyStr(st.Args, "site") != site || truthyStr(st.Args, "target") != "browser" ||
+			!strings.Contains(goal, "only the part at "+site) || truthyStr(st.Args, "success") != "" {
+			t.Fatalf("step %d = %+v", i, st)
+		}
+		if got := startURL(truthyStr(st.Args, "site"), goal); got != site {
+			t.Fatalf("step %d starts at %q", i, got)
+		}
+	}
+	if p.Steps[2].Command != cmdReplan {
+		t.Fatalf("steps %+v", p.Steps)
+	}
+
+	// One address, said twice or with a query, stays one task.
+	c.llm.say("plan", planJSON("Order a watch",
+		step(policy.ToolComputerTask, "Order it", `{"goal": "order the best watch at https://shop.example/watches (https://shop.example/watches/?q=watch)", "target": "browser", "site": "`+shopSite+`"}`)))
+	if p, err := c.s.PlanErrand(context.Background(), "order me the best watch", []MenuEntry{computerEntry()}); err != nil || len(p.Steps) != 1 {
+		t.Fatalf("plan = %+v %v", p, err)
+	}
+}
+
 // A computer task starts where the user said: the step's site when it is a web address, else
 // the first address on that site in the step's goal or the errand's.
 func TestStartURL(t *testing.T) {

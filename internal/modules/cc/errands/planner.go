@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -336,6 +337,55 @@ func mergeComputerSteps(steps []Step) []Step {
 	return out
 }
 
+// splitComputerSteps makes a computer task whose goal names more than one web address (another
+// host or path; a query or a trailing slash is the same one) one task per address, in order, each
+// starting at its own: the house model wrote one task for the bank's and the card's statements, and
+// only the card's was downloaded. Each goal is the whole request with the part it is for; the
+// success check, said for the whole request, is left to each task's own checks.
+func splitComputerSteps(steps []Step) []Step {
+	var out []Step
+	for _, st := range steps {
+		urls := webAddresses(truthyStr(st.Args, "goal"))
+		if st.Command != cmdComputer || len(urls) < 2 {
+			out = append(out, st)
+			continue
+		}
+		goal := strings.TrimRight(parse.PyStrip(truthyStr(st.Args, "goal")), ".")
+		for _, u := range urls {
+			args := pyjson.NewObject()
+			for _, k := range st.Args.Keys() {
+				if v, _ := st.Args.Get(k); k != "success" {
+					args.Set(k, v)
+				}
+			}
+			args.Set("site", u)
+			args.Set("goal", goal+". This task is only the part at "+u+": the other addresses are other tasks.")
+			out = append(out, Step{Command: st.Command, Args: args, Label: st.Label + " (" + strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://") + ")",
+				IsRisky: st.IsRisky, RunWithoutConfirmation: st.RunWithoutConfirmation, Approved: st.Approved})
+		}
+	}
+	return out
+}
+
+// webAddresses is the distinct web addresses in s, in order, by host and path.
+func webAddresses(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, w := range strings.Fields(s) {
+		w = strings.TrimLeft(strings.TrimRight(w, `.,;:!?)"'`), `("'`)
+		u, err := url.Parse(w)
+		if err != nil || !isWebURL(w) {
+			continue
+		}
+		key := strings.ToLower(u.Host) + strings.TrimSuffix(u.Path, "/")
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
 const closingDirective = "Think step by step: list each action the user wants and its order, then output " +
 	"ONLY the final JSON object and nothing after it."
 
@@ -627,7 +677,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(mergeComputerSteps(plan.Steps))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(plan.Steps)))
 	return plan, err
 }
 
