@@ -50,6 +50,12 @@ func (ve *voiceEnv) awaitWake(cid string) {
 
 func (ve *voiceEnv) transcribe(cid string, speakerAudio bool) map[string]any {
 	ve.t.Helper()
+	return ve.transcribeOn(ve.node, cid, speakerAudio)
+}
+
+// transcribeOn is transcribe as node n.
+func (ve *voiceEnv) transcribeOn(n testNode, cid string, speakerAudio bool) map[string]any {
+	ve.t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	fw, _ := mw.CreateFormFile("file", "cmd.wav")
@@ -63,7 +69,7 @@ func (ve *voiceEnv) transcribe(cid string, speakerAudio bool) map[string]any {
 	_ = mw.Close()
 	req, _ := http.NewRequest("POST", ve.srv.URL+"/api/v0/media/whisper/transcribe", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("X-API-Key", ve.node.id+":"+ve.node.key)
+	req.Header.Set("X-API-Key", n.id+":"+n.key)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		ve.t.Fatal(err)

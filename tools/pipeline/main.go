@@ -409,6 +409,9 @@ func printLog(w io.Writer, l ScenarioLog, verbose bool) {
 		} else {
 			fmt.Fprintf(w, "  ‹ %s  (%s, %.1fs, %d model calls)\n", t.Reply, t.Stop, t.Seconds, len(t.LLM))
 		}
+		if len(t.Others) > 0 {
+			fmt.Fprintf(w, "  nodes: %s\n", t.nodesSummary())
+		}
 		for _, f := range t.Failures {
 			fmt.Fprintf(w, "  ✗ %s\n", f)
 		}

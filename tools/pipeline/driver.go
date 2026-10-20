@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,6 +39,60 @@ type TurnLog struct {
 	LLM         []TapEntry `json:"llm,omitempty"`
 	Error       string     `json:"error,omitempty"`
 	Failures    []string   `json:"failures,omitempty"`
+	// With also_heard_by: Node is the node this log is of, StoodDown whether it stood down for
+	// another, and Others the other nodes' outcomes.
+	Node      string      `json:"node,omitempty"`
+	StoodDown bool        `json:"stood_down,omitempty"`
+	Others    []OtherNode `json:"others,omitempty"`
+}
+
+// OtherNode is another node's outcome of a turn several nodes heard.
+type OtherNode struct {
+	Node      string `json:"node"`
+	Reply     string `json:"reply,omitempty"`
+	Stop      string `json:"stop"`
+	StoodDown bool   `json:"stood_down,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// answers is how many nodes answered the turn: neither stood down nor failed.
+func (t TurnLog) answers() int {
+	n := 0
+	if !t.StoodDown && t.Error == "" {
+		n++
+	}
+	for _, o := range t.Others {
+		if !o.StoodDown && o.Error == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// nodesSummary is each node's outcome, for a failure message.
+func (t TurnLog) nodesSummary() string {
+	out := []string{fmt.Sprintf("%s: %s %q", nodeLabel(t.Node), outcome(t.StoodDown, t.Stop, t.Error), t.Reply)}
+	for _, o := range t.Others {
+		out = append(out, fmt.Sprintf("%s: %s %q", nodeLabel(o.Node), outcome(o.StoodDown, o.Stop, o.Error), o.Reply))
+	}
+	return strings.Join(out, "; ")
+}
+
+func nodeLabel(kind string) string {
+	if kind == "" {
+		return "kitchen"
+	}
+	return kind
+}
+
+func outcome(stoodDown bool, stop, err string) string {
+	switch {
+	case err != "":
+		return "error " + err
+	case stoodDown:
+		return "stood down"
+	}
+	return stop
 }
 
 // ScenarioLog is one run of a scenario.
@@ -67,6 +122,8 @@ type Driver struct {
 	// desktop caches it once made.
 	Desktop *DesktopSetup
 	desktop map[string]*Node // by owner ("" the primary, "removed")
+	// source is the turn_source this driver's turns send ("" none; "wake" for also_heard_by).
+	source string
 }
 
 // speakerID resolves a scenario's speaker.
@@ -143,12 +200,39 @@ func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
 			}()
 		}
 	}
+	tz := sc.Timezone
+	if tz == "" {
+		tz = "America/New_York"
+	}
+	// also_heard_by: a second node woke with this one; both start at once, as at a wake.
+	var also *Driver
+	alsoCID := newUUID()
+	if err == nil && sc.AlsoHeardBy != nil {
+		var n *Node
+		if n, err = d.nodeFor(ctx, *sc.AlsoHeardBy, ""); err == nil && n == d.Node {
+			err = errors.New("also_heard_by: the scenario's own node")
+		}
+		if err == nil {
+			as := *d
+			as.Node, as.source = n, "wake"
+			also = &as
+		}
+	}
 	if err == nil {
-		tz := sc.Timezone
-		if tz == "" {
-			tz = "America/New_York"
+		var alsoErr error
+		var wg sync.WaitGroup
+		if also != nil {
+			wg.Add(1)
+			go func() { defer wg.Done(); alsoErr = also.Node.Start(ctx, alsoCID, tz, tools, agents, vocab) }()
 		}
 		err = d.Node.Start(ctx, out.ConversationID, tz, tools, agents, vocab)
+		wg.Wait()
+		if alsoErr == nil && also != nil {
+			defer also.Node.End(context.WithoutCancel(ctx), alsoCID)
+		}
+		if err == nil && alsoErr != nil {
+			err = fmt.Errorf("also_heard_by: %w", alsoErr)
+		}
 	}
 	if err != nil {
 		out.Pass = false
@@ -163,7 +247,13 @@ func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
 	}
 	voiced := sc.Voice || d.Voice || d.VoiceName != ""
 	for _, turn := range sc.Turns {
-		tl := d.turn(ctx, out.ConversationID, nodeNames, turn.Say, voiced, voice, speaker, func(name string) any { return sc.resultFor(turn, name) })
+		result := func(name string) any { return sc.resultFor(turn, name) }
+		var tl TurnLog
+		if also != nil {
+			tl = d.heardByBoth(ctx, also, sc, out.ConversationID, alsoCID, nodeNames, turn.Say, voiced, voice, speaker, result)
+		} else {
+			tl = d.turn(ctx, out.ConversationID, nodeNames, turn.Say, voiced, voice, speaker, result)
+		}
 		tl.Failures = turn.Expect.Check(tl)
 		if len(tl.Failures) > 0 {
 			out.Pass = false
@@ -174,6 +264,34 @@ func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
 		}
 	}
 	return out
+}
+
+// heardByBoth plays one turn on this node and also's at once, each a wake turn of its own
+// conversation. The log is the node that answered (the first that didn't stand down); the
+// other is in Others.
+func (d *Driver) heardByBoth(ctx context.Context, also *Driver, sc Scenario, cid, alsoCID string, nodeNames []string, say string, voiced bool, voice string, speaker int64, result func(string) any) TurnLog {
+	me := *d
+	me.source = "wake"
+	logs := make([]TurnLog, 2)
+	var wg sync.WaitGroup
+	for i, run := range []struct {
+		d   *Driver
+		cid string
+	}{{&me, cid}, {also, alsoCID}} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			logs[i] = run.d.turn(ctx, run.cid, nodeNames, say, voiced, voice, speaker, result)
+		}()
+	}
+	wg.Wait()
+	logs[0].Node, logs[1].Node = sc.Node, *sc.AlsoHeardBy
+	main, other := logs[0], logs[1]
+	if main.StoodDown && !other.StoodDown {
+		main, other = other, main
+	}
+	main.Others = []OtherNode{{Node: other.Node, Reply: other.Reply, Stop: other.Stop, StoodDown: other.StoodDown, Error: other.Error}}
+	return main
 }
 
 // turn sends one utterance and answers tool calls until command-center is done. A voiced turn
@@ -201,7 +319,7 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		}
 		text = v.Heard
 	}
-	resp, err := d.Node.Command(ctx, cid, text, speaker)
+	resp, err := d.Node.command(ctx, cid, text, speaker, d.source)
 	for i := 0; err == nil && resp.StopReason == "tool_calls" && len(resp.ToolCalls) > 0; i++ {
 		if i == maxContinues {
 			err = fmt.Errorf("still calling tools after %d round-trips", maxContinues)
@@ -219,7 +337,7 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		tl.Error = err.Error()
 		return tl
 	}
-	tl.Stop = resp.StopReason
+	tl.Stop, tl.StoodDown = resp.StopReason, resp.StoodDown
 	switch {
 	case resp.StopReason == "error":
 		var cmds []struct {

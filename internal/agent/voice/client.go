@@ -86,6 +86,9 @@ type StreamRequest struct {
 	// LevelVsWake is a follow-up's speech level against the woken command's, in dB: the
 	// follow-up gate's level signal (uploads are normalised, so only the node knows).
 	LevelVsWake *float64 `json:"level_vs_wake_db,omitempty"`
+	// SpeechLevel is a wake turn's speech level in dBFS: with WakeConfidence, how
+	// command-center picks the node that answers when several heard one wake.
+	SpeechLevel *float64 `json:"speech_level_db,omitempty"`
 }
 
 // Reply is either streamed speech (200) or a control response (202).
@@ -107,6 +110,8 @@ type Control struct {
 	// KeepListening comes with a follow-up command-center's gate rejected (not_for_me): the
 	// window stays open. Absent (false) from servers without the gate: not_for_me closes it.
 	KeepListening bool `json:"keep_listening"`
+	// StoodDown comes with not_for_me when another node of the household answers this wake.
+	StoodDown bool `json:"stood_down"`
 	// Commands carries a processing error on the blocking routes (stop_reason null on
 	// /continue, "complete" with no message on /voice/command).
 	Commands []struct {
