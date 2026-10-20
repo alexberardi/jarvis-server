@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,13 +94,38 @@ func TestHeartbeatReportsWebsiteAccess(t *testing.T) {
 	send(map[string]any{"type": "host", "origin": "chrome-extension://" + browser.ChromeDevExtensionID + "/"})
 	send(map[string]any{"type": "hello", "protocol": browser.Protocol, "browser": "Firefox", "website_access": false})
 	wait(woke)
-	if c := caps(); c["browser_extension"] != extConnected || c["browser_website_access"] != "off" {
-		t.Fatalf("connected, access off: %v", c)
+	if c := caps(); c["browser_extension"] != extConnected || c["browser_website_access"] != "off" || c["browser_website_access_off_in"] != "Firefox" {
+		t.Fatalf("connected, access off in Firefox: %v", c)
 	}
 	woke = changed()
 	send(map[string]any{"type": "event", "event": "access", "website_access": true})
 	wait(woke)
 	if c := caps(); c["browser_website_access"] != "on" {
 		t.Fatalf("access turned on: %v", c)
+	} else if _, ok := c["browser_website_access_off_in"]; ok {
+		t.Fatalf("access on, still names a browser: %v", c)
+	}
+}
+
+func TestAccessOffIn(t *testing.T) {
+	off, on := false, true
+	b := func(name string, a *bool) browser.BrowserInfo {
+		return browser.BrowserInfo{Browser: name, WebsiteAccess: a}
+	}
+	for _, c := range []struct {
+		name string
+		in   []browser.BrowserInfo
+		want string
+	}{
+		{"none", nil, ""},
+		{"on or unknown", []browser.BrowserInfo{b("Firefox", &on), b("Google Chrome", nil)}, ""},
+		{"one off", []browser.BrowserInfo{b("Firefox", &off), b("Google Chrome", &on)}, "Firefox"},
+		{"two off, one name twice", []browser.BrowserInfo{b("Firefox", &off), b("Brave", &off), b("Firefox", &off)}, "Firefox, Brave"},
+		{"no name", []browser.BrowserInfo{b("", &off)}, "unknown"},
+		{"too long for a capability", []browser.BrowserInfo{b(strings.Repeat("x", 40), &off), b(strings.Repeat("y", 40), &off)}, ""},
+	} {
+		if got := accessOffIn(c.in); got != c.want {
+			t.Errorf("%s: accessOffIn = %q, want %q", c.name, got, c.want)
+		}
 	}
 }

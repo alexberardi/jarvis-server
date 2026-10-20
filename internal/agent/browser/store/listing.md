@@ -12,6 +12,8 @@ Everything here was checked against the extension's code (`../extension/`) at ve
 0.3.1 added `screenshot` of a task window and `download`, with the `downloads` permission;
 0.3.2 shows website access in the popup, with a button that asks for it, and tells the agent
 whether it has it: no new permission, and nothing more is read).
+The full description's "AFTER INSTALLING" section is the admin Add-ons page's wording too
+(`web/admin/src/lib/addons.ts`, `WEBSITE_ACCESS`); a test on each side keeps them the same.
 If the extension gains a permission or reads something new, update the privacy answers below
 and the privacy policy's "Browser extension and desktop agent" section (jarvis-docs) to match.
 
@@ -65,6 +67,12 @@ This extension is one part of Jarvis and does nothing on its own:
 Both are free and open source: https://github.com/alexberardi/jarvis-server
 
 Without the agent, the extension stays idle: it has no buttons or pages of its own, and it quietly waits for the agent to appear.
+
+AFTER INSTALLING: TURN ON WEBSITE ACCESS
+Your browser may add the extension with website access off. Without it, macro recordings capture only page loads and Jarvis can't act on pages.
+• Firefox: open about:addons, click Jarvis Browser Control, open Permissions and turn on "Access your data for all websites".
+• Chrome, Edge, Brave and other Chromium browsers: open Extensions, click Details on Jarvis Browser Control and set Site access to "On all sites".
+Then reload the tabs you want Jarvis to use. More: https://docs.jarvisautomation.dev/clients/desktop-agent/#turn-on-website-access
 
 PRIVATE BY DESIGN
 • The extension talks only to the Jarvis agent on this computer, through the browser's native-messaging channel. It has no network code of its own.

@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -67,7 +68,8 @@ const (
 
 // heartbeatCaps reports the browser extension's state, and with a browser connected whose
 // extension says, browser_website_access "on" or "off" (off while any has it off: pages can't be
-// read or acted on there); it wakes a heartbeat when these change;
+// read or acted on there) and, when off, browser_website_access_off_in naming those browsers (for
+// the admin's per-browser step); it wakes a heartbeat when these change;
 // with sw, also computer control's switch as computer_control "on" or "off" (its changes wake
 // a heartbeat through Runner.BeatNow).
 func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[string]any, changed func() <-chan struct{}) {
@@ -90,12 +92,42 @@ func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[strin
 			if a := hub.WebsiteAccess(); a != nil {
 				out["browser_website_access"] = map[bool]string{true: "on", false: "off"}[*a]
 			}
+			if names := accessOffIn(hub.Browsers()); names != "" {
+				out["browser_website_access_off_in"] = names
+			}
 		}
 		if sw != nil {
 			out["computer_control"] = map[bool]string{true: "on", false: "off"}[sw.On()]
 		}
 		return out
 	}, hubChanged(hub)
+}
+
+// accessOffInMax is cc's limit on a capability's string (cleanCaps' maxCapLen).
+const accessOffInMax = 64
+
+// accessOffIn names the connected browsers whose extension says website access is off, once
+// each ("Firefox", "Firefox, Brave"; "unknown" for one that gave no name); "" when none is off,
+// or when the names don't fit a capability (the admin then shows every browser's step).
+func accessOffIn(bs []browser.BrowserInfo) string {
+	var names []string
+	for _, b := range bs {
+		if b.WebsiteAccess == nil || *b.WebsiteAccess {
+			continue
+		}
+		name := b.Browser
+		if name == "" {
+			name = "unknown"
+		}
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	out := strings.Join(names, ", ")
+	if len(out) > accessOffInMax {
+		return ""
+	}
+	return out
 }
 
 // hubChanged is hub's Changed, nil without a hub.

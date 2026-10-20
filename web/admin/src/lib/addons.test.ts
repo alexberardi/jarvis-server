@@ -1,6 +1,9 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { NodeLiveness } from '@/api/nodes'
-import { canSignOut, detectOS, extensionLabel, yourDevices } from './addons'
+import { canSignOut, detectOS, extensionLabel, WEBSITE_ACCESS, websiteAccessFamilies, yourDevices } from './addons'
 
 const n = (node_id: string, hh: string | null, online: boolean, node_kind: string | null = 'desktop', room = node_id): NodeLiveness => ({
   node_id,
@@ -58,5 +61,29 @@ describe('canSignOut (decision 2026-10-14)', () => {
     expect(canSignOut(n(null), 7, [{ id: 'h1', role: 'admin' }])).toBe(true)
     expect(canSignOut(n(null), 7, [{ id: 'h1', role: 'owner' }])).toBe(true)
     expect(canSignOut(n(7, 'h2'), 7, [{ id: 'h1', role: 'admin' }])).toBe(false)
+  })
+})
+
+describe('website access wording', () => {
+  // One wording for the Add-ons page and the store listing (both stores paste the same Full
+  // description). Outside the SPA's root, so read from disk; vitest runs in web/admin.
+  const listing = readFileSync(path.resolve(process.cwd(), '../../internal/agent/browser/store/listing.md'), 'utf8')
+  const description = listing.split('## Full description (both stores)')[1].split('```')[1]
+
+  it('is the store listing\'s, word for word', () => {
+    for (const s of [WEBSITE_ACCESS.why, WEBSITE_ACCESS.firefox, WEBSITE_ACCESS.chrome, WEBSITE_ACCESS.reload, WEBSITE_ACCESS.docs]) {
+      expect(description).toContain(s)
+    }
+  })
+
+  it('picks the step for the browser that has it off, both when it cannot tell', () => {
+    expect(websiteAccessFamilies('Firefox')).toEqual(['firefox'])
+    expect(websiteAccessFamilies('LibreWolf')).toEqual(['firefox'])
+    expect(websiteAccessFamilies('Google Chrome')).toEqual(['chrome'])
+    expect(websiteAccessFamilies('Microsoft Edge')).toEqual(['chrome'])
+    expect(websiteAccessFamilies('Brave, Firefox')).toEqual(['firefox', 'chrome'])
+    expect(websiteAccessFamilies('unknown')).toEqual(['firefox', 'chrome'])
+    expect(websiteAccessFamilies(undefined)).toEqual(['firefox', 'chrome'])
+    expect(websiteAccessFamilies('')).toEqual(['firefox', 'chrome'])
   })
 })
