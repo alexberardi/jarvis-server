@@ -2,11 +2,9 @@ package voice
 
 import (
 	"log/slog"
-	"slices"
-	"strings"
-	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // Computer is what Jarvis is doing with this computer (*computer.Activity): while it controls
@@ -41,15 +39,47 @@ func (p *Pipeline) holdComputer(log *slog.Logger) *held {
 	return &held{kind: k, text: text}
 }
 
-// stopIfAsked ends the held task when the woken command is a stop phrase. The turn still goes
-// to the server, so cc records it.
-func (p *Pipeline) stopIfAsked(s *session, transcript string) {
-	if s.held == nil || !IsStopPhrase(transcript) {
-		return
+// ComputerActivity is what a turn tells the server Jarvis is doing with this computer
+// (computer_activity, #288): command-center steers a stop phrase to stop_recording, never drops
+// it as not for it, and states in the prompt that a recording is running.
+type ComputerActivity struct {
+	Kind string `json:"kind"`           // "recording", "controlling" or "paused"
+	Task string `json:"task,omitempty"` // its text ("Watching what you do", "Ordering the blue mug")
+	// Stopped: this command was a stop phrase and the agent already stopped the task here.
+	Stopped bool `json:"stopped,omitempty"`
+}
+
+// computerTurn is a command's computer_activity (nil: the computer is idle). A stop phrase ends
+// the task locally, at once, whether the wake word held it or it started during this
+// conversation (a recording "record a macro" started); the turn still goes to the server, so
+// cc records it and stop_recording saves the recording. A follow-up (followUp) stops only a
+// recording: a control task the wake word held stays held through the follow-ups, where "cancel
+// that" or "stop" answers the conversation, not the task.
+func (p *Pipeline) computerTurn(s *session, transcript string, followUp bool) *ComputerActivity {
+	if p.Computer == nil {
+		return nil
 	}
-	s.held.stopped = true
-	p.Computer.Stop()
-	s.log.Info("computer: stopped by voice", "task", s.held.text, "transcript", transcript)
+	k, text := p.Computer.Status()
+	if h := s.held; h != nil && !h.stopped && k == computer.Paused && text == h.text {
+		k = h.kind // held for this turn: report what it was
+	}
+	if k != computer.Controlling && k != computer.Recording && k != computer.Paused {
+		return nil
+	}
+	a := &ComputerActivity{Kind: string(k), Task: text}
+	stop := computeruse.IsStopPhrase // a recording also ends on its own words ("I'm done")
+	if k == computer.Recording {
+		stop = computeruse.IsRecordingStopPhrase
+	}
+	if (!followUp || k == computer.Recording) && stop(transcript) {
+		if s.held != nil {
+			s.held.stopped = true
+		}
+		p.Computer.Stop()
+		a.Stopped = true
+		s.log.Info("computer: stopped by voice", "kind", k, "task", text, "transcript", transcript)
+	}
+	return a
 }
 
 // releaseComputer resumes the held task after a turn that did not stop it, unless something
@@ -64,37 +94,4 @@ func (p *Pipeline) releaseComputer(s *session) {
 	}
 	p.Computer.Set(h.kind, h.text)
 	s.log.Info("computer: resumed after the turn", "kind", h.kind, "task", h.text)
-}
-
-// stopPhrases are whole commands that end a computer task. The whole utterance must be one
-// (after the fillers): "don't stop", "stop the music" or "wait" are not.
-var stopPhrases = []string{
-	"stop", "stop it", "stop that", "stop stop", "stop everything", "stop the task",
-	"stop what you're doing", "cancel", "cancel it", "cancel that", "cancel the task",
-	"that's enough", "thats enough", "enough", "abort", "quit", "never mind", "nevermind",
-}
-
-// stopFillers are dropped from either end of the command before matching.
-var stopFillers = []string{"hey", "ok", "okay", "jarvis", "please", "now", "just"}
-
-// IsStopPhrase reports whether a voice command means "stop what you're doing on the computer"
-// ("Stop.", "Jarvis, stop it", "That's enough", "Never mind"), with dictate.ClassifyAnswer's
-// normalisation (lowercase, letters, digits and apostrophes).
-func IsStopPhrase(s string) bool {
-	var b strings.Builder
-	for _, r := range strings.ToLower(strings.ReplaceAll(s, "’", "'")) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune(' ')
-		}
-	}
-	words := strings.Fields(b.String())
-	for len(words) > 0 && slices.Contains(stopFillers, words[0]) {
-		words = words[1:]
-	}
-	for len(words) > 0 && slices.Contains(stopFillers, words[len(words)-1]) {
-		words = words[:len(words)-1]
-	}
-	return slices.Contains(stopPhrases, strings.Join(words, " "))
 }

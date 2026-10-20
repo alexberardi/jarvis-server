@@ -86,6 +86,8 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 	case !ran && conv.serverNames["recall"] && countNags(msgs, nagRecallFirst) < 1 &&
 		tf.AsksOwnFact(utterance) && tf.DeniesStoredFact(reply):
 		return recallFirstRetry
+	case recordingClaimNag(conv, reply, msgs) != "":
+		return notStoppedRetry
 	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool):
 		if words := tf.TypeAfterOpenWords(utterance); words != "" {
 			return fmt.Sprintf(unfinishedTypeFormat, words)
@@ -114,5 +116,5 @@ func calledThisTurn(msgs []chatMsg, name string) bool {
 // isFollowThroughNag reports one of this file's nudges (scrubbed like the other nags).
 func isFollowThroughNag(m chatMsg) bool {
 	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved) ||
-		isNag(m, nagNotCancelled)
+		isNag(m, nagNotCancelled) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped)
 }

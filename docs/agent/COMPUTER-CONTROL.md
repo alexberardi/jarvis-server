@@ -130,6 +130,18 @@ password the model can see.
   pauses the task; ⌃⌥⎋ (Carbon hotkey, named in the tray tooltip) stops it. On Linux: idle-notify
   (wlroots) or the X server's idle time, and Ctrl+Alt+Esc (X11 grab, GlobalShortcuts portal, or a
   Hyprland bind); DESIGN.md §17.
+- **Voice stop (#288):** the agent stops the computer itself, at once, when the whole command is a
+  stop phrase: `computeruse.IsStopPhrase` ("stop", "cancel", …) for a control task, in a wake
+  turn; `computeruse.IsRecordingStopPhrase` (that list plus "stop recording", "I'm done",
+  "that's it", "done", …) for a recording, in a wake turn or a follow-up. A follow-up never stops
+  a control task: it stays held through the follow-ups, where "cancel that" answers the
+  conversation. Either way the turn still goes to jarvisd with `computer_activity`
+  (`{kind, task, stopped}`, sent with every voice turn). While it says recording, the prompt says
+  so, a recording stop phrase is never dropped as not for Jarvis (the follow-up gate is skipped
+  for it only while recording) and ends with `stop_recording` (jarvisd calls it if the model
+  doesn't), and no reply may claim the recording stopped unless it did. The island shows the task
+  as a coloured dot beside any voice state
+  ([decision](../decisions/2026-10-19-voice-stop-recording.md)).
 - **Audit:** every action (intent, target, result) in `cc_autonomy_events`; screenshots kept
   locally with a retention setting.
 

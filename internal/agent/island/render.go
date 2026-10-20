@@ -37,6 +37,8 @@ const (
 	barMinH = 4
 	barMaxH = 24
 	barsEnd = 18 // the last bar's right edge, from the pill's right edge
+	badgeX  = 9  // the activity badge's centre, from the pill's right edge (after the bars)
+	badgeR  = 3
 
 	// A note (what is being typed, a question waiting for a yes): a wider pill with text.
 	noteMaxW  = 344
@@ -68,6 +70,10 @@ type Frame struct {
 	Ring   float64        // follow-up: the fraction of the window left (1 → 0)
 	Glow   float64        // 0..1 halo around the orb (loudness)
 	Text   string         // Note and the activity states: the text shown
+	// Badge is the activity going on under a voice state (Controlling, Paused, Recording; Hidden
+	// for none): a dot in its colour at the pill's right end, so a recording that starts
+	// during a turn shows at once (#288).
+	Badge State
 }
 
 // Render draws f into dst (CanvasW·scale × CanvasH·scale), clearing it first.
@@ -137,6 +143,9 @@ func Render(dst *image.RGBA, f Frame, scale float64) {
 		h := barMinH + (barMaxH-barMinH)*clamp01(b)
 		bx := left + float64(i)*(barW+barGap)
 		c.fill(func(z *rast) { z.roundRect(bx, cy-h/2, barW, h, barW/2) }, accent, barsA)
+	}
+	if f.Badge.activity() {
+		c.fill(func(z *rast) { z.circle(x0+pillW-badgeX, cy, badgeR) }, accentFor(f.Badge), 1)
 	}
 }
 
