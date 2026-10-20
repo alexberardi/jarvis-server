@@ -90,11 +90,7 @@ export default function InboxPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader
-        title="Inbox"
-        description="What Jarvis sends back: research results, questions that need your answer, and notices."
-        actions={actions}
-      />
+      <PageHeader title="Inbox" actions={actions} />
 
       <Card flush className="overflow-hidden">
         {list.isError ? (

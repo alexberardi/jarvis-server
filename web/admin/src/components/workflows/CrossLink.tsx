@@ -6,7 +6,7 @@ export default function CrossLink({ to, icon, children }: { to: string; icon: Re
   return (
     <Link
       to={to}
-      className="inline-flex h-8 items-center gap-1.5 rounded-control text-small font-medium text-primary underline-offset-4 hover:underline"
+      className="inline-flex h-10 items-center gap-1.5 rounded-control text-small md:h-8 font-medium text-primary underline-offset-4 hover:underline"
     >
       {icon}
       {children}
