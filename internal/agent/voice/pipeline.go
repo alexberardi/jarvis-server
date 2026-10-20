@@ -515,7 +515,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		ex.Outcome = OutcomeNonSpeech
 		return "", true
 	}
-	activity := p.computerTurn(s, tr.Text) // a stop phrase stops it locally, at once; the server still hears it
+	activity := p.computerTurn(s, tr.Text, false) // a stop phrase stops it locally, at once; the server still hears it
 
 	// Row 11: join the warmup (bounded), then the streaming turn.
 	select {

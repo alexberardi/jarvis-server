@@ -52,8 +52,10 @@ type ComputerActivity struct {
 // computerTurn is a command's computer_activity (nil: the computer is idle). A stop phrase ends
 // the task locally, at once, whether the wake word held it or it started during this
 // conversation (a recording "record a macro" started); the turn still goes to the server, so
-// cc records it and stop_recording saves the recording.
-func (p *Pipeline) computerTurn(s *session, transcript string) *ComputerActivity {
+// cc records it and stop_recording saves the recording. A follow-up (followUp) stops only a
+// recording: a control task the wake word held stays held through the follow-ups, where "cancel
+// that" or "stop" answers the conversation, not the task.
+func (p *Pipeline) computerTurn(s *session, transcript string, followUp bool) *ComputerActivity {
 	if p.Computer == nil {
 		return nil
 	}
@@ -69,7 +71,7 @@ func (p *Pipeline) computerTurn(s *session, transcript string) *ComputerActivity
 	if k == computer.Recording {
 		stop = computeruse.IsRecordingStopPhrase
 	}
-	if stop(transcript) {
+	if (!followUp || k == computer.Recording) && stop(transcript) {
 		if s.held != nil {
 			s.held.stopped = true
 		}

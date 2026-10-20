@@ -142,7 +142,9 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	}
 
 	conv.computer = in.Computer
-	stopAsked := in.Computer.stopAsked(in.VoiceCommand) // never dropped as not for Jarvis (#288)
+	// A stop phrase while a task runs is never dropped as not for Jarvis (#288). In a follow-up
+	// only a recording's: a follow-up "cancel that" during a control task is about the exchange.
+	stopAsked := in.Computer.stopAsked(in.VoiceCommand) && (in.Source != "follow_up" || in.Computer.recording())
 
 	var st turnState
 	if m.resolveWakeVerified(ctx, conv, in, &st) {

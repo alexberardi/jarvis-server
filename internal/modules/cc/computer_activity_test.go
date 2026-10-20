@@ -8,6 +8,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 )
 
 // #288: voice couldn't stop a recording. The agent now sends what Jarvis is doing with its
@@ -257,4 +258,48 @@ func lastIsNagIn(req map[string]any, tag string) bool {
 	last := msgs[len(msgs)-1]
 	s, _ := last["content"].(string)
 	return last["role"] == "system" && strings.HasPrefix(s, tag)
+}
+
+// The follow-up gate drops a different, quiet voice before the model. While recording, "I'm
+// done." skips it (a weaker voice is still the user ending their recording); any other
+// follow-up with the same evidence is dropped as ever, and so is a follow-up "Cancel that."
+// while Jarvis controls the computer (a follow-up never stops a control task).
+func TestStopPhraseWhileRecordingSkipsTheFollowUpGate(t *testing.T) {
+	controlling := map[string]any{"kind": "controlling", "task": "Ordering the blue mug"}
+	for _, tc := range []struct {
+		name, said string
+		activity   map[string]any
+		stop       bool
+	}{
+		{"recording, I'm done", "I'm done.", recordingNow, true},
+		{"recording, other", "and the score is now three to one", recordingNow, false},
+		{"controlling, cancel that", "Cancel that.", controlling, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ve, agent := recordingConv(t)
+			ve.m.recordingNamed.Store(ve.node.id, namedRecording{id: "rec_00aa11bb22cc33dd", task: "test2"})
+			ve.stt.voices = []stt.Voice{voiceAt(1, 0)}
+			ve.transcribe("c1", true)
+			ve.eng.say("I'm watching. Say I'm done when you're finished.")
+			ve.turn("/api/v0/voice/command", "c1", "record a macro called test2", map[string]any{"turn_source": "wake",
+				"wake_confidence": 0.9, "computer_activity": recordingNow}).want(200)
+			calls := len(ve.eng.requests())
+
+			ve.stt.voices = []stt.Voice{voiceAt(0, 1)} // a different voice, and quiet: the gate rejects
+			ve.transcribe("c1", true)
+			ve.eng.push(nativeCall("call_s1", toolStopRecording, `{}`))
+			ve.eng.say("Saved test2.")
+			b := followUp(ve, tc.said, map[string]any{"level_vs_wake_db": -14.5, "computer_activity": tc.activity})
+			stopped := slices.Contains(agent.calls, ve.node.id+" "+computeruse.ToolRecordStop)
+			if !tc.stop {
+				if b["stop_reason"] != "not_for_me" || stopped || len(ve.eng.requests()) != calls {
+					t.Fatalf("an ordinary follow-up passed the gate: body %v, agent calls %v", b, agent.calls)
+				}
+				return
+			}
+			if b["stop_reason"] == "not_for_me" || !stopped {
+				t.Fatalf("the gate dropped the stop: body %v, agent calls %v", b, agent.calls)
+			}
+		})
+	}
 }

@@ -250,3 +250,33 @@ func TestFollowUpStopsARecordingTheTurnStarted(t *testing.T) {
 		})
 	}
 }
+
+// A control task the wake word held stays held through the follow-ups: a follow-up "Cancel
+// that." is about the conversation (the timer just set), never the task, which resumes after
+// the session. Only a recording ends on a follow-up (#288).
+func TestFollowUpNeverStopsAControlTask(t *testing.T) {
+	for _, said := range []string{"Cancel that.", "Never mind.", "Stop."} {
+		t.Run(said, func(t *testing.T) {
+			srv := newServer()
+			srv.text, srv.texts, srv.speakPCM = "Set a timer for ten minutes.", []string{said}, pcmOf(50)
+			c := &fakeComputer{srv: srv}
+			c.Activity.Set(computer.Controlling, "Ordering the blue mug")
+			srv.followUp = func(StreamRequest) (*Control, error) { return complete("Okay."), nil }
+			mic := oneWake()
+			r := newRig(t, mic, srv)
+			r.p.Computer = c
+			answer(r, mic, utterance)
+			stop := r.run(t)
+			r.turn(t)
+			_ = stop()
+
+			if got, want := c.list(), []string{"pause", "set:controlling"}; !slices.Equal(got, want) {
+				t.Fatalf("computer calls %v, want %v", got, want)
+			}
+			want := ComputerActivity{Kind: "controlling", Task: "Ordering the blue mug"}
+			if len(srv.commands) != 1 || srv.commands[0].Computer == nil || *srv.commands[0].Computer != want {
+				t.Fatalf("follow-ups sent %+v, want computer_activity %+v", srv.commands, want)
+			}
+		})
+	}
+}
