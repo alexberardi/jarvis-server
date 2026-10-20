@@ -2,6 +2,23 @@ package computer
 
 import "testing"
 
+// A click on a listed element (a ref, no coordinates) is a press: the house model writes it so.
+func TestParseClickOnRefIsPress(t *testing.T) {
+	r, err := parseReply(`{"actions": [{"kind": "click", "ref": "e5", "intent": "Open the watches"}, {"kind": "click", "x": 3, "y": 4, "intent": "There"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := r.Actions[0]; a.Kind != "press" || a.Ref != "e5" {
+		t.Fatalf("action 0 = %+v", a)
+	}
+	if a := r.Actions[1]; a.Kind != "click" || *a.X != 3 {
+		t.Fatalf("action 1 = %+v", a)
+	}
+	if _, err := parseReply(`{"actions": [{"kind": "click", "intent": "nowhere"}]}`); err == nil {
+		t.Fatal("a click with neither a ref nor coordinates parsed")
+	}
+}
+
 func TestParseReply(t *testing.T) {
 	ok := []struct{ in, want string }{
 		{"```json\n{\"thought\": \"go\", \"actions\": [{\"kind\": \"press\", \"ref\": \"e1\", \"intent\": \"Open\"}]}\n```", "actions"},

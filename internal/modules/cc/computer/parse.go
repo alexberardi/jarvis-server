@@ -67,6 +67,11 @@ func parseReply(s string) (Reply, error) {
 		}
 		r.Actions, r.Checkout = nil, nil
 	default:
+		for i, a := range r.Actions {
+			if a.Kind == "click" && a.Ref != "" && a.X == nil && a.Y == nil {
+				r.Actions[i].Kind = "press" // a click on a listed element
+			}
+		}
 		if err := computeruse.ValidateBatch(r.Actions); err != nil {
 			return Reply{}, fmt.Errorf(`"actions": %v`, err)
 		}
