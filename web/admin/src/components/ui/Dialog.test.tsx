@@ -109,4 +109,24 @@ describe('Sheet', () => {
     fireEvent.click(opener())
     expect(dialog()).toHaveClass('animate-sheet-in', 'md:animate-pop-in', 'rounded-t-card')
   })
+
+  it('stays open on Escape and the backdrop when it must be acknowledged, and shows no close button', () => {
+    function Must() {
+      const [open, setOpen] = useState(true)
+      return (
+        <Dialog open={open} onClose={() => setOpen(false)} dismissible={false} title="Key for app" footer={<button onClick={() => setOpen(false)}>Done</button>}>
+          <p>secret</p>
+        </Dialog>
+      )
+    }
+    render(<Must />)
+    const d = screen.getByRole('dialog', { name: 'Key for app' })
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+    fireEvent.keyDown(d, { key: 'Escape' })
+    fireEvent.click(screen.getByTestId('dialog-backdrop'))
+    expect(screen.getByRole('dialog', { name: 'Key for app' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    return waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
 })
+
