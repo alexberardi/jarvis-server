@@ -94,4 +94,25 @@ describe('HardwarePanel builds', () => {
     renderPanel()
     expect(await screen.findByRole('button', { name: 'metal ↓' })).toBeTruthy()
   })
+
+  it('says what vLLM downloads before it is fetched', async () => {
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: { vllm: { build: '0.32.0', flavours: ['cuda'], download_bytes: 3_932_507_100, disk_bytes: 17_000_000_000 } },
+    })
+    renderPanel()
+    expect(await screen.findByText('3.7 GB download, needs 15.8 GB free while installing')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'cuda ↓' })).toBeTruthy()
+  })
+
+  it('says why vLLM cannot run without an NVIDIA GPU, with no download offered', async () => {
+    const why = 'vllm needs an NVIDIA GPU (driver 580 or later); none was detected'
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: { vllm: { build: '0.32.0', flavours: [], unavailable: why, download_bytes: 3_932_507_100, disk_bytes: 17_000_000_000 } },
+    })
+    renderPanel()
+    await screen.findByText(why)
+    expect(screen.queryByText(/free while installing/)).toBeNull()
+  })
 })

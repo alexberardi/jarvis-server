@@ -19,7 +19,7 @@ Open questions live in [QUESTIONS.md](QUESTIONS.md).
 
 **Decisions that apply:**
 - **PLAN §3.3:** llama-server per slot; macOS on Metal; GPUs auto-detected, always configurable, multi-GPU.
-- **PLAN §7:** cuts are in-process TRANSFORMERS/vLLM/MLX (vLLM stays reachable as a remote OpenAI-compatible endpoint), LoRA/adapters/training, unused `swap_*`, legacy `cache/` and the WIP pipeline routes.
+- **PLAN §7:** cuts are in-process TRANSFORMERS/vLLM/MLX (vLLM and MLX return as supervised Python engines, LD10 and LD9, not in-process), LoRA/adapters/training, unused `swap_*`, legacy `cache/` and the WIP pipeline routes.
 - **LD9 (2026-10-19):** MLX comes back as a supervised engine on Apple Silicon (`mlx_lm.server`, installed into a uv-managed Python env under the engines dir; jarvisd itself stays pure Go). See 01 §3.11.
 - **D9:** fastText is cut, including llm-proxy's date fallback.
 - **D11:** drop unread settings.
@@ -277,7 +277,7 @@ Every tracked non-test source file is listed below. **Keep** means the behaviour
 | `backends/base.py` | 215 | Keep (spirit) | the `engine.Client` interface |
 | `backends/gguf_backend.py`, `gguf_vision_backend.py`, `chat_formats.py`, `power_metrics.py` | 991+254+130+87 | **Cut** | in-process llama.cpp (replaced by llama-server) |
 | `backends/mlx_backend.py`, `mlx_vision_backend.py` | 514+197 | **Cut** (in-process) | a supervised `mlx_lm.server` instead (LD9, 01 §3.11) |
-| `backends/vllm_backend.py`, `vllm_vision_backend.py`, `vllm_availability.py` | 513+429+38 | **Cut** | PLAN §7; remote vLLM instead |
+| `backends/vllm_backend.py`, `vllm_vision_backend.py`, `vllm_availability.py` | 513+429+38 | **Cut** (in-process) | PLAN §7; a supervised `vllm` engine instead (LD10, 01 §3.12) |
 | `backends/transformers_backend.py`, `transformers_vision_backend.py` | 751+274 | **Cut** | PLAN §7 |
 | `backends/mock_backend.py` | 105 | Cut | Go fake engine in tests |
 | `gpu_select.py` | 401 | **Keep** (rules as data; subprocess-only) | `llm/gpu` (01 §3.4) |

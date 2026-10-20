@@ -10,8 +10,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // runFakeUV is uv for the Python engine install tests: `python install V`, `venv --python V
@@ -62,6 +65,12 @@ func runFakeUV(args []string) int {
 		if err != nil || !strings.Contains(string(b), "--hash=sha256:") {
 			fmt.Fprintln(os.Stderr, "requirements without hashes")
 			return 1
+		}
+		if n, _ := strconv.Atoi(os.Getenv("FAKE_UV_PIP_BYTES")); n > 0 {
+			// Wheels landing in the cache while the install runs, for the progress poll.
+			os.MkdirAll(os.Getenv("UV_CACHE_DIR"), 0o755)
+			os.WriteFile(filepath.Join(os.Getenv("UV_CACHE_DIR"), "wheel"), make([]byte, n), 0o644)
+			time.Sleep(300 * time.Millisecond)
 		}
 	default:
 		return 2
@@ -141,8 +150,8 @@ func TestPythonEngineGate(t *testing.T) {
 	if k, err := DirEngine(mac); err != nil || k != KindMLX {
 		t.Fatalf("dir engine on a mac: %s %v", k, err)
 	}
-	if _, err := DirEngine(Platform{"linux", "amd64"}); err == nil || !strings.Contains(err.Error(), "Apple Silicon") {
-		t.Fatalf("dir engine on linux: %v", err)
+	if _, err := DirEngine(Platform{"linux", "arm64"}); err == nil || !strings.Contains(err.Error(), "Apple Silicon") {
+		t.Fatalf("dir engine on linux/arm64: %v", err)
 	}
 	if Build(KindMLX) != PyEngines[KindMLX].Version || Build(KindLlama) != Releases[KindLlama].Build {
 		t.Fatal("Build")
@@ -391,5 +400,49 @@ func TestResolvePythonEngineOffPlatform(t *testing.T) {
 	}
 	if !slices.Contains(g.fetchQ, "mlx-lm/metal") {
 		t.Fatalf("fetch queue %v", g.fetchQ)
+	}
+}
+
+// A big engine (vLLM's install takes about 17 GB at its peak) doesn't start without the disk
+// for it, and reports its package step as bytes on disk.
+func TestPythonEngineInstallDiskAndProgress(t *testing.T) {
+	g := newPyRig(t)
+	saved := PyEngines[KindMLX]
+	t.Cleanup(func() { PyEngines[KindMLX] = saved })
+	e := saved
+	e.DiskBytes, e.DownloadBytes = 3_000_000_000, 1_000_000_000
+	PyEngines[KindMLX] = e
+
+	g.b.DiskFree = func(string) uint64 { return 500_000_000 }
+	_, err := g.b.Fetch(context.Background(), KindMLX, FlavourMetal, nil)
+	if err == nil || !strings.Contains(err.Error(), "needs about 3.0 GB free") || !strings.Contains(err.Error(), "0.5 GB free") ||
+		!strings.Contains(err.Error(), "1.0 GB download") {
+		t.Fatalf("short disk: %v", err)
+	}
+	if g.srv.requests.Load() != 0 {
+		t.Fatal("downloaded with no room for the install")
+	}
+
+	g.b.DiskFree = func(string) uint64 { return 20_000_000_000 }
+	oldPoll := installPoll
+	installPoll = 10 * time.Millisecond
+	t.Cleanup(func() { installPoll = oldPoll })
+	t.Setenv("FAKE_UV_PIP_BYTES", "1048576")
+	var mu sync.Mutex
+	var seen []int64
+	_, err = g.b.Fetch(context.Background(), KindMLX, FlavourMetal, func(done, total int64) {
+		if total == e.DiskBytes {
+			mu.Lock()
+			seen = append(seen, done)
+			mu.Unlock()
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) == 0 || slices.Max(seen) < 1<<20 {
+		t.Fatalf("package progress %v", seen)
 	}
 }

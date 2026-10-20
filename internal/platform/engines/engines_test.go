@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -69,6 +70,14 @@ func runHelper() {
 	}
 	fmt.Println("hello stdout")
 	fmt.Fprintln(os.Stderr, "hello stderr")
+	if v := os.Getenv("HELPER_ERROR_LINE"); v != "" {
+		// A Python traceback: the root cause, then lines that push it out of the tail.
+		fmt.Fprintln(os.Stderr, "(EngineCore pid=123) ERROR 10-20 04:40:09 [core.py:1510] "+v)
+		for i := 0; i < 40; i++ {
+			fmt.Fprintf(os.Stderr, "  File \"x.py\", line %d, in f\n", i)
+		}
+		fmt.Fprintln(os.Stderr, "RuntimeError: Engine core initialization failed. See root cause above.")
+	}
 	if v := os.Getenv("HELPER_CRASH_AFTER"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -265,6 +274,25 @@ func TestRestartsAfterCrash(t *testing.T) {
 	st := s.Status()
 	if st.Restarts < 2 || !strings.Contains(st.LastError, "exit status 3") {
 		t.Fatalf("status = %+v", st)
+	}
+}
+
+// ErrorLine keeps the engine's own reason for an exit (the root cause of a Python traceback),
+// which the last output lines alone may not show.
+func TestErrorLineExplainsExit(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	f.health.set(false)
+	spec := f.spec(map[string]string{"HELPER_CRASH_AFTER": "0s",
+		"HELPER_ERROR_LINE": "ValueError: Free memory on device cuda:0 (0.96/11.61 GiB) on startup is less than desired"})
+	spec.Restart.MaxRestarts = 1
+	spec.ErrorLine = regexp.MustCompile(`(?:^|\] )((?:\w+\.)*\w*(?:Error|Exception): .*)`)
+	s := start(t, spec)
+	eventually(t, "the exit explained", func() bool {
+		return strings.Contains(s.Status().LastError, "exit status 3: ValueError: Free memory on device cuda:0")
+	})
+	if out := s.Status().Output; slices.ContainsFunc(out, func(l string) bool { return strings.HasPrefix(l, "ValueError") }) {
+		t.Fatal("the test's root cause is still in the tail: it proves nothing")
 	}
 }
 

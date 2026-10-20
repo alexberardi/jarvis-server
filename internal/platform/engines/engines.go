@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -126,6 +127,10 @@ type Spec struct {
 	// PIDDir, if set, holds a pid file for the running engine so Sweep can kill it after
 	// jarvisd dies without stopping it (macOS has no Pdeathsig). Names must be unique in it.
 	PIDDir string
+	// ErrorLine, if set, finds the engine's own reason for exiting in its output: the first
+	// line since the start that matches (its first group, if it has one) is added to the
+	// exit's error, e.g. the root cause of a Python traceback the last lines no longer show.
+	ErrorLine *regexp.Regexp
 }
 
 func (s Spec) withDefaults() Spec {
@@ -259,7 +264,9 @@ type Supervisor struct {
 	restarts int
 	lastErr  string
 	tail     []string
-	cur      *run // nil when the loop is not running
+	reason   string // ErrorLine's match since the start
+
+	cur *run // nil when the loop is not running
 }
 
 // run is one Start→Stop lifetime of the supervision loop.
@@ -490,7 +497,7 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 	if hc == nil {
 		select {
 		case <-p.exited:
-			return false, p.exitErr()
+			return false, s.explain(p.exitErr())
 		case <-r.stop:
 			return true, nil
 		}
@@ -505,7 +512,7 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 	for {
 		select {
 		case <-p.exited:
-			return false, p.exitErr()
+			return false, s.explain(p.exitErr())
 		case <-r.stop:
 			return true, nil
 		case <-startup.C:
@@ -602,6 +609,16 @@ type proc struct {
 	err    error
 }
 
+// explain adds ErrorLine's match to an exit's error.
+func (s *Supervisor) explain(err error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reason == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, s.reason)
+}
+
 func (p *proc) exitErr() error {
 	if p.err == nil {
 		return errors.New("exited: status 0")
@@ -611,6 +628,7 @@ func (p *proc) exitErr() error {
 
 // spawn launches the engine. Callers hold s.mu; the output goroutines take it per line.
 func (s *Supervisor) spawn() (*proc, error) {
+	s.reason = ""
 	cmd := exec.Command(s.spec.Path, s.spec.Args...)
 	cmd.Dir = s.spec.Dir
 	cmd.Env = s.spec.environ(os.Environ())
@@ -680,6 +698,11 @@ func (w *lineWriter) emit(line []byte) {
 	l := string(bytes.TrimRight(line, "\r"))
 	w.s.log.Debug("engine output", "stream", w.stream, "line", l)
 	w.s.mu.Lock()
+	if re := w.s.spec.ErrorLine; re != nil && w.s.reason == "" {
+		if m := re.FindStringSubmatch(l); m != nil {
+			w.s.reason = m[len(m)-1]
+		}
+	}
 	w.s.tail = append(w.s.tail, l)
 	if len(w.s.tail) > outputTail {
 		w.s.tail = slices.Delete(w.s.tail, 0, len(w.s.tail)-outputTail)

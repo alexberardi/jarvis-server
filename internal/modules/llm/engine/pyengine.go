@@ -5,13 +5,17 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/sysinfo"
 )
 
 // Python engines (decision 2026-10-19-mlx-engine): an OpenAI-compatible inference server that
@@ -24,8 +28,8 @@ import (
 // marked complete only after an import check passes. Supervision is the resolver's, as for
 // llama-server: `python -I -m <module>` on a loopback port, health-checked and restarted.
 //
-// MLX (mlx_lm.server) is the first kind; vLLM and Transformers are meant to follow as further
-// entries of PyEngines.
+// MLX (mlx_lm.server) was the first kind, vLLM (vllm.go) the second; Transformers is meant to
+// follow as a further entry of PyEngines.
 
 // KindMLX is mlx_lm.server: MLX models (Hugging Face directories) on Apple Silicon.
 const KindMLX Kind = "mlx-lm"
@@ -52,17 +56,45 @@ type PyEngine struct {
 	// Module is run as `python -I -m Module`; Check is a program that must exit 0 after
 	// install (`python -I -c Check`).
 	Module, Check string
-	// Args are the server's flags after the module: the model, the loopback port and the
-	// most tokens a reply may take when the request doesn't say (ctx, 0 = engine default).
-	Args func(model string, port, ctx int) []string
+	// Gate says why the engine can't run on this hardware ("" = it can), for what the
+	// platform alone doesn't decide (nil = nothing).
+	Gate func(hw Hardware) string
+	// DownloadBytes is the package set's download and DiskBytes the most disk the install
+	// takes while it runs (0 = small); an install with less free space doesn't start.
+	DownloadBytes, DiskBytes int64
+	// Args are the server's flags after the module.
+	Args func(a PyArgs) []string
 	// HealthPath answers 200 once the model is loaded.
 	HealthPath string
 	// RequestModel is the "model" a request names the loaded model by.
 	RequestModel string
 	// Env is added to the server's environment.
 	Env map[string]string
+	// APIKeyEnv is the variable the server reads an API key from: each instance gets a
+	// random one, as llama-server does ("" = none, and the server binds 127.0.0.1 only).
+	APIKeyEnv string
+	// CacheEnv points each variable at <install dir>/cache/<subdir>, for the caches the
+	// server writes at run time.
+	CacheEnv map[string]string
+	// Tune completes an instance key from the label and the hardware (nil = nothing).
+	Tune func(c LabelConfig, hw Hardware, k *instanceKey) error
 	// Short prefixes the engine instance's name.
 	Short string
+}
+
+// PyArgs is what a Python engine's command line is built from.
+type PyArgs struct {
+	Model string
+	Port  int
+	// Context is the label's context: the most tokens a reply may take when the request
+	// doesn't say (mlx-lm), or the longest sequence (vLLM's --max-model-len). 0 = engine default.
+	Context int
+	// GPUMemory is the share of each card the engine preallocates (vLLM; 0 = not passed).
+	GPUMemory float64
+	// Devices is how many cards the engine spans.
+	Devices int
+	// ToolParser and ReasoningParser are the model's (vLLM).
+	ToolParser, ReasoningParser string
 }
 
 //go:embed pyengines/mlx-lm.txt
@@ -84,12 +116,12 @@ var PyEngines = map[Kind]PyEngine{
 		Needs:        "Apple Silicon (darwin/arm64, macOS 14 or later)",
 		Module:       "mlx_lm.server",
 		Check:        "import mlx.core, mlx_lm.server",
-		Args: func(model string, port, ctx int) []string {
-			p := strconv.Itoa(port)
-			a := []string{"--model", model, "--host", "127.0.0.1", "--port", p,
+		Args: func(pa PyArgs) []string {
+			p := strconv.Itoa(pa.Port)
+			a := []string{"--model", pa.Model, "--host", "127.0.0.1", "--port", p,
 				"--allowed-origins", "http://127.0.0.1:" + p}
-			if ctx > 0 {
-				a = append(a, "--max-tokens", strconv.Itoa(ctx))
+			if pa.Context > 0 {
+				a = append(a, "--max-tokens", strconv.Itoa(pa.Context))
 			}
 			return a
 		},
@@ -98,6 +130,20 @@ var PyEngines = map[Kind]PyEngine{
 		Env:          map[string]string{"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1"},
 		Short:        "mlx",
 	},
+}
+
+// pyErrorLine is the exception line that ends a Python traceback's root cause, bare or after
+// vLLM's "(EngineCore pid=N) ERROR <time> [file:line] " prefix: why a Python engine exited
+// (e.g. vLLM's "ValueError: Free memory on device cuda:0 … is less than desired GPU memory
+// utilization"), which the generic error after it doesn't say.
+var pyErrorLine = regexp.MustCompile(`(?:^|\] )((?:\w+\.)*\w*(?:Error|Exception): .*)`)
+
+// errorLine is the engines.Spec ErrorLine of a kind (nil = none).
+func errorLine(k Kind) *regexp.Regexp {
+	if _, ok := k.Python(); ok {
+		return pyErrorLine
+	}
+	return nil
 }
 
 // Python returns a kind's Python engine, if it is one.
@@ -140,6 +186,17 @@ func Unavailable(k Kind, p Platform) string {
 	return ""
 }
 
+// UnavailableOn is Unavailable on detected hardware: a Python engine's Gate as well.
+func UnavailableOn(k Kind, p Platform, hw Hardware) string {
+	if why := Unavailable(k, p); why != "" {
+		return why
+	}
+	if e, ok := PyEngines[k]; ok && e.Gate != nil {
+		return e.Gate(hw)
+	}
+	return ""
+}
+
 // DirEngine is the engine for a model that is a directory (Hugging Face layout: config,
 // safetensors, tokenizer) on p: the first Python engine that runs there.
 func DirEngine(p Platform) (Kind, error) {
@@ -161,8 +218,11 @@ func DirEngine(p Platform) (Kind, error) {
 // pythonIn is a Python engine install's interpreter.
 func pythonIn(dir string) string { return filepath.Join(dir, "venv", "bin", "python") }
 
+// installPoll is how often a package install's progress is measured.
+var installPoll = 5 * time.Second
+
 // fetchPython installs a Python engine (see the top of this file). progress covers uv's
-// download; the Python and package steps are logged.
+// download, then the package step as bytes on disk out of DiskBytes; the steps are logged.
 func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progress func(done, total int64)) (string, error) {
 	if err := e.supports(b.Platform, f); err != nil {
 		return "", err
@@ -174,6 +234,9 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 	py := pythonIn(dir)
 	if fileExists(filepath.Join(dir, completeMarker)) && fileExists(py) {
 		return py, nil
+	}
+	if err := b.checkDisk(e); err != nil {
+		return "", err
 	}
 	uv, err := b.Fetch(ctx, KindUV, FlavourCPU, progress)
 	if err != nil {
@@ -221,7 +284,15 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 		}
 		cmd := exec.CommandContext(ctx, s.bin, s.args...)
 		cmd.Env, cmd.Dir = env, dir
-		if out, err := cmd.CombinedOutput(); err != nil {
+		var stop func()
+		if s.name == "packages" && e.DiskBytes > 0 {
+			stop = b.watchInstall(e, []string{cache, dir}, progress)
+		}
+		out, err := cmd.CombinedOutput()
+		if stop != nil {
+			stop()
+		}
+		if err != nil {
 			return "", fmt.Errorf("fetch %s %s: %s: %w: %s", e.Kind, e.Version, s.name, err, tail(string(out), 2000))
 		}
 	}
@@ -237,6 +308,74 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 	}
 	return py, nil
 }
+
+// checkDisk refuses an install the engines dir hasn't the space for.
+func (b *Binaries) checkDisk(e PyEngine) error {
+	if e.DiskBytes == 0 {
+		return nil
+	}
+	free := b.DiskFree
+	if free == nil {
+		free = sysinfo.DiskFree
+	}
+	os.MkdirAll(b.Dir, 0o755)
+	if have := free(b.Dir); have > 0 && have < uint64(e.DiskBytes) {
+		return fmt.Errorf("fetch %s %s: needs about %s free in %s (a %s download); %s free",
+			e.Kind, e.Version, gb(e.DiskBytes), b.Dir, gb(e.DownloadBytes), gb(int64(have)))
+	}
+	return nil
+}
+
+// watchInstall reports the package step's bytes on disk under dirs to progress (out of
+// DiskBytes) and to the log, until the returned stop is called.
+func (b *Binaries) watchInstall(e PyEngine, dirs []string, progress func(done, total int64)) (stop func()) {
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		t := time.NewTicker(installPoll)
+		defer t.Stop()
+		logged := time.Now()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+			}
+			var n int64
+			for _, d := range dirs {
+				n += dirSize(d)
+			}
+			n = min(n, e.DiskBytes)
+			if progress != nil {
+				progress(n, e.DiskBytes)
+			}
+			if b.Log != nil && time.Since(logged) >= 30*time.Second {
+				logged = time.Now()
+				b.Log.Info("engine install progress", "kind", e.Kind, "version", e.Version,
+					"on_disk", gb(n), "of_about", gb(e.DiskBytes))
+			}
+		}
+	}()
+	return func() { close(done); <-finished }
+}
+
+// dirSize is the bytes of the regular files under dir.
+func dirSize(dir string) int64 {
+	var n int64
+	filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && d.Type().IsRegular() {
+			if fi, err := d.Info(); err == nil {
+				n += fi.Size()
+			}
+		}
+		return nil
+	})
+	return n
+}
+
+// gb formats bytes as gigabytes, e.g. "3.9 GB".
+func gb(n int64) string { return fmt.Sprintf("%.1f GB", float64(n)/1e9) }
 
 // pythonInstallEnv is jarvisd's environment without the variables that would point uv or
 // Python somewhere else (a user's venv, conda, PYTHONPATH, a pip config), plus set.
