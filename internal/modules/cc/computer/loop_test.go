@@ -212,6 +212,11 @@ func actions(acts ...string) string {
 	return `{"thought": "next", "actions": [` + strings.Join(acts, ",") + `]}`
 }
 
+// buying is actions with the checkout a batch that buys something carries.
+func buying(acts ...string) string {
+	return `{"checkout": {"product": "Lavender soap", "price": "4.99"}, "actions": [` + strings.Join(acts, ",") + `]}`
+}
+
 const doneAnswer = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`
 
 // --- tests ---
@@ -286,7 +291,7 @@ func TestLoopStopRequested(t *testing.T) {
 	t.Run("between rounds", testStopBetweenRounds)
 	t.Run("while waiting for approval", func(t *testing.T) {
 		e := newEnv(t)
-		e.script(actions(press("e5", "Place the order")), doneAnswer)
+		e.script(buying(press("e5", "Place the order")), doneAnswer)
 		out := e.run()
 		if out.State != StateNeedsApproval || len(out.Pending) != 1 {
 			t.Fatalf("outcome %+v", out)
@@ -400,7 +405,7 @@ func TestRiskyAsksGroupedWithAllowedRisky(t *testing.T) {
 		Tool: policy.ToolComputerTask, Target: "action:sensitive_input", Effect: policy.Allow}); err != nil {
 		t.Fatal(err)
 	}
-	e.script(actions(`{"kind": "set_value", "ref": "e2", "text": "4111 1111 1111 1111", "intent": "Fill in the card number"}`,
+	e.script(buying(`{"kind": "set_value", "ref": "e2", "text": "4111 1111 1111 1111", "intent": "Fill in the card number"}`,
 		press("e5", "Place the order")), doneAnswer)
 	out := e.run()
 	if out.State != StateNeedsApproval || len(out.Pending) != 2 ||
@@ -780,5 +785,29 @@ func TestLoopObservesWithStartURL(t *testing.T) {
 	}
 	if len(e.exec.observes) == 0 || e.exec.observes[0].StartURL != tk.StartURL {
 		t.Fatalf("observes %+v", e.exec.observes)
+	}
+}
+
+// A batch that buys something without a checkout goes back to the model once for one, so the
+// confirmation shows what is bought and for how much; a second one without is asked as it is.
+func TestPayWithoutCheckoutAsksOnce(t *testing.T) {
+	e := newEnv(t)
+	e.script(actions(press("e5", "Place the order")),
+		`{"checkout": {"product": "Lavender soap", "price": "4.99"}, "actions": [`+press("e5", "Place the order")+`]}`)
+	out := e.run()
+	if out.State != StateNeedsApproval || out.Checkout == nil || out.Checkout.Product != "Lavender soap" || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
+	}
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `"checkout"`) || !strings.Contains(txt, "Last turn: ") {
+		t.Fatalf("no checkout feedback:\n%s", txt)
+	}
+	if ev := e.events(); len(ev) != 1 || ev[0].Outcome != policy.OutcomeAsked {
+		t.Fatalf("events %+v", ev)
+	}
+
+	e = newEnv(t)
+	e.script(actions(press("e5", "Place the order")), actions(press("e5", "Place the order")))
+	if out := e.run(); out.State != StateNeedsApproval || out.Checkout != nil || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
 	}
 }

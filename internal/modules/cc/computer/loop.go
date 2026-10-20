@@ -221,6 +221,8 @@ type round struct {
 	wantShot bool
 	feedback string
 	looked   bool // this Run call has observed once
+	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
+	checkoutAsked bool
 }
 
 // Run drives the task until it is done, needs the user, fails, is stopped or runs out of budget.
@@ -497,6 +499,16 @@ func (l *Loop) decideAndAct(ctx context.Context, r *round, obs Observation, acti
 			pending = append(pending, PendingAction{Index: i, Action: d.action, Reason: h.Reason, Digest: h.Digest})
 		}
 		held.Actions = append(held.Actions, h)
+	}
+	if len(pending) > 0 && co == nil && !r.checkoutAsked {
+		for _, p := range pending {
+			if p.Category == computeruse.CatPay {
+				// The confirmation shows what is bought and for how much: ask the model once.
+				r.checkoutAsked = true
+				r.feedback = `these actions buy something, so the user confirms them first: answer again with the same actions and a "checkout" read from the page (product, price, currency, seller, ship_to, card)`
+				return Outcome{}, false
+			}
+		}
 	}
 	if len(pending) > 0 {
 		for _, p := range pending {
