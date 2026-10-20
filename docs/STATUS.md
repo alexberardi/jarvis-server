@@ -71,6 +71,12 @@ Decision: [2026-10-19-mlx-engine](decisions/2026-10-19-mlx-engine.md) (llm LD9);
 
 - [ ] **MLX engine:** Python engine layer + mlx-lm install and supervision ✓ (llm 01 §3.11), model manager repo-directory models + mlx-community catalog entries, admin MLX choice + engine install progress + explicit tool/JSON/vision limits, live Mac check (tokens/s next to llama-server on Metal)
 
+### vLLM on Linux + NVIDIA (#300, in parallel)
+
+Decision: [2026-10-19-vllm-engine](decisions/2026-10-19-vllm-engine.md) (llm LD10, reverses LD7); the second kind on #299's Python engine layer.
+
+- [ ] **vLLM engine:** kind `vllm` (linux/amd64, NVIDIA driver ≥ 580), hash-locked install with disk check and progress, supervision with an explicit GPU share counted by the fit check, GPU fault/loss, tool/reasoning parsers and vision per model ✓ (llm 01 §3.12); live chat/stream/tool turn with tokens/s next to llama-server and VRAM of both, on a card with room (the devbox's was held by the installed jarvisd)
+
 ### Prompts as text (in parallel)
 
 Contract: [cc/prompt-contract.md](cc/prompt-contract.md) ([decision](decisions/2026-10-16-prompts-as-text.md)).

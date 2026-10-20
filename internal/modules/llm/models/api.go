@@ -348,8 +348,13 @@ func (a *API) hardware(w http.ResponseWriter, r *http.Request) {
 			"build":    engine.Build(k),
 			"flavours": engine.FlavoursFor(k, a.Manager.Binaries.Platform),
 		}
-		if why := engine.Unavailable(k, a.Manager.Binaries.Platform); why != "" {
+		if why := engine.UnavailableOn(k, a.Manager.Binaries.Platform, hw); why != "" {
 			b["unavailable"] = why
+			b["flavours"] = []string{}
+		}
+		if e, ok := k.Python(); ok && e.DiskBytes > 0 {
+			// Shown before the download: vLLM's is gigabytes.
+			b["download_bytes"], b["disk_bytes"] = e.DownloadBytes, e.DiskBytes
 		}
 		builds[string(k)] = b
 	}
@@ -397,6 +402,11 @@ func (a *API) fetchEngine(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		_, err = engine.AssetsFor(k, a.Manager.Binaries.Platform, f)
+	}
+	if err == nil {
+		if why := engine.UnavailableOn(k, a.Manager.Binaries.Platform, a.Manager.hardware(r.Context())); why != "" {
+			err = errors.New(why)
+		}
 	}
 	if err != nil {
 		httpx.Error(w, http.StatusUnprocessableEntity, err.Error())

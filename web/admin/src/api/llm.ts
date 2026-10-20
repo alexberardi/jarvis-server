@@ -127,8 +127,11 @@ export interface HardwareResponse {
   hardware: Hardware
   gpu_fault?: GPUFault | null
   proposal: Record<string, Placement>
-  /** unavailable says why a kind can't run on this host (MLX off Apple Silicon). */
-  builds: Record<string, { build: string; flavours: string[]; unavailable?: string }>
+  /**
+   * unavailable says why a kind can't run on this host (MLX off Apple Silicon, vLLM without an
+   * NVIDIA GPU); a Python engine with a big install says its download and peak disk use.
+   */
+  builds: Record<string, { build: string; flavours: string[]; unavailable?: string; download_bytes?: number; disk_bytes?: number }>
   installed: EngineBuild[] | null
   engines: EngineInstance[] | null
   voice: VoiceModel[] | null
@@ -400,6 +403,8 @@ export interface LabelConfig {
   gpu_layers: number
   kv_cache_type: string
   flash_attn: string
+  /** vLLM only: the share of each card it preallocates; 0 = sized to the model. */
+  gpu_memory_utilization?: number
   extra_args: string
   /** ID12: auto (the model's catalog flag; never for remote), on or off. */
   fold_system_messages?: string
@@ -471,6 +476,7 @@ export type LabelUpdate = Partial<{
   gpu_layers: number
   kv_cache_type: string
   flash_attn: string
+  gpu_memory_utilization: number
   extra_args: string
   fold_system_messages: string
   remote_url: string

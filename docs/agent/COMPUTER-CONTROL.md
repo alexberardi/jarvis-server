@@ -136,6 +136,9 @@ password the model can see.
   `stop_recording` (jarvisd calls it if the model doesn't), and no reply may claim a stop that
   didn't run. The island shows the task as a coloured dot beside any voice state
   ([decision](../decisions/2026-10-19-voice-stop-recording.md)).
+  pauses the task; ⌃⌥⎋ (Carbon hotkey, named in the tray tooltip) stops it. On Linux: idle-notify
+  (wlroots) or the X server's idle time, and Ctrl+Alt+Esc (X11 grab, GlobalShortcuts portal, or a
+  Hyprland bind); DESIGN.md §17.
 - **Audit:** every action (intent, target, result) in `cc_autonomy_events`; screenshots kept
   locally with a retention setting.
 
@@ -151,6 +154,9 @@ password the model can see.
    Desktop on macOS (piece 36): `computer_record_start {mode: desktop}` or `jarvis-agent computer
    record start --desktop`, through a listen-only event tap that needs the Input Monitoring grant
    (the setup page asks for it) ([decision](../decisions/2026-10-19-desktop-recording-macos.md)).
+   Desktop on X11: built (piece 37): the same, through the RECORD extension and AT-SPI, with no
+   grant to ask for; on Wayland it refuses with "On Wayland I can only record the browser"
+   (`unsupported`, Q8) ([decision](../decisions/2026-10-19-desktop-recording-x11.md)).
    jarvisd's `start_recording` still starts the browser, and learning skips desktop traces.
 2. **Capture structure, not just pixels.**
    - Browser (extension): each element acted on (role, accessible name, a stable selector),
@@ -159,7 +165,8 @@ password the model can see.
    - Desktop (agent): app and window, the element under each click from the accessibility tree,
      keystrokes grouped into text, a keyframe screenshot per step. Secure input fields are
      never captured. Built on macOS (piece 36): events `click`, `input`, `key`, `scroll` with
-     `app` (bundle id) and `element.ax_path`; keyframes at most every 2 s.
+     `app` (bundle id) and `element.ax_path`; keyframes at most every 2 s. Built on X11 (piece
+     37): the same events, `app` the window's WM_CLASS, AT-SPI roles, no `ax_path`.
    - Stored on the computer and the household server only, with retention; viewable and deletable.
 3. **Learn.** The model turns the trace (plus narration) into a workflow: named steps with an
    intent and a target each; **parameters** for what varies (dates, file names, amounts), which

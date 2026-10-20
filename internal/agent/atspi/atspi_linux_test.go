@@ -50,6 +50,12 @@ func (n *fakeNode) called() []string {
 	return slices.Clone(n.calls)
 }
 
+func (n *fakeNode) setStates(s ...int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.states = s
+}
+
 func (n *fakeNode) ref() objRef { return objRef{n.app.conn.Names()[0], n.path} }
 
 func (n *fakeNode) GetRole() (uint32, *dbus.Error) { return n.role, nil }
@@ -63,6 +69,8 @@ func (n *fakeNode) GetChildren() ([]objRef, *dbus.Error) {
 }
 
 func (n *fakeNode) GetState() ([]uint32, *dbus.Error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	s := make([]uint32, 2)
 	for _, b := range n.states {
 		s[b/32] |= 1 << (b % 32)
@@ -188,6 +196,9 @@ func reset() {
 	refs.mu.Lock()
 	refs.nodes = nil
 	refs.mu.Unlock()
+	lastFocus.mu.Lock()
+	lastFocus.o = nil
+	lastFocus.mu.Unlock()
 }
 
 const (
@@ -307,6 +318,34 @@ func TestPasswordTextHidden(t *testing.T) {
 	}
 	if c := w.password.called(); len(c) != 0 {
 		t.Errorf("ElementAt read the password text: %q", c)
+	}
+}
+
+// Focused is the active window's element with the focus; a password text is secure, and its
+// text is never read.
+func TestFocused(t *testing.T) {
+	w := newWindow()
+	fakeDesktop(t, w.app)
+
+	el, err := Focused(os.Getpid())
+	if err != nil || el == nil || el.Name != "OK" || el.Role != "button" || el.Secure {
+		t.Fatalf("Focused = %+v, %v; want the OK button", el, err)
+	}
+	w.ok.setStates(usable...)
+	w.password.setStates(with(stateFocused)...)
+	el, err = Focused(os.Getpid())
+	if err != nil || el == nil || el.Name != "Password" || !el.Secure {
+		t.Fatalf("Focused after the focus moved = %+v, %v; want the password text, secure", el, err)
+	}
+	if el, _ := Focused(os.Getpid()); el == nil || !el.Secure {
+		t.Fatalf("Focused again (the cached element) = %+v", el)
+	}
+	if c := w.password.called(); len(c) != 0 {
+		t.Errorf("Focused read the password text: %q", c)
+	}
+	w.password.setStates(usable...)
+	if el, err := Focused(os.Getpid()); err != nil || el != nil {
+		t.Errorf("nothing focused: %+v, %v", el, err)
 	}
 }
 

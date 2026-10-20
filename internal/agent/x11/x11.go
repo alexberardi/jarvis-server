@@ -60,6 +60,15 @@ type Conn interface {
 	Geometry(win uint32) (x, y, w, h int, err error)
 	// Sync waits until the server has processed every request sent so far.
 	Sync() error
+	// IdleTime is how long since the last input event, ours (XTEST) included
+	// (MIT-SCREEN-SAVER QueryInfo).
+	IdleTime() (time.Duration, error)
+	// GrabKey grabs key code with exactly modifiers mods on the root window (asynchronous
+	// modes): its presses come to this connection only. An error: another client holds it.
+	GrabKey(code byte, mods uint16) error
+	// NextKeyPress waits for the next key press on this connection (a grabbed key's) and
+	// returns its key code and modifier state; an error once the connection has ended.
+	NextKeyPress() (code byte, state uint16, err error)
 	Close()
 }
 
@@ -89,13 +98,18 @@ func (d *Display) getenv(k string) string {
 // Session says whether this is an X11 session: DISPLAY set and not a Wayland session
 // (XWayland's DISPLAY would only reach XWayland clients and lie about the rest).
 func (d *Display) Session() (bool, string) {
-	if d.getenv("WAYLAND_DISPLAY") != "" || d.getenv("XDG_SESSION_TYPE") == "wayland" {
+	if d.Wayland() {
 		return false, "a Wayland session (XWayland only reaches X11 apps)"
 	}
 	if d.getenv("DISPLAY") == "" {
 		return false, "no X11 display (DISPLAY is unset)"
 	}
 	return true, ""
+}
+
+// Wayland says whether this is a Wayland session.
+func (d *Display) Wayland() bool {
+	return d.getenv("WAYLAND_DISPLAY") != "" || d.getenv("XDG_SESSION_TYPE") == "wayland"
 }
 
 func (d *Display) open() (Conn, error) {

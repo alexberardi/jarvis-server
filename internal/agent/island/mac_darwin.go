@@ -196,7 +196,7 @@ func runApp(log *slog.Logger, ev AppEvents, withIsland bool, fn func(*Island) er
 		if err := registerStopHotkey(ev); err != nil {
 			log.Warn("the stop hotkey "+StopHotkeyLabel+" won't work", "err", err)
 		} else {
-			stopHotkeyOn.Store(true)
+			setStopHotkey(StopHotkeyLabel)
 		}
 	}
 

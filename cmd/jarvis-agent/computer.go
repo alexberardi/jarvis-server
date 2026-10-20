@@ -94,7 +94,7 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 
 // newRecorder is the agent's recorder: traces under dir (<agent dir>/recordings), the browser
 // extension's events (a browser toolset in tools), the desktop where this OS can record it
-// (macOS, with keyframes from the screen toolset in tools), and a trace stopped here (the menu,
+// (macOS and X11, with keyframes from the screen toolset in tools), and a trace stopped here (the menu,
 // the CLI, voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected:
 // then it is kept here only).
 func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {

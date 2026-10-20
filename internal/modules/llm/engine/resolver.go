@@ -367,6 +367,17 @@ func (r *Resolver) apply(ctx context.Context, label string) (Endpoint, *instance
 	} else if keep != nil {
 		return r.fill(ep, c, keep), keep, nil
 	}
+	py, isPy := c.Kind.Python()
+	var hw Hardware
+	if isPy && (py.Gate != nil || py.Tune != nil) && r.Hardware != nil {
+		hw = r.Hardware(ctx)
+	}
+	if isPy && py.Gate != nil && r.Hardware != nil {
+		if why := py.Gate(hw); why != "" {
+			delete(r.bound, label)
+			return ep, nil, &NotReadyError{Label: label, State: "no_engine_build", Reason: why}
+		}
+	}
 	bin, ok := r.Binaries.Path(c.Kind, f)
 	if !ok {
 		delete(r.bound, label)
@@ -379,6 +390,12 @@ func (r *Resolver) apply(ctx context.Context, label string) (Endpoint, *instance
 			Reason: fmt.Sprintf("downloading %s %s build %s", c.Kind, f, Build(c.Kind))}
 	}
 	key := keyFor(c, f, bin)
+	if isPy && py.Tune != nil {
+		if err := py.Tune(c, hw, &key); err != nil {
+			delete(r.bound, label)
+			return ep, nil, &NotReadyError{Label: label, State: "misconfigured", Reason: err.Error()}
+		}
+	}
 	if c.ChatTemplate != "" && c.Kind == KindLlama && !c.Embedding {
 		if key.ChatTemplate, err = r.templateFile(c.ChatTemplate); err != nil {
 			delete(r.bound, label)
@@ -414,7 +431,7 @@ func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 	ep.Engine, ep.APIKey, ep.Model = inst.name, inst.apiKey, inst.alias
 	ep.FoldSystemMessages = c.FoldSystemMessages
 	ep.ContextLength, ep.Parallel = inst.key.Context, inst.key.Parallel
-	ep.Vision = inst.key.MMProj != ""
+	ep.Vision = inst.key.MMProj != "" || inst.key.Vision
 	if e, ok := c.Kind.Python(); ok {
 		ep.Model = e.RequestModel
 	}
@@ -447,10 +464,7 @@ func (r *Resolver) flavour(ctx context.Context, c LabelConfig) (Flavour, error) 
 	}
 	if e, ok := c.Kind.Python(); ok {
 		// A Python engine runs on its platform's one accelerator.
-		p := r.Platform
-		if p == (Platform{}) {
-			p = Host()
-		}
+		p := r.platform()
 		if f == "" {
 			f = e.Platforms[p]
 		}
@@ -475,6 +489,14 @@ func (r *Resolver) flavour(ctx context.Context, c LabelConfig) (Flavour, error) 
 		return "", err
 	}
 	return f, nil
+}
+
+// platform is the host's platform, for the Python engines' gate.
+func (r *Resolver) platform() Platform {
+	if r.Platform == (Platform{}) {
+		return Host()
+	}
+	return r.Platform
 }
 
 func (r *Resolver) users(h string) int {
@@ -518,6 +540,17 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 	if py, ok := c.Kind.Python(); ok {
 		maps.Copy(env, py.Env)
 		health = py.HealthPath
+		if py.APIKeyEnv != "" {
+			b := make([]byte, 16)
+			_, _ = rand.Read(b)
+			inst.apiKey = hex.EncodeToString(b)
+			env[py.APIKeyEnv] = inst.apiKey
+		}
+		// <install>/venv/bin/python → <install>/cache/<subdir>
+		install := filepath.Dir(filepath.Dir(dir))
+		for v, sub := range py.CacheEnv {
+			env[v] = filepath.Join(install, "cache", sub)
+		}
 	} else if runtime.GOOS == "linux" {
 		// The CUDA runtime ships beside the binaries.
 		ld := dir
@@ -544,6 +577,7 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 			Interval:   def(r.HealthInterval, 5*time.Second),
 			DrainGrace: def(r.DrainGrace, 30*time.Second),
 		},
+		ErrorLine:    errorLine(c.Kind),
 		StartTimeout: def(r.StartTimeout, 10*time.Minute),
 		StopTimeout:  def(r.StopTimeout, 10*time.Second),
 		Restart:      r.Restart,

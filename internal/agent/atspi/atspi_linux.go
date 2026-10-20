@@ -468,3 +468,64 @@ func elementAt(pid int, x, y int) (*computeruse.Element, error) {
 	}
 	return &computeruse.Element{Role: roleNames[r], Name: cur.name(ctx), Secure: r == rolePasswordText}, nil
 }
+
+// maxFocusWalk bounds the walk for the focused element (a document can have thousands).
+const maxFocusWalk = 2000
+
+// lastFocus is the element focused() found last: while it keeps STATE_FOCUSED it is still the
+// one (an app has one focused element), so a keystroke costs a GetState, not a walk.
+var lastFocus struct {
+	mu   sync.Mutex
+	pid  int
+	o    *obj
+	role uint32
+}
+
+// focused finds the active window's element with STATE_FOCUSED, depth-first.
+func focused(pid int) (*computeruse.Element, error) {
+	ctx := context.Background()
+	lastFocus.mu.Lock()
+	defer lastFocus.mu.Unlock()
+	if o := lastFocus.o; o != nil && lastFocus.pid == pid && o.c.Connected() && o.state(ctx).has(stateFocused) {
+		return focusedElement(ctx, *o, lastFocus.role), nil
+	}
+	lastFocus.o = nil
+	win, err := activeWindow(ctx, pid)
+	if err != nil {
+		return nil, err
+	}
+	budget := maxFocusWalk
+	var find func(o obj, depth int) (obj, bool)
+	find = func(o obj, depth int) (obj, bool) {
+		if budget--; budget < 0 || ctx.Err() != nil {
+			return obj{}, false
+		}
+		if o.state(ctx).has(stateFocused) {
+			return o, true
+		}
+		if depth >= maxDepth {
+			return obj{}, false
+		}
+		kids, _ := o.children(ctx)
+		for _, k := range kids {
+			if f, ok := find(k, depth+1); ok {
+				return f, true
+			}
+		}
+		return obj{}, false
+	}
+	o, ok := find(win, 0)
+	if !ok {
+		return nil, nil
+	}
+	r, err := o.role(ctx)
+	if err != nil {
+		return nil, callErr("GetRole", err)
+	}
+	lastFocus.pid, lastFocus.o, lastFocus.role = pid, &o, r
+	return focusedElement(ctx, o, r), nil
+}
+
+func focusedElement(ctx context.Context, o obj, role uint32) *computeruse.Element {
+	return &computeruse.Element{Role: roleNames[role], Name: o.name(ctx), Secure: role == rolePasswordText}
+}

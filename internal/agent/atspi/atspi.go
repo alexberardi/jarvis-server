@@ -74,6 +74,10 @@ func Element(gen int, ref string) (*computeruse.Element, error) { return element
 // action and for recording; nil when there's none.
 func ElementAt(pid int, x, y int) (*computeruse.Element, error) { return elementAt(pid, x, y) }
 
+// Focused returns the element with the keyboard focus in the active window of the app with
+// this pid, which recorded typing goes to (a passwordtext is Secure); nil when none has it.
+func Focused(pid int) (*computeruse.Element, error) { return focused(pid) }
+
 func clip(s string) string {
 	r := []rune(s)
 	if len(r) <= maxText {
