@@ -9,12 +9,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/tray"
 )
 
@@ -309,5 +311,15 @@ func TestComputerClick(t *testing.T) {
 	nativeInput = func() input.Input { return nil }
 	if err := computerCmd([]string{"click", "1", "1"}, &b, never); err == nil {
 		t.Fatal("no backend: no error")
+	}
+}
+
+// The recorder records the desktop where the OS can (macOS), and says it can't elsewhere.
+func TestNewRecorderDesktopSource(t *testing.T) {
+	activity := &computer.Activity{}
+	rec := newRecorder(t.TempDir(), activity, nil, func() *node.CC { return nil }, slog.New(slog.DiscardHandler))
+	_, has := rec.Sources[computer.ModeDesktop]
+	if has != (runtime.GOOS == "darwin") {
+		t.Fatalf("desktop source on %s: %v", runtime.GOOS, has)
 	}
 }

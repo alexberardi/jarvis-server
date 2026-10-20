@@ -11,7 +11,10 @@ func TestSupportedOnlyOnMacAndTrustedIsCallable(t *testing.T) {
 	if got := Supported(); got != (runtime.GOOS == "darwin") {
 		t.Fatalf("Supported() = %v on %s", got, runtime.GOOS)
 	}
-	t.Logf("Trusted() = %v", Trusted())
+	t.Logf("Trusted() = %v, ListenTrusted() = %v", Trusted(), ListenTrusted())
+	if runtime.GOOS != "darwin" && ListenTrusted() {
+		t.Fatal("Input Monitoring granted off macOS")
+	}
 }
 
 // The privacy probes must be callable (and never prompt) everywhere.

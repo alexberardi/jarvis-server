@@ -140,13 +140,18 @@ password the model can see.
    done"), the menu's "Record a macro…" / "Stop recording" (not gated by computer control, C11) and `jarvis-agent computer record start|stop`; browser
    only for now, 30 minutes at most; a recording stopped on the computer is uploaded to
    `POST /api/v0/computer/recordings` ([decision](../decisions/2026-10-19-agent-recording.md)).
+   Desktop on macOS (piece 36): `computer_record_start {mode: desktop}` or `jarvis-agent computer
+   record start --desktop`, through a listen-only event tap that needs the Input Monitoring grant
+   (the setup page asks for it) ([decision](../decisions/2026-10-19-desktop-recording-macos.md)).
+   jarvisd's `start_recording` still starts the browser, and learning skips desktop traces.
 2. **Capture structure, not just pixels.**
    - Browser (extension): each element acted on (role, accessible name, a stable selector),
      values typed (password and sensitive fields masked, never stored), navigations, downloads
      and uploads.
    - Desktop (agent): app and window, the element under each click from the accessibility tree,
      keystrokes grouped into text, a keyframe screenshot per step. Secure input fields are
-     never captured.
+     never captured. Built on macOS (piece 36): events `click`, `input`, `key`, `scroll` with
+     `app` (bundle id) and `element.ax_path`; keyframes at most every 2 s.
    - Stored on the computer and the household server only, with retention; viewable and deletable.
 3. **Learn.** The model turns the trace (plus narration) into a workflow: named steps with an
    intent and a target each; **parameters** for what varies (dates, file names, amounts), which

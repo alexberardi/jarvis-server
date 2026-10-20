@@ -49,8 +49,9 @@ const (
 var (
 	// ErrNotRecording: no recording with that id is going on.
 	ErrNotRecording = errors.New("no recording is going on")
-	// ErrDesktopRecording: recording the desktop itself comes later; the browser works.
-	ErrDesktopRecording = errors.New("recording the desktop isn't supported yet: I can watch what you do in the browser")
+	// ErrDesktopRecording: this computer has no desktop recording (macOS has it, piece 36);
+	// the browser works.
+	ErrDesktopRecording = errors.New("I can't record the desktop on this computer yet: I can watch what you do in the browser")
 	// ErrBusy: Jarvis is already recording or controlling this computer.
 	ErrBusy = errors.New("Jarvis is already using this computer")
 )
@@ -64,7 +65,14 @@ type Source interface {
 	Stop(ctx context.Context, id string) error
 }
 
-// Keyframe is a desktop recording's picture of the screen at one event, kept on this computer.
+// KeyframeSource is a Source that takes keyframes (the desktop): once Stop returns, Keyframes
+// hands over recording id's.
+type KeyframeSource interface {
+	Keyframes(id string) []Keyframe
+}
+
+// Keyframe is a desktop recording's picture of the screen at one event, kept on this computer
+// (<id>.<seq>.jpg next to the trace, 0600).
 type Keyframe struct {
 	Seq  int    `json:"seq"`
 	Path string `json:"-"`
@@ -133,15 +141,14 @@ func (r *Recorder) Path(id string) string { return filepath.Join(r.Dir, id+".jso
 
 // Start starts recording in mode and returns the recording's id.
 func (r *Recorder) Start(ctx context.Context, mode string) (string, error) {
-	switch mode {
-	case ModeBrowser:
-	case ModeDesktop:
-		return "", ErrDesktopRecording
-	default:
+	if mode != ModeBrowser && mode != ModeDesktop {
 		return "", fmt.Errorf("unknown recording mode %q: want browser or desktop", mode)
 	}
 	src := r.Sources[mode]
-	if src == nil {
+	switch {
+	case src == nil && mode == ModeDesktop:
+		return "", ErrDesktopRecording
+	case src == nil:
 		return "", fmt.Errorf("can't record the %s on this computer", mode)
 	}
 	if k, _ := r.Activity.Status(); k != Idle {
@@ -280,10 +287,15 @@ func (r *Recorder) stop(id, reason string) (Trace, error) {
 		r.log().Warn("recording: the source didn't stop cleanly; keeping what it sent", "recording", rec.trace.ID, "err", err)
 	}
 	cancel()
+	var keyframes []Keyframe
+	if ks, ok := rec.src.(KeyframeSource); ok {
+		keyframes = ks.Keyframes(rec.trace.ID)
+	}
 
 	r.mu.Lock()
 	r.cur = nil
 	tr := rec.trace
+	tr.Keyframes = keyframes
 	tr.StoppedAt, tr.Reason = r.clock().UTC(), reason
 	stopTimer, removeStop := rec.stopTimer, rec.removeStop
 	r.mu.Unlock()
@@ -305,14 +317,18 @@ func (r *Recorder) stop(id, reason string) (Trace, error) {
 	return tr, nil
 }
 
-// Delete removes recording id's local copy (stopping it first, without handing it on, if it
-// is the one going on). A copy already gone is no error.
+// Delete removes recording id's local copy and its keyframes (stopping it first, without
+// handing it on, if it is the one going on). A copy already gone is no error.
 func (r *Recorder) Delete(id string) error {
 	if !recordingIDPattern.MatchString(id) {
 		return fmt.Errorf("bad recording id %q", id)
 	}
 	if r.Current() == id {
 		_, _ = r.stop(id, StopAsked)
+	}
+	kf, _ := filepath.Glob(filepath.Join(r.Dir, id+".*.jpg"))
+	for _, k := range kf {
+		_ = os.Remove(k)
 	}
 	err := os.Remove(r.Path(id))
 	if errors.Is(err, os.ErrNotExist) {
