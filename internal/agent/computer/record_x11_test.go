@@ -191,7 +191,7 @@ func TestX11ClicksRecorded(t *testing.T) {
 	if got, want := summary(evs), `click New note; input Title "Bann !"; key Title [Enter]; key Title [ctrl+s]; scroll; click`; got != want {
 		t.Fatalf("trace:\n got %s\nwant %s", got, want)
 	}
-	if c := evs[0]; c.App != "Notes" || c.X != 120 || c.Y != 40 || c.Element.Role != "button" {
+	if c := evs[0]; c.App != "Notes" || c.X != 120 || c.Y != 40 || c.Element.Role != "button" || c.Button != "" {
 		t.Fatalf("click %+v", c)
 	}
 	if s := evs[4]; s.DY != 2 || s.X != 300 {
@@ -254,8 +254,12 @@ func TestWaylandDesktopRecordingRefused(t *testing.T) {
 			if left, _ := os.ReadDir(e.r.Dir); len(left) != 0 {
 				t.Fatalf("a refused start left %v", left)
 			}
-			// The browser still records.
-			if _, err := e.r.Start(context.Background(), ModeBrowser); err != nil {
+			// The browser still records (stopped, so Windows can remove the open trace file).
+			id, err := e.r.Start(context.Background(), ModeBrowser)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.r.Stop(id); err != nil {
 				t.Fatal(err)
 			}
 		})
