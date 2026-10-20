@@ -300,21 +300,41 @@ function ConnectionCard({
   )
 }
 
-/** Row is one connection: its name and badges, the lines under it, and its health or actions at the right. */
-function Row({ testId, title, meta, children, trailing }: { testId: string; title: ReactNode; meta?: ReactNode; children?: ReactNode; trailing?: ReactNode }) {
+/**
+ * Row is one connection: its name, badges and health on the first line, the lines under it, and
+ * its actions at the right (under it on a phone).
+ */
+function Row({
+  testId,
+  title,
+  status,
+  meta,
+  children,
+  actions,
+}: {
+  testId: string
+  title: ReactNode
+  status?: ReactNode
+  meta?: ReactNode
+  children?: ReactNode
+  actions?: ReactNode
+}) {
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0" data-testid={testId}>
-      <div className="min-w-0 flex-1 basis-64 space-y-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">{title}</div>
+      <div className="min-w-0 flex-1 basis-64 space-y-0.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {title}
+          {status && <span className="ml-auto">{status}</span>}
+        </div>
         {meta && <p className="text-small break-all text-text-muted">{meta}</p>}
         {children}
       </div>
-      {trailing && <div className="flex flex-wrap items-center gap-2">{trailing}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </li>
   )
 }
 
-const rowName = 'font-mono text-subheading break-all text-text'
+const rowName = 'font-mono text-body font-medium break-all text-text'
 
 /**
  * ConnectionsPage (AD7): what talks to jarvisd. The list renders at once without health
@@ -417,7 +437,7 @@ export default function ConnectionsPage() {
                   </>
                 }
                 meta={l.url}
-                trailing={<HealthBadge health={l.health} probing={probing} />}
+                status={<HealthBadge health={l.health} probing={probing} />}
               >
                 <PublicURLField name={l.name} value={l.public_url} />
               </Row>
@@ -465,10 +485,9 @@ export default function ConnectionsPage() {
                       {x.description ? ` · ${x.description}` : ''}
                     </>
                   }
-                  trailing={
-                    <>
-                      <HealthBadge health={x.health} probing={probing} />
-                      {x.removable && (
+                  status={<HealthBadge health={x.health} probing={probing} />}
+                  actions={
+                    x.removable && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -483,8 +502,7 @@ export default function ConnectionsPage() {
                         >
                           Remove
                         </Button>
-                      )}
-                    </>
+                    )
                   }
                 >
                   <PublicURLField name={x.name} value={x.public_url} />
@@ -543,7 +561,7 @@ export default function ConnectionsPage() {
                       {a.last_rotated_at ? ` · key rotated ${new Date(a.last_rotated_at).toLocaleDateString()}` : ''}
                     </>
                   }
-                  trailing={
+                  actions={
                     <>
                       <Button
                         size="sm"
