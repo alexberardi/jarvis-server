@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -131,6 +132,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			s.updateRanCard(ctx, w, *rc.results, "running", note)
 		}
 		t.RunID, t.Answer, t.Approved = out.RunID, "", digests(out.Pending)
+		t.ApprovedReason = "within your " + dollars(limit) + " spend limit"
 		out = s.Computer.Loop.Run(ctx, t)
 	}
 	s.log().Info("errands: step (computer)", "run", out.RunID, "state", out.State, "rounds", out.Rounds)
@@ -193,14 +195,14 @@ func (s *Service) withinSpendLimit(ctx context.Context, hh string, out computer.
 }
 
 // priceCents reads a price as the model reports it ("$12.99", "12,99 €", "1,299.00") in cents.
+// It is on the auto-pay path, so anything it could under-read fails: more than one number
+// ("$12.99 + $5.00 shipping"), or letters other than one currency code ("$1.2k", "Free").
 func priceCents(s string) (int64, bool) {
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= '0' && r <= '9') || r == '.' || r == ',' {
-			b.WriteRune(r)
-		}
+	m := priceRe.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return 0, false
 	}
-	n := b.String()
+	n := m[1]
 	if i := strings.LastIndexAny(n, ".,"); i >= 0 && len(n)-i-1 == 2 {
 		n = strings.NewReplacer(",", "", ".", "").Replace(n[:i]) + "." + n[i+1:]
 	} else {
@@ -212,6 +214,9 @@ func priceCents(s string) (int64, bool) {
 	}
 	return int64(math.Round(f * 100)), true
 }
+
+// priceRe is one number, with a currency sign or a three-letter code (USD) on either side.
+var priceRe = regexp.MustCompile(`^(?:[A-Z]{3}\s*)?[$€£¥₹]?\s*([0-9][0-9.,]*)\s*[$€£¥₹]?(?:\s*[A-Z]{3})?$`)
 
 func dollars(cents int64) string { return fmt.Sprintf("$%d.%02d", cents/100, cents%100) }
 

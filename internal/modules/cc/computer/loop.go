@@ -115,6 +115,8 @@ type Task struct {
 	// Approved are the digests of held actions the user approved: the loop mints their tokens
 	// and runs the held batch before anything else.
 	Approved []string
+	// ApprovedReason is what the audit log says approved them ("" = "approved by the user").
+	ApprovedReason string
 	// Answer is the user's reply to the run's last question.
 	Answer string
 	// Progress, when set, is called after every round with the run as saved (its history), so
@@ -478,10 +480,14 @@ func (l *Loop) runApproved(ctx context.Context, r *round, held *Held) (Outcome, 
 		}
 	}
 	tgt := held.Target
+	reason := r.task.ApprovedReason
+	if reason == "" {
+		reason = "approved by the user"
+	}
 	ds := make([]decision, len(held.Actions))
 	for i, h := range held.Actions {
 		ds[i] = decision{action: h.Action, site: siteHost(tgt.Site), app: tgt.App,
-			verdict: policy.Verdict{Effect: policy.Allow, Reason: "approved by the user"}}
+			verdict: policy.Verdict{Effect: policy.Allow, Reason: reason}}
 		if h.Category != "" {
 			ds[i].risk = computeruse.Risk{Level: computeruse.LevelConfirm, Category: h.Category, Reason: h.Reason}
 			ds[i].target = policy.TargetAction + h.Category

@@ -36,3 +36,7 @@ These choices were made while wiring `computer_task` into the errand runner
 - **Spend limit.** `computer.auto_approve_cents` is compared with the checkout's price in
   cents, read from the model's price text (`$12.99`, `12,99 €`). The currency is not converted.
   It applies only when everything held is in the `pay` category.
+  A price that isn't exactly one number (with at most a currency sign or code) asks: `$1.2k`
+  or `$12.99 + $5.00 shipping` is never read as less than it is. The limit is per checkout,
+  not per run: a task with several checkouts could approve each under the limit. An
+  auto-approval is audited as "within your $X spend limit", not "approved by the user".

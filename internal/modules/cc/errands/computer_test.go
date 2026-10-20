@@ -317,6 +317,9 @@ func TestCheckoutCardThenApprove(t *testing.T) {
 	if w := c.wf("wf_c"); w.State != "done" || w.Results[0].Message != "Ordered the blue mug." {
 		t.Fatalf("run = %s %+v", w.State, w.Results)
 	}
+	if ev, ok := orderEvent(c); !ok || ev.Reason != "approved by the user" {
+		t.Fatalf("audit = %+v", ev)
+	}
 	// The progress card lists what ran, once each (not the held action as well).
 	up, _ := c.cards.update("item-1")
 	st := up.Metadata["steps"].([]any)[0].(map[string]any)
@@ -383,10 +386,82 @@ func TestSpendLimitAutoApproves(t *testing.T) {
 		t.Fatalf("progress card doesn't say it approved:\n%s", up.Body)
 	}
 
+	// The audit log says the spend limit approved it, not the user.
+	if ev, ok := orderEvent(c); !ok || ev.Reason != "within your $20.00 spend limit" {
+		t.Fatalf("audit = %+v", ev)
+	}
+
 	// Over the limit, it asks.
 	c2 := newComputerEnv(t)
 	c2.s.Settings = withInts{c2.set, map[string]int64{SettingAutoApproveCents: 1000}}
 	c2.parkOnCheckout("errand")
+	if len(c2.appr.minted()) != 0 || len(c2.comp.acted()) != 0 {
+		t.Fatal("over the limit, something was approved")
+	}
+
+	// Within the limit, but the batch also sends a message: it asks, and nothing runs.
+	c3 := newComputerEnv(t)
+	c3.s.Settings = withInts{c3.set, map[string]int64{SettingAutoApproveCents: 2000}}
+	c3.comp.els = append(c3.comp.els, computer.Element{Ref: "e6", Role: "button", Name: "Send message"})
+	c3.policy.set(policy.ToolComputerTask+"|"+policy.TargetAction+computeruse.CatSend, policy.Verdict{Effect: policy.Ask, Reason: "computer task default (action:send)"})
+	c3.llm.say("computer", `{"checkout": {"product": "Blue mug", "price": "$12.99", "currency": "USD"}, `+
+		`"actions": [{"kind": "press", "ref": "e1", "intent": "Place the order"}, {"kind": "press", "ref": "e6", "intent": "Message the seller"}]}`, doneReply)
+	c3.launchRun("wf_c", "errand", computerStep("order a blue mug"))
+	c3.idle()
+	card, ok := c3.cardTitled(stepTitlePrefix)
+	if !ok || strings.Join(elementLabels(card.Metadata), ",") != "Approve,Cancel" {
+		t.Fatalf("no confirmation for a batch that isn't only a payment: %v", c3.cards.titles())
+	}
+	if st := c3.wfState("wf_c"); st != "waiting" {
+		t.Fatalf("state = %s", st)
+	}
+	if len(c3.appr.minted()) != 0 || len(c3.comp.acted()) != 0 {
+		t.Fatalf("minted %v, acted %+v", c3.appr.minted(), c3.comp.acted())
+	}
+}
+
+// orderEvent is the audit event of the "Place the order" action that ran.
+func orderEvent(c *cenv) (policy.Event, bool) {
+	for _, ev := range c.act.all() {
+		if ev.Source == computer.SourceComputer && ev.Detail["intent"] == "Place the order" && ev.Outcome == policy.OutcomeRan {
+			return ev, true
+		}
+	}
+	return policy.Event{}, false
+}
+
+func TestPriceCents(t *testing.T) {
+	for _, tc := range []struct {
+		in    string
+		cents int64
+		ok    bool
+	}{
+		{"$12.99", 1299, true},
+		{"12,99 €", 1299, true},
+		{"1,299.00", 129900, true},
+		{"1.299,00 €", 129900, true},
+		{"USD 12.99", 1299, true},
+		{"12.99 EUR", 1299, true},
+		{"", 0, false},
+		{"Free", 0, false},
+		{"$1.2k", 0, false},
+		{"$12.99 + $5.00 shipping", 0, false},
+		{"$12.99/mo", 0, false},
+	} {
+		got, ok := priceCents(tc.in)
+		if ok != tc.ok || (ok && got != tc.cents) {
+			t.Errorf("priceCents(%q) = %d, %v; want %d, %v", tc.in, got, ok, tc.cents, tc.ok)
+		}
+	}
+	// "$1.2k" is not approved under a $20 limit.
+	c := newComputerEnv(t)
+	c.s.Settings = withInts{c.set, map[string]int64{SettingAutoApproveCents: 2000}}
+	if _, ok := c.s.withinSpendLimit(context.Background(), hh, computer.Outcome{
+		Checkout: &computer.Checkout{Product: "Blue mug", Price: "$1.2k"},
+		Pending:  []computer.PendingAction{{Category: computeruse.CatPay, Digest: "d"}},
+	}); ok {
+		t.Fatal("$1.2k approved under a $20 limit")
+	}
 }
 
 func TestStopRunningComputerStep(t *testing.T) {
