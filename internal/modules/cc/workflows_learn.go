@@ -203,6 +203,11 @@ type desktopElement struct {
 	Role   string `json:"role,omitempty"`
 	Name   string `json:"name,omitempty"`
 	AXPath string `json:"ax_path,omitempty"`
+	// Vision: the vision model named it from the click's keyframe (workflows_learn_sight.go),
+	// with Confidence; Did is what it says the click did. Never read from a trace.
+	Vision     bool    `json:"-"`
+	Confidence float64 `json:"-"`
+	Did        string  `json:"-"`
 }
 
 type desktopWindow struct {
@@ -541,6 +546,9 @@ func describeDesktopEvent(e desktopEvent) string {
 		if name := oneLine(e.Element.Name); name != "" {
 			el += " " + strconv.Quote(truncateRunes(name, learnMaxValue))
 		}
+		if e.Element.Vision {
+			el += " (seen on the screen)"
+		}
 		where = el + " in " + where
 	}
 	switch e.Kind {
@@ -679,17 +687,11 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 // buildDesktopWorkflow is buildWorkflow for a desktop trace: each step targets the recorded
 // app and window, and replays its last event (a click at the recorded point, typing, a key).
 // A step whose event had an accessibility element (AX on macOS, AT-SPI on Linux) records it
-// with source "ax", so a replay finds it again; one without (no accessibility context, a key
-// with nothing focused) keeps only the point, the app and the window.
+// with source "ax", so a replay finds it again; a click the vision model named
+// (nameClicksBySight) records that with source "vision"; one without (no accessibility
+// context, no keyframe, a key with nothing focused) keeps only the point, the app and the window.
 func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandidate, out learnOutput) (TaughtWorkflow, error) {
-	w, _, err := buildDesktopSteps(rec, evs, cands, out)
-	return w, err
-}
-
-// buildDesktopSteps is buildDesktopWorkflow that also returns each step's event numbers.
-func buildDesktopSteps(rec Recording, evs []desktopEvent, cands []paramCandidate, out learnOutput) (TaughtWorkflow, [][]int, error) {
 	w := newDraft(rec, out)
-	var stepNums [][]int
 	subs := learnParams(&w, out, cands)
 	for _, s := range out.Steps {
 		nums := stepEvents(s.EventSeqs, len(evs))
@@ -698,7 +700,11 @@ func buildDesktopSteps(rec Recording, evs []desktopEvent, cands []paramCandidate
 		}
 		n := nums[len(nums)-1]
 		e := evs[n-1]
-		intent := stepIntent(s.Intent, describeDesktopEvent(e))
+		described := describeDesktopEvent(e)
+		if e.Element != nil && e.Element.Did != "" {
+			described = e.Element.Did
+		}
+		intent := stepIntent(s.Intent, described)
 		a, ok := desktopEventAction(e, intent)
 		if !ok {
 			continue
@@ -717,17 +723,12 @@ func buildDesktopSteps(rec Recording, evs []desktopEvent, cands []paramCandidate
 			continue
 		}
 		step.Risk = risk
-		had := len(w.Steps)
 		addStep(&w, step, subs[n])
-		if len(w.Steps) > had {
-			stepNums = append(stepNums, nums)
-		}
 	}
 	// No URL or download on a desktop: the model's text or screen check, if any.
 	sc := successCheck(out.Success, nil)
 	sc.URLContains = ""
-	w, err := finishDraft(w, sc)
-	return w, stepNums, err
+	return finishDraft(w, sc)
 }
 
 // newDraft is the draft's owner, name and triggers.
@@ -963,6 +964,9 @@ func desktopRecordedElement(el *desktopElement) *RecordedElement {
 	if el == nil || (el.Role == "" && el.Name == "") {
 		return nil
 	}
+	if el.Vision {
+		return &RecordedElement{Role: el.Role, Name: el.Name, Source: elementSourceVision, Confidence: el.Confidence}
+	}
 	return &RecordedElement{Role: el.Role, Name: el.Name, AXPath: el.AXPath, Source: "ax"}
 }
 
@@ -1109,15 +1113,10 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 		if err := m.awaitKeyframes(ctx, *rec, evs); err != nil {
 			return err
 		}
+		note = m.nameClicksBySight(ctx, *rec, evs)
 		cands := desktopParamCandidates(evs)
 		system, prompt = desktopLearnSystemPrompt, desktopLearnPrompt(evs, cands, rec.Narration)
-		build = func(out learnOutput) (TaughtWorkflow, error) {
-			w, nums, err := buildDesktopSteps(*rec, evs, cands, out)
-			if err == nil {
-				note = m.nameStepsBySight(ctx, *rec, &w, evs, nums)
-			}
-			return w, err
-		}
+		build = func(out learnOutput) (TaughtWorkflow, error) { return buildDesktopWorkflow(*rec, evs, cands, out) }
 	}
 	if m.LLM == nil {
 		return errors.New("no llm module")

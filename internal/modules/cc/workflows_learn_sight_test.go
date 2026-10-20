@@ -15,8 +15,8 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 )
 
-// fakeSightLLM answers the learn call with learn, and a call with images (naming steps by
-// sight) with a label for each "Step N" it is shown: labels[N], else "Label N".
+// fakeSightLLM answers the learn call with learn, and a call with images (naming clicks by
+// sight) with a label for each "Event N" it is shown: labels[N], else "Label N".
 type fakeSightLLM struct {
 	mu     sync.Mutex
 	learn  string
@@ -25,7 +25,7 @@ type fakeSightLLM struct {
 	reqs   []llm.ChatRequest
 }
 
-var sightStepRE = regexp.MustCompile(`(?m)^Step (\d+):`)
+var sightStepRE = regexp.MustCompile(`(?m)^Event (\d+):`)
 
 func (f *fakeSightLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	f.mu.Lock()
@@ -38,7 +38,7 @@ func (f *fakeSightLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRe
 	if f.fail != nil {
 		return nil, f.fail
 	}
-	var steps []map[string]any
+	var evs []map[string]any
 	for _, p := range parts {
 		for _, m := range sightStepRE.FindAllStringSubmatch(p.Text, -1) {
 			n, _ := strconv.Atoi(m[1])
@@ -46,14 +46,14 @@ func (f *fakeSightLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRe
 			if label == "" {
 				label = "Label " + m[1]
 			}
-			steps = append(steps, map[string]any{"step": n, "app": "Text Editor", "role": "button", "label": label,
+			evs = append(evs, map[string]any{"event": n, "app": "Text Editor", "role": "button", "label": label,
 				"did": "clicked " + label, "confidence": 0.8})
 		}
 	}
 	// One the model made up, and one it couldn't name: both ignored.
-	steps = append(steps, map[string]any{"step": 99, "role": "button", "label": "Ghost", "confidence": 1},
-		map[string]any{"step": 1, "role": "", "label": "", "confidence": 0.1})
-	b, _ := json.Marshal(map[string]any{"steps": steps})
+	evs = append(evs, map[string]any{"event": 99, "role": "button", "label": "Ghost", "confidence": 1},
+		map[string]any{"event": 1, "role": "", "label": "", "confidence": 0.1})
+	b, _ := json.Marshal(map[string]any{"events": evs})
 	return &llm.ChatResponse{Content: "```json\n" + string(b) + "\n```"}, nil
 }
 
@@ -192,10 +192,11 @@ const waylandSightModel = `{"name": "Add to the shopping list",
   {"intent": "Save it", "event_seqs": [3]}
  ]}`
 
-// TestLearnNamesWaylandStepsBySight: a Wayland click has no element, only its point; the vision
-// model sees its marked keyframe and crop, the window and the events around it, and its answer
-// becomes the step's element (source vision, its confidence), and the step's intent when the
-// learn call gave none. Steps without a click are left alone.
+// TestLearnNamesWaylandStepsBySight: a Wayland click has no element, only its point; before the
+// learn call, the vision model sees its marked keyframe and crop, the window and the events
+// around it. Its answer is what the learn prompt says was clicked, the step's element (source
+// vision, its confidence), and the step's intent when the learn call gave none. Steps without a
+// click are left alone.
 func TestLearnNamesWaylandStepsBySight(t *testing.T) {
 	se := newSightEnv(t, waylandSightModel, true, 32768)
 	se.record("rec_wl_sight", desktopTrace(t, "desktop_wayland_trace.json"))
@@ -229,7 +230,7 @@ func TestLearnNamesWaylandStepsBySight(t *testing.T) {
 	}
 	text := sightText(calls[0])
 	for _, s := range []string{
-		"Step 1: click in org.gnome.TextEditor",
+		"Event 1: click in org.gnome.TextEditor",
 		`window: org.gnome.TextEditor, "notes.txt"`,
 		"after: type into org.gnome.TextEditor",
 		"(200,340)", // the click on the keyframe
@@ -241,6 +242,12 @@ func TestLearnNamesWaylandStepsBySight(t *testing.T) {
 	}
 	if strings.Contains(text, "hunter2") {
 		t.Fatalf("a masked value reached the model:\n%s", text)
+	}
+	se.model.mu.Lock()
+	learnPrompt := *se.model.reqs[len(se.model.reqs)-1].Messages[1].Content.Text
+	se.model.mu.Unlock()
+	if want := `1. click button "Label 1" (seen on the screen) in org.gnome.TextEditor — "notes.txt" at (1200,340)`; !strings.Contains(learnPrompt, want) {
+		t.Fatalf("the learn prompt lacks %q:\n%s", want, learnPrompt)
 	}
 	if body := se.cardBody(); strings.Contains(body, "vision") {
 		t.Fatalf("the card has a vision note:\n%s", body)
@@ -301,7 +308,7 @@ func TestLearnSightLeavesAXSteps(t *testing.T) {
 			t.Fatal("the AX step's keyframe was sent")
 		}
 	}
-	if strings.Contains(text, "Step 1:") || !strings.Contains(text, "unmarked") || !strings.Contains(text, "(500,600)") {
+	if strings.Contains(text, "Event 1:") || !strings.Contains(text, "unmarked") || !strings.Contains(text, "(500,600)") {
 		t.Fatalf("request text:\n%s", text)
 	}
 }
@@ -321,7 +328,7 @@ func TestLearnSightWithoutVision(t *testing.T) {
 		t.Fatalf("steps %s", mustJSON(t, w.Steps))
 	}
 	body := se.cardBody()
-	if !strings.Contains(body, "no vision") || !strings.Contains(body, "2 steps") {
+	if !strings.Contains(body, "no vision") || !strings.Contains(body, "2 clicks") {
 		t.Fatalf("the card doesn't say the model has no vision:\n%s", body)
 	}
 }
@@ -337,7 +344,7 @@ func TestLearnSightModelFails(t *testing.T) {
 	if w.Steps[1].Element != nil || len(se.model.sightCalls()) != 1 {
 		t.Fatalf("steps %s", mustJSON(t, w.Steps))
 	}
-	if body := se.cardBody(); !strings.Contains(body, "couldn't name 1 step from the screen") {
+	if body := se.cardBody(); !strings.Contains(body, "couldn't name 1 click from the screen") {
 		t.Fatalf("card:\n%s", body)
 	}
 }
@@ -367,7 +374,7 @@ func TestLearnSightBatches(t *testing.T) {
 				t.Fatalf("%d calls with images, want %d", len(calls), tc.calls)
 			}
 			for _, c := range calls {
-				if n := len(sightImages(c)); n > 2*sightMaxSteps {
+				if n := len(sightImages(c)); n > 2*sightMaxClicks {
 					t.Fatalf("a call with %d images", n)
 				}
 			}
