@@ -191,10 +191,7 @@ func (m *Module) writeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &lq):
 		// D37: the legacy node result shape, so command-center can relay it unchanged.
-		httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"success": false, "error": "low_quality", "reason": lq.Reason,
-			"speech_seconds": lq.SpeechSeconds, "detail": lq.Error(),
-		})
+		httpx.WriteJSON(w, http.StatusUnprocessableEntity, lq.Wire())
 	case errors.Is(err, ErrBadAudio):
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrSampleIndex):

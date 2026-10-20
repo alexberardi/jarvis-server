@@ -91,7 +91,7 @@ var Definitions = []settings.Definition{
 	{Key: "voice.min_speaker_margin", Category: "voice", Type: settings.Float, Default: 0.05,
 		Description: "Open-set/ambiguity gate. With 2+ enrolled voices, a recognition is rejected (unknown speaker) when the winner beats the runner-up by less than this margin. 0 disables the gate."},
 	{Key: "voice.enroll_min_speech_seconds", Category: "voice", Type: settings.Float, Default: 3.0,
-		Description: "Enrollment quality gate (D37): a take with less speech than this (energy VAD) is rejected as low_quality and not stored."},
+		Description: "Enrollment quality gate (D37): a take with less speech than this (energy VAD) is rejected as low_quality and not stored. Only voiced 20 ms frames count, not the pauses between words, so 3.0 s is about 4 s of talking."},
 	{Key: "voice.enroll_min_consistency", Category: "voice", Type: settings.Float, Default: 0.3,
 		Description: "Enrollment quality gate (D37): a take whose cosine to the user's other takes is below this is rejected as low_quality (someone else, or noise). 0 disables it."},
 }
