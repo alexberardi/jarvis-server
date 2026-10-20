@@ -122,6 +122,14 @@ describe('Models page job checklist (AD3b)', () => {
     expect(screen.getByRole('tab', { name: 'Catalog' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('opens the Jobs tab while a job filter is on', async () => {
+    renderPage('/models?job=speaker')
+    expect(await screen.findByTestId('catalog-eres2net')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Jobs' }))
+    expect(await screen.findByRole('list', { name: 'Model jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Jobs' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('splits the page into tabs: Jobs first, the others one tap away, and ?tab= opens one', async () => {
     renderPage()
     expect(await screen.findByRole('list', { name: 'Model jobs' })).toBeInTheDocument()

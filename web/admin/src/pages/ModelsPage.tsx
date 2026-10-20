@@ -24,7 +24,8 @@ type Tab = (typeof TABS)[number]
  * per-job checklist, AD3b, with a "Set up" per missing job, and what each label runs), Catalog
  * (the catalog with fit, narrowed by a job's "Set up", and Hugging Face installs), Installed,
  * Prompts and Hardware. Installs in progress stay above the tabs. `?job=stt` (the dashboard
- * banner's link) opens the Catalog with that filter; `?tab=` opens a tab.
+ * banner's link) opens the Catalog with that filter; `?tab=` opens a tab (a tab chosen here is always
+ * written to it, so Jobs opens even while a filter is on).
  */
 export default function ModelsPage() {
   const [tokenReason, setTokenReason] = useState<string | null>(null)
@@ -63,7 +64,7 @@ export default function ModelsPage() {
         <Tabs
           label="Models"
           value={tab}
-          onValueChange={(id) => update({ tab: id === 'jobs' ? null : id })}
+          onValueChange={(id) => update({ tab: id })}
           tabs={[
             {
               id: 'jobs',
