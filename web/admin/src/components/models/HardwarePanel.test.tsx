@@ -72,3 +72,26 @@ describe('HardwarePanel engines', () => {
     await waitFor(() => expect(api.getHardware).toHaveBeenCalledTimes(2))
   })
 })
+
+describe('HardwarePanel builds', () => {
+  it('offers the MLX engine where it runs and says why not elsewhere', async () => {
+    const why = 'mlx-lm needs Apple Silicon (darwin/arm64, macOS 14 or later); this host is linux/amd64'
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: {
+        'llama-server': { build: 'b11457', flavours: ['cpu', 'cuda'] },
+        'mlx-lm': { build: '0.32.2', flavours: [], unavailable: why },
+      },
+    })
+    renderPanel()
+    await screen.findByText(why)
+    expect(screen.getByRole('button', { name: 'cuda ↓' })).toBeTruthy()
+
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: { 'mlx-lm': { build: '0.32.2', flavours: ['metal'] } },
+    })
+    renderPanel()
+    expect(await screen.findByRole('button', { name: 'metal ↓' })).toBeTruthy()
+  })
+})

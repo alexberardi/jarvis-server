@@ -177,19 +177,26 @@ const (
 	KeyWhisperPath     = "stt.engine_path"
 )
 
-// BaseURLKey and PathKey name a kind's release-URL and binary-override settings.
+// BaseURLKey and PathKey name a kind's release-URL and binary-override settings; "" for a
+// kind that has none (uv and the Python engines download from their pinned defaults).
 func BaseURLKey(k Kind) string {
-	if k == KindWhisper {
+	switch k {
+	case KindLlama:
+		return KeyLlamaBaseURL
+	case KindWhisper:
 		return KeyWhisperBaseURL
 	}
-	return KeyLlamaBaseURL
+	return ""
 }
 
 func PathKey(k Kind) string {
-	if k == KindWhisper {
+	switch k {
+	case KindLlama:
+		return KeyLlamaEnginePath
+	case KindWhisper:
 		return KeyWhisperPath
 	}
-	return KeyLlamaEnginePath
+	return ""
 }
 
 // SettingDefinitions returns every setting this package and the model manager read. The llm
@@ -286,9 +293,13 @@ type LabelConfig struct {
 
 // ModelInfo is what the model manager knows about an installed model.
 type ModelInfo struct {
-	ID             string
-	Kind           string
-	Path           string
+	ID   string
+	Kind string
+	// Path is the model's file, or its directory for a Hugging Face layout model.
+	Path string
+	// Engine is the engine kind that runs the model; "" = by its format (a GGUF file runs on
+	// llama-server, a directory on the host's Python engine, DirEngine).
+	Engine         Kind
 	MMProjID       string // the model's own projector, when installed with one
 	ContextDefault int
 	// ChatTemplate and FoldSystemMessages come from the model's catalog entry (ID12).
@@ -313,6 +324,8 @@ type ConfigSource interface {
 type SettingsSource struct {
 	Settings *settings.Service
 	Models   ModelLookup
+	// Platform is the host's, for picking a model directory's engine; zero = Host().
+	Platform Platform
 }
 
 // ErrUnknownLabel is returned for a label that isn't in LabelDefs.
@@ -386,6 +399,23 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	return c, nil
 }
 
+// engineFor is the engine kind of an LLM label's model: the model's own, else by its format
+// ("" = the label's default, llama-server).
+func (s SettingsSource) engineFor(info ModelInfo) (Kind, error) {
+	if info.Engine != "" {
+		return info.Engine, nil
+	}
+	st, err := os.Stat(info.Path)
+	if err != nil || !st.IsDir() {
+		return "", nil
+	}
+	p := s.Platform
+	if p == (Platform{}) {
+		p = Host()
+	}
+	return DirEngine(p)
+}
+
 // resolveModels fills in the model and projector paths; autoFold takes the fold flag from
 // the model's catalog entry.
 func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelConfig, autoFold bool) {
@@ -420,7 +450,21 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 	}
 	c.ModelPath = info.Path
 	if d.ModelKind == ModelLLM {
-		c.ChatTemplate = info.ChatTemplate
+		k, err := s.engineFor(info)
+		if err != nil {
+			c.Problem = fmt.Sprintf("model %s: %v", ref, err)
+			return
+		}
+		if k != "" {
+			c.Kind = k
+		}
+	}
+	_, py := c.Kind.Python()
+	if d.ModelKind == ModelLLM {
+		if !py {
+			// A Python engine reads the template from the model directory.
+			c.ChatTemplate = info.ChatTemplate
+		}
 		if autoFold {
 			c.FoldSystemMessages = info.FoldSystemMessages
 		}
@@ -431,7 +475,8 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 			c.Context = 8192
 		}
 	}
-	if d.ModelKind != ModelLLM {
+	if d.ModelKind != ModelLLM || py {
+		// No projector: a Python engine takes none.
 		c.MMProj = ""
 		return
 	}

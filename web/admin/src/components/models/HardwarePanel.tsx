@@ -150,6 +150,7 @@ export default function HardwarePanel() {
                   <li key={kind} className="flex flex-wrap items-center gap-2">
                     <code className="text-[var(--color-text)]">{kind}</code>
                     <span className="text-[var(--color-text-muted)]">{b.build}</span>
+                    {b.unavailable && <span className="text-[var(--color-text-muted)]">{b.unavailable}</span>}
                     {b.flavours.map((f) =>
                       have.has(f) ? (
                         <Pill key={f} tone="ok" title="Downloaded">

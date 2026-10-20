@@ -46,6 +46,12 @@ func keyFor(c LabelConfig, f Flavour, binary string) instanceKey {
 		GPULayers: c.GPULayers, Devices: normList(c.GPUDevices), ExtraArgs: strings.TrimSpace(c.ExtraArgs),
 		FlashAttn: c.FlashAttn,
 	}
+	if _, ok := c.Kind.Python(); ok {
+		// The engine takes none of llama.cpp's placement or cache flags, so they don't
+		// split one model into two engines (LD1). Context bounds a reply (PyEngine.Args).
+		return instanceKey{Kind: c.Kind, Binary: binary, Flavour: f, Model: c.ModelPath, Context: c.Context,
+			Parallel: 1, ExtraArgs: strings.TrimSpace(c.ExtraArgs)}
+	}
 	if c.Kind == KindLlama {
 		k.Context, k.Parallel = c.Context, c.Parallel
 		k.SplitMode, k.TensorSplit = c.SplitMode, normList(c.TensorSplit)
@@ -72,6 +78,10 @@ func (k instanceKey) args(port int, alias string) ([]string, error) {
 	extra, err := SplitArgs(k.ExtraArgs)
 	if err != nil {
 		return nil, fmt.Errorf("extra_args: %w", err)
+	}
+	if e, ok := k.Kind.Python(); ok {
+		a := append([]string{"-I", "-m", e.Module}, e.Args(k.Model, port, k.Context)...)
+		return append(a, extra...), nil
 	}
 	a := []string{"-m", k.Model, "--host", "127.0.0.1", "--port", strconv.Itoa(port)}
 	switch k.Kind {
