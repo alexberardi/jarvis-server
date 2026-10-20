@@ -11,7 +11,8 @@ import (
 var update = flag.Bool("update", false, "rewrite testdata/report.md")
 
 // fixedReport is a run with every kind of line: skipped (pending, macOS), a required case that
-// passed 3/3, one that passed 2/3, one that failed 1/3, and a pending case that ran and failed.
+// passed 3/3, one that passed 2/3 (an errand stopped at a run's end), one that failed 1/3, and a
+// pending case that ran and failed.
 func fixedReport() *Report {
 	run := func(passed bool, rounds int, secs float64, failure, shot string, i int, name string) RunResult {
 		return RunResult{Passed: passed, Rounds: rounds, Seconds: secs, Failure: failure, Screenshot: shot,
@@ -34,6 +35,7 @@ func fixedReport() *Report {
 		{Name: "notes_macos", Phase: "desktop-mac", File: "tools/ccsuite/cases/notes_macos.json", CaseStatus: "pending", Status: "skipped", SkipReason: "macOS only: the Mac test host"},
 		{Name: "replay_moved_button", Phase: "teach", File: "tools/ccsuite/cases/replay_moved_button.json", CaseStatus: "pending", Status: "skipped", SkipReason: "pending"},
 	}
+	cases[1].RunResults[1].Stopped = []string{"Order the Pulse Active 2"}
 	for i := range cases {
 		if cases[i].Status == "" {
 			summarize(&cases[i])

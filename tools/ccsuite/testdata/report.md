@@ -42,3 +42,7 @@ timed out after 10 min
 ```
 bring-up: no sway: scripts/desktop-shot deps
 ```
+
+## Errands stopped at a run's end
+
+- store_order_cancel run 2: Order the Pulse Active 2
