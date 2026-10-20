@@ -6,7 +6,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 )
 
@@ -27,6 +29,35 @@ func addStepsOf(st Step) []Step {
 		out = append(out, stepFromValue(e))
 	}
 	return out
+}
+
+// readDownloads continues a checkpoint that directly follows a computer task that downloaded
+// files: read each of them, then a checkpoint to finish with what they say (budgetRule). Nil
+// otherwise. The planner is not asked: the house model guessed the names, or wrote the reads
+// and the spreadsheet at once in JSON it couldn't close.
+func readDownloads(results []Result, checkpoint int) []Step {
+	if checkpoint < 1 || checkpoint > len(results) {
+		return nil
+	}
+	prev := results[checkpoint-1]
+	if prev.Command != cmdComputer || !prev.Success || prev.Data == nil {
+		return nil
+	}
+	v, _ := prev.Data.Get("downloads")
+	files, _ := v.([]any)
+	var out []Step
+	for _, f := range files {
+		name, _ := f.(string)
+		if name == "" {
+			continue
+		}
+		out = append(out, Step{Command: cmdReadFile, Label: "Read " + name, Args: servertools.Obj("path", computer.DownloadsDir+"/"+name)})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return append(out, Step{Command: cmdReplan, Label: "Use what they say",
+		Args: servertools.Obj("reason", "the files read above: finish the goal with what they say")})
 }
 
 // runReplanJob is _resolve_and_decide_replan: resolve the continuation (cursor-aware: from the
@@ -51,6 +82,9 @@ func (s *Service) runReplanJob(ctx context.Context, job queue.Job) ([]byte, erro
 	}
 	add := addStepsOf(w.Steps[j.Step])
 	if len(add) == 0 {
+		add = readDownloads(w.Results, j.Step)
+	}
+	if len(add) == 0 {
 		menu := s.resolveNodeMenu(ctx, w.NodeID, w.HouseholdID, w.UserID)
 		plan, err := s.ReplanFromProgress(ctx, w.Goal, w.Steps[:j.Step], w.Results, j.Reason, menu)
 		switch {
@@ -69,7 +103,8 @@ func (s *Service) runReplanJob(ctx context.Context, job queue.Job) ([]byte, erro
 		s.log().Error("errands: store replan add_steps", "workflow", w.ID, "err", err)
 	}
 	amended := append(append([]Step(nil), w.Steps...), add...)
-	if len(add) > 0 && WidensEnvelope(w.Steps, amended) {
+	// A computer errand that stays one asks only through its computer tasks (startComputerPlan).
+	if len(add) > 0 && WidensEnvelope(w.Steps, amended) && !isComputerPlan(amended) {
 		fresh, err := s.loadWorkflow(ctx, w.ID)
 		if err == nil && fresh != nil && fresh.State == "waiting" {
 			s.postReplanCard(ctx, fresh, j.Reason, add)

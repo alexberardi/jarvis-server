@@ -126,21 +126,26 @@ func TestComputerControlOffMessage(t *testing.T) {
 
 func TestNeedsComputer(t *testing.T) {
 	for s, want := range map[string]bool{
-		"order me a phone case":                        true,
-		"Order a phone case":                           true,
-		"buy a new phone case on amazon":               true,
-		"can you purchase the blue mug":                true,
-		"check out my cart":                            true,
-		"add the charger to my cart":                   true,
-		"fill out the passport renewal form":           true,
-		"what's the weather":                           false,
-		"put the movies in order":                      false,
-		"what did I order last week":                   false,
-		"call Joe's pizza and order a large pepperoni": false,
-		"remind me to buy milk tomorrow":               false,
-		"add buy batteries to my shopping list":        false,
-		"research the best smart watch":                false,
-		"open steam":                                   false,
+		"order me a phone case":                                       true,
+		"Order a phone case":                                          true,
+		"buy a new phone case on amazon":                              true,
+		"can you purchase the blue mug":                               true,
+		"check out my cart":                                           true,
+		"add the charger to my cart":                                  true,
+		"fill out the passport renewal form":                          true,
+		"what's the weather":                                          false,
+		"put the movies in order":                                     false,
+		"what did I order last week":                                  false,
+		"call Joe's pizza and order a large pepperoni":                false,
+		"remind me to buy milk tomorrow":                              false,
+		"add buy batteries to my shopping list":                       false,
+		"research the best smart watch":                               false,
+		"open steam":                                                  false,
+		"Open Neovim and Typeello World.":                             false, // desktop tools, not an errand
+		"download my card statement for september":                    true,
+		"do my budget: download the bank statements":                  true,
+		"fill in the plot application at http://127.0.0.1:8080/form/": true,
+		"fill in the blanks for me":                                   false,
 	} {
 		if got := needsComputer(s); got != want {
 			t.Errorf("needsComputer(%q) = %v, want %v", s, got, want)
@@ -149,7 +154,7 @@ func TestNeedsComputer(t *testing.T) {
 }
 
 // With the switch off on every computer, a request that needs one gets the hint saying so, and
-// run_errand refuses it with where to turn it on; with one on, neither.
+// run_errand refuses it with where to turn it on; with one on, the hint says to use run_errand.
 func TestComputerControlOffHintAndErrandRefusal(t *testing.T) {
 	ve := newVoiceEnv(t, prompts.Qwen3_8B)
 	ve.setComputerControl("off")
@@ -182,8 +187,8 @@ func TestComputerControlOffHintAndErrandRefusal(t *testing.T) {
 	ve.setComputerControl("on")
 	ve.eng.say("On it.")
 	ve.turn("/api/v0/voice/command", "c1", "order me a phone case", map[string]any{"turn_source": "wake", "wake_confidence": 0.9}).want(200)
-	if u := lastUserOf(ve); strings.Contains(u, "[computer control:") {
-		t.Fatalf("hint with the switch on: %q", u)
+	if u := lastUserOf(ve); !strings.Contains(u, "[computer control: on. Do this with run_errand") {
+		t.Fatalf("no run_errand hint with the switch on: %q", u)
 	}
 	if got := errand("Order a phone case"); strings.Contains(got, "computer_control_off") {
 		t.Fatalf("run_errand with the switch on: %s", got)

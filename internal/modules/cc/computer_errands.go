@@ -174,10 +174,13 @@ func (e computerExec) Observe(ctx context.Context, o computer.Observe) (computer
 		return computer.Observation{}, err
 	}
 	var te *computerToolErr
-	if ferr := nodeFailure(out); errors.As(ferr, &te) && te.code == "invalid_argument" && o.Target.Site != "" &&
+	if ferr := nodeFailure(out); errors.As(ferr, &te) && te.code == "invalid_argument" && (o.StartURL != "" || o.Target.Site != "") &&
 		strings.Contains(te.msg, "no window") {
-		// The task's first look: open its window on the site.
-		args["url"] = "https://" + o.Target.Site
+		// The task's first look: open its window where the user said, else on the site.
+		args["url"] = o.StartURL
+		if o.StartURL == "" {
+			args["url"] = "https://" + o.Target.Site
+		}
 		out, imgs, err = nodes.RunToolImages(ctx, run.NodeID, computeruse.ToolObserve, toArgs(args), run.UserID, computerObserveTimeout)
 		if err != nil {
 			return computer.Observation{}, err
@@ -190,6 +193,7 @@ func (e computerExec) Observe(ctx context.Context, o computer.Observe) (computer
 		URL      string `json:"url"`
 		Title    string `json:"title"`
 		App      string `json:"app"`
+		Text     string `json:"text"`
 		Snapshot *struct {
 			Gen      int                       `json:"gen"`
 			Elements []computeruse.SnapElement `json:"elements"`
@@ -203,7 +207,7 @@ func (e computerExec) Observe(ctx context.Context, o computer.Observe) (computer
 	if err := json.Unmarshal([]byte(pyjson.Dumps(out, false)), &parsed); err != nil {
 		return computer.Observation{}, fmt.Errorf("unreadable observation: %w", err)
 	}
-	obs := computer.Observation{URL: parsed.URL, Title: parsed.Title, App: parsed.App}
+	obs := computer.Observation{URL: parsed.URL, Title: parsed.Title, App: parsed.App, Text: parsed.Text}
 	if parsed.Snapshot != nil {
 		obs.Gen = parsed.Snapshot.Gen
 		for _, el := range parsed.Snapshot.Elements {

@@ -29,6 +29,19 @@ func TestClassify(t *testing.T) {
 		{"submit payment", press, btn("Submit payment"), web, CatPay, LevelConfirm},
 		{"card number into cc field", set("4111 1111 1111 1111"), &Element{Role: "textbox", Name: "Card number", Autocomplete: "cc-number"}, web, CatPay, LevelConfirm},
 		{"expiry into cc field", set("12/29"), &Element{Role: "textbox", Autocomplete: "billing cc-exp"}, web, CatPay, LevelConfirm},
+		// a form's newsletter option sends or subscribes nothing until the form is sent, and
+		// sending it asks; the other categories still ask on a checkbox, radio or switch
+		{"newsletter checkbox", press, &Element{Role: "checkbox", Name: "Send me the monthly newsletter"}, web, "", LevelNone},
+		{"subscribe checkbox", click, &Element{Role: "checkbox", Name: "Subscribe to offers"}, web, "", LevelNone},
+		{"unsubscribe radio", press, &Element{Role: "radio", Name: "Unsubscribe from all"}, web, "", LevelNone},
+		{"delete radio", press, &Element{Role: "radio", Name: "Delete old backups"}, web, CatDelete, LevelConfirm},
+		{"share switch", press, &Element{Role: "switch", Name: "Share my location"}, web, CatSharing, LevelConfirm},
+		{"subscribe switch", press, &Element{Role: "switch", Name: "Subscribe"}, web, CatSubscribe, LevelConfirm},
+		{"send button still asks", press, btn("Send message"), web, CatSend, LevelConfirm},
+		// setting a checkbox's state is pressing it
+		{"set a delete checkbox", set("checked"), &Element{Role: "checkbox", Name: "Delete my data"}, web, CatDelete, LevelConfirm},
+		{"select a share radio", Action{Kind: "select", Intent: "x", Ref: "e2", Text: "checked"}, &Element{Role: "radio", Name: "Share with everyone"}, web, CatSharing, LevelConfirm},
+		{"set the newsletter checkbox", set("unchecked"), &Element{Role: "checkbox", Name: "Send me the monthly newsletter"}, web, "", LevelNone},
 		// pay near misses
 		{"payment methods link", press, link("Payment methods"), web, "", LevelNone},
 		{"add to cart", press, btn("Add to cart"), web, "", LevelNone},

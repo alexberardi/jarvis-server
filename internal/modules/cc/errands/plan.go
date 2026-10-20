@@ -158,13 +158,21 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 		Goal: r.Goal, Summary: plan.Summary, Steps: plan.Steps}
 	// Checkpoint 1 (autonomy PLAN §1): with autonomy on, the household's rules decide the plan.
 	var asked *policy.Event
-	if s.autonomous(ctx, r.HouseholdID) {
-		verdicts := s.decideSteps(ctx, r.HouseholdID, plan.Steps, policy.SourceErrandPlan)
+	autonomous := s.autonomous(ctx, r.HouseholdID)
+	var verdicts []policy.Verdict
+	if autonomous {
+		verdicts = s.decideSteps(ctx, r.HouseholdID, plan.Steps, policy.SourceErrandPlan)
 		for _, v := range verdicts {
 			if v.Effect == policy.Block {
 				return s.blockPlan(ctx, row, verdicts)
 			}
 		}
+	}
+	if isComputerPlan(plan.Steps) && !hasDesktopStep(plan.Steps) {
+		// A desktop task runs on its own only when attended (C9), below.
+		return s.startComputerPlan(ctx, row)
+	}
+	if autonomous {
 		ok, reason := IsAutorunEligible(plan.Steps, verdicts)
 		if ok && hasDesktopStep(plan.Steps) && !s.attended(ctx, r) {
 			ok, reason = false, "a desktop task runs on its own only when you ask for it at that computer"
@@ -284,6 +292,41 @@ func (s *Service) autorunPlan(ctx context.Context, p *planRow) (*planRow, error)
 	}
 	p.State, p.WorkflowID = "launched", wfID
 	s.log().Info("errands: plan autorun", "plan", p.ID, "workflow", wfID, "household", p.HouseholdID, "steps", len(p.Steps))
+	return p, nil
+}
+
+// computerPlanCommands are the steps of a computer errand: computer tasks, the computer's file
+// tools and the replan checkpoint between them.
+var computerPlanCommands = map[string]bool{cmdComputer: true, cmdReadFile: true, cmdWriteSheet: true, cmdReplan: true}
+
+// isComputerPlan reports whether steps are a computer errand: at least one computer task, and
+// nothing but computerPlanCommands, none risky.
+func isComputerPlan(steps []Step) bool {
+	computer := false
+	for _, st := range steps {
+		cmd := strings.TrimSpace(st.Command)
+		if !computerPlanCommands[cmd] || st.IsRisky {
+			return false
+		}
+		computer = computer || cmd == cmdComputer
+	}
+	return computer
+}
+
+// startComputerPlan runs a computer errand at once, without a plan card (user, 2026-10-20): the
+// computer task asks for what it needs itself (the checkout confirmation, a question), through
+// the household's rules whatever started it, and its progress card reports the run.
+func (s *Service) startComputerPlan(ctx context.Context, p *planRow) (*planRow, error) {
+	if err := s.insertPlan(ctx, p); err != nil {
+		return nil, err
+	}
+	wfID := hexID("wf_")
+	raced, err := s.launch(ctx, p, wfID, "errand", "", nil)
+	if err != nil || raced {
+		return p, err
+	}
+	p.State, p.WorkflowID = "launched", wfID
+	s.log().Info("errands: computer errand started", "plan", p.ID, "workflow", wfID, "household", p.HouseholdID, "steps", len(p.Steps))
 	return p, nil
 }
 

@@ -57,7 +57,7 @@ func TestComputerExecOverTheBus(t *testing.T) {
 		case name == computeruse.ToolObserve && args["url"] == nil:
 			return `{"success": false, "error": "the task has no window yet: give the url to open it on", "error_code": "invalid_argument"}`
 		case name == computeruse.ToolObserve:
-			return `{"success": true, "target": "browser", "url": "https://shop.example/", "title": "Shop",
+			return `{"success": true, "target": "browser", "url": "https://shop.example/", "title": "Shop", "text": "Buy\n$4.99",
 				"snapshot": {"gen": 3, "elements": [{"ref": "e1", "role": "button", "name": "Buy"}, {"ref": "e2", "role": "textbox", "name": "Password", "type": "password"}]},
 				"capture": {"capture_id": "cap_1", "width": 800, "height": 600},
 				"image_attachments": [{"mime": "image/png", "data": "` + shot + `", "label": "screenshot"}]}`
@@ -86,7 +86,7 @@ func TestComputerExecOverTheBus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if obs.URL != "https://shop.example/" || obs.Gen != 3 || len(obs.Elements) != 2 || obs.Elements[0].Name != "Buy" ||
+	if obs.URL != "https://shop.example/" || obs.Text != "Buy\n$4.99" || obs.Gen != 3 || len(obs.Elements) != 2 || obs.Elements[0].Name != "Buy" ||
 		!obs.Elements[1].Secure || obs.Image == nil || obs.Image.CaptureID != "cap_1" || obs.Image.Width != 800 ||
 		!bytes.Equal(obs.Image.Data, pngBytes) {
 		t.Fatalf("observation = %+v", obs)
@@ -157,6 +157,38 @@ func TestComputerTargetsForErrands(t *testing.T) {
 	menu := ve.m.errands.FullMenu(ctx, nil, voiceHH, nil)
 	if menu[len(menu)-1].Command != "computer_task" {
 		t.Fatalf("menu = %+v", menu)
+	}
+}
+
+// The first look opens the task's window on its start address, as the user gave it (scheme,
+// port and path), and on https://<site> without one.
+func TestComputerExecOpensStartURL(t *testing.T) {
+	agent := &computerAgent{reply: func(name string, args map[string]any, n int) string {
+		if args["url"] == nil {
+			return `{"success": false, "error": "the task has no window yet: give the url to open it on", "error_code": "invalid_argument"}`
+		}
+		return `{"success": true, "target": "browser", "url": "x", "snapshot": {"gen": 1, "elements": []}}`
+	}}
+	e := newEnv(t, envOpts{configure: func(m *Module) { m.Publisher = agent; agent.m = m }})
+	ctx := context.Background()
+	store := &computer.Store{DB: e.m.deps.DB}
+	run, err := store.Create(ctx, computer.Run{HouseholdID: "hh-1", NodeID: "node-1", WorkflowID: "wf_1", Goal: "buy", Target: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := computerExec{m: e.m, store: store}
+	tgt := computeruse.Target{Kind: "browser", Site: "127.0.0.1:8080"}
+	for _, c := range []struct{ start, want string }{
+		{"http://127.0.0.1:8080/store/", "http://127.0.0.1:8080/store/"},
+		{"", "https://127.0.0.1:8080"},
+	} {
+		if _, err := ex.Observe(ctx, computer.Observe{RunID: run.ID, Target: tgt, StartURL: c.start, Snapshot: true}); err != nil {
+			t.Fatal(err)
+		}
+		calls := agent.sent()
+		if got := calls[len(calls)-1]["arguments"].(map[string]any)["url"]; got != c.want {
+			t.Fatalf("start %q: opened %v", c.start, got)
+		}
 	}
 }
 

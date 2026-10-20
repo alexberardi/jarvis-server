@@ -121,21 +121,40 @@ func (m *Module) phoneCallsEnabled(ctx context.Context, hh string) bool {
 	return errandPhone{m}.Enabled(ctx, hh)
 }
 
-// computerControlHint is the turn's line when it needs a computer and none has the switch on.
+// computerControlHint is the turn's line when it needs a computer: with none switched on, that
+// it's off; with one on, that it's an errand (run_errand), whose computer task drives the
+// browser or app with the household's rules and the checkout confirmation, never the turn's own
+// browser or desktop tools.
 func (m *Module) computerControlHint(ctx context.Context, conv *conversation, utterance string) string {
+	if !needsComputer(utterance) {
+		return ""
+	}
 	msg := m.computerControlOff(ctx, conv.householdID, utterance)
 	if msg == "" {
-		return ""
+		if !conv.serverNames["run_errand"] {
+			return ""
+		}
+		if cc, err := m.computerControl(ctx, conv.householdID); err != nil || len(cc.on) == 0 {
+			return ""
+		}
+		return computerOnHint
 	}
 	return "[computer control: off on every computer. If doing this needs Jarvis to use a computer (buying or ordering " +
 		"online, filling in a website's forms, working in an app), don't start an errand or use any other tool for it; " +
 		"tell the user: " + msg + "]"
 }
 
+// computerOnHint is the turn's line for a request that needs a computer with the switch on.
+const computerOnHint = "[computer control: on. Do this with run_errand, with the user's whole request (every " +
+	"detail and web address) as the goal: it runs on the computer and asks the user on their phone before " +
+	"paying or sending. Don't use the browser or desktop tools for it yourself.]"
+
 // needsComputer is whether a request (an utterance, an errand's goal) asks Jarvis to act on a
-// website or app: buy, order, check out, fill in a form. A phone call ("call Joe's and order …"),
-// a reminder ("remind me to buy milk"), a list item and research don't.
+// website or app: buy, order, check out, fill in a form (or a web page), download (a statement).
+// A phone call ("call Joe's and order …"), a reminder ("remind me to buy milk"), a list item and
+// research don't.
 func needsComputer(s string) bool {
+	web := strings.Contains(s, "://")
 	ws := strings.Fields(strings.ToLower(s))
 	for i := range ws {
 		ws[i] = compactName(ws[i])
@@ -157,7 +176,7 @@ func needsComputer(s string) bool {
 			next = ws[i+1]
 		}
 		switch w {
-		case "buy", "purchase", "checkout", "reorder", "cart":
+		case "buy", "purchase", "checkout", "reorder", "cart", "download":
 			return true
 		case "order":
 			// The verb: "order me a …", "order a …"; not "in order", "my order", "did I order".
@@ -169,7 +188,7 @@ func needsComputer(s string) bool {
 				return true
 			}
 		case "fill":
-			if (next == "out" || next == "in") && has("form") {
+			if (next == "out" || next == "in") && (has("form") || web) {
 				return true
 			}
 		}

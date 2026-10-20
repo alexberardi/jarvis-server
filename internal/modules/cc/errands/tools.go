@@ -41,7 +41,16 @@ type RunErrandTool struct {
 	// ComputerOff, when set, says why goal can't run in the household: it needs a computer and
 	// none has computer control on (COMPUTER-CONTROL.md C11). "" lets it through.
 	ComputerOff func(ctx context.Context, householdID, goal string) string
+	// NeedsComputer, when set, says whether goal is a task on a computer: with computer_task on
+	// the menu, such an errand starts at once (startComputerPlan) and the ack says so.
+	NeedsComputer func(goal string) bool
 }
+
+// computerAck is run_errand's ack for a computer errand. It is said before the plan exists, so
+// it is true either way: a browser-only plan runs without a plan card, one that mixes in other
+// commands or a desktop task still posts one.
+const computerAck = "On it — I'll do that on your computer and check with you on your phone before " +
+	"anything that needs your OK. If it needs more than the browser, I'll send you the plan to review first."
 
 func (*RunErrandTool) Name() string { return "run_errand" }
 
@@ -82,6 +91,9 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 		return errObj("task_failed", "I couldn't start planning that errand: "+err.Error()), nil
 	}
 	s.log().Info("errands: draft started", "household", turn.HouseholdID, "node", turn.NodeID, "goal", goal)
+	if t.NeedsComputer != nil && t.NeedsComputer(goal) && menuHas(menu, cmdComputer) {
+		return servertools.Obj("status", "accepted", "message", computerAck), nil
+	}
 	return servertools.Obj("status", "accepted", "message",
 		"On it — I'm putting together a plan for that errand and I'll send "+
 			"it to your phone to review. Tap Run when you're ready."), nil
@@ -198,4 +210,13 @@ func (t *ListScheduledErrandsTool) Execute(ctx context.Context, _ servertools.Ca
 	}
 	return servertools.Obj("status", "ok", "message", fmt.Sprintf(
 		"You have %d errands scheduled. I've sent the full list to your phone, where you can cancel any of them.", n)), nil
+}
+
+func menuHas(menu []MenuEntry, cmd string) bool {
+	for _, c := range menu {
+		if c.Command == cmd {
+			return true
+		}
+	}
+	return false
 }

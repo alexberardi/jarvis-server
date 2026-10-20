@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -82,6 +83,10 @@ const (
 	// The cc module's file tools (spreadsheet_tools.go), offered with computer_task.
 	cmdReadFile   = "read_computer_file"
 	cmdWriteSheet = "write_spreadsheet"
+	// browserPrefix and desktopPrefix name the agent's own browser and desktop commands
+	// (browser_open, browser_fill, desktop_open, …).
+	browserPrefix = "browser_"
+	desktopPrefix = "desktop_"
 )
 
 // NodeMenu is build_errand_menu: a node's available commands (CommandDefinition dicts, as the
@@ -210,21 +215,25 @@ func toolRisky(t servertools.ServerTool) bool {
 }
 
 // FullMenu is build_full_errand_menu: node commands ∪ enabled server tools; on a name
-// collision the server tool wins (the executor would run it).
+// collision the server tool wins (the executor would run it). With computer_task offered, the
+// agent's own browser and desktop commands (browser_*, desktop_*) are left out: a task on a
+// website or in an app is one computer_task step, whose loop drives it, never a chain of single
+// commands.
 func (s *Service) FullMenu(ctx context.Context, available []*pyjson.Object, hh string, speaker *int64) []MenuEntry {
 	server := s.serverMenu(ctx, hh, speaker)
 	names := map[string]bool{}
 	for _, c := range server {
 		names[c.Command] = true
 	}
+	computer := s.computerOffered(ctx, hh)
 	var out []MenuEntry
 	for _, c := range NodeMenu(available) {
-		if !names[c.Command] {
+		if !names[c.Command] && !(computer && (strings.HasPrefix(c.Command, browserPrefix) || strings.HasPrefix(c.Command, desktopPrefix))) {
 			out = append(out, c)
 		}
 	}
 	out = append(out, server...)
-	if s.computerOffered(ctx, hh) {
+	if computer {
 		out = append(out, computerEntry())
 		if e := s.runWorkflowEntry(ctx, hh, speaker); e != nil {
 			out = append(out, *e)
@@ -251,18 +260,170 @@ const decompositionRule = "Create a SEPARATE step for EACH distinct action the u
 // budgetRule is the decomposition rule's line for budgets (plan P3 piece 13), in the prompts
 // whose menu has write_spreadsheet: the rows are only known once the statements have been read.
 const budgetRule = "BUDGETS: for a budget or a spending report from statements, download each statement " +
-	"with computer_task, then read each one with read_computer_file, then end the plan with a " +
-	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with every " +
-	"transaction categorised and a total per category; the report then says where the money went.\n\n"
+	"with a computer_task of its own (one per website the user gave), then end the plan with a request_replan checkpoint: the files' names are known only " +
+	"once they are downloaded. Then read each downloaded file with read_computer_file, then another " +
+	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with one row per " +
+	"category: the category and its total over every transaction read; the report then says where the money went.\n\n"
 
-// budgetRuleFor is budgetRule when menu offers write_spreadsheet, else "".
-func budgetRuleFor(menu []MenuEntry) string {
-	for _, c := range menu {
-		if c.Command == cmdWriteSheet {
-			return budgetRule
+// websiteRule is the decomposition rule's line for computer tasks (plan P3 piece 14): the
+// house model split "order the best watch" into a find step and an order step, and the second
+// task no longer knew what the first had found.
+const websiteRule = "COMPUTER TASKS: everything the user wants done on one website or in one app (find, " +
+	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
+	"request for that site, with every detail they gave. Start the site at the web address they gave.\n\n"
+
+// computerRulesFor is the computer rules for menu: websiteRule when it offers computer_task, and
+// budgetRule when it offers write_spreadsheet.
+func computerRulesFor(menu []MenuEntry) string {
+	out := ""
+	if menuHas(menu, cmdComputer) {
+		out += websiteRule
+	}
+	if menuHas(menu, cmdWriteSheet) {
+		out += budgetRule
+	}
+	return out
+}
+
+// checkpointSpreadsheet ends a plan at a write_spreadsheet that follows a read_computer_file with
+// a checkpoint in its place: its rows are what the reads find, unknown until they ran, and the
+// house model plans it with none (budgetRule).
+func checkpointSpreadsheet(steps []Step) []Step {
+	read := false
+	for i, st := range steps {
+		switch st.Command {
+		case cmdReadFile:
+			read = true
+		case cmdWriteSheet:
+			if read {
+				out := append([]Step(nil), steps[:i]...)
+				return append(out, Step{Command: cmdReplan, Label: st.Label, Args: servertools.Obj("reason",
+					"write_spreadsheet from the files read above: one row per category with its total")})
+			}
 		}
 	}
-	return ""
+	return steps
+}
+
+// mergeComputerSteps joins adjacent computer tasks on the same target and site (the same web
+// address when they were given one: a bank's and a card's statements may share a host) into one, whose
+// goal is theirs in order ("find it, then order it") and whose success check is the last's
+// (websiteRule, for when the model splits them anyway).
+func mergeComputerSteps(steps []Step) []Step {
+	// The web address a task was given ("" without one).
+	address := func(st Step) string {
+		return strings.TrimSuffix(strings.ToLower(startURL(truthyStr(st.Args, "site"))), "/")
+	}
+	same := func(a, b Step) bool {
+		if a.Command != cmdComputer || b.Command != cmdComputer || truthyStr(a.Args, "target") != truthyStr(b.Args, "target") {
+			return false
+		}
+		if ua, ub := address(a), address(b); ua != "" && ub != "" {
+			return ua == ub
+		}
+		return siteOf(truthyStr(a.Args, "site")) == siteOf(truthyStr(b.Args, "site"))
+	}
+	var out []Step
+	for _, st := range steps {
+		if n := len(out); n > 0 && same(out[n-1], st) {
+			prev := &out[n-1]
+			args := copyObj(prev.Args)
+			args.Set("goal", parse.PyStrip(truthyStr(prev.Args, "goal"))+", then "+parse.PyStrip(truthyStr(st.Args, "goal")))
+			if s := truthyStr(st.Args, "success"); s != "" {
+				args.Set("success", s)
+			}
+			prev.Args, prev.Label = args, st.Label
+			continue
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// closeJSON is s with the brackets it leaves open closed, and whether it left any: the house
+// model ends a long plan without its last "}" now and then. s cut off inside a string isn't
+// closed.
+func closeJSON(s string) (string, bool) {
+	var open []byte
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case esc:
+			esc = false
+		case inStr && c == '\\':
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			open = append(open, '}')
+		case c == '[':
+			open = append(open, ']')
+		case c == '}' || c == ']':
+			if len(open) == 0 || open[len(open)-1] != c {
+				return s, false
+			}
+			open = open[:len(open)-1]
+		}
+	}
+	if inStr || len(open) == 0 {
+		return s, false
+	}
+	b := []byte(strings.TrimSpace(s))
+	for i := len(open) - 1; i >= 0; i-- {
+		b = append(b, open[i])
+	}
+	return string(b), true
+}
+
+// splitComputerSteps makes a computer task whose goal names more than one web address (another
+// host or path; a query or a trailing slash is the same one) one task per address, in order, each
+// starting at its own: the house model wrote one task for the bank's and the card's statements, and
+// only the card's was downloaded. Each goal is the whole request with the part it is for; the
+// success check, said for the whole request, is left to each task's own checks.
+func splitComputerSteps(steps []Step) []Step {
+	var out []Step
+	for _, st := range steps {
+		urls := webAddresses(truthyStr(st.Args, "goal"))
+		if st.Command != cmdComputer || len(urls) < 2 {
+			out = append(out, st)
+			continue
+		}
+		goal := strings.TrimRight(parse.PyStrip(truthyStr(st.Args, "goal")), ".")
+		for _, u := range urls {
+			args := pyjson.NewObject()
+			for _, k := range st.Args.Keys() {
+				if v, _ := st.Args.Get(k); k != "success" {
+					args.Set(k, v)
+				}
+			}
+			args.Set("site", u)
+			args.Set("goal", goal+". This task is only the part at "+u+": the other addresses are other tasks.")
+			out = append(out, Step{Command: st.Command, Args: args, Label: st.Label + " (" + strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://") + ")",
+				IsRisky: st.IsRisky, RunWithoutConfirmation: st.RunWithoutConfirmation, Approved: st.Approved})
+		}
+	}
+	return out
+}
+
+// webAddresses is the distinct web addresses in s, in order, by host and path.
+func webAddresses(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, w := range strings.Fields(s) {
+		w = strings.TrimLeft(strings.TrimRight(w, `.,;:!?)"'`), `("'`)
+		u, err := url.Parse(w)
+		if err != nil || !isWebURL(w) {
+			continue
+		}
+		key := strings.ToLower(u.Host) + strings.TrimSuffix(u.Path, "/")
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 const closingDirective = "Think step by step: list each action the user wants and its order, then output " +
@@ -297,7 +458,7 @@ func BuildPrompt(goal string, menu []MenuEntry) string {
 		"list of steps, choosing ONLY from the available commands below. Fill each " +
 		"step's args from that command's arg spec, using the user's own words, and " +
 		"give each step a short human-readable label.\n\n" +
-		decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + computerRulesFor(menu) +
 		replanCheckpointRule +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
 		"User's goal: " + goal + "\n\n" +
@@ -313,7 +474,7 @@ func BuildRefinePrompt(summary string, current []Step, instruction string, menu 
 	return "You are Jarvis's errand planner revising an EXISTING plan. Apply the " +
 		"user's change to the current plan, keeping the parts they didn't ask to " +
 		"change and choosing ONLY from the available commands.\n\n" +
-		decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + computerRulesFor(menu) +
 		"Current plan: " + summary + "\n" +
 		"Current steps: " + stepsDumps(current) + "\n\n" +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
@@ -332,7 +493,7 @@ func BuildReplanPrompt(goal string, done []Step, progress, reason string, menu [
 		"needed to finish the goal BASED ON those results, choosing ONLY from the " +
 		"available commands. Return ONLY the steps still to run (do not repeat the ones " +
 		"already done).\n\n" +
-		decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + computerRulesFor(menu) +
 		"Goal: " + goal + "\n" +
 		"Steps already run: " + stepsDumps(done) + "\n" +
 		"What happened:\n" + progress + "\n\n" +
@@ -470,7 +631,13 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 		s.log().Warn("errands: planner EMPTY response", "finish", resp.FinishReason)
 		return nil, fmt.Errorf("%w: planner returned an empty response", ErrPlan)
 	}
-	v, err := pyjson.Loads(stripFences(stripThink(raw)))
+	text := stripFences(stripThink(raw))
+	v, err := pyjson.Loads(text)
+	if err != nil {
+		if closed, ok := closeJSON(text); ok {
+			v, err = pyjson.Loads(closed)
+		}
+	}
 	if err != nil {
 		s.log().Warn("errands: planner UNPARSEABLE JSON", "head", truncRunes(raw, 400))
 		return nil, fmt.Errorf("%w: planner returned invalid JSON: %v", ErrPlan, err)
@@ -555,7 +722,9 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 		return Plan{}, err
 	}
 	allowed, risky, free := allowedOf(menu)
-	return planFromData(data, allowed, goal, risky, free, true)
+	plan, err := planFromData(data, allowed, goal, risky, free, true)
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(plan.Steps)))
+	return plan, err
 }
 
 // RefinePlan is refine_errand_plan: the allowed set also keeps the plan's own commands, so a
@@ -593,7 +762,9 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 	if fallback == "" {
 		fallback = "continue"
 	}
-	return planFromData(data, allowed, fallback, risky, free, false)
+	plan, err := planFromData(data, allowed, fallback, risky, free, false)
+	plan.Steps = checkpointSpreadsheet(plan.Steps)
+	return plan, err
 }
 
 // compactResultData is _compact_result_data (cap 320): the step's real result for the replan.

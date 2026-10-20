@@ -16,6 +16,9 @@ type RunResult struct {
 	Failure    string  `json:"failure,omitempty"`
 	Screenshot string  `json:"screenshot,omitempty"` // relative to the report's directory
 	Dir        string  `json:"dir"`                  // the run's files (state.json, logs), relative
+	// Stopped: the errands still running when the run ended (on --settle or max_minutes), which
+	// the suite stopped before scoring it.
+	Stopped []string `json:"stopped,omitempty"`
 }
 
 // CaseResult is a case's line in the report: Status is passed, failed or skipped; CaseStatus
@@ -120,6 +123,19 @@ func (r *Report) Markdown() string {
 		fmt.Fprintf(&b, "\n### %s (%s, %d/%d runs passed)\n\n`%s`\n\n```\n%s\n```\n", c.Name, c.CaseStatus, c.Passed, c.Runs, c.File, strings.TrimSpace(c.Failure))
 		if c.Screenshot != "" {
 			fmt.Fprintf(&b, "\n![%s](%s)\n", c.Name, c.Screenshot)
+		}
+	}
+	first = true
+	for _, c := range r.Cases {
+		for i, rr := range c.RunResults {
+			if len(rr.Stopped) == 0 {
+				continue
+			}
+			if first {
+				b.WriteString("\n## Errands stopped at a run's end\n\n")
+				first = false
+			}
+			fmt.Fprintf(&b, "- %s run %d: %s\n", c.Name, i+1, strings.Join(rr.Stopped, ", "))
 		}
 	}
 	return b.String()

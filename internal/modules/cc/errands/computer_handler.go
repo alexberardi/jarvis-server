@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -112,6 +113,11 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		t.Target = computeruse.Target{Kind: "browser", Site: siteOf(truthyStr(args, "site")), App: parse.PyStrip(truthyStr(args, "app"))}
 		if truthyStr(args, "target") == "desktop" {
 			t.Target.Kind = "desktop"
+		} else {
+			t.StartURL = startURL(truthyStr(args, "site"), truthyStr(args, "goal"), rc.goal)
+			if t.Target.Site == "" {
+				t.Target.Site = siteOf(t.StartURL)
+			}
 		}
 		if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
 			t.Success = &computer.SuccessCheck{Screen: ok}
@@ -173,7 +179,15 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			did := strings.TrimSpace(strings.TrimSuffix(out.Summary, "Checked: "+out.Checked+"."))
 			msg = strings.TrimSpace("Done, checked: " + out.Checked + ". " + did + " " + note)
 		}
-		return Result{Command: cmd, Label: label, Success: true, Message: msg, Summary: out.Summary}, nil
+		res := Result{Command: cmd, Label: label, Success: true, Message: msg, Summary: out.Summary}
+		if len(out.Downloads) > 0 {
+			files := make([]any, len(out.Downloads))
+			for i, f := range out.Downloads {
+				files[i] = f
+			}
+			res.Data = servertools.Obj("downloads", files)
+		}
+		return res, nil
 	case computer.StateNeedsApproval:
 		return Result{}, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true,
 			Computer: &computerWait{Checkout: out.Checkout, Pending: out.Pending}}
@@ -283,6 +297,32 @@ func siteOf(site string) string {
 		site = site[:i]
 	}
 	return strings.ToLower(site)
+}
+
+// startURL is where a browser task starts: site when it is a web address, else the first web
+// address on site (any site when it is "") in the goals, the step's then the errand's; "" when
+// there is none (the executor opens https://<site>). The house model shortens the user's
+// http://127.0.0.1:8080/store/ to a host in site, and the store isn't at https://<host>.
+func startURL(site string, goals ...string) string {
+	site = strings.TrimSpace(site)
+	if isWebURL(site) {
+		return site
+	}
+	host := siteOf(site)
+	for _, g := range goals {
+		for _, w := range strings.Fields(g) {
+			w = strings.TrimLeft(strings.TrimRight(w, `.,;:!?)"'`), `("'`)
+			if isWebURL(w) && (host == "" || siteOf(w) == host) {
+				return w
+			}
+		}
+	}
+	return ""
+}
+
+func isWebURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // --- cards ---

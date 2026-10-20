@@ -1253,6 +1253,7 @@ function actDo(gen, n, op, value, keys) {
   const el = s?.refs && s.gen === gen ? s.refs.get(n) : null;
   if (!el || !el.isConnected || el.ownerDocument !== document) return { error: "the element is no longer on the page; take a new snapshot", code: "stale_ref" };
   const TEXTY = new Set(["", "text", "email", "search", "tel", "url", "password", "number"]);
+  const DATEY = new Set(["date", "time", "datetime-local", "month", "week"]);
   const KEY_CODES = { Enter: 13, Escape: 27, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
   const norm = (x) => String(x ?? "").toLowerCase().replace(/\s+/g, " ").trim();
   const type = el.localName === "input" ? (el.getAttribute("type") || "").toLowerCase() : "";
@@ -1274,9 +1275,17 @@ function actDo(gen, n, op, value, keys) {
       if (el.localName === "input" && type === "password") {
         return { error: "that is a password field: Jarvis doesn't type passwords there; the user enters it", code: "password_field" };
       }
-      const editable = el.localName === "textarea" || (el.localName === "input" && TEXTY.has(type)) || el.isContentEditable;
+      const dateLike = el.localName === "input" && DATEY.has(type);
+      const editable = el.localName === "textarea" || (el.localName === "input" && TEXTY.has(type)) || el.isContentEditable || dateLike;
       if (!editable || el.readOnly) return { error: "that element isn't a text field", code: "invalid_argument" };
       el.focus();
+      if (dateLike) {
+        // No typing into a date picker's segments: its value is set whole ("2026-11-01").
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        break;
+      }
       if (el.isContentEditable) {
         const r = document.createRange();
         r.selectNodeContents(el);

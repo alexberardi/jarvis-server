@@ -136,7 +136,8 @@ func (m *Module) registerErrandTools() {
 		}
 		return m.errands
 	}
-	m.tools.Register(&errands.RunErrandTool{Svc: svc, Commands: m.conversationCommands, ComputerOff: m.computerControlOff})
+	m.tools.Register(&errands.RunErrandTool{Svc: svc, Commands: m.conversationCommands, ComputerOff: m.computerControlOff,
+		NeedsComputer: needsComputer})
 	m.tools.Register(&errands.ScheduleErrandTool{Svc: svc})
 	m.tools.Register(&errands.ListScheduledErrandsTool{Svc: svc})
 }

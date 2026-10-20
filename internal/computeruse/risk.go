@@ -67,7 +67,11 @@ func Classify(a Action, el *Element, t Target) Risk {
 		}
 	}
 
-	switch a.Kind {
+	kind := a.Kind
+	if (kind == "set_value" || kind == "select") && IsToggle(el) {
+		kind = "press" // setting a checkbox's state is pressing it
+	}
+	switch kind {
 	case "type", "set_value", "clipboard_write":
 		if el != nil && hasCCAutocomplete(el.Autocomplete) {
 			return confirm(CatPay, fmt.Sprintf("fills the payment field %q (autocomplete %q)", el.Name, el.Autocomplete))
@@ -90,6 +94,9 @@ func Classify(a Action, el *Element, t Target) Risk {
 
 	ws := words(el.Name)
 	for _, l := range riskWords {
+		if formOption(el, l.category) {
+			continue
+		}
 		if w := firstPhrase(ws, l.words); w != "" {
 			return confirm(l.category, fmt.Sprintf("%s %q matches %q", roleOf(el), el.Name, w))
 		}
@@ -104,6 +111,30 @@ func Classify(a Action, el *Element, t Target) Risk {
 		return confirm(CatSubmitThirdParty, fmt.Sprintf("submits a form (%s %q)", roleOf(el), el.Name))
 	}
 	return Risk{Level: LevelNone}
+}
+
+// IsToggle reports whether el is a checkbox, radio button or switch: setting its state is
+// pressing it.
+func IsToggle(el *Element) bool {
+	if el == nil {
+		return false
+	}
+	switch el.Role {
+	case "checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio":
+		return true
+	}
+	return false
+}
+
+// formOption reports whether el is a form's checkbox or radio button, whose words of category
+// don't make pressing it risky: "Send me the monthly newsletter" sends or subscribes nothing
+// until its form is sent, and sending the form asks (isSubmit).
+func formOption(el *Element, category string) bool {
+	switch category {
+	case CatSend, CatSubscribe, CatUnsubscribe:
+		return el.Role == "checkbox" || el.Role == "radio"
+	}
+	return false
 }
 
 func confirm(cat, reason string) Risk { return Risk{LevelConfirm, cat, reason} }

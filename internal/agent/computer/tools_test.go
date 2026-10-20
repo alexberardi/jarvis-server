@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"os"
 	"path/filepath"
@@ -28,6 +29,18 @@ type fakeBrowser struct {
 	onAct   func()
 	n       int
 	shotErr error
+	text    string // the page's text (read_page)
+	textErr error
+}
+
+func (b *fakeBrowser) PageText(_ context.Context, tab string, max int) (string, error) {
+	if b.textErr != nil {
+		return "", b.textErr
+	}
+	if r := []rune(b.text); len(r) > max {
+		return string(r[:max]), nil
+	}
+	return b.text, nil
 }
 
 func (b *fakeBrowser) OpenBackground(_ context.Context, u string) (string, string, error) {
@@ -191,6 +204,19 @@ func TestObserveOpensTaskWindow(t *testing.T) {
 	if out["success"] != true || len(b.opened) != 1 {
 		t.Fatalf("second observe %v, opened %v", out, b.opened)
 	}
+	// The snapshot comes with the page's text (prices, ratings: not elements), capped; a page
+	// whose text can't be read is still observed.
+	b.text = "Pulse Active 2 Smart Watch $249 ★ 4.8 " + strings.Repeat("x", 5000)
+	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "snapshot": true})
+	if txt, _ := out["text"].(string); !strings.HasPrefix(txt, "Pulse Active 2 Smart Watch $249") || len([]rune(txt)) != pageTextChars {
+		t.Fatalf("text %d chars: %.60q", len([]rune(txt)), txt)
+	}
+	b.textErr = errors.New("no readable text")
+	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "snapshot": true})
+	if out["success"] != true || out["text"] != nil {
+		t.Fatalf("observe without text: %v", out)
+	}
+	b.text, b.textErr = "", nil
 	// A new run needs an address.
 	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_2", "target": browserTarget, "snapshot": true})
 	if out["success"] != false || !strings.Contains(out["error"].(string), "url") {
@@ -555,5 +581,24 @@ func TestUnknownToolNotHandled(t *testing.T) {
 		if !names[n] {
 			t.Fatalf("%s not offered: %v", n, names)
 		}
+	}
+}
+
+// set_value or select on a checkbox, radio button or switch sets its state (the extension's
+// check op), where a press would toggle it whatever it was.
+func TestSetValueChecksABox(t *testing.T) {
+	tl, b, _ := testTools(t)
+	b.snap.Elements = append(b.snap.Elements,
+		computeruse.SnapElement{Ref: "e5", Role: "checkbox", Name: "Send me the monthly newsletter"},
+		computeruse.SnapElement{Ref: "e6", Role: "radio", Name: "standard"})
+	observe(t, tl, "cr_1")
+	rs, _ := act(t, tl, "cr_1", []computeruse.Action{
+		{Kind: "set_value", Ref: "e5", Text: "unchecked", Intent: "no newsletter"},
+		{Kind: "select", Ref: "e6", Text: "checked", Intent: "the standard plot"},
+		{Kind: "set_value", Ref: "e1", Text: "mug", Intent: "search"},
+	})
+	wantCodes(t, rs, "ok", "ok", "ok")
+	if strings.Join(b.acts, "|") != "check e5 unchecked|check e6 checked|set_value e1 mug" {
+		t.Fatalf("acts %v", b.acts)
 	}
 }

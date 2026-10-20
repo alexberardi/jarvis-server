@@ -108,6 +108,7 @@ func TestChecks(t *testing.T) {
 		{"asked with pattern", Check{Kind: "asked", Pattern: "(?i)pulse active 2"}, &st, ""},
 		{"asked wrong pattern", Check{Kind: "asked", Pattern: "Nova"}, &st, `no card asked with "Nova"`},
 		{"asked only buttonless cards", Check{Kind: "asked"}, &State{Cards: st.Cards[:1]}, "no card asked"},
+		{"a progress card's Stop doesn't ask", Check{Kind: "asked"}, &State{Cards: []Card{{Title: "🖥️ Errand: x", Buttons: []string{"Stop"}, Progress: true}}}, "no card asked"},
 		{"refused", Check{Kind: "refused"}, &st, ""},
 		{"refused with pattern", Check{Kind: "refused", Pattern: "blocked"}, &st, ""},
 		{"refused fails", Check{Kind: "refused"}, &State{Replies: []string{"Done, I downloaded it."}}, "is a refusal"},
@@ -157,6 +158,25 @@ func TestAnswers(t *testing.T) {
 	}
 	if a, ok := answerFor(answers, Card{Category: "computer_confirm", Buttons: []string{"Approve"}}); !ok || a.Tap != "cancel" {
 		t.Errorf("confirm card answer = %v, %v", a, ok)
+	}
+	// A run's checkout confirmation is a step card in the plan's category: a confirm, not a plan.
+	if a, ok := answerFor(answers, Card{Category: "errand_plan", Step: true, Buttons: []string{"Approve", "Cancel"}}); !ok || a.Tap != "cancel" {
+		t.Errorf("step card answer = %v, %v", a, ok)
+	}
+	if _, ok := answerFor(answers, Card{Category: "errand", Progress: true, Buttons: []string{"Stop"}}); ok {
+		t.Error("a progress card was answered")
+	}
+	var step, progress inboxItem
+	json.Unmarshal([]byte(`{"category": "errand_plan", "metadata": {"workflow_id": "wf_1", "step": 0}}`), &step)
+	json.Unmarshal([]byte(`{"category": "errand", "metadata": {"card_type": "errand_progress", "workflow_id": "wf_1"}}`), &progress)
+	if c := step.card(); !c.Step || c.Progress {
+		t.Errorf("step card = %+v", c)
+	}
+	if c := progress.card(); !c.Progress || c.Done() {
+		t.Errorf("progress card = %+v", c)
+	}
+	if c := (inboxItem{Category: "errand"}).card(); !c.Done() {
+		t.Error("the completion card isn't the end")
 	}
 	var it inboxItem
 	json.Unmarshal([]byte(`{"metadata": {"interactive_elements": [

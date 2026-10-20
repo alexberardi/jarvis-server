@@ -176,8 +176,12 @@ func (t *writeSpreadsheetTool) Execute(ctx context.Context, call servertools.Cal
 	for _, s := range sheets {
 		rows += len(s.Rows)
 	}
+	msg := fmt.Sprintf("Saved the spreadsheet as %s (%d sheets, %d rows).", dest, len(sheets), rows)
+	if p := servertools.SheetPreview(sheets); p != "" {
+		msg += " " + p // the errand's report says what is in it
+	}
 	res := servertools.Obj("status", "saved", "path", dest, "bytes", len(data), "sheets", len(sheets), "rows", rows,
-		"message", fmt.Sprintf("Saved the spreadsheet as %s (%d sheets, %d rows).", dest, len(sheets), rows))
+		"message", msg)
 	if up, ok := m.Notify.(serverAttacher); ok {
 		a, err := up.UploadServerAttachment(ctx, spreadsheetOwner, turn.HouseholdID, notifications.XLSXMime, bytes.NewReader(data))
 		if err != nil {

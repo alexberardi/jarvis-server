@@ -208,6 +208,22 @@ Current steps: [{"command": "custom_cmd", "args": {"a": 1}, "label": "Custom", "
 	}
 }
 
+// A plan whose JSON ends without its last closing brackets is closed and read: the house model
+// left off the final "}" of a budget's spreadsheet replan, and the errand ended without one.
+func TestPlannerClosesUnclosedJSON(t *testing.T) {
+	e := newTenv(t, false)
+	e.llm.say("replan", `{"summary": "Write it", "steps": [{"command": "get_weather", "args": {"note": "a } in [a string"}, "label": "Weather"}]`)
+	plan, err := e.s.ReplanFromProgress(context.Background(), "goal", nil, nil, "why", nil)
+	if err != nil || len(plan.Steps) != 1 || plan.Steps[0].Label != "Weather" || truthyStr(plan.Steps[0].Args, "note") != "a } in [a string" {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	// Cut off inside a string, it is still invalid.
+	e.llm.say("replan", `{"summary": "Write it", "steps": [{"command": "get_wea`)
+	if _, err := e.s.ReplanFromProgress(context.Background(), "goal", nil, nil, "why", nil); err == nil {
+		t.Fatal("a plan cut off in a string was read")
+	}
+}
+
 func TestReplanMayBeEmptyAndSeesResults(t *testing.T) {
 	e := newTenv(t, false)
 	e.llm.say("replan", `{"summary": "", "steps": []}`)

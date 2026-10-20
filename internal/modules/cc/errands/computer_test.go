@@ -11,6 +11,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -20,13 +21,16 @@ import (
 
 // fakeComputer is the agent's computer_observe / computer_act / computer_stop.
 type fakeComputer struct {
-	mu      sync.Mutex
-	url     string
-	els     []computer.Element
-	batches []computer.Batch
-	stops   []string
+	mu       sync.Mutex
+	observes []computer.Observe
+	url      string
+	els      []computer.Element
+	batches  []computer.Batch
+	stops    []string
 	// onAct, when set, runs before each batch is answered (after the batches so far are counted).
 	onAct func(n int)
+	// downloads are in Downloads once a batch ran.
+	downloads []computer.FileEntry
 	// pausedAt is the batch (1-based) the user takes over the computer in: it answers paused.
 	pausedAt int
 }
@@ -34,6 +38,7 @@ type fakeComputer struct {
 func (f *fakeComputer) Observe(_ context.Context, o computer.Observe) (computer.Observation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.observes = append(f.observes, o)
 	return computer.Observation{URL: f.url, Title: "Shop", Elements: f.els}, nil
 }
 
@@ -55,7 +60,12 @@ func (f *fakeComputer) Act(_ context.Context, b computer.Batch) (computer.ActRes
 	return res, nil
 }
 
-func (f *fakeComputer) Files(context.Context, computer.Files) (computer.FileInfo, error) {
+func (f *fakeComputer) Files(_ context.Context, a computer.Files) (computer.FileInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if a.Op == "list" && len(f.batches) > 0 {
+		return computer.FileInfo{Entries: f.downloads}, nil
+	}
 	return computer.FileInfo{}, nil
 }
 
@@ -191,6 +201,9 @@ func TestPlannerOffersComputerTask(t *testing.T) {
 		mustObj(t, `{"command_name": "get_weather", "description": "Weather"}`),
 		mustObj(t, `{"command_name": "computer_act", "description": "Act on the computer."}`),
 		mustObj(t, `{"command_name": "computer_observe", "description": "Look at the computer."}`),
+		mustObj(t, `{"command_name": "browser_open", "description": "Open a page in the browser."}`),
+		mustObj(t, `{"command_name": "browser_fill", "description": "Fill in a field on the page."}`),
+		mustObj(t, `{"command_name": "desktop_open", "description": "Open an app or a web address."}`),
 	}
 	got := c.s.FullMenu(ctx, node, hh, ptr(7))
 	var names []string
@@ -214,11 +227,18 @@ func TestPlannerOffersComputerTask(t *testing.T) {
 	}
 
 	// Without a computer with computer control on, it isn't offered.
+	// Without a computer with computer control on, it isn't offered, and the browser's own
+	// commands are (a website task through computer_task never mixes with them).
 	c.s.Computer.Targets = func(context.Context, string) ([]string, string) { return nil, "Computer control is off." }
+	names = nil
 	for _, m := range c.s.FullMenu(ctx, node, hh, ptr(7)) {
 		if m.Command == policy.ToolComputerTask || computeruse.IsInternalTool(m.Command) {
 			t.Fatalf("offered %s without a computer", m.Command)
 		}
+		names = append(names, m.Command)
+	}
+	if strings.Join(names, ",") != "get_weather,browser_open,browser_fill,desktop_open" {
+		t.Fatalf("menu without a computer = %v", names)
 	}
 	c.s.Computer = nil
 	for _, m := range c.s.FullMenu(ctx, node, hh, ptr(7)) {
@@ -611,5 +631,325 @@ func TestComputerAskThenContinue(t *testing.T) {
 	last := reqs[len(reqs)-2] // the round after the answer
 	if !strings.Contains(last.Messages[1].Content.Parts[0].Text, "navy") {
 		t.Fatal("the answer didn't reach the model")
+	}
+}
+
+// A computer errand (only computer tasks and the computer's file tools) starts at once: no plan
+// card, its one question is the checkout confirmation (user, 2026-10-20).
+func TestComputerPlanStartsWithoutPlanCard(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Order a blue mug", step(policy.ToolComputerTask, "Order the mug",
+		`{"goal": "order a blue mug", "target": "browser", "site": "`+shopSite+`"}`)))
+	c.llm.say("computer", checkoutReply)
+	p := c.draft("order me a blue mug", ptr(7), []MenuEntry{computerEntry()})
+	if p.State != "launched" || p.WorkflowID == "" {
+		t.Fatalf("plan = %+v", p)
+	}
+	for _, cd := range c.cards.all() {
+		if cd.Category == planCategory && cd.Metadata["plan_id"] != nil {
+			t.Fatalf("plan card posted: %+v", cd)
+		}
+	}
+	w := c.wf(p.WorkflowID)
+	if w.Kind != "errand" || w.State != "waiting" || w.WaitingOn != "approval" {
+		t.Fatalf("run = %s %s %s", w.Kind, w.State, w.WaitingOn)
+	}
+	if _, ok := c.cardTitled(stepTitlePrefix); !ok {
+		var titles []string
+		for _, cd := range c.cards.all() {
+			titles = append(titles, cd.Title)
+		}
+		t.Fatalf("no checkout confirmation: %v", titles)
+	}
+}
+
+// A plan that mixes a computer task with other commands still asks with its plan card.
+func TestMixedComputerPlanPostsPlanCard(t *testing.T) {
+	c := newComputerEnv(t)
+	weather := MenuEntry{Command: "get_weather", Description: "Weather"}
+	c.llm.say("plan", planJSON("Weather and a mug", step("get_weather", "Weather", ""),
+		step(policy.ToolComputerTask, "Order the mug", `{"goal": "order a blue mug", "target": "browser"}`)))
+	p := c.draft("check the weather and order a mug", ptr(7), []MenuEntry{weather, computerEntry()})
+	if p.State != "draft" {
+		t.Fatalf("plan = %+v", p)
+	}
+	if cards := c.cards.all(); len(cards) != 1 || cards[0].Category != planCategory {
+		t.Fatalf("cards = %+v", cards)
+	}
+}
+
+func TestIsComputerPlan(t *testing.T) {
+	ct := computerStep("x")
+	for _, c := range []struct {
+		steps []Step
+		want  bool
+	}{
+		{[]Step{ct}, true},
+		{[]Step{ct, {Command: cmdReadFile}, {Command: cmdReplan}}, true},
+		{[]Step{ct, {Command: cmdWriteSheet}}, true},
+		{[]Step{{Command: cmdReadFile}}, false},
+		{[]Step{ct, {Command: "get_weather"}}, false},
+		{[]Step{ct, {Command: cmdWriteSheet, IsRisky: true}}, false},
+		{nil, false},
+	} {
+		if got := isComputerPlan(c.steps); got != c.want {
+			t.Errorf("isComputerPlan(%+v) = %v", c.steps, got)
+		}
+	}
+}
+
+// A computer errand's replan that adds only the computer's file tools goes on without a card:
+// the budget reads its statements and writes the spreadsheet in one run.
+func TestComputerReplanContinuesWithoutCard(t *testing.T) {
+	c := newComputerEnv(t)
+	read := &fakeTool{name: cmdReadFile, def: toolDef(cmdReadFile, "Read a file", "path", mustObj(t, `{"type": "string"}`)),
+		result: servertools.Obj("text", "2026-09-03,Dining,12.00")}
+	c.tools.Register(read)
+	c.llm.say("plan", planJSON("Budget", step(policy.ToolComputerTask, "Get the statement",
+		`{"goal": "download the statement", "target": "browser", "site": "`+shopSite+`"}`),
+		`{"command": "request_replan", "args": {"reason": "read what was downloaded"}, "label": "Decide"}`))
+	c.llm.say("computer", doneReply)
+	c.llm.say("replan", planJSON("Read it", step(cmdReadFile, "Read the statement", `{"path": "~/Downloads/statement.csv"}`)))
+	c.llm.say("compose", "Dining was $12.")
+	p := c.draft("do my budget", ptr(7), []MenuEntry{computerEntry()})
+	c.idle()
+	w := c.wf(p.WorkflowID)
+	if w.State != "done" || len(w.Steps) != 3 {
+		t.Fatalf("run = %s steps %+v", w.State, w.Steps)
+	}
+	if len(read.args) != 1 {
+		t.Fatalf("read_computer_file ran %d times", len(read.args))
+	}
+	for _, cd := range c.cards.all() {
+		if strings.HasPrefix(cd.Title, "🔀") {
+			t.Fatalf("delta card: %+v", cd)
+		}
+	}
+}
+
+// A computer errand whose plan still gets a plan card (a desktop task, or other commands mixed
+// in) isn't acked as started: the ack is said before the plan exists.
+func TestRunErrandComputerAckWithPlanCard(t *testing.T) {
+	c := newComputerEnv(t)
+	tool := &RunErrandTool{Svc: func() *Service { return c.s }, NeedsComputer: func(string) bool { return true }}
+	c.llm.say("plan", planJSON("Order and note it",
+		step(policy.ToolComputerTask, "Order it", `{"goal": "order a blue mug", "target": "browser", "site": "`+shopSite+`"}`),
+		step(policy.ToolComputerTask, "Note it", `{"goal": "write the order down in Notes", "target": "desktop", "app": "Notes"}`)))
+	got := res(tool.Execute(context.Background(), servertools.Call{Args: servertools.Obj("goal", "order me a blue mug and note it")}, turnFor(7)))
+	c.idle()
+	if strings.Contains(got, "I'm starting") || !strings.Contains(got, "the plan to review first") {
+		t.Fatalf("ack: %s", got)
+	}
+	planCard := false
+	for _, cd := range c.cards.all() {
+		planCard = planCard || strings.Contains(strings.Join(elementLabels(cd.Metadata), ","), "Run")
+	}
+	if !planCard {
+		t.Fatalf("no plan card: %+v", c.cards.all())
+	}
+}
+
+// run_errand's ack for a computer errand says it starts at once, not "Tap Run".
+func TestRunErrandComputerAck(t *testing.T) {
+	c := newComputerEnv(t)
+	tool := &RunErrandTool{Svc: func() *Service { return c.s }, NeedsComputer: func(g string) bool { return strings.HasPrefix(g, "order") }}
+	ack := func(goal string) string {
+		return res(tool.Execute(context.Background(), servertools.Call{Args: servertools.Obj("goal", goal)}, turnFor(7)))
+	}
+	if got := ack("order me a blue mug"); got != `{"status": "accepted", "message": "`+computerAck+`"}` {
+		t.Fatal(got)
+	}
+	if got := ack("check the weather"); !strings.Contains(got, "Tap Run") {
+		t.Fatal(got)
+	}
+	c.s.Computer = nil // no computer task on the menu: the plan card's ack
+	if got := ack("order me a blue mug"); !strings.Contains(got, "Tap Run") {
+		t.Fatal(got)
+	}
+}
+
+// Adjacent computer tasks on one site are one task: the planner's "find it" then "order it"
+// would lose what the first found.
+func TestMergeComputerSteps(t *testing.T) {
+	ct := func(goal, site, target, success string) Step {
+		a := servertools.Obj("goal", goal, "target", target, "site", site)
+		if success != "" {
+			a.Set("success", success)
+		}
+		return Step{Command: cmdComputer, Args: a, Label: goal}
+	}
+	steps := []Step{
+		ct("find the best watch", "http://127.0.0.1:9/store/", "browser", "a product page"),
+		ct("order it", "127.0.0.1:9", "browser", "an order confirmation page"),
+		ct("download the statement", "bank.example", "browser", ""),
+		{Command: cmdReadFile, Label: "read"},
+		ct("download the card statement", "card.example", "browser", ""),
+		ct("download the other one", "card.example", "desktop", ""),
+		// One host, two sites the user named: the bank's and the card's statements.
+		ct("download the bank statement", "http://127.0.0.1:9/bank/", "browser", ""),
+		ct("download the card statement", "http://127.0.0.1:9/card/", "browser", ""),
+	}
+	got := mergeComputerSteps(steps)
+	var lines []string
+	for _, st := range got {
+		lines = append(lines, st.Command+"|"+truthyStr(st.Args, "goal")+"|"+truthyStr(st.Args, "success")+"|"+st.Label)
+	}
+	want := []string{
+		"computer_task|find the best watch, then order it|an order confirmation page|order it",
+		"computer_task|download the statement||download the statement",
+		"read_computer_file|||read",
+		"computer_task|download the card statement||download the card statement",
+		"computer_task|download the other one||download the other one",
+		"computer_task|download the bank statement||download the bank statement",
+		"computer_task|download the card statement||download the card statement",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("merged:\n%s", strings.Join(lines, "\n"))
+	}
+	if truthyStr(steps[0].Args, "goal") != "find the best watch" {
+		t.Fatal("the planner's steps were changed in place")
+	}
+}
+
+// The planner's reply is merged before the plan is made.
+func TestPlanErrandMergesComputerSteps(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Order a watch",
+		step(policy.ToolComputerTask, "Find it", `{"goal": "find the best watch", "target": "browser", "site": "`+shopSite+`"}`),
+		step(policy.ToolComputerTask, "Order it", `{"goal": "order it", "target": "browser", "site": "`+shopSite+`"}`)))
+	p, err := c.s.PlanErrand(context.Background(), "order me the best watch", []MenuEntry{computerEntry()})
+	if err != nil || len(p.Steps) != 1 || truthyStr(p.Steps[0].Args, "goal") != "find the best watch, then order it" {
+		t.Fatalf("plan = %+v %v", p, err)
+	}
+}
+
+// A computer task whose goal names two web addresses is one task per address: the house model
+// wrote one task for the bank's and the card's statements, and only the card's was downloaded.
+func TestPlanErrandSplitsComputerTaskPerAddress(t *testing.T) {
+	c := newComputerEnv(t)
+	bank, card := "http://127.0.0.1:42683/bank/", "http://127.0.0.1:42683/card/"
+	c.llm.say("plan", planJSON("Download bank and card statements, then build the spreadsheet",
+		step(policy.ToolComputerTask, "Download bank and card statements", `{"goal": "download the statements from my bank (`+bank+`) and my card (`+card+`)", "target": "browser", "site": "`+bank+`", "success": "both statements downloaded"}`),
+		step(cmdReplan, "Wait for files", `{"reason": "read the downloaded statements"}`)))
+	menu := []MenuEntry{computerEntry(), {Command: cmdReplan, Description: "checkpoint"}}
+	p, err := c.s.PlanErrand(context.Background(), "do my budget from "+bank+" and "+card, menu)
+	if err != nil || len(p.Steps) != 3 {
+		t.Fatalf("plan = %+v %v", p, err)
+	}
+	for i, site := range []string{bank, card} {
+		st := p.Steps[i]
+		goal := truthyStr(st.Args, "goal")
+		if st.Command != cmdComputer || truthyStr(st.Args, "site") != site || truthyStr(st.Args, "target") != "browser" ||
+			!strings.Contains(goal, "only the part at "+site) || truthyStr(st.Args, "success") != "" {
+			t.Fatalf("step %d = %+v", i, st)
+		}
+		if got := startURL(truthyStr(st.Args, "site"), goal); got != site {
+			t.Fatalf("step %d starts at %q", i, got)
+		}
+	}
+	if p.Steps[2].Command != cmdReplan {
+		t.Fatalf("steps %+v", p.Steps)
+	}
+
+	// One address, said twice or with a query, stays one task.
+	c.llm.say("plan", planJSON("Order a watch",
+		step(policy.ToolComputerTask, "Order it", `{"goal": "order the best watch at https://shop.example/watches (https://shop.example/watches/?q=watch)", "target": "browser", "site": "`+shopSite+`"}`)))
+	if p, err := c.s.PlanErrand(context.Background(), "order me the best watch", []MenuEntry{computerEntry()}); err != nil || len(p.Steps) != 1 {
+		t.Fatalf("plan = %+v %v", p, err)
+	}
+}
+
+// A computer task starts where the user said: the step's site when it is a web address, else
+// the first address on that site in the step's goal or the errand's.
+func TestStartURL(t *testing.T) {
+	for _, c := range []struct{ site, goal, errand, want string }{
+		{"http://127.0.0.1:9/store/", "", "", "http://127.0.0.1:9/store/"},
+		{"127.0.0.1:9", "order it from http://127.0.0.1:9/store/.", "", "http://127.0.0.1:9/store/"},
+		{"127.0.0.1:9", "order it", "order me a watch at http://127.0.0.1:9/store/injection, thanks", "http://127.0.0.1:9/store/injection"},
+		{"shop.example", "order it from http://other.example/x", "", ""},
+		{"shop.example", "order it", "", ""},
+		{"", "fill in https://forms.example/a?b=1", "", "https://forms.example/a?b=1"},
+		{"ftp://x.example/", "", "", ""},
+	} {
+		if got := startURL(c.site, c.goal, c.errand); got != c.want {
+			t.Errorf("startURL(%q, %q, %q) = %q, want %q", c.site, c.goal, c.errand, got, c.want)
+		}
+	}
+}
+
+// The handler opens a browser task at the web address the user gave: the step's site is only the
+// host, the address is in the goal.
+func TestComputerTaskStartsAtTheGoalsAddress(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Order a mug", step(policy.ToolComputerTask, "Order it",
+		`{"goal": "order a blue mug from http://127.0.0.1:9/store/", "target": "browser", "site": "127.0.0.1:9"}`)))
+	c.llm.say("computer", doneReply)
+	c.draft("order me a blue mug from http://127.0.0.1:9/store/", ptr(7), []MenuEntry{computerEntry()})
+	c.idle()
+	c.comp.mu.Lock()
+	defer c.comp.mu.Unlock()
+	if len(c.comp.observes) == 0 || c.comp.observes[0].StartURL != "http://127.0.0.1:9/store/" ||
+		c.comp.observes[0].Target.Site != "127.0.0.1:9" {
+		t.Fatalf("observes %+v", c.comp.observes)
+	}
+}
+
+// The replan after the downloads that reads them and writes the spreadsheet stops at a
+// checkpoint in the spreadsheet's place, for what the reads find.
+func TestReplanSpreadsheetAfterReadIsACheckpoint(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("replan", planJSON("Read them",
+		step(cmdReadFile, "Read the bank's", `{"path": "~/Downloads/bank-statement-2026-09.csv"}`),
+		step(cmdReadFile, "Read the card's", `{"path": "~/Downloads/card-statement-2026-09.csv"}`),
+		step(cmdWriteSheet, "Write the budget", `{"name": "Budget"}`)))
+	menu := []MenuEntry{computerEntry(), {Command: cmdReadFile, Description: "read"}, {Command: cmdWriteSheet, Description: "sheet"}}
+	p, err := c.s.ReplanFromProgress(context.Background(), "do my budget", nil, nil, "read the downloads", menu)
+	if err != nil || len(p.Steps) != 3 || p.Steps[0].Command != cmdReadFile || p.Steps[1].Command != cmdReadFile ||
+		p.Steps[2].Command != cmdReplan {
+		t.Fatalf("plan = %+v %v", p, err)
+	}
+}
+
+// A spreadsheet planned after reading files waits for what was read: it becomes a checkpoint.
+func TestSpreadsheetAfterReadIsACheckpoint(t *testing.T) {
+	read := Step{Command: cmdReadFile, Args: servertools.Obj("path", "~/Downloads/a.csv"), Label: "Read"}
+	sheet := Step{Command: cmdWriteSheet, Args: servertools.Obj("name", "Budget"), Label: "Write it"}
+	got := checkpointSpreadsheet([]Step{read, read, sheet, {Command: "get_weather"}})
+	if len(got) != 3 || got[2].Command != cmdReplan || got[2].Label != "Write it" ||
+		!strings.Contains(truthyStr(got[2].Args, "reason"), "write_spreadsheet") {
+		t.Fatalf("steps %+v", got)
+	}
+	// A spreadsheet with nothing read before it in the plan (the replan after the reads) stays.
+	if got := checkpointSpreadsheet([]Step{sheet}); len(got) != 1 || got[0].Command != cmdWriteSheet {
+		t.Fatalf("steps %+v", got)
+	}
+}
+
+// The checkpoint right after a computer task that downloaded files reads each of them, then
+// waits for what they say, without asking the planner for the files' names.
+func TestCheckpointReadsTheDownloads(t *testing.T) {
+	c := newComputerEnv(t)
+	read, _ := fileTools(t, c.tenv)
+	c.comp.downloads = []computer.FileEntry{{Name: "statement-2026-09.csv", Bytes: 900}, {Name: "card-statement-2026-09.csv", Bytes: 800}}
+	c.llm.say("plan", planJSON("Budget", step(policy.ToolComputerTask, "Get the statements",
+		`{"goal": "download the statements", "target": "browser", "site": "`+shopSite+`"}`),
+		`{"command": "request_replan", "args": {"reason": "read what was downloaded"}, "label": "Wait for files"}`))
+	c.llm.say("computer", `{"actions": [{"kind": "press", "ref": "e2", "intent": "Download"}]}`, doneReply)
+	c.llm.say("replan", planJSON("Nothing more"))
+	c.llm.say("compose", "Read both.")
+	p := c.draft("do my budget", ptr(7), c.s.FullMenu(context.Background(), nil, hh, ptr(7)))
+	c.idle()
+	w := c.wf(p.WorkflowID)
+	if w.State != "done" || len(read.args) != 2 {
+		t.Fatalf("run = %s, reads %v", w.State, read.args)
+	}
+	if !strings.Contains(read.args[0], "~/Downloads/card-statement-2026-09.csv") || !strings.Contains(read.args[1], "~/Downloads/statement-2026-09.csv") {
+		t.Fatalf("reads %v", read.args)
+	}
+	if n := len(c.llm.requests("replan")); n != 1 {
+		t.Fatalf("replans asked of the planner: %d (only the one after the reads)", n)
+	}
+	if last := w.Steps[len(w.Steps)-1]; last.Command != cmdReplan {
+		t.Fatalf("steps %+v", w.Steps)
 	}
 }

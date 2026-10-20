@@ -2,7 +2,7 @@
   "name": "web_form",
   "about": "Fill in and send the fixture's 10-field form. Flipped by piece 14.",
   "phase": "browser",
-  "status": "pending",
+  "status": "required",
   "say": "Fill in the garden plot application at {{sites}}/form/ for me: name Avery Test, email avery@example.com, phone 555 0100, start date 2026-11-01, country US, the standard plot, contact me by email, no newsletter, accept the terms, and say \"A sunny spot, please.\" in the message.",
   "target": "browser",
   "setup": {"login": []},

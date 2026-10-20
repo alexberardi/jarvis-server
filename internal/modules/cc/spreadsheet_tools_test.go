@@ -80,6 +80,10 @@ func TestWriteSpreadsheet(t *testing.T) {
 		!strings.Contains(out["message"].(string), "Budget 2026-09.xlsx") {
 		t.Fatalf("saved: %v", out)
 	}
+	// The report says what is in it: the last sheet's rows (the totals, for a budget).
+	if msg := out["message"].(string); !strings.HasSuffix(msg, " By category: Groceries -54.2; Utilities -88.1.") {
+		t.Fatalf("message: %s", msg)
+	}
 	if ids, _ := out["attachment_ids"].([]any); len(ids) != 1 || ids[0] != "att-1" {
 		t.Fatalf("attachment ids: %v", out)
 	}

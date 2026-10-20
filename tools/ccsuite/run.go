@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -102,14 +103,9 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 			continue
 		}
 		cr := CaseResult{Name: c.Name, Phase: c.Phase, File: c.File, CaseStatus: c.Status}
-		desk, _ := c.needs()
 		switch {
-		case c.Status == "pending" && !*includePending:
-			cr.Status, cr.SkipReason = "skipped", "pending"
-		case desk == "mac" && runtime.GOOS != "darwin":
-			cr.Status, cr.SkipReason = "skipped", "macOS only: the Mac test host"
-		case desk == "mac":
-			cr.Status, cr.SkipReason = "skipped", "macOS desktop cases are not wired yet (piece 22)"
+		case skipReason(c, *llm, *includePending, runtime.GOOS) != "":
+			cr.Status, cr.SkipReason = "skipped", skipReason(c, *llm, *includePending, runtime.GOOS)
 		case upErr != nil:
 			cr.RunResults = []RunResult{{Failure: "bring-up: " + upErr.Error()}}
 			summarize(&cr)
@@ -159,9 +155,26 @@ func runID() string {
 	return time.Now().Format("20060102-150405") + "-" + hex.EncodeToString(b)
 }
 
+// skipReason is why c isn't run, or "".
+func skipReason(c Case, llm string, includePending bool, goos string) string {
+	desk, _ := c.needs()
+	switch {
+	case c.Status == "pending" && !includePending:
+		return "pending"
+	case llm == "scripted" && c.Phase != "tests":
+		// The plumbing run: the scripted model does no computer tasks.
+		return "the scripted model does no computer tasks"
+	case desk == "mac" && goos != "darwin":
+		return "macOS only: the Mac test host"
+	case desk == "mac":
+		return "macOS desktop cases are not wired yet (piece 22)"
+	}
+	return ""
+}
+
 // runOnce is one run of a case: reset the fixtures, say the message, answer the cards, wait for
 // the errand to be over, then gather the state and evaluate the checks. Its files are in
-// cases/<name>/run-<i>/ (state.json, failure.png).
+// cases/<name>/run-<i>/ (state.json, llm.jsonl, failure.png).
 func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	r.Dir = filepath.ToSlash(filepath.Join("cases", c.Name, fmt.Sprintf("run-%d", i)))
 	dir := filepath.Join(e.Dir, r.Dir)
@@ -191,6 +204,9 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		}
 		node = e.NodeID
 	}
+	if err := e.Block(cctx, c.Setup.Block); err != nil {
+		return fail("block: " + err.Error())
+	}
 	if err := e.Login(cctx, c.Setup.Login); err != nil {
 		return fail("login: " + err.Error())
 	}
@@ -212,7 +228,7 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	}
 	llmLog := e.Sbx["SBX_LLM_LOG"]
 	offset := fileSize(llmLog)
-	defer func() { r.Rounds = countLines(llmLog, offset) }()
+	defer func() { r.Rounds = copyLines(llmLog, offset, filepath.Join(dir, "llm.jsonl")) }()
 
 	// Say it, from the seeded user to the agent node, as the app's chat does.
 	var (
@@ -229,57 +245,18 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		mu.Unlock()
 	}()
 
-	// Answer the cards until the errand is over: a completion card, or quiet for --settle after
-	// the chat's answer, or max_minutes.
-	var cards []Card
-	sitesBefore, _ := e.sitesRaw(cctx)
-	lastChange, timedOut, finished := time.Now(), false, false
-	for !finished {
-		select {
-		case <-cctx.Done():
-			timedOut, finished = ctx.Err() == nil, true
-			continue
-		case <-time.After(2 * time.Second):
-		}
-		items, err := e.inbox(cctx)
-		if err != nil {
-			continue
-		}
-		for _, it := range items {
-			if known[it.ID] {
-				continue
-			}
-			known[it.ID] = true
-			lastChange = time.Now()
-			card := it.card()
-			if a, ok := answerFor(c.Answers, card); ok {
-				if el, ok := it.button(a.Tap); ok {
-					if err := e.tap(cctx, it, el); err != nil {
-						card.Tapped = "failed: " + err.Error()
-					} else {
-						card.Tapped = el.Label
-					}
-				}
-			}
-			cards = append(cards, card)
-			if card.Category == "errand" {
-				finished = true // the completion card
-			}
-		}
-		if now, err := e.sitesRaw(cctx); err == nil && !bytes.Equal(now, sitesBefore) {
-			sitesBefore, lastChange = now, time.Now()
-		}
-		select {
-		case <-chatDone:
-			if time.Since(lastChange) >= e.settle() {
-				finished = true
-			}
-		default:
-			lastChange = time.Now() // still answering
-		}
-	}
+	// Answer the cards until the errand is over, then stop it if it still runs: an errand left
+	// running would run into the next run's cards and fixtures.
+	cards, ended := watchCards(cctx, e, realClock, c.Answers, known, chatDone, e.settle())
+	timedOut := !ended && ctx.Err() == nil
 	cancel()
 	<-chatDone
+	if ctx.Err() == nil {
+		var err error
+		if r.Stopped, err = stopErrands(ctx, e, realClock, 3*time.Minute); err != nil {
+			fmt.Fprintf(e.Log, "ccsuite: %s run %d: %v\n", c.Name, i, err)
+		}
+	}
 
 	// The state, from the fixtures themselves.
 	st, err := e.gather(ctx, cards)
@@ -310,6 +287,131 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	return fail(strings.Join(why, "\n"))
 }
 
+// errandSite is what the card loop talks to: the Env, or a fake in the tests.
+type errandSite interface {
+	inbox(ctx context.Context) ([]inboxItem, error)
+	sitesRaw(ctx context.Context) ([]byte, error)
+	tap(ctx context.Context, it inboxItem, el element) error
+}
+
+// clock is the card loop's time: now, and wait (false once ctx is done).
+type clock struct {
+	now  func() time.Time
+	wait func(ctx context.Context, d time.Duration) bool
+}
+
+var realClock = clock{now: time.Now, wait: func(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
+}}
+
+// watchCards answers the cards until the errand is over: a completion card, or quiet for settle
+// after the chat's answer (chatDone), or ctx's end (ended false). A card is news when it appears
+// and whenever its title, body or buttons change (the progress card, step by step); cards is
+// each card's last version, in the order they appeared. old: the cards there before the run.
+func watchCards(ctx context.Context, s errandSite, clk clock, answers []Answer, old map[string]bool,
+	chatDone <-chan struct{}, settle time.Duration) (cards []Card, ended bool) {
+	at := map[string]int{}
+	sitesBefore, _ := s.sitesRaw(ctx)
+	lastChange := clk.now()
+	for {
+		if !clk.wait(ctx, 2*time.Second) {
+			return cards, false
+		}
+		items, err := s.inbox(ctx)
+		if err != nil {
+			continue
+		}
+		done := false
+		for _, it := range items {
+			if old[it.ID] {
+				continue
+			}
+			card := it.card()
+			i, seen := at[it.ID]
+			if seen {
+				card.Tapped = cards[i].Tapped
+				if reflect.DeepEqual(cards[i], card) {
+					continue
+				}
+				cards[i] = card
+			} else {
+				i = len(cards)
+				at[it.ID] = i
+				cards = append(cards, card)
+			}
+			lastChange = clk.now()
+			if a, ok := answerFor(answers, card); ok && card.Tapped == "" {
+				if el, ok := it.button(a.Tap); ok {
+					if err := s.tap(ctx, it, el); err != nil {
+						cards[i].Tapped = "failed: " + err.Error()
+					} else {
+						cards[i].Tapped = el.Label
+					}
+				}
+			}
+			done = done || card.Done() // the completion card
+		}
+		if done {
+			return cards, true
+		}
+		if now, err := s.sitesRaw(ctx); err == nil && !bytes.Equal(now, sitesBefore) {
+			sitesBefore, lastChange = now, clk.now()
+		}
+		select {
+		case <-chatDone:
+			if clk.now().Sub(lastChange) >= settle {
+				return cards, true
+			}
+		default:
+			lastChange = clk.now() // still answering
+		}
+	}
+}
+
+// stopErrands taps Stop on every errand still running or waiting (its progress card's Stop,
+// again every 15 s while it runs on) until none is, and returns their titles; an error when one
+// still runs after limit.
+func stopErrands(ctx context.Context, s errandSite, clk clock, limit time.Duration) ([]string, error) {
+	deadline := clk.now().Add(limit)
+	var stopped []string
+	tapped := map[string]time.Time{}
+	for {
+		items, err := s.inbox(ctx)
+		if err == nil {
+			running := 0
+			for _, it := range items {
+				el, ok := it.stop()
+				if !ok {
+					continue
+				}
+				running++
+				last, seen := tapped[it.ID]
+				if !seen {
+					stopped = append(stopped, it.Title)
+				}
+				if !seen || clk.now().Sub(last) >= 15*time.Second {
+					tapped[it.ID] = clk.now()
+					s.tap(ctx, it, el) // a failed tap is tried again
+				}
+			}
+			if running == 0 {
+				return stopped, nil
+			}
+		}
+		if !clk.now().Before(deadline) {
+			return stopped, fmt.Errorf("an errand still runs %v after its run ended (%s)", limit, strings.Join(stopped, ", "))
+		}
+		if !clk.wait(ctx, 3*time.Second) {
+			return stopped, ctx.Err()
+		}
+	}
+}
+
 func (e *Env) settle() time.Duration {
 	if e.Settle > 0 {
 		return e.Settle
@@ -320,11 +422,11 @@ func (e *Env) settle() time.Duration {
 // answerFor is the case's answer for a card that asks: plan cards (an errand's plan) take a
 // "plan" answer, any other card with buttons a "confirm" one.
 func answerFor(answers []Answer, c Card) (Answer, bool) {
-	if len(c.Buttons) == 0 {
+	if len(c.Buttons) == 0 || c.Progress {
 		return Answer{}, false
 	}
 	kind := "confirm"
-	if c.Category == "errand_plan" {
+	if c.Category == "errand_plan" && !c.Step {
 		kind = "plan"
 	}
 	for _, a := range answers {
@@ -336,7 +438,7 @@ func answerFor(answers []Answer, c Card) (Answer, bool) {
 }
 
 // reset puts the fixtures back: the sites' state (orders, downloads, forms, sessions), the
-// fake relay's pushes and the agent's ~/Documents/Jarvis.
+// fake relay's pushes, the agent's ~/Documents/Jarvis and what its browser downloaded.
 func (e *Env) reset(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, "POST", e.Sites+"/control/reset", nil)
 	if err := doJSON(req, nil); err != nil {
@@ -351,6 +453,14 @@ func (e *Env) reset(ctx context.Context) error {
 	docs := e.path("agent-home", "Documents", "Jarvis")
 	if err := os.RemoveAll(docs); err != nil {
 		return err
+	}
+	// The files only: the browser may hold the directory.
+	dl := e.path("agent-home", "Downloads")
+	files, _ := os.ReadDir(dl)
+	for _, f := range files {
+		if err := os.RemoveAll(filepath.Join(dl, f.Name())); err != nil {
+			return err
+		}
 	}
 	return os.MkdirAll(docs, 0o755)
 }
@@ -455,6 +565,9 @@ type inboxItem struct {
 	Category string `json:"category"`
 	Metadata struct {
 		HouseholdID string    `json:"household_id"`
+		WorkflowID  string    `json:"workflow_id"`
+		CardType    string    `json:"card_type"`
+		State       string    `json:"state"`
 		Elements    []element `json:"interactive_elements"`
 	} `json:"metadata"`
 }
@@ -476,7 +589,8 @@ func (e *Env) inbox(ctx context.Context) ([]inboxItem, error) {
 }
 
 func (it inboxItem) card() Card {
-	c := Card{ID: it.ID, Title: it.Title, Body: firstNonEmpty(it.Body, it.Summary), Category: it.Category}
+	c := Card{ID: it.ID, Title: it.Title, Body: firstNonEmpty(it.Body, it.Summary), Category: it.Category,
+		Step: it.Metadata.WorkflowID != "", Progress: it.Metadata.CardType == "errand_progress"}
 	for _, el := range it.Metadata.Elements {
 		c.Buttons = append(c.Buttons, el.Label)
 	}
@@ -497,6 +611,22 @@ func (it inboxItem) button(tap string) (element, bool) {
 	for _, el := range it.Metadata.Elements {
 		s := el.Label + " " + el.Callback + " " + el.ID
 		if want.MatchString(s) && !other.MatchString(el.Label) {
+			return el, true
+		}
+	}
+	return element{}, false
+}
+
+// stop is the Stop of an errand's progress card while the errand runs or waits on a card.
+func (it inboxItem) stop() (element, bool) {
+	if t := it.Metadata.CardType; t != "errand_progress" && t != "autonomy_ran" {
+		return element{}, false
+	}
+	if st := it.Metadata.State; st != "running" && st != "waiting" {
+		return element{}, false
+	}
+	for _, el := range it.Metadata.Elements {
+		if el.Callback == "stop_errand" {
 			return el, true
 		}
 	}
@@ -524,8 +654,9 @@ func fileSize(path string) int64 {
 	return st.Size()
 }
 
-// countLines is the model calls logged after offset (one JSON line each, tools/pipeline tap).
-func countLines(path string, offset int64) int {
+// copyLines is the model calls logged after offset (one JSON line each, tools/pipeline tap),
+// copied to dst so they outlive the sandbox's purge.
+func copyLines(path string, offset int64, dst string) int {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0
@@ -534,13 +665,17 @@ func countLines(path string, offset int64) int {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return 0
 	}
+	var out bytes.Buffer
 	n := 0
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
 		if len(bytes.TrimSpace(sc.Bytes())) > 0 {
+			out.Write(sc.Bytes())
+			out.WriteByte('\n')
 			n++
 		}
 	}
+	os.WriteFile(dst, out.Bytes(), 0o644)
 	return n
 }
