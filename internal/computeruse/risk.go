@@ -90,6 +90,9 @@ func Classify(a Action, el *Element, t Target) Risk {
 
 	ws := words(el.Name)
 	for _, l := range riskWords {
+		if formOption(el, l.category) {
+			continue
+		}
 		if w := firstPhrase(ws, l.words); w != "" {
 			return confirm(l.category, fmt.Sprintf("%s %q matches %q", roleOf(el), el.Name, w))
 		}
@@ -104,6 +107,17 @@ func Classify(a Action, el *Element, t Target) Risk {
 		return confirm(CatSubmitThirdParty, fmt.Sprintf("submits a form (%s %q)", roleOf(el), el.Name))
 	}
 	return Risk{Level: LevelNone}
+}
+
+// formOption reports whether el is a form's checkbox or radio button, whose words of category
+// don't make pressing it risky: "Send me the monthly newsletter" sends or subscribes nothing
+// until its form is sent, and sending the form asks (isSubmit).
+func formOption(el *Element, category string) bool {
+	switch category {
+	case CatSend, CatSubscribe, CatUnsubscribe:
+		return el.Role == "checkbox" || el.Role == "radio"
+	}
+	return false
 }
 
 func confirm(cat, reason string) Risk { return Risk{LevelConfirm, cat, reason} }
