@@ -576,6 +576,28 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     expect(screen.getByTestId('setup-step-position')).toHaveTextContent('Step 6 of 11: Voice')
   })
 
+  // On a phone the "Step N of 11" line is the only way back to an earlier step: it opens the
+  // list, and picking a step closes it again.
+  it('opens the step list from the progress line and closes it after a pick', async () => {
+    signIn()
+    auth.getSetupState.mockResolvedValue({ ...superState, models_configured: true, setup_completed: false, setup_step: 'voice' })
+    renderWizard(false)
+    await screen.findByRole('heading', { name: /^Voice Required/ })
+    const toggle = screen.getByRole('button', { name: /^Step 6 of 11: Voice/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAttribute('aria-controls', 'setup-steps')
+    expect(screen.getByRole('list', { name: 'Setup steps' })).toHaveClass('max-sm:hidden')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('list', { name: 'Setup steps' })).not.toHaveClass('max-sm:hidden')
+
+    fireEvent.click(within(screen.getByRole('list', { name: 'Setup steps' })).getByRole('button', { name: 'Hardware' }))
+    expect(await screen.findByRole('heading', { name: /^Hardware/ })).toBeInTheDocument()
+    const after = screen.getByRole('button', { name: /^Step 3 of 11: Hardware/ })
+    expect(after).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('list', { name: 'Setup steps' })).toHaveClass('max-sm:hidden')
+  })
+
   // Home then picks Chat or, while something needs the operator, the dashboard (HomeRedirect).
   it('forwards home once setup was finished', async () => {
     signIn()

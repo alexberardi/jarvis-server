@@ -55,7 +55,7 @@ export default function HouseholdSettings() {
       />
       {error && (
         <Alert tone="danger" title="Couldn't load the household's settings" className="mb-4">
-          {errorMessage(error, 'The server did not answer. Reload the page to try again.')}
+          {errorMessage(error, 'Reload the page to try again.')}
         </Alert>
       )}
       <ul className="space-y-4">

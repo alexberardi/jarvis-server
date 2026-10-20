@@ -28,7 +28,7 @@ export default function AccountPage() {
       setDraft(null)
       toast.success('Saved')
     } catch (err) {
-      setError(errorMessage(err, 'The server did not answer. Try again in a moment.'))
+      setError(errorMessage(err, "The name wasn't saved. Try again in a moment."))
     } finally {
       setSaving(false)
     }
