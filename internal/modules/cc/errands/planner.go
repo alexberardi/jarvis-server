@@ -258,8 +258,8 @@ const decompositionRule = "Create a SEPARATE step for EACH distinct action the u
 const budgetRule = "BUDGETS: for a budget or a spending report from statements, download the statements " +
 	"with computer_task, then end the plan with a request_replan checkpoint: the files' names are known only " +
 	"once they are downloaded. Then read each downloaded file with read_computer_file, then another " +
-	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with every " +
-	"transaction categorised and a total per category; the report then says where the money went.\n\n"
+	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with one row per " +
+	"category: the category and its total over every transaction read; the report then says where the money went.\n\n"
 
 // websiteRule is the decomposition rule's line for computer tasks (plan P3 piece 14): the
 // house model split "order the best watch" into a find step and an order step, and the second
@@ -294,7 +294,7 @@ func checkpointSpreadsheet(steps []Step) []Step {
 			if read {
 				out := append([]Step(nil), steps[:i]...)
 				return append(out, Step{Command: cmdReplan, Label: st.Label, Args: servertools.Obj("reason",
-					"write_spreadsheet from the files read above: every transaction categorised, with a total per category")})
+					"write_spreadsheet from the files read above: one row per category with its total")})
 			}
 		}
 	}
