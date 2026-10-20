@@ -15,6 +15,7 @@ export interface NodeLiveness {
   node_kind?: string | null
   /**
    * What the node reported, e.g. browser_extension: "connected" | "disconnected" | "disabled",
+   * browser_website_access: "on" | "off" (only with an extension connected that says),
    * computer_control: "on" | "off".
    */
   capabilities?: Record<string, string | boolean | number>
@@ -28,6 +29,15 @@ export interface NodeLiveness {
 export function extensionState(n: NodeLiveness | undefined): 'connected' | 'disconnected' | 'disabled' | null {
   const v = n?.capabilities?.browser_extension
   return v === 'connected' || v === 'disconnected' || v === 'disabled' ? v : null
+}
+
+/**
+ * websiteAccessState is whether a desktop agent's connected browser extension may read and act on
+ * pages (Firefox lets the user turn it off); null when it didn't say (no extension connected, or one before 0.3.2).
+ */
+export function websiteAccessState(n: NodeLiveness | undefined): 'on' | 'off' | null {
+  const v = n?.capabilities?.browser_website_access
+  return v === 'on' || v === 'off' ? v : null
 }
 
 /**

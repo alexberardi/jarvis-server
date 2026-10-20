@@ -128,6 +128,7 @@ type change struct {
 	tune  func(*voice.Config)          // nil: not a voice setting
 	leds  func(LEDs)                   // nil: not an LED setting
 	audio func(context.Context, Audio) // set instead of state and save: Audio persists it
+	note  string                       // logged when applied: what was changed on the way in
 }
 
 // parse turns one key into a change, or says why it is skipped.
@@ -149,7 +150,12 @@ func parse(key string, v any) (change, string) {
 		if !ok || f < 0 {
 			return change{}, "use 0 (off) or more seconds"
 		}
-		return change{state: func(s *State) { s.FollowUpListen = f }, save: func(s *settings.Settings) { s.FollowUp = &f },
+		note := ""
+		if c := voice.ClampFollowUpListen(f); c != f {
+			note = fmt.Sprintf("follow_up_listen_seconds clamped from %v to %v s", f, c)
+			f = c
+		}
+		return change{note: note, state: func(s *State) { s.FollowUpListen = f }, save: func(s *settings.Settings) { s.FollowUp = &f },
 			tune: func(c *voice.Config) { c.FollowUp.ListenSecs = f }}, ""
 	case "follow_up_silence_duration":
 		f, ok := number(v)
@@ -241,6 +247,9 @@ func (n *Node) updateNodeConfig(ctx context.Context, _ node.Backend, det map[str
 		if why != "" {
 			n.log.Warn("update_node_config: key ignored", "key", k, "value", in[k], "why", why)
 			continue
+		}
+		if c.note != "" {
+			n.log.Info("update_node_config: " + c.note)
 		}
 		changes = append(changes, c)
 		applied = append(applied, k)

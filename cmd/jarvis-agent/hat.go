@@ -236,7 +236,7 @@ func hatCmd(ctx context.Context, args []string) error {
 		wait(*dur)
 	case "cycle":
 		for _, n := range []string{hat.Normal, hat.WakeDetected, hat.Listening, hat.Thinking, hat.Speaking,
-			hat.Error, hat.NotForMe, hat.Alert, hat.Muted, hat.ShutdownWarning, hat.Off} {
+			hat.Error, hat.NotForMe, hat.Alert, hat.Muted, hat.ShutdownWarning, hat.Setup, hat.Off} {
 			leds.SetTransient(n)
 			log.Info("hat: showing", "pattern", n)
 			if !wait(*dur) {

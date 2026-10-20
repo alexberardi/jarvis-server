@@ -35,6 +35,7 @@ const (
 	NotForMe        = "not_for_me"
 	Muted           = "muted"
 	ShutdownWarning = "shutdown_warning"
+	Setup           = "setup" // not enrolled: the setup hotspot is up (the Go node's own; #292)
 )
 
 func all(p Pixel) []Pixel { return []Pixel{p, p, p} }
@@ -61,6 +62,10 @@ var patterns = map[string]func(t float64) []Pixel{
 	Error:    func(float64) []Pixel { return all(Pixel{255, 0, 0, 50}) },
 	NotForMe: func(float64) []Pixel { return all(Pixel{255, 90, 0, 45}) },
 	Muted:    func(float64) []Pixel { return all(Pixel{255, 0, 0, 30}) },
+	// A slow blue breath, 3 s a cycle: no other state is blue or breathes.
+	Setup: func(t float64) []Pixel {
+		return all(Pixel{0, 60, 255, uint8(10 + 30*(1-math.Cos(2*math.Pi*t/3))/2)})
+	},
 	ShutdownWarning: func(t float64) []Pixel {
 		if math.Mod(t, 0.2) < 0.1 {
 			return all(Pixel{255, 0, 0, 60})
@@ -136,7 +141,7 @@ type LEDs struct {
 
 // animated are the patterns that change with time; the others are drawn once and the renderer
 // sleeps until the next change (Python redraws at 20 Hz regardless: ~3% of a Pi 4 core).
-var animated = map[string]bool{Thinking: true, ShutdownWarning: true}
+var animated = map[string]bool{Thinking: true, ShutdownWarning: true, Setup: true}
 
 // NewLEDs starts rendering to strip: "normal" (dim white) until told otherwise.
 func NewLEDs(strip Strip, log *slog.Logger) *LEDs {

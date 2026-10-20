@@ -65,7 +65,9 @@ const (
 	extDisabled     = "disabled"     // run --no-browser
 )
 
-// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes;
+// heartbeatCaps reports the browser extension's state, and with a browser connected whose
+// extension says, browser_website_access "on" or "off" (off while any has it off: pages can't be
+// read or acted on there); it wakes a heartbeat when these change;
 // with sw, also computer control's switch as computer_control "on" or "off" (its changes wake
 // a heartbeat through Runner.BeatNow).
 func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[string]any, changed func() <-chan struct{}) {
@@ -84,6 +86,11 @@ func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[strin
 			}
 		}
 		out := map[string]any{"browser_extension": state}
+		if hub != nil {
+			if a := hub.WebsiteAccess(); a != nil {
+				out["browser_website_access"] = map[bool]string{true: "on", false: "off"}[*a]
+			}
+		}
 		if sw != nil {
 			out["computer_control"] = map[bool]string{true: "on", false: "off"}[sw.On()]
 		}
@@ -558,6 +565,7 @@ func run(ctx context.Context, args []string) error {
 		*f.noTray, *f.noOverlay = true, true
 	}
 	cp, tf, voiceOn, noOverlay, vf, hf := f.cp, f.tf, f.voiceOn, f.noOverlay, f.vf, f.hf
+	vf.clampFollowUp(log)
 	tf.pi = !p.desktop
 	// One agent per user: the control socket is the lock, and how a second launch, the
 	// start-only shortcut and uninstall reach this one (installers plan item 1.9).
@@ -580,6 +588,20 @@ func run(ctx context.Context, args []string) error {
 			// the agent once it is (setupwait.go). Typed in a terminal, it says what to do.
 			return waitForSetup(ctx, log, path, *f.noTray, ctl)
 		}
+		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && !p.desktop {
+			// A Pi that isn't enrolled (a factory reset, an install without a code) is in setup
+			// mode until the app provisions it, then the node (setupmode.go).
+			if err = piSetupMode(ctx, log, path, hf); err == nil {
+				c, err = node.LoadCreds(path)
+			} else if ctx.Err() != nil {
+				if ctl != nil {
+					_ = ctl.Close()
+				}
+				return nil // stopped while waiting
+			}
+		}
+	}
+	if err != nil {
 		if ctl != nil {
 			_ = ctl.Close()
 		}
@@ -626,6 +648,21 @@ func run(ctx context.Context, args []string) error {
 		tf.host = newPiHost(ctx, filepath.Dir(path), mic, log)
 		tf.host.Music = duck
 	}
+	// jarvisd's client once connected: approval tokens are checked with it, recordings uploaded.
+	var liveCC atomic.Pointer[node.CC]
+	if p.desktop {
+		// Computer tasks in the browser (plan P3 piece 8): build adds the executor's tools
+		// after the browser's.
+		tf.computer = func(bt *browser.Tools) node.Toolset {
+			return &computer.Tools{Browser: computer.BrowserOf(bt), Switch: computerSw, Activity: activity,
+				CC: func() computer.Approver {
+					if cc := liveCC.Load(); cc != nil {
+						return cc
+					}
+					return nil
+				}}
+		}
+	}
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -634,7 +671,6 @@ func run(ctx context.Context, args []string) error {
 	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
 	// is uploaded once connected to jarvisd (liveCC). computer_switch is computer control's
 	// switch for jarvisd's voice tools (enable/disable_computer_control).
-	var liveCC atomic.Pointer[node.CC]
 	var recorder *computer.Recorder
 	if p.desktop {
 		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, log)
@@ -868,6 +904,9 @@ type toolFlags struct {
 	host *sdkhost.Host
 	// live is the sidecar in service once build ran (the Pi's reminders are polled from it).
 	live *sidecar.Live
+	// computer, when the caller sets it, is the computer-task executor's tools on the browser
+	// extension's: build adds them after the browser tools.
+	computer func(*browser.Tools) node.Toolset
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -924,6 +963,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		bt.Origins = f.origins
 		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
+		if f.computer != nil {
+			tools = append(tools, f.computer(bt))
+		}
 		closeAll = stopBrowser
 	}
 	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)

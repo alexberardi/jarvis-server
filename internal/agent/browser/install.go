@@ -317,6 +317,16 @@ func writeFileAtomic(path string, b []byte, mode os.FileMode) error {
 
 // ChromiumSteps are the manual steps for a Chromium browser: Chrome Web Store installs aside,
 // a browser only loads an unpacked extension the user picks in its own UI.
+// WebsiteAccessSteps is how to give the extension access to every site in browser (its name as
+// the extension reports it), the permission Firefox lets the user turn off; without it the
+// extension can't read or act on pages.
+func WebsiteAccessSteps(browser string) string {
+	if strings.Contains(strings.ToLower(browser), "firefox") {
+		return "click the Jarvis Browser Control toolbar button -> \"Turn on\" (or about:addons -> Jarvis Browser Control -> Permissions -> turn on \"Access your data for all websites\")"
+	}
+	return "click the Jarvis Browser Control toolbar button -> \"Turn on\" (or the extensions page -> Jarvis Browser Control -> Details -> Site access -> \"On all sites\")"
+}
+
 func ChromiumSteps(dir string) string {
 	return strings.Join([]string{
 		"In Chrome, Edge, Brave, Arc or Vivaldi:",

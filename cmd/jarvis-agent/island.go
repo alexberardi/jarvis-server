@@ -102,7 +102,7 @@ func islandDemo(ctx context.Context, args []string) error {
 			{island.Listening, 0, 2500 * time.Millisecond, true},
 			{island.Thinking, 0, 1500 * time.Millisecond, false},
 			{island.Speaking, 0, 2500 * time.Millisecond, true},
-			{island.FollowUp, 8 * time.Second, 3 * time.Second, false},
+			{island.FollowUp, 3 * time.Second, 3 * time.Second, false},
 			{island.Listening, 0, 1500 * time.Millisecond, true},
 			{island.Thinking, 0, time.Second, false},
 			{island.FollowUp, 3 * time.Second, 3 * time.Second, false},

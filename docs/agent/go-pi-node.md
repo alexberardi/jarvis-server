@@ -558,7 +558,9 @@ transcribed, and the response carries `keep_listening: true` until `voice.follow
 iteration (`MaxIgnored` 5 bounds it locally). Older nodes ignore `keep_listening` and close the
 window as before; older servers never send it.
 
-**Node defaults now** (Python's in brackets): window 8 s, then 6, then 5 (4, 3); an answer ends
+**Node defaults now** (Python's in brackets): window 3 s on every iteration, and at most 3 s
+however it is set (4, then 3; it was 8, then 6, then 5 until #296, see
+[decisions/2026-10-19-follow-up-window-3s.md](../decisions/2026-10-19-follow-up-window-3s.md)); an answer ends
 after 1.2 s of silence (0.5); answers may run 10 s (7). The wake turn's endpointing is unchanged.
 
 **Evaluation** (`internal/agent/voice/gate_eval_test.go` → `internal/modules/cc/followup_gate_eval_test.go`;
@@ -883,7 +885,7 @@ to agent.json in one serialized write (`settings.Update`, shared with the voice 
 | `led_brightness_percent` | `led_brightness` / `--led-brightness` | `LEDs.SetBrightness` |
 | `wake_word_threshold` | `wake_threshold` / `--wake-threshold` | the running pipeline, from its next chunk (`voice.Live.Tune`) |
 | `wake_ack_audio_enabled` | `chimes` / `--no-chimes` | same |
-| `follow_up_listen_seconds` | `follow_up` / `--follow-up` | same (from the next turn) |
+| `follow_up_listen_seconds` | `follow_up` / `--follow-up` | same (from the next turn); clamped to 3 s, logged |
 | `follow_up_silence_duration` | `follow_up_silence` / `--follow-up-silence` | same |
 | `silence_threshold` | `silence_threshold` / `--silence-threshold` | same (`Endpointing.SilenceThreshold`: the static one, used when the pre-wake level isn't known, as Python's) |
 | `silence_duration` | `listen_silence` / `--listen-silence` | same (`Endpointing.SilenceSecs`) |
@@ -1232,7 +1234,7 @@ checked on the lab Pi 4 since it was built.
 | 4.1 Pi profile, HAT codec self-heal | built | no |
 | 4.2 self-update on the Pi | built | partly: `systemd-run --user` reaches pi's manager; **open (e)**: the rollback repro after rerunning `install-pi.sh` (#220) |
 | 4.3 `install-pi.sh` (3a, 3b), the release | built | no; no published release yet |
-| 4.4 provisioning API, NetworkManager backend, recovery | built | no; **open (d)**: setup mode is not started at boot |
+| 4.4 provisioning API, NetworkManager backend, recovery, setup mode at boot | built | no; setup mode at boot (#292) unit-tested, pending the lab Pi |
 | 4.5 the built-in commands in the sidecar; reminders, alerts, button | built | no; **open (b)**: `control_device`, `routine`, `send_link` are skipped (`internal/agent/packages/python.go:58`) |
 | 5.1 follow-up | built (heard on the desktop) | no |
 | 5.2 barge-in | built (rig tests) | no |
@@ -1242,7 +1244,7 @@ checked on the lab Pi 4 since it was built.
 | 5.4 Pi volume and mute from the app (`volume_percent`, `is_muted`; #295) | built (`sdkhost.Audio`, persisted in `volume.json`) | no: the slider heard to change the HAT's speaker, and kept after a restart |
 | 5.5 K2 + settings snapshot | built for the desktop agent (`internal/agent/nodesettings`); the Pi reports its `node_config`, volume included | **open (c)**: not marked done or checked for the Pi profile |
 | 5.6 packages (apt, post_install, test-install) | built | no |
-| 5.7 factory reset, routines sync, context requests | built | no; **open (d)**: a reset node doesn't return to provisioning; jarvisd's broker drops `context/operations` answers (ACL, held for the user) |
+| 5.7 factory reset, routines sync, context requests | built | no; a reset node boots into setup mode (#292), pending the lab Pi; jarvisd's broker drops `context/operations` answers (ACL, held for the user) |
 | 5.8 Bluetooth | built | no |
 | 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
 | 5.10 voice-profile takes | built | no |
@@ -1256,8 +1258,10 @@ What each open gap blocks, if the Python node were retired today:
 - **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
   the node. The app's device control still works.
 - **(c)** the app's node settings (and their secrets' Sync) may not reach a Pi; not confirmed.
-- **(d)** a factory reset (from the app or the provisioning API) leaves a node that is offline
-  with no hotspot: someone has to reinstall it by hand.
+- **(d)** ~~a factory reset leaves a node that is offline with no hotspot~~: built (#292), `run
+  --profile pi` with no credentials is in setup mode (hotspot, provisioning API, the HAT's blue
+  `setup` breath) until the app provisions it; pending the lab Pi check (reset from the app, the
+  phone sees `jarvis-<id8>` within ~60 s, provisioning brings it back).
 - **(e)** a bad release that crash-loops may not roll back by itself on a Pi.
 
 #### Retirement proposal (BLOCKED on (a)–(e) and the soak; for the user to approve)
@@ -1544,7 +1548,11 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       on-device** (lab Pi 4, provisioned from the app). hostapd stays unbuilt unless NM's AP
       fails on the chip. Differences from N: in
       [decisions/2026-10-18-pi-wifi-networkmanager-dbus.md](../decisions/2026-10-18-pi-wifi-networkmanager-dbus.md).
-      **Still open:** starting setup mode at boot.
+      **Setup mode at boot (#292):** `run --profile pi` with no `node.json` (a factory reset,
+      an install not enrolled by code) runs the same scan, hotspot and API on :8080 (captive
+      checks on :80; the unit grants `CAP_NET_BIND_SERVICE`), the HAT on the `setup` pattern, and
+      becomes the node in the same process once provisioned. Unit-tested; pending on-device.
+      [decision](../decisions/2026-10-19-pi-setup-mode-at-boot.md).
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
       2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
       profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the
@@ -1611,9 +1619,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       sidecar's declared context operations (describe's `context_operations`, a
       `context_query` round trip as the requesting user, 128 KiB cap, every failure answered).
       Unit tests (an httptest jarvisd, a temp state dir) and a real sidecar for context.
-      **Open:** after the reboot the node has no credentials, and `run` does not start setup mode
-      yet (4.4's "starting setup mode at boot"), so it is not back in provisioning mode by itself;
-      jarvisd's broker drops `context/operations` answers (ACL, held for the user).
+      After the reboot the node has no credentials and `run` starts setup mode (4.4, #292).
+      **Open:** jarvisd's broker drops `context/operations` answers (ACL, held for the user).
       **Pending on-device** (lab Pi 4): a reset from the app, watched to `success`.
    8. Bluetooth. **Done 2026-10-18 (§3.15)** (unit tests over a fake bus, the D-Bus client
       against a fake `org.bluez`, jarvisd's routes end to end; not yet on a Pi).

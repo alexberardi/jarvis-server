@@ -275,8 +275,9 @@ func TestNoSignedXPIUnlessEmbedded(t *testing.T) {
 }
 
 // The toolbar popup (install plan 3.5) adds no input to the extension: it is a static page that
-// shows the state background.js put in its URL and links to the public download page. It sends
-// the background nothing (so background.js still needs no runtime.onMessage), runs no remote
+// shows the state background.js put in its URL and links to the public download page, and shows
+// and asks for website access (permissions.contains/request of <all_urls>, which the manifest
+// already declares; jstest/popup.test.mjs). It sends the background nothing (so background.js still needs no runtime.onMessage), runs no remote
 // code and reads no page.
 func TestPopupSurface(t *testing.T) {
 	for _, target := range []string{TargetFirefox, TargetChromium} {

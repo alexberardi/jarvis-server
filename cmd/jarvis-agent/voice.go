@@ -58,7 +58,7 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	fs.Float64Var(&v.threshold, "wake-threshold", 0.4, "wake word fires above this score (the Python node's wake_word_threshold)")
 	fs.BoolVar(&v.noChimes, "no-chimes", false, "don't play the wake and error chimes")
 	fs.Float64Var(&v.followUp, "follow-up", voice.DefaultFollowUp().ListenSecs,
-		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; the Python node's follow_up_listen_seconds)")
+		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3; the Python node's follow_up_listen_seconds)")
 	fs.Float64Var(&v.followSilence, "follow-up-silence", voice.DefaultFollowUp().SilenceSecs,
 		"seconds of silence that end a follow-up answer (the Python node's follow_up_silence_duration is 0.5)")
 	ep, fu := voice.DefaultEndpointing(), voice.DefaultFollowUp()
@@ -78,6 +78,15 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	fs.DurationVar(&v.preRoll, "listen-preroll", defaultPreRoll,
 		"keep up to this much of what the microphone heard while the wake chime played, in front of the command (0: drop it, as the Python node)")
 	return v
+}
+
+// clampFollowUp caps the follow-up window at voice.MaxFollowUpListenSecs. An agent.json or
+// --follow-up from before the cap (8 s was the default) still starts the agent (#296).
+func (v *voiceFlags) clampFollowUp(log *slog.Logger) {
+	if c := voice.ClampFollowUpListen(v.followUp); c != v.followUp {
+		log.Info("follow-up window clamped", "from_s", v.followUp, "to_s", c)
+		v.followUp = c
+	}
 }
 
 // defaultPreRoll covers the wake chime (210 ms) plus the speaker's open and drain latency on a
@@ -220,6 +229,7 @@ func listen(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	vf.clampFollowUp(log)
 	vs, err := loadVoice(ctx, vf, log)
 	if err != nil {
 		return fmt.Errorf("voice: %w", err)
