@@ -73,8 +73,7 @@ func TestBudgetErrandAttachesSpreadsheet(t *testing.T) {
 	e.llm.say("plan", planJSON("Budget for September",
 		step(cmdReadFile, "Read the statement", `{"path": "~/Downloads/statement-2026-09.csv"}`),
 		`{"command": "request_replan", "args": {"reason": "categorise the transactions"}, "label": "Categorise"}`))
-	e.llm.say("replan", planJSON("Write the budget", step(cmdReadFile, "Read it again", `{"path": "~/Downloads/statement-2026-09.csv"}`),
-		step(cmdWriteSheet, "Write the budget", `{"name": "Budget 2026-09"}`)))
+	e.llm.say("replan", planJSON("Write the budget", step(cmdWriteSheet, "Write the budget", `{"name": "Budget 2026-09"}`)))
 	e.llm.say("compose", "Groceries 54.20, utilities 88.10. The budget is in Documents/Jarvis.")
 	p := e.draft("do my budget for September", ptr(7), e.s.FullMenu(context.Background(), nil, hh, ptr(7)))
 	wf := launch(t, e, p)
@@ -91,7 +90,7 @@ func TestBudgetErrandAttachesSpreadsheet(t *testing.T) {
 		t.Fatalf("approve = %+v", r)
 	}
 	e.idle()
-	if w = e.wf(wf); w.State != "done" || len(read.args) != 2 || len(write.args) != 1 {
+	if w = e.wf(wf); w.State != "done" || len(read.args) != 1 || len(write.args) != 1 {
 		t.Fatalf("run = %+v, reads %d, writes %d", w, len(read.args), len(write.args))
 	}
 	var done Card

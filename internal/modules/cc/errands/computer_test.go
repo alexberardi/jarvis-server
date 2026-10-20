@@ -799,3 +799,18 @@ func TestStartURL(t *testing.T) {
 		}
 	}
 }
+
+// A spreadsheet planned after reading files waits for what was read: it becomes a checkpoint.
+func TestSpreadsheetAfterReadIsACheckpoint(t *testing.T) {
+	read := Step{Command: cmdReadFile, Args: servertools.Obj("path", "~/Downloads/a.csv"), Label: "Read"}
+	sheet := Step{Command: cmdWriteSheet, Args: servertools.Obj("name", "Budget"), Label: "Write it"}
+	got := checkpointSpreadsheet([]Step{read, read, sheet, {Command: "get_weather"}})
+	if len(got) != 3 || got[2].Command != cmdReplan || got[2].Label != "Write it" ||
+		!strings.Contains(truthyStr(got[2].Args, "reason"), "write_spreadsheet") {
+		t.Fatalf("steps %+v", got)
+	}
+	// A spreadsheet with nothing read before it in the plan (the replan after the reads) stays.
+	if got := checkpointSpreadsheet([]Step{sheet}); len(got) != 1 || got[0].Command != cmdWriteSheet {
+		t.Fatalf("steps %+v", got)
+	}
+}

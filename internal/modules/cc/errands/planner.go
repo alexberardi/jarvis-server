@@ -281,6 +281,26 @@ func computerRulesFor(menu []MenuEntry) string {
 	return out
 }
 
+// checkpointSpreadsheet ends a plan at a write_spreadsheet that follows a read_computer_file with
+// a checkpoint in its place: its rows are what the reads find, unknown until they ran, and the
+// house model plans it with none (budgetRule).
+func checkpointSpreadsheet(steps []Step) []Step {
+	read := false
+	for i, st := range steps {
+		switch st.Command {
+		case cmdReadFile:
+			read = true
+		case cmdWriteSheet:
+			if read {
+				out := append([]Step(nil), steps[:i]...)
+				return append(out, Step{Command: cmdReplan, Label: st.Label, Args: servertools.Obj("reason",
+					"write_spreadsheet from the files read above: every transaction categorised, with a total per category")})
+			}
+		}
+	}
+	return steps
+}
+
 // mergeComputerSteps joins adjacent computer tasks on the same target and site into one, whose
 // goal is theirs in order ("find it, then order it") and whose success check is the last's
 // (websiteRule, for when the model splits them anyway).
@@ -598,7 +618,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = mergeComputerSteps(plan.Steps)
+	plan.Steps = checkpointSpreadsheet(mergeComputerSteps(plan.Steps))
 	return plan, err
 }
 
@@ -637,7 +657,9 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 	if fallback == "" {
 		fallback = "continue"
 	}
-	return planFromData(data, allowed, fallback, risky, free, false)
+	plan, err := planFromData(data, allowed, fallback, risky, free, false)
+	plan.Steps = checkpointSpreadsheet(plan.Steps)
+	return plan, err
 }
 
 // compactResultData is _compact_result_data (cap 320): the step's real result for the replan.
