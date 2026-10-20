@@ -55,7 +55,7 @@ jarvisd replaces the model service and the sidecars as follows:
 |---|---|---|
 | `REST` | `backends/rest_backend.py` `RestClient` | **Kept in spirit.** It becomes the one Go engine client, used for both local llama-server and remote endpoints. |
 | `GGUF` | `backends/gguf_backend.py` (llama-cpp-python, in-process) | **Cut.** Replaced by a local llama-server. The MBP dev box runs it today (Qwen3-8B, Metal). |
-| `MLX` | `backends/mlx_backend.py`, `mlx_vision_backend.py` | **Cut** (PLAN §7). `mlx_lm.server` stays reachable as a remote endpoint. |
+| `MLX` | `backends/mlx_backend.py`, `mlx_vision_backend.py` | **Supervised engine on Apple Silicon** (LD9, 2026-10-19; the 2026-10-06 cut is reversed): jarvisd runs `mlx_lm.server` like llama-server (§3.11). The in-process backend is still not ported. |
 | `VLLM` | `backends/vllm_backend.py`, `vllm_vision_backend.py`, `vllm_availability.py` | **Cut.** vLLM's OpenAI server stays reachable as a remote endpoint. |
 | `TRANSFORMERS` | `backends/transformers_backend.py`, `transformers_vision_backend.py` | **Cut** |
 | `MOCK` | `backends/mock_backend.py` | **Cut.** The Go tests use an `httptest` fake engine instead. |
@@ -327,6 +327,33 @@ Detection puts the result in `Hardware.gpu_fault` and logs it at ERROR with both
 **Re-checking.** `engine.WatchGPU` runs from the stack's `Start`: it detects once at startup, then every 3 minutes. When the cheap file probe's answer changes, or labels are refused for a lost GPU, it re-detects and has the resolver reconcile. So the warning appears even when jarvisd was not restarted, and labels come back on their own if the GPU returns.
 
 **Admin.** `GET /v1/models/labels` and `GET /v1/hardware` carry `gpu_fault` (`engine.FaultFor`). That is the driver fault, with the labels it stops, or a generic `gpu_unavailable` fault naming the refused labels, or `null`. Its `message` is the admin's warning, e.g. *"NVIDIA driver updated (kernel 580.173.04, libraries 580.178.04): reboot the server."*, and `user_message` is what requests fail with. The SPA shows it as a red banner on the Dashboard, the Labels editor and the Hardware panel, and label pills read "GPU unavailable". The setup job summary counts `gpu_unavailable` as failed (it needs the operator, not patience).
+
+### 3.11 Python engines: MLX on Apple Silicon (jarvisd, LD9)
+
+The decision: [2026-10-19-mlx-engine](../decisions/2026-10-19-mlx-engine.md). jarvisd stays pure Go; a Python engine is a downloaded, supervised program like llama-server. The layer is generic (`internal/modules/llm/engine/pyengine.go`, `PyEngines`); mlx-lm is its first kind, and vLLM (#300) and Transformers (#301) are meant to be further entries.
+
+**A Python engine kind** pins: the server package's version (it names the install directory), a Python version, the whole package set as a `uv pip compile --generate-hashes` lock (`engine/pyengines/<kind>.txt`, embedded), the platforms it runs on with the accelerator each uses (its flavour), what it needs where it can't run, the module to run, an import check, its flags, its health path and the `model` name requests use.
+
+**Platform gate.** mlx-lm runs on `darwin/arm64` only (flavour `metal`; macOS 14 or later, the oldest platform tag of the mlx wheels). `FlavoursFor` lists nothing elsewhere and `AssetsFor`, `Unavailable` and a label on an MLX model say why: *"mlx-lm needs Apple Silicon (darwin/arm64, macOS 14 or later); this host is linux/amd64"*. `GET /v1/hardware` carries it as `builds["mlx-lm"].unavailable` and the admin Hardware panel shows it; where it runs, the panel's "metal ↓" button installs it through `POST /v1/hardware/engines/fetch`.
+
+**Install** (`Binaries.Fetch` → `fetchPython`, the same `llm.engine.fetch` queue job as a llama-server build):
+
+1. uv: a pinned release (`Releases[KindUV]`, astral-sh/uv 0.13.3, size and sha256 per asset), fetched, checked and extracted like an engine build into `<home>/engines/uv/<build>-cpu/`. It is not an engine kind.
+2. `uv python install --no-bin 3.12`, `uv venv`, `uv pip install --require-hashes --only-binary :all: -r requirements.txt`, then `python -I -c "import mlx.core, mlx_lm.server"`. Everything goes into `<home>/engines/mlx-lm/<version>-metal/` (`python/` holds uv's CPython, `venv/` the packages); uv's cache is `<home>/engines/mlx-lm/.uv-cache`, kept across a failed attempt so a retry doesn't download again, and removed after a good one. uv runs with `UV_PYTHON_PREFERENCE=only-managed` (never a system or Homebrew Python), `UV_NO_CONFIG=1`, and jarvisd's environment minus `UV_*`, `PYTHON*`, `PIP_*`, `VIRTUAL_ENV` and `CONDA_*`. uv checks the CPython download against the digests built into it, so the interpreter is pinned through uv's pin.
+3. The directory is marked complete (`.jarvis-complete`) only after the check passes; a failed step removes the directory and the error names the step and the end of its output.
+
+**Engine kind of a label.** An LLM label's engine follows its model's format (`SettingsSource.engineFor`): the model manager's `ModelInfo.Engine` when it records one, else a GGUF file runs on llama-server and a directory (Hugging Face layout) on the host's Python engine (`DirEngine`). Until the model manager installs MLX repo directories (the next PR of #299), `llm.<label>.model` can name a directory by absolute path. A Python engine takes none of llama.cpp's placement, cache or template flags, so they don't split one model into two servers: its instance key is the kind, the interpreter, the model directory, the context and the extra args (LD1). It gets no projector and no pinned template (it reads `chat_template.jinja` / `tokenizer_config.json` from the directory). `gpu_backend` other than `auto` or the engine's own (`metal`) is refused with the reason.
+
+**Supervision.** `python -I -m mlx_lm.server --model DIR --host 127.0.0.1 --port N --allowed-origins http://127.0.0.1:N --max-tokens <context>`, plus `extra_args` (e.g. `--chat-template-args '{"enable_thinking": false}'`), through the same supervisor as llama-server (health `GET /health`, 200 once the model is loaded; restart on a crash; stopped with jarvisd). mlx_lm.server has no API key option, so it binds 127.0.0.1 only, as whisper-server does, and its CORS allow-list is narrowed to its own origin (its default `*` would let any web page read its replies). Requests name the model `default_model`: any other name makes mlx_lm.server load that model, from the Hub if need be, and `HF_HUB_OFFLINE=1` in its environment stops that. Its own reply limit defaults to 512 tokens; `--max-tokens` set to the label's context bounds a reply as llama-server's context does. The endpoint is OpenAI-compatible (`/v1/chat/completions`, streaming), with no key, `Vision=false` and `Parallel=1`.
+
+**What mlx_lm.server 0.32.2 does with what cc needs** (read from its source; not yet run against a model, which is the next PR's live check):
+
+- **Tool calls:** native `tools` go through the model's chat template and are parsed back into `tool_calls` for tokenizers that declare a tool parser (the Qwen3 family does). For a model without one it only logs a warning and answers in text.
+- **JSON mode:** `response_format` is not read; the request is answered as free text. The `jsonmode` package's prompt-side instructions still apply, but nothing constrains the output.
+- **Thinking:** a request's `chat_template_kwargs` (`enable_thinking`, LD8) is honoured; the reasoning comes back in the message's `reasoning` field and the answer alone in `content`.
+- **Vision:** only models with a registered image processor (one family, `muse_spark`, in 0.32.2) take images; jarvisd reports `Vision=false` for every MLX endpoint, so LD4's image requests on an MLX label get the existing "this label can't see images" error.
+
+Making these explicit errors rather than quiet degradations is the third PR of #299.
 
 ## 4. Data
 

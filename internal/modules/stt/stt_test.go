@@ -382,6 +382,9 @@ func TestEnrollQualityGate(t *testing.T) {
 		if c != 422 || body["success"] != false || body["error"] != "low_quality" || body["reason"] != reason {
 			t.Errorf("%s: %d %v", name, c, body)
 		}
+		if _, has := body["min_speech_seconds"]; has != (reason == "too_little_speech") {
+			t.Errorf("%s: min_speech_seconds only with too_little_speech: %v", name, body)
+		}
 	}
 	lowQuality("silence", sineWAV(16000, 8, 0), "too_little_speech")
 	// 2 s of voice in an 8 s take (the node records 8 s).

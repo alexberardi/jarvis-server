@@ -292,6 +292,9 @@ func newEnv(t *testing.T) *env {
 	// Engine releases for this host, served by the hub.
 	host := engine.Host()
 	for _, k := range engine.Kinds {
+		if _, py := k.Python(); py {
+			continue
+		}
 		archive := tarGz(t, map[string]string{"pkg/" + k.BinaryName(host): "bin", "pkg/libggml.so": "lib"})
 		old := engine.Releases[k]
 		r := old
@@ -1149,6 +1152,38 @@ func TestSettingsSourceDefaults(t *testing.T) {
 	}
 }
 
+// A model that is a directory (Hugging Face layout) runs on the host's Python engine: MLX on
+// Apple Silicon; elsewhere the label says why.
+func TestSettingsSourceModelDirectory(t *testing.T) {
+	e := newEnv(t)
+	dir := filepath.Join(t.TempDir(), "Qwen3-0.6B-4bit")
+	os.MkdirAll(dir, 0o755)
+	gguf := filepath.Join(t.TempDir(), "q.gguf")
+	os.WriteFile(gguf, []byte("x"), 0o644)
+	e.set.Set(e.ctx, "llm.live.model", dir, settings.Scope{})
+	e.set.Set(e.ctx, "llm.live.mmproj", gguf, settings.Scope{})
+	mac := engine.SettingsSource{Settings: e.set, Models: e.mgr.Store, Platform: engine.Platform{OS: "darwin", Arch: "arm64"}}
+	c, err := mac.Label(e.ctx, "live")
+	if err != nil || c.Kind != engine.KindMLX || c.ModelPath != dir || c.Problem != "" || c.MMProjPath != "" || c.Context != 8192 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	// background shared with live follows it.
+	e.set.Set(e.ctx, "llm.background.engine", "shared", settings.Scope{})
+	if c, _ := mac.Label(e.ctx, "background"); c.Kind != engine.KindMLX || c.SharedWith != "live" {
+		t.Fatalf("shared %+v", c)
+	}
+	linux := mac
+	linux.Platform = engine.Platform{OS: "linux", Arch: "amd64"}
+	if c, _ := linux.Label(e.ctx, "live"); !strings.Contains(c.Problem, "Apple Silicon") || !strings.Contains(c.Problem, "linux/amd64") {
+		t.Fatalf("linux %+v", c)
+	}
+	// A GGUF file stays on llama-server.
+	e.set.Set(e.ctx, "llm.live.model", gguf, settings.Scope{})
+	if c, _ := mac.Label(e.ctx, "live"); c.Kind != engine.KindLlama || c.Problem != "" {
+		t.Fatalf("gguf %+v", c)
+	}
+}
+
 // TestStackEndToEnd: install → assign → the resolver runs the engine, for an LLM label and the
 // stt label alike, through NewStack (the wiring the llm module uses).
 func TestStackEndToEnd(t *testing.T) {
@@ -1235,6 +1270,12 @@ func TestStackEndToEnd(t *testing.T) {
 	code, out = call("GET", "/v1/hardware", "")
 	if code != 200 || out["hardware"] == nil || out["builds"] == nil {
 		t.Fatalf("hardware %d %v", code, out)
+	}
+	// MLX is offered on Apple Silicon only; elsewhere the build says why.
+	mlx, _ := out["builds"].(map[string]any)["mlx-lm"].(map[string]any)
+	why, _ := mlx["unavailable"].(string)
+	if onMac := engine.Host() == (engine.Platform{OS: "darwin", Arch: "arm64"}); mlx == nil || onMac == (why != "") {
+		t.Fatalf("mlx build %v", mlx)
 	}
 	// Turn background to its own context: a second LLM engine; then delete the model with force.
 	code, _ = call("PUT", "/v1/models/labels", `{"background":{"context":4096}}`)

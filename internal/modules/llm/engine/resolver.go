@@ -1,7 +1,9 @@
 // Package engine runs jarvisd's local inference engines: llama-server (LLM labels, vision,
-// embeddings) and whisper-server (speech-to-text), through one code path.
+// embeddings), whisper-server (speech-to-text) and the Python engines (mlx-lm, for MLX models
+// on Apple Silicon), through one code path.
 //
 //   - release.go: the pinned upstream builds per kind, platform and GPU flavour
+//   - pyengine.go: the Python engines (pinned package sets, platform gate, uv-built install)
 //   - binaries.go, download.go, archive.go: fetching a build (resumable, sha256-checked)
 //   - gpu.go: GPU detection (subprocess only) and placement proposals
 //   - config.go: labels, their settings and the effective LabelConfig
@@ -37,7 +39,7 @@ type Endpoint struct {
 	// "/chat/completions" or "/embeddings"); for stt, the whisper-server root (POST /inference).
 	BaseURL string `json:"base_url"`
 	// APIKey goes in "Authorization: Bearer" (x-api-key for API=anthropic). Local llama-server engines get a random key per
-	// instance; whisper-server has none (it binds 127.0.0.1 only).
+	// instance; whisper-server and the Python engines have none (they bind 127.0.0.1 only).
 	APIKey string `json:"-"`
 	// Model is the name to send as the request's "model".
 	Model      string `json:"model"`
@@ -116,6 +118,8 @@ type Resolver struct {
 	// and leaves it failed until its settings change or Retry is called. Default 3;
 	// negative = never give up.
 	MaxRetries int
+	// Platform is the host's, for the Python engines' platform gate; zero = Host().
+	Platform Platform
 	// Interval is how often Start's loop reconciles; default 15s.
 	Interval time.Duration
 	// TemplateDir holds the pinned chat templates engines are launched with
@@ -372,7 +376,7 @@ func (r *Resolver) apply(ctx context.Context, label string) (Endpoint, *instance
 			}
 		}
 		return ep, nil, &NotReadyError{Label: label, State: "fetching_engine",
-			Reason: fmt.Sprintf("downloading %s %s build %s", c.Kind, f, Releases[c.Kind].Build)}
+			Reason: fmt.Sprintf("downloading %s %s build %s", c.Kind, f, Build(c.Kind))}
 	}
 	key := keyFor(c, f, bin)
 	if c.ChatTemplate != "" && c.Kind == KindLlama && !c.Embedding {
@@ -411,6 +415,9 @@ func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 	ep.FoldSystemMessages = c.FoldSystemMessages
 	ep.ContextLength, ep.Parallel = inst.key.Context, inst.key.Parallel
 	ep.Vision = inst.key.MMProj != ""
+	if e, ok := c.Kind.Python(); ok {
+		ep.Model = e.RequestModel
+	}
 	if c.Kind == KindWhisper {
 		ep.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", inst.port)
 	} else {
@@ -437,6 +444,17 @@ func (r *Resolver) flavour(ctx context.Context, c LabelConfig) (Flavour, error) 
 	f, err := ParseFlavour(c.GPUBackend)
 	if err != nil {
 		return "", err
+	}
+	if e, ok := c.Kind.Python(); ok {
+		// A Python engine runs on its platform's one accelerator.
+		p := r.Platform
+		if p == (Platform{}) {
+			p = Host()
+		}
+		if f == "" {
+			f = e.Platforms[p]
+		}
+		return f, e.supports(p, f)
 	}
 	if f != "" {
 		return f, nil
@@ -470,6 +488,9 @@ func (r *Resolver) users(h string) int {
 }
 
 func shortKind(k Kind) string {
+	if e, ok := k.Python(); ok {
+		return e.Short
+	}
 	if k == KindWhisper {
 		return "whisper"
 	}
@@ -493,7 +514,11 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 		env["LLAMA_API_KEY"] = inst.apiKey // not on argv, so `ps` doesn't show it
 	}
 	dir := filepath.Dir(key.Binary)
-	if runtime.GOOS == "linux" {
+	health := "/health"
+	if py, ok := c.Kind.Python(); ok {
+		maps.Copy(env, py.Env)
+		health = py.HealthPath
+	} else if runtime.GOOS == "linux" {
 		// The CUDA runtime ships beside the binaries.
 		ld := dir
 		if cur := os.Getenv("LD_LIBRARY_PATH"); cur != "" {
@@ -515,7 +540,7 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 		Name: inst.name, Path: key.Binary, Args: args, Env: env, Dir: dir,
 		GPU: engines.GPU{Backend: key.Flavour.GPUBackend(), VisibleDevices: key.Devices},
 		Health: &engines.HealthCheck{
-			URL:        fmt.Sprintf("http://127.0.0.1:%d/health", port),
+			URL:        fmt.Sprintf("http://127.0.0.1:%d%s", port, health),
 			Interval:   def(r.HealthInterval, 5*time.Second),
 			DrainGrace: def(r.DrainGrace, 30*time.Second),
 		},

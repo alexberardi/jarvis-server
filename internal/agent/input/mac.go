@@ -94,8 +94,7 @@ type Mac struct {
 	mu   sync.Mutex      // serializes posting calls; held across post
 	held map[string]bool // buttons down from Button, so Move drags them
 
-	winMu      sync.Mutex // guards start and end only; never held across post
-	start, end time.Time
+	injectWindow
 }
 
 func (m *Mac) Available(context.Context) (bool, string) {
@@ -106,18 +105,6 @@ func (m *Mac) Available(context.Context) (bool, string) {
 		return false, "controlling the computer needs Accessibility for Jarvis Automation Agent: turn it on in System Settings > Privacy & Security > Accessibility"
 	}
 	return true, ""
-}
-
-func (m *Mac) Injecting() (start, end time.Time) {
-	m.winMu.Lock()
-	defer m.winMu.Unlock()
-	return m.start, m.end
-}
-
-func (m *Mac) setWindow(start, end time.Time) {
-	m.winMu.Lock()
-	m.start, m.end = start, end
-	m.winMu.Unlock()
 }
 
 // inject runs post with the injection window recorded around it. Calls are serialized.
@@ -131,8 +118,8 @@ func (m *Mac) inject(ctx context.Context, post func() error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	start := time.Now()
-	m.setWindow(start, time.Time{})
-	defer func() { m.setWindow(start, time.Now()) }()
+	m.set(start, time.Time{})
+	defer func() { m.set(start, time.Now()) }()
 	return post()
 }
 

@@ -263,8 +263,8 @@ func (b *BlueZ) Pair(ctx context.Context, mac string) error { return b.deviceCal
 
 func (b *BlueZ) Connect(ctx context.Context, mac string) error {
 	err := b.deviceCall(ctx, mac, "Connect")
-	var de dbus.Error
-	if errors.As(err, &de) && de.Name == "org.bluez.Error.AlreadyConnected" {
+	var be BlueZError
+	if errors.As(err, &be) && be.Name == "org.bluez.Error.AlreadyConnected" {
 		return nil
 	}
 	return err
@@ -318,7 +318,7 @@ func mapErr(err error) error {
 	if len(de.Body) > 0 {
 		msg = fmt.Sprint(de.Body[0])
 	}
-	return dbus.Error{Name: de.Name, Body: []any{msg}}
+	return BlueZError{Name: de.Name, Message: msg}
 }
 
 // agent is org.bluez.Agent1 with no input and no output (N:services/bluetooth_pair_agent.py

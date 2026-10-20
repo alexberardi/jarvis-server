@@ -50,6 +50,12 @@ func (ve *voiceEnv) awaitWake(cid string) {
 
 func (ve *voiceEnv) transcribe(cid string, speakerAudio bool) map[string]any {
 	ve.t.Helper()
+	return ve.transcribeOn(ve.node, cid, speakerAudio)
+}
+
+// transcribeOn is transcribe as node n.
+func (ve *voiceEnv) transcribeOn(n testNode, cid string, speakerAudio bool) map[string]any {
+	ve.t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	fw, _ := mw.CreateFormFile("file", "cmd.wav")
@@ -63,7 +69,7 @@ func (ve *voiceEnv) transcribe(cid string, speakerAudio bool) map[string]any {
 	_ = mw.Close()
 	req, _ := http.NewRequest("POST", ve.srv.URL+"/api/v0/media/whisper/transcribe", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("X-API-Key", ve.node.id+":"+ve.node.key)
+	req.Header.Set("X-API-Key", n.id+":"+n.key)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		ve.t.Fatal(err)
@@ -714,6 +720,14 @@ func TestVoiceEnrollmentHandoff(t *testing.T) {
 	res := ve.do("GET", "/api/v0/mobile/voice-profile-results/"+rid, nil, bearer(tok)).want(200).json()
 	if res["success"] != false || res["error"] != "low_quality" {
 		t.Fatalf("stt Q1 mapping %v", res)
+	}
+	// #293: mobile gets the reason, so it can say "1.2 s of speech, need 3" and retry that take.
+	if res["reason"] != "too_little_speech" || res["speech_seconds"] != 1.2 || res["min_speech_seconds"] != 3.0 ||
+		res["detail"] != "low_quality: 1.2 s of speech, need at least 3.0 s" {
+		t.Fatalf("low_quality reason not relayed: %v", res)
+	}
+	if lq["min_speech_seconds"] != 3.0 {
+		t.Fatalf("M4 422 without min_speech_seconds: %v", lq)
 	}
 	ve.do("GET", "/api/v0/mobile/voice-profile-results/"+rid, nil, bearer(tok)).want(202) // consumed
 }

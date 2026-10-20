@@ -8,10 +8,12 @@ package xkb
 
 import "fmt"
 
-// Stroke is one key press and release: the keysym, optionally with Shift held.
+// Stroke is one key press and release: the keysym, optionally with Shift held, and for a
+// chord the other modifiers held (ControlMask, Mod1Mask, Mod4Mask).
 type Stroke struct {
 	Sym   uint32
 	Shift bool
+	Mods  uint32
 }
 
 // Named keysyms (X11 keysymdef.h).
@@ -26,12 +28,27 @@ const (
 	KeyRight      uint32 = 0xff53
 	KeyDown       uint32 = 0xff54
 	KeyShiftL     uint32 = 0xffe1
+	KeyControlL   uint32 = 0xffe3
+	KeyAltL       uint32 = 0xffe9
+	KeySuperL     uint32 = 0xffeb
+	KeyBackSpace  uint32 = 0xff08
+	KeyDelete     uint32 = 0xffff
+	KeyInsert     uint32 = 0xff63
+	KeyHome       uint32 = 0xff50
+	KeyEnd        uint32 = 0xff57
+	KeyPageUp     uint32 = 0xff55 // Prior
+	KeyPageDown   uint32 = 0xff56 // Next
+	KeyF1         uint32 = 0xffbe // F2..F12 follow: KeyF1 + n - 1
 )
 
 var names = map[uint32]string{
 	KeyReturn: "Return", KeyEscape: "Escape", KeyTab: "Tab", KeyISOLeftTab: "ISO_Left_Tab",
 	KeySpace: "space", KeyLeft: "Left", KeyUp: "Up", KeyRight: "Right", KeyDown: "Down",
-	KeyShiftL: "Shift_L",
+	KeyShiftL: "Shift_L", KeyControlL: "Control_L", KeyAltL: "Alt_L", KeySuperL: "Super_L",
+	KeyBackSpace: "BackSpace", KeyDelete: "Delete", KeyInsert: "Insert", KeyHome: "Home", KeyEnd: "End",
+	KeyPageUp: "Prior", KeyPageDown: "Next",
+	KeyF1: "F1", KeyF1 + 1: "F2", KeyF1 + 2: "F3", KeyF1 + 3: "F4", KeyF1 + 4: "F5", KeyF1 + 5: "F6",
+	KeyF1 + 6: "F7", KeyF1 + 7: "F8", KeyF1 + 8: "F9", KeyF1 + 9: "F10", KeyF1 + 10: "F11", KeyF1 + 11: "F12",
 }
 
 // unicodeBit marks a keysym that is a Unicode code point (keysymdef.h: 0x01000000 + U+xxxx).

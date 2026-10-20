@@ -127,8 +127,9 @@ func TestChordFlags(t *testing.T) {
 	}
 }
 
-func TestKeyMapCoversKeyNames(t *testing.T) {
-	// Every name computeruse accepts (kept in step by hand: input mustn't import computeruse).
+// keyNames is every name computeruse accepts (kept in step by hand: input mustn't import
+// computeruse).
+func keyNames() []string {
 	names := []string{"ctrl", "alt", "shift", "meta", "cmd", "super", "enter", "return", "tab", "escape", "esc",
 		"space", "backspace", "delete", "insert", "home", "end", "pageup", "pagedown", "up", "down", "left", "right",
 		"-", "=", ",", ".", "/", ";", "'", "[", "]", `\`, "`"}
@@ -141,8 +142,12 @@ func TestKeyMapCoversKeyNames(t *testing.T) {
 	for i := 1; i <= 12; i++ {
 		names = append(names, fmt.Sprintf("f%d", i))
 	}
+	return names
+}
+
+func TestKeyMapCoversKeyNames(t *testing.T) {
 	seen := map[uint16]string{}
-	for _, n := range names {
+	for _, n := range keyNames() {
 		if _, _, err := chord([]string{n}); err != nil {
 			t.Errorf("%q: %v", n, err)
 		}

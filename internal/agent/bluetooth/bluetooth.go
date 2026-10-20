@@ -46,6 +46,16 @@ var (
 	ErrInProgress    = errors.New("org.bluez.Error.InProgress")    // a connect already running
 )
 
+// BlueZError is any other org.bluez.Error.*: its D-Bus name and BlueZ's text ("Page Timeout").
+type BlueZError struct{ Name, Message string }
+
+func (e BlueZError) Error() string {
+	if e.Message == "" {
+		return e.Name
+	}
+	return e.Name + ": " + e.Message
+}
+
 // Adapter is the state of the controller (org.bluez.Adapter1).
 type Adapter struct {
 	Powered bool
@@ -424,21 +434,22 @@ func (n *Node) Pair(ctx context.Context, mac, role string) (string, error) {
 	}
 	_ = n.Bus.SetAdapter(ctx, "Pairable", true)
 	if _, known := n.device(ctx, mac); !known && !n.find(ctx, mac) {
-		return "", errors.New("Failed to pair — make sure the device is in pairing mode")
+		return "", errors.New("Device not found — put it in pairing mode and keep it close")
 	}
 	pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	err := n.Bus.Pair(pctx, mac)
 	cancel()
 	if err != nil && !errors.Is(err, ErrAlreadyExists) {
 		n.log().Warn("bluetooth: pair failed", "mac", mac, "err", err)
-		return "", errors.New("Failed to pair — make sure the device is in pairing mode")
+		d, _ := n.device(ctx, mac)
+		return "", pairError(err, displayName(d))
 	}
 	if err := n.Bus.SetTrusted(ctx, mac, true); err != nil {
 		n.log().Warn("bluetooth: trust failed", "mac", mac, "err", err)
 	}
 	if err := n.connect(ctx, mac); err != nil {
 		n.log().Warn("bluetooth: connect after pair failed", "mac", mac, "err", err)
-		return "", errors.New("Paired but failed to connect")
+		return "", errors.New("Paired but failed to connect" + bluezSuffix(err))
 	}
 	n.routeAudio(ctx, mac, role)
 	name := mac
@@ -453,6 +464,48 @@ func (n *Node) Pair(ctx context.Context, mac, role string) (string, error) {
 		}
 	}
 	return name, nil
+}
+
+// pairError is the app's message for a failed Device1.Pair: what BlueZ's error means for the
+// user, then the BlueZ error itself for support. name is the device's, or "".
+func pairError(err error, name string) error {
+	if name == "" {
+		name = "the device"
+	}
+	var be BlueZError
+	errors.As(err, &be)
+	text := strings.ToLower(be.Message)
+	var msg string
+	switch {
+	case strings.Contains(text, "page timeout") || strings.Contains(text, "page-timeout"):
+		msg = capitalize(name) + " didn't answer — put it in pairing mode and keep it close"
+	case be.Name == "org.bluez.Error.AuthenticationFailed", be.Name == "org.bluez.Error.AuthenticationRejected",
+		be.Name == "org.bluez.Error.AuthenticationCanceled":
+		msg = "Pairing was refused by the device"
+	case be.Name == "org.bluez.Error.ConnectionAttemptFailed":
+		msg = "Couldn't connect to " + name + " to pair — keep it close and try again"
+	case errors.Is(err, context.DeadlineExceeded):
+		msg = "Pairing timed out — make sure the device is in pairing mode"
+	default:
+		msg = "Failed to pair — make sure the device is in pairing mode"
+	}
+	return errors.New(msg + bluezSuffix(err))
+}
+
+// bluezSuffix is " (org.bluez.Error.X: text)" when err is BlueZ's, else "".
+func bluezSuffix(err error) string {
+	var be BlueZError
+	if !errors.As(err, &be) {
+		return ""
+	}
+	return " (" + be.Error() + ")"
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // find is N:'s _scan_briefly: BR/EDR discovery until BlueZ knows mac (after a remove it

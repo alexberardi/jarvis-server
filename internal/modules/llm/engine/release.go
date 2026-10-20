@@ -51,9 +51,10 @@ func (f Flavour) GPUBackend() engines.GPUBackend {
 	return ""
 }
 
-// Kind is an engine program. jarvisd runs two, through one code path: llama-server (LLM,
-// vision, embeddings) and whisper-server (speech-to-text, D7). Both are ggml programs with the
-// same GPU backends, release layout and /health semantics.
+// Kind is an engine program. jarvisd runs them through one code path: llama-server (LLM,
+// vision, embeddings) and whisper-server (speech-to-text, D7), ggml programs with the same GPU
+// backends, release layout and /health semantics; and the Python engines of pyengine.go
+// (mlx-lm), OpenAI-compatible servers installed into a uv-managed environment.
 type Kind string
 
 const (
@@ -62,7 +63,7 @@ const (
 )
 
 // Kinds lists the engine kinds.
-var Kinds = []Kind{KindLlama, KindWhisper}
+var Kinds = []Kind{KindLlama, KindWhisper, KindMLX}
 
 // Release pins one kind's build (01 §3.6). Bumping it means replacing Assets with the new
 // release's names, sizes and sha256 digests (GitHub's API lists them: `size`, `digest` per
@@ -190,6 +191,20 @@ var Releases = map[Kind]Release{
 	},
 }
 
+// uvRelease is uv, which installs the Python engines (pyengine.go): astral-sh/uv's release,
+// for the platforms some Python engine runs on (linux is there for vLLM, #300).
+var uvRelease = Release{
+	Kind: KindUV, Build: "0.13.3",
+	DefaultBaseURL: "https://github.com/astral-sh/uv/releases/download",
+	Assets: map[Platform]map[Flavour][]Asset{
+		{"darwin", "arm64"}: {FlavourCPU: {{"uv-aarch64-apple-darwin.tar.gz", 14309841, "bf1e4fb6f5f5079a2902ad3f3a9e2d337575b226a1378f2449d8404353650608"}}},
+		{"linux", "amd64"}:  {FlavourCPU: {{"uv-x86_64-unknown-linux-gnu.tar.gz", 16767662, "e4f169ec380f1793b898a6f1fcbacd22db25cf7ca0349a6e96ffb85b69998d04"}}},
+		{"linux", "arm64"}:  {FlavourCPU: {{"uv-aarch64-unknown-linux-gnu.tar.gz", 15857962, "611ff684f193a84d2fdad29c5f12505d02ece94984c7c982cdde950eba5c95b9"}}},
+	},
+}
+
+func init() { Releases[KindUV] = uvRelease }
+
 // BinaryName is the kind's executable file name on a platform.
 func (k Kind) BinaryName(p Platform) string {
 	if p.OS == "windows" {
@@ -199,8 +214,15 @@ func (k Kind) BinaryName(p Platform) string {
 }
 
 // AssetsFor returns a kind's assets for a flavour on a platform, or an error naming the
-// flavours that platform does have.
+// flavours that platform does have. A Python engine's asset is uv's release, and its error
+// says what the engine needs.
 func AssetsFor(k Kind, p Platform, f Flavour) ([]Asset, error) {
+	if e, ok := PyEngines[k]; ok {
+		if err := e.supports(p, f); err != nil {
+			return nil, err
+		}
+		return AssetsFor(KindUV, p, FlavourCPU)
+	}
 	r, ok := Releases[k]
 	if !ok {
 		return nil, fmt.Errorf("unknown engine kind %q", k)
@@ -218,6 +240,12 @@ func AssetsFor(k Kind, p Platform, f Flavour) ([]Asset, error) {
 
 // FlavoursFor lists the flavours a kind has builds for on a platform, in AllFlavours order.
 func FlavoursFor(k Kind, p Platform) []string {
+	if e, ok := PyEngines[k]; ok {
+		if f, ok := e.Platforms[p]; ok {
+			return []string{string(f)}
+		}
+		return nil
+	}
 	var out []string
 	for _, f := range AllFlavours {
 		if _, ok := Releases[k].Assets[p][f]; ok {

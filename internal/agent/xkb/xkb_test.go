@@ -153,7 +153,10 @@ func TestUS(t *testing.T) {
 		t.Fatal("US incomplete")
 	}
 	for sym, want := range map[uint32]pos{'a': {38, false}, 'A': {38, true}, '~': {49, true}, '\\': {51, false},
-		'|': {51, true}, '/': {61, false}, '?': {61, true}, KeyUp: {111, false}, KeyISOLeftTab: {23, true}} {
+		'|': {51, true}, '/': {61, false}, '?': {61, true}, KeyUp: {111, false}, KeyISOLeftTab: {23, true},
+		KeyF1: {67, false}, KeyF1 + 9: {76, false}, KeyF1 + 11: {96, false}, KeyHome: {110, false}, KeyEnd: {115, false},
+		KeyPageUp: {112, false}, KeyPageDown: {117, false}, KeyDelete: {119, false}, KeyBackSpace: {22, false},
+		KeyControlL: {37, false}, KeySuperL: {133, false}} {
 		if got := l.pos[sym]; got != want {
 			t.Errorf("%q at %+v, want %+v", rune(sym), got, want)
 		}
@@ -181,7 +184,7 @@ func TestPlanUsesTheLayout(t *testing.T) {
 		t.Fatalf("%d batches, %v", len(bs), err)
 	}
 	b := bs[0]
-	want := []Press{{43, false}, {43, true}, {11, false}, {10, true}, {23, true}, {43, false}}
+	want := []Press{{43, false, 0}, {43, true, 0}, {11, false, 0}, {10, true, 0}, {23, true, 0}, {43, false, 0}}
 	if !slices.Equal(b.Presses, want) {
 		t.Fatalf("presses %v\nwant    %v", b.Presses, want)
 	}

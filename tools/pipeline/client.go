@@ -51,6 +51,8 @@ type TurnResponse struct {
 	} `json:"validation_request"`
 	Commands      json.RawMessage `json:"commands"`
 	EndOfExchange *bool           `json:"end_of_exchange"`
+	// StoodDown: another node of the household answers this wake (not_for_me).
+	StoodDown bool `json:"stood_down"`
 }
 
 // ToolResult is what the node sends back for one call.
@@ -149,8 +151,16 @@ func (n *Node) Start(ctx context.Context, cid, timezone string, tools []json.Raw
 // Command sends one utterance (what STT would have produced). speaker, when not 0, is sent as
 // speaker_user_id: a sandbox with JARVIS_DEV_SPEAKER_HINTS=1 takes it as the voice match.
 func (n *Node) Command(ctx context.Context, cid, text string, speaker int64) (TurnResponse, error) {
+	return n.command(ctx, cid, text, speaker, "")
+}
+
+// command is Command with a turn_source ("" = not sent).
+func (n *Node) command(ctx context.Context, cid, text string, speaker int64, source string) (TurnResponse, error) {
 	var r TurnResponse
 	body := map[string]any{"voice_command": text, "conversation_id": cid}
+	if source != "" {
+		body["turn_source"] = source
+	}
 	if speaker != 0 {
 		body["speaker_user_id"] = speaker
 	}

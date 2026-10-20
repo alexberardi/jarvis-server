@@ -62,6 +62,19 @@ func (e *LowQualityError) Error() string {
 	return fmt.Sprintf("low_quality: %.1f s of speech, need at least %.1f s", e.SpeechSeconds, e.MinSpeech)
 }
 
+// Wire is the D37 result: the legacy {"success": false, "error": "low_quality"} plus the reason,
+// so mobile can say why (#293). min_speech_seconds only comes with too_little_speech.
+func (e *LowQualityError) Wire() map[string]any {
+	w := map[string]any{
+		"success": false, "error": "low_quality", "reason": e.Reason,
+		"speech_seconds": e.SpeechSeconds, "detail": e.Error(),
+	}
+	if e.Reason == "too_little_speech" {
+		w["min_speech_seconds"] = e.MinSpeech
+	}
+	return w
+}
+
 // Outcomes of the speaker pass (Speaker.Outcome). Only OutcomeMatched carries a user id.
 const (
 	OutcomeMatched    = "matched"
