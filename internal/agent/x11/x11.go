@@ -89,13 +89,18 @@ func (d *Display) getenv(k string) string {
 // Session says whether this is an X11 session: DISPLAY set and not a Wayland session
 // (XWayland's DISPLAY would only reach XWayland clients and lie about the rest).
 func (d *Display) Session() (bool, string) {
-	if d.getenv("WAYLAND_DISPLAY") != "" || d.getenv("XDG_SESSION_TYPE") == "wayland" {
+	if d.Wayland() {
 		return false, "a Wayland session (XWayland only reaches X11 apps)"
 	}
 	if d.getenv("DISPLAY") == "" {
 		return false, "no X11 display (DISPLAY is unset)"
 	}
 	return true, ""
+}
+
+// Wayland says whether this is a Wayland session.
+func (d *Display) Wayland() bool {
+	return d.getenv("WAYLAND_DISPLAY") != "" || d.getenv("XDG_SESSION_TYPE") == "wayland"
 }
 
 func (d *Display) open() (Conn, error) {
