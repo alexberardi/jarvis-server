@@ -89,5 +89,16 @@ describe('WorkflowsPage', () => {
     api.listWorkflows.mockResolvedValue([])
     renderPage()
     expect(await screen.findByText(/Nothing taught yet/)).toBeInTheDocument()
+    expect(screen.getByText(/Jarvis, watch me/)).toBeInTheDocument()
+  })
+
+  it('says what failed and loads again on Try again', async () => {
+    api.listWorkflows.mockRejectedValueOnce(new Error('boom')).mockResolvedValue([])
+    renderPage()
+    expect(await screen.findByText("Couldn't load your workflows")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    })
+    expect(await screen.findByText(/Nothing taught yet/)).toBeInTheDocument()
   })
 })

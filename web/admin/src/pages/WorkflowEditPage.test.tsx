@@ -64,6 +64,16 @@ beforeEach(() => {
 })
 
 describe('WorkflowEditPage', () => {
+  it('says what failed and loads again on Try again', async () => {
+    api.getWorkflow.mockRejectedValueOnce(new Error('boom'))
+    renderPage()
+    expect(await screen.findByText("Couldn't load this workflow")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    })
+    expect(await screen.findAllByTestId('step')).toHaveLength(5)
+  })
+
   it('shows the steps as sentences, the risky one asking first', async () => {
     renderPage()
     expect(await screen.findByRole('heading', { name: 'Download bank statement' })).toBeInTheDocument()

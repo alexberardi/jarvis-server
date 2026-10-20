@@ -3,14 +3,13 @@ import { Link } from 'react-router-dom'
 import { CheckCheck, Inbox, ListChecks, Trash2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { bulkDelete, bulkRead } from '@/api/inbox'
+import { bulkDelete, bulkRead, confirmationOf } from '@/api/inbox'
+import type { InboxItem } from '@/api/inbox'
+import { Badge, Button, Card, EmptyState, ErrorState, List, PageHeader, SkeletonList } from '@/components/ui'
 import { inboxKeys, useInboxList } from '@/hooks/useInbox'
 import { errorMessage } from '@/lib/errors'
 import { timeAgo } from '@/lib/time'
 import { cn } from '@/lib/utils'
-
-const button =
-  'inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:opacity-50'
 
 /** InboxPage lists what Jarvis sent back (webapp 01 P5): research results, confirmations, notices. */
 export default function InboxPage() {
@@ -44,102 +43,133 @@ export default function InboxPage() {
     }
   }
 
-  return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold text-[var(--color-text)]">Inbox</h1>
-        {items.length > 0 &&
-          (selecting ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-[var(--color-text-muted)]">{selected.size} selected</span>
-              <button
-                type="button"
-                className={button}
-                onClick={() => setSelected(selected.size === items.length ? new Set() : new Set(items.map((i) => i.id)))}
-              >
-                {selected.size === items.length ? 'None' : 'All'}
-              </button>
-              <button type="button" className={button} disabled={!selected.size || busy} onClick={() => void bulk('read')}>
-                <CheckCheck size={14} aria-hidden="true" /> Mark read
-              </button>
-              <button
-                type="button"
-                className={cn(button, 'text-red-500')}
-                disabled={!selected.size || busy}
-                onClick={() => void bulk('delete')}
-              >
-                <Trash2 size={14} aria-hidden="true" /> Delete
-              </button>
-              <button
-                type="button"
-                aria-label="Cancel selection"
-                className={button}
-                onClick={() => {
-                  setSelecting(false)
-                  setSelected(new Set())
-                }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ) : (
-            <button type="button" className={button} onClick={() => setSelecting(true)}>
-              <ListChecks size={14} aria-hidden="true" /> Select
-            </button>
-          ))}
-      </div>
+  const actions =
+    items.length === 0 ? null : selecting ? (
+      <>
+        <span className="text-small text-text-muted">{selected.size} selected</span>
+        <Button
+          size="sm"
+          onClick={() => setSelected(selected.size === items.length ? new Set() : new Set(items.map((i) => i.id)))}
+        >
+          {selected.size === items.length ? 'None' : 'All'}
+        </Button>
+        <Button
+          size="sm"
+          icon={<CheckCheck size={16} aria-hidden />}
+          disabled={!selected.size || busy}
+          onClick={() => void bulk('read')}
+        >
+          Mark read
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
+          icon={<Trash2 size={16} aria-hidden />}
+          disabled={!selected.size || busy}
+          onClick={() => void bulk('delete')}
+        >
+          Delete
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label="Cancel selection"
+          onClick={() => {
+            setSelecting(false)
+            setSelected(new Set())
+          }}
+        >
+          <X size={18} aria-hidden />
+        </Button>
+      </>
+    ) : (
+      <Button size="sm" icon={<ListChecks size={16} aria-hidden />} onClick={() => setSelecting(true)}>
+        Select
+      </Button>
+    )
 
-      {list.isError ? (
-        <p role="alert" className="text-sm text-red-500">
-          {errorMessage(list.error, 'Could not load the inbox')}
-        </p>
-      ) : list.isLoading ? (
-        <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
-      ) : items.length === 0 ? (
-        <div className="flex flex-col items-center rounded-xl border border-dashed border-[var(--color-border)] p-10 text-center">
-          <Inbox size={32} className="mb-2 text-[var(--color-text-muted)]" aria-hidden="true" />
-          <p className="text-sm text-[var(--color-text-muted)]">
-            Nothing here yet. Research results and confirmations from Jarvis land here.
-          </p>
-        </div>
-      ) : (
-        <ul className="divide-y divide-[var(--color-border)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          {items.map((it) => {
-            const inner = (
-              <>
-                <span
-                  aria-label={it.is_read ? undefined : 'Unread'}
-                  className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full', it.is_read ? 'bg-transparent' : 'bg-[var(--color-primary)]')}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className={cn('truncate text-sm text-[var(--color-text)]', !it.is_read && 'font-semibold')}>{it.title}</span>
-                    <span className="shrink-0 text-xs text-[var(--color-text-muted)]">{timeAgo(it.created_at)}</span>
-                  </span>
-                  {it.summary && <span className="line-clamp-2 block text-sm text-[var(--color-text-muted)]">{it.summary}</span>}
-                  <span className="mt-1 inline-block rounded-full bg-[var(--color-surface-alt)] px-2 py-0.5 text-xs text-[var(--color-text-muted)]">
-                    {it.category.replace(/_/g, ' ')}
-                  </span>
-                </span>
-              </>
-            )
-            return (
+  return (
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title="Inbox"
+        description="What Jarvis sends back: research results, questions that need your answer, and notices."
+        actions={actions}
+      />
+
+      <Card flush className="overflow-hidden">
+        {list.isError ? (
+          <ErrorState
+            title="Couldn't load your inbox"
+            message={errorMessage(list.error, 'Check your connection and try again.')}
+            onRetry={() => list.refetch()}
+          />
+        ) : list.isLoading ? (
+          <SkeletonList rows={3} label="Loading your inbox" />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={<Inbox size={20} />}
+            title="Nothing here yet"
+            description="Research results, questions that need your answer, and notices from Jarvis land here."
+          />
+        ) : (
+          <List label="Inbox items">
+            {items.map((it) => (
               <li key={it.id}>
                 {selecting ? (
-                  <label className={cn('flex cursor-pointer gap-3 p-3', selected.has(it.id) && 'bg-[var(--color-surface-alt)]')}>
-                    <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it.id)} aria-label={`Select ${it.title}`} />
-                    {inner}
+                  <label className={cn('flex cursor-pointer gap-3 px-4 py-3', selected.has(it.id) && 'bg-surface-alt')}>
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 shrink-0 accent-primary"
+                      checked={selected.has(it.id)}
+                      onChange={() => toggle(it.id)}
+                      aria-label={`Select ${it.title}`}
+                    />
+                    <Row item={it} />
                   </label>
                 ) : (
-                  <Link to={`/inbox/${encodeURIComponent(it.id)}`} className="flex gap-3 p-3 hover:bg-[var(--color-surface-alt)]">
-                    {inner}
+                  <Link
+                    to={`/inbox/${encodeURIComponent(it.id)}`}
+                    className="flex gap-3 px-4 py-3 transition-colors duration-(--duration-hover) hover:bg-surface-alt"
+                  >
+                    <Row item={it} />
                   </Link>
                 )}
               </li>
-            )
-          })}
-        </ul>
-      )}
+            ))}
+          </List>
+        )}
+      </Card>
     </div>
+  )
+}
+
+/**
+ * Row is one item: unread dot, title and time, the summary, and its badges. A confirmation that
+ * is still unread says it needs an answer, so it doesn't read like an FYI.
+ */
+function Row({ item }: { item: InboxItem }) {
+  const asks = !item.is_read && confirmationOf(item) !== null
+  return (
+    <>
+      <span
+        aria-label={item.is_read ? undefined : 'Unread'}
+        className={cn('mt-2 size-2 shrink-0 rounded-pill', item.is_read ? 'bg-transparent' : 'bg-primary')}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline justify-between gap-3">
+          <span className={cn('truncate text-body text-text', !item.is_read && 'font-semibold')}>{item.title}</span>
+          <span className="shrink-0 text-caption text-text-muted">{timeAgo(item.created_at)}</span>
+        </span>
+        {item.summary && <span className="line-clamp-2 block text-small text-text-muted">{item.summary}</span>}
+        <span className="mt-1.5 flex flex-wrap gap-1.5">
+          {asks && (
+            <Badge tone="warning" dot>
+              Needs your answer
+            </Badge>
+          )}
+          <Badge>{item.category.replace(/_/g, ' ')}</Badge>
+        </span>
+      </span>
+    </>
   )
 }
