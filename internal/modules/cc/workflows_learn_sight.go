@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
-	"slices"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
@@ -31,7 +31,7 @@ const (
 	sightMaxClicks = 4 // clicks one call names: at most 2*sightMaxClicks images
 	// What one click takes of the model's context (its keyframe, its crop, its text), and what
 	// the instructions and the answer need; a small window names fewer clicks per call.
-	sightClickTokens    = 1600 + 400 + 300
+	sightClickTokens   = 1600 + 400 + 300
 	sightReserveTokens = 2000
 	sightMaxTokens     = 1500
 	sightMaxLabel      = 120 // runes of a role, label, app or "did"
@@ -91,7 +91,6 @@ func (m *Module) awaitKeyframes(ctx context.Context, rec Recording, evs []deskto
 	}
 	return nil
 }
-
 
 // sightClick is a click to name: its event number (1-based in evs), its keyframe and crop.
 type sightClick struct {
