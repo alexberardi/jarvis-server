@@ -185,7 +185,7 @@ func TestTransformersTune(t *testing.T) {
 func TestResolveTransformers(t *testing.T) {
 	g := newRig(t)
 	g.r.Platform = Platform{"darwin", "arm64"}
-	g.bins.have[FlavourMetal] = true
+	g.bins.have = map[Flavour]bool{FlavourMetal: true} // the CPU install comes later, fetched
 	dir := hfDir(t, g.models, "SmolLM2-135M-Instruct", qwen3Config, 1<<20)
 	live := LabelConfig{Label: LabelLive, Kind: KindTransformers, ModelKind: ModelLLM, Engine: ModeLocal, Model: dir, ModelPath: dir,
 		Context: 4096, Parallel: 1, GPULayers: 999, GPUBackend: "auto", DType: "bfloat16"}
