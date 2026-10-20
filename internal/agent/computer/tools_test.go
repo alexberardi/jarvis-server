@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"os"
 	"path/filepath"
@@ -28,6 +29,18 @@ type fakeBrowser struct {
 	onAct   func()
 	n       int
 	shotErr error
+	text    string // the page's text (read_page)
+	textErr error
+}
+
+func (b *fakeBrowser) PageText(_ context.Context, tab string, max int) (string, error) {
+	if b.textErr != nil {
+		return "", b.textErr
+	}
+	if r := []rune(b.text); len(r) > max {
+		return string(r[:max]), nil
+	}
+	return b.text, nil
 }
 
 func (b *fakeBrowser) OpenBackground(_ context.Context, u string) (string, string, error) {
@@ -191,6 +204,19 @@ func TestObserveOpensTaskWindow(t *testing.T) {
 	if out["success"] != true || len(b.opened) != 1 {
 		t.Fatalf("second observe %v, opened %v", out, b.opened)
 	}
+	// The snapshot comes with the page's text (prices, ratings: not elements), capped; a page
+	// whose text can't be read is still observed.
+	b.text = "Pulse Active 2 Smart Watch $249 ★ 4.8 " + strings.Repeat("x", 5000)
+	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "snapshot": true})
+	if txt, _ := out["text"].(string); !strings.HasPrefix(txt, "Pulse Active 2 Smart Watch $249") || len([]rune(txt)) != pageTextChars {
+		t.Fatalf("text %d chars: %.60q", len([]rune(txt)), txt)
+	}
+	b.textErr = errors.New("no readable text")
+	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "snapshot": true})
+	if out["success"] != true || out["text"] != nil {
+		t.Fatalf("observe without text: %v", out)
+	}
+	b.text, b.textErr = "", nil
 	// A new run needs an address.
 	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_2", "target": browserTarget, "snapshot": true})
 	if out["success"] != false || !strings.Contains(out["error"].(string), "url") {

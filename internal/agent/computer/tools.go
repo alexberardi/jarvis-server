@@ -26,7 +26,13 @@ type Browser interface {
 	Act(ctx context.Context, tab string, gen int, ref, op, value string, keys []string) (browser.ActResult, error)
 	Screenshot(ctx context.Context, window string) (screen.Shot, computeruse.Geometry, error)
 	CloseTab(ctx context.Context, tab string) error
+	// PageText is the tab's visible text, at most max characters (browser_read_page).
+	PageText(ctx context.Context, tab string, max int) (string, error)
 }
+
+// pageTextChars caps the page text an observation carries: prices, ratings and order numbers
+// that the snapshot's elements don't have, in a small model's context.
+const pageTextChars = 3000
 
 // Approver checks an approval token with jarvisd (node.CC.VerifyApproval): single use, bound to
 // the action's digest.
@@ -38,6 +44,16 @@ type Approver interface {
 func BrowserOf(t *browser.Tools) Browser { return extBrowser{t} }
 
 type extBrowser struct{ *browser.Tools }
+
+func (b extBrowser) PageText(ctx context.Context, tab string, max int) (string, error) {
+	out, _ := b.Call(ctx, browser.ToolReadPage, map[string]any{"tab_id": tab, "max_chars": max}, node.Request{})
+	if out["success"] != true {
+		return "", fmt.Errorf("%v", out["error"])
+	}
+	text, _ := out["content"].(string)
+	text = strings.TrimPrefix(text, browser.PageBegin+"\n")
+	return strings.TrimSuffix(text, "\n"+browser.PageEnd), nil
+}
 
 func (b extBrowser) CloseTab(ctx context.Context, tab string) error {
 	out, _ := b.Call(ctx, browser.ToolCloseTab, map[string]any{"tab_id": tab}, node.Request{})
@@ -247,6 +263,13 @@ func (t *Tools) observe(ctx context.Context, a observeArgs) map[string]any {
 			out["title"] = s.Title
 		}
 		out["snapshot"] = map[string]any{"gen": s.Gen, "elements": s.Elements}
+		// Best effort: without its text the page is still observed.
+		if text, err := t.Browser.PageText(ctx, run.Tab, pageTextChars); err == nil && strings.TrimSpace(text) != "" {
+			if r := []rune(text); len(r) > pageTextChars {
+				text = string(r[:pageTextChars])
+			}
+			out["text"] = text
+		}
 	}
 	if a.Screenshot {
 		shot, g, err := t.Browser.Screenshot(ctx, run.Window)

@@ -57,7 +57,7 @@ func TestComputerExecOverTheBus(t *testing.T) {
 		case name == computeruse.ToolObserve && args["url"] == nil:
 			return `{"success": false, "error": "the task has no window yet: give the url to open it on", "error_code": "invalid_argument"}`
 		case name == computeruse.ToolObserve:
-			return `{"success": true, "target": "browser", "url": "https://shop.example/", "title": "Shop",
+			return `{"success": true, "target": "browser", "url": "https://shop.example/", "title": "Shop", "text": "Buy\n$4.99",
 				"snapshot": {"gen": 3, "elements": [{"ref": "e1", "role": "button", "name": "Buy"}, {"ref": "e2", "role": "textbox", "name": "Password", "type": "password"}]},
 				"capture": {"capture_id": "cap_1", "width": 800, "height": 600},
 				"image_attachments": [{"mime": "image/png", "data": "` + shot + `", "label": "screenshot"}]}`
@@ -86,7 +86,7 @@ func TestComputerExecOverTheBus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if obs.URL != "https://shop.example/" || obs.Gen != 3 || len(obs.Elements) != 2 || obs.Elements[0].Name != "Buy" ||
+	if obs.URL != "https://shop.example/" || obs.Text != "Buy\n$4.99" || obs.Gen != 3 || len(obs.Elements) != 2 || obs.Elements[0].Name != "Buy" ||
 		!obs.Elements[1].Secure || obs.Image == nil || obs.Image.CaptureID != "cap_1" || obs.Image.Width != 800 ||
 		!bytes.Equal(obs.Image.Data, pngBytes) {
 		t.Fatalf("observation = %+v", obs)

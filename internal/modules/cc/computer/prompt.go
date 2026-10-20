@@ -109,6 +109,10 @@ func renderPrompt(in promptInput) string {
 	for _, e := range o.Elements {
 		b.WriteString(renderElement(e) + "\n")
 	}
+	if t := renderText(o.Text); t != "" {
+		// What the elements don't say: prices, ratings, order numbers.
+		b.WriteString("text on the page:\n" + t + "\n")
+	}
 	b.WriteString(PageEnd + "\n")
 
 	if in.Images > 0 {
@@ -128,6 +132,17 @@ func renderElement(e Element) string {
 		s += " [" + strings.Join(e.State, ",") + "]"
 	}
 	return s
+}
+
+// renderText is the page's text, one non-empty line each, defanged.
+func renderText(s string) string {
+	var lines []string
+	for _, l := range strings.Split(s, "\n") {
+		if l = defang(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // describe is the success check as one line for the prompt, or "".

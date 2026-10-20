@@ -169,6 +169,7 @@ type Observation struct {
 	URL, Title, App string
 	Gen             int
 	Elements        []Element
+	Text            string // the page's visible text (capped by the agent), "" when unread
 	Image           *Image // nil without a screenshot
 }
 
