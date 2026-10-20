@@ -558,6 +558,7 @@ func run(ctx context.Context, args []string) error {
 		*f.noTray, *f.noOverlay = true, true
 	}
 	cp, tf, voiceOn, noOverlay, vf, hf := f.cp, f.tf, f.voiceOn, f.noOverlay, f.vf, f.hf
+	vf.clampFollowUp(log)
 	tf.pi = !p.desktop
 	// One agent per user: the control socket is the lock, and how a second launch, the
 	// start-only shortcut and uninstall reach this one (installers plan item 1.9).

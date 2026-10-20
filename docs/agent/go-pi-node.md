@@ -558,7 +558,9 @@ transcribed, and the response carries `keep_listening: true` until `voice.follow
 iteration (`MaxIgnored` 5 bounds it locally). Older nodes ignore `keep_listening` and close the
 window as before; older servers never send it.
 
-**Node defaults now** (Python's in brackets): window 8 s, then 6, then 5 (4, 3); an answer ends
+**Node defaults now** (Python's in brackets): window 3 s on every iteration, and at most 3 s
+however it is set (4, then 3; it was 8, then 6, then 5 until #296, see
+[decisions/2026-10-19-follow-up-window-3s.md](../decisions/2026-10-19-follow-up-window-3s.md)); an answer ends
 after 1.2 s of silence (0.5); answers may run 10 s (7). The wake turn's endpointing is unchanged.
 
 **Evaluation** (`internal/agent/voice/gate_eval_test.go` → `internal/modules/cc/followup_gate_eval_test.go`;
@@ -883,7 +885,7 @@ to agent.json in one serialized write (`settings.Update`, shared with the voice 
 | `led_brightness_percent` | `led_brightness` / `--led-brightness` | `LEDs.SetBrightness` |
 | `wake_word_threshold` | `wake_threshold` / `--wake-threshold` | the running pipeline, from its next chunk (`voice.Live.Tune`) |
 | `wake_ack_audio_enabled` | `chimes` / `--no-chimes` | same |
-| `follow_up_listen_seconds` | `follow_up` / `--follow-up` | same (from the next turn) |
+| `follow_up_listen_seconds` | `follow_up` / `--follow-up` | same (from the next turn); clamped to 3 s, logged |
 | `follow_up_silence_duration` | `follow_up_silence` / `--follow-up-silence` | same |
 
 A bad value skips that key with a log line. `volume_percent` and `is_muted` are logged and
