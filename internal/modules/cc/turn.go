@@ -63,6 +63,8 @@ type turnInput struct {
 	// LevelVsWake is the node's measure of a follow-up's speech level against the wake
 	// request's, in dB (level_vs_wake_db; the follow-up gate's level signal).
 	LevelVsWake *float64
+	// SpeechLevel is a wake turn's speech level in dBFS (speech_level_db; wake arbitration).
+	SpeechLevel *float64
 	// Images are a mobile chat turn's attached images (chat_images.go).
 	Images []chatImage
 	// SameDevice: a web chat typed on the computer whose agent is this node (sameDeviceHint).
@@ -133,6 +135,11 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	if len(in.Images) == 0 && isSTTNoise(in.VoiceCommand) {
 		m.deps.Log.Info("cc: not_for_me_prefilter", "conversation_id", conv.id, "transcript", in.VoiceCommand)
 		return turnOutcome{res: engineResult{Stop: stopNotForMe}, conv: conv}, nil
+	}
+	if down, err := m.arbitrateWake(ctx, conv, in); err != nil {
+		return turnOutcome{}, err
+	} else if down {
+		return turnOutcome{res: engineResult{Stop: stopNotForMe, StoodDown: true}, conv: conv}, nil
 	}
 
 	var st turnState
