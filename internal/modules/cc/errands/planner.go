@@ -337,6 +337,43 @@ func mergeComputerSteps(steps []Step) []Step {
 	return out
 }
 
+// closeJSON is s with the brackets it leaves open closed, and whether it left any: the house
+// model ends a long plan without its last "}" now and then. s cut off inside a string isn't
+// closed.
+func closeJSON(s string) (string, bool) {
+	var open []byte
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case esc:
+			esc = false
+		case inStr && c == '\\':
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			open = append(open, '}')
+		case c == '[':
+			open = append(open, ']')
+		case c == '}' || c == ']':
+			if len(open) == 0 || open[len(open)-1] != c {
+				return s, false
+			}
+			open = open[:len(open)-1]
+		}
+	}
+	if inStr || len(open) == 0 {
+		return s, false
+	}
+	b := []byte(strings.TrimSpace(s))
+	for i := len(open) - 1; i >= 0; i-- {
+		b = append(b, open[i])
+	}
+	return string(b), true
+}
+
 // splitComputerSteps makes a computer task whose goal names more than one web address (another
 // host or path; a query or a trailing slash is the same one) one task per address, in order, each
 // starting at its own: the house model wrote one task for the bank's and the card's statements, and
@@ -591,7 +628,13 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 		s.log().Warn("errands: planner EMPTY response", "finish", resp.FinishReason)
 		return nil, fmt.Errorf("%w: planner returned an empty response", ErrPlan)
 	}
-	v, err := pyjson.Loads(stripFences(stripThink(raw)))
+	text := stripFences(stripThink(raw))
+	v, err := pyjson.Loads(text)
+	if err != nil {
+		if closed, ok := closeJSON(text); ok {
+			v, err = pyjson.Loads(closed)
+		}
+	}
 	if err != nil {
 		s.log().Warn("errands: planner UNPARSEABLE JSON", "head", truncRunes(raw, 400))
 		return nil, fmt.Errorf("%w: planner returned invalid JSON: %v", ErrPlan, err)
