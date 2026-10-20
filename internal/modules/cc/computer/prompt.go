@@ -38,7 +38,7 @@ Rules:
 - Propose risky actions (paying, placing an order, sending, deleting, sharing, installing, subscribing) like any other, with "checkout" when it buys something: Jarvis asks the user before they run.
 - Never type a password or a one-time code. If you need to log in, ask with reason "login_needed".
 - If the task is unclear, or you are stuck after trying twice, ask with reason "unclear".
-- Say done only when the task is finished, and say how to check it in "verify".`
+- Say done only when the task is finished, and say in "verify" how to check it: "url_contains", "text_present" (text on the page), "download" {"name_like", "min_bytes"}, "file" {"path", "contains"} or "screen" (a yes/no question about the screen). Jarvis checks it before telling the user.`
 
 // defaultRules is the rules summary when the caller gives none.
 const defaultRules = "Risky actions (pay, send, delete, sharing, install, subscribe, security settings, captcha, sensitive input) ask the user first. Every site and app is allowed unless a rule below blocks it."

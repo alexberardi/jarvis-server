@@ -49,6 +49,9 @@ const (
 	maxScreenshots = 2 // screenshots sent per model call
 	fewElements    = 5 // a snapshot with fewer elements gets a screenshot too
 	maxTokens      = 1024
+	// verifyRounds is the extra budget after a done whose check failed: this many more rounds to
+	// fix it and say done again.
+	verifyRounds = 5
 )
 
 // LLM is the llm module in process.
@@ -57,10 +60,11 @@ type LLM interface {
 }
 
 // Executor runs a run's observations and actions on the computer (the agent's computer_observe,
-// computer_act and computer_stop, through the node bus).
+// computer_act, computer_files and computer_stop, through the node bus).
 type Executor interface {
 	Observe(ctx context.Context, o Observe) (Observation, error)
 	Act(ctx context.Context, b Batch) (ActResult, error)
+	Files(ctx context.Context, f Files) (FileInfo, error)
 	Stop(ctx context.Context, runID string)
 }
 
@@ -128,12 +132,13 @@ type Task struct {
 type Outcome struct {
 	RunID    string
 	State    string // done | ask | needs_approval | failed | stopped | paused
-	Summary  string // done: the model's summary; failed/stopped: the reason, for the user
+	Summary  string // done: the model's summary and what was checked; failed/stopped: the reason, for the user
+	Checked  string // done: what Jarvis checked before reporting it
 	Ask      string // ask: the question
 	Reason   string // ask: page_instructions | unclear | login_needed
 	Pending  []PendingAction
 	Checkout *Checkout
-	Verify   *SuccessCheck
+	Verify   *SuccessCheck // done: the check that passed
 	Rounds   int
 }
 
@@ -245,6 +250,10 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		if l.stopRequested(ctx, run) {
 			return l.end(ctx, run, Outcome{State: StateStopped, Summary: "Stopped."})
 		}
+		if v := run.Verify; v != nil && v.FailedAt > 0 && (run.Rounds-v.FailedAt >= verifyRounds || run.Rounds >= maxRounds) {
+			l.Exec.Stop(ctx, run.ID)
+			return l.end(ctx, run, Outcome{State: StateFailed, Summary: v.couldntConfirm()})
+		}
 		if run.Rounds >= maxRounds {
 			l.Exec.Stop(ctx, run.ID)
 			return l.end(ctx, run, Outcome{State: StateFailed,
@@ -310,7 +319,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	r.feedback = ""
 	switch {
 	case reply.Done:
-		return Outcome{State: StateDone, Summary: reply.Summary, Verify: reply.Verify}, true
+		return l.done(ctx, r, reply)
 	case reply.Ask != "":
 		if reply.Reason == ReasonPageInstructions {
 			return Outcome{State: StateAsk, Ask: injectionAsk, Reason: ReasonPageInstructions}, true
@@ -331,6 +340,44 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		return Outcome{}, false
 	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
+}
+
+// done checks the result before the task reports done (C4): the task's own success check, else
+// the one the model's done carries. A done without either is sent back once for one. A check that
+// fails goes back to the model as feedback, with verifyRounds more rounds to fix it.
+func (l *Loop) done(ctx context.Context, r *round, reply Reply) (Outcome, bool) {
+	check := r.task.Success
+	if check.empty() {
+		check = reply.Verify
+	}
+	if r.run.Verify == nil {
+		r.run.Verify = &VerifyState{}
+	}
+	v := r.run.Verify
+	if check.empty() {
+		if !v.Asked {
+			v.Asked = true
+			r.feedback = `you said done but gave no "verify" check, so I can't confirm it. If the task is finished, say done again with a "verify" that shows it (url_contains, text_present, download, file or screen); if not, carry on.`
+			return Outcome{}, false
+		}
+		return Outcome{State: StateFailed, Summary: "I couldn't confirm the task was finished: there was no way to check it."}, true
+	}
+	res := l.Verify(ctx, r.run.ID, r.task.Target, r.pick, check)
+	if res.OK {
+		sum := strings.TrimSpace(reply.Summary)
+		if sum != "" && !strings.HasSuffix(sum, ".") {
+			sum += "."
+		}
+		return Outcome{State: StateDone, Summary: strings.TrimSpace(sum + " Checked: " + res.Checked + "."),
+			Checked: res.Checked, Verify: check}, true
+	}
+	if v.FailedAt == 0 {
+		v.FailedAt = r.run.Rounds
+	}
+	v.What, v.Why = check.describe(), res.Why
+	r.feedback = "you said done, but my check failed: " + res.Why +
+		". Finish the task if it isn't, then say done again with a check that holds."
+	return Outcome{}, false
 }
 
 // observe takes a snapshot, and a screenshot for the desktop, when the model asked for one, or

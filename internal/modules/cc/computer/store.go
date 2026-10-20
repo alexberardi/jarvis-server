@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
@@ -33,7 +35,8 @@ type Run struct {
 	StopRequested        bool
 	Rounds               int
 	History              []Entry
-	Pending              *Held // the batch waiting for a confirmation, or nil
+	Pending              *Held        // the batch waiting for a confirmation, or nil
+	Verify               *VerifyState // the result checks so far, or nil
 	Model, Error         string
 	CreatedAt, UpdatedAt time.Time
 }
@@ -62,6 +65,24 @@ type HeldAction struct {
 	Category string             `json:"category,omitempty"`
 	Reason   string             `json:"reason,omitempty"`
 	Digest   string             `json:"digest,omitempty"`
+}
+
+// VerifyState is a run's result checks (cc_computer_runs.verify): whether the model was asked
+// for a missing check, and since which round a failed check is being fixed, so a run that waits
+// for the user in between keeps its budget.
+type VerifyState struct {
+	Asked    bool   `json:"asked,omitempty"`     // a done without a check was sent back once
+	FailedAt int    `json:"failed_at,omitempty"` // the round the first failed check was in (0: none)
+	What     string `json:"what,omitempty"`      // the last failed check, described
+	Why      string `json:"why,omitempty"`       // and why it failed
+}
+
+func (v *VerifyState) couldntConfirm() string {
+	what := v.What
+	if what == "" {
+		what = "the result"
+	}
+	return fmt.Sprintf("I couldn't confirm %s: %s.", what, strings.TrimSuffix(v.Why, "."))
 }
 
 // Store keeps computer task runs (cc_computer_runs).
@@ -117,12 +138,13 @@ func (s *Store) Get(ctx context.Context, id string) (*Run, error) {
 		stop             int
 		hist             string
 		pending          sql.NullString
+		verify           sql.NullString
 		created, updated string
 	)
 	err := s.DB.Read.QueryRowContext(ctx, `SELECT id, household_id, user_id, node_id, workflow_id, step, goal,
-		target, state, stop_requested, rounds, history, pending, model, error, created_at, updated_at
+		target, state, stop_requested, rounds, history, pending, verify, model, error, created_at, updated_at
 		FROM cc_computer_runs WHERE id = ?`, id).Scan(&r.ID, &r.HouseholdID, &uid, &r.NodeID, &r.WorkflowID,
-		&r.Step, &r.Goal, &r.Target, &r.State, &stop, &r.Rounds, &hist, &pending, &r.Model, &r.Error, &created, &updated)
+		&r.Step, &r.Goal, &r.Target, &r.State, &stop, &r.Rounds, &hist, &pending, &verify, &r.Model, &r.Error, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoRun
 	}
@@ -139,6 +161,12 @@ func (s *Store) Get(ctx context.Context, id string) (*Run, error) {
 	if pending.Valid {
 		r.Pending = &Held{}
 		if err := json.Unmarshal([]byte(pending.String), r.Pending); err != nil {
+			return nil, err
+		}
+	}
+	if verify.Valid {
+		r.Verify = &VerifyState{}
+		if err := json.Unmarshal([]byte(verify.String), r.Verify); err != nil {
 			return nil, err
 		}
 	}
@@ -171,7 +199,7 @@ func (s *Store) newest(ctx context.Context, where string, args ...any) (*Run, er
 	return s.Get(ctx, id)
 }
 
-// Save writes a run's progress: state, rounds, history, the held batch, model and error.
+// Save writes a run's progress: state, rounds, history, the held batch, the checks, model and error.
 func (s *Store) Save(ctx context.Context, r *Run) error {
 	hist, err := historyJSON(r.History)
 	if err != nil {
@@ -185,10 +213,18 @@ func (s *Store) Save(ctx context.Context, r *Run) error {
 		}
 		pending = string(b)
 	}
+	var verify any
+	if r.Verify != nil {
+		b, err := json.Marshal(r.Verify)
+		if err != nil {
+			return err
+		}
+		verify = string(b)
+	}
 	r.UpdatedAt = s.now()
 	_, err = s.DB.Write.ExecContext(ctx, `UPDATE cc_computer_runs SET state = ?, rounds = ?, history = ?,
-		pending = ?, model = ?, error = ?, updated_at = ? WHERE id = ?`,
-		r.State, r.Rounds, hist, pending, r.Model, r.Error, dbTime(r.UpdatedAt), r.ID)
+		pending = ?, verify = ?, model = ?, error = ?, updated_at = ? WHERE id = ?`,
+		r.State, r.Rounds, hist, pending, verify, r.Model, r.Error, dbTime(r.UpdatedAt), r.ID)
 	return err
 }
 
