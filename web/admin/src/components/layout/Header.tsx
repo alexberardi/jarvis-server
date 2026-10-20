@@ -13,14 +13,14 @@ interface HeaderProps {
 }
 
 const iconButton =
-  'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)]'
+  'press inline-flex size-10 shrink-0 items-center justify-center rounded-control text-text-muted hover:bg-surface-alt hover:text-text'
 
 export default function Header({ onOpenNav, navOpen = false }: HeaderProps) {
   const { state, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-4 md:px-6">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-2 sm:px-4 md:px-6">
       <div className="flex min-w-0 items-center gap-1">
         <button
           type="button"
@@ -30,9 +30,9 @@ export default function Header({ onOpenNav, navOpen = false }: HeaderProps) {
           aria-expanded={navOpen}
           className={`${iconButton} md:hidden`}
         >
-          <Menu size={20} />
+          <Menu size={20} aria-hidden />
         </button>
-        <span className="truncate text-lg font-bold text-[var(--color-primary)] md:hidden">Jarvis Automation</span>
+        <span className="truncate text-heading text-primary md:hidden">Jarvis Automation</span>
       </div>
 
       <div className="flex min-w-0 items-center gap-1 sm:gap-2">
@@ -41,7 +41,7 @@ export default function Header({ onOpenNav, navOpen = false }: HeaderProps) {
         {state.user && (
           <Link
             to="/account"
-            className="hidden min-w-0 items-center gap-1.5 truncate rounded-lg px-2 py-1 text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] sm:flex"
+            className="hidden h-10 min-w-0 items-center gap-1.5 truncate rounded-control px-2 text-small text-text-muted transition-colors duration-(--duration-hover) hover:bg-surface-alt hover:text-text sm:flex"
             title={state.user.email}
           >
             <UserRound size={16} className="shrink-0" />
@@ -71,7 +71,7 @@ export default function Header({ onOpenNav, navOpen = false }: HeaderProps) {
         <button
           type="button"
           onClick={logout}
-          className={`${iconButton} hover:text-red-500`}
+          className={`${iconButton} hover:text-danger`}
           title="Log out"
           aria-label="Log out"
         >

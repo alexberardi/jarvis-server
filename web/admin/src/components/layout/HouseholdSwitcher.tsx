@@ -26,7 +26,7 @@ export default function HouseholdSwitcher({ className }: { className?: string })
       value={activeHouseholdId}
       onChange={(e) => void pick(e.target.value)}
       className={cn(
-        'h-9 min-w-0 truncate rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 text-sm text-[var(--color-text)] sm:max-w-[12rem]',
+        'h-9 min-w-0 truncate rounded-control border border-border-strong bg-surface px-2 text-small text-text sm:max-w-[12rem]',
         className,
       )}
     >

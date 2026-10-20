@@ -1,35 +1,226 @@
 @import "tailwindcss";
 
-:root {
+/*
+ * Design tokens: direction B, Quiet Violet (docs/decisions/2026-10-20-web-ui-direction.md).
+ * The values are docs/design/directions/tokens.py's DIRECTIONS["B"], copied exactly; their AA
+ * contrast is checked by src/theme/tokens.test.ts against src/theme/colors.ts, which holds the
+ * same values for JS. Change a colour in all three places.
+ *
+ * @theme makes each one a Tailwind utility (bg-surface, text-text-muted, border-border-strong,
+ * text-body, rounded-card, ease-drawer, ...). Pages written before the tokens use the same
+ * variables directly (bg-[var(--color-surface)]); both keep working. `static` emits every
+ * variable even when no utility uses it, because pages reference them through var().
+ */
+@theme static {
+  /* Colours, light. `.dark` below swaps them. */
+  --color-background: #f6f6f8;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f0f0f3;
+  --color-border: #e2e2e8;
+  --color-border-strong: #84848f;
+  --color-text: #16161b;
+  --color-text-muted: #5b5b68;
   --color-primary: #8A00C4;
+  --color-on-primary: #ffffff;
+  --color-primary-soft: #f2e6fa;
+  --color-success: #1d7339;
+  --color-success-soft: #e3f3e8;
+  --color-warning: #8a5300;
+  --color-warning-soft: #fbefd9;
+  --color-danger: #bf2530;
+  --color-danger-soft: #fbe5e6;
+  --color-focus: #8A00C4;
+  /* The old palette's accents, kept for the pages that still use them. B has none of its own. */
   --color-secondary: #22c55e;
   --color-tertiary: #0891b2;
-  --color-background: #f8fafc;
-  --color-surface: #ffffff;
-  --color-surface-alt: #f1f5f9;
-  --color-border: #e2e8f0;
-  --color-text: #0f172a;
-  --color-text-muted: #64748b;
+
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  /* Type scale: 12-24px. 12px is the floor (no 10-11px). */
+  --text-title: 1.5rem;
+  --text-title--line-height: 1.25;
+  --text-title--font-weight: 650;
+  --text-heading: 1.125rem;
+  --text-heading--line-height: 1.35;
+  --text-heading--font-weight: 600;
+  --text-subheading: 0.9375rem;
+  --text-subheading--line-height: 1.4;
+  --text-subheading--font-weight: 600;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.55;
+  --text-small: 0.8125rem;
+  --text-small--line-height: 1.45;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.35;
+  --text-caption--font-weight: 500;
+
+  /* Spacing stays on Tailwind's 4px step; B's scale is 1, 2, 3, 4, 5, 6, 8 and 10 of it. */
+  --spacing: 0.25rem;
+
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-bubble: 1.125rem;
+  --radius-pill: 9999px;
+
+  /* B is borders, not shadows: only what floats over the page (menus, dialogs, the drawer). */
+  --shadow-raised: var(--elevation-raised);
+  --shadow-overlay: var(--elevation-overlay);
+
+  /* Easing (emil-design-eng): ease-out for UI, the drawer curve for things that slide in. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Menus and dialogs: opacity + translateY(-4px), 160ms. The sheet slides up like the drawer. */
+  --animate-pop-in: pop-in var(--duration-menu) var(--ease-out) both;
+  --animate-pop-out: pop-out var(--duration-menu) var(--ease-out) both;
+  --animate-sheet-in: sheet-in var(--duration-drawer) var(--ease-drawer) both;
+  --animate-sheet-out: sheet-out var(--duration-menu) var(--ease-out) both;
+  --animate-fade-in: fade-in var(--duration-menu) ease both;
+  --animate-fade-out: fade-out var(--duration-menu) ease both;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--motion-pop-y));
+    }
+  }
+  @keyframes pop-out {
+    to {
+      opacity: 0;
+      transform: translateY(var(--motion-pop-y));
+    }
+  }
+  @keyframes sheet-in {
+    from {
+      opacity: var(--motion-sheet-opacity);
+      transform: translateY(var(--motion-sheet-y));
+    }
+  }
+  @keyframes sheet-out {
+    to {
+      opacity: var(--motion-sheet-opacity);
+      transform: translateY(var(--motion-sheet-y));
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+}
+
+:root {
+  /* Durations (B's motion rules). Everything is under 300ms; lists and chat mount instantly. */
+  --duration-press: 100ms;
+  --duration-hover: 120ms;
+  --duration-menu: 160ms;
+  --duration-toast-in: 200ms;
+  --duration-toast-out: 160ms;
+  --duration-drawer: 220ms;
+
+  /* How far things move. Reduced motion zeroes them, so only the opacity change is left. */
+  --motion-pop-y: -4px;
+  --motion-sheet-y: 100%;
+  --motion-sheet-opacity: 1;
+
+  --elevation-raised: 0 1px 2px rgb(22 22 27 / 0.06), 0 4px 12px rgb(22 22 27 / 0.08);
+  --elevation-overlay: 0 4px 12px rgb(22 22 27 / 0.08), 0 16px 40px rgb(22 22 27 / 0.16);
 }
 
 .dark {
+  --color-background: #111115;
+  --color-surface: #1a1a20;
+  --color-surface-alt: #23232b;
+  --color-border: #2e2e38;
+  --color-border-strong: #787889;
+  --color-text: #f2f2f5;
+  --color-text-muted: #a6a6b4;
   --color-primary: #c084fc;
+  --color-on-primary: #1d0b2b;
+  --color-primary-soft: #2e1f3d;
+  --color-success: #72d697;
+  --color-success-soft: #173022;
+  --color-warning: #f0b44c;
+  --color-warning-soft: #352a16;
+  --color-danger: #ff8f8f;
+  --color-danger-soft: #3a1d20;
+  --color-focus: #c084fc;
   --color-secondary: #4ade80;
   --color-tertiary: #38bdf8;
-  --color-background: #0f172a;
-  --color-surface: #0b1222;
-  --color-surface-alt: #1e293b;
-  --color-border: #334155;
-  --color-text: #f8fafc;
-  --color-text-muted: #94a3b8;
+
+  --elevation-raised: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px rgb(0 0 0 / 0.3);
+  --elevation-overlay: 0 4px 12px rgb(0 0 0 / 0.4), 0 16px 40px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+
+/*
+ * prefers-reduced-motion (B): transforms off, colour and opacity changes stay, spinners slow to
+ * 1.6s. Components use `motion-safe:`/`motion-reduce:` for their own transitions; this covers
+ * the shared animations and Tailwind's spinner.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-pop-y: 0px;
+    --motion-sheet-y: 0px;
+    --motion-sheet-opacity: 0;
+  }
+  .animate-spin {
+    animation-duration: 1.6s;
+  }
+}
+
+/* Press feedback (B): scale(0.98) in 100ms; hover changes colour only, in 120ms. */
+@utility press {
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration:
+    var(--duration-hover), var(--duration-hover), var(--duration-hover), var(--duration-hover),
+    var(--duration-press);
+  transition-timing-function: ease, ease, ease, ease, var(--ease-out);
+  &:active:not(:disabled):not([aria-disabled='true']) {
+    transform: scale(0.98);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:active:not(:disabled):not([aria-disabled='true']) {
+      transform: none;
+    }
+  }
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
   -webkit-font-smoothing: antialiased;
   background-color: var(--color-background);
   color: var(--color-text);
+}
+
+@layer base {
+  /* One focus ring everywhere, for the keyboard only. Pages that draw their own ring set outline-none. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+}
+
+/* Sonner (the toasts): B's colours, entering from the bottom in 200ms and leaving in 160ms. */
+[data-sonner-toaster][data-sonner-toaster] [data-sonner-toast] {
+  transition:
+    transform var(--duration-toast-in) var(--ease-out),
+    opacity var(--duration-toast-in) var(--ease-out),
+    height var(--duration-toast-in) var(--ease-out),
+    box-shadow var(--duration-hover) ease;
+}
+[data-sonner-toaster][data-sonner-toaster] [data-sonner-toast][data-removed='true'] {
+  transition-duration: var(--duration-toast-out);
 }
 
 /*

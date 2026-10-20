@@ -67,19 +67,18 @@ function NavItems({ items, onPick }: { items: NavItem[]; onPick: () => void }) {
       onClick={onPick}
       className={({ isActive }) =>
         cn(
-          'flex items-center gap-3 rounded-lg px-3 py-2 max-md:min-h-10 text-sm font-medium transition-colors',
-          isActive
-            ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-            : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)]',
+          'flex min-h-9 items-center gap-3 rounded-control px-3 py-2 text-small font-medium max-md:min-h-11',
+          'transition-colors duration-(--duration-hover)',
+          isActive ? 'bg-primary-soft text-primary' : 'text-text-muted hover:bg-surface-alt hover:text-text',
         )
       }
     >
-      <item.icon size={18} />
+      <item.icon size={18} aria-hidden />
       {item.label}
       {!!item.badge && (
         <span
           aria-label={`${item.badge} unread`}
-          className="ml-auto rounded-full bg-[var(--color-primary)] px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white"
+          className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-pill bg-primary px-1.5 text-caption text-on-primary"
         >
           {item.badge > 99 ? '99+' : item.badge}
         </span>
@@ -111,7 +110,7 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
     <>
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          className="fixed inset-0 z-40 animate-fade-in bg-black/50 md:hidden"
           aria-hidden="true"
           data-testid="sidebar-backdrop"
           onClick={close}
@@ -122,30 +121,32 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
         aria-label="Main navigation"
         data-open={open ? 'true' : 'false'}
         className={cn(
-          'flex w-64 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] md:w-56',
-          // Drawer below md: fixed, off-canvas unless open. Static column from md.
-          'fixed inset-y-0 left-0 z-50 max-w-[85vw] transition-transform duration-200 md:static md:z-auto md:max-w-none md:translate-x-0',
-          open ? 'translate-x-0 shadow-xl' : '-translate-x-full max-md:invisible',
+          'flex w-64 shrink-0 flex-col border-r border-border bg-surface md:w-56',
+          // Drawer below md: fixed, off-canvas unless open. Static column from md. It slides in
+          // 220ms on the drawer curve; visibility flips after the slide, so closing is seen too.
+          'fixed inset-y-0 left-0 z-50 max-w-[85vw] md:static md:z-auto md:max-w-none md:translate-x-0',
+          'transition-[translate,visibility] duration-(--duration-drawer) ease-drawer motion-reduce:transition-none',
+          open ? 'translate-x-0 shadow-overlay md:shadow-none' : '-translate-x-full max-md:invisible',
         )}
       >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] px-4">
-          <span className="text-lg font-bold text-[var(--color-primary)]">Jarvis Automation</span>
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+          <span className="text-heading text-primary">Jarvis Automation</span>
           <button
             type="button"
             onClick={close}
             aria-label="Close navigation"
-            className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] md:hidden"
+            className="press -mr-2 inline-flex size-10 items-center justify-center rounded-control text-text-muted hover:bg-surface-alt hover:text-text md:hidden"
           >
-            <X size={20} />
+            <X size={20} aria-hidden />
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-2">
+        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
           <HouseholdSwitcher className="mb-2 w-full sm:hidden" />
           <NavItems items={member} onPick={close} />
           {superuser && (
             <>
-              <p className="px-3 pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              <p className="px-3 pt-5 pb-1 text-caption tracking-wide text-text-muted uppercase">
                 Admin
               </p>
               <NavItems items={adminNav} onPick={close} />

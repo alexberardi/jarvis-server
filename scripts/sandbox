@@ -38,7 +38,7 @@
 #   --llm scripted   a deterministic model for UI tests: tools/scriptllm (port 7798 + offset, behind
 #                    the tap) answers from e2e/llm/default.json; needs no installed jarvisd. Tests
 #                    switch scripts at $SBX_SCRIPTLLM/control/script (docs/decisions/2026-10-17-scripted-llm.md)
-#   --ui             build the admin SPA first (npm) and serve it; otherwise web/admin/dist/ui
+#   --ui             build the admin SPA first (npm, with the /dev/ui gallery) and serve it; otherwise web/admin/dist/ui
 #                    is served when it exists, else the built-in placeholder page
 #   --voice          real TTS and STT, for voice pipeline runs (pipeline say --voice): Kokoro,
 #                    the speaker model and a whisper model, downloaded once into
@@ -434,7 +434,9 @@ cmd_up() {
 
   if [ "$UI" = 1 ]; then
     say "building the admin UI"
-    npm --prefix "$ROOT/web/admin" ci --silent && npm --prefix "$ROOT/web/admin" run build --silent
+    # VITE_UI_GALLERY adds the dev-only design-system gallery (/dev/ui) for screenshots; a
+    # release build leaves it out.
+    npm --prefix "$ROOT/web/admin" ci --silent && VITE_UI_GALLERY=1 npm --prefix "$ROOT/web/admin" run build --silent
   fi
   say "building jarvisd"
   local ldflags="-X main.version=$VERSION"

@@ -31,6 +31,11 @@ downloads Chromium if the cache doesn't have it.
 | `--tiles PX` | off | Also cuts each page taller than PX into PX-high pieces (`<file>.t01.png`, ...). Phone pages can reach 6000px, and an image viewer shrinks that until it can't be read. Use `--tiles 1600` when an agent will Read the shots. |
 | `--settle-ms N` | `600` | Extra wait after the page goes quiet and its spinners are gone. |
 
+The design-system gallery, `/dev/ui` (every `web/admin/src/components/ui` component in every
+state), is a dev-only route: it exists under `vite dev` and in a build with `VITE_UI_GALLERY=1`,
+which `scripts/sandbox up --ui` sets. `--pages /dev/ui,/dev/ui?open=dialog,/dev/ui?open=sheet`
+shoots it, with the dialog and the sheet open. A release build leaves it out.
+
 ## Output
 
 Each shot is saved as `<page>__<viewport>__<theme>.png`, and `index.json` holds one record per shot:
