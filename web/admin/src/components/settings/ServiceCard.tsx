@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
-import { ChevronDown, ChevronRight, CheckCircle2, XCircle } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useId, useState, useMemo } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Badge, Card } from '@/components/ui'
 import CategoryGroup from './CategoryGroup'
 import type { ServiceSettingsResult } from '@/types/settings'
 
@@ -11,6 +11,7 @@ interface ServiceCardProps {
 
 export default function ServiceCard({ result, defaultExpanded = false }: ServiceCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
+  const panel = useId()
   const grouped = useMemo(() => {
     const map = new Map<string, typeof result.settings>()
     for (const s of result.settings) {
@@ -19,68 +20,55 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
     }
     return map
   }, [result])
+  const count = result.settings.length
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <Card flush className="overflow-hidden">
       <button
+        type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-[var(--color-surface-alt)]"
+        aria-expanded={expanded}
+        aria-controls={panel}
+        className="flex min-h-14 w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left transition-colors duration-(--duration-hover) hover:bg-surface-alt"
       >
         {expanded ? (
-          <ChevronDown size={18} className="text-[var(--color-text-muted)]" />
+          <ChevronDown size={18} aria-hidden className="shrink-0 text-text-muted" />
         ) : (
-          <ChevronRight size={18} className="text-[var(--color-text-muted)]" />
+          <ChevronRight size={18} aria-hidden className="shrink-0 text-text-muted" />
         )}
-
-        <span className="min-w-0 font-medium text-[var(--color-text)]">
-          {result.display_name || result.service_name}
+        <span className="min-w-0 text-subheading text-text">{result.display_name || result.service_name}</span>
+        {result.display_name && <code className="font-mono text-caption text-text-muted">{result.service_name}</code>}
+        <span className="ml-auto flex items-center gap-3">
+          {result.latency_ms != null && result.latency_ms > 500 && (
+            <span className="hidden text-caption text-warning tabular-nums sm:inline" title="Slow to answer">
+              {Math.round(result.latency_ms)} ms
+            </span>
+          )}
+          {result.success ? (
+            <Badge>
+              {count} {count === 1 ? 'setting' : 'settings'}
+            </Badge>
+          ) : (
+            <Badge tone="danger" dot>
+              Didn't load
+            </Badge>
+          )}
         </span>
-        {result.display_name && (
-          <code className="text-xs text-[var(--color-text-muted)]">{result.service_name}</code>
-        )}
-
-        {result.success ? (
-          <CheckCircle2 size={16} className="text-[var(--color-secondary)]" />
-        ) : (
-          <XCircle size={16} className="text-red-500" />
-        )}
-
-        <span className="whitespace-nowrap text-xs text-[var(--color-text-muted)]">
-          {result.success
-            ? `${result.settings.length} settings`
-            : result.error ?? 'Error'}
-        </span>
-
-        {result.latency_ms != null && (
-          <span
-            className={cn(
-              'ml-auto hidden text-xs sm:inline',
-              result.latency_ms > 500 ? 'text-amber-500' : 'text-[var(--color-text-muted)]',
-            )}
-          >
-            {Math.round(result.latency_ms)}ms
-          </span>
-        )}
       </button>
 
       {expanded && result.success && (
-        <div className="space-y-2 border-t border-[var(--color-border)] px-2 py-3">
+        <div id={panel} className="border-t border-border">
           {[...grouped.entries()].map(([category, settings]) => (
-            <CategoryGroup
-              key={category}
-              category={category}
-              settings={settings}
-              serviceName={result.service_name}
-            />
+            <CategoryGroup key={category} category={category} settings={settings} serviceName={result.service_name} />
           ))}
         </div>
       )}
 
       {expanded && !result.success && (
-        <div className="border-t border-[var(--color-border)] px-4 py-3">
-          <p className="text-sm text-red-500">{result.error ?? 'Failed to fetch settings'}</p>
+        <div id={panel} className="border-t border-border px-4 py-3">
+          <p className="text-small text-danger">{result.error ?? "This module didn't answer."}</p>
         </div>
       )}
-    </div>
+    </Card>
   )
 }

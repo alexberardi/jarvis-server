@@ -5,6 +5,7 @@ import { useResetHouseholdSetting, useUpdateSetting } from '@/hooks/useSettings'
 import { errorMessage } from '@/lib/errors'
 import { formatSettingValue } from '@/lib/settings'
 import type { HouseholdValue, SettingResponse } from '@/types/settings'
+import { Button } from '@/components/ui'
 import SettingEditor from './SettingEditor'
 
 interface HouseholdValuesProps {
@@ -25,23 +26,17 @@ export default function HouseholdValues({ setting, serviceName }: HouseholdValue
   const usingDefault = setting.households_using_default
 
   if (values.length === 0) {
-    return (
-      <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">
-        Households can change this in the app
-      </p>
-    )
+    return <p className="mt-1 text-caption text-text-muted">Households can change this in the app</p>
   }
 
   return (
-    <div
-      className="mt-2 space-y-0.5 border-l-2 border-[var(--color-border)] pl-3"
-      data-testid={`household-values-${setting.key}`}
-    >
+    <div className="mt-2 rounded-control bg-surface-alt px-3 py-1" data-testid={`household-values-${setting.key}`}>
+      <p className="pt-1 text-caption text-text-muted">Households with their own value</p>
       {values.map((hv) => (
         <HouseholdValueRow key={hv.household_id} setting={setting} serviceName={serviceName} hv={hv} />
       ))}
       {usingDefault !== undefined && usingDefault > 0 && (
-        <p className="text-[11px] text-[var(--color-text-muted)]">
+        <p className="pb-1 text-caption text-text-muted">
           {plural(usingDefault, 'household uses', 'households use')} the default
         </p>
       )}
@@ -86,12 +81,12 @@ function HouseholdValueRow({ setting, serviceName, hv }: HouseholdValueRowProps)
   }
 
   return (
-    <div className="flex items-center gap-2 text-xs" data-testid={`household-value-${hv.household_id}`}>
-      <span className="min-w-0 shrink truncate text-[var(--color-text)]" title={hv.household_id}>
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1 text-small" data-testid={`household-value-${hv.household_id}`}>
+      <span className="min-w-0 shrink truncate font-medium text-text" title={hv.household_id}>
         {hv.household_name}
       </span>
       {editing ? (
-        <div className="flex-1">
+        <div className="w-full">
           <SettingEditor
             setting={own}
             onSave={handleSave}
@@ -101,27 +96,28 @@ function HouseholdValueRow({ setting, serviceName, hv }: HouseholdValueRowProps)
         </div>
       ) : (
         <>
-          <span className="font-mono text-[var(--color-text-muted)]">{formatSettingValue(own)}</span>
+          <span className="min-w-0 font-mono break-all text-text-muted">{formatSettingValue(own)}</span>
           <span className="flex-1" />
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
             onClick={() => setEditing(true)}
             disabled={busy}
             aria-label={`Edit ${hv.household_name}`}
             title={`Edit ${hv.household_name}'s value`}
-            className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-primary)] disabled:opacity-50"
           >
-            <Pencil size={12} />
-          </button>
-          <button
-            type="button"
+            <Pencil size={14} aria-hidden />
+          </Button>
+          <Button
+            size="sm"
             onClick={handleReset}
+            loading={reset.isPending}
             disabled={busy}
             title={`Remove ${hv.household_name}'s own value; it follows the default again`}
-            className="shrink-0 rounded border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)] disabled:opacity-50"
           >
-            {reset.isPending ? 'Resetting…' : 'Use default'}
-          </button>
+            Use default
+          </Button>
         </>
       )}
     </div>

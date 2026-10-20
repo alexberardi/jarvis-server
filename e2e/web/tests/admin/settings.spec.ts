@@ -19,7 +19,7 @@ interface Setting {
 
 /** openSetting searches for the key and opens the module's card (the search leaves it collapsed). */
 async function openSetting(page: Page) {
-  await page.getByPlaceholder('Search settings...').fill(KEY)
+  await page.getByLabel('Search settings').fill(KEY)
   await page.getByRole('button', { name: /Command center/ }).click()
 }
 

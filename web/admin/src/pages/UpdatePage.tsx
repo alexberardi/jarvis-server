@@ -1,14 +1,36 @@
-import { useState } from 'react'
-import { AlertTriangle, ArrowUpCircle, CheckCircle2, CircleSlash, Copy, ExternalLink, HelpCircle, Loader2, RefreshCw } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { AlertTriangle, ArrowUpCircle, CheckCircle2, CircleSlash, Copy, ExternalLink, HelpCircle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 import { applyUpdate, updateStatus, type LastUpgrade, type UpdateInfo } from '@/api/update'
 import { getSystemInfo, waitForRestart } from '@/api/system'
-import { buttonClass } from '@/components/models/styles'
+import { Button, Card, ErrorState, PageHeader, Skeleton, Switch } from '@/components/ui'
 import { useFeatureAvailable } from '@/hooks/useFeature'
 import { updateKey, useCheckNow, useLastUpgrade, useSetUpdatesEnabled, useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
+
+type Tone = 'neutral' | 'success' | 'warning'
+
+const toneIcon: Record<Tone, string> = {
+  neutral: 'bg-surface-alt text-text-muted',
+  success: 'bg-success-soft text-success',
+  warning: 'bg-warning-soft text-warning',
+}
+
+function VerdictLine({ icon, tone, title, children }: { icon: ReactNode; tone: Tone; title: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-start gap-3" data-testid="verdict">
+      <span aria-hidden className={cn('flex size-10 shrink-0 items-center justify-center rounded-pill', toneIcon[tone])}>
+        {icon}
+      </span>
+      <div className="min-w-0 pt-0.5">
+        <p className="text-subheading text-text">{title}</p>
+        <p className="mt-0.5 text-small break-words text-text-muted">{children}</p>
+      </div>
+    </div>
+  )
+}
 
 function Verdict({ info }: { info: UpdateInfo }) {
   const status = updateStatus(info)
@@ -16,67 +38,41 @@ function Verdict({ info }: { info: UpdateInfo }) {
   switch (status) {
     case 'disabled':
       return (
-        <div className="flex items-start gap-3" data-testid="verdict">
-          <CircleSlash size={20} className="mt-0.5 text-[var(--color-text-muted)]" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Update checks are off</p>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              jarvisd does not contact GitHub, so it can't tell whether a newer version exists.
-            </p>
-          </div>
-        </div>
+        <VerdictLine icon={<CircleSlash size={20} />} tone="neutral" title="Update checks are off">
+          Jarvis Automation doesn't contact GitHub, so it can't tell whether a newer version exists.
+        </VerdictLine>
       )
     case 'unchecked':
       return (
-        <div className="flex items-start gap-3" data-testid="verdict">
-          <AlertTriangle size={20} className="mt-0.5 text-amber-500" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Couldn't check for updates</p>
-            <p className="text-xs text-[var(--color-text-muted)]">{info.reason ?? 'No check has succeeded yet.'}</p>
-          </div>
-        </div>
+        <VerdictLine icon={<AlertTriangle size={20} />} tone="warning" title="Couldn't check for updates">
+          {info.reason ?? 'No check has succeeded yet.'}
+        </VerdictLine>
       )
     case 'available':
       return (
-        <div className="flex items-start gap-3" data-testid="verdict">
-          <ArrowUpCircle size={20} className="mt-0.5 text-green-500" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">
-              jarvisd {info.latest_version} is available{info.prerelease ? ' (pre-release)' : ''}
-            </p>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              You have {info.current_version}
-              {info.published_at ? ` · released ${new Date(info.published_at).toLocaleDateString()}` : ''}
-              {checkedAt ? ` · checked ${checkedAt}` : ''}
-            </p>
-          </div>
-        </div>
+        <VerdictLine
+          icon={<ArrowUpCircle size={20} />}
+          tone="success"
+          title={`Jarvis Automation ${info.latest_version} is available${info.prerelease ? ' (pre-release)' : ''}`}
+        >
+          You have {info.current_version}
+          {info.published_at ? ` · released ${new Date(info.published_at).toLocaleDateString()}` : ''}
+          {checkedAt ? ` · checked ${checkedAt}` : ''}
+        </VerdictLine>
       )
     case 'up_to_date':
       return (
-        <div className="flex items-start gap-3" data-testid="verdict">
-          <CheckCircle2 size={20} className="mt-0.5 text-green-500" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">jarvisd is up to date</p>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              {info.current_version} is the latest {info.prerelease ? 'pre-release' : 'release'}
-              {checkedAt ? ` · checked ${checkedAt}` : ''}
-            </p>
-          </div>
-        </div>
+        <VerdictLine icon={<CheckCircle2 size={20} />} tone="success" title="Jarvis Automation is up to date">
+          {info.current_version} is the latest {info.prerelease ? 'pre-release' : 'release'}
+          {checkedAt ? ` · checked ${checkedAt}` : ''}
+        </VerdictLine>
       )
     default:
       return (
-        <div className="flex items-start gap-3" data-testid="verdict">
-          <HelpCircle size={20} className="mt-0.5 text-[var(--color-text-muted)]" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">No verdict for this build</p>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              {info.reason ?? 'This version cannot be compared with the releases.'}
-              {info.latest_version ? ` Latest release: ${info.latest_version}.` : ''}
-            </p>
-          </div>
-        </div>
+        <VerdictLine icon={<HelpCircle size={20} />} tone="neutral" title="No verdict for this build">
+          {info.reason ?? 'This version cannot be compared with the releases.'}
+          {info.latest_version ? ` Latest release: ${info.latest_version}.` : ''}
+        </VerdictLine>
       )
   }
 }
@@ -90,7 +86,7 @@ function LastOutcome({ last }: { last: LastUpgrade }) {
   const at = new Date(last.at).toLocaleString()
   if (last.outcome === 'succeeded') {
     return (
-      <p className="text-xs text-[var(--color-text-muted)]" data-testid="last-upgrade">
+      <p className="text-small text-text-muted" data-testid="last-upgrade">
         Last update: {last.from_version} → {last.to_version} on {at}.
       </p>
     )
@@ -100,11 +96,8 @@ function LastOutcome({ last }: { last: LastUpgrade }) {
       ? `The update to ${last.to_version} was rolled back to ${last.from_version} on ${at}`
       : `The update to ${last.to_version} failed on ${at}`
   return (
-    <div
-      className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-[var(--color-text)]"
-      data-testid="last-upgrade"
-    >
-      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
+    <div className="flex items-start gap-2 rounded-control bg-warning-soft p-3 text-small text-text" data-testid="last-upgrade">
+      <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-warning" />
       <div className="min-w-0 space-y-1">
         <p className="break-words">
           {what}
@@ -119,27 +112,30 @@ function LastOutcome({ last }: { last: LastUpgrade }) {
                 : 'Data written since the update was staged was rolled back with it.'}
             </p>
           ) : (
-            <p className="text-[var(--color-text-muted)]">The database was kept as it was.</p>
+            <p>The database was kept as it was.</p>
           ))}
       </div>
     </div>
   )
 }
 
+const linkClass = 'text-primary underline-offset-2 hover:underline'
+
 function CopyLine({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2">
-      <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all rounded bg-[var(--color-surface-alt)] px-2 py-1.5 font-mono text-xs text-[var(--color-text)]">
+      <pre className="min-w-0 flex-1 overflow-x-auto rounded-control border border-border bg-surface-alt px-3 py-2 font-mono text-small break-all whitespace-pre-wrap text-text">
         {text}
       </pre>
-      <button
-        type="button"
-        className={buttonClass.icon}
+      <Button
+        variant="ghost"
+        size="icon"
         aria-label="Copy command"
+        title="Copy"
         onClick={() => void navigator.clipboard?.writeText(text).then(() => toast.success('Copied'), () => {})}
       >
-        <Copy size={14} />
-      </button>
+        <Copy size={16} aria-hidden />
+      </Button>
     </div>
   )
 }
@@ -151,7 +147,7 @@ function CopyLine({ text }: { text: string }) {
  */
 export default function UpdatePage() {
   const qc = useQueryClient()
-  const { data, isLoading, isError, error } = useUpdateCheck()
+  const { data, isLoading, isError, error, refetch } = useUpdateCheck()
   const check = useCheckNow()
   const toggle = useSetUpdatesEnabled()
   const canApply = useFeatureAvailable('update-apply')
@@ -160,7 +156,7 @@ export default function UpdatePage() {
   const [manual, setManual] = useState<{ detail: string; command?: string } | null>(null)
 
   async function apply(info: UpdateInfo) {
-    if (!window.confirm(`Update jarvisd to ${info.latest_version}? It restarts, so voice and the admin pause briefly.`)) return
+    if (!window.confirm(`Update Jarvis Automation to ${info.latest_version}? It restarts, so voice and the admin pause briefly.`)) return
     setApplying(true)
     setManual(null)
     let before: string | undefined
@@ -172,20 +168,20 @@ export default function UpdatePage() {
     try {
       const r = await applyUpdate(info.latest_version)
       if (r.kind === 'unsupported') {
-        toast.info("This jarvisd can't update itself yet; use the command below.")
+        toast.info("This install can't update itself yet. Use the command below.")
         return
       }
       if (r.kind === 'manual') {
         setManual({ detail: r.detail, command: r.command })
         return
       }
-      const id = toast.loading('Updating jarvisd… it restarts when the new version is in place')
+      const id = toast.loading('Updating Jarvis Automation… It restarts when the new version is in place.')
       const after = await waitForRestart(before, 5 * 60_000, 2000)
       if (!after) {
-        toast.error('jarvisd did not come back within 5 minutes. Check it on the server.', { id })
+        toast.error('Jarvis Automation didn\'t come back within 5 minutes. Check it on the server.', { id })
         return
       }
-      toast.success(`jarvisd ${after.version} is running`, { id })
+      toast.success(`Jarvis Automation ${after.version} is running`, { id })
       await qc.invalidateQueries({ queryKey: updateKey })
       void qc.invalidateQueries({ queryKey: ['system-info'] })
     } catch (err) {
@@ -195,126 +191,131 @@ export default function UpdatePage() {
     }
   }
 
-  return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-[var(--color-text)]">Updates</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">New jarvisd releases come from GitHub. Nothing installs by itself.</p>
-      </div>
+  const checkNow = () => check.mutate(undefined, { onError: (err) => toast.error(errorMessage(err, 'Check failed')) })
 
-      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the update status')}</p>}
+  return (
+    <div className="mx-auto max-w-3xl">
+      <PageHeader title="Updates" description="New Jarvis Automation releases come from GitHub. Nothing installs by itself." />
+
+      {isLoading && (
+        <Card role="status" aria-label="Loading the update status" className="space-y-3">
+          <Skeleton className="h-6 w-1/2" />
+          <Skeleton className="h-4 w-3/4" />
+        </Card>
+      )}
+      {isError && (
+        <Card>
+          <ErrorState
+            title="Couldn't read the update status"
+            message={errorMessage(error)}
+            onRetry={() => refetch()}
+          />
+        </Card>
+      )}
 
       {data && (
-        <>
-          <section className="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                role="switch"
-                aria-label="Check for updates"
-                className="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
-                checked={data.updates_enabled}
-                disabled={toggle.isPending}
-                onChange={(e) => {
-                  const on = e.target.checked
-                  toggle.mutate(on, {
-                    onError: (err) => toast.error(errorMessage(err, 'Could not change the setting')),
-                    // Opting in checks at once (A10b), instead of showing "Couldn't check" until Check now.
-                    onSuccess: () => {
-                      if (on) check.mutate(undefined, { onError: (err) => toast.error(errorMessage(err, 'Check failed')) })
-                    },
-                  })
-                }}
-              />
-              <span>
-                <span className="block text-sm font-medium text-[var(--color-text)]">Check for updates</span>
-                <span className="block text-xs text-[var(--color-text-muted)]">
-                  jarvisd asks GitHub for the release list (at most once an hour, when the admin shows the update status, and
-                  when you press Check now). GitHub sees your IP address. Off by default.
-                </span>
-              </span>
-            </label>
-          </section>
+        <div className="space-y-4">
+          <Card>
+            <Switch
+              label="Check for updates"
+              description="Jarvis Automation asks GitHub for the release list: at most once an hour, when the admin shows the update status, and when you press Check now. GitHub sees your IP address. Off by default."
+              checked={data.updates_enabled}
+              disabled={toggle.isPending}
+              onCheckedChange={(on) => {
+                toggle.mutate(on, {
+                  onError: (err) => toast.error(errorMessage(err, 'Could not change the setting')),
+                  // Opting in checks at once (A10b), instead of showing "Couldn't check" until Check now.
+                  onSuccess: () => {
+                    if (on) checkNow()
+                  },
+                })
+              }}
+            />
+          </Card>
 
-          <section className="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <div className="flex items-start justify-between gap-2">
+          <Card className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <Verdict info={data} />
               {data.updates_enabled && (
-                <button
-                  type="button"
-                  className={buttonClass.secondary}
-                  disabled={check.isPending}
-                  onClick={() => check.mutate(undefined, { onError: (err) => toast.error(errorMessage(err, 'Check failed')) })}
+                <Button
+                  size="sm"
+                  className="self-start"
+                  icon={<RefreshCw size={14} aria-hidden />}
+                  loading={check.isPending}
+                  onClick={checkNow}
                 >
-                  <RefreshCw size={12} className={cn(check.isPending && 'animate-spin')} /> Check now
-                </button>
+                  Check now
+                </Button>
               )}
             </div>
-            <p className="text-xs text-[var(--color-text-muted)]">
+            <p className="text-small text-text-muted">
               Running {data.current_version} on {data.platform}.
             </p>
             {last && <LastOutcome last={last} />}
 
             {updateStatus(data) === 'available' && (
-              <div className="space-y-3 border-t border-[var(--color-border)] pt-3">
+              <div className="space-y-4 border-t border-border pt-4">
                 {canApply && (
-                  <button type="button" className={buttonClass.primary} disabled={applying} onClick={() => void apply(data)}>
-                    {applying ? <Loader2 size={12} className="animate-spin" /> : <ArrowUpCircle size={12} />} Update now
-                  </button>
+                  <Button
+                    variant="primary"
+                    icon={<ArrowUpCircle size={16} aria-hidden />}
+                    loading={applying}
+                    onClick={() => void apply(data)}
+                  >
+                    Update now
+                  </Button>
                 )}
                 {manual && (
-                  <div className="space-y-1 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-[var(--color-text)]">
+                  <div role="status" className="space-y-2 rounded-control bg-warning-soft p-3 text-small text-text">
                     <p>{manual.detail}</p>
                     {manual.command && <CopyLine text={manual.command} />}
                   </div>
                 )}
                 {data.install_command ? (
-                  <div className="space-y-1">
-                    <p className="text-xs text-[var(--color-text-muted)]">Or update from a terminal on the server:</p>
+                  <div className="space-y-1.5">
+                    <p className="text-small text-text-muted">Or update from a terminal on the server:</p>
                     <CopyLine text={data.install_command} />
                   </div>
                 ) : (
-                  <p className="text-xs text-[var(--color-text-muted)]">{data.install_hint}</p>
+                  <p className="text-small text-text-muted">{data.install_hint}</p>
                 )}
-                {data.asset && (
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    Download:{' '}
-                    <a className="text-[var(--color-primary)] hover:underline" href={data.asset.url} target="_blank" rel="noreferrer">
-                      {data.asset.name}
-                    </a>
-                    {data.checksums_url && (
-                      <>
-                        {' '}·{' '}
-                        <a className="text-[var(--color-primary)] hover:underline" href={data.checksums_url} target="_blank" rel="noreferrer">
-                          SHA256SUMS
+                {(data.asset || data.release_url) && (
+                  <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small text-text-muted">
+                    {data.asset && (
+                      <span>
+                        Download:{' '}
+                        <a className={linkClass} href={data.asset.url} target="_blank" rel="noreferrer">
+                          {data.asset.name}
                         </a>
-                      </>
+                        {data.checksums_url && (
+                          <>
+                            {' '}·{' '}
+                            <a className={linkClass} href={data.checksums_url} target="_blank" rel="noreferrer">
+                              SHA256SUMS
+                            </a>
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {data.release_url && (
+                      <a className={cn(linkClass, 'inline-flex items-center gap-1')} href={data.release_url} target="_blank" rel="noreferrer">
+                        Release on GitHub <ExternalLink size={12} aria-hidden />
+                      </a>
                     )}
                   </p>
                 )}
                 {data.release_notes && (
-                  <details>
-                    <summary className="cursor-pointer text-xs text-[var(--color-text)]">Release notes</summary>
-                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-alt)] p-2 text-xs text-[var(--color-text-muted)]">
+                  <details className="group">
+                    <summary className="cursor-pointer rounded-control text-small font-medium text-text">Release notes</summary>
+                    <pre className="mt-2 max-h-80 overflow-auto rounded-control bg-surface-alt p-3 font-mono text-caption whitespace-pre-wrap text-text">
                       {data.release_notes}
                     </pre>
                   </details>
                 )}
-                {data.release_url && (
-                  <a
-                    className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline"
-                    href={data.release_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Release on GitHub <ExternalLink size={10} />
-                  </a>
-                )}
               </div>
             )}
-          </section>
-        </>
+          </Card>
+        </div>
       )}
     </div>
   )

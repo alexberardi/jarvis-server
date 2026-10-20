@@ -1,13 +1,15 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { Activity, ChevronDown, ChevronRight, SearchX } from 'lucide-react'
 import { fetchTraces, type TraceListItem } from '@/api/traces'
 import { fetchAllHouseholds, fetchAllNodes, type AdminNode } from '@/api/admin'
+import { Button, Card, EmptyState, ErrorState, PageHeader, Select, SkeletonList, Table, TBody, TD, TH, THead, TR } from '@/components/ui'
+import { SourceIcon, TraceStatus } from '@/components/traces/TraceBits'
+import { errorMessage } from '@/lib/errors'
 import { formatServerTime } from '@/lib/time'
-
-function formatDuration(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
-}
+import { formatDuration, sourceLabel } from '@/lib/traces'
+import { cn } from '@/lib/utils'
 
 function formatTime(iso: string): string {
   return formatServerTime(iso, {
@@ -64,22 +66,105 @@ function groupByConversation(traces: TraceListItem[]): ConversationGroup[] {
   )
 }
 
-function sourceBadge(source: string): string {
-  return source === 'mobile' ? '📱' : '🔊'
+function byOldest(traces: TraceListItem[]): TraceListItem[] {
+  return traces.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
 }
 
-function StatusDot({ status }: { status: string }) {
+const noTraces = (
+  <EmptyState
+    icon={<Activity size={20} />}
+    title="No traces yet"
+    description="A trace appears each time someone talks to Jarvis, on a node or in the app: what they said, the answer, and how long each step took."
+  />
+)
+
+/** TraceCards is the phone layout of the traces table: a row per conversation, opening onto its traces. */
+export function TraceCards({
+  groups,
+  expanded,
+  onToggle,
+  onOpen,
+  nodeLabel,
+  householdName,
+  empty = noTraces,
+}: {
+  groups: ConversationGroup[]
+  expanded: Set<string>
+  onToggle: (conversationId: string) => void
+  onOpen: (traceId: string) => void
+  nodeLabel: (nodeId: string | null) => string
+  householdName: (householdId: string) => string
+  /** What shows when there are no conversations. */
+  empty?: ReactNode
+}) {
+  if (groups.length === 0) return <>{empty}</>
   return (
-    <span
-      role="img"
-      aria-label={status === 'ok' ? 'ok' : status}
-      className={`inline-block h-2 w-2 shrink-0 rounded-full ${status === 'ok' ? 'bg-green-500' : 'bg-red-500'}`}
-    />
+    <ul className="divide-y divide-border lg:hidden" aria-label="Conversations" data-testid="trace-cards">
+      {groups.map((g) => {
+        const isExpanded = expanded.has(g.conversation_id)
+        const household = g.household_id ? householdName(g.household_id) : ''
+        return (
+          <li key={g.conversation_id}>
+            <button
+              type="button"
+              className="block w-full space-y-1 px-4 py-3 text-left transition-colors duration-(--duration-hover) hover:bg-surface-alt"
+              aria-expanded={isExpanded}
+              onClick={() => onToggle(g.conversation_id)}
+            >
+              <span className="flex items-center justify-between gap-2 text-caption text-text-muted">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <SourceIcon source={g.source} />
+                  <span className="min-w-0 truncate">
+                    {formatTime(g.newest_at)} · {nodeLabel(g.node_id)}
+                    {household && ` · ${household}`}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 tabular-nums">
+                  {formatDuration(g.total_duration_ms)}
+                  <TraceStatus status={g.status} />
+                  <span className="flex items-center gap-0.5">
+                    {g.traces.length}
+                    {isExpanded ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+                  </span>
+                </span>
+              </span>
+              <span className="line-clamp-2 block text-body break-words text-text">{g.user_command ?? '-'}</span>
+              {g.assistant_message && (
+                <span className="line-clamp-2 block text-small break-words text-text-muted">{g.assistant_message}</span>
+              )}
+            </button>
+            {isExpanded && (
+              <ul className="divide-y divide-border border-t border-border bg-surface-alt">
+                {byOldest(g.traces).map((t) => (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      className="flex min-h-11 w-full items-center justify-between gap-2 py-2 pr-4 pl-10 text-left text-small transition-colors duration-(--duration-hover) hover:bg-border"
+                      onClick={() => onOpen(t.id)}
+                    >
+                      <span className="min-w-0 truncate text-text">
+                        {formatTime(t.created_at)} · {t.request_type}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2 text-caption text-text-muted tabular-nums">
+                        {formatDuration(t.total_duration_ms)}
+                        <TraceStatus status={t.status} />
+                        {t.span_count} spans
+                        <ChevronRight size={14} aria-hidden />
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
-/** TraceCards is the phone layout of the traces table: a card per conversation. */
-export function TraceCards({
+/** TraceTable is the traces table from lg: a row per conversation, its traces under it when open. */
+function TraceTable({
   groups,
   expanded,
   onToggle,
@@ -94,73 +179,96 @@ export function TraceCards({
   nodeLabel: (nodeId: string | null) => string
   householdName: (householdId: string) => string
 }) {
-  if (groups.length === 0) {
-    return (
-      <p className="rounded-lg border border-[var(--color-border)] px-3 py-8 text-center text-sm text-[var(--color-text-muted)] lg:hidden">
-        No traces yet
-      </p>
-    )
-  }
+  const row = 'cursor-pointer transition-colors duration-(--duration-hover) hover:bg-surface-alt'
   return (
-    <ul className="space-y-2 lg:hidden" aria-label="Conversations" data-testid="trace-cards">
-      {groups.map((g) => {
-        const isExpanded = expanded.has(g.conversation_id)
-        const household = g.household_id ? householdName(g.household_id) : ''
-        return (
-          <li key={g.conversation_id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <button
-              type="button"
-              className="block w-full space-y-1 p-3 text-left text-sm"
-              aria-expanded={isExpanded}
-              onClick={() => onToggle(g.conversation_id)}
-            >
-              <span className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-muted)]">
-                <span className="min-w-0 truncate">
-                  {sourceBadge(g.source)} {formatTime(g.newest_at)} · {nodeLabel(g.node_id)}
-                  {household && ` · ${household}`}
-                </span>
-                <span className="flex shrink-0 items-center gap-2 tabular-nums">
-                  {formatDuration(g.total_duration_ms)}
-                  <StatusDot status={g.status} />
-                  <span>
-                    {g.traces.length} {isExpanded ? '▼' : '▶'}
-                  </span>
-                </span>
-              </span>
-              <span className="line-clamp-2 block break-words text-[var(--color-text)]">{g.user_command ?? '-'}</span>
-              {g.assistant_message && (
-                <span className="line-clamp-2 block break-words text-[var(--color-text-muted)]">{g.assistant_message}</span>
-              )}
-            </button>
-            {isExpanded && (
-              <ul className="border-t border-[var(--color-border)]">
-                {g.traces
-                  .slice()
-                  .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
-                  .map((t) => (
-                    <li key={t.id} className="border-b border-[var(--color-border)] last:border-0">
-                      <button
-                        type="button"
-                        className="flex w-full items-center justify-between gap-2 bg-[var(--color-surface-alt)]/40 px-3 py-2 text-left text-xs"
-                        onClick={() => onOpen(t.id)}
-                      >
-                        <span className="min-w-0 truncate text-[var(--color-text)]">
-                          {formatTime(t.created_at)} · {t.request_type}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2 tabular-nums text-[var(--color-text-muted)]">
-                          {formatDuration(t.total_duration_ms)}
-                          <StatusDot status={t.status} />
-                          {t.span_count} spans
-                        </span>
-                      </button>
-                    </li>
+    <div className="hidden lg:block">
+      <Table caption="Conversations">
+        <THead>
+          <TR>
+            <TH className="w-10 px-2">
+              <span className="sr-only">Open</span>
+            </TH>
+            <TH>Time</TH>
+            <TH>Source</TH>
+            <TH>Node</TH>
+            <TH>User said</TH>
+            <TH>Jarvis said</TH>
+            <TH className="text-right">Duration</TH>
+            <TH>Status</TH>
+            <TH className="text-right">Traces</TH>
+          </TR>
+        </THead>
+        <TBody>
+          {groups.map((g) => {
+            const isExpanded = expanded.has(g.conversation_id)
+            const household = g.household_id ? householdName(g.household_id) : ''
+            return (
+              <Fragment key={g.conversation_id}>
+                <TR className={row} onClick={() => onToggle(g.conversation_id)}>
+                  <TD className="px-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8"
+                      aria-expanded={isExpanded}
+                      aria-label={`${isExpanded ? 'Hide' : 'Show'} this conversation's traces`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggle(g.conversation_id)
+                      }}
+                    >
+                      {isExpanded ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}
+                    </Button>
+                  </TD>
+                  <TD className="whitespace-nowrap tabular-nums">{formatTime(g.newest_at)}</TD>
+                  <TD className="text-text-muted">
+                    <span className="inline-flex items-center gap-1.5">
+                      <SourceIcon source={g.source} />
+                      {sourceLabel(g.source)}
+                    </span>
+                  </TD>
+                  <TD className="whitespace-nowrap text-text-muted">
+                    {nodeLabel(g.node_id)}
+                    {household && <span className="text-small"> · {household}</span>}
+                  </TD>
+                  <TD className="max-w-xs truncate">{g.user_command ?? '-'}</TD>
+                  <TD className="max-w-xs truncate text-text-muted">{g.assistant_message ?? '-'}</TD>
+                  <TD className="text-right tabular-nums">{formatDuration(g.total_duration_ms)}</TD>
+                  <TD>
+                    <TraceStatus status={g.status} />
+                  </TD>
+                  <TD className="text-right text-text-muted tabular-nums">{g.traces.length}</TD>
+                </TR>
+                {isExpanded &&
+                  byOldest(g.traces).map((trace) => (
+                    <TR key={trace.id} className={cn(row, 'bg-surface-alt/60')} onClick={() => onOpen(trace.id)}>
+                      <TD className="px-2" />
+                      <TD className="whitespace-nowrap text-text-muted tabular-nums">
+                        <Link
+                          to={`/admin/traces/${trace.id}`}
+                          className="rounded-control underline-offset-2 hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {formatTime(trace.created_at)}
+                        </Link>
+                      </TD>
+                      <TD className="text-small text-text-muted">{trace.request_type}</TD>
+                      <TD className="text-small whitespace-nowrap text-text-muted">{nodeLabel(trace.node_id)}</TD>
+                      <TD className="max-w-xs truncate">{trace.user_command ?? '-'}</TD>
+                      <TD className="max-w-xs truncate text-text-muted">{trace.assistant_message ?? '-'}</TD>
+                      <TD className="text-right tabular-nums">{formatDuration(trace.total_duration_ms)}</TD>
+                      <TD>
+                        <TraceStatus status={trace.status} />
+                      </TD>
+                      <TD className="text-right text-text-muted tabular-nums">{trace.span_count}</TD>
+                    </TR>
                   ))}
-              </ul>
-            )}
-          </li>
-        )
-      })}
-    </ul>
+              </Fragment>
+            )
+          })}
+        </TBody>
+      </Table>
+    </div>
   )
 }
 
@@ -184,7 +292,7 @@ export default function TracesPage() {
     staleTime: 60_000,
   })
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['traces', statusFilter, sourceFilter, householdFilter, nodeFilter],
     queryFn: () =>
       fetchTraces({
@@ -239,214 +347,104 @@ export default function TracesPage() {
     }
   }
 
-  const selectClass =
-    'min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-text)]'
+  const filtered = Boolean(statusFilter || sourceFilter || householdFilter || nodeFilter)
+  function clearFilters(): void {
+    setStatusFilter('')
+    setSourceFilter('')
+    setHouseholdFilter('')
+    setNodeFilter('')
+  }
+
+  const shared = {
+    groups,
+    expanded,
+    onToggle: toggleExpanded,
+    onOpen: (id: string) => navigate(`/admin/traces/${id}`),
+    nodeLabel: (id: string | null) => (id ? nodeNameById.get(id) ?? id.slice(0, 8) : '-'),
+    householdName: (id: string) => householdNameById.get(id) ?? '',
+  }
+
+  let body
+  if (isLoading) {
+    body = <SkeletonList rows={6} label="Loading traces" />
+  } else if (error) {
+    body = <ErrorState title="Couldn't load traces" message={errorMessage(error)} onRetry={() => refetch()} />
+  } else {
+    body = (
+      <>
+        {/* Below lg (a phone, or a tablet next to the sidebar) the table becomes a row per conversation. */}
+        <TraceCards
+          {...shared}
+          empty={
+            filtered ? (
+              <EmptyState
+                icon={<SearchX size={20} />}
+                title="No traces match these filters"
+                action={<Button onClick={clearFilters}>Clear filters</Button>}
+              />
+            ) : undefined
+          }
+        />
+        {groups.length > 0 && <TraceTable {...shared} />}
+      </>
+    )
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Request Traces</h1>
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
-          <select
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Traces"
+        description="Each request Jarvis handled: what was said, the answer, and how long each service took."
+      />
+
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-auto">
+          <Select
             aria-label="Household"
-            className={selectClass}
             value={householdFilter}
-            onChange={(e) => onHouseholdChange(e.target.value)}
+            onValueChange={onHouseholdChange}
             disabled={householdsQuery.isLoading}
-          >
-            <option value="">All households</option>
-            {(householdsQuery.data ?? []).map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.name}
-              </option>
-            ))}
-          </select>
-          <select
+            options={[{ value: '', label: 'All households' }, ...(householdsQuery.data ?? []).map((h) => ({ value: h.id, label: h.name }))]}
+          />
+          <Select
             aria-label="Node"
-            className={selectClass}
             value={nodeFilter}
-            onChange={(e) => setNodeFilter(e.target.value)}
+            onValueChange={setNodeFilter}
             disabled={nodesQuery.isLoading}
-          >
-            <option value="">All nodes</option>
-            {nodesForDropdown.map((n) => (
-              <option key={n.node_id} value={n.node_id}>
-                {n.name}
-              </option>
-            ))}
-          </select>
-          <select
+            options={[{ value: '', label: 'All nodes' }, ...nodesForDropdown.map((n) => ({ value: n.node_id, label: n.name }))]}
+          />
+          <Select
             aria-label="Status"
-            className={selectClass}
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="">All statuses</option>
-            <option value="ok">OK</option>
-            <option value="error">Error</option>
-          </select>
-          <select
+            onValueChange={setStatusFilter}
+            options={[
+              { value: '', label: 'All statuses' },
+              { value: 'ok', label: 'OK' },
+              { value: 'error', label: 'Error' },
+            ]}
+          />
+          <Select
             aria-label="Source"
-            className={selectClass}
             value={sourceFilter}
-            onChange={(e) => setSourceFilter(e.target.value)}
-          >
-            <option value="">All sources</option>
-            <option value="node">Node</option>
-            <option value="mobile">Mobile</option>
-          </select>
+            onValueChange={setSourceFilter}
+            options={[
+              { value: '', label: 'All sources' },
+              { value: 'node', label: 'Node' },
+              { value: 'mobile', label: 'Mobile' },
+            ]}
+          />
         </div>
+        {data && data.total > 0 && (
+          <p className="text-small text-text-muted tabular-nums">
+            {data.total} {data.total === 1 ? 'trace' : 'traces'} in {groups.length}{' '}
+            {groups.length === 1 ? 'conversation' : 'conversations'}
+          </p>
+        )}
       </div>
 
-      {isLoading && (
-        <div className="flex justify-center py-12">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400">
-          Failed to load traces
-        </div>
-      )}
-
-      {data && (
-        <>
-          <p className="text-sm text-[var(--color-text-muted)]">
-            {data.total} traces in {groups.length} conversation{groups.length === 1 ? '' : 's'}
-          </p>
-          {/* Below lg (a phone, or a tablet next to the sidebar) the table becomes one card per conversation. */}
-          <TraceCards
-            groups={groups}
-            expanded={expanded}
-            onToggle={toggleExpanded}
-            onOpen={(id) => navigate(`/admin/traces/${id}`)}
-            nodeLabel={(id) => (id ? nodeNameById.get(id) ?? id.slice(0, 8) : '-')}
-            householdName={(id) => householdNameById.get(id) ?? ''}
-          />
-          <div className="hidden overflow-x-auto rounded-lg border border-[var(--color-border)] lg:block">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface-alt)]">
-                  <th className="w-8 px-2 py-2"></th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--color-text-muted)]">Time</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--color-text-muted)]">Source</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--color-text-muted)]">Node</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--color-text-muted)]">User said</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--color-text-muted)]">Jarvis said</th>
-                  <th className="px-3 py-2 text-right font-medium text-[var(--color-text-muted)]">Duration</th>
-                  <th className="px-3 py-2 text-center font-medium text-[var(--color-text-muted)]">Status</th>
-                  <th className="px-3 py-2 text-right font-medium text-[var(--color-text-muted)]">Traces</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groups.map((g) => {
-                  const isExpanded = expanded.has(g.conversation_id)
-                  const traceCount = g.traces.length
-                  const nodeLabel = g.node_id ? nodeNameById.get(g.node_id) ?? g.node_id.slice(0, 8) : '-'
-                  return (
-                    <Fragment key={g.conversation_id}>
-                      <tr
-                        className="border-b border-[var(--color-border)] cursor-pointer transition-colors hover:bg-[var(--color-surface-alt)]"
-                        onClick={() => toggleExpanded(g.conversation_id)}
-                      >
-                        <td className="px-2 py-2 text-center text-[var(--color-text-muted)]">
-                          {traceCount > 1 ? (isExpanded ? '▼' : '▶') : ''}
-                        </td>
-                        <td className="px-3 py-2 text-[var(--color-text)] whitespace-nowrap">
-                          {formatTime(g.newest_at)}
-                        </td>
-                        <td className="px-3 py-2 text-[var(--color-text-muted)]">
-                          <span className="inline-flex items-center gap-1">
-                            {sourceBadge(g.source)}
-                            {g.source}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-[var(--color-text-muted)] whitespace-nowrap">
-                          {nodeLabel}
-                          {g.household_id && (
-                            <span className="ml-1 text-xs opacity-60">
-                              · {householdNameById.get(g.household_id) ?? ''}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-[var(--color-text)] max-w-xs truncate">
-                          {g.user_command ?? '-'}
-                        </td>
-                        <td className="px-3 py-2 text-[var(--color-text-muted)] max-w-xs truncate">
-                          {g.assistant_message ?? '-'}
-                        </td>
-                        <td className="px-3 py-2 text-right text-[var(--color-text)] tabular-nums">
-                          {formatDuration(g.total_duration_ms)}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <span
-                            className={`inline-block h-2 w-2 rounded-full ${
-                              g.status === 'ok' ? 'bg-green-500' : 'bg-red-500'
-                            }`}
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-right text-[var(--color-text-muted)] tabular-nums">
-                          {traceCount}
-                        </td>
-                      </tr>
-                      {isExpanded &&
-                        g.traces
-                          .slice()
-                          .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
-                          .map((trace) => (
-                            <tr
-                              key={trace.id}
-                              className="border-b border-[var(--color-border)] cursor-pointer bg-[var(--color-surface-alt)]/40 transition-colors hover:bg-[var(--color-surface-alt)]"
-                              onClick={() => navigate(`/admin/traces/${trace.id}`)}
-                            >
-                              <td className="px-2 py-2"></td>
-                              <td className="px-3 py-2 text-[var(--color-text-muted)] whitespace-nowrap">
-                                <span className="inline-block w-3" />
-                                {formatTime(trace.created_at)}
-                              </td>
-                              <td className="px-3 py-2 text-[var(--color-text-muted)] text-xs">
-                                {trace.request_type}
-                              </td>
-                              <td className="px-3 py-2 text-[var(--color-text-muted)] whitespace-nowrap text-xs">
-                                {trace.node_id ? nodeNameById.get(trace.node_id) ?? trace.node_id.slice(0, 8) : '-'}
-                              </td>
-                              <td className="px-3 py-2 text-[var(--color-text)] max-w-xs truncate">
-                                {trace.user_command ?? '-'}
-                              </td>
-                              <td className="px-3 py-2 text-[var(--color-text-muted)] max-w-xs truncate">
-                                {trace.assistant_message ?? '-'}
-                              </td>
-                              <td className="px-3 py-2 text-right text-[var(--color-text)] tabular-nums">
-                                {formatDuration(trace.total_duration_ms)}
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <span
-                                  className={`inline-block h-2 w-2 rounded-full ${
-                                    trace.status === 'ok' ? 'bg-green-500' : 'bg-red-500'
-                                  }`}
-                                />
-                              </td>
-                              <td className="px-3 py-2 text-right text-[var(--color-text-muted)] tabular-nums">
-                                {trace.span_count}
-                              </td>
-                            </tr>
-                          ))}
-                    </Fragment>
-                  )
-                })}
-                {groups.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
-                      No traces yet
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      <Card flush className="overflow-hidden">
+        {body}
+      </Card>
     </div>
   )
 }

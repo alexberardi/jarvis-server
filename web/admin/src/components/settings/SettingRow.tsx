@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Pencil, Database, AlertTriangle, Lock } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Database, Lock, Pencil, RotateCw } from 'lucide-react'
+import { Badge, Button } from '@/components/ui'
 import { useUpdateSetting } from '@/hooks/useSettings'
 import SettingEditor from './SettingEditor'
 import HouseholdValues from './HouseholdValues'
@@ -15,14 +15,6 @@ interface SettingRowProps {
 }
 
 const RELOAD_MESSAGE = 'Applies after jarvisd restarts'
-
-const typeBadgeColors: Record<string, string> = {
-  string: 'bg-blue-500/10 text-blue-500',
-  int: 'bg-emerald-500/10 text-emerald-500',
-  float: 'bg-emerald-500/10 text-emerald-500',
-  bool: 'bg-amber-500/10 text-amber-500',
-  json: 'bg-purple-500/10 text-purple-500',
-}
 
 export default function SettingRow({ setting, serviceName }: SettingRowProps) {
   const [editing, setEditing] = useState(false)
@@ -39,7 +31,7 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
             const action = restartAction()
             toast.warning(
               `Setting updated. ${res.message || RELOAD_MESSAGE}.`,
-              action ? { action: { label: 'Restart jarvisd', onClick: action } } : undefined,
+              action ? { action: { label: 'Restart server', onClick: action } } : undefined,
             )
           } else {
             toast.success('Setting updated')
@@ -53,73 +45,57 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
   }
 
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg px-3 py-2 hover:bg-[var(--color-surface-alt)]">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <code className="text-sm font-medium text-[var(--color-text)]">{setting.key}</code>
-          <span
-            className={cn(
-              'rounded px-1.5 py-0.5 text-[10px] font-medium',
-              typeBadgeColors[setting.value_type] ?? 'bg-gray-500/10 text-gray-500',
-            )}
-          >
-            {setting.value_type}
-          </span>
-          {setting.from_db && (
-            <span title="Stored in database">
-              <Database size={12} className="text-[var(--color-tertiary)]" />
-            </span>
-          )}
+    <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-start md:gap-6">
+      <div className="min-w-0 md:flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <code className="font-mono text-small font-medium break-all text-text">{setting.key}</code>
+          <Badge>{setting.value_type}</Badge>
           {setting.is_secret && (
-            <span title="Secret: write-only">
-              <Lock size={12} className="text-[var(--color-text-muted)]" />
-            </span>
+            <Badge title="Write-only: the value is never shown">
+              <Lock size={12} aria-hidden />
+              Secret
+            </Badge>
           )}
           {setting.requires_reload && (
-            <span title={RELOAD_MESSAGE}>
-              <AlertTriangle size={12} className="text-amber-500" />
+            <Badge tone="warning" title={RELOAD_MESSAGE}>
+              <RotateCw size={12} aria-hidden />
+              Needs restart
+            </Badge>
+          )}
+          {setting.from_db && (
+            <span role="img" aria-label="Changed from the default" title="Changed from the default (stored in the database)">
+              <Database size={14} aria-hidden className="text-text-muted" />
             </span>
           )}
         </div>
-
-        {setting.description && (
-          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{setting.description}</p>
-        )}
-
-        {setting.household_scoped && (
-          <p className="mt-1 text-[11px] font-medium text-[var(--color-text-muted)]">
-            Default for all households
-          </p>
-        )}
-
-        {editing ? (
-          <div className="mt-2">
-            <SettingEditor
-              setting={setting}
-              onSave={handleSave}
-              onCancel={() => setEditing(false)}
-              isSaving={mutation.isPending}
-            />
-          </div>
-        ) : (
-          <p className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
-            {formatSettingValue(setting)}
-          </p>
-        )}
-
-        {setting.household_scoped && <HouseholdValues setting={setting} serviceName={serviceName} />}
+        {setting.description && <p className="mt-1 max-w-prose text-small text-text-muted">{setting.description}</p>}
+        {setting.household_scoped && <p className="mt-1 text-caption text-text-muted">Default for all households</p>}
       </div>
 
-      {!editing && (
-        <button
-          onClick={() => setEditing(true)}
-          className="shrink-0 rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-primary)]"
-          title={setting.household_scoped ? 'Edit the default' : 'Edit'}
-          aria-label={setting.household_scoped ? 'Edit the default' : 'Edit'}
-        >
-          <Pencil size={14} />
-        </button>
-      )}
+      <div className="min-w-0 md:w-80 md:shrink-0">
+        {editing ? (
+          <SettingEditor
+            setting={setting}
+            onSave={handleSave}
+            onCancel={() => setEditing(false)}
+            isSaving={mutation.isPending}
+          />
+        ) : (
+          <div className="flex min-h-10 items-center gap-2">
+            <p className="min-w-0 flex-1 font-mono text-small break-all text-text">{formatSettingValue(setting)}</p>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditing(true)}
+              title={setting.household_scoped ? 'Edit the default' : 'Edit'}
+              aria-label={setting.household_scoped ? 'Edit the default' : 'Edit'}
+            >
+              <Pencil size={16} aria-hidden />
+            </Button>
+          </div>
+        )}
+        {setting.household_scoped && <HouseholdValues setting={setting} serviceName={serviceName} />}
+      </div>
     </div>
   )
 }

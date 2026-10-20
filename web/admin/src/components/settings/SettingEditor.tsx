@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { cn } from '@/lib/utils'
+import { Button, Input, Select, Switch } from '@/components/ui'
+import { fieldControl } from '@/components/ui/fieldStyles'
 import type { SettingResponse } from '@/types/settings'
 import { secretIsSet } from '@/lib/settings'
 
@@ -9,6 +11,8 @@ interface SettingEditorProps {
   onCancel: () => void
   isSaving: boolean
 }
+
+const OTHER = '__other__'
 
 export default function SettingEditor({ setting, onSave, onCancel, isSaving }: SettingEditorProps) {
   const [rawValue, setRawValue] = useState(() => {
@@ -69,126 +73,95 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
     onSave(parsed)
   }
 
-  const inputClass = cn(
-    'w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-1.5',
-    'text-sm text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]',
-  )
+  const onText = (v: string) => {
+    setRawValue(v)
+    setValidationError(null)
+  }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+    <form onSubmit={handleSubmit} className="flex flex-wrap items-start gap-2">
       {hasOptions ? (
-        <div className="flex items-center gap-2">
-          <select
-            value={showCustomInput ? '__other__' : rawValue}
-            onChange={(e) => {
-              if (e.target.value === '__other__') {
+        <>
+          <Select
+            aria-label={setting.key}
+            wrapperClassName="w-full sm:w-64"
+            value={showCustomInput ? OTHER : rawValue}
+            onValueChange={(v) => {
+              if (v === OTHER) {
                 setShowCustomInput(true)
                 setRawValue('')
               } else {
                 setShowCustomInput(false)
-                setRawValue(e.target.value)
+                setRawValue(v)
               }
             }}
-            className={cn(inputClass, 'max-w-xs')}
-          >
-            {setting.options!.map((opt) => (
-              <option key={String(opt)} value={String(opt)}>
-                {String(opt)}
-              </option>
-            ))}
-            <option value="__other__">Other...</option>
-          </select>
+            options={[
+              ...setting.options!.map((opt) => ({ value: String(opt), label: String(opt) })),
+              { value: OTHER, label: 'Other…' },
+            ]}
+          />
           {showCustomInput && (
-            <input
-              type="text"
+            <Input
+              aria-label={`${setting.key}, custom value`}
+              wrapperClassName="w-full sm:w-64"
               value={rawValue}
               onChange={(e) => setRawValue(e.target.value)}
               placeholder="Custom value"
-              className={cn(inputClass, 'max-w-xs')}
               autoFocus
             />
           )}
-        </div>
+        </>
       ) : setting.value_type === 'bool' ? (
-        <button
-          type="button"
-          role="switch"
-          aria-checked={boolValue}
-          onClick={() => setBoolValue((prev) => !prev)}
-          className={cn(
-            'relative h-6 w-11 rounded-full transition-colors',
-            boolValue ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-border)]',
-          )}
-        >
-          <span
-            className={cn(
-              'absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform',
-              boolValue && 'translate-x-5',
-            )}
-          />
-        </button>
+        <Switch
+          className="flex h-10 items-center"
+          aria-label={setting.key}
+          checked={boolValue}
+          onCheckedChange={setBoolValue}
+        />
       ) : setting.value_type === 'json' ? (
-        <div className="flex-1">
+        <div className="flex w-full flex-col gap-1.5">
           <textarea
+            aria-label={setting.key}
+            aria-invalid={validationError ? true : undefined}
             value={rawValue}
-            onChange={(e) => {
-              setRawValue(e.target.value)
-              setValidationError(null)
-            }}
+            onChange={(e) => onText(e.target.value)}
             rows={4}
-            className={cn(inputClass, 'font-mono text-xs')}
+            className={cn(fieldControl, 'h-auto py-2 font-mono text-small')}
           />
-          {validationError && <p className="mt-1 text-xs text-red-500">{validationError}</p>}
+          {validationError && <p className="text-small text-danger">{validationError}</p>}
         </div>
       ) : (
-        <div>
-          <input
-            type={setting.value_type === 'int' || setting.value_type === 'float' ? 'number' : setting.is_secret ? 'password' : 'text'}
-            step={setting.value_type === 'float' ? 'any' : undefined}
-            autoComplete={setting.is_secret ? 'off' : undefined}
-            placeholder={
-              setting.is_secret
-                ? secretIsSet(setting)
-                  ? 'Enter a new value to replace it'
-                  : 'Paste value'
-                : undefined
-            }
-            value={rawValue}
-            onChange={(e) => {
-              setRawValue(e.target.value)
-              setValidationError(null)
-            }}
-            className={cn(inputClass, 'max-w-xs')}
-          />
-          {validationError && <p className="mt-1 text-xs text-red-500">{validationError}</p>}
-        </div>
+        <Input
+          aria-label={setting.key}
+          wrapperClassName="w-full sm:w-64"
+          type={setting.value_type === 'int' || setting.value_type === 'float' ? 'number' : setting.is_secret ? 'password' : 'text'}
+          step={setting.value_type === 'float' ? 'any' : undefined}
+          autoComplete={setting.is_secret ? 'off' : undefined}
+          placeholder={setting.is_secret ? (secretIsSet(setting) ? 'Enter a new value to replace it' : 'Paste value') : undefined}
+          value={rawValue}
+          onChange={(e) => onText(e.target.value)}
+          error={validationError ?? undefined}
+        />
       )}
 
-      <button
-        type="submit"
-        disabled={isSaving}
-        className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-      >
-        {isSaving ? 'Saving...' : 'Save'}
-      </button>
-      {setting.is_secret && secretIsSet(setting) && (
-        <button
-          type="button"
-          disabled={isSaving}
-          onClick={() => onSave(null)}
-          title="Remove the stored value (falls back to the default or environment)"
-          className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-red-500 hover:bg-red-500/10 disabled:opacity-50"
-        >
-          Clear
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)]"
-      >
-        Cancel
-      </button>
+      <div className="flex items-center gap-2">
+        <Button type="submit" variant="primary" loading={isSaving}>
+          Save
+        </Button>
+        {setting.is_secret && secretIsSet(setting) && (
+          <Button
+            variant="danger"
+            disabled={isSaving}
+            onClick={() => onSave(null)}
+            title="Remove the stored value (falls back to the default or environment)"
+          >
+            Clear
+          </Button>
+        )}
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
     </form>
   )
 }
