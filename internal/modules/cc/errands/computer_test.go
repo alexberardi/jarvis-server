@@ -749,6 +749,9 @@ func TestMergeComputerSteps(t *testing.T) {
 		{Command: cmdReadFile, Label: "read"},
 		ct("download the card statement", "card.example", "browser", ""),
 		ct("download the other one", "card.example", "desktop", ""),
+		// One host, two sites the user named: the bank's and the card's statements.
+		ct("download the bank statement", "http://127.0.0.1:9/bank/", "browser", ""),
+		ct("download the card statement", "http://127.0.0.1:9/card/", "browser", ""),
 	}
 	got := mergeComputerSteps(steps)
 	var lines []string
@@ -761,6 +764,8 @@ func TestMergeComputerSteps(t *testing.T) {
 		"read_computer_file|||read",
 		"computer_task|download the card statement||download the card statement",
 		"computer_task|download the other one||download the other one",
+		"computer_task|download the bank statement||download the bank statement",
+		"computer_task|download the card statement||download the card statement",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("merged:\n%s", strings.Join(lines, "\n"))

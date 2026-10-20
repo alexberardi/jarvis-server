@@ -255,8 +255,8 @@ const decompositionRule = "Create a SEPARATE step for EACH distinct action the u
 
 // budgetRule is the decomposition rule's line for budgets (plan P3 piece 13), in the prompts
 // whose menu has write_spreadsheet: the rows are only known once the statements have been read.
-const budgetRule = "BUDGETS: for a budget or a spending report from statements, download the statements " +
-	"with computer_task, then end the plan with a request_replan checkpoint: the files' names are known only " +
+const budgetRule = "BUDGETS: for a budget or a spending report from statements, download each statement " +
+	"with a computer_task of its own (one per website the user gave), then end the plan with a request_replan checkpoint: the files' names are known only " +
 	"once they are downloaded. Then read each downloaded file with read_computer_file, then another " +
 	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with one row per " +
 	"category: the category and its total over every transaction read; the report then says where the money went.\n\n"
@@ -301,14 +301,23 @@ func checkpointSpreadsheet(steps []Step) []Step {
 	return steps
 }
 
-// mergeComputerSteps joins adjacent computer tasks on the same target and site into one, whose
+// mergeComputerSteps joins adjacent computer tasks on the same target and site (the same web
+// address when they were given one: a bank's and a card's statements may share a host) into one, whose
 // goal is theirs in order ("find it, then order it") and whose success check is the last's
 // (websiteRule, for when the model splits them anyway).
 func mergeComputerSteps(steps []Step) []Step {
+	// The web address a task was given ("" without one).
+	address := func(st Step) string {
+		return strings.TrimSuffix(strings.ToLower(startURL(truthyStr(st.Args, "site"))), "/")
+	}
 	same := func(a, b Step) bool {
-		return a.Command == cmdComputer && b.Command == cmdComputer &&
-			truthyStr(a.Args, "target") == truthyStr(b.Args, "target") &&
-			siteOf(truthyStr(a.Args, "site")) == siteOf(truthyStr(b.Args, "site"))
+		if a.Command != cmdComputer || b.Command != cmdComputer || truthyStr(a.Args, "target") != truthyStr(b.Args, "target") {
+			return false
+		}
+		if ua, ub := address(a), address(b); ua != "" && ub != "" {
+			return ua == ub
+		}
+		return siteOf(truthyStr(a.Args, "site")) == siteOf(truthyStr(b.Args, "site"))
 	}
 	var out []Step
 	for _, st := range steps {
