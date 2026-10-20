@@ -15,7 +15,9 @@ import (
 
 // A trace handed on to Stopped (to be uploaded to jarvisd) is pending until it is sent: an
 // empty <id>.pending (0600) next to it says so, so one stopped while the agent isn't connected,
-// or whose upload failed, is sent later (Pending, Sent).
+// or whose upload failed, is sent later (Pending, Sent). Its click keyframes go up after the
+// trace (#344), however it was stopped: an empty <id>.keyframes says they are still to send
+// (KeyframesPending, KeyframesSent).
 
 func (r *Recorder) pendingPath(id string) string { return filepath.Join(r.Dir, id+".pending") }
 
@@ -57,6 +59,91 @@ func (r *Recorder) Pending() []Trace {
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
+	return out
+}
+
+// keyframesPath marks recording id's click keyframes as still to send.
+func (r *Recorder) keyframesPath(id string) string { return filepath.Join(r.Dir, id+".keyframes") }
+
+// markKeyframes marks tr's click keyframes to be sent, when it has any; it reports whether.
+func (r *Recorder) markKeyframes(tr Trace) bool {
+	if len(ClickKeyframes(tr)) == 0 {
+		return false
+	}
+	if err := writePrivate(r.keyframesPath(tr.ID), nil); err != nil {
+		r.log().Warn("recording: couldn't mark the keyframes to be sent", "recording", tr.ID, "err", err)
+		return false
+	}
+	return true
+}
+
+// KeyframesPending is the recordings whose click keyframes aren't sent yet, oldest first.
+func (r *Recorder) KeyframesPending() []Trace {
+	markers, _ := filepath.Glob(filepath.Join(r.Dir, "rec_*.keyframes"))
+	var out []Trace
+	for _, m := range markers {
+		id := strings.TrimSuffix(filepath.Base(m), ".keyframes")
+		if !recordingIDPattern.MatchString(id) {
+			continue
+		}
+		tr, err := r.LoadTrace(id)
+		if errors.Is(err, os.ErrNotExist) {
+			r.KeyframesSent(id)
+			continue
+		}
+		if err != nil {
+			r.log().Warn("recording: couldn't read a trace whose keyframes are to send", "recording", id, "err", err)
+			continue
+		}
+		out = append(out, tr)
+	}
+	slices.SortStableFunc(out, func(a, b Trace) int {
+		if c := a.StartedAt.Compare(b.StartedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out
+}
+
+// KeyframesMarked is when recording id's keyframes were marked to send (zero: they aren't).
+func (r *Recorder) KeyframesMarked(id string) time.Time {
+	fi, err := os.Stat(r.keyframesPath(id))
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
+}
+
+// KeyframesSent clears recording id's keyframes marker (sent, or given up on).
+func (r *Recorder) KeyframesSent(id string) {
+	if err := os.Remove(r.keyframesPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		r.log().Warn("recording: couldn't clear the keyframes marker", "recording", id, "err", err)
+	}
+}
+
+// ClickKeyframes is tr's keyframes taken at a click (the event of the same seq), by seq: those
+// jarvisd keeps with the recording.
+func ClickKeyframes(tr Trace) []Keyframe {
+	if len(tr.Keyframes) == 0 {
+		return nil
+	}
+	clicks := map[int]bool{}
+	for _, raw := range tr.Events {
+		var e struct {
+			Seq  int    `json:"seq"`
+			Kind string `json:"kind"`
+		}
+		if json.Unmarshal(raw, &e) == nil && e.Kind == InClick {
+			clicks[e.Seq] = true
+		}
+	}
+	var out []Keyframe
+	for _, k := range tr.Keyframes {
+		if clicks[k.Seq] {
+			out = append(out, k)
+		}
+	}
 	return out
 }
 

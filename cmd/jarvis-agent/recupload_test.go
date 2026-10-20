@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -16,33 +17,67 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
-// fakeJarvisd is jarvisd's POST /api/v0/computer/recordings: it answers status (200 when 0)
-// and counts the uploads by recording id. A transport, so no listener is needed.
+// fakeJarvisd is jarvisd's POST /api/v0/computer/recordings and its keyframes' PUTs: it
+// answers status (200 when 0; a PUT's own in putStatus first), counts the uploads by recording
+// id and keeps the keyframes' paths. A transport, so no listener is needed.
 type fakeJarvisd struct {
-	mu     sync.Mutex
-	status int
-	posts  map[string]int
+	mu        sync.Mutex
+	status    int
+	posts     map[string]int
+	images    bool // an upload carried image_attachments
+	putStatus map[string]int
+	puts      []string
 }
 
 func (j *fakeJarvisd) RoundTrip(req *http.Request) (*http.Response, error) {
 	var body struct {
-		ID string `json:"recording_id"`
+		ID     string `json:"recording_id"`
+		Images []any  `json:"image_attachments"`
 	}
-	_ = json.NewDecoder(req.Body).Decode(&body)
+	if req.Method == http.MethodPost {
+		_ = json.NewDecoder(req.Body).Decode(&body)
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	status := j.status
+	if s := j.putStatus[req.URL.Path]; s != 0 && req.Method == http.MethodPut {
+		status = s
+	}
 	if status == 0 {
 		status = http.StatusOK
 	}
 	if req.URL.Path == "/api/v0/computer/recordings" && status == http.StatusOK {
 		j.posts[body.ID]++
+		j.images = j.images || len(body.Images) > 0
+	}
+	if req.Method == http.MethodPut && status == http.StatusOK {
+		if ct := req.Header.Get("Content-Type"); ct != "image/jpeg" {
+			status = http.StatusBadRequest
+		} else {
+			j.puts = append(j.puts, req.URL.Path)
+		}
 	}
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}},
 		Body: io.NopCloser(bytes.NewReader([]byte(`{}`))), Request: req}, nil
 }
 
 func (j *fakeJarvisd) set(status int) { j.mu.Lock(); j.status = status; j.mu.Unlock() }
+
+func (j *fakeJarvisd) setPut(path string, status int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.putStatus == nil {
+		j.putStatus = map[string]int{}
+	}
+	j.putStatus[path] = status
+}
+
+func (j *fakeJarvisd) keyframes() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.puts)
+}
+func (j *fakeJarvisd) attachments() bool { j.mu.Lock(); defer j.mu.Unlock(); return j.images }
 
 func (j *fakeJarvisd) uploads() map[string]int {
 	j.mu.Lock()

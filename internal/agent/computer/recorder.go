@@ -111,7 +111,11 @@ type Recorder struct {
 	// MaxRecording): the agent uploads it. It must not block for long. The trace is pending
 	// (Pending) until the agent says it was sent (Sent).
 	Stopped func(Trace)
-	Log     *slog.Logger
+	// KeyframesLater gets a trace stopped by Stop that has click keyframes: jarvisd has the
+	// trace (computer_record_stop's answer), the agent sends them (KeyframesPending). It must
+	// not block for long.
+	KeyframesLater func(Trace)
+	Log            *slog.Logger
 
 	// now and after are the clock (tests replace them).
 	now   func() time.Time
@@ -258,7 +262,13 @@ func (r *Recorder) emit(id string, e json.RawMessage) {
 
 // Stop stops recording id ("" for the one going on) and returns its trace. The caller has
 // the trace (the computer_record_stop tool), so Stopped isn't called.
-func (r *Recorder) Stop(id string) (Trace, error) { return r.stop(id, StopAsked) }
+func (r *Recorder) Stop(id string) (Trace, error) {
+	tr, err := r.stop(id, StopAsked)
+	if err == nil && r.KeyframesLater != nil && fileExists(r.keyframesPath(tr.ID)) {
+		r.KeyframesLater(tr)
+	}
+	return tr, err
+}
 
 // End stops the recording going on and hands its trace to Stopped (the status icon's "Stop
 // recording", `jarvis-agent computer record stop`).
@@ -319,6 +329,7 @@ func (r *Recorder) stop(id, reason string) (Trace, error) {
 	if err := errors.Join(werr, rec.f.Close()); err != nil {
 		r.log().Warn("recording: couldn't finish the trace file", "recording", tr.ID, "err", err)
 	}
+	r.markKeyframes(tr)
 	if k, _ := r.Activity.Status(); k == Recording {
 		r.Activity.Set(Idle, "")
 	}
@@ -326,7 +337,7 @@ func (r *Recorder) stop(id, reason string) (Trace, error) {
 	return tr, nil
 }
 
-// Delete removes recording id's local copy, its keyframes and its pending marker (stopping it
+// Delete removes recording id's local copy, its keyframes and its markers (stopping it
 // first, without handing it on, if it is the one going on). A copy already gone is no error.
 func (r *Recorder) Delete(id string) error {
 	if !recordingIDPattern.MatchString(id) {
@@ -340,6 +351,7 @@ func (r *Recorder) Delete(id string) error {
 		_ = os.Remove(k)
 	}
 	_ = os.Remove(r.pendingPath(id))
+	_ = os.Remove(r.keyframesPath(id))
 	err := os.Remove(r.Path(id))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
