@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -209,5 +210,66 @@ func TestWaitConnected(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("WaitConnected didn't wake on connect")
+	}
+}
+
+// Website access (the extension's <all_urls> host permission, which Firefox lets the user turn
+// off) comes in hello and in "access" events; a change wakes Changed, so the heartbeat reports
+// it. An extension that never says (before 0.3.2) leaves it unknown (nil), not off.
+func TestHubWebsiteAccess(t *testing.T) {
+	h, path := startHub(t)
+	off := false
+	ff := connectExtHello(t, h, path, Message{Type: "hello", Protocol: Protocol, Browser: "Firefox", WebsiteAccess: &off}, nil)
+	access := func(browser string) *bool {
+		for _, b := range h.Browsers() {
+			if b.Browser == browser {
+				return b.WebsiteAccess
+			}
+		}
+		t.Fatalf("%s not connected", browser)
+		return nil
+	}
+	if a := access("Firefox"); a == nil || *a {
+		t.Fatalf("after hello: website access %v, want off", a)
+	}
+	connectExt(t, h, path, "Chrome", false, nil)
+	if a := access("Chrome"); a != nil {
+		t.Fatalf("an old extension's website access is %v, want unknown", *a)
+	}
+	// The agent's own (the heartbeat's): off while any browser that says has it off.
+	if a := h.WebsiteAccess(); a == nil || *a {
+		t.Fatalf("hub website access %v, want off", a)
+	}
+
+	changed := h.Changed()
+	on := true
+	ff.send(Message{Type: "event", Event: "access", WebsiteAccess: &on})
+	select {
+	case <-changed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Changed didn't fire on an access event")
+	}
+	if a := access("Firefox"); a == nil || !*a {
+		t.Fatalf("after the access event: %v, want on", a)
+	}
+	if a := h.WebsiteAccess(); a == nil || !*a {
+		t.Fatalf("hub website access %v, want on", a)
+	}
+
+	changed = h.Changed()
+	ff.send(Message{Type: "event", Event: "access", WebsiteAccess: &off})
+	<-changed
+	if a := access("Firefox"); a == nil || *a {
+		t.Fatalf("after turning it off: %v, want off", a)
+	}
+
+	// The status connection (jarvis-agent browser status) carries it.
+	st, err := QueryStatus(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(st)
+	if !strings.Contains(string(b), `"website_access":false`) {
+		t.Fatalf("status reply %s has no website_access", b)
 	}
 }

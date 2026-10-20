@@ -326,8 +326,10 @@ for a desktop node (422, `code: "not_for_computers"`) from the Pantry detail's `
    carries `node_kind: "desktop"` and `capabilities: {"browser_extension": "connected" |
    "disconnected" | "disabled"}` (`disabled` with `run --no-browser`), and cc's node list and
    node view (`GET /api/v0/admin/nodes[/{id}]`, the admin and mobile node APIs) return both
-   (`null` and `{}` for a node that never reported them). The agent sends a beat at once when
-   the extension connects or disconnects. `jarvis-agent status` reports the kind but no
+   (`null` and `{}` for a node that never reported them). With an extension connected that says
+   (0.3.2+), it adds `browser_website_access: "on" | "off"` (off while any connected browser has
+   its `<all_urls>` host permission off; the admin's "connected, website access off"). The agent
+   sends a beat at once when the extension connects or disconnects, or its website access changes. `jarvis-agent status` reports the kind but no
    capabilities, since it doesn't hold the browser connection. jarvisd doesn't yet skip
    verbs a desktop node can't serve. Later, let CC offer a household's desktop tools in a Pi's
    turn with node-qualified dispatch ("turn down my computer").

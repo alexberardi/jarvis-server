@@ -1,5 +1,5 @@
 // The toolbar popup: whether the desktop agent's native host answered, and a link to download the
-// agent when it didn't. background.js puts the state in this page's URL (action.setPopup); the
+// agent when it didn't; whether the extension has website access, and a button to turn it on. background.js puts the state in this page's URL (action.setPopup); the
 // page sends the background nothing. The link is public (the release page): the extension never
 // learns the user's own Jarvis server address.
 "use strict";
@@ -51,3 +51,34 @@ link.addEventListener("click", (e) => {
     .catch(() => {})
     .finally(() => window.close());
 });
+
+// Website access (the <all_urls> host permission, which Firefox lets the user turn off): read
+// here with permissions.contains, asked for with permissions.request. The background learns of a
+// change from permissions.onAdded/onRemoved, so this page still sends it nothing.
+const ALL_SITES = { origins: ["<all_urls>"] };
+const access = document.getElementById("access");
+const accessOn = document.getElementById("access-on");
+
+function showAccess(on) {
+  access.hidden = false;
+  access.classList.toggle("off", !on);
+  document.getElementById("access-state").textContent = on ? "on" : "off";
+  document.getElementById("access-hint").hidden = on;
+  accessOn.hidden = on;
+}
+
+function readAccess() {
+  return Promise.resolve(api.permissions.contains(ALL_SITES))
+    .then((on) => showAccess(!!on))
+    .catch(() => {}); // the browser can't say: show nothing
+}
+
+accessOn.addEventListener("click", () => {
+  // Called straight from the click, with nothing awaited first: Firefox shows its prompt only
+  // inside the user's gesture.
+  Promise.resolve(api.permissions.request(ALL_SITES))
+    .catch(() => false)
+    .then(readAccess);
+});
+
+readAccess();
