@@ -15,7 +15,10 @@ blueprint piece 29):
   "stop", computer control turned off, the 30-minute limit): the agent uploads it to
   `POST /api/v0/computer/recordings` (node auth), and it is the recording of the member signed in
   on that computer (`owner_user_id` while still in the household; nobody: 409, the trace stays
-  local). Only a computer's agent may upload (a Pi: 403).
+  local). Only a computer's agent may upload (a Pi: 403). One stopped while the agent isn't
+  connected, or whose upload fails, is kept with a `<id>.pending` marker next to its trace and
+  sent on the next connect and every 5 minutes while connected, oldest first (#298); the island
+  says it was kept on the computer. A 400, 409, 413 or 422 is final: the trace stays local.
 - **Which computer.** A turn on a computer records that computer. A turn elsewhere (a Pi, the
   phone) records the speaker's own computer with computer control on; never someone else's.
   (Superseded by [2026-10-19-record-a-macro-and-voice-switch](2026-10-19-record-a-macro-and-voice-switch.md):
