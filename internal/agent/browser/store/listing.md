@@ -6,9 +6,10 @@ privacy policy is the project's, at https://docs.jarvisautomation.dev/security/p
 `docs/security/privacy-policy.md`, section "Browser extension and desktop agent"); the images are
 in [images/](images/).
 
-Everything here was checked against the extension's code (`../extension/`) at version 0.3.0 (0.2.0 added
+Everything here was checked against the extension's code (`../extension/`) at version 0.3.1 (0.2.0 added
 `fill` and `click`: dictation, docs/agent/DESIGN.md §14; 0.2.1 added the toolbar popup, install plan 3.5;
-0.3.0 added `snapshot` and `act` and background task windows: computer control, docs/agent/COMPUTER_CONTROL.md).
+0.3.0 added `snapshot` and `act` and background task windows: computer control, docs/agent/COMPUTER_CONTROL.md;
+0.3.1 added `screenshot` of a task window and `download`, with the `downloads` permission).
 If the extension gains a permission or reads something new, update the privacy answers below
 and the privacy policy's "Browser extension and desktop agent" section (jarvis-docs) to match.
 
@@ -67,7 +68,7 @@ PRIVATE BY DESIGN
 • The extension talks only to the Jarvis agent on this computer, through the browser's native-messaging channel. It has no network code of its own.
 • It reads a page, or the list of your open tabs, only when you ask Jarvis to do something in the browser. The result goes to your own Jarvis server and nowhere else.
 • It never reads passwords, card numbers or one-time codes. It fills a field or clicks a button only when you ask Jarvis to, and only when exactly one field or button on the page matches what you said; it writes the text you dictated and never reads a field back. A password field is filled only when you say it is the password field.
-• When you give Jarvis an errand to run in the browser, it can list a page's buttons, links and form fields (with what ordinary fields already contain, such as an email or address, so it doesn't type them twice) and act on them, in a window it opens behind yours. Password, card, one-time-code and hidden fields are listed without their contents, and Jarvis never types into a password field this way.
+• When you give Jarvis an errand to run in the browser, it can list a page's buttons, links and form fields (with what ordinary fields already contain, such as an email or address, so it doesn't type them twice) and act on them, in a window it opens behind yours, take a picture of that window when the list isn't enough, and save a file the errand needs (such as a statement) to your downloads folder. Password, card, one-time-code and hidden fields are listed without their contents, and Jarvis never types into a password field this way.
 • No analytics, no ads, no tracking, no accounts with us. It stores nothing in the browser.
 • Web pages and other extensions can't send it commands.
 
@@ -87,12 +88,12 @@ Jarvis is in early beta. Questions and bug reports are welcome on GitHub (https:
 ### Single purpose
 
 ```
-Lets the user's own Jarvis voice assistant control their browser on request: list, open, switch and close tabs, navigate back/forward/reload, read the visible text of a page, scroll, find text, fill in a field the user names, click a button by its label, run errands the user gives it (list a page's buttons, links and form fields and act on them, in a background window), and play, pause, skip or mute video and audio. Commands come only from the Jarvis desktop agent on the same computer via native messaging.
+Lets the user's own Jarvis voice assistant control their browser on request: list, open, switch and close tabs, navigate back/forward/reload, read the visible text of a page, scroll, find text, fill in a field the user names, click a button by its label, run errands the user gives it (list a page's buttons, links and form fields and act on them, in a background window, take a picture of that window and save a file the errand downloads), and play, pause, skip or mute video and audio. Commands come only from the Jarvis desktop agent on the same computer via native messaging.
 ```
 
 ### Permission justifications
 
-The Chromium manifest asks for exactly `tabs`, `scripting`, `nativeMessaging`, `alarms` and
+The Chromium manifest asks for exactly `tabs`, `scripting`, `nativeMessaging`, `alarms`, `downloads` and
 the host permission `<all_urls>` (a Go test, `TestExtensionSurface`, pins this set).
 
 **nativeMessaging**
@@ -115,6 +116,11 @@ To run the extension's own bundled functions in a tab when the user asks: read t
 A once-a-minute alarm wakes the background service worker so it can reconnect to the Jarvis desktop agent after the agent or the browser restarts. It does nothing else.
 ```
 
+**downloads**
+```
+To save statements and files the user asked Jarvis to fetch: when an errand the user gave Jarvis includes downloading a file (for example a monthly bank statement), the extension starts that one download (by pressing the page's download button, or from its address), waits for it to finish and tells the agent the saved file's name, path, size and type. It doesn't open, move or delete files, and never lists or reads the user's other downloads.
+```
+
 **Host permission `<all_urls>`**
 ```
 The user can ask Jarvis to read, scroll, search, fill a field, click a button or control media on whatever page they are on, so the extension needs to run its bundled functions on any http/https page. It acts only on a user's request, and only on the tab the request is about. There are no content scripts that run automatically.
@@ -133,7 +139,7 @@ Tick these two:
 | Category | Why it applies |
 |---|---|
 | **Web history** | `list_tabs` returns the titles and URLs of open tabs to the agent when the user asks about their tabs, and every tab command reports the affected tab's title and URL. |
-| **Website content** | `read_page` returns a page's visible text, and `find` returns the text around a match, when the user asks Jarvis about a page. `snapshot` returns a page's buttons, links and form fields (their labels, and the contents of ordinary fields) for an errand the user gave Jarvis. |
+| **Website content** | `read_page` returns a page's visible text, and `find` returns the text around a match, when the user asks Jarvis about a page. `snapshot` returns a page's buttons, links and form fields (their labels, and the contents of ordinary fields) for an errand the user gave Jarvis. `screenshot` returns a picture of the page in the background window of such an errand. |
 
 Leave the rest unticked:
 

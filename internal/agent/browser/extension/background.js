@@ -421,9 +421,6 @@ const COMMANDS = {
   async act(args) {
     const t = await tabFor(args);
     const gen = Number(args.gen);
-    const m = /^e([1-9][0-9]{0,5})$/.exec(String(args.ref ?? ""));
-    if (!Number.isInteger(gen) || gen <= 0 || !m) throw fail("invalid_argument", "gen and ref (e.g. e12) from a snapshot are required");
-    const n = Number(m[1]);
     const op = String(args.op ?? "");
     if (!ACT_OPS.has(op)) throw fail("invalid_argument", `op must be one of ${[...ACT_OPS].join(", ")}`);
     const value = String(args["value"] ?? ""); // the agent's text, not the page's
@@ -432,22 +429,7 @@ const COMMANDS = {
     if (op === "keys" && (!keys.length || keys.some((k) => !ACT_KEYS.has(k)))) {
       throw fail("invalid_argument", `keys must be some of ${[...ACT_KEYS].join(", ")}`);
     }
-    const known = snaps.get(t.id);
-    if (known && known.gen !== gen) throw fail("stale_ref", "the page has a newer snapshot; take a snapshot and use its refs");
-    const probes = (await inject(t, { func: actFind, args: [gen, n], allFrames: true })).filter((p) => p?.result);
-    if (!probes.some((p) => p.result.gen === gen)) throw fail("stale_ref", "the page changed since that snapshot; take a new one");
-    if (probes.some((p) => p.result.moved)) throw fail("stale_ref", `${args.ref} moved to another frame; take a new snapshot`);
-    const holders = probes.filter((p) => p.result.found);
-    if (!holders.length) throw fail("not_found", `${args.ref} is no longer on the page; take a new snapshot`);
-    const frame = holders[0].frameId;
-    const was = known?.frameOf.get(n);
-    if (holders.length > 1 || (was != null && was !== frame)) {
-      throw fail("stale_ref", `${args.ref} moved to another frame; take a new snapshot`);
-    }
-    const [r] = await inject(t, { func: actDo, args: [gen, n, op, value, keys], frameIds: [frame] });
-    const res = r?.result;
-    if (!res) throw fail("failed", "the page returned nothing");
-    if (res.error) throw fail(res.code ?? "failed", res.error);
+    await actOn(t, gen, args.ref, op, value, keys);
     const after = await settled(t.id);
     return { ok: true, url_after: clip(after.url, URL_MAX), title_after: clip(after.title, TITLE_MAX) };
   },
@@ -480,12 +462,68 @@ const COMMANDS = {
     rec = null;
     return { events: r.seq };
   },
+
+  // screenshot captures the visible page of a (task) window as a JPEG, with the viewport's CSS
+  // size and device pixel ratio (the image is in physical pixels). A minimised window shows
+  // nothing, so it is refused.
+  async screenshot(args) {
+    const id = Number(args.window_id);
+    if (!Number.isInteger(id)) throw fail("invalid_argument", "window_id must be a task window's id");
+    let w;
+    try {
+      w = await api.windows.get(id, { populate: true });
+    } catch {
+      throw fail("window_not_found", `no window ${clip(args.window_id, 20)} (it may have been closed)`);
+    }
+    if (w.state === "minimized") throw fail("window_minimized", "the task window is minimised, so it can't be captured; restore it");
+    const t = w.tabs?.find((x) => x.active);
+    if (!t) throw fail("tab_not_found", "the window has no active tab");
+    const [v] = await inject(t, { func: viewportSize });
+    if (!v?.result) throw fail("failed", "the page returned no viewport size");
+    const url = await api.tabs.captureVisibleTab(id, { format: "jpeg", quality: 80 });
+    const data = String(url).replace(/^data:image\/jpeg;base64,/, "");
+    return { data, width: v.result.width, height: v.result.height, device_pixel_ratio: v.result.dpr };
+  },
+
+  // download saves a file into the browser's downloads folder: the one pressing ref (of the tab's
+  // last snapshot) starts within DOWNLOAD_START_MS, or url's. It waits (≤ DOWNLOAD_DONE_MS) for
+  // the file to complete and says where it is.
+  async download(args) {
+    const t = await tabFor(args);
+    const byRef = args.ref != null && args.ref !== "";
+    if (byRef === (args.url != null && args.url !== "")) throw fail("invalid_argument", "give either a ref or a url");
+    let id;
+    if (byRef) {
+      const known = snaps.get(t.id);
+      if (!known) throw fail("stale_ref", "take a snapshot of the tab first and use its refs");
+      const created = nextDownload(DOWNLOAD_START_MS);
+      try {
+        await actOn(t, known.gen, args.ref, "press", "", []);
+      } catch (e) {
+        created.cancel();
+        throw e;
+      }
+      id = await created.id;
+    } else {
+      id = await api.downloads.download({ url: checkURL(args.url), saveAs: false, conflictAction: "uniquify" });
+    }
+    const d = await downloadDone(id, DOWNLOAD_DONE_MS);
+    const path = String(d.filename ?? "");
+    return {
+      path,
+      bytes: d.fileSize > 0 ? d.fileSize : d.bytesReceived ?? 0,
+      mime: String(d.mime ?? ""),
+      filename: path.split(/[\\/]/).pop(),
+    };
+  },
 };
 
 const FILL_MAX = 2000;
 const SNAPSHOT_MAX = 1000;
 const ACT_OPS = new Set(["press", "set_value", "select", "check", "focus", "scroll_into_view", "keys"]);
 const ACT_KEYS = new Set(["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+const DOWNLOAD_START_MS = 10000;
+const DOWNLOAD_DONE_MS = 60000;
 
 // Snapshot generations: one sequence for all tabs, seeded from the clock so a restarted service
 // worker doesn't hand out a gen an older snapshot already used. snaps remembers each tab's last
@@ -509,6 +547,82 @@ async function settled(tabId) {
     return { url: "", title: "" }; // the act closed the tab
   }
   return { url: t.pendingUrl || t.url, title: t.title };
+}
+
+// actOn does op on the element ref ("e12") of snapshot gen in tab t. It refuses a ref from
+// another snapshot or document (stale_ref), and typing into a password field (password_field).
+async function actOn(t, gen, ref, op, value, keys) {
+  const m = /^e([1-9][0-9]{0,5})$/.exec(String(ref ?? ""));
+  if (!Number.isInteger(gen) || gen <= 0 || !m) throw fail("invalid_argument", "gen and ref (e.g. e12) from a snapshot are required");
+  const n = Number(m[1]);
+  const known = snaps.get(t.id);
+  if (known && known.gen !== gen) throw fail("stale_ref", "the page has a newer snapshot; take a snapshot and use its refs");
+  const probes = (await inject(t, { func: actFind, args: [gen, n], allFrames: true })).filter((p) => p?.result);
+  if (!probes.some((p) => p.result.gen === gen)) throw fail("stale_ref", "the page changed since that snapshot; take a new one");
+  if (probes.some((p) => p.result.moved)) throw fail("stale_ref", `${ref} moved to another frame; take a new snapshot`);
+  const holders = probes.filter((p) => p.result.found);
+  if (!holders.length) throw fail("not_found", `${ref} is no longer on the page; take a new snapshot`);
+  const frame = holders[0].frameId;
+  const was = known?.frameOf.get(n);
+  if (holders.length > 1 || (was != null && was !== frame)) {
+    throw fail("stale_ref", `${ref} moved to another frame; take a new snapshot`);
+  }
+  const [r] = await inject(t, { func: actDo, args: [gen, n, op, value, keys], frameIds: [frame] });
+  const res = r?.result;
+  if (!res) throw fail("failed", "the page returned nothing");
+  if (res.error) throw fail(res.code ?? "failed", res.error);
+}
+
+// nextDownload resolves to the id of the next download the browser starts, within ms.
+function nextDownload(ms) {
+  let listener, timer;
+  const stop = () => {
+    clearTimeout(timer);
+    api.downloads.onCreated.removeListener(listener);
+  };
+  const id = new Promise((resolve, reject) => {
+    listener = (d) => {
+      stop();
+      resolve(d.id);
+    };
+    timer = setTimeout(() => {
+      stop();
+      reject(fail("no_download", `pressing that started no download within ${ms / 1000} s`));
+    }, ms);
+    api.downloads.onCreated.addListener(listener);
+  });
+  id.catch(() => {}); // a failed press cancels it unawaited
+  return { id, cancel: stop };
+}
+
+// downloadDone waits (≤ ms) for download id to complete and returns its item.
+async function downloadDone(id, ms) {
+  let listener, timer;
+  const done = new Promise((resolve, reject) => {
+    const check = async () => {
+      const [d] = await api.downloads.search({ id });
+      if (!d) return reject(fail("download_failed", "the download disappeared (cancelled or removed)"));
+      if (d.state === "complete") resolve(d);
+      else if (d.state === "interrupted") reject(fail("download_failed", `the download failed (${clip(d.error, 80)})`));
+    };
+    listener = (delta) => {
+      if (delta.id === id && delta.state) check().catch(reject);
+    };
+    timer = setTimeout(() => reject(fail("timeout", `the download didn't complete within ${ms / 1000} s`)), ms);
+    api.downloads.onChanged.addListener(listener);
+    check().catch(reject); // it may have finished already
+  });
+  try {
+    return await done;
+  } finally {
+    clearTimeout(timer);
+    api.downloads.onChanged.removeListener(listener);
+  }
+}
+
+// viewportSize runs in the page: its viewport in CSS pixels and device pixel ratio.
+function viewportSize() {
+  return { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 };
 }
 
 // uniqueFrame probes every frame of the tab with func (a dry run) and returns the frame holding

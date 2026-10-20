@@ -74,6 +74,9 @@ func setup(t *testing.T, opts ...func(*Module)) *env {
 		t.Fatal(err)
 	}
 	q.Start(ctx)
+	// Stop the workers before the DB closes and the temp dirs go: a poll still in flight
+	// leaves SQLite's -wal/-shm files behind and RemoveAll fails ("directory not empty").
+	t.Cleanup(func() { cancel(); q.Wait() })
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return &env{t: t, m: m, srv: srv, engine: eng, res: res, q: q, ctx: ctx}
