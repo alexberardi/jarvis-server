@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
@@ -67,9 +68,20 @@ func parseReply(s string) (Reply, error) {
 		}
 		r.Actions, r.Checkout = nil, nil
 	default:
+		thought, _, _ := strings.Cut(strings.TrimSpace(r.Thought), "\n")
+		if utf8.RuneCountInString(thought) > computeruse.MaxIntent {
+			thought = ""
+		}
 		for i, a := range r.Actions {
 			if a.Kind == "click" && a.Ref != "" && a.X == nil && a.Y == nil {
 				r.Actions[i].Kind = "press" // a click on a listed element
+			}
+			if strings.TrimSpace(a.Intent) == "" {
+				// The house model leaves it out; the risk comes from the element, not the intent.
+				r.Actions[i].Intent = thought
+				if thought == "" {
+					r.Actions[i].Intent = strings.TrimSpace(r.Actions[i].Kind + " " + a.Ref)
+				}
 			}
 		}
 		if err := computeruse.ValidateBatch(r.Actions); err != nil {

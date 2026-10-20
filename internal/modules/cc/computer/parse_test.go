@@ -19,6 +19,22 @@ func TestParseClickOnRefIsPress(t *testing.T) {
 	}
 }
 
+// An action without an intent gets the reply's thought, else its kind and ref (risk comes from
+// the element, never from the intent).
+func TestParseMissingIntent(t *testing.T) {
+	r, err := parseReply(`{"thought": "Open the watch list.\nThen pick one.", "actions": [{"kind": "click", "ref": "e5"}, {"kind": "wait", "ms": 500, "intent": " "}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Actions[0].Intent != "Open the watch list." || r.Actions[1].Intent != "Open the watch list." {
+		t.Fatalf("intents %q %q", r.Actions[0].Intent, r.Actions[1].Intent)
+	}
+	r, err = parseReply(`{"actions": [{"kind": "press", "ref": "e5"}]}`)
+	if err != nil || r.Actions[0].Intent != "press e5" {
+		t.Fatalf("%+v %v", r.Actions, err)
+	}
+}
+
 func TestParseReply(t *testing.T) {
 	ok := []struct{ in, want string }{
 		{"```json\n{\"thought\": \"go\", \"actions\": [{\"kind\": \"press\", \"ref\": \"e1\", \"intent\": \"Open\"}]}\n```", "actions"},
