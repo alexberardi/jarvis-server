@@ -255,23 +255,6 @@ const budgetRule = "BUDGETS: for a budget or a spending report from statements, 
 	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with every " +
 	"transaction categorised and a total per category; the report then says where the money went.\n\n"
 
-// desktopAppRule goes before the decomposition rule for desktop apps (plan P3 piece 35), in the
-// prompts whose menu has computer_task: the open-and-type commands can't work in an app.
-const desktopAppRule = "DESKTOP APPS: to get something done inside a desktop app (write a note, fill " +
-	"something in, click through the app), plan ONE computer_task step with target desktop, the app " +
-	"and the whole goal. desktop_open and desktop_type_text only open an app or type text the user " +
-	"dictated.\n\n"
-
-// desktopAppRuleFor is desktopAppRule when menu offers computer_task, else "".
-func desktopAppRuleFor(menu []MenuEntry) string {
-	for _, c := range menu {
-		if c.Command == cmdComputer {
-			return desktopAppRule
-		}
-	}
-	return ""
-}
-
 // budgetRuleFor is budgetRule when menu offers write_spreadsheet, else "".
 func budgetRuleFor(menu []MenuEntry) string {
 	for _, c := range menu {
@@ -314,7 +297,7 @@ func BuildPrompt(goal string, menu []MenuEntry) string {
 		"list of steps, choosing ONLY from the available commands below. Fill each " +
 		"step's args from that command's arg spec, using the user's own words, and " +
 		"give each step a short human-readable label.\n\n" +
-		desktopAppRuleFor(menu) + decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + budgetRuleFor(menu) +
 		replanCheckpointRule +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
 		"User's goal: " + goal + "\n\n" +
@@ -330,7 +313,7 @@ func BuildRefinePrompt(summary string, current []Step, instruction string, menu 
 	return "You are Jarvis's errand planner revising an EXISTING plan. Apply the " +
 		"user's change to the current plan, keeping the parts they didn't ask to " +
 		"change and choosing ONLY from the available commands.\n\n" +
-		desktopAppRuleFor(menu) + decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + budgetRuleFor(menu) +
 		"Current plan: " + summary + "\n" +
 		"Current steps: " + stepsDumps(current) + "\n\n" +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
@@ -349,7 +332,7 @@ func BuildReplanPrompt(goal string, done []Step, progress, reason string, menu [
 		"needed to finish the goal BASED ON those results, choosing ONLY from the " +
 		"available commands. Return ONLY the steps still to run (do not repeat the ones " +
 		"already done).\n\n" +
-		desktopAppRuleFor(menu) + decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + budgetRuleFor(menu) +
 		"Goal: " + goal + "\n" +
 		"Steps already run: " + stepsDumps(done) + "\n" +
 		"What happened:\n" + progress + "\n\n" +

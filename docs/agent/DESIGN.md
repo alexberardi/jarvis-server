@@ -758,8 +758,10 @@ per call, like the capture above:
   name asked for stands in when no app has it (every Tk app's class is `Tk`); what may be done
   in it still goes by its app.
 - **Attended:** the screen lock is logind's `LockedHint` for `XDG_SESSION_ID` (else this
-  process's session); with no logind session (a headless test session) there is no lock to see
-  and the idle check alone applies. Idle comes from ext-idle-notify (Wayland) or the X server;
+  process's session, else the user's graphical session, `GetUser(uid)`'s `Display`: the
+  installed agent is a systemd user unit, in no session of its own); only when the user has no
+  graphical session (a headless test session) is there no lock to see, and the idle check alone
+  applies. Anything else logind can't answer refuses the task. Idle comes from ext-idle-notify (Wayland) or the X server;
   the Wayland monitor starts with the agent, as the compositor only reports input after it
   began, and until it has seen some a task is refused ("I haven't seen anyone use this
   computer").

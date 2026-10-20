@@ -127,18 +127,3 @@ func TestDesktopNeedsAttended(t *testing.T) {
 		t.Fatalf("stale turn: plan %s", p.State)
 	}
 }
-
-// With computer_task on the menu, the planner is told that work inside a desktop app is one
-// computer_task, not desktop_open and desktop_type_text (a 9B planner chose those for "in the
-// notes app, make a note"); without it the prompts are as they were.
-func TestPlannerDesktopAppRule(t *testing.T) {
-	menu := []MenuEntry{computerEntry()}
-	for _, p := range []string{BuildPrompt("g", menu), BuildRefinePrompt("s", nil, "i", menu), BuildReplanPrompt("g", nil, "p", "r", menu)} {
-		if !strings.Contains(p, desktopAppRule) {
-			t.Fatalf("prompt lacks the desktop app rule:\n%s", p)
-		}
-	}
-	if p := BuildPrompt("g", commandMenu()); strings.Contains(p, "DESKTOP APPS") {
-		t.Fatal("desktop app rule without computer_task")
-	}
-}

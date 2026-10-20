@@ -15,9 +15,16 @@ Wayland task needs, and its absence is reported by name. tk and Xvfb are test fi
 - **A title can stand in for an app name** when no app has the name (every Tk app's class is
   `Tk`). Only for finding the window: the deny check still goes by its app, so a terminal titled
   "Notes" is still a terminal.
-- **The lock is logind's LockedHint** for `XDG_SESSION_ID`, else for this process's session.
-  With no logind session at all (a headless test session, a container) there is no lock to see
-  and only the idle check applies, rather than refusing every task there.
+- **The lock is logind's LockedHint** for `XDG_SESSION_ID`, else for this process's session,
+  else for the user's graphical session. The installed agent is a systemd user unit
+  (`user@.service`), which is in no logind session and whose environment has no
+  `XDG_SESSION_ID`, so it finds its session as `Manager.GetUser(uid)`'s `Display` (the session
+  the user's desktop runs in). Only when the user has no graphical session (`Display` is `/`, or
+  logind knows no such user: a headless test session, a container) is there no lock to see, and
+  only the idle check applies, rather than refusing every task there. Any other logind failure
+  (no system bus, a timeout, access denied) is an error, and the task refuses. So a suite run on
+  a computer whose own screen is locked refuses its desktop cases too: the headless session it
+  drives is not a logind session, and the user's desktop is the one asked about.
 - **"At the computer" needs input the agent saw.** A compositor's idle notifications only report
   input after the monitor began, so the monitor starts with the agent, and a task with no input
   seen yet is refused as such. The computer suite gives its headless sessions a user: Shift,

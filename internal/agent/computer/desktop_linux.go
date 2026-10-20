@@ -183,22 +183,52 @@ func recordedIn(el *computeruse.Element, w DesktopWindow) *ax.Recorded {
 type logind interface {
 	// Session is this process's session: XDG_SESSION_ID's, else the one its PID is in.
 	Session(ctx context.Context) (dbus.ObjectPath, error)
+	// Display is the user's graphical session, "/" when they have none.
+	Display(ctx context.Context) (dbus.ObjectPath, error)
 	LockedHint(ctx context.Context, session dbus.ObjectPath) (bool, error)
 }
 
 // logindLocked is the session's LockedHint (set by lock screens: hyprlock, swaylock with
-// logind integration, xss-lock). Without logind or a session for this process (a headless
-// session, a container) there is no lock to see: the idle check still applies.
+// logind integration, xss-lock). The installed agent is a systemd user unit, in no session of
+// its own, so without one it asks for the user's graphical session. Only when the user has
+// none (a headless test session, a container) is there no lock to see: the idle check still
+// applies. Any other failure is an error, so a task refuses rather than guess.
 func logindLocked(ctx context.Context, l logind) (bool, error) {
 	s, err := l.Session(ctx)
+	if noSession(err) {
+		s, err = l.Display(ctx)
+		if noSession(err) || err == nil && (s == "" || s == "/") {
+			return false, nil
+		}
+	}
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("logind: %w", err)
 	}
 	locked, err := l.LockedHint(ctx, s)
 	if err != nil {
 		return false, fmt.Errorf("logind: %w", err)
 	}
 	return locked, nil
+}
+
+// noSession is logind saying there is no such session or user, not that it couldn't answer.
+func noSession(err error) bool {
+	var name string
+	var e dbus.Error
+	var pe *dbus.Error
+	switch {
+	case errors.As(err, &e):
+		name = e.Name
+	case errors.As(err, &pe):
+		name = pe.Name
+	default:
+		return false
+	}
+	switch name {
+	case login1 + ".NoSessionForPID", login1 + ".NoSuchSession", login1 + ".NoSuchUser":
+		return true
+	}
+	return false
 }
 
 type systemLogind struct{}
@@ -223,6 +253,30 @@ func (systemLogind) Session(ctx context.Context) (dbus.ObjectPath, error) {
 		err = m.CallWithContext(ctx, login1+".Manager.GetSessionByPID", 0, uint32(os.Getpid())).Store(&p)
 	}
 	return p, err
+}
+
+func (systemLogind) Display(ctx context.Context) (dbus.ObjectPath, error) {
+	c, err := dbus.SystemBus()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, logindTimeout)
+	defer cancel()
+	var u dbus.ObjectPath
+	if err := c.Object(login1, "/org/freedesktop/login1").CallWithContext(ctx, login1+".Manager.GetUser", 0, uint32(os.Getuid())).Store(&u); err != nil {
+		return "", err
+	}
+	var v dbus.Variant
+	if err := c.Object(login1, u).CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, login1+".User", "Display").Store(&v); err != nil {
+		return "", err
+	}
+	// Display is (session id, session object path).
+	if d, ok := v.Value().([]any); ok && len(d) == 2 {
+		if p, ok := d[1].(dbus.ObjectPath); ok {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("the user's Display isn't a session: %v", v)
 }
 
 func (systemLogind) LockedHint(ctx context.Context, s dbus.ObjectPath) (bool, error) {

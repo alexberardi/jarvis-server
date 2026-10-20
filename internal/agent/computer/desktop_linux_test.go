@@ -154,29 +154,47 @@ func TestLinuxAX(t *testing.T) {
 type fakeLogind struct {
 	session dbus.ObjectPath
 	noSess  error
-	locked  bool
+	display dbus.ObjectPath
+	noDisp  error
+	locked  map[dbus.ObjectPath]bool
 	hintErr error
 }
 
 func (f fakeLogind) Session(context.Context) (dbus.ObjectPath, error) { return f.session, f.noSess }
-func (f fakeLogind) LockedHint(context.Context, dbus.ObjectPath) (bool, error) {
-	return f.locked, f.hintErr
+func (f fakeLogind) Display(context.Context) (dbus.ObjectPath, error) { return f.display, f.noDisp }
+func (f fakeLogind) LockedHint(_ context.Context, s dbus.ObjectPath) (bool, error) {
+	return f.locked[s], f.hintErr
 }
 
-// The lock state is the session's LockedHint; with no logind session to ask (a headless
-// session) nothing is locked, and a session that can't be read refuses.
+func logindErr(name string) error { return dbus.Error{Name: "org.freedesktop.login1." + name} }
+
+// The lock state is the session's LockedHint. An agent in no session of its own (the systemd
+// user unit) asks for the user's graphical session; only a user with none (a headless session)
+// has nothing locked, and anything logind can't answer refuses.
 func TestLogindLocked(t *testing.T) {
 	ctx := context.Background()
-	if l, err := logindLocked(ctx, fakeLogind{session: "/s/2", locked: true}); !l || err != nil {
-		t.Errorf("locked: %v %v", l, err)
-	}
-	if l, err := logindLocked(ctx, fakeLogind{session: "/s/2"}); l || err != nil {
-		t.Errorf("unlocked: %v %v", l, err)
-	}
-	if l, err := logindLocked(ctx, fakeLogind{noSess: errors.New("NoSessionForPID")}); l || err != nil {
-		t.Errorf("no session: %v %v", l, err)
-	}
-	if _, err := logindLocked(ctx, fakeLogind{session: "/s/2", hintErr: errors.New("access denied")}); err == nil {
-		t.Error("an unreadable LockedHint must be an error")
+	locked := map[dbus.ObjectPath]bool{"/s/2": true}
+	noPID := logindErr("NoSessionForPID")
+	for _, c := range []struct {
+		name   string
+		l      fakeLogind
+		locked bool
+		err    bool
+	}{
+		{"own session locked", fakeLogind{session: "/s/2", locked: locked}, true, false},
+		{"own session unlocked", fakeLogind{session: "/s/3", locked: locked}, false, false},
+		{"user unit, display locked", fakeLogind{noSess: noPID, display: "/s/2", locked: locked}, true, false},
+		{"user unit, display unlocked", fakeLogind{noSess: noPID, display: "/s/3", locked: locked}, false, false},
+		{"stale XDG_SESSION_ID, display locked", fakeLogind{noSess: logindErr("NoSuchSession"), display: "/s/2", locked: locked}, true, false},
+		{"no graphical session", fakeLogind{noSess: noPID, display: "/", locked: locked}, false, false},
+		{"no such user", fakeLogind{noSess: noPID, noDisp: logindErr("NoSuchUser")}, false, false},
+		{"bus down", fakeLogind{noSess: errors.New("dial unix /run/dbus/system_bus_socket: connection refused")}, false, true},
+		{"display unreadable", fakeLogind{noSess: noPID, noDisp: dbus.Error{Name: "org.freedesktop.DBus.Error.AccessDenied"}}, false, true},
+		{"hint unreadable", fakeLogind{session: "/s/2", hintErr: errors.New("access denied")}, false, true},
+	} {
+		l, err := logindLocked(ctx, c.l)
+		if l != c.locked || (err != nil) != c.err {
+			t.Errorf("%s: locked %v, err %v; want %v, error %v", c.name, l, err, c.locked, c.err)
+		}
 	}
 }

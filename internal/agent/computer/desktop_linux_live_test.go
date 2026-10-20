@@ -28,6 +28,8 @@ func TestDesktopNotesLive(t *testing.T) {
 	}
 	tl := &Tools{Switch: NewSwitch(true, nil), Desktop: d, Activity: &Activity{}, Home: t.TempDir()}
 	defer tl.closeDesktop()
+	locked, err := d.Locked(t.Context())
+	t.Logf("screen locked: %v (%v)", locked, err)
 	// The user is at the computer: the monitor is watching, then they press Shift.
 	if _, err := d.Monitor.Since(t.Context()); err != nil {
 		t.Fatal(err)
