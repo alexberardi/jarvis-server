@@ -115,6 +115,8 @@ type workflowRow struct {
 	State       string
 	WaitingOn   string
 	InboxItemID string
+
+	signal *resumeJob // the signal this drive resumes from (not stored)
 }
 
 // DisplayTitle is title or goal or "your errand".

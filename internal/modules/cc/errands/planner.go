@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
@@ -82,7 +83,7 @@ const (
 
 // NodeMenu is build_errand_menu: a node's available commands (CommandDefinition dicts, as the
 // conversation cached them or report_tools returned them) in the menu shape, minus the deny
-// list.
+// list and the computer-control tools (only a computer_task step's loop calls them).
 func NodeMenu(available []*pyjson.Object) []MenuEntry {
 	var menu []MenuEntry
 	for _, c := range available {
@@ -90,7 +91,7 @@ func NodeMenu(available []*pyjson.Object) []MenuEntry {
 			continue
 		}
 		name := parse.PyStrip(objStr(c, "command_name"))
-		if name == "" || menuDeny[name] {
+		if name == "" || menuDeny[name] || computeruse.IsInternalTool(name) {
 			continue
 		}
 		args := pyjson.NewObject()
@@ -216,7 +217,11 @@ func (s *Service) FullMenu(ctx context.Context, available []*pyjson.Object, hh s
 			out = append(out, c)
 		}
 	}
-	return append(out, server...)
+	out = append(out, server...)
+	if s.computerOffered(ctx, hh) {
+		out = append(out, computerEntry())
+	}
+	return out
 }
 
 // --- prompts (byte-exact) ---

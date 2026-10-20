@@ -32,6 +32,8 @@ const (
 // message or error ("" while pending).
 type RanStep struct {
 	Label, Command, Status, Result string
+	// Progress is a computer task's last few action intents (nil for other steps).
+	Progress []string
 }
 
 // RanRule is what allowed one tool: Scope is household | watch | goal | automation | tool.
@@ -48,6 +50,9 @@ type RanCard struct {
 	Revision                                                                int
 	Steps                                                                   []RanStep
 	Rules                                                                   []RanRule
+	// Started: an errand the user started (its progress card, while a computer task runs), not
+	// one the household's rules ran on its own.
+	Started bool
 }
 
 // RanRuleOf is the card's line for the verdict that allowed tool.
@@ -66,6 +71,9 @@ func RanCardMetadata(c RanCard) map[string]any {
 	steps := make([]any, len(c.Steps))
 	for i, st := range c.Steps {
 		steps[i] = map[string]any{"label": st.Label, "command": st.Command, "status": st.Status, "result": st.Result}
+		if st.Progress != nil {
+			steps[i].(map[string]any)["progress"] = st.Progress
+		}
 	}
 	rules := make([]any, len(c.Rules))
 	for i, r := range c.Rules {
@@ -76,9 +84,13 @@ func RanCardMetadata(c RanCard) map[string]any {
 		rules[i] = map[string]any{"tool": r.Tool, "effect": r.Effect, "scope": r.Scope, "rule_id": id, "note": r.Note,
 			"reason": r.Reason}
 	}
+	cardType := "autonomy_ran"
+	if c.Started {
+		cardType = "errand_progress"
+	}
 	md := map[string]any{
 		"household_id": c.HouseholdID,
-		"card_type":    "autonomy_ran",
+		"card_type":    cardType,
 		"state":        c.State,
 		"source":       map[string]any{"kind": c.SourceKind, "label": c.SourceLabel},
 		"steps":        steps,
@@ -109,13 +121,18 @@ func RanCardBody(c RanCard) string {
 	if c.Answer != "" {
 		lines = append(lines, c.Answer, "")
 	}
-	lines = append(lines, "I ran this on its own because your household's rules allow it.", "")
+	if !c.Started {
+		lines = append(lines, "I ran this on its own because your household's rules allow it.", "")
+	}
 	for i, st := range c.Steps {
 		line := fmt.Sprintf("%d. %s %s", i+1, ranStepIcon[st.Status], st.Label)
 		if st.Result != "" {
 			line += " — " + st.Result
 		}
 		lines = append(lines, line)
+	}
+	if c.Started {
+		return strings.Join(lines, "\n")
 	}
 	lines = append(lines, "", "Allowed by:")
 	for _, r := range c.Rules {
@@ -132,9 +149,10 @@ func RanCardBody(c RanCard) string {
 // past the end) and, per distinct tool, the verdict that allows it now.
 func (s *Service) ranCard(ctx context.Context, w *workflowRow, results []Result, state string) RanCard {
 	c := RanCard{HouseholdID: w.HouseholdID, State: state, WorkflowID: w.ID, PlanID: s.planOf(ctx, w.ID),
-		SourceKind: "errand", SourceLabel: "Errand", Revision: w.Revision, Steps: []RanStep{}, Rules: []RanRule{}}
+		SourceKind: "errand", SourceLabel: "Errand", Revision: w.Revision, Steps: []RanStep{}, Rules: []RanRule{},
+		Started: w.Kind != KindAutorun}
 	var steps []Step
-	for _, st := range w.Steps {
+	for i, st := range w.Steps {
 		cmd := parse.PyStrip(st.Command)
 		if cmd == "" {
 			continue
@@ -153,7 +171,18 @@ func (s *Service) ranCard(ctx context.Context, w *workflowRow, results []Result,
 				rs.Status, rs.Result = "failed", firstNonEmpty(r.Error, "failed")
 			}
 		}
+		if cmd == cmdComputer {
+			if line, intents, ok := s.computerProgress(ctx, w, i, st); ok {
+				rs.Progress = append([]string{}, intents...)
+				if rs.Status == "pending" && line != "" {
+					rs.Result = line
+				}
+			}
+		}
 		c.Steps = append(c.Steps, rs)
+	}
+	if c.Started {
+		return c // the user started it: no rule allowed anything
 	}
 	verdicts := s.decideSteps(ctx, w.HouseholdID, steps, policy.SourceErrandStep)
 	seen := map[string]bool{}
@@ -211,9 +240,16 @@ func (s *Service) ranCardOf(w *workflowRow, c RanCard, summary string) Card {
 	if summary == "" {
 		summary = ranSummary[c.State]
 	}
+	title, category := ranTitlePrefix, CategoryAutonomy
+	if c.Started {
+		title, category = progressTitlePrefix, completionCategory
+		if summary == ranSummary[c.State] && c.State == "running" {
+			summary = "Working on it."
+		}
+	}
 	return Card{
-		HouseholdID: w.HouseholdID, UserID: w.UserID, Title: ranTitlePrefix + w.DisplayTitle(), Summary: summary,
-		Body: RanCardBody(c), Category: CategoryAutonomy, Metadata: RanCardMetadata(c), Push: true,
+		HouseholdID: w.HouseholdID, UserID: w.UserID, Title: title + w.DisplayTitle(), Summary: summary,
+		Body: RanCardBody(c), Category: category, Metadata: RanCardMetadata(c), Push: true,
 		TargetType: targetType(w.UserID),
 	}
 }

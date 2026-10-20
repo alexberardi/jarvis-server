@@ -99,6 +99,8 @@ type Result struct {
 	Data    *pyjson.Object
 	Summary string // a phone call's wrap-up, threaded into later call briefs
 	Control bool   // a control-flow step (an approved request_replan): left out of the tally
+
+	stopped bool // a computer task the user stopped: the run ends stopped (not stored)
 }
 
 func nullStr(s string) any {

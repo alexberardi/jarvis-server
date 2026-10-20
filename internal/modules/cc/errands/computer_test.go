@@ -1,0 +1,503 @@
+package errands
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+)
+
+// Computer tasks in errands (plan P3 piece 11): the real computer.Loop with a fake executor on
+// the computer, the harness's scripted model and fake policy.
+
+// fakeComputer is the agent's computer_observe / computer_act / computer_stop.
+type fakeComputer struct {
+	mu      sync.Mutex
+	url     string
+	els     []computer.Element
+	batches []computer.Batch
+	stops   []string
+	// onAct, when set, runs before each batch is answered (after the batches so far are counted).
+	onAct func(n int)
+}
+
+func (f *fakeComputer) Observe(_ context.Context, o computer.Observe) (computer.Observation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return computer.Observation{URL: f.url, Title: "Shop", Elements: f.els}, nil
+}
+
+func (f *fakeComputer) Act(_ context.Context, b computer.Batch) (computer.ActResult, error) {
+	f.mu.Lock()
+	f.batches = append(f.batches, b)
+	n, hook := len(f.batches), f.onAct
+	f.mu.Unlock()
+	if hook != nil {
+		hook(n)
+	}
+	var res computer.ActResult
+	for i := range b.Actions {
+		res.Results = append(res.Results, computer.StepResult{I: i, OK: true})
+	}
+	return res, nil
+}
+
+func (f *fakeComputer) Stop(_ context.Context, runID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stops = append(f.stops, runID)
+}
+
+func (f *fakeComputer) acted() []computer.Batch {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]computer.Batch(nil), f.batches...)
+}
+
+func (f *fakeComputer) stopped() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.stops...)
+}
+
+// fakeApprovals records the digests it minted tokens for.
+type fakeApprovals struct {
+	mu      sync.Mutex
+	digests []string
+}
+
+func (f *fakeApprovals) Mint(_ context.Context, _, _, _, digest string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.digests = append(f.digests, digest)
+	return "tok-" + digest[:8], nil
+}
+
+func (f *fakeApprovals) minted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.digests...)
+}
+
+// withInts adds integer settings to the harness's booleans.
+type withInts struct {
+	fakeSettings
+	ints map[string]int64
+}
+
+func (s withInts) Int(_ context.Context, key string, _ settings.Scope) int64 { return s.ints[key] }
+
+type cenv struct {
+	*tenv
+	comp *fakeComputer
+	appr *fakeApprovals
+	runs *computer.Store
+}
+
+const shopSite = "shop.example"
+
+// newComputerEnv is the harness with computer tasks on, one computer ("comp-1") with computer
+// control on, and a checkout page on it.
+func newComputerEnv(t *testing.T) *cenv {
+	e := newTenv(t, true)
+	c := &cenv{tenv: e, appr: &fakeApprovals{}, runs: &computer.Store{DB: e.d},
+		comp: &fakeComputer{url: "https://" + shopSite + "/checkout", els: []computer.Element{
+			{Ref: "e1", Role: "button", Name: "Place your order"},
+			{Ref: "e2", Role: "link", Name: "Cart"},
+			{Ref: "e3", Role: "button", Name: "Add to cart"},
+			{Ref: "e4", Role: "link", Name: "Home"},
+			{Ref: "e5", Role: "textbox", Name: "Search"},
+		}}}
+	e.s.Computer = &ComputerTasks{
+		Loop:    &computer.Loop{LLM: e.llm, Exec: c.comp, Policy: e.policy, Audit: e.act, Store: c.runs, Approvals: c.appr},
+		Targets: func(context.Context, string) ([]string, string) { return []string{"comp-1"}, "" },
+	}
+	// The household allows the shop; paying asks (the defaults).
+	e.policy.set(policy.ToolComputerTask+"|"+policy.TargetSite+shopSite, policy.Verdict{Effect: policy.Allow, Reason: "computer task default (site:)"})
+	e.policy.set(policy.ToolComputerTask+"|"+policy.TargetAction+computeruse.CatPay, policy.Verdict{Effect: policy.Ask, Reason: "computer task default (action:pay)"})
+	return c
+}
+
+func computerStep(goal string) Step {
+	args := pyjson.NewObject()
+	args.Set("goal", goal)
+	args.Set("target", "browser")
+	args.Set("site", shopSite)
+	return Step{Command: policy.ToolComputerTask, Args: args, Label: "Order the mug"}
+}
+
+// launchRun inserts a run of kind and queues its first drive, as launch does.
+func (c *cenv) launchRun(id, kind string, steps ...Step) {
+	c.t.Helper()
+	now := dbTime(time.Now())
+	if _, err := c.d.Write.Exec(`INSERT INTO cc_workflows (id, kind, household_id, user_id, node_id, goal, title, steps, cursor,
+		results_json, revision, state, waiting_on, inbox_item_id, created_at, updated_at)
+		VALUES (?, ?, ?, 7, 'node-1', 'order a blue mug', 'Order a mug', ?, 0, '[]', 1, 'waiting', NULL, NULL, ?, ?)`,
+		id, kind, hh, stepsDumps(steps), now, now); err != nil {
+		c.t.Fatal(err)
+	}
+	if err := c.s.enqueueResume(context.Background(), resumeJob{WorkflowID: id, Step: -1, Kind: signalStart}); err != nil {
+		c.t.Fatal(err)
+	}
+}
+
+const (
+	checkoutReply = `{"checkout": {"product": "Blue mug", "price": "$12.99", "currency": "USD", "seller": "Shop Example", "ship_to": "12 Elm St", "card": "4242"}, ` +
+		`"actions": [{"kind": "press", "ref": "e1", "intent": "Place the order"}]}`
+	doneReply = `{"done": true, "summary": "Ordered the blue mug."}`
+)
+
+func (c *cenv) cardTitled(prefix string) (Card, bool) {
+	for _, cd := range c.cards.all() {
+		if strings.HasPrefix(cd.Title, prefix) {
+			return cd, true
+		}
+	}
+	return Card{}, false
+}
+
+func elementLabels(md map[string]any) []string {
+	var out []string
+	els, _ := md["interactive_elements"].([]any)
+	for _, el := range els {
+		if m, ok := el.(map[string]any); ok {
+			out = append(out, m["label"].(string))
+		}
+	}
+	return out
+}
+
+func TestPlannerOffersComputerTask(t *testing.T) {
+	c := newComputerEnv(t)
+	ctx := context.Background()
+	node := []*pyjson.Object{
+		mustObj(t, `{"command_name": "get_weather", "description": "Weather"}`),
+		mustObj(t, `{"command_name": "computer_act", "description": "Act on the computer."}`),
+		mustObj(t, `{"command_name": "computer_observe", "description": "Look at the computer."}`),
+	}
+	got := c.s.FullMenu(ctx, node, hh, ptr(7))
+	var names []string
+	var entry MenuEntry
+	for _, m := range got {
+		names = append(names, m.Command)
+		if m.Command == policy.ToolComputerTask {
+			entry = m
+		}
+	}
+	if strings.Join(names, ",") != "get_weather,computer_task" {
+		t.Fatalf("menu = %v", names)
+	}
+	if !strings.HasPrefix(entry.Description, "Do a multi-step task on the user's computer") {
+		t.Fatalf("entry = %+v", entry)
+	}
+	for _, arg := range []string{"goal", "target", "site", "app", "success"} {
+		if _, ok := entry.Args.Get(arg); !ok {
+			t.Fatalf("args %s missing: %s", arg, pyjson.Dumps(entry.Args, true))
+		}
+	}
+
+	// Without a computer with computer control on, it isn't offered.
+	c.s.Computer.Targets = func(context.Context, string) ([]string, string) { return nil, "Computer control is off." }
+	for _, m := range c.s.FullMenu(ctx, node, hh, ptr(7)) {
+		if m.Command == policy.ToolComputerTask || computeruse.IsInternalTool(m.Command) {
+			t.Fatalf("offered %s without a computer", m.Command)
+		}
+	}
+	c.s.Computer = nil
+	for _, m := range c.s.FullMenu(ctx, node, hh, ptr(7)) {
+		if m.Command == policy.ToolComputerTask {
+			t.Fatal("offered without computer tasks")
+		}
+	}
+}
+
+func TestComputerStepDone(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("computer", `{"thought": "search", "actions": [{"kind": "set_value", "ref": "e5", "text": "blue mug", "intent": "Search for a blue mug"}]}`, doneReply)
+	c.launchRun("wf_c", "errand", computerStep("find a blue mug"))
+	c.idle()
+	w := c.wf("wf_c")
+	if w.State != "done" || len(w.Results) != 1 || !w.Results[0].Success || w.Results[0].Message != "Ordered the blue mug." {
+		t.Fatalf("run = %s %+v", w.State, w.Results)
+	}
+	if b := c.comp.acted(); len(b) != 1 || b[0].Target.Site != shopSite || b[0].Actions[0].Intent != "Search for a blue mug" {
+		t.Fatalf("batches = %+v", b)
+	}
+	run, err := c.runs.ForStep(context.Background(), "wf_c", 0)
+	if err != nil || run.State != computer.RunDone || run.NodeID != "comp-1" || run.Goal != "find a blue mug" {
+		t.Fatalf("computer run = %+v %v", run, err)
+	}
+	if _, ok := c.cardTitled("✅ Errand done: "); !ok {
+		t.Fatalf("cards = %v", c.cards.titles())
+	}
+}
+
+func TestComputerStepNoComputerFails(t *testing.T) {
+	c := newComputerEnv(t)
+	c.s.Computer.Targets = func(context.Context, string) ([]string, string) { return nil, "Computer control is off." }
+	c.launchRun("wf_c", "errand", computerStep("find a blue mug"))
+	c.idle()
+	w := c.wf("wf_c")
+	if w.State != "failed" || len(w.Results) != 1 || w.Results[0].Error != "Computer control is off." {
+		t.Fatalf("run = %s %+v", w.State, w.Results)
+	}
+}
+
+// parkOnCheckout runs a computer step to its checkout confirmation and returns the card.
+func (c *cenv) parkOnCheckout(kind string) Card {
+	c.t.Helper()
+	c.llm.say("computer", checkoutReply, doneReply)
+	c.launchRun("wf_c", kind, computerStep("order a blue mug"))
+	c.idle()
+	if st := c.wfState("wf_c"); st != "waiting" {
+		c.t.Fatalf("state = %s, cards %v", st, c.cards.titles())
+	}
+	card, ok := c.cardTitled(stepTitlePrefix)
+	if !ok {
+		c.t.Fatalf("no confirmation card: %v", c.cards.titles())
+	}
+	return card
+}
+
+func TestCheckoutCardThenApprove(t *testing.T) {
+	c := newComputerEnv(t)
+	card := c.parkOnCheckout("errand")
+	if len(c.comp.acted()) != 0 {
+		t.Fatal("the order ran before the OK")
+	}
+	if !card.Push {
+		t.Fatal("the confirmation isn't pushed")
+	}
+	for _, line := range []string{"Product: Blue mug", "Price: $12.99", "Seller: Shop Example", "Ship to: 12 Elm St", "Card: •••• 4242"} {
+		if !strings.Contains(card.Body, line) {
+			t.Fatalf("body lacks %q:\n%s", line, card.Body)
+		}
+	}
+	co, _ := card.Metadata["checkout"].(map[string]any)
+	if co["product"] != "Blue mug" || co["price"] != "$12.99" || co["seller"] != "Shop Example" || co["ship_to"] != "12 Elm St" || co["card"] != "4242" {
+		t.Fatalf("metadata.checkout = %#v", card.Metadata["checkout"])
+	}
+	if got := strings.Join(elementLabels(card.Metadata), ","); got != "Approve,Cancel" {
+		t.Fatalf("buttons = %s", got)
+	}
+	run, err := c.runs.ForStep(context.Background(), "wf_c", 0)
+	if err != nil || run.Pending == nil {
+		t.Fatalf("run = %+v %v", run, err)
+	}
+	var pending []string
+	for _, h := range run.Pending.Actions {
+		if h.Digest != "" {
+			pending = append(pending, h.Digest)
+		}
+	}
+
+	r := c.tap(CallbackApproveStep, map[string]any{"workflow_id": "wf_c", "step": 0, "revision": card.Metadata["revision"]})
+	if !r.Success {
+		t.Fatalf("approve = %+v", r)
+	}
+	c.idle()
+	if got := c.appr.minted(); !slices.Equal(got, pending) || len(got) != 1 {
+		t.Fatalf("minted %v, pending %v", got, pending)
+	}
+	b := c.comp.acted()
+	if len(b) != 1 || b[0].Actions[0].Intent != "Place the order" || b[0].Actions[0].Approval == "" {
+		t.Fatalf("batches = %+v", b)
+	}
+	if w := c.wf("wf_c"); w.State != "done" || w.Results[0].Message != "Ordered the blue mug." {
+		t.Fatalf("run = %s %+v", w.State, w.Results)
+	}
+}
+
+func TestCheckoutCancelNothingRuns(t *testing.T) {
+	c := newComputerEnv(t)
+	card := c.parkOnCheckout("errand")
+	els, _ := card.Metadata["interactive_elements"].([]any)
+	cancel := els[1].(map[string]any)
+	r := c.tap(cancel["callback"].(string), cancel["data"].(map[string]any))
+	if !r.Success {
+		t.Fatalf("cancel = %+v", r)
+	}
+	c.idle()
+	if st := c.wfState("wf_c"); st != "cancelled" {
+		t.Fatalf("state = %s", st)
+	}
+	run, _ := c.runs.ForStep(context.Background(), "wf_c", 0)
+	if run.State != computer.RunStopped || !run.StopRequested {
+		t.Fatalf("computer run = %+v", run)
+	}
+	if len(c.comp.acted()) != 0 || len(c.appr.minted()) != 0 {
+		t.Fatalf("acted %v, minted %v", c.comp.acted(), c.appr.minted())
+	}
+	if got := c.comp.stopped(); len(got) == 0 || got[0] != run.ID {
+		t.Fatalf("computer_stop = %v", got)
+	}
+	// A late Approve on the cancelled card does nothing.
+	c.tap(CallbackApproveStep, map[string]any{"workflow_id": "wf_c", "step": 0, "revision": card.Metadata["revision"]})
+	c.idle()
+	if len(c.comp.acted()) != 0 {
+		t.Fatal("the order ran after Cancel")
+	}
+}
+
+func TestSpendLimitAutoApproves(t *testing.T) {
+	c := newComputerEnv(t)
+	c.s.Settings = withInts{c.set, map[string]int64{SettingAutoApproveCents: 2000}}
+	c.llm.say("computer", checkoutReply, doneReply)
+	c.launchRun("wf_c", "errand", computerStep("order a blue mug"))
+	c.idle()
+	if _, ok := c.cardTitled(stepTitlePrefix); ok {
+		t.Fatalf("asked within the spend limit: %v", c.cards.titles())
+	}
+	if w := c.wf("wf_c"); w.State != "done" {
+		t.Fatalf("state = %s %+v", w.State, w.Results)
+	}
+	if b := c.comp.acted(); len(b) != 1 || b[0].Actions[0].Approval == "" {
+		t.Fatalf("batches = %+v", b)
+	}
+	prog, ok := c.cardTitled(progressTitlePrefix)
+	if !ok {
+		t.Fatalf("no progress card: %v", c.cards.titles())
+	}
+	up, _ := c.cards.update(c.cards.ids[slices.IndexFunc(c.cards.all(), func(cd Card) bool { return cd.Title == prog.Title })])
+	if !strings.Contains(up.Body, "within your $20.00 spend limit") {
+		t.Fatalf("progress card doesn't say it approved:\n%s", up.Body)
+	}
+
+	// Over the limit, it asks.
+	c2 := newComputerEnv(t)
+	c2.s.Settings = withInts{c2.set, map[string]int64{SettingAutoApproveCents: 1000}}
+	c2.parkOnCheckout("errand")
+}
+
+func TestStopRunningComputerStep(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("computer", `{"thought": "a", "actions": [{"kind": "press", "ref": "e2", "intent": "Open the cart"}]}`,
+		`{"thought": "b", "actions": [{"kind": "press", "ref": "e4", "intent": "Go home"}]}`)
+	tapped := make(chan CallbackResult, 1)
+	c.comp.onAct = func(n int) {
+		if n == 1 {
+			tapped <- c.tap(CallbackStop, map[string]any{"workflow_id": "wf_c"})
+		}
+	}
+	c.launchRun("wf_c", "errand", computerStep("browse"))
+	c.idle()
+	r := <-tapped
+	if ib, _ := r.ContextData["inbox"].(map[string]any); !r.Success || ib["title"] != "🛑 Stopping the errand" {
+		t.Fatalf("stop = %+v", r)
+	}
+	if n := len(c.comp.acted()); n != 1 {
+		t.Fatalf("acted %d batches after Stop", n)
+	}
+	run, _ := c.runs.ForStep(context.Background(), "wf_c", 0)
+	if run.State != computer.RunStopped || !run.StopRequested {
+		t.Fatalf("computer run = %+v", run)
+	}
+	if got := c.comp.stopped(); len(got) == 0 || got[0] != run.ID {
+		t.Fatalf("computer_stop = %v", got)
+	}
+	if st := c.wfState("wf_c"); st != "cancelled" {
+		t.Fatalf("state = %s", st)
+	}
+	if _, ok := c.cardTitled("🛑 Errand stopped: "); !ok {
+		t.Fatalf("cards = %v", c.cards.titles())
+	}
+}
+
+func TestProgressCardUpdates(t *testing.T) {
+	c := newComputerEnv(t)
+	var intents []string
+	var replies []string
+	for i := 1; i <= 6; i++ {
+		intent := "Look at item " + string(rune('0'+i))
+		intents = append(intents, intent)
+		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "e3", "intent": "`+intent+`"}]}`)
+	}
+	c.llm.say("computer", append(replies, doneReply)...)
+	var seen []Card
+	c.comp.onAct = func(n int) {
+		if n == 2 {
+			if up, ok := c.cards.update("item-1"); ok {
+				seen = append(seen, up)
+			}
+		}
+	}
+	c.launchRun("wf_c", "errand", computerStep("browse"))
+	c.idle()
+	prog := c.cards.all()[0]
+	if !strings.HasPrefix(prog.Title, progressTitlePrefix) || prog.Metadata["workflow_id"] != "wf_c" {
+		t.Fatalf("first card = %+v", prog)
+	}
+	if len(seen) != 1 {
+		t.Fatal("the progress card wasn't updated while the step ran")
+	}
+	steps := seen[0].Metadata["steps"].([]any)
+	st := steps[0].(map[string]any)
+	if st["result"] != "Working in "+shopSite+": "+intents[0] || seen[0].Metadata["state"] != "running" {
+		t.Fatalf("step line = %#v", st)
+	}
+	if got := elementLabels(seen[0].Metadata); len(got) != 1 || got[0] != "Stop" {
+		t.Fatalf("buttons = %v", got)
+	}
+	// At the end: the last five intents, and the step done.
+	up, _ := c.cards.update("item-1")
+	st = up.Metadata["steps"].([]any)[0].(map[string]any)
+	prg, _ := st["progress"].([]string)
+	if !slices.Equal(prg, intents[1:]) || st["status"] != "ok" || up.Metadata["state"] != "done" {
+		t.Fatalf("final step = %#v state %v", st, up.Metadata["state"])
+	}
+}
+
+func TestLiveStartedStillDecides(t *testing.T) {
+	c := newComputerEnv(t)
+	if c.s.autonomous(context.Background(), hh) {
+		t.Fatal("the household runs errands on its own; this is about a run the user started")
+	}
+	c.parkOnCheckout("errand")
+	var targets []string
+	for _, a := range c.policy.calls {
+		if a.Tool == policy.ToolComputerTask {
+			targets = append(targets, a.Target)
+		}
+	}
+	if !slices.Contains(targets, policy.TargetAction+computeruse.CatPay) {
+		t.Fatalf("policy saw %v", targets)
+	}
+}
+
+func TestComputerAskThenContinue(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("computer", `{"ask": "Which colour, blue or navy?", "reason": "unclear"}`,
+		`{"thought": "x", "actions": [{"kind": "press", "ref": "e3", "intent": "Add the navy mug"}]}`, doneReply)
+	c.launchRun("wf_c", "errand", computerStep("order a mug"))
+	c.idle()
+	card, ok := c.cardTitled(questionTitlePrefix)
+	if !ok || !strings.Contains(card.Body, "Which colour, blue or navy?") || !card.Push {
+		t.Fatalf("cards = %v", c.cards.titles())
+	}
+	if got := strings.Join(elementLabels(card.Metadata), ","); got != "Continue,Stop" {
+		t.Fatalf("buttons = %s", got)
+	}
+	els := card.Metadata["interactive_elements"].([]any)
+	data := els[0].(map[string]any)["data"].(map[string]any)
+	data["instruction"] = "navy"
+	if r := c.tap(CallbackAnswerStep, data); !r.Success {
+		t.Fatalf("continue = %+v", r)
+	}
+	c.idle()
+	if w := c.wf("wf_c"); w.State != "done" {
+		t.Fatalf("state = %s %+v", w.State, w.Results)
+	}
+	reqs := c.llm.requests("computer")
+	last := reqs[len(reqs)-2] // the round after the answer
+	if !strings.Contains(last.Messages[1].Content.Parts[0].Text, "navy") {
+		t.Fatal("the answer didn't reach the model")
+	}
+}

@@ -147,6 +147,30 @@ func (s *Store) Get(ctx context.Context, id string) (*Run, error) {
 	return &r, nil
 }
 
+// ForStep reads the newest run of an errand step (ErrNoRun when it has none).
+func (s *Store) ForStep(ctx context.Context, workflowID string, step int) (*Run, error) {
+	return s.newest(ctx, `workflow_id = ? AND step = ?`, workflowID, step)
+}
+
+// Active reads the newest run of an errand that hasn't ended (running, waiting or paused), or
+// ErrNoRun.
+func (s *Store) Active(ctx context.Context, workflowID string) (*Run, error) {
+	return s.newest(ctx, `workflow_id = ? AND state IN ('running', 'waiting', 'paused')`, workflowID)
+}
+
+func (s *Store) newest(ctx context.Context, where string, args ...any) (*Run, error) {
+	var id string
+	err := s.DB.Read.QueryRowContext(ctx, `SELECT id FROM cc_computer_runs WHERE `+where+
+		` ORDER BY created_at DESC, rowid DESC LIMIT 1`, args...).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNoRun
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, id)
+}
+
 // Save writes a run's progress: state, rounds, history, the held batch, model and error.
 func (s *Store) Save(ctx context.Context, r *Run) error {
 	hist, err := historyJSON(r.History)

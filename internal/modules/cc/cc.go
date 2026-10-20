@@ -59,7 +59,7 @@ func Definitions() []settings.Definition {
 		voiceDefinitions(prompts.DefaultPersona), followUpGateDefinitions(), packageDefinitions(), smartHomeDefinitions(),
 		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(),
 		householdSettingDefinitions(), compactionDefinitions(), watchDefinitions(),
-		recordingDefinitions())))
+		recordingDefinitions(), computerDefinitions())))
 }
 
 func nodeDefinitions() []settings.Definition {

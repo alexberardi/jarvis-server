@@ -46,6 +46,8 @@ func promptKind(p string) string {
 		return "plan"
 	case strings.HasPrefix(p, "You are Jarvis giving the user the FINAL report"):
 		return "compose"
+	case strings.HasPrefix(p, "You are Jarvis, doing a task on the user's computer"):
+		return "computer"
 	}
 	return "?"
 }
@@ -301,7 +303,8 @@ func toolDef(name, desc string, props ...any) *pyjson.Object {
 		"parameters", servertools.Obj("type", "object", "properties", servertools.Obj(props...))))
 }
 
-// fakePolicy answers per tool (default ask) and counts its calls.
+// fakePolicy answers per tool and target ("tool|target", then "tool"; default ask) and counts its
+// calls.
 type fakePolicy struct {
 	mu       sync.Mutex
 	verdicts map[string]policy.Verdict
@@ -312,6 +315,9 @@ func (f *fakePolicy) Decide(_ context.Context, _ string, a policy.Action) policy
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, a)
+	if v, ok := f.verdicts[a.Tool+"|"+a.Target]; ok && a.Target != "" {
+		return v
+	}
 	if v, ok := f.verdicts[a.Tool]; ok {
 		return v
 	}

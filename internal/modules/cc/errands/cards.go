@@ -153,8 +153,8 @@ func (s *Service) postReplanCard(ctx context.Context, w *workflowRow, reason str
 		Body: replanCardBody(title, reason, add), Category: planCategory,
 		Metadata: ReplanCardMetadata(w.ID, w.Revision, add, w.HouseholdID), Push: true, TargetType: targetType(w.UserID),
 	}
-	if w.Kind == KindAutorun {
-		s.Cards.Post(ctx, c) // the run's stored card is its "Ran on its own" card
+	if w.tracksProgress() {
+		s.Cards.Post(ctx, c) // the run's stored card is its "Ran on its own" or progress card
 		return
 	}
 	id := ""
@@ -177,6 +177,7 @@ var statusCard = map[string][2]string{
 	"partial": {"⚠️", "finished with issues"},
 	"failed":  {"⚠️", "couldn't finish"},
 	"timeout": {"⏱️", "didn't finish"},
+	"stopped": {"🛑", "stopped"},
 }
 
 // postCompletionCard is _post_errand_completion_card: ONE honest card per finished errand, no

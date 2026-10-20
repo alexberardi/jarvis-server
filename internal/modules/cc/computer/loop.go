@@ -24,6 +24,9 @@ const (
 	SettingMaxRounds  = "computer.max_rounds"
 	SettingMaxMinutes = "computer.max_minutes"
 	SettingModel      = "computer.model"
+	// SettingAutoApproveCents is the spend limit: a checkout at most this many cents is approved
+	// without asking (0 = off). The errand step reads it (piece 11).
+	SettingAutoApproveCents = "computer.auto_approve_cents"
 
 	defaultMaxRounds  = 40
 	defaultMaxMinutes = 20
@@ -114,6 +117,9 @@ type Task struct {
 	Approved []string
 	// Answer is the user's reply to the run's last question.
 	Answer string
+	// Progress, when set, is called after every round with the run as saved (its history), so
+	// the errand's card can show what the task is doing.
+	Progress func(run *Run)
 }
 
 // Outcome is where a Run call ended.
@@ -254,6 +260,9 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		}
 		if err := l.Store.Save(ctx, run); err != nil {
 			return l.end(ctx, run, Outcome{State: StateFailed, Summary: "I couldn't save the task's progress."})
+		}
+		if t.Progress != nil {
+			t.Progress(run)
 		}
 	}
 }
