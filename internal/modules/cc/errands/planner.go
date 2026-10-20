@@ -79,6 +79,9 @@ const (
 	cmdReplan  = "request_replan"
 	cmdPhone   = "make_phone_call"
 	cmdWaitFor = "wait_for"
+	// The cc module's file tools (spreadsheet_tools.go), offered with computer_task.
+	cmdReadFile   = "read_computer_file"
+	cmdWriteSheet = "write_spreadsheet"
 )
 
 // NodeMenu is build_errand_menu: a node's available commands (CommandDefinition dicts, as the
@@ -141,6 +144,9 @@ func (s *Service) enabledServerTools(ctx context.Context, hh string, speaker *in
 		if s.Settings == nil || s.Settings.Bool(ctx, settingRecallEnabled, sc) {
 			names = append(names, "recall")
 		}
+	}
+	if s.computerOffered(ctx, hh) {
+		names = append(names, cmdReadFile, cmdWriteSheet)
 	}
 	out := names[:0]
 	for _, n := range names {
@@ -239,6 +245,23 @@ const decompositionRule = "Create a SEPARATE step for EACH distinct action the u
 	"into one step and do not drop an action. Only include actions the user " +
 	"actually asked for.\n\n"
 
+// budgetRule is the decomposition rule's line for budgets (plan P3 piece 13), in the prompts
+// whose menu has write_spreadsheet: the rows are only known once the statements have been read.
+const budgetRule = "BUDGETS: for a budget or a spending report from statements, download each statement " +
+	"with computer_task, then read each one with read_computer_file, then end the plan with a " +
+	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with every " +
+	"transaction categorised and a total per category; the report then says where the money went.\n\n"
+
+// budgetRuleFor is budgetRule when menu offers write_spreadsheet, else "".
+func budgetRuleFor(menu []MenuEntry) string {
+	for _, c := range menu {
+		if c.Command == cmdWriteSheet {
+			return budgetRule
+		}
+	}
+	return ""
+}
+
 const closingDirective = "Think step by step: list each action the user wants and its order, then output " +
 	"ONLY the final JSON object and nothing after it."
 
@@ -271,7 +294,7 @@ func BuildPrompt(goal string, menu []MenuEntry) string {
 		"list of steps, choosing ONLY from the available commands below. Fill each " +
 		"step's args from that command's arg spec, using the user's own words, and " +
 		"give each step a short human-readable label.\n\n" +
-		decompositionRule +
+		decompositionRule + budgetRuleFor(menu) +
 		replanCheckpointRule +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
 		"User's goal: " + goal + "\n\n" +
@@ -287,7 +310,7 @@ func BuildRefinePrompt(summary string, current []Step, instruction string, menu 
 	return "You are Jarvis's errand planner revising an EXISTING plan. Apply the " +
 		"user's change to the current plan, keeping the parts they didn't ask to " +
 		"change and choosing ONLY from the available commands.\n\n" +
-		decompositionRule +
+		decompositionRule + budgetRuleFor(menu) +
 		"Current plan: " + summary + "\n" +
 		"Current steps: " + stepsDumps(current) + "\n\n" +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
@@ -306,7 +329,7 @@ func BuildReplanPrompt(goal string, done []Step, progress, reason string, menu [
 		"needed to finish the goal BASED ON those results, choosing ONLY from the " +
 		"available commands. Return ONLY the steps still to run (do not repeat the ones " +
 		"already done).\n\n" +
-		decompositionRule +
+		decompositionRule + budgetRuleFor(menu) +
 		"Goal: " + goal + "\n" +
 		"Steps already run: " + stepsDumps(done) + "\n" +
 		"What happened:\n" + progress + "\n\n" +
@@ -599,6 +622,9 @@ func compactResultData(data *pyjson.Object, limit int) string {
 	return truncRunes(strings.Join(parts, "; "), limit)
 }
 
+// replanFileText is how much of a file read_computer_file read the replan sees, per step.
+const replanFileText = 12000
+
 // summarizeProgress is _summarize_progress. It pairs done[i] with results[i] (legacy §8.10).
 func summarizeProgress(done []Step, results []Result) string {
 	var lines []string
@@ -615,6 +641,10 @@ func summarizeProgress(done []Step, results []Result) string {
 			r = results[i]
 		}
 		detail := firstNonEmpty(r.Message, r.Summary, compactResultData(r.Data, 320), r.Error)
+		if text := truthyStr(r.Data, "text"); r.Success && r.Command == cmdReadFile && text != "" {
+			// A statement read for the replan to categorise: its text, not just "Read it".
+			detail += "\n  " + strings.ReplaceAll(strings.TrimRight(truncRunes(text, replanFileText), "\n"), "\n", "\n  ")
+		}
 		if detail == "" {
 			if r.Success {
 				detail = "done"

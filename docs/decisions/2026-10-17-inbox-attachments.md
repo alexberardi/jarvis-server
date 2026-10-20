@@ -37,7 +37,7 @@ Allowed: `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `video/mp4`, `vid
 type comes from the content's magic bytes (`http.DetectContentType`, plus an ISO BMFF `ftyp`
 check for MP4 that refuses HEIF/AVIF/QuickTime brands). A declared `Content-Type` other than
 `application/octet-stream` must agree, so a mislabelled file is refused rather than guessed.
-SVG is not allowed (it is a script vehicle).
+SVG is not allowed (it is a script vehicle). (Amended 2026-10-20: jarvisd's own errand spreadsheets may be `.xlsx`, in process only; see [2026-10-20-errand-spreadsheets](2026-10-20-errand-spreadsheets.md).)
 
 Bytes go to jarvisd's blob store (the FS backend under the data dir, not MinIO),
 content-addressed at `inbox/sha256/<ab>/<sha256>`. Identical files share one blob. Rows are in

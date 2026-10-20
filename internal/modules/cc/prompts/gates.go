@@ -55,7 +55,7 @@ var textPathWhitelist = []string{
 // ServerToolAllowed is the gate itself: web tools need web search on; remember/forget need a
 // known speaker and memory on; recall additionally needs recall on; the watch tools need watches
 // on and a known speaker (A8); the recording and computer control tools a computer in the
-// household and a known speaker. Every other tool passes.
+// household and a known speaker; the file tools never (errand steps only). Every other tool passes.
 func ServerToolAllowed(name string, g ToolGates) bool {
 	switch name {
 	case "deep_research", "quick_search":
@@ -68,6 +68,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.Watches && g.SpeakerKnown
 	case "start_recording", "stop_recording", "enable_computer_control", "disable_computer_control", "computer_control_status":
 		return g.Computers && g.SpeakerKnown
+	case "read_computer_file", "write_spreadsheet":
+		return false // errand steps only: the planner offers them with computer_task
 	}
 	if g.PhotoTools[name] {
 		return g.ChatPhotos

@@ -61,6 +61,8 @@ func (m *Module) registerServerTools() {
 	m.tools.Register(&cancelWatchTool{m: m})
 	m.tools.Register(&startRecordingTool{m: m}) // "record this macro" (recording_tools.go)
 	m.tools.Register(&stopRecordingTool{m: m})
+	m.tools.Register(&readComputerFileTool{m: m}) // errand steps: statements and spreadsheets (spreadsheet_tools.go)
+	m.tools.Register(&writeSpreadsheetTool{m: m})
 	m.tools.Register(&enableComputerControlTool{m: m}) // "enable computer control" (computer_voice.go)
 	m.tools.Register(&disableComputerControlTool{m: m})
 	m.tools.Register(&computerControlStatusTool{m: m})

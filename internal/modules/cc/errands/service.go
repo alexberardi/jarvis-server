@@ -117,7 +117,13 @@ type Card struct {
 	// withhold it: Post then returns "".
 	Gated     bool
 	DedupeKey string
+	// AttachmentIDs are files the errand made (write_spreadsheet's), uploaded as
+	// AttachmentOwner, for the card to carry.
+	AttachmentIDs []string
 }
+
+// AttachmentOwner owns the inbox attachments errand steps upload for their cards.
+const AttachmentOwner = "server:errands"
 
 // Cards posts and updates inbox cards through the notify service (D31).
 type Cards interface {

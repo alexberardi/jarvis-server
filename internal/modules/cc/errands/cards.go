@@ -3,6 +3,7 @@ package errands
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -203,10 +204,35 @@ func (s *Service) postCompletionCard(ctx context.Context, hh, title string, agg 
 	if agg.Answer != "" {
 		md["answer"] = agg.Answer // the report in full (#232); the summary is its first line
 	}
+	ids, files := stepFiles(agg.Results)
+	if len(files) > 0 {
+		md["files"] = files
+	}
 	s.Cards.Post(ctx, Card{
 		HouseholdID: hh, UserID: uid, Title: ih[0] + " Errand " + ih[1] + ": " + title, Summary: summary, Body: body,
-		Category: completionCategory, Metadata: md, Push: true, TargetType: targetType(uid),
+		Category: completionCategory, Metadata: md, Push: true, TargetType: targetType(uid), AttachmentIDs: ids,
 	})
+}
+
+// stepFiles are the files the run's steps saved on the computer (write_spreadsheet): their
+// attachments' ids and, for the card's metadata, their names and paths there.
+func stepFiles(results []Result) (ids []string, files []any) {
+	for _, r := range results {
+		if !r.Success || r.Command != cmdWriteSheet || r.Data == nil {
+			continue
+		}
+		if p := truthyStr(r.Data, "path"); p != "" {
+			files = append(files, map[string]any{"name": path.Base(strings.ReplaceAll(p, `\`, "/")), "path": p})
+		}
+		v, _ := r.Data.Get("attachment_ids")
+		l, _ := v.([]any)
+		for _, x := range l {
+			if id, ok := x.(string); ok && id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids, files
 }
 
 // postCouldntPlanCard is _post_couldnt_plan_card (never-vanish: the voice ack promised a card).

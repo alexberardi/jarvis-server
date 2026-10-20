@@ -293,6 +293,17 @@ func (c errandCards) Post(ctx context.Context, card errands.Card) string {
 			DedupeKey: card.DedupeKey, Push: card.Push})
 		return id
 	}
+	if len(card.AttachmentIDs) > 0 {
+		in := notifications.NewInboxItem{HouseholdID: card.HouseholdID, UserID: card.UserID, Title: card.Title, Summary: card.Summary,
+			Body: card.Body, Category: card.Category, Metadata: card.Metadata, AttachmentIDs: card.AttachmentIDs,
+			AttachmentOwner: errands.AttachmentOwner}
+		id, err := c.m.postInboxItemWith(ctx, in, card.Push, card.TargetType)
+		if err == nil {
+			return id
+		}
+		// The card matters more than its file (the file is on the computer either way).
+		c.m.deps.Log.Warn("cc: errand card attachments refused; posting it without", "err", err)
+	}
 	return c.m.postInboxItem(ctx, card.HouseholdID, card.UserID, card.Title, card.Summary, card.Body, card.Category,
 		card.Metadata, card.Push, card.TargetType)
 }

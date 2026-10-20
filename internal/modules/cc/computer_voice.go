@@ -94,6 +94,11 @@ const (
 var genericComputerNames = map[string]bool{"": true, "this": true, "here": true, "computer": true, "thiscomputer": true,
 	"thecomputer": true, "mycomputer": true, "thismachine": true, "mymachine": true, "thislaptop": true, "mylaptop": true}
 
+// computerKey is a computer's name as the model passed it, compacted (genericComputerNames).
+func computerKey(named string) string {
+	return compactName(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(named)), "the "), "my "))
+}
+
 // computerPick is what pickComputer found: the computers in reach, the one to act on, or a
 // refusal to say instead.
 type computerPick struct {
@@ -122,7 +127,7 @@ func (m *Module) pickComputer(ctx context.Context, turn servertools.Turn, named 
 			p.reach = append(p.reach, c)
 		}
 	}
-	key := compactName(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(named)), "the "), "my "))
+	key := computerKey(named)
 	if !genericComputerNames[key] {
 		p.hasNamed = true
 		var hits []voiceComputer
