@@ -38,6 +38,10 @@ func TestClassify(t *testing.T) {
 		{"share switch", press, &Element{Role: "switch", Name: "Share my location"}, web, CatSharing, LevelConfirm},
 		{"subscribe switch", press, &Element{Role: "switch", Name: "Subscribe"}, web, CatSubscribe, LevelConfirm},
 		{"send button still asks", press, btn("Send message"), web, CatSend, LevelConfirm},
+		// setting a checkbox's state is pressing it
+		{"set a delete checkbox", set("checked"), &Element{Role: "checkbox", Name: "Delete my data"}, web, CatDelete, LevelConfirm},
+		{"select a share radio", Action{Kind: "select", Intent: "x", Ref: "e2", Text: "checked"}, &Element{Role: "radio", Name: "Share with everyone"}, web, CatSharing, LevelConfirm},
+		{"set the newsletter checkbox", set("unchecked"), &Element{Role: "checkbox", Name: "Send me the monthly newsletter"}, web, "", LevelNone},
 		// pay near misses
 		{"payment methods link", press, link("Payment methods"), web, "", LevelNone},
 		{"add to cart", press, btn("Add to cart"), web, "", LevelNone},

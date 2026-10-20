@@ -583,3 +583,22 @@ func TestUnknownToolNotHandled(t *testing.T) {
 		}
 	}
 }
+
+// set_value or select on a checkbox, radio button or switch sets its state (the extension's
+// check op), where a press would toggle it whatever it was.
+func TestSetValueChecksABox(t *testing.T) {
+	tl, b, _ := testTools(t)
+	b.snap.Elements = append(b.snap.Elements,
+		computeruse.SnapElement{Ref: "e5", Role: "checkbox", Name: "Send me the monthly newsletter"},
+		computeruse.SnapElement{Ref: "e6", Role: "radio", Name: "standard"})
+	observe(t, tl, "cr_1")
+	rs, _ := act(t, tl, "cr_1", []computeruse.Action{
+		{Kind: "set_value", Ref: "e5", Text: "unchecked", Intent: "no newsletter"},
+		{Kind: "select", Ref: "e6", Text: "checked", Intent: "the standard plot"},
+		{Kind: "set_value", Ref: "e1", Text: "mug", Intent: "search"},
+	})
+	wantCodes(t, rs, "ok", "ok", "ok")
+	if strings.Join(b.acts, "|") != "check e5 unchecked|check e6 checked|set_value e1 mug" {
+		t.Fatalf("acts %v", b.acts)
+	}
+}

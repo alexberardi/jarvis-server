@@ -494,6 +494,10 @@ func (t *Tools) do(ctx context.Context, a actArgs, action computeruse.Action, ru
 	case "press":
 		return elementAct("press", "", nil)
 	case "set_value", "select":
+		if isToggle(run.Snap, action.Ref) {
+			// A state, not a toggle: "unchecked" on a box that is unchecked leaves it so.
+			return elementAct("check", action.Text, nil)
+		}
 		return elementAct(action.Kind, action.Text, nil)
 	case "type":
 		if action.Ref != "" {
@@ -523,6 +527,15 @@ func (t *Tools) do(ctx context.Context, a actArgs, action computeruse.Action, ru
 	}
 	return "browser_window", fmt.Errorf("a browser task acts on page elements by ref (press, set_value, select, "+
 		"keypress with a ref and Enter, Escape, Tab or arrows; navigate); %s by coordinates or at the focus is for desktop tasks", action.Kind)
+}
+
+// isToggle reports whether ref is a checkbox, radio button or switch in snap.
+func isToggle(snap *computeruse.Snapshot, ref string) bool {
+	if snap == nil {
+		return false
+	}
+	el := snap.Find(ref)
+	return el != nil && computeruse.IsToggle(el.Element())
 }
 
 // hostOf is rawURL's host name, lower case ("" when it has none).
