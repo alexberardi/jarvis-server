@@ -40,7 +40,8 @@ func TestParseDesktopTrace(t *testing.T) {
 			{Seq: 7, TS: 1760000005000, Kind: "input", App: "Bank", Element: &desktopElement{Role: "passwordtext", Name: "Password"}, Masked: true},
 		}},
 		{"desktop_wayland_trace.json", []desktopEvent{
-			{Seq: 1, TS: 1760000000000, Kind: "click", App: "org.gnome.TextEditor", X: 1200, Y: 340, Window: notesWin, Context: "none"},
+			{Seq: 1, TS: 1760000000000, Kind: "click", App: "org.gnome.TextEditor", X: 1200, Y: 340, Window: notesWin, Context: "none",
+				KeyframePoint: &desktopPoint{X: 200, Y: 340}},
 			// Typing with no accessibility context is masked: the recorder couldn't tell a password.
 			{Seq: 3, TS: 1760000001800, Kind: "input", App: "org.gnome.TextEditor", Masked: true, Window: notesWin, Context: "none"},
 			{Seq: 4, TS: 1760000002500, Kind: "key", App: "org.gnome.TextEditor", Key: "Ctrl+s", Window: notesWin, Context: "none"},
@@ -48,7 +49,8 @@ func TestParseDesktopTrace(t *testing.T) {
 		}},
 		{"desktop_macos_trace.json", []desktopEvent{
 			{Seq: 1, TS: 1760000000000, Kind: "click", App: "com.apple.Notes", X: 310, Y: 62,
-				Element: &desktopElement{Role: "AXButton", Name: "New Note", AXPath: "AXWindow/AXToolbar/AXButton#new"}},
+				Element: &desktopElement{Role: "AXButton", Name: "New Note", AXPath: "AXWindow/AXToolbar/AXButton#new"},
+				KeyframePoint: &desktopPoint{X: 310, Y: 62}},
 			{Seq: 2, TS: 1760000001000, Kind: "input", App: "com.apple.Notes", Value: "Call the dentist",
 				Element: &desktopElement{Role: "AXTextArea", Name: "Note body", AXPath: "AXWindow/AXScrollArea/AXTextArea"}},
 			{Seq: 3, TS: 1760000002000, Kind: "input", App: "com.apple.Notes", Value: "Todo",

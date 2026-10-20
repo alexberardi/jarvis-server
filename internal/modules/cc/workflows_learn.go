@@ -189,6 +189,14 @@ type desktopEvent struct {
 	// Context is "none" when the recording had no accessibility context: no element, and
 	// nothing the recorder could mask.
 	Context string `json:"context,omitempty"`
+	// KeyframePoint: the event has a keyframe with its point marked, here in the JPEG's pixels
+	// (Wayland); the agent uploads it after the trace (recording_keyframes.go).
+	KeyframePoint *desktopPoint `json:"keyframe_point,omitempty"`
+}
+
+type desktopPoint struct {
+	X int `json:"x"`
+	Y int `json:"y"`
 }
 
 type desktopElement struct {
@@ -674,7 +682,14 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 // with source "ax", so a replay finds it again; one without (no accessibility context, a key
 // with nothing focused) keeps only the point, the app and the window.
 func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandidate, out learnOutput) (TaughtWorkflow, error) {
+	w, _, err := buildDesktopSteps(rec, evs, cands, out)
+	return w, err
+}
+
+// buildDesktopSteps is buildDesktopWorkflow that also returns each step's event numbers.
+func buildDesktopSteps(rec Recording, evs []desktopEvent, cands []paramCandidate, out learnOutput) (TaughtWorkflow, [][]int, error) {
 	w := newDraft(rec, out)
+	var stepNums [][]int
 	subs := learnParams(&w, out, cands)
 	for _, s := range out.Steps {
 		nums := stepEvents(s.EventSeqs, len(evs))
@@ -702,12 +717,17 @@ func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandid
 			continue
 		}
 		step.Risk = risk
+		had := len(w.Steps)
 		addStep(&w, step, subs[n])
+		if len(w.Steps) > had {
+			stepNums = append(stepNums, nums)
+		}
 	}
 	// No URL or download on a desktop: the model's text or screen check, if any.
 	sc := successCheck(out.Success, nil)
 	sc.URLContains = ""
-	return finishDraft(w, sc)
+	w, err := finishDraft(w, sc)
+	return w, stepNums, err
 }
 
 // newDraft is the draft's owner, name and triggers.
@@ -1020,7 +1040,7 @@ func (m *Module) registerWorkflowLearning() {
 				return nil, queue.Permanent(err)
 			}
 			return nil, m.learnFromRecording(ctx, p.RecordingID)
-		}, MaxAttempts: 3, Lease: 10 * time.Minute})
+		}, MaxAttempts: learnMaxAttempts, Backoff: learnBackoff, Lease: 10 * time.Minute})
 	}
 }
 
@@ -1065,6 +1085,7 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	var (
 		system, prompt string
 		build          func(learnOutput) (TaughtWorkflow, error)
+		note           string // for the card: what the draft lacks (naming steps by sight)
 	)
 	if rec.Mode == "browser" {
 		evs, err := parseTrace(rec.Trace)
@@ -1085,9 +1106,18 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 		if len(evs) == 0 {
 			return queue.Permanent(errors.New("the recording has no events"))
 		}
+		if err := m.awaitKeyframes(ctx, *rec, evs); err != nil {
+			return err
+		}
 		cands := desktopParamCandidates(evs)
 		system, prompt = desktopLearnSystemPrompt, desktopLearnPrompt(evs, cands, rec.Narration)
-		build = func(out learnOutput) (TaughtWorkflow, error) { return buildDesktopWorkflow(*rec, evs, cands, out) }
+		build = func(out learnOutput) (TaughtWorkflow, error) {
+			w, nums, err := buildDesktopSteps(*rec, evs, cands, out)
+			if err == nil {
+				note = m.nameStepsBySight(ctx, *rec, &w, evs, nums)
+			}
+			return w, err
+		}
 	}
 	if m.LLM == nil {
 		return errors.New("no llm module")
@@ -1121,14 +1151,14 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	}
 	m.deps.Log.Info("cc: workflow learnt from a recording", "recording", id, "mode", rec.Mode, "workflow", stored.ID,
 		"steps", len(stored.Steps), "params", len(stored.Params))
-	m.postLearnedCard(ctx, stored)
+	m.postLearnedCard(ctx, stored, note)
 	return nil
 }
 
 // postLearnedCard asks the workflow's owner to review it. The admin's inbox shows the body as
 // markdown, where the Review link opens the workflow's page (the server doesn't know the
 // admin's public address, so the link is the SPA path, which metadata.path also carries).
-func (m *Module) postLearnedCard(ctx context.Context, w TaughtWorkflow) {
+func (m *Module) postLearnedCard(ctx context.Context, w TaughtWorkflow, note string) {
 	path := "/workflows/" + w.ID
 	title := `I learned "` + w.Name + `"`
 	summary := fmt.Sprintf("%s (%d step%s). Review it.", title, len(w.Steps), plural(len(w.Steps)))
@@ -1147,6 +1177,9 @@ func (m *Module) postLearnedCard(ctx context.Context, w TaughtWorkflow) {
 			names[i] = p.Name
 		}
 		fmt.Fprintf(&b, "\nWhat changes each time: %s.\n", strings.Join(names, ", "))
+	}
+	if note != "" {
+		b.WriteString("\n" + note + "\n")
 	}
 	b.WriteString("\n[Review](" + path + ")\n")
 	uid := w.OwnerID
