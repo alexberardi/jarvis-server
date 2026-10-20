@@ -288,6 +288,16 @@ func TestDoneNamesDownloads(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 
+	// No Downloads folder yet when the task began: every file in it at the end is new.
+	e = newEnv(t)
+	e.exec.onAct = func() {
+		e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{{Name: "statement-2026-09.csv", Bytes: 900}}}}
+	}
+	e.script(actions(press("e3", "Download it")), `{"done": true, "summary": "Downloaded it.", "verify": {"download": {"name_like": "statement"}}}`)
+	if out := e.run(); out.State != StateDone || !strings.Contains(out.Summary, "Downloaded: statement-2026-09.csv (in ~/Downloads).") {
+		t.Fatalf("outcome %+v", out)
+	}
+
 	// Nothing new: nothing said.
 	e = newEnv(t)
 	e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{{Name: "old.pdf", Bytes: 10}}}}

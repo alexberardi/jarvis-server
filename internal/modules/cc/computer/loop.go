@@ -222,7 +222,7 @@ type round struct {
 	wantShot bool
 	feedback string
 	looked   bool // this Run call has observed once
-	// downloadsBefore are the files in Downloads when this Run call began (nil: unknown), so
+	// downloadsBefore are the files in Downloads when this Run call began (nil: not a browser task), so
 	// done can name the ones the task downloaded.
 	downloadsBefore map[string]bool
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
@@ -315,7 +315,10 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		return l.end(ctx, run, out)
 	}
 	if t.Target.Kind == "browser" {
-		r.downloadsBefore = l.downloads(ctx, run.ID)
+		// No Downloads folder yet (a fresh profile): nothing was there.
+		if r.downloadsBefore = l.downloads(ctx, run.ID); r.downloadsBefore == nil {
+			r.downloadsBefore = map[string]bool{}
+		}
 	}
 	if held := run.Pending; held != nil {
 		run.Pending = nil
