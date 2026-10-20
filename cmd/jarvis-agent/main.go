@@ -536,7 +536,18 @@ func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	}
 }
 
+// run is the agent. A computer's run that was signed out doesn't exit: it waits for the new
+// sign-in on the setup page, then runs again in place (signedOut.rejoin).
 func run(ctx context.Context, args []string) error {
+	err := runAgent(ctx, args)
+	var so signedOut
+	if errors.As(err, &so) {
+		return so.rejoin(ctx, listenControl)
+	}
+	return err
+}
+
+func runAgent(ctx context.Context, args []string) error {
 	fs, f := newRunFlags(flag.ExitOnError)
 	_ = fs.Parse(args)
 	if err := noStrayArgs(fs); err != nil {
@@ -578,7 +589,7 @@ func run(ctx context.Context, args []string) error {
 		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && p.desktop {
 			// A login item on a computer that isn't set up: the status icon's "Set up", then
 			// the agent once it is (setupwait.go). Typed in a terminal, it says what to do.
-			return waitForSetup(ctx, log, path, *f.noTray, ctl)
+			return waitForSetup(ctx, log, path, *f.noTray, ctl, false)
 		}
 		if ctl != nil {
 			_ = ctl.Close()
@@ -760,8 +771,10 @@ func run(ctx context.Context, args []string) error {
 		setup = openSetupPage(log)
 	}
 	// Signed out (from Add-ons, an admin, or the menu's Sign out): drop node.json only, keep
-	// agent.json and apps.json, and open the setup page so someone can sign in again.
-	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
+	// agent.json and apps.json, and open the setup page so someone can sign in again; a
+	// computer's run then waits for the new sign-in (run below).
+	end := nodeEnd{credsFile: path, nodeID: c.NodeID, desktop: p.desktop, noTray: *f.noTray, stop: quit, openSetup: setup, log: log}
+	runNode := func(ctx context.Context) error { return end.of(r.Run(ctx)) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
 		activity: activity, computer: computerSw, recorder: recorder}
 	sw.changed = ic.voiceChanged

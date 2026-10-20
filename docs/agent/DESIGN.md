@@ -1097,8 +1097,11 @@ publishes `jarvis/nodes/{id}/signed-out` `{node_id}`. The agent treats that mess
 nudge: it heartbeats at once, and only jarvisd refusing the key (401/403, `node.Revoked`) signs it
 out, so a spoofed message can't sign out a working agent. An agent that was offline finds out at
 its next start or heartbeat. Signed out, `run` stops serving tools, deletes **only** `node.json`
-(`agent.json` and `apps.json` stay), opens the setup page (`jarvis-agent setup`) and exits with
-"not set up" (78; 0 under its LaunchAgent), which no supervisor restarts. A 5xx or a network
+(`agent.json` and `apps.json` stay) and opens the setup page (`jarvis-agent setup`). On a
+computer it then waits for the new sign-in like a login item that isn't set up yet ("Not set up
+yet" in the status icon, the control socket answering) and runs again in place once the page has
+saved the new credentials (decision 2026-10-19-signed-out-run-waits); a Pi exits with "not set up"
+(78), which no supervisor restarts. A 5xx or a network
 error is never a sign-out. The owner is recorded at registration (`cc_nodes.owner_user_id`, cc
 migration 00180): whoever minted the provisioning token, i.e. the pairing approver or the member
 who signed in on the page; admin-key nodes and nodes paired before 00180 (beyond the one-day token
