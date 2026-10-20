@@ -341,6 +341,12 @@ func TestSampleKeyframes(t *testing.T) {
 	}
 }
 
+// codedErr is an error with a code, as the browser extension's refusals are.
+type codedErr struct{ code, msg string }
+
+func (e codedErr) Error() string     { return e.msg }
+func (e codedErr) ErrorCode() string { return e.code }
+
 func TestRecordTools(t *testing.T) {
 	e := newRecEnv(t)
 	tools := &RecordTools{R: e.r}
@@ -373,6 +379,13 @@ func TestRecordTools(t *testing.T) {
 		t.Fatalf("start with computer control off %v", out)
 	}
 	_, _ = tools.Call(ctx, "computer_record_stop", map[string]any{}, node.Request{})
+	// The extension's refusal keeps its code and message, so jarvisd can say what to do.
+	e.src.failErr = codedErr{"no_site_access", "Jarvis Browser Control doesn't have access to websites"}
+	out, _ = tools.Call(ctx, "computer_record_start", map[string]any{}, node.Request{})
+	if out["success"] != false || out["error_code"] != "no_site_access" || !strings.Contains(out["error"].(string), "access to websites") {
+		t.Fatalf("start without site access %v", out)
+	}
+	e.src.failErr = nil
 	if _, ok := tools.Call(ctx, "computer_act", nil, node.Request{}); ok {
 		t.Fatal("handled another tool")
 	}

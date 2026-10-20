@@ -8,19 +8,16 @@ What the user did, one event per line:
 1. open https://bank.example.com/login
 2. type into textbox "Username": "alex"
 3. type into textbox "Password": •••
-4. click button "Sign in"
-5. open https://bank.example.com/accounts
-6. click link "Statements"
-7. open https://bank.example.com/statements?month=2026-08
-8. type into textbox "Statement month": "2026-09"
-9. click button "Download CSV"
-10. download "statement_2026-09.csv" (text/csv)
+4. click button "Sign in" (opens https://bank.example.com/accounts)
+5. click link "Statements" (opens https://bank.example.com/statements?month=2026-08)
+6. type into textbox "Statement month": "2026-09"
+7. click button "Download CSV"
+8. download "statement_2026-09.csv" (text/csv)
 
 Values that may change from one run to the next (the only parameter candidates):
-- event 7: month "2026-08" (url)
-- event 8: month "2026-09" (typed)
-- event 10: file "statement_2026-09.csv" (download)
-- event 10: month "2026-09" (url)
+- event 6: month "2026-09" (typed)
+- event 8: file "statement_2026-09.csv" (download)
+- event 8: month "2026-09" (url)
 
 Answer with this JSON:
 {"name": "...", "triggers": ["..."], "steps": [{"intent": "...", "event_seqs": [1], "target": "..."}], "params": [{"name": "...", "kind": "...", "example": "...", "from_seqs": [1]}], "success": {...}}

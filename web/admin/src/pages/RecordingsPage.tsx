@@ -12,7 +12,7 @@ import { useRecording, useRecordings } from '@/hooks/useWorkflows'
 import { errorMessage } from '@/lib/errors'
 import { formatServerTime } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { eventSentence, expiresIn, traceEvents } from '@/lib/workflows'
+import { eventSentence, expiresIn, foldTrace, traceEvents } from '@/lib/workflows'
 
 const button =
   'inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:opacity-50'
@@ -118,7 +118,7 @@ export default function RecordingsPage() {
 
 function RecordingView({ id, summary }: { id: string; summary: Recording }) {
   const rec = useRecording(id)
-  const events = traceEvents(rec.data?.trace)
+  const events = foldTrace(traceEvents(rec.data?.trace))
   return (
     <div id={`rec-${id}`} className="mt-3 space-y-2 pl-6">
       {rec.isError ? (

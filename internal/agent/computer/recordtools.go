@@ -88,10 +88,14 @@ func TraceOutput(tr Trace) map[string]any {
 	return out
 }
 
-// recordFail is a failure output with a code jarvisd tells apart.
+// recordFail is a failure output with a code jarvisd tells apart: the recorder's own, or the
+// browser extension's (no_site_access: it may not script pages).
 func recordFail(err error) map[string]any {
 	o := node.Fail("%v", err)
+	var coded interface{ ErrorCode() string }
 	switch {
+	case errors.As(err, &coded) && coded.ErrorCode() != "":
+		o["error_code"] = coded.ErrorCode()
 	case errors.Is(err, ErrNotRecording):
 		o["error_code"] = "not_recording"
 	case errors.Is(err, ErrBusy):

@@ -62,8 +62,10 @@ export function eventSentence(e: TraceEvent): Part[] {
     }
     case 'submit':
       return [{ text: 'Submitted the form' }]
-    case 'keydown':
-      return [{ text: `Pressed ${e.key ?? 'a key'}` }]
+    case 'key':
+      return name ? [{ text: `Pressed ${e.key ?? 'a key'} in ` }, { text: name, bold: true }] : [{ text: `Pressed ${e.key ?? 'a key'}` }]
+    case 'cannot_watch':
+      return [{ text: `Couldn't watch ${host(e.url)}` }]
     case 'download':
       return [{ text: `Downloaded ${e.filename ?? 'a file'}` }]
   }
@@ -73,6 +75,44 @@ export function eventSentence(e: TraceEvent): Part[] {
 /** traceEvents is a recording's trace as a list of events (empty when it isn't one). */
 export function traceEvents(trace: unknown): TraceEvent[] {
   return Array.isArray(trace) ? trace.filter((e): e is TraceEvent => !!e && typeof e === 'object') : []
+}
+
+/** How soon after a click, submit or key a navigation in its tab is that action's doing (ms). */
+const NAV_FOLD_MS = 1500
+
+/**
+ * foldTrace keeps a navigation only when the user opened the page themselves: one an action in
+ * its tab caused becomes the action's result_url, and one to the URL its tab is already on is
+ * dropped. Events go in the order of their times (a navigation can arrive before the click that
+ * caused it); a trace without times folds a navigation right after the action. The same rule as
+ * the learner's (foldNavigations in workflows_learn.go).
+ */
+export function foldTrace(evs: TraceEvent[]): TraceEvent[] {
+  if (evs.every((e) => e.ts)) evs = [...evs].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
+  const out: TraceEvent[] = []
+  const at = new Map<number, string | undefined>() // the URL each tab is on
+  const action = new Map<number, number>() // each tab's last click, submit or key: its index in out
+  for (const e of evs) {
+    const tab = e.tab ?? 0
+    if (e.kind !== 'navigate') {
+      if (e.kind === 'click' || e.kind === 'submit' || e.kind === 'key') action.set(tab, out.length)
+      if (e.kind !== 'download' && e.url) at.set(tab, e.url)
+      out.push(e)
+      continue
+    }
+    if (at.get(tab) === e.url) continue
+    at.set(tab, e.url)
+    const i = action.get(tab)
+    if (i !== undefined) {
+      const a = out[i]
+      if (a.ts && e.ts ? e.ts - a.ts <= NAV_FOLD_MS : i === out.length - 1) {
+        out[i] = { ...a, result_url: e.url }
+        continue
+      }
+    }
+    out.push(e)
+  }
+  return out
 }
 
 /** RISKS are computeruse's risk categories, in plain words: a step with one asks first. */

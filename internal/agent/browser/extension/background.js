@@ -20,7 +20,8 @@
 //
 // Recording (record_start/record_stop): while the user records a task, every frame reports their
 // clicks, field changes, submits and Enter/Escape/Tab, plus navigations and downloads, as
-// structured events. Secret fields' values are never read (masked: true instead).
+// structured events (and cannot_watch for a page it can't script). Secret fields' values are
+// never read (masked: true instead).
 "use strict";
 
 const api = globalThis.browser ?? globalThis.chrome;
@@ -440,6 +441,14 @@ const COMMANDS = {
     const id = String(args.recording_id ?? "");
     if (!REC_ID.test(id)) throw fail("invalid_argument", "recording_id must be 1-64 letters, digits, _ or -");
     if (rec && rec.id !== id) throw fail("busy", "another recording is running; stop it first");
+    // Firefox lets the user take back <all_urls> (and a temporary add-on may never get it): then
+    // no page can be watched and only navigations would be recorded. Asking for it needs a click
+    // in the browser, so say where to turn it on.
+    if (!(await api.permissions.contains({ origins: ["<all_urls>"] }))) {
+      throw fail("no_site_access", api.runtime.getBrowserInfo
+        ? "Jarvis Browser Control doesn't have access to websites, so it can't see what you do. In Firefox, open about:addons, then Jarvis Browser Control, Permissions, and turn on Access your data for all websites."
+        : "Jarvis Browser Control doesn't have access to websites, so it can't see what you do. Open chrome://extensions, then Jarvis Browser Control, Details, and set Site access to On all sites.");
+    }
     if (!rec) rec = { id, seq: 0, tabs: new Set(), polling: new Set() };
     const r = rec;
     await Promise.all((await api.tabs.query({})).map((t) => recTab(r, t)));
@@ -705,7 +714,10 @@ async function recTab(r, t) {
   try {
     res = await inject(t, { func: recInstall, args: [r.id], allFrames: true });
   } catch {
-    return; // a page the browser doesn't let extensions script
+    // A page the browser doesn't let extensions script: say so, or the trace would hold only
+    // its navigations.
+    if (rec === r) recPost(r, t.id, null, { kind: "cannot_watch", url: t.url });
+    return;
   }
   r.tabs.add(t.id);
   for (const f of res) if (f?.result?.token) recPollFrame(r, t.id, f.frameId, f.result.token);
