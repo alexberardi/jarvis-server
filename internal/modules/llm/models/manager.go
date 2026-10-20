@@ -1016,6 +1016,15 @@ func (m *Manager) validateField(ctx context.Context, d labelRef, f string, def s
 				}
 				return nil
 			}
+			if f == "model" && d.ModelKind == engine.ModelLLM {
+				// A Hugging Face layout directory runs on the host's Python engine (vLLM, MLX).
+				if st, err := os.Stat(s); err == nil && st.IsDir() {
+					if !fileExists(filepath.Join(s, "config.json")) {
+						return badRequest("%s.%s: %s has no config.json (not a Hugging Face model directory)", d.Name, f, s)
+					}
+					return nil
+				}
+			}
 			if !fileExists(s) {
 				return badRequest("%s.%s: no file at %s", d.Name, f, s)
 			}
@@ -1256,8 +1265,17 @@ func (m *Manager) otherPrograms(ctx context.Context, residents []Resident) []Res
 }
 
 // residentNeed estimates a label's engine in MB: its installed model (plus projector) at the
-// label's context, or an external file by its size.
+// label's context, or an external file by its size. A vLLM engine needs the share of its
+// cards it preallocates, whatever the model weighs.
 func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64, bool) {
+	if c.Kind == engine.KindVLLM {
+		frac, dev, err := engine.VLLMGPUMemory(c, m.hardware(ctx))
+		if err != nil {
+			return 0, false
+		}
+		n := max(len(deviceList(c.GPUDevices)), 1)
+		return int64(frac*float64(dev.TotalMB)) * int64(n), true
+	}
 	var weights, host, kv int64
 	n := c.Context
 	if mod, err := m.Store.Get(ctx, c.Model); err == nil {

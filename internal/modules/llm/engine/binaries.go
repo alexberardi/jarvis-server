@@ -32,6 +32,8 @@ type Binaries struct {
 	// Override returns an operator-installed binary to use instead of a download, e.g.
 	// Homebrew's whisper-server on macOS ("" = none).
 	Override func(Kind) string
+	// DiskFree is the space free on the filesystem holding a path (nil = sysinfo.DiskFree).
+	DiskFree func(path string) uint64
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex

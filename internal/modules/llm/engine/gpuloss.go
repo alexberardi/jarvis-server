@@ -62,6 +62,11 @@ func (r *Resolver) gpuGate(ctx context.Context, label string, c LabelConfig) (*N
 	}
 	last := r.lastGood[label]
 	want, expected := ExpectedGPU(c, last)
+	if e, ok := c.Kind.Python(); ok {
+		// A Python engine runs on its platform's accelerator only, whatever gpu_layers says.
+		want = e.Platforms[r.platform()]
+		expected = want != "" && want != FlavourCPU
+	}
 	if !expected {
 		r.gpuBack(label)
 		return nil, nil
@@ -72,8 +77,7 @@ func (r *Resolver) gpuGate(ctx context.Context, label string, c LabelConfig) (*N
 		return nil, nil
 	}
 	if h, ok := r.bound[label]; ok {
-		if inst := r.instances[h]; inst != nil && inst.key.Flavour != FlavourCPU && inst.key.GPULayers != 0 &&
-			inst.key.Model == c.ModelPath {
+		if inst := r.instances[h]; inst != nil && inst.key.onGPU() && inst.key.Model == c.ModelPath {
 			st := inst.sup.Status()
 			if (st.State == engines.Healthy || st.State == engines.Unhealthy) && !st.Started.IsZero() &&
 				st.Started.Before(hw.DetectedAt) {
@@ -101,6 +105,15 @@ func (r *Resolver) gpuGate(ctx context.Context, label string, c LabelConfig) (*N
 	return &NotReadyError{Label: label, State: StateGPUUnavailable, Reason: msg}, nil
 }
 
+// onGPU says whether the engine runs on a GPU: a GPU build that offloads layers, or a Python
+// engine on a GPU accelerator.
+func (k instanceKey) onGPU() bool {
+	if _, ok := k.Kind.Python(); ok {
+		return k.Flavour != FlavourCPU && k.Flavour != ""
+	}
+	return k.Flavour != FlavourCPU && k.GPULayers != 0
+}
+
 // gpuBack notes a label that is no longer refused for a lost GPU. r.mu is held.
 func (r *Resolver) gpuBack(label string) {
 	if _, ok := r.gpuDown[label]; ok {
@@ -124,7 +137,7 @@ func (r *Resolver) recordGPU(ctx context.Context) {
 			continue
 		}
 		k := inst.key
-		if k.Flavour == FlavourCPU || k.GPULayers == 0 {
+		if !k.onGPU() {
 			if _, ok := r.lastGood[label]; ok {
 				delete(r.lastGood, label)
 				changed = true

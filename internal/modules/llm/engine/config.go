@@ -100,6 +100,9 @@ var fields = []field{
 	{name: "gpu_layers", typ: settings.Int, def: int64(999), desc: "Layers to offload (-ngl); 0 = CPU only. For stt, 0 disables the GPU"},
 	{name: "kv_cache_type", typ: settings.String, def: "f16", desc: "KV cache type (f16, q8_0, q4_0)", only: []string{ModelLLM},
 		opts: []any{"f16", "q8_0", "q4_0"}},
+	{name: "gpu_memory_utilization", typ: settings.Float, def: float64(0),
+		desc: "vLLM only: share of each GPU it preallocates (0.05-0.95); 0 = sized to the model at its context, leaving the rest to llama-server",
+		only: []string{ModelLLM}},
 	{name: "flash_attn", typ: settings.String, def: "auto", desc: "Flash attention: auto, on or off", opts: []any{"auto", "on", "off"}},
 	{name: "fold_system_messages", typ: settings.String, def: FoldAuto,
 		desc: "Fold later system messages into the user turn, for chat templates that reject them (Qwen 3.5, 3.8): auto = as the model's catalog entry says (never for remote), on or off",
@@ -267,8 +270,10 @@ type LabelConfig struct {
 	GPULayers   int    `json:"gpu_layers"`
 	KVCacheType string `json:"kv_cache_type"`
 	FlashAttn   string `json:"flash_attn"`
-	ExtraArgs   string `json:"extra_args"`
-	Embedding   bool   `json:"embedding"`
+	// GPUMemory is gpu_memory_utilization (vLLM; 0 = sized to the model, VLLMGPUMemory).
+	GPUMemory float64 `json:"gpu_memory_utilization"`
+	ExtraArgs string  `json:"extra_args"`
+	Embedding bool    `json:"embedding"`
 	// ChatTemplate is the model's pinned chat template (from its catalog entry), which the
 	// engine is launched with instead of the GGUF's own; "" = the GGUF's (ID12).
 	ChatTemplate string `json:"-"`
@@ -368,6 +373,9 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 		KVCacheType: str("kv_cache_type"), FlashAttn: str("flash_attn"),
 		ExtraArgs: str("extra_args"), Embedding: d.ModelKind == ModelEmbedding,
 		RemoteURL: str("remote_url"), RemoteModel: str("remote_model"), RemoteAPIKey: str("remote_api_key"),
+	}
+	if has("gpu_memory_utilization") {
+		c.GPUMemory = s.Settings.Float(ctx, p+"gpu_memory_utilization", settings.Scope{})
 	}
 	c.RemoteAPIMode = strings.ToLower(str("remote_api"))
 	c.RemoteAPI = RemoteAPI(c.RemoteAPIMode, c.RemoteURL)

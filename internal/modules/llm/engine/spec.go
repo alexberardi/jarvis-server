@@ -32,6 +32,11 @@ type instanceKey struct {
 	// another instance (ID12).
 	ChatTemplate string `json:"tpl,omitempty"`
 	ExtraArgs    string `json:"extra,omitempty"`
+	// GPUMemory, ToolParser, ReasoningParser and Vision are a vLLM engine's (vllmTune).
+	GPUMemory       float64 `json:"gpu_mem,omitempty"`
+	ToolParser      string  `json:"tools,omitempty"`
+	ReasoningParser string  `json:"reasoning,omitempty"`
+	Vision          bool    `json:"vision,omitempty"`
 }
 
 func (k instanceKey) hash() string {
@@ -49,8 +54,13 @@ func keyFor(c LabelConfig, f Flavour, binary string) instanceKey {
 	if _, ok := c.Kind.Python(); ok {
 		// The engine takes none of llama.cpp's placement or cache flags, so they don't
 		// split one model into two engines (LD1). Context bounds a reply (PyEngine.Args).
-		return instanceKey{Kind: c.Kind, Binary: binary, Flavour: f, Model: c.ModelPath, Context: c.Context,
+		// On CUDA (vLLM) the devices are the engine's: CUDA_VISIBLE_DEVICES.
+		pk := instanceKey{Kind: c.Kind, Binary: binary, Flavour: f, Model: c.ModelPath, Context: c.Context,
 			Parallel: 1, ExtraArgs: strings.TrimSpace(c.ExtraArgs)}
+		if f == FlavourCUDA {
+			pk.Devices = normList(c.GPUDevices)
+		}
+		return pk
 	}
 	if c.Kind == KindLlama {
 		k.Context, k.Parallel = c.Context, c.Parallel
@@ -80,7 +90,12 @@ func (k instanceKey) args(port int, alias string) ([]string, error) {
 		return nil, fmt.Errorf("extra_args: %w", err)
 	}
 	if e, ok := k.Kind.Python(); ok {
-		a := append([]string{"-I", "-m", e.Module}, e.Args(k.Model, port, k.Context)...)
+		n := 0
+		if k.Devices != "" {
+			n = len(strings.Split(k.Devices, ","))
+		}
+		a := append([]string{"-I", "-m", e.Module}, e.Args(PyArgs{Model: k.Model, Port: port, Context: k.Context,
+			GPUMemory: k.GPUMemory, Devices: n, ToolParser: k.ToolParser, ReasoningParser: k.ReasoningParser})...)
 		return append(a, extra...), nil
 	}
 	a := []string{"-m", k.Model, "--host", "127.0.0.1", "--port", strconv.Itoa(port)}

@@ -199,3 +199,32 @@ describe('GPU fault (prod outage 2026-10-10)', () => {
     expect(screen.queryByRole('alert', { name: 'GPU problem' })).toBeNull()
   })
 })
+
+describe('LabelsEditor vLLM GPU memory', () => {
+  it('offers the GPU share for a vLLM label only and saves it as a fraction', async () => {
+    const live = status('live', '')
+    live.config = { ...live.config, kind: 'vllm', model: '/m/Qwen3-0.6B', model_path: '/m/Qwen3-0.6B', gpu_memory_utilization: 0 }
+    const labels: llm.LabelsResponse = {
+      labels: [live, status('background', '')],
+      voice: null,
+      engines: null,
+      proposal: {},
+      recommend: {},
+      warnings: null,
+    }
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    renderEditor()
+    const card = await screen.findByTestId('label-live')
+    fireEvent.click(within(card).getByRole('button', { name: /Advanced/ }))
+    const input = within(card).getByLabelText('GPU memory share')
+    expect(input).toHaveValue(0)
+    fireEvent.change(input, { target: { value: '0.45' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ live: { gpu_memory_utilization: 0.45 } }))
+
+    const bg = await screen.findByTestId('label-background')
+    fireEvent.click(within(bg).getByRole('button', { name: /Advanced/ }))
+    expect(within(bg).queryByLabelText('GPU memory share')).not.toBeInTheDocument()
+  })
+})
