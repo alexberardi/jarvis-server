@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { ImageIcon, Loader2 } from 'lucide-react'
+import { ImageIcon } from 'lucide-react'
 import type { ChatAction } from '@/api/chat'
 import type { ChatMessage } from '@/lib/chatState'
 import { optionLabel } from '@/lib/chatState'
 import { cn } from '@/lib/utils'
+import { Button, Spinner, type ButtonVariant } from '@/components/ui'
 import Markdown from './Markdown'
 
 interface Props {
@@ -18,12 +19,7 @@ interface Props {
   busy: boolean
 }
 
-const actionStyle = (t?: string) =>
-  t === 'primary'
-    ? 'bg-[var(--color-primary)] text-white hover:opacity-90'
-    : t === 'destructive'
-      ? 'bg-red-600 text-white hover:opacity-90'
-      : 'border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]'
+const actionVariant = (t?: string): ButtonVariant => (t === 'primary' ? 'primary' : t === 'destructive' ? 'danger' : 'secondary')
 
 export default function MessageBubble({ message: m, userName, onAnswer, onAction, latest, busy }: Props) {
   const [running, setRunning] = useState<string | null>(null)
@@ -42,20 +38,18 @@ export default function MessageBubble({ message: m, userName, onAnswer, onAction
   return (
     <div className={cn('flex', user ? 'justify-end' : 'justify-start')} data-role={m.role}>
       <div className={cn('max-w-[88%] min-w-0 sm:max-w-[75%]')}>
-        {user && <p className="mb-0.5 text-right text-xs text-[var(--color-text-muted)]">{userName}</p>}
+        <p className={cn('mb-1 text-caption text-text-muted', user && 'text-right')}>{user ? userName : 'Jarvis'}</p>
         <div
           className={cn(
-            'rounded-2xl px-3.5 py-2 text-sm',
-            user
-              ? 'rounded-br-md bg-[var(--color-primary)] text-white'
-              : 'rounded-bl-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]',
-            m.error && 'border-red-500/40 text-red-600 dark:text-red-400',
+            'rounded-bubble px-4 py-2.5 text-body',
+            user ? 'rounded-br-control bg-primary text-on-primary' : 'rounded-bl-control border border-border bg-surface text-text',
+            m.error && 'border-danger/40 bg-danger-soft text-danger',
           )}
         >
           {user ? (
             <>
               {m.images ? (
-                <p className="mb-1 flex items-center gap-1 text-xs opacity-80">
+                <p className="mb-1 flex items-center gap-1 text-caption">
                   <ImageIcon size={12} aria-hidden="true" />
                   {m.images === 1 ? '1 photo' : `${m.images} photos`}
                 </p>
@@ -63,9 +57,9 @@ export default function MessageBubble({ message: m, userName, onAnswer, onAction
               {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
             </>
           ) : m.pending && !m.text ? (
-            <p className="flex items-center gap-2 text-[var(--color-text-muted)]" role="status">
-              <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-              {m.status || 'Thinking...'}
+            <p className="flex items-center gap-2 text-text-muted" role="status">
+              <Spinner className="size-3.5" />
+              {m.status || 'Thinking…'}
             </p>
           ) : (
             <Markdown>{m.text}</Markdown>
@@ -73,9 +67,9 @@ export default function MessageBubble({ message: m, userName, onAnswer, onAction
         </div>
 
         {!user && m.reasoning && (
-          <details className="mt-1 text-xs text-[var(--color-text-muted)]">
-            <summary className="cursor-pointer select-none">Thinking</summary>
-            <p className="mt-1 whitespace-pre-wrap border-l-2 border-[var(--color-border)] pl-2">{m.reasoning}</p>
+          <details className="mt-1.5 text-small text-text-muted">
+            <summary className="w-fit cursor-pointer rounded-control select-none hover:text-text">Thinking</summary>
+            <p className="mt-1 rounded-control bg-surface-alt px-3 py-2 whitespace-pre-wrap text-text">{m.reasoning}</p>
           </details>
         )}
 
@@ -84,15 +78,9 @@ export default function MessageBubble({ message: m, userName, onAnswer, onAction
             {m.validation.options.map((o, i) => {
               const label = optionLabel(o)
               return (
-                <button
-                  key={`${label}-${i}`}
-                  type="button"
-                  disabled={!latest || busy}
-                  onClick={() => onAnswer?.(label)}
-                  className="rounded-full border border-[var(--color-primary)] px-3 py-1 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 disabled:opacity-50"
-                >
+                <Button key={`${label}-${i}`} size="sm" className="rounded-pill" disabled={!latest || busy} onClick={() => onAnswer?.(label)}>
                   {label}
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -101,24 +89,21 @@ export default function MessageBubble({ message: m, userName, onAnswer, onAction
         {!user && m.actions && m.actions.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {m.actionDone ? (
-              <p className="text-sm text-[var(--color-text-muted)]" role="status">
+              <p className="text-small text-text-muted" role="status">
                 {m.actionDone}
               </p>
             ) : (
               m.actions.map((a) => (
-                <button
+                <Button
                   key={a.button_action}
-                  type="button"
+                  size="sm"
+                  variant={actionVariant(a.button_type)}
                   disabled={running !== null}
+                  loading={running === a.button_action}
                   onClick={() => void press(a)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50',
-                    actionStyle(a.button_type),
-                  )}
                 >
-                  {running === a.button_action && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
                   {a.button_text}
-                </button>
+                </Button>
               ))
             )}
           </div>
