@@ -189,6 +189,7 @@ func TestPlannerOffersComputerTask(t *testing.T) {
 		mustObj(t, `{"command_name": "computer_observe", "description": "Look at the computer."}`),
 		mustObj(t, `{"command_name": "browser_open", "description": "Open a page in the browser."}`),
 		mustObj(t, `{"command_name": "browser_fill", "description": "Fill in a field on the page."}`),
+		mustObj(t, `{"command_name": "desktop_open", "description": "Open an app or a web address."}`),
 	}
 	got := c.s.FullMenu(ctx, node, hh, ptr(7))
 	var names []string
@@ -222,7 +223,7 @@ func TestPlannerOffersComputerTask(t *testing.T) {
 		}
 		names = append(names, m.Command)
 	}
-	if strings.Join(names, ",") != "get_weather,browser_open,browser_fill" {
+	if strings.Join(names, ",") != "get_weather,browser_open,browser_fill,desktop_open" {
 		t.Fatalf("menu without a computer = %v", names)
 	}
 	c.s.Computer = nil
@@ -728,5 +729,55 @@ func TestRunErrandComputerAck(t *testing.T) {
 	c.s.Computer = nil // no computer task on the menu: the plan card's ack
 	if got := ack("order me a blue mug"); !strings.Contains(got, "Tap Run") {
 		t.Fatal(got)
+	}
+}
+
+// Adjacent computer tasks on one site are one task: the planner's "find it" then "order it"
+// would lose what the first found.
+func TestMergeComputerSteps(t *testing.T) {
+	ct := func(goal, site, target, success string) Step {
+		a := servertools.Obj("goal", goal, "target", target, "site", site)
+		if success != "" {
+			a.Set("success", success)
+		}
+		return Step{Command: cmdComputer, Args: a, Label: goal}
+	}
+	steps := []Step{
+		ct("find the best watch", "http://127.0.0.1:9/store/", "browser", "a product page"),
+		ct("order it", "127.0.0.1:9", "browser", "an order confirmation page"),
+		ct("download the statement", "bank.example", "browser", ""),
+		{Command: cmdReadFile, Label: "read"},
+		ct("download the card statement", "card.example", "browser", ""),
+		ct("download the other one", "card.example", "desktop", ""),
+	}
+	got := mergeComputerSteps(steps)
+	var lines []string
+	for _, st := range got {
+		lines = append(lines, st.Command+"|"+truthyStr(st.Args, "goal")+"|"+truthyStr(st.Args, "success")+"|"+st.Label)
+	}
+	want := []string{
+		"computer_task|find the best watch, then order it|an order confirmation page|order it",
+		"computer_task|download the statement||download the statement",
+		"read_computer_file|||read",
+		"computer_task|download the card statement||download the card statement",
+		"computer_task|download the other one||download the other one",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("merged:\n%s", strings.Join(lines, "\n"))
+	}
+	if truthyStr(steps[0].Args, "goal") != "find the best watch" {
+		t.Fatal("the planner's steps were changed in place")
+	}
+}
+
+// The planner's reply is merged before the plan is made.
+func TestPlanErrandMergesComputerSteps(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Order a watch",
+		step(policy.ToolComputerTask, "Find it", `{"goal": "find the best watch", "target": "browser", "site": "`+shopSite+`"}`),
+		step(policy.ToolComputerTask, "Order it", `{"goal": "order it", "target": "browser", "site": "`+shopSite+`"}`)))
+	p, err := c.s.PlanErrand(context.Background(), "order me the best watch", []MenuEntry{computerEntry()})
+	if err != nil || len(p.Steps) != 1 || truthyStr(p.Steps[0].Args, "goal") != "find the best watch, then order it" {
+		t.Fatalf("plan = %+v %v", p, err)
 	}
 }

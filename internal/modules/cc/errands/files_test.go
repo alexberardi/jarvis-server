@@ -48,8 +48,8 @@ func TestPlannerOffersFileToolsWithComputer(t *testing.T) {
 			t.Fatalf("prompt lacks the budget rule:\n%s", p)
 		}
 	}
-	if !strings.Contains(BuildPrompt("g", menu), "actually asked for.\n\n"+budgetRule+"CHECKPOINT") {
-		t.Fatal("the budget rule isn't after the decomposition rule")
+	if !strings.Contains(BuildPrompt("g", menu), "actually asked for.\n\n"+websiteRule+budgetRule+"CHECKPOINT") {
+		t.Fatal("the website and budget rules aren't after the decomposition rule")
 	}
 
 	c.s.Computer.Targets = func(context.Context, string) ([]string, string) { return nil, "Computer control is off." }

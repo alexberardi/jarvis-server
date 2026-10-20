@@ -82,8 +82,10 @@ const (
 	// The cc module's file tools (spreadsheet_tools.go), offered with computer_task.
 	cmdReadFile   = "read_computer_file"
 	cmdWriteSheet = "write_spreadsheet"
-	// browserPrefix names the browser extension's node commands (browser_open, browser_fill, …).
+	// browserPrefix and desktopPrefix name the agent's own browser and desktop commands
+	// (browser_open, browser_fill, desktop_open, …).
 	browserPrefix = "browser_"
+	desktopPrefix = "desktop_"
 )
 
 // NodeMenu is build_errand_menu: a node's available commands (CommandDefinition dicts, as the
@@ -213,8 +215,9 @@ func toolRisky(t servertools.ServerTool) bool {
 
 // FullMenu is build_full_errand_menu: node commands ∪ enabled server tools; on a name
 // collision the server tool wins (the executor would run it). With computer_task offered, the
-// browser extension's own commands (browser_*) are left out: a website task is one computer_task
-// step, whose loop drives the browser, never a chain of single browser commands.
+// agent's own browser and desktop commands (browser_*, desktop_*) are left out: a task on a
+// website or in an app is one computer_task step, whose loop drives it, never a chain of single
+// commands.
 func (s *Service) FullMenu(ctx context.Context, available []*pyjson.Object, hh string, speaker *int64) []MenuEntry {
 	server := s.serverMenu(ctx, hh, speaker)
 	names := map[string]bool{}
@@ -224,7 +227,7 @@ func (s *Service) FullMenu(ctx context.Context, available []*pyjson.Object, hh s
 	computer := s.computerOffered(ctx, hh)
 	var out []MenuEntry
 	for _, c := range NodeMenu(available) {
-		if !names[c.Command] && !(computer && strings.HasPrefix(c.Command, browserPrefix)) {
+		if !names[c.Command] && !(computer && (strings.HasPrefix(c.Command, browserPrefix) || strings.HasPrefix(c.Command, desktopPrefix))) {
 			out = append(out, c)
 		}
 	}
@@ -257,12 +260,50 @@ const budgetRule = "BUDGETS: for a budget or a spending report from statements, 
 	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with every " +
 	"transaction categorised and a total per category; the report then says where the money went.\n\n"
 
-// budgetRuleFor is budgetRule when menu offers write_spreadsheet, else "".
-func budgetRuleFor(menu []MenuEntry) string {
-	if menuHas(menu, cmdWriteSheet) {
-		return budgetRule
+// websiteRule is the decomposition rule's line for computer tasks (plan P3 piece 14): the
+// house model split "order the best watch" into a find step and an order step, and the second
+// task no longer knew what the first had found.
+const websiteRule = "COMPUTER TASKS: everything the user wants done on one website or in one app (find, " +
+	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
+	"request for that site, with every detail they gave. Start the site at the web address they gave.\n\n"
+
+// computerRulesFor is the computer rules for menu: websiteRule when it offers computer_task, and
+// budgetRule when it offers write_spreadsheet.
+func computerRulesFor(menu []MenuEntry) string {
+	out := ""
+	if menuHas(menu, cmdComputer) {
+		out += websiteRule
 	}
-	return ""
+	if menuHas(menu, cmdWriteSheet) {
+		out += budgetRule
+	}
+	return out
+}
+
+// mergeComputerSteps joins adjacent computer tasks on the same target and site into one, whose
+// goal is theirs in order ("find it, then order it") and whose success check is the last's
+// (websiteRule, for when the model splits them anyway).
+func mergeComputerSteps(steps []Step) []Step {
+	same := func(a, b Step) bool {
+		return a.Command == cmdComputer && b.Command == cmdComputer &&
+			truthyStr(a.Args, "target") == truthyStr(b.Args, "target") &&
+			siteOf(truthyStr(a.Args, "site")) == siteOf(truthyStr(b.Args, "site"))
+	}
+	var out []Step
+	for _, st := range steps {
+		if n := len(out); n > 0 && same(out[n-1], st) {
+			prev := &out[n-1]
+			args := copyObj(prev.Args)
+			args.Set("goal", parse.PyStrip(truthyStr(prev.Args, "goal"))+", then "+parse.PyStrip(truthyStr(st.Args, "goal")))
+			if s := truthyStr(st.Args, "success"); s != "" {
+				args.Set("success", s)
+			}
+			prev.Args, prev.Label = args, st.Label
+			continue
+		}
+		out = append(out, st)
+	}
+	return out
 }
 
 const closingDirective = "Think step by step: list each action the user wants and its order, then output " +
@@ -297,7 +338,7 @@ func BuildPrompt(goal string, menu []MenuEntry) string {
 		"list of steps, choosing ONLY from the available commands below. Fill each " +
 		"step's args from that command's arg spec, using the user's own words, and " +
 		"give each step a short human-readable label.\n\n" +
-		decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + computerRulesFor(menu) +
 		replanCheckpointRule +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
 		"User's goal: " + goal + "\n\n" +
@@ -313,7 +354,7 @@ func BuildRefinePrompt(summary string, current []Step, instruction string, menu 
 	return "You are Jarvis's errand planner revising an EXISTING plan. Apply the " +
 		"user's change to the current plan, keeping the parts they didn't ask to " +
 		"change and choosing ONLY from the available commands.\n\n" +
-		decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + computerRulesFor(menu) +
 		"Current plan: " + summary + "\n" +
 		"Current steps: " + stepsDumps(current) + "\n\n" +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
@@ -332,7 +373,7 @@ func BuildReplanPrompt(goal string, done []Step, progress, reason string, menu [
 		"needed to finish the goal BASED ON those results, choosing ONLY from the " +
 		"available commands. Return ONLY the steps still to run (do not repeat the ones " +
 		"already done).\n\n" +
-		decompositionRule + budgetRuleFor(menu) +
+		decompositionRule + computerRulesFor(menu) +
 		"Goal: " + goal + "\n" +
 		"Steps already run: " + stepsDumps(done) + "\n" +
 		"What happened:\n" + progress + "\n\n" +
@@ -555,7 +596,9 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 		return Plan{}, err
 	}
 	allowed, risky, free := allowedOf(menu)
-	return planFromData(data, allowed, goal, risky, free, true)
+	plan, err := planFromData(data, allowed, goal, risky, free, true)
+	plan.Steps = mergeComputerSteps(plan.Steps)
+	return plan, err
 }
 
 // RefinePlan is refine_errand_plan: the allowed set also keeps the plan's own commands, so a
