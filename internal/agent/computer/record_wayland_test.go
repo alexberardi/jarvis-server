@@ -89,16 +89,6 @@ func describe(ins []DeskInput) string {
 	return strings.Join(b, " ")
 }
 
-func itoa(n int) string {
-	if n < 0 {
-		return "-" + itoa(-n)
-	}
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	return itoa(n/10) + string(rune('0'+n%10))
-}
-
 // The evdev decoder: text through the layout (Shift and Caps Lock levels, autorepeat), named
 // keys, shortcuts as keys (ctrl+n), clicks as buttons, the wheel as scrolls; releases, the
 // middle button and modifier presses alone are nothing.
@@ -361,7 +351,7 @@ func TestWaylandRecording(t *testing.T) {
 		t.Fatalf("input event: %+v %+v", in, in.Window)
 	}
 	if click.X != 1500 || click.Y != 250 || click.Button != "" || click.App != "org.gnome.TextEditor" || click.Element != nil ||
-		*click.Window != (DesktopWindow{Class: "org.gnome.TextEditor", Title: "notes.txt", X: 1000, W: 800, H: 600}) {
+		*click.Window != (EventWindow{Class: "org.gnome.TextEditor", Title: "notes.txt", X: 1000, W: 800, H: 600}) {
 		t.Fatalf("click: %+v %+v", click, click.Window)
 	}
 	// The click's keyframe: its point on the image (the monitor starts at x 1000; the 1920 px

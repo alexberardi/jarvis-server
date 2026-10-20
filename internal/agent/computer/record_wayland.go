@@ -162,14 +162,14 @@ func (p *wlPlatform) focused() (*ax.Recorded, error) {
 	return rec, nil
 }
 
-func (p *wlPlatform) window() *DesktopWindow {
+func (p *wlPlatform) window() *EventWindow {
 	ctx, cancel := wlCtx()
 	defer cancel()
 	w, err := p.sys.Windows.FocusedWindow(ctx)
 	if err != nil || w == nil {
 		return nil
 	}
-	return &DesktopWindow{Class: w.Class, Title: w.Title, X: w.X, Y: w.Y, W: w.W, H: w.H}
+	return &EventWindow{Class: w.Class, Title: w.Title, X: w.X, Y: w.Y, W: w.W, H: w.H}
 }
 
 // frame is a keyframe with pt marked: the click's point, else the cursor's when known.

@@ -83,7 +83,7 @@ type DeskPlatform struct {
 	// KeyframeEvery is the shortest gap between keyframes (0: KeyframeEvery).
 	KeyframeEvery time.Duration
 	// Window is the focused window, kept on each event (nil: none kept).
-	Window func() *DesktopWindow
+	Window func() *EventWindow
 	// Context is asked at each start: "" when elements can be looked up, "none" when they
 	// can't (no accessibility bus): every event then says so, nothing can be masked, and the
 	// start warns that typed text is kept (Warning).
@@ -110,8 +110,8 @@ type KeyframePoint struct {
 	Y int `json:"y"`
 }
 
-// DesktopWindow is the focused window an event happened in (Wayland: the compositor's).
-type DesktopWindow struct {
+// EventWindow is the focused window an event happened in (Wayland: the compositor's).
+type EventWindow struct {
 	Class string `json:"class,omitempty"`
 	Title string `json:"title,omitempty"`
 	X     int    `json:"x,omitempty"`
@@ -137,7 +137,7 @@ type DesktopEvent struct {
 	Y           int             `json:"y,omitempty"`
 	DX          int             `json:"dx,omitempty"` // scroll: lines
 	DY          int             `json:"dy,omitempty"`
-	Window      *DesktopWindow  `json:"window,omitempty"`
+	Window      *EventWindow    `json:"window,omitempty"`
 	// Context is "none" when the recording has no accessibility context (no element, no mask).
 	Context string `json:"context,omitempty"`
 	// KeyframePoint: the event has a keyframe with its point marked, here.
@@ -317,7 +317,7 @@ type deskRecorder struct {
 // deskTyping is the text typed into one element so far.
 type deskTyping struct {
 	el     *ax.Recorded
-	win    *DesktopWindow
+	win    *EventWindow
 	text   []rune
 	masked bool
 	at     time.Time
@@ -442,7 +442,7 @@ func (d *deskRecorder) event(kind string, el *ax.Recorded, at time.Time) Desktop
 }
 
 // eventIn is an event on el in window win (nil: none kept).
-func (d *deskRecorder) eventIn(kind string, el *ax.Recorded, win *DesktopWindow, at time.Time) DesktopEvent {
+func (d *deskRecorder) eventIn(kind string, el *ax.Recorded, win *EventWindow, at time.Time) DesktopEvent {
 	e := DesktopEvent{RecordingID: d.id, Kind: kind, TS: at.UnixMilli(), Window: win, Context: d.context}
 	if el != nil {
 		e.App = el.App
@@ -457,7 +457,7 @@ func (d *deskRecorder) eventIn(kind string, el *ax.Recorded, win *DesktopWindow,
 }
 
 // window is the focused window when the platform keeps it.
-func (d *deskRecorder) window() *DesktopWindow {
+func (d *deskRecorder) window() *EventWindow {
 	if d.p.Window == nil {
 		return nil
 	}
