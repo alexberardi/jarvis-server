@@ -73,8 +73,11 @@ type RecordedElement struct {
 	Frame    string `json:"frame,omitempty"`
 	AXPath   string `json:"ax_path,omitempty"`
 	// Source is where the element came from: "ax" for the desktop accessibility tree (AX on
-	// macOS, AT-SPI on Linux); empty for a browser element.
+	// macOS, AT-SPI on Linux), "vision" for one the vision model named from the click's
+	// keyframe (no AX path: a replay finds it by sight); empty for a browser element.
 	Source string `json:"source,omitempty"`
+	// Confidence is the vision model's, 0 to 1 (source "vision" only).
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 // Heal is a step whose element moved: the element the replay acted on in its place.
