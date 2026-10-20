@@ -44,58 +44,65 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
     )
   }
 
+  const value = formatSettingValue(setting)
   return (
-    <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-start md:gap-6">
-      <div className="min-w-0 md:flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <code className="font-mono text-small font-medium break-all text-text">{setting.key}</code>
-          <Badge>{setting.value_type}</Badge>
-          {setting.is_secret && (
-            <Badge title="Write-only: the value is never shown">
-              <Lock size={12} aria-hidden />
-              Secret
-            </Badge>
-          )}
-          {setting.requires_reload && (
-            <Badge tone="warning" title={RELOAD_MESSAGE}>
-              <RotateCw size={12} aria-hidden />
-              Needs restart
-            </Badge>
-          )}
-          {setting.from_db && (
-            <span role="img" aria-label="Changed from the default" title="Changed from the default (stored in the database)">
-              <Database size={14} aria-hidden className="text-text-muted" />
-            </span>
-          )}
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 px-4 py-2.5">
+      <div className="min-w-0 md:grid md:grid-cols-[minmax(0,1fr)_18rem] md:gap-x-6">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <code className="font-mono text-small font-medium break-all text-text">{setting.key}</code>
+            <Badge>{setting.value_type}</Badge>
+            {setting.is_secret && (
+              <Badge title="Write-only: the value is never shown">
+                <Lock size={12} aria-hidden />
+                Secret
+              </Badge>
+            )}
+            {setting.requires_reload && (
+              <Badge tone="warning" title={RELOAD_MESSAGE}>
+                <RotateCw size={12} aria-hidden />
+                Needs restart
+              </Badge>
+            )}
+            {setting.from_db && (
+              <span role="img" aria-label="Changed from the default" title="Changed from the default (stored in the database)">
+                <Database size={14} aria-hidden className="text-text-muted" />
+              </span>
+            )}
+          </div>
+          {setting.description && <p className="mt-0.5 max-w-prose text-small text-text-muted">{setting.description}</p>}
+          {setting.household_scoped && <p className="mt-0.5 text-caption text-text-muted">Default for all households</p>}
         </div>
-        {setting.description && <p className="mt-1 max-w-prose text-small text-text-muted">{setting.description}</p>}
-        {setting.household_scoped && <p className="mt-1 text-caption text-text-muted">Default for all households</p>}
+
+        <div className="mt-1 min-w-0 md:mt-0 md:pt-0.5">
+          {editing ? (
+            <SettingEditor
+              setting={setting}
+              onSave={handleSave}
+              onCancel={() => setEditing(false)}
+              isSaving={mutation.isPending}
+            />
+          ) : value ? (
+            <p className="font-mono text-small break-all text-text">{value}</p>
+          ) : (
+            <p className="text-small text-text-muted italic">Empty</p>
+          )}
+          {setting.household_scoped && <HouseholdValues setting={setting} serviceName={serviceName} />}
+        </div>
       </div>
 
-      <div className="min-w-0 md:w-80 md:shrink-0">
-        {editing ? (
-          <SettingEditor
-            setting={setting}
-            onSave={handleSave}
-            onCancel={() => setEditing(false)}
-            isSaving={mutation.isPending}
-          />
-        ) : (
-          <div className="flex min-h-10 items-center gap-2">
-            <p className="min-w-0 flex-1 font-mono text-small break-all text-text">{formatSettingValue(setting)}</p>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setEditing(true)}
-              title={setting.household_scoped ? 'Edit the default' : 'Edit'}
-              aria-label={setting.household_scoped ? 'Edit the default' : 'Edit'}
-            >
-              <Pencil size={16} aria-hidden />
-            </Button>
-          </div>
-        )}
-        {setting.household_scoped && <HouseholdValues setting={setting} serviceName={serviceName} />}
-      </div>
+      {!editing && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="-my-1.5 -mr-2"
+          onClick={() => setEditing(true)}
+          title={setting.household_scoped ? 'Edit the default' : 'Edit'}
+          aria-label={setting.household_scoped ? 'Edit the default' : 'Edit'}
+        >
+          <Pencil size={16} aria-hidden />
+        </Button>
+      )}
     </div>
   )
 }

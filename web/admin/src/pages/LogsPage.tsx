@@ -42,7 +42,7 @@ function LogRow({ e }: { e: LogEntry }) {
       <button
         type="button"
         className={cn(
-          'grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 px-4 py-2 text-left',
+          'grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 px-4 py-1.5 text-left',
           'lg:grid-cols-[9.5rem_5.5rem_9rem_minmax(0,1fr)_1rem]',
           hasContext ? 'transition-colors duration-(--duration-hover) hover:bg-surface-alt' : 'cursor-default',
         )}
@@ -57,7 +57,7 @@ function LogRow({ e }: { e: LogEntry }) {
         <span className="col-span-4 row-start-2 min-w-0 font-mono text-small break-words whitespace-pre-wrap text-text lg:col-span-1 lg:col-start-4 lg:row-start-1">
           {e.message}
         </span>
-        <span className="col-start-4 row-start-1 flex justify-end text-text-muted lg:col-start-5" aria-hidden>
+        <span className="col-start-4 row-start-1 flex justify-end self-center text-text-muted lg:col-start-5" aria-hidden>
           {hasContext && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
         </span>
       </button>

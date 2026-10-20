@@ -92,7 +92,7 @@ export default function SettingsPage() {
         title="Settings"
         description={
           <>
-            How each part of Jarvis Automation behaves. Which model runs what is set on{' '}
+            How each part of Jarvis Automation behaves. Model choices are on{' '}
             <Link to="/admin/models" className="text-primary underline-offset-2 hover:underline">
               Models
             </Link>
