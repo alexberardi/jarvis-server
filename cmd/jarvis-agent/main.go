@@ -682,7 +682,11 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		nodeConfig = wirePiNode(r, vf, hf, hd, live, sp, log)
+		var audio *sdkhost.Audio
+		if tf.host != nil {
+			audio = tf.host.Audio
+		}
+		nodeConfig = wirePiNode(r, vf, hf, hd, live, audio, sp, log)
 	}
 	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
 	// and are in its settings snapshot; a computer has none.

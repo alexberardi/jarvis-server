@@ -47,6 +47,11 @@ type Settings struct {
 	FollowUpSilence *float64 `json:"follow_up_silence,omitempty"`
 	LEDs            *bool    `json:"leds,omitempty"`
 	LEDBrightness   *int     `json:"led_brightness,omitempty"`
+	// The voice pipeline's endpointing (#295).
+	SilenceThreshold      *float64 `json:"silence_threshold,omitempty"`
+	ListenSilence         *float64 `json:"listen_silence,omitempty"`
+	FollowUpMinAfterOnset *float64 `json:"follow_up_min_after_onset,omitempty"`
+	FollowUpMinSpeech     *float64 `json:"follow_up_min_speech,omitempty"`
 	// ComputerControl: Jarvis may use this computer (COMPUTER-CONTROL.md C11). Unset is off:
 	// a new install and an upgrade both start off; the menu's toggle sets it.
 	ComputerControl *bool `json:"computer_control,omitempty"`
@@ -78,6 +83,13 @@ var Keys = []Key{
 	{"follow_up_silence", "follow-up-silence", false, "seconds of silence that end a follow-up answer", func(s *Settings) any { return &s.FollowUpSilence }},
 	{"leds", "no-leds", true, "light the ReSpeaker HAT's LEDs (a Pi)", func(s *Settings) any { return &s.LEDs }},
 	{"led_brightness", "led-brightness", false, "HAT LED brightness, percent (0 to 100)", func(s *Settings) any { return &s.LEDBrightness }},
+	{"silence_threshold", "silence-threshold", false, "RMS below which a command counts as silence, when the room's level before the wake word isn't known",
+		func(s *Settings) any { return &s.SilenceThreshold }},
+	{"listen_silence", "listen-silence", false, "seconds of silence that end a command", func(s *Settings) any { return &s.ListenSilence }},
+	{"follow_up_min_after_onset", "follow-up-min-after-onset", false, "a follow-up answer records at least this many seconds after speech starts",
+		func(s *Settings) any { return &s.FollowUpMinAfterOnset }},
+	{"follow_up_min_speech", "follow-up-min-speech", false, "a follow-up answer shorter than this many seconds of speech is noise",
+		func(s *Settings) any { return &s.FollowUpMinSpeech }},
 	{"computer_control", "computer-control", false, `let Jarvis use this computer (off by default; the menu's "Computer control" sets it)`,
 		func(s *Settings) any { return &s.ComputerControl }},
 }
@@ -162,6 +174,18 @@ func (s Settings) Validate() error {
 	}
 	if s.FollowUpSilence != nil && *s.FollowUpSilence <= 0 {
 		return fmt.Errorf("follow_up_silence is %v; use a number of seconds above 0", *s.FollowUpSilence)
+	}
+	if s.SilenceThreshold != nil && *s.SilenceThreshold <= 0 {
+		return fmt.Errorf("silence_threshold is %v; use a number above 0", *s.SilenceThreshold)
+	}
+	if s.ListenSilence != nil && *s.ListenSilence <= 0 {
+		return fmt.Errorf("listen_silence is %v; use a number of seconds above 0", *s.ListenSilence)
+	}
+	if s.FollowUpMinAfterOnset != nil && *s.FollowUpMinAfterOnset <= 0 {
+		return fmt.Errorf("follow_up_min_after_onset is %v; use a number of seconds above 0", *s.FollowUpMinAfterOnset)
+	}
+	if s.FollowUpMinSpeech != nil && *s.FollowUpMinSpeech < 0 {
+		return fmt.Errorf("follow_up_min_speech is %v; use 0 or more seconds", *s.FollowUpMinSpeech)
 	}
 	if s.LEDBrightness != nil && (*s.LEDBrightness < 0 || *s.LEDBrightness > 100) {
 		return fmt.Errorf("led_brightness is %d; use 0 to 100", *s.LEDBrightness)

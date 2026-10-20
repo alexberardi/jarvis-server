@@ -35,6 +35,13 @@ type Voice interface {
 	Measure(ctx context.Context, d time.Duration) ([]float64, error)
 }
 
+// Audio is the speaker's volume and mute (*sdkhost.Audio), which persists them itself
+// (volume.json) and applies them again at start.
+type Audio interface {
+	SetVolume(ctx context.Context, pct int) bool
+	SetMuted(ctx context.Context, muted bool) bool
+}
+
 // State is the node settings the agent runs with now, under their meaning in the Python node's
 // config.json: what the settings snapshot's node_config reports.
 type State struct {
@@ -44,12 +51,18 @@ type State struct {
 	FollowUpSilence float64 // follow_up_silence_duration
 	LEDEnabled      bool    // led_enabled
 	LEDBrightness   int     // led_brightness_percent
+	// The voice pipeline's endpointing.
+	SilenceThreshold      float64 // silence_threshold (the static one; the room's level wins when known)
+	SilenceSecs           float64 // silence_duration: silence that ends a command
+	FollowUpMinAfterOnset float64 // follow_up_min_record_after_onset_secs
+	FollowUpMinSpeech     float64 // follow_up_min_speech_secs
 }
 
-// Node handles the verbs. Set LEDs and Voice after New when the Pi has them.
+// Node handles the verbs. Set LEDs, Voice and Audio after New when the Pi has them.
 type Node struct {
 	LEDs  LEDs  // nil: no HAT
 	Voice Voice // nil: voice can't run on this build
+	Audio Audio // nil: no mixer to set
 	// MeasureWait is how long a measurement may wait for a turn in progress to end (30 s).
 	MeasureWait time.Duration
 
@@ -107,12 +120,14 @@ func FilterTrustAnchors(in map[string]any) (safe map[string]any, rejected []stri
 	return safe, rejected
 }
 
-// change is one accepted key: its effect on State, agent.json and the running pipeline.
+// change is one accepted key: its effect on State, agent.json, the running pipeline or the
+// speaker.
 type change struct {
 	state func(*State)
 	save  func(*settings.Settings)
-	tune  func(*voice.Config) // nil: not a voice setting
-	leds  func(LEDs)          // nil: not an LED setting
+	tune  func(*voice.Config)          // nil: not a voice setting
+	leds  func(LEDs)                   // nil: not an LED setting
+	audio func(context.Context, Audio) // set instead of state and save: Audio persists it
 }
 
 // parse turns one key into a change, or says why it is skipped.
@@ -155,15 +170,52 @@ func parse(key string, v any) (change, string) {
 		p := max(0, min(100, int(f))) // Python's int(); the LED service clamps
 		return change{state: func(s *State) { s.LEDBrightness = p }, save: func(s *settings.Settings) { s.LEDBrightness = &p },
 			leds: func(l LEDs) { l.SetBrightness(p) }}, ""
-	case "volume_percent", "is_muted":
-		return change{}, "the Go node has no Pi volume control yet; not applied or saved"
+	case "silence_threshold":
+		f, ok := number(v)
+		f = math.Trunc(f) // Python's int()
+		if !ok || f <= 0 {
+			return change{}, "use a number above 0"
+		}
+		return change{state: func(s *State) { s.SilenceThreshold = f }, save: func(s *settings.Settings) { s.SilenceThreshold = &f },
+			tune: func(c *voice.Config) { c.Endpointing.SilenceThreshold = f }}, ""
+	case "silence_duration":
+		f, ok := number(v)
+		if !ok || f <= 0 {
+			return change{}, "use a number of seconds above 0"
+		}
+		return change{state: func(s *State) { s.SilenceSecs = f }, save: func(s *settings.Settings) { s.ListenSilence = &f },
+			tune: func(c *voice.Config) { c.Endpointing.SilenceSecs = f }}, ""
+	case "follow_up_min_record_after_onset_secs":
+		f, ok := number(v)
+		if !ok || f <= 0 {
+			return change{}, "use a number of seconds above 0"
+		}
+		return change{state: func(s *State) { s.FollowUpMinAfterOnset = f }, save: func(s *settings.Settings) { s.FollowUpMinAfterOnset = &f },
+			tune: func(c *voice.Config) { c.FollowUp.MinAfterOnsetSecs = f }}, ""
+	case "follow_up_min_speech_secs":
+		f, ok := number(v)
+		if !ok || f < 0 {
+			return change{}, "use 0 or more seconds"
+		}
+		return change{state: func(s *State) { s.FollowUpMinSpeech = f }, save: func(s *settings.Settings) { s.FollowUpMinSpeech = &f },
+			tune: func(c *voice.Config) { c.FollowUp.MinSpeechSecs = f }}, ""
+	case "volume_percent":
+		f, ok := number(v)
+		if !ok {
+			return change{}, "use a percentage"
+		}
+		p := max(0, min(100, int(f))) // Python's int(); set_volume_percent clamps
+		return change{audio: func(ctx context.Context, a Audio) { a.SetVolume(ctx, p) }}, ""
+	case "is_muted":
+		b := truthy(v)
+		return change{audio: func(ctx context.Context, a Audio) { a.SetMuted(ctx, b) }}, ""
 	case "wake_word_model":
 		return change{}, "the Go node has one wake word (hey_jarvis); not applied or saved"
 	}
 	return change{}, "not a Go node setting; not applied or saved"
 }
 
-func (n *Node) updateNodeConfig(_ context.Context, _ node.Backend, det map[string]any) {
+func (n *Node) updateNodeConfig(ctx context.Context, _ node.Backend, det map[string]any) {
 	in, _ := det["settings"].(map[string]any)
 	if len(in) == 0 {
 		n.log.Warn("update_node_config: no settings provided")
@@ -183,6 +235,9 @@ func (n *Node) updateNodeConfig(_ context.Context, _ node.Backend, det map[strin
 	var applied []string
 	for _, k := range keys {
 		c, why := parse(k, in[k])
+		if why == "" && c.audio != nil && n.Audio == nil {
+			why = "no mixer on this node; not applied or saved"
+		}
 		if why != "" {
 			n.log.Warn("update_node_config: key ignored", "key", k, "value", in[k], "why", why)
 			continue
@@ -195,7 +250,12 @@ func (n *Node) updateNodeConfig(_ context.Context, _ node.Backend, det map[strin
 	}
 	// Live first, as Python: the user sees the effect even if the file can't be written.
 	n.mu.Lock()
+	save := false
 	for _, c := range changes {
+		if c.audio != nil {
+			continue
+		}
+		save = true
 		c.state(&n.state)
 		if c.leds != nil && n.LEDs != nil {
 			c.leds(n.LEDs)
@@ -205,10 +265,18 @@ func (n *Node) updateNodeConfig(_ context.Context, _ node.Backend, det map[strin
 		}
 	}
 	n.mu.Unlock()
-	if n.path != "" {
+	// The mixer outside the lock: pactl may take its time.
+	for _, c := range changes {
+		if c.audio != nil {
+			c.audio(ctx, n.Audio)
+		}
+	}
+	if n.path != "" && save {
 		err := settings.Update(n.path, func(s *settings.Settings) error {
 			for _, c := range changes {
-				c.save(s)
+				if c.save != nil {
+					c.save(s)
+				}
 			}
 			return nil
 		})

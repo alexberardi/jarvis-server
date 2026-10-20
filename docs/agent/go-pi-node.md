@@ -885,12 +885,17 @@ to agent.json in one serialized write (`settings.Update`, shared with the voice 
 | `wake_ack_audio_enabled` | `chimes` / `--no-chimes` | same |
 | `follow_up_listen_seconds` | `follow_up` / `--follow-up` | same (from the next turn) |
 | `follow_up_silence_duration` | `follow_up_silence` / `--follow-up-silence` | same |
+| `silence_threshold` | `silence_threshold` / `--silence-threshold` | same (`Endpointing.SilenceThreshold`: the static one, used when the pre-wake level isn't known, as Python's) |
+| `silence_duration` | `listen_silence` / `--listen-silence` | same (`Endpointing.SilenceSecs`) |
+| `follow_up_min_record_after_onset_secs` | `follow_up_min_after_onset` / `--follow-up-min-after-onset` | same (`FollowUp.MinAfterOnsetSecs`) |
+| `follow_up_min_speech_secs` | `follow_up_min_speech` / `--follow-up-min-speech` | same (`FollowUp.MinSpeechSecs`) |
+| `volume_percent`, `is_muted` | not in agent.json: `sdkhost.Audio` persists them in `volume.json` and applies them again at start | `sdkhost.Audio.SetVolume` / `SetMuted` (pactl on the default sink or `jarvis_output`, else amixer; plus Bluetooth sinks), as `N:set_volume_percent` |
 
-A bad value skips that key with a log line. `volume_percent` and `is_muted` are logged and
-neither applied nor saved: the Go node has no Pi volume control yet. `wake_word_model` is
+A bad value skips that key with a log line (#295 added the endpointing keys and the volume;
+before it they were logged and ignored). `wake_word_model` is
 ignored (the Go node has one wake word), so `restart` never restarts anything; every key it takes
 applies live. Any other key is logged and ignored. The settings snapshot's `node_config` reports
-the values in effect.
+the values in effect, and `volume_percent` (the persisted level, else the mixer's) and `is_muted`.
 
 **`preview_led_pattern`** (`N:handle_preview_led_pattern`): `hat.LEDs.Preview`, then back to
 what was showing (a real voice state set meanwhile survives the timer). `duration_seconds`
@@ -1232,8 +1237,10 @@ checked on the lab Pi 4 since it was built.
 | 5.1 follow-up | built (heard on the desktop) | no |
 | 5.2 barge-in | built (rig tests) | no |
 | 5.3 client tools / continue | built | no |
-| 5.4 `update_node_config`, ambient noise, LED preview | built; Pi volume not applied | no |
-| 5.5 K2 + settings snapshot | built for the desktop agent (`internal/agent/nodesettings`); the Pi reports its `node_config` | **open (c)**: not marked done or checked for the Pi profile; the snapshot's volume says "no Pi volume control" |
+| 5.4 `update_node_config`, ambient noise, LED preview | built | no |
+| 5.4 the app's Voice Settings: silence threshold and duration, follow-up minimums (#295) | built | no: "Set Automatically", then a turn that ends on the new silence |
+| 5.4 Pi volume and mute from the app (`volume_percent`, `is_muted`; #295) | built (`sdkhost.Audio`, persisted in `volume.json`) | no: the slider heard to change the HAT's speaker, and kept after a restart |
+| 5.5 K2 + settings snapshot | built for the desktop agent (`internal/agent/nodesettings`); the Pi reports its `node_config`, volume included | **open (c)**: not marked done or checked for the Pi profile |
 | 5.6 packages (apt, post_install, test-install) | built | no |
 | 5.7 factory reset, routines sync, context requests | built | no; **open (d)**: a reset node doesn't return to provisioning; jarvisd's broker drops `context/operations` answers (ACL, held for the user) |
 | 5.8 Bluetooth | built | no |
@@ -1552,9 +1559,8 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       tell_joke) against the real Go backends with a real Python, each backend's RPC, and the
       timers' restart and expiry with a fake clock. **Pending on-device** (lab Pi 4): the first
       boot's install, a voice turn per family, a timer heard on expiry, the volume heard to
-      change. Not done: `update_node_config`'s `volume_percent`/`is_muted` and the settings
-      snapshot's volume still say "no Pi volume control" (§3.14); they can use the same
-      `sdkhost.Audio`.
+      change. `update_node_config`'s `volume_percent`/`is_muted` and the settings snapshot's
+      volume use the same `sdkhost.Audio` (§3.14, #295).
       **Reminders, alerts and the button built 2026-10-19** (loop #175,
       [decision](../decisions/2026-10-19-pi-reminders-alerts.md)): `reminder` loads (the sidecar
       stands in for `jarvis_log_client` and restores the reminders when it loads them); the
