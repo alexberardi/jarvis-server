@@ -147,6 +147,20 @@ func (a *Audio) current(ctx context.Context) (int, error) {
 	return clamp(best), nil
 }
 
+// Volume is the level in effect: the persisted one, else the mixer's.
+func (a *Audio) Volume(ctx context.Context) (int, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.current(ctx)
+}
+
+// Muted is whether the speaker was last muted.
+func (a *Audio) Muted() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.load().Muted
+}
+
 // Adjust moves the volume by delta points and returns the new level.
 func (a *Audio) Adjust(ctx context.Context, delta int) (int, error) {
 	a.mu.Lock()
