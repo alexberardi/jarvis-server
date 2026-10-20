@@ -26,9 +26,12 @@ func TestMacKeyInput(t *testing.T) {
 		{"cmd+shift+N", 45, macFlagCmd | macFlagShift, false, "N", DeskInput{Key: "shift+cmd+n"}},
 		{"ctrl+a", 0, macFlagCtrl, false, "\x01", DeskInput{Key: "ctrl+a"}},
 		{"cmd+return", vkReturn, macFlagCmd, false, "", DeskInput{Key: "cmd+enter"}},
+		{"tab", vkTab, 0, false, "\t", DeskInput{Key: KeyTab}},
+		{"shift+tab", vkTab, macFlagShift, false, "\t", DeskInput{Key: "shift+tab"}},
 		{"alt types", 2, macFlagAlt, false, "∂", DeskInput{Text: "∂"}},
 		{"secure letter", 0, 0, true, "p", DeskInput{Secure: true}},
 		{"secure return", vkReturn, 0, true, "", DeskInput{Key: KeyEnter, Secure: true}},
+		{"secure shift+tab", vkTab, macFlagShift, true, "", DeskInput{Key: "shift+tab", Secure: true}},
 		{"secure shortcut", 9, macFlagCmd, true, "v", DeskInput{Secure: true}},
 	}
 	for _, c := range cases {

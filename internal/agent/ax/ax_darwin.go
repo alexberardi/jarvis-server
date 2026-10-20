@@ -3,6 +3,7 @@
 package ax
 
 import (
+	"runtime"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -405,6 +406,8 @@ func recorded(e elem) *Recorded {
 var (
 	appKitOnce sync.Once
 	runningApp objc.ID // NSRunningApplication; 0 when AppKit didn't load
+	poolPush   func() uintptr
+	poolPop    func(uintptr)
 	bundleIDs  sync.Map
 )
 
@@ -416,13 +419,25 @@ func bundleID(pid int32) string {
 		return v.(string)
 	}
 	appKitOnce.Do(func() {
+		lobjc, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
+		if err != nil {
+			return
+		}
 		if _, err := purego.Dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", purego.RTLD_NOW|purego.RTLD_GLOBAL); err == nil {
+			purego.RegisterLibFunc(&poolPush, lobjc, "objc_autoreleasePoolPush")
+			purego.RegisterLibFunc(&poolPop, lobjc, "objc_autoreleasePoolPop")
 			runningApp = objc.ID(objc.GetClass("NSRunningApplication"))
 		}
 	})
 	if runningApp == 0 {
 		return ""
 	}
+	// runningApplicationWithProcessIdentifier: returns an autoreleased object, and a Go thread
+	// has no pool of its own: drain one here, on the thread that pushed it.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	pool := poolPush()
+	defer poolPop(pool)
 	app := runningApp.Send(objc.RegisterName("runningApplicationWithProcessIdentifier:"), pid)
 	if app == 0 {
 		return ""

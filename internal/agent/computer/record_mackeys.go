@@ -32,6 +32,10 @@ func macKeyInput(code uint16, flags uint64, secure bool, at time.Time, text func
 	in := DeskInput{Kind: InKey, At: at, Secure: secure}
 	named := macNamedKeys[code]
 	shortcut := flags&(macFlagCmd|macFlagCtrl) != 0
+	if named == KeyTab && !shortcut && flags&macFlagShift != 0 {
+		in.Key = "shift+tab" // moves focus back, so a replay must not press plain Tab
+		return in
+	}
 	if secure {
 		if named != KeyBackspace && !shortcut {
 			in.Key = named // Enter, Tab and Escape say nothing of what was typed

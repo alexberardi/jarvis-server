@@ -11,7 +11,10 @@ waits for the thread to end, so no event arrives after a recording stopped.
 
 The callback only decodes the event and queues it. Accessibility lookups (the element under a
 click, the focused element) and keyframes run on a worker goroutine, so an app that doesn't
-answer AX can't make macOS disable the tap; a tap disabled by timeout is re-enabled anyway.
+answer AX can't make macOS disable the tap; a tap disabled by timeout is re-enabled anyway. The
+cost: the focused element is read when the worker handles a keystroke, not when it was pressed,
+so if the worker falls behind (a keyframe just ran), text typed right before a Tab or click can
+be credited to the next field. Secure input is not affected: its flag is taken in the callback.
 
 Secure input is dropped at two points. While `IsSecureEventInputEnabled()` is on, the callback
 never reads a key's characters (only Enter, Tab and Escape are named). Text typed into an
@@ -21,7 +24,7 @@ never reads a key's characters (only Enter, Tab and Escape are named). Text type
 Desktop events keep the browser trace's fields (`seq`, `ts`, `kind` click/input/key/scroll,
 `element` role and name, `value`, `masked`) and add `app` (bundle id), `element.ax_path`, the
 click's or scroll's `x`/`y`, `button: right` and the scroll's `dx`/`dy`. Shortcuts are `key`
-events named like `cmd+n`. Keyframes are `<id>.<seq>.jpg` next to the trace (0600), at most one
+events named like `cmd+n`, and Shift+Tab is `shift+tab` so a replay moves focus back. Keyframes are `<id>.<seq>.jpg` next to the trace (0600), at most one
 every 2 s, and `Delete` removes them with the trace.
 
 Input Monitoring is a fifth grant on the setup page. Like Screen Recording, macOS applies it
