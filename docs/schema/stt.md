@@ -59,6 +59,8 @@ From `jarvis-whisper-api/app/services/settings_definitions.py` (the input for th
   `whisper.default_beam_size`, `whisper.language`, `voice.recognition_enabled` (household-scoped,
   D35), `voice.similarity_threshold` (**0.43**, ERes2Net), `voice.min_speaker_margin`; new
   `voice.enroll_min_speech_seconds` (3.0) and `voice.enroll_min_consistency` (0.3) for D37.
+  A rejected take is 422 `{success:false, error:"low_quality", reason, speech_seconds, detail}`
+  (+ `min_speech_seconds` for `too_little_speech`); cc relays the same fields on V10 (#293).
   The engine keys moved to the llm module's `stt.*` labels (D7).
 - **Cut/changed keys:** `voice.encoder` (`ecapa` is the cut torch stack; sherpa-onnx encoder replaces it), the `voice.*` thresholds need recalibration for the new encoder (PLAN §3.3) so imported values should not be trusted; `whisper.*` keys depend on D7 (whisper.cpp engine vs sherpa ASR).
 - Dev DB seeds 13 of the 24 keys.

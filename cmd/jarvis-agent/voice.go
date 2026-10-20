@@ -32,9 +32,15 @@ type voiceFlags struct {
 	followUp      float64
 	followSilence float64
 	bargeIn       bool
-	debounce      time.Duration
-	onsetWait     time.Duration
-	preRoll       time.Duration
+	// Endpointing (#295): the app's silence_threshold, silence_duration,
+	// follow_up_min_record_after_onset_secs and follow_up_min_speech_secs.
+	silenceThreshold    float64
+	listenSilence       float64
+	followMinAfterOnset float64
+	followMinSpeech     float64
+	debounce            time.Duration
+	onsetWait           time.Duration
+	preRoll             time.Duration
 }
 
 // minWakeDebounce is the shortest --wake-debounce: below it one utterance of the wake word
@@ -55,6 +61,14 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3; the Python node's follow_up_listen_seconds)")
 	fs.Float64Var(&v.followSilence, "follow-up-silence", voice.DefaultFollowUp().SilenceSecs,
 		"seconds of silence that end a follow-up answer (the Python node's follow_up_silence_duration is 0.5)")
+	ep, fu := voice.DefaultEndpointing(), voice.DefaultFollowUp()
+	fs.Float64Var(&v.silenceThreshold, "silence-threshold", ep.SilenceThreshold,
+		"RMS below which a command counts as silence, when the room's level before the wake word isn't known (the Python node's silence_threshold)")
+	fs.Float64Var(&v.listenSilence, "listen-silence", ep.SilenceSecs, "seconds of silence that end a command (the Python node's silence_duration)")
+	fs.Float64Var(&v.followMinAfterOnset, "follow-up-min-after-onset", fu.MinAfterOnsetSecs,
+		"a follow-up answer records at least this many seconds after speech starts (the Python node's follow_up_min_record_after_onset_secs)")
+	fs.Float64Var(&v.followMinSpeech, "follow-up-min-speech", fu.MinSpeechSecs,
+		"a follow-up answer shorter than this many seconds of speech is noise (the Python node's follow_up_min_speech_secs)")
 	fs.BoolVar(&v.bargeIn, "barge-in", voice.DefaultBargeIn().Enabled,
 		"stop a reply when \"hey Jarvis\" is said over it (-barge-in=false: off; the Python node's barge_in_enabled)")
 	fs.DurationVar(&v.debounce, "wake-debounce", voice.DefaultConfig().Debounce,
@@ -119,6 +133,11 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	if err != nil {
 		return nil, fmt.Errorf("wake word: %w", err)
 	}
+	return &voiceStack{flags: f, cfg: voiceConfig(f), det: det, close: closeDet}, nil
+}
+
+// voiceConfig is the pipeline's configuration from the flags (agent.json applied to them).
+func voiceConfig(f *voiceFlags) voice.Config {
 	cfg := voice.DefaultConfig()
 	cfg.WakeThreshold = f.threshold
 	cfg.Chimes = !f.noChimes
@@ -130,7 +149,19 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	if f.followSilence > 0 {
 		cfg.FollowUp.SilenceSecs = f.followSilence
 	}
-	return &voiceStack{flags: f, cfg: cfg, det: det, close: closeDet}, nil
+	if f.silenceThreshold > 0 {
+		cfg.Endpointing.SilenceThreshold = f.silenceThreshold
+	}
+	if f.listenSilence > 0 {
+		cfg.Endpointing.SilenceSecs = f.listenSilence
+	}
+	if f.followMinAfterOnset > 0 {
+		cfg.FollowUp.MinAfterOnsetSecs = f.followMinAfterOnset
+	}
+	if f.followMinSpeech >= 0 {
+		cfg.FollowUp.MinSpeechSecs = f.followMinSpeech
+	}
+	return cfg
 }
 
 func (v *voiceStack) options(cc *node.CC, tools node.Toolset, log *slog.Logger, onTurn func(voice.Turn)) voice.Options {

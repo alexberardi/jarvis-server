@@ -263,9 +263,14 @@ var usRows = []struct {
 	{51, "\\zxcvbnm,./", "|ZXCVBNM<>?"},
 }
 
-// usNamed are the US layout's named keys; occupied keys (modifiers, BackSpace) have no keysym.
-var usNamed = map[uint32]uint32{9: KeyEscape, 22: 0, 23: KeyTab, 36: KeyReturn, 37: 0, 50: 0, 62: 0,
-	64: 0, 65: KeySpace, 66: 0, 108: 0, 105: 0, 111: KeyUp, 113: KeyLeft, 114: KeyRight, 116: KeyDown, 133: 0}
+// usNamed are the US layout's named keys (evdev keycodes + 8); occupied keys (the right-hand
+// modifiers, Caps Lock) have no keysym.
+var usNamed = map[uint32]uint32{9: KeyEscape, 22: KeyBackSpace, 23: KeyTab, 36: KeyReturn, 37: KeyControlL,
+	50: KeyShiftL, 62: 0, 64: KeyAltL, 65: KeySpace, 66: 0, 108: 0, 105: 0, 111: KeyUp, 113: KeyLeft,
+	114: KeyRight, 116: KeyDown, 133: KeySuperL,
+	67: KeyF1, 68: KeyF1 + 1, 69: KeyF1 + 2, 70: KeyF1 + 3, 71: KeyF1 + 4, 72: KeyF1 + 5, 73: KeyF1 + 6,
+	74: KeyF1 + 7, 75: KeyF1 + 8, 76: KeyF1 + 9, 95: KeyF1 + 10, 96: KeyF1 + 11,
+	110: KeyHome, 112: KeyPageUp, 115: KeyEnd, 117: KeyPageDown, 118: KeyInsert, 119: KeyDelete}
 
 // usFirstFree is past every keycode with a keysym in a standard evdev keymap (709 in
 // libxkbcommon's, with the inet extras).

@@ -224,3 +224,57 @@ func signedOutToSetup(err error, credsFile, nodeID string, log *slog.Logger, ope
 	}
 	return errNotSetUp{err}
 }
+
+// nodeEnd is what happens when run's node ends (node.Runner.Run returns). It always ends run's
+// context first (stop), so the control socket closes with the node: otherwise run's deferred
+// wait for the socket kept a process with no node, no icon and no island answering the setup
+// page's "is it running?", and nothing started the agent again after a sign-in (#297). Then
+// signedOutToSetup; and a computer's run that was signed out waits for the new sign-in instead
+// of exiting (signedOut), since a run in a terminal, or under a job that doesn't restart it,
+// would otherwise be gone for good.
+type nodeEnd struct {
+	credsFile, nodeID string
+	desktop, noTray   bool
+	stop              func()
+	openSetup         func()
+	log               *slog.Logger
+}
+
+func (e nodeEnd) of(err error) error {
+	e.stop()
+	err = signedOutToSetup(err, e.credsFile, e.nodeID, e.log, e.openSetup)
+	if ns := (errNotSetUp{}); e.desktop && errors.As(err, &ns) {
+		return signedOut{err: err, credsFile: e.credsFile, noTray: e.noTray, log: e.log}
+	}
+	return err
+}
+
+// signedOut ends a computer's runAgent that was signed out, with the setup page already open;
+// run then waits for the new sign-in (rejoin). It wraps errNotSetUp.
+type signedOut struct {
+	err       error
+	credsFile string
+	noTray    bool
+	log       *slog.Logger
+}
+
+func (s signedOut) Error() string { return s.err.Error() }
+func (s signedOut) Unwrap() error { return s.err }
+
+// rejoin is the signed-out computer's wait: the login item's "Not set up yet" icon and control
+// socket (waitForSetup), without opening the setup page again, then the agent again in place
+// once the page has saved the new credentials. listen takes the control socket again (the
+// node's closed with it); one that another agent holds by now means that agent runs instead.
+func (s signedOut) rejoin(ctx context.Context, listen func() (net.Listener, error)) error {
+	ctl, err := listen()
+	if errors.Is(err, browser.ErrInUse) {
+		s.log.Info("signed out; another agent started meanwhile, leaving it to that one")
+		return nil
+	}
+	if err != nil {
+		s.log.Warn("control socket off while waiting for the sign-in", "err", err)
+		ctl = nil
+	}
+	s.log.Info("signed out: waiting for this computer to be signed in again")
+	return waitForSetup(ctx, s.log, s.credsFile, s.noTray, ctl, true)
+}

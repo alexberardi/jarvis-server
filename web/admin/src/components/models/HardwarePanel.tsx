@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import type { EngineInstance, HardwareResponse } from '@/api/llm'
 import { useFetchEngine, useHardware, useRefreshHardware, useRetryEngine } from '@/hooks/useModelManager'
 import { errorMessage } from '@/lib/errors'
-import { formatMB } from '@/lib/format'
+import { formatBytes, formatMB } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import GpuFaultBanner from './GpuFaultBanner'
 import { buttonClass, stateTone } from './styles'
@@ -150,6 +150,12 @@ export default function HardwarePanel() {
                   <li key={kind} className="flex flex-wrap items-center gap-2">
                     <code className="text-[var(--color-text)]">{kind}</code>
                     <span className="text-[var(--color-text-muted)]">{b.build}</span>
+                    {b.unavailable && <span className="text-[var(--color-text-muted)]">{b.unavailable}</span>}
+                    {!b.unavailable && b.disk_bytes && b.flavours.some((f) => !have.has(f)) && (
+                      <span className="text-[var(--color-text-muted)]">
+                        {formatBytes(b.download_bytes)} download, needs {formatBytes(b.disk_bytes)} free while installing
+                      </span>
+                    )}
                     {b.flavours.map((f) =>
                       have.has(f) ? (
                         <Pill key={f} tone="ok" title="Downloaded">

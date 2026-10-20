@@ -72,3 +72,47 @@ describe('HardwarePanel engines', () => {
     await waitFor(() => expect(api.getHardware).toHaveBeenCalledTimes(2))
   })
 })
+
+describe('HardwarePanel builds', () => {
+  it('offers the MLX engine where it runs and says why not elsewhere', async () => {
+    const why = 'mlx-lm needs Apple Silicon (darwin/arm64, macOS 14 or later); this host is linux/amd64'
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: {
+        'llama-server': { build: 'b11457', flavours: ['cpu', 'cuda'] },
+        'mlx-lm': { build: '0.32.2', flavours: [], unavailable: why },
+      },
+    })
+    renderPanel()
+    await screen.findByText(why)
+    expect(screen.getByRole('button', { name: 'cuda ↓' })).toBeTruthy()
+
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: { 'mlx-lm': { build: '0.32.2', flavours: ['metal'] } },
+    })
+    renderPanel()
+    expect(await screen.findByRole('button', { name: 'metal ↓' })).toBeTruthy()
+  })
+
+  it('says what vLLM downloads before it is fetched', async () => {
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: { vllm: { build: '0.32.0', flavours: ['cuda'], download_bytes: 3_932_507_100, disk_bytes: 17_000_000_000 } },
+    })
+    renderPanel()
+    expect(await screen.findByText('3.7 GB download, needs 15.8 GB free while installing')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'cuda ↓' })).toBeTruthy()
+  })
+
+  it('says why vLLM cannot run without an NVIDIA GPU, with no download offered', async () => {
+    const why = 'vllm needs an NVIDIA GPU (driver 580 or later); none was detected'
+    api.getHardware.mockResolvedValue({
+      ...hardware(engine),
+      builds: { vllm: { build: '0.32.0', flavours: [], unavailable: why, download_bytes: 3_932_507_100, disk_bytes: 17_000_000_000 } },
+    })
+    renderPanel()
+    await screen.findByText(why)
+    expect(screen.queryByText(/free while installing/)).toBeNull()
+  })
+})

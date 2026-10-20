@@ -64,22 +64,7 @@ func TestFrontend(t *testing.T) {
 		t.Fatal(r, err)
 	}
 
-	for _, d := range []string{"portals", "config/xdg-desktop-portal", "data/applications", "run"} {
-		_ = os.MkdirAll(filepath.Join(dir, d), 0o700)
-	}
-	// The .desktop file `dictation allow` writes, so the frontend can register the app id.
-	if err := WriteDesktopFile(filepath.Join(dir, "data/applications", AppID+".desktop"), "/bin/true"); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.WriteFile(filepath.Join(dir, "portals", "jarvistest.portal"), []byte("[portal]\nDBusName=org.freedesktop.impl.portal.desktop.jarvistest\nInterfaces=org.freedesktop.impl.portal.RemoteDesktop;\nUseIn=jarvistest\n"), 0o600)
-	_ = os.WriteFile(filepath.Join(dir, "config/xdg-desktop-portal", "portals.conf"), []byte("[preferred]\ndefault=jarvistest\n"), 0o600)
-	env := []string{"DBUS_SESSION_BUS_ADDRESS=" + addr, "HOME=" + dir, "PATH=/usr/bin:/bin",
-		"XDG_DESKTOP_PORTAL_DIR=" + filepath.Join(dir, "portals"), "XDG_CONFIG_HOME=" + filepath.Join(dir, "config"),
-		"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "XDG_RUNTIME_DIR=" + filepath.Join(dir, "run"),
-		"XDG_CURRENT_DESKTOP=jarvistest"}
-	spawn(t, dir, "store", env, store)
-	spawn(t, dir, "frontend", env, frontend, "--replace")
-	waitName(t, bc, "org.freedesktop.portal.Desktop")
+	runFrontend(t, dir, addr, bc, "org.freedesktop.impl.portal.RemoteDesktop", frontend, store)
 
 	ctx := context.Background()
 	rd := &RemoteDesktop{Dial: func() (Bus, error) { return dialBusAt(addr) },
@@ -343,6 +328,29 @@ const busConfig = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Con
   </policy>
 </busconfig>
 `
+
+// runFrontend starts the permission store and the real portal frontend on the private bus at
+// addr, with bc's connection (named org.freedesktop.impl.portal.desktop.jarvistest) as the
+// backend for iface, and waits for the frontend's name.
+func runFrontend(t *testing.T, dir, addr string, bc *dbus.Conn, iface, frontend, store string) {
+	t.Helper()
+	for _, d := range []string{"portals", "config/xdg-desktop-portal", "data/applications", "run"} {
+		_ = os.MkdirAll(filepath.Join(dir, d), 0o700)
+	}
+	// The .desktop file `dictation allow` writes, so the frontend can register the app id.
+	if err := WriteDesktopFile(filepath.Join(dir, "data/applications", AppID+".desktop"), "/bin/true"); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "portals", "jarvistest.portal"), []byte("[portal]\nDBusName=org.freedesktop.impl.portal.desktop.jarvistest\nInterfaces="+iface+";\nUseIn=jarvistest\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "config/xdg-desktop-portal", "portals.conf"), []byte("[preferred]\ndefault=jarvistest\n"), 0o600)
+	env := []string{"DBUS_SESSION_BUS_ADDRESS=" + addr, "HOME=" + dir, "PATH=/usr/bin:/bin",
+		"XDG_DESKTOP_PORTAL_DIR=" + filepath.Join(dir, "portals"), "XDG_CONFIG_HOME=" + filepath.Join(dir, "config"),
+		"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "XDG_RUNTIME_DIR=" + filepath.Join(dir, "run"),
+		"XDG_CURRENT_DESKTOP=jarvistest"}
+	spawn(t, dir, "store", env, store)
+	spawn(t, dir, "frontend", env, frontend, "--replace")
+	waitName(t, bc, "org.freedesktop.portal.Desktop")
+}
 
 func startBus(t *testing.T, dir string) string {
 	cfg := filepath.Join(dir, "bus.conf")

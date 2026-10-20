@@ -932,3 +932,63 @@ func TestExpectJudgesTheCallThatMeetsIt(t *testing.T) {
 		t.Errorf("node result: %v", f)
 	}
 }
+
+// "also_heard_by": the seeded node and a desktop agent both send the turn as a wake turn of
+// their own conversation; the expectation counts the nodes that answered (loop #287).
+func TestDriverAlsoHeardBy(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		arbitrate bool
+		pass      bool
+	}{{"one answers", true, true}, {"both answer", false, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			sources := map[string]any{}
+			answered := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				json.NewDecoder(r.Body).Decode(&body)
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v0/admin/nodes/heartbeat", "/api/v0/conversation/start", "/api/v0/conversation/end":
+					io.WriteString(w, `{"status":"ok"}`)
+				case "/api/v0/voice/command":
+					mu.Lock()
+					defer mu.Unlock()
+					sources[r.Header.Get("X-API-Key")] = body["turn_source"]
+					if tc.arbitrate && answered > 0 {
+						io.WriteString(w, `{"stop_reason":"not_for_me","tool_calls":[],"assistant_message":"","stood_down":true}`)
+						return
+					}
+					answered++
+					io.WriteString(w, `{"stop_reason":"complete","tool_calls":[],"assistant_message":"It's noon."}`)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+			root, _ := filepath.Abs("../..")
+			state := filepath.Join(t.TempDir(), "desktop-node.json")
+			os.WriteFile(state, []byte(`{"node_id":"desk-1","node_key":"dkey"}`), 0o600)
+			d := &Driver{Node: &Node{BaseURL: srv.URL, ID: "node", Key: "key"}, Root: root,
+				Desktop: &DesktopSetup{AuthURL: srv.URL, Email: "p@example.com", StateFile: state}}
+			one, desktop := 1, "desktop"
+			sc := Scenario{Name: "two nodes", Tools: "none", Home: "none", AlsoHeardBy: &desktop,
+				Turns: []Turn{{Say: "what time is it", Expect: Expect{Answers: &one, Reply: "noon"}}}}
+			l := d.Run(context.Background(), sc)
+			if l.Pass != tc.pass {
+				t.Fatalf("pass %v, want %v: %+v", l.Pass, tc.pass, l.Turns)
+			}
+			if sources["node:key"] != "wake" || sources["desk-1:dkey"] != "wake" {
+				t.Fatalf("both nodes must send a wake turn: %v", sources)
+			}
+			tl := l.Turns[0]
+			if len(tl.Others) != 1 || tl.Reply != "It's noon." || tl.StoodDown {
+				t.Fatalf("turn %+v", tl)
+			}
+			if tc.arbitrate && !tl.Others[0].StoodDown {
+				t.Fatalf("the other node must be logged as standing down: %+v", tl.Others)
+			}
+		})
+	}
+}

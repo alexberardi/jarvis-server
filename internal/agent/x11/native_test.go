@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/xkb"
 )
@@ -113,5 +114,42 @@ func TestNativePointer(t *testing.T) {
 			c, err := d.Capture(ctx, act)
 			t.Logf("active %s: %d,%d %dx%d (err %v)", FormatID(act), c.X, c.Y, c.W, c.H, err)
 		}
+	}
+}
+
+// TestNativeStopKey grabs Ctrl+Alt+Esc on $DISPLAY and presses it from a second client
+// (XTEST), as the user would: the grab must see it, and only it. Only for a throwaway headless
+// server (Xvfb, a private Xwayland): JARVIS_X11_STOPKEY=1.
+func TestNativeStopKey(t *testing.T) {
+	if os.Getenv("JARVIS_X11_STOPKEY") != "1" {
+		t.Skip("JARVIS_X11_STOPKEY=1 grabs and presses Ctrl+Alt+Esc (a throwaway X server only)")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &Display{}
+	pressed := make(chan struct{}, 4)
+	if err := d.GrabStopKey(ctx, func() { pressed <- struct{}{} }); err != nil {
+		t.Fatal(err)
+	}
+	user := &Display{}
+	if err := user.Keys(ctx, []string{"escape"}); err != nil { // Escape alone: not ours
+		t.Fatal(err)
+	}
+	if err := user.Keys(ctx, []string{"ctrl", "alt", "escape"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-pressed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the grab didn't see Ctrl+Alt+Esc")
+	}
+	select {
+	case <-pressed:
+		t.Fatal("a plain Escape (or the release) counted as the stop hotkey")
+	case <-time.After(300 * time.Millisecond):
+	}
+	// A second grab of the same keys (another program) is refused while ours holds them.
+	if err := (&Display{}).GrabStopKey(ctx, func() {}); err == nil || !strings.Contains(err.Error(), "another program") {
+		t.Fatalf("a second grab: %v, want refused", err)
 	}
 }

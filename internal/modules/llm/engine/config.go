@@ -100,6 +100,9 @@ var fields = []field{
 	{name: "gpu_layers", typ: settings.Int, def: int64(999), desc: "Layers to offload (-ngl); 0 = CPU only. For stt, 0 disables the GPU"},
 	{name: "kv_cache_type", typ: settings.String, def: "f16", desc: "KV cache type (f16, q8_0, q4_0)", only: []string{ModelLLM},
 		opts: []any{"f16", "q8_0", "q4_0"}},
+	{name: "gpu_memory_utilization", typ: settings.Float, def: float64(0),
+		desc: "vLLM only: share of each GPU it preallocates (0.05-0.95); 0 = sized to the model at its context, leaving the rest to llama-server",
+		only: []string{ModelLLM}},
 	{name: "flash_attn", typ: settings.String, def: "auto", desc: "Flash attention: auto, on or off", opts: []any{"auto", "on", "off"}},
 	{name: "fold_system_messages", typ: settings.String, def: FoldAuto,
 		desc: "Fold later system messages into the user turn, for chat templates that reject them (Qwen 3.5, 3.8): auto = as the model's catalog entry says (never for remote), on or off",
@@ -177,19 +180,26 @@ const (
 	KeyWhisperPath     = "stt.engine_path"
 )
 
-// BaseURLKey and PathKey name a kind's release-URL and binary-override settings.
+// BaseURLKey and PathKey name a kind's release-URL and binary-override settings; "" for a
+// kind that has none (uv and the Python engines download from their pinned defaults).
 func BaseURLKey(k Kind) string {
-	if k == KindWhisper {
+	switch k {
+	case KindLlama:
+		return KeyLlamaBaseURL
+	case KindWhisper:
 		return KeyWhisperBaseURL
 	}
-	return KeyLlamaBaseURL
+	return ""
 }
 
 func PathKey(k Kind) string {
-	if k == KindWhisper {
+	switch k {
+	case KindLlama:
+		return KeyLlamaEnginePath
+	case KindWhisper:
 		return KeyWhisperPath
 	}
-	return KeyLlamaEnginePath
+	return ""
 }
 
 // SettingDefinitions returns every setting this package and the model manager read. The llm
@@ -260,8 +270,10 @@ type LabelConfig struct {
 	GPULayers   int    `json:"gpu_layers"`
 	KVCacheType string `json:"kv_cache_type"`
 	FlashAttn   string `json:"flash_attn"`
-	ExtraArgs   string `json:"extra_args"`
-	Embedding   bool   `json:"embedding"`
+	// GPUMemory is gpu_memory_utilization (vLLM; 0 = sized to the model, VLLMGPUMemory).
+	GPUMemory float64 `json:"gpu_memory_utilization"`
+	ExtraArgs string  `json:"extra_args"`
+	Embedding bool    `json:"embedding"`
 	// ChatTemplate is the model's pinned chat template (from its catalog entry), which the
 	// engine is launched with instead of the GGUF's own; "" = the GGUF's (ID12).
 	ChatTemplate string `json:"-"`
@@ -286,9 +298,13 @@ type LabelConfig struct {
 
 // ModelInfo is what the model manager knows about an installed model.
 type ModelInfo struct {
-	ID             string
-	Kind           string
-	Path           string
+	ID   string
+	Kind string
+	// Path is the model's file, or its directory for a Hugging Face layout model.
+	Path string
+	// Engine is the engine kind that runs the model; "" = by its format (a GGUF file runs on
+	// llama-server, a directory on the host's Python engine, DirEngine).
+	Engine         Kind
 	MMProjID       string // the model's own projector, when installed with one
 	ContextDefault int
 	// ChatTemplate and FoldSystemMessages come from the model's catalog entry (ID12).
@@ -313,6 +329,8 @@ type ConfigSource interface {
 type SettingsSource struct {
 	Settings *settings.Service
 	Models   ModelLookup
+	// Platform is the host's, for picking a model directory's engine; zero = Host().
+	Platform Platform
 }
 
 // ErrUnknownLabel is returned for a label that isn't in LabelDefs.
@@ -356,6 +374,9 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 		ExtraArgs: str("extra_args"), Embedding: d.ModelKind == ModelEmbedding,
 		RemoteURL: str("remote_url"), RemoteModel: str("remote_model"), RemoteAPIKey: str("remote_api_key"),
 	}
+	if has("gpu_memory_utilization") {
+		c.GPUMemory = s.Settings.Float(ctx, p+"gpu_memory_utilization", settings.Scope{})
+	}
 	c.RemoteAPIMode = strings.ToLower(str("remote_api"))
 	c.RemoteAPI = RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
 	if has("remote_vision") {
@@ -384,6 +405,23 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	}
 	s.resolveModels(ctx, d, &c, c.FoldMode != FoldOn && c.FoldMode != FoldOff)
 	return c, nil
+}
+
+// engineFor is the engine kind of an LLM label's model: the model's own, else by its format
+// ("" = the label's default, llama-server).
+func (s SettingsSource) engineFor(info ModelInfo) (Kind, error) {
+	if info.Engine != "" {
+		return info.Engine, nil
+	}
+	st, err := os.Stat(info.Path)
+	if err != nil || !st.IsDir() {
+		return "", nil
+	}
+	p := s.Platform
+	if p == (Platform{}) {
+		p = Host()
+	}
+	return DirEngine(p)
 }
 
 // resolveModels fills in the model and projector paths; autoFold takes the fold flag from
@@ -420,7 +458,21 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 	}
 	c.ModelPath = info.Path
 	if d.ModelKind == ModelLLM {
-		c.ChatTemplate = info.ChatTemplate
+		k, err := s.engineFor(info)
+		if err != nil {
+			c.Problem = fmt.Sprintf("model %s: %v", ref, err)
+			return
+		}
+		if k != "" {
+			c.Kind = k
+		}
+	}
+	_, py := c.Kind.Python()
+	if d.ModelKind == ModelLLM {
+		if !py {
+			// A Python engine reads the template from the model directory.
+			c.ChatTemplate = info.ChatTemplate
+		}
 		if autoFold {
 			c.FoldSystemMessages = info.FoldSystemMessages
 		}
@@ -431,7 +483,8 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 			c.Context = 8192
 		}
 	}
-	if d.ModelKind != ModelLLM {
+	if d.ModelKind != ModelLLM || py {
+		// No projector: a Python engine takes none.
 		c.MMProj = ""
 		return
 	}

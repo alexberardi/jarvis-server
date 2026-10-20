@@ -45,8 +45,11 @@ type Hardware struct {
 	Flavour Flavour `json:"flavour"`
 	// RAMMB is the host's physical memory, what a model on the CPU is judged against (0 =
 	// unknown).
-	RAMMB      int64     `json:"ram_mb,omitempty"`
-	DetectedAt time.Time `json:"detected_at"`
+	RAMMB int64 `json:"ram_mb,omitempty"`
+	// NVIDIADriver is the NVIDIA driver version nvidia-smi reports, e.g. "610.57.04" ("" =
+	// none or unknown); vLLM's CUDA build needs a recent one.
+	NVIDIADriver string    `json:"nvidia_driver,omitempty"`
+	DetectedAt   time.Time `json:"detected_at"`
 	// Fault is set when the GPU driver is known to be broken (driver_mismatch: the NVIDIA
 	// kernel module and userspace libraries differ until a reboot).
 	Fault *GPUFault `json:"gpu_fault,omitempty"`
@@ -101,7 +104,7 @@ func ParseListDevices(out string) []Device {
 	return devs
 }
 
-// ParseNvidiaSMI parses `nvidia-smi --query-gpu=index,name,memory.total,memory.free
+// ParseNvidiaSMI parses `nvidia-smi --query-gpu=index,name,memory.total,memory.free[,driver_version]
 // --format=csv,noheader,nounits`.
 func ParseNvidiaSMI(out string) []Device {
 	var devs []Device
@@ -123,6 +126,16 @@ func ParseNvidiaSMI(out string) []Device {
 			Name: f[1], TotalMB: total, FreeMB: free})
 	}
 	return devs
+}
+
+// nvidiaDriver is the driver_version column (the fifth) of ParseNvidiaSMI's input.
+func nvidiaDriver(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Split(line, ","); len(f) >= 5 {
+			return strings.TrimSpace(f[4])
+		}
+	}
+	return ""
 }
 
 // apuArchs are the gfx targets of AMD APU iGPUs (ported from gpu_select.py).
@@ -370,8 +383,9 @@ func (d *Detector) detect(ctx context.Context) Hardware {
 			fault = d.Driver()
 		}
 		d.probed = fault
-		if out, ok := d.run(ctx, "nvidia-smi", "--query-gpu=index,name,memory.total,memory.free", "--format=csv,noheader,nounits"); ok {
+		if out, ok := d.run(ctx, "nvidia-smi", "--query-gpu=index,name,memory.total,memory.free,driver_version", "--format=csv,noheader,nounits"); ok {
 			smi := ParseNvidiaSMI(out)
+			h.NVIDIADriver = nvidiaDriver(out)
 			freeFromOutside(h.Devices, smi)
 			add("nvidia-smi", smi)
 			if fault == nil && nvmlMismatch(out) {

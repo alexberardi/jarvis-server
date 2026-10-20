@@ -1,0 +1,19 @@
+[
+  {
+    "name": "wake arbitration: the kitchen Pi and a desktop hear one Hey Jarvis, one answers",
+    "tags": ["wake_arbitration"],
+    "also_heard_by": "desktop",
+    "home": "none",
+    "turns": [
+      {"say": "what time is it", "expect": {"answers": 1, "reply": "{now}"}}
+    ]
+  },
+  {
+    "name": "wake arbitration: two nodes, one wake, a device command runs once",
+    "tags": ["wake_arbitration"],
+    "also_heard_by": "desktop",
+    "turns": [
+      {"say": "turn on the kitchen lights", "expect": {"answers": 1, "tool": "control_device"}}
+    ]
+  }
+]

@@ -292,6 +292,9 @@ func newEnv(t *testing.T) *env {
 	// Engine releases for this host, served by the hub.
 	host := engine.Host()
 	for _, k := range engine.Kinds {
+		if _, py := k.Python(); py {
+			continue
+		}
 		archive := tarGz(t, map[string]string{"pkg/" + k.BinaryName(host): "bin", "pkg/libggml.so": "lib"})
 		old := engine.Releases[k]
 		r := old
@@ -1149,6 +1152,45 @@ func TestSettingsSourceDefaults(t *testing.T) {
 	}
 }
 
+// A model that is a directory (Hugging Face layout) runs on the host's Python engine: MLX on
+// Apple Silicon; elsewhere the label says why.
+func TestSettingsSourceModelDirectory(t *testing.T) {
+	e := newEnv(t)
+	dir := filepath.Join(t.TempDir(), "Qwen3-0.6B-4bit")
+	os.MkdirAll(dir, 0o755)
+	gguf := filepath.Join(t.TempDir(), "q.gguf")
+	os.WriteFile(gguf, []byte("x"), 0o644)
+	e.set.Set(e.ctx, "llm.live.model", dir, settings.Scope{})
+	e.set.Set(e.ctx, "llm.live.mmproj", gguf, settings.Scope{})
+	mac := engine.SettingsSource{Settings: e.set, Models: e.mgr.Store, Platform: engine.Platform{OS: "darwin", Arch: "arm64"}}
+	c, err := mac.Label(e.ctx, "live")
+	if err != nil || c.Kind != engine.KindMLX || c.ModelPath != dir || c.Problem != "" || c.MMProjPath != "" || c.Context != 8192 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	// background shared with live follows it.
+	e.set.Set(e.ctx, "llm.background.engine", "shared", settings.Scope{})
+	if c, _ := mac.Label(e.ctx, "background"); c.Kind != engine.KindMLX || c.SharedWith != "live" {
+		t.Fatalf("shared %+v", c)
+	}
+	// On linux/amd64 it is vLLM's; on a host neither runs on, the label says why.
+	linux := mac
+	linux.Platform = engine.Platform{OS: "linux", Arch: "amd64"}
+	if c, _ := linux.Label(e.ctx, "live"); c.Kind != engine.KindVLLM || c.Problem != "" || c.MMProjPath != "" {
+		t.Fatalf("linux %+v", c)
+	}
+	arm := mac
+	arm.Platform = engine.Platform{OS: "linux", Arch: "arm64"}
+	if c, _ := arm.Label(e.ctx, "live"); !strings.Contains(c.Problem, "Apple Silicon") || !strings.Contains(c.Problem, "linux/arm64") ||
+		!strings.Contains(c.Problem, "NVIDIA") {
+		t.Fatalf("linux/arm64 %+v", c)
+	}
+	// A GGUF file stays on llama-server.
+	e.set.Set(e.ctx, "llm.live.model", gguf, settings.Scope{})
+	if c, _ := mac.Label(e.ctx, "live"); c.Kind != engine.KindLlama || c.Problem != "" {
+		t.Fatalf("gguf %+v", c)
+	}
+}
+
 // TestStackEndToEnd: install → assign → the resolver runs the engine, for an LLM label and the
 // stt label alike, through NewStack (the wiring the llm module uses).
 func TestStackEndToEnd(t *testing.T) {
@@ -1235,6 +1277,12 @@ func TestStackEndToEnd(t *testing.T) {
 	code, out = call("GET", "/v1/hardware", "")
 	if code != 200 || out["hardware"] == nil || out["builds"] == nil {
 		t.Fatalf("hardware %d %v", code, out)
+	}
+	// MLX is offered on Apple Silicon only; elsewhere the build says why.
+	mlx, _ := out["builds"].(map[string]any)["mlx-lm"].(map[string]any)
+	why, _ := mlx["unavailable"].(string)
+	if onMac := engine.Host() == (engine.Platform{OS: "darwin", Arch: "arm64"}); mlx == nil || onMac == (why != "") {
+		t.Fatalf("mlx build %v", mlx)
 	}
 	// Turn background to its own context: a second LLM engine; then delete the model with force.
 	code, _ = call("PUT", "/v1/models/labels", `{"background":{"context":4096}}`)
@@ -1544,5 +1592,115 @@ func TestCatalogKVAndHostBytes(t *testing.T) {
 		if e, _ := CatalogEntry(id); e.HostBytes != want {
 			t.Errorf("%s host_bytes %d, want %d", id, e.HostBytes, want)
 		}
+	}
+}
+
+// A vLLM engine needs the share of the card it preallocates, whatever its model weighs: the
+// fit check and the overcommit warning count that next to llama-server's engines.
+func TestVLLMResident(t *testing.T) {
+	e := newEnv(t)
+	dir := filepath.Join(t.TempDir(), "Qwen3-0.6B")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"model_type":"qwen3","num_hidden_layers":28,
+		"num_key_value_heads":8,"head_dim":128,"num_attention_heads":16,"hidden_size":1024}`), 0o644)
+	w, _ := os.Create(filepath.Join(dir, "model.safetensors"))
+	w.Truncate(1_503_300_328)
+	w.Close()
+	gguf := filepath.Join(t.TempDir(), "m.gguf")
+	g, _ := os.Create(gguf)
+	g.Truncate(4 << 30)
+	g.Close()
+	e.mgr.Detector = &engine.Detector{Platform: engine.Platform{OS: "linux", Arch: "amd64"},
+		Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+			if name == "nvidia-smi" {
+				return []byte("0, NVIDIA GeForce RTX 3080 Ti, 12288, 12288, 610.57.04\n"), nil
+			}
+			return nil, io.EOF
+		}}
+	vllm := engine.LabelConfig{Label: "live", Kind: engine.KindVLLM, ModelKind: engine.ModelLLM, Engine: engine.ModeLocal,
+		Model: dir, ModelPath: dir, Context: 8192, GPULayers: 999}
+	llama := engine.LabelConfig{Label: "background", Kind: engine.KindLlama, ModelKind: engine.ModelLLM, Engine: engine.ModeLocal,
+		Model: gguf, ModelPath: gguf, Context: 8192, GPULayers: 999}
+	e.labels.status = []engine.LabelStatus{{Label: "live", Config: vllm}, {Label: "background", Config: llama}}
+	rs := e.mgr.Residents(e.ctx)
+	if len(rs) != 2 || rs[0].NeededMB != 3932 { // 0.32 × 12288 MB: sized to the model (engine.VLLMGPUMemory)
+		t.Fatalf("residents %+v", rs)
+	}
+	hw := e.mgr.Detector.Hardware(e.ctx, false)
+	hw.Flavour = engine.FlavourCUDA // as with a CUDA llama-server build for this host
+	if w := Overcommitted(hw, rs); len(w) != 0 {
+		t.Fatalf("sized share next to a 4 GB model: %v", w)
+	}
+	// vLLM's own default share (0.9) leaves no room for the llama-server label: said so.
+	vllm.GPUMemory = 0.9
+	e.labels.status[0].Config = vllm
+	rs = e.mgr.Residents(e.ctx)
+	if rs[0].NeededMB != 11059 {
+		t.Fatalf("set share %+v", rs)
+	}
+	if w := Overcommitted(hw, rs); len(w) != 1 || !strings.Contains(w[0], "live, background") {
+		t.Fatalf("overcommit %v", w)
+	}
+}
+
+// The hardware page says why vLLM can't run on this box and how much it downloads; asking
+// for it anyway is refused before anything is fetched.
+func TestVLLMBuildOnHardwarePage(t *testing.T) {
+	e := newEnv(t)
+	e.mgr.Binaries.Platform = engine.Platform{OS: "linux", Arch: "amd64"}
+	smi := ""
+	e.mgr.Detector = &engine.Detector{Platform: e.mgr.Binaries.Platform,
+		Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+			if name == "nvidia-smi" && smi != "" {
+				return []byte(smi), nil
+			}
+			return nil, io.EOF
+		}}
+	mux := http.NewServeMux()
+	(&API{Manager: e.mgr, Resolver: e.labels}).Mount(mux, func(http.ResponseWriter, *http.Request) bool { return true })
+	call := func(method, path, body string) (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	build := func() map[string]any {
+		_, out := call("GET", "/v1/hardware?refresh=1", "")
+		b, _ := out["builds"].(map[string]any)["vllm"].(map[string]any)
+		return b
+	}
+	b := build()
+	if why, _ := b["unavailable"].(string); !strings.Contains(why, "NVIDIA GPU") || len(b["flavours"].([]any)) != 0 {
+		t.Fatalf("no gpu: %v", b)
+	}
+	if b["download_bytes"].(float64) < 3e9 || b["disk_bytes"].(float64) < b["download_bytes"].(float64) {
+		t.Fatalf("sizes: %v", b)
+	}
+	if code, out := call("POST", "/v1/hardware/engines", `{"kind":"vllm","flavour":"cuda"}`); code != 422 ||
+		!strings.Contains(fmt.Sprint(out), "NVIDIA GPU") {
+		t.Fatalf("fetch with no gpu: %d %v", code, out)
+	}
+	smi = "0, NVIDIA GeForce RTX 3080 Ti, 12288, 12000, 610.57.04\n"
+	if b := build(); b["unavailable"] != nil || fmt.Sprint(b["flavours"]) != "[cuda]" {
+		t.Fatalf("with a gpu: %v", b)
+	}
+}
+
+// An LLM label's model may be a Hugging Face directory by absolute path (01 §3.11), not any
+// directory.
+func TestUpdateLabelsModelDirectory(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"model": dir}})
+	if err == nil || !strings.Contains(err.Error(), "no config.json") {
+		t.Fatalf("plain directory: %v", err)
+	}
+	os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"model_type":"qwen3"}`), 0o644)
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"model": dir}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"embeddings": {"model": dir}}); err == nil {
+		t.Fatal("a directory for the embeddings label")
 	}
 }

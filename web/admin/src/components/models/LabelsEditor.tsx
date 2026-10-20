@@ -434,6 +434,20 @@ function EngineLabelCard({
                   ))}
                 </select>
               </Field>
+              {cfg.kind === 'vllm' && (
+                <Field label="GPU memory share" htmlFor={id('gpu_memory_utilization')} hint="vLLM preallocates this share of the card; 0 = sized to the model">
+                  <input
+                    id={id('gpu_memory_utilization')}
+                    type="number"
+                    min={0}
+                    max={0.95}
+                    step={0.01}
+                    value={v('gpu_memory_utilization') ?? 0}
+                    onChange={(e) => set({ gpu_memory_utilization: Math.min(0.95, Math.max(0, Number(e.target.value) || 0)) })}
+                    className={inputClass}
+                  />
+                </Field>
+              )}
               {isLLM && (
                 <Field label="KV cache" htmlFor={id('kv_cache_type')}>
                   <select id={id('kv_cache_type')} value={v('kv_cache_type')} onChange={(e) => set({ kv_cache_type: e.target.value })} className={selectClass}>
