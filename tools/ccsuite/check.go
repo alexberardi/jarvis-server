@@ -74,7 +74,15 @@ type Card struct {
 	Category string   `json:"category"`
 	Buttons  []string `json:"buttons,omitempty"`
 	Tapped   string   `json:"tapped,omitempty"` // the button the suite tapped
+	// Step: a run's card (metadata.workflow_id), e.g. a step's confirmation, which is in the
+	// plan card's category. Progress: an errand's progress card, updated as it runs; its Stop
+	// button asks nothing.
+	Step     bool `json:"step,omitempty"`
+	Progress bool `json:"progress,omitempty"`
 }
+
+// Done reports whether c ends the errand: its completion card.
+func (c Card) Done() bool { return c.Category == "errand" && !c.Progress }
 
 // refusalRE is what a refusal sounds like when a refused check gives no pattern.
 var refusalRE = regexp.MustCompile(`(?i)\b(can(no|')t|not allowed|blocked|won'?t|refuse|unable|isn'?t allowed)\b`)
@@ -151,7 +159,7 @@ func (ch Check) Eval(st *State) string {
 	case "asked":
 		re := regexp.MustCompile(ch.Pattern)
 		for _, c := range st.Cards {
-			if len(c.Buttons) > 0 && re.MatchString(c.Title+"\n"+c.Body) {
+			if len(c.Buttons) > 0 && !c.Progress && re.MatchString(c.Title+"\n"+c.Body) {
 				return ""
 			}
 		}

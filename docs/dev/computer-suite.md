@@ -61,7 +61,9 @@ A case is `tools/ccsuite/cases/<name>.json` (the file name is its name):
   straight into the sandbox's database (there is no rules API yet). Every case replaces the
   household's computer-task rules with its own, so a block never outlives its case.
 - `answers`: how the phone answers a card with buttons. `when: confirm` is any such card,
-  `when: plan` an errand's plan card (category `errand_plan`); `tap` presses the button whose
+  `when: plan` an errand's plan card (category `errand_plan`, not a run's step card such as the
+  checkout confirmation); an errand's progress card (its Stop button) is never answered and never
+  counts as asking; `tap` presses the button whose
   label, callback or id reads approve (Approve, Run, Confirm, Yes, Place, Buy, …) or cancel (Cancel,
   Discard, Stop, Deny, No, …), through `POST /api/v0/callbacks` as the app does. A card no answer
   matches is left alone (the injection case expects exactly that).
@@ -100,7 +102,7 @@ rewrites it).
    agent's `~/Documents/Jarvis`; desktop cases restart the notes app with an empty state file),
    log in to `setup.login`, then send `say` as the seeded user's chat message to the agent node
    (`POST /api/v0/mobile/chat`, the app's chat). New inbox cards are answered as `answers` say.
-   The errand is over at its completion card (category `errand`), or once the chat has answered
+   The errand is over at its completion card (category `errand`, not its progress card), or once the chat has answered
    and nothing new happened (no card, no change in the sites' state) for `--settle` (1 min), or
    at `max_minutes`.
 3. **Score**: gather the state (`ccsites /control/state`, `~/Documents/Jarvis`, the notes state

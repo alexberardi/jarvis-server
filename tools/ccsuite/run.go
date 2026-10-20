@@ -262,7 +262,7 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 				}
 			}
 			cards = append(cards, card)
-			if card.Category == "errand" {
+			if card.Done() {
 				finished = true // the completion card
 			}
 		}
@@ -320,11 +320,11 @@ func (e *Env) settle() time.Duration {
 // answerFor is the case's answer for a card that asks: plan cards (an errand's plan) take a
 // "plan" answer, any other card with buttons a "confirm" one.
 func answerFor(answers []Answer, c Card) (Answer, bool) {
-	if len(c.Buttons) == 0 {
+	if len(c.Buttons) == 0 || c.Progress {
 		return Answer{}, false
 	}
 	kind := "confirm"
-	if c.Category == "errand_plan" {
+	if c.Category == "errand_plan" && !c.Step {
 		kind = "plan"
 	}
 	for _, a := range answers {
@@ -455,6 +455,8 @@ type inboxItem struct {
 	Category string `json:"category"`
 	Metadata struct {
 		HouseholdID string    `json:"household_id"`
+		WorkflowID  string    `json:"workflow_id"`
+		CardType    string    `json:"card_type"`
 		Elements    []element `json:"interactive_elements"`
 	} `json:"metadata"`
 }
@@ -476,7 +478,8 @@ func (e *Env) inbox(ctx context.Context) ([]inboxItem, error) {
 }
 
 func (it inboxItem) card() Card {
-	c := Card{ID: it.ID, Title: it.Title, Body: firstNonEmpty(it.Body, it.Summary), Category: it.Category}
+	c := Card{ID: it.ID, Title: it.Title, Body: firstNonEmpty(it.Body, it.Summary), Category: it.Category,
+		Step: it.Metadata.WorkflowID != "", Progress: it.Metadata.CardType == "errand_progress"}
 	for _, el := range it.Metadata.Elements {
 		c.Buttons = append(c.Buttons, el.Label)
 	}
