@@ -405,6 +405,12 @@ export interface LabelConfig {
   flash_attn: string
   /** vLLM only: the share of each card it preallocates; 0 = sized to the model. */
   gpu_memory_utilization?: number
+  /** Engine for a Hugging Face directory model: auto, mlx-lm, transformers or vllm. */
+  dir_engine?: string
+  /** Transformers only: auto, bfloat16, float16 or float32. */
+  dtype?: string
+  /** Transformers on CUDA only: none, bnb-4bit or bnb-8bit. */
+  quantization?: string
   extra_args: string
   /** ID12: auto (the model's catalog flag; never for remote), on or off. */
   fold_system_messages?: string
@@ -477,6 +483,9 @@ export type LabelUpdate = Partial<{
   kv_cache_type: string
   flash_attn: string
   gpu_memory_utilization: number
+  dir_engine: string
+  dtype: string
+  quantization: string
   extra_args: string
   fold_system_messages: string
   remote_url: string

@@ -228,3 +228,37 @@ describe('LabelsEditor vLLM GPU memory', () => {
     expect(within(bg).queryByLabelText('GPU memory share')).not.toBeInTheDocument()
   })
 })
+
+describe('LabelsEditor model directory engine', () => {
+  it('offers the directory engine for a directory model, and dtype and quantization on Transformers', async () => {
+    const live = status('live', '')
+    live.config = { ...live.config, kind: 'transformers', model: '/m/SmolLM2', model_path: '/m/SmolLM2', dir_engine: 'transformers', dtype: 'auto', quantization: 'none' }
+    const bg = status('background', '')
+    bg.config = { ...bg.config, kind: 'mlx-lm', model: '/m/Qwen3-4bit', model_path: '/m/Qwen3-4bit', dir_engine: 'auto', dtype: 'auto', quantization: 'none' }
+    const labels: llm.LabelsResponse = {
+      labels: [live, bg],
+      voice: null,
+      engines: null,
+      proposal: {},
+      recommend: {},
+      warnings: null,
+    }
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    renderEditor()
+    const card = await screen.findByTestId('label-live')
+    fireEvent.click(within(card).getByRole('button', { name: /Advanced/ }))
+    expect(within(card).getByLabelText('Directory engine')).toHaveValue('transformers')
+    fireEvent.change(within(card).getByLabelText('Precision'), { target: { value: 'bfloat16' } })
+    fireEvent.change(within(card).getByLabelText('Quantization'), { target: { value: 'bnb-4bit' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ live: { dtype: 'bfloat16', quantization: 'bnb-4bit' } }))
+
+    const bgCard = await screen.findByTestId('label-background')
+    fireEvent.click(within(bgCard).getByRole('button', { name: /Advanced/ }))
+    fireEvent.change(within(bgCard).getByLabelText('Directory engine'), { target: { value: 'transformers' } })
+    expect(within(bgCard).queryByLabelText('Precision')).not.toBeInTheDocument()
+    fireEvent.click(within(bgCard).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ background: { dir_engine: 'transformers' } }))
+  })
+})
