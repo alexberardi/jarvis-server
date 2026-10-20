@@ -581,6 +581,20 @@ func run(ctx context.Context, args []string) error {
 			// the agent once it is (setupwait.go). Typed in a terminal, it says what to do.
 			return waitForSetup(ctx, log, path, *f.noTray, ctl)
 		}
+		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && !p.desktop {
+			// A Pi that isn't enrolled (a factory reset, an install without a code) is in setup
+			// mode until the app provisions it, then the node (setupmode.go).
+			if err = piSetupMode(ctx, log, path, hf); err == nil {
+				c, err = node.LoadCreds(path)
+			} else if ctx.Err() != nil {
+				if ctl != nil {
+					_ = ctl.Close()
+				}
+				return nil // stopped while waiting
+			}
+		}
+	}
+	if err != nil {
 		if ctl != nil {
 			_ = ctl.Close()
 		}
