@@ -574,12 +574,6 @@ func (e *Env) startAgent(ctx context.Context, d *desktop) error {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	// Computer control is off on every install (C11): the suite's user has turned it on.
-	on := exec.CommandContext(ctx, e.path("bin", "jarvis-agent"), "computer", "on")
-	on.Env = append(d.env, browser.ControlSocketEnv+"="+ctl)
-	if out, err := on.CombinedOutput(); err != nil {
-		return fmt.Errorf("jarvis-agent computer on: %w: %s", err, out)
-	}
 	e.logf("agent running, computer control on (logs/agent.log)")
 	return nil
 }

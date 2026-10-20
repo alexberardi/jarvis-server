@@ -94,7 +94,7 @@ rewrites it).
    each under its own `dbus-run-session` with its own `XDG_RUNTIME_DIR` and HOME and nothing of the
    user's environment (as `scripts/desktop-shot`); the real `jarvis-agent run --profile desktop
    --voice=false --computer-control`, enrolled to the sandbox with the seeded login, with its own control and browser
-   sockets and computer control turned on (`jarvis-agent computer on` once it is up); for browser and teach cases Playwright's Chromium with a throwaway `--user-data-dir`,
+   sockets and computer control turned on by that `--computer-control` flag; for browser and teach cases Playwright's Chromium with a throwaway `--user-data-dir`,
    `--load-extension` of `jarvis-agent browser pack --target chromium`, the native-messaging
    manifest in the profile's `NativeMessagingHosts/`, and a DevTools pipe the suite sets the
    session cookies through. The run waits until the extension is connected to the agent.
