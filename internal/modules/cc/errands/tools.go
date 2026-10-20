@@ -46,9 +46,11 @@ type RunErrandTool struct {
 	NeedsComputer func(goal string) bool
 }
 
-// computerAck is run_errand's ack for a computer errand, which runs without a plan card.
-const computerAck = "On it — I'm starting that on your computer. I'll check with you on your phone " +
-	"before anything that needs your OK."
+// computerAck is run_errand's ack for a computer errand. It is said before the plan exists, so
+// it is true either way: a browser-only plan runs without a plan card, one that mixes in other
+// commands or a desktop task still posts one.
+const computerAck = "On it — I'll do that on your computer and check with you on your phone before " +
+	"anything that needs your OK. If it needs more than the browser, I'll send you the plan to review first."
 
 func (*RunErrandTool) Name() string { return "run_errand" }
 

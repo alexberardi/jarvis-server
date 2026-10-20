@@ -725,6 +725,28 @@ func TestComputerReplanContinuesWithoutCard(t *testing.T) {
 	}
 }
 
+// A computer errand whose plan still gets a plan card (a desktop task, or other commands mixed
+// in) isn't acked as started: the ack is said before the plan exists.
+func TestRunErrandComputerAckWithPlanCard(t *testing.T) {
+	c := newComputerEnv(t)
+	tool := &RunErrandTool{Svc: func() *Service { return c.s }, NeedsComputer: func(string) bool { return true }}
+	c.llm.say("plan", planJSON("Order and note it",
+		step(policy.ToolComputerTask, "Order it", `{"goal": "order a blue mug", "target": "browser", "site": "`+shopSite+`"}`),
+		step(policy.ToolComputerTask, "Note it", `{"goal": "write the order down in Notes", "target": "desktop", "app": "Notes"}`)))
+	got := res(tool.Execute(context.Background(), servertools.Call{Args: servertools.Obj("goal", "order me a blue mug and note it")}, turnFor(7)))
+	c.idle()
+	if strings.Contains(got, "I'm starting") || !strings.Contains(got, "the plan to review first") {
+		t.Fatalf("ack: %s", got)
+	}
+	planCard := false
+	for _, cd := range c.cards.all() {
+		planCard = planCard || strings.Contains(strings.Join(elementLabels(cd.Metadata), ","), "Run")
+	}
+	if !planCard {
+		t.Fatalf("no plan card: %+v", c.cards.all())
+	}
+}
+
 // run_errand's ack for a computer errand says it starts at once, not "Tap Run".
 func TestRunErrandComputerAck(t *testing.T) {
 	c := newComputerEnv(t)
