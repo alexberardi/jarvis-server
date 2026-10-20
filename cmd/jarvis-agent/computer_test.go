@@ -318,7 +318,7 @@ func TestComputerClick(t *testing.T) {
 // Wayland refuses at start), and says it can't elsewhere.
 func TestNewRecorderDesktopSource(t *testing.T) {
 	activity := &computer.Activity{}
-	rec := newRecorder(t.TempDir(), activity, nil, func() *node.CC { return nil }, slog.New(slog.DiscardHandler))
+	rec, _ := newRecorder(t.TempDir(), activity, nil, func() *node.CC { return nil }, nil, slog.New(slog.DiscardHandler))
 	_, has := rec.Sources[computer.ModeDesktop]
 	if has != (runtime.GOOS == "darwin" || runtime.GOOS == "linux") {
 		t.Fatalf("desktop source on %s: %v", runtime.GOOS, has)

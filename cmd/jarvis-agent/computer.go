@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
@@ -96,8 +99,8 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 // extension's events (a browser toolset in tools), the desktop where this OS can record it
 // (macOS and X11, with keyframes from the screen toolset in tools), and a trace stopped here (the menu,
 // the CLI, voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected:
-// then it is kept here only).
-func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {
+// then it is kept here and sent once connected, the user told through note).
+func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc func() *node.CC, note func(string), log *slog.Logger) (*computer.Recorder, *recordingUploads) {
 	sources := map[string]computer.Source{}
 	var shots screen.Capturer
 	for _, t := range tools {
@@ -111,8 +114,10 @@ func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc f
 	if src := computer.NewDesktopSource(dir, keyframer(shots), log); src != nil {
 		sources[computer.ModeDesktop] = src
 	}
-	return &computer.Recorder{Dir: dir, Activity: activity, Sources: sources, Log: log,
-		Stopped: func(tr computer.Trace) { go uploadRecording(cc(), tr, log) }}
+	rec := &computer.Recorder{Dir: dir, Activity: activity, Sources: sources, Log: log}
+	up := &recordingUploads{rec: rec, cc: cc, note: note, log: log, every: recordingRetryEvery}
+	rec.Stopped = up.stopped
+	return rec, up
 }
 
 // keyframer is a desktop recording's keyframe: the screen as a JPEG (nil without a capturer).
@@ -133,20 +138,92 @@ func keyframer(c screen.Capturer) func(context.Context) ([]byte, error) {
 	}
 }
 
-// uploadRecording sends a trace stopped on this computer to jarvisd (POST
-// /api/v0/computer/recordings); on a failure the local copy stays.
-func uploadRecording(cc *node.CC, tr computer.Trace, log *slog.Logger) {
-	if cc == nil {
-		log.Warn("recording: not connected to jarvisd; the recording stays on this computer only", "recording", tr.ID)
-		return
+// recordingKeptNote tells the user a recording stopped here isn't with jarvisd yet.
+const recordingKeptNote = "Recording kept on this computer: Jarvis gets it once connected"
+
+// recordingRefusedNote tells the user jarvisd won't take a recording stopped here.
+const recordingRefusedNote = "Jarvis couldn't take the recording: it stays on this computer"
+
+// recordingRetryEvery is how often, while connected, traces not sent yet are tried again.
+const recordingRetryEvery = 5 * time.Minute
+
+// recordingUploads sends the traces stopped on this computer to jarvisd (POST
+// /api/v0/computer/recordings): at the stop, then those not sent yet (rec.Pending: stopped
+// while not connected, or the upload failed) on every connect and every `every` while
+// connected, oldest first. jarvisd keeps a recording by its id, so one sent twice is one.
+type recordingUploads struct {
+	rec   *computer.Recorder
+	cc    func() *node.CC // nil while not connected
+	note  func(string)    // tells the user (the island); nil for nobody
+	log   *slog.Logger
+	every time.Duration
+
+	mu sync.Mutex // one sweep at a time
+}
+
+// stopped is the recorder's Stopped: it sends tr (and any older ones) and tells the user when
+// tr stays here.
+func (u *recordingUploads) stopped(tr computer.Trace) {
+	go func() {
+		retry := true
+		if cc := u.cc(); cc != nil {
+			var kept bool
+			if retry, kept = u.sweep(cc)[tr.ID]; !kept {
+				return
+			}
+		}
+		u.log.Warn("recording: not sent to jarvisd", "recording", tr.ID, "sent_later", retry)
+		if u.note != nil {
+			u.note(map[bool]string{true: recordingKeptNote, false: recordingRefusedNote}[retry])
+		}
+	}()
+}
+
+// serve is part of OnConnected: it sends the traces not sent yet at once and every u.every
+// until ctx ends.
+func (u *recordingUploads) serve(ctx context.Context, cc *node.CC) {
+	for {
+		u.sweep(cc)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(u.every):
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := cc.UploadRecording(ctx, computer.TraceOutput(tr)); err != nil {
-		log.Warn("recording: upload failed; the recording stays on this computer only", "recording", tr.ID, "err", err)
-		return
+}
+
+// sweep sends the traces not sent yet, oldest first, stopping at the first that doesn't go.
+// It returns those it didn't send: true for one tried again later, false for one jarvisd
+// refused for good (a bad trace, an id that is another node's), which stays on this computer
+// only.
+func (u *recordingUploads) sweep(cc *node.CC) map[string]bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	kept := map[string]bool{}
+	pending := u.rec.Pending()
+	for i, tr := range pending {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := cc.UploadRecording(ctx, computer.TraceOutput(tr))
+		cancel()
+		var he *node.HTTPError
+		switch {
+		case err == nil:
+			u.rec.Sent(tr.ID)
+			u.log.Info("recording: sent to jarvisd", "recording", tr.ID, "events", len(tr.Events))
+		case errors.As(err, &he) && slices.Contains([]int{http.StatusBadRequest, http.StatusConflict,
+			http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity}, he.Status):
+			u.rec.Sent(tr.ID)
+			kept[tr.ID] = false
+			u.log.Warn("recording: jarvisd refused it; the recording stays on this computer only", "recording", tr.ID, "err", err)
+		default:
+			u.log.Warn("recording: upload failed; trying again later", "recording", tr.ID, "err", err)
+			for _, tr := range pending[i:] {
+				kept[tr.ID] = true
+			}
+			return kept
+		}
 	}
-	log.Info("recording: sent to jarvisd", "recording", tr.ID, "events", len(tr.Events))
+	return kept
 }
 
 // recordFromHere starts a recording in mode or, with mode "", ends the one going on, uploading

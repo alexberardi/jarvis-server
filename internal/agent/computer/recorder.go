@@ -100,7 +100,8 @@ type Recorder struct {
 	// Sources by mode; a mode without one can't be recorded.
 	Sources map[string]Source
 	// Stopped gets a trace the user stopped some other way than Stop (End, Activity's stop,
-	// MaxRecording): the agent uploads it. It must not block for long.
+	// MaxRecording): the agent uploads it. It must not block for long. The trace is pending
+	// (Pending) until the agent says it was sent (Sent).
 	Stopped func(Trace)
 	Log     *slog.Logger
 
@@ -185,8 +186,8 @@ func (r *Recorder) Start(ctx context.Context, mode string) (string, error) {
 	}
 	r.Activity.Set(Recording, "Watching what you do")
 	stop := func(reason string) {
-		if tr, err := r.stop(id, reason); err == nil && r.Stopped != nil {
-			r.Stopped(tr)
+		if tr, err := r.stop(id, reason); err == nil {
+			r.handOn(tr)
 		}
 	}
 	r.mu.Lock()
@@ -255,8 +256,8 @@ func (r *Recorder) Stop(id string) (Trace, error) { return r.stop(id, StopAsked)
 // recording", `jarvis-agent computer record stop`).
 func (r *Recorder) End() (Trace, error) {
 	tr, err := r.stop("", StopAsked)
-	if err == nil && r.Stopped != nil {
-		r.Stopped(tr)
+	if err == nil {
+		r.handOn(tr)
 	}
 	return tr, err
 }
@@ -317,8 +318,8 @@ func (r *Recorder) stop(id, reason string) (Trace, error) {
 	return tr, nil
 }
 
-// Delete removes recording id's local copy and its keyframes (stopping it first, without
-// handing it on, if it is the one going on). A copy already gone is no error.
+// Delete removes recording id's local copy, its keyframes and its pending marker (stopping it
+// first, without handing it on, if it is the one going on). A copy already gone is no error.
 func (r *Recorder) Delete(id string) error {
 	if !recordingIDPattern.MatchString(id) {
 		return fmt.Errorf("bad recording id %q", id)
@@ -330,6 +331,7 @@ func (r *Recorder) Delete(id string) error {
 	for _, k := range kf {
 		_ = os.Remove(k)
 	}
+	_ = os.Remove(r.pendingPath(id))
 	err := os.Remove(r.Path(id))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

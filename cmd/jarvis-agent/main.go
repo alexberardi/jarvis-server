@@ -663,6 +663,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	// jarvisd's client once connected: approval tokens are checked with it, recordings uploaded.
 	var liveCC atomic.Pointer[node.CC]
+	var note atomic.Pointer[func(string)] // the island's note, once it is up
 	if p.desktop {
 		// Computer tasks in the browser (plan P3 piece 8): build adds the executor's tools
 		// after the browser's.
@@ -682,11 +683,17 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	defer closeTools()
 	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
-	// is uploaded once connected to jarvisd (liveCC). computer_switch is computer control's
-	// switch for jarvisd's voice tools (enable/disable_computer_control).
+	// is uploaded once connected to jarvisd (liveCC); the island says when it waits for that.
+	// computer_switch is computer control's switch for jarvisd's voice tools
+	// (enable/disable_computer_control).
 	var recorder *computer.Recorder
+	var uploads *recordingUploads
 	if p.desktop {
-		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, log)
+		recorder, uploads = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, func(text string) {
+			if n := note.Load(); n != nil {
+				(*n)(text)
+			}
+		}, log)
 		tools = append(tools, &computer.RecordTools{R: recorder}, &computer.SwitchTools{S: computerSw})
 		recReady.Store(recorder)
 	}
@@ -800,6 +807,8 @@ func runAgent(ctx context.Context, args []string) error {
 	if onConnected := r.OnConnected; p.desktop {
 		r.OnConnected = func(ctx context.Context, cc *node.CC) {
 			liveCC.Store(cc)
+			defer liveCC.CompareAndSwap(cc, nil)
+			go uploads.serve(ctx, cc) // the recordings not sent yet
 			if onConnected != nil {
 				onConnected(ctx, cc)
 			} else {
@@ -824,7 +833,6 @@ func runAgent(ctx context.Context, args []string) error {
 		computerSw.Watch(func(bool) { ic.refresh() })
 	}
 	activity.Show(ic.activityChanged)
-	var note atomic.Pointer[func(string)] // the island's note, once it is up
 	followServer(ctx, r, !*f.noAutoUpdate, func(text string) {
 		ic.setUpdate(text)
 		if n := note.Load(); n != nil {
