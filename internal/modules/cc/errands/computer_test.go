@@ -186,6 +186,8 @@ func TestPlannerOffersComputerTask(t *testing.T) {
 		mustObj(t, `{"command_name": "get_weather", "description": "Weather"}`),
 		mustObj(t, `{"command_name": "computer_act", "description": "Act on the computer."}`),
 		mustObj(t, `{"command_name": "computer_observe", "description": "Look at the computer."}`),
+		mustObj(t, `{"command_name": "browser_open", "description": "Open a page in the browser."}`),
+		mustObj(t, `{"command_name": "browser_fill", "description": "Fill in a field on the page."}`),
 	}
 	got := c.s.FullMenu(ctx, node, hh, ptr(7))
 	var names []string
@@ -209,11 +211,18 @@ func TestPlannerOffersComputerTask(t *testing.T) {
 	}
 
 	// Without a computer with computer control on, it isn't offered.
+	// Without a computer with computer control on, it isn't offered, and the browser's own
+	// commands are (a website task through computer_task never mixes with them).
 	c.s.Computer.Targets = func(context.Context, string) ([]string, string) { return nil, "Computer control is off." }
+	names = nil
 	for _, m := range c.s.FullMenu(ctx, node, hh, ptr(7)) {
 		if m.Command == policy.ToolComputerTask || computeruse.IsInternalTool(m.Command) {
 			t.Fatalf("offered %s without a computer", m.Command)
 		}
+		names = append(names, m.Command)
+	}
+	if strings.Join(names, ",") != "get_weather,browser_open,browser_fill" {
+		t.Fatalf("menu without a computer = %v", names)
 	}
 	c.s.Computer = nil
 	for _, m := range c.s.FullMenu(ctx, node, hh, ptr(7)) {

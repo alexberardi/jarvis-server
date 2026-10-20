@@ -82,6 +82,8 @@ const (
 	// The cc module's file tools (spreadsheet_tools.go), offered with computer_task.
 	cmdReadFile   = "read_computer_file"
 	cmdWriteSheet = "write_spreadsheet"
+	// browserPrefix names the browser extension's node commands (browser_open, browser_fill, …).
+	browserPrefix = "browser_"
 )
 
 // NodeMenu is build_errand_menu: a node's available commands (CommandDefinition dicts, as the
@@ -210,21 +212,24 @@ func toolRisky(t servertools.ServerTool) bool {
 }
 
 // FullMenu is build_full_errand_menu: node commands ∪ enabled server tools; on a name
-// collision the server tool wins (the executor would run it).
+// collision the server tool wins (the executor would run it). With computer_task offered, the
+// browser extension's own commands (browser_*) are left out: a website task is one computer_task
+// step, whose loop drives the browser, never a chain of single browser commands.
 func (s *Service) FullMenu(ctx context.Context, available []*pyjson.Object, hh string, speaker *int64) []MenuEntry {
 	server := s.serverMenu(ctx, hh, speaker)
 	names := map[string]bool{}
 	for _, c := range server {
 		names[c.Command] = true
 	}
+	computer := s.computerOffered(ctx, hh)
 	var out []MenuEntry
 	for _, c := range NodeMenu(available) {
-		if !names[c.Command] {
+		if !names[c.Command] && !(computer && strings.HasPrefix(c.Command, browserPrefix)) {
 			out = append(out, c)
 		}
 	}
 	out = append(out, server...)
-	if s.computerOffered(ctx, hh) {
+	if computer {
 		out = append(out, computerEntry())
 	}
 	return out
