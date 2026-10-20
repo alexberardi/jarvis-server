@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
     --no-ui) UI=0; shift ;;
     --home) [ $# -ge 2 ] || { echo "dev-run: --home needs a directory" >&2; exit 2; }; OWNHOME=$2; shift 2 ;;
     --) shift; break ;;
-    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "dev-run: unknown argument $1 (serve arguments go after --)" >&2; exit 2 ;;
   esac
 done
