@@ -114,6 +114,10 @@ and background only):
 | `<p>.split_mode`, `<p>.tensor_split` | `""` | `-sm`, `-ts` (llama only) |
 | `<p>.gpu_layers` | 999 (embeddings 0) | `-ngl`; 0 on a GPU build adds `-dev none`; for stt 0 means `--no-gpu` |
 | `<p>.kv_cache_type` (llm) | `f16` | `-ctk/-ctv` |
+| `<p>.gpu_memory_utilization` (llm) | 0 | vLLM's GPU share (01 §3.12) |
+| `<p>.dir_engine` (llm) | `auto` | engine for a Hugging Face directory model: `auto` (MLX on Apple Silicon, vLLM on linux/amd64, else Transformers), `mlx-lm`, `transformers`, `vllm` (01 §3.13) |
+| `<p>.dtype` (llm) | `auto` | Transformers' `--dtype`: `auto`, `bfloat16`, `float16`, `float32` |
+| `<p>.quantization` (llm) | `none` | Transformers' bitsandbytes `--quantization` (`bnb-4bit`, `bnb-8bit`), CUDA only |
 | `<p>.flash_attn` | `auto` | `-fa on/off` (stt: `off` → `-nfa`) |
 | `<p>.extra_args` | `""` | shell-quoted extra flags (after jarvisd's own, so a `--chat-template-file` here overrides the pinned one) |
 | `<p>.fold_system_messages` (llm) | `auto` | ID12: `auto` = the model's catalog flag (never for remote), `on`, `off`. When on, requests are folded for a strict chat template (04 §3.7) |

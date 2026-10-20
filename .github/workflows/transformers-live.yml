@@ -1,0 +1,44 @@
+name: transformers-live
+
+# The live Transformers engine check (TestRealTransformers, decision
+# 2026-10-19-transformers-engine): in a throwaway jarvisd home, the engine fetch job installs the
+# pinned transformers + torch set with uv, SmolLM2-135M-Instruct (270 MB) is assigned to live,
+# and a chat and a streamed turn go through jarvisd's chat service; the log has tokens/s.
+# GitHub's macOS runners have no usable MPS device, so this lane runs on the CPU
+# (gpu_backend=cpu); the MPS run is on a real Mac (same command, without the backend variable).
+# About 0.45 GB of downloads per run, so not on every pull request.
+on:
+  push:
+    branches: [main]
+    paths:
+      - internal/modules/llm/engine/pyengine.go
+      - internal/modules/llm/engine/transformers.go
+      - internal/modules/llm/engine/pyengines/transformers-*.txt
+      - .github/workflows/transformers-live.yml
+  schedule:
+    - cron: "41 5 * * 1" # Mondays 05:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transformers-live
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.27"
+
+jobs:
+  cpu:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Live Transformers test (CPU)
+        env:
+          JARVIS_TRANSFORMERS_TEST_BACKEND: cpu
+        run: CGO_ENABLED=0 go test -tags transformers ./internal/modules/llm -run '^TestRealTransformers$' -count=1 -v -timeout 30m

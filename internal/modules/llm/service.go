@@ -550,7 +550,7 @@ func (s *Service) payload(ctx context.Context, ep Endpoint, label string, req *C
 			p.ToolChoice = req.ToolChoice
 		}
 	}
-	p.applyThinking(s.budget(ctx, label, req))
+	p.applyThinking(s.budget(ctx, label, req), ep)
 	return p
 }
 
@@ -726,7 +726,7 @@ func (s *Service) retryJSON(ctx context.Context, ep Endpoint, label string, req 
 	}
 	p := &chatPayload{Model: ep.Model, Messages: retry, Temperature: jsonmode.RetryTemperature(t),
 		MaxTokens: &mt, TopP: req.TopP, Seed: req.Seed}
-	p.applyThinking(s.budget(ctx, label, req))
+	p.applyThinking(s.budget(ctx, label, req), ep)
 	s.log.Warn("llm: JSON invalid, retrying once", "label", label)
 	c, err := s.complete(ctx, ep, p)
 	if err != nil {

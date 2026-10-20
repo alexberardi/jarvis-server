@@ -92,15 +92,15 @@ func TestVLLMGate(t *testing.T) {
 	}
 
 	// A model directory runs on vLLM on linux/amd64, on MLX on a Mac.
-	if k, err := DirEngine(linuxAMD); err != nil || k != KindVLLM {
+	if k, err := DirEngine(linuxAMD, ""); err != nil || k != KindVLLM {
 		t.Fatalf("dir engine on linux: %s %v", k, err)
 	}
-	if k, err := DirEngine(Platform{"darwin", "arm64"}); err != nil || k != KindMLX {
+	if k, err := DirEngine(Platform{"darwin", "arm64"}, ""); err != nil || k != KindMLX {
 		t.Fatalf("dir engine on a mac: %s %v", k, err)
 	}
-	if _, err := DirEngine(Platform{"windows", "amd64"}); err == nil || !strings.Contains(err.Error(), "Apple Silicon") ||
+	if _, err := DirEngine(Platform{"linux", "arm64"}, ""); err == nil || !strings.Contains(err.Error(), "Apple Silicon") ||
 		!strings.Contains(err.Error(), "NVIDIA") {
-		t.Fatalf("dir engine on windows: %v", err)
+		t.Fatalf("dir engine on linux/arm64: %v", err)
 	}
 
 	e := PyEngines[KindVLLM]

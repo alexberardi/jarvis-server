@@ -147,10 +147,10 @@ func TestPythonEngineGate(t *testing.T) {
 			t.Errorf("%s: err %v, why %q", p, err, why)
 		}
 	}
-	if k, err := DirEngine(mac); err != nil || k != KindMLX {
+	if k, err := DirEngine(mac, ""); err != nil || k != KindMLX {
 		t.Fatalf("dir engine on a mac: %s %v", k, err)
 	}
-	if _, err := DirEngine(Platform{"linux", "arm64"}); err == nil || !strings.Contains(err.Error(), "Apple Silicon") {
+	if _, err := DirEngine(Platform{"linux", "arm64"}, ""); err == nil || !strings.Contains(err.Error(), "Apple Silicon") {
 		t.Fatalf("dir engine on linux/arm64: %v", err)
 	}
 	if Build(KindMLX) != PyEngines[KindMLX].Version || Build(KindLlama) != Releases[KindLlama].Build {

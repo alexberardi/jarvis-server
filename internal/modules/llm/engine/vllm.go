@@ -39,7 +39,7 @@ func init() {
 	PyEngines[KindVLLM] = PyEngine{
 		Kind: KindVLLM, Version: "0.32.0", Python: "3.12",
 		Requirements: vllmRequirements,
-		Platforms:    map[Platform]Flavour{{"linux", "amd64"}: FlavourCUDA},
+		Platforms:    map[Platform][]Flavour{{"linux", "amd64"}: {FlavourCUDA}},
 		Needs:        fmt.Sprintf("linux/amd64 with an NVIDIA GPU (driver %d or later)", vllmMinDriver),
 		Gate:         vllmGate,
 		// Measured for 0.32.0: 3.9 GB of wheels unpack to 8.1 GB, copied out of uv's cache

@@ -63,8 +63,9 @@ func (r *Resolver) gpuGate(ctx context.Context, label string, c LabelConfig) (*N
 	last := r.lastGood[label]
 	want, expected := ExpectedGPU(c, last)
 	if e, ok := c.Kind.Python(); ok {
-		// A Python engine runs on its platform's accelerator only, whatever gpu_layers says.
-		want = e.Platforms[r.platform()]
+		// A Python engine runs on its platform's accelerator, whatever gpu_layers says.
+		backend, _ := ParseFlavour(c.GPUBackend)
+		want, _ = e.flavourFor(r.platform(), backend)
 		expected = want != "" && want != FlavourCPU
 	}
 	if !expected {
