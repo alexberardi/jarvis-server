@@ -37,6 +37,83 @@ func (l *LinuxWindows) compositor() string {
 	return ""
 }
 
+// Compositor names the supported Wayland compositor of this session ("hyprland", "sway"), or
+// "" (X11, GNOME, KDE).
+func (l *LinuxWindows) Compositor() string { return l.compositor() }
+
+// FocusedWindow is the window with keyboard focus, as the compositor says: its app (Hyprland's
+// class, sway's app_id or X11 class), title, process and layout geometry.
+type FocusedWindow struct {
+	Class, Title string
+	PID          int
+	X, Y, W, H   int
+}
+
+// FocusedWindow asks Hyprland or sway which window has focus; nil when none has (an empty
+// workspace). ErrUnavailable on other desktops.
+func (l *LinuxWindows) FocusedWindow(ctx context.Context) (*FocusedWindow, error) {
+	switch l.compositor() {
+	case "hyprland":
+		out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"-j", "activewindow"}})
+		if err != nil {
+			return nil, err
+		}
+		var w struct {
+			Address string `json:"address"`
+			At      []int  `json:"at"`
+			Size    []int  `json:"size"`
+			Class   string `json:"class"`
+			Title   string `json:"title"`
+			PID     int    `json:"pid"`
+		}
+		if err := json.Unmarshal([]byte(out), &w); err != nil {
+			return nil, fmt.Errorf("hyprctl activewindow: %w", err)
+		}
+		if w.Address == "" {
+			return nil, nil
+		}
+		f := &FocusedWindow{Class: w.Class, Title: w.Title, PID: w.PID}
+		if len(w.At) == 2 && len(w.Size) == 2 {
+			f.X, f.Y, f.W, f.H = w.At[0], w.At[1], w.Size[0], w.Size[1]
+		}
+		return f, nil
+	case "sway":
+		root, err := l.swayTree(ctx)
+		if err != nil {
+			return nil, err
+		}
+		n := root.focusedLeaf()
+		if n == nil {
+			return nil, nil
+		}
+		class := n.AppID
+		if class == "" && n.WindowProperties != nil {
+			class = n.WindowProperties.Class
+		}
+		return &FocusedWindow{Class: class, Title: n.Name, PID: n.Pid, X: n.Rect.X, Y: n.Rect.Y, W: n.Rect.Width, H: n.Rect.Height}, nil
+	}
+	return nil, ErrUnavailable
+}
+
+// Cursor is the pointer's position in layout coordinates: Hyprland's `hyprctl cursorpos`. sway
+// has no IPC for it (ok false), nor do other desktops.
+func (l *LinuxWindows) Cursor(ctx context.Context) (x, y float64, ok bool) {
+	if l.compositor() != "hyprland" {
+		return 0, 0, false
+	}
+	out, err := l.X.Run(ctx, Cmd{Name: "hyprctl", Args: []string{"cursorpos"}})
+	if err != nil {
+		return 0, 0, false
+	}
+	xs, ys, found := strings.Cut(out, ",")
+	if !found {
+		return 0, 0, false
+	}
+	x, err1 := strconv.ParseFloat(strings.TrimSpace(xs), 64)
+	y, err2 := strconv.ParseFloat(strings.TrimSpace(ys), 64)
+	return x, y, err1 == nil && err2 == nil
+}
+
 func (l *LinuxWindows) Available(ctx context.Context) (bool, string) {
 	if l.compositor() != "" {
 		return true, ""
@@ -221,12 +298,18 @@ func (l *LinuxWindows) hyprList(ctx context.Context) ([]Window, error) {
 // --- sway ---
 
 type swayNode struct {
-	ID               int64   `json:"id"`
-	Type             string  `json:"type"`
-	Name             string  `json:"name"`
-	AppID            string  `json:"app_id"`
-	Pid              int     `json:"pid"`
-	Focused          bool    `json:"focused"`
+	ID      int64  `json:"id"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	AppID   string `json:"app_id"`
+	Pid     int    `json:"pid"`
+	Focused bool   `json:"focused"`
+	Rect    struct {
+		X      int `json:"x"`
+		Y      int `json:"y"`
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	} `json:"rect"`
 	Focus            []int64 `json:"focus"`
 	Visible          *bool   `json:"visible"`
 	CurrentWorkspace string  `json:"current_workspace"`

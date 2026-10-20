@@ -255,3 +255,27 @@ func TestPlanBatchesWhenFreeKeysRunOut(t *testing.T) {
 		t.Fatal("no free key, no error")
 	}
 }
+
+func TestLayoutSym(t *testing.T) {
+	us := US()
+	// evdev KEY_A is 30: XKB keycode 38.
+	if got := us.Sym(38, 0); got != 'a' {
+		t.Fatalf("a: %#x", got)
+	}
+	if got := us.Sym(38, 1); got != 'A' {
+		t.Fatalf("A: %#x", got)
+	}
+	if got := us.Sym(10, 1); got != '!' {
+		t.Fatalf("shift+1: %#x", got)
+	}
+	if got := us.Sym(38, 2); got != 0 {
+		t.Fatalf("level 3: %#x", got)
+	}
+	if got := us.Sym(999, 0); got != 0 {
+		t.Fatalf("no key: %#x", got)
+	}
+	var nilLayout *Layout
+	if got := nilLayout.Sym(38, 0); got != 0 {
+		t.Fatalf("nil layout: %#x", got)
+	}
+}

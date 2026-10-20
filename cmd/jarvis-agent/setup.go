@@ -19,6 +19,8 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
+	"github.com/alexberardi/jarvis-server/internal/agent/evdev"
 	"github.com/alexberardi/jarvis-server/internal/agent/firstrun"
 	"github.com/alexberardi/jarvis-server/internal/agent/install"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
@@ -189,6 +191,8 @@ func setupDeps(log *slog.Logger, o setupOptions) firstrun.Deps {
 	}
 	if runtime.GOOS == "darwin" && macax.Supported() {
 		d.Permissions = macPermissions()
+	} else {
+		d.Permissions = linuxPermissions(runtime.GOOS, (&dictate.LinuxWindows{X: dictate.OSExec{}}).Compositor(), inputAccess)
 	}
 	if p := typingPortal(); p != nil {
 		d.Portal = p
@@ -338,9 +342,49 @@ func macPermissions() []firstrun.Permission {
 	}
 }
 
+// inputGroupCmd adds the user to the input group: they run it themselves (the agent never
+// asks for sudo), then log out and back in. computer.ErrInputGroup says the same.
+const inputGroupCmd = "sudo usermod -aG input $USER"
+
+// linuxPermissions is the Linux step, on Hyprland and sway (where the desktop can be recorded):
+// the input group, Linux's Input Monitoring, granted once access says the keyboard opens.
+func linuxPermissions(goos, compositor string, access func() error) []firstrun.Permission {
+	if goos != "linux" || compositor == "" {
+		return nil
+	}
+	return []firstrun.Permission{{ID: "input-monitoring", Label: "Keyboard and mouse (the input group)",
+		Why: "So Jarvis can watch what you do on the desktop when you ask it to learn a task (never what you type " +
+			"into a password field it can see). Run the command in a terminal, then log out and back in.",
+		How: inputGroupCmd,
+		Status: func() string {
+			if access() == nil {
+				return firstrun.Granted
+			}
+			return firstrun.NotAsked
+		}}}
+}
+
+// inputAccess is nil when this process can read a keyboard under /dev/input.
+func inputAccess() error {
+	devs, err := evdev.Devices(evdev.SysRoot, evdev.DevRoot)
+	if err != nil {
+		return err
+	}
+	return evdev.Access(devs)
+}
+
+// inputMonitoring: macOS's Input Monitoring grant, Linux's input group.
+func inputMonitoring() bool {
+	if runtime.GOOS == "linux" {
+		return inputAccess() == nil
+	}
+	return macax.ListenTrusted()
+}
+
 // freshChecks are the grants macOS shows a process only after it restarts, which
-// `jarvis-agent permission <name>` checks in a fresh one.
-var freshChecks = map[string]func() bool{"screen": macax.ScreenTrusted, "input-monitoring": macax.ListenTrusted}
+// `jarvis-agent permission <name>` checks in a fresh one (on Linux input-monitoring is the
+// input group, which a login applies).
+var freshChecks = map[string]func() bool{"screen": macax.ScreenTrusted, "input-monitoring": inputMonitoring}
 
 // freshStatus asks a new process of this binary (`jarvis-agent permission <name>`), which
 // macOS answers with the current grant; this process's own answer is fixed at its start.
@@ -356,8 +400,9 @@ func freshStatus(name string) bool {
 }
 
 // permissionCmd is `jarvis-agent permission screen|input-monitoring`: the setup page's fresh
-// Screen Recording or Input Monitoring check (prints granted or not_asked). Hidden: not in
-// the usage.
+// Screen Recording or Input Monitoring check (prints granted or not_asked; on Linux,
+// input-monitoring is whether the input group lets it read the keyboard, and not_asked also
+// prints the command that adds it). Hidden: not in the usage.
 func permissionCmd(args []string, w io.Writer) error {
 	var check func() bool
 	if len(args) == 1 {
@@ -368,8 +413,11 @@ func permissionCmd(args []string, w io.Writer) error {
 	}
 	if check() {
 		fmt.Fprintln(w, firstrun.Granted)
-	} else {
-		fmt.Fprintln(w, firstrun.NotAsked)
+		return nil
+	}
+	fmt.Fprintln(w, firstrun.NotAsked)
+	if runtime.GOOS == "linux" && args[0] == "input-monitoring" {
+		fmt.Fprintf(w, "Recording the desktop needs to read the keyboard and mouse: run `%s`, then log out and back in.\n", inputGroupCmd)
 	}
 	return nil
 }

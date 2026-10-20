@@ -1,6 +1,7 @@
 package computer
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,20 +13,24 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
+	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 )
 
-// Desktop recording (plan P3 piece 36): the platform's listen-only tap (record_darwin.go) hands
-// over the user's raw clicks, keystrokes and scrolls; DesktopSource turns them into the browser
+// Desktop recording (plan P3 piece 36): the platform's listen-only tap (record_darwin.go;
+// record_x11.go and record_wayland.go on Linux) hands over the user's raw clicks, keystrokes
+// and scrolls; DesktopSource turns them into the browser
 // trace's events (kind click, input, key, scroll; element role and name) plus the desktop's
 // app (bundle id) and the element's AX path, with a keyframe of the screen at most every
 // KeyframeEvery. Keystrokes become one input event per focused element. A keystroke typed while
 // secure input is on, or into a secure text field, never leaves the tap: the input event says
 // masked instead.
 
-// KeyframeEvery is the shortest gap between two keyframes of a desktop recording.
+// KeyframeEvery is the shortest gap between two keyframes of a desktop recording (unless the
+// platform says otherwise: DeskPlatform.KeyframeEvery).
 const KeyframeEvery = 2 * time.Second
 
 const (
@@ -62,6 +67,8 @@ type DeskInput struct {
 	Key    string
 	Secure bool // key: secure event input was on
 	DX, DY int  // scroll: lines
+	// NoPoint: a click or scroll whose position isn't known (sway has no IPC for the cursor).
+	NoPoint bool
 }
 
 // DeskPlatform is what a desktop recording asks the OS (ax on macOS).
@@ -70,6 +77,47 @@ type DeskPlatform struct {
 	Focused   func() (*ax.Recorded, error)
 	// Keyframe is a JPEG of the screen; nil: no keyframes.
 	Keyframe func(ctx context.Context) ([]byte, error)
+	// Frame, when set, takes the keyframes instead (Wayland): the screen with pt marked (a
+	// click's point; nil: the cursor's, if known), where pt is on it, and a crop around it.
+	Frame func(ctx context.Context, pt *Point) (Frame, error)
+	// KeyframeEvery is the shortest gap between keyframes (0: KeyframeEvery).
+	KeyframeEvery time.Duration
+	// Window is the focused window, kept on each event (nil: none kept).
+	Window func() *DesktopWindow
+	// Context is asked at each start: "" when elements can be looked up, "none" when they
+	// can't (no accessibility bus): every event then says so, nothing can be masked, and the
+	// start warns that typed text is kept (Warning).
+	Context func() string
+}
+
+// ContextNone: the recording has no accessibility context (DesktopEvent.Context).
+const ContextNone = "none"
+
+// Point is a global point in layout (logical) coordinates.
+type Point struct{ X, Y float64 }
+
+// Frame is a keyframe from DeskPlatform.Frame: the JPEG, and when the point is on it, the
+// point in the JPEG's pixels and a JPEG of the 256 px around it.
+type Frame struct {
+	JPEG  []byte
+	Point *KeyframePoint
+	Crop  []byte
+}
+
+// KeyframePoint is where an event's point (the click, else the cursor) is on its keyframe.
+type KeyframePoint struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// DesktopWindow is the focused window an event happened in (Wayland: the compositor's).
+type DesktopWindow struct {
+	Class string `json:"class,omitempty"`
+	Title string `json:"title,omitempty"`
+	X     int    `json:"x,omitempty"`
+	Y     int    `json:"y,omitempty"`
+	W     int    `json:"w,omitempty"`
+	H     int    `json:"h,omitempty"`
 }
 
 // DesktopEvent is one event of a desktop trace: a browser.RecordEvent's fields, and the app and
@@ -89,6 +137,11 @@ type DesktopEvent struct {
 	Y           int             `json:"y,omitempty"`
 	DX          int             `json:"dx,omitempty"` // scroll: lines
 	DY          int             `json:"dy,omitempty"`
+	Window      *DesktopWindow  `json:"window,omitempty"`
+	// Context is "none" when the recording has no accessibility context (no element, no mask).
+	Context string `json:"context,omitempty"`
+	// KeyframePoint: the event has a keyframe with its point marked, here.
+	KeyframePoint *KeyframePoint `json:"keyframe_point,omitempty"`
 }
 
 // DesktopElement is the element an event happened on.
@@ -111,9 +164,10 @@ type DesktopSource struct {
 
 	now func() time.Time // tests replace it
 
-	mu   sync.Mutex
-	cur  *deskSession
-	done map[string][]Keyframe // stopped recordings' keyframes, until Keyframes takes them
+	mu      sync.Mutex
+	cur     *deskSession
+	done    map[string][]Keyframe // stopped recordings' keyframes, until Keyframes takes them
+	warning string                // the last start's (Warning)
 }
 
 type deskSession struct {
@@ -122,6 +176,25 @@ type deskSession struct {
 	ch      chan DeskInput
 	stopTap func()
 	worker  chan struct{}
+	pending atomic.Int64 // inputs queued or being handled
+}
+
+// noContextWarning is the start's warning when there is no accessibility context.
+const noContextWarning = "I can't see which field you're typing in (the accessibility bus isn't running), so " +
+	"typed text is kept as it is, passwords too: don't type secrets while I'm recording."
+
+// Warning is what the last start wants the user to know ("" for nothing).
+func (s *DesktopSource) Warning() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.warning
+}
+
+// settled reports whether the recording going on has handled every input it got (tests).
+func (s *DesktopSource) settled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cur == nil || s.cur.pending.Load() == 0
 }
 
 func (s *DesktopSource) log() *slog.Logger {
@@ -143,22 +216,32 @@ func (s *DesktopSource) Start(_ context.Context, id string, emit func(json.RawMe
 	}
 	ses := &deskSession{id: id, ch: make(chan DeskInput, deskQueue), worker: make(chan struct{}),
 		rec: &deskRecorder{id: id, dir: s.Dir, p: s.Platform, emit: emit, now: now, log: s.log()}}
+	if s.Platform.Context != nil {
+		ses.rec.context = s.Platform.Context()
+	}
 	stop, err := s.Tap(func(in DeskInput) {
+		ses.pending.Add(1)
 		select {
 		case ses.ch <- in:
 		default: // the worker is far behind (an app not answering AX): drop rather than block the tap
+			ses.pending.Add(-1)
 		}
 	})
 	if err != nil {
 		return err
 	}
 	ses.stopTap = stop
+	s.warning = ""
+	if ses.rec.context == ContextNone {
+		s.warning = noContextWarning
+	}
 	go func() {
 		defer close(ses.worker)
 		for in := range ses.ch {
 			if !ses.rec.isAbandoned() {
 				ses.rec.handle(in)
 			}
+			ses.pending.Add(-1)
 		}
 	}()
 	s.cur = ses
@@ -221,6 +304,9 @@ type deskRecorder struct {
 	typing   *deskTyping
 	scroll   *DesktopEvent
 	scrolled time.Time
+	context  string    // DeskPlatform.Context's answer at the start
+	at       time.Time // the input being handled: keyframes are throttled on its time
+	quiet    bool      // flushing for a click that takes the keyframe itself
 
 	kmu       sync.Mutex
 	kf        []Keyframe
@@ -231,6 +317,7 @@ type deskRecorder struct {
 // deskTyping is the text typed into one element so far.
 type deskTyping struct {
 	el     *ax.Recorded
+	win    *DesktopWindow
 	text   []rune
 	masked bool
 	at     time.Time
@@ -240,16 +327,27 @@ func (d *deskRecorder) handle(in DeskInput) {
 	if in.At.IsZero() {
 		in.At = d.now()
 	}
+	d.at = in.At
 	switch in.Kind {
 	case InClick:
+		// With marked keyframes the click takes the keyframe of the moment typing ended.
+		d.quiet = d.p.Frame != nil
 		d.flush()
-		el := d.lookup(d.p.ElementAt, in.X, in.Y)
+		d.quiet = false
+		var el *ax.Recorded
+		var pt *Point
+		if !in.NoPoint {
+			el = d.lookup(d.p.ElementAt, in.X, in.Y)
+			pt = &Point{in.X, in.Y}
+		}
 		e := d.event(InClick, el, in.At)
-		e.X, e.Y = round(in.X), round(in.Y)
+		if pt != nil {
+			e.X, e.Y = round(in.X), round(in.Y)
+		}
 		if in.Button == "right" {
 			e.Button = "right"
 		}
-		d.send(e)
+		d.sendAt(e, pt)
 	case InScroll:
 		d.flushTyping()
 		if d.scroll != nil && in.At.Sub(d.scrolled) < deskScrollGap {
@@ -259,9 +357,15 @@ func (d *deskRecorder) handle(in DeskInput) {
 			return
 		}
 		d.flushScroll()
-		el := d.lookup(d.p.ElementAt, in.X, in.Y)
+		var el *ax.Recorded
+		if !in.NoPoint {
+			el = d.lookup(d.p.ElementAt, in.X, in.Y)
+		}
 		e := d.event(InScroll, el, in.At)
-		e.X, e.Y, e.DX, e.DY = round(in.X), round(in.Y), in.DX, in.DY
+		if !in.NoPoint {
+			e.X, e.Y = round(in.X), round(in.Y)
+		}
+		e.DX, e.DY = in.DX, in.DY
 		d.scroll, d.scrolled = &e, in.At
 	case InKey:
 		d.flushScroll()
@@ -296,7 +400,7 @@ func (d *deskRecorder) key(in DeskInput) {
 		d.flushTyping()
 	}
 	if d.typing == nil {
-		d.typing = &deskTyping{el: el, at: in.At}
+		d.typing = &deskTyping{el: el, win: d.window(), at: in.At}
 	}
 	t := d.typing
 	if in.Secure || (el != nil && el.Secure) {
@@ -334,12 +438,30 @@ func sameElement(a, b *ax.Recorded) bool {
 }
 
 func (d *deskRecorder) event(kind string, el *ax.Recorded, at time.Time) DesktopEvent {
-	e := DesktopEvent{RecordingID: d.id, Kind: kind, TS: at.UnixMilli()}
+	return d.eventIn(kind, el, d.window(), at)
+}
+
+// eventIn is an event on el in window win (nil: none kept).
+func (d *deskRecorder) eventIn(kind string, el *ax.Recorded, win *DesktopWindow, at time.Time) DesktopEvent {
+	e := DesktopEvent{RecordingID: d.id, Kind: kind, TS: at.UnixMilli(), Window: win, Context: d.context}
 	if el != nil {
 		e.App = el.App
-		e.Element = &DesktopElement{Role: el.Role, Name: el.Name, AXPath: el.Path}
+		if el.Role != "" || el.Name != "" || el.Path != "" {
+			e.Element = &DesktopElement{Role: el.Role, Name: el.Name, AXPath: el.Path}
+		}
+	}
+	if e.App == "" && win != nil {
+		e.App = win.Class
 	}
 	return e
+}
+
+// window is the focused window when the platform keeps it.
+func (d *deskRecorder) window() *DesktopWindow {
+	if d.p.Window == nil {
+		return nil
+	}
+	return d.p.Window()
 }
 
 func (d *deskRecorder) flush() {
@@ -356,7 +478,7 @@ func (d *deskRecorder) flushTyping() {
 	if !t.masked && len(t.text) == 0 {
 		return // typed and deleted again
 	}
-	e := d.event("input", t.el, t.at)
+	e := d.eventIn("input", t.el, t.win, t.at)
 	if t.masked {
 		e.Masked = true
 	} else {
@@ -375,10 +497,15 @@ func (d *deskRecorder) flushScroll() {
 }
 
 // send numbers e, takes its keyframe when the last one is KeyframeEvery old, and emits it.
-func (d *deskRecorder) send(e DesktopEvent) {
+func (d *deskRecorder) send(e DesktopEvent) { d.sendAt(e, nil) }
+
+// sendAt is send for an event at point pt (a click's), which a marked keyframe marks.
+func (d *deskRecorder) sendAt(e DesktopEvent, pt *Point) {
 	d.seq++
 	e.Seq = d.seq
-	d.keyframe(e.Seq)
+	if !d.quiet {
+		e.KeyframePoint = d.keyframe(e.Seq, pt)
+	}
 	raw, err := json.Marshal(e)
 	if err != nil {
 		return
@@ -386,34 +513,55 @@ func (d *deskRecorder) send(e DesktopEvent) {
 	d.emit(raw)
 }
 
-func (d *deskRecorder) keyframe(seq int64) {
-	if d.p.Keyframe == nil {
-		return
+// keyframe takes event seq's keyframe unless the last one is too recent (on the inputs'
+// clock), and returns where the point is on it when the platform marks it.
+func (d *deskRecorder) keyframe(seq int64, pt *Point) *KeyframePoint {
+	if d.p.Keyframe == nil && d.p.Frame == nil {
+		return nil
 	}
-	now := d.now()
-	if !d.lastShot.IsZero() && now.Sub(d.lastShot) < KeyframeEvery {
-		return
+	now := d.at
+	if now.IsZero() {
+		now = d.now()
+	}
+	if !d.lastShot.IsZero() && now.Sub(d.lastShot) < cmp.Or(d.p.KeyframeEvery, KeyframeEvery) {
+		return nil
 	}
 	d.lastShot = now
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	b, err := d.p.Keyframe(ctx)
+	var f Frame
+	var err error
+	if d.p.Frame != nil {
+		f, err = d.p.Frame(ctx, pt)
+	} else {
+		f.JPEG, err = d.p.Keyframe(ctx)
+	}
 	cancel()
 	if err != nil {
 		d.log.Debug("desktop recording: no keyframe", "seq", seq, "err", err)
-		return
+		return nil
 	}
-	path := filepath.Join(d.dir, d.id+"."+strconv.FormatInt(seq, 10)+".jpg")
+	base := filepath.Join(d.dir, d.id+"."+strconv.FormatInt(seq, 10))
 	d.kmu.Lock()
 	defer d.kmu.Unlock()
 	if d.abandoned {
-		return
+		return nil
 	}
-	if err := writePrivate(path, b); err != nil {
+	if err := writePrivate(base+".jpg", f.JPEG); err != nil {
 		d.log.Warn("desktop recording: couldn't keep a keyframe", "err", err)
-		return
+		return nil
 	}
-	d.kf = append(d.kf, Keyframe{Seq: int(seq), Path: path})
+	k := Keyframe{Seq: int(seq), Path: base + ".jpg"}
+	if f.Crop != nil {
+		if err := writePrivate(base+cropSuffix, f.Crop); err == nil {
+			k.Crop = base + cropSuffix
+		}
+	}
+	d.kf = append(d.kf, k)
+	return f.Point
 }
+
+// cropSuffix ends a keyframe's crop around its point: <id>.<seq>.crop.jpg next to it.
+const cropSuffix = ".crop.jpg"
 
 // abandon is Stop giving up on the worker; once it returns, no keyframe is written.
 func (d *deskRecorder) abandon() {
@@ -454,3 +602,21 @@ func writePrivate(path string, b []byte) error {
 }
 
 func round(f float64) int { return int(math.Round(f)) }
+
+// keyframer is a desktop recording's keyframe: the screen as a JPEG (nil without a capturer).
+func keyframer(c screen.Capturer) func(context.Context) ([]byte, error) {
+	if c == nil {
+		return nil
+	}
+	return func(ctx context.Context) ([]byte, error) {
+		if ok, why := c.Available(ctx); !ok {
+			return nil, errors.New(why)
+		}
+		shot, err := c.Capture(ctx, screen.ScopeScreen, "")
+		if err != nil {
+			return nil, err
+		}
+		b, _, _, err := screen.Encode(shot.Image)
+		return b, err
+	}
+}

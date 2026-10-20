@@ -18,3 +18,5 @@ func focus(int, string) error                               { return ErrUnsuppor
 func element(int, string) (*computeruse.Element, error)     { return nil, ErrUnsupported }
 func elementAt(int, int, int) (*computeruse.Element, error) { return nil, ErrUnsupported }
 func focused(int) (*computeruse.Element, error)             { return nil, ErrUnsupported }
+
+func available(context.Context) error { return ErrUnsupported }

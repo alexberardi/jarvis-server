@@ -529,3 +529,8 @@ func focused(pid int) (*computeruse.Element, error) {
 func focusedElement(ctx context.Context, o obj, role uint32) *computeruse.Element {
 	return &computeruse.Element{Role: roleNames[role], Name: o.name(ctx), Secure: role == rolePasswordText}
 }
+
+func available(ctx context.Context) error {
+	_, err := bus(ctx)
+	return err
+}

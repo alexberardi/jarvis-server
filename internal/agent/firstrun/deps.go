@@ -51,7 +51,8 @@ type Deps struct {
 	Voice *Voice
 	// Mic opens the microphone for the level meter; nil hides the meter.
 	Mic MicOpener
-	// Permissions are the macOS privacy grants, in the order shown; empty elsewhere.
+	// Permissions are the macOS privacy grants, in the order shown; on Hyprland and sway the
+	// input group (desktop recording); empty elsewhere.
 	Permissions []Permission
 	// Portal is the GNOME/KDE "allow typing" step; nil where it doesn't apply.
 	Portal *Portal
@@ -73,7 +74,8 @@ type Voice struct {
 	Set func(on bool) error
 }
 
-// Permission is one macOS privacy grant the agent needs.
+// Permission is one macOS privacy grant the agent needs, or a step the user takes on Linux
+// (the input group).
 type Permission struct {
 	ID    string // "accessibility", "microphone", "automation", "screen", "input-monitoring"
 	Label string // "Accessibility"
@@ -84,6 +86,8 @@ type Permission struct {
 	Ask func()
 	// Pane is the System Settings link for it.
 	Pane string
+	// How is a command the user runs themselves instead (Linux's input group), shown as is.
+	How string
 }
 
 // Permission statuses.
