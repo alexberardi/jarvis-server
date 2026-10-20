@@ -699,12 +699,12 @@ func runAgent(ctx context.Context, args []string) error {
 	if p.desktop {
 		// Computer tasks in the browser and on the desktop (plan P3 pieces 8 and 22): build
 		// adds the executor's tools after the browser's.
-		tf.computer = func(bt *browser.Tools, launch func(ctx context.Context, app string) error) node.Toolset {
+		tf.computer = func(bt *browser.Tools, apps computer.Apps) node.Toolset {
 			var b computer.Browser
 			if bt != nil {
 				b = computer.BrowserOf(bt)
 			}
-			return &computer.Tools{Browser: b, Desktop: computer.NativeDesktop(launch), Switch: computerSw, Activity: activity,
+			return &computer.Tools{Browser: b, Desktop: computer.NativeDesktop(apps), Switch: computerSw, Activity: activity,
 				CC: func() computer.Approver {
 					if cc := liveCC.Load(); cc != nil {
 						return cc
@@ -966,7 +966,7 @@ type toolFlags struct {
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
 	// desktop_open's catalogue: build adds them after the browser tools.
-	computer func(bt *browser.Tools, launch func(ctx context.Context, app string) error) node.Toolset
+	computer func(bt *browser.Tools, apps computer.Apps) node.Toolset
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -1028,15 +1028,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		closeAll = stopBrowser
 	}
 	if f.computer != nil {
-		// A desktop task's app that isn't running opens like "open Notes" would.
-		launch := func(ctx context.Context, app string) error {
-			out, _ := opener.Call(ctx, desktop.ToolOpen, map[string]any{"target": app}, node.Request{})
-			if out["success"] == false {
-				return fmt.Errorf("%v", out["error"])
-			}
-			return nil
-		}
-		tools = append(tools, f.computer(bt, launch))
+		// A desktop task's app that isn't running opens from desktop_open's catalogue, by name
+		// only: never a link or a path, whatever --allow-open-any says.
+		tools = append(tools, f.computer(bt, opener))
 	}
 	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)
 	return h, tools, closeAll, err

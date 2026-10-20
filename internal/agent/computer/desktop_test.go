@@ -8,10 +8,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
+	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
+	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
+
+// fakeOS is the host desktop_open runs on: it records what is opened and launched (the rest of
+// host.Backend is unused).
+type fakeOS struct {
+	host.Backend
+	opened, launched []string
+	onLaunch         func(path string)
+}
+
+func (f *fakeOS) Platform() string                      { return "darwin" }
+func (f *fakeOS) Capabilities(context.Context) []string { return []string{host.CapOpen} }
+func (f *fakeOS) Open(_ context.Context, t string) error {
+	f.opened = append(f.opened, t)
+	return nil
+}
+func (f *fakeOS) LaunchApp(_ context.Context, p string) error {
+	f.launched = append(f.launched, p)
+	if f.onLaunch != nil {
+		f.onLaunch(p)
+	}
+	return nil
+}
+
+// catalogue is the installed apps desktop_open can launch.
+var catalogue = []apps.App{
+	{Name: "Notes", Path: "/System/Applications/Notes.app", Kind: apps.MacApp},
+	{Name: "Terminal", Path: "/System/Applications/Utilities/Terminal.app", Kind: apps.MacApp},
+	{Name: "Safari", Path: "/Applications/Safari.app", Kind: apps.MacApp},
+}
 
 // fakeAX is the accessibility tree: one snapshot, the element at a point by the window under
 // it, and the focused element.
@@ -120,7 +152,7 @@ type desktopFixture struct {
 	clip  *fakeClip
 	shots []DesktopWindow
 	lock  bool
-	opens []string
+	os    *fakeOS
 }
 
 func newDesktop(t *testing.T) *desktopFixture {
@@ -158,11 +190,10 @@ func newDesktop(t *testing.T) *desktopFixture {
 			return screen.Shot{Image: image.NewRGBA(image.Rect(0, 0, 2*w.W, 2*w.H)), App: w.App, Title: w.Title, Geometry: g}, nil
 		},
 		Locked: func(context.Context) (bool, error) { return f.lock, nil },
-		Launch: func(_ context.Context, app string) error {
-			f.opens = append(f.opens, app)
-			return nil
-		},
 	}
+	// desktop_open's own catalogue and policy, even with --allow-open-any.
+	f.os = &fakeOS{}
+	d.Apps = desktop.New(host.New(f.os), desktop.OpenPolicy{AllowAny: true}, func() ([]apps.App, error) { return catalogue, nil })
 	f.tl = &Tools{Switch: NewSwitch(true, nil), Desktop: d, Activity: &Activity{}, Home: t.TempDir()}
 	t.Cleanup(f.tl.closeDesktop)
 	return f
@@ -263,18 +294,37 @@ func TestDesktopMapsCoordinates(t *testing.T) {
 func TestDesktopLaunchesApp(t *testing.T) {
 	f := newDesktop(t)
 	f.wins.ws = []DesktopWindow{dFinder}
-	launched := dNotes
-	f.tl.Desktop.Launch = func(_ context.Context, app string) error {
-		f.opens = append(f.opens, app)
-		f.wins.ws = append([]DesktopWindow{launched}, f.wins.ws...)
-		return nil
-	}
-	out, _ := f.observe(t, "Notes")
+	f.os.onLaunch = func(string) { f.wins.ws = append([]DesktopWindow{dNotes}, f.wins.ws...) }
+	// A near name opens the catalogue's app and waits for its window.
+	out, _ := f.observe(t, "Note")
 	if out["success"] != true || out["app"] != "Notes" {
 		t.Fatalf("observe = %v", out)
 	}
-	if len(f.opens) != 1 || f.opens[0] != "Notes" {
-		t.Errorf("launched %v, want Notes through desktop_open", f.opens)
+	if len(f.os.launched) != 1 || f.os.launched[0] != "/System/Applications/Notes.app" {
+		t.Errorf("launched %v, want Notes from the catalogue", f.os.launched)
+	}
+}
+
+// What a desktop task opens is an installed app by name: never a link, a path or a URI, and a
+// near name of a denied app is that app.
+func TestDesktopLaunchRefusesLinks(t *testing.T) {
+	for _, c := range []struct{ app, code string }{
+		{"https://blocked.example/x", "invalid_argument"},
+		{"mailto:someone@example.com", "invalid_argument"},
+		{"/System/Applications/Utilities/Terminal.app", "invalid_argument"},
+		{"x-apple.systempreferences:com.apple.preference.security", "invalid_argument"},
+		{"Terminl", "denied"},
+		{"Safar", "browser_window"},
+	} {
+		f := newDesktop(t)
+		f.wins.ws = []DesktopWindow{dFinder}
+		out, _ := f.observe(t, c.app)
+		if out["error_code"] != c.code {
+			t.Errorf("observe %q = %v, want %s", c.app, out, c.code)
+		}
+		if len(f.os.opened)+len(f.os.launched) != 0 {
+			t.Errorf("observe %q opened %v launched %v, want nothing", c.app, f.os.opened, f.os.launched)
+		}
 	}
 }
 
@@ -336,6 +386,12 @@ func TestPasswordPromptDenied(t *testing.T) {
 	res := f.act(t, "Notes", click(capID, 400, 300))
 	if r := firstResult(t, res); r["code"] != "denied" || !strings.Contains(r["error"].(string), "authentication") {
 		t.Errorf("click on the password prompt = %v, want denied", r)
+	}
+	// A prompt the accessibility hit test can't see: its window alone refuses the point.
+	f.ax.at = func(float64, float64) *ax.Recorded { return nil }
+	res = f.act(t, "Notes", click(capID, 400, 300))
+	if r := firstResult(t, res); r["code"] != "denied" || !strings.Contains(r["error"].(string), "authentication") {
+		t.Errorf("click on a password prompt AX can't see = %v, want denied", r)
 	}
 	f.ax.focused = &ax.Recorded{Role: "AXSecureTextField", Secure: true, PID: 90, App: "com.apple.SecurityAgent"}
 	res = f.act(t, "Notes", map[string]any{"kind": "type", "intent": "x", "text": "hunter2"})

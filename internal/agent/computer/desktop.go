@@ -10,7 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
+	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/winmatch"
@@ -39,10 +41,17 @@ type Desktop struct {
 	// Locked reports whether the screen is locked (nil: never).
 	Locked    func(ctx context.Context) (bool, error)
 	Clipboard Clipboard // nil: no clipboard actions
-	// Launch opens an installed app by name through desktop_open's catalogue (nil: an app that
+	// Apps finds and opens installed apps through desktop_open's catalogue (nil: an app that
 	// isn't running can't be used).
-	Launch func(ctx context.Context, app string) error
-	Now    func() time.Time // nil: time.Now
+	Apps Apps
+	Now  func() time.Time // nil: time.Now
+}
+
+// Apps is desktop_open's catalogue (desktop.Tools): FindApp takes an app's name only, never a
+// link, a path or a URI; LaunchApp opens what FindApp returned, by its catalogue path.
+type Apps interface {
+	FindApp(name string) (apps.App, error)
+	LaunchApp(ctx context.Context, app apps.App) error
 }
 
 // AX is the accessibility tree (package ax).
@@ -310,34 +319,47 @@ func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
 
 // window is app's front window, launching the app through desktop_open's catalogue when it has
 // none.
-func (t *Tools) window(ctx context.Context, app string) (DesktopWindow, error) {
+func (t *Tools) window(ctx context.Context, app string) (DesktopWindow, string, error) {
 	d := t.Desktop
 	ws, err := d.Windows.List(ctx)
 	if err != nil {
-		return DesktopWindow{}, err
+		return DesktopWindow{}, "not_found", err
 	}
 	if w, ok := findWindow(ws, app); ok {
-		return w, nil
+		return w, "", nil
 	}
-	if app == "" || d.Launch == nil {
-		return DesktopWindow{}, fmt.Errorf("%s has no window open", firstNonEmpty(app, "no app"))
+	if app == "" || d.Apps == nil {
+		return DesktopWindow{}, "not_found", fmt.Errorf("%s has no window open", firstNonEmpty(app, "no app"))
 	}
-	if err := d.Launch(ctx, app); err != nil {
-		return DesktopWindow{}, fmt.Errorf("couldn't open %s: %w", app, err)
+	// The app opened is the catalogue's match, checked like the app asked for: a near name of
+	// a denied app is that app.
+	found, err := d.Apps.FindApp(app)
+	if errors.Is(err, host.ErrInvalidTarget) {
+		return DesktopWindow{}, "invalid_argument", fmt.Errorf("couldn't open %s: %w", app, err)
+	}
+	if err != nil {
+		return DesktopWindow{}, "not_found", fmt.Errorf("couldn't open %s: %w", app, err)
+	}
+	if code, err := appCheck([]string{found.Name}, nil, nil); err != nil {
+		return DesktopWindow{}, code, err
+	}
+	app = found.Name
+	if err := d.Apps.LaunchApp(ctx, found); err != nil {
+		return DesktopWindow{}, "not_found", fmt.Errorf("couldn't open %s: %w", app, err)
 	}
 	deadline := time.Now().Add(launchWait)
 	for {
 		if ws, err := d.Windows.List(ctx); err == nil {
 			if w, ok := findWindow(ws, app); ok {
-				return w, nil
+				return w, "", nil
 			}
 		}
 		if time.Now().After(deadline) {
-			return DesktopWindow{}, fmt.Errorf("%s didn't open a window", app)
+			return DesktopWindow{}, "not_found", fmt.Errorf("%s didn't open a window", app)
 		}
 		select {
 		case <-ctx.Done():
-			return DesktopWindow{}, ctx.Err()
+			return DesktopWindow{}, "not_found", ctx.Err()
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
@@ -370,9 +392,9 @@ func (t *Tools) observeDesktop(ctx context.Context, a observeArgs) map[string]an
 	if code, err := t.begin(ctx, a.RunID, false); err != nil {
 		return failCode(code, "%v", err)
 	}
-	w, err := t.window(ctx, app)
+	w, code, err := t.window(ctx, app)
 	if err != nil {
-		return failCode("not_found", "%v", err)
+		return failCode(code, "%v", err)
 	}
 	if code, err := appCheck([]string{w.App}, nil, nil); err != nil {
 		return failCode(code, "%v", err)

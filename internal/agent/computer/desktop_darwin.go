@@ -17,8 +17,8 @@ import (
 
 // NativeDesktop is desktop tasks on macOS: the accessibility tree (ax), the window list and
 // screencapture (screen), CGEvent input, the HID idle time, the session's lock state and
-// pbcopy/pbpaste. launch opens an app through desktop_open's catalogue (nil: none).
-func NativeDesktop(launch func(ctx context.Context, app string) error) *Desktop {
+// pbcopy/pbpaste. apps opens an app through desktop_open's catalogue (nil: none).
+func NativeDesktop(apps Apps) *Desktop {
 	in := input.Native()
 	if in == nil {
 		return nil
@@ -36,7 +36,7 @@ func NativeDesktop(launch func(ctx context.Context, app string) error) *Desktop 
 		},
 		Locked:    screenLocked,
 		Clipboard: NativeClipboard(),
-		Launch:    launch,
+		Apps:      apps,
 	}
 }
 
