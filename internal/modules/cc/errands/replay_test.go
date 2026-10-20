@@ -175,3 +175,50 @@ func TestParamValues(t *testing.T) {
 		}
 	}
 }
+
+// TestPlannerPrefersSavedWorkflow: with saved workflows on the menu, the prompts say a goal that
+// is one of them is a run_workflow step (the house model planned "download my bank statement
+// for August" as a computer_task with a made-up site); without any, the prompt is as it was.
+func TestPlannerPrefersSavedWorkflow(t *testing.T) {
+	c := newComputerEnv(t)
+	ctx := context.Background()
+	without := BuildPrompt("g", c.s.FullMenu(ctx, nil, hh, ptr(7)))
+	if strings.Contains(without, workflowRule) {
+		t.Fatalf("a menu without run_workflow has the workflow rule:\n%s", without)
+	}
+	c.taught(cartWorkflow())
+	menu := c.s.FullMenu(ctx, nil, hh, ptr(7))
+	for _, p := range []string{BuildPrompt("g", menu), BuildRefinePrompt("s", nil, "i", menu), BuildReplanPrompt("g", nil, "p", "r", menu)} {
+		if !strings.Contains(p, websiteRule+workflowRule) {
+			t.Fatalf("prompt lacks the workflow rule after the website rule:\n%s", p)
+		}
+	}
+}
+
+// TestWorkflowPlanStartsWithoutPlanCard: a plan that replays a taught browser workflow is a
+// computer errand, started at once like a computer task (user, 2026-10-20); one whose workflow
+// works in a desktop app, or whose name matches no workflow, asks with its plan card when the
+// user isn't at the computer (C9).
+func TestWorkflowPlanStartsWithoutPlanCard(t *testing.T) {
+	desktopWF := computer.Workflow{ID: "tw_9", Name: "Notes export", Params: nil,
+		Steps: []computer.WorkflowStep{{Intent: "Export", Target: "desktop", App: "notes",
+			Action: computeruse.Action{Kind: "keypress", Keys: []string{"enter"}}}}}
+	for _, c := range []struct {
+		name, args, want string
+	}{
+		{"browser", `{"name": "Bank statement", "params": {"month": "May"}}`, "launched"},
+		{"desktop", `{"name": "Notes export"}`, "draft"},
+		{"unknown", `{"name": "pay rent"}`, "draft"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ce := newComputerEnv(t)
+			ce.taught(cartWorkflow(), desktopWF)
+			menu := ce.s.FullMenu(context.Background(), nil, hh, ptr(7))
+			ce.llm.say("plan", planJSON("Run it", step(cmdRunWorkflow, "Run it", c.args)))
+			p := ce.draft("run it", ptr(7), menu)
+			if p.State != c.want {
+				t.Fatalf("plan = %+v, want %s", p, c.want)
+			}
+		})
+	}
+}

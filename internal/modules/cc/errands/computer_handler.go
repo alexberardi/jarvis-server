@@ -221,6 +221,37 @@ func hasDesktopStep(steps []Step) bool {
 	return false
 }
 
+// hasDesktopReplay is hasDesktopStep counting a taught workflow's replay (run_workflow) whose
+// workflow works in a desktop app, or which doesn't name exactly one of uid's workflows (it can't
+// be told, so it isn't run unasked).
+func (s *Service) hasDesktopReplay(ctx context.Context, hh string, uid *int64, steps []Step) bool {
+	if hasDesktopStep(steps) {
+		return true
+	}
+	for _, st := range steps {
+		if parse.PyStrip(st.Command) != cmdRunWorkflow {
+			continue
+		}
+		if s.Computer == nil || s.Computer.Taught == nil {
+			return true
+		}
+		ws, err := s.Computer.Taught.Visible(ctx, hh, uid)
+		if err != nil {
+			return true
+		}
+		m := computer.MatchWorkflows(ws, parse.PyStrip(truthyStr(st.Args, "name")))
+		if len(m) != 1 {
+			return true
+		}
+		for _, ws := range m[0].Steps {
+			if ws.Target == "desktop" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // attended reports whether the user asked for r a moment ago on a computer a computer task can
 // run on: then its desktop tasks may run without a tap (C9).
 func (s *Service) attended(ctx context.Context, r DraftRequest) bool {
