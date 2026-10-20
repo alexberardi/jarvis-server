@@ -323,3 +323,17 @@ func TestNewRecorderDesktopSource(t *testing.T) {
 		t.Fatalf("desktop source on %s: %v", runtime.GOOS, has)
 	}
 }
+
+// The usage error names every subcommand, so a merge can't quietly drop one.
+func TestComputerUsageNamesAll(t *testing.T) {
+	never := func() (net.Conn, error) { t.Fatal("dialed the agent"); return nil, nil }
+	err := computerCmd([]string{"bogus"}, &bytes.Buffer{}, never)
+	if err == nil {
+		t.Fatal("bogus: no error")
+	}
+	for _, want := range []string{"record start [--desktop]", "record --browser", "download URL REF", "click X Y"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("usage %q lacks %q", err, want)
+		}
+	}
+}

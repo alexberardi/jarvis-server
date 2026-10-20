@@ -26,16 +26,17 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-const computerUsage = "usage: jarvis-agent computer stop|status|on|off|record start|record stop|snapshot URL|record --browser|download URL REF|click X Y"
+const computerUsage = "usage: jarvis-agent computer stop|status|on|off|record start [--desktop]|record stop|snapshot URL|record --browser|download URL REF|click X Y"
 
-// computerCmd is `jarvis-agent computer stop|status|on|off|record start|record stop`: stop what
-// Jarvis is doing with this computer (a computer task, a recording), as the status icon's "Stop
-// Jarvis" does, say what it is doing, turn computer control on or off, as its "Computer
-// control" does, or record what the user does in the browser, as its "Record a macro…" does. All ask
-// the running agent over its control socket. (`computer snapshot`, `computer record --browser`
-// and `computer download` are computerSnapshotCmd, computerRecordCmd and computerDownloadCmd,
-// which main dispatches before this.) `click X Y` is a debug command: a left click at global
-// logical X, Y through this desktop's input backend.
+// computerCmd is `jarvis-agent computer stop|status|on|off|record start [--desktop]|record stop`:
+// stop what Jarvis is doing with this computer (a computer task, a recording), as the status
+// icon's "Stop Jarvis" does, say what it is doing, turn computer control on or off, as its
+// "Computer control" does, or record what the user does in the browser, as its "Record a
+// macro…" does (or on the desktop, with --desktop). All ask the running agent over its control
+// socket. (`computer snapshot`, `computer record --browser` and `computer download` are
+// computerSnapshotCmd, computerRecordCmd and computerDownloadCmd, which main dispatches before
+// this.) `click X Y` is a debug command: a left click at global logical X, Y through this
+// desktop's input backend.
 func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 	if len(args) == 3 && args[0] == "click" {
 		return computerClick(args[1:], w)
