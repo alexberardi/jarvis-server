@@ -55,7 +55,7 @@ function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
         <span data-testid="setup-step-position">
           Step {at + 1} of {STEPS.length}: <span className="font-semibold text-text">{TITLES[step]}</span>
         </span>
-        <ChevronDown size={16} aria-hidden className={cn('shrink-0 transition-transform duration-(--duration-menu) ease-out', open && 'rotate-180')} />
+        <ChevronDown size={16} aria-hidden className={cn('shrink-0 transition-transform duration-(--duration-menu) ease-out motion-reduce:transition-none', open && 'rotate-180')} />
       </button>
       <div aria-hidden className="mt-1 h-1 overflow-hidden rounded-pill bg-surface-alt sm:hidden">
         <div className="h-full rounded-pill bg-primary" style={{ width: `${((at + 1) / STEPS.length) * 100}%` }} />

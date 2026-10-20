@@ -4,9 +4,9 @@ import type { DoctorCheck } from '@/api/doctor'
 import { cn } from '@/lib/utils'
 
 const ICON = {
-  ok: <CheckCircle2 size={14} className="shrink-0 text-green-500" aria-label="ok" />,
-  warn: <AlertTriangle size={14} className="shrink-0 text-amber-500" aria-label="warning" />,
-  fail: <XCircle size={14} className="shrink-0 text-red-500" aria-label="failed" />,
+  ok: <CheckCircle2 size={14} className="shrink-0 text-success" aria-label="ok" />,
+  warn: <AlertTriangle size={14} className="shrink-0 text-warning" aria-label="warning" />,
+  fail: <XCircle size={14} className="shrink-0 text-danger" aria-label="failed" />,
 }
 
 function statusIcon(status: string) {
@@ -49,7 +49,7 @@ function CopyFix({ fix }: { fix: string }) {
           )
         }}
       >
-        {copied ? <CheckCircle2 size={12} className="text-green-500" /> : <Copy size={12} />}
+        {copied ? <CheckCircle2 size={12} className="text-success" /> : <Copy size={12} />}
       </button>
     </div>
   )
@@ -72,7 +72,7 @@ export default function DoctorChecks({ checks, onlyProblems = false }: { checks:
           key={`${c.name}-${i}`}
           className={cn(
             'rounded-lg border p-2',
-            c.status === 'ok' ? 'border-[var(--color-border)]' : c.status === 'fail' ? 'border-red-500/30' : 'border-amber-500/30',
+            c.status === 'ok' ? 'border-[var(--color-border)]' : c.status === 'fail' ? 'border-danger/40' : 'border-warning/40',
           )}
         >
           <div className="flex items-start gap-2">
