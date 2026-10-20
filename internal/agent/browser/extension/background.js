@@ -148,8 +148,40 @@ async function hello(p) {
     browser: info.name,
     browser_version: info.version,
     focused,
+    website_access: await websiteAccess(),
   });
 }
+
+// --- website access ---
+//
+// The <all_urls> host permission lets the extension read and act on pages. Firefox lets the user
+// turn it off (it is off after install unless they allowed it in the prompt), and then every
+// page command fails and recordings keep only page loads. The agent is told in hello and on
+// every change, so `jarvis-agent browser status` and the admin can say why; the popup asks for
+// it back (popup.js).
+
+const ALL_SITES = { origins: ["<all_urls>"] };
+
+// websiteAccess is whether the extension may access every site; undefined when the browser
+// can't say (hello then leaves it out).
+async function websiteAccess() {
+  try {
+    return !!(await api.permissions.contains(ALL_SITES));
+  } catch {
+    return undefined;
+  }
+}
+
+function accessChanged() {
+  const p = port;
+  if (!p) return; // the next hello carries it
+  websiteAccess().then((on) => {
+    if (on !== undefined && port === p) post(p, { type: "event", event: "access", website_access: on });
+  });
+}
+
+api.permissions?.onAdded?.addListener(accessChanged);
+api.permissions?.onRemoved?.addListener(accessChanged);
 
 async function onMessage(p, msg) {
   if (!msg || msg.type !== "command") return;

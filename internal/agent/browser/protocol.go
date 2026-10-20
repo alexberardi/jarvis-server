@@ -95,6 +95,10 @@ type Message struct {
 	Event   string `json:"event,omitempty"`
 	Focused bool   `json:"focused,omitempty"`
 
+	// hello / event "access": whether the extension may access every site (its <all_urls> host
+	// permission, which Firefox lets the user turn off). nil: the extension doesn't say (< 0.3.2).
+	WebsiteAccess *bool `json:"website_access,omitempty"`
+
 	// host (first line of a host's IPC connection)
 	Origin string `json:"origin,omitempty"`
 	PID    int    `json:"pid,omitempty"`

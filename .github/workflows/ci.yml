@@ -47,6 +47,8 @@ jobs:
       - run: npm run lint
       - run: npx tsc -b
       - run: npx vitest run
+      # The browser extension's own unit tests (a fake WebExtension API; no browser needed).
+      - run: node --test ../../internal/agent/browser/jstest/*.test.mjs
       - run: npm run build
       - uses: actions/upload-artifact@v4
         with:

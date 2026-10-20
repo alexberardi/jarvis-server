@@ -161,14 +161,15 @@ func TestFollowUpAnswerSurvivesAPauseMidSentence(t *testing.T) {
 func TestIgnoredAnswerDoesNotRestartTheWindow(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		speech int // chunks of the ignored answer
+		speech int     // chunks of the ignored answer
+		listen float64 // the window (0: the default); long enough to leave a rest after the answer
 		want   func(cfg FollowUpConfig, opened []int, end int) (got, want int)
 	}{
-		{"the rest of the window", 30, func(cfg FollowUpConfig, opened []int, end int) (int, int) {
+		{"the rest of the window", 30, 8, func(cfg FollowUpConfig, opened []int, end int) (int, int) {
 			// The whole window, the ignored answer included, is ~8 s of audio, not 8 + 8.
 			return end - opened[0], frames(cfg.ListenSecs)
 		}},
-		{"at least the grace", 100, func(cfg FollowUpConfig, opened []int, end int) (int, int) {
+		{"at least the grace", 100, 0, func(cfg FollowUpConfig, opened []int, end int) (int, int) {
 			return end - opened[1], frames(cfg.IgnoredGraceSecs)
 		}},
 	} {
@@ -180,6 +181,9 @@ func TestIgnoredAnswerDoesNotRestartTheWindow(t *testing.T) {
 			}
 			mic := oneWake()
 			r := newRig(t, mic, srv)
+			if tc.listen > 0 {
+				r.p.Cfg.FollowUp.ListenSecs = tc.listen
+			}
 			l := answer(r, mic, rep(speech, tc.speech))
 			var mu sync.Mutex
 			var opened []int

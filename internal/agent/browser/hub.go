@@ -46,6 +46,8 @@ type BrowserInfo struct {
 	Focused          bool      `json:"focused"`
 	LastFocus        time.Time `json:"last_focus,omitzero"`
 	Connected        time.Time `json:"connected"`
+	// WebsiteAccess is whether the extension may read and act on pages; nil when it doesn't say.
+	WebsiteAccess *bool `json:"website_access,omitempty"`
 }
 
 // Hub is the agent's side: it accepts native hosts on the socket, tracks the browsers behind
@@ -163,6 +165,8 @@ func (h *Hub) handle(ctx context.Context, c net.Conn) {
 			if m.Focused {
 				hc.info.LastFocus = h.now()
 			}
+			accessChanged := !sameAccess(hc.info.WebsiteAccess, m.WebsiteAccess)
+			hc.info.WebsiteAccess = m.WebsiteAccess
 			wasReady := hc.ready
 			hc.ready = true
 			if hc.info.Key == "" {
@@ -170,7 +174,10 @@ func (h *Hub) handle(ctx context.Context, c net.Conn) {
 			}
 			h.mu.Unlock()
 			if !wasReady {
-				h.Log.Info("browser connected", "id", id, "browser", m.Browser, "version", m.BrowserVersion, "extension", m.ExtensionVersion)
+				h.Log.Info("browser connected", "id", id, "browser", m.Browser, "version", m.BrowserVersion, "extension", m.ExtensionVersion,
+					"website_access", accessText(m.WebsiteAccess))
+				h.notify()
+			} else if accessChanged {
 				h.notify()
 			}
 		case "event":
@@ -187,6 +194,17 @@ func (h *Hub) handle(ctx context.Context, c net.Conn) {
 					hc.info.LastFocus = h.now()
 				}
 				h.mu.Unlock()
+			}
+			if m.Event == "access" && m.WebsiteAccess != nil {
+				h.mu.Lock()
+				changed := !sameAccess(hc.info.WebsiteAccess, m.WebsiteAccess)
+				hc.info.WebsiteAccess = m.WebsiteAccess
+				ready := hc.ready
+				h.mu.Unlock()
+				if changed && ready {
+					h.Log.Info("browser website access changed", "id", id, "website_access", accessText(m.WebsiteAccess))
+					h.notify()
+				}
 			}
 		case "result":
 			h.mu.Lock()
@@ -210,6 +228,21 @@ func (h *Hub) drop(id int, hc *hubConn) {
 		h.Log.Info("browser disconnected", "id", id, "browser", hc.info.Browser)
 		h.notify()
 	}
+}
+
+func sameAccess(a, b *bool) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
+}
+
+// accessText is website access as "on", "off" or "unknown".
+func accessText(a *bool) string {
+	switch {
+	case a == nil:
+		return "unknown"
+	case *a:
+		return "on"
+	}
+	return "off"
 }
 
 func (h *Hub) notify() {
@@ -279,11 +312,25 @@ func (h *Hub) Browsers() []BrowserInfo {
 	return out
 }
 
-// Changed returns a channel that is closed the next time a browser connects or disconnects.
+// Changed returns a channel that is closed the next time a browser connects or disconnects, or
+// a connected browser's website access changes.
 func (h *Hub) Changed() <-chan struct{} {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.changed
+}
+
+// WebsiteAccess is the connected browsers' website access: off when any has it off, on when
+// some have it on and none off, nil when none says (or none is connected).
+func (h *Hub) WebsiteAccess() *bool {
+	var out *bool
+	for _, b := range h.Browsers() {
+		if a := b.WebsiteAccess; a != nil && (out == nil || !*a) {
+			v := *a
+			out = &v
+		}
+	}
+	return out
 }
 
 // Connected reports whether any browser is connected.
