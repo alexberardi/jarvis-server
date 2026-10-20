@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -145,5 +148,81 @@ func TestSignedOutByANewerEnrolmentKeepsItsCredentials(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("node.json still there: %v", err)
+	}
+}
+
+// #297: whatever ends the node, run's context ends with it, so the control socket closes too
+// (it kept a process with no node answering the setup page's start). A computer that was signed
+// out waits for the new sign-in (signedOut) instead of exiting; a Pi still exits "not set up".
+func TestNodeEndStopsTheRunAndASignedOutComputerWaits(t *testing.T) {
+	t.Setenv("XPC_SERVICE_NAME", "")
+	path := filepath.Join(t.TempDir(), "node.json")
+	save := func() {
+		if err := node.SaveCreds(path, node.Creds{ConfigURL: "http://cfg", NodeID: "n1", NodeKey: "k"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped, opened := 0, 0
+	end := nodeEnd{credsFile: path, nodeID: "n1", desktop: true, stop: func() { stopped++ }, openSetup: func() { opened++ }, log: slog.New(slog.DiscardHandler)}
+
+	save()
+	err := end.of(fmt.Errorf("run: %w", node.ErrSignedOut))
+	var so signedOut
+	if !errors.As(err, &so) || so.credsFile != path || stopped != 1 || opened != 1 {
+		t.Fatalf("computer: err=%v stopped=%d opened=%d", err, stopped, opened)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("node.json still there: %v", err)
+	}
+
+	save()
+	end.desktop = false
+	err = end.of(node.ErrSignedOut)
+	if errors.As(err, &so) || exitCode(err) != exitNotSetUp || stopped != 2 {
+		t.Fatalf("pi: err=%v exit=%d stopped=%d", err, exitCode(err), stopped)
+	}
+
+	boom := errors.New("boom")
+	if err := end.of(boom); err != boom || stopped != 3 {
+		t.Fatalf("other end: err=%v stopped=%d", err, stopped)
+	}
+}
+
+// #297: a signed-out computer's run doesn't exit: it waits, without opening the setup page a
+// second time, until the page saves new credentials, then runs again in place (reexec).
+func TestSignedOutRunRunsAgainOnTheNewCredentials(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "node.json")
+	defer func(d time.Duration) { setupPollEvery = d }(setupPollEvery)
+	setupPollEvery = 5 * time.Millisecond
+	ran := make(chan struct{}, 1)
+	defer func(f func(*slog.Logger) error) { reexec = f }(reexec)
+	reexec = func(*slog.Logger) error { ran <- struct{}{}; return nil }
+
+	so := signedOut{err: errNotSetUp{node.ErrSignedOut}, credsFile: path, noTray: true, log: slog.New(slog.DiscardHandler)}
+	done := make(chan error, 1)
+	go func() {
+		done <- so.rejoin(context.Background(), func() (net.Listener, error) { return nil, errors.New("no socket in this test") })
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("returned before the sign-in: %v", err)
+	case <-ran:
+		t.Fatal("ran again before the sign-in")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := node.SaveCreds(path, node.Creds{ConfigURL: "http://cfg", NodeID: "n2", NodeKey: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ran:
+	case <-time.After(5 * time.Second):
+		t.Fatal("didn't run again on the new credentials")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, setupOfferedMarker)); !os.IsNotExist(err) {
+		t.Fatalf("the wait offered the setup page again: %v", err)
 	}
 }

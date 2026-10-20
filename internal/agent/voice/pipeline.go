@@ -534,7 +534,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	reply, err := p.Server.VoiceStream(sctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id,
-		TurnSource: "wake", WakeConfidence: &conf, Affect: tr.Affect})
+		TurnSource: "wake", WakeConfidence: &conf, SpeechLevel: s.wakeLevel, Affect: tr.Affect})
 	if err != nil {
 		p.fail(ctx, ex, fmt.Errorf("voice/command/stream: %w", err))
 		return "", false
@@ -557,6 +557,9 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		return "", true
 	}
 	// Rows 13, 18, 19: a control response.
+	if reply.Control != nil && reply.Control.StoodDown {
+		log.Info("standing down: another node answers this wake")
+	}
 	end := p.resolve(ctx, s, ex, reply.Control)
 	return end, ex.Outcome != OutcomeError
 }

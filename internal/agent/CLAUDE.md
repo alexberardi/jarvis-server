@@ -45,6 +45,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent restart                         # via systemd/launchd when they run it; applies config changes
 ./jarvis-agent stop                            # quit until the next login or start (exit 0: no supervisor restarts it)
 ./jarvis-agent dictation allow                 # GNOME/KDE Wayland: the portal's one-time typing dialog
+./jarvis-agent computer click 640 400          # debug: one left click through input.Native()
 ./jarvis-agent try                             # list the tools this host offers now
 ./jarvis-agent try desktop_set_volume '{"volume": 30}'   # run one tool locally, no jarvisd
 ./jarvis-agent apps steam                      # what a name resolves to (never launches)
@@ -138,7 +139,13 @@ internal/agent/
                       `dictation allow` writes);
                       `jarvis-agent dictation allow|revoke|status` (cmd/jarvis-agent/dictation.go)
   vkbd/               the Wayland virtual keyboard (zwp_virtual_keyboard_manager_v1), pure Go:
-                      what wtype does, without wtype (DESIGN.md §14)
+                      what wtype does, without wtype (DESIGN.md §14); chords hold their
+                      modifiers as the depressed mask (the keymap maps Control/Mod1/Mod4)
+  vptr/               the wlroots virtual pointer (zwlr_virtual_pointer_manager_v1), pure Go: one
+                      pointer for the agent's life, motion_absolute against the xdg-output layout
+  input/              pointer and keys for computer tasks: the Input interface, macOS CGEvent
+                      (mac.go), wlroots vptr + vkbd (wlroots.go; Native in a Wayland session),
+                      X11 XTEST (x11.go; Native otherwise)
   x11/                X11 without helpers: XTEST typing (spare-keycode remap, settle, restore),
                       pointer, chords and root GetImage capture (pointer.go), and EWMH windows (list, activate, close, iconify, active) over a narrow
                       Conn (x11.go, unit-tested with a fake everywhere); the real Conn is
@@ -146,7 +153,7 @@ internal/agent/
   xkb/                keysyms for text and dictation's keys, and the minimal XKB keymap a
                       virtual keyboard uploads (pure, every OS)
   wlwire/             the Wayland client wire (connection, ids, args, registry), shared by the
-                      island and vkbd
+                      island, vkbd and vptr
   settings/           the settings file (agent.json): keys that stand for run flags, applied unless
                       the command line set the flag (DESIGN.md §13 "The settings file")
   hat/                the ReSpeaker 2-mics HAT (Pi nodes): APA102 LEDs with the Python node's

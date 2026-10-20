@@ -30,7 +30,7 @@ import (
 // (exec), so the supervisor that started it keeps supervising it.
 
 // setupPollEvery is how often a waiting login item looks for the credentials the setup page saves.
-const setupPollEvery = time.Second
+var setupPollEvery = time.Second
 
 // setupOfferedMarker is the file that records the setup page was opened at a login.
 const setupOfferedMarker = "setup-offered-at-login"
@@ -138,8 +138,9 @@ func waitingControl(enrolled func() bool, openSetup, quit func()) control.Handle
 // waitForSetup is run on a computer that isn't set up, started by a login item: it waits as
 // setupWait says, then becomes the agent (reexecRun). credsFile is where the page saves the
 // credentials. ctl is the control socket run holds (nil when it couldn't): served meanwhile, so
-// the waiting agent can be stopped, and closed before the agent starts in its place.
-func waitForSetup(ctx context.Context, log *slog.Logger, credsFile string, noTray bool, ctl net.Listener) error {
+// the waiting agent can be stopped, and closed before the agent starts in its place. offered:
+// the setup page is already open (a sign-out opened it), so the wait never opens it by itself.
+func waitForSetup(ctx context.Context, log *slog.Logger, credsFile string, noTray bool, ctl net.Listener, offered bool) error {
 	t := time.NewTicker(setupPollEvery)
 	defer t.Stop()
 	quit := make(chan struct{})
@@ -151,6 +152,9 @@ func waitForSetup(ctx context.Context, log *slog.Logger, credsFile string, noTra
 		openSetup: openSetupPage(log),
 		marker:    filepath.Join(filepath.Dir(credsFile), setupOfferedMarker),
 		quit:      quit,
+	}
+	if offered {
+		w.marker = ""
 	}
 	stopControl := func() {}
 	if ctl != nil {
@@ -195,5 +199,8 @@ func waitForSetup(ctx context.Context, log *slog.Logger, credsFile string, noTra
 	case runErr != nil:
 		return runErr
 	}
-	return reexecRun(log)
+	return reexec(log)
 }
+
+// reexec is reexecRun, swappable for tests.
+var reexec = reexecRun

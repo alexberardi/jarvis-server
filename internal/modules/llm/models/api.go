@@ -28,10 +28,16 @@ type Stack struct {
 func NewStack(deps module.Deps, set *settings.Service) *Stack {
 	log := deps.Log
 	str := func(key string) string { return set.String(context.Background(), key, settings.Scope{}) }
+	keyed := func(key string) string {
+		if key == "" {
+			return ""
+		}
+		return str(key)
+	}
 	store := &Store{DB: deps.DB}
 	bins := engine.NewBinaries(deps.Config.Home, log)
-	bins.BaseURL = func(k engine.Kind) string { return str(engine.BaseURLKey(k)) }
-	bins.Override = func(k engine.Kind) string { return str(engine.PathKey(k)) }
+	bins.BaseURL = func(k engine.Kind) string { return keyed(engine.BaseURLKey(k)) }
+	bins.Override = func(k engine.Kind) string { return keyed(engine.PathKey(k)) }
 	det := engine.NewDetector(func() map[engine.Flavour]string { return bins.Installed(engine.KindLlama) })
 	det.Log = log
 	res := &engine.Resolver{
@@ -338,10 +344,14 @@ func (a *API) hardware(w http.ResponseWriter, r *http.Request) {
 	}
 	builds := map[string]any{}
 	for _, k := range engine.Kinds {
-		builds[string(k)] = map[string]any{
-			"build":    engine.Releases[k].Build,
+		b := map[string]any{
+			"build":    engine.Build(k),
 			"flavours": engine.FlavoursFor(k, a.Manager.Binaries.Platform),
 		}
+		if why := engine.Unavailable(k, a.Manager.Binaries.Platform); why != "" {
+			b["unavailable"] = why
+		}
+		builds[string(k)] = b
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"hardware":  hw,

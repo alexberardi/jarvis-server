@@ -167,6 +167,7 @@ const (
 	settingDedupeWindow      = "voice.tool_dedupe_window_seconds"
 	settingHouseholdLocation = "household.location"
 	settingAttention         = "attention.enabled"
+	settingWakeArbitration   = "voice.wake_arbitration_window_s"
 )
 
 // voiceDefinitions are 5b's settings (legacy services/settings_definitions.py, D11-cleaned).
@@ -226,6 +227,9 @@ func voiceDefinitions(defaultPersona string) []settings.Definition {
 		{Key: settingDedupeWindow, Category: "voice", Type: settings.Float, Default: 120.0,
 			Description: "Seconds an issued client tool call (name + canonical args) blocks an identical re-issue in the " +
 				"same conversation (answered with a one-shot nudge). 0 disables."},
+		{Key: settingWakeArbitration, Category: "voice", Type: settings.Float, Default: 1.5,
+			Description: "Seconds within which wake turns from several nodes of the household with the same request are " +
+				"one \"Hey Jarvis\": one node answers, the others stand down silently (arbitration.go). Max 10. 0 disables."},
 		{Key: settingHouseholdLocation, Category: "household", Type: settings.String, Default: "",
 			Description: "Household locality used to disambiguate business searches (e.g. 'Springfield, IL'). Sent to " +
 				"nodes as home_context.location. Empty means unset."},

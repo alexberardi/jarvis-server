@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,12 +21,15 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
+	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
+
+const computerUsage = "usage: jarvis-agent computer stop|status|on|off|record start [--desktop]|record stop|snapshot URL|record --browser|download URL REF|click X Y"
 
 // computerCmd is `jarvis-agent computer stop|status|on|off|record start [--desktop]|record stop`:
 // stop what Jarvis is doing with this computer (a computer task, a recording), as the status
@@ -34,8 +38,12 @@ import (
 // macro…" does (or on the desktop, with --desktop). All ask the running agent over its control
 // socket. (`computer snapshot`, `computer record --browser` and `computer download` are
 // computerSnapshotCmd, computerRecordCmd and computerDownloadCmd, which main dispatches before
-// this.)
+// this.) `click X Y` is a debug command: a left click at global logical X, Y through this
+// desktop's input backend.
 func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
+	if len(args) == 3 && args[0] == "click" {
+		return computerClick(args[1:], w)
+	}
 	cmds := map[string]string{"stop": control.ComputerStop, "status": control.ComputerStatus,
 		"on": control.ComputerOn, "off": control.ComputerOff,
 		"record start": control.ComputerRecordStart, "record stop": control.ComputerRecordStop,
@@ -45,7 +53,7 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 		cmd = cmds[strings.Join(args, " ")]
 	}
 	if cmd == "" {
-		return errors.New("usage: jarvis-agent computer stop|status|on|off|record start [--desktop]|record stop|snapshot URL|record --browser|download URL REF")
+		return errors.New(computerUsage)
 	}
 	r, err := control.Ask(dial, cmd)
 	if err != nil {
@@ -263,6 +271,32 @@ func (b browserRecording) Stop(ctx context.Context, id string) error {
 	defer b.bt.Hub.SetRecordSink(nil)
 	_, err := b.bt.RecordStop(ctx, id)
 	return err
+}
+
+// nativeInput is the desktop's input backend (a variable for tests).
+var nativeInput = input.Native
+
+// computerClick clicks at X, Y.
+func computerClick(args []string, w io.Writer) error {
+	x, errX := strconv.Atoi(args[0])
+	y, errY := strconv.Atoi(args[1])
+	if errX != nil || errY != nil {
+		return errors.New(computerUsage)
+	}
+	in := nativeInput()
+	if in == nil {
+		return errors.New("no input backend for this desktop")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if ok, why := in.Available(ctx); !ok {
+		return fmt.Errorf("%w: %s", input.ErrUnavailable, why)
+	}
+	if err := in.Click(ctx, x, y, "left", 1); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Clicked at %d,%d.\n", x, y)
+	return nil
 }
 
 // islandActivity is the island's state for an activity.

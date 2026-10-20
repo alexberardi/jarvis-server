@@ -34,6 +34,12 @@ type Scenario struct {
 	// member the primary then removed from the household, so the agent has no usable owner
 	// and per-user things say to sign in again (desktop.go).
 	Owner string `json:"owner,omitempty"`
+	// AlsoHeardBy is a second node in earshot ("desktop", or "" for the seeded kitchen Pi
+	// when Node is "desktop"): it opens its own conversation with the same tools, and every
+	// turn is sent by both at once as a wake turn (turn_source: wake), as when one
+	// "Hey Jarvis" wakes two devices. The turn's log is the node that answered; the others
+	// are in its "others" (wake arbitration, loop #287). Unset: one node.
+	AlsoHeardBy *string `json:"also_heard_by,omitempty"`
 	// Home is the device payload the node reports at /conversation/start (node_context.agents,
 	// what a Pi with Home Assistant sends): a name under tools/pipeline/homes ("avery", the
 	// default, matches the seeded rooms), "none", or a JSON file path.
@@ -89,11 +95,13 @@ type Expect struct {
 	NotResultMatch map[string]string `json:"not_result_match,omitempty"`
 	// NotCall: no call of this tool (node or server) has args matching all of these regexps,
 	// e.g. {"tool": "desktop_open", "args_match": {"target": "(?i)type"}}.
-	NotCall    *CallMatch `json:"not_call,omitempty"`
-	Reply      string     `json:"reply,omitempty"`       // the spoken reply matches this regexp
-	NotReply   string     `json:"not_reply,omitempty"`   // and does not match this one
-	Stop       string     `json:"stop,omitempty"`        // final stop_reason
-	MaxSeconds float64    `json:"max_seconds,omitempty"` // the turn finished within this
+	NotCall  *CallMatch `json:"not_call,omitempty"`
+	Reply    string     `json:"reply,omitempty"`     // the spoken reply matches this regexp
+	NotReply string     `json:"not_reply,omitempty"` // and does not match this one
+	Stop     string     `json:"stop,omitempty"`      // final stop_reason
+	// Answers: with also_heard_by, how many of the nodes answered (the rest stood down).
+	Answers    *int    `json:"answers,omitempty"`
+	MaxSeconds float64 `json:"max_seconds,omitempty"` // the turn finished within this
 	// Voice turns only: what STT made of the said text.
 	Heard    string   `json:"heard,omitempty"`     // the transcript matches this regexp
 	NotHeard string   `json:"not_heard,omitempty"` // and does not match this one
@@ -309,6 +317,11 @@ func (e Expect) Check(t TurnLog) []string {
 	}
 	if e.NotReply != "" && regexp.MustCompile(e.NotReply).MatchString(t.Reply) {
 		fails = append(fails, fmt.Sprintf("reply %q matches /%s/", t.Reply, e.NotReply))
+	}
+	if e.Answers != nil {
+		if n := t.answers(); n != *e.Answers {
+			fails = append(fails, fmt.Sprintf("%d nodes answered, want %d (%s)", n, *e.Answers, t.nodesSummary()))
+		}
 	}
 	if e.Stop != "" && t.Stop != e.Stop {
 		fails = append(fails, fmt.Sprintf("stop_reason %s, want %s", t.Stop, e.Stop))

@@ -127,7 +127,8 @@ export interface HardwareResponse {
   hardware: Hardware
   gpu_fault?: GPUFault | null
   proposal: Record<string, Placement>
-  builds: Record<string, { build: string; flavours: string[] }>
+  /** unavailable says why a kind can't run on this host (MLX off Apple Silicon). */
+  builds: Record<string, { build: string; flavours: string[]; unavailable?: string }>
   installed: EngineBuild[] | null
   engines: EngineInstance[] | null
   voice: VoiceModel[] | null

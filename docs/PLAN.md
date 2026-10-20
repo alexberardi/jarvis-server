@@ -286,7 +286,7 @@ Archive the Python service repos. Rewrite CLAUDE.md files and jarvis-docs.
   - node-mobile's three adapter screens (a client change)
 - **About 27 CC routes with no caller** (Appendix A), plus the 4 job callbacks, which become in-process.
 - **Prompt providers:** everything except the Qwen 3.x set and the test-only ChatGPTOpenAI (Appendix B). Community provider install (`exec()` of cloned Python) is dropped; the mechanism gets redesigned after the rewrite.
-- **llm-proxy:** the TRANSFORMERS, vLLM and MLX in-process backends (vLLM and MLX remain reachable as OpenAI-compatible remote endpoints), unused `swap_*`, legacy `cache/`, and the WIP pipeline routes. Training and conversion scripts stay as offline Python tooling, outside the server.
+- **llm-proxy:** the TRANSFORMERS, vLLM and MLX in-process backends (vLLM remains reachable as an OpenAI-compatible remote endpoint; MLX returns as a supervised `mlx_lm.server` engine on Apple Silicon, installed as a downloaded Python engine while jarvisd stays pure Go: [decision 2026-10-19](decisions/2026-10-19-mlx-engine.md), llm LD9), unused `swap_*`, legacy `cache/`, and the WIP pipeline routes. Training and conversion scripts stay as offline Python tooling, outside the server.
 - **OCR:** EasyOCR, PaddleOCR, rapidocr (revisit if LLM vision plus tesseract recall falls short), and the dead async-validation modules.
 - **TTS:** `/generate-wake-response` (deprecated) and Piper. sherpa can run Piper/VITS models later if a low-end voice is needed.
 - **Whisper:** resemblyzer, the ECAPA/torch stack and librosa.
