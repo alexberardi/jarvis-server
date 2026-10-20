@@ -759,3 +759,17 @@ func TestPickLabel(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 }
+
+// The task's start address goes with the loop's looks, for the executor's first one to open.
+func TestLoopObservesWithStartURL(t *testing.T) {
+	e := newEnv(t)
+	e.script(doneAnswer)
+	tk := task()
+	tk.StartURL = "http://127.0.0.1:8080/store/"
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.exec.observes) == 0 || e.exec.observes[0].StartURL != tk.StartURL {
+		t.Fatalf("observes %+v", e.exec.observes)
+	}
+}

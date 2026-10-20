@@ -113,9 +113,12 @@ type Task struct {
 	Step        int
 	Goal        string
 	Target      computeruse.Target
-	Success     *SuccessCheck
-	Rules       string // the household's rules as one line for the model ("" = the defaults)
-	UseCloud    bool
+	// StartURL is where the task's window opens on its first look ("" = https://<site>): the web
+	// address the user gave, with its scheme, port and path.
+	StartURL string
+	Success  *SuccessCheck
+	Rules    string // the household's rules as one line for the model ("" = the defaults)
+	UseCloud bool
 	// Approved are the digests of held actions the user approved: the loop mints their tokens
 	// and runs the held batch before anything else.
 	Approved []string
@@ -156,6 +159,7 @@ type PendingAction struct {
 type Observe struct {
 	RunID      string
 	Target     computeruse.Target
+	StartURL   string // the task's (Task.StartURL), for the executor to open its window on
 	Snapshot   bool
 	Screenshot bool
 }
@@ -385,14 +389,14 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply) (Outcome, bool) 
 func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 	t := r.task
 	desktop := t.Target.Kind == "desktop"
-	o := Observe{RunID: r.run.ID, Target: t.Target, Snapshot: true, Screenshot: desktop || r.wantShot}
+	o := Observe{RunID: r.run.ID, Target: t.Target, StartURL: t.StartURL, Snapshot: true, Screenshot: desktop || r.wantShot}
 	r.wantShot = false
 	obs, err := l.Exec.Observe(ctx, o)
 	if err != nil {
 		return obs, err
 	}
 	if obs.Image == nil && len(obs.Elements) < fewElements {
-		shot, err := l.Exec.Observe(ctx, Observe{RunID: r.run.ID, Target: t.Target, Screenshot: true})
+		shot, err := l.Exec.Observe(ctx, Observe{RunID: r.run.ID, Target: t.Target, StartURL: t.StartURL, Screenshot: true})
 		if err == nil {
 			obs.Image = shot.Image
 		}

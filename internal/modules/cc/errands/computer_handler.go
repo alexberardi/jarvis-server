@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -92,6 +93,11 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	}
 	if truthyStr(args, "target") == "desktop" {
 		t.Target.Kind = "desktop"
+	} else {
+		t.StartURL = startURL(truthyStr(args, "site"), truthyStr(args, "goal"), rc.goal)
+		if t.Target.Site == "" {
+			t.Target.Site = siteOf(t.StartURL)
+		}
 	}
 	if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
 		t.Success = &computer.SuccessCheck{Screen: ok}
@@ -233,6 +239,32 @@ func siteOf(site string) string {
 		site = site[:i]
 	}
 	return strings.ToLower(site)
+}
+
+// startURL is where a browser task starts: site when it is a web address, else the first web
+// address on site (any site when it is "") in the goals, the step's then the errand's; "" when
+// there is none (the executor opens https://<site>). The house model shortens the user's
+// http://127.0.0.1:8080/store/ to a host in site, and the store isn't at https://<host>.
+func startURL(site string, goals ...string) string {
+	site = strings.TrimSpace(site)
+	if isWebURL(site) {
+		return site
+	}
+	host := siteOf(site)
+	for _, g := range goals {
+		for _, w := range strings.Fields(g) {
+			w = strings.TrimLeft(strings.TrimRight(w, `.,;:!?)"'`), `("'`)
+			if isWebURL(w) && (host == "" || siteOf(w) == host) {
+				return w
+			}
+		}
+	}
+	return ""
+}
+
+func isWebURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // --- cards ---

@@ -159,3 +159,35 @@ func TestComputerTargetsForErrands(t *testing.T) {
 		t.Fatalf("menu = %+v", menu)
 	}
 }
+
+// The first look opens the task's window on its start address, as the user gave it (scheme,
+// port and path), and on https://<site> without one.
+func TestComputerExecOpensStartURL(t *testing.T) {
+	agent := &computerAgent{reply: func(name string, args map[string]any, n int) string {
+		if args["url"] == nil {
+			return `{"success": false, "error": "the task has no window yet: give the url to open it on", "error_code": "invalid_argument"}`
+		}
+		return `{"success": true, "target": "browser", "url": "x", "snapshot": {"gen": 1, "elements": []}}`
+	}}
+	e := newEnv(t, envOpts{configure: func(m *Module) { m.Publisher = agent; agent.m = m }})
+	ctx := context.Background()
+	store := &computer.Store{DB: e.m.deps.DB}
+	run, err := store.Create(ctx, computer.Run{HouseholdID: "hh-1", NodeID: "node-1", WorkflowID: "wf_1", Goal: "buy", Target: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := computerExec{m: e.m, store: store}
+	tgt := computeruse.Target{Kind: "browser", Site: "127.0.0.1:8080"}
+	for _, c := range []struct{ start, want string }{
+		{"http://127.0.0.1:8080/store/", "http://127.0.0.1:8080/store/"},
+		{"", "https://127.0.0.1:8080"},
+	} {
+		if _, err := ex.Observe(ctx, computer.Observe{RunID: run.ID, Target: tgt, StartURL: c.start, Snapshot: true}); err != nil {
+			t.Fatal(err)
+		}
+		calls := agent.sent()
+		if got := calls[len(calls)-1]["arguments"].(map[string]any)["url"]; got != c.want {
+			t.Fatalf("start %q: opened %v", c.start, got)
+		}
+	}
+}

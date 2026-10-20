@@ -781,3 +781,21 @@ func TestPlanErrandMergesComputerSteps(t *testing.T) {
 		t.Fatalf("plan = %+v %v", p, err)
 	}
 }
+
+// A computer task starts where the user said: the step's site when it is a web address, else
+// the first address on that site in the step's goal or the errand's.
+func TestStartURL(t *testing.T) {
+	for _, c := range []struct{ site, goal, errand, want string }{
+		{"http://127.0.0.1:9/store/", "", "", "http://127.0.0.1:9/store/"},
+		{"127.0.0.1:9", "order it from http://127.0.0.1:9/store/.", "", "http://127.0.0.1:9/store/"},
+		{"127.0.0.1:9", "order it", "order me a watch at http://127.0.0.1:9/store/injection, thanks", "http://127.0.0.1:9/store/injection"},
+		{"shop.example", "order it from http://other.example/x", "", ""},
+		{"shop.example", "order it", "", ""},
+		{"", "fill in https://forms.example/a?b=1", "", "https://forms.example/a?b=1"},
+		{"ftp://x.example/", "", "", ""},
+	} {
+		if got := startURL(c.site, c.goal, c.errand); got != c.want {
+			t.Errorf("startURL(%q, %q, %q) = %q, want %q", c.site, c.goal, c.errand, got, c.want)
+		}
+	}
+}

@@ -174,10 +174,13 @@ func (e computerExec) Observe(ctx context.Context, o computer.Observe) (computer
 		return computer.Observation{}, err
 	}
 	var te *computerToolErr
-	if ferr := nodeFailure(out); errors.As(ferr, &te) && te.code == "invalid_argument" && o.Target.Site != "" &&
+	if ferr := nodeFailure(out); errors.As(ferr, &te) && te.code == "invalid_argument" && (o.StartURL != "" || o.Target.Site != "") &&
 		strings.Contains(te.msg, "no window") {
-		// The task's first look: open its window on the site.
-		args["url"] = "https://" + o.Target.Site
+		// The task's first look: open its window where the user said, else on the site.
+		args["url"] = o.StartURL
+		if o.StartURL == "" {
+			args["url"] = "https://" + o.Target.Site
+		}
 		out, imgs, err = nodes.RunToolImages(ctx, run.NodeID, computeruse.ToolObserve, toArgs(args), run.UserID, computerObserveTimeout)
 		if err != nil {
 			return computer.Observation{}, err
