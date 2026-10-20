@@ -15,7 +15,14 @@ func fullDescription(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, after, ok := strings.Cut(string(b), "## Full description (both stores)\n")
+	return descriptionBlock(t, string(b))
+}
+
+func descriptionBlock(t *testing.T, listing string) string {
+	t.Helper()
+	// Windows checkouts convert the listing to CRLF; the markers below match LF.
+	listing = strings.ReplaceAll(listing, "\r\n", "\n")
+	_, after, ok := strings.Cut(listing, "## Full description (both stores)\n")
 	if !ok {
 		t.Fatal("listing.md has no Full description section")
 	}
@@ -28,6 +35,19 @@ func fullDescription(t *testing.T) string {
 		t.Fatal("Full description's code block is not closed")
 	}
 	return block
+}
+
+// A Windows checkout (CRLF) finds the same description as a Linux one.
+func TestListingCRLF(t *testing.T) {
+	lf := fullDescription(t)
+	b, err := os.ReadFile("store/listing.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	crlf := strings.ReplaceAll(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n", "\r\n")
+	if got := descriptionBlock(t, crlf); got != lf {
+		t.Errorf("CRLF listing gives a different description (%d vs %d bytes)", len(got), len(lf))
+	}
 }
 
 // The description both stores show says how to turn website access on (Firefox can install an
