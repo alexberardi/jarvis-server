@@ -49,7 +49,7 @@ func TestParseDesktopTrace(t *testing.T) {
 		}},
 		{"desktop_macos_trace.json", []desktopEvent{
 			{Seq: 1, TS: 1760000000000, Kind: "click", App: "com.apple.Notes", X: 310, Y: 62,
-				Element: &desktopElement{Role: "AXButton", Name: "New Note", AXPath: "AXWindow/AXToolbar/AXButton#new"},
+				Element:       &desktopElement{Role: "AXButton", Name: "New Note", AXPath: "AXWindow/AXToolbar/AXButton#new"},
 				KeyframePoint: &desktopPoint{X: 310, Y: 62}},
 			{Seq: 2, TS: 1760000001000, Kind: "input", App: "com.apple.Notes", Value: "Call the dentist",
 				Element: &desktopElement{Role: "AXTextArea", Name: "Note body", AXPath: "AXWindow/AXScrollArea/AXTextArea"}},
