@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -221,9 +222,42 @@ type round struct {
 	wantShot bool
 	feedback string
 	looked   bool // this Run call has observed once
+	// downloadsBefore are the files in Downloads when this Run call began (nil: unknown), so
+	// done can name the ones the task downloaded.
+	downloadsBefore map[string]bool
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
 	// sendAsked: a done over a filled-in form that wasn't sent was sent back.
 	checkoutAsked, sendAsked bool
+}
+
+// downloads are the names of the finished files in Downloads, nil when it can't be listed.
+func (l *Loop) downloads(ctx context.Context, runID string) map[string]bool {
+	info, err := l.Exec.Files(ctx, Files{RunID: runID, Op: "list", Path: downloadsDir})
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, e := range info.Entries {
+		if !e.Dir && !hasSuffix(strings.ToLower(e.Name), partialSuffixes) {
+			out[e.Name] = true
+		}
+	}
+	return out
+}
+
+// newDownloads are the files in Downloads that weren't there when the Run call began, sorted.
+func (l *Loop) newDownloads(ctx context.Context, r *round) []string {
+	if r.downloadsBefore == nil {
+		return nil
+	}
+	var out []string
+	for name := range l.downloads(ctx, r.run.ID) {
+		if !r.downloadsBefore[name] {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // downloadButton is obs's first element named for downloading, else nil.
@@ -279,6 +313,9 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 
 	if out, blocked := l.blockedSite(ctx, r); blocked {
 		return l.end(ctx, run, out)
+	}
+	if t.Target.Kind == "browser" {
+		r.downloadsBefore = l.downloads(ctx, run.ID)
 	}
 	if held := run.Pending; held != nil {
 		run.Pending = nil
@@ -445,6 +482,10 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation)
 		sum := strings.TrimSpace(reply.Summary)
 		if sum != "" && !strings.HasSuffix(sum, ".") {
 			sum += "."
+		}
+		if got := l.newDownloads(ctx, r); len(got) > 0 {
+			// The errand's next steps read them by name (read_computer_file).
+			sum += " Downloaded: " + strings.Join(got, ", ") + " (in " + downloadsDir + ")."
 		}
 		return Outcome{State: StateDone, Summary: strings.TrimSpace(sum + " Checked: " + res.Checked + "."),
 			Checked: res.Checked, Verify: check}, true

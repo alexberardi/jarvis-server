@@ -272,3 +272,27 @@ func TestDownloadCheckFailsPointsAtButton(t *testing.T) {
 		t.Fatalf("no pointer:\n%s", txt)
 	}
 }
+
+// A browser task's done names the files it downloaded, for the errand's next steps to read.
+func TestDoneNamesDownloads(t *testing.T) {
+	e := newEnv(t)
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{{Name: "old.pdf", Bytes: 10}}}}
+	e.exec.onAct = func() {
+		e.exec.files["list ~/Downloads"] = FileInfo{Entries: []FileEntry{{Name: "old.pdf", Bytes: 10},
+			{Name: "bank-statement-2026-09.csv", Bytes: 900}, {Name: "card-statement-2026-09.csv", Bytes: 800},
+			{Name: "x.csv.crdownload", Bytes: 5}, {Name: "New folder", Dir: true}}}
+	}
+	e.script(actions(press("e3", "Download it")), `{"done": true, "summary": "Downloaded both.", "verify": {"download": {"name_like": "statement"}}}`)
+	out := e.run()
+	if out.State != StateDone || !strings.HasPrefix(out.Summary, "Downloaded both. Downloaded: bank-statement-2026-09.csv, card-statement-2026-09.csv (in ~/Downloads). Checked: ") {
+		t.Fatalf("outcome %+v", out)
+	}
+
+	// Nothing new: nothing said.
+	e = newEnv(t)
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{{Name: "old.pdf", Bytes: 10}}}}
+	e.script(doneAnswer)
+	if out := e.run(); out.State != StateDone || strings.Contains(out.Summary, "Downloaded:") {
+		t.Fatalf("outcome %+v", out)
+	}
+}
