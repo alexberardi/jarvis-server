@@ -47,6 +47,8 @@ type fakeExec struct {
 	results  func(b Batch) ActResult // nil: every action ok
 	stops    []string
 	onAct    func()
+	files    map[string]FileInfo // "list ~/Downloads", "read report.csv"; missing: not found
+	fileArgs []Files
 }
 
 func (f *fakeExec) Observe(_ context.Context, o Observe) (Observation, error) {
@@ -77,6 +79,15 @@ func (f *fakeExec) Act(_ context.Context, b Batch) (ActResult, error) {
 		res.Results = append(res.Results, StepResult{I: i, OK: true})
 	}
 	return res, nil
+}
+
+func (f *fakeExec) Files(_ context.Context, a Files) (FileInfo, error) {
+	f.fileArgs = append(f.fileArgs, a)
+	info, ok := f.files[a.Op+" "+a.Path]
+	if !ok {
+		return FileInfo{}, errors.New("not found")
+	}
+	return info, nil
 }
 
 func (f *fakeExec) Stop(_ context.Context, runID string) { f.stops = append(f.stops, runID) }
@@ -201,7 +212,7 @@ func actions(acts ...string) string {
 	return `{"thought": "next", "actions": [` + strings.Join(acts, ",") + `]}`
 }
 
-const doneAnswer = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/thanks"}}`
+const doneAnswer = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`
 
 // --- tests ---
 
@@ -209,10 +220,10 @@ func TestLoopDone(t *testing.T) {
 	e := newEnv(t)
 	e.script(actions(press("e3", "Add the soap to the cart")), doneAnswer)
 	out := e.run()
-	if out.State != StateDone || out.Summary != "Ordered the soap." || out.Rounds != 2 {
+	if out.State != StateDone || out.Summary != `Ordered the soap. Checked: the address contains "/soap".` || out.Checked != `the address contains "/soap"` || out.Rounds != 2 {
 		t.Fatalf("outcome %+v", out)
 	}
-	if out.Verify == nil || out.Verify.URLContains != "/thanks" {
+	if out.Verify == nil || out.Verify.URLContains != "/soap" {
 		t.Fatalf("verify %+v", out.Verify)
 	}
 	if len(e.exec.batches) != 1 || e.exec.batches[0].Actions[0].Ref != "e3" || e.exec.batches[0].Actions[0].Approval != "" {
@@ -591,7 +602,7 @@ func TestImagePruning(t *testing.T) {
 	for range 4 {
 		e.script(actions(press("e3", "Press it")))
 	}
-	e.script(doneAnswer)
+	e.script(`{"done": true, "summary": "Pressed it.", "verify": {"text_present": ["Add to cart"]}}`)
 	tk := task()
 	tk.Target = computeruse.Target{Kind: "desktop", App: "notes"}
 	out := e.loop.Run(context.Background(), tk)

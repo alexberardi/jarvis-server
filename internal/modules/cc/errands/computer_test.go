@@ -50,6 +50,10 @@ func (f *fakeComputer) Act(_ context.Context, b computer.Batch) (computer.ActRes
 	return res, nil
 }
 
+func (f *fakeComputer) Files(context.Context, computer.Files) (computer.FileInfo, error) {
+	return computer.FileInfo{}, nil
+}
+
 func (f *fakeComputer) Stop(_ context.Context, runID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -152,7 +156,7 @@ func (c *cenv) launchRun(id, kind string, steps ...Step) {
 const (
 	checkoutReply = `{"checkout": {"product": "Blue mug", "price": "$12.99", "currency": "USD", "seller": "Shop Example", "ship_to": "12 Elm St", "card": "4242"}, ` +
 		`"actions": [{"kind": "press", "ref": "e1", "intent": "Place the order"}]}`
-	doneReply = `{"done": true, "summary": "Ordered the blue mug."}`
+	doneReply = `{"done": true, "summary": "Ordered the blue mug.", "verify": {"url_contains": "/checkout"}}`
 )
 
 func (c *cenv) cardTitled(prefix string) (Card, bool) {
@@ -225,7 +229,7 @@ func TestComputerStepDone(t *testing.T) {
 	c.launchRun("wf_c", "errand", computerStep("find a blue mug"))
 	c.idle()
 	w := c.wf("wf_c")
-	if w.State != "done" || len(w.Results) != 1 || !w.Results[0].Success || w.Results[0].Message != "Ordered the blue mug." {
+	if w.State != "done" || len(w.Results) != 1 || !w.Results[0].Success || w.Results[0].Message != `Done, checked: the address contains "/checkout". Ordered the blue mug.` {
 		t.Fatalf("run = %s %+v", w.State, w.Results)
 	}
 	if b := c.comp.acted(); len(b) != 1 || b[0].Target.Site != shopSite || b[0].Actions[0].Intent != "Search for a blue mug" {
@@ -237,6 +241,22 @@ func TestComputerStepDone(t *testing.T) {
 	}
 	if _, ok := c.cardTitled("✅ Errand done: "); !ok {
 		t.Fatalf("cards = %v", c.cards.titles())
+	}
+}
+
+// A done whose check never holds fails the step with the reason, after five more rounds (C4).
+func TestComputerStepCheckFails(t *testing.T) {
+	c := newComputerEnv(t)
+	wrong := `{"done": true, "summary": "Ordered the blue mug.", "verify": {"url_contains": "/thanks"}}`
+	for range 6 {
+		c.llm.say("computer", wrong)
+	}
+	c.launchRun("wf_c", "errand", computerStep("find a blue mug"))
+	c.idle()
+	w := c.wf("wf_c")
+	if w.State != "failed" || len(w.Results) != 1 || w.Results[0].Success ||
+		!strings.HasPrefix(w.Results[0].Error, `I couldn't confirm the address contains "/thanks": the address is https://`+shopSite+"/checkout") {
+		t.Fatalf("run = %s %+v", w.State, w.Results)
 	}
 }
 
@@ -314,7 +334,7 @@ func TestCheckoutCardThenApprove(t *testing.T) {
 	if len(b) != 1 || b[0].Actions[0].Intent != "Place the order" || b[0].Actions[0].Approval == "" {
 		t.Fatalf("batches = %+v", b)
 	}
-	if w := c.wf("wf_c"); w.State != "done" || w.Results[0].Message != "Ordered the blue mug." {
+	if w := c.wf("wf_c"); w.State != "done" || w.Results[0].Message != `Done, checked: the address contains "/checkout". Ordered the blue mug.` {
 		t.Fatalf("run = %s %+v", w.State, w.Results)
 	}
 	if ev, ok := orderEvent(c); !ok || ev.Reason != "approved by the user" {

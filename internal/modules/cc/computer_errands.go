@@ -244,6 +244,36 @@ func (e computerExec) Act(ctx context.Context, b computer.Batch) (computer.ActRe
 	return computer.ActResult{Results: parsed.Results, Paused: parsed.Paused}, nil
 }
 
+func (e computerExec) Files(ctx context.Context, f computer.Files) (computer.FileInfo, error) {
+	run, err := e.node(ctx, f.RunID)
+	if err != nil {
+		return computer.FileInfo{}, err
+	}
+	out := errandNodes{e.m}.RunTool(ctx, run.NodeID, computeruse.ToolFiles,
+		toArgs(map[string]any{"run_id": f.RunID, "op": f.Op, "path": f.Path}), run.UserID, "", computerObserveTimeout)
+	if err := nodeFailure(out); err != nil {
+		return computer.FileInfo{}, err
+	}
+	var parsed struct {
+		Path    string `json:"path"`
+		Bytes   int64  `json:"bytes"`
+		Text    string `json:"text"`
+		Entries []struct {
+			Name  string `json:"name"`
+			Dir   bool   `json:"dir"`
+			Bytes int64  `json:"bytes"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(pyjson.Dumps(out, false)), &parsed); err != nil {
+		return computer.FileInfo{}, fmt.Errorf("unreadable files answer: %w", err)
+	}
+	info := computer.FileInfo{Path: parsed.Path, Bytes: parsed.Bytes, Text: parsed.Text}
+	for _, en := range parsed.Entries {
+		info.Entries = append(info.Entries, computer.FileEntry{Name: en.Name, Dir: en.Dir, Bytes: en.Bytes})
+	}
+	return info, nil
+}
+
 func (e computerExec) Stop(ctx context.Context, runID string) {
 	run, err := e.node(ctx, runID)
 	if err != nil {

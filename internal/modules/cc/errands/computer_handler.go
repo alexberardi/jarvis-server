@@ -139,6 +139,11 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	switch out.State {
 	case computer.StateDone:
 		msg := strings.TrimSpace(firstNonEmpty(out.Summary, "Done.") + " " + note)
+		if out.Checked != "" {
+			// What Jarvis checked before reporting it (C4) leads the card.
+			did := strings.TrimSpace(strings.TrimSuffix(out.Summary, "Checked: "+out.Checked+"."))
+			msg = strings.TrimSpace("Done, checked: " + out.Checked + ". " + did + " " + note)
+		}
 		return Result{Command: cmd, Label: label, Success: true, Message: msg, Summary: out.Summary}, nil
 	case computer.StateNeedsApproval:
 		return Result{}, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true,

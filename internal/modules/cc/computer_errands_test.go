@@ -63,6 +63,12 @@ func TestComputerExecOverTheBus(t *testing.T) {
 				"image_attachments": [{"mime": "image/png", "data": "` + shot + `", "label": "screenshot"}]}`
 		case name == computeruse.ToolAct:
 			return `{"success": false, "stopped_at": 1, "results": [{"i": 0, "ok": true}, {"i": 1, "ok": false, "code": "stale_ref", "error": "gone"}]}`
+		case name == computeruse.ToolFiles && args["op"] == "list":
+			return `{"success": true, "path": "/home/a/Downloads", "entries": [{"name": "statement.pdf", "dir": false, "bytes": 4096}, {"name": "old", "dir": true}]}`
+		case name == computeruse.ToolFiles && args["path"] == "missing.csv":
+			return `{"success": false, "error": "no such file", "error_code": "not_found"}`
+		case name == computeruse.ToolFiles:
+			return `{"success": true, "path": "/home/a/Documents/Jarvis/budget.csv", "bytes": 9, "text": "a,b\n1,2\n"}`
 		}
 		return `{"success": true}`
 	}}
@@ -105,8 +111,25 @@ func TestComputerExecOverTheBus(t *testing.T) {
 		t.Fatalf("act = %v", act)
 	}
 
+	// The result checks read files through computer_files (piece 12).
+	list, err := ex.Files(ctx, computer.Files{RunID: run.ID, Op: "list", Path: "~/Downloads"})
+	if err != nil || len(list.Entries) != 2 || list.Entries[0] != (computer.FileEntry{Name: "statement.pdf", Bytes: 4096}) || !list.Entries[1].Dir {
+		t.Fatalf("list = %+v %v", list, err)
+	}
+	if fa := agent.sent()[3]; fa["command_name"] != computeruse.ToolFiles || fa["arguments"].(map[string]any)["path"] != "~/Downloads" ||
+		fa["arguments"].(map[string]any)["run_id"] != run.ID {
+		t.Fatalf("files = %v", fa)
+	}
+	read, err := ex.Files(ctx, computer.Files{RunID: run.ID, Op: "read", Path: "budget.csv"})
+	if err != nil || read.Text != "a,b\n1,2\n" || read.Bytes != 9 {
+		t.Fatalf("read = %+v %v", read, err)
+	}
+	if _, err := ex.Files(ctx, computer.Files{RunID: run.ID, Op: "read", Path: "missing.csv"}); err == nil || err.Error() != "no such file" {
+		t.Fatalf("missing file: %v", err)
+	}
+
 	ex.Stop(ctx, run.ID)
-	if st := agent.sent()[3]; st["command_name"] != computeruse.ToolStop || st["arguments"].(map[string]any)["run_id"] != run.ID {
+	if st := agent.sent()[6]; st["command_name"] != computeruse.ToolStop || st["arguments"].(map[string]any)["run_id"] != run.ID {
 		t.Fatalf("stop = %v", st)
 	}
 	for _, c := range agent.sent() {
