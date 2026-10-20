@@ -69,6 +69,9 @@ func parseTurn(w http.ResponseWriter, r *http.Request) (turnInput, bool) {
 	if v, ok := b.object("computer_activity", false); ok {
 		in.Computer = parseComputerActivity(v)
 	}
+	if v, ok := b.number("speech_level_db"); ok {
+		in.SpeechLevel = &v
+	}
 	if !b.done(w) {
 		return turnInput{}, false
 	}
@@ -174,6 +177,9 @@ func voiceResponse(commands []any, info *pyjson.Object, stop any, calls []any, v
 func withKeepListening(body *pyjson.Object, res engineResult) *pyjson.Object {
 	if res.KeepListening {
 		body.Set("keep_listening", true)
+	}
+	if res.StoodDown {
+		body.Set("stood_down", true)
 	}
 	return body
 }

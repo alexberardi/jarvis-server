@@ -107,6 +107,12 @@ func TestStartRecordingTool(t *testing.T) {
 	if out := runTool(t, start, "", ve.recTurn(7)); out["error"] != "start_failed" || !strings.Contains(out["message"].(string), "extension") {
 		t.Fatalf("agent refused: %v", out)
 	}
+	// The browser without access to websites: its code, and where to turn the access on.
+	agent.answers[computeruse.ToolRecordStart] = map[string]any{"success": false, "error_code": "no_site_access",
+		"error": "Jarvis Browser Control doesn't have access to websites, so it can't see what you do. In Firefox, open about:addons, then Jarvis Browser Control, Permissions, and turn on Access your data for all websites."}
+	if out := runTool(t, start, "", ve.recTurn(7)); out["error"] != "no_site_access" || !strings.Contains(out["message"].(string), "Access your data for all websites") {
+		t.Fatalf("no site access: %v", out)
+	}
 }
 
 // From a Pi in the room, the speaker's own computer is the one recorded.

@@ -3,7 +3,6 @@ package bluetooth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"path/filepath"
 	"reflect"
@@ -175,15 +174,39 @@ func TestPairFailures(t *testing.T) {
 		setup func(*fakeBus, *fakePulse)
 		want  string
 	}{
-		"not in pairing mode": {func(*fakeBus, *fakePulse) {}, "Failed to pair — make sure the device is in pairing mode"},
+		"not in pairing mode": {func(*fakeBus, *fakePulse) {}, "Device not found — put it in pairing mode and keep it close"},
+		"page timeout": {func(b *fakeBus, _ *fakePulse) {
+			b.inRange[speaker] = speakerDev()
+			b.pairErr[speaker] = BlueZError{Name: "org.bluez.Error.ConnectionAttemptFailed", Message: "Page Timeout"}
+		}, "JBL Flip 5 didn't answer — put it in pairing mode and keep it close (org.bluez.Error.ConnectionAttemptFailed: Page Timeout)"},
+		"br page timeout, no name": {func(b *fakeBus, _ *fakePulse) {
+			b.inRange[speaker] = Device{Address: speaker, Alias: "AA-BB-CC-DD-EE-01"}
+			b.pairErr[speaker] = BlueZError{Name: "org.bluez.Error.Failed", Message: "br-connection-page-timeout"}
+		}, "The device didn't answer — put it in pairing mode and keep it close (org.bluez.Error.Failed: br-connection-page-timeout)"},
 		"pair refused": {func(b *fakeBus, _ *fakePulse) {
 			b.inRange[speaker] = speakerDev()
-			b.pairErr[speaker] = errors.New("org.bluez.Error.AuthenticationFailed")
-		}, "Failed to pair — make sure the device is in pairing mode"},
+			b.pairErr[speaker] = BlueZError{Name: "org.bluez.Error.AuthenticationFailed", Message: "Authentication Failed"}
+		}, "Pairing was refused by the device (org.bluez.Error.AuthenticationFailed: Authentication Failed)"},
+		"pair rejected": {func(b *fakeBus, _ *fakePulse) {
+			b.inRange[speaker] = speakerDev()
+			b.pairErr[speaker] = BlueZError{Name: "org.bluez.Error.AuthenticationRejected"}
+		}, "Pairing was refused by the device (org.bluez.Error.AuthenticationRejected)"},
+		"connection attempt failed": {func(b *fakeBus, _ *fakePulse) {
+			b.inRange[speaker] = speakerDev()
+			b.pairErr[speaker] = BlueZError{Name: "org.bluez.Error.ConnectionAttemptFailed", Message: "Connection Refused"}
+		}, "Couldn't connect to JBL Flip 5 to pair — keep it close and try again (org.bluez.Error.ConnectionAttemptFailed: Connection Refused)"},
+		"pair times out": {func(b *fakeBus, _ *fakePulse) {
+			b.inRange[speaker] = speakerDev()
+			b.pairErr[speaker] = context.DeadlineExceeded
+		}, "Pairing timed out — make sure the device is in pairing mode"},
+		"other bluez error": {func(b *fakeBus, _ *fakePulse) {
+			b.inRange[speaker] = speakerDev()
+			b.pairErr[speaker] = BlueZError{Name: "org.bluez.Error.Failed", Message: "Resource temporarily unavailable"}
+		}, "Failed to pair — make sure the device is in pairing mode (org.bluez.Error.Failed: Resource temporarily unavailable)"},
 		"connect fails": {func(b *fakeBus, _ *fakePulse) {
 			b.inRange[speaker] = speakerDev()
-			b.connectErr[speaker] = errors.New("org.bluez.Error.Failed: br-connection-page-timeout")
-		}, "Paired but failed to connect"},
+			b.connectErr[speaker] = BlueZError{Name: "org.bluez.Error.Failed", Message: "br-connection-page-timeout"}
+		}, "Paired but failed to connect (org.bluez.Error.Failed: br-connection-page-timeout)"},
 		"audio profile never comes up": {func(b *fakeBus, _ *fakePulse) {
 			b.inRange[speaker] = speakerDev()
 			b.onConnect = nil // ACL up, no A2DP sink

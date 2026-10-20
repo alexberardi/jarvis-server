@@ -65,7 +65,9 @@ const (
 	extDisabled     = "disabled"     // run --no-browser
 )
 
-// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes;
+// heartbeatCaps reports the browser extension's state, and with a browser connected whose
+// extension says, browser_website_access "on" or "off" (off while any has it off: pages can't be
+// read or acted on there); it wakes a heartbeat when these change;
 // with sw, also computer control's switch as computer_control "on" or "off" (its changes wake
 // a heartbeat through Runner.BeatNow).
 func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[string]any, changed func() <-chan struct{}) {
@@ -84,6 +86,11 @@ func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[strin
 			}
 		}
 		out := map[string]any{"browser_extension": state}
+		if hub != nil {
+			if a := hub.WebsiteAccess(); a != nil {
+				out["browser_website_access"] = map[bool]string{true: "on", false: "off"}[*a]
+			}
+		}
 		if sw != nil {
 			out["computer_control"] = map[bool]string{true: "on", false: "off"}[sw.On()]
 		}
@@ -229,6 +236,10 @@ func usage(w io.Writer) {
            recording; the menu's "Stop Jarvis" does the same), or say what it is doing
   computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
            off by default, and off stops a task going on)
+  computer record start [--desktop] | stop   record what you do in the browser (the menu's
+           "Record a macro…"), or on the desktop (macOS), and send it to Jarvis when you stop
+  computer click X Y       debug: a left click at X, Y (global logical coordinates) through
+           this desktop's input backend
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   update   update to the version of the jarvisd this computer is signed in to (the agent also
@@ -534,7 +545,18 @@ func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	}
 }
 
+// run is the agent. A computer's run that was signed out doesn't exit: it waits for the new
+// sign-in on the setup page, then runs again in place (signedOut.rejoin).
 func run(ctx context.Context, args []string) error {
+	err := runAgent(ctx, args)
+	var so signedOut
+	if errors.As(err, &so) {
+		return so.rejoin(ctx, listenControl)
+	}
+	return err
+}
+
+func runAgent(ctx context.Context, args []string) error {
 	fs, f := newRunFlags(flag.ExitOnError)
 	_ = fs.Parse(args)
 	if err := noStrayArgs(fs); err != nil {
@@ -556,6 +578,7 @@ func run(ctx context.Context, args []string) error {
 		*f.noTray, *f.noOverlay = true, true
 	}
 	cp, tf, voiceOn, noOverlay, vf, hf := f.cp, f.tf, f.voiceOn, f.noOverlay, f.vf, f.hf
+	vf.clampFollowUp(log)
 	tf.pi = !p.desktop
 	// One agent per user: the control socket is the lock, and how a second launch, the
 	// start-only shortcut and uninstall reach this one (installers plan item 1.9).
@@ -576,8 +599,22 @@ func run(ctx context.Context, args []string) error {
 		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && p.desktop {
 			// A login item on a computer that isn't set up: the status icon's "Set up", then
 			// the agent once it is (setupwait.go). Typed in a terminal, it says what to do.
-			return waitForSetup(ctx, log, path, *f.noTray, ctl)
+			return waitForSetup(ctx, log, path, *f.noTray, ctl, false)
 		}
+		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && !p.desktop {
+			// A Pi that isn't enrolled (a factory reset, an install without a code) is in setup
+			// mode until the app provisions it, then the node (setupmode.go).
+			if err = piSetupMode(ctx, log, path, hf); err == nil {
+				c, err = node.LoadCreds(path)
+			} else if ctx.Err() != nil {
+				if ctl != nil {
+					_ = ctl.Close()
+				}
+				return nil // stopped while waiting
+			}
+		}
+	}
+	if err != nil {
 		if ctl != nil {
 			_ = ctl.Close()
 		}
@@ -624,6 +661,21 @@ func run(ctx context.Context, args []string) error {
 		tf.host = newPiHost(ctx, filepath.Dir(path), mic, log)
 		tf.host.Music = duck
 	}
+	// jarvisd's client once connected: approval tokens are checked with it, recordings uploaded.
+	var liveCC atomic.Pointer[node.CC]
+	if p.desktop {
+		// Computer tasks in the browser (plan P3 piece 8): build adds the executor's tools
+		// after the browser's.
+		tf.computer = func(bt *browser.Tools) node.Toolset {
+			return &computer.Tools{Browser: computer.BrowserOf(bt), Switch: computerSw, Activity: activity,
+				CC: func() computer.Approver {
+					if cc := liveCC.Load(); cc != nil {
+						return cc
+					}
+					return nil
+				}}
+		}
+	}
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -632,7 +684,6 @@ func run(ctx context.Context, args []string) error {
 	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
 	// is uploaded once connected to jarvisd (liveCC). computer_switch is computer control's
 	// switch for jarvisd's voice tools (enable/disable_computer_control).
-	var liveCC atomic.Pointer[node.CC]
 	var recorder *computer.Recorder
 	if p.desktop {
 		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, log)
@@ -758,8 +809,10 @@ func run(ctx context.Context, args []string) error {
 		setup = openSetupPage(log)
 	}
 	// Signed out (from Add-ons, an admin, or the menu's Sign out): drop node.json only, keep
-	// agent.json and apps.json, and open the setup page so someone can sign in again.
-	runNode := func(ctx context.Context) error { return signedOutToSetup(r.Run(ctx), path, c.NodeID, log, setup) }
+	// agent.json and apps.json, and open the setup page so someone can sign in again; a
+	// computer's run then waits for the new sign-in (run below).
+	end := nodeEnd{credsFile: path, nodeID: c.NodeID, desktop: p.desktop, noTray: *f.noTray, stop: quit, openSetup: setup, log: log}
+	runNode := func(ctx context.Context) error { return end.of(r.Run(ctx)) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
 		activity: activity, computer: computerSw, recorder: recorder}
 	sw.changed = ic.voiceChanged
@@ -862,6 +915,9 @@ type toolFlags struct {
 	host *sdkhost.Host
 	// live is the sidecar in service once build ran (the Pi's reminders are polled from it).
 	live *sidecar.Live
+	// computer, when the caller sets it, is the computer-task executor's tools on the browser
+	// extension's: build adds them after the browser tools.
+	computer func(*browser.Tools) node.Toolset
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -918,6 +974,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		bt.Origins = f.origins
 		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
+		if f.computer != nil {
+			tools = append(tools, f.computer(bt))
+		}
 		closeAll = stopBrowser
 	}
 	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)
@@ -1075,6 +1134,12 @@ func status(ctx context.Context, args []string) error {
 			macax.ScreenPrompt()
 			fmt.Print("  -> Reading the screen is OFF: allow \"Jarvis Automation Agent\" in System Settings > Privacy & Security >\n" +
 				"     Screen & System Audio Recording, then restart the agent.\n")
+		}
+		listen := macax.ListenTrusted()
+		fmt.Printf("input monitoring: %v\n", listen)
+		if !listen {
+			fmt.Print("  -> Recording a task in an app is OFF: allow \"Jarvis Automation Agent\" in System Settings > Privacy & Security >\n" +
+				"     Input Monitoring (the setup page asks for it), then restart the agent.\n")
 		}
 	}
 	fmt.Printf("voice:        %s\n", voiceStatus())

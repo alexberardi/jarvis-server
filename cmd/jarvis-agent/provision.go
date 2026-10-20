@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -46,32 +47,62 @@ func provisionCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	log := logger()
-	ctx, done := context.WithCancel(ctx)
-	defer done()
 	_, simulated := w.(*provisioning.Simulated)
 	if !simulated && *apSSID == "" {
 		*apSSID = defaultAPSSID(provisioning.SystemIdentity(enrolledID(path)).NodeID)
 	}
-	o := provisionOptions(path, w, *apSSID, log)
+	return serveSetup(ctx, setupServer{path: path, wifi: w, apSSID: *apSSID, listen: *listen, captive: *captive,
+		hotspot: !simulated, log: logger()})
+}
+
+// setupServer is what serveSetup runs: `provision`'s flags, or a Pi's setup mode at boot.
+type setupServer struct {
+	path            string
+	wifi            provisioning.WiFi
+	apSSID          string
+	listen, captive string // captive "": none
+	hotspot         bool   // start the hotspot (not on a simulated radio)
+	log             *slog.Logger
+	ready           func(api net.Addr) // the API is listening (nil: nothing)
+}
+
+// serveSetup serves the provisioning API (and starts the hotspot) until the node is provisioned
+// (nil), ctx ends (nil) or the API can't serve. A captive listener that can't bind (port 80
+// without the capability) is logged: the app reaches the API without it.
+func serveSetup(ctx context.Context, s setupServer) error {
+	log := s.log
+	ctx, done := context.WithCancel(ctx)
+	defer done()
+	o := provisionOptions(s.path, s.wifi, s.apSSID, log)
 	o.OnProvisioned = done
 	srv := provisioning.New(ctx, o)
-	if !simulated {
-		startHotspot(ctx, w, *apSSID, log)
+	if s.hotspot {
+		startHotspot(ctx, s.wifi, s.apSSID, log)
 	}
-	if r, ok := provisionRecovery(w, *apSSID, o.Provisioned, srv.StateMachine(), os.Getenv, log); ok {
+	if r, ok := provisionRecovery(s.wifi, s.apSSID, o.Provisioned, srv.StateMachine(), os.Getenv, log); ok {
 		go r.Run(ctx)
 	}
-	api := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
+	ln, err := net.Listen("tcp", s.listen)
+	if err != nil {
+		return fmt.Errorf("provisioning API: %w", err)
+	}
+	api := &http.Server{Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 	servers := []*http.Server{api}
-	if *captive != "" {
-		servers = append(servers, &http.Server{Addr: *captive, Handler: provisioning.CaptiveHandler(), ReadHeaderTimeout: 10 * time.Second})
+	errc := make(chan error, 2)
+	go func() { errc <- api.Serve(ln) }()
+	if s.captive != "" {
+		if cln, err := net.Listen("tcp", s.captive); err != nil {
+			log.Warn("provisioning: no captive listener; phones won't pop the setup sheet, the app still works", "listen", s.captive, "err", err)
+		} else {
+			c := &http.Server{Handler: provisioning.CaptiveHandler(), ReadHeaderTimeout: 10 * time.Second}
+			servers = append(servers, c)
+			go func() { errc <- c.Serve(cln) }()
+		}
 	}
-	errc := make(chan error, len(servers))
-	for _, s := range servers {
-		go func() { errc <- s.ListenAndServe() }()
+	log.Info("provisioning: serving", "listen", ln.Addr().String(), "captive", s.captive, "hotspot", s.apSSID)
+	if s.ready != nil {
+		s.ready(ln.Addr())
 	}
-	log.Info("provisioning: serving", "listen", *listen, "captive", *captive, "wifi", *wifi)
 	select {
 	case err = <-errc:
 	case <-ctx.Done():

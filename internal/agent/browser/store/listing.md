@@ -6,10 +6,12 @@ privacy policy is the project's, at https://docs.jarvisautomation.dev/security/p
 `docs/security/privacy-policy.md`, section "Browser extension and desktop agent"); the images are
 in [images/](images/).
 
-Everything here was checked against the extension's code (`../extension/`) at version 0.3.1 (0.2.0 added
+Everything here was checked against the extension's code (`../extension/`) at version 0.3.2 (0.2.0 added
 `fill` and `click`: dictation, docs/agent/DESIGN.md §14; 0.2.1 added the toolbar popup, install plan 3.5;
 0.3.0 added `snapshot` and `act` and background task windows: computer control, docs/agent/COMPUTER_CONTROL.md;
-0.3.1 added `screenshot` of a task window and `download`, with the `downloads` permission).
+0.3.1 added `screenshot` of a task window and `download`, with the `downloads` permission;
+0.3.2 shows website access in the popup, with a button that asks for it, and tells the agent
+whether it has it: no new permission, and nothing more is read).
 If the extension gains a permission or reads something new, update the privacy answers below
 and the privacy policy's "Browser extension and desktop agent" section (jarvis-docs) to match.
 

@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -52,7 +53,9 @@ const (
 // traceEvent is one event of a browser trace (the agent's browser.RecordEvent; "filename" is
 // accepted for a download too).
 type traceEvent struct {
-	Kind     string        `json:"kind"` // click, input, change, submit, key, navigate, download
+	Kind     string        `json:"kind"`          // click, input, change, submit, key, navigate, download
+	TS       int64         `json:"ts,omitempty"`  // ms, the page's clock
+	Tab      int64         `json:"tab,omitempty"` // the browser's tab id
 	URL      string        `json:"url,omitempty"`
 	Key      string        `json:"key,omitempty"`
 	Element  *traceElement `json:"element,omitempty"`
@@ -60,6 +63,8 @@ type traceEvent struct {
 	Masked   bool          `json:"masked,omitempty"`
 	Mime     string        `json:"mime,omitempty"`
 	Filename string        `json:"filename,omitempty"`
+	// ResultURL is where a click, submit or key took its tab (foldNavigations).
+	ResultURL string `json:"-"`
 }
 
 type traceElement struct {
@@ -78,19 +83,23 @@ func (e traceEvent) typing() bool {
 	return (e.Kind == "input" || e.Kind == "change") && e.Element != nil
 }
 
+// acts is whether e is something the user did that can take its tab to another page.
+func (e traceEvent) acts() bool {
+	return e.Kind == "click" || e.Kind == "submit" || e.Kind == "key"
+}
+
 // parseTrace reads a recording's trace: its known events, a password field's value dropped
-// (the agent masks it already), and each run of typing into one field kept as its last event
-// (the extension reports input as the user types, then change).
+// (the agent masks it already), navigations folded (foldNavigations), and each run of typing
+// into one field kept as its last event (the extension reports input as the user types, then
+// change).
 func parseTrace(raw json.RawMessage) ([]traceEvent, error) {
 	var all []traceEvent
 	if err := json.Unmarshal(raw, &all); err != nil {
 		return nil, fmt.Errorf("the trace is not a list of events: %w", err)
 	}
+	all = slices.DeleteFunc(all, func(e traceEvent) bool { return !slices.Contains(traceKinds, e.Kind) })
 	var out []traceEvent
-	for _, e := range all {
-		if !slices.Contains(traceKinds, e.Kind) {
-			continue
-		}
+	for _, e := range foldNavigations(all) {
 		if e.Element != nil && strings.EqualFold(e.Element.Type, "password") {
 			e.Masked = true
 		}
@@ -107,6 +116,55 @@ func parseTrace(raw json.RawMessage) ([]traceEvent, error) {
 		out = out[:learnMaxEvents]
 	}
 	return out, nil
+}
+
+// navFoldMS is how soon after a click, submit or key in a tab a navigation in that tab is the
+// action's doing (a link, a form, an app's pushState route), by the page's clock.
+const navFoldMS = 1500
+
+// foldNavigations keeps a navigation as an event only when the user opened the page themselves
+// (typed, a bookmark): one an action in its tab caused becomes that action's ResultURL, and one
+// to the URL its tab is already on (a reload, the browser reporting it again) is dropped. Events
+// go in the order of their times: a navigation can reach the extension before the click or Enter
+// that caused it (the page's events come by polling). A trace without times folds a navigation
+// right after the action.
+func foldNavigations(evs []traceEvent) []traceEvent {
+	if !slices.ContainsFunc(evs, func(e traceEvent) bool { return e.TS == 0 }) {
+		evs = slices.Clone(evs)
+		slices.SortStableFunc(evs, func(a, b traceEvent) int { return cmp.Compare(a.TS, b.TS) })
+	}
+	var out []traceEvent
+	at := map[int64]string{}  // the URL each tab is on
+	action := map[int64]int{} // each tab's last click, submit or key: its index in out
+	for _, e := range evs {
+		if e.Kind != "navigate" {
+			if e.acts() {
+				action[e.Tab] = len(out)
+			}
+			if e.Kind != "download" && e.URL != "" {
+				at[e.Tab] = e.URL
+			}
+			out = append(out, e)
+			continue
+		}
+		if at[e.Tab] == e.URL {
+			continue
+		}
+		at[e.Tab] = e.URL
+		if i, ok := action[e.Tab]; ok {
+			a := out[i]
+			caused := i == len(out)-1 // no times: right after it
+			if a.TS > 0 && e.TS > 0 {
+				caused = e.TS-a.TS <= navFoldMS
+			}
+			if caused {
+				out[i].ResultURL = e.URL
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // --- parameter candidates ---
@@ -286,6 +344,11 @@ func learnPrompt(evs []traceEvent, cands []paramCandidate, narration string) str
 
 // describeEvent is one event as the prompt shows it.
 func describeEvent(e traceEvent) string {
+	if e.ResultURL != "" {
+		a := e
+		a.ResultURL = ""
+		return describeEvent(a) + " (opens " + truncateRunes(e.ResultURL, learnMaxValue) + ")"
+	}
 	value := func() string {
 		if e.Masked {
 			return maskedValue

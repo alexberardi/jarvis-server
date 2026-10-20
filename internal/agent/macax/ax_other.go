@@ -18,6 +18,12 @@ func ScreenTrusted() bool { return false }
 // ScreenPrompt does nothing off macOS.
 func ScreenPrompt() bool { return false }
 
+// ListenTrusted is false off macOS.
+func ListenTrusted() bool { return false }
+
+// ListenPrompt does nothing off macOS.
+func ListenPrompt() bool { return false }
+
 // MicStatus is "unknown" off macOS.
 func MicStatus() string { return StatusUnknown }
 

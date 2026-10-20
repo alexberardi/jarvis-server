@@ -112,6 +112,7 @@ func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call,
 		return recordingRefusal(agentCode(out, "start_failed"), "I couldn't start recording: "+agentError(out)), nil
 	}
 	id, _ := out["recording_id"].(string)
+	m.recordingOn.Store(nodeID, m.now())
 	if task := strings.TrimSpace(argText(call, "task")); task != "" && !recordingPhrases[compactName(task)] && id != "" {
 		m.recordingTasks.Store(id, task)
 		m.recordingNamed.Store(nodeID, namedRecording{id: id, task: task})
@@ -157,6 +158,7 @@ func (t *stopRecordingTool) Execute(ctx context.Context, call servertools.Call, 
 	out := m.agentRecordingCall(ctx, nodeID, computeruse.ToolRecordStop, map[string]any{}, turn.Speaker.UserID)
 	if !dispatchOK(out) {
 		if agentCode(out, "") == "not_recording" {
+			m.recordingOn.Delete(nodeID)
 			return recordingRefusal("not_recording", "I wasn't watching: nothing is being recorded on your computer."), nil
 		}
 		return recordingRefusal(agentCode(out, "stop_failed"), "I couldn't stop recording: "+agentError(out)), nil
@@ -166,6 +168,7 @@ func (t *stopRecordingTool) Execute(ctx context.Context, call servertools.Call, 
 		return nil, err
 	}
 	m.recordingNamed.Delete(nodeID)
+	m.recordingOn.Delete(nodeID)
 	rec.HouseholdID, rec.OwnerID, rec.NodeID, rec.Narration = turn.HouseholdID, turn.Speaker.UserID, nodeID, name
 	rec, err = m.storeAgentRecording(ctx, rec)
 	if err != nil {
@@ -303,6 +306,7 @@ func (m *Module) handleUploadRecording(w http.ResponseWriter, r *http.Request, n
 		return
 	}
 	rec.HouseholdID, rec.OwnerID, rec.NodeID = n.HouseholdID, owner, n.ID
+	m.recordingOn.Delete(n.ID)
 	stored, err := m.storeAgentRecording(r.Context(), rec)
 	if err != nil {
 		m.writeErr(w, err)

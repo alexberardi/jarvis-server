@@ -81,7 +81,7 @@ func TestIndicatorFollowsTheTurn(t *testing.T) {
 	if first != time.Duration(DefaultFollowUp().ListenSecs*float64(time.Second)) {
 		t.Fatalf("first window %v", first)
 	}
-	// After the ignored answer the countdown carries on from what is left, not a fresh 8 s.
+	// After the ignored answer the countdown carries on from what is left, not a fresh 3 s.
 	if second >= first || second < time.Duration(DefaultFollowUp().IgnoredGraceSecs*float64(time.Second)) {
 		t.Fatalf("window after the ignored answer %v (first %v)", second, first)
 	}
@@ -106,4 +106,72 @@ func TestIndicatorFlashesAFailedTurn(t *testing.T) {
 	if len(got) == 0 || got[len(got)-1] != CueError || got[0] != CueListening {
 		t.Fatalf("cues %v: want listening first and error last", got)
 	}
+}
+
+// The follow-up window is 3 s on every iteration (#296): no 8 s, then 6, then 5.
+func TestFollowUpWindowIsThreeSecondsEveryIteration(t *testing.T) {
+	if got := DefaultFollowUp().ListenSecs; got != 3 || MaxFollowUpListenSecs != 3 {
+		t.Fatalf("default window %v s, want 3 (the cap %v)", got, MaxFollowUpListenSecs)
+	}
+	srv := newServer()
+	srv.texts, srv.speakPCM = []string{"And what's the date?", "Thanks for that."}, pcmOf(50)
+	srv.followUp = func(req StreamRequest) (*Control, error) {
+		if req.VoiceCommand == "And what's the date?" {
+			return complete("It's October tenth."), nil
+		}
+		return complete("You're welcome."), nil
+	}
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	answer(r, mic, utterance, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 2 || tr.FollowUpEnd != EndTimeout {
+		t.Fatalf("turn %+v", tr)
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{3 * time.Second, 3 * time.Second, 3 * time.Second}) {
+		t.Fatalf("follow-up windows %v, want 3 s each", got)
+	}
+}
+
+// A window shorter than the old 5 s floor (follow_up_min_timeout_secs) is not raised to it.
+func TestShortFollowUpWindowIsKept(t *testing.T) {
+	mic := oneWake()
+	r := newRig(t, mic, newServer())
+	r.p.Cfg.FollowUp.ListenSecs = 1.5
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	answer(r, mic)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.FollowUpEnd != EndTimeout {
+		t.Fatalf("turn %+v", tr)
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{1500 * time.Millisecond}) {
+		t.Fatalf("follow-up windows %v, want [1.5s]", got)
+	}
+}
+
+func TestClampFollowUpListen(t *testing.T) {
+	for _, c := range []struct{ in, want float64 }{{8, 3}, {3.5, 3}, {3, 3}, {2.5, 2.5}, {0, 0}} {
+		if got := ClampFollowUpListen(c.in); got != c.want {
+			t.Errorf("ClampFollowUpListen(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func followUpWindows(ind *recIndicator) []time.Duration {
+	ind.mu.Lock()
+	defer ind.mu.Unlock()
+	var w []time.Duration
+	for _, c := range ind.cues {
+		if c.Cue == CueFollowUp {
+			w = append(w, c.Window)
+		}
+	}
+	return w
 }

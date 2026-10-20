@@ -176,6 +176,9 @@ func (m *Module) handleConversationStart(w http.ResponseWriter, r *http.Request,
 // the warmup inference.
 func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*conversation, error) {
 	hh := n.HouseholdID
+	if req.chatUserID == 0 {
+		m.wakes.started(hh, n.ID, req.ConversationID) // a node starts at wake time (wake arbitration)
+	}
 	prompt, err := m.resolvePrompt(ctx, hh)
 	if err != nil {
 		return nil, err

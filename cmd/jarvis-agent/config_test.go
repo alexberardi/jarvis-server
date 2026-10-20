@@ -144,3 +144,36 @@ func TestConfigCommand(t *testing.T) {
 		t.Fatal("unknown verb accepted")
 	}
 }
+
+// An agent.json (or --follow-up) from before the 3 s cap still starts the agent, with the
+// window clamped to 3 s (#296).
+func TestRunClampsTheFollowUpWindow(t *testing.T) {
+	for _, c := range []struct {
+		file string
+		args []string
+		want float64
+	}{
+		{`{}`, nil, 3},
+		{`{"follow_up": 8}`, nil, 3},
+		{`{"follow_up": 2}`, nil, 2},
+		{`{"follow_up": 0}`, nil, 0},
+		{`{}`, []string{"--follow-up", "6"}, 3},
+	} {
+		p := filepath.Join(t.TempDir(), "agent.json")
+		if err := os.WriteFile(p, []byte(c.file), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fs, f := newRunFlags(flag.ContinueOnError)
+		if err := fs.Parse(append([]string{"--config", p}, c.args...)); err != nil {
+			t.Fatal(err)
+		}
+		log := slog.New(slog.NewTextHandler(io.Discard, nil))
+		if err := applySettings(fs, *f.config, log); err != nil {
+			t.Fatalf("%s %v: %v", c.file, c.args, err)
+		}
+		f.vf.clampFollowUp(log)
+		if f.vf.followUp != c.want {
+			t.Errorf("%s %v: follow-up %v, want %v", c.file, c.args, f.vf.followUp, c.want)
+		}
+	}
+}

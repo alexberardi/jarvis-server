@@ -17,19 +17,19 @@ import (
 // After every reply the model didn't mark terminal, the node keeps listening without the wake
 // word: wait for the room to go quiet (the reply's tail), then for speech onset, record until
 // a short silence, transcribe, and send it as a follow_up turn of the same conversation. Up
-// to 5 times, each window shorter than the last. It closes quietly when nobody speaks, on
+// to 5 times, each window as long as the first (the Python node's shrank). It closes quietly when nobody speaks, on
 // noise, on the node hearing itself, or when command-center ends the exchange.
 //
 // Time is counted in captured chunks (80 ms each), not wall-clock time: the same thing on a
 // real microphone, and deterministic on a scripted one.
 
 // FollowUpConfig is the follow-up window's tuning. DefaultFollowUp is the Python node's, except
-// where command-center's follow-up gate (go-pi-node.md §3.10) made a longer window affordable.
+// where DefaultFollowUp says otherwise.
 type FollowUpConfig struct {
 	ListenSecs        float64 // follow_up_listen_seconds: the first window (0 turns follow-up off)
 	MaxIterations     int     // max_follow_up_iterations (5)
-	DecaySecs         float64 // follow_up_timeout_decay_secs: each window this much shorter (2 s)
-	MinTimeoutSecs    float64 // follow_up_min_timeout_secs: but never under this
+	DecaySecs         float64 // follow_up_timeout_decay_secs: each window this much shorter (0)
+	MinTimeoutSecs    float64 // follow_up_min_timeout_secs: but never under this (0; never above ListenSecs)
 	QuietWaitSecs     float64 // follow_up_quiet_wait_secs: at most this long draining the reply's tail (0.5 s)
 	SilenceSecs       float64 // follow_up_silence_duration: silence that ends an answer
 	MinAfterOnsetSecs float64 // follow_up_min_record_after_onset_secs (0.7 s)
@@ -45,13 +45,21 @@ type FollowUpConfig struct {
 	IgnoredGraceSecs float64
 }
 
+// MaxFollowUpListenSecs caps the follow-up window, wherever it is set (agent.json, --follow-up,
+// the app's follow_up_listen_seconds): 8 s left every turn hanging long after the reply (user,
+// 2026-10-19, #296).
+const MaxFollowUpListenSecs = 3
+
+// ClampFollowUpListen caps a follow-up window at MaxFollowUpListenSecs.
+func ClampFollowUpListen(secs float64) float64 { return min(secs, MaxFollowUpListenSecs) }
+
 // DefaultFollowUp is the follow-up window out of the box (go-pi-node.md §3.10 has the
-// evidence). Changed from the Python node's: 8 s to start answering instead of 4 (then 6, then
-// 5), because speech that isn't for Jarvis now costs nothing; 1.2 s of silence ends an answer
-// instead of 0.5 (0.5 s cut 37% of real read utterances mid-sentence, 1.2 s 1.6%); answers may
-// run 10 s instead of 7.
+// evidence). Changed from the Python node's: 3 s to start answering on every iteration, the
+// cap (#296; it was 8 s, then 6, then 5, which kept every turn open long after the reply);
+// 1.2 s of silence ends an answer instead of 0.5 (0.5 s cut 37% of real read utterances
+// mid-sentence, 1.2 s 1.6%); answers may run 10 s instead of 7.
 func DefaultFollowUp() FollowUpConfig {
-	return FollowUpConfig{ListenSecs: 8, MaxIterations: 5, DecaySecs: 2, MinTimeoutSecs: 5,
+	return FollowUpConfig{ListenSecs: MaxFollowUpListenSecs, MaxIterations: 5,
 		QuietWaitSecs: 0.5, SilenceSecs: 1.2, MinAfterOnsetSecs: 0.7, MinSpeechSecs: 0.3,
 		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2}
 }
@@ -112,7 +120,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			t.FollowUpEnd = EndMaxIterations
 			return
 		}
-		window := max(cfg.MinTimeoutSecs, cfg.ListenSecs-float64(it-1)*cfg.DecaySecs)
+		window := max(min(cfg.MinTimeoutSecs, cfg.ListenSecs), cfg.ListenSecs-float64(it-1)*cfg.DecaySecs)
 		// Speech that wasn't for us doesn't buy the room a new window: after an ignored
 		// answer, only what is left of this one (but at least IgnoredGraceSecs).
 		timeout := window

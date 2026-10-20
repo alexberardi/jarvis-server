@@ -12,7 +12,11 @@
   .ok .dot { background: var(--ok); }
   p { margin: 0 0 10px; color: var(--muted); }
   a.button { display: inline-block; padding: 7px 12px; border-radius: 8px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; }
-  a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  a.button:focus-visible, button.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  button.button { padding: 7px 12px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  #access { margin-top: 14px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--muted) 35%, transparent); }
+  #access-line { color: var(--fg); }
+  .off #access-state { color: var(--warn); font-weight: 600; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -21,6 +25,11 @@
 <p id="message">Jarvis controls this browser through the Jarvis Automation desktop agent on this computer. It isn't connected.</p>
 <p id="hint" hidden></p>
 <a id="download" class="button" href="https://github.com/alexberardi/jarvis-server/releases" target="_blank" rel="noopener noreferrer">Download the Jarvis Automation agent</a>
+<section id="access" hidden>
+<p id="access-line">Website access: <span id="access-state"></span></p>
+<p id="access-hint" hidden>Without it Jarvis can't read or act on pages, and recordings keep only page loads.</p>
+<button id="access-on" class="button" type="button" hidden>Turn on</button>
+</section>
 <script src="popup.js"></script>
 </body>
 </html>

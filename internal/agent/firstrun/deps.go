@@ -75,7 +75,7 @@ type Voice struct {
 
 // Permission is one macOS privacy grant the agent needs.
 type Permission struct {
-	ID    string // "accessibility", "microphone", "automation", "screen"
+	ID    string // "accessibility", "microphone", "automation", "screen", "input-monitoring"
 	Label string // "Accessibility"
 	Why   string // what it's for, in plain words
 	// Status is "granted", "denied", "not_asked" or "unknown". It never prompts.

@@ -19,7 +19,7 @@ type RecordEvent struct {
 	RecordingID string         `json:"recording_id"`
 	Seq         int64          `json:"seq"`
 	TS          int64          `json:"ts"`   // ms since the epoch, the page's clock
-	Kind        string         `json:"kind"` // click, input, change, submit, key, navigate, download
+	Kind        string         `json:"kind"` // click, input, change, submit, key, navigate, download, cannot_watch (a page it can't script)
 	URL         string         `json:"url,omitempty"`
 	Tab         int64          `json:"tab,omitempty"`
 	Key         string         `json:"key,omitempty"` // kind key: Enter, Escape or Tab

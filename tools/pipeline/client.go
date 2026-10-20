@@ -51,6 +51,8 @@ type TurnResponse struct {
 	} `json:"validation_request"`
 	Commands      json.RawMessage `json:"commands"`
 	EndOfExchange *bool           `json:"end_of_exchange"`
+	// StoodDown: another node of the household answers this wake (not_for_me).
+	StoodDown bool `json:"stood_down"`
 }
 
 // ToolResult is what the node sends back for one call.

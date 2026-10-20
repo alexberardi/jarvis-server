@@ -205,6 +205,13 @@ type Module struct {
 	// (namedRecording):
 	// stop_recording asks for a name otherwise.
 	recordingNamed sync.Map
+	// recordingOn is, by computer, when a voice start_recording started recording there: a
+	// node mid-recording answers the wake it shares with other nodes (arbitration.go).
+	recordingOn sync.Map
+	// wakes arbitrates one wake heard by several nodes (arbitration.go); wakeAfter is its
+	// timer (tests replace it).
+	wakes     *wakeArbiter
+	wakeAfter func(time.Duration) <-chan time.Time
 	// learnRecording gets every recording stored from an agent: it queues learning a
 	// workflow from it (workflows_learn.go; tests replace it).
 	learnRecording func(ctx context.Context, rec Recording) error
@@ -274,6 +281,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.k2 = newK2Store()
 	m.resets = newResetStore()
 	m.ambient = newAmbientStore()
+	m.wakes = newWakeArbiter(func() time.Time { return m.now() }, m.wakeAfter)
 	m.releases = &releaseCache{}
 	m.convs = newConvCache(m.now)
 	m.signals = newConvSignals(m.now)

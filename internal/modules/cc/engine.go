@@ -62,8 +62,11 @@ type engineResult struct {
 	// KeepListening: a follow-up the gate rejected; the node keeps its window open
 	// (followup_gate.go). Sent as keep_listening only when true.
 	KeepListening bool
-	Reasoning     string
-	Err           string
+	// StoodDown: another node of the household answers this wake (arbitration.go); the stop
+	// is not_for_me, sent with stood_down: true.
+	StoodDown bool
+	Reasoning string
+	Err       string
 	// ImageArgs are the photos a client call's image parameters resolved to, by call id
 	// (chat_image_actions.go, §9). ToolCalls keep the model's photo numbers, so history,
 	// traces and transcripts never hold bytes; only the node's tool_call gets them

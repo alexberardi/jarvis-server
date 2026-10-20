@@ -18,11 +18,18 @@ import (
 //
 //	llama:   GET /health, POST /v1/chat/completions, POST /v1/embeddings (Bearer LLAMA_API_KEY)
 //	whisper: GET /health, POST /inference
+//	python:  `-I -c CODE` exits 0 (FAKE_PY_FAIL=1: 1); `-I -m mlx_lm.server --model DIR …` serves
+//	         GET /health and POST /v1/chat/completions with no key, as mlx_lm.server does
+//
+// With FAKE_UV=1 it is uv instead (runFakeUV).
 //
 // Knobs: FAKE_ENGINE_LOG (directory: each start writes <pid>.json with argv and env),
 // FAKE_ENGINE_LOADING (duration /health answers 503 first), FAKE_ENGINE_LIST_DEVICES (printed
 // for --list-devices).
 func TestMain(m *testing.M) {
+	if os.Getenv("FAKE_UV") == "1" {
+		os.Exit(runFakeUV(os.Args[1:]))
+	}
 	if os.Getenv("FAKE_ENGINE") == "1" {
 		runFakeEngine(os.Args[1:])
 		os.Exit(0)
@@ -39,6 +46,14 @@ func runFakeEngine(args []string) {
 	if len(args) > 0 && args[0] == "--list-devices" {
 		fmt.Println("Available devices:")
 		fmt.Print(os.Getenv("FAKE_ENGINE_LIST_DEVICES"))
+		return
+	}
+	python := len(args) > 0 && args[0] == "-I"
+	if python && len(args) > 1 && args[1] == "-c" {
+		if os.Getenv("FAKE_PY_FAIL") == "1" {
+			fmt.Fprintln(os.Stderr, "ModuleNotFoundError: No module named 'mlx_lm'")
+			os.Exit(1)
+		}
 		return
 	}
 	flag := func(names ...string) string {
@@ -61,7 +76,7 @@ func runFakeEngine(args []string) {
 	}
 	if dir := os.Getenv("FAKE_ENGINE_LOG"); dir != "" {
 		env := map[string]string{}
-		for _, k := range []string{"LLAMA_API_KEY", "CUDA_VISIBLE_DEVICES", "GGML_VK_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES"} {
+		for _, k := range []string{"LLAMA_API_KEY", "CUDA_VISIBLE_DEVICES", "GGML_VK_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "HF_HUB_OFFLINE"} {
 			if v, ok := os.LookupEnv(k); ok {
 				env[k] = v
 			}
@@ -69,7 +84,11 @@ func runFakeEngine(args []string) {
 		b, _ := json.Marshal(fakeStart{Args: args, Env: env})
 		_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", os.Getpid())), b, 0o644)
 	}
-	if _, err := os.Stat(flag("-m")); err != nil {
+	model := flag("-m")
+	if python {
+		model = flag("--model")
+	}
+	if _, err := os.Stat(model); err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load model:", err)
 		os.Exit(1)
 	}
@@ -108,7 +127,7 @@ func runFakeEngine(args []string) {
 			return
 		}
 		fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":"hi from %s"},"finish_reason":"stop"}],"model":%q}`,
-			filepath.Base(flag("-m")), flag("--alias"))
+			filepath.Base(model), flag("--alias"))
 	})
 	mux.HandleFunc("POST /v1/embeddings", func(w http.ResponseWriter, r *http.Request) {
 		if !auth(w, r) {

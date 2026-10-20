@@ -421,6 +421,10 @@ func TestTurnStreamsTheReplyToTheSpeaker(t *testing.T) {
 		in.ConversationID != "conv-1" || in.VoiceCommand != "What time is it?" || in.Affect["read"] != "calm" {
 		t.Fatalf("stream request %+v", in)
 	}
+	// The command's speech level goes with the wake turn (cc's wake arbitration, #287).
+	if in.SpeechLevel == nil || *in.SpeechLevel >= 0 || *in.SpeechLevel < -90 {
+		t.Fatalf("speech_level_db %v, want the command's dBFS", in.SpeechLevel)
+	}
 
 	// Uploads: 48 kHz command; speaker_audio = the 2 s wake clip (ending in the wake word),
 	// then the command.

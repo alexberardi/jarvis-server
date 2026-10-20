@@ -137,7 +137,8 @@ func (k *Keyboard) Available(ctx context.Context) (bool, string) {
 	return true, ""
 }
 
-// Send types the strokes into whatever has keyboard focus.
+// Send types the strokes into whatever has keyboard focus. A stroke with Mods is a chord:
+// those modifiers are held around its key.
 func (k *Keyboard) Send(ctx context.Context, strokes []xkb.Stroke) error {
 	if why := k.excluded(); why != "" {
 		return errors.New(why)
@@ -217,12 +218,17 @@ func (k *Keyboard) Send(ctx context.Context, strokes []xkb.Stroke) error {
 				return err
 			}
 			code := p.Code - 8 // the protocol takes evdev codes
+			// A chord's modifiers are held as the depressed mask around its key, as wtype -M does.
+			mods := p.Mods
 			if p.Shift {
-				_ = c.Send(kb, opModifiers, wlwire.NewArgs().U32(xkb.ShiftMask).U32(0).U32(0).U32(0).Bytes(), -1)
+				mods |= xkb.ShiftMask
+			}
+			if mods != 0 {
+				_ = c.Send(kb, opModifiers, wlwire.NewArgs().U32(mods).U32(0).U32(0).U32(0).Bytes(), -1)
 			}
 			_ = c.Send(kb, opKey, wlwire.NewArgs().U32(stamp()).U32(code).U32(keyPressed).Bytes(), -1)
 			_ = c.Send(kb, opKey, wlwire.NewArgs().U32(stamp()).U32(code).U32(keyReleased).Bytes(), -1)
-			if p.Shift {
+			if mods != 0 {
 				_ = c.Send(kb, opModifiers, wlwire.NewArgs().U32(0).U32(0).U32(0).U32(0).Bytes(), -1)
 			}
 			if (i+1)%syncEvery == 0 {

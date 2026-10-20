@@ -20,7 +20,8 @@ import (
 )
 
 // Binaries manages engine builds on disk under <home>/engines/<kind>/<build>-<flavour>/:
-// which are installed, and fetching a missing one (download, sha256 check, extract).
+// which are installed, and fetching a missing one (download, sha256 check, extract; for a
+// Python engine, a uv-built environment, see pyengine.go).
 type Binaries struct {
 	Dir      string // <home>/engines
 	Platform Platform
@@ -43,15 +44,24 @@ func NewBinaries(home string, log *slog.Logger) *Binaries {
 
 // InstallDir is where a flavour of a kind lives.
 func (b *Binaries) InstallDir(k Kind, f Flavour) string {
-	return filepath.Join(b.Dir, string(k), Releases[k].Build+"-"+string(f))
+	return filepath.Join(b.Dir, string(k), Build(k)+"-"+string(f))
+}
+
+// binPath is the program to run in an install directory: the binary, or a Python engine's
+// interpreter.
+func (b *Binaries) binPath(k Kind, dir string) string {
+	if _, ok := k.Python(); ok {
+		return pythonIn(dir)
+	}
+	return filepath.Join(dir, k.BinaryName(b.Platform))
 }
 
 const completeMarker = ".jarvis-complete"
 
 // Path returns the binary to run for a kind and flavour, if one is available: the operator
-// override, else an installed build.
+// override (not for Python engines), else an installed build.
 func (b *Binaries) Path(k Kind, f Flavour) (string, bool) {
-	if b.Override != nil {
+	if _, py := k.Python(); b.Override != nil && !py {
 		if p := b.Override(k); p != "" {
 			if _, err := os.Stat(p); err == nil {
 				return p, true
@@ -62,7 +72,7 @@ func (b *Binaries) Path(k Kind, f Flavour) (string, bool) {
 	if _, err := os.Stat(filepath.Join(dir, completeMarker)); err != nil {
 		return "", false
 	}
-	p := filepath.Join(dir, k.BinaryName(b.Platform))
+	p := b.binPath(k, dir)
 	if _, err := os.Stat(p); err != nil {
 		return "", false
 	}
@@ -110,7 +120,7 @@ func (b *Binaries) List() []InstalledEngine {
 				continue
 			}
 			out = append(out, InstalledEngine{Kind: k, Build: build, Flavour: Flavour(fl),
-				Path: filepath.Join(dir, k.BinaryName(b.Platform)), Pinned: build == Releases[k].Build})
+				Path: b.binPath(k, dir), Pinned: build == Build(k)})
 		}
 	}
 	return out
@@ -132,6 +142,9 @@ func (b *Binaries) lock(key string) *sync.Mutex {
 // bytes downloaded so far out of the flavour's total. Concurrent fetches of the same build
 // wait for one another; downloads resume from their .part files after an interruption.
 func (b *Binaries) Fetch(ctx context.Context, k Kind, f Flavour, progress func(done, total int64)) (string, error) {
+	if e, ok := k.Python(); ok {
+		return b.fetchPython(ctx, e, f, progress)
+	}
 	assets, err := AssetsFor(k, b.Platform, f)
 	if err != nil {
 		return "", err
@@ -249,7 +262,7 @@ type fetchPayload struct {
 
 // FetchDedupKey is the dedup key of a build's fetch job.
 func FetchDedupKey(k Kind, f Flavour) string {
-	return "llm.engine:" + string(k) + ":" + Releases[k].Build + "-" + string(f)
+	return "llm.engine:" + string(k) + ":" + Build(k) + "-" + string(f)
 }
 
 // RegisterJobs registers the fetch job. onDone runs after a successful fetch (the resolver
