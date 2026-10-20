@@ -141,6 +141,7 @@ func TestNeedsComputer(t *testing.T) {
 		"add buy batteries to my shopping list":                       false,
 		"research the best smart watch":                               false,
 		"open steam":                                                  false,
+		"Open Neovim and Typeello World.":                             false, // desktop tools, not an errand
 		"download my card statement for september":                    true,
 		"do my budget: download the bank statements":                  true,
 		"fill in the plot application at http://127.0.0.1:8080/form/": true,
