@@ -54,6 +54,7 @@ type promptInput struct {
 	Images      int    // screenshots attached after the text
 	Coordinates string // the model's coordinate convention, when a screenshot is attached
 	Feedback    string // why the last batch didn't run, for the model
+	Hint        string // a replay's: where the step was recorded
 }
 
 // renderPrompt is the user turn's text for one round.
@@ -68,6 +69,9 @@ func renderPrompt(in promptInput) string {
 		rules = defaultRules
 	}
 	fmt.Fprintf(&b, "Rules: %s\n", oneLine(rules))
+	if in.Hint != "" {
+		fmt.Fprintf(&b, "Hint: %s\n", oneLine(in.Hint))
+	}
 	if in.Answer != "" {
 		fmt.Fprintf(&b, "The user answered your question: %s\n", oneLine(in.Answer))
 	}

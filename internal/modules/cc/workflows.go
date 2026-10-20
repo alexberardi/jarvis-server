@@ -61,34 +61,12 @@ type TaughtWorkflow struct {
 	UpdatedAt   time.Time             `json:"updated_at"`
 }
 
-// Param is a value the workflow asks for at replay ("which month?").
-type Param struct {
-	Name        string `json:"name"`
-	Kind        string `json:"kind"` // date | month | text | number | file
-	Example     string `json:"example,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-// WStep is one step of a workflow: the action as recorded, and the element it landed on so a
-// replay can find it again when the page has moved.
-type WStep struct {
-	Intent  string             `json:"intent"`
-	Target  string             `json:"target"` // browser | desktop
-	Site    string             `json:"site,omitempty"`
-	App     string             `json:"app,omitempty"`
-	Action  computeruse.Action `json:"action"`
-	Element *RecordedElement   `json:"element,omitempty"`
-	Risk    string             `json:"risk,omitempty"` // a computeruse risk category; "" is none
-}
-
-// RecordedElement is what the recorder saw of the element a step acted on.
-type RecordedElement struct {
-	Role     string `json:"role,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Selector string `json:"selector,omitempty"`
-	Frame    string `json:"frame,omitempty"`
-	AXPath   string `json:"ax_path,omitempty"`
-}
+// Param, WStep and RecordedElement are the computer package's, which replays them (piece 31).
+type (
+	Param           = computer.WorkflowParam
+	WStep           = computer.WorkflowStep
+	RecordedElement = computer.RecordedElement
+)
 
 // Validate checks a workflow before it is stored. Each step's action must pass
 // computeruse.Action.Validate; errors name the field ("steps[2]: ...").
@@ -433,14 +411,4 @@ func (m *Module) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, u 
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "deleted", "id": wf.ID})
-}
-
-// handleRunWorkflow is the replay route's place (piece 31 builds replay): it checks the caller
-// sees the workflow, then answers 501.
-func (m *Module) handleRunWorkflow(w http.ResponseWriter, r *http.Request, u authn.User) {
-	if _, _, err := m.visibleWorkflow(r.Context(), u, r.PathValue("id"), false); err != nil {
-		m.writeErr(w, err)
-		return
-	}
-	detailCode(w, http.StatusNotImplemented, "Replaying a workflow is not available yet", "not_implemented")
 }

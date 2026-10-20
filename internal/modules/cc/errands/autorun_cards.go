@@ -171,7 +171,7 @@ func (s *Service) ranCard(ctx context.Context, w *workflowRow, results []Result,
 				rs.Status, rs.Result = "failed", firstNonEmpty(r.Error, "failed")
 			}
 		}
-		if cmd == cmdComputer {
+		if isComputerStep(cmd) {
 			if line, intents, ok := s.computerProgress(ctx, w, i, st); ok {
 				rs.Progress = append([]string{}, intents...)
 				if rs.Status == "pending" && line != "" {
