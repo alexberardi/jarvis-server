@@ -85,9 +85,9 @@ describe('WorkflowEditPage', () => {
     expect(sentence(3)).toBe('Choose checking')
     expect(within(steps()[4]).getByText('Asks first')).toBeInTheDocument()
     // A step that was risky when taught always asks; another can be made to.
-    expect(screen.getByRole('switch', { name: 'Ask first before step 5' })).toBeChecked()
-    expect(screen.getByRole('switch', { name: 'Ask first before step 5' })).toBeDisabled()
-    expect(screen.getByRole('switch', { name: 'Ask first before step 1' })).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: /^Always asks: .+ before step 5$/ })).toBeChecked()
+    expect(screen.getByRole('switch', { name: /^Always asks: .+ before step 5$/ })).toBeDisabled()
+    expect(screen.getByRole('switch', { name: 'Ask me first before step 1' })).not.toBeChecked()
     expect(screen.getByTestId('success-sentence')).toHaveTextContent('a file named like statement*.csv downloads.')
   })
 
@@ -179,7 +179,7 @@ describe('WorkflowEditPage', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: '  Monthly statement ' } })
     fireEvent.click(screen.getByRole('switch', { name: 'Share with the household' }))
     fireEvent.change(screen.getByLabelText('Step 1 intent'), { target: { value: 'Open the bank site' } })
-    fireEvent.click(screen.getByRole('switch', { name: 'Ask first before step 2' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Ask me first before step 2' }))
     fireEvent.change(screen.getByLabelText('Why step 2 asks'), { target: { value: 'send' } })
     fireEvent.click(screen.getByRole('button', { name: 'Delete step 4' }))
     fireEvent.change(screen.getByLabelText('New step'), { target: { value: 'Rename the file to {month}.csv' } })

@@ -213,8 +213,12 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
                   {edit && (
                     <div className="col-start-1 row-start-3 flex flex-wrap items-center gap-x-3 gap-y-2 sm:col-span-2">
                       <Switch
-                        aria-label={`Ask first before step ${i + 1}`}
-                        label={<span className="text-small text-text-muted">{raw.lockedRisk ? `Always asks: ${riskLabel(d.step.risk).toLowerCase()}` : 'Ask me first'}</span>}
+                        label={
+                          <span className="text-small text-text-muted">
+                            {raw.lockedRisk ? `Always asks: ${riskLabel(d.step.risk).toLowerCase()}` : 'Ask me first'}
+                            <span className="sr-only"> before step {i + 1}</span>
+                          </span>
+                        }
                         checked={risky}
                         disabled={raw.lockedRisk}
                         onCheckedChange={(on) => patch(raw.uid, (s) => ({ ...s, risk: on ? 'submit_third_party' : '' }))}
