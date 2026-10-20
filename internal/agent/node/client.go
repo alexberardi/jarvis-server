@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,22 +29,34 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s: %d", e.Method, e.Path, e.Status)
 }
 
-// doJSON sends body (nil for none) and decodes a JSON answer into out (nil to discard).
+// rawBody is a request body sent as it is, with its content type.
+type rawBody struct {
+	data        []byte
+	contentType string
+}
+
+// doJSON sends body (nil for none; a rawBody as it is, anything else as JSON) and decodes a
+// JSON answer into out (nil to discard).
 func doJSON(ctx context.Context, hc *http.Client, method, rawURL string, hdr map[string]string, body, out any) error {
 	var rd io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
+	ctype := "application/json"
+	switch b := body.(type) {
+	case nil:
+	case rawBody:
+		rd, ctype = bytes.NewReader(b.data), b.contentType
+	default:
+		raw, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		rd = bytes.NewReader(b)
+		rd = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, rd)
 	if err != nil {
 		return err
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", ctype)
 	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
@@ -304,6 +317,15 @@ func (c *CC) VerifyApproval(ctx context.Context, token, digest string) (bool, er
 // workflow from it. out is computer_record_stop's output (computer.TraceOutput).
 func (c *CC) UploadRecording(ctx context.Context, out map[string]any) error {
 	return c.do(ctx, http.MethodPost, "/api/v0/computer/recordings", out, nil)
+}
+
+// UploadKeyframe sends one click keyframe (crop: its crop) of a recording jarvisd has, a JPEG.
+func (c *CC) UploadKeyframe(ctx context.Context, recordingID string, seq int, crop bool, jpeg []byte) error {
+	path := "/api/v0/computer/recordings/" + url.PathEscape(recordingID) + "/keyframes/" + strconv.Itoa(seq)
+	if crop {
+		path += "/crop"
+	}
+	return c.do(ctx, http.MethodPut, path, rawBody{jpeg, "image/jpeg"}, nil)
 }
 
 // PostToolReport answers report_tools.

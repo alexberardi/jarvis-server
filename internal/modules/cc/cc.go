@@ -208,6 +208,8 @@ type Module struct {
 	// recordingOn is, by computer, when a voice start_recording started recording there: a
 	// node mid-recording answers the wake it shares with other nodes (arbitration.go).
 	recordingOn sync.Map
+	// keyframeMu makes a keyframe's limit check and store one step (recording_keyframes.go).
+	keyframeMu sync.Mutex
 	// wakes arbitrates one wake heard by several nodes (arbitration.go); wakeAfter is its
 	// timer (tests replace it).
 	wakes     *wakeArbiter
@@ -380,6 +382,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	mux.HandleFunc("POST "+v0+"/computer/approvals/{token}/verify", m.node(m.handleVerifyApproval))
 	// A recording the user stopped on their computer (the agent's menu, CLI or 30 minutes).
 	mux.HandleFunc("POST "+v0+"/computer/recordings", m.node(m.handleUploadRecording))
+	// Then each click's keyframe and its crop (recording_keyframes.go).
+	mux.HandleFunc("PUT "+v0+"/computer/recordings/{id}/keyframes/{seq}", m.node(m.handlePutKeyframe(false)))
+	mux.HandleFunc("PUT "+v0+"/computer/recordings/{id}/keyframes/{seq}/crop", m.node(m.handlePutKeyframe(true)))
 	for _, p := range []string{"/device-control-results/", "/device-state-results/", "/mobile/node-tool-reports/"} {
 		mux.HandleFunc("POST "+v0+p+"{request_id}", m.node(m.handleResult))
 	}
