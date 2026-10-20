@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -39,6 +40,10 @@ type DraftRequest struct {
 	Goal        string
 	// Menu is the menu built from the live conversation; nil re-sources it from the node.
 	Menu []MenuEntry
+	// TurnAt is when the user asked for it on NodeID (a live turn); zero when nobody did (a
+	// schedule fired it). A desktop computer task runs on its own only right after a turn on
+	// that computer (attended, C9).
+	TurnAt time.Time
 }
 
 type planJob struct {
@@ -47,6 +52,7 @@ type planJob struct {
 	UserID      *int64          `json:"user_id"`
 	Goal        string          `json:"goal"`
 	Menu        json.RawMessage `json:"menu,omitempty"`
+	TurnAt      time.Time       `json:"turn_at,omitzero"`
 }
 
 func planDedupPrefix(uid *int64) string {
@@ -114,7 +120,7 @@ func (s *Service) DraftErrand(ctx context.Context, r DraftRequest) error {
 		return ErrDisabled
 	}
 	payload, err := json.Marshal(planJob{HouseholdID: r.HouseholdID, NodeID: r.NodeID, UserID: r.UserID,
-		Goal: r.Goal, Menu: menuJSON(r.Menu)})
+		Goal: r.Goal, Menu: menuJSON(r.Menu), TurnAt: r.TurnAt})
 	if err != nil {
 		return err
 	}
@@ -160,6 +166,9 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 			}
 		}
 		ok, reason := IsAutorunEligible(plan.Steps, verdicts)
+		if ok && hasDesktopStep(plan.Steps) && !s.attended(ctx, r) {
+			ok, reason = false, "a desktop task runs on its own only when you ask for it at that computer"
+		}
 		if ok {
 			return s.autorunPlan(ctx, row)
 		}
@@ -300,7 +309,7 @@ func (s *Service) runPlanJob(ctx context.Context, job queue.Job) ([]byte, error)
 		return nil, queue.Permanent(err)
 	}
 	_, err := s.CreatePlan(ctx, DraftRequest{HouseholdID: r.HouseholdID, NodeID: r.NodeID, UserID: r.UserID,
-		Goal: r.Goal, Menu: menuFromJSON(r.Menu)})
+		Goal: r.Goal, Menu: menuFromJSON(r.Menu), TurnAt: r.TurnAt})
 	switch {
 	case err == nil:
 	case ctx.Err() != nil:

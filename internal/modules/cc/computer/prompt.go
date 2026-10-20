@@ -31,6 +31,7 @@ An action is {"kind": "...", "intent": "<what this action is for, one line>", ..
 - navigate {"url"}: open an http or https address. scroll {"dx", "dy"}. wait {"ms"} (at most 5000). keypress {"keys": ["ctrl", "s"]}. type {"text"}.
 - screenshot: see the screen next turn.
 - click, double_click, move {"x", "y"}; drag {"path": [[x, y], ...]}: only on a screenshot, in its coordinates.
+- In a desktop app: clipboard_write {"text"} puts text on the clipboard, clipboard_read shows you what is on it next turn; keypress chords like ["cmd", "v"] work. Web pages are only for browser tasks.
 Send at most 12 actions per turn; you see the result of every action before the next turn. Prefer elements by ref over coordinates.
 
 Rules:
@@ -54,6 +55,8 @@ type promptInput struct {
 	Images      int    // screenshots attached after the text
 	Coordinates string // the model's coordinate convention, when a screenshot is attached
 	Feedback    string // why the last batch didn't run, for the model
+	Clipboard   string // what the last batch read from the clipboard (content, like the page)
+	Desktop     bool   // the task is in a desktop app: its window, not a page
 }
 
 // renderPrompt is the user turn's text for one round.
@@ -91,7 +94,11 @@ func renderPrompt(in promptInput) string {
 		fmt.Fprintf(&b, "Last turn: %s\n", oneLine(in.Feedback))
 	}
 
-	b.WriteString("\nCurrent page:\n")
+	if in.Desktop {
+		b.WriteString("\nCurrent window:\n")
+	} else {
+		b.WriteString("\nCurrent page:\n")
+	}
 	b.WriteString(PageBegin + "\n")
 	o := in.Obs
 	if o.URL != "" {
@@ -109,6 +116,9 @@ func renderPrompt(in promptInput) string {
 	for _, e := range o.Elements {
 		b.WriteString(renderElement(e) + "\n")
 	}
+	if in.Clipboard != "" {
+		fmt.Fprintf(&b, "clipboard: %q\n", defang(in.Clipboard))
+	}
 	b.WriteString(PageEnd + "\n")
 
 	if in.Images > 0 {
@@ -118,9 +128,10 @@ func renderPrompt(in promptInput) string {
 	return b.String()
 }
 
-// renderElement is one snapshot line: e12 button "Place order" value="2" [disabled].
+// renderElement is one snapshot line: e12 button "Place order" value="2" [disabled]. A desktop
+// app's accessibility roles read like a page's ("AXButton" is a button).
 func renderElement(e Element) string {
-	s := fmt.Sprintf("%s %s %q", e.Ref, orDash(e.Role), defang(e.Name))
+	s := fmt.Sprintf("%s %s %q", e.Ref, orDash(roleName(e.Role)), defang(e.Name))
 	if e.Value != "" {
 		s += fmt.Sprintf(" value=%q", defang(e.Value))
 	}
@@ -128,6 +139,33 @@ func renderElement(e Element) string {
 		s += " [" + strings.Join(e.State, ",") + "]"
 	}
 	return s
+}
+
+// axRoles are macOS accessibility roles as the model knows them from pages; any other AX role
+// loses its prefix and is split into words ("AXDisclosureTriangle" is "disclosure triangle").
+var axRoles = map[string]string{
+	"AXButton": "button", "AXTextField": "textbox", "AXTextArea": "text area", "AXSecureTextField": "password field",
+	"AXCheckBox": "checkbox", "AXRadioButton": "radio", "AXPopUpButton": "combobox", "AXComboBox": "combobox",
+	"AXMenuItem": "menu item", "AXMenuButton": "menu button", "AXLink": "link", "AXCell": "cell", "AXRow": "row",
+	"AXTab": "tab", "AXRadioGroup": "radio group", "AXStaticText": "text", "AXImage": "image", "AXSlider": "slider",
+}
+
+func roleName(role string) string {
+	if r, ok := axRoles[role]; ok {
+		return r
+	}
+	rest, ok := strings.CutPrefix(role, "AX")
+	if !ok || rest == "" {
+		return role
+	}
+	var b strings.Builder
+	for i, c := range rest {
+		if i > 0 && c >= 'A' && c <= 'Z' {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(c)
+	}
+	return strings.ToLower(b.String())
 }
 
 // describe is the success check as one line for the prompt, or "".
