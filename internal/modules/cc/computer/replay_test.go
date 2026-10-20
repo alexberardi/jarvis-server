@@ -128,6 +128,24 @@ func TestReplayHealsMovedButton(t *testing.T) {
 	}
 }
 
+func TestReplayNoHealWhenModelPicksRecordedElement(t *testing.T) {
+	// Two buttons named Download CSV: the direct try can't tell which, so the model picks one.
+	// It is the recorded element, so nothing moved and nothing is stored.
+	e := newEnv(t, bankPage(Element{Ref: "e9", Role: "button", Name: "Download CSV"},
+		Element{Ref: "e10", Role: "button", Name: "Download CSV"}))
+	wfs := &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	e.script(actions(press("e10", "Download the CSV")))
+	out := e.replay(statementWorkflow(), map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(e.llm.reqs) != 1 || out.Healed != nil ||
+		out.Summary != `Ran "Bank statement". Checked: the address contains "/statements".` {
+		t.Fatalf("outcome %+v, %d model calls", out, len(e.llm.reqs))
+	}
+	if wfs.heals != nil {
+		t.Fatalf("stored a heal of an element that didn't move: %+v", wfs.heals)
+	}
+}
+
 func TestReplayNotHealedWhenCheckFails(t *testing.T) {
 	e := newEnv(t, bankPage(Element{Ref: "e9", Role: "link", Name: "Download CSV"}))
 	wfs := &fakeWorkflows{}

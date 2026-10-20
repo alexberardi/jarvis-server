@@ -168,9 +168,14 @@ func TestWorkflowHealStore(t *testing.T) {
 	if got.Version != 2 || *got.Steps[0].Element != heal.Element || got.Steps[0].Intent != w.Steps[0].Intent {
 		t.Fatalf("healed %+v (v%d)", got.Steps[0], got.Version)
 	}
-	// A replay of an older version doesn't overwrite an edit since.
-	if err := store.Heal(ctx, w.ID, 1, []computer.Heal{heal}); err == nil || !strings.Contains(err.Error(), "changed since") {
+	// A replay of an older version doesn't overwrite an edit since, even where the step's element
+	// is still the one it saw.
+	again := computer.Heal{Step: 0, Was: heal.Element, Element: computer.RecordedElement{Role: "link", Name: "Statements"}}
+	if err := store.Heal(ctx, w.ID, 1, []computer.Heal{again}); err == nil || !strings.Contains(err.Error(), "(version 2, not 1)") {
 		t.Fatalf("stale heal: %v", err)
+	}
+	if got, _ := ve.m.getWorkflow(ctx, w.ID); got.Version != 2 || *got.Steps[0].Element != heal.Element {
+		t.Fatalf("a stale heal changed %+v (v%d)", got.Steps[0], got.Version)
 	}
 	// Visible: the user's own and the shared ones; with no user, the shared ones.
 	seedTaught(t, ve.m, voiceHH, 8, "Order ink", true)
