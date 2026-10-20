@@ -154,6 +154,7 @@ DIRECTIONS = {
 # The pairs checked for each direction and theme: (label, fg role, bg role, minimum ratio).
 PAIRS = [
     ("text on bg", "text", "bg", 4.5),
+    ("text on surface (card text)", "text", "surface", 4.5),
     ("text on surface-alt", "text", "surface-alt", 4.5),
     ("muted on bg", "muted", "bg", 4.5),
     ("muted on surface", "muted", "surface", 4.5),

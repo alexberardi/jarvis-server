@@ -56,7 +56,7 @@ COPY = {
           "status": "Jarvis is running. One thing needs you.", "chat_ph": "Ask Jarvis anything", "nav_admin": "Your server"},
     "B": {"dash_title": "Dashboard", "dash_sub": "Avery Household · jarvisd 0.31.2 · up 4 days", "greet": "",
           "status": "", "chat_ph": "Message Jarvis", "nav_admin": "Admin"},
-    "C": {"dash_title": "Dashboard", "dash_sub": "jarvisd 0.31.2 · omarchy · up 4d 2h", "greet": "",
+    "C": {"dash_title": "Dashboard", "dash_sub": "jarvisd 0.31.2 · jarvis-host · up 4d 2h", "greet": "",
           "status": "", "chat_ph": "Message Jarvis", "nav_admin": "Server"},
 }
 
@@ -91,8 +91,8 @@ def dashboard(k, vp):
              '<button class="m-btn primary">Finish setup</button></div>')
     attention = (f'<section class="m-card m-attn"><h2 class="t-heading">{icon("alert", "ic warn")}Needs you</h2>'
                  '<div class="m-issue"><p class="m-issue-t">Phones and nodes on your network can\'t reach Jarvis</p>'
-                 '<p class="m-muted">The firewall drops 14 of jarvisd\'s ports from 10.0.0.0/24. It works from this machine only.</p>'
-                 '<div class="m-code"><code>sudo ufw allow from 10.0.0.0/24 to any port 7700:7712 proto tcp</code>'
+                 '<p class="m-muted">The firewall drops 14 of jarvisd\'s ports from 192.168.1.0/24. It works from this machine only.</p>'
+                 '<div class="m-code"><code>sudo ufw allow from 192.168.1.0/24 to any port 7700:7712 proto tcp</code>'
                  f'<button class="m-icbtn" aria-label="Copy command">{icon("copy")}</button></div>'
                  '<div class="m-row-actions"><button class="m-btn">Check again</button><a class="m-link">Why this matters</a></div></div>'
                  '<p class="m-muted m-ok">4 other checks pass.</p></section>')
@@ -118,7 +118,7 @@ def dashboard(k, vp):
               '</ul></section>')
     system = (f'<section class="m-card m-system"><div class="m-cardhead"><h2 class="t-heading">{icon("gear")}This server</h2>'
               f'<button class="m-icbtn" aria-label="Server actions">{icon("more")}</button></div>'
-              '<dl class="m-kv"><dt>Host</dt><dd>omarchy · linux/amd64</dd><dt>Hardware</dt><dd>24 cores · 31 GB · RTX 4090</dd>'
+              '<dl class="m-kv"><dt>Host</dt><dd>jarvis-host · linux/amd64</dd><dt>Hardware</dt><dd>24 cores · 31 GB · RTX 4090</dd>'
               '<dt>Data</dt><dd>5.5 MB · 197 GB free</dd><dt>Listeners</dt><dd>11 serving</dd></dl></section>')
     title = c["dash_title"]
     head = f'<div class="m-pagehead"><div><h1 class="t-title">{title}</h1><p class="m-muted">{c["dash_sub"]}</p></div></div>'
@@ -408,7 +408,7 @@ def spec(d, theme):
     t = d[theme]
     rows = "".join(f'<div><small>{n} {px}/{lh} {w}</small><span style="font-size:{px}px;line-height:{lh};font-weight:{w}">{esc(use)}</span></div>'
                    for n, px, lh, w, use in d["type"])
-    mono = f'<div><small>mono</small><span style="font-family:{d["mono"]};font-size:13px">412 ms · 10.0.0.0/24 · 5eed0000</span></div>'
+    mono = f'<div><small>mono</small><span style="font-family:{d["mono"]};font-size:13px">412 ms · 192.168.1.0/24 · 5eed0000</span></div>'
     return f'<div class="spec" style="font-family:{d["font"]};background:{t["surface"]};color:{t["text"]}">{rows}{mono}</div>'
 
 
