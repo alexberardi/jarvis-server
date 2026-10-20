@@ -45,12 +45,8 @@ function AddonCard({ id, title, icon, description, children }: { id: string; tit
     <Card as="section" aria-labelledby={id}>
       <CardHeader
         id={id}
-        title={
-          <span className="flex items-center gap-2">
-            <span className="text-text-muted">{icon}</span>
-            {title}
-          </span>
-        }
+        title={title}
+        icon={icon}
         description={description}
       />
       {children}
@@ -234,7 +230,7 @@ export default function AddonsPage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader title="Add-ons" description="Use Jarvis on your computers, in your browser and on your phone." />
       <div className="space-y-4">
-        <AddonCard id="addon-this-computer" title="This computer" icon={<Monitor size={18} aria-hidden="true" />}>
+        <AddonCard id="addon-this-computer" title="This computer" icon={<Monitor size={18} />}>
           {hereQ.isLoading || nodesQ.isLoading ? (
             loadingLine('Checking this computer')
           ) : (
@@ -253,7 +249,7 @@ export default function AddonsPage() {
         <AddonCard
           id="addon-desktop-agent"
           title="Desktop agent"
-          icon={<Laptop size={18} aria-hidden="true" />}
+          icon={<Laptop size={18} />}
           description='Talk to Jarvis with "Hey Jarvis" on a computer, and let it open apps, read the screen and type for you.'
         >
           {/* Through jarvisd, verified against the release signature (install plan 3.1). */}
@@ -263,7 +259,7 @@ export default function AddonsPage() {
           </div>
         </AddonCard>
 
-        <AddonCard id="addon-your-devices" title="Your devices" icon={<Laptop size={18} aria-hidden="true" />}>
+        <AddonCard id="addon-your-devices" title="Your devices" icon={<Laptop size={18} />}>
           {nodesQ.isError ? (
             <ErrorState
               className="py-4"
@@ -294,7 +290,7 @@ export default function AddonsPage() {
         <AddonCard
           id="addon-browser-extension"
           title="Browser extension"
-          icon={<Puzzle size={18} aria-hidden="true" />}
+          icon={<Puzzle size={18} />}
           description="Lets Jarvis read and control tabs in your browser, through the desktop agent on the same computer."
         >
           <div className="flex flex-wrap items-center gap-2">
@@ -318,7 +314,7 @@ export default function AddonsPage() {
         <AddonCard
           id="addon-phone-app"
           title="Phone app"
-          icon={<Smartphone size={18} aria-hidden="true" />}
+          icon={<Smartphone size={18} />}
           description="Chat, voice, your inbox and household settings on iPhone and Android."
         >
           <div className="flex flex-wrap gap-2">

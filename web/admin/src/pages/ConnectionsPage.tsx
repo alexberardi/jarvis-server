@@ -290,12 +290,8 @@ function ConnectionCard({
     <Card as="section" aria-labelledby={id}>
       <CardHeader
         id={id}
-        title={
-          <span className="flex items-center gap-2">
-            <span className="text-text-muted">{icon}</span>
-            {title}
-          </span>
-        }
+        title={title}
+        icon={icon}
         description={description}
         actions={actions}
       />
@@ -406,7 +402,7 @@ export default function ConnectionsPage() {
         <ConnectionCard
           id="conn-listeners"
           title="jarvisd listeners"
-          icon={<Server size={18} aria-hidden />}
+          icon={<Server size={18} />}
           description="Managed by jarvisd; change ports with JARVIS_PORT_* in jarvisd.env. Behind a tunnel (e.g. Cloudflare), set each public hostname as that listener's public URL."
         >
           <ul className="divide-y divide-border">
@@ -432,7 +428,7 @@ export default function ConnectionsPage() {
         <ConnectionCard
           id="conn-external"
           title="External services"
-          icon={<Link2 size={18} aria-hidden />}
+          icon={<Link2 size={18} />}
           description="Add-ons and other machines registered with jarvisd's service registry, so nodes and apps can find them."
           actions={
             !adding && (
@@ -501,7 +497,7 @@ export default function ConnectionsPage() {
         <ConnectionCard
           id="conn-apps"
           title="App clients"
-          icon={<AppWindow size={18} aria-hidden />}
+          icon={<AppWindow size={18} />}
           description="Credentials for other programs that call jarvisd (add-ons, a remote GPU box). Phones and nodes don't need one."
           actions={
             !creating && (
