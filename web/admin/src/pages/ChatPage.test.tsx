@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/auth/AuthContext'
 import type { ChatEvent, ChatTurnRequest } from '@/api/chat'
@@ -242,8 +242,10 @@ describe('ChatPage', () => {
       fireEvent.click(send)
     })
     expect(await screen.findByText('Hello.')).toBeInTheDocument()
+    // Each side's name is just above what it said, outside the message itself (e2e reads its exact text).
     const answer = document.querySelector('[data-role="assistant"]') as HTMLElement
-    expect(within(answer).getByText('Jarvis')).toBeInTheDocument()
-    expect(within(document.querySelector('[data-role="user"]') as HTMLElement).getByText('Emma')).toBeInTheDocument()
+    expect(answer.previousElementSibling).toHaveTextContent(/^Jarvis$/)
+    expect(answer).toHaveTextContent(/^Hello\.$/)
+    expect(document.querySelector('[data-role="user"]')?.previousElementSibling).toHaveTextContent(/^Emma$/)
   })
 })
