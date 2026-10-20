@@ -8,6 +8,7 @@
 #      breaks show up here instead of in CI), contract files included
 #   3. race tests of the changed packages (--all: ./...); --no-race skips the race detector
 #   4. the admin SPA's typecheck + vitest when web/admin changed
+#   5. the browser extension's unit tests (node --test) when it or they changed
 #
 # "Changed" is everything differing from the merge base with REF (default origin/main, else
 # main), committed or not, plus untracked files.
@@ -71,6 +72,13 @@ if printf '%s\n' "${CHANGED[@]}" | grep -q '^web/admin/'; then
   step "admin SPA (tsc, vitest)"
   [ -d web/admin/node_modules ] || npm --prefix web/admin ci --silent
   (cd web/admin && npx tsc -b && npx vitest run) || fail=1
+fi
+
+if printf '%s\n' "${CHANGED[@]}" | grep -q '^internal/agent/browser/\(extension\|jstest\)/'; then
+  step "browser extension (node --test)"
+  if node --test internal/agent/browser/jstest/*.test.mjs >/dev/null; then echo ok; else
+    node --test internal/agent/browser/jstest/*.test.mjs | tail -40; fail=1
+  fi
 fi
 
 echo

@@ -7,7 +7,7 @@ import { formatVersion } from '@/lib/format'
 import { timeAgo } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import type { AdminNode } from '@/api/admin'
-import { computerControlState, extensionState } from '@/api/nodes'
+import { computerControlState, extensionState, websiteAccessState } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
 
 const extensionText = { connected: 'connected', disconnected: 'not connected', disabled: 'off' } as const
@@ -15,6 +15,8 @@ const extensionText = { connected: 'connected', disconnected: 'not connected', d
 function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const desktop = live?.node_kind === 'desktop'
   const ext = extensionState(live)
+  // Website access off: the browser is connected but Jarvis can't read or act on its pages.
+  const accessOff = ext === 'connected' && websiteAccessState(live) === 'off'
   const computerControl = computerControlState(live)
   const Icon = desktop ? Laptop : Cpu
   return (
@@ -67,6 +69,11 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
         {ext && (
           <p>
             <span className="font-medium">Browser extension:</span> {extensionText[ext]}
+            {accessOff && (
+              <span title='Turn it on with "Turn on" in the Jarvis Browser Control toolbar button on that computer'>
+                , website access off
+              </span>
+            )}
           </p>
         )}
         {computerControl && (

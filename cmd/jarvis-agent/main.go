@@ -65,7 +65,9 @@ const (
 	extDisabled     = "disabled"     // run --no-browser
 )
 
-// heartbeatCaps reports the browser extension's state, and wakes a heartbeat when it changes;
+// heartbeatCaps reports the browser extension's state, and with a browser connected whose
+// extension says, browser_website_access "on" or "off" (off while any has it off: pages can't be
+// read or acted on there); it wakes a heartbeat when these change;
 // with sw, also computer control's switch as computer_control "on" or "off" (its changes wake
 // a heartbeat through Runner.BeatNow).
 func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[string]any, changed func() <-chan struct{}) {
@@ -84,6 +86,11 @@ func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[strin
 			}
 		}
 		out := map[string]any{"browser_extension": state}
+		if hub != nil {
+			if a := hub.WebsiteAccess(); a != nil {
+				out["browser_website_access"] = map[bool]string{true: "on", false: "off"}[*a]
+			}
+		}
 		if sw != nil {
 			out["computer_control"] = map[bool]string{true: "on", false: "off"}[sw.On()]
 		}

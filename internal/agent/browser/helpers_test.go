@@ -64,6 +64,12 @@ func (f *fakeExt) received() []Message {
 // commands (nil: never answers).
 func connectExt(t *testing.T, h *Hub, path string, browser string, focused bool, handle func(Message) Message) *fakeExt {
 	t.Helper()
+	return connectExtHello(t, h, path, Message{Type: "hello", Protocol: Protocol, Browser: browser, BrowserVersion: "1", ExtensionVersion: "0.1.0", Focused: focused}, handle)
+}
+
+// connectExtHello is connectExt with the extension's hello given.
+func connectExtHello(t *testing.T, h *Hub, path string, hello Message, handle func(Message) Message) *fakeExt {
+	t.Helper()
 	before := len(h.Browsers())
 	c, err := Dial(path)
 	if err != nil {
@@ -72,7 +78,7 @@ func connectExt(t *testing.T, h *Hub, path string, browser string, focused bool,
 	f := &fakeExt{c: c, handle: handle}
 	t.Cleanup(func() { _ = c.Close() })
 	f.send(Message{Type: "host", Origin: "chrome-extension://" + ChromeDevExtensionID + "/"})
-	f.send(Message{Type: "hello", Protocol: Protocol, Browser: browser, BrowserVersion: "1", ExtensionVersion: "0.1.0", Focused: focused})
+	f.send(hello)
 	go func() {
 		sc := bufio.NewScanner(c)
 		for sc.Scan() {

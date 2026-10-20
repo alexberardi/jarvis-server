@@ -217,6 +217,10 @@ func browserInstall(args []string, w io.Writer) error {
 				filepath.Join(fdir, "manifest.json"))
 		}
 	}
+	if firefox || chromium {
+		st, err := queryLive()
+		fmt.Fprint(w, installAccessNote(firefox, chromium, st, err))
+	}
 	if !firefox && !chromium {
 		fmt.Fprintln(w, "\nNo supported browser found for this user. Install Firefox or a Chromium browser, or pass --all.")
 	} else {
@@ -322,7 +326,17 @@ func browserStatus(w io.Writer) error {
 	return nil
 }
 
-// browserLive is one line about the running agent's connected browsers.
+// queryLive asks the running agent which browsers are connected.
+func queryLive() (browser.StatusReply, error) {
+	path, err := browser.SocketPath()
+	if err != nil {
+		return browser.StatusReply{}, err
+	}
+	return browser.QueryStatus(path)
+}
+
+// browserLive is a line about the running agent's connected browsers, and how to turn website
+// access on for each one that has it off.
 func browserLive() string {
 	path, err := browser.SocketPath()
 	if err != nil {
@@ -332,6 +346,10 @@ func browserLive() string {
 	if err != nil {
 		return "Agent: not running (or not reachable at " + path + ")"
 	}
+	return liveText(st)
+}
+
+func liveText(st browser.StatusReply) string {
 	if len(st.Browsers) == 0 {
 		return "Agent: running; no browser connected (is the extension installed and enabled?)"
 	}
@@ -341,9 +359,50 @@ func browserLive() string {
 		if b.Focused {
 			s += ", focused"
 		}
+		if b.WebsiteAccess != nil {
+			s += ", website access " + map[bool]string{true: "on", false: "off"}[*b.WebsiteAccess]
+		}
 		parts = append(parts, s)
 	}
-	return "Agent: running; connected: " + strings.Join(parts, "; ")
+	return "Agent: running; connected: " + strings.Join(parts, "; ") + accessOffSteps(st)
+}
+
+// accessOffSteps is a line per connected browser whose extension has website access off.
+func accessOffSteps(st browser.StatusReply) string {
+	var out string
+	for _, b := range st.Browsers {
+		if b.WebsiteAccess != nil && !*b.WebsiteAccess {
+			out += fmt.Sprintf("\n  %s: website access is off, so Jarvis can't read or act on pages. To turn it on: %s",
+				b.Browser, browser.WebsiteAccessSteps(b.Browser))
+		}
+	}
+	return out
+}
+
+// installAccessNote ends browser install: how to turn website access on in each connected
+// browser that has it off, and, while no Firefox has connected to say, the Firefox step (Firefox
+// lets the user leave it off at install). Empty when there's nothing to do.
+func installAccessNote(firefox, chromium bool, st browser.StatusReply, err error) string {
+	if err != nil {
+		st = browser.StatusReply{}
+	}
+	out := accessOffSteps(st)
+	if firefox {
+		reported := false
+		for _, b := range st.Browsers {
+			if b.WebsiteAccess != nil && strings.Contains(strings.ToLower(b.Browser), "firefox") {
+				reported = true
+			}
+		}
+		if !reported {
+			out += "\nFirefox: Jarvis needs website access to read and act on pages. If the toolbar button says " +
+				"\"Website access: off\": " + browser.WebsiteAccessSteps("Firefox")
+		}
+	}
+	if out == "" {
+		return ""
+	}
+	return "\n" + strings.TrimPrefix(out, "\n") + "\n"
 }
 
 // offerBrowserSetup is enroll's last step: set up browser control if asked to, or ask.

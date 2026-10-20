@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,5 +129,58 @@ func TestBrowserAnswerDefaultsToYes(t *testing.T) {
 		if got := browserAnswerYes(c.line, c.err); got != c.want {
 			t.Errorf("browserAnswerYes(%q, %v) = %v, want %v", c.line, c.err, got, c.want)
 		}
+	}
+}
+
+// browser status prints each connected browser's website access (on, off, or nothing for an
+// extension that doesn't report it), and how to turn it on for each one that has it off.
+func TestBrowserLiveWebsiteAccess(t *testing.T) {
+	on, off := true, false
+	got := liveText(browser.StatusReply{Browsers: []browser.BrowserInfo{
+		{Browser: "Firefox", Version: "140.0", ExtensionVersion: "0.3.2", Focused: true, WebsiteAccess: &off},
+		{Browser: "Google Chrome", Version: "130", ExtensionVersion: "0.3.2", WebsiteAccess: &on},
+		{Browser: "Brave", Version: "1", ExtensionVersion: "0.3.1"},
+	}})
+	for _, want := range []string{
+		"Firefox 140.0 (extension 0.3.2), focused, website access off;",
+		"Google Chrome 130 (extension 0.3.2), website access on;",
+		"Brave 1 (extension 0.3.1)\n",
+		"Firefox: website access is off, so Jarvis can't read or act on pages. To turn it on: " + browser.WebsiteAccessSteps("Firefox"),
+	} {
+		if !strings.Contains(got+"\n", want) {
+			t.Errorf("status lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Google Chrome: website access is off") || strings.Contains(got, "Brave: website access") {
+		t.Errorf("steps for a browser that doesn't need them:\n%s", got)
+	}
+	if !strings.Contains(browser.WebsiteAccessSteps("Firefox"), "about:addons") ||
+		!strings.Contains(browser.WebsiteAccessSteps("Google Chrome"), "Site access") {
+		t.Errorf("steps: %q / %q", browser.WebsiteAccessSteps("Firefox"), browser.WebsiteAccessSteps("Google Chrome"))
+	}
+}
+
+// browser install ends with how to turn website access on: for every connected browser that has
+// it off, and for Firefox (where it can be off from the install on) when Firefox hasn't
+// connected yet to say.
+func TestInstallAccessNote(t *testing.T) {
+	on, off := true, false
+	if got := installAccessNote(false, true, browser.StatusReply{}, nil); got != "" {
+		t.Errorf("chromium only, nothing connected: %q", got)
+	}
+	got := installAccessNote(true, false, browser.StatusReply{}, errors.New("not running"))
+	if !strings.Contains(got, browser.WebsiteAccessSteps("Firefox")) {
+		t.Errorf("firefox, not connected: %q", got)
+	}
+	got = installAccessNote(true, true, browser.StatusReply{Browsers: []browser.BrowserInfo{{Browser: "Firefox", WebsiteAccess: &on}}}, nil)
+	if got != "" {
+		t.Errorf("firefox connected with access on: %q", got)
+	}
+	got = installAccessNote(true, true, browser.StatusReply{Browsers: []browser.BrowserInfo{
+		{Browser: "Firefox", WebsiteAccess: &on}, {Browser: "Google Chrome", WebsiteAccess: &off},
+	}}, nil)
+	if !strings.Contains(got, "Google Chrome: website access is off") || !strings.Contains(got, browser.WebsiteAccessSteps("Google Chrome")) ||
+		strings.Contains(got, "Firefox") {
+		t.Errorf("chrome off: %q", got)
 	}
 }
