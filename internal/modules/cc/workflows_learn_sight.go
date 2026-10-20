@@ -227,22 +227,9 @@ func (m *Module) nameBatch(ctx context.Context, label string, evs []desktopEvent
 	if err != nil {
 		return 0, err
 	}
-	var out struct {
-		Events []struct {
-			Event      int     `json:"event"`
-			App        string  `json:"app"`
-			Role       string  `json:"role"`
-			Label      string  `json:"label"`
-			Did        string  `json:"did"`
-			Confidence float64 `json:"confidence"`
-		} `json:"events"`
-	}
-	i, j := strings.Index(resp.Content, "{"), strings.LastIndex(resp.Content, "}")
-	if i < 0 || j < i {
-		return 0, errors.New("the model's answer isn't JSON")
-	}
-	if err := json.Unmarshal([]byte(resp.Content[i:j+1]), &out); err != nil {
-		return 0, fmt.Errorf("the model's answer isn't the events JSON: %w", err)
+	out, err := parseSightAnswer(resp.Content)
+	if err != nil {
+		return 0, err
 	}
 	clean := func(s string) string { return truncateRunes(oneLine(s), sightMaxLabel) }
 	named := 0
@@ -261,6 +248,43 @@ func (m *Module) nameBatch(ctx context.Context, label string, evs []desktopEvent
 		named++
 	}
 	return named, nil
+}
+
+type sightAnswer struct {
+	Events []struct {
+		Event      int     `json:"event"`
+		App        string  `json:"app"`
+		Role       string  `json:"role"`
+		Label      string  `json:"label"`
+		Did        string  `json:"did"`
+		Confidence float64 `json:"confidence"`
+	} `json:"events"`
+}
+
+// parseSightAnswer reads the model's {"events": [...]}, or the bare list a model may answer
+// instead.
+func parseSightAnswer(s string) (sightAnswer, error) {
+	var out sightAnswer
+	i := strings.IndexAny(s, "{[")
+	if i < 0 {
+		return out, errors.New("the model's answer isn't JSON")
+	}
+	if s[i] == '[' {
+		if j := strings.LastIndex(s, "]"); j > i {
+			if err := json.Unmarshal([]byte(s[i:j+1]), &out.Events); err != nil {
+				return out, fmt.Errorf("the model's answer isn't the events JSON: %w", err)
+			}
+			return out, nil
+		}
+	}
+	j := strings.LastIndex(s, "}")
+	if j < i {
+		return out, errors.New("the model's answer isn't JSON")
+	}
+	if err := json.Unmarshal([]byte(s[i:j+1]), &out); err != nil {
+		return out, fmt.Errorf("the model's answer isn't the events JSON: %w", err)
+	}
+	return out, nil
 }
 
 // sightClickText is a click as the model sees it next to its keyframe: the click, its window,

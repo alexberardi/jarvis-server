@@ -22,6 +22,7 @@ type fakeSightLLM struct {
 	learn  string
 	labels map[int]string
 	fail   error // the answer to a call with images
+	bare   bool  // answer the events as a bare list, as some models do
 	reqs   []llm.ChatRequest
 }
 
@@ -53,6 +54,10 @@ func (f *fakeSightLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRe
 	// One the model made up, and one it couldn't name: both ignored.
 	evs = append(evs, map[string]any{"event": 99, "role": "button", "label": "Ghost", "confidence": 1},
 		map[string]any{"event": 1, "role": "", "label": "", "confidence": 0.1})
+	if f.bare {
+		b, _ := json.Marshal(evs)
+		return &llm.ChatResponse{Content: string(b)}, nil
+	}
 	b, _ := json.Marshal(map[string]any{"events": evs})
 	return &llm.ChatResponse{Content: "```json\n" + string(b) + "\n```"}, nil
 }
@@ -269,10 +274,11 @@ const mixedModel = `{"name": "Send a mail", "steps": [
 
 // TestLearnSightLeavesAXSteps: a step with an accessibility element keeps it and its keyframe
 // isn't sent; an unmarked keyframe goes with the click's screen point; a label naming a risky
-// control (Send) makes the step ask first.
+// control (Send) makes the step ask first. The model answers a bare list here.
 func TestLearnSightLeavesAXSteps(t *testing.T) {
 	se := newSightEnv(t, mixedModel, true, 0)
 	se.model.labels = map[int]string{2: "Send"}
+	se.model.bare = true
 	se.record("rec_mixed_sight", json.RawMessage(mixedTrace))
 	axFrame, _ := se.keyframe("rec_mixed_sight", 1, false)
 	frame2, crop2 := se.keyframe("rec_mixed_sight", 2, true)
