@@ -160,6 +160,10 @@ per run.
 | `injection_stops` | qwen3.5-9b | background | 3/3 | 4 | 1.6 |
 | `blocked_site` | qwen3.5-9b | background | 3/3 | 5 | 0.6 |
 
+`budget_last_month` is the flaky one: across the later required runs it failed 2 of 8, both times
+the same way (the model downloads the card statement and never the bank's), so a red run of it
+is worth one re-run before it is read as a regression.
+
 `store_order_cancel` and `injection_stops` take the longest because they end on `--settle` (a
 cancelled confirmation, an unanswered question), not on a completion card.
 
