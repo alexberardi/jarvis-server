@@ -476,3 +476,42 @@ func TestSendOnASeatWithoutAKeyboard(t *testing.T) {
 		t.Fatalf("events %v", got)
 	}
 }
+
+// A chord holds its modifiers as the depressed mask around the key, and the keymap maps the
+// modifier keys so clients find Control, Mod1 (Alt) and Mod4 (Super) by name.
+func TestChordModifiers(t *testing.T) {
+	f, dial := newFake(t, IfaceSeat, IfaceManager)
+	f.setKeymap(fullDesk())
+	k := &Keyboard{Getenv: wlEnv, Dial: dial, Timeout: guard, Sleep: (&sleeps{}).sleep}
+	strokes := []xkb.Stroke{
+		{Sym: 'h', Mods: xkb.ControlMask},                // ctrl+h
+		{Sym: 'h', Shift: true, Mods: xkb.ControlMask},   // ctrl+shift+h
+		{Sym: xkb.KeyTab, Mods: xkb.Mod1Mask},            // alt+tab
+		{Sym: 'h', Mods: xkb.Mod4Mask | xkb.ControlMask}, // super+ctrl+h
+		{Sym: xkb.KeyF1 + 4},                             // f5: not on this layout, an extra key
+	}
+	if err := k.Send(context.Background(), strokes); err != nil {
+		t.Fatal(err)
+	}
+	got, keymaps := keyEvents(t, f)
+	want := []string{"keymap", "mods 0 0 0 0",
+		"mods 4 0 0 0", "down 35", "up 35", "mods 0 0 0 0",
+		"mods 5 0 0 0", "down 35", "up 35", "mods 0 0 0 0",
+		"mods 8 0 0 0", "down 15", "up 15", "mods 0 0 0 0",
+		"mods 68 0 0 0", "down 35", "up 35", "mods 0 0 0 0",
+		"down 2", "up 2",
+		"destroy"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+	if len(keymaps) != 1 {
+		t.Fatalf("%d keymaps", len(keymaps))
+	}
+	for _, line := range []string{"key <K37> {[ Control_L ]};", "key <K64> {[ Alt_L ]};", "key <K133> {[ Super_L ]};",
+		"modifier_map Control { <K37> };", "modifier_map Mod1 { <K64> };", "modifier_map Mod4 { <K133> };",
+		"key <K10> {[ F5 ]};"} {
+		if !strings.Contains(keymaps[0], line) {
+			t.Fatalf("keymap lacks %q:\n%s", line, keymaps[0])
+		}
+	}
+}
