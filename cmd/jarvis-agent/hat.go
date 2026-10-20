@@ -14,6 +14,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
+	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
 
@@ -263,15 +264,29 @@ func hatCmd(ctx context.Context, args []string) error {
 // piState is the node settings the Pi starts with: its flags, after agent.json.
 func piState(vf *voiceFlags, hf *hatFlags) pinode.State {
 	return pinode.State{WakeThreshold: vf.threshold, WakeAck: !vf.noChimes, FollowUpListen: vf.followUp,
-		FollowUpSilence: vf.followSilence, LEDEnabled: hf.mode != "off" && !hf.noLEDs, LEDBrightness: hf.brightness}
+		FollowUpSilence: vf.followSilence, LEDEnabled: hf.mode != "off" && !hf.noLEDs, LEDBrightness: hf.brightness,
+		SilenceThreshold: vf.silenceThreshold, SilenceSecs: vf.listenSilence,
+		FollowUpMinAfterOnset: vf.followMinAfterOnset, FollowUpMinSpeech: vf.followMinSpeech}
+}
+
+// piAudio is the speaker's volume as the settings verbs set it and the snapshot reports it
+// (*sdkhost.Audio).
+type piAudio interface {
+	pinode.Audio
+	Volume(ctx context.Context) (int, error)
+	Muted() bool
 }
 
 // wirePiNode gives the runner the Pi's verbs (update_node_config, preview_led_pattern,
 // measure_ambient_noise; internal/agent/pinode): changes go to the HAT's LEDs (hd, nil
-// without one), to the voice pipeline through live, and into agent.json at path. It returns
-// the settings snapshot's node_config, which reports them.
-func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, live *voice.Live, path string, log *slog.Logger) func() map[string]any {
+// without one), to the voice pipeline through live, to the speaker through audio (nil: none),
+// and into agent.json at path. It returns the settings snapshot's node_config, which reports them.
+func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, live *voice.Live, audio *sdkhost.Audio, path string, log *slog.Logger) func() map[string]any {
 	pn := pinode.New(piState(vf, hf), path, log)
+	var pa piAudio
+	if audio != nil {
+		pn.Audio, pa = audio, audio
+	}
 	if hd != nil && hd.leds != nil {
 		pn.LEDs = hd.leds
 	}
@@ -283,32 +298,46 @@ func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, li
 		verbs[name] = func(ctx context.Context, cc *node.CC, det map[string]any) { v(ctx, cc, det) }
 	}
 	addVerbs(r, verbs)
-	return piNodeConfig(pn.State, vf.bargeIn, hd, hat.Detected())
+	return piNodeConfig(pn.State, vf.bargeIn, hd, pa, hat.Detected())
 }
 
 // piNodeConfig is the Pi profile's settings-snapshot node_config: the HAT (detected: hat.Detected;
 // the LEDs and button this agent actually opened) and the voice and LED settings it runs with
 // now (state: the flags, then the app's changes; bargeIn: the flag, not changed live yet), under
-// the Python node's keys (settings_snapshot_service.py build_snapshot). Keys the Go node has no
-// setting for yet (silence thresholds, barge-in thresholds, maintenance restart, update consent)
-// are left out.
-func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, detected bool) func() map[string]any {
+// the Python node's keys (settings_snapshot_service.py build_snapshot), and the speaker's volume
+// and mute (audio; nil or unreadable: left out, as Python's). Keys the Go node has no setting for
+// yet (min/max record seconds, barge-in thresholds, maintenance restart, update consent) are
+// left out.
+func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, audio piAudio, detected bool) func() map[string]any {
 	return func() map[string]any {
 		leds := hd != nil && hd.leds != nil
 		st := state()
-		return map[string]any{
-			"wake_word_threshold":        st.WakeThreshold,
-			"wake_ack_audio_enabled":     st.WakeAck,
-			"follow_up_listen_seconds":   st.FollowUpListen,
-			"follow_up_silence_duration": st.FollowUpSilence,
-			"barge_in_enabled":           bargeIn,
-			"led_enabled":                st.LEDEnabled,
-			"led_brightness_percent":     st.LEDBrightness,
+		nc := map[string]any{
+			"wake_word_threshold":                   st.WakeThreshold,
+			"wake_ack_audio_enabled":                st.WakeAck,
+			"follow_up_listen_seconds":              st.FollowUpListen,
+			"follow_up_silence_duration":            st.FollowUpSilence,
+			"barge_in_enabled":                      bargeIn,
+			"silence_threshold":                     int(st.SilenceThreshold),
+			"silence_duration":                      st.SilenceSecs,
+			"follow_up_min_record_after_onset_secs": st.FollowUpMinAfterOnset,
+			"follow_up_min_speech_secs":             st.FollowUpMinSpeech,
+			"led_enabled":                           st.LEDEnabled,
+			"led_brightness_percent":                st.LEDBrightness,
 			"hardware": map[string]any{
 				"hat_detected":        detected || leds,
 				"led_chain_available": leds,
 				"button_available":    leds && hd.closeLine != nil,
 			},
 		}
+		if audio != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if pct, err := audio.Volume(ctx); err == nil {
+				nc["volume_percent"] = pct
+			}
+			nc["is_muted"] = audio.Muted()
+		}
+		return nc
 	}
 }

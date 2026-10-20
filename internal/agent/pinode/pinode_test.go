@@ -59,6 +59,25 @@ func (v *fakeVoice) Measure(ctx context.Context, d time.Duration) ([]float64, er
 	return v.rms, v.err
 }
 
+type fakeAudio struct {
+	mu     sync.Mutex
+	volume []int
+	muted  []bool
+}
+
+func (a *fakeAudio) SetVolume(_ context.Context, p int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.volume = append(a.volume, p)
+	return true
+}
+func (a *fakeAudio) SetMuted(_ context.Context, m bool) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.muted = append(a.muted, m)
+	return true
+}
+
 type fakeCC struct {
 	valid    map[string]bool
 	verified []string
@@ -84,7 +103,8 @@ func (f *fakeCC) PostAmbientResult(_ context.Context, rid string, p map[string]a
 }
 
 func initial() State {
-	return State{WakeThreshold: 0.4, WakeAck: true, FollowUpListen: 4, FollowUpSilence: 1, LEDEnabled: true, LEDBrightness: 100}
+	return State{WakeThreshold: 0.4, WakeAck: true, FollowUpListen: 4, FollowUpSilence: 1, LEDEnabled: true, LEDBrightness: 100,
+		SilenceThreshold: 300, SilenceSecs: 0.8, FollowUpMinAfterOnset: 0.7, FollowUpMinSpeech: 0.3}
 }
 
 func newNode(t *testing.T) (*Node, *fakeLEDs, *fakeVoice, string) {
@@ -92,7 +112,7 @@ func newNode(t *testing.T) (*Node, *fakeLEDs, *fakeVoice, string) {
 	leds, v := &fakeLEDs{}, &fakeVoice{cfg: voice.DefaultConfig()}
 	path := filepath.Join(t.TempDir(), settings.FileName)
 	n := New(initial(), path, quiet)
-	n.LEDs, n.Voice = leds, v
+	n.LEDs, n.Voice, n.Audio = leds, v, &fakeAudio{}
 	return n, leds, v, path
 }
 
@@ -152,18 +172,32 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 		"wake_ack_audio_enabled":     false,
 		"follow_up_listen_seconds":   0.0,
 		"follow_up_silence_duration": 0.7,
-		"volume_percent":             30.0, // not applied: no Pi volume control yet
-		"is_muted":                   true,
-		"room":                       "kitchen",
-		"api_key":                    "nope",
+		// #295: not the Go defaults (300, 0.8, 0.7, 0.3), so a key left unapplied shows.
+		"silence_threshold":                     1000.9, // Python's int()
+		"silence_duration":                      0.5,
+		"follow_up_min_record_after_onset_secs": 0.9,
+		"follow_up_min_speech_secs":             "0.45",
+		"volume_percent":                        30.0, // the mixer (sdkhost.Audio), which persists it in volume.json
+		"is_muted":                              true,
+		"room":                                  "kitchen",
+		"api_key":                               "nope",
 	}})
+	a := n.Audio.(*fakeAudio)
+	if !slices.Equal(a.volume, []int{30}) || !slices.Equal(a.muted, []bool{true}) {
+		t.Fatalf("audio %v %v", a.volume, a.muted)
+	}
+	if e, f := v.cfg.Endpointing, v.cfg.FollowUp; e.SilenceThreshold != 1000 || e.SilenceSecs != 0.5 ||
+		f.MinAfterOnsetSecs != 0.9 || f.MinSpeechSecs != 0.45 {
+		t.Fatalf("endpointing %+v, follow-up %+v", e, f)
+	}
 	if !slices.Equal(leds.enabled, []bool{false}) || !slices.Equal(leds.bright, []int{40}) {
 		t.Fatalf("leds %v %v", leds.enabled, leds.bright)
 	}
 	if v.cfg.WakeThreshold != 0.55 || v.cfg.Chimes || v.cfg.FollowUp.ListenSecs != 0 || v.cfg.FollowUp.SilenceSecs != 0.7 {
 		t.Fatalf("voice cfg %+v", v.cfg)
 	}
-	want := State{WakeThreshold: 0.55, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDBrightness: 40}
+	want := State{WakeThreshold: 0.55, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDBrightness: 40,
+		SilenceThreshold: 1000, SilenceSecs: 0.5, FollowUpMinAfterOnset: 0.9, FollowUpMinSpeech: 0.45}
 	if got := n.State(); got != want {
 		t.Fatalf("state %+v", got)
 	}
@@ -172,7 +206,8 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 		t.Fatal(err, unknown)
 	}
 	if *s.Voice != true || *s.LEDs != false || *s.LEDBrightness != 40 || *s.WakeThreshold != 0.55 ||
-		*s.Chimes != false || *s.FollowUp != 0 || *s.FollowUpSilence != 0.7 {
+		*s.Chimes != false || *s.FollowUp != 0 || *s.FollowUpSilence != 0.7 ||
+		*s.SilenceThreshold != 1000 || *s.ListenSilence != 0.5 || *s.FollowUpMinAfterOnset != 0.9 || *s.FollowUpMinSpeech != 0.45 {
 		t.Fatalf("saved %+v", s)
 	}
 	b, _ := os.ReadFile(path)
@@ -186,11 +221,19 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 func TestUpdateSkipsBadValues(t *testing.T) {
 	n, leds, v, path := newNode(t)
 	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{
-		"wake_word_threshold":        1.5,
-		"led_brightness_percent":     "bright",
-		"follow_up_silence_duration": 0.0,
-		"led_enabled":                1.0, // Python: str(1) == "1" is true
+		"wake_word_threshold":                   1.5,
+		"led_brightness_percent":                "bright",
+		"follow_up_silence_duration":            0.0,
+		"led_enabled":                           1.0, // Python: str(1) == "1" is true
+		"silence_threshold":                     0.5, // int() is 0
+		"silence_duration":                      -1.0,
+		"follow_up_min_record_after_onset_secs": 0.0,
+		"follow_up_min_speech_secs":             -0.1,
+		"volume_percent":                        "loud",
 	}})
+	if a := n.Audio.(*fakeAudio); len(a.volume) != 0 {
+		t.Fatalf("volume %v", a.volume)
+	}
 	if v.tunes != 0 || len(leds.bright) != 0 || !slices.Equal(leds.enabled, []bool{true}) {
 		t.Fatalf("tunes %d, leds %v %v", v.tunes, leds.bright, leds.enabled)
 	}
@@ -215,6 +258,23 @@ func TestUpdateWithoutAHatOrVoiceStillPersists(t *testing.T) {
 	if n.State().LEDBrightness != 100 {
 		t.Fatal(n.State())
 	}
+}
+
+func TestVolumeIsClampedAndLeftOutOfAgentJSON(t *testing.T) {
+	n, _, _, path := newNode(t)
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{
+		"volume_percent": 140.0, "is_muted": "false"}})
+	a := n.Audio.(*fakeAudio)
+	if !slices.Equal(a.volume, []int{100}) || !slices.Equal(a.muted, []bool{false}) {
+		t.Fatalf("audio %v %v", a.volume, a.muted)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a volume-only update wrote agent.json (volume.json is its file)")
+	}
+
+	// No mixer on this build: skipped, not an error.
+	n = New(initial(), "", quiet)
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{"volume_percent": 50.0}})
 }
 
 func TestUpdateWithNoSettingsDoesNothing(t *testing.T) {
