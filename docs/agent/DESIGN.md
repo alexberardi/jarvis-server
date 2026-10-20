@@ -2235,3 +2235,52 @@ The agent, with the same packages in a real sidecar, must give the same answers 
 
 Not run: the mobile app's screens themselves against an agent.
 
+
+## 17. Linux: the user's hand and the stop hotkey (2026-10-20)
+
+While Jarvis controls the computer, `computer.Guard` pauses the task when the user touches the
+mouse or keyboard (COMPUTER-CONTROL.md, C9). On Linux, `input.NativeMonitor()` tells it when the
+last input came:
+
+- **Wayland (wlroots: Hyprland, sway)**: `idlenotify.Monitor`, one `ext_idle_notifier_v1`
+  input-idle notification (version 2, which idle inhibitors such as a playing video don't hold
+  back) with a 1 s timeout on the default seat. A `resumed` is input at that moment; an `idled`
+  dates input 1 s before it; and no `idled` for over 1.25 s since the latest event means input
+  within the last 1.25 s. So input that starts less than a second after our own (the seat never
+  went idle, so no `resumed`) still pauses, about a second later, from its `idled` or from the
+  missing one. A version 1 notifier (inhibitors hold its `idled` back) counts its events only.
+  Compositors without the protocol (GNOME, KDE) give `Since` an error: the guard then has only
+  the pointer drift check.
+- **X11**: `x11.Idle`, the server's idle time (MIT-SCREEN-SAVER `QueryInfo`) on a kept
+  connection, 1 ms rounded forward (the server counts whole milliseconds).
+
+Both count our own injected events as input too (virtual pointer and keyboard, XTEST); the
+guard tells them apart by time, against its own injection windows (+250 ms). Pointer drift
+(`Cursor()`, > 3 px from where our last action left it) is the same check as on macOS.
+
+**The stop hotkey, Ctrl+Alt+Esc** (`island.RunWith`/`RunLoop` start it; it calls
+`AppEvents.StopHotkey`, which stops what Jarvis is doing, like the tray's "Stop Jarvis"):
+
+- **X11**: a passive grab of Ctrl+Alt+Escape on the root window (also with CapsLock and NumLock
+  on). Another program holding it is logged and the tooltip names no hotkey.
+- **Wayland**: the `org.freedesktop.portal.GlobalShortcuts` portal (one session for the agent's
+  life, shortcut id `stop`, preferred trigger `CTRL+ALT+Escape`). GNOME and KDE ask the user
+  once; the tooltip names the key the desktop reports.
+- **Hyprland**: its portal (xdg-desktop-portal-hyprland) binds no key itself, and without the
+  portal there is none, so the agent logs this line to add to `~/.config/hypr/hyprland.conf`:
+
+  ```
+  bind = CTRL ALT, Escape, exec, jarvis-agent computer stop
+  ```
+
+  `jarvis-agent computer stop` sends the running agent `computer-stop` over its control socket.
+  The tooltip names no hotkey then: the agent can't see that the line is there.
+
+Tests: `idlenotify` against a scripted compositor, `x11` against `fakeConn`, the portal client
+against a fake bus and (`JARVIS_PORTAL_FRONTEND`) the real xdg-desktop-portal frontend with a
+fake GlobalShortcuts backend. Live, only ever in a disposable session (they move the pointer):
+`JARVIS_GUARD_LINUX_LIVE=1 go test -run GuardLinuxLive ./internal/agent/computer/` in a headless
+sway or a private X server (our moves and keys don't pause; a second client's key press does,
+also 400 ms after our own move), and `JARVIS_X11_STOPKEY=1 go test -run NativeStopKey
+./internal/agent/x11/` (a second client's Ctrl+Alt+Esc reaches the grab, a plain Escape doesn't,
+and a second grab is refused).

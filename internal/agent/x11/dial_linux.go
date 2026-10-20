@@ -9,8 +9,10 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/jezek/xgb"
+	"github.com/jezek/xgb/screensaver"
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
 )
@@ -27,6 +29,8 @@ type xconn struct {
 	root  xproto.Window
 	xtest bool
 	atoms map[string]uint32
+	saver error // why MIT-SCREEN-SAVER can't be used; nil once it can
+	saved bool  // saver is known
 }
 
 func dialX() (Conn, error) {
@@ -204,4 +208,35 @@ func (x *xconn) Geometry(win uint32) (int, int, int, int, error) {
 		return 0, 0, 0, 0, err
 	}
 	return int(t.DstX), int(t.DstY), int(g.Width), int(g.Height), nil
+}
+
+func (x *xconn) IdleTime() (time.Duration, error) {
+	if !x.saved {
+		x.saver, x.saved = screensaver.Init(x.c), true
+	}
+	if x.saver != nil {
+		return 0, fmt.Errorf("the X server has no MIT-SCREEN-SAVER extension: %w", x.saver)
+	}
+	r, err := screensaver.QueryInfo(x.c, xproto.Drawable(x.root)).Reply()
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(r.MsSinceUserInput) * time.Millisecond, nil
+}
+
+func (x *xconn) GrabKey(code byte, mods uint16) error {
+	return xproto.GrabKeyChecked(x.c, true, x.root, mods, xproto.Keycode(code),
+		xproto.GrabModeAsync, xproto.GrabModeAsync).Check()
+}
+
+func (x *xconn) NextKeyPress() (byte, uint16, error) {
+	for {
+		ev, err := x.c.WaitForEvent()
+		if ev == nil && err == nil {
+			return 0, 0, io.EOF
+		}
+		if kp, ok := ev.(xproto.KeyPressEvent); ok {
+			return byte(kp.Detail), kp.State, nil
+		}
+	}
 }

@@ -31,7 +31,12 @@ type fakeConn struct {
 	pointer [2]int
 	geoms   map[uint32][4]int // win -> root-relative x, y, w, h
 	depth   byte
-	pixels  []byte // what GetImage returns
+	pixels  []byte        // what GetImage returns
+	idle    time.Duration // what IdleTime returns
+	idleErr error
+	grabErr error       // what GrabKey returns
+	presses chan uint16 // NextKeyPress's key presses (their modifier state); closed: the connection ended
+	onClose func()
 }
 
 type prop struct {
@@ -141,7 +146,23 @@ func (f *fakeConn) Geometry(win uint32) (int, int, int, int, error) {
 	return g[0], g[1], g[2], g[3], nil
 }
 func (f *fakeConn) Sync() error { f.log = append(f.log, "sync"); return nil }
-func (f *fakeConn) Close()      {}
+func (f *fakeConn) Close() {
+	if f.onClose != nil {
+		f.onClose()
+	}
+}
+func (f *fakeConn) IdleTime() (time.Duration, error) { return f.idle, f.idleErr }
+func (f *fakeConn) GrabKey(code byte, mods uint16) error {
+	f.log = append(f.log, fmt.Sprintf("grab %d %#x", code, mods))
+	return f.grabErr
+}
+func (f *fakeConn) NextKeyPress() (byte, uint16, error) {
+	st, ok := <-f.presses
+	if !ok {
+		return 0, 0, errors.New("connection closed")
+	}
+	return 14, st, nil
+}
 
 var x11Env = func(k string) string { return map[string]string{"DISPLAY": ":0"}[k] }
 

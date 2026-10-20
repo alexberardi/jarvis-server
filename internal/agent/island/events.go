@@ -7,28 +7,31 @@ import "sync/atomic"
 // as "Jarvis Automation Agent.app" running: opening the app again (Finder, the Dock, Spotlight)
 // or the jarvis-agent://start link starts no process, but sends the running agent an Apple event
 // (reopen, or get-URL). These are where they go. Elsewhere a second launch is a new process and
-// reaches the agent over its control socket, so they are never called.
+// reaches the agent over its control socket, so Reopen and OpenURL are never called there;
+// StopHotkey is called wherever the desktop gives the agent the stop hotkey.
 type AppEvents struct {
 	// Reopen: the app was opened again (kAEReopenApplication).
 	Reopen func()
 	// OpenURL: a URL of the app's scheme was opened (kAEGetURL); the receiver checks it.
 	OpenURL func(url string)
-	// StopHotkey: the user pressed ⌃⌥⎋ (StopHotkeyLabel), anywhere: stop what Jarvis is doing
-	// with the computer. macOS only for now.
+	// StopHotkey: the user pressed the stop hotkey (⌃⌥⎋ on macOS, Ctrl+Alt+Esc on Linux),
+	// anywhere: stop what Jarvis is doing with the computer.
 	StopHotkey func()
 }
 
-// StopHotkeyLabel is the stop hotkey as the tray's tooltip names it.
+// StopHotkeyLabel is the macOS stop hotkey as the tray's tooltip names it.
 const StopHotkeyLabel = "⌃⌥⎋"
 
-// stopHotkeyOn is set once the stop hotkey is registered.
-var stopHotkeyOn atomic.Bool
+// stopHotkeyAs is the stop hotkey's label, set once it is registered.
+var stopHotkeyAs atomic.Pointer[string]
 
-// StopHotkey is StopHotkeyLabel once the stop hotkey works (registered with the OS), "" before
-// that or when it couldn't be (another app holds it, or not macOS).
+func setStopHotkey(label string) { stopHotkeyAs.Store(&label) }
+
+// StopHotkey is the stop hotkey's label once it works (registered with the OS or the desktop),
+// "" before that or when it couldn't be (another app holds it, or the desktop names no key).
 func StopHotkey() string {
-	if stopHotkeyOn.Load() {
-		return StopHotkeyLabel
+	if p := stopHotkeyAs.Load(); p != nil {
+		return *p
 	}
 	return ""
 }
