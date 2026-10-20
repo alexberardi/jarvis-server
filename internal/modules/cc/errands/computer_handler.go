@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
@@ -36,6 +38,13 @@ const (
 	CallbackAnswerStep  = "answer_errand_step"
 	questionTitlePrefix = "❓ Errand question: "
 	progressTitlePrefix = "🖥️ Errand: "
+
+	pausedTitlePrefix = "⏸️ Paused: "
+	pausedText        = "Paused because you used the computer."
+
+	// attendedTurn is how recent a turn on a computer must be for a desktop task started from it
+	// to run on its own (C9).
+	attendedTurn = 5 * time.Minute
 
 	// progressIntents is how many of the task's last actions its card lists.
 	progressIntents = 5
@@ -112,6 +121,14 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			return failed(firstNonEmpty(off, "There's no computer with computer control on."))
 		}
 		t.NodeID = ids[0]
+		if t.Target.Kind == "desktop" && rc.wf != nil && rc.wf.Kind == KindAutorun {
+			// Nobody tapped Run: it runs on its own only on the computer it was asked for at
+			// (CreatePlan checked the turn was recent), never on another one (attended, C9).
+			if !slices.Contains(ids, rc.nodeID) {
+				return failed("A desktop task runs only on the computer you ask for it at.")
+			}
+			t.NodeID = rc.nodeID
+		}
 	}
 	w := rc.wf
 	if w != nil {
@@ -151,8 +168,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	case computer.StateAsk:
 		return Result{}, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true, Computer: &computerWait{Ask: out.Ask}}
 	case computer.StatePaused:
-		return Result{}, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true,
-			Computer: &computerWait{Ask: "I paused because you're using the computer. Tap Continue when it's free again."}}
+		return Result{}, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true, Computer: &computerWait{Paused: true}}
 	case computer.StateStopped:
 		return Result{Command: cmd, Label: label, Error: firstNonEmpty(out.Summary, "Stopped."), stopped: true}, nil
 	}
@@ -160,11 +176,33 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 }
 
 // computerWait is what a computer step parked on: a confirmation of its held actions (with the
-// checkout they complete, when they buy something) or a question.
+// checkout they complete, when they buy something), a question, or the user taking over the
+// computer (Paused).
 type computerWait struct {
 	Checkout *computer.Checkout
 	Pending  []computer.PendingAction
 	Ask      string
+	Paused   bool
+}
+
+// hasDesktopStep reports whether a plan has a computer task in a desktop app.
+func hasDesktopStep(steps []Step) bool {
+	for _, st := range steps {
+		if parse.PyStrip(st.Command) == cmdComputer && st.Args != nil && truthyStr(st.Args, "target") == "desktop" {
+			return true
+		}
+	}
+	return false
+}
+
+// attended reports whether the user asked for r a moment ago on a computer a computer task can
+// run on: then its desktop tasks may run without a tap (C9).
+func (s *Service) attended(ctx context.Context, r DraftRequest) bool {
+	if r.TurnAt.IsZero() || s.now().Sub(r.TurnAt) > attendedTurn || s.Computer == nil || s.Computer.Targets == nil {
+		return false
+	}
+	ids, _ := s.Computer.Targets(ctx, r.HouseholdID)
+	return slices.Contains(ids, r.NodeID)
 }
 
 func digests(pending []computer.PendingAction) []string {
@@ -288,7 +326,15 @@ func (s *Service) postComputerCard(ctx context.Context, w *workflowRow, i int, c
 	md := map[string]any{"household_id": w.HouseholdID, "workflow_id": w.ID, "revision": w.Revision, "step": i,
 		"steps": []Step{st}}
 	var title, summary, body string
-	if cw.Ask != "" {
+	switch {
+	case cw.Paused:
+		title, summary = pausedTitlePrefix+label, pausedText
+		body = pausedText + " Tap **Continue** when it's free and Jarvis carries on, or **Stop** to end the errand here."
+		md["interactive_elements"] = []any{
+			element("continue-step", "Continue", CallbackAnswerStep, ident()),
+			element("stop-errand", "Stop", CallbackStop, map[string]any{"workflow_id": w.ID, "revision": w.Revision}),
+		}
+	case cw.Ask != "":
 		answer := ident()
 		answer["instruction"] = ""
 		title, summary = questionTitlePrefix+label, cw.Ask
@@ -299,7 +345,7 @@ func (s *Service) postComputerCard(ctx context.Context, w *workflowRow, i int, c
 			element("continue-step", "Continue", CallbackAnswerStep, answer),
 			element("stop-errand", "Stop", CallbackStop, map[string]any{"workflow_id": w.ID, "revision": w.Revision}),
 		}
-	} else {
+	default:
 		lines, co := ComputerConfirmCard(cw.Checkout, cw.Pending)
 		title = stepTitlePrefix + label
 		summary = "“" + w.DisplayTitle() + "” is ready to go ahead; tap Approve to let it."
@@ -440,9 +486,15 @@ func (s *Service) handleAnswerStep(ctx context.Context, c CallbackContext) Callb
 	if !revisionsMatch(c.Data["revision"], w.Revision) {
 		return fail("This errand was updated — open the latest card.")
 	}
-	answer := strings.TrimSpace(dataStr(c.Data, "instruction"))
+	answer := firstNonEmpty(strings.TrimSpace(dataStr(c.Data, "instruction")), "Carry on.")
+	if s.Computer == nil || s.Computer.Loop == nil || s.Computer.Loop.Store == nil {
+		return fail("Computer tasks are unavailable right now.")
+	}
+	if run, err := s.Computer.Loop.Store.ForStep(ctx, w.ID, step); err == nil && run.State == computer.RunPaused {
+		answer = "" // the Paused card's Continue: there was no question
+	}
 	if err := s.enqueueResume(ctx, resumeJob{WorkflowID: w.ID, Step: step - 1, Kind: signalConfirm,
-		Answer: firstNonEmpty(answer, "Carry on.")}); err != nil {
+		Answer: answer}); err != nil {
 		return fail("Couldn't continue the errand.")
 	}
 	s.log().Info("errands: computer question answered", "workflow", w.ID, "step", step)

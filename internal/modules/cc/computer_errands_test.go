@@ -159,3 +159,37 @@ func TestComputerTargetsForErrands(t *testing.T) {
 		t.Fatalf("menu = %+v", menu)
 	}
 }
+
+// A desktop task's batch says when it resumes a paused run, and its results carry the app it
+// was the first in and what the clipboard held.
+func TestComputerExecDesktop(t *testing.T) {
+	agent := &computerAgent{reply: func(name string, args map[string]any, n int) string {
+		if name == computeruse.ToolAct {
+			return `{"success": false, "stopped_at": 2, "paused": true, "new_apps": ["Finder"], "results": [
+				{"i": 0, "ok": true, "new_app": "Finder"}, {"i": 1, "ok": true, "text": "milk"},
+				{"i": 2, "ok": false, "code": "paused", "error": "paused: the user is using the computer"}]}`
+		}
+		return `{"success": true}`
+	}}
+	e := newEnv(t, envOpts{configure: func(m *Module) { m.Publisher = agent; agent.m = m }})
+	ctx := context.Background()
+	store := &computer.Store{DB: e.m.deps.DB}
+	run, err := store.Create(ctx, computer.Run{HouseholdID: "hh-1", NodeID: "node-1", WorkflowID: "wf_1", Goal: "note", Target: "desktop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := computerExec{m: e.m, store: store}
+	res, err := ex.Act(ctx, computer.Batch{RunID: run.ID, Target: computeruse.Target{Kind: "desktop", App: "Notes"}, Resume: true,
+		Actions: []computeruse.Action{{Kind: "press", Ref: "a1", Intent: "Open"}, {Kind: "clipboard_read", Intent: "Read"},
+			{Kind: "keypress", Keys: []string{"cmd", "s"}, Intent: "Save"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Paused || len(res.Results) != 3 || res.Results[0].NewApp != "Finder" || res.Results[1].Text != "milk" || res.Results[2].Code != "paused" {
+		t.Fatalf("result = %+v", res)
+	}
+	args := agent.sent()[0]["arguments"].(map[string]any)
+	if args["resume"] != true || args["target"].(map[string]any)["app"] != "Notes" {
+		t.Fatalf("act args = %v", args)
+	}
+}

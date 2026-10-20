@@ -184,11 +184,13 @@ type Image struct {
 	Width, Height int
 }
 
-// Batch is one computer_act call.
+// Batch is one computer_act call. Resume continues a desktop task the user paused by using the
+// computer (its Paused card's Continue).
 type Batch struct {
 	RunID   string
 	Target  computeruse.Target
 	Actions []computeruse.Action
+	Resume  bool
 }
 
 // ActResult is computer_act's answer: a result per action that ran, in order (the agent stops at
@@ -198,12 +200,15 @@ type ActResult struct {
 	Paused  bool // the user took over the computer
 }
 
-// StepResult is one action's result.
+// StepResult is one action's result. NewApp is the app a desktop action was the task's first in
+// (shown and audited, Q4); Text is what a clipboard_read read (content, like the page).
 type StepResult struct {
-	I     int
-	OK    bool
-	Code  string // denied, needs_approval, stale_ref, stopped, …
-	Error string
+	I      int
+	OK     bool
+	Code   string // denied, needs_approval, stale_ref, stopped, paused, not_attended, …
+	Error  string
+	NewApp string `json:"new_app"`
+	Text   string
 }
 
 // round is one Run call's state.
@@ -216,12 +221,16 @@ type round struct {
 	wantShot bool
 	feedback string
 	looked   bool // this Run call has observed once
+	// resume: the run was paused (the user used the computer); its next batch resumes it.
+	resume bool
+	// clipboard is what the last batch read from the clipboard, for the next prompt only.
+	clipboard string
 }
 
 // Run drives the task until it is done, needs the user, fails, is stopped or runs out of budget.
 // History is saved after every round, so a stop, a crash or a confirmation loses nothing.
 func (l *Loop) Run(ctx context.Context, t Task) Outcome {
-	run, err := l.open(ctx, t)
+	run, paused, err := l.open(ctx, t)
 	if err != nil {
 		return Outcome{RunID: t.RunID, State: StateFailed, Summary: "I couldn't start the computer task: " + err.Error()}
 	}
@@ -231,7 +240,7 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
 	run.Model = pick.Model
-	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}}
+	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
@@ -316,7 +325,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if err != nil {
 		return Outcome{State: StateFailed, Summary: err.Error()}, true
 	}
-	r.feedback = ""
+	r.feedback, r.clipboard = "", ""
 	switch {
 	case reply.Done:
 		return l.done(ctx, r, reply)
@@ -406,7 +415,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 	text := renderPrompt(promptInput{
 		Goal: t.Goal, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
-		Feedback: r.feedback,
+		Feedback: r.feedback, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
 	})
 	parts := []llm.Part{{Type: "text", Text: text}}
 	for _, im := range r.shots {
@@ -448,6 +457,7 @@ type decision struct {
 	site    string
 	app     string
 	verdict policy.Verdict
+	newApp  string // the app the executor said the action was the task's first in
 }
 
 // decideAndAct decides every action of the batch, then blocks, holds or runs it.
@@ -552,11 +562,14 @@ func (l *Loop) runApproved(ctx context.Context, r *round, held *Held) (Outcome, 
 
 // act sends the batch and records a history entry and an audit row per action.
 func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []decision) (Outcome, bool) {
-	b := Batch{RunID: r.run.ID, Target: tgt}
+	b := Batch{RunID: r.run.ID, Target: tgt, Resume: r.resume}
 	for _, d := range ds {
 		b.Actions = append(b.Actions, d.action)
 	}
 	res, err := l.Exec.Act(ctx, b)
+	if err == nil {
+		r.resume = false
+	}
 	if err != nil {
 		for _, d := range ds {
 			l.record(ctx, r, d, policy.OutcomeFailed, "not run")
@@ -575,7 +588,16 @@ func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []d
 		case !ran:
 			l.record(ctx, r, d, policy.OutcomeFailed, "not run")
 		case sr.OK:
-			l.record(ctx, r, d, policy.OutcomeRan, "ok")
+			result := "ok"
+			if sr.NewApp != "" {
+				// The first time the task used this app: allowed (Q4), and said.
+				result = "ok (first use of " + oneLine(sr.NewApp) + ")"
+				d.newApp = sr.NewApp
+			}
+			if d.action.Kind == "clipboard_read" {
+				r.clipboard = sr.Text
+			}
+			l.record(ctx, r, d, policy.OutcomeRan, result)
 		default:
 			result := strings.TrimSpace("failed: " + sr.Code + " " + sr.Error)
 			l.record(ctx, r, d, policy.OutcomeFailed, result)
@@ -700,34 +722,40 @@ func (l *Loop) record(ctx context.Context, r *round, d decision, outcome, result
 	if effect == "" {
 		effect = policy.Allow
 	}
+	detail := map[string]any{"intent": d.action.Intent, "kind": d.action.Kind, "target": d.target,
+		"site": d.site, "app": d.app, "result": result}
+	if d.newApp != "" {
+		detail["new_app"] = d.newApp
+	}
 	_ = l.Audit.Record(ctx, policy.Event{
 		HouseholdID: r.task.HouseholdID, UserID: r.task.UserID, Source: SourceComputer, SourceID: r.run.ID,
 		Tool: policy.ToolComputerTask, Effect: effect, Outcome: outcome, RuleID: ruleID, Reason: d.verdict.Reason,
-		Detail: map[string]any{"intent": d.action.Intent, "kind": d.action.Kind, "target": d.target,
-			"site": d.site, "app": d.app, "result": result},
+		Detail: detail,
 	})
 }
 
-// open creates the task's run, or loads the one it resumes.
-func (l *Loop) open(ctx context.Context, t Task) (*Run, error) {
+// open creates the task's run, or loads the one it resumes; paused: that one was paused.
+func (l *Loop) open(ctx context.Context, t Task) (run *Run, paused bool, err error) {
 	if t.RunID == "" {
 		kind := t.Target.Kind
 		if kind == "" {
 			kind = "browser"
 		}
-		return l.Store.Create(ctx, Run{HouseholdID: t.HouseholdID, UserID: t.UserID, NodeID: t.NodeID,
+		run, err := l.Store.Create(ctx, Run{HouseholdID: t.HouseholdID, UserID: t.UserID, NodeID: t.NodeID,
 			WorkflowID: t.WorkflowID, Step: t.Step, Goal: t.Goal, Target: kind})
+		return run, false, err
 	}
-	run, err := l.Store.Get(ctx, t.RunID)
+	run, err = l.Store.Get(ctx, t.RunID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	switch run.State {
 	case RunDone, RunFailed, RunStopped:
-		return nil, fmt.Errorf("the task already ended (%s)", run.State)
+		return nil, false, fmt.Errorf("the task already ended (%s)", run.State)
 	}
+	paused = run.State == RunPaused
 	run.State = RunRunning
-	return run, nil
+	return run, paused, nil
 }
 
 // end saves the run in the state the outcome leaves it in.
@@ -746,6 +774,11 @@ func (l *Loop) end(ctx context.Context, run *Run, out Outcome) Outcome {
 		run.State, run.Error = RunFailed, out.Summary
 	}
 	_ = l.Store.Save(ctx, run)
+	if run.Target == "desktop" && (run.State == RunDone || run.State == RunFailed) {
+		// The computer's side of the task ends with it: its guard and its "controlling"
+		// indicator.
+		l.Exec.Stop(ctx, run.ID)
+	}
 	return out
 }
 

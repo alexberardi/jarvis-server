@@ -239,6 +239,30 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	return out, nil
 }
 
+// FindApp is the installed app a computer task names, near names included: only an app by
+// name, never a link, a path or a URI, whatever --allow-open-any says (computer.Apps).
+func (t *Tools) FindApp(name string) (apps.App, error) {
+	kind, err := OpenPolicy{}.Classify(name)
+	if err != nil {
+		return apps.App{}, err
+	}
+	if kind != targetApp {
+		return apps.App{}, host.Errorf(host.ErrInvalidTarget, "only an installed app's name can be opened here (got %q)", name)
+	}
+	list, err := t.catalogue()
+	if err != nil {
+		return apps.App{}, err
+	}
+	p, err := apps.Find(list, name)
+	return p.App, err
+}
+
+// LaunchApp launches an app FindApp returned, by its catalogue path.
+func (t *Tools) LaunchApp(ctx context.Context, app apps.App) error {
+	t.Launched.Record(ctx, app.Name, app.ID)
+	return t.Host.LaunchApp(ctx, app.Path)
+}
+
 func (t *Tools) catalogue() ([]apps.App, error) {
 	if t.Apps == nil {
 		return nil, nil

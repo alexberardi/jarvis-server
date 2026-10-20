@@ -27,6 +27,8 @@ type fakeComputer struct {
 	stops   []string
 	// onAct, when set, runs before each batch is answered (after the batches so far are counted).
 	onAct func(n int)
+	// pausedAt is the batch (1-based) the user takes over the computer in: it answers paused.
+	pausedAt int
 }
 
 func (f *fakeComputer) Observe(_ context.Context, o computer.Observe) (computer.Observation, error) {
@@ -42,6 +44,9 @@ func (f *fakeComputer) Act(_ context.Context, b computer.Batch) (computer.ActRes
 	f.mu.Unlock()
 	if hook != nil {
 		hook(n)
+	}
+	if n == f.pausedAt {
+		return computer.ActResult{Paused: true, Results: []computer.StepResult{{I: 0, Code: "paused", Error: "paused"}}}, nil
 	}
 	var res computer.ActResult
 	for i := range b.Actions {

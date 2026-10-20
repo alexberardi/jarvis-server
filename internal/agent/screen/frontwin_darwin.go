@@ -56,7 +56,7 @@ var (
 	cgDisplayModeGetPixelWidth func(mode uintptr) uintptr
 	cgDisplayModeRelease       func(mode uintptr)
 
-	keyLayer, keyNumber, keyOwner, keyName, keyBounds, keyOnscreen, keyX, keyY, keyWidth, keyHeight uintptr
+	keyLayer, keyNumber, keyOwner, keyOwnerPID, keyName, keyBounds, keyOnscreen, keyX, keyY, keyWidth, keyHeight uintptr
 )
 
 func loadFW() error {
@@ -96,6 +96,7 @@ func loadFW() error {
 		keyLayer = cfStringCreateWithCString(0, "kCGWindowLayer", cfStringEncodingUTF8)
 		keyNumber = cfStringCreateWithCString(0, "kCGWindowNumber", cfStringEncodingUTF8)
 		keyOwner = cfStringCreateWithCString(0, "kCGWindowOwnerName", cfStringEncodingUTF8)
+		keyOwnerPID = cfStringCreateWithCString(0, "kCGWindowOwnerPID", cfStringEncodingUTF8)
 		keyName = cfStringCreateWithCString(0, "kCGWindowName", cfStringEncodingUTF8)
 		keyBounds = cfStringCreateWithCString(0, "kCGWindowBounds", cfStringEncodingUTF8)
 		keyOnscreen = cfStringCreateWithCString(0, "kCGWindowIsOnscreen", cfStringEncodingUTF8)
@@ -103,7 +104,7 @@ func loadFW() error {
 		keyY = cfStringCreateWithCString(0, "Y", cfStringEncodingUTF8)
 		keyWidth = cfStringCreateWithCString(0, "Width", cfStringEncodingUTF8)
 		keyHeight = cfStringCreateWithCString(0, "Height", cfStringEncodingUTF8)
-		if keyLayer == 0 || keyNumber == 0 || keyOwner == 0 || keyName == 0 || keyBounds == 0 || keyOnscreen == 0 ||
+		if keyLayer == 0 || keyNumber == 0 || keyOwner == 0 || keyOwnerPID == 0 || keyName == 0 || keyBounds == 0 || keyOnscreen == 0 ||
 			keyX == 0 || keyY == 0 || keyWidth == 0 || keyHeight == 0 {
 			fwErr = errors.New("CoreFoundation: could not create window-info keys")
 		}
@@ -134,6 +135,9 @@ func windowList() ([]MacWindow, error) {
 		}
 		w := MacWindow{ID: uint32(id), Layer: int(layer), Title: cfString(cfDictionaryGetValue(d, keyName)),
 			App: cfString(cfDictionaryGetValue(d, keyOwner)), OnScreen: cfBool(cfDictionaryGetValue(d, keyOnscreen))}
+		if pid, ok := cfInt(cfDictionaryGetValue(d, keyOwnerPID)); ok {
+			w.PID = int(pid)
+		}
 		if b := cfDictionaryGetValue(d, keyBounds); b != 0 && cfGetTypeID(b) == cfDictionaryGetTypeID() {
 			w.X, _ = cfFloat(cfDictionaryGetValue(b, keyX))
 			w.Y, _ = cfFloat(cfDictionaryGetValue(b, keyY))
