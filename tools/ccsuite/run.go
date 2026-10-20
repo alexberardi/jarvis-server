@@ -161,7 +161,7 @@ func runID() string {
 
 // runOnce is one run of a case: reset the fixtures, say the message, answer the cards, wait for
 // the errand to be over, then gather the state and evaluate the checks. Its files are in
-// cases/<name>/run-<i>/ (state.json, failure.png).
+// cases/<name>/run-<i>/ (state.json, llm.jsonl, failure.png).
 func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	r.Dir = filepath.ToSlash(filepath.Join("cases", c.Name, fmt.Sprintf("run-%d", i)))
 	dir := filepath.Join(e.Dir, r.Dir)
@@ -212,7 +212,7 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	}
 	llmLog := e.Sbx["SBX_LLM_LOG"]
 	offset := fileSize(llmLog)
-	defer func() { r.Rounds = countLines(llmLog, offset) }()
+	defer func() { r.Rounds = copyLines(llmLog, offset, filepath.Join(dir, "llm.jsonl")) }()
 
 	// Say it, from the seeded user to the agent node, as the app's chat does.
 	var (
@@ -524,8 +524,9 @@ func fileSize(path string) int64 {
 	return st.Size()
 }
 
-// countLines is the model calls logged after offset (one JSON line each, tools/pipeline tap).
-func countLines(path string, offset int64) int {
+// copyLines is the model calls logged after offset (one JSON line each, tools/pipeline tap),
+// copied to dst so they outlive the sandbox's purge.
+func copyLines(path string, offset int64, dst string) int {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0
@@ -534,13 +535,17 @@ func countLines(path string, offset int64) int {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return 0
 	}
+	var out bytes.Buffer
 	n := 0
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
 		if len(bytes.TrimSpace(sc.Bytes())) > 0 {
+			out.Write(sc.Bytes())
+			out.WriteByte('\n')
 			n++
 		}
 	}
+	os.WriteFile(dst, out.Bytes(), 0o644)
 	return n
 }
