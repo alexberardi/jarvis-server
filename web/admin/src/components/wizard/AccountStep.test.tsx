@@ -35,10 +35,10 @@ const tokens = {
 }
 
 function fillForm() {
-  fireEvent.change(screen.getByLabelText('Display Name'), { target: { value: 'Admin' } })
+  fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Admin' } })
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'admin@example.com' } })
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } })
-  fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } })
+  fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } })
 }
 
 function renderStep(onCreated = vi.fn()) {
@@ -80,7 +80,7 @@ describe('AccountStep setup token', () => {
     expect(screen.queryByLabelText('Setup token')).toBeNull()
 
     fillForm()
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
 
     await waitFor(() => expect(onCreated).toHaveBeenCalled())
     expect(setupMock).toHaveBeenCalledWith('admin@example.com', 'password123', 'Admin', 'from-link')
@@ -100,7 +100,7 @@ describe('AccountStep setup token', () => {
     expect(screen.getByText(TOKEN_FILE)).toBeInTheDocument()
 
     fillForm()
-    const submit = screen.getByRole('button', { name: 'Create Superuser Account' })
+    const submit = screen.getByRole('button', { name: 'Create superuser account' })
     expect(submit).toBeDisabled()
 
     fireEvent.change(input, { target: { value: '  pasted-token  ' } })
@@ -117,14 +117,14 @@ describe('AccountStep setup token', () => {
     await waitFor(() => expect(stateMock).toHaveBeenCalled())
 
     fillForm()
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('not accepted')
     expect(screen.getByText(TOKEN_FILE)).toBeInTheDocument()
     expect(getSetupToken()).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Setup token'), { target: { value: 'fresh' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
 
     await waitFor(() => expect(onCreated).toHaveBeenCalled())
     expect(setupMock.mock.calls[1][3]).toBe('fresh')
@@ -136,7 +136,7 @@ describe('AccountStep setup token', () => {
     renderStep()
     await waitFor(() => expect(stateMock).toHaveBeenCalled())
     fillForm()
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('needs its setup token')
     expect(screen.getByLabelText('Setup token')).toBeInTheDocument()
   })
@@ -147,7 +147,7 @@ describe('AccountStep setup token', () => {
     renderStep()
     await waitFor(() => expect(stateMock).toHaveBeenCalled())
     fillForm()
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Setup already completed')
     expect(screen.queryByLabelText('Setup token')).toBeNull()
   })

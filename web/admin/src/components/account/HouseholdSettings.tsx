@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { getHouseholdSettings, putHouseholdSetting } from '@/api/household'
+import { Alert, Card, CardHeader, Switch, toast } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { errorMessage } from '@/lib/errors'
 
@@ -47,48 +47,31 @@ export default function HouseholdSettings() {
 
   if (!hh) return null
   return (
-    <section
-      aria-labelledby="household-settings"
-      className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-6"
-    >
-      <h2 id="household-settings" className="text-lg font-medium text-[var(--color-text)]">
-        Household{membership ? `: ${membership.name}` : ''}
-      </h2>
-      {membership && !canEdit && (
-        <p className="mt-1 text-sm text-[var(--color-text-muted)]">Only a household admin can change these.</p>
-      )}
+    <Card as="section" aria-labelledby="household-settings">
+      <CardHeader
+        id="household-settings"
+        title={`Household${membership ? `: ${membership.name}` : ''}`}
+        description={membership && !canEdit ? 'Only a household admin can change these.' : undefined}
+      />
       {error && (
-        <p role="alert" className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">
-          {errorMessage(error, 'Could not load the household settings')}
-        </p>
+        <Alert tone="danger" title="Couldn't load the household's settings" className="mb-4">
+          {errorMessage(error, 'The server did not answer. Reload the page to try again.')}
+        </Alert>
       )}
-      <ul className="mt-3 space-y-3">
-        {SWITCHES.map((s) => {
-          const id = `hh-${s.key.replace(/\W/g, '-')}`
-          return (
-            <li key={s.key} className="flex items-start gap-3">
-              <input
-                id={id}
-                type="checkbox"
-                role="switch"
-                aria-describedby={`${id}-help`}
-                checked={data?.[s.key] === true}
-                disabled={!canEdit || isLoading || !!error || write.isPending}
-                onChange={(e) => write.mutate({ key: s.key, value: e.target.checked })}
-                className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-primary)]"
-              />
-              <div>
-                <label htmlFor={id} className="text-sm font-medium text-[var(--color-text)]">
-                  {s.label}
-                </label>
-                <p id={`${id}-help`} className="text-sm text-[var(--color-text-muted)]">
-                  {s.help} Off by default.
-                </p>
-              </div>
-            </li>
-          )
-        })}
+      <ul className="space-y-4">
+        {SWITCHES.map((s) => (
+          <li key={s.key}>
+            <Switch
+              id={`hh-${s.key.replace(/\W/g, '-')}`}
+              label={s.label}
+              description={`${s.help} Off by default.`}
+              checked={data?.[s.key] === true}
+              disabled={!canEdit || isLoading || !!error || write.isPending}
+              onCheckedChange={(value) => write.mutate({ key: s.key, value })}
+            />
+          </li>
+        ))}
       </ul>
-    </section>
+    </Card>
   )
 }

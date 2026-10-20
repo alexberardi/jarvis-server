@@ -1,15 +1,15 @@
 import { type FormEvent, useState } from 'react'
-import { toast } from 'sonner'
 import HouseholdSettings from '@/components/account/HouseholdSettings'
+import { Alert, Button, Card, Input, PageHeader, toast } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { errorMessage } from '@/lib/errors'
 import { nameOf } from '@/lib/session'
-import { cn } from '@/lib/utils'
 
 /**
  * AccountPage is the v1 account view (webapp 01 §4.4): who you are, the name Jarvis calls you,
- * and the active household's feature switches (a household admin flips them). Password,
- * household and invite management stay in the mobile app for v1.
+ * and the active household's feature switches (a household admin flips them). The password is
+ * changed from the header's key button (/change-password); household and invite management stay
+ * in the mobile app for v1.
  */
 export default function AccountPage() {
   const { state, updateDisplayName } = useAuth()
@@ -28,7 +28,7 @@ export default function AccountPage() {
       setDraft(null)
       toast.success('Saved')
     } catch (err) {
-      setError(errorMessage(err, 'Could not save the name'))
+      setError(errorMessage(err, 'The server did not answer. Try again in a moment.'))
     } finally {
       setSaving(false)
     }
@@ -38,46 +38,42 @@ export default function AccountPage() {
   const unchanged = value.trim() === (user.display_name ?? '').trim()
 
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <h1 className="text-xl font-semibold text-[var(--color-text)]">Account</h1>
-      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-6">
-        <p className="text-lg font-medium text-[var(--color-text)]" data-testid="account-name">
-          {nameOf(user)}
-        </p>
-        <p className="mb-4 break-all text-sm text-[var(--color-text-muted)]">{user.email}</p>
+    <div className="mx-auto max-w-2xl">
+      <PageHeader title="Account" description="Who you are to Jarvis, and your household's features." />
+      <div className="space-y-4">
+        <Card as="section" aria-labelledby="account-profile">
+          <h2 id="account-profile" className="sr-only">
+            Profile
+          </h2>
+          <p className="text-heading break-words text-text" data-testid="account-name">
+            {nameOf(user)}
+          </p>
+          <p className="break-all text-small text-text-muted">{user.email}</p>
 
-        <form onSubmit={save} className="space-y-3">
-          <label htmlFor="display-name" className="block text-sm text-[var(--color-text-muted)]">
-            Display name: what Jarvis calls you
-          </label>
-          <input
-            id="display-name"
-            type="text"
-            maxLength={100}
-            value={value}
-            placeholder={user.username ?? ''}
-            onChange={(e) => setDraft(e.target.value)}
-            className={cn(
-              'w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2',
-              'text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]',
-              'outline-none focus:ring-2 focus:ring-[var(--color-primary)]',
-            )}
-          />
+          <form onSubmit={save} className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start">
+            <Input
+              id="display-name"
+              label="Display name"
+              hint="What Jarvis calls you."
+              wrapperClassName="flex-1"
+              type="text"
+              maxLength={100}
+              value={value}
+              placeholder={user.username ?? ''}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <Button type="submit" variant="primary" loading={saving} disabled={unchanged} className="sm:mt-7">
+              Save
+            </Button>
+          </form>
           {error && (
-            <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">
+            <Alert tone="danger" title="Couldn't save the name" className="mt-3">
               {error}
-            </p>
+            </Alert>
           )}
-          <button
-            type="submit"
-            disabled={saving || unchanged}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </form>
+        </Card>
+        <HouseholdSettings />
       </div>
-      <HouseholdSettings />
     </div>
   )
 }

@@ -1,7 +1,9 @@
 // The design system's base components (direction B, Quiet Violet). Tokens: src/index.css.
 // Every one is shown in every state on the dev-only gallery, /dev/ui (pages/dev/UiGalleryPage).
+export { default as Alert, type AlertTone } from './Alert'
 export { default as Badge, type BadgeTone } from './Badge'
 export { default as Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button'
+export { buttonClass } from './buttonStyles'
 export { default as Card, CardHeader } from './Card'
 export { default as Dialog, Sheet, type DialogProps } from './Dialog'
 export { default as EmptyState } from './EmptyState'
@@ -9,7 +11,7 @@ export { default as ErrorState } from './ErrorState'
 export { default as Input, type InputProps } from './Input'
 export { default as List, ListItem } from './List'
 export { default as PageHeader } from './PageHeader'
-export { default as Select, type SelectOption, type SelectProps } from './Select'
+export { default as Select, type SelectGroup, type SelectOption, type SelectProps } from './Select'
 export { default as Skeleton, SkeletonList } from './Skeleton'
 export { default as Spinner } from './Spinner'
 export { default as Switch, type SwitchProps } from './Switch'

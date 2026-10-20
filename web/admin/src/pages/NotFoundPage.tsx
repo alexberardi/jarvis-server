@@ -1,16 +1,21 @@
 import { Link } from 'react-router-dom'
+import { Compass } from 'lucide-react'
+import { buttonClass, EmptyState } from '@/components/ui'
 
+/** NotFoundPage is any address the app has no page for, inside the shell, with the way back. */
 export default function NotFoundPage() {
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center">
-      <h1 className="mb-2 text-4xl font-bold text-[var(--color-text)]">404</h1>
-      <p className="mb-4 text-[var(--color-text-muted)]">Page not found</p>
-      <Link
-        to="/"
-        className="text-[var(--color-primary)] underline hover:opacity-80"
-      >
-        Go home
-      </Link>
-    </div>
+    <EmptyState
+      className="min-h-[60vh] justify-center"
+      icon={<Compass size={20} />}
+      titleAs="h1"
+      title="Page not found"
+      description="Nothing lives at this address. The link may be mistyped, or the page has moved."
+      action={
+        <Link to="/" className={buttonClass({ variant: 'primary' })}>
+          Go home
+        </Link>
+      }
+    />
   )
 }

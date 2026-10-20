@@ -8,8 +8,7 @@ import HfBrowser from '@/components/models/HfBrowser'
 import HfTokenPrompt from '@/components/models/HfTokenPrompt'
 import PromptProviderCard from '@/components/models/PromptProviderCard'
 import { currentModels, fitSummary } from '@/components/models/logic'
-import { buttonClass } from '@/components/models/styles'
-import { Pill, ProgressBar } from '@/components/models/ui'
+import { ProgressBar } from '@/components/models/ui'
 import { useInstallAction } from '@/components/models/useInstallAction'
 import {
   everythingRecommended,
@@ -22,12 +21,14 @@ import {
   underWay,
   type JobDef,
 } from '@/components/setup/jobs'
+import { Badge, Button, ErrorState } from '@/components/ui'
 import { useCatalog, useLabels } from '@/hooks/useModelManager'
 import { useSetupState } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
 import { formatBytes } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { currentChoices } from './hardware'
+import { StepActions, StepHeader, StepLoading } from './StepFrame'
 import VoicePicker from './VoicePicker'
 
 const ICONS: Record<string, LucideIcon> = {
@@ -47,7 +48,7 @@ function SttPlacement() {
   // The Hardware step's own reading of the labels, so both steps say the same thing.
   const c = currentChoices(hw, data.labels)
   return (
-    <p className="text-xs text-[var(--color-text-muted)]">
+    <p className="text-small text-text-muted">
       {c.stt === 'cpu'
         ? 'Runs on the CPU, as set in the Hardware step; the recommendation is sized for that.'
         : `Runs on the GPU (${c.flavour}${c.sttDevice ? `, device ${c.sttDevice}` : ''}), as set in the Hardware step.`}
@@ -62,7 +63,7 @@ function LlmPlacement() {
   const hw = setup.data?.hardware
   if (!data || !hw || currentChoices(hw, data.labels).flavour !== 'cpu') return null
   return (
-    <p className="text-xs text-[var(--color-text-muted)]">
+    <p className="text-small text-text-muted">
       Runs on the CPU, as set in the Hardware step, so the recommendation is a small model that answers at a usable
       speed there.
     </p>
@@ -145,9 +146,8 @@ export default function JobStep({
     onAllConfirmed?.()
   }
 
-  const primaryText = busy
-    ? 'Starting…'
-    : settled || !entry
+  const primaryText =
+    settled || !entry
       ? 'Continue'
       : entry.installed
         ? 'Use and continue'
@@ -156,31 +156,34 @@ export default function JobStep({
   return (
     <div className="space-y-4">
       {onAllConfirmed && everything.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-[var(--color-text)]">Install everything recommended</p>
-            <p className="text-xs text-[var(--color-text-muted)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-card bg-primary-soft p-4">
+          <div className="min-w-0 flex-1 basis-64">
+            <p className="text-subheading text-text">Install everything recommended</p>
+            <p className="mt-0.5 text-small text-text-muted">
               Picks the recommended model for each of the five jobs on this machine and starts the downloads
               {everythingBytes > 0 ? ` (${formatBytes(everythingBytes)} in all)` : ''}. You can change any of them later.
             </p>
           </div>
-          <button type="button" className={buttonClass.primary} disabled={busy} onClick={confirmAll}>
-            <Sparkles size={12} /> Install everything recommended
-          </button>
+          <Button variant="primary" size="sm" icon={<Sparkles size={14} aria-hidden />} disabled={busy} onClick={confirmAll}>
+            Install everything recommended
+          </Button>
         </div>
       )}
 
-      <div>
-        <h2 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
-          <Icon size={20} /> {def.title}
-          <Pill tone={def.required ? 'info' : 'muted'}>{def.required ? 'Required' : 'Optional'}</Pill>
-        </h2>
-        <p className="mt-1 text-sm text-[var(--color-text-muted)]">{def.blurb}</p>
-      </div>
+      <StepHeader
+        icon={<Icon size={22} />}
+        title={def.title}
+        badge={<Badge tone={def.required ? 'primary' : 'neutral'}>{def.required ? 'Required' : 'Optional'}</Badge>}
+      >
+        {def.blurb}
+      </StepHeader>
 
       {job.state !== 'missing' && (
-        <div className="space-y-1.5 rounded-lg bg-[var(--color-surface-alt)] px-3 py-2" data-testid="job-status">
-          <p className="text-xs text-[var(--color-text)]">
+        <div
+          className={cn('space-y-2 rounded-control px-3 py-2.5', job.state === 'failed' ? 'bg-danger-soft text-danger' : 'bg-surface-alt text-text')}
+          data-testid="job-status"
+        >
+          <p className="text-small">
             {job.state === 'failed' && job.install?.error
               ? `${job.install.model_id} failed: ${job.install.error}`
               : `${jobStateText(job, true)}${job.install && job.state === 'downloading' ? ` · ${job.install.model_id}` : ''}${
@@ -195,8 +198,14 @@ export default function JobStep({
         <HfTokenPrompt reason={`${tokenReason}. Save a token, then install again.`} onSaved={() => setTokenReason(null)} />
       )}
 
-      {catalog.isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading the catalog…</p>}
-      {catalog.isError && <p className="text-sm text-red-500">{errorMessage(catalog.error, 'Could not load the catalog')}</p>}
+      {catalog.isLoading && <StepLoading>Loading the model catalog</StepLoading>}
+      {catalog.isError && (
+        <ErrorState
+          title="Couldn't load the model catalog"
+          message={`${errorMessage(catalog.error, 'The server did not answer')}. You can skip this step and pick a model on the Models page later.`}
+          onRetry={() => catalog.refetch()}
+        />
+      )}
 
       {options.length > 0 && (
         <fieldset className="space-y-2">
@@ -208,8 +217,8 @@ export default function JobStep({
               <label
                 key={m.id}
                 className={cn(
-                  'flex cursor-pointer items-start gap-3 rounded-lg border p-3',
-                  choice === m.id ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5' : 'border-[var(--color-border)]',
+                  'flex cursor-pointer items-start gap-3 rounded-control border p-3 transition-colors duration-(--duration-hover)',
+                  choice === m.id ? 'border-primary bg-primary-soft' : 'border-border hover:border-border-strong',
                 )}
               >
                 <input
@@ -218,31 +227,31 @@ export default function JobStep({
                   value={m.id}
                   checked={choice === m.id}
                   onChange={() => setPicked(m.id)}
-                  className="mt-1"
+                  className="mt-1 accent-primary"
                   aria-label={m.display}
                 />
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-[var(--color-text)]">{m.display}</span>
+                    <span className="text-subheading text-text">{m.display}</span>
                     {isRec && (
-                      <Pill tone="info">
-                        <Star size={10} /> Recommended
-                      </Pill>
+                      <Badge tone="primary">
+                        <Star size={12} aria-hidden /> Recommended
+                      </Badge>
                     )}
                     <FitBadge fit={m.fit} />
-                    {m.mmproj && <Pill>vision</Pill>}
+                    {m.mmproj && <Badge>vision</Badge>}
                     {inUse ? (
-                      <Pill tone="ok">
-                        <CheckCircle2 size={10} /> In use
-                      </Pill>
+                      <Badge tone="success">
+                        <CheckCircle2 size={12} aria-hidden /> In use
+                      </Badge>
                     ) : (
-                      m.installed && <Pill tone="ok">Installed</Pill>
+                      m.installed && <Badge tone="success">Installed</Badge>
                     )}
                   </div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-small text-text-muted">
                     {formatBytes(m.size)} · {fitSummary(m.fit)}
                   </p>
-                  {m.notes && <p className="text-xs text-[var(--color-text-muted)]">{m.notes}</p>}
+                  {m.notes && <p className="text-small text-text-muted">{m.notes}</p>}
                 </div>
               </label>
             )
@@ -250,11 +259,11 @@ export default function JobStep({
         </fieldset>
       )}
       {catalog.data && options.length === 0 && (
-        <p className="text-sm text-[var(--color-text-muted)]">The catalog has no {def.title.toLowerCase()} models for this machine.</p>
+        <p className="text-body text-text-muted">The catalog has no {def.title.toLowerCase()} models for this machine.</p>
       )}
 
       {def.id === 'llm' && entry?.mmproj && (
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <p className="text-small text-text-muted">
           Includes its vision projector, so Jarvis can also look at photos (recipes, receipts).
         </p>
       )}
@@ -271,17 +280,19 @@ export default function JobStep({
         />
       )}
       {def.id === 'speaker' && (
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <p className="text-small text-text-muted">
           Each person enrols their voice later in the Jarvis mobile app; until then nobody is recognised. Runs on the CPU.
         </p>
       )}
       {def.id === 'memory' && (
-        <p className="text-xs text-[var(--color-text-muted)]">Runs on the CPU next to everything else; it is small.</p>
+        <p className="text-small text-text-muted">Runs on the CPU next to everything else; it is small.</p>
       )}
       {def.id === 'llm' && (
         <>
-          <details className="rounded-xl border border-[var(--color-border)] p-3">
-            <summary className="cursor-pointer text-sm text-[var(--color-text)]">Install a different model from Hugging Face</summary>
+          <details className="rounded-control border border-border px-3 py-2">
+            <summary className="flex min-h-8 cursor-pointer items-center text-body text-text">
+              Install a different model from Hugging Face
+            </summary>
             <div className="mt-3">
               <HfBrowser />
             </div>
@@ -290,26 +301,22 @@ export default function JobStep({
         </>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button type="button" className={buttonClass.secondary} onClick={onBack} disabled={busy}>
-          Back
-        </button>
-        <div className="flex items-center gap-3">
-          {!underWay(job.state) && (
-            <button
-              type="button"
-              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              onClick={onNext}
-              disabled={busy}
-            >
-              {def.required ? 'Skip for now' : 'Skip'}
-            </button>
-          )}
-          <button type="button" className={buttonClass.primary} disabled={busy} onClick={confirm}>
-            {primaryText}
-          </button>
-        </div>
-      </div>
+      <StepActions
+        back={
+          <Button onClick={onBack} disabled={busy}>
+            Back
+          </Button>
+        }
+      >
+        {!underWay(job.state) && (
+          <Button variant="ghost" onClick={onNext} disabled={busy}>
+            {def.required ? 'Skip for now' : 'Skip'}
+          </Button>
+        )}
+        <Button variant="primary" loading={busy} onClick={confirm}>
+          {primaryText}
+        </Button>
+      </StepActions>
     </div>
   )
 }

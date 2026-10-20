@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import Button from './Button'
+import { buttonClass } from './buttonStyles'
 
 describe('Button', () => {
   it('is a type=button that calls onClick', () => {
@@ -57,5 +58,14 @@ describe('Button', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Go' }))
     expect(onSubmit).toHaveBeenCalled()
+  })
+
+  it('lends its look to a link through buttonClass', () => {
+    render(
+      <a href="/x" className={buttonClass({ variant: 'primary' })}>
+        Go
+      </a>,
+    )
+    expect(screen.getByRole('link', { name: 'Go' })).toHaveClass('bg-primary', 'text-on-primary', 'press', 'h-10')
   })
 })

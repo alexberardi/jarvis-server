@@ -33,7 +33,7 @@ test('the wizard sets up an empty install', async ({ freshPage }) => {
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password', { exact: true }).fill(password)
   await page.getByLabel('Confirm password').fill(password)
-  await click('Create Superuser Account')
+  await click('Create superuser account')
 
   await step('Hardware')
   await click('Looks good')

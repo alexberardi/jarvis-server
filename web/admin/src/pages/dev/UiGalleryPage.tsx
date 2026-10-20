@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Cpu, Inbox, Plus, Save, Trash2 } from 'lucide-react'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -149,6 +150,19 @@ export default function UiGalleryPage() {
               Offline
             </Badge>
           </Row>
+        </Section>
+
+        <Section title="Alert">
+          <div className="space-y-2">
+            <Alert tone="danger" title="Couldn't sign in">
+              Invalid email or password.
+            </Alert>
+            <Alert tone="warning">Some checks failed. Other devices may not reach this machine until they are fixed.</Alert>
+            <Alert tone="success" title="Superuser account created">
+              you@example.com
+            </Alert>
+            <Alert>These are the defaults for the whole install.</Alert>
+          </div>
         </Section>
 
         <div className="grid gap-6 md:grid-cols-2">

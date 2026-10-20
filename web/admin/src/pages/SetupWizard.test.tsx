@@ -264,11 +264,11 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     // Account.
-    fireEvent.change(await screen.findByLabelText('Display Name'), { target: { value: 'Op' } })
+    fireEvent.change(await screen.findByLabelText('Display name'), { target: { value: 'Op' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@example.com' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } })
-    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
     await waitFor(() => expect(auth.setup).toHaveBeenCalledWith('op@example.com', 'password123', 'Op', 'tok'))
 
     // Hardware: pre-filled to detection; one click accepts without writing anything.
@@ -356,19 +356,19 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     )
     renderWizard()
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-    fireEvent.change(await screen.findByLabelText('Display Name'), { target: { value: 'Op' } })
+    fireEvent.change(await screen.findByLabelText('Display name'), { target: { value: 'Op' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@jarvis.local' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } })
-    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/special-use or reserved name/)
     expect(screen.getByLabelText('Email')).toHaveValue('op@jarvis.local')
-    expect(screen.getByLabelText('Display Name')).toHaveValue('Op')
+    expect(screen.getByLabelText('Display name')).toHaveValue('Op')
 
     // Corrected, it goes through on the same form.
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@example.com' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
     await waitFor(() => expect(auth.setup).toHaveBeenLastCalledWith('op@example.com', 'password123', 'Op', 'tok'))
     expect(await screen.findByText('RTX 3080 Ti')).toBeInTheDocument()
   })

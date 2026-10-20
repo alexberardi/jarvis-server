@@ -10,8 +10,15 @@ export interface SelectOption {
   disabled?: boolean
 }
 
-export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onChange'>, FieldProps {
+export interface SelectGroup {
+  label: string
   options: SelectOption[]
+}
+
+export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onChange'>, FieldProps {
+  options?: SelectOption[]
+  /** Options under headings (optgroups), after `options`. */
+  groups?: SelectGroup[]
   /** Called with the picked option's value. */
   onValueChange?: (value: string) => void
   onChange?: SelectHTMLAttributes<HTMLSelectElement>['onChange']
@@ -30,7 +37,8 @@ export default function Select({
   hint,
   error,
   id,
-  options,
+  options = [],
+  groups = [],
   onValueChange,
   onChange,
   placeholder,
@@ -60,10 +68,11 @@ export default function Select({
               {placeholder}
             </option>
           )}
-          {options.map((o) => (
-            <option key={o.value} value={o.value} disabled={o.disabled}>
-              {o.label}
-            </option>
+          {options.map(optionOf)}
+          {groups.map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {g.options.map(optionOf)}
+            </optgroup>
           ))}
         </select>
         <ChevronDown
@@ -73,5 +82,13 @@ export default function Select({
         />
       </div>
     </FieldFrame>
+  )
+}
+
+function optionOf(o: SelectOption) {
+  return (
+    <option key={o.value} value={o.value} disabled={o.disabled}>
+      {o.label}
+    </option>
   )
 }
