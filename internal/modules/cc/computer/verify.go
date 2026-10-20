@@ -36,6 +36,17 @@ type FileCheck struct {
 }
 
 // empty reports a check with nothing to check.
+// concrete reports whether c checks something on the page or the disk itself: the address, the
+// text, a download or a file.
+func (c *SuccessCheck) concrete() bool {
+	return c != nil && (c.URLContains != "" || len(c.TextPresent) > 0 || c.Download != nil || c.File != nil)
+}
+
+// screenOnly reports whether c is only a question about the screen.
+func (c *SuccessCheck) screenOnly() bool {
+	return c != nil && !c.concrete() && strings.TrimSpace(c.Screen) != ""
+}
+
 func (c *SuccessCheck) empty() bool {
 	return c == nil || (c.URLContains == "" && len(c.TextPresent) == 0 && c.Download == nil && c.File == nil &&
 		strings.TrimSpace(c.Screen) == "")
@@ -111,8 +122,8 @@ func (l *Loop) Verify(ctx context.Context, runID string, target computeruse.Targ
 				unseen = append(unseen, t)
 			}
 		}
-		// The snapshot holds the interactive elements only: text in a heading or a paragraph is
-		// looked for on the screenshot.
+		// Text in neither the elements nor the page's text (a canvas, an image) is looked for on
+		// the screenshot.
 		for _, t := range unseen {
 			ok, why := l.askScreen(ctx, pick, obs.Image, fmt.Sprintf("Does the screen show the text %q?", t))
 			if !ok {

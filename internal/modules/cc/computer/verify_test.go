@@ -223,3 +223,34 @@ func TestDoneWithoutCheckAsksOnce(t *testing.T) {
 		}
 	})
 }
+
+// Text in the page's text (a heading, a paragraph) is checked there, with no model call.
+func TestVerifyTextInPageText(t *testing.T) {
+	page := thanksPage()
+	page.Text = "Thank you, your order is placed\nOrder number:   TS-100001"
+	e := newEnv(t, page)
+	if v := e.verify(&SuccessCheck{TextPresent: []string{"Order number: TS-100001"}}); !v.OK || len(e.llm.reqs) != 0 {
+		t.Fatalf("verify %+v, %d calls", v, len(e.llm.reqs))
+	}
+}
+
+// The task's success said only in words (a planner's "an order confirmation page") gives way to
+// the model's own checks of the address, the text, a download or a file; with none, it is asked
+// of the screen.
+func TestDoneScreenOnlyTaskTakesModelChecks(t *testing.T) {
+	e := newEnv(t, shopPage())
+	e.script(doneAnswer)
+	tk := task()
+	tk.Success = &SuccessCheck{Screen: "an order confirmation page"}
+	out := e.loop.Run(context.Background(), tk)
+	if out.State != StateDone || out.Checked != `the address contains "/soap"` || len(e.llm.reqs) != 1 {
+		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
+	}
+
+	e = newEnv(t, thanksPage())
+	e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"screen": "is the order placed?"}}`, "Yes, the order page.")
+	out = e.loop.Run(context.Background(), tk)
+	if out.State != StateDone || out.Checked != "an order confirmation page: yes" {
+		t.Fatalf("outcome %+v", out)
+	}
+}

@@ -348,11 +348,14 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 }
 
 // done checks the result before the task reports done (C4): the task's own success check, else
-// the one the model's done carries. A done without either is sent back once for one. A check that
-// fails goes back to the model as feedback, with verifyRounds more rounds to fix it.
+// the one the model's done carries. A task's check said only in words (Screen: the planner's
+// "an order confirmation page") gives way to the model's checks of the address, the text, a
+// download or a file, which hold or don't on the page itself. A done without a check is sent back
+// once for one. A check that fails goes back to the model as feedback, with verifyRounds more
+// rounds to fix it.
 func (l *Loop) done(ctx context.Context, r *round, reply Reply) (Outcome, bool) {
 	check := r.task.Success
-	if check.empty() {
+	if check.empty() || (check.screenOnly() && reply.Verify.concrete()) {
 		check = reply.Verify
 	}
 	if r.run.Verify == nil {
@@ -779,11 +782,17 @@ func (l *Loop) str(ctx context.Context, key string, sc settings.Scope, def strin
 	return def
 }
 
-// pageTexts are the observation's texts the injection check reads.
+// pageTexts are the observation's texts the injection check and the text checks read: the
+// title, each element's name and value, and each line of the page's text.
 func pageTexts(o Observation) []string {
 	out := []string{o.Title}
 	for _, e := range o.Elements {
 		out = append(out, e.Name, e.Value)
+	}
+	for _, l := range strings.Split(o.Text, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
 	}
 	return out
 }
