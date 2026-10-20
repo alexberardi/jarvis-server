@@ -11,6 +11,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -615,5 +616,117 @@ func TestComputerAskThenContinue(t *testing.T) {
 	last := reqs[len(reqs)-2] // the round after the answer
 	if !strings.Contains(last.Messages[1].Content.Parts[0].Text, "navy") {
 		t.Fatal("the answer didn't reach the model")
+	}
+}
+
+// A computer errand (only computer tasks and the computer's file tools) starts at once: no plan
+// card, its one question is the checkout confirmation (user, 2026-10-20).
+func TestComputerPlanStartsWithoutPlanCard(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Order a blue mug", step(policy.ToolComputerTask, "Order the mug",
+		`{"goal": "order a blue mug", "target": "browser", "site": "`+shopSite+`"}`)))
+	c.llm.say("computer", checkoutReply)
+	p := c.draft("order me a blue mug", ptr(7), []MenuEntry{computerEntry()})
+	if p.State != "launched" || p.WorkflowID == "" {
+		t.Fatalf("plan = %+v", p)
+	}
+	for _, cd := range c.cards.all() {
+		if cd.Category == planCategory && cd.Metadata["plan_id"] != nil {
+			t.Fatalf("plan card posted: %+v", cd)
+		}
+	}
+	w := c.wf(p.WorkflowID)
+	if w.Kind != "errand" || w.State != "waiting" || w.WaitingOn != "approval" {
+		t.Fatalf("run = %s %s %s", w.Kind, w.State, w.WaitingOn)
+	}
+	if _, ok := c.cardTitled(stepTitlePrefix); !ok {
+		var titles []string
+		for _, cd := range c.cards.all() {
+			titles = append(titles, cd.Title)
+		}
+		t.Fatalf("no checkout confirmation: %v", titles)
+	}
+}
+
+// A plan that mixes a computer task with other commands still asks with its plan card.
+func TestMixedComputerPlanPostsPlanCard(t *testing.T) {
+	c := newComputerEnv(t)
+	weather := MenuEntry{Command: "get_weather", Description: "Weather"}
+	c.llm.say("plan", planJSON("Weather and a mug", step("get_weather", "Weather", ""),
+		step(policy.ToolComputerTask, "Order the mug", `{"goal": "order a blue mug", "target": "browser"}`)))
+	p := c.draft("check the weather and order a mug", ptr(7), []MenuEntry{weather, computerEntry()})
+	if p.State != "draft" {
+		t.Fatalf("plan = %+v", p)
+	}
+	if cards := c.cards.all(); len(cards) != 1 || cards[0].Category != planCategory {
+		t.Fatalf("cards = %+v", cards)
+	}
+}
+
+func TestIsComputerPlan(t *testing.T) {
+	ct := computerStep("x")
+	for _, c := range []struct {
+		steps []Step
+		want  bool
+	}{
+		{[]Step{ct}, true},
+		{[]Step{ct, {Command: cmdReadFile}, {Command: cmdReplan}}, true},
+		{[]Step{ct, {Command: cmdWriteSheet}}, true},
+		{[]Step{{Command: cmdReadFile}}, false},
+		{[]Step{ct, {Command: "get_weather"}}, false},
+		{[]Step{ct, {Command: cmdWriteSheet, IsRisky: true}}, false},
+		{nil, false},
+	} {
+		if got := isComputerPlan(c.steps); got != c.want {
+			t.Errorf("isComputerPlan(%+v) = %v", c.steps, got)
+		}
+	}
+}
+
+// A computer errand's replan that adds only the computer's file tools goes on without a card:
+// the budget reads its statements and writes the spreadsheet in one run.
+func TestComputerReplanContinuesWithoutCard(t *testing.T) {
+	c := newComputerEnv(t)
+	read := &fakeTool{name: cmdReadFile, def: toolDef(cmdReadFile, "Read a file", "path", mustObj(t, `{"type": "string"}`)),
+		result: servertools.Obj("text", "2026-09-03,Dining,12.00")}
+	c.tools.Register(read)
+	c.llm.say("plan", planJSON("Budget", step(policy.ToolComputerTask, "Get the statement",
+		`{"goal": "download the statement", "target": "browser", "site": "`+shopSite+`"}`),
+		`{"command": "request_replan", "args": {"reason": "read what was downloaded"}, "label": "Decide"}`))
+	c.llm.say("computer", doneReply)
+	c.llm.say("replan", planJSON("Read it", step(cmdReadFile, "Read the statement", `{"path": "~/Downloads/statement.csv"}`)))
+	c.llm.say("compose", "Dining was $12.")
+	p := c.draft("do my budget", ptr(7), []MenuEntry{computerEntry()})
+	c.idle()
+	w := c.wf(p.WorkflowID)
+	if w.State != "done" || len(w.Steps) != 3 {
+		t.Fatalf("run = %s steps %+v", w.State, w.Steps)
+	}
+	if len(read.args) != 1 {
+		t.Fatalf("read_computer_file ran %d times", len(read.args))
+	}
+	for _, cd := range c.cards.all() {
+		if strings.HasPrefix(cd.Title, "🔀") {
+			t.Fatalf("delta card: %+v", cd)
+		}
+	}
+}
+
+// run_errand's ack for a computer errand says it starts at once, not "Tap Run".
+func TestRunErrandComputerAck(t *testing.T) {
+	c := newComputerEnv(t)
+	tool := &RunErrandTool{Svc: func() *Service { return c.s }, NeedsComputer: func(g string) bool { return strings.HasPrefix(g, "order") }}
+	ack := func(goal string) string {
+		return res(tool.Execute(context.Background(), servertools.Call{Args: servertools.Obj("goal", goal)}, turnFor(7)))
+	}
+	if got := ack("order me a blue mug"); got != `{"status": "accepted", "message": "`+computerAck+`"}` {
+		t.Fatal(got)
+	}
+	if got := ack("check the weather"); !strings.Contains(got, "Tap Run") {
+		t.Fatal(got)
+	}
+	c.s.Computer = nil // no computer task on the menu: the plan card's ack
+	if got := ack("order me a blue mug"); !strings.Contains(got, "Tap Run") {
+		t.Fatal(got)
 	}
 }

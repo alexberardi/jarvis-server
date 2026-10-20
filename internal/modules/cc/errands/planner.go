@@ -259,10 +259,8 @@ const budgetRule = "BUDGETS: for a budget or a spending report from statements, 
 
 // budgetRuleFor is budgetRule when menu offers write_spreadsheet, else "".
 func budgetRuleFor(menu []MenuEntry) string {
-	for _, c := range menu {
-		if c.Command == cmdWriteSheet {
-			return budgetRule
-		}
+	if menuHas(menu, cmdWriteSheet) {
+		return budgetRule
 	}
 	return ""
 }

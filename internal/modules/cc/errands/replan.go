@@ -69,7 +69,8 @@ func (s *Service) runReplanJob(ctx context.Context, job queue.Job) ([]byte, erro
 		s.log().Error("errands: store replan add_steps", "workflow", w.ID, "err", err)
 	}
 	amended := append(append([]Step(nil), w.Steps...), add...)
-	if len(add) > 0 && WidensEnvelope(w.Steps, amended) {
+	// A computer errand that stays one asks only through its computer tasks (startComputerPlan).
+	if len(add) > 0 && WidensEnvelope(w.Steps, amended) && !isComputerPlan(amended) {
 		fresh, err := s.loadWorkflow(ctx, w.ID)
 		if err == nil && fresh != nil && fresh.State == "waiting" {
 			s.postReplanCard(ctx, fresh, j.Reason, add)
