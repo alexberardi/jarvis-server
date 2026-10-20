@@ -61,10 +61,11 @@ type TaughtWorkflow struct {
 	UpdatedAt   time.Time             `json:"updated_at"`
 }
 
-// Param, WStep and RecordedElement are the computer package's, which replays them (piece 31).
+// Param, WStep, StepWindow and RecordedElement are the computer package's, which replays them (piece 31).
 type (
 	Param           = computer.WorkflowParam
 	WStep           = computer.WorkflowStep
+	StepWindow      = computer.StepWindow
 	RecordedElement = computer.RecordedElement
 )
 

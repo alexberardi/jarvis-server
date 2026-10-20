@@ -204,6 +204,10 @@ func windowGeo(at, size []int, mons []hyprMonitor, monitor int) computeruse.Geom
 
 // hyprClient is the slice of `hyprctl -j clients` a named capture needs.
 type hyprClient struct {
+	Address        string           `json:"address"`
+	PID            int              `json:"pid"`
+	Floating       bool             `json:"floating"`
+	Pinned         bool             `json:"pinned"`
 	At             []int            `json:"at"`
 	Size           []int            `json:"size"`
 	Title          string           `json:"title"`
@@ -281,6 +285,7 @@ type swayNode struct {
 	Focused          bool    `json:"focused"`
 	Focus            []int64 `json:"focus"` // children, most recently focused first
 	Visible          *bool   `json:"visible"`
+	FullscreenMode   int     `json:"fullscreen_mode"`
 	CurrentWorkspace string  `json:"current_workspace"` // outputs
 	Scale            float64 `json:"scale"`             // outputs
 	WindowProperties *struct {

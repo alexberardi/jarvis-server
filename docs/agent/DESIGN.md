@@ -734,6 +734,45 @@ the note says the image couldn't be read, so the model tells the user.
 the continue (error chime), a smaller one reaches the model as base64 text. Update jarvisd
 with the agent.
 
+**Desktop tasks on Linux** (plan P3 piece 35, 2026-10-20). `computer_observe` and
+`computer_act` with target desktop (`internal/agent/computer/desktop_linux.go`) pick the session
+per call, like the capture above:
+
+| session | windows (front to back, focus marked) | capture | pointer and keys |
+|---|---|---|---|
+| Hyprland | `hyprctl -j clients` on the shown workspaces (and pinned): fullscreen, then floating, then tiled, each by `focusHistoryID` | `grim -g` the window's rectangle | wlroots virtual pointer and keyboard |
+| sway | `swaymsg -t get_tree` on the shown workspaces: fullscreen, floating, tiled, by the `focus` lists | `grim -g` | wlroots virtual pointer and keyboard |
+| X11 | EWMH `_NET_CLIENT_LIST_STACKING` on the current desktop, `_NET_ACTIVE_WINDOW` (no window manager: the root's mapped children) | `GetImage` on the root | XTEST |
+
+- **Not supported:** GNOME and KDE on Wayland (no cross-client window list or input); a task
+  there fails saying so. grim is the one program a Wayland task needs installed; without it the
+  capture says to install it. Everything on X11 is the built-in protocol client.
+- **Elements:** AT-SPI (`internal/agent/atspi`) for apps that expose it (GTK, Qt, Electron with
+  accessibility on), found by the window's process. Tk apps (and others without AT-SPI) get
+  screenshots only: the snapshot says so and the model works from the capture. On Wayland the
+  element under a point isn't asked (AT-SPI's coordinates there aren't the screen's); the
+  window list decides.
+- **The deny check** goes by the window's app (Hyprland's class, sway's app_id or an Xwayland
+  window's class, X11's `WM_CLASS`): the one under a point for a click, the focused one for
+  keys, which on a tiling compositor can be under a floating window. A window titled with the
+  name asked for stands in when no app has it (every Tk app's class is `Tk`); what may be done
+  in it still goes by its app.
+- **Attended:** the screen lock is logind's `LockedHint` for `XDG_SESSION_ID` (else this
+  process's session, else the user's graphical session, `GetUser(uid)`'s `Display`: the
+  installed agent is a systemd user unit, in no session of its own); only when the user has no
+  graphical session (a headless test session) is there no lock to see, and the idle check alone
+  applies. Anything else logind can't answer refuses the task. Idle comes from ext-idle-notify (Wayland) or the X server;
+  the Wayland monitor starts with the agent, as the compositor only reports input after it
+  began, and until it has seen some a task is refused ("I haven't seen anyone use this
+  computer").
+- **Stop:** Ctrl+Alt+Esc (§17): an X11 key grab, or the GlobalShortcuts portal on Wayland; on
+  Hyprland, whose portal binds no key, the `hyprland.conf` line §17 gives.
+- **Verified** (`TestDesktopNotesLive`, `JARVIS_DESKTOP_LIVE=1`, a headless session only): the
+  fixture notes app under Xvfb with no window manager and under headless sway (Xwayland): the
+  window found by its title, captured, a move, the title typed, a click in the body, its text
+  and Ctrl+S, and the note saved. The suite's `notes_x11` and `notes_wlroots` stay pending: the
+  model routes "in the notes app, make a note" to `desktop_open`, not to a computer task.
+
 
 ## 13. Install and pairing without a terminal (plan, 2026-10-12)
 

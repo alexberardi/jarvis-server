@@ -46,6 +46,8 @@ export interface WStep {
   target: 'browser' | 'desktop'
   site?: string
   app?: string
+  /** desktop: the window the step was recorded in */
+  window?: { class?: string; title?: string }
   action: Action
   element?: RecordedElement
   /** A computeruse risk category: the step asks first. "" or absent is none. */

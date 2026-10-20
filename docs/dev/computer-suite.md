@@ -93,8 +93,8 @@ rewrites it).
    Xvfb): a desktop session, headless sway (`WLR_BACKENDS=headless`, Xwayland on) or `Xvfb :N`,
    each under its own `dbus-run-session` with its own `XDG_RUNTIME_DIR` and HOME and nothing of the
    user's environment (as `scripts/desktop-shot`); the real `jarvis-agent run --profile desktop
-   --voice=false`, enrolled to the sandbox with the seeded login, with its own control and browser
-   sockets and computer control turned on (`jarvis-agent computer on`); for browser and teach cases Playwright's Chromium with a throwaway `--user-data-dir`,
+   --voice=false --computer-control`, enrolled to the sandbox with the seeded login, with its own control and browser
+   sockets and computer control turned on (`jarvis-agent computer on` once it is up); for browser and teach cases Playwright's Chromium with a throwaway `--user-data-dir`,
    `--load-extension` of `jarvis-agent browser pack --target chromium`, the native-messaging
    manifest in the profile's `NativeMessagingHosts/`, and a DevTools pipe the suite sets the
    session cookies through. The run waits until the extension is connected to the agent.
@@ -142,10 +142,14 @@ skip_reason, passed, runs, rounds, seconds, failure, screenshot, run_results}]}`
 mean of model calls per run from the sandbox's `llm.jsonl`), `results.json` (the E2E report's
 suite shape, `scripts/lib/e2e_report.py`), `logs/` and `cases/`.
 
-Needs: sway (`scripts/desktop-shot deps` builds one into `~/.cache`; for the notes app under sway
-it must have Xwayland), `Xvfb` for X11 cases (`sudo pacman -S xorg-server-xvfb`), `grim`,
-`dbus-run-session`, Python 3 with Tk for the notes app, and Playwright's Chromium (`cd e2e/web &&
-npx playwright install chromium`, or `--chromium`). Each is checked only when a case needs it.
+Needs: sway (`scripts/desktop-shot deps` builds one into `~/.cache`, with Xwayland when
+`Xwayland` is installed, which the notes app under sway needs; a cached build without it is
+rebuilt), `Xvfb` for X11 cases (`sudo pacman -S xorg-server-xvfb`), `grim`, `dbus-run-session`,
+Python 3 with Tk for the notes app (`sudo pacman -S tk`; the bring-up says so in one line when it
+is missing), and Playwright's Chromium (`cd e2e/web && npx playwright install chromium`, or
+`--chromium`). Each is checked only when a case needs it. Before a desktop case the session's user
+presses Shift (through the agent's own input backend): desktop tasks run only while someone used
+the computer in the last few minutes.
 
 ## Results on the house model
 

@@ -106,9 +106,15 @@ func newLearnEnv(t *testing.T, reply string) *learnEnv {
 // learnt from it.
 func (le *learnEnv) store(id string, trace json.RawMessage, narration string) TaughtWorkflow {
 	le.t.Helper()
+	return le.storeMode(id, "browser", trace, narration)
+}
+
+// storeMode is store for a recording of mode (browser, desktop).
+func (le *learnEnv) storeMode(id, mode string, trace json.RawMessage, narration string) TaughtWorkflow {
+	le.t.Helper()
 	ctx := context.Background()
 	if _, err := le.m.storeAgentRecording(ctx, Recording{ID: id, HouseholdID: cbHH, OwnerID: 5, NodeID: "node-mac",
-		Mode: "browser", Trace: trace, Narration: narration}); err != nil {
+		Mode: mode, Trace: trace, Narration: narration}); err != nil {
 		le.t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)

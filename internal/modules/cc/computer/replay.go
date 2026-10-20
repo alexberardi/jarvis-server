@@ -191,7 +191,7 @@ func (l *Loop) replayRound(ctx context.Context, r *round, st WorkflowStep, i int
 		for _, a := range actions {
 			if el := elementOf(obs, a.Ref); el != nil {
 				if !sameElement(*rec, *el) {
-					r.heal = &RecordedElement{Role: el.Role, Name: el.Name}
+					r.heal = &RecordedElement{Role: el.Role, Name: el.Name, Source: rec.Source}
 				}
 				break
 			}

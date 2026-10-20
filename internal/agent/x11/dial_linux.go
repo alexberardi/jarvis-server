@@ -210,6 +210,26 @@ func (x *xconn) Geometry(win uint32) (int, int, int, int, error) {
 	return int(t.DstX), int(t.DstY), int(g.Width), int(g.Height), nil
 }
 
+func (x *xconn) Children(win uint32) ([]uint32, error) {
+	t, err := xproto.QueryTree(x.c, xproto.Window(win)).Reply()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uint32, len(t.Children))
+	for i, w := range t.Children {
+		out[i] = uint32(w)
+	}
+	return out, nil
+}
+
+func (x *xconn) Viewable(win uint32) (bool, error) {
+	a, err := xproto.GetWindowAttributes(x.c, xproto.Window(win)).Reply()
+	if err != nil {
+		return false, err
+	}
+	return a.MapState == xproto.MapStateViewable, nil
+}
+
 func (x *xconn) IdleTime() (time.Duration, error) {
 	if !x.saved {
 		x.saver, x.saved = screensaver.Init(x.c), true

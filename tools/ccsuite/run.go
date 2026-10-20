@@ -214,6 +214,9 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		if err := e.StartNotes(cctx, c.Setup.NotesLayout); err != nil {
 			return fail("notes app: " + err.Error())
 		}
+		if err := e.UserInput(cctx); err != nil {
+			return fail("user input: " + err.Error())
+		}
 	}
 	seen, err := e.inbox(cctx)
 	if err != nil {

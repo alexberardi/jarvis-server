@@ -23,7 +23,7 @@ import (
 )
 
 // Learning a workflow from a recording (docs/agent/COMPUTER_CONTROL.md, plan P3 piece 30):
-// every browser recording an agent stores (piece 29) queues cc.workflow.learn. The job numbers
+// every browser or desktop recording an agent stores (piece 29) queues cc.workflow.learn. The job numbers
 // the trace's events, seeds the values that may change from run to run (dates, months, file
 // names, amounts in typed values and URLs) and asks the background model to group the events
 // into steps, name the workflow and pick the parameters among the seeded candidates. What the
@@ -31,8 +31,9 @@ import (
 // event, and its risk from computeruse.Classify. The draft is stored as the recording owner's
 // (not shared), and a card asks them to review it on the admin's /workflows/<id>.
 //
-// Desktop recordings (plan P3 pieces 34-35) have another event shape (parseDesktopTrace): their
-// events are parsed, but no steps are learnt from them yet.
+// Desktop recordings (plan P3 pieces 34-35) have another event shape (parseDesktopTrace) and are
+// learnt the same way: the model sees each event's app, window and element, and each step
+// targets the recorded app and window (buildDesktopWorkflow), recording the AX/AT-SPI element when the event had one.
 
 const (
 	learnJob          = "cc.workflow.learn"
@@ -384,6 +385,26 @@ func paramCandidates(evs []traceEvent) []paramCandidate {
 	return out
 }
 
+// desktopParamCandidates are paramCandidates for a desktop trace: the dates, months, file
+// names and amounts in typed values (never masked ones). There are no URLs on a desktop.
+func desktopParamCandidates(evs []desktopEvent) []paramCandidate {
+	var out []paramCandidate
+	for i, e := range evs {
+		if e.Kind != "input" || e.Masked {
+			continue
+		}
+		var found []paramCandidate
+		for _, c := range scanCandidates(e.Value) {
+			c.Event, c.From = i+1, "typed"
+			if !slices.ContainsFunc(found, func(o paramCandidate) bool { return o.Kind == c.Kind && o.Value == c.Value }) {
+				found = append(found, c)
+			}
+		}
+		out = append(out, found...)
+	}
+	return out
+}
+
 // downloadName is a download event's file name.
 func downloadName(e traceEvent) string {
 	if e.Filename != "" {
@@ -412,15 +433,42 @@ const learnInstructions = `Answer with this JSON:
 - success: how to tell the task worked: {"download": {"name_like": "statement_*.csv"}} for a download, {"url_contains": "..."} or {"text_present": ["..."]} for a page that shows it.
 - ••• is a value that was hidden on purpose: never guess it.`
 
+const desktopLearnSystemPrompt = `You turn a recording of someone doing a task in the apps on their computer into a workflow Jarvis can replay for them later. Answer only JSON.`
+
+const (
+	learnSuccessBrowser = `- success: how to tell the task worked: {"download": {"name_like": "statement_*.csv"}} for a download, {"url_contains": "..."} or {"text_present": ["..."]} for a page that shows it.`
+	learnSuccessDesktop = `- success: how to tell the task worked: {"text_present": ["..."]} for text the app shows when it is done, or {"screen": "..."} saying what the screen shows then.`
+)
+
+// desktopLearnInstructions are learnInstructions with a success check a desktop can show.
+var desktopLearnInstructions = strings.Replace(learnInstructions, learnSuccessBrowser, learnSuccessDesktop, 1)
+
 // learnPrompt is the user message: the narration, the numbered events, the candidates.
 func learnPrompt(evs []traceEvent, cands []paramCandidate, narration string) string {
+	lines := make([]string, len(evs))
+	for i, e := range evs {
+		lines[i] = describeEvent(e)
+	}
+	return eventsPrompt(lines, cands, narration, learnInstructions)
+}
+
+// desktopLearnPrompt is learnPrompt for a desktop trace.
+func desktopLearnPrompt(evs []desktopEvent, cands []paramCandidate, narration string) string {
+	lines := make([]string, len(evs))
+	for i, e := range evs {
+		lines[i] = describeDesktopEvent(e)
+	}
+	return eventsPrompt(lines, cands, narration, desktopLearnInstructions)
+}
+
+func eventsPrompt(lines []string, cands []paramCandidate, narration, instructions string) string {
 	var b strings.Builder
 	if n := oneLine(narration); n != "" {
 		fmt.Fprintf(&b, "What the user said about it: %q\n\n", truncateRunes(n, learnMaxNarration))
 	}
 	b.WriteString("What the user did, one event per line:\n")
-	for i, e := range evs {
-		fmt.Fprintf(&b, "%d. %s\n", i+1, describeEvent(e))
+	for i, l := range lines {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, l)
 	}
 	b.WriteString("\nValues that may change from one run to the next (the only parameter candidates):\n")
 	if len(cands) == 0 {
@@ -429,7 +477,7 @@ func learnPrompt(evs []traceEvent, cands []paramCandidate, narration string) str
 	for _, c := range cands {
 		fmt.Fprintf(&b, "- event %d: %s %q (%s)\n", c.Event, c.Kind, truncateRunes(c.Value, learnMaxValue), c.From)
 	}
-	b.WriteString("\n" + learnInstructions)
+	b.WriteString("\n" + instructions)
 	return b.String()
 }
 
@@ -469,6 +517,42 @@ func describeEvent(e traceEvent) string {
 			s += " (" + e.Mime + ")"
 		}
 		return s
+	}
+	return e.Kind
+}
+
+// describeDesktopEvent is one desktop event as the prompt shows it: what was done, on which
+// element when the recording had one, in which app and window.
+func describeDesktopEvent(e desktopEvent) string {
+	where := orDefault(e.App, "an app")
+	if e.Window != nil && e.Window.Title != "" {
+		where += " — " + strconv.Quote(truncateRunes(oneLine(e.Window.Title), learnMaxValue))
+	}
+	if e.Element != nil {
+		el := orDefault(e.Element.Role, "element")
+		if name := oneLine(e.Element.Name); name != "" {
+			el += " " + strconv.Quote(truncateRunes(name, learnMaxValue))
+		}
+		where = el + " in " + where
+	}
+	switch e.Kind {
+	case "click":
+		verb := "click"
+		if e.Button == "right" || e.Button == "middle" {
+			verb = e.Button + "-click"
+		}
+		if e.Element == nil {
+			verb += " in"
+		}
+		return fmt.Sprintf("%s %s at (%d,%d)", verb, where, e.X, e.Y)
+	case "input":
+		value := maskedValue
+		if !e.Masked {
+			value = strconv.Quote(truncateRunes(oneLine(e.Value), learnMaxValue))
+		}
+		return "type into " + where + ": " + value
+	case "key":
+		return "press " + e.Key + " in " + where
 	}
 	return e.Kind
 }
@@ -546,6 +630,88 @@ func parseLearnOutput(s string) (learnOutput, error) {
 // recorded event's, its risk Classify's. A step on the built-in deny list is dropped (a replay
 // could never run it).
 func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out learnOutput) (TaughtWorkflow, error) {
+	w := newDraft(rec, out)
+	subs := learnParams(&w, out, cands)
+
+	// The page each event happened on.
+	pages := make([]string, len(evs))
+	for i, e := range evs {
+		switch {
+		case e.URL != "":
+			pages[i] = e.URL
+		case i > 0:
+			pages[i] = pages[i-1]
+		}
+	}
+	for _, s := range out.Steps {
+		n := primaryEvent(evs, stepEvents(s.EventSeqs, len(evs)))
+		if n == 0 {
+			continue
+		}
+		e := evs[n-1]
+		intent := stepIntent(s.Intent, describeEvent(e))
+		a, ok := eventAction(e, intent)
+		if !ok {
+			continue
+		}
+		step := WStep{Intent: intent, Target: "browser", Action: a, Element: recordedElement(e.Element)}
+		if u, err := url.Parse(pages[n-1]); err == nil {
+			step.Site = u.Host
+		}
+		risk, ok := stepRisk(a, riskElement(e), computeruse.Target{Kind: "browser", Site: step.Site}, e.Masked)
+		if !ok {
+			continue
+		}
+		step.Risk = risk
+		addStep(&w, step, subs[n])
+	}
+	return finishDraft(w, successCheck(out.Success, evs))
+}
+
+// buildDesktopWorkflow is buildWorkflow for a desktop trace: each step targets the recorded
+// app and window, and replays its last event (a click at the recorded point, typing, a key).
+// A step whose event had an accessibility element (AX on macOS, AT-SPI on Linux) records it
+// with source "ax", so a replay finds it again; one without (no accessibility context, a key
+// with nothing focused) keeps only the point, the app and the window.
+func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandidate, out learnOutput) (TaughtWorkflow, error) {
+	w := newDraft(rec, out)
+	subs := learnParams(&w, out, cands)
+	for _, s := range out.Steps {
+		nums := stepEvents(s.EventSeqs, len(evs))
+		if len(nums) == 0 {
+			continue
+		}
+		n := nums[len(nums)-1]
+		e := evs[n-1]
+		intent := stepIntent(s.Intent, describeDesktopEvent(e))
+		a, ok := desktopEventAction(e, intent)
+		if !ok {
+			continue
+		}
+		step := WStep{Intent: intent, Target: "desktop", App: e.App, Action: a}
+		if e.Window != nil && (e.Window.Class != "" || e.Window.Title != "") {
+			step.Window = &StepWindow{Class: e.Window.Class, Title: e.Window.Title}
+		}
+		step.Element = desktopRecordedElement(e.Element)
+		var el *computeruse.Element
+		if e.Element != nil {
+			el = &computeruse.Element{Role: e.Element.Role, Name: e.Element.Name, Secure: e.Masked}
+		}
+		risk, ok := stepRisk(a, el, computeruse.Target{Kind: "desktop", App: e.App}, e.Masked)
+		if !ok {
+			continue
+		}
+		step.Risk = risk
+		addStep(&w, step, subs[n])
+	}
+	// No URL or download on a desktop: the model's text or screen check, if any.
+	sc := successCheck(out.Success, nil)
+	sc.URLContains = ""
+	return finishDraft(w, sc)
+}
+
+// newDraft is the draft's owner, name and triggers.
+func newDraft(rec Recording, out learnOutput) TaughtWorkflow {
 	w := TaughtWorkflow{HouseholdID: rec.HouseholdID, OwnerID: rec.OwnerID, RecordingID: rec.ID,
 		Name: truncateRunes(oneLine(out.Name), maxWorkflowName)}
 	if w.Name == "" {
@@ -556,13 +722,19 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 			w.Triggers = append(w.Triggers, t)
 		}
 	}
+	return w
+}
 
-	// Params: named by the model, valued by the candidates.
-	type sub struct {
-		c    paramCandidate
-		name string
-	}
-	subs := map[int][]sub{}
+// paramSub is a param to write into the step of the candidate's event.
+type paramSub struct {
+	c    paramCandidate
+	name string
+}
+
+// learnParams adds the params to w, named by the model and valued by the candidates, and returns
+// what to substitute in each event's step.
+func learnParams(w *TaughtWorkflow, out learnOutput, cands []paramCandidate) map[int][]paramSub {
+	subs := map[int][]paramSub{}
 	for _, p := range out.Params {
 		name := strings.Trim(slugRE.ReplaceAllString(strings.ToLower(strings.TrimSpace(p.Name)), "_"), "_")
 		if name == "" || !slices.Contains(paramKinds, p.Kind) || len(w.Params) == maxWorkflowParams ||
@@ -592,65 +764,61 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 		}
 		w.Params = append(w.Params, Param{Name: name, Kind: p.Kind, Example: example})
 		for _, c := range picked {
-			subs[c.Event] = append(subs[c.Event], sub{c, name})
+			subs[c.Event] = append(subs[c.Event], paramSub{c, name})
 		}
 	}
+	return subs
+}
 
-	// The page each event happened on.
-	pages := make([]string, len(evs))
-	for i, e := range evs {
-		switch {
-		case e.URL != "":
-			pages[i] = e.URL
-		case i > 0:
-			pages[i] = pages[i-1]
+// stepEvents is a step's event numbers that are in the trace (1 to n), each once.
+func stepEvents(seqs []int, n int) []int {
+	var nums []int
+	for _, s := range seqs {
+		if s >= 1 && s <= n && !slices.Contains(nums, s) {
+			nums = append(nums, s)
 		}
 	}
-	for _, s := range out.Steps {
-		var nums []int
-		for _, n := range s.EventSeqs {
-			if n >= 1 && n <= len(evs) && !slices.Contains(nums, n) {
-				nums = append(nums, n)
-			}
-		}
-		n := primaryEvent(evs, nums)
-		if n == 0 {
-			continue
-		}
-		e := evs[n-1]
-		intent := truncateRunes(oneLine(s.Intent), computeruse.MaxIntent)
-		if intent == "" {
-			intent = truncateRunes(describeEvent(e), computeruse.MaxIntent)
-		}
-		a, ok := eventAction(e, intent)
-		if !ok {
-			continue
-		}
-		step := WStep{Intent: intent, Target: "browser", Action: a, Element: recordedElement(e.Element)}
-		if u, err := url.Parse(pages[n-1]); err == nil {
-			step.Site = u.Host
-		}
-		// Classify sees the recorded value, before the params replace it.
-		switch r := computeruse.Classify(a, riskElement(e), computeruse.Target{Kind: "browser", Site: step.Site}); {
-		case r.Level == computeruse.LevelDeny:
-			continue
-		case r.Level == computeruse.LevelConfirm && slices.Contains(riskCategories, r.Category):
-			step.Risk = r.Category
-		case e.Masked:
-			step.Risk = computeruse.CatSensitiveInput
-		}
-		for _, sb := range subs[n] {
-			substitute(&step, sb.c, sb.name)
-		}
-		if len(w.Steps) < maxWorkflowSteps {
-			w.Steps = append(w.Steps, step)
-		}
+	return nums
+}
+
+// stepIntent is the model's intent for a step, else the description of its event.
+func stepIntent(intent, described string) string {
+	if intent = truncateRunes(oneLine(intent), computeruse.MaxIntent); intent != "" {
+		return intent
 	}
+	return truncateRunes(described, computeruse.MaxIntent)
+}
+
+// stepRisk is a step's risk category; false for a step Classify denies. Classify sees the
+// recorded value, before the params replace it.
+func stepRisk(a computeruse.Action, el *computeruse.Element, t computeruse.Target, masked bool) (string, bool) {
+	switch r := computeruse.Classify(a, el, t); {
+	case r.Level == computeruse.LevelDeny:
+		return "", false
+	case r.Level == computeruse.LevelConfirm && slices.Contains(riskCategories, r.Category):
+		return r.Category, true
+	case masked:
+		return computeruse.CatSensitiveInput, true
+	}
+	return "", true
+}
+
+// addStep writes the step's params and adds it, up to maxWorkflowSteps.
+func addStep(w *TaughtWorkflow, step WStep, subs []paramSub) {
+	for _, sb := range subs {
+		substitute(&step, sb.c, sb.name)
+	}
+	if len(w.Steps) < maxWorkflowSteps {
+		w.Steps = append(w.Steps, step)
+	}
+}
+
+// finishDraft sets the success check and validates the draft, which needs a step.
+func finishDraft(w TaughtWorkflow, sc computer.SuccessCheck) (TaughtWorkflow, error) {
 	if len(w.Steps) == 0 {
 		return TaughtWorkflow{}, errors.New("the model's answer has no step on a recorded event")
 	}
-
-	w.Success = successCheck(out.Success, evs)
+	w.Success = sc
 	return w, w.Validate()
 }
 
@@ -719,6 +887,45 @@ func eventAction(e traceEvent, intent string) (computeruse.Action, bool) {
 	return a, true
 }
 
+// desktopEventAction is the action that replays a desktop event (false when none does). A
+// click keeps its recorded global point (docs/decisions/2026-10-19-learning-workflows.md); a key
+// is its chord ("Ctrl+s" is ctrl and s), dropped when a key isn't one keypress knows.
+func desktopEventAction(e desktopEvent, intent string) (computeruse.Action, bool) {
+	a := computeruse.Action{Intent: intent}
+	switch e.Kind {
+	case "click":
+		if e.X < 0 || e.Y < 0 {
+			return a, false
+		}
+		x, y := e.X, e.Y
+		a.Kind, a.X, a.Y = "click", &x, &y
+		if e.Button == "right" || e.Button == "middle" {
+			a.Button = e.Button
+		}
+	case "input":
+		text := truncateRunes(e.Value, computeruse.MaxText)
+		if e.Masked {
+			text = maskedValue
+		}
+		if text == "" {
+			return a, false // a cleared field: without an element there is nothing to set
+		}
+		a.Kind, a.Text = "type", text
+	case "key":
+		var keys []string
+		for _, k := range strings.Split(strings.ToLower(e.Key), "+") {
+			if !computeruse.KeyNames[k] {
+				return a, false
+			}
+			keys = append(keys, k)
+		}
+		a.Kind, a.Keys = "keypress", keys
+	default:
+		return a, false
+	}
+	return a, true
+}
+
 func recordedElement(el *traceElement) *RecordedElement {
 	if el == nil {
 		return nil
@@ -728,6 +935,15 @@ func recordedElement(el *traceElement) *RecordedElement {
 		r.Frame = strconv.Itoa(el.Frame)
 	}
 	return r
+}
+
+// desktopRecordedElement is the recorded element of a desktop event: its role, label and path
+// from the accessibility tree, never a value (a password field's is not kept at all).
+func desktopRecordedElement(el *desktopElement) *RecordedElement {
+	if el == nil || (el.Role == "" && el.Name == "") {
+		return nil
+	}
+	return &RecordedElement{Role: el.Role, Name: el.Name, AXPath: el.AXPath, Source: "ax"}
 }
 
 func riskElement(e traceEvent) *computeruse.Element {
@@ -808,9 +1024,10 @@ func (m *Module) registerWorkflowLearning() {
 	}
 }
 
-// queueLearning queues learning a workflow from a browser recording (once per recording).
+// queueLearning queues learning a workflow from a browser or desktop recording (once per
+// recording).
 func (m *Module) queueLearning(ctx context.Context, rec Recording) error {
-	if rec.Mode != "browser" || m.LLM == nil {
+	if (rec.Mode != "browser" && rec.Mode != "desktop") || m.LLM == nil {
 		return nil
 	}
 	if m.deps.Queue == nil {
@@ -837,17 +1054,6 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	if err != nil || rec == nil {
 		return err
 	}
-	if rec.Mode != "browser" {
-		evs, err := parseDesktopTrace(rec.Trace)
-		if err != nil {
-			return queue.Permanent(err)
-		}
-		if len(evs) == 0 {
-			return queue.Permanent(errors.New("the recording has no events"))
-		}
-		m.deps.Log.Info("cc: parsed a desktop recording; not learning steps from it yet", "recording", id, "events", len(evs))
-		return nil
-	}
 	var have string
 	err = m.deps.DB.Read.QueryRowContext(ctx, `SELECT id FROM cc_taught_workflows WHERE recording_id = ? LIMIT 1`, id).Scan(&have)
 	if err == nil {
@@ -856,17 +1062,36 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	evs, err := parseTrace(rec.Trace)
-	if err != nil {
-		return queue.Permanent(err)
-	}
-	if len(evs) == 0 {
-		return queue.Permanent(errors.New("the recording has no events"))
+	var (
+		system, prompt string
+		build          func(learnOutput) (TaughtWorkflow, error)
+	)
+	if rec.Mode == "browser" {
+		evs, err := parseTrace(rec.Trace)
+		if err != nil {
+			return queue.Permanent(err)
+		}
+		if len(evs) == 0 {
+			return queue.Permanent(errors.New("the recording has no events"))
+		}
+		cands := paramCandidates(evs)
+		system, prompt = learnSystemPrompt, learnPrompt(evs, cands, rec.Narration)
+		build = func(out learnOutput) (TaughtWorkflow, error) { return buildWorkflow(*rec, evs, cands, out) }
+	} else {
+		evs, err := parseDesktopTrace(rec.Trace)
+		if err != nil {
+			return queue.Permanent(err)
+		}
+		if len(evs) == 0 {
+			return queue.Permanent(errors.New("the recording has no events"))
+		}
+		cands := desktopParamCandidates(evs)
+		system, prompt = desktopLearnSystemPrompt, desktopLearnPrompt(evs, cands, rec.Narration)
+		build = func(out learnOutput) (TaughtWorkflow, error) { return buildDesktopWorkflow(*rec, evs, cands, out) }
 	}
 	if m.LLM == nil {
 		return errors.New("no llm module")
 	}
-	cands := paramCandidates(evs)
 	temp, maxTokens, think := 0.0, learnMaxTokens, 0
 	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{
 		Label:           llm.LabelBackground,
@@ -875,8 +1100,8 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 		ReasoningBudget: &think,
 		ResponseFormat:  &llm.ResponseFormat{Type: "json_object"},
 		Messages: []llm.Message{
-			{Role: "system", Content: llm.TextContent(learnSystemPrompt)},
-			{Role: "user", Content: llm.TextContent(learnPrompt(evs, cands, rec.Narration))},
+			{Role: "system", Content: llm.TextContent(system)},
+			{Role: "user", Content: llm.TextContent(prompt)},
 		},
 	})
 	if err != nil {
@@ -886,7 +1111,7 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	w, err := buildWorkflow(*rec, evs, cands, out)
+	w, err := build(out)
 	if err != nil {
 		return queue.Permanent(err)
 	}
@@ -894,7 +1119,7 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	m.deps.Log.Info("cc: workflow learnt from a recording", "recording", id, "workflow", stored.ID,
+	m.deps.Log.Info("cc: workflow learnt from a recording", "recording", id, "mode", rec.Mode, "workflow", stored.ID,
 		"steps", len(stored.Steps), "params", len(stored.Params))
 	m.postLearnedCard(ctx, stored)
 	return nil

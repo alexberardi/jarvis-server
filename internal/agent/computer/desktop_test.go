@@ -492,6 +492,12 @@ func TestNotAttendedRefused(t *testing.T) {
 		t.Errorf("locked screen: observe = %v, want not_attended", out)
 	}
 	f.lock = false
+	// No input seen since the monitor began (a Wayland compositor's notifications only say
+	// what happened since): refused, without a made-up idle time.
+	f.mon.set(time.Time{})
+	if out, _ := f.observe(t, "Notes"); out["error_code"] != "not_attended" || !strings.Contains(out["error"].(string), "haven't seen") {
+		t.Errorf("no input seen yet: observe = %v, want not_attended saying so", out)
+	}
 	f.mon.set(f.clock.Now().Add(-6 * time.Minute))
 	if out, _ := f.observe(t, "Notes"); out["error_code"] != "not_attended" {
 		t.Errorf("idle 6 min: observe = %v, want not_attended", out)
@@ -618,5 +624,60 @@ func TestClipboardCommands(t *testing.T) {
 	}
 	if clipboardFor("linux", env()) != nil || clipboardFor("windows", env()) != nil {
 		t.Error("a clipboard without a session")
+	}
+}
+
+// On Linux the window list is the stacking order and the focus is marked apart: a floating
+// window can sit above the focused tiled one. Keys go by the focused window, a click by the
+// one on top, and with no accessibility tree (a Tk app) the window list alone decides.
+func TestFocusedWindowMarkedApart(t *testing.T) {
+	f := newDesktop(t)
+	f.tl.Desktop.AX = nil
+	term := dTerminal
+	term.Focused = true
+	f.wins.ws = []DesktopWindow{dNotes, term}
+	out, capID := f.observe(t, "")
+	if out["error_code"] != "denied" {
+		t.Errorf("observe with no app = %v, want the focused terminal denied", out)
+	}
+	if out, capID = f.observe(t, "Notes"); out["success"] != true || capID == "" {
+		t.Fatalf("observe Notes = %v", out)
+	}
+	res := f.act(t, "Notes", map[string]any{"kind": "type", "intent": "x", "text": "rm -rf ~"})
+	if r := firstResult(t, res); r["code"] != "denied" {
+		t.Errorf("type while the terminal has the focus = %v, want denied", r)
+	}
+	if got := f.in.posted(); len(got) != 0 {
+		t.Errorf("posted %v, want nothing", got)
+	}
+	// Notes has the focus: typing goes there, and a click on it is Notes'.
+	term.Focused = false
+	notes := dNotes
+	notes.Focused = true
+	f.wins.ws = []DesktopWindow{notes, term}
+	res = f.act(t, "Notes", map[string]any{"kind": "type", "intent": "x", "text": "milk"}, click(capID, 10, 10))
+	for _, r := range results(res) {
+		if r["ok"] != true {
+			t.Errorf("result = %v", r)
+		}
+	}
+}
+
+// A window titled with the app's name stands in when no app has that name (a Tk app's class is
+// "Tk"); an app with the name comes first, and the window's own app is still what is checked.
+func TestWindowByTitle(t *testing.T) {
+	tk := DesktopWindow{ID: "0x1", App: "Tk", Title: "Jarvis Test Notes", X: 0, Y: 0, W: 720, H: 480}
+	term := DesktopWindow{ID: "0x2", App: "foot", Title: "Notes", X: 0, Y: 500, W: 720, H: 300}
+	ws := []DesktopWindow{term, tk, dNotes}
+	if w, ok := findWindow(ws, "Jarvis Test Notes"); !ok || w.ID != "0x1" {
+		t.Errorf("by title = %+v %v", w, ok)
+	}
+	if w, ok := findWindow(ws, "Notes"); !ok || w.ID != dNotes.ID {
+		t.Errorf("an app named Notes comes first: %+v", w)
+	}
+	f := newDesktop(t)
+	f.wins.ws = []DesktopWindow{term}
+	if out, _ := f.observe(t, "Notes"); out["error_code"] != "denied" {
+		t.Errorf("a terminal titled Notes = %v, want denied", out)
 	}
 }
