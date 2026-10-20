@@ -48,6 +48,10 @@ func TestPlannerOffersFileToolsWithComputer(t *testing.T) {
 			t.Fatalf("prompt lacks the budget rule:\n%s", p)
 		}
 	}
+	// The files are read once their names are known: the checkpoint comes after the downloads.
+	if i, j := strings.Index(budgetRule, "request_replan"), strings.Index(budgetRule, "read_computer_file"); i < 0 || j < i {
+		t.Fatalf("the budget rule reads before its checkpoint: %s", budgetRule)
+	}
 	if !strings.Contains(BuildPrompt("g", menu), "actually asked for.\n\n"+websiteRule+budgetRule+"CHECKPOINT") {
 		t.Fatal("the website and budget rules aren't after the decomposition rule")
 	}

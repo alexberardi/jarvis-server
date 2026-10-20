@@ -255,8 +255,9 @@ const decompositionRule = "Create a SEPARATE step for EACH distinct action the u
 
 // budgetRule is the decomposition rule's line for budgets (plan P3 piece 13), in the prompts
 // whose menu has write_spreadsheet: the rows are only known once the statements have been read.
-const budgetRule = "BUDGETS: for a budget or a spending report from statements, download each statement " +
-	"with computer_task, then read each one with read_computer_file, then end the plan with a " +
+const budgetRule = "BUDGETS: for a budget or a spending report from statements, download the statements " +
+	"with computer_task, then end the plan with a request_replan checkpoint: the files' names are known only " +
+	"once they are downloaded. Then read each downloaded file with read_computer_file, then another " +
 	"request_replan checkpoint. Once the statements have been read, write_spreadsheet with every " +
 	"transaction categorised and a total per category; the report then says where the money went.\n\n"
 
