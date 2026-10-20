@@ -2,8 +2,8 @@ package desktop
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
