@@ -62,7 +62,7 @@ export default function RecordingsPage() {
           <EmptyState
             icon={<Video size={20} />}
             title="No recordings yet"
-            description={'On your computer, pick "Record a macro…" in the Jarvis Automation menu or say "Jarvis, watch me", then do the task once.'}
+            description="On your computer, pick “Record a macro…” in the Jarvis Automation menu or say “Jarvis, watch me”, then do the task once."
           />
         ) : (
           <List label="Recordings">

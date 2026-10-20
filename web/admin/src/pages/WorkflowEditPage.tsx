@@ -144,8 +144,9 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
           {shown.map((d, i) => {
             const raw = steps[i]
             const risky = !!d.step.risk
+            // One row of icons: beside the switch on a phone, beside the intent from sm (grid placement).
             const icons = edit && (
-              <div className="flex shrink-0 items-center">
+              <div className="col-start-2 row-start-3 flex shrink-0 items-center self-center sm:row-start-2">
                 <Button size="icon" variant="ghost" aria-label={`Move step ${i + 1} up`} disabled={i === 0} onClick={() => move(i, i - 1)}>
                   <ArrowUp size={16} aria-hidden />
                 </Button>
@@ -186,8 +187,8 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
               >
                 {edit && <GripVertical size={16} className="mt-1 hidden shrink-0 cursor-grab text-text-muted sm:block" aria-hidden />}
                 <span className="mt-px w-5 shrink-0 text-body text-text-muted tabular-nums">{i + 1}.</span>
-                <div className="min-w-0 flex-1 space-y-2">
-                  <p className="text-body text-text [overflow-wrap:anywhere]">
+                <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-2">
+                  <p className="col-span-2 text-body text-text [overflow-wrap:anywhere]">
                     <Sentence parts={stepSentence(d.step)} />
                     {risky && (
                       <Badge tone="warning" title={riskLabel(d.step.risk)} className="ml-2 align-middle">
@@ -199,6 +200,7 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
                     <Input
                       aria-label={`Step ${i + 1} intent`}
                       placeholder="What it does"
+                      wrapperClassName="col-span-2 sm:col-span-1"
                       value={d.step.intent}
                       onChange={(e) => {
                         const v = e.target.value
@@ -206,31 +208,29 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
                       }}
                     />
                   ) : (
-                    <p className="text-small text-text-muted">{d.step.intent}</p>
+                    <p className="col-span-2 text-small text-text-muted">{d.step.intent}</p>
                   )}
                   {edit && (
-                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <Switch
-                          aria-label={`Ask first before step ${i + 1}`}
-                          label={<span className="text-small text-text-muted">{raw.lockedRisk ? `Always asks: ${riskLabel(d.step.risk).toLowerCase()}` : 'Ask me first'}</span>}
-                          checked={risky}
-                          disabled={raw.lockedRisk}
-                          onCheckedChange={(on) => patch(raw.uid, (s) => ({ ...s, risk: on ? 'submit_third_party' : '' }))}
+                    <div className="col-start-1 row-start-3 flex flex-wrap items-center gap-x-3 gap-y-2 sm:col-span-2">
+                      <Switch
+                        aria-label={`Ask first before step ${i + 1}`}
+                        label={<span className="text-small text-text-muted">{raw.lockedRisk ? `Always asks: ${riskLabel(d.step.risk).toLowerCase()}` : 'Ask me first'}</span>}
+                        checked={risky}
+                        disabled={raw.lockedRisk}
+                        onCheckedChange={(on) => patch(raw.uid, (s) => ({ ...s, risk: on ? 'submit_third_party' : '' }))}
+                      />
+                      {risky && !raw.lockedRisk && (
+                        <Select
+                          aria-label={`Why step ${i + 1} asks`}
+                          className="h-8 text-small"
+                          options={RISKS}
+                          value={d.step.risk}
+                          onValueChange={(v) => patch(raw.uid, (s) => ({ ...s, risk: v }))}
                         />
-                        {risky && !raw.lockedRisk && (
-                          <Select
-                            aria-label={`Why step ${i + 1} asks`}
-                            className="h-8 text-small"
-                            options={RISKS}
-                            value={d.step.risk}
-                            onValueChange={(v) => patch(raw.uid, (s) => ({ ...s, risk: v }))}
-                          />
-                        )}
-                      </div>
-                      {icons}
+                      )}
                     </div>
                   )}
+                  {icons}
                 </div>
               </li>
             )

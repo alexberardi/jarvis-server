@@ -100,7 +100,7 @@ export default function InboxItemPage() {
     <article className="mx-auto max-w-3xl space-y-5">
       <div className="flex items-center justify-between gap-2">
         <BackLink />
-        <Button size="sm" variant="danger" icon={<Trash2 size={16} aria-hidden />} onClick={() => void remove()}>
+        <Button size="sm" variant="ghost" icon={<Trash2 size={16} aria-hidden />} onClick={() => void remove()}>
           Delete
         </Button>
       </div>

@@ -51,7 +51,7 @@ export default function WorkflowsPage() {
           <EmptyState
             icon={<Workflow size={20} />}
             title="Nothing taught yet"
-            description={'Say "Jarvis, watch me" on your computer and do the task once. It shows up here to run again.'}
+            description="Say “Jarvis, watch me” on your computer and do the task once. It shows up here to run again."
           />
         ) : (
           <List label="Workflows">
