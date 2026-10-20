@@ -412,7 +412,8 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply) (Outcome, bool) 
 	}
 	v.What, v.Why = check.describe(), res.Why
 	r.feedback = "you said done, but my check failed: " + res.Why +
-		". Finish the task if it isn't, then say done again with a check that holds."
+		". So the task isn't finished: don't say done now; answer with the action it still needs on the " +
+		"current page (e.g. press the button that sends, submits or completes it), and say done once it holds."
 	return Outcome{}, false
 }
 

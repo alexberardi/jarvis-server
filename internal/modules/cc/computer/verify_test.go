@@ -142,7 +142,7 @@ func TestVerifyFailsThenRecovers(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 	// The failed check is the next round's feedback.
-	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `Last turn: you said done, but my check failed: the address is https://shop.example.com/soap, not one with "/thanks".`) {
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `Last turn: you said done, but my check failed: the address is https://shop.example.com/soap, not one with "/thanks". So the task isn't finished: don't say done now; answer with the action it still needs`) {
 		t.Fatalf("no feedback in the prompt:\n%s", txt)
 	}
 	r := e.storedRun(out.RunID)
