@@ -191,6 +191,9 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		}
 		node = e.NodeID
 	}
+	if err := e.Block(cctx, c.Setup.Block); err != nil {
+		return fail("block: " + err.Error())
+	}
 	if err := e.Login(cctx, c.Setup.Login); err != nil {
 		return fail("login: " + err.Error())
 	}

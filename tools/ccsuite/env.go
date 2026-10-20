@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/db"
 )
 
 // Env is one run's world, in a private run dir and never the user's session: a sandbox jarvisd
@@ -664,6 +666,41 @@ func (e *Env) startBrowser(ctx context.Context, d *desktop) error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+// Block makes sites the household's blocked sites for computer tasks, and nothing else: each
+// case starts with its own setup.block (none for most). There is no rules API yet (the Rules UI
+// is phase P4), so the rules go straight into the sandbox jarvisd's database, which cc reads on
+// every decision.
+func (e *Env) Block(ctx context.Context, sites []string) error {
+	d, err := db.Open(ctx, filepath.Join(e.Root, ".sandbox", e.Name, "home", "jarvis.db"))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return setBlockRules(ctx, &policy.Store{DB: d}, e.Household, sites)
+}
+
+// setBlockRules replaces hh's household rules for computer tasks with a block rule per site.
+func setBlockRules(ctx context.Context, st *policy.Store, hh string, sites []string) error {
+	rules, err := st.ListRules(ctx, hh)
+	if err != nil {
+		return err
+	}
+	for _, r := range rules {
+		if r.ScopeKind == policy.ScopeHousehold && r.Tool == policy.ToolComputerTask {
+			if _, err := st.DeleteRule(ctx, hh, r.ID); err != nil {
+				return err
+			}
+		}
+	}
+	for _, s := range sites {
+		if _, err := st.PutRule(ctx, policy.Rule{HouseholdID: hh, ScopeKind: policy.ScopeHousehold,
+			Tool: policy.ToolComputerTask, Target: "site:" + s, Effect: policy.Block, Note: "ccsuite setup.block"}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Login asks the sites for a session per site and puts the cookies in the browser, standing in

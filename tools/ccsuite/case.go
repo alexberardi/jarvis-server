@@ -40,6 +40,9 @@ type Setup struct {
 	Login       []string `json:"login"`
 	Layout      string   `json:"layout,omitempty"`       // ccsites pages: default or moved
 	NotesLayout string   `json:"notes_layout,omitempty"` // the notes app: default or moved
+	// Block lists the sites (hosts, e.g. 127.0.0.1) the household blocks for computer tasks
+	// during the case: a household rule of cc's (policy.Rule, effect block) per site.
+	Block []string `json:"block,omitempty"`
 }
 
 // Answer says how to answer a card that asks: when is the card's kind (confirm: a card with
@@ -122,6 +125,11 @@ func (c *Case) Validate() error {
 	for _, s := range c.Setup.Login {
 		if !oneOf(s, loginSites...) {
 			return fmt.Errorf("setup.login %q: one of %s", s, strings.Join(loginSites, ", "))
+		}
+	}
+	for _, s := range c.Setup.Block {
+		if s == "" || strings.ContainsAny(s, ":/ ") {
+			return fmt.Errorf("setup.block %q: a host, e.g. 127.0.0.1", s)
 		}
 	}
 	for i, a := range c.Answers {

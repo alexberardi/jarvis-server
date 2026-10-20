@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
+	"github.com/alexberardi/jarvis-server/internal/platform/db"
 )
 
 // TestCasesParse: every case file parses and validates, names are unique and match their files,
@@ -61,6 +67,7 @@ func TestCasesRejected(t *testing.T) {
 		"name vs file":   {"y", strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), "not the file's name"},
 		"bad phase":      {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `"browser", "status"`, `"web", "status"`, 1), `phase "web"`},
 		"bad login site": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]`, `["shop"]`, 1), `setup.login "shop"`},
+		"bad block site": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]}`, `["store"], "block": ["http://x/"]}`, 1), `setup.block "http://x/"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -72,5 +79,41 @@ func TestCasesRejected(t *testing.T) {
 				t.Errorf("err = %v, want one with %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestBlockRules: setup.block replaces the household's computer-task rules with one block rule
+// per site, so a case's block never outlives it; a case without one leaves none.
+func TestBlockRules(t *testing.T) {
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := d.Write.ExecContext(ctx, `CREATE TABLE cc_tool_rules (id INTEGER PRIMARY KEY, household_id TEXT NOT NULL,
+		scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', tool TEXT NOT NULL, target TEXT NOT NULL DEFAULT '',
+		effect TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', updated_by INTEGER, updated_at TEXT NOT NULL,
+		UNIQUE (household_id, scope_kind, scope_id, tool, target))`); err != nil {
+		t.Fatal(err)
+	}
+	st := &policy.Store{DB: d}
+	if err := setBlockRules(ctx, st, "hh", []string{"127.0.0.1", "Shop.Example"}); err != nil {
+		t.Fatal(err)
+	}
+	rules, _ := st.ListRules(ctx, "hh")
+	var got []string
+	for _, r := range rules {
+		got = append(got, fmt.Sprintf("%s %s %s %s", r.ScopeKind, r.Tool, r.Target, r.Effect))
+	}
+	want := []string{"household computer_task site:127.0.0.1 block", "household computer_task site:shop.example block"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("rules = %q, want %q", got, want)
+	}
+	if err := setBlockRules(ctx, st, "hh", nil); err != nil {
+		t.Fatal(err)
+	}
+	if rules, _ := st.ListRules(ctx, "hh"); len(rules) != 0 {
+		t.Errorf("after a case without block: %d rules left", len(rules))
 	}
 }
