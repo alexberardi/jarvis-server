@@ -86,6 +86,8 @@ type StreamRequest struct {
 	// LevelVsWake is a follow-up's speech level against the woken command's, in dB: the
 	// follow-up gate's level signal (uploads are normalised, so only the node knows).
 	LevelVsWake *float64 `json:"level_vs_wake_db,omitempty"`
+	// Computer is what Jarvis is doing with this computer as the command is sent (computer.go).
+	Computer *ComputerActivity `json:"computer_activity,omitempty"`
 	// SpeechLevel is a wake turn's speech level in dBFS: with WakeConfidence, how
 	// command-center picks the node that answers when several heard one wake.
 	SpeechLevel *float64 `json:"speech_level_db,omitempty"`

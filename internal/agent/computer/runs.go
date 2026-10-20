@@ -13,16 +13,66 @@ const runIdle = 6 * time.Hour
 
 // Run is the executor's state of one computer task (cc's run id): its task window and tab, the
 // tab's address as last seen, the last snapshot (an action's ref is only good for its gen) and
-// whether it was stopped.
+// whether it was stopped. A desktop task also has its app, the captures its actions' points are
+// on and the apps it has used.
 type Run struct {
-	ID       string
-	Tab      string // "KEY:N", the task window's tab
-	Window   string // "KEY:N", the task window
-	URL      string
-	Snap     *computeruse.Snapshot
-	Stopped  bool
+	ID      string
+	Tab     string // "KEY:N", the task window's tab
+	Window  string // "KEY:N", the task window; a desktop task's window id
+	URL     string
+	Snap    *computeruse.Snapshot
+	Stopped bool
+	App     string // desktop: the task's app, as its window names it ("Notes")
+	PID     int    // desktop: its process
+
 	captures int
 	touched  time.Time
+	attended bool                            // desktop: started with the user there; the guard watches it
+	shots    map[string]computeruse.Geometry // desktop: the latest captures by id
+	order    []string                        // their ids, oldest first
+	apps     map[string]bool                 // desktop: the apps it has used, by appKeyOf
+}
+
+// keepCapture remembers capture id's geometry (the last maxCaptures).
+func (r *Run) keepCapture(id string, g computeruse.Geometry) {
+	if r.shots == nil {
+		r.shots = map[string]computeruse.Geometry{}
+	}
+	r.shots[id] = g
+	r.order = append(r.order, id)
+	if len(r.order) > maxCaptures {
+		delete(r.shots, r.order[0])
+		r.order = r.order[1:]
+	}
+}
+
+// capture is capture id's geometry; "" is the latest capture.
+func (r Run) capture(id string) (computeruse.Geometry, bool) {
+	if id == "" && len(r.order) > 0 {
+		id = r.order[len(r.order)-1]
+	}
+	g, ok := r.shots[id]
+	return g, ok
+}
+
+// knowApp notes an app the task uses.
+func (r *Run) knowApp(name string) {
+	if k := appKeyOf(name); k != "" {
+		if r.apps == nil {
+			r.apps = map[string]bool{}
+		}
+		r.apps[k] = true
+	}
+}
+
+// knows reports whether the task has used the app named names before.
+func (r *Run) knows(names []string) bool {
+	for _, n := range names {
+		if r.apps[appKeyOf(n)] {
+			return true
+		}
+	}
+	return false
 }
 
 // Runs keeps the executor's runs by id. A stopped run stays stopped: every later action on it
@@ -60,6 +110,15 @@ func (r *Runs) With(id string, f func(*Run)) {
 	}
 	run.touched = now
 	f(run)
+}
+
+// forEach calls f with every run, under the lock.
+func (r *Runs) forEach(f func(*Run)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, run := range r.runs {
+		f(run)
+	}
 }
 
 // Get is a copy of run id's state (a new, empty one when unknown).

@@ -190,6 +190,15 @@ func (l *Layout) Has(sym uint32) bool {
 	return ok
 }
 
+// Sym is what XKB keycode code produces on level 0 (none) or 1 (Shift); 0 for nothing. A
+// recording decodes the keys it reads with it.
+func (l *Layout) Sym(code uint32, level int) uint32 {
+	if l == nil || level < 0 || level > 1 {
+		return 0
+	}
+	return l.levels[code][level]
+}
+
 // free lists the keycodes the layout leaves empty, the ones X11 can see first.
 func (l *Layout) free() []uint32 {
 	var low, high []uint32

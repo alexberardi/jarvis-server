@@ -124,6 +124,7 @@ button.big span { color: var(--muted); font-size: .92rem; }
 }
 .perms li:first-child { border-top: none; }
 .perms .why { grid-column: 2 / 4; color: var(--muted); font-size: .92rem; }
+.perms code { font-size: .85rem; user-select: all; white-space: nowrap; }
 .dot {
   width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
   border: 2px solid var(--line); font-size: .8rem; font-weight: 700;

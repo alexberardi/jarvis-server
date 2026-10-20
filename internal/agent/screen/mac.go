@@ -16,11 +16,16 @@ type MacWindow struct {
 	ID       uint32
 	Title    string // empty without the Screen Recording grant
 	App      string // owner name
+	PID      int    // owner's process id
 	Layer    int
 	X, Y     float64 // top-left, global points (kCGWindowBounds)
 	W, H     float64
 	OnScreen bool
 }
+
+// MacWindows is the window list, front to back (CGWindowListCopyWindowInfo): what a desktop
+// computer task looks for its app's window in. An error off macOS.
+func MacWindows() ([]MacWindow, error) { return windowList() }
 
 // minSide: smaller windows are status items, tooltips and helpers, never what the user means.
 const minSide = 50
@@ -105,6 +110,19 @@ func (m *Mac) Capture(ctx context.Context, scope, window string) (Shot, error) {
 			win, hasWin = frontOf(ws)
 		}
 	}
+	if hasWin {
+		return m.CaptureWindow(ctx, win)
+	}
+	return m.capture(ctx, MacWindow{}, false)
+}
+
+// CaptureWindow captures win (even when covered), with its geometry: a desktop computer task's
+// window.
+func (m *Mac) CaptureWindow(ctx context.Context, win MacWindow) (Shot, error) {
+	return m.capture(ctx, win, true)
+}
+
+func (m *Mac) capture(ctx context.Context, win MacWindow, hasWin bool) (Shot, error) {
 	// screencapture writes only to a file: a private directory, removed before returning.
 	dir, err := os.MkdirTemp("", "jarvis-screen-")
 	if err != nil {

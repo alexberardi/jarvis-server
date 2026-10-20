@@ -342,7 +342,11 @@ the agent (+~4.5 MB), the price of one verification path.
     in the tool output; command-center drops it at commit. Never add a cache, a "last
     screenshot" or a capture the model didn't ask for. The island is suspended for the
     capture. Don't capture someone's desktop in tests unless they agreed (`JARVIS_SCREEN_NATIVE`
-    is opt-in) and never commit a capture.
+    is opt-in) and never commit a capture. **Computer tasks are the exception**
+    (COMPUTER-CONTROL.md C7): `computer_observe` screenshots the task's window after every
+    action because cc's loop asks for it each round, with its geometry kept per run only to map
+    the next action's points (`Run.keepCapture`, the last 4); the images themselves follow the
+    same rules (memory only, never logged, never kept by cc past the model call).
 
 26. **The HAT is the Python node's, ported with its numbers** (go-pi-node.md §3.11): patterns,
     colours and brightness are golden-tested against `respeaker_led_service.py` and `apa102_pi`
@@ -367,6 +371,12 @@ the agent (+~4.5 MB), the price of one verification path.
     tests). **Never type or press keys in a desktop someone is using in tests:** use fakes, or a
     nested headless compositor (`WLR_BACKENDS=headless sway` with its own `WAYLAND_DISPLAY`,
     `env -i` so no `HYPRLAND_INSTANCE_SIGNATURE` leaks in) and `jarvis-agent try`.
+    **Computer tasks are the exception** (COMPUTER-CONTROL.md C7, `computer/desktop.go`): inside
+    a task the executor presses modifier chords (`computeruse.KeyNames`, minus the lock/logout
+    chords of `DenyAction`) and reads and writes the clipboard (`clipboard_read`/`clipboard_write`,
+    only through `computer_act`), and types where the focus is after checking the app with the
+    focus (deny list, blocked apps, browsers, never a password field). Dictation, voice turns
+    and every other tool keep this invariant as written; nothing else touches the clipboard.
 
 28. **Built-in typing and window control first, helpers as fallback** (installers §9.3 item 6:
     the agent binary is the whole install). On Wayland the virtual keyboard (`vkbd`) is used

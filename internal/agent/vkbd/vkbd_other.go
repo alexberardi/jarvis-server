@@ -27,3 +27,6 @@ func (*Keyboard) Available(context.Context) (bool, string) {
 func (*Keyboard) Send(context.Context, []xkb.Stroke) error {
 	return errors.New("the Wayland virtual keyboard is Linux-only")
 }
+
+// Layout is the US layout off Linux.
+func (*Keyboard) Layout(context.Context) *xkb.Layout { return xkb.US() }

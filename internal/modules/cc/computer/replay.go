@@ -32,7 +32,7 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	if t.Target.Kind == "" && len(steps) > 0 {
 		t.Target = steps[0].target()
 	}
-	run, err := l.open(ctx, t)
+	run, paused, err := l.open(ctx, t)
 	if err != nil {
 		return Outcome{RunID: t.RunID, State: StateFailed, Summary: "I couldn't start the computer task: " + err.Error()}
 	}
@@ -42,7 +42,7 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
 	run.Model = pick.Model
-	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}}
+	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 

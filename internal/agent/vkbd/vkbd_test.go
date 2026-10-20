@@ -515,3 +515,17 @@ func TestChordModifiers(t *testing.T) {
 		}
 	}
 }
+
+func TestLayoutReadsTheDesktopKeymap(t *testing.T) {
+	f, dial := newFake(t, "wl_compositor", IfaceSeat)
+	f.setKeymap(fullDesk())
+	k := &Keyboard{Getenv: wlEnv, Dial: dial, Timeout: guard}
+	l := k.Layout(context.Background())
+	if got := l.Sym(43, 1); got != 'H' {
+		t.Fatalf("keycode 43 shifted: %#x, want H from the desktop's keymap", got)
+	}
+	none := &Keyboard{Getenv: func(string) string { return "" }}
+	if got := none.Layout(context.Background()).Sym(43, 0); got != 'h' {
+		t.Fatalf("no Wayland: US (h on 43), got %#x", got)
+	}
+}

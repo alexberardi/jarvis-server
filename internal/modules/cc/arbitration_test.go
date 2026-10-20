@@ -326,3 +326,29 @@ func TestWakeArbiterDroppedTurnReleasesTheWait(t *testing.T) {
 		t.Fatalf("the remaining node must answer once the other dropped its turn: %+v", v)
 	}
 }
+
+// #288 with #287: a node whose agent says it is recording is busy, so a "Hey Jarvis, I'm done"
+// heard by it and a Pi is answered there (where the recording runs), even when the server did
+// not start the recording (the tray did, or jarvisd restarted).
+func TestWakeBidBusyWhileTheAgentRecords(t *testing.T) {
+	m := &Module{now: time.Now}
+	conv := &conversation{nodeID: "desktop", householdID: "hh"}
+	wake := turnInput{VoiceCommand: "I'm done", Source: "wake"}
+	if m.wakeBid(conv, wake).Busy {
+		t.Fatal("an idle node's wake must not be busy")
+	}
+	rec := wake
+	rec.Computer = &computerActivity{Kind: "recording", Task: "Watching what you do"}
+	if !m.wakeBid(conv, rec).Busy {
+		t.Fatal("a node that reports a recording must be busy")
+	}
+	ctl := wake
+	ctl.Computer = &computerActivity{Kind: "controlling", Task: "Ordering the blue mug"}
+	if m.wakeBid(conv, ctl).Busy {
+		t.Fatal("controlling is not a recording")
+	}
+	m.recordingOn.Store("desktop", time.Now())
+	if !m.wakeBid(conv, wake).Busy {
+		t.Fatal("a voice start_recording on the node must still count")
+	}
+}

@@ -227,8 +227,8 @@ func TestPasswordFocusDropped(t *testing.T) {
 	}
 }
 
-// computer_record_start {mode: desktop} on Wayland says only the browser can be recorded
-// (unsupported); without any X display it is the general "can't record the desktop".
+// The X11 source in a Wayland session refuses as unsupported (record_linux.go hands Wayland to
+// the Wayland source); without any X display it is the general "can't record the desktop".
 func TestWaylandDesktopRecordingRefused(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -237,7 +237,7 @@ func TestWaylandDesktopRecordingRefused(t *testing.T) {
 	}{
 		{"wayland", &x11.Display{Getenv: func(k string) string {
 			return map[string]string{"WAYLAND_DISPLAY": "wayland-1", "DISPLAY": ":0"}[k]
-		}}, "On Wayland I can only record the browser"},
+		}}, ErrWaylandRecording.Error()},
 		{"no display", &fakeX11{noX: true}, ErrDesktopRecording.Error()},
 	} {
 		t.Run(c.name, func(t *testing.T) {

@@ -221,7 +221,7 @@ func (s *Service) Start(ctx context.Context, r StartRequest) (string, error) {
 		return "", err
 	}
 	wfID := hexID("wf_")
-	if _, err := s.launch(ctx, p, wfID, "errand", ""); err != nil {
+	if _, err := s.launch(ctx, p, wfID, "errand", "", nil); err != nil {
 		return "", err
 	}
 	s.log().Info("errands: started", "plan", p.ID, "workflow", wfID, "steps", len(r.Steps))

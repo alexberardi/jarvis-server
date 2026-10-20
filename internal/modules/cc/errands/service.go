@@ -164,6 +164,7 @@ type Service struct {
 	// Activity is the autonomy activity log. Nil: nothing is recorded.
 	Activity interface {
 		Record(ctx context.Context, e policy.Event) error
+		RecordTx(ctx context.Context, tx *sql.Tx, e policy.Event) error
 	}
 
 	// Tunables (tests shorten them).
@@ -282,6 +283,16 @@ func (s *Service) record(ctx context.Context, e policy.Event) {
 		return
 	}
 	if err := s.Activity.Record(ctx, e); err != nil {
+		s.log().Warn("errands: autonomy event not recorded", "outcome", e.Outcome, "source", e.Source, "err", err)
+	}
+}
+
+// recordTx is record inside tx, so the event commits with what it reports.
+func (s *Service) recordTx(ctx context.Context, tx *sql.Tx, e policy.Event) {
+	if s.Activity == nil {
+		return
+	}
+	if err := s.Activity.RecordTx(ctx, tx, e); err != nil {
 		s.log().Warn("errands: autonomy event not recorded", "outcome", e.Outcome, "source", e.Source, "err", err)
 	}
 }
