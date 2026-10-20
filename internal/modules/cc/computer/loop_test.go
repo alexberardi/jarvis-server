@@ -811,3 +811,33 @@ func TestPayWithoutCheckoutAsksOnce(t *testing.T) {
 		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
 	}
 }
+
+// A site the household blocks is never opened: the task ends before its first look.
+func TestBlockedSiteNeverOpened(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.rules.PutRule(context.Background(), policy.Rule{HouseholdID: "hh-1", ScopeKind: policy.ScopeHousehold,
+		Tool: policy.ToolComputerTask, Target: policy.TargetSite + "shop.example.com", Effect: policy.Block, Note: "no shopping"}); err != nil {
+		t.Fatal(err)
+	}
+	e.script(doneAnswer)
+	tk := task()
+	tk.StartURL = "http://shop.example.com:8080/store/"
+	out := e.loop.Run(context.Background(), tk)
+	if out.State != StateFailed || !strings.HasPrefix(out.Summary, `I can't use shop.example.com: `) {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.exec.observes) != 0 || len(e.llm.reqs) != 0 {
+		t.Fatalf("opened it: %d looks, %d model calls", len(e.exec.observes), len(e.llm.reqs))
+	}
+	if ev := e.events(); len(ev) != 1 || ev[0].Outcome != policy.OutcomeBlocked {
+		t.Fatalf("events %+v", ev)
+	}
+
+	// Another site goes ahead.
+	e = newEnv(t)
+	e.script(doneAnswer)
+	tk.StartURL = "http://other.example.com/"
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+}

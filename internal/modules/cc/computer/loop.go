@@ -242,6 +242,9 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
+	if out, blocked := l.blockedSite(ctx, r); blocked {
+		return l.end(ctx, run, out)
+	}
 	if held := run.Pending; held != nil {
 		run.Pending = nil
 		// A stop pressed while the run waited wins over a later approval: the held batch is
@@ -283,6 +286,29 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 			t.Progress(run)
 		}
 	}
+}
+
+// blockedSite ends a browser task whose site the household blocks before anything opens it: the
+// actions on the page would be refused anyway, after the page was loaded and read.
+func (l *Loop) blockedSite(ctx context.Context, r *round) (Outcome, bool) {
+	t := r.task
+	if t.Target.Kind != "browser" {
+		return Outcome{}, false
+	}
+	start := t.StartURL
+	if start == "" && t.Target.Site != "" {
+		start = "https://" + t.Target.Site
+	}
+	if start == "" {
+		return Outcome{}, false
+	}
+	open := computeruse.Action{Kind: "navigate", URL: start, Intent: "Open " + start}
+	d := l.decide(ctx, t, t.Target, Observation{}, open)
+	if d.verdict.Effect != policy.Block {
+		return Outcome{}, false
+	}
+	l.record(ctx, r, d, policy.OutcomeBlocked, "blocked: "+d.verdict.Reason)
+	return Outcome{State: StateFailed, Summary: fmt.Sprintf("I can't use %s: %s.", d.site, d.verdict.Reason)}, true
 }
 
 // stopRequested reports a durable stop (or a store that can't say), and passes it on to the
