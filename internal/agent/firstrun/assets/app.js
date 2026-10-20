@@ -138,9 +138,13 @@ function setText(id, text) {
   show(id, !!text);
 }
 
-function renderPermissions(perms) {
+function renderPermissions(perms, os) {
   show("perm-step", perms && perms.length > 0);
   if (!perms || !perms.length) return;
+  const mac = os === "darwin";
+  $("perm-title").textContent = mac ? "Let Jarvis Automation Agent work on this Mac" : "Let Jarvis Automation Agent watch the keyboard and mouse";
+  $("perm-intro").textContent = mac ? "macOS asks you to allow each of these once. The ticks turn green as you do."
+    : "Only for recording what you do on the desktop. Run the command once in a terminal, then log out and back in.";
   const list = $("perm-list");
   list.replaceChildren();
   let all = true;
@@ -155,7 +159,11 @@ function renderPermissions(perms) {
     const label = document.createElement("strong");
     label.textContent = p.label;
     const action = document.createElement("span");
-    if (!ok) {
+    if (!ok && p.how) {
+      const code = document.createElement("code");
+      code.textContent = p.how;
+      action.append(code);
+    } else if (!ok) {
       const b = document.createElement("button");
       b.type = "button";
       b.textContent = p.status === "denied" ? "Open Settings" : "Allow";
@@ -210,7 +218,7 @@ function render(s) {
   const joined = renderJoin(s);
   show("browser-step", joined);
   if (joined) renderBrowsers(s.stores);
-  renderPermissions(s.permissions);
+  renderPermissions(s.permissions, s.os);
   renderPortal(s.portal);
   renderVoice(s);
   show("done-row", joined);

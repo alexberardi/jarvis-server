@@ -39,8 +39,7 @@ func (m *Module) arbitrateWake(ctx context.Context, conv *conversation, in turnI
 	}
 	secs := m.settings.Float(ctx, settingWakeArbitration, settings.Scope{HouseholdID: conv.householdID})
 	window := min(time.Duration(secs*float64(time.Second)), wakeArbitrationMax)
-	b := wakeBid{Household: conv.householdID, Node: conv.nodeID, ConversationID: conv.id, Transcript: in.VoiceCommand,
-		Busy: in.Source == "follow_up" || m.nodeRecording(conv.nodeID), Score: in.WakeConfidence, Level: in.SpeechLevel}
+	b := m.wakeBid(conv, in)
 	if wait, ok := ctx.Value(turnWaitKey{}).(context.Context); ok {
 		ctx = wait
 	}
@@ -58,6 +57,14 @@ func (m *Module) arbitrateWake(ctx context.Context, conv *conversation, in turnI
 			"nodes", v.Members, "waited_ms", v.Waited.Milliseconds(), "busy", b.Busy)
 	}
 	return v.StandDown, nil
+}
+
+// wakeBid is conv's bid for in. Busy: a follow-up, or a recording on the node (a voice
+// start_recording, or the agent's computer_activity, #288).
+func (m *Module) wakeBid(conv *conversation, in turnInput) wakeBid {
+	return wakeBid{Household: conv.householdID, Node: conv.nodeID, ConversationID: conv.id, Transcript: in.VoiceCommand,
+		Busy:  in.Source == "follow_up" || in.Computer.recording() || m.nodeRecording(conv.nodeID),
+		Score: in.WakeConfidence, Level: in.SpeechLevel}
 }
 
 // nodeRecording: a voice start_recording is under way on the node.

@@ -17,7 +17,14 @@ type Store struct {
 }
 
 // Record appends one event. CreatedAt is filled from Now (default time.Now).
-func (s *Store) Record(ctx context.Context, e Event) error {
+func (s *Store) Record(ctx context.Context, e Event) error { return s.record(ctx, s.DB.Write, e) }
+
+// RecordTx is Record inside the caller's transaction: the event commits with it.
+func (s *Store) RecordTx(ctx context.Context, tx *sql.Tx, e Event) error { return s.record(ctx, tx, e) }
+
+func (s *Store) record(ctx context.Context, x interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, e Event) error {
 	now := s.Now
 	if now == nil {
 		now = time.Now
@@ -31,7 +38,7 @@ func (s *Store) Record(ctx context.Context, e Event) error {
 		}
 		detail = string(b)
 	}
-	_, err := s.DB.Write.ExecContext(ctx, `INSERT INTO cc_autonomy_events
+	_, err := x.ExecContext(ctx, `INSERT INTO cc_autonomy_events
 		(household_id, user_id, source, source_id, tool, effect, outcome, rule_id, reason, detail, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.HouseholdID, e.UserID, e.Source, e.SourceID, e.Tool, string(e.Effect), e.Outcome, e.RuleID, e.Reason, detail,

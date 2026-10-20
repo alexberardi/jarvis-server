@@ -170,6 +170,8 @@ type conversation struct {
 	dateKeys         []string // the last turn's extracted date keys (native continue reuses them)
 	// voiceCommand is the last turn's voice command as heard (the continue path's typed-app fill).
 	voiceCommand string
+	// computer is the last turn's computer_activity (computer_activity.go; nil: idle).
+	computer *computerActivity
 
 	pendingTranscript *pendingTranscript
 

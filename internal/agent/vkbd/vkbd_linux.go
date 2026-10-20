@@ -265,6 +265,33 @@ func (e *NotOnLayoutError) Error() string {
 // ErrorCode is the tool result's error_code.
 func (e *NotOnLayoutError) ErrorCode() string { return "unsupported_characters" }
 
+// Layout is the desktop's keyboard layout (desktopLayout), read once over a connection of its
+// own: what a desktop recording decodes the keys it reads with. US when it can't be read.
+func (k *Keyboard) Layout(ctx context.Context) *xkb.Layout {
+	c, reg, gs, err := k.globals(ctx)
+	if err != nil {
+		return k.lastLayout(nil)
+	}
+	defer c.Close()
+	sg, ok := gs[IfaceSeat]
+	if !ok {
+		return k.lastLayout(nil)
+	}
+	var caps atomic.Uint32
+	caps.Store(seatCapKeyboard)
+	seat := c.Bind(reg, sg, 1, func(uint32) func(uint16, []byte) {
+		return func(op uint16, a []byte) {
+			if op == evSeatCapabilities {
+				caps.Store(wlwire.NewReader(a).U32())
+			}
+		}
+	})
+	if err := k.rt(ctx, c); err != nil {
+		return k.lastLayout(nil)
+	}
+	return k.desktopLayout(ctx, c, seat, caps.Load()&seatCapKeyboard != 0)
+}
+
 // desktopLayout is the keyboard layout to type with: the keymap the compositor hands a new
 // keyboard (the active keyboard's) when it is a whole layout, else the last one read, else US.
 // The active keyboard can be another virtual keyboard (an input method's, wtype's) holding a

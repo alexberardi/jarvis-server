@@ -32,15 +32,19 @@ func (f *fakeRecAgent) call(_ context.Context, nodeID, tool string, args map[str
 	return f.answers[tool]
 }
 
-func newRecToolEnv(t *testing.T) (*voiceEnv, *fakeRecAgent, *[]Recording) {
+func newRecToolEnv(t *testing.T, provider ...string) (*voiceEnv, *fakeRecAgent, *[]Recording) {
 	t.Helper()
+	prov := prompts.Qwen3_8B
+	if len(provider) > 0 {
+		prov = provider[0]
+	}
 	agent := &fakeRecAgent{answers: map[string]map[string]any{
 		computeruse.ToolRecordStart: {"success": true, "recording_id": "rec_00aa11bb22cc33dd", "mode": "browser", "max_minutes": 30.0},
 		computeruse.ToolRecordStop: {"success": true, "recording_id": "rec_00aa11bb22cc33dd", "mode": "browser", "events": 2.0,
 			"trace": []any{map[string]any{"kind": "navigate", "url": "https://bank.example"}, map[string]any{"kind": "click"}}, "keyframes": 0.0},
 	}}
 	var learned []Recording
-	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) {
+	ve := newVoiceEnv(t, prov, func(m *Module) {
 		m.recordingAgent = agent.call
 		m.learnRecording = func(_ context.Context, rec Recording) error { learned = append(learned, rec); return nil }
 	})

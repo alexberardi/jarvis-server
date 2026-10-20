@@ -448,6 +448,33 @@ function EngineLabelCard({
                   />
                 </Field>
               )}
+              {['mlx-lm', 'vllm', 'transformers'].includes(cfg.kind) && (
+                <Field label="Directory engine" htmlFor={id('dir_engine')} hint="auto = MLX on Apple Silicon, vLLM on Linux, else Transformers">
+                  <select id={id('dir_engine')} value={v('dir_engine') || 'auto'} onChange={(e) => set({ dir_engine: e.target.value })} className={selectClass}>
+                    {['auto', 'mlx-lm', 'transformers', 'vllm'].map((f) => (
+                      <option key={f}>{f}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {cfg.kind === 'transformers' && (
+                <Field label="Precision" htmlFor={id('dtype')} hint="auto = as the model is stored">
+                  <select id={id('dtype')} value={v('dtype') || 'auto'} onChange={(e) => set({ dtype: e.target.value })} className={selectClass}>
+                    {['auto', 'bfloat16', 'float16', 'float32'].map((f) => (
+                      <option key={f}>{f}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {cfg.kind === 'transformers' && (
+                <Field label="Quantization" htmlFor={id('quantization')} hint="bitsandbytes, CUDA only">
+                  <select id={id('quantization')} value={v('quantization') || 'none'} onChange={(e) => set({ quantization: e.target.value })} className={selectClass}>
+                    {['none', 'bnb-4bit', 'bnb-8bit'].map((f) => (
+                      <option key={f}>{f}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               {isLLM && (
                 <Field label="KV cache" htmlFor={id('kv_cache_type')}>
                   <select id={id('kv_cache_type')} value={v('kv_cache_type')} onChange={(e) => set({ kv_cache_type: e.target.value })} className={selectClass}>

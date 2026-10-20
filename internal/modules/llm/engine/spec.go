@@ -37,6 +37,9 @@ type instanceKey struct {
 	ToolParser      string  `json:"tools,omitempty"`
 	ReasoningParser string  `json:"reasoning,omitempty"`
 	Vision          bool    `json:"vision,omitempty"`
+	// DType and Quantization are a Transformers engine's (transformersTune).
+	DType        string `json:"dtype,omitempty"`
+	Quantization string `json:"quant,omitempty"`
 }
 
 func (k instanceKey) hash() string {
@@ -94,8 +97,9 @@ func (k instanceKey) args(port int, alias string) ([]string, error) {
 		if k.Devices != "" {
 			n = len(strings.Split(k.Devices, ","))
 		}
-		a := append([]string{"-I", "-m", e.Module}, e.Args(PyArgs{Model: k.Model, Port: port, Context: k.Context,
-			GPUMemory: k.GPUMemory, Devices: n, ToolParser: k.ToolParser, ReasoningParser: k.ReasoningParser})...)
+		a := append([]string{"-I", "-m", e.Module}, e.Args(PyArgs{Model: k.Model, Port: port, Flavour: k.Flavour, Context: k.Context,
+			GPUMemory: k.GPUMemory, Devices: n, ToolParser: k.ToolParser, ReasoningParser: k.ReasoningParser,
+			DType: k.DType, Quantization: k.Quantization})...)
 		return append(a, extra...), nil
 	}
 	a := []string{"-m", k.Model, "--host", "127.0.0.1", "--port", strconv.Itoa(port)}

@@ -72,10 +72,18 @@ type KeyframeSource interface {
 }
 
 // Keyframe is a desktop recording's picture of the screen at one event, kept on this computer
-// (<id>.<seq>.jpg next to the trace, 0600).
+// (<id>.<seq>.jpg next to the trace, 0600), and on Wayland the 256 px around its point
+// (<id>.<seq>.crop.jpg). Delete removes both.
 type Keyframe struct {
 	Seq  int    `json:"seq"`
 	Path string `json:"-"`
+	Crop string `json:"-"` // "" for none
+}
+
+// Warner is a Source with something to tell the user once it started (the desktop without
+// accessibility: typed text is kept); "" for nothing.
+type Warner interface {
+	Warning() string
 }
 
 // Trace is a stopped recording.

@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -28,8 +29,9 @@ import (
 // marked complete only after an import check passes. Supervision is the resolver's, as for
 // llama-server: `python -I -m <module>` on a loopback port, health-checked and restarted.
 //
-// MLX (mlx_lm.server) was the first kind, vLLM (vllm.go) the second; Transformers is meant to
-// follow as a further entry of PyEngines.
+// MLX (mlx_lm.server) was the first kind, vLLM (vllm.go) the second, Transformers
+// (transformers.go) the third. An engine may run on several accelerators of one platform
+// (Transformers: MPS or CPU on a Mac); each platform and accelerator has its own package set.
 
 // KindMLX is mlx_lm.server: MLX models (Hugging Face directories) on Apple Silicon.
 const KindMLX Kind = "mlx-lm"
@@ -46,11 +48,17 @@ type PyEngine struct {
 	// Python is the interpreter version uv installs.
 	Python string
 	// Requirements is the whole package set as a `uv pip compile --generate-hashes` lock,
-	// installed with --require-hashes (wheels only).
+	// installed with --require-hashes (wheels only), for every platform without its own in Sets.
 	Requirements string
-	// Platforms maps each platform the engine runs on to its accelerator, which is the
-	// install's flavour.
-	Platforms map[Platform]Flavour
+	// Platforms maps each platform the engine runs on to its accelerators, the default first;
+	// the accelerator is the install's flavour.
+	Platforms map[Platform][]Flavour
+	// Sets is the package set of a platform's accelerator where it isn't Requirements (and
+	// DownloadBytes, DiskBytes), keyed by SetKey.
+	Sets map[string]PySet
+	// DirFallback: the engine runs a model directory only when no other engine runs there or
+	// the label's dir_engine names it (Transformers runs everywhere, MLX and vLLM do better).
+	DirFallback bool
 	// Needs says what the engine needs, for the hosts it can't run on.
 	Needs string
 	// Module is run as `python -I -m Module`; Check is a program that must exit 0 after
@@ -66,8 +74,10 @@ type PyEngine struct {
 	Args func(a PyArgs) []string
 	// HealthPath answers 200 once the model is loaded.
 	HealthPath string
-	// RequestModel is the "model" a request names the loaded model by.
+	// RequestModel is the "model" a request names the loaded model by ("" = its path).
 	RequestModel string
+	// NoReasoningBudget: the server refuses llama-server's reasoning_budget request field.
+	NoReasoningBudget bool
 	// Env is added to the server's environment.
 	Env map[string]string
 	// APIKeyEnv is the variable the server reads an API key from: each instance gets a
@@ -82,10 +92,34 @@ type PyEngine struct {
 	Short string
 }
 
+// PySet is one hash-locked package set of a Python engine.
+type PySet struct {
+	Requirements string
+	// IndexURL is a wheel index uv reads besides PyPI (PyTorch's, for its CUDA builds; "" = none).
+	IndexURL string
+	// DownloadBytes is the set's download and DiskBytes the most disk its install takes.
+	DownloadBytes, DiskBytes int64
+}
+
+// SetKey keys PyEngine.Sets: "os/arch/flavour".
+func SetKey(p Platform, f Flavour) string { return p.String() + "/" + string(f) }
+
+// Set is the package set the engine installs on p for f.
+func (e PyEngine) Set(p Platform, f Flavour) PySet {
+	if s, ok := e.Sets[SetKey(p, f)]; ok {
+		return s
+	}
+	return PySet{Requirements: e.Requirements, DownloadBytes: e.DownloadBytes, DiskBytes: e.DiskBytes}
+}
+
 // PyArgs is what a Python engine's command line is built from.
 type PyArgs struct {
 	Model string
 	Port  int
+	// Flavour is the install's accelerator.
+	Flavour Flavour
+	// DType and Quantization are the label's (Transformers; "" = the engine's default).
+	DType, Quantization string
 	// Context is the label's context: the most tokens a reply may take when the request
 	// doesn't say (mlx-lm), or the longest sequence (vLLM's --max-model-len). 0 = engine default.
 	Context int
@@ -112,7 +146,7 @@ var PyEngines = map[Kind]PyEngine{
 	KindMLX: {
 		Kind: KindMLX, Version: "0.32.2", Python: "3.12",
 		Requirements: mlxRequirements,
-		Platforms:    map[Platform]Flavour{{"darwin", "arm64"}: FlavourMetal},
+		Platforms:    map[Platform][]Flavour{{"darwin", "arm64"}: {FlavourMetal}},
 		Needs:        "Apple Silicon (darwin/arm64, macOS 14 or later)",
 		Module:       "mlx_lm.server",
 		Check:        "import mlx.core, mlx_lm.server",
@@ -166,10 +200,32 @@ func (e PyEngine) supports(p Platform, f Flavour) error {
 	if !ok {
 		return fmt.Errorf("%s needs %s; this host is %s", e.Kind, e.Needs, p)
 	}
-	if f != acc {
-		return fmt.Errorf("%s runs on %s only, not %s", e.Kind, acc, f)
+	if !slices.Contains(acc, f) {
+		if len(acc) == 1 {
+			return fmt.Errorf("%s runs on %s only, not %s", e.Kind, acc[0], f)
+		}
+		return fmt.Errorf("%s runs on %s here, not %s", e.Kind, flavourList(acc), f)
 	}
 	return nil
+}
+
+// flavourFor is the accelerator a label runs the engine on p with: its gpu_backend, or the
+// platform's default when that is "" (auto).
+func (e PyEngine) flavourFor(p Platform, backend Flavour) (Flavour, error) {
+	if backend == "" {
+		if acc := e.Platforms[p]; len(acc) > 0 {
+			backend = acc[0]
+		}
+	}
+	return backend, e.supports(p, backend)
+}
+
+func flavourList(fs []Flavour) string {
+	s := make([]string, len(fs))
+	for i, f := range fs {
+		s[i] = string(f)
+	}
+	return strings.Join(s, " or ")
 }
 
 // Unavailable says why a kind can't be installed on p ("" = it can).
@@ -197,14 +253,36 @@ func UnavailableOn(k Kind, p Platform, hw Hardware) string {
 	return ""
 }
 
+// DirEngineAuto is the dir_engine setting's default: the platform's engine for a directory.
+const DirEngineAuto = "auto"
+
 // DirEngine is the engine for a model that is a directory (Hugging Face layout: config,
-// safetensors, tokenizer) on p: the first Python engine that runs there.
-func DirEngine(p Platform) (Kind, error) {
+// safetensors, tokenizer) on p: the one choice names ("" or auto = the first Python engine
+// that runs there, an engine with DirFallback only when no other does).
+func DirEngine(p Platform, choice string) (Kind, error) {
+	if choice = strings.ToLower(strings.TrimSpace(choice)); choice != "" && choice != DirEngineAuto {
+		k := Kind(choice)
+		if _, ok := PyEngines[k]; !ok {
+			return "", fmt.Errorf("dir_engine %q: not an engine for a model directory (%s)", choice, strings.Join(DirEngineChoices(), ", "))
+		}
+		if why := Unavailable(k, p); why != "" {
+			return "", errors.New(why)
+		}
+		return k, nil
+	}
 	var kinds []Kind
 	for k := range PyEngines {
 		kinds = append(kinds, k)
 	}
-	slices.Sort(kinds)
+	slices.SortFunc(kinds, func(a, b Kind) int {
+		if fa, fb := PyEngines[a].DirFallback, PyEngines[b].DirFallback; fa != fb {
+			if fa {
+				return 1
+			}
+			return -1
+		}
+		return strings.Compare(string(a), string(b))
+	})
 	var why []string
 	for _, k := range kinds {
 		if _, ok := PyEngines[k].Platforms[p]; ok {
@@ -215,8 +293,23 @@ func DirEngine(p Platform) (Kind, error) {
 	return "", fmt.Errorf("no engine for a model directory runs here: %s", strings.Join(why, "; "))
 }
 
-// pythonIn is a Python engine install's interpreter.
-func pythonIn(dir string) string { return filepath.Join(dir, "venv", "bin", "python") }
+// DirEngineChoices are the dir_engine setting's values: auto and every Python engine.
+func DirEngineChoices() []string {
+	out := []string{DirEngineAuto}
+	for k := range PyEngines {
+		out = append(out, string(k))
+	}
+	slices.Sort(out[1:])
+	return out
+}
+
+// pythonIn is a Python engine install's interpreter on p.
+func pythonIn(p Platform, dir string) string {
+	if p.OS == "windows" {
+		return filepath.Join(dir, "venv", "Scripts", "python.exe")
+	}
+	return filepath.Join(dir, "venv", "bin", "python")
+}
 
 // installPoll is how often a package install's progress is measured.
 var installPoll = 5 * time.Second
@@ -231,11 +324,12 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 	l.Lock()
 	defer l.Unlock()
 	dir := b.InstallDir(e.Kind, f)
-	py := pythonIn(dir)
+	py := pythonIn(b.Platform, dir)
 	if fileExists(filepath.Join(dir, completeMarker)) && fileExists(py) {
 		return py, nil
 	}
-	if err := b.checkDisk(e); err != nil {
+	set := e.Set(b.Platform, f)
+	if err := b.checkDisk(e, set); err != nil {
 		return "", err
 	}
 	uv, err := b.Fetch(ctx, KindUV, FlavourCPU, progress)
@@ -257,7 +351,7 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 		}
 	}()
 	req := filepath.Join(dir, "requirements.txt")
-	if err := os.WriteFile(req, []byte(e.Requirements), 0o644); err != nil {
+	if err := os.WriteFile(req, []byte(set.Requirements), 0o644); err != nil {
 		return "", err
 	}
 	cache := filepath.Join(b.Dir, string(e.Kind), ".uv-cache")
@@ -268,6 +362,11 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 		"UV_NO_CONFIG":          "1",            // no uv.toml from the user's home
 		"UV_NO_PROGRESS":        "1",
 	})
+	pip := []string{"pip", "install", "--python", py, "--require-hashes", "--only-binary", ":all:"}
+	if set.IndexURL != "" {
+		// PyPI and the extra index: a package's pinned version from whichever has it.
+		pip = append(pip, "--extra-index-url", set.IndexURL, "--index-strategy", "unsafe-best-match")
+	}
 	steps := []struct {
 		name string
 		bin  string
@@ -275,7 +374,7 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 	}{
 		{"python", uv, []string{"python", "install", "--no-bin", e.Python}}, // no python3.x shims in ~/.local/bin
 		{"venv", uv, []string{"venv", "--python", e.Python, filepath.Join(dir, "venv")}},
-		{"packages", uv, []string{"pip", "install", "--python", py, "--require-hashes", "--only-binary", ":all:", "-r", req}},
+		{"packages", uv, append(pip, "-r", req)},
 		{"check", py, []string{"-I", "-c", e.Check}},
 	}
 	for _, s := range steps {
@@ -284,9 +383,17 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 		}
 		cmd := exec.CommandContext(ctx, s.bin, s.args...)
 		cmd.Env, cmd.Dir = env, dir
+		if s.name == "check" {
+			// The engine's own environment: importing transformers' CLI calls the Hub unless
+			// HF_HUB_OFFLINE is set.
+			cmd.Env = slices.Clone(env)
+			for k, v := range e.Env {
+				cmd.Env = append(cmd.Env, k+"="+v)
+			}
+		}
 		var stop func()
-		if s.name == "packages" && e.DiskBytes > 0 {
-			stop = b.watchInstall(e, []string{cache, dir}, progress)
+		if s.name == "packages" && set.DiskBytes > 0 {
+			stop = b.watchInstall(e, set, []string{cache, dir}, progress)
 		}
 		out, err := cmd.CombinedOutput()
 		if stop != nil {
@@ -310,8 +417,8 @@ func (b *Binaries) fetchPython(ctx context.Context, e PyEngine, f Flavour, progr
 }
 
 // checkDisk refuses an install the engines dir hasn't the space for.
-func (b *Binaries) checkDisk(e PyEngine) error {
-	if e.DiskBytes == 0 {
+func (b *Binaries) checkDisk(e PyEngine, set PySet) error {
+	if set.DiskBytes == 0 {
 		return nil
 	}
 	free := b.DiskFree
@@ -319,16 +426,16 @@ func (b *Binaries) checkDisk(e PyEngine) error {
 		free = sysinfo.DiskFree
 	}
 	os.MkdirAll(b.Dir, 0o755)
-	if have := free(b.Dir); have > 0 && have < uint64(e.DiskBytes) {
+	if have := free(b.Dir); have > 0 && have < uint64(set.DiskBytes) {
 		return fmt.Errorf("fetch %s %s: needs about %s free in %s (a %s download); %s free",
-			e.Kind, e.Version, gb(e.DiskBytes), b.Dir, gb(e.DownloadBytes), gb(int64(have)))
+			e.Kind, e.Version, gb(set.DiskBytes), b.Dir, gb(set.DownloadBytes), gb(int64(have)))
 	}
 	return nil
 }
 
 // watchInstall reports the package step's bytes on disk under dirs to progress (out of
 // DiskBytes) and to the log, until the returned stop is called.
-func (b *Binaries) watchInstall(e PyEngine, dirs []string, progress func(done, total int64)) (stop func()) {
+func (b *Binaries) watchInstall(e PyEngine, set PySet, dirs []string, progress func(done, total int64)) (stop func()) {
 	done := make(chan struct{})
 	finished := make(chan struct{})
 	go func() {
@@ -346,14 +453,14 @@ func (b *Binaries) watchInstall(e PyEngine, dirs []string, progress func(done, t
 			for _, d := range dirs {
 				n += dirSize(d)
 			}
-			n = min(n, e.DiskBytes)
+			n = min(n, set.DiskBytes)
 			if progress != nil {
-				progress(n, e.DiskBytes)
+				progress(n, set.DiskBytes)
 			}
 			if b.Log != nil && time.Since(logged) >= 30*time.Second {
 				logged = time.Now()
 				b.Log.Info("engine install progress", "kind", e.Kind, "version", e.Version,
-					"on_disk", gb(n), "of_about", gb(e.DiskBytes))
+					"on_disk", gb(n), "of_about", gb(set.DiskBytes))
 			}
 		}
 	}()

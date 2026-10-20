@@ -229,6 +229,9 @@ func (e computerExec) Act(ctx context.Context, b computer.Batch) (computer.ActRe
 	}
 	args := map[string]any{"run_id": b.RunID, "target": b.Target, "actions": b.Actions,
 		"blocked": map[string]any{"sites": []string{}, "apps": []string{}}}
+	if b.Resume {
+		args["resume"] = true
+	}
 	out, _, err := errandNodes{e.m}.RunToolImages(ctx, run.NodeID, computeruse.ToolAct, toArgs(args), run.UserID, computerActTimeout)
 	if err != nil {
 		return computer.ActResult{}, err

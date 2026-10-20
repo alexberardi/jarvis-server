@@ -108,6 +108,7 @@ func turnFor(speaker int64) servertools.Turn {
 
 func TestRunErrandTool(t *testing.T) {
 	e := newTenv(t, false)
+	e.s.Now = func() time.Time { return time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC) }
 	svc := func() *Service { return e.s }
 	tool := &RunErrandTool{Svc: svc, Commands: func(id string) []*pyjson.Object {
 		return []*pyjson.Object{mustObj(t, `{"command_name": "get_weather", "description": "W"}`)}
@@ -123,7 +124,7 @@ func TestRunErrandTool(t *testing.T) {
 	}
 	var payload string
 	_ = e.d.Read.QueryRow(`SELECT payload FROM platform_jobs WHERE type = ?`, JobPlan).Scan(&payload)
-	if payload != `{"household_id":"hh-1","node_id":"node-1","user_id":7,"goal":"check weather","menu":[{"command":"get_weather","description":"W","args":{},"is_risky":false}]}` {
+	if payload != `{"household_id":"hh-1","node_id":"node-1","user_id":7,"goal":"check weather","menu":[{"command":"get_weather","description":"W","args":{},"is_risky":false}],"turn_at":"2026-10-20T09:00:00Z"}` {
 		t.Fatalf("payload = %s", payload)
 	}
 	e.set[SettingEnabled] = false

@@ -41,6 +41,9 @@ type Endpoint struct {
 	// API is the dialect: "" or APIOpenAI for /chat/completions, APIAnthropic for the
 	// Anthropic Messages API (anthropic.go).
 	API string
+	// NoReasoningBudget: the engine refuses reasoning_budget (transformers serve answers 422);
+	// thinking goes by chat_template_kwargs alone.
+	NoReasoningBudget bool
 }
 
 // Endpoint dialects (engine.APIOpenAI, engine.APIAnthropic).

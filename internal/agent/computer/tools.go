@@ -63,15 +63,16 @@ func (b extBrowser) CloseTab(ctx context.Context, tab string) error {
 	return nil
 }
 
-// Tools is the computer-task executor's node tools for browser targets (blueprint P3 piece 8):
+// Tools is the computer-task executor's node tools (blueprint P3 pieces 8 and 22):
 // computer_observe, computer_act, computer_files and computer_stop. cc's computer-task loop calls
 // them; the model never sees them (computeruse.IsInternalTool). The rules are enforced here,
-// whatever cc decided: the switch, the built-in deny list, the batch's blocked sites, the risk
-// of each action (a confirm-level one runs only with a token cc minted for exactly it) and no
+// whatever cc decided: the switch, the built-in deny list, the batch's blocked sites and apps, the
+// risk of each action (a confirm-level one runs only with a token cc minted for exactly it) and no
 // typing into password fields. A browser task acts on page elements by ref in a task window
-// behind the user's; coordinates are for desktop targets (C3).
+// behind the user's; coordinates are for desktop targets (C3), which are attended (desktop.go).
 type Tools struct {
-	Browser  Browser
+	Browser  Browser         // nil: no browser tasks
+	Desktop  *Desktop        // nil: no desktop tasks
 	CC       func() Approver // nil, or returning nil: not connected to jarvisd, nothing risky runs
 	Switch   *Switch
 	Activity *Activity
@@ -80,6 +81,7 @@ type Tools struct {
 
 	once sync.Once
 	rs   *Runs
+	desk desktopState
 }
 
 // runs is the executor's runs; the first call registers them with Activity's Stop.
@@ -122,7 +124,7 @@ func (t *Tools) Available(context.Context) []node.ToolDef {
 func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ node.Request) (map[string]any, bool) {
 	switch name {
 	case computeruse.ToolObserve, computeruse.ToolAct, computeruse.ToolFiles:
-		if err := t.Switch.Allow(TargetBrowser); err != nil {
+		if err := t.Switch.Allow(targetKind(args)); err != nil {
 			return failCode("computer_control_off", "%v", err), true
 		}
 	case computeruse.ToolStop:
@@ -151,11 +153,20 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 	}
 	t.runs().Stop(id)
 	if t.Activity != nil && !t.runs().Live() {
-		if k, _ := t.Activity.Status(); k == Controlling {
-			t.Activity.Set(Idle, "")
-		}
+		t.endDesktop()
 	}
 	return map[string]any{"success": true, "run_id": id}, true
+}
+
+// targetKind is a call's target kind for the switch's message: desktop, else browser.
+func targetKind(args map[string]any) string {
+	var a struct {
+		Target target `json:"target"`
+	}
+	if decodeArgs(args, &a) == nil && a.Target.Kind == TargetDesktop {
+		return TargetDesktop
+	}
+	return TargetBrowser
 }
 
 // target is a computeruse.Target, or just its kind ("browser").
@@ -186,6 +197,9 @@ type actArgs struct {
 		Sites []string `json:"sites"`
 		Apps  []string `json:"apps"`
 	} `json:"blocked"`
+	// Resume continues a desktop task paused because the user used the computer (the
+	// server's Paused card's Continue).
+	Resume bool `json:"resume"`
 }
 
 func decodeArgs(args map[string]any, v any) error {
@@ -223,8 +237,12 @@ func (t *Tools) observe(ctx context.Context, a observeArgs) map[string]any {
 	switch {
 	case a.RunID == "":
 		return failCode("invalid_argument", "run_id is required")
+	case a.Target.Kind == TargetDesktop:
+		return t.observeDesktop(ctx, a)
 	case a.Target.Kind != TargetBrowser:
-		return failCode("invalid_argument", "this agent's executor only does browser targets, not %q", a.Target.Kind)
+		return failCode("invalid_argument", "a target is browser or desktop, not %q", a.Target.Kind)
+	case t.Browser == nil:
+		return failCode("not_connected", "no browser with the Jarvis extension on this computer")
 	}
 	run := t.runs().Get(a.RunID)
 	if run.Stopped {
@@ -324,13 +342,16 @@ func (t *Tools) open(ctx context.Context, id, rawURL string, blocked []string) (
 	return "", nil
 }
 
-// Result is one action's result in computer_act's answer.
+// Result is one action's result in computer_act's answer. NewApp is the app a desktop action
+// was the task's first in (Q4); Text is what clipboard_read read.
 type Result struct {
-	I     int               `json:"i"`
-	OK    bool              `json:"ok"`
-	Code  string            `json:"code,omitempty"`
-	Error string            `json:"error,omitempty"`
-	Risk  *computeruse.Risk `json:"risk,omitempty"`
+	I      int               `json:"i"`
+	OK     bool              `json:"ok"`
+	Code   string            `json:"code,omitempty"`
+	Error  string            `json:"error,omitempty"`
+	Risk   *computeruse.Risk `json:"risk,omitempty"`
+	NewApp string            `json:"new_app,omitempty"`
+	Text   string            `json:"text,omitempty"`
 }
 
 func (r Result) out() map[string]any {
@@ -344,6 +365,12 @@ func (r Result) out() map[string]any {
 	if r.Risk != nil {
 		m["risk"] = *r.Risk
 	}
+	if r.NewApp != "" {
+		m["new_app"] = r.NewApp
+	}
+	if r.Text != "" {
+		m["text"] = r.Text
+	}
 	return m
 }
 
@@ -351,12 +378,16 @@ func (t *Tools) act(ctx context.Context, a actArgs) map[string]any {
 	switch {
 	case a.RunID == "":
 		return failCode("invalid_argument", "run_id is required")
-	case a.Target.Kind != TargetBrowser:
-		return failCode("invalid_argument", "this agent's executor only does browser targets, not %q", a.Target.Kind)
+	case a.Target.Kind != TargetBrowser && a.Target.Kind != TargetDesktop:
+		return failCode("invalid_argument", "a target is browser or desktop, not %q", a.Target.Kind)
 	case len(a.Actions) == 0:
 		return failCode("invalid_argument", "no actions")
 	case len(a.Actions) > computeruse.MaxBatch:
 		return failCode("invalid_argument", "%d actions, at most %d per call", len(a.Actions), computeruse.MaxBatch)
+	case a.Target.Kind == TargetDesktop:
+		return t.actDesktop(ctx, a)
+	case t.Browser == nil:
+		return failCode("not_connected", "no browser with the Jarvis extension on this computer")
 	}
 	results := []map[string]any{}
 	out := map[string]any{"success": true}
@@ -417,23 +448,8 @@ func (t *Tools) step(ctx context.Context, a actArgs, i int, action computeruse.A
 	if (action.Kind == "set_value" || action.Kind == "type") && el != nil && el.Secure {
 		return fail("password_field", "%s is a password field: Jarvis doesn't type passwords; the user enters it", action.Ref)
 	}
-	risk := computeruse.Classify(action, el, tgt)
-	switch risk.Level {
-	case computeruse.LevelDeny:
-		r := fail("denied", "%s", risk.Reason)
-		r.Risk = &risk
+	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt); !ok {
 		return r
-	case computeruse.LevelConfirm:
-		if action.Approval == "" {
-			r := fail("needs_approval", "%s: the user has to approve it", risk.Reason)
-			r.Risk = &risk
-			return r
-		}
-		if err := t.verify(ctx, action.Approval, action.Digest(a.RunID, tgt)); err != nil {
-			r := fail("bad_approval", "%v", err)
-			r.Risk = &risk
-			return r
-		}
 	}
 
 	t.showing(action.Intent)
@@ -441,6 +457,33 @@ func (t *Tools) step(ctx context.Context, a actArgs, i int, action computeruse.A
 		return fail(code, "%v", err)
 	}
 	return Result{I: i, OK: true}
+}
+
+// checkRisk classifies action i (on el, or nil, in tgt): ok when it may run, else its failed
+// result. A risky one runs only with a valid approval token for exactly it.
+func (t *Tools) checkRisk(ctx context.Context, runID string, i int, action computeruse.Action, el *computeruse.Element, tgt computeruse.Target) (Result, bool) {
+	fail := func(code, format string, args ...any) Result {
+		return Result{I: i, Code: code, Error: fmt.Sprintf(format, args...)}
+	}
+	risk := computeruse.Classify(action, el, tgt)
+	switch risk.Level {
+	case computeruse.LevelDeny:
+		r := fail("denied", "%s", risk.Reason)
+		r.Risk = &risk
+		return r, false
+	case computeruse.LevelConfirm:
+		if action.Approval == "" {
+			r := fail("needs_approval", "%s: the user has to approve it", risk.Reason)
+			r.Risk = &risk
+			return r, false
+		}
+		if err := t.verify(ctx, action.Approval, action.Digest(runID, tgt)); err != nil {
+			r := fail("bad_approval", "%v", err)
+			r.Risk = &risk
+			return r, false
+		}
+	}
+	return Result{I: i, OK: true}, true
 }
 
 func (t *Tools) verify(ctx context.Context, token, digest string) error {

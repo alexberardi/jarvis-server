@@ -85,7 +85,7 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 	}
 	menu := s.FullMenu(ctx, available, turn.HouseholdID, speaker)
 	if err := s.DraftErrand(ctx, DraftRequest{HouseholdID: turn.HouseholdID, NodeID: turn.NodeID, UserID: speaker,
-		Goal: goal, Menu: menu}); err != nil {
+		Goal: goal, Menu: menu, TurnAt: s.now()}); err != nil {
 		return errObj("task_failed", "I couldn't start planning that errand: "+err.Error()), nil
 	}
 	s.log().Info("errands: draft started", "household", turn.HouseholdID, "node", turn.NodeID, "goal", goal)

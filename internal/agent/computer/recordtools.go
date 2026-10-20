@@ -51,7 +51,11 @@ func (t *RecordTools) Call(ctx context.Context, name string, args map[string]any
 		if err != nil {
 			return recordFail(err), true
 		}
-		return map[string]any{"success": true, "recording_id": id, "mode": mode, "max_minutes": int(MaxRecording.Minutes())}, true
+		out := map[string]any{"success": true, "recording_id": id, "mode": mode, "max_minutes": int(MaxRecording.Minutes())}
+		if w, ok := t.R.Sources[mode].(Warner); ok && w.Warning() != "" {
+			out["warning"] = w.Warning()
+		}
+		return out, true
 	case computeruse.ToolRecordStop:
 		tr, err := t.R.Stop(id)
 		if err != nil {

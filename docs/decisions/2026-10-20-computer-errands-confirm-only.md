@@ -13,7 +13,8 @@ without a delta card. The household's rules still decide every action, whatever 
 ([computer tasks follow the rules](2026-10-19-computer-tasks-follow-the-rules.md) when recorded).
 
 A plan that mixes a computer task with other commands (a reminder, a phone call) still shows its
-plan card.
+plan card. So does a plan with a desktop task: that one runs on its own only when the user asked
+for it at that computer a moment ago, and autonomy is on (C9); otherwise its plan card waits for a tap.
 
 Why: the brief's promise is one confirmation on the phone before paying
 ([COMPUTER-CONTROL.md](../agent/COMPUTER-CONTROL.md)); a plan card in front of it made it two, and

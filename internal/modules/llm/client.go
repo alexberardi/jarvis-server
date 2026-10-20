@@ -41,12 +41,16 @@ type streamOptions struct {
 
 // applyThinking is _apply_reasoning: a nil budget leaves the server's launch flags in charge;
 // otherwise the chat template's enable_thinking kwarg (the only control Qwen3.5 honours) is
-// set, and reasoning_budget is forwarded for servers that read it. N>0 means "on, uncapped".
-func (p *chatPayload) applyThinking(budget *int) {
+// set, and reasoning_budget is forwarded for servers that read it (not to one that refuses it,
+// ep.NoReasoningBudget). N>0 means "on, uncapped".
+func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 	if budget == nil {
 		return
 	}
 	p.ChatTemplateKwargs = map[string]bool{"enable_thinking": *budget != 0}
+	if ep.NoReasoningBudget {
+		return
+	}
 	b := *budget
 	p.ReasoningBudget = &b
 }

@@ -103,6 +103,15 @@ var fields = []field{
 	{name: "gpu_memory_utilization", typ: settings.Float, def: float64(0),
 		desc: "vLLM only: share of each GPU it preallocates (0.05-0.95); 0 = sized to the model at its context, leaving the rest to llama-server",
 		only: []string{ModelLLM}},
+	{name: "dir_engine", typ: settings.String, def: DirEngineAuto,
+		desc: "Engine for a Hugging Face directory model: auto (MLX on Apple Silicon, vLLM on linux/amd64, else Transformers), mlx-lm, transformers or vllm",
+		opts: []any{DirEngineAuto, string(KindMLX), string(KindTransformers), string(KindVLLM)}, only: []string{ModelLLM}},
+	{name: "dtype", typ: settings.String, def: "auto",
+		desc: "Transformers only: weights' precision (auto = as the model is stored, bfloat16, float16 or float32)",
+		opts: []any{"auto", "bfloat16", "float16", "float32"}, only: []string{ModelLLM}},
+	{name: "quantization", typ: settings.String, def: "none",
+		desc: "Transformers on CUDA only: load the weights quantized by bitsandbytes (none, bnb-4bit or bnb-8bit)",
+		opts: []any{"none", "bnb-4bit", "bnb-8bit"}, only: []string{ModelLLM}},
 	{name: "flash_attn", typ: settings.String, def: "auto", desc: "Flash attention: auto, on or off", opts: []any{"auto", "on", "off"}},
 	{name: "fold_system_messages", typ: settings.String, def: FoldAuto,
 		desc: "Fold later system messages into the user turn, for chat templates that reject them (Qwen 3.5, 3.8): auto = as the model's catalog entry says (never for remote), on or off",
@@ -272,8 +281,13 @@ type LabelConfig struct {
 	FlashAttn   string `json:"flash_attn"`
 	// GPUMemory is gpu_memory_utilization (vLLM; 0 = sized to the model, VLLMGPUMemory).
 	GPUMemory float64 `json:"gpu_memory_utilization"`
-	ExtraArgs string  `json:"extra_args"`
-	Embedding bool    `json:"embedding"`
+	// DirEngine is dir_engine: the engine for a directory model (DirEngine; "auto" = the platform's).
+	DirEngine string `json:"dir_engine"`
+	// DType and Quantization are dtype and quantization (Transformers).
+	DType        string `json:"dtype"`
+	Quantization string `json:"quantization"`
+	ExtraArgs    string `json:"extra_args"`
+	Embedding    bool   `json:"embedding"`
 	// ChatTemplate is the model's pinned chat template (from its catalog entry), which the
 	// engine is launched with instead of the GGUF's own; "" = the GGUF's (ID12).
 	ChatTemplate string `json:"-"`
@@ -372,7 +386,9 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 		SplitMode: str("split_mode"), TensorSplit: str("tensor_split"), GPULayers: num("gpu_layers"),
 		KVCacheType: str("kv_cache_type"), FlashAttn: str("flash_attn"),
 		ExtraArgs: str("extra_args"), Embedding: d.ModelKind == ModelEmbedding,
-		RemoteURL: str("remote_url"), RemoteModel: str("remote_model"), RemoteAPIKey: str("remote_api_key"),
+		DirEngine: strings.ToLower(str("dir_engine")), DType: strings.ToLower(str("dtype")),
+		Quantization: strings.ToLower(str("quantization")),
+		RemoteURL:    str("remote_url"), RemoteModel: str("remote_model"), RemoteAPIKey: str("remote_api_key"),
 	}
 	if has("gpu_memory_utilization") {
 		c.GPUMemory = s.Settings.Float(ctx, p+"gpu_memory_utilization", settings.Scope{})
@@ -409,7 +425,7 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 
 // engineFor is the engine kind of an LLM label's model: the model's own, else by its format
 // ("" = the label's default, llama-server).
-func (s SettingsSource) engineFor(info ModelInfo) (Kind, error) {
+func (s SettingsSource) engineFor(info ModelInfo, dirEngine string) (Kind, error) {
 	if info.Engine != "" {
 		return info.Engine, nil
 	}
@@ -421,7 +437,7 @@ func (s SettingsSource) engineFor(info ModelInfo) (Kind, error) {
 	if p == (Platform{}) {
 		p = Host()
 	}
-	return DirEngine(p)
+	return DirEngine(p, dirEngine)
 }
 
 // resolveModels fills in the model and projector paths; autoFold takes the fold flag from
@@ -458,7 +474,7 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 	}
 	c.ModelPath = info.Path
 	if d.ModelKind == ModelLLM {
-		k, err := s.engineFor(info)
+		k, err := s.engineFor(info, c.DirEngine)
 		if err != nil {
 			c.Problem = fmt.Sprintf("model %s: %v", ref, err)
 			return

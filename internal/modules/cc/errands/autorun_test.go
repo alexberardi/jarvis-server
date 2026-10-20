@@ -125,6 +125,20 @@ func TestAutorunLaunchesWithRanCard(t *testing.T) {
 	}
 }
 
+// The launched event is logged before the run can start: a slow log write must not let the
+// steps' events come first.
+func TestAutorunLogsLaunchBeforeSteps(t *testing.T) {
+	e, menu := autorunEnv(t)
+	e.policy.set("get_weather", allowHousehold)
+	e.policy.set("quick_search", allowTool)
+	e.act.slowDown(policy.OutcomeLaunched, 300*time.Millisecond)
+	weatherAndSearch(e)
+	e.draft("weather and search", ptr(7), menu)
+	if got := strings.Join(outcomes(e.act.all()), ","); got != "launched,ran,ran" {
+		t.Fatalf("outcomes = %s", got)
+	}
+}
+
 func TestAutorunOffKeepsPlanCard(t *testing.T) {
 	e, menu := autorunEnv(t)
 	e.set[SettingAutonomous] = false

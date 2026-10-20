@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -122,7 +123,8 @@ type Driver struct {
 	// desktop caches it once made.
 	Desktop *DesktopSetup
 	desktop map[string]*Node // by owner ("" the primary, "removed")
-	// source is the turn_source this driver's turns send ("" none; "wake" for also_heard_by).
+	// source is the turn_source this driver's turns send when the turn sets none ("" none; "wake"
+	// for also_heard_by).
 	source string
 }
 
@@ -250,9 +252,9 @@ func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
 		result := func(name string) any { return sc.resultFor(turn, name) }
 		var tl TurnLog
 		if also != nil {
-			tl = d.heardByBoth(ctx, also, sc, out.ConversationID, alsoCID, nodeNames, turn.Say, voiced, voice, speaker, result)
+			tl = d.heardByBoth(ctx, also, sc, out.ConversationID, alsoCID, nodeNames, turn.Say, turn.wire(), voiced, voice, speaker, result)
 		} else {
-			tl = d.turn(ctx, out.ConversationID, nodeNames, turn.Say, voiced, voice, speaker, result)
+			tl = d.turn(ctx, out.ConversationID, nodeNames, turn.Say, turn.wire(), voiced, voice, speaker, result)
 		}
 		tl.Failures = turn.Expect.Check(tl)
 		if len(tl.Failures) > 0 {
@@ -269,7 +271,7 @@ func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
 // heardByBoth plays one turn on this node and also's at once, each a wake turn of its own
 // conversation. The log is the node that answered (the first that didn't stand down); the
 // other is in Others.
-func (d *Driver) heardByBoth(ctx context.Context, also *Driver, sc Scenario, cid, alsoCID string, nodeNames []string, say string, voiced bool, voice string, speaker int64, result func(string) any) TurnLog {
+func (d *Driver) heardByBoth(ctx context.Context, also *Driver, sc Scenario, cid, alsoCID string, nodeNames []string, say string, extra map[string]any, voiced bool, voice string, speaker int64, result func(string) any) TurnLog {
 	me := *d
 	me.source = "wake"
 	logs := make([]TurnLog, 2)
@@ -281,7 +283,7 @@ func (d *Driver) heardByBoth(ctx context.Context, also *Driver, sc Scenario, cid
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			logs[i] = run.d.turn(ctx, run.cid, nodeNames, say, voiced, voice, speaker, result)
+			logs[i] = run.d.turn(ctx, run.cid, nodeNames, say, extra, voiced, voice, speaker, result)
 		}()
 	}
 	wg.Wait()
@@ -296,7 +298,7 @@ func (d *Driver) heardByBoth(ctx context.Context, also *Driver, sc Scenario, cid
 
 // turn sends one utterance and answers tool calls until command-center is done. A voiced turn
 // sends what STT heard of it instead.
-func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, voiced bool, voice string, speaker int64, result func(string) any) (tl TurnLog) {
+func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, extra map[string]any, voiced bool, voice string, speaker int64, result func(string) any) (tl TurnLog) {
 	tl.Say = say
 	mark := tapSize(d.TapLog)
 	start := time.Now()
@@ -319,7 +321,14 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		}
 		text = v.Heard
 	}
-	resp, err := d.Node.command(ctx, cid, text, speaker, d.source)
+	if _, ok := extra["turn_source"]; d.source != "" && !ok {
+		extra = maps.Clone(extra)
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		extra["turn_source"] = d.source
+	}
+	resp, err := d.Node.Command(ctx, cid, text, speaker, extra)
 	for i := 0; err == nil && resp.StopReason == "tool_calls" && len(resp.ToolCalls) > 0; i++ {
 		if i == maxContinues {
 			err = fmt.Errorf("still calling tools after %d round-trips", maxContinues)

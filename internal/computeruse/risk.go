@@ -72,7 +72,7 @@ func Classify(a Action, el *Element, t Target) Risk {
 		kind = "press" // setting a checkbox's state is pressing it
 	}
 	switch kind {
-	case "type", "set_value":
+	case "type", "set_value", "clipboard_write":
 		if el != nil && hasCCAutocomplete(el.Autocomplete) {
 			return confirm(CatPay, fmt.Sprintf("fills the payment field %q (autocomplete %q)", el.Name, el.Autocomplete))
 		}

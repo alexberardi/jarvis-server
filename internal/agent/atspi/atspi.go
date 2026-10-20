@@ -85,3 +85,7 @@ func clip(s string) string {
 	}
 	return string(r[:maxText]) + "…"
 }
+
+// Available reports whether the accessibility bus can be reached (nil) or why not: without it a
+// desktop recording has no element context and masks nothing.
+func Available(ctx context.Context) error { return available(ctx) }

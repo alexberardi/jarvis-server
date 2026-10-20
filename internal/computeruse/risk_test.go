@@ -95,6 +95,7 @@ func TestClassify(t *testing.T) {
 		// sensitive input
 		{"card number typed", typ("my card is 4111-1111-1111-1111"), &Element{Role: "textbox", Name: "Message"}, web, CatSensitiveInput, LevelConfirm},
 		{"card number set by coordinates", typ("4242424242424242"), nil, desk, CatSensitiveInput, LevelConfirm},
+		{"card number to the clipboard", Action{Kind: "clipboard_write", Intent: "copy", Text: "4242424242424242"}, nil, desk, CatSensitiveInput, LevelConfirm},
 		{"not luhn", typ("4111 1111 1111 1112"), nil, web, "", LevelNone},
 		{"ssn", set("078-05-1120"), &Element{Role: "textbox", Name: "Notes"}, web, CatSensitiveInput, LevelConfirm},
 		{"ssn plain in ssn field", set("078051120"), &Element{Role: "textbox", Name: "Social Security number"}, web, CatSensitiveInput, LevelConfirm},

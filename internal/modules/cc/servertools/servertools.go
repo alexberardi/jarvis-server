@@ -67,6 +67,9 @@ type Turn struct {
 	// Images resolves the chat photos the model currently sees, by number (images.go). Nil
 	// outside mobile chat.
 	Images TurnImages
+	// ComputerStopped is the computer task the node's agent stopped itself on this command (a
+	// voice stop phrase): "recording", "controlling" or "paused"; "" none.
+	ComputerStopped string
 }
 
 // Call is one tool call addressed to a server tool.

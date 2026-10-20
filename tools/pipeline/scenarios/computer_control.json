@@ -230,6 +230,127 @@
     ]
   },
   {
+    "name": "voice #288: I'm done in the follow-up of record a macro called test2 calls stop_recording",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "record a macro called test2",
+        "source": "wake",
+        "expect": {
+          "server_tool": "start_recording"
+        }
+      },
+      {
+        "say": "I'm done.",
+        "source": "follow_up",
+        "computer_activity": {
+          "kind": "recording",
+          "task": "Watching what you do",
+          "stopped": true
+        },
+        "expect": {
+          "server_tool": "stop_recording",
+          "stop": "complete",
+          "not_reply": "(?i)still recording"
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice #288: a new wake 'Hey Jarvis, I'm done' while recording calls stop_recording, not not_for_me",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "Hey Jarvis, I'm done.",
+        "source": "wake",
+        "computer_activity": {
+          "kind": "recording",
+          "task": "Watching what you do",
+          "stopped": true
+        },
+        "expect": {
+          "server_tool": "stop_recording",
+          "stop": "complete"
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice #288: stop recording while recording calls stop_recording",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "Stop recording.",
+        "source": "wake",
+        "computer_activity": {
+          "kind": "recording",
+          "task": "Watching what you do"
+        },
+        "expect": {
+          "server_tool": "stop_recording",
+          "stop": "complete"
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice #288: another question while recording doesn't stop it or say it stopped",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "What time is it?",
+        "source": "wake",
+        "computer_activity": {
+          "kind": "recording",
+          "task": "Watching what you do"
+        },
+        "expect": {
+          "not_tool": [
+            "stop_recording",
+            "start_recording"
+          ],
+          "not_reply": "(?i)\\b(stopped|saved|recorded)\\b"
+        }
+      }
+    ]
+  },
+  {
+    "name": "voice #288 near-miss: I'm done with dinner while not recording stays not for me",
+    "node": "desktop",
+    "tools": "../toolsets/desktop.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "What time is it?",
+        "source": "wake",
+        "expect": {
+          "not_tool": [
+            "stop_recording"
+          ]
+        }
+      },
+      {
+        "say": "I'm done with dinner",
+        "source": "follow_up",
+        "expect": {
+          "stop": "not_for_me",
+          "not_tool": [
+            "stop_recording",
+            "start_recording"
+          ]
+        }
+      }
+    ]
+  },
+  {
     "name": "voice near-miss: enable dark mode calls none of the computer control tools",
     "node": "desktop",
     "tools": "../toolsets/desktop.json",

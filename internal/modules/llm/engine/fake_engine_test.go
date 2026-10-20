@@ -20,7 +20,9 @@ import (
 //	whisper: GET /health, POST /inference
 //	python:  `-I -c CODE` exits 0 (FAKE_PY_FAIL=1: 1); `-I -m mlx_lm.server --model DIR …` serves
 //	         GET /health and POST /v1/chat/completions with no key, as mlx_lm.server does
-//	         (vLLM's `-m vllm.entrypoints.openai.api_server`: Bearer VLLM_API_KEY when set)
+//	         (vLLM's `-m vllm.entrypoints.openai.api_server`: Bearer VLLM_API_KEY when set;
+//	         Transformers' `-m transformers.cli.transformers serve DIR …`: 400 for a "model" other
+//	         than DIR and 422 for a reasoning_budget field, as transformers serve does)
 //
 // With FAKE_UV=1 it is uv instead (runFakeUV).
 //
@@ -51,6 +53,9 @@ func runFakeEngine(args []string) {
 	}
 	python := len(args) > 0 && args[0] == "-I"
 	if python && len(args) > 1 && args[1] == "-c" {
+		if p := os.Getenv("FAKE_PY_CHECK_LOG"); p != "" {
+			os.WriteFile(p, []byte("HF_HUB_OFFLINE="+os.Getenv("HF_HUB_OFFLINE")), 0o644)
+		}
 		if os.Getenv("FAKE_PY_FAIL") == "1" {
 			fmt.Fprintln(os.Stderr, "ModuleNotFoundError: No module named 'mlx_lm'")
 			os.Exit(1)
@@ -87,8 +92,12 @@ func runFakeEngine(args []string) {
 		_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", os.Getpid())), b, 0o644)
 	}
 	model := flag("-m")
+	serve := python && flag("-m") == "transformers.cli.transformers"
 	if python {
 		model = flag("--model")
+	}
+	if serve {
+		model = flag("serve")
 	}
 	if _, err := os.Stat(model); err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load model:", err)
@@ -130,6 +139,18 @@ func runFakeEngine(args []string) {
 		if has("--embedding") {
 			http.Error(w, "embedding-only server", http.StatusNotImplemented)
 			return
+		}
+		if serve {
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if m, ok := body["model"]; ok && m != model {
+				http.Error(w, fmt.Sprintf(`{"detail":"Server is pinned to '%s'; requested '%v'."}`, model, m), http.StatusBadRequest)
+				return
+			}
+			if _, ok := body["reasoning_budget"]; ok {
+				http.Error(w, `{"detail":"Unexpected fields in the request: {'reasoning_budget'}"}`, http.StatusUnprocessableEntity)
+				return
+			}
 		}
 		fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":"hi from %s"},"finish_reason":"stop"}],"model":%q}`,
 			filepath.Base(model), flag("--alias"))

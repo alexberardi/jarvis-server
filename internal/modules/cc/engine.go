@@ -91,6 +91,10 @@ type engineInput struct {
 	// voiceCommand is the turn's voice command as heard, without hints or suffix (the typed-app
 	// fill: utterance is the composed user message on the continue path).
 	voiceCommand string
+	// mustCall is a tool this turn has to call (stop_recording on a stop phrase while the
+	// computer records, computer_activity.go): a reply without it, not-for-me included, gets one
+	// nudge.
+	mustCall string
 }
 
 var thinkCaptureRE = regexp.MustCompile(`(?s)<think>(.*?)</think>`)
@@ -245,6 +249,13 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			dedupePending = false
 		}
 
+		// A stop phrase while recording outranks the sentinel (#288).
+		if in.mustCall != "" && len(calls) == 0 && !calledThisTurn(msgs, in.mustCall) && countNags(msgs, nagStopRecording) < 1 &&
+			iter+1 < in.maxIter {
+			msgs = msgs[:len(msgs)-1]
+			msgs = append(msgs, sysMsg(stopRecordingRetry))
+			continue
+		}
 		// h. The sentinel outranks every guard.
 		if parse.SentinelNotForMe(raw, message) {
 			if havePopped {

@@ -37,7 +37,7 @@ type Action struct {
 	DY        int      `json:"dy,omitempty"`     //
 	Button    string   `json:"button,omitempty"` // left right middle
 	Keys      []string `json:"keys,omitempty"`   // keypress: ["ctrl","s"], names from KeyNames
-	Text      string   `json:"text,omitempty"`   // type / set_value / select (≤ MaxText)
+	Text      string   `json:"text,omitempty"`   // type / set_value / select / clipboard_write (≤ MaxText)
 	Ref       string   `json:"ref,omitempty"`    // press set_value select: snapshot ref "e12"
 	URL       string   `json:"url,omitempty"`    // navigate (http/https)
 	MS        int      `json:"ms,omitempty"`     // wait (≤ MaxWaitMS)
@@ -61,6 +61,9 @@ var Kinds = map[string]bool{
 	"click": true, "double_click": true, "triple_click": true, "drag": true, "move": true,
 	"scroll": true, "keypress": true, "type": true, "wait": true, "screenshot": true,
 	"zoom": true, "press": true, "set_value": true, "select": true, "navigate": true,
+	// The clipboard, inside computer tasks only (COMPUTER-CONTROL.md C7): dictation and voice
+	// turns never touch it.
+	"clipboard_read": true, "clipboard_write": true,
 }
 
 // KeyNames are the valid keypress names, lower case (Validate compares case-insensitively).
@@ -145,9 +148,9 @@ func (a Action) Validate() error {
 				return fmt.Errorf("unknown key %q", k)
 			}
 		}
-	case "type":
+	case "type", "clipboard_write":
 		if a.Text == "" {
-			return errors.New("type needs text")
+			return fmt.Errorf("%s needs text", a.Kind)
 		}
 	case "press", "set_value", "select":
 		if a.Ref == "" {

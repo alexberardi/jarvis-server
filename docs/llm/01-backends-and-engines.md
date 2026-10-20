@@ -57,7 +57,7 @@ jarvisd replaces the model service and the sidecars as follows:
 | `GGUF` | `backends/gguf_backend.py` (llama-cpp-python, in-process) | **Cut.** Replaced by a local llama-server. The MBP dev box runs it today (Qwen3-8B, Metal). |
 | `MLX` | `backends/mlx_backend.py`, `mlx_vision_backend.py` | **Supervised engine on Apple Silicon** (LD9, 2026-10-19; the 2026-10-06 cut is reversed): jarvisd runs `mlx_lm.server` like llama-server (§3.11). The in-process backend is still not ported. |
 | `VLLM` | `backends/vllm_backend.py`, `vllm_vision_backend.py`, `vllm_availability.py` | **Cut** as an in-process backend; **back as a supervised engine** (LD10, §3.12): jarvisd runs vLLM's OpenAI server itself on Linux with an NVIDIA GPU. |
-| `TRANSFORMERS` | `backends/transformers_backend.py`, `transformers_vision_backend.py` | **Cut** |
+| `TRANSFORMERS` | `backends/transformers_backend.py`, `transformers_vision_backend.py` | In-process backend **cut**; returns as the supervised `transformers` engine (LD11, §3.13) |
 | `MOCK` | `backends/mock_backend.py` | **Cut.** The Go tests use an `httptest` fake engine instead. |
 | GGUF vision | `backends/gguf_vision_backend.py` | **Cut.** Vision is llama-server `--mmproj`. |
 
@@ -330,7 +330,7 @@ Detection puts the result in `Hardware.gpu_fault` and logs it at ERROR with both
 
 ### 3.11 Python engines: MLX on Apple Silicon (jarvisd, LD9)
 
-The decision: [2026-10-19-mlx-engine](../decisions/2026-10-19-mlx-engine.md). jarvisd stays pure Go; a Python engine is a downloaded, supervised program like llama-server. The layer is generic (`internal/modules/llm/engine/pyengine.go`, `PyEngines`); mlx-lm is its first kind, vLLM (§3.12) its second, and Transformers (#301) is meant to follow.
+The decision: [2026-10-19-mlx-engine](../decisions/2026-10-19-mlx-engine.md). jarvisd stays pure Go; a Python engine is a downloaded, supervised program like llama-server. The layer is generic (`internal/modules/llm/engine/pyengine.go`, `PyEngines`); mlx-lm is its first kind, vLLM (§3.12) its second, Transformers (§3.13) its third.
 
 **A Python engine kind** pins: the server package's version (it names the install directory), a Python version, the whole package set as a `uv pip compile --generate-hashes` lock (`engine/pyengines/<kind>.txt`, embedded), the platforms it runs on with the accelerator each uses (its flavour), what it needs where it can't run, the module to run, an import check, its flags, its health path and the `model` name requests use.
 
@@ -382,6 +382,37 @@ The decision: [2026-10-19-vllm-engine](../decisions/2026-10-19-vllm-engine.md). 
 
 **Live check on the devbox (2026-10-20).** `go test -tags vllm -run TestRealVLLM ./internal/modules/llm/models/` (`integration_vllm_test.go`: a throwaway jarvisd home, the real fetch job, Qwen3-0.6B at a pinned revision, then a chat, a streamed turn with tokens/s, a tool call and a thinking turn, and nvidia-smi's memory) ran up to vLLM's start: detection read the RTX 3080 Ti (12 GB) and driver 610.57.04, the gate passed, the fetch job installed vllm 0.32.0 (8.1 GB, cache removed), and vLLM accepted every flag jarvisd passes. It then refused to start because the installed jarvisd's own engine held 10.4 of the card's 12 GB (*"Free memory on device cuda:0 (0.95/11.61 GiB) … less than desired GPU memory utilization (0.28, 3.25 GiB)"*). The chat, stream, tool-call and tokens/s figures next to llama-server, and the VRAM of both running together, are still to be taken on a card with room.
 
+### 3.13 Transformers (jarvisd, LD11)
+
+The decision: [2026-10-19-transformers-engine](../decisions/2026-10-19-transformers-engine.md). Transformers is the third kind of §3.11's Python engine layer (`internal/modules/llm/engine/transformers.go`, kind `transformers`): Hugging Face's own OpenAI-compatible server, `transformers serve`, for any Hugging Face directory model (safetensors) on the accelerator torch has there.
+
+**Platforms and accelerators.** The layer now takes several accelerators per platform (`PyEngine.Platforms`, the default first) and a package set per platform and accelerator (`PyEngine.Sets`, else `Requirements`; each with its download and disk sizes and an optional extra wheel index for uv). Transformers runs on:
+
+| Platform | Flavours (default first) | Package set |
+|---|---|---|
+| darwin/arm64 | `metal` (MPS), `cpu` | `engine/pyengines/transformers-darwin-arm64.txt`: 51 packages, transformers 5.20.2 with its `serving` extra, torch 2.14.1, requests; 173.8 MB of wheels (torch 127 MB), about 0.8 GB installed plus 0.78 GB of uv cache while installing (`DiskBytes` 1.7 GB). One torch build serves MPS and CPU. |
+| windows/amd64 | `cpu` | `transformers-windows-amd64.txt`: the same pins plus colorama; 177.6 MB of wheels (`DiskBytes` 1.8 GB) |
+
+**Not yet:** Linux (CPU and CUDA). PyPI's Linux torch is the CUDA 13 build, which pulls about 3 GB of NVIDIA wheels even on a CPU box; the CPU and CUDA 12.8 builds are only on PyTorch's wheel index (`download.pytorch.org`), which the build sandbox couldn't reach. They follow as their own item: linux-amd64/arm64 CPU sets, linux and windows CUDA sets pinned to cu128 (driver 570+) with bitsandbytes, through `PySet.IndexURL` (`uv pip install --extra-index-url … --index-strategy unsafe-best-match`, still `--require-hashes`). Until then `Unavailable` says *"transformers needs Apple Silicon (MPS or CPU) or Windows x64 (CPU); Linux is not supported yet; this host is linux/amd64"*.
+
+uv now has a pinned windows/amd64 asset (`uv-x86_64-pc-windows-msvc.zip`), and a Windows install's interpreter is `venv\Scripts\python.exe`. The import check (`import torch, accelerate, fastapi, uvicorn, transformers.cli.transformers, transformers.cli.serve`) runs with the engine's own environment, since importing transformers' CLI calls the Hub unless `HF_HUB_OFFLINE` is set. `GET /v1/hardware` shows the set's sizes (`download_bytes`, `disk_bytes`) before the download, as for vLLM.
+
+**Choosing the engine of a directory model.** `llm.<label>.dir_engine` (Labels editor, Advanced, for a label on a directory model): `auto` keeps MLX on Apple Silicon and vLLM on linux/amd64 and takes Transformers where neither runs (Windows; `PyEngine.DirFallback`); `transformers`, `mlx-lm` or `vllm` name one, and a choice that can't run on the host is the label's problem with the reason. A model whose catalog entry records an engine keeps it. `gpu_backend` picks the accelerator among the platform's (`auto` = the default, `cpu` on a Mac runs the CPU install, a separate install directory).
+
+**Supervision.** `python -I -m transformers.cli.transformers serve DIR --host 127.0.0.1 --port N --device mps|cpu|cuda [--dtype D] [--quantization bnb-4bit|bnb-8bit]`, then `extra_args` (e.g. `--attn-implementation sdpa`). Its environment adds `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, `HF_HUB_DISABLE_TELEMETRY=1`, `HF_HUB_DISABLE_UPDATE_CHECK=1`, `PYTORCH_ENABLE_MPS_FALLBACK=1` (an op MPS lacks runs on the CPU instead of failing), and points `HF_HOME`, `XDG_CACHE_HOME` and torch inductor's cache under `<install>/cache/`. The server preloads the model before it listens, so `GET /health` answers once it is loaded, and never unloads it. It has no API key option, so it binds 127.0.0.1 only, as mlx_lm.server does; its CORS middleware stays off. Its `/load_model` and `/reset` routes are reachable by any local process, as everything on mlx_lm.server is. The instance key is §3.11's plus `dtype` and `quantization` (`transformersTune`), so two labels with different precision get two servers; `dtype` is `auto` (as stored), `bfloat16`, `float16` or `float32`, and `quantization` (bitsandbytes) is refused off CUDA (*"quantization bnb-4bit needs CUDA (bitsandbytes); this label runs transformers on metal"*). A model path with an `@` is refused (the server reads it as a revision).
+
+**What `transformers serve` 5.20.2 does with what cc needs** (from its source, and in process against a tiny random Qwen2 model: `serve-probe-result.json` in #301's evidence):
+
+- **Model name:** a request's `model` must be the string it was started with (else 400 *"Server is pinned to '…'; requested 'default_model'"*), so the endpoint's `Model` is the directory path (`PyEngine.RequestModel` empty).
+- **Unknown fields:** any field outside OpenAI's chat schema is refused with 422 (*"Unexpected fields in the request: {'reasoning_budget'}"*). jarvisd's `reasoning_budget` is therefore not sent to it (`Endpoint.NoReasoningBudget`); thinking goes by `chat_template_kwargs` (`enable_thinking`, LD8) alone, which it honours.
+- **Streaming:** real SSE, one chunk per token or so, ending with a usage chunk (`stream_options` itself is "ignored" with a warning).
+- **Tool calls:** `tools` go through the model's chat template; `tool_choice` is ignored (always "auto"). The reply is parsed into `tool_calls` for the families it has a response template for (Qwen2/2.5/3/3.5 incl. MoE and VL, Gemma 4) or whose tokenizer ships one; any other model's call stays in the text, so **cc's tool turns don't work on such a model** (SmolLM2, Llama, Mistral).
+- **JSON mode:** `response_format` is ignored with a warning; jarvisd never sends it upstream anyway, so JSON mode is the `jsonmode` package's instruction, validation and correction turn, as on every engine.
+- **Vision:** a model with a `vision_config` (e.g. Qwen2.5-VL, Qwen3-VL) loads with its processor and takes OpenAI image parts; its endpoint reports `Vision=true`, others `false`. Not run against a vision model yet.
+- **Reply length:** with no `max_tokens` a reply is capped at 1024 new tokens (its default), not at the context as on llama-server; a caller that wants more must ask for it.
+
+**Live check.** `go test -tags transformers -run TestRealTransformers ./internal/modules/llm/` (`integration_transformers_test.go`): a throwaway jarvisd home, the real fetch job, SmolLM2-135M-Instruct downloaded as a directory and assigned to live with `dir_engine=transformers`, then a chat and a streamed turn through jarvisd's chat service with thinking off (tokens/s logged) and a tool-call probe. `JARVIS_TRANSFORMERS_TEST_BACKEND=cpu` runs it on the CPU; CI's `transformers-live` workflow does that on macos-14 (GitHub's Mac runners have no usable MPS). The MPS run is the same command on a real Mac.
+
 ## 4. Data
 
 - **No tables.** All state is in memory: slot states, the frozen config, `_active_streams` (02).
@@ -406,6 +437,8 @@ See 05 §5 for the full disposition. The engine-shaping keys are:
 | `kv_cache_type` | |
 | `flash_attn` | |
 | `extra_args` | |
+| `gpu_memory_utilization` | vLLM (§3.12) |
+| `dir_engine`, `dtype`, `quantization` | Transformers (§3.13) |
 | `remote_*` | |
 
 **Prod mapping on import:**
