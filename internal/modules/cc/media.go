@@ -326,9 +326,9 @@ type enrollment struct {
 	nodeID      string
 	userID      int64
 	householdID string
-	kind        string // enroll_voice | verify_voice
-	lowQuality  bool   // M4 rejected the take (D37); the node reports it as upload_failed
-	used        bool   // the take was uploaded (one upload per start)
+	kind        string               // enroll_voice | verify_voice
+	lowQuality  *stt.LowQualityError // M4 rejected the take (D37); the node reports it as upload_failed
+	used        bool                 // the take was uploaded (one upload per start)
 	seq         int
 	expires     time.Time
 }
@@ -378,10 +378,19 @@ func (e *enrollments) get(rid string) *enrollment {
 	return e.m[rid]
 }
 
-func (e *enrollments) markLowQuality(x *enrollment) {
+func (e *enrollments) markLowQuality(x *enrollment, lq *stt.LowQualityError) {
 	e.mu.Lock()
-	x.lowQuality = true
+	x.lowQuality = lq
 	e.mu.Unlock()
+}
+
+func (e *enrollments) lowQualityOf(rid string) *stt.LowQualityError {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if x := e.m[rid]; x != nil {
+		return x.lowQuality
+	}
+	return nil
 }
 
 func queryUserID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -400,7 +409,7 @@ func queryUserID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 
 // handleEnroll is M4. The take must belong to a pending start for this node and user, and is
 // stored in the node's household. A take failing the D37 gate is 422 low_quality, and the
-// node's resulting V9 failure is relayed to mobile as error "low_quality" (stt Q1).
+// node's resulting V9 failure is relayed to mobile as error "low_quality" with its reason (stt Q1, #293).
 func (m *Module) handleEnroll(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
 	userID, ok := queryUserID(w, r)
 	if !ok || !parseUpload(w, r) {
@@ -427,10 +436,8 @@ func (m *Module) handleEnroll(w http.ResponseWriter, r *http.Request, n *nodeCtx
 	res, err := m.STT.Enroll(r.Context(), p.householdID, userID, file, nil)
 	var lq *stt.LowQualityError
 	if errors.As(err, &lq) {
-		m.enroll.markLowQuality(p)
-		httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"success": false, "error": "low_quality", "reason": lq.Reason, "speech_seconds": lq.SpeechSeconds, "detail": lq.Error(),
-		})
+		m.enroll.markLowQuality(p, lq)
+		httpx.WriteJSON(w, http.StatusUnprocessableEntity, lq.Wire())
 		return
 	}
 	if err != nil {
@@ -539,18 +546,21 @@ func (m *Module) handleStartNodeVoice(kind string, defaultSecs float64) userHand
 
 // handleVoiceProfileResult is V9: the node's take result, through the shared sink. A take
 // M4 rejected as low quality arrives as the node's generic upload failure and is relayed as
-// error "low_quality", which mobile already displays (stt Q1).
+// error "low_quality", which mobile already displays (stt Q1), plus reason, speech_seconds,
+// min_speech_seconds and detail so mobile can say why and retry the take (#293).
 func (m *Module) handleVoiceProfileResult(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
 	raw, ok := readRawObject(w, r)
 	if !ok {
 		return
 	}
 	rid := r.PathValue("request_id")
-	if p := m.enroll.get(rid); p != nil && p.lowQuality {
+	if lq := m.enroll.lowQualityOf(rid); lq != nil {
 		var res map[string]any
 		if json.Unmarshal(raw, &res) == nil && res["success"] == false {
 			if e, _ := res["error"].(string); strings.HasPrefix(e, "upload_failed") {
-				res["error"] = "low_quality"
+				for k, v := range lq.Wire() {
+					res[k] = v
+				}
 				raw, _ = json.Marshal(res)
 			}
 		}

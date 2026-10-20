@@ -715,6 +715,14 @@ func TestVoiceEnrollmentHandoff(t *testing.T) {
 	if res["success"] != false || res["error"] != "low_quality" {
 		t.Fatalf("stt Q1 mapping %v", res)
 	}
+	// #293: mobile gets the reason, so it can say "1.2 s of speech, need 3" and retry that take.
+	if res["reason"] != "too_little_speech" || res["speech_seconds"] != 1.2 || res["min_speech_seconds"] != 3.0 ||
+		res["detail"] != "low_quality: 1.2 s of speech, need at least 3.0 s" {
+		t.Fatalf("low_quality reason not relayed: %v", res)
+	}
+	if lq["min_speech_seconds"] != 3.0 {
+		t.Fatalf("M4 422 without min_speech_seconds: %v", lq)
+	}
 	ve.do("GET", "/api/v0/mobile/voice-profile-results/"+rid, nil, bearer(tok)).want(202) // consumed
 }
 
