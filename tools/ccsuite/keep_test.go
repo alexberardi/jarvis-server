@@ -4,10 +4,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +64,10 @@ func TestLeaderIs(t *testing.T) {
 	}
 	defer cmd.Wait()
 	defer cmd.Process.Kill()
+	// Until the child has exec'd, its command line is empty (taken as gone): wait for it.
+	for i := 0; i < 200 && !execd(cmd.Process.Pid); i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if !leaderIs(cmd.Process.Pid, cmd.Args[0]) {
 		t.Error("a sleep is not taken for a sleep")
 	}
@@ -73,4 +79,10 @@ func TestLeaderIs(t *testing.T) {
 	if !leaderIs(cmd.Process.Pid, "/opt/chromium/chrome") {
 		t.Error("a leader that is gone is not taken for ours")
 	}
+}
+
+// execd reports whether pid runs a program already (on macOS, always).
+func execd(pid int) bool {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	return err != nil || strings.Contains(string(b), "sleep")
 }
