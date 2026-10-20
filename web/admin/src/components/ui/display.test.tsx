@@ -23,7 +23,7 @@ describe('Card', () => {
     expect(within(region).getByRole('button', { name: 'Add' })).toBeInTheDocument()
   })
 
-  it('puts an icon before the title without changing the heading's name', () => {
+  it("puts an icon before the title without changing the heading's name", () => {
     render(
       <Card as="section" aria-labelledby="h">
         <CardHeader id="h" title="Catalog" icon={<svg data-testid="icon" />} />
