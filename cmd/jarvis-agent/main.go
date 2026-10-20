@@ -626,6 +626,21 @@ func run(ctx context.Context, args []string) error {
 		tf.host = newPiHost(ctx, filepath.Dir(path), mic, log)
 		tf.host.Music = duck
 	}
+	// jarvisd's client once connected: approval tokens are checked with it, recordings uploaded.
+	var liveCC atomic.Pointer[node.CC]
+	if p.desktop {
+		// Computer tasks in the browser (plan P3 piece 8): build adds the executor's tools
+		// after the browser's.
+		tf.computer = func(bt *browser.Tools) node.Toolset {
+			return &computer.Tools{Browser: computer.BrowserOf(bt), Switch: computerSw, Activity: activity,
+				CC: func() computer.Approver {
+					if cc := liveCC.Load(); cc != nil {
+						return cc
+					}
+					return nil
+				}}
+		}
+	}
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -634,7 +649,6 @@ func run(ctx context.Context, args []string) error {
 	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
 	// is uploaded once connected to jarvisd (liveCC). computer_switch is computer control's
 	// switch for jarvisd's voice tools (enable/disable_computer_control).
-	var liveCC atomic.Pointer[node.CC]
 	var recorder *computer.Recorder
 	if p.desktop {
 		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, log)
@@ -864,6 +878,9 @@ type toolFlags struct {
 	host *sdkhost.Host
 	// live is the sidecar in service once build ran (the Pi's reminders are polled from it).
 	live *sidecar.Live
+	// computer, when the caller sets it, is the computer-task executor's tools on the browser
+	// extension's: build adds them after the browser tools.
+	computer func(*browser.Tools) node.Toolset
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -920,6 +937,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		bt.Origins = f.origins
 		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
+		if f.computer != nil {
+			tools = append(tools, f.computer(bt))
+		}
 		closeAll = stopBrowser
 	}
 	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)
