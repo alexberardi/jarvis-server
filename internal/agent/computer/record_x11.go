@@ -2,7 +2,6 @@ package computer
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -20,11 +19,8 @@ import (
 // them. The element under a click is AT-SPI's GetAccessibleAtPoint in the window under the
 // point (its _NET_WM_PID); typing goes to the active window's focused element, and keystrokes
 // into a password text never leave the recorder (masked). Wayland lets no app see another's
-// input, so there only the browser is recorded (decision 2026-10-19-taught-workflows, Q8).
+// input: record_wayland.go reads the devices instead, and record_linux.go picks by session.
 // Platform-free so the tests run everywhere; record_linux.go wires the real display.
-
-// ErrWaylandRecording: computer_record_start {mode: desktop} in a Wayland session.
-var ErrWaylandRecording = errors.New("On Wayland I can only record the browser")
 
 // x11Desk is the slice of *x11.Display an X11 recording uses.
 type x11Desk interface {

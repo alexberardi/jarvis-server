@@ -63,8 +63,12 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 	case cmd == control.ComputerRecordStart:
 		fmt.Fprintf(w, "Recording (%s): do the task in the browser, then run `jarvis-agent computer record stop` or choose Stop recording in the menu.\n", r.Answer)
 	case cmd == control.ComputerRecordDesktop:
+		id, warning, _ := strings.Cut(r.Answer, "\t")
+		if warning == "" {
+			warning = "What you type into password fields isn't kept."
+		}
 		fmt.Fprintf(w, "Recording the desktop (%s): do the task, then run `jarvis-agent computer record stop` or choose Stop recording in the menu. "+
-			"What you type into password fields isn't kept.\n", r.Answer)
+			"%s\n", id, warning)
 	case cmd == control.ComputerRecordStop:
 		id, n, _ := strings.Cut(r.Answer, " ")
 		fmt.Fprintf(w, "Stopped %s: %s events, sent to Jarvis.\n", id, n)
@@ -97,7 +101,7 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 
 // newRecorder is the agent's recorder: traces under dir (<agent dir>/recordings), the browser
 // extension's events (a browser toolset in tools), the desktop where this OS can record it
-// (macOS and X11, with keyframes from the screen toolset in tools), and a trace stopped here (the menu,
+// (macOS, X11, and Hyprland and sway on Wayland, with keyframes from the screen toolset in tools), and a trace stopped here (the menu,
 // the CLI, voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected:
 // then it is kept here and sent once connected, the user told through note).
 func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc func() *node.CC, note func(string), log *slog.Logger) (*computer.Recorder, *recordingUploads) {
@@ -111,31 +115,13 @@ func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc f
 			shots = t.C
 		}
 	}
-	if src := computer.NewDesktopSource(dir, keyframer(shots), log); src != nil {
+	if src := computer.NewDesktopSource(dir, shots, log); src != nil {
 		sources[computer.ModeDesktop] = src
 	}
 	rec := &computer.Recorder{Dir: dir, Activity: activity, Sources: sources, Log: log}
 	up := &recordingUploads{rec: rec, cc: cc, note: note, log: log, every: recordingRetryEvery}
 	rec.Stopped = up.stopped
 	return rec, up
-}
-
-// keyframer is a desktop recording's keyframe: the screen as a JPEG (nil without a capturer).
-func keyframer(c screen.Capturer) func(context.Context) ([]byte, error) {
-	if c == nil {
-		return nil
-	}
-	return func(ctx context.Context) ([]byte, error) {
-		if ok, why := c.Available(ctx); !ok {
-			return nil, errors.New(why)
-		}
-		shot, err := c.Capture(ctx, screen.ScopeScreen, "")
-		if err != nil {
-			return nil, err
-		}
-		b, _, _, err := screen.Encode(shot.Image)
-		return b, err
-	}
 }
 
 // recordingKeptNote tells the user a recording stopped here isn't with jarvisd yet.
@@ -229,14 +215,18 @@ func (u *recordingUploads) sweep(cc *node.CC) map[string]bool {
 // recordFromHere starts a recording in mode or, with mode "", ends the one going on, uploading
 // it: the status icon's "Record a macro…" / "Stop recording" and `jarvis-agent computer record
 // start [--desktop]|stop`. The answer is the recording's id, and on stop its events too
-// ("rec_… 12").
+// ("rec_… 12"). A start with a warning (computer.Warner) follows the id with a tab and it.
 func recordFromHere(ctx context.Context, rec *computer.Recorder, mode string, log *slog.Logger) (string, error) {
 	if mode != "" {
 		id, err := rec.Start(ctx, mode)
 		if err != nil {
 			log.Warn("recording: couldn't start", "err", err)
+			return id, err
 		}
-		return id, err
+		if w, ok := rec.Sources[mode].(computer.Warner); ok && w.Warning() != "" {
+			return id + "\t" + w.Warning(), nil
+		}
+		return id, nil
 	}
 	tr, err := rec.End()
 	if err != nil {

@@ -103,10 +103,20 @@ func (r *Recorder) LoadTrace(id string) (Trace, error) {
 	kf, _ := filepath.Glob(filepath.Join(r.Dir, id+".*.jpg"))
 	for _, p := range kf {
 		seq, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), id+"."), ".jpg"))
-		if err == nil {
-			tr.Keyframes = append(tr.Keyframes, Keyframe{Seq: seq, Path: p})
+		if err != nil {
+			continue // a crop (<id>.<seq>.crop.jpg)
 		}
+		k := Keyframe{Seq: seq, Path: p}
+		if crop := strings.TrimSuffix(p, ".jpg") + cropSuffix; fileExists(crop) {
+			k.Crop = crop
+		}
+		tr.Keyframes = append(tr.Keyframes, k)
 	}
 	slices.SortFunc(tr.Keyframes, func(a, b Keyframe) int { return a.Seq - b.Seq })
 	return tr, nil
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

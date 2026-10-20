@@ -3,9 +3,10 @@
 package computer
 
 import (
-	"context"
 	"log/slog"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 )
 
 // NewDesktopSource is nil off macOS and Linux: the desktop can't be recorded there.
-func NewDesktopSource(string, func(context.Context) ([]byte, error), *slog.Logger) Source { return nil }
+func NewDesktopSource(string, screen.Capturer, *slog.Logger) Source { return nil }

@@ -853,6 +853,22 @@ func TestPermissionsAskThenOpenSettings(t *testing.T) {
 	s.app.wg.Wait()
 }
 
+// A step the user does themselves (Linux's input group): the page shows the command to run,
+// and asking for it says to run it instead of opening a settings pane.
+func TestPermissionWithACommand(t *testing.T) {
+	s := testServer(t, Deps{GOOS: "linux", Permissions: []Permission{{ID: "input-monitoring", Label: "Keyboard and mouse",
+		How: "sudo usermod -aG input $USER", Status: func() string { return NotAsked }}}})
+	st := decode[stateView](t, send(s, req(s, "GET", "api/state", nil)))
+	if len(st.Permissions) != 1 || st.Permissions[0].How != "sudo usermod -aG input $USER" {
+		t.Fatalf("%+v", st.Permissions)
+	}
+	w := send(s, req(s, "POST", "api/permission", map[string]string{"id": "input-monitoring"}))
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "sudo usermod -aG input $USER") ||
+		strings.Contains(w.Body.String(), "System Settings") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPortalStep(t *testing.T) {
 	allowed := false
 	s := testServer(t, Deps{Portal: &Portal{

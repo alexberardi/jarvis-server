@@ -270,7 +270,36 @@ func TestComputerRecordStartStop(t *testing.T) {
 	if tr := <-handed; tr.ID == "" || rec.Current() != "" {
 		t.Fatalf("Stop recording: %+v, still %q", tr, rec.Current())
 	}
+
+	// The desktop, and its start's warning (no accessibility on Wayland: typed text is kept).
+	desk := &warnRecSource{warning: "typed text is kept as it is"}
+	rec.Sources[computer.ModeDesktop] = desk
+	got, err = run("record", "start", "--desktop")
+	if err != nil || !strings.HasPrefix(got, "Recording the desktop (rec_") || !strings.Contains(got, "typed text is kept as it is") ||
+		strings.Contains(got, "password fields isn't kept") || strings.Contains(got, "\t") {
+		t.Fatalf("record start --desktop: %q %v", got, err)
+	}
+	if _, err := run("record", "stop"); err != nil {
+		t.Fatal(err)
+	}
+	<-handed
+	desk.warning = ""
+	got, err = run("record", "start", "--desktop")
+	if err != nil || !strings.Contains(got, "password fields isn't kept") {
+		t.Fatalf("record start --desktop without a warning: %q %v", got, err)
+	}
+	if _, err := run("record", "stop"); err != nil {
+		t.Fatal(err)
+	}
+	<-handed
 }
+
+type warnRecSource struct {
+	fakeRecSource
+	warning string
+}
+
+func (s *warnRecSource) Warning() string { return s.warning }
 
 // clickInput records clicks; the rest of input.Input is never called.
 type clickInput struct {

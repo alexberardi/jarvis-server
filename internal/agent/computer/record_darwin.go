@@ -3,7 +3,6 @@
 package computer
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"runtime"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
+	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 )
 
 // macOS desktop recording: a listen-only CGEventTap (it sees the user's clicks, keys and
@@ -34,11 +34,11 @@ var (
 		"Privacy & Security > Accessibility")
 )
 
-// NewDesktopSource is the recorder's desktop mode on macOS: keyframes from keyframe (nil: none)
-// kept in dir.
-func NewDesktopSource(dir string, keyframe func(context.Context) ([]byte, error), log *slog.Logger) Source {
+// NewDesktopSource is the recorder's desktop mode on macOS: keyframes of the screen from shots
+// (nil: none) kept in dir.
+func NewDesktopSource(dir string, shots screen.Capturer, log *slog.Logger) Source {
 	return &DesktopSource{Dir: dir, Tap: macTap, Log: log,
-		Platform: DeskPlatform{ElementAt: ax.RecordedAt, Focused: ax.FocusedElement, Keyframe: keyframe}}
+		Platform: DeskPlatform{ElementAt: ax.RecordedAt, Focused: ax.FocusedElement, Keyframe: keyframer(shots)}}
 }
 
 const (

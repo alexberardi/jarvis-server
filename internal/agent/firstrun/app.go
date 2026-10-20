@@ -101,6 +101,7 @@ type permissionView struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Why    string `json:"why"`
+	How    string `json:"how,omitempty"`
 	Status string `json:"status"`
 }
 
@@ -162,7 +163,7 @@ func (a *app) state(ctx context.Context) stateView {
 		if p.Status != nil {
 			st = p.Status()
 		}
-		v.Permissions = append(v.Permissions, permissionView{ID: p.ID, Label: p.Label, Why: p.Why, Status: st})
+		v.Permissions = append(v.Permissions, permissionView{ID: p.ID, Label: p.Label, Why: p.Why, How: p.How, Status: st})
 	}
 	if a.d.Portal != nil {
 		allowed, available, why := a.d.Portal.Status(ctx)
@@ -622,6 +623,10 @@ func (a *app) postPermission(w http.ResponseWriter, r *http.Request) {
 		a.wg.Add(1)
 		go func() { defer a.wg.Done(); p.Ask() }()
 		writeJSON(w, http.StatusOK, map[string]string{"did": "asked"})
+		return
+	}
+	if p.How != "" {
+		fail(w, http.StatusNotFound, "Run this in a terminal: "+p.How)
 		return
 	}
 	if a.d.OpenURL == nil || p.Pane == "" {

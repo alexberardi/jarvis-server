@@ -146,8 +146,14 @@ password the model can see.
    record start --desktop`, through a listen-only event tap that needs the Input Monitoring grant
    (the setup page asks for it) ([decision](../decisions/2026-10-19-desktop-recording-macos.md)).
    Desktop on X11: built (piece 37): the same, through the RECORD extension and AT-SPI, with no
-   grant to ask for; on Wayland it refuses with "On Wayland I can only record the browser"
-   (`unsupported`, Q8) ([decision](../decisions/2026-10-19-desktop-recording-x11.md)).
+   grant to ask for ([decision](../decisions/2026-10-19-desktop-recording-x11.md)).
+   Desktop on Wayland, Hyprland and sway (#318): keys and buttons from evdev (the user in the
+   `input` group: the setup page and `jarvis-agent permission input-monitoring` give the
+   `sudo usermod -aG input $USER` step, and a start without it refuses with it), the cursor and
+   focused window from the compositor, AT-SPI's focused element per typing group (a password text
+   is masked; without AT-SPI `context: none` and a warning that typed text is kept), and a
+   keyframe at most every second with the click marked and a 256 px crop. GNOME and KDE refuse
+   (`unsupported`, Q8) ([decision](../decisions/2026-10-20-desktop-recording-wayland.md)).
    jarvisd's `start_recording` still starts the browser, and learning skips desktop traces.
 2. **Capture structure, not just pixels.**
    - Browser (extension): each element acted on (role, accessible name, a stable selector),
@@ -183,7 +189,7 @@ within the household, and governed by the same rules (C2) as any computer task.
 | Q4 | First use of a new desktop app: ask or allow? | Allow (C2, autonomy-first), with the app shown in the progress stream and the audit log; the household can switch it to ask. |
 | Q5 | Platform order for desktop control? | macOS first (signed app, TCC, Mac mini/MBP test hosts), then Linux wlroots and X11 (this box), then Windows, then GNOME/KDE (no pure-Go PipeWire client). Foreground cursor everywhere in v1; no private macOS background APIs. |
 | Q7 | Where do workflows live, and can they be shared? | In jarvisd (cc), as household data next to routines: owned by the member who taught them, shareable within the household, exportable later (Pantry is a possible home for public ones; not v1). |
-| Q8 | Desktop recording on Wayland? | Browser recording first everywhere. Desktop recording on macOS (AX notifications + event tap under the existing grants), then X11 and Windows; on Wayland only through what the portals allow, otherwise browser-only. |
+| Q8 | Desktop recording on Wayland? | Browser recording first everywhere. Desktop recording on macOS (AX notifications + event tap under the existing grants), then X11 and Windows. On Wayland (user, 2026-10-20): record what Wayland allows and let the vision model make sense of it: on Hyprland and sway, evdev input behind the `input` group, compositor context, AT-SPI and marked keyframes ([decision](../decisions/2026-10-20-desktop-recording-wayland.md)); GNOME and KDE browser-only until the portals. |
 | Q6 | Go building blocks? | robotgo v1.3.6 pure-Go tags and vcaesar/screenshot (ScreenCaptureKit via purego), pinned and wrapped behind our own interface; purego AX; go-ole UIA (own layer); godbus AT-SPI (own client). No cgo (decision 2026-10-06). |
 
 ## Phases (suggested pieces; the blueprint decides)

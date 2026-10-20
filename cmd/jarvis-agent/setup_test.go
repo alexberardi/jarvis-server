@@ -11,7 +11,10 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
+	"github.com/alexberardi/jarvis-server/internal/agent/evdev"
+	"github.com/alexberardi/jarvis-server/internal/agent/firstrun"
 )
 
 func TestNeedsTypingPortal(t *testing.T) {
@@ -93,5 +96,28 @@ func TestControlSocketVoiceCommands(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.saved) != 2 || f.saved[0] || !f.saved[1] {
 		t.Fatalf("saved %v", f.saved)
+	}
+}
+
+// On Hyprland and sway the setup page shows the input group step (granted once the keyboard
+// opens), with the same command the recording's refusal gives; elsewhere nothing.
+func TestLinuxInputPermission(t *testing.T) {
+	if p := linuxPermissions("linux", "", func() error { return nil }); p != nil {
+		t.Fatalf("GNOME/KDE/X11: %+v", p)
+	}
+	if p := linuxPermissions("darwin", "hyprland", func() error { return nil }); p != nil {
+		t.Fatalf("macOS: %+v", p)
+	}
+	var access error = evdev.ErrNoAccess
+	p := linuxPermissions("linux", "hyprland", func() error { return access })
+	if len(p) != 1 || p[0].ID != "input-monitoring" || p[0].How != inputGroupCmd || p[0].Status() != firstrun.NotAsked {
+		t.Fatalf("%+v", p)
+	}
+	access = nil
+	if p[0].Status() != firstrun.Granted {
+		t.Fatal("not granted once the keyboard opens")
+	}
+	if !strings.Contains(computer.ErrInputGroup.Error(), inputGroupCmd) {
+		t.Fatalf("the refusal says %q", computer.ErrInputGroup)
 	}
 }
