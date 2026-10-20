@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Run this checkout's jarvisd in place of the installed one, on the installed one's data.
 #
-#   scripts/dev-run.sh [--no-ui] [-- extra `jarvisd serve` arguments]
+#   scripts/dev-run.sh [--no-ui] [--home DIR] [-- extra `jarvisd serve` arguments]
 #
 # Builds the admin UI and the binary, stops the installed service (systemd system or --user unit,
 # or the macOS LaunchDaemon), runs the build in the foreground on that service's data directory as
-# that service's account, and starts the service again when you press Ctrl-C. Nodes and phones keep working because the accounts,
-# households and node keys are the installed ones. Without an installed service it runs on
+# that service's account, and starts the service again when you press Ctrl-C. Nodes and phones
+# keep working because the accounts, households and node keys are the installed ones. Without an installed service it runs on
 # ~/.jarvisd.
 #
 #   --no-ui   skip `npm run build` for the admin UI (reuse web/admin/dist as it is)
+#   --home D  run on D instead (a fresh instance when D is new: its own setup, household and
+#             models), as you; the installed service is still stopped for its ports
 #
 # The build reports itself as dev-<commit>, so it never takes part in update checks. If it
 # brings database migrations the installed release doesn't have, the script says so and asks
@@ -19,12 +21,13 @@
 # Linux (systemd) and macOS (launchd). Stopping and starting a system service asks for sudo.
 set -euo pipefail
 
-UI=1
+UI=1 OWNHOME=
 while [ $# -gt 0 ]; do
   case $1 in
     --no-ui) UI=0; shift ;;
+    --home) [ $# -ge 2 ] || { echo "dev-run: --home needs a directory" >&2; exit 2; }; OWNHOME=$2; shift 2 ;;
     --) shift; break ;;
-    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "dev-run: unknown argument $1 (serve arguments go after --)" >&2; exit 2 ;;
   esac
 done
@@ -65,7 +68,13 @@ elif systemctl --user cat jarvisd.service >/dev/null 2>&1; then
 fi
 
 # as runs a command as the account the installed service uses.
+if [ -n "$OWNHOME" ]; then
+  mkdir -p "$OWNHOME"
+  HOMEDIR=$(cd "$OWNHOME" && pwd)
+fi
+
 as() {
+  [ -z "$OWNHOME" ] || { "$@"; return; }
   case $MODE in
     system) sudo -u jarvisd -H "$@" ;;
     launchd) if [ "$RUNAS" = "$(id -un)" ]; then "$@"; else sudo -u "$RUNAS" -H "$@"; fi ;;
@@ -122,7 +131,7 @@ fi
 
 # Migrations the installed release doesn't have make the move one-way: ask first.
 PENDING=$(as "$BIN" migrate status --home "$HOMEDIR" 2>/dev/null | awk 'NR > 1 && $4 > 0 {printf "%s%s(+%s)", sep, $1, $4; sep=", "}')
-if [ -n "$PENDING" ]; then
+if [ -n "$PENDING" ] && [ -z "$OWNHOME" ]; then
   say "this build adds database migrations: $PENDING"
   say "after it runs, the installed release won't start on $HOMEDIR until the next release (or serve --allow-downgrade)"
   read -r -p "dev-run: continue? [y/N] " ok
