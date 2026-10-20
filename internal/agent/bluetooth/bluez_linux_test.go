@@ -324,8 +324,11 @@ func TestBlueZOverDBus(t *testing.T) {
 	if err := b.Connect(ctx, speaker); !errors.Is(err, ErrInProgress) {
 		t.Fatalf("connect: %v, want ErrInProgress", err)
 	}
-	if err := b.Disconnect(ctx, speaker); err == nil || !strings.Contains(err.Error(), "br-connection-unknown") {
-		t.Fatalf("disconnect: %v", err)
+	// BlueZ's error name reaches Pair's message to the app, not only its text.
+	var be BlueZError
+	if err := b.Disconnect(ctx, speaker); !errors.As(err, &be) || be != (BlueZError{Name: "org.bluez.Error.Failed", Message: "br-connection-unknown"}) ||
+		err.Error() != "org.bluez.Error.Failed: br-connection-unknown" {
+		t.Fatalf("disconnect: %#v", err)
 	}
 	if err := b.SetTrusted(ctx, speaker, true); err != nil {
 		t.Fatal(err)
