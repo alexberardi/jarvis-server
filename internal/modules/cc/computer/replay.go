@@ -120,12 +120,10 @@ func (l *Loop) replayStep(ctx context.Context, r *round, st WorkflowStep, i int)
 			return Outcome{State: StateFailed, Summary: "I couldn't see the computer: " + err.Error()}, true
 		}
 		obs = o
-		el, ok := findElement(obs.Elements, st.Element)
-		switch {
-		case ok:
+		if el, ok := findElement(obs.Elements, st.Element); ok {
 			a = onElement(a, el)
-		case a.Kind != "type":
-			direct = false // a type without its field goes where the focus is, as recorded
+		} else {
+			direct = false
 		}
 	case needsTarget(a.Kind):
 		direct = false // a ref or coordinates from the recording mean nothing now

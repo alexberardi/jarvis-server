@@ -19,6 +19,9 @@ named the old element), the workflow's version goes up by one and the card says 
 updated the step". A heal is stored only when the workflow is still at the version the replay
 started from: an edit made meanwhile wins. A run whose check fails stores nothing. If the model
 asks, or its actions fail, the run asks the user (Continue with an answer resumes that step).
+This holds for every kind of step, typing included: a `type` step that recorded its field (every
+learnt one does) and whose field is not found goes to the model round with the value in the hint,
+never to wherever the focus is. Only a `type` step recorded without an element types at the focus.
 
 **Policy is never skipped.** A direct step goes through the same `decide` → hold/mint → act path as
 the loop's actions, so a risky step (Place order) still waits for its one confirmation, and every

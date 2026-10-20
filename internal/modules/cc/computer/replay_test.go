@@ -2,6 +2,7 @@ package computer
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -125,6 +126,47 @@ func TestReplayHealsMovedButton(t *testing.T) {
 	wf.Steps[1].Element = &wfs.heals[0].Element
 	if out := e2.replay(wf, map[string]string{"month": "November 2026"}); out.State != StateDone || len(e2.llm.reqs) != 0 {
 		t.Fatalf("second replay %+v, %d model calls", out, len(e2.llm.reqs))
+	}
+}
+
+func TestReplayHealsMovedField(t *testing.T) {
+	// The Memo field was renamed; a type step that recorded it goes to the model, not the focus.
+	wf := statementWorkflow()
+	wf.Steps = append(wf.Steps, WorkflowStep{Intent: "Write the month", Target: "browser",
+		Action:  computeruse.Action{Kind: "type", Intent: "Write the month", Text: "{month}"},
+		Element: &RecordedElement{Role: "textbox", Name: "Memo"}})
+	e := newEnv(t, bankPage(Element{Ref: "e4", Role: "button", Name: "Download CSV"},
+		Element{Ref: "e7", Role: "textbox", Name: "Search"}, Element{Ref: "e8", Role: "textbox", Name: "Memo (optional)"}))
+	wfs := &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	typ, _ := json.Marshal(map[string]any{"kind": "type", "ref": "e8", "text": "October 2026", "intent": "Write the month"})
+	e.script(actions(string(typ)))
+	out := e.replay(wf, map[string]string{"month": "October 2026"})
+	if out.State != StateDone || out.Rounds != 1 {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.llm.reqs) != 1 {
+		t.Fatalf("model calls %d", len(e.llm.reqs))
+	}
+	txt := userText(e.llm.reqs[0])
+	for _, want := range []string{`Hint: this step was recorded on textbox "Memo"`, `The value is "October 2026"`} {
+		if !strings.Contains(txt, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, txt)
+		}
+	}
+	for _, b := range e.exec.batches {
+		for _, a := range b.Actions {
+			if a.Kind == "type" && a.Ref == "" {
+				t.Fatalf("typed at the focus: %+v", a)
+			}
+		}
+	}
+	if a := e.exec.batches[len(e.exec.batches)-1].Actions[0]; a.Ref != "e8" || a.Text != "October 2026" {
+		t.Fatalf("typed %+v", a)
+	}
+	want := Heal{Step: 2, Was: RecordedElement{Role: "textbox", Name: "Memo"}, Element: RecordedElement{Role: "textbox", Name: "Memo (optional)"}}
+	if wfs.id != "tw_1" || wfs.version != 3 || len(wfs.heals) != 1 || wfs.heals[0] != want {
+		t.Fatalf("stored %s v%d %+v", wfs.id, wfs.version, wfs.heals)
 	}
 }
 
