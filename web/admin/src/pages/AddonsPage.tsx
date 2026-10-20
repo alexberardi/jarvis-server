@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { ExternalLink, Laptop, LogOut, Monitor, Play, Puzzle, Smartphone } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Laptop, LogOut, Monitor, Play, Puzzle, Smartphone } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getThisDevice } from '@/api/chat'
 import { extensionState, getNodeLiveness, signOutDevice, websiteAccessState } from '@/api/nodes'
@@ -9,6 +9,7 @@ import AgentDownload from '@/components/addons/AgentDownload'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import {
   Badge,
+  Banner,
   Button,
   buttonStyles,
   Card,
@@ -138,14 +139,35 @@ function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; ma
         </div>
       </div>
       {accessOff && (
-        <div data-testid="website-access-off" className="mt-3 rounded-control bg-warning-soft p-3 text-small text-text">
-          <p className="font-medium text-warning">Website access is off in {label}'s browser.</p>
+        <Banner
+          data-testid="website-access-off"
+          tone="warning"
+          className="mt-3"
+          icon={<AlertTriangle size={16} />}
+          title={`Website access is off in ${label}'s browser.`}
+        >
           <WebsiteAccessSteps families={websiteAccessFamilies(String(n.capabilities?.browser_website_access_off_in ?? ''))} />
-        </div>
+        </Banner>
       )}
       {confirming && (
-        <div role="group" aria-label={`Sign out ${label}`} className="mt-3 rounded-control bg-surface-alt p-3 text-small">
-          <p className="text-text">
+        <Banner
+          role="group"
+          aria-label={`Sign out ${label}`}
+          tone="danger"
+          className="mt-3"
+          icon={<LogOut size={16} />}
+          actions={
+            <>
+              <Button size="sm" variant="danger" loading={signOut.isPending} onClick={() => signOut.mutate()}>
+                Sign out
+              </Button>
+              <Button size="sm" onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
+            </>
+          }
+        >
+          <p>
             Sign {label} out of Jarvis Automation? It stops working with Jarvis until someone signs in on it again. Its
             settings on that computer are kept.
           </p>
@@ -154,15 +176,7 @@ function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; ma
               {errorMessage(signOut.error, 'Could not sign it out. Try again.')}
             </p>
           )}
-          <div className="mt-3 flex gap-2">
-            <Button size="sm" variant="danger" loading={signOut.isPending} onClick={() => signOut.mutate()}>
-              Sign out
-            </Button>
-            <Button size="sm" onClick={() => setConfirming(false)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
+        </Banner>
       )}
     </li>
   )

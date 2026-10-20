@@ -7,7 +7,7 @@ import { updateSetting } from '@/api/settings'
 import { mmKeys, usePromptProvider, useSetPromptProvider } from '@/hooks/useModelManager'
 import { useSetupState } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
-import { Badge, Button, ErrorState, Skeleton } from '@/components/ui'
+import { Badge, Banner, Button, ErrorState, Skeleton } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
 import { cn } from '@/lib/utils'
 import ModelCard from './ModelCard'
@@ -141,12 +141,11 @@ export default function PromptProviderCard() {
           )}
 
           {warn && (
-            <p role="alert" className="flex items-start gap-2 rounded-control bg-danger-soft px-3 py-2 text-small text-text">
-              <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-danger" />
+            <Banner role="alert" tone="danger" icon={<AlertTriangle size={16} />}>
               {data.effective
                 ? `"${data.effective}" is not a known prompt provider, so voice turns will fail. Pick one below.`
                 : 'No prompt provider: the live model names none, so voice turns will fail until you pick one.'}
-            </p>
+            </Banner>
           )}
 
           {(editing || mustPick || warn) && (

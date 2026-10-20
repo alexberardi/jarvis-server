@@ -17,7 +17,7 @@ import { useHardware, useInstalled, useLabels, usePutLabels } from '@/hooks/useM
 import { errorMessage } from '@/lib/errors'
 import { labelDraftDiff } from './logic'
 import GpuFaultBanner from './GpuFaultBanner'
-import { Badge, Button, ErrorState, SkeletonList } from '@/components/ui'
+import { Badge, Banner, Button, ErrorState, SkeletonList } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
 import ModelCard from './ModelCard'
 import { stateBadge } from './tone'
@@ -281,12 +281,11 @@ function EngineLabelCard({
       </div>
 
       {mode === 'remote' && (
-        <div className="space-y-3 rounded-control bg-warning-soft p-3">
-          <p className="flex items-start gap-2 text-small text-text">
-            <Globe size={16} aria-hidden className="mt-0.5 shrink-0 text-warning" />
+        <div className="space-y-3">
+          <Banner tone="warning" icon={<Globe size={16} />}>
             Requests for this label leave this machine: prompts, conversation text
             {isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.
-          </p>
+          </Banner>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Base URL" htmlFor={id('remote_url')}>
               <input
@@ -620,10 +619,9 @@ export default function LabelsEditor({ labels: only }: { labels?: Label[] }) {
         <div className="space-y-4">
           <GpuFaultBanner fault={data.gpu_fault} />
           {(data.warnings ?? []).map((w) => (
-            <p key={w} className="flex items-start gap-2 rounded-control bg-warning-soft px-3 py-2 text-small text-text">
-              <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-warning" />
+            <Banner key={w} tone="warning" icon={<AlertTriangle size={16} />}>
               {w}
-            </p>
+            </Banner>
           ))}
           <div className="divide-y divide-border">
           {data.labels

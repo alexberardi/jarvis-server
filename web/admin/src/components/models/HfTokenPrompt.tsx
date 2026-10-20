@@ -3,7 +3,7 @@ import { KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { useHfTokenSet, useSetHfToken } from '@/hooks/useModelManager'
 import { errorMessage } from '@/lib/errors'
-import { Button, Input } from '@/components/ui'
+import { Banner, Button, Input } from '@/components/ui'
 
 /**
  * HfTokenPrompt stores `llm.hf_token` (a write-only secret) for gated repos. The Models page
@@ -35,15 +35,13 @@ export default function HfTokenPrompt({
     })
   }
 
-  return (
-    <div className={compact ? 'space-y-2' : 'space-y-2 rounded-card bg-warning-soft p-4'}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-subheading text-text">
-        <KeyRound size={16} aria-hidden className="text-warning" />
-        Hugging Face token
-        <span className="text-small font-normal text-text-muted">
-          {isSet ? '(set; enter a new one to replace it)' : '(not set)'}
-        </span>
-      </div>
+  const state = (
+    <span className="text-small font-normal text-text-muted">
+      {isSet ? '(set; enter a new one to replace it)' : '(not set)'}
+    </span>
+  )
+  const body = (
+    <div className="space-y-2">
       {reason && <p className="text-small text-text">{reason}</p>}
       <p className="text-small text-text-muted">
         Only needed for gated or private repos. Create a read token at huggingface.co → Settings → Access
@@ -84,6 +82,24 @@ export default function HfTokenPrompt({
           </Button>
         )}
       </form>
+    </div>
+  )
+
+  if (!compact) {
+    return (
+      <Banner tone="warning" icon={<KeyRound size={16} />} title={<>Hugging Face token {state}</>}>
+        {body}
+      </Banner>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-subheading text-text">
+        <KeyRound size={16} aria-hidden className="text-warning" />
+        Hugging Face token
+        {state}
+      </div>
+      {body}
     </div>
   )
 }

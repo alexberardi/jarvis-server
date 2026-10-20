@@ -5,7 +5,7 @@ import type { InstalledModel } from '@/api/llm'
 import { useDeleteModel, useInstalled } from '@/hooks/useModelManager'
 import { errorMessage, errorStatus } from '@/lib/errors'
 import { formatBytes } from '@/lib/format'
-import { Badge, Button, EmptyState, ErrorState, SkeletonList } from '@/components/ui'
+import { Badge, Banner, Button, EmptyState, ErrorState, SkeletonList } from '@/components/ui'
 import ModelCard from './ModelCard'
 import { stateBadge } from './tone'
 
@@ -31,30 +31,34 @@ function ConfirmDelete({
 }) {
   const { model, conflict } = pending
   return (
-    <div role="alertdialog" aria-label={`Delete ${model.id}`} className="mt-3 space-y-3 rounded-control bg-danger-soft p-3">
-      <p className="text-small text-text">
-        {conflict ? (
-          <>
-            <span className="font-medium">{conflict}.</span> Delete anyway? Those labels will have no model until you
-            assign another.
-          </>
-        ) : model.external ? (
-          <>Forget {model.id}? The file stays on disk (it was registered in place).</>
-        ) : (
-          <>
-            Delete {model.id} and its files ({formatBytes(model.bytes_done || model.size)})?
-          </>
-        )}
-      </p>
-      <div className="flex justify-end gap-2">
-        <Button size="sm" onClick={onCancel} disabled={busy}>
-          Keep it
-        </Button>
-        <Button size="sm" variant="danger" onClick={onConfirm} loading={busy}>
-          {conflict ? 'Delete and unassign' : 'Delete'}
-        </Button>
-      </div>
-    </div>
+    <Banner
+      tone="danger"
+      role="alertdialog"
+      aria-label={`Delete ${model.id}`}
+      className="mt-3"
+      icon={<Trash2 size={16} />}
+      actions={
+        <>
+          <Button size="sm" onClick={onCancel} disabled={busy}>
+            Keep it
+          </Button>
+          <Button size="sm" variant="danger" onClick={onConfirm} loading={busy}>
+            {conflict ? 'Delete and unassign' : 'Delete'}
+          </Button>
+        </>
+      }
+    >
+      {conflict ? (
+        <>
+          <span className="font-medium">{conflict}.</span> Delete anyway? Those labels will have no model until you
+          assign another.
+        </>
+      ) : model.external ? (
+        <>Forget {model.id}? The file stays on disk (it was registered in place).</>
+      ) : (
+        <>Delete {model.id} and its files ({formatBytes(model.bytes_done || model.size)})?</>
+      )}
+    </Banner>
   )
 }
 

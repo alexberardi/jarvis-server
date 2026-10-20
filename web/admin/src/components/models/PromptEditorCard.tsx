@@ -19,7 +19,7 @@ import {
 } from '@/hooks/usePrompt'
 import { errorMessage } from '@/lib/errors'
 import { promptTheme, promptVariables } from './promptEditor'
-import { Badge, Button, ErrorState, Skeleton } from '@/components/ui'
+import { Badge, Banner, Button, ErrorState, Skeleton } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
 import { cn } from '@/lib/utils'
 import ModelCard from './ModelCard'
@@ -253,10 +253,9 @@ export default function PromptEditorCard() {
           </div>
 
           {data.fallback && (
-            <p role="alert" className="flex items-start gap-2 rounded-control bg-warning-soft px-3 py-2 text-small text-text">
-              <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-warning" />
+            <Banner role="alert" tone="warning" icon={<AlertTriangle size={16} />}>
               {data.fallback}
-            </p>
+            </Banner>
           )}
 
           <CodeEditor value={draft} onChange={edit} variables={data.variables} />
@@ -283,9 +282,9 @@ export default function PromptEditorCard() {
           </div>
 
           {save.error && (
-            <p role="alert" className="rounded-control bg-danger-soft px-3 py-2 text-small text-text">
+            <Banner role="alert" tone="danger" icon={<AlertTriangle size={16} />}>
               {errorMessage(save.error, 'Could not save the prompt')}
-            </p>
+            </Banner>
           )}
 
           <div className="flex flex-wrap items-center gap-2">

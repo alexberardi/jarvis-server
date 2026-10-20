@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ListChecks, X } from 'lucide-react'
+import { Filter, ListChecks, X } from 'lucide-react'
 import CatalogList from '@/components/models/CatalogList'
 import HardwarePanel from '@/components/models/HardwarePanel'
 import HfBrowser from '@/components/models/HfBrowser'
@@ -11,7 +11,7 @@ import LabelsEditor from '@/components/models/LabelsEditor'
 import PromptProviderCard from '@/components/models/PromptProviderCard'
 import PromptEditorCard from '@/components/models/PromptEditorCard'
 import ModelCard from '@/components/models/ModelCard'
-import { Button, PageHeader, Tabs } from '@/components/ui'
+import { Banner, Button, PageHeader, Tabs } from '@/components/ui'
 import JobChecklist from '@/components/setup/JobChecklist'
 import { jobDef, underWay } from '@/components/setup/jobs'
 import { useSetupState } from '@/hooks/useSetup'
@@ -96,14 +96,17 @@ export default function ModelsPage() {
                 <div className="space-y-4">
                   <div ref={catalogRef} className="scroll-mt-4 space-y-3">
                     {filter && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-primary-soft px-3 py-2 text-small text-text">
-                        <span>
-                          Showing models for <strong>{filter.title}</strong>
-                        </span>
-                        <Button size="sm" variant="ghost" icon={<X size={14} aria-hidden />} onClick={() => showJob(null)}>
-                          Show all
-                        </Button>
-                      </div>
+                      <Banner
+                        tone="primary"
+                        icon={<Filter size={16} />}
+                        actions={
+                          <Button size="sm" variant="ghost" icon={<X size={14} aria-hidden />} onClick={() => showJob(null)}>
+                            Show all
+                          </Button>
+                        }
+                      >
+                        Showing models for <strong>{filter.title}</strong>
+                      </Banner>
                     )}
                     <CatalogList onNeedsToken={setTokenReason} kinds={filter ? [filter.kind] : undefined} />
                   </div>
