@@ -7,8 +7,10 @@ import { updateSetting } from '@/api/settings'
 import { mmKeys, usePromptProvider, useSetPromptProvider } from '@/hooks/useModelManager'
 import { useSetupState } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
-import { buttonClass, inputClass } from './styles'
-import { Pill, Section } from './ui'
+import { Badge, Button, ErrorState, Skeleton } from '@/components/ui'
+import { fieldControl } from '@/components/ui/fieldStyles'
+import { cn } from '@/lib/utils'
+import ModelCard from './ModelCard'
 
 const SOURCE_TEXT: Record<string, string> = {
   model: 'from model',
@@ -41,23 +43,23 @@ function ModeRow({ id, label, mode, options }: { id: string; label: string; mode
   const setByYou = mode.value !== 'auto'
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label htmlFor={`llm-${id}`} className="w-32 text-sm text-[var(--color-text-muted)]">
+    <div className="flex flex-wrap items-center gap-2 py-3 first:pt-0 last:pb-0">
+      <label htmlFor={`llm-${id}`} className="w-32 text-small font-medium text-text">
         {label}
       </label>
-      <code className="text-sm text-[var(--color-text)]">{mode.effective}</code>
-      <Pill>{detected ?? `detected: ${mode.detected}`}</Pill>
+      <code className="font-mono text-small text-text">{mode.effective}</code>
+      <Badge>{detected ?? `detected: ${mode.detected}`}</Badge>
       {setByYou ? (
-        <Pill tone="info">set by you</Pill>
+        <Badge tone="primary">set by you</Badge>
       ) : (
-        <span className="text-xs text-[var(--color-text-muted)]">households' prompts may set their own</span>
+        <span className="text-small text-text-muted">households' prompts may set their own</span>
       )}
       <select
         id={`llm-${id}`}
         value={mode.value}
         disabled={set.isPending}
         onChange={(e) => set.mutate(e.target.value)}
-        className={`${inputClass} ml-auto w-auto max-w-xs`}
+        className={cn(fieldControl, 'w-full sm:ml-auto sm:w-auto sm:max-w-xs')}
       >
         <option value="auto">auto ({mode.detected || 'not detected'})</option>
         {options.map((o) => (
@@ -75,7 +77,7 @@ function ModeRow({ id, label, mode, options }: { id: string; label: string; mode
  * provider and where it comes from, an override, and a pick-list when the model names none.
  */
 export default function PromptProviderCard() {
-  const { data, isLoading, isError, error } = usePromptProvider()
+  const { data, isLoading, isError, error, refetch } = usePromptProvider()
   const set = useSetPromptProvider()
   const setup = useSetupState()
   const [editing, setEditing] = useState(false)
@@ -103,32 +105,44 @@ export default function PromptProviderCard() {
   const warn = Boolean(data && !data.valid && !(awaitingModel && unset))
 
   return (
-    <Section
+    <ModelCard
       title="Prompt and model behaviour"
       icon={MessageSquareCode}
       description="The default prompt for households without their own, and how the live model calls tools and thinks."
     >
-      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the prompt provider')}</p>}
+      {isLoading && (
+        <div role="status" aria-label="Loading the prompt provider" className="space-y-2">
+          <Skeleton className="w-1/3" />
+          <Skeleton className="w-2/3" />
+        </div>
+      )}
+      {isError && (
+        <ErrorState
+          className="py-6"
+          title="Couldn't read the prompt provider"
+          message={errorMessage(error, 'The server did not answer.')}
+          onRetry={() => refetch()}
+        />
+      )}
       {data && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <code className="text-sm text-[var(--color-text)]">{data.effective || '(none)'}</code>
-            {data.source && <Pill tone={data.source === 'setting' ? 'info' : 'muted'}>{SOURCE_TEXT[data.source] ?? data.source}</Pill>}
+            <code className="font-mono text-body text-text">{data.effective || '(none)'}</code>
+            {data.source && <Badge tone={data.source === 'setting' ? 'primary' : 'neutral'}>{SOURCE_TEXT[data.source] ?? data.source}</Badge>}
             {data.source === 'setting' && data.derived && data.derived !== data.value && (
-              <span className="text-xs text-[var(--color-text-muted)]">(the model says {data.derived})</span>
+              <span className="text-small text-text-muted">(the model says {data.derived})</span>
             )}
           </div>
 
           {awaitingModel && unset && (
-            <p className="text-xs text-[var(--color-text-muted)]">
+            <p className="text-small text-text-muted">
               It comes from the live model once one is assigned; catalog models name theirs.
             </p>
           )}
 
           {warn && (
-            <p role="alert" className="flex items-start gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <p role="alert" className="flex items-start gap-2 rounded-control bg-danger-soft px-3 py-2 text-small text-text">
+              <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-danger" />
               {data.effective
                 ? `"${data.effective}" is not a known prompt provider, so voice turns will fail. Pick one below.`
                 : 'No prompt provider: the live model names none, so voice turns will fail until you pick one.'}
@@ -145,7 +159,7 @@ export default function PromptProviderCard() {
                   id="prompt-provider"
                   value={choice || data.value || ''}
                   onChange={(e) => setChoice(e.target.value)}
-                  className={`${inputClass} max-w-xs`}
+                  className={cn(fieldControl, 'max-w-xs')}
                 >
                   <option value="" disabled>
                     Choose…
@@ -161,44 +175,40 @@ export default function PromptProviderCard() {
                   id="prompt-provider"
                   value={choice}
                   onChange={(e) => setChoice(e.target.value)}
-                  className={`${inputClass} max-w-xs`}
+                  className={cn(fieldControl, 'max-w-xs')}
                 />
               )}
-              <button
-                type="button"
-                className={buttonClass.primary}
-                disabled={set.isPending || !(choice || data.value)}
+              <Button
+                variant="primary"
+                disabled={!(choice || data.value)}
+                loading={set.isPending}
                 onClick={() => save(choice || data.value)}
               >
                 Use this
-              </button>
-              {editing && (
-                <button type="button" className={buttonClass.secondary} onClick={() => setEditing(false)}>
-                  Cancel
-                </button>
-              )}
+              </Button>
+              {editing && <Button onClick={() => setEditing(false)}>Cancel</Button>}
             </div>
           )}
 
           <div className="flex flex-wrap gap-2">
             {!editing && !mustPick && (data.valid || (awaitingModel && unset)) && (
-              <button type="button" className={buttonClass.secondary} onClick={() => setEditing(true)}>
+              <Button size="sm" onClick={() => setEditing(true)}>
                 Override
-              </button>
+              </Button>
             )}
             {data.source === 'setting' && (
-              <button type="button" className={buttonClass.secondary} disabled={set.isPending} onClick={() => save('')}>
+              <Button size="sm" disabled={set.isPending} onClick={() => save('')}>
                 {data.derived ? `Use the model's (${data.derived})` : 'Clear override'}
-              </button>
+              </Button>
             )}
           </div>
 
-          <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
+          <div className="divide-y divide-border border-t border-border pt-3">
             <ModeRow id="tool_calling" label="Tool calling" mode={data.tool_calling} options={['native', 'text']} />
             <ModeRow id="thinking_switch" label="Thinking switch" mode={data.thinking_switch} options={['suffix', 'none']} />
           </div>
         </div>
       )}
-    </Section>
+    </ModelCard>
   )
 }
