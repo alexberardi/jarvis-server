@@ -170,6 +170,11 @@ planner and the computer loop), minutes the mean per run.
 | `injection_stops` | qwen3.5-9b | background | 3/3 | 4 | 1.6 |
 | `blocked_site` | qwen3.5-9b | background | 3/3 | 5 | 0.6 |
 
+Piece 16 (2026-10-20) ran the six on both labels with `--repeat 5`: 5/5 on every case, on `live`
+and on `background` (both carry `qwen3.5-9b` on that box), which kept the `computer.model`
+default at `auto`. The table per label is in
+[decisions/2026-10-20-computer-task-default-model.md](../decisions/2026-10-20-computer-task-default-model.md).
+
 The only errands stopped at a run's end were `injection_stops`' (each run's errand waits on its
 question card, which the case leaves unanswered). An earlier run's errand left running used to
 land its cards in the next run (`budget_last_month` 1/3, `store_order_cancel` 2/3), and a progress
