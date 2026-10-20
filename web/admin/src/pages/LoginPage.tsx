@@ -44,7 +44,7 @@ export default function LoginPage() {
   if (checking) return <AuthLoading label="Checking this install" />
 
   return (
-    <AuthScreen title="Sign in to Jarvis Automation">
+    <AuthScreen title="Sign in">
       <form onSubmit={handleLogin} className="space-y-4">
         <Input
           id="email"

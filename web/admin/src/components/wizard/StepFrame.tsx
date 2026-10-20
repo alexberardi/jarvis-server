@@ -21,14 +21,16 @@ export function StepHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 flex-1 basis-64">
-        <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-title text-text">
+        <h2 className="flex items-start gap-2 text-title text-balance text-text">
           {icon && (
-            <span aria-hidden className="flex text-text-muted">
+            <span aria-hidden className="flex h-[1.25em] shrink-0 items-center text-text-muted">
               {icon}
             </span>
           )}
-          {title}
-          {badge}
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            {title}
+            {badge}
+          </span>
         </h2>
         {children && <p className="mt-1.5 max-w-prose text-body text-pretty text-text-muted">{children}</p>}
       </div>
