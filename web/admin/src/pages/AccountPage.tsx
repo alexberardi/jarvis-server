@@ -62,7 +62,7 @@ export default function AccountPage() {
               placeholder={user.username ?? ''}
               onChange={(e) => setDraft(e.target.value)}
             />
-            <Button type="submit" variant="primary" loading={saving} disabled={unchanged} className="sm:mt-7">
+            <Button type="submit" variant="primary" loading={saving} disabled={unchanged} className="sm:mt-6.25">
               Save
             </Button>
           </form>
