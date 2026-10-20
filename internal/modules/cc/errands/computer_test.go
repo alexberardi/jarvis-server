@@ -21,11 +21,12 @@ import (
 
 // fakeComputer is the agent's computer_observe / computer_act / computer_stop.
 type fakeComputer struct {
-	mu      sync.Mutex
-	url     string
-	els     []computer.Element
-	batches []computer.Batch
-	stops   []string
+	mu       sync.Mutex
+	observes []computer.Observe
+	url      string
+	els      []computer.Element
+	batches  []computer.Batch
+	stops    []string
 	// onAct, when set, runs before each batch is answered (after the batches so far are counted).
 	onAct func(n int)
 	// downloads are in Downloads once a batch ran.
@@ -37,6 +38,7 @@ type fakeComputer struct {
 func (f *fakeComputer) Observe(_ context.Context, o computer.Observe) (computer.Observation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.observes = append(f.observes, o)
 	return computer.Observation{URL: f.url, Title: "Shop", Elements: f.els}, nil
 }
 
@@ -872,6 +874,39 @@ func TestStartURL(t *testing.T) {
 		if got := startURL(c.site, c.goal, c.errand); got != c.want {
 			t.Errorf("startURL(%q, %q, %q) = %q, want %q", c.site, c.goal, c.errand, got, c.want)
 		}
+	}
+}
+
+// The handler opens a browser task at the web address the user gave: the step's site is only the
+// host, the address is in the goal.
+func TestComputerTaskStartsAtTheGoalsAddress(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Order a mug", step(policy.ToolComputerTask, "Order it",
+		`{"goal": "order a blue mug from http://127.0.0.1:9/store/", "target": "browser", "site": "127.0.0.1:9"}`)))
+	c.llm.say("computer", doneReply)
+	c.draft("order me a blue mug from http://127.0.0.1:9/store/", ptr(7), []MenuEntry{computerEntry()})
+	c.idle()
+	c.comp.mu.Lock()
+	defer c.comp.mu.Unlock()
+	if len(c.comp.observes) == 0 || c.comp.observes[0].StartURL != "http://127.0.0.1:9/store/" ||
+		c.comp.observes[0].Target.Site != "127.0.0.1:9" {
+		t.Fatalf("observes %+v", c.comp.observes)
+	}
+}
+
+// The replan after the downloads that reads them and writes the spreadsheet stops at a
+// checkpoint in the spreadsheet's place, for what the reads find.
+func TestReplanSpreadsheetAfterReadIsACheckpoint(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("replan", planJSON("Read them",
+		step(cmdReadFile, "Read the bank's", `{"path": "~/Downloads/bank-statement-2026-09.csv"}`),
+		step(cmdReadFile, "Read the card's", `{"path": "~/Downloads/card-statement-2026-09.csv"}`),
+		step(cmdWriteSheet, "Write the budget", `{"name": "Budget"}`)))
+	menu := []MenuEntry{computerEntry(), {Command: cmdReadFile, Description: "read"}, {Command: cmdWriteSheet, Description: "sheet"}}
+	p, err := c.s.ReplanFromProgress(context.Background(), "do my budget", nil, nil, "read the downloads", menu)
+	if err != nil || len(p.Steps) != 3 || p.Steps[0].Command != cmdReadFile || p.Steps[1].Command != cmdReadFile ||
+		p.Steps[2].Command != cmdReplan {
+		t.Fatalf("plan = %+v %v", p, err)
 	}
 }
 
