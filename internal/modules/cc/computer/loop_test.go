@@ -868,10 +868,14 @@ func TestDoneOnUnsentFormAsksOnce(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 
-	// Only once: a second done after filling stands (the task may say not to send it).
+	// Twice, the second time with the action written out; a third done stands (the task may
+	// say not to send it).
 	e = newEnv(t, formPage())
-	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm, doneForm)
-	if out := e.loop.Run(context.Background(), task()); out.State != StateDone || len(e.llm.reqs) != 3 {
+	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm, doneForm, doneForm)
+	if out := e.loop.Run(context.Background(), task()); out.State != StateDone || len(e.llm.reqs) != 4 {
 		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
+	}
+	if txt := userText(e.llm.reqs[3]); !strings.Contains(txt, `{"actions": [{"kind": "press", "ref": "e3", "intent": "Send the form"}]}`) {
+		t.Fatalf("second nudge:\n%s", txt)
 	}
 }

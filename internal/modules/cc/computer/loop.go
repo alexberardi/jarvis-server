@@ -228,8 +228,9 @@ type round struct {
 	// done can name the ones the task downloaded.
 	downloadsBefore map[string]bool
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
-	// sendAsked: a done over a filled-in form that wasn't sent was sent back.
-	checkoutAsked, sendAsked bool
+	checkoutAsked bool
+	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
+	sendAsked int
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -429,11 +430,16 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	r.feedback = ""
 	switch {
 	case reply.Done:
-		if btn := unsentForm(r.run.History, obs); btn != nil && !r.sendAsked {
-			// The house model fills a form in and says done without sending it.
-			r.sendAsked = true
+		if btn := unsentForm(r.run.History, obs); btn != nil && r.sendAsked < 2 {
+			// The house model fills a form in and says done without sending it, and may say
+			// it again after the first nudge: the second one writes the action out.
+			r.sendAsked++
 			r.feedback = fmt.Sprintf(`you said done, but the form isn't sent: press %q (%s) to send it, unless the task says not to`,
 				btn.Name, btn.Ref)
+			if r.sendAsked == 2 {
+				r.feedback = fmt.Sprintf(`you said done again, but the form still isn't sent. Unless the task says not to send it, answer exactly {"actions": [{"kind": "press", "ref": %q, "intent": "Send the form"}]}`,
+					btn.Ref)
+			}
 			return Outcome{}, false
 		}
 		return l.done(ctx, r, reply, obs)
