@@ -163,7 +163,7 @@ func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
 	}
 	voiced := sc.Voice || d.Voice || d.VoiceName != ""
 	for _, turn := range sc.Turns {
-		tl := d.turn(ctx, out.ConversationID, nodeNames, turn.Say, voiced, voice, speaker, func(name string) any { return sc.resultFor(turn, name) })
+		tl := d.turn(ctx, out.ConversationID, nodeNames, turn.Say, turn.wire(), voiced, voice, speaker, func(name string) any { return sc.resultFor(turn, name) })
 		tl.Failures = turn.Expect.Check(tl)
 		if len(tl.Failures) > 0 {
 			out.Pass = false
@@ -178,7 +178,7 @@ func (d *Driver) run(ctx context.Context, sc Scenario) (out ScenarioLog) {
 
 // turn sends one utterance and answers tool calls until command-center is done. A voiced turn
 // sends what STT heard of it instead.
-func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, voiced bool, voice string, speaker int64, result func(string) any) (tl TurnLog) {
+func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say string, extra map[string]any, voiced bool, voice string, speaker int64, result func(string) any) (tl TurnLog) {
 	tl.Say = say
 	mark := tapSize(d.TapLog)
 	start := time.Now()
@@ -201,7 +201,7 @@ func (d *Driver) turn(ctx context.Context, cid string, nodeNames []string, say s
 		}
 		text = v.Heard
 	}
-	resp, err := d.Node.Command(ctx, cid, text, speaker)
+	resp, err := d.Node.Command(ctx, cid, text, speaker, extra)
 	for i := 0; err == nil && resp.StopReason == "tool_calls" && len(resp.ToolCalls) > 0; i++ {
 		if i == maxContinues {
 			err = fmt.Errorf("still calling tools after %d round-trips", maxContinues)

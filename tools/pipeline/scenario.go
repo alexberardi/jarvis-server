@@ -67,9 +67,32 @@ type Scenario struct {
 }
 
 type Turn struct {
-	Say     string         `json:"say"`
-	Results map[string]any `json:"results,omitempty"`
-	Expect  Expect         `json:"expect"`
+	Say string `json:"say"`
+	// Source is the turn's turn_source: "" sends none (a typed turn), "wake" a woken command,
+	// "follow_up" an answer in the follow-up window (the follow-up gate runs on it).
+	Source string `json:"source,omitempty"`
+	// ComputerActivity is what the desktop agent says Jarvis is doing with its computer as the
+	// turn is sent (computer_activity, #288): {"kind": "recording", "task": "Watching what you
+	// do"}, with "stopped": true when the agent stopped it itself on this command.
+	ComputerActivity map[string]any `json:"computer_activity,omitempty"`
+	Results          map[string]any `json:"results,omitempty"`
+	Expect           Expect         `json:"expect"`
+}
+
+// wire is the turn's extra /voice/command fields.
+func (t Turn) wire() map[string]any {
+	b := map[string]any{}
+	switch t.Source {
+	case "":
+	case "follow_up":
+		b["turn_source"], b["follow_up_iteration"] = t.Source, 1
+	default:
+		b["turn_source"] = t.Source
+	}
+	if t.ComputerActivity != nil {
+		b["computer_activity"] = t.ComputerActivity
+	}
+	return b
 }
 
 // Expect is checked against one turn. Every set field must hold.
@@ -204,6 +227,9 @@ func (s Scenario) validate() error {
 			if _, err := regexp.Compile(re); err != nil {
 				return fmt.Errorf("turn %d: %s: %w", i+1, k, err)
 			}
+		}
+		if t.Source != "" && t.Source != "wake" && t.Source != "follow_up" {
+			return fmt.Errorf("turn %d: source %q is not wake or follow_up", i+1, t.Source)
 		}
 		e := t.Expect
 		if (len(e.Args) > 0 || len(e.ArgsMatch) > 0 || len(e.ResultMatch) > 0 || len(e.NotResultMatch) > 0) &&

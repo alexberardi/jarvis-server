@@ -67,6 +67,9 @@ type turnInput struct {
 	Images []chatImage
 	// SameDevice: a web chat typed on the computer whose agent is this node (sameDeviceHint).
 	SameDevice bool
+	// Computer is what a desktop agent says Jarvis is doing with its computer
+	// (computer_activity, computer_activity.go); nil when idle or not sent.
+	Computer *computerActivity
 }
 
 // photoOnly: a chat message of photos and no words. Nothing was asked, so the model describes
@@ -135,6 +138,9 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		return turnOutcome{res: engineResult{Stop: stopNotForMe}, conv: conv}, nil
 	}
 
+	conv.computer = in.Computer
+	stopAsked := in.Computer.stopAsked(in.VoiceCommand) // never dropped as not for Jarvis (#288)
+
 	var st turnState
 	if m.resolveWakeVerified(ctx, conv, in, &st) {
 		return turnOutcome{res: engineResult{Stop: stopNotForMe}, conv: conv}, nil
@@ -143,7 +149,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 
 	// The follow-up gate (followup_gate.go): a different voice from across the room is
 	// dropped here; weaker evidence becomes a hint for the model.
-	gate := in.Source == "follow_up" && m.followUpGateOn(ctx, conv.householdID, conv.nodeID)
+	gate := in.Source == "follow_up" && !stopAsked && m.followUpGateOn(ctx, conv.householdID, conv.nodeID)
 	var ev gateEvidence
 	if gate {
 		ev = m.followUpEvidence(ctx, conv, in)
@@ -188,6 +194,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		m.desktopAppHint(conv, in.VoiceCommand),
 		sameDeviceHint(conv, in),
 		m.computerControlHint(ctx, conv, in.VoiceCommand),
+		computerActivityHint(in.Computer, in.VoiceCommand),
 	}
 	if in.photoOnly() {
 		hints = append(hints, prompts.PhotoOnlyHint)
@@ -217,9 +224,10 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	endLoop := tr.measure("tool_execution_loop", "cc", nil)
 	res, out := m.runEngine(ctx, engineInput{
 		conv: conv, msgs: msgs, maxIter: maxIter, utterance: in.VoiceCommand, voiceCommand: in.VoiceCommand, dateKeys: keys,
-		doubleCheck: doubleCheckSentinel(in, st) && !ev.doubted(), doubleCheckMsg: doubleCheckFor(in),
-		turn:    m.toolTurn(conv, in.VoiceCommand),
-		noForce: in.photoOnly(),
+		doubleCheck: doubleCheckSentinel(in, st) && !ev.doubted() && !stopAsked, doubleCheckMsg: doubleCheckFor(in),
+		turn:     m.toolTurn(conv, in.VoiceCommand),
+		noForce:  in.photoOnly(),
+		mustCall: mustStopRecording(conv, in.VoiceCommand),
 	})
 	if res.Stop == stopError {
 		endLoop(errors.New(res.Err))
@@ -240,6 +248,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 			"transcript", in.VoiceCommand)
 		res = engineResult{Stop: stopNotForMe}
 	}
+	res, out = m.afterComputerTurn(ctx, conv, in.VoiceCommand, res, out)
 	if gate && res.Stop == stopNotForMe {
 		// A rejected follow-up leaves no trace: not committed, not counted, not transcribed.
 		res.KeepListening = m.ignoreFollowUp(ctx, conv)
@@ -316,6 +325,7 @@ func (m *Module) toolTurn(conv *conversation, utterance string) servertools.Turn
 		Utterance: utterance, Agents: conv.agents, MemberIDs: conv.memberIDs,
 		Speaker: servertools.Speaker{UserID: conv.speakerID, Name: conv.speakerName, RecognitionOff: conv.recognitionOff,
 			SignedOutComputer: conv.signedOutComputer()},
+		ComputerStopped: conv.computer.stoppedHere(),
 	}
 }
 

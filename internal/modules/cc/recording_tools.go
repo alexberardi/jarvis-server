@@ -114,7 +114,7 @@ func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call,
 	id, _ := out["recording_id"].(string)
 	if task := strings.TrimSpace(argText(call, "task")); task != "" && !recordingPhrases[compactName(task)] && id != "" {
 		m.recordingTasks.Store(id, task)
-		m.recordingNamed.Store(nodeID, id)
+		m.recordingNamed.Store(nodeID, namedRecording{id: id, task: task})
 	} else {
 		m.recordingNamed.Delete(nodeID)
 	}
@@ -146,6 +146,9 @@ func (t *stopRecordingTool) Execute(ctx context.Context, call servertools.Call, 
 	}
 	nodeID := p.target.row.nodeID
 	name := strings.TrimSpace(argText(call, "name"))
+	if turn.ComputerStopped == "recording" && nodeID == turn.NodeID {
+		return m.recordingStoppedHere(nodeID, name), nil
+	}
 	if name == "" {
 		if _, named := m.recordingNamed.Load(nodeID); !named {
 			return recordingRefusal("need_name", "What should I call this macro? The recording keeps going until you tell me."), nil
@@ -174,6 +177,24 @@ func (t *stopRecordingTool) Execute(ctx context.Context, call servertools.Call, 
 	}
 	return servertools.Obj("status", "saved", "recording_id", rec.ID, "steps", rec.Steps, "message",
 		fmt.Sprintf("Got it: I saved %s (%d steps). I'll learn it as a workflow.", saved, rec.Steps)), nil
+}
+
+// namedRecording is a recording a voice start_recording named (Module.recordingNamed).
+type namedRecording struct{ id, task string }
+
+// recordingStoppedHere is stop_recording's answer when the agent already stopped the recording
+// on this command (a voice stop phrase, #288). Asking it again would say not_recording, and it
+// is uploading the trace itself (handleUploadRecording names it from recordingTasks), so nothing
+// is asked of it, nor a name: the recording is saved.
+func (m *Module) recordingStoppedHere(nodeID, name string) *pyjson.Object {
+	if v, ok := m.recordingNamed.LoadAndDelete(nodeID); ok && name == "" {
+		name = v.(namedRecording).task
+	}
+	saved := "what you showed me"
+	if name != "" {
+		saved = `"` + name + `"`
+	}
+	return servertools.Obj("status", "saved", "message", fmt.Sprintf("Got it: I stopped recording and saved %s. I'll learn it as a workflow.", saved))
 }
 
 // agentCode is a failed agent output's error_code (dflt when it has none).

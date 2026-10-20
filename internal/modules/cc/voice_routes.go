@@ -66,6 +66,9 @@ func parseTurn(w http.ResponseWriter, r *http.Request) (turnInput, bool) {
 	if v, ok := b.number("level_vs_wake_db"); ok {
 		in.LevelVsWake = &v
 	}
+	if v, ok := b.object("computer_activity", false); ok {
+		in.Computer = parseComputerActivity(v)
+	}
 	if !b.done(w) {
 		return turnInput{}, false
 	}

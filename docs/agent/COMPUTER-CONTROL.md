@@ -128,6 +128,14 @@ password the model can see.
   by hotkey. On macOS (`computer.Guard`): HID activity outside our own injection windows
   (+250 ms), or the pointer > 3 px from where our last action left it, polled every 100 ms,
   pauses the task; ⌃⌥⎋ (Carbon hotkey, named in the tray tooltip) stops it.
+- **Voice stop (#288):** a stop phrase (`computeruse.IsStopPhrase`: "stop", "stop recording",
+  "I'm done", "that's it", "done", …; the whole command) ends a running task or recording on the
+  agent at once, in a wake turn or a follow-up, and the turn still goes to jarvisd with
+  `computer_activity` (`{kind, task, stopped}`, sent with every voice turn). While it says
+  recording, the prompt says so, a stop phrase is never dropped as not for Jarvis and ends with
+  `stop_recording` (jarvisd calls it if the model doesn't), and no reply may claim a stop that
+  didn't run. The island shows the task as a coloured dot beside any voice state
+  ([decision](../decisions/2026-10-19-voice-stop-recording.md)).
 - **Audit:** every action (intent, target, result) in `cc_autonomy_events`; screenshots kept
   locally with a retention setting.
 

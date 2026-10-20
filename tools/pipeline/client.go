@@ -147,10 +147,14 @@ func (n *Node) Start(ctx context.Context, cid, timezone string, tools []json.Raw
 }
 
 // Command sends one utterance (what STT would have produced). speaker, when not 0, is sent as
-// speaker_user_id: a sandbox with JARVIS_DEV_SPEAKER_HINTS=1 takes it as the voice match.
-func (n *Node) Command(ctx context.Context, cid, text string, speaker int64) (TurnResponse, error) {
+// speaker_user_id: a sandbox with JARVIS_DEV_SPEAKER_HINTS=1 takes it as the voice match. extra
+// are more request fields (turn_source, computer_activity).
+func (n *Node) Command(ctx context.Context, cid, text string, speaker int64, extra map[string]any) (TurnResponse, error) {
 	var r TurnResponse
 	body := map[string]any{"voice_command": text, "conversation_id": cid}
+	for k, v := range extra {
+		body[k] = v
+	}
 	if speaker != 0 {
 		body["speaker_user_id"] = speaker
 	}
