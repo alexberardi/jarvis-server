@@ -11,8 +11,9 @@ import (
 )
 
 // cdpPipe is the Chrome DevTools Protocol over --remote-debugging-pipe: JSON messages, each
-// ended by a NUL byte, written to the browser's fd 3 and read from its fd 4. Only browser-level
-// commands (no target sessions); events are dropped.
+// ended by a NUL byte, written to the browser's fd 3 and read from its fd 4. Browser-level
+// commands, and a page's through its flat session (Target.attachToTarget, flatten); events are
+// dropped.
 type cdpPipe struct {
 	w       io.WriteCloser
 	mu      sync.Mutex
@@ -56,8 +57,14 @@ func newCDP(w io.WriteCloser, r io.ReadCloser) *cdpPipe {
 	return c
 }
 
-// Call sends one command and waits for its answer.
+// Call sends one browser-level command and waits for its answer.
 func (c *cdpPipe) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	return c.CallSession(ctx, "", method, params)
+}
+
+// CallSession sends one command to a target's session ("" for the browser) and waits for its
+// answer.
+func (c *cdpPipe) CallSession(ctx context.Context, session, method string, params any) (json.RawMessage, error) {
 	c.mu.Lock()
 	c.next++
 	id := c.next
@@ -67,6 +74,9 @@ func (c *cdpPipe) Call(ctx context.Context, method string, params any) (json.Raw
 	msg := map[string]any{"id": id, "method": method}
 	if params != nil {
 		msg["params"] = params
+	}
+	if session != "" {
+		msg["sessionId"] = session
 	}
 	b, _ := json.Marshal(msg)
 	if _, err := c.w.Write(append(b, 0)); err != nil {

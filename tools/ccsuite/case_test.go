@@ -41,6 +41,12 @@ func TestCasesParse(t *testing.T) {
 	if !slices.Equal(names, want) {
 		t.Errorf("cases %v, want %v", names, want)
 	}
+	// The teach cases replay what the suite demonstrated.
+	for _, c := range cases {
+		if c.Phase == "teach" && c.Setup.Demonstrate != "bank_download" {
+			t.Errorf("%s: setup.demonstrate %q, want bank_download", c.Name, c.Setup.Demonstrate)
+		}
+	}
 }
 
 func TestCaseMessage(t *testing.T) {
@@ -68,6 +74,10 @@ func TestCasesRejected(t *testing.T) {
 		"bad phase":      {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `"browser", "status"`, `"web", "status"`, 1), `phase "web"`},
 		"bad login site": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]`, `["shop"]`, 1), `setup.login "shop"`},
 		"bad block site": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]}`, `["store"], "block": ["http://x/"]}`, 1), `setup.block "http://x/"`},
+		"bad demonstration": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]}`, `["store"], "demonstrate": "bank_upload"}`, 1),
+			`setup.demonstrate "bank_upload": one of bank_download`},
+		"demonstration on the desktop": {"x", strings.Replace(strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1),
+			`["store"]}`, `["store"], "demonstrate": "bank_download"}`, 1), `"target": "browser"`, `"target": "desktop"`, 1), "needs target browser"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

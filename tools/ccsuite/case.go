@@ -43,6 +43,11 @@ type Setup struct {
 	// Block lists the sites (hosts, e.g. 127.0.0.1) the household blocks for computer tasks
 	// during the case: a household rule of cc's (policy.Rule, effect block) per site.
 	Block []string `json:"block,omitempty"`
+	// Demonstrate names a scripted demonstration (teach.go demonstrations, e.g. bank_download)
+	// the suite plays in the browser while the agent records it, before Say: jarvisd learns a
+	// workflow from it, which the suite saves as-is. The fixtures are reset afterwards, and a
+	// layout moved is then every page's (the site changed since it was taught).
+	Demonstrate string `json:"demonstrate,omitempty"`
 }
 
 // Answer says how to answer a card that asks: when is the card's kind (confirm: a card with
@@ -121,6 +126,14 @@ func (c *Case) Validate() error {
 		return fmt.Errorf("setup.layout %q: default or moved", c.Setup.Layout)
 	case !oneOf(c.Setup.NotesLayout, "", "default", "moved"):
 		return fmt.Errorf("setup.notes_layout %q: default or moved", c.Setup.NotesLayout)
+	}
+	if d := c.Setup.Demonstrate; d != "" {
+		if _, ok := demonstrations[d]; !ok {
+			return fmt.Errorf("setup.demonstrate %q: one of %s", d, strings.Join(demonstrationNames(), ", "))
+		}
+		if c.Target != "browser" {
+			return errors.New("setup.demonstrate needs target browser")
+		}
 	}
 	for _, s := range c.Setup.Login {
 		if !oneOf(s, loginSites...) {

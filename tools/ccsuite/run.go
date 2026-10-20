@@ -210,6 +210,46 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	if err := e.Login(cctx, c.Setup.Login); err != nil {
 		return fail("login: " + err.Error())
 	}
+	if c.Setup.Demonstrate != "" {
+		tc, err := e.teacher()
+		if err != nil {
+			return fail("demonstrate: " + err.Error())
+		}
+		var t taught
+		defer func() {
+			if err := tc.forget(context.WithoutCancel(ctx), t); err != nil {
+				fmt.Fprintf(e.Log, "ccsuite: %s run %d: forgetting the demonstration: %v\n", c.Name, i, err)
+			}
+		}()
+		// Its model calls (the learn job's) and the saved workflow, apart from the case's own.
+		demoLog := e.Sbx["SBX_LLM_LOG"]
+		demoOffset := fileSize(demoLog)
+		err = tc.Demonstrate(cctx, c.Setup.Demonstrate, &t)
+		copyLines(demoLog, demoOffset, filepath.Join(dir, "demonstrate.jsonl"))
+		if t.Saved != nil {
+			b, _ := json.MarshalIndent(t.Saved, "", "  ")
+			os.WriteFile(filepath.Join(dir, "taught.json"), b, 0o644)
+		}
+		if err != nil {
+			return fail("demonstrate: " + err.Error())
+		}
+		e.logf("%s run %d: demonstrated %s, workflow %s saved", c.Name, i, c.Setup.Demonstrate, t.Workflow)
+		// The case's checks see only the replay: the demonstration's download goes.
+		if err := e.reset(cctx); err != nil {
+			return fail("reset: " + err.Error())
+		}
+		if err := e.Login(cctx, c.Setup.Login); err != nil {
+			return fail("login: " + err.Error())
+		}
+		// The site moved its buttons since: setup.layout is every page's now, not only
+		// ?layout=moved's (the taught steps open the site's own addresses).
+		if c.Setup.Layout == "moved" {
+			req, _ := http.NewRequestWithContext(cctx, "POST", e.Sites+"/control/layout?layout=moved", nil)
+			if err := doJSON(req, nil); err != nil {
+				return fail("layout: " + err.Error())
+			}
+		}
+	}
 	if strings.HasPrefix(c.Phase, "desktop-") {
 		if err := e.StartNotes(cctx, c.Setup.NotesLayout); err != nil {
 			return fail("notes app: " + err.Error())
