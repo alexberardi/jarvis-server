@@ -357,6 +357,7 @@ func (m *Module) previewServerTools(ctx context.Context, hh string, native bool)
 		RecallEnabled: m.householdBool(ctx, settingRecallEnabled, hh),
 		Watches:       m.householdBool(ctx, settingWatchesEnabled, hh),
 		Computers:     m.hasComputer(ctx, hh),
+		Workflows:     m.hasWorkflows(ctx, hh),
 		PhotoTools:    map[string]bool{},
 	}
 	for n := range m.serverPhotoTools() {

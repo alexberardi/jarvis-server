@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,20 @@ func (t taughtWorkflows) Visible(ctx context.Context, hh string, uid *int64) ([]
 		out[i] = w.replay()
 	}
 	return out, nil
+}
+
+// hasWorkflows is whether the household has a taught workflow: run_workflow is offered then. A
+// failed lookup offers it not.
+func (m *Module) hasWorkflows(ctx context.Context, hh string) bool {
+	if hh == "" {
+		return false
+	}
+	var one int
+	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT 1 FROM cc_taught_workflows WHERE household_id = ? LIMIT 1`, hh).Scan(&one)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		m.deps.Log.Warn("cc: workflow lookup", "household", hh, "err", err)
+	}
+	return err == nil
 }
 
 // Heal stores the elements a replay healed, as long as nobody changed the workflow since it was
@@ -136,8 +151,9 @@ func (*runWorkflowTool) Name() string { return toolRunWorkflow }
 
 func (*runWorkflowTool) Definition() *pyjson.Object {
 	return watchToolDefinition(toolRunWorkflow,
-		"Run a task the user taught Jarvis (a saved workflow, recorded with 'watch me') on their computer, e.g. "+
-			"'download my bank statement for October', 'run the bank statement workflow for March'. Call it with the "+
+		"Run a saved workflow (a task Jarvis already learned) on the user's computer, e.g. "+
+			"'download my bank statement for October', 'run the bank statement workflow for March'. Not for recording "+
+			"or stopping a recording: those are start_recording and stop_recording. Call it with the "+
 			"workflow's name or the user's phrase for it, and a value for each thing it needs. If it answers status "+
 			"\"ask\", nothing has started: ask the user, then call it again with their answer. Only status \"started\" "+
 			"means it is running.",

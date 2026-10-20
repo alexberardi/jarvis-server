@@ -69,15 +69,22 @@ func TestRunWorkflowByTrigger(t *testing.T) {
 	tool := &runWorkflowTool{m: ve.m}
 	turn := ve.recTurn(7)
 
-	// Offered only with a computer in the household and a known speaker.
-	if prompts.ServerToolAllowed(toolRunWorkflow, prompts.ToolGates{SpeakerKnown: true}) ||
-		!prompts.ServerToolAllowed(toolRunWorkflow, prompts.ToolGates{Computers: true, SpeakerKnown: true}) {
+	// Offered only with a computer and a taught workflow in the household, and a known speaker.
+	if prompts.ServerToolAllowed(toolRunWorkflow, prompts.ToolGates{SpeakerKnown: true, Workflows: true}) ||
+		prompts.ServerToolAllowed(toolRunWorkflow, prompts.ToolGates{Computers: true, SpeakerKnown: true}) ||
+		!prompts.ServerToolAllowed(toolRunWorkflow, prompts.ToolGates{Computers: true, SpeakerKnown: true, Workflows: true}) {
 		t.Fatal("run_workflow gate")
+	}
+	if ve.m.hasWorkflows(context.Background(), voiceHH) {
+		t.Fatal("hasWorkflows with none taught")
 	}
 	if got := runTool(t, tool, `{"name": "my bank statement"}`, turn); got["error"] != "no_workflows" {
 		t.Fatalf("nothing taught: %v", got)
 	}
 	bank := seedTaught(t, ve.m, voiceHH, 7, "Bank statement", false, "download my bank statement")
+	if !ve.m.hasWorkflows(context.Background(), voiceHH) || ve.m.hasWorkflows(context.Background(), "other-hh") {
+		t.Fatal("hasWorkflows after one taught")
+	}
 	seedTaught(t, ve.m, voiceHH, 7, "Bank transfer", false)
 	seedTaught(t, ve.m, voiceHH, 8, "Order ink", false) // another member's, not shared
 

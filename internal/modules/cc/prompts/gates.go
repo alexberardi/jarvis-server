@@ -16,6 +16,10 @@ type ToolGates struct {
 	// known speaker (the recording is theirs; whose computers and workflows they reach depends on
 	// who asks).
 	Computers bool
+	// Workflows: the household has a taught workflow. run_workflow also needs it: with none it
+	// could only say so, and one more tool next to the recording ones makes the small live model
+	// call those less.
+	Workflows bool
 	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
 	// photos come from (docs/cc/chat-images.md §8-9). Gates every photo tool.
 	ChatPhotos bool
@@ -67,11 +71,12 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.SpeakerKnown && g.MemoryEnabled && g.RecallEnabled
 	case "create_watch", "list_watches", "cancel_watch":
 		return g.Watches && g.SpeakerKnown
-	case "start_recording", "stop_recording", "enable_computer_control", "disable_computer_control", "computer_control_status",
-		"run_workflow":
+	case "start_recording", "stop_recording", "enable_computer_control", "disable_computer_control", "computer_control_status":
 		return g.Computers && g.SpeakerKnown
 	case "read_computer_file", "write_spreadsheet":
 		return false // errand steps only: the planner offers them with computer_task
+	case "run_workflow":
+		return g.Computers && g.Workflows && g.SpeakerKnown
 	}
 	if g.PhotoTools[name] {
 		return g.ChatPhotos
