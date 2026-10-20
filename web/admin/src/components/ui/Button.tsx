@@ -1,7 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
-import { cn } from '@/lib/utils'
-import { buttonClass, type ButtonSize, type ButtonVariant } from './buttonStyles'
 import Spinner from './Spinner'
+import { buttonStyles, type ButtonSize, type ButtonVariant } from './buttonStyles'
 
 export type { ButtonSize, ButtonVariant }
 
@@ -34,7 +33,7 @@ export default function Button({
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={cn(buttonClass({ variant, size }), className)}
+      className={buttonStyles({ variant, size, className })}
       {...rest}
     >
       {loading ? <Spinner /> : icon}

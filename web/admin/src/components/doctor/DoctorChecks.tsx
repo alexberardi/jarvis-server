@@ -1,12 +1,12 @@
 import { Fragment, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Copy, XCircle } from 'lucide-react'
 import type { DoctorCheck } from '@/api/doctor'
-import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui'
 
 const ICON = {
-  ok: <CheckCircle2 size={14} className="shrink-0 text-success" aria-label="ok" />,
-  warn: <AlertTriangle size={14} className="shrink-0 text-warning" aria-label="warning" />,
-  fail: <XCircle size={14} className="shrink-0 text-danger" aria-label="failed" />,
+  ok: <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-success" aria-label="ok" />,
+  warn: <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" aria-label="warning" />,
+  fail: <XCircle size={16} className="mt-0.5 shrink-0 text-danger" aria-label="failed" />,
 }
 
 function statusIcon(status: string) {
@@ -21,8 +21,8 @@ function statusIcon(status: string) {
 function CopyFix({ fix }: { fix: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="mt-1 flex items-start gap-2">
-      <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-normal rounded bg-[var(--color-surface-alt)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)]">
+    <div className="mt-2 flex items-start gap-2">
+      <pre className="min-w-0 flex-1 overflow-x-auto rounded-control bg-surface-alt px-3 py-2 font-mono text-caption break-normal whitespace-pre-wrap text-text">
         {fix.split(',').map((part, i) => (
           <Fragment key={i}>
             {i > 0 && (
@@ -34,11 +34,11 @@ function CopyFix({ fix }: { fix: string }) {
           </Fragment>
         ))}
       </pre>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
         title="Copy"
         aria-label="Copy fix"
-        className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)]"
         onClick={() => {
           void navigator.clipboard?.writeText(fix).then(
             () => {
@@ -49,8 +49,8 @@ function CopyFix({ fix }: { fix: string }) {
           )
         }}
       >
-        {copied ? <CheckCircle2 size={12} className="text-success" /> : <Copy size={12} />}
-      </button>
+        {copied ? <CheckCircle2 size={16} className="text-success" aria-hidden /> : <Copy size={16} aria-hidden />}
+      </Button>
     </div>
   )
 }
@@ -63,25 +63,18 @@ function CopyFix({ fix }: { fix: string }) {
 export default function DoctorChecks({ checks, onlyProblems = false }: { checks: DoctorCheck[]; onlyProblems?: boolean }) {
   const shown = onlyProblems ? checks.filter((c) => c.status !== 'ok') : checks
   if (shown.length === 0) {
-    return <p className="text-xs text-[var(--color-text-muted)]">{onlyProblems ? 'Every check passed.' : 'No checks ran.'}</p>
+    return <p className="text-small text-text-muted">{onlyProblems ? 'Every check passed.' : 'No checks ran.'}</p>
   }
+  // Rows divided by hairlines, not boxes: the list sits inside a card already.
   return (
-    <ul className="space-y-2">
+    <ul className="divide-y divide-border">
       {shown.map((c, i) => (
-        <li
-          key={`${c.name}-${i}`}
-          className={cn(
-            'rounded-lg border p-2',
-            c.status === 'ok' ? 'border-[var(--color-border)]' : c.status === 'fail' ? 'border-danger/40' : 'border-warning/40',
-          )}
-        >
-          <div className="flex items-start gap-2">
-            {statusIcon(c.status)}
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-[var(--color-text)]">{c.name}</p>
-              {c.detail && <p className="text-xs text-[var(--color-text-muted)]">{c.detail}</p>}
-              {c.fix && c.status !== 'ok' && <CopyFix fix={c.fix} />}
-            </div>
+        <li key={`${c.name}-${i}`} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+          {statusIcon(c.status)}
+          <div className="min-w-0 flex-1">
+            <p className="text-subheading text-text">{c.name}</p>
+            {c.detail && <p className="text-small break-words text-text-muted">{c.detail}</p>}
+            {c.fix && c.status !== 'ok' && <CopyFix fix={c.fix} />}
           </div>
         </li>
       ))}

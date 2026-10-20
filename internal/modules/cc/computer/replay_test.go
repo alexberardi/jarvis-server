@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
@@ -376,5 +377,103 @@ func TestReplayDesktopAXElement(t *testing.T) {
 	want := Heal{Step: 0, Was: *wf.Steps[0].Element, Element: RecordedElement{Role: "AXButton", Name: "Compose", Source: "ax"}}
 	if len(wfs.heals) != 1 || wfs.heals[0] != want {
 		t.Fatalf("stored %+v", wfs.heals)
+	}
+}
+
+// TestParamValueMonth: a month param whose example is YYYY-MM takes the month as people say it.
+func TestParamValueMonth(t *testing.T) {
+	iso := WorkflowParam{Name: "month", Kind: "month", Example: "2026-09"}
+	now := time.Date(2026, time.October, 20, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		p    WorkflowParam
+		v    string
+		want string
+	}{
+		{iso, "August", "2026-08"},
+		{iso, " august 2026 ", "2026-08"},
+		{iso, "Aug 2025", "2025-08"},
+		{iso, "September of 2026", "2026-09"},
+		{iso, "October", "2026-10"},
+		{iso, "December", "2025-12"}, // the last December up to now
+		{iso, "2026-8", "2026-08"},
+		{iso, "08/2026", "2026-08"},
+		{iso, "last month", "last month"},
+		{iso, "2026-13", "2026-13"},
+		{WorkflowParam{Name: "month", Kind: "month", Example: "September 2026"}, "August", "August"},
+		{WorkflowParam{Name: "note", Kind: "text", Example: "2026-09"}, " August ", "August"},
+	} {
+		if got := ParamValue(c.p, c.v, now); got != c.want {
+			t.Errorf("ParamValue(%+v, %q) = %q, want %q", c.p, c.v, got, c.want)
+		}
+	}
+}
+
+// linkMonthWorkflow picks its month by pressing the month's link (a learnt "Statement {month}").
+func linkMonthWorkflow() *Workflow {
+	return &Workflow{ID: "tw_2", Name: "Download bank statement", Version: 1,
+		Params: []WorkflowParam{{Name: "month", Kind: "month", Example: "2026-09"}},
+		Steps: []WorkflowStep{
+			{Intent: "select statement period", Target: "browser", Site: "bank.example.com",
+				Action:  computeruse.Action{Kind: "press", Intent: "select statement period", Ref: RecordedRef},
+				Element: &RecordedElement{Role: "link", Name: "Statement {month}", Selector: `link "Statement {month}"`}},
+		},
+		Success: SuccessCheck{URLContains: "/statements"},
+	}
+}
+
+// TestReplayPressesParamElement: the recorded element's name takes the param's value, so the
+// replay presses the new month's link directly; one healed is not stored (it is that month's).
+func TestReplayPressesParamElement(t *testing.T) {
+	steps, err := linkMonthWorkflow().bind(map[string]string{"month": "August"}, time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if el := steps[0].Element; el.Name != "Statement 2026-08" || el.Selector != `link "Statement 2026-08"` {
+		t.Fatalf("element %+v", el)
+	}
+	if wf := linkMonthWorkflow(); wf.Steps[0].Element.Name != "Statement {month}" {
+		t.Fatalf("bound in place: %+v", wf.Steps[0].Element)
+	}
+
+	e := newEnv(t, bankPage(Element{Ref: "e8", Role: "link", Name: "Statement 2026-09"}, Element{Ref: "e9", Role: "link", Name: "Statement 2026-08"}))
+	if out := e.replay(linkMonthWorkflow(), map[string]string{"month": "2026-08"}); out.State != StateDone || len(e.llm.reqs) != 0 {
+		t.Fatalf("outcome %+v, %d model calls", out, len(e.llm.reqs))
+	}
+	if a := e.exec.batches[0].Actions[0]; a.Ref != "e9" {
+		t.Fatalf("pressed %+v", a)
+	}
+
+	// The month's link is now a button: the model's round presses it, and the step keeps its param.
+	e2 := newEnv(t, bankPage(Element{Ref: "e9", Role: "button", Name: "Statement 2026-08"}))
+	wfs := &fakeWorkflows{}
+	e2.loop.Workflows = wfs
+	e2.script(actions(press("e9", "select statement period")))
+	if out := e2.replay(linkMonthWorkflow(), map[string]string{"month": "2026-08"}); out.State != StateDone || len(out.Healed) != 0 || len(wfs.heals) != 0 {
+		t.Fatalf("outcome %+v, stored %+v", out, wfs.heals)
+	}
+}
+
+// TestReplayOpensWindowAtFirstStep: the task's window is opened (the executor acts only in a
+// window an observe opened) on the first step's address, before the first act, as a computer
+// task's is on its start URL: on http too, not https://<site>.
+func TestReplayOpensWindowAtFirstStep(t *testing.T) {
+	e := newEnv(t, bankPage(Element{Ref: "e4", Role: "button", Name: "Download CSV"}))
+	wf := statementWorkflow()
+	wf.Steps[0].Action.URL = "http://127.0.0.1:4000/bank/statements?month={month}"
+	wf.Steps[0].Site = "127.0.0.1:4000"
+	var before int
+	e.exec.onAct = func() {
+		if len(e.exec.batches) == 1 {
+			before = len(e.exec.observes)
+		}
+	}
+	if out := e.replay(wf, map[string]string{"month": "2026-08"}); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if before == 0 {
+		t.Fatal("acted before any observe opened the window")
+	}
+	if o := e.exec.observes[0]; o.StartURL != "http://127.0.0.1:4000/bank/statements?month=2026-08" {
+		t.Fatalf("first observe %+v", o)
 	}
 }

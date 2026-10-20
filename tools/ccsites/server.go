@@ -29,7 +29,8 @@ var templateFS embed.FS
 //
 // store, bank and card answer 401 with a sign-in page without their session cookie.
 // ?layout=moved on store and bank pages moves the primary buttons (other position, wrapper and
-// id, same accessible name) and is carried on through links and forms.
+// id, same accessible name) and is carried on through links and forms; POST
+// /control/layout?layout=moved makes it every page's, until a reset.
 type Server struct {
 	dir   string // "" = memory only
 	now   func() time.Time
@@ -38,6 +39,7 @@ type Server struct {
 	mu    sync.Mutex
 	st    State
 	carts map[string][]CartItem // session token → cart
+	moved bool                  // every page is the moved variant (/control/layout)
 }
 
 // State is what GET /control/state reports; every list is [] when empty, never null.
@@ -323,7 +325,10 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, code int, name, 
 	}
 	site, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	var b strings.Builder
-	if err := t.ExecuteTemplate(&b, "base", page{Title: title, Site: site, Moved: moved(r), D: d}); err != nil {
+	s.mu.Lock()
+	all := s.moved
+	s.mu.Unlock()
+	if err := t.ExecuteTemplate(&b, "base", page{Title: title, Site: site, Moved: all || moved(r), D: d}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

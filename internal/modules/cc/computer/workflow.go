@@ -6,7 +6,9 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
@@ -117,15 +119,21 @@ func (w *Workflow) Missing(params map[string]string) []string {
 }
 
 // Bind is the workflow's steps with every {param} replaced by its value: in the intents, the
-// typed and selected text and the addresses (escaped for where it stands in the URL). A param
-// the workflow declares without a value is an error.
+// typed and selected text, the addresses (escaped for where it stands in the URL) and the
+// recorded elements' names and selectors (the "Statement {month}" link). A month is written as
+// the workflow's example writes it (ParamValue). A param the workflow declares without a value
+// is an error.
 func (w *Workflow) Bind(params map[string]string) ([]WorkflowStep, error) {
+	return w.bind(params, time.Now())
+}
+
+func (w *Workflow) bind(params map[string]string, now time.Time) ([]WorkflowStep, error) {
 	if miss := w.Missing(params); len(miss) > 0 {
 		return nil, fmt.Errorf("I need the %s to run %q", strings.Join(miss, " and "), w.Name)
 	}
 	declared := map[string]string{}
 	for _, p := range w.Params {
-		declared[p.Name] = strings.TrimSpace(params[p.Name])
+		declared[p.Name] = ParamValue(p, params[p.Name], now)
 	}
 	sub := func(s string, esc func(v string, at int) string) string {
 		var b strings.Builder
@@ -159,12 +167,63 @@ func (w *Workflow) Bind(params map[string]string) ([]WorkflowStep, error) {
 		a.Keys = slices.Clone(a.Keys)
 		if st.Element != nil {
 			el := *st.Element
+			el.Name, el.Selector = sub(el.Name, nil), sub(el.Selector, nil)
 			st.Element = &el
 		}
 		st.Action = a
 		steps[i] = st
 	}
 	return steps, nil
+}
+
+var (
+	isoMonthRe = regexp.MustCompile(`^\d{4}-\d{2}$`)
+	// monthNameRe and monthNumRe are a month as people say it: "August", "aug 2026", "August of 2026",
+	// "2026-8", "08/2026".
+	monthNameRe = regexp.MustCompile(`^([a-z]{3,9})\.?(?:,?\s+(?:of\s+)?(\d{4}))?$`)
+	monthNumRe  = regexp.MustCompile(`^(?:(\d{4})-(\d{1,2})|(\d{1,2})/(\d{4}))$`)
+)
+
+// ParamValue is v, the value given for p, as the workflow uses it: trimmed, and a month as its
+// example writes it (YYYY-MM) when the example is one: "August" or "August 2026" is 2026-08. A
+// month without a year is its latest one up to now's month. Anything else is left as given.
+func ParamValue(p WorkflowParam, v string, now time.Time) string {
+	v = strings.TrimSpace(v)
+	if p.Kind != "month" || !isoMonthRe.MatchString(p.Example) {
+		return v
+	}
+	low := strings.ToLower(v)
+	year, month := 0, 0
+	if m := monthNumRe.FindStringSubmatch(low); m != nil {
+		if m[1] != "" {
+			year, month = atoi(m[1]), atoi(m[2])
+		} else {
+			year, month = atoi(m[4]), atoi(m[3])
+		}
+	} else if m := monthNameRe.FindStringSubmatch(low); m != nil {
+		for i := time.January; i <= time.December; i++ {
+			if name := strings.ToLower(i.String()); name == m[1] || (len(m[1]) >= 3 && strings.HasPrefix(name, m[1])) {
+				month = int(i)
+			}
+		}
+		if m[2] != "" {
+			year = atoi(m[2])
+		} else if month != 0 {
+			year = now.Year()
+			if month > int(now.Month()) {
+				year--
+			}
+		}
+	}
+	if month < 1 || month > 12 || year < 1 {
+		return v
+	}
+	return fmt.Sprintf("%04d-%02d", year, month)
+}
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 // MatchWorkflows finds the workflows q names: by name, slug or trigger phrase, compared

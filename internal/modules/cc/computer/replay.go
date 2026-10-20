@@ -32,6 +32,10 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	if t.Target.Kind == "" && len(steps) > 0 {
 		t.Target = steps[0].target()
 	}
+	// The window opens where the workflow starts, as recorded (http too), not on https://<site>.
+	if t.StartURL == "" && len(steps) > 0 && steps[0].Target == "browser" && steps[0].Action.Kind == "navigate" {
+		t.StartURL = steps[0].Action.URL
+	}
 	run, paused, err := l.open(ctx, t)
 	if err != nil {
 		return Outcome{RunID: t.RunID, State: StateFailed, Summary: "I couldn't start the computer task: " + err.Error()}
@@ -49,6 +53,16 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
 	next := stepsDone(run.History)
+	if next == 0 && run.Pending == nil && t.Target.Kind == "browser" {
+		// The executor acts only in a window an observe opened: open it first, unless the
+		// household blocks the site, as a computer task does.
+		if out, blocked := l.blockedSite(ctx, r); blocked {
+			return l.end(ctx, run, out)
+		}
+		if _, err := l.Exec.Observe(ctx, Observe{RunID: run.ID, Target: t.Target, StartURL: t.StartURL, Snapshot: true}); err != nil {
+			return l.end(ctx, run, Outcome{State: StateFailed, Summary: "I couldn't see the computer: " + err.Error()})
+		}
+	}
 	if held := run.Pending; held != nil && next < len(steps) {
 		run.Pending = nil
 		if l.stopRequested(ctx, run) {
@@ -70,12 +84,10 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 			return l.end(ctx, run, Outcome{State: StateStopped, Summary: "Stopped."})
 		}
 		if run.Rounds >= maxRounds {
-			l.Exec.Stop(ctx, run.ID)
 			return l.end(ctx, run, Outcome{State: StateFailed,
 				Summary: fmt.Sprintf("I stopped after %d rounds without finishing.", run.Rounds)})
 		}
 		if !l.now().Before(deadline) {
-			l.Exec.Stop(ctx, run.ID)
 			return l.end(ctx, run, Outcome{State: StateFailed, Summary: "I ran out of time before finishing."})
 		}
 		st := steps[i]
@@ -117,7 +129,7 @@ func (l *Loop) replayStep(ctx context.Context, r *round, st WorkflowStep, i int)
 	direct := true
 	switch {
 	case st.Element != nil && takesRef(a.Kind):
-		o, err := l.Exec.Observe(ctx, Observe{RunID: r.run.ID, Target: r.task.Target, Snapshot: true})
+		o, err := l.Exec.Observe(ctx, Observe{RunID: r.run.ID, Target: r.task.Target, StartURL: r.task.StartURL, Snapshot: true})
 		if err != nil {
 			return Outcome{State: StateFailed, Summary: "I couldn't see the computer: " + err.Error()}, true
 		}
@@ -274,12 +286,14 @@ func heldHeal(h []Entry, wstep int) *RecordedElement {
 	return nil
 }
 
-// healsOf are the finished steps that were healed, in step order.
+// healsOf are the finished steps that were healed, in step order. A step whose element names a
+// param ("Statement {month}") is not: the element healed to is this run's value's.
 func healsOf(h []Entry, steps []WorkflowStep) []Heal {
 	var out []Heal
 	for _, e := range h {
 		i := e.WStep - 1
-		if !e.StepDone || e.Healed == nil || i < 0 || i >= len(steps) || steps[i].Element == nil {
+		if !e.StepDone || e.Healed == nil || i < 0 || i >= len(steps) || steps[i].Element == nil ||
+			placeholderRe.MatchString(steps[i].Element.Name) {
 			continue
 		}
 		out = append(out, Heal{Step: i, Was: *steps[i].Element, Element: *e.Healed})

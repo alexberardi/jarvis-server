@@ -484,7 +484,7 @@ func TestFoldNavigationsIntoActions(t *testing.T) {
 			{"seq":3,"ts":5600,"tab":4,"kind":"navigate","url":"` + u + `/search?q=x"}]`,
 			[]string{"change Search", "key Search → " + u + "/search?q=x"}},
 		// Headless Firefox (lane-events.jsonl): the form's pushState came in before the typing,
-		// Enter and submit that caused it.
+		// Enter and submit that caused it. The submit is Enter's doing: Enter opens the page.
 		{"Enter in a chat box, the navigation first", `[
 			{"seq":6,"ts":67775,"tab":1,"kind":"click","url":"` + u + `/chat","element":{"role":"textbox","name":"Message"}},
 			{"seq":7,"ts":68141,"tab":1,"kind":"navigate","url":"` + u + `/chat?sent=1"},
@@ -492,7 +492,13 @@ func TestFoldNavigationsIntoActions(t *testing.T) {
 			{"seq":9,"ts":68136,"tab":1,"kind":"key","key":"Enter","url":"` + u + `/chat","element":{"role":"textbox","name":"Message"}},
 			{"seq":10,"ts":68138,"tab":1,"kind":"submit","url":"` + u + `/chat","element":{"role":"form","name":"f"}},
 			{"seq":11,"ts":69649,"tab":1,"kind":"click","url":"` + u + `/chat?sent=1","element":{"role":"button","name":"Switch to light mode"}}]`,
-			[]string{"click Message", "input Message", "key Message", "submit f → " + u + "/chat?sent=1", "click Switch to light mode"}},
+			[]string{"click Message", "input Message", "key Message → " + u + "/chat?sent=1", "click Switch to light mode"}},
+		{"a form's button: the submit is the click's", `[
+			{"seq":1,"ts":5000,"tab":4,"kind":"click","url":"` + u + `/s","element":{"role":"button","name":"Download CSV"}},
+			{"seq":2,"ts":5010,"tab":4,"kind":"submit","url":"` + u + `/s","element":{"role":"form"}},
+			{"seq":3,"ts":9000,"tab":4,"kind":"click","url":"` + u + `/s","element":{"role":"textbox","name":"Note"}},
+			{"seq":4,"ts":20000,"tab":4,"kind":"submit","url":"` + u + `/s","element":{"role":"form","name":"later"}}]`,
+			[]string{"click Download CSV", "click Note", "submit later"}},
 		{"too late, or in another tab: opened by the user", `[
 			{"seq":1,"ts":5000,"tab":4,"kind":"click","url":"` + u + `/","element":{"role":"button","name":"Switch to light mode"}},
 			{"seq":2,"ts":5200,"tab":9,"kind":"navigate","url":"https://example.com/"},
@@ -516,5 +522,60 @@ func TestDescribeFoldedClick(t *testing.T) {
 	e := traceEvent{Kind: "click", Element: &traceElement{Role: "link", Name: "Chat"}, ResultURL: "http://localhost:7710/chat"}
 	if got := describeEvent(e); got != `click link "Chat" (opens http://localhost:7710/chat)` {
 		t.Fatalf("got %s", got)
+	}
+}
+
+// linkMonthTrace is the suite's bank demonstration (tools/ccsuite setup.demonstrate): the month
+// is picked by clicking its link, and the CSV comes from a form's button, a download the browser
+// reports before it names the file.
+const linkMonthTrace = `[
+ {"seq":1,"ts":1760000000000,"kind":"navigate","url":"http://127.0.0.1:4000/bank/statements","tab":1},
+ {"seq":2,"ts":1760000002000,"kind":"click","url":"http://127.0.0.1:4000/bank/statements","tab":1,"element":{"role":"link","name":"Statement 2026-09","tag":"a","selector":"link \"Statement 2026-09\""}},
+ {"seq":3,"ts":1760000002300,"kind":"navigate","url":"http://127.0.0.1:4000/bank/statements/2026-09","tab":1},
+ {"seq":4,"ts":1760000004000,"kind":"click","url":"http://127.0.0.1:4000/bank/statements/2026-09","tab":1,"element":{"role":"button","name":"Download CSV","tag":"button","type":"submit","selector":"#download-csv"}},
+ {"seq":5,"ts":1760000004010,"kind":"submit","url":"http://127.0.0.1:4000/bank/statements/2026-09","tab":1,"element":{"role":"form","tag":"form","selector":"form[action=\"/bank/statements/2026-09/download\"]"}},
+ {"seq":6,"ts":1760000004300,"kind":"download","url":"http://127.0.0.1:4000/bank/statements/2026-09/download","mime":"text/csv"}
+]`
+
+// linkMonthModel is the house model's answer for it (qwen3.5-9b, 2026-10-20, with the events
+// numbered as the prompt now shows them): the month from the link's event, and a download name
+// guessed from the URL.
+const linkMonthModel = `{"name":"Download bank statement","triggers":["download bank statement","get statement csv"],"steps":[{"intent":"navigate to statements page","event_seqs":[1],"target":"bank statements list"},{"intent":"select statement period","event_seqs":[2],"target":"Statement 2026-09"},{"intent":"initiate download","event_seqs":[3],"target":"Download CSV button"},{"intent":"complete download","event_seqs":[4],"target":"CSV file download"}],"params":[{"name":"month","kind":"month","example":"2026-09","from_seqs":[2]}],"success":{"download":{"name_like":"download"}}}`
+
+// TestLearnFromLinkPickedMonth: a month picked by clicking its link is a param of the link the
+// replay presses; the form's submit is the button's doing, not a step of its own (the house model
+// made it one, and the replay submitted the form twice); an unnamed download is checked by its
+// type.
+func TestLearnFromLinkPickedMonth(t *testing.T) {
+	le := newLearnEnv(t, linkMonthModel)
+	w := le.store("rec_link1", json.RawMessage(linkMonthTrace), "")
+
+	if len(w.Params) != 1 || w.Params[0] != (Param{Name: "month", Kind: "month", Example: "2026-09"}) {
+		t.Fatalf("params %+v", w.Params)
+	}
+	if len(w.Steps) != 3 {
+		t.Fatalf("steps %+v", w.Steps)
+	}
+	if e := w.Steps[1].Element; e == nil || e.Name != "Statement {month}" || e.Selector != `link "Statement {month}"` || w.Steps[1].Action.Kind != "press" {
+		t.Fatalf("link step %+v %+v", w.Steps[1], e)
+	}
+	if e := w.Steps[2].Element; e == nil || e.Role != "button" || e.Name != "Download CSV" || e.Selector != "#download-csv" {
+		t.Fatalf("download step %+v %+v", w.Steps[2], e)
+	}
+	if d := w.Success.Download; d == nil || d.NameLike != "*.csv" {
+		t.Fatalf("success %+v", w.Success)
+	}
+
+	le.model.mu.Lock()
+	user := *le.model.reqs[0].Messages[1].Content.Text
+	le.model.mu.Unlock()
+	for _, want := range []string{`- event 2: month "2026-09" (clicked)`, `3. click button "Download CSV"`,
+		"4. download from http://127.0.0.1:4000/bank/statements/2026-09/download, file name unknown (text/csv)"} {
+		if !strings.Contains(user, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, user)
+		}
+	}
+	if strings.Contains(user, "submit") {
+		t.Fatalf("the submit the button caused is in the prompt:\n%s", user)
 	}
 }

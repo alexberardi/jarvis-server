@@ -1,11 +1,11 @@
 {
   "name": "replay_moved_button",
-  "about": "Replay the taught bank download on the ?layout=moved variant, whose buttons moved: the replay heals the target. Flipping it (piece 32) adds the demonstrate setup step.",
+  "about": "Replay the taught bank download (demonstrated on the default layout) after the site moved its buttons: every page is the moved variant, whose Download CSV button has another place, wrapper and id. The replay finds it again by role and name.",
   "phase": "teach",
-  "status": "pending",
-  "say": "Download my bank statement for September from {{sites}}/bank/{{layout}}",
+  "status": "required",
+  "say": "Download my bank statement for September.",
   "target": "browser",
-  "setup": {"login": ["bank"], "layout": "moved"},
+  "setup": {"login": ["bank"], "layout": "moved", "demonstrate": "bank_download"},
   "answers": [],
   "checks": [
     {"kind": "download", "site": "bank", "month": "2026-09"}

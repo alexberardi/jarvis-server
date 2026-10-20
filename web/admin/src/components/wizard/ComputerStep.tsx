@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getThisDevice } from '@/api/chat'
 import { extensionState, getNodeLiveness } from '@/api/nodes'
 import AgentDownload from '@/components/addons/AgentDownload'
-import { Button, buttonClass, Spinner } from '@/components/ui'
+import { Button, buttonStyles, Spinner } from '@/components/ui'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { useAuth } from '@/hooks/useAuth'
 import { LINKS, yourDevices } from '@/lib/addons'
@@ -169,7 +169,7 @@ export default function ComputerStep({ onNext, onBack }: { onNext: () => void; o
           <ol className="space-y-4 pl-3 sm:pl-7" aria-label="Browser extension steps">
             <Tick done={extConnected}>
               {store ? (
-                <a href={store} target="_blank" rel="noopener noreferrer" className={buttonClass({ size: 'sm' })}>
+                <a href={store} target="_blank" rel="noopener noreferrer" className={buttonStyles({ size: 'sm' })}>
                   Add it from {storeName} <ExternalLink size={14} aria-hidden="true" />
                 </a>
               ) : (

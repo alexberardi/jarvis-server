@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { Brain, Loader2 } from 'lucide-react'
+import { Brain, Sparkles } from 'lucide-react'
 import { JOBS, jobFor, jobStateText, joinTitles, missingRequired } from '@/components/setup/jobs'
+import { Banner, buttonStyles, Spinner } from '@/components/ui'
 import { useSetupState } from '@/hooks/useSetup'
 
 const STATE_TEXT: Record<string, string> = {
@@ -19,55 +20,50 @@ export default function ModelBanner() {
   if (data.setup_step) {
     // A10 F9: the wizard was left before Done (another tab, a closed browser).
     return (
-      <div className="flex items-center justify-between rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
-        <p className="text-sm text-[var(--color-text)]">Setup isn't finished: models, privacy choices and next steps.</p>
-        <Link to="/setup" className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90">
-          Finish setup
-        </Link>
-      </div>
+      <Banner
+        tone="primary"
+        icon={<Sparkles size={20} />}
+        actions={
+          <Link to="/setup" className={buttonStyles({ variant: 'primary', size: 'sm' })}>
+            Finish setup
+          </Link>
+        }
+      >
+        <p className="text-body">Setup isn't finished: models, privacy choices and next steps.</p>
+      </Banner>
     )
   }
   const missing = missingRequired(data.jobs)
   if (missing.length > 0 || (!data.jobs && data.models_configured === false)) {
     const names = missing.length > 0 ? joinTitles(missing.map((m) => m.title)) : 'Language model'
     return (
-      <div
+      <Banner
         role="status"
         aria-label="Voice setup"
-        className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4"
+        tone="primary"
+        icon={<Brain size={20} />}
+        title={`Voice isn't ready: ${names} ${missing.length > 1 ? 'are' : 'is'} missing`}
+        actions={
+          <Link to={`/admin/models?job=${missing[0]?.id ?? 'llm'}`} className={buttonStyles({ variant: 'primary', size: 'sm' })}>
+            Set up models
+          </Link>
+        }
       >
-        <div className="flex items-center gap-3">
-          <Brain size={20} className="text-[var(--color-primary)]" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">
-              Voice isn't ready: {names} {missing.length > 1 ? 'are' : 'is'} missing
-            </p>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Jarvis can't answer voice requests until {missing.length > 1 ? 'they are' : 'it is'} installed.
-            </p>
-          </div>
-        </div>
-        <Link
-          to={`/admin/models?job=${missing[0]?.id ?? 'llm'}`}
-          className="shrink-0 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs text-white hover:opacity-90"
-        >
-          Set up models
-        </Link>
-      </div>
+        Jarvis can't answer voice requests until {missing.length > 1 ? 'they are' : 'it is'} installed.
+      </Banner>
     )
   }
   const downloading = JOBS.map((d) => ({ d, j: jobFor(data.jobs, d.id) })).filter(({ j }) => j.state === 'downloading')
   if (downloading.length > 0) {
     return (
-      <div role="status" className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
-        <Loader2 size={18} className="animate-spin text-amber-500" />
-        <p className="text-sm text-[var(--color-text)]">
+      <Banner role="status" tone="warning" icon={<Spinner className="size-5" />}>
+        <p className="text-body">
           {downloading.map(({ d, j }) => `${d.title}: ${jobStateText(j).toLowerCase()}`).join(' · ')}.{' '}
-          <Link to="/admin/models" className="text-[var(--color-primary)] hover:underline">
+          <Link to="/admin/models" className="text-primary underline-offset-2 hover:underline">
             Details
           </Link>
         </p>
-      </div>
+      </Banner>
     )
   }
   if (data.models_configured && data.live_ready === false) {
@@ -75,15 +71,14 @@ export default function ModelBanner() {
     // A lost GPU isn't something to wait out: the dashboard's GPU banner says what to do.
     if (st === 'gpu_unavailable') return null
     return (
-      <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
-        <Loader2 size={18} className="animate-spin text-amber-500" />
-        <p className="text-sm text-[var(--color-text)]">
+      <Banner tone="warning" icon={<Spinner className="size-5" />}>
+        <p className="text-body">
           The live model is {STATE_TEXT[st] ?? st}. Voice requests are answered once it is ready.{' '}
-          <Link to="/admin/models" className="text-[var(--color-primary)] hover:underline">
+          <Link to="/admin/models" className="text-primary underline-offset-2 hover:underline">
             Details
           </Link>
         </p>
-      </div>
+      </Banner>
     )
   }
   return null

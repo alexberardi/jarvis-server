@@ -227,4 +227,25 @@ describe('ChatPage', () => {
     expect(localStorage.getItem('jarvis-admin:u:chat-node:h1')).toBe('kitchen-pi')
     await waitFor(() => expect(api.warmupChat.mock.calls.at(-1)?.[0].node_id).toBe('kitchen-pi'))
   })
+  it("asks in the house's words, names both sides, and shows an empty Send as off", async () => {
+    plays([{ type: 'done', full_text: 'Hello.', conversation_id: 'c-4' }])
+    renderPage()
+    await waitFor(() => expect(api.warmupChat).toHaveBeenCalled())
+    const input = screen.getByLabelText('Message')
+    expect(input).toHaveAttribute('placeholder', 'Ask Jarvis')
+    const send = screen.getByRole('button', { name: 'Send' })
+    expect(send).toBeDisabled()
+    expect(send).not.toHaveClass('bg-primary')
+    fireEvent.change(input, { target: { value: 'hi' } })
+    expect(send).toHaveClass('bg-primary')
+    await act(async () => {
+      fireEvent.click(send)
+    })
+    expect(await screen.findByText('Hello.')).toBeInTheDocument()
+    // Each side's name is just above what it said, outside the message itself (e2e reads its exact text).
+    const answer = document.querySelector('[data-role="assistant"]') as HTMLElement
+    expect(answer.previousElementSibling).toHaveTextContent(/^Jarvis$/)
+    expect(answer).toHaveTextContent(/^Hello\.$/)
+    expect(document.querySelector('[data-role="user"]')?.previousElementSibling).toHaveTextContent(/^Emma$/)
+  })
 })

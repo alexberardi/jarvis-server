@@ -438,3 +438,39 @@ func TestControlLoginRejectsUnknownSite(t *testing.T) {
 		t.Errorf("login site=form: %d", resp.StatusCode)
 	}
 }
+
+// TestControlLayout: POST /control/layout?layout=moved moves every page's buttons without
+// ?layout=moved (the site was redesigned since the user taught Jarvis), until a reset.
+func TestControlLayout(t *testing.T) {
+	_, hs := newSites(t, t.TempDir())
+	c := browser(t)
+	login(t, c, hs.URL, "bank")
+	ids := func() []string {
+		_, _, body := get(t, c, hs.URL+"/bank/statements/2026-09")
+		_, id := buttons(body)
+		return id
+	}
+	before := ids()
+	for _, l := range []string{"moved", "sideways"} {
+		resp, err := http.Post(hs.URL+"/control/layout?layout="+l, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if want := map[string]int{"moved": 200, "sideways": 400}[l]; resp.StatusCode != want {
+			t.Fatalf("layout %s: %d, want %d", l, resp.StatusCode, want)
+		}
+	}
+	if moved := ids(); slices.Equal(moved, before) || !slices.Contains(moved, "export-statement") {
+		t.Fatalf("buttons %q after layout moved, %q before", moved, before)
+	}
+	resp, err := http.Post(hs.URL+"/control/reset", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	login(t, c, hs.URL, "bank")
+	if after := ids(); !slices.Equal(after, before) {
+		t.Fatalf("buttons %q after a reset, want %q", after, before)
+	}
+}

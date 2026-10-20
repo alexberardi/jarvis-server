@@ -16,15 +16,19 @@ const sizes: Record<ButtonSize, string> = {
   icon: 'size-10 justify-center',
 }
 
-/**
- * buttonClass is Button's look, for an element that has to stay something else: a router Link
- * or an external link that reads as a button. Apart from Button.tsx for fast refresh.
- */
-export function buttonClass({ variant = 'secondary', size = 'md' }: { variant?: ButtonVariant; size?: ButtonSize } = {}) {
+/** buttonStyles is a Button's look, also for a link that should read as a button (apart from Button for fast refresh). */
+export function buttonStyles({
+  variant = 'secondary',
+  size = 'md',
+  className,
+}: { variant?: ButtonVariant; size?: ButtonSize; className?: string } = {}) {
   return cn(
     'press inline-flex shrink-0 items-center justify-center rounded-control font-medium whitespace-nowrap select-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
+    // index.css's 40px touch floor on phones covers buttons, not links: a link gets it here.
+    'max-md:[a&]:min-h-10',
     variants[variant],
     sizes[size],
+    className,
   )
 }

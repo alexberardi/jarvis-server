@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { Copy, Power, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { requestStop, type StopResult } from '@/api/system'
-import { buttonClass, dialogClass } from '@/components/models/styles'
-import { cn } from '@/lib/utils'
+import { Button, Dialog } from '@/components/ui'
 import { useFeatureAvailable } from '@/hooks/useFeature'
 import { errorMessage } from '@/lib/errors'
 import { restartJarvisd } from '@/lib/restart'
@@ -12,17 +11,18 @@ import type { SystemInfo } from '@/types/system'
 function CopyCommand({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2">
-      <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all rounded bg-[var(--color-surface-alt)] px-2 py-1.5 font-mono text-xs text-[var(--color-text)]">
+      <pre className="min-w-0 flex-1 overflow-x-auto rounded-control bg-surface-alt px-3 py-2 font-mono text-small break-all whitespace-pre-wrap text-text">
         {text}
       </pre>
-      <button
-        type="button"
-        className={buttonClass.icon}
+      <Button
+        variant="ghost"
+        size="icon"
         aria-label="Copy command"
+        title="Copy"
         onClick={() => void navigator.clipboard?.writeText(text).then(() => toast.success('Copied'), () => {})}
       >
-        <Copy size={14} />
-      </button>
+        <Copy size={16} aria-hidden />
+      </Button>
     </div>
   )
 }
@@ -44,53 +44,52 @@ function StopDialog({ startCommand, startNote, onClose }: { startCommand: string
   }
   const result = phase.step === 'done' ? phase.result : null
   const stopping = result?.kind === 'stopping'
+  const sending = phase.step === 'sending'
   return (
-    <div className={dialogClass.backdrop} role="dialog" aria-modal="true" aria-labelledby="stop-title">
-      <div className={cn(dialogClass.panel, 'space-y-3')}>
-        <h2 id="stop-title" className="flex items-center gap-2 text-lg font-semibold text-[var(--color-text)]">
-          <Square size={16} /> {stopping ? 'jarvisd is stopping' : 'Stop jarvisd?'}
-        </h2>
-        {(phase.step === 'confirm' || phase.step === 'sending') && (
+    <Dialog
+      open
+      onClose={onClose}
+      // Once jarvisd is stopping this page can't come back: there is nothing to close into.
+      dismissible={!sending && !stopping}
+      title={stopping ? 'jarvisd is stopping' : 'Stop jarvisd?'}
+      footer={
+        phase.step === 'confirm' || sending ? (
           <>
-            <p className="text-sm text-[var(--color-text)]">
-              Voice, the apps and this admin page stop working. jarvisd stays stopped until you start it again on the server:
-            </p>
+            <Button onClick={onClose} disabled={sending}>
+              Cancel
+            </Button>
+            <Button variant="danger" icon={<Square size={14} aria-hidden />} loading={sending} onClick={confirm}>
+              Stop jarvisd
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
+      <div className="space-y-3 text-body">
+        {(phase.step === 'confirm' || sending) && (
+          <>
+            <p>Voice, the apps and this admin page stop working. jarvisd stays stopped until you start it again on the server:</p>
             <CopyCommand text={startCommand} />
-            {startNote && <p className="text-xs text-[var(--color-text-muted)]">{startNote}</p>}
-            <div className="flex justify-end gap-2 pt-1">
-              <button type="button" className={buttonClass.secondary} onClick={onClose} disabled={phase.step === 'sending'}>
-                Cancel
-              </button>
-              <button type="button" className={buttonClass.dangerSolid} onClick={confirm} disabled={phase.step === 'sending'}>
-                <Square size={12} /> {phase.step === 'sending' ? 'Stopping…' : 'Stop jarvisd'}
-              </button>
-            </div>
+            {startNote && <p className="text-small text-text-muted">{startNote}</p>}
           </>
         )}
         {result?.kind === 'stopping' && (
           <>
-            <p className="text-sm text-[var(--color-text)]">This page stops responding in a moment. To start jarvisd again, run:</p>
+            <p>This page stops responding in a moment. To start jarvisd again, run:</p>
             <CopyCommand text={result.startCommand} />
-            {result.startNote && <p className="text-xs text-[var(--color-text-muted)]">{result.startNote}</p>}
+            {result.startNote && <p className="text-small text-text-muted">{result.startNote}</p>}
           </>
         )}
         {result?.kind === 'refused' && (
           <>
-            <p className="text-sm text-red-500">{result.detail}</p>
+            <p className="text-danger">{result.detail}</p>
             {result.command && <CopyCommand text={result.command} />}
           </>
         )}
-        {result?.kind === 'unsupported' && <p className="text-sm text-red-500">This jarvisd can't stop from the admin. Stop it on the server.</p>}
-        {phase.step === 'failed' && <p className="text-sm text-red-500">{phase.error}</p>}
-        {(phase.step === 'failed' || (result && !stopping)) && (
-          <div className="flex justify-end">
-            <button type="button" className={buttonClass.secondary} onClick={onClose}>
-              Close
-            </button>
-          </div>
-        )}
+        {result?.kind === 'unsupported' && <p className="text-danger">This jarvisd can't stop from the admin. Stop it on the server.</p>}
+        {phase.step === 'failed' && <p className="text-danger">{phase.error}</p>}
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -112,23 +111,24 @@ export default function PowerControls({ info }: { info: SystemInfo }) {
   return (
     <>
       {canRestart && (
-        <button
-          type="button"
-          className={buttonClass.secondary}
-          disabled={restarting}
+        <Button
+          size="sm"
+          icon={<Power size={14} aria-hidden />}
+          loading={restarting}
           onClick={() => {
             if (!window.confirm('Restart jarvisd now? Voice and the admin are unavailable for a few seconds.')) return
             setRestarting(true)
             void restartJarvisd().finally(() => setRestarting(false))
           }}
         >
-          <Power size={12} /> {restarting ? 'Restarting…' : 'Restart'}
-        </button>
+          {restarting ? 'Restarting…' : 'Restart'}
+        </Button>
       )}
       {stop && (
-        <button type="button" className={buttonClass.danger} disabled={!canStop} title={stopTitle} onClick={() => setStopOpen(true)}>
-          <Square size={12} /> Stop
-        </button>
+        // Stopping is rare and drastic: a quiet button here, the red one only in the dialog that confirms it.
+        <Button variant="ghost" size="sm" icon={<Square size={14} aria-hidden />} disabled={!canStop} title={stopTitle} onClick={() => setStopOpen(true)}>
+          Stop
+        </Button>
       )}
       {stopOpen && stop && <StopDialog startCommand={stop.start_command} startNote={stop.start_note} onClose={() => setStopOpen(false)} />}
     </>
