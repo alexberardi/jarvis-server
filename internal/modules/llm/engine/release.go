@@ -192,14 +192,16 @@ var Releases = map[Kind]Release{
 }
 
 // uvRelease is uv, which installs the Python engines (pyengine.go): astral-sh/uv's release,
-// for the platforms some Python engine runs on (linux is there for vLLM, #300).
+// for the platforms some Python engine runs on (linux is there for vLLM, #300, windows for
+// Transformers, #301).
 var uvRelease = Release{
 	Kind: KindUV, Build: "0.13.3",
 	DefaultBaseURL: "https://github.com/astral-sh/uv/releases/download",
 	Assets: map[Platform]map[Flavour][]Asset{
-		{"darwin", "arm64"}: {FlavourCPU: {{"uv-aarch64-apple-darwin.tar.gz", 14309841, "bf1e4fb6f5f5079a2902ad3f3a9e2d337575b226a1378f2449d8404353650608"}}},
-		{"linux", "amd64"}:  {FlavourCPU: {{"uv-x86_64-unknown-linux-gnu.tar.gz", 16767662, "e4f169ec380f1793b898a6f1fcbacd22db25cf7ca0349a6e96ffb85b69998d04"}}},
-		{"linux", "arm64"}:  {FlavourCPU: {{"uv-aarch64-unknown-linux-gnu.tar.gz", 15857962, "611ff684f193a84d2fdad29c5f12505d02ece94984c7c982cdde950eba5c95b9"}}},
+		{"darwin", "arm64"}:  {FlavourCPU: {{"uv-aarch64-apple-darwin.tar.gz", 14309841, "bf1e4fb6f5f5079a2902ad3f3a9e2d337575b226a1378f2449d8404353650608"}}},
+		{"linux", "amd64"}:   {FlavourCPU: {{"uv-x86_64-unknown-linux-gnu.tar.gz", 16767662, "e4f169ec380f1793b898a6f1fcbacd22db25cf7ca0349a6e96ffb85b69998d04"}}},
+		{"linux", "arm64"}:   {FlavourCPU: {{"uv-aarch64-unknown-linux-gnu.tar.gz", 15857962, "611ff684f193a84d2fdad29c5f12505d02ece94984c7c982cdde950eba5c95b9"}}},
+		{"windows", "amd64"}: {FlavourCPU: {{"uv-x86_64-pc-windows-msvc.zip", 15204998, "bb701bd35b586c45966654ea2703c9bd116a6a4fc0a8ca755bd644c2c41c5ebe"}}},
 	},
 }
 
@@ -241,10 +243,11 @@ func AssetsFor(k Kind, p Platform, f Flavour) ([]Asset, error) {
 // FlavoursFor lists the flavours a kind has builds for on a platform, in AllFlavours order.
 func FlavoursFor(k Kind, p Platform) []string {
 	if e, ok := PyEngines[k]; ok {
-		if f, ok := e.Platforms[p]; ok {
-			return []string{string(f)}
+		var out []string
+		for _, f := range e.Platforms[p] {
+			out = append(out, string(f))
 		}
-		return nil
+		return out
 	}
 	var out []string
 	for _, f := range AllFlavours {

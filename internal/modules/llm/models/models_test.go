@@ -1068,6 +1068,8 @@ func TestUpdateLabelsValidation(t *testing.T) {
 		{"live": {"remote_api": "auto"}},
 		{"stt": {"model": "whisper-tiny", "gpu_layers": float64(0)}},
 		{"live": {"mmproj": "none"}},
+		{"live": {"dir_engine": "transformers", "dtype": "bfloat16", "quantization": "bnb-4bit"}},
+		{"background": {"dir_engine": "auto", "dtype": "auto", "quantization": "none"}},
 	}
 	for _, u := range ok {
 		if err := e.mgr.UpdateLabels(e.ctx, u); err != nil {
@@ -1091,6 +1093,11 @@ func TestUpdateLabelsValidation(t *testing.T) {
 		{"stt": {"remote_url": "http://x"}},
 		{"live": {"remote_api": "gemini"}},
 		{"stt": {"remote_api": "openai"}},
+		{"live": {"dir_engine": "llama"}},
+		{"live": {"dtype": "int8"}},
+		{"live": {"quantization": "awq"}},
+		{"stt": {"dtype": "float16"}},
+		{"embeddings": {"dir_engine": "transformers"}},
 	}
 	for _, u := range bad {
 		if err := e.mgr.UpdateLabels(e.ctx, u); err == nil {
@@ -1689,6 +1696,36 @@ func TestVLLMBuildOnHardwarePage(t *testing.T) {
 
 // An LLM label's model may be a Hugging Face directory by absolute path (01 §3.11), not any
 // directory.
+// The Hardware page shows the Transformers set of the host's platform, with its size, before
+// the download.
+func TestTransformersBuildOnHardwarePage(t *testing.T) {
+	e := newEnv(t)
+	mux := http.NewServeMux()
+	(&API{Manager: e.mgr, Resolver: e.labels}).Mount(mux, func(http.ResponseWriter, *http.Request) bool { return true })
+	build := func(p engine.Platform) map[string]any {
+		e.mgr.Binaries.Platform = p
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/hardware", nil))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		b, _ := out["builds"].(map[string]any)["transformers"].(map[string]any)
+		return b
+	}
+	tf := engine.PyEngines[engine.KindTransformers]
+	win := engine.Platform{OS: "windows", Arch: "amd64"}
+	if b := build(win); fmt.Sprint(b["flavours"]) != "[cpu]" || b["download_bytes"] != float64(tf.Set(win, engine.FlavourCPU).DownloadBytes) {
+		t.Fatalf("windows: %v", b)
+	}
+	mac := engine.Platform{OS: "darwin", Arch: "arm64"}
+	if b := build(mac); fmt.Sprint(b["flavours"]) != "[metal cpu]" || b["download_bytes"] != float64(tf.Set(mac, engine.FlavourMetal).DownloadBytes) {
+		t.Fatalf("mac: %v", b)
+	}
+	if b := build(engine.Platform{OS: "linux", Arch: "amd64"}); !strings.Contains(fmt.Sprint(b["unavailable"]), "Linux is not supported yet") ||
+		b["download_bytes"] != nil {
+		t.Fatalf("linux: %v", b)
+	}
+}
+
 func TestUpdateLabelsModelDirectory(t *testing.T) {
 	e := newEnv(t)
 	dir := t.TempDir()
@@ -1702,5 +1739,27 @@ func TestUpdateLabelsModelDirectory(t *testing.T) {
 	}
 	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"embeddings": {"model": dir}}); err == nil {
 		t.Fatal("a directory for the embeddings label")
+	}
+
+	// On a Mac the directory runs on MLX unless dir_engine asks for Transformers; on Windows
+	// Transformers is the only engine for it.
+	src := engine.SettingsSource{Settings: e.set, Models: e.mgr.Store, Platform: engine.Platform{OS: "darwin", Arch: "arm64"}}
+	if c, _ := src.Label(e.ctx, "live"); c.Kind != engine.KindMLX || c.Problem != "" {
+		t.Fatalf("mac, auto: %s %q", c.Kind, c.Problem)
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"dir_engine": "transformers", "dtype": "float16"}}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := src.Label(e.ctx, "live"); c.Kind != engine.KindTransformers || c.DType != "float16" || c.Problem != "" {
+		t.Fatalf("mac, transformers: %s %q %q", c.Kind, c.DType, c.Problem)
+	}
+	src.Platform = engine.Platform{OS: "linux", Arch: "amd64"}
+	if c, _ := src.Label(e.ctx, "live"); !strings.Contains(c.Problem, "Linux is not supported yet") {
+		t.Fatalf("linux, transformers: %s %q", c.Kind, c.Problem)
+	}
+	src.Platform = engine.Platform{OS: "windows", Arch: "amd64"}
+	e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"dir_engine": "auto"}})
+	if c, _ := src.Label(e.ctx, "live"); c.Kind != engine.KindTransformers || c.Problem != "" {
+		t.Fatalf("windows, auto: %s %q", c.Kind, c.Problem)
 	}
 }

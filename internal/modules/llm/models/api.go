@@ -352,9 +352,15 @@ func (a *API) hardware(w http.ResponseWriter, r *http.Request) {
 			b["unavailable"] = why
 			b["flavours"] = []string{}
 		}
-		if e, ok := k.Python(); ok && e.DiskBytes > 0 {
-			// Shown before the download: vLLM's is gigabytes.
-			b["download_bytes"], b["disk_bytes"] = e.DownloadBytes, e.DiskBytes
+		if e, ok := k.Python(); ok {
+			// Shown before the download (vLLM's is gigabytes): the set of the platform's
+			// default accelerator.
+			p := a.Manager.Binaries.Platform
+			if fs := e.Platforms[p]; len(fs) > 0 {
+				if set := e.Set(p, fs[0]); set.DiskBytes > 0 {
+					b["download_bytes"], b["disk_bytes"] = set.DownloadBytes, set.DiskBytes
+				}
+			}
 		}
 		builds[string(k)] = b
 	}

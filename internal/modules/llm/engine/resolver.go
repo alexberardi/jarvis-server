@@ -59,6 +59,8 @@ type Endpoint struct {
 	// API is the dialect a remote endpoint speaks: APIOpenAI or APIAnthropic (remote_api).
 	// Local engines leave it empty (OpenAI-compatible).
 	API string `json:"api,omitempty"`
+	// NoReasoningBudget: the engine refuses a request with reasoning_budget (Transformers).
+	NoReasoningBudget bool `json:"-"`
 }
 
 // ErrNotConfigured is returned for a label with no model (or engine=off): 01 §3.9 "not
@@ -434,6 +436,10 @@ func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 	ep.Vision = inst.key.MMProj != "" || inst.key.Vision
 	if e, ok := c.Kind.Python(); ok {
 		ep.Model = e.RequestModel
+		if ep.Model == "" {
+			ep.Model = inst.key.Model
+		}
+		ep.NoReasoningBudget = e.NoReasoningBudget
 	}
 	if c.Kind == KindWhisper {
 		ep.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", inst.port)
@@ -463,12 +469,8 @@ func (r *Resolver) flavour(ctx context.Context, c LabelConfig) (Flavour, error) 
 		return "", err
 	}
 	if e, ok := c.Kind.Python(); ok {
-		// A Python engine runs on its platform's one accelerator.
-		p := r.platform()
-		if f == "" {
-			f = e.Platforms[p]
-		}
-		return f, e.supports(p, f)
+		// A Python engine runs on its platform's accelerators only (auto = the default one).
+		return e.flavourFor(r.platform(), f)
 	}
 	if f != "" {
 		return f, nil

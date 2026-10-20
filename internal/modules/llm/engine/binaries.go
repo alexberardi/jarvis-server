@@ -53,7 +53,7 @@ func (b *Binaries) InstallDir(k Kind, f Flavour) string {
 // interpreter.
 func (b *Binaries) binPath(k Kind, dir string) string {
 	if _, ok := k.Python(); ok {
-		return pythonIn(dir)
+		return pythonIn(b.Platform, dir)
 	}
 	return filepath.Join(dir, k.BinaryName(b.Platform))
 }
