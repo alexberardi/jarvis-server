@@ -36,6 +36,8 @@ func TestRenderGolden(t *testing.T) {
 		{"controlling", Frame{State: Controlling, Appear: 1, Glow: 0.6, Text: "Ordering the blue mug from Example Store"}},
 		{"paused", Frame{State: Paused, Appear: 1, Text: "Paused: Ordering the blue mug from Example Store"}},
 		{"recording", Frame{State: Recording, Appear: 1, Glow: 0.6, Text: "Recording"}},
+		{"follow_up_recording", Frame{State: FollowUp, Appear: 1, Bars: [nBars]float64{0.1, 0.1, 0.1, 0.1, 0.1}, Ring: 0.62, Badge: Recording}},
+		{"thinking_recording", Frame{State: Thinking, Appear: 1, Bars: [nBars]float64{0.4, 0.3, 0.22, 0.2, 0.25}, Badge: Recording}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			img := image.NewRGBA(image.Rect(0, 0, CanvasW*2, CanvasH*2))
@@ -571,4 +573,35 @@ func TestSuspendKeepsTheActivity(t *testing.T) {
 	}
 	i.SetActivity(Hidden, "")
 	d.untilHidden(be)
+}
+
+// TestActivityBadgeOverVoice (#288): a recording started during a voice turn shows at once. The
+// voice state still has the pill, and every frame of it carries the activity as a badge: a dot
+// in the activity's colour at the pill's right end.
+func TestActivityBadgeOverVoice(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	for _, s := range []State{Listening, Thinking, Speaking, FollowUp} {
+		var m model
+		m.set(s, 5*time.Second, t0)
+		if f, _ := m.step(t0); f.Badge != Hidden {
+			t.Fatalf("%v with no activity: badge %v", s, f.Badge)
+		}
+		m.setActivity(Recording, "Watching what you do")
+		f, _ := m.step(t0.Add(50 * time.Millisecond))
+		if f.State != s || f.Badge != Recording {
+			t.Fatalf("%v once recording: state %v badge %v, want %v with the recording badge", s, f.State, f.Badge, s)
+		}
+		img := image.NewRGBA(image.Rect(0, 0, CanvasW*2, CanvasH*2))
+		Render(img, Frame{State: s, Appear: 1, Badge: Recording}, 2)
+		x, y := 2*((CanvasW+pillW)/2-badgeX), 2*(pillTop+pillH/2)
+		if c := img.RGBAAt(int(x), int(y)); c.R < 200 || c.G > 90 || c.B < 60 || c.B > 130 {
+			t.Fatalf("%v: no recording dot at (%v, %v): %v", s, x, y, c)
+		}
+	}
+	// The activity's own pill needs no badge.
+	var m model
+	m.setActivity(Recording, "Watching what you do")
+	if f, _ := m.step(t0); f.State != Recording || f.Badge != Hidden {
+		t.Fatalf("the activity pill: state %v badge %v", f.State, f.Badge)
+	}
 }

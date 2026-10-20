@@ -187,8 +187,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		// A follow_up turn of the same conversation, on the blocking route as the Python node
 		// sends it (continue_conversation → POST /voice/command).
 		iter := it
+		activity := p.computerTurn(s, tr.Text) // "I'm done" stops a recording at once (#288)
 		c, err := p.Server.VoiceCommand(ctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id,
-			TurnSource: "follow_up", FollowUpIteration: &iter, LevelVsWake: level})
+			TurnSource: "follow_up", FollowUpIteration: &iter, LevelVsWake: level, Computer: activity})
 		if err == nil && c.StopReason == "not_for_me" && c.KeepListening {
 			ignored++
 			ex.Outcome = OutcomeIgnored

@@ -438,6 +438,8 @@ func (m *model) step(now time.Time) (Frame, bool) {
 	f := Frame{State: m.seen, Appear: m.appear, Bars: m.bars}
 	if f.State == Note || f.State.activity() {
 		f.Text = m.seenText
+	} else if s != Hidden {
+		f.Badge = m.activity // under the voice state, still on screen
 	}
 	switch s {
 	case Listening, Speaking:

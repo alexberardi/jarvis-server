@@ -515,7 +515,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		ex.Outcome = OutcomeNonSpeech
 		return "", true
 	}
-	p.stopIfAsked(s, tr.Text) // locally, at once; the server still hears it
+	activity := p.computerTurn(s, tr.Text) // a stop phrase stops it locally, at once; the server still hears it
 
 	// Row 11: join the warmup (bounded), then the streaming turn.
 	select {
@@ -534,7 +534,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	reply, err := p.Server.VoiceStream(sctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id,
-		TurnSource: "wake", WakeConfidence: &conf, Affect: tr.Affect})
+		TurnSource: "wake", WakeConfidence: &conf, Affect: tr.Affect, Computer: activity})
 	if err != nil {
 		p.fail(ctx, ex, fmt.Errorf("voice/command/stream: %w", err))
 		return "", false
