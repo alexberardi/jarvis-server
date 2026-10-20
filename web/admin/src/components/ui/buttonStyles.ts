@@ -25,6 +25,8 @@ export function buttonStyles({
   return cn(
     'press inline-flex shrink-0 items-center justify-center rounded-control font-medium whitespace-nowrap select-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
+    // index.css's 40px touch floor on phones covers buttons, not links: a link gets it here.
+    'max-md:[a&]:min-h-10',
     variants[variant],
     sizes[size],
     className,

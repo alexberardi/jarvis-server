@@ -67,5 +67,7 @@ describe('buttonStyles', () => {
     expect(buttonStyles({ variant: 'primary', size: 'sm' })).toContain('h-8')
     expect(buttonStyles({ className: 'mt-2' })).toContain('border-border-strong')
     expect(buttonStyles({ className: 'mt-2' })).toContain('mt-2')
+    // A link has no base-layer touch floor on phones, so the styles carry one.
+    expect(buttonStyles({ size: 'sm' })).toContain('max-md:[a&]:min-h-10')
   })
 })
