@@ -68,23 +68,24 @@ func replaceMasked(t *testing.T, with string) json.RawMessage {
 	return out
 }
 
-// bankModel is what a model answers for the bank trace: an invented event (42) and an
-// invented param, and a param of an unknown kind on a real candidate (event 8), which the job drops.
+// bankModel is what a model answers for the bank trace (its navigations after Sign in and
+// Statements folded into those clicks): an invented event (42) and an invented param, and a
+// param of an unknown kind on a real candidate (event 6), which the job drops.
 const bankModel = `{"name": "Download bank statement", "triggers": ["download my bank statement", " "],
  "steps": [
   {"intent": "Open the bank's sign-in page", "event_seqs": [1], "target": "the sign-in page"},
   {"intent": "Enter the username", "event_seqs": [2], "target": "Username"},
   {"intent": "Enter the password", "event_seqs": [3], "target": "Password"},
-  {"intent": "Sign in", "event_seqs": [4, 5], "target": "Sign in"},
-  {"intent": "Open the statements", "event_seqs": [6, 7], "target": "Statements"},
-  {"intent": "Enter the month {month}", "event_seqs": [8], "target": "Statement month"},
-  {"intent": "Download the CSV", "event_seqs": [9, 10], "target": "Download CSV"},
+  {"intent": "Sign in", "event_seqs": [4], "target": "Sign in"},
+  {"intent": "Open the statements", "event_seqs": [5], "target": "Statements"},
+  {"intent": "Enter the month {month}", "event_seqs": [6], "target": "Statement month"},
+  {"intent": "Download the CSV", "event_seqs": [7, 8], "target": "Download CSV"},
   {"intent": "Log out", "event_seqs": [42], "target": "Log out"}
  ],
  "params": [
-  {"name": "month", "kind": "month", "example": "2026-09", "from_seqs": [7, 8]},
+  {"name": "month", "kind": "month", "example": "2026-09", "from_seqs": [5, 6]},
   {"name": "account", "kind": "text", "example": "checking", "from_seqs": [42]},
-  {"name": "statement_month", "kind": "colour", "example": "2026-09", "from_seqs": [8]}
+  {"name": "statement_month", "kind": "colour", "example": "2026-09", "from_seqs": [6]}
  ],
  "success": {"download": {"name_like": "statement_*.csv"}}}`
 
@@ -384,7 +385,7 @@ func TestLearnDefaults(t *testing.T) {
 		t.Fatalf("success %+v", sc)
 	}
 	// A param from a navigation's query becomes a placeholder in its URL.
-	s := WStep{Intent: "Open the 2026-08 statements", Action: computeruse.Action{Kind: "navigate", URL: evs[6].URL}}
+	s := WStep{Intent: "Open the 2026-08 statements", Action: computeruse.Action{Kind: "navigate", URL: "https://bank.example.com/statements?month=2026-08"}}
 	substitute(&s, paramCandidate{Event: 7, Kind: "month", Value: "2026-08", Key: "month"}, "month")
 	if s.Action.URL != "https://bank.example.com/statements?month={month}" || s.Intent != "Open the {month} statements" || s.Action.Intent != s.Intent {
 		t.Fatalf("step %+v", s)
@@ -392,5 +393,122 @@ func TestLearnDefaults(t *testing.T) {
 	s.Action.Intent = "x"
 	if err := s.Action.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// shortTrace is parseTrace's events as one line each: "kind url → result" (tab, when not 0).
+func shortTrace(t *testing.T, raw string) []string {
+	t.Helper()
+	evs, err := parseTrace(json.RawMessage(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range evs {
+		s := e.Kind
+		if e.Element != nil {
+			s += " " + e.Element.Name
+		}
+		if e.Kind == "navigate" {
+			s += " " + e.URL
+		}
+		if e.ResultURL != "" {
+			s += " → " + e.ResultURL
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// TestFoldNavigationsReloads: rec_c69371244277e2ca (2026-10-19), recorded without access to
+// websites, was 15 navigations and nothing else; the repeats (reloads, a tab's URL reported
+// again) aren't steps.
+func TestFoldNavigationsReloads(t *testing.T) {
+	var lines []string
+	for i, n := range []struct {
+		tab int
+		url string
+	}{
+		{3, "http://127.0.0.1:7790/"}, {3, "http://127.0.0.1:7790/"},
+		{4, "http://localhost:7710/"}, {4, "http://localhost:7710/"}, {4, "http://localhost:7710/"},
+		{4, "http://localhost:7710/chat"}, {4, "http://localhost:7710/chat"}, {4, "http://localhost:7710/chat"},
+		{3, "http://127.0.0.1:7790/"},
+		{4, "http://localhost:7710/recordings"}, {4, "http://localhost:7710/recordings"},
+		{4, "http://localhost:7710/"}, {4, "http://localhost:7710/"}, {4, "http://localhost:7710/"},
+		{4, "http://localhost:7710/"},
+	} {
+		lines = append(lines, fmt.Sprintf(`{"seq":%d,"ts":%d,"kind":"navigate","tab":%d,"url":%q}`, i+1, 1760900000000+int64(i)*3000, n.tab, n.url))
+	}
+	got := shortTrace(t, "["+strings.Join(lines, ",")+"]")
+	want := []string{"navigate http://127.0.0.1:7790/", "navigate http://localhost:7710/", "navigate http://localhost:7710/chat",
+		"navigate http://localhost:7710/recordings", "navigate http://localhost:7710/"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("events\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestFoldNavigationsIntoActions: a navigation right after a click, submit or key in its tab is
+// what that action did, not a page the user opened.
+func TestFoldNavigationsIntoActions(t *testing.T) {
+	const u = "http://localhost:7710"
+	for _, c := range []struct {
+		name, trace string
+		want        []string
+	}{
+		{"click then pushState", `[
+			{"seq":1,"ts":1000,"tab":4,"kind":"navigate","url":"` + u + `/"},
+			{"seq":2,"ts":5000,"tab":4,"kind":"click","url":"` + u + `/","element":{"role":"link","name":"Add-ons"}},
+			{"seq":3,"ts":5300,"tab":4,"kind":"navigate","url":"` + u + `/addons"},
+			{"seq":4,"ts":9000,"tab":4,"kind":"click","url":"` + u + `/addons","element":{"role":"link","name":"Chat"}},
+			{"seq":5,"ts":9100,"tab":4,"kind":"navigate","url":"` + u + `/chat"},
+			{"seq":6,"ts":9200,"tab":4,"kind":"navigate","url":"` + u + `/chat"}]`,
+			[]string{"navigate " + u + "/", "click Add-ons → " + u + "/addons", "click Chat → " + u + "/chat"}},
+		{"redirects end where the click went", `[
+			{"seq":1,"ts":5000,"tab":4,"kind":"click","url":"` + u + `/","element":{"role":"button","name":"Sign in"}},
+			{"seq":2,"ts":5400,"tab":4,"kind":"navigate","url":"` + u + `/login"},
+			{"seq":3,"ts":5900,"tab":4,"kind":"navigate","url":"` + u + `/home"}]`,
+			[]string{"click Sign in → " + u + "/home"}},
+		{"the navigation reported before the click", `[
+			{"seq":1,"ts":5300,"tab":4,"kind":"navigate","url":"` + u + `/addons"},
+			{"seq":2,"ts":5000,"tab":4,"kind":"click","url":"` + u + `/","element":{"role":"link","name":"Add-ons"}}]`,
+			[]string{"click Add-ons → " + u + "/addons"}},
+		{"Enter in a search box", `[
+			{"seq":1,"ts":5000,"tab":4,"kind":"change","url":"` + u + `/","element":{"role":"textbox","name":"Search"},"value":"x"},
+			{"seq":2,"ts":5100,"tab":4,"kind":"key","key":"Enter","url":"` + u + `/","element":{"role":"textbox","name":"Search"}},
+			{"seq":3,"ts":5600,"tab":4,"kind":"navigate","url":"` + u + `/search?q=x"}]`,
+			[]string{"change Search", "key Search → " + u + "/search?q=x"}},
+		// Headless Firefox (lane-events.jsonl): the form's pushState came in before the typing,
+		// Enter and submit that caused it.
+		{"Enter in a chat box, the navigation first", `[
+			{"seq":6,"ts":67775,"tab":1,"kind":"click","url":"` + u + `/chat","element":{"role":"textbox","name":"Message"}},
+			{"seq":7,"ts":68141,"tab":1,"kind":"navigate","url":"` + u + `/chat?sent=1"},
+			{"seq":8,"ts":68136,"tab":1,"kind":"input","url":"` + u + `/chat","element":{"role":"textbox","name":"Message"},"value":"what time is it?"},
+			{"seq":9,"ts":68136,"tab":1,"kind":"key","key":"Enter","url":"` + u + `/chat","element":{"role":"textbox","name":"Message"}},
+			{"seq":10,"ts":68138,"tab":1,"kind":"submit","url":"` + u + `/chat","element":{"role":"form","name":"f"}},
+			{"seq":11,"ts":69649,"tab":1,"kind":"click","url":"` + u + `/chat?sent=1","element":{"role":"button","name":"Switch to light mode"}}]`,
+			[]string{"click Message", "input Message", "key Message", "submit f → " + u + "/chat?sent=1", "click Switch to light mode"}},
+		{"too late, or in another tab: opened by the user", `[
+			{"seq":1,"ts":5000,"tab":4,"kind":"click","url":"` + u + `/","element":{"role":"button","name":"Switch to light mode"}},
+			{"seq":2,"ts":5200,"tab":9,"kind":"navigate","url":"https://example.com/"},
+			{"seq":3,"ts":9000,"tab":4,"kind":"navigate","url":"` + u + `/settings"}]`,
+			[]string{"click Switch to light mode", "navigate https://example.com/", "navigate " + u + "/settings"}},
+		{"an old trace without times: right after the action", `[
+			{"seq":1,"kind":"click","url":"` + u + `/","element":{"role":"link","name":"Chat"}},
+			{"seq":2,"kind":"navigate","url":"` + u + `/chat"},
+			{"seq":3,"kind":"change","url":"` + u + `/chat","element":{"role":"textbox","name":"Message"},"value":"hi"},
+			{"seq":4,"kind":"navigate","url":"` + u + `/"}]`,
+			[]string{"click Chat → " + u + "/chat", "change Message", "navigate " + u + "/"}},
+	} {
+		if got := shortTrace(t, c.trace); !slices.Equal(got, c.want) {
+			t.Errorf("%s\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The model sees where a click went.
+func TestDescribeFoldedClick(t *testing.T) {
+	e := traceEvent{Kind: "click", Element: &traceElement{Role: "link", Name: "Chat"}, ResultURL: "http://localhost:7710/chat"}
+	if got := describeEvent(e); got != `click link "Chat" (opens http://localhost:7710/chat)` {
+		t.Fatalf("got %s", got)
 	}
 }

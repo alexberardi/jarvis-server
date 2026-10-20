@@ -115,7 +115,12 @@ export async function runWorkflow(id: string): Promise<void> {
 /** One recorded event (the extension's trace format, plan P3 piece 28). */
 export interface TraceEvent {
   kind?: string
+  /** ms since the epoch, the page's clock */
+  ts?: number
+  tab?: number
   url?: string
+  /** where a click, submit or key took its tab (foldTrace) */
+  result_url?: string
   value?: string
   masked?: boolean
   key?: string
