@@ -222,7 +222,32 @@ type round struct {
 	feedback string
 	looked   bool // this Run call has observed once
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
-	checkoutAsked bool
+	// sendAsked: a done over a filled-in form that wasn't sent was sent back.
+	checkoutAsked, sendAsked bool
+}
+
+// unsentForm is the submit button of the form on obs when the run's last actions filled fields
+// in (set_value, select, type) and pressed nothing since, else nil.
+func unsentForm(history []Entry, obs Observation) *Element {
+	filled := false
+	for i := len(history) - 1; i >= 0 && !filled; i-- {
+		switch history[i].Kind {
+		case "set_value", "select", "type":
+			filled = true
+		case "press", "click", "keypress", "navigate":
+			return nil
+		}
+	}
+	if !filled {
+		return nil
+	}
+	for i, e := range obs.Elements {
+		el := &computeruse.Element{Role: e.Role, Name: e.Name, Type: e.Type}
+		if e.Role == "button" && computeruse.Classify(computeruse.Action{Kind: "press", Ref: e.Ref}, el, computeruse.Target{Kind: "browser"}).Category == computeruse.CatSubmitThirdParty {
+			return &obs.Elements[i]
+		}
+	}
+	return nil
 }
 
 // Run drives the task until it is done, needs the user, fails, is stopped or runs out of budget.
@@ -352,6 +377,13 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	r.feedback = ""
 	switch {
 	case reply.Done:
+		if btn := unsentForm(r.run.History, obs); btn != nil && !r.sendAsked {
+			// The house model fills a form in and says done without sending it.
+			r.sendAsked = true
+			r.feedback = fmt.Sprintf(`you said done, but the form isn't sent: press %q (%s) to send it, unless the task says not to`,
+				btn.Name, btn.Ref)
+			return Outcome{}, false
+		}
 		return l.done(ctx, r, reply)
 	case reply.Ask != "":
 		if reply.Reason == ReasonPageInstructions {

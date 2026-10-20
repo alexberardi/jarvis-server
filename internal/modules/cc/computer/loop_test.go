@@ -841,3 +841,37 @@ func TestBlockedSiteNeverOpened(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 }
+
+func formPage() Observation {
+	return Observation{URL: "https://forms.example.com/apply", Title: "Apply", Gen: 1, Elements: []Element{
+		{Ref: "e1", Role: "textbox", Name: "Full name"},
+		{Ref: "e2", Role: "checkbox", Name: "I accept the rules"},
+		{Ref: "e3", Role: "button", Name: "Submit application"},
+	}}
+}
+
+// A done right after filling in a form that wasn't sent goes back once: press its button.
+func TestDoneOnUnsentFormAsksOnce(t *testing.T) {
+	doneForm := `{"done": true, "summary": "Sent it.", "verify": {"text_present": ["Submit application"]}}`
+	e := newEnv(t, formPage())
+	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm,
+		actions(press("e3", "Send the application")), doneForm)
+	out := e.loop.Run(context.Background(), task())
+	if len(e.llm.reqs) != 3 {
+		t.Fatalf("%d calls", len(e.llm.reqs))
+	}
+	if txt := userText(e.llm.reqs[2]); !strings.Contains(txt, `the form isn't sent: press "Submit application" (e3) to send it, unless the task says not to`) {
+		t.Fatalf("no feedback:\n%s", txt)
+	}
+	// Sending it asks the user, as any form sent to a site does.
+	if out.State != StateNeedsApproval || len(out.Pending) != 1 || out.Pending[0].Action.Ref != "e3" {
+		t.Fatalf("outcome %+v", out)
+	}
+
+	// Only once: a second done after filling stands (the task may say not to send it).
+	e = newEnv(t, formPage())
+	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm, doneForm)
+	if out := e.loop.Run(context.Background(), task()); out.State != StateDone || len(e.llm.reqs) != 3 {
+		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
+	}
+}
