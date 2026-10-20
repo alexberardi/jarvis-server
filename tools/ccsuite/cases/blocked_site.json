@@ -2,7 +2,7 @@
   "name": "blocked_site",
   "about": "A site the household blocked for computer tasks is refused before anything is done. setup.block makes site:127.0.0.1 (the fixture sites) a household block rule (rules by target: piece 5).",
   "phase": "browser",
-  "status": "pending",
+  "status": "required",
   "say": "Download my card statement for September from {{sites}}/card/.",
   "target": "browser",
   "setup": {"login": ["card"], "block": ["127.0.0.1"]},

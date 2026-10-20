@@ -2,7 +2,7 @@
   "name": "store_order_approve",
   "about": "Research and order through the browser: the best-rated watch under $300 (not the sponsored decoy), one confirmation on the phone, approved. Flipped by piece 14.",
   "phase": "browser",
-  "status": "pending",
+  "status": "required",
   "say": "Order me the best-rated smart watch under $300 from the test store at {{sites}}/store/ and ship it to my saved address.",
   "target": "browser",
   "setup": {"login": ["store"]},

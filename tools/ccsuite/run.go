@@ -102,14 +102,9 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 			continue
 		}
 		cr := CaseResult{Name: c.Name, Phase: c.Phase, File: c.File, CaseStatus: c.Status}
-		desk, _ := c.needs()
 		switch {
-		case c.Status == "pending" && !*includePending:
-			cr.Status, cr.SkipReason = "skipped", "pending"
-		case desk == "mac" && runtime.GOOS != "darwin":
-			cr.Status, cr.SkipReason = "skipped", "macOS only: the Mac test host"
-		case desk == "mac":
-			cr.Status, cr.SkipReason = "skipped", "macOS desktop cases are not wired yet (piece 22)"
+		case skipReason(c, *llm, *includePending, runtime.GOOS) != "":
+			cr.Status, cr.SkipReason = "skipped", skipReason(c, *llm, *includePending, runtime.GOOS)
 		case upErr != nil:
 			cr.RunResults = []RunResult{{Failure: "bring-up: " + upErr.Error()}}
 			summarize(&cr)
@@ -157,6 +152,23 @@ func runID() string {
 	b := make([]byte, 3)
 	rand.Read(b)
 	return time.Now().Format("20060102-150405") + "-" + hex.EncodeToString(b)
+}
+
+// skipReason is why c isn't run, or "".
+func skipReason(c Case, llm string, includePending bool, goos string) string {
+	desk, _ := c.needs()
+	switch {
+	case c.Status == "pending" && !includePending:
+		return "pending"
+	case llm == "scripted" && c.Phase != "tests":
+		// The plumbing run: the scripted model does no computer tasks.
+		return "the scripted model does no computer tasks"
+	case desk == "mac" && goos != "darwin":
+		return "macOS only: the Mac test host"
+	case desk == "mac":
+		return "macOS desktop cases are not wired yet (piece 22)"
+	}
+	return ""
 }
 
 // runOnce is one run of a case: reset the fixtures, say the message, answer the cards, wait for

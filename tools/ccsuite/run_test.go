@@ -27,3 +27,23 @@ func TestCopyLines(t *testing.T) {
 		t.Fatalf("missing log: %d", n)
 	}
 }
+
+func TestSkipReason(t *testing.T) {
+	browser := Case{Name: "web_form", Phase: "browser", Status: "required", Target: "browser"}
+	for _, c := range []struct {
+		c       Case
+		llm     string
+		pending bool
+		want    string
+	}{
+		{browser, "shared", false, ""},
+		{browser, "scripted", false, "the scripted model does no computer tasks"},
+		{Case{Phase: "browser", Status: "pending"}, "shared", false, "pending"},
+		{Case{Phase: "browser", Status: "pending"}, "shared", true, ""},
+		{Case{Phase: "tests", Status: "required"}, "scripted", false, ""},
+	} {
+		if got := skipReason(c.c, c.llm, c.pending, "linux"); got != c.want {
+			t.Errorf("%+v %s: %q, want %q", c.c, c.llm, got, c.want)
+		}
+	}
+}
