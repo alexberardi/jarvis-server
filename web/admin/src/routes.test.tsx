@@ -241,3 +241,18 @@ describe('logout (G13)', () => {
     expect(localStorage.getItem('jarvis-admin-theme')).toBe('light')
   })
 })
+
+describe('design-system gallery (dev only)', () => {
+  it('serves /dev/ui inside the shell under vite dev, with no nav entry', async () => {
+    signIn({ is_superuser: false })
+    renderAt('/dev/ui')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Design system' })).toBeInTheDocument()
+    expect(within(nav()).queryByRole('link', { name: /Design/ })).toBeNull()
+  })
+
+  it('opens the dialog on load with ?open=dialog, for a screenshot', async () => {
+    signIn({ is_superuser: false })
+    renderAt('/dev/ui?open=dialog')
+    expect(await screen.findByRole('dialog', { name: 'Rename node' })).toBeInTheDocument()
+  })
+})

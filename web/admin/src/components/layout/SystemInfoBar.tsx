@@ -12,7 +12,7 @@ export default function SystemInfoBar() {
   const platform = data.arch ? `${data.platform}/${data.arch}` : data.platform
 
   return (
-    <div className="space-y-0.5 border-t border-[var(--color-border)] px-3 py-2 text-[10px] text-[var(--color-text-muted)]">
+    <div className="space-y-0.5 border-t border-border px-3 py-2 text-caption font-normal text-text-muted">
       <div className="flex items-center gap-1.5">
         <Cpu size={10} />
         <span>{data.cpuCount} cores</span>

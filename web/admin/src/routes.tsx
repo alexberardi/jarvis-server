@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { Navigate, Route } from 'react-router-dom'
 
 import RequireSuperuser from '@/auth/RequireSuperuser'
@@ -27,6 +27,14 @@ import UpdatePage from '@/pages/UpdatePage'
 import UsersPage from '@/pages/UsersPage'
 import WorkflowEditPage from '@/pages/WorkflowEditPage'
 import WorkflowsPage from '@/pages/WorkflowsPage'
+
+/**
+ * The design-system gallery (pages/dev/UiGalleryPage) is dev-only: there under `vite dev` and in
+ * a build made with VITE_UI_GALLERY=1 (scripts/sandbox up --ui, for its screenshots). A release
+ * build leaves the route and the page's chunk out.
+ */
+const UiGalleryPage =
+  import.meta.env.DEV || import.meta.env.VITE_UI_GALLERY === '1' ? lazy(() => import('@/pages/dev/UiGalleryPage')) : null
 
 /**
  * The Admin pages (webapp 01 §4.2), under /admin/. Their old top-level paths redirect, so
@@ -73,6 +81,16 @@ export function shellRoutes() {
       <Route path="/workflows/:id" element={<WorkflowEditPage />} />
       <Route path="/recordings" element={<RecordingsPage />} />
       <Route path="/account" element={<AccountPage />} />
+      {UiGalleryPage && (
+        <Route
+          path="/dev/ui"
+          element={
+            <Suspense fallback={null}>
+              <UiGalleryPage />
+            </Suspense>
+          }
+        />
+      )}
       <Route path="/admin" element={<RequireSuperuser />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
         {adminPages.map((p) => (

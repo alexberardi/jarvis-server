@@ -83,4 +83,19 @@ describe('navigation drawer (below md)', () => {
     expect(drawer().className).toMatch(/\bmd:translate-x-0\b/)
     expect(menu().className).toMatch(/\bmd:hidden\b/)
   })
+
+  it('slides on the drawer curve in 220ms, and appears in place for reduced motion', () => {
+    renderShell()
+    expect(drawer()).toHaveClass('ease-drawer', 'duration-(--duration-drawer)', 'motion-reduce:transition-none')
+    fireEvent.click(menu())
+    expect(screen.getByTestId('sidebar-backdrop')).toHaveClass('animate-fade-in')
+  })
+
+  it('marks the current page with the primary-soft selection', () => {
+    renderShell()
+    const current = screen.getByRole('link', { name: 'Dashboard' })
+    expect(current).toHaveAttribute('aria-current', 'page')
+    expect(current).toHaveClass('bg-primary-soft', 'text-primary')
+    expect(screen.getByRole('link', { name: 'Logs' })).not.toHaveClass('bg-primary-soft')
+  })
 })

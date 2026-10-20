@@ -13,6 +13,7 @@
     "/workflows/:id": { "tests": ["e2e/web/tests/workflows.spec.ts"] },
     "/recordings": { "tests": ["e2e/web/tests/workflows.spec.ts"] },
     "/account": { "tests": ["e2e/web/tests/account.spec.ts", "e2e/web/tests/household-settings.spec.ts"] },
+    "/dev/ui": { "manual": "the design-system gallery, dev-only (vite dev or a VITE_UI_GALLERY=1 build): reviewed by scripts/screenshots --pages /dev/ui; each component's behaviour is in web/admin/src/components/ui/*.test.tsx" },
     "/admin": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/admin/dashboard": { "tests": ["e2e/web/tests/admin/dashboard.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/models": { "tests": ["e2e/web/tests/admin/models.spec.ts", "e2e/web/tests/roles.spec.ts"] },
