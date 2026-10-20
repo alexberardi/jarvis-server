@@ -67,6 +67,13 @@ func TestVerifyScreen(t *testing.T) {
 	if v := e.verify(&SuccessCheck{Screen: "Is an order number shown?"}); !v.OK || v.Checked != "Is an order number shown?: yes" {
 		t.Fatalf("verify %+v", v)
 	}
+	// The question goes with the page's address, title and text: the house model answered "no"
+	// from the screenshot alone on the store's confirmation page.
+	if txt := e.llm.reqs[0].Messages[1].Content.Parts[0].Text; !strings.Contains(txt, "Question: Is an order number shown?") ||
+		!strings.Contains(txt, "Address: https://shop.example.com/thanks?order=1234") || !strings.Contains(txt, "Title: Thank you") ||
+		!strings.Contains(txt, "Order 1234") {
+		t.Fatalf("screen question:\n%s", txt)
+	}
 	e.script("Maybe.")
 	if v := e.verify(&SuccessCheck{Screen: "Is an order number shown?"}); v.OK {
 		t.Fatalf("an unclear answer passed: %+v", v)
@@ -239,23 +246,30 @@ func TestVerifyTextInPageText(t *testing.T) {
 	}
 }
 
-// The task's success said only in words (a planner's "an order confirmation page") gives way to
-// the model's own checks of the address, the text, a download or a file; with none, it is asked
-// of the screen.
-func TestDoneScreenOnlyTaskTakesModelChecks(t *testing.T) {
-	e := newEnv(t, shopPage())
-	e.script(doneAnswer)
+// The task's success said only in words (a planner's "an order confirmation page") is asked of
+// the screen even when the model's done carries checks of its own: both must hold. The house
+// model said done on the checkout page with url_contains "checkout", before ordering.
+func TestDoneScreenTaskCheckedWithModelChecks(t *testing.T) {
+	checkout := shopPage()
+	checkout.URL = "https://shop.example.com/checkout"
+	checkout.Image = thanksPage().Image
+	e := newEnv(t, checkout)
+	e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "checkout", "text_present": ["Place order"]}}`,
+		"No, it's a checkout page with a Place order button.")
 	tk := task()
 	tk.Success = &SuccessCheck{Screen: "an order confirmation page"}
 	out := e.loop.Run(context.Background(), tk)
-	if out.State != StateDone || out.Checked != `the address contains "/soap"` || len(e.llm.reqs) != 1 {
-		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
+	if out.State == StateDone {
+		t.Fatalf("done on the checkout page: %+v", out)
+	}
+	if len(e.llm.reqs) < 2 || !strings.Contains(userText(e.llm.reqs[1]), "an order confirmation page") {
+		t.Fatalf("the screen wasn't asked: %d calls", len(e.llm.reqs))
 	}
 
 	e = newEnv(t, thanksPage())
-	e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"screen": "is the order placed?"}}`, "Yes, the order page.")
+	e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/thanks"}}`, "Yes, the order page.")
 	out = e.loop.Run(context.Background(), tk)
-	if out.State != StateDone || out.Checked != "an order confirmation page: yes" {
+	if out.State != StateDone || out.Checked != `the address contains "/thanks"; an order confirmation page: yes` {
 		t.Fatalf("outcome %+v", out)
 	}
 }

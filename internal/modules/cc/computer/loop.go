@@ -476,14 +476,20 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 
 // done checks the result before the task reports done (C4): the task's own success check, else
 // the one the model's done carries. A task's check said only in words (Screen: the planner's
-// "an order confirmation page") gives way to the model's checks of the address, the text, a
-// download or a file, which hold or don't on the page itself. A done without a check is sent back
-// once for one. A check that fails goes back to the model as feedback, with verifyRounds more
+// "an order confirmation page") is checked together with the model's checks of the address, the
+// text, a download or a file: both must hold, the model's never replace the task's (the house
+// model checked "checkout" on the checkout page, before ordering). A done without a check is sent
+// back once for one. A check that fails goes back to the model as feedback, with verifyRounds more
 // rounds to fix it.
 func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation) (Outcome, bool) {
 	check := r.task.Success
-	if check.empty() || (check.screenOnly() && reply.Verify.concrete()) {
+	switch {
+	case check.empty():
 		check = reply.Verify
+	case check.screenOnly() && reply.Verify.concrete():
+		both := *reply.Verify
+		both.Screen = check.Screen
+		check = &both
 	}
 	if r.run.Verify == nil {
 		r.run.Verify = &VerifyState{}
