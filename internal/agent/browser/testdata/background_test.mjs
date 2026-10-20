@@ -57,7 +57,7 @@ function load({ tabs = [], granted = true, blocked = [], firefox = true } = {}) 
     }
     throw new Error(`no result for ${cmd}`);
   };
-  return { call, sent, injected, events: () => sent.filter((m) => m.event === "record") };
+  return { call, sent, injected, ctx, events: () => sent.filter((m) => m.event === "record") };
 }
 
 const TABS = [
@@ -106,4 +106,33 @@ test("a page that can't be watched is reported, not skipped silently", async () 
   assert.equal(evs[0].url, "https://bank.example.com/");
   assert.equal(evs[0].tab, 2);
   assert.equal(evs[0].recording_id, "rec_1");
+});
+
+// fakeInput is an <input type=...> as actDo sees it, in ctx's document.
+function fakeInput(ctx, type) {
+  const doc = { execCommand: () => false };
+  ctx.document = doc;
+  ctx.Event = class { constructor(type) { this.type = type; } };
+  ctx.HTMLInputElement = class { set value(v) { this._value = v; } get value() { return this._value ?? ""; } };
+  const el = Object.assign(Object.create(ctx.HTMLInputElement.prototype), {
+    localName: "input", isConnected: true, ownerDocument: doc, disabled: false, readOnly: false, events: [],
+    getAttribute: (k) => (k === "type" ? type : null),
+    scrollIntoView() {}, focus() {}, select() {},
+    dispatchEvent(e) { this.events.push(e.type); },
+  });
+  ctx.__jarvisSnap = { gen: 1, refs: new Map([[1, el]]) };
+  return el;
+}
+
+test("set_value fills a date field (the native setter, with input and change events)", () => {
+  const { ctx } = load();
+  for (const type of ["date", "time", "datetime-local", "month", "week"]) {
+    const el = fakeInput(ctx, type);
+    const r = ctx.actDo(1, 1, "set_value", "2026-11-01", []);
+    assert.equal(r?.error, undefined, type);
+    assert.equal(el.value, "2026-11-01", type);
+    assert.deepEqual(el.events, ["input", "change"], type);
+  }
+  fakeInput(ctx, "checkbox");
+  assert.equal(ctx.actDo(1, 1, "set_value", "x", []).code, "invalid_argument");
 });
