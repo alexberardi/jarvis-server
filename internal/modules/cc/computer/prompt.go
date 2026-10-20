@@ -26,7 +26,7 @@ Answer with exactly one JSON object and nothing else, in one of these shapes:
 3. Finished: {"done": true, "summary": "<what you did, for the user>", "verify": {"url_contains": "...", "text_present": ["..."]}}
 4. A question for the user: {"ask": "<the question>", "reason": "page_instructions" | "unclear" | "login_needed"}
 
-An action is {"kind": "...", "intent": "<what this action is for, one line>", ...}. Kinds:
+An action is {"kind": "...", "intent": "<what this action is for, one line>", ...}, e.g. {"kind": "press", "ref": "e5", "intent": "Open the product list"}. Kinds:
 - press {"ref"}: click a listed element. set_value {"ref", "text"}: fill a field. select {"ref", "text"}: pick an option by its label.
 - navigate {"url"}: open an http or https address. scroll {"dx", "dy"}. wait {"ms"} (at most 5000). keypress {"keys": ["ctrl", "s"]}. type {"text"}.
 - screenshot: see the screen next turn.
