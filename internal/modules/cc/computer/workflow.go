@@ -13,7 +13,7 @@ import (
 )
 
 // Taught workflows as the replay sees them (plan P3 pieces 26 and 31). cc stores them
-// (cc_taught_workflows, cc/workflows.go, whose WStep, RecordedElement and Param are these types)
+// (cc_taught_workflows, cc/workflows.go, whose WStep, StepWindow, RecordedElement and Param are these types)
 // and the replay (replay.go) runs them.
 
 const (
@@ -52,9 +52,17 @@ type WorkflowStep struct {
 	Target  string             `json:"target"` // browser | desktop
 	Site    string             `json:"site,omitempty"`
 	App     string             `json:"app,omitempty"`
+	Window  *StepWindow        `json:"window,omitempty"` // desktop: the recorded window, when known
 	Action  computeruse.Action `json:"action"`
 	Element *RecordedElement   `json:"element,omitempty"`
 	Risk    string             `json:"risk,omitempty"` // a computeruse risk category; "" is none
+}
+
+// StepWindow is the window a desktop step was recorded in: its class (the app id on Wayland)
+// and title.
+type StepWindow struct {
+	Class string `json:"class,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 // RecordedElement is what the recorder saw of the element a step acted on.

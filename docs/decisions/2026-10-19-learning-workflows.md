@@ -29,4 +29,20 @@ choices a later reader would otherwise have to work out again:
   callback button either, because nothing would happen on the server when it is pressed. In the
   admin's inbox, the link opens the workflow page. A real Review button in the apps would read
   `metadata.path` and needs client work.
-- **Desktop recordings** have another event shape (pieces 34–35), so they are not learnt yet.
+- **Desktop recordings** (pieces 34–35, #342) are learnt the same way, with their own event lines
+  (the app, the window title and the element, when the recording had one) and a success check of
+  `text_present` or `screen` (no URL or download). Each step has `target: "desktop"`, `app`, and
+  `window` (`class` and `title` only; no geometry) when the recorder saw the focused window. A step
+  replays its last event: a click becomes `click` at the point, with `button: right` or `middle`
+  kept; typing becomes `type` (`•••` and `sensitive_input` when masked, or when the recording had
+  no accessibility context, which parsing treats as masked); a key becomes `keypress` with its
+  chord split (`Ctrl+s` is `["ctrl","s"]`) and is dropped when a key isn't in `KeyNames`. A cleared
+  field is dropped, since there is no ref for `set_value`. There is no `element` yet (#343).
+- **A desktop click keeps the recorded global point** (screen coordinates), not a point relative to
+  the window. X11 and macOS traces have no window geometry, so a window-relative point could only
+  be made for some platforms, and it could go negative, which `Validate` refuses. The point is a
+  fallback anyway: a replay should find the place again from the element (#343) or the recorded
+  crop, and map the point into its own capture's pixels when it falls back to it.
+  Today's replay (`cc/computer/replay.go`) never clicks it blindly: a click without an element
+  is a `needsTarget` action, so it goes to a model round instead; a learnt `type`
+  or `keypress` runs directly.
