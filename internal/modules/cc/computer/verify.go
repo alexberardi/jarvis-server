@@ -202,7 +202,19 @@ func nameLike(name, like string) bool {
 		ok, err := path.Match(like, name)
 		return ok && err == nil
 	}
-	return strings.Contains(name, like)
+	return strings.Contains(unseparated(name), unseparated(like))
+}
+
+// unseparated is s without the separators a file name's words may have: statement_2026-09 and
+// statement-2026-09 are the same name.
+func unseparated(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '_', '-', ' ', '.':
+			return -1
+		}
+		return r
+	}, s)
 }
 
 func hasSuffix(s string, suffixes []string) bool {

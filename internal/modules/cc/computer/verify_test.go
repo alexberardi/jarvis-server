@@ -97,6 +97,11 @@ func TestVerifyDownload(t *testing.T) {
 		v.Why != "statement-2026-08.pdf in Downloads is too small to be it" {
 		t.Fatalf("verify %+v", v)
 	}
+	// Separators don't matter: the house model writes statement_2026_09 for statement-2026-09.
+	if v := e.verify(&SuccessCheck{Download: &DownloadCheck{NameLike: "STATEMENT_2026 09", MinBytes: 1000}}); !v.OK ||
+		v.Checked != "Statement-2026-09.pdf is in Downloads (48 KB)" {
+		t.Fatalf("verify %+v", v)
+	}
 	if v := e.verify(&SuccessCheck{Download: &DownloadCheck{NameLike: "invoice"}}); v.OK ||
 		v.Why != `there's no file like "invoice" in Downloads` {
 		t.Fatalf("verify %+v", v)
@@ -252,5 +257,18 @@ func TestDoneScreenOnlyTaskTakesModelChecks(t *testing.T) {
 	out = e.loop.Run(context.Background(), tk)
 	if out.State != StateDone || out.Checked != "an order confirmation page: yes" {
 		t.Fatalf("outcome %+v", out)
+	}
+}
+
+// A failed download check points at the page's download button.
+func TestDownloadCheckFailsPointsAtButton(t *testing.T) {
+	page := shopPage()
+	page.Elements = append(page.Elements, Element{Ref: "e8", Role: "button", Name: "Download CSV"})
+	e := newEnv(t, page)
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {}}
+	e.script(`{"done": true, "summary": "Downloaded it.", "verify": {"download": {"name_like": "statement"}}}`, doneAnswer)
+	e.run()
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `there's no file like "statement" in Downloads. Nothing was downloaded yet: press "Download CSV" (e8) to download it.`) {
+		t.Fatalf("no pointer:\n%s", txt)
 	}
 }

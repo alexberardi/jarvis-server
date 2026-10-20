@@ -226,6 +226,16 @@ type round struct {
 	checkoutAsked, sendAsked bool
 }
 
+// downloadButton is obs's first element named for downloading, else nil.
+func downloadButton(obs Observation) *Element {
+	for i, e := range obs.Elements {
+		if (e.Role == "button" || e.Role == "link") && strings.Contains(strings.ToLower(e.Name), "download") {
+			return &obs.Elements[i]
+		}
+	}
+	return nil
+}
+
 // unsentForm is the submit button of the form on obs when the run's last actions filled fields
 // in (set_value, select, type) and pressed nothing since, else nil.
 func unsentForm(history []Entry, obs Observation) *Element {
@@ -384,7 +394,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 				btn.Name, btn.Ref)
 			return Outcome{}, false
 		}
-		return l.done(ctx, r, reply)
+		return l.done(ctx, r, reply, obs)
 	case reply.Ask != "":
 		if reply.Reason == ReasonPageInstructions {
 			return Outcome{State: StateAsk, Ask: injectionAsk, Reason: ReasonPageInstructions}, true
@@ -413,7 +423,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 // download or a file, which hold or don't on the page itself. A done without a check is sent back
 // once for one. A check that fails goes back to the model as feedback, with verifyRounds more
 // rounds to fix it.
-func (l *Loop) done(ctx context.Context, r *round, reply Reply) (Outcome, bool) {
+func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation) (Outcome, bool) {
 	check := r.task.Success
 	if check.empty() || (check.screenOnly() && reply.Verify.concrete()) {
 		check = reply.Verify
@@ -443,7 +453,14 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply) (Outcome, bool) 
 		v.FailedAt = r.run.Rounds
 	}
 	v.What, v.Why = check.describe(), res.Why
-	r.feedback = "you said done, but my check failed: " + res.Why +
+	why := res.Why
+	if check.Download != nil && strings.Contains(why, "Downloads") {
+		if btn := downloadButton(obs); btn != nil {
+			// The house model opens a statement's page and takes that for its download.
+			why += fmt.Sprintf(". Nothing was downloaded yet: press %q (%s) to download it", btn.Name, btn.Ref)
+		}
+	}
+	r.feedback = "you said done, but my check failed: " + why +
 		". So the task isn't finished: don't say done now; answer with the action it still needs on the " +
 		"current page (e.g. press the button that sends, submits or completes it), and say done once it holds."
 	return Outcome{}, false
