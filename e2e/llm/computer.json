@@ -1,0 +1,59 @@
+{
+  "fallback": "Scripted model: no rule matched that.",
+  "rules": [
+    {
+      "match": "(?s)You are Jarvis's errand planner\\..*red mug",
+      "reply": "{\"summary\": \"Order a red mug from shop.example\", \"steps\": [{\"command\": \"computer_task\", \"args\": {\"goal\": \"Order a red mug\", \"target\": \"browser\", \"site\": \"shop.example\", \"success\": \"an order confirmation page\"}, \"label\": \"Order the red mug on shop.example\", \"is_risky\": true}]}"
+    },
+    {
+      "match": "You are Jarvis's errand planner\\.",
+      "reply": "{\"summary\": \"Order a blue mug from shop.example\", \"steps\": [{\"command\": \"computer_task\", \"args\": {\"goal\": \"Order a blue mug\", \"target\": \"browser\", \"site\": \"shop.example\", \"success\": \"an order confirmation page\"}, \"label\": \"Order the blue mug on shop.example\", \"is_risky\": true}]}"
+    },
+    {
+      "match": "(?s)^Task: [^\\n]*red mug",
+      "reply": "{\"checkout\": {\"product\": \"Red mug\", \"price\": \"$14.50\", \"currency\": \"USD\", \"seller\": \"Shop Example\", \"ship_to\": \"12 Elm St\", \"card\": \"4242\"}, \"actions\": [{\"kind\": \"press\", \"ref\": \"e1\", \"intent\": \"Place the order\"}]}"
+    },
+    {
+      "match": "(?s)^Task: .*Place the order",
+      "reply": "{\"done\": true, \"summary\": \"Ordered the blue mug: order 1234 is on the confirmation page.\"}"
+    },
+    {
+      "match": "(?s)^Task: .*Add the blue mug to the cart",
+      "reply": "{\"checkout\": {\"product\": \"Blue mug\", \"price\": \"$12.99\", \"currency\": \"USD\", \"seller\": \"Shop Example\", \"ship_to\": \"12 Elm St\", \"card\": \"4242\"}, \"actions\": [{\"kind\": \"press\", \"ref\": \"e1\", \"intent\": \"Place the order\"}]}"
+    },
+    {
+      "match": "(?s)^Task: ",
+      "reply": "{\"thought\": \"Put it in the cart first.\", \"actions\": [{\"kind\": \"press\", \"ref\": \"e3\", \"intent\": \"Add the blue mug to the cart\"}]}"
+    },
+    {
+      "match": "giving the user the FINAL report",
+      "reply": "I ordered the blue mug on shop.example: order 1234."
+    },
+    {
+      "match": "(?i)order me a blue mug",
+      "tool_calls": [
+        {
+          "name": "run_errand",
+          "arguments": {
+            "goal": "Order me a blue mug from shop.example"
+          }
+        }
+      ]
+    },
+    {
+      "match": "(?i)order me a red mug",
+      "tool_calls": [
+        {
+          "name": "run_errand",
+          "arguments": {
+            "goal": "Order me a red mug from shop.example"
+          }
+        }
+      ]
+    },
+    {
+      "after_tool": "run_errand",
+      "reply": "On it: the plan is on your phone."
+    }
+  ]
+}

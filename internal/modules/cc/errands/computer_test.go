@@ -273,6 +273,9 @@ func TestCheckoutCardThenApprove(t *testing.T) {
 	if len(c.comp.acted()) != 0 {
 		t.Fatal("the order ran before the OK")
 	}
+	if up, _ := c.cards.update("item-1"); up.Metadata["steps"].([]any)[0].(map[string]any)["result"] != "Waiting for you in "+shopSite {
+		t.Fatalf("progress card while waiting = %#v", up.Metadata["steps"])
+	}
 	if !card.Push {
 		t.Fatal("the confirmation isn't pushed")
 	}
@@ -314,6 +317,12 @@ func TestCheckoutCardThenApprove(t *testing.T) {
 	if w := c.wf("wf_c"); w.State != "done" || w.Results[0].Message != "Ordered the blue mug." {
 		t.Fatalf("run = %s %+v", w.State, w.Results)
 	}
+	// The progress card lists what ran, once each (not the held action as well).
+	up, _ := c.cards.update("item-1")
+	st := up.Metadata["steps"].([]any)[0].(map[string]any)
+	if prg, _ := st["progress"].([]string); !slices.Equal(prg, []string{"Place the order"}) || up.Metadata["state"] != "done" {
+		t.Fatalf("progress card = %#v", up.Metadata)
+	}
 }
 
 func TestCheckoutCancelNothingRuns(t *testing.T) {
@@ -328,6 +337,9 @@ func TestCheckoutCancelNothingRuns(t *testing.T) {
 	c.idle()
 	if st := c.wfState("wf_c"); st != "cancelled" {
 		t.Fatalf("state = %s", st)
+	}
+	if up, _ := c.cards.update("item-1"); up.Metadata["state"] != "stopped" || len(elementLabels(up.Metadata)) != 0 {
+		t.Fatalf("progress card = %#v", up.Metadata)
 	}
 	run, _ := c.runs.ForStep(context.Background(), "wf_c", 0)
 	if run.State != computer.RunStopped || !run.StopRequested {
@@ -432,7 +444,7 @@ func TestProgressCardUpdates(t *testing.T) {
 	c.launchRun("wf_c", "errand", computerStep("browse"))
 	c.idle()
 	prog := c.cards.all()[0]
-	if !strings.HasPrefix(prog.Title, progressTitlePrefix) || prog.Metadata["workflow_id"] != "wf_c" {
+	if !strings.HasPrefix(prog.Title, progressTitlePrefix) || prog.Metadata["workflow_id"] != "wf_c" || prog.Push {
 		t.Fatalf("first card = %+v", prog)
 	}
 	if len(seen) != 1 {

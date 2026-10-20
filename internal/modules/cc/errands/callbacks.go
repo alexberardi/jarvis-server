@@ -392,6 +392,8 @@ func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackRes
 			if w.Kind == KindAutorun {
 				s.updateRanCard(ctx, w, w.Results, "stopped", "")
 				s.recordStopped(ctx, w, &c.UserID)
+			} else if w.tracksProgress() {
+				s.updateRanCard(ctx, w, w.Results, "stopped", "")
 			}
 			return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, "🗑️ Errand stopped",
 				firstNonEmpty(w.Title, w.Goal, "The errand")+" stopped."+note)}

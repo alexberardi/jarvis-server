@@ -38,6 +38,8 @@ const (
 
 	// progressIntents is how many of the task's last actions its card lists.
 	progressIntents = 5
+	// heldResult is a history entry's result for an action held for the user (computer.Loop).
+	heldResult = "waiting for the user"
 )
 
 // ComputerTasks runs computer_task steps.
@@ -332,7 +334,9 @@ func (s *Service) ensureProgressCard(ctx context.Context, w *workflowRow, result
 	if s.Cards == nil || w.InboxItemID != "" || w.Kind == KindAutorun {
 		return
 	}
-	id := s.Cards.Post(ctx, s.ranCardOf(w, s.ranCard(ctx, w, results, "running"), ""))
+	c := s.ranCardOf(w, s.ranCard(ctx, w, results, "running"), "")
+	c.Push = false // the user just tapped Run; the confirmation and the completion push
+	id := s.Cards.Post(ctx, c)
 	if id == "" {
 		return
 	}
@@ -354,21 +358,24 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 		return "", nil, false
 	}
 	for _, h := range run.History {
-		if h.Intent != "" {
+		// What the task did: not the actions it held for the user, nor the ones that never ran.
+		if h.Intent != "" && h.Result != heldResult && h.Result != "not run" {
 			intents = append(intents, h.Intent)
 		}
 	}
 	if len(intents) > progressIntents {
 		intents = intents[len(intents)-progressIntents:]
 	}
+	where := firstNonEmpty(siteOf(truthyStr(st.Args, "site")), parse.PyStrip(truthyStr(st.Args, "app")),
+		map[string]string{"desktop": "the app"}[run.Target], "the browser")
 	switch run.State {
-	case computer.RunRunning, computer.RunWaiting, computer.RunPaused:
-		where := firstNonEmpty(siteOf(truthyStr(st.Args, "site")), parse.PyStrip(truthyStr(st.Args, "app")),
-			map[string]string{"desktop": "the app"}[run.Target], "the browser")
+	case computer.RunRunning:
 		line = "Working in " + where
 		if len(intents) > 0 {
 			line += ": " + intents[len(intents)-1]
 		}
+	case computer.RunWaiting, computer.RunPaused:
+		line = "Waiting for you in " + where
 	}
 	return line, intents, true
 }
