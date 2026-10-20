@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import Dialog, { Sheet } from './Dialog'
 
@@ -85,6 +85,21 @@ describe('Dialog', () => {
     expect(document.body.style.overflow).toBe('hidden')
     fireEvent.keyDown(dialog()!, { key: 'Escape' })
     expect(document.body.style.overflow).toBe('')
+  })
+})
+
+describe('Dialog that must not be dismissed', () => {
+  it('has no close button, and ignores Escape and the backdrop', () => {
+    const onClose = vi.fn()
+    render(
+      <Dialog open dismissible={false} onClose={onClose} title="Stopping">
+        <p>Wait</p>
+      </Dialog>,
+    )
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    fireEvent.click(screen.getByTestId('dialog-backdrop'))
+    expect(onClose).not.toHaveBeenCalled()
   })
 })
 

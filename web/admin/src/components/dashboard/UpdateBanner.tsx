@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowUpCircle } from 'lucide-react'
 import { updateStatus } from '@/api/update'
+import { Banner, Button } from '@/components/ui'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 
 const DISMISSED_KEY = 'jarvis-update-dismissed-version'
@@ -24,37 +25,33 @@ export default function UpdateBanner() {
   if (dismissed === data.latest_version) return null
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-      <div className="flex items-center gap-3">
-        <ArrowUpCircle size={20} className="text-green-500" />
-        <div>
-          <p className="text-sm font-medium text-[var(--color-text)]">jarvisd {data.latest_version} is available</p>
-          <p className="text-xs text-[var(--color-text-muted)]">You have {data.current_version}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            try {
-              localStorage.setItem(DISMISSED_KEY, data.latest_version!)
-            } catch {
-              // ignore
-            }
-            setDismissed(data.latest_version)
-          }}
-          className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-        >
-          Dismiss
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate('/admin/update')}
-          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs text-white hover:opacity-90"
-        >
-          View update
-        </button>
-      </div>
-    </div>
+    <Banner
+      tone="success"
+      icon={<ArrowUpCircle size={20} />}
+      title={`jarvisd ${data.latest_version} is available`}
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              try {
+                localStorage.setItem(DISMISSED_KEY, data.latest_version!)
+              } catch {
+                // ignore
+              }
+              setDismissed(data.latest_version)
+            }}
+          >
+            Dismiss
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => navigate('/admin/update')}>
+            View update
+          </Button>
+        </>
+      }
+    >
+      You have {data.current_version}
+    </Banner>
   )
 }

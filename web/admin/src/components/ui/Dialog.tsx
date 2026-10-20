@@ -15,6 +15,8 @@ export interface DialogProps {
   footer?: ReactNode
   /** `sheet` comes up from the bottom on a phone and is a centred dialog from md. */
   variant?: 'dialog' | 'sheet'
+  /** False while closing would leave the user nowhere (an action that can't be undone is under way): no close button, Escape and the backdrop do nothing. */
+  dismissible?: boolean
   className?: string
 }
 
@@ -38,6 +40,7 @@ export default function Dialog({
   children,
   footer,
   variant = 'dialog',
+  dismissible = true,
   className,
 }: DialogProps) {
   const [mounted, setMounted] = useState(open)
@@ -59,6 +62,7 @@ export default function Dialog({
       description={description}
       footer={footer}
       variant={variant}
+      dismissible={dismissible}
       className={className}
     >
       {children}
@@ -72,7 +76,10 @@ export function Sheet(props: Omit<DialogProps, 'variant'>) {
   return <Dialog {...props} variant="sheet" />
 }
 
-function DialogPanel({ open, onClose, title, description, children, footer, variant, className }: DialogProps) {
+function DialogPanel({ open, onClose: close, title, description, children, footer, variant, dismissible, className }: DialogProps) {
+  const onClose = () => {
+    if (dismissible) close()
+  }
   const titleId = useId()
   const descriptionId = useId()
   const panel = useRef<HTMLDivElement>(null)
@@ -159,9 +166,11 @@ function DialogPanel({ open, onClose, title, description, children, footer, vari
               </p>
             )}
           </div>
-          <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose} className="-mt-1 -mr-2">
-            <X size={18} aria-hidden />
-          </Button>
+          {dismissible && (
+            <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose} className="-mt-1 -mr-2">
+              <X size={18} aria-hidden />
+            </Button>
+          )}
         </div>
         <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-5">
           {children}

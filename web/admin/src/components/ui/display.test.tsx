@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Badge from './Badge'
+import Banner from './Banner'
 import Card, { CardHeader } from './Card'
 import EmptyState from './EmptyState'
 import ErrorState from './ErrorState'
@@ -136,5 +137,24 @@ describe('Skeleton', () => {
     render(<SkeletonList rows={4} label="Loading nodes" />)
     const status = screen.getByRole('status', { name: 'Loading nodes' })
     expect(status.children).toHaveLength(4)
+  })
+})
+
+describe('Banner', () => {
+  it('shows its title, text and actions, and passes the role and name through', () => {
+    render(
+      <Banner tone="danger" role="alert" aria-label="GPU problem" title="The GPU is gone" actions={<button>Fix it</button>}>
+        Models that need it are not running.
+      </Banner>,
+    )
+    const alert = screen.getByRole('alert', { name: 'GPU problem' })
+    expect(alert).toHaveTextContent('The GPU is gone')
+    expect(alert).toHaveTextContent('Models that need it are not running.')
+    expect(within(alert).getByRole('button', { name: 'Fix it' })).toBeInTheDocument()
+  })
+
+  it('draws its tone on the soft background', () => {
+    const { container } = render(<Banner tone="warning">Downloading</Banner>)
+    expect(container.firstChild).toHaveClass('bg-warning-soft')
   })
 })

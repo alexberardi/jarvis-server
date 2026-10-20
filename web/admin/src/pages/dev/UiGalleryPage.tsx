@@ -1,9 +1,11 @@
 import { useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Cpu, Inbox, Plus, Save, Trash2 } from 'lucide-react'
+import { AlertOctagon, ArrowUpCircle, Cpu, Inbox, Loader, Plus, Save, Sparkles, Trash2 } from 'lucide-react'
 import {
   Badge,
+  Banner,
   Button,
+  buttonStyles,
   Card,
   CardHeader,
   Dialog,
@@ -149,6 +151,21 @@ export default function UiGalleryPage() {
               Offline
             </Badge>
           </Row>
+        </Section>
+
+        <Section title="Banner">
+          <div className="space-y-3">
+            <Banner tone="primary" icon={<Sparkles size={20} />} title="Setup isn't finished" actions={<a href="#banner" className={buttonStyles({ variant: 'primary', size: 'sm' })}>Finish setup</a>}>
+              Models, privacy choices and next steps.
+            </Banner>
+            <Banner tone="warning" icon={<Loader size={20} />}>Language model: downloading 30%.</Banner>
+            <Banner tone="success" icon={<ArrowUpCircle size={20} />} title="jarvisd 0.32.0 is available" actions={<Button size="sm">View update</Button>}>
+              You have 0.31.2
+            </Banner>
+            <Banner tone="danger" icon={<AlertOctagon size={20} />} title="The GPU needs a reboot">
+              Not running until then: Live (voice replies).
+            </Banner>
+          </div>
         </Section>
 
         <div className="grid gap-6 md:grid-cols-2">
