@@ -339,3 +339,42 @@ func TestMatchWorkflows(t *testing.T) {
 		}
 	}
 }
+
+func TestReplayDesktopAXElement(t *testing.T) {
+	ptr := func(i int) *int { return &i }
+	notes := func(els ...Element) Observation {
+		return Observation{App: "com.apple.Notes", Title: "Notes", Gen: 1, Elements: els}
+	}
+	wf := &Workflow{ID: "tw_1", Version: 3, Name: "New note", Steps: []WorkflowStep{
+		{Intent: "New note", Target: "desktop", App: "com.apple.Notes",
+			Action:  computeruse.Action{Kind: "click", Intent: "New note", X: ptr(310), Y: ptr(62)},
+			Element: &RecordedElement{Role: "AXButton", Name: "New Note", AXPath: "AXWindow/AXToolbar/AXButton#new", Source: "ax"}},
+	}, Success: SuccessCheck{TextPresent: []string{"Search"}}}
+
+	// The recorded element is on screen: pressed at once, no model.
+	e := newEnv(t, notes(Element{Ref: "a1", Role: "AXTextField", Name: "Search"}, Element{Ref: "a2", Role: "AXButton", Name: "New Note"}))
+	out := e.replay(wf, nil)
+	if out.State != StateDone || out.Rounds != 0 || len(e.llm.reqs) != 0 {
+		t.Fatalf("outcome %+v, model calls %d", out, len(e.llm.reqs))
+	}
+	if a := e.exec.batches[0].Actions[0]; a.Kind != "press" || a.Ref != "a2" || a.X != nil {
+		t.Fatalf("pressed %+v", a)
+	}
+	if b := e.exec.batches[0]; b.Target.Kind != "desktop" || b.Target.App != "com.apple.Notes" {
+		t.Fatalf("target %+v", b.Target)
+	}
+
+	// It was renamed: the model picks it, and the heal stays an accessibility element.
+	e = newEnv(t, notes(Element{Ref: "a1", Role: "AXTextField", Name: "Search"}, Element{Ref: "a2", Role: "AXButton", Name: "Compose"}))
+	wfs := &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	e.script(actions(press("a2", "New note")))
+	out = e.replay(wf, nil)
+	if out.State != StateDone || out.Rounds != 1 {
+		t.Fatalf("outcome %+v", out)
+	}
+	want := Heal{Step: 0, Was: *wf.Steps[0].Element, Element: RecordedElement{Role: "AXButton", Name: "Compose", Source: "ax"}}
+	if len(wfs.heals) != 1 || wfs.heals[0] != want {
+		t.Fatalf("stored %+v", wfs.heals)
+	}
+}

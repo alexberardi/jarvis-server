@@ -72,6 +72,9 @@ type RecordedElement struct {
 	Selector string `json:"selector,omitempty"`
 	Frame    string `json:"frame,omitempty"`
 	AXPath   string `json:"ax_path,omitempty"`
+	// Source is where the element came from: "ax" for the desktop accessibility tree (AX on
+	// macOS, AT-SPI on Linux); empty for a browser element.
+	Source string `json:"source,omitempty"`
 }
 
 // Heal is a step whose element moved: the element the replay acted on in its place.

@@ -114,6 +114,16 @@ const waylandModel = `{"name": "Add to the shopping list",
  ],
  "success": {"screen": "the note is saved"}}`
 
+// macModel is what a model answers for the macOS trace: one step per event.
+const macModel = `{"name": "Note a todo",
+ "steps": [
+  {"intent": "New note", "event_seqs": [1]},
+  {"intent": "Write the todo", "event_seqs": [2]},
+  {"intent": "Title it", "event_seqs": [3]},
+  {"intent": "Save it", "event_seqs": [4]},
+  {"intent": "Sign in to the bank", "event_seqs": [5]}
+ ]}`
+
 // TestLearnFromDesktopRecording: a desktop recording is learnt like a browser one, its steps
 // targeting the recorded app and window: clicks at the recorded point (a right click's button
 // kept), typing (masked, or recorded without accessibility, as ••• and a sensitive input), keys
@@ -122,6 +132,9 @@ func TestLearnFromDesktopRecording(t *testing.T) {
 	ptr := func(i int) *int { return &i }
 	notes := &StepWindow{Class: "org.gnome.TextEditor", Title: "notes.txt"}
 	bank := &StepWindow{Class: "firefox", Title: "Bank — Mozilla Firefox"}
+	ax := func(role, name, path string) *RecordedElement {
+		return &RecordedElement{Role: role, Name: name, AXPath: path, Source: "ax"}
+	}
 	for _, tc := range []struct {
 		file, model string
 		name        string
@@ -130,22 +143,41 @@ func TestLearnFromDesktopRecording(t *testing.T) {
 		prompt      []string
 	}{
 		{"desktop_x11_trace.json", x11Model, "Note the groceries", []WStep{
-			{Intent: "Create a new note", Target: "desktop", App: "Notes",
+			{Intent: "Create a new note", Target: "desktop", App: "Notes", Element: ax("button", "New note", ""),
 				Action: computeruse.Action{Kind: "click", Intent: "Create a new note", X: ptr(120), Y: ptr(48)}},
-			{Intent: "Title it Groceries", Target: "desktop", App: "Notes",
+			{Intent: "Title it Groceries", Target: "desktop", App: "Notes", Element: ax("textbox", "Title", ""),
 				Action: computeruse.Action{Kind: "type", Intent: "Title it Groceries", Text: "Groceries"}},
-			{Intent: "Confirm the title", Target: "desktop", App: "Notes",
+			{Intent: "Confirm the title", Target: "desktop", App: "Notes", Element: ax("textbox", "Title", ""),
 				Action: computeruse.Action{Kind: "keypress", Intent: "Confirm the title", Keys: []string{"enter"}}},
-			{Intent: "Open the password field's menu", Target: "desktop", App: "Bank",
+			{Intent: "Open the password field's menu", Target: "desktop", App: "Bank", Element: ax("passwordtext", "Password", ""),
 				Action: computeruse.Action{Kind: "click", Intent: "Open the password field's menu", X: ptr(640), Y: ptr(410), Button: "right"}},
 			{Intent: "Enter the bank password", Target: "desktop", App: "Bank", Risk: computeruse.CatSensitiveInput,
-				Action: computeruse.Action{Kind: "type", Intent: "Enter the bank password", Text: maskedValue}},
+				Element: ax("passwordtext", "Password", ""),
+				Action:  computeruse.Action{Kind: "type", Intent: "Enter the bank password", Text: maskedValue}},
 		}, `{"text_present":["Groceries"]}`, []string{
 			`1. click button "New note" in Notes at (120,48)`,
 			`2. type into textbox "Title" in Notes: "Groceries"`,
 			`3. press Enter in textbox "Title" in Notes`,
 			`4. right-click passwordtext "Password" in Bank at (640,410)`,
 			`5. type into passwordtext "Password" in Bank: •••`,
+		}},
+		{"desktop_macos_trace.json", macModel, "Note a todo", []WStep{
+			{Intent: "New note", Target: "desktop", App: "com.apple.Notes",
+				Element: ax("AXButton", "New Note", "AXWindow/AXToolbar/AXButton#new"),
+				Action:  computeruse.Action{Kind: "click", Intent: "New note", X: ptr(310), Y: ptr(62)}},
+			{Intent: "Write the todo", Target: "desktop", App: "com.apple.Notes",
+				Element: ax("AXTextArea", "Note body", "AXWindow/AXScrollArea/AXTextArea"),
+				Action:  computeruse.Action{Kind: "type", Intent: "Write the todo", Text: "Call the dentist"}},
+			{Intent: "Title it", Target: "desktop", App: "com.apple.Notes",
+				Element: ax("AXTextField", "Title", "AXWindow/AXTextField"),
+				Action:  computeruse.Action{Kind: "type", Intent: "Title it", Text: "Todo"}},
+			{Intent: "Save it", Target: "desktop", App: "com.apple.Notes",
+				Action: computeruse.Action{Kind: "keypress", Intent: "Save it", Keys: []string{"cmd", "s"}}},
+			{Intent: "Sign in to the bank", Target: "desktop", App: "com.example.bank", Risk: computeruse.CatSensitiveInput,
+				Element: ax("AXSecureTextField", "Password", "AXWindow/AXSecureTextField"),
+				Action:  computeruse.Action{Kind: "type", Intent: "Sign in to the bank", Text: maskedValue}},
+		}, `{}`, []string{
+			`1. click AXButton "New Note" in com.apple.Notes at (310,62)`,
 		}},
 		{"desktop_wayland_trace.json", waylandModel, "Add to the shopping list", []WStep{
 			{Intent: "Write the item in notes.txt", Target: "desktop", App: "org.gnome.TextEditor", Window: notes, Risk: computeruse.CatSensitiveInput,
@@ -185,6 +217,9 @@ func TestLearnFromDesktopRecording(t *testing.T) {
 				if !strings.Contains(user, line+"\n") {
 					t.Fatalf("prompt lacks %q:\n%s", line, user)
 				}
+			}
+			if strings.Contains(mustJSON(t, w.Steps), "hunter2") {
+				t.Fatalf("a masked value reached the steps: %s", mustJSON(t, w.Steps))
 			}
 			if strings.Contains(user, "hunter2") {
 				t.Fatalf("a masked value reached the model:\n%s", user)
