@@ -40,10 +40,10 @@ const (
 
 	// maskedValue stands for a value the recorder masked (a password, a card number): the model
 	// sees it, and the step types it, as this; the replay asks for the real one.
-	maskedValue = "•••"
+	maskedValue = computer.MaskedValue
 	// recordedRef is the ref of a learnt press, select or set_value: there is no snapshot at
 	// learning time, so a replay (piece 31) finds the element again from the step's Element.
-	recordedRef = "recorded"
+	recordedRef = computer.RecordedRef
 
 	learnMaxEvents    = 300  // events in the prompt; the rest of a longer trace is dropped
 	learnMaxValue     = 200  // runes of a value or an element name in the prompt

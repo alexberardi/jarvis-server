@@ -568,3 +568,59 @@ func TestRoutineDefinitionsDedupe(t *testing.T) {
 		t.Fatal("declared twice")
 	}
 }
+
+func TestRoutineRunsWorkflowStepOnServer(t *testing.T) {
+	e := newRoutineEnv(t)
+	n := e.createNode("n1", rhh)
+	c := e.dialNode(n)
+	c.subscribe("jarvis/nodes/n1/commands")
+	e.createNode("comp1", rhh)
+	if _, err := e.d.Write.Exec(`UPDATE cc_nodes SET node_kind = 'desktop',
+		capabilities = '{"browser_extension":"connected","computer_control":"on"}' WHERE node_id = 'comp1'`); err != nil {
+		t.Fatal(err)
+	}
+	withErrandQueue(t, e.env)
+	bank := seedTaught(t, e.m, rhh, 1, "Bank statement", true)
+	seedTaught(t, e.m, rhh, 1, "Pay rent", false) // not shared: not the household's to run
+	wfStep := func(name string, more ...any) map[string]any {
+		args := []any{map[string]any{"key": "name", "value": name}}
+		for i := 0; i+1 < len(more); i += 2 {
+			args = append(args, map[string]any{"key": more[i], "value": more[i+1]})
+		}
+		return map[string]any{"command": "run_workflow", "args": args, "label": "statement"}
+	}
+
+	// Only workflow steps: they run here, and nothing is published to the node.
+	rt := e.create("Statement", map[string]any{"steps": []any{wfStep("bank statement", "month", "October 2026")}})
+	got := e.do("POST", e.path("/"+rt["id"].(string)+"/run-now"), map[string]any{"node_id": "n1"}, bearer(e.owner)).want(200).json()
+	if got["status"] != "success" || got["passed"] != 1.0 || got["failed"] != 0.0 || got["message"] != "Started “Bank statement”." {
+		t.Fatalf("result %v", got)
+	}
+	rows := errandRows(t, e.env)
+	if len(rows) != 1 {
+		t.Fatalf("errands %v", rows)
+	}
+	for _, r := range rows {
+		if r[0] != "" || !strings.Contains(r[1], bank.ID) || !strings.Contains(r[1], `"month": "October 2026"`) {
+			t.Fatalf("errand %v", r)
+		}
+	}
+
+	// Mixed: the node gets only its own steps, and the results add up.
+	weather := routineBody("x", nil)["steps"].([]any)[0]
+	rt = e.create("Morning", map[string]any{"steps": []any{wfStep("pay rent"), weather}})
+	ch := make(chan *resp, 1)
+	go func() {
+		ch <- e.do("POST", e.path("/"+rt["id"].(string)+"/run-now"), map[string]any{"node_id": "n1"}, bearer(e.owner))
+	}()
+	d := e.answerRoutine(c, n, map[string]any{"success": true, "passed": 1, "failed": 0, "message": "Sunny."})
+	def, _ := json.Marshal(d["routine"])
+	if strings.Contains(string(def), "run_workflow") || !strings.Contains(string(def), `"command":"get_weather"`) {
+		t.Fatalf("published %s", def)
+	}
+	got = (<-ch).want(200).json()
+	if got["status"] != "partial" || got["passed"] != 1.0 || got["failed"] != 1.0 ||
+		got["message"] != `There's no shared workflow called "pay rent". Sunny.` {
+		t.Fatalf("result %v", got)
+	}
+}

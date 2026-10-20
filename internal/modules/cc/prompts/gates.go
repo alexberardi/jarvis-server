@@ -11,10 +11,15 @@ type ToolGates struct {
 	RecallEnabled bool // memory.recall_enabled
 	Watches       bool // watches.enabled
 	// Computers: the household has a computer (a desktop agent). Gates start_recording,
-	// stop_recording and the computer control tools (enable_computer_control,
-	// disable_computer_control, computer_control_status), which also need a known speaker (the
-	// recording is theirs; whose computers they reach depends on who asks).
+	// stop_recording, the computer control tools (enable_computer_control,
+	// disable_computer_control, computer_control_status) and run_workflow, which also need a
+	// known speaker (the recording is theirs; whose computers and workflows they reach depends on
+	// who asks).
 	Computers bool
+	// Workflows: the household has a taught workflow. run_workflow also needs it: with none it
+	// could only say so, and one more tool next to the recording ones makes the small live model
+	// call those less.
+	Workflows bool
 	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
 	// photos come from (docs/cc/chat-images.md §8-9). Gates every photo tool.
 	ChatPhotos bool
@@ -70,6 +75,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.Computers && g.SpeakerKnown
 	case "read_computer_file", "write_spreadsheet":
 		return false // errand steps only: the planner offers them with computer_task
+	case "run_workflow":
+		return g.Computers && g.Workflows && g.SpeakerKnown
 	}
 	if g.PhotoTools[name] {
 		return g.ChatPhotos
@@ -80,7 +87,7 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 // TextServerTools is the text path's server-tool list, in the legacy order: the whitelist,
 // then deep_research and quick_search, then remember, forget and recall, then create_watch,
 // list_watches and cancel_watch, then start_recording and stop_recording, then the computer
-// control tools, then the photo tools
+// control tools and run_workflow, then the photo tools
 // (sorted), each behind its gate. Names the caller's registry does not have are skipped by the
 // caller (legacy get_tool).
 func TextServerTools(g ToolGates) []string {
@@ -92,7 +99,7 @@ func TextServerTools(g ToolGates) []string {
 	sort.Strings(photo)
 	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall",
 		"create_watch", "list_watches", "cancel_watch", "start_recording", "stop_recording",
-		"enable_computer_control", "disable_computer_control", "computer_control_status"}, photo...) {
+		"enable_computer_control", "disable_computer_control", "computer_control_status", "run_workflow"}, photo...) {
 		if ServerToolAllowed(n, g) {
 			out = append(out, n)
 		}

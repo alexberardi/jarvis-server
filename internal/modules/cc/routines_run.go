@@ -10,8 +10,11 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
@@ -92,6 +95,21 @@ func (m *Module) runRoutineOnce(ctx context.Context, rt *routineRow, nodeID stri
 		return routineResult{Status: "failed", Message: note, Error: note}
 	}
 	defer m.rt.release(rt.id)
+	// run_workflow steps run here (a saved workflow replays on a computer, piece 31); the node
+	// gets the rest, and nothing when there is no rest.
+	wfSteps, nodeRT := rt.splitWorkflowSteps()
+	if len(wfSteps) == 0 {
+		return m.publishRoutine(ctx, rt, nodeID)
+	}
+	res := m.runRoutineWorkflows(ctx, rt, nodeID, wfSteps)
+	if nodeRT == nil {
+		return res
+	}
+	return combineRoutine(res, m.publishRoutine(ctx, nodeRT, nodeID))
+}
+
+// publishRoutine sends the routine to the node and waits for its result.
+func (m *Module) publishRoutine(ctx context.Context, rt *routineRow, nodeID string) routineResult {
 	if !m.bus.Available() {
 		m.deps.Log.Error("cc: run routine: MQTT not available", "routine", rt.slug, "node", nodeID)
 		return routineResult{Status: "failed", Error: ErrNoBroker.Error()}
@@ -380,3 +398,120 @@ func (m *Module) routineTargetUp(ctx context.Context, hh, nodeID string, now tim
 // pyAware renders an aware UTC time like Python's isoformat(): "...+00:00", microseconds
 // omitted when zero (schedule.last_fired_at, which mobile parses).
 func pyAware(t time.Time) string { return pyNaive(t) + "+00:00" }
+
+// splitWorkflowSteps separates a routine's run_workflow steps from the rest: nodeRT is the
+// routine with only the rest (nil when nothing is left for the node).
+func (r *routineRow) splitWorkflowSteps() (wf []map[string]any, nodeRT *routineRow) {
+	var steps []map[string]any
+	dec := json.NewDecoder(strings.NewReader(r.steps))
+	dec.UseNumber()
+	if err := dec.Decode(&steps); err != nil {
+		return nil, r
+	}
+	var rest []map[string]any
+	for _, s := range steps {
+		if c, _ := s["command"].(string); strings.TrimSpace(c) == toolRunWorkflow {
+			wf = append(wf, s)
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	if len(wf) == 0 {
+		return nil, r
+	}
+	if len(rest) == 0 {
+		return wf, nil
+	}
+	b, err := json.Marshal(rest)
+	if err != nil {
+		return wf, nil
+	}
+	cp := *r
+	cp.steps = string(b)
+	return wf, &cp
+}
+
+// runRoutineWorkflows starts the routine's run_workflow steps: each replays a workflow shared
+// with the household (a routine is the household's, not one member's), in an errand of its own
+// whose card reports how it went. A step passes when its replay started.
+func (m *Module) runRoutineWorkflows(ctx context.Context, rt *routineRow, nodeID string, steps []map[string]any) routineResult {
+	var res routineResult
+	var msgs []string
+	ws, err := taughtWorkflows{m}.Visible(ctx, rt.householdID, nil)
+	if err != nil {
+		m.deps.Log.Error("cc: routine workflows", "routine", rt.slug, "err", err)
+	}
+	for _, s := range steps {
+		args := flattenArgs(s["args"])
+		name, _ := args["name"].(string)
+		params := errands.ParamValues(args["params"])
+		for k, v := range args {
+			if k != "name" && k != "params" {
+				for pk, pv := range errands.ParamValues(map[string]any{k: v}) {
+					params[pk] = pv
+				}
+			}
+		}
+		var msg string
+		switch match := computer.MatchWorkflows(ws, name); {
+		case err != nil:
+			msg = "I couldn't load the saved workflows."
+		case len(match) == 0:
+			msg = fmt.Sprintf("There's no shared workflow called %q.", name)
+		case len(match) > 1:
+			msg = fmt.Sprintf("More than one shared workflow matches %q.", name)
+		default:
+			if _, ref := m.startReplay(ctx, rt.householdID, nil, nodeID, match[0], params); ref != nil {
+				msg = ref.msg
+			} else {
+				res.Passed++
+				msgs = append(msgs, "Started “"+match[0].Name+"”.")
+				continue
+			}
+		}
+		res.Failed++
+		msgs = append(msgs, msg)
+		m.deps.Log.Warn("cc: routine workflow step", "routine", rt.slug, "workflow", name, "why", msg)
+	}
+	res.Message = strings.Join(msgs, " ")
+	res.Success = res.Passed > 0
+	switch {
+	case !res.Success:
+		res.Status = "failed"
+	case res.Failed > 0:
+		res.Status = "partial"
+	default:
+		res.Status = "success"
+	}
+	return res
+}
+
+// combineRoutine is one result for a routine whose workflow steps ran here (srv) and the rest on
+// the node: the counts add up, the messages join, and the node's failure or timeout stands.
+func combineRoutine(srv, node routineResult) routineResult {
+	out := node
+	out.Passed += srv.Passed
+	out.Failed += srv.Failed
+	var parts []string
+	for _, m := range []any{srv.Message, node.Message} {
+		switch v := m.(type) {
+		case string:
+			if v != "" {
+				parts = append(parts, v)
+			}
+		case nil:
+		default:
+			b, _ := json.Marshal(v)
+			parts = append(parts, string(b))
+		}
+	}
+	out.Message = strings.Join(parts, " ")
+	if node.Status == "success" || node.Status == "partial" {
+		out.Success = true
+		out.Status = "success"
+		if out.Failed > 0 {
+			out.Status = "partial"
+		}
+	}
+	return out
+}

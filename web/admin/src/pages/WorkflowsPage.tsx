@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { runWorkflow } from '@/api/workflows'
 import { useAuth } from '@/hooks/useAuth'
 import { useWorkflows } from '@/hooks/useWorkflows'
-import { errorMessage, errorStatus } from '@/lib/errors'
+import { errorMessage } from '@/lib/errors'
 
 const button =
   'inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:opacity-50'
@@ -21,8 +21,9 @@ export default function WorkflowsPage() {
   const run = useMutation({
     mutationFn: runWorkflow,
     onSuccess: () => toast.success('Started'),
-    onError: (err) =>
-      toast.error(errorStatus(err) === 501 ? "Running a workflow from here isn't available yet." : errorMessage(err, 'Could not run it')),
+    // The server says why it can't start: a value it needs (it asks by voice), no computer with
+    // computer control on, errands off.
+    onError: (err) => toast.error(errorMessage(err, 'Could not run it')),
   })
   const items = list.data ?? []
 

@@ -226,6 +226,9 @@ func (s *Service) FullMenu(ctx context.Context, available []*pyjson.Object, hh s
 	out = append(out, server...)
 	if s.computerOffered(ctx, hh) {
 		out = append(out, computerEntry())
+		if e := s.runWorkflowEntry(ctx, hh, speaker); e != nil {
+			out = append(out, *e)
+		}
 	}
 	return out
 }

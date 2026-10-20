@@ -96,9 +96,9 @@ func TestWorkflowVisibility(t *testing.T) {
 	e.do("GET", wfBase+"/"+shared.ID, nil, e.outsider).detail(404, "Workflow not found")
 	e.do("GET", wfBase+"/"+private.ID, nil, e.outsider).detail(404, "Workflow not found")
 	e.do("GET", wfBase+"/tw_missing", nil, e.owner).detail(404, "Workflow not found")
-	// Run (replay is piece 31) checks the same visibility first.
+	// Run (workflows_run.go) checks the same visibility first.
 	e.do("POST", wfBase+"/"+private.ID+"/run", nil, e.member).detail(404, "Workflow not found")
-	e.do("POST", wfBase+"/"+shared.ID+"/run", nil, e.member).want(501)
+	e.do("POST", wfBase+"/"+shared.ID+"/run", nil, e.member).detail(400, "Which month should I run “Order printer ink” for?")
 }
 
 func wfPutBody(w TaughtWorkflow) map[string]any {
