@@ -97,6 +97,69 @@ describe('AddonsPage', () => {
     expect(api.getSystemInfo).not.toHaveBeenCalled()
   })
 
+  it('says how to turn on website access next to the store links, for both browsers, with the docs', async () => {
+    renderPage()
+    const section = (await screen.findByRole('heading', { name: 'Browser extension' })).closest('section')!
+    expect(section).toHaveTextContent('After installing, turn on website access')
+    expect(section).toHaveTextContent('about:addons')
+    expect(section).toHaveTextContent('"Access your data for all websites"')
+    expect(section).toHaveTextContent('Site access to "On all sites"')
+    expect(section).toHaveTextContent('macro recordings capture only page loads')
+    expect(within(section).getByRole('link', { name: /More about website access/ })).toHaveAttribute(
+      'href',
+      'https://docs.jarvisautomation.dev/clients/desktop-agent/#turn-on-website-access',
+    )
+  })
+
+  const withAccess = (caps: Record<string, string>) =>
+    api.getNodeLiveness.mockResolvedValue([
+      { ...node('a', 'office', true, 'connected'), capabilities: { browser_extension: 'connected', ...caps } },
+    ])
+  const row = async () => within(await screen.findByRole('list', { name: 'Your devices' })).getAllByRole('listitem')[0]
+
+  it("warns when a device's website access is off, with the step for that browser", async () => {
+    withAccess({ browser_website_access: 'off', browser_website_access_off_in: 'Firefox' })
+    renderPage()
+    const r = await row()
+    expect(within(r).getByTestId('extension-state')).toHaveTextContent('Website access is off')
+    const warn = within(r).getByTestId('website-access-off')
+    expect(warn).toHaveTextContent('about:addons')
+    expect(warn).not.toHaveTextContent('On all sites')
+    expect(within(warn).getByRole('link', { name: /More about website access/ })).toBeInTheDocument()
+  })
+
+  it('gives the Chrome step for a Chromium browser', async () => {
+    withAccess({ browser_website_access: 'off', browser_website_access_off_in: 'Google Chrome' })
+    renderPage()
+    const warn = within(await row()).getByTestId('website-access-off')
+    expect(warn).toHaveTextContent('On all sites')
+    expect(warn).not.toHaveTextContent('about:addons')
+  })
+
+  it('gives both steps when an older agent says off without naming the browser', async () => {
+    withAccess({ browser_website_access: 'off' })
+    renderPage()
+    const warn = within(await row()).getByTestId('website-access-off')
+    expect(warn).toHaveTextContent('about:addons')
+    expect(warn).toHaveTextContent('On all sites')
+  })
+
+  it('just says connected when website access is on or not reported', async () => {
+    withAccess({ browser_website_access: 'on' })
+    renderPage()
+    const r = await row()
+    expect(within(r).getByTestId('extension-state')).toHaveTextContent('Browser extension connected')
+    expect(within(r).queryByTestId('website-access-off')).toBeNull()
+  })
+
+  it('says nothing about website access when the extension did not report it', async () => {
+    withAccess({})
+    renderPage()
+    const r = await row()
+    expect(within(r).getByTestId('extension-state')).toHaveTextContent('Browser extension connected')
+    expect(within(r).queryByTestId('website-access-off')).toBeNull()
+  })
+
   it('says so when there are no computers yet', async () => {
     api.getNodeLiveness.mockResolvedValue([])
     renderPage()

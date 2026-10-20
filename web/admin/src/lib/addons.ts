@@ -63,6 +63,40 @@ export function extensionLabel(state: 'connected' | 'disconnected' | 'disabled' 
   return 'Browser extension: not reported'
 }
 
+/**
+ * WEBSITE_ACCESS is how to turn on the extension's website access (Firefox can install an MV3
+ * extension with it off): the Add-ons page's wording, and word for word the store listing's
+ * "AFTER INSTALLING" section (internal/agent/browser/store/listing.md; addons.test.ts checks).
+ */
+export const WEBSITE_ACCESS = {
+  why: "Without it, macro recordings capture only page loads and Jarvis can't act on pages.",
+  firefox: 'Firefox: open about:addons, click Jarvis Browser Control, open Permissions and turn on "Access your data for all websites".',
+  chrome:
+    'Chrome, Edge, Brave and other Chromium browsers: open Extensions, click Details on Jarvis Browser Control and set Site access to "On all sites".',
+  reload: 'Then reload the tabs you want Jarvis to use.',
+  docs: 'https://docs.jarvisautomation.dev/clients/desktop-agent/#turn-on-website-access',
+}
+
+export type BrowserFamily = 'firefox' | 'chrome'
+
+const FIREFOX_LIKE = /firefox|librewolf|waterfox|floorp|zen|mullvad|tor browser/i
+const CHROMIUM_LIKE = /chrom|edge|brave|opera|vivaldi|arc|yandex|samsung/i
+
+/**
+ * websiteAccessFamilies is whose step to show for the browsers a device named with website access
+ * off (capability browser_website_access_off_in, "Firefox, Brave"); both when it can't tell (an
+ * older agent, or a browser it doesn't know).
+ */
+export function websiteAccessFamilies(offIn: string | undefined): BrowserFamily[] {
+  const found = new Set<BrowserFamily>()
+  for (const name of (offIn ?? '').split(',').map((s) => s.trim())) {
+    if (FIREFOX_LIKE.test(name)) found.add('firefox')
+    else if (CHROMIUM_LIKE.test(name)) found.add('chrome')
+    else return ['firefox', 'chrome']
+  }
+  return (['firefox', 'chrome'] as const).filter((f) => found.has(f))
+}
+
 /** The household roles that may sign out anyone's device (cc: admin or higher). */
 const SIGN_OUT_ROLES = new Set(['admin', 'owner'])
 

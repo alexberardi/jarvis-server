@@ -3,12 +3,23 @@ import type { ReactNode } from 'react'
 import { ExternalLink, Laptop, LogOut, Monitor, Play, Puzzle, Smartphone } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getThisDevice } from '@/api/chat'
-import { extensionState, getNodeLiveness, signOutDevice } from '@/api/nodes'
+import { extensionState, getNodeLiveness, signOutDevice, websiteAccessState } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
 import AgentDownload from '@/components/addons/AgentDownload'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { useAuth } from '@/hooks/useAuth'
-import { AGENT_START_URL, canSignOut, detectOS, extensionLabel, LINKS, OS_NAME, yourDevices } from '@/lib/addons'
+import {
+  AGENT_START_URL,
+  canSignOut,
+  detectOS,
+  extensionLabel,
+  LINKS,
+  OS_NAME,
+  WEBSITE_ACCESS,
+  websiteAccessFamilies,
+  yourDevices,
+} from '@/lib/addons'
+import type { BrowserFamily } from '@/lib/addons'
 import { nodeLabel } from '@/lib/chatNode'
 import { errorMessage } from '@/lib/errors'
 import { timeAgo } from '@/lib/time'
@@ -44,11 +55,30 @@ function External({ href, children }: { href: string; children: ReactNode }) {
   )
 }
 
+/** WebsiteAccessSteps says how to turn on the extension's website access in the given browsers. */
+function WebsiteAccessSteps({ families }: { families: BrowserFamily[] }) {
+  return (
+    <>
+      <p>{WEBSITE_ACCESS.why}</p>
+      <ul className="my-1 list-disc space-y-0.5 pl-5">
+        {families.map((f) => (
+          <li key={f}>{WEBSITE_ACCESS[f]}</li>
+        ))}
+      </ul>
+      <p>{WEBSITE_ACCESS.reload}</p>
+      <div className="mt-2">
+        <External href={WEBSITE_ACCESS.docs}>More about website access</External>
+      </div>
+    </>
+  )
+}
+
 /** SETTINGS_NOTE: node settings are end-to-end encrypted with a key only the phone app and the node hold. */
 export const SETTINGS_NOTE = 'Settings for this computer are managed in the Jarvis Automation mobile app (admins).'
 
 function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; maySignOut: boolean }) {
   const ext = extensionState(n)
+  const accessOff = ext === 'connected' && websiteAccessState(n) === 'off'
   const qc = useQueryClient()
   const [confirming, setConfirming] = useState(false)
   const signOut = useMutation({
@@ -79,7 +109,9 @@ function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; ma
           <p className="text-xs text-[var(--color-text-muted)]">
             {n.online ? 'Online' : `Offline${n.last_seen ? ` · last seen ${timeAgo(n.last_seen)}` : ''}`}
             {' · '}
-            <span data-testid="extension-state">{extensionLabel(ext)}</span>
+            <span data-testid="extension-state" className={cn(accessOff && 'text-amber-500')}>
+              {accessOff ? 'Website access is off' : extensionLabel(ext)}
+            </span>
           </p>
           <p className="text-xs text-[var(--color-text-muted)]">{SETTINGS_NOTE}</p>
         </div>
@@ -98,6 +130,15 @@ function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; ma
           )}
         </div>
       </div>
+      {accessOff && (
+        <div
+          data-testid="website-access-off"
+          className="mt-2 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300"
+        >
+          <p className="font-medium">Website access is off in {label}'s browser.</p>
+          <WebsiteAccessSteps families={websiteAccessFamilies(String(n.capabilities?.browser_website_access_off_in ?? ''))} />
+        </div>
+      )}
       {confirming && (
         <div role="group" aria-label={`Sign out ${label}`} className="mt-2 rounded-lg border border-[var(--color-border)] p-3 text-sm">
           <p className="text-[var(--color-text)]">
@@ -239,9 +280,7 @@ export default function AddonsPage() {
         </p>
         <div className="flex flex-wrap gap-2">
           {LINKS.firefoxStore && <External href={LINKS.firefoxStore}>Add to Firefox</External>}
-          {LINKS.chromeStore && (
-<External href={LINKS.chromeStore}>Add to Chrome</External>
-          )}
+          {LINKS.chromeStore && <External href={LINKS.chromeStore}>Add to Chrome</External>}
           {!LINKS.firefoxStore && !LINKS.chromeStore && (
             <>
               <p className="w-full text-sm text-[var(--color-text-muted)]">
@@ -250,6 +289,10 @@ export default function AddonsPage() {
               <External href={LINKS.browserGuide}>How browser control works</External>
             </>
           )}
+        </div>
+        <div className="mt-3 text-sm text-[var(--color-text-muted)]">
+          <p className="font-medium text-[var(--color-text)]">After installing, turn on website access</p>
+          <WebsiteAccessSteps families={['firefox', 'chrome']} />
         </div>
       </Section>
 

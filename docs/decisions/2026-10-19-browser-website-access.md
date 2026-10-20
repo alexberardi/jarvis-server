@@ -16,7 +16,9 @@ nothing is "unknown", never "off".
 - **Heartbeat.** A separate capability key, `browser_website_access: "on" | "off"`, present only
   when a connected extension says, rather than a new `browser_extension` value: consumers of
   `browser_extension` (admin, mobile) keep working unchanged. With several browsers it is "off"
-  while any one is off.
+  while any one is off. (#303) With it off, `browser_website_access_off_in` names those browsers
+  ("Firefox", "Firefox, Brave"; omitted when they don't fit cc's 64-character capability), so
+  the admin Add-ons page shows that browser's step; without the key it shows both.
 - **`jarvis-agent browser install`.** At install time the extension usually hasn't connected yet,
   so install asks a running agent (`browser status`'s query) and prints the step for every
   connected browser that has it off; for Firefox, while no Firefox has reported, it always ends
@@ -25,3 +27,9 @@ nothing is "unknown", never "off".
   for each that is off.
 - **Tests.** The extension's JavaScript gets real unit tests (`internal/agent/browser/jstest/`,
   `node --test` with a fake WebExtension API), run in CI's admin job and by `scripts/check`.
+- **Where people see the step (#303).** The store listing's full description has an "AFTER
+  INSTALLING" section and the admin Add-ons page shows the same words under the store links and
+  on a device whose access is off; one source, `web/admin/src/lib/addons.ts` `WEBSITE_ACCESS`,
+  with a vitest that the listing contains it verbatim and a Go test (`listing_test.go`) for the
+  section and the Chrome Web Store's 16,000-character limit. Both link to the docs' "Turn on
+  website access" section (jarvis-docs `clients/desktop-agent.md`).
