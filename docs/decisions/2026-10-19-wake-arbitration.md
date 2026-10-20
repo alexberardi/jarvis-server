@@ -20,6 +20,17 @@ within the window and has not sent its command yet; it waits until that command 
 window (from the group's first command) ends. A lone node never waits, so single-node latency is
 unchanged. On the 2026-10-19 incident the conversations started within ~0.5 s of each other.
 
+**After the node's own gates.** A turn bids only once it has passed its own drop gates: the
+STT-noise prefilter, wake verification (in `enforce` mode, after waiting up to 1.2 s,
+`wakeVerifyWait`, for the wake clip's verdict) and the follow-up acoustic gate. A turn one of
+them drops never bids and never wins, so it cannot silence the rest of the household: if node
+A's follow-up window hears someone talking to node B and its gate drops that as a different,
+far voice, B still answers; if A's wake clip is unverified, B's verified wake answers. A dropped
+turn also tells the arbiter, so a node waiting for it decides at once instead of at the end of
+the window. Waiting for the wake verdict adds no time to arbitration: every node waits for its
+own verdict in parallel, and nodes are grouped by when their conversations started as well as
+by when their commands arrive, so a bid delayed by its verdict still joins its wake's group.
+
 **Who answers, in order:**
 1. a node **mid-activity for this request**: the follow-up of its own conversation, or a node a
    voice `start_recording` is recording on (until it stops, at most 30 min). It answers at once,

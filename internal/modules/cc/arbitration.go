@@ -104,6 +104,7 @@ type wakeStart struct {
 type wakeGroup struct {
 	household string
 	first     time.Time // first bid's arrival
+	window    time.Duration
 	members   []*wakeBid
 	winner    *wakeBid
 	done      chan struct{} // closed when decided
@@ -152,7 +153,7 @@ func (a *wakeArbiter) bid(ctx context.Context, b wakeBid, window time.Duration) 
 	}
 	g := a.groupFor(&me, window)
 	if g == nil {
-		g = &wakeGroup{household: b.Household, first: now, done: make(chan struct{})}
+		g = &wakeGroup{household: b.Household, first: now, window: window, done: make(chan struct{})}
 		a.groups = append(a.groups, g)
 	}
 	g.members = append(g.members, &me)
@@ -167,12 +168,7 @@ func (a *wakeArbiter) bid(ctx context.Context, b wakeBid, window time.Duration) 
 	if me.Busy {
 		a.decide(g)
 	}
-	// A bid can release any waiting group of the household: its node is no longer pending.
-	for _, o := range a.groups {
-		if o.winner == nil && o.household == b.Household && !a.pending(o, window) {
-			a.decide(o)
-		}
-	}
+	a.release(b.Household) // its node is no longer pending
 	if g.winner != nil {
 		v := a.verdict(g, &me, 0)
 		a.mu.Unlock()
@@ -199,6 +195,26 @@ func (a *wakeArbiter) bid(ctx context.Context, b wakeBid, window time.Duration) 
 		a.decide(g)
 	}
 	return a.verdict(g, &me, a.now().Sub(now)), nil
+}
+
+// dropped: convID's turn was dropped by its own node's gates (noise, an unverified wake, the
+// follow-up gate) and never bids, so no group waits for it.
+func (a *wakeArbiter) dropped(convID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if s := a.starts[convID]; s != nil && !s.turned {
+		s.turned = true
+		a.release(s.household)
+	}
+}
+
+// release decides each waiting group of the household that no longer waits for a node.
+func (a *wakeArbiter) release(household string) {
+	for _, o := range a.groups {
+		if o.winner == nil && o.household == household && !a.pending(o, o.window) {
+			a.decide(o)
+		}
+	}
 }
 
 func (a *wakeArbiter) verdict(g *wakeGroup, me *wakeBid, waited time.Duration) arbVerdict {

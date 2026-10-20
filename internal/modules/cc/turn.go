@@ -134,16 +134,12 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 
 	if len(in.Images) == 0 && isSTTNoise(in.VoiceCommand) {
 		m.deps.Log.Info("cc: not_for_me_prefilter", "conversation_id", conv.id, "transcript", in.VoiceCommand)
+		m.wakes.dropped(conv.id)
 		return turnOutcome{res: engineResult{Stop: stopNotForMe}, conv: conv}, nil
 	}
-	if down, err := m.arbitrateWake(ctx, conv, in); err != nil {
-		return turnOutcome{}, err
-	} else if down {
-		return turnOutcome{res: engineResult{Stop: stopNotForMe, StoodDown: true}, conv: conv}, nil
-	}
-
 	var st turnState
 	if m.resolveWakeVerified(ctx, conv, in, &st) {
+		m.wakes.dropped(conv.id)
 		return turnOutcome{res: engineResult{Stop: stopNotForMe}, conv: conv}, nil
 	}
 	m.resolveFollowupDoubt(ctx, conv, in, &st)
@@ -160,6 +156,13 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 				"stage", "acoustic", "keep_listening", keep, "transcript", in.VoiceCommand}, ev.fields()...)...)
 			return turnOutcome{res: engineResult{Stop: stopNotForMe, KeepListening: keep}, conv: conv}, nil
 		}
+	}
+	// Wake arbitration (arbitration.go) only once the turn passed its own gates, so a turn its
+	// node drops never silences the node that should answer.
+	if down, err := m.arbitrateWake(ctx, conv, in); err != nil {
+		return turnOutcome{}, err
+	} else if down {
+		return turnOutcome{res: engineResult{Stop: stopNotForMe, StoodDown: true}, conv: conv}, nil
 	}
 
 	msgs := stripTransient(cloneMsgs(conv.messages))

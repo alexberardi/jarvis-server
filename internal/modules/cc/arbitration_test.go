@@ -312,3 +312,17 @@ func TestSameRequest(t *testing.T) {
 		}
 	}
 }
+
+// A node whose turn its own gates drop never bids; a group waiting for it is decided then,
+// not at the end of the window.
+func TestWakeArbiterDroppedTurnReleasesTheWait(t *testing.T) {
+	a, c := newTestArbiter()
+	a.started("hh", "desktop", "c-desk")
+	a.started("hh", "pi", "c-pi")
+	c.advance(2 * time.Second)
+	first := bidAsync(t, a, c, wakeBid{Household: "hh", Node: "desktop", ConversationID: "c-desk", Transcript: "what time is it"})
+	a.dropped("c-pi") // e.g. its wake clip was unverified
+	if v := recv(t, first); v.StandDown || v.Members != 1 {
+		t.Fatalf("the remaining node must answer once the other dropped its turn: %+v", v)
+	}
+}
