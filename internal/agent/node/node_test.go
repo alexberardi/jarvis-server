@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -604,5 +605,32 @@ func TestUploadRecording(t *testing.T) {
 	status = http.StatusForbidden
 	if err := cc.UploadRecording(context.Background(), map[string]any{}); err == nil {
 		t.Fatal("403 is an error")
+	}
+}
+
+func TestUploadKeyframe(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.EscapedPath()+" "+r.Header.Get("Content-Type")+" "+r.Header.Get("X-API-Key")+" "+string(b))
+		if strings.HasSuffix(r.URL.Path, "/crop") {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			fmt.Fprint(w, `{"detail":"full","code":"keyframe_limit"}`)
+		}
+	}))
+	defer srv.Close()
+	cc := NewCC(srv.URL, Creds{NodeID: "n1", NodeKey: "k"})
+	if err := cc.UploadKeyframe(context.Background(), "rec_1", 7, false, []byte("jpeg")); err != nil {
+		t.Fatal(err)
+	}
+	err := cc.UploadKeyframe(context.Background(), "rec_1", 7, true, []byte("crop"))
+	var he *HTTPError
+	if !errors.As(err, &he) || he.Status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("413: %v", err)
+	}
+	want := []string{"PUT /api/v0/computer/recordings/rec_1/keyframes/7 image/jpeg n1:k jpeg",
+		"PUT /api/v0/computer/recordings/rec_1/keyframes/7/crop image/jpeg n1:k crop"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q", got)
 	}
 }

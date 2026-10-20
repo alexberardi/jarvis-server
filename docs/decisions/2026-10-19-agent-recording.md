@@ -30,7 +30,8 @@ blueprint piece 29):
   with the switch off they answer where to turn it on, like the computer-task errands.
 - **Browser only for now.** `mode: desktop` answers "not supported yet" until pieces 36/37; so no
   keyframes exist yet. `computer_record_stop` already sends at most 4 sampled keyframes as
-  `image_attachments` (the rest stay local); jarvisd stores only their count today.
+  `image_attachments` (the rest stay local); jarvisd stores only their count today. (Superseded:
+  each click's keyframe and crop are now kept, [2026-10-20-recording-keyframes.md](2026-10-20-recording-keyframes.md).)
 - **Learning is a hook.** Every stored recording goes to `Module.learnRecording`, nil until
   piece 30 queues the learn job there.
 - **Limits.** 30 minutes, then the recording stops by itself and uploads; a trace keeps at most
