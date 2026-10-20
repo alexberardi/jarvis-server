@@ -1,0 +1,7 @@
+[
+{"recording_id":"rec_mac","seq":1,"ts":1760000000000,"kind":"click","app":"com.apple.Notes","element":{"role":"AXButton","name":"New Note","ax_path":"AXWindow/AXToolbar/AXButton#new"},"x":310,"y":62,"keyframe_point":{"x":310,"y":62}},
+{"recording_id":"rec_mac","seq":2,"ts":1760000001000,"kind":"input","app":"com.apple.Notes","element":{"role":"AXTextArea","name":"Note body","ax_path":"AXWindow/AXScrollArea/AXTextArea"},"value":"Call the dentist"},
+{"recording_id":"rec_mac","seq":3,"ts":1760000002000,"kind":"input","app":"com.apple.Notes","element":{"role":"AXTextField","name":"Title","ax_path":"AXWindow/AXTextField"},"value":"Todo"},
+{"recording_id":"rec_mac","seq":4,"ts":1760000003000,"kind":"key","app":"com.apple.Notes","key":"Cmd+s"},
+{"recording_id":"rec_mac","seq":5,"ts":1760000004000,"kind":"input","app":"com.example.bank","element":{"role":"AXSecureTextField","name":"Password","ax_path":"AXWindow/AXSecureTextField"},"masked":true}
+]
