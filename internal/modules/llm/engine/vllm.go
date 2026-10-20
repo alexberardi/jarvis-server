@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // vLLM (decision 2026-10-19-vllm-engine, llm LD10): vllm's OpenAI-compatible server, a Python
@@ -100,9 +101,21 @@ func vllmGate(hw Hardware) string {
 	return ""
 }
 
+// vllmTuned caches vllmTune's answer per input for the process: it runs on every resolve, and
+// a later detection that reads the card's total a little differently (llama-server's figure
+// instead of nvidia-smi's once a build is installed) must not change the share and restart a
+// running engine. A changed setting, model, context or devices is another input.
+var vllmTuned sync.Map // string -> instanceKey
+
 // vllmTune completes a vLLM engine's key: its GPU share, the model's parsers and whether it
 // takes images.
 func vllmTune(c LabelConfig, hw Hardware, k *instanceKey) error {
+	in := fmt.Sprintf("%s|%d|%s|%v", c.ModelPath, c.Context, normList(c.GPUDevices), c.GPUMemory)
+	if v, ok := vllmTuned.Load(in); ok {
+		t := v.(instanceKey)
+		k.GPUMemory, k.ToolParser, k.ReasoningParser, k.Vision = t.GPUMemory, t.ToolParser, t.ReasoningParser, t.Vision
+		return nil
+	}
 	t, err := ReadModelTraits(c.ModelPath)
 	if err != nil {
 		return err
@@ -112,6 +125,7 @@ func vllmTune(c LabelConfig, hw Hardware, k *instanceKey) error {
 		return err
 	}
 	k.GPUMemory, k.ToolParser, k.ReasoningParser, k.Vision = frac, t.ToolParser, t.ReasoningParser, t.Vision
+	vllmTuned.Store(in, *k)
 	return nil
 }
 

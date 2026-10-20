@@ -252,7 +252,7 @@ func TestVLLMArgv(t *testing.T) {
 // answer any local process), the model's parsers, a GPU budget, the visible devices and its
 // caches under the install dir.
 func TestResolveVLLM(t *testing.T) {
-	g, _ := gpuRig(t, hwVLLM, &memStore{})
+	g, box := gpuRig(t, hwVLLM, &memStore{})
 	g.r.Platform = linuxAMD
 	dir := hfDir(t, g.models, "Qwen3-VL-2B", qwen3VLConfig, 4<<30)
 	bin := os.Args[0] // fakeBinaries' engine, as if it were <install>/venv/bin/python
@@ -299,6 +299,17 @@ func TestResolveVLLM(t *testing.T) {
 	}
 	if i := instanceFor(g.r, ep.Engine); i.Kind != KindVLLM || i.Flavour != FlavourCUDA {
 		t.Fatalf("instance %+v", i)
+	}
+
+	// Detection later reads the card's total a little differently (llama-server's figure once
+	// a build is installed): the running engine keeps its share and isn't restarted.
+	other := hwVLLM
+	other.Devices = []Device{hwVLLM.Devices[0]}
+	other.Devices[0].TotalMB = 11000
+	box.set(other)
+	g.r.Reconcile(context.Background())
+	if again := g.ready(LabelLive); again.Engine != ep.Engine || len(g.starts()) != 1 {
+		t.Fatalf("restarted: %s → %s, %d starts", ep.Engine, again.Engine, len(g.starts()))
 	}
 }
 
