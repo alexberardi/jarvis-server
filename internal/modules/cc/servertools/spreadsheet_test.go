@@ -106,3 +106,14 @@ func TestSheetsFromArgsLimits(t *testing.T) {
 		t.Error("over the cell cap: no error")
 	}
 }
+
+// Sheets written as a JSON string (as the house model does in errand steps) are read the same.
+func TestSheetsFromArgsJSONString(t *testing.T) {
+	sheets, err := SheetsFromArgs(`[{"title": "Totals", "columns": ["Category", "Total"], "rows": [["Dining", 362]]}]`)
+	if err != nil || len(sheets) != 1 || sheets[0].Title != "Totals" || len(sheets[0].Rows) != 1 {
+		t.Fatalf("%+v %v", sheets, err)
+	}
+	if _, err := SheetsFromArgs(`not json`); err == nil {
+		t.Error("a string that isn't JSON: no error")
+	}
+}

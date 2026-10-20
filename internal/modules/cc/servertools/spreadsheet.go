@@ -65,6 +65,10 @@ func SpreadsheetName(name string) (string, error) {
 // list of cells in column order or an object keyed by column (its keys are the columns when
 // columns is empty).
 func SheetsFromArgs(v any) ([]Sheet, error) {
+	if s, ok := v.(string); ok {
+		// The list written as a JSON string.
+		v, _ = pyjson.Loads(strings.TrimSpace(s))
+	}
 	list, ok := v.([]any)
 	if !ok || len(list) == 0 {
 		return nil, errors.New("sheets must be a list of {title, columns, rows}")
