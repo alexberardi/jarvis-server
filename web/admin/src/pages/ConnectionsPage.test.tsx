@@ -164,7 +164,7 @@ describe('publicURLError', () => {
     expect(await screen.findByText('jarvis-auth')).toBeInTheDocument()
   })
 
-  it('keeps the key dialog open on Escape: only "I\'ve stored it" closes it', async () => {
+  it('keeps the key dialog open on Escape and the backdrop, with no close button: only "I\'ve stored it" closes it', async () => {
     m.createApp.mockResolvedValue({ app_id: 'satellite', name: 'GPU box', app_key: 'sekrit-key-123', is_active: true })
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /New app/ }))
@@ -172,8 +172,13 @@ describe('publicURLError', () => {
     fireEvent.change(screen.getByLabelText('App name'), { target: { value: 'GPU box' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
     const dialog = await screen.findByRole('dialog', { name: 'Key for satellite' })
+    expect(within(dialog).queryByRole('button', { name: 'Close' })).toBeNull()
     fireEvent.keyDown(dialog, { key: 'Escape' })
     expect(screen.getByTestId('app-key')).toHaveTextContent('sekrit-key-123')
+    fireEvent.click(screen.getByTestId('dialog-backdrop'))
+    expect(screen.getByTestId('app-key')).toHaveTextContent('sekrit-key-123')
+    fireEvent.click(within(dialog).getByRole('button', { name: "I've stored it" }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Key for satellite' })).toBeNull())
   })
 })
 
