@@ -27,6 +27,8 @@ type SuccessCheck struct {
 type DownloadCheck struct {
 	NameLike string `json:"name_like"`
 	MinBytes int64  `json:"min_bytes,omitempty"`
+	// before are files already in Downloads when the task began, which don't count.
+	before map[string]bool
 }
 
 // FileCheck: a file at Path (under the agent's allowed folders) containing every Contains.
@@ -180,7 +182,7 @@ func (l *Loop) findDownload(ctx context.Context, runID string, d *DownloadCheck)
 	small := ""
 	for _, e := range info.Entries {
 		name := strings.ToLower(e.Name)
-		if e.Dir || hasSuffix(name, partialSuffixes) || !nameLike(name, like) {
+		if e.Dir || d.before[e.Name] || hasSuffix(name, partialSuffixes) || !nameLike(name, like) {
 			continue
 		}
 		if e.Bytes < d.MinBytes || e.Bytes == 0 {

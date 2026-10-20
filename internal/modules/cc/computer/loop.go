@@ -236,6 +236,8 @@ type round struct {
 	// downloadsBefore are the files in Downloads when this Run call began (nil: not a browser task), so
 	// done can name the ones the task downloaded.
 	downloadsBefore map[string]bool
+	// fresh: the run began in this Run call, so downloadsBefore are all from before the task.
+	fresh bool
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
@@ -319,7 +321,7 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
 	run.Model = pick.Model
-	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused}
+	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, fresh: run.Rounds == 0}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
@@ -490,6 +492,13 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation)
 		both := *reply.Verify
 		both.Screen = check.Screen
 		check = &both
+	}
+	if check != nil && check.Download != nil && r.fresh && len(r.downloadsBefore) > 0 {
+		// A file that was there before the task (an earlier task's statement) isn't its download.
+		c, d := *check, *check.Download
+		d.before = r.downloadsBefore
+		c.Download = &d
+		check = &c
 	}
 	if r.run.Verify == nil {
 		r.run.Verify = &VerifyState{}

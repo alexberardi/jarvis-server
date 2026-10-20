@@ -287,6 +287,29 @@ func TestDownloadCheckFailsPointsAtButton(t *testing.T) {
 	}
 }
 
+// A new task's download check counts only what it downloaded: the bank's statement, there
+// before the card's task began, doesn't pass the card's "statement_2026-09".
+func TestDownloadCheckIgnoresEarlierFiles(t *testing.T) {
+	e := newEnv(t)
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{{Name: "bank-statement-2026-09.csv", Bytes: 900}}}}
+	e.script(`{"done": true, "summary": "Downloaded it.", "verify": {"download": {"name_like": "statement_2026-09"}}}`, doneAnswer)
+	e.run()
+	if len(e.llm.reqs) < 2 || !strings.Contains(userText(e.llm.reqs[1]), `there's no file like "statement_2026-09" in Downloads`) {
+		t.Fatalf("an earlier file passed: %d calls", len(e.llm.reqs))
+	}
+
+	e = newEnv(t)
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{{Name: "bank-statement-2026-09.csv", Bytes: 900}}}}
+	e.exec.onAct = func() {
+		e.exec.files["list ~/Downloads"] = FileInfo{Entries: []FileEntry{{Name: "bank-statement-2026-09.csv", Bytes: 900},
+			{Name: "card-statement-2026-09.csv", Bytes: 800}}}
+	}
+	e.script(actions(press("e3", "Download it")), `{"done": true, "summary": "Downloaded it.", "verify": {"download": {"name_like": "statement_2026-09"}}}`)
+	if out := e.run(); out.State != StateDone || out.Checked != "card-statement-2026-09.csv is in Downloads (800 bytes)" {
+		t.Fatalf("outcome %+v", out)
+	}
+}
+
 // A browser task's done names the files it downloaded, for the errand's next steps to read.
 func TestDoneNamesDownloads(t *testing.T) {
 	e := newEnv(t)
