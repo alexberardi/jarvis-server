@@ -22,8 +22,8 @@ in its first lines, with the changes listed below (section 4(b)). None was refus
 
 **Where they live.** The skills belong in `.claude/skills/<name>/`, with this file as
 `.claude/skills/DESIGN-SKILLS.md`. The build sandbox that wrote them cannot write `.claude/skills/`,
-so the first PR staged them under `design-skills/` and they are moved by one rename
-(`git mv design-skills/* .claude/skills/`). Relative links inside the skills survive the move.
+so the first PR (#355) staged them under `design-skills/`; they were moved here by one rename on
+2026-10-20. Changes to them go through a person's session, for the same reason.
 
 ## Precedence
 
@@ -227,7 +227,6 @@ Never copy an upstream file in unread.
 
 ## Follow-ups
 
-- Move `design-skills/*` to `.claude/skills/` (the rename above) before or as this PR merges.
 - Copy the same three skills and this file into alexberardi/jarvis-docs (separate item: one PR
   cannot touch both repos).
 - The audit's token maths found existing contrast failures that belong to the UI items (#331
