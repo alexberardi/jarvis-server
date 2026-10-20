@@ -69,7 +69,7 @@ func parseReply(s string) (Reply, error) {
 		r.Actions, r.Checkout = nil, nil
 	default:
 		thought, _, _ := strings.Cut(strings.TrimSpace(r.Thought), "\n")
-		if utf8.RuneCountInString(thought) > computeruse.MaxIntent {
+		if utf8.RuneCountInString(thought) > computeruse.MaxIntent || len(r.Actions) > 1 {
 			thought = ""
 		}
 		for i, a := range r.Actions {

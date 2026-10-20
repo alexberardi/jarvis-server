@@ -19,15 +19,17 @@ func TestParseClickOnRefIsPress(t *testing.T) {
 	}
 }
 
-// An action without an intent gets the reply's thought, else its kind and ref (risk comes from
-// the element, never from the intent).
+// An action without an intent gets the reply's thought when it is the only one, else its kind
+// and ref (risk comes from the element, never from the intent).
 func TestParseMissingIntent(t *testing.T) {
-	r, err := parseReply(`{"thought": "Open the watch list.\nThen pick one.", "actions": [{"kind": "click", "ref": "e5"}, {"kind": "wait", "ms": 500, "intent": " "}]}`)
-	if err != nil {
-		t.Fatal(err)
+	r, err := parseReply(`{"thought": "Open the watch list.\nThen pick one.", "actions": [{"kind": "click", "ref": "e5"}]}`)
+	if err != nil || r.Actions[0].Intent != "Open the watch list." {
+		t.Fatalf("%+v %v", r.Actions, err)
 	}
-	if r.Actions[0].Intent != "Open the watch list." || r.Actions[1].Intent != "Open the watch list." {
-		t.Fatalf("intents %q %q", r.Actions[0].Intent, r.Actions[1].Intent)
+	// In a batch, each its own: one thought for every action would say nothing.
+	r, err = parseReply(`{"thought": "Fill it in.", "actions": [{"kind": "set_value", "ref": "e2", "text": "Avery"}, {"kind": "wait", "ms": 500, "intent": " "}, {"kind": "press", "ref": "e3", "intent": "Accept"}]}`)
+	if err != nil || r.Actions[0].Intent != "set_value e2" || r.Actions[1].Intent != "wait" || r.Actions[2].Intent != "Accept" {
+		t.Fatalf("%+v %v", r.Actions, err)
 	}
 	r, err = parseReply(`{"actions": [{"kind": "press", "ref": "e5"}]}`)
 	if err != nil || r.Actions[0].Intent != "press e5" {
