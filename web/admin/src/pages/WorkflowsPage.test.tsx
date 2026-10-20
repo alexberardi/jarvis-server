@@ -72,16 +72,17 @@ describe('WorkflowsPage', () => {
     expect(theirs).toHaveTextContent('Shared with the household')
   })
 
-  it("says so when running from here isn't available yet", async () => {
+  it("says why the server couldn't start it", async () => {
     api.listWorkflows.mockResolvedValue([wf({})])
-    const res = { status: 501, data: { detail: 'Replaying a workflow is not available yet' }, statusText: '', headers: {}, config: { headers: new AxiosHeaders() } }
-    api.runWorkflow.mockRejectedValue(new AxiosError('501', 'ERR', undefined, undefined, res))
+    const detail = 'Which month should I run “Download bank statement” for?'
+    const res = { status: 400, data: { detail, code: 'missing_params' }, statusText: '', headers: {}, config: { headers: new AxiosHeaders() } }
+    api.runWorkflow.mockRejectedValue(new AxiosError('400', 'ERR', undefined, undefined, res))
     renderPage()
     await act(async () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Run Download bank statement' }))
     })
     expect(api.runWorkflow.mock.calls[0][0]).toBe('tw_1')
-    expect(toast.error).toHaveBeenCalledWith("Running a workflow from here isn't available yet.")
+    expect(toast.error).toHaveBeenCalledWith(detail)
   })
 
   it('shows how to teach one when there are none', async () => {

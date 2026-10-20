@@ -100,6 +100,7 @@ type Loop struct {
 	Approvals Approvals // nil: a risky action can't be allowed, it fails
 	Settings  Settings
 	Models    Models
+	Workflows WorkflowStore // nil: a replay's healed steps aren't stored
 	Now       func() time.Time
 }
 
@@ -146,6 +147,7 @@ type Outcome struct {
 	// Downloads are the files a browser task downloaded (done), by name in ~/Downloads.
 	Downloads []string
 	Rounds    int
+	Healed    []Heal // a replay's done: the steps whose element moved (stored when Loop.Workflows is set)
 }
 
 // PendingAction is one risky action held for the user's confirmation. All the risky actions of a
@@ -228,7 +230,10 @@ type round struct {
 	seen     map[string]bool
 	wantShot bool
 	feedback string
-	looked   bool // this Run call has observed once
+	hint     string // a replay's fallback round: where the step was recorded
+	looked   bool   // this Run call has observed once
+	wstep    int    // a replay's step (1-based) the round's actions belong to
+	heal     *RecordedElement
 	// resume: the run was paused (the user used the computer); its next batch resumes it.
 	resume bool
 	// clipboard is what the last batch read from the clipboard, for the next prompt only.
@@ -412,28 +417,10 @@ func (l *Loop) stopRequested(ctx context.Context, run *Run) bool {
 
 // round is one observe → model → policy → act cycle; done reports an outcome that ends the call.
 func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
-	t := r.task
-	obs, err := l.observe(ctx, r)
-	if err != nil {
-		return Outcome{State: StateFailed, Summary: "I couldn't see the computer: " + err.Error()}, true
+	obs, stop := l.look(ctx, r)
+	if stop != nil {
+		return *stop, true
 	}
-	// New page text that reads like instructions to the model stops the run. After the user
-	// answered a question, what was on the page then is not news.
-	answered := t.Answer != "" && !r.looked
-	r.looked = true
-	for _, s := range pageTexts(obs) {
-		if !r.seen[s] && !answered && injectionLike(s) {
-			return Outcome{State: StateAsk, Ask: injectionAsk, Reason: ReasonPageInstructions}, true
-		}
-		r.seen[s] = true
-	}
-	if obs.Image != nil && r.pick.Vision {
-		r.shots = append(r.shots, obs.Image)
-		if len(r.shots) > maxScreenshots {
-			r.shots = r.shots[len(r.shots)-maxScreenshots:]
-		}
-	}
-
 	reply, err := l.ask(ctx, r, obs)
 	if err != nil {
 		return Outcome{State: StateFailed, Summary: err.Error()}, true
@@ -474,6 +461,31 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		return Outcome{}, false
 	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
+}
+
+// look observes for the model: new page text that reads like instructions to it ends the call
+// (stop), and a screenshot joins the ones the model sees.
+func (l *Loop) look(ctx context.Context, r *round) (Observation, *Outcome) {
+	obs, err := l.observe(ctx, r)
+	if err != nil {
+		return obs, &Outcome{State: StateFailed, Summary: "I couldn't see the computer: " + err.Error()}
+	}
+	// After the user answered a question, what was on the page then is not news.
+	answered := r.task.Answer != "" && !r.looked
+	r.looked = true
+	for _, s := range pageTexts(obs) {
+		if !r.seen[s] && !answered && injectionLike(s) {
+			return obs, &Outcome{State: StateAsk, Ask: injectionAsk, Reason: ReasonPageInstructions}
+		}
+		r.seen[s] = true
+	}
+	if obs.Image != nil && r.pick.Vision {
+		r.shots = append(r.shots, obs.Image)
+		if len(r.shots) > maxScreenshots {
+			r.shots = r.shots[len(r.shots)-maxScreenshots:]
+		}
+	}
+	return obs, nil
 }
 
 // done checks the result before the task reports done (C4): the task's own success check, else
@@ -569,7 +581,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 	text := renderPrompt(promptInput{
 		Goal: t.Goal, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
-		Feedback: r.feedback, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
+		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
 	})
 	parts := []llm.Part{{Type: "text", Text: text}}
 	for _, im := range r.shots {
@@ -874,7 +886,7 @@ func (l *Loop) mint(ctx context.Context, r *round, digest string) (string, error
 // record appends the action to the run's history and writes its audit row.
 func (l *Loop) record(ctx context.Context, r *round, d decision, outcome, result string) {
 	r.run.History = append(r.run.History, Entry{Round: r.run.Rounds, Kind: d.action.Kind,
-		Intent: d.action.Intent, Ref: d.action.Ref, Result: result})
+		Intent: d.action.Intent, Ref: d.action.Ref, Result: result, WStep: r.wstep, Healed: r.heal})
 	if l.Audit == nil {
 		return
 	}

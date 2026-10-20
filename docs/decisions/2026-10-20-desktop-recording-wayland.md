@@ -59,7 +59,8 @@ gets `keyframe_point: {x, y}` in the sent JPEG's pixels (after the 1568 px scali
 256 px crop at full resolution is kept next to it as `<id>.<seq>.crop.jpg`. Both are 0600 and go
 with the recording (Delete globs `<id>.*.jpg`; LoadTrace finds the crop again). The upload still
 attaches at most four keyframes (jarvisd takes four images per tool result); the crops stay on
-the computer until #319 decides how the vision model gets them.
+the computer until #319 decides how the vision model gets them. (Superseded: each click's
+keyframe and crop now go up after the trace, [2026-10-20-recording-keyframes.md](2026-10-20-recording-keyframes.md).)
 
 **GNOME and KDE refuse for now.** No wlr-screencopy for grim and no compositor IPC for the
 cursor or the focused window: `ErrWaylandRecording` ("On Wayland I can record the desktop on

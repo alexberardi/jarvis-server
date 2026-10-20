@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
+	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
@@ -232,6 +233,8 @@ type envOpts struct {
 type envExtra struct {
 	log   io.Writer // the module's log (default: discarded)
 	queue bool      // a started job queue in the module's deps
+	// noBlobs leaves the module without a blob store (by default it has one in a temp dir).
+	noBlobs bool
 }
 
 var envExtras sync.Map // *testing.T -> envExtra
@@ -329,6 +332,13 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 	log := slog.New(slog.NewTextHandler(logW, nil))
 	mux := http.NewServeMux()
 	deps := module.Deps{DB: d, Log: log}
+	if !extra.noBlobs {
+		fs, err := blob.NewFS(t.TempDir(), log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps.Blobs = fs
+	}
 	if extra.queue {
 		deps.Queue = queue.New(d, log)
 		deps.Queue.PollInterval = 20 * time.Millisecond

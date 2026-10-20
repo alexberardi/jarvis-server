@@ -32,7 +32,7 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	store := &computer.Store{DB: m.deps.DB, Now: m.now}
 	loop := &computer.Loop{
 		LLM: m.LLM, Exec: computerExec{m: m, store: store}, Policy: m.policy, Store: store,
-		Approvals: computerApprovals{m}, Settings: m.settings, Now: m.now,
+		Approvals: computerApprovals{m}, Settings: m.settings, Now: m.now, Workflows: taughtWorkflows{m},
 		Models: computer.Models{
 			Endpoint: func(ctx context.Context, label string) (llm.Endpoint, error) {
 				if m.Endpoints == nil {
@@ -46,7 +46,7 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	if m.autonomy != nil {
 		loop.Audit = m.autonomy
 	}
-	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets}
+	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}}
 }
 
 // computerTargets are the computers a computer task may run on (computer control on), or why

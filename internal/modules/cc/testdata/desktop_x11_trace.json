@@ -1,0 +1,10 @@
+[
+{"recording_id":"rec_x11","seq":1,"ts":1760000000000,"kind":"click","app":"Notes","element":{"role":"button","name":"New note"},"x":120,"y":48},
+{"recording_id":"rec_x11","seq":2,"ts":1760000001000,"kind":"input","app":"Notes","element":{"role":"textbox","name":"Title"},"value":"Gro"},
+{"recording_id":"rec_x11","seq":3,"ts":1760000001500,"kind":"input","app":"Notes","element":{"role":"textbox","name":"Title"},"value":"Groceries"},
+{"recording_id":"rec_x11","seq":4,"ts":1760000002000,"kind":"key","app":"Notes","element":{"role":"textbox","name":"Title"},"key":"Enter"},
+{"recording_id":"rec_x11","seq":5,"ts":1760000003000,"kind":"scroll","app":"Notes","x":400,"y":300,"dy":-3},
+{"recording_id":"rec_x11","seq":6,"ts":1760000004000,"kind":"click","app":"Bank","element":{"role":"passwordtext","name":"Password"},"x":640,"y":410,"button":"right"},
+{"recording_id":"rec_x11","seq":7,"ts":1760000005000,"kind":"input","app":"Bank","element":{"role":"passwordtext","name":"Password"},"masked":true,"value":"hunter2-do-not-send"},
+{"recording_id":"rec_x11","seq":8,"ts":1760000006000,"kind":"hover","app":"Bank"}
+]

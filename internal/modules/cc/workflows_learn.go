@@ -31,7 +31,8 @@ import (
 // event, and its risk from computeruse.Classify. The draft is stored as the recording owner's
 // (not shared), and a card asks them to review it on the admin's /workflows/<id>.
 //
-// Desktop recordings (plan P3 pieces 34-35) have another event shape and are not learnt yet.
+// Desktop recordings (plan P3 pieces 34-35) have another event shape (parseDesktopTrace): their
+// events are parsed, but no steps are learnt from them yet.
 
 const (
 	learnJob          = "cc.workflow.learn"
@@ -39,10 +40,10 @@ const (
 
 	// maskedValue stands for a value the recorder masked (a password, a card number): the model
 	// sees it, and the step types it, as this; the replay asks for the real one.
-	maskedValue = "•••"
+	maskedValue = computer.MaskedValue
 	// recordedRef is the ref of a learnt press, select or set_value: there is no snapshot at
 	// learning time, so a replay (piece 31) finds the element again from the step's Element.
-	recordedRef = "recorded"
+	recordedRef = computer.RecordedRef
 
 	learnMaxEvents    = 300  // events in the prompt; the rest of a longer trace is dropped
 	learnMaxValue     = 200  // runes of a value or an element name in the prompt
@@ -165,6 +166,96 @@ func foldNavigations(evs []traceEvent) []traceEvent {
 		out = append(out, e)
 	}
 	return out
+}
+
+// desktopEvent is one event of a desktop trace (the agent's computer.DesktopEvent, mirrored
+// here so cc doesn't import the agent): where a browser event has a URL and a selector, it has
+// the app, the focused window (Wayland only) and the element's AX path (AT-SPI on Linux, AX on
+// macOS) when the recording had an accessibility context.
+type desktopEvent struct {
+	Seq     int64           `json:"seq,omitempty"`
+	TS      int64           `json:"ts,omitempty"`  // ms since the epoch
+	Kind    string          `json:"kind"`          // click, input, key (scroll is dropped)
+	App     string          `json:"app,omitempty"` // the bundle id (macOS), else the window class
+	Key     string          `json:"key,omitempty"`
+	Element *desktopElement `json:"element,omitempty"`
+	Value   string          `json:"value,omitempty"`
+	Masked  bool            `json:"masked,omitempty"`
+	Button  string          `json:"button,omitempty"` // click: right for a right click
+	X       int             `json:"x,omitempty"`      // click: the global point
+	Y       int             `json:"y,omitempty"`
+	Window  *desktopWindow  `json:"window,omitempty"`
+	// Context is "none" when the recording had no accessibility context: no element, and
+	// nothing the recorder could mask.
+	Context string `json:"context,omitempty"`
+}
+
+type desktopElement struct {
+	Role   string `json:"role,omitempty"`
+	Name   string `json:"name,omitempty"`
+	AXPath string `json:"ax_path,omitempty"`
+}
+
+type desktopWindow struct {
+	Class string `json:"class,omitempty"`
+	Title string `json:"title,omitempty"`
+	X     int    `json:"x,omitempty"`
+	Y     int    `json:"y,omitempty"`
+	W     int    `json:"w,omitempty"`
+	H     int    `json:"h,omitempty"`
+}
+
+// desktopContextNone is a desktop event's Context without accessibility (computer.ContextNone).
+const desktopContextNone = "none"
+
+// desktopKinds are the desktop events learnt from; a scroll says nothing a replay can redo by
+// its element, so it is dropped like an unknown kind.
+var desktopKinds = []string{"click", "input", "key"}
+
+// sameTarget is whether e and o were typed into the same place: the same element, else (no
+// element) the same window and app.
+func (e desktopEvent) sameTarget(o desktopEvent) bool {
+	if (e.Element == nil) != (o.Element == nil) {
+		return false
+	}
+	if e.Element != nil {
+		return *e.Element == *o.Element && e.App == o.App
+	}
+	return e.App == o.App && (e.Window == nil) == (o.Window == nil) &&
+		(e.Window == nil || (e.Window.Class == o.Window.Class && e.Window.Title == o.Window.Title))
+}
+
+// parseDesktopTrace reads a desktop recording's trace as parseTrace reads a browser one: its
+// known events in order, a masked value dropped, and each run of typing into one place kept as
+// its last event. Typing recorded without an accessibility context (Wayland with no AT-SPI) is
+// treated as masked: the recorder couldn't tell a password field, so its value never reaches
+// the model and a replay asks for it.
+func parseDesktopTrace(raw json.RawMessage) ([]desktopEvent, error) {
+	var all []desktopEvent
+	if err := json.Unmarshal(raw, &all); err != nil {
+		return nil, fmt.Errorf("the trace is not a list of desktop events: %w", err)
+	}
+	var out []desktopEvent
+	for _, e := range all {
+		if !slices.Contains(desktopKinds, e.Kind) {
+			continue
+		}
+		if e.Kind == "input" && e.Context == desktopContextNone {
+			e.Masked = true
+		}
+		if e.Masked {
+			e.Value = ""
+		}
+		if n := len(out); n > 0 && e.Kind == "input" && out[n-1].Kind == "input" && e.sameTarget(out[n-1]) {
+			out[n-1] = e
+			continue
+		}
+		out = append(out, e)
+	}
+	if len(out) > learnMaxEvents {
+		out = out[:learnMaxEvents]
+	}
+	return out, nil
 }
 
 // --- parameter candidates ---
@@ -747,7 +838,14 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 		return err
 	}
 	if rec.Mode != "browser" {
-		m.deps.Log.Info("cc: not learning from a desktop recording yet", "recording", id)
+		evs, err := parseDesktopTrace(rec.Trace)
+		if err != nil {
+			return queue.Permanent(err)
+		}
+		if len(evs) == 0 {
+			return queue.Permanent(errors.New("the recording has no events"))
+		}
+		m.deps.Log.Info("cc: parsed a desktop recording; not learning steps from it yet", "recording", id, "events", len(evs))
 		return nil
 	}
 	var have string

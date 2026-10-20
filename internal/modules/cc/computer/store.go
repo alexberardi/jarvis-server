@@ -49,6 +49,11 @@ type Entry struct {
 	Intent string `json:"intent"`
 	Ref    string `json:"ref,omitempty"`
 	Result string `json:"result"` // ok | failed: <code> <error> | blocked: … | not run
+	// A replay's (replay.go): the workflow step (1-based) the action belongs to, whether it
+	// finished that step, and the element the step was healed to.
+	WStep    int              `json:"wstep,omitempty"`
+	StepDone bool             `json:"step_done,omitempty"`
+	Healed   *RecordedElement `json:"healed,omitempty"`
 }
 
 // Held is a batch parked for a confirmation: every action of the batch, in order, and which of

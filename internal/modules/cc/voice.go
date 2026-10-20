@@ -66,6 +66,7 @@ func (m *Module) registerServerTools() {
 	m.tools.Register(&enableComputerControlTool{m: m}) // "enable computer control" (computer_voice.go)
 	m.tools.Register(&disableComputerControlTool{m: m})
 	m.tools.Register(&computerControlStatusTool{m: m})
+	m.tools.Register(&runWorkflowTool{m: m}) // "download my bank statement for October" (workflows_run.go)
 	if m.Recipes != nil {
 		m.tools.Register(&saveRecipeTool{m: m, imp: m.Recipes}) // chat photo → recipe (chat_image_actions.go)
 	}

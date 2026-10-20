@@ -59,6 +59,8 @@ type ComputerTasks struct {
 	// Targets are the household's computers a computer task may run on (computer control on,
 	// the agent's computer tools), in preference order; off says why there are none, for the user.
 	Targets func(ctx context.Context, hh string) (nodeIDs []string, off string)
+	// Taught are the saved workflows a step may replay (replay.go; nil: none).
+	Taught TaughtWorkflows
 }
 
 // computerEntry is computer_task in the planner's menu.
@@ -86,7 +88,7 @@ func (s *Service) computerOffered(ctx context.Context, hh string) bool {
 
 type computerHandler struct{}
 
-func (computerHandler) Match(_ *Service, cmd string) bool { return cmd == cmdComputer }
+func (computerHandler) Match(_ *Service, cmd string) bool { return isComputerStep(cmd) }
 
 func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd string, args *pyjson.Object, label string, i int) (Result, *Suspend) {
 	failed := func(msg string) (Result, *Suspend) { return Result{Command: cmd, Label: label, Error: msg}, nil }
@@ -96,26 +98,36 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	if rc.workflowID == "" {
 		return failed("computer step has no workflow link")
 	}
-	t := computer.Task{HouseholdID: rc.householdID, UserID: rc.userID, WorkflowID: rc.workflowID, Step: i,
-		Goal:   parse.PyStrip(firstNonEmpty(truthyStr(args, "goal"), rc.goal)),
-		Target: computeruse.Target{Kind: "browser", Site: siteOf(truthyStr(args, "site")), App: parse.PyStrip(truthyStr(args, "app"))},
-	}
-	if truthyStr(args, "target") == "desktop" {
-		t.Target.Kind = "desktop"
+	t := computer.Task{HouseholdID: rc.householdID, UserID: rc.userID, WorkflowID: rc.workflowID, Step: i}
+	// A saved workflow replays (its own goal, targets and success check); anything else is the
+	// loop on the step's goal.
+	run := func(t computer.Task) computer.Outcome { return s.Computer.Loop.Run(ctx, t) }
+	if cmd == cmdRunWorkflow || truthyStr(args, ArgTaughtWorkflow) != "" {
+		wf, params, msg := s.taughtStep(ctx, rc, args)
+		if msg != "" {
+			return failed(msg)
+		}
+		run = func(t computer.Task) computer.Outcome { return s.Computer.Loop.Replay(ctx, t, wf, params) }
 	} else {
-		t.StartURL = startURL(truthyStr(args, "site"), truthyStr(args, "goal"), rc.goal)
-		if t.Target.Site == "" {
-			t.Target.Site = siteOf(t.StartURL)
+		t.Goal = parse.PyStrip(firstNonEmpty(truthyStr(args, "goal"), rc.goal))
+		t.Target = computeruse.Target{Kind: "browser", Site: siteOf(truthyStr(args, "site")), App: parse.PyStrip(truthyStr(args, "app"))}
+		if truthyStr(args, "target") == "desktop" {
+			t.Target.Kind = "desktop"
+		} else {
+			t.StartURL = startURL(truthyStr(args, "site"), truthyStr(args, "goal"), rc.goal)
+			if t.Target.Site == "" {
+				t.Target.Site = siteOf(t.StartURL)
+			}
+		}
+		if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
+			t.Success = &computer.SuccessCheck{Screen: ok}
 		}
 	}
-	if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
-		t.Success = &computer.SuccessCheck{Screen: ok}
-	}
 	// A run of this step that hasn't ended is resumed (after its confirmation or question).
-	run, err := s.Computer.Loop.Store.ForStep(ctx, rc.workflowID, i)
+	prev, err := s.Computer.Loop.Store.ForStep(ctx, rc.workflowID, i)
 	switch {
-	case err == nil && (run.State == computer.RunWaiting || run.State == computer.RunPaused):
-		t.RunID, t.NodeID = run.ID, run.NodeID
+	case err == nil && (prev.State == computer.RunWaiting || prev.State == computer.RunPaused):
+		t.RunID, t.NodeID = prev.ID, prev.NodeID
 		if sig := rc.signal; sig != nil {
 			t.Approved, t.Answer = sig.Approved, sig.Answer
 		}
@@ -142,7 +154,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		t.Progress = func(*computer.Run) { s.updateRanCard(ctx, w, *rc.results, "running", "") }
 	}
 
-	out := s.Computer.Loop.Run(ctx, t)
+	out := run(t)
 	var note string // a checkout approved within the spend limit, said on the card
 	for out.State == computer.StateNeedsApproval {
 		limit, ok := s.withinSpendLimit(ctx, rc.householdID, out)
@@ -156,7 +168,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		}
 		t.RunID, t.Answer, t.Approved = out.RunID, "", digests(out.Pending)
 		t.ApprovedReason = "within your " + dollars(limit) + " spend limit"
-		out = s.Computer.Loop.Run(ctx, t)
+		out = run(t)
 	}
 	s.log().Info("errands: step (computer)", "run", out.RunID, "state", out.State, "rounds", out.Rounds)
 	switch out.State {
@@ -413,7 +425,7 @@ func (s *Service) postComputerCard(ctx context.Context, w *workflowRow, i int, c
 // hasComputerStep reports whether the run's plan has a computer task.
 func (w *workflowRow) hasComputerStep() bool {
 	for _, st := range w.Steps {
-		if parse.PyStrip(st.Command) == cmdComputer {
+		if isComputerStep(st.Command) {
 			return true
 		}
 	}
@@ -482,7 +494,7 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 // digests approved (the loop mints their tokens). ok=false: the step isn't a computer task
 // waiting on a confirmation.
 func (s *Service) approveComputer(ctx context.Context, w *workflowRow, step int) (resumeJob, bool) {
-	if s.Computer == nil || s.Computer.Loop == nil || parse.PyStrip(w.Steps[step].Command) != cmdComputer {
+	if s.Computer == nil || s.Computer.Loop == nil || !isComputerStep(w.Steps[step].Command) {
 		return resumeJob{}, false
 	}
 	run, err := s.Computer.Loop.Store.ForStep(ctx, w.ID, step)
@@ -520,7 +532,7 @@ func (s *Service) handleAnswerStep(ctx context.Context, c CallbackContext) Callb
 		return fail("Errand not found")
 	}
 	if w.State != "waiting" || w.WaitingOn != signalApproval || w.Cursor != step || step < 0 || step >= len(w.Steps) ||
-		parse.PyStrip(w.Steps[step].Command) != cmdComputer {
+		!isComputerStep(w.Steps[step].Command) {
 		return handled(c.HouseholdID, "That question was already answered.")
 	}
 	if !revisionsMatch(c.Data["revision"], w.Revision) {

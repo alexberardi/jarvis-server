@@ -59,8 +59,11 @@ type Recording struct {
 	Narration   string          `json:"narration"`
 	Keyframes   int             `json:"keyframes"`
 	Steps       int             `json:"steps"` // the trace's events (0 when it isn't a list)
-	CreatedAt   time.Time       `json:"created_at"`
-	ExpiresAt   time.Time       `json:"expires_at"`
+	// KeyframeImages: the click keyframes kept here (recording_keyframes.go); one recording's
+	// GET only.
+	KeyframeImages []KeyframeImage `json:"keyframe_images,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	ExpiresAt      time.Time       `json:"expires_at"`
 }
 
 // recordingRetention is the household's retention in days (the default when unset or invalid).
@@ -163,7 +166,8 @@ func (m *Module) listRecordings(ctx context.Context, hh string, owner int64) ([]
 	return out, rows.Err()
 }
 
-// deleteRecordingRow deletes a recording and forgets it on the workflows learnt from it.
+// deleteRecordingRow deletes a recording and its keyframes, and forgets it on the workflows
+// learnt from it.
 func (m *Module) deleteRecordingRow(ctx context.Context, id string) error {
 	tx, err := m.deps.DB.Write.BeginTx(ctx, nil)
 	if err != nil {
@@ -176,7 +180,11 @@ func (m *Module) deleteRecordingRow(ctx context.Context, id string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE cc_taught_workflows SET recording_id = NULL WHERE recording_id = ?`, id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	m.deleteKeyframes(ctx, id)
+	return nil
 }
 
 // deleteRecording deletes the row, then asks the agent to delete its copy (best effort).
@@ -214,7 +222,8 @@ func (m *Module) agentDeleteRecording(ctx context.Context, nodeID, recID string)
 	return nil
 }
 
-// sweepRecordings deletes every expired recording (and asks each agent to delete its copy).
+// sweepRecordings deletes every expired recording (and asks each agent to delete its copy),
+// then the keyframes whose recording is gone.
 func (m *Module) sweepRecordings(ctx context.Context) error {
 	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT `+recordingColumns+` FROM cc_recordings
 		WHERE expires_at <= ? ORDER BY expires_at`, dbTime(m.now()))
@@ -242,7 +251,7 @@ func (m *Module) sweepRecordings(ctx context.Context) error {
 	if len(expired) > 0 {
 		m.deps.Log.Info("cc: expired recordings deleted", "count", len(expired))
 	}
-	return nil
+	return m.sweepOrphanKeyframes(ctx)
 }
 
 // --- registration ---
@@ -317,6 +326,10 @@ func (m *Module) handleGetRecording(w http.ResponseWriter, r *http.Request, u au
 	rec, err := m.ownRecording(r.Context(), u, r.PathValue("id"))
 	if err != nil {
 		m.writeErr(w, err)
+		return
+	}
+	if rec.KeyframeImages, err = m.keyframeImages(r.Context(), rec.ID); err != nil {
+		m.internalError(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, rec)

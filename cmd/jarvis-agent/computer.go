@@ -119,8 +119,8 @@ func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc f
 		sources[computer.ModeDesktop] = src
 	}
 	rec := &computer.Recorder{Dir: dir, Activity: activity, Sources: sources, Log: log}
-	up := &recordingUploads{rec: rec, cc: cc, note: note, log: log, every: recordingRetryEvery}
-	rec.Stopped = up.stopped
+	up := &recordingUploads{rec: rec, cc: cc, note: note, log: log, every: recordingRetryEvery, delay: keyframesDelay}
+	rec.Stopped, rec.KeyframesLater = up.stopped, up.later
 	return rec, up
 }
 
@@ -133,16 +133,28 @@ const recordingRefusedNote = "Jarvis couldn't take the recording: it stays on th
 // recordingRetryEvery is how often, while connected, traces not sent yet are tried again.
 const recordingRetryEvery = 5 * time.Minute
 
+// keyframesDelay is how long after computer_record_stop its keyframes are sent: jarvisd stores
+// the recording once it has the tool's answer.
+const keyframesDelay = 3 * time.Second
+
+// keyframesGiveUp is how long the keyframes of a recording jarvisd doesn't have (404) are
+// tried again.
+const keyframesGiveUp = 24 * time.Hour
+
 // recordingUploads sends the traces stopped on this computer to jarvisd (POST
 // /api/v0/computer/recordings): at the stop, then those not sent yet (rec.Pending: stopped
 // while not connected, or the upload failed) on every connect and every `every` while
 // connected, oldest first. jarvisd keeps a recording by its id, so one sent twice is one.
+// Then each click's keyframe and its crop (PUT …/keyframes/{seq}[/crop], #344), for those and
+// for the recordings jarvisd stopped itself (computer_record_stop: later); one sent twice is
+// one too.
 type recordingUploads struct {
 	rec   *computer.Recorder
 	cc    func() *node.CC // nil while not connected
 	note  func(string)    // tells the user (the island); nil for nobody
 	log   *slog.Logger
 	every time.Duration
+	delay time.Duration // later's
 
 	mu sync.Mutex // one sweep at a time
 }
@@ -165,6 +177,16 @@ func (u *recordingUploads) stopped(tr computer.Trace) {
 	}()
 }
 
+// later is the recorder's KeyframesLater: tr's keyframes are sent a moment from now, once
+// jarvisd has stored the trace computer_record_stop answered (or on the next sweep).
+func (u *recordingUploads) later(computer.Trace) {
+	time.AfterFunc(u.delay, func() {
+		if cc := u.cc(); cc != nil {
+			u.sweep(cc)
+		}
+	})
+}
+
 // serve is part of OnConnected: it sends the traces not sent yet at once and every u.every
 // until ctx ends.
 func (u *recordingUploads) serve(ctx context.Context, cc *node.CC) {
@@ -178,8 +200,8 @@ func (u *recordingUploads) serve(ctx context.Context, cc *node.CC) {
 	}
 }
 
-// sweep sends the traces not sent yet, oldest first, stopping at the first that doesn't go.
-// It returns those it didn't send: true for one tried again later, false for one jarvisd
+// sweep sends the traces not sent yet, oldest first, stopping at the first that doesn't go,
+// then the keyframes not sent yet (sendKeyframes). It returns the traces it didn't send: true for one tried again later, false for one jarvisd
 // refused for good (a bad trace, an id that is another node's), which stays on this computer
 // only.
 func (u *recordingUploads) sweep(cc *node.CC) map[string]bool {
@@ -188,8 +210,10 @@ func (u *recordingUploads) sweep(cc *node.CC) map[string]bool {
 	kept := map[string]bool{}
 	pending := u.rec.Pending()
 	for i, tr := range pending {
+		out := computer.TraceOutput(tr)
+		delete(out, "image_attachments") // jarvisd takes the click keyframes one by one, after
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		err := cc.UploadRecording(ctx, computer.TraceOutput(tr))
+		err := cc.UploadRecording(ctx, out)
 		cancel()
 		var he *node.HTTPError
 		switch {
@@ -199,6 +223,7 @@ func (u *recordingUploads) sweep(cc *node.CC) map[string]bool {
 		case errors.As(err, &he) && slices.Contains([]int{http.StatusBadRequest, http.StatusConflict,
 			http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity}, he.Status):
 			u.rec.Sent(tr.ID)
+			u.rec.KeyframesSent(tr.ID)
 			kept[tr.ID] = false
 			u.log.Warn("recording: jarvisd refused it; the recording stays on this computer only", "recording", tr.ID, "err", err)
 		default:
@@ -209,7 +234,72 @@ func (u *recordingUploads) sweep(cc *node.CC) map[string]bool {
 			return kept
 		}
 	}
+	u.sendKeyframes(cc)
 	return kept
+}
+
+// sendKeyframes sends the click keyframes of the recordings jarvisd has, oldest first,
+// stopping at the first that doesn't go (jarvisd down: the next sweep sends it again).
+func (u *recordingUploads) sendKeyframes(cc *node.CC) {
+	for _, tr := range u.rec.KeyframesPending() {
+		if !u.sendTraceKeyframes(cc, tr) {
+			return
+		}
+	}
+}
+
+// sendTraceKeyframes sends tr's click keyframes and crops, by seq, and clears its marker. One
+// jarvisd won't take (not a JPEG, not a click; a crop too big) is skipped; a recording that
+// has all it may keep (413), or isn't this computer's, is done; one jarvisd doesn't have yet
+// (404: computer_record_stop's not stored) is tried again until keyframesGiveUp. It returns
+// false when jarvisd failed, to stop the sweep.
+func (u *recordingUploads) sendTraceKeyframes(cc *node.CC, tr computer.Trace) bool {
+	sent := 0
+	for _, k := range computer.ClickKeyframes(tr) {
+		for _, img := range []struct {
+			path string
+			crop bool
+		}{{k.Path, false}, {k.Crop, true}} {
+			if img.path == "" {
+				continue
+			}
+			b, err := os.ReadFile(img.path)
+			if err != nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			err = cc.UploadKeyframe(ctx, tr.ID, k.Seq, img.crop, b)
+			cancel()
+			var he *node.HTTPError
+			status := 0
+			if errors.As(err, &he) {
+				status = he.Status
+			}
+			switch {
+			case err == nil:
+				sent++
+			case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity ||
+				(status == http.StatusRequestEntityTooLarge && img.crop):
+				u.log.Warn("recording: jarvisd refused a keyframe", "recording", tr.ID, "seq", k.Seq, "crop", img.crop, "err", err)
+			case status == http.StatusRequestEntityTooLarge || status == http.StatusForbidden || status == http.StatusConflict:
+				u.log.Warn("recording: jarvisd takes no more of its keyframes", "recording", tr.ID, "sent", sent, "err", err)
+				u.rec.KeyframesSent(tr.ID)
+				return true
+			case status == http.StatusNotFound:
+				if time.Since(u.rec.KeyframesMarked(tr.ID)) > keyframesGiveUp {
+					u.log.Warn("recording: jarvisd never had it; its keyframes stay on this computer only", "recording", tr.ID)
+					u.rec.KeyframesSent(tr.ID)
+				}
+				return true
+			default:
+				u.log.Warn("recording: keyframe upload failed; trying again later", "recording", tr.ID, "seq", k.Seq, "err", err)
+				return false
+			}
+		}
+	}
+	u.rec.KeyframesSent(tr.ID)
+	u.log.Info("recording: keyframes sent to jarvisd", "recording", tr.ID, "images", sent)
+	return true
 }
 
 // recordFromHere starts a recording in mode or, with mode "", ends the one going on, uploading

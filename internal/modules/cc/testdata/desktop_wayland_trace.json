@@ -1,0 +1,8 @@
+[
+{"recording_id":"rec_wl","seq":1,"ts":1760000000000,"kind":"click","app":"org.gnome.TextEditor","x":1200,"y":340,"window":{"class":"org.gnome.TextEditor","title":"notes.txt","x":1000,"w":800,"h":600},"context":"none","keyframe_point":{"x":200,"y":340}},
+{"recording_id":"rec_wl","seq":2,"ts":1760000001000,"kind":"input","app":"org.gnome.TextEditor","value":"buy mi","window":{"class":"org.gnome.TextEditor","title":"notes.txt","x":1000,"w":800,"h":600},"context":"none"},
+{"recording_id":"rec_wl","seq":3,"ts":1760000001800,"kind":"input","app":"org.gnome.TextEditor","value":"buy milk","window":{"class":"org.gnome.TextEditor","title":"notes.txt","x":1000,"w":800,"h":600},"context":"none"},
+{"recording_id":"rec_wl","seq":4,"ts":1760000002500,"kind":"key","app":"org.gnome.TextEditor","key":"Ctrl+s","window":{"class":"org.gnome.TextEditor","title":"notes.txt","x":1000,"w":800,"h":600},"context":"none"},
+{"recording_id":"rec_wl","seq":5,"ts":1760000003000,"kind":"scroll","app":"firefox","x":300,"y":500,"dy":5,"window":{"class":"firefox","title":"Bank — Mozilla Firefox","w":1000,"h":1000},"context":"none"},
+{"recording_id":"rec_wl","seq":6,"ts":1760000004000,"kind":"input","app":"firefox","value":"hunter2-do-not-send","window":{"class":"firefox","title":"Bank — Mozilla Firefox","w":1000,"h":1000},"context":"none"}
+]
