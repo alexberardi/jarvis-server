@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -201,5 +202,24 @@ func TestWindowToolsPassIDsThrough(t *testing.T) {
 	}
 	if _, ok := ts.Call(context.Background(), "nope", nil, node.Request{}); ok {
 		t.Fatal("unknown tool handled")
+	}
+}
+
+// A computer task's app is found by name only: never a link, a path or a URI, even with
+// --allow-open-any.
+func TestFindAppNamesOnly(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{AllowAny: true}, catalogue)
+	for _, target := range []string{"https://store.steampowered.com", "mailto:a@example.com", "/Applications/Steam.app", "steam://run/1", "-a Steam"} {
+		if _, err := ts.FindApp(target); !errors.Is(err, host.ErrInvalidTarget) {
+			t.Errorf("FindApp(%q) = %v, want invalid target", target, err)
+		}
+	}
+	a, err := ts.FindApp("stem")
+	if err != nil || a.Path != "/Applications/Steam.app" {
+		t.Fatalf("FindApp(stem) = %v, %v", a, err)
+	}
+	if err := ts.LaunchApp(context.Background(), a); err != nil || len(b.launched) != 1 || b.launched[0] != a.Path || len(b.opened) != 0 {
+		t.Errorf("LaunchApp = %v, launched %v opened %v", err, b.launched, b.opened)
 	}
 }
