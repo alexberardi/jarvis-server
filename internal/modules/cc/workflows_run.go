@@ -138,8 +138,9 @@ func (*runWorkflowTool) Definition() *pyjson.Object {
 	return watchToolDefinition(toolRunWorkflow,
 		"Run a task the user taught Jarvis (a saved workflow, recorded with 'watch me') on their computer, e.g. "+
 			"'download my bank statement for October', 'run the bank statement workflow for March'. Call it with the "+
-			"workflow's name or the user's phrase for it, and a value for each thing it needs; if it answers with a "+
-			"question, ask the user and call it again with their answer.",
+			"workflow's name or the user's phrase for it, and a value for each thing it needs. If it answers status "+
+			"\"ask\", nothing has started: ask the user, then call it again with their answer. Only status \"started\" "+
+			"means it is running.",
 		servertools.Obj(
 			"name", strProp("The saved workflow's name, or the user's words for it ('my bank statement')"),
 			"params", servertools.Obj("type", "object", "description",
@@ -178,7 +179,12 @@ func (t *runWorkflowTool) Execute(ctx context.Context, call servertools.Call, tu
 				q = strings.TrimSuffix(q, "?") + fmt.Sprintf(" (last time: %s)?", p.Example)
 			}
 		}
-		return servertools.Obj("status", "ask", "missing", miss, "message", q), nil
+		var next strings.Builder
+		enc := json.NewEncoder(&next)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(map[string]any{"name": wf.Name, "params": map[string]string{miss[0]: "<their answer>"}})
+		return servertools.Obj("status", "ask", "missing", miss, "message", q,
+			"next", "Nothing has started yet. Ask the user this, then call run_workflow again with "+strings.TrimSpace(next.String())+"."), nil
 	}
 	if _, ref := t.m.startReplay(ctx, turn.HouseholdID, &uid, turn.NodeID, wf, params); ref != nil {
 		return recordingRefusal(ref.code, ref.msg), nil

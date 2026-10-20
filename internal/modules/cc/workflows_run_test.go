@@ -89,7 +89,8 @@ func TestRunWorkflowByTrigger(t *testing.T) {
 		t.Fatalf("not theirs: %v", got)
 	}
 	if got := runTool(t, tool, `{"name": "Download my bank statement"}`, turn); got["status"] != "ask" ||
-		got["message"] != "Which month should I run “Bank statement” for (last time: September 2026)?" {
+		got["message"] != "Which month should I run “Bank statement” for (last time: September 2026)?" ||
+		got["next"] != `Nothing has started yet. Ask the user this, then call run_workflow again with {"name":"Bank statement","params":{"month":"<their answer>"}}.` {
 		t.Fatalf("missing month: %v", got)
 	}
 	// Computer control off: it says so, and starts nothing.
