@@ -146,7 +146,7 @@ func hostOnly(host string) string {
 }
 
 // readXauth finds display's entry in the Xauthority file: a FamilyWild one, or a FamilyLocal
-// one for this host, for this display or any.
+// one for this host, for this display or any, that is a MIT-MAGIC-COOKIE-1 (others are skipped).
 func readXauth(host, display string) (xauth, error) {
 	const familyLocal, familyWild = 256, 65535
 	if host == "" || host == "localhost" || host == "unix" {
@@ -180,7 +180,9 @@ func readXauth(host, display string) (xauth, error) {
 	}
 	for {
 		var family uint16
-		if err := binary.Read(f, binary.BigEndian, &family); err != nil {
+		if err := binary.Read(f, binary.BigEndian, &family); err == io.EOF {
+			return xauth{}, fmt.Errorf("no MIT-MAGIC-COOKIE-1 entry for display %s in %s", display, name)
+		} else if err != nil {
 			return xauth{}, err
 		}
 		var parts [4][]byte
@@ -190,10 +192,8 @@ func readXauth(host, display string) (xauth, error) {
 			}
 		}
 		addr, disp := string(parts[0]), string(parts[1])
-		if (family == familyWild || (family == familyLocal && addr == host)) && (disp == "" || disp == display) {
-			if string(parts[2]) != "MIT-MAGIC-COOKIE-1" || len(parts[3]) != 16 {
-				return xauth{}, fmt.Errorf("unsupported X authorization %q", parts[2])
-			}
+		if (family == familyWild || (family == familyLocal && addr == host)) && (disp == "" || disp == display) &&
+			string(parts[2]) == "MIT-MAGIC-COOKIE-1" && len(parts[3]) == 16 {
 			return xauth{name: string(parts[2]), data: parts[3]}, nil
 		}
 	}
