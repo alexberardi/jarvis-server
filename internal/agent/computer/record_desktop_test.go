@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -246,7 +247,8 @@ func TestKeyframesThrottled(t *testing.T) {
 	for _, k := range kf {
 		seqs = append(seqs, k.Seq)
 		st, err := os.Stat(k.Path)
-		if err != nil || st.Mode().Perm() != 0o600 || filepath.Dir(k.Path) != e.rec.dir {
+		// Windows reports 0666 for any file it can write: no Unix modes there.
+		if err != nil || runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 || filepath.Dir(k.Path) != e.rec.dir {
 			t.Fatalf("keyframe %s: %v %v", k.Path, err, st)
 		}
 	}
