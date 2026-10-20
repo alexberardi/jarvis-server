@@ -91,6 +91,10 @@ type DesktopWindow struct {
 	Title      string
 	Layer      int // 0: an ordinary window; above it panels, prompts, the menu bar
 	X, Y, W, H int
+	// Focused marks the window with the keyboard focus where the list is the stacking order
+	// and the focus can be below the top (Linux: a floating window over the focused tiled
+	// one). No window marked: the front one has it (macOS).
+	Focused bool
 }
 
 func (w DesktopWindow) contains(x, y int) bool {
@@ -307,8 +311,15 @@ func appCheck(names []string, el *computeruse.Element, blocked []string) (code s
 	return "", nil
 }
 
-// findWindow is app's front ordinary window ("" app: the frontmost one).
+// findWindow is app's front ordinary window ("" app: the focused one, else the frontmost).
 func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
+	if app == "" {
+		for _, w := range ws {
+			if w.Focused && w.normal() {
+				return w, true
+			}
+		}
+	}
 	for _, w := range ws {
 		if w.normal() && (app == "" || sameApp([]string{w.App}, app)) {
 			return w, true

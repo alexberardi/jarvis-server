@@ -620,3 +620,39 @@ func TestClipboardCommands(t *testing.T) {
 		t.Error("a clipboard without a session")
 	}
 }
+
+// On Linux the window list is the stacking order and the focus is marked apart: a floating
+// window can sit above the focused tiled one. Keys go by the focused window, a click by the
+// one on top, and with no accessibility tree (a Tk app) the window list alone decides.
+func TestFocusedWindowMarkedApart(t *testing.T) {
+	f := newDesktop(t)
+	f.tl.Desktop.AX = nil
+	term := dTerminal
+	term.Focused = true
+	f.wins.ws = []DesktopWindow{dNotes, term}
+	out, capID := f.observe(t, "")
+	if out["error_code"] != "denied" {
+		t.Errorf("observe with no app = %v, want the focused terminal denied", out)
+	}
+	if out, capID = f.observe(t, "Notes"); out["success"] != true || capID == "" {
+		t.Fatalf("observe Notes = %v", out)
+	}
+	res := f.act(t, "Notes", map[string]any{"kind": "type", "intent": "x", "text": "rm -rf ~"})
+	if r := firstResult(t, res); r["code"] != "denied" {
+		t.Errorf("type while the terminal has the focus = %v, want denied", r)
+	}
+	if got := f.in.posted(); len(got) != 0 {
+		t.Errorf("posted %v, want nothing", got)
+	}
+	// Notes has the focus: typing goes there, and a click on it is Notes'.
+	term.Focused = false
+	notes := dNotes
+	notes.Focused = true
+	f.wins.ws = []DesktopWindow{notes, term}
+	res = f.act(t, "Notes", map[string]any{"kind": "type", "intent": "x", "text": "milk"}, click(capID, 10, 10))
+	for _, r := range results(res) {
+		if r["ok"] != true {
+			t.Errorf("result = %v", r)
+		}
+	}
+}

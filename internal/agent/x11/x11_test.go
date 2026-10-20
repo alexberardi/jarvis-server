@@ -30,13 +30,16 @@ type fakeConn struct {
 	failMap bool
 	pointer [2]int
 	geoms   map[uint32][4]int // win -> root-relative x, y, w, h
-	depth   byte
-	pixels  []byte        // what GetImage returns
-	idle    time.Duration // what IdleTime returns
-	idleErr error
-	grabErr error       // what GrabKey returns
-	presses chan uint16 // NextKeyPress's key presses (their modifier state); closed: the connection ended
-	onClose func()
+	// children is QueryTree's (bottom to top); unmapped the windows that aren't viewable.
+	children map[uint32][]uint32
+	unmapped map[uint32]bool
+	depth    byte
+	pixels   []byte        // what GetImage returns
+	idle     time.Duration // what IdleTime returns
+	idleErr  error
+	grabErr  error       // what GrabKey returns
+	presses  chan uint16 // NextKeyPress's key presses (their modifier state); closed: the connection ended
+	onClose  func()
 }
 
 type prop struct {
@@ -145,7 +148,9 @@ func (f *fakeConn) Geometry(win uint32) (int, int, int, int, error) {
 	}
 	return g[0], g[1], g[2], g[3], nil
 }
-func (f *fakeConn) Sync() error { f.log = append(f.log, "sync"); return nil }
+func (f *fakeConn) Children(win uint32) ([]uint32, error) { return f.children[win], nil }
+func (f *fakeConn) Viewable(win uint32) (bool, error)     { return !f.unmapped[win], nil }
+func (f *fakeConn) Sync() error                           { f.log = append(f.log, "sync"); return nil }
 func (f *fakeConn) Close() {
 	if f.onClose != nil {
 		f.onClose()

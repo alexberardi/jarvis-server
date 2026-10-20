@@ -723,6 +723,9 @@ func (e *Env) StartNotes(ctx context.Context, layout string) error {
 	if _, err := os.Stat(py); err != nil {
 		py = "python3"
 	}
+	if out, err := exec.CommandContext(ctx, py, "-c", "import tkinter").CombinedOutput(); err != nil {
+		return fmt.Errorf("the notes app needs Tk for %s (Arch: sudo pacman -S tk; Debian, Ubuntu: sudo apt install python3-tk): %s", py, lastOutputLine(out))
+	}
 	argv := []string{py, app, "--state", d.notesSt, "--layout", firstNonEmpty(layout, "default")}
 	var cmd *exec.Cmd
 	if d.kind == "wlroots" {
@@ -783,6 +786,11 @@ func (e *Env) StartNotes(ctx context.Context, layout string) error {
 // lastLine is a log's last non-empty line, for an error message.
 func lastLine(path string) string {
 	b, _ := os.ReadFile(path)
+	return lastOutputLine(b)
+}
+
+// lastOutputLine is a command output's last non-empty line.
+func lastOutputLine(b []byte) string {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	return strings.TrimSpace(lines[len(lines)-1])
 }
