@@ -57,12 +57,28 @@ func TestPatternsMatchPython(t *testing.T) {
 		}
 	}
 	for n := range patterns {
-		if !names[n] {
+		if !names[n] && !goOnly[n] {
 			t.Errorf("pattern %q has no Python golden", n)
 		}
 	}
-	if len(names) != len(patterns) {
-		t.Errorf("Python has %d patterns, Go %d", len(names), len(patterns))
+	if len(names) != len(patterns)-len(goOnly) {
+		t.Errorf("Python has %d patterns, Go %d besides its own", len(names), len(patterns)-len(goOnly))
+	}
+}
+
+// goOnly are the Go node's patterns Python has no counterpart for.
+var goOnly = map[string]bool{Setup: true}
+
+// Setup mode's pattern (#292): a blue breath between 10% and 40%, 3 s a cycle.
+func TestSetupPattern(t *testing.T) {
+	for _, c := range []struct {
+		t      float64
+		bright uint8
+	}{{0, 10}, {0.75, 25}, {1.5, 40}, {3, 10}} {
+		want := Pixel{0, 60, 255, c.bright}
+		if got := Render(Setup, c.t, 100); !slices.Equal(got, []Pixel{want, want, want}) {
+			t.Errorf("t=%v: %v, want %v", c.t, got, want)
+		}
 	}
 }
 

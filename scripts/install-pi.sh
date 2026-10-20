@@ -572,6 +572,8 @@ TimeoutStopSec=10
 Environment=HOME=$NODE_HOME
 Environment=XDG_RUNTIME_DIR=/run/user/$NODE_UID
 SyslogIdentifier=jarvis-agent
+# Setup mode (not enrolled) answers phones' connectivity checks on :80 so they open the setup sheet.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
