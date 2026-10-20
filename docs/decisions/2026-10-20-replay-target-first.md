@@ -39,3 +39,10 @@ resolves the name when it runs.
 **Routines.** `run_workflow` steps start their errand on the server and count as passed when it
 started (the replay can take minutes; its own card reports the outcome). The node gets the rest of
 the routine, or nothing when nothing is left.
+
+**Voice offers it only with a workflow taught.** `run_workflow` is in a voice conversation only when
+the household has a computer, a taught workflow and a known speaker (`ToolGates.Workflows`). With
+none taught it could only say so, and the extra tool beside `start_recording` and `stop_recording`
+made the live model (qwen3.5-9b) answer "record this macro" and "I'm done" without calling them in
+the pipeline scenarios. A workflow taught mid-conversation is offered from the next one (the gates
+are fixed per conversation, like the others).
