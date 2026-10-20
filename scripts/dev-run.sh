@@ -83,7 +83,8 @@ if [ "$UI" = 1 ]; then
 fi
 
 PLAT=$(echo "$OS" | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-ls internal/voice/sherpa/libs/"$PLAT"/* >/dev/null 2>&1 || die "native libs missing: run scripts/fetch-sherpa-libs.sh $PLAT"
+# The voice pipeline embeds onnxruntime (gitignored); this is a no-op once they're there.
+scripts/fetch-sherpa-libs.sh "$PLAT" >&2 || die "could not fetch the native voice libraries for $PLAT"
 
 # The account running it must be able to read the binary, so it lives outside $HOME.
 BIN=/tmp/jarvisd-dev-$(id -un)
