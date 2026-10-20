@@ -879,3 +879,21 @@ func TestDoneOnUnsentFormAsksOnce(t *testing.T) {
 		t.Fatalf("second nudge:\n%s", txt)
 	}
 }
+
+// TestBrowserRunEndsOnComputer: a browser task that is over, done or failed, ends on the computer
+// too (its "controlling" indicator), once: until then the agent refuses to start a recording.
+func TestBrowserRunEndsOnComputer(t *testing.T) {
+	e := newEnv(t)
+	e.script(doneAnswer)
+	out := e.run()
+	if out.State != StateDone || len(e.exec.stops) != 1 || e.exec.stops[0] != out.RunID {
+		t.Fatalf("done: outcome %+v, stops %v", out, e.exec.stops)
+	}
+
+	e = newEnv(t)
+	e.setts[SettingMaxRounds] = 1
+	e.script(actions(press("e1", "Go home")), actions(press("e1", "Go home")))
+	if out := e.run(); out.State != StateFailed || len(e.exec.stops) != 1 {
+		t.Fatalf("failed: outcome %+v, stops %v", out, e.exec.stops)
+	}
+}

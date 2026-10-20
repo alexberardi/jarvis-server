@@ -34,8 +34,8 @@ required case passed, 1 when one failed, 2 when the run could not bring its worl
 | `notes_wlroots` | desktop-wlroots | a note in the fixture notes app under headless sway (Xwayland) | piece 35 |
 | `notes_x11` | desktop-x11 | the same under Xvfb | piece 35 |
 | `notes_macos` | desktop-mac | Notes.app on the Mac test host; skipped elsewhere, not wired yet | piece 22 |
-| `replay_changed_param` | teach | a taught bank download replayed for another month (needs a `demonstrate` setup step) | piece 32 |
-| `replay_moved_button` | teach | the same on the `?layout=moved` page | piece 32 |
+| `replay_changed_param` | teach | the bank download, demonstrated for 2026-09 (`setup.demonstrate`), replayed for August | piece 32 |
+| `replay_moved_button` | teach | the same replayed after the site moved its buttons (every page the moved variant) | piece 32 |
 
 A case is `tools/ccsuite/cases/<name>.json` (the file name is its name):
 
@@ -47,7 +47,7 @@ A case is `tools/ccsuite/cases/<name>.json` (the file name is its name):
   "status": "pending",                // pending | required
   "say": "Order me … from the test store at {{sites}}/store/",   // {{sites}}: the fixture sites; {{layout}}: ?layout=moved when setup.layout is moved
   "target": "browser",                // browser | desktop
-  "setup": {"login": ["store"], "layout": "moved", "notes_layout": "moved", "block": ["127.0.0.1"]},
+  "setup": {"login": ["store"], "layout": "moved", "notes_layout": "moved", "block": ["127.0.0.1"], "demonstrate": "bank_download"},
   "answers": [{"when": "confirm", "tap": "cancel"}],
   "checks": [{"kind": "asked", "pattern": "(?i)pulse active 2"}, {"kind": "no_order"}],
   "max_minutes": 15
@@ -56,6 +56,19 @@ A case is `tools/ccsuite/cases/<name>.json` (the file name is its name):
 
 - `setup.login`: the sites (`store`, `bank`, `card`) whose session cookie goes into the browser
   profile, standing in for a saved login.
+- `setup.demonstrate`: a scripted demonstration (`tools/ccsuite/teach.go`; `bank_download`: the
+  statements list, the 2026-09 link, Download CSV) the suite plays before `say`, as the user
+  teaching Jarvis: it starts a browser recording on the agent's control socket (`computer record
+  start`), plays the steps in a tab of its own through the DevTools pipe with real input events
+  (`Input.dispatchMouseEvent`; the recorder ignores untrusted ones such as `el.click()`), stops
+  the recording, waits for the workflow cc's learn job makes of it (`GET /api/v0/workflows`, by
+  `recording_id`) and saves it as it is (`PUT`, the user's Review then Save). The fixtures are
+  then reset and logged in again, so the checks see only the replay, and `setup.layout: moved`
+  becomes every page's (`ccsites POST /control/layout?layout=moved`: the site changed since it
+  was taught; the taught steps open the site's own addresses, without `?layout=moved`). The run
+  deletes the workflow and the recording at its end, so each run teaches its own (two would make
+  the replay ask which one, and a replay heals the one it ran). The learn job's model calls are in
+  the run's `demonstrate.jsonl`, the saved workflow in `taught.json`.
 - `setup.block`: hosts (e.g. `127.0.0.1`, the fixture sites) the household blocks for computer
   tasks during the case: a household rule of cc's (`cc_tool_rules`, effect `block`), written
   straight into the sandbox's database (there is no rules API yet). Every case replaces the
@@ -186,6 +199,29 @@ own downloads. Its one failure in the run before (2/3) was a replan whose JSON l
 
 `store_order_cancel` and `injection_stops` take the longest because they end on `--settle` (a
 cancelled confirmation, an unanswered question), not on a completion card.
+
+The teach cases were flipped to `required` by piece 32 (2026-10-20): `--llm shared --label
+background --filter replay_ --repeat 3`, as `required`, fresh, one run (5.4 minutes), not picked
+or repeated. Each run demonstrates, learns (one model call), then replays: the chat turn hands
+the errand planner the goal, which plans one `run_workflow` step; the replay runs target-first,
+no model call, and its success check passes.
+
+| case | model | label | pass rate | rounds | minutes |
+|---|---|---|---|---|---|
+| `replay_changed_param` | qwen3.5-9b | background | 3/3 | 5 | 1.0 |
+| `replay_moved_button` | qwen3.5-9b | background | 3/3 | 5 | 0.8 |
+
+What it took, besides the demonstration: learning makes a month picked by clicking its link
+(`Statement 2026-09`) a param of the link the replay presses (`Statement {month}`), folds a
+form's submit into the button click that caused it (the house model made it a step of its own,
+and the replay downloaded twice), and checks a download the browser didn't name by its type
+(`*.csv`, not the URL's last part); a replay binds params into recorded elements, writes a month
+as the workflow's example does (`August` is `2026-08`), opens its window where the workflow
+starts (http too) and ends a finished browser task on the computer (the agent stayed busy and
+refused the next recording); the planner prefers a saved workflow to a computer task, and a plan
+that only replays a browser workflow starts at once like a computer task. The moved variant keeps
+the buttons' accessible names, so the replay finds the moved Download CSV by role and name
+without a model round.
 
 ## Flipping a case to required
 

@@ -272,12 +272,22 @@ const websiteRule = "COMPUTER TASKS: everything the user wants done on one websi
 	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
 	"request for that site, with every detail they gave. Start the site at the web address they gave.\n\n"
 
-// computerRulesFor is the computer rules for menu: websiteRule when it offers computer_task, and
-// budgetRule when it offers write_spreadsheet.
+// workflowRule is the computer rules' line for saved workflows (plan P3 piece 32): with the
+// websiteRule alone the house model planned "download my bank statement for August" as a
+// computer_task on a made-up site, though the menu listed the workflow that does it.
+const workflowRule = "SAVED WORKFLOWS: when the goal is a task run_workflow lists (the same task, even for another " +
+	"month or value), it is ONE run_workflow step with that workflow's name and the user's values as its params, " +
+	"not a computer_task.\n\n"
+
+// computerRulesFor is the computer rules for menu: websiteRule when it offers computer_task,
+// workflowRule when it offers run_workflow and budgetRule when it offers write_spreadsheet.
 func computerRulesFor(menu []MenuEntry) string {
 	out := ""
 	if menuHas(menu, cmdComputer) {
 		out += websiteRule
+	}
+	if menuHas(menu, cmdRunWorkflow) {
+		out += workflowRule
 	}
 	if menuHas(menu, cmdWriteSheet) {
 		out += budgetRule

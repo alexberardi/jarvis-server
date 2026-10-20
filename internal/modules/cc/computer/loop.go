@@ -355,16 +355,13 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 			return l.end(ctx, run, Outcome{State: StateStopped, Summary: "Stopped."})
 		}
 		if v := run.Verify; v != nil && v.FailedAt > 0 && (run.Rounds-v.FailedAt >= verifyRounds || run.Rounds >= maxRounds) {
-			l.Exec.Stop(ctx, run.ID)
 			return l.end(ctx, run, Outcome{State: StateFailed, Summary: v.couldntConfirm()})
 		}
 		if run.Rounds >= maxRounds {
-			l.Exec.Stop(ctx, run.ID)
 			return l.end(ctx, run, Outcome{State: StateFailed,
 				Summary: fmt.Sprintf("I stopped after %d rounds without finishing.", run.Rounds)})
 		}
 		if !l.now().Before(deadline) {
-			l.Exec.Stop(ctx, run.ID)
 			return l.end(ctx, run, Outcome{State: StateFailed,
 				Summary: "I ran out of time before finishing."})
 		}
@@ -950,9 +947,9 @@ func (l *Loop) end(ctx context.Context, run *Run, out Outcome) Outcome {
 		run.State, run.Error = RunFailed, out.Summary
 	}
 	_ = l.Store.Save(ctx, run)
-	if run.Target == "desktop" && (run.State == RunDone || run.State == RunFailed) {
-		// The computer's side of the task ends with it: its guard and its "controlling"
-		// indicator.
+	if run.State == RunDone || run.State == RunFailed {
+		// The computer's side of the task ends with it: its "controlling" indicator, and a
+		// desktop task's guard. (A browser task's left the agent busy: no recording could start.)
 		l.Exec.Stop(ctx, run.ID)
 	}
 	return out

@@ -101,7 +101,7 @@ func parseTrace(raw json.RawMessage) ([]traceEvent, error) {
 	}
 	all = slices.DeleteFunc(all, func(e traceEvent) bool { return !slices.Contains(traceKinds, e.Kind) })
 	var out []traceEvent
-	for _, e := range foldNavigations(all) {
+	for _, e := range foldSubmits(foldNavigations(all)) {
 		if e.Element != nil && strings.EqualFold(e.Element.Type, "password") {
 			e.Masked = true
 		}
@@ -118,6 +118,30 @@ func parseTrace(raw json.RawMessage) ([]traceEvent, error) {
 		out = out[:learnMaxEvents]
 	}
 	return out, nil
+}
+
+// foldSubmits drops a form's submit that a click or a key in its tab caused (its submit button,
+// Enter in a field), the page it opened becoming the action's: replaying the action submits the
+// form again, so as a step of its own it would submit twice. Events are in time order
+// (foldNavigations); a trace without times folds a submit right after the action.
+func foldSubmits(evs []traceEvent) []traceEvent {
+	var out []traceEvent
+	last := map[int64]int{} // each tab's last event, when it is a click or a key: its index in out
+	for _, e := range evs {
+		i, ok := last[e.Tab]
+		delete(last, e.Tab)
+		if e.Kind == "submit" && ok && (out[i].TS == 0 || e.TS == 0 || e.TS-out[i].TS <= navFoldMS) {
+			if out[i].ResultURL == "" {
+				out[i].ResultURL = e.ResultURL
+			}
+			continue
+		}
+		if e.Kind == "click" || e.Kind == "key" {
+			last[e.Tab] = len(out)
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // navFoldMS is how soon after a click, submit or key in a tab a navigation in that tab is the
@@ -280,7 +304,7 @@ type paramCandidate struct {
 	Kind  string // date | month | number | file
 	Value string
 	Key   string // the URL query key it is the value of ("" elsewhere)
-	From  string // typed | url | download
+	From  string // typed | clicked | url | download
 }
 
 const monthNames = `january|february|march|april|may|june|july|august|september|october|november|december`
@@ -370,8 +394,9 @@ func urlCandidates(raw string) []paramCandidate {
 }
 
 // paramCandidates seeds the parameters deterministically, before the model sees the trace:
-// the dates, months, file names and amounts in typed values (never masked ones), navigations'
-// and downloads' URLs, and downloaded file names.
+// the dates, months, file names and amounts in typed values (never masked ones), in the names
+// of the elements clicked (a "Statement 2026-09" link), navigations' and downloads' URLs, and
+// downloaded file names.
 func paramCandidates(evs []traceEvent) []paramCandidate {
 	var out []paramCandidate
 	for i, e := range evs {
@@ -387,10 +412,12 @@ func paramCandidates(evs []traceEvent) []paramCandidate {
 		switch {
 		case e.typing() && !e.Masked:
 			add(scanCandidates(e.Value), "typed")
+		case e.Kind == "click" && e.Element != nil:
+			add(scanCandidates(e.Element.Name), "clicked")
 		case e.Kind == "navigate":
 			add(urlCandidates(e.URL), "url")
 		case e.Kind == "download":
-			add(scanCandidates(downloadName(e)), "download")
+			add(scanCandidates(firstNonEmptyStr(downloadName(e), downloadURLName(e))), "download")
 			add(urlCandidates(e.URL), "url")
 		}
 		out = append(out, found...)
@@ -418,14 +445,18 @@ func desktopParamCandidates(evs []desktopEvent) []paramCandidate {
 	return out
 }
 
-// downloadName is a download event's file name.
+// downloadName is a download event's file name, as the browser reported it ("" when it
+// didn't: Chromium names the file only after the download starts).
 func downloadName(e traceEvent) string {
 	if e.Filename != "" {
 		return e.Filename
 	}
-	if e.Value != "" {
-		return e.Value
-	}
+	return e.Value
+}
+
+// downloadURLName is the last part of a download's URL path, which is often not the file's
+// name (/statements/2026-09/download saves statement-2026-09.csv).
+func downloadURLName(e traceEvent) string {
 	if u, err := url.Parse(e.URL); err == nil && u.Path != "" && u.Path != "/" {
 		return path.Base(u.Path)
 	}
@@ -526,6 +557,9 @@ func describeEvent(e traceEvent) string {
 		return "press " + e.Key
 	case "download":
 		s := "download " + strconv.Quote(truncateRunes(downloadName(e), learnMaxValue))
+		if downloadName(e) == "" {
+			s = "download from " + truncateRunes(e.URL, learnMaxValue) + ", file name unknown"
+		}
 		if e.Mime != "" {
 			s += " (" + e.Mime + ")"
 		}
@@ -992,14 +1026,37 @@ func substitute(s *WStep, c paramCandidate, name string) {
 	case "type", "select":
 		s.Action.Text = strings.ReplaceAll(s.Action.Text, c.Value, ph)
 	}
+	// The element pressed for the value ("Statement 2026-09"): the replay presses the one for
+	// the new value.
+	if s.Element != nil && c.From == "clicked" {
+		s.Element.Name = strings.ReplaceAll(s.Element.Name, c.Value, ph)
+		s.Element.Selector = strings.ReplaceAll(s.Element.Selector, c.Value, ph)
+	}
 	s.Intent = strings.ReplaceAll(s.Intent, c.Value, ph)
 	s.Action.Intent = s.Intent
+}
+
+// downloadExts are the file types a download's MIME type names, for one the browser didn't name.
+var downloadExts = map[string]string{"text/csv": ".csv", "application/pdf": ".pdf", "application/json": ".json",
+	"application/zip": ".zip", "text/plain": ".txt", "application/vnd.ms-excel": ".xls",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx"}
+
+// downloadExt is an unnamed download's extension: its MIME type's, else its URL's ("" when
+// neither says).
+func downloadExt(e traceEvent) string {
+	mt, _, _ := strings.Cut(strings.ToLower(e.Mime), ";")
+	if ext, ok := downloadExts[strings.TrimSpace(mt)]; ok {
+		return ext
+	}
+	return path.Ext(downloadURLName(e))
 }
 
 var digitRun = regexp.MustCompile(`\d+(?:[-_.]\d+)*`)
 
 // successCheck is the model's check, tidied; a trace with a download always checks one (the
-// last download's name, its numbers as *, when the model gave none).
+// last download's name, its numbers as *, when the model gave none). When the browser didn't
+// name the last download, its name isn't known, so a name the model gave for it is a guess: the
+// check is then a file of the download's type (*.csv), or any file.
 func successCheck(sc computer.SuccessCheck, evs []traceEvent) computer.SuccessCheck {
 	out := computer.SuccessCheck{URLContains: strings.TrimSpace(sc.URLContains), Screen: oneLine(sc.Screen)}
 	for _, t := range sc.TextPresent {
@@ -1013,15 +1070,17 @@ func successCheck(sc computer.SuccessCheck, evs []traceEvent) computer.SuccessCh
 	if sc.File != nil && strings.TrimSpace(sc.File.Path) != "" {
 		out.File = sc.File
 	}
-	if out.Download == nil {
-		for i := len(evs) - 1; i >= 0; i-- {
-			if evs[i].Kind == "download" {
-				if name := downloadName(evs[i]); name != "" {
-					out.Download = &computer.DownloadCheck{NameLike: digitRun.ReplaceAllString(name, "*")}
-				}
-				break
-			}
+	for i := len(evs) - 1; i >= 0; i-- {
+		if evs[i].Kind != "download" {
+			continue
 		}
+		switch name := downloadName(evs[i]); {
+		case name == "":
+			out.Download = &computer.DownloadCheck{NameLike: "*" + downloadExt(evs[i])}
+		case out.Download == nil:
+			out.Download = &computer.DownloadCheck{NameLike: digitRun.ReplaceAllString(name, "*")}
+		}
+		break
 	}
 	return out
 }

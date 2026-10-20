@@ -690,6 +690,8 @@ func TestIsComputerPlan(t *testing.T) {
 		{[]Step{{Command: cmdReadFile}}, false},
 		{[]Step{ct, {Command: "get_weather"}}, false},
 		{[]Step{ct, {Command: cmdWriteSheet, IsRisky: true}}, false},
+		{[]Step{{Command: cmdRunWorkflow}}, true}, // a taught workflow's replay runs on the computer too
+		{[]Step{{Command: cmdRunWorkflow}, {Command: "get_weather"}}, false},
 		{nil, false},
 	} {
 		if got := isComputerPlan(c.steps); got != c.want {
