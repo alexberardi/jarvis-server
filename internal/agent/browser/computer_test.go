@@ -1,10 +1,17 @@
 package browser
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"image"
+	"image/jpeg"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 func TestSnapshotParses(t *testing.T) {
@@ -163,9 +170,115 @@ func TestOutdatedExtension(t *testing.T) {
 	_, err1 := ts.Snapshot(ctx, "1", 0)
 	_, err2 := ts.Act(ctx, "1", 1, "e1", "press", "", nil)
 	_, _, err3 := ts.OpenBackground(ctx, "https://shop.test")
-	for i, err := range []error{err1, err2, err3} {
+	_, _, err4 := ts.Screenshot(ctx, "firefox:9")
+	_, err5 := ts.Download(ctx, "1", "e1", "")
+	for i, err := range []error{err1, err2, err3, err4, err5} {
 		if code(err) != "extension_outdated" || !strings.Contains(err.Error(), "Firefox is version 0.1.0") {
 			t.Errorf("%d: %v", i, err)
 		}
+	}
+}
+
+// jpegB64 is a w×h JPEG, base64 (what captureVisibleTab returns after its data: prefix).
+func jpegB64(t *testing.T, w, h int) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, image.NewRGBA(image.Rect(0, 0, w, h)), nil); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(b.Bytes())
+}
+
+func TestScreenshotGeometry(t *testing.T) {
+	h, path := startHub(t)
+	data := jpegB64(t, 200, 100)
+	f := connectExt(t, h, path, "Firefox", true, func(Message) Message {
+		// The viewport in CSS pixels; the image is physical (DPR 2).
+		return ok(map[string]any{"data": data, "width": 100, "height": 50, "device_pixel_ratio": 2})
+	})
+	shot, g, err := NewTools(h).Screenshot(context.Background(), "firefox:9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := computeruse.Geometry{LogicalW: 100, LogicalH: 50, Scale: 2, ImageW: 200, ImageH: 100}
+	if g != want || shot.Geometry != want {
+		t.Fatalf("geometry %+v, shot %+v, want %+v", g, shot.Geometry, want)
+	}
+	if b := shot.Image.Bounds(); b.Dx() != 200 || b.Dy() != 100 {
+		t.Errorf("image %v", b)
+	}
+	if x, y := g.ToGlobal(100, 50); x != 50 || y != 25 {
+		t.Errorf("image centre maps to %d,%d", x, y)
+	}
+	cmd := f.received()[0]
+	if cmd.Cmd != "screenshot" || cmd.Args["window_id"] != float64(9) || cmd.Args["tab_id"] != nil {
+		t.Errorf("sent %s %v", cmd.Cmd, cmd.Args)
+	}
+}
+
+func TestScreenshotRefused(t *testing.T) {
+	h, path := startHub(t)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		if m.Args["window_id"] == float64(1) {
+			return Message{Code: "window_minimized", Error: "the task window is minimised"}
+		}
+		return ok(map[string]any{"data": "not a jpeg", "width": 100, "height": 50, "device_pixel_ratio": 1})
+	})
+	ts := NewTools(h)
+	ctx := context.Background()
+	if _, _, err := ts.Screenshot(ctx, "firefox:1"); code(err) != "window_minimized" {
+		t.Errorf("minimised: %v", err)
+	}
+	if _, _, err := ts.Screenshot(ctx, "firefox:2"); err == nil || !strings.Contains(err.Error(), "malformed") {
+		t.Errorf("bad image: %v", err)
+	}
+	for _, w := range []string{"", "firefox:x"} {
+		if _, _, err := ts.Screenshot(ctx, w); !errors.Is(err, errBadArgs) {
+			t.Errorf("window %q: %v", w, err)
+		}
+	}
+}
+
+func TestDownloadByRef(t *testing.T) {
+	h, path := startHub(t)
+	f := connectExt(t, h, path, "Firefox", true, func(Message) Message {
+		return ok(map[string]any{"path": "/home/u/Downloads/statement-2026-09.csv", "bytes": 2048,
+			"mime": "text/csv", "filename": "statement-2026-09.csv"})
+	})
+	ts := NewTools(h)
+	ctx := context.Background()
+	r, err := ts.Download(ctx, "firefox:5", "e12", "")
+	want := DownloadResult{Path: "/home/u/Downloads/statement-2026-09.csv", Bytes: 2048, MIME: "text/csv", Filename: "statement-2026-09.csv"}
+	if err != nil || r != want {
+		t.Fatalf("download: %+v %v", r, err)
+	}
+	cmd := f.received()[0]
+	if cmd.Cmd != "download" || cmd.Args["tab_id"] != float64(5) || cmd.Args["ref"] != "e12" || cmd.Args["url"] != nil {
+		t.Errorf("sent %s %v", cmd.Cmd, cmd.Args)
+	}
+	if _, err := ts.Download(ctx, "firefox:5", "", "https://bank.test/statement.csv"); err != nil {
+		t.Fatal(err)
+	}
+	if a := f.received()[1].Args; a["url"] != "https://bank.test/statement.csv" || a["ref"] != nil {
+		t.Errorf("by url sent %v", a)
+	}
+	for _, c := range [][2]string{{"", ""}, {"e1", "https://bank.test/x"}, {"12", ""}, {"", "file:///etc/passwd"}} {
+		if _, err := ts.Download(ctx, "firefox:5", c[0], c[1]); !errors.Is(err, errBadArgs) {
+			t.Errorf("ref %q url %q: %v", c[0], c[1], err)
+		}
+	}
+	if len(f.received()) != 2 {
+		t.Errorf("bad arguments reached the extension: %v", f.received()[2:])
+	}
+}
+
+func TestDownloadTimeout(t *testing.T) {
+	defer func(d time.Duration) { downloadTimeout = d }(downloadTimeout)
+	downloadTimeout = 50 * time.Millisecond
+	h, path := startHub(t)
+	connectExt(t, h, path, "Firefox", true, nil) // never answers
+	_, err := NewTools(h).Download(context.Background(), "firefox:5", "e3", "")
+	if code(err) != "timeout" {
+		t.Fatalf("download: %v", err)
 	}
 }

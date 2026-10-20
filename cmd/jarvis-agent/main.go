@@ -162,6 +162,8 @@ func main() {
 			err = computerSnapshotCmd(ctx, os.Args[3:])
 		} else if len(os.Args) > 3 && os.Args[2] == "record" && os.Args[3] != "start" && os.Args[3] != "stop" {
 			err = computerRecordCmd(ctx, os.Args[3:], os.Stdin, os.Stdout)
+		} else if len(os.Args) > 2 && os.Args[2] == "download" {
+			err = computerDownloadCmd(ctx, os.Args[3:])
 		} else {
 			err = computerCmd(os.Args[2:], os.Stdout, controlDial)
 		}
