@@ -8,11 +8,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/tray"
 )
 
@@ -265,5 +267,15 @@ func TestComputerRecordStartStop(t *testing.T) {
 	ic.recordFromMenu(false)
 	if tr := <-handed; tr.ID == "" || rec.Current() != "" {
 		t.Fatalf("Stop recording: %+v, still %q", tr, rec.Current())
+	}
+}
+
+// The recorder records the desktop where the OS can (macOS), and says it can't elsewhere.
+func TestNewRecorderDesktopSource(t *testing.T) {
+	activity := &computer.Activity{}
+	rec := newRecorder(t.TempDir(), activity, nil, func() *node.CC { return nil }, slog.New(slog.DiscardHandler))
+	_, has := rec.Sources[computer.ModeDesktop]
+	if has != (runtime.GOOS == "darwin") {
+		t.Fatalf("desktop source on %s: %v", runtime.GOOS, has)
 	}
 }

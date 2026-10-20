@@ -39,8 +39,11 @@ func TestPermissionCmdUsage(t *testing.T) {
 	if err := permissionCmd([]string{"microphone"}, &b); err == nil {
 		t.Fatal("accepted another permission")
 	}
-	if err := permissionCmd([]string{"screen"}, &b); err != nil || strings.TrimSpace(b.String()) == "" {
-		t.Fatalf("%q %v", b.String(), err)
+	for _, name := range []string{"screen", "input-monitoring"} {
+		b.Reset()
+		if err := permissionCmd([]string{name}, &b); err != nil || strings.TrimSpace(b.String()) == "" {
+			t.Fatalf("%s: %q %v", name, b.String(), err)
+		}
 	}
 }
 

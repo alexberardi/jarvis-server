@@ -229,6 +229,8 @@ func usage(w io.Writer) {
            recording; the menu's "Stop Jarvis" does the same), or say what it is doing
   computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
            off by default, and off stops a task going on)
+  computer record start [--desktop] | stop   record what you do in the browser (the menu's
+           "Record a macro…"), or on the desktop (macOS), and send it to Jarvis when you stop
   restart  restart the running agent (through systemd or launchd when they run it), so it
            reads the settings file again
   update   update to the version of the jarvisd this computer is signed in to (the agent also
@@ -1075,6 +1077,12 @@ func status(ctx context.Context, args []string) error {
 			macax.ScreenPrompt()
 			fmt.Print("  -> Reading the screen is OFF: allow \"Jarvis Automation Agent\" in System Settings > Privacy & Security >\n" +
 				"     Screen & System Audio Recording, then restart the agent.\n")
+		}
+		listen := macax.ListenTrusted()
+		fmt.Printf("input monitoring: %v\n", listen)
+		if !listen {
+			fmt.Print("  -> Recording a task in an app is OFF: allow \"Jarvis Automation Agent\" in System Settings > Privacy & Security >\n" +
+				"     Input Monitoring (the setup page asks for it), then restart the agent.\n")
 		}
 	}
 	fmt.Printf("voice:        %s\n", voiceStatus())

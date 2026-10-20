@@ -16,6 +16,8 @@ var (
 
 	cgPreflightScreenCaptureAccess func() bool
 	cgRequestScreenCaptureAccess   func() bool
+	cgPreflightListenEventAccess   func() bool
+	cgRequestListenEventAccess     func() bool
 )
 
 func loadCG() error {
@@ -27,6 +29,8 @@ func loadCG() error {
 		}
 		purego.RegisterLibFunc(&cgPreflightScreenCaptureAccess, cg, "CGPreflightScreenCaptureAccess")
 		purego.RegisterLibFunc(&cgRequestScreenCaptureAccess, cg, "CGRequestScreenCaptureAccess")
+		purego.RegisterLibFunc(&cgPreflightListenEventAccess, cg, "CGPreflightListenEventAccess")
+		purego.RegisterLibFunc(&cgRequestListenEventAccess, cg, "CGRequestListenEventAccess")
 	})
 	return cgLoadErr
 }
@@ -47,4 +51,22 @@ func ScreenPrompt() bool {
 		return false
 	}
 	return cgRequestScreenCaptureAccess()
+}
+
+// ListenTrusted reports whether this process holds the Input Monitoring grant, which a desktop
+// recording's event tap needs. It never prompts.
+func ListenTrusted() bool {
+	if loadCG() != nil {
+		return false
+	}
+	return cgPreflightListenEventAccess()
+}
+
+// ListenPrompt asks macOS to add this process to Input Monitoring and show its prompt when it
+// isn't granted yet. Like Screen Recording, a new grant applies after the process restarts.
+func ListenPrompt() bool {
+	if loadCG() != nil {
+		return false
+	}
+	return cgRequestListenEventAccess()
 }

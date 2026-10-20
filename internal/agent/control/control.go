@@ -52,11 +52,14 @@ const (
 	// recording's id; stop "<id> <events>".
 	ComputerRecordStart = "computer-record-start"
 	ComputerRecordStop  = "computer-record-stop"
+	// ComputerRecordDesktop starts a recording of the desktop instead (`jarvis-agent computer
+	// record start --desktop`; macOS); ComputerRecordStop stops it.
+	ComputerRecordDesktop = "computer-record-desktop"
 )
 
 // Commands is every command the agent accepts.
 var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff,
-	ComputerRecordStart, ComputerRecordStop}
+	ComputerRecordStart, ComputerRecordStop, ComputerRecordDesktop}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second
@@ -67,7 +70,7 @@ const RecordTimeout = 15 * time.Second
 
 // Timeout bounds cmd's request and answer.
 func Timeout(cmd string) time.Duration {
-	if cmd == ComputerRecordStart || cmd == ComputerRecordStop {
+	if cmd == ComputerRecordStart || cmd == ComputerRecordStop || cmd == ComputerRecordDesktop {
 		return RecordTimeout
 	}
 	return IOTimeout

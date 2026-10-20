@@ -3,11 +3,13 @@
 package ax
 
 import (
+	"runtime"
 	"strconv"
 	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+	"github.com/ebitengine/purego/objc"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
@@ -50,6 +52,7 @@ var (
 	axSetAttributeValue       func(el, attr, value uintptr) int32
 	axCopyElementAtPosition   func(app uintptr, x, y float32, out *uintptr) int32
 	axSetMessagingTimeout     func(el uintptr, seconds float32) int32
+	axGetPid                  func(el uintptr, pid *int32) int32
 	axValueGetValue           func(v uintptr, typ int32, out unsafe.Pointer) bool
 	axValueGetTypeID          func() uintptr
 	cfGetTypeID               func(ref uintptr) uintptr
@@ -98,6 +101,7 @@ func load() error {
 			"AXUIElementSetAttributeValue":      &axSetAttributeValue,
 			"AXUIElementCopyElementAtPosition":  &axCopyElementAtPosition,
 			"AXUIElementSetMessagingTimeout":    &axSetMessagingTimeout,
+			"AXUIElementGetPid":                 &axGetPid,
 			"AXValueGetValue":                   &axValueGetValue,
 			"AXValueGetTypeID":                  &axValueGetTypeID,
 			"CFGetTypeID":                       &cfGetTypeID,
@@ -352,4 +356,96 @@ func elementAt(x, y float64) (*computeruse.Element, error) {
 	role, secure := identity(e)
 	name, _ := describe(e, role, secure)
 	return &computeruse.Element{Role: role, Name: name, Secure: secure}, nil
+}
+
+func recordedAt(x, y float64) (*Recorded, error) {
+	if err := ready(); err != nil {
+		return nil, err
+	}
+	var out uintptr
+	switch code := axCopyElementAtPosition(uintptr(systemWide), float32(x), float32(y), &out); code {
+	case axSuccess:
+	case axErrorNoValue:
+		return nil, nil
+	default:
+		return nil, axErr(code, "element at point")
+	}
+	return recorded(elem(out)), nil
+}
+
+func focusedElement() (*Recorded, error) {
+	if err := ready(); err != nil {
+		return nil, err
+	}
+	v, code := systemWide.copyAttr("AXFocusedUIElement")
+	switch {
+	case v != 0:
+		return recorded(elem(v)), nil
+	case code == axErrorNoValue || code == axErrorAttributeUnsupport:
+		return nil, nil
+	}
+	return nil, axErr(code, "focused element")
+}
+
+// recorded reads e for a recording and releases it.
+func recorded(e elem) *Recorded {
+	defer e.release()
+	r := recordedOf(e, func(n axNode) axNode {
+		if p, _ := n.(elem).copyAttr("AXParent"); p != 0 {
+			return elem(p)
+		}
+		return nil
+	})
+	var pid int32
+	if axGetPid(uintptr(e), &pid) == axSuccess && pid > 0 {
+		r.PID, r.App = int(pid), bundleID(pid)
+	}
+	return &r
+}
+
+var (
+	appKitOnce sync.Once
+	runningApp objc.ID // NSRunningApplication; 0 when AppKit didn't load
+	poolPush   func() uintptr
+	poolPop    func(uintptr)
+	bundleIDs  sync.Map
+)
+
+func forgetApps() { bundleIDs.Clear() }
+
+// bundleID is the bundle id of the app with this pid ("" when it has none), remembered per pid.
+func bundleID(pid int32) string {
+	if v, ok := bundleIDs.Load(pid); ok {
+		return v.(string)
+	}
+	appKitOnce.Do(func() {
+		lobjc, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
+		if err != nil {
+			return
+		}
+		if _, err := purego.Dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", purego.RTLD_NOW|purego.RTLD_GLOBAL); err == nil {
+			purego.RegisterLibFunc(&poolPush, lobjc, "objc_autoreleasePoolPush")
+			purego.RegisterLibFunc(&poolPop, lobjc, "objc_autoreleasePoolPop")
+			runningApp = objc.ID(objc.GetClass("NSRunningApplication"))
+		}
+	})
+	if runningApp == 0 {
+		return ""
+	}
+	// runningApplicationWithProcessIdentifier: returns an autoreleased object, and a Go thread
+	// has no pool of its own: drain one here, on the thread that pushed it.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	pool := poolPush()
+	defer poolPop(pool)
+	app := runningApp.Send(objc.RegisterName("runningApplicationWithProcessIdentifier:"), pid)
+	if app == 0 {
+		return ""
+	}
+	id := ""
+	if s := app.Send(objc.RegisterName("bundleIdentifier")); s != 0 {
+		id = goString(uintptr(s)) // NSString is toll-free bridged to CFString
+	}
+	bundleIDs.Store(pid, id)
+	return id
 }

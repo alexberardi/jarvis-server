@@ -130,7 +130,7 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 					return "on", nil
 				}
 				return "off", nil
-			case control.ComputerRecordStart, control.ComputerRecordStop:
+			case control.ComputerRecordStart, control.ComputerRecordStop, control.ComputerRecordDesktop:
 				var rec *computer.Recorder
 				if recorder != nil {
 					rec = recorder()
@@ -138,7 +138,8 @@ func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *
 				if rec == nil {
 					return "", errors.New("recording isn't available on this device")
 				}
-				return recordFromHere(ctx, rec, cmd == control.ComputerRecordStart, log)
+				mode := map[string]string{control.ComputerRecordStart: computer.ModeBrowser, control.ComputerRecordDesktop: computer.ModeDesktop}[cmd]
+				return recordFromHere(ctx, rec, mode, log)
 			case control.ShowRunning:
 				// No island (--no-overlay, no display): nothing to show, but it is running.
 				pill.Show()
