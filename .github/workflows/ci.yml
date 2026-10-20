@@ -148,6 +148,53 @@ jobs:
         env:
           JARVIS_HOST_NATIVE: "1"
         run: go test -count=1 -v -run Native ./internal/agent/host/
+      # The device id from the real OS lookups (/etc/machine-id, IOPlatformUUID, MachineGuid):
+      # present, the same in two processes, and different for another OS user. Prints only
+      # pass/fail, never the id.
+      - name: Device id (this runner's own OS)
+        run: scripts/deviceid-native-check.sh "${{ runner.temp }}/deviceid" ${{ matrix.os != 'windows-latest' && '--other-user' || '' }}
+      # Windows PowerShell 5.1 for LocalAccounts and ScheduledTasks. The user comes from
+      # New-LocalUser (`net user` stops to ask Y/N about a password over 14 characters), and the
+      # binary runs as that user through Task Scheduler, not Start-Process -Credential, which
+      # fails from the runner's session. Administrators gives it the batch logon a task needs;
+      # it is still another SID, so another device id.
+      - name: Device id as another Windows user
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $env:RUNNER_TEMP 'deviceid'
+          $dir = 'C:\deviceid-other'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item (Join-Path $src 'deviceid.test.exe'), (Join-Path $src 'fp') $dir
+          icacls $dir /grant '*S-1-1-0:(OI)(CI)M' | Out-Null
+          $out = Join-Path $dir 'out.txt'
+          $lines = @(
+            '@echo off',
+            'set JARVIS_HOST_NATIVE=1',
+            "set JARVIS_DEVICEID_DIFFERS_FROM=$dir\fp",
+            "whoami > `"$out`"",
+            "`"$dir\deviceid.test.exe`" -test.run TestNativeDeviceID -test.v >> `"$out`" 2>&1",
+            'exit /b %ERRORLEVEL%'
+          )
+          Set-Content -Encoding ascii -Path (Join-Path $dir 'run.cmd') -Value $lines
+          $pw = [guid]::NewGuid().ToString() + 'aA1!'
+          New-LocalUser -Name jarvisprobe -Password (ConvertTo-SecureString $pw -AsPlainText -Force) -PasswordNeverExpires | Out-Null
+          Add-LocalGroupMember -SID 'S-1-5-32-544' -Member jarvisprobe
+          $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$dir\run.cmd`""
+          Register-ScheduledTask -TaskName jarvisprobe -Action $action -User "$env:COMPUTERNAME\jarvisprobe" -Password $pw | Out-Null
+          Start-ScheduledTask -TaskName jarvisprobe
+          # 267009: running; 267011: not run yet.
+          $deadline = (Get-Date).AddMinutes(3)
+          do {
+            Start-Sleep -Seconds 2
+            $rc = (Get-ScheduledTaskInfo -TaskName jarvisprobe).LastTaskResult
+          } while (($rc -eq 267009 -or $rc -eq 267011) -and (Get-Date) -lt $deadline)
+          if (Test-Path $out) { Get-Content $out }
+          if ($rc -ne 0) { throw "device id test as another user: task result $rc" }
+          if (-not (Select-String -Quiet -SimpleMatch "device id differs from the other OS user's" $out)) {
+            throw 'device id test as another user did not compare the ids'
+          }
       - name: Static build (CGO_ENABLED=0)
         env:
           CGO_ENABLED: "0"
