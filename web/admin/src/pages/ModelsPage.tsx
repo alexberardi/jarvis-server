@@ -10,17 +10,21 @@ import InstallsList from '@/components/models/InstallsList'
 import LabelsEditor from '@/components/models/LabelsEditor'
 import PromptProviderCard from '@/components/models/PromptProviderCard'
 import PromptEditorCard from '@/components/models/PromptEditorCard'
-import { buttonClass } from '@/components/models/styles'
-import { Section } from '@/components/models/ui'
+import ModelCard from '@/components/models/ModelCard'
+import { Button, PageHeader, Tabs } from '@/components/ui'
 import JobChecklist from '@/components/setup/JobChecklist'
 import { jobDef, underWay } from '@/components/setup/jobs'
 import { useSetupState } from '@/hooks/useSetup'
 
+const TABS = ['jobs', 'catalog', 'installed', 'prompts', 'hardware'] as const
+type Tab = (typeof TABS)[number]
+
 /**
- * ModelsPage is the model manager (S8): the per-job checklist (AD3b) with a "Set up" per
- * missing job that narrows the catalog to that job's models, then what each label runs,
- * installs with progress, the catalog with fit, Hugging Face installs, installed models, and
- * the hardware view. `?job=stt` (the dashboard banner's link) opens with that filter.
+ * ModelsPage is the model manager (S8), in tabs so a phone isn't one 8,000px stack: Jobs (the
+ * per-job checklist, AD3b, with a "Set up" per missing job, and what each label runs), Catalog
+ * (the catalog with fit, narrowed by a job's "Set up", and Hugging Face installs), Installed,
+ * Prompts and Hardware. Installs in progress stay above the tabs. `?job=stt` (the dashboard
+ * banner's link) opens the Catalog with that filter; `?tab=` opens a tab.
  */
 export default function ModelsPage() {
   const [tokenReason, setTokenReason] = useState<string | null>(null)
@@ -28,72 +32,99 @@ export default function ModelsPage() {
   const setup = useSetupState()
   const catalogRef = useRef<HTMLDivElement>(null)
   const filter = jobDef(params.get('job') ?? '')
+  const asked = params.get('tab') as Tab | null
+  const tab: Tab = asked && TABS.includes(asked) ? asked : filter ? 'catalog' : 'jobs'
 
   // Following a "Set up" (here or from the dashboard) lands on the narrowed catalog.
   useEffect(() => {
     if (filter) catalogRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
   }, [filter])
 
-  function showJob(id: string | null) {
+  function update(patch: Record<string, string | null>) {
     const next = new URLSearchParams(params)
-    if (id) next.set('job', id)
-    else next.delete('job')
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v)
+      else next.delete(k)
+    }
     setParams(next, { replace: true })
   }
+  const showJob = (id: string | null) => update({ job: id, tab: 'catalog' })
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-[var(--color-text)]">Models</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">
-          Install models, choose what each job runs on, and see what is loaded on your GPU.
-        </p>
-      </div>
+    <div className="mx-auto max-w-5xl">
+      <PageHeader title="Models" description="Install models, choose what each job runs on, and see what is loaded on your GPU." />
 
-      {tokenReason && (
-        <HfTokenPrompt reason={`${tokenReason}. Save a token, then install again.`} onSaved={() => setTokenReason(null)} />
-      )}
-
-      {setup.data?.jobs && (
-        <Section title="Jobs" icon={ListChecks} description="What each part of Jarvis needs, and whether it has it.">
-          <JobChecklist
-            jobs={setup.data.jobs}
-            action={(def, job) =>
-              !underWay(job.state) && (
-                <button
-                  type="button"
-                  className={buttonClass.secondary}
-                  onClick={() => showJob(def.id)}
-                  aria-label={`Set up ${def.title}`}
-                >
-                  Set up
-                </button>
-              )
-            }
-          />
-        </Section>
-      )}
-
-      <InstallsList />
-      <LabelsEditor />
-      <PromptProviderCard />
-      <PromptEditorCard />
-      <div ref={catalogRef} className="scroll-mt-4 space-y-2">
-        {filter && (
-          <div className="flex items-center justify-between rounded-lg bg-[var(--color-surface-alt)] px-3 py-2 text-xs text-[var(--color-text)]">
-            <span>
-              Showing models for <strong>{filter.title}</strong>
-            </span>
-            <button type="button" className={buttonClass.secondary} onClick={() => showJob(null)}>
-              <X size={12} /> Show all
-            </button>
-          </div>
+      <div className="space-y-4">
+        {tokenReason && (
+          <HfTokenPrompt reason={`${tokenReason}. Save a token, then install again.`} onSaved={() => setTokenReason(null)} />
         )}
-        <CatalogList onNeedsToken={setTokenReason} kinds={filter ? [filter.kind] : undefined} />
+        <InstallsList />
+
+        <Tabs
+          label="Models"
+          value={tab}
+          onValueChange={(id) => update({ tab: id === 'jobs' ? null : id })}
+          tabs={[
+            {
+              id: 'jobs',
+              label: 'Jobs',
+              content: (
+                <div className="space-y-4">
+                  {setup.data?.jobs && (
+                    <ModelCard title="Jobs" icon={ListChecks} description="What each part of Jarvis needs, and whether it has it.">
+                      <JobChecklist
+                        jobs={setup.data.jobs}
+                        action={(def, job) =>
+                          !underWay(job.state) && (
+                            <Button size="sm" onClick={() => showJob(def.id)} aria-label={`Set up ${def.title}`}>
+                              Set up
+                            </Button>
+                          )
+                        }
+                      />
+                    </ModelCard>
+                  )}
+                  <LabelsEditor />
+                </div>
+              ),
+            },
+            {
+              id: 'catalog',
+              label: 'Catalog',
+              content: (
+                <div className="space-y-4">
+                  <div ref={catalogRef} className="scroll-mt-4 space-y-3">
+                    {filter && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-primary-soft px-3 py-2 text-small text-text">
+                        <span>
+                          Showing models for <strong>{filter.title}</strong>
+                        </span>
+                        <Button size="sm" variant="ghost" icon={<X size={14} aria-hidden />} onClick={() => showJob(null)}>
+                          Show all
+                        </Button>
+                      </div>
+                    )}
+                    <CatalogList onNeedsToken={setTokenReason} kinds={filter ? [filter.kind] : undefined} />
+                  </div>
+                  <HfBrowser />
+                </div>
+              ),
+            },
+            { id: 'installed', label: 'Installed', content: <InstalledList /> },
+            {
+              id: 'prompts',
+              label: 'Prompts',
+              content: (
+                <div className="space-y-4">
+                  <PromptProviderCard />
+                  <PromptEditorCard />
+                </div>
+              ),
+            },
+            { id: 'hardware', label: 'Hardware', content: <HardwarePanel /> },
+          ]}
+        />
       </div>
-      <HfBrowser />
-      <InstalledList />
-      <HardwarePanel />
     </div>
   )
 }

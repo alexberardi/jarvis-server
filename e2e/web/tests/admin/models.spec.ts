@@ -30,6 +30,7 @@ test.describe('admin models', () => {
       if (r.method() === 'POST' && /\/api\/llm\/v1\/models\/(install|hf)/.test(r.url())) installs.push(r.url())
     })
     await page.goto('/admin/models')
+    await page.getByRole('tab', { name: 'Catalog' }).click()
     const section = page.getByRole('region', { name: 'Catalog' })
     for (const m of catalog) await expect(section.getByTestId(`catalog-${m.id}`)).toContainText(m.display)
 
