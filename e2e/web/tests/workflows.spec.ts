@@ -22,9 +22,9 @@ test('lists the taught workflows: yours and the shared one', async ({ page }) =>
   await expect(water).toContainText('Another member’s')
   await expect(water).toContainText('Shared with the household')
 
-  // Replay arrives in a later piece: the server answers 501 and the page says so.
+  // Run replays it (piece 31); without a month the server says what it needs, and the page says so.
   await page.getByRole('button', { name: 'Run Download bank statement' }).click()
-  await expect(page.getByText("Running a workflow from here isn't available yet.")).toBeVisible()
+  await expect(page.getByText('Which month should I run “Download bank statement” for?')).toBeVisible()
 })
 
 test('edits a workflow and the server keeps the edit', async ({ page }) => {
