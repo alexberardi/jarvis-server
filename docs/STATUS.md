@@ -77,6 +77,12 @@ Decision: [2026-10-19-vllm-engine](decisions/2026-10-19-vllm-engine.md) (llm LD1
 
 - [ ] **vLLM engine:** kind `vllm` (linux/amd64, NVIDIA driver ≥ 580), hash-locked install with disk check and progress, supervision with an explicit GPU share counted by the fit check, GPU fault/loss, tool/reasoning parsers and vision per model ✓ (llm 01 §3.12); live chat/stream/tool turn with tokens/s next to llama-server and VRAM of both, on a card with room (the devbox's was held by the installed jarvisd)
 
+### Transformers engine (#301, in parallel)
+
+Decision: [2026-10-19-transformers-engine](decisions/2026-10-19-transformers-engine.md) (llm LD11); the third kind on #299's Python engine layer.
+
+- [ ] **Transformers engine:** kind `transformers` (`transformers serve` 5.20.2), several accelerators and a package set per platform, macOS arm64 (MPS, CPU) and Windows x64 (CPU) sets with sizes, `dir_engine` / `dtype` / `quantization` label settings, no `reasoning_budget` to it ✓ (llm 01 §3.13); live CPU run in CI (`transformers-live`) and MPS run on a Mac with tokens/s; Linux CPU + CUDA cu128 sets with bitsandbytes (needs PyTorch's wheel index in the build sandbox)
+
 ### Prompts as text (in parallel)
 
 Contract: [cc/prompt-contract.md](cc/prompt-contract.md) ([decision](decisions/2026-10-16-prompts-as-text.md)).
