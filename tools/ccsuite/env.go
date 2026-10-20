@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
@@ -470,6 +471,12 @@ func (e *Env) startSession(ctx context.Context, kind string) (*desktop, error) {
 			return nil, err
 		}
 		server = []string{sway, "-c", cfg}
+		// The agent asks sway through swaymsg, which a cached build has beside sway only.
+		for i, v := range env {
+			if strings.HasPrefix(v, "PATH=") {
+				env[i] = "PATH=" + filepath.Dir(sway) + string(os.PathListSeparator) + strings.TrimPrefix(v, "PATH=")
+			}
+		}
 		env = append(env, "WLR_BACKENDS=headless", "WLR_HEADLESS_OUTPUTS=1", "WLR_LIBINPUT_NO_DEVICES=1",
 			"WLR_RENDERER=pixman", "XDG_CURRENT_DESKTOP=sway", "XDG_SESSION_TYPE=wayland")
 	case "x11":
@@ -546,8 +553,10 @@ func freeDisplay() int {
 // startAgent runs the real agent in the session, with its own control and browser sockets.
 func (e *Env) startAgent(ctx context.Context, d *desktop) error {
 	ctl := filepath.Join(d.rt, "control.sock")
+	// Computer control on, as the user turns it on in the tray: the server offers computer tasks
+	// only on a computer that reports it.
 	cmd := exec.Command(e.path("bin", "jarvis-agent"), "run", "--profile", "desktop", "--creds", e.creds,
-		"--voice=false", "--no-auto-update")
+		"--voice=false", "--no-auto-update", "--computer-control")
 	cmd.Env = append(d.env, browser.ControlSocketEnv+"="+ctl, browser.SocketEnv+"="+filepath.Join(d.rt, "browser.sock"))
 	var err error
 	if d.agent, err = e.start("agent", cmd); err != nil {
@@ -781,6 +790,43 @@ func (e *Env) StartNotes(ctx context.Context, layout string) error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+// userInputCmd is ccsuite's own subcommand that presses Shift in the session it runs in.
+const userInputCmd = "__user-input"
+
+// UserInput is the user at the computer before a desktop case: desktop tasks run only while
+// someone used the computer in the last few minutes (COMPUTER-CONTROL.md C9), and a headless
+// session has no one. It presses Shift through the agent's own input backend (wlroots virtual
+// keyboard, XTEST), as the session's user, which the agent's idle monitor sees as input.
+func (e *Env) UserInput(ctx context.Context) error {
+	d := e.desk
+	if d == nil {
+		return errors.New("no desktop session")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, self, userInputCmd)
+	cmd.Env = d.env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, lastOutputLine(out))
+	}
+	// The idle notification comes a second after the input (idlenotify.Timeout).
+	time.Sleep(1500 * time.Millisecond)
+	return nil
+}
+
+func userInput(ctx context.Context) error {
+	in := input.Native()
+	if in == nil {
+		return errors.New("no input backend here")
+	}
+	if ok, why := in.Available(ctx); !ok {
+		return errors.New(why)
+	}
+	return in.Keys(ctx, []string{"shift"})
 }
 
 // lastLine is a log's last non-empty line, for an error message.

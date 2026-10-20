@@ -167,6 +167,9 @@ func (t *Tools) attended(ctx context.Context, lockOnly bool) error {
 	if err != nil {
 		return fmt.Errorf("I can't tell whether you're at the computer (%v), so I won't use the mouse and keyboard", err)
 	}
+	if last.IsZero() {
+		return errors.New("I haven't seen anyone use this computer since I started watching: desktop tasks run while you're at the computer")
+	}
 	if idle := t.dnow().Sub(last); idle > attendedIdle {
 		return fmt.Errorf("nobody has used this computer for %d minutes: desktop tasks run while you're at the computer",
 			int(idle/time.Minute))
@@ -311,7 +314,9 @@ func appCheck(names []string, el *computeruse.Element, blocked []string) (code s
 	return "", nil
 }
 
-// findWindow is app's front ordinary window ("" app: the focused one, else the frontmost).
+// findWindow is app's front ordinary window ("" app: the focused one, else the frontmost). A
+// window whose title is the name stands in when no app has it: a toolkit's generic class (Tk
+// apps are all "Tk" on X11) doesn't name the app. What may be done in it still goes by its app.
 func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
 	if app == "" {
 		for _, w := range ws {
@@ -322,6 +327,11 @@ func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
 	}
 	for _, w := range ws {
 		if w.normal() && (app == "" || sameApp([]string{w.App}, app)) {
+			return w, true
+		}
+	}
+	for _, w := range ws {
+		if w.normal() && app != "" && sameApp([]string{w.Title}, app) {
 			return w, true
 		}
 	}

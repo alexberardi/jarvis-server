@@ -48,6 +48,8 @@ func dispatch(ctx context.Context, args []string, stdout io.Writer) error {
 		return runCmd(ctx, args[1:], stdout)
 	case len(args) > 0 && args[0] == "down":
 		return downCmd(args[1:], stdout)
+	case len(args) > 0 && args[0] == userInputCmd:
+		return userInput(ctx)
 	}
 	return errors.New("usage: ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted] [--label live|background] [--include-pending] [--out DIR] [--keep]\n       ccsuite down --run DIR")
 }

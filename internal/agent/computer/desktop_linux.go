@@ -31,10 +31,14 @@ func NativeDesktop(apps Apps) *Desktop {
 	if in == nil {
 		return nil
 	}
+	mon := input.NativeMonitor()
+	// A compositor's idle notifications only say what happened after the monitor began:
+	// begin now, so input before the first task counts.
+	go mon.Since(context.Background()) //nolint:errcheck // a warm-up; tasks ask again
 	wins := &linuxWindows{getenv: os.Getenv, wayland: &screen.Wayland{X: screen.OSExec{}}, x11: &x11.Display{}}
 	return &Desktop{
 		AX:      &linuxAX{windows: wins, getenv: os.Getenv, elementAt: atspi.ElementAt, focused: atspi.Focused},
-		Windows: wins, Input: in, Monitor: input.NativeMonitor(),
+		Windows: wins, Input: in, Monitor: mon,
 		Capture:   wins.capture,
 		Locked:    func(ctx context.Context) (bool, error) { return logindLocked(ctx, systemLogind{}) },
 		Clipboard: NativeClipboard(),
