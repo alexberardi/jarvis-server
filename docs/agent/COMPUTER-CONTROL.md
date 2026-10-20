@@ -127,7 +127,9 @@ password the model can see.
   (island + tray), auto-pause the moment the user touches mouse or keyboard, "stop" by voice and
   by hotkey. On macOS (`computer.Guard`): HID activity outside our own injection windows
   (+250 ms), or the pointer > 3 px from where our last action left it, polled every 100 ms,
-  pauses the task; ⌃⌥⎋ (Carbon hotkey, named in the tray tooltip) stops it.
+  pauses the task; ⌃⌥⎋ (Carbon hotkey, named in the tray tooltip) stops it. On Linux: idle-notify
+  (wlroots) or the X server's idle time, and Ctrl+Alt+Esc (X11 grab, GlobalShortcuts portal, or a
+  Hyprland bind); DESIGN.md §17.
 - **Audit:** every action (intent, target, result) in `cc_autonomy_events`; screenshots kept
   locally with a retention setting.
 

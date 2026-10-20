@@ -17,6 +17,7 @@ const (
 	busName      = "org.freedesktop.portal.Desktop"
 	objPath      = dbus.ObjectPath("/org/freedesktop/portal/desktop")
 	ifaceRD      = "org.freedesktop.portal.RemoteDesktop"
+	ifaceGS      = "org.freedesktop.portal.GlobalShortcuts"
 	ifaceRequest = "org.freedesktop.portal.Request"
 	ifaceSession = "org.freedesktop.portal.Session"
 )
@@ -54,8 +55,12 @@ func (b *dbusBus) register() error {
 func (b *dbusBus) Close() { _ = b.c.Close() }
 
 func (b *dbusBus) prop(ctx context.Context, name string) (uint32, error) {
+	return b.propOn(ctx, ifaceRD, name)
+}
+
+func (b *dbusBus) propOn(ctx context.Context, iface, name string) (uint32, error) {
 	var v dbus.Variant
-	err := b.obj.CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, ifaceRD, name).Store(&v)
+	err := b.obj.CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, iface, name).Store(&v)
 	if err != nil {
 		return 0, err
 	}
@@ -99,6 +104,11 @@ func (b *dbusBus) requestPath(tok string) dbus.ObjectPath {
 
 // request calls a Request-style method (opts last) and waits for the Response.
 func (b *dbusBus) request(ctx context.Context, method string, opts map[string]any, args ...any) (uint32, map[string]any, error) {
+	return b.requestOn(ctx, ifaceRD, method, opts, args...)
+}
+
+// requestOn is request on interface iface.
+func (b *dbusBus) requestOn(ctx context.Context, iface, method string, opts map[string]any, args ...any) (uint32, map[string]any, error) {
 	tok := token()
 	vopts := variants(opts)
 	vopts["handle_token"] = dbus.MakeVariant(tok)
@@ -119,7 +129,7 @@ func (b *dbusBus) request(ctx context.Context, method string, opts map[string]an
 		_ = b.c.RemoveMatchSignalContext(context.WithoutCancel(ctx), dbus.WithMatchObjectPath(want), dbus.WithMatchInterface(ifaceRequest), dbus.WithMatchMember("Response"))
 	}()
 	var handle dbus.ObjectPath
-	if err := b.obj.CallWithContext(ctx, ifaceRD+"."+method, 0, append(args, vopts)...).Store(&handle); err != nil {
+	if err := b.obj.CallWithContext(ctx, iface+"."+method, 0, append(args, vopts)...).Store(&handle); err != nil {
 		return 0, nil, err
 	}
 	if handle != want { // a portal older than 0.9 picks its own path
@@ -144,11 +154,7 @@ func (b *dbusBus) request(ctx context.Context, method string, opts map[string]an
 			raw, _ := s.Body[1].(map[string]dbus.Variant)
 			res := make(map[string]any, len(raw))
 			for k, v := range raw {
-				if p, ok := v.Value().(dbus.ObjectPath); ok {
-					res[k] = string(p)
-				} else {
-					res[k] = v.Value()
-				}
+				res[k] = plain(v.Value())
 			}
 			return code, res, nil
 		}
@@ -184,6 +190,106 @@ func (b *dbusBus) Keysym(ctx context.Context, session string, keysym int32, pres
 
 func (b *dbusBus) CloseSession(ctx context.Context, session string) error {
 	return b.c.Object(busName, dbus.ObjectPath(session)).CallWithContext(ctx, ifaceSession+".Close", 0).Err
+}
+
+// plain is a decoded D-Bus value with object paths as strings, variants unwrapped and structs
+// and arrays as []any (a(sa{sv}) is []any of []any{string, map[string]any}).
+func plain(v any) any {
+	switch v := v.(type) {
+	case dbus.ObjectPath:
+		return string(v)
+	case dbus.Variant:
+		return plain(v.Value())
+	case map[string]dbus.Variant:
+		m := make(map[string]any, len(v))
+		for k, e := range v {
+			m[k] = plain(e.Value())
+		}
+		return m
+	case []any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = plain(e)
+		}
+		return out
+	case [][]any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = plain(e)
+		}
+		return out
+	}
+	return v
+}
+
+// --- GlobalShortcuts ---
+
+func dialShortcutsBus() (ShortcutsBus, error) {
+	c, err := dbus.ConnectSessionBus()
+	if err != nil {
+		return nil, err
+	}
+	return newDbusBus(c), nil
+}
+
+func (b *dbusBus) ShortcutsVersion(ctx context.Context) (uint32, error) {
+	return b.propOn(ctx, ifaceGS, "version")
+}
+
+func (b *dbusBus) Activated(ctx context.Context) (<-chan Activation, error) {
+	match := []dbus.MatchOption{dbus.WithMatchObjectPath(objPath), dbus.WithMatchInterface(ifaceGS), dbus.WithMatchMember("Activated")}
+	if err := b.c.AddMatchSignalContext(ctx, match...); err != nil {
+		return nil, err
+	}
+	sigs := make(chan *dbus.Signal, 16)
+	b.c.Signal(sigs)
+	out := make(chan Activation, 4)
+	go func() {
+		defer close(out)
+		defer b.c.RemoveSignal(sigs)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case s, ok := <-sigs:
+				if !ok {
+					return
+				}
+				if s.Path != objPath || s.Name != ifaceGS+".Activated" || len(s.Body) < 2 {
+					continue
+				}
+				session, _ := s.Body[0].(dbus.ObjectPath)
+				id, _ := s.Body[1].(string)
+				select {
+				case out <- Activation{Session: string(session), ID: id}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out, nil
+}
+
+func (b *dbusBus) CreateShortcutsSession(ctx context.Context, opts map[string]any) (uint32, map[string]any, error) {
+	return b.requestOn(ctx, ifaceGS, "CreateSession", opts)
+}
+
+// shortcutArg is one (sa{sv}) of BindShortcuts.
+type shortcutArg struct {
+	ID   string
+	Opts map[string]dbus.Variant
+}
+
+func (b *dbusBus) BindShortcuts(ctx context.Context, session string, shortcuts []Shortcut, opts map[string]any) (uint32, map[string]any, error) {
+	args := make([]shortcutArg, len(shortcuts))
+	for i, s := range shortcuts {
+		args[i] = shortcutArg{s.ID, map[string]dbus.Variant{
+			"description":       dbus.MakeVariant(s.Description),
+			"preferred_trigger": dbus.MakeVariant(s.PreferredTrigger),
+		}}
+	}
+	return b.requestOn(ctx, ifaceGS, "BindShortcuts", opts, dbus.ObjectPath(session), args, "") // no parent window
 }
 
 // dialBusAt connects to the bus at addr (tests: a private dbus-daemon).
