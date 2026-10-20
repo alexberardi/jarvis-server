@@ -49,8 +49,8 @@ const (
 var (
 	// ErrNotRecording: no recording with that id is going on.
 	ErrNotRecording = errors.New("no recording is going on")
-	// ErrDesktopRecording: this computer has no desktop recording (macOS has it, piece 36);
-	// the browser works.
+	// ErrDesktopRecording: this computer has no desktop recording (macOS and X11 have it,
+	// pieces 36 and 37); the browser works.
 	ErrDesktopRecording = errors.New("I can't record the desktop on this computer yet: I can watch what you do in the browser")
 	// ErrBusy: Jarvis is already recording or controlling this computer.
 	ErrBusy = errors.New("Jarvis is already using this computer")

@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package computer
 
@@ -7,5 +7,5 @@ import (
 	"log/slog"
 )
 
-// NewDesktopSource is nil off macOS: the desktop can't be recorded there yet (X11 is piece 37).
+// NewDesktopSource is nil off macOS and Linux: the desktop can't be recorded there.
 func NewDesktopSource(string, func(context.Context) ([]byte, error), *slog.Logger) Source { return nil }

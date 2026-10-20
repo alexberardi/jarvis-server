@@ -100,7 +100,7 @@ func recordFail(err error) map[string]any {
 		o["error_code"] = "not_recording"
 	case errors.Is(err, ErrBusy):
 		o["error_code"] = "busy"
-	case errors.Is(err, ErrDesktopRecording):
+	case errors.Is(err, ErrDesktopRecording), errors.Is(err, ErrWaylandRecording):
 		o["error_code"] = "unsupported"
 	}
 	return o

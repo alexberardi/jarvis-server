@@ -17,3 +17,4 @@ func setValue(int, string, string) error                    { return ErrUnsuppor
 func focus(int, string) error                               { return ErrUnsupported }
 func element(int, string) (*computeruse.Element, error)     { return nil, ErrUnsupported }
 func elementAt(int, int, int) (*computeruse.Element, error) { return nil, ErrUnsupported }
+func focused(int) (*computeruse.Element, error)             { return nil, ErrUnsupported }
