@@ -240,6 +240,39 @@ func cellValue(v any) any {
 	return clip(pyjson.Dumps(v, false))
 }
 
+// previewRows caps SheetPreview.
+const previewRows = 12
+
+// SheetPreview is the last sheet's first rows as one line ("Totals: Dining 362; Groceries 324."),
+// for a report to say what the spreadsheet holds; "" when that sheet has no rows.
+func SheetPreview(sheets []Sheet) string {
+	if len(sheets) == 0 {
+		return ""
+	}
+	sh := sheets[len(sheets)-1]
+	if len(sh.Rows) == 0 {
+		return ""
+	}
+	var rows []string
+	for _, r := range sh.Rows[:min(len(sh.Rows), previewRows)] {
+		var cells []string
+		for _, c := range r {
+			if t := strings.TrimSpace(cellText(c)); t != "" {
+				cells = append(cells, t)
+			}
+		}
+		rows = append(rows, strings.Join(cells, " "))
+	}
+	out := strings.Join(rows, "; ")
+	if n := len(sh.Rows) - previewRows; n > 0 {
+		out += fmt.Sprintf("; and %d more rows", n)
+	}
+	if sh.Title != "" {
+		out = sh.Title + ": " + out
+	}
+	return out + "."
+}
+
 func cellText(v any) string {
 	if s, ok := v.(string); ok {
 		return s
