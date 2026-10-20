@@ -33,7 +33,7 @@ import (
 //
 // Desktop recordings (plan P3 pieces 34-35) have another event shape (parseDesktopTrace) and are
 // learnt the same way: the model sees each event's app, window and element, and each step
-// targets the recorded app and window (buildDesktopWorkflow). Their steps have no element yet.
+// targets the recorded app and window (buildDesktopWorkflow), recording the AX/AT-SPI element when the event had one.
 
 const (
 	learnJob          = "cc.workflow.learn"
@@ -670,7 +670,9 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 
 // buildDesktopWorkflow is buildWorkflow for a desktop trace: each step targets the recorded
 // app and window, and replays its last event (a click at the recorded point, typing, a key).
-// There is no element yet: a replay finds the place by the point, the app and the window.
+// A step whose event had an accessibility element (AX on macOS, AT-SPI on Linux) records it
+// with source "ax", so a replay finds it again; one without (no accessibility context, a key
+// with nothing focused) keeps only the point, the app and the window.
 func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandidate, out learnOutput) (TaughtWorkflow, error) {
 	w := newDraft(rec, out)
 	subs := learnParams(&w, out, cands)
@@ -690,6 +692,7 @@ func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandid
 		if e.Window != nil && (e.Window.Class != "" || e.Window.Title != "") {
 			step.Window = &StepWindow{Class: e.Window.Class, Title: e.Window.Title}
 		}
+		step.Element = desktopRecordedElement(e.Element)
 		var el *computeruse.Element
 		if e.Element != nil {
 			el = &computeruse.Element{Role: e.Element.Role, Name: e.Element.Name, Secure: e.Masked}
@@ -932,6 +935,15 @@ func recordedElement(el *traceElement) *RecordedElement {
 		r.Frame = strconv.Itoa(el.Frame)
 	}
 	return r
+}
+
+// desktopRecordedElement is the recorded element of a desktop event: its role, label and path
+// from the accessibility tree, never a value (a password field's is not kept at all).
+func desktopRecordedElement(el *desktopElement) *RecordedElement {
+	if el == nil || (el.Role == "" && el.Name == "") {
+		return nil
+	}
+	return &RecordedElement{Role: el.Role, Name: el.Name, AXPath: el.AXPath, Source: "ax"}
 }
 
 func riskElement(e traceEvent) *computeruse.Element {

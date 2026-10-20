@@ -37,11 +37,14 @@ choices a later reader would otherwise have to work out again:
   kept; typing becomes `type` (`•••` and `sensitive_input` when masked, or when the recording had
   no accessibility context, which parsing treats as masked); a key becomes `keypress` with its
   chord split (`Ctrl+s` is `["ctrl","s"]`) and is dropped when a key isn't in `KeyNames`. A cleared
-  field is dropped, since there is no ref for `set_value`. There is no `element` yet (#343).
+  field is dropped, since there is no ref for `set_value`. When the event has an AX (macOS) or
+  AT-SPI (Linux) element, the step records it (role, label, `ax_path`) with `source: ax`, never its
+  value; an event without one (no accessibility context, a key with nothing focused) leaves
+  `element` empty for the vision pass (#319). A heal keeps the source.
 - **A desktop click keeps the recorded global point** (screen coordinates), not a point relative to
   the window. X11 and macOS traces have no window geometry, so a window-relative point could only
   be made for some platforms, and it could go negative, which `Validate` refuses. The point is a
-  fallback anyway: a replay should find the place again from the element (#343) or the recorded
+  fallback anyway: a replay should find the place again from the element or the recorded
   crop, and map the point into its own capture's pixels when it falls back to it.
   Today's replay (`cc/computer/replay.go`) never clicks it blindly: a click without an element
   is a `needsTarget` action, so it goes to a model round instead; a learnt `type`

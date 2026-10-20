@@ -167,7 +167,8 @@ password the model can see.
    keyframe at most every second with the click marked and a 256 px crop. GNOME and KDE refuse
    (`unsupported`, Q8) ([decision](../decisions/2026-10-20-desktop-recording-wayland.md)).
    jarvisd's `start_recording` still starts the browser. Desktop traces are learnt into steps
-   that target the recorded app and window (#342); their steps have no element yet (#343).
+   that target the recorded app and window (#342); each step records its AX/AT-SPI element
+   (`source: ax`) when the event had one (#343).
 2. **Capture structure, not just pixels.**
    - Browser (extension): each element acted on (role, accessible name, a stable selector),
      values typed (password and sensitive fields masked, never stored), navigations, downloads
