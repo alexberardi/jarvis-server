@@ -28,6 +28,8 @@ type fakeComputer struct {
 	stops   []string
 	// onAct, when set, runs before each batch is answered (after the batches so far are counted).
 	onAct func(n int)
+	// downloads are in Downloads once a batch ran.
+	downloads []computer.FileEntry
 }
 
 func (f *fakeComputer) Observe(_ context.Context, o computer.Observe) (computer.Observation, error) {
@@ -51,7 +53,12 @@ func (f *fakeComputer) Act(_ context.Context, b computer.Batch) (computer.ActRes
 	return res, nil
 }
 
-func (f *fakeComputer) Files(context.Context, computer.Files) (computer.FileInfo, error) {
+func (f *fakeComputer) Files(_ context.Context, a computer.Files) (computer.FileInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if a.Op == "list" && len(f.batches) > 0 {
+		return computer.FileInfo{Entries: f.downloads}, nil
+	}
 	return computer.FileInfo{}, nil
 }
 
@@ -817,5 +824,34 @@ func TestSpreadsheetAfterReadIsACheckpoint(t *testing.T) {
 	// A spreadsheet with nothing read before it in the plan (the replan after the reads) stays.
 	if got := checkpointSpreadsheet([]Step{sheet}); len(got) != 1 || got[0].Command != cmdWriteSheet {
 		t.Fatalf("steps %+v", got)
+	}
+}
+
+// The checkpoint right after a computer task that downloaded files reads each of them, then
+// waits for what they say, without asking the planner for the files' names.
+func TestCheckpointReadsTheDownloads(t *testing.T) {
+	c := newComputerEnv(t)
+	read, _ := fileTools(t, c.tenv)
+	c.comp.downloads = []computer.FileEntry{{Name: "statement-2026-09.csv", Bytes: 900}, {Name: "card-statement-2026-09.csv", Bytes: 800}}
+	c.llm.say("plan", planJSON("Budget", step(policy.ToolComputerTask, "Get the statements",
+		`{"goal": "download the statements", "target": "browser", "site": "`+shopSite+`"}`),
+		`{"command": "request_replan", "args": {"reason": "read what was downloaded"}, "label": "Wait for files"}`))
+	c.llm.say("computer", `{"actions": [{"kind": "press", "ref": "e2", "intent": "Download"}]}`, doneReply)
+	c.llm.say("replan", planJSON("Nothing more"))
+	c.llm.say("compose", "Read both.")
+	p := c.draft("do my budget", ptr(7), c.s.FullMenu(context.Background(), nil, hh, ptr(7)))
+	c.idle()
+	w := c.wf(p.WorkflowID)
+	if w.State != "done" || len(read.args) != 2 {
+		t.Fatalf("run = %s, reads %v", w.State, read.args)
+	}
+	if !strings.Contains(read.args[0], "~/Downloads/card-statement-2026-09.csv") || !strings.Contains(read.args[1], "~/Downloads/statement-2026-09.csv") {
+		t.Fatalf("reads %v", read.args)
+	}
+	if n := len(c.llm.requests("replan")); n != 1 {
+		t.Fatalf("replans asked of the planner: %d (only the one after the reads)", n)
+	}
+	if last := w.Steps[len(w.Steps)-1]; last.Command != cmdReplan {
+		t.Fatalf("steps %+v", w.Steps)
 	}
 }

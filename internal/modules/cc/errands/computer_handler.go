@@ -150,7 +150,15 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			did := strings.TrimSpace(strings.TrimSuffix(out.Summary, "Checked: "+out.Checked+"."))
 			msg = strings.TrimSpace("Done, checked: " + out.Checked + ". " + did + " " + note)
 		}
-		return Result{Command: cmd, Label: label, Success: true, Message: msg, Summary: out.Summary}, nil
+		res := Result{Command: cmd, Label: label, Success: true, Message: msg, Summary: out.Summary}
+		if len(out.Downloads) > 0 {
+			files := make([]any, len(out.Downloads))
+			for i, f := range out.Downloads {
+				files[i] = f
+			}
+			res.Data = servertools.Obj("downloads", files)
+		}
+		return res, nil
 	case computer.StateNeedsApproval:
 		return Result{}, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true,
 			Computer: &computerWait{Checkout: out.Checkout, Pending: out.Pending}}

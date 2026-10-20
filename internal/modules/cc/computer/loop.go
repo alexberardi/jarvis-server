@@ -143,7 +143,9 @@ type Outcome struct {
 	Pending  []PendingAction
 	Checkout *Checkout
 	Verify   *SuccessCheck // done: the check that passed
-	Rounds   int
+	// Downloads are the files a browser task downloaded (done), by name in ~/Downloads.
+	Downloads []string
+	Rounds    int
 }
 
 // PendingAction is one risky action held for the user's confirmation. All the risky actions of a
@@ -232,7 +234,7 @@ type round struct {
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
 func (l *Loop) downloads(ctx context.Context, runID string) map[string]bool {
-	info, err := l.Exec.Files(ctx, Files{RunID: runID, Op: "list", Path: downloadsDir})
+	info, err := l.Exec.Files(ctx, Files{RunID: runID, Op: "list", Path: DownloadsDir})
 	if err != nil {
 		return nil
 	}
@@ -486,11 +488,12 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation)
 		if sum != "" && !strings.HasSuffix(sum, ".") {
 			sum += "."
 		}
-		if got := l.newDownloads(ctx, r); len(got) > 0 {
+		got := l.newDownloads(ctx, r)
+		if len(got) > 0 {
 			// The errand's next steps read them by name (read_computer_file).
-			sum += " Downloaded: " + strings.Join(got, ", ") + " (in " + downloadsDir + ")."
+			sum += " Downloaded: " + strings.Join(got, ", ") + " (in " + DownloadsDir + ")."
 		}
-		return Outcome{State: StateDone, Summary: strings.TrimSpace(sum + " Checked: " + res.Checked + "."),
+		return Outcome{State: StateDone, Summary: strings.TrimSpace(sum + " Checked: " + res.Checked + "."), Downloads: got,
 			Checked: res.Checked, Verify: check}, true
 	}
 	if v.FailedAt == 0 {

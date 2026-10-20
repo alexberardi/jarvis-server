@@ -75,8 +75,9 @@ type FileEntry struct {
 	Bytes int64
 }
 
-// downloadsDir is where the download check looks (the agent's computer_files reads it).
-const downloadsDir = "~/Downloads"
+// DownloadsDir is where a browser task's downloads land and the download check looks (the
+// agent's computer_files reads it); Outcome.Downloads are names in it.
+const DownloadsDir = "~/Downloads"
 
 // partial download names: a browser's download still in progress.
 var partialSuffixes = []string{".crdownload", ".part", ".download", ".tmp"}
@@ -171,7 +172,7 @@ func (l *Loop) Verify(ctx context.Context, runID string, target computeruse.Targ
 // findDownload looks in Downloads for a finished file matching d: what it found, or why not.
 // NameLike is a glob when it has * ? or [, else a part of the name; both ignore case.
 func (l *Loop) findDownload(ctx context.Context, runID string, d *DownloadCheck) (found, why string) {
-	info, err := l.Exec.Files(ctx, Files{RunID: runID, Op: "list", Path: downloadsDir})
+	info, err := l.Exec.Files(ctx, Files{RunID: runID, Op: "list", Path: DownloadsDir})
 	if err != nil {
 		return "", "I couldn't look in Downloads: " + err.Error()
 	}
