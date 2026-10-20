@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 )
 
@@ -129,7 +130,7 @@ func (s *Service) handleApprove(ctx context.Context, c CallbackContext) Callback
 		return fail("This errand has no steps to run.")
 	}
 	wfID := hexID("wf_")
-	raced, err := s.launch(ctx, p, wfID, "errand", "")
+	raced, err := s.launch(ctx, p, wfID, "errand", "", nil)
 	if err != nil {
 		s.log().Error("errands: launch run", "plan", p.ID, "err", err)
 		return fail("I couldn't start that errand — try again in a bit.")
@@ -143,8 +144,9 @@ func (s *Service) handleApprove(ctx context.Context, c CallbackContext) Callback
 
 // launch moves a draft plan to launched and spawns its run (state waiting, no signal) of the
 // given kind, with its first drive queued in the same transaction. raced: the plan was no
-// longer a draft, and nothing was created.
-func (s *Service) launch(ctx context.Context, p *planRow, wfID, kind, inboxID string) (raced bool, err error) {
+// longer a draft, and nothing was created. ev, when set, is logged in that transaction too, so
+// it comes before anything the run logs.
+func (s *Service) launch(ctx context.Context, p *planRow, wfID, kind, inboxID string, ev *policy.Event) (raced bool, err error) {
 	now := dbTime(s.now())
 	err = s.DB.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE cc_errand_plans SET state = 'launched', workflow_id = ?, confirmed_at = ?,
@@ -162,6 +164,9 @@ func (s *Service) launch(ctx context.Context, p *planRow, wfID, kind, inboxID st
 			wfID, kind, p.HouseholdID, nullInt(p.UserID), nullText(p.NodeID), firstNonEmpty(p.Goal, p.Summary),
 			nullText(firstNonEmpty(p.Summary, p.Goal)), stepsDumps(p.Steps), nullText(inboxID), now, now); err != nil {
 			return err
+		}
+		if ev != nil {
+			s.recordTx(ctx, tx, *ev)
 		}
 		b, _ := json.Marshal(resumeJob{WorkflowID: wfID, Step: -1, Kind: signalStart})
 		_, err = s.Queue.EnqueueTx(ctx, tx, JobResume, b, queue.Options{})

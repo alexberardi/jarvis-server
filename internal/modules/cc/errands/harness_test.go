@@ -337,13 +337,31 @@ func (f *fakePolicy) n() int {
 type fakeActivity struct {
 	mu     sync.Mutex
 	events []policy.Event
+	slow   map[string]time.Duration // outcome → how long its Record takes
 }
 
 func (f *fakeActivity) Record(_ context.Context, e policy.Event) error {
 	f.mu.Lock()
+	d := f.slow[e.Outcome]
+	f.mu.Unlock()
+	time.Sleep(d)
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, e)
 	return nil
+}
+
+func (f *fakeActivity) RecordTx(ctx context.Context, _ *sql.Tx, e policy.Event) error {
+	return f.Record(ctx, e)
+}
+
+func (f *fakeActivity) slowDown(outcome string, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.slow == nil {
+		f.slow = map[string]time.Duration{}
+	}
+	f.slow[outcome] = d
 }
 
 func (f *fakeActivity) all() []policy.Event {

@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,6 +95,31 @@ func TestEventsLimit(t *testing.T) {
 	}
 	if len(all) != 5 {
 		t.Fatalf("limit 1000: got %d, want 5", len(all))
+	}
+}
+
+// RecordTx commits with the caller's transaction and is gone when it rolls back.
+func TestRecordTx(t *testing.T) {
+	d, s, _ := storeEnv(t)
+	ctx := context.Background()
+	ev := Event{HouseholdID: "hh-1", Source: SourceErrandPlan, Effect: Allow, Outcome: OutcomeLaunched}
+	rollback := errors.New("rollback")
+	if err := d.Tx(ctx, func(tx *sql.Tx) error {
+		if err := s.RecordTx(ctx, tx, ev); err != nil {
+			t.Fatal(err)
+		}
+		return rollback
+	}); !errors.Is(err, rollback) {
+		t.Fatalf("tx = %v", err)
+	}
+	if evs, _ := s.Events(ctx, "hh-1", 0); len(evs) != 0 {
+		t.Fatalf("rolled back: %+v", evs)
+	}
+	if err := d.Tx(ctx, func(tx *sql.Tx) error { return s.RecordTx(ctx, tx, ev) }); err != nil {
+		t.Fatal(err)
+	}
+	if evs, _ := s.Events(ctx, "hh-1", 0); len(evs) != 1 || evs[0].Outcome != OutcomeLaunched {
+		t.Fatalf("committed: %+v", evs)
 	}
 }
 
