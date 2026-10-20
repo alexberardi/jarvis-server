@@ -65,6 +65,12 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
   captures, the hero clip of the desktop agent (user), and a photo of the Pi node with the HAT.
 - [ ] **Docs:** update jarvis-docs, which still describes the multi-service Python stack, for jarvisd: install, upgrade, `import-legacy`, and the Go node. Also re-check this repo's README and `docs/install/` against the released version.
 
+### MLX on Apple Silicon (#299, in parallel)
+
+Decision: [2026-10-19-mlx-engine](decisions/2026-10-19-mlx-engine.md) (llm LD9); built as a generic Python engine layer that vLLM (#300) and Transformers (#301) reuse.
+
+- [ ] **MLX engine:** Python engine layer + mlx-lm install and supervision ✓ (llm 01 §3.11), model manager repo-directory models + mlx-community catalog entries, admin MLX choice + engine install progress + explicit tool/JSON/vision limits, live Mac check (tokens/s next to llama-server on Metal)
+
 ### Prompts as text (in parallel)
 
 Contract: [cc/prompt-contract.md](cc/prompt-contract.md) ([decision](decisions/2026-10-16-prompts-as-text.md)).
