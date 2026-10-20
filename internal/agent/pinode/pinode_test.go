@@ -351,3 +351,39 @@ func TestMeasureFailures(t *testing.T) {
 		})
 	}
 }
+
+// The app may send a longer follow-up window than the node allows (#296): it applies and
+// saves the cap, 3 s, and says so in the log.
+func TestUpdateClampsTheFollowUpWindow(t *testing.T) {
+	for _, c := range []struct {
+		in, want float64
+		clamped  bool
+	}{{8, 3, true}, {3.5, 3, true}, {2.5, 2.5, false}, {0, 0, false}} {
+		var logs strings.Builder
+		n, _, v, path := newNode(t)
+		n.log = slog.New(slog.NewTextHandler(&logs, nil))
+		run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{
+			"follow_up_listen_seconds": c.in,
+		}})
+		if v.cfg.FollowUp.ListenSecs != c.want || n.State().FollowUpListen != c.want {
+			t.Errorf("%v: voice %v, state %v, want %v", c.in, v.cfg.FollowUp.ListenSecs, n.State().FollowUpListen, c.want)
+		}
+		s, _, err := settings.Load(path)
+		if err != nil || s.FollowUp == nil || *s.FollowUp != c.want {
+			t.Errorf("%v: saved %v (%v), want %v", c.in, s.FollowUp, err, c.want)
+		}
+		if got := strings.Contains(logs.String(), "follow_up_listen_seconds clamped"); got != c.clamped {
+			t.Errorf("%v: clamp logged %v, want %v:\n%s", c.in, got, c.clamped, logs.String())
+		}
+	}
+}
+
+func TestUpdateRejectsANegativeFollowUpWindow(t *testing.T) {
+	n, _, v, _ := newNode(t)
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{
+		"follow_up_listen_seconds": -1.0,
+	}})
+	if v.tunes != 0 || n.State() != initial() {
+		t.Fatalf("tunes %d, state %+v", v.tunes, n.State())
+	}
+}
