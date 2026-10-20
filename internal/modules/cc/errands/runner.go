@@ -40,6 +40,9 @@ type Suspend struct {
 	Key     string // the correlation key (a phone session id)
 	Results []Result
 	Confirm bool // an approval wait on the step at Cursor itself (a rule said ask), not a replan
+	// Computer: a computer task's confirmation or question (Confirm is set too); its card replaces
+	// the step card.
+	Computer *computerWait
 }
 
 // runCtx is the per-run context threaded to the handlers (WorkflowContext). It replaces the
@@ -54,10 +57,13 @@ type runCtx struct {
 	convID      string
 	results     *[]Result
 	dateCtx     *dates.Context
+	wf          *workflowRow
+	// signal is the confirmation or answer the run resumed from, for the step at the cursor only.
+	signal *resumeJob
 }
 
 // StepHandler is one capability plane. Handlers are tried in order and the first match runs
-// the step: phone → replan → server tool → node (the catch-all).
+// the step: phone → replan → computer task → server tool → node (the catch-all).
 type StepHandler interface {
 	Match(s *Service, command string) bool
 	// Run returns the step's outcome, or a Suspend when a deferred step paused the run.
@@ -65,7 +71,7 @@ type StepHandler interface {
 }
 
 func (s *Service) handlers() []StepHandler {
-	return []StepHandler{phoneHandler{}, replanHandler{}, serverHandler{}, nodeHandler{}}
+	return []StepHandler{phoneHandler{}, replanHandler{}, computerHandler{}, serverHandler{}, nodeHandler{}}
 }
 
 // runStep is run_step: a handler panic becomes a failed outcome (one bad step never escapes).
@@ -388,8 +394,8 @@ func nodeOutcome(cmd string, out *pyjson.Object) Result {
 func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior []Result) (*Aggregate, *Suspend) {
 	results := append([]Result(nil), prior...)
 	rc := &runCtx{workflowID: w.ID, householdID: w.HouseholdID, nodeID: w.NodeID, userID: w.UserID, goal: w.Goal,
-		timezone: s.timezone(ctx, w.HouseholdID), convID: "errand-" + hexID(""), results: &results}
-	auto := w.Kind == KindAutorun
+		timezone: s.timezone(ctx, w.HouseholdID), convID: "errand-" + hexID(""), results: &results, wf: w}
+	auto, cards := w.Kind == KindAutorun, w.tracksProgress()
 	for i := start; i < len(w.Steps); i++ {
 		st := w.Steps[i]
 		cmd := parse.PyStrip(st.Command)
@@ -416,7 +422,7 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 			s.log().Info("errands: step skipped", "index", i, "command", cmd, "reason", skip)
 			results = append(results, Result{Command: cmd, Label: label, Success: true,
 				Data: servertools.Obj("skipped", skip)})
-			if auto {
+			if cards {
 				s.updateRanCard(ctx, w, results, "running", "")
 			}
 			continue
@@ -435,7 +441,7 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 				s.recordStep(ctx, w, i, cmd, d, policy.OutcomeBlocked)
 				s.log().Info("errands: step blocked by a household rule", "index", i, "command", cmd)
 				results = append(results, Result{Command: cmd, Label: label, Error: msg})
-				if auto {
+				if cards {
 					s.updateRanCard(ctx, w, results, "running", "")
 				}
 				agg := s.aggregateAndCompose(ctx, w.Goal, results)
@@ -444,6 +450,10 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 				s.recordStep(ctx, w, i, cmd, d, policy.OutcomeAsked)
 				return nil, &Suspend{Cursor: i, Kind: signalApproval, Confirm: true, Results: results}
 			}
+		}
+		rc.signal = nil
+		if i == start && w.signal != nil && w.signal.Kind == signalConfirm {
+			rc.signal = w.signal
 		}
 		r, susp := s.runStep(ctx, rc, cmd, args, label, i)
 		if susp != nil {
@@ -459,7 +469,18 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 			}
 			s.recordStep(ctx, w, i, cmd, *v, outcome)
 		}
-		if auto {
+		if r.stopped {
+			// The user stopped the computer task: the errand ends here, stopped.
+			agg := aggregate(results)
+			agg.Status, agg.Message, agg.Results = "stopped", "Stopped during “"+label+"”.", results
+			if by, ok := s.stopRequested.LoadAndDelete(w.ID); ok {
+				if uid, ok := by.(int64); ok {
+					agg.stoppedBy = &uid
+				}
+			}
+			return &agg, nil
+		}
+		if cards {
 			s.updateRanCard(ctx, w, results, "running", "")
 		}
 		if !r.Success {
@@ -758,6 +779,10 @@ type resumeJob struct {
 	Call       *CallOutcome `json:"call,omitempty"`
 	// Fail, when set, is a synthesized failure outcome for the step (a deadline).
 	Fail *failOutcome `json:"fail,omitempty"`
+	// Approved are the digests of a computer task's held actions the user approved; Answer is the
+	// user's answer to its question (a confirm_step resume).
+	Approved []string `json:"approved,omitempty"`
+	Answer   string   `json:"answer,omitempty"`
 }
 
 type failOutcome struct {
@@ -814,6 +839,10 @@ func (s *Service) deliver(ctx context.Context, j resumeJob) (bool, error) {
 	}()
 
 	results := append([]Result(nil), w.Results...)
+	w.signal = &j
+	if j.Fail != nil {
+		s.stopComputer(dctx, w.ID, true) // the wait ran out: its computer task ends unrun
+	}
 	if j.Kind != signalStart && (j.Kind != signalConfirm || j.Fail != nil) { // an approved step runs from the cursor
 		var outcome Result
 		switch {
@@ -863,6 +892,11 @@ func (s *Service) finish(ctx context.Context, w *workflowRow, agg Aggregate) {
 			s.recordStopped(ctx, w, agg.stoppedBy)
 		}
 	} else {
+		s.stopRequested.Delete(w.ID)
+		if w.InboxItemID != "" && w.hasComputerStep() {
+			// The progress card shows where it ended; the completion card reports it.
+			s.putRanCard(ctx, w, s.ranCard(ctx, w, agg.Results, ranState(agg)), "")
+		}
 		s.postCompletionCard(ctx, w.HouseholdID, w.DisplayTitle(), agg, w.UserID)
 	}
 	errText := ""
@@ -894,7 +928,11 @@ func (s *Service) suspend(ctx context.Context, w *workflowRow, susp *Suspend) {
 			w.Revision++
 			s.enqueueDeadline(ctx, deadlineJob{WorkflowID: w.ID, Step: step, Kind: signalApproval, Confirm: true,
 				Revision: w.Revision}, s.ApprovalDeadline)
-			s.postStepCard(ctx, w, susp.Cursor)
+			if susp.Computer != nil {
+				s.postComputerCard(ctx, w, susp.Cursor, susp.Computer)
+			} else {
+				s.postStepCard(ctx, w, susp.Cursor)
+			}
 			s.updateRanCard(ctx, w, susp.Results, "waiting", "")
 			break
 		}

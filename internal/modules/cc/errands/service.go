@@ -152,6 +152,9 @@ type Service struct {
 	Policy interface {
 		Decide(ctx context.Context, hh string, a policy.Action) policy.Verdict
 	}
+	// Computer runs computer_task steps on the household's computers (computer_handler.go). Nil:
+	// computer_task is never offered and such a step fails.
+	Computer *ComputerTasks
 	// Activity is the autonomy activity log. Nil: nothing is recorded.
 	Activity interface {
 		Record(ctx context.Context, e policy.Event) error

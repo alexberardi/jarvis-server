@@ -31,6 +31,7 @@ func (m *Module) registerErrands() {
 		DB: m.deps.DB, Log: m.deps.Log, LLM: m.LLM, Tools: m.tools, Settings: m.settings,
 		Nodes: errandNodes{m}, Cards: errandCards{m}, Phone: phoneCalls, Schedules: schedules,
 		Timezone: m.householdTimezone, Now: m.now, Policy: m.policy, Activity: m.autonomy,
+		Computer: m.computerTasks(),
 	}
 	if m.deps.Queue != nil {
 		s.Register(m.deps.Queue)

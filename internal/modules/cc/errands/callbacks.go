@@ -50,6 +50,7 @@ func (s *Service) Callbacks() map[string]CallbackFunc {
 		CallbackApproveRepl: s.handleApproveReplan,
 		CallbackStop:        s.handleStop,
 		CallbackApproveStep: s.handleApproveStep,
+		CallbackAnswerStep:  s.handleAnswerStep,
 	}
 }
 
@@ -307,7 +308,7 @@ func dataInt(d map[string]any, k string) (int, bool) {
 }
 
 // handleApproveStep is the step card's Approve: mark the parked step approved and resume the
-// run from it.
+// run from it. A computer task's confirmation resumes it with its held actions approved.
 func (s *Service) handleApproveStep(ctx context.Context, c CallbackContext) CallbackResult {
 	if !s.Available() {
 		return fail("Errands are unavailable right now.")
@@ -333,11 +334,15 @@ func (s *Service) handleApproveStep(ctx context.Context, c CallbackContext) Call
 	if !revisionsMatch(c.Data["revision"], w.Revision) {
 		return fail("This errand was updated — open the latest card.")
 	}
+	job, isComputer := s.approveComputer(ctx, w, step)
+	if !isComputer {
+		job = resumeJob{WorkflowID: w.ID, Step: step - 1, Kind: signalConfirm}
+	}
 	w.Steps[step].Approved = true
 	if err := s.saveSteps(ctx, w.ID, w.Steps, true); err != nil {
 		return fail("Couldn't approve the step.")
 	}
-	if err := s.enqueueResume(ctx, resumeJob{WorkflowID: w.ID, Step: step - 1, Kind: signalConfirm}); err != nil {
+	if err := s.enqueueResume(ctx, job); err != nil {
 		return fail("Couldn't approve the step.")
 	}
 	label := firstNonEmpty(w.Steps[step].Label, strings.TrimSpace(w.Steps[step].Command))
@@ -346,7 +351,8 @@ func (s *Service) handleApproveStep(ctx context.Context, c CallbackContext) Call
 }
 
 // handleStop is the delta card's (and the "Ran on its own" card's) Stop: cancel the waiting run
-// here; a running autorun run stops before its next step.
+// here; a running autorun run stops before its next step, and a running computer task (in any
+// errand) at once: its durable stop is set and its computer told.
 func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackResult {
 	if s.DB == nil {
 		return fail("Errands are unavailable right now.")
@@ -357,6 +363,13 @@ func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackRes
 	}
 	if w == nil {
 		return CallbackResult{Success: true}
+	}
+	if w.State == "running" {
+		if s.stopComputer(ctx, w.ID, false) {
+			s.stopRequested.Store(w.ID, c.UserID)
+			return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, "🛑 Stopping the errand",
+				"I'm stopping “"+w.DisplayTitle()+"” on the computer now.")}
+		}
 	}
 	if w.Kind == KindAutorun && w.State == "running" {
 		s.stopRequested.Store(w.ID, c.UserID)
@@ -369,6 +382,7 @@ func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackRes
 			return fail("Couldn't stop the errand.")
 		}
 		if ok {
+			s.stopComputer(ctx, w.ID, true) // nothing it held runs
 			note := ""
 			if s.declineCalls(ctx, w.ID) {
 				note = " I won't place the remaining call(s)."
@@ -378,6 +392,8 @@ func (s *Service) handleStop(ctx context.Context, c CallbackContext) CallbackRes
 			if w.Kind == KindAutorun {
 				s.updateRanCard(ctx, w, w.Results, "stopped", "")
 				s.recordStopped(ctx, w, &c.UserID)
+			} else if w.tracksProgress() {
+				s.updateRanCard(ctx, w, w.Results, "stopped", "")
 			}
 			return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, "🗑️ Errand stopped",
 				firstNonEmpty(w.Title, w.Goal, "The errand")+" stopped."+note)}
