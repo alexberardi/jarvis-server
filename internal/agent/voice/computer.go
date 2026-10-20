@@ -65,7 +65,11 @@ func (p *Pipeline) computerTurn(s *session, transcript string) *ComputerActivity
 		return nil
 	}
 	a := &ComputerActivity{Kind: string(k), Task: text}
-	if computeruse.IsStopPhrase(transcript) {
+	stop := computeruse.IsStopPhrase // a recording also ends on its own words ("I'm done")
+	if k == computer.Recording {
+		stop = computeruse.IsRecordingStopPhrase
+	}
+	if stop(transcript) {
 		if s.held != nil {
 			s.held.stopped = true
 		}

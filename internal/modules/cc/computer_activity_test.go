@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -95,25 +96,40 @@ func TestStopPhraseWhileRecordingFallsBackToTheTool(t *testing.T) {
 }
 
 // Stopped here (the agent's own stop, which uploads the trace): stop_recording doesn't ask the
-// agent again (it would say not_recording) nor for a name, and says it's saved, by its name.
+// agent again (it would say not_recording) nor for a name, and says it's saved under the name
+// the upload gets (the start's task), never a name the model passes now.
 func TestStopRecordingStoppedHere(t *testing.T) {
-	ve, agent, _ := newRecToolEnv(t)
-	ve.setComputerControl("on")
-	runTool(t, &startRecordingTool{m: ve.m}, `{"task": "test2"}`, ve.recTurn(7))
-	turn := ve.recTurn(7)
-	turn.ComputerStopped = "recording"
-	out := runTool(t, &stopRecordingTool{m: ve.m}, "", turn)
-	if out["status"] != "saved" || !strings.Contains(out["message"].(string), `"test2"`) {
-		t.Fatalf("stop: %v", out)
-	}
-	if len(agent.calls) != 1 {
-		t.Fatalf("asked the agent again: %v", agent.calls)
-	}
-	// Unnamed: no need_name, the trace is already on its way.
-	agent.calls = nil
-	runTool(t, &startRecordingTool{m: ve.m}, "", ve.recTurn(7))
-	if out := runTool(t, &stopRecordingTool{m: ve.m}, "", turn); out["status"] != "saved" || len(agent.calls) != 1 {
-		t.Fatalf("unnamed: %v %v", out, agent.calls)
+	for _, tc := range []struct {
+		name, start, stop, says, stored string
+	}{
+		{"named at the start", `{"task": "test2"}`, "", `"test2"`, "test2"},
+		{"named at the start and the stop", `{"task": "test2"}`, `{"name": "X"}`, `"test2"`, "test2"},
+		{"named only at the stop", "", `{"name": "X"}`, "what you showed me", ""},
+		{"unnamed", "", "", "what you showed me", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ve, agent, learned := newRecToolEnv(t)
+			ve.setComputerControl("on")
+			runTool(t, &startRecordingTool{m: ve.m}, tc.start, ve.recTurn(7))
+			turn := ve.recTurn(7)
+			turn.ComputerStopped = "recording"
+			out := runTool(t, &stopRecordingTool{m: ve.m}, tc.stop, turn)
+			if msg, _ := out["message"].(string); out["status"] != "saved" || !strings.Contains(msg, tc.says) || strings.Contains(msg, `"X"`) {
+				t.Fatalf("stop: %v", out)
+			}
+			if len(agent.calls) != 1 {
+				t.Fatalf("asked the agent again: %v", agent.calls)
+			}
+			// The agent's own upload, as handleUploadRecording stores it.
+			rec, err := ve.m.storeAgentRecording(context.Background(), Recording{ID: "rec_00aa11bb22cc33dd", HouseholdID: voiceHH,
+				OwnerID: 7, NodeID: ve.node.id, Mode: "browser", Steps: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Narration != tc.stored || len(*learned) != 1 {
+				t.Fatalf("stored as %q, the message says %s", rec.Narration, tc.says)
+			}
+		})
 	}
 }
 
@@ -133,6 +149,40 @@ func TestReplyNeverClaimsAStopThatDidNotRun(t *testing.T) {
 	}
 	if len(agent.calls) != 0 {
 		t.Fatalf("agent calls %v", agent.calls)
+	}
+}
+
+// During a recording, another tool's answer that says "stopped" or "saved" ("I stopped the
+// timer", "your note is saved") is not about the recording: it reaches the user, unnudged.
+func TestOtherStopsPassDuringARecording(t *testing.T) {
+	for _, reply := range []string{"Okay, I stopped the timer.", "Your note is saved.", "Your settings are saved.",
+		"The game was saved by the goalie in overtime.", "I stopped the music."} {
+		ve, agent := recordingConv(t)
+		ve.eng.say(reply)
+		b := ve.turn("/api/v0/voice/command", "c1", "What happened?", map[string]any{"computer_activity": recordingNow}).want(200).json()
+		if b["assistant_message"] != reply {
+			t.Fatalf("%q became %v", reply, b)
+		}
+		if reqs := turnRequests(ve, "What happened?"); len(reqs) != 1 {
+			t.Fatalf("%q: %d model calls, want 1 (no %s nudge)", reply, len(reqs), nagNotStopped)
+		}
+		if len(agent.calls) != 0 {
+			t.Fatalf("agent calls %v", agent.calls)
+		}
+	}
+}
+
+func TestClaimsStopRE(t *testing.T) {
+	for s, want := range map[string]bool{
+		"I've stopped the recording and saved it.": true, "Okay, the recording is saved.": true,
+		"Got it. I've recorded the macro called test2.": true, "I stopped recording.": true,
+		"Saved the macro.": true, "The recording has been stopped.": true, "I've finished recording.": true,
+		"Okay, I stopped the timer.": false, "Your note is saved.": false, "Stopped.": false, "Saved!": false,
+		"I'm still recording.": false, "The recording keeps going.": false,
+	} {
+		if got := claimsStopRE.MatchString(s); got != want {
+			t.Errorf("claimsStopRE(%q) = %v, want %v", s, got, want)
+		}
 	}
 }
 
@@ -171,6 +221,17 @@ func TestStopPhraseWhileControllingIsAnswered(t *testing.T) {
 		"kind": "controlling", "task": "Ordering the blue mug", "stopped": true}}).want(200).json()
 	if b["stop_reason"] == "not_for_me" || !strings.Contains(b["assistant_message"].(string), "stopped") {
 		t.Fatalf("body %v", b)
+	}
+}
+
+// Controlling, "That's all." is no stop (a recording's word, not a task's): the model answers.
+func TestRecordingWordsDontStopControl(t *testing.T) {
+	a := &computerActivity{Kind: "controlling", Task: "Ordering the blue mug"}
+	if a.stopAsked("That's all.") || a.stopAsked("I'm done.") || !a.stopAsked("Stop.") {
+		t.Fatalf("controlling: stopAsked is wrong")
+	}
+	if a := (&computerActivity{Kind: "recording"}); !a.stopAsked("That's all.") || !a.stopAsked("I'm done.") {
+		t.Fatalf("recording: stopAsked is wrong")
 	}
 }
 

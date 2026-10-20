@@ -147,7 +147,7 @@ func (t *stopRecordingTool) Execute(ctx context.Context, call servertools.Call, 
 	nodeID := p.target.row.nodeID
 	name := strings.TrimSpace(argText(call, "name"))
 	if turn.ComputerStopped == "recording" && nodeID == turn.NodeID {
-		return m.recordingStoppedHere(nodeID, name), nil
+		return m.recordingStoppedHere(nodeID), nil
 	}
 	if name == "" {
 		if _, named := m.recordingNamed.Load(nodeID); !named {
@@ -184,15 +184,13 @@ type namedRecording struct{ id, task string }
 
 // recordingStoppedHere is stop_recording's answer when the agent already stopped the recording
 // on this command (a voice stop phrase, #288). Asking it again would say not_recording, and it
-// is uploading the trace itself (handleUploadRecording names it from recordingTasks), so nothing
-// is asked of it, nor a name: the recording is saved.
-func (m *Module) recordingStoppedHere(nodeID, name string) *pyjson.Object {
-	if v, ok := m.recordingNamed.LoadAndDelete(nodeID); ok && name == "" {
-		name = v.(namedRecording).task
-	}
+// is uploading the trace itself, named from recordingTasks (the start's task), so nothing is
+// asked of it, nor a name: the recording is saved, under the start's name. A name the model
+// passes now can't be applied (the upload may already be in), so the answer never claims it.
+func (m *Module) recordingStoppedHere(nodeID string) *pyjson.Object {
 	saved := "what you showed me"
-	if name != "" {
-		saved = `"` + name + `"`
+	if v, ok := m.recordingNamed.LoadAndDelete(nodeID); ok {
+		saved = `"` + v.(namedRecording).task + `"`
 	}
 	return servertools.Obj("status", "saved", "message", fmt.Sprintf("Got it: I stopped recording and saved %s. I'll learn it as a workflow.", saved))
 }

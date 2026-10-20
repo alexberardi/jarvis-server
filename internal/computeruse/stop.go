@@ -15,7 +15,12 @@ var stopPhrases = []string{
 	"stop", "stop it", "stop that", "stop stop", "stop everything", "stop the task",
 	"stop what you're doing", "cancel", "cancel it", "cancel that", "cancel the task",
 	"that's enough", "thats enough", "enough", "abort", "quit", "never mind", "nevermind",
-	// A recording's (#288): what start_recording tells the user to say, and its neighbours.
+}
+
+// recordingStopPhrases also end a recording, and only a recording (#288): what start_recording
+// tells the user to say, and its neighbours. "That's all" in reply to "Anything else?" must not
+// end a task Jarvis is doing on the computer.
+var recordingStopPhrases = []string{
 	"stop recording", "stop the recording", "stop watching", "stop watching me",
 	"i'm done", "im done", "i am done", "i'm all done", "all done", "done", "we're done",
 	"i'm finished", "im finished", "i am finished", "finished",
@@ -26,9 +31,21 @@ var stopPhrases = []string{
 var stopFillers = []string{"hey", "ok", "okay", "alright", "jarvis", "please", "now", "just", "thanks"}
 
 // IsStopPhrase reports whether a voice command means "stop what you're doing on the computer"
-// ("Stop.", "Jarvis, stop it", "That's enough", "Never mind", "Stop recording.", "I'm done."),
-// with dictate.ClassifyAnswer's normalisation (lowercase, letters, digits and apostrophes).
+// ("Stop.", "Jarvis, stop it", "That's enough", "Never mind"), with dictate.ClassifyAnswer's
+// normalisation (lowercase, letters, digits and apostrophes).
 func IsStopPhrase(s string) bool {
+	return slices.Contains(stopPhrases, stopCommand(s))
+}
+
+// IsRecordingStopPhrase reports whether a voice command ends a recording: a stop phrase, or
+// one of the recording's own ("Stop recording.", "I'm done.", "That's it.").
+func IsRecordingStopPhrase(s string) bool {
+	c := stopCommand(s)
+	return slices.Contains(stopPhrases, c) || slices.Contains(recordingStopPhrases, c)
+}
+
+// stopCommand is s normalised, fillers dropped from either end.
+func stopCommand(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(strings.ReplaceAll(s, "’", "'")) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' {
@@ -44,5 +61,5 @@ func IsStopPhrase(s string) bool {
 	for len(words) > 0 && slices.Contains(stopFillers, words[len(words)-1]) {
 		words = words[:len(words)-1]
 	}
-	return slices.Contains(stopPhrases, strings.Join(words, " "))
+	return strings.Join(words, " ")
 }

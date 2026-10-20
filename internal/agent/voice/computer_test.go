@@ -114,6 +114,11 @@ func TestOtherTurnResumes(t *testing.T) {
 		{computer.Controlling, "What's the weather?", []string{"pause", "set:controlling"}},
 		{computer.Recording, "Keep going.", []string{"pause", "set:recording"}},
 		{computer.Controlling, "Don't stop.", []string{"pause", "set:controlling"}},
+		// A recording's stop words don't end a task Jarvis is doing (#288): "That's all" is an
+		// answer to "Anything else?".
+		{computer.Controlling, "That's all.", []string{"pause", "set:controlling"}},
+		{computer.Controlling, "That's all, thanks.", []string{"pause", "set:controlling"}},
+		{computer.Controlling, "I'm done.", []string{"pause", "set:controlling"}},
 		{computer.Idle, "Stop.", nil},
 	} {
 		t.Run(tc.text, func(t *testing.T) {

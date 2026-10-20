@@ -15,7 +15,7 @@ import (
 // called test2" with no stop_recording call, and a new wake "Hey Jarvis, I'm done." was dropped
 // as not for Jarvis; the recording went on. Now, while the node records:
 //   - the prompt says a recording is running on this computer (computerActivityHint);
-//   - a stop phrase (computeruse.IsStopPhrase, the agent's own list) skips the follow-up gate
+//   - a stop phrase (computeruse.IsRecordingStopPhrase, the agent's own list) skips the follow-up gate
 //     and the not-for-me verdict, the model is nudged to call stop_recording (nagStopRecording),
 //     and if it still doesn't, jarvisd calls it itself (stopRecordingFallback);
 //   - a reply claiming it stopped or saved without stop_recording is nudged (nagNotStopped),
@@ -48,7 +48,13 @@ func (a *computerActivity) recording() bool { return a != nil && a.Kind == "reco
 
 // stopAsked: a task runs (or ran until this command) and the command says stop.
 func (a *computerActivity) stopAsked(utterance string) bool {
-	return a != nil && (a.Stopped || computeruse.IsStopPhrase(utterance))
+	if a == nil {
+		return false
+	}
+	if a.recording() {
+		return a.Stopped || computeruse.IsRecordingStopPhrase(utterance)
+	}
+	return a.Stopped || computeruse.IsStopPhrase(utterance)
 }
 
 // stoppedHere is the kind of task the agent stopped on this command ("" none): stop_recording's
@@ -96,10 +102,14 @@ const (
 	stoppedReply = "Okay, I stopped."
 )
 
-// claimsStopRE is a reply saying a recording ended: "I've recorded the macro", "stopped",
-// "saved", "finished recording".
-var claimsStopRE = regexp.MustCompile(`(?i)\b(stopped|saved|(have|'ve|’ve) recorded|recorded (the|your|that|it)|` +
-	`(finished|done|ended|end(ed)?) (the )?recording|recording (is )?(done|finished|complete|over))\b`)
+// claimsStopRE is a reply saying the recording ended: "I've stopped the recording", "I've
+// recorded the macro", "the recording is saved". It names the recording (or macro): "I stopped
+// the timer" or "your note is saved" during a recording are other tools' answers.
+var claimsStopRE = regexp.MustCompile(`(?i)\b(stopped (the |your )?recording|` +
+	`(saved|finished|ended|done with) (the |your |that |this )?(recording|macro|workflow)|` +
+	`(have|'ve|’ve) recorded (the |your |that |this )?(macro|recording|workflow|it)|recorded (the|your) macro|` +
+	`(finished|done|ended|end) recording|` +
+	`(recording|macro) (is |has |was )?(been )?(done|finished|complete|over|saved|stopped|ended))\b`)
 
 // recordingClaimNag is the follow-through nudge for a reply claiming the running recording
 // stopped when stop_recording didn't run, or "".
@@ -151,7 +161,8 @@ func (m *Module) afterComputerTurn(ctx context.Context, conv *conversation, utte
 		return reply(msg)
 	case res.Stop == stopNotForMe && a.Stopped && a.stopAsked(utterance):
 		return reply(stoppedReply)
-	case res.Stop == stopComplete && a.recording() && !a.Stopped && claimsStopRE.MatchString(res.Message):
+	case res.Stop == stopComplete && a.recording() && !a.Stopped && countNags(out, nagNotStopped) >= 1 &&
+		claimsStopRE.MatchString(res.Message):
 		m.deps.Log.Info("cc: reply claimed the recording stopped; it didn't", "conversation_id", conv.id, "reply", res.Message)
 		return reply(stillRecordingReply)
 	}
