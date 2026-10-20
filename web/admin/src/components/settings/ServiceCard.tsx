@@ -29,7 +29,7 @@ export default function ServiceCard({ result, defaultExpanded = false }: Service
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
         aria-controls={panel}
-        className="flex min-h-14 w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left transition-colors duration-(--duration-hover) hover:bg-surface-alt"
+        className="flex min-h-12 w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-left transition-colors duration-(--duration-hover) hover:bg-surface-alt"
       >
         {expanded ? (
           <ChevronDown size={18} aria-hidden className="shrink-0 text-text-muted" />

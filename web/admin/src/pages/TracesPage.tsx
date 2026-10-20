@@ -231,8 +231,12 @@ function TraceTable({
                     {nodeLabel(g.node_id)}
                     {household && <span className="text-small"> · {household}</span>}
                   </TD>
-                  <TD className="max-w-xs truncate">{g.user_command ?? '-'}</TD>
-                  <TD className="max-w-xs truncate text-text-muted">{g.assistant_message ?? '-'}</TD>
+                  <TD className="max-w-xs truncate" title={g.user_command ?? undefined}>
+                    {g.user_command ?? '-'}
+                  </TD>
+                  <TD className="max-w-xs truncate text-text-muted" title={g.assistant_message ?? undefined}>
+                    {g.assistant_message ?? '-'}
+                  </TD>
                   <TD className="text-right tabular-nums">{formatDuration(g.total_duration_ms)}</TD>
                   <TD>
                     <TraceStatus status={g.status} />

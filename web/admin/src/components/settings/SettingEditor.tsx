@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { Button, Input, Select, Switch } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
@@ -27,6 +27,7 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
   const hasOptions = !setting.is_secret && Boolean(setting.options?.length)
   const isCustomValue = hasOptions && !setting.options!.includes(rawValue)
   const [showCustomInput, setShowCustomInput] = useState(isCustomValue)
+  const errorId = useId()
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
@@ -123,12 +124,17 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
           <textarea
             aria-label={setting.key}
             aria-invalid={validationError ? true : undefined}
+            aria-describedby={validationError ? errorId : undefined}
             value={rawValue}
             onChange={(e) => onText(e.target.value)}
             rows={4}
             className={cn(fieldControl, 'h-auto py-2 font-mono text-small')}
           />
-          {validationError && <p className="text-small text-danger">{validationError}</p>}
+          {validationError && (
+            <p id={errorId} className="text-small text-danger">
+              {validationError}
+            </p>
+          )}
         </div>
       ) : (
         <Input

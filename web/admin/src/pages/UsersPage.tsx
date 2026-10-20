@@ -156,16 +156,18 @@ function UserRow({ user }: { user: AdminUser }) {
         </div>
 
         {panel === 'idle' && !result && (
-          <Button
-            size="sm"
-            icon={<KeyRound size={14} aria-hidden />}
-            onClick={() => setPanel('confirm')}
-            disabled={!user.is_active}
-            title={user.is_active ? undefined : 'Reactivate the account first'}
-            className="self-start"
-          >
-            Reset password
-          </Button>
+          <div className="flex flex-col items-start gap-1 sm:items-end">
+            <Button
+              size="sm"
+              icon={<KeyRound size={14} aria-hidden />}
+              onClick={() => setPanel('confirm')}
+              disabled={!user.is_active}
+              title={user.is_active ? undefined : 'Reactivate the account first'}
+            >
+              Reset password
+            </Button>
+            {!user.is_active && <p className="text-caption text-text-muted">Reactivate the account first</p>}
+          </div>
         )}
       </div>
 

@@ -42,7 +42,7 @@ function LogRow({ e }: { e: LogEntry }) {
       <button
         type="button"
         className={cn(
-          'grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 px-4 py-1.5 text-left',
+          'grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 px-4 py-1.5 text-left lg:py-1',
           'lg:grid-cols-[9.5rem_5.5rem_9rem_minmax(0,1fr)_1rem]',
           hasContext ? 'transition-colors duration-(--duration-hover) hover:bg-surface-alt' : 'cursor-default',
         )}
@@ -200,7 +200,7 @@ export default function LogsPage() {
         actions={
           <>
             {live && (
-              <Badge tone={TAIL_TONE[tailState]} dot data-testid="tail-state">
+              <Badge tone={TAIL_TONE[tailState]} dot role="status" data-testid="tail-state">
                 {TAIL_TEXT[tailState]}
               </Badge>
             )}
