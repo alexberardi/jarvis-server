@@ -25,16 +25,16 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-const computerUsage = "usage: jarvis-agent computer stop|status|on|off|record start|record stop|snapshot URL|record --browser|click X Y"
+const computerUsage = "usage: jarvis-agent computer stop|status|on|off|record start|record stop|snapshot URL|record --browser|download URL REF|click X Y"
 
 // computerCmd is `jarvis-agent computer stop|status|on|off|record start|record stop`: stop what
 // Jarvis is doing with this computer (a computer task, a recording), as the status icon's "Stop
 // Jarvis" does, say what it is doing, turn computer control on or off, as its "Computer
-// control" does, or record what the user does in the browser, as its "Watch me" does. All ask
-// the running agent over its control socket. (`computer snapshot` and `computer record
-// --browser` are computerSnapshotCmd and computerRecordCmd, which main dispatches before this.)
-// `click X Y` is a debug command: a left click at global logical X, Y through this desktop's
-// input backend.
+// control" does, or record what the user does in the browser, as its "Record a macro…" does. All ask
+// the running agent over its control socket. (`computer snapshot`, `computer record --browser`
+// and `computer download` are computerSnapshotCmd, computerRecordCmd and computerDownloadCmd,
+// which main dispatches before this.) `click X Y` is a debug command: a left click at global
+// logical X, Y through this desktop's input backend.
 func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 	if len(args) == 3 && args[0] == "click" {
 		return computerClick(args[1:], w)
@@ -90,14 +90,14 @@ func computerCmd(args []string, w io.Writer, dial control.Dialer) error {
 // extension's events (a browser toolset in tools), and a trace stopped here (the menu, the CLI,
 // voice "stop", its 30 minutes) uploaded to jarvisd through cc (nil until connected: then it is
 // kept here only).
-func newRecorder(dir string, sw *computer.Switch, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {
+func newRecorder(dir string, activity *computer.Activity, tools node.Multi, cc func() *node.CC, log *slog.Logger) *computer.Recorder {
 	sources := map[string]computer.Source{}
 	for _, t := range tools {
 		if bt, ok := t.(*browser.Tools); ok {
 			sources[computer.ModeBrowser] = browserRecording{bt}
 		}
 	}
-	return &computer.Recorder{Dir: dir, Switch: sw, Activity: activity, Sources: sources, Log: log,
+	return &computer.Recorder{Dir: dir, Activity: activity, Sources: sources, Log: log,
 		Stopped: func(tr computer.Trace) { go uploadRecording(cc(), tr, log) }}
 }
 
@@ -118,7 +118,7 @@ func uploadRecording(cc *node.CC, tr computer.Trace, log *slog.Logger) {
 }
 
 // recordFromHere starts a browser recording or ends the one going on, uploading it: the
-// status icon's "Watch me" / "Stop recording" and `jarvis-agent computer record start|stop`.
+// status icon's "Record a macro…" / "Stop recording" and `jarvis-agent computer record start|stop`.
 // The answer is the recording's id, and on stop its events too ("rec_… 12").
 func recordFromHere(ctx context.Context, rec *computer.Recorder, start bool, log *slog.Logger) (string, error) {
 	if start {
@@ -212,7 +212,7 @@ func saveComputer(path string, on bool) error {
 	return settings.Update(path, func(s *settings.Settings) error { s.ComputerControl = &on; return nil })
 }
 
-// --- jarvis-agent computer snapshot URL: computer control's browser calls, by hand ---
+// --- jarvis-agent computer snapshot URL, download URL REF: computer control's browser calls, by hand ---
 //
 // The computer-task executor calls these directly (they are not model tools, so `try` can't
 // reach them). This debug command serves the extension itself, like `try`, so it needs no
@@ -228,20 +228,15 @@ func computerSnapshotCmd(ctx context.Context, args []string) error {
 	if fs.NArg() != 1 {
 		return errors.New("usage: jarvis-agent computer snapshot [--wait 10s] [--max 300] [--json] URL")
 	}
-	hub, stopBrowser := startBrowser(ctx, logger())
-	defer stopBrowser()
-	wctx, cancel := context.WithTimeout(ctx, *wait)
-	connected := hub.WaitConnected(wctx)
-	cancel()
-	if !connected {
-		return fmt.Errorf("no browser extension connected in %s (if a jarvis-agent is running, it holds browser control: stop it first)", *wait)
-	}
-	bt := browser.NewTools(hub)
-	tab, window, err := bt.OpenBackground(ctx, fs.Arg(0))
+	bt, stopBrowser, err := connectedBrowser(ctx, *wait)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "opened tab %s in background window %s (left open)\n", tab, window)
+	defer stopBrowser()
+	tab, err := openTaskWindow(ctx, bt, fs.Arg(0))
+	if err != nil {
+		return err
+	}
 	snap, err := settledSnapshot(ctx, bt, tab, *maxEls)
 	if err != nil {
 		return err
@@ -253,6 +248,65 @@ func computerSnapshotCmd(ctx context.Context, args []string) error {
 	}
 	printSnapshot(os.Stdout, snap)
 	return nil
+}
+
+// computerDownloadCmd is `jarvis-agent computer download`; args follow "download". It opens URL
+// in a task window, snapshots it (refs are the snapshot's: take REF from `computer snapshot URL`)
+// and downloads what pressing REF starts.
+func computerDownloadCmd(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("computer download", flag.ExitOnError)
+	wait := fs.Duration("wait", 10*time.Second, "how long to wait for the browser extension to connect")
+	_ = fs.Parse(args)
+	if fs.NArg() != 2 {
+		return errors.New("usage: jarvis-agent computer download [--wait 10s] URL REF")
+	}
+	bt, stopBrowser, err := connectedBrowser(ctx, *wait)
+	if err != nil {
+		return err
+	}
+	defer stopBrowser()
+	tab, err := openTaskWindow(ctx, bt, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	snap, err := settledSnapshot(ctx, bt, tab, browser.DefaultSnapshotMax)
+	if err != nil {
+		return err
+	}
+	e := snap.Find(fs.Arg(1))
+	if e == nil {
+		return fmt.Errorf("the page has no %s (it has %d elements; see jarvis-agent computer snapshot %s)", fs.Arg(1), len(snap.Elements), fs.Arg(0))
+	}
+	fmt.Fprintf(os.Stderr, "pressing %s %s %q\n", e.Ref, e.Role, e.Name)
+	r, err := bt.Download(ctx, tab, e.Ref, "")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s  %d bytes  %s\n", r.Path, r.Bytes, r.MIME)
+	return nil
+}
+
+// connectedBrowser serves the browser extension itself and waits for it to connect.
+func connectedBrowser(ctx context.Context, wait time.Duration) (*browser.Tools, func(), error) {
+	hub, stopBrowser := startBrowser(ctx, logger())
+	wctx, cancel := context.WithTimeout(ctx, wait)
+	connected := hub.WaitConnected(wctx)
+	cancel()
+	if !connected {
+		stopBrowser()
+		return nil, nil, fmt.Errorf("no browser extension connected in %s (if a jarvis-agent is running, it holds browser control: stop it first)", wait)
+	}
+	return browser.NewTools(hub), stopBrowser, nil
+}
+
+// openTaskWindow opens url in a background task window, which it leaves open.
+func openTaskWindow(ctx context.Context, bt *browser.Tools, url string) (string, error) {
+	tab, window, err := bt.OpenBackground(ctx, url)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(os.Stderr, "opened tab %s in background window %s (left open)\n", tab, window)
+	return tab, nil
 }
 
 // settledSnapshot snapshots tab once the new page has loaded (its first moments are about:blank,

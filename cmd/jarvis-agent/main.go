@@ -162,6 +162,8 @@ func main() {
 			err = computerSnapshotCmd(ctx, os.Args[3:])
 		} else if len(os.Args) > 3 && os.Args[2] == "record" && os.Args[3] != "start" && os.Args[3] != "stop" {
 			err = computerRecordCmd(ctx, os.Args[3:], os.Stdin, os.Stdout)
+		} else if len(os.Args) > 2 && os.Args[2] == "download" {
+			err = computerDownloadCmd(ctx, os.Args[3:])
 		} else {
 			err = computerCmd(os.Args[2:], os.Stdout, controlDial)
 		}
@@ -630,12 +632,13 @@ func run(ctx context.Context, args []string) error {
 	}
 	defer closeTools()
 	// Recording what the user does (plan P3 piece 29): a computer's only. A trace stopped here
-	// is uploaded once connected to jarvisd (liveCC).
+	// is uploaded once connected to jarvisd (liveCC). computer_switch is computer control's
+	// switch for jarvisd's voice tools (enable/disable_computer_control).
 	var liveCC atomic.Pointer[node.CC]
 	var recorder *computer.Recorder
 	if p.desktop {
-		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), computerSw, activity, tools, liveCC.Load, log)
-		tools = append(tools, &computer.RecordTools{R: recorder})
+		recorder = newRecorder(filepath.Join(filepath.Dir(path), "recordings"), activity, tools, liveCC.Load, log)
+		tools = append(tools, &computer.RecordTools{R: recorder}, &computer.SwitchTools{S: computerSw})
 		recReady.Store(recorder)
 	}
 	go learnServer(ctx, c.ConfigURL, tf.origins, log)

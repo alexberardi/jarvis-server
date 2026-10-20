@@ -6,11 +6,18 @@
 #               [--llm shared|scripted] [--audio wav|pipewire|pi] [--pi-host USER@HOST] [--pi-card N]
 #               [--voices DIR] [--repeat N] [--agent-arg FLAG] [--label live|background] [--include-pending]
 #   scripts/e2e mobile --real-push [--keep] [--name N] [--mobile-repo PATH]
+#   scripts/e2e ios --sandbox-env FILE [--filter RE] [--mobile-repo PATH]
 #
 #   web     the admin SPA (Playwright, e2e/web/)
 #   mobile   the mobile app: the Maestro flows of jarvis-node-mobile's .maestro/ on a headless
 #            harness emulator (scripts/lib/mobile.sh), logged in to the sandbox
-#   all      every suite but voice and computer (default)
+#   all      every suite but voice, computer and ios (default)
+#   ios      the same Maestro flows on the iOS Simulator, on a Mac with Xcode (scripts/lib/ios.sh):
+#            the app built for the simulator, the harness's own simulator (jarvis-harness-e2e),
+#            erased per run; against a sandbox on another machine that is up with --lan
+#   --sandbox-env FILE  ios: that sandbox's sandbox-lan.env (scripts/sandbox up --lan --profile
+#            rich --llm scripted writes it), copied to this Mac; the suite neither starts nor
+#            stops it
 #   voice    the virtual node voice lane (tools/voicelane, e2e/voice/cases.json): the real
 #            jarvis-agent (--profile pi) hears TTS and its spoken replies are transcribed and
 #            checked; only when asked, since it takes the real model and minutes
@@ -62,19 +69,20 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 say() { echo "e2e: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,59p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; }
 
-SUITE=all FILTER='' KEEP=0 REAL_PUSH=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT='' AGENT_ARGS=() PI_HOST=${JARVIS_E2E_PI:-} PI_CARD=auto VOICES=''
+SUITE=all FILTER='' KEEP=0 REAL_PUSH=0 NAME='' MOBILE_REPO_ARG='' VLLM=shared AUDIO=wav REPEAT='' AGENT_ARGS=() PI_HOST=${JARVIS_E2E_PI:-} PI_CARD=auto VOICES='' SANDBOX_ENV=''
 LABEL='' PENDING=0
 while [ $# -gt 0 ]; do
   case $1 in
-    web|mobile|all|voice|computer) SUITE=$1; shift ;;
+    web|mobile|all|voice|computer|ios) SUITE=$1; shift ;;
     --filter) FILTER=$2; shift 2 ;;
     --keep) KEEP=1; shift ;;
     --real-push) REAL_PUSH=1; shift ;;
     --name) NAME=$2; shift 2 ;;
     --mobile-repo) MOBILE_REPO_ARG=$(cd "$2" && pwd) || die "--mobile-repo: no directory $2"; shift 2 ;;
     --llm) VLLM=$2; shift 2 ;;
+    --sandbox-env) SANDBOX_ENV=$(cd "$(dirname "$2")" && pwd)/$(basename "$2") || die "--sandbox-env: no $2"; shift 2 ;;
     --audio) AUDIO=$2; shift 2 ;;
     --repeat) REPEAT=$2; shift 2 ;;
     --pi-host) PI_HOST=$2; shift 2 ;;
@@ -94,6 +102,17 @@ case $AUDIO in wav | pipewire | pi) ;; *) die "--audio: wav, pipewire or pi" ;; 
 case $REPEAT in '') ;; *[!0-9]* | 0) die "--repeat: a positive number" ;; esac
 case $LABEL in '' | live | background) ;; *) die "--label: live or background" ;; esac
 [ "$REAL_PUSH" = 0 ] || [ "$SUITE" = mobile ] || die "--real-push goes with the mobile suite: scripts/e2e mobile --real-push"
+if [ "$SUITE" = ios ]; then
+  [ -n "$SANDBOX_ENV" ] || die "ios: --sandbox-env FILE (the sandbox-lan.env of a sandbox up with --lan) is required"
+  [ -f "$SANDBOX_ENV" ] || die "--sandbox-env: no file $SANDBOX_ENV"
+  # The sandbox is the other machine's: its name in the report, and nothing here to purge.
+  # shellcheck disable=SC1090
+  NAME=$(. "$SANDBOX_ENV" && echo "${JARVIS_SANDBOX:-}")
+  [ -n "$NAME" ] || die "--sandbox-env: $SANDBOX_ENV is not a sandbox.env (no JARVIS_SANDBOX)"
+  KEEP=1
+elif [ -n "$SANDBOX_ENV" ]; then
+  die "--sandbox-env is for the ios suite"
+fi
 
 RUN=$(date +%Y%m%d-%H%M%S)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')
 NAME=${NAME:-e2e-$RUN}
@@ -107,6 +126,7 @@ AUDIO_PIDS=()
 # shellcheck disable=SC2329 # run by the trap
 cleanup() {
   if [ ${#AUDIO_PIDS[@]} -gt 0 ]; then kill "${AUDIO_PIDS[@]}" 2>/dev/null || true; fi
+  if [ "$SUITE" = ios ]; then return; fi
   if [ "$KEEP" = 1 ]; then
     say "kept: scripts/sandbox down --name $NAME --purge; scripts/sandbox down --name $SETUP --purge"
   else
@@ -216,7 +236,9 @@ run_real_push() {
     # shellcheck source=lib/mobile.sh
     . "$ROOT/scripts/lib/mobile.sh"
     use_play_store
+    # shellcheck disable=SC2030 # this subshell's own, like the other suites' (mobile_flows reads theirs)
     REF=origin/main FETCH=1
+    # shellcheck disable=SC2030
     if [ -n "$MOBILE_REPO_ARG" ]; then MOBILE_REPO=$MOBILE_REPO_ARG REF=HEAD FETCH=0; fi
     WORK=$mdir STATEF=$mdir/emulator.port KEEP=0
     [ "$(uname -s)" = Linux ] || die "Linux only (the Android emulator needs KVM)"
@@ -262,7 +284,9 @@ if [ "$REAL_PUSH" = 1 ]; then
   report
 fi
 
-if [ "$SUITE" = computer ]; then
+if [ "$SUITE" = ios ]; then
+  say "run $RUN: sandbox $NAME on another machine ($SANDBOX_ENV)"
+elif [ "$SUITE" = computer ]; then
   : # tools/ccsuite brings up (and purges) its own sandbox, ccsuite-<run>
 elif [ "$SUITE" = voice ]; then
   say "run $RUN: sandbox $NAME (voice, --llm $VLLM, --audio $AUDIO; log in $OUT/sandbox-$NAME.log)"
@@ -305,6 +329,47 @@ run_web() {
   SUITES+=(web)
 }
 
+# mobile_flows SHA DIR: the .maestro/ of that mobile commit into DIR/src (the flows of the very
+# commit the app was built from). Called inside the suites' subshells, which set MOBILE_REPO and REF.
+# shellcheck disable=SC2031
+mobile_flows() {
+  mkdir -p "$2/src"
+  git -C "$MOBILE_REPO" archive --format=tar "$1" .maestro 2>/dev/null | tar -x -C "$2/src" ||
+    die "no .maestro/ in jarvis-node-mobile ${1:0:12} ($MOBILE_REPO)"
+  say "flows: .maestro/ of jarvis-node-mobile ${1:0:12} ($REF in $MOBILE_REPO)"
+  # Its screens, for the coverage gate (e2e/coverage.json; the Android suite's first test).
+  git -C "$MOBILE_REPO" archive --format=tar "$1" src/navigation 2>/dev/null | tar -x -C "$2/src" ||
+    die "no src/navigation/ in jarvis-node-mobile ${1:0:12} ($MOBILE_REPO)"
+}
+
+# flow_env sets FLOW_ENV, the flows' environment from the sourced sandbox.env: the contract in
+# docs/decisions/2026-10-18-e2e-mobile-runner.md, the same for both platforms ($1: android|ios,
+# the push token's device type). It also switches the scripted model to the chat flows' answers
+# (CHAT_MESSAGE → CHAT_REPLY).
+flow_env() {
+  local platform=$1
+  curl -sf -o /dev/null -X POST "$SBX_SCRIPTLLM/control/script" -H 'Content-Type: application/json' \
+    -d '{"path": "e2e/llm/mobile.json"}' || die "could not switch the scripted model to e2e/llm/mobile.json"
+  FLOW_ENV=(-e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD" -e "EMAIL_SUPERUSER=$SBX_EMAIL"
+    -e "CHAT_MESSAGE=what is 12 times 7" -e "CHAT_REPLY=12 times 7 is 84.")
+  local r v
+  for r in ADMIN POWER MEMBER; do
+    v=SBX_EMAIL_$r
+    [ -z "${!v:-}" ] || FLOW_ENV+=(-e "EMAIL_$r=${!v}")
+  done
+  # Pushes (docs/decisions/2026-10-18-e2e-push.md): neither device gets a real push token here,
+  # so the superuser gets a fake one; a flow makes an event happen (in the app, or as the seeded
+  # node through CC_URL with NODE_API_KEY) and checks FAKE_RELAY/control/pushes?token=PUSH_TOKEN
+  # from a runScript (which runs on this host).
+  local push_token="ExponentPushToken[e2e-${platform/android/mobile}-$RUN]"
+  curl -sf -o /dev/null -X POST "$SBX_NOTIFICATIONS/api/v0/tokens" -H "Authorization: Bearer $SBX_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"push_token\": \"$push_token\", \"device_type\": \"$platform\", \"device_name\": \"E2E (fake relay)\"}" ||
+    die "could not register the flows' push token"
+  FLOW_ENV+=(-e "FAKE_RELAY=$SBX_FAKERELAY" -e "PUSH_TOKEN=$push_token" -e "CC_URL=$SBX_CC"
+    -e "NODE_API_KEY=$SBX_NODE_ID:$SBX_NODE_KEY" -e "USER_ID=$SBX_USER_ID")
+}
+
 # run_mobile plays the mobile app's Maestro flows on a disposable harness emulator, logged in to
 # $NAME (docs/decisions/2026-10-18-e2e-mobile-runner.md). Everything that can die runs in a
 # subshell, so a missing SDK or a failed build becomes the suite's error instead of ending the run.
@@ -330,19 +395,9 @@ run_mobile() {
     maestro=$(ensure_maestro)
     ensure_avd
     apk=$(build_apk "$REF" 0 "$FETCH")
-    # The flows of the very commit the APK was built from.
-    sha=$(git -C "$MOBILE_REPO" rev-parse --verify -q "$REF^{commit}")
-    mkdir -p "$mdir/src"
-    git -C "$MOBILE_REPO" archive --format=tar "$sha" .maestro 2>/dev/null | tar -x -C "$mdir/src" ||
-      die "no .maestro/ in jarvis-node-mobile ${sha:0:12} ($MOBILE_REPO)"
-    say "flows: .maestro/ of jarvis-node-mobile ${sha:0:12} ($REF in $MOBILE_REPO)"
-    # Its screens, for the coverage gate (e2e/coverage.json; the suite's first test).
-    git -C "$MOBILE_REPO" archive --format=tar "$sha" src/navigation 2>/dev/null | tar -x -C "$mdir/src" ||
-      die "no src/navigation/ in jarvis-node-mobile ${sha:0:12} ($MOBILE_REPO)"
+    mobile_flows "$(git -C "$MOBILE_REPO" rev-parse --verify -q "$REF^{commit}")" "$mdir"
     (cd "$ROOT" && CGO_ENABLED=0 go build -o "$mdir/e2emobile" ./tools/e2emobile)
-    # The chat flows' answers (CHAT_MESSAGE → CHAT_REPLY below).
-    curl -sf -o /dev/null -X POST "$SBX_SCRIPTLLM/control/script" -H 'Content-Type: application/json' \
-      -d '{"path": "e2e/llm/mobile.json"}' || die "could not switch the scripted model to e2e/llm/mobile.json"
+    flow_env android
 
     trap kill_emulator EXIT
     trap 'exit 130' INT TERM
@@ -352,27 +407,9 @@ run_mobile() {
     reverse_args
     install_app "$apk"
 
-    # The flows' environment: the contract in docs/decisions/2026-10-18-e2e-mobile-runner.md.
-    env=(-e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD" -e "EMAIL_SUPERUSER=$SBX_EMAIL"
-      -e "CHAT_MESSAGE=what is 12 times 7" -e "CHAT_REPLY=12 times 7 is 84.")
-    for r in ADMIN POWER MEMBER; do
-      v=SBX_EMAIL_$r
-      [ -z "${!v:-}" ] || env+=(-e "EMAIL_$r=${!v}")
-    done
-    # Pushes (docs/decisions/2026-10-18-e2e-push.md): the emulator has no FCM, so the superuser
-    # gets a fake device token; a flow makes an event happen (in the app, or as the seeded node
-    # through CC_URL with NODE_API_KEY) and checks FAKE_RELAY/control/pushes?token=PUSH_TOKEN
-    # from a runScript (which runs on this host).
-    push_token="ExponentPushToken[e2e-mobile-$RUN]"
-    curl -sf -o /dev/null -X POST "$SBX_NOTIFICATIONS/api/v0/tokens" -H "Authorization: Bearer $SBX_TOKEN" \
-      -H 'Content-Type: application/json' \
-      -d "{\"push_token\": \"$push_token\", \"device_type\": \"android\", \"device_name\": \"E2E (fake relay)\"}" ||
-      die "could not register the flows' push token"
-    env+=(-e "FAKE_RELAY=$SBX_FAKERELAY" -e "PUSH_TOKEN=$push_token" -e "CC_URL=$SBX_CC"
-      -e "NODE_API_KEY=$SBX_NODE_ID:$SBX_NODE_KEY" -e "USER_ID=$SBX_USER_ID")
     "$mdir/e2emobile" run --flows "$mdir/src/.maestro" --out "$mdir" --serial "$SERIAL" \
       --maestro "$maestro" --adb "$ADB" "${REVERSE_ARGS[@]}" --coverage "$ROOT/e2e/coverage.json" --nav "$mdir/src/src/navigation" \
-      ${FILTER:+--filter "$FILTER"} "${env[@]}"
+      ${FILTER:+--filter "$FILTER"} "${FLOW_ENV[@]}"
   ) 2>&1 | tee "$OUT/mobile.log"
   rc=${PIPESTATUS[0]}
   set -e
@@ -383,6 +420,63 @@ run_mobile() {
   fi
   echo "$rc" >"$OUT/mobile.exit"
   SUITES+=(mobile)
+}
+
+# run_ios plays the same flows on the harness's iOS Simulator, against the other machine's --lan
+# sandbox (docs/decisions/2026-10-18-e2e-ios-lane.md). Built like run_mobile: a subshell, so a
+# missing Xcode or a failed build becomes the suite's error.
+run_ios() {
+  local idir=$OUT/ios rc=0 why
+  mkdir -p "$idir"
+  say "ios: running (log in ios.log)"
+  set +e
+  (
+    set -e
+    # shellcheck source=lib/mobile.sh
+    . "$ROOT/scripts/lib/mobile.sh"
+    # shellcheck source=lib/ios.sh
+    . "$ROOT/scripts/lib/ios.sh"
+    REF=origin/main
+    if [ -n "$MOBILE_REPO_ARG" ]; then MOBILE_REPO=$MOBILE_REPO_ARG REF=HEAD; fi
+    ensure_xcode
+    command -v go >/dev/null || die "go not on PATH"
+    # shellcheck disable=SC1090
+    source "$SANDBOX_ENV"
+    # The simulator shares this Mac's network: if the Mac reaches the sandbox, so does the app.
+    curl -sf -o /dev/null --max-time 5 "$SBX_CONFIG/health" ||
+      die "this Mac can't reach the sandbox's config service at $SBX_CONFIG (up with --lan on the other machine?)"
+    case $SBX_CONFIG in http://127.0.0.1:* | http://localhost:*) die "$SANDBOX_ENV has loopback URLs: pass the sandbox-lan.env of a --lan sandbox" ;; esac
+
+    git -C "$MOBILE_REPO" rev-parse --git-dir >/dev/null 2>&1 ||
+      die "no jarvis-node-mobile git repo at $MOBILE_REPO (set JARVIS_MOBILE_REPO)"
+    if [ "$REF" = origin/main ]; then git -C "$MOBILE_REPO" fetch -q origin main 2>/dev/null || true; fi
+    sha=$(git -C "$MOBILE_REPO" rev-parse --verify -q "$REF^{commit}") || die "no $REF in $MOBILE_REPO"
+    maestro=$(ensure_maestro)
+    # The sandbox's config URL is baked in (EXPO_PUBLIC_MANUAL_CONFIG_URL); the config service
+    # then hands the app every other service on the same LAN address.
+    app=$(build_ios_app "$sha" "$SBX_CONFIG")
+    mobile_flows "$sha" "$idir"
+    (cd "$ROOT" && CGO_ENABLED=0 go build -o "$idir/e2emobile" ./tools/e2emobile)
+    flow_env ios
+
+    trap shutdown_sim EXIT
+    trap 'exit 130' INT TERM
+    ensure_sim
+    boot_sim
+    install_ios_app "$app"
+    "$idir/e2emobile" run --platform ios --udid "$UDID" --device-name "$SIM_NAME" --process "$(plist "$app" CFBundleExecutable)" \
+      --bundle-id "$PKG" --flows "$idir/src/.maestro" --out "$idir" --maestro "$maestro" \
+      ${FILTER:+--filter "$FILTER"} "${FLOW_ENV[@]}"
+  ) 2>&1 | tee "$OUT/ios.log"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [ ! -f "$idir/results.json" ]; then
+    why=$(grep -v '^[[:space:]]*$' "$OUT/ios.log" | tail -1 | sed -E 's/^e2e(mobile)?: //')
+    broken ios "ios suite did not run: ${why:-exit $rc, see ios.log}"
+    return
+  fi
+  echo "$rc" >"$OUT/ios.exit"
+  SUITES+=(ios)
 }
 
 # start_audio starts a private PipeWire (its own runtime dir under the run, never the user's
@@ -480,6 +574,7 @@ run_computer() {
 case $SUITE in
   web | all) run_web ;;
   voice) run_voice ;;
+  ios) run_ios ;;
   computer) run_computer ;;
 esac
 case $SUITE in

@@ -57,7 +57,7 @@ project declares itself a **non-trader**.
    - Homepage URL: the repo. Support URL: the issues page. (Both are in the `listing.md` table.)
 4. **Privacy** tab, all from `listing.md` → "Chrome: Privacy practices tab":
    - the single-purpose statement;
-   - one justification each for `nativeMessaging`, `tabs`, `scripting`, `alarms` and the host
+   - one justification each for `nativeMessaging`, `tabs`, `scripting`, `alarms`, `downloads` and the host
      permission `<all_urls>`;
    - remote code: **No**;
    - data usage: tick **Web history** and **Website content** only, then all three
@@ -170,4 +170,7 @@ Once the listed version is approved:
    signed `.xpi` as above.
 5. If a permission or the data read changes, update `listing.md`, the privacy policy's extension section (jarvis-docs),
    both stores' privacy answers, and `data_collection_permissions`.
+   0.3.1 added `downloads` (justification in `listing.md`: save statements and files the user
+   asked Jarvis to fetch): add it on Chrome's Privacy tab before uploading; both stores re-review,
+   and Chrome asks installed users to accept the new permission.
 6. Release the agent so new installs embed the new `.xpi`.
