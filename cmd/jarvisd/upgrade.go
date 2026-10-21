@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/doctor"
+	adminmod "github.com/alexberardi/jarvis-server/internal/modules/admin"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/update"
@@ -85,6 +86,11 @@ func runUpgrade(ctx context.Context, flagHome string, args []string, stdout io.W
 		}
 		fmt.Fprintf(stdout, "%s signature ok (%s); verified %s\n", update.SumsName, version, strings.Join(names, ", "))
 		return nil
+	}
+	if c := strings.ToLower(strings.TrimSpace(os.Getenv("JARVIS_CONTAINER"))); c != "" && !*check {
+		// The container host updates jarvisd: a binary swapped in place is lost with the
+		// container, and the next image pull would undo it.
+		return errors.New(adminmod.ContainerHint(c))
 	}
 	if *prestart || *helperMode {
 		// Privileged: before bootstrap, which would read the (service-writable) env file.

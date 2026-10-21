@@ -513,6 +513,8 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 				Helper:   helper,
 				UserUnit: userUnit,
 				Source:   updateSource(),
+				// A container is updated by its host (Unraid's Docker tab, a new image).
+				Container: deps.Config.Env.Container,
 			}
 			// AD8b: the Stop button only when the installed definition keeps jarvisd stopped.
 			kind := restarter.Kind()

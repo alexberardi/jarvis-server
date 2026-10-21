@@ -673,3 +673,40 @@ func TestUpdateCheckFailureIsHonest(t *testing.T) {
 		t.Fatalf("unreachable: %v", st)
 	}
 }
+
+// In a container (JARVIS_CONTAINER) the update comes from the container host: the check still
+// says a new version exists, but nothing installs it from here.
+func TestUpdateInAContainer(t *testing.T) {
+	t.Setenv(EnvAllowUpdates, "1")
+	gh, _ := fakeGitHub(t, 200, []map[string]any{
+		release("v1.3.0", false, false, archive("v1.3.0"), "SHA256SUMS", installer()),
+	})
+	for kind, want := range map[string]string{
+		"unraid": "This jarvisd runs in a container. Update it from Unraid's Docker tab: Check for Updates, then apply update. Your data in appdata is kept.",
+		"docker": "This jarvisd runs in a container. Pull the new image and recreate the container; the /data volume is kept.",
+	} {
+		e := newA4(t, "v1.2.3")
+		e.m.Updates = UpdateOptions{APIBase: gh.URL}
+		e.m.Upgrade.Container = kind
+		st := decode(t, send(e.mux, "GET", "/api/update", "", root...))
+		if st["update_available"] != true || st["install_command"] != nil || st["install_hint"] != want ||
+			st["can_apply"] != false || st["apply_blocked"] != want || st["apply_command"] != nil {
+			t.Fatalf("%s: %v", kind, st)
+		}
+		if kind == "unraid" && !strings.Contains(want, "Unraid's Docker tab") {
+			t.Fatal("unraid hint")
+		}
+		w := send(e.mux, "POST", "/api/update/apply", "", root...)
+		if w.Code != http.StatusConflict || decode(t, w)["detail"] != want {
+			t.Fatalf("%s apply: %d %s", kind, w.Code, w.Body)
+		}
+	}
+	// Checks off: the hint already names the container host.
+	t.Setenv(EnvAllowUpdates, "")
+	e := newA4(t, "v1.2.3")
+	e.m.Upgrade.Container = "unraid"
+	if st := decode(t, send(e.mux, "GET", "/api/update", "", root...)); !strings.Contains(fmt.Sprint(st["install_hint"]), "Unraid's Docker tab") ||
+		!strings.Contains(fmt.Sprint(st["apply_blocked"]), "Unraid's Docker tab") {
+		t.Fatalf("checks off: %v", st)
+	}
+}

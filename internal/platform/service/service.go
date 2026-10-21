@@ -53,6 +53,10 @@ const (
 	Systemd Kind = "systemd"
 	Launchd Kind = "launchd"
 	SCM     Kind = "windows-service"
+	// Container: jarvisd is a container's main process (JARVIS_CONTAINER is set). The
+	// container's restart policy starts it again after a restart exit; the container host
+	// (Unraid's Docker tab, docker) stops and updates it.
+	Container Kind = "container"
 )
 
 // Supervised reports whether something will start jarvisd again after it exits.
@@ -112,6 +116,8 @@ func RestartCommand(kind Kind, user bool) string {
 		return "sudo launchctl kickstart -k system/" + LaunchdLabel
 	case SCM:
 		return "Restart-Service " + Name
+	case Container:
+		return containerCommand("restart")
 	}
 	return "stop jarvisd (Ctrl-C) and start it again: jarvisd serve"
 }
@@ -130,6 +136,8 @@ func StartCommand(kind Kind, user bool) string {
 		return "sudo jarvisd service start"
 	case SCM:
 		return "jarvisd service start"
+	case Container:
+		return containerCommand("start")
 	}
 	return "jarvisd serve"
 }
@@ -142,8 +150,15 @@ func StartNote(kind Kind) string {
 		return "Run it in an elevated PowerShell (Run as administrator). Restarting the computer also starts jarvisd."
 	case Systemd, Launchd:
 		return "Run it on the server. Restarting the computer also starts jarvisd."
+	case Container:
+		return "The container's restart policy also starts jarvisd when the server or Docker restarts."
 	}
 	return "Run it on the server, in the directory and environment jarvisd ran in before."
+}
+
+// containerCommand is how to restart or start jarvisd in a container: from the host.
+func containerCommand(verb string) string {
+	return verb + " it from Unraid's Docker tab (or `docker " + verb + " <name>`)"
 }
 
 // InstallCommand is what rewrites the installed service definition (keeping the data, home
@@ -177,7 +192,8 @@ func stopCommand(kind Kind, user bool) string {
 // StopExitCodeFor is the status jarvisd exits with when the admin stops it under kind: one
 // its supervisor does not restart. systemd: StopExitCode (RestartPreventExitStatus=);
 // launchd (KeepAlive SuccessfulExit=false) and the SCM (recovery actions fire on a non-zero
-// exit only): 0. Unsupervised: 0.
+// exit only): 0. Unsupervised: 0. Container: 0, though StopBlocker refuses the stop first
+// (the restart policy would start jarvisd again).
 func StopExitCodeFor(kind Kind) int {
 	if kind == Systemd {
 		return StopExitCode
@@ -193,14 +209,19 @@ type probe struct {
 	winService func() bool
 }
 
-// Detect reports which service manager runs this process: the jarvisd systemd unit (system
-// or user), a launchd job, the Windows SCM, or none (a terminal, a container's init, a
+// Detect reports which service manager runs this process: a container (JARVIS_CONTAINER), the
+// jarvisd systemd unit (system or user), a launchd job, the Windows SCM, or none (a terminal, a container's init, a
 // foreign supervisor jarvisd can't count on).
 func Detect() Kind {
 	return detect(probe{getenv: os.Getenv, getppid: os.Getppid, readFile: os.ReadFile, winService: IsWindowsService})
 }
 
 func detect(p probe) Kind {
+	// The container image sets JARVIS_CONTAINER; whatever init runs inside, the container's
+	// restart policy is the supervisor.
+	if strings.TrimSpace(p.getenv("JARVIS_CONTAINER")) != "" {
+		return Container
+	}
 	if p.winService() {
 		return SCM
 	}
