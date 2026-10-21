@@ -107,7 +107,8 @@ type CallSnapshot struct {
 // settings (AD6, telephony.go), not options.
 type Options struct {
 	// PublicURL is the public https base a tunnel maps to the CC listener (Twilio reaches the
-	// media WebSocket through it). PublicWSSURL overrides the derived wss base.
+	// media WebSocket through it); on a single-port server, where cc is the config port's
+	// /cc, it must end in /cc. PublicWSSURL overrides the derived wss base.
 	PublicURL    string
 	PublicWSSURL string
 	// AuthToken is the signing key for the single-provider path only (Service.Provider set);

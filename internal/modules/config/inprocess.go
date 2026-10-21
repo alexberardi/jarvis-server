@@ -28,11 +28,14 @@ const (
 
 // ServiceEntry is a registry row as the admin shows it.
 type ServiceEntry struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Scheme      string `json:"scheme"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Scheme string `json:"scheme"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	// Path is the prefix a mounted listener is served under in single-port mode (URL ends in
+	// it), "" otherwise.
+	Path        string `json:"path"`
 	HealthPath  string `json:"health_path"`
 	Description string `json:"description"`
 	Managed     string `json:"managed"`
@@ -107,7 +110,7 @@ func (m *Module) Services(ctx context.Context) ([]ServiceEntry, error) {
 func (m *Module) toEntry(s service, managed map[string]string) ServiceEntry {
 	return ServiceEntry{
 		Name: s.Name, URL: s.url(urlStyle{}), Scheme: s.Scheme, Host: s.Host, Port: s.Port,
-		HealthPath: s.HealthPath.String, Description: s.Description.String, Managed: managed[s.Name],
+		Path: s.Path.String, HealthPath: s.HealthPath.String, Description: s.Description.String, Managed: managed[s.Name],
 		PublicURL: s.publicDisplay(), svc: s,
 	}
 }

@@ -304,8 +304,9 @@ func (m *Module) authSessionWhere(ctx context.Context, where string, args ...any
 	return scanAuthSession(m.deps.DB.Read.QueryRowContext(ctx, `SELECT `+authSessionCols+` FROM cc_auth_sessions WHERE `+where, args...))
 }
 
-// externalBase is _get_external_url: the oauth.external_url setting, else the request's
-// X-Forwarded-Proto / X-Forwarded-Host / Host.
+// externalBase is _get_external_url: the oauth.external_url setting (taken as is), else the
+// request's X-Forwarded-Proto / X-Forwarded-Host / Host plus the mount prefix it came in under
+// (/cc on the config port).
 func (m *Module) externalBase(ctx context.Context, r *http.Request) string {
 	if u := m.settings.String(ctx, settingOAuthExternalURL, settings.Scope{}); u != "" {
 		return strings.TrimRight(u, "/")
@@ -324,7 +325,7 @@ func (m *Module) externalBase(ctx context.Context, r *http.Request) string {
 	if host == "" {
 		host = "localhost"
 	}
-	return scheme + "://" + host
+	return scheme + "://" + host + httpx.MountPrefix(r)
 }
 
 // authConfig is AuthConfigPayload (the fields CC uses; the rest are validated and ignored,

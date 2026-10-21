@@ -184,13 +184,15 @@ func (m *Module) purgeOne(ctx context.Context, name, base, token string) error {
 	return fail(http.StatusBadGateway, deletionFailed)
 }
 
-// serviceURL reads a service's base URL from the config module's registry table (same DB).
-// "" when the service isn't registered or the table doesn't exist.
+// serviceURL reads a service's base URL from the config module's registry table (same DB),
+// with its path prefix (single-port mode). "" when the service isn't registered or the table
+// doesn't exist.
 func (m *Module) serviceURL(ctx context.Context, name string) (string, error) {
 	var scheme, host string
 	var port int
+	var path sql.NullString
 	err := m.deps.DB.Read.QueryRowContext(ctx,
-		`SELECT scheme, host, port FROM config_services WHERE name = ?`, name).Scan(&scheme, &host, &port)
+		`SELECT scheme, host, port, path FROM config_services WHERE name = ?`, name).Scan(&scheme, &host, &port, &path)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -200,5 +202,5 @@ func (m *Module) serviceURL(ctx context.Context, name string) (string, error) {
 		}
 		return "", err
 	}
-	return fmt.Sprintf("%s://%s:%d", scheme, host, port), nil
+	return fmt.Sprintf("%s://%s:%d", scheme, host, port) + path.String, nil
 }

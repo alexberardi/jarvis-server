@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/netaddr"
 )
 
@@ -23,11 +24,13 @@ import (
 // use, derived from the request the phone made to this server:
 //
 //   - a non-loopback Host is reachable from the LAN as it is, so the command-center URL is the
-//     one the phone used (scheme + Host). The config URL swaps in the config port when Host
-//     names a port; without one the phone came through a proxy or tunnel that only it knows,
-//     so the config URL is left out.
+//     one the phone used (scheme + Host, plus the mount prefix when it came in under the
+//     config port's /cc). The config URL swaps in the config port when Host names a port;
+//     without one the phone came through a proxy or tunnel that only it knows, so the config
+//     URL is left out.
 //   - a loopback Host (localhost, 127.0.0.0/8, ::1, or an unspecified address) is useless to a
-//     node, so both URLs use this host's LAN address (lan) and the listeners' ports.
+//     node, so both URLs use this host's LAN address (lan) and the listeners' ports (in
+//     single-port mode, the config port and cc's prefix).
 //
 // Either is "" when it can't be determined, and the caller omits it.
 func nodeURLs(r *http.Request, cfg config.Config, lan func() string) (ccURL, configURL string) {
@@ -40,7 +43,7 @@ func nodeURLs(r *http.Request, cfg config.Config, lan func() string) (ccURL, con
 		if r.TLS != nil || (loopbackRemote(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")) {
 			scheme = "https"
 		}
-		ccURL = scheme + "://" + r.Host
+		ccURL = scheme + "://" + r.Host + httpx.MountPrefix(r)
 		if port != "" {
 			configURL = scheme + "://" + net.JoinHostPort(host, strconv.Itoa(listenerPort(cfg, config.ListenerConfig)))
 		}
@@ -53,8 +56,11 @@ func nodeURLs(r *http.Request, cfg config.Config, lan func() string) (ccURL, con
 	if addr == "" {
 		return "", ""
 	}
-	return "http://" + net.JoinHostPort(addr, strconv.Itoa(listenerPort(cfg, config.ListenerCC))),
-		"http://" + net.JoinHostPort(addr, strconv.Itoa(listenerPort(cfg, config.ListenerConfig)))
+	configURL = "http://" + net.JoinHostPort(addr, strconv.Itoa(listenerPort(cfg, config.ListenerConfig)))
+	if cfg.SinglePort {
+		return configURL + config.Paths[config.ListenerCC], configURL
+	}
+	return "http://" + net.JoinHostPort(addr, strconv.Itoa(listenerPort(cfg, config.ListenerCC))), configURL
 }
 
 // nodeLANAddr is this host's LAN address (the mDNS / setup-link rules), or "".

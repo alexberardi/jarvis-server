@@ -22,6 +22,18 @@ const token = "s3cret-admin"
 
 func setup(t *testing.T, served ...string) (*Module, http.Handler) {
 	t.Helper()
+	return start(t, openDB(t), false, served...)
+}
+
+// setupSinglePort is setup with Config.SinglePort: the mounted listeners have no port of
+// their own.
+func setupSinglePort(t *testing.T, served ...string) (*Module, http.Handler) {
+	t.Helper()
+	return start(t, openDB(t), true, served...)
+}
+
+func openDB(t *testing.T) *db.DB {
+	t.Helper()
 	ctx := context.Background()
 	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
 	if err != nil {
@@ -31,6 +43,12 @@ func setup(t *testing.T, served ...string) (*Module, http.Handler) {
 	if err := db.Migrate(ctx, d, "config", Migrations()); err != nil {
 		t.Fatal(err)
 	}
+	return d
+}
+
+// start registers and starts a module on d, as jarvisd does at each boot.
+func start(t *testing.T, d *db.DB, singlePort bool, served ...string) (*Module, http.Handler) {
+	t.Helper()
 	ports := map[string]int{}
 	for k, v := range pconfig.DefaultPorts {
 		ports[k] = v
@@ -38,11 +56,11 @@ func setup(t *testing.T, served ...string) (*Module, http.Handler) {
 	m := &Module{Served: served, AdminToken: token}
 	mux := http.NewServeMux()
 	m.Register(mux, module.Deps{
-		Config: pconfig.Config{Host: "0.0.0.0", Ports: ports},
+		Config: pconfig.Config{Host: "0.0.0.0", Ports: ports, SinglePort: singlePort},
 		DB:     d,
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	if err := m.Start(ctx); err != nil {
+	if err := m.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return m, mux
@@ -235,6 +253,25 @@ func TestHealthProbes(t *testing.T) {
 	if c, body := do(t, h, "GET", "/services/up/health", ""); c != 200 || body["healthy"] != true || body["latency_ms"] == nil {
 		t.Fatalf("single: %d %v", c, body)
 	}
+
+	// Single port: the mounted cc row is probed at the config port + its prefix.
+	ccUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/cc/health" {
+			w.WriteHeader(200)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer ccUp.Close()
+	m, h := setupSinglePort(t)
+	m.deps.Config.Ports[pconfig.ListenerConfig] = ccUp.Listener.Addr().(*tcpAddr).Port
+	m.Served = []string{pconfig.ListenerCC}
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c, body := do(t, h, "GET", "/services/jarvis-command-center/health", ""); c != 200 || body["healthy"] != true {
+		t.Fatalf("single port: %d %v", c, body)
+	}
 }
 
 type tcpAddr = net.TCPAddr
@@ -332,5 +369,87 @@ func TestExternalServices(t *testing.T) {
 	_, body = do(t, h, "GET", "/services", "")
 	if got := services(body)["jarvis-pantry"]["url"]; got != "http://10.0.0.5:7721" {
 		t.Errorf("moved pantry url %v", got)
+	}
+}
+
+func allListeners() []string {
+	var out []string
+	for l := range ServiceNames {
+		out = append(out, l)
+	}
+	return out
+}
+
+// In single-port mode jarvisd's mounted listeners are the config port + their prefix.
+func TestSinglePortRegistry(t *testing.T) {
+	m, h := setupSinglePort(t, allListeners()...)
+	m.MQTTPort = 1884
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cc := "jarvis-command-center"
+	cases := []struct {
+		name, path, svc string
+		want            map[string]any
+	}{
+		{"default", "/services", cc, map[string]any{"port": float64(7700), "path": "/cc", "url": "http://localhost:7700/cc"}},
+		{"remote", "/services?style=remote&remote_host=10.0.0.5", cc, map[string]any{"url": "http://10.0.0.5:7700/cc"}},
+		{"dockerized", "/services?style=dockerized", cc, map[string]any{"url": "http://host.docker.internal:7700/cc"}},
+		{"external without public URL", "/services?style=external&remote_host=10.0.0.5", cc, map[string]any{"url": "http://10.0.0.5:7700/cc"}},
+		{"config service", "/services", "jarvis-config-service", map[string]any{"port": float64(7700), "path": nil, "url": "http://localhost:7700"}},
+		{"admin", "/services", "jarvis-admin", map[string]any{"port": float64(7710), "path": nil, "url": "http://localhost:7710"}},
+		{"mqtt", "/services", "jarvis-mqtt-broker", map[string]any{"port": float64(1884), "path": nil, "url": "mqtt://localhost:1884"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			code, body := do(t, h, "GET", c.path, "")
+			if code != 200 {
+				t.Fatalf("%d %v", code, body)
+			}
+			row, ok := services(body)[c.svc]
+			if !ok {
+				t.Fatalf("no %s in %v", c.svc, body)
+			}
+			for k, v := range c.want {
+				if got, ok := row[k]; !ok || got != v {
+					t.Errorf("%s %s = %v, want %v", c.svc, k, got, v)
+				}
+			}
+		})
+	}
+	t.Run("no trailing slash", func(t *testing.T) {
+		_, body := do(t, h, "GET", "/services", "")
+		for name, row := range services(body) {
+			if u, _ := row["url"].(string); strings.HasSuffix(u, "/") {
+				t.Errorf("%s url %q ends in /", name, u)
+			}
+		}
+	})
+}
+
+// Turning single-port mode off again puts the rows back on their own ports, without a path.
+func TestSinglePortSwitchBack(t *testing.T) {
+	d := openDB(t)
+	start(t, d, true, pconfig.ListenerConfig, pconfig.ListenerCC)
+	_, h := start(t, d, false, pconfig.ListenerConfig, pconfig.ListenerCC)
+	_, body := do(t, h, "GET", "/services/jarvis-command-center", "")
+	if body["port"] != float64(7703) || body["path"] != nil || body["url"] != "http://localhost:7703" {
+		t.Fatalf("after switching back: %v", body)
+	}
+}
+
+// A public base URL is answered as entered: the path is the LAN side's.
+func TestSinglePortPublicURLWins(t *testing.T) {
+	m, h := setupSinglePort(t, pconfig.ListenerConfig, pconfig.ListenerCC)
+	if _, err := m.SetPublicURL(context.Background(), "jarvis-command-center", "https://cc.example.io"); err != nil {
+		t.Fatal(err)
+	}
+	_, body := do(t, h, "GET", "/services/jarvis-command-center?style=external&remote_host=10.0.0.5", "")
+	if body["url"] != "https://cc.example.io:443" {
+		t.Fatalf("external: %v", body)
+	}
+	_, body = do(t, h, "GET", "/services/jarvis-command-center?style=remote&remote_host=10.0.0.5", "")
+	if body["url"] != "http://10.0.0.5:7700/cc" {
+		t.Fatalf("remote: %v", body)
 	}
 }

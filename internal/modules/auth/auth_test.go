@@ -1262,11 +1262,11 @@ func TestDeleteMeDownstreamPurge(t *testing.T) {
 	port := srv.Listener.Addr().(*net.TCPAddr).Port
 
 	e := newEnv(t)
-	if _, err := e.db.Write.Exec(`CREATE TABLE config_services (name TEXT, host TEXT, port INTEGER, scheme TEXT)`); err != nil {
+	if _, err := e.db.Write.Exec(`CREATE TABLE config_services (name TEXT, host TEXT, port INTEGER, scheme TEXT, path TEXT)`); err != nil {
 		t.Fatal(err)
 	}
-	e.db.Write.Exec(`INSERT INTO config_services VALUES ('jarvis-command-center', '127.0.0.1', ?, 'http')`, port)
-	e.db.Write.Exec(`INSERT INTO config_services VALUES ('jarvis-notifications', '127.0.0.1', 1, 'http')`) // unreachable
+	e.db.Write.Exec(`INSERT INTO config_services VALUES ('jarvis-command-center', '127.0.0.1', ?, 'http', NULL)`, port)
+	e.db.Write.Exec(`INSERT INTO config_services VALUES ('jarvis-notifications', '127.0.0.1', 1, 'http', NULL)`) // unreachable
 
 	for _, c := range []struct {
 		status int
@@ -1294,6 +1294,25 @@ func TestDeleteMeDownstreamPurge(t *testing.T) {
 	e.expect(204, "", "DELETE", "/auth/me", map[string]any{"password": u.password}, bearerH(u.access))
 	if len(seen) != 0 {
 		t.Fatal(seen)
+	}
+}
+
+// On a single-port server the registry row carries the listener's prefix, and the purge URL
+// keeps it.
+func TestDeletionServiceURLPath(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.db.Write.Exec(`CREATE TABLE config_services (name TEXT, host TEXT, port INTEGER, scheme TEXT, path TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	e.db.Write.Exec(`INSERT INTO config_services VALUES ('jarvis-command-center', 'localhost', 7700, 'http', '/cc')`)
+	e.db.Write.Exec(`INSERT INTO config_services VALUES ('jarvis-notifications', 'localhost', 7712, 'http', NULL)`)
+	for name, want := range map[string]string{
+		"jarvis-command-center": "http://localhost:7700/cc",
+		"jarvis-notifications":  "http://localhost:7712",
+	} {
+		if got, err := e.m.serviceURL(context.Background(), name); err != nil || got != want {
+			t.Errorf("serviceURL(%s) = %q, %v; want %q", name, got, err, want)
+		}
 	}
 }
 
