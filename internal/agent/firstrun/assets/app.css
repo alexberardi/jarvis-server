@@ -174,6 +174,12 @@ button.big span { color: var(--color-text-muted); font-size: var(--text-small); 
   font: var(--text-small) var(--font-mono); user-select: all; white-space: nowrap;
   padding: 2px 6px; border-radius: 4px; background: var(--color-surface-alt);
 }
+/* On a phone the command or button gets its own row under the label, and a long command wraps. */
+@media (max-width: 520px) {
+  .perms li { grid-template-columns: 28px 1fr; }
+  .perms li > :nth-child(3), .perms .why { grid-column: 2; }
+  .perms code { white-space: normal; overflow-wrap: anywhere; }
+}
 .dot {
   width: 24px; height: 24px; border-radius: var(--radius-pill); display: grid; place-items: center;
   border: 2px solid var(--color-border-strong); font-size: var(--text-caption); font-weight: 700;
