@@ -131,6 +131,10 @@ type Resolver struct {
 	// resolver kills engines a previous jarvisd left there (engines.Sweep): on macOS they
 	// outlive a crashed jarvisd. Empty = no pid files.
 	PIDDir string
+	// OnReady, if set, runs each time an engine becomes healthy (first start and every restart)
+	// with the labels it serves, sorted: the llm layer warms it then (decision
+	// 2026-10-20-prompt-diet). It runs in its own goroutine.
+	OnReady func(labels []string)
 	// Memory persists where each label last ran healthy on a GPU, so a GPU that disappears
 	// later is noticed even when the label's settings are all "auto" (nil = in memory only).
 	Memory GPUMemory
@@ -424,7 +428,13 @@ func (r *Resolver) apply(ctx context.Context, label string) (Endpoint, *instance
 			return ep, nil, &NotReadyError{Label: label, State: string(engines.Failed), Reason: err.Error()}
 		}
 	}
+	prev, had := r.bound[label]
 	r.bound[label] = h
+	// A label newly bound to an engine that is already healthy (background joining live's
+	// model) is reported on its own: the engine's own OnReady named only the labels it had.
+	if (!had || prev != h) && r.OnReady != nil && inst.sup != nil && inst.sup.State() == engines.Healthy {
+		go r.OnReady([]string{label})
+	}
 	return r.fill(ep, c, inst), inst, nil
 }
 
@@ -499,6 +509,26 @@ func (r *Resolver) platform() Platform {
 		return Host()
 	}
 	return r.Platform
+}
+
+// ready reports the engine with key hash h healthy to OnReady, with the labels bound to it.
+func (r *Resolver) ready(h string) {
+	if r.OnReady == nil {
+		return
+	}
+	r.mu.Lock()
+	var labels []string
+	for l, b := range r.bound {
+		if b == h {
+			labels = append(labels, l)
+		}
+	}
+	r.mu.Unlock()
+	if len(labels) == 0 {
+		return
+	}
+	slices.Sort(labels)
+	r.OnReady(labels)
 }
 
 func (r *Resolver) users(h string) int {
@@ -580,6 +610,7 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 			DrainGrace: def(r.DrainGrace, 30*time.Second),
 		},
 		ErrorLine:    errorLine(c.Kind),
+		OnHealthy:    func() { r.ready(h) },
 		StartTimeout: def(r.StartTimeout, 10*time.Minute),
 		StopTimeout:  def(r.StopTimeout, 10*time.Second),
 		Restart:      r.Restart,

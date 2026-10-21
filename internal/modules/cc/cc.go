@@ -177,7 +177,9 @@ type Module struct {
 	// lastInputs is each node's latest warmup prompt inputs (household_prompt.go).
 	lastInputs lastInputs
 
-	convs   *convCache
+	convs *convCache
+	// warms shares identical warm-ups and remembers recent ones for re-warming (warm_flight.go).
+	warms   warmFlight
 	signals *convSignals
 	// wakeSem and voiceSem bound the wake verifications and follow-up voice checks running
 	// beside node transcriptions (whisper and the speaker model are shared): one more is
