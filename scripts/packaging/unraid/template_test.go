@@ -74,8 +74,12 @@ func TestTemplate(t *testing.T) {
 	}
 	for _, p := range ports {
 		if !want[p] {
-			t.Errorf("unexpected port target %q", p)
+			t.Errorf("unexpected or repeated port target %q", p)
 		}
+		delete(want, p)
+	}
+	for p := range want {
+		t.Errorf("missing port target %q", p)
 	}
 
 	foundPath := false
@@ -92,12 +96,17 @@ func TestTemplate(t *testing.T) {
 		t.Error("no Path config")
 	}
 
+	foundContainer := false
 	for _, cfg := range c.Configs {
 		if cfg.Type == "Variable" && cfg.Name == "JARVIS_CONTAINER" {
+			foundContainer = true
 			if cfg.Value != "unraid" {
 				t.Errorf("JARVIS_CONTAINER = %q", cfg.Value)
 			}
 		}
+	}
+	if !foundContainer {
+		t.Error("no JARVIS_CONTAINER variable")
 	}
 
 	for _, cfg := range c.Configs {
