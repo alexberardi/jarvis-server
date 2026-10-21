@@ -18,6 +18,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
+	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 )
@@ -137,6 +138,83 @@ func TestRunnerServesModulesOnTheirListeners(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second): // hang guard
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// handlerModule registers handler funcs on a listener.
+type handlerModule struct {
+	name, listener string
+	routes         map[string]http.HandlerFunc
+}
+
+func (h *handlerModule) Name() string      { return h.name }
+func (h *handlerModule) Listener() string  { return h.listener }
+func (h *handlerModule) Migrations() fs.FS { return nil }
+func (h *handlerModule) Register(mux *http.ServeMux, _ Deps) {
+	for pattern, f := range h.routes {
+		mux.HandleFunc(pattern, f)
+	}
+}
+
+func TestRunnerMountsListenersOnTheConfigPort(t *testing.T) {
+	cfg := &fakeModule{name: "config", listener: config.ListenerConfig, routes: map[string]string{"GET /info": "config"}}
+	cc := &handlerModule{name: "cc", listener: config.ListenerCC, routes: map[string]http.HandlerFunc{
+		"GET /health":  func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "cc") },
+		"GET /prefix":  func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, httpx.MountPrefix(r)) },
+		"GET /raw/{x}": func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, r.URL.RawPath) },
+	}}
+	ready := make(chan struct{})
+	r := &Runner{Deps: deps(t), Modules: []Module{cfg, cc}, Mounts: map[string]string{config.ListenerCC: "/cc"},
+		OnReady: func() { close(ready) }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	select {
+	case <-ready:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("OnReady never called")
+	}
+	cfgAddr, ccAddr := r.Addr(config.ListenerConfig), r.Addr(config.ListenerCC)
+	for _, c := range []struct {
+		addr, path string
+		code       int
+		body       string
+	}{
+		{cfgAddr, "/cc/health", 200, "cc"},
+		{cfgAddr, "/info", 200, "config"},
+		{cfgAddr, "/cc/prefix", 200, "/cc"},
+		{ccAddr, "/prefix", 200, ""},
+		{cfgAddr, "/cc/raw/a%2Fb", 200, "/raw/a%2Fb"},
+		{cfgAddr, "/nope/health", 404, ""},
+		{ccAddr, "/health", 200, "cc"}, // the own port is unchanged
+	} {
+		code, b := get(t, c.addr, c.path)
+		if code != c.code || (c.code == 200 && b != c.body) {
+			t.Errorf("%s%s = %d %q, want %d %q", c.addr, c.path, code, b, c.code, c.body)
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("Run did not return after cancel")
+	}
+}
+
+func TestMountedStreamsFlush(t *testing.T) {
+	cfg := &fakeModule{name: "config", listener: config.ListenerConfig, routes: map[string]string{"GET /info": "config"}}
+	sse := &sseModule{listener: config.ListenerCC}
+	r := &Runner{Deps: deps(t), Modules: []Module{cfg, sse}, Mounts: map[string]string{config.ListenerCC: "/cc"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := openStreamAt(t, ctx, r, config.ListenerConfig, "/cc/stream")
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("Run never returned")
 	}
 }
 
@@ -299,10 +377,18 @@ func TestRunnerMigratesPlatformTables(t *testing.T) {
 
 // sseModule serves GET /stream like the admin log tail: one event, then it holds the
 // connection until the request's context ends.
-type sseModule struct{ cancelled atomic.Bool }
+type sseModule struct {
+	cancelled atomic.Bool
+	listener  string // "" = admin
+}
 
-func (*sseModule) Name() string      { return "sse" }
-func (*sseModule) Listener() string  { return config.ListenerAdmin }
+func (*sseModule) Name() string { return "sse" }
+func (m *sseModule) Listener() string {
+	if m.listener == "" {
+		return config.ListenerAdmin
+	}
+	return m.listener
+}
 func (*sseModule) Migrations() fs.FS { return nil }
 func (m *sseModule) Register(mux *http.ServeMux, _ Deps) {
 	mux.HandleFunc("GET /stream", func(w http.ResponseWriter, r *http.Request) {
@@ -317,18 +403,43 @@ func (m *sseModule) Register(mux *http.ServeMux, _ Deps) {
 // openStream starts r with ctx and holds one SSE request open; it returns Run's result channel.
 func openStream(t *testing.T, ctx context.Context, r *Runner) chan error {
 	t.Helper()
+	return openStreamAt(t, ctx, r, config.ListenerAdmin, "/stream")
+}
+
+// openStreamAt is openStream with the stream read from path on listener's address.
+func openStreamAt(t *testing.T, ctx context.Context, r *Runner, listener, path string) chan error {
+	t.Helper()
 	ready := make(chan struct{})
 	r.OnReady = func() { close(ready) }
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
 	<-ready
-	resp, err := http.Get("http://" + r.Addr(config.ListenerAdmin) + "/stream")
+	// A stream that never flushes sends no headers and no event: cancel the request after
+	// 10s so that fails here instead of at go test's timeout.
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	t.Cleanup(cancelReq)
+	timer := time.AfterFunc(10*time.Second, cancelReq)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, "http://"+r.Addr(listener)+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
 	t.Cleanup(func() { resp.Body.Close() })
-	if _, err := bufio.NewReader(resp.Body).ReadString('\n'); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: status %d, want 200", path, resp.StatusCode)
+	}
+	line, err := bufio.NewReader(resp.Body).ReadString('\n')
+	if !timer.Stop() {
+		t.Fatalf("GET %s: no event within 10s (not flushed?)", path)
+	}
+	if err != nil {
 		t.Fatal(err)
+	}
+	if line != "data: hi\n" {
+		t.Fatalf("GET %s: first line %q, want %q", path, line, "data: hi\n")
 	}
 	return done
 }

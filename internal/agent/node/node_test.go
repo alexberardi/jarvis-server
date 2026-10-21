@@ -231,6 +231,32 @@ func TestDiscoverAsksForRemoteStyle(t *testing.T) {
 	}
 }
 
+// On a single-port jarvisd, /services lists command-center under the config port's /cc path;
+// the node keeps that URL and calls under it.
+func TestDiscoverKeepsAMountedURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"services":[{"name":"jarvis-command-center","url":"http://h:7700/cc"}]}`))
+	}))
+	defer srv.Close()
+	s, err := Discover(context.Background(), srv.Client(), srv.URL)
+	if err != nil || s[SvcCommandCenter] != "http://h:7700/cc" {
+		t.Fatalf("%v %v", s, err)
+	}
+
+	var path string
+	cc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer cc.Close()
+	if err := NewCC(cc.URL+"/cc", Creds{}).Do(context.Background(), http.MethodGet, "/api/v0/node/mqtt-credentials", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/cc/api/v0/node/mqtt-credentials" {
+		t.Fatalf("path = %q", path)
+	}
+}
+
 func TestBrokerURL(t *testing.T) {
 	for in, want := range map[string]string{
 		"mqtt://10.0.0.1:1884":       "tcp://10.0.0.1:1884",
