@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/doctor"
+	configmod "github.com/alexberardi/jarvis-server/internal/modules/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
@@ -28,13 +31,71 @@ func exposure(listeners []string, env config.Env) doctor.Exposure {
 	}
 }
 
-// doctorPorts lists the ports `jarvisd doctor` checks.
+// doctorPorts lists the ports `jarvisd doctor` checks: the mounted listeners' own ports and
+// the MQTT WebSocket only when legacy ports are on.
 func doctorPorts(cfg config.Config) []doctor.Port {
 	var listeners []string
 	for _, m := range modules(cfg.Env) {
 		listeners = append(listeners, m.Listener())
 	}
-	return exposure(listeners, cfg.Env).Ports(cfg.Ports)
+	legacy := readLegacyPorts(cfg)
+	env := cfg.Env
+	env.MQTTWSAddr = mqttWSAddr(cfg.Env, legacy)
+	return exposure(boundListeners(listeners, legacy), env).Ports(cfg.Ports)
+}
+
+// boundListeners is the listeners that get a port of their own: all of them with legacy ports
+// on, else the ones not mounted on the config port.
+func boundListeners(listeners []string, legacy bool) []string {
+	if legacy {
+		return listeners
+	}
+	var out []string
+	for _, l := range listeners {
+		if config.Paths[l] == "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// mqttWSAddr is the MQTT WebSocket address jarvisd listens on: JARVIS_MQTT_WS_ADDR when set
+// (even to "", which disables it), else 9883 moved by JARVIS_PORT_OFFSET with legacy ports on,
+// and none without.
+func mqttWSAddr(env config.Env, legacy bool) string {
+	if _, set := os.LookupEnv("JARVIS_MQTT_WS_ADDR"); set || !legacy {
+		return env.MQTTWSAddr
+	}
+	return config.ShiftAddr(config.DefaultMQTTWSAddr, config.PortOffset())
+}
+
+// readLegacyPorts is serve's legacy-ports decision, read without changing anything:
+// JARVIS_LEGACY_PORTS when set, else the stored server.legacy_ports. No database, no settings
+// table or no row (jarvisd hasn't decided yet) reads as off, as does a bad env value (serve
+// refuses to start with one).
+func readLegacyPorts(cfg config.Config) bool {
+	if set, on, err := config.ParseLegacyPorts(cfg.Env.LegacyPorts); set || err != nil {
+		return on
+	}
+	path := cfg.DBPath()
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	c, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(2000)")
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	var v sql.NullString
+	if err := c.QueryRow(`SELECT value FROM config_settings WHERE key = ?
+		AND household_id IS NULL AND node_id IS NULL AND user_id IS NULL ORDER BY id LIMIT 1`, configmod.LegacyPortsKey).Scan(&v); err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(v.String)) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // runDoctor is `jarvisd doctor [--json] [--fix]`: it prints each check (or JSON) and fails

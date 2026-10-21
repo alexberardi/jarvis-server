@@ -4,7 +4,7 @@
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
 #   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich|empty] [--llm shared|none|scripted] [--ui]
-#                      [--voice [--stt-model ID]] [--relay fake|none|URL] [--lan]
+#                      [--voice [--stt-model ID]] [--relay fake|none|URL] [--lan] [--single-port]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
 #   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
@@ -59,6 +59,12 @@
 #                    does; never the project's). With JARVIS_UPDATE_API (or JARVISD_RELEASE_BASE)
 #                    in the environment of `up`, jarvisd reads a fake release signed with it
 #
+#   --single-port    jarvisd as a fresh install runs it: legacy ports off (JARVIS_LEGACY_PORTS=0),
+#                    so only config (7700), admin (7710) and MQTT (1884) listen, and every other
+#                    service is under its path on the config port: SBX_CC is
+#                    http://127.0.0.1:<7700+offset>/cc and so on. Without it jarvisd runs with
+#                    JARVIS_LEGACY_PORTS=1, every service on its own port as before. Kept per name
+#                    until the next up
 #   --lan            listen on every interface instead of 127.0.0.1 (jarvisd, the scripted
 #                    model and the fake relay), for a device on another machine: the iOS lane's
 #                    simulator on the Mac (scripts/e2e ios). The dev box's LAN address (or
@@ -87,10 +93,10 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,79p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,85p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
-VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST=""
+VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -104,10 +110,11 @@ while [ $# -gt 0 ]; do
     --trust-key) TRUST_KEY=$2; shift 2 ;;
     --relay) RELAY=$2; shift 2 ;;
     --lan) LAN=1; shift ;;
+    --single-port) SINGLE_PORT=1; shift ;;
     --purge) PURGE=1; shift ;;
     --node-name) NODE_NAME=$2; shift 2 ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,79p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,85p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -128,6 +135,7 @@ TAPPID=$DIR/tap.pid
 SCRIPTPID=$DIR/scriptllm.pid
 RELAYPID=$DIR/fakerelay.pid
 LLMF=$DIR/llm-mode
+SINGLEF=$DIR/single-port
 
 running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 tap_running() { [ -f "$TAPPID" ] && kill -0 "$(cat "$TAPPID")" 2>/dev/null; }
@@ -135,6 +143,23 @@ scriptllm_running() { [ -f "$SCRIPTPID" ] && kill -0 "$(cat "$SCRIPTPID")" 2>/de
 relay_running() { [ -f "$RELAYPID" ] && kill -0 "$(cat "$RELAYPID")" 2>/dev/null; }
 port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
 port() { echo $(($1 + $(cat "$OFFSETF"))); }
+# svc_url is a listener's base URL: its own port, or with --single-port (as the sandbox was last
+# brought up) its path on the config port.
+svc_url() {
+  local l=$1 p prefix
+  case $l in
+    config) p=7700 ;; auth) p=7701 prefix=/auth ;; logs) p=7702 prefix=/logs ;; cc) p=7703 prefix=/cc ;;
+    llm) p=7704 prefix=/llm ;; whisper) p=7706 prefix=/stt ;; tts) p=7707 prefix=/tts ;;
+    notifications) p=7712 prefix=/notifications ;; recipes) p=7030 prefix=/recipes ;; ocr) p=7031 prefix=/ocr ;;
+    admin) p=7710 ;;
+    *) die "svc_url: unknown listener $l" ;;
+  esac
+  if [ -f "$SINGLEF" ] && [ -n "${prefix:-}" ]; then
+    echo "http://127.0.0.1:$(port 7700)$prefix"
+  else
+    echo "http://127.0.0.1:$(port $p)"
+  fi
+}
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 
 # The installed jarvisd's LLM API, reached with an app client of its own (created once in its
@@ -177,21 +202,21 @@ pick_offset() {
   die "no free port offset"
 }
 
-set_setting() { # listener-port key json-value
+set_setting() { # listener key json-value
   local code
-  code=$(curl -s -o "$DIR/.put" -w '%{http_code}' -X PUT "http://127.0.0.1:$1/settings/$2" \
+  code=$(curl -s -o "$DIR/.put" -w '%{http_code}' -X PUT "$(svc_url "$1")/settings/$2" \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"value\": $3}")
   [ "$code" = 200 ] || die "PUT $2 → $code: $(cat "$DIR/.put")"
 }
 
 login() {
-  curl -sf -X POST "http://127.0.0.1:$(port 7701)/auth/login" -H 'Content-Type: application/json' \
+  curl -sf -X POST "$(svc_url auth)/auth/login" -H 'Content-Type: application/json' \
     -d '{"email":"test@jarvisautomation.io","password":"DevPass123!"}' | json 'd["access_token"]'
 }
 
 point_llm() {
   TOKEN=$(login) || die "login failed"
-  local llm=$(port 7704) cc=$(port 7703)
+  local llm=llm cc=cc
   if [ "$LLM" = none ]; then
     set_setting "$llm" llm.live.engine '"off"'
     say "llm: off"
@@ -225,7 +250,7 @@ point_llm() {
   set_setting "$llm" llm.embeddings.engine '"off"'
   # A household with voice ID: the memory tools are offered (D3/D21) and refuse an unknown
   # speaker when called; pipeline turns name the speaker through dev speaker hints.
-  set_setting "$(port 7706)" voice.recognition_enabled true
+  set_setting whisper voice.recognition_enabled true
   # The prompt provider a local install takes from the model's catalog entry.
   local provider
   provider=$(python3 -c '
@@ -261,7 +286,7 @@ for e in json.load(open(sys.argv[1])):
 # and reads the OpenAI tool_calls the script returns, so no prompt format is involved. The prompt
 # provider is a fixed catalog one (a remote model derives none).
 point_scripted() {
-  local llm=$(port 7704) cc=$(port 7703)
+  local llm=llm cc=cc
   scriptllm_running || { tail -5 "$DIR/scriptllm.log" >&2; die "scriptllm is not running (log: $DIR/scriptllm.log)"; }
   set_setting "$llm" llm.live.engine '"remote"'
   set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$(port 7799)/v1\""
@@ -272,7 +297,7 @@ point_scripted() {
   set_setting "$llm" llm.live.fold_system_messages '"off"'
   set_setting "$llm" llm.background.engine '"shared"'
   set_setting "$llm" llm.embeddings.engine '"off"'
-  set_setting "$(port 7706)" voice.recognition_enabled true
+  set_setting whisper voice.recognition_enabled true
   set_setting "$cc" llm.prompt_provider '"Qwen3_5_9B_Compressed"'
   set_setting "$cc" llm.tool_calling '"native"'
   set_setting "$cc" llm.thinking_switch '"none"'
@@ -318,7 +343,7 @@ for e in json.load(open(sys.argv[1])):
 # setup_voice turns on TTS, the speaker model and STT (whisper on the CPU), then waits until a
 # synthesized phrase comes back as text through command-center, as a node would see it.
 setup_voice() {
-  local llm=$(port 7704) cc=$(port 7703)
+  local llm=llm cc=cc
   if [ "$VOICE" != 1 ]; then
     set_setting "$llm" stt.engine '"off"'
     return
@@ -340,10 +365,10 @@ setup_voice() {
   node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json")
   say "voice: warming TTS and STT ($STT_MODEL on the CPU; the first start fetches whisper-server)"
   for _ in $(seq 1 120); do
-    code=$(curl -s -o "$DIR/.warm.wav" -w '%{http_code}' -X POST "http://127.0.0.1:$cc/api/v0/media/tts/speak" \
+    code=$(curl -s -o "$DIR/.warm.wav" -w '%{http_code}' -X POST "$(svc_url cc)/api/v0/media/tts/speak" \
       -H "X-API-Key: $node_id:$node_key" -H 'Content-Type: application/json' -d '{"text": "Testing one two three."}')
     if [ "$code" = 200 ]; then
-      code=$(curl -s -o "$DIR/.warm.json" -w '%{http_code}' -X POST "http://127.0.0.1:$cc/api/v0/media/whisper/transcribe" \
+      code=$(curl -s -o "$DIR/.warm.json" -w '%{http_code}' -X POST "$(svc_url cc)/api/v0/media/whisper/transcribe" \
         -H "X-API-Key: $node_id:$node_key" -F "file=@$DIR/.warm.wav;type=audio/wav")
       [ "$code" = 200 ] && break
     fi
@@ -358,7 +383,7 @@ setup_voice() {
 # household with that role (admin: other than the superuser), as the household lists them.
 role_emails() {
   local auth hh
-  auth=http://127.0.0.1:$(port 7701)
+  auth=$(svc_url auth)
   hh=$(curl -sf "$auth/households" -H "Authorization: Bearer $TOKEN" |
     json 'next((h["id"] for h in d if h.get("role") == "admin"), "")') || return 0
   [ -n "$hh" ] || return 0
@@ -395,9 +420,9 @@ write_env() {
       echo "export SBX_LAN_HOST=$LAN_HOST"
       echo "export SBX_LAN_CONFIG=http://$LAN_HOST:$(port 7700)"
     fi
-    for l in config:7700 auth:7701 logs:7702 cc:7703 llm:7704 whisper:7706 tts:7707 notifications:7712 recipes:7030 ocr:7031 admin:7710; do
-      n=$(tr '[:lower:]' '[:upper:]' <<<"${l%%:*}")
-      echo "export SBX_$n=http://127.0.0.1:$(port "${l#*:}")"
+    for l in config auth logs cc llm whisper tts notifications recipes ocr admin; do
+      n=$(tr '[:lower:]' '[:upper:]' <<<"$l")
+      echo "export SBX_$n=$(svc_url "$l")"
     done
     echo "export SBX_MQTT=127.0.0.1:$(port 1884)"
     echo "export SBX_LLM_TAP=http://127.0.0.1:$(port 7799)"
@@ -417,7 +442,7 @@ write_env() {
     echo "export SBX_EMAIL=test@jarvisautomation.io"
     echo "export SBX_PASSWORD='DevPass123!'"
     echo "export SBX_TOKEN=$TOKEN"
-    echo "export SBX_USER_ID=$(curl -sf "http://127.0.0.1:$(port 7701)/auth/me" -H "Authorization: Bearer $TOKEN" | json 'd["id"]')"
+    echo "export SBX_USER_ID=$(curl -sf "$(svc_url auth)/auth/me" -H "Authorization: Bearer $TOKEN" | json 'd["id"]')"
     # A seeded login per household role besides the superuser (scripts/seed-dev.py PEOPLE),
     # for scripts/screenshots --user; same password.
     role_emails
@@ -447,6 +472,7 @@ cmd_up() {
   [ "$RELAY" != fake ] || (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/fakerelay" ./tools/fakerelay)
   echo "$LLM" >"$LLMF"
   echo "$RELAY" >"$DIR/relay-mode"
+  if [ "$SINGLE_PORT" = 1 ]; then touch "$SINGLEF"; else rm -f "$SINGLEF"; fi
 
   cmd_stop
   local ui="" bind=127.0.0.1
@@ -456,7 +482,7 @@ cmd_up() {
     say "--lan: listening on every interface; the LAN reaches it at $LAN_HOST"
   fi
   [ -d "$ROOT/web/admin/dist/ui" ] && ui=$ROOT/web/admin/dist/ui
-  say "starting on offset $(cat "$OFFSETF") (cc :$(port 7703), admin :$(port 7710))"
+  say "starting on offset $(cat "$OFFSETF") (cc $(svc_url cc), admin :$(port 7710))"
   # The push relay is relay.url's env fallback, so it applies before seeding and on --profile
   # empty too; a test that sets relay.url itself overrides it.
   local relay_url=
@@ -469,7 +495,10 @@ cmd_up() {
     *) relay_url=$RELAY ;;
   esac
   say "push relay: ${relay_url:-none}$([ "$RELAY" != fake ] || echo " (tools/fakerelay; pushes in $DIR/pushes.jsonl)")"
-  RELAY_URL=$relay_url JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
+  # Every harness URL assumes the legacy ports unless --single-port asks for a fresh install's.
+  local legacy=1
+  [ "$SINGLE_PORT" = 0 ] || legacy=0
+  RELAY_URL=$relay_url JARVIS_LEGACY_PORTS=$legacy JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
     setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"
@@ -488,11 +517,11 @@ cmd_up() {
     >>"$DIR/tap.log" 2>&1 </dev/null &
   echo $! >"$TAPPID"
   for _ in $(seq 1 60); do
-    curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null && break
+    curl -sf "$(svc_url cc)/health" >/dev/null && break
     running || { tail -20 "$LOG" >&2; die "jarvisd exited (log: $LOG)"; }
     sleep 0.5
   done
-  curl -sf "http://127.0.0.1:$(port 7703)/health" >/dev/null || die "not healthy after 30s (log: $LOG)"
+  curl -sf "$(svc_url cc)/health" >/dev/null || die "not healthy after 30s (log: $LOG)"
 
   if [ "$PROFILE" = empty ]; then
     [ -f "$HOME_DIR/setup-token" ] || die "--profile empty: $HOME_DIR/setup-token is missing (was this sandbox seeded before? down --purge it first)"
@@ -500,7 +529,7 @@ cmd_up() {
   else
     say "seeding ($PROFILE)"
     python3 "$ROOT/scripts/seed-dev.py" --home "$HOME_DIR" --base-url http://127.0.0.1 \
-      --auth-port "$(port 7701)" --cc-port "$(port 7703)" --admin-port "$(port 7710)" \
+      --auth-url "$(svc_url auth)" --cc-url "$(svc_url cc)" --admin-port "$(port 7710)" \
       --profile "$PROFILE" >"$DIR/seed.log" 2>&1 || { tail -20 "$DIR/seed.log" >&2; die "seeding failed (log: $DIR/seed.log)"; }
     point_llm
     setup_voice
@@ -603,7 +632,7 @@ gpu_report() {
 
 cmd_status() {
   if [ -f "$OFFSETF" ]; then
-    if running; then echo "$NAME: up (pid $(cat "$PIDFILE"), offset $(cat "$OFFSETF"), cc http://127.0.0.1:$(port 7703), admin http://127.0.0.1:$(port 7710))"
+    if running; then echo "$NAME: up (pid $(cat "$PIDFILE"), offset $(cat "$OFFSETF"), cc $(svc_url cc), admin http://127.0.0.1:$(port 7710))"
     else echo "$NAME: down (offset $(cat "$OFFSETF"))"; fi
   else
     echo "$NAME: not created"

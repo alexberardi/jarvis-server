@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/mdns"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
@@ -64,6 +66,52 @@ var Definitions = []settings.Definition{
 	// Kept for /settings parity (admin lists it); nothing reads it, as in the legacy service.
 	{Key: "health_check.enabled", Category: "health_check", Type: settings.Bool, Default: true,
 		Description: "Whether health checks are enabled"},
+	{Key: LegacyPortsKey, Category: "server", Type: settings.Bool, Default: false, RequiresReload: true,
+		Description: "Also listen on the old per-service ports (7701–7712, 7030, 7031) and the MQTT WebSocket port 9883, " +
+			"for clients that don't follow /services URLs. New installs start with it off; upgraded installs with it on. " +
+			"JARVIS_LEGACY_PORTS overrides it."},
+}
+
+// LegacyPortsKey is the setting that keeps every listener's own port (and 9883) open.
+const LegacyPortsKey = "server.legacy_ports"
+
+// LegacyPorts decides, once at startup, whether the legacy ports bind: JARVIS_LEGACY_PORTS
+// (env) when set, else the stored setting. With no stored value yet it decides and stores
+// it: on when the registry already holds rows an earlier jarvisd synced (an upgrade, whose
+// clients know the old ports), off on a fresh database.
+func LegacyPorts(ctx context.Context, d *db.DB, log *slog.Logger, env string) (bool, error) {
+	if set, on, err := pconfig.ParseLegacyPorts(env); err != nil || set {
+		return on, err
+	}
+	svc, err := settings.New(d, "config", Definitions, log)
+	if err != nil {
+		return false, err
+	}
+	if err := svc.Migrate(ctx); err != nil {
+		return false, err
+	}
+	v, found, err := svc.GetExact(ctx, LegacyPortsKey, settings.Scope{})
+	if err != nil {
+		return false, err
+	}
+	if found {
+		on, _ := v.(bool)
+		return on, nil
+	}
+	var upgrade bool
+	if err := d.Read.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM config_services WHERE description = 'served by jarvisd')`).Scan(&upgrade); err != nil {
+		return false, fmt.Errorf("config: legacy ports: %w", err)
+	}
+	if err := svc.Set(ctx, LegacyPortsKey, upgrade, settings.Scope{}); err != nil {
+		return false, err
+	}
+	reason := "fresh install"
+	if upgrade {
+		reason = "upgrade"
+	}
+	log.Info("legacy ports", "on", upgrade, "reason", reason)
+	return upgrade, nil
 }
 
 // Module is the config module.

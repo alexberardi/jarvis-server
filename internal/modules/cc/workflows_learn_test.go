@@ -17,6 +17,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
+	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite testdata/*.golden")
@@ -135,6 +136,23 @@ func (le *learnEnv) storeMode(id, mode string, trace json.RawMessage, narration 
 	}
 }
 
+// cards waits for the learnt-workflow card, which the job posts just after it stores the
+// workflow storeMode waits for, and returns the inbox items posted by then.
+func (le *learnEnv) cards() []notifications.NewInboxItem {
+	le.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		le.notify.mu.Lock()
+		items := slices.Clone(le.notify.items)
+		le.notify.mu.Unlock()
+		if slices.ContainsFunc(items, func(it notifications.NewInboxItem) bool { return it.Category == learnCardCategory }) ||
+			time.Now().After(deadline) {
+			return items
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestLearnFromBankTrace(t *testing.T) {
 	le := newLearnEnv(t, bankModel)
 	w := le.store("rec_bank1", bankTraceWithSecret(t), "this is how I get my bank statement")
@@ -206,9 +224,7 @@ func TestLearnFromBankTrace(t *testing.T) {
 	}
 
 	// The card asks the owner to review it.
-	le.notify.mu.Lock()
-	items := slices.Clone(le.notify.items)
-	le.notify.mu.Unlock()
+	items := le.cards()
 	if len(items) != 1 {
 		t.Fatalf("cards %+v", items)
 	}

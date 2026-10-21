@@ -237,9 +237,13 @@ func TestPortsConfigFallbackKeepsBrokerAndMDNS(t *testing.T) {
 		t.Fatal("want the bogus offset to fail Load")
 	}
 	ports := doctorPorts(portsConfig())
-	for _, want := range []doctor.Port{{Name: "mqtt", Port: 1884, Proto: "tcp"}, {Name: "mqtt-ws", Port: 9883, Proto: "tcp"}, {Name: "mdns", Port: 5353, Proto: "udp"}} {
+	for _, want := range []doctor.Port{{Name: "mqtt", Port: 1884, Proto: "tcp"}, {Name: "mdns", Port: 5353, Proto: "udp"}} {
 		if !slices.Contains(ports, want) {
 			t.Errorf("%+v missing from %v", want, ports)
 		}
+	}
+	// A fresh home has legacy ports off: no MQTT WebSocket.
+	if slices.ContainsFunc(ports, func(p doctor.Port) bool { return p.Name == "mqtt-ws" }) {
+		t.Errorf("mqtt-ws listed on a fresh home: %v", ports)
 	}
 }
